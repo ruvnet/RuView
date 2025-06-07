@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from src.config.settings import get_settings
+from src.config.settings import get_settings, load_settings_from_file
 from src.logger import setup_logging, get_logger
 from src.commands.start import start_command
 from src.commands.stop import stop_command
@@ -18,6 +18,14 @@ from src.commands.status import status_command
 settings = get_settings()
 setup_logging(settings)
 logger = get_logger(__name__)
+
+
+def get_settings_with_config(config_file: Optional[str] = None):
+    """Get settings with optional config file."""
+    if config_file:
+        return load_settings_from_file(config_file)
+    else:
+        return get_settings()
 
 
 @click.group()
@@ -96,7 +104,7 @@ def start(ctx, host: str, port: int, workers: int, reload: bool, daemon: bool):
     
     try:
         # Get settings
-        settings = get_settings(config_file=ctx.obj.get('config_file'))
+        settings = get_settings_with_config(ctx.obj.get('config_file'))
         
         # Override settings with CLI options
         if ctx.obj.get('debug'):
@@ -139,7 +147,7 @@ def stop(ctx, force: bool, timeout: int):
     
     try:
         # Get settings
-        settings = get_settings(config_file=ctx.obj.get('config_file'))
+        settings = get_settings_with_config(ctx.obj.get('config_file'))
         
         # Run stop command
         asyncio.run(stop_command(
@@ -171,7 +179,7 @@ def status(ctx, format: str, detailed: bool):
     
     try:
         # Get settings
-        settings = get_settings(config_file=ctx.obj.get('config_file'))
+        settings = get_settings_with_config(ctx.obj.get('config_file'))
         
         # Run status command
         asyncio.run(status_command(
@@ -206,7 +214,7 @@ def init(ctx, url: Optional[str]):
         from alembic import command
         
         # Get settings
-        settings = get_settings(config_file=ctx.obj.get('config_file'))
+        settings = get_settings_with_config(ctx.obj.get('config_file'))
         
         if url:
             settings.database_url = url
@@ -301,7 +309,7 @@ def run(ctx, task: Optional[str]):
         from src.tasks.backup import get_backup_manager
         
         # Get settings
-        settings = get_settings(config_file=ctx.obj.get('config_file'))
+        settings = get_settings_with_config(ctx.obj.get('config_file'))
         
         async def run_tasks():
             if task == 'cleanup' or task is None:
@@ -338,7 +346,7 @@ def status(ctx):
         import json
         
         # Get settings
-        settings = get_settings(config_file=ctx.obj.get('config_file'))
+        settings = get_settings_with_config(ctx.obj.get('config_file'))
         
         # Get task managers
         cleanup_manager = get_cleanup_manager(settings)
@@ -375,37 +383,36 @@ def show(ctx):
         import json
         
         # Get settings
-        settings = get_settings(config_file=ctx.obj.get('config_file'))
+        settings = get_settings_with_config(ctx.obj.get('config_file'))
         
         # Convert settings to dict (excluding sensitive data)
         config_dict = {
+            "app_name": settings.app_name,
+            "version": settings.version,
             "environment": settings.environment,
             "debug": settings.debug,
-            "api_version": settings.api_version,
             "host": settings.host,
             "port": settings.port,
-            "database": {
-                "host": settings.db_host,
-                "port": settings.db_port,
-                "name": settings.db_name,
-                "pool_size": settings.db_pool_size,
-            },
-            "redis": {
-                "enabled": settings.redis_enabled,
-                "host": settings.redis_host,
-                "port": settings.redis_port,
-                "db": settings.redis_db,
-            },
-            "monitoring": {
-                "interval_seconds": settings.monitoring_interval_seconds,
-                "cleanup_interval_seconds": settings.cleanup_interval_seconds,
-                "backup_interval_seconds": settings.backup_interval_seconds,
-            },
-            "retention": {
-                "csi_data_days": settings.csi_data_retention_days,
-                "pose_detection_days": settings.pose_detection_retention_days,
-                "metrics_days": settings.metrics_retention_days,
-                "audit_log_days": settings.audit_log_retention_days,
+            "api_prefix": settings.api_prefix,
+            "docs_url": settings.docs_url,
+            "redoc_url": settings.redoc_url,
+            "log_level": settings.log_level,
+            "log_file": settings.log_file,
+            "data_storage_path": settings.data_storage_path,
+            "model_storage_path": settings.model_storage_path,
+            "temp_storage_path": settings.temp_storage_path,
+            "wifi_interface": settings.wifi_interface,
+            "csi_buffer_size": settings.csi_buffer_size,
+            "pose_confidence_threshold": settings.pose_confidence_threshold,
+            "stream_fps": settings.stream_fps,
+            "websocket_ping_interval": settings.websocket_ping_interval,
+            "features": {
+                "authentication": settings.enable_authentication,
+                "rate_limiting": settings.enable_rate_limiting,
+                "websockets": settings.enable_websockets,
+                "historical_data": settings.enable_historical_data,
+                "real_time_processing": settings.enable_real_time_processing,
+                "cors": settings.cors_enabled,
             }
         }
         
@@ -423,7 +430,7 @@ def validate(ctx):
     
     try:
         # Get settings
-        settings = get_settings(config_file=ctx.obj.get('config_file'))
+        settings = get_settings_with_config(ctx.obj.get('config_file'))
         
         # Validate database connection
         from src.database.connection import get_database_manager
@@ -438,27 +445,28 @@ def validate(ctx):
                 click.echo(f"✗ Database connection: FAILED - {e}")
                 return False
             
-            # Validate Redis connection (if enabled)
-            if settings.redis_enabled:
+            # Validate Redis connection (if configured)
+            redis_url = settings.get_redis_url()
+            if redis_url:
                 try:
-                    redis_stats = await db_manager.get_connection_stats()
-                    if "redis" in redis_stats and not redis_stats["redis"].get("error"):
-                        click.echo("✓ Redis connection: OK")
-                    else:
-                        click.echo("✗ Redis connection: FAILED")
-                        return False
+                    import redis.asyncio as redis
+                    redis_client = redis.from_url(redis_url)
+                    await redis_client.ping()
+                    click.echo("✓ Redis connection: OK")
+                    await redis_client.close()
                 except Exception as e:
                     click.echo(f"✗ Redis connection: FAILED - {e}")
                     return False
             else:
-                click.echo("- Redis connection: DISABLED")
+                click.echo("- Redis connection: NOT CONFIGURED")
             
             # Validate directories
             from pathlib import Path
             
             directories = [
-                ("Log directory", settings.log_directory),
-                ("Backup directory", settings.backup_directory),
+                ("Data storage", settings.data_storage_path),
+                ("Model storage", settings.model_storage_path),
+                ("Temp storage", settings.temp_storage_path),
             ]
             
             for name, directory in directories:
@@ -466,8 +474,12 @@ def validate(ctx):
                 if path.exists() and path.is_dir():
                     click.echo(f"✓ {name}: OK")
                 else:
-                    click.echo(f"✗ {name}: NOT FOUND - {directory}")
-                    return False
+                    try:
+                        path.mkdir(parents=True, exist_ok=True)
+                        click.echo(f"✓ {name}: CREATED - {directory}")
+                    except Exception as e:
+                        click.echo(f"✗ {name}: FAILED TO CREATE - {directory} ({e})")
+                        return False
             
             click.echo("\n✓ Configuration validation passed")
             return True
@@ -490,7 +502,7 @@ def version():
         
         settings = get_settings()
         
-        click.echo(f"WiFi-DensePose API v{settings.api_version}")
+        click.echo(f"WiFi-DensePose API v{settings.version}")
         click.echo(f"Environment: {settings.environment}")
         click.echo(f"Python: {sys.version}")
         

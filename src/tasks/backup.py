@@ -222,7 +222,7 @@ class ConfigurationBackup(BackupTask):
                 "backup_timestamp": datetime.utcnow().isoformat(),
                 "environment": self.settings.environment,
                 "debug": self.settings.debug,
-                "api_version": self.settings.api_version,
+                "version": self.settings.version,
                 "database_settings": {
                     "db_host": self.settings.db_host,
                     "db_port": self.settings.db_port,

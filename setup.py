@@ -117,17 +117,17 @@ setup(
     long_description_content_type="text/markdown",
     
     # Author information
-    author="WiFi-DensePose Team",
-    author_email="team@wifi-densepose.com",
-    maintainer="WiFi-DensePose Team",
-    maintainer_email="team@wifi-densepose.com",
+    author="rUv",
+    author_email="ruv@ruv.net",
+    maintainer="rUv",
+    maintainer_email="ruv@ruv.net",
     
     # URLs
-    url="https://github.com/wifi-densepose/wifi-densepose",
+    url="https://github.com/ruvnet/wifi-densepose",
     project_urls={
-        "Documentation": "https://wifi-densepose.readthedocs.io/",
-        "Source": "https://github.com/wifi-densepose/wifi-densepose",
-        "Tracker": "https://github.com/wifi-densepose/wifi-densepose/issues",
+        "Documentation": "https://github.com/ruvnet/wifi-densepose#readme",
+        "Source": "https://github.com/ruvnet/wifi-densepose",
+        "Tracker": "https://github.com/ruvnet/wifi-densepose/issues",
     },
     
     # Package configuration
@@ -156,8 +156,8 @@ setup(
             "myst-parser>=2.0.0",
         ],
         "gpu": [
-            "torch>=2.1.0+cu118",
-            "torchvision>=0.16.0+cu118",
+            "torch>=2.1.0",
+            "torchvision>=0.16.0",
             "nvidia-ml-py>=12.535.0",
         ],
         "monitoring": [

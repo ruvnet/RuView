@@ -7,12 +7,12 @@ name = "wifi-densepose"
 version = "1.0.0"
 description = "WiFi-based human pose estimation using CSI data and DensePose neural networks"
 readme = "README.md"
-license = {file = "LICENSE"}
+license = "MIT"
 authors = [
-    {name = "WiFi-DensePose Team", email = "team@wifi-densepose.com"}
+    {name = "rUv", email = "ruv@ruv.net"}
 ]
 maintainers = [
-    {name = "WiFi-DensePose Team", email = "team@wifi-densepose.com"}
+    {name = "rUv", email = "ruv@ruv.net"}
 ]
 keywords = [
     "wifi",
@@ -29,7 +29,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
@@ -139,8 +138,8 @@ docs = [
 ]
 
 gpu = [
-    "torch>=2.1.0+cu118",
-    "torchvision>=0.16.0+cu118",
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
     "nvidia-ml-py>=12.535.0",
 ]
 
@@ -157,11 +156,11 @@ deployment = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/wifi-densepose/wifi-densepose"
-Documentation = "https://wifi-densepose.readthedocs.io/"
-Repository = "https://github.com/wifi-densepose/wifi-densepose.git"
-"Bug Tracker" = "https://github.com/wifi-densepose/wifi-densepose/issues"
-Changelog = "https://github.com/wifi-densepose/wifi-densepose/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/ruvnet/wifi-densepose"
+Documentation = "https://github.com/ruvnet/wifi-densepose#readme"
+Repository = "https://github.com/ruvnet/wifi-densepose.git"
+"Bug Tracker" = "https://github.com/ruvnet/wifi-densepose/issues"
+Changelog = "https://github.com/ruvnet/wifi-densepose/blob/main/CHANGELOG.md"
 
 [project.scripts]
 wifi-densepose = "src.cli:cli"

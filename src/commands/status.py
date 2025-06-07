@@ -115,7 +115,7 @@ def _get_configuration_status(settings: Settings) -> Dict[str, Any]:
     return {
         "environment": settings.environment,
         "debug": settings.debug,
-        "api_version": settings.api_version,
+        "version": settings.version,
         "host": settings.host,
         "port": settings.port,
         "database_configured": bool(settings.database_url or (settings.db_host and settings.db_name)),
@@ -377,7 +377,7 @@ def _print_text_status(status_data: Dict[str, Any], detailed: bool) -> None:
     print("⚙️  Configuration:")
     print(f"   Environment: {config['environment']}")
     print(f"   Debug: {config['debug']}")
-    print(f"   API Version: {config['api_version']}")
+    print(f"   API Version: {config['version']}")
     print(f"   Listen: {config['host']}:{config['port']}")
     print(f"   Database: {'✅' if config['database_configured'] else '❌'}")
     print(f"   Redis: {'✅' if config['redis_enabled'] else '❌'}")

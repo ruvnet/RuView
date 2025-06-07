@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiFi DensePose: Human Tracking Through Walls</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>WiFi DensePose</h1>
+            <p class="subtitle">Human Tracking Through Walls Using WiFi Signals</p>
+            <div class="header-info">
+                <span class="api-version"></span>
+                <span class="api-environment"></span>
+                <span class="overall-health"></span>
+            </div>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="nav-tabs">
+            <button class="nav-tab active" data-tab="dashboard">Dashboard</button>
+            <button class="nav-tab" data-tab="hardware">Hardware</button>
+            <button class="nav-tab" data-tab="demo">Live Demo</button>
+            <button class="nav-tab" data-tab="architecture">Architecture</button>
+            <button class="nav-tab" data-tab="performance">Performance</button>
+            <button class="nav-tab" data-tab="applications">Applications</button>
+        </nav>
+
+        <!-- Dashboard Tab -->
+        <section id="dashboard" class="tab-content active">
+            <div class="hero-section">
+                <h2>Revolutionary WiFi-Based Human Pose Detection</h2>
+                <p class="hero-description">
+                    AI can track your full-body movement through walls using just WiFi signals. 
+                    Researchers at Carnegie Mellon have trained a neural network to turn basic WiFi 
+                    signals into detailed wireframe models of human bodies.
+                </p>
+                
+                <!-- Error container -->
+                <div class="error-container" style="display: none;"></div>
+
+                <!-- Live Status Panel -->
+                <div class="live-status-panel">
+                    <h3>System Status</h3>
+                    <div class="status-grid">
+                        <div class="component-status" data-component="api">
+                            <span class="component-name">API Server</span>
+                            <span class="status-text">-</span>
+                            <span class="status-message"></span>
+                        </div>
+                        <div class="component-status" data-component="hardware">
+                            <span class="component-name">Hardware</span>
+                            <span class="status-text">-</span>
+                            <span class="status-message"></span>
+                        </div>
+                        <div class="component-status" data-component="inference">
+                            <span class="component-name">Inference</span>
+                            <span class="status-text">-</span>
+                            <span class="status-message"></span>
+                        </div>
+                        <div class="component-status" data-component="streaming">
+                            <span class="component-name">Streaming</span>
+                            <span class="status-text">-</span>
+                            <span class="status-message"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Metrics -->
+                <div class="system-metrics-panel">
+                    <h3>System Metrics</h3>
+                    <div class="metrics-grid">
+                        <div class="metric-item">
+                            <span class="metric-label">CPU Usage</span>
+                            <div class="progress-bar" data-type="cpu">
+                                <div class="progress-fill normal" style="width: 0%"></div>
+                            </div>
+                            <span class="cpu-usage">0%</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Memory Usage</span>
+                            <div class="progress-bar" data-type="memory">
+                                <div class="progress-fill normal" style="width: 0%"></div>
+                            </div>
+                            <span class="memory-usage">0%</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Disk Usage</span>
+                            <div class="progress-bar" data-type="disk">
+                                <div class="progress-fill normal" style="width: 0%"></div>
+                            </div>
+                            <span class="disk-usage">0%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Features Status -->
+                <div class="features-panel">
+                    <h3>Features</h3>
+                    <div class="features-status"></div>
+                </div>
+
+                <!-- Live Statistics -->
+                <div class="live-stats-panel">
+                    <h3>Live Statistics</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <span class="stat-label">Active Persons</span>
+                            <span class="person-count">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Avg Confidence</span>
+                            <span class="avg-confidence">0%</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Total Detections</span>
+                            <span class="detection-count">0</span>
+                        </div>
+                    </div>
+                    
+                    <div class="zones-panel">
+                        <h4>Zone Occupancy</h4>
+                        <div class="zones-summary"></div>
+                    </div>
+                </div>
+                
+                <div class="key-benefits">
+                    <div class="benefit-card">
+                        <div class="benefit-icon">🏠</div>
+                        <h3>Through Walls</h3>
+                        <p>Works through solid barriers with no line of sight required</p>
+                    </div>
+                    <div class="benefit-card">
+                        <div class="benefit-icon">🔒</div>
+                        <h3>Privacy-Preserving</h3>
+                        <p>No cameras or visual recording - just WiFi signal analysis</p>
+                    </div>
+                    <div class="benefit-card">
+                        <div class="benefit-icon">⚡</div>
+                        <h3>Real-Time</h3>
+                        <p>Maps 24 body regions in real-time at 100Hz sampling rate</p>
+                    </div>
+                    <div class="benefit-card">
+                        <div class="benefit-icon">💰</div>
+                        <h3>Low Cost</h3>
+                        <p>Built using $30 commercial WiFi hardware</p>
+                    </div>
+                </div>
+
+                <div class="system-stats">
+                    <div class="stat" data-stat="body-regions">
+                        <span class="stat-value">24</span>
+                        <span class="stat-label">Body Regions</span>
+                    </div>
+                    <div class="stat" data-stat="sampling-rate">
+                        <span class="stat-value">100Hz</span>
+                        <span class="stat-label">Sampling Rate</span>
+                    </div>
+                    <div class="stat" data-stat="accuracy">
+                        <span class="stat-value">87.2%</span>
+                        <span class="stat-label">Accuracy (AP@50)</span>
+                    </div>
+                    <div class="stat" data-stat="hardware-cost">
+                        <span class="stat-value">$30</span>
+                        <span class="stat-label">Hardware Cost</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Hardware Tab -->
+        <section id="hardware" class="tab-content">
+            <h2>Hardware Configuration</h2>
+            
+            <div class="hardware-grid">
+                <div class="antenna-section">
+                    <h3>3×3 Antenna Array</h3>
+                    <p class="help-text">Click antennas to toggle their state</p>
+                    <div class="antenna-array">
+                        <div class="antenna-grid">
+                            <div class="antenna tx active" data-type="TX1"></div>
+                            <div class="antenna tx active" data-type="TX2"></div>
+                            <div class="antenna tx active" data-type="TX3"></div>
+                            <div class="antenna rx active" data-type="RX1"></div>
+                            <div class="antenna rx active" data-type="RX2"></div>
+                            <div class="antenna rx active" data-type="RX3"></div>
+                            <div class="antenna rx active" data-type="RX4"></div>
+                            <div class="antenna rx active" data-type="RX5"></div>
+                            <div class="antenna rx active" data-type="RX6"></div>
+                        </div>
+                        <div class="antenna-legend">
+                            <div class="legend-item">
+                                <div class="legend-color tx"></div>
+                                <span>Transmitters (3)</span>
+                            </div>
+                            <div class="legend-item">
+                                <div class="legend-color rx"></div>
+                                <span>Receivers (6)</span>
+                            </div>
+                        </div>
+                        <div class="array-status"></div>
+                    </div>
+                </div>
+
+                <div class="config-section">
+                    <h3>WiFi Configuration</h3>
+                    <div class="config-grid">
+                        <div class="config-item">
+                            <label>Frequency</label>
+                            <div class="config-value">2.4GHz ± 20MHz</div>
+                        </div>
+                        <div class="config-item">
+                            <label>Subcarriers</label>
+                            <div class="config-value">30</div>
+                        </div>
+                        <div class="config-item">
+                            <label>Sampling Rate</label>
+                            <div class="config-value">100 Hz</div>
+                        </div>
+                        <div class="config-item">
+                            <label>Total Cost</label>
+                            <div class="config-value">$30</div>
+                        </div>
+                    </div>
+
+                    <div class="csi-data">
+                        <h4>Real-time CSI Data</h4>
+                        <div class="csi-display">
+                            <div class="csi-row">
+                                <span>Amplitude:</span>
+                                <div class="csi-bar">
+                                    <div class="csi-fill amplitude" style="width: 75%"></div>
+                                </div>
+                                <span class="csi-value">0.75</span>
+                            </div>
+                            <div class="csi-row">
+                                <span>Phase:</span>
+                                <div class="csi-bar">
+                                    <div class="csi-fill phase" style="width: 60%"></div>
+                                </div>
+                                <span class="csi-value">1.2π</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Demo Tab -->
+        <section id="demo" class="tab-content">
+            <h2>Live Demonstration</h2>
+            
+            <div class="demo-controls">
+                <button id="startDemo" class="btn btn--primary">Start Stream</button>
+                <button id="stopDemo" class="btn btn--secondary" disabled>Stop Stream</button>
+                <div class="demo-status">
+                    <span class="status status--info" id="demoStatus">Ready</span>
+                </div>
+            </div>
+
+            <div class="demo-grid">
+                <div class="signal-panel">
+                    <h3>WiFi Signal Analysis</h3>
+                    <div class="signal-display">
+                        <canvas id="signalCanvas" width="400" height="200"></canvas>
+                    </div>
+                    <div class="signal-metrics">
+                        <div class="metric">
+                            <span>Signal Strength:</span>
+                            <span id="signalStrength">-45 dBm</span>
+                        </div>
+                        <div class="metric">
+                            <span>Processing Latency:</span>
+                            <span id="latency">12 ms</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pose-panel">
+                    <h3>Human Pose Detection</h3>
+                    <div class="pose-display">
+                        <canvas id="poseCanvas" width="400" height="300"></canvas>
+                    </div>
+                    <div class="detection-info">
+                        <div class="info-item">
+                            <span>Persons Detected:</span>
+                            <span id="personCount">0</span>
+                        </div>
+                        <div class="info-item">
+                            <span>Confidence:</span>
+                            <span id="confidence">0.0%</span>
+                        </div>
+                        <div class="info-item">
+                            <span>Keypoints:</span>
+                            <span id="keypoints">0/0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Architecture Tab -->
+        <section id="architecture" class="tab-content">
+            <h2>System Architecture</h2>
+            
+            <div class="architecture-flow">
+                <img src="https://pplx-res.cloudinary.com/image/upload/v1748813853/gpt4o_images/m7zztcttnue7vaxclvuw.png" 
+                     alt="WiFi DensePose Architecture" class="architecture-image">
+                
+                <div class="flow-steps">
+                    <div class="step-card" data-step="1">
+                        <div class="step-number">1</div>
+                        <h3>CSI Input</h3>
+                        <p>Channel State Information collected from WiFi antenna array</p>
+                    </div>
+                    <div class="step-card" data-step="2">
+                        <div class="step-number">2</div>
+                        <h3>Phase Sanitization</h3>
+                        <p>Remove hardware-specific noise and normalize signal phase</p>
+                    </div>
+                    <div class="step-card" data-step="3">
+                        <div class="step-number">3</div>
+                        <h3>Modality Translation</h3>
+                        <p>Convert WiFi signals to visual representation using CNN</p>
+                    </div>
+                    <div class="step-card" data-step="4">
+                        <div class="step-number">4</div>
+                        <h3>DensePose-RCNN</h3>
+                        <p>Extract human pose keypoints and body part segmentation</p>
+                    </div>
+                    <div class="step-card" data-step="5">
+                        <div class="step-number">5</div>
+                        <h3>Wireframe Output</h3>
+                        <p>Generate final human pose wireframe visualization</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Performance Tab -->
+        <section id="performance" class="tab-content">
+            <h2>Performance Analysis</h2>
+            
+            <div class="performance-chart">
+                <img src="https://pplx-res.cloudinary.com/image/upload/v1748813924/pplx_code_interpreter/af6ef268_nsauu6.jpg" 
+                     alt="Performance Comparison Chart" class="chart-image">
+            </div>
+
+            <div class="performance-grid">
+                <div class="performance-card">
+                    <h3>WiFi-based (Same Layout)</h3>
+                    <div class="metric-list">
+                        <div class="metric-item">
+                            <span>Average Precision:</span>
+                            <span class="metric-value">43.5%</span>
+                        </div>
+                        <div class="metric-item">
+                            <span>AP@50:</span>
+                            <span class="metric-value success">87.2%</span>
+                        </div>
+                        <div class="metric-item">
+                            <span>AP@75:</span>
+                            <span class="metric-value">44.6%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="performance-card">
+                    <h3>Image-based (Reference)</h3>
+                    <div class="metric-list">
+                        <div class="metric-item">
+                            <span>Average Precision:</span>
+                            <span class="metric-value success">84.7%</span>
+                        </div>
+                        <div class="metric-item">
+                            <span>AP@50:</span>
+                            <span class="metric-value success">94.4%</span>
+                        </div>
+                        <div class="metric-item">
+                            <span>AP@75:</span>
+                            <span class="metric-value success">77.1%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="limitations-section">
+                    <h3>Advantages & Limitations</h3>
+                    <div class="pros-cons">
+                        <div class="pros">
+                            <h4>Advantages</h4>
+                            <ul>
+                                <li>Through-wall detection</li>
+                                <li>Privacy preserving</li>
+                                <li>Lighting independent</li>
+                                <li>Low cost hardware</li>
+                                <li>Uses existing WiFi</li>
+                            </ul>
+                        </div>
+                        <div class="cons">
+                            <h4>Limitations</h4>
+                            <ul>
+                                <li>Performance drops in different layouts</li>
+                                <li>Requires WiFi-compatible devices</li>
+                                <li>Training requires synchronized data</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Applications Tab -->
+        <section id="applications" class="tab-content">
+            <h2>Real-World Applications</h2>
+            
+            <div class="applications-grid">
+                <div class="app-card">
+                    <div class="app-icon">👴</div>
+                    <h3>Elderly Care Monitoring</h3>
+                    <p>Monitor elderly individuals for falls or emergencies without invading privacy. Track movement patterns and detect anomalies in daily routines.</p>
+                    <div class="app-features">
+                        <span class="feature-tag">Fall Detection</span>
+                        <span class="feature-tag">Activity Monitoring</span>
+                        <span class="feature-tag">Emergency Alert</span>
+                    </div>
+                </div>
+
+                <div class="app-card">
+                    <div class="app-icon">🏠</div>
+                    <h3>Home Security Systems</h3>
+                    <p>Detect intruders and monitor home security without visible cameras. Track multiple persons and identify suspicious movement patterns.</p>
+                    <div class="app-features">
+                        <span class="feature-tag">Intrusion Detection</span>
+                        <span class="feature-tag">Multi-person Tracking</span>
+                        <span class="feature-tag">Invisible Monitoring</span>
+                    </div>
+                </div>
+
+                <div class="app-card">
+                    <div class="app-icon">🏥</div>
+                    <h3>Healthcare Patient Monitoring</h3>
+                    <p>Monitor patients in hospitals and care facilities. Track vital signs through movement analysis and detect health emergencies.</p>
+                    <div class="app-features">
+                        <span class="feature-tag">Vital Sign Analysis</span>
+                        <span class="feature-tag">Movement Tracking</span>
+                        <span class="feature-tag">Health Alerts</span>
+                    </div>
+                </div>
+
+                <div class="app-card">
+                    <div class="app-icon">🏢</div>
+                    <h3>Smart Building Occupancy</h3>
+                    <p>Optimize building energy consumption by tracking occupancy patterns. Control lighting, HVAC, and security systems automatically.</p>
+                    <div class="app-features">
+                        <span class="feature-tag">Energy Optimization</span>
+                        <span class="feature-tag">Occupancy Tracking</span>
+                        <span class="feature-tag">Smart Controls</span>
+                    </div>
+                </div>
+
+                <div class="app-card">
+                    <div class="app-icon">🥽</div>
+                    <h3>AR/VR Applications</h3>
+                    <p>Enable full-body tracking for virtual and augmented reality applications without wearing additional sensors or cameras.</p>
+                    <div class="app-features">
+                        <span class="feature-tag">Full Body Tracking</span>
+                        <span class="feature-tag">Sensor-free</span>
+                        <span class="feature-tag">Immersive Experience</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="implementation-note">
+                <h3>Implementation Considerations</h3>
+                <p>While WiFi DensePose offers revolutionary capabilities, successful implementation requires careful consideration of environment setup, data privacy regulations, and system calibration for optimal performance.</p>
+            </div>
+        </section>
+    </div>
+
+    <!-- Error Toast -->
+    <div id="globalErrorToast" class="error-toast"></div>
+
+    <!-- Load application scripts as modules -->
+    <script type="module" src="app.js"></script>
+</body>
+</html>
