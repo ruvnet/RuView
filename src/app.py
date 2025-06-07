@@ -311,3 +311,18 @@ def setup_root_endpoints(app: FastAPI, settings: Settings):
             except Exception as e:
                 logger.error(f"Error resetting services: {e}")
                 return {"error": str(e)}
+
+
+# Create default app instance for uvicorn
+def get_app() -> FastAPI:
+    """Get the default application instance."""
+    from src.config.settings import get_settings
+    from src.services.orchestrator import ServiceOrchestrator
+    
+    settings = get_settings()
+    orchestrator = ServiceOrchestrator(settings)
+    return create_app(settings, orchestrator)
+
+
+# Default app instance for uvicorn
+app = get_app()

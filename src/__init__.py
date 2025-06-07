@@ -29,7 +29,7 @@ Author: WiFi-DensePose Team
 License: MIT
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "WiFi-DensePose Team"
 __email__ = "team@wifi-densepose.com"
 __license__ = "MIT"

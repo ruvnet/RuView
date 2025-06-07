@@ -21,6 +21,16 @@ python-jose[cryptography]>=3.3.0
 python-multipart>=0.0.6
 passlib[bcrypt]>=1.7.4
 
+# Database dependencies
+sqlalchemy>=2.0.0
+asyncpg>=0.28.0
+aiosqlite>=0.19.0
+redis>=4.5.0
+
+# CLI dependencies
+click>=8.0.0
+alembic>=1.10.0
+
 # Hardware interface dependencies
 asyncio-mqtt>=0.11.0
 aiohttp>=3.8.0

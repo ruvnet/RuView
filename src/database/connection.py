@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any, AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from sqlalchemy import create_engine, event, pool
+from sqlalchemy import create_engine, event, pool, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import QueuePool, NullPool
@@ -65,12 +65,35 @@ class DatabaseManager:
             raise DatabaseConnectionError(f"Database initialization failed: {e}")
     
     async def _initialize_postgresql(self):
-        """Initialize PostgreSQL connections."""
+        """Initialize PostgreSQL connections with SQLite failsafe."""
+        postgresql_failed = False
+        
+        try:
+            # Try PostgreSQL first
+            await self._initialize_postgresql_primary()
+            logger.info("PostgreSQL connections initialized")
+            return
+        except Exception as e:
+            postgresql_failed = True
+            logger.error(f"PostgreSQL initialization failed: {e}")
+            
+            if not self.settings.enable_database_failsafe:
+                raise DatabaseConnectionError(f"PostgreSQL connection failed and failsafe disabled: {e}")
+            
+            logger.warning("Falling back to SQLite database")
+        
+        # Fallback to SQLite if PostgreSQL failed and failsafe is enabled
+        if postgresql_failed and self.settings.enable_database_failsafe:
+            await self._initialize_sqlite_fallback()
+            logger.info("SQLite fallback database initialized")
+    
+    async def _initialize_postgresql_primary(self):
+        """Initialize primary PostgreSQL connections."""
         # Build database URL
-        if self.settings.database_url:
+        if self.settings.database_url and "postgresql" in self.settings.database_url:
             db_url = self.settings.database_url
             async_db_url = self.settings.database_url.replace("postgresql://", "postgresql+asyncpg://")
-        else:
+        elif self.settings.db_host and self.settings.db_name and self.settings.db_user:
             db_url = (
                 f"postgresql://{self.settings.db_user}:{self.settings.db_password}"
                 f"@{self.settings.db_host}:{self.settings.db_port}/{self.settings.db_name}"
@@ -79,6 +102,8 @@ class DatabaseManager:
                 f"postgresql+asyncpg://{self.settings.db_user}:{self.settings.db_password}"
                 f"@{self.settings.db_host}:{self.settings.db_port}/{self.settings.db_name}"
             )
+        else:
+            raise ValueError("PostgreSQL connection parameters not configured")
         
         # Create async engine (don't specify poolclass for async engines)
         self._async_engine = create_async_engine(
@@ -122,11 +147,65 @@ class DatabaseManager:
         
         # Test connections
         await self._test_postgresql_connection()
+    
+    async def _initialize_sqlite_fallback(self):
+        """Initialize SQLite fallback database."""
+        import os
         
-        logger.info("PostgreSQL connections initialized")
+        # Ensure directory exists
+        sqlite_path = self.settings.sqlite_fallback_path
+        os.makedirs(os.path.dirname(sqlite_path), exist_ok=True)
+        
+        # Build SQLite URLs
+        db_url = f"sqlite:///{sqlite_path}"
+        async_db_url = f"sqlite+aiosqlite:///{sqlite_path}"
+        
+        # Create async engine for SQLite
+        self._async_engine = create_async_engine(
+            async_db_url,
+            echo=self.settings.db_echo,
+            future=True,
+        )
+        
+        # Create sync engine for SQLite
+        self._sync_engine = create_engine(
+            db_url,
+            poolclass=NullPool,  # SQLite doesn't need connection pooling
+            echo=self.settings.db_echo,
+            future=True,
+        )
+        
+        # Create session factories
+        self._async_session_factory = async_sessionmaker(
+            self._async_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+        
+        self._sync_session_factory = sessionmaker(
+            self._sync_engine,
+            expire_on_commit=False,
+        )
+        
+        # Add connection event listeners
+        self._setup_connection_events()
+        
+        # Test SQLite connection
+        await self._test_sqlite_connection()
+    
+    async def _test_sqlite_connection(self):
+        """Test SQLite connection."""
+        try:
+            async with self._async_engine.begin() as conn:
+                result = await conn.execute(text("SELECT 1"))
+                result.fetchone()  # Don't await this - fetchone() is not async
+            logger.debug("SQLite connection test successful")
+        except Exception as e:
+            logger.error(f"SQLite connection test failed: {e}")
+            raise DatabaseConnectionError(f"SQLite connection test failed: {e}")
     
     async def _initialize_redis(self):
-        """Initialize Redis connection."""
+        """Initialize Redis connection with failsafe."""
         if not self.settings.redis_enabled:
             logger.info("Redis disabled, skipping initialization")
             return
@@ -160,10 +239,15 @@ class DatabaseManager:
             
         except Exception as e:
             logger.error(f"Failed to initialize Redis: {e}")
+            
             if self.settings.redis_required:
-                raise
+                raise DatabaseConnectionError(f"Redis connection failed and is required: {e}")
+            elif self.settings.enable_redis_failsafe:
+                logger.warning("Redis initialization failed, continuing without Redis (failsafe enabled)")
+                self._redis_client = None
             else:
                 logger.warning("Redis initialization failed but not required, continuing without Redis")
+                self._redis_client = None
     
     def _setup_connection_events(self):
         """Setup database connection event listeners."""
@@ -195,8 +279,8 @@ class DatabaseManager:
         """Test PostgreSQL connection."""
         try:
             async with self._async_engine.begin() as conn:
-                result = await conn.execute("SELECT 1")
-                await result.fetchone()
+                result = await conn.execute(text("SELECT 1"))
+                result.fetchone()  # Don't await this - fetchone() is not async
             logger.debug("PostgreSQL connection test successful")
         except Exception as e:
             logger.error(f"PostgreSQL connection test failed: {e}")
@@ -265,31 +349,48 @@ class DatabaseManager:
     async def health_check(self) -> Dict[str, Any]:
         """Perform database health check."""
         health_status = {
-            "postgresql": {"status": "unknown", "details": {}},
+            "database": {"status": "unknown", "details": {}},
             "redis": {"status": "unknown", "details": {}},
             "overall": "unknown"
         }
         
-        # Check PostgreSQL
+        # Check Database (PostgreSQL or SQLite)
         try:
             start_time = datetime.utcnow()
             async with self.get_async_session() as session:
-                result = await session.execute("SELECT 1")
-                await result.fetchone()
+                result = await session.execute(text("SELECT 1"))
+                result.fetchone()  # Don't await this - fetchone() is not async
             
             response_time = (datetime.utcnow() - start_time).total_seconds()
             
-            health_status["postgresql"] = {
-                "status": "healthy",
-                "details": {
-                    "response_time_ms": round(response_time * 1000, 2),
+            # Determine database type and status
+            is_sqlite = self.is_using_sqlite_fallback()
+            db_type = "sqlite_fallback" if is_sqlite else "postgresql"
+            
+            details = {
+                "type": db_type,
+                "response_time_ms": round(response_time * 1000, 2),
+            }
+            
+            # Add pool info for PostgreSQL
+            if not is_sqlite and hasattr(self._async_engine, 'pool'):
+                details.update({
                     "pool_size": self._async_engine.pool.size(),
                     "checked_out": self._async_engine.pool.checkedout(),
                     "overflow": self._async_engine.pool.overflow(),
-                }
+                })
+            
+            # Add failsafe info
+            if is_sqlite:
+                details["failsafe_active"] = True
+                details["fallback_path"] = self.settings.sqlite_fallback_path
+            
+            health_status["database"] = {
+                "status": "healthy",
+                "details": details
             }
         except Exception as e:
-            health_status["postgresql"] = {
+            health_status["database"] = {
                 "status": "unhealthy",
                 "details": {"error": str(e)}
             }
@@ -324,15 +425,22 @@ class DatabaseManager:
             }
         
         # Determine overall status
-        postgresql_healthy = health_status["postgresql"]["status"] == "healthy"
+        database_healthy = health_status["database"]["status"] == "healthy"
         redis_healthy = (
             health_status["redis"]["status"] in ["healthy", "disabled"] or
             not self.settings.redis_required
         )
         
-        if postgresql_healthy and redis_healthy:
-            health_status["overall"] = "healthy"
-        elif postgresql_healthy:
+        # Check if using failsafe modes
+        using_sqlite_fallback = self.is_using_sqlite_fallback()
+        redis_unavailable = not self.is_redis_available() and self.settings.redis_enabled
+        
+        if database_healthy and redis_healthy:
+            if using_sqlite_fallback or redis_unavailable:
+                health_status["overall"] = "degraded"  # Working but using failsafe
+            else:
+                health_status["overall"] = "healthy"
+        elif database_healthy:
             health_status["overall"] = "degraded"
         else:
             health_status["overall"] = "unhealthy"
@@ -394,6 +502,36 @@ class DatabaseManager:
         self._initialized = False
         logger.info("Database connections closed")
     
+    def is_using_sqlite_fallback(self) -> bool:
+        """Check if currently using SQLite fallback database."""
+        if not self._async_engine:
+            return False
+        return "sqlite" in str(self._async_engine.url)
+    
+    def is_redis_available(self) -> bool:
+        """Check if Redis is available."""
+        return self._redis_client is not None
+    
+    async def test_connection(self) -> bool:
+        """Test database connection for CLI validation."""
+        try:
+            if not self._initialized:
+                await self.initialize()
+            
+            # Test database connection (PostgreSQL or SQLite)
+            async with self.get_async_session() as session:
+                result = await session.execute(text("SELECT 1"))
+                result.fetchone()  # Don't await this - fetchone() is not async
+            
+            # Test Redis connection if enabled
+            if self._redis_client:
+                await self._redis_client.ping()
+            
+            return True
+        except Exception as e:
+            logger.error(f"Database connection test failed: {e}")
+            return False
+    
     async def reset_connections(self):
         """Reset all database connections."""
         logger.info("Resetting database connections")
@@ -438,8 +576,8 @@ class DatabaseHealthCheck:
         try:
             start_time = datetime.utcnow()
             async with self.db_manager.get_async_session() as session:
-                result = await session.execute("SELECT version()")
-                version = (await result.fetchone())[0]
+                result = await session.execute(text("SELECT version()"))
+                version = result.fetchone()[0]  # Don't await this - fetchone() is not async
             
             response_time = (datetime.utcnow() - start_time).total_seconds()
             

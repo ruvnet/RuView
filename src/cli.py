@@ -212,6 +212,7 @@ def init(ctx, url: Optional[str]):
         from src.database.connection import get_database_manager
         from alembic.config import Config
         from alembic import command
+        import os
         
         # Get settings
         settings = get_settings_with_config(ctx.obj.get('config_file'))
@@ -228,10 +229,19 @@ def init(ctx, url: Optional[str]):
         
         asyncio.run(init_db())
         
-        # Run migrations
-        alembic_cfg = Config("alembic.ini")
-        command.upgrade(alembic_cfg, "head")
-        logger.info("Database migrations applied successfully")
+        # Run migrations if alembic.ini exists
+        alembic_ini_path = "alembic.ini"
+        if os.path.exists(alembic_ini_path):
+            try:
+                alembic_cfg = Config(alembic_ini_path)
+                # Set the database URL in the config
+                alembic_cfg.set_main_option("sqlalchemy.url", settings.get_database_url())
+                command.upgrade(alembic_cfg, "head")
+                logger.info("Database migrations applied successfully")
+            except Exception as migration_error:
+                logger.warning(f"Migration failed, but database is initialized: {migration_error}")
+        else:
+            logger.info("No alembic.ini found, skipping migrations")
         
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
@@ -490,6 +500,97 @@ def validate(ctx):
         
     except Exception as e:
         logger.error(f"Failed to validate configuration: {e}")
+        sys.exit(1)
+
+
+@config.command()
+@click.option(
+    '--format',
+    type=click.Choice(['text', 'json']),
+    default='text',
+    help='Output format (default: text)'
+)
+@click.pass_context
+def failsafe(ctx, format: str):
+    """Show failsafe status and configuration."""
+    
+    try:
+        import json
+        from src.database.connection import get_database_manager
+        
+        # Get settings
+        settings = get_settings_with_config(ctx.obj.get('config_file'))
+        
+        async def check_failsafe_status():
+            db_manager = get_database_manager(settings)
+            
+            # Initialize database to check current state
+            try:
+                await db_manager.initialize()
+            except Exception as e:
+                logger.warning(f"Database initialization failed: {e}")
+            
+            # Collect failsafe status
+            failsafe_status = {
+                "database": {
+                    "failsafe_enabled": settings.enable_database_failsafe,
+                    "using_sqlite_fallback": db_manager.is_using_sqlite_fallback(),
+                    "sqlite_fallback_path": settings.sqlite_fallback_path,
+                    "primary_database_url": settings.get_database_url() if not db_manager.is_using_sqlite_fallback() else None,
+                },
+                "redis": {
+                    "failsafe_enabled": settings.enable_redis_failsafe,
+                    "redis_enabled": settings.redis_enabled,
+                    "redis_required": settings.redis_required,
+                    "redis_available": db_manager.is_redis_available(),
+                    "redis_url": settings.get_redis_url() if settings.redis_enabled else None,
+                },
+                "overall_status": "healthy"
+            }
+            
+            # Determine overall status
+            if failsafe_status["database"]["using_sqlite_fallback"] or not failsafe_status["redis"]["redis_available"]:
+                failsafe_status["overall_status"] = "degraded"
+            
+            # Output results
+            if format == 'json':
+                click.echo(json.dumps(failsafe_status, indent=2))
+            else:
+                click.echo("=== Failsafe Status ===\n")
+                
+                # Database status
+                click.echo("Database:")
+                if failsafe_status["database"]["using_sqlite_fallback"]:
+                    click.echo("  ⚠️  Using SQLite fallback database")
+                    click.echo(f"     Path: {failsafe_status['database']['sqlite_fallback_path']}")
+                else:
+                    click.echo("  ✓  Using primary database (PostgreSQL)")
+                
+                click.echo(f"  Failsafe enabled: {'Yes' if failsafe_status['database']['failsafe_enabled'] else 'No'}")
+                
+                # Redis status
+                click.echo("\nRedis:")
+                if not failsafe_status["redis"]["redis_enabled"]:
+                    click.echo("  -  Redis disabled")
+                elif not failsafe_status["redis"]["redis_available"]:
+                    click.echo("  ⚠️  Redis unavailable (failsafe active)")
+                else:
+                    click.echo("  ✓  Redis available")
+                
+                click.echo(f"  Failsafe enabled: {'Yes' if failsafe_status['redis']['failsafe_enabled'] else 'No'}")
+                click.echo(f"  Required: {'Yes' if failsafe_status['redis']['redis_required'] else 'No'}")
+                
+                # Overall status
+                status_icon = "✓" if failsafe_status["overall_status"] == "healthy" else "⚠️"
+                click.echo(f"\nOverall Status: {status_icon} {failsafe_status['overall_status'].upper()}")
+                
+                if failsafe_status["overall_status"] == "degraded":
+                    click.echo("\nNote: System is running in degraded mode using failsafe configurations.")
+        
+        asyncio.run(check_failsafe_status())
+        
+    except Exception as e:
+        logger.error(f"Failed to check failsafe status: {e}")
         sys.exit(1)
 
 

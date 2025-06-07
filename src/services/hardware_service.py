@@ -128,9 +128,8 @@ class HardwareService:
                     mock_mode=self.settings.mock_hardware
                 )
                 
-                # Connect to router
-                if not self.settings.mock_hardware:
-                    await router_interface.connect()
+                # Connect to router (always connect, even in mock mode)
+                await router_interface.connect()
                 
                 self.router_interfaces[router_id] = router_interface
                 self.logger.info(f"Router interface initialized: {router_id}")

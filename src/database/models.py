@@ -160,7 +160,7 @@ class Session(Base, UUIDMixin, TimestampMixin):
     
     # Metadata
     tags = Column(ARRAY(String), nullable=True)
-    metadata = Column(JSON, nullable=True)
+    meta_data = Column(JSON, nullable=True)
     
     # Statistics
     total_frames = Column(Integer, default=0, nullable=False)
@@ -191,7 +191,7 @@ class Session(Base, UUIDMixin, TimestampMixin):
             "config": self.config,
             "device_id": str(self.device_id),
             "tags": self.tags,
-            "metadata": self.metadata,
+            "metadata": self.meta_data,
             "total_frames": self.total_frames,
             "processed_frames": self.processed_frames,
             "error_count": self.error_count,
@@ -240,7 +240,7 @@ class CSIData(Base, UUIDMixin, TimestampMixin):
     is_valid = Column(Boolean, default=True, nullable=False)
     
     # Metadata
-    metadata = Column(JSON, nullable=True)
+    meta_data = Column(JSON, nullable=True)
     
     # Constraints and indexes
     __table_args__ = (
@@ -278,7 +278,7 @@ class CSIData(Base, UUIDMixin, TimestampMixin):
             "processed_at": self.processed_at.isoformat() if self.processed_at else None,
             "quality_score": self.quality_score,
             "is_valid": self.is_valid,
-            "metadata": self.metadata,
+            "metadata": self.meta_data,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -317,7 +317,7 @@ class PoseDetection(Base, UUIDMixin, TimestampMixin):
     is_valid = Column(Boolean, default=True, nullable=False)
     
     # Metadata
-    metadata = Column(JSON, nullable=True)
+    meta_data = Column(JSON, nullable=True)
     
     # Constraints and indexes
     __table_args__ = (
@@ -350,7 +350,7 @@ class PoseDetection(Base, UUIDMixin, TimestampMixin):
             "image_quality": self.image_quality,
             "pose_quality": self.pose_quality,
             "is_valid": self.is_valid,
-            "metadata": self.metadata,
+            "metadata": self.meta_data,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -378,7 +378,7 @@ class SystemMetric(Base, UUIDMixin, TimestampMixin):
     
     # Metadata
     description = Column(Text, nullable=True)
-    metadata = Column(JSON, nullable=True)
+    meta_data = Column(JSON, nullable=True)
     
     # Constraints and indexes
     __table_args__ = (
@@ -402,7 +402,7 @@ class SystemMetric(Base, UUIDMixin, TimestampMixin):
             "source": self.source,
             "component": self.component,
             "description": self.description,
-            "metadata": self.metadata,
+            "metadata": self.meta_data,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -437,7 +437,7 @@ class AuditLog(Base, UUIDMixin, TimestampMixin):
     error_message = Column(Text, nullable=True)
     
     # Metadata
-    metadata = Column(JSON, nullable=True)
+    meta_data = Column(JSON, nullable=True)
     tags = Column(ARRAY(String), nullable=True)
     
     # Constraints and indexes
@@ -467,7 +467,7 @@ class AuditLog(Base, UUIDMixin, TimestampMixin):
             "changes": self.changes,
             "success": self.success,
             "error_message": self.error_message,
-            "metadata": self.metadata,
+            "metadata": self.meta_data,
             "tags": self.tags,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,

@@ -58,7 +58,7 @@ class MonitoringTask:
                     source=metric_data.get("source", self.name),
                     component=metric_data.get("component"),
                     description=metric_data.get("description"),
-                    metadata=metric_data.get("metadata"),
+                    meta_data=metric_data.get("metadata"),
                 )
                 session.add(metric)
             

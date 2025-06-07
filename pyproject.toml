@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wifi-densepose"
-version = "1.0.0"
+version = "1.1.0"
 description = "WiFi-based human pose estimation using CSI data and DensePose neural networks"
 readme = "README.md"
 license = "MIT"

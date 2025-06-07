@@ -63,6 +63,15 @@ class Settings(BaseSettings):
     redis_enabled: bool = Field(default=True, description="Enable Redis")
     redis_host: str = Field(default="localhost", description="Redis host")
     redis_port: int = Field(default=6379, description="Redis port")
+    redis_required: bool = Field(default=False, description="Require Redis connection (fail if unavailable)")
+    redis_max_connections: int = Field(default=10, description="Maximum Redis connections")
+    redis_socket_timeout: int = Field(default=5, description="Redis socket timeout in seconds")
+    redis_connect_timeout: int = Field(default=5, description="Redis connection timeout in seconds")
+    
+    # Failsafe settings
+    enable_database_failsafe: bool = Field(default=True, description="Enable automatic SQLite failsafe when PostgreSQL unavailable")
+    enable_redis_failsafe: bool = Field(default=True, description="Enable automatic Redis failsafe (disable when unavailable)")
+    sqlite_fallback_path: str = Field(default="./data/wifi_densepose_fallback.db", description="SQLite fallback database path")
     
     # Hardware settings
     wifi_interface: str = Field(default="wlan0", description="WiFi interface name")
@@ -88,6 +97,7 @@ class Settings(BaseSettings):
         description="Log format"
     )
     log_file: Optional[str] = Field(default=None, description="Log file path")
+    log_directory: str = Field(default="./logs", description="Log directory path")
     log_max_size: int = Field(default=10485760, description="Max log file size in bytes (10MB)")
     log_backup_count: int = Field(default=5, description="Number of log backup files")
     
@@ -103,6 +113,7 @@ class Settings(BaseSettings):
     data_storage_path: str = Field(default="./data", description="Data storage directory")
     model_storage_path: str = Field(default="./models", description="Model storage directory")
     temp_storage_path: str = Field(default="./temp", description="Temporary storage directory")
+    backup_directory: str = Field(default="./backups", description="Backup storage directory")
     max_storage_size_gb: int = Field(default=100, description="Maximum storage size in GB")
     
     # API settings
@@ -241,7 +252,15 @@ class Settings(BaseSettings):
         if self.is_development:
             return f"sqlite:///{self.data_storage_path}/wifi_densepose.db"
         
+        # SQLite failsafe for production if enabled
+        if self.enable_database_failsafe:
+            return f"sqlite:///{self.sqlite_fallback_path}"
+        
         raise ValueError("Database URL must be configured for non-development environments")
+    
+    def get_sqlite_fallback_url(self) -> str:
+        """Get SQLite fallback database URL."""
+        return f"sqlite:///{self.sqlite_fallback_path}"
     
     def get_redis_url(self) -> Optional[str]:
         """Get Redis URL with fallback."""
@@ -334,6 +353,8 @@ class Settings(BaseSettings):
             self.data_storage_path,
             self.model_storage_path,
             self.temp_storage_path,
+            self.log_directory,
+            self.backup_directory,
         ]
         
         for directory in directories:
