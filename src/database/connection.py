@@ -80,10 +80,9 @@ class DatabaseManager:
                 f"@{self.settings.db_host}:{self.settings.db_port}/{self.settings.db_name}"
             )
         
-        # Create async engine
+        # Create async engine (don't specify poolclass for async engines)
         self._async_engine = create_async_engine(
             async_db_url,
-            poolclass=QueuePool,
             pool_size=self._connection_pool_size,
             max_overflow=self._max_overflow,
             pool_timeout=self._pool_timeout,
