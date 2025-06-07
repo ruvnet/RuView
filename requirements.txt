@@ -1,0 +1,32 @@
+# Core dependencies
+numpy>=1.21.0
+scipy>=1.7.0
+torch>=1.12.0
+torchvision>=0.13.0
+
+# Testing dependencies
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.10.0
+
+# API dependencies
+fastapi>=0.95.0
+uvicorn>=0.20.0
+websockets>=10.4
+pydantic>=1.10.0
+
+# Hardware interface dependencies
+asyncio-mqtt>=0.11.0
+aiohttp>=3.8.0
+
+# Data processing dependencies
+opencv-python>=4.7.0
+scikit-learn>=1.2.0
+
+# Monitoring dependencies
+prometheus-client>=0.16.0
+
+# Development dependencies
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0
