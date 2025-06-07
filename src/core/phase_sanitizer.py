@@ -1,6 +1,7 @@
 """Phase sanitizer for WiFi-DensePose CSI phase data processing."""
 
 import numpy as np
+import torch
 from typing import Optional
 from scipy import signal
 
@@ -59,6 +60,35 @@ class PhaseSanitizer:
         result[outlier_mask] = mean_val
         
         return result
+    
+    def sanitize_phase_batch(self, processed_csi: torch.Tensor) -> torch.Tensor:
+        """Sanitize phase information in a batch of processed CSI data.
+        
+        Args:
+            processed_csi: Processed CSI tensor from CSI processor
+            
+        Returns:
+            CSI tensor with sanitized phase information
+        """
+        if not isinstance(processed_csi, torch.Tensor):
+            raise ValueError("Input must be a torch.Tensor")
+        
+        # Convert to numpy for processing
+        csi_numpy = processed_csi.detach().cpu().numpy()
+        
+        # The processed CSI has shape (batch, channels, subcarriers, time)
+        # where channels = 2 * antennas (amplitude and phase interleaved)
+        batch_size, channels, subcarriers, time_samples = csi_numpy.shape
+        
+        # Process phase channels (odd indices contain phase information)
+        for batch_idx in range(batch_size):
+            for ch_idx in range(1, channels, 2):  # Phase channels are at odd indices
+                phase_data = csi_numpy[batch_idx, ch_idx, :, :]
+                sanitized_phase = self.sanitize(phase_data)
+                csi_numpy[batch_idx, ch_idx, :, :] = sanitized_phase
+        
+        # Convert back to tensor
+        return torch.from_numpy(csi_numpy).float()
     
     def smooth_phase(self, phase_data: np.ndarray) -> np.ndarray:
         """Apply smoothing filter to reduce noise in phase data.
