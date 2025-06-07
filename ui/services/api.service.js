@@ -1,6 +1,7 @@
 // API Service for WiFi-DensePose UI
 
 import { API_CONFIG, buildApiUrl } from '../config/api.config.js';
+import { backendDetector } from '../utils/backend-detector.js';
 
 export class ApiService {
   constructor() {
@@ -69,8 +70,15 @@ export class ApiService {
       // Process request through interceptors
       const processed = await this.processRequest(url, options);
       
+      // Determine the correct base URL (real backend vs mock)
+      let finalUrl = processed.url;
+      if (processed.url.startsWith(API_CONFIG.BASE_URL)) {
+        const baseUrl = await backendDetector.getBaseUrl();
+        finalUrl = processed.url.replace(API_CONFIG.BASE_URL, baseUrl);
+      }
+      
       // Make the request
-      const response = await fetch(processed.url, {
+      const response = await fetch(finalUrl, {
         ...processed.options,
         headers: this.getHeaders(processed.options.headers)
       });

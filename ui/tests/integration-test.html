@@ -95,8 +95,8 @@
     <!-- Test Controls Panel -->
     <div class="test-controls">
         <h3>Integration Tests</h3>
-        <button class="test-button" onclick="startMockServer()">Start Mock Server</button>
-        <button class="test-button danger" onclick="stopMockServer()">Stop Mock Server</button>
+        <button class="test-button" onclick="toggleMockMode()">Toggle Mock Mode</button>
+        <button class="test-button" onclick="checkBackendStatus()">Check Backend Status</button>
         <button class="test-button" onclick="testHealthAPI()">Test Health API</button>
         <button class="test-button" onclick="testPoseAPI()">Test Pose API</button>
         <button class="test-button" onclick="testWebSocketStream()">Test WebSocket</button>
@@ -376,34 +376,60 @@
     <script type="module">
         import { mockServer } from '../utils/mock-server.js';
         import { WiFiDensePoseApp } from '../app.js';
+        import { API_CONFIG } from '../config/api.config.js';
+        import { backendDetector } from '../utils/backend-detector.js';
 
         // Global test functions
         window.mockServer = mockServer;
         window.app = null;
 
-        window.startMockServer = () => {
+        window.toggleMockMode = async () => {
             try {
-                mockServer.start();
-                updateMockIndicator(true);
-                showTestStatus('Mock server started successfully', 'success');
+                // Toggle mock mode
+                API_CONFIG.MOCK_SERVER.ENABLED = !API_CONFIG.MOCK_SERVER.ENABLED;
                 
-                // Initialize app if not already done
+                // Force backend detector to recheck
+                backendDetector.forceCheck();
+                
+                if (API_CONFIG.MOCK_SERVER.ENABLED) {
+                    mockServer.start();
+                    updateMockIndicator(true);
+                    showTestStatus('Mock mode enabled - using test data', 'success');
+                } else {
+                    mockServer.stop();
+                    updateMockIndicator(false);
+                    showTestStatus('Mock mode disabled - using real backend', 'info');
+                }
+                
+                // Reinitialize app with new configuration
                 if (!window.app) {
                     window.app = new WiFiDensePoseApp();
-                    window.app.init();
+                    await window.app.init();
                 }
             } catch (error) {
-                showTestStatus(`Failed to start mock server: ${error.message}`, 'error');
+                showTestStatus(`Failed to toggle mock mode: ${error.message}`, 'error');
             }
         };
 
-        window.stopMockServer = () => {
+        window.checkBackendStatus = async () => {
             try {
-                mockServer.stop();
-                updateMockIndicator(false);
-                showTestStatus('Mock server stopped', 'info');
+                showTestStatus('Checking backend status...', 'info');
+                
+                const isAvailable = await backendDetector.checkBackendAvailability();
+                const useMock = await backendDetector.shouldUseMockServer();
+                
+                if (isAvailable && !useMock) {
+                    showTestStatus('✅ Real backend is available and being used', 'success');
+                    updateMockIndicator(false);
+                } else if (useMock) {
+                    showTestStatus('🧪 Using mock server (testing mode)', 'success');
+                    updateMockIndicator(true);
+                } else {
+                    showTestStatus('❌ Backend unavailable, mock server available', 'error');
+                    updateMockIndicator(false);
+                }
             } catch (error) {
-                showTestStatus(`Failed to stop mock server: ${error.message}`, 'error');
+                showTestStatus(`Backend check failed: ${error.message}`, 'error');
             }
         };
 
@@ -537,9 +563,15 @@
             }
         }
 
-        // Auto-start mock server on load
-        document.addEventListener('DOMContentLoaded', () => {
-            startMockServer();
+        // Auto-check backend status on load
+        document.addEventListener('DOMContentLoaded', async () => {
+            await checkBackendStatus();
+            
+            // Initialize app
+            if (!window.app) {
+                window.app = new WiFiDensePoseApp();
+                await window.app.init();
+            }
         });
     </script>
 </body>

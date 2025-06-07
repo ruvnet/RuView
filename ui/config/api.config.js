@@ -6,6 +6,12 @@ export const API_CONFIG = {
   WS_PREFIX: 'ws://',
   WSS_PREFIX: 'wss://',
   
+  // Mock server configuration (only for testing)
+  MOCK_SERVER: {
+    ENABLED: false,  // Set to true only for testing without backend
+    AUTO_DETECT: true,  // Automatically detect if backend is available
+  },
+  
   // API Endpoints
   ENDPOINTS: {
     // Root & Info

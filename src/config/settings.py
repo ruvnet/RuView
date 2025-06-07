@@ -42,10 +42,27 @@ class Settings(BaseSettings):
     database_pool_size: int = Field(default=10, description="Database connection pool size")
     database_max_overflow: int = Field(default=20, description="Database max overflow connections")
     
+    # Database connection pool settings (alternative naming for compatibility)
+    db_pool_size: int = Field(default=10, description="Database connection pool size")
+    db_max_overflow: int = Field(default=20, description="Database max overflow connections")
+    db_pool_timeout: int = Field(default=30, description="Database pool timeout in seconds")
+    db_pool_recycle: int = Field(default=3600, description="Database pool recycle time in seconds")
+    
+    # Database connection settings
+    db_host: Optional[str] = Field(default=None, description="Database host")
+    db_port: int = Field(default=5432, description="Database port")
+    db_name: Optional[str] = Field(default=None, description="Database name")
+    db_user: Optional[str] = Field(default=None, description="Database user")
+    db_password: Optional[str] = Field(default=None, description="Database password")
+    db_echo: bool = Field(default=False, description="Enable database query logging")
+    
     # Redis settings (for caching and rate limiting)
     redis_url: Optional[str] = Field(default=None, description="Redis connection URL")
     redis_password: Optional[str] = Field(default=None, description="Redis password")
     redis_db: int = Field(default=0, description="Redis database number")
+    redis_enabled: bool = Field(default=True, description="Enable Redis")
+    redis_host: str = Field(default="localhost", description="Redis host")
+    redis_port: int = Field(default=6379, description="Redis port")
     
     # Hardware settings
     wifi_interface: str = Field(default="wlan0", description="WiFi interface name")
@@ -78,6 +95,9 @@ class Settings(BaseSettings):
     metrics_enabled: bool = Field(default=True, description="Enable metrics collection")
     health_check_interval: int = Field(default=30, description="Health check interval in seconds")
     performance_monitoring: bool = Field(default=True, description="Enable performance monitoring")
+    monitoring_interval_seconds: int = Field(default=60, description="Monitoring task interval in seconds")
+    cleanup_interval_seconds: int = Field(default=3600, description="Cleanup task interval in seconds")
+    backup_interval_seconds: int = Field(default=86400, description="Backup task interval in seconds")
     
     # Storage settings
     data_storage_path: str = Field(default="./data", description="Data storage directory")
@@ -160,6 +180,38 @@ class Settings(BaseSettings):
         if v < 1:
             raise ValueError("Workers must be at least 1")
         return v
+    
+    @field_validator("db_port")
+    @classmethod
+    def validate_db_port(cls, v):
+        """Validate database port."""
+        if not 1 <= v <= 65535:
+            raise ValueError("Database port must be between 1 and 65535")
+        return v
+    
+    @field_validator("redis_port")
+    @classmethod
+    def validate_redis_port(cls, v):
+        """Validate Redis port."""
+        if not 1 <= v <= 65535:
+            raise ValueError("Redis port must be between 1 and 65535")
+        return v
+    
+    @field_validator("db_pool_size")
+    @classmethod
+    def validate_db_pool_size(cls, v):
+        """Validate database pool size."""
+        if v < 1:
+            raise ValueError("Database pool size must be at least 1")
+        return v
+    
+    @field_validator("monitoring_interval_seconds", "cleanup_interval_seconds", "backup_interval_seconds")
+    @classmethod
+    def validate_interval_seconds(cls, v):
+        """Validate interval settings."""
+        if v < 0:
+            raise ValueError("Interval seconds must be non-negative")
+        return v
     @property
     def is_development(self) -> bool:
         """Check if running in development environment."""
@@ -180,6 +232,11 @@ class Settings(BaseSettings):
         if self.database_url:
             return self.database_url
         
+        # Build URL from individual components if available
+        if self.db_host and self.db_name and self.db_user:
+            password_part = f":{self.db_password}" if self.db_password else ""
+            return f"postgresql://{self.db_user}{password_part}@{self.db_host}:{self.db_port}/{self.db_name}"
+        
         # Default SQLite database for development
         if self.is_development:
             return f"sqlite:///{self.data_storage_path}/wifi_densepose.db"
@@ -188,14 +245,15 @@ class Settings(BaseSettings):
     
     def get_redis_url(self) -> Optional[str]:
         """Get Redis URL with fallback."""
+        if not self.redis_enabled:
+            return None
+            
         if self.redis_url:
             return self.redis_url
         
-        # Default Redis for development
-        if self.is_development:
-            return "redis://localhost:6379/0"
-        
-        return None
+        # Build URL from individual components
+        password_part = f":{self.redis_password}@" if self.redis_password else ""
+        return f"redis://{password_part}{self.redis_host}:{self.redis_port}/{self.redis_db}"
     
     def get_cors_config(self) -> Dict[str, Any]:
         """Get CORS configuration."""
@@ -318,8 +376,8 @@ def validate_settings(settings: Settings) -> List[str]:
         if not settings.secret_key or settings.secret_key == "change-me":
             issues.append("Secret key must be set for production")
         
-        if not settings.database_url:
-            issues.append("Database URL must be set for production")
+        if not settings.database_url and not (settings.db_host and settings.db_name and settings.db_user):
+            issues.append("Database URL or database connection parameters must be set for production")
         
         if settings.debug:
             issues.append("Debug mode should be disabled in production")

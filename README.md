@@ -213,8 +213,14 @@ system.stop()
 # Start the API server
 wifi-densepose start
 
-# Or using Python
-python -m wifi_densepose.main
+# Start with custom configuration
+wifi-densepose -c /path/to/config.yaml start
+
+# Start with verbose logging
+wifi-densepose -v start
+
+# Check server status
+wifi-densepose status
 ```
 
 The API will be available at `http://localhost:8000`
@@ -255,180 +261,229 @@ The CLI is automatically installed with the package:
 pip install wifi-densepose
 
 # Verify CLI installation
-wifi-densepose --version
+wifi-densepose --help
+wifi-densepose version
 ```
 
 ### Basic Commands
 
-#### Start/Stop System
+The WiFi-DensePose CLI provides the following commands:
+
 ```bash
-# Start the WiFi DensePose system
+wifi-densepose [OPTIONS] COMMAND [ARGS]...
+
+Options:
+  -c, --config PATH  Path to configuration file
+  -v, --verbose      Enable verbose logging
+  --debug            Enable debug mode
+  --help             Show this message and exit.
+
+Commands:
+  config   Configuration management commands.
+  db       Database management commands.
+  start    Start the WiFi-DensePose API server.
+  status   Show the status of the WiFi-DensePose API server.
+  stop     Stop the WiFi-DensePose API server.
+  tasks    Background task management commands.
+  version  Show version information.
+```
+
+#### Server Management
+```bash
+# Start the WiFi-DensePose API server
 wifi-densepose start
 
 # Start with custom configuration
-wifi-densepose start --config /path/to/config.yaml
+wifi-densepose -c /path/to/config.yaml start
 
-# Start in development mode
-wifi-densepose start --dev
+# Start with verbose logging
+wifi-densepose -v start
 
-# Stop the system
-wifi-densepose stop
+# Start with debug mode
+wifi-densepose --debug start
 
-# Restart the system
-wifi-densepose restart
-```
-
-#### System Status
-```bash
-# Check system status
+# Check server status
 wifi-densepose status
 
-# Get detailed health information
-wifi-densepose health
+# Stop the server
+wifi-densepose stop
 
-# Show system information
-wifi-densepose info
-```
-
-#### Pose Data Operations
-```bash
-# Get latest pose data
-wifi-densepose pose latest
-
-# Get pose history
-wifi-densepose pose history --hours 24
-
-# Stream pose data to console
-wifi-densepose pose stream
-
-# Export pose data
-wifi-densepose pose export --format json --output poses.json
+# Show version information
+wifi-densepose version
 ```
 
 ### Configuration Commands
 
-#### Environment Setup
+#### Configuration Management
 ```bash
-# Initialize configuration
-wifi-densepose init
+# Configuration management commands
+wifi-densepose config [SUBCOMMAND]
 
-# Create configuration from template
-wifi-densepose config create --template healthcare
-
-# Validate configuration
-wifi-densepose config validate
-
+# Examples:
 # Show current configuration
 wifi-densepose config show
+
+# Validate configuration file
+wifi-densepose config validate
+
+# Create default configuration
+wifi-densepose config init
+
+# Edit configuration
+wifi-densepose config edit
 ```
 
-#### Hardware Configuration
+#### Database Management
 ```bash
-# List available WiFi interfaces
-wifi-densepose hardware list-interfaces
+# Database management commands
+wifi-densepose db [SUBCOMMAND]
 
-# Test hardware connectivity
-wifi-densepose hardware test
+# Examples:
+# Initialize database
+wifi-densepose db init
 
-# Calibrate environment
-wifi-densepose calibrate --duration 10 --environment room_001
+# Run database migrations
+wifi-densepose db migrate
 
-# Show hardware status
-wifi-densepose hardware status
+# Check database status
+wifi-densepose db status
+
+# Backup database
+wifi-densepose db backup
+
+# Restore database
+wifi-densepose db restore
 ```
 
-### Monitoring Commands
-
-#### Real-time Monitoring
+#### Background Tasks
 ```bash
-# Monitor system performance
-wifi-densepose monitor
+# Background task management commands
+wifi-densepose tasks [SUBCOMMAND]
 
-# Monitor pose detection in real-time
-wifi-densepose monitor poses
+# Examples:
+# List running tasks
+wifi-densepose tasks list
 
-# Monitor system logs
-wifi-densepose logs --follow
+# Start background tasks
+wifi-densepose tasks start
 
-# Monitor specific component
-wifi-densepose monitor --component csi_processor
+# Stop background tasks
+wifi-densepose tasks stop
+
+# Check task status
+wifi-densepose tasks status
 ```
 
-#### Analytics and Reports
+### Command Examples
+
+#### Complete CLI Reference
 ```bash
-# Generate analytics report
-wifi-densepose analytics report --period 24h
+# Show help for main command
+wifi-densepose --help
 
-# Show fall detection events
-wifi-densepose analytics falls --since yesterday
+# Show help for specific command
+wifi-densepose start --help
+wifi-densepose config --help
+wifi-densepose db --help
 
-# Export system metrics
-wifi-densepose metrics export --format csv
+# Use global options with commands
+wifi-densepose -v status          # Verbose status check
+wifi-densepose --debug start      # Start with debug logging
+wifi-densepose -c custom.yaml start  # Start with custom config
+```
+
+#### Common Usage Patterns
+```bash
+# Basic server lifecycle
+wifi-densepose start              # Start the server
+wifi-densepose status             # Check if running
+wifi-densepose stop               # Stop the server
+
+# Configuration management
+wifi-densepose config show        # View current config
+wifi-densepose config validate    # Check config validity
+
+# Database operations
+wifi-densepose db init            # Initialize database
+wifi-densepose db migrate         # Run migrations
+wifi-densepose db status          # Check database health
+
+# Task management
+wifi-densepose tasks list         # List background tasks
+wifi-densepose tasks status       # Check task status
+
+# Version and help
+wifi-densepose version            # Show version info
+wifi-densepose --help             # Show help message
 ```
 
 ### CLI Examples
 
 #### Complete Setup Workflow
 ```bash
-# 1. Initialize new environment
-wifi-densepose init --environment healthcare
+# 1. Check version and help
+wifi-densepose version
+wifi-densepose --help
 
-# 2. Configure hardware
-wifi-densepose hardware setup --interface wlan0
+# 2. Initialize configuration
+wifi-densepose config init
 
-# 3. Calibrate environment
-wifi-densepose calibrate --duration 15
+# 3. Initialize database
+wifi-densepose db init
 
-# 4. Start system
+# 4. Start the server
 wifi-densepose start
 
-# 5. Monitor in real-time
-wifi-densepose monitor poses
+# 5. Check status
+wifi-densepose status
 ```
 
 #### Development Workflow
 ```bash
-# Start in development mode with mock data
-wifi-densepose start --dev --mock-hardware
+# Start with debug logging
+wifi-densepose --debug start
 
-# Run tests
-wifi-densepose test
+# Use custom configuration
+wifi-densepose -c dev-config.yaml start
 
-# Check code quality
-wifi-densepose lint
+# Check database status
+wifi-densepose db status
 
-# Generate documentation
-wifi-densepose docs generate
+# Manage background tasks
+wifi-densepose tasks start
+wifi-densepose tasks list
 ```
 
-#### Production Deployment
+#### Production Workflow
 ```bash
-# Deploy to production
-wifi-densepose deploy --environment production
+# Start with production config
+wifi-densepose -c production.yaml start
 
-# Check deployment status
-wifi-densepose deploy status
+# Check system status
+wifi-densepose status
 
-# Scale system
-wifi-densepose scale --replicas 3
+# Manage database
+wifi-densepose db migrate
+wifi-densepose db backup
 
-# Update system
-wifi-densepose update --version 1.2.0
+# Monitor tasks
+wifi-densepose tasks status
 ```
 
 #### Troubleshooting
 ```bash
-# Run system diagnostics
-wifi-densepose diagnose
+# Enable verbose logging
+wifi-densepose -v status
 
-# Check hardware connectivity
-wifi-densepose hardware test --verbose
+# Check configuration
+wifi-densepose config validate
 
-# Validate configuration
-wifi-densepose config validate --strict
+# Check database health
+wifi-densepose db status
 
-# Reset to defaults
-wifi-densepose reset --confirm
+# Restart services
+wifi-densepose stop
+wifi-densepose start
 ```
 
 ## 📚 Documentation

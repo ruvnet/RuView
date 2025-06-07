@@ -1573,6 +1573,42 @@ canvas {
   opacity: 1;
 }
 
+/* Backend status toast */
+.backend-status-toast {
+  position: fixed;
+  top: var(--space-24);
+  right: var(--space-24);
+  padding: var(--space-12) var(--space-20);
+  border-radius: var(--radius-base);
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-100%);
+  opacity: 0;
+  transition: all 0.3s ease;
+  z-index: 1001;
+  font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-sm);
+}
+
+.backend-status-toast.show {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.backend-status-toast.success {
+  background: var(--color-success);
+  color: white;
+}
+
+.backend-status-toast.warning {
+  background: var(--color-warning);
+  color: white;
+}
+
+.backend-status-toast.error {
+  background: var(--color-error);
+  color: white;
+}
+
 /* Tab badge */
 .tab-badge {
   display: inline-block;

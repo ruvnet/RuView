@@ -34,6 +34,12 @@ ui/
 
 ## 🚀 Features
 
+### Smart Backend Detection
+- **Automatic Detection**: Automatically detects if your FastAPI backend is running
+- **Real Backend Priority**: Always uses the real backend when available
+- **Mock Fallback**: Falls back to mock server only when backend is unavailable
+- **Testing Mode**: Can force mock mode for testing and development
+
 ### Real-time Dashboard
 - Live system health monitoring
 - Real-time pose detection statistics
@@ -281,6 +287,14 @@ apiService.addResponseInterceptor(async (response, url) => {
 ## 🚀 Deployment
 
 ### Development
+
+**Option 1: Use the startup script**
+```bash
+cd /workspaces/wifi-densepose/ui
+./start-ui.sh
+```
+
+**Option 2: Manual setup**
 ```bash
 # First, start your FastAPI backend (runs on port 8000)
 wifi-densepose start
@@ -294,8 +308,13 @@ python -m http.server 3000
 npx http-server . -p 3000
 
 # Open the UI at http://localhost:3000
-# The UI will connect to the FastAPI backend at http://localhost:8000
+# The UI will automatically detect and connect to your backend
 ```
+
+### Backend Detection Behavior
+- **Real Backend Available**: UI connects to `http://localhost:8000` and shows ✅ "Connected to real backend"
+- **Backend Unavailable**: UI automatically uses mock server and shows ⚠️ "Mock server active - testing mode"
+- **Force Mock Mode**: Set `API_CONFIG.MOCK_SERVER.ENABLED = true` for testing
 
 ### Production
 1. Configure `API_CONFIG.BASE_URL` for your backend

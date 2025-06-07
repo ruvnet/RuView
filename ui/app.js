@@ -7,6 +7,7 @@ import { LiveDemoTab } from './components/LiveDemoTab.js';
 import { apiService } from './services/api.service.js';
 import { wsService } from './services/websocket.service.js';
 import { healthService } from './services/health.service.js';
+import { backendDetector } from './utils/backend-detector.js';
 
 class WiFiDensePoseApp {
   constructor() {
@@ -51,13 +52,30 @@ class WiFiDensePoseApp {
       return response;
     });
 
-    // Check API availability
-    try {
-      const health = await healthService.checkLiveness();
-      console.log('API is available:', health);
-    } catch (error) {
-      console.error('API is not available:', error);
-      throw new Error('API is not available. Please ensure the backend is running.');
+    // Detect backend availability and initialize accordingly
+    const useMock = await backendDetector.shouldUseMockServer();
+    
+    if (useMock) {
+      console.log('🧪 Initializing with mock server for testing');
+      // Import and start mock server only when needed
+      const { mockServer } = await import('./utils/mock-server.js');
+      mockServer.start();
+      
+      // Show notification to user
+      this.showBackendStatus('Mock server active - testing mode', 'warning');
+    } else {
+      console.log('🔌 Initializing with real backend');
+      
+      // Verify backend is actually working
+      try {
+        const health = await healthService.checkLiveness();
+        console.log('✅ Backend is available and responding:', health);
+        this.showBackendStatus('Connected to real backend', 'success');
+      } catch (error) {
+        console.error('❌ Backend check failed:', error);
+        this.showBackendStatus('Backend connection failed', 'error');
+        // Don't throw - let the app continue and retry later
+      }
     }
   }
 
@@ -193,6 +211,28 @@ class WiFiDensePoseApp {
       console.error('Unhandled promise rejection:', event.reason);
       this.showGlobalError('An unexpected error occurred');
     });
+  }
+
+  // Show backend status notification
+  showBackendStatus(message, type) {
+    // Create status notification if it doesn't exist
+    let statusToast = document.getElementById('backendStatusToast');
+    if (!statusToast) {
+      statusToast = document.createElement('div');
+      statusToast.id = 'backendStatusToast';
+      statusToast.className = 'backend-status-toast';
+      document.body.appendChild(statusToast);
+    }
+
+    statusToast.textContent = message;
+    statusToast.className = `backend-status-toast ${type}`;
+    statusToast.classList.add('show');
+
+    // Auto-hide success messages, keep warnings and errors longer
+    const timeout = type === 'success' ? 3000 : 8000;
+    setTimeout(() => {
+      statusToast.classList.remove('show');
+    }, timeout);
   }
 
   // Show global error message
