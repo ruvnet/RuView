@@ -120,7 +120,7 @@ class ConnectionManager:
             "start_time": datetime.utcnow()
         }
         self._cleanup_task = None
-        self._start_cleanup_task()
+        self._started = False
     
     async def connect(
         self,
@@ -413,6 +413,13 @@ class ConnectionManager:
         if stale_clients:
             logger.info(f"Cleaned up {len(stale_clients)} stale connections")
     
+    async def start(self):
+        """Start the connection manager."""
+        if not self._started:
+            self._start_cleanup_task()
+            self._started = True
+            logger.info("Connection manager started")
+    
     def _start_cleanup_task(self):
         """Start background cleanup task."""
         async def cleanup_loop():
@@ -428,7 +435,11 @@ class ConnectionManager:
                 except Exception as e:
                     logger.error(f"Error in cleanup task: {e}")
         
-        self._cleanup_task = asyncio.create_task(cleanup_loop())
+        try:
+            self._cleanup_task = asyncio.create_task(cleanup_loop())
+        except RuntimeError:
+            # No event loop running, will start later
+            logger.debug("No event loop running, cleanup task will start later")
     
     async def shutdown(self):
         """Shutdown connection manager."""

@@ -14,8 +14,9 @@ from src.commands.start import start_command
 from src.commands.stop import stop_command
 from src.commands.status import status_command
 
-# Setup logging for CLI
-setup_logging()
+# Get default settings and setup logging for CLI
+settings = get_settings()
+setup_logging(settings)
 logger = get_logger(__name__)
 
 
@@ -496,6 +497,11 @@ def version():
     except Exception as e:
         logger.error(f"Failed to get version: {e}")
         sys.exit(1)
+
+
+def create_cli(orchestrator=None):
+    """Create CLI interface for the application."""
+    return cli
 
 
 if __name__ == '__main__':

@@ -349,6 +349,10 @@ class DomainConfig:
         
         return routers
     
+    def get_all_routers(self) -> List[RouterConfig]:
+        """Get all router configurations."""
+        return list(self.routers.values())
+    
     def validate_configuration(self) -> List[str]:
         """Validate the entire configuration."""
         issues = []

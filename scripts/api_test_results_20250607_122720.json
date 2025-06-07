@@ -1,0 +1,1967 @@
+{
+  "total_tests": 24,
+  "passed": 5,
+  "failed": 19,
+  "errors": [
+    "WebSocket /ws/pose - Exception: BaseEventLoop.create_connection() got an unexpected keyword argument 'timeout'",
+    "WebSocket /ws/hardware - Exception: BaseEventLoop.create_connection() got an unexpected keyword argument 'timeout'"
+  ],
+  "test_details": [
+    {
+      "test_name": "GET /health/health",
+      "description": "System health check",
+      "url": "http://localhost:8000/health/health",
+      "method": "GET",
+      "expected_status": 200,
+      "actual_status": 200,
+      "response_time_ms": 1017.05,
+      "response_data": {
+        "status": "unhealthy",
+        "timestamp": "2025-06-07T12:27:19.698473",
+        "uptime_seconds": 0.0,
+        "components": {
+          "hardware": {
+            "name": "Hardware Service",
+            "status": "unhealthy",
+            "message": "Health check failed: 'HardwareService' object has no attribute 'health_check'",
+            "last_check": "2025-06-07T12:27:19.698473",
+            "uptime_seconds": null,
+            "metrics": null
+          },
+          "pose": {
+            "name": "Pose Service",
+            "status": "healthy",
+            "message": "Service is running normally",
+            "last_check": "2025-06-07T12:27:19.698473",
+            "uptime_seconds": 0.0,
+            "metrics": {
+              "total_processed": 5314,
+              "success_rate": 1.0,
+              "average_processing_time_ms": 0.8020579601053834
+            }
+          },
+          "stream": {
+            "name": "Stream Service",
+            "status": "unhealthy",
+            "message": "Health check failed: 'StreamService' object has no attribute 'health_check'",
+            "last_check": "2025-06-07T12:27:19.698473",
+            "uptime_seconds": null,
+            "metrics": null
+          }
+        },
+        "system_metrics": {
+          "cpu": {
+            "percent": 39.4,
+            "count": 2
+          },
+          "memory": {
+            "total_gb": 7.75,
+            "available_gb": 2.98,
+            "used_gb": 4.41,
+            "percent": 61.6
+          },
+          "disk": {
+            "total_gb": 31.33,
+            "free_gb": 7.99,
+            "used_gb": 21.72,
+            "percent": 69.34
+          },
+          "network": {
+            "bytes_sent": 3572468408,
+            "bytes_recv": 36997029117,
+            "packets_sent": 1132219,
+            "packets_recv": 25723413
+          }
+        }
+      },
+      "success": true,
+      "timestamp": "2025-06-07T12:27:20.703081"
+    },
+    {
+      "test_name": "GET /health/ready",
+      "description": "Readiness check",
+      "url": "http://localhost:8000/health/ready",
+      "method": "GET",
+      "expected_status": 200,
+      "actual_status": 200,
+      "response_time_ms": 2.5,
+      "response_data": {
+        "ready": false,
+        "timestamp": "2025-06-07T12:27:20.705155",
+        "checks": {},
+        "message": "Readiness check failed: 'HardwareService' object has no attribute 'is_ready'"
+      },
+      "success": true,
+      "timestamp": "2025-06-07T12:27:20.705747"
+    },
+    {
+      "test_name": "POST /pose/estimate",
+      "description": "Basic pose estimation",
+      "url": "http://localhost:8000/pose/estimate",
+      "method": "POST",
+      "expected_status": 200,
+      "actual_status": 404,
+      "response_time_ms": 0.99,
+      "response_data": {
+        "error": {
+          "code": 404,
+          "message": "Not Found",
+          "type": "http_error",
+          "path": "/pose/estimate"
+        }
+      },
+      "success": false,
+      "timestamp": "2025-06-07T12:27:20.706878"
+    },
+    {
+      "test_name": "POST /pose/estimate",
+      "description": "Pose estimation with parameters",
+      "url": "http://localhost:8000/pose/estimate",
+      "method": "POST",
+      "expected_status": 200,
+      "actual_status": 404,
+      "response_time_ms": 0.89,
+      "response_data": {
+        "error": {
+          "code": 404,
+          "message": "Not Found",
+          "type": "http_error",
+          "path": "/pose/estimate"
+        }
+      },
+      "success": false,
+      "timestamp": "2025-06-07T12:27:20.708132"
+    },
+    {
+      "test_name": "POST /pose/analyze",
+      "description": "Pose analysis",
+      "url": "http://localhost:8000/pose/analyze",
+      "method": "POST",
+      "expected_status": 200,
+      "actual_status": 404,
+      "response_time_ms": 0.91,
+      "response_data": {
+        "error": {
+          "code": 404,
+          "message": "Not Found",
+          "type": "http_error",
+          "path": "/pose/analyze"
+        }
+      },
+      "success": false,
+      "timestamp": "2025-06-07T12:27:20.709165"
+    },
+    {
+      "test_name": "GET /pose/zones/zone_1/occupancy",
+      "description": "Zone occupancy",
+      "url": "http://localhost:8000/pose/zones/zone_1/occupancy",
+      "method": "GET",
+      "expected_status": 200,
+      "actual_status": 404,
+      "response_time_ms": 0.78,
+      "response_data": {
+        "error": {
+          "code": 404,
+          "message": "Not Found",
+          "type": "http_error",
+          "path": "/pose/zones/zone_1/occupancy"
+        }
+      },
+      "success": false,
+      "timestamp": "2025-06-07T12:27:20.710222"
+    },
+    {
+      "test_name": "GET /pose/zones/summary",
+      "description": "All zones summary",
+      "url": "http://localhost:8000/pose/zones/summary",
+      "method": "GET",
+      "expected_status": 200,
+      "actual_status": 404,
+      "response_time_ms": 0.84,
+      "response_data": {
+        "error": {
+          "code": 404,
+          "message": "Not Found",
+          "type": "http_error",
+          "path": "/pose/zones/summary"
+        }
+      },
+      "success": false,
+      "timestamp": "2025-06-07T12:27:20.711403"
+    },
+    {
+      "test_name": "GET /pose/historical",
+      "description": "Historical pose data",
+      "url": "http://localhost:8000/pose/historical",
+      "method": "GET",
+      "expected_status": 200,
+      "actual_status": 404,
+      "response_time_ms": 0.83,
+      "response_data": {
+        "error": {
+          "code": 404,
+          "message": "Not Found",
+          "type": "http_error",
+          "path": "/pose/historical"
+        }
+      },
+      "success": false,
+      "timestamp": "2025-06-07T12:27:20.712646"
+    },
+    {
+      "test_name": "GET /pose/activities/recent",
+      "description": "Recent activities",
+      "url": "http://localhost:8000/pose/activities/recent",
+      "method": "GET",
+      "expected_status": 200,
+      "actual_status": 404,
+      "response_time_ms": 0.9,
+      "response_data": {
+        "error": {
+          "code": 404,
+          "message": "Not Found",
+          "type": "http_error",
+          "path": "/pose/activities/recent"
+        }
+      },
+      "success": false,
+      "timestamp": "2025-06-07T12:27:20.713667"
+    },
+    {
+      "test_name": "GET /calibration/status",
+      "description": "Calibration status",
+      "url": "http://localhost:8000/calibration/status",
+      "method": "GET",
+      "expected_status": 200,
+      "actual_status": 404,
+      "response_time_ms": 0.76,
+      "response_data": {
+        "error": {
+          "code": 404,
+          "message": "Not Found",
+          "type": "http_error",
+          "path": "/calibration/status"
+        }
+      },
+      "success": false,
+      "timestamp": "2025-06-07T12:27:20.714763"
+    },
+    {
+      "test_name": "POST /calibration/start",
+      "description": "Start calibration",
+      "url": "http://localhost:8000/calibration/start",
+      "method": "POST",
+      "expected_status": 200,
+      "actual_status": 404,
+      "response_time_ms": 0.87,
+      "response_data": {
+        "error": {
+          "code": 404,
+          "message": "Not Found",
+          "type": "http_error",
+          "path": "/calibration/start"
+        }
+      },
+      "success": false,
+      "timestamp": "2025-06-07T12:27:20.715985"
+    },
+    {
+      "test_name": "GET /statistics",
+      "description": "System statistics",
+      "url": "http://localhost:8000/statistics",
+      "method": "GET",
+      "expected_status": 200,
+      "actual_status": 404,
+      "response_time_ms": 0.93,
+      "response_data": {
+        "error": {
+          "code": 404,
+          "message": "Not Found",
+          "type": "http_error",
+          "path": "/statistics"
+        }
+      },
+      "success": false,
+      "timestamp": "2025-06-07T12:27:20.717073"
+    },
+    {
+      "test_name": "GET /hardware/status",
+      "description": "Hardware status",
+      "url": "http://localhost:8000/hardware/status",
+      "method": "GET",
+      "expected_status": 200,
+      "actual_status": 404,
+      "response_time_ms": 0.79,
+      "response_data": {
+        "error": {
+          "code": 404,
+          "message": "Not Found",
+          "type": "http_error",
+          "path": "/hardware/status"
+        }
+      },
+      "success": false,
+      "timestamp": "2025-06-07T12:27:20.718166"
+    },
+    {
+      "test_name": "GET /hardware/routers",
+      "description": "Router information",
+      "url": "http://localhost:8000/hardware/routers",
+      "method": "GET",
+      "expected_status": 200,
+      "actual_status": 404,
+      "response_time_ms": 0.84,
+      "response_data": {
+        "error": {
+          "code": 404,
+          "message": "Not Found",
+          "type": "http_error",
+          "path": "/hardware/routers"
+        }
+      },
+      "success": false,
+      "timestamp": "2025-06-07T12:27:20.719352"
+    },
+    {
+      "test_name": "GET /hardware/routers/main_router",
+      "description": "Specific router info",
+      "url": "http://localhost:8000/hardware/routers/main_router",
+      "method": "GET",
+      "expected_status": 200,
+      "actual_status": 404,
+      "response_time_ms": 0.79,
+      "response_data": {
+        "error": {
+          "code": 404,
+          "message": "Not Found",
+          "type": "http_error",
+          "path": "/hardware/routers/main_router"
+        }
+      },
+      "success": false,
+      "timestamp": "2025-06-07T12:27:20.720486"
+    },
+    {
+      "test_name": "GET /stream/status",
+      "description": "Stream status",
+      "url": "http://localhost:8000/stream/status",
+      "method": "GET",
+      "expected_status": 200,
+      "actual_status": 404,
+      "response_time_ms": 0.87,
+      "response_data": {
+        "error": {
+          "code": 404,
+          "message": "Not Found",
+          "type": "http_error",
+          "path": "/stream/status"
+        }
+      },
+      "success": false,
+      "timestamp": "2025-06-07T12:27:20.721535"
+    },
+    {
+      "test_name": "POST /stream/start",
+      "description": "Start streaming",
+      "url": "http://localhost:8000/stream/start",
+      "method": "POST",
+      "expected_status": 200,
+      "actual_status": 404,
+      "response_time_ms": 0.78,
+      "response_data": {
+        "error": {
+          "code": 404,
+          "message": "Not Found",
+          "type": "http_error",
+          "path": "/stream/start"
+        }
+      },
+      "success": false,
+      "timestamp": "2025-06-07T12:27:20.722650"
+    },
+    {
+      "test_name": "POST /stream/stop",
+      "description": "Stop streaming",
+      "url": "http://localhost:8000/stream/stop",
+      "method": "POST",
+      "expected_status": 200,
+      "actual_status": 404,
+      "response_time_ms": 0.98,
+      "response_data": {
+        "error": {
+          "code": 404,
+          "message": "Not Found",
+          "type": "http_error",
+          "path": "/stream/stop"
+        }
+      },
+      "success": false,
+      "timestamp": "2025-06-07T12:27:20.723750"
+    },
+    {
+      "test_name": "WebSocket /ws/pose",
+      "description": "Pose data WebSocket",
+      "url": "ws://localhost:8000/ws/pose",
+      "method": "WebSocket",
+      "response_time_ms": null,
+      "response_data": null,
+      "success": false,
+      "error": "BaseEventLoop.create_connection() got an unexpected keyword argument 'timeout'",
+      "traceback": "Traceback (most recent call last):\n  File \"/workspaces/wifi-densepose/scripts/test_api_endpoints.py\", line 164, in test_websocket_endpoint\n    async with websockets.connect(ws_url, timeout=5) as websocket:\n  File \"/usr/local/python/3.12.1/lib/python3.12/site-packages/websockets/asyncio/client.py\", line 587, in __aenter__\n    return await self\n           ^^^^^^^^^^\n  File \"/usr/local/python/3.12.1/lib/python3.12/site-packages/websockets/asyncio/client.py\", line 541, in __await_impl__\n    self.connection = await self.create_connection()\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/python/3.12.1/lib/python3.12/site-packages/websockets/asyncio/client.py\", line 467, in create_connection\n    _, connection = await loop.create_connection(factory, **kwargs)\n                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: BaseEventLoop.create_connection() got an unexpected keyword argument 'timeout'\n",
+      "timestamp": "2025-06-07T12:27:20.747316"
+    },
+    {
+      "test_name": "WebSocket /ws/hardware",
+      "description": "Hardware status WebSocket",
+      "url": "ws://localhost:8000/ws/hardware",
+      "method": "WebSocket",
+      "response_time_ms": null,
+      "response_data": null,
+      "success": false,
+      "error": "BaseEventLoop.create_connection() got an unexpected keyword argument 'timeout'",
+      "traceback": "Traceback (most recent call last):\n  File \"/workspaces/wifi-densepose/scripts/test_api_endpoints.py\", line 164, in test_websocket_endpoint\n    async with websockets.connect(ws_url, timeout=5) as websocket:\n  File \"/usr/local/python/3.12.1/lib/python3.12/site-packages/websockets/asyncio/client.py\", line 587, in __aenter__\n    return await self\n           ^^^^^^^^^^\n  File \"/usr/local/python/3.12.1/lib/python3.12/site-packages/websockets/asyncio/client.py\", line 541, in __await_impl__\n    self.connection = await self.create_connection()\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/python/3.12.1/lib/python3.12/site-packages/websockets/asyncio/client.py\", line 467, in create_connection\n    _, connection = await loop.create_connection(factory, **kwargs)\n                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: BaseEventLoop.create_connection() got an unexpected keyword argument 'timeout'\n",
+      "timestamp": "2025-06-07T12:27:20.748123"
+    },
+    {
+      "test_name": "GET /docs",
+      "description": "API documentation",
+      "url": "http://localhost:8000/docs",
+      "method": "GET",
+      "expected_status": 200,
+      "actual_status": 200,
+      "response_time_ms": 1.71,
+      "response_data": {
+        "raw_response": "\n    <!DOCTYPE html>\n    <html>\n    <head>\n    <link type=\"text/css\" rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css\">\n    <link rel=\"shortcut icon\" href=\"https://fastapi.tiangolo.com/img/favicon.png\">\n    <title>WiFi-DensePose API - Swagger UI</title>\n    </head>\n    <body>\n    <div id=\"swagger-ui\">\n    </div>\n    <script src=\"https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js\"></script>\n    <!-- `SwaggerUIBundle` is now available on the page -->\n    <script>\n    const ui = SwaggerUIBundle({\n        url: '/openapi.json',\n    \"dom_id\": \"#swagger-ui\",\n\"layout\": \"BaseLayout\",\n\"deepLinking\": true,\n\"showExtensions\": true,\n\"showCommonExtensions\": true,\noauth2RedirectUrl: window.location.origin + '/docs/oauth2-redirect',\n    presets: [\n        SwaggerUIBundle.presets.apis,\n        SwaggerUIBundle.SwaggerUIStandalonePreset\n        ],\n    })\n    </script>\n    </body>\n    </html>\n    "
+      },
+      "success": true,
+      "timestamp": "2025-06-07T12:27:20.749960"
+    },
+    {
+      "test_name": "GET /openapi.json",
+      "description": "OpenAPI schema",
+      "url": "http://localhost:8000/openapi.json",
+      "method": "GET",
+      "expected_status": 200,
+      "actual_status": 200,
+      "response_time_ms": 1.18,
+      "response_data": {
+        "openapi": "3.1.0",
+        "info": {
+          "title": "WiFi-DensePose API",
+          "description": "WiFi-based human pose estimation and activity recognition API",
+          "version": "1.0.0"
+        },
+        "paths": {
+          "/health/health": {
+            "get": {
+              "tags": [
+                "Health"
+              ],
+              "summary": "Health Check",
+              "description": "Comprehensive system health check.",
+              "operationId": "health_check_health_health_get",
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/SystemHealth"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/health/ready": {
+            "get": {
+              "tags": [
+                "Health"
+              ],
+              "summary": "Readiness Check",
+              "description": "Check if system is ready to serve requests.",
+              "operationId": "readiness_check_health_ready_get",
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/ReadinessCheck"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/health/live": {
+            "get": {
+              "tags": [
+                "Health"
+              ],
+              "summary": "Liveness Check",
+              "description": "Simple liveness check for load balancers.",
+              "operationId": "liveness_check_health_live_get",
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/health/metrics": {
+            "get": {
+              "tags": [
+                "Health"
+              ],
+              "summary": "Get System Metrics",
+              "description": "Get detailed system metrics.",
+              "operationId": "get_system_metrics_health_metrics_get",
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                }
+              },
+              "security": [
+                {
+                  "HTTPBearer": []
+                }
+              ]
+            }
+          },
+          "/health/version": {
+            "get": {
+              "tags": [
+                "Health"
+              ],
+              "summary": "Get Version Info",
+              "description": "Get application version information.",
+              "operationId": "get_version_info_health_version_get",
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/api/v1/pose/current": {
+            "get": {
+              "tags": [
+                "Pose Estimation"
+              ],
+              "summary": "Get Current Pose Estimation",
+              "description": "Get current pose estimation from WiFi signals.",
+              "operationId": "get_current_pose_estimation_api_v1_pose_current_get",
+              "security": [
+                {
+                  "HTTPBearer": []
+                }
+              ],
+              "parameters": [
+                {
+                  "name": "confidence_threshold",
+                  "in": "query",
+                  "required": false,
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "maximum": 1.0,
+                        "minimum": 0.0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Confidence Threshold"
+                  }
+                },
+                {
+                  "name": "max_persons",
+                  "in": "query",
+                  "required": false,
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "maximum": 50,
+                        "minimum": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Max Persons"
+                  }
+                },
+                {
+                  "name": "include_keypoints",
+                  "in": "query",
+                  "required": false,
+                  "schema": {
+                    "type": "boolean",
+                    "default": true,
+                    "title": "Include Keypoints"
+                  }
+                },
+                {
+                  "name": "include_segmentation",
+                  "in": "query",
+                  "required": false,
+                  "schema": {
+                    "type": "boolean",
+                    "default": false,
+                    "title": "Include Segmentation"
+                  }
+                }
+              ],
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "anyOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Zone Ids"
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/PoseEstimationResponse"
+                      }
+                    }
+                  }
+                },
+                "422": {
+                  "description": "Validation Error",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/HTTPValidationError"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/api/v1/pose/analyze": {
+            "post": {
+              "tags": [
+                "Pose Estimation"
+              ],
+              "summary": "Analyze Pose Data",
+              "description": "Trigger pose analysis with custom parameters.",
+              "operationId": "analyze_pose_data_api_v1_pose_analyze_post",
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/PoseEstimationRequest"
+                    }
+                  }
+                },
+                "required": true
+              },
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/PoseEstimationResponse"
+                      }
+                    }
+                  }
+                },
+                "422": {
+                  "description": "Validation Error",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/HTTPValidationError"
+                      }
+                    }
+                  }
+                }
+              },
+              "security": [
+                {
+                  "HTTPBearer": []
+                }
+              ]
+            }
+          },
+          "/api/v1/pose/zones/{zone_id}/occupancy": {
+            "get": {
+              "tags": [
+                "Pose Estimation"
+              ],
+              "summary": "Get Zone Occupancy",
+              "description": "Get current occupancy for a specific zone.",
+              "operationId": "get_zone_occupancy_api_v1_pose_zones__zone_id__occupancy_get",
+              "security": [
+                {
+                  "HTTPBearer": []
+                }
+              ],
+              "parameters": [
+                {
+                  "name": "zone_id",
+                  "in": "path",
+                  "required": true,
+                  "schema": {
+                    "type": "string",
+                    "title": "Zone Id"
+                  }
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                },
+                "422": {
+                  "description": "Validation Error",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/HTTPValidationError"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/api/v1/pose/zones/summary": {
+            "get": {
+              "tags": [
+                "Pose Estimation"
+              ],
+              "summary": "Get Zones Summary",
+              "description": "Get occupancy summary for all zones.",
+              "operationId": "get_zones_summary_api_v1_pose_zones_summary_get",
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                }
+              },
+              "security": [
+                {
+                  "HTTPBearer": []
+                }
+              ]
+            }
+          },
+          "/api/v1/pose/historical": {
+            "post": {
+              "tags": [
+                "Pose Estimation"
+              ],
+              "summary": "Get Historical Data",
+              "description": "Get historical pose estimation data.",
+              "operationId": "get_historical_data_api_v1_pose_historical_post",
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HistoricalDataRequest"
+                    }
+                  }
+                },
+                "required": true
+              },
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                },
+                "422": {
+                  "description": "Validation Error",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/HTTPValidationError"
+                      }
+                    }
+                  }
+                }
+              },
+              "security": [
+                {
+                  "HTTPBearer": []
+                }
+              ]
+            }
+          },
+          "/api/v1/pose/activities": {
+            "get": {
+              "tags": [
+                "Pose Estimation"
+              ],
+              "summary": "Get Detected Activities",
+              "description": "Get recently detected activities.",
+              "operationId": "get_detected_activities_api_v1_pose_activities_get",
+              "security": [
+                {
+                  "HTTPBearer": []
+                }
+              ],
+              "parameters": [
+                {
+                  "name": "zone_id",
+                  "in": "query",
+                  "required": false,
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Filter by zone ID",
+                    "title": "Zone Id"
+                  },
+                  "description": "Filter by zone ID"
+                },
+                {
+                  "name": "limit",
+                  "in": "query",
+                  "required": false,
+                  "schema": {
+                    "type": "integer",
+                    "maximum": 100,
+                    "minimum": 1,
+                    "description": "Maximum number of activities",
+                    "default": 10,
+                    "title": "Limit"
+                  },
+                  "description": "Maximum number of activities"
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                },
+                "422": {
+                  "description": "Validation Error",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/HTTPValidationError"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/api/v1/pose/calibrate": {
+            "post": {
+              "tags": [
+                "Pose Estimation"
+              ],
+              "summary": "Calibrate Pose System",
+              "description": "Calibrate the pose estimation system.",
+              "operationId": "calibrate_pose_system_api_v1_pose_calibrate_post",
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                }
+              },
+              "security": [
+                {
+                  "HTTPBearer": []
+                }
+              ]
+            }
+          },
+          "/api/v1/pose/calibration/status": {
+            "get": {
+              "tags": [
+                "Pose Estimation"
+              ],
+              "summary": "Get Calibration Status",
+              "description": "Get current calibration status.",
+              "operationId": "get_calibration_status_api_v1_pose_calibration_status_get",
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                }
+              },
+              "security": [
+                {
+                  "HTTPBearer": []
+                }
+              ]
+            }
+          },
+          "/api/v1/pose/stats": {
+            "get": {
+              "tags": [
+                "Pose Estimation"
+              ],
+              "summary": "Get Pose Statistics",
+              "description": "Get pose estimation statistics.",
+              "operationId": "get_pose_statistics_api_v1_pose_stats_get",
+              "security": [
+                {
+                  "HTTPBearer": []
+                }
+              ],
+              "parameters": [
+                {
+                  "name": "hours",
+                  "in": "query",
+                  "required": false,
+                  "schema": {
+                    "type": "integer",
+                    "maximum": 168,
+                    "minimum": 1,
+                    "description": "Hours of data to analyze",
+                    "default": 24,
+                    "title": "Hours"
+                  },
+                  "description": "Hours of data to analyze"
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                },
+                "422": {
+                  "description": "Validation Error",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/HTTPValidationError"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/api/v1/stream/status": {
+            "get": {
+              "tags": [
+                "Streaming"
+              ],
+              "summary": "Get Stream Status",
+              "description": "Get current streaming status.",
+              "operationId": "get_stream_status_api_v1_stream_status_get",
+              "parameters": [
+                {
+                  "name": "websocket_token",
+                  "in": "query",
+                  "required": false,
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Websocket Token"
+                  }
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/StreamStatus"
+                      }
+                    }
+                  }
+                },
+                "422": {
+                  "description": "Validation Error",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/HTTPValidationError"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/api/v1/stream/start": {
+            "post": {
+              "tags": [
+                "Streaming"
+              ],
+              "summary": "Start Streaming",
+              "description": "Start the streaming service.",
+              "operationId": "start_streaming_api_v1_stream_start_post",
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                }
+              },
+              "security": [
+                {
+                  "HTTPBearer": []
+                }
+              ]
+            }
+          },
+          "/api/v1/stream/stop": {
+            "post": {
+              "tags": [
+                "Streaming"
+              ],
+              "summary": "Stop Streaming",
+              "description": "Stop the streaming service.",
+              "operationId": "stop_streaming_api_v1_stream_stop_post",
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                }
+              },
+              "security": [
+                {
+                  "HTTPBearer": []
+                }
+              ]
+            }
+          },
+          "/api/v1/stream/clients": {
+            "get": {
+              "tags": [
+                "Streaming"
+              ],
+              "summary": "Get Connected Clients",
+              "description": "Get list of connected WebSocket clients.",
+              "operationId": "get_connected_clients_api_v1_stream_clients_get",
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                }
+              },
+              "security": [
+                {
+                  "HTTPBearer": []
+                }
+              ]
+            }
+          },
+          "/api/v1/stream/clients/{client_id}": {
+            "delete": {
+              "tags": [
+                "Streaming"
+              ],
+              "summary": "Disconnect Client",
+              "description": "Disconnect a specific WebSocket client.",
+              "operationId": "disconnect_client_api_v1_stream_clients__client_id__delete",
+              "security": [
+                {
+                  "HTTPBearer": []
+                }
+              ],
+              "parameters": [
+                {
+                  "name": "client_id",
+                  "in": "path",
+                  "required": true,
+                  "schema": {
+                    "type": "string",
+                    "title": "Client Id"
+                  }
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                },
+                "422": {
+                  "description": "Validation Error",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/HTTPValidationError"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/api/v1/stream/broadcast": {
+            "post": {
+              "tags": [
+                "Streaming"
+              ],
+              "summary": "Broadcast Message",
+              "description": "Broadcast a message to connected WebSocket clients.",
+              "operationId": "broadcast_message_api_v1_stream_broadcast_post",
+              "security": [
+                {
+                  "HTTPBearer": []
+                }
+              ],
+              "parameters": [
+                {
+                  "name": "stream_type",
+                  "in": "query",
+                  "required": false,
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Target stream type",
+                    "title": "Stream Type"
+                  },
+                  "description": "Target stream type"
+                },
+                {
+                  "name": "zone_ids",
+                  "in": "query",
+                  "required": false,
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Target zone IDs",
+                    "title": "Zone Ids"
+                  },
+                  "description": "Target zone IDs"
+                }
+              ],
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "title": "Message"
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                },
+                "422": {
+                  "description": "Validation Error",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/HTTPValidationError"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/api/v1/stream/metrics": {
+            "get": {
+              "tags": [
+                "Streaming"
+              ],
+              "summary": "Get Streaming Metrics",
+              "description": "Get streaming performance metrics.",
+              "operationId": "get_streaming_metrics_api_v1_stream_metrics_get",
+              "parameters": [
+                {
+                  "name": "websocket_token",
+                  "in": "query",
+                  "required": false,
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Websocket Token"
+                  }
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                },
+                "422": {
+                  "description": "Validation Error",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "#/components/schemas/HTTPValidationError"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/": {
+            "get": {
+              "summary": "Root",
+              "description": "Root endpoint with API information.",
+              "operationId": "root__get",
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/api/v1/info": {
+            "get": {
+              "summary": "Api Info",
+              "description": "Get detailed API information.",
+              "operationId": "api_info_api_v1_info_get",
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/api/v1/status": {
+            "get": {
+              "summary": "Api Status",
+              "description": "Get current API status.",
+              "operationId": "api_status_api_v1_status_get",
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/api/v1/metrics": {
+            "get": {
+              "summary": "Api Metrics",
+              "description": "Get API metrics.",
+              "operationId": "api_metrics_api_v1_metrics_get",
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/api/v1/dev/config": {
+            "get": {
+              "summary": "Dev Config",
+              "description": "Get current configuration (development only).",
+              "operationId": "dev_config_api_v1_dev_config_get",
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "/api/v1/dev/reset": {
+            "post": {
+              "summary": "Dev Reset",
+              "description": "Reset services (development only).",
+              "operationId": "dev_reset_api_v1_dev_reset_post",
+              "responses": {
+                "200": {
+                  "description": "Successful Response",
+                  "content": {
+                    "application/json": {
+                      "schema": {}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "components": {
+          "schemas": {
+            "ComponentHealth": {
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "title": "Name",
+                  "description": "Component name"
+                },
+                "status": {
+                  "type": "string",
+                  "title": "Status",
+                  "description": "Health status (healthy, degraded, unhealthy)"
+                },
+                "message": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Message",
+                  "description": "Status message"
+                },
+                "last_check": {
+                  "type": "string",
+                  "format": "date-time",
+                  "title": "Last Check",
+                  "description": "Last health check timestamp"
+                },
+                "uptime_seconds": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Uptime Seconds",
+                  "description": "Component uptime"
+                },
+                "metrics": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Metrics",
+                  "description": "Component metrics"
+                }
+              },
+              "type": "object",
+              "required": [
+                "name",
+                "status",
+                "last_check"
+              ],
+              "title": "ComponentHealth",
+              "description": "Health status for a system component."
+            },
+            "HTTPValidationError": {
+              "properties": {
+                "detail": {
+                  "items": {
+                    "$ref": "#/components/schemas/ValidationError"
+                  },
+                  "type": "array",
+                  "title": "Detail"
+                }
+              },
+              "type": "object",
+              "title": "HTTPValidationError"
+            },
+            "HistoricalDataRequest": {
+              "properties": {
+                "start_time": {
+                  "type": "string",
+                  "format": "date-time",
+                  "title": "Start Time",
+                  "description": "Start time for data query"
+                },
+                "end_time": {
+                  "type": "string",
+                  "format": "date-time",
+                  "title": "End Time",
+                  "description": "End time for data query"
+                },
+                "zone_ids": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Zone Ids",
+                  "description": "Filter by specific zones"
+                },
+                "aggregation_interval": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "maximum": 3600.0,
+                      "minimum": 60.0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Aggregation Interval",
+                  "description": "Aggregation interval in seconds",
+                  "default": 300
+                },
+                "include_raw_data": {
+                  "type": "boolean",
+                  "title": "Include Raw Data",
+                  "description": "Include raw detection data",
+                  "default": false
+                }
+              },
+              "type": "object",
+              "required": [
+                "start_time",
+                "end_time"
+              ],
+              "title": "HistoricalDataRequest",
+              "description": "Request model for historical pose data."
+            },
+            "PersonPose": {
+              "properties": {
+                "person_id": {
+                  "type": "string",
+                  "title": "Person Id",
+                  "description": "Unique person identifier"
+                },
+                "confidence": {
+                  "type": "number",
+                  "title": "Confidence",
+                  "description": "Detection confidence score"
+                },
+                "bounding_box": {
+                  "additionalProperties": {
+                    "type": "number"
+                  },
+                  "type": "object",
+                  "title": "Bounding Box",
+                  "description": "Person bounding box"
+                },
+                "keypoints": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "additionalProperties": true,
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Keypoints",
+                  "description": "Body keypoints with coordinates and confidence"
+                },
+                "segmentation": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Segmentation",
+                  "description": "DensePose segmentation data"
+                },
+                "zone_id": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Zone Id",
+                  "description": "Zone where person is detected"
+                },
+                "activity": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Activity",
+                  "description": "Detected activity"
+                },
+                "timestamp": {
+                  "type": "string",
+                  "format": "date-time",
+                  "title": "Timestamp",
+                  "description": "Detection timestamp"
+                }
+              },
+              "type": "object",
+              "required": [
+                "person_id",
+                "confidence",
+                "bounding_box",
+                "timestamp"
+              ],
+              "title": "PersonPose",
+              "description": "Person pose data model."
+            },
+            "PoseEstimationRequest": {
+              "properties": {
+                "zone_ids": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Zone Ids",
+                  "description": "Specific zones to analyze (all zones if not specified)"
+                },
+                "confidence_threshold": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "maximum": 1.0,
+                      "minimum": 0.0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Confidence Threshold",
+                  "description": "Minimum confidence threshold for detections"
+                },
+                "max_persons": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "maximum": 50.0,
+                      "minimum": 1.0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Max Persons",
+                  "description": "Maximum number of persons to detect"
+                },
+                "include_keypoints": {
+                  "type": "boolean",
+                  "title": "Include Keypoints",
+                  "description": "Include detailed keypoint data",
+                  "default": true
+                },
+                "include_segmentation": {
+                  "type": "boolean",
+                  "title": "Include Segmentation",
+                  "description": "Include DensePose segmentation masks",
+                  "default": false
+                }
+              },
+              "type": "object",
+              "title": "PoseEstimationRequest",
+              "description": "Request model for pose estimation."
+            },
+            "PoseEstimationResponse": {
+              "properties": {
+                "timestamp": {
+                  "type": "string",
+                  "format": "date-time",
+                  "title": "Timestamp",
+                  "description": "Analysis timestamp"
+                },
+                "frame_id": {
+                  "type": "string",
+                  "title": "Frame Id",
+                  "description": "Unique frame identifier"
+                },
+                "persons": {
+                  "items": {
+                    "$ref": "#/components/schemas/PersonPose"
+                  },
+                  "type": "array",
+                  "title": "Persons",
+                  "description": "Detected persons"
+                },
+                "zone_summary": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "type": "object",
+                  "title": "Zone Summary",
+                  "description": "Person count per zone"
+                },
+                "processing_time_ms": {
+                  "type": "number",
+                  "title": "Processing Time Ms",
+                  "description": "Processing time in milliseconds"
+                },
+                "metadata": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Metadata",
+                  "description": "Additional metadata"
+                }
+              },
+              "type": "object",
+              "required": [
+                "timestamp",
+                "frame_id",
+                "persons",
+                "zone_summary",
+                "processing_time_ms"
+              ],
+              "title": "PoseEstimationResponse",
+              "description": "Response model for pose estimation."
+            },
+            "ReadinessCheck": {
+              "properties": {
+                "ready": {
+                  "type": "boolean",
+                  "title": "Ready",
+                  "description": "Whether system is ready to serve requests"
+                },
+                "timestamp": {
+                  "type": "string",
+                  "format": "date-time",
+                  "title": "Timestamp",
+                  "description": "Readiness check timestamp"
+                },
+                "checks": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "type": "object",
+                  "title": "Checks",
+                  "description": "Individual readiness checks"
+                },
+                "message": {
+                  "type": "string",
+                  "title": "Message",
+                  "description": "Readiness status message"
+                }
+              },
+              "type": "object",
+              "required": [
+                "ready",
+                "timestamp",
+                "checks",
+                "message"
+              ],
+              "title": "ReadinessCheck",
+              "description": "System readiness check result."
+            },
+            "StreamStatus": {
+              "properties": {
+                "is_active": {
+                  "type": "boolean",
+                  "title": "Is Active",
+                  "description": "Whether streaming is active"
+                },
+                "connected_clients": {
+                  "type": "integer",
+                  "title": "Connected Clients",
+                  "description": "Number of connected clients"
+                },
+                "streams": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Streams",
+                  "description": "Active streams"
+                },
+                "uptime_seconds": {
+                  "type": "number",
+                  "title": "Uptime Seconds",
+                  "description": "Stream uptime in seconds"
+                }
+              },
+              "type": "object",
+              "required": [
+                "is_active",
+                "connected_clients",
+                "streams",
+                "uptime_seconds"
+              ],
+              "title": "StreamStatus",
+              "description": "Stream status model."
+            },
+            "SystemHealth": {
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "title": "Status",
+                  "description": "Overall system status"
+                },
+                "timestamp": {
+                  "type": "string",
+                  "format": "date-time",
+                  "title": "Timestamp",
+                  "description": "Health check timestamp"
+                },
+                "uptime_seconds": {
+                  "type": "number",
+                  "title": "Uptime Seconds",
+                  "description": "System uptime"
+                },
+                "components": {
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/ComponentHealth"
+                  },
+                  "type": "object",
+                  "title": "Components",
+                  "description": "Component health status"
+                },
+                "system_metrics": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "System Metrics",
+                  "description": "System-level metrics"
+                }
+              },
+              "type": "object",
+              "required": [
+                "status",
+                "timestamp",
+                "uptime_seconds",
+                "components",
+                "system_metrics"
+              ],
+              "title": "SystemHealth",
+              "description": "Overall system health status."
+            },
+            "ValidationError": {
+              "properties": {
+                "loc": {
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "integer"
+                      }
+                    ]
+                  },
+                  "type": "array",
+                  "title": "Location"
+                },
+                "msg": {
+                  "type": "string",
+                  "title": "Message"
+                },
+                "type": {
+                  "type": "string",
+                  "title": "Error Type"
+                }
+              },
+              "type": "object",
+              "required": [
+                "loc",
+                "msg",
+                "type"
+              ],
+              "title": "ValidationError"
+            }
+          },
+          "securitySchemes": {
+            "HTTPBearer": {
+              "type": "http",
+              "scheme": "bearer"
+            }
+          }
+        }
+      },
+      "success": true,
+      "timestamp": "2025-06-07T12:27:20.751744"
+    },
+    {
+      "test_name": "GET /nonexistent",
+      "description": "Non-existent endpoint",
+      "url": "http://localhost:8000/nonexistent",
+      "method": "GET",
+      "expected_status": 404,
+      "actual_status": 404,
+      "response_time_ms": 0.75,
+      "response_data": {
+        "error": {
+          "code": 404,
+          "message": "Not Found",
+          "type": "http_error",
+          "path": "/nonexistent"
+        }
+      },
+      "success": true,
+      "timestamp": "2025-06-07T12:27:20.752801"
+    },
+    {
+      "test_name": "POST /pose/estimate",
+      "description": "Invalid request data",
+      "url": "http://localhost:8000/pose/estimate",
+      "method": "POST",
+      "expected_status": 422,
+      "actual_status": 404,
+      "response_time_ms": 0.89,
+      "response_data": {
+        "error": {
+          "code": 404,
+          "message": "Not Found",
+          "type": "http_error",
+          "path": "/pose/estimate"
+        }
+      },
+      "success": false,
+      "timestamp": "2025-06-07T12:27:20.753929"
+    }
+  ]
+}

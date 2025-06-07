@@ -7,18 +7,11 @@ import psutil
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from src.api.dependencies import (
-    get_hardware_service,
-    get_pose_service,
-    get_stream_service,
-    get_current_user
-)
-from src.services.hardware_service import HardwareService
-from src.services.pose_service import PoseService
-from src.services.stream_service import StreamService
+from src.api.dependencies import get_current_user
+from src.services.orchestrator import ServiceOrchestrator
 from src.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -58,20 +51,19 @@ class ReadinessCheck(BaseModel):
 
 # Health check endpoints
 @router.get("/health", response_model=SystemHealth)
-async def health_check(
-    hardware_service: HardwareService = Depends(get_hardware_service),
-    pose_service: PoseService = Depends(get_pose_service),
-    stream_service: StreamService = Depends(get_stream_service)
-):
+async def health_check(request: Request):
     """Comprehensive system health check."""
     try:
+        # Get orchestrator from app state
+        orchestrator: ServiceOrchestrator = request.app.state.orchestrator
+        
         timestamp = datetime.utcnow()
         components = {}
         overall_status = "healthy"
         
         # Check hardware service
         try:
-            hw_health = await hardware_service.health_check()
+            hw_health = await orchestrator.hardware_service.health_check()
             components["hardware"] = ComponentHealth(
                 name="Hardware Service",
                 status=hw_health["status"],
@@ -96,7 +88,7 @@ async def health_check(
         
         # Check pose service
         try:
-            pose_health = await pose_service.health_check()
+            pose_health = await orchestrator.pose_service.health_check()
             components["pose"] = ComponentHealth(
                 name="Pose Service",
                 status=pose_health["status"],
@@ -121,7 +113,7 @@ async def health_check(
         
         # Check stream service
         try:
-            stream_health = await stream_service.health_check()
+            stream_health = await orchestrator.stream_service.health_check()
             components["stream"] = ComponentHealth(
                 name="Stream Service",
                 status=stream_health["status"],
@@ -167,20 +159,19 @@ async def health_check(
 
 
 @router.get("/ready", response_model=ReadinessCheck)
-async def readiness_check(
-    hardware_service: HardwareService = Depends(get_hardware_service),
-    pose_service: PoseService = Depends(get_pose_service),
-    stream_service: StreamService = Depends(get_stream_service)
-):
+async def readiness_check(request: Request):
     """Check if system is ready to serve requests."""
     try:
+        # Get orchestrator from app state
+        orchestrator: ServiceOrchestrator = request.app.state.orchestrator
+        
         timestamp = datetime.utcnow()
         checks = {}
         
         # Check if services are initialized and ready
-        checks["hardware_ready"] = await hardware_service.is_ready()
-        checks["pose_ready"] = await pose_service.is_ready()
-        checks["stream_ready"] = await stream_service.is_ready()
+        checks["hardware_ready"] = await orchestrator.hardware_service.is_ready()
+        checks["pose_ready"] = await orchestrator.pose_service.is_ready()
+        checks["stream_ready"] = await orchestrator.stream_service.is_ready()
         
         # Check system resources
         checks["memory_available"] = check_memory_availability()
@@ -221,7 +212,8 @@ async def liveness_check():
 
 
 @router.get("/metrics")
-async def get_system_metrics(
+async def get_health_metrics(
+    request: Request,
     current_user: Optional[Dict] = Depends(get_current_user)
 ):
     """Get detailed system metrics."""

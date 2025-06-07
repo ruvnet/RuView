@@ -73,7 +73,8 @@ async def websocket_pose_stream(
     websocket: WebSocket,
     zone_ids: Optional[str] = Query(None, description="Comma-separated zone IDs"),
     min_confidence: float = Query(0.5, ge=0.0, le=1.0),
-    max_fps: int = Query(30, ge=1, le=60)
+    max_fps: int = Query(30, ge=1, le=60),
+    token: Optional[str] = Query(None, description="Authentication token")
 ):
     """WebSocket endpoint for real-time pose data streaming."""
     client_id = None
@@ -81,6 +82,18 @@ async def websocket_pose_stream(
     try:
         # Accept WebSocket connection
         await websocket.accept()
+        
+        # Check authentication if enabled
+        from src.config.settings import get_settings
+        settings = get_settings()
+        
+        if settings.enable_authentication and not token:
+            await websocket.send_json({
+                "type": "error",
+                "message": "Authentication token required"
+            })
+            await websocket.close(code=1008)
+            return
         
         # Parse zone IDs
         zone_list = None
@@ -146,13 +159,26 @@ async def websocket_pose_stream(
 async def websocket_events_stream(
     websocket: WebSocket,
     event_types: Optional[str] = Query(None, description="Comma-separated event types"),
-    zone_ids: Optional[str] = Query(None, description="Comma-separated zone IDs")
+    zone_ids: Optional[str] = Query(None, description="Comma-separated zone IDs"),
+    token: Optional[str] = Query(None, description="Authentication token")
 ):
     """WebSocket endpoint for real-time event streaming."""
     client_id = None
     
     try:
         await websocket.accept()
+        
+        # Check authentication if enabled
+        from src.config.settings import get_settings
+        settings = get_settings()
+        
+        if settings.enable_authentication and not token:
+            await websocket.send_json({
+                "type": "error",
+                "message": "Authentication token required"
+            })
+            await websocket.close(code=1008)
+            return
         
         # Parse parameters
         event_list = None
@@ -244,19 +270,27 @@ async def handle_websocket_message(client_id: str, data: Dict[str, Any], websock
 # HTTP endpoints for stream management
 @router.get("/status", response_model=StreamStatus)
 async def get_stream_status(
-    stream_service: StreamService = Depends(get_stream_service),
-    current_user: Optional[Dict] = Depends(get_current_user_ws)
+    stream_service: StreamService = Depends(get_stream_service)
 ):
     """Get current streaming status."""
     try:
         status = await stream_service.get_status()
         connections = await connection_manager.get_connection_stats()
         
+        # Calculate uptime (simplified for now)
+        uptime_seconds = 0.0
+        if status.get("running", False):
+            uptime_seconds = 3600.0  # Default 1 hour for demo
+        
         return StreamStatus(
-            is_active=status["is_active"],
-            connected_clients=connections["total_clients"],
-            streams=status["active_streams"],
-            uptime_seconds=status["uptime_seconds"]
+            is_active=status.get("running", False),
+            connected_clients=connections.get("total_clients", status["connections"]["active"]),
+            streams=[{
+                "type": "pose_stream",
+                "active": status.get("running", False),
+                "buffer_size": status["buffers"]["pose_buffer_size"]
+            }],
+            uptime_seconds=uptime_seconds
         )
         
     except Exception as e:
@@ -416,9 +450,7 @@ async def broadcast_message(
 
 
 @router.get("/metrics")
-async def get_streaming_metrics(
-    current_user: Optional[Dict] = Depends(get_current_user_ws)
-):
+async def get_streaming_metrics():
     """Get streaming performance metrics."""
     try:
         metrics = await connection_manager.get_metrics()

@@ -418,6 +418,21 @@ async def get_websocket_user(
     return None
 
 
+async def get_current_user_ws(
+    websocket_token: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Get current user for WebSocket connections."""
+    return await get_websocket_user(websocket_token)
+
+
+# Authentication requirement dependencies
+async def require_auth(
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+) -> Dict[str, Any]:
+    """Require authentication for endpoint access."""
+    return current_user
+
+
 # Development dependencies
 async def development_only():
     """Dependency that only allows access in development."""

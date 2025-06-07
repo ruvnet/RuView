@@ -307,40 +307,45 @@ class ErrorHandler:
 class ErrorHandlingMiddleware:
     """Error handling middleware for FastAPI."""
     
-    def __init__(self, settings: Settings):
+    def __init__(self, app, settings: Settings):
+        self.app = app
         self.settings = settings
         self.error_handler = ErrorHandler(settings)
     
-    async def __call__(self, request: Request, call_next: Callable) -> Response:
+    async def __call__(self, scope, receive, send):
         """Process request through error handling middleware."""
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+            
         start_time = time.time()
         
         try:
-            response = await call_next(request)
-            return response
-            
-        except HTTPException as exc:
-            error_response = self.error_handler.handle_http_exception(request, exc)
-            return error_response.to_response()
-            
-        except RequestValidationError as exc:
-            error_response = self.error_handler.handle_validation_error(request, exc)
-            return error_response.to_response()
-            
-        except ValidationError as exc:
-            error_response = self.error_handler.handle_pydantic_error(request, exc)
-            return error_response.to_response()
-            
+            await self.app(scope, receive, send)
         except Exception as exc:
-            # Check for specific error types
-            if self._is_database_error(exc):
-                error_response = self.error_handler.handle_database_error(request, exc)
-            elif self._is_external_service_error(exc):
-                error_response = self.error_handler.handle_external_service_error(request, exc)
-            else:
-                error_response = self.error_handler.handle_generic_exception(request, exc)
+            # Create a mock request for error handling
+            from starlette.requests import Request
+            request = Request(scope, receive)
             
-            return error_response.to_response()
+            # Handle different exception types
+            if isinstance(exc, HTTPException):
+                error_response = self.error_handler.handle_http_exception(request, exc)
+            elif isinstance(exc, RequestValidationError):
+                error_response = self.error_handler.handle_validation_error(request, exc)
+            elif isinstance(exc, ValidationError):
+                error_response = self.error_handler.handle_pydantic_error(request, exc)
+            else:
+                # Check for specific error types
+                if self._is_database_error(exc):
+                    error_response = self.error_handler.handle_database_error(request, exc)
+                elif self._is_external_service_error(exc):
+                    error_response = self.error_handler.handle_external_service_error(request, exc)
+                else:
+                    error_response = self.error_handler.handle_generic_exception(request, exc)
+            
+            # Send the error response
+            response = error_response.to_response()
+            await response(scope, receive, send)
         
         finally:
             # Log request processing time
@@ -424,11 +429,10 @@ def setup_error_handling(app, settings: Settings):
         return error_response.to_response()
     
     # Add middleware for additional error handling
-    middleware = ErrorHandlingMiddleware(settings)
-    
-    @app.middleware("http")
-    async def error_handling_middleware(request: Request, call_next):
-        return await middleware(request, call_next)
+    # Note: We use exception handlers instead of custom middleware to avoid ASGI conflicts
+    # The middleware approach is commented out but kept for reference
+    # middleware = ErrorHandlingMiddleware(app, settings)
+    # app.add_middleware(ErrorHandlingMiddleware, settings=settings)
     
     logger.info("Error handling configured")
 

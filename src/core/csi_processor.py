@@ -2,7 +2,9 @@
 
 import numpy as np
 import torch
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from datetime import datetime
+from collections import deque
 
 
 class CSIProcessor:
@@ -18,6 +20,11 @@ class CSIProcessor:
         self.sample_rate = self.config.get('sample_rate', 1000)
         self.num_subcarriers = self.config.get('num_subcarriers', 56)
         self.num_antennas = self.config.get('num_antennas', 3)
+        self.buffer_size = self.config.get('buffer_size', 1000)
+        
+        # Data buffer for temporal processing
+        self.data_buffer = deque(maxlen=self.buffer_size)
+        self.last_processed_data = None
     
     def process_raw_csi(self, raw_data: np.ndarray) -> np.ndarray:
         """Process raw CSI data into normalized format.
@@ -77,3 +84,46 @@ class CSIProcessor:
         
         # Convert to tensor
         return torch.from_numpy(processed_data).float()
+    
+    def add_data(self, csi_data: np.ndarray, timestamp: datetime):
+        """Add CSI data to the processing buffer.
+        
+        Args:
+            csi_data: Raw CSI data array
+            timestamp: Timestamp of the data sample
+        """
+        sample = {
+            'data': csi_data,
+            'timestamp': timestamp,
+            'processed': False
+        }
+        self.data_buffer.append(sample)
+    
+    def get_processed_data(self) -> Optional[np.ndarray]:
+        """Get the most recent processed CSI data.
+        
+        Returns:
+            Processed CSI data array or None if no data available
+        """
+        if not self.data_buffer:
+            return None
+        
+        # Get the most recent unprocessed sample
+        recent_sample = None
+        for sample in reversed(self.data_buffer):
+            if not sample['processed']:
+                recent_sample = sample
+                break
+        
+        if recent_sample is None:
+            return self.last_processed_data
+        
+        # Process the data
+        try:
+            processed_data = self.process_raw_csi(recent_sample['data'])
+            recent_sample['processed'] = True
+            self.last_processed_data = processed_data
+            return processed_data
+        except Exception as e:
+            # Return last known good data if processing fails
+            return self.last_processed_data

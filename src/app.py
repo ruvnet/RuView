@@ -3,6 +3,7 @@ FastAPI application factory and configuration
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -15,10 +16,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.config.settings import Settings
 from src.services.orchestrator import ServiceOrchestrator
-from src.middleware.auth import AuthMiddleware
-from src.middleware.cors import setup_cors
+from src.middleware.auth import AuthenticationMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 from src.middleware.rate_limit import RateLimitMiddleware
-from src.middleware.error_handler import ErrorHandlerMiddleware
+from src.middleware.error_handler import ErrorHandlingMiddleware
 from src.api.routers import pose, stream, health
 from src.api.websocket.connection_manager import connection_manager
 
@@ -34,6 +35,9 @@ async def lifespan(app: FastAPI):
         # Get orchestrator from app state
         orchestrator: ServiceOrchestrator = app.state.orchestrator
         
+        # Start connection manager
+        await connection_manager.start()
+        
         # Start all services
         await orchestrator.start()
         
@@ -47,6 +51,10 @@ async def lifespan(app: FastAPI):
     finally:
         # Cleanup on shutdown
         logger.info("Shutting down WiFi-DensePose API...")
+        
+        # Shutdown connection manager
+        await connection_manager.shutdown()
+        
         if hasattr(app.state, 'orchestrator'):
             await app.state.orchestrator.shutdown()
         logger.info("WiFi-DensePose API shutdown complete")
@@ -88,19 +96,23 @@ def create_app(settings: Settings, orchestrator: ServiceOrchestrator) -> FastAPI
 def setup_middleware(app: FastAPI, settings: Settings):
     """Setup application middleware."""
     
-    # Error handling middleware (should be first)
-    app.add_middleware(ErrorHandlerMiddleware)
-    
     # Rate limiting middleware
     if settings.enable_rate_limiting:
         app.add_middleware(RateLimitMiddleware, settings=settings)
     
     # Authentication middleware
     if settings.enable_authentication:
-        app.add_middleware(AuthMiddleware, settings=settings)
+        app.add_middleware(AuthenticationMiddleware, settings=settings)
     
     # CORS middleware
-    setup_cors(app, settings)
+    if settings.cors_enabled:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_credentials=settings.cors_allow_credentials,
+            allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+            allow_headers=["*"],
+        )
     
     # Trusted host middleware for production
     if settings.is_production:

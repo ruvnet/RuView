@@ -97,6 +97,8 @@ class Settings(BaseSettings):
     enable_websockets: bool = Field(default=True, description="Enable WebSocket support")
     enable_historical_data: bool = Field(default=True, description="Enable historical data storage")
     enable_real_time_processing: bool = Field(default=True, description="Enable real-time processing")
+    cors_enabled: bool = Field(default=True, description="Enable CORS middleware")
+    cors_allow_credentials: bool = Field(default=True, description="Allow credentials in CORS")
     
     # Development settings
     mock_hardware: bool = Field(default=False, description="Use mock hardware for development")

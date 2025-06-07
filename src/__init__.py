@@ -246,8 +246,15 @@ if __name__ != '__main__':
 
 
 # Compatibility aliases for backward compatibility
-WifiDensePose = app  # Legacy alias
-get_config = get_settings  # Legacy alias
+try:
+    WifiDensePose = app  # Legacy alias
+except NameError:
+    WifiDensePose = None  # Will be None if app import failed
+
+try:
+    get_config = get_settings  # Legacy alias
+except NameError:
+    get_config = None  # Will be None if get_settings import failed
 
 
 def main():
