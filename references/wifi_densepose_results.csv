@@ -1,0 +1,61 @@
+Category,Metric,Value,Unit,Description
+Hardware,WiFi_Transmitters,3,count,Number of WiFi transmitter antennas
+Hardware,WiFi_Receivers,3,count,Number of WiFi receiver antennas
+Hardware,Frequency_Range,2.4GHz ± 20MHz,frequency,Operating frequency range
+Hardware,Subcarriers,30,count,Number of subcarrier frequencies
+Hardware,Sampling_Rate,100,Hz,CSI data sampling rate
+Hardware,Total_Cost,30,USD,Hardware cost using TP-Link AC1750 routers
+Architecture,Input_Amplitude_Shape,150x3x3,tensor,CSI amplitude input dimensions
+Architecture,Input_Phase_Shape,150x3x3,tensor,CSI phase input dimensions
+Architecture,Output_Feature_Shape,3x720x1280,tensor,Spatial feature map dimensions
+Architecture,Body_Parts,24,count,Number of body parts detected
+Architecture,Keypoints,17,count,Number of keypoints tracked (COCO format)
+Training,Learning_Rate,0.001,rate,Initial learning rate
+Training,Batch_Size,16,count,Training batch size
+Training,Total_Iterations,145000,count,Total training iterations
+Training,Lambda_DensePose,0.6,weight,DensePose loss weight
+Training,Lambda_Keypoint,0.3,weight,Keypoint loss weight
+Training,Lambda_Transfer,0.1,weight,Transfer learning loss weight
+Performance,WiFi_Same_Layout_AP,43.5,AP,AP for WiFi_Same_Layout
+Performance,WiFi_Same_Layout_AP@50,87.2,AP,AP@50 for WiFi_Same_Layout
+Performance,WiFi_Same_Layout_AP@75,44.6,AP,AP@75 for WiFi_Same_Layout
+Performance,WiFi_Same_Layout_AP-m,38.1,AP,AP-m for WiFi_Same_Layout
+Performance,WiFi_Same_Layout_AP-l,46.4,AP,AP-l for WiFi_Same_Layout
+Performance,WiFi_Same_Layout_dpAP_GPS,45.3,AP,dpAP_GPS for WiFi_Same_Layout
+Performance,WiFi_Same_Layout_dpAP_GPS@50,79.3,AP,dpAP_GPS@50 for WiFi_Same_Layout
+Performance,WiFi_Same_Layout_dpAP_GPS@75,47.7,AP,dpAP_GPS@75 for WiFi_Same_Layout
+Performance,WiFi_Same_Layout_dpAP_GPSm,43.2,AP,dpAP_GPSm for WiFi_Same_Layout
+Performance,WiFi_Same_Layout_dpAP_GPSm@50,77.4,AP,dpAP_GPSm@50 for WiFi_Same_Layout
+Performance,WiFi_Same_Layout_dpAP_GPSm@75,45.5,AP,dpAP_GPSm@75 for WiFi_Same_Layout
+Performance,Image_Same_Layout_AP,84.7,AP,AP for Image_Same_Layout
+Performance,Image_Same_Layout_AP@50,94.4,AP,AP@50 for Image_Same_Layout
+Performance,Image_Same_Layout_AP@75,77.1,AP,AP@75 for Image_Same_Layout
+Performance,Image_Same_Layout_AP-m,70.3,AP,AP-m for Image_Same_Layout
+Performance,Image_Same_Layout_AP-l,83.8,AP,AP-l for Image_Same_Layout
+Performance,Image_Same_Layout_dpAP_GPS,81.8,AP,dpAP_GPS for Image_Same_Layout
+Performance,Image_Same_Layout_dpAP_GPS@50,93.7,AP,dpAP_GPS@50 for Image_Same_Layout
+Performance,Image_Same_Layout_dpAP_GPS@75,86.2,AP,dpAP_GPS@75 for Image_Same_Layout
+Performance,Image_Same_Layout_dpAP_GPSm,84.0,AP,dpAP_GPSm for Image_Same_Layout
+Performance,Image_Same_Layout_dpAP_GPSm@50,94.9,AP,dpAP_GPSm@50 for Image_Same_Layout
+Performance,Image_Same_Layout_dpAP_GPSm@75,86.8,AP,dpAP_GPSm@75 for Image_Same_Layout
+Performance,WiFi_Different_Layout_AP,27.3,AP,AP for WiFi_Different_Layout
+Performance,WiFi_Different_Layout_AP@50,51.8,AP,AP@50 for WiFi_Different_Layout
+Performance,WiFi_Different_Layout_AP@75,24.2,AP,AP@75 for WiFi_Different_Layout
+Performance,WiFi_Different_Layout_AP-m,22.1,AP,AP-m for WiFi_Different_Layout
+Performance,WiFi_Different_Layout_AP-l,28.6,AP,AP-l for WiFi_Different_Layout
+Performance,WiFi_Different_Layout_dpAP_GPS,25.4,AP,dpAP_GPS for WiFi_Different_Layout
+Performance,WiFi_Different_Layout_dpAP_GPS@50,50.2,AP,dpAP_GPS@50 for WiFi_Different_Layout
+Performance,WiFi_Different_Layout_dpAP_GPS@75,24.7,AP,dpAP_GPS@75 for WiFi_Different_Layout
+Performance,WiFi_Different_Layout_dpAP_GPSm,23.2,AP,dpAP_GPSm for WiFi_Different_Layout
+Performance,WiFi_Different_Layout_dpAP_GPSm@50,47.4,AP,dpAP_GPSm@50 for WiFi_Different_Layout
+Performance,WiFi_Different_Layout_dpAP_GPSm@75,26.5,AP,dpAP_GPSm@75 for WiFi_Different_Layout
+Ablation,Amplitude_Only_AP,39.5,AP,Performance with amplitude only
+Ablation,Plus_Phase_AP,40.3,AP,Performance adding phase information
+Ablation,Plus_Keypoints_AP,42.9,AP,Performance adding keypoint supervision
+Ablation,Final_Model_AP,43.5,AP,Performance with transfer learning
+Advantages,Through_Walls,Yes,boolean,Can detect through walls and obstacles
+Advantages,Privacy_Preserving,Yes,boolean,No visual recording required
+Advantages,Lighting_Independent,Yes,boolean,Works in complete darkness
+Advantages,Low_Cost,Yes,boolean,Uses standard WiFi equipment
+Advantages,Real_Time,Yes,boolean,Multiple frames per second
+Advantages,Multiple_People,Yes,boolean,Can track multiple people simultaneously
