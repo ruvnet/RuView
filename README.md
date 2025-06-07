@@ -90,14 +90,25 @@ WiFi DensePose consists of several key components working together:
 
 ### Using pip (Recommended)
 
+WiFi-DensePose is now available on PyPI for easy installation:
+
 ```bash
+# Install the latest stable version
 pip install wifi-densepose
+
+# Install with specific version
+pip install wifi-densepose==1.0.0
+
+# Install with optional dependencies
+pip install wifi-densepose[gpu]  # For GPU acceleration
+pip install wifi-densepose[dev]  # For development
+pip install wifi-densepose[all]  # All optional dependencies
 ```
 
 ### From Source
 
 ```bash
-git clone https://github.com/your-org/wifi-densepose.git
+git clone https://github.com/ruvnet/wifi-densepose.git
 cd wifi-densepose
 pip install -r requirements.txt
 pip install -e .
@@ -106,8 +117,8 @@ pip install -e .
 ### Using Docker
 
 ```bash
-docker pull your-org/wifi-densepose:latest
-docker run -p 8000:8000 your-org/wifi-densepose:latest
+docker pull ruvnet/wifi-densepose:latest
+docker run -p 8000:8000 ruvnet/wifi-densepose:latest
 ```
 
 ### System Requirements
@@ -188,73 +199,70 @@ async def stream_poses():
 asyncio.run(stream_poses())
 ```
 
-## 📚 API Documentation
+## 📚 Documentation
 
-### REST API Endpoints
+Comprehensive documentation is available to help you get started and make the most of WiFi-DensePose:
 
-The system provides a comprehensive REST API for all operations:
+### 📖 Core Documentation
 
-#### Pose Estimation
-- `GET /api/v1/pose/latest` - Get latest pose data
-- `GET /api/v1/pose/history` - Get historical pose data
-- `GET /api/v1/pose/tracking/{track_id}` - Get person tracking data
-- `POST /api/v1/pose/process` - Submit CSI data for processing
+- **[User Guide](docs/user_guide.md)** - Complete guide covering installation, setup, basic usage, and examples
+- **[API Reference](docs/api_reference.md)** - Detailed documentation of all public classes, methods, and endpoints
+- **[Deployment Guide](docs/deployment.md)** - Production deployment, Docker setup, Kubernetes, and scaling strategies
+- **[Troubleshooting Guide](docs/troubleshooting.md)** - Common issues, solutions, and diagnostic procedures
 
-#### System Management
-- `POST /api/v1/system/start` - Start the pose estimation system
-- `POST /api/v1/system/stop` - Stop the system
-- `GET /api/v1/system/status` - Get system status
-- `POST /api/v1/system/restart` - Restart the system
+### 🚀 Quick Links
 
-#### Configuration
-- `GET /api/v1/config` - Get current configuration
-- `PUT /api/v1/config` - Update configuration
-- `GET /api/v1/config/schema` - Get configuration schema
+- **Interactive API Docs**: http://localhost:8000/docs (when running)
+- **Health Check**: http://localhost:8000/api/v1/health
+- **Latest Poses**: http://localhost:8000/api/v1/pose/latest
+- **System Status**: http://localhost:8000/api/v1/system/status
 
-#### Analytics
-- `GET /api/v1/analytics/summary` - Get analytics summary
-- `GET /api/v1/analytics/events` - Get activity events (falls, alerts)
-- `GET /api/v1/analytics/occupancy` - Get occupancy data
+### 📋 API Overview
 
-### WebSocket API
+The system provides a comprehensive REST API and WebSocket streaming:
 
-Real-time streaming endpoints:
+#### Key REST Endpoints
+```bash
+# Pose estimation
+GET /api/v1/pose/latest          # Get latest pose data
+GET /api/v1/pose/history         # Get historical data
+GET /api/v1/pose/zones/{zone_id} # Get zone-specific data
 
-- `ws://localhost:8000/ws/pose/stream` - Real-time pose data stream
-- `ws://localhost:8000/ws/analytics/events` - Real-time analytics events
-- `ws://localhost:8000/ws/system/status` - Real-time system status
+# System management
+GET /api/v1/system/status        # System health and status
+POST /api/v1/system/calibrate    # Calibrate environment
+GET /api/v1/analytics/summary    # Analytics dashboard data
+```
 
-### Python SDK Examples
+#### WebSocket Streaming
+```javascript
+// Real-time pose data
+ws://localhost:8000/ws/pose/stream
 
+// Analytics events (falls, alerts)
+ws://localhost:8000/ws/analytics/events
+
+// System status updates
+ws://localhost:8000/ws/system/status
+```
+
+#### Python SDK Quick Example
 ```python
 from wifi_densepose import WiFiDensePoseClient
 
 # Initialize client
 client = WiFiDensePoseClient(base_url="http://localhost:8000")
 
-# Get latest poses
+# Get latest poses with confidence filtering
 poses = client.get_latest_poses(min_confidence=0.7)
+print(f"Detected {len(poses)} persons")
 
-# Get historical data
-history = client.get_pose_history(
-    start_time="2025-01-07T00:00:00Z",
-    end_time="2025-01-07T23:59:59Z"
-)
-
-# Get analytics
-analytics = client.get_analytics_summary(
-    start_time="2025-01-07T00:00:00Z",
-    end_time="2025-01-07T23:59:59Z"
-)
-
-# Configure system
-client.update_config({
-    "detection": {
-        "confidence_threshold": 0.8,
-        "max_persons": 5
-    }
-})
+# Get zone occupancy
+occupancy = client.get_zone_occupancy("living_room")
+print(f"Living room occupancy: {occupancy.person_count}")
 ```
+
+For complete API documentation with examples, see the [API Reference Guide](docs/api_reference.md).
 
 ## 🔧 Hardware Setup
 
@@ -773,7 +781,7 @@ We welcome contributions to WiFi DensePose! Please follow these guidelines:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/wifi-densepose.git
+git clone https://github.com/ruvnet/wifi-densepose.git
 cd wifi-densepose
 
 # Create virtual environment
@@ -881,9 +889,14 @@ SOFTWARE.
 
 ## 📞 Support
 
-- **Documentation**: [https://docs.wifi-densepose.com](https://docs.wifi-densepose.com)
-- **Issues**: [GitHub Issues](https://github.com/your-org/wifi-densepose/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-org/wifi-densepose/discussions)
+- **Documentation**:
+  - [User Guide](docs/user_guide.md) - Complete setup and usage guide
+  - [API Reference](docs/api_reference.md) - Detailed API documentation
+  - [Deployment Guide](docs/deployment.md) - Production deployment instructions
+  - [Troubleshooting Guide](docs/troubleshooting.md) - Common issues and solutions
+- **Issues**: [GitHub Issues](https://github.com/ruvnet/wifi-densepose/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/ruvnet/wifi-densepose/discussions)
+- **PyPI Package**: [https://pypi.org/project/wifi-densepose/](https://pypi.org/project/wifi-densepose/)
 - **Email**: support@wifi-densepose.com
 - **Discord**: [Join our community](https://discord.gg/wifi-densepose)
 

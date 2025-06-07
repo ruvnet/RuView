@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiFi DensePose Integration Test</title>
+    <link rel="stylesheet" href="../style.css">
+    <style>
+        .test-controls {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 1000;
+            min-width: 250px;
+        }
+        
+        .test-controls h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        
+        .test-button {
+            display: block;
+            width: 100%;
+            margin-bottom: 10px;
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .test-button:hover {
+            background: #0056b3;
+        }
+        
+        .test-button.danger {
+            background: #dc3545;
+        }
+        
+        .test-button.danger:hover {
+            background: #c82333;
+        }
+        
+        .test-status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        
+        .test-status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .test-status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .test-status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        .mock-indicator {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #28a745;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            z-index: 1000;
+        }
+        
+        .mock-indicator.inactive {
+            background: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <!-- Test Controls Panel -->
+    <div class="test-controls">
+        <h3>Integration Tests</h3>
+        <button class="test-button" onclick="startMockServer()">Start Mock Server</button>
+        <button class="test-button danger" onclick="stopMockServer()">Stop Mock Server</button>
+        <button class="test-button" onclick="testHealthAPI()">Test Health API</button>
+        <button class="test-button" onclick="testPoseAPI()">Test Pose API</button>
+        <button class="test-button" onclick="testWebSocketStream()">Test WebSocket</button>
+        <button class="test-button" onclick="testFullIntegration()">Full Integration Test</button>
+        <button class="test-button" onclick="simulateErrors()">Simulate Errors</button>
+        <div class="test-status" id="testStatus" style="display: none;"></div>
+    </div>
+
+    <!-- Mock Server Indicator -->
+    <div class="mock-indicator inactive" id="mockIndicator">Mock Server: Offline</div>
+
+    <!-- Main Application -->
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>WiFi DensePose</h1>
+            <p class="subtitle">Human Tracking Through Walls Using WiFi Signals</p>
+            <div class="header-info">
+                <span class="api-version"></span>
+                <span class="api-environment"></span>
+                <span class="overall-health"></span>
+            </div>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="nav-tabs">
+            <button class="nav-tab active" data-tab="dashboard">Dashboard</button>
+            <button class="nav-tab" data-tab="hardware">Hardware</button>
+            <button class="nav-tab" data-tab="demo">Live Demo</button>
+            <button class="nav-tab" data-tab="architecture">Architecture</button>
+        </nav>
+
+        <!-- Dashboard Tab -->
+        <section id="dashboard" class="tab-content active">
+            <div class="hero-section">
+                <h2>Integration Test Dashboard</h2>
+                <p class="hero-description">
+                    This page demonstrates the full WiFi-DensePose UI with mock backend integration.
+                    Use the test controls to interact with different components.
+                </p>
+                
+                <!-- Error container -->
+                <div class="error-container" style="display: none;"></div>
+
+                <!-- Live Status Panel -->
+                <div class="live-status-panel">
+                    <h3>System Status</h3>
+                    <div class="status-grid">
+                        <div class="component-status" data-component="api">
+                            <span class="component-name">API Server</span>
+                            <span class="status-text">-</span>
+                            <span class="status-message"></span>
+                        </div>
+                        <div class="component-status" data-component="hardware">
+                            <span class="component-name">Hardware</span>
+                            <span class="status-text">-</span>
+                            <span class="status-message"></span>
+                        </div>
+                        <div class="component-status" data-component="inference">
+                            <span class="component-name">Inference</span>
+                            <span class="status-text">-</span>
+                            <span class="status-message"></span>
+                        </div>
+                        <div class="component-status" data-component="streaming">
+                            <span class="component-name">Streaming</span>
+                            <span class="status-text">-</span>
+                            <span class="status-message"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Metrics -->
+                <div class="system-metrics-panel">
+                    <h3>System Metrics</h3>
+                    <div class="metrics-grid">
+                        <div class="metric-item">
+                            <span class="metric-label">CPU Usage</span>
+                            <div class="progress-bar" data-type="cpu">
+                                <div class="progress-fill normal" style="width: 0%"></div>
+                            </div>
+                            <span class="cpu-usage">0%</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Memory Usage</span>
+                            <div class="progress-bar" data-type="memory">
+                                <div class="progress-fill normal" style="width: 0%"></div>
+                            </div>
+                            <span class="memory-usage">0%</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">Disk Usage</span>
+                            <div class="progress-bar" data-type="disk">
+                                <div class="progress-fill normal" style="width: 0%"></div>
+                            </div>
+                            <span class="disk-usage">0%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Features Status -->
+                <div class="features-panel">
+                    <h3>Features</h3>
+                    <div class="features-status"></div>
+                </div>
+
+                <!-- Live Statistics -->
+                <div class="live-stats-panel">
+                    <h3>Live Statistics</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <span class="stat-label">Active Persons</span>
+                            <span class="person-count">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Avg Confidence</span>
+                            <span class="avg-confidence">0%</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Total Detections</span>
+                            <span class="detection-count">0</span>
+                        </div>
+                    </div>
+                    
+                    <div class="zones-panel">
+                        <h4>Zone Occupancy</h4>
+                        <div class="zones-summary"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Hardware Tab -->
+        <section id="hardware" class="tab-content">
+            <h2>Hardware Configuration</h2>
+            
+            <div class="hardware-grid">
+                <div class="antenna-section">
+                    <h3>3×3 Antenna Array</h3>
+                    <p class="help-text">Click antennas to toggle their state</p>
+                    <div class="antenna-array">
+                        <div class="antenna-grid">
+                            <div class="antenna tx active" data-type="TX1"></div>
+                            <div class="antenna tx active" data-type="TX2"></div>
+                            <div class="antenna tx active" data-type="TX3"></div>
+                            <div class="antenna rx active" data-type="RX1"></div>
+                            <div class="antenna rx active" data-type="RX2"></div>
+                            <div class="antenna rx active" data-type="RX3"></div>
+                            <div class="antenna rx active" data-type="RX4"></div>
+                            <div class="antenna rx active" data-type="RX5"></div>
+                            <div class="antenna rx active" data-type="RX6"></div>
+                        </div>
+                        <div class="antenna-legend">
+                            <div class="legend-item">
+                                <div class="legend-color tx"></div>
+                                <span>Transmitters (3)</span>
+                            </div>
+                            <div class="legend-item">
+                                <div class="legend-color rx"></div>
+                                <span>Receivers (6)</span>
+                            </div>
+                        </div>
+                        <div class="array-status"></div>
+                    </div>
+                </div>
+
+                <div class="config-section">
+                    <h3>WiFi Configuration</h3>
+                    <div class="config-grid">
+                        <div class="config-item">
+                            <label>Frequency</label>
+                            <div class="config-value">2.4GHz ± 20MHz</div>
+                        </div>
+                        <div class="config-item">
+                            <label>Subcarriers</label>
+                            <div class="config-value">30</div>
+                        </div>
+                        <div class="config-item">
+                            <label>Sampling Rate</label>
+                            <div class="config-value">100 Hz</div>
+                        </div>
+                        <div class="config-item">
+                            <label>Total Cost</label>
+                            <div class="config-value">$30</div>
+                        </div>
+                    </div>
+
+                    <div class="csi-data">
+                        <h4>Real-time CSI Data</h4>
+                        <div class="csi-display">
+                            <div class="csi-row">
+                                <span>Amplitude:</span>
+                                <div class="csi-bar">
+                                    <div class="csi-fill amplitude" style="width: 75%"></div>
+                                </div>
+                                <span class="csi-value">0.75</span>
+                            </div>
+                            <div class="csi-row">
+                                <span>Phase:</span>
+                                <div class="csi-bar">
+                                    <div class="csi-fill phase" style="width: 60%"></div>
+                                </div>
+                                <span class="csi-value">1.2π</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Demo Tab -->
+        <section id="demo" class="tab-content">
+            <h2>Live Demonstration</h2>
+            
+            <div class="demo-controls">
+                <button id="startDemo" class="btn btn--primary">Start Stream</button>
+                <button id="stopDemo" class="btn btn--secondary" disabled>Stop Stream</button>
+                <div class="demo-status">
+                    <span class="status status--info" id="demoStatus">Ready</span>
+                </div>
+            </div>
+
+            <div class="demo-grid">
+                <div class="signal-panel">
+                    <h3>WiFi Signal Analysis</h3>
+                    <div class="signal-display">
+                        <canvas id="signalCanvas" width="400" height="200"></canvas>
+                    </div>
+                    <div class="signal-metrics">
+                        <div class="metric">
+                            <span>Signal Strength:</span>
+                            <span id="signalStrength">-45 dBm</span>
+                        </div>
+                        <div class="metric">
+                            <span>Processing Latency:</span>
+                            <span id="latency">12 ms</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pose-panel">
+                    <h3>Human Pose Detection</h3>
+                    <div class="pose-display">
+                        <canvas id="poseCanvas" width="400" height="300"></canvas>
+                    </div>
+                    <div class="detection-info">
+                        <div class="info-item">
+                            <span>Persons Detected:</span>
+                            <span id="personCount">0</span>
+                        </div>
+                        <div class="info-item">
+                            <span>Confidence:</span>
+                            <span id="confidence">0.0%</span>
+                        </div>
+                        <div class="info-item">
+                            <span>Keypoints:</span>
+                            <span id="keypoints">0/0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Architecture Tab -->
+        <section id="architecture" class="tab-content">
+            <h2>System Architecture</h2>
+            <div class="implementation-note">
+                <h3>Integration Test Mode</h3>
+                <p>This page is running in integration test mode with a mock backend server. All API calls and WebSocket connections are intercepted and handled by mock implementations that simulate the real WiFi-DensePose backend.</p>
+            </div>
+        </section>
+    </div>
+
+    <!-- Error Toast -->
+    <div id="globalErrorToast" class="error-toast"></div>
+
+    <!-- Load application scripts as modules -->
+    <script type="module">
+        import { mockServer } from '../utils/mock-server.js';
+        import { WiFiDensePoseApp } from '../app.js';
+
+        // Global test functions
+        window.mockServer = mockServer;
+        window.app = null;
+
+        window.startMockServer = () => {
+            try {
+                mockServer.start();
+                updateMockIndicator(true);
+                showTestStatus('Mock server started successfully', 'success');
+                
+                // Initialize app if not already done
+                if (!window.app) {
+                    window.app = new WiFiDensePoseApp();
+                    window.app.init();
+                }
+            } catch (error) {
+                showTestStatus(`Failed to start mock server: ${error.message}`, 'error');
+            }
+        };
+
+        window.stopMockServer = () => {
+            try {
+                mockServer.stop();
+                updateMockIndicator(false);
+                showTestStatus('Mock server stopped', 'info');
+            } catch (error) {
+                showTestStatus(`Failed to stop mock server: ${error.message}`, 'error');
+            }
+        };
+
+        window.testHealthAPI = async () => {
+            try {
+                showTestStatus('Testing health API...', 'info');
+                
+                const response = await fetch('/health/health');
+                const data = await response.json();
+                
+                if (data.status === 'healthy') {
+                    showTestStatus('Health API test passed', 'success');
+                } else {
+                    showTestStatus('Health API returned non-healthy status', 'error');
+                }
+            } catch (error) {
+                showTestStatus(`Health API test failed: ${error.message}`, 'error');
+            }
+        };
+
+        window.testPoseAPI = async () => {
+            try {
+                showTestStatus('Testing pose API...', 'info');
+                
+                const response = await fetch('/api/v1/pose/current');
+                const data = await response.json();
+                
+                if (data.timestamp && Array.isArray(data.persons)) {
+                    showTestStatus(`Pose API test passed. Found ${data.persons.length} persons`, 'success');
+                } else {
+                    showTestStatus('Pose API returned invalid data format', 'error');
+                }
+            } catch (error) {
+                showTestStatus(`Pose API test failed: ${error.message}`, 'error');
+            }
+        };
+
+        window.testWebSocketStream = () => {
+            try {
+                showTestStatus('Testing WebSocket stream...', 'info');
+                
+                const ws = new WebSocket('ws://localhost/api/v1/stream/pose');
+                
+                ws.onopen = () => {
+                    showTestStatus('WebSocket connection opened', 'success');
+                };
+                
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    showTestStatus(`WebSocket message received: ${data.type}`, 'success');
+                    
+                    // Close after first message
+                    setTimeout(() => ws.close(), 1000);
+                };
+                
+                ws.onerror = (error) => {
+                    showTestStatus(`WebSocket error: ${error.message}`, 'error');
+                };
+                
+                ws.onclose = () => {
+                    showTestStatus('WebSocket connection closed', 'info');
+                };
+            } catch (error) {
+                showTestStatus(`WebSocket test failed: ${error.message}`, 'error');
+            }
+        };
+
+        window.testFullIntegration = async () => {
+            try {
+                showTestStatus('Running full integration test...', 'info');
+                
+                // Start mock server if not running
+                if (!mockServer.isRunning) {
+                    mockServer.start();
+                    updateMockIndicator(true);
+                }
+                
+                // Test health
+                await testHealthAPI();
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Test pose
+                await testPoseAPI();
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Test WebSocket
+                testWebSocketStream();
+                
+                showTestStatus('Full integration test completed', 'success');
+            } catch (error) {
+                showTestStatus(`Integration test failed: ${error.message}`, 'error');
+            }
+        };
+
+        window.simulateErrors = () => {
+            try {
+                showTestStatus('Simulating server errors...', 'info');
+                
+                // Add error endpoints
+                mockServer.simulateError('GET', '/health/health', 500, 'Simulated server error');
+                mockServer.simulateError('GET', '/api/v1/pose/current', 503, 'Service unavailable');
+                
+                showTestStatus('Error simulation enabled. Health and Pose APIs will return errors.', 'success');
+            } catch (error) {
+                showTestStatus(`Failed to simulate errors: ${error.message}`, 'error');
+            }
+        };
+
+        function updateMockIndicator(isActive) {
+            const indicator = document.getElementById('mockIndicator');
+            if (isActive) {
+                indicator.textContent = 'Mock Server: Online';
+                indicator.classList.remove('inactive');
+            } else {
+                indicator.textContent = 'Mock Server: Offline';
+                indicator.classList.add('inactive');
+            }
+        }
+
+        function showTestStatus(message, type) {
+            const status = document.getElementById('testStatus');
+            status.textContent = message;
+            status.className = `test-status ${type}`;
+            status.style.display = 'block';
+            
+            // Auto-hide after 5 seconds for success/info messages
+            if (type === 'success' || type === 'info') {
+                setTimeout(() => {
+                    status.style.display = 'none';
+                }, 5000);
+            }
+        }
+
+        // Auto-start mock server on load
+        document.addEventListener('DOMContentLoaded', () => {
+            startMockServer();
+        });
+    </script>
+</body>
+</html>
