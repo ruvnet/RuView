@@ -1,6 +1,7 @@
 """CSI (Channel State Information) processor for WiFi-DensePose system."""
 
 import numpy as np
+import torch
 from typing import Dict, Any, Optional
 
 

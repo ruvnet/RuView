@@ -18,6 +18,7 @@ pydantic>=1.10.0
 # Hardware interface dependencies
 asyncio-mqtt>=0.11.0
 aiohttp>=3.8.0
+paramiko>=3.0.0
 
 # Data processing dependencies
 opencv-python>=4.7.0
