@@ -24,17 +24,60 @@ A cutting-edge WiFi-based human pose estimation system that leverages Channel St
 
 ## 📋 Table of Contents
 
-1. [System Architecture](#system-architecture)
-2. [Installation](#installation)
-3. [Quick Start](#quick-start)
-4. [Documentation](#documentation)
-5. [Hardware Setup](#hardware-setup)
-6. [Configuration](#configuration)
-7. [Testing](#testing)
-8. [Deployment](#deployment)
-9. [Performance Metrics](#performance-metrics)
-10. [Contributing](#contributing)
-11. [License](#license)
+1. [🚀 Key Features](#-key-features)
+2. [🏗️ System Architecture](#️-system-architecture)
+   - [Core Components](#core-components)
+3. [📦 Installation](#-installation)
+   - [Using pip (Recommended)](#using-pip-recommended)
+   - [From Source](#from-source)
+   - [Using Docker](#using-docker)
+   - [System Requirements](#system-requirements)
+4. [🚀 Quick Start](#-quick-start)
+   - [Basic Setup](#1-basic-setup)
+   - [Start the System](#2-start-the-system)
+   - [Using the REST API](#3-using-the-rest-api)
+   - [Real-time Streaming](#4-real-time-streaming)
+5. [🖥️ CLI Usage](#️-cli-usage)
+   - [Installation](#cli-installation)
+   - [Basic Commands](#basic-commands)
+   - [Configuration Commands](#configuration-commands)
+   - [Monitoring Commands](#monitoring-commands)
+   - [Examples](#cli-examples)
+6. [📚 Documentation](#-documentation)
+   - [Core Documentation](#-core-documentation)
+   - [Quick Links](#-quick-links)
+   - [API Overview](#-api-overview)
+7. [🔧 Hardware Setup](#-hardware-setup)
+   - [Supported Hardware](#supported-hardware)
+   - [Physical Setup](#physical-setup)
+   - [Network Configuration](#network-configuration)
+   - [Environment Calibration](#environment-calibration)
+8. [⚙️ Configuration](#️-configuration)
+   - [Environment Variables](#environment-variables)
+   - [Domain-Specific Configurations](#domain-specific-configurations)
+   - [Advanced Configuration](#advanced-configuration)
+9. [🧪 Testing](#-testing)
+   - [Running Tests](#running-tests)
+   - [Test Categories](#test-categories)
+   - [Mock Testing](#mock-testing)
+   - [Continuous Integration](#continuous-integration)
+10. [🚀 Deployment](#-deployment)
+    - [Production Deployment](#production-deployment)
+    - [Infrastructure as Code](#infrastructure-as-code)
+    - [Monitoring and Logging](#monitoring-and-logging)
+11. [📊 Performance Metrics](#-performance-metrics)
+    - [Benchmark Results](#benchmark-results)
+    - [Performance Optimization](#performance-optimization)
+    - [Load Testing](#load-testing)
+12. [🤝 Contributing](#-contributing)
+    - [Development Setup](#development-setup)
+    - [Code Standards](#code-standards)
+    - [Contribution Process](#contribution-process)
+    - [Code Review Checklist](#code-review-checklist)
+    - [Issue Templates](#issue-templates)
+13. [📄 License](#-license)
+14. [🙏 Acknowledgments](#-acknowledgments)
+15. [📞 Support](#-support)
 
 ## 🏗️ System Architecture
 
@@ -197,6 +240,195 @@ async def stream_poses():
 
 # Run the streaming client
 asyncio.run(stream_poses())
+```
+
+## 🖥️ CLI Usage
+
+WiFi DensePose provides a comprehensive command-line interface for easy system management, configuration, and monitoring.
+
+### CLI Installation
+
+The CLI is automatically installed with the package:
+
+```bash
+# Install WiFi DensePose with CLI
+pip install wifi-densepose
+
+# Verify CLI installation
+wifi-densepose --version
+```
+
+### Basic Commands
+
+#### Start/Stop System
+```bash
+# Start the WiFi DensePose system
+wifi-densepose start
+
+# Start with custom configuration
+wifi-densepose start --config /path/to/config.yaml
+
+# Start in development mode
+wifi-densepose start --dev
+
+# Stop the system
+wifi-densepose stop
+
+# Restart the system
+wifi-densepose restart
+```
+
+#### System Status
+```bash
+# Check system status
+wifi-densepose status
+
+# Get detailed health information
+wifi-densepose health
+
+# Show system information
+wifi-densepose info
+```
+
+#### Pose Data Operations
+```bash
+# Get latest pose data
+wifi-densepose pose latest
+
+# Get pose history
+wifi-densepose pose history --hours 24
+
+# Stream pose data to console
+wifi-densepose pose stream
+
+# Export pose data
+wifi-densepose pose export --format json --output poses.json
+```
+
+### Configuration Commands
+
+#### Environment Setup
+```bash
+# Initialize configuration
+wifi-densepose init
+
+# Create configuration from template
+wifi-densepose config create --template healthcare
+
+# Validate configuration
+wifi-densepose config validate
+
+# Show current configuration
+wifi-densepose config show
+```
+
+#### Hardware Configuration
+```bash
+# List available WiFi interfaces
+wifi-densepose hardware list-interfaces
+
+# Test hardware connectivity
+wifi-densepose hardware test
+
+# Calibrate environment
+wifi-densepose calibrate --duration 10 --environment room_001
+
+# Show hardware status
+wifi-densepose hardware status
+```
+
+### Monitoring Commands
+
+#### Real-time Monitoring
+```bash
+# Monitor system performance
+wifi-densepose monitor
+
+# Monitor pose detection in real-time
+wifi-densepose monitor poses
+
+# Monitor system logs
+wifi-densepose logs --follow
+
+# Monitor specific component
+wifi-densepose monitor --component csi_processor
+```
+
+#### Analytics and Reports
+```bash
+# Generate analytics report
+wifi-densepose analytics report --period 24h
+
+# Show fall detection events
+wifi-densepose analytics falls --since yesterday
+
+# Export system metrics
+wifi-densepose metrics export --format csv
+```
+
+### CLI Examples
+
+#### Complete Setup Workflow
+```bash
+# 1. Initialize new environment
+wifi-densepose init --environment healthcare
+
+# 2. Configure hardware
+wifi-densepose hardware setup --interface wlan0
+
+# 3. Calibrate environment
+wifi-densepose calibrate --duration 15
+
+# 4. Start system
+wifi-densepose start
+
+# 5. Monitor in real-time
+wifi-densepose monitor poses
+```
+
+#### Development Workflow
+```bash
+# Start in development mode with mock data
+wifi-densepose start --dev --mock-hardware
+
+# Run tests
+wifi-densepose test
+
+# Check code quality
+wifi-densepose lint
+
+# Generate documentation
+wifi-densepose docs generate
+```
+
+#### Production Deployment
+```bash
+# Deploy to production
+wifi-densepose deploy --environment production
+
+# Check deployment status
+wifi-densepose deploy status
+
+# Scale system
+wifi-densepose scale --replicas 3
+
+# Update system
+wifi-densepose update --version 1.2.0
+```
+
+#### Troubleshooting
+```bash
+# Run system diagnostics
+wifi-densepose diagnose
+
+# Check hardware connectivity
+wifi-densepose hardware test --verbose
+
+# Validate configuration
+wifi-densepose config validate --strict
+
+# Reset to defaults
+wifi-densepose reset --confirm
 ```
 
 ## 📚 Documentation
