@@ -3,8 +3,10 @@
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.95+-green.svg)](https://fastapi.tiangolo.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Test Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](https://github.com/your-org/wifi-densepose)
-[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://hub.docker.com/r/your-org/wifi-densepose)
+[![PyPI version](https://img.shields.io/pypi/v/wifi-densepose.svg)](https://pypi.org/project/wifi-densepose/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/wifi-densepose.svg)](https://pypi.org/project/wifi-densepose/)
+[![Test Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](https://github.com/ruvnet/wifi-densepose)
+[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://hub.docker.com/r/ruvnet/wifi-densepose)
 
 A cutting-edge WiFi-based human pose estimation system that leverages Channel State Information (CSI) data and advanced machine learning to provide real-time, privacy-preserving pose detection without cameras.
 
@@ -25,7 +27,7 @@ A cutting-edge WiFi-based human pose estimation system that leverages Channel St
 1. [System Architecture](#system-architecture)
 2. [Installation](#installation)
 3. [Quick Start](#quick-start)
-4. [API Documentation](#api-documentation)
+4. [Documentation](#documentation)
 5. [Hardware Setup](#hardware-setup)
 6. [Configuration](#configuration)
 7. [Testing](#testing)
