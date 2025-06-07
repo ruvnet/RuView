@@ -1,0 +1,347 @@
+# GitLab CI/CD Pipeline for WiFi-DensePose
+# This pipeline provides an alternative to GitHub Actions for GitLab users
+
+stages:
+  - validate
+  - test
+  - security
+  - build
+  - deploy-staging
+  - deploy-production
+  - monitor
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+  REGISTRY: $CI_REGISTRY
+  IMAGE_NAME: $CI_REGISTRY_IMAGE
+  PYTHON_VERSION: "3.11"
+  KUBECONFIG: /tmp/kubeconfig
+
+# Global before_script
+before_script:
+  - echo "Pipeline started for $CI_COMMIT_REF_NAME"
+  - export IMAGE_TAG=${CI_COMMIT_SHA:0:8}
+
+# Code Quality and Validation
+code-quality:
+  stage: validate
+  image: python:$PYTHON_VERSION
+  before_script:
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+    - pip install black flake8 mypy bandit safety
+  script:
+    - echo "Running code quality checks..."
+    - black --check --diff src/ tests/
+    - flake8 src/ tests/ --max-line-length=88 --extend-ignore=E203,W503
+    - mypy src/ --ignore-missing-imports
+    - bandit -r src/ -f json -o bandit-report.json || true
+    - safety check --json --output safety-report.json || true
+  artifacts:
+    reports:
+      junit: bandit-report.json
+    paths:
+      - bandit-report.json
+      - safety-report.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Unit Tests
+unit-tests:
+  stage: test
+  image: python:$PYTHON_VERSION
+  services:
+    - postgres:15
+    - redis:7
+  variables:
+    POSTGRES_DB: test_wifi_densepose
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    DATABASE_URL: postgresql://postgres:postgres@postgres:5432/test_wifi_densepose
+    REDIS_URL: redis://redis:6379/0
+    ENVIRONMENT: test
+  before_script:
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+    - pip install pytest-cov pytest-xdist
+  script:
+    - echo "Running unit tests..."
+    - pytest tests/unit/ -v --cov=src --cov-report=xml --cov-report=html --junitxml=junit.xml
+  coverage: '/TOTAL.*\s+(\d+%)$/'
+  artifacts:
+    reports:
+      junit: junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+    paths:
+      - htmlcov/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Integration Tests
+integration-tests:
+  stage: test
+  image: python:$PYTHON_VERSION
+  services:
+    - postgres:15
+    - redis:7
+  variables:
+    POSTGRES_DB: test_wifi_densepose
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    DATABASE_URL: postgresql://postgres:postgres@postgres:5432/test_wifi_densepose
+    REDIS_URL: redis://redis:6379/0
+    ENVIRONMENT: test
+  before_script:
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+    - pip install pytest
+  script:
+    - echo "Running integration tests..."
+    - pytest tests/integration/ -v --junitxml=integration-junit.xml
+  artifacts:
+    reports:
+      junit: integration-junit.xml
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Security Scanning
+security-scan:
+  stage: security
+  image: python:$PYTHON_VERSION
+  before_script:
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+    - pip install bandit semgrep safety
+  script:
+    - echo "Running security scans..."
+    - bandit -r src/ -f sarif -o bandit-results.sarif || true
+    - semgrep --config=p/security-audit --config=p/secrets --config=p/python --sarif --output=semgrep.sarif src/ || true
+    - safety check --json --output safety-report.json || true
+  artifacts:
+    reports:
+      sast: 
+        - bandit-results.sarif
+        - semgrep.sarif
+    paths:
+      - safety-report.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Container Security Scan
+container-security:
+  stage: security
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - docker info
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
+  script:
+    - echo "Building and scanning container..."
+    - docker build -t $IMAGE_NAME:$IMAGE_TAG .
+    - docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $PWD:/tmp/.cache/ aquasec/trivy:latest image --format sarif --output /tmp/.cache/trivy-results.sarif $IMAGE_NAME:$IMAGE_TAG || true
+  artifacts:
+    reports:
+      container_scanning: trivy-results.sarif
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# Build and Push Docker Image
+build-image:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - docker info
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
+  script:
+    - echo "Building Docker image..."
+    - docker build --target production -t $IMAGE_NAME:$IMAGE_TAG -t $IMAGE_NAME:latest .
+    - docker push $IMAGE_NAME:$IMAGE_TAG
+    - docker push $IMAGE_NAME:latest
+    - echo "Image pushed: $IMAGE_NAME:$IMAGE_TAG"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+# Deploy to Staging
+deploy-staging:
+  stage: deploy-staging
+  image: bitnami/kubectl:latest
+  environment:
+    name: staging
+    url: https://staging.wifi-densepose.com
+  before_script:
+    - echo "$KUBE_CONFIG_STAGING" | base64 -d > $KUBECONFIG
+    - kubectl config view
+  script:
+    - echo "Deploying to staging environment..."
+    - kubectl set image deployment/wifi-densepose wifi-densepose=$IMAGE_NAME:$IMAGE_TAG -n wifi-densepose-staging
+    - kubectl rollout status deployment/wifi-densepose -n wifi-densepose-staging --timeout=600s
+    - kubectl get pods -n wifi-densepose-staging -l app=wifi-densepose
+    - echo "Staging deployment completed"
+  after_script:
+    - sleep 30
+    - curl -f https://staging.wifi-densepose.com/health || exit 1
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  when: manual
+  allow_failure: false
+
+# Deploy to Production
+deploy-production:
+  stage: deploy-production
+  image: bitnami/kubectl:latest
+  environment:
+    name: production
+    url: https://wifi-densepose.com
+  before_script:
+    - echo "$KUBE_CONFIG_PRODUCTION" | base64 -d > $KUBECONFIG
+    - kubectl config view
+  script:
+    - echo "Deploying to production environment..."
+    # Backup current deployment
+    - kubectl get deployment wifi-densepose -n wifi-densepose -o yaml > backup-deployment.yaml
+    # Blue-Green Deployment
+    - kubectl patch deployment wifi-densepose -n wifi-densepose -p '{"spec":{"template":{"metadata":{"labels":{"version":"green"}}}}}'
+    - kubectl set image deployment/wifi-densepose wifi-densepose=$IMAGE_NAME:$IMAGE_TAG -n wifi-densepose
+    - kubectl rollout status deployment/wifi-densepose -n wifi-densepose --timeout=600s
+    - kubectl wait --for=condition=ready pod -l app=wifi-densepose,version=green -n wifi-densepose --timeout=300s
+    # Switch traffic
+    - kubectl patch service wifi-densepose-service -n wifi-densepose -p '{"spec":{"selector":{"version":"green"}}}'
+    - echo "Production deployment completed"
+  after_script:
+    - sleep 30
+    - curl -f https://wifi-densepose.com/health || exit 1
+  artifacts:
+    paths:
+      - backup-deployment.yaml
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+  allow_failure: false
+
+# Post-deployment Monitoring
+monitor-deployment:
+  stage: monitor
+  image: curlimages/curl:latest
+  script:
+    - echo "Monitoring deployment health..."
+    - |
+      if [ "$CI_ENVIRONMENT_NAME" = "production" ]; then
+        BASE_URL="https://wifi-densepose.com"
+      else
+        BASE_URL="https://staging.wifi-densepose.com"
+      fi
+    - |
+      for i in $(seq 1 10); do
+        echo "Health check $i/10"
+        curl -f $BASE_URL/health || exit 1
+        curl -f $BASE_URL/api/v1/status || exit 1
+        sleep 30
+      done
+    - echo "Monitoring completed successfully"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: on_success
+    - if: $CI_COMMIT_TAG
+      when: on_success
+  allow_failure: true
+
+# Rollback Job (Manual)
+rollback:
+  stage: deploy-production
+  image: bitnami/kubectl:latest
+  environment:
+    name: production
+    url: https://wifi-densepose.com
+  before_script:
+    - echo "$KUBE_CONFIG_PRODUCTION" | base64 -d > $KUBECONFIG
+  script:
+    - echo "Rolling back deployment..."
+    - kubectl rollout undo deployment/wifi-densepose -n wifi-densepose
+    - kubectl rollout status deployment/wifi-densepose -n wifi-densepose --timeout=600s
+    - kubectl get pods -n wifi-densepose -l app=wifi-densepose
+    - echo "Rollback completed"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+  allow_failure: false
+
+# Cleanup old images
+cleanup:
+  stage: monitor
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
+  script:
+    - echo "Cleaning up old images..."
+    - |
+      # Keep only the last 10 images
+      IMAGES_TO_DELETE=$(docker images $IMAGE_NAME --format "table {{.Tag}}" | tail -n +2 | tail -n +11)
+      for tag in $IMAGES_TO_DELETE; do
+        if [ "$tag" != "latest" ] && [ "$tag" != "$IMAGE_TAG" ]; then
+          echo "Deleting image: $IMAGE_NAME:$tag"
+          docker rmi $IMAGE_NAME:$tag || true
+        fi
+      done
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: on_success
+  allow_failure: true
+
+# Notification
+notify-success:
+  stage: monitor
+  image: curlimages/curl:latest
+  script:
+    - |
+      if [ -n "$SLACK_WEBHOOK_URL" ]; then
+        curl -X POST -H 'Content-type: application/json' \
+          --data "{\"text\":\"✅ Pipeline succeeded for $CI_PROJECT_NAME on $CI_COMMIT_REF_NAME\"}" \
+          $SLACK_WEBHOOK_URL
+      fi
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: on_success
+  allow_failure: true
+
+notify-failure:
+  stage: monitor
+  image: curlimages/curl:latest
+  script:
+    - |
+      if [ -n "$SLACK_WEBHOOK_URL" ]; then
+        curl -X POST -H 'Content-type: application/json' \
+          --data "{\"text\":\"❌ Pipeline failed for $CI_PROJECT_NAME on $CI_COMMIT_REF_NAME\"}" \
+          $SLACK_WEBHOOK_URL
+      fi
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: on_failure
+  allow_failure: true
+
+# Include additional pipeline configurations
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Container-Scanning.gitlab-ci.yml
+  - template: Security/Dependency-Scanning.gitlab-ci.yml
+  - template: Security/License-Scanning.gitlab-ci.yml

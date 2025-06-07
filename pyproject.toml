@@ -1,0 +1,371 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wifi-densepose"
+version = "1.0.0"
+description = "WiFi-based human pose estimation using CSI data and DensePose neural networks"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "WiFi-DensePose Team", email = "team@wifi-densepose.com"}
+]
+maintainers = [
+    {name = "WiFi-DensePose Team", email = "team@wifi-densepose.com"}
+]
+keywords = [
+    "wifi",
+    "csi",
+    "pose-estimation",
+    "densepose",
+    "neural-networks",
+    "computer-vision",
+    "machine-learning",
+    "iot",
+    "wireless-sensing"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: System :: Networking",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.9"
+dependencies = [
+    # Core framework
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    
+    # Database
+    "sqlalchemy>=2.0.0",
+    "alembic>=1.13.0",
+    "asyncpg>=0.29.0",
+    "psycopg2-binary>=2.9.0",
+    
+    # Redis (optional)
+    "redis>=5.0.0",
+    "aioredis>=2.0.0",
+    
+    # Neural networks and ML
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+    "numpy>=1.24.0",
+    "opencv-python>=4.8.0",
+    "pillow>=10.0.0",
+    "scikit-learn>=1.3.0",
+    
+    # Signal processing
+    "scipy>=1.11.0",
+    "matplotlib>=3.7.0",
+    "pandas>=2.1.0",
+    
+    # Networking and hardware
+    "scapy>=2.5.0",
+    "pyserial>=3.5",
+    "paramiko>=3.3.0",
+    
+    # Utilities
+    "click>=8.1.0",
+    "rich>=13.6.0",
+    "typer>=0.9.0",
+    "python-multipart>=0.0.6",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
+    "toml>=0.10.2",
+    
+    # Monitoring and logging
+    "prometheus-client>=0.19.0",
+    "structlog>=23.2.0",
+    "psutil>=5.9.0",
+    
+    # HTTP client
+    "httpx>=0.25.0",
+    "aiofiles>=23.2.0",
+    
+    # Validation and serialization
+    "marshmallow>=3.20.0",
+    "jsonschema>=4.19.0",
+    
+    # Background tasks
+    "celery>=5.3.0",
+    "kombu>=5.3.0",
+    
+    # Development and testing (optional)
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.9.0",
+    "isort>=5.12.0",
+    "flake8>=6.1.0",
+    "mypy>=1.6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "pytest-xdist>=3.3.0",
+    "black>=23.9.0",
+    "isort>=5.12.0",
+    "flake8>=6.1.0",
+    "mypy>=1.6.0",
+    "pre-commit>=3.5.0",
+    "bandit>=1.7.0",
+    "safety>=2.3.0",
+]
+
+docs = [
+    "sphinx>=7.2.0",
+    "sphinx-rtd-theme>=1.3.0",
+    "sphinx-autodoc-typehints>=1.25.0",
+    "myst-parser>=2.0.0",
+]
+
+gpu = [
+    "torch>=2.1.0+cu118",
+    "torchvision>=0.16.0+cu118",
+    "nvidia-ml-py>=12.535.0",
+]
+
+monitoring = [
+    "grafana-api>=1.0.3",
+    "influxdb-client>=1.38.0",
+    "elasticsearch>=8.10.0",
+]
+
+deployment = [
+    "gunicorn>=21.2.0",
+    "docker>=6.1.0",
+    "kubernetes>=28.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/wifi-densepose/wifi-densepose"
+Documentation = "https://wifi-densepose.readthedocs.io/"
+Repository = "https://github.com/wifi-densepose/wifi-densepose.git"
+"Bug Tracker" = "https://github.com/wifi-densepose/wifi-densepose/issues"
+Changelog = "https://github.com/wifi-densepose/wifi-densepose/blob/main/CHANGELOG.md"
+
+[project.scripts]
+wifi-densepose = "src.cli:cli"
+wdp = "src.cli:cli"
+
+[project.entry-points."wifi_densepose.plugins"]
+# Plugin entry points for extensibility
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+exclude = ["tests*", "docs*", "scripts*"]
+
+[tool.setuptools.package-data]
+"src" = [
+    "*.yaml",
+    "*.yml",
+    "*.json",
+    "*.toml",
+    "*.cfg",
+    "*.ini",
+]
+"src.models" = ["*.pth", "*.onnx", "*.pt"]
+"src.config" = ["*.yaml", "*.yml", "*.json"]
+
+[tool.black]
+line-length = 88
+target-version = ['py39', 'py310', 'py311', 'py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+  | migrations
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+known_first_party = ["src"]
+known_third_party = [
+    "fastapi",
+    "pydantic",
+    "sqlalchemy",
+    "torch",
+    "numpy",
+    "opencv",
+    "scipy",
+    "matplotlib",
+    "pandas",
+    "redis",
+    "celery",
+    "pytest",
+]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+    "scapy.*",
+    "cv2.*",
+    "torch.*",
+    "torchvision.*",
+    "matplotlib.*",
+    "scipy.*",
+    "sklearn.*",
+    "paramiko.*",
+    "serial.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=src",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+    "gpu: marks tests that require GPU",
+    "hardware: marks tests that require hardware",
+    "network: marks tests that require network access",
+]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*",
+    "*/migrations/*",
+    "*/venv/*",
+    "*/.venv/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.bandit]
+exclude_dirs = ["tests", "migrations"]
+skips = ["B101", "B601"]
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = [
+    "E203",  # whitespace before ':'
+    "E501",  # line too long
+    "W503",  # line break before binary operator
+]
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    ".venv",
+    "venv",
+    "migrations",
+]
+per-file-ignores = [
+    "__init__.py:F401",
+    "tests/*:S101",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+]
+ignore = [
+    "E501",  # line too long, handled by black
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+]
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/*" = ["S101"]
+
+[tool.ruff.isort]
+known-first-party = ["src"]
+
+# Alembic configuration
+[tool.alembic]
+script_location = "src/database/migrations"
+prepend_sys_path = ["."]
+version_path_separator = "os"
+sqlalchemy.url = "postgresql://localhost/wifi_densepose"
+
+[tool.semantic_release]
+version_variable = "src/__init__.py:__version__"
+version_pattern = "pyproject.toml:version = \"{version}\""
+build_command = "pip install build && python -m build"

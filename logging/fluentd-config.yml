@@ -1,0 +1,617 @@
+# Fluentd Configuration for WiFi-DensePose
+# This configuration sets up comprehensive log aggregation and processing
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluentd-config
+  namespace: kube-system
+  labels:
+    app: fluentd
+    component: logging
+data:
+  fluent.conf: |
+    # Main configuration file for Fluentd
+    @include kubernetes.conf
+    @include prometheus.conf
+    @include systemd.conf
+    @include wifi-densepose.conf
+
+  kubernetes.conf: |
+    # Kubernetes logs configuration
+    <source>
+      @type tail
+      @id in_tail_container_logs
+      path /var/log/containers/*.log
+      pos_file /var/log/fluentd-containers.log.pos
+      tag kubernetes.*
+      read_from_head true
+      <parse>
+        @type multi_format
+        <pattern>
+          format json
+          time_key time
+          time_format %Y-%m-%dT%H:%M:%S.%NZ
+        </pattern>
+        <pattern>
+          format /^(?<time>.+) (?<stream>stdout|stderr) [^ ]* (?<log>.*)$/
+          time_format %Y-%m-%dT%H:%M:%S.%N%:z
+        </pattern>
+      </parse>
+    </source>
+
+    # Kubernetes metadata enrichment
+    <filter kubernetes.**>
+      @type kubernetes_metadata
+      @id filter_kube_metadata
+      kubernetes_url "#{ENV['FLUENT_FILTER_KUBERNETES_URL'] || 'https://' + ENV.fetch('KUBERNETES_SERVICE_HOST') + ':' + ENV.fetch('KUBERNETES_SERVICE_PORT') + '/api'}"
+      verify_ssl "#{ENV['KUBERNETES_VERIFY_SSL'] || true}"
+      ca_file "#{ENV['KUBERNETES_CA_FILE']}"
+      skip_labels "#{ENV['FLUENT_KUBERNETES_METADATA_SKIP_LABELS'] || 'false'}"
+      skip_container_metadata "#{ENV['FLUENT_KUBERNETES_METADATA_SKIP_CONTAINER_METADATA'] || 'false'}"
+      skip_master_url "#{ENV['FLUENT_KUBERNETES_METADATA_SKIP_MASTER_URL'] || 'false'}"
+      skip_namespace_metadata "#{ENV['FLUENT_KUBERNETES_METADATA_SKIP_NAMESPACE_METADATA'] || 'false'}"
+    </filter>
+
+    # Parse JSON logs from applications
+    <filter kubernetes.**>
+      @type parser
+      @id filter_parser
+      key_name log
+      reserve_data true
+      remove_key_name_field true
+      <parse>
+        @type multi_format
+        <pattern>
+          format json
+        </pattern>
+        <pattern>
+          format none
+        </pattern>
+      </parse>
+    </filter>
+
+    # Add log level detection
+    <filter kubernetes.**>
+      @type record_transformer
+      @id filter_log_level
+      <record>
+        log_level ${record.dig("level") || record.dig("severity") || "info"}
+        service_name ${record.dig("kubernetes", "labels", "app") || "unknown"}
+        namespace ${record.dig("kubernetes", "namespace_name") || "default"}
+        pod_name ${record.dig("kubernetes", "pod_name") || "unknown"}
+        container_name ${record.dig("kubernetes", "container_name") || "unknown"}
+      </record>
+    </filter>
+
+  wifi-densepose.conf: |
+    # WiFi-DensePose specific log processing
+    <filter kubernetes.**wifi-densepose**>
+      @type record_transformer
+      @id filter_wifi_densepose
+      <record>
+        application "wifi-densepose"
+        environment "#{ENV['ENVIRONMENT'] || 'production'}"
+        cluster "#{ENV['CLUSTER_NAME'] || 'wifi-densepose'}"
+        region "#{ENV['AWS_REGION'] || 'us-west-2'}"
+      </record>
+    </filter>
+
+    # Parse WiFi-DensePose application logs
+    <filter kubernetes.**wifi-densepose**>
+      @type parser
+      @id filter_wifi_densepose_parser
+      key_name log
+      reserve_data true
+      remove_key_name_field false
+      <parse>
+        @type multi_format
+        <pattern>
+          format json
+          time_key timestamp
+          time_format %Y-%m-%dT%H:%M:%S.%L%z
+        </pattern>
+        <pattern>
+          format regexp
+          expression /^(?<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z) \[(?<level>\w+)\] (?<logger>\S+): (?<message>.*)$/
+          time_key timestamp
+          time_format %Y-%m-%dT%H:%M:%S.%L%z
+        </pattern>
+        <pattern>
+          format none
+        </pattern>
+      </parse>
+    </filter>
+
+    # Extract metrics from logs
+    <filter kubernetes.**wifi-densepose**>
+      @type prometheus
+      @id filter_prometheus_wifi_densepose
+      <metric>
+        name fluentd_input_status_num_records_total
+        type counter
+        desc The total number of incoming records
+        <labels>
+          tag ${tag}
+          hostname ${hostname}
+          namespace $.kubernetes.namespace_name
+          pod $.kubernetes.pod_name
+        </labels>
+      </metric>
+      <metric>
+        name fluentd_wifi_densepose_errors_total
+        type counter
+        desc The total number of error logs
+        <labels>
+          namespace $.kubernetes.namespace_name
+          pod $.kubernetes.pod_name
+          level $.level
+        </labels>
+      </metric>
+    </filter>
+
+    # Route error logs to separate output
+    <match kubernetes.**wifi-densepose**>
+      @type copy
+      <store>
+        @type rewrite_tag_filter
+        @id rewrite_tag_filter_wifi_densepose_errors
+        <rule>
+          key level
+          pattern ^(error|fatal|panic)$
+          tag wifi_densepose.errors
+        </rule>
+        <rule>
+          key level
+          pattern ^(warn|warning)$
+          tag wifi_densepose.warnings
+        </rule>
+        <rule>
+          key level
+          pattern .*
+          tag wifi_densepose.info
+        </rule>
+      </store>
+    </match>
+
+  systemd.conf: |
+    # System logs from systemd
+    <source>
+      @type systemd
+      @id in_systemd_kubelet
+      matches [{ "_SYSTEMD_UNIT": "kubelet.service" }]
+      <storage>
+        @type local
+        persistent true
+        path /var/log/fluentd-journald-kubelet.pos
+      </storage>
+      <entry>
+        fields_strip_underscores true
+      </entry>
+      tag systemd.kubelet
+    </source>
+
+    <source>
+      @type systemd
+      @id in_systemd_docker
+      matches [{ "_SYSTEMD_UNIT": "docker.service" }]
+      <storage>
+        @type local
+        persistent true
+        path /var/log/fluentd-journald-docker.pos
+      </storage>
+      <entry>
+        fields_strip_underscores true
+      </entry>
+      tag systemd.docker
+    </source>
+
+    <source>
+      @type systemd
+      @id in_systemd_containerd
+      matches [{ "_SYSTEMD_UNIT": "containerd.service" }]
+      <storage>
+        @type local
+        persistent true
+        path /var/log/fluentd-journald-containerd.pos
+      </storage>
+      <entry>
+        fields_strip_underscores true
+      </entry>
+      tag systemd.containerd
+    </source>
+
+  prometheus.conf: |
+    # Prometheus metrics exposure
+    <source>
+      @type prometheus
+      @id in_prometheus
+      bind 0.0.0.0
+      port 24231
+      metrics_path /metrics
+    </source>
+
+    <source>
+      @type prometheus_monitor
+      @id in_prometheus_monitor
+      interval 10
+      <labels>
+        hostname ${hostname}
+      </labels>
+    </source>
+
+    <source>
+      @type prometheus_output_monitor
+      @id in_prometheus_output_monitor
+      interval 10
+      <labels>
+        hostname ${hostname}
+      </labels>
+    </source>
+
+    <source>
+      @type prometheus_tail_monitor
+      @id in_prometheus_tail_monitor
+      interval 10
+      <labels>
+        hostname ${hostname}
+      </labels>
+    </source>
+
+  output.conf: |
+    # Output configuration for different log types
+    
+    # WiFi-DensePose error logs to dedicated index
+    <match wifi_densepose.errors>
+      @type elasticsearch
+      @id out_es_wifi_densepose_errors
+      host "#{ENV['FLUENT_ELASTICSEARCH_HOST'] || 'elasticsearch.logging.svc.cluster.local'}"
+      port "#{ENV['FLUENT_ELASTICSEARCH_PORT'] || '9200'}"
+      scheme "#{ENV['FLUENT_ELASTICSEARCH_SCHEME'] || 'http'}"
+      ssl_verify "#{ENV['FLUENT_ELASTICSEARCH_SSL_VERIFY'] || 'true'}"
+      user "#{ENV['FLUENT_ELASTICSEARCH_USER'] || use_default}"
+      password "#{ENV['FLUENT_ELASTICSEARCH_PASSWORD'] || use_default}"
+      index_name wifi-densepose-errors
+      type_name _doc
+      include_timestamp true
+      logstash_format true
+      logstash_prefix wifi-densepose-errors
+      logstash_dateformat %Y.%m.%d
+      <buffer>
+        @type file
+        path /var/log/fluentd-buffers/wifi-densepose-errors.buffer
+        flush_mode interval
+        retry_type exponential_backoff
+        flush_thread_count 2
+        flush_interval 5s
+        retry_forever
+        retry_max_interval 30
+        chunk_limit_size 2M
+        queue_limit_length 8
+        overflow_action block
+      </buffer>
+    </match>
+
+    # WiFi-DensePose warning logs
+    <match wifi_densepose.warnings>
+      @type elasticsearch
+      @id out_es_wifi_densepose_warnings
+      host "#{ENV['FLUENT_ELASTICSEARCH_HOST'] || 'elasticsearch.logging.svc.cluster.local'}"
+      port "#{ENV['FLUENT_ELASTICSEARCH_PORT'] || '9200'}"
+      scheme "#{ENV['FLUENT_ELASTICSEARCH_SCHEME'] || 'http'}"
+      ssl_verify "#{ENV['FLUENT_ELASTICSEARCH_SSL_VERIFY'] || 'true'}"
+      user "#{ENV['FLUENT_ELASTICSEARCH_USER'] || use_default}"
+      password "#{ENV['FLUENT_ELASTICSEARCH_PASSWORD'] || use_default}"
+      index_name wifi-densepose-warnings
+      type_name _doc
+      include_timestamp true
+      logstash_format true
+      logstash_prefix wifi-densepose-warnings
+      logstash_dateformat %Y.%m.%d
+      <buffer>
+        @type file
+        path /var/log/fluentd-buffers/wifi-densepose-warnings.buffer
+        flush_mode interval
+        retry_type exponential_backoff
+        flush_thread_count 2
+        flush_interval 10s
+        retry_forever
+        retry_max_interval 30
+        chunk_limit_size 2M
+        queue_limit_length 8
+        overflow_action block
+      </buffer>
+    </match>
+
+    # WiFi-DensePose info logs
+    <match wifi_densepose.info>
+      @type elasticsearch
+      @id out_es_wifi_densepose_info
+      host "#{ENV['FLUENT_ELASTICSEARCH_HOST'] || 'elasticsearch.logging.svc.cluster.local'}"
+      port "#{ENV['FLUENT_ELASTICSEARCH_PORT'] || '9200'}"
+      scheme "#{ENV['FLUENT_ELASTICSEARCH_SCHEME'] || 'http'}"
+      ssl_verify "#{ENV['FLUENT_ELASTICSEARCH_SSL_VERIFY'] || 'true'}"
+      user "#{ENV['FLUENT_ELASTICSEARCH_USER'] || use_default}"
+      password "#{ENV['FLUENT_ELASTICSEARCH_PASSWORD'] || use_default}"
+      index_name wifi-densepose-info
+      type_name _doc
+      include_timestamp true
+      logstash_format true
+      logstash_prefix wifi-densepose-info
+      logstash_dateformat %Y.%m.%d
+      <buffer>
+        @type file
+        path /var/log/fluentd-buffers/wifi-densepose-info.buffer
+        flush_mode interval
+        retry_type exponential_backoff
+        flush_thread_count 2
+        flush_interval 30s
+        retry_forever
+        retry_max_interval 30
+        chunk_limit_size 2M
+        queue_limit_length 8
+        overflow_action block
+      </buffer>
+    </match>
+
+    # Kubernetes system logs
+    <match kubernetes.**>
+      @type elasticsearch
+      @id out_es_kubernetes
+      host "#{ENV['FLUENT_ELASTICSEARCH_HOST'] || 'elasticsearch.logging.svc.cluster.local'}"
+      port "#{ENV['FLUENT_ELASTICSEARCH_PORT'] || '9200'}"
+      scheme "#{ENV['FLUENT_ELASTICSEARCH_SCHEME'] || 'http'}"
+      ssl_verify "#{ENV['FLUENT_ELASTICSEARCH_SSL_VERIFY'] || 'true'}"
+      user "#{ENV['FLUENT_ELASTICSEARCH_USER'] || use_default}"
+      password "#{ENV['FLUENT_ELASTICSEARCH_PASSWORD'] || use_default}"
+      index_name kubernetes
+      type_name _doc
+      include_timestamp true
+      logstash_format true
+      logstash_prefix kubernetes
+      logstash_dateformat %Y.%m.%d
+      <buffer>
+        @type file
+        path /var/log/fluentd-buffers/kubernetes.buffer
+        flush_mode interval
+        retry_type exponential_backoff
+        flush_thread_count 2
+        flush_interval 60s
+        retry_forever
+        retry_max_interval 30
+        chunk_limit_size 2M
+        queue_limit_length 8
+        overflow_action block
+      </buffer>
+    </match>
+
+    # System logs
+    <match systemd.**>
+      @type elasticsearch
+      @id out_es_systemd
+      host "#{ENV['FLUENT_ELASTICSEARCH_HOST'] || 'elasticsearch.logging.svc.cluster.local'}"
+      port "#{ENV['FLUENT_ELASTICSEARCH_PORT'] || '9200'}"
+      scheme "#{ENV['FLUENT_ELASTICSEARCH_SCHEME'] || 'http'}"
+      ssl_verify "#{ENV['FLUENT_ELASTICSEARCH_SSL_VERIFY'] || 'true'}"
+      user "#{ENV['FLUENT_ELASTICSEARCH_USER'] || use_default}"
+      password "#{ENV['FLUENT_ELASTICSEARCH_PASSWORD'] || use_default}"
+      index_name systemd
+      type_name _doc
+      include_timestamp true
+      logstash_format true
+      logstash_prefix systemd
+      logstash_dateformat %Y.%m.%d
+      <buffer>
+        @type file
+        path /var/log/fluentd-buffers/systemd.buffer
+        flush_mode interval
+        retry_type exponential_backoff
+        flush_thread_count 2
+        flush_interval 60s
+        retry_forever
+        retry_max_interval 30
+        chunk_limit_size 2M
+        queue_limit_length 8
+        overflow_action block
+      </buffer>
+    </match>
+
+    # Backup to S3 for long-term storage
+    <match **>
+      @type copy
+      <store>
+        @type s3
+        @id out_s3_backup
+        aws_key_id "#{ENV['AWS_ACCESS_KEY_ID']}"
+        aws_sec_key "#{ENV['AWS_SECRET_ACCESS_KEY']}"
+        s3_bucket "#{ENV['S3_BUCKET_NAME'] || 'wifi-densepose-logs'}"
+        s3_region "#{ENV['AWS_REGION'] || 'us-west-2'}"
+        path logs/
+        s3_object_key_format %{path}%{time_slice}_%{index}.%{file_extension}
+        time_slice_format %Y/%m/%d/%H
+        time_slice_wait 10m
+        utc
+        <buffer time>
+          @type file
+          path /var/log/fluentd-buffers/s3
+          timekey 3600
+          timekey_wait 10m
+          chunk_limit_size 256m
+        </buffer>
+        <format>
+          @type json
+        </format>
+      </store>
+      <store>
+        @type stdout
+        @id out_stdout_backup
+      </store>
+    </match>
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fluentd
+  namespace: kube-system
+  labels:
+    app: fluentd
+    component: logging
+spec:
+  selector:
+    matchLabels:
+      app: fluentd
+  template:
+    metadata:
+      labels:
+        app: fluentd
+        component: logging
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "24231"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: fluentd
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/control-plane
+          effect: NoSchedule
+      containers:
+        - name: fluentd
+          image: fluent/fluentd-kubernetes-daemonset:v1.16-debian-elasticsearch7-1
+          env:
+            - name: FLUENT_ELASTICSEARCH_HOST
+              value: "elasticsearch.logging.svc.cluster.local"
+            - name: FLUENT_ELASTICSEARCH_PORT
+              value: "9200"
+            - name: FLUENT_ELASTICSEARCH_SCHEME
+              value: "http"
+            - name: FLUENT_UID
+              value: "0"
+            - name: FLUENTD_SYSTEMD_CONF
+              value: disable
+            - name: ENVIRONMENT
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CLUSTER_NAME
+              value: "wifi-densepose"
+            - name: AWS_REGION
+              value: "us-west-2"
+            - name: S3_BUCKET_NAME
+              value: "wifi-densepose-logs"
+          resources:
+            limits:
+              memory: 512Mi
+              cpu: 200m
+            requests:
+              memory: 256Mi
+              cpu: 100m
+          volumeMounts:
+            - name: varlog
+              mountPath: /var/log
+            - name: varlibdockercontainers
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+            - name: fluentd-config
+              mountPath: /fluentd/etc
+            - name: fluentd-buffer
+              mountPath: /var/log/fluentd-buffers
+          ports:
+            - containerPort: 24231
+              name: prometheus
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: 24231
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: 24231
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: varlog
+          hostPath:
+            path: /var/log
+        - name: varlibdockercontainers
+          hostPath:
+            path: /var/lib/docker/containers
+        - name: fluentd-config
+          configMap:
+            name: fluentd-config
+        - name: fluentd-buffer
+          hostPath:
+            path: /var/log/fluentd-buffers
+            type: DirectoryOrCreate
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fluentd
+  namespace: kube-system
+  labels:
+    app: fluentd
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: fluentd
+  labels:
+    app: fluentd
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: fluentd
+  labels:
+    app: fluentd
+roleRef:
+  kind: ClusterRole
+  name: fluentd
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+  - kind: ServiceAccount
+    name: fluentd
+    namespace: kube-system
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fluentd
+  namespace: kube-system
+  labels:
+    app: fluentd
+    component: logging
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "24231"
+    prometheus.io/path: "/metrics"
+spec:
+  selector:
+    app: fluentd
+  ports:
+    - name: prometheus
+      port: 24231
+      targetPort: 24231
+      protocol: TCP
+  type: ClusterIP

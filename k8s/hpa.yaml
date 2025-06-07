@@ -1,0 +1,324 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: wifi-densepose-hpa
+  namespace: wifi-densepose
+  labels:
+    app: wifi-densepose
+    component: autoscaler
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: wifi-densepose
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Pods
+    pods:
+      metric:
+        name: websocket_connections_per_pod
+      target:
+        type: AverageValue
+        averageValue: "50"
+  - type: Object
+    object:
+      metric:
+        name: nginx_ingress_controller_requests_rate
+      describedObject:
+        apiVersion: v1
+        kind: Service
+        name: nginx-service
+      target:
+        type: Value
+        value: "1000"
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Min
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      - type: Pods
+        value: 4
+        periodSeconds: 60
+      selectPolicy: Max
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nginx-hpa
+  namespace: wifi-densepose
+  labels:
+    app: wifi-densepose
+    component: nginx-autoscaler
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nginx
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Object
+    object:
+      metric:
+        name: nginx_http_requests_per_second
+      describedObject:
+        apiVersion: v1
+        kind: Service
+        name: nginx-service
+      target:
+        type: Value
+        value: "500"
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 20
+        periodSeconds: 60
+      selectPolicy: Min
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      - type: Pods
+        value: 2
+        periodSeconds: 30
+      selectPolicy: Max
+
+---
+# Vertical Pod Autoscaler for database optimization
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: postgres-vpa
+  namespace: wifi-densepose
+  labels:
+    app: wifi-densepose
+    component: postgres-vpa
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: postgres
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: postgres
+      minAllowed:
+        cpu: 250m
+        memory: 512Mi
+      maxAllowed:
+        cpu: 2
+        memory: 4Gi
+      controlledResources: ["cpu", "memory"]
+      controlledValues: RequestsAndLimits
+
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: redis-vpa
+  namespace: wifi-densepose
+  labels:
+    app: wifi-densepose
+    component: redis-vpa
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: redis
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: redis
+      minAllowed:
+        cpu: 100m
+        memory: 256Mi
+      maxAllowed:
+        cpu: 1
+        memory: 2Gi
+      controlledResources: ["cpu", "memory"]
+      controlledValues: RequestsAndLimits
+
+---
+# Pod Disruption Budget for high availability
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: wifi-densepose-pdb
+  namespace: wifi-densepose
+  labels:
+    app: wifi-densepose
+    component: pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: wifi-densepose
+      component: api
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nginx-pdb
+  namespace: wifi-densepose
+  labels:
+    app: wifi-densepose
+    component: nginx-pdb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: wifi-densepose
+      component: nginx
+
+---
+# Custom Resource for advanced autoscaling (KEDA)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: wifi-densepose-keda-scaler
+  namespace: wifi-densepose
+  labels:
+    app: wifi-densepose
+    component: keda-scaler
+spec:
+  scaleTargetRef:
+    name: wifi-densepose
+  pollingInterval: 30
+  cooldownPeriod: 300
+  idleReplicaCount: 3
+  minReplicaCount: 3
+  maxReplicaCount: 50
+  fallback:
+    failureThreshold: 3
+    replicas: 6
+  advanced:
+    restoreToOriginalReplicaCount: true
+    horizontalPodAutoscalerConfig:
+      name: wifi-densepose-keda-hpa
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+          - type: Percent
+            value: 10
+            periodSeconds: 60
+        scaleUp:
+          stabilizationWindowSeconds: 60
+          policies:
+          - type: Percent
+            value: 50
+            periodSeconds: 60
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service.monitoring.svc.cluster.local:9090
+      metricName: wifi_densepose_active_connections
+      threshold: '80'
+      query: sum(wifi_densepose_websocket_connections_active)
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service.monitoring.svc.cluster.local:9090
+      metricName: wifi_densepose_request_rate
+      threshold: '1000'
+      query: sum(rate(http_requests_total{service="wifi-densepose"}[5m]))
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus-service.monitoring.svc.cluster.local:9090
+      metricName: wifi_densepose_queue_length
+      threshold: '100'
+      query: sum(wifi_densepose_processing_queue_length)
+  - type: redis
+    metadata:
+      address: redis-service.wifi-densepose.svc.cluster.local:6379
+      listName: processing_queue
+      listLength: '50'
+      passwordFromEnv: REDIS_PASSWORD
+
+---
+# Network Policy for autoscaling components
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: autoscaling-network-policy
+  namespace: wifi-densepose
+  labels:
+    app: wifi-densepose
+    component: autoscaling-network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: wifi-densepose
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090
+  - to:
+    - podSelector:
+        matchLabels:
+          component: redis
+    ports:
+    - protocol: TCP
+      port: 6379

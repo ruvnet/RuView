@@ -1,0 +1,511 @@
+---
+# WiFi-DensePose Ansible Playbook
+# This playbook configures servers for WiFi-DensePose deployment
+
+- name: Configure WiFi-DensePose Infrastructure
+  hosts: all
+  become: yes
+  gather_facts: yes
+  vars:
+    # Application Configuration
+    app_name: wifi-densepose
+    app_user: wifi-densepose
+    app_group: wifi-densepose
+    app_home: /opt/wifi-densepose
+    
+    # Docker Configuration
+    docker_version: "24.0"
+    docker_compose_version: "2.21.0"
+    
+    # Kubernetes Configuration
+    kubernetes_version: "1.28"
+    kubectl_version: "1.28.0"
+    helm_version: "3.12.0"
+    
+    # Monitoring Configuration
+    node_exporter_version: "1.6.1"
+    prometheus_version: "2.45.0"
+    grafana_version: "10.0.0"
+    
+    # Security Configuration
+    fail2ban_enabled: true
+    ufw_enabled: true
+    
+    # System Configuration
+    timezone: "UTC"
+    ntp_servers:
+      - "0.pool.ntp.org"
+      - "1.pool.ntp.org"
+      - "2.pool.ntp.org"
+      - "3.pool.ntp.org"
+
+  pre_tasks:
+    - name: Update package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Update package cache (RedHat)
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+
+  tasks:
+    # System Configuration
+    - name: Set timezone
+      timezone:
+        name: "{{ timezone }}"
+
+    - name: Install essential packages
+      package:
+        name:
+          - curl
+          - wget
+          - git
+          - vim
+          - htop
+          - unzip
+          - jq
+          - python3
+          - python3-pip
+          - ca-certificates
+          - gnupg
+          - lsb-release
+          - apt-transport-https
+        state: present
+
+    - name: Configure NTP
+      template:
+        src: ntp.conf.j2
+        dest: /etc/ntp.conf
+        backup: yes
+      notify: restart ntp
+
+    # Security Configuration
+    - name: Install and configure UFW firewall
+      block:
+        - name: Install UFW
+          package:
+            name: ufw
+            state: present
+
+        - name: Reset UFW to defaults
+          ufw:
+            state: reset
+
+        - name: Configure UFW defaults
+          ufw:
+            direction: "{{ item.direction }}"
+            policy: "{{ item.policy }}"
+          loop:
+            - { direction: 'incoming', policy: 'deny' }
+            - { direction: 'outgoing', policy: 'allow' }
+
+        - name: Allow SSH
+          ufw:
+            rule: allow
+            port: '22'
+            proto: tcp
+
+        - name: Allow HTTP
+          ufw:
+            rule: allow
+            port: '80'
+            proto: tcp
+
+        - name: Allow HTTPS
+          ufw:
+            rule: allow
+            port: '443'
+            proto: tcp
+
+        - name: Allow Kubernetes API
+          ufw:
+            rule: allow
+            port: '6443'
+            proto: tcp
+
+        - name: Allow Node Exporter
+          ufw:
+            rule: allow
+            port: '9100'
+            proto: tcp
+            src: '10.0.0.0/8'
+
+        - name: Enable UFW
+          ufw:
+            state: enabled
+      when: ufw_enabled
+
+    - name: Install and configure Fail2Ban
+      block:
+        - name: Install Fail2Ban
+          package:
+            name: fail2ban
+            state: present
+
+        - name: Configure Fail2Ban jail
+          template:
+            src: jail.local.j2
+            dest: /etc/fail2ban/jail.local
+            backup: yes
+          notify: restart fail2ban
+
+        - name: Start and enable Fail2Ban
+          systemd:
+            name: fail2ban
+            state: started
+            enabled: yes
+      when: fail2ban_enabled
+
+    # User Management
+    - name: Create application group
+      group:
+        name: "{{ app_group }}"
+        state: present
+
+    - name: Create application user
+      user:
+        name: "{{ app_user }}"
+        group: "{{ app_group }}"
+        home: "{{ app_home }}"
+        shell: /bin/bash
+        system: yes
+        create_home: yes
+
+    - name: Create application directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: '0755'
+      loop:
+        - "{{ app_home }}"
+        - "{{ app_home }}/logs"
+        - "{{ app_home }}/data"
+        - "{{ app_home }}/config"
+        - "{{ app_home }}/backups"
+
+    # Docker Installation
+    - name: Install Docker
+      block:
+        - name: Add Docker GPG key
+          apt_key:
+            url: https://download.docker.com/linux/ubuntu/gpg
+            state: present
+
+        - name: Add Docker repository
+          apt_repository:
+            repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+            state: present
+
+        - name: Install Docker packages
+          package:
+            name:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-buildx-plugin
+              - docker-compose-plugin
+            state: present
+
+        - name: Add users to docker group
+          user:
+            name: "{{ item }}"
+            groups: docker
+            append: yes
+          loop:
+            - "{{ app_user }}"
+            - "{{ ansible_user }}"
+
+        - name: Start and enable Docker
+          systemd:
+            name: docker
+            state: started
+            enabled: yes
+
+        - name: Configure Docker daemon
+          template:
+            src: docker-daemon.json.j2
+            dest: /etc/docker/daemon.json
+            backup: yes
+          notify: restart docker
+
+    # Kubernetes Tools Installation
+    - name: Install Kubernetes tools
+      block:
+        - name: Add Kubernetes GPG key
+          apt_key:
+            url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+            state: present
+
+        - name: Add Kubernetes repository
+          apt_repository:
+            repo: "deb https://apt.kubernetes.io/ kubernetes-xenial main"
+            state: present
+
+        - name: Install kubectl
+          package:
+            name: kubectl={{ kubectl_version }}-00
+            state: present
+
+        - name: Hold kubectl package
+          dpkg_selections:
+            name: kubectl
+            selection: hold
+
+        - name: Install Helm
+          unarchive:
+            src: "https://get.helm.sh/helm-v{{ helm_version }}-linux-amd64.tar.gz"
+            dest: /tmp
+            remote_src: yes
+            creates: /tmp/linux-amd64/helm
+
+        - name: Copy Helm binary
+          copy:
+            src: /tmp/linux-amd64/helm
+            dest: /usr/local/bin/helm
+            mode: '0755'
+            remote_src: yes
+
+    # Monitoring Setup
+    - name: Install Node Exporter
+      block:
+        - name: Create node_exporter user
+          user:
+            name: node_exporter
+            system: yes
+            shell: /bin/false
+            home: /var/lib/node_exporter
+            create_home: no
+
+        - name: Download Node Exporter
+          unarchive:
+            src: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+            dest: /tmp
+            remote_src: yes
+            creates: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64"
+
+        - name: Copy Node Exporter binary
+          copy:
+            src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+            dest: /usr/local/bin/node_exporter
+            mode: '0755'
+            owner: node_exporter
+            group: node_exporter
+            remote_src: yes
+
+        - name: Create Node Exporter systemd service
+          template:
+            src: node_exporter.service.j2
+            dest: /etc/systemd/system/node_exporter.service
+          notify:
+            - reload systemd
+            - restart node_exporter
+
+        - name: Start and enable Node Exporter
+          systemd:
+            name: node_exporter
+            state: started
+            enabled: yes
+            daemon_reload: yes
+
+    # Log Management
+    - name: Configure log rotation
+      template:
+        src: wifi-densepose-logrotate.j2
+        dest: /etc/logrotate.d/wifi-densepose
+
+    - name: Create log directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: syslog
+        group: adm
+        mode: '0755'
+      loop:
+        - /var/log/wifi-densepose
+        - /var/log/wifi-densepose/application
+        - /var/log/wifi-densepose/nginx
+        - /var/log/wifi-densepose/monitoring
+
+    # System Optimization
+    - name: Configure system limits
+      template:
+        src: limits.conf.j2
+        dest: /etc/security/limits.d/wifi-densepose.conf
+
+    - name: Configure sysctl parameters
+      template:
+        src: sysctl.conf.j2
+        dest: /etc/sysctl.d/99-wifi-densepose.conf
+      notify: reload sysctl
+
+    # Backup Configuration
+    - name: Install backup tools
+      package:
+        name:
+          - rsync
+          - awscli
+        state: present
+
+    - name: Create backup script
+      template:
+        src: backup.sh.j2
+        dest: "{{ app_home }}/backup.sh"
+        mode: '0755'
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+
+    - name: Configure backup cron job
+      cron:
+        name: "WiFi-DensePose backup"
+        minute: "0"
+        hour: "2"
+        job: "{{ app_home }}/backup.sh"
+        user: "{{ app_user }}"
+
+    # SSL/TLS Configuration
+    - name: Install SSL tools
+      package:
+        name:
+          - openssl
+          - certbot
+          - python3-certbot-nginx
+        state: present
+
+    - name: Create SSL directory
+      file:
+        path: /etc/ssl/wifi-densepose
+        state: directory
+        mode: '0755'
+
+    # Health Check Script
+    - name: Create health check script
+      template:
+        src: health-check.sh.j2
+        dest: "{{ app_home }}/health-check.sh"
+        mode: '0755'
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+
+    - name: Configure health check cron job
+      cron:
+        name: "WiFi-DensePose health check"
+        minute: "*/5"
+        job: "{{ app_home }}/health-check.sh"
+        user: "{{ app_user }}"
+
+  handlers:
+    - name: restart ntp
+      systemd:
+        name: ntp
+        state: restarted
+
+    - name: restart fail2ban
+      systemd:
+        name: fail2ban
+        state: restarted
+
+    - name: restart docker
+      systemd:
+        name: docker
+        state: restarted
+
+    - name: reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: restart node_exporter
+      systemd:
+        name: node_exporter
+        state: restarted
+
+    - name: reload sysctl
+      command: sysctl --system
+
+# Additional playbooks for specific environments
+- name: Configure Development Environment
+  hosts: development
+  become: yes
+  tasks:
+    - name: Install development tools
+      package:
+        name:
+          - build-essential
+          - python3-dev
+          - nodejs
+          - npm
+        state: present
+
+    - name: Configure development Docker settings
+      template:
+        src: docker-daemon-dev.json.j2
+        dest: /etc/docker/daemon.json
+        backup: yes
+      notify: restart docker
+
+- name: Configure Production Environment
+  hosts: production
+  become: yes
+  tasks:
+    - name: Configure production security settings
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: yes
+      loop:
+        - { name: 'net.ipv4.ip_forward', value: '0' }
+        - { name: 'net.ipv4.conf.all.send_redirects', value: '0' }
+        - { name: 'net.ipv4.conf.default.send_redirects', value: '0' }
+        - { name: 'net.ipv4.conf.all.accept_source_route', value: '0' }
+        - { name: 'net.ipv4.conf.default.accept_source_route', value: '0' }
+
+    - name: Configure production log levels
+      lineinfile:
+        path: /etc/rsyslog.conf
+        line: "*.info;mail.none;authpriv.none;cron.none /var/log/messages"
+        create: yes
+
+    - name: Install production monitoring
+      package:
+        name:
+          - auditd
+          - aide
+        state: present
+
+- name: Configure Kubernetes Nodes
+  hosts: kubernetes
+  become: yes
+  tasks:
+    - name: Configure kubelet
+      template:
+        src: kubelet-config.yaml.j2
+        dest: /var/lib/kubelet/config.yaml
+      notify: restart kubelet
+
+    - name: Configure container runtime
+      template:
+        src: containerd-config.toml.j2
+        dest: /etc/containerd/config.toml
+      notify: restart containerd
+
+    - name: Start and enable kubelet
+      systemd:
+        name: kubelet
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: restart kubelet
+      systemd:
+        name: kubelet
+        state: restarted
+
+    - name: restart containerd
+      systemd:
+        name: containerd
+        state: restarted

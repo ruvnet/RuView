@@ -1,0 +1,287 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wifi-densepose-config
+  namespace: wifi-densepose
+  labels:
+    app: wifi-densepose
+    component: config
+data:
+  # Application Configuration
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "info"
+  DEBUG: "false"
+  RELOAD: "false"
+  WORKERS: "4"
+  
+  # API Configuration
+  API_PREFIX: "/api/v1"
+  DOCS_URL: "/docs"
+  REDOC_URL: "/redoc"
+  OPENAPI_URL: "/openapi.json"
+  
+  # Feature Flags
+  ENABLE_AUTHENTICATION: "true"
+  ENABLE_RATE_LIMITING: "true"
+  ENABLE_WEBSOCKETS: "true"
+  ENABLE_REAL_TIME_PROCESSING: "true"
+  ENABLE_HISTORICAL_DATA: "true"
+  ENABLE_TEST_ENDPOINTS: "false"
+  METRICS_ENABLED: "true"
+  
+  # Rate Limiting
+  RATE_LIMIT_REQUESTS: "100"
+  RATE_LIMIT_WINDOW: "60"
+  
+  # CORS Configuration
+  CORS_ORIGINS: "https://wifi-densepose.com,https://app.wifi-densepose.com"
+  CORS_METHODS: "GET,POST,PUT,DELETE,OPTIONS"
+  CORS_HEADERS: "Content-Type,Authorization,X-Requested-With"
+  
+  # Database Configuration
+  DATABASE_HOST: "postgres-service"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: "wifi_densepose"
+  DATABASE_USER: "wifi_user"
+  
+  # Redis Configuration
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  
+  # Hardware Configuration
+  ROUTER_TIMEOUT: "30"
+  CSI_BUFFER_SIZE: "1024"
+  MAX_ROUTERS: "10"
+  
+  # Model Configuration
+  MODEL_PATH: "/app/models"
+  MODEL_CACHE_SIZE: "3"
+  INFERENCE_BATCH_SIZE: "8"
+  
+  # Streaming Configuration
+  MAX_WEBSOCKET_CONNECTIONS: "100"
+  STREAM_BUFFER_SIZE: "1000"
+  HEARTBEAT_INTERVAL: "30"
+  
+  # Monitoring Configuration
+  PROMETHEUS_PORT: "8080"
+  METRICS_PATH: "/metrics"
+  HEALTH_CHECK_PATH: "/health"
+  
+  # Logging Configuration
+  LOG_FORMAT: "json"
+  LOG_FILE: "/app/logs/app.log"
+  LOG_MAX_SIZE: "100MB"
+  LOG_BACKUP_COUNT: "5"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: wifi-densepose
+  labels:
+    app: wifi-densepose
+    component: nginx
+data:
+  nginx.conf: |
+    user nginx;
+    worker_processes auto;
+    error_log /var/log/nginx/error.log warn;
+    pid /var/run/nginx.pid;
+
+    events {
+        worker_connections 1024;
+        use epoll;
+        multi_accept on;
+    }
+
+    http {
+        include /etc/nginx/mime.types;
+        default_type application/octet-stream;
+
+        log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                        '$status $body_bytes_sent "$http_referer" '
+                        '"$http_user_agent" "$http_x_forwarded_for" '
+                        'rt=$request_time uct="$upstream_connect_time" '
+                        'uht="$upstream_header_time" urt="$upstream_response_time"';
+
+        access_log /var/log/nginx/access.log main;
+
+        sendfile on;
+        tcp_nopush on;
+        tcp_nodelay on;
+        keepalive_timeout 65;
+        types_hash_max_size 2048;
+        client_max_body_size 10M;
+
+        gzip on;
+        gzip_vary on;
+        gzip_min_length 1024;
+        gzip_proxied any;
+        gzip_comp_level 6;
+        gzip_types
+            text/plain
+            text/css
+            text/xml
+            text/javascript
+            application/json
+            application/javascript
+            application/xml+rss
+            application/atom+xml
+            image/svg+xml;
+
+        upstream wifi_densepose_backend {
+            least_conn;
+            server wifi-densepose-service:8000 max_fails=3 fail_timeout=30s;
+            keepalive 32;
+        }
+
+        server {
+            listen 80;
+            server_name _;
+            return 301 https://$server_name$request_uri;
+        }
+
+        server {
+            listen 443 ssl http2;
+            server_name wifi-densepose.com;
+
+            ssl_certificate /etc/nginx/ssl/tls.crt;
+            ssl_certificate_key /etc/nginx/ssl/tls.key;
+            ssl_protocols TLSv1.2 TLSv1.3;
+            ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384;
+            ssl_prefer_server_ciphers off;
+            ssl_session_cache shared:SSL:10m;
+            ssl_session_timeout 10m;
+
+            location / {
+                proxy_pass http://wifi_densepose_backend;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_connect_timeout 30s;
+                proxy_send_timeout 30s;
+                proxy_read_timeout 30s;
+            }
+
+            location /ws {
+                proxy_pass http://wifi_densepose_backend;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection "upgrade";
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_connect_timeout 7d;
+                proxy_send_timeout 7d;
+                proxy_read_timeout 7d;
+            }
+
+            location /health {
+                access_log off;
+                proxy_pass http://wifi_densepose_backend/health;
+                proxy_set_header Host $host;
+            }
+
+            location /metrics {
+                access_log off;
+                proxy_pass http://wifi_densepose_backend/metrics;
+                proxy_set_header Host $host;
+                allow 10.0.0.0/8;
+                allow 172.16.0.0/12;
+                allow 192.168.0.0/16;
+                deny all;
+            }
+        }
+    }
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: wifi-densepose
+  labels:
+    app: wifi-densepose
+    component: postgres
+data:
+  init-db.sql: |
+    -- Create database if not exists
+    CREATE DATABASE IF NOT EXISTS wifi_densepose;
+    
+    -- Create user if not exists
+    DO
+    $do$
+    BEGIN
+       IF NOT EXISTS (
+          SELECT FROM pg_catalog.pg_roles
+          WHERE  rolname = 'wifi_user') THEN
+          
+          CREATE ROLE wifi_user LOGIN PASSWORD 'wifi_pass';
+       END IF;
+    END
+    $do$;
+    
+    -- Grant privileges
+    GRANT ALL PRIVILEGES ON DATABASE wifi_densepose TO wifi_user;
+    
+    -- Connect to the database
+    \c wifi_densepose;
+    
+    -- Create extensions
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+    CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";
+    
+    -- Create tables
+    CREATE TABLE IF NOT EXISTS pose_sessions (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        session_id VARCHAR(255) UNIQUE NOT NULL,
+        router_id VARCHAR(255) NOT NULL,
+        start_time TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        end_time TIMESTAMP WITH TIME ZONE,
+        status VARCHAR(50) DEFAULT 'active',
+        metadata JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    
+    CREATE TABLE IF NOT EXISTS pose_data (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        session_id UUID REFERENCES pose_sessions(id),
+        timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        pose_keypoints JSONB NOT NULL,
+        confidence_scores JSONB,
+        bounding_box JSONB,
+        metadata JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    
+    CREATE TABLE IF NOT EXISTS csi_data (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        session_id UUID REFERENCES pose_sessions(id),
+        timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        router_id VARCHAR(255) NOT NULL,
+        csi_matrix JSONB NOT NULL,
+        phase_data JSONB,
+        amplitude_data JSONB,
+        metadata JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    
+    -- Create indexes
+    CREATE INDEX IF NOT EXISTS idx_pose_sessions_session_id ON pose_sessions(session_id);
+    CREATE INDEX IF NOT EXISTS idx_pose_sessions_router_id ON pose_sessions(router_id);
+    CREATE INDEX IF NOT EXISTS idx_pose_sessions_start_time ON pose_sessions(start_time);
+    CREATE INDEX IF NOT EXISTS idx_pose_data_session_id ON pose_data(session_id);
+    CREATE INDEX IF NOT EXISTS idx_pose_data_timestamp ON pose_data(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_csi_data_session_id ON csi_data(session_id);
+    CREATE INDEX IF NOT EXISTS idx_csi_data_router_id ON csi_data(router_id);
+    CREATE INDEX IF NOT EXISTS idx_csi_data_timestamp ON csi_data(timestamp);
+    
+    -- Grant table privileges
+    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO wifi_user;
+    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO wifi_user;

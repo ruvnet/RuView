@@ -1,0 +1,410 @@
+# WiFi-DensePose Alerting Rules
+# This file defines alerting rules for monitoring the WiFi-DensePose application
+
+groups:
+  - name: wifi-densepose.application
+    rules:
+      # Application Health Alerts
+      - alert: ApplicationDown
+        expr: up{job="wifi-densepose-app"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: wifi-densepose
+          team: platform
+        annotations:
+          summary: "WiFi-DensePose application is down"
+          description: "WiFi-DensePose application on {{ $labels.instance }} has been down for more than 1 minute."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/application-down"
+
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{job="wifi-densepose-app",status=~"5.."}[5m])) /
+            sum(rate(http_requests_total{job="wifi-densepose-app"}[5m]))
+          ) * 100 > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: wifi-densepose
+          team: platform
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value }}% for the last 5 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/high-error-rate"
+
+      - alert: CriticalErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{job="wifi-densepose-app",status=~"5.."}[5m])) /
+            sum(rate(http_requests_total{job="wifi-densepose-app"}[5m]))
+          ) * 100 > 10
+        for: 2m
+        labels:
+          severity: critical
+          service: wifi-densepose
+          team: platform
+        annotations:
+          summary: "Critical error rate detected"
+          description: "Error rate is {{ $value }}% for the last 2 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/critical-error-rate"
+
+      - alert: HighResponseTime
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket{job="wifi-densepose-app"}[5m])) by (le)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: wifi-densepose
+          team: platform
+        annotations:
+          summary: "High response time detected"
+          description: "95th percentile response time is {{ $value }}s for the last 5 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/high-response-time"
+
+      - alert: LowRequestRate
+        expr: sum(rate(http_requests_total{job="wifi-densepose-app"}[5m])) < 1
+        for: 10m
+        labels:
+          severity: warning
+          service: wifi-densepose
+          team: platform
+        annotations:
+          summary: "Low request rate detected"
+          description: "Request rate is {{ $value }} requests/second for the last 10 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/low-request-rate"
+
+  - name: wifi-densepose.infrastructure
+    rules:
+      # Infrastructure Alerts
+      - alert: HighCPUUsage
+        expr: |
+          (
+            sum(rate(container_cpu_usage_seconds_total{namespace=~"wifi-densepose.*",container!="POD"}[5m])) by (pod) /
+            sum(container_spec_cpu_quota{namespace=~"wifi-densepose.*",container!="POD"} / container_spec_cpu_period{namespace=~"wifi-densepose.*",container!="POD"}) by (pod)
+          ) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: wifi-densepose
+          team: platform
+        annotations:
+          summary: "High CPU usage detected"
+          description: "Pod {{ $labels.pod }} CPU usage is {{ $value }}% for the last 5 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/high-cpu-usage"
+
+      - alert: HighMemoryUsage
+        expr: |
+          (
+            sum(container_memory_working_set_bytes{namespace=~"wifi-densepose.*",container!="POD"}) by (pod) /
+            sum(container_spec_memory_limit_bytes{namespace=~"wifi-densepose.*",container!="POD"}) by (pod)
+          ) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: wifi-densepose
+          team: platform
+        annotations:
+          summary: "High memory usage detected"
+          description: "Pod {{ $labels.pod }} memory usage is {{ $value }}% for the last 5 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/high-memory-usage"
+
+      - alert: PodCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total{namespace=~"wifi-densepose.*"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: wifi-densepose
+          team: platform
+        annotations:
+          summary: "Pod is crash looping"
+          description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is crash looping."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/pod-crash-looping"
+
+      - alert: PodNotReady
+        expr: kube_pod_status_ready{namespace=~"wifi-densepose.*",condition="false"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          service: wifi-densepose
+          team: platform
+        annotations:
+          summary: "Pod is not ready"
+          description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has been not ready for more than 5 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/pod-not-ready"
+
+      - alert: DeploymentReplicasMismatch
+        expr: |
+          kube_deployment_spec_replicas{namespace=~"wifi-densepose.*"} !=
+          kube_deployment_status_replicas_available{namespace=~"wifi-densepose.*"}
+        for: 10m
+        labels:
+          severity: warning
+          service: wifi-densepose
+          team: platform
+        annotations:
+          summary: "Deployment replicas mismatch"
+          description: "Deployment {{ $labels.deployment }} in namespace {{ $labels.namespace }} has {{ $value }} available replicas, expected {{ $labels.spec_replicas }}."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/deployment-replicas-mismatch"
+
+  - name: wifi-densepose.database
+    rules:
+      # Database Alerts
+      - alert: DatabaseDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: database
+          team: platform
+        annotations:
+          summary: "PostgreSQL database is down"
+          description: "PostgreSQL database on {{ $labels.instance }} has been down for more than 1 minute."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/database-down"
+
+      - alert: HighDatabaseConnections
+        expr: |
+          (
+            pg_stat_database_numbackends{datname="wifi_densepose"} /
+            pg_settings_max_connections
+          ) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+          team: platform
+        annotations:
+          summary: "High database connection usage"
+          description: "Database connection usage is {{ $value }}% for the last 5 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/high-database-connections"
+
+      - alert: DatabaseSlowQueries
+        expr: pg_stat_activity_max_tx_duration{datname="wifi_densepose"} > 300
+        for: 2m
+        labels:
+          severity: warning
+          service: database
+          team: platform
+        annotations:
+          summary: "Slow database queries detected"
+          description: "Longest running query has been active for {{ $value }} seconds."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/database-slow-queries"
+
+      - alert: DatabaseDiskSpaceHigh
+        expr: |
+          (
+            (node_filesystem_size_bytes{mountpoint="/var/lib/postgresql"} - node_filesystem_free_bytes{mountpoint="/var/lib/postgresql"}) /
+            node_filesystem_size_bytes{mountpoint="/var/lib/postgresql"}
+          ) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+          team: platform
+        annotations:
+          summary: "Database disk space usage high"
+          description: "Database disk usage is {{ $value }}% for the last 5 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/database-disk-space-high"
+
+  - name: wifi-densepose.redis
+    rules:
+      # Redis Alerts
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+          team: platform
+        annotations:
+          summary: "Redis is down"
+          description: "Redis on {{ $labels.instance }} has been down for more than 1 minute."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/redis-down"
+
+      - alert: RedisHighMemoryUsage
+        expr: |
+          (
+            redis_memory_used_bytes /
+            redis_memory_max_bytes
+          ) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+          team: platform
+        annotations:
+          summary: "Redis high memory usage"
+          description: "Redis memory usage is {{ $value }}% for the last 5 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/redis-high-memory-usage"
+
+      - alert: RedisHighConnections
+        expr: redis_connected_clients > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+          team: platform
+        annotations:
+          summary: "Redis high connection count"
+          description: "Redis has {{ $value }} connected clients for the last 5 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/redis-high-connections"
+
+  - name: wifi-densepose.kubernetes
+    rules:
+      # Kubernetes Cluster Alerts
+      - alert: KubernetesNodeNotReady
+        expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: kubernetes
+          team: platform
+        annotations:
+          summary: "Kubernetes node not ready"
+          description: "Node {{ $labels.node }} has been not ready for more than 5 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/kubernetes-node-not-ready"
+
+      - alert: KubernetesNodeHighCPU
+        expr: |
+          (
+            1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) by (instance)
+          ) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: kubernetes
+          team: platform
+        annotations:
+          summary: "Kubernetes node high CPU usage"
+          description: "Node {{ $labels.instance }} CPU usage is {{ $value }}% for the last 5 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/kubernetes-node-high-cpu"
+
+      - alert: KubernetesNodeHighMemory
+        expr: |
+          (
+            1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+          ) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: kubernetes
+          team: platform
+        annotations:
+          summary: "Kubernetes node high memory usage"
+          description: "Node {{ $labels.instance }} memory usage is {{ $value }}% for the last 5 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/kubernetes-node-high-memory"
+
+      - alert: KubernetesNodeDiskSpaceHigh
+        expr: |
+          (
+            (node_filesystem_size_bytes{fstype!="tmpfs"} - node_filesystem_free_bytes{fstype!="tmpfs"}) /
+            node_filesystem_size_bytes{fstype!="tmpfs"}
+          ) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: kubernetes
+          team: platform
+        annotations:
+          summary: "Kubernetes node high disk usage"
+          description: "Node {{ $labels.instance }} disk usage is {{ $value }}% on {{ $labels.mountpoint }}."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/kubernetes-node-disk-space-high"
+
+      - alert: KubernetesPersistentVolumeClaimPending
+        expr: kube_persistentvolumeclaim_status_phase{phase="Pending"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          service: kubernetes
+          team: platform
+        annotations:
+          summary: "PersistentVolumeClaim pending"
+          description: "PersistentVolumeClaim {{ $labels.persistentvolumeclaim }} in namespace {{ $labels.namespace }} has been pending for more than 5 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/kubernetes-pvc-pending"
+
+  - name: wifi-densepose.security
+    rules:
+      # Security Alerts
+      - alert: UnauthorizedAPIAccess
+        expr: increase(http_requests_total{job="wifi-densepose-app",status="401"}[5m]) > 10
+        for: 1m
+        labels:
+          severity: warning
+          service: wifi-densepose
+          team: security
+        annotations:
+          summary: "High number of unauthorized API access attempts"
+          description: "{{ $value }} unauthorized access attempts in the last 5 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/unauthorized-api-access"
+
+      - alert: SuspiciousActivity
+        expr: increase(http_requests_total{job="wifi-densepose-app",status="403"}[5m]) > 20
+        for: 1m
+        labels:
+          severity: critical
+          service: wifi-densepose
+          team: security
+        annotations:
+          summary: "Suspicious activity detected"
+          description: "{{ $value }} forbidden access attempts in the last 5 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/suspicious-activity"
+
+      - alert: CertificateExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 30
+        for: 1h
+        labels:
+          severity: warning
+          service: wifi-densepose
+          team: platform
+        annotations:
+          summary: "SSL certificate expiring soon"
+          description: "SSL certificate for {{ $labels.instance }} expires in {{ $value }} days."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/certificate-expiring-soon"
+
+  - name: wifi-densepose.business
+    rules:
+      # Business Logic Alerts
+      - alert: LowDataProcessingRate
+        expr: rate(wifi_densepose_data_processed_total[5m]) < 10
+        for: 10m
+        labels:
+          severity: warning
+          service: wifi-densepose
+          team: product
+        annotations:
+          summary: "Low data processing rate"
+          description: "Data processing rate is {{ $value }} items/second for the last 10 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/low-data-processing-rate"
+
+      - alert: HighDataProcessingErrors
+        expr: |
+          (
+            rate(wifi_densepose_data_processing_errors_total[5m]) /
+            rate(wifi_densepose_data_processed_total[5m])
+          ) * 100 > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: wifi-densepose
+          team: product
+        annotations:
+          summary: "High data processing error rate"
+          description: "Data processing error rate is {{ $value }}% for the last 5 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/high-data-processing-errors"
+
+      - alert: ModelInferenceLatencyHigh
+        expr: |
+          histogram_quantile(0.95,
+            rate(wifi_densepose_model_inference_duration_seconds_bucket[5m])
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: wifi-densepose
+          team: ml
+        annotations:
+          summary: "High model inference latency"
+          description: "95th percentile model inference latency is {{ $value }}s for the last 5 minutes."
+          runbook_url: "https://docs.wifi-densepose.com/runbooks/high-model-inference-latency"

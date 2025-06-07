@@ -1,0 +1,446 @@
+name: Security Scanning
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run security scans daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # Static Application Security Testing (SAST)
+  sast:
+    name: Static Application Security Testing
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install bandit semgrep safety
+
+    - name: Run Bandit security scan
+      run: |
+        bandit -r src/ -f sarif -o bandit-results.sarif
+      continue-on-error: true
+
+    - name: Upload Bandit results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: bandit-results.sarif
+        category: bandit
+
+    - name: Run Semgrep security scan
+      uses: returntocorp/semgrep-action@v1
+      with:
+        config: >-
+          p/security-audit
+          p/secrets
+          p/python
+          p/docker
+          p/kubernetes
+      env:
+        SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        
+    - name: Generate Semgrep SARIF
+      run: |
+        semgrep --config=p/security-audit --config=p/secrets --config=p/python --sarif --output=semgrep.sarif src/
+      continue-on-error: true
+
+    - name: Upload Semgrep results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: semgrep.sarif
+        category: semgrep
+
+  # Dependency vulnerability scanning
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install safety pip-audit
+
+    - name: Run Safety check
+      run: |
+        safety check --json --output safety-report.json
+      continue-on-error: true
+
+    - name: Run pip-audit
+      run: |
+        pip-audit --format=json --output=pip-audit-report.json
+      continue-on-error: true
+
+    - name: Run Snyk vulnerability scan
+      uses: snyk/actions/python@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        args: --sarif-file-output=snyk-results.sarif
+      continue-on-error: true
+
+    - name: Upload Snyk results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: snyk-results.sarif
+        category: snyk
+
+    - name: Upload vulnerability reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: vulnerability-reports
+        path: |
+          safety-report.json
+          pip-audit-report.json
+          snyk-results.sarif
+
+  # Container security scanning
+  container-scan:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    needs: []
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image for scanning
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        target: production
+        load: true
+        tags: wifi-densepose:scan
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: 'wifi-densepose:scan'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+        category: trivy
+
+    - name: Run Grype vulnerability scanner
+      uses: anchore/scan-action@v3
+      id: grype-scan
+      with:
+        image: 'wifi-densepose:scan'
+        fail-build: false
+        severity-cutoff: high
+        output-format: sarif
+
+    - name: Upload Grype results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: ${{ steps.grype-scan.outputs.sarif }}
+        category: grype
+
+    - name: Run Docker Scout
+      uses: docker/scout-action@v1
+      if: always()
+      with:
+        command: cves
+        image: wifi-densepose:scan
+        sarif-file: scout-results.sarif
+        summary: true
+
+    - name: Upload Docker Scout results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: scout-results.sarif
+        category: docker-scout
+
+  # Infrastructure as Code security scanning
+  iac-scan:
+    name: Infrastructure Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Checkov IaC scan
+      uses: bridgecrewio/checkov-action@master
+      with:
+        directory: .
+        framework: kubernetes,dockerfile,terraform,ansible
+        output_format: sarif
+        output_file_path: checkov-results.sarif
+        quiet: true
+        soft_fail: true
+
+    - name: Upload Checkov results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: checkov-results.sarif
+        category: checkov
+
+    - name: Run Terrascan IaC scan
+      uses: tenable/terrascan-action@main
+      with:
+        iac_type: 'k8s'
+        iac_version: 'v1'
+        policy_type: 'k8s'
+        only_warn: true
+        sarif_upload: true
+
+    - name: Run KICS IaC scan
+      uses: checkmarx/kics-github-action@master
+      with:
+        path: '.'
+        output_path: kics-results
+        output_formats: 'sarif'
+        exclude_paths: '.git,node_modules'
+        exclude_queries: 'a7ef1e8c-fbf8-4ac1-b8c7-2c3b0e6c6c6c'
+
+    - name: Upload KICS results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: kics-results/results.sarif
+        category: kics
+
+  # Secret scanning
+  secret-scan:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Run TruffleHog secret scan
+      uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./
+        base: main
+        head: HEAD
+        extra_args: --debug --only-verified
+
+    - name: Run GitLeaks secret scan
+      uses: gitleaks/gitleaks-action@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+    - name: Run detect-secrets
+      run: |
+        pip install detect-secrets
+        detect-secrets scan --all-files --baseline .secrets.baseline
+        detect-secrets audit .secrets.baseline
+      continue-on-error: true
+
+  # License compliance scanning
+  license-scan:
+    name: License Compliance Scan
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pip-licenses licensecheck
+
+    - name: Run license check
+      run: |
+        pip-licenses --format=json --output-file=licenses.json
+        licensecheck --zero
+
+    - name: Upload license report
+      uses: actions/upload-artifact@v3
+      with:
+        name: license-report
+        path: licenses.json
+
+  # Security policy compliance
+  compliance-check:
+    name: Security Policy Compliance
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check security policy files
+      run: |
+        # Check for required security files
+        files=("SECURITY.md" ".github/SECURITY.md" "docs/SECURITY.md")
+        found=false
+        for file in "${files[@]}"; do
+          if [[ -f "$file" ]]; then
+            echo "✅ Found security policy: $file"
+            found=true
+            break
+          fi
+        done
+        if [[ "$found" == false ]]; then
+          echo "❌ No security policy found. Please create SECURITY.md"
+          exit 1
+        fi
+
+    - name: Check for security headers in code
+      run: |
+        # Check for security-related configurations
+        grep -r "X-Frame-Options\|X-Content-Type-Options\|X-XSS-Protection\|Content-Security-Policy" src/ || echo "⚠️ Consider adding security headers"
+
+    - name: Validate Kubernetes security contexts
+      run: |
+        # Check for security contexts in Kubernetes manifests
+        if find k8s/ -name "*.yaml" -exec grep -l "securityContext" {} \; | wc -l | grep -q "^0$"; then
+          echo "❌ No security contexts found in Kubernetes manifests"
+          exit 1
+        else
+          echo "✅ Security contexts found in Kubernetes manifests"
+        fi
+
+  # Notification and reporting
+  security-report:
+    name: Security Report
+    runs-on: ubuntu-latest
+    needs: [sast, dependency-scan, container-scan, iac-scan, secret-scan, license-scan, compliance-check]
+    if: always()
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+
+    - name: Generate security summary
+      run: |
+        echo "# Security Scan Summary" > security-summary.md
+        echo "" >> security-summary.md
+        echo "## Scan Results" >> security-summary.md
+        echo "- SAST: ${{ needs.sast.result }}" >> security-summary.md
+        echo "- Dependency Scan: ${{ needs.dependency-scan.result }}" >> security-summary.md
+        echo "- Container Scan: ${{ needs.container-scan.result }}" >> security-summary.md
+        echo "- IaC Scan: ${{ needs.iac-scan.result }}" >> security-summary.md
+        echo "- Secret Scan: ${{ needs.secret-scan.result }}" >> security-summary.md
+        echo "- License Scan: ${{ needs.license-scan.result }}" >> security-summary.md
+        echo "- Compliance Check: ${{ needs.compliance-check.result }}" >> security-summary.md
+        echo "" >> security-summary.md
+        echo "Generated on: $(date)" >> security-summary.md
+
+    - name: Upload security summary
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-summary
+        path: security-summary.md
+
+    - name: Notify security team on critical findings
+      if: needs.sast.result == 'failure' || needs.dependency-scan.result == 'failure' || needs.container-scan.result == 'failure'
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        channel: '#security'
+        text: |
+          🚨 Critical security findings detected!
+          Repository: ${{ github.repository }}
+          Branch: ${{ github.ref }}
+          Workflow: ${{ github.workflow }}
+          Please review the security scan results immediately.
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SECURITY_SLACK_WEBHOOK_URL }}
+
+    - name: Create security issue on critical findings
+      if: needs.sast.result == 'failure' || needs.dependency-scan.result == 'failure'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `Security Scan Failures - ${new Date().toISOString()}`,
+            body: `
+            ## Security Scan Failures Detected
+            
+            **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            **Branch:** ${{ github.ref }}
+            
+            **Failed Scans:**
+            - SAST: ${{ needs.sast.result }}
+            - Dependency Scan: ${{ needs.dependency-scan.result }}
+            - Container Scan: ${{ needs.container-scan.result }}
+            
+            **Action Required:**
+            - [ ] Review security scan results
+            - [ ] Address critical vulnerabilities
+            - [ ] Update dependencies if needed
+            - [ ] Re-run security scans
+            
+            **Security Dashboard:** Check the Security tab for detailed findings.
+            `,
+            labels: ['security', 'vulnerability', 'urgent']
+          })

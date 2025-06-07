@@ -1,0 +1,347 @@
+name: Continuous Deployment
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_run:
+    workflows: ["Continuous Integration"]
+    types:
+      - completed
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+      force_deploy:
+        description: 'Force deployment (skip checks)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
+
+jobs:
+  # Pre-deployment checks
+  pre-deployment:
+    name: Pre-deployment Checks
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
+    outputs:
+      deploy_env: ${{ steps.determine-env.outputs.environment }}
+      image_tag: ${{ steps.determine-tag.outputs.tag }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Determine deployment environment
+      id: determine-env
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          echo "environment=staging" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+          echo "environment=production" >> $GITHUB_OUTPUT
+        else
+          echo "environment=staging" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Determine image tag
+      id: determine-tag
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+          echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        else
+          echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Verify image exists
+      run: |
+        docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.determine-tag.outputs.tag }}
+
+  # Deploy to staging
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [pre-deployment]
+    if: needs.pre-deployment.outputs.deploy_env == 'staging'
+    environment:
+      name: staging
+      url: https://staging.wifi-densepose.com
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+
+    - name: Configure kubectl
+      run: |
+        echo "${{ secrets.KUBE_CONFIG_DATA_STAGING }}" | base64 -d > kubeconfig
+        export KUBECONFIG=kubeconfig
+
+    - name: Deploy to staging namespace
+      run: |
+        export KUBECONFIG=kubeconfig
+        
+        # Update image tag in deployment
+        kubectl set image deployment/wifi-densepose wifi-densepose=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.pre-deployment.outputs.image_tag }} -n wifi-densepose-staging
+        
+        # Wait for rollout to complete
+        kubectl rollout status deployment/wifi-densepose -n wifi-densepose-staging --timeout=600s
+        
+        # Verify deployment
+        kubectl get pods -n wifi-densepose-staging -l app=wifi-densepose
+
+    - name: Run smoke tests
+      run: |
+        sleep 30
+        curl -f https://staging.wifi-densepose.com/health || exit 1
+        curl -f https://staging.wifi-densepose.com/api/v1/info || exit 1
+
+    - name: Run integration tests against staging
+      run: |
+        python -m pytest tests/integration/ --base-url=https://staging.wifi-densepose.com -v
+
+  # Deploy to production
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [pre-deployment, deploy-staging]
+    if: needs.pre-deployment.outputs.deploy_env == 'production' || (github.ref == 'refs/tags/v*' && needs.deploy-staging.result == 'success')
+    environment:
+      name: production
+      url: https://wifi-densepose.com
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+
+    - name: Configure kubectl
+      run: |
+        echo "${{ secrets.KUBE_CONFIG_DATA_PRODUCTION }}" | base64 -d > kubeconfig
+        export KUBECONFIG=kubeconfig
+
+    - name: Pre-deployment backup
+      run: |
+        export KUBECONFIG=kubeconfig
+        
+        # Backup current deployment
+        kubectl get deployment wifi-densepose -n wifi-densepose -o yaml > backup-deployment.yaml
+        
+        # Backup database
+        kubectl exec -n wifi-densepose deployment/postgres -- pg_dump -U wifi_user wifi_densepose > backup-db.sql
+
+    - name: Blue-Green Deployment
+      run: |
+        export KUBECONFIG=kubeconfig
+        
+        # Create green deployment
+        kubectl patch deployment wifi-densepose -n wifi-densepose -p '{"spec":{"template":{"metadata":{"labels":{"version":"green"}}}}}'
+        kubectl set image deployment/wifi-densepose wifi-densepose=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.pre-deployment.outputs.image_tag }} -n wifi-densepose
+        
+        # Wait for green deployment to be ready
+        kubectl rollout status deployment/wifi-densepose -n wifi-densepose --timeout=600s
+        
+        # Verify green deployment health
+        kubectl wait --for=condition=ready pod -l app=wifi-densepose,version=green -n wifi-densepose --timeout=300s
+
+    - name: Traffic switching validation
+      run: |
+        export KUBECONFIG=kubeconfig
+        
+        # Get green pod IP for direct testing
+        GREEN_POD=$(kubectl get pods -n wifi-densepose -l app=wifi-densepose,version=green -o jsonpath='{.items[0].metadata.name}')
+        
+        # Test green deployment directly
+        kubectl exec -n wifi-densepose $GREEN_POD -- curl -f http://localhost:8000/health
+        kubectl exec -n wifi-densepose $GREEN_POD -- curl -f http://localhost:8000/api/v1/info
+
+    - name: Switch traffic to green
+      run: |
+        export KUBECONFIG=kubeconfig
+        
+        # Update service selector to point to green
+        kubectl patch service wifi-densepose-service -n wifi-densepose -p '{"spec":{"selector":{"version":"green"}}}'
+        
+        # Wait for traffic switch
+        sleep 30
+
+    - name: Production smoke tests
+      run: |
+        curl -f https://wifi-densepose.com/health || exit 1
+        curl -f https://wifi-densepose.com/api/v1/info || exit 1
+
+    - name: Cleanup old deployment
+      run: |
+        export KUBECONFIG=kubeconfig
+        
+        # Remove blue version label from old pods
+        kubectl label pods -n wifi-densepose -l app=wifi-densepose,version!=green version-
+        
+        # Scale down old replica set (optional)
+        # kubectl scale rs -n wifi-densepose -l app=wifi-densepose,version!=green --replicas=0
+
+    - name: Upload deployment artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: production-deployment-${{ github.run_number }}
+        path: |
+          backup-deployment.yaml
+          backup-db.sql
+
+  # Rollback capability
+  rollback:
+    name: Rollback Deployment
+    runs-on: ubuntu-latest
+    if: failure() && (needs.deploy-staging.result == 'failure' || needs.deploy-production.result == 'failure')
+    needs: [pre-deployment, deploy-staging, deploy-production]
+    environment:
+      name: ${{ needs.pre-deployment.outputs.deploy_env }}
+    steps:
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+
+    - name: Configure kubectl
+      run: |
+        if [[ "${{ needs.pre-deployment.outputs.deploy_env }}" == "production" ]]; then
+          echo "${{ secrets.KUBE_CONFIG_DATA_PRODUCTION }}" | base64 -d > kubeconfig
+          NAMESPACE="wifi-densepose"
+        else
+          echo "${{ secrets.KUBE_CONFIG_DATA_STAGING }}" | base64 -d > kubeconfig
+          NAMESPACE="wifi-densepose-staging"
+        fi
+        export KUBECONFIG=kubeconfig
+        echo "NAMESPACE=$NAMESPACE" >> $GITHUB_ENV
+
+    - name: Rollback deployment
+      run: |
+        export KUBECONFIG=kubeconfig
+        
+        # Rollback to previous version
+        kubectl rollout undo deployment/wifi-densepose -n ${{ env.NAMESPACE }}
+        
+        # Wait for rollback to complete
+        kubectl rollout status deployment/wifi-densepose -n ${{ env.NAMESPACE }} --timeout=600s
+        
+        # Verify rollback
+        kubectl get pods -n ${{ env.NAMESPACE }} -l app=wifi-densepose
+
+  # Post-deployment monitoring
+  post-deployment:
+    name: Post-deployment Monitoring
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production]
+    if: always() && (needs.deploy-staging.result == 'success' || needs.deploy-production.result == 'success')
+    steps:
+    - name: Monitor deployment health
+      run: |
+        ENV="${{ needs.pre-deployment.outputs.deploy_env }}"
+        if [[ "$ENV" == "production" ]]; then
+          BASE_URL="https://wifi-densepose.com"
+        else
+          BASE_URL="https://staging.wifi-densepose.com"
+        fi
+        
+        # Monitor for 5 minutes
+        for i in {1..10}; do
+          echo "Health check $i/10"
+          curl -f $BASE_URL/health || exit 1
+          curl -f $BASE_URL/api/v1/status || exit 1
+          sleep 30
+        done
+
+    - name: Update deployment status
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const deployEnv = '${{ needs.pre-deployment.outputs.deploy_env }}';
+          const environmentUrl = deployEnv === 'production' ? 'https://wifi-densepose.com' : 'https://staging.wifi-densepose.com';
+          
+          const { data: deployment } = await github.rest.repos.createDeploymentStatus({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            deployment_id: context.payload.deployment.id,
+            state: 'success',
+            environment_url: environmentUrl,
+            description: 'Deployment completed successfully'
+          });
+
+  # Notification
+  notify:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production, post-deployment]
+    if: always()
+    steps:
+    - name: Notify Slack on success
+      if: needs.deploy-production.result == 'success' || needs.deploy-staging.result == 'success'
+      uses: 8398a7/action-slack@v3
+      with:
+        status: success
+        channel: '#deployments'
+        text: |
+          🚀 Deployment successful!
+          Environment: ${{ needs.pre-deployment.outputs.deploy_env }}
+          Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.pre-deployment.outputs.image_tag }}
+          URL: https://${{ needs.pre-deployment.outputs.deploy_env == 'production' && 'wifi-densepose.com' || 'staging.wifi-densepose.com' }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    - name: Notify Slack on failure
+      if: needs.deploy-production.result == 'failure' || needs.deploy-staging.result == 'failure'
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        channel: '#deployments'
+        text: |
+          ❌ Deployment failed!
+          Environment: ${{ needs.pre-deployment.outputs.deploy_env }}
+          Please check the logs and consider rollback if necessary.
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    - name: Create deployment issue on failure
+      if: needs.deploy-production.result == 'failure'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `Production Deployment Failed - ${new Date().toISOString()}`,
+            body: `
+            ## Deployment Failure Report
+            
+            **Environment:** Production
+            **Image Tag:** ${{ needs.pre-deployment.outputs.image_tag }}
+            **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            
+            **Action Required:**
+            - [ ] Investigate deployment failure
+            - [ ] Consider rollback if necessary
+            - [ ] Fix underlying issues
+            - [ ] Re-deploy when ready
+            
+            **Logs:** Check the workflow run for detailed error messages.
+            `,
+            labels: ['deployment', 'production', 'urgent']
+          })

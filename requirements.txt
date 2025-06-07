@@ -8,6 +8,9 @@ torchvision>=0.13.0
 pytest>=7.0.0
 pytest-asyncio>=0.21.0
 pytest-mock>=3.10.0
+pytest-benchmark>=4.0.0
+httpx>=0.24.0
+pydantic-settings>=2.0.0
 
 # API dependencies
 fastapi>=0.95.0
