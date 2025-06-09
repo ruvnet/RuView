@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wifi-densepose"
-version = "1.1.0"
+version = "1.2.0"
 description = "WiFi-based human pose estimation using CSI data and DensePose neural networks"
 readme = "README.md"
 license = "MIT"
@@ -108,6 +108,9 @@ dependencies = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "pytest-xdist>=3.3.0",
+    "pytest-bdd>=7.0.0",
     "black>=23.9.0",
     "isort>=5.12.0",
     "flake8>=6.1.0",
@@ -121,6 +124,11 @@ dev = [
     "pytest-cov>=4.1.0",
     "pytest-mock>=3.12.0",
     "pytest-xdist>=3.3.0",
+    "pytest-bdd>=7.0.0",
+    "pytest-spec>=3.2.0",
+    "pytest-clarity>=1.0.1",
+    "pytest-sugar>=0.9.7",
+    "coverage[toml]>=7.3.0",
     "black>=23.9.0",
     "isort>=5.12.0",
     "flake8>=6.1.0",
@@ -128,6 +136,9 @@ dev = [
     "pre-commit>=3.5.0",
     "bandit>=1.7.0",
     "safety>=2.3.0",
+    "factory-boy>=3.3.0",
+    "freezegun>=1.2.0",
+    "responses>=0.23.0",
 ]
 
 docs = [
@@ -267,11 +278,14 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-report=html",
     "--cov-report=xml",
+    "--cov-fail-under=100",
+    "--cov-branch",
+    "-v",
 ]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
+python_classes = ["Test*", "Describe*", "When*"]
+python_functions = ["test_*", "it_*", "should_*"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
@@ -279,11 +293,14 @@ markers = [
     "gpu: marks tests that require GPU",
     "hardware: marks tests that require hardware",
     "network: marks tests that require network access",
+    "tdd: marks tests following TDD approach",
+    "london: marks tests using London School TDD style",
 ]
 asyncio_mode = "auto"
 
 [tool.coverage.run]
 source = ["src"]
+branch = true
 omit = [
     "*/tests/*",
     "*/test_*",
@@ -294,6 +311,9 @@ omit = [
 ]
 
 [tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
@@ -306,6 +326,12 @@ exclude_lines = [
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
 ]
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.coverage.xml]
+output = "coverage.xml"
 
 [tool.bandit]
 exclude_dirs = ["tests", "migrations"]

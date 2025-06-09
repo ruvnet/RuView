@@ -137,38 +137,77 @@ export class DashboardTab {
 
   // Update component status
   updateComponentStatus(component, status) {
-    const element = this.container.querySelector(`[data-component="${component}"]`);
+    // Map backend component names to UI component names
+    const componentMap = {
+      'pose': 'inference',
+      'stream': 'streaming',
+      'hardware': 'hardware'
+    };
+    
+    const uiComponent = componentMap[component] || component;
+    const element = this.container.querySelector(`[data-component="${uiComponent}"]`);
+    
     if (element) {
       element.className = `component-status status-${status.status}`;
-      element.querySelector('.status-text').textContent = status.status;
+      const statusText = element.querySelector('.status-text');
+      const statusMessage = element.querySelector('.status-message');
       
-      if (status.message) {
-        element.querySelector('.status-message').textContent = status.message;
+      if (statusText) {
+        statusText.textContent = status.status.toUpperCase();
+      }
+      
+      if (statusMessage && status.message) {
+        statusMessage.textContent = status.message;
+      }
+    }
+    
+    // Also update API status based on overall health
+    if (component === 'hardware') {
+      const apiElement = this.container.querySelector(`[data-component="api"]`);
+      if (apiElement) {
+        apiElement.className = `component-status status-healthy`;
+        const apiStatusText = apiElement.querySelector('.status-text');
+        const apiStatusMessage = apiElement.querySelector('.status-message');
+        
+        if (apiStatusText) {
+          apiStatusText.textContent = 'HEALTHY';
+        }
+        
+        if (apiStatusMessage) {
+          apiStatusMessage.textContent = 'API server is running normally';
+        }
       }
     }
   }
 
   // Update system metrics
   updateSystemMetrics(metrics) {
+    // Handle both flat and nested metric structures
+    // Backend returns system_metrics.cpu.percent, mock returns metrics.cpu.percent
+    const systemMetrics = metrics.system_metrics || metrics;
+    const cpuPercent = systemMetrics.cpu?.percent || systemMetrics.cpu_percent;
+    const memoryPercent = systemMetrics.memory?.percent || systemMetrics.memory_percent;
+    const diskPercent = systemMetrics.disk?.percent || systemMetrics.disk_percent;
+
     // CPU usage
     const cpuElement = this.container.querySelector('.cpu-usage');
-    if (cpuElement && metrics.cpu_percent !== undefined) {
-      cpuElement.textContent = `${metrics.cpu_percent.toFixed(1)}%`;
-      this.updateProgressBar('cpu', metrics.cpu_percent);
+    if (cpuElement && cpuPercent !== undefined) {
+      cpuElement.textContent = `${cpuPercent.toFixed(1)}%`;
+      this.updateProgressBar('cpu', cpuPercent);
     }
 
     // Memory usage
     const memoryElement = this.container.querySelector('.memory-usage');
-    if (memoryElement && metrics.memory_percent !== undefined) {
-      memoryElement.textContent = `${metrics.memory_percent.toFixed(1)}%`;
-      this.updateProgressBar('memory', metrics.memory_percent);
+    if (memoryElement && memoryPercent !== undefined) {
+      memoryElement.textContent = `${memoryPercent.toFixed(1)}%`;
+      this.updateProgressBar('memory', memoryPercent);
     }
 
     // Disk usage
     const diskElement = this.container.querySelector('.disk-usage');
-    if (diskElement && metrics.disk_percent !== undefined) {
-      diskElement.textContent = `${metrics.disk_percent.toFixed(1)}%`;
-      this.updateProgressBar('disk', metrics.disk_percent);
+    if (diskElement && diskPercent !== undefined) {
+      diskElement.textContent = `${diskPercent.toFixed(1)}%`;
+      this.updateProgressBar('disk', diskPercent);
     }
   }
 
@@ -214,33 +253,65 @@ export class DashboardTab {
     // Update person count
     const personCount = this.container.querySelector('.person-count');
     if (personCount) {
-      personCount.textContent = poseData.total_persons || 0;
+      const count = poseData.persons ? poseData.persons.length : (poseData.total_persons || 0);
+      personCount.textContent = count;
     }
 
     // Update average confidence
     const avgConfidence = this.container.querySelector('.avg-confidence');
-    if (avgConfidence && poseData.persons) {
+    if (avgConfidence && poseData.persons && poseData.persons.length > 0) {
       const confidences = poseData.persons.map(p => p.confidence);
-      const avg = confidences.length > 0 
+      const avg = confidences.length > 0
         ? (confidences.reduce((a, b) => a + b, 0) / confidences.length * 100).toFixed(1)
         : 0;
       avgConfidence.textContent = `${avg}%`;
+    } else if (avgConfidence) {
+      avgConfidence.textContent = '0%';
+    }
+
+    // Update total detections from stats if available
+    const detectionCount = this.container.querySelector('.detection-count');
+    if (detectionCount && poseData.total_detections !== undefined) {
+      detectionCount.textContent = this.formatNumber(poseData.total_detections);
     }
   }
 
   // Update zones display
   updateZonesDisplay(zonesSummary) {
     const zonesContainer = this.container.querySelector('.zones-summary');
-    if (!zonesContainer || !zonesSummary) return;
+    if (!zonesContainer) return;
 
     zonesContainer.innerHTML = '';
     
-    Object.entries(zonesSummary.zones).forEach(([zoneId, data]) => {
+    // Handle different zone summary formats
+    let zones = {};
+    if (zonesSummary && zonesSummary.zones) {
+      zones = zonesSummary.zones;
+    } else if (zonesSummary && typeof zonesSummary === 'object') {
+      zones = zonesSummary;
+    }
+    
+    // If no zones data, show default zones
+    if (Object.keys(zones).length === 0) {
+      ['zone_1', 'zone_2', 'zone_3', 'zone_4'].forEach(zoneId => {
+        const zoneElement = document.createElement('div');
+        zoneElement.className = 'zone-item';
+        zoneElement.innerHTML = `
+          <span class="zone-name">${zoneId}</span>
+          <span class="zone-count">undefined</span>
+        `;
+        zonesContainer.appendChild(zoneElement);
+      });
+      return;
+    }
+    
+    Object.entries(zones).forEach(([zoneId, data]) => {
       const zoneElement = document.createElement('div');
       zoneElement.className = 'zone-item';
+      const count = typeof data === 'object' ? (data.person_count || data.count || 0) : data;
       zoneElement.innerHTML = `
-        <span class="zone-name">${data.name || zoneId}</span>
-        <span class="zone-count">${data.person_count}</span>
+        <span class="zone-name">${zoneId}</span>
+        <span class="zone-count">${count}</span>
       `;
       zonesContainer.appendChild(zoneElement);
     });

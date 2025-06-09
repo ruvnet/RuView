@@ -203,13 +203,17 @@ class WiFiDensePoseApp {
   // Set up error handling
   setupErrorHandling() {
     window.addEventListener('error', (event) => {
-      console.error('Global error:', event.error);
-      this.showGlobalError('An unexpected error occurred');
+      if (event.error) {
+        console.error('Global error:', event.error);
+        this.showGlobalError('An unexpected error occurred');
+      }
     });
 
     window.addEventListener('unhandledrejection', (event) => {
-      console.error('Unhandled promise rejection:', event.reason);
-      this.showGlobalError('An unexpected error occurred');
+      if (event.reason) {
+        console.error('Unhandled promise rejection:', event.reason);
+        this.showGlobalError('An unexpected error occurred');
+      }
     });
   }
 

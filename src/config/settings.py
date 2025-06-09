@@ -78,6 +78,15 @@ class Settings(BaseSettings):
     csi_buffer_size: int = Field(default=1000, description="CSI data buffer size")
     hardware_polling_interval: float = Field(default=0.1, description="Hardware polling interval in seconds")
     
+    # CSI Processing settings
+    csi_sampling_rate: int = Field(default=1000, description="CSI sampling rate")
+    csi_window_size: int = Field(default=512, description="CSI window size")
+    csi_overlap: float = Field(default=0.5, description="CSI window overlap")
+    csi_noise_threshold: float = Field(default=0.1, description="CSI noise threshold")
+    csi_human_detection_threshold: float = Field(default=0.8, description="CSI human detection threshold")
+    csi_smoothing_factor: float = Field(default=0.9, description="CSI smoothing factor")
+    csi_max_history_size: int = Field(default=500, description="CSI max history size")
+    
     # Pose estimation settings
     pose_model_path: Optional[str] = Field(default=None, description="Path to pose estimation model")
     pose_confidence_threshold: float = Field(default=0.5, description="Minimum confidence threshold")
@@ -135,6 +144,14 @@ class Settings(BaseSettings):
     mock_hardware: bool = Field(default=False, description="Use mock hardware for development")
     mock_pose_data: bool = Field(default=False, description="Use mock pose data for development")
     enable_test_endpoints: bool = Field(default=False, description="Enable test endpoints")
+    
+    # Cleanup settings
+    csi_data_retention_days: int = Field(default=30, description="CSI data retention in days")
+    pose_detection_retention_days: int = Field(default=30, description="Pose detection retention in days")
+    metrics_retention_days: int = Field(default=7, description="Metrics retention in days")
+    audit_log_retention_days: int = Field(default=90, description="Audit log retention in days")
+    orphaned_session_threshold_days: int = Field(default=7, description="Orphaned session threshold in days")
+    cleanup_batch_size: int = Field(default=1000, description="Cleanup batch size")
     
     model_config = SettingsConfigDict(
         env_file=".env",

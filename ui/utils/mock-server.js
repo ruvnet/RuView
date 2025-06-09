@@ -15,16 +15,14 @@ export class MockServer {
       status: 'healthy',
       timestamp: new Date().toISOString(),
       components: {
-        api: { status: 'healthy', message: 'API server running' },
+        pose: { status: 'healthy', message: 'Pose detection service running' },
         hardware: { status: 'healthy', message: 'Hardware connected' },
-        inference: { status: 'healthy', message: 'Inference engine running' },
-        streaming: { status: 'healthy', message: 'Streaming service active' }
+        stream: { status: 'healthy', message: 'Streaming service active' }
       },
-      metrics: {
-        cpu_percent: Math.random() * 30 + 10,
-        memory_percent: Math.random() * 40 + 20,
-        disk_percent: Math.random() * 20 + 5,
-        uptime: Math.floor(Date.now() / 1000) - 3600
+      system_metrics: {
+        cpu: { percent: Math.random() * 30 + 10 },
+        memory: { percent: Math.random() * 40 + 20 },
+        disk: { percent: Math.random() * 20 + 5 }
       }
     }));
 
@@ -101,20 +99,23 @@ export class MockServer {
     }));
 
     // Pose endpoints
-    this.addEndpoint('GET', '/api/v1/pose/current', () => ({
-      timestamp: new Date().toISOString(),
-      total_persons: Math.floor(Math.random() * 3),
-      persons: this.generateMockPersons(Math.floor(Math.random() * 3)),
-      processing_time: Math.random() * 20 + 5,
-      zone_id: 'living-room'
-    }));
+    this.addEndpoint('GET', '/api/v1/pose/current', () => {
+      const personCount = Math.floor(Math.random() * 3);
+      return {
+        timestamp: new Date().toISOString(),
+        persons: this.generateMockPersons(personCount),
+        processing_time: Math.random() * 20 + 5,
+        zone_id: 'living-room',
+        total_detections: Math.floor(Math.random() * 10000)
+      };
+    });
 
     this.addEndpoint('GET', '/api/v1/pose/zones/summary', () => ({
-      total_persons: Math.floor(Math.random() * 5),
       zones: {
-        'zone1': { person_count: Math.floor(Math.random() * 2), name: 'Living Room' },
-        'zone2': { person_count: Math.floor(Math.random() * 2), name: 'Kitchen' },
-        'zone3': { person_count: Math.floor(Math.random() * 2), name: 'Bedroom' }
+        'zone_1': Math.floor(Math.random() * 2),
+        'zone_2': Math.floor(Math.random() * 2),
+        'zone_3': Math.floor(Math.random() * 2),
+        'zone_4': Math.floor(Math.random() * 2)
       }
     }));
 
@@ -151,7 +152,7 @@ export class MockServer {
       persons.push({
         person_id: `person_${i}`,
         confidence: Math.random() * 0.3 + 0.7,
-        bounding_box: {
+        bbox: {
           x: Math.random() * 400,
           y: Math.random() * 300,
           width: Math.random() * 100 + 50,
@@ -167,11 +168,38 @@ export class MockServer {
   // Generate mock keypoints (COCO format)
   generateMockKeypoints() {
     const keypoints = [];
+    // Generate keypoints in a rough human pose shape
+    const centerX = Math.random() * 600 + 100;
+    const centerY = Math.random() * 400 + 100;
+    
+    // COCO keypoint order: nose, left_eye, right_eye, left_ear, right_ear,
+    // left_shoulder, right_shoulder, left_elbow, right_elbow, left_wrist, right_wrist,
+    // left_hip, right_hip, left_knee, right_knee, left_ankle, right_ankle
+    const offsets = [
+      [0, -80],     // nose
+      [-10, -90],   // left_eye
+      [10, -90],    // right_eye
+      [-20, -85],   // left_ear
+      [20, -85],    // right_ear
+      [-40, -40],   // left_shoulder
+      [40, -40],    // right_shoulder
+      [-60, 10],    // left_elbow
+      [60, 10],     // right_elbow
+      [-65, 60],    // left_wrist
+      [65, 60],     // right_wrist
+      [-20, 60],    // left_hip
+      [20, 60],     // right_hip
+      [-25, 120],   // left_knee
+      [25, 120],    // right_knee
+      [-25, 180],   // left_ankle
+      [25, 180]     // right_ankle
+    ];
+    
     for (let i = 0; i < 17; i++) {
       keypoints.push({
-        x: (Math.random() - 0.5) * 2, // Normalized coordinates
-        y: (Math.random() - 0.5) * 2,
-        confidence: Math.random() * 0.5 + 0.5
+        x: centerX + offsets[i][0] + (Math.random() - 0.5) * 10,
+        y: centerY + offsets[i][1] + (Math.random() - 0.5) * 10,
+        confidence: Math.random() * 0.3 + 0.7
       });
     }
     return keypoints;
@@ -313,13 +341,25 @@ export class MockServer {
         if (this.url.includes('/stream/pose')) {
           this.poseInterval = setInterval(() => {
             if (this.readyState === WebSocket.OPEN) {
+              const personCount = Math.floor(Math.random() * 3);
+              const persons = mockServer.generateMockPersons(personCount);
+              
+              // Match the backend format exactly
               this.dispatchEvent(new MessageEvent('message', {
                 data: JSON.stringify({
                   type: 'pose_data',
-                  payload: {
-                    timestamp: new Date().toISOString(),
-                    persons: mockServer.generateMockPersons(Math.floor(Math.random() * 3)),
-                    processing_time: Math.random() * 20 + 5
+                  timestamp: new Date().toISOString(),
+                  zone_id: 'zone_1',
+                  data: {
+                    pose: {
+                      persons: persons
+                    },
+                    confidence: Math.random() * 0.3 + 0.7,
+                    activity: Math.random() > 0.5 ? 'standing' : 'walking'
+                  },
+                  metadata: {
+                    frame_id: `frame_${Date.now()}`,
+                    processing_time_ms: Math.random() * 20 + 5
                   }
                 })
               }));

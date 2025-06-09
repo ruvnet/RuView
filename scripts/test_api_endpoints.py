@@ -281,8 +281,8 @@ class APITester:
         
         # Test WebSocket Endpoints
         print(f"{Fore.MAGENTA}Testing WebSocket Endpoints:{Style.RESET_ALL}")
-        await self.test_websocket_endpoint("/ws/pose", description="Pose WebSocket")
-        await self.test_websocket_endpoint("/ws/hardware", description="Hardware WebSocket")
+        await self.test_websocket_endpoint("/api/v1/stream/pose", description="Pose WebSocket")
+        await self.test_websocket_endpoint("/api/v1/stream/events", description="Events WebSocket")
         print()
         
         # Test Documentation Endpoints

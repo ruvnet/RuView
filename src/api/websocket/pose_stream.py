@@ -80,13 +80,19 @@ class PoseStreamHandler:
     async def _stream_loop(self):
         """Main streaming loop."""
         try:
+            logger.info("🚀 Starting pose streaming loop")
             while self.is_streaming:
                 try:
                     # Get current pose data from all zones
+                    logger.debug("📡 Getting current pose data...")
                     pose_data = await self.pose_service.get_current_pose_data()
+                    logger.debug(f"📊 Received pose data: {pose_data}")
                     
                     if pose_data:
+                        logger.debug("📤 Broadcasting pose data...")
                         await self._process_and_broadcast_pose_data(pose_data)
+                    else:
+                        logger.debug("⚠️ No pose data received")
                     
                     # Control streaming rate
                     await asyncio.sleep(1.0 / self.stream_config["fps"])
@@ -100,6 +106,7 @@ class PoseStreamHandler:
         except Exception as e:
             logger.error(f"Fatal error in pose streaming loop: {e}")
         finally:
+            logger.info("🛑 Pose streaming loop stopped")
             self.is_streaming = False
     
     async def _process_and_broadcast_pose_data(self, raw_pose_data: Dict[str, Any]):
@@ -133,6 +140,8 @@ class PoseStreamHandler:
     async def _broadcast_pose_data(self, pose_data: PoseStreamData):
         """Broadcast pose data to matching WebSocket clients."""
         try:
+            logger.debug(f"📡 Preparing to broadcast pose data for zone {pose_data.zone_id}")
+            
             # Prepare broadcast data
             broadcast_data = {
                 "type": "pose_data",
@@ -149,6 +158,8 @@ class PoseStreamHandler:
             if pose_data.metadata and self.stream_config["include_metadata"]:
                 broadcast_data["metadata"] = pose_data.metadata
             
+            logger.debug(f"📤 Broadcasting data: {broadcast_data}")
+            
             # Broadcast to pose stream subscribers
             sent_count = await self.connection_manager.broadcast(
                 data=broadcast_data,
@@ -156,8 +167,7 @@ class PoseStreamHandler:
                 zone_ids=[pose_data.zone_id]
             )
             
-            if sent_count > 0:
-                logger.debug(f"Broadcasted pose data for zone {pose_data.zone_id} to {sent_count} clients")
+            logger.info(f"✅ Broadcasted pose data for zone {pose_data.zone_id} to {sent_count} clients")
         
         except Exception as e:
             logger.error(f"Error broadcasting pose data: {e}")

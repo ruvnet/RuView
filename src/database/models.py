@@ -13,8 +13,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, validates
-from sqlalchemy.dialects.postgresql import UUID, ARRAY
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
+
+# Import custom array type for compatibility
+from src.database.model_types import StringArray, FloatArray
 
 Base = declarative_base()
 
@@ -78,11 +81,11 @@ class Device(Base, UUIDMixin, TimestampMixin):
     
     # Configuration
     config = Column(JSON, nullable=True)
-    capabilities = Column(ARRAY(String), nullable=True)
+    capabilities = Column(StringArray, nullable=True)
     
     # Metadata
     description = Column(Text, nullable=True)
-    tags = Column(ARRAY(String), nullable=True)
+    tags = Column(StringArray, nullable=True)
     
     # Relationships
     sessions = relationship("Session", back_populates="device", cascade="all, delete-orphan")
@@ -159,7 +162,7 @@ class Session(Base, UUIDMixin, TimestampMixin):
     pose_detections = relationship("PoseDetection", back_populates="session", cascade="all, delete-orphan")
     
     # Metadata
-    tags = Column(ARRAY(String), nullable=True)
+    tags = Column(StringArray, nullable=True)
     meta_data = Column(JSON, nullable=True)
     
     # Statistics
@@ -216,8 +219,8 @@ class CSIData(Base, UUIDMixin, TimestampMixin):
     session = relationship("Session", back_populates="csi_data")
     
     # CSI data
-    amplitude = Column(ARRAY(Float), nullable=False)
-    phase = Column(ARRAY(Float), nullable=False)
+    amplitude = Column(FloatArray, nullable=False)
+    phase = Column(FloatArray, nullable=False)
     frequency = Column(Float, nullable=False)  # MHz
     bandwidth = Column(Float, nullable=False)  # MHz
     
@@ -370,7 +373,7 @@ class SystemMetric(Base, UUIDMixin, TimestampMixin):
     
     # Labels and tags
     labels = Column(JSON, nullable=True)
-    tags = Column(ARRAY(String), nullable=True)
+    tags = Column(StringArray, nullable=True)
     
     # Source information
     source = Column(String(255), nullable=True)
@@ -438,7 +441,7 @@ class AuditLog(Base, UUIDMixin, TimestampMixin):
     
     # Metadata
     meta_data = Column(JSON, nullable=True)
-    tags = Column(ARRAY(String), nullable=True)
+    tags = Column(StringArray, nullable=True)
     
     # Constraints and indexes
     __table_args__ = (

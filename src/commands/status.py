@@ -99,10 +99,11 @@ async def _get_server_status(settings: Settings) -> Dict[str, Any]:
 def _get_system_status() -> Dict[str, Any]:
     """Get system status information."""
     
+    uname_info = psutil.os.uname()
     return {
-        "hostname": psutil.os.uname().nodename,
-        "platform": psutil.os.uname().system,
-        "architecture": psutil.os.uname().machine,
+        "hostname": uname_info.nodename,
+        "platform": uname_info.sysname,
+        "architecture": uname_info.machine,
         "python_version": f"{psutil.sys.version_info.major}.{psutil.sys.version_info.minor}.{psutil.sys.version_info.micro}",
         "boot_time": datetime.fromtimestamp(psutil.boot_time()).isoformat(),
         "uptime_seconds": time.time() - psutil.boot_time(),

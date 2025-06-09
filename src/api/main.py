@@ -94,6 +94,11 @@ async def initialize_services(app: FastAPI):
 async def start_background_tasks(app: FastAPI):
     """Start background tasks."""
     try:
+        # Start pose service
+        pose_service = app.state.pose_service
+        await pose_service.start()
+        logger.info("Pose service started")
+        
         # Start pose streaming if enabled
         if settings.enable_real_time_processing:
             pose_stream_handler = app.state.pose_stream_handler
@@ -121,7 +126,7 @@ async def cleanup_services(app: FastAPI):
             await app.state.stream_service.shutdown()
         
         if hasattr(app.state, 'pose_service'):
-            await app.state.pose_service.shutdown()
+            await app.state.pose_service.stop()
         
         if hasattr(app.state, 'hardware_service'):
             await app.state.hardware_service.shutdown()

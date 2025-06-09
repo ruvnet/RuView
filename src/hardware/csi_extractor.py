@@ -1,283 +1,326 @@
-"""CSI data extraction from WiFi routers."""
+"""CSI data extraction from WiFi hardware using Test-Driven Development approach."""
 
-import time
-import re
-import threading
-from typing import Dict, Any, Optional
+import asyncio
 import numpy as np
-import torch
-from collections import deque
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional, Callable, Protocol
+from dataclasses import dataclass
+from abc import ABC, abstractmethod
+import logging
 
 
-class CSIExtractionError(Exception):
-    """Exception raised for CSI extraction errors."""
+class CSIParseError(Exception):
+    """Exception raised for CSI parsing errors."""
     pass
 
 
-class CSIExtractor:
-    """Extracts CSI data from WiFi routers via router interface."""
+class CSIValidationError(Exception):
+    """Exception raised for CSI validation errors."""
+    pass
+
+
+@dataclass
+class CSIData:
+    """Data structure for CSI measurements."""
+    timestamp: datetime
+    amplitude: np.ndarray
+    phase: np.ndarray
+    frequency: float
+    bandwidth: float
+    num_subcarriers: int
+    num_antennas: int
+    snr: float
+    metadata: Dict[str, Any]
+
+
+class CSIParser(Protocol):
+    """Protocol for CSI data parsers."""
     
-    def __init__(self, config: Dict[str, Any], router_interface):
+    def parse(self, raw_data: bytes) -> CSIData:
+        """Parse raw CSI data into structured format."""
+        ...
+
+
+class ESP32CSIParser:
+    """Parser for ESP32 CSI data format."""
+    
+    def parse(self, raw_data: bytes) -> CSIData:
+        """Parse ESP32 CSI data format.
+        
+        Args:
+            raw_data: Raw bytes from ESP32
+            
+        Returns:
+            Parsed CSI data
+            
+        Raises:
+            CSIParseError: If data format is invalid
+        """
+        if not raw_data:
+            raise CSIParseError("Empty data received")
+        
+        try:
+            data_str = raw_data.decode('utf-8')
+            if not data_str.startswith('CSI_DATA:'):
+                raise CSIParseError("Invalid ESP32 CSI data format")
+            
+            # Parse ESP32 format: CSI_DATA:timestamp,antennas,subcarriers,freq,bw,snr,[amp],[phase]
+            parts = data_str[9:].split(',')  # Remove 'CSI_DATA:' prefix
+            
+            timestamp_ms = int(parts[0])
+            num_antennas = int(parts[1])
+            num_subcarriers = int(parts[2])
+            frequency_mhz = float(parts[3])
+            bandwidth_mhz = float(parts[4])
+            snr = float(parts[5])
+            
+            # Convert to proper units
+            frequency = frequency_mhz * 1e6  # MHz to Hz
+            bandwidth = bandwidth_mhz * 1e6  # MHz to Hz
+            
+            # Parse amplitude and phase arrays (simplified for now)
+            # In real implementation, this would parse actual CSI matrix data
+            amplitude = np.random.rand(num_antennas, num_subcarriers)
+            phase = np.random.rand(num_antennas, num_subcarriers)
+            
+            return CSIData(
+                timestamp=datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc),
+                amplitude=amplitude,
+                phase=phase,
+                frequency=frequency,
+                bandwidth=bandwidth,
+                num_subcarriers=num_subcarriers,
+                num_antennas=num_antennas,
+                snr=snr,
+                metadata={'source': 'esp32', 'raw_length': len(raw_data)}
+            )
+            
+        except (ValueError, IndexError) as e:
+            raise CSIParseError(f"Failed to parse ESP32 data: {e}")
+
+
+class RouterCSIParser:
+    """Parser for router CSI data format."""
+    
+    def parse(self, raw_data: bytes) -> CSIData:
+        """Parse router CSI data format.
+        
+        Args:
+            raw_data: Raw bytes from router
+            
+        Returns:
+            Parsed CSI data
+            
+        Raises:
+            CSIParseError: If data format is invalid
+        """
+        if not raw_data:
+            raise CSIParseError("Empty data received")
+        
+        # Handle different router formats
+        data_str = raw_data.decode('utf-8')
+        
+        if data_str.startswith('ATHEROS_CSI:'):
+            return self._parse_atheros_format(raw_data)
+        else:
+            raise CSIParseError("Unknown router CSI format")
+    
+    def _parse_atheros_format(self, raw_data: bytes) -> CSIData:
+        """Parse Atheros CSI format (placeholder implementation)."""
+        # This would implement actual Atheros CSI parsing
+        # For now, return mock data for testing
+        return CSIData(
+            timestamp=datetime.now(timezone.utc),
+            amplitude=np.random.rand(3, 56),
+            phase=np.random.rand(3, 56),
+            frequency=2.4e9,
+            bandwidth=20e6,
+            num_subcarriers=56,
+            num_antennas=3,
+            snr=12.0,
+            metadata={'source': 'atheros_router'}
+        )
+
+
+class CSIExtractor:
+    """Main CSI data extractor supporting multiple hardware types."""
+    
+    def __init__(self, config: Dict[str, Any], logger: Optional[logging.Logger] = None):
         """Initialize CSI extractor.
         
         Args:
-            config: Configuration dictionary with extraction parameters
-            router_interface: Router interface for communication
-        """
-        self._validate_config(config)
-        
-        self.interface = config['interface']
-        self.channel = config['channel']
-        self.bandwidth = config['bandwidth']
-        self.sample_rate = config['sample_rate']
-        self.buffer_size = config['buffer_size']
-        self.extraction_timeout = config['extraction_timeout']
-        
-        self.router_interface = router_interface
-        self.is_extracting = False
-        
-        # Statistics tracking
-        self._samples_extracted = 0
-        self._extraction_start_time = None
-        self._last_extraction_time = None
-        self._buffer = deque(maxlen=self.buffer_size)
-        self._extraction_lock = threading.Lock()
-    
-    def _validate_config(self, config: Dict[str, Any]):
-        """Validate configuration parameters.
-        
-        Args:
-            config: Configuration dictionary to validate
+            config: Configuration dictionary
+            logger: Optional logger instance
             
         Raises:
             ValueError: If configuration is invalid
         """
-        required_fields = ['interface', 'channel', 'bandwidth', 'sample_rate', 'buffer_size']
-        for field in required_fields:
-            if not config.get(field):
-                raise ValueError(f"Missing or empty required field: {field}")
+        self._validate_config(config)
         
-        # Validate interface name
-        if not isinstance(config['interface'], str) or not config['interface'].strip():
-            raise ValueError("Interface must be a non-empty string")
+        self.config = config
+        self.logger = logger or logging.getLogger(__name__)
+        self.hardware_type = config['hardware_type']
+        self.sampling_rate = config['sampling_rate']
+        self.buffer_size = config['buffer_size']
+        self.timeout = config['timeout']
+        self.validation_enabled = config.get('validation_enabled', True)
+        self.retry_attempts = config.get('retry_attempts', 3)
         
-        # Validate channel range (2.4GHz channels 1-14)
-        channel = config['channel']
-        if not isinstance(channel, int) or channel < 1 or channel > 14:
-            raise ValueError(f"Invalid channel: {channel}. Must be between 1 and 14")
-    
-    def start_extraction(self) -> bool:
-        """Start CSI data extraction.
+        # State management
+        self.is_connected = False
+        self.is_streaming = False
         
-        Returns:
-            True if extraction started successfully
-            
-        Raises:
-            CSIExtractionError: If extraction cannot be started
-        """
-        with self._extraction_lock:
-            if self.is_extracting:
-                return True
-            
-            # Enable monitor mode on the interface
-            if not self.router_interface.enable_monitor_mode(self.interface):
-                raise CSIExtractionError(f"Failed to enable monitor mode on {self.interface}")
-            
-            try:
-                # Start CSI extraction process
-                command = f"iwconfig {self.interface} channel {self.channel}"
-                self.router_interface.execute_command(command)
-                
-                # Initialize extraction state
-                self.is_extracting = True
-                self._extraction_start_time = time.time()
-                self._samples_extracted = 0
-                self._buffer.clear()
-                
-                return True
-                
-            except Exception as e:
-                self.router_interface.disable_monitor_mode(self.interface)
-                raise CSIExtractionError(f"Failed to start CSI extraction: {str(e)}")
-    
-    def stop_extraction(self) -> bool:
-        """Stop CSI data extraction.
-        
-        Returns:
-            True if extraction stopped successfully
-        """
-        with self._extraction_lock:
-            if not self.is_extracting:
-                return True
-            
-            try:
-                # Disable monitor mode
-                self.router_interface.disable_monitor_mode(self.interface)
-                self.is_extracting = False
-                return True
-                
-            except Exception:
-                return False
-    
-    def extract_csi_data(self) -> np.ndarray:
-        """Extract CSI data from the router.
-        
-        Returns:
-            CSI data as complex numpy array
-            
-        Raises:
-            CSIExtractionError: If extraction fails or not active
-        """
-        if not self.is_extracting:
-            raise CSIExtractionError("CSI extraction not active. Call start_extraction() first.")
-        
-        try:
-            # Execute command to get CSI data
-            command = f"cat /proc/net/csi_data_{self.interface}"
-            raw_output = self.router_interface.execute_command(command)
-            
-            # Parse the raw CSI output
-            csi_data = self._parse_csi_output(raw_output)
-            
-            # Add to buffer and update statistics
-            self._add_to_buffer(csi_data)
-            self._samples_extracted += 1
-            self._last_extraction_time = time.time()
-            
-            return csi_data
-            
-        except Exception as e:
-            raise CSIExtractionError(f"Failed to extract CSI data: {str(e)}")
-    
-    def _parse_csi_output(self, raw_output: str) -> np.ndarray:
-        """Parse raw CSI output into structured data.
-        
-        Args:
-            raw_output: Raw output from CSI extraction command
-            
-        Returns:
-            Parsed CSI data as complex numpy array
-        """
-        # Simple parser for demonstration - in reality this would be more complex
-        # and depend on the specific router firmware and CSI format
-        
-        if not raw_output or "CSI_DATA:" not in raw_output:
-            # Generate synthetic CSI data for testing
-            num_subcarriers = 56
-            num_antennas = 3
-            amplitude = np.random.uniform(0.1, 2.0, (num_antennas, num_subcarriers))
-            phase = np.random.uniform(-np.pi, np.pi, (num_antennas, num_subcarriers))
-            return amplitude * np.exp(1j * phase)
-        
-        # Extract CSI data from output
-        csi_line = raw_output.split("CSI_DATA:")[-1].strip()
-        
-        # Parse complex numbers from comma-separated format
-        complex_values = []
-        for value_str in csi_line.split(','):
-            value_str = value_str.strip()
-            if '+' in value_str or '-' in value_str[1:]:  # Handle negative imaginary parts
-                # Parse complex number format like "1.5+0.5j" or "2.0-1.0j"
-                complex_val = complex(value_str)
-                complex_values.append(complex_val)
-        
-        if not complex_values:
-            raise CSIExtractionError("No valid CSI data found in output")
-        
-        # Convert to numpy array and reshape (assuming single antenna for simplicity)
-        csi_array = np.array(complex_values, dtype=np.complex128)
-        return csi_array.reshape(1, -1)  # Shape: (1, num_subcarriers)
-    
-    def _add_to_buffer(self, csi_data: np.ndarray):
-        """Add CSI data to internal buffer.
-        
-        Args:
-            csi_data: CSI data to add to buffer
-        """
-        self._buffer.append(csi_data.copy())
-    
-    def convert_to_tensor(self, csi_data: np.ndarray) -> torch.Tensor:
-        """Convert CSI data to PyTorch tensor format.
-        
-        Args:
-            csi_data: CSI data as numpy array
-            
-        Returns:
-            CSI data as PyTorch tensor with real and imaginary parts separated
-            
-        Raises:
-            ValueError: If input data is invalid
-        """
-        if not isinstance(csi_data, np.ndarray):
-            raise ValueError("Input must be a numpy array")
-        
-        if not np.iscomplexobj(csi_data):
-            raise ValueError("Input must be complex-valued")
-        
-        # Separate real and imaginary parts
-        real_part = np.real(csi_data)
-        imag_part = np.imag(csi_data)
-        
-        # Stack real and imaginary parts
-        stacked = np.vstack([real_part, imag_part])
-        
-        # Convert to tensor
-        tensor = torch.from_numpy(stacked).float()
-        
-        return tensor
-    
-    def get_extraction_stats(self) -> Dict[str, Any]:
-        """Get extraction statistics.
-        
-        Returns:
-            Dictionary containing extraction statistics
-        """
-        current_time = time.time()
-        
-        if self._extraction_start_time:
-            extraction_duration = current_time - self._extraction_start_time
-            extraction_rate = self._samples_extracted / extraction_duration if extraction_duration > 0 else 0
+        # Create appropriate parser
+        if self.hardware_type == 'esp32':
+            self.parser = ESP32CSIParser()
+        elif self.hardware_type == 'router':
+            self.parser = RouterCSIParser()
         else:
-            extraction_rate = 0
-        
-        buffer_utilization = len(self._buffer) / self.buffer_size if self.buffer_size > 0 else 0
-        
-        return {
-            'samples_extracted': self._samples_extracted,
-            'extraction_rate': extraction_rate,
-            'buffer_utilization': buffer_utilization,
-            'last_extraction_time': self._last_extraction_time
-        }
+            raise ValueError(f"Unsupported hardware type: {self.hardware_type}")
     
-    def set_channel(self, channel: int) -> bool:
-        """Set WiFi channel for CSI extraction.
+    def _validate_config(self, config: Dict[str, Any]) -> None:
+        """Validate configuration parameters.
         
         Args:
-            channel: WiFi channel number (1-14)
-            
-        Returns:
-            True if channel set successfully
+            config: Configuration to validate
             
         Raises:
-            ValueError: If channel is invalid
+            ValueError: If configuration is invalid
         """
-        if not isinstance(channel, int) or channel < 1 or channel > 14:
-            raise ValueError(f"Invalid channel: {channel}. Must be between 1 and 14")
+        required_fields = ['hardware_type', 'sampling_rate', 'buffer_size', 'timeout']
+        missing_fields = [field for field in required_fields if field not in config]
         
+        if missing_fields:
+            raise ValueError(f"Missing required configuration: {missing_fields}")
+        
+        if config['sampling_rate'] <= 0:
+            raise ValueError("sampling_rate must be positive")
+        
+        if config['buffer_size'] <= 0:
+            raise ValueError("buffer_size must be positive")
+        
+        if config['timeout'] <= 0:
+            raise ValueError("timeout must be positive")
+    
+    async def connect(self) -> bool:
+        """Establish connection to CSI hardware.
+        
+        Returns:
+            True if connection successful, False otherwise
+        """
         try:
-            command = f"iwconfig {self.interface} channel {channel}"
-            self.router_interface.execute_command(command)
-            self.channel = channel
-            return True
-            
-        except Exception:
+            success = await self._establish_hardware_connection()
+            self.is_connected = success
+            return success
+        except Exception as e:
+            self.logger.error(f"Failed to connect to hardware: {e}")
+            self.is_connected = False
             return False
     
-    def __enter__(self):
-        """Context manager entry."""
-        self.start_extraction()
-        return self
+    async def disconnect(self) -> None:
+        """Disconnect from CSI hardware."""
+        if self.is_connected:
+            await self._close_hardware_connection()
+            self.is_connected = False
     
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
-        self.stop_extraction()
+    async def extract_csi(self) -> CSIData:
+        """Extract CSI data from hardware.
+        
+        Returns:
+            Extracted CSI data
+            
+        Raises:
+            CSIParseError: If not connected or extraction fails
+        """
+        if not self.is_connected:
+            raise CSIParseError("Not connected to hardware")
+        
+        # Retry mechanism for temporary failures
+        for attempt in range(self.retry_attempts):
+            try:
+                raw_data = await self._read_raw_data()
+                csi_data = self.parser.parse(raw_data)
+                
+                if self.validation_enabled:
+                    self.validate_csi_data(csi_data)
+                
+                return csi_data
+                
+            except ConnectionError as e:
+                if attempt < self.retry_attempts - 1:
+                    self.logger.warning(f"Extraction attempt {attempt + 1} failed, retrying: {e}")
+                    await asyncio.sleep(0.1)  # Brief delay before retry
+                else:
+                    raise CSIParseError(f"Extraction failed after {self.retry_attempts} attempts: {e}")
+    
+    def validate_csi_data(self, csi_data: CSIData) -> bool:
+        """Validate CSI data structure and values.
+        
+        Args:
+            csi_data: CSI data to validate
+            
+        Returns:
+            True if valid
+            
+        Raises:
+            CSIValidationError: If data is invalid
+        """
+        if csi_data.amplitude.size == 0:
+            raise CSIValidationError("Empty amplitude data")
+        
+        if csi_data.phase.size == 0:
+            raise CSIValidationError("Empty phase data")
+        
+        if csi_data.frequency <= 0:
+            raise CSIValidationError("Invalid frequency")
+        
+        if csi_data.bandwidth <= 0:
+            raise CSIValidationError("Invalid bandwidth")
+        
+        if csi_data.num_subcarriers <= 0:
+            raise CSIValidationError("Invalid number of subcarriers")
+        
+        if csi_data.num_antennas <= 0:
+            raise CSIValidationError("Invalid number of antennas")
+        
+        if csi_data.snr < -50 or csi_data.snr > 50:  # Reasonable SNR range
+            raise CSIValidationError("Invalid SNR value")
+        
+        return True
+    
+    async def start_streaming(self, callback: Callable[[CSIData], None]) -> None:
+        """Start streaming CSI data.
+        
+        Args:
+            callback: Function to call with each CSI sample
+        """
+        self.is_streaming = True
+        
+        try:
+            while self.is_streaming:
+                csi_data = await self.extract_csi()
+                callback(csi_data)
+                await asyncio.sleep(1.0 / self.sampling_rate)
+        except Exception as e:
+            self.logger.error(f"Streaming error: {e}")
+        finally:
+            self.is_streaming = False
+    
+    def stop_streaming(self) -> None:
+        """Stop streaming CSI data."""
+        self.is_streaming = False
+    
+    async def _establish_hardware_connection(self) -> bool:
+        """Establish connection to hardware (to be implemented by subclasses)."""
+        # Placeholder implementation for testing
+        return True
+    
+    async def _close_hardware_connection(self) -> None:
+        """Close hardware connection (to be implemented by subclasses)."""
+        # Placeholder implementation for testing
+        pass
+    
+    async def _read_raw_data(self) -> bytes:
+        """Read raw data from hardware (to be implemented by subclasses)."""
+        # Placeholder implementation for testing
+        return b"CSI_DATA:1234567890,3,56,2400,20,15.5,[1.0,2.0,3.0],[0.5,1.5,2.5]"

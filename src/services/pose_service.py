@@ -57,14 +57,29 @@ class PoseService:
             # Initialize CSI processor
             csi_config = {
                 'buffer_size': self.settings.csi_buffer_size,
-                'sample_rate': 1000,  # Default sampling rate
+                'sampling_rate': getattr(self.settings, 'csi_sampling_rate', 1000),
+                'window_size': getattr(self.settings, 'csi_window_size', 512),
+                'overlap': getattr(self.settings, 'csi_overlap', 0.5),
+                'noise_threshold': getattr(self.settings, 'csi_noise_threshold', 0.1),
+                'human_detection_threshold': getattr(self.settings, 'csi_human_detection_threshold', 0.8),
+                'smoothing_factor': getattr(self.settings, 'csi_smoothing_factor', 0.9),
+                'max_history_size': getattr(self.settings, 'csi_max_history_size', 500),
                 'num_subcarriers': 56,
                 'num_antennas': 3
             }
             self.csi_processor = CSIProcessor(config=csi_config)
             
             # Initialize phase sanitizer
-            self.phase_sanitizer = PhaseSanitizer()
+            phase_config = {
+                'unwrapping_method': 'numpy',
+                'outlier_threshold': 3.0,
+                'smoothing_window': 5,
+                'enable_outlier_removal': True,
+                'enable_smoothing': True,
+                'enable_noise_filtering': True,
+                'noise_threshold': getattr(self.settings, 'csi_noise_threshold', 0.1)
+            }
+            self.phase_sanitizer = PhaseSanitizer(config=phase_config)
             
             # Initialize models if not mocking
             if not self.settings.mock_pose_data:
@@ -158,16 +173,52 @@ class PoseService:
     
     async def _process_csi(self, csi_data: np.ndarray, metadata: Dict[str, Any]) -> np.ndarray:
         """Process raw CSI data."""
-        # Add CSI data to processor
-        self.csi_processor.add_data(csi_data, metadata.get("timestamp", datetime.now()))
+        # Convert raw data to CSIData format
+        from src.hardware.csi_extractor import CSIData
         
-        # Get processed data
-        processed_data = self.csi_processor.get_processed_data()
+        # Create CSIData object with proper fields
+        # For mock data, create amplitude and phase from input
+        if csi_data.ndim == 1:
+            amplitude = np.abs(csi_data)
+            phase = np.angle(csi_data) if np.iscomplexobj(csi_data) else np.zeros_like(csi_data)
+        else:
+            amplitude = csi_data
+            phase = np.zeros_like(csi_data)
         
-        # Apply phase sanitization
-        if processed_data is not None:
-            sanitized_data = self.phase_sanitizer.sanitize(processed_data)
-            return sanitized_data
+        csi_data_obj = CSIData(
+            timestamp=metadata.get("timestamp", datetime.now()),
+            amplitude=amplitude,
+            phase=phase,
+            frequency=metadata.get("frequency", 5.0),  # 5 GHz default
+            bandwidth=metadata.get("bandwidth", 20.0),  # 20 MHz default
+            num_subcarriers=metadata.get("num_subcarriers", 56),
+            num_antennas=metadata.get("num_antennas", 3),
+            snr=metadata.get("snr", 20.0),  # 20 dB default
+            metadata=metadata
+        )
+        
+        # Process CSI data
+        try:
+            detection_result = await self.csi_processor.process_csi_data(csi_data_obj)
+            
+            # Add to history for temporal analysis
+            self.csi_processor.add_to_history(csi_data_obj)
+            
+            # Extract amplitude data for pose estimation
+            if detection_result and detection_result.features:
+                amplitude_data = detection_result.features.amplitude_mean
+                
+                # Apply phase sanitization if we have phase data
+                if hasattr(detection_result.features, 'phase_difference'):
+                    phase_data = detection_result.features.phase_difference
+                    sanitized_phase = self.phase_sanitizer.sanitize(phase_data)
+                    # Combine amplitude and phase data
+                    return np.concatenate([amplitude_data, sanitized_phase])
+                
+                return amplitude_data
+            
+        except Exception as e:
+            self.logger.warning(f"CSI processing failed, using raw data: {e}")
         
         return csi_data
     
