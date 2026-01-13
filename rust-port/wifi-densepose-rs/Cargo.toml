@@ -10,6 +10,7 @@ members = [
     "crates/wifi-densepose-hardware",
     "crates/wifi-densepose-wasm",
     "crates/wifi-densepose-cli",
+    "crates/wifi-densepose-mat",
 ]
 
 [workspace.package]
@@ -91,6 +92,7 @@ wifi-densepose-db = { path = "crates/wifi-densepose-db" }
 wifi-densepose-config = { path = "crates/wifi-densepose-config" }
 wifi-densepose-hardware = { path = "crates/wifi-densepose-hardware" }
 wifi-densepose-wasm = { path = "crates/wifi-densepose-wasm" }
+wifi-densepose-mat = { path = "crates/wifi-densepose-mat" }
 
 [profile.release]
 lto = true

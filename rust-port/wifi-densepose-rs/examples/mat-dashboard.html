@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiFi-Mat Disaster Response Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #16213e 0%, #0f3460 100%);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .header h1::before {
+            content: '';
+            width: 12px;
+            height: 12px;
+            background: #00ff88;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.8); }
+        }
+
+        .event-info {
+            font-size: 0.9rem;
+            color: #aaa;
+        }
+
+        .main-container {
+            display: grid;
+            grid-template-columns: 1fr 300px;
+            gap: 1rem;
+            padding: 1rem;
+            height: calc(100vh - 80px);
+        }
+
+        .map-section {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .map-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .map-header h2 {
+            font-size: 1.1rem;
+        }
+
+        .map-controls {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .map-controls button {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #0066ff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0052cc;
+        }
+
+        .btn-secondary {
+            background: #333;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #444;
+        }
+
+        .btn-danger {
+            background: #cc0000;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #aa0000;
+        }
+
+        .canvas-container {
+            flex: 1;
+            position: relative;
+            background: #0a0a1a;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        #mapCanvas {
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .panel {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 1rem;
+        }
+
+        .panel h3 {
+            font-size: 0.95rem;
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid #333;
+        }
+
+        /* Statistics */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.5rem;
+        }
+
+        .stat-item {
+            background: #0a0a1a;
+            padding: 0.75rem;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            color: #888;
+            margin-top: 0.25rem;
+        }
+
+        .stat-immediate .stat-value { color: #ff0000; }
+        .stat-delayed .stat-value { color: #ffcc00; }
+        .stat-minor .stat-value { color: #00cc00; }
+        .stat-total .stat-value { color: #0096ff; }
+
+        /* Triage Legend */
+        .legend {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border: 2px solid white;
+        }
+
+        .legend-immediate { background: #ff0000; }
+        .legend-delayed { background: #ffcc00; }
+        .legend-minor { background: #00cc00; }
+        .legend-deceased { background: #333333; }
+        .legend-unknown { background: #999999; }
+
+        /* Alerts Panel */
+        .alerts-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .alert-item {
+            background: #0a0a1a;
+            padding: 0.75rem;
+            border-radius: 4px;
+            margin-bottom: 0.5rem;
+            border-left: 3px solid #ff0000;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .alert-item:hover {
+            background: #1a1a3a;
+        }
+
+        .alert-item.priority-critical { border-left-color: #ff0000; }
+        .alert-item.priority-high { border-left-color: #ff6600; }
+        .alert-item.priority-medium { border-left-color: #ffcc00; }
+        .alert-item.priority-low { border-left-color: #0066ff; }
+
+        .alert-title {
+            font-weight: bold;
+            font-size: 0.85rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .alert-message {
+            font-size: 0.75rem;
+            color: #aaa;
+        }
+
+        .alert-time {
+            font-size: 0.7rem;
+            color: #666;
+            margin-top: 0.25rem;
+        }
+
+        /* Survivors Panel */
+        .survivors-list {
+            max-height: 250px;
+            overflow-y: auto;
+        }
+
+        .survivor-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem;
+            background: #0a0a1a;
+            border-radius: 4px;
+            margin-bottom: 0.5rem;
+            cursor: pointer;
+        }
+
+        .survivor-item:hover {
+            background: #1a1a3a;
+        }
+
+        .survivor-marker {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 2px solid white;
+        }
+
+        .survivor-info {
+            flex: 1;
+        }
+
+        .survivor-id {
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+
+        .survivor-details {
+            font-size: 0.7rem;
+            color: #888;
+        }
+
+        .survivor-vital {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 2px;
+            background: #333;
+        }
+
+        /* Notification Toast */
+        .toast-container {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .toast {
+            background: #16213e;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            border-left: 4px solid #ff0000;
+            animation: slideIn 0.3s ease;
+            max-width: 350px;
+        }
+
+        .toast.critical { border-left-color: #ff0000; background: #2a1a1a; }
+        .toast.high { border-left-color: #ff6600; }
+        .toast.medium { border-left-color: #ffcc00; }
+        .toast.low { border-left-color: #0066ff; }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        .toast-title {
+            font-weight: bold;
+            margin-bottom: 0.25rem;
+        }
+
+        .toast-message {
+            font-size: 0.85rem;
+            color: #aaa;
+        }
+
+        .toast-close {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            background: none;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            font-size: 1.2rem;
+        }
+
+        /* Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1001;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: #16213e;
+            padding: 2rem;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 500px;
+        }
+
+        .modal h2 {
+            margin-bottom: 1rem;
+        }
+
+        .modal-form {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .form-group label {
+            font-size: 0.85rem;
+            color: #aaa;
+        }
+
+        .form-group input,
+        .form-group select {
+            padding: 0.75rem;
+            border: 1px solid #333;
+            border-radius: 4px;
+            background: #0a0a1a;
+            color: white;
+            font-size: 1rem;
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: flex-end;
+            margin-top: 1rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .main-container {
+                grid-template-columns: 1fr;
+            }
+
+            .sidebar {
+                flex-direction: row;
+                flex-wrap: wrap;
+            }
+
+            .sidebar .panel {
+                flex: 1;
+                min-width: 280px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>WiFi-Mat Disaster Response</h1>
+        <div class="event-info" id="eventInfo">No active event</div>
+    </header>
+
+    <div class="main-container">
+        <section class="map-section">
+            <div class="map-header">
+                <h2>Scan Zone Map</h2>
+                <div class="map-controls">
+                    <button class="btn-primary" onclick="showCreateEventModal()">New Event</button>
+                    <button class="btn-secondary" onclick="addRectZone()">+ Rectangle Zone</button>
+                    <button class="btn-secondary" onclick="addCircleZone()">+ Circle Zone</button>
+                    <button class="btn-secondary" onclick="simulateSurvivor()">Simulate Detection</button>
+                </div>
+            </div>
+            <div class="canvas-container">
+                <canvas id="mapCanvas"></canvas>
+            </div>
+        </section>
+
+        <aside class="sidebar">
+            <div class="panel">
+                <h3>Statistics</h3>
+                <div class="stats-grid">
+                    <div class="stat-item stat-total">
+                        <div class="stat-value" id="statTotal">0</div>
+                        <div class="stat-label">Total Survivors</div>
+                    </div>
+                    <div class="stat-item stat-immediate">
+                        <div class="stat-value" id="statImmediate">0</div>
+                        <div class="stat-label">Immediate</div>
+                    </div>
+                    <div class="stat-item stat-delayed">
+                        <div class="stat-value" id="statDelayed">0</div>
+                        <div class="stat-label">Delayed</div>
+                    </div>
+                    <div class="stat-item stat-minor">
+                        <div class="stat-value" id="statMinor">0</div>
+                        <div class="stat-label">Minor</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>Triage Legend</h3>
+                <div class="legend">
+                    <div class="legend-item">
+                        <div class="legend-color legend-immediate"></div>
+                        <span>Immediate (Red) - Life-threatening</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color legend-delayed"></div>
+                        <span>Delayed (Yellow) - Serious</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color legend-minor"></div>
+                        <span>Minor (Green) - Walking wounded</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color legend-deceased"></div>
+                        <span>Deceased (Black)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color legend-unknown"></div>
+                        <span>Unknown (Gray)</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>Active Alerts</h3>
+                <div class="alerts-list" id="alertsList">
+                    <p style="color: #666; font-size: 0.85rem;">No active alerts</p>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>Detected Survivors</h3>
+                <div class="survivors-list" id="survivorsList">
+                    <p style="color: #666; font-size: 0.85rem;">No survivors detected</p>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Create Event Modal -->
+    <div class="modal-overlay" id="createEventModal">
+        <div class="modal">
+            <h2>Create Disaster Event</h2>
+            <div class="modal-form">
+                <div class="form-group">
+                    <label>Disaster Type</label>
+                    <select id="disasterType">
+                        <option value="earthquake">Earthquake</option>
+                        <option value="building_collapse">Building Collapse</option>
+                        <option value="landslide">Landslide</option>
+                        <option value="avalanche">Avalanche</option>
+                        <option value="flood">Flood</option>
+                        <option value="mine_collapse">Mine Collapse</option>
+                        <option value="industrial">Industrial Accident</option>
+                        <option value="tunnel_collapse">Tunnel Collapse</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Location (Latitude)</label>
+                    <input type="number" id="eventLat" value="37.7749" step="0.0001">
+                </div>
+                <div class="form-group">
+                    <label>Location (Longitude)</label>
+                    <input type="number" id="eventLng" value="-122.4194" step="0.0001">
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <input type="text" id="eventDesc" placeholder="Enter event description">
+                </div>
+                <div class="form-actions">
+                    <button class="btn-secondary" onclick="hideCreateEventModal()">Cancel</button>
+                    <button class="btn-primary" onclick="createEvent()">Create Event</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // WiFi-Mat Dashboard JavaScript
+        // This connects to the WASM module for disaster response functionality
+
+        // Import WASM module (adjust path based on your build output)
+        // import init, { MatDashboard, initLogging } from './pkg/wifi_densepose_wasm.js';
+
+        // For demo purposes, we'll create a mock implementation
+        // In production, this would be the real WASM module
+
+        class MockMatDashboard {
+            constructor() {
+                this.eventId = null;
+                this.zones = new Map();
+                this.survivors = new Map();
+                this.alerts = [];
+                this.callbacks = {};
+                this.zoneCounter = 0;
+            }
+
+            createEvent(type, lat, lng, description) {
+                this.eventId = crypto.randomUUID();
+                this.eventStart = Date.now();
+                this.eventType = type;
+                this.description = description;
+                console.log(`Event created: ${this.eventId}`);
+                return this.eventId;
+            }
+
+            getEventId() {
+                return this.eventId;
+            }
+
+            addRectangleZone(name, x, y, width, height) {
+                const id = crypto.randomUUID();
+                this.zones.set(id, {
+                    id, name, type: 'rectangle', x, y, width, height,
+                    status: 0, scan_count: 0, detection_count: 0
+                });
+                if (this.callbacks.onZoneUpdated) {
+                    this.callbacks.onZoneUpdated(this.zones.get(id));
+                }
+                return id;
+            }
+
+            addCircleZone(name, centerX, centerY, radius) {
+                const id = crypto.randomUUID();
+                this.zones.set(id, {
+                    id, name, type: 'circle', centerX, centerY, radius,
+                    status: 0, scan_count: 0, detection_count: 0
+                });
+                if (this.callbacks.onZoneUpdated) {
+                    this.callbacks.onZoneUpdated(this.zones.get(id));
+                }
+                return id;
+            }
+
+            simulateSurvivorDetection(x, y, depth, triage, confidence) {
+                const id = crypto.randomUUID();
+                const colors = ['#ff0000', '#ffcc00', '#00cc00', '#333333', '#999999'];
+                const survivor = {
+                    id,
+                    zone_id: Array.from(this.zones.keys())[0] || '',
+                    x, y, depth,
+                    triage_status: triage,
+                    triage_color: colors[triage] || '#999999',
+                    confidence,
+                    breathing_rate: 12 + Math.random() * 8,
+                    heart_rate: 60 + Math.random() * 40,
+                    first_detected: new Date().toISOString(),
+                    last_updated: new Date().toISOString(),
+                    is_deteriorating: Math.random() < 0.2
+                };
+                this.survivors.set(id, survivor);
+
+                if (this.callbacks.onSurvivorDetected) {
+                    this.callbacks.onSurvivorDetected(survivor);
+                }
+
+                // Generate alert for urgent survivors
+                if (triage <= 1) {
+                    const alert = {
+                        id: crypto.randomUUID(),
+                        survivor_id: id,
+                        priority: triage === 0 ? 0 : 1,
+                        title: triage === 0 ? 'CRITICAL: Survivor needs immediate attention' : 'URGENT: Survivor detected',
+                        message: `Survivor at (${x.toFixed(0)}, ${y.toFixed(0)}) - Depth: ${Math.abs(depth).toFixed(1)}m`,
+                        recommended_action: triage === 0 ? 'Dispatch rescue team immediately' : 'Schedule rescue team',
+                        triage_status: triage,
+                        location_x: x,
+                        location_y: y,
+                        created_at: new Date().toISOString(),
+                        priority_color: triage === 0 ? '#ff0000' : '#ff6600'
+                    };
+                    this.alerts.push(alert);
+                    if (this.callbacks.onAlertGenerated) {
+                        this.callbacks.onAlertGenerated(alert);
+                    }
+                }
+
+                return id;
+            }
+
+            getSurvivors() {
+                return Array.from(this.survivors.values());
+            }
+
+            getAlerts() {
+                return this.alerts.filter(a => !a.acknowledged);
+            }
+
+            acknowledgeAlert(alertId) {
+                const alert = this.alerts.find(a => a.id === alertId);
+                if (alert) {
+                    alert.acknowledged = true;
+                    return true;
+                }
+                return false;
+            }
+
+            getStats() {
+                const survivors = Array.from(this.survivors.values());
+                return {
+                    total_survivors: survivors.length,
+                    immediate_count: survivors.filter(s => s.triage_status === 0).length,
+                    delayed_count: survivors.filter(s => s.triage_status === 1).length,
+                    minor_count: survivors.filter(s => s.triage_status === 2).length,
+                    deceased_count: survivors.filter(s => s.triage_status === 3).length,
+                    unknown_count: survivors.filter(s => s.triage_status === 4).length,
+                    active_zones: this.zones.size,
+                    total_scans: 0,
+                    active_alerts: this.alerts.filter(a => !a.acknowledged).length,
+                    elapsed_seconds: this.eventStart ? (Date.now() - this.eventStart) / 1000 : 0
+                };
+            }
+
+            onSurvivorDetected(callback) { this.callbacks.onSurvivorDetected = callback; }
+            onSurvivorUpdated(callback) { this.callbacks.onSurvivorUpdated = callback; }
+            onAlertGenerated(callback) { this.callbacks.onAlertGenerated = callback; }
+            onZoneUpdated(callback) { this.callbacks.onZoneUpdated = callback; }
+
+            renderZones(ctx) {
+                this.zones.forEach(zone => {
+                    const colors = {
+                        fill: 'rgba(0, 150, 255, 0.3)',
+                        stroke: '#0096ff'
+                    };
+
+                    ctx.fillStyle = colors.fill;
+                    ctx.strokeStyle = colors.stroke;
+                    ctx.lineWidth = 2;
+
+                    if (zone.type === 'rectangle') {
+                        ctx.fillRect(zone.x, zone.y, zone.width, zone.height);
+                        ctx.strokeRect(zone.x, zone.y, zone.width, zone.height);
+                        ctx.fillStyle = '#ffffff';
+                        ctx.font = '12px sans-serif';
+                        ctx.fillText(zone.name, zone.x + 5, zone.y + 15);
+                    } else if (zone.type === 'circle') {
+                        ctx.beginPath();
+                        ctx.arc(zone.centerX, zone.centerY, zone.radius, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.stroke();
+                        ctx.fillStyle = '#ffffff';
+                        ctx.font = '12px sans-serif';
+                        ctx.fillText(zone.name, zone.centerX - 20, zone.centerY);
+                    }
+                });
+            }
+
+            renderSurvivors(ctx) {
+                this.survivors.forEach(survivor => {
+                    const radius = survivor.is_deteriorating ? 12 : 10;
+
+                    // Glow for immediate
+                    if (survivor.triage_status === 0) {
+                        ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+                        ctx.beginPath();
+                        ctx.arc(survivor.x, survivor.y, radius + 8, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+
+                    // Main marker
+                    ctx.fillStyle = survivor.triage_color;
+                    ctx.beginPath();
+                    ctx.arc(survivor.x, survivor.y, radius, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Border
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+
+                    // Deterioration ring
+                    if (survivor.is_deteriorating) {
+                        ctx.strokeStyle = '#ff0000';
+                        ctx.lineWidth = 3;
+                        ctx.beginPath();
+                        ctx.arc(survivor.x, survivor.y, radius + 4, 0, Math.PI * 2);
+                        ctx.stroke();
+                    }
+
+                    // Depth label
+                    if (survivor.depth < 0) {
+                        ctx.fillStyle = '#ffffff';
+                        ctx.font = '10px sans-serif';
+                        ctx.fillText(`${Math.abs(survivor.depth).toFixed(1)}m`, survivor.x + radius + 2, survivor.y + 4);
+                    }
+                });
+            }
+        }
+
+        // Global dashboard instance
+        let dashboard = null;
+        let canvas = null;
+        let ctx = null;
+
+        // Initialize
+        async function init() {
+            console.log('Initializing WiFi-Mat Dashboard...');
+
+            // In production, use real WASM:
+            // await init();
+            // initLogging('info');
+            // dashboard = new MatDashboard();
+
+            // For demo, use mock:
+            dashboard = new MockMatDashboard();
+
+            // Setup canvas
+            canvas = document.getElementById('mapCanvas');
+            ctx = canvas.getContext('2d');
+
+            // Handle resize
+            function resizeCanvas() {
+                const container = canvas.parentElement;
+                canvas.width = container.clientWidth;
+                canvas.height = container.clientHeight;
+                render();
+            }
+            window.addEventListener('resize', resizeCanvas);
+            resizeCanvas();
+
+            // Setup callbacks
+            dashboard.onSurvivorDetected((survivor) => {
+                console.log('Survivor detected:', survivor);
+                updateSurvivorsList();
+                updateStats();
+                render();
+            });
+
+            dashboard.onAlertGenerated((alert) => {
+                console.log('Alert generated:', alert);
+                showToast(alert);
+                updateAlertsList();
+                updateStats();
+            });
+
+            dashboard.onZoneUpdated((zone) => {
+                console.log('Zone updated:', zone);
+                render();
+            });
+
+            // Canvas click for placing survivors (demo)
+            canvas.addEventListener('click', (e) => {
+                if (!dashboard.getEventId()) return;
+
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                // For demo, click to simulate detection
+                // const triage = Math.floor(Math.random() * 5);
+                // dashboard.simulateSurvivorDetection(x, y, -Math.random() * 5, triage, 0.7 + Math.random() * 0.3);
+            });
+
+            // Start render loop
+            requestAnimationFrame(renderLoop);
+
+            console.log('Dashboard initialized');
+        }
+
+        // Render loop
+        function renderLoop() {
+            render();
+            requestAnimationFrame(renderLoop);
+        }
+
+        function render() {
+            if (!ctx || !canvas) return;
+
+            // Clear
+            ctx.fillStyle = '#0a0a1a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw grid
+            ctx.strokeStyle = '#1a1a3a';
+            ctx.lineWidth = 1;
+            for (let x = 0; x < canvas.width; x += 50) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+            for (let y = 0; y < canvas.height; y += 50) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+
+            // Render zones and survivors
+            if (dashboard) {
+                dashboard.renderZones(ctx);
+                dashboard.renderSurvivors(ctx);
+            }
+        }
+
+        // UI Functions
+        window.showCreateEventModal = function() {
+            document.getElementById('createEventModal').classList.add('active');
+        };
+
+        window.hideCreateEventModal = function() {
+            document.getElementById('createEventModal').classList.remove('active');
+        };
+
+        window.createEvent = function() {
+            const type = document.getElementById('disasterType').value;
+            const lat = parseFloat(document.getElementById('eventLat').value);
+            const lng = parseFloat(document.getElementById('eventLng').value);
+            const desc = document.getElementById('eventDesc').value || `${type} event`;
+
+            const eventId = dashboard.createEvent(type, lat, lng, desc);
+
+            document.getElementById('eventInfo').textContent = `Event: ${desc} (${eventId.substring(0, 8)}...)`;
+            hideCreateEventModal();
+
+            showToast({
+                title: 'Event Created',
+                message: `Disaster event ${type} initialized`,
+                priority: 3,
+                priority_color: '#0066ff'
+            });
+        };
+
+        window.addRectZone = function() {
+            if (!dashboard.getEventId()) {
+                alert('Please create an event first');
+                return;
+            }
+
+            const name = prompt('Zone name:', `Zone ${String.fromCharCode(65 + dashboard.zones.size)}`);
+            if (!name) return;
+
+            const x = 50 + Math.random() * (canvas.width - 250);
+            const y = 50 + Math.random() * (canvas.height - 200);
+            const width = 100 + Math.random() * 150;
+            const height = 80 + Math.random() * 120;
+
+            dashboard.addRectangleZone(name, x, y, width, height);
+        };
+
+        window.addCircleZone = function() {
+            if (!dashboard.getEventId()) {
+                alert('Please create an event first');
+                return;
+            }
+
+            const name = prompt('Zone name:', `Zone ${String.fromCharCode(65 + dashboard.zones.size)}`);
+            if (!name) return;
+
+            const centerX = 100 + Math.random() * (canvas.width - 200);
+            const centerY = 100 + Math.random() * (canvas.height - 200);
+            const radius = 40 + Math.random() * 60;
+
+            dashboard.addCircleZone(name, centerX, centerY, radius);
+        };
+
+        window.simulateSurvivor = function() {
+            if (!dashboard.getEventId()) {
+                alert('Please create an event first');
+                return;
+            }
+
+            const x = 50 + Math.random() * (canvas.width - 100);
+            const y = 50 + Math.random() * (canvas.height - 100);
+            const depth = -Math.random() * 5;
+            const triage = Math.floor(Math.random() * 5);
+            const confidence = 0.5 + Math.random() * 0.5;
+
+            dashboard.simulateSurvivorDetection(x, y, depth, triage, confidence);
+        };
+
+        function updateStats() {
+            const stats = dashboard.getStats();
+            document.getElementById('statTotal').textContent = stats.total_survivors;
+            document.getElementById('statImmediate').textContent = stats.immediate_count;
+            document.getElementById('statDelayed').textContent = stats.delayed_count;
+            document.getElementById('statMinor').textContent = stats.minor_count;
+        }
+
+        function updateSurvivorsList() {
+            const survivors = dashboard.getSurvivors();
+            const container = document.getElementById('survivorsList');
+
+            if (survivors.length === 0) {
+                container.innerHTML = '<p style="color: #666; font-size: 0.85rem;">No survivors detected</p>';
+                return;
+            }
+
+            container.innerHTML = survivors.map(s => {
+                const triageLabels = ['IMMEDIATE', 'DELAYED', 'MINOR', 'DECEASED', 'UNKNOWN'];
+                return `
+                    <div class="survivor-item">
+                        <div class="survivor-marker" style="background: ${s.triage_color}"></div>
+                        <div class="survivor-info">
+                            <div class="survivor-id">${s.id.substring(0, 8)}...</div>
+                            <div class="survivor-details">
+                                ${triageLabels[s.triage_status]} | Depth: ${Math.abs(s.depth).toFixed(1)}m
+                            </div>
+                        </div>
+                        <div class="survivor-vital">${s.breathing_rate.toFixed(0)} bpm</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function updateAlertsList() {
+            const alerts = dashboard.getAlerts();
+            const container = document.getElementById('alertsList');
+
+            if (alerts.length === 0) {
+                container.innerHTML = '<p style="color: #666; font-size: 0.85rem;">No active alerts</p>';
+                return;
+            }
+
+            container.innerHTML = alerts.map(a => {
+                const priorityClass = ['critical', 'high', 'medium', 'low'][a.priority] || 'low';
+                return `
+                    <div class="alert-item priority-${priorityClass}" onclick="acknowledgeAlert('${a.id}')">
+                        <div class="alert-title">${a.title}</div>
+                        <div class="alert-message">${a.message}</div>
+                        <div class="alert-time">${new Date(a.created_at).toLocaleTimeString()}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        window.acknowledgeAlert = function(alertId) {
+            dashboard.acknowledgeAlert(alertId);
+            updateAlertsList();
+            updateStats();
+        };
+
+        function showToast(alert) {
+            const container = document.getElementById('toastContainer');
+            const priorityClass = ['critical', 'high', 'medium', 'low'][alert.priority] || 'low';
+
+            const toast = document.createElement('div');
+            toast.className = `toast ${priorityClass}`;
+            toast.innerHTML = `
+                <button class="toast-close" onclick="this.parentElement.remove()">&times;</button>
+                <div class="toast-title">${alert.title}</div>
+                <div class="toast-message">${alert.message}</div>
+            `;
+
+            container.appendChild(toast);
+
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                if (toast.parentElement) {
+                    toast.remove();
+                }
+            }, 5000);
+
+            // Play alert sound for critical
+            if (alert.priority === 0) {
+                playAlertSound();
+            }
+        }
+
+        function playAlertSound() {
+            // Create a simple beep sound
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+
+                oscillator.frequency.value = 880;
+                oscillator.type = 'sine';
+                gainNode.gain.value = 0.3;
+
+                oscillator.start();
+                oscillator.stop(audioCtx.currentTime + 0.2);
+
+                setTimeout(() => {
+                    const osc2 = audioCtx.createOscillator();
+                    osc2.connect(gainNode);
+                    osc2.frequency.value = 880;
+                    osc2.type = 'sine';
+                    osc2.start();
+                    osc2.stop(audioCtx.currentTime + 0.2);
+                }, 250);
+            } catch (e) {
+                console.log('Audio not available');
+            }
+        }
+
+        // Initialize on load
+        init();
+    </script>
+</body>
+</html>

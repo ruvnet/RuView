@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-01-13T03:30:55.480Z",
+  "timestamp": "2026-01-13T18:18:55.019Z",
   "projectRoot": "/home/user/wifi-densepose/rust-port/wifi-densepose-rs",
   "structure": {
     "hasPackageJson": false,
@@ -7,5 +7,5 @@
     "hasClaudeConfig": false,
     "hasClaudeFlow": true
   },
-  "scannedAt": 1768275055481
+  "scannedAt": 1768328335020
 }

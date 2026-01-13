@@ -1,0 +1,72 @@
+[package]
+name = "wifi-densepose-mat"
+version = "0.1.0"
+edition = "2021"
+authors = ["WiFi-DensePose Team"]
+description = "Mass Casualty Assessment Tool - WiFi-based disaster survivor detection"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/wifi-densepose"
+keywords = ["wifi", "disaster", "rescue", "detection", "vital-signs"]
+categories = ["science", "algorithms"]
+
+[features]
+default = ["std", "api"]
+std = []
+api = ["dep:serde", "chrono/serde", "geo/use-serde"]
+portable = ["low-power"]
+low-power = []
+distributed = ["tokio/sync"]
+drone = ["distributed"]
+serde = ["dep:serde", "chrono/serde", "geo/use-serde"]
+
+[dependencies]
+# Workspace dependencies
+wifi-densepose-core = { path = "../wifi-densepose-core" }
+wifi-densepose-signal = { path = "../wifi-densepose-signal" }
+wifi-densepose-nn = { path = "../wifi-densepose-nn" }
+
+# Async runtime
+tokio = { version = "1.35", features = ["rt", "sync", "time"] }
+async-trait = "0.1"
+
+# Web framework (REST API)
+axum = { version = "0.7", features = ["ws"] }
+futures-util = "0.3"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = "1.0"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Math and signal processing
+num-complex = "0.4"
+ndarray = "0.15"
+rustfft = "6.1"
+
+# Utilities
+uuid = { version = "1.6", features = ["v4", "serde"] }
+tracing = "0.1"
+parking_lot = "0.12"
+
+# Geo calculations
+geo = "0.27"
+
+[dev-dependencies]
+tokio-test = "0.4"
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.4"
+approx = "0.5"
+
+[[bench]]
+name = "detection_bench"
+harness = false
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
