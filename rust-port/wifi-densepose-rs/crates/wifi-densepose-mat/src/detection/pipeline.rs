@@ -1,6 +1,10 @@
 //! Detection pipeline combining all vital signs detectors.
+//!
+//! This module provides both traditional signal-processing-based detection
+//! and optional ML-enhanced detection for improved accuracy.
 
 use crate::domain::{ScanZone, VitalSignsReading, ConfidenceScore};
+use crate::ml::{MlDetectionConfig, MlDetectionPipeline, MlDetectionResult};
 use crate::{DisasterConfig, MatError};
 use super::{
     BreathingDetector, BreathingDetectorConfig,
@@ -23,6 +27,10 @@ pub struct DetectionConfig {
     pub enable_heartbeat: bool,
     /// Minimum overall confidence to report detection
     pub min_confidence: f64,
+    /// Enable ML-enhanced detection
+    pub enable_ml: bool,
+    /// ML detection configuration (if enabled)
+    pub ml_config: Option<MlDetectionConfig>,
 }
 
 impl Default for DetectionConfig {
@@ -34,6 +42,8 @@ impl Default for DetectionConfig {
             sample_rate: 1000.0,
             enable_heartbeat: false,
             min_confidence: 0.3,
+            enable_ml: false,
+            ml_config: None,
         }
     }
 }
@@ -52,6 +62,20 @@ impl DetectionConfig {
         detection_config.enable_heartbeat = config.sensitivity > 0.7;
 
         detection_config
+    }
+
+    /// Enable ML-enhanced detection with the given configuration
+    pub fn with_ml(mut self, ml_config: MlDetectionConfig) -> Self {
+        self.enable_ml = true;
+        self.ml_config = Some(ml_config);
+        self
+    }
+
+    /// Enable ML-enhanced detection with default configuration
+    pub fn with_default_ml(mut self) -> Self {
+        self.enable_ml = true;
+        self.ml_config = Some(MlDetectionConfig::default());
+        self
     }
 }
 
@@ -123,18 +147,40 @@ pub struct DetectionPipeline {
     heartbeat_detector: HeartbeatDetector,
     movement_classifier: MovementClassifier,
     data_buffer: parking_lot::RwLock<CsiDataBuffer>,
+    /// Optional ML detection pipeline
+    ml_pipeline: Option<MlDetectionPipeline>,
 }
 
 impl DetectionPipeline {
     /// Create a new detection pipeline
     pub fn new(config: DetectionConfig) -> Self {
+        let ml_pipeline = if config.enable_ml {
+            config.ml_config.clone().map(MlDetectionPipeline::new)
+        } else {
+            None
+        };
+
         Self {
             breathing_detector: BreathingDetector::new(config.breathing.clone()),
             heartbeat_detector: HeartbeatDetector::new(config.heartbeat.clone()),
             movement_classifier: MovementClassifier::new(config.movement.clone()),
             data_buffer: parking_lot::RwLock::new(CsiDataBuffer::new(config.sample_rate)),
+            ml_pipeline,
             config,
         }
+    }
+
+    /// Initialize ML models asynchronously (if enabled)
+    pub async fn initialize_ml(&mut self) -> Result<(), MatError> {
+        if let Some(ref mut ml) = self.ml_pipeline {
+            ml.initialize().await.map_err(MatError::from)?;
+        }
+        Ok(())
+    }
+
+    /// Check if ML pipeline is ready
+    pub fn ml_ready(&self) -> bool {
+        self.ml_pipeline.as_ref().map_or(true, |ml| ml.is_ready())
     }
 
     /// Process a scan zone and return detected vital signs
@@ -152,17 +198,66 @@ impl DetectionPipeline {
             return Ok(None);
         }
 
-        // Detect vital signs
+        // Detect vital signs using traditional pipeline
         let reading = self.detect_from_buffer(&buffer, zone)?;
 
+        // If ML is enabled and ready, enhance with ML predictions
+        let enhanced_reading = if self.config.enable_ml && self.ml_ready() {
+            self.enhance_with_ml(reading, &buffer).await?
+        } else {
+            reading
+        };
+
         // Check minimum confidence
-        if let Some(ref r) = reading {
+        if let Some(ref r) = enhanced_reading {
             if r.confidence.value() < self.config.min_confidence {
                 return Ok(None);
             }
         }
 
-        Ok(reading)
+        Ok(enhanced_reading)
+    }
+
+    /// Enhance detection results with ML predictions
+    async fn enhance_with_ml(
+        &self,
+        traditional_reading: Option<VitalSignsReading>,
+        buffer: &CsiDataBuffer,
+    ) -> Result<Option<VitalSignsReading>, MatError> {
+        let ml_pipeline = match &self.ml_pipeline {
+            Some(ml) => ml,
+            None => return Ok(traditional_reading),
+        };
+
+        // Get ML predictions
+        let ml_result = ml_pipeline.process(buffer).await.map_err(MatError::from)?;
+
+        // If we have ML vital classification, use it to enhance or replace traditional
+        if let Some(ref ml_vital) = ml_result.vital_classification {
+            if let Some(vital_reading) = ml_vital.to_vital_signs_reading() {
+                // If ML result has higher confidence, prefer it
+                if let Some(ref traditional) = traditional_reading {
+                    if ml_result.overall_confidence() > traditional.confidence.value() as f32 {
+                        return Ok(Some(vital_reading));
+                    }
+                } else {
+                    // No traditional reading, use ML result
+                    return Ok(Some(vital_reading));
+                }
+            }
+        }
+
+        Ok(traditional_reading)
+    }
+
+    /// Get the latest ML detection results (if ML is enabled)
+    pub async fn get_ml_results(&self) -> Option<MlDetectionResult> {
+        let buffer = self.data_buffer.read();
+        if let Some(ref ml) = self.ml_pipeline {
+            ml.process(&buffer).await.ok()
+        } else {
+            None
+        }
     }
 
     /// Add CSI data to the processing buffer
@@ -236,7 +331,22 @@ impl DetectionPipeline {
         self.breathing_detector = BreathingDetector::new(config.breathing.clone());
         self.heartbeat_detector = HeartbeatDetector::new(config.heartbeat.clone());
         self.movement_classifier = MovementClassifier::new(config.movement.clone());
+
+        // Update ML pipeline if configuration changed
+        if config.enable_ml != self.config.enable_ml || config.ml_config != self.config.ml_config {
+            self.ml_pipeline = if config.enable_ml {
+                config.ml_config.clone().map(MlDetectionPipeline::new)
+            } else {
+                None
+            };
+        }
+
         self.config = config;
+    }
+
+    /// Get the ML pipeline (if enabled)
+    pub fn ml_pipeline(&self) -> Option<&MlDetectionPipeline> {
+        self.ml_pipeline.as_ref()
     }
 }
 

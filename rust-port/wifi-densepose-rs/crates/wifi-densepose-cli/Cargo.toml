@@ -3,5 +3,54 @@ name = "wifi-densepose-cli"
 version.workspace = true
 edition.workspace = true
 description = "CLI for WiFi-DensePose"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "wifi-densepose"
+path = "src/main.rs"
+
+[features]
+default = ["mat"]
+mat = []
 
 [dependencies]
+# Internal crates
+wifi-densepose-mat = { path = "../wifi-densepose-mat" }
+
+# CLI framework
+clap = { version = "4.4", features = ["derive", "env", "cargo"] }
+
+# Output formatting
+colored = "2.1"
+tabled = { version = "0.15", features = ["ansi"] }
+indicatif = "0.17"
+console = "0.15"
+
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+csv = "1.3"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.0"
+tempfile = "3.9"

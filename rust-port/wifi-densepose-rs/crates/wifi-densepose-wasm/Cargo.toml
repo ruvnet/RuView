@@ -3,5 +3,61 @@ name = "wifi-densepose-wasm"
 version.workspace = true
 edition.workspace = true
 description = "WebAssembly bindings for WiFi-DensePose"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/wifi-densepose"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["console_error_panic_hook"]
+mat = ["wifi-densepose-mat"]
 
 [dependencies]
+# WASM bindings
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "console",
+    "Window",
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "WebSocket",
+    "MessageEvent",
+    "ErrorEvent",
+    "CloseEvent",
+    "BinaryType",
+    "Performance",
+] }
+
+# Error handling and logging
+console_error_panic_hook = { version = "0.1", optional = true }
+wasm-logger = "0.2"
+log = "0.4"
+
+# Serialization for JS interop
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde-wasm-bindgen = "0.6"
+
+# Async runtime for WASM
+futures = "0.3"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde", "wasmbind"] }
+
+# UUID generation (with JS random support)
+uuid = { version = "1.6", features = ["v4", "serde", "js"] }
+getrandom = { version = "0.2", features = ["js"] }
+
+# Optional: wifi-densepose-mat integration
+wifi-densepose-mat = { path = "../wifi-densepose-mat", optional = true, features = ["serde"] }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O4", "--enable-mutable-globals"]

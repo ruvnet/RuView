@@ -78,10 +78,12 @@
 #![warn(rustdoc::missing_crate_level_docs)]
 
 pub mod alerting;
+pub mod api;
 pub mod detection;
 pub mod domain;
 pub mod integration;
 pub mod localization;
+pub mod ml;
 
 // Re-export main types
 pub use domain::{
@@ -119,6 +121,23 @@ pub use alerting::{
 pub use integration::{
     SignalAdapter, NeuralAdapter, HardwareAdapter,
     AdapterError, IntegrationConfig,
+};
+
+pub use api::{
+    create_router, AppState,
+};
+
+pub use ml::{
+    // Core ML types
+    MlError, MlResult, MlDetectionConfig, MlDetectionPipeline, MlDetectionResult,
+    // Debris penetration model
+    DebrisPenetrationModel, DebrisFeatures, DepthEstimate as MlDepthEstimate,
+    DebrisModel, DebrisModelConfig, DebrisFeatureExtractor,
+    MaterialType, DebrisClassification, AttenuationPrediction,
+    // Vital signs classifier
+    VitalSignsClassifier, VitalSignsClassifierConfig,
+    BreathingClassification, HeartbeatClassification,
+    UncertaintyEstimate, ClassifierOutput,
 };
 
 /// Library version
@@ -165,6 +184,10 @@ pub enum MatError {
     /// I/O error
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+
+    /// Machine learning error
+    #[error("ML error: {0}")]
+    Ml(#[from] ml::MlError),
 }
 
 /// Configuration for the disaster response system
@@ -417,6 +440,10 @@ pub mod prelude {
         LocalizationService,
         // Alerting
         AlertDispatcher,
+        // ML types
+        MlDetectionConfig, MlDetectionPipeline, MlDetectionResult,
+        DebrisModel, MaterialType, DebrisClassification,
+        VitalSignsClassifier, UncertaintyEstimate,
     };
 }
 

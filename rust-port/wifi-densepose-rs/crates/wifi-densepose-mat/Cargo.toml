@@ -10,13 +10,14 @@ keywords = ["wifi", "disaster", "rescue", "detection", "vital-signs"]
 categories = ["science", "algorithms"]
 
 [features]
-default = ["std"]
+default = ["std", "api"]
 std = []
+api = ["dep:serde", "chrono/serde", "geo/use-serde"]
 portable = ["low-power"]
 low-power = []
 distributed = ["tokio/sync"]
 drone = ["distributed"]
-serde = ["dep:serde", "chrono/serde"]
+serde = ["dep:serde", "chrono/serde", "geo/use-serde"]
 
 [dependencies]
 # Workspace dependencies
@@ -27,6 +28,10 @@ wifi-densepose-nn = { path = "../wifi-densepose-nn" }
 # Async runtime
 tokio = { version = "1.35", features = ["rt", "sync", "time"] }
 async-trait = "0.1"
+
+# Web framework (REST API)
+axum = { version = "0.7", features = ["ws"] }
+futures-util = "0.3"
 
 # Error handling
 thiserror = "1.0"
@@ -57,6 +62,10 @@ tokio-test = "0.4"
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1.4"
 approx = "0.5"
+
+[[bench]]
+name = "detection_bench"
+harness = false
 
 [package.metadata.docs.rs]
 all-features = true
