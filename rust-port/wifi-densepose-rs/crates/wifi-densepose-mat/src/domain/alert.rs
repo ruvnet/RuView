@@ -130,6 +130,7 @@ impl AlertPayload {
             triage_status,
             location: None,
             recommended_action: String::new(),
+            deadline: None,
             metadata: std::collections::HashMap::new(),
         }
     }

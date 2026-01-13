@@ -236,11 +236,11 @@ impl PositionFuser {
         let history = self.history.read();
 
         // Use exponentially weighted moving average
-        let alpha = 0.3; // Smoothing factor
+        let alpha: f64 = 0.3; // Smoothing factor
         let mut smoothed = current.position.clone();
 
         for (i, estimate) in history.iter().rev().enumerate().skip(1) {
-            let weight = alpha * (1.0 - alpha).powi(i as i32);
+            let weight = alpha * (1.0_f64 - alpha).powi(i as i32);
             smoothed.x = smoothed.x * (1.0 - weight) + estimate.position.x * weight;
             smoothed.y = smoothed.y * (1.0 - weight) + estimate.position.y * weight;
             smoothed.z = smoothed.z * (1.0 - weight) + estimate.position.z * weight;

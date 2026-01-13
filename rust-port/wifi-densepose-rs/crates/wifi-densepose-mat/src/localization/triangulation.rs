@@ -337,11 +337,11 @@ mod tests {
         let sensors = create_test_sensors();
 
         // Target at (5, 4) - calculate distances
-        let target = (5.0, 4.0);
+        let target: (f64, f64) = (5.0, 4.0);
         let distances: Vec<(&str, f64)> = vec![
-            ("s1", ((target.0 - 0.0).powi(2) + (target.1 - 0.0).powi(2)).sqrt()),
-            ("s2", ((target.0 - 10.0).powi(2) + (target.1 - 0.0).powi(2)).sqrt()),
-            ("s3", ((target.0 - 5.0).powi(2) + (target.1 - 10.0).powi(2)).sqrt()),
+            ("s1", ((target.0 - 0.0_f64).powi(2) + (target.1 - 0.0_f64).powi(2)).sqrt()),
+            ("s2", ((target.0 - 10.0_f64).powi(2) + (target.1 - 0.0_f64).powi(2)).sqrt()),
+            ("s3", ((target.0 - 5.0_f64).powi(2) + (target.1 - 10.0_f64).powi(2)).sqrt()),
         ];
 
         let dist_vec: Vec<(SensorPosition, f64)> = distances

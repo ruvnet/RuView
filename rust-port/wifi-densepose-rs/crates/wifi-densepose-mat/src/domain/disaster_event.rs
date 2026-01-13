@@ -289,18 +289,22 @@ impl DisasterEvent {
         location: Option<Coordinates3D>,
     ) -> Result<&Survivor, MatError> {
         // Check if this might be an existing survivor
-        if let Some(loc) = &location {
-            if let Some(existing) = self.find_nearby_survivor(loc, 2.0) {
-                // Update existing survivor
-                let survivor = self.survivors.iter_mut()
-                    .find(|s| s.id() == existing)
-                    .ok_or_else(|| MatError::Domain("Survivor not found".into()))?;
-                survivor.update_vitals(vitals);
-                if let Some(l) = location {
-                    survivor.update_location(l);
-                }
-                return Ok(survivor);
+        let existing_id = if let Some(loc) = &location {
+            self.find_nearby_survivor(loc, 2.0).cloned()
+        } else {
+            None
+        };
+
+        if let Some(existing) = existing_id {
+            // Update existing survivor
+            let survivor = self.survivors.iter_mut()
+                .find(|s| s.id() == &existing)
+                .ok_or_else(|| MatError::Domain("Survivor not found".into()))?;
+            survivor.update_vitals(vitals);
+            if let Some(l) = location {
+                survivor.update_location(l);
             }
+            return Ok(survivor);
         }
 
         // Create new survivor

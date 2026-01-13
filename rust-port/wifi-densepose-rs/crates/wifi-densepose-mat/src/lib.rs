@@ -337,36 +337,43 @@ impl DisasterResponse {
 
     /// Execute a single scan cycle
     async fn scan_cycle(&mut self) -> Result<()> {
+        // Collect detections first to avoid borrowing issues
+        let mut detections = Vec::new();
+
+        {
+            let event = self.event.as_ref()
+                .ok_or_else(|| MatError::Domain("No active disaster event".into()))?;
+
+            for zone in event.zones() {
+                if zone.status() != &ZoneStatus::Active {
+                    continue;
+                }
+
+                // This would integrate with actual hardware in production
+                // For now, we process any available CSI data
+                let detection_result = self.detection_pipeline.process_zone(zone).await?;
+
+                if let Some(vital_signs) = detection_result {
+                    // Attempt localization
+                    let location = self.localization_service
+                        .estimate_position(&vital_signs, zone);
+
+                    detections.push((zone.id().clone(), vital_signs, location));
+                }
+            }
+        }
+
+        // Now process detections with mutable access
         let event = self.event.as_mut()
             .ok_or_else(|| MatError::Domain("No active disaster event".into()))?;
 
-        for zone in event.zones_mut() {
-            if zone.status() != &ZoneStatus::Active {
-                continue;
-            }
+        for (zone_id, vital_signs, location) in detections {
+            let survivor = event.record_detection(zone_id, vital_signs, location)?;
 
-            // This would integrate with actual hardware in production
-            // For now, we process any available CSI data
-            let detection_result = self.detection_pipeline.process_zone(zone).await?;
-
-            if let Some(vital_signs) = detection_result {
-                // Attempt localization
-                let location = self.localization_service
-                    .estimate_position(&vital_signs, zone)
-                    .ok();
-
-                // Create or update survivor
-                let survivor = event.record_detection(
-                    zone.id().clone(),
-                    vital_signs,
-                    location,
-                )?;
-
-                // Generate alert if needed
-                if survivor.should_alert() {
-                    let alert = self.alert_dispatcher.generate_alert(&survivor)?;
-                    self.alert_dispatcher.dispatch(alert).await?;
-                }
+            // Generate alert if needed
+            if survivor.should_alert() {
+                let alert = self.alert_dispatcher.generate_alert(survivor)?;
+                self.alert_dispatcher.dispatch(alert).await?;
             }
         }
 

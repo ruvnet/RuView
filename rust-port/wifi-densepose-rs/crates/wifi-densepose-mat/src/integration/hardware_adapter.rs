@@ -1,7 +1,7 @@
 //! Adapter for wifi-densepose-hardware crate.
 
 use super::AdapterError;
-use crate::domain::{SensorPosition, SensorType};
+use crate::domain::SensorPosition;
 
 /// Hardware adapter for sensor communication
 pub struct HardwareAdapter {
@@ -255,6 +255,7 @@ pub enum HealthStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::SensorType;
 
     fn create_test_sensor(id: &str) -> SensorInfo {
         SensorInfo {

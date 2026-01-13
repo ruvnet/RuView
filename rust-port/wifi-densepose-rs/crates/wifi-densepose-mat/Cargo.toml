@@ -58,10 +58,6 @@ criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1.4"
 approx = "0.5"
 
-[[bench]]
-name = "detection_bench"
-harness = false
-
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]

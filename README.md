@@ -73,6 +73,61 @@ Mathematical correctness validated:
 
 See [Rust Port Documentation](/rust-port/wifi-densepose-rs/docs/) for ADRs and DDD patterns.
 
+## 🚨 WiFi-Mat: Disaster Response Module
+
+A specialized extension for **search and rescue operations** - detecting and localizing survivors trapped in rubble, earthquakes, and natural disasters.
+
+### Key Capabilities
+
+| Feature | Description |
+|---------|-------------|
+| **Vital Signs Detection** | Breathing (4-60 BPM), heartbeat via micro-Doppler |
+| **3D Localization** | Position estimation through debris up to 5m depth |
+| **START Triage** | Automatic Immediate/Delayed/Minor/Deceased classification |
+| **Real-time Alerts** | Priority-based notifications with escalation |
+
+### Use Cases
+
+- Earthquake search and rescue
+- Building collapse response
+- Avalanche victim location
+- Mine collapse detection
+- Flood rescue operations
+
+### Quick Example
+
+```rust
+use wifi_densepose_mat::{DisasterResponse, DisasterConfig, DisasterType, ScanZone, ZoneBounds};
+
+let config = DisasterConfig::builder()
+    .disaster_type(DisasterType::Earthquake)
+    .sensitivity(0.85)
+    .max_depth(5.0)
+    .build();
+
+let mut response = DisasterResponse::new(config);
+response.initialize_event(location, "Building collapse")?;
+response.add_zone(ScanZone::new("North Wing", ZoneBounds::rectangle(0.0, 0.0, 30.0, 20.0)))?;
+response.start_scanning().await?;
+
+// Get survivors prioritized by triage status
+let immediate = response.survivors_by_triage(TriageStatus::Immediate);
+println!("{} survivors require immediate rescue", immediate.len());
+```
+
+### Documentation
+
+- **[WiFi-Mat User Guide](docs/wifi-mat-user-guide.md)** - Complete setup, configuration, and field deployment
+- **[Architecture Decision Record](docs/adr/ADR-001-wifi-mat-disaster-detection.md)** - Design decisions and rationale
+- **[Domain Model](docs/ddd/wifi-mat-domain-model.md)** - DDD bounded contexts and entities
+
+**Build:**
+```bash
+cd rust-port/wifi-densepose-rs
+cargo build --release --package wifi-densepose-mat
+cargo test --package wifi-densepose-mat
+```
+
 ## 📋 Table of Contents
 
 <table>
@@ -81,6 +136,8 @@ See [Rust Port Documentation](/rust-port/wifi-densepose-rs/docs/) for ADRs and D
 
 **🚀 Getting Started**
 - [Key Features](#-key-features)
+- [Rust Implementation (v2)](#-rust-implementation-v2)
+- [WiFi-Mat Disaster Response](#-wifi-mat-disaster-response-module)
 - [System Architecture](#️-system-architecture)
 - [Installation](#-installation)
   - [Using pip (Recommended)](#using-pip-recommended)
