@@ -1,0 +1,7 @@
+[package]
+name = "wifi-densepose-wasm"
+version.workspace = true
+edition.workspace = true
+description = "WebAssembly bindings for WiFi-DensePose"
+
+[dependencies]

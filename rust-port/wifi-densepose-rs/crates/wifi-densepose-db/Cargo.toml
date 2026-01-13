@@ -1,0 +1,7 @@
+[package]
+name = "wifi-densepose-db"
+version.workspace = true
+edition.workspace = true
+description = "Database layer for WiFi-DensePose"
+
+[dependencies]

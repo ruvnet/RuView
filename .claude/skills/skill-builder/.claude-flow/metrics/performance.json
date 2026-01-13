@@ -1,0 +1,87 @@
+{
+  "startTime": 1760892801445,
+  "sessionId": "session-1760892801445",
+  "lastActivity": 1760892801445,
+  "sessionDuration": 0,
+  "totalTasks": 1,
+  "successfulTasks": 1,
+  "failedTasks": 0,
+  "totalAgents": 0,
+  "activeAgents": 0,
+  "neuralEvents": 0,
+  "memoryMode": {
+    "reasoningbankOperations": 0,
+    "basicOperations": 0,
+    "autoModeSelections": 0,
+    "modeOverrides": 0,
+    "currentMode": "auto"
+  },
+  "operations": {
+    "store": {
+      "count": 0,
+      "totalDuration": 0,
+      "errors": 0
+    },
+    "retrieve": {
+      "count": 0,
+      "totalDuration": 0,
+      "errors": 0
+    },
+    "query": {
+      "count": 0,
+      "totalDuration": 0,
+      "errors": 0
+    },
+    "list": {
+      "count": 0,
+      "totalDuration": 0,
+      "errors": 0
+    },
+    "delete": {
+      "count": 0,
+      "totalDuration": 0,
+      "errors": 0
+    },
+    "search": {
+      "count": 0,
+      "totalDuration": 0,
+      "errors": 0
+    },
+    "init": {
+      "count": 0,
+      "totalDuration": 0,
+      "errors": 0
+    }
+  },
+  "performance": {
+    "avgOperationDuration": 0,
+    "minOperationDuration": null,
+    "maxOperationDuration": null,
+    "slowOperations": 0,
+    "fastOperations": 0,
+    "totalOperationTime": 0
+  },
+  "storage": {
+    "totalEntries": 0,
+    "reasoningbankEntries": 0,
+    "basicEntries": 0,
+    "databaseSize": 0,
+    "lastBackup": null,
+    "growthRate": 0
+  },
+  "errors": {
+    "total": 0,
+    "byType": {},
+    "byOperation": {},
+    "recent": []
+  },
+  "reasoningbank": {
+    "semanticSearches": 0,
+    "sqlFallbacks": 0,
+    "embeddingGenerated": 0,
+    "consolidations": 0,
+    "avgQueryTime": 0,
+    "cacheHits": 0,
+    "cacheMisses": 0
+  }
+}

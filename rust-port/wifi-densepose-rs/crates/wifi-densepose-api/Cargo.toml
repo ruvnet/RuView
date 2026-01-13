@@ -1,0 +1,7 @@
+[package]
+name = "wifi-densepose-api"
+version.workspace = true
+edition.workspace = true
+description = "REST API for WiFi-DensePose"
+
+[dependencies]

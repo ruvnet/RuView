@@ -1,0 +1,30 @@
+[package]
+name = "wifi-densepose-signal"
+version.workspace = true
+edition.workspace = true
+description = "WiFi CSI signal processing for DensePose estimation"
+license.workspace = true
+
+[dependencies]
+# Core utilities
+thiserror.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
+
+# Signal processing
+ndarray = { workspace = true }
+rustfft.workspace = true
+num-complex.workspace = true
+num-traits.workspace = true
+
+# Internal
+wifi-densepose-core = { path = "../wifi-densepose-core" }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest.workspace = true
+
+[[bench]]
+name = "signal_bench"
+harness = false

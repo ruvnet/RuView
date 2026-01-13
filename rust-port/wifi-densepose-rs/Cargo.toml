@@ -1,0 +1,109 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/wifi-densepose-core",
+    "crates/wifi-densepose-signal",
+    "crates/wifi-densepose-nn",
+    "crates/wifi-densepose-api",
+    "crates/wifi-densepose-db",
+    "crates/wifi-densepose-config",
+    "crates/wifi-densepose-hardware",
+    "crates/wifi-densepose-wasm",
+    "crates/wifi-densepose-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["WiFi-DensePose Contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/wifi-densepose"
+documentation = "https://docs.rs/wifi-densepose"
+keywords = ["wifi", "densepose", "csi", "pose-estimation", "rust"]
+categories = ["science", "computer-vision", "wasm"]
+
+[workspace.dependencies]
+# Core utilities
+thiserror = "1.0"
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+tokio = { version = "1.35", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Signal processing
+ndarray = { version = "0.15", features = ["serde"] }
+ndarray-linalg = { version = "0.16", features = ["openblas-static"] }
+rustfft = "6.1"
+num-complex = "0.4"
+num-traits = "0.2"
+
+# Neural network
+tch = "0.14"
+ort = { version = "2.0.0-rc.11" }
+candle-core = "0.4"
+candle-nn = "0.4"
+
+# Web framework
+axum = { version = "0.7", features = ["ws", "macros"] }
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip"] }
+hyper = { version = "1.1", features = ["full"] }
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "sqlite", "uuid", "chrono", "json"] }
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+
+# Configuration
+config = "0.14"
+dotenvy = "0.15"
+envy = "0.4"
+
+# WASM
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["console", "Window", "WebSocket"] }
+getrandom = { version = "0.2", features = ["js"] }
+
+# Hardware
+serialport = "4.3"
+pcap = "1.1"
+
+# Testing
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.4"
+mockall = "0.12"
+wiremock = "0.5"
+
+# ruvector integration
+# ruvector-core = "0.1"
+# ruvector-data-framework = "0.1"
+
+# Internal crates
+wifi-densepose-core = { path = "crates/wifi-densepose-core" }
+wifi-densepose-signal = { path = "crates/wifi-densepose-signal" }
+wifi-densepose-nn = { path = "crates/wifi-densepose-nn" }
+wifi-densepose-api = { path = "crates/wifi-densepose-api" }
+wifi-densepose-db = { path = "crates/wifi-densepose-db" }
+wifi-densepose-config = { path = "crates/wifi-densepose-config" }
+wifi-densepose-hardware = { path = "crates/wifi-densepose-hardware" }
+wifi-densepose-wasm = { path = "crates/wifi-densepose-wasm" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+opt-level = 3
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true
+strip = false
+
+[profile.bench]
+inherits = "release"
+debug = true

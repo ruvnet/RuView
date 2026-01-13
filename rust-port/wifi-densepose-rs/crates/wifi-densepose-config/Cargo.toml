@@ -1,0 +1,7 @@
+[package]
+name = "wifi-densepose-config"
+version.workspace = true
+edition.workspace = true
+description = "Configuration management for WiFi-DensePose"
+
+[dependencies]
