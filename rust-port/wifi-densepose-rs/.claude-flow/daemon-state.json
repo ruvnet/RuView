@@ -1,51 +1,49 @@
 {
   "running": true,
-  "startedAt": "2026-01-13T03:24:14.137Z",
+  "startedAt": "2026-01-13T03:30:55.475Z",
   "workers": {
     "map": {
-      "runCount": 3,
-      "successCount": 3,
+      "runCount": 1,
+      "successCount": 1,
       "failureCount": 0,
-      "averageDurationMs": 1.3333333333333333,
-      "lastRun": "2026-01-13T03:39:14.149Z",
-      "nextRun": "2026-01-13T03:39:14.144Z",
-      "isRunning": false
+      "averageDurationMs": 1,
+      "isRunning": false,
+      "nextRun": "2026-01-13T03:45:55.482Z",
+      "lastRun": "2026-01-13T03:30:55.481Z"
     },
     "audit": {
-      "runCount": 2,
+      "runCount": 1,
       "successCount": 0,
-      "failureCount": 2,
+      "failureCount": 1,
       "averageDurationMs": 0,
-      "lastRun": "2026-01-13T03:31:14.142Z",
-      "nextRun": "2026-01-13T03:41:14.143Z",
-      "isRunning": false
+      "isRunning": false,
+      "nextRun": "2026-01-13T03:47:55.481Z",
+      "lastRun": "2026-01-13T03:37:55.480Z"
     },
     "optimize": {
-      "runCount": 2,
+      "runCount": 0,
       "successCount": 0,
-      "failureCount": 2,
+      "failureCount": 0,
       "averageDurationMs": 0,
-      "lastRun": "2026-01-13T03:33:14.140Z",
-      "nextRun": "2026-01-13T03:48:14.141Z",
-      "isRunning": false
+      "isRunning": true,
+      "nextRun": "2026-01-13T03:34:55.475Z"
     },
     "consolidate": {
       "runCount": 1,
       "successCount": 1,
       "failureCount": 0,
-      "averageDurationMs": 0,
-      "lastRun": "2026-01-13T03:11:00.656Z",
-      "nextRun": "2026-01-13T03:41:00.656Z",
-      "isRunning": false
+      "averageDurationMs": 1,
+      "isRunning": false,
+      "nextRun": "2026-01-13T04:06:55.476Z",
+      "lastRun": "2026-01-13T03:37:55.485Z"
     },
     "testgaps": {
-      "runCount": 1,
+      "runCount": 0,
       "successCount": 0,
-      "failureCount": 1,
+      "failureCount": 0,
       "averageDurationMs": 0,
-      "lastRun": "2026-01-13T03:37:14.141Z",
-      "nextRun": "2026-01-13T03:57:14.142Z",
-      "isRunning": false
+      "isRunning": false,
+      "nextRun": "2026-01-13T03:38:55.475Z"
     },
     "predict": {
       "runCount": 0,
@@ -64,8 +62,8 @@
   },
   "config": {
     "autoStart": false,
-    "logDir": "/home/user/wifi-densepose/.claude-flow/logs",
-    "stateFile": "/home/user/wifi-densepose/.claude-flow/daemon-state.json",
+    "logDir": "/home/user/wifi-densepose/rust-port/wifi-densepose-rs/.claude-flow/logs",
+    "stateFile": "/home/user/wifi-densepose/rust-port/wifi-densepose-rs/.claude-flow/daemon-state.json",
     "maxConcurrent": 2,
     "workerTimeoutMs": 300000,
     "resourceThresholds": {
@@ -131,5 +129,5 @@
       }
     ]
   },
-  "savedAt": "2026-01-13T03:39:14.149Z"
+  "savedAt": "2026-01-13T03:37:55.485Z"
 }
