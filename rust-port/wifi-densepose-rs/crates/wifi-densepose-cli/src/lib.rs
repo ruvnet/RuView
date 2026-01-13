@@ -1,0 +1,1 @@
+//! WiFi-DensePose CLI (stub)

@@ -1,0 +1,7 @@
+[package]
+name = "wifi-densepose-cli"
+version.workspace = true
+edition.workspace = true
+description = "CLI for WiFi-DensePose"
+
+[dependencies]

@@ -1,0 +1,7 @@
+[package]
+name = "wifi-densepose-hardware"
+version.workspace = true
+edition.workspace = true
+description = "Hardware interface for WiFi-DensePose"
+
+[dependencies]

@@ -22,6 +22,26 @@ A cutting-edge WiFi-based human pose estimation system that leverages Channel St
 - **WebSocket Streaming**: Real-time pose data streaming for live applications
 - **100% Test Coverage**: Thoroughly tested with comprehensive test suite
 
+## 🦀 Rust Implementation (v2)
+
+A high-performance Rust port is available in `/rust-port/wifi-densepose-rs/`:
+
+| Feature | Python (v1) | Rust (v2) |
+|---------|-------------|-----------|
+| CSI Processing | ~5ms | ~0.5ms |
+| Memory Usage | ~500MB | ~100MB |
+| WASM Support | ❌ | ✅ |
+| Binary Size | N/A | ~10MB |
+
+**Quick Start (Rust):**
+```bash
+cd rust-port/wifi-densepose-rs
+cargo build --release
+cargo test --workspace
+```
+
+See [Rust Port Documentation](/rust-port/wifi-densepose-rs/docs/) for ADRs and DDD patterns.
+
 ## 📋 Table of Contents
 
 <table>

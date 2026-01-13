@@ -1,0 +1,60 @@
+[package]
+name = "wifi-densepose-nn"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+documentation.workspace = true
+keywords = ["neural-network", "onnx", "inference", "densepose", "deep-learning"]
+categories = ["science", "computer-vision"]
+description = "Neural network inference for WiFi-DensePose pose estimation"
+
+[features]
+default = ["onnx"]
+onnx = ["ort"]
+tch-backend = ["tch"]
+candle-backend = ["candle-core", "candle-nn"]
+cuda = ["onnx"]
+tensorrt = ["onnx"]
+all-backends = ["onnx", "tch-backend", "candle-backend"]
+
+[dependencies]
+# Core utilities
+thiserror.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+# Tensor operations
+ndarray.workspace = true
+num-traits.workspace = true
+
+# ONNX Runtime (default)
+ort = { workspace = true, optional = true }
+
+# PyTorch backend (optional)
+tch = { workspace = true, optional = true }
+
+# Candle backend (optional)
+candle-core = { workspace = true, optional = true }
+candle-nn = { workspace = true, optional = true }
+
+# Async runtime
+tokio = { workspace = true, features = ["sync", "rt"] }
+
+# Additional utilities
+parking_lot = "0.12"
+once_cell = "1.19"
+memmap2 = "0.9"
+
+[dev-dependencies]
+criterion.workspace = true
+proptest.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tempfile = "3.10"
+
+[[bench]]
+name = "inference_bench"
+harness = false

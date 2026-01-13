@@ -1,0 +1,64 @@
+[package]
+name = "wifi-densepose-core"
+description = "Core types, traits, and utilities for WiFi-DensePose pose estimation system"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+[features]
+default = ["std"]
+std = []
+serde = ["dep:serde", "ndarray/serde"]
+async = ["dep:async-trait"]
+
+[dependencies]
+# Error handling
+thiserror.workspace = true
+
+# Serialization (optional)
+serde = { workspace = true, optional = true }
+
+# Numeric types
+ndarray.workspace = true
+num-complex.workspace = true
+num-traits.workspace = true
+
+# Async traits (optional)
+async-trait = { version = "0.1", optional = true }
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID for unique identifiers
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+[dev-dependencies]
+serde_json.workspace = true
+proptest.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
+nursery = "warn"
+# Allow specific lints that are too strict for this crate
+missing_const_for_fn = "allow"
+doc_markdown = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+cast_precision_loss = "allow"
+redundant_closure_for_method_calls = "allow"
+suboptimal_flops = "allow"
+imprecise_flops = "allow"
+manual_midpoint = "allow"
+unnecessary_map_or = "allow"
+missing_panics_doc = "allow"

@@ -1,0 +1,1 @@
+//! WiFi-DensePose configuration (stub)
