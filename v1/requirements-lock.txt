@@ -1,0 +1,13 @@
+# WiFi-DensePose Pipeline Verification - Pinned Dependencies
+# These versions are locked to ensure deterministic pipeline output.
+# The proof bundle (v1/data/proof/) depends on exact numerical behavior
+# from these libraries. Changing versions may alter floating-point results
+# and require regenerating the expected hash.
+#
+# To update: change versions, run `python v1/data/proof/verify.py --generate-hash`,
+# then commit the new expected_features.sha256.
+
+numpy==1.26.4
+scipy==1.14.1
+pydantic==2.10.4
+pydantic-settings==2.7.1

@@ -78,21 +78,33 @@ async def get_current_user(
     if not credentials:
         return None
     
-    # This would normally validate the JWT token
-    # For now, return a mock user for development
+    # Validate the JWT token
+    # JWT validation must be configured via settings (e.g. JWT_SECRET, JWT_ALGORITHM)
     if settings.is_development:
-        return {
-            "id": "dev-user",
-            "username": "developer",
-            "email": "dev@example.com",
-            "is_admin": True,
-            "permissions": ["read", "write", "admin"]
-        }
-    
+        logger.warning(
+            "Authentication credentials provided in development mode but JWT "
+            "validation is not configured. Set up JWT authentication via "
+            "environment variables (JWT_SECRET, JWT_ALGORITHM) or disable "
+            "authentication. Rejecting request."
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                "JWT authentication is not configured. In development mode, either "
+                "disable authentication (enable_authentication=False) or configure "
+                "JWT validation. Returning mock users is not permitted in any environment."
+            ),
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     # In production, implement proper JWT validation
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Authentication not implemented",
+        detail=(
+            "JWT authentication is not configured. Configure JWT_SECRET and "
+            "JWT_ALGORITHM environment variables, or integrate an external "
+            "identity provider. See docs/authentication.md for setup instructions."
+        ),
         headers={"WWW-Authenticate": "Bearer"},
     )
 
@@ -404,17 +416,22 @@ async def get_websocket_user(
     # Skip authentication if disabled
     if not settings.enable_authentication:
         return None
-    
-    # For development, return mock user
+
+    # Validate the WebSocket token
+    if not websocket_token:
+        return None
+
     if settings.is_development:
-        return {
-            "id": "ws-user",
-            "username": "websocket_user",
-            "is_admin": False,
-            "permissions": ["read"]
-        }
-    
+        logger.warning(
+            "WebSocket token provided in development mode but token validation "
+            "is not configured. Rejecting. Disable authentication or configure "
+            "JWT validation to allow WebSocket connections."
+        )
+        return None
+
     # In production, implement proper token validation
+    # TODO: Implement JWT/token validation for WebSocket connections
+    logger.warning("WebSocket token validation is not implemented. Rejecting token.")
     return None
 
 

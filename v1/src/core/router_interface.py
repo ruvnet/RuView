@@ -57,19 +57,16 @@ class RouterInterface:
         self.error_count = 0
         self.sample_count = 0
         
-        # Mock data generation
-        self.mock_data_generator = None
+        # Mock data generation (delegated to testing module)
+        self._mock_csi_generator = None
         if mock_mode:
             self._initialize_mock_generator()
-    
+
     def _initialize_mock_generator(self):
-        """Initialize mock data generator."""
-        self.mock_data_generator = {
-            'phase': 0,
-            'amplitude_base': 1.0,
-            'frequency': 0.1,
-            'noise_level': 0.1
-        }
+        """Initialize mock data generator from the testing module."""
+        from src.testing.mock_csi_generator import MockCSIGenerator
+        self._mock_csi_generator = MockCSIGenerator()
+        self._mock_csi_generator.show_banner()
     
     async def connect(self):
         """Connect to the router."""
@@ -143,56 +140,14 @@ class RouterInterface:
             return None
     
     def _generate_mock_csi_data(self) -> np.ndarray:
-        """Generate mock CSI data for testing."""
-        # Simulate CSI data with realistic characteristics
-        num_subcarriers = 64
-        num_antennas = 4
-        num_samples = 100
-        
-        # Update mock generator state
-        self.mock_data_generator['phase'] += self.mock_data_generator['frequency']
-        
-        # Generate amplitude and phase data
-        time_axis = np.linspace(0, 1, num_samples)
-        
-        # Create realistic CSI patterns
-        csi_data = np.zeros((num_antennas, num_subcarriers, num_samples), dtype=complex)
-        
-        for antenna in range(num_antennas):
-            for subcarrier in range(num_subcarriers):
-                # Base signal with some variation per antenna/subcarrier
-                amplitude = (
-                    self.mock_data_generator['amplitude_base'] * 
-                    (1 + 0.2 * np.sin(2 * np.pi * subcarrier / num_subcarriers)) *
-                    (1 + 0.1 * antenna)
-                )
-                
-                # Phase with spatial and frequency variation
-                phase_offset = (
-                    self.mock_data_generator['phase'] +
-                    2 * np.pi * subcarrier / num_subcarriers +
-                    np.pi * antenna / num_antennas
-                )
-                
-                # Add some movement simulation
-                movement_freq = 0.5  # Hz
-                movement_amplitude = 0.3
-                movement = movement_amplitude * np.sin(2 * np.pi * movement_freq * time_axis)
-                
-                # Generate complex signal
-                signal_amplitude = amplitude * (1 + movement)
-                signal_phase = phase_offset + movement * 0.5
-                
-                # Add noise
-                noise_real = np.random.normal(0, self.mock_data_generator['noise_level'], num_samples)
-                noise_imag = np.random.normal(0, self.mock_data_generator['noise_level'], num_samples)
-                noise = noise_real + 1j * noise_imag
-                
-                # Create complex signal
-                signal = signal_amplitude * np.exp(1j * signal_phase) + noise
-                csi_data[antenna, subcarrier, :] = signal
-        
-        return csi_data
+        """Generate mock CSI data for testing.
+
+        Delegates to the MockCSIGenerator in the testing module.
+        This method is only callable when mock_mode is True.
+        """
+        if self._mock_csi_generator is None:
+            self._initialize_mock_generator()
+        return self._mock_csi_generator.generate()
     
     async def _collect_real_csi_data(self) -> Optional[np.ndarray]:
         """Collect real CSI data from the router.
@@ -264,18 +219,9 @@ class RouterInterface:
             Dictionary containing router information
         """
         if self.mock_mode:
-            return {
-                "model": "Mock Router",
-                "firmware": "1.0.0-mock",
-                "wifi_standard": "802.11ac",
-                "antennas": 4,
-                "supported_bands": ["2.4GHz", "5GHz"],
-                "csi_capabilities": {
-                    "max_subcarriers": 64,
-                    "max_antennas": 4,
-                    "sampling_rate": 1000
-                }
-            }
+            if self._mock_csi_generator is None:
+                self._initialize_mock_generator()
+            return self._mock_csi_generator.get_router_info()
         
         # For real routers, this would query the actual hardware
         return {

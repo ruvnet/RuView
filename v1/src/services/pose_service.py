@@ -714,31 +714,39 @@ class PoseService:
         }
     
     async def get_statistics(self, start_time, end_time):
-        """Get pose estimation statistics."""
+        """Get pose estimation statistics.
+
+        In mock mode, delegates to testing module. In production, returns
+        actual accumulated statistics from self.stats, or indicates no data.
+        """
         try:
-            import random
-            
-            # Mock statistics
-            total_detections = random.randint(100, 1000)
-            successful_detections = int(total_detections * random.uniform(0.8, 0.95))
-            
+            if self.settings.mock_pose_data:
+                from src.testing.mock_pose_generator import generate_mock_statistics
+                return generate_mock_statistics(start_time=start_time, end_time=end_time)
+
+            # Production: return actual accumulated statistics
+            total = self.stats["total_processed"]
+            successful = self.stats["successful_detections"]
+            failed = self.stats["failed_detections"]
+
             return {
-                "total_detections": total_detections,
-                "successful_detections": successful_detections,
-                "failed_detections": total_detections - successful_detections,
-                "success_rate": successful_detections / total_detections,
-                "average_confidence": random.uniform(0.75, 0.90),
-                "average_processing_time_ms": random.uniform(50, 200),
-                "unique_persons": random.randint(5, 20),
-                "most_active_zone": random.choice(["zone_1", "zone_2", "zone_3"]),
+                "total_detections": total,
+                "successful_detections": successful,
+                "failed_detections": failed,
+                "success_rate": successful / max(1, total),
+                "average_confidence": self.stats["average_confidence"],
+                "average_processing_time_ms": self.stats["processing_time_ms"],
+                "unique_persons": 0,
+                "most_active_zone": "N/A",
                 "activity_distribution": {
-                    "standing": random.uniform(0.3, 0.5),
-                    "sitting": random.uniform(0.2, 0.4),
-                    "walking": random.uniform(0.1, 0.3),
-                    "lying": random.uniform(0.0, 0.1)
-                }
+                    "standing": 0.0,
+                    "sitting": 0.0,
+                    "walking": 0.0,
+                    "lying": 0.0,
+                },
+                "note": "Statistics reflect actual processed data. Activity distribution and unique persons require a persistence backend." if total == 0 else None,
             }
-            
+
         except Exception as e:
             self.logger.error(f"Error getting statistics: {e}")
             raise
