@@ -539,14 +539,23 @@ export class PoseDetectionCanvas {
     const persons = this.state.lastPoseData?.persons?.length || 0;
     const zones = Object.keys(this.state.lastPoseData?.zone_summary || {}).length;
 
-    statsEl.innerHTML = `
-      Connection: ${this.state.connectionState}<br>
-      Frames: ${this.state.frameCount}<br>
-      FPS: ${fps.toFixed(1)}<br>
-      Persons: ${persons}<br>
-      Zones: ${zones}<br>
-      Uptime: ${uptime}s
-    `;
+    // Use textContent instead of innerHTML to prevent XSS
+    statsEl.textContent = '';
+    const lines = [
+      `Connection: ${this.state.connectionState}`,
+      `Frames: ${this.state.frameCount}`,
+      `FPS: ${fps.toFixed(1)}`,
+      `Persons: ${persons}`,
+      `Zones: ${zones}`,
+      `Uptime: ${uptime}s`
+    ];
+    lines.forEach((line, index) => {
+      if (index > 0) {
+        statsEl.appendChild(document.createElement('br'));
+      }
+      const textNode = document.createTextNode(line);
+      statsEl.appendChild(textNode);
+    });
   }
 
   showError(message) {

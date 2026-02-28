@@ -103,10 +103,18 @@ export class DashboardTab {
     Object.entries(features).forEach(([feature, enabled]) => {
       const featureElement = document.createElement('div');
       featureElement.className = `feature-item ${enabled ? 'enabled' : 'disabled'}`;
-      featureElement.innerHTML = `
-        <span class="feature-name">${this.formatFeatureName(feature)}</span>
-        <span class="feature-status">${enabled ? '✓' : '✗'}</span>
-      `;
+      
+      // Use textContent instead of innerHTML to prevent XSS
+      const featureNameSpan = document.createElement('span');
+      featureNameSpan.className = 'feature-name';
+      featureNameSpan.textContent = this.formatFeatureName(feature);
+      
+      const featureStatusSpan = document.createElement('span');
+      featureStatusSpan.className = 'feature-status';
+      featureStatusSpan.textContent = enabled ? '✓' : '✗';
+      
+      featureElement.appendChild(featureNameSpan);
+      featureElement.appendChild(featureStatusSpan);
       featuresContainer.appendChild(featureElement);
     });
   }
@@ -296,10 +304,18 @@ export class DashboardTab {
       ['zone_1', 'zone_2', 'zone_3', 'zone_4'].forEach(zoneId => {
         const zoneElement = document.createElement('div');
         zoneElement.className = 'zone-item';
-        zoneElement.innerHTML = `
-          <span class="zone-name">${zoneId}</span>
-          <span class="zone-count">undefined</span>
-        `;
+        
+        // Use textContent instead of innerHTML to prevent XSS
+        const zoneNameSpan = document.createElement('span');
+        zoneNameSpan.className = 'zone-name';
+        zoneNameSpan.textContent = zoneId;
+        
+        const zoneCountSpan = document.createElement('span');
+        zoneCountSpan.className = 'zone-count';
+        zoneCountSpan.textContent = 'undefined';
+        
+        zoneElement.appendChild(zoneNameSpan);
+        zoneElement.appendChild(zoneCountSpan);
         zonesContainer.appendChild(zoneElement);
       });
       return;
@@ -309,10 +325,18 @@ export class DashboardTab {
       const zoneElement = document.createElement('div');
       zoneElement.className = 'zone-item';
       const count = typeof data === 'object' ? (data.person_count || data.count || 0) : data;
-      zoneElement.innerHTML = `
-        <span class="zone-name">${zoneId}</span>
-        <span class="zone-count">${count}</span>
-      `;
+      
+      // Use textContent instead of innerHTML to prevent XSS
+      const zoneNameSpan = document.createElement('span');
+      zoneNameSpan.className = 'zone-name';
+      zoneNameSpan.textContent = zoneId;
+      
+      const zoneCountSpan = document.createElement('span');
+      zoneCountSpan.className = 'zone-count';
+      zoneCountSpan.textContent = String(count);
+      
+      zoneElement.appendChild(zoneNameSpan);
+      zoneElement.appendChild(zoneCountSpan);
       zonesContainer.appendChild(zoneElement);
     });
   }
