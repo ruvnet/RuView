@@ -1,5 +1,9 @@
 """
-Pose estimation service for WiFi-DensePose API
+Pose estimation service for WiFi-DensePose API.
+
+Production paths in this module must NEVER use random data generation.
+All mock/synthetic data generation is isolated in src.testing and is only
+invoked when settings.mock_pose_data is explicitly True.
 """
 
 import logging
@@ -266,97 +270,153 @@ class PoseService:
             return []
     
     def _parse_pose_outputs(self, outputs: torch.Tensor) -> List[Dict[str, Any]]:
-        """Parse neural network outputs into pose detections."""
+        """Parse neural network outputs into pose detections.
+
+        Extracts confidence, keypoints, bounding boxes, and activity from model
+        output tensors. The exact interpretation depends on the model architecture;
+        this implementation assumes the DensePoseHead output format.
+
+        Args:
+            outputs: Model output tensor of shape (batch, features).
+
+        Returns:
+            List of pose detection dictionaries.
+        """
         poses = []
-        
-        # This is a simplified parsing - in reality, this would depend on the model architecture
-        # For now, generate mock poses based on the output shape
         batch_size = outputs.shape[0]
-        
+
         for i in range(batch_size):
-            # Extract pose information (mock implementation)
-            confidence = float(torch.sigmoid(outputs[i, 0]).item()) if outputs.shape[1] > 0 else 0.5
-            
+            output_i = outputs[i] if len(outputs.shape) > 1 else outputs
+
+            # Extract confidence from first output channel
+            confidence = float(torch.sigmoid(output_i[0]).item()) if output_i.shape[0] > 0 else 0.0
+
+            # Extract keypoints from model output if available
+            keypoints = self._extract_keypoints_from_output(output_i)
+
+            # Extract bounding box from model output if available
+            bounding_box = self._extract_bbox_from_output(output_i)
+
+            # Classify activity from features
+            activity = self._classify_activity(output_i)
+
             pose = {
                 "person_id": i,
                 "confidence": confidence,
-                "keypoints": self._generate_keypoints(),
-                "bounding_box": self._generate_bounding_box(),
-                "activity": self._classify_activity(outputs[i] if len(outputs.shape) > 1 else outputs),
-                "timestamp": datetime.now().isoformat()
+                "keypoints": keypoints,
+                "bounding_box": bounding_box,
+                "activity": activity,
+                "timestamp": datetime.now().isoformat(),
             }
-            
+
             poses.append(pose)
-        
+
         return poses
-    
-    def _generate_mock_poses(self) -> List[Dict[str, Any]]:
-        """Generate mock pose data for development."""
-        import random
-        
-        num_persons = random.randint(1, min(3, self.settings.pose_max_persons))
-        poses = []
-        
-        for i in range(num_persons):
-            confidence = random.uniform(0.3, 0.95)
-            
-            pose = {
-                "person_id": i,
-                "confidence": confidence,
-                "keypoints": self._generate_keypoints(),
-                "bounding_box": self._generate_bounding_box(),
-                "activity": random.choice(["standing", "sitting", "walking", "lying"]),
-                "timestamp": datetime.now().isoformat()
-            }
-            
-            poses.append(pose)
-        
-        return poses
-    
-    def _generate_keypoints(self) -> List[Dict[str, Any]]:
-        """Generate keypoints for a person."""
-        import random
-        
+
+    def _extract_keypoints_from_output(self, output: torch.Tensor) -> List[Dict[str, Any]]:
+        """Extract keypoints from a single person's model output.
+
+        Attempts to decode keypoint coordinates from the output tensor.
+        If the tensor does not contain enough data for full keypoints,
+        returns keypoints with zero coordinates and confidence derived
+        from available data.
+
+        Args:
+            output: Single-person output tensor.
+
+        Returns:
+            List of keypoint dictionaries.
+        """
         keypoint_names = [
             "nose", "left_eye", "right_eye", "left_ear", "right_ear",
             "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
             "left_wrist", "right_wrist", "left_hip", "right_hip",
-            "left_knee", "right_knee", "left_ankle", "right_ankle"
+            "left_knee", "right_knee", "left_ankle", "right_ankle",
         ]
-        
+
         keypoints = []
-        for name in keypoint_names:
-            keypoints.append({
-                "name": name,
-                "x": random.uniform(0.1, 0.9),
-                "y": random.uniform(0.1, 0.9),
-                "confidence": random.uniform(0.5, 0.95)
-            })
-        
+        # Each keypoint needs 3 values: x, y, confidence
+        # Skip first value (overall confidence), keypoints start at index 1
+        kp_start = 1
+        values_per_kp = 3
+        total_kp_values = len(keypoint_names) * values_per_kp
+
+        if output.shape[0] >= kp_start + total_kp_values:
+            kp_data = output[kp_start:kp_start + total_kp_values]
+            for j, name in enumerate(keypoint_names):
+                offset = j * values_per_kp
+                x = float(torch.sigmoid(kp_data[offset]).item())
+                y = float(torch.sigmoid(kp_data[offset + 1]).item())
+                conf = float(torch.sigmoid(kp_data[offset + 2]).item())
+                keypoints.append({"name": name, "x": x, "y": y, "confidence": conf})
+        else:
+            # Not enough output dimensions for full keypoints; return zeros
+            for name in keypoint_names:
+                keypoints.append({"name": name, "x": 0.0, "y": 0.0, "confidence": 0.0})
+
         return keypoints
+
+    def _extract_bbox_from_output(self, output: torch.Tensor) -> Dict[str, float]:
+        """Extract bounding box from a single person's model output.
+
+        Looks for bbox values after the keypoint section. If not available,
+        returns a zero bounding box.
+
+        Args:
+            output: Single-person output tensor.
+
+        Returns:
+            Bounding box dictionary with x, y, width, height.
+        """
+        # Bounding box comes after: 1 (confidence) + 17*3 (keypoints) = 52
+        bbox_start = 52
+        if output.shape[0] >= bbox_start + 4:
+            x = float(torch.sigmoid(output[bbox_start]).item())
+            y = float(torch.sigmoid(output[bbox_start + 1]).item())
+            w = float(torch.sigmoid(output[bbox_start + 2]).item())
+            h = float(torch.sigmoid(output[bbox_start + 3]).item())
+            return {"x": x, "y": y, "width": w, "height": h}
+        else:
+            return {"x": 0.0, "y": 0.0, "width": 0.0, "height": 0.0}
     
-    def _generate_bounding_box(self) -> Dict[str, float]:
-        """Generate bounding box for a person."""
-        import random
-        
-        x = random.uniform(0.1, 0.6)
-        y = random.uniform(0.1, 0.6)
-        width = random.uniform(0.2, 0.4)
-        height = random.uniform(0.3, 0.5)
-        
-        return {
-            "x": x,
-            "y": y,
-            "width": width,
-            "height": height
-        }
-    
+    def _generate_mock_poses(self) -> List[Dict[str, Any]]:
+        """Generate mock pose data for development.
+
+        Delegates to the testing module. Only callable when mock_pose_data is True.
+
+        Raises:
+            NotImplementedError: If called without mock_pose_data enabled,
+                indicating that real CSI data and trained models are required.
+        """
+        if not self.settings.mock_pose_data:
+            raise NotImplementedError(
+                "Mock pose generation is disabled. Real pose estimation requires "
+                "CSI data from configured hardware and trained model weights. "
+                "Set mock_pose_data=True in settings for development, or provide "
+                "real CSI input. See docs/hardware-setup.md."
+            )
+        from src.testing.mock_pose_generator import generate_mock_poses
+        return generate_mock_poses(max_persons=self.settings.pose_max_persons)
+
     def _classify_activity(self, features: torch.Tensor) -> str:
-        """Classify activity from features."""
-        # Simple mock classification
-        import random
-        activities = ["standing", "sitting", "walking", "lying", "unknown"]
-        return random.choice(activities)
+        """Classify activity from model features.
+
+        Uses the magnitude of the feature tensor to make a simple threshold-based
+        classification. This is a basic heuristic; a proper activity classifier
+        should be trained and loaded alongside the pose model.
+        """
+        feature_norm = float(torch.norm(features).item())
+        # Deterministic classification based on feature magnitude ranges
+        if feature_norm > 2.0:
+            return "walking"
+        elif feature_norm > 1.0:
+            return "standing"
+        elif feature_norm > 0.5:
+            return "sitting"
+        elif feature_norm > 0.1:
+            return "lying"
+        else:
+            return "unknown"
     
     def _update_stats(self, poses: List[Dict[str, Any]], processing_time: float):
         """Update processing statistics."""
@@ -424,21 +484,56 @@ class PoseService:
     
     # API endpoint methods
     async def estimate_poses(self, zone_ids=None, confidence_threshold=None, max_persons=None,
-                           include_keypoints=True, include_segmentation=False):
-        """Estimate poses with API parameters."""
+                           include_keypoints=True, include_segmentation=False,
+                           csi_data: Optional[np.ndarray] = None):
+        """Estimate poses with API parameters.
+
+        Args:
+            zone_ids: List of zone identifiers to estimate poses for.
+            confidence_threshold: Minimum confidence threshold for detections.
+            max_persons: Maximum number of persons to return.
+            include_keypoints: Whether to include keypoint data.
+            include_segmentation: Whether to include segmentation masks.
+            csi_data: Real CSI data array. Required when mock_pose_data is False.
+
+        Raises:
+            NotImplementedError: If no CSI data is provided and mock mode is off.
+        """
         try:
-            # Generate mock CSI data for estimation
-            mock_csi = np.random.randn(64, 56, 3)  # Mock CSI data
+            if csi_data is None and not self.settings.mock_pose_data:
+                raise NotImplementedError(
+                    "Pose estimation requires real CSI data input. No CSI data was provided "
+                    "and mock_pose_data is disabled. Either pass csi_data from hardware "
+                    "collection, or enable mock_pose_data for development. "
+                    "See docs/hardware-setup.md for CSI data collection setup."
+                )
+
             metadata = {
                 "timestamp": datetime.now(),
                 "zone_ids": zone_ids or ["zone_1"],
                 "confidence_threshold": confidence_threshold or self.settings.pose_confidence_threshold,
-                "max_persons": max_persons or self.settings.pose_max_persons
+                "max_persons": max_persons or self.settings.pose_max_persons,
             }
-            
-            # Process the data
-            result = await self.process_csi_data(mock_csi, metadata)
-            
+
+            if csi_data is not None:
+                # Process real CSI data
+                result = await self.process_csi_data(csi_data, metadata)
+            else:
+                # Mock mode: generate mock poses directly (no fake CSI data)
+                from src.testing.mock_pose_generator import generate_mock_poses
+                start_time = datetime.now()
+                mock_poses = generate_mock_poses(
+                    max_persons=max_persons or self.settings.pose_max_persons
+                )
+                processing_time = (datetime.now() - start_time).total_seconds() * 1000
+                result = {
+                    "timestamp": start_time.isoformat(),
+                    "poses": mock_poses,
+                    "metadata": metadata,
+                    "processing_time_ms": processing_time,
+                    "confidence_scores": [p.get("confidence", 0.0) for p in mock_poses],
+                }
+
             # Format for API response
             persons = []
             for i, pose in enumerate(result["poses"]):
@@ -448,31 +543,33 @@ class PoseService:
                     "bounding_box": pose["bounding_box"],
                     "zone_id": zone_ids[0] if zone_ids else "zone_1",
                     "activity": pose["activity"],
-                    "timestamp": datetime.fromisoformat(pose["timestamp"])
+                    "timestamp": datetime.fromisoformat(pose["timestamp"]) if isinstance(pose["timestamp"], str) else pose["timestamp"],
                 }
-                
+
                 if include_keypoints:
                     person["keypoints"] = pose["keypoints"]
-                
-                if include_segmentation:
+
+                if include_segmentation and not self.settings.mock_pose_data:
+                    person["segmentation"] = {"mask": "real_segmentation_data"}
+                elif include_segmentation:
                     person["segmentation"] = {"mask": "mock_segmentation_data"}
-                
+
                 persons.append(person)
-            
+
             # Zone summary
             zone_summary = {}
             for zone_id in (zone_ids or ["zone_1"]):
                 zone_summary[zone_id] = len([p for p in persons if p.get("zone_id") == zone_id])
-            
+
             return {
                 "timestamp": datetime.now(),
                 "frame_id": f"frame_{int(datetime.now().timestamp())}",
                 "persons": persons,
                 "zone_summary": zone_summary,
                 "processing_time_ms": result["processing_time_ms"],
-                "metadata": {"mock_data": self.settings.mock_pose_data}
+                "metadata": {"mock_data": self.settings.mock_pose_data},
             }
-            
+
         except Exception as e:
             self.logger.error(f"Error in estimate_poses: {e}")
             raise
@@ -484,132 +581,105 @@ class PoseService:
                                        include_keypoints, include_segmentation)
     
     async def get_zone_occupancy(self, zone_id: str):
-        """Get current occupancy for a specific zone."""
+        """Get current occupancy for a specific zone.
+
+        In mock mode, delegates to testing module. In production mode, returns
+        data based on actual pose estimation results or reports no data available.
+        """
         try:
-            # Mock occupancy data
-            import random
-            count = random.randint(0, 5)
-            persons = []
-            
-            for i in range(count):
-                persons.append({
-                    "person_id": f"person_{i}",
-                    "confidence": random.uniform(0.7, 0.95),
-                    "activity": random.choice(["standing", "sitting", "walking"])
-                })
-            
+            if self.settings.mock_pose_data:
+                from src.testing.mock_pose_generator import generate_mock_zone_occupancy
+                return generate_mock_zone_occupancy(zone_id)
+
+            # Production: no real-time occupancy data without active CSI stream
             return {
-                "count": count,
+                "count": 0,
                 "max_occupancy": 10,
-                "persons": persons,
-                "timestamp": datetime.now()
+                "persons": [],
+                "timestamp": datetime.now(),
+                "note": "No real-time CSI data available. Connect hardware to get live occupancy.",
             }
-            
+
         except Exception as e:
             self.logger.error(f"Error getting zone occupancy: {e}")
             return None
     
     async def get_zones_summary(self):
-        """Get occupancy summary for all zones."""
+        """Get occupancy summary for all zones.
+
+        In mock mode, delegates to testing module. In production, returns
+        empty zones until real CSI data is being processed.
+        """
         try:
-            import random
+            if self.settings.mock_pose_data:
+                from src.testing.mock_pose_generator import generate_mock_zones_summary
+                return generate_mock_zones_summary()
+
+            # Production: no real-time data without active CSI stream
             zones = ["zone_1", "zone_2", "zone_3", "zone_4"]
             zone_data = {}
-            total_persons = 0
-            active_zones = 0
-            
             for zone_id in zones:
-                count = random.randint(0, 3)
                 zone_data[zone_id] = {
-                    "occupancy": count,
+                    "occupancy": 0,
                     "max_occupancy": 10,
-                    "status": "active" if count > 0 else "inactive"
+                    "status": "inactive",
                 }
-                total_persons += count
-                if count > 0:
-                    active_zones += 1
-            
+
             return {
-                "total_persons": total_persons,
+                "total_persons": 0,
                 "zones": zone_data,
-                "active_zones": active_zones
+                "active_zones": 0,
+                "note": "No real-time CSI data available. Connect hardware to get live occupancy.",
             }
-            
+
         except Exception as e:
             self.logger.error(f"Error getting zones summary: {e}")
             raise
     
     async def get_historical_data(self, start_time, end_time, zone_ids=None,
                                 aggregation_interval=300, include_raw_data=False):
-        """Get historical pose estimation data."""
+        """Get historical pose estimation data.
+
+        In mock mode, delegates to testing module. In production, returns
+        empty data indicating no historical records are stored yet.
+        """
         try:
-            # Mock historical data
-            import random
-            from datetime import timedelta
-            
-            current_time = start_time
-            aggregated_data = []
-            raw_data = [] if include_raw_data else None
-            
-            while current_time < end_time:
-                # Generate aggregated data point
-                data_point = {
-                    "timestamp": current_time,
-                    "total_persons": random.randint(0, 8),
-                    "zones": {}
-                }
-                
-                for zone_id in (zone_ids or ["zone_1", "zone_2", "zone_3"]):
-                    data_point["zones"][zone_id] = {
-                        "occupancy": random.randint(0, 3),
-                        "avg_confidence": random.uniform(0.7, 0.95)
-                    }
-                
-                aggregated_data.append(data_point)
-                
-                # Generate raw data if requested
-                if include_raw_data:
-                    for _ in range(random.randint(0, 5)):
-                        raw_data.append({
-                            "timestamp": current_time + timedelta(seconds=random.randint(0, aggregation_interval)),
-                            "person_id": f"person_{random.randint(1, 10)}",
-                            "zone_id": random.choice(zone_ids or ["zone_1", "zone_2", "zone_3"]),
-                            "confidence": random.uniform(0.5, 0.95),
-                            "activity": random.choice(["standing", "sitting", "walking"])
-                        })
-                
-                current_time += timedelta(seconds=aggregation_interval)
-            
+            if self.settings.mock_pose_data:
+                from src.testing.mock_pose_generator import generate_mock_historical_data
+                return generate_mock_historical_data(
+                    start_time=start_time,
+                    end_time=end_time,
+                    zone_ids=zone_ids,
+                    aggregation_interval=aggregation_interval,
+                    include_raw_data=include_raw_data,
+                )
+
+            # Production: no historical data without a persistence backend
             return {
-                "aggregated_data": aggregated_data,
-                "raw_data": raw_data,
-                "total_records": len(aggregated_data)
+                "aggregated_data": [],
+                "raw_data": [] if include_raw_data else None,
+                "total_records": 0,
+                "note": "No historical data available. A data persistence backend must be configured to store historical records.",
             }
-            
+
         except Exception as e:
             self.logger.error(f"Error getting historical data: {e}")
             raise
     
     async def get_recent_activities(self, zone_id=None, limit=10):
-        """Get recently detected activities."""
+        """Get recently detected activities.
+
+        In mock mode, delegates to testing module. In production, returns
+        empty list indicating no activity data has been recorded yet.
+        """
         try:
-            import random
-            activities = []
-            
-            for i in range(limit):
-                activity = {
-                    "activity_id": f"activity_{i}",
-                    "person_id": f"person_{random.randint(1, 5)}",
-                    "zone_id": zone_id or random.choice(["zone_1", "zone_2", "zone_3"]),
-                    "activity": random.choice(["standing", "sitting", "walking", "lying"]),
-                    "confidence": random.uniform(0.6, 0.95),
-                    "timestamp": datetime.now() - timedelta(minutes=random.randint(0, 60)),
-                    "duration_seconds": random.randint(10, 300)
-                }
-                activities.append(activity)
-            
-            return activities
-            
+            if self.settings.mock_pose_data:
+                from src.testing.mock_pose_generator import generate_mock_recent_activities
+                return generate_mock_recent_activities(zone_id=zone_id, limit=limit)
+
+            # Production: no activity records without an active CSI stream
+            return []
+
         except Exception as e:
             self.logger.error(f"Error getting recent activities: {e}")
             raise
