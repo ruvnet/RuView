@@ -152,8 +152,10 @@ cargo test --package wifi-densepose-mat
 - [WiFi-Mat Disaster Response](#-wifi-mat-disaster-response-module)
 - [System Architecture](#️-system-architecture)
 - [Installation](#-installation)
-  - [Using pip (Recommended)](#using-pip-recommended)
-  - [From Source](#from-source)
+  - [Guided Installer (Recommended)](#guided-installer-recommended)
+  - [Install Profiles](#install-profiles)
+  - [From Source (Rust)](#from-source-rust--primary)
+  - [From Source (Python)](#from-source-python)
   - [Using Docker](#using-docker)
   - [System Requirements](#system-requirements)
 - [Quick Start](#-quick-start)
@@ -189,7 +191,7 @@ cargo test --package wifi-densepose-mat
 - [Testing](#-testing)
   - [Running Tests](#running-tests)
   - [Test Categories](#test-categories)
-  - [Mock Testing](#mock-testing)
+  - [Testing Without Hardware](#testing-without-hardware)
   - [Continuous Integration](#continuous-integration)
 - [Deployment](#-deployment)
   - [Production Deployment](#production-deployment)
@@ -266,30 +268,89 @@ WiFi DensePose consists of several key components working together:
 
 ## 📦 Installation
 
-### Using pip (Recommended)
+### Guided Installer (Recommended)
 
-WiFi-DensePose is now available on PyPI for easy installation:
+The interactive installer detects your hardware, checks your environment, and builds the right profile automatically:
 
 ```bash
-# Install the latest stable version
-pip install wifi-densepose
-
-# Install with specific version
-pip install wifi-densepose==1.0.0
-
-# Install with optional dependencies
-pip install wifi-densepose[gpu]  # For GPU acceleration
-pip install wifi-densepose[dev]  # For development
-pip install wifi-densepose[all]  # All optional dependencies
+./install.sh
 ```
 
-### From Source
+It walks through 7 steps:
+1. **System detection** — OS, RAM, disk, GPU
+2. **Toolchain detection** — Python, Rust, Docker, Node.js, ESP-IDF
+3. **WiFi hardware detection** — interfaces, ESP32 USB, Intel CSI debug
+4. **Profile recommendation** — picks the best profile for your hardware
+5. **Dependency installation** — installs what's missing
+6. **Build** — compiles the selected profile
+7. **Summary** — shows next steps and verification commands
+
+#### Install Profiles
+
+| Profile | What it installs | Size | Requirements |
+|---------|-----------------|------|-------------|
+| `verify` | Pipeline verification only | ~5 MB | Python 3.8+ |
+| `python` | Full Python API server + sensing | ~500 MB | Python 3.8+ |
+| `rust` | Rust pipeline (~810x faster) | ~200 MB | Rust 1.70+ |
+| `browser` | WASM for in-browser execution | ~10 MB | Rust + wasm-pack |
+| `iot` | ESP32 sensor mesh + aggregator | varies | Rust + ESP-IDF |
+| `docker` | Docker-based deployment | ~1 GB | Docker |
+| `field` | WiFi-Mat disaster response kit | ~62 MB | Rust + wasm-pack |
+| `full` | Everything available | ~2 GB | All toolchains |
+
+#### Non-Interactive Install
+
+```bash
+# Install a specific profile without prompts
+./install.sh --profile rust --yes
+
+# Just run hardware detection (no install)
+./install.sh --check-only
+
+# Or use make targets
+make install              # Interactive
+make install-verify       # Verification only
+make install-python       # Python pipeline
+make install-rust         # Rust pipeline
+make install-browser      # WASM browser build
+make install-docker       # Docker deployment
+make install-field        # Disaster response kit
+make install-full         # Everything
+make check                # Hardware check only
+```
+
+### From Source (Rust — Primary)
+
+```bash
+git clone https://github.com/ruvnet/wifi-densepose.git
+cd wifi-densepose
+
+# Install Rust pipeline (810x faster than Python)
+./install.sh --profile rust --yes
+
+# Or manually:
+cd rust-port/wifi-densepose-rs
+cargo build --release
+cargo test --workspace
+```
+
+### From Source (Python)
 
 ```bash
 git clone https://github.com/ruvnet/wifi-densepose.git
 cd wifi-densepose
 pip install -r requirements.txt
 pip install -e .
+```
+
+### Using pip (Python only)
+
+```bash
+pip install wifi-densepose
+
+# With optional dependencies
+pip install wifi-densepose[gpu]  # For GPU acceleration
+pip install wifi-densepose[all]  # All optional dependencies
 ```
 
 ### Using Docker
@@ -301,19 +362,23 @@ docker run -p 8000:8000 ruvnet/wifi-densepose:latest
 
 ### System Requirements
 
-- **Python**: 3.8 or higher
+- **Rust**: 1.70+ (primary runtime — install via [rustup](https://rustup.rs/))
+- **Python**: 3.8+ (for verification and legacy v1 API)
 - **Operating System**: Linux (Ubuntu 18.04+), macOS (10.15+), Windows 10+
 - **Memory**: Minimum 4GB RAM, Recommended 8GB+
 - **Storage**: 2GB free space for models and data
-- **Network**: WiFi interface with CSI capability
-- **GPU**: Optional but recommended (NVIDIA GPU with CUDA support)
+- **Network**: WiFi interface with CSI capability (optional — installer detects what you have)
+- **GPU**: Optional (NVIDIA CUDA or Apple Metal)
 
 ## 🚀 Quick Start
 
 ### 1. Basic Setup
 
 ```bash
-# Install the package
+# Install the package (Rust — recommended)
+./install.sh --profile rust --yes
+
+# Or Python legacy
 pip install wifi-densepose
 
 # Copy example configuration
@@ -891,17 +956,16 @@ pytest tests/performance/  # Performance tests
 - Memory usage profiling
 - Stress testing
 
-### Mock Testing
+### Testing Without Hardware
 
-For development without hardware:
+For development without WiFi CSI hardware, use the deterministic reference signal:
 
 ```bash
-# Enable mock mode
-export MOCK_HARDWARE=true
-export MOCK_POSE_DATA=true
+# Verify the full signal processing pipeline (no hardware needed)
+./verify
 
-# Run tests with mocked hardware
-pytest tests/ --mock-hardware
+# Run Rust tests (all use real signal processing, no mocks)
+cd rust-port/wifi-densepose-rs && cargo test --workspace
 ```
 
 ### Continuous Integration
@@ -1303,6 +1367,16 @@ SOFTWARE.
 ```
 
 ## Changelog
+
+### v2.2.0 — 2026-02-28
+
+- **Guided installer** — `./install.sh` with 7-step hardware detection, WiFi interface discovery, toolchain checks, and environment-specific RVF builds (verify/python/rust/browser/iot/docker/field/full profiles)
+- **Make targets** — `make install`, `make check`, `make install-rust`, `make build-wasm`, `make bench`, and 15+ other targets
+- **Real-only inference** — `forward()` and hardware adapters return explicit errors without weights/hardware instead of silent empty data
+- **5.7x Doppler FFT speedup** — Phase cache ring buffer reduces full pipeline from 719us to 254us per frame
+- **Trust kill switch** — `./verify` with SHA-256 proof replay, `--audit` mode, and production code integrity scan
+- **Security hardening** — 10 vulnerabilities fixed (hardcoded creds, JWT bypass, NaN panics), 12 dead code instances removed
+- **SOTA research** — Comprehensive WiFi sensing + RuVector analysis with 30+ citations and 20-year projection (docs/research/)
 
 ### v2.1.0 — 2026-02-28
 
