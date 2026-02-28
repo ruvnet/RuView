@@ -45,12 +45,17 @@ jobs:
 
     - name: Determine deployment environment
       id: determine-env
+      env:
+        # Use environment variable to prevent shell injection
+        GITHUB_EVENT_NAME: ${{ github.event_name }}
+        GITHUB_REF: ${{ github.ref }}
+        GITHUB_INPUT_ENVIRONMENT: ${{ github.event.inputs.environment }}
       run: |
-        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-          echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
-        elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+        if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+          echo "environment=$GITHUB_INPUT_ENVIRONMENT" >> $GITHUB_OUTPUT
+        elif [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
           echo "environment=staging" >> $GITHUB_OUTPUT
-        elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+        elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
           echo "environment=production" >> $GITHUB_OUTPUT
         else
           echo "environment=staging" >> $GITHUB_OUTPUT
