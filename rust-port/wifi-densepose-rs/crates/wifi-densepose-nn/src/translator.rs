@@ -282,46 +282,48 @@ impl ModalityTranslator {
     }
 
     /// Forward pass through the translator
+    ///
+    /// # Errors
+    /// Returns an error if no model weights are loaded. Load weights with
+    /// `with_weights()` before calling forward(). Use `forward_mock()` in tests.
     pub fn forward(&self, input: &Tensor) -> NnResult<TranslatorOutput> {
         self.validate_input(input)?;
 
         if let Some(ref _weights) = self.weights {
             self.forward_native(input)
         } else {
-            self.forward_mock(input)
+            Err(NnError::inference("No model weights loaded. Load weights with with_weights() before calling forward(). Use MockBackend for testing."))
         }
     }
 
     /// Encode input to latent space
+    ///
+    /// # Errors
+    /// Returns an error if no model weights are loaded.
     pub fn encode(&self, input: &Tensor) -> NnResult<Vec<Tensor>> {
         self.validate_input(input)?;
 
-        let shape = input.shape();
-        let batch = shape.dim(0).unwrap_or(1);
-        let height = shape.dim(2).unwrap_or(64);
-        let width = shape.dim(3).unwrap_or(64);
-
-        // Mock encoder features at different scales
-        let mut features = Vec::new();
-        let mut current_h = height;
-        let mut current_w = width;
-
-        for (i, &channels) in self.config.hidden_channels.iter().enumerate() {
-            if i > 0 {
-                current_h /= 2;
-                current_w /= 2;
-            }
-            let feat = Tensor::zeros_4d([batch, channels, current_h.max(1), current_w.max(1)]);
-            features.push(feat);
+        if self.weights.is_none() {
+            return Err(NnError::inference("No model weights loaded. Cannot encode without weights."));
         }
 
-        Ok(features)
+        // Real encoding through the encoder path of forward_native
+        let output = self.forward_native(input)?;
+        output.encoder_features.ok_or_else(|| {
+            NnError::inference("Encoder features not available from forward pass")
+        })
     }
 
     /// Decode from latent space
+    ///
+    /// # Errors
+    /// Returns an error if no model weights are loaded or if encoded features are empty.
     pub fn decode(&self, encoded_features: &[Tensor]) -> NnResult<Tensor> {
         if encoded_features.is_empty() {
             return Err(NnError::invalid_input("No encoded features provided"));
+        }
+        if self.weights.is_none() {
+            return Err(NnError::inference("No model weights loaded. Cannot decode without weights."));
         }
 
         let last_feat = encoded_features.last().unwrap();
@@ -385,6 +387,7 @@ impl ModalityTranslator {
     }
 
     /// Mock forward pass for testing
+    #[cfg(test)]
     fn forward_mock(&self, input: &Tensor) -> NnResult<TranslatorOutput> {
         let shape = input.shape();
         let batch = shape.dim(0).unwrap_or(1);
@@ -670,27 +673,47 @@ mod tests {
     }
 
     #[test]
+    fn test_forward_without_weights_errors() {
+        let config = TranslatorConfig::new(128, vec![256, 512, 256], 256);
+        let translator = ModalityTranslator::new(config).unwrap();
+
+        let input = Tensor::zeros_4d([1, 128, 64, 64]);
+        let result = translator.forward(&input);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No model weights loaded"));
+    }
+
+    #[test]
     fn test_mock_forward() {
         let config = TranslatorConfig::new(128, vec![256, 512, 256], 256);
         let translator = ModalityTranslator::new(config).unwrap();
 
         let input = Tensor::zeros_4d([1, 128, 64, 64]);
-        let output = translator.forward(&input).unwrap();
+        let output = translator.forward_mock(&input).unwrap();
 
         assert_eq!(output.features.shape().dim(1), Some(256));
     }
 
     #[test]
-    fn test_encode_decode() {
+    fn test_encode_without_weights_errors() {
         let config = TranslatorConfig::new(128, vec![256, 512], 256);
         let translator = ModalityTranslator::new(config).unwrap();
 
         let input = Tensor::zeros_4d([1, 128, 64, 64]);
-        let encoded = translator.encode(&input).unwrap();
-        assert_eq!(encoded.len(), 2);
+        let result = translator.encode(&input);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No model weights loaded"));
+    }
 
-        let decoded = translator.decode(&encoded).unwrap();
-        assert_eq!(decoded.shape().dim(1), Some(256));
+    #[test]
+    fn test_decode_without_weights_errors() {
+        let config = TranslatorConfig::new(128, vec![256, 512], 256);
+        let translator = ModalityTranslator::new(config).unwrap();
+
+        let features = vec![Tensor::zeros_4d([1, 512, 32, 32])];
+        let result = translator.decode(&features);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No model weights loaded"));
     }
 
     #[test]

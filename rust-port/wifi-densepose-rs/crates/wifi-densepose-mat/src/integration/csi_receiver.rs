@@ -1104,25 +1104,12 @@ impl CsiParser {
             return Err(AdapterError::DataFormat("PicoScenes packet too short".into()));
         }
 
-        // Simplified parsing - real implementation would parse all segments
-        let rssi = data[20] as i8;
-        let channel = data[24];
-
-        // Placeholder - full implementation would parse the CSI segment
-        Ok(CsiPacket {
-            timestamp: Utc::now(),
-            source_id: "picoscenes".to_string(),
-            amplitudes: vec![],
-            phases: vec![],
-            rssi,
-            noise_floor: -92,
-            metadata: CsiPacketMetadata {
-                channel,
-                format: CsiPacketFormat::PicoScenes,
-                ..Default::default()
-            },
-            raw_data: Some(data.to_vec()),
-        })
+        // PicoScenes CSI segment parsing is not yet implemented.
+        // The format requires parsing DeviceType, RxSBasic, CSI, and MVMExtra segments.
+        // See https://ps.zpj.io/packet-format.html for the full specification.
+        Err(AdapterError::DataFormat(
+            "PicoScenes CSI parser not yet implemented. Packet received but segment parsing (DeviceType, RxSBasic, CSI, MVMExtra) is required. See https://ps.zpj.io/packet-format.html".into()
+        ))
     }
 
     /// Parse JSON CSI format

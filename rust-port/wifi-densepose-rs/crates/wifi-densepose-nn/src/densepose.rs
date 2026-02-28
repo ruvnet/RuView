@@ -233,15 +233,17 @@ impl DensePoseHead {
     ///
     /// This performs inference using loaded weights. For ONNX-based inference,
     /// use the ONNX backend directly.
+    ///
+    /// # Errors
+    /// Returns an error if no model weights are loaded. Load weights with
+    /// `with_weights()` before calling forward(). Use `forward_mock()` in tests.
     pub fn forward(&self, input: &Tensor) -> NnResult<DensePoseOutput> {
         self.validate_input(input)?;
 
-        // If we have native weights, use them
         if let Some(ref _weights) = self.weights {
             self.forward_native(input)
         } else {
-            // Return mock output for testing when no weights are loaded
-            self.forward_mock(input)
+            Err(NnError::inference("No model weights loaded. Load weights with with_weights() before calling forward(). Use MockBackend for testing."))
         }
     }
 
@@ -283,6 +285,7 @@ impl DensePoseHead {
     }
 
     /// Mock forward pass for testing
+    #[cfg(test)]
     fn forward_mock(&self, input: &Tensor) -> NnResult<DensePoseOutput> {
         let shape = input.shape();
         let batch = shape.dim(0).unwrap_or(1);
@@ -552,12 +555,23 @@ mod tests {
     }
 
     #[test]
+    fn test_forward_without_weights_errors() {
+        let config = DensePoseConfig::new(256, 24, 2);
+        let head = DensePoseHead::new(config).unwrap();
+
+        let input = Tensor::zeros_4d([1, 256, 64, 64]);
+        let result = head.forward(&input);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No model weights loaded"));
+    }
+
+    #[test]
     fn test_mock_forward_pass() {
         let config = DensePoseConfig::new(256, 24, 2);
         let head = DensePoseHead::new(config).unwrap();
 
         let input = Tensor::zeros_4d([1, 256, 64, 64]);
-        let output = head.forward(&input).unwrap();
+        let output = head.forward_mock(&input).unwrap();
 
         // Check output shapes
         assert_eq!(output.segmentation.shape().dim(1), Some(25)); // 24 + 1 background

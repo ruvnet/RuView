@@ -1302,6 +1302,20 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## Changelog
+
+### v2.1.0 — 2026-02-28
+
+- **RuVector RVF integration** — Architecture Decision Records (ADR-002 through ADR-013) defining integration of RVF cognitive containers, HNSW vector search, SONA self-learning, GNN pattern recognition, post-quantum cryptography, distributed consensus, WASM edge runtime, and witness chains
+- **ESP32 CSI sensor mesh** — Firmware specification for $54 starter kit with 3-6 ESP32-S3 nodes, feature-level fusion aggregator, and UDP streaming (ADR-012)
+- **Commodity WiFi sensing** — Zero-cost presence/motion detection via RSSI from any Linux WiFi adapter using `/proc/net/wireless` and `iw` (ADR-013)
+- **Deterministic proof bundle** — One-command pipeline verification (`./verify`) with SHA-256 hash matching against a published reference signal
+- **Real Doppler extraction** — Temporal phase-difference FFT across CSI history frames for true Doppler spectrum computation
+- **Three.js visualization** — 3D body model with 24 DensePose body parts, signal visualization, environment rendering, and WebSocket streaming
+- **Commodity sensing module** — `RssiFeatureExtractor` with FFT spectral analysis, CUSUM change detection, and `PresenceClassifier` with rule-based logic
+- **CI verification pipeline** — GitHub Actions workflow that verifies pipeline determinism and scans for unseeded random calls in production code
+- **Rust hardware adapters** — ESP32, Intel 5300, Atheros, UDP, and PCAP adapters now return explicit errors when no hardware is connected instead of silent empty data
+
 ## 🙏 Acknowledgments
 
 - **Research Foundation**: Based on groundbreaking research in WiFi-based human sensing
