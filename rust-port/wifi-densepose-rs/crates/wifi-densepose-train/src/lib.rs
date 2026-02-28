@@ -38,23 +38,38 @@
 //! println!("amplitude shape: {:?}", sample.amplitude.shape());
 //! ```
 
-#![forbid(unsafe_code)]
+// Note: #![forbid(unsafe_code)] is intentionally absent because the `tch`
+// dependency (PyTorch Rust bindings) internally requires unsafe code via FFI.
+// All *this* crate's code is written without unsafe blocks.
 #![warn(missing_docs)]
 
 pub mod config;
 pub mod dataset;
 pub mod error;
-pub mod losses;
-pub mod metrics;
-pub mod model;
-pub mod proof;
 pub mod subcarrier;
+
+// The following modules use `tch` (PyTorch Rust bindings) for GPU-accelerated
+// training and are only compiled when the `tch-backend` feature is enabled.
+// Without the feature the crate still provides the dataset / config / subcarrier
+// APIs needed for data preprocessing and proof verification.
+#[cfg(feature = "tch-backend")]
+pub mod losses;
+#[cfg(feature = "tch-backend")]
+pub mod metrics;
+#[cfg(feature = "tch-backend")]
+pub mod model;
+#[cfg(feature = "tch-backend")]
+pub mod proof;
+#[cfg(feature = "tch-backend")]
 pub mod trainer;
 
 // Convenient re-exports at the crate root.
 pub use config::TrainingConfig;
 pub use dataset::{CsiDataset, CsiSample, DataLoader, MmFiDataset, SyntheticCsiDataset, SyntheticConfig};
-pub use error::{ConfigError, DatasetError, SubcarrierError, TrainError, TrainResult};
+pub use error::{ConfigError, DatasetError, SubcarrierError, TrainError};
+// TrainResult<T> is the generic Result alias from error.rs; the concrete
+// TrainResult struct from trainer.rs is accessed via trainer::TrainResult.
+pub use error::TrainResult as TrainResultAlias;
 pub use subcarrier::{compute_interp_weights, interpolate_subcarriers, select_subcarriers_by_variance};
 
 /// Crate version string.

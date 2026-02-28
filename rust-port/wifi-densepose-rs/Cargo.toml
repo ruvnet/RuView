@@ -99,9 +99,12 @@ proptest = "1.4"
 mockall = "0.12"
 wiremock = "0.5"
 
-# ruvector integration
-# ruvector-core = "0.1"
-# ruvector-data-framework = "0.1"
+# ruvector integration (all at v2.0.4 — published on crates.io)
+ruvector-mincut = "2.0.4"
+ruvector-attn-mincut = "2.0.4"
+ruvector-temporal-tensor = "2.0.4"
+ruvector-solver = "2.0.4"
+ruvector-attention = "2.0.4"
 
 # Internal crates
 wifi-densepose-core = { path = "crates/wifi-densepose-core" }

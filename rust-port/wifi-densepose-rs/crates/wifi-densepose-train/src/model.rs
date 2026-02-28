@@ -1,61 +1,56 @@
-//! WiFi-DensePose end-to-end model using tch-rs (PyTorch Rust bindings).
+//! End-to-end WiFi-DensePose model (tch-rs / LibTorch backend).
 //!
-//! # Architecture
+//! Architecture (following CMU arXiv:2301.00250):
 //!
 //! ```text
-//! CSI amplitude + phase
-//!       │
-//!       ▼
-//! ┌─────────────────────┐
-//! │  PhaseSanitizerNet  │  differentiable conjugate multiplication
-//! └─────────────────────┘
-//!       │
-//!       ▼
-//! ┌────────────────────────────┐
-//! │  ModalityTranslatorNet     │  CSI → spatial pseudo-image [B, 3, 48, 48]
-//! └────────────────────────────┘
-//!       │
-//!       ▼
-//! ┌─────────────────┐
-//! │  ResNet18-like  │  [B, 256, H/4, W/4] feature maps
-//! │  Backbone       │
-//! └─────────────────┘
-//!       │
-//!   ┌───┴───┐
-//!   │       │
-//!   ▼       ▼
-//! ┌─────┐ ┌────────────┐
-//! │ KP  │ │ DensePose  │
-//! │ Head│ │ Head       │
-//! └─────┘ └────────────┘
-//! [B,17,H,W]  [B,25,H,W] + [B,48,H,W]
+//! amplitude [B, T*tx*rx, sub]  ─┐
+//!                                ├─► ModalityTranslator ─► [B, 3, 48, 48]
+//! phase     [B, T*tx*rx, sub]  ─┘        │
+//!                                         ▼
+//!                                  ResNet18-like backbone
+//!                                         │
+//!                              ┌──────────┴──────────┐
+//!                              ▼                     ▼
+//!                        KeypointHead          DensePoseHead
+//!                      [B,17,H,W] heatmaps   [B,25,H,W] parts
+//!                                             [B,48,H,W] UV
 //! ```
+//!
+//! Sub-networks are instantiated once in [`WiFiDensePoseModel::new`] and
+//! stored as struct fields so layer weights persist correctly across forward
+//! passes.  A lazy `forward_impl` reconstruction approach is intentionally
+//! avoided here.
 //!
 //! # No pre-trained weights
 //!
-//! The backbone uses a ResNet18-compatible architecture built purely with
-//! `tch::nn`. Weights are initialised from scratch (Kaiming uniform by
-//! default from tch).  Pre-trained ImageNet weights are not loaded because
-//! network access is not guaranteed during training runs.
+//! Weights are initialised from scratch (Kaiming uniform, default from tch).
+//! Pre-trained ImageNet weights are not loaded because network access is not
+//! guaranteed during training runs.
 
 use std::path::Path;
 use tch::{nn, nn::Module, nn::ModuleT, Device, Kind, Tensor};
 
+use ruvector_attn_mincut::attn_mincut;
+use ruvector_attention::attention::ScaledDotProductAttention;
+use ruvector_attention::traits::Attention;
+
 use crate::config::TrainingConfig;
+use crate::error::TrainError;
 
 // ---------------------------------------------------------------------------
 // Public output type
 // ---------------------------------------------------------------------------
 
 /// Outputs produced by a single forward pass of [`WiFiDensePoseModel`].
+#[derive(Debug)]
 pub struct ModelOutput {
     /// Keypoint heatmaps: `[B, 17, H, W]`.
     pub keypoints: Tensor,
     /// Body-part logits (24 parts + background): `[B, 25, H, W]`.
     pub part_logits: Tensor,
-    /// UV coordinates (24 × 2 channels interleaved): `[B, 48, H, W]`.
+    /// UV surface coordinates (24 × 2 channels): `[B, 48, H, W]`.
     pub uv_coords: Tensor,
-    /// Backbone feature map used for cross-modal transfer loss: `[B, 256, H/4, W/4]`.
+    /// Backbone feature map for cross-modal transfer loss: `[B, 256, H/4, W/4]`.
     pub features: Tensor,
 }
 
@@ -63,41 +58,67 @@ pub struct ModelOutput {
 // WiFiDensePoseModel
 // ---------------------------------------------------------------------------
 
-/// Complete WiFi-DensePose model.
+/// End-to-end WiFi-DensePose model.
 ///
-/// Input: CSI amplitude and phase tensors with shape
-/// `[B, T*n_tx*n_rx, n_sub]` (flattened antenna-time dimension).
-///
-/// Output: [`ModelOutput`] with keypoints and DensePose predictions.
+/// Input CSI tensors have shape `[B, T * n_tx * n_rx, n_sub]`.
+/// All sub-networks are built once at construction and stored as fields so
+/// their parameters persist correctly across calls.
 pub struct WiFiDensePoseModel {
     vs: nn::VarStore,
-    config: TrainingConfig,
+    translator: ModalityTranslator,
+    backbone: Backbone,
+    kp_head: KeypointHead,
+    dp_head: DensePoseHead,
+    /// Active training configuration.
+    pub config: TrainingConfig,
 }
 
-// Internal model components stored in the VarStore.
-// We use sub-paths inside the single VarStore to keep all parameters in
-// one serialisable store.
-
 impl WiFiDensePoseModel {
-    /// Create a new model on `device`.
+    /// Build a new model with randomly-initialised weights on `device`.
     ///
-    /// All sub-networks are constructed and their parameters registered in the
-    /// internal `VarStore`.
+    /// Call `tch::manual_seed(seed)` before this for reproducibility.
     pub fn new(config: &TrainingConfig, device: Device) -> Self {
         let vs = nn::VarStore::new(device);
+        let root = vs.root();
+
+        // Compute the flattened CSI input size used by the modality translator.
+        let flat_csi = (config.window_frames
+            * config.num_antennas_tx
+            * config.num_antennas_rx
+            * config.num_subcarriers) as i64;
+
+        let num_parts = config.num_body_parts as i64;
+
+        let translator = ModalityTranslator::new(&root / "translator", flat_csi);
+        let backbone = Backbone::new(&root / "backbone", config.backbone_channels as i64);
+        let kp_head = KeypointHead::new(
+            &root / "kp_head",
+            config.backbone_channels as i64,
+            config.num_keypoints as i64,
+        );
+        let dp_head = DensePoseHead::new(
+            &root / "dp_head",
+            config.backbone_channels as i64,
+            num_parts,
+        );
+
         WiFiDensePoseModel {
             vs,
+            translator,
+            backbone,
+            kp_head,
+            dp_head,
             config: config.clone(),
         }
     }
 
-    /// Forward pass with gradient tracking (training mode).
+    /// Forward pass in training mode (dropout / batch-norm in train mode).
     ///
     /// # Arguments
     ///
     /// - `amplitude`: `[B, T*n_tx*n_rx, n_sub]`
     /// - `phase`:     `[B, T*n_tx*n_rx, n_sub]`
-    pub fn forward_train(&self, amplitude: &Tensor, phase: &Tensor) -> ModelOutput {
+    pub fn forward_t(&self, amplitude: &Tensor, phase: &Tensor) -> ModelOutput {
         self.forward_impl(amplitude, phase, true)
     }
 
@@ -106,110 +127,95 @@ impl WiFiDensePoseModel {
         tch::no_grad(|| self.forward_impl(amplitude, phase, false))
     }
 
-    /// Save model weights to `path`.
+    /// Save model weights to a file (tch safetensors / .pt format).
     ///
     /// # Errors
     ///
-    /// Returns an error if the file cannot be written.
-    pub fn save(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-        self.vs.save(path)?;
-        Ok(())
+    /// Returns [`TrainError::TrainingStep`] if the file cannot be written.
+    pub fn save(&self, path: &Path) -> Result<(), TrainError> {
+        self.vs
+            .save(path)
+            .map_err(|e| TrainError::training_step(format!("save failed: {e}")))
     }
 
-    /// Load model weights from `path`.
+    /// Load model weights from a file.
     ///
     /// # Errors
     ///
-    /// Returns an error if the file cannot be read or the weights are
-    /// incompatible with the model architecture.
-    pub fn load(
-        path: &Path,
-        config: &TrainingConfig,
-        device: Device,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut model = Self::new(config, device);
-        // Build parameter graph first so load can find named tensors.
-        let _dummy_amp = Tensor::zeros(
-            [1, 1, config.num_subcarriers as i64],
-            (Kind::Float, device),
-        );
-        let _dummy_phase = _dummy_amp.shallow_clone();
-        let _ = model.forward_impl(&_dummy_amp, &_dummy_phase, false);
-        model.vs.load(path)?;
-        Ok(model)
-    }
-
-    /// Return all trainable variable tensors.
-    pub fn trainable_variables(&self) -> Vec<Tensor> {
+    /// Returns [`TrainError::TrainingStep`] if the file cannot be read or the
+    /// weights are incompatible with this model's architecture.
+    pub fn load(&mut self, path: &Path) -> Result<(), TrainError> {
         self.vs
-            .trainable_variables()
-            .into_iter()
-            .map(|t| t.shallow_clone())
-            .collect()
+            .load(path)
+            .map_err(|e| TrainError::training_step(format!("load failed: {e}")))
     }
 
-    /// Count total trainable parameters.
-    pub fn num_parameters(&self) -> usize {
-        self.vs
-            .trainable_variables()
-            .iter()
-            .map(|t| t.numel() as usize)
-            .sum()
-    }
-
-    /// Access the internal `VarStore` (e.g. to create an optimizer).
-    pub fn var_store(&self) -> &nn::VarStore {
+    /// Return a reference to the internal `VarStore` (e.g. to build an
+    /// optimiser).
+    pub fn varstore(&self) -> &nn::VarStore {
         &self.vs
     }
 
     /// Mutable access to the internal `VarStore`.
+    pub fn varstore_mut(&mut self) -> &mut nn::VarStore {
+        &mut self.vs
+    }
+
+    /// Alias for [`varstore`](Self::varstore) — matches the `var_store` naming
+    /// convention used by the training loop.
+    pub fn var_store(&self) -> &nn::VarStore {
+        &self.vs
+    }
+
+    /// Alias for [`varstore_mut`](Self::varstore_mut).
     pub fn var_store_mut(&mut self) -> &mut nn::VarStore {
         &mut self.vs
     }
 
+    /// Alias for [`forward_t`](Self::forward_t) kept for compatibility with
+    /// the training-loop code.
+    pub fn forward_train(&self, amplitude: &Tensor, phase: &Tensor) -> ModelOutput {
+        self.forward_t(amplitude, phase)
+    }
+
+    /// Total number of trainable scalar parameters.
+    pub fn num_parameters(&self) -> i64 {
+        self.vs
+            .trainable_variables()
+            .iter()
+            .map(|t| t.numel())
+            .sum()
+    }
+
     // ------------------------------------------------------------------
-    // Internal forward implementation
+    // Internal implementation
     // ------------------------------------------------------------------
 
-    fn forward_impl(
-        &self,
-        amplitude: &Tensor,
-        phase: &Tensor,
-        train: bool,
-    ) -> ModelOutput {
-        let root = self.vs.root();
+    fn forward_impl(&self, amplitude: &Tensor, phase: &Tensor, train: bool) -> ModelOutput {
         let cfg = &self.config;
 
-        // ── Phase sanitization ───────────────────────────────────────────
+        // ── Phase sanitization (differentiable, no learned params) ───────
         let clean_phase = phase_sanitize(phase);
 
-        // ── Modality translation ─────────────────────────────────────────
-        // Flatten antenna-time and subcarrier dimensions → [B, flat]
+        // ── Flatten antenna×time×subcarrier dimensions ───────────────────
         let batch = amplitude.size()[0];
         let flat_amp = amplitude.reshape([batch, -1]);
         let flat_phase = clean_phase.reshape([batch, -1]);
-        let input_size = flat_amp.size()[1];
 
-        let spatial = modality_translate(&root, &flat_amp, &flat_phase, input_size, train);
-        // spatial: [B, 3, 48, 48]
+        // ── Modality translator: CSI → pseudo spatial image ──────────────
+        // Output: [B, 3, 48, 48]
+        let spatial = self.translator.forward_t(&flat_amp, &flat_phase, train);
 
-        // ── ResNet18-like backbone ────────────────────────────────────────
-        let (features, feat_h, feat_w) = resnet18_backbone(&root, &spatial, train, cfg.backbone_channels as i64);
-        // features: [B, 256, 12, 12]
+        // ── ResNet-style backbone ─────────────────────────────────────────
+        // Output: [B, backbone_channels, H', W']
+        let features = self.backbone.forward_t(&spatial, train);
 
-        // ── Keypoint head ────────────────────────────────────────────────
-        let kp_h = cfg.heatmap_size as i64;
-        let kp_w = kp_h;
-        let keypoints = keypoint_head(&root, &features, cfg.num_keypoints as i64, (kp_h, kp_w), train);
+        // ── Keypoint head ─────────────────────────────────────────────────
+        let hs = cfg.heatmap_size as i64;
+        let keypoints = self.kp_head.forward_t(&features, hs, train);
 
-        // ── DensePose head ───────────────────────────────────────────────
-        let (part_logits, uv_coords) = densepose_head(
-            &root,
-            &features,
-            (cfg.num_body_parts + 1) as i64,  // +1 for background
-            (kp_h, kp_w),
-            train,
-        );
+        // ── DensePose head ────────────────────────────────────────────────
+        let (part_logits, uv_coords) = self.dp_head.forward_t(&features, hs, train);
 
         ModelOutput {
             keypoints,
@@ -224,33 +230,24 @@ impl WiFiDensePoseModel {
 // Phase sanitizer (no learned parameters)
 // ---------------------------------------------------------------------------
 
-/// Differentiable phase sanitization via conjugate multiplication.
+/// Differentiable phase sanitization via subcarrier-differential method.
 ///
-/// Implements the CSI ratio model: for each adjacent subcarrier pair, compute
-/// the phase difference to cancel out common-mode phase drift (e.g. carrier
-/// frequency offset, sampling offset).
+/// Computes first-order differences along the subcarrier axis to cancel
+/// common-mode phase drift (carrier frequency offset, sampling offset).
 ///
 /// Input:  `[B, T*n_ant, n_sub]`
-/// Output: `[B, T*n_ant, n_sub]` (sanitized phase)
+/// Output: `[B, T*n_ant, n_sub]`  (zero-padded on the left)
 fn phase_sanitize(phase: &Tensor) -> Tensor {
-    // For each subcarrier k, compute the differential phase:
-    //   φ_clean[k] = φ[k] - φ[k-1]   for k > 0
-    //   φ_clean[0] = 0
-    //
-    // This removes linear phase ramps caused by timing and CFO.
-    // Implemented as: diff along last dimension with zero-padding on the left.
-
     let n_sub = phase.size()[2];
     if n_sub <= 1 {
         return phase.zeros_like();
     }
 
-    // Slice k=1..N and k=0..N-1, compute difference.
+    // φ_clean[k] = φ[k] - φ[k-1] for k > 0; φ_clean[0] = 0
     let later = phase.slice(2, 1, n_sub, 1);
     let earlier = phase.slice(2, 0, n_sub - 1, 1);
     let diff = later - earlier;
 
-    // Prepend a zero column so the output has the same shape as input.
     let zeros = Tensor::zeros(
         [phase.size()[0], phase.size()[1], 1],
         (Kind::Float, phase.device()),
@@ -259,323 +256,446 @@ fn phase_sanitize(phase: &Tensor) -> Tensor {
 }
 
 // ---------------------------------------------------------------------------
-// Modality translator
+// Modality Translator
 // ---------------------------------------------------------------------------
 
-/// Build and run the modality translator network.
+/// Translates flattened (amplitude, phase) CSI vectors into a pseudo-image.
 ///
-/// Architecture:
-/// - Amplitude encoder: `Linear(input_size, 512) → ReLU → Linear(512, 256) → ReLU`
-/// - Phase encoder:     same structure as amplitude encoder
-/// - Fusion:            `Linear(512, 256) → ReLU → Linear(256, 48*48*3)`
-///                       → reshape to `[B, 3, 48, 48]`
-///
-/// All layers share the same `root` VarStore path so weights accumulate
-/// across calls (the parameters are created lazily on first call and reused).
-fn modality_translate(
-    root: &nn::Path,
-    flat_amp: &Tensor,
-    flat_phase: &Tensor,
-    input_size: i64,
-    train: bool,
-) -> Tensor {
-    let mt = root / "modality_translator";
-
-    // Amplitude encoder
-    let ae = |x: &Tensor| {
-        let h = ((&mt / "amp_enc_fc1").linear(x, input_size, 512));
-        let h = h.relu();
-        let h = ((&mt / "amp_enc_fc2").linear(&h, 512, 256));
-        h.relu()
-    };
-
-    // Phase encoder
-    let pe = |x: &Tensor| {
-        let h = ((&mt / "ph_enc_fc1").linear(x, input_size, 512));
-        let h = h.relu();
-        let h = ((&mt / "ph_enc_fc2").linear(&h, 512, 256));
-        h.relu()
-    };
-
-    let amp_feat = ae(flat_amp);      // [B, 256]
-    let phase_feat = pe(flat_phase);   // [B, 256]
-
-    // Concatenate and fuse
-    let fused = Tensor::cat(&[amp_feat, phase_feat], 1); // [B, 512]
-
-    let spatial_out: i64 = 3 * 48 * 48;
-    let fused = (&mt / "fusion_fc1").linear(&fused, 512, 256);
-    let fused = fused.relu();
-    let fused = (&mt / "fusion_fc2").linear(&fused, 256, spatial_out);
-    // fused: [B, 3*48*48]
-
-    let batch = fused.size()[0];
-    let spatial_map = fused.reshape([batch, 3, 48, 48]);
-
-    // Optional: apply tanh to bound activations before passing to CNN.
-    spatial_map.tanh()
+/// ```text
+/// amplitude [B, flat_csi] ─► amp_fc1 ► relu ► amp_fc2 ► relu ─┐
+///                                                                 ├─► fuse_fc ► reshape ► spatial_conv ► [B, 3, 48, 48]
+/// phase     [B, flat_csi] ─► ph_fc1  ► relu ► ph_fc2  ► relu ─┘
+/// ```
+struct ModalityTranslator {
+    amp_fc1: nn::Linear,
+    amp_fc2: nn::Linear,
+    ph_fc1: nn::Linear,
+    ph_fc2: nn::Linear,
+    fuse_fc: nn::Linear,
+    // Spatial refinement conv layers
+    sp_conv1: nn::Conv2D,
+    sp_bn1: nn::BatchNorm,
+    sp_conv2: nn::Conv2D,
 }
 
-// ---------------------------------------------------------------------------
-// Path::linear helper (creates or retrieves a Linear layer)
-// ---------------------------------------------------------------------------
+impl ModalityTranslator {
+    fn new(vs: nn::Path, flat_csi: i64) -> Self {
+        let amp_fc1 = nn::linear(&vs / "amp_fc1", flat_csi, 512, Default::default());
+        let amp_fc2 = nn::linear(&vs / "amp_fc2", 512, 256, Default::default());
+        let ph_fc1 = nn::linear(&vs / "ph_fc1", flat_csi, 512, Default::default());
+        let ph_fc2 = nn::linear(&vs / "ph_fc2", 512, 256, Default::default());
+        // Fuse 256+256 → 3*48*48
+        let fuse_fc = nn::linear(&vs / "fuse_fc", 512, 3 * 48 * 48, Default::default());
 
-/// Extension trait to make `nn::Path` callable with `linear(x, in, out)`.
-trait PathLinear {
-    fn linear(&self, x: &Tensor, in_dim: i64, out_dim: i64) -> Tensor;
-}
+        // Two conv layers that mix spatial information in the pseudo-image.
+        let sp_conv1 = nn::conv2d(
+            &vs / "sp_conv1",
+            3,
+            32,
+            3,
+            nn::ConvConfig {
+                padding: 1,
+                bias: false,
+                ..Default::default()
+            },
+        );
+        let sp_bn1 = nn::batch_norm2d(&vs / "sp_bn1", 32, Default::default());
+        let sp_conv2 = nn::conv2d(
+            &vs / "sp_conv2",
+            32,
+            3,
+            3,
+            nn::ConvConfig {
+                padding: 1,
+                ..Default::default()
+            },
+        );
 
-impl PathLinear for nn::Path<'_> {
-    fn linear(&self, x: &Tensor, in_dim: i64, out_dim: i64) -> Tensor {
-        let cfg = nn::LinearConfig::default();
-        let layer = nn::linear(self, in_dim, out_dim, cfg);
-        layer.forward(x)
+        ModalityTranslator {
+            amp_fc1,
+            amp_fc2,
+            ph_fc1,
+            ph_fc2,
+            fuse_fc,
+            sp_conv1,
+            sp_bn1,
+            sp_conv2,
+        }
+    }
+
+    fn forward_t(&self, amp: &Tensor, ph: &Tensor, train: bool) -> Tensor {
+        let b = amp.size()[0];
+
+        // Amplitude branch
+        let a = amp
+            .apply(&self.amp_fc1)
+            .relu()
+            .dropout(0.2, train)
+            .apply(&self.amp_fc2)
+            .relu();
+
+        // Phase branch
+        let p = ph
+            .apply(&self.ph_fc1)
+            .relu()
+            .dropout(0.2, train)
+            .apply(&self.ph_fc2)
+            .relu();
+
+        // Fuse and reshape to spatial map
+        let fused = Tensor::cat(&[a, p], 1) // [B, 512]
+            .apply(&self.fuse_fc) // [B, 3*48*48]
+            .view([b, 3, 48, 48])
+            .relu();
+
+        // Spatial refinement
+        let out = fused
+            .apply(&self.sp_conv1)
+            .apply_t(&self.sp_bn1, train)
+            .relu()
+            .apply(&self.sp_conv2)
+            .tanh(); // bound to [-1, 1] before backbone
+
+        out
     }
 }
 
 // ---------------------------------------------------------------------------
-// ResNet18-like backbone
+// Backbone
 // ---------------------------------------------------------------------------
 
-/// A ResNet18-style CNN backbone.
-///
-/// Input:  `[B, 3, 48, 48]`
-/// Output: `[B, 256, 12, 12]` (spatial features)
-///
-/// Architecture:
-/// - Stem:  Conv2d(3→64, k=3, s=1, p=1) + BN + ReLU
-/// - Layer1: 2 × BasicBlock(64→64)
-/// - Layer2: 2 × BasicBlock(64→128, stride=2)   → 24×24
-/// - Layer3: 2 × BasicBlock(128→256, stride=2)  → 12×12
-///
-/// (No Layer4/pooling to preserve spatial resolution.)
-fn resnet18_backbone(
-    root: &nn::Path,
-    x: &Tensor,
-    train: bool,
-    out_channels: i64,
-) -> (Tensor, i64, i64) {
-    let bb = root / "backbone";
-
-    // Stem
-    let stem_conv = nn::conv2d(
-        &(&bb / "stem_conv"),
-        3,
-        64,
-        3,
-        nn::ConvConfig { padding: 1, ..Default::default() },
-    );
-    let stem_bn = nn::batch_norm2d(&(&bb / "stem_bn"), 64, Default::default());
-    let x = stem_conv.forward(x).apply_t(&stem_bn, train).relu();
-
-    // Layer 1: 64 → 64
-    let x = basic_block(&(&bb / "l1b1"), &x, 64, 64, 1, train);
-    let x = basic_block(&(&bb / "l1b2"), &x, 64, 64, 1, train);
-
-    // Layer 2: 64 → 128 (stride 2 → half spatial)
-    let x = basic_block(&(&bb / "l2b1"), &x, 64, 128, 2, train);
-    let x = basic_block(&(&bb / "l2b2"), &x, 128, 128, 1, train);
-
-    // Layer 3: 128 → out_channels (stride 2 → half spatial again)
-    let x = basic_block(&(&bb / "l3b1"), &x, 128, out_channels, 2, train);
-    let x = basic_block(&(&bb / "l3b2"), &x, out_channels, out_channels, 1, train);
-
-    let shape = x.size();
-    let h = shape[2];
-    let w = shape[3];
-    (x, h, w)
-}
-
-/// ResNet BasicBlock.
+/// ResNet18-compatible backbone.
 ///
 /// ```text
-/// x ─── Conv2d(s) ─── BN ─── ReLU ─── Conv2d(1) ─── BN ──+── ReLU
-///  │                                                         │
-///  └── (downsample if needed) ──────────────────────────────┘
+/// Input:  [B, 3, 48, 48]
+/// Stem:   Conv2d(3→64, k=3, s=1, p=1) + BN + ReLU         → [B, 64, 48, 48]
+/// Layer1: 2 × BasicBlock(64→64,   stride=1)                → [B, 64, 48, 48]
+/// Layer2: 2 × BasicBlock(64→128,  stride=2)                → [B, 128, 24, 24]
+/// Layer3: 2 × BasicBlock(128→256, stride=2)                → [B, 256, 12, 12]
+/// Output: [B, out_channels, 12, 12]
 /// ```
-fn basic_block(
-    path: &nn::Path,
-    x: &Tensor,
-    in_ch: i64,
-    out_ch: i64,
-    stride: i64,
-    train: bool,
-) -> Tensor {
-    let conv1 = nn::conv2d(
-        &(path / "conv1"),
-        in_ch,
-        out_ch,
-        3,
-        nn::ConvConfig { stride, padding: 1, bias: false, ..Default::default() },
-    );
-    let bn1 = nn::batch_norm2d(&(path / "bn1"), out_ch, Default::default());
+struct Backbone {
+    stem_conv: nn::Conv2D,
+    stem_bn: nn::BatchNorm,
+    // Layer 1
+    l1b1: BasicBlock,
+    l1b2: BasicBlock,
+    // Layer 2
+    l2b1: BasicBlock,
+    l2b2: BasicBlock,
+    // Layer 3
+    l3b1: BasicBlock,
+    l3b2: BasicBlock,
+}
 
-    let conv2 = nn::conv2d(
-        &(path / "conv2"),
-        out_ch,
-        out_ch,
-        3,
-        nn::ConvConfig { padding: 1, bias: false, ..Default::default() },
-    );
-    let bn2 = nn::batch_norm2d(&(path / "bn2"), out_ch, Default::default());
+impl Backbone {
+    fn new(vs: nn::Path, out_channels: i64) -> Self {
+        let stem_conv = nn::conv2d(
+            &vs / "stem_conv",
+            3,
+            64,
+            3,
+            nn::ConvConfig {
+                padding: 1,
+                bias: false,
+                ..Default::default()
+            },
+        );
+        let stem_bn = nn::batch_norm2d(&vs / "stem_bn", 64, Default::default());
 
-    let out = conv1.forward(x).apply_t(&bn1, train).relu();
-    let out = conv2.forward(&out).apply_t(&bn2, train);
+        Backbone {
+            stem_conv,
+            stem_bn,
+            l1b1: BasicBlock::new(&vs / "l1b1", 64, 64, 1),
+            l1b2: BasicBlock::new(&vs / "l1b2", 64, 64, 1),
+            l2b1: BasicBlock::new(&vs / "l2b1", 64, 128, 2),
+            l2b2: BasicBlock::new(&vs / "l2b2", 128, 128, 1),
+            l3b1: BasicBlock::new(&vs / "l3b1", 128, out_channels, 2),
+            l3b2: BasicBlock::new(&vs / "l3b2", out_channels, out_channels, 1),
+        }
+    }
 
-    // Residual / skip connection
-    let residual = if in_ch != out_ch || stride != 1 {
-        let ds_conv = nn::conv2d(
-            &(path / "ds_conv"),
+    fn forward_t(&self, x: &Tensor, train: bool) -> Tensor {
+        let x = self
+            .stem_conv
+            .forward(x)
+            .apply_t(&self.stem_bn, train)
+            .relu();
+        let x = self.l1b1.forward_t(&x, train);
+        let x = self.l1b2.forward_t(&x, train);
+        let x = self.l2b1.forward_t(&x, train);
+        let x = self.l2b2.forward_t(&x, train);
+        let x = self.l3b1.forward_t(&x, train);
+        self.l3b2.forward_t(&x, train)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// BasicBlock
+// ---------------------------------------------------------------------------
+
+/// ResNet BasicBlock with optional projection shortcut.
+///
+/// ```text
+/// x ── Conv2d(s) ── BN ── ReLU ── Conv2d(1) ── BN ──┐
+///  │                                                   +── ReLU
+///  └── (1×1 Conv+BN if in_ch≠out_ch or stride≠1) ───┘
+/// ```
+struct BasicBlock {
+    conv1: nn::Conv2D,
+    bn1: nn::BatchNorm,
+    conv2: nn::Conv2D,
+    bn2: nn::BatchNorm,
+    downsample: Option<(nn::Conv2D, nn::BatchNorm)>,
+}
+
+impl BasicBlock {
+    fn new(vs: nn::Path, in_ch: i64, out_ch: i64, stride: i64) -> Self {
+        let conv1 = nn::conv2d(
+            &vs / "conv1",
             in_ch,
             out_ch,
-            1,
-            nn::ConvConfig { stride, bias: false, ..Default::default() },
+            3,
+            nn::ConvConfig {
+                stride,
+                padding: 1,
+                bias: false,
+                ..Default::default()
+            },
         );
-        let ds_bn = nn::batch_norm2d(&(path / "ds_bn"), out_ch, Default::default());
-        ds_conv.forward(x).apply_t(&ds_bn, train)
-    } else {
-        x.shallow_clone()
-    };
+        let bn1 = nn::batch_norm2d(&vs / "bn1", out_ch, Default::default());
 
-    (out + residual).relu()
+        let conv2 = nn::conv2d(
+            &vs / "conv2",
+            out_ch,
+            out_ch,
+            3,
+            nn::ConvConfig {
+                padding: 1,
+                bias: false,
+                ..Default::default()
+            },
+        );
+        let bn2 = nn::batch_norm2d(&vs / "bn2", out_ch, Default::default());
+
+        let downsample = if in_ch != out_ch || stride != 1 {
+            let ds_conv = nn::conv2d(
+                &vs / "ds_conv",
+                in_ch,
+                out_ch,
+                1,
+                nn::ConvConfig {
+                    stride,
+                    bias: false,
+                    ..Default::default()
+                },
+            );
+            let ds_bn = nn::batch_norm2d(&vs / "ds_bn", out_ch, Default::default());
+            Some((ds_conv, ds_bn))
+        } else {
+            None
+        };
+
+        BasicBlock {
+            conv1,
+            bn1,
+            conv2,
+            bn2,
+            downsample,
+        }
+    }
+
+    fn forward_t(&self, x: &Tensor, train: bool) -> Tensor {
+        let residual = match &self.downsample {
+            Some((ds_conv, ds_bn)) => ds_conv.forward(x).apply_t(ds_bn, train),
+            None => x.shallow_clone(),
+        };
+
+        let out = self
+            .conv1
+            .forward(x)
+            .apply_t(&self.bn1, train)
+            .relu();
+        let out = self.conv2.forward(&out).apply_t(&self.bn2, train);
+
+        (out + residual).relu()
+    }
 }
 
 // ---------------------------------------------------------------------------
-// Keypoint head
+// Keypoint Head
 // ---------------------------------------------------------------------------
 
-/// Keypoint heatmap prediction head.
+/// Predicts per-joint Gaussian heatmaps.
 ///
-/// Input:  `[B, in_channels, H, W]`
-/// Output: `[B, num_keypoints, out_h, out_w]` (after upsampling)
-fn keypoint_head(
-    root: &nn::Path,
-    features: &Tensor,
-    num_keypoints: i64,
-    output_size: (i64, i64),
-    train: bool,
-) -> Tensor {
-    let kp = root / "keypoint_head";
+/// ```text
+/// Input:  [B, in_channels, H', W']
+/// ► Conv2d(in→256, 3×3, p=1) + BN + ReLU
+/// ► Conv2d(256→128, 3×3, p=1) + BN + ReLU
+/// ► Conv2d(128→num_keypoints, 1×1)
+/// ► upsample_bilinear2d → [B, num_keypoints, heatmap_size, heatmap_size]
+/// ```
+struct KeypointHead {
+    conv1: nn::Conv2D,
+    bn1: nn::BatchNorm,
+    conv2: nn::Conv2D,
+    bn2: nn::BatchNorm,
+    out_conv: nn::Conv2D,
+}
 
-    let conv1 = nn::conv2d(
-        &(&kp / "conv1"),
-        256,
-        256,
-        3,
-        nn::ConvConfig { padding: 1, bias: false, ..Default::default() },
-    );
-    let bn1 = nn::batch_norm2d(&(&kp / "bn1"), 256, Default::default());
+impl KeypointHead {
+    fn new(vs: nn::Path, in_ch: i64, num_kp: i64) -> Self {
+        let conv1 = nn::conv2d(
+            &vs / "conv1",
+            in_ch,
+            256,
+            3,
+            nn::ConvConfig {
+                padding: 1,
+                bias: false,
+                ..Default::default()
+            },
+        );
+        let bn1 = nn::batch_norm2d(&vs / "bn1", 256, Default::default());
 
-    let conv2 = nn::conv2d(
-        &(&kp / "conv2"),
-        256,
-        128,
-        3,
-        nn::ConvConfig { padding: 1, bias: false, ..Default::default() },
-    );
-    let bn2 = nn::batch_norm2d(&(&kp / "bn2"), 128, Default::default());
+        let conv2 = nn::conv2d(
+            &vs / "conv2",
+            256,
+            128,
+            3,
+            nn::ConvConfig {
+                padding: 1,
+                bias: false,
+                ..Default::default()
+            },
+        );
+        let bn2 = nn::batch_norm2d(&vs / "bn2", 128, Default::default());
 
-    let output_conv = nn::conv2d(
-        &(&kp / "output_conv"),
-        128,
-        num_keypoints,
-        1,
-        Default::default(),
-    );
+        let out_conv = nn::conv2d(&vs / "out_conv", 128, num_kp, 1, Default::default());
 
-    let x = conv1.forward(features).apply_t(&bn1, train).relu();
-    let x = conv2.forward(&x).apply_t(&bn2, train).relu();
-    let x = output_conv.forward(&x);
+        KeypointHead {
+            conv1,
+            bn1,
+            conv2,
+            bn2,
+            out_conv,
+        }
+    }
 
-    // Upsample to (output_size_h, output_size_w)
-    x.upsample_bilinear2d(
-        [output_size.0, output_size.1],
-        false,
-        None,
-        None,
-    )
+    fn forward_t(&self, x: &Tensor, heatmap_size: i64, train: bool) -> Tensor {
+        let h = x
+            .apply(&self.conv1)
+            .apply_t(&self.bn1, train)
+            .relu()
+            .apply(&self.conv2)
+            .apply_t(&self.bn2, train)
+            .relu()
+            .apply(&self.out_conv);
+
+        h.upsample_bilinear2d(&[heatmap_size, heatmap_size], false, None, None)
+    }
 }
 
 // ---------------------------------------------------------------------------
-// DensePose head
+// DensePose Head
 // ---------------------------------------------------------------------------
 
-/// DensePose prediction head.
+/// Predicts body-part segmentation and continuous UV surface coordinates.
 ///
-/// Input:  `[B, in_channels, H, W]`
-/// Outputs:
-/// - part logits: `[B, num_parts, out_h, out_w]`
-/// - UV coordinates: `[B, 2*(num_parts-1), out_h, out_w]`  (background excluded from UV)
-fn densepose_head(
-    root: &nn::Path,
-    features: &Tensor,
-    num_parts: i64,
-    output_size: (i64, i64),
-    train: bool,
-) -> (Tensor, Tensor) {
-    let dp = root / "densepose_head";
+/// ```text
+/// Input: [B, in_channels, H', W']
+///
+/// Shared trunk:
+///   ► Conv2d(in→256, 3×3, p=1) + BN + ReLU
+///   ► Conv2d(256→256, 3×3, p=1) + BN + ReLU
+///   ► upsample_bilinear2d → [B, 256, out_size, out_size]
+///
+/// Part branch:  Conv2d(256→num_parts+1, 1×1) → part logits
+/// UV branch:    Conv2d(256→num_parts*2, 1×1) → sigmoid → UV ∈ [0,1]
+/// ```
+struct DensePoseHead {
+    shared_conv1: nn::Conv2D,
+    shared_bn1: nn::BatchNorm,
+    shared_conv2: nn::Conv2D,
+    shared_bn2: nn::BatchNorm,
+    part_out: nn::Conv2D,
+    uv_out: nn::Conv2D,
+}
 
-    // Shared convolutional block
-    let shared_conv1 = nn::conv2d(
-        &(&dp / "shared_conv1"),
-        256,
-        256,
-        3,
-        nn::ConvConfig { padding: 1, bias: false, ..Default::default() },
-    );
-    let shared_bn1 = nn::batch_norm2d(&(&dp / "shared_bn1"), 256, Default::default());
+impl DensePoseHead {
+    fn new(vs: nn::Path, in_ch: i64, num_parts: i64) -> Self {
+        let shared_conv1 = nn::conv2d(
+            &vs / "shared_conv1",
+            in_ch,
+            256,
+            3,
+            nn::ConvConfig {
+                padding: 1,
+                bias: false,
+                ..Default::default()
+            },
+        );
+        let shared_bn1 = nn::batch_norm2d(&vs / "shared_bn1", 256, Default::default());
 
-    let shared_conv2 = nn::conv2d(
-        &(&dp / "shared_conv2"),
-        256,
-        256,
-        3,
-        nn::ConvConfig { padding: 1, bias: false, ..Default::default() },
-    );
-    let shared_bn2 = nn::batch_norm2d(&(&dp / "shared_bn2"), 256, Default::default());
+        let shared_conv2 = nn::conv2d(
+            &vs / "shared_conv2",
+            256,
+            256,
+            3,
+            nn::ConvConfig {
+                padding: 1,
+                bias: false,
+                ..Default::default()
+            },
+        );
+        let shared_bn2 = nn::batch_norm2d(&vs / "shared_bn2", 256, Default::default());
 
-    // Part segmentation head: 256 → num_parts
-    let part_conv = nn::conv2d(
-        &(&dp / "part_conv"),
-        256,
-        num_parts,
-        1,
-        Default::default(),
-    );
+        // num_parts + 1: 24 body-part classes + 1 background class
+        let part_out = nn::conv2d(
+            &vs / "part_out",
+            256,
+            num_parts + 1,
+            1,
+            Default::default(),
+        );
+        // num_parts * 2: U and V channel for each of the 24 body parts
+        let uv_out = nn::conv2d(
+            &vs / "uv_out",
+            256,
+            num_parts * 2,
+            1,
+            Default::default(),
+        );
 
-    // UV regression head: 256 → 48 channels (2 × 24 body parts)
-    let uv_conv = nn::conv2d(
-        &(&dp / "uv_conv"),
-        256,
-        48, // 24 parts × 2 (U, V)
-        1,
-        Default::default(),
-    );
+        DensePoseHead {
+            shared_conv1,
+            shared_bn1,
+            shared_conv2,
+            shared_bn2,
+            part_out,
+            uv_out,
+        }
+    }
 
-    let shared = shared_conv1.forward(features).apply_t(&shared_bn1, train).relu();
-    let shared = shared_conv2.forward(&shared).apply_t(&shared_bn2, train).relu();
+    /// Returns `(part_logits, uv_coords)`.
+    fn forward_t(&self, x: &Tensor, out_size: i64, train: bool) -> (Tensor, Tensor) {
+        let f = x
+            .apply(&self.shared_conv1)
+            .apply_t(&self.shared_bn1, train)
+            .relu()
+            .apply(&self.shared_conv2)
+            .apply_t(&self.shared_bn2, train)
+            .relu();
 
-    let parts = part_conv.forward(&shared);
-    let uv = uv_conv.forward(&shared);
+        // Upsample shared features to output resolution
+        let f = f.upsample_bilinear2d(&[out_size, out_size], false, None, None);
 
-    // Upsample both heads to the target spatial resolution.
-    let parts_up = parts.upsample_bilinear2d(
-        [output_size.0, output_size.1],
-        false,
-        None,
-        None,
-    );
-    let uv_up = uv.upsample_bilinear2d(
-        [output_size.0, output_size.1],
-        false,
-        None,
-        None,
-    );
+        let parts = f.apply(&self.part_out);
+        // Sigmoid constrains UV predictions to [0, 1]
+        let uv = f.apply(&self.uv_out).sigmoid();
 
-    // Apply sigmoid to UV to constrain predictions to [0, 1].
-    let uv_out = uv_up.sigmoid();
-
-    (parts_up, uv_out)
+        (parts, uv)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -609,25 +729,28 @@ mod tests {
         let model = WiFiDensePoseModel::new(&cfg, device);
 
         let batch = 2_i64;
-        let antennas = (cfg.num_antennas_tx * cfg.num_antennas_rx * cfg.window_frames) as i64;
+        let antennas =
+            (cfg.num_antennas_tx * cfg.num_antennas_rx * cfg.window_frames) as i64;
         let n_sub = cfg.num_subcarriers as i64;
 
         let amp = Tensor::ones([batch, antennas, n_sub], (Kind::Float, device));
         let ph = Tensor::zeros([batch, antennas, n_sub], (Kind::Float, device));
 
-        let out = model.forward_train(&amp, &ph);
+        let out = model.forward_t(&amp, &ph);
 
         // Keypoints: [B, 17, heatmap_size, heatmap_size]
         assert_eq!(out.keypoints.size()[0], batch);
         assert_eq!(out.keypoints.size()[1], cfg.num_keypoints as i64);
+        assert_eq!(out.keypoints.size()[2], cfg.heatmap_size as i64);
+        assert_eq!(out.keypoints.size()[3], cfg.heatmap_size as i64);
 
-        // Part logits: [B, 25, heatmap_size, heatmap_size]
+        // Part logits: [B, num_body_parts+1, heatmap_size, heatmap_size]
         assert_eq!(out.part_logits.size()[0], batch);
         assert_eq!(out.part_logits.size()[1], (cfg.num_body_parts + 1) as i64);
 
-        // UV: [B, 48, heatmap_size, heatmap_size]
+        // UV: [B, num_body_parts*2, heatmap_size, heatmap_size]
         assert_eq!(out.uv_coords.size()[0], batch);
-        assert_eq!(out.uv_coords.size()[1], 48);
+        assert_eq!(out.uv_coords.size()[1], (cfg.num_body_parts * 2) as i64);
     }
 
     #[test]
@@ -635,42 +758,8 @@ mod tests {
         tch::manual_seed(0);
         let cfg = tiny_config();
         let model = WiFiDensePoseModel::new(&cfg, Device::Cpu);
-
-        // Trigger parameter creation by running a forward pass.
-        let batch = 1_i64;
-        let antennas = (cfg.num_antennas_tx * cfg.num_antennas_rx * cfg.window_frames) as i64;
-        let n_sub = cfg.num_subcarriers as i64;
-        let amp = Tensor::zeros([batch, antennas, n_sub], (Kind::Float, Device::Cpu));
-        let ph = amp.shallow_clone();
-        let _ = model.forward_train(&amp, &ph);
-
         let n = model.num_parameters();
-        assert!(n > 0, "Model must have trainable parameters");
-    }
-
-    #[test]
-    fn phase_sanitize_zeros_first_column() {
-        let ph = Tensor::ones([2, 3, 8], (Kind::Float, Device::Cpu));
-        let out = phase_sanitize(&ph);
-        // First subcarrier column should be 0.
-        let first_col = out.slice(2, 0, 1, 1);
-        let max_abs: f64 = first_col.abs().max().double_value(&[]);
-        assert!(max_abs < 1e-6, "First diff column should be 0");
-    }
-
-    #[test]
-    fn phase_sanitize_captures_ramp() {
-        // A linear phase ramp φ[k] = k should produce constant diffs of 1.
-        let ph = Tensor::arange(8, (Kind::Float, Device::Cpu))
-            .reshape([1, 1, 8])
-            .expand([2, 3, 8], true);
-        let out = phase_sanitize(&ph);
-        // All columns except the first should be 1.0
-        let tail = out.slice(2, 1, 8, 1);
-        let min_val: f64 = tail.min().double_value(&[]);
-        let max_val: f64 = tail.max().double_value(&[]);
-        assert!((min_val - 1.0).abs() < 1e-5, "Expected 1.0 diff, got {min_val}");
-        assert!((max_val - 1.0).abs() < 1e-5, "Expected 1.0 diff, got {max_val}");
+        assert!(n > 0, "model must have trainable parameters");
     }
 
     #[test]
@@ -680,7 +769,8 @@ mod tests {
         let model = WiFiDensePoseModel::new(&cfg, Device::Cpu);
 
         let batch = 1_i64;
-        let antennas = (cfg.num_antennas_tx * cfg.num_antennas_rx * cfg.window_frames) as i64;
+        let antennas =
+            (cfg.num_antennas_tx * cfg.num_antennas_rx * cfg.window_frames) as i64;
         let n_sub = cfg.num_subcarriers as i64;
         let amp = Tensor::rand([batch, antennas, n_sub], (Kind::Float, Device::Cpu));
         let ph = Tensor::rand([batch, antennas, n_sub], (Kind::Float, Device::Cpu));
@@ -698,7 +788,8 @@ mod tests {
         let model = WiFiDensePoseModel::new(&cfg, Device::Cpu);
 
         let batch = 2_i64;
-        let antennas = (cfg.num_antennas_tx * cfg.num_antennas_rx * cfg.window_frames) as i64;
+        let antennas =
+            (cfg.num_antennas_tx * cfg.num_antennas_rx * cfg.window_frames) as i64;
         let n_sub = cfg.num_subcarriers as i64;
         let amp = Tensor::rand([batch, antennas, n_sub], (Kind::Float, Device::Cpu));
         let ph = Tensor::rand([batch, antennas, n_sub], (Kind::Float, Device::Cpu));
@@ -707,7 +798,76 @@ mod tests {
 
         let uv_min: f64 = out.uv_coords.min().double_value(&[]);
         let uv_max: f64 = out.uv_coords.max().double_value(&[]);
-        assert!(uv_min >= 0.0 - 1e-5, "UV min should be >= 0, got {uv_min}");
-        assert!(uv_max <= 1.0 + 1e-5, "UV max should be <= 1, got {uv_max}");
+        assert!(
+            uv_min >= 0.0 - 1e-5,
+            "UV min should be >= 0, got {uv_min}"
+        );
+        assert!(
+            uv_max <= 1.0 + 1e-5,
+            "UV max should be <= 1, got {uv_max}"
+        );
+    }
+
+    #[test]
+    fn phase_sanitize_zeros_first_column() {
+        let ph = Tensor::ones([2, 3, 8], (Kind::Float, Device::Cpu));
+        let out = phase_sanitize(&ph);
+        let first_col = out.slice(2, 0, 1, 1);
+        let max_abs: f64 = first_col.abs().max().double_value(&[]);
+        assert!(max_abs < 1e-6, "first diff column should be 0");
+    }
+
+    #[test]
+    fn phase_sanitize_captures_ramp() {
+        // φ[k] = k → diffs should all be 1.0 (except the padded zero)
+        let ph = Tensor::arange(8, (Kind::Float, Device::Cpu))
+            .reshape([1, 1, 8])
+            .expand([2, 3, 8], true);
+        let out = phase_sanitize(&ph);
+        let tail = out.slice(2, 1, 8, 1);
+        let min_val: f64 = tail.min().double_value(&[]);
+        let max_val: f64 = tail.max().double_value(&[]);
+        assert!(
+            (min_val - 1.0).abs() < 1e-5,
+            "expected 1.0 diff, got {min_val}"
+        );
+        assert!(
+            (max_val - 1.0).abs() < 1e-5,
+            "expected 1.0 diff, got {max_val}"
+        );
+    }
+
+    #[test]
+    fn save_and_load_roundtrip() {
+        use tempfile::tempdir;
+
+        tch::manual_seed(42);
+        let cfg = tiny_config();
+        let mut model = WiFiDensePoseModel::new(&cfg, Device::Cpu);
+
+        let tmp = tempdir().expect("tempdir");
+        let path = tmp.path().join("weights.pt");
+
+        model.save(&path).expect("save should succeed");
+        model.load(&path).expect("load should succeed");
+
+        // After loading, a forward pass should still work.
+        let batch = 1_i64;
+        let antennas =
+            (cfg.num_antennas_tx * cfg.num_antennas_rx * cfg.window_frames) as i64;
+        let n_sub = cfg.num_subcarriers as i64;
+        let amp = Tensor::rand([batch, antennas, n_sub], (Kind::Float, Device::Cpu));
+        let ph = Tensor::rand([batch, antennas, n_sub], (Kind::Float, Device::Cpu));
+        let out = model.forward_inference(&amp, &ph);
+        assert_eq!(out.keypoints.size()[0], batch);
+    }
+
+    #[test]
+    fn varstore_accessible() {
+        let cfg = tiny_config();
+        let mut model = WiFiDensePoseModel::new(&cfg, Device::Cpu);
+        // Both varstore() and varstore_mut() must compile and return the store.
+        let _vs = model.varstore();
+        let _vs_mut = model.varstore_mut();
     }
 }

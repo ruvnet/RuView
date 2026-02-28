@@ -206,7 +206,6 @@ fn csi_flat_size_positive_for_valid_config() {
 /// config (all fields must match).
 #[test]
 fn config_json_roundtrip_identical() {
-    use std::path::PathBuf;
     use tempfile::tempdir;
 
     let tmp = tempdir().expect("tempdir must be created");

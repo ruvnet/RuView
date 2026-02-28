@@ -1,190 +1,156 @@
 //! Integration tests for [`wifi_densepose_train::metrics`].
 //!
-//! The metrics module currently exposes [`EvalMetrics`] plus (future) PCK,
-//! OKS, and Hungarian assignment helpers.  All tests here are fully
-//! deterministic: no `rand`, no OS entropy, and all inputs are fixed arrays.
+//! The metrics module is only compiled when the `tch-backend` feature is
+//! enabled (because it is gated in `lib.rs`).  Tests that use
+//! `EvalMetrics` are wrapped in `#[cfg(feature = "tch-backend")]`.
 //!
-//! Tests that rely on functions not yet present in the module are marked with
-//! `#[ignore]` so they compile and run, but skip gracefully until the
-//! implementation is added.  Remove `#[ignore]` when the corresponding
-//! function lands in `metrics.rs`.
-
-use wifi_densepose_train::metrics::EvalMetrics;
-
-// ---------------------------------------------------------------------------
-// EvalMetrics construction and field access
-// ---------------------------------------------------------------------------
-
-/// A freshly constructed [`EvalMetrics`] should hold exactly the values that
-/// were passed in.
-#[test]
-fn eval_metrics_stores_correct_values() {
-    let m = EvalMetrics {
-        mpjpe: 0.05,
-        pck_at_05: 0.92,
-        gps: 1.3,
-    };
-
-    assert!(
-        (m.mpjpe - 0.05).abs() < 1e-12,
-        "mpjpe must be 0.05, got {}",
-        m.mpjpe
-    );
-    assert!(
-        (m.pck_at_05 - 0.92).abs() < 1e-12,
-        "pck_at_05 must be 0.92, got {}",
-        m.pck_at_05
-    );
-    assert!(
-        (m.gps - 1.3).abs() < 1e-12,
-        "gps must be 1.3, got {}",
-        m.gps
-    );
-}
-
-/// `pck_at_05` of a perfect prediction must be 1.0.
-#[test]
-fn pck_perfect_prediction_is_one() {
-    // Perfect: predicted == ground truth, so PCK@0.5 = 1.0.
-    let m = EvalMetrics {
-        mpjpe: 0.0,
-        pck_at_05: 1.0,
-        gps: 0.0,
-    };
-    assert!(
-        (m.pck_at_05 - 1.0).abs() < 1e-9,
-        "perfect prediction must yield pck_at_05 = 1.0, got {}",
-        m.pck_at_05
-    );
-}
-
-/// `pck_at_05` of a completely wrong prediction must be 0.0.
-#[test]
-fn pck_completely_wrong_prediction_is_zero() {
-    let m = EvalMetrics {
-        mpjpe: 999.0,
-        pck_at_05: 0.0,
-        gps: 999.0,
-    };
-    assert!(
-        m.pck_at_05.abs() < 1e-9,
-        "completely wrong prediction must yield pck_at_05 = 0.0, got {}",
-        m.pck_at_05
-    );
-}
-
-/// `mpjpe` must be 0.0 when predicted and ground-truth positions are identical.
-#[test]
-fn mpjpe_perfect_prediction_is_zero() {
-    let m = EvalMetrics {
-        mpjpe: 0.0,
-        pck_at_05: 1.0,
-        gps: 0.0,
-    };
-    assert!(
-        m.mpjpe.abs() < 1e-12,
-        "perfect prediction must yield mpjpe = 0.0, got {}",
-        m.mpjpe
-    );
-}
-
-/// `mpjpe` must increase as the prediction moves further from ground truth.
-/// Monotonicity check using a manually computed sequence.
-#[test]
-fn mpjpe_is_monotone_with_distance() {
-    // Three metrics representing increasing prediction error.
-    let small_error = EvalMetrics { mpjpe: 0.01, pck_at_05: 0.99, gps: 0.1 };
-    let medium_error = EvalMetrics { mpjpe: 0.10, pck_at_05: 0.70, gps: 1.0 };
-    let large_error = EvalMetrics { mpjpe: 0.50, pck_at_05: 0.20, gps: 5.0 };
-
-    assert!(
-        small_error.mpjpe < medium_error.mpjpe,
-        "small error mpjpe must be < medium error mpjpe"
-    );
-    assert!(
-        medium_error.mpjpe < large_error.mpjpe,
-        "medium error mpjpe must be < large error mpjpe"
-    );
-}
-
-/// GPS (geodesic point-to-surface distance) must be 0.0 for a perfect prediction.
-#[test]
-fn gps_perfect_prediction_is_zero() {
-    let m = EvalMetrics {
-        mpjpe: 0.0,
-        pck_at_05: 1.0,
-        gps: 0.0,
-    };
-    assert!(
-        m.gps.abs() < 1e-12,
-        "perfect prediction must yield gps = 0.0, got {}",
-        m.gps
-    );
-}
-
-/// GPS must increase as the DensePose prediction degrades.
-#[test]
-fn gps_monotone_with_distance() {
-    let perfect = EvalMetrics { mpjpe: 0.0, pck_at_05: 1.0, gps: 0.0 };
-    let imperfect = EvalMetrics { mpjpe: 0.1, pck_at_05: 0.8, gps: 2.0 };
-    let poor = EvalMetrics { mpjpe: 0.5, pck_at_05: 0.3, gps: 8.0 };
-
-    assert!(
-        perfect.gps < imperfect.gps,
-        "perfect GPS must be < imperfect GPS"
-    );
-    assert!(
-        imperfect.gps < poor.gps,
-        "imperfect GPS must be < poor GPS"
-    );
-}
+//! The deterministic PCK, OKS, and Hungarian assignment tests that require
+//! no tch dependency are implemented inline in the non-gated section below
+//! using hand-computed helper functions.
+//!
+//! All inputs are fixed, deterministic arrays — no `rand`, no OS entropy.
 
 // ---------------------------------------------------------------------------
-// PCK computation (deterministic, hand-computed)
+// Tests that use `EvalMetrics` (requires tch-backend because the metrics
+// module is feature-gated in lib.rs)
 // ---------------------------------------------------------------------------
 
-/// Compute PCK from a fixed prediction/GT pair and verify the result.
-///
-/// PCK@threshold: fraction of keypoints whose L2 distance to GT is ≤ threshold.
-/// With pred == gt, every keypoint passes, so PCK = 1.0.
-#[test]
-fn pck_computation_perfect_prediction() {
-    let num_joints = 17_usize;
-    let threshold = 0.5_f64;
+#[cfg(feature = "tch-backend")]
+mod eval_metrics_tests {
+    use wifi_densepose_train::metrics::EvalMetrics;
 
-    // pred == gt: every distance is 0 ≤ threshold → all pass.
-    let pred: Vec<[f64; 2]> =
-        (0..num_joints).map(|j| [j as f64 * 0.05, j as f64 * 0.04]).collect();
-    let gt = pred.clone();
+    /// A freshly constructed [`EvalMetrics`] should hold exactly the values
+    /// that were passed in.
+    #[test]
+    fn eval_metrics_stores_correct_values() {
+        let m = EvalMetrics {
+            mpjpe: 0.05,
+            pck_at_05: 0.92,
+            gps: 1.3,
+        };
 
-    let correct = pred
-        .iter()
-        .zip(gt.iter())
-        .filter(|(p, g)| {
-            let dx = p[0] - g[0];
-            let dy = p[1] - g[1];
-            let dist = (dx * dx + dy * dy).sqrt();
-            dist <= threshold
-        })
-        .count();
+        assert!(
+            (m.mpjpe - 0.05).abs() < 1e-12,
+            "mpjpe must be 0.05, got {}",
+            m.mpjpe
+        );
+        assert!(
+            (m.pck_at_05 - 0.92).abs() < 1e-12,
+            "pck_at_05 must be 0.92, got {}",
+            m.pck_at_05
+        );
+        assert!(
+            (m.gps - 1.3).abs() < 1e-12,
+            "gps must be 1.3, got {}",
+            m.gps
+        );
+    }
 
-    let pck = correct as f64 / num_joints as f64;
-    assert!(
-        (pck - 1.0).abs() < 1e-9,
-        "PCK for perfect prediction must be 1.0, got {pck}"
-    );
+    /// `pck_at_05` of a perfect prediction must be 1.0.
+    #[test]
+    fn pck_perfect_prediction_is_one() {
+        let m = EvalMetrics {
+            mpjpe: 0.0,
+            pck_at_05: 1.0,
+            gps: 0.0,
+        };
+        assert!(
+            (m.pck_at_05 - 1.0).abs() < 1e-9,
+            "perfect prediction must yield pck_at_05 = 1.0, got {}",
+            m.pck_at_05
+        );
+    }
+
+    /// `pck_at_05` of a completely wrong prediction must be 0.0.
+    #[test]
+    fn pck_completely_wrong_prediction_is_zero() {
+        let m = EvalMetrics {
+            mpjpe: 999.0,
+            pck_at_05: 0.0,
+            gps: 999.0,
+        };
+        assert!(
+            m.pck_at_05.abs() < 1e-9,
+            "completely wrong prediction must yield pck_at_05 = 0.0, got {}",
+            m.pck_at_05
+        );
+    }
+
+    /// `mpjpe` must be 0.0 when predicted and GT positions are identical.
+    #[test]
+    fn mpjpe_perfect_prediction_is_zero() {
+        let m = EvalMetrics {
+            mpjpe: 0.0,
+            pck_at_05: 1.0,
+            gps: 0.0,
+        };
+        assert!(
+            m.mpjpe.abs() < 1e-12,
+            "perfect prediction must yield mpjpe = 0.0, got {}",
+            m.mpjpe
+        );
+    }
+
+    /// `mpjpe` must increase monotonically with prediction error.
+    #[test]
+    fn mpjpe_is_monotone_with_distance() {
+        let small_error = EvalMetrics { mpjpe: 0.01, pck_at_05: 0.99, gps: 0.1 };
+        let medium_error = EvalMetrics { mpjpe: 0.10, pck_at_05: 0.70, gps: 1.0 };
+        let large_error = EvalMetrics { mpjpe: 0.50, pck_at_05: 0.20, gps: 5.0 };
+
+        assert!(
+            small_error.mpjpe < medium_error.mpjpe,
+            "small error mpjpe must be < medium error mpjpe"
+        );
+        assert!(
+            medium_error.mpjpe < large_error.mpjpe,
+            "medium error mpjpe must be < large error mpjpe"
+        );
+    }
+
+    /// GPS must be 0.0 for a perfect DensePose prediction.
+    #[test]
+    fn gps_perfect_prediction_is_zero() {
+        let m = EvalMetrics {
+            mpjpe: 0.0,
+            pck_at_05: 1.0,
+            gps: 0.0,
+        };
+        assert!(
+            m.gps.abs() < 1e-12,
+            "perfect prediction must yield gps = 0.0, got {}",
+            m.gps
+        );
+    }
+
+    /// GPS must increase monotonically as prediction quality degrades.
+    #[test]
+    fn gps_monotone_with_distance() {
+        let perfect = EvalMetrics { mpjpe: 0.0, pck_at_05: 1.0, gps: 0.0 };
+        let imperfect = EvalMetrics { mpjpe: 0.1, pck_at_05: 0.8, gps: 2.0 };
+        let poor = EvalMetrics { mpjpe: 0.5, pck_at_05: 0.3, gps: 8.0 };
+
+        assert!(
+            perfect.gps < imperfect.gps,
+            "perfect GPS must be < imperfect GPS"
+        );
+        assert!(
+            imperfect.gps < poor.gps,
+            "imperfect GPS must be < poor GPS"
+        );
+    }
 }
 
-/// PCK of completely wrong predictions (all very far away) must be 0.0.
-#[test]
-fn pck_computation_completely_wrong_prediction() {
-    let num_joints = 17_usize;
-    let threshold = 0.05_f64; // tight threshold
+// ---------------------------------------------------------------------------
+// Deterministic PCK computation tests (pure Rust, no tch, no feature gate)
+// ---------------------------------------------------------------------------
 
-    // GT at origin; pred displaced by 10.0 in both axes.
-    let gt: Vec<[f64; 2]> = (0..num_joints).map(|_| [0.0, 0.0]).collect();
-    let pred: Vec<[f64; 2]> = (0..num_joints).map(|_| [10.0, 10.0]).collect();
-
+/// Compute PCK@threshold for a (pred, gt) pair.
+fn compute_pck(pred: &[[f64; 2]], gt: &[[f64; 2]], threshold: f64) -> f64 {
+    let n = pred.len();
+    if n == 0 {
+        return 0.0;
+    }
     let correct = pred
         .iter()
         .zip(gt.iter())
@@ -194,49 +160,103 @@ fn pck_computation_completely_wrong_prediction() {
             (dx * dx + dy * dy).sqrt() <= threshold
         })
         .count();
+    correct as f64 / n as f64
+}
 
-    let pck = correct as f64 / num_joints as f64;
+/// PCK of a perfect prediction (pred == gt) must be 1.0.
+#[test]
+fn pck_computation_perfect_prediction() {
+    let num_joints = 17_usize;
+    let threshold = 0.5_f64;
+
+    let pred: Vec<[f64; 2]> =
+        (0..num_joints).map(|j| [j as f64 * 0.05, j as f64 * 0.04]).collect();
+    let gt = pred.clone();
+
+    let pck = compute_pck(&pred, &gt, threshold);
+    assert!(
+        (pck - 1.0).abs() < 1e-9,
+        "PCK for perfect prediction must be 1.0, got {pck}"
+    );
+}
+
+/// PCK of completely wrong predictions must be 0.0.
+#[test]
+fn pck_computation_completely_wrong_prediction() {
+    let num_joints = 17_usize;
+    let threshold = 0.05_f64;
+
+    let gt: Vec<[f64; 2]> = (0..num_joints).map(|_| [0.0, 0.0]).collect();
+    let pred: Vec<[f64; 2]> = (0..num_joints).map(|_| [10.0, 10.0]).collect();
+
+    let pck = compute_pck(&pred, &gt, threshold);
     assert!(
         pck.abs() < 1e-9,
         "PCK for completely wrong prediction must be 0.0, got {pck}"
     );
 }
 
-// ---------------------------------------------------------------------------
-// OKS computation (deterministic, hand-computed)
-// ---------------------------------------------------------------------------
-
-/// OKS (Object Keypoint Similarity) of a perfect prediction must be 1.0.
-///
-/// OKS_j = exp( -d_j² / (2 · s² · σ_j²) ) for each joint j.
-/// When d_j = 0 for all joints, OKS = 1.0.
+/// PCK is monotone: a prediction closer to GT scores higher.
 #[test]
-fn oks_perfect_prediction_is_one() {
-    let num_joints = 17_usize;
-    let sigma = 0.05_f64; // COCO default for nose
-    let scale = 1.0_f64; // normalised bounding-box scale
+fn pck_monotone_with_accuracy() {
+    let gt = vec![[0.5_f64, 0.5_f64]];
+    let close_pred = vec![[0.51_f64, 0.50_f64]];
+    let far_pred = vec![[0.60_f64, 0.50_f64]];
+    let very_far_pred = vec![[0.90_f64, 0.50_f64]];
 
-    // pred == gt → all distances zero → OKS = 1.0
-    let pred: Vec<[f64; 2]> =
-        (0..num_joints).map(|j| [j as f64 * 0.05, 0.3]).collect();
-    let gt = pred.clone();
+    let threshold = 0.05_f64;
+    let pck_close = compute_pck(&close_pred, &gt, threshold);
+    let pck_far = compute_pck(&far_pred, &gt, threshold);
+    let pck_very_far = compute_pck(&very_far_pred, &gt, threshold);
 
-    let oks_vals: Vec<f64> = pred
+    assert!(
+        pck_close >= pck_far,
+        "closer prediction must score at least as high: close={pck_close}, far={pck_far}"
+    );
+    assert!(
+        pck_far >= pck_very_far,
+        "farther prediction must score lower or equal: far={pck_far}, very_far={pck_very_far}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic OKS computation tests (pure Rust, no tch, no feature gate)
+// ---------------------------------------------------------------------------
+
+/// Compute OKS for a (pred, gt) pair.
+fn compute_oks(pred: &[[f64; 2]], gt: &[[f64; 2]], sigma: f64, scale: f64) -> f64 {
+    let n = pred.len();
+    if n == 0 {
+        return 0.0;
+    }
+    let denom = 2.0 * scale * scale * sigma * sigma;
+    let sum: f64 = pred
         .iter()
         .zip(gt.iter())
         .map(|(p, g)| {
             let dx = p[0] - g[0];
             let dy = p[1] - g[1];
-            let d2 = dx * dx + dy * dy;
-            let denom = 2.0 * scale * scale * sigma * sigma;
-            (-d2 / denom).exp()
+            (-(dx * dx + dy * dy) / denom).exp()
         })
-        .collect();
+        .sum();
+    sum / n as f64
+}
 
-    let mean_oks = oks_vals.iter().sum::<f64>() / num_joints as f64;
+/// OKS of a perfect prediction (pred == gt) must be 1.0.
+#[test]
+fn oks_perfect_prediction_is_one() {
+    let num_joints = 17_usize;
+    let sigma = 0.05_f64;
+    let scale = 1.0_f64;
+
+    let pred: Vec<[f64; 2]> =
+        (0..num_joints).map(|j| [j as f64 * 0.05, 0.3]).collect();
+    let gt = pred.clone();
+
+    let oks = compute_oks(&pred, &gt, sigma, scale);
     assert!(
-        (mean_oks - 1.0).abs() < 1e-9,
-        "OKS for perfect prediction must be 1.0, got {mean_oks}"
+        (oks - 1.0).abs() < 1e-9,
+        "OKS for perfect prediction must be 1.0, got {oks}"
     );
 }
 
@@ -245,50 +265,51 @@ fn oks_perfect_prediction_is_one() {
 fn oks_decreases_with_distance() {
     let sigma = 0.05_f64;
     let scale = 1.0_f64;
-    let gt = [0.5_f64, 0.5_f64];
 
-    // Compute OKS for three increasing distances.
-    let distances = [0.0_f64, 0.1, 0.5];
-    let oks_vals: Vec<f64> = distances
-        .iter()
-        .map(|&d| {
-            let d2 = d * d;
-            let denom = 2.0 * scale * scale * sigma * sigma;
-            (-d2 / denom).exp()
-        })
-        .collect();
+    let gt = vec![[0.5_f64, 0.5_f64]];
+    let pred_d0 = vec![[0.5_f64, 0.5_f64]];
+    let pred_d1 = vec![[0.6_f64, 0.5_f64]];
+    let pred_d2 = vec![[1.0_f64, 0.5_f64]];
+
+    let oks_d0 = compute_oks(&pred_d0, &gt, sigma, scale);
+    let oks_d1 = compute_oks(&pred_d1, &gt, sigma, scale);
+    let oks_d2 = compute_oks(&pred_d2, &gt, sigma, scale);
 
     assert!(
-        oks_vals[0] > oks_vals[1],
-        "OKS at distance 0 must be > OKS at distance 0.1: {} vs {}",
-        oks_vals[0], oks_vals[1]
+        oks_d0 > oks_d1,
+        "OKS at distance 0 must be > OKS at distance 0.1: {oks_d0} vs {oks_d1}"
     );
     assert!(
-        oks_vals[1] > oks_vals[2],
-        "OKS at distance 0.1 must be > OKS at distance 0.5: {} vs {}",
-        oks_vals[1], oks_vals[2]
+        oks_d1 > oks_d2,
+        "OKS at distance 0.1 must be > OKS at distance 0.5: {oks_d1} vs {oks_d2}"
     );
 }
 
 // ---------------------------------------------------------------------------
-// Hungarian assignment (deterministic, hand-computed)
+// Hungarian assignment tests (deterministic, hand-computed)
 // ---------------------------------------------------------------------------
 
-/// Identity cost matrix: optimal assignment is i → i for all i.
-///
-/// This exercises the Hungarian algorithm logic: a diagonal cost matrix with
-/// very high off-diagonal costs must assign each row to its own column.
+/// Greedy row-by-row assignment (correct for non-competing minima).
+fn greedy_assignment(cost: &[Vec<f64>]) -> Vec<usize> {
+    cost.iter()
+        .map(|row| {
+            row.iter()
+                .enumerate()
+                .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(col, _)| col)
+                .unwrap_or(0)
+        })
+        .collect()
+}
+
+/// Identity cost matrix (0 on diagonal, 100 elsewhere) must assign i → i.
 #[test]
 fn hungarian_identity_cost_matrix_assigns_diagonal() {
-    // Simulate the output of a correct Hungarian assignment.
-    // Cost: 0 on diagonal, 100 elsewhere.
     let n = 3_usize;
     let cost: Vec<Vec<f64>> = (0..n)
         .map(|i| (0..n).map(|j| if i == j { 0.0 } else { 100.0 }).collect())
         .collect();
 
-    // Greedy solution for identity cost matrix: always picks diagonal.
-    // (A real Hungarian implementation would agree with greedy here.)
     let assignment = greedy_assignment(&cost);
     assert_eq!(
         assignment,
@@ -298,13 +319,9 @@ fn hungarian_identity_cost_matrix_assigns_diagonal() {
     );
 }
 
-/// Permuted cost matrix: optimal assignment must find the permutation.
-///
-/// Cost matrix where the minimum-cost assignment is 0→2, 1→0, 2→1.
-/// All rows have a unique zero-cost entry at the permuted column.
+/// Permuted cost matrix must find the optimal (zero-cost) assignment.
 #[test]
 fn hungarian_permuted_cost_matrix_finds_optimal() {
-    // Matrix with zeros at: [0,2], [1,0], [2,1] and high cost elsewhere.
     let cost: Vec<Vec<f64>> = vec![
         vec![100.0, 100.0, 0.0],
         vec![0.0, 100.0, 100.0],
@@ -312,11 +329,6 @@ fn hungarian_permuted_cost_matrix_finds_optimal() {
     ];
 
     let assignment = greedy_assignment(&cost);
-
-    // Greedy picks the minimum of each row in order.
-    // Row 0: min at column 2 → assign col 2
-    // Row 1: min at column 0 → assign col 0
-    // Row 2: min at column 1 → assign col 1
     assert_eq!(
         assignment,
         vec![2, 0, 1],
@@ -325,7 +337,7 @@ fn hungarian_permuted_cost_matrix_finds_optimal() {
     );
 }
 
-/// A larger 5×5 identity cost matrix must also be assigned correctly.
+/// A 5×5 identity cost matrix must also be assigned correctly.
 #[test]
 fn hungarian_5x5_identity_matrix() {
     let n = 5_usize;
@@ -343,107 +355,59 @@ fn hungarian_5x5_identity_matrix() {
 }
 
 // ---------------------------------------------------------------------------
-// MetricsAccumulator (deterministic batch evaluation)
+// MetricsAccumulator tests (deterministic batch evaluation)
 // ---------------------------------------------------------------------------
 
-/// A MetricsAccumulator must produce the same PCK result as computing PCK
-/// directly on the combined batch — verified with a fixed dataset.
+/// Batch PCK must be 1.0 when all predictions are exact.
 #[test]
-fn metrics_accumulator_matches_batch_pck() {
-    // 5 fixed (pred, gt) pairs for 3 keypoints each.
-    // All predictions exactly correct → overall PCK must be 1.0.
-    let pairs: Vec<(Vec<[f64; 2]>, Vec<[f64; 2]>)> = (0..5)
-        .map(|_| {
-            let kps: Vec<[f64; 2]> = (0..3).map(|j| [j as f64 * 0.1, 0.5]).collect();
-            (kps.clone(), kps)
-        })
-        .collect();
-
+fn metrics_accumulator_perfect_batch_pck() {
+    let num_kp = 17_usize;
+    let num_samples = 5_usize;
     let threshold = 0.5_f64;
-    let total_joints: usize = pairs.iter().map(|(p, _)| p.len()).sum();
-    let correct: usize = pairs
-        .iter()
-        .flat_map(|(pred, gt)| {
-            pred.iter().zip(gt.iter()).map(|(p, g)| {
-                let dx = p[0] - g[0];
-                let dy = p[1] - g[1];
-                ((dx * dx + dy * dy).sqrt() <= threshold) as usize
-            })
-        })
-        .sum();
 
-    let pck = correct as f64 / total_joints as f64;
+    let kps: Vec<[f64; 2]> = (0..num_kp).map(|j| [j as f64 * 0.05, j as f64 * 0.04]).collect();
+    let total_joints = num_samples * num_kp;
+
+    let total_correct: usize = (0..num_samples)
+        .flat_map(|_| kps.iter().zip(kps.iter()))
+        .filter(|(p, g)| {
+            let dx = p[0] - g[0];
+            let dy = p[1] - g[1];
+            (dx * dx + dy * dy).sqrt() <= threshold
+        })
+        .count();
+
+    let pck = total_correct as f64 / total_joints as f64;
     assert!(
         (pck - 1.0).abs() < 1e-9,
         "batch PCK for all-correct pairs must be 1.0, got {pck}"
     );
 }
 
-/// Accumulating results from two halves must equal computing on the full set.
+/// Accumulating 50% correct and 50% wrong predictions must yield PCK = 0.5.
 #[test]
-fn metrics_accumulator_is_additive() {
-    // 6 pairs split into two groups of 3.
-    // First 3: correct → PCK portion = 3/6 = 0.5
-    // Last 3: wrong → PCK portion = 0/6 = 0.0
+fn metrics_accumulator_is_additive_half_correct() {
     let threshold = 0.05_f64;
+    let gt_kp = [0.5_f64, 0.5_f64];
+    let wrong_kp = [10.0_f64, 10.0_f64];
 
-    let correct_pairs: Vec<(Vec<[f64; 2]>, Vec<[f64; 2]>)> = (0..3)
-        .map(|_| {
-            let kps = vec![[0.5_f64, 0.5_f64]];
-            (kps.clone(), kps)
-        })
+    // 3 correct + 3 wrong = 6 total.
+    let pairs: Vec<([f64; 2], [f64; 2])> = (0..6)
+        .map(|i| if i < 3 { (gt_kp, gt_kp) } else { (wrong_kp, gt_kp) })
         .collect();
 
-    let wrong_pairs: Vec<(Vec<[f64; 2]>, Vec<[f64; 2]>)> = (0..3)
-        .map(|_| {
-            let pred = vec![[10.0_f64, 10.0_f64]]; // far from GT
-            let gt = vec![[0.5_f64, 0.5_f64]];
-            (pred, gt)
-        })
-        .collect();
-
-    let all_pairs: Vec<_> = correct_pairs.iter().chain(wrong_pairs.iter()).collect();
-    let total_joints = all_pairs.len(); // 6 joints (1 per pair)
-    let total_correct: usize = all_pairs
+    let correct: usize = pairs
         .iter()
-        .flat_map(|(pred, gt)| {
-            pred.iter().zip(gt.iter()).map(|(p, g)| {
-                let dx = p[0] - g[0];
-                let dy = p[1] - g[1];
-                ((dx * dx + dy * dy).sqrt() <= threshold) as usize
-            })
+        .filter(|(pred, gt)| {
+            let dx = pred[0] - gt[0];
+            let dy = pred[1] - gt[1];
+            (dx * dx + dy * dy).sqrt() <= threshold
         })
-        .sum();
+        .count();
 
-    let pck = total_correct as f64 / total_joints as f64;
-    // 3 correct out of 6 → 0.5
+    let pck = correct as f64 / pairs.len() as f64;
     assert!(
         (pck - 0.5).abs() < 1e-9,
-        "accumulator PCK must be 0.5 (3/6 correct), got {pck}"
+        "50% correct pairs must yield PCK = 0.5, got {pck}"
     );
-}
-
-// ---------------------------------------------------------------------------
-// Internal helper: greedy assignment (stands in for Hungarian algorithm)
-// ---------------------------------------------------------------------------
-
-/// Greedy row-by-row minimum assignment — correct for non-competing optima.
-///
-/// This is **not** a full Hungarian implementation; it serves as a
-/// deterministic, dependency-free stand-in for testing assignment logic with
-/// cost matrices where the greedy and optimal solutions coincide (e.g.,
-/// permutation matrices).
-fn greedy_assignment(cost: &[Vec<f64>]) -> Vec<usize> {
-    let n = cost.len();
-    let mut assignment = Vec::with_capacity(n);
-    for row in cost.iter().take(n) {
-        let best_col = row
-            .iter()
-            .enumerate()
-            .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .map(|(col, _)| col)
-            .unwrap_or(0);
-        assignment.push(best_col);
-    }
-    assignment
 }

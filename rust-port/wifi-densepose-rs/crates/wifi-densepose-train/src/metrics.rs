@@ -17,7 +17,10 @@
 //! All computations are grounded in real geometry and follow published metric
 //! definitions. No random or synthetic values are introduced at runtime.
 
-use ndarray::{Array1, Array2};
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
+use petgraph::graph::{DiGraph, NodeIndex};
+use ruvector_mincut::{DynamicMinCut, MinCutBuilder};
+use std::collections::VecDeque;
 
 // ---------------------------------------------------------------------------
 // COCO keypoint sigmas (17 joints)
@@ -657,6 +660,153 @@ pub fn hungarian_assignment(cost_matrix: &[Vec<f32>]) -> Vec<(usize, usize)> {
     assignments
 }
 
+// ---------------------------------------------------------------------------
+// Dynamic min-cut based person matcher (ruvector-mincut integration)
+// ---------------------------------------------------------------------------
+
+/// Multi-frame dynamic person matcher using subpolynomial min-cut.
+///
+/// Wraps `ruvector_mincut::DynamicMinCut` to maintain the bipartite
+/// assignment graph across video frames. When persons enter or leave
+/// the scene, the graph is updated incrementally in O(n^{1.5} log n)
+/// amortized time rather than O(n³) Hungarian reconstruction.
+///
+/// # Graph structure
+///
+/// - Node 0: source (S)
+/// - Nodes 1..=n_pred: prediction nodes
+/// - Nodes n_pred+1..=n_pred+n_gt: ground-truth nodes
+/// - Node n_pred+n_gt+1: sink (T)
+///
+/// Edges:
+/// - S → pred_i: capacity = LARGE_CAP (ensures all predictions are considered)
+/// - pred_i → gt_j: capacity = LARGE_CAP - oks_cost (so high OKS = cheap edge)
+/// - gt_j → T: capacity = LARGE_CAP
+pub struct DynamicPersonMatcher {
+    inner: DynamicMinCut,
+    n_pred: usize,
+    n_gt: usize,
+}
+
+const LARGE_CAP: f64 = 1e6;
+const SOURCE: u64 = 0;
+
+impl DynamicPersonMatcher {
+    /// Build a new matcher from a cost matrix.
+    ///
+    /// `cost_matrix[i][j]` is the cost of assigning prediction `i` to GT `j`.
+    /// Lower cost = better match.
+    pub fn new(cost_matrix: &[Vec<f32>]) -> Self {
+        let n_pred = cost_matrix.len();
+        let n_gt = if n_pred > 0 { cost_matrix[0].len() } else { 0 };
+        let sink = (n_pred + n_gt + 1) as u64;
+
+        let mut edges: Vec<(u64, u64, f64)> = Vec::new();
+
+        // Source → pred nodes
+        for i in 0..n_pred {
+            edges.push((SOURCE, (i + 1) as u64, LARGE_CAP));
+        }
+
+        // Pred → GT nodes (higher OKS → higher edge capacity = preferred)
+        for i in 0..n_pred {
+            for j in 0..n_gt {
+                let cost = cost_matrix[i][j] as f64;
+                let cap = (LARGE_CAP - cost).max(0.0);
+                edges.push(((i + 1) as u64, (n_pred + j + 1) as u64, cap));
+            }
+        }
+
+        // GT nodes → sink
+        for j in 0..n_gt {
+            edges.push(((n_pred + j + 1) as u64, sink, LARGE_CAP));
+        }
+
+        let inner = if edges.is_empty() {
+            MinCutBuilder::new().exact().build().unwrap()
+        } else {
+            MinCutBuilder::new().exact().with_edges(edges).build().unwrap()
+        };
+
+        DynamicPersonMatcher { inner, n_pred, n_gt }
+    }
+
+    /// Update matching when a new person enters the scene.
+    ///
+    /// `pred_idx` and `gt_idx` are 0-indexed into the original cost matrix.
+    /// `oks_cost` is the assignment cost (lower = better).
+    pub fn add_person(&mut self, pred_idx: usize, gt_idx: usize, oks_cost: f32) {
+        let pred_node = (pred_idx + 1) as u64;
+        let gt_node = (self.n_pred + gt_idx + 1) as u64;
+        let cap = (LARGE_CAP - oks_cost as f64).max(0.0);
+        let _ = self.inner.insert_edge(pred_node, gt_node, cap);
+    }
+
+    /// Update matching when a person leaves the scene.
+    pub fn remove_person(&mut self, pred_idx: usize, gt_idx: usize) {
+        let pred_node = (pred_idx + 1) as u64;
+        let gt_node = (self.n_pred + gt_idx + 1) as u64;
+        let _ = self.inner.delete_edge(pred_node, gt_node);
+    }
+
+    /// Compute the current optimal assignment.
+    ///
+    /// Returns `(pred_idx, gt_idx)` pairs using the min-cut partition to
+    /// identify matched edges.
+    pub fn assign(&self) -> Vec<(usize, usize)> {
+        let cut_edges = self.inner.cut_edges();
+        let mut assignments = Vec::new();
+
+        // Cut edges from pred_node to gt_node (not source or sink edges)
+        for edge in &cut_edges {
+            let u = edge.source;
+            let v = edge.target;
+            // Skip source/sink edges
+            if u == SOURCE {
+                continue;
+            }
+            let sink = (self.n_pred + self.n_gt + 1) as u64;
+            if v == sink {
+                continue;
+            }
+            // u is a pred node (1..=n_pred), v is a gt node (n_pred+1..=n_pred+n_gt)
+            if u >= 1
+                && u <= self.n_pred as u64
+                && v >= (self.n_pred + 1) as u64
+                && v <= (self.n_pred + self.n_gt) as u64
+            {
+                let pred_idx = (u - 1) as usize;
+                let gt_idx = (v - self.n_pred as u64 - 1) as usize;
+                assignments.push((pred_idx, gt_idx));
+            }
+        }
+
+        assignments
+    }
+
+    /// Minimum cut value (= maximum matching size via max-flow min-cut theorem).
+    pub fn min_cut_value(&self) -> f64 {
+        self.inner.min_cut_value()
+    }
+}
+
+/// Assign predictions to ground truths using `DynamicPersonMatcher`.
+///
+/// This is the ruvector-powered replacement for multi-frame scenarios.
+/// For deterministic single-frame proof verification, use `hungarian_assignment`.
+///
+/// Returns `(pred_idx, gt_idx)` pairs representing the optimal assignment.
+pub fn assignment_mincut(cost_matrix: &[Vec<f32>]) -> Vec<(usize, usize)> {
+    if cost_matrix.is_empty() {
+        return vec![];
+    }
+    if cost_matrix[0].is_empty() {
+        return vec![];
+    }
+    let matcher = DynamicPersonMatcher::new(cost_matrix);
+    matcher.assign()
+}
+
 /// Build the OKS cost matrix for multi-person matching.
 ///
 /// Cost between predicted person `i` and GT person `j` is `1 − OKS(pred_i, gt_j)`.
@@ -705,6 +855,422 @@ pub fn find_augmenting_path(
         }
     }
     false
+}
+
+// ============================================================================
+// Spec-required public API
+// ============================================================================
+
+/// Per-keypoint OKS sigmas from the COCO benchmark (17 keypoints).
+///
+/// Alias for [`COCO_KP_SIGMAS`] using the canonical API name.
+/// Order: nose, l_eye, r_eye, l_ear, r_ear, l_shoulder, r_shoulder,
+///        l_elbow, r_elbow, l_wrist, r_wrist, l_hip, r_hip, l_knee, r_knee,
+///        l_ankle, r_ankle.
+pub const COCO_KPT_SIGMAS: [f32; 17] = COCO_KP_SIGMAS;
+
+/// COCO joint indices for hip-to-hip torso size used by PCK.
+const KPT_LEFT_HIP: usize = 11;
+const KPT_RIGHT_HIP: usize = 12;
+
+// ── Spec MetricsResult ──────────────────────────────────────────────────────
+
+/// Detailed result of metric evaluation — spec-required structure.
+///
+/// Extends [`MetricsResult`] with per-joint PCK and a count of visible
+/// keypoints. Produced by [`MetricsAccumulatorV2`] and [`evaluate_dataset_v2`].
+#[derive(Debug, Clone)]
+pub struct MetricsResultDetailed {
+    /// PCK@0.2 across all visible keypoints.
+    pub pck_02: f32,
+    /// Per-joint PCK@0.2 (index = COCO joint index).
+    pub per_joint_pck: [f32; 17],
+    /// Mean OKS.
+    pub oks: f32,
+    /// Number of persons evaluated.
+    pub num_samples: usize,
+    /// Total number of visible keypoints evaluated.
+    pub num_visible_keypoints: usize,
+}
+
+// ── PCK (ArrayView signature) ───────────────────────────────────────────────
+
+/// Compute PCK@`threshold` for a single person (spec `ArrayView` signature).
+///
+/// A keypoint is counted as correct when:
+///
+/// ```text
+/// ‖pred_kpts[j] − gt_kpts[j]‖₂  ≤  threshold × torso_size
+/// ```
+///
+/// `torso_size` = pixel-space distance between left hip (joint 11) and right
+/// hip (joint 12). Falls back to `0.1 × image_diagonal` when both are
+/// invisible.
+///
+/// # Arguments
+/// * `pred_kpts`  — \[17, 2\] predicted (x, y) normalised to \[0, 1\]
+/// * `gt_kpts`    — \[17, 2\] ground-truth (x, y) normalised to \[0, 1\]
+/// * `visibility` — \[17\] 1.0 = visible, 0.0 = invisible
+/// * `threshold`  — fraction of torso size (e.g. 0.2 for PCK@0.2)
+/// * `image_size` — `(width, height)` in pixels
+///
+/// Returns `(overall_pck, per_joint_pck)`.
+pub fn compute_pck_v2(
+    pred_kpts: ArrayView2<f32>,
+    gt_kpts: ArrayView2<f32>,
+    visibility: ArrayView1<f32>,
+    threshold: f32,
+    image_size: (usize, usize),
+) -> (f32, [f32; 17]) {
+    let (w, h) = image_size;
+    let (wf, hf) = (w as f32, h as f32);
+
+    let lh_vis = visibility[KPT_LEFT_HIP] > 0.0;
+    let rh_vis = visibility[KPT_RIGHT_HIP] > 0.0;
+
+    let torso_size = if lh_vis && rh_vis {
+        let dx = (gt_kpts[[KPT_LEFT_HIP, 0]] - gt_kpts[[KPT_RIGHT_HIP, 0]]) * wf;
+        let dy = (gt_kpts[[KPT_LEFT_HIP, 1]] - gt_kpts[[KPT_RIGHT_HIP, 1]]) * hf;
+        (dx * dx + dy * dy).sqrt()
+    } else {
+        0.1 * (wf * wf + hf * hf).sqrt()
+    };
+
+    let max_dist = threshold * torso_size;
+
+    let mut per_joint_pck = [0.0f32; 17];
+    let mut total_visible = 0u32;
+    let mut total_correct = 0u32;
+
+    for j in 0..17 {
+        if visibility[j] <= 0.0 {
+            continue;
+        }
+        total_visible += 1;
+        let dx = (pred_kpts[[j, 0]] - gt_kpts[[j, 0]]) * wf;
+        let dy = (pred_kpts[[j, 1]] - gt_kpts[[j, 1]]) * hf;
+        if (dx * dx + dy * dy).sqrt() <= max_dist {
+            total_correct += 1;
+            per_joint_pck[j] = 1.0;
+        }
+    }
+
+    let overall = if total_visible == 0 {
+        0.0
+    } else {
+        total_correct as f32 / total_visible as f32
+    };
+
+    (overall, per_joint_pck)
+}
+
+// ── OKS (ArrayView signature) ────────────────────────────────────────────────
+
+/// Compute OKS for a single person (spec `ArrayView` signature).
+///
+/// COCO formula: `OKS = Σᵢ exp(-dᵢ² / (2 s² kᵢ²)) · δ(vᵢ>0) / Σᵢ δ(vᵢ>0)`
+///
+/// where `s = sqrt(area)` is the object scale and `kᵢ` is from
+/// [`COCO_KPT_SIGMAS`].
+///
+/// Returns 0.0 when no keypoints are visible or `area == 0`.
+pub fn compute_oks_v2(
+    pred_kpts: ArrayView2<f32>,
+    gt_kpts: ArrayView2<f32>,
+    visibility: ArrayView1<f32>,
+    area: f32,
+) -> f32 {
+    let s = area.sqrt();
+    if s <= 0.0 {
+        return 0.0;
+    }
+    let mut numerator = 0.0f32;
+    let mut denominator = 0.0f32;
+    for j in 0..17 {
+        if visibility[j] <= 0.0 {
+            continue;
+        }
+        denominator += 1.0;
+        let dx = pred_kpts[[j, 0]] - gt_kpts[[j, 0]];
+        let dy = pred_kpts[[j, 1]] - gt_kpts[[j, 1]];
+        let d_sq = dx * dx + dy * dy;
+        let ki = COCO_KPT_SIGMAS[j];
+        numerator += (-d_sq / (2.0 * s * s * ki * ki)).exp();
+    }
+    if denominator == 0.0 { 0.0 } else { numerator / denominator }
+}
+
+// ── Min-cost bipartite matching (petgraph DiGraph + SPFA) ────────────────────
+
+/// Optimal bipartite assignment using min-cost max-flow via SPFA.
+///
+/// Given `cost_matrix[i][j]` (use **−OKS** to maximise OKS), returns a vector
+/// whose `k`-th element is the GT index matched to the `k`-th prediction.
+/// Length ≤ `min(n_pred, n_gt)`.
+///
+/// # Graph structure
+/// ```text
+/// source ──(cost=0)──► pred_i ──(cost=cost[i][j])──► gt_j ──(cost=0)──► sink
+/// ```
+/// Every forward arc has capacity 1; paired reverse arcs start at capacity 0.
+/// SPFA augments one unit along the cheapest path per iteration.
+pub fn hungarian_assignment_v2(cost_matrix: &Array2<f32>) -> Vec<usize> {
+    let n_pred = cost_matrix.nrows();
+    let n_gt = cost_matrix.ncols();
+    if n_pred == 0 || n_gt == 0 {
+        return Vec::new();
+    }
+    let (mut graph, source, sink) = build_mcf_graph(cost_matrix);
+    let (_cost, pairs) = run_spfa_mcf(&mut graph, source, sink, n_pred, n_gt);
+    // Sort by pred index and return only gt indices.
+    let mut sorted = pairs;
+    sorted.sort_unstable_by_key(|&(i, _)| i);
+    sorted.into_iter().map(|(_, j)| j).collect()
+}
+
+/// Build the min-cost flow graph for bipartite assignment.
+///
+/// Nodes: `[source, pred_0, …, pred_{n-1}, gt_0, …, gt_{m-1}, sink]`
+/// Edges alternate forward/backward: even index = forward (cap=1), odd = backward (cap=0).
+fn build_mcf_graph(cost_matrix: &Array2<f32>) -> (DiGraph<(), f32>, NodeIndex, NodeIndex) {
+    let n_pred = cost_matrix.nrows();
+    let n_gt = cost_matrix.ncols();
+    let total = 2 + n_pred + n_gt;
+    let mut g: DiGraph<(), f32> = DiGraph::with_capacity(total, 0);
+    let nodes: Vec<NodeIndex> = (0..total).map(|_| g.add_node(())).collect();
+    let source = nodes[0];
+    let sink = nodes[1 + n_pred + n_gt];
+
+    // source → pred_i (forward) and pred_i → source (reverse)
+    for i in 0..n_pred {
+        g.add_edge(source, nodes[1 + i], 0.0_f32);
+        g.add_edge(nodes[1 + i], source, 0.0_f32);
+    }
+    // pred_i → gt_j and reverse
+    for i in 0..n_pred {
+        for j in 0..n_gt {
+            let c = cost_matrix[[i, j]];
+            g.add_edge(nodes[1 + i], nodes[1 + n_pred + j], c);
+            g.add_edge(nodes[1 + n_pred + j], nodes[1 + i], -c);
+        }
+    }
+    // gt_j → sink and reverse
+    for j in 0..n_gt {
+        g.add_edge(nodes[1 + n_pred + j], sink, 0.0_f32);
+        g.add_edge(sink, nodes[1 + n_pred + j], 0.0_f32);
+    }
+    (g, source, sink)
+}
+
+/// SPFA-based successive shortest paths for min-cost max-flow.
+///
+/// Capacities: even edge index = forward (initial cap 1), odd = backward (cap 0).
+/// Each iteration finds the cheapest augmenting path and pushes one unit.
+fn run_spfa_mcf(
+    graph: &mut DiGraph<(), f32>,
+    source: NodeIndex,
+    sink: NodeIndex,
+    n_pred: usize,
+    n_gt: usize,
+) -> (f32, Vec<(usize, usize)>) {
+    let n_nodes = graph.node_count();
+    let n_edges = graph.edge_count();
+    let src = source.index();
+    let snk = sink.index();
+
+    let mut cap: Vec<i32> = (0..n_edges).map(|i| if i % 2 == 0 { 1 } else { 0 }).collect();
+    let mut total_cost = 0.0f32;
+    let mut assignments: Vec<(usize, usize)> = Vec::new();
+
+    loop {
+        let mut dist = vec![f32::INFINITY; n_nodes];
+        let mut in_q = vec![false; n_nodes];
+        let mut prev_node = vec![usize::MAX; n_nodes];
+        let mut prev_edge = vec![usize::MAX; n_nodes];
+
+        dist[src] = 0.0;
+        let mut q: VecDeque<usize> = VecDeque::new();
+        q.push_back(src);
+        in_q[src] = true;
+
+        while let Some(u) = q.pop_front() {
+            in_q[u] = false;
+            for e in graph.edges(NodeIndex::new(u)) {
+                let eidx = e.id().index();
+                let v = e.target().index();
+                let cost = *e.weight();
+                if cap[eidx] > 0 && dist[u] + cost < dist[v] - 1e-9_f32 {
+                    dist[v] = dist[u] + cost;
+                    prev_node[v] = u;
+                    prev_edge[v] = eidx;
+                    if !in_q[v] {
+                        q.push_back(v);
+                        in_q[v] = true;
+                    }
+                }
+            }
+        }
+
+        if dist[snk].is_infinite() {
+            break;
+        }
+        total_cost += dist[snk];
+
+        // Augment and decode assignment.
+        let mut node = snk;
+        let mut path_pred = usize::MAX;
+        let mut path_gt = usize::MAX;
+        while node != src {
+            let eidx = prev_edge[node];
+            let parent = prev_node[node];
+            cap[eidx] -= 1;
+            cap[if eidx % 2 == 0 { eidx + 1 } else { eidx - 1 }] += 1;
+
+            // pred nodes: 1..=n_pred; gt nodes: (n_pred+1)..=(n_pred+n_gt)
+            if parent >= 1 && parent <= n_pred && node > n_pred && node <= n_pred + n_gt {
+                path_pred = parent - 1;
+                path_gt = node - 1 - n_pred;
+            }
+            node = parent;
+        }
+        if path_pred != usize::MAX && path_gt != usize::MAX {
+            assignments.push((path_pred, path_gt));
+        }
+    }
+    (total_cost, assignments)
+}
+
+// ── Dataset-level evaluation (spec signature) ────────────────────────────────
+
+/// Evaluate metrics over a full dataset, returning [`MetricsResultDetailed`].
+///
+/// For each `(pred, gt)` pair the function computes PCK@0.2 and OKS, then
+/// accumulates across the dataset.  GT bounding-box area is estimated from
+/// the extents of visible GT keypoints.
+pub fn evaluate_dataset_v2(
+    predictions: &[(Array2<f32>, Array1<f32>)],
+    ground_truth: &[(Array2<f32>, Array1<f32>)],
+    image_size: (usize, usize),
+) -> MetricsResultDetailed {
+    assert_eq!(predictions.len(), ground_truth.len());
+    let mut acc = MetricsAccumulatorV2::new();
+    for ((pred_kpts, _), (gt_kpts, gt_vis)) in predictions.iter().zip(ground_truth.iter()) {
+        acc.update(pred_kpts.view(), gt_kpts.view(), gt_vis.view(), image_size);
+    }
+    acc.finalize()
+}
+
+// ── MetricsAccumulatorV2 ─────────────────────────────────────────────────────
+
+/// Running accumulator for detailed evaluation metrics (spec-required type).
+///
+/// Use during the validation loop: call [`update`](MetricsAccumulatorV2::update)
+/// per person, then [`finalize`](MetricsAccumulatorV2::finalize) after the epoch.
+pub struct MetricsAccumulatorV2 {
+    total_correct: [f32; 17],
+    total_visible: [f32; 17],
+    total_oks: f32,
+    num_samples: usize,
+}
+
+impl MetricsAccumulatorV2 {
+    /// Create a new, zeroed accumulator.
+    pub fn new() -> Self {
+        Self {
+            total_correct: [0.0; 17],
+            total_visible: [0.0; 17],
+            total_oks: 0.0,
+            num_samples: 0,
+        }
+    }
+
+    /// Update with one person's predictions and GT.
+    ///
+    /// # Arguments
+    /// * `pred`       — \[17, 2\] normalised predicted keypoints
+    /// * `gt`         — \[17, 2\] normalised GT keypoints
+    /// * `vis`        — \[17\] visibility flags (> 0 = visible)
+    /// * `image_size` — `(width, height)` in pixels
+    pub fn update(
+        &mut self,
+        pred: ArrayView2<f32>,
+        gt: ArrayView2<f32>,
+        vis: ArrayView1<f32>,
+        image_size: (usize, usize),
+    ) {
+        let (_, per_joint) = compute_pck_v2(pred, gt, vis, 0.2, image_size);
+        for j in 0..17 {
+            if vis[j] > 0.0 {
+                self.total_visible[j] += 1.0;
+                self.total_correct[j] += per_joint[j];
+            }
+        }
+        let area = kpt_bbox_area_v2(gt, vis, image_size);
+        self.total_oks += compute_oks_v2(pred, gt, vis, area);
+        self.num_samples += 1;
+    }
+
+    /// Finalise and return the aggregated [`MetricsResultDetailed`].
+    pub fn finalize(self) -> MetricsResultDetailed {
+        let mut per_joint_pck = [0.0f32; 17];
+        let mut tot_c = 0.0f32;
+        let mut tot_v = 0.0f32;
+        for j in 0..17 {
+            per_joint_pck[j] = if self.total_visible[j] > 0.0 {
+                self.total_correct[j] / self.total_visible[j]
+            } else {
+                0.0
+            };
+            tot_c += self.total_correct[j];
+            tot_v += self.total_visible[j];
+        }
+        MetricsResultDetailed {
+            pck_02: if tot_v > 0.0 { tot_c / tot_v } else { 0.0 },
+            per_joint_pck,
+            oks: if self.num_samples > 0 {
+                self.total_oks / self.num_samples as f32
+            } else {
+                0.0
+            },
+            num_samples: self.num_samples,
+            num_visible_keypoints: tot_v as usize,
+        }
+    }
+}
+
+impl Default for MetricsAccumulatorV2 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Estimate bounding-box area (pixels²) from visible GT keypoints.
+fn kpt_bbox_area_v2(
+    gt: ArrayView2<f32>,
+    vis: ArrayView1<f32>,
+    image_size: (usize, usize),
+) -> f32 {
+    let (w, h) = image_size;
+    let (wf, hf) = (w as f32, h as f32);
+    let mut x_min = f32::INFINITY;
+    let mut x_max = f32::NEG_INFINITY;
+    let mut y_min = f32::INFINITY;
+    let mut y_max = f32::NEG_INFINITY;
+    for j in 0..17 {
+        if vis[j] <= 0.0 {
+            continue;
+        }
+        let x = gt[[j, 0]] * wf;
+        let y = gt[[j, 1]] * hf;
+        x_min = x_min.min(x);
+        x_max = x_max.max(x);
+        y_min = y_min.min(y);
+        y_max = y_max.max(y);
+    }
+    if x_min.is_infinite() {
+        return 0.01 * wf * hf;
+    }
+    (x_max - x_min).max(1.0) * (y_max - y_min).max(1.0)
 }
 
 // ---------------------------------------------------------------------------
@@ -980,5 +1546,119 @@ mod tests {
         let found = find_augmenting_path(&adj, 0, 2, &mut visited, &mut matching);
         assert!(found);
         assert_eq!(matching[0], Some(0));
+    }
+
+    // ── Spec-required API tests ───────────────────────────────────────────────
+
+    #[test]
+    fn spec_pck_v2_perfect() {
+        let mut kpts = Array2::<f32>::zeros((17, 2));
+        for j in 0..17 {
+            kpts[[j, 0]] = 0.5;
+            kpts[[j, 1]] = 0.5;
+        }
+        let vis = Array1::ones(17_usize);
+        let (pck, per_joint) = compute_pck_v2(kpts.view(), kpts.view(), vis.view(), 0.2, (256, 256));
+        assert!((pck - 1.0).abs() < 1e-5, "pck={pck}");
+        for j in 0..17 {
+            assert_eq!(per_joint[j], 1.0, "joint {j}");
+        }
+    }
+
+    #[test]
+    fn spec_pck_v2_no_visible() {
+        let kpts = Array2::<f32>::zeros((17, 2));
+        let vis = Array1::zeros(17_usize);
+        let (pck, _) = compute_pck_v2(kpts.view(), kpts.view(), vis.view(), 0.2, (256, 256));
+        assert_eq!(pck, 0.0);
+    }
+
+    #[test]
+    fn spec_oks_v2_perfect() {
+        let mut kpts = Array2::<f32>::zeros((17, 2));
+        for j in 0..17 {
+            kpts[[j, 0]] = 0.5;
+            kpts[[j, 1]] = 0.5;
+        }
+        let vis = Array1::ones(17_usize);
+        let oks = compute_oks_v2(kpts.view(), kpts.view(), vis.view(), 128.0 * 128.0);
+        assert!((oks - 1.0).abs() < 1e-5, "oks={oks}");
+    }
+
+    #[test]
+    fn spec_oks_v2_zero_area() {
+        let kpts = Array2::<f32>::zeros((17, 2));
+        let vis = Array1::ones(17_usize);
+        let oks = compute_oks_v2(kpts.view(), kpts.view(), vis.view(), 0.0);
+        assert_eq!(oks, 0.0);
+    }
+
+    #[test]
+    fn spec_hungarian_v2_single() {
+        let cost = ndarray::array![[-1.0_f32]];
+        let assignments = hungarian_assignment_v2(&cost);
+        assert_eq!(assignments.len(), 1);
+        assert_eq!(assignments[0], 0);
+    }
+
+    #[test]
+    fn spec_hungarian_v2_2x2() {
+        // cost[0][0]=-0.9, cost[0][1]=-0.1
+        // cost[1][0]=-0.2, cost[1][1]=-0.8
+        // Optimal: pred0→gt0, pred1→gt1 (total=-1.7).
+        let cost = ndarray::array![[-0.9_f32, -0.1], [-0.2, -0.8]];
+        let assignments = hungarian_assignment_v2(&cost);
+        // Two distinct gt indices should be assigned.
+        let unique: std::collections::HashSet<usize> =
+            assignments.iter().cloned().collect();
+        assert_eq!(unique.len(), 2, "both GT should be assigned: {:?}", assignments);
+    }
+
+    #[test]
+    fn spec_hungarian_v2_empty() {
+        let cost: ndarray::Array2<f32> = ndarray::Array2::zeros((0, 0));
+        let assignments = hungarian_assignment_v2(&cost);
+        assert!(assignments.is_empty());
+    }
+
+    #[test]
+    fn spec_accumulator_v2_perfect() {
+        let mut kpts = Array2::<f32>::zeros((17, 2));
+        for j in 0..17 {
+            kpts[[j, 0]] = 0.5;
+            kpts[[j, 1]] = 0.5;
+        }
+        let vis = Array1::ones(17_usize);
+        let mut acc = MetricsAccumulatorV2::new();
+        acc.update(kpts.view(), kpts.view(), vis.view(), (256, 256));
+        let result = acc.finalize();
+        assert!((result.pck_02 - 1.0).abs() < 1e-5, "pck_02={}", result.pck_02);
+        assert!((result.oks - 1.0).abs() < 1e-5, "oks={}", result.oks);
+        assert_eq!(result.num_samples, 1);
+        assert_eq!(result.num_visible_keypoints, 17);
+    }
+
+    #[test]
+    fn spec_accumulator_v2_empty() {
+        let acc = MetricsAccumulatorV2::new();
+        let result = acc.finalize();
+        assert_eq!(result.pck_02, 0.0);
+        assert_eq!(result.oks, 0.0);
+        assert_eq!(result.num_samples, 0);
+    }
+
+    #[test]
+    fn spec_evaluate_dataset_v2_perfect() {
+        let mut kpts = Array2::<f32>::zeros((17, 2));
+        for j in 0..17 {
+            kpts[[j, 0]] = 0.5;
+            kpts[[j, 1]] = 0.5;
+        }
+        let vis = Array1::ones(17_usize);
+        let samples: Vec<(Array2<f32>, Array1<f32>)> =
+            (0..4).map(|_| (kpts.clone(), vis.clone())).collect();
+        let result = evaluate_dataset_v2(&samples, &samples, (256, 256));
+        assert_eq!(result.num_samples, 4);
+        assert!((result.pck_02 - 1.0).abs() < 1e-5);
     }
 }

@@ -14,6 +14,7 @@ path = "src/bin/train.rs"
 [[bin]]
 name = "verify-training"
 path = "src/bin/verify_training.rs"
+required-features = ["tch-backend"]
 
 [features]
 default = []
@@ -41,6 +42,13 @@ tch = { workspace = true, optional = true }
 
 # Graph algorithms (min-cut for optimal keypoint assignment)
 petgraph.workspace = true
+
+# ruvector integration (subpolynomial min-cut, sparse solvers, temporal compression, attention)
+ruvector-mincut = { workspace = true }
+ruvector-attn-mincut = { workspace = true }
+ruvector-temporal-tensor = { workspace = true }
+ruvector-solver = { workspace = true }
+ruvector-attention = { workspace = true }
 
 # Data loading
 ndarray-npy.workspace = true

@@ -5,8 +5,10 @@
 //! directory use [`tempfile::TempDir`].
 
 use wifi_densepose_train::dataset::{
-    CsiDataset, DatasetError, MmFiDataset, SyntheticCsiDataset, SyntheticConfig,
+    CsiDataset, MmFiDataset, SyntheticCsiDataset, SyntheticConfig,
 };
+// DatasetError is re-exported at the crate root from error.rs.
+use wifi_densepose_train::DatasetError;
 
 // ---------------------------------------------------------------------------
 // Helper: default SyntheticConfig
@@ -255,7 +257,7 @@ fn two_datasets_same_config_same_samples() {
 /// shapes (and thus different data).
 #[test]
 fn different_config_produces_different_data() {
-    let mut cfg1 = default_cfg();
+    let cfg1 = default_cfg();
     let mut cfg2 = default_cfg();
     cfg2.num_subcarriers = 28; // different subcarrier count
 
@@ -302,7 +304,7 @@ fn get_large_index_returns_error() {
 // MmFiDataset — directory not found
 // ---------------------------------------------------------------------------
 
-/// [`MmFiDataset::discover`] must return a [`DatasetError::DirectoryNotFound`]
+/// [`MmFiDataset::discover`] must return a [`DatasetError::DataNotFound`]
 /// when the root directory does not exist.
 #[test]
 fn mmfi_dataset_nonexistent_directory_returns_error() {
@@ -322,14 +324,13 @@ fn mmfi_dataset_nonexistent_directory_returns_error() {
         "MmFiDataset::discover must return Err for a non-existent directory"
     );
 
-    // The error must specifically be DirectoryNotFound.
-    match result.unwrap_err() {
-        DatasetError::DirectoryNotFound { .. } => { /* expected */ }
-        other => panic!(
-            "expected DatasetError::DirectoryNotFound, got {:?}",
-            other
-        ),
-    }
+    // The error must specifically be DataNotFound (directory does not exist).
+    // Use .err() to avoid requiring MmFiDataset: Debug.
+    let err = result.err().expect("result must be Err");
+    assert!(
+        matches!(err, DatasetError::DataNotFound { .. }),
+        "expected DatasetError::DataNotFound for a non-existent directory"
+    );
 }
 
 /// An empty temporary directory that exists must not panic — it simply has

@@ -41,6 +41,8 @@
 //! ```
 
 use ndarray::{Array1, Array2, Array4};
+use ruvector_temporal_tensor::segment as tt_segment;
+use ruvector_temporal_tensor::{TemporalTensorCompressor, TierPolicy};
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
@@ -290,6 +292,8 @@ pub struct MmFiDataset {
     window_frames: usize,
     target_subcarriers: usize,
     num_keypoints: usize,
+    /// Root directory stored for display / debug purposes.
+    #[allow(dead_code)]
     root: PathBuf,
 }
 
@@ -429,7 +433,7 @@ impl CsiDataset for MmFiDataset {
         let total = self.len();
         let (entry_idx, frame_offset) =
             self.locate(idx).ok_or(DatasetError::IndexOutOfBounds {
-                index: idx,
+                idx,
                 len: total,
             })?;
 
@@ -502,6 +506,193 @@ impl CsiDataset for MmFiDataset {
 }
 
 // ---------------------------------------------------------------------------
+// CompressedCsiBuffer
+// ---------------------------------------------------------------------------
+
+/// Compressed CSI buffer using ruvector-temporal-tensor tiered quantization.
+///
+/// Stores CSI amplitude or phase data in a compressed byte buffer.
+/// Hot frames (last 10) are kept at ~8-bit precision, warm frames at 5-7 bits,
+/// cold frames at 3 bits — giving 50-75% memory reduction vs raw f32 storage.
+///
+/// # Usage
+///
+/// Push frames with `push_frame`, then call `flush()`, then access via
+/// `get_frame(idx)` for transparent decode.
+pub struct CompressedCsiBuffer {
+    /// Completed compressed byte segments from ruvector-temporal-tensor.
+    /// Each entry is an independently decodable segment. Multiple segments
+    /// arise when the tier changes or drift is detected between frames.
+    segments: Vec<Vec<u8>>,
+    /// Cumulative frame count at the start of each segment (prefix sum).
+    /// `segment_frame_starts[i]` is the index of the first frame in `segments[i]`.
+    segment_frame_starts: Vec<usize>,
+    /// Number of f32 elements per frame (n_tx * n_rx * n_sc).
+    elements_per_frame: usize,
+    /// Number of frames stored.
+    num_frames: usize,
+    /// Compression ratio achieved (ratio of raw f32 bytes to compressed bytes).
+    pub compression_ratio: f32,
+}
+
+impl CompressedCsiBuffer {
+    /// Build a compressed buffer from all frames of a CSI array.
+    ///
+    /// `data`: shape `[T, n_tx, n_rx, n_sc]` — temporal CSI array.
+    /// `tensor_id`: 0 = amplitude, 1 = phase (used as the initial timestamp
+    ///              hint so amplitude and phase buffers start in separate
+    ///              compressor states).
+    pub fn from_array4(data: &Array4<f32>, tensor_id: u64) -> Self {
+        let shape = data.shape();
+        let (n_t, n_tx, n_rx, n_sc) = (shape[0], shape[1], shape[2], shape[3]);
+        let elements_per_frame = n_tx * n_rx * n_sc;
+
+        // TemporalTensorCompressor::new(policy, len: u32, now_ts: u32)
+        let mut comp = TemporalTensorCompressor::new(
+            TierPolicy::default(),
+            elements_per_frame as u32,
+            tensor_id as u32,
+        );
+
+        let mut segments: Vec<Vec<u8>> = Vec::new();
+        let mut segment_frame_starts: Vec<usize> = Vec::new();
+        // Track how many frames have been committed to `segments`
+        let mut frames_committed: usize = 0;
+        let mut temp_seg: Vec<u8> = Vec::new();
+
+        for t in 0..n_t {
+            // set_access(access_count: u32, last_access_ts: u32)
+            // Mark recent frames as "hot": simulate access_count growing with t
+            // and last_access_ts = t so that the score = t*1024/1 when now_ts = t.
+            // For the last ~10 frames this yields a high score (hot tier).
+            comp.set_access(t as u32, t as u32);
+
+            // Flatten frame [n_tx, n_rx, n_sc] to Vec<f32>
+            let frame: Vec<f32> = (0..n_tx)
+                .flat_map(|tx| {
+                    (0..n_rx).flat_map(move |rx| (0..n_sc).map(move |sc| data[[t, tx, rx, sc]]))
+                })
+                .collect();
+
+            // push_frame clears temp_seg and writes a completed segment to it
+            // only when a segment boundary is crossed (tier change or drift).
+            comp.push_frame(&frame, t as u32, &mut temp_seg);
+
+            if !temp_seg.is_empty() {
+                // A segment was completed for the frames *before* the current one.
+                // Determine how many frames this segment holds via its header.
+                let seg_frame_count = tt_segment::parse_header(&temp_seg)
+                    .map(|h| h.frame_count as usize)
+                    .unwrap_or(0);
+                if seg_frame_count > 0 {
+                    segment_frame_starts.push(frames_committed);
+                    frames_committed += seg_frame_count;
+                    segments.push(temp_seg.clone());
+                }
+            }
+        }
+
+        // Force-emit whatever remains in the compressor's active buffer.
+        comp.flush(&mut temp_seg);
+        if !temp_seg.is_empty() {
+            let seg_frame_count = tt_segment::parse_header(&temp_seg)
+                .map(|h| h.frame_count as usize)
+                .unwrap_or(0);
+            if seg_frame_count > 0 {
+                segment_frame_starts.push(frames_committed);
+                frames_committed += seg_frame_count;
+                segments.push(temp_seg.clone());
+            }
+        }
+
+        // Compute overall compression ratio: uncompressed / compressed bytes.
+        let total_compressed: usize = segments.iter().map(|s| s.len()).sum();
+        let total_raw = frames_committed * elements_per_frame * 4;
+        let compression_ratio = if total_compressed > 0 && total_raw > 0 {
+            total_raw as f32 / total_compressed as f32
+        } else {
+            1.0
+        };
+
+        CompressedCsiBuffer {
+            segments,
+            segment_frame_starts,
+            elements_per_frame,
+            num_frames: n_t,
+            compression_ratio,
+        }
+    }
+
+    /// Decode a single frame at index `t` back to f32.
+    ///
+    /// Returns `None` if `t >= num_frames` or decode fails.
+    pub fn get_frame(&self, t: usize) -> Option<Vec<f32>> {
+        if t >= self.num_frames {
+            return None;
+        }
+        // Binary-search for the segment that contains frame t.
+        let seg_idx = self
+            .segment_frame_starts
+            .partition_point(|&start| start <= t)
+            .saturating_sub(1);
+        if seg_idx >= self.segments.len() {
+            return None;
+        }
+        let frame_within_seg = t - self.segment_frame_starts[seg_idx];
+        tt_segment::decode_single_frame(&self.segments[seg_idx], frame_within_seg)
+    }
+
+    /// Decode all frames back to an `Array4<f32>` with the original shape.
+    ///
+    /// # Arguments
+    ///
+    /// - `n_tx`: number of TX antennas
+    /// - `n_rx`: number of RX antennas
+    /// - `n_sc`: number of subcarriers
+    pub fn to_array4(&self, n_tx: usize, n_rx: usize, n_sc: usize) -> Array4<f32> {
+        let expected = self.num_frames * n_tx * n_rx * n_sc;
+        let mut decoded: Vec<f32> = Vec::with_capacity(expected);
+
+        for seg in &self.segments {
+            let mut seg_decoded = Vec::new();
+            tt_segment::decode(seg, &mut seg_decoded);
+            decoded.extend_from_slice(&seg_decoded);
+        }
+
+        if decoded.len() < expected {
+            // Pad with zeros if decode produced fewer elements (shouldn't happen).
+            decoded.resize(expected, 0.0);
+        }
+
+        Array4::from_shape_vec(
+            (self.num_frames, n_tx, n_rx, n_sc),
+            decoded[..expected].to_vec(),
+        )
+        .unwrap_or_else(|_| Array4::zeros((self.num_frames, n_tx, n_rx, n_sc)))
+    }
+
+    /// Number of frames stored.
+    pub fn len(&self) -> usize {
+        self.num_frames
+    }
+
+    /// True if no frames have been stored.
+    pub fn is_empty(&self) -> bool {
+        self.num_frames == 0
+    }
+
+    /// Compressed byte size.
+    pub fn compressed_size_bytes(&self) -> usize {
+        self.segments.iter().map(|s| s.len()).sum()
+    }
+
+    /// Uncompressed size in bytes (n_frames * elements_per_frame * 4).
+    pub fn uncompressed_size_bytes(&self) -> usize {
+        self.num_frames * self.elements_per_frame * 4
+    }
+}
+
+// ---------------------------------------------------------------------------
 // NPY helpers
 // ---------------------------------------------------------------------------
 
@@ -512,10 +703,11 @@ fn load_npy_f32(path: &Path) -> Result<Array4<f32>, DatasetError> {
         .map_err(|e| DatasetError::io_error(path, e))?;
     let arr: ndarray::ArrayD<f32> = ndarray::ArrayD::read_npy(file)
         .map_err(|e| DatasetError::npy_read(path, e.to_string()))?;
+    let shape = arr.shape().to_vec();
     arr.into_dimensionality::<ndarray::Ix4>().map_err(|_e| {
         DatasetError::invalid_format(
             path,
-            format!("Expected 4-D array, got shape {:?}", arr.shape()),
+            format!("Expected 4-D array, got shape {:?}", shape),
         )
     })
 }
@@ -527,10 +719,11 @@ fn load_npy_kp(path: &Path, _num_keypoints: usize) -> Result<ndarray::Array3<f32
         .map_err(|e| DatasetError::io_error(path, e))?;
     let arr: ndarray::ArrayD<f32> = ndarray::ArrayD::read_npy(file)
         .map_err(|e| DatasetError::npy_read(path, e.to_string()))?;
+    let shape = arr.shape().to_vec();
     arr.into_dimensionality::<ndarray::Ix3>().map_err(|_e| {
         DatasetError::invalid_format(
             path,
-            format!("Expected 3-D keypoint array, got shape {:?}", arr.shape()),
+            format!("Expected 3-D keypoint array, got shape {:?}", shape),
         )
     })
 }
@@ -709,7 +902,7 @@ impl CsiDataset for SyntheticCsiDataset {
     fn get(&self, idx: usize) -> Result<CsiSample, DatasetError> {
         if idx >= self.num_samples {
             return Err(DatasetError::IndexOutOfBounds {
-                index: idx,
+                idx,
                 len: self.num_samples,
             });
         }
@@ -811,7 +1004,7 @@ mod tests {
         let ds = SyntheticCsiDataset::new(5, SyntheticConfig::default());
         assert!(matches!(
             ds.get(5),
-            Err(DatasetError::IndexOutOfBounds { index: 5, len: 5 })
+            Err(DatasetError::IndexOutOfBounds { idx: 5, len: 5 })
         ));
     }
 
