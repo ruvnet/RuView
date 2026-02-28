@@ -1,0 +1,20 @@
+[package]
+name = "rvf-kernel"
+version = "0.1.0"
+edition = "2021"
+description = "Real Linux microkernel builder for RVF cognitive containers"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector"
+readme = "README.md"
+categories = ["embedded", "virtualization"]
+keywords = ["rvf", "kernel", "microvm", "initramfs", "cognitive-container"]
+rust-version = "1.87"
+
+[dependencies]
+rvf-types = { version = "0.2.0", path = "../rvf-types", features = ["std"] }
+sha3 = "0.10"
+flate2 = "1.0"
+
+[dev-dependencies]
+tempfile = "3"

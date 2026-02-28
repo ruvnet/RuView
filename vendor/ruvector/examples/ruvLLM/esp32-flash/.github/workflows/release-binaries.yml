@@ -1,0 +1,159 @@
+name: Release Pre-built Binaries
+
+on:
+  push:
+    tags:
+      - 'ruvllm-esp32-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.2.1)'
+        required: true
+        default: '0.2.1'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-firmware:
+    name: Build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: esp32
+            rust_target: xtensa-esp32-espidf
+            features: ""
+          - target: esp32s2
+            rust_target: xtensa-esp32s2-espidf
+            features: ""
+          - target: esp32s3
+            rust_target: xtensa-esp32s3-espidf
+            features: ""
+          - target: esp32c3
+            rust_target: riscv32imc-esp-espidf
+            features: ""
+          - target: esp32c6
+            rust_target: riscv32imac-esp-espidf
+            features: ""
+          # Federation-enabled builds
+          - target: esp32s3-federation
+            rust_target: xtensa-esp32s3-espidf
+            features: "federation"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Install ESP toolchain
+        run: |
+          curl -L https://github.com/esp-rs/espup/releases/latest/download/espup-x86_64-unknown-linux-gnu -o espup
+          chmod +x espup
+          ./espup install
+          source ~/export-esp.sh
+
+      - name: Install ldproxy
+        run: cargo install ldproxy
+
+      - name: Build firmware
+        working-directory: examples/ruvLLM/esp32-flash
+        run: |
+          source ~/export-esp.sh
+          if [ -n "${{ matrix.features }}" ]; then
+            cargo build --release --target ${{ matrix.rust_target }} --features ${{ matrix.features }}
+          else
+            cargo build --release --target ${{ matrix.rust_target }}
+          fi
+
+      - name: Create binary package
+        working-directory: examples/ruvLLM/esp32-flash
+        run: |
+          mkdir -p dist
+          # Find the built binary
+          BINARY=$(find target/${{ matrix.rust_target }}/release -maxdepth 1 -name "ruvllm-esp32*" -type f ! -name "*.d" | head -1)
+          if [ -f "$BINARY" ]; then
+            cp "$BINARY" dist/ruvllm-esp32-${{ matrix.target }}
+          fi
+          # Create flash script
+          cat > dist/flash-${{ matrix.target }}.sh << 'EOF'
+          #!/bin/bash
+          PORT=${1:-/dev/ttyUSB0}
+          espflash flash --monitor --port $PORT ruvllm-esp32-${{ matrix.target }}
+          EOF
+          chmod +x dist/flash-${{ matrix.target }}.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruvllm-esp32-${{ matrix.target }}
+          path: examples/ruvLLM/esp32-flash/dist/
+
+  create-release:
+    name: Create Release
+    needs: build-firmware
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: binaries
+          merge-multiple: true
+
+      - name: Create release archive
+        run: |
+          cd binaries
+          # Create combined archive
+          tar -czvf ruvllm-esp32-all-targets.tar.gz *
+          # Create individual zips
+          for dir in */; do
+            target=$(basename "$dir")
+            zip -r "ruvllm-esp32-${target}.zip" "$dir"
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            binaries/*.tar.gz
+            binaries/*.zip
+          body: |
+            ## RuvLLM ESP32 Pre-built Binaries
+
+            Download the firmware for your ESP32 variant and flash directly - no Rust toolchain required!
+
+            ### Quick Flash
+
+            ```bash
+            # Download and extract
+            tar -xzf ruvllm-esp32-all-targets.tar.gz
+
+            # Flash (Linux/macOS)
+            ./flash-esp32s3.sh /dev/ttyUSB0
+
+            # Or use espflash directly
+            espflash flash --monitor ruvllm-esp32-esp32s3
+            ```
+
+            ### Available Binaries
+
+            | File | Target | Features |
+            |------|--------|----------|
+            | `ruvllm-esp32-esp32` | ESP32 | Base |
+            | `ruvllm-esp32-esp32s2` | ESP32-S2 | Base |
+            | `ruvllm-esp32-esp32s3` | ESP32-S3 | Base + SIMD |
+            | `ruvllm-esp32-esp32c3` | ESP32-C3 | Base |
+            | `ruvllm-esp32-esp32c6` | ESP32-C6 | Base |
+            | `ruvllm-esp32-esp32s3-federation` | ESP32-S3 | Multi-chip federation |
+
+            ### Web Flasher
+
+            Flash directly from your browser: [RuvLLM Web Flasher](https://ruvnet.github.io/ruvector/flash)

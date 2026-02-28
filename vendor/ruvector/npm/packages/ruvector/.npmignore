@@ -1,0 +1,12 @@
+src/
+test/
+tsconfig.json
+*.log
+node_modules/
+.DS_Store
+*.tgz
+*.db
+.agentic-flow/
+.claude-flow/
+.ruvector/
+ruvector.db

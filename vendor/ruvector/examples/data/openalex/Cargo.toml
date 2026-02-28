@@ -1,0 +1,49 @@
+[package]
+name = "ruvector-data-openalex"
+version.workspace = true
+edition.workspace = true
+description = "OpenAlex research intelligence integration for RuVector"
+license.workspace = true
+repository.workspace = true
+keywords = ["openalex", "research", "citations", "graph", "discovery"]
+categories = ["science", "database"]
+
+[dependencies]
+# Core framework
+ruvector-data-framework = { path = "../framework" }
+
+# Async runtime
+tokio.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# HTTP client
+reqwest.workspace = true
+
+# Time handling
+chrono.workspace = true
+
+# Logging
+tracing.workspace = true
+thiserror.workspace = true
+
+# Data processing
+rayon.workspace = true
+
+# URL encoding
+urlencoding = "2.1"
+
+# Compression for bulk downloads
+flate2 = "1.0"
+
+[dev-dependencies]
+tokio-test = "0.4"
+rand = "0.8"
+
+[[example]]
+name = "frontier_radar"
+path = "examples/frontier_radar.rs"

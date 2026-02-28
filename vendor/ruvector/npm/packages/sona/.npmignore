@@ -1,0 +1,10 @@
+target/
+node_modules/
+**/*.rs
+Cargo.toml
+Cargo.lock
+.cargo/
+*.node
+!*.node
+.github/
+.vscode/

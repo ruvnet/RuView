@@ -1,0 +1,27 @@
+[package]
+name = "ruvector-solver-node"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Node.js NAPI bindings for RuVector sublinear-time solver"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ruvector-solver = { version = "2.0.3", path = "../ruvector-solver", default-features = false }
+napi = { workspace = true }
+napi-derive = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = true
+strip = true

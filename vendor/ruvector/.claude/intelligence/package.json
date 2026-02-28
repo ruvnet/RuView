@@ -1,0 +1,26 @@
+{
+  "name": "@claude/ruvector-intelligence",
+  "version": "0.1.0",
+  "description": "Self-learning intelligence layer for Claude Code hooks using RuVector",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "rv-intel": "./cli.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test tests/",
+    "pretrain": "node pretrain.js",
+    "validate": "node tests/validate.js",
+    "stats": "node cli.js stats",
+    "metrics": "node metrics.js effectiveness",
+    "report": "node metrics.js effectiveness && node tests/validate.js"
+  },
+  "dependencies": {
+    "@ruvector/core": "file:../../npm/core",
+    "better-sqlite3": "^12.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  }
+}

@@ -1,0 +1,25 @@
+[package]
+name = "rvf-desktop"
+version = "2.0.0"
+edition = "2021"
+description = "RuVector Causal Atlas — native desktop app with embedded Three.js dashboard"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+
+[[bin]]
+name = "ruvector"
+path = "src/main.rs"
+
+[dependencies]
+wry = "0.49"
+tao = { version = "0.32", features = ["rwh_06"] }
+rust-embed = { version = "8", features = ["compression"] }
+tiny_http = "0.12"
+mime_guess = "2"
+open = "5"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

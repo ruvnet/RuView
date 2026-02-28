@@ -1,0 +1,75 @@
+[
+  {
+    "id": "json_vec_001",
+    "embedding": [0.15, 0.42, 0.78, 0.91, 0.23, 0.67],
+    "metadata": {
+      "category": "electronics",
+      "brand": "TechCorp",
+      "price": 299.99,
+      "inStock": true
+    }
+  },
+  {
+    "id": "json_vec_002",
+    "embedding": [0.89, 0.23, 0.45, 0.12, 0.78, 0.34],
+    "metadata": {
+      "category": "books",
+      "author": "Jane Smith",
+      "genre": "fiction",
+      "rating": 4.5
+    }
+  },
+  {
+    "id": "json_vec_003",
+    "embedding": [0.34, 0.67, 0.12, 0.56, 0.91, 0.45],
+    "metadata": {
+      "category": "electronics",
+      "brand": "SmartHome",
+      "price": 149.99,
+      "inStock": false
+    }
+  },
+  {
+    "id": "json_vec_004",
+    "embedding": [0.56, 0.12, 0.91, 0.34, 0.67, 0.78],
+    "metadata": {
+      "category": "clothing",
+      "size": "M",
+      "color": "blue",
+      "season": "summer"
+    }
+  },
+  {
+    "id": "json_vec_005",
+    "embedding": [0.23, 0.78, 0.45, 0.67, 0.12, 0.91],
+    "metadata": {
+      "category": "food",
+      "type": "organic",
+      "expiry": "2025-12-31",
+      "vegan": true
+    }
+  },
+  {
+    "id": "json_vec_006",
+    "embedding": [0.91, 0.45, 0.23, 0.78, 0.56, 0.12],
+    "metadata": {}
+  },
+  {
+    "id": "json_vec_007",
+    "embedding": [0.67, 0.34, 0.89, 0.12, 0.45, 0.78],
+    "metadata": {
+      "category": "sports",
+      "equipment": "tennis",
+      "brand": "ProSport"
+    }
+  },
+  {
+    "id": "json_vec_008",
+    "embedding": [0.12, 0.91, 0.67, 0.34, 0.23, 0.89],
+    "metadata": {
+      "category": "toys",
+      "ageRange": "3-7",
+      "educational": true
+    }
+  }
+]

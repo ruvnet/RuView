@@ -1,0 +1,31 @@
+[package]
+name = "causal-emergence"
+version = "0.1.0"
+edition = "2021"
+authors = ["RuVector Team"]
+description = "Hierarchical Causal Consciousness (HCC) framework with O(log n) emergence detection"
+license = "MIT"
+
+# Enable standalone compilation
+[workspace]
+
+[lib]
+name = "causal_emergence"
+path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "causal_emergence_bench"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.bench]
+inherits = "release"

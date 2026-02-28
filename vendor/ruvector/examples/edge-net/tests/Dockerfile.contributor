@@ -1,0 +1,47 @@
+# @ruvector/edge-net Contributor Docker Image
+#
+# Runs the contribute-daemon.js to earn QDAG credits via real CPU work.
+# Connects to the relay server and reports contributions periodically.
+
+FROM node:20-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY package.json ./
+RUN npm install --production 2>/dev/null || true
+
+# Copy source files
+COPY *.js ./
+COPY *.wasm ./
+COPY *.d.ts ./
+COPY node/ ./node/
+COPY models/ ./models/ 2>/dev/null || true
+COPY plugins/ ./plugins/ 2>/dev/null || true
+
+# Create .ruvector directory for identity persistence
+RUN mkdir -p /root/.ruvector/identities
+
+# Environment variables
+ENV RELAY_URL=wss://edge-net-relay-875130704813.us-central1.run.app
+ENV CPU_LIMIT=50
+ENV CONTRIBUTOR_ID=contributor
+ENV LOG_LEVEL=info
+
+# Entrypoint script
+COPY <<'EOF' /entrypoint.sh
+#!/bin/bash
+set -e
+
+echo "=== Edge-Net Contributor: $CONTRIBUTOR_ID ==="
+echo "CPU Limit: $CPU_LIMIT%"
+echo "Relay: $RELAY_URL"
+echo ""
+
+# Start contribute daemon with specified settings
+exec node contribute-daemon.js --cpu "$CPU_LIMIT" --site "$CONTRIBUTOR_ID"
+EOF
+
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

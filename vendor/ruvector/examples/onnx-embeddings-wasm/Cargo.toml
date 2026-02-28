@@ -1,0 +1,61 @@
+[package]
+name = "ruvector-onnx-embeddings-wasm"
+version = "0.1.2"
+edition = "2021"
+authors = ["RuVector Team"]
+description = "WASM embedding generation with SIMD - runs in browsers, Cloudflare Workers, Deno, and edge runtimes"
+license = "MIT"
+repository = "https://github.com/ruvnet/ruvector"
+keywords = ["onnx", "embeddings", "wasm", "webassembly", "ml"]
+categories = ["wasm", "science", "algorithms"]
+
+# Standalone package
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Tract - ONNX inference that compiles to WASM
+tract-onnx = "0.21"
+tract-core = "0.21"
+
+# Tokenization - HuggingFace tokenizers (WASM compatible)
+tokenizers = { version = "0.20", default-features = false, features = ["unstable_wasm"] }
+
+# WASM bindings
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["console"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde-wasm-bindgen = "0.6"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Async (WASM compatible)
+futures = "0.3"
+
+# Console logging for WASM
+console_error_panic_hook = { version = "0.1", optional = true }
+
+# Getrandom for WASM
+getrandom = { version = "0.2", features = ["js"] }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[features]
+default = ["console_error_panic_hook"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Os", "--enable-mutable-globals"]

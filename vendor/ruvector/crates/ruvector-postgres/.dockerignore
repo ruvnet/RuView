@@ -1,0 +1,61 @@
+# Docker ignore file for ruvector-postgres
+
+# Target directory (build artifacts)
+target/
+**/target/
+
+# Cargo lock (will be copied separately)
+# Cargo.lock
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Documentation (not needed in build)
+docs/
+*.md
+!README.md
+
+# Test files
+tests/
+benches/
+
+# Examples
+examples/
+
+# Local configuration
+.env
+.env.local
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+.directory
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini

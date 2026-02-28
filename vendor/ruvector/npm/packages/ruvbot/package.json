@@ -1,0 +1,146 @@
+{
+  "name": "ruvbot",
+  "version": "0.3.1",
+  "description": "Enterprise-grade self-learning AI assistant with military-strength security, 150x faster vector search, and 12+ LLM models",
+  "main": "dist/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "ruvbot": "./bin/ruvbot.js"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./core": {
+      "import": "./dist/esm/core/index.js",
+      "require": "./dist/core/index.js"
+    },
+    "./integrations/slack": {
+      "import": "./dist/esm/integration/slack/index.js",
+      "require": "./dist/integration/slack/index.js"
+    },
+    "./integrations/webhooks": {
+      "import": "./dist/esm/integration/webhooks/index.js",
+      "require": "./dist/integration/webhooks/index.js"
+    },
+    "./learning": {
+      "import": "./dist/esm/learning/index.js",
+      "require": "./dist/learning/index.js"
+    }
+  },
+  "scripts": {
+    "build": "npm run build:cjs && npm run build:esm",
+    "build:cjs": "tsc -p tsconfig.json",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "build:rvf": "node scripts/build-rvf.js",
+    "run:rvf": "node scripts/run-rvf.js",
+    "inspect:rvf": "node scripts/run-rvf.js --inspect",
+    "dev": "tsc -w",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ai",
+    "ai-assistant",
+    "chatbot",
+    "llm",
+    "gemini",
+    "claude",
+    "openai",
+    "openrouter",
+    "vector-database",
+    "vector-search",
+    "hnsw",
+    "embeddings",
+    "wasm",
+    "memory",
+    "self-learning",
+    "neural",
+    "multi-tenant",
+    "enterprise",
+    "security",
+    "prompt-injection",
+    "aidefence",
+    "slack-bot",
+    "discord-bot",
+    "typescript",
+    "cli"
+  ],
+  "author": "RuVector Team <team@ruv.io>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "npm/packages/ruvbot"
+  },
+  "homepage": "https://github.com/ruvnet/ruvector/tree/main/npm/packages/ruvbot",
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.20.0",
+    "aidefence": "^2.1.1",
+    "commander": "^12.0.0",
+    "chalk": "^5.3.0",
+    "ora": "^8.0.1",
+    "dotenv": "^16.3.1",
+    "eventemitter3": "^5.0.1",
+    "uuid": "^9.0.0",
+    "pino": "^8.17.2",
+    "pino-pretty": "^10.3.1",
+    "zod": "^3.22.4"
+  },
+  "optionalDependencies": {
+    "@ruvector/ruvllm": "^2.3.0",
+    "@slack/bolt": "^3.17.0",
+    "@slack/web-api": "^7.0.0",
+    "bullmq": "^5.1.0",
+    "ioredis": "^5.3.2",
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "@types/pg": "^8.10.9",
+    "@types/uuid": "^9.0.7",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.0",
+    "@vitest/coverage-v8": "^1.2.0"
+  },
+  "peerDependencies": {
+    "typescript": ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "scripts",
+    "kernel/bzImage",
+    "ruvbot.rvf",
+    "src/api/public",
+    ".env.example",
+    "README.md"
+  ]
+}

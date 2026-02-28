@@ -1,0 +1,27 @@
+[package]
+name = "ruvector-mincut-node"
+version.workspace = true
+edition.workspace = true
+description = "Node.js bindings for subpolynomial-time dynamic minimum cut"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+keywords = ["mincut", "nodejs", "napi", "graph", "algorithm"]
+categories = ["api-bindings", "algorithms"]
+readme = "README.md"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ruvector-mincut = { version = "2.0", path = "../ruvector-mincut", features = ["monitoring"] }
+napi = { workspace = true }
+napi-derive = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[build-dependencies]
+napi-build = "2.1"
+
+[features]
+default = []

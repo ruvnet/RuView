@@ -1,0 +1,26 @@
+# WASM build artifacts
+pkg/
+pkg-node/
+pkg-bundler/
+
+# Dependencies
+node_modules/
+
+# Build artifacts
+target/
+Cargo.lock
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
+*.profraw

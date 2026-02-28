@@ -1,0 +1,24 @@
+# Test Runner Dockerfile for RuVector-Postgres
+FROM rust:1.75-bookworm
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    postgresql-client-16 \
+    libclang-dev \
+    clang \
+    pkg-config \
+    libssl-dev \
+    cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install pgrx
+RUN cargo install cargo-pgrx --version 0.12.6 --locked
+
+# Install additional test tools
+RUN cargo install cargo-nextest --locked
+RUN cargo install cargo-criterion --locked
+
+WORKDIR /app
+
+# Default command
+CMD ["cargo", "test", "--features", "pg_test"]

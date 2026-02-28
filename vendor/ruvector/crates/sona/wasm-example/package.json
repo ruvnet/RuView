@@ -1,0 +1,20 @@
+{
+  "name": "sona-wasm-example",
+  "version": "0.1.0",
+  "description": "SONA WASM Example - Self-Optimizing Neural Architecture in the browser",
+  "type": "module",
+  "scripts": {
+    "build": "cd .. && wasm-pack build --target web --features wasm --out-dir wasm-example/pkg",
+    "serve": "python3 -m http.server 8080",
+    "dev": "npm run build && npm run serve"
+  },
+  "keywords": [
+    "wasm",
+    "neural",
+    "learning",
+    "lora",
+    "adaptive"
+  ],
+  "author": "RuVector Team",
+  "license": "MIT OR Apache-2.0"
+}

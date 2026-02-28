@@ -1,0 +1,353 @@
+name: Build Graph Transformer Native Modules
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/ruvector-graph-transformer/**'
+      - 'crates/ruvector-graph-transformer-node/**'
+      - 'crates/ruvector-graph-transformer-wasm/**'
+      - '.github/workflows/build-graph-transformer.yml'
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/ruvector-graph-transformer/**'
+      - 'crates/ruvector-graph-transformer-node/**'
+      - 'crates/ruvector-graph-transformer-wasm/**'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to npm after build'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            platform: linux-x64-gnu
+          - host: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+            platform: linux-x64-musl
+          - host: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            platform: linux-arm64-gnu
+          - host: ubuntu-22.04
+            target: aarch64-unknown-linux-musl
+            platform: linux-arm64-musl
+          - host: macos-14
+            target: x86_64-apple-darwin
+            platform: darwin-x64
+          - host: macos-14
+            target: aarch64-apple-darwin
+            platform: darwin-arm64
+          - host: windows-2022
+            target: x86_64-pc-windows-msvc
+            platform: win32-x64-msvc
+
+    name: Build ${{ matrix.settings.platform }}
+    runs-on: ${{ matrix.settings.host }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.settings.target }}
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: graph-transformer-${{ matrix.settings.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64 GNU)
+        if: matrix.settings.platform == 'linux-arm64-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Install cross-compilation tools (Linux x64 musl)
+        if: matrix.settings.platform == 'linux-x64-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Install cross-compilation tools (Linux ARM64 musl)
+        if: matrix.settings.platform == 'linux-arm64-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu musl-tools
+
+      - name: Install NAPI-RS CLI
+        run: npm install -g @napi-rs/cli
+
+      - name: Install dependencies
+        working-directory: crates/ruvector-graph-transformer-node
+        run: npm install --ignore-scripts --omit=optional --force
+
+      - name: Build native module
+        working-directory: crates/ruvector-graph-transformer-node
+        run: |
+          napi build --platform --release --target ${{ matrix.settings.target }} -p ruvector-graph-transformer-node
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Find built .node files (debug)
+        shell: bash
+        run: |
+          echo "=== Searching for graph-transformer .node files ==="
+          find crates/ruvector-graph-transformer-node -name "*.node" -type f 2>/dev/null || true
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p gt-artifacts/${{ matrix.settings.platform }}
+          NODE_FILE=$(find crates/ruvector-graph-transformer-node -name "ruvector-graph-transformer.*.node" -type f | head -1)
+          if [ -z "$NODE_FILE" ]; then
+            echo "ERROR: No .node file found"
+            find crates/ruvector-graph-transformer-node -name "*.node" -type f
+            exit 1
+          fi
+          echo "Found: $NODE_FILE"
+          cp -v "$NODE_FILE" "gt-artifacts/${{ matrix.settings.platform }}/"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gt-bindings-${{ matrix.settings.platform }}
+          path: gt-artifacts/${{ matrix.settings.platform }}/*.node
+          if-no-files-found: error
+
+  build-wasm:
+    name: Build WASM
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: graph-transformer-wasm
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked || true
+
+      - name: Build WASM
+        run: |
+          wasm-pack build crates/ruvector-graph-transformer-wasm --target web --release || \
+          cargo build -p ruvector-graph-transformer-wasm --target wasm32-unknown-unknown --release
+
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: graph-transformer-wasm
+          path: crates/ruvector-graph-transformer-wasm/pkg/
+          if-no-files-found: warn
+
+  commit-binaries:
+    name: Commit Built Binaries
+    runs-on: ubuntu-22.04
+    needs: [build, build-wasm]
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Copy binaries to platform packages
+        run: |
+          echo "=== Downloaded artifacts ==="
+          find artifacts -name "*.node" -o -name "*.wasm"
+
+          for platform in linux-x64-gnu linux-x64-musl linux-arm64-gnu linux-arm64-musl darwin-x64 darwin-arm64 win32-x64-msvc; do
+            if [ -d "artifacts/gt-bindings-${platform}" ]; then
+              mkdir -p "crates/ruvector-graph-transformer-node/npm/${platform}"
+              cp -v artifacts/gt-bindings-${platform}/*.node "crates/ruvector-graph-transformer-node/npm/${platform}/" || true
+            fi
+          done
+
+          if [ -d "artifacts/graph-transformer-wasm" ]; then
+            mkdir -p crates/ruvector-graph-transformer-wasm/pkg
+            cp -rv artifacts/graph-transformer-wasm/* crates/ruvector-graph-transformer-wasm/pkg/ || true
+          fi
+
+      - name: Show binary sizes
+        run: |
+          echo "=== Built Binaries ==="
+          find crates/ruvector-graph-transformer-node/npm -name "*.node" -exec ls -lh {} \; 2>/dev/null || true
+          find crates/ruvector-graph-transformer-wasm/pkg -name "*.wasm" -exec ls -lh {} \; 2>/dev/null || true
+
+      - name: Commit and push binaries
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f crates/ruvector-graph-transformer-node/npm/ crates/ruvector-graph-transformer-wasm/pkg/ || true
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: Update graph transformer NAPI-RS binaries for all platforms
+
+          Built from commit ${{ github.sha }}
+
+          Platforms updated:
+          - linux-x64-gnu
+          - linux-x64-musl
+          - linux-arm64-gnu
+          - linux-arm64-musl
+          - darwin-x64
+          - darwin-arm64
+          - win32-x64-msvc
+          - wasm
+
+          Generated by GitHub Actions"
+            git push
+          fi
+
+  publish:
+    name: Publish Platform Packages
+    runs-on: ubuntu-22.04
+    needs: [build, commit-binaries]
+    if: |
+      inputs.publish == true ||
+      startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create and publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./crates/ruvector-graph-transformer-node/package.json').version")
+          echo "Publishing version: $VERSION"
+
+          for dir in artifacts/gt-bindings-*/; do
+            platform=$(basename "$dir" | sed 's/gt-bindings-//')
+            NODE_FILE=$(find "$dir" -name "*.node" | head -1)
+
+            if [ -z "$NODE_FILE" ]; then
+              echo "No .node file found in $dir"
+              continue
+            fi
+
+            echo "=== Publishing @ruvector/graph-transformer-${platform}@${VERSION} ==="
+
+            PKG_DIR="npm-pkg/graph-transformer-${platform}"
+            mkdir -p "$PKG_DIR"
+
+            case "$platform" in
+              linux-x64-gnu)
+                OS="linux"; CPU="x64"; LIBC='"libc": ["glibc"],'
+                NODE_NAME="ruvector-graph-transformer.linux-x64-gnu.node"
+                ;;
+              linux-x64-musl)
+                OS="linux"; CPU="x64"; LIBC='"libc": ["musl"],'
+                NODE_NAME="ruvector-graph-transformer.linux-x64-musl.node"
+                ;;
+              linux-arm64-gnu)
+                OS="linux"; CPU="arm64"; LIBC='"libc": ["glibc"],'
+                NODE_NAME="ruvector-graph-transformer.linux-arm64-gnu.node"
+                ;;
+              linux-arm64-musl)
+                OS="linux"; CPU="arm64"; LIBC='"libc": ["musl"],'
+                NODE_NAME="ruvector-graph-transformer.linux-arm64-musl.node"
+                ;;
+              darwin-x64)
+                OS="darwin"; CPU="x64"; LIBC=""
+                NODE_NAME="ruvector-graph-transformer.darwin-x64.node"
+                ;;
+              darwin-arm64)
+                OS="darwin"; CPU="arm64"; LIBC=""
+                NODE_NAME="ruvector-graph-transformer.darwin-arm64.node"
+                ;;
+              win32-x64-msvc)
+                OS="win32"; CPU="x64"; LIBC=""
+                NODE_NAME="ruvector-graph-transformer.win32-x64-msvc.node"
+                ;;
+            esac
+
+            cp "$NODE_FILE" "$PKG_DIR/$NODE_NAME"
+
+            cat > "$PKG_DIR/package.json" << EOF
+          {
+            "name": "@ruvector/graph-transformer-${platform}",
+            "version": "${VERSION}",
+            "os": ["${OS}"],
+            "cpu": ["${CPU}"],
+            ${LIBC}
+            "main": "${NODE_NAME}",
+            "files": ["${NODE_NAME}"],
+            "description": "Proof-gated graph transformer - ${platform} platform binary",
+            "keywords": ["ruvector", "graph-transformer", "napi-rs"],
+            "author": "Ruvector Team",
+            "license": "MIT",
+            "repository": {"type": "git", "url": "https://github.com/ruvnet/ruvector"},
+            "engines": {"node": ">= 10"},
+            "publishConfig": {"registry": "https://registry.npmjs.org/", "access": "public"}
+          }
+          EOF
+
+            if [ ! -f "$PKG_DIR/$NODE_NAME" ]; then
+              echo "ERROR: Binary $NODE_NAME missing from $PKG_DIR"
+              ls -la "$PKG_DIR/"
+              exit 1
+            fi
+
+            echo "Binary size: $(wc -c < "$PKG_DIR/$NODE_NAME") bytes"
+
+            cd "$PKG_DIR"
+            npm publish --access public || echo "Failed to publish @ruvector/graph-transformer-${platform}"
+            cd ../..
+          done
+
+      - name: Publish main @ruvector/graph-transformer package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        working-directory: crates/ruvector-graph-transformer-node
+        run: |
+          npm install --ignore-scripts --omit=optional --force
+          npm publish --access public --ignore-scripts || echo "Failed to publish @ruvector/graph-transformer"

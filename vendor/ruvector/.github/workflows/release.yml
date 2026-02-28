@@ -1,0 +1,621 @@
+name: Release Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.1.3)'
+        required: true
+        type: string
+      skip_tests:
+        description: 'Skip test validation'
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Dry run (no publishing)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Job 1: Validate code quality and run tests
+  validate:
+    name: Validate Code Quality
+    runs-on: ubuntu-22.04
+    if: ${{ !inputs.skip_tests }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: npm/package-lock.json
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: 'v1-rust'
+          shared-key: 'validate'
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Run Rust tests
+        run: cargo test --workspace --all-features
+        env:
+          RUST_TEST_THREADS: 2
+
+      - name: Install npm dependencies
+        working-directory: npm
+        run: npm ci
+
+      - name: Run npm tests
+        working-directory: npm
+        run: npm run test:unit || true
+
+      - name: Generate validation summary
+        if: always()
+        run: |
+          echo "## Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Code formatting checked" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Clippy lints passed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Rust tests completed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ npm tests completed" >> $GITHUB_STEP_SUMMARY
+
+  # Job 2: Build and test Rust crates
+  build-crates:
+    name: Build Rust Crates
+    runs-on: ubuntu-22.04
+    needs: validate
+    if: always() && (needs.validate.result == 'success' || needs.validate.result == 'skipped')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: 'v1-rust'
+          shared-key: 'build-crates'
+
+      - name: Build all crates
+        run: cargo build --workspace --release
+
+      - name: Run crate tests
+        run: cargo test --workspace --release
+        env:
+          RUST_TEST_THREADS: 2
+
+      - name: Generate crate build summary
+        run: |
+          echo "## Crate Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Built Crates:" >> $GITHUB_STEP_SUMMARY
+          cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | "- \(.name) v\(.version)"' >> $GITHUB_STEP_SUMMARY
+
+  # Job 3: Build WASM packages
+  build-wasm:
+    name: Build WASM Packages
+    runs-on: ubuntu-22.04
+    needs: validate
+    if: always() && (needs.validate.result == 'success' || needs.validate.result == 'skipped')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: npm/package-lock.json
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: 'v1-rust'
+          shared-key: 'wasm'
+
+      - name: Cache wasm-pack
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            ~/.cargo/bin/wasm-pack
+          key: ${{ runner.os }}-wasm-pack-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build ruvector-wasm
+        working-directory: crates/ruvector-wasm
+        run: wasm-pack build --target nodejs --out-dir ../../npm/packages/wasm/wasm-pkg
+
+      - name: Build ruvector-gnn-wasm
+        working-directory: crates/ruvector-gnn-wasm
+        run: wasm-pack build --target nodejs --release
+
+      - name: Build ruvector-graph-wasm
+        working-directory: crates/ruvector-graph-wasm
+        run: bash build.sh
+
+      - name: Build ruvector-tiny-dancer-wasm
+        working-directory: crates/ruvector-tiny-dancer-wasm
+        run: wasm-pack build --target nodejs --release
+
+      - name: Upload WASM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-packages
+          path: |
+            npm/packages/wasm/wasm-pkg/**
+            crates/ruvector-gnn-wasm/pkg/**
+            crates/ruvector-graph-wasm/pkg/**
+            crates/ruvector-tiny-dancer-wasm/pkg/**
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Generate WASM build summary
+        run: |
+          echo "## WASM Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ ruvector-wasm built" >> $GITHUB_STEP_SUMMARY
+          echo "✅ ruvector-gnn-wasm built" >> $GITHUB_STEP_SUMMARY
+          echo "✅ ruvector-graph-wasm built" >> $GITHUB_STEP_SUMMARY
+          echo "✅ ruvector-tiny-dancer-wasm built" >> $GITHUB_STEP_SUMMARY
+
+  # Job 4: Build native Node.js modules (reuse existing workflow)
+  build-native:
+    name: Build Native Modules
+    needs: validate
+    if: always() && (needs.validate.result == 'success' || needs.validate.result == 'skipped')
+    uses: ./.github/workflows/build-native.yml
+    with:
+      skip_commit: true
+
+  # Job 5: Publish crates to crates.io
+  publish-crates:
+    name: Publish Rust Crates
+    runs-on: ubuntu-22.04
+    needs: [validate, build-crates]
+    if: |
+      always() &&
+      (needs.validate.result == 'success' || needs.validate.result == 'skipped') &&
+      needs.build-crates.result == 'success' &&
+      (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') &&
+      !inputs.dry_run
+    environment:
+      name: crates-io
+      url: https://crates.io/crates/ruvector-core
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: 'v1-rust'
+          shared-key: 'publish'
+
+      - name: Verify CARGO_REGISTRY_TOKEN
+        run: |
+          if [ -z "${{ secrets.CARGO_REGISTRY_TOKEN }}" ]; then
+            echo "❌ CARGO_REGISTRY_TOKEN is not set"
+            exit 1
+          fi
+          echo "✅ CARGO_REGISTRY_TOKEN is configured"
+
+      - name: Publish crates in dependency order
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -e
+
+          # Define publishing order (dependencies first)
+          CRATES=(
+            "ruvector-core"
+            "ruvector-metrics"
+            "ruvector-filter"
+            "ruvector-snapshot"
+            "ruvector-collections"
+            "ruvector-router-core"
+            "ruvector-raft"
+            "ruvector-cluster"
+            "ruvector-replication"
+            "ruvector-gnn"
+            "ruvector-graph"
+            "ruvector-server"
+            "ruvector-tiny-dancer-core"
+            "ruvector-router-cli"
+            "ruvector-router-ffi"
+            "ruvector-router-wasm"
+            "ruvector-cli"
+            "ruvector-bench"
+            "ruvector-wasm"
+            "ruvector-node"
+            "ruvector-gnn-wasm"
+            "ruvector-gnn-node"
+            "ruvector-graph-wasm"
+            "ruvector-graph-node"
+            "ruvector-tiny-dancer-wasm"
+            "ruvector-tiny-dancer-node"
+          )
+
+          echo "## Crate Publishing Progress" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          for crate in "${CRATES[@]}"; do
+            echo "Publishing $crate..."
+
+            # Check if crate exists
+            if [ ! -d "crates/$crate" ]; then
+              echo "⏭️  Skipping $crate (not found)" >> $GITHUB_STEP_SUMMARY
+              continue
+            fi
+
+            cd "crates/$crate"
+
+            # Try to publish, continue if already published
+            if cargo publish --token "$CARGO_REGISTRY_TOKEN" --allow-dirty; then
+              echo "✅ Published $crate" >> $GITHUB_STEP_SUMMARY
+              # Wait to avoid rate limiting
+              sleep 10
+            else
+              echo "⚠️  Failed to publish $crate (may already exist)" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            cd ../..
+          done
+
+      - name: Verify published crates
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Verification" >> $GITHUB_STEP_SUMMARY
+          echo "Check published crates at: https://crates.io/search?q=ruvector" >> $GITHUB_STEP_SUMMARY
+
+  # Job 6: Prepare npm packages for manual publishing
+  # NOTE: Automatic npm publishing disabled - packages are published manually
+  prepare-npm:
+    name: Prepare npm Packages
+    runs-on: ubuntu-22.04
+    needs: [validate, build-native, build-wasm]
+    if: |
+      always() &&
+      (needs.validate.result == 'success' || needs.validate.result == 'skipped') &&
+      needs.build-native.result == 'success' &&
+      needs.build-wasm.result == 'success' &&
+      (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Download native binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bindings-*
+          path: artifacts
+
+      - name: Download WASM packages
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-packages
+          path: wasm-artifacts
+
+      - name: Copy native binaries to platform packages
+        run: |
+          for dir in artifacts/bindings-*/; do
+            platform=$(basename "$dir" | sed 's/bindings-//')
+            mkdir -p "npm/core/platforms/${platform}"
+            cp -v "$dir"/*.node "npm/core/platforms/${platform}/" || true
+          done
+
+          # Copy linux-x64 to native directory
+          if [ -f "npm/core/platforms/linux-x64-gnu/ruvector.node" ]; then
+            mkdir -p npm/core/native/linux-x64
+            cp -v npm/core/platforms/linux-x64-gnu/ruvector.node npm/core/native/linux-x64/
+          fi
+
+      - name: Copy WASM packages
+        run: |
+          # Copy main WASM package
+          if [ -d "wasm-artifacts/npm/packages/wasm/wasm-pkg" ]; then
+            cp -r wasm-artifacts/npm/packages/wasm/wasm-pkg/* npm/packages/wasm/wasm-pkg/
+          fi
+
+      - name: Install dependencies
+        working-directory: npm
+        run: npm ci || npm install --ignore-scripts
+
+      - name: Build npm packages
+        working-directory: npm
+        run: npm run build || echo "Build step skipped"
+
+      - name: Package artifacts for manual publishing
+        run: |
+          mkdir -p npm-publish-ready
+
+          # Copy platform binaries
+          cp -r npm/core/platforms npm-publish-ready/ || true
+          cp -r npm/core/native npm-publish-ready/ || true
+
+          # Create manifest
+          echo "# NPM Packages Ready for Publishing" > npm-publish-ready/README.md
+          echo "" >> npm-publish-ready/README.md
+          echo "## Platform binaries included:" >> npm-publish-ready/README.md
+          find npm-publish-ready/platforms -name "*.node" 2>/dev/null | while read f; do
+            echo "- $(basename $f)" >> npm-publish-ready/README.md
+          done
+
+          echo "" >> npm-publish-ready/README.md
+          echo "## Manual publishing commands:" >> npm-publish-ready/README.md
+          echo "\`\`\`bash" >> npm-publish-ready/README.md
+          echo "# Login to npm" >> npm-publish-ready/README.md
+          echo "npm login" >> npm-publish-ready/README.md
+          echo "" >> npm-publish-ready/README.md
+          echo "# Publish packages" >> npm-publish-ready/README.md
+          echo "cd npm/packages/core && npm publish --access public" >> npm-publish-ready/README.md
+          echo "cd npm/packages/wasm && npm publish --access public" >> npm-publish-ready/README.md
+          echo "cd npm/packages/cli && npm publish --access public" >> npm-publish-ready/README.md
+          echo "cd npm/packages/ruvector && npm publish --access public" >> npm-publish-ready/README.md
+          echo "\`\`\`" >> npm-publish-ready/README.md
+
+      - name: Upload npm-ready artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-publish-ready
+          path: npm-publish-ready/
+          retention-days: 30
+
+      - name: Generate npm preparation summary
+        run: |
+          echo "## npm Package Preparation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Native binaries copied to platform packages" >> $GITHUB_STEP_SUMMARY
+          echo "✅ WASM packages prepared" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Packages ready for manual publishing" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Manual Publishing Required" >> $GITHUB_STEP_SUMMARY
+          echo "Download the \`npm-publish-ready\` artifact and run:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "npm login" >> $GITHUB_STEP_SUMMARY
+          echo "npm publish --access public" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+  # Job 7: Create GitHub release
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-22.04
+    needs: [build-crates, build-native, build-wasm, publish-crates, prepare-npm]
+    if: |
+      always() &&
+      needs.build-crates.result == 'success' &&
+      needs.build-native.result == 'success' &&
+      needs.build-wasm.result == 'success' &&
+      (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download native binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bindings-*
+          path: release-artifacts
+
+      - name: Download WASM packages
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-packages
+          path: release-artifacts/wasm
+
+      - name: Package artifacts for release
+        run: |
+          mkdir -p release-packages
+
+          # Package native binaries
+          for dir in release-artifacts/bindings-*/; do
+            platform=$(basename "$dir" | sed 's/bindings-//')
+            tar -czf "release-packages/ruvector-native-${platform}.tar.gz" -C "$dir" .
+          done
+
+          # Package WASM
+          tar -czf release-packages/ruvector-wasm.tar.gz -C release-artifacts/wasm .
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION="${{ github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="v${{ inputs.version }}"
+          fi
+
+          cat > release_notes.md <<EOF
+          # RuVector ${VERSION}
+
+          ## 🚀 What's New
+
+          This release includes:
+          - High-performance Rust vector database core
+          - Node.js native bindings for all major platforms
+          - WebAssembly support for browser and Node.js
+          - Graph neural network capabilities
+          - Distributed clustering support
+
+          ## 📦 Packages Published
+
+          ### Rust Crates (crates.io)
+          - \`ruvector-core\` - Core vector database functionality
+          - \`ruvector-graph\` - Graph database capabilities
+          - \`ruvector-gnn\` - Graph neural networks
+          - \`ruvector-cluster\` - Distributed clustering
+          - And 20+ more specialized crates
+
+          ### npm Packages
+          - \`@ruvector/core\` - Main Node.js package with platform-specific binaries
+          - \`@ruvector/wasm\` - WebAssembly bindings
+          - \`@ruvector/cli\` - Command-line interface
+          - \`@ruvector/extensions\` - Additional extensions
+
+          ## 🏗️ Platform Support
+
+          ### Native Node.js Modules
+          - ✅ Linux x64 (GNU)
+          - ✅ Linux ARM64 (GNU)
+          - ✅ macOS x64 (Intel)
+          - ✅ macOS ARM64 (Apple Silicon)
+          - ✅ Windows x64 (MSVC)
+
+          ### WebAssembly
+          - ✅ All platforms via WASM
+
+          ## 📥 Installation
+
+          \`\`\`bash
+          # Node.js
+          npm install @ruvector/core
+
+          # WASM
+          npm install @ruvector/wasm
+
+          # CLI
+          npm install -g @ruvector/cli
+
+          # Rust
+          cargo add ruvector-core
+          \`\`\`
+
+          ## 🔗 Links
+
+          - [npm Package](https://www.npmjs.com/package/@ruvector/core)
+          - [crates.io](https://crates.io/crates/ruvector-core)
+          - [Documentation](https://github.com/ruvnet/ruvector)
+          - [Repository](https://github.com/ruvnet/ruvector)
+
+          ## 📊 Metrics
+
+          - Total Rust Crates: 26
+          - Total npm Packages: 4+
+          - Supported Platforms: 5 native + WASM
+          - Binary Size: ~2-5 MB per platform
+
+          ---
+
+          Built with ❤️ by the RuVector team
+          EOF
+
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.release_notes.outputs.version }}
+          name: RuVector ${{ steps.release_notes.outputs.version }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ contains(steps.release_notes.outputs.version, 'alpha') || contains(steps.release_notes.outputs.version, 'beta') }}
+          files: |
+            release-packages/*.tar.gz
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate release summary
+        run: |
+          echo "## 🎉 Release Created Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Version: ${{ steps.release_notes.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Published Artifacts:" >> $GITHUB_STEP_SUMMARY
+          ls -lh release-packages/ >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Release URL:" >> $GITHUB_STEP_SUMMARY
+          echo "https://github.com/${{ github.repository }}/releases/tag/${{ steps.release_notes.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+
+  # Summary job to report overall status
+  release-summary:
+    name: Release Summary
+    runs-on: ubuntu-22.04
+    needs: [validate, build-crates, build-native, build-wasm, publish-crates, prepare-npm, create-release]
+    if: always()
+
+    steps:
+      - name: Generate final summary
+        run: |
+          echo "# 🚀 RuVector Release Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Job Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Validate | ${{ needs.validate.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build Crates | ${{ needs.build-crates.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build Native | ${{ needs.build-native.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build WASM | ${{ needs.build-wasm.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Publish Crates | ${{ needs.publish-crates.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Prepare npm | ${{ needs.prepare-npm.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Create Release | ${{ needs.create-release.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.create-release.result }}" = "success" ]; then
+            echo "## ✅ Release completed successfully!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ⚠️ Release completed with some warnings or failures" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "- Verify packages on [crates.io](https://crates.io/search?q=ruvector)" >> $GITHUB_STEP_SUMMARY
+          echo "- Verify packages on [npm](https://www.npmjs.com/search?q=%40ruvector)" >> $GITHUB_STEP_SUMMARY
+          echo "- Check [GitHub releases](https://github.com/${{ github.repository }}/releases)" >> $GITHUB_STEP_SUMMARY
+          echo "- Update documentation if needed" >> $GITHUB_STEP_SUMMARY

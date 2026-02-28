@@ -1,0 +1,1 @@
+{"version":3,"file":"express-middleware.d.ts","sourceRoot":"","sources":["express-middleware.ts"],"names":[],"mappings":"AAAA;;;;;;;GAOG;AAMH,OAAO,QAAQ,SAAS,CAAC;IACvB,UAAU,OAAO;QACf,SAAS,CAAC,EAAE,MAAM,CAAC;QACnB,WAAW,CAAC,EAAE,MAAM,CAAC;KACtB;CACF"}

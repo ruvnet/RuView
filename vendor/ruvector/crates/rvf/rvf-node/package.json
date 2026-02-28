@@ -1,0 +1,25 @@
+{
+  "name": "@ruvector/rvf-node",
+  "version": "0.1.4",
+  "description": "RuVector Format Node.js native bindings",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "binaryName": "rvf-node",
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "aarch64-unknown-linux-gnu"
+    ]
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "prepublishOnly": "napi prepublish -t npm"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  }
+}

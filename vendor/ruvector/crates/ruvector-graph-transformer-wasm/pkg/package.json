@@ -1,0 +1,31 @@
+{
+  "name": "ruvector-graph-transformer-wasm",
+  "type": "module",
+  "collaborators": [
+    "Ruvector Team"
+  ],
+  "description": "WASM bindings for ruvector-graph-transformer: proof-gated graph attention in the browser",
+  "version": "2.0.5",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector"
+  },
+  "files": [
+    "ruvector_graph_transformer_wasm_bg.wasm",
+    "ruvector_graph_transformer_wasm.js",
+    "ruvector_graph_transformer_wasm.d.ts"
+  ],
+  "main": "ruvector_graph_transformer_wasm.js",
+  "types": "ruvector_graph_transformer_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ],
+  "keywords": [
+    "wasm",
+    "graph-transformer",
+    "attention",
+    "verified",
+    "webassembly"
+  ]
+}

@@ -1,0 +1,36 @@
+[package]
+name = "agentic-robotics-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+[dependencies]
+zenoh = { workspace = true }
+rustdds = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+cdr = { workspace = true }
+rkyv = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+parking_lot = { workspace = true }
+crossbeam = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+hdrhistogram = { workspace = true }
+
+[[bench]]
+name = "message_passing"
+harness = false

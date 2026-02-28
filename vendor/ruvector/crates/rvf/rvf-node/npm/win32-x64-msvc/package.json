@@ -1,0 +1,20 @@
+{
+  "name": "@ruvector/rvf-node-win32-x64-msvc",
+  "version": "0.1.7",
+  "cpu": [
+    "x64"
+  ],
+  "main": "rvf-node.win32-x64-msvc.node",
+  "files": [
+    "rvf-node.win32-x64-msvc.node"
+  ],
+  "description": "RuVector Format Node.js native bindings",
+  "license": "MIT",
+  "os": [
+    "win32"
+  ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  }
+}

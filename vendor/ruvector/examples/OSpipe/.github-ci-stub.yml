@@ -1,0 +1,58 @@
+# OSpipe Cross-Platform Build Matrix
+# Copy to .github/workflows/ospipe.yml to activate
+name: OSpipe Build
+on:
+  push:
+    paths: ['examples/OSpipe/**']
+  pull_request:
+    paths: ['examples/OSpipe/**']
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            name: macOS ARM64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            name: macOS x64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: Windows x64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            name: Linux x64
+          - os: ubuntu-latest
+            target: wasm32-unknown-unknown
+            name: WASM
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build
+        run: cargo build -p ospipe --target ${{ matrix.target }} --release
+      - name: Test
+        run: cargo test -p ospipe
+        if: matrix.target != 'wasm32-unknown-unknown'
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        if: matrix.target != 'wasm32-unknown-unknown'
+        with:
+          name: ospipe-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/libospipe*
+            target/${{ matrix.target }}/release/ospipe*
+          if-no-files-found: ignore
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@v4
+        if: matrix.target == 'wasm32-unknown-unknown'
+        with:
+          name: ospipe-wasm
+          path: target/wasm32-unknown-unknown/release/ospipe.wasm
+          if-no-files-found: ignore

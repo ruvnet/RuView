@@ -1,0 +1,9 @@
+id,embedding,metadata
+vec_001,"[0.12, 0.45, 0.78, 0.23, 0.91]","{""category"":""product"",""priority"":""high"",""score"":95}"
+vec_002,"[0.34, 0.67, 0.12, 0.89, 0.45]","{""category"":""service"",""priority"":""medium"",""score"":87}"
+vec_003,"[0.56, 0.23, 0.91, 0.45, 0.67]","{""category"":""product"",""priority"":""low"",""score"":72}"
+vec_004,"[0.89, 0.12, 0.34, 0.78, 0.23]","{""category"":""support"",""priority"":""high"",""score"":91}"
+vec_005,"[0.23, 0.91, 0.56, 0.12, 0.89]","{""category"":""service"",""priority"":""high"",""score"":88}"
+vec_006,"[0.67, 0.34, 0.78, 0.91, 0.12]","{}"
+vec_007,"[0.91, 0.56, 0.23, 0.67, 0.45]","{""category"":""product"",""featured"":true}"
+vec_008,"[0.12, 0.78, 0.45, 0.23, 0.91]","{""category"":""demo"",""status"":""active""}"

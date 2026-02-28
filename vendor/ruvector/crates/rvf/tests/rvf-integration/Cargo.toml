@@ -1,0 +1,19 @@
+[package]
+name = "rvf-integration-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Integration and acceptance tests for the RVF crate family"
+
+[dependencies]
+rvf-types = { path = "../../rvf-types", features = ["std"] }
+rvf-wire = { path = "../../rvf-wire" }
+rvf-manifest = { path = "../../rvf-manifest" }
+rvf-index = { path = "../../rvf-index" }
+rvf-quant = { path = "../../rvf-quant" }
+rvf-crypto = { path = "../../rvf-crypto" }
+rvf-runtime = { path = "../../rvf-runtime" }
+rvf-adapter-rvlite = { path = "../../rvf-adapters/rvlite" }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+tempfile = "3"

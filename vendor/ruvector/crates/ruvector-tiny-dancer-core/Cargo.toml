@@ -1,0 +1,59 @@
+[package]
+name = "ruvector-tiny-dancer-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Production-grade AI agent routing system with FastGRNN neural inference"
+
+[lib]
+crate-type = ["lib", "staticlib"]
+
+[dependencies]
+# Workspace dependencies
+redb = { workspace = true }
+memmap2 = { workspace = true }
+rayon = { workspace = true }
+crossbeam = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+simsimd = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+dashmap = { workspace = true }
+
+# Math and ML dependencies
+ndarray = { workspace = true }
+rand = { workspace = true }
+rand_distr = { workspace = true }
+
+# Time and utilities
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled", "modern_sqlite"] }
+
+# Performance monitoring
+once_cell = { workspace = true }
+
+# Byte manipulation
+bytemuck = "1.18"
+
+[dev-dependencies]
+criterion = { workspace = true }
+proptest = { workspace = true }
+tempfile = "3.12"
+tracing-subscriber = { workspace = true }
+
+[[bench]]
+name = "routing_inference"
+harness = false
+
+[[bench]]
+name = "feature_engineering"
+harness = false

@@ -1,0 +1,81 @@
+[package]
+name = "ruvector-graph-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "WebAssembly bindings for RuVector graph database with Neo4j-inspired API and Cypher support"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ruvector-core = { version = "2.0", path = "../ruvector-core", default-features = false }
+ruvector-graph = { version = "2.0", path = "../ruvector-graph", default-features = false, features = ["wasm"] }
+parking_lot = { workspace = true }
+getrandom = { workspace = true }
+
+# Add getrandom 0.2 with js feature for WASM compatibility
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
+
+# WASM
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+js-sys = { workspace = true }
+web-sys = { workspace = true, features = [
+    "console",
+    "Window",
+    "IdbDatabase",
+    "IdbFactory",
+    "IdbObjectStore",
+    "IdbRequest",
+    "IdbTransaction",
+    "IdbOpenDbRequest",
+    "Worker",
+    "MessagePort",
+] }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde-wasm-bindgen = "0.6"
+
+# UUID support
+uuid = { workspace = true }
+
+# Utils
+console_error_panic_hook = "0.1"
+tracing-wasm = "0.2"
+
+# Regex for basic Cypher parsing
+regex = "1.10"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[features]
+default = []
+simd = ["ruvector-core/simd"]
+
+# Ensure getrandom uses wasm_js/js features for WASM
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.release.package."*"]
+opt-level = "z"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

@@ -1,0 +1,205 @@
+name: Build RVF Node Native Modules
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/rvf/rvf-node/**'
+      - 'crates/rvf/rvf-runtime/**'
+      - 'npm/packages/rvf-node/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/rvf/rvf-node/**'
+      - 'crates/rvf/rvf-runtime/**'
+      - 'npm/packages/rvf-node/**'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            platform: linux-x64-gnu
+          - host: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            platform: linux-arm64-gnu
+          - host: macos-14
+            target: x86_64-apple-darwin
+            platform: darwin-x64
+          - host: macos-14
+            target: aarch64-apple-darwin
+            platform: darwin-arm64
+          - host: windows-2022
+            target: x86_64-pc-windows-msvc
+            platform: win32-x64-msvc
+
+    name: Build ${{ matrix.settings.platform }}
+    runs-on: ${{ matrix.settings.host }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.settings.target }}
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: rvf-node-${{ matrix.settings.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.settings.platform == 'linux-arm64-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Install NAPI-RS CLI
+        run: npm install -g @napi-rs/cli@^2.18.0
+
+      - name: Build rvf-node native module
+        shell: bash
+        working-directory: crates/rvf/rvf-node
+        run: |
+          napi build --platform --release --target ${{ matrix.settings.target }}
+          # NAPI CLI may output as index.<platform>.node; rename to rvf-node.<platform>.node
+          BUILT=$(ls -1 *.*.node 2>/dev/null | head -1)
+          EXPECTED="rvf-node.${{ matrix.settings.platform }}.node"
+          if [ -n "$BUILT" ] && [ "$BUILT" != "$EXPECTED" ]; then
+            mv -v "$BUILT" "$EXPECTED"
+          fi
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: "-C link-arg=-undefined -C link-arg=dynamic_lookup"
+          CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS: "-C link-arg=-undefined -C link-arg=dynamic_lookup"
+
+      - name: List built artifacts
+        shell: bash
+        run: |
+          echo "=== Built .node files ==="
+          find crates/rvf/rvf-node -name "*.node" -type f -exec ls -lh {} \;
+
+      - name: Copy binary to platform package
+        shell: bash
+        run: |
+          SRC=$(find crates/rvf/rvf-node -maxdepth 1 -name "rvf-node.*.node" -type f | head -1)
+          FNAME=$(basename "$SRC")
+
+          # Copy to npm platform package (avoid same-file error)
+          PLAT_DIR="crates/rvf/rvf-node/npm/${{ matrix.settings.platform }}"
+          mkdir -p "$PLAT_DIR"
+          if [ "$(realpath "$SRC")" != "$(realpath "$PLAT_DIR/$FNAME" 2>/dev/null)" ]; then
+            cp -v "$SRC" "$PLAT_DIR/$FNAME"
+          else
+            echo "Source and dest are same file, skipping copy to platform dir"
+          fi
+
+          # Copy to main rvf-node package
+          if [ "$(realpath "$SRC")" != "$(realpath "npm/packages/rvf-node/$FNAME" 2>/dev/null)" ]; then
+            cp -v "$SRC" "npm/packages/rvf-node/$FNAME"
+          else
+            echo "Source and dest are same file, skipping copy to main dir"
+          fi
+
+          echo "=== Platform package ==="
+          ls -lh "$PLAT_DIR/"
+          echo "=== Main package ==="
+          ls -lh "npm/packages/rvf-node/$FNAME"
+
+      - name: Test native module (native platform only)
+        if: |
+          (matrix.settings.platform == 'linux-x64-gnu') ||
+          (matrix.settings.platform == 'darwin-arm64' && runner.arch == 'ARM64') ||
+          (matrix.settings.platform == 'darwin-x64' && runner.arch == 'X64') ||
+          (matrix.settings.platform == 'win32-x64-msvc' && runner.os == 'Windows')
+        continue-on-error: true
+        shell: bash
+        run: |
+          NODE_FILE=$(find crates/rvf/rvf-node -name "rvf-node.*.node" -type f | head -1)
+          if [ -f "$NODE_FILE" ]; then
+            echo "Testing: $NODE_FILE"
+            node -e "
+              const m = require('./$NODE_FILE');
+              console.log('Exports:', Object.keys(m));
+              if (m.RvfDatabase) {
+                console.log('RvfDatabase methods:', Object.getOwnPropertyNames(m.RvfDatabase.prototype || {}));
+                console.log('RvfDatabase static:', Object.keys(m.RvfDatabase));
+              }
+              console.log('OK');
+            "
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rvf-node-${{ matrix.settings.platform }}
+          path: |
+            crates/rvf/rvf-node/npm/${{ matrix.settings.platform }}/rvf-node.*.node
+          if-no-files-found: error
+
+  commit-binaries:
+    name: Commit RVF Node Binaries
+    runs-on: ubuntu-22.04
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: rvf-node-*
+
+      - name: Copy binaries to packages
+        run: |
+          for dir in artifacts/rvf-node-*/; do
+            platform=$(basename "$dir" | sed 's/rvf-node-//')
+            mkdir -p "crates/rvf/rvf-node/npm/${platform}"
+            cp -v "$dir"/rvf-node.*.node "crates/rvf/rvf-node/npm/${platform}/"
+            cp -v "$dir"/rvf-node.*.node "npm/packages/rvf-node/"
+          done
+
+      - name: Show binary sizes
+        run: |
+          echo "=== RVF Node Binaries ==="
+          find crates/rvf/rvf-node/npm -name "*.node" -exec ls -lh {} \;
+          echo "=== Main package ==="
+          find npm/packages/rvf-node -name "*.node" -exec ls -lh {} \;
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f crates/rvf/rvf-node/npm/ npm/packages/rvf-node/*.node
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: Update RVF NAPI-RS binaries for all platforms
+
+          Built from commit ${{ github.sha }}
+
+          Platforms: linux-x64-gnu, linux-arm64-gnu, darwin-x64, darwin-arm64, win32-x64-msvc
+
+          Co-Authored-By: claude-flow <ruv@ruv.net>"
+            git push
+          fi

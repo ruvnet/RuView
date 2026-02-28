@@ -1,0 +1,21 @@
+{
+  "tasks": [],
+  "optimizations": 0,
+  "pretrained": true,
+  "pretrainVersion": 2,
+  "pretrainedAt": "2025-12-25T21:07:36.675Z",
+  "stats": {
+    "commands": 7697,
+    "agents": 662,
+    "files": 4018,
+    "patterns": 5,
+    "coordination": 11,
+    "calibration": 8520
+  },
+  "features": {
+    "patternDecay": true,
+    "calibration": true,
+    "activeLearning": true,
+    "uncertainStates": 0
+  }
+}

@@ -1,0 +1,128 @@
+[package]
+name = "ruvector-data-framework"
+version = "0.3.0"
+edition.workspace = true
+description = "Core discovery framework for RuVector dataset integrations - find hidden patterns in massive datasets using vector memory, graph structures, and dynamic min-cut algorithms"
+license.workspace = true
+repository.workspace = true
+readme = "../README.md"
+documentation = "https://docs.rs/ruvector-data-framework"
+authors = ["RuVector Team <team@ruvector.dev>"]
+keywords = ["vector-database", "discovery", "graph", "mincut", "coherence"]
+categories = ["science", "database", "data-structures"]
+
+[dependencies]
+# Async runtime
+tokio.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# HTTP client for APIs
+reqwest.workspace = true
+
+# Time handling
+chrono.workspace = true
+
+# Logging and errors
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror.workspace = true
+
+# Data processing
+rayon = { workspace = true, optional = true }
+ndarray.workspace = true
+rand = "0.8"
+
+# URL encoding for API calls
+urlencoding = "2.1"
+
+# XML parsing for PubMed
+quick-xml = { version = "0.36", features = ["serialize"] }
+
+# Compression
+flate2 = "1.1"
+
+# MCP Server dependencies
+clap = { version = "4.5", features = ["derive"] }
+num_cpus = "1.16"
+warp = { version = "0.3", optional = true }
+
+# ONNX embeddings (optional - for semantic embeddings)
+ruvector-onnx-embeddings = { version = "0.1.0", optional = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+rand = "0.8"
+tempfile = "3.8"
+tracing-subscriber = "0.3"
+
+[[example]]
+name = "cross_domain_discovery"
+path = "examples/cross_domain_discovery.rs"
+
+[[example]]
+name = "optimized_benchmark"
+path = "examples/optimized_benchmark.rs"
+
+[[example]]
+name = "discovery_hunter"
+path = "examples/discovery_hunter.rs"
+
+[[example]]
+name = "api_client_demo"
+path = "examples/api_client_demo.rs"
+
+[[example]]
+name = "real_data_discovery"
+path = "examples/real_data_discovery.rs"
+
+[[example]]
+name = "multi_domain_discovery"
+path = "examples/multi_domain_discovery.rs"
+
+[[example]]
+name = "realtime_feeds"
+path = "examples/realtime_feeds.rs"
+
+[[example]]
+name = "medical_discovery"
+path = "examples/medical_discovery.rs"
+
+[[example]]
+name = "wiki_discovery"
+path = "examples/wiki_discovery.rs"
+
+[[example]]
+name = "arxiv_discovery"
+path = "examples/arxiv_discovery.rs"
+
+[[example]]
+name = "optimized_runner"
+path = "examples/optimized_runner.rs"
+
+[[example]]
+name = "news_social_demo"
+path = "examples/news_social_demo.rs"
+
+[[example]]
+name = "dynamic_mincut_benchmark"
+path = "examples/dynamic_mincut_benchmark.rs"
+
+[[bin]]
+name = "discover"
+path = "src/bin/discover.rs"
+
+[[bin]]
+name = "mcp_discovery"
+path = "src/bin/mcp_discovery.rs"
+
+[features]
+default = ["async", "parallel"]
+async = []
+parallel = ["rayon"]
+sse = ["warp"]
+onnx-embeddings = ["dep:ruvector-onnx-embeddings"]

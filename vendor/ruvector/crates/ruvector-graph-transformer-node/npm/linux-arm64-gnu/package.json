@@ -1,0 +1,16 @@
+{
+  "name": "@ruvector/graph-transformer-linux-arm64-gnu",
+  "version": "2.0.4",
+  "os": ["linux"],
+  "cpu": ["arm64"],
+  "libc": ["glibc"],
+  "main": "ruvector-graph-transformer.linux-arm64-gnu.node",
+  "files": ["ruvector-graph-transformer.linux-arm64-gnu.node"],
+  "description": "Proof-gated graph transformer - linux-arm64-gnu platform binary",
+  "keywords": ["ruvector", "graph-transformer", "napi-rs"],
+  "author": "Ruvector Team",
+  "license": "MIT",
+  "repository": {"type": "git", "url": "https://github.com/ruvnet/ruvector"},
+  "engines": {"node": ">= 10"},
+  "publishConfig": {"registry": "https://registry.npmjs.org/", "access": "public"}
+}

@@ -1,0 +1,8 @@
+# Cargo configuration for RuvLLM N-API builds
+# This enables proper dynamic linking for Node.js native modules on macOS
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
+
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]

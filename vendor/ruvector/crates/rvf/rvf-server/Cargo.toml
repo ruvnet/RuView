@@ -1,0 +1,33 @@
+[package]
+name = "rvf-server"
+version = "0.1.0"
+edition = "2021"
+description = "RuVector Format TCP/HTTP streaming server with REST API"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector"
+readme = "README.md"
+categories = ["database-implementations", "web-programming::http-server"]
+keywords = ["vector", "database", "server", "http", "rvf"]
+rust-version = "1.87"
+
+[[bin]]
+name = "rvf-server"
+path = "src/main.rs"
+
+[dependencies]
+rvf-runtime = { version = "0.2.0", path = "../rvf-runtime" }
+rvf-types = { version = "0.2.0", path = "../rvf-types" }
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.7", features = ["ws"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+tower-http = { version = "0.6", features = ["cors"] }
+mime_guess = "2"
+
+[dev-dependencies]
+axum-test = "16"
+tempfile = "3"
+tower = "0.5"
+http-body-util = "0.1"

@@ -1,0 +1,38 @@
+[package]
+name = "ruvector-graph-transformer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Unified graph transformer with proof-gated mutation substrate — 8 verified modules for physics, biological, manifold, temporal, and economic graph intelligence"
+readme = "README.md"
+keywords = ["graph-transformer", "proof-gated", "attention", "verified", "neural-network"]
+categories = ["science", "mathematics", "algorithms"]
+
+[features]
+default = ["sublinear", "verified-training"]
+sublinear = []
+physics = []
+biological = []
+self-organizing = []
+verified-training = []
+manifold = []
+temporal = []
+economic = []
+full = ["sublinear", "physics", "biological", "self-organizing", "verified-training", "manifold", "temporal", "economic"]
+
+[dependencies]
+ruvector-verified = { version = "0.1", path = "../ruvector-verified", features = ["ultra", "hnsw-proofs"] }
+ruvector-gnn = { version = "2.0", path = "../ruvector-gnn" }
+ruvector-attention = { version = "2.0", path = "../ruvector-attention" }
+ruvector-mincut = { version = "2.0", path = "../ruvector-mincut" }
+ruvector-solver = { version = "2.0", path = "../ruvector-solver" }
+ruvector-coherence = { version = "2.0", path = "../ruvector-coherence" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

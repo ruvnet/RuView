@@ -1,0 +1,31 @@
+[package]
+name = "ruvector-mincut-wasm"
+version.workspace = true
+edition.workspace = true
+description = "WASM bindings for subpolynomial-time dynamic minimum cut"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+keywords = ["mincut", "wasm", "graph", "algorithm", "dynamic"]
+categories = ["wasm", "algorithms"]
+readme = "README.md"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ruvector-mincut = { version = "2.0", path = "../ruvector-mincut", default-features = false, features = ["wasm"] }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+js-sys = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde-wasm-bindgen = "0.6"
+console_error_panic_hook = "0.1"
+getrandom = { version = "0.2", features = ["js"] }
+
+[features]
+default = []
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O4"]

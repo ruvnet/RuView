@@ -1,0 +1,32 @@
+{
+  "name": "@ruvector/ruvllm-linux-x64-gnu",
+  "version": "2.0.0",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "main": "ruvllm.linux-x64-gnu.node",
+  "files": ["ruvllm.linux-x64-gnu.node"],
+  "description": "RuvLLM native SIMD acceleration - linux-x64-gnu platform",
+  "keywords": [
+    "ruvllm",
+    "llm",
+    "simd",
+    "avx2",
+    "vector-database",
+    "napi-rs"
+  ],
+  "author": "rUv Team <team@ruv.io>",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "npm/packages/ruvllm-linux-x64-gnu"
+  },
+  "engines": {
+    "node": ">= 18"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "libc": ["glibc"]
+}

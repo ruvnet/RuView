@@ -1,0 +1,3 @@
+# Database artifacts from VectorDB test/run
+:memory:
+*.db

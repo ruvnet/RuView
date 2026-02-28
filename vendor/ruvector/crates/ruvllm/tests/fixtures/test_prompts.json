@@ -1,0 +1,191 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "description": "Test prompts for RuvLTRA-Small validation",
+    "model": "ruvltra-small",
+    "last_updated": "2024-01-19"
+  },
+  "prompts": {
+    "simple_completion": {
+      "id": "simple_001",
+      "category": "completion",
+      "prompt": "The quick brown fox",
+      "expected_patterns": ["jumps", "jumped", "runs", "ran", "over", "lazy"],
+      "max_tokens": 50,
+      "temperature": 0.7,
+      "notes": "Classic completion test for basic language modeling"
+    },
+    "instruction_haiku": {
+      "id": "instruction_001",
+      "category": "instruction",
+      "prompt": "Write a haiku about programming:",
+      "expected_patterns": ["code", "bug", "compile", "debug", "screen", "night", "lines", "function"],
+      "max_tokens": 100,
+      "temperature": 0.8,
+      "notes": "Tests instruction-following ability"
+    },
+    "qa_capital": {
+      "id": "qa_001",
+      "category": "question_answering",
+      "prompt": "Q: What is the capital of France?\nA:",
+      "expected_output": "Paris",
+      "max_tokens": 20,
+      "temperature": 0.1,
+      "notes": "Simple factual QA with deterministic expected output"
+    },
+    "qa_math": {
+      "id": "qa_002",
+      "category": "question_answering",
+      "prompt": "Q: What is 2 + 2?\nA:",
+      "expected_output": "4",
+      "max_tokens": 10,
+      "temperature": 0.0,
+      "notes": "Simple math QA"
+    },
+    "code_fibonacci": {
+      "id": "code_001",
+      "category": "code_generation",
+      "prompt": "def fibonacci(n):\n    '''Return the nth Fibonacci number.'''\n",
+      "expected_patterns": ["return", "if", "else", "n", "<=", "1", "+", "fibonacci"],
+      "max_tokens": 150,
+      "temperature": 0.3,
+      "notes": "Code generation with expected structural patterns"
+    },
+    "code_hello_world": {
+      "id": "code_002",
+      "category": "code_generation",
+      "prompt": "# Python function to print hello world\ndef",
+      "expected_patterns": ["print", "hello", "world", "def"],
+      "max_tokens": 50,
+      "temperature": 0.2,
+      "notes": "Simple code generation"
+    },
+    "conversation_greeting": {
+      "id": "conv_001",
+      "category": "conversation",
+      "prompt": "User: Hello!\nAssistant:",
+      "expected_patterns": ["hello", "hi", "how", "help", "can", "assist"],
+      "max_tokens": 50,
+      "temperature": 0.7,
+      "notes": "Basic conversation response"
+    },
+    "conversation_joke": {
+      "id": "conv_002",
+      "category": "conversation",
+      "prompt": "User: Tell me a joke.\nAssistant:",
+      "expected_patterns": ["why", "what", "because", "knock", "chicken"],
+      "max_tokens": 100,
+      "temperature": 0.9,
+      "notes": "Creative response generation"
+    },
+    "summarization": {
+      "id": "summary_001",
+      "category": "summarization",
+      "prompt": "Summarize the following in one sentence:\nMachine learning is a subset of artificial intelligence that enables systems to learn and improve from experience without being explicitly programmed.\nSummary:",
+      "expected_patterns": ["machine learning", "AI", "artificial intelligence", "learn", "data"],
+      "max_tokens": 50,
+      "temperature": 0.3,
+      "notes": "Tests summarization capability"
+    },
+    "translation": {
+      "id": "translation_001",
+      "category": "translation",
+      "prompt": "Translate to French: Hello, how are you?\nFrench:",
+      "expected_patterns": ["bonjour", "comment", "allez", "vous"],
+      "max_tokens": 30,
+      "temperature": 0.1,
+      "notes": "Basic translation test"
+    },
+    "sentiment": {
+      "id": "sentiment_001",
+      "category": "classification",
+      "prompt": "Classify the sentiment of this review as positive, negative, or neutral:\n\"This product is amazing! Best purchase I've ever made.\"\nSentiment:",
+      "expected_output": "positive",
+      "max_tokens": 10,
+      "temperature": 0.0,
+      "notes": "Sentiment classification"
+    },
+    "reasoning_chain": {
+      "id": "reasoning_001",
+      "category": "reasoning",
+      "prompt": "Question: If I have 3 apples and give away 1, how many do I have left?\nLet's think step by step:",
+      "expected_patterns": ["3", "1", "2", "subtract", "minus", "left", "remaining"],
+      "max_tokens": 100,
+      "temperature": 0.1,
+      "notes": "Chain-of-thought reasoning"
+    }
+  },
+  "edge_cases": {
+    "empty_prompt": {
+      "id": "edge_001",
+      "prompt": "",
+      "expected_behavior": "Should handle gracefully, may produce empty output or generic response",
+      "max_tokens": 20
+    },
+    "single_char": {
+      "id": "edge_002",
+      "prompt": "A",
+      "expected_behavior": "Should produce coherent completion",
+      "max_tokens": 30
+    },
+    "special_characters": {
+      "id": "edge_003",
+      "prompt": "Translate: \"Hello, world!\" ->",
+      "expected_behavior": "Should handle quotes and punctuation correctly",
+      "max_tokens": 30
+    },
+    "very_long_prompt": {
+      "id": "edge_004",
+      "prompt": "The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. Continue:",
+      "expected_behavior": "Should handle long context without issues",
+      "max_tokens": 50
+    },
+    "unicode": {
+      "id": "edge_005",
+      "prompt": "Translate to English: \u4f60\u597d\u4e16\u754c",
+      "expected_patterns": ["hello", "world"],
+      "max_tokens": 20
+    },
+    "mixed_language": {
+      "id": "edge_006",
+      "prompt": "English and \u65e5\u672c\u8a9e mixed:",
+      "expected_behavior": "Should handle multilingual input",
+      "max_tokens": 50
+    },
+    "numbers": {
+      "id": "edge_007",
+      "prompt": "Continue the sequence: 1, 2, 3, 4,",
+      "expected_patterns": ["5", "6", "7"],
+      "max_tokens": 20
+    },
+    "repetitive": {
+      "id": "edge_008",
+      "prompt": "Hello hello hello hello hello",
+      "expected_behavior": "Should not amplify repetition excessively",
+      "max_tokens": 30
+    }
+  },
+  "stress_tests": {
+    "max_context": {
+      "id": "stress_001",
+      "description": "Test with maximum context length",
+      "prompt_length": 8192,
+      "max_tokens": 100,
+      "notes": "Generate prompt programmatically to fill context"
+    },
+    "long_generation": {
+      "id": "stress_002",
+      "description": "Generate many tokens",
+      "prompt": "Once upon a time",
+      "max_tokens": 2000,
+      "notes": "Test stability over long generation"
+    },
+    "rapid_requests": {
+      "id": "stress_003",
+      "description": "Many rapid sequential requests",
+      "num_requests": 100,
+      "prompt": "Hello",
+      "max_tokens": 10
+    }
+  }
+}

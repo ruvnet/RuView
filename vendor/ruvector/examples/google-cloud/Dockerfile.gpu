@@ -1,0 +1,124 @@
+# =============================================================================
+# RuVector Cloud Run GPU Dockerfile
+# Optimized for NVIDIA L4 GPUs on Google Cloud Run
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1: Build Environment
+# -----------------------------------------------------------------------------
+FROM nvidia/cuda:12.3.1-devel-ubuntu22.04 AS builder
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    cmake \
+    git \
+    clang \
+    llvm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Set CUDA paths
+ENV CUDA_HOME=/usr/local/cuda
+ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}
+ENV PATH=${CUDA_HOME}/bin:${PATH}
+
+WORKDIR /build
+
+# Copy workspace Cargo files for dependency caching
+COPY Cargo.toml Cargo.lock ./
+
+# Copy all crate manifests
+COPY crates/ruvector-core/Cargo.toml crates/ruvector-core/
+COPY crates/ruvector-bench/Cargo.toml crates/ruvector-bench/
+COPY crates/ruvector-gnn/Cargo.toml crates/ruvector-gnn/
+COPY crates/ruvector-attention/Cargo.toml crates/ruvector-attention/
+COPY crates/ruvector-raft/Cargo.toml crates/ruvector-raft/
+COPY crates/ruvector-replication/Cargo.toml crates/ruvector-replication/
+COPY crates/ruvector-cluster/Cargo.toml crates/ruvector-cluster/
+COPY crates/ruvector-server/Cargo.toml crates/ruvector-server/
+COPY crates/ruvector-collections/Cargo.toml crates/ruvector-collections/
+COPY crates/ruvector-filter/Cargo.toml crates/ruvector-filter/
+COPY crates/ruvector-metrics/Cargo.toml crates/ruvector-metrics/
+COPY crates/ruvector-snapshot/Cargo.toml crates/ruvector-snapshot/
+
+# Copy example manifest
+COPY examples/google-cloud/Cargo.toml examples/google-cloud/
+
+# Create stub files for dependency resolution
+RUN mkdir -p crates/ruvector-core/src && echo "pub fn stub() {}" > crates/ruvector-core/src/lib.rs && \
+    mkdir -p crates/ruvector-bench/src && echo "pub fn stub() {}" > crates/ruvector-bench/src/lib.rs && \
+    mkdir -p crates/ruvector-gnn/src && echo "pub fn stub() {}" > crates/ruvector-gnn/src/lib.rs && \
+    mkdir -p crates/ruvector-attention/src && echo "pub fn stub() {}" > crates/ruvector-attention/src/lib.rs && \
+    mkdir -p crates/ruvector-raft/src && echo "pub fn stub() {}" > crates/ruvector-raft/src/lib.rs && \
+    mkdir -p crates/ruvector-replication/src && echo "pub fn stub() {}" > crates/ruvector-replication/src/lib.rs && \
+    mkdir -p crates/ruvector-cluster/src && echo "pub fn stub() {}" > crates/ruvector-cluster/src/lib.rs && \
+    mkdir -p crates/ruvector-server/src && echo "pub fn stub() {}" > crates/ruvector-server/src/lib.rs && \
+    mkdir -p crates/ruvector-collections/src && echo "pub fn stub() {}" > crates/ruvector-collections/src/lib.rs && \
+    mkdir -p crates/ruvector-filter/src && echo "pub fn stub() {}" > crates/ruvector-filter/src/lib.rs && \
+    mkdir -p crates/ruvector-metrics/src && echo "pub fn stub() {}" > crates/ruvector-metrics/src/lib.rs && \
+    mkdir -p crates/ruvector-snapshot/src && echo "pub fn stub() {}" > crates/ruvector-snapshot/src/lib.rs && \
+    mkdir -p examples/google-cloud/src && echo "fn main() {}" > examples/google-cloud/src/main.rs
+
+# Build dependencies (cached layer)
+RUN cargo build --release -p ruvector-cloudrun-gpu 2>/dev/null || true
+
+# Copy actual source code
+COPY crates/ crates/
+COPY examples/google-cloud/src/ examples/google-cloud/src/
+
+# Build the benchmark binary
+RUN cargo build --release -p ruvector-cloudrun-gpu
+
+# -----------------------------------------------------------------------------
+# Stage 2: Runtime Environment
+# -----------------------------------------------------------------------------
+FROM nvidia/cuda:12.3.1-runtime-ubuntu22.04
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libssl3 \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN useradd -m -u 1000 -s /bin/bash ruvector
+
+# Create app directory
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /build/target/release/gpu-benchmark ./
+
+# Set ownership
+RUN chown -R ruvector:ruvector /app
+
+# Switch to non-root user
+USER ruvector
+
+# Environment variables
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+ENV RUVECTOR_GPU_ENABLED=true
+ENV RUST_LOG=info
+ENV PORT=8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:${PORT}/health || exit 1
+
+# Expose port
+EXPOSE 8080
+
+# Default command: start server
+CMD ["./gpu-benchmark", "serve", "--port", "8080"]

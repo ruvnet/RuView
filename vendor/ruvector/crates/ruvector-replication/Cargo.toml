@@ -1,0 +1,28 @@
+[package]
+name = "ruvector-replication"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Data replication and synchronization for ruvector"
+
+[dependencies]
+ruvector-core = { version = "2.0.1", path = "../ruvector-core" }
+tokio = { workspace = true, features = ["time"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+futures = { workspace = true }
+rand = { workspace = true }
+bincode = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }

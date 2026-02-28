@@ -1,0 +1,8 @@
+# Don't ignore anything - include all files for Cloud Build
+!*
+!**/*
+
+# Ignore only truly unwanted files
+node_modules/
+.git/
+*.log

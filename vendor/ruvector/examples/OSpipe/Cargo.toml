@@ -1,0 +1,73 @@
+[package]
+name = "ospipe"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT"
+description = "OSpipe: RuVector-enhanced personal AI memory system integrating with Screenpipe"
+authors = ["Ruvector Team"]
+repository = "https://github.com/ruvnet/ruvector"
+
+[dependencies]
+# Serialization (cross-platform)
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling and utilities (cross-platform)
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Time and UUID (cross-platform)
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.11", features = ["v4", "serde", "js"] }
+
+# Math (cross-platform)
+rand = { workspace = true }
+
+# Native-only: RuVector ecosystem (path dependencies)
+# These crates pull in platform-specific code (mmap, tokio, ring, etc.) that
+# does not compile for wasm32-unknown-unknown.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ruvector-core = { version = "2.0", path = "../../crates/ruvector-core" }
+ruvector-filter = { version = "2.0", path = "../../crates/ruvector-filter" }
+ruvector-cluster = { version = "2.0", path = "../../crates/ruvector-cluster" }
+ruvector-delta-core = { version = "0.1", path = "../../crates/ruvector-delta-core", features = ["serde"] }
+ruvector-router-core = { version = "2.0", path = "../../crates/ruvector-router-core" }
+ruvector-graph = { version = "2.0", path = "../../crates/ruvector-graph", default-features = false }
+ruvector-gnn = { version = "2.0", path = "../../crates/ruvector-gnn", default-features = false }
+cognitum-gate-kernel = { version = "0.1", path = "../../crates/cognitum-gate-kernel", default-features = true }
+ruqu-algorithms = { version = "2.0.5", path = "../../crates/ruqu-algorithms", default-features = false }
+ruvector-attention = { version = "2.0", path = "../../crates/ruvector-attention", default-features = false }
+
+# HTTP server dependencies (native only)
+axum = { version = "0.7", features = ["json"] }
+tower-http = { version = "0.6", features = ["cors"] }
+tower = { version = "0.5" }
+tokio = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# WASM-only dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { workspace = true }
+js-sys = { workspace = true }
+serde-wasm-bindgen = "0.6"
+getrandom = { version = "0.2", features = ["js"] }
+console_error_panic_hook = { version = "0.1", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[dev-dependencies]
+tokio = { workspace = true }
+uuid = { version = "1.11", features = ["v4"] }
+
+[features]
+default = ["console_error_panic_hook"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "ospipe-server"
+path = "src/bin/ospipe-server.rs"
+required-features = []

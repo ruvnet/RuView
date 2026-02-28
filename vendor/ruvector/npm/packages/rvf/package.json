@@ -1,0 +1,36 @@
+{
+  "name": "@ruvector/rvf",
+  "version": "0.2.0",
+  "description": "RuVector Format — unified TypeScript SDK for vector intelligence",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": ["dist/", "package.json"],
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "bench": "tsx bench/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": ["vector", "database", "binary-format", "hnsw", "simd", "rvf"],
+  "license": "MIT",
+  "repository": "https://github.com/ruvnet/ruvector",
+  "dependencies": {
+    "@ruvector/rvf-node": "^0.1.7"
+  },
+  "optionalDependencies": {
+    "@ruvector/rvf-wasm": "^0.1.5",
+    "@ruvector/rvf-solver": "^0.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  }
+}

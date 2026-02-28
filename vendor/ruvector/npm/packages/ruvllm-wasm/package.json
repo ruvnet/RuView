@@ -1,0 +1,68 @@
+{
+  "name": "@ruvector/ruvllm-wasm",
+  "version": "0.1.0",
+  "description": "WASM bindings for browser-based LLM inference - run AI models directly in the browser with WebGPU acceleration",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "test": "node --test test/*.test.js",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.30",
+    "@webgpu/types": "^0.1.69",
+    "typescript": "^5.9.3"
+  },
+  "keywords": [
+    "llm",
+    "wasm",
+    "webassembly",
+    "browser",
+    "inference",
+    "webgpu",
+    "ai",
+    "machine-learning",
+    "edge",
+    "offline",
+    "ruvector",
+    "ruvllm",
+    "transformers"
+  ],
+  "author": "rUv Team <team@ruv.io>",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "npm/packages/ruvllm-wasm"
+  },
+  "homepage": "https://github.com/ruvnet/ruvector/tree/main/crates/ruvllm-wasm",
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "engines": {
+    "node": ">= 18"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
+}

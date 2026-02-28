@@ -1,0 +1,44 @@
+[package]
+name = "ruvector-graph-node"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Node.js bindings for RuVector Graph Database via NAPI-RS"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ruvector-core = { version = "2.0", path = "../ruvector-core" }
+ruvector-graph = { version = "2.0", path = "../ruvector-graph", features = ["storage"] }
+
+# Node.js bindings
+napi = { workspace = true }
+napi-derive = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+futures = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Graph functionality
+uuid = { workspace = true }
+
+[build-dependencies]
+napi-build = "2.1"
+
+[profile.release]
+lto = true
+strip = true

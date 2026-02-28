@@ -1,0 +1,58 @@
+{
+  "name": "@ruvector/ospipe",
+  "version": "0.1.2",
+  "type": "module",
+  "description": "OSpipe SDK - RuVector-enhanced personal AI memory system for Screenpipe pipes",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "module": "dist/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./wasm": {
+      "import": "./dist/wasm.js",
+      "types": "./dist/wasm.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ospipe",
+    "screenpipe",
+    "ruvector",
+    "ai-memory",
+    "vector-search",
+    "semantic-search",
+    "pipes"
+  ],
+  "author": "RuVector Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ruvnet/ruvector.git",
+    "directory": "examples/OSpipe"
+  },
+  "homepage": "https://github.com/ruvnet/ruvector/tree/main/examples/OSpipe#readme",
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@screenpipe/js": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@screenpipe/js": {
+      "optional": true
+    }
+  }
+}

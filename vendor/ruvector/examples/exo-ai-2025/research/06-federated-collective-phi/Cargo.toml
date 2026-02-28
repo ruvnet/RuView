@@ -1,0 +1,21 @@
+[package]
+name = "federated-collective-phi"
+version = "0.1.0"
+edition = "2021"
+authors = ["Research Synthesis 2023-2025"]
+description = "Distributed consciousness framework based on IIT 4.0, CRDTs, Byzantine consensus, and federated learning"
+license = "MIT"
+
+[workspace]
+# Empty workspace to exclude from parent workspace
+
+[lib]
+name = "federated_collective_phi"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+criterion = "0.5"

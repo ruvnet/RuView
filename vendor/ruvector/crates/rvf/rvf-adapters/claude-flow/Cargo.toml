@@ -1,0 +1,19 @@
+[package]
+name = "rvf-adapter-claude-flow"
+version = "0.1.0"
+edition = "2021"
+description = "RVF adapter for claude-flow memory subsystem — stores memory entries as RVF files with WITNESS_SEG audit trails"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+rvf-types = { path = "../../rvf-types", features = ["std"] }
+rvf-runtime = { path = "../../rvf-runtime", features = ["std"] }
+rvf-crypto = { path = "../../rvf-crypto", features = ["std"] }
+
+[dev-dependencies]
+tempfile = "3"

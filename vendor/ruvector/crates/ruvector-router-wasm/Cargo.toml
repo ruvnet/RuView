@@ -1,0 +1,34 @@
+[package]
+name = "ruvector-router-wasm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "WASM bindings for ruvector-router-core"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ruvector-router-core = { version = "2.0", path = "../ruvector-router-core" }
+
+# WASM dependencies
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["console"] }
+
+# Workspace dependencies
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

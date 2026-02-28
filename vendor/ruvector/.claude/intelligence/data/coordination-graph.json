@@ -1,0 +1,253 @@
+{
+  "nodes": {
+    "config-specialist": {
+      "type": "config-specialist",
+      "capabilities": [
+        "config-specialist"
+      ],
+      "load": 0,
+      "active": true
+    },
+    "javascript-developer": {
+      "type": "javascript-developer",
+      "capabilities": [
+        "javascript-developer"
+      ],
+      "load": 0,
+      "active": true
+    },
+    "technical-writer": {
+      "type": "technical-writer",
+      "capabilities": [
+        "documentation",
+        "markdown"
+      ],
+      "load": 0,
+      "active": true
+    },
+    "system-admin": {
+      "type": "system-admin",
+      "capabilities": [
+        "system-admin"
+      ],
+      "load": 0,
+      "active": true
+    },
+    "general-developer": {
+      "type": "general-developer",
+      "capabilities": [
+        "general",
+        "debugging"
+      ],
+      "load": 0,
+      "active": true
+    },
+    "rust-developer": {
+      "type": "rust-developer",
+      "capabilities": [
+        "rust",
+        "cargo",
+        "wasm"
+      ],
+      "load": 0,
+      "active": true
+    },
+    "typescript-developer": {
+      "type": "typescript-developer",
+      "capabilities": [
+        "typescript",
+        "javascript",
+        "node"
+      ],
+      "load": 0,
+      "active": true
+    },
+    "frontend-developer": {
+      "type": "frontend-developer",
+      "capabilities": [
+        "frontend-developer"
+      ],
+      "load": 0,
+      "active": true
+    },
+    "devops-engineer": {
+      "type": "devops-engineer",
+      "capabilities": [
+        "devops-engineer"
+      ],
+      "load": 0,
+      "active": true
+    },
+    "python-developer": {
+      "type": "python-developer",
+      "capabilities": [
+        "python-developer"
+      ],
+      "load": 0,
+      "active": true
+    },
+    "database-expert": {
+      "type": "database-expert",
+      "capabilities": [
+        "database-expert"
+      ],
+      "load": 0,
+      "active": true
+    }
+  },
+  "edges": {
+    "config-specialist:javascript-developer": {
+      "weight": 12,
+      "interactions": 12
+    },
+    "config-specialist:technical-writer": {
+      "weight": 28,
+      "interactions": 28
+    },
+    "config-specialist:system-admin": {
+      "weight": 1,
+      "interactions": 1
+    },
+    "config-specialist:general-developer": {
+      "weight": 24,
+      "interactions": 24
+    },
+    "config-specialist:rust-developer": {
+      "weight": 1,
+      "interactions": 1
+    },
+    "config-specialist:typescript-developer": {
+      "weight": 4,
+      "interactions": 4
+    },
+    "config-specialist:frontend-developer": {
+      "weight": 1,
+      "interactions": 1
+    },
+    "config-specialist:python-developer": {
+      "weight": 1,
+      "interactions": 1
+    },
+    "javascript-developer:technical-writer": {
+      "weight": 13,
+      "interactions": 13
+    },
+    "javascript-developer:system-admin": {
+      "weight": 2,
+      "interactions": 2
+    },
+    "javascript-developer:general-developer": {
+      "weight": 7,
+      "interactions": 7
+    },
+    "javascript-developer:rust-developer": {
+      "weight": 2,
+      "interactions": 2
+    },
+    "javascript-developer:typescript-developer": {
+      "weight": 3,
+      "interactions": 3
+    },
+    "javascript-developer:frontend-developer": {
+      "weight": 2,
+      "interactions": 2
+    },
+    "javascript-developer:python-developer": {
+      "weight": 2,
+      "interactions": 2
+    },
+    "technical-writer:system-admin": {
+      "weight": 3,
+      "interactions": 3
+    },
+    "technical-writer:general-developer": {
+      "weight": 32,
+      "interactions": 32
+    },
+    "technical-writer:rust-developer": {
+      "weight": 3,
+      "interactions": 3
+    },
+    "technical-writer:typescript-developer": {
+      "weight": 6,
+      "interactions": 6
+    },
+    "technical-writer:frontend-developer": {
+      "weight": 2,
+      "interactions": 2
+    },
+    "technical-writer:python-developer": {
+      "weight": 2,
+      "interactions": 2
+    },
+    "technical-writer:database-expert": {
+      "weight": 1,
+      "interactions": 1
+    },
+    "system-admin:general-developer": {
+      "weight": 2,
+      "interactions": 2
+    },
+    "system-admin:typescript-developer": {
+      "weight": 1,
+      "interactions": 1
+    },
+    "system-admin:frontend-developer": {
+      "weight": 1,
+      "interactions": 1
+    },
+    "system-admin:python-developer": {
+      "weight": 1,
+      "interactions": 1
+    },
+    "general-developer:rust-developer": {
+      "weight": 3,
+      "interactions": 3
+    },
+    "general-developer:typescript-developer": {
+      "weight": 4,
+      "interactions": 4
+    },
+    "general-developer:frontend-developer": {
+      "weight": 2,
+      "interactions": 2
+    },
+    "general-developer:devops-engineer": {
+      "weight": 1,
+      "interactions": 1
+    },
+    "general-developer:python-developer": {
+      "weight": 2,
+      "interactions": 2
+    },
+    "general-developer:database-expert": {
+      "weight": 1,
+      "interactions": 1
+    },
+    "rust-developer:typescript-developer": {
+      "weight": 1,
+      "interactions": 1
+    },
+    "rust-developer:python-developer": {
+      "weight": 1,
+      "interactions": 1
+    },
+    "typescript-developer:frontend-developer": {
+      "weight": 2,
+      "interactions": 2
+    },
+    "typescript-developer:devops-engineer": {
+      "weight": 1,
+      "interactions": 1
+    },
+    "typescript-developer:python-developer": {
+      "weight": 2,
+      "interactions": 2
+    },
+    "frontend-developer:python-developer": {
+      "weight": 1,
+      "interactions": 1
+    }
+  },
+  "lastUpdated": "2025-12-25T21:07:36.675Z"
+}

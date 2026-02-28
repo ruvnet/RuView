@@ -1,0 +1,39 @@
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique user identifier (UUID)"
+    },
+    "name": {
+      "type": "string",
+      "description": "Full name of the user"
+    },
+    "email": {
+      "type": "string",
+      "format": "email",
+      "description": "Valid email address"
+    },
+    "age": {
+      "type": "number",
+      "minimum": 18,
+      "maximum": 100,
+      "description": "User age between 18 and 100"
+    },
+    "role": {
+      "type": "string",
+      "enum": ["admin", "user", "moderator"],
+      "description": "User role in the system"
+    },
+    "active": {
+      "type": "boolean",
+      "description": "Whether the user account is active"
+    },
+    "registeredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of registration"
+    }
+  },
+  "required": ["id", "name", "email"]
+}

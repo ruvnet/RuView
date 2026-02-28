@@ -1,0 +1,110 @@
+[package]
+name = "ruvector-benchmarks"
+version = "0.1.0"
+edition = "2021"
+description = "Comprehensive benchmarks for temporal reasoning and vector operations"
+publish = false
+
+[dependencies]
+# Core ruvector
+ruvector-core = { path = "../../crates/ruvector-core", default-features = false, features = ["parallel"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = { version = "2.0.0-rc.3", features = ["serde"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Random and numerics
+rand = "0.8"
+rand_distr = "0.4"
+
+# Parallel processing
+rayon = "1.10"
+
+# CLI and progress
+clap = { version = "4.5", features = ["derive"] }
+indicatif = "0.17"
+console = "0.15"
+
+# Async
+tokio = { version = "1.41", features = ["rt-multi-thread", "sync", "macros", "time", "fs"] }
+futures = "0.3"
+
+# Time handling (critical for temporal benchmarks)
+chrono = { version = "0.4", features = ["serde"] }
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Crypto for witness chains
+sha2 = "0.10"
+
+# RVF native format integration
+rvf-types = { path = "../../crates/rvf/rvf-types" }
+rvf-crypto = { path = "../../crates/rvf/rvf-crypto" }
+rvf-wire = { path = "../../crates/rvf/rvf-wire" }
+
+# Statistics
+statistical = "1.0"
+hdrhistogram = "7.5"
+
+# HTTP for tool-augmented tests
+reqwest = { version = "0.11", features = ["json"] }
+
+# Visualization
+plotters = { version = "0.3", optional = true }
+
+# Type theory for verified reasoning (lean-agentic)
+lean-agentic = "0.1"
+
+[dev-dependencies]
+tempfile = "3.13"
+
+[features]
+default = []
+visualize = ["plotters"]
+
+[[bin]]
+name = "temporal-benchmark"
+path = "src/bin/temporal_benchmark.rs"
+
+[[bin]]
+name = "vector-benchmark"
+path = "src/bin/vector_benchmark.rs"
+
+[[bin]]
+name = "swarm-regret"
+path = "src/bin/swarm_regret.rs"
+
+[[bin]]
+name = "timepuzzle-runner"
+path = "src/bin/timepuzzle_runner.rs"
+
+[[bin]]
+name = "intelligence-assessment"
+path = "src/bin/intelligence_assessment.rs"
+
+[[bin]]
+name = "rvf-intelligence-bench"
+path = "src/bin/rvf_intelligence_bench.rs"
+
+[[bin]]
+name = "superintelligence"
+path = "src/bin/superintelligence.rs"
+
+[[bin]]
+name = "agi-proof-harness"
+path = "src/bin/agi_proof_harness.rs"
+
+[[bin]]
+name = "acceptance-rvf"
+path = "src/bin/acceptance_rvf.rs"
+
+[[bin]]
+name = "wasm-solver-bench"
+path = "src/bin/wasm_solver_bench.rs"

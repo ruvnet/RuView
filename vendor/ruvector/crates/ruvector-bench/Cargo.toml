@@ -1,0 +1,99 @@
+[package]
+name = "ruvector-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Comprehensive benchmarking suite for Ruvector"
+publish = false
+
+[[bin]]
+name = "ann-benchmark"
+path = "src/bin/ann_benchmark.rs"
+
+[[bin]]
+name = "agenticdb-benchmark"
+path = "src/bin/agenticdb_benchmark.rs"
+
+[[bin]]
+name = "latency-benchmark"
+path = "src/bin/latency_benchmark.rs"
+
+[[bin]]
+name = "memory-benchmark"
+path = "src/bin/memory_benchmark.rs"
+
+[[bin]]
+name = "comparison-benchmark"
+path = "src/bin/comparison_benchmark.rs"
+
+[[bin]]
+name = "profiling-benchmark"
+path = "src/bin/profiling_benchmark.rs"
+
+[dependencies]
+ruvector-core = {path = "../ruvector-core" }
+ruvector-mincut = { path = "../ruvector-mincut", features = ["canonical"] }
+ruvector-coherence = { path = "../ruvector-coherence", features = ["spectral"] }
+ruvector-cognitive-container = { path = "../ruvector-cognitive-container" }
+cognitum-gate-kernel = { path = "../cognitum-gate-kernel", default-features = true, features = ["canonical-witness"] }
+
+# Benchmarking
+criterion = { workspace = true }
+
+# CLI
+clap = { workspace = true }
+indicatif = { workspace = true }
+console = { workspace = true }
+
+# Data
+rand = { workspace = true }
+rand_distr = { workspace = true }
+
+# Performance
+rayon = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Statistics and analysis
+hdrhistogram = "7.5"
+statistical = "1.0"
+
+# Visualization
+plotters = "0.3"
+tabled = "0.16"
+
+# Dataset loading
+hdf5 = { version = "0.8", optional = true }
+byteorder = "1.5"
+
+# Memory profiling
+sysinfo = "0.31"
+jemalloc-ctl = { version = "0.5", optional = true }
+
+# Profiling
+pprof = { version = "0.13", features = ["flamegraph", "criterion"], optional = true }
+
+# Async
+tokio = { workspace = true }
+
+# Timing
+instant = "0.1"
+chrono = "0.4"
+
+# Testing utilities
+tempfile = "3.13"
+
+[features]
+default = []
+hdf5-datasets = ["hdf5"]
+profiling = ["pprof", "jemalloc-ctl"]

@@ -1,0 +1,53 @@
+{
+  "name": "agentic-robotics",
+  "version": "0.1.3",
+  "description": "High-performance agentic robotics framework with ROS2 compatibility - Node.js bindings",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "agentic-robotics-node",
+    "triples": {
+      "defaults": true,
+      "additional": [
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin"
+      ]
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/vibecast.git",
+    "directory": "crates/agentic-robotics-node"
+  },
+  "homepage": "https://ruv.io",
+  "license": "MIT OR Apache-2.0",
+  "keywords": [
+    "robotics",
+    "ros",
+    "ros2",
+    "middleware",
+    "agents",
+    "napi-rs",
+    "rust",
+    "native"
+  ],
+  "engines": {
+    "node": ">= 14"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "scripts": {
+    "build": "cargo build --release",
+    "test": "node test.js"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "agentic-robotics.*.node",
+    "README.md"
+  ]
+}

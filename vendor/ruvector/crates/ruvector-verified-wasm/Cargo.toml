@@ -1,0 +1,35 @@
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[package]
+name = "ruvector-verified-wasm"
+version = "0.1.1"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT OR Apache-2.0"
+description = "WASM bindings for ruvector-verified: proof-carrying vector operations in the browser"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector"
+documentation = "https://docs.rs/ruvector-verified-wasm"
+readme = "README.md"
+keywords = ["wasm", "verification", "vector-database", "dependent-types", "webassembly"]
+categories = ["wasm", "science", "mathematics"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ruvector-verified = { version = "0.1.1", path = "../ruvector-verified", features = ["ultra"] }
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["console"] }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[profile.release]
+opt-level = "s"
+lto = true

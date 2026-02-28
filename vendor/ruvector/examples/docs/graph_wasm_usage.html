@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RuVector Graph WASM Demo</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        .demo-section {
+            margin: 30px 0;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 6px;
+            border-left: 4px solid #4CAF50;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .output {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        .stat-label {
+            font-size: 14px;
+            color: #666;
+            margin-top: 5px;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+            border-left: 4px solid #c62828;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔗 RuVector Graph WASM Demo</h1>
+        <div id="loading" class="loading">
+            <p>Loading WebAssembly module...</p>
+        </div>
+        <div id="error" style="display: none;" class="error"></div>
+        <div id="content" style="display: none;">
+            <div class="demo-section">
+                <h2>Database Operations</h2>
+                <button onclick="createSampleGraph()">Create Sample Graph</button>
+                <button onclick="createHypergraph()">Create Hypergraph</button>
+                <button onclick="queryGraph()">Query Nodes</button>
+                <button onclick="exportCypher()">Export as Cypher</button>
+                <button onclick="clearDatabase()">Clear Database</button>
+            </div>
+
+            <div class="demo-section">
+                <h2>Statistics</h2>
+                <div class="stats" id="stats">
+                    <div class="stat-card">
+                        <div class="stat-value" id="nodeCount">0</div>
+                        <div class="stat-label">Nodes</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="edgeCount">0</div>
+                        <div class="stat-label">Edges</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="hyperedgeCount">0</div>
+                        <div class="stat-label">Hyperedges</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="avgDegree">0.0</div>
+                        <div class="stat-label">Avg Degree</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="demo-section">
+                <h2>Console Output</h2>
+                <div class="output" id="output">Ready to execute operations...</div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import init, { GraphDB } from '../npm/packages/graph-wasm/ruvector_graph_wasm.js';
+
+        let db;
+
+        async function initWasm() {
+            try {
+                await init();
+                db = new GraphDB('cosine');
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+                log('✅ WASM module loaded successfully');
+                log('✅ GraphDB initialized with cosine distance metric');
+                updateStats();
+            } catch (error) {
+                showError('Failed to initialize WASM: ' + error.message);
+            }
+        }
+
+        window.createSampleGraph = function() {
+            try {
+                log('Creating sample social network graph...');
+
+                // Create people
+                const alice = db.createNode(['Person'], {
+                    name: 'Alice',
+                    age: 30,
+                    city: 'New York'
+                });
+                log(`Created node: Alice (${alice})`);
+
+                const bob = db.createNode(['Person'], {
+                    name: 'Bob',
+                    age: 35,
+                    city: 'San Francisco'
+                });
+                log(`Created node: Bob (${bob})`);
+
+                const charlie = db.createNode(['Person'], {
+                    name: 'Charlie',
+                    age: 28,
+                    city: 'New York'
+                });
+                log(`Created node: Charlie (${charlie})`);
+
+                // Create company
+                const company = db.createNode(['Company'], {
+                    name: 'TechCorp',
+                    founded: 2010
+                });
+                log(`Created node: TechCorp (${company})`);
+
+                // Create relationships
+                const friendship1 = db.createEdge(alice, bob, 'KNOWS', {
+                    since: 2015,
+                    strength: 0.9
+                });
+                log(`Created edge: Alice KNOWS Bob`);
+
+                const friendship2 = db.createEdge(bob, charlie, 'KNOWS', {
+                    since: 2018,
+                    strength: 0.7
+                });
+                log(`Created edge: Bob KNOWS Charlie`);
+
+                const works1 = db.createEdge(alice, company, 'WORKS_AT', {
+                    since: 2020,
+                    position: 'Engineer'
+                });
+                log(`Created edge: Alice WORKS_AT TechCorp`);
+
+                const works2 = db.createEdge(charlie, company, 'WORKS_AT', {
+                    since: 2019,
+                    position: 'Designer'
+                });
+                log(`Created edge: Charlie WORKS_AT TechCorp`);
+
+                log('✅ Sample graph created successfully!');
+                updateStats();
+            } catch (error) {
+                showError('Error creating graph: ' + error.message);
+            }
+        };
+
+        window.createHypergraph = function() {
+            try {
+                log('Creating hypergraph example...');
+
+                // Create documents with embeddings
+                const doc1 = db.createNode(['Document'], {
+                    title: 'AI Research Paper',
+                    embedding: generateRandomEmbedding(384)
+                });
+                log(`Created document node: ${doc1}`);
+
+                const doc2 = db.createNode(['Document'], {
+                    title: 'ML Tutorial',
+                    embedding: generateRandomEmbedding(384)
+                });
+                log(`Created document node: ${doc2}`);
+
+                const author = db.createNode(['Person'], {
+                    name: 'Dr. Smith',
+                    embedding: generateRandomEmbedding(384)
+                });
+                log(`Created author node: ${author}`);
+
+                // Create hyperedge connecting all three
+                const hyperedge = db.createHyperedge(
+                    [doc1, doc2, author],
+                    'Research papers authored by Dr. Smith on related AI topics',
+                    null, // Auto-generate embedding
+                    0.95
+                );
+                log(`Created hyperedge: ${hyperedge}`);
+
+                const he = db.getHyperedge(hyperedge);
+                log(`Hyperedge order (connected nodes): ${he.order}`);
+                log(`Hyperedge confidence: ${he.confidence}`);
+
+                log('✅ Hypergraph created successfully!');
+                updateStats();
+            } catch (error) {
+                showError('Error creating hypergraph: ' + error.message);
+            }
+        };
+
+        window.queryGraph = async function() {
+            try {
+                log('Querying graph for Person nodes...');
+
+                // Note: Full Cypher support is limited in this version
+                // This demonstrates the API even if query parsing is basic
+                const results = await db.query('MATCH (n:Person) RETURN n');
+
+                log(`Query returned ${results.count} results`);
+                log(`Nodes: ${results.nodes.length}`);
+                log(`Edges: ${results.edges.length}`);
+                log(`Hyperedges: ${results.hyperedges.length}`);
+
+                if (results.isEmpty()) {
+                    log('No results found. Try creating a sample graph first.');
+                } else {
+                    log('✅ Query executed successfully!');
+                }
+
+                updateStats();
+            } catch (error) {
+                showError('Error querying graph: ' + error.message);
+            }
+        };
+
+        window.exportCypher = function() {
+            try {
+                log('Exporting database as Cypher...');
+                const cypher = db.exportCypher();
+
+                if (cypher.trim() === '') {
+                    log('Database is empty. Nothing to export.');
+                } else {
+                    log('Exported Cypher statements:');
+                    log('');
+                    log(cypher);
+                    log('✅ Export complete!');
+                }
+            } catch (error) {
+                showError('Error exporting: ' + error.message);
+            }
+        };
+
+        window.clearDatabase = function() {
+            try {
+                log('Clearing database...');
+                db = new GraphDB('cosine');
+                log('✅ Database cleared!');
+                updateStats();
+            } catch (error) {
+                showError('Error clearing database: ' + error.message);
+            }
+        };
+
+        function updateStats() {
+            try {
+                const stats = db.stats();
+                document.getElementById('nodeCount').textContent = stats.nodeCount;
+                document.getElementById('edgeCount').textContent = stats.edgeCount;
+                document.getElementById('hyperedgeCount').textContent = stats.hyperedgeCount;
+                document.getElementById('avgDegree').textContent = stats.avgEntityDegree.toFixed(2);
+            } catch (error) {
+                console.error('Error updating stats:', error);
+            }
+        }
+
+        function log(message) {
+            const output = document.getElementById('output');
+            const timestamp = new Date().toLocaleTimeString();
+            output.innerHTML += `[${timestamp}] ${message}\n`;
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            log('❌ ERROR: ' + message);
+        }
+
+        function generateRandomEmbedding(dim) {
+            return Array.from({ length: dim }, () => Math.random() * 2 - 1);
+        }
+
+        // Initialize on page load
+        initWasm();
+    </script>
+</body>
+</html>

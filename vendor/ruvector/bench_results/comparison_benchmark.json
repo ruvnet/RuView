@@ -1,0 +1,89 @@
+[
+  {
+    "name": "ruvector_optimized",
+    "dataset": "synthetic",
+    "dimensions": 384,
+    "num_vectors": 10000,
+    "num_queries": 100,
+    "k": 10,
+    "qps": 1215.8984855108915,
+    "latency_p50": 0.78,
+    "latency_p95": 0.78,
+    "latency_p99": 0.78,
+    "latency_p999": 0.78,
+    "recall_at_1": 1.0,
+    "recall_at_10": 1.0,
+    "recall_at_100": 1.0,
+    "memory_mb": 0.0,
+    "build_time_secs": 0.0,
+    "metadata": {
+      "system": "ruvector"
+    }
+  },
+  {
+    "name": "ruvector_no_quant",
+    "dataset": "synthetic",
+    "dimensions": 384,
+    "num_vectors": 10000,
+    "num_queries": 100,
+    "k": 10,
+    "qps": 1218.0020656584231,
+    "latency_p50": 0.775,
+    "latency_p95": 0.775,
+    "latency_p99": 0.775,
+    "latency_p999": 0.775,
+    "recall_at_1": 1.0,
+    "recall_at_10": 1.0,
+    "recall_at_100": 1.0,
+    "memory_mb": 0.0,
+    "build_time_secs": 0.0,
+    "metadata": {
+      "system": "ruvector_no_quant"
+    }
+  },
+  {
+    "name": "python_baseline",
+    "dataset": "synthetic",
+    "dimensions": 384,
+    "num_vectors": 10000,
+    "num_queries": 100,
+    "k": 10,
+    "qps": 77.46019665191933,
+    "latency_p50": 11.879000000000001,
+    "latency_p95": 11.879000000000001,
+    "latency_p99": 11.879000000000001,
+    "latency_p999": 11.879000000000001,
+    "recall_at_1": 1.0,
+    "recall_at_10": 1.0,
+    "recall_at_100": 1.0,
+    "memory_mb": 0.0,
+    "build_time_secs": 0.0,
+    "metadata": {
+      "simulated": "true",
+      "system": "python_numpy"
+    }
+  },
+  {
+    "name": "brute_force",
+    "dataset": "synthetic",
+    "dimensions": 384,
+    "num_vectors": 10000,
+    "num_queries": 100,
+    "k": 10,
+    "qps": 12.174453737434945,
+    "latency_p50": 77.759,
+    "latency_p95": 77.759,
+    "latency_p99": 77.759,
+    "latency_p999": 77.759,
+    "recall_at_1": 1.0,
+    "recall_at_10": 1.0,
+    "recall_at_100": 1.0,
+    "memory_mb": 0.0,
+    "build_time_secs": 0.0,
+    "metadata": {
+      "system": "brute_force",
+      "simulated": "true",
+      "slowdown_factor": "100"
+    }
+  }
+]

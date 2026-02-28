@@ -1,0 +1,1083 @@
+{
+  "other_in_general": {
+    "command-succeeded": 0.8,
+    "command-failed": -0.07287493536618515,
+    "_meta": {
+      "lastUpdate": "2025-12-29T18:24:18.698Z",
+      "updateCount": 5174
+    }
+  },
+  "test_in_general": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-11-20T22:53:02.000Z",
+      "updateCount": 454,
+      "firstSeen": "2025-12-25T21:05:51.000Z"
+    }
+  },
+  "other_in_postgres": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-09T17:35:58.000Z",
+      "updateCount": 99,
+      "firstSeen": "2025-12-25T21:00:59.000Z"
+    }
+  },
+  "other_in_wasm": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:18:45.000Z",
+      "updateCount": 120,
+      "firstSeen": "2025-12-25T20:55:20.000Z"
+    }
+  },
+  "git_in_postgres": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-09T18:56:59.000Z",
+      "updateCount": 12,
+      "firstSeen": "2025-12-25T20:53:13.000Z"
+    }
+  },
+  "other_in_mincut": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-25T16:37:55.000Z",
+      "updateCount": 38,
+      "firstSeen": "2025-12-25T20:49:58.000Z"
+    }
+  },
+  "git_in_general": {
+    "command-succeeded": 0.8,
+    "command-failed": -0.02941523307132153,
+    "_meta": {
+      "lastUpdate": "2025-12-29T18:25:18.301Z",
+      "updateCount": 305
+    }
+  },
+  "other_in_rvlite": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-09T18:46:46.000Z",
+      "updateCount": 424,
+      "firstSeen": "2025-12-25T20:40:59.000Z"
+    }
+  },
+  "other_in_ruvector-core": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:40:58.000Z",
+      "updateCount": 56,
+      "firstSeen": "2025-12-25T20:38:07.000Z"
+    }
+  },
+  "npm_in_general": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-11-21T03:15:46.000Z",
+      "updateCount": 306,
+      "firstSeen": "2025-12-25T20:36:13.000Z"
+    }
+  },
+  "test_in_wasm": {
+    "command-succeeded": 0.789939466853354,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-10T20:45:26.000Z",
+      "updateCount": 9,
+      "firstSeen": "2025-12-25T20:30:07.000Z"
+    }
+  },
+  "test_in_rvlite": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-09T18:40:31.000Z",
+      "updateCount": 137,
+      "firstSeen": "2025-12-25T20:27:02.000Z"
+    }
+  },
+  "git_in_mincut": {
+    "command-succeeded": 0.789939466853354,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-25T16:37:54.000Z",
+      "updateCount": 9,
+      "firstSeen": "2025-12-25T19:40:04.000Z"
+    }
+  },
+  "build_in_general": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-11-20T21:23:40.000Z",
+      "updateCount": 122,
+      "firstSeen": "2025-12-25T19:37:37.000Z"
+    }
+  },
+  "cargo_in_general": {
+    "command-succeeded": 0.03282057241011145,
+    "command-failed": -0.005270462766947299,
+    "_meta": {
+      "lastUpdate": "2025-12-29T18:16:12.025Z",
+      "updateCount": 90
+    }
+  },
+  "build_in_mincut": {
+    "command-succeeded": 0.3,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-25T19:12:41.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-25T19:12:41.000Z"
+    }
+  },
+  "cargo_in_mincut": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-25T17:11:19.000Z",
+      "updateCount": 27,
+      "firstSeen": "2025-12-25T18:14:22.000Z"
+    }
+  },
+  "git_in_rvlite": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-09T19:43:59.000Z",
+      "updateCount": 31,
+      "firstSeen": "2025-12-17T01:42:39.000Z"
+    }
+  },
+  "build_in_rvlite": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-09T19:34:09.000Z",
+      "updateCount": 45,
+      "firstSeen": "2025-12-16T23:36:26.000Z"
+    }
+  },
+  "wasm_in_wasm": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-09T18:59:33.000Z",
+      "updateCount": 41,
+      "firstSeen": "2025-12-16T17:41:09.000Z"
+    }
+  },
+  "build_in_wasm": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-11-21T02:53:58.000Z",
+      "updateCount": 15,
+      "firstSeen": "2025-12-16T02:50:27.000Z"
+    }
+  },
+  "cargo_in_wasm": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-11-20T22:37:26.000Z",
+      "updateCount": 20,
+      "firstSeen": "2025-12-16T02:49:54.000Z"
+    }
+  },
+  "other_in_sona": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-11-23T00:09:59.000Z",
+      "updateCount": 62,
+      "firstSeen": "2025-12-16T02:32:53.000Z"
+    }
+  },
+  "other_in_attention": {
+    "command-succeeded": 0.44849242404917494,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-11T19:13:21.000Z",
+      "updateCount": 2,
+      "firstSeen": "2025-12-13T19:25:37.000Z"
+    }
+  },
+  "test_in_ruvector-core": {
+    "command-succeeded": 0.6644140212138276,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-11-21T20:35:07.000Z",
+      "updateCount": 5,
+      "firstSeen": "2025-12-13T15:29:03.000Z"
+    }
+  },
+  "npm_in_ruvector-core": {
+    "command-succeeded": 0.6644140212138276,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-13T15:25:05.000Z",
+      "updateCount": 5,
+      "firstSeen": "2025-12-13T15:27:12.000Z"
+    }
+  },
+  "npm_in_rvlite": {
+    "command-succeeded": 0.6124138875378071,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-12T18:02:47.000Z",
+      "updateCount": 4,
+      "firstSeen": "2025-12-13T00:56:18.000Z"
+    }
+  },
+  "test_in_postgres": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-09T17:33:40.000Z",
+      "updateCount": 49,
+      "firstSeen": "2025-12-12T22:51:47.000Z"
+    }
+  },
+  "cargo_in_sona": {
+    "command-succeeded": 0.3,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-12T20:03:02.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-12T20:03:02.000Z"
+    }
+  },
+  "cargo_in_ruvector-graph": {
+    "command-succeeded": 0.3,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-12T20:02:58.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-12T20:02:58.000Z"
+    }
+  },
+  "cargo_in_attention": {
+    "command-succeeded": 0.3,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-12T20:02:54.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-12T20:02:54.000Z"
+    }
+  },
+  "cargo_in_gnn": {
+    "command-succeeded": 0.3,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-12T20:02:49.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-12T20:02:49.000Z"
+    }
+  },
+  "cargo_in_ruvector-core": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-11-21T03:00:54.000Z",
+      "updateCount": 11,
+      "firstSeen": "2025-12-12T20:02:44.000Z"
+    }
+  },
+  "cargo_in_postgres": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-09T17:49:53.000Z",
+      "updateCount": 10,
+      "firstSeen": "2025-12-10T23:23:07.000Z"
+    }
+  },
+  "npm_in_wasm": {
+    "command-succeeded": 0.3,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-10T20:46:35.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-10T20:46:35.000Z"
+    }
+  },
+  "build_in_ruvector-core": {
+    "command-succeeded": 0.44849242404917494,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-11-21T20:41:48.000Z",
+      "updateCount": 2,
+      "firstSeen": "2025-12-10T18:13:18.000Z"
+    }
+  },
+  "cargo_in_rvlite": {
+    "command-succeeded": 0.8,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-09T19:00:16.000Z",
+      "updateCount": 25,
+      "firstSeen": "2025-12-10T17:59:29.000Z"
+    }
+  },
+  "test_in_sona": {
+    "command-succeeded": 0.3,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-10T17:45:20.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-10T17:45:20.000Z"
+    }
+  },
+  "other_in_ruvector-graph": {
+    "command-succeeded": 0.44849242404917494,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-09T18:48:05.000Z",
+      "updateCount": 2,
+      "firstSeen": "2025-12-10T15:41:37.000Z"
+    }
+  },
+  "build_in_postgres": {
+    "command-succeeded": 0.7055147418567568,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-12-09T17:50:46.000Z",
+      "updateCount": 6,
+      "firstSeen": "2025-12-09T18:55:46.000Z"
+    }
+  },
+  "git_in_wasm": {
+    "command-succeeded": 0.44849242404917494,
+    "command-failed": 0,
+    "_meta": {
+      "lastUpdate": "2025-11-21T21:31:15.000Z",
+      "updateCount": 2,
+      "firstSeen": "2025-11-21T21:32:03.000Z"
+    }
+  },
+  "edit_json_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T21:47:48.596Z",
+      "updateCount": 81
+    },
+    "config-specialist": 0.75,
+    "successful-edit": 0.03316421614222487
+  },
+  "edit_js_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T21:41:44.338Z",
+      "updateCount": 97
+    },
+    "javascript-developer": 0.75,
+    "successful-edit": 0.0601478273971287
+  },
+  "edit_md_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:13:09.000Z",
+      "updateCount": 121,
+      "firstSeen": "2025-12-25T20:20:35.000Z"
+    },
+    "technical-writer": 0.75
+  },
+  "edit_sh_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-12-29T18:22:21.441Z",
+      "updateCount": 17
+    },
+    "system-admin": 0.75,
+    "successful-edit": 0.024253562503633298
+  },
+  "edit_toml_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T21:16:24.000Z",
+      "updateCount": 4,
+      "firstSeen": "2025-12-25T19:11:38.000Z"
+    },
+    "general-developer": 0.45320426448880974
+  },
+  "edit_rs_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-11-22T22:37:26.000Z",
+      "updateCount": 21,
+      "firstSeen": "2025-12-25T19:11:12.000Z"
+    },
+    "rust-developer": 0.75
+  },
+  "edit_md_in_ruvector-mincut": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T16:35:23.000Z",
+      "updateCount": 2,
+      "firstSeen": "2025-12-25T18:37:37.000Z"
+    },
+    "technical-writer": 0.3131370849898476
+  },
+  "edit_rs_in_ruvector-mincut": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T17:48:36.000Z",
+      "updateCount": 3,
+      "firstSeen": "2025-12-25T18:11:03.000Z"
+    },
+    "rust-developer": 0.39244918276534413
+  },
+  "edit_toml_in_ruvector-mincut": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T17:00:49.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-25T17:00:49.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_tsx_in_rvlite": {
+    "_meta": {
+      "lastUpdate": "2025-12-10T18:39:37.000Z",
+      "updateCount": 21,
+      "firstSeen": "2025-12-16T20:49:46.000Z"
+    },
+    "general-developer": 0.75
+  },
+  "edit_ts_in_rvlite": {
+    "_meta": {
+      "lastUpdate": "2025-12-10T18:48:24.000Z",
+      "updateCount": 37,
+      "firstSeen": "2025-12-16T18:54:06.000Z"
+    },
+    "typescript-developer": 0.75
+  },
+  "edit_md_in_rvlite": {
+    "_meta": {
+      "lastUpdate": "2025-12-09T18:40:33.000Z",
+      "updateCount": 35,
+      "firstSeen": "2025-12-16T18:24:44.000Z"
+    },
+    "technical-writer": 0.75
+  },
+  "edit_rs_in_rvlite": {
+    "_meta": {
+      "lastUpdate": "2025-12-09T18:57:10.000Z",
+      "updateCount": 29,
+      "firstSeen": "2025-12-16T17:37:15.000Z"
+    },
+    "rust-developer": 0.75
+  },
+  "edit_rs_in_ruvector-core": {
+    "_meta": {
+      "lastUpdate": "2025-12-27T00:35:46.788Z",
+      "updateCount": 13
+    },
+    "rust-developer": 0.6959263623272283,
+    "successful-edit": 0.02773500981126146
+  },
+  "edit_unknown_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:03:36.000Z",
+      "updateCount": 25,
+      "firstSeen": "2025-12-16T17:00:29.000Z"
+    },
+    "general-developer": 0.75
+  },
+  "edit_unknown_in_rvlite": {
+    "_meta": {
+      "lastUpdate": "2025-12-12T16:49:19.000Z",
+      "updateCount": 3,
+      "firstSeen": "2025-12-16T17:00:08.000Z"
+    },
+    "general-developer": 0.39244918276534413
+  },
+  "edit_css_in_rvlite": {
+    "_meta": {
+      "lastUpdate": "2025-12-10T18:39:31.000Z",
+      "updateCount": 2,
+      "firstSeen": "2025-12-16T04:44:34.000Z"
+    },
+    "frontend-developer": 0.3131370849898476
+  },
+  "edit_sh_in_ruvllm-wasm": {
+    "_meta": {
+      "lastUpdate": "2025-12-16T02:37:23.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-16T02:37:23.000Z"
+    },
+    "system-admin": 0.2
+  },
+  "edit_conf_in_rvlite": {
+    "_meta": {
+      "lastUpdate": "2025-12-15T23:35:06.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-15T23:35:06.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_yml_in_rvlite": {
+    "_meta": {
+      "lastUpdate": "2025-12-15T23:35:01.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-15T23:35:01.000Z"
+    },
+    "devops-engineer": 0.2
+  },
+  "edit_js_in_ruvllm-wasm": {
+    "_meta": {
+      "lastUpdate": "2025-12-15T23:17:21.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-15T23:17:21.000Z"
+    },
+    "javascript-developer": 0.2
+  },
+  "edit_rs_in_ruvllm-wasm": {
+    "_meta": {
+      "lastUpdate": "2025-12-15T22:57:28.000Z",
+      "updateCount": 8,
+      "firstSeen": "2025-12-15T23:15:00.000Z"
+    },
+    "rust-developer": 0.6072149006507236
+  },
+  "edit_toml_in_ruvllm-wasm": {
+    "_meta": {
+      "lastUpdate": "2025-12-15T22:56:58.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-15T22:56:58.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_txt_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-11-22T22:40:34.000Z",
+      "updateCount": 2,
+      "firstSeen": "2025-12-13T19:09:42.000Z"
+    },
+    "general-developer": 0.3131370849898476
+  },
+  "edit_html_in_rvlite": {
+    "_meta": {
+      "lastUpdate": "2025-12-09T19:06:10.000Z",
+      "updateCount": 2,
+      "firstSeen": "2025-12-12T22:21:09.000Z"
+    },
+    "frontend-developer": 0.3131370849898476
+  },
+  "edit_json_in_rvlite": {
+    "_meta": {
+      "lastUpdate": "2025-12-10T21:25:34.000Z",
+      "updateCount": 4,
+      "firstSeen": "2025-12-12T22:20:16.000Z"
+    },
+    "config-specialist": 0.45320426448880974
+  },
+  "edit_example_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:33:07.000Z",
+      "updateCount": 2,
+      "firstSeen": "2025-12-12T21:55:35.000Z"
+    },
+    "general-developer": 0.3131370849898476
+  },
+  "edit_rs_in_ruvector-postgres": {
+    "_meta": {
+      "lastUpdate": "2025-12-09T17:48:32.000Z",
+      "updateCount": 14,
+      "firstSeen": "2025-12-11T18:50:56.000Z"
+    },
+    "rust-developer": 0.7281451750785212
+  },
+  "edit_py_in_rvlite": {
+    "_meta": {
+      "lastUpdate": "2025-12-10T23:12:41.000Z",
+      "updateCount": 2,
+      "firstSeen": "2025-12-10T23:19:01.000Z"
+    },
+    "python-developer": 0.3131370849898476
+  },
+  "edit_py_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-12-10T23:17:56.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-10T23:17:56.000Z"
+    },
+    "python-developer": 0.2
+  },
+  "edit_csv_in_rvlite": {
+    "_meta": {
+      "lastUpdate": "2025-12-10T23:14:47.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-10T23:14:47.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_tsx_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-12-10T23:14:07.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-10T23:14:07.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_sh_in_rvlite": {
+    "_meta": {
+      "lastUpdate": "2025-12-10T23:13:25.000Z",
+      "updateCount": 2,
+      "firstSeen": "2025-12-10T23:13:39.000Z"
+    },
+    "system-admin": 0.3131370849898476
+  },
+  "edit_ts_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T22:49:32.000Z",
+      "updateCount": 32,
+      "firstSeen": "2025-12-10T23:12:35.000Z"
+    },
+    "typescript-developer": 0.75
+  },
+  "edit_mjs_in_rvlite": {
+    "_meta": {
+      "lastUpdate": "2025-12-10T20:21:25.000Z",
+      "updateCount": 8,
+      "firstSeen": "2025-12-10T21:25:20.000Z"
+    },
+    "general-developer": 0.6072149006507236
+  },
+  "edit_js_in_rvlite": {
+    "_meta": {
+      "lastUpdate": "2025-12-10T18:00:06.000Z",
+      "updateCount": 3,
+      "firstSeen": "2025-12-10T18:39:04.000Z"
+    },
+    "javascript-developer": 0.39244918276534413
+  },
+  "edit_rs_in_sona": {
+    "_meta": {
+      "lastUpdate": "2025-12-10T17:38:18.000Z",
+      "updateCount": 10,
+      "firstSeen": "2025-12-10T17:51:45.000Z"
+    },
+    "rust-developer": 0.6565863574458344
+  },
+  "edit_unknown_in_ruvector-postgres": {
+    "_meta": {
+      "lastUpdate": "2025-12-09T17:55:37.000Z",
+      "updateCount": 2,
+      "firstSeen": "2025-12-10T16:01:13.000Z"
+    },
+    "general-developer": 0.3131370849898476
+  },
+  "edit_sql_in_ruvector-postgres": {
+    "_meta": {
+      "lastUpdate": "2025-12-09T18:09:40.000Z",
+      "updateCount": 2,
+      "firstSeen": "2025-12-10T15:46:38.000Z"
+    },
+    "database-expert": 0.3131370849898476
+  },
+  "edit_md_in_ruvector-postgres": {
+    "_meta": {
+      "lastUpdate": "2025-12-09T19:44:31.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-09T19:44:31.000Z"
+    },
+    "technical-writer": 0.2
+  },
+  "edit_toml_in_ruvector-gnn-wasm": {
+    "_meta": {
+      "lastUpdate": "2025-12-09T19:25:08.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-09T19:25:08.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_toml_in_ruvector-graph-wasm": {
+    "_meta": {
+      "lastUpdate": "2025-12-09T19:24:26.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-09T19:24:26.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_toml_in_rvlite": {
+    "_meta": {
+      "lastUpdate": "2025-12-09T18:57:07.000Z",
+      "updateCount": 2,
+      "firstSeen": "2025-12-09T19:02:37.000Z"
+    },
+    "general-developer": 0.3131370849898476
+  },
+  "edit_toml_in_ruvector-postgres": {
+    "_meta": {
+      "lastUpdate": "2025-12-09T19:01:26.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-09T19:01:26.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_sql_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-12-09T17:34:24.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-12-09T17:34:24.000Z"
+    },
+    "database-expert": 0.2
+  },
+  "edit_mjs_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-11-21T03:09:21.000Z",
+      "updateCount": 15,
+      "firstSeen": "2025-11-23T00:06:52.000Z"
+    },
+    "general-developer": 0.7421836978719482
+  },
+  "edit_yml_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-11-21T13:15:05.000Z",
+      "updateCount": 9,
+      "firstSeen": "2025-11-22T20:53:41.000Z"
+    },
+    "devops-engineer": 0.6334005739406754
+  },
+  "edit_toml_in_ruvector-tiny-dancer-wasm": {
+    "_meta": {
+      "lastUpdate": "2025-11-21T21:27:22.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-21T21:27:22.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_toml_in_ruvector-tiny-dancer-node": {
+    "_meta": {
+      "lastUpdate": "2025-11-21T21:27:16.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-21T21:27:16.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_md_in_ruvector-tiny-dancer-core": {
+    "_meta": {
+      "lastUpdate": "2025-11-21T21:20:20.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-21T21:20:20.000Z"
+    },
+    "technical-writer": 0.2
+  },
+  "edit_cjs_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-11-21T15:23:46.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-21T15:23:46.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_rs_in_ruvector-router-wasm": {
+    "_meta": {
+      "lastUpdate": "2025-11-21T15:10:53.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-21T15:10:53.000Z"
+    },
+    "rust-developer": 0.2
+  },
+  "edit_rs_in_ruvector-router-ffi": {
+    "_meta": {
+      "lastUpdate": "2025-11-21T15:10:48.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-21T15:10:48.000Z"
+    },
+    "rust-developer": 0.2
+  },
+  "edit_rs_in_ruvector-router-cli": {
+    "_meta": {
+      "lastUpdate": "2025-11-21T15:10:44.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-21T15:10:44.000Z"
+    },
+    "rust-developer": 0.2
+  },
+  "edit_toml_in_ruvector-router-core": {
+    "_meta": {
+      "lastUpdate": "2025-11-21T15:05:13.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-21T15:05:13.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_toml_in_ruvector-core": {
+    "_meta": {
+      "lastUpdate": "2025-11-21T13:25:01.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-21T13:25:01.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_rs_in_ruvector-bench": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T22:56:24.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T22:56:24.000Z"
+    },
+    "rust-developer": 0.2
+  },
+  "edit_rs_in_ruvector-cli": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T22:13:02.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T22:13:02.000Z"
+    },
+    "rust-developer": 0.2
+  },
+  "edit_rs_in_router-core": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T22:11:40.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T22:11:40.000Z"
+    },
+    "rust-developer": 0.2
+  },
+  "edit_rs_in_ruvector-node": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T21:04:11.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T21:04:11.000Z"
+    },
+    "rust-developer": 0.2
+  },
+  "edit_toml_in_router-wasm": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:46:05.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T20:46:05.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_toml_in_router-ffi": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:45:56.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T20:45:56.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_toml_in_router-cli": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:45:47.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T20:45:47.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_toml_in_ruvector-bench": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:45:39.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T20:45:39.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_toml_in_ruvector-cli": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:43:16.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T20:43:16.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_toml_in_ruvector-wasm": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:42:34.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T20:42:34.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_toml_in_ruvector-node": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:42:28.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T20:42:28.000Z"
+    },
+    "general-developer": 0.2
+  },
+  "edit_md_in_ruvector-node": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:23:04.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T20:23:04.000Z"
+    },
+    "technical-writer": 0.2
+  },
+  "edit_md_in_ruvector-bench": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:22:41.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T20:22:41.000Z"
+    },
+    "technical-writer": 0.2
+  },
+  "edit_md_in_ruvector-wasm": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:22:22.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T20:22:22.000Z"
+    },
+    "technical-writer": 0.2
+  },
+  "edit_md_in_router-ffi": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:20:50.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T20:20:50.000Z"
+    },
+    "technical-writer": 0.2
+  },
+  "edit_md_in_router-core": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:20:44.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T20:20:44.000Z"
+    },
+    "technical-writer": 0.2
+  },
+  "edit_md_in_ruvector-cli": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:20:27.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T20:20:27.000Z"
+    },
+    "technical-writer": 0.2
+  },
+  "edit_md_in_router-wasm": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:20:26.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T20:20:26.000Z"
+    },
+    "technical-writer": 0.2
+  },
+  "edit_md_in_router-cli": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:20:21.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T20:20:21.000Z"
+    },
+    "technical-writer": 0.2
+  },
+  "edit_md_in_ruvector-core": {
+    "_meta": {
+      "lastUpdate": "2025-11-20T20:20:02.000Z",
+      "updateCount": 1,
+      "firstSeen": "2025-11-20T20:20:02.000Z"
+    },
+    "technical-writer": 0.2
+  },
+  "uncertain_state_1": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T21:19:39.841Z",
+      "updateCount": 6
+    },
+    "action_a": 0.05693410722092548,
+    "action_b": 0.04290056899113557
+  },
+  "decay_test_state": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T21:19:39.847Z",
+      "updateCount": 9
+    },
+    "action": 0.29897556935214076
+  },
+  "test_state_1766697047016": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T21:10:47.017Z",
+      "updateCount": 1
+    },
+    "test-action": 0.1
+  },
+  "neg_test_1766697047018": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T21:10:47.020Z",
+      "updateCount": 2
+    },
+    "test-action": 0.05757359291579978
+  },
+  "running_cargo_command": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T21:26:12.076Z",
+      "updateCount": 2
+    },
+    "command-succeeded": 0.1,
+    "command-failed": -0.035355339059327376
+  },
+  "editing_rs_in_core": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T21:19:11.376Z",
+      "updateCount": 2
+    },
+    "successful-edit": 0.16359151440471154
+  },
+  "test_state_1766697575530": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T21:19:35.530Z",
+      "updateCount": 1
+    },
+    "test-action": 0.1
+  },
+  "neg_test_1766697575532": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T21:19:35.533Z",
+      "updateCount": 2
+    },
+    "test-action": 0.05757359302230347
+  },
+  "running_other_command": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T21:35:14.869Z",
+      "updateCount": 13
+    },
+    "command-failed": -0.22702011487617407
+  },
+  "editing_rs_in_micro_hnsw_wasm": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T21:27:18.981Z",
+      "updateCount": 1
+    },
+    "successful-edit": 0.1
+  },
+  "editing_toml_in_micro_hnsw_wasm": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T21:30:15.678Z",
+      "updateCount": 2
+    },
+    "successful-edit": 0.16362668868739272
+  },
+  "editing_json_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T21:29:44.225Z",
+      "updateCount": 4
+    },
+    "successful-edit": 0.2513207815751637
+  },
+  "editing_md_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T21:32:23.154Z",
+      "updateCount": 1
+    },
+    "successful-edit": 0.1
+  },
+  "editing_js_in_project": {
+    "_meta": {
+      "lastUpdate": "2025-12-25T21:35:52.689Z",
+      "updateCount": 1
+    },
+    "successful-edit": 0.1
+  },
+  "edit_rs_in_ruvector-nervous-system": {
+    "_meta": {
+      "lastUpdate": "2025-12-28T03:52:43.979Z",
+      "updateCount": 3
+    },
+    "successful-edit": 0.21190563708295282
+  }
+}

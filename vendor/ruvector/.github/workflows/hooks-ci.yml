@@ -1,0 +1,214 @@
+name: Hooks CI
+
+on:
+  push:
+    branches: [main, claude/*]
+    paths:
+      - 'crates/ruvector-cli/src/cli/hooks.rs'
+      - 'crates/ruvector-cli/tests/hooks_tests.rs'
+      - 'npm/packages/cli/**'
+      - '.github/workflows/hooks-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/ruvector-cli/**'
+      - 'npm/packages/cli/**'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  rust-cli-tests:
+    name: Rust CLI Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build CLI
+        run: cargo build -p ruvector-cli --release
+
+      - name: Run hooks unit tests
+        run: cargo test -p ruvector-cli hooks --release
+
+      - name: Test hooks commands
+        run: |
+          ./target/release/ruvector hooks --help
+          ./target/release/ruvector hooks stats
+          ./target/release/ruvector hooks session-start
+          ./target/release/ruvector hooks pre-edit src/main.rs
+          ./target/release/ruvector hooks post-edit --success src/main.rs
+          ./target/release/ruvector hooks remember --memory-type test "CI test content"
+          ./target/release/ruvector hooks recall "CI test"
+          ./target/release/ruvector hooks learn test-state test-action --reward 0.5
+          ./target/release/ruvector hooks suggest edit-rs --actions coder,reviewer
+          ./target/release/ruvector hooks route "test task"
+          ./target/release/ruvector hooks should-test src/lib.rs
+          ./target/release/ruvector hooks swarm-register ci-agent-1 rust-dev
+          ./target/release/ruvector hooks swarm-stats
+          ./target/release/ruvector hooks session-end
+
+  npm-cli-tests:
+    name: npm CLI Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          # Copy CLI package to temp location to avoid workspace interference
+          cp -r npm/packages/cli /tmp/cli
+          cd /tmp/cli
+          npm install --ignore-scripts
+          cp -r node_modules $GITHUB_WORKSPACE/npm/packages/cli/
+
+      - name: Build CLI
+        working-directory: npm/packages/cli
+        run: npm run build
+
+      - name: Test hooks commands
+        working-directory: npm/packages/cli
+        run: |
+          node dist/cli.js hooks --help
+          node dist/cli.js hooks stats
+          node dist/cli.js hooks session-start
+          node dist/cli.js hooks pre-edit src/test.ts
+          node dist/cli.js hooks post-edit --success src/test.ts
+          node dist/cli.js hooks remember --type test "CI test content"
+          node dist/cli.js hooks recall "CI test"
+          node dist/cli.js hooks learn test-state test-action --reward 0.5
+          node dist/cli.js hooks suggest edit-ts --actions coder,reviewer
+          node dist/cli.js hooks route "test task"
+          node dist/cli.js hooks should-test src/lib.ts
+          node dist/cli.js hooks swarm-register ci-agent typescript-dev
+          node dist/cli.js hooks swarm-coordinate ci-agent other-agent --weight 0.8
+          node dist/cli.js hooks swarm-optimize "task1,task2"
+          node dist/cli.js hooks swarm-recommend "typescript"
+          node dist/cli.js hooks swarm-stats
+          node dist/cli.js hooks session-end
+
+  postgres-schema-validation:
+    name: PostgreSQL Schema Validation
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: ruvector_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get install -y postgresql-client
+
+      - name: Create ruvector type stub
+        run: |
+          psql "postgresql://test:test@localhost:5432/ruvector_test" <<EOF
+          -- Create a stub type for ruvector (actual extension not needed for schema validation)
+          CREATE DOMAIN ruvector AS REAL[];
+
+          -- Create stub operator for vector distance
+          CREATE FUNCTION ruvector_distance(ruvector, ruvector) RETURNS REAL AS \$\$
+          SELECT 0.0::REAL;
+          \$\$ LANGUAGE SQL;
+
+          CREATE OPERATOR <=> (
+            LEFTARG = ruvector,
+            RIGHTARG = ruvector,
+            FUNCTION = ruvector_distance
+          );
+          EOF
+
+      - name: Validate hooks schema
+        run: |
+          psql "postgresql://test:test@localhost:5432/ruvector_test" -f crates/ruvector-cli/sql/hooks_schema.sql
+
+      - name: Test schema functions
+        run: |
+          psql "postgresql://test:test@localhost:5432/ruvector_test" <<EOF
+          -- Test Q-learning update
+          SELECT ruvector_hooks_update_q('test_state', 'test_action', 0.8);
+
+          -- Test pattern retrieval
+          SELECT * FROM ruvector_hooks_patterns WHERE state = 'test_state';
+
+          -- Test agent registration
+          SELECT ruvector_hooks_swarm_register('test-agent', 'developer', ARRAY['rust', 'python']);
+
+          -- Test swarm stats
+          SELECT * FROM ruvector_hooks_swarm_stats();
+
+          -- Test session start
+          SELECT * FROM ruvector_hooks_session_start();
+
+          -- Verify stats
+          SELECT * FROM ruvector_hooks_get_stats();
+          EOF
+
+  feature-parity-check:
+    name: Feature Parity Check
+    runs-on: ubuntu-latest
+    needs: [rust-cli-tests, npm-cli-tests]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build both CLIs
+        run: |
+          cargo build -p ruvector-cli --release
+          # Install CLI deps in temp to avoid workspace interference
+          cp -r npm/packages/cli /tmp/cli
+          cd /tmp/cli && npm install --ignore-scripts && npm run build
+          cp -r /tmp/cli/node_modules npm/packages/cli/
+          cp -r /tmp/cli/dist npm/packages/cli/
+
+      - name: Compare command counts
+        run: |
+          RUST_COUNT=$(./target/release/ruvector hooks --help | grep -E "^  [a-z]" | wc -l)
+          NPM_COUNT=$(cd npm/packages/cli && node dist/cli.js hooks --help | grep -E "^  [a-z]" | wc -l)
+
+          echo "Rust CLI commands: $RUST_COUNT"
+          echo "npm CLI commands: $NPM_COUNT"
+
+          if [ "$RUST_COUNT" -ne "$NPM_COUNT" ]; then
+            echo "⚠️ Feature parity mismatch: Rust has $RUST_COUNT, npm has $NPM_COUNT"
+            echo "This is informational only - some commands may be Rust-specific"
+          else
+            echo "✅ Feature parity: Both CLIs have $RUST_COUNT commands"
+          fi

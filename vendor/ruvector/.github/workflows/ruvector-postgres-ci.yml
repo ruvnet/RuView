@@ -1,0 +1,494 @@
+# RuVector-Postgres CI/CD Pipeline
+# Build, test, and package the PostgreSQL vector extension
+#
+# Features:
+# - Matrix testing across PostgreSQL 16, 17 (LTS versions)
+# - Docker-based integration tests
+# - Performance regression detection
+# - Automated packaging for releases
+
+name: RuVector-Postgres CI/CD
+
+on:
+  push:
+    branches: [main, develop, "feat/**", "claude/**", "fix/**"]
+    paths:
+      - 'crates/ruvector-postgres/**'
+      - '.github/workflows/ruvector-postgres-ci.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'crates/ruvector-postgres/**'
+      - '.github/workflows/ruvector-postgres-ci.yml'
+  workflow_dispatch:
+    inputs:
+      run_benchmarks:
+        description: 'Run performance benchmarks'
+        required: false
+        default: 'false'
+        type: boolean
+      pg_version:
+        description: 'PostgreSQL version to test (empty for matrix)'
+        required: false
+        default: ''
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  PGRX_VERSION: '0.12.9'
+  RUST_VERSION: 'stable'
+
+# Concurrency control - cancel in-progress runs for same PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================================
+  # Code Quality Checks
+  # ============================================================================
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt, clippy
+
+      - name: Install PostgreSQL 17 dev headers
+        run: |
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          sudo apt-get update
+          sudo apt-get install -y postgresql-17 postgresql-server-dev-17
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-lint-
+
+      - name: Install cargo-pgrx
+        run: cargo install cargo-pgrx --version ${{ env.PGRX_VERSION }} --locked
+
+      - name: Initialize pgrx
+        run: cargo pgrx init --pg17=/usr/lib/postgresql/17/bin/pg_config
+        working-directory: crates/ruvector-postgres
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+        working-directory: crates/ruvector-postgres
+
+      - name: Run Clippy
+        run: |
+          cargo clippy --features pg17 -- -D warnings \
+            -A clippy::too_many_arguments \
+            -A clippy::should_implement_trait \
+            -A clippy::collapsible_str_replace \
+            -A clippy::useless_format \
+            -A clippy::needless_range_loop \
+            -A clippy::comparison_chain \
+            -A clippy::not_unsafe_ptr_arg_deref \
+            -A clippy::derivable_impls \
+            -A clippy::redundant_closure \
+            -A clippy::manual_div_ceil \
+            -A clippy::unnecessary_cast \
+            -A clippy::unwrap_or_default
+        working-directory: crates/ruvector-postgres
+
+  # ============================================================================
+  # Matrix Build & Test
+  # ============================================================================
+  test:
+    name: Test PG${{ matrix.pg_version }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: lint
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        pg_version: [17]
+        include:
+          # macOS tests for pg17
+          - os: macos-latest
+            pg_version: 17
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Install PostgreSQL (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          sudo apt-get update
+          sudo apt-get install -y postgresql-${{ matrix.pg_version }} postgresql-server-dev-${{ matrix.pg_version }}
+          echo "/usr/lib/postgresql/${{ matrix.pg_version }}/bin" >> $GITHUB_PATH
+
+      - name: Install PostgreSQL (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install postgresql@${{ matrix.pg_version }}
+          echo "/opt/homebrew/opt/postgresql@${{ matrix.pg_version }}/bin" >> $GITHUB_PATH
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-pg${{ matrix.pg_version }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-pg${{ matrix.pg_version }}-
+            ${{ runner.os }}-cargo-test-
+
+      - name: Install cargo-pgrx
+        run: cargo install cargo-pgrx --version ${{ env.PGRX_VERSION }} --locked
+
+      - name: Initialize pgrx (Ubuntu)
+        if: runner.os == 'Linux'
+        run: cargo pgrx init --pg${{ matrix.pg_version }}=/usr/lib/postgresql/${{ matrix.pg_version }}/bin/pg_config
+        working-directory: crates/ruvector-postgres
+
+      - name: Initialize pgrx (macOS)
+        if: runner.os == 'macOS'
+        run: cargo pgrx init --pg${{ matrix.pg_version }}=/opt/homebrew/opt/postgresql@${{ matrix.pg_version }}/bin/pg_config
+        working-directory: crates/ruvector-postgres
+
+      - name: Build extension
+        run: cargo build --no-default-features --features pg${{ matrix.pg_version }} --release
+        working-directory: crates/ruvector-postgres
+
+      # Note: cargo test --lib is skipped because #[pg_test] tests require PostgreSQL runtime
+      # and cause linker errors (undefined symbols) when compiled outside pgrx test harness.
+      # All tests are run via cargo pgrx test instead.
+
+      - name: Run pgrx tests
+        run: cargo pgrx test pg${{ matrix.pg_version }} --no-default-features
+        working-directory: crates/ruvector-postgres
+
+  # ============================================================================
+  # All Features Test
+  # ============================================================================
+  test-all-features:
+    name: Test All Features (PG17)
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Install PostgreSQL 17
+        run: |
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          sudo apt-get update
+          sudo apt-get install -y postgresql-17 postgresql-server-dev-17
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-allfeatures-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install cargo-pgrx
+        run: cargo install cargo-pgrx --version ${{ env.PGRX_VERSION }} --locked
+
+      - name: Initialize pgrx
+        run: cargo pgrx init --pg17=/usr/lib/postgresql/17/bin/pg_config
+        working-directory: crates/ruvector-postgres
+
+      - name: Build with all features
+        run: cargo build --features pg17,index-all,quant-all,graph-complete --release
+        working-directory: crates/ruvector-postgres
+
+      - name: Test with all features
+        run: cargo pgrx test pg17 --features index-all,quant-all,graph-complete
+        working-directory: crates/ruvector-postgres
+
+  # ============================================================================
+  # Docker Integration Tests
+  # ============================================================================
+  docker-integration:
+    name: Docker Integration (PG${{ matrix.pg_version }})
+    runs-on: ubuntu-latest
+    needs: test
+
+    strategy:
+      fail-fast: false
+      matrix:
+        pg_version: [17]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: crates/ruvector-postgres/docker/Dockerfile
+          build-args: |
+            PG_VERSION=${{ matrix.pg_version }}
+          push: false
+          load: true
+          tags: ruvector-postgres:pg${{ matrix.pg_version }}-test
+          cache-from: type=gha,scope=pg${{ matrix.pg_version }}
+          cache-to: type=gha,mode=max,scope=pg${{ matrix.pg_version }}
+
+      - name: Start PostgreSQL container
+        run: |
+          docker run -d \
+            --name ruvector-test \
+            -p 5432:5432 \
+            -e POSTGRES_USER=ruvector \
+            -e POSTGRES_PASSWORD=ruvector \
+            -e POSTGRES_DB=ruvector_test \
+            ruvector-postgres:pg${{ matrix.pg_version }}-test
+
+          # Wait for PostgreSQL to be ready
+          for i in {1..30}; do
+            if docker exec ruvector-test pg_isready -U ruvector -d ruvector_test; then
+              echo "PostgreSQL is ready"
+              break
+            fi
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+
+      - name: Verify extension installation
+        run: |
+          docker exec ruvector-test psql -U ruvector -d ruvector_test -c "CREATE EXTENSION IF NOT EXISTS ruvector;"
+          docker exec ruvector-test psql -U ruvector -d ruvector_test -c "SELECT ruvector_version();"
+          docker exec ruvector-test psql -U ruvector -d ruvector_test -c "SELECT ruvector_simd_info();"
+
+      - name: Run integration tests
+        run: |
+          docker exec ruvector-test psql -U ruvector -d ruvector_test << 'EOF'
+          -- Test vector operations
+          SELECT '[1,2,3]'::real[] AS test_vector;
+          SELECT l2_distance_arr(ARRAY[1.0,2.0,3.0]::real[], ARRAY[4.0,5.0,6.0]::real[]) AS l2_dist;
+          SELECT cosine_distance_arr(ARRAY[1.0,0.0,0.0]::real[], ARRAY[0.0,1.0,0.0]::real[]) AS cosine_dist;
+          SELECT inner_product_arr(ARRAY[1.0,2.0,3.0]::real[], ARRAY[1.0,2.0,3.0]::real[]) AS inner_prod;
+
+          -- Test table creation and queries
+          CREATE TABLE test_vectors (id SERIAL PRIMARY KEY, embedding real[]);
+          INSERT INTO test_vectors (embedding) VALUES
+            (ARRAY[1.0,2.0,3.0]::real[]),
+            (ARRAY[4.0,5.0,6.0]::real[]),
+            (ARRAY[7.0,8.0,9.0]::real[]);
+
+          SELECT id, l2_distance_arr(embedding, ARRAY[1.0,2.0,3.0]::real[]) AS distance
+          FROM test_vectors
+          ORDER BY distance
+          LIMIT 3;
+
+          DROP TABLE test_vectors;
+          SELECT 'Integration tests passed!' AS result;
+          EOF
+
+      - name: Collect container logs
+        if: always()
+        run: docker logs ruvector-test
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f ruvector-test || true
+
+  # ============================================================================
+  # Performance Benchmarks
+  # ============================================================================
+  benchmark:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'pull_request' || github.event.inputs.run_benchmarks == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Install PostgreSQL 17
+        run: |
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          sudo apt-get update
+          sudo apt-get install -y postgresql-17 postgresql-server-dev-17
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install cargo-pgrx
+        run: cargo install cargo-pgrx --version ${{ env.PGRX_VERSION }} --locked
+
+      - name: Initialize pgrx
+        run: cargo pgrx init --pg17=/usr/lib/postgresql/17/bin/pg_config
+        working-directory: crates/ruvector-postgres
+
+      - name: Run benchmarks
+        run: |
+          cargo bench --features pg17 -- --output-format bencher | tee benchmark-results.txt
+        working-directory: crates/ruvector-postgres
+
+      - name: Store benchmark results
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: RuVector-Postgres Benchmarks
+          tool: 'cargo'
+          output-file-path: crates/ruvector-postgres/benchmark-results.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: false
+          alert-threshold: '150%'
+          comment-on-alert: true
+          fail-on-alert: false
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: crates/ruvector-postgres/benchmark-results.txt
+          retention-days: 30
+
+  # ============================================================================
+  # Security Audit
+  # ============================================================================
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Run cargo audit
+        run: |
+          cargo install cargo-audit
+          cargo audit --ignore RUSTSEC-2020-0071 || true
+        working-directory: crates/ruvector-postgres
+
+  # ============================================================================
+  # Package Extension
+  # ============================================================================
+  package:
+    name: Package PG${{ matrix.pg_version }}
+    runs-on: ubuntu-latest
+    needs: [test, docker-integration]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    strategy:
+      matrix:
+        pg_version: [17]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Install PostgreSQL
+        run: |
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          sudo apt-get update
+          sudo apt-get install -y postgresql-${{ matrix.pg_version }} postgresql-server-dev-${{ matrix.pg_version }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-package-pg${{ matrix.pg_version }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install cargo-pgrx
+        run: cargo install cargo-pgrx --version ${{ env.PGRX_VERSION }} --locked
+
+      - name: Initialize pgrx
+        run: cargo pgrx init --pg${{ matrix.pg_version }}=/usr/lib/postgresql/${{ matrix.pg_version }}/bin/pg_config
+        working-directory: crates/ruvector-postgres
+
+      - name: Package extension
+        run: cargo pgrx package --no-default-features --features pg${{ matrix.pg_version }},graph-complete
+        working-directory: crates/ruvector-postgres
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruvector-postgres-pg${{ matrix.pg_version }}
+          path: crates/ruvector-postgres/target/release/ruvector-pg${{ matrix.pg_version }}/
+          retention-days: 30
+
+  # ============================================================================
+  # Summary Job
+  # ============================================================================
+  summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [lint, test, test-all-features, docker-integration, security]
+    if: always()
+
+    steps:
+      - name: Check job statuses
+        run: |
+          echo "## CI Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Test Matrix | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| All Features | ${{ needs.test-all-features.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Integration | ${{ needs.docker-integration.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Audit | ${{ needs.security.result }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail if any job failed
+        if: contains(needs.*.result, 'failure')
+        run: exit 1

@@ -1,0 +1,33 @@
+[package]
+name = "agentic-robotics-mcp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+[dependencies]
+agentic-robotics-core = { path = "../agentic-robotics-core", version = "0.1.2" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Optional dependencies for SSE transport
+axum = { version = "0.7", optional = true }
+tokio-stream = { version = "0.1", optional = true }
+
+[features]
+default = []
+sse = ["axum", "tokio-stream"]
+
+[dev-dependencies]
+tokio-test = "0.4"

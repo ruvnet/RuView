@@ -1,0 +1,200 @@
+[package]
+name = "ruvector-postgres"
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+description = "High-performance PostgreSQL vector database extension v2 - pgvector drop-in replacement with 230+ SQL functions, SIMD acceleration, Flash Attention, GNN layers, hybrid search, multi-tenancy, self-healing, and self-learning capabilities"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector"
+documentation = "https://docs.rs/ruvector-postgres"
+authors = ["ruv.io Team <info@ruv.io>"]
+keywords = ["postgresql", "vector-database", "embeddings", "pgvector", "hnsw"]
+categories = ["database", "science", "algorithms"]
+readme = "README.md"
+exclude = ["docker/", "tests/", "benches/", "examples/"]
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = ["pg17"]
+pg14 = ["pgrx/pg14", "pgrx-tests/pg14"]
+pg15 = ["pgrx/pg15", "pgrx-tests/pg15"]
+pg16 = ["pgrx/pg16", "pgrx-tests/pg16"]
+pg17 = ["pgrx/pg17", "pgrx-tests/pg17"]
+pg_test = []
+
+# SIMD features for compile-time selection
+simd-native = []  # Use native CPU features (detected at build time)
+simd-avx2 = []
+simd-avx512 = []
+simd-neon = []
+simd-auto = []  # Auto-detect at runtime (default behavior)
+
+# Index features
+index-hnsw = []
+index-ivfflat = []
+index-all = ["index-hnsw", "index-ivfflat"]
+
+# Quantization features
+quantization-scalar = []
+quantization-product = []
+quantization-binary = []
+quantization-all = ["quantization-scalar", "quantization-product", "quantization-binary"]
+quant-all = ["quantization-all"]  # Alias for convenience
+
+# Optional features
+# Note: hybrid-search and filtered-search are planned for future releases
+neon-compat = []  # Neon-specific optimizations
+
+# Advanced AI features (opt-in)
+learning = []       # Self-learning / ReasoningBank
+attention = []      # 39 attention mechanisms
+gnn = []            # GNN layers (GCN, GraphSAGE, GAT, GIN)
+hyperbolic = []     # Hyperbolic embeddings (Poincaré, Lorentz)
+sparse = []         # Sparse vectors (BM25, SPLADE)
+graph = []          # Graph operations & Cypher
+routing = []        # Tiny Dancer AI routing
+embeddings = ["dep:fastembed"]  # Local embedding generation
+gated-transformer = ["dep:ruvector-mincut-gated-transformer"]  # Mincut-gated transformer
+
+# v0.3 features — Solver, Math, TDA, Extended Attention, Sona, Domain Expansion
+solver = ["dep:ruvector-solver"]
+math-distances = ["dep:ruvector-math"]
+tda = ["dep:ruvector-math"]
+attention-extended = ["attention", "dep:ruvector-attention"]
+sona-learning = ["dep:ruvector-sona"]
+domain-expansion = ["dep:ruvector-domain-expansion"]
+
+# Feature bundles
+ai-complete = ["learning", "attention", "gnn", "routing", "gated-transformer"]
+graph-complete = ["hyperbolic", "sparse", "graph"]
+all-features = ["ai-complete", "graph-complete", "embeddings"]
+analytics-complete = ["solver", "math-distances", "tda"]
+ai-complete-v3 = ["ai-complete", "attention-extended", "sona-learning"]
+all-features-v3 = ["all-features", "analytics-complete", "ai-complete-v3", "domain-expansion"]
+
+[dependencies]
+# PostgreSQL extension framework
+pgrx = "0.12"
+
+# Pin home to avoid edition2024 issues
+home = "=0.5.9"
+
+# SIMD acceleration (leverages existing ruvector-core capabilities)
+simsimd = "5.9"
+
+# Half-precision floating point
+half = { version = "2.4", features = ["std", "serde"] }
+
+# Concurrency and synchronization
+parking_lot = "0.12"
+dashmap = "6.0"
+crossbeam = "0.8"
+
+# Parallel processing
+rayon = "1.10"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"  # Use 1.x for Rust 1.83 compatibility
+rkyv = "0.8"
+
+# Memory management
+memmap2 = "0.9"
+
+# Random number generation (for HNSW)
+rand = "0.8"
+rand_chacha = "0.3"
+
+# Bit manipulation (for binary quantization)
+bitvec = "1.0"
+
+# Ordered floats for sorting
+ordered-float = "4.2"
+
+# Heap for top-k
+priority-queue = "2.0"
+
+# Error handling
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+
+# Date/time
+chrono = "0.4"
+
+# Lazy static initialization
+lazy_static = "1.4"
+once_cell = "1.19"
+
+# Local embedding generation (optional)
+fastembed = { version = "5", optional = true }
+
+# Mincut-gated transformer (optional)
+ruvector-mincut-gated-transformer = { version = "0.1.0", path = "../ruvector-mincut-gated-transformer", optional = true }
+
+# v0.3 optional dependencies
+ruvector-solver = { version = "2.0", path = "../ruvector-solver", features = ["full"], optional = true }
+ruvector-math = { version = "2.0", path = "../ruvector-math", optional = true }
+ruvector-attention = { version = "2.0", path = "../ruvector-attention", optional = true }
+ruvector-sona = { version = "0.1", path = "../sona", features = ["serde-support"], optional = true }
+ruvector-domain-expansion = { version = "2.0", path = "../ruvector-domain-expansion", optional = true }
+
+# Optional: Use ruvector-core for shared implementations
+# Uncomment to link with existing ruvector-core crate
+# ruvector-core = { path = "../ruvector-core", optional = true }
+
+[dev-dependencies]
+pgrx-tests = "0.12"
+criterion = "0.5"
+proptest = "1.4"
+approx = "0.5"
+rand = "0.8"
+tempfile = "3.10"
+
+[[bench]]
+name = "distance_bench"
+harness = false
+
+[[bench]]
+name = "quantized_distance_bench"
+harness = false
+
+[[bench]]
+name = "index_bench"
+harness = false
+
+[[bench]]
+name = "quantization_bench"
+harness = false
+
+[[bench]]
+name = "hybrid_bench"
+harness = false
+
+[[bench]]
+name = "integrity_bench"
+harness = false
+
+[[bench]]
+name = "e2e_bench"
+harness = false
+
+[[bin]]
+name = "pgrx_embed_ruvector-postgres"
+path = "./src/bin/pgrx_embed.rs"
+
+[[bin]]
+name = "download-models"
+path = "./scripts/download_models.rs"
+required-features = ["embeddings"]
+
+[package.metadata.pgrx]
+# Extension metadata for pgrx
+pg14 = "pg14"
+pg15 = "pg15"
+pg16 = "pg16"
+pg17 = "pg17"

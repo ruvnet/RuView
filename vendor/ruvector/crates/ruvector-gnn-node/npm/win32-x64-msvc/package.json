@@ -1,0 +1,34 @@
+{
+  "name": "@ruvector/gnn-win32-x64-msvc",
+  "version": "0.1.25",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "ruvector-gnn.win32-x64-msvc.node",
+  "files": [
+    "ruvector-gnn.win32-x64-msvc.node"
+  ],
+  "description": "Graph Neural Network capabilities for Ruvector - win32-x64-msvc platform",
+  "keywords": [
+    "ruvector",
+    "gnn",
+    "graph-neural-network",
+    "napi-rs"
+  ],
+  "author": "Ruvector Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector"
+  },
+  "engines": {
+    "node": ">= 10"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  }
+}

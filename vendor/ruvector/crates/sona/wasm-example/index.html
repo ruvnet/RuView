@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SONA WASM Demo - Self-Optimizing Neural Architecture</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .section h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        button:hover {
+            background: #764ba2;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        input[type="number"], input[type="range"] {
+            width: 100%;
+            padding: 8px;
+            border: 2px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 1em;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-card .value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-card .label {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        #console {
+            background: #1e1e1e;
+            color: #00ff00;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+
+        .visualization {
+            background: white;
+            padding: 20px;
+            border-radius: 6px;
+            margin-top: 15px;
+        }
+
+        canvas {
+            width: 100%;
+            height: 200px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 1.2em;
+            color: #667eea;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .success {
+            color: #28a745;
+        }
+
+        .warning {
+            color: #ffc107;
+        }
+
+        .error {
+            color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🧠 SONA WASM Demo</h1>
+            <p>Self-Optimizing Neural Architecture in Your Browser</p>
+        </header>
+
+        <div class="content">
+            <div id="loading" class="loading">
+                <div class="spinner"></div>
+                <p>Loading WASM module...</p>
+            </div>
+
+            <div id="app" style="display: none;">
+                <!-- Configuration Section -->
+                <div class="section">
+                    <h2>⚙️ Configuration</h2>
+                    <div class="controls">
+                        <div>
+                            <label>Hidden Dimension:</label>
+                            <input type="number" id="hiddenDim" value="256" min="64" max="2048" step="64">
+                        </div>
+                        <div>
+                            <label>Micro-LoRA Rank:</label>
+                            <input type="number" id="microRank" value="2" min="1" max="8">
+                        </div>
+                        <div>
+                            <label>Base-LoRA Rank:</label>
+                            <input type="number" id="baseRank" value="16" min="4" max="64" step="4">
+                        </div>
+                    </div>
+                    <button onclick="initializeEngine()">Initialize Engine</button>
+                </div>
+
+                <!-- Learning Section -->
+                <div class="section">
+                    <h2>📚 Learning Controls</h2>
+                    <div class="controls">
+                        <button onclick="runSingleTrajectory()">Run Single Trajectory</button>
+                        <button onclick="runBatch()">Run Batch (10 trajectories)</button>
+                        <button onclick="forceLearn()">Force Background Learning</button>
+                        <button onclick="clearEngine()">Reset Engine</button>
+                    </div>
+                </div>
+
+                <!-- Statistics Section -->
+                <div class="section">
+                    <h2>📊 Engine Statistics</h2>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="value" id="trajCount">0</div>
+                            <div class="label">Trajectories</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="value" id="patternCount">0</div>
+                            <div class="label">Patterns</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="value" id="loraUpdates">0</div>
+                            <div class="label">LoRA Updates</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="value" id="avgQuality">0.00</div>
+                            <div class="label">Avg Quality</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Visualization Section -->
+                <div class="section">
+                    <h2>📈 LoRA Transformation Visualization</h2>
+                    <div class="visualization">
+                        <canvas id="loraCanvas"></canvas>
+                    </div>
+                </div>
+
+                <!-- Console Section -->
+                <div class="section">
+                    <h2>💻 Console Output</h2>
+                    <div id="console"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="./index.js"></script>
+</body>
+</html>

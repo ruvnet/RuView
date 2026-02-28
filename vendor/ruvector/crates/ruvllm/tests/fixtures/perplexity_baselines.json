@@ -1,0 +1,161 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "description": "Perplexity baselines for RuvLTRA-Small quality validation",
+    "model": "ruvltra-small",
+    "quantization_tested": ["Q4_K", "Q5_K", "Q8_0", "F16"],
+    "last_updated": "2024-01-19"
+  },
+  "quality_thresholds": {
+    "max_acceptable_perplexity": 50.0,
+    "warning_perplexity": 30.0,
+    "excellent_perplexity": 15.0,
+    "notes": "Perplexity values vary by dataset and prompt type"
+  },
+  "baselines": {
+    "wikitext": {
+      "description": "WikiText-2 test set perplexity",
+      "dataset_url": "https://huggingface.co/datasets/wikitext",
+      "values": {
+        "F16": {
+          "perplexity": 8.5,
+          "tokens_evaluated": 250000,
+          "notes": "Full precision baseline"
+        },
+        "Q8_0": {
+          "perplexity": 8.7,
+          "degradation_pct": 2.4,
+          "notes": "8-bit quantization, minimal quality loss"
+        },
+        "Q5_K": {
+          "perplexity": 9.2,
+          "degradation_pct": 8.2,
+          "notes": "5-bit k-quant, good balance"
+        },
+        "Q4_K": {
+          "perplexity": 9.8,
+          "degradation_pct": 15.3,
+          "notes": "4-bit k-quant, most common deployment format"
+        },
+        "Q2_K": {
+          "perplexity": 14.5,
+          "degradation_pct": 70.6,
+          "notes": "2-bit extreme quantization, noticeable degradation"
+        }
+      }
+    },
+    "lambada": {
+      "description": "LAMBADA last-word prediction accuracy",
+      "metric": "accuracy",
+      "values": {
+        "F16": {
+          "accuracy": 0.72,
+          "notes": "Full precision accuracy"
+        },
+        "Q4_K": {
+          "accuracy": 0.68,
+          "degradation_pct": 5.6,
+          "notes": "Slight accuracy drop acceptable"
+        }
+      }
+    },
+    "hellaswag": {
+      "description": "HellaSwag commonsense reasoning",
+      "metric": "accuracy",
+      "values": {
+        "F16": {
+          "accuracy": 0.68
+        },
+        "Q4_K": {
+          "accuracy": 0.65,
+          "degradation_pct": 4.4
+        }
+      }
+    },
+    "custom_prompts": {
+      "description": "Perplexity on custom test prompts",
+      "values": {
+        "simple_completion": {
+          "expected_ppl_range": [5.0, 20.0],
+          "notes": "Common phrase continuation should have low perplexity"
+        },
+        "code_generation": {
+          "expected_ppl_range": [8.0, 30.0],
+          "notes": "Code has higher entropy but should still be coherent"
+        },
+        "creative_writing": {
+          "expected_ppl_range": [15.0, 45.0],
+          "notes": "Creative tasks have higher acceptable perplexity"
+        },
+        "factual_qa": {
+          "expected_ppl_range": [3.0, 15.0],
+          "notes": "Factual responses should be confident"
+        }
+      }
+    }
+  },
+  "degradation_limits": {
+    "max_perplexity_increase_pct": 20.0,
+    "max_accuracy_decrease_pct": 10.0,
+    "notes": "Quantization should not degrade quality beyond these limits"
+  },
+  "token_probability_thresholds": {
+    "min_top1_probability": 0.01,
+    "min_top5_cumulative": 0.1,
+    "max_entropy": 10.0,
+    "notes": "Thresholds for detecting garbled or degenerate output"
+  },
+  "repetition_metrics": {
+    "max_ngram_repetition_ratio": 0.3,
+    "max_consecutive_repeats": 3,
+    "ngram_window_sizes": [2, 3, 4],
+    "notes": "Detect excessive repetition in generated text"
+  },
+  "coherence_metrics": {
+    "min_sentence_length": 3,
+    "max_sentence_length": 200,
+    "punctuation_ratio_range": [0.01, 0.15],
+    "alphanumeric_ratio_min": 0.7,
+    "notes": "Basic structural coherence checks"
+  },
+  "speed_baselines": {
+    "description": "Token generation speed baselines (tokens/second)",
+    "device_baselines": {
+      "m4_pro_ane": {
+        "prompt_processing": 2000,
+        "generation": 60,
+        "notes": "M4 Pro with ANE acceleration"
+      },
+      "m4_pro_neon": {
+        "prompt_processing": 1500,
+        "generation": 45,
+        "notes": "M4 Pro NEON-only fallback"
+      },
+      "m1_ane": {
+        "prompt_processing": 1200,
+        "generation": 40,
+        "notes": "M1 with ANE"
+      },
+      "cpu_x86": {
+        "prompt_processing": 500,
+        "generation": 15,
+        "notes": "x86 CPU baseline (AVX2)"
+      }
+    }
+  },
+  "memory_baselines": {
+    "model_sizes_mb": {
+      "F16": 4000,
+      "Q8_0": 2200,
+      "Q4_K": 1200,
+      "Q2_K": 700
+    },
+    "kv_cache_per_token_bytes": {
+      "F16": 1100,
+      "Q8_0": 1100,
+      "notes": "KV cache typically stays in F16 for accuracy"
+    },
+    "peak_memory_multiplier": 1.5,
+    "notes": "Peak memory = model_size * multiplier during inference"
+  }
+}

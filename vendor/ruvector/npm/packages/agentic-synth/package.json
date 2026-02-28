@@ -1,0 +1,163 @@
+{
+  "name": "@ruvector/agentic-synth",
+  "version": "0.1.6",
+  "description": "High-performance synthetic data generator for AI/ML training, RAG systems, and agentic workflows with DSPy.ts, Gemini, OpenRouter, and vector databases",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "bin": {
+    "agentic-synth": "./bin/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./generators": {
+      "types": "./dist/generators/index.d.ts",
+      "import": "./dist/generators/index.js",
+      "require": "./dist/generators/index.cjs"
+    },
+    "./cache": {
+      "types": "./dist/cache/index.d.ts",
+      "import": "./dist/cache/index.js",
+      "require": "./dist/cache/index.cjs"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.cjs",
+    "dist/**/*.d.ts",
+    "dist/**/*.map",
+    "bin",
+    "config",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean && chmod +x bin/cli.js",
+    "build:generators": "tsup src/generators/index.ts --format esm,cjs --dts --out-dir dist/generators",
+    "build:cache": "tsup src/cache/index.ts --format esm,cjs --dts --out-dir dist/cache",
+    "build:all": "npm run build && npm run build:generators && npm run build:cache",
+    "dev": "tsup src/index.ts --format esm --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:cli": "vitest run tests/cli",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests training --ext .ts,.js",
+    "lint:fix": "eslint src tests training --ext .ts,.js --fix",
+    "format": "prettier --write \"src/**/*.{ts,js}\" \"tests/**/*.{ts,js}\" \"training/**/*.{ts,js}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,js}\" \"tests/**/*.{ts,js}\" \"training/**/*.{ts,js}\"",
+    "prepublishOnly": "npm run build:all",
+    "benchmark": "node benchmarks/run.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "commander": "^11.1.0",
+    "dotenv": "^16.6.1",
+    "dspy.ts": "^2.1.1",
+    "zod": "^4.1.13"
+  },
+  "peerDependencies": {
+    "agentic-robotics": "^1.0.0",
+    "midstreamer": "^1.0.0",
+    "ruvector": "^0.1.26"
+  },
+  "peerDependenciesMeta": {
+    "midstreamer": {
+      "optional": true
+    },
+    "agentic-robotics": {
+      "optional": true
+    },
+    "ruvector": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.25",
+    "@typescript-eslint/eslint-plugin": "^8.47.0",
+    "@typescript-eslint/parser": "^8.47.0",
+    "@vitest/coverage-v8": "^3.2.4",
+    "eslint": "^8.57.1",
+    "prettier": "^3.7.3",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "keywords": [
+    "synthetic-data",
+    "data-generation",
+    "ai-training",
+    "ml-training",
+    "machine-learning",
+    "test-data",
+    "training-data",
+    "training-datasets",
+    "dataset-generator",
+    "synthetic-dataset",
+    "mock-data",
+    "data-synthesis",
+    "rag",
+    "retrieval-augmented-generation",
+    "vector-embeddings",
+    "agentic-ai",
+    "llm",
+    "dspy",
+    "dspy-ts",
+    "prompt-engineering",
+    "gpt",
+    "claude",
+    "gemini",
+    "openrouter",
+    "data-augmentation",
+    "edge-cases",
+    "ruvector",
+    "agenticdb",
+    "langchain",
+    "typescript",
+    "nodejs",
+    "nlp",
+    "natural-language-processing",
+    "time-series",
+    "event-generation",
+    "structured-data",
+    "streaming",
+    "context-caching",
+    "cli-tool"
+  ],
+  "author": {
+    "name": "rUv",
+    "url": "https://github.com/ruvnet"
+  },
+  "contributors": [
+    {
+      "name": "rUv",
+      "url": "https://github.com/ruvnet"
+    }
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "packages/agentic-synth"
+  },
+  "homepage": "https://github.com/ruvnet/ruvector/tree/main/packages/agentic-synth#readme",
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/ruvnet"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}

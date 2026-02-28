@@ -1,0 +1,27 @@
+name: Copilot Setup Steps
+
+on:
+  workflow_call:
+
+  jobs:
+    copilot-setup:
+        runs-on: ubuntu-latest
+            environment: copilot
+                steps:
+                      - name: Cleanup before git clone
+                              run: rm -rf /home/runner/work/ruvector/ruvector
+                                      continue-on-error: true
+
+                                            - name: Checkout repository
+                                                    uses: actions/checkout@v4
+
+                                                          - name: Set up Node.js
+                                                                  uses: actions/setup-node@v4
+                                                                          with:
+                                                                                    node-version: '18'
+
+                                                                                          - name: Install ruvector dependencies
+                                                                                                  run: npm install -g ruvector
+
+                                                                                                        - name: Verify ruvector MCP
+                                                                                                                run: npx ruvector --version

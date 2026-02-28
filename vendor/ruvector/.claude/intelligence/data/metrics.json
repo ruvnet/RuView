@@ -1,0 +1,60 @@
+{
+  "created": "2025-12-25T21:26:16.464Z",
+  "predictions": [],
+  "commandOutcomes": [
+    {
+      "type": "cargo",
+      "success": false,
+      "hadWarning": false,
+      "timestamp": "2025-12-25T21:26:16.464Z"
+    },
+    {
+      "type": "other",
+      "success": false,
+      "hadWarning": false,
+      "timestamp": "2025-12-25T21:26:34.271Z"
+    },
+    {
+      "type": "other",
+      "success": false,
+      "hadWarning": false,
+      "timestamp": "2025-12-25T21:26:46.412Z"
+    },
+    {
+      "type": "other",
+      "success": false,
+      "hadWarning": false,
+      "timestamp": "2025-12-25T21:27:40.771Z"
+    },
+    {
+      "type": "other",
+      "success": false,
+      "hadWarning": false,
+      "timestamp": "2025-12-25T21:27:54.195Z"
+    },
+    {
+      "type": "other",
+      "success": false,
+      "hadWarning": false,
+      "timestamp": "2025-12-25T21:30:08.692Z"
+    },
+    {
+      "type": "test",
+      "success": false,
+      "hadWarning": false,
+      "timestamp": "2025-12-25T21:30:39.131Z"
+    }
+  ],
+  "agentRoutings": [],
+  "dailyStats": {
+    "2025-12-25": {
+      "commands": 7,
+      "successes": 0,
+      "withWarning": 0,
+      "warningHeeded": 0,
+      "warningHeededSuccess": 0
+    }
+  },
+  "calibration": {},
+  "lastUpdated": "2025-12-25T21:30:39.131Z"
+}

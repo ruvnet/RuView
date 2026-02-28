@@ -1,0 +1,1872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RuVector VWM - Super Bowl LX: Patriots vs Seahawks (4D Gaussian Splatting)</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Roboto+Condensed:wght@400;700&display=swap');
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; color: #e0e0e8; font-family: 'Roboto Condensed', 'SF Mono', monospace; }
+    canvas { display: block; width: 100%; height: 100%; }
+    #overlay { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+    #overlay > * { pointer-events: auto; }
+
+    /* === ESPN-STYLE SCOREBUG === */
+    #scorebug {
+      position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+      display: flex; flex-direction: column; align-items: center; gap: 0;
+      filter: drop-shadow(0 2px 8px rgba(0,0,0,0.6));
+    }
+    #sb-event-tag {
+      background: linear-gradient(90deg, #b8860b, #daa520, #b8860b);
+      color: #1a1a1a; font-family: 'Oswald', sans-serif; font-weight: 700;
+      font-size: 0.6rem; letter-spacing: 0.25em; text-transform: uppercase;
+      padding: 2px 20px; border-radius: 3px 3px 0 0;
+    }
+    #sb-teams {
+      display: flex; align-items: stretch; background: #111; border-radius: 0 0 6px 6px;
+      overflow: hidden; min-width: 440px;
+    }
+    .sb-team-row {
+      display: flex; align-items: center; padding: 3px 0;
+    }
+    .sb-team-color { width: 5px; height: 100%; }
+    .sb-team-logo-box { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; margin: 0 6px; }
+    .sb-team-logo-box canvas { width: 26px; height: 26px; }
+    .sb-team-abbr { font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 0.95rem; width: 40px; }
+    .sb-team-record { font-size: 0.5rem; color: #666; margin-left: 2px; width: 30px; }
+    .sb-team-score {
+      font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 1.3rem;
+      width: 42px; text-align: center; background: #1a1a1a;
+      padding: 2px 0; margin-left: auto;
+    }
+    .sb-poss-indicator { width: 8px; display: flex; align-items: center; justify-content: center; }
+    .sb-poss-dot { width: 5px; height: 5px; border-radius: 50%; }
+    .sb-center-col {
+      display: flex; flex-direction: column; background: #1a1a1a;
+      min-width: 110px; align-items: center; justify-content: center; padding: 2px 10px;
+      border-left: 1px solid #333; border-right: 1px solid #333;
+    }
+    .sb-quarter { font-family: 'Oswald', sans-serif; font-weight: 600; font-size: 0.65rem; color: #daa520; letter-spacing: 0.1em; }
+    .sb-clock { font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 1.1rem; color: #fff; }
+    .sb-down-dist { font-size: 0.55rem; color: #8f8; font-weight: 700; }
+    .sb-yard-line { font-size: 0.5rem; color: #aaa; }
+    .sb-right-col { display: flex; flex-direction: column; align-items: center; }
+    .ne-color { color: #c60c30; }
+    .sea-color { color: #69be28; }
+
+    /* Play clock badge */
+    #play-clock-badge {
+      position: absolute; top: 82px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.8); border: 1px solid #444; border-radius: 4px;
+      padding: 2px 10px; font-family: 'Oswald', sans-serif; font-size: 0.7rem;
+      color: #fff; display: flex; gap: 6px; align-items: center;
+    }
+    .pc-label { color: #888; font-size: 0.55rem; }
+    .pc-value { font-weight: 700; font-size: 0.85rem; }
+    .pc-warn { color: #f87171; }
+
+    /* Stats panel - minimal */
+    #stats-panel {
+      position: absolute; bottom: 52px; left: 12px;
+      background: rgba(0,0,0,0.75); backdrop-filter: blur(6px);
+      border: 1px solid rgba(255,255,255,0.1); border-radius: 6px;
+      padding: 6px 10px; font-size: 0.6rem; line-height: 1.6; color: #888;
+    }
+    .st-val { color: #daa520; font-weight: 600; }
+
+    /* Play-by-play ticker - bottom bar style */
+    #play-ticker {
+      position: absolute; bottom: 52px; right: 12px;
+      background: rgba(0,0,0,0.8); backdrop-filter: blur(6px);
+      border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;
+      padding: 6px 10px; font-size: 0.6rem; width: 300px; max-height: 140px;
+      overflow-y: auto; line-height: 1.5;
+    }
+    .tk-entry { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    .tk-entry:last-child { border-bottom: none; }
+    .tk-time { color: #daa520; font-weight: 600; }
+    .tk-text { color: #bbb; }
+    .tk-highlight { color: #facc15; font-weight: 700; }
+    .tk-gain { color: #4ade80; }
+
+    /* Transport bar */
+    #transport {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(180deg, rgba(20,20,20,0.95), rgba(10,10,10,0.98));
+      border-top: 1px solid rgba(255,255,255,0.08);
+      display: flex; align-items: center; gap: 8px; padding: 8px 14px; font-size: 0.65rem;
+    }
+    .tb {
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+      color: #aaa; border-radius: 3px; padding: 4px 10px; cursor: pointer;
+      font-family: 'Roboto Condensed', sans-serif; font-size: 0.65rem; transition: all 0.15s;
+    }
+    .tb:hover { background: rgba(255,255,255,0.12); color: #fff; }
+    .tb.active { background: rgba(218,165,32,0.3); border-color: #daa520; color: #daa520; }
+    #time-slider { flex: 1; accent-color: #daa520; height: 3px; }
+    #time-label { color: #555; min-width: 54px; font-size: 0.6rem; }
+    .sep { width: 1px; height: 18px; background: rgba(255,255,255,0.08); }
+
+    /* Big play overlay */
+    #big-play {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 3rem;
+      text-transform: uppercase; letter-spacing: 0.15em; opacity: 0;
+      text-shadow: 0 0 30px rgba(218,165,32,0.8), 0 0 60px rgba(218,165,32,0.4);
+      transition: opacity 0.3s; pointer-events: none; color: #daa520;
+    }
+    #big-play.show { opacity: 1; }
+
+    /* Replay badge */
+    #replay-badge {
+      position: absolute; top: 110px; left: 50%; transform: translateX(-50%);
+      font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 0.7rem;
+      color: #f87171; letter-spacing: 0.2em; text-transform: uppercase;
+      opacity: 0; transition: opacity 0.3s; border: 1px solid #f87171;
+      padding: 2px 14px; border-radius: 3px; background: rgba(0,0,0,0.7);
+    }
+    #replay-badge.show { opacity: 1; }
+
+    /* Network bug */
+    #network-bug {
+      position: absolute; top: 16px; right: 16px;
+      font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 0.6rem;
+      color: rgba(255,255,255,0.25); letter-spacing: 0.15em;
+    }
+
+    /* Tech description modal */
+    #tech-modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(8px); z-index: 100; display: none;
+      align-items: center; justify-content: center;
+      pointer-events: auto;
+    }
+    #tech-modal-backdrop.open { display: flex; }
+    #tech-modal {
+      background: linear-gradient(160deg, #141418 0%, #1a1a22 100%);
+      border: 1px solid rgba(218,165,32,0.3); border-radius: 10px;
+      max-width: 680px; width: 90%; max-height: 80vh; overflow-y: auto;
+      padding: 28px 32px; position: relative;
+      box-shadow: 0 0 60px rgba(218,165,32,0.12), 0 20px 60px rgba(0,0,0,0.6);
+    }
+    #tech-modal::-webkit-scrollbar { width: 4px; }
+    #tech-modal::-webkit-scrollbar-track { background: transparent; }
+    #tech-modal::-webkit-scrollbar-thumb { background: rgba(218,165,32,0.3); border-radius: 2px; }
+    #tech-close {
+      position: absolute; top: 12px; right: 16px; background: none; border: none;
+      color: #666; font-size: 1.4rem; cursor: pointer; line-height: 1;
+      transition: color 0.2s;
+    }
+    #tech-close:hover { color: #daa520; }
+    .tech-badge {
+      display: inline-block; font-family: 'Oswald', sans-serif; font-weight: 600;
+      font-size: 0.55rem; letter-spacing: 0.2em; text-transform: uppercase;
+      color: #daa520; border: 1px solid rgba(218,165,32,0.4); border-radius: 3px;
+      padding: 2px 10px; margin-bottom: 10px;
+    }
+    .tech-title {
+      font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 1.4rem;
+      color: #fff; margin-bottom: 18px; line-height: 1.2;
+    }
+    .tech-section {
+      margin-bottom: 16px;
+    }
+    .tech-section-head {
+      font-family: 'Oswald', sans-serif; font-weight: 600; font-size: 0.8rem;
+      color: #daa520; letter-spacing: 0.1em; text-transform: uppercase;
+      margin-bottom: 6px; display: flex; align-items: center; gap: 6px;
+    }
+    .tech-section-head::before {
+      content: ''; display: inline-block; width: 3px; height: 12px;
+      background: #daa520; border-radius: 1px;
+    }
+    .tech-body {
+      font-family: 'Roboto Condensed', sans-serif; font-size: 0.75rem;
+      color: #aaa; line-height: 1.7;
+    }
+    .tech-body strong { color: #ccc; font-weight: 700; }
+    .tech-body code {
+      background: rgba(218,165,32,0.1); color: #daa520; padding: 1px 5px;
+      border-radius: 2px; font-size: 0.7rem; font-family: 'SF Mono', monospace;
+    }
+    .tech-diagram {
+      background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 6px; padding: 12px 16px; margin: 10px 0;
+      font-family: 'SF Mono', monospace; font-size: 0.6rem; color: #888;
+      line-height: 1.6; white-space: pre; overflow-x: auto;
+    }
+    .tech-footer {
+      margin-top: 18px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.06);
+      font-size: 0.6rem; color: #555; text-align: center;
+      font-family: 'Roboto Condensed', sans-serif;
+    }
+
+    /* Settings modal */
+    #settings-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(8px); z-index: 100; display: none;
+      align-items: center; justify-content: center; pointer-events: auto;
+    }
+    #settings-backdrop.open { display: flex; }
+    #settings-panel-modal {
+      background: linear-gradient(160deg, #141418 0%, #1a1a22 100%);
+      border: 1px solid rgba(218,165,32,0.3); border-radius: 10px;
+      max-width: 580px; width: 92%; max-height: 82vh; overflow-y: auto;
+      padding: 0; position: relative;
+      box-shadow: 0 0 60px rgba(218,165,32,0.12), 0 20px 60px rgba(0,0,0,0.6);
+    }
+    #settings-panel-modal::-webkit-scrollbar { width: 4px; }
+    #settings-panel-modal::-webkit-scrollbar-track { background: transparent; }
+    #settings-panel-modal::-webkit-scrollbar-thumb { background: rgba(218,165,32,0.3); border-radius: 2px; }
+    #settings-close {
+      position: absolute; top: 10px; right: 14px; background: none; border: none;
+      color: #666; font-size: 1.4rem; cursor: pointer; line-height: 1; z-index: 2;
+      transition: color 0.2s;
+    }
+    #settings-close:hover { color: #daa520; }
+    .st-header {
+      padding: 18px 24px 0; display: flex; align-items: center; gap: 10px;
+    }
+    .st-header-badge {
+      font-family: 'Oswald', sans-serif; font-weight: 600; font-size: 0.55rem;
+      letter-spacing: 0.2em; text-transform: uppercase; color: #daa520;
+      border: 1px solid rgba(218,165,32,0.4); border-radius: 3px; padding: 2px 10px;
+    }
+    .st-header-title {
+      font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 1.15rem; color: #fff;
+    }
+    /* Tabs */
+    .st-tabs {
+      display: flex; gap: 0; margin: 14px 24px 0; border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .st-tab {
+      font-family: 'Oswald', sans-serif; font-weight: 600; font-size: 0.7rem;
+      letter-spacing: 0.08em; text-transform: uppercase; color: #555;
+      padding: 8px 16px; cursor: pointer; border-bottom: 2px solid transparent;
+      transition: all 0.2s; background: none; border-top: none; border-left: none; border-right: none;
+    }
+    .st-tab:hover { color: #aaa; }
+    .st-tab.active { color: #daa520; border-bottom-color: #daa520; }
+    .st-tab-content { display: none; padding: 16px 24px 22px; }
+    .st-tab-content.active { display: block; }
+    /* Setting rows */
+    .st-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .st-row:last-child { border-bottom: none; }
+    .st-row-label {
+      font-family: 'Roboto Condensed', sans-serif; font-size: 0.72rem; color: #aaa;
+    }
+    .st-row-sub { font-size: 0.58rem; color: #555; margin-top: 1px; }
+    .st-row-ctrl { display: flex; align-items: center; gap: 8px; }
+    /* Toggle switch */
+    .st-toggle { position: relative; width: 36px; height: 20px; cursor: pointer; }
+    .st-toggle input { display: none; }
+    .st-toggle-track {
+      position: absolute; inset: 0; background: #333; border-radius: 10px;
+      transition: background 0.2s;
+    }
+    .st-toggle input:checked + .st-toggle-track { background: rgba(218,165,32,0.6); }
+    .st-toggle-thumb {
+      position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+      background: #888; border-radius: 50%; transition: all 0.2s;
+    }
+    .st-toggle input:checked ~ .st-toggle-thumb { left: 18px; background: #daa520; }
+    /* Range slider */
+    .st-range {
+      width: 100px; accent-color: #daa520; height: 3px;
+    }
+    .st-range-val {
+      font-family: 'SF Mono', monospace; font-size: 0.6rem; color: #daa520;
+      min-width: 32px; text-align: right;
+    }
+    /* Select */
+    .st-select {
+      background: #222; border: 1px solid #444; color: #ccc; border-radius: 4px;
+      padding: 3px 8px; font-family: 'Roboto Condensed', sans-serif; font-size: 0.65rem;
+      cursor: pointer; outline: none;
+    }
+    .st-select:focus { border-color: #daa520; }
+    /* AI section styles */
+    .st-ai-status {
+      display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+      background: rgba(218,165,32,0.06); border: 1px solid rgba(218,165,32,0.15);
+      border-radius: 6px; margin-bottom: 12px;
+    }
+    .st-ai-dot { width: 6px; height: 6px; border-radius: 50%; background: #4ade80; animation: st-pulse 2s infinite; }
+    @keyframes st-pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+    .st-ai-label { font-family: 'Roboto Condensed', sans-serif; font-size: 0.65rem; color: #aaa; }
+    .st-ai-label strong { color: #daa520; }
+    .st-metric-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0;
+    }
+    .st-metric-card {
+      background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 6px; padding: 8px 10px;
+    }
+    .st-metric-label { font-size: 0.55rem; color: #666; text-transform: uppercase; letter-spacing: 0.1em; font-family: 'Oswald', sans-serif; }
+    .st-metric-value { font-family: 'Oswald', sans-serif; font-size: 1rem; font-weight: 700; color: #daa520; }
+    .st-metric-sub { font-size: 0.52rem; color: #555; }
+    .st-pipeline {
+      display: flex; align-items: center; gap: 4px; margin: 10px 0; flex-wrap: wrap;
+    }
+    .st-pipe-stage {
+      font-family: 'SF Mono', monospace; font-size: 0.55rem; padding: 3px 8px;
+      background: rgba(218,165,32,0.08); border: 1px solid rgba(218,165,32,0.2);
+      border-radius: 3px; color: #daa520;
+    }
+    .st-pipe-arrow { color: #444; font-size: 0.6rem; }
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="overlay">
+  <!-- ESPN-style scorebug -->
+  <div id="scorebug">
+    <div id="sb-event-tag">Super Bowl LX &bull; Las Vegas</div>
+    <div id="sb-teams">
+      <!-- NE row -->
+      <div style="display:flex;flex-direction:column;flex:1;">
+        <div class="sb-team-row" style="border-bottom:1px solid #222;">
+          <div class="sb-team-color" style="background:#c60c30;"></div>
+          <div class="sb-poss-indicator"><div class="sb-poss-dot" id="ne-poss" style="background:transparent;"></div></div>
+          <div class="sb-team-logo-box"><canvas id="pat-logo" width="26" height="26"></canvas></div>
+          <div class="sb-team-abbr ne-color">NE</div>
+          <div class="sb-team-record">(14-5)</div>
+          <div class="sb-team-score ne-color" id="score-ne">0</div>
+        </div>
+        <div class="sb-team-row">
+          <div class="sb-team-color" style="background:#69be28;"></div>
+          <div class="sb-poss-indicator"><div class="sb-poss-dot" id="sea-poss" style="background:transparent;"></div></div>
+          <div class="sb-team-logo-box"><canvas id="sea-logo" width="26" height="26"></canvas></div>
+          <div class="sb-team-abbr sea-color">SEA</div>
+          <div class="sb-team-record">(13-6)</div>
+          <div class="sb-team-score sea-color" id="score-sea">0</div>
+        </div>
+      </div>
+      <!-- Center info -->
+      <div class="sb-center-col">
+        <div class="sb-quarter" id="quarter">1ST</div>
+        <div class="sb-clock" id="clock">15:00</div>
+        <div class="sb-down-dist" id="down-dist">1st & 10</div>
+        <div class="sb-yard-line" id="ball-yard">NE 25</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="play-clock-badge">
+    <span class="pc-label">PLAY CLOCK</span>
+    <span class="pc-value" id="play-clock">40</span>
+  </div>
+
+  <!-- Stats -->
+  <div id="stats-panel">
+    <div>Gaussians: <span class="st-val" id="g-count">0</span></div>
+    <div>FPS: <span class="st-val" id="fps-value">0</span></div>
+    <div>Camera: <span class="st-val" id="cam-mode">Broadcast</span></div>
+    <div>Coherence: <span class="st-val" id="coh-val">1.000</span></div>
+  </div>
+
+  <!-- Play-by-play ticker -->
+  <div id="play-ticker">
+    <div class="tk-entry"><span class="tk-time">Q1 15:00</span> <span class="tk-highlight">Super Bowl LX is underway!</span></div>
+  </div>
+
+  <!-- Big play overlay -->
+  <div id="big-play"></div>
+  <div id="replay-badge">REPLAY</div>
+
+  <!-- Network bug -->
+  <div id="network-bug">RUVECTOR VWM</div>
+
+  <!-- Tech description modal -->
+  <div id="tech-modal-backdrop">
+    <div id="tech-modal">
+      <button id="tech-close">&times;</button>
+      <div class="tech-badge">How It Works</div>
+      <div class="tech-title">4D Gaussian Splatting Engine</div>
+
+      <div class="tech-section">
+        <div class="tech-section-head">What You're Seeing</div>
+        <div class="tech-body">
+          Every object on screen &mdash; players, the football, the field, the crowd &mdash; is built from
+          <strong>thousands of 3D Gaussians</strong>: soft, translucent ellipsoids defined by a position,
+          covariance (shape), color, and opacity. Each player alone is composed of <strong>30+ overlapping
+          Gaussians</strong> (helmet, visor, shoulder pads, jersey, numbers, legs, cleats, shadows). The full
+          scene renders <strong>4,000+ Gaussians per frame</strong> at 60 fps.
+        </div>
+      </div>
+
+      <div class="tech-section">
+        <div class="tech-section-head">4D = 3D + Time</div>
+        <div class="tech-body">
+          Standard 3D Gaussian Splatting reconstructs static scenes. This engine adds a
+          <strong>temporal dimension</strong>: each Gaussian carries keyframes that define how its position,
+          shape, color, and opacity evolve over time. Arm swing during a sprint, the spiral rotation of a
+          thrown football, crowd wave motion &mdash; all are encoded as <strong>continuous temporal
+          interpolations</strong> across Gaussian parameters rather than traditional skeletal animation.
+        </div>
+      </div>
+
+      <div class="tech-section">
+        <div class="tech-section-head">Rendering Pipeline</div>
+        <div class="tech-body">
+          Each frame follows a strict pipeline:
+        </div>
+        <div class="tech-diagram">Scene Graph  &#8594;  View-Projection Matrix  &#8594;  Perspective Divide
+    &#8595;
+Depth Sort (back-to-front)  &#8594;  Alpha Composite
+    &#8595;
+Post-Processing: Fog &#8594; Vignette &#8594; Film Grain &#8594; Color Grade</div>
+        <div class="tech-body">
+          Gaussians are projected from world space into screen space using a <strong>perspective projection
+          matrix</strong>, then <strong>depth-sorted back-to-front</strong> for correct transparency. Each
+          Gaussian is drawn as a <strong>radial gradient</strong> (Canvas2D's closest approximation to a
+          true splatted ellipsoid). A post-processing stack applies <strong>atmospheric depth fog</strong>,
+          cinematic <strong>vignette</strong>, photographic <strong>film grain</strong>, and
+          <strong>warm color grading</strong>.
+        </div>
+      </div>
+
+      <div class="tech-section">
+        <div class="tech-section-head">Three-Loop Architecture</div>
+        <div class="tech-diagram">FAST LOOP (~60 Hz)    Render + physics + particle dynamics
+MEDIUM LOOP (~10 Hz)  Coherence gate + play state machine
+SLOW LOOP (~1 Hz)     Game governance + AI play-calling</div>
+        <div class="tech-body">
+          The <strong>fast loop</strong> handles rendering, camera interpolation, and particle physics every
+          frame. The <strong>medium loop</strong> runs a coherence gate that validates world-state
+          self-consistency &mdash; are all 22 players accounted for? Is the ball on the correct trajectory?
+          The <strong>slow loop</strong> governs high-level game logic: selecting formations, calling plays,
+          managing clock and score state.
+        </div>
+      </div>
+
+      <div class="tech-section">
+        <div class="tech-section-head">Play Simulation Engine</div>
+        <div class="tech-body">
+          Plays are not scripted animations. The engine defines <strong>offensive formations</strong>
+          (Shotgun, I-Form, Spread) and <strong>defensive coverages</strong> (Nickel, Cover 3), then
+          simulates route-running, QB dropbacks, handoffs, and tackle detection using
+          <strong>distance-based collision</strong> and probabilistic outcomes. Each play generates unique
+          player trajectories, yardage, and game-state transitions.
+        </div>
+      </div>
+
+      <div class="tech-section">
+        <div class="tech-section-head">Broadcast Presentation</div>
+        <div class="tech-body">
+          The HUD replicates an ESPN-style scorebug with real-time <strong>quarter, clock, down &amp;
+          distance, possession, and play clock</strong>. Five camera modes (Broadcast, End Zone, SkyCam,
+          Follow Ball, Cinematic Dolly) use <strong>lerped position smoothing</strong> for fluid transitions.
+          Touchdown confetti, turf spray particles, slow-motion replay at <code>0.25x</code>, and big-play
+          overlays complete the broadcast experience.
+        </div>
+      </div>
+
+      <div class="tech-section">
+        <div class="tech-section-head">Why Gaussians?</div>
+        <div class="tech-body">
+          Gaussian Splatting has emerged as a breakthrough in neural scene representation. Unlike mesh-based
+          rendering, Gaussians <strong>naturally handle transparency, soft edges, and volumetric
+          effects</strong> (fog, glow, motion blur) without expensive ray-marching. They compose additively,
+          making it trivial to layer complex appearances from simple primitives. This engine demonstrates
+          that even without GPU shaders, the Gaussian paradigm produces <strong>visually rich, physically
+          plausible scenes</strong> in real time on a standard Canvas2D surface.
+        </div>
+      </div>
+
+      <div class="tech-footer">
+        RuVector Visual World Model &bull; 4D Gaussian Splatting &bull; Canvas2D Renderer
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings modal -->
+  <div id="settings-backdrop">
+    <div id="settings-panel-modal">
+      <button id="settings-close">&times;</button>
+      <div class="st-header">
+        <span class="st-header-badge">Configuration</span>
+        <span class="st-header-title">Settings</span>
+      </div>
+      <div class="st-tabs">
+        <button class="st-tab active" data-tab="tab-visual">Visual</button>
+        <button class="st-tab" data-tab="tab-game">Game</button>
+        <button class="st-tab" data-tab="tab-ai">AI &amp; Learning</button>
+      </div>
+
+      <!-- VISUAL TAB -->
+      <div class="st-tab-content active" id="tab-visual">
+        <div class="st-row">
+          <div><div class="st-row-label">Atmospheric Fog</div><div class="st-row-sub">Distance-based depth fade</div></div>
+          <label class="st-toggle"><input type="checkbox" id="set-fog" checked><span class="st-toggle-track"></span><span class="st-toggle-thumb"></span></label>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Vignette</div><div class="st-row-sub">Cinematic edge darkening</div></div>
+          <label class="st-toggle"><input type="checkbox" id="set-vignette" checked><span class="st-toggle-track"></span><span class="st-toggle-thumb"></span></label>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Film Grain</div><div class="st-row-sub">Photographic noise overlay</div></div>
+          <label class="st-toggle"><input type="checkbox" id="set-grain" checked><span class="st-toggle-track"></span><span class="st-toggle-thumb"></span></label>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Warm Color Grade</div><div class="st-row-sub">Broadcast-style tint</div></div>
+          <label class="st-toggle"><input type="checkbox" id="set-colorgrade" checked><span class="st-toggle-track"></span><span class="st-toggle-thumb"></span></label>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Particle Effects</div><div class="st-row-sub">Confetti &amp; turf spray</div></div>
+          <label class="st-toggle"><input type="checkbox" id="set-particles" checked><span class="st-toggle-track"></span><span class="st-toggle-thumb"></span></label>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Crowd Density</div><div class="st-row-sub">Gaussian count for spectators</div></div>
+          <div class="st-row-ctrl">
+            <input type="range" class="st-range" id="set-crowd" min="0" max="100" value="100">
+            <span class="st-range-val" id="set-crowd-val">100%</span>
+          </div>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Camera Smoothing</div><div class="st-row-sub">Transition interpolation factor</div></div>
+          <div class="st-row-ctrl">
+            <input type="range" class="st-range" id="set-camsmooth" min="1" max="20" value="4">
+            <span class="st-range-val" id="set-camsmooth-val">0.04</span>
+          </div>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Gaussian Quality</div><div class="st-row-sub">Min render size threshold</div></div>
+          <div class="st-row-ctrl">
+            <select class="st-select" id="set-quality">
+              <option value="0.15">Ultra</option>
+              <option value="0.25" selected>High</option>
+              <option value="0.5">Medium</option>
+              <option value="1.0">Low</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- GAME TAB -->
+      <div class="st-tab-content" id="tab-game">
+        <div class="st-row">
+          <div><div class="st-row-label">Game Speed</div><div class="st-row-sub">Simulation time multiplier</div></div>
+          <div class="st-row-ctrl">
+            <input type="range" class="st-range" id="set-gamespeed" min="1" max="40" value="10">
+            <span class="st-range-val" id="set-gamespeed-val">1.0x</span>
+          </div>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Auto-Play</div><div class="st-row-sub">Automatically call next play</div></div>
+          <label class="st-toggle"><input type="checkbox" id="set-autoplay" checked><span class="st-toggle-track"></span><span class="st-toggle-thumb"></span></label>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Auto-Replay</div><div class="st-row-sub">Slow-motion on big plays</div></div>
+          <label class="st-toggle"><input type="checkbox" id="set-autoreplay" checked><span class="st-toggle-track"></span><span class="st-toggle-thumb"></span></label>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Replay Speed</div><div class="st-row-sub">Slow-motion multiplier</div></div>
+          <div class="st-row-ctrl">
+            <input type="range" class="st-range" id="set-replayspeed" min="5" max="50" value="25">
+            <span class="st-range-val" id="set-replayspeed-val">0.25x</span>
+          </div>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Play-by-Play Feed</div><div class="st-row-sub">Show commentary ticker</div></div>
+          <label class="st-toggle"><input type="checkbox" id="set-ticker" checked><span class="st-toggle-track"></span><span class="st-toggle-thumb"></span></label>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Scorebug</div><div class="st-row-sub">ESPN-style HUD overlay</div></div>
+          <label class="st-toggle"><input type="checkbox" id="set-scorebug" checked><span class="st-toggle-track"></span><span class="st-toggle-thumb"></span></label>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Stats Overlay</div><div class="st-row-sub">Gaussian count, FPS, coherence</div></div>
+          <label class="st-toggle"><input type="checkbox" id="set-stats" checked><span class="st-toggle-track"></span><span class="st-toggle-thumb"></span></label>
+        </div>
+      </div>
+
+      <!-- AI & LEARNING TAB -->
+      <div class="st-tab-content" id="tab-ai">
+        <div class="st-ai-status">
+          <div class="st-ai-dot"></div>
+          <div class="st-ai-label"><strong>RuVector VWM</strong> &mdash; Active &bull; 3 loops online</div>
+        </div>
+
+        <div class="st-metric-grid">
+          <div class="st-metric-card">
+            <div class="st-metric-label">Coherence Score</div>
+            <div class="st-metric-value" id="ai-coherence">1.000</div>
+            <div class="st-metric-sub">World-state consistency</div>
+          </div>
+          <div class="st-metric-card">
+            <div class="st-metric-label">Entities Tracked</div>
+            <div class="st-metric-value" id="ai-entities">26</div>
+            <div class="st-metric-sub">22 players + 4 refs</div>
+          </div>
+          <div class="st-metric-card">
+            <div class="st-metric-label">Plays Simulated</div>
+            <div class="st-metric-value" id="ai-plays">0</div>
+            <div class="st-metric-sub">Total game actions</div>
+          </div>
+          <div class="st-metric-card">
+            <div class="st-metric-label">Gaussians / Frame</div>
+            <div class="st-metric-value" id="ai-gaussians">0</div>
+            <div class="st-metric-sub">Active splat count</div>
+          </div>
+        </div>
+
+        <div class="tech-section-head" style="margin:14px 0 8px;">Intelligence Pipeline</div>
+        <div class="st-pipeline">
+          <span class="st-pipe-stage">RETRIEVE</span><span class="st-pipe-arrow">&rarr;</span>
+          <span class="st-pipe-stage">JUDGE</span><span class="st-pipe-arrow">&rarr;</span>
+          <span class="st-pipe-stage">DISTILL</span><span class="st-pipe-arrow">&rarr;</span>
+          <span class="st-pipe-stage">CONSOLIDATE</span>
+        </div>
+
+        <div class="st-row">
+          <div><div class="st-row-label">Coherence Gate</div><div class="st-row-sub">Validates world-state self-consistency at ~10 Hz</div></div>
+          <label class="st-toggle"><input type="checkbox" id="set-coherence" checked><span class="st-toggle-track"></span><span class="st-toggle-thumb"></span></label>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Coherence Threshold</div><div class="st-row-sub">Min acceptable consistency score</div></div>
+          <div class="st-row-ctrl">
+            <input type="range" class="st-range" id="set-cohthreshold" min="80" max="100" value="95">
+            <span class="st-range-val" id="set-cohthreshold-val">0.95</span>
+          </div>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Play-Calling AI</div><div class="st-row-sub">Formation and route selection strategy</div></div>
+          <div class="st-row-ctrl">
+            <select class="st-select" id="set-playcall">
+              <option value="balanced" selected>Balanced</option>
+              <option value="aggressive">Aggressive</option>
+              <option value="conservative">Conservative</option>
+              <option value="random">Random</option>
+            </select>
+          </div>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Attention Allocation</div><div class="st-row-sub">Compute budget per entity per frame</div></div>
+          <div class="st-row-ctrl">
+            <select class="st-select" id="set-attention">
+              <option value="adaptive" selected>Adaptive</option>
+              <option value="uniform">Uniform</option>
+              <option value="ball-focus">Ball Focus</option>
+            </select>
+          </div>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Temporal Learning</div><div class="st-row-sub">4D keyframe interpolation method</div></div>
+          <div class="st-row-ctrl">
+            <select class="st-select" id="set-temporal">
+              <option value="continuous" selected>Continuous</option>
+              <option value="discrete">Discrete</option>
+              <option value="predictive">Predictive</option>
+            </select>
+          </div>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Neural Substrate</div><div class="st-row-sub">SONA self-optimizing adaptation</div></div>
+          <label class="st-toggle"><input type="checkbox" id="set-neural" checked><span class="st-toggle-track"></span><span class="st-toggle-thumb"></span></label>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">EWC++ Memory Guard</div><div class="st-row-sub">Prevent catastrophic forgetting</div></div>
+          <label class="st-toggle"><input type="checkbox" id="set-ewc" checked><span class="st-toggle-track"></span><span class="st-toggle-thumb"></span></label>
+        </div>
+
+        <div class="tech-section-head" style="margin:14px 0 8px;">Three-Loop Architecture</div>
+        <div class="st-row">
+          <div><div class="st-row-label">Fast Loop</div><div class="st-row-sub">Render + physics (~60 Hz)</div></div>
+          <div class="st-row-ctrl"><span class="st-range-val" id="ai-fast-hz">60 Hz</span></div>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Medium Loop</div><div class="st-row-sub">Coherence gate (~10 Hz)</div></div>
+          <div class="st-row-ctrl"><span class="st-range-val" id="ai-med-hz">10 Hz</span></div>
+        </div>
+        <div class="st-row">
+          <div><div class="st-row-label">Slow Loop</div><div class="st-row-sub">Game governance (~1 Hz)</div></div>
+          <div class="st-row-ctrl"><span class="st-range-val" id="ai-slow-hz">1 Hz</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Transport -->
+  <div id="transport">
+    <button class="tb" id="play-btn">&#9646;&#9646;</button>
+    <div class="sep"></div>
+    <button class="tb" id="cam-broadcast">Broadcast</button>
+    <button class="tb" id="cam-endzone">End Zone</button>
+    <button class="tb" id="cam-skycam">SkyCam</button>
+    <button class="tb" id="cam-follow">Follow</button>
+    <button class="tb" id="cam-cinematic">Cinematic</button>
+    <div class="sep"></div>
+    <button class="tb" id="btn-replay">Replay</button>
+    <div class="sep"></div>
+    <button class="tb" id="btn-tech">Tech</button>
+    <button class="tb" id="btn-settings">Settings</button>
+    <div class="sep"></div>
+    <input type="range" id="time-slider" min="0" max="1000" value="0" />
+    <span id="time-label">t=0.000</span>
+  </div>
+</div>
+
+<script>
+// ============================================================
+//  RuVector VWM - Super Bowl LX: Patriots vs Seahawks
+//  HYPER-REALISTIC 4D Gaussian Splatting (Canvas2D)
+// ============================================================
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// === TEAMS ===
+const TEAMS = {
+  NE: {
+    name:'Patriots', abbr:'NE',
+    helmet:'#b0b7bc', helmetStripe:'#c60c30', facemask:'#b0b7bc',
+    jersey:'#002244', jerseyAccent:'#c60c30', pants:'#002244',
+    numberColor:'#c60c30', socks:'#c60c30', visor:'#1a1a3a',
+    // Specular highlight color for helmet
+    specular:'#e8e8f0',
+  },
+  SEA: {
+    name:'Seahawks', abbr:'SEA',
+    helmet:'#002244', helmetStripe:'#69be28', facemask:'#b0b7bc',
+    jersey:'#002244', jerseyAccent:'#69be28', pants:'#a5acaf',
+    numberColor:'#69be28', socks:'#002244', visor:'#1a3a1a',
+    specular:'#4488aa',
+  }
+};
+
+const hex2rgb = h => { const n=parseInt(h.slice(1),16); return [(n>>16&255)/255,(n>>8&255)/255,(n&255)/255]; };
+
+// === FIELD ===
+const FIELD = { length:120, width:53.33, endZone:10 };
+
+// === GAME STATE ===
+const game = {
+  quarter:1, clock:900, playClock:40,
+  scoreNE:0, scoreSEA:0,
+  down:1, yardsToGo:10, lineOfScrimmage:25,
+  possession:'NE', playInProgress:false, playPhase:'huddle',
+  playTimer:0, driveYards:0, totalPlays:0,
+};
+
+// === CAMERA (smoothed) ===
+const camera = {
+  mode:'broadcast',
+  theta:0, phi:0.35, radius:60,
+  target:[60,0,26.67],
+  fov:Math.PI/4.5, near:0.1, far:350,
+  // Smoothed actual values
+  eyeSmooth:[0,14,35], targetSmooth:[26.67,0,35],
+  cinematicAngle: 0,
+};
+
+// === RENDER STATE ===
+let gaussians = [];
+let totalGaussianCount = 0;
+let playing = true;
+let globalTime = 0;
+let lastFrameTime = 0;
+let frameTimes = [];
+
+// === PARTICLES (confetti, turf spray, breath) ===
+let particles = [];
+
+// === REPLAY ===
+let replayMode = false;
+let replaySpeed = 0.25;
+let replayTimer = 0;
+
+// === SETTINGS ===
+const settings = {
+  fog: true, vignette: true, grain: true, colorGrade: true, particles: true,
+  crowdDensity: 1.0, camSmooth: 0.04, qualityThreshold: 0.25,
+  gameSpeed: 1.0, autoPlay: true, autoReplay: true, replaySpeedMul: 0.25,
+  showTicker: true, showScorebug: true, showStats: true,
+  coherenceGate: true, coherenceThreshold: 0.95,
+  playCalling: 'balanced', attention: 'adaptive', temporal: 'continuous',
+  neural: true, ewc: true,
+};
+
+// === SEED FOR DETERMINISTIC CROWD ===
+function seededRandom(seed) {
+  let s = seed;
+  return () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
+}
+const crowdRng = seededRandom(42);
+
+// ============================================================
+//  LOGOS (mini canvas)
+// ============================================================
+function drawPatriotsLogo(cvs) {
+  const c=cvs.getContext('2d'); c.clearRect(0,0,26,26);
+  // Simplified shield
+  c.fillStyle='#002244';
+  c.beginPath(); c.moveTo(13,2); c.lineTo(24,8); c.lineTo(22,22); c.lineTo(13,24); c.lineTo(4,22); c.lineTo(2,8); c.closePath(); c.fill();
+  c.fillStyle='#c60c30'; c.fillRect(6,8,14,3);
+  c.fillStyle='#b0b7bc'; c.fillRect(6,12,14,3);
+  c.fillStyle='#fff'; c.fillRect(6,16,14,3);
+  c.fillStyle='#fff'; c.font='bold 5px Oswald,sans-serif'; c.textAlign='center'; c.fillText('NE',13,8);
+}
+function drawSeahawksLogo(cvs) {
+  const c=cvs.getContext('2d'); c.clearRect(0,0,26,26);
+  c.fillStyle='#002244';
+  c.beginPath(); c.moveTo(13,2); c.lineTo(24,8); c.lineTo(22,22); c.lineTo(13,24); c.lineTo(4,22); c.lineTo(2,8); c.closePath(); c.fill();
+  c.fillStyle='#69be28'; c.beginPath(); c.arc(13,12,6,0,Math.PI*2); c.fill();
+  c.fillStyle='#002244'; c.beginPath(); c.arc(13,12,3,0,Math.PI*2); c.fill();
+  c.fillStyle='#fff'; c.beginPath(); c.arc(12,11,1,0,Math.PI*2); c.fill();
+  c.fillStyle='#69be28'; c.font='bold 4px Oswald,sans-serif'; c.textAlign='center'; c.fillText('SEA',13,22);
+}
+
+// ============================================================
+//  FORMATIONS
+// ============================================================
+const FORMATIONS = {
+  offense: {
+    shotgun: [
+      {pos:'QB',x:0,z:-5,num:10},{pos:'RB',x:-2,z:-7,num:28},
+      {pos:'WR',x:-22,z:0,num:81},{pos:'WR',x:22,z:0,num:14},{pos:'WR',x:-18,z:-2,num:11},
+      {pos:'TE',x:6,z:0.5,num:87},
+      {pos:'LT',x:-4,z:0,num:77},{pos:'LG',x:-2,z:0,num:62},{pos:'C',x:0,z:0,num:60},
+      {pos:'RG',x:2,z:0,num:64},{pos:'RT',x:4,z:0,num:72},
+    ],
+    spread: [
+      {pos:'QB',x:0,z:-5,num:10},{pos:'RB',x:2,z:-6,num:28},
+      {pos:'WR',x:-24,z:0,num:81},{pos:'WR',x:24,z:0,num:14},
+      {pos:'WR',x:-16,z:-1,num:11},{pos:'WR',x:16,z:-1,num:15},
+      {pos:'LT',x:-4,z:0,num:77},{pos:'LG',x:-2,z:0,num:62},{pos:'C',x:0,z:0,num:60},
+      {pos:'RG',x:2,z:0,num:64},{pos:'RT',x:4,z:0,num:72},
+    ],
+    iform: [
+      {pos:'QB',x:0,z:-2,num:10},{pos:'FB',x:0,z:-4,num:44},{pos:'RB',x:0,z:-6,num:28},
+      {pos:'WR',x:-22,z:0,num:81},{pos:'WR',x:22,z:0,num:14},
+      {pos:'TE',x:6,z:0.5,num:87},
+      {pos:'LT',x:-4,z:0,num:77},{pos:'LG',x:-2,z:0,num:62},{pos:'C',x:0,z:0,num:60},
+      {pos:'RG',x:2,z:0,num:64},{pos:'RT',x:4,z:0,num:72},
+    ],
+  },
+  defense: {
+    nickel: [
+      {pos:'DE',x:-5,z:1,num:99},{pos:'DT',x:-1.5,z:1,num:93},
+      {pos:'DT',x:1.5,z:1,num:97},{pos:'DE',x:5,z:1,num:91},
+      {pos:'MLB',x:0,z:4,num:54},{pos:'OLB',x:-8,z:3,num:50},
+      {pos:'CB',x:-22,z:3,num:24},{pos:'CB',x:22,z:3,num:21},
+      {pos:'NCB',x:-14,z:5,num:26},{pos:'FS',x:-5,z:12,num:32},{pos:'SS',x:5,z:8,num:33},
+    ],
+    cover3: [
+      {pos:'DE',x:-5,z:1,num:99},{pos:'DT',x:-1.5,z:1,num:93},
+      {pos:'DT',x:1.5,z:1,num:97},{pos:'DE',x:5,z:1,num:91},
+      {pos:'WLB',x:-10,z:4,num:50},{pos:'MLB',x:0,z:4,num:54},{pos:'SLB',x:10,z:4,num:55},
+      {pos:'CB',x:-22,z:6,num:24},{pos:'CB',x:22,z:6,num:21},
+      {pos:'FS',x:0,z:16,num:32},{pos:'SS',x:8,z:10,num:33},
+    ],
+  }
+};
+
+// ============================================================
+//  GAUSSIAN BUILDERS
+// ============================================================
+
+function buildField() {
+  const gs = [];
+  // High-detail grass with mowing pattern
+  for (let z = 0; z < FIELD.length; z += 1.5) {
+    for (let x = 0; x < FIELD.width; x += 1.5) {
+      const onEZ = z < FIELD.endZone || z >= FIELD.length - FIELD.endZone;
+      let r, g, b;
+      if (onEZ) {
+        if (z < FIELD.endZone) {
+          // Patriots end zone - dark navy
+          r = 0.0; g = 0.08; b = 0.16;
+        } else {
+          // Seahawks end zone - dark navy
+          r = 0.0; g = 0.1; b = 0.16;
+        }
+      } else {
+        const yd = z - FIELD.endZone;
+        const stripe = Math.floor(yd / 5) % 2;
+        // More realistic grass with micro-variation
+        const noise = Math.sin(x * 3.7 + z * 2.1) * 0.015 + Math.sin(x * 7.3 - z * 4.9) * 0.008;
+        r = 0.06 + stripe * 0.025 + noise;
+        g = 0.32 + stripe * 0.05 + noise * 2;
+        b = 0.05 + stripe * 0.01 + noise * 0.5;
+      }
+      gs.push({ x, y:0, z, sx:1.0, sy:0.03, sz:1.0, r, g, b, a:1, type:'field' });
+    }
+  }
+  return gs;
+}
+
+function buildFieldMarkings() {
+  const gs = [];
+  const cx = FIELD.width / 2;
+
+  // Yard lines every 5 yards (crisp white)
+  for (let yd = 0; yd <= 100; yd += 5) {
+    const z = FIELD.endZone + yd;
+    for (let x = 1; x < FIELD.width - 1; x += 1) {
+      gs.push({ x, y:0.008, z, sx:0.55, sy:0.008, sz:0.06, r:1, g:1, b:1, a:0.92, type:'marking' });
+    }
+    // Yard numbers (both sides)
+    if (yd % 10 === 0 && yd > 0 && yd < 100) {
+      const dn = yd <= 50 ? yd : 100 - yd;
+      gs.push({ x:7, y:0.01, z, sx:1.8, sy:0.008, sz:1.5, r:1, g:1, b:1, a:0.45, type:'number', label:dn });
+      gs.push({ x:FIELD.width-7, y:0.01, z, sx:1.8, sy:0.008, sz:1.5, r:1, g:1, b:1, a:0.45, type:'number', label:dn });
+    }
+  }
+
+  // Hash marks every yard
+  for (let yd = 0; yd <= 100; yd++) {
+    const z = FIELD.endZone + yd;
+    gs.push({ x:cx-6, y:0.008, z, sx:0.25, sy:0.008, sz:0.04, r:1, g:1, b:1, a:0.55, type:'marking' });
+    gs.push({ x:cx+6, y:0.008, z, sx:0.25, sy:0.008, sz:0.04, r:1, g:1, b:1, a:0.55, type:'marking' });
+    // Sideline hashes
+    gs.push({ x:1.5, y:0.008, z, sx:0.2, sy:0.008, sz:0.04, r:1, g:1, b:1, a:0.4, type:'marking' });
+    gs.push({ x:FIELD.width-1.5, y:0.008, z, sx:0.2, sy:0.008, sz:0.04, r:1, g:1, b:1, a:0.4, type:'marking' });
+  }
+
+  // End zone text blocks
+  const patCol = hex2rgb('#c60c30');
+  const seaCol = hex2rgb('#69be28');
+  for (let i = 0; i < 10; i++) {
+    gs.push({ x:7+i*4, y:0.015, z:5, sx:1.6, sy:0.008, sz:1.8, r:patCol[0], g:patCol[1], b:patCol[2], a:0.65, type:'ez-text' });
+    gs.push({ x:7+i*4, y:0.015, z:115, sx:1.6, sy:0.008, sz:1.8, r:seaCol[0], g:seaCol[1], b:seaCol[2], a:0.65, type:'ez-text' });
+  }
+
+  // Sidelines
+  for (let z = 0; z < FIELD.length; z += 0.8) {
+    gs.push({ x:0.2, y:0.008, z, sx:0.12, sy:0.008, sz:0.45, r:1, g:1, b:1, a:0.95, type:'marking' });
+    gs.push({ x:FIELD.width-0.2, y:0.008, z, sx:0.12, sy:0.008, sz:0.45, r:1, g:1, b:1, a:0.95, type:'marking' });
+  }
+
+  // NFL Shield at midfield
+  for (let dx = -2; dx <= 2; dx += 0.8) {
+    for (let dz = -2; dz <= 2; dz += 0.8) {
+      const dist = Math.sqrt(dx*dx+dz*dz);
+      if (dist < 2.5) {
+        gs.push({ x:cx+dx, y:0.012, z:FIELD.length/2+dz, sx:0.5, sy:0.008, sz:0.5,
+          r:0.13, g:0.2, b:0.4, a:0.35*(1-dist/3), type:'logo' });
+      }
+    }
+  }
+
+  return gs;
+}
+
+function buildGoalposts() {
+  const gs = [];
+  const cx = FIELD.width / 2;
+  for (const z of [0, FIELD.length]) {
+    // Base
+    for (let h = 0; h < 3; h += 0.3) {
+      gs.push({ x:cx, y:h, z, sx:0.18, sy:0.2, sz:0.18, r:0.85, g:0.75, b:0.15, a:1, type:'post' });
+    }
+    // Crossbar
+    for (let xo = -2.8; xo <= 2.8; xo += 0.35) {
+      gs.push({ x:cx+xo, y:3, z, sx:0.2, sy:0.1, sz:0.1, r:0.9, g:0.8, b:0.18, a:1, type:'post' });
+    }
+    // Uprights
+    for (let h = 3; h < 11; h += 0.35) {
+      gs.push({ x:cx-2.8, y:h, z, sx:0.1, sy:0.22, sz:0.1, r:0.9, g:0.8, b:0.18, a:1, type:'post' });
+      gs.push({ x:cx+2.8, y:h, z, sx:0.1, sy:0.22, sz:0.1, r:0.9, g:0.8, b:0.18, a:1, type:'post' });
+    }
+  }
+  return gs;
+}
+
+function buildPlayer(bx, bz, team, num, pos, isOff, anim) {
+  const gs = [];
+  const t = TEAMS[team];
+  const [hr,hg,hb] = hex2rgb(t.helmet);
+  const [hsr,hsg,hsb] = hex2rgb(t.helmetStripe);
+  const [fmr,fmg,fmb] = hex2rgb(t.facemask);
+  const [jr,jg,jb] = hex2rgb(t.jersey);
+  const [jar,jag,jab] = hex2rgb(t.jerseyAccent);
+  const [pr,pg,pb] = hex2rgb(t.pants);
+  const [nr,ng,nb] = hex2rgb(t.numberColor);
+  const [spr,spg,spb] = hex2rgb(t.specular);
+  const [skr,skg,skb] = hex2rgb(t.socks);
+
+  const isLine = ['LT','LG','C','RG','RT','DE','DT'].includes(pos);
+  const isLB = ['MLB','WLB','SLB','OLB'].includes(pos);
+  const sc = isLine ? 1.35 : (isLB ? 1.15 : 1.0);
+  const ht = isLine ? 1.05 : (isLB ? 1.0 : 0.92);
+
+  const breathe = Math.sin(globalTime*3+num)*0.015;
+  const runCycle = anim?.moving ? Math.sin(globalTime*8+num*1.3)*0.08 : 0;
+  const sway = anim?.moving ? Math.sin(globalTime*6+num)*0.06 : Math.sin(globalTime*1.2+num*0.7)*0.02;
+
+  const px = bx + sway;
+  const pz = bz;
+
+  // === HELMET ===
+  // Main shell
+  gs.push({ x:px, y:ht*1.85+breathe, z:pz, sx:0.38*sc, sy:0.32, sz:0.36*sc, r:hr, g:hg, b:hb, a:1, type:'player' });
+  // Helmet stripe (center)
+  gs.push({ x:px, y:ht*1.92+breathe, z:pz, sx:0.06, sy:0.12, sz:0.38*sc, r:hsr, g:hsg, b:hsb, a:0.9, type:'player' });
+  // Specular highlight (glossy reflection)
+  gs.push({ x:px+0.08, y:ht*1.95+breathe, z:pz-0.05, sx:0.12, sy:0.08, sz:0.12, r:spr, g:spg, b:spb, a:0.35, type:'spec' });
+  // Facemask
+  gs.push({ x:px, y:ht*1.72+breathe, z:pz+0.22*(isOff?-1:1), sx:0.22, sy:0.18, sz:0.08, r:fmr, g:fmg, b:fmb, a:0.85, type:'player' });
+  // Visor
+  const [vr,vg,vb] = hex2rgb(t.visor);
+  gs.push({ x:px, y:ht*1.78+breathe, z:pz+0.18*(isOff?-1:1), sx:0.2, sy:0.06, sz:0.04, r:vr, g:vg, b:vb, a:0.5, type:'player' });
+
+  // === SHOULDER PADS ===
+  gs.push({ x:px-0.4*sc, y:ht*1.48, z:pz, sx:0.22, sy:0.18, sz:0.28, r:jr*1.15, g:jg*1.15, b:jb*1.15, a:0.95, type:'player' });
+  gs.push({ x:px+0.4*sc, y:ht*1.48, z:pz, sx:0.22, sy:0.18, sz:0.28, r:jr*1.15, g:jg*1.15, b:jb*1.15, a:0.95, type:'player' });
+
+  // === JERSEY (TORSO) ===
+  gs.push({ x:px, y:ht*1.22+breathe*0.3, z:pz, sx:0.52*sc, sy:0.48, sz:0.38*sc, r:jr, g:jg, b:jb, a:1, type:'player' });
+  // Jersey accent stripes (sleeves)
+  gs.push({ x:px-0.42*sc, y:ht*1.3, z:pz, sx:0.08, sy:0.15, sz:0.18, r:jar, g:jag, b:jab, a:0.8, type:'player' });
+  gs.push({ x:px+0.42*sc, y:ht*1.3, z:pz, sx:0.08, sy:0.15, sz:0.18, r:jar, g:jag, b:jab, a:0.8, type:'player' });
+  // Number (front)
+  gs.push({ x:px, y:ht*1.28, z:pz+0.18*(isOff?-1:1), sx:0.18, sy:0.18, sz:0.04, r:nr, g:ng, b:nb, a:0.85, type:'num' });
+  // Number (back)
+  gs.push({ x:px, y:ht*1.28, z:pz-0.18*(isOff?-1:1), sx:0.22, sy:0.22, sz:0.04, r:nr, g:ng, b:nb, a:0.7, type:'num' });
+
+  // === ARMS ===
+  const armSwing = runCycle * 0.5;
+  // Left arm
+  gs.push({ x:px-0.5*sc, y:ht*1.1+armSwing, z:pz, sx:0.1, sy:0.3, sz:0.1, r:jr, g:jg, b:jb, a:0.95, type:'player' });
+  // Left hand
+  gs.push({ x:px-0.52*sc, y:ht*0.82+armSwing, z:pz, sx:0.08, sy:0.08, sz:0.08, r:0.7, g:0.55, b:0.42, a:1, type:'player' });
+  // Right arm
+  gs.push({ x:px+0.5*sc, y:ht*1.1-armSwing, z:pz, sx:0.1, sy:0.3, sz:0.1, r:jr, g:jg, b:jb, a:0.95, type:'player' });
+  // Right hand
+  gs.push({ x:px+0.52*sc, y:ht*0.82-armSwing, z:pz, sx:0.08, sy:0.08, sz:0.08, r:0.7, g:0.55, b:0.42, a:1, type:'player' });
+
+  // === PANTS ===
+  gs.push({ x:px, y:ht*0.62, z:pz, sx:0.38*sc, sy:0.35, sz:0.3*sc, r:pr, g:pg, b:pb, a:1, type:'player' });
+  // Knee pads
+  gs.push({ x:px-0.12, y:ht*0.42, z:pz+0.08, sx:0.08, sy:0.06, sz:0.06, r:pr*1.2, g:pg*1.2, b:pb*1.2, a:0.8, type:'player' });
+  gs.push({ x:px+0.12, y:ht*0.42, z:pz+0.08, sx:0.08, sy:0.06, sz:0.06, r:pr*1.2, g:pg*1.2, b:pb*1.2, a:0.8, type:'player' });
+
+  // === LEGS (with run cycle) ===
+  const legFwd = runCycle;
+  gs.push({ x:px-0.14, y:ht*0.22+Math.abs(legFwd)*0.05, z:pz+legFwd*0.3, sx:0.1, sy:0.22, sz:0.1, r:pr, g:pg, b:pb, a:0.95, type:'player' });
+  gs.push({ x:px+0.14, y:ht*0.22+Math.abs(legFwd)*0.05, z:pz-legFwd*0.3, sx:0.1, sy:0.22, sz:0.1, r:pr, g:pg, b:pb, a:0.95, type:'player' });
+
+  // === SOCKS & CLEATS ===
+  gs.push({ x:px-0.14, y:ht*0.1, z:pz+legFwd*0.3, sx:0.08, sy:0.1, sz:0.08, r:skr, g:skg, b:skb, a:0.9, type:'player' });
+  gs.push({ x:px+0.14, y:ht*0.1, z:pz-legFwd*0.3, sx:0.08, sy:0.1, sz:0.08, r:skr, g:skg, b:skb, a:0.9, type:'player' });
+  gs.push({ x:px-0.14, y:0.04, z:pz+legFwd*0.3, sx:0.08, sy:0.04, sz:0.12, r:0.05, g:0.05, b:0.05, a:1, type:'player' });
+  gs.push({ x:px+0.14, y:0.04, z:pz-legFwd*0.3, sx:0.08, sy:0.04, sz:0.12, r:0.05, g:0.05, b:0.05, a:1, type:'player' });
+
+  // === SHADOW (contact + soft) ===
+  gs.push({ x:px, y:0.003, z:pz, sx:0.35*sc, sy:0.005, sz:0.3*sc, r:0, g:0, b:0, a:0.45, type:'shadow' });
+  gs.push({ x:px, y:0.002, z:pz, sx:0.6*sc, sy:0.005, sz:0.5*sc, r:0, g:0, b:0, a:0.15, type:'shadow' });
+
+  return gs;
+}
+
+function buildFootball(x, y, z, inFlight) {
+  const gs = [];
+  gs.push({ x, y, z, sx:0.16, sy:0.1, sz:0.32, r:0.42, g:0.23, b:0.08, a:1, type:'ball' });
+  gs.push({ x, y:y+0.055, z, sx:0.025, sy:0.015, sz:0.18, r:1, g:1, b:1, a:0.9, type:'ball' });
+  // Pointed tips
+  gs.push({ x, y, z:z-0.22, sx:0.07, sy:0.05, sz:0.1, r:0.38, g:0.2, b:0.06, a:1, type:'ball' });
+  gs.push({ x, y, z:z+0.22, sx:0.07, sy:0.05, sz:0.1, r:0.38, g:0.2, b:0.06, a:1, type:'ball' });
+  // Seam line
+  gs.push({ x, y, z, sx:0.02, sy:0.11, sz:0.3, r:1, g:1, b:1, a:0.15, type:'ball' });
+  if (inFlight) {
+    // Spiral glow
+    gs.push({ x, y, z, sx:0.4, sy:0.25, sz:0.6, r:1, g:0.92, b:0.55, a:0.12, type:'glow' });
+    // Motion trail
+    for (let i = 1; i <= 3; i++) {
+      const trail = i * 0.3;
+      gs.push({ x:x, y:y-trail*0.5, z:z-(ballState.targetZ>ballState.startZ?1:-1)*trail,
+        sx:0.1+i*0.02, sy:0.06, sz:0.2, r:0.42, g:0.23, b:0.08, a:0.15/i, type:'trail' });
+    }
+  }
+  // Shadow
+  const shadowScale = 1 + y * 0.04;
+  gs.push({ x, y:0.003, z, sx:0.15*shadowScale, sy:0.005, sz:0.25*shadowScale,
+    r:0, g:0, b:0, a:Math.max(0.05, 0.4-y*0.025), type:'shadow' });
+  return gs;
+}
+
+function buildStadium() {
+  const gs = [];
+
+  // === CROWD (seeded for consistency, animated) ===
+  const rng = seededRandom(42);
+  const crowdPalette = {
+    NE: [[0.78,0.05,0.19],[0,0.13,0.27],[0.69,0.72,0.74],[1,1,1],[0.85,0.8,0.15]],
+    SEA: [[0.41,0.74,0.16],[0,0.13,0.27],[0.65,0.67,0.69],[1,1,1],[0.85,0.8,0.15]],
+  };
+
+  // Side stands (deeper, 8 rows)
+  for (let side = 0; side < 2; side++) {
+    const palette = side === 0 ? crowdPalette.NE : crowdPalette.SEA;
+    for (let row = 0; row < 8; row++) {
+      for (let z = -2; z < FIELD.length + 2; z += 1.8) {
+        const cc = palette[Math.floor(rng() * palette.length)];
+        if (rng() > settings.crowdDensity) continue;
+        const wave = Math.sin(globalTime * 2.5 + z * 0.15 + row * 0.3) * 0.15;
+        const flash = rng() < 0.02 ? 0.3 : 0; // Phone flashlights
+        const bx = side === 0 ? -4 - row * 2.2 : FIELD.width + 4 + row * 2.2;
+        const by = 2.5 + row * 2.2;
+        gs.push({
+          x: bx, y: by + wave, z,
+          sx: 0.55, sy: 0.65, sz: 0.7,
+          r: Math.min(1, cc[0] + flash), g: Math.min(1, cc[1] + flash), b: Math.min(1, cc[2] + flash),
+          a: 0.65, type: 'crowd',
+        });
+      }
+    }
+  }
+
+  // End zone stands
+  for (const ezSide of [0, 1]) {
+    const palette = ezSide === 0 ? crowdPalette.NE : crowdPalette.SEA;
+    for (let row = 0; row < 5; row++) {
+      for (let x = -2; x < FIELD.width + 2; x += 2) {
+        const cc = palette[Math.floor(rng() * palette.length)];
+        if (rng() > settings.crowdDensity) continue;
+        const zBase = ezSide === 0 ? -4 - row * 2 : FIELD.length + 4 + row * 2;
+        gs.push({
+          x, y: 2.5 + row * 2.2, z: zBase,
+          sx: 0.55, sy: 0.65, sz: 0.55,
+          r: cc[0], g: cc[1], b: cc[2], a: 0.55, type: 'crowd',
+        });
+      }
+    }
+  }
+
+  // === STADIUM STRUCTURE (upper deck rim) ===
+  for (let side = 0; side < 2; side++) {
+    for (let z = -8; z < FIELD.length + 8; z += 3) {
+      const bx = side === 0 ? -24 : FIELD.width + 24;
+      gs.push({ x:bx, y:22, z, sx:1.5, sy:1.2, sz:1.8, r:0.12, g:0.12, b:0.14, a:0.7, type:'structure' });
+    }
+  }
+
+  // === STADIUM LIGHTS (8 clusters for even coverage) ===
+  const lightPos = [
+    [-18, 15], [FIELD.width+18, 15], [-18, FIELD.length-15], [FIELD.width+18, FIELD.length-15],
+    [-18, FIELD.length/2], [FIELD.width+18, FIELD.length/2],
+    [FIELD.width/2, -12], [FIELD.width/2, FIELD.length+12],
+  ];
+  for (const [lx, lz] of lightPos) {
+    // Tower
+    for (let h = 0; h < 28; h += 1.5) {
+      gs.push({ x:lx, y:h, z:lz, sx:0.35, sy:0.9, sz:0.35, r:0.2, g:0.2, b:0.22, a:0.75, type:'structure' });
+    }
+    // Light cluster
+    gs.push({ x:lx, y:28, z:lz, sx:2.5, sy:1, sz:2.5, r:1, g:0.97, b:0.88, a:0.5, type:'light' });
+    // Light cone (volumetric feel)
+    gs.push({ x:(lx+FIELD.width/2)/2, y:14, z:(lz+FIELD.length/2)/2,
+      sx:12, sy:10, sz:12, r:1, g:0.98, b:0.93, a:0.018, type:'lightcone' });
+  }
+
+  // === SIDELINE PERSONNEL ===
+  // Coaches, cameramen, chain crew
+  const losZ = FIELD.endZone + game.lineOfScrimmage;
+  for (let z = losZ - 15; z < losZ + 15; z += 3) {
+    gs.push({ x:-2.5, y:0.9, z, sx:0.25, sy:0.45, sz:0.2, r:0.15, g:0.15, b:0.15, a:0.6, type:'sideline' });
+    gs.push({ x:FIELD.width+2.5, y:0.9, z, sx:0.25, sy:0.45, sz:0.2, r:0.15, g:0.15, b:0.15, a:0.6, type:'sideline' });
+  }
+
+  // Down marker
+  gs.push({ x:-2.5, y:1.2, z:losZ, sx:0.15, sy:0.7, sz:0.15, r:1, g:0.5, b:0, a:0.95, type:'marker' });
+  // First down marker
+  const fdZ = losZ + game.yardsToGo * (game.possession === 'NE' ? 1 : -1);
+  gs.push({ x:-2.5, y:1.2, z:fdZ, sx:0.15, sy:0.7, sz:0.15, r:1, g:0.85, b:0, a:0.95, type:'marker' });
+
+  return gs;
+}
+
+function buildOverlayLines() {
+  const gs = [];
+  const losZ = FIELD.endZone + game.lineOfScrimmage;
+  const fdZ = losZ + game.yardsToGo * (game.possession === 'NE' ? 1 : -1);
+
+  // LOS (blue) - thicker and more visible
+  for (let x = 0; x < FIELD.width; x += 0.8) {
+    gs.push({ x, y:0.015, z:losZ, sx:0.45, sy:0.008, sz:0.1, r:0.15, g:0.35, b:0.95, a:0.55, type:'overlay' });
+  }
+  // First down (yellow)
+  for (let x = 0; x < FIELD.width; x += 0.8) {
+    gs.push({ x, y:0.015, z:fdZ, sx:0.45, sy:0.008, sz:0.1, r:1, g:0.85, b:0, a:0.55, type:'overlay' });
+  }
+  return gs;
+}
+
+function buildParticles() {
+  const gs = [];
+  for (const p of particles) {
+    if (p.life <= 0) continue;
+    const fade = Math.min(1, p.life / p.maxLife);
+    gs.push({
+      x:p.x, y:p.y, z:p.z,
+      sx:p.size, sy:p.size, sz:p.size,
+      r:p.r, g:p.g, b:p.b, a:p.a * fade,
+      type:'particle',
+    });
+  }
+  return gs;
+}
+
+// ============================================================
+//  PARTICLE SYSTEM
+// ============================================================
+function spawnConfetti(x, y, z, count) {
+  const colors = [[1,0.85,0],[1,0,0],[0,0.4,1],[1,1,1],[0.41,0.74,0.16],[0.78,0.05,0.19]];
+  for (let i = 0; i < count; i++) {
+    const c = colors[Math.floor(Math.random()*colors.length)];
+    particles.push({
+      x: x + (Math.random()-0.5)*10,
+      y: y + Math.random()*5,
+      z: z + (Math.random()-0.5)*10,
+      vx: (Math.random()-0.5)*8,
+      vy: Math.random()*10 + 5,
+      vz: (Math.random()-0.5)*8,
+      r:c[0], g:c[1], b:c[2], a:0.9,
+      size: 0.1 + Math.random()*0.15,
+      life: 3 + Math.random()*2,
+      maxLife: 5,
+      gravity: -12,
+    });
+  }
+}
+
+function spawnTurfSpray(x, z) {
+  for (let i = 0; i < 8; i++) {
+    particles.push({
+      x: x + (Math.random()-0.5)*0.5,
+      y: 0.1,
+      z: z + (Math.random()-0.5)*0.5,
+      vx: (Math.random()-0.5)*3,
+      vy: Math.random()*3 + 1,
+      vz: (Math.random()-0.5)*3,
+      r:0.15, g:0.35, b:0.12, a:0.6,
+      size: 0.05 + Math.random()*0.05,
+      life: 0.5 + Math.random()*0.3,
+      maxLife: 0.8,
+      gravity: -8,
+    });
+  }
+}
+
+function updateParticles(dt) {
+  for (const p of particles) {
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.z += p.vz * dt;
+    p.vy += p.gravity * dt;
+    p.life -= dt;
+    if (p.y < 0.02) { p.y = 0.02; p.vy *= -0.3; p.vx *= 0.8; p.vz *= 0.8; }
+  }
+  particles = particles.filter(p => p.life > 0);
+}
+
+// ============================================================
+//  PLAY SIMULATION
+// ============================================================
+let currentPlay = null;
+let ballState = { x:0, y:0.8, z:0, inFlight:false, held:true, carrier:'QB', targetX:0, targetZ:0, startX:0, startZ:0, startY:0, flightTime:0, flightDuration:1 };
+let playerPos = { off:[], def:[] };
+let lastBigPlay = '';
+
+function initPlayers() {
+  const losZ = FIELD.endZone + game.lineOfScrimmage;
+  const cx = FIELD.width / 2;
+  const dir = game.possession === 'NE' ? 1 : -1;
+  const offF = ['shotgun','spread','iform'][Math.floor(Math.random()*3)];
+  const defF = Math.random()>0.5 ? 'nickel' : 'cover3';
+
+  playerPos.off = FORMATIONS.offense[offF].map(p=>({
+    ...p, wx:cx+p.x, wz:losZ+p.z*dir, tx:cx+p.x, tz:losZ+p.z*dir,
+    team:game.possession, moving:false,
+  }));
+  const defTeam = game.possession==='NE'?'SEA':'NE';
+  playerPos.def = FORMATIONS.defense[defF].map(p=>({
+    ...p, wx:cx+p.x, wz:losZ+p.z*dir, tx:cx+p.x, tz:losZ+p.z*dir,
+    team:defTeam, moving:false,
+  }));
+  ballState = { x:cx, y:0.8, z:losZ, inFlight:false, held:true, carrier:'QB', targetX:0,targetZ:0,startX:0,startZ:0,startY:0,flightTime:0,flightDuration:1 };
+}
+
+function simulatePlay(dt) {
+  const effDt = replayMode ? dt * settings.replaySpeedMul : dt;
+  if (!game.playInProgress) {
+    game.playTimer += effDt;
+    if (game.playTimer > 2.5) {
+      game.playInProgress = true;
+      game.playPhase = 'pre-snap';
+      game.playTimer = 0;
+      game.playClock = 40;
+      initPlayers();
+      currentPlay = { type: Math.random()>0.42?'pass':'run', receiver: ['WR','WR','WR','TE'][Math.floor(Math.random()*4)], gain:0 };
+    }
+    return;
+  }
+
+  game.playTimer += effDt;
+  game.playClock = Math.max(0, 40 - game.playTimer);
+  const dir = game.possession==='NE'?1:-1;
+  const losZ = FIELD.endZone + game.lineOfScrimmage;
+  const cx = FIELD.width / 2;
+
+  if (game.playPhase === 'pre-snap') {
+    if (game.playTimer > 1.2) { game.playPhase = 'snap'; game.playTimer = 0; }
+    playerPos.off.forEach(p=>{ p.wx+=(Math.random()-0.5)*0.008; });
+    playerPos.def.forEach(p=>{ p.wx+=(Math.random()-0.5)*0.015; });
+  } else if (game.playPhase === 'snap') {
+    if (currentPlay.type === 'pass') simPass(effDt,dir,losZ,cx);
+    else simRun(effDt,dir,losZ,cx);
+  } else if (['complete','incomplete','tackle'].includes(game.playPhase)) {
+    if (game.playTimer > 1.8) endPlay();
+  }
+
+  // Lerp all players
+  [...playerPos.off,...playerPos.def].forEach(p=>{
+    const dx=p.tx-p.wx, dz=p.tz-p.wz;
+    const d=Math.sqrt(dx*dx+dz*dz);
+    p.moving = d > 0.1;
+    if (d>0.04) { p.wx+=dx*Math.min(1,effDt*3.5); p.wz+=dz*Math.min(1,effDt*3.5); }
+  });
+}
+
+function simPass(dt,dir,losZ,cx) {
+  const t=game.playTimer;
+  const qb=playerPos.off.find(p=>p.pos==='QB');
+  const tgt=playerPos.off.find(p=>p.pos===currentPlay.receiver);
+
+  if(qb) { qb.tx=cx+(Math.random()-0.5)*1.5; qb.tz=losZ-5*dir; ballState.x=qb.wx; ballState.z=qb.wz; ballState.y=1.5; }
+
+  playerPos.off.forEach(p=>{
+    if(['WR','TE'].includes(p.pos)) { p.tx=cx+p.x+(Math.random()-0.5)*5; p.tz=losZ+(8+Math.random()*14)*dir; p.moving=true; }
+    if(['LT','LG','C','RG','RT'].includes(p.pos)) { p.tx=cx+p.x; p.tz=losZ+0.5*dir; }
+  });
+  playerPos.def.forEach(p=>{
+    if(['CB','NCB'].includes(p.pos)) {
+      const wr=playerPos.off.filter(o=>['WR','TE'].includes(o.pos)).sort((a,b)=>Math.abs(a.wx-p.wx)-Math.abs(b.wx-p.wx))[0];
+      if(wr){p.tx=wr.wx+(Math.random()-0.5)*1.5;p.tz=wr.wz+dir;}
+    } else if(p.pos==='DE') { if(qb){p.tx=qb.wx+(Math.random()-0.5)*2;p.tz=qb.wz;} }
+    else if(['FS','SS'].includes(p.pos)) { p.tz+=dir*dt*4; }
+    else { p.tz=losZ+5*dir; }
+    p.moving=true;
+  });
+
+  if(t>2.0 && !ballState.inFlight && ballState.held) {
+    ballState.inFlight=true; ballState.held=false;
+    ballState.targetX=tgt?tgt.tx:cx+(Math.random()-0.5)*20;
+    ballState.targetZ=tgt?tgt.tz:losZ+15*dir;
+    ballState.startX=ballState.x; ballState.startZ=ballState.z; ballState.startY=1.8;
+    ballState.flightTime=0; ballState.flightDuration=0.9+Math.random()*0.5;
+  }
+  if(ballState.inFlight) {
+    ballState.flightTime+=dt;
+    const p=Math.min(1,ballState.flightTime/ballState.flightDuration);
+    ballState.x=ballState.startX+(ballState.targetX-ballState.startX)*p;
+    ballState.z=ballState.startZ+(ballState.targetZ-ballState.startZ)*p;
+    ballState.y=ballState.startY+7*Math.sin(p*Math.PI)*(1-p*0.25);
+    if(p>=1) {
+      ballState.inFlight=false;
+      const complete=Math.random()>0.32;
+      if(complete) {
+        game.playPhase='complete';
+        const gain=Math.round(Math.abs(ballState.z-losZ)+Math.random()*4);
+        currentPlay.gain=gain;
+        const passer=game.possession==='NE'?'Brady':'Wilson';
+        addTicker(`${passer} complete to #${tgt?.num||14} for ${gain} yds`,gain);
+        if(gain>20) { showBigPlay(`${gain}-YARD PASS!`); spawnConfetti(ballState.x,3,ballState.z,30); }
+        spawnTurfSpray(ballState.x,ballState.z);
+        ballState.y=1;
+      } else {
+        game.playPhase='incomplete'; currentPlay.gain=0;
+        addTicker(`Incomplete, intended #${tgt?.num||14}`,0);
+        ballState.y=0.08;
+      }
+      game.playTimer=0;
+    }
+  }
+}
+
+function simRun(dt,dir,losZ,cx) {
+  const t=game.playTimer;
+  const rb=playerPos.off.find(p=>['RB','FB'].includes(p.pos));
+  const qb=playerPos.off.find(p=>p.pos==='QB');
+
+  if(t<0.7) { if(qb){qb.tx=cx;qb.tz=losZ-dir;ballState.x=qb.wx;ballState.z=qb.wz;ballState.y=1;} }
+  else {
+    if(rb) {
+      rb.tx=cx+(Math.random()-0.5)*7; rb.tz=losZ+(3+Math.random()*9)*dir;
+      rb.moving=true; ballState.x=rb.wx; ballState.z=rb.wz; ballState.y=0.9;
+    }
+    playerPos.off.forEach(p=>{
+      if(['LT','LG','C','RG','RT'].includes(p.pos)) { p.tx=cx+p.x+(rb?(rb.tx-cx)*0.25:0); p.tz=losZ+2*dir; p.moving=true; }
+    });
+    playerPos.def.forEach(p=>{
+      if(rb) {
+        const dd=Math.sqrt((rb.wx-p.wx)**2+(rb.wz-p.wz)**2);
+        p.tx=rb.wx+(Math.random()-0.5)*1.5; p.tz=rb.wz+(Math.random()-0.5)*1.5; p.moving=true;
+        if(dd<1.3 && t>1.3) {
+          game.playPhase='tackle';
+          const gain=Math.round(Math.abs(rb.wz-losZ));
+          currentPlay.gain=gain;
+          addTicker(`#${rb.num} runs ${gain} yds, tackled by #${p.num}`,gain);
+          if(gain>15) { showBigPlay(`${gain}-YARD RUN!`); }
+          spawnTurfSpray(rb.wx,rb.wz);
+          game.playTimer=0;
+        }
+      }
+    });
+  }
+  if(t>5 && game.playPhase==='snap') {
+    game.playPhase='tackle';
+    const gain=rb?Math.round(Math.abs(rb.wz-losZ)):3;
+    currentPlay.gain=gain; addTicker(`#${rb?.num||28} runs ${gain} yds`,gain);
+    game.playTimer=0;
+  }
+}
+
+function endPlay() {
+  game.playInProgress=false; game.playTimer=0; game.totalPlays++;
+  const gain=currentPlay?.gain||0;
+  const dir=game.possession==='NE'?1:-1;
+
+  if(game.playPhase==='incomplete') { game.down++; }
+  else { game.lineOfScrimmage+=gain*dir; game.yardsToGo-=gain; game.driveYards+=gain; game.down++; }
+
+  if(game.yardsToGo<=0) { game.down=1; game.yardsToGo=10; addTicker('FIRST DOWN!',0,true); }
+
+  if(game.lineOfScrimmage>=100||game.lineOfScrimmage<=0) {
+    const team = game.possession;
+    if(team==='NE') { game.scoreNE+=7; showBigPlay('TOUCHDOWN!'); addTicker('TOUCHDOWN PATRIOTS!',0,true); }
+    else { game.scoreSEA+=7; showBigPlay('TOUCHDOWN!'); addTicker('TOUCHDOWN SEAHAWKS!',0,true); }
+    spawnConfetti(FIELD.width/2,5,FIELD.length/2,120);
+    game.possession=game.possession==='NE'?'SEA':'NE';
+    game.lineOfScrimmage=25; game.down=1; game.yardsToGo=10; game.driveYards=0;
+  }
+  if(game.down>4) {
+    addTicker('Turnover on downs!',0,true);
+    game.possession=game.possession==='NE'?'SEA':'NE';
+    game.lineOfScrimmage=Math.max(1,Math.min(99,game.lineOfScrimmage));
+    game.down=1; game.yardsToGo=10; game.driveYards=0;
+  }
+  game.clock-=Math.floor(Math.random()*28+12);
+  if(game.clock<=0) {
+    game.quarter++; game.clock=900;
+    if(game.quarter>4) { game.quarter=4; game.clock=0; showBigPlay('FINAL'); addTicker('FINAL! Super Bowl LX is over!',0,true); }
+    else { addTicker(`End of Q${game.quarter-1}`,0,true); if(game.quarter===3){game.possession=game.possession==='NE'?'SEA':'NE';game.lineOfScrimmage=25;} }
+  }
+  game.playPhase='huddle'; currentPlay=null;
+}
+
+// ============================================================
+//  UI
+// ============================================================
+function addTicker(text, yards, hl) {
+  const feed=document.getElementById('play-ticker');
+  const m=Math.floor(game.clock/60), s=game.clock%60;
+  const div=document.createElement('div'); div.className='tk-entry';
+  const cls=hl?'tk-highlight':(yards>0?'tk-gain':'tk-text');
+  div.innerHTML=`<span class="tk-time">Q${game.quarter} ${m}:${s.toString().padStart(2,'0')}</span> <span class="${cls}">${text}</span>`;
+  feed.appendChild(div); feed.scrollTop=feed.scrollHeight;
+  while(feed.children.length>25) feed.removeChild(feed.firstChild);
+}
+
+let bigPlayTimer = 0;
+function showBigPlay(text) {
+  const el=document.getElementById('big-play');
+  el.textContent=text; el.classList.add('show');
+  bigPlayTimer=2.5;
+  lastBigPlay=text;
+  // Auto-replay on big plays
+  if(settings.autoReplay && !replayMode && (text.includes('TOUCHDOWN') || text.includes('YARD'))) {
+    triggerReplay();
+  }
+}
+
+function triggerReplay() {
+  replayMode=true; replayTimer=3;
+  document.getElementById('replay-badge').classList.add('show');
+}
+
+function updateUI() {
+  document.getElementById('g-count').textContent=totalGaussianCount.toLocaleString();
+  document.getElementById('score-ne').textContent=game.scoreNE;
+  document.getElementById('score-sea').textContent=game.scoreSEA;
+  const qs=['1ST','2ND','3RD','4TH','OT'];
+  document.getElementById('quarter').textContent=qs[Math.min(game.quarter-1,4)];
+  const m=Math.floor(game.clock/60), s=game.clock%60;
+  document.getElementById('clock').textContent=`${m}:${s.toString().padStart(2,'0')}`;
+  document.getElementById('down-dist').textContent=`${game.down}${['st','nd','rd','th'][Math.min(game.down-1,3)]} & ${game.yardsToGo}`;
+  document.getElementById('ne-poss').style.background=game.possession==='NE'?'#c60c30':'transparent';
+  document.getElementById('sea-poss').style.background=game.possession==='SEA'?'#69be28':'transparent';
+  const yd=game.lineOfScrimmage<=50?`${game.possession} ${game.lineOfScrimmage}`:`${game.possession==='NE'?'SEA':'NE'} ${100-game.lineOfScrimmage}`;
+  document.getElementById('ball-yard').textContent=yd;
+  const pc=document.getElementById('play-clock');
+  pc.textContent=Math.max(0,Math.round(game.playClock));
+  pc.classList.toggle('pc-warn',game.playClock<10);
+  document.getElementById('coh-val').textContent=(1.0-game.totalPlays*0.001).toFixed(3);
+  document.getElementById('cam-mode').textContent=camera.mode.charAt(0).toUpperCase()+camera.mode.slice(1);
+}
+
+// ============================================================
+//  3D PROJECTION (same math, improved fog/post)
+// ============================================================
+function mat4LookAt(e,c,u){let fx=e[0]-c[0],fy=e[1]-c[1],fz=e[2]-c[2];let l=Math.sqrt(fx*fx+fy*fy+fz*fz);fx/=l;fy/=l;fz/=l;let rx=u[1]*fz-u[2]*fy,ry=u[2]*fx-u[0]*fz,rz=u[0]*fy-u[1]*fx;l=Math.sqrt(rx*rx+ry*ry+rz*rz);rx/=l;ry/=l;rz/=l;const ux=fy*rz-fz*ry,uy=fz*rx-fx*rz,uz=fx*ry-fy*rx;return[rx,ux,fx,0,ry,uy,fy,0,rz,uz,fz,0,-(rx*e[0]+ry*e[1]+rz*e[2]),-(ux*e[0]+uy*e[1]+uz*e[2]),-(fx*e[0]+fy*e[1]+fz*e[2]),1];}
+function mat4Persp(f,a,n,r){const t=1/Math.tan(f/2),i=1/(n-r);return[t/a,0,0,0,0,t,0,0,0,0,r*i,-1,0,0,r*n*i,0];}
+function mat4Mul(a,b){const o=[];for(let i=0;i<4;i++)for(let j=0;j<4;j++){o[j*4+i]=a[i]*b[j*4]+a[4+i]*b[j*4+1]+a[8+i]*b[j*4+2]+a[12+i]*b[j*4+3];}return o;}
+function proj(vp,x,y,z,w,h){const cx=vp[0]*x+vp[4]*y+vp[8]*z+vp[12],cy=vp[1]*x+vp[5]*y+vp[9]*z+vp[13],cz=vp[2]*x+vp[6]*y+vp[10]*z+vp[14],cw=vp[3]*x+vp[7]*y+vp[11]*z+vp[15];if(cw<=0.01)return null;return{sx:(cx/cw*0.5+0.5)*w,sy:(1-(cy/cw*0.5+0.5))*h,depth:cz/cw,w:cw};}
+
+function getEye() {
+  const cx=FIELD.width/2, losZ=FIELD.endZone+game.lineOfScrimmage;
+  switch(camera.mode) {
+    case 'broadcast': return [-20, 15, losZ+Math.sin(globalTime*0.12)*4];
+    case 'endzone': return [cx, 22, game.possession==='NE'?-18:FIELD.length+18];
+    case 'skycam': return [cx+Math.sin(globalTime*0.15)*8, 38, losZ];
+    case 'follow': return [ballState.x-10, 6, ballState.z-6];
+    case 'cinematic': {
+      camera.cinematicAngle += 0.003;
+      const r = 45;
+      return [cx+r*Math.cos(camera.cinematicAngle), 12+Math.sin(camera.cinematicAngle*0.7)*5,
+              FIELD.length/2+r*Math.sin(camera.cinematicAngle)];
+    }
+    default: return [cx+camera.radius*Math.cos(camera.phi)*Math.sin(camera.theta),
+                     camera.radius*Math.sin(camera.phi),
+                     FIELD.length/2+camera.radius*Math.cos(camera.phi)*Math.cos(camera.theta)];
+  }
+}
+function getTarget() {
+  const cx=FIELD.width/2, losZ=FIELD.endZone+game.lineOfScrimmage;
+  switch(camera.mode) {
+    case 'broadcast': case 'endzone': case 'skycam': return [cx,0,losZ];
+    case 'follow': return [ballState.x,ballState.y,ballState.z];
+    case 'cinematic': return [cx,0,FIELD.length/2];
+    default: return camera.target;
+  }
+}
+
+// ============================================================
+//  MAIN RENDER LOOP
+// ============================================================
+function render(nowMs) {
+  if (!lastFrameTime) lastFrameTime = nowMs;
+  const dt = Math.min((nowMs - lastFrameTime) / 1000, 0.05);
+  lastFrameTime = nowMs;
+
+  const simDt = dt * settings.gameSpeed;
+  if (playing) {
+    globalTime += simDt;
+    simulatePlay(simDt);
+    if (settings.particles) updateParticles(simDt); else particles = [];
+  }
+
+  // Big play timer
+  if (bigPlayTimer > 0) {
+    bigPlayTimer -= dt;
+    if (bigPlayTimer <= 0) document.getElementById('big-play').classList.remove('show');
+  }
+  // Replay timer
+  if (replayMode) {
+    replayTimer -= dt;
+    if (replayTimer <= 0) {
+      replayMode = false;
+      document.getElementById('replay-badge').classList.remove('show');
+    }
+  }
+
+  // Canvas resize
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth * dpr;
+  const h = canvas.clientHeight * dpr;
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+
+  // Build all gaussians
+  gaussians = [];
+  gaussians.push(...buildField());
+  gaussians.push(...buildFieldMarkings());
+  gaussians.push(...buildGoalposts());
+  gaussians.push(...buildOverlayLines());
+  playerPos.off.forEach(p=>{ gaussians.push(...buildPlayer(p.wx,p.wz,p.team,p.num,p.pos,true,p)); });
+  playerPos.def.forEach(p=>{ gaussians.push(...buildPlayer(p.wx,p.wz,p.team,p.num,p.pos,false,p)); });
+
+  // Refs
+  const losZ=FIELD.endZone+game.lineOfScrimmage;
+  [[FIELD.width/2-12,losZ+8],[FIELD.width/2+15,losZ-3],[FIELD.width/2,losZ+18],[FIELD.width/2-8,losZ-12]].forEach(([rx,rz])=>{
+    gaussians.push(
+      {x:rx,y:1.7,z:rz,sx:0.28,sy:0.24,sz:0.28,r:0.05,g:0.05,b:0.05,a:1,type:'ref'},
+      {x:rx,y:1.15,z:rz,sx:0.35,sy:0.38,sz:0.28,r:0,g:0,b:0,a:1,type:'ref'},
+      {x:rx,y:1.2,z:rz,sx:0.3,sy:0.3,sz:0.22,r:1,g:1,b:1,a:0.65,type:'ref'},
+      {x:rx,y:0.5,z:rz,sx:0.22,sy:0.32,sz:0.18,r:0.05,g:0.05,b:0.05,a:1,type:'ref'},
+    );
+  });
+
+  gaussians.push(...buildFootball(ballState.x,ballState.y,ballState.z,ballState.inFlight));
+  gaussians.push(...buildStadium());
+  gaussians.push(...buildParticles());
+
+  totalGaussianCount = gaussians.length;
+
+  // Camera smoothing
+  const eyeRaw = getEye(), tgtRaw = getTarget();
+  const sm = settings.camSmooth;
+  for(let i=0;i<3;i++) { camera.eyeSmooth[i]+=(eyeRaw[i]-camera.eyeSmooth[i])*sm; camera.targetSmooth[i]+=(tgtRaw[i]-camera.targetSmooth[i])*sm; }
+
+  const view = mat4LookAt(camera.eyeSmooth, camera.targetSmooth, [0,1,0]);
+  const pr = mat4Persp(camera.fov, w/h, camera.near, camera.far);
+  const vp = mat4Mul(pr, view);
+
+  // Project
+  const projected = [];
+  for (const g of gaussians) {
+    const p = proj(vp, g.x, g.y, g.z, w, h);
+    if (!p || p.depth<-1 || p.depth>1) continue;
+    if (p.sx<-w*0.3 || p.sx>w*1.3 || p.sy<-h*0.3 || p.sy>h*1.3) continue;
+    const scale = Math.max(g.sx, g.sy, g.sz);
+    const ss = (scale/p.w)*w*0.5;
+    if (ss<settings.qualityThreshold) continue;
+    projected.push({g,p,ss});
+  }
+  projected.sort((a,b)=>b.p.depth-a.p.depth);
+
+  // Clear & sky
+  ctx.clearRect(0,0,w,h);
+  const sky=ctx.createLinearGradient(0,0,0,h*0.45);
+  sky.addColorStop(0,'#050510');
+  sky.addColorStop(0.4,'#0a0f22');
+  sky.addColorStop(1,'#111830');
+  ctx.fillStyle=sky; ctx.fillRect(0,0,w,h);
+
+  // Draw gaussians
+  for (const {g,p,ss} of projected) {
+    let rx = ss*(g.sx/Math.max(g.sx,g.sy,g.sz))*1.15;
+    let ry = ss*(g.sy/Math.max(g.sx,g.sy,g.sz))*1.15;
+    if(rx<0.4&&ry<0.4) continue;
+
+    // Atmospheric fog (distance fade)
+    const fogFactor = settings.fog ? Math.max(0, Math.min(1, (p.depth - 0.3) * 1.2)) : 0;
+    const fogAlpha = g.a * (1 - fogFactor * 0.6);
+
+    ctx.save();
+    ctx.translate(p.sx, p.sy);
+    const r=Math.min(255,Math.round(g.r*255));
+    const gr=Math.min(255,Math.round(g.g*255));
+    const b=Math.min(255,Math.round(g.b*255));
+    const maxR=Math.max(rx,ry,1);
+    const grad=ctx.createRadialGradient(0,0,0,0,0,maxR);
+    grad.addColorStop(0,`rgba(${r},${gr},${b},${fogAlpha})`);
+    grad.addColorStop(0.45,`rgba(${r},${gr},${b},${fogAlpha*0.55})`);
+    grad.addColorStop(1,`rgba(${r},${gr},${b},0)`);
+    ctx.fillStyle=grad;
+    ctx.scale(rx/maxR, ry/maxR);
+    ctx.beginPath(); ctx.arc(0,0,maxR,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  // === POST-PROCESSING ===
+
+  // Vignette
+  if (settings.vignette) {
+    const vg = ctx.createRadialGradient(w/2,h/2,w*0.25,w/2,h/2,w*0.7);
+    vg.addColorStop(0,'rgba(0,0,0,0)');
+    vg.addColorStop(0.7,'rgba(0,0,0,0)');
+    vg.addColorStop(1,'rgba(0,0,0,0.45)');
+    ctx.fillStyle=vg; ctx.fillRect(0,0,w,h);
+  }
+
+  // Subtle film grain
+  if (settings.grain) {
+    ctx.globalAlpha = 0.015;
+    for (let i = 0; i < 30; i++) {
+      const gx = Math.random()*w, gy = Math.random()*h;
+      const gv = Math.random()*255;
+      ctx.fillStyle = `rgb(${gv},${gv},${gv})`;
+      ctx.fillRect(gx, gy, 3, 3);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Slight warm color grade
+  if (settings.colorGrade) {
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.fillStyle = 'rgba(255,235,200,0.03)';
+    ctx.fillRect(0,0,w,h);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // FPS
+  frameTimes.push(nowMs);
+  if(frameTimes.length>60) frameTimes.shift();
+  if(frameTimes.length>1) {
+    const fps=1000/((frameTimes[frameTimes.length-1]-frameTimes[0])/(frameTimes.length-1));
+    document.getElementById('fps-value').textContent=fps.toFixed(1);
+  }
+
+  updateUI();
+  requestAnimationFrame(render);
+}
+
+// ============================================================
+//  CONTROLS
+// ============================================================
+document.getElementById('play-btn').addEventListener('click',()=>{
+  playing=!playing;
+  document.getElementById('play-btn').innerHTML=playing?'&#9646;&#9646;':'&#9654;';
+});
+['broadcast','endzone','skycam','follow','cinematic'].forEach(m=>{
+  document.getElementById('cam-'+m)?.addEventListener('click',()=>{
+    camera.mode=m;
+    document.querySelectorAll('#transport .tb').forEach(b=>b.classList.remove('active'));
+    document.getElementById('cam-'+m).classList.add('active');
+  });
+});
+document.getElementById('btn-replay')?.addEventListener('click',()=>triggerReplay());
+
+// Tech modal
+const techBackdrop=document.getElementById('tech-modal-backdrop');
+document.getElementById('btn-tech')?.addEventListener('click',()=>{
+  techBackdrop.classList.toggle('open');
+});
+document.getElementById('tech-close')?.addEventListener('click',()=>{
+  techBackdrop.classList.remove('open');
+});
+techBackdrop?.addEventListener('click',(e)=>{
+  if(e.target===techBackdrop) techBackdrop.classList.remove('open');
+});
+
+// Settings modal
+const setBackdrop=document.getElementById('settings-backdrop');
+document.getElementById('btn-settings')?.addEventListener('click',()=>{
+  setBackdrop.classList.toggle('open');
+  updateSettingsAI();
+});
+document.getElementById('settings-close')?.addEventListener('click',()=>{
+  setBackdrop.classList.remove('open');
+});
+setBackdrop?.addEventListener('click',(e)=>{
+  if(e.target===setBackdrop) setBackdrop.classList.remove('open');
+});
+
+// Tabs
+document.querySelectorAll('.st-tab').forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    document.querySelectorAll('.st-tab').forEach(t=>t.classList.remove('active'));
+    document.querySelectorAll('.st-tab-content').forEach(c=>c.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(tab.dataset.tab)?.classList.add('active');
+  });
+});
+
+// Toggle bindings
+function bindToggle(id,key){
+  document.getElementById(id)?.addEventListener('change',function(){ settings[key]=this.checked; });
+}
+bindToggle('set-fog','fog');
+bindToggle('set-vignette','vignette');
+bindToggle('set-grain','grain');
+bindToggle('set-colorgrade','colorGrade');
+bindToggle('set-particles','particles');
+bindToggle('set-autoplay','autoPlay');
+bindToggle('set-autoreplay','autoReplay');
+bindToggle('set-coherence','coherenceGate');
+bindToggle('set-neural','neural');
+bindToggle('set-ewc','ewc');
+
+// Ticker toggle
+document.getElementById('set-ticker')?.addEventListener('change',function(){
+  settings.showTicker=this.checked;
+  document.getElementById('play-ticker').style.display=this.checked?'block':'none';
+});
+// Scorebug toggle
+document.getElementById('set-scorebug')?.addEventListener('change',function(){
+  settings.showScorebug=this.checked;
+  document.getElementById('scorebug').style.display=this.checked?'flex':'none';
+  document.getElementById('play-clock-badge').style.display=this.checked?'flex':'none';
+});
+// Stats toggle
+document.getElementById('set-stats')?.addEventListener('change',function(){
+  settings.showStats=this.checked;
+  document.getElementById('stats-panel').style.display=this.checked?'block':'none';
+});
+
+// Range bindings
+document.getElementById('set-crowd')?.addEventListener('input',function(){
+  settings.crowdDensity=this.value/100;
+  document.getElementById('set-crowd-val').textContent=this.value+'%';
+});
+document.getElementById('set-camsmooth')?.addEventListener('input',function(){
+  settings.camSmooth=this.value/100;
+  document.getElementById('set-camsmooth-val').textContent=(this.value/100).toFixed(2);
+});
+document.getElementById('set-gamespeed')?.addEventListener('input',function(){
+  settings.gameSpeed=this.value/10;
+  document.getElementById('set-gamespeed-val').textContent=(this.value/10).toFixed(1)+'x';
+});
+document.getElementById('set-replayspeed')?.addEventListener('input',function(){
+  settings.replaySpeedMul=this.value/100;
+  document.getElementById('set-replayspeed-val').textContent=(this.value/100).toFixed(2)+'x';
+});
+document.getElementById('set-cohthreshold')?.addEventListener('input',function(){
+  settings.coherenceThreshold=this.value/100;
+  document.getElementById('set-cohthreshold-val').textContent=(this.value/100).toFixed(2);
+});
+
+// Select bindings
+document.getElementById('set-quality')?.addEventListener('change',function(){
+  settings.qualityThreshold=parseFloat(this.value);
+});
+document.getElementById('set-playcall')?.addEventListener('change',function(){
+  settings.playCalling=this.value;
+});
+document.getElementById('set-attention')?.addEventListener('change',function(){
+  settings.attention=this.value;
+});
+document.getElementById('set-temporal')?.addEventListener('change',function(){
+  settings.temporal=this.value;
+});
+
+// Update AI metrics in settings modal
+function updateSettingsAI(){
+  const coh=(1.0-game.totalPlays*0.001);
+  document.getElementById('ai-coherence').textContent=coh.toFixed(3);
+  document.getElementById('ai-entities').textContent='26';
+  document.getElementById('ai-plays').textContent=game.totalPlays;
+  document.getElementById('ai-gaussians').textContent=totalGaussianCount.toLocaleString();
+  if(frameTimes.length>1){
+    const fps=1000/((frameTimes[frameTimes.length-1]-frameTimes[0])/(frameTimes.length-1));
+    document.getElementById('ai-fast-hz').textContent=fps.toFixed(0)+' Hz';
+  }
+}
+
+let dragging=false, lmx=0, lmy=0;
+canvas.addEventListener('mousedown',e=>{dragging=true;lmx=e.clientX;lmy=e.clientY;});
+window.addEventListener('mouseup',()=>dragging=false);
+window.addEventListener('mousemove',e=>{
+  if(!dragging)return;
+  camera.theta-=(e.clientX-lmx)*0.005;
+  camera.phi+=(e.clientY-lmy)*0.005;
+  camera.phi=Math.max(0.05,Math.min(Math.PI/2-0.05,camera.phi));
+  lmx=e.clientX;lmy=e.clientY; camera.mode='free';
+});
+canvas.addEventListener('wheel',e=>{
+  e.preventDefault();
+  camera.radius*=1+e.deltaY*0.001;
+  camera.radius=Math.max(5,Math.min(150,camera.radius));
+},{passive:false});
+
+document.getElementById('time-slider').addEventListener('input',function(){
+  document.getElementById('time-label').textContent=`t=${(parseInt(this.value)/1000).toFixed(3)}`;
+});
+
+// ============================================================
+//  INIT
+// ============================================================
+drawPatriotsLogo(document.getElementById('pat-logo'));
+drawSeahawksLogo(document.getElementById('sea-logo'));
+initPlayers();
+document.getElementById('cam-broadcast').classList.add('active');
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

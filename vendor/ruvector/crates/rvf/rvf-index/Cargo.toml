@@ -1,0 +1,24 @@
+[package]
+name = "rvf-index"
+version = "0.1.0"
+edition = "2021"
+description = "RuVector Format progressive HNSW indexing with Layer A/B/C tiered search"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector"
+readme = "README.md"
+categories = ["algorithms", "data-structures"]
+keywords = ["vector", "hnsw", "nearest-neighbor", "indexing", "rvf"]
+rust-version = "1.87"
+
+[features]
+default = ["std"]
+std = []
+simd = []
+
+[dependencies]
+# rvf-types dependency will be re-enabled once rvf-types stabilizes.
+# For now, rvf-index defines its own local types.
+
+[dev-dependencies]
+rand = "0.8"

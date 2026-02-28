@@ -1,0 +1,1467 @@
+{"anchor":"Help me check workflow","positive":"claude-flow workflow status","negative":"claude-flow agent status"}
+{"anchor":"Coordinate multiple AI agents on a complex task","positive":"claude-flow swarm init","negative":"agentic-flow pipeline create"}
+{"anchor":"retrieve in cache","positive":"agentic-flow cache get","negative":"ruvector vector get"}
+{"anchor":"delete the collection","positive":"ruvector collection delete","negative":"claude-flow memory delete"}
+{"anchor":"Can you create pipeline?","positive":"agentic-flow pipeline create","negative":"claude-flow swarm init"}
+{"anchor":"info the model","positive":"agentic-flow model info","negative":"ruvector quantize info"}
+{"anchor":"Help me set cache","positive":"agentic-flow cache set","negative":"claude-flow memory store"}
+{"anchor":"I need retrieve functionality","positive":"agentic-flow cache get","negative":"claude-flow memory retrieve"}
+{"anchor":"Can you clear cache?","positive":"agentic-flow cache clear","negative":"claude-flow swarm init"}
+{"anchor":"I need a way to store embedding in cache","positive":"agentic-flow cache set","negative":"claude-flow memory store"}
+{"anchor":"I need a way to create a new vector collection","positive":"ruvector collection create","negative":"claude-flow memory store"}
+{"anchor":"get the cache","positive":"agentic-flow cache get","negative":"ruvector vector get"}
+{"anchor":"info model","positive":"agentic-flow model info","negative":"ruvector quantize info"}
+{"anchor":"Help me info model","positive":"agentic-flow model info","negative":"claude-flow agent status"}
+{"anchor":"metadata in model","positive":"agentic-flow model info","negative":"ruvector quantize info"}
+{"anchor":"combined in search","positive":"agentic-flow search hybrid","negative":"claude-flow embeddings search"}
+{"anchor":"quantize the model","positive":"agentic-flow model quantize","negative":"ruvector quantize apply"}
+{"anchor":"I need to info model","positive":"agentic-flow model info","negative":"ruvector quantize info"}
+{"anchor":"Can you delete collection?","positive":"ruvector collection delete","negative":"ruvector vector delete"}
+{"anchor":"I need to stats cache","positive":"agentic-flow cache stats","negative":"ruvector collection info"}
+{"anchor":"How do I hybrid search combining keyword and semantic?","positive":"agentic-flow search hybrid","negative":"ruvector search filter"}
+{"anchor":"create pipeline","positive":"agentic-flow pipeline create","negative":"claude-flow workflow create"}
+{"anchor":"I want to get collection information","positive":"ruvector collection info","negative":"ruvector quantize info"}
+{"anchor":"I need to info model","positive":"agentic-flow model info","negative":"claude-flow agent status"}
+{"anchor":"Create a star topology for centralized coordination","positive":"claude-flow swarm init","negative":"claude-flow hive-mind init"}
+{"anchor":"I want to hybrid search combining keyword and semantic","positive":"agentic-flow search hybrid","negative":"claude-flow memory search"}
+{"anchor":"show snapshot","positive":"ruvector snapshot list","negative":"claude-flow task list"}
+{"anchor":"rebuild index","positive":"ruvector index rebuild","negative":"claude-flow swarm init"}
+{"anchor":"status in quantize","positive":"ruvector quantize info","negative":"agentic-flow model info"}
+{"anchor":"info quantize","positive":"ruvector quantize info","negative":"claude-flow agent status"}
+{"anchor":"Help me check agent","positive":"claude-flow agent status","negative":"ruvector collection info"}
+{"anchor":"Add vectors to the collection","positive":"ruvector vector insert","negative":"claude-flow memory store"}
+{"anchor":"Help me compare embeddings","positive":"claude-flow embeddings compare","negative":"agentic-flow similarity"}
+{"anchor":"How do I get quantization info?","positive":"ruvector quantize info","negative":"ruvector collection info"}
+{"anchor":"How do I list all collections?","positive":"ruvector collection list","negative":"agentic-flow model list"}
+{"anchor":"I need to list snapshot","positive":"ruvector snapshot list","negative":"claude-flow agent list"}
+{"anchor":"info model","positive":"agentic-flow model info","negative":"claude-flow agent status"}
+{"anchor":"How do I list all tasks?","positive":"claude-flow task list","negative":"ruvector snapshot list"}
+{"anchor":"Spawn a coder agent to implement features","positive":"claude-flow agent spawn","negative":"claude-flow hive-mind spawn"}
+{"anchor":"list session","positive":"claude-flow session list","negative":"claude-flow memory list"}
+{"anchor":"How do I create a new workflow?","positive":"claude-flow workflow create","negative":"claude-flow task create"}
+{"anchor":"I need a way to save current session state","positive":"claude-flow session save","negative":"ruvector snapshot create"}
+{"anchor":"make workflow","positive":"claude-flow workflow create","negative":"ruvector collection create"}
+{"anchor":"Can you get cache?","positive":"agentic-flow cache get","negative":"ruvector vector get"}
+{"anchor":"Persist agent decisions for analysis","positive":"claude-flow memory store","negative":"ruvector vector insert"}
+{"anchor":"Search memory for similar patterns","positive":"claude-flow memory search","negative":"agentic-flow search nearest"}
+{"anchor":"How do I list saved sessions?","positive":"claude-flow session list","negative":"claude-flow memory list"}
+{"anchor":"I want to get workflow execution status","positive":"claude-flow workflow status","negative":"claude-flow agent status"}
+{"anchor":"I need neighbors functionality","positive":"agentic-flow search nearest","negative":"ruvector search knn"}
+{"anchor":"I need a way to list saved sessions","positive":"claude-flow session list","negative":"claude-flow task list"}
+{"anchor":"Can you list collection?","positive":"ruvector collection list","negative":"claude-flow memory list"}
+{"anchor":"I need to get vector","positive":"ruvector vector get","negative":"agentic-flow cache get"}
+{"anchor":"patterns the neural","positive":"claude-flow neural patterns","negative":"ruvector collection create"}
+{"anchor":"init swarm","positive":"claude-flow swarm init","negative":"agentic-flow pipeline create"}
+{"anchor":"I want to list saved sessions","positive":"claude-flow session list","negative":"claude-flow memory list"}
+{"anchor":"I need to patterns neural","positive":"claude-flow neural patterns","negative":"ruvector collection create"}
+{"anchor":"I want to vectorize embed","positive":"agentic-flow embed","negative":"claude-flow embeddings generate"}
+{"anchor":"I need a way to find nearest neighbors to query vector","positive":"agentic-flow search nearest","negative":"ruvector search knn"}
+{"anchor":"I need transfer functionality","positive":"claude-flow claims handoff","negative":"agentic-flow embed"}
+{"anchor":"I need create functionality","positive":"claude-flow agent spawn","negative":"claude-flow hive-mind spawn"}
+{"anchor":"I need to list agent","positive":"claude-flow agent list","negative":"ruvector collection list"}
+{"anchor":"I want to initialize a swarm with specified topology","positive":"claude-flow swarm init","negative":"claude-flow hive-mind init"}
+{"anchor":"I want to make workflow","positive":"claude-flow workflow create","negative":"agentic-flow pipeline create"}
+{"anchor":"Kill a misbehaving agent","positive":"claude-flow agent terminate","negative":"claude-flow swarm shutdown"}
+{"anchor":"I need a way to apply performance optimizations","positive":"claude-flow performance optimize","negative":"ruvector index optimize"}
+{"anchor":"How do I gracefully shutdown the swarm?","positive":"claude-flow swarm shutdown","negative":"ruvector collection create"}
+{"anchor":"Set up a multi-agent swarm for parallel processing","positive":"claude-flow swarm init","negative":"agentic-flow pipeline create"}
+{"anchor":"I want to list all active agents","positive":"claude-flow agent list","negative":"claude-flow task list"}
+{"anchor":"check the agent","positive":"claude-flow agent status","negative":"ruvector quantize info"}
+{"anchor":"I want to delete vectors from collection","positive":"ruvector vector delete","negative":"claude-flow memory delete"}
+{"anchor":"create the collection","positive":"ruvector collection create","negative":"ruvector snapshot create"}
+{"anchor":"I need to worker hooks","positive":"claude-flow hooks worker dispatch","negative":"ruvector collection create"}
+{"anchor":"I need to embed","positive":"agentic-flow embed","negative":"claude-flow embeddings generate"}
+{"anchor":"I want to show agent","positive":"claude-flow agent list","negative":"claude-flow memory list"}
+{"anchor":"initialize in swarm","positive":"claude-flow swarm init","negative":"claude-flow hive-mind init"}
+{"anchor":"list model","positive":"agentic-flow model list","negative":"claude-flow agent list"}
+{"anchor":"I need to optimize performance","positive":"claude-flow performance optimize","negative":"ruvector index optimize"}
+{"anchor":"I want to show model","positive":"agentic-flow model list","negative":"ruvector snapshot list"}
+{"anchor":"hybrid search","positive":"agentic-flow search hybrid","negative":"claude-flow memory search"}
+{"anchor":"How do I get model information and metadata?","positive":"agentic-flow model info","negative":"claude-flow agent status"}
+{"anchor":"I want to hybrid search combining keyword and semantic","positive":"agentic-flow search hybrid","negative":"claude-flow embeddings search"}
+{"anchor":"Help me list session","positive":"claude-flow session list","negative":"claude-flow agent list"}
+{"anchor":"list the session","positive":"claude-flow session list","negative":"claude-flow task list"}
+{"anchor":"similarity","positive":"agentic-flow similarity","negative":"claude-flow embeddings compare"}
+{"anchor":"add vector","positive":"ruvector vector insert","negative":"agentic-flow cache set"}
+{"anchor":"Help me stats cache","positive":"agentic-flow cache stats","negative":"ruvector index stats"}
+{"anchor":"Can you stop agent?","positive":"claude-flow agent terminate","negative":"agentic-flow embed"}
+{"anchor":"list collection","positive":"ruvector collection list","negative":"claude-flow agent list"}
+{"anchor":"Can you get vector?","positive":"ruvector vector get","negative":"claude-flow memory retrieve"}
+{"anchor":"Help me restore session","positive":"claude-flow session restore","negative":"ruvector snapshot restore"}
+{"anchor":"status in quantize","positive":"ruvector quantize info","negative":"claude-flow agent status"}
+{"anchor":"I need a way to create a new workflow","positive":"claude-flow workflow create","negative":"claude-flow task create"}
+{"anchor":"Help me info quantize","positive":"ruvector quantize info","negative":"agentic-flow model info"}
+{"anchor":"Can you list session?","positive":"claude-flow session list","negative":"claude-flow memory list"}
+{"anchor":"Can you search memory?","positive":"claude-flow memory search","negative":"ruvector search knn"}
+{"anchor":"Help me clear cache","positive":"agentic-flow cache clear","negative":"claude-flow swarm init"}
+{"anchor":"I want to show snapshot","positive":"ruvector snapshot list","negative":"claude-flow agent list"}
+{"anchor":"Can you info model?","positive":"agentic-flow model info","negative":"ruvector quantize info"}
+{"anchor":"insert vector","positive":"ruvector vector insert","negative":"agentic-flow cache set"}
+{"anchor":"search the embeddings","positive":"claude-flow embeddings search","negative":"agentic-flow search hybrid"}
+{"anchor":"Help me board claims","positive":"claude-flow claims board","negative":"ruvector collection create"}
+{"anchor":"I want to view claims board","positive":"claude-flow claims board","negative":"ruvector collection create"}
+{"anchor":"Can you info quantize?","positive":"ruvector quantize info","negative":"ruvector collection info"}
+{"anchor":"I want to search for nearest search","positive":"ruvector search knn","negative":"agentic-flow search nearest"}
+{"anchor":"check agent","positive":"claude-flow agent status","negative":"claude-flow swarm status"}
+{"anchor":"I need a way to list saved sessions","positive":"claude-flow session list","negative":"claude-flow memory list"}
+{"anchor":"I need a way to get model information and metadata","positive":"agentic-flow model info","negative":"ruvector collection info"}
+{"anchor":"I want to list all collections","positive":"ruvector collection list","negative":"claude-flow memory list"}
+{"anchor":"How do I k-nearest neighbor search?","positive":"ruvector search knn","negative":"agentic-flow search nearest"}
+{"anchor":"I need to search embeddings","positive":"claude-flow embeddings search","negative":"agentic-flow search hybrid"}
+{"anchor":"info the model","positive":"agentic-flow model info","negative":"ruvector collection info"}
+{"anchor":"I want to terminate a specific agent","positive":"claude-flow agent terminate","negative":"ruvector collection create"}
+{"anchor":"search memory","positive":"claude-flow memory search","negative":"ruvector search knn"}
+{"anchor":"cosine in similarity","positive":"agentic-flow similarity","negative":"claude-flow embeddings compare"}
+{"anchor":"Can you restore snapshot?","positive":"ruvector snapshot restore","negative":"claude-flow session restore"}
+{"anchor":"Start a queen-led hive-mind collective","positive":"claude-flow hive-mind init","negative":"claude-flow swarm init"}
+{"anchor":"How do I view claims board?","positive":"claude-flow claims board","negative":"agentic-flow embed"}
+{"anchor":"I need a way to get index statistics","positive":"ruvector index stats","negative":"claude-flow hooks metrics"}
+{"anchor":"I want to make task","positive":"claude-flow task create","negative":"ruvector collection create"}
+{"anchor":"restore the session","positive":"claude-flow session restore","negative":"ruvector snapshot restore"}
+{"anchor":"Help me check agent","positive":"claude-flow agent status","negative":"ruvector quantize info"}
+{"anchor":"I want to show model","positive":"agentic-flow model list","negative":"ruvector collection list"}
+{"anchor":"find embeddings","positive":"claude-flow embeddings search","negative":"agentic-flow search hybrid"}
+{"anchor":"How do I mark task as complete?","positive":"claude-flow task complete","negative":"ruvector collection create"}
+{"anchor":"How do I list available snapshots?","positive":"ruvector snapshot list","negative":"ruvector collection list"}
+{"anchor":"Can you search embeddings?","positive":"claude-flow embeddings search","negative":"agentic-flow search hybrid"}
+{"anchor":"init swarm","positive":"claude-flow swarm init","negative":"claude-flow hive-mind init"}
+{"anchor":"I need to list collection","positive":"ruvector collection list","negative":"agentic-flow model list"}
+{"anchor":"list memory","positive":"claude-flow memory list","negative":"ruvector snapshot list"}
+{"anchor":"metadata in model","positive":"agentic-flow model info","negative":"ruvector collection info"}
+{"anchor":"I need a way to list available snapshots","positive":"ruvector snapshot list","negative":"agentic-flow model list"}
+{"anchor":"Store learned patterns for future reference","positive":"claude-flow memory store","negative":"agentic-flow cache set"}
+{"anchor":"I need a way to mark task as complete","positive":"claude-flow task complete","negative":"agentic-flow embed"}
+{"anchor":"I need to create task","positive":"claude-flow task create","negative":"ruvector collection create"}
+{"anchor":"list snapshot","positive":"ruvector snapshot list","negative":"ruvector collection list"}
+{"anchor":"Can you list snapshot?","positive":"ruvector snapshot list","negative":"agentic-flow model list"}
+{"anchor":"I need a way to get quantization info","positive":"ruvector quantize info","negative":"agentic-flow model info"}
+{"anchor":"I need a way to list all active agents","positive":"claude-flow agent list","negative":"claude-flow memory list"}
+{"anchor":"dashboard in hooks","positive":"claude-flow hooks metrics","negative":"ruvector index stats"}
+{"anchor":"board claims","positive":"claude-flow claims board","negative":"agentic-flow embed"}
+{"anchor":"Help me check agent","positive":"claude-flow agent status","negative":"agentic-flow model info"}
+{"anchor":"list the agent","positive":"claude-flow agent list","negative":"claude-flow task list"}
+{"anchor":"Query semantic memory for debugging tips","positive":"claude-flow memory search","negative":"agentic-flow search hybrid"}
+{"anchor":"I want to get collection information","positive":"ruvector collection info","negative":"claude-flow agent status"}
+{"anchor":"Help me embed","positive":"agentic-flow embed","negative":"claude-flow embeddings generate"}
+{"anchor":"Can you find similar search?","positive":"ruvector search knn","negative":"claude-flow memory search"}
+{"anchor":"I need to pretrain hooks","positive":"claude-flow hooks pretrain","negative":"ruvector index build"}
+{"anchor":"I want to apply performance optimizations","positive":"claude-flow performance optimize","negative":"ruvector index optimize"}
+{"anchor":"I need a way to list all active agents","positive":"claude-flow agent list","negative":"claude-flow task list"}
+{"anchor":"I need a way to get status of a specific agent","positive":"claude-flow agent status","negative":"claude-flow workflow status"}
+{"anchor":"I want to show collection","positive":"ruvector collection list","negative":"claude-flow task list"}
+{"anchor":"Stop the agent that is stuck","positive":"claude-flow agent terminate","negative":"claude-flow task cancel"}
+{"anchor":"I want to get agent","positive":"claude-flow agent status","negative":"ruvector collection info"}
+{"anchor":"I want to list saved sessions","positive":"claude-flow session list","negative":"claude-flow task list"}
+{"anchor":"delete collection","positive":"ruvector collection delete","negative":"claude-flow memory delete"}
+{"anchor":"How do I create a new workflow?","positive":"claude-flow workflow create","negative":"ruvector collection create"}
+{"anchor":"find similar search","positive":"ruvector search knn","negative":"claude-flow memory search"}
+{"anchor":"I want to tune index","positive":"ruvector index optimize","negative":"claude-flow performance optimize"}
+{"anchor":"How do I restore a saved session?","positive":"claude-flow session restore","negative":"ruvector snapshot restore"}
+{"anchor":"I need bootstrap functionality","positive":"claude-flow hooks pretrain","negative":"ruvector index build"}
+{"anchor":"Can you find similar search?","positive":"ruvector search knn","negative":"agentic-flow search nearest"}
+{"anchor":"I need combined functionality","positive":"agentic-flow search hybrid","negative":"ruvector search filter"}
+{"anchor":"Help me batch-embed","positive":"agentic-flow batch-embed","negative":"ruvector search batch"}
+{"anchor":"How do I bootstrap intelligence from repository?","positive":"claude-flow hooks pretrain","negative":"ruvector index build"}
+{"anchor":"view in claims","positive":"claude-flow claims board","negative":"ruvector collection create"}
+{"anchor":"list the task","positive":"claude-flow task list","negative":"ruvector collection list"}
+{"anchor":"Help me find similar search","positive":"ruvector search knn","negative":"agentic-flow search nearest"}
+{"anchor":"show session","positive":"claude-flow session list","negative":"claude-flow agent list"}
+{"anchor":"list collection","positive":"ruvector collection list","negative":"claude-flow task list"}
+{"anchor":"handoff claims","positive":"claude-flow claims handoff","negative":"agentic-flow embed"}
+{"anchor":"list memory","positive":"claude-flow memory list","negative":"claude-flow task list"}
+{"anchor":"remove vector","positive":"ruvector vector delete","negative":"ruvector collection delete"}
+{"anchor":"Load cached data from memory","positive":"claude-flow memory retrieve","negative":"agentic-flow cache get"}
+{"anchor":"I need a way to release a claim on an issue","positive":"claude-flow claims release","negative":"ruvector collection create"}
+{"anchor":"Can you info quantize?","positive":"ruvector quantize info","negative":"agentic-flow model info"}
+{"anchor":"I need compress functionality","positive":"ruvector quantize apply","negative":"agentic-flow model quantize"}
+{"anchor":"Can you worker hooks?","positive":"claude-flow hooks worker dispatch","negative":"agentic-flow embed"}
+{"anchor":"hybrid search","positive":"agentic-flow search hybrid","negative":"claude-flow embeddings search"}
+{"anchor":"I need a way to list all active agents","positive":"claude-flow agent list","negative":"ruvector snapshot list"}
+{"anchor":"I want to run workflow","positive":"claude-flow workflow execute","negative":"agentic-flow pipeline run"}
+{"anchor":"I need a way to list all active agents","positive":"claude-flow agent list","negative":"ruvector collection list"}
+{"anchor":"search the embeddings","positive":"claude-flow embeddings search","negative":"claude-flow memory search"}
+{"anchor":"check the workflow","positive":"claude-flow workflow status","negative":"claude-flow swarm status"}
+{"anchor":"Can you list collection?","positive":"ruvector collection list","negative":"claude-flow agent list"}
+{"anchor":"Can you handoff claims?","positive":"claude-flow claims handoff","negative":"ruvector collection create"}
+{"anchor":"I need dispatch functionality","positive":"claude-flow hooks worker dispatch","negative":"agentic-flow embed"}
+{"anchor":"transfer in claims","positive":"claude-flow claims handoff","negative":"agentic-flow embed"}
+{"anchor":"I want to compute similarity between embeddings","positive":"agentic-flow similarity","negative":"claude-flow embeddings compare"}
+{"anchor":"I need status functionality","positive":"ruvector quantize info","negative":"ruvector collection info"}
+{"anchor":"I need to restore session","positive":"claude-flow session restore","negative":"ruvector snapshot restore"}
+{"anchor":"list the memory","positive":"claude-flow memory list","negative":"claude-flow task list"}
+{"anchor":"I need to list memory","positive":"claude-flow memory list","negative":"claude-flow task list"}
+{"anchor":"check the agent","positive":"claude-flow agent status","negative":"claude-flow workflow status"}
+{"anchor":"Help me create collection","positive":"ruvector collection create","negative":"claude-flow memory store"}
+{"anchor":"Help me worker hooks","positive":"claude-flow hooks worker dispatch","negative":"agentic-flow embed"}
+{"anchor":"status in quantize","positive":"ruvector quantize info","negative":"ruvector collection info"}
+{"anchor":"How do I get index statistics?","positive":"ruvector index stats","negative":"claude-flow hooks metrics"}
+{"anchor":"I want to get index statistics","positive":"ruvector index stats","negative":"claude-flow hooks metrics"}
+{"anchor":"save the session","positive":"claude-flow session save","negative":"ruvector snapshot create"}
+{"anchor":"show session","positive":"claude-flow session list","negative":"claude-flow task list"}
+{"anchor":"I need a way to create a new vector collection","positive":"ruvector collection create","negative":"claude-flow task create"}
+{"anchor":"info quantize","positive":"ruvector quantize info","negative":"agentic-flow model info"}
+{"anchor":"Help me generate embeddings","positive":"claude-flow embeddings generate","negative":"agentic-flow embed"}
+{"anchor":"I want to make workflow","positive":"claude-flow workflow create","negative":"claude-flow task create"}
+{"anchor":"I need a way to list available snapshots","positive":"ruvector snapshot list","negative":"claude-flow task list"}
+{"anchor":"Help me delete collection","positive":"ruvector collection delete","negative":"claude-flow memory delete"}
+{"anchor":"I need a way to retrieve embedding from cache","positive":"agentic-flow cache get","negative":"ruvector vector get"}
+{"anchor":"search embeddings","positive":"claude-flow embeddings search","negative":"agentic-flow search hybrid"}
+{"anchor":"search for nearest search","positive":"ruvector search knn","negative":"agentic-flow search nearest"}
+{"anchor":"Help me delete collection","positive":"ruvector collection delete","negative":"ruvector vector delete"}
+{"anchor":"Monitor swarm performance and throughput","positive":"claude-flow swarm status","negative":"claude-flow performance benchmark"}
+{"anchor":"Help me apply quantize","positive":"ruvector quantize apply","negative":"agentic-flow model quantize"}
+{"anchor":"I need to info collection","positive":"ruvector collection info","negative":"ruvector quantize info"}
+{"anchor":"Can you get cache?","positive":"agentic-flow cache get","negative":"claude-flow memory retrieve"}
+{"anchor":"I need fetch functionality","positive":"ruvector vector get","negative":"claude-flow memory retrieve"}
+{"anchor":"I need a way to generate embeddings for text using onnx models","positive":"agentic-flow embed","negative":"claude-flow embeddings generate"}
+{"anchor":"stats in collection","positive":"ruvector collection info","negative":"claude-flow agent status"}
+{"anchor":"I need cosine functionality","positive":"agentic-flow similarity","negative":"claude-flow embeddings compare"}
+{"anchor":"complete task","positive":"claude-flow task complete","negative":"agentic-flow embed"}
+{"anchor":"Can you set cache?","positive":"agentic-flow cache set","negative":"claude-flow memory store"}
+{"anchor":"I want to dispatch a background worker","positive":"claude-flow hooks worker dispatch","negative":"ruvector collection create"}
+{"anchor":"workers in hive-mind","positive":"claude-flow hive-mind spawn","negative":"claude-flow agent spawn"}
+{"anchor":"Help me get cache","positive":"agentic-flow cache get","negative":"ruvector vector get"}
+{"anchor":"Help me create workflow","positive":"claude-flow workflow create","negative":"claude-flow task create"}
+{"anchor":"I want to remove vector","positive":"ruvector vector delete","negative":"claude-flow memory delete"}
+{"anchor":"Can you generate embeddings?","positive":"claude-flow embeddings generate","negative":"agentic-flow embed"}
+{"anchor":"predict the neural","positive":"claude-flow neural predict","negative":"ruvector collection create"}
+{"anchor":"I need a way to list all active agents","positive":"claude-flow agent list","negative":"agentic-flow model list"}
+{"anchor":"How do I list memory entries?","positive":"claude-flow memory list","negative":"agentic-flow model list"}
+{"anchor":"Can you list model?","positive":"agentic-flow model list","negative":"claude-flow task list"}
+{"anchor":"make collection","positive":"ruvector collection create","negative":"claude-flow workflow create"}
+{"anchor":"Save task completion metrics to memory","positive":"claude-flow memory store","negative":"claude-flow session save"}
+{"anchor":"search the memory","positive":"claude-flow memory search","negative":"agentic-flow search hybrid"}
+{"anchor":"I need a way to list memory entries","positive":"claude-flow memory list","negative":"agentic-flow model list"}
+{"anchor":"I want to generate embeddings for text","positive":"claude-flow embeddings generate","negative":"agentic-flow embed"}
+{"anchor":"Help me init hive-mind","positive":"claude-flow hive-mind init","negative":"claude-flow swarm init"}
+{"anchor":"list the memory","positive":"claude-flow memory list","negative":"ruvector snapshot list"}
+{"anchor":"execute the workflow","positive":"claude-flow workflow execute","negative":"agentic-flow pipeline run"}
+{"anchor":"Can you list agent?","positive":"claude-flow agent list","negative":"claude-flow task list"}
+{"anchor":"execute workflow","positive":"claude-flow workflow execute","negative":"agentic-flow pipeline run"}
+{"anchor":"I need a way to spawn a new agent with specified type","positive":"claude-flow agent spawn","negative":"claude-flow hive-mind spawn"}
+{"anchor":"Help me create collection","positive":"ruvector collection create","negative":"ruvector snapshot create"}
+{"anchor":"I need a way to terminate a specific agent","positive":"claude-flow agent terminate","negative":"agentic-flow embed"}
+{"anchor":"How do I compare similarity between texts?","positive":"claude-flow embeddings compare","negative":"agentic-flow similarity"}
+{"anchor":"How do I create a new vector collection?","positive":"ruvector collection create","negative":"claude-flow workflow create"}
+{"anchor":"I want to get model information and metadata","positive":"agentic-flow model info","negative":"ruvector collection info"}
+{"anchor":"Show running agent processes","positive":"claude-flow agent list","negative":"claude-flow task list"}
+{"anchor":"Can you list snapshot?","positive":"ruvector snapshot list","negative":"claude-flow memory list"}
+{"anchor":"I want to get memory","positive":"claude-flow memory retrieve","negative":"ruvector vector get"}
+{"anchor":"Can you create workflow?","positive":"claude-flow workflow create","negative":"agentic-flow pipeline create"}
+{"anchor":"Can you nearest search?","positive":"agentic-flow search nearest","negative":"ruvector search knn"}
+{"anchor":"Create a new worker agent for this task","positive":"claude-flow agent spawn","negative":"claude-flow hive-mind spawn"}
+{"anchor":"Can you search embeddings?","positive":"claude-flow embeddings search","negative":"claude-flow memory search"}
+{"anchor":"list collection","positive":"ruvector collection list","negative":"agentic-flow model list"}
+{"anchor":"list the task","positive":"claude-flow task list","negative":"agentic-flow model list"}
+{"anchor":"I want to kill agent","positive":"claude-flow agent terminate","negative":"ruvector collection create"}
+{"anchor":"I want to k-nearest neighbor search","positive":"ruvector search knn","negative":"claude-flow memory search"}
+{"anchor":"I want to list all tasks","positive":"claude-flow task list","negative":"agentic-flow model list"}
+{"anchor":"I need a way to list all collections","positive":"ruvector collection list","negative":"claude-flow memory list"}
+{"anchor":"unclaim in claims","positive":"claude-flow claims release","negative":"ruvector collection create"}
+{"anchor":"metrics the hooks","positive":"claude-flow hooks metrics","negative":"ruvector index stats"}
+{"anchor":"I want to get vectors by id","positive":"ruvector vector get","negative":"claude-flow memory retrieve"}
+{"anchor":"list model","positive":"agentic-flow model list","negative":"claude-flow memory list"}
+{"anchor":"Can you list session?","positive":"claude-flow session list","negative":"claude-flow task list"}
+{"anchor":"I need to list model","positive":"agentic-flow model list","negative":"ruvector snapshot list"}
+{"anchor":"I want to get index statistics","positive":"ruvector index stats","negative":"agentic-flow cache stats"}
+{"anchor":"init hive-mind","positive":"claude-flow hive-mind init","negative":"claude-flow swarm init"}
+{"anchor":"How do I list all active agents?","positive":"claude-flow agent list","negative":"claude-flow task list"}
+{"anchor":"I want to make collection","positive":"ruvector collection create","negative":"claude-flow workflow create"}
+{"anchor":"Can you stats index?","positive":"ruvector index stats","negative":"claude-flow hooks metrics"}
+{"anchor":"get agent","positive":"claude-flow agent status","negative":"claude-flow swarm status"}
+{"anchor":"How do I semantic vector search in memory?","positive":"claude-flow memory search","negative":"claude-flow embeddings search"}
+{"anchor":"How do I list all active agents?","positive":"claude-flow agent list","negative":"claude-flow memory list"}
+{"anchor":"I need to list memory","positive":"claude-flow memory list","negative":"agentic-flow model list"}
+{"anchor":"How do I list available models?","positive":"agentic-flow model list","negative":"ruvector snapshot list"}
+{"anchor":"save session","positive":"claude-flow session save","negative":"ruvector snapshot create"}
+{"anchor":"Find relevant past solutions","positive":"claude-flow memory search","negative":"ruvector search filter"}
+{"anchor":"show model","positive":"agentic-flow model list","negative":"ruvector collection list"}
+{"anchor":"encode embed","positive":"agentic-flow embed","negative":"claude-flow embeddings generate"}
+{"anchor":"Start a researcher agent to investigate","positive":"claude-flow agent spawn","negative":"claude-flow task create"}
+{"anchor":"get swarm","positive":"claude-flow swarm status","negative":"claude-flow agent status"}
+{"anchor":"get the vector","positive":"ruvector vector get","negative":"agentic-flow cache get"}
+{"anchor":"list the snapshot","positive":"ruvector snapshot list","negative":"claude-flow task list"}
+{"anchor":"Help me create snapshot","positive":"ruvector snapshot create","negative":"ruvector collection create"}
+{"anchor":"Help me quantize model","positive":"agentic-flow model quantize","negative":"ruvector quantize apply"}
+{"anchor":"restore snapshot","positive":"ruvector snapshot restore","negative":"claude-flow session restore"}
+{"anchor":"Get details about a specific agent","positive":"claude-flow agent status","negative":"claude-flow swarm status"}
+{"anchor":"I want to retrieve embedding from cache","positive":"agentic-flow cache get","negative":"ruvector vector get"}
+{"anchor":"Can you list agent?","positive":"claude-flow agent list","negative":"ruvector collection list"}
+{"anchor":"spawn hive-mind","positive":"claude-flow hive-mind spawn","negative":"claude-flow agent spawn"}
+{"anchor":"Help me set cache","positive":"agentic-flow cache set","negative":"ruvector vector insert"}
+{"anchor":"I need to list agent","positive":"claude-flow agent list","negative":"ruvector snapshot list"}
+{"anchor":"I want to show model","positive":"agentic-flow model list","negative":"claude-flow task list"}
+{"anchor":"How do I create a new vector collection?","positive":"ruvector collection create","negative":"claude-flow memory store"}
+{"anchor":"list the collection","positive":"ruvector collection list","negative":"agentic-flow model list"}
+{"anchor":"retrieve memory","positive":"claude-flow memory retrieve","negative":"ruvector vector get"}
+{"anchor":"I need a way to semantic vector search in memory","positive":"claude-flow memory search","negative":"ruvector search knn"}
+{"anchor":"Can you info collection?","positive":"ruvector collection info","negative":"claude-flow agent status"}
+{"anchor":"Cache successful code patterns","positive":"claude-flow memory store","negative":"agentic-flow cache set"}
+{"anchor":"create the task","positive":"claude-flow task create","negative":"ruvector collection create"}
+{"anchor":"search memory","positive":"claude-flow memory search","negative":"claude-flow embeddings search"}
+{"anchor":"create task","positive":"claude-flow task create","negative":"ruvector collection create"}
+{"anchor":"I want to find embeddings","positive":"claude-flow embeddings search","negative":"agentic-flow search hybrid"}
+{"anchor":"create collection","positive":"ruvector collection create","negative":"claude-flow workflow create"}
+{"anchor":"Help me info model","positive":"agentic-flow model info","negative":"ruvector quantize info"}
+{"anchor":"I want to get agent","positive":"claude-flow agent status","negative":"agentic-flow model info"}
+{"anchor":"Help me list agent","positive":"claude-flow agent list","negative":"ruvector collection list"}
+{"anchor":"I need a way to clear embedding cache","positive":"agentic-flow cache clear","negative":"claude-flow swarm init"}
+{"anchor":"pretrain hooks","positive":"claude-flow hooks pretrain","negative":"ruvector index build"}
+{"anchor":"fetch in vector","positive":"ruvector vector get","negative":"agentic-flow cache get"}
+{"anchor":"Check the health of all running agents","positive":"claude-flow swarm status","negative":"claude-flow agent status"}
+{"anchor":"Can you list snapshot?","positive":"ruvector snapshot list","negative":"ruvector collection list"}
+{"anchor":"check agent","positive":"claude-flow agent status","negative":"ruvector collection info"}
+{"anchor":"I need a way to execute a workflow","positive":"claude-flow workflow execute","negative":"agentic-flow pipeline run"}
+{"anchor":"I need to check swarm","positive":"claude-flow swarm status","negative":"claude-flow agent status"}
+{"anchor":"How do I semantic search across stored embeddings?","positive":"claude-flow embeddings search","negative":"claude-flow memory search"}
+{"anchor":"I want to get current swarm status and agent health","positive":"claude-flow swarm status","negative":"claude-flow workflow status"}
+{"anchor":"I want to get collection information","positive":"ruvector collection info","negative":"agentic-flow cache stats"}
+{"anchor":"I want to delete vectors from collection","positive":"ruvector vector delete","negative":"ruvector collection delete"}
+{"anchor":"I want to generate embeddings for text using onnx models","positive":"agentic-flow embed","negative":"claude-flow embeddings generate"}
+{"anchor":"Can you hybrid search?","positive":"agentic-flow search hybrid","negative":"claude-flow memory search"}
+{"anchor":"list the session","positive":"claude-flow session list","negative":"claude-flow agent list"}
+{"anchor":"Help me patterns neural","positive":"claude-flow neural patterns","negative":"agentic-flow embed"}
+{"anchor":"optimize the performance","positive":"claude-flow performance optimize","negative":"ruvector index optimize"}
+{"anchor":"initialize in swarm","positive":"claude-flow swarm init","negative":"agentic-flow pipeline create"}
+{"anchor":"get cache","positive":"agentic-flow cache get","negative":"ruvector vector get"}
+{"anchor":"Search memory for similar patterns","positive":"claude-flow memory search","negative":"ruvector search knn"}
+{"anchor":"I need a way to get workflow execution status","positive":"claude-flow workflow status","negative":"claude-flow agent status"}
+{"anchor":"Help me delete vector","positive":"ruvector vector delete","negative":"claude-flow memory delete"}
+{"anchor":"I need graph functionality","positive":"agentic-flow pipeline visualize","negative":"claude-flow swarm init"}
+{"anchor":"How do I semantic vector search in memory?","positive":"claude-flow memory search","negative":"ruvector search knn"}
+{"anchor":"get agent","positive":"claude-flow agent status","negative":"ruvector collection info"}
+{"anchor":"Can you list collection?","positive":"ruvector collection list","negative":"agentic-flow model list"}
+{"anchor":"stop agent","positive":"claude-flow agent terminate","negative":"ruvector collection create"}
+{"anchor":"I want to show memory","positive":"claude-flow memory list","negative":"claude-flow task list"}
+{"anchor":"I want to bootstrap intelligence from repository","positive":"claude-flow hooks pretrain","negative":"ruvector index build"}
+{"anchor":"I need a way to list all tasks","positive":"claude-flow task list","negative":"claude-flow memory list"}
+{"anchor":"How do I get status of a specific agent?","positive":"claude-flow agent status","negative":"ruvector collection info"}
+{"anchor":"How do I create a new task?","positive":"claude-flow task create","negative":"ruvector collection create"}
+{"anchor":"I need to list model","positive":"agentic-flow model list","negative":"claude-flow agent list"}
+{"anchor":"Help me store memory","positive":"claude-flow memory store","negative":"ruvector collection create"}
+{"anchor":"I need store functionality","positive":"claude-flow neural patterns","negative":"agentic-flow embed"}
+{"anchor":"save memory","positive":"claude-flow memory store","negative":"agentic-flow cache set"}
+{"anchor":"How do I list all tasks?","positive":"claude-flow task list","negative":"claude-flow agent list"}
+{"anchor":"Help me list agent","positive":"claude-flow agent list","negative":"claude-flow task list"}
+{"anchor":"I need a way to handoff issue to another claimant","positive":"claude-flow claims handoff","negative":"ruvector collection create"}
+{"anchor":"metrics hooks","positive":"claude-flow hooks metrics","negative":"ruvector index stats"}
+{"anchor":"I need embed functionality","positive":"agentic-flow batch-embed","negative":"ruvector search batch"}
+{"anchor":"I want to show task","positive":"claude-flow task list","negative":"ruvector collection list"}
+{"anchor":"I need a way to store a value in memory with optional namespace","positive":"claude-flow memory store","negative":"ruvector collection create"}
+{"anchor":"How do I delete a memory entry?","positive":"claude-flow memory delete","negative":"ruvector vector delete"}
+{"anchor":"I need a way to initialize a swarm with specified topology","positive":"claude-flow swarm init","negative":"agentic-flow pipeline create"}
+{"anchor":"I need a way to generate embeddings for text","positive":"claude-flow embeddings generate","negative":"agentic-flow embed"}
+{"anchor":"I need a way to list available snapshots","positive":"ruvector snapshot list","negative":"claude-flow agent list"}
+{"anchor":"get agent","positive":"claude-flow agent status","negative":"agentic-flow model info"}
+{"anchor":"I need to stats cache","positive":"agentic-flow cache stats","negative":"ruvector index stats"}
+{"anchor":"I need status functionality","positive":"ruvector quantize info","negative":"agentic-flow model info"}
+{"anchor":"Help me list agent","positive":"claude-flow agent list","negative":"ruvector snapshot list"}
+{"anchor":"Help me check agent","positive":"claude-flow agent status","negative":"claude-flow swarm status"}
+{"anchor":"delete the vector","positive":"ruvector vector delete","negative":"claude-flow memory delete"}
+{"anchor":"I need a way to semantic vector search in memory","positive":"claude-flow memory search","negative":"agentic-flow search hybrid"}
+{"anchor":"list the model","positive":"agentic-flow model list","negative":"claude-flow memory list"}
+{"anchor":"How do I list all tasks?","positive":"claude-flow task list","negative":"ruvector collection list"}
+{"anchor":"delete memory","positive":"claude-flow memory delete","negative":"ruvector vector delete"}
+{"anchor":"I need metadata functionality","positive":"agentic-flow model info","negative":"claude-flow agent status"}
+{"anchor":"show session","positive":"claude-flow session list","negative":"claude-flow memory list"}
+{"anchor":"How do I list saved sessions?","positive":"claude-flow session list","negative":"claude-flow task list"}
+{"anchor":"I want to get memory","positive":"claude-flow memory retrieve","negative":"agentic-flow cache get"}
+{"anchor":"Set up Byzantine fault-tolerant consensus","positive":"claude-flow hive-mind init","negative":"claude-flow swarm init"}
+{"anchor":"show memory","positive":"claude-flow memory list","negative":"claude-flow task list"}
+{"anchor":"fetch in vector","positive":"ruvector vector get","negative":"claude-flow memory retrieve"}
+{"anchor":"I want to create a new workflow","positive":"claude-flow workflow create","negative":"ruvector collection create"}
+{"anchor":"Launch a distributed agent network","positive":"claude-flow swarm init","negative":"claude-flow agent spawn"}
+{"anchor":"I want to get model information and metadata","positive":"agentic-flow model info","negative":"claude-flow agent status"}
+{"anchor":"How do I list available models?","positive":"agentic-flow model list","negative":"claude-flow task list"}
+{"anchor":"get vector","positive":"ruvector vector get","negative":"agentic-flow cache get"}
+{"anchor":"Can you search memory?","positive":"claude-flow memory search","negative":"agentic-flow search hybrid"}
+{"anchor":"make collection","positive":"ruvector collection create","negative":"claude-flow task create"}
+{"anchor":"I need to check workflow","positive":"claude-flow workflow status","negative":"claude-flow agent status"}
+{"anchor":"How do I get status of a specific agent?","positive":"claude-flow agent status","negative":"ruvector quantize info"}
+{"anchor":"I want to list all tasks","positive":"claude-flow task list","negative":"ruvector collection list"}
+{"anchor":"I want to semantic search across stored embeddings","positive":"claude-flow embeddings search","negative":"agentic-flow search hybrid"}
+{"anchor":"find similar the search","positive":"ruvector search knn","negative":"claude-flow memory search"}
+{"anchor":"Help me create workflow","positive":"claude-flow workflow create","negative":"ruvector collection create"}
+{"anchor":"show task","positive":"claude-flow task list","negative":"agentic-flow model list"}
+{"anchor":"find similar the search","positive":"ruvector search knn","negative":"agentic-flow search nearest"}
+{"anchor":"find embeddings","positive":"claude-flow embeddings search","negative":"claude-flow memory search"}
+{"anchor":"Set up a multi-agent swarm for parallel processing","positive":"claude-flow swarm init","negative":"claude-flow agent spawn"}
+{"anchor":"get vector","positive":"ruvector vector get","negative":"claude-flow memory retrieve"}
+{"anchor":"post-task hooks","positive":"claude-flow hooks post-task","negative":"ruvector collection create"}
+{"anchor":"How do I delete a vector collection?","positive":"ruvector collection delete","negative":"ruvector vector delete"}
+{"anchor":"How do I list available snapshots?","positive":"ruvector snapshot list","negative":"claude-flow agent list"}
+{"anchor":"I need status functionality","positive":"ruvector quantize info","negative":"claude-flow agent status"}
+{"anchor":"run workflow","positive":"claude-flow workflow execute","negative":"agentic-flow pipeline run"}
+{"anchor":"Find k-nearest matches to this embedding","positive":"ruvector search knn","negative":"agentic-flow search nearest"}
+{"anchor":"tune performance","positive":"claude-flow performance optimize","negative":"ruvector index optimize"}
+{"anchor":"I need to list agent","positive":"claude-flow agent list","negative":"claude-flow task list"}
+{"anchor":"I want to restore a saved session","positive":"claude-flow session restore","negative":"ruvector snapshot restore"}
+{"anchor":"I want to get swarm","positive":"claude-flow swarm status","negative":"claude-flow workflow status"}
+{"anchor":"How do I delete a vector collection?","positive":"ruvector collection delete","negative":"claude-flow memory delete"}
+{"anchor":"I need done functionality","positive":"claude-flow task complete","negative":"ruvector collection create"}
+{"anchor":"Hybrid keyword and semantic search","positive":"agentic-flow search hybrid","negative":"ruvector search filter"}
+{"anchor":"show agent","positive":"claude-flow agent list","negative":"agentic-flow model list"}
+{"anchor":"check workflow","positive":"claude-flow workflow status","negative":"claude-flow swarm status"}
+{"anchor":"I need metadata functionality","positive":"agentic-flow model info","negative":"ruvector collection info"}
+{"anchor":"I need a way to create a new processing pipeline","positive":"agentic-flow pipeline create","negative":"claude-flow swarm init"}
+{"anchor":"Help me list collection","positive":"ruvector collection list","negative":"claude-flow task list"}
+{"anchor":"Train the routing model","positive":"claude-flow neural train","negative":"claude-flow hooks pretrain"}
+{"anchor":"I need a way to manage neural patterns","positive":"claude-flow neural patterns","negative":"ruvector collection create"}
+{"anchor":"Create an embedding pipeline","positive":"agentic-flow pipeline create","negative":"claude-flow workflow create"}
+{"anchor":"Can you init swarm?","positive":"claude-flow swarm init","negative":"agentic-flow pipeline create"}
+{"anchor":"How do I view learning metrics dashboard?","positive":"claude-flow hooks metrics","negative":"ruvector index stats"}
+{"anchor":"I want to create a new task","positive":"claude-flow task create","negative":"claude-flow workflow create"}
+{"anchor":"Store learned patterns for future reference","positive":"claude-flow memory store","negative":"ruvector vector insert"}
+{"anchor":"check swarm","positive":"claude-flow swarm status","negative":"claude-flow agent status"}
+{"anchor":"Help me init swarm","positive":"claude-flow swarm init","negative":"agentic-flow pipeline create"}
+{"anchor":"I need to run pipeline","positive":"agentic-flow pipeline run","negative":"claude-flow workflow execute"}
+{"anchor":"I want to make collection","positive":"ruvector collection create","negative":"ruvector snapshot create"}
+{"anchor":"How do I list all collections?","positive":"ruvector collection list","negative":"claude-flow task list"}
+{"anchor":"I want to show task","positive":"claude-flow task list","negative":"claude-flow agent list"}
+{"anchor":"I need a way to retrieve embedding from cache","positive":"agentic-flow cache get","negative":"claude-flow memory retrieve"}
+{"anchor":"List all active agents in the system","positive":"claude-flow agent list","negative":"agentic-flow model list"}
+{"anchor":"How do I spawn a new agent with specified type?","positive":"claude-flow agent spawn","negative":"claude-flow hive-mind spawn"}
+{"anchor":"I want to retrieve a value from memory by key","positive":"claude-flow memory retrieve","negative":"agentic-flow cache get"}
+{"anchor":"I need a way to get cache statistics","positive":"agentic-flow cache stats","negative":"ruvector index stats"}
+{"anchor":"create the pipeline","positive":"agentic-flow pipeline create","negative":"claude-flow swarm init"}
+{"anchor":"I need a way to delete vectors from collection","positive":"ruvector vector delete","negative":"claude-flow memory delete"}
+{"anchor":"Create vector representations of text","positive":"agentic-flow embed","negative":"claude-flow embeddings generate"}
+{"anchor":"make pipeline","positive":"agentic-flow pipeline create","negative":"claude-flow swarm init"}
+{"anchor":"I need a way to k-nearest neighbor search","positive":"ruvector search knn","negative":"agentic-flow search nearest"}
+{"anchor":"check swarm","positive":"claude-flow swarm status","negative":"claude-flow workflow status"}
+{"anchor":"Help me list collection","positive":"ruvector collection list","negative":"claude-flow agent list"}
+{"anchor":"delete the collection","positive":"ruvector collection delete","negative":"ruvector vector delete"}
+{"anchor":"I want to show agent","positive":"claude-flow agent list","negative":"ruvector collection list"}
+{"anchor":"persist in session","positive":"claude-flow session save","negative":"ruvector snapshot create"}
+{"anchor":"I want to tune performance","positive":"claude-flow performance optimize","negative":"ruvector index optimize"}
+{"anchor":"Can you get vector?","positive":"ruvector vector get","negative":"agentic-flow cache get"}
+{"anchor":"Initialize hierarchical agent coordination","positive":"claude-flow swarm init","negative":"claude-flow hive-mind init"}
+{"anchor":"bootstrap in hooks","positive":"claude-flow hooks pretrain","negative":"ruvector index build"}
+{"anchor":"I need a way to get model information and metadata","positive":"agentic-flow model info","negative":"ruvector quantize info"}
+{"anchor":"I need a way to get collection information","positive":"ruvector collection info","negative":"ruvector quantize info"}
+{"anchor":"Can you check agent?","positive":"claude-flow agent status","negative":"agentic-flow model info"}
+{"anchor":"I need retrieve functionality","positive":"agentic-flow cache get","negative":"ruvector vector get"}
+{"anchor":"I want to show model","positive":"agentic-flow model list","negative":"claude-flow memory list"}
+{"anchor":"I want to get status of a specific agent","positive":"claude-flow agent status","negative":"claude-flow swarm status"}
+{"anchor":"Can you list agent?","positive":"claude-flow agent list","negative":"agentic-flow model list"}
+{"anchor":"I need inference functionality","positive":"claude-flow neural predict","negative":"agentic-flow embed"}
+{"anchor":"I need a way to get status of a specific agent","positive":"claude-flow agent status","negative":"ruvector collection info"}
+{"anchor":"I need a way to get vectors by id","positive":"ruvector vector get","negative":"agentic-flow cache get"}
+{"anchor":"search for nearest search","positive":"ruvector search knn","negative":"claude-flow memory search"}
+{"anchor":"I want to delete a vector collection","positive":"ruvector collection delete","negative":"ruvector vector delete"}
+{"anchor":"show model","positive":"agentic-flow model list","negative":"claude-flow agent list"}
+{"anchor":"Help me hybrid search","positive":"agentic-flow search hybrid","negative":"ruvector search filter"}
+{"anchor":"list agent","positive":"claude-flow agent list","negative":"agentic-flow model list"}
+{"anchor":"I want to make snapshot","positive":"ruvector snapshot create","negative":"claude-flow session save"}
+{"anchor":"I need a way to get collection information","positive":"ruvector collection info","negative":"claude-flow agent status"}
+{"anchor":"I want to remove memory","positive":"claude-flow memory delete","negative":"ruvector vector delete"}
+{"anchor":"Route this task to the optimal agent","positive":"claude-flow hooks route","negative":"claude-flow agent spawn"}
+{"anchor":"I need to create workflow","positive":"claude-flow workflow create","negative":"ruvector collection create"}
+{"anchor":"stats in collection","positive":"ruvector collection info","negative":"agentic-flow model info"}
+{"anchor":"show task","positive":"claude-flow task list","negative":"claude-flow memory list"}
+{"anchor":"list task","positive":"claude-flow task list","negative":"claude-flow agent list"}
+{"anchor":"I need to save session","positive":"claude-flow session save","negative":"ruvector snapshot create"}
+{"anchor":"I want to retrieve embedding from cache","positive":"agentic-flow cache get","negative":"claude-flow memory retrieve"}
+{"anchor":"Help me list agent","positive":"claude-flow agent list","negative":"agentic-flow model list"}
+{"anchor":"info model","positive":"agentic-flow model info","negative":"ruvector collection info"}
+{"anchor":"I need to search embeddings","positive":"claude-flow embeddings search","negative":"claude-flow memory search"}
+{"anchor":"I need to hybrid search","positive":"agentic-flow search hybrid","negative":"claude-flow memory search"}
+{"anchor":"predict neural","positive":"claude-flow neural predict","negative":"ruvector collection create"}
+{"anchor":"Create a mesh topology swarm with 10 agents","positive":"claude-flow swarm init","negative":"claude-flow hive-mind spawn"}
+{"anchor":"handoff the claims","positive":"claude-flow claims handoff","negative":"agentic-flow embed"}
+{"anchor":"I need collective functionality","positive":"claude-flow hive-mind init","negative":"claude-flow swarm init"}
+{"anchor":"I need a way to get vectors by id","positive":"ruvector vector get","negative":"claude-flow memory retrieve"}
+{"anchor":"Can you create collection?","positive":"ruvector collection create","negative":"claude-flow workflow create"}
+{"anchor":"check agent","positive":"claude-flow agent status","negative":"ruvector quantize info"}
+{"anchor":"How do I create a snapshot of collection?","positive":"ruvector snapshot create","negative":"claude-flow session save"}
+{"anchor":"info collection","positive":"ruvector collection info","negative":"agentic-flow cache stats"}
+{"anchor":"Can you metrics hooks?","positive":"claude-flow hooks metrics","negative":"ruvector index stats"}
+{"anchor":"Help me run pipeline","positive":"agentic-flow pipeline run","negative":"claude-flow workflow execute"}
+{"anchor":"I want to k-nearest neighbor search","positive":"ruvector search knn","negative":"agentic-flow search nearest"}
+{"anchor":"list session","positive":"claude-flow session list","negative":"claude-flow agent list"}
+{"anchor":"Rebuild search index after updates","positive":"ruvector index rebuild","negative":"claude-flow hooks pretrain"}
+{"anchor":"create the workflow","positive":"claude-flow workflow create","negative":"claude-flow task create"}
+{"anchor":"get the vector","positive":"ruvector vector get","negative":"claude-flow memory retrieve"}
+{"anchor":"Get the stored pattern for authentication","positive":"claude-flow memory retrieve","negative":"ruvector vector get"}
+{"anchor":"How do I quantize model for faster inference?","positive":"agentic-flow model quantize","negative":"ruvector quantize apply"}
+{"anchor":"I want to semantic search across stored embeddings","positive":"claude-flow embeddings search","negative":"claude-flow memory search"}
+{"anchor":"collective in hive-mind","positive":"claude-flow hive-mind init","negative":"claude-flow swarm init"}
+{"anchor":"Can you list model?","positive":"agentic-flow model list","negative":"claude-flow agent list"}
+{"anchor":"I want to list all active agents","positive":"claude-flow agent list","negative":"claude-flow memory list"}
+{"anchor":"I need to list model","positive":"agentic-flow model list","negative":"claude-flow task list"}
+{"anchor":"Can you list model?","positive":"agentic-flow model list","negative":"ruvector collection list"}
+{"anchor":"How do I semantic search across stored embeddings?","positive":"claude-flow embeddings search","negative":"agentic-flow search hybrid"}
+{"anchor":"Help me find similar search","positive":"ruvector search knn","negative":"claude-flow memory search"}
+{"anchor":"I need to list agent","positive":"claude-flow agent list","negative":"claude-flow memory list"}
+{"anchor":"I want to list available models","positive":"agentic-flow model list","negative":"claude-flow memory list"}
+{"anchor":"I need to init swarm","positive":"claude-flow swarm init","negative":"claude-flow hive-mind init"}
+{"anchor":"Help me check workflow","positive":"claude-flow workflow status","negative":"claude-flow swarm status"}
+{"anchor":"I need a way to create a new task","positive":"claude-flow task create","negative":"ruvector collection create"}
+{"anchor":"I need to complete task","positive":"claude-flow task complete","negative":"agentic-flow embed"}
+{"anchor":"Can you list snapshot?","positive":"ruvector snapshot list","negative":"claude-flow task list"}
+{"anchor":"I want to show task","positive":"claude-flow task list","negative":"agentic-flow model list"}
+{"anchor":"I need to create workflow","positive":"claude-flow workflow create","negative":"agentic-flow pipeline create"}
+{"anchor":"How do I list all tasks?","positive":"claude-flow task list","negative":"claude-flow memory list"}
+{"anchor":"How do I release a claim on an issue?","positive":"claude-flow claims release","negative":"ruvector collection create"}
+{"anchor":"I need a way to list memory entries","positive":"claude-flow memory list","negative":"claude-flow task list"}
+{"anchor":"Get information about the collection","positive":"ruvector collection info","negative":"agentic-flow model info"}
+{"anchor":"find similar search","positive":"ruvector search knn","negative":"agentic-flow search nearest"}
+{"anchor":"I need to check agent","positive":"claude-flow agent status","negative":"claude-flow workflow status"}
+{"anchor":"Optimize index for query performance","positive":"ruvector index optimize","negative":"claude-flow performance optimize"}
+{"anchor":"I need to store memory","positive":"claude-flow memory store","negative":"agentic-flow cache set"}
+{"anchor":"I need a way to k-nearest neighbor search","positive":"ruvector search knn","negative":"claude-flow memory search"}
+{"anchor":"How do I dispatch a background worker?","positive":"claude-flow hooks worker dispatch","negative":"agentic-flow embed"}
+{"anchor":"Help me list snapshot","positive":"ruvector snapshot list","negative":"claude-flow agent list"}
+{"anchor":"How do I handoff issue to another claimant?","positive":"claude-flow claims handoff","negative":"ruvector collection create"}
+{"anchor":"Quantize the model for faster inference","positive":"agentic-flow model quantize","negative":"ruvector quantize apply"}
+{"anchor":"Help me list model","positive":"agentic-flow model list","negative":"claude-flow agent list"}
+{"anchor":"Can you list agent?","positive":"claude-flow agent list","negative":"claude-flow memory list"}
+{"anchor":"I need a way to list memory entries","positive":"claude-flow memory list","negative":"ruvector collection list"}
+{"anchor":"Batch embed multiple documents efficiently","positive":"agentic-flow batch-embed","negative":"ruvector search batch"}
+{"anchor":"Can you info collection?","positive":"ruvector collection info","negative":"agentic-flow model info"}
+{"anchor":"I want to list available snapshots","positive":"ruvector snapshot list","negative":"claude-flow agent list"}
+{"anchor":"filter search","positive":"ruvector search filter","negative":"agentic-flow search hybrid"}
+{"anchor":"optimize the index","positive":"ruvector index optimize","negative":"claude-flow performance optimize"}
+{"anchor":"How do I retrieve embedding from cache?","positive":"agentic-flow cache get","negative":"ruvector vector get"}
+{"anchor":"set cache","positive":"agentic-flow cache set","negative":"ruvector vector insert"}
+{"anchor":"Configure HNSW parameters for accuracy","positive":"ruvector index build","negative":"ruvector quantize apply"}
+{"anchor":"I need execute functionality","positive":"agentic-flow pipeline run","negative":"claude-flow workflow execute"}
+{"anchor":"Can you delete collection?","positive":"ruvector collection delete","negative":"claude-flow memory delete"}
+{"anchor":"Store API response for later retrieval","positive":"claude-flow memory store","negative":"ruvector vector insert"}
+{"anchor":"Create a snapshot backup of vectors","positive":"ruvector snapshot create","negative":"claude-flow session save"}
+{"anchor":"I need combined functionality","positive":"agentic-flow search hybrid","negative":"claude-flow memory search"}
+{"anchor":"How do I list memory entries?","positive":"claude-flow memory list","negative":"ruvector collection list"}
+{"anchor":"How do I list all collections?","positive":"ruvector collection list","negative":"claude-flow memory list"}
+{"anchor":"Can you post-task hooks?","positive":"claude-flow hooks post-task","negative":"agentic-flow embed"}
+{"anchor":"neighbors in search","positive":"agentic-flow search nearest","negative":"ruvector search knn"}
+{"anchor":"I want to get cache statistics","positive":"agentic-flow cache stats","negative":"ruvector index stats"}
+{"anchor":"Can you check agent?","positive":"claude-flow agent status","negative":"claude-flow workflow status"}
+{"anchor":"distance in similarity","positive":"agentic-flow similarity","negative":"claude-flow embeddings compare"}
+{"anchor":"I need a way to list all tasks","positive":"claude-flow task list","negative":"ruvector collection list"}
+{"anchor":"I need to list session","positive":"claude-flow session list","negative":"claude-flow memory list"}
+{"anchor":"How do I create a new processing pipeline?","positive":"agentic-flow pipeline create","negative":"claude-flow swarm init"}
+{"anchor":"I want to store a value in memory with optional namespace","positive":"claude-flow memory store","negative":"agentic-flow cache set"}
+{"anchor":"I need to list snapshot","positive":"ruvector snapshot list","negative":"claude-flow task list"}
+{"anchor":"run the pipeline","positive":"agentic-flow pipeline run","negative":"claude-flow workflow execute"}
+{"anchor":"I need to search memory","positive":"claude-flow memory search","negative":"agentic-flow search hybrid"}
+{"anchor":"I need a way to list all collections","positive":"ruvector collection list","negative":"agentic-flow model list"}
+{"anchor":"list the model","positive":"agentic-flow model list","negative":"ruvector snapshot list"}
+{"anchor":"Query the vector database for similar items","positive":"ruvector search knn","negative":"claude-flow memory search"}
+{"anchor":"Find similar embeddings in the collection","positive":"ruvector search knn","negative":"claude-flow embeddings search"}
+{"anchor":"Can you delete memory?","positive":"claude-flow memory delete","negative":"ruvector vector delete"}
+{"anchor":"List all active agents in the system","positive":"claude-flow agent list","negative":"ruvector collection list"}
+{"anchor":"list the memory","positive":"claude-flow memory list","negative":"ruvector collection list"}
+{"anchor":"Spawn a coder agent to implement features","positive":"claude-flow agent spawn","negative":"claude-flow task create"}
+{"anchor":"I need a way to gracefully shutdown the swarm","positive":"claude-flow swarm shutdown","negative":"ruvector collection create"}
+{"anchor":"Create a new workflow for code review","positive":"claude-flow workflow create","negative":"agentic-flow pipeline create"}
+{"anchor":"I need a way to quantize model for faster inference","positive":"agentic-flow model quantize","negative":"ruvector quantize apply"}
+{"anchor":"I need a way to semantic vector search in memory","positive":"claude-flow memory search","negative":"claude-flow embeddings search"}
+{"anchor":"info collection","positive":"ruvector collection info","negative":"claude-flow agent status"}
+{"anchor":"I want to range search within distance threshold","positive":"agentic-flow search range","negative":"claude-flow swarm init"}
+{"anchor":"list model","positive":"agentic-flow model list","negative":"claude-flow task list"}
+{"anchor":"I want to remove vector","positive":"ruvector vector delete","negative":"ruvector collection delete"}
+{"anchor":"I want to list all active agents","positive":"claude-flow agent list","negative":"ruvector snapshot list"}
+{"anchor":"create the collection","positive":"ruvector collection create","negative":"claude-flow task create"}
+{"anchor":"I want to list memory entries","positive":"claude-flow memory list","negative":"claude-flow agent list"}
+{"anchor":"I need workers functionality","positive":"claude-flow hive-mind spawn","negative":"claude-flow agent spawn"}
+{"anchor":"How do I k-nearest neighbor search?","positive":"ruvector search knn","negative":"claude-flow memory search"}
+{"anchor":"I want to list available models","positive":"agentic-flow model list","negative":"claude-flow task list"}
+{"anchor":"Release my claim on this issue","positive":"claude-flow claims release","negative":"claude-flow task complete"}
+{"anchor":"I want to add vector","positive":"ruvector vector insert","negative":"agentic-flow cache set"}
+{"anchor":"I need a way to compute similarity between embeddings","positive":"agentic-flow similarity","negative":"claude-flow embeddings compare"}
+{"anchor":"I want to manage neural patterns","positive":"claude-flow neural patterns","negative":"agentic-flow embed"}
+{"anchor":"Help me create pipeline","positive":"agentic-flow pipeline create","negative":"claude-flow swarm init"}
+{"anchor":"I want to list all tasks","positive":"claude-flow task list","negative":"claude-flow agent list"}
+{"anchor":"I want to semantic vector search in memory","positive":"claude-flow memory search","negative":"claude-flow embeddings search"}
+{"anchor":"How do I store a value in memory with optional namespace?","positive":"claude-flow memory store","negative":"agentic-flow cache set"}
+{"anchor":"create the workflow","positive":"claude-flow workflow create","negative":"ruvector collection create"}
+{"anchor":"I want to create a new processing pipeline","positive":"agentic-flow pipeline create","negative":"claude-flow workflow create"}
+{"anchor":"Calculate cosine distance between embeddings","positive":"agentic-flow similarity","negative":"claude-flow embeddings compare"}
+{"anchor":"Get the stored pattern for authentication","positive":"claude-flow memory retrieve","negative":"claude-flow memory search"}
+{"anchor":"I need to find similar search","positive":"ruvector search knn","negative":"agentic-flow search nearest"}
+{"anchor":"Can you spawn hive-mind?","positive":"claude-flow hive-mind spawn","negative":"claude-flow agent spawn"}
+{"anchor":"How do I get collection information?","positive":"ruvector collection info","negative":"ruvector quantize info"}
+{"anchor":"I want to batch embed multiple texts efficiently","positive":"agentic-flow batch-embed","negative":"ruvector search batch"}
+{"anchor":"I need to list task","positive":"claude-flow task list","negative":"claude-flow memory list"}
+{"anchor":"list the snapshot","positive":"ruvector snapshot list","negative":"claude-flow agent list"}
+{"anchor":"How do I list all active agents?","positive":"claude-flow agent list","negative":"agentic-flow model list"}
+{"anchor":"I want to spawn a new agent with specified type","positive":"claude-flow agent spawn","negative":"claude-flow hive-mind spawn"}
+{"anchor":"List available embedding models","positive":"agentic-flow model list","negative":"claude-flow agent list"}
+{"anchor":"list agent","positive":"claude-flow agent list","negative":"ruvector snapshot list"}
+{"anchor":"Help me stats cache","positive":"agentic-flow cache stats","negative":"ruvector collection info"}
+{"anchor":"make snapshot","positive":"ruvector snapshot create","negative":"ruvector collection create"}
+{"anchor":"restore session","positive":"claude-flow session restore","negative":"ruvector snapshot restore"}
+{"anchor":"list model","positive":"agentic-flow model list","negative":"ruvector snapshot list"}
+{"anchor":"I want to show memory","positive":"claude-flow memory list","negative":"ruvector snapshot list"}
+{"anchor":"I want to show memory","positive":"claude-flow memory list","negative":"agentic-flow model list"}
+{"anchor":"I need to similarity","positive":"agentic-flow similarity","negative":"claude-flow embeddings compare"}
+{"anchor":"I want to rebuild existing index","positive":"ruvector index rebuild","negative":"claude-flow swarm init"}
+{"anchor":"Help me list session","positive":"claude-flow session list","negative":"claude-flow task list"}
+{"anchor":"check the swarm","positive":"claude-flow swarm status","negative":"claude-flow agent status"}
+{"anchor":"delete collection","positive":"ruvector collection delete","negative":"ruvector vector delete"}
+{"anchor":"shutdown the swarm","positive":"claude-flow swarm shutdown","negative":"ruvector collection create"}
+{"anchor":"I want to make collection","positive":"ruvector collection create","negative":"claude-flow task create"}
+{"anchor":"Run the CI/CD workflow","positive":"claude-flow workflow execute","negative":"claude-flow task create"}
+{"anchor":"I want to show collection","positive":"ruvector collection list","negative":"agentic-flow model list"}
+{"anchor":"I need to quantize model","positive":"agentic-flow model quantize","negative":"ruvector quantize apply"}
+{"anchor":"How do I create a new vector collection?","positive":"ruvector collection create","negative":"ruvector snapshot create"}
+{"anchor":"How do I retrieve embedding from cache?","positive":"agentic-flow cache get","negative":"claude-flow memory retrieve"}
+{"anchor":"check agent","positive":"claude-flow agent status","negative":"claude-flow workflow status"}
+{"anchor":"Help me batch search","positive":"ruvector search batch","negative":"agentic-flow batch-embed"}
+{"anchor":"I need to handoff claims","positive":"claude-flow claims handoff","negative":"agentic-flow embed"}
+{"anchor":"list the collection","positive":"ruvector collection list","negative":"claude-flow task list"}
+{"anchor":"create task","positive":"claude-flow task create","negative":"claude-flow workflow create"}
+{"anchor":"show agent","positive":"claude-flow agent list","negative":"ruvector snapshot list"}
+{"anchor":"Convert text to numerical vectors using ONNX","positive":"agentic-flow embed","negative":"claude-flow embeddings generate"}
+{"anchor":"Help me delete memory","positive":"claude-flow memory delete","negative":"ruvector vector delete"}
+{"anchor":"Store learned neural patterns","positive":"claude-flow neural patterns","negative":"claude-flow memory store"}
+{"anchor":"Get swarm coordination status","positive":"claude-flow swarm status","negative":"claude-flow agent list"}
+{"anchor":"show agent","positive":"claude-flow agent list","negative":"ruvector collection list"}
+{"anchor":"I need to list session","positive":"claude-flow session list","negative":"claude-flow agent list"}
+{"anchor":"create the task","positive":"claude-flow task create","negative":"claude-flow workflow create"}
+{"anchor":"Help me search memory","positive":"claude-flow memory search","negative":"agentic-flow search hybrid"}
+{"anchor":"I need stats functionality","positive":"ruvector collection info","negative":"agentic-flow cache stats"}
+{"anchor":"store in neural","positive":"claude-flow neural patterns","negative":"agentic-flow embed"}
+{"anchor":"How do I list all active agents?","positive":"claude-flow agent list","negative":"ruvector collection list"}
+{"anchor":"list the collection","positive":"ruvector collection list","negative":"claude-flow memory list"}
+{"anchor":"How do I generate embeddings for text?","positive":"claude-flow embeddings generate","negative":"agentic-flow embed"}
+{"anchor":"I want to create a new vector collection","positive":"ruvector collection create","negative":"claude-flow memory store"}
+{"anchor":"I need load functionality","positive":"ruvector snapshot restore","negative":"claude-flow session restore"}
+{"anchor":"I need to hybrid search","positive":"agentic-flow search hybrid","negative":"claude-flow embeddings search"}
+{"anchor":"I want to delete a vector collection","positive":"ruvector collection delete","negative":"claude-flow memory delete"}
+{"anchor":"I need to info collection","positive":"ruvector collection info","negative":"agentic-flow cache stats"}
+{"anchor":"Help me list agent","positive":"claude-flow agent list","negative":"claude-flow memory list"}
+{"anchor":"I need to retrieve memory","positive":"claude-flow memory retrieve","negative":"ruvector vector get"}
+{"anchor":"remove memory","positive":"claude-flow memory delete","negative":"ruvector vector delete"}
+{"anchor":"I need fetch functionality","positive":"ruvector vector get","negative":"agentic-flow cache get"}
+{"anchor":"Persist session for later continuation","positive":"claude-flow session save","negative":"claude-flow memory store"}
+{"anchor":"I need statistics functionality","positive":"agentic-flow cache stats","negative":"ruvector collection info"}
+{"anchor":"I need initialize functionality","positive":"claude-flow swarm init","negative":"agentic-flow pipeline create"}
+{"anchor":"I want to show collection","positive":"ruvector collection list","negative":"claude-flow memory list"}
+{"anchor":"I want to handoff issue to another claimant","positive":"claude-flow claims handoff","negative":"ruvector collection create"}
+{"anchor":"retrieve the memory","positive":"claude-flow memory retrieve","negative":"ruvector vector get"}
+{"anchor":"Help me create pipeline","positive":"agentic-flow pipeline create","negative":"claude-flow workflow create"}
+{"anchor":"range search","positive":"agentic-flow search range","negative":"claude-flow swarm init"}
+{"anchor":"I want to remove collection","positive":"ruvector collection delete","negative":"ruvector vector delete"}
+{"anchor":"Help me get vector","positive":"ruvector vector get","negative":"agentic-flow cache get"}
+{"anchor":"Configure swarm consensus using raft protocol","positive":"claude-flow swarm init","negative":"claude-flow hive-mind consensus"}
+{"anchor":"Can you create collection?","positive":"ruvector collection create","negative":"ruvector snapshot create"}
+{"anchor":"get workflow","positive":"claude-flow workflow status","negative":"claude-flow swarm status"}
+{"anchor":"Restore vectors from backup","positive":"ruvector snapshot restore","negative":"claude-flow session restore"}
+{"anchor":"How do I list memory entries?","positive":"claude-flow memory list","negative":"claude-flow task list"}
+{"anchor":"Scan input for security threats","positive":"claude-flow aidefence scan","negative":"claude-flow hooks pre-task"}
+{"anchor":"How do I get vectors by id?","positive":"ruvector vector get","negative":"agentic-flow cache get"}
+{"anchor":"Can you check workflow?","positive":"claude-flow workflow status","negative":"claude-flow agent status"}
+{"anchor":"I need to restore snapshot","positive":"ruvector snapshot restore","negative":"claude-flow session restore"}
+{"anchor":"I need to search memory","positive":"claude-flow memory search","negative":"ruvector search knn"}
+{"anchor":"Can you restore session?","positive":"claude-flow session restore","negative":"ruvector snapshot restore"}
+{"anchor":"info the model","positive":"agentic-flow model info","negative":"claude-flow agent status"}
+{"anchor":"I want to list memory entries","positive":"claude-flow memory list","negative":"ruvector collection list"}
+{"anchor":"list the agent","positive":"claude-flow agent list","negative":"ruvector snapshot list"}
+{"anchor":"Help me rebuild index","positive":"ruvector index rebuild","negative":"agentic-flow embed"}
+{"anchor":"Help me save session","positive":"claude-flow session save","negative":"ruvector snapshot create"}
+{"anchor":"I want to save current session state","positive":"claude-flow session save","negative":"ruvector snapshot create"}
+{"anchor":"I want to list all tasks","positive":"claude-flow task list","negative":"ruvector snapshot list"}
+{"anchor":"store in cache","positive":"agentic-flow cache set","negative":"ruvector vector insert"}
+{"anchor":"I need a way to delete vectors from collection","positive":"ruvector vector delete","negative":"ruvector collection delete"}
+{"anchor":"Can you optimize index?","positive":"ruvector index optimize","negative":"claude-flow performance optimize"}
+{"anchor":"Can you optimize performance?","positive":"claude-flow performance optimize","negative":"ruvector index optimize"}
+{"anchor":"Set up a database for embedding storage","positive":"ruvector collection create","negative":"agentic-flow cache set"}
+{"anchor":"filter the search","positive":"ruvector search filter","negative":"agentic-flow search hybrid"}
+{"anchor":"show model","positive":"agentic-flow model list","negative":"claude-flow task list"}
+{"anchor":"I need multiple functionality","positive":"ruvector search batch","negative":"agentic-flow batch-embed"}
+{"anchor":"delete the memory","positive":"claude-flow memory delete","negative":"ruvector collection delete"}
+{"anchor":"stop in swarm","positive":"claude-flow swarm shutdown","negative":"ruvector collection create"}
+{"anchor":"Generate embeddings for these documents","positive":"agentic-flow embed","negative":"claude-flow embeddings generate"}
+{"anchor":"How do I apply quantization to collection?","positive":"ruvector quantize apply","negative":"agentic-flow model quantize"}
+{"anchor":"create collection","positive":"ruvector collection create","negative":"claude-flow task create"}
+{"anchor":"I need a way to list memory entries","positive":"claude-flow memory list","negative":"ruvector snapshot list"}
+{"anchor":"How do I get vectors by id?","positive":"ruvector vector get","negative":"claude-flow memory retrieve"}
+{"anchor":"I need to create collection","positive":"ruvector collection create","negative":"ruvector snapshot create"}
+{"anchor":"How do I manage neural patterns?","positive":"claude-flow neural patterns","negative":"ruvector collection create"}
+{"anchor":"I want to make collection","positive":"ruvector collection create","negative":"claude-flow memory store"}
+{"anchor":"Can you insert vector?","positive":"ruvector vector insert","negative":"agentic-flow cache set"}
+{"anchor":"Can you quantize model?","positive":"agentic-flow model quantize","negative":"ruvector quantize apply"}
+{"anchor":"create the snapshot","positive":"ruvector snapshot create","negative":"claude-flow session save"}
+{"anchor":"delete the vector","positive":"ruvector vector delete","negative":"ruvector collection delete"}
+{"anchor":"I need a way to list available models","positive":"agentic-flow model list","negative":"claude-flow agent list"}
+{"anchor":"I want to get agent","positive":"claude-flow agent status","negative":"ruvector quantize info"}
+{"anchor":"stats in collection","positive":"ruvector collection info","negative":"ruvector quantize info"}
+{"anchor":"How do I list available models?","positive":"agentic-flow model list","negative":"claude-flow agent list"}
+{"anchor":"I need a way to semantic search across stored embeddings","positive":"claude-flow embeddings search","negative":"claude-flow memory search"}
+{"anchor":"How do I get model information and metadata?","positive":"agentic-flow model info","negative":"ruvector quantize info"}
+{"anchor":"Save this configuration for reuse","positive":"claude-flow memory store","negative":"claude-flow session save"}
+{"anchor":"I need a way to record task completion for learning","positive":"claude-flow hooks post-task","negative":"ruvector collection create"}
+{"anchor":"How do I get current swarm status and agent health?","positive":"claude-flow swarm status","negative":"claude-flow workflow status"}
+{"anchor":"statistics in cache","positive":"agentic-flow cache stats","negative":"ruvector index stats"}
+{"anchor":"Can you store memory?","positive":"claude-flow memory store","negative":"agentic-flow cache set"}
+{"anchor":"hybrid the search","positive":"agentic-flow search hybrid","negative":"claude-flow embeddings search"}
+{"anchor":"I need to get vector","positive":"ruvector vector get","negative":"claude-flow memory retrieve"}
+{"anchor":"How do I initialize a swarm with specified topology?","positive":"claude-flow swarm init","negative":"agentic-flow pipeline create"}
+{"anchor":"retrieve memory","positive":"claude-flow memory retrieve","negative":"agentic-flow cache get"}
+{"anchor":"Help me stop agent","positive":"claude-flow agent terminate","negative":"agentic-flow embed"}
+{"anchor":"How do I filtered vector search with metadata?","positive":"ruvector search filter","negative":"agentic-flow search hybrid"}
+{"anchor":"set cache","positive":"agentic-flow cache set","negative":"claude-flow memory store"}
+{"anchor":"I need a way to restore a saved session","positive":"claude-flow session restore","negative":"ruvector snapshot restore"}
+{"anchor":"Log task before starting","positive":"claude-flow hooks pre-task","negative":"claude-flow task create"}
+{"anchor":"Help me post-task hooks","positive":"claude-flow hooks post-task","negative":"ruvector collection create"}
+{"anchor":"radius in search","positive":"agentic-flow search range","negative":"claude-flow swarm init"}
+{"anchor":"Can you create collection?","positive":"ruvector collection create","negative":"claude-flow memory store"}
+{"anchor":"stats index","positive":"ruvector index stats","negative":"claude-flow hooks metrics"}
+{"anchor":"How do I store a value in memory with optional namespace?","positive":"claude-flow memory store","negative":"ruvector collection create"}
+{"anchor":"How do I store embedding in cache?","positive":"agentic-flow cache set","negative":"ruvector vector insert"}
+{"anchor":"list agent","positive":"claude-flow agent list","negative":"claude-flow memory list"}
+{"anchor":"How do I delete a memory entry?","positive":"claude-flow memory delete","negative":"ruvector collection delete"}
+{"anchor":"I need to list agent","positive":"claude-flow agent list","negative":"agentic-flow model list"}
+{"anchor":"I need store functionality","positive":"agentic-flow cache set","negative":"claude-flow memory store"}
+{"anchor":"How do I initialize a swarm with specified topology?","positive":"claude-flow swarm init","negative":"claude-flow hive-mind init"}
+{"anchor":"I need a way to get model information and metadata","positive":"agentic-flow model info","negative":"claude-flow agent status"}
+{"anchor":"I want to list all active agents","positive":"claude-flow agent list","negative":"ruvector collection list"}
+{"anchor":"apply quantize","positive":"ruvector quantize apply","negative":"agentic-flow model quantize"}
+{"anchor":"I need to batch-embed","positive":"agentic-flow batch-embed","negative":"ruvector search batch"}
+{"anchor":"stats the cache","positive":"agentic-flow cache stats","negative":"ruvector index stats"}
+{"anchor":"init the hive-mind","positive":"claude-flow hive-mind init","negative":"claude-flow swarm init"}
+{"anchor":"I want to filtered vector search with metadata","positive":"ruvector search filter","negative":"agentic-flow search hybrid"}
+{"anchor":"list model","positive":"agentic-flow model list","negative":"ruvector collection list"}
+{"anchor":"I need a way to list all collections","positive":"ruvector collection list","negative":"claude-flow agent list"}
+{"anchor":"Create search index for vectors","positive":"ruvector index build","negative":"claude-flow neural train"}
+{"anchor":"I need info functionality","positive":"ruvector index stats","negative":"claude-flow hooks metrics"}
+{"anchor":"I want to show collection","positive":"ruvector collection list","negative":"claude-flow agent list"}
+{"anchor":"I need a way to initialize a swarm with specified topology","positive":"claude-flow swarm init","negative":"claude-flow hive-mind init"}
+{"anchor":"I need to find similar search","positive":"ruvector search knn","negative":"claude-flow memory search"}
+{"anchor":"I want to show agent","positive":"claude-flow agent list","negative":"claude-flow task list"}
+{"anchor":"I want to make workflow","positive":"claude-flow workflow create","negative":"ruvector collection create"}
+{"anchor":"remove collection","positive":"ruvector collection delete","negative":"ruvector vector delete"}
+{"anchor":"I need a way to list available models","positive":"agentic-flow model list","negative":"claude-flow task list"}
+{"anchor":"I want to get status of a specific agent","positive":"claude-flow agent status","negative":"ruvector collection info"}
+{"anchor":"I want to list all collections","positive":"ruvector collection list","negative":"claude-flow task list"}
+{"anchor":"Route this task to the optimal agent","positive":"claude-flow hooks route","negative":"claude-flow hooks pre-task"}
+{"anchor":"Help me list collection","positive":"ruvector collection list","negative":"agentic-flow model list"}
+{"anchor":"I need compress functionality","positive":"agentic-flow model quantize","negative":"ruvector quantize apply"}
+{"anchor":"I need to stats index","positive":"ruvector index stats","negative":"agentic-flow cache stats"}
+{"anchor":"list the agent","positive":"claude-flow agent list","negative":"claude-flow memory list"}
+{"anchor":"Delete the old vector collection","positive":"ruvector collection delete","negative":"claude-flow memory delete"}
+{"anchor":"similarity in embeddings","positive":"claude-flow embeddings compare","negative":"agentic-flow similarity"}
+{"anchor":"Can you info model?","positive":"agentic-flow model info","negative":"ruvector collection info"}
+{"anchor":"Help me handoff claims","positive":"claude-flow claims handoff","negative":"ruvector collection create"}
+{"anchor":"Can you patterns neural?","positive":"claude-flow neural patterns","negative":"agentic-flow embed"}
+{"anchor":"Can you create pipeline?","positive":"agentic-flow pipeline create","negative":"claude-flow workflow create"}
+{"anchor":"Help me store memory","positive":"claude-flow memory store","negative":"agentic-flow cache set"}
+{"anchor":"I want to list available models","positive":"agentic-flow model list","negative":"claude-flow agent list"}
+{"anchor":"Can you delete vector?","positive":"ruvector vector delete","negative":"ruvector collection delete"}
+{"anchor":"Check workflow execution status","positive":"claude-flow workflow status","negative":"claude-flow task status"}
+{"anchor":"I want to show session","positive":"claude-flow session list","negative":"claude-flow memory list"}
+{"anchor":"I need a way to visualize pipeline structure","positive":"agentic-flow pipeline visualize","negative":"claude-flow swarm init"}
+{"anchor":"stats the index","positive":"ruvector index stats","negative":"agentic-flow cache stats"}
+{"anchor":"Delete vectors by ID","positive":"ruvector vector delete","negative":"claude-flow memory delete"}
+{"anchor":"I want to get workflow","positive":"claude-flow workflow status","negative":"claude-flow agent status"}
+{"anchor":"I need a way to get current swarm status and agent health","positive":"claude-flow swarm status","negative":"claude-flow agent status"}
+{"anchor":"find memory","positive":"claude-flow memory search","negative":"ruvector search knn"}
+{"anchor":"I need a way to delete a vector collection","positive":"ruvector collection delete","negative":"ruvector vector delete"}
+{"anchor":"I want to list memory entries","positive":"claude-flow memory list","negative":"ruvector snapshot list"}
+{"anchor":"set the cache","positive":"agentic-flow cache set","negative":"ruvector vector insert"}
+{"anchor":"list the agent","positive":"claude-flow agent list","negative":"ruvector collection list"}
+{"anchor":"Create a task for the coder agent","positive":"claude-flow task create","negative":"claude-flow agent spawn"}
+{"anchor":"I want to search for nearest search","positive":"ruvector search knn","negative":"claude-flow memory search"}
+{"anchor":"I need to list task","positive":"claude-flow task list","negative":"agentic-flow model list"}
+{"anchor":"I need a way to list available models","positive":"agentic-flow model list","negative":"ruvector snapshot list"}
+{"anchor":"I want to list available models","positive":"agentic-flow model list","negative":"ruvector snapshot list"}
+{"anchor":"quantize model","positive":"agentic-flow model quantize","negative":"ruvector quantize apply"}
+{"anchor":"I need a way to view claims board","positive":"claude-flow claims board","negative":"agentic-flow embed"}
+{"anchor":"How do I generate embeddings for text using onnx models?","positive":"agentic-flow embed","negative":"claude-flow embeddings generate"}
+{"anchor":"How do I list saved sessions?","positive":"claude-flow session list","negative":"claude-flow agent list"}
+{"anchor":"Upsert vectors with metadata","positive":"ruvector vector insert","negative":"agentic-flow cache set"}
+{"anchor":"make workflow","positive":"claude-flow workflow create","negative":"claude-flow task create"}
+{"anchor":"I need to list snapshot","positive":"ruvector snapshot list","negative":"agentic-flow model list"}
+{"anchor":"Can you list session?","positive":"claude-flow session list","negative":"claude-flow agent list"}
+{"anchor":"list task","positive":"claude-flow task list","negative":"ruvector snapshot list"}
+{"anchor":"execute in pipeline","positive":"agentic-flow pipeline run","negative":"claude-flow workflow execute"}
+{"anchor":"I want to get status of a specific agent","positive":"claude-flow agent status","negative":"agentic-flow model info"}
+{"anchor":"I need a way to list available models","positive":"agentic-flow model list","negative":"claude-flow memory list"}
+{"anchor":"How do I batch embed multiple texts efficiently?","positive":"agentic-flow batch-embed","negative":"ruvector search batch"}
+{"anchor":"search the memory","positive":"claude-flow memory search","negative":"ruvector search knn"}
+{"anchor":"I need to info collection","positive":"ruvector collection info","negative":"claude-flow agent status"}
+{"anchor":"list the snapshot","positive":"ruvector snapshot list","negative":"agentic-flow model list"}
+{"anchor":"list the snapshot","positive":"ruvector snapshot list","negative":"claude-flow memory list"}
+{"anchor":"How do I list all active agents?","positive":"claude-flow agent list","negative":"ruvector snapshot list"}
+{"anchor":"I need to delete memory","positive":"claude-flow memory delete","negative":"ruvector collection delete"}
+{"anchor":"I need to init hive-mind","positive":"claude-flow hive-mind init","negative":"claude-flow swarm init"}
+{"anchor":"list the task","positive":"claude-flow task list","negative":"claude-flow memory list"}
+{"anchor":"find memory","positive":"claude-flow memory search","negative":"agentic-flow search hybrid"}
+{"anchor":"Fetch previously saved configuration","positive":"claude-flow memory retrieve","negative":"claude-flow session restore"}
+{"anchor":"Can you list memory?","positive":"claude-flow memory list","negative":"ruvector snapshot list"}
+{"anchor":"Can you complete task?","positive":"claude-flow task complete","negative":"ruvector collection create"}
+{"anchor":"Train neural patterns for better routing","positive":"claude-flow neural train","negative":"claude-flow hooks pretrain"}
+{"anchor":"info collection","positive":"ruvector collection info","negative":"ruvector quantize info"}
+{"anchor":"Help me list memory","positive":"claude-flow memory list","negative":"ruvector collection list"}
+{"anchor":"I need completion functionality","positive":"claude-flow hooks post-task","negative":"ruvector collection create"}
+{"anchor":"Help me info model","positive":"agentic-flow model info","negative":"ruvector collection info"}
+{"anchor":"embed in embeddings","positive":"claude-flow embeddings generate","negative":"agentic-flow embed"}
+{"anchor":"I need flush functionality","positive":"agentic-flow cache clear","negative":"ruvector collection create"}
+{"anchor":"Help me list snapshot","positive":"ruvector snapshot list","negative":"ruvector collection list"}
+{"anchor":"I want to quantize model for faster inference","positive":"agentic-flow model quantize","negative":"ruvector quantize apply"}
+{"anchor":"remove vector","positive":"ruvector vector delete","negative":"claude-flow memory delete"}
+{"anchor":"Help me get vector","positive":"ruvector vector get","negative":"claude-flow memory retrieve"}
+{"anchor":"stats cache","positive":"agentic-flow cache stats","negative":"ruvector index stats"}
+{"anchor":"I want to get agent","positive":"claude-flow agent status","negative":"claude-flow swarm status"}
+{"anchor":"Remember this debugging solution","positive":"claude-flow memory store","negative":"agentic-flow cache set"}
+{"anchor":"Help me hybrid search","positive":"agentic-flow search hybrid","negative":"claude-flow embeddings search"}
+{"anchor":"compare the embeddings","positive":"claude-flow embeddings compare","negative":"agentic-flow similarity"}
+{"anchor":"batch in batch-embed","positive":"agentic-flow batch-embed","negative":"ruvector search batch"}
+{"anchor":"I want to remove collection","positive":"ruvector collection delete","negative":"claude-flow memory delete"}
+{"anchor":"I need a way to create a new vector collection","positive":"ruvector collection create","negative":"ruvector snapshot create"}
+{"anchor":"range the search","positive":"agentic-flow search range","negative":"ruvector collection create"}
+{"anchor":"batch-embed","positive":"agentic-flow batch-embed","negative":"ruvector search batch"}
+{"anchor":"I need to predict neural","positive":"claude-flow neural predict","negative":"ruvector collection create"}
+{"anchor":"show snapshot","positive":"ruvector snapshot list","negative":"claude-flow memory list"}
+{"anchor":"Define a multi-step workflow","positive":"claude-flow workflow create","negative":"agentic-flow pipeline create"}
+{"anchor":"Look up related patterns in storage","positive":"claude-flow memory search","negative":"ruvector search knn"}
+{"anchor":"list the snapshot","positive":"ruvector snapshot list","negative":"ruvector collection list"}
+{"anchor":"create workflow","positive":"claude-flow workflow create","negative":"ruvector collection create"}
+{"anchor":"I want to get status of a specific agent","positive":"claude-flow agent status","negative":"claude-flow workflow status"}
+{"anchor":"I want to get swarm","positive":"claude-flow swarm status","negative":"claude-flow agent status"}
+{"anchor":"info in index","positive":"ruvector index stats","negative":"claude-flow hooks metrics"}
+{"anchor":"Can you list task?","positive":"claude-flow task list","negative":"claude-flow memory list"}
+{"anchor":"I need batch functionality","positive":"agentic-flow batch-embed","negative":"ruvector search batch"}
+{"anchor":"I want to get collection information","positive":"ruvector collection info","negative":"agentic-flow model info"}
+{"anchor":"I need to info collection","positive":"ruvector collection info","negative":"agentic-flow model info"}
+{"anchor":"Dispatch a background worker for optimization","positive":"claude-flow hooks worker dispatch","negative":"claude-flow agent spawn"}
+{"anchor":"Check if input is safe","positive":"claude-flow aidefence is_safe","negative":"claude-flow aidefence scan"}
+{"anchor":"I want to get vectors by id","positive":"ruvector vector get","negative":"agentic-flow cache get"}
+{"anchor":"Can you info collection?","positive":"ruvector collection info","negative":"agentic-flow cache stats"}
+{"anchor":"I need a way to optimize index for search performance","positive":"ruvector index optimize","negative":"claude-flow performance optimize"}
+{"anchor":"How do I get workflow execution status?","positive":"claude-flow workflow status","negative":"claude-flow swarm status"}
+{"anchor":"I want to show session","positive":"claude-flow session list","negative":"claude-flow agent list"}
+{"anchor":"stats cache","positive":"agentic-flow cache stats","negative":"ruvector collection info"}
+{"anchor":"I want to show task","positive":"claude-flow task list","negative":"ruvector snapshot list"}
+{"anchor":"I need a way to create a new workflow","positive":"claude-flow workflow create","negative":"ruvector collection create"}
+{"anchor":"I need a way to apply quantization to collection","positive":"ruvector quantize apply","negative":"agentic-flow model quantize"}
+{"anchor":"I need a way to execute a pipeline with input data","positive":"agentic-flow pipeline run","negative":"claude-flow workflow execute"}
+{"anchor":"Can you save session?","positive":"claude-flow session save","negative":"ruvector snapshot create"}
+{"anchor":"Help me visualize pipeline","positive":"agentic-flow pipeline visualize","negative":"ruvector collection create"}
+{"anchor":"info the collection","positive":"ruvector collection info","negative":"agentic-flow cache stats"}
+{"anchor":"show collection","positive":"ruvector collection list","negative":"claude-flow memory list"}
+{"anchor":"Can you check swarm?","positive":"claude-flow swarm status","negative":"claude-flow agent status"}
+{"anchor":"I need to rebuild index","positive":"ruvector index rebuild","negative":"agentic-flow embed"}
+{"anchor":"remove memory","positive":"claude-flow memory delete","negative":"ruvector collection delete"}
+{"anchor":"vectorize embed","positive":"agentic-flow embed","negative":"claude-flow embeddings generate"}
+{"anchor":"How do I compute similarity between embeddings?","positive":"agentic-flow similarity","negative":"claude-flow embeddings compare"}
+{"anchor":"Help me list memory","positive":"claude-flow memory list","negative":"claude-flow agent list"}
+{"anchor":"done in task","positive":"claude-flow task complete","negative":"agentic-flow embed"}
+{"anchor":"Search vectors with metadata filters","positive":"ruvector search filter","negative":"agentic-flow search hybrid"}
+{"anchor":"I need to set cache","positive":"agentic-flow cache set","negative":"ruvector vector insert"}
+{"anchor":"Produce semantic embeddings from descriptions","positive":"agentic-flow embed","negative":"claude-flow embeddings generate"}
+{"anchor":"show task","positive":"claude-flow task list","negative":"ruvector snapshot list"}
+{"anchor":"How do I visualize pipeline structure?","positive":"agentic-flow pipeline visualize","negative":"claude-flow swarm init"}
+{"anchor":"store in cache","positive":"agentic-flow cache set","negative":"claude-flow memory store"}
+{"anchor":"I need a way to batch embed multiple texts efficiently","positive":"agentic-flow batch-embed","negative":"ruvector search batch"}
+{"anchor":"How do I range search within distance threshold?","positive":"agentic-flow search range","negative":"claude-flow swarm init"}
+{"anchor":"How do I create a new task?","positive":"claude-flow task create","negative":"claude-flow workflow create"}
+{"anchor":"Can you list task?","positive":"claude-flow task list","negative":"ruvector collection list"}
+{"anchor":"Claim this issue for work","positive":"claude-flow claims claim","negative":"claude-flow task create"}
+{"anchor":"I want to show task","positive":"claude-flow task list","negative":"claude-flow memory list"}
+{"anchor":"info the quantize","positive":"ruvector quantize info","negative":"agentic-flow model info"}
+{"anchor":"Help me list task","positive":"claude-flow task list","negative":"agentic-flow model list"}
+{"anchor":"I need to spawn hive-mind","positive":"claude-flow hive-mind spawn","negative":"claude-flow agent spawn"}
+{"anchor":"find memory","positive":"claude-flow memory search","negative":"claude-flow embeddings search"}
+{"anchor":"list the session","positive":"claude-flow session list","negative":"claude-flow memory list"}
+{"anchor":"list agent","positive":"claude-flow agent list","negative":"ruvector collection list"}
+{"anchor":"How do I get workflow execution status?","positive":"claude-flow workflow status","negative":"claude-flow agent status"}
+{"anchor":"I need to delete collection","positive":"ruvector collection delete","negative":"ruvector vector delete"}
+{"anchor":"list snapshot","positive":"ruvector snapshot list","negative":"claude-flow agent list"}
+{"anchor":"I want to get quantization info","positive":"ruvector quantize info","negative":"ruvector collection info"}
+{"anchor":"How do I make predictions using neural model?","positive":"claude-flow neural predict","negative":"agentic-flow embed"}
+{"anchor":"Pre-train routing model on repository","positive":"claude-flow hooks pretrain","negative":"claude-flow neural train"}
+{"anchor":"How do I list available models?","positive":"agentic-flow model list","negative":"claude-flow memory list"}
+{"anchor":"Track metrics from completed tasks","positive":"claude-flow hooks metrics","negative":"claude-flow performance benchmark"}
+{"anchor":"info the collection","positive":"ruvector collection info","negative":"ruvector quantize info"}
+{"anchor":"Optimize for lower latency","positive":"claude-flow performance optimize","negative":"ruvector index optimize"}
+{"anchor":"I need to create snapshot","positive":"ruvector snapshot create","negative":"claude-flow session save"}
+{"anchor":"Help me info quantize","positive":"ruvector quantize info","negative":"ruvector collection info"}
+{"anchor":"I need to retrieve memory","positive":"claude-flow memory retrieve","negative":"agentic-flow cache get"}
+{"anchor":"Can you list memory?","positive":"claude-flow memory list","negative":"agentic-flow model list"}
+{"anchor":"Help me shutdown swarm","positive":"claude-flow swarm shutdown","negative":"agentic-flow embed"}
+{"anchor":"How do I execute a pipeline with input data?","positive":"agentic-flow pipeline run","negative":"claude-flow workflow execute"}
+{"anchor":"I want to remove memory","positive":"claude-flow memory delete","negative":"ruvector collection delete"}
+{"anchor":"How do I terminate a specific agent?","positive":"claude-flow agent terminate","negative":"ruvector collection create"}
+{"anchor":"board the claims","positive":"claude-flow claims board","negative":"ruvector collection create"}
+{"anchor":"I need to metrics hooks","positive":"claude-flow hooks metrics","negative":"ruvector index stats"}
+{"anchor":"Help me execute workflow","positive":"claude-flow workflow execute","negative":"agentic-flow pipeline run"}
+{"anchor":"generate embeddings","positive":"claude-flow embeddings generate","negative":"agentic-flow embed"}
+{"anchor":"How do I create a new processing pipeline?","positive":"agentic-flow pipeline create","negative":"claude-flow workflow create"}
+{"anchor":"store the memory","positive":"claude-flow memory store","negative":"agentic-flow cache set"}
+{"anchor":"I want to apply quantization to collection","positive":"ruvector quantize apply","negative":"agentic-flow model quantize"}
+{"anchor":"I want to show snapshot","positive":"ruvector snapshot list","negative":"agentic-flow model list"}
+{"anchor":"Restore previous session","positive":"claude-flow session restore","negative":"claude-flow memory retrieve"}
+{"anchor":"optimize performance","positive":"claude-flow performance optimize","negative":"ruvector index optimize"}
+{"anchor":"I need a way to range search within distance threshold","positive":"agentic-flow search range","negative":"claude-flow swarm init"}
+{"anchor":"Can you release claims?","positive":"claude-flow claims release","negative":"agentic-flow embed"}
+{"anchor":"embed","positive":"agentic-flow embed","negative":"claude-flow embeddings generate"}
+{"anchor":"Analyze codebase to bootstrap intelligence","positive":"claude-flow hooks pretrain","negative":"ruvector index build"}
+{"anchor":"patterns neural","positive":"claude-flow neural patterns","negative":"agentic-flow embed"}
+{"anchor":"check the workflow","positive":"claude-flow workflow status","negative":"claude-flow agent status"}
+{"anchor":"get memory","positive":"claude-flow memory retrieve","negative":"ruvector vector get"}
+{"anchor":"I want to find memory","positive":"claude-flow memory search","negative":"ruvector search knn"}
+{"anchor":"I want to get model information and metadata","positive":"agentic-flow model info","negative":"ruvector quantize info"}
+{"anchor":"set the cache","positive":"agentic-flow cache set","negative":"claude-flow memory store"}
+{"anchor":"I need a way to get quantization info","positive":"ruvector quantize info","negative":"ruvector collection info"}
+{"anchor":"I need to list collection","positive":"ruvector collection list","negative":"claude-flow agent list"}
+{"anchor":"Can you rebuild index?","positive":"ruvector index rebuild","negative":"agentic-flow embed"}
+{"anchor":"I need a way to rebuild existing index","positive":"ruvector index rebuild","negative":"claude-flow swarm init"}
+{"anchor":"Create a new workflow for code review","positive":"claude-flow workflow create","negative":"claude-flow task create"}
+{"anchor":"How do I get index statistics?","positive":"ruvector index stats","negative":"agentic-flow cache stats"}
+{"anchor":"Can you stats cache?","positive":"agentic-flow cache stats","negative":"ruvector collection info"}
+{"anchor":"How do I create a new workflow?","positive":"claude-flow workflow create","negative":"agentic-flow pipeline create"}
+{"anchor":"How do I build hnsw index for collection?","positive":"ruvector index build","negative":"claude-flow hooks pretrain"}
+{"anchor":"I want to regenerate index","positive":"ruvector index rebuild","negative":"claude-flow swarm init"}
+{"anchor":"create pipeline","positive":"agentic-flow pipeline create","negative":"claude-flow swarm init"}
+{"anchor":"check workflow","positive":"claude-flow workflow status","negative":"claude-flow agent status"}
+{"anchor":"create workflow","positive":"claude-flow workflow create","negative":"claude-flow task create"}
+{"anchor":"I want to clear embedding cache","positive":"agentic-flow cache clear","negative":"ruvector collection create"}
+{"anchor":"info the collection","positive":"ruvector collection info","negative":"agentic-flow model info"}
+{"anchor":"create the snapshot","positive":"ruvector snapshot create","negative":"ruvector collection create"}
+{"anchor":"I need to init swarm","positive":"claude-flow swarm init","negative":"agentic-flow pipeline create"}
+{"anchor":"make collection","positive":"ruvector collection create","negative":"ruvector snapshot create"}
+{"anchor":"I want to create a new processing pipeline","positive":"agentic-flow pipeline create","negative":"claude-flow swarm init"}
+{"anchor":"I want to create index","positive":"ruvector index build","negative":"claude-flow hooks pretrain"}
+{"anchor":"I need a way to create a snapshot of collection","positive":"ruvector snapshot create","negative":"ruvector collection create"}
+{"anchor":"compress in quantize","positive":"ruvector quantize apply","negative":"agentic-flow model quantize"}
+{"anchor":"I need to shutdown swarm","positive":"claude-flow swarm shutdown","negative":"agentic-flow embed"}
+{"anchor":"get the cache","positive":"agentic-flow cache get","negative":"claude-flow memory retrieve"}
+{"anchor":"stats index","positive":"ruvector index stats","negative":"agentic-flow cache stats"}
+{"anchor":"How do I get status of a specific agent?","positive":"claude-flow agent status","negative":"agentic-flow model info"}
+{"anchor":"Help me similarity","positive":"agentic-flow similarity","negative":"claude-flow embeddings compare"}
+{"anchor":"rebuild the index","positive":"ruvector index rebuild","negative":"agentic-flow embed"}
+{"anchor":"I want to compare similarity between texts","positive":"claude-flow embeddings compare","negative":"agentic-flow similarity"}
+{"anchor":"I want to visualize pipeline structure","positive":"agentic-flow pipeline visualize","negative":"ruvector collection create"}
+{"anchor":"show snapshot","positive":"ruvector snapshot list","negative":"claude-flow agent list"}
+{"anchor":"How do I store embedding in cache?","positive":"agentic-flow cache set","negative":"claude-flow memory store"}
+{"anchor":"clear the cache","positive":"agentic-flow cache clear","negative":"claude-flow swarm init"}
+{"anchor":"remove collection","positive":"ruvector collection delete","negative":"claude-flow memory delete"}
+{"anchor":"List saved sessions","positive":"claude-flow session list","negative":"claude-flow memory list"}
+{"anchor":"inference in neural","positive":"claude-flow neural predict","negative":"ruvector collection create"}
+{"anchor":"I need to info quantize","positive":"ruvector quantize info","negative":"agentic-flow model info"}
+{"anchor":"Can you list task?","positive":"claude-flow task list","negative":"claude-flow agent list"}
+{"anchor":"I need a way to get workflow execution status","positive":"claude-flow workflow status","negative":"claude-flow swarm status"}
+{"anchor":"I want to store embedding in cache","positive":"agentic-flow cache set","negative":"claude-flow memory store"}
+{"anchor":"info the collection","positive":"ruvector collection info","negative":"claude-flow agent status"}
+{"anchor":"I need to store memory","positive":"claude-flow memory store","negative":"ruvector collection create"}
+{"anchor":"I want to create a new task","positive":"claude-flow task create","negative":"ruvector collection create"}
+{"anchor":"Help me check swarm","positive":"claude-flow swarm status","negative":"claude-flow agent status"}
+{"anchor":"Help me search embeddings","positive":"claude-flow embeddings search","negative":"agentic-flow search hybrid"}
+{"anchor":"Help me range search","positive":"agentic-flow search range","negative":"claude-flow swarm init"}
+{"anchor":"Batch search multiple query vectors","positive":"ruvector search batch","negative":"agentic-flow batch-embed"}
+{"anchor":"retrieve the memory","positive":"claude-flow memory retrieve","negative":"agentic-flow cache get"}
+{"anchor":"Help me build index","positive":"ruvector index build","negative":"claude-flow hooks pretrain"}
+{"anchor":"How do I hybrid search combining keyword and semantic?","positive":"agentic-flow search hybrid","negative":"claude-flow memory search"}
+{"anchor":"Add a new task to the queue","positive":"claude-flow task create","negative":"claude-flow workflow create"}
+{"anchor":"I need to delete collection","positive":"ruvector collection delete","negative":"claude-flow memory delete"}
+{"anchor":"I want to encode embed","positive":"agentic-flow embed","negative":"claude-flow embeddings generate"}
+{"anchor":"show model","positive":"agentic-flow model list","negative":"ruvector snapshot list"}
+{"anchor":"I want to make snapshot","positive":"ruvector snapshot create","negative":"ruvector collection create"}
+{"anchor":"Can you board claims?","positive":"claude-flow claims board","negative":"agentic-flow embed"}
+{"anchor":"embed in batch-embed","positive":"agentic-flow batch-embed","negative":"ruvector search batch"}
+{"anchor":"delete vector","positive":"ruvector vector delete","negative":"ruvector collection delete"}
+{"anchor":"Can you apply quantize?","positive":"ruvector quantize apply","negative":"agentic-flow model quantize"}
+{"anchor":"I need to build index","positive":"ruvector index build","negative":"claude-flow hooks pretrain"}
+{"anchor":"delete the memory","positive":"claude-flow memory delete","negative":"ruvector vector delete"}
+{"anchor":"I need a way to list all tasks","positive":"claude-flow task list","negative":"ruvector snapshot list"}
+{"anchor":"Perform approximate nearest neighbor search","positive":"ruvector search knn","negative":"agentic-flow search nearest"}
+{"anchor":"I need a way to list available snapshots","positive":"ruvector snapshot list","negative":"claude-flow memory list"}
+{"anchor":"stats the cache","positive":"agentic-flow cache stats","negative":"ruvector collection info"}
+{"anchor":"I want to insert vectors into collection","positive":"ruvector vector insert","negative":"agentic-flow cache set"}
+{"anchor":"How do I get cache statistics?","positive":"agentic-flow cache stats","negative":"ruvector index stats"}
+{"anchor":"Can you store memory?","positive":"claude-flow memory store","negative":"ruvector collection create"}
+{"anchor":"Can you check agent?","positive":"claude-flow agent status","negative":"ruvector quantize info"}
+{"anchor":"Can you check workflow?","positive":"claude-flow workflow status","negative":"claude-flow swarm status"}
+{"anchor":"I want to show session","positive":"claude-flow session list","negative":"claude-flow task list"}
+{"anchor":"How do I apply performance optimizations?","positive":"claude-flow performance optimize","negative":"ruvector index optimize"}
+{"anchor":"I want to create a new vector collection","positive":"ruvector collection create","negative":"claude-flow task create"}
+{"anchor":"How do I clear embedding cache?","positive":"agentic-flow cache clear","negative":"claude-flow swarm init"}
+{"anchor":"Can you stats index?","positive":"ruvector index stats","negative":"agentic-flow cache stats"}
+{"anchor":"I need stop functionality","positive":"claude-flow swarm shutdown","negative":"ruvector collection create"}
+{"anchor":"How do I find nearest neighbors to query vector?","positive":"agentic-flow search nearest","negative":"ruvector search knn"}
+{"anchor":"Can you check agent?","positive":"claude-flow agent status","negative":"claude-flow swarm status"}
+{"anchor":"show collection","positive":"ruvector collection list","negative":"agentic-flow model list"}
+{"anchor":"Run the processing pipeline","positive":"agentic-flow pipeline run","negative":"claude-flow workflow execute"}
+{"anchor":"I need to check agent","positive":"claude-flow agent status","negative":"agentic-flow model info"}
+{"anchor":"show memory","positive":"claude-flow memory list","negative":"ruvector snapshot list"}
+{"anchor":"I need distance functionality","positive":"agentic-flow similarity","negative":"claude-flow embeddings compare"}
+{"anchor":"Help me search memory","positive":"claude-flow memory search","negative":"claude-flow embeddings search"}
+{"anchor":"How do I list memory entries?","positive":"claude-flow memory list","negative":"ruvector snapshot list"}
+{"anchor":"Can you visualize pipeline?","positive":"agentic-flow pipeline visualize","negative":"ruvector collection create"}
+{"anchor":"create the pipeline","positive":"agentic-flow pipeline create","negative":"claude-flow workflow create"}
+{"anchor":"I need view functionality","positive":"claude-flow claims board","negative":"agentic-flow embed"}
+{"anchor":"I want to make pipeline","positive":"agentic-flow pipeline create","negative":"claude-flow swarm init"}
+{"anchor":"I need a way to create a new vector collection","positive":"ruvector collection create","negative":"claude-flow workflow create"}
+{"anchor":"Get neural routing prediction","positive":"claude-flow neural predict","negative":"agentic-flow embed"}
+{"anchor":"Can you hybrid search?","positive":"agentic-flow search hybrid","negative":"ruvector search filter"}
+{"anchor":"How do I create a new vector collection?","positive":"ruvector collection create","negative":"claude-flow task create"}
+{"anchor":"I need a way to get current swarm status and agent health","positive":"claude-flow swarm status","negative":"claude-flow workflow status"}
+{"anchor":"make task","positive":"claude-flow task create","negative":"ruvector collection create"}
+{"anchor":"I need to range search","positive":"agentic-flow search range","negative":"ruvector collection create"}
+{"anchor":"Can you create task?","positive":"claude-flow task create","negative":"claude-flow workflow create"}
+{"anchor":"I need a way to restore collection from snapshot","positive":"ruvector snapshot restore","negative":"claude-flow session restore"}
+{"anchor":"create the collection","positive":"ruvector collection create","negative":"claude-flow workflow create"}
+{"anchor":"I need a way to filtered vector search with metadata","positive":"ruvector search filter","negative":"agentic-flow search hybrid"}
+{"anchor":"hybrid the search","positive":"agentic-flow search hybrid","negative":"claude-flow memory search"}
+{"anchor":"Help me stats index","positive":"ruvector index stats","negative":"claude-flow hooks metrics"}
+{"anchor":"save memory","positive":"claude-flow memory store","negative":"ruvector collection create"}
+{"anchor":"I need to list snapshot","positive":"ruvector snapshot list","negative":"ruvector collection list"}
+{"anchor":"I want to create a new vector collection","positive":"ruvector collection create","negative":"ruvector snapshot create"}
+{"anchor":"Assign this issue to me","positive":"claude-flow claims claim","negative":"claude-flow task create"}
+{"anchor":"I want to list available snapshots","positive":"ruvector snapshot list","negative":"ruvector collection list"}
+{"anchor":"Help me info collection","positive":"ruvector collection info","negative":"ruvector quantize info"}
+{"anchor":"regenerate index","positive":"ruvector index rebuild","negative":"claude-flow swarm init"}
+{"anchor":"I need a way to get index statistics","positive":"ruvector index stats","negative":"agentic-flow cache stats"}
+{"anchor":"I need to filter search","positive":"ruvector search filter","negative":"agentic-flow search hybrid"}
+{"anchor":"I need to create task","positive":"claude-flow task create","negative":"claude-flow workflow create"}
+{"anchor":"I want to delete a memory entry","positive":"claude-flow memory delete","negative":"ruvector vector delete"}
+{"anchor":"show model","positive":"agentic-flow model list","negative":"claude-flow memory list"}
+{"anchor":"list the task","positive":"claude-flow task list","negative":"claude-flow agent list"}
+{"anchor":"Help me check agent","positive":"claude-flow agent status","negative":"claude-flow workflow status"}
+{"anchor":"I need a way to get status of a specific agent","positive":"claude-flow agent status","negative":"agentic-flow model info"}
+{"anchor":"info collection","positive":"ruvector collection info","negative":"agentic-flow model info"}
+{"anchor":"clear cache","positive":"agentic-flow cache clear","negative":"ruvector collection create"}
+{"anchor":"Can you batch search?","positive":"ruvector search batch","negative":"agentic-flow batch-embed"}
+{"anchor":"make collection","positive":"ruvector collection create","negative":"claude-flow memory store"}
+{"anchor":"I need to board claims","positive":"claude-flow claims board","negative":"ruvector collection create"}
+{"anchor":"Cache the embedding for reuse","positive":"agentic-flow cache set","negative":"claude-flow memory store"}
+{"anchor":"I want to get quantization info","positive":"ruvector quantize info","negative":"claude-flow agent status"}
+{"anchor":"I want to mark task as complete","positive":"claude-flow task complete","negative":"agentic-flow embed"}
+{"anchor":"I need to list snapshot","positive":"ruvector snapshot list","negative":"claude-flow memory list"}
+{"anchor":"I need load functionality","positive":"claude-flow session restore","negative":"ruvector snapshot restore"}
+{"anchor":"flush in cache","positive":"agentic-flow cache clear","negative":"ruvector collection create"}
+{"anchor":"Help me info collection","positive":"ruvector collection info","negative":"agentic-flow cache stats"}
+{"anchor":"How do I save current session state?","positive":"claude-flow session save","negative":"ruvector snapshot create"}
+{"anchor":"Can you list memory?","positive":"claude-flow memory list","negative":"claude-flow agent list"}
+{"anchor":"I need a way to create a new processing pipeline","positive":"agentic-flow pipeline create","negative":"claude-flow workflow create"}
+{"anchor":"show agent","positive":"claude-flow agent list","negative":"claude-flow memory list"}
+{"anchor":"check the agent","positive":"claude-flow agent status","negative":"ruvector collection info"}
+{"anchor":"I need a way to build hnsw index for collection","positive":"ruvector index build","negative":"claude-flow hooks pretrain"}
+{"anchor":"Continue where I left off","positive":"claude-flow session restore","negative":"claude-flow memory retrieve"}
+{"anchor":"I need a way to spawn workers and join to hive-mind","positive":"claude-flow hive-mind spawn","negative":"claude-flow agent spawn"}
+{"anchor":"I want to list available snapshots","positive":"ruvector snapshot list","negative":"claude-flow memory list"}
+{"anchor":"I need to list model","positive":"agentic-flow model list","negative":"claude-flow memory list"}
+{"anchor":"How do I list memory entries?","positive":"claude-flow memory list","negative":"claude-flow agent list"}
+{"anchor":"store memory","positive":"claude-flow memory store","negative":"ruvector collection create"}
+{"anchor":"Clear the embedding cache","positive":"agentic-flow cache clear","negative":"claude-flow memory delete"}
+{"anchor":"I want to list saved sessions","positive":"claude-flow session list","negative":"claude-flow agent list"}
+{"anchor":"apply the quantize","positive":"ruvector quantize apply","negative":"agentic-flow model quantize"}
+{"anchor":"Help me list task","positive":"claude-flow task list","negative":"claude-flow agent list"}
+{"anchor":"I need to batch search","positive":"ruvector search batch","negative":"agentic-flow batch-embed"}
+{"anchor":"list the model","positive":"agentic-flow model list","negative":"claude-flow agent list"}
+{"anchor":"I need a way to list available models","positive":"agentic-flow model list","negative":"ruvector collection list"}
+{"anchor":"Can you info quantize?","positive":"ruvector quantize info","negative":"claude-flow agent status"}
+{"anchor":"Help me optimize performance","positive":"claude-flow performance optimize","negative":"ruvector index optimize"}
+{"anchor":"Help me pretrain hooks","positive":"claude-flow hooks pretrain","negative":"ruvector index build"}
+{"anchor":"I need to list model","positive":"agentic-flow model list","negative":"ruvector collection list"}
+{"anchor":"I need a way to delete a vector collection","positive":"ruvector collection delete","negative":"claude-flow memory delete"}
+{"anchor":"I need a way to hybrid search combining keyword and semantic","positive":"agentic-flow search hybrid","negative":"claude-flow memory search"}
+{"anchor":"Help me create collection","positive":"ruvector collection create","negative":"claude-flow workflow create"}
+{"anchor":"I need to list collection","positive":"ruvector collection list","negative":"claude-flow task list"}
+{"anchor":"Can you execute workflow?","positive":"claude-flow workflow execute","negative":"agentic-flow pipeline run"}
+{"anchor":"Can you list task?","positive":"claude-flow task list","negative":"agentic-flow model list"}
+{"anchor":"Can you init hive-mind?","positive":"claude-flow hive-mind init","negative":"claude-flow swarm init"}
+{"anchor":"I want to get workflow","positive":"claude-flow workflow status","negative":"claude-flow swarm status"}
+{"anchor":"Execute the deployment workflow","positive":"claude-flow workflow execute","negative":"agentic-flow pipeline run"}
+{"anchor":"Profile slow operations","positive":"claude-flow performance profile","negative":"claude-flow performance benchmark"}
+{"anchor":"Help me create collection","positive":"ruvector collection create","negative":"claude-flow task create"}
+{"anchor":"get cache","positive":"agentic-flow cache get","negative":"claude-flow memory retrieve"}
+{"anchor":"compress in model","positive":"agentic-flow model quantize","negative":"ruvector quantize apply"}
+{"anchor":"info quantize","positive":"ruvector quantize info","negative":"ruvector collection info"}
+{"anchor":"metadata in model","positive":"agentic-flow model info","negative":"claude-flow agent status"}
+{"anchor":"I need a way to retrieve a value from memory by key","positive":"claude-flow memory retrieve","negative":"ruvector vector get"}
+{"anchor":"generate the embeddings","positive":"claude-flow embeddings generate","negative":"agentic-flow embed"}
+{"anchor":"I want to get current swarm status and agent health","positive":"claude-flow swarm status","negative":"claude-flow agent status"}
+{"anchor":"list session","positive":"claude-flow session list","negative":"claude-flow task list"}
+{"anchor":"I want to save memory","positive":"claude-flow memory store","negative":"agentic-flow cache set"}
+{"anchor":"Help me list task","positive":"claude-flow task list","negative":"ruvector collection list"}
+{"anchor":"How do I spawn workers and join to hive-mind?","positive":"claude-flow hive-mind spawn","negative":"claude-flow agent spawn"}
+{"anchor":"How do I semantic vector search in memory?","positive":"claude-flow memory search","negative":"agentic-flow search hybrid"}
+{"anchor":"How do I get collection information?","positive":"ruvector collection info","negative":"claude-flow agent status"}
+{"anchor":"I want to show agent","positive":"claude-flow agent list","negative":"agentic-flow model list"}
+{"anchor":"I want to store embedding in cache","positive":"agentic-flow cache set","negative":"ruvector vector insert"}
+{"anchor":"I need to clear cache","positive":"agentic-flow cache clear","negative":"claude-flow swarm init"}
+{"anchor":"How do I batch search multiple queries?","positive":"ruvector search batch","negative":"agentic-flow batch-embed"}
+{"anchor":"How do I get model information and metadata?","positive":"agentic-flow model info","negative":"ruvector collection info"}
+{"anchor":"I need embed functionality","positive":"claude-flow embeddings generate","negative":"agentic-flow embed"}
+{"anchor":"Help me get cache","positive":"agentic-flow cache get","negative":"claude-flow memory retrieve"}
+{"anchor":"Help me spawn agent","positive":"claude-flow agent spawn","negative":"claude-flow hive-mind spawn"}
+{"anchor":"I need to create workflow","positive":"claude-flow workflow create","negative":"claude-flow task create"}
+{"anchor":"Find nearest neighbors to query","positive":"agentic-flow search nearest","negative":"ruvector search knn"}
+{"anchor":"create the collection","positive":"ruvector collection create","negative":"claude-flow memory store"}
+{"anchor":"I need to insert vector","positive":"ruvector vector insert","negative":"agentic-flow cache set"}
+{"anchor":"I want to make task","positive":"claude-flow task create","negative":"claude-flow workflow create"}
+{"anchor":"I want to make predictions using neural model","positive":"claude-flow neural predict","negative":"agentic-flow embed"}
+{"anchor":"show memory","positive":"claude-flow memory list","negative":"ruvector collection list"}
+{"anchor":"I need metadata functionality","positive":"agentic-flow model info","negative":"ruvector quantize info"}
+{"anchor":"Help me list model","positive":"agentic-flow model list","negative":"ruvector collection list"}
+{"anchor":"spawn agent","positive":"claude-flow agent spawn","negative":"claude-flow hive-mind spawn"}
+{"anchor":"I need a way to initialize hive-mind collective","positive":"claude-flow hive-mind init","negative":"claude-flow swarm init"}
+{"anchor":"Help me release claims","positive":"claude-flow claims release","negative":"agentic-flow embed"}
+{"anchor":"I need to create collection","positive":"ruvector collection create","negative":"claude-flow workflow create"}
+{"anchor":"I need metadata functionality","positive":"ruvector search filter","negative":"agentic-flow search hybrid"}
+{"anchor":"combined in search","positive":"agentic-flow search hybrid","negative":"ruvector search filter"}
+{"anchor":"I need stats functionality","positive":"ruvector collection info","negative":"claude-flow agent status"}
+{"anchor":"Help me restore snapshot","positive":"ruvector snapshot restore","negative":"claude-flow session restore"}
+{"anchor":"I want to create a new vector collection","positive":"ruvector collection create","negative":"claude-flow workflow create"}
+{"anchor":"I need initialize functionality","positive":"claude-flow swarm init","negative":"claude-flow hive-mind init"}
+{"anchor":"Help me metrics hooks","positive":"claude-flow hooks metrics","negative":"ruvector index stats"}
+{"anchor":"Can you list memory?","positive":"claude-flow memory list","negative":"claude-flow task list"}
+{"anchor":"list the memory","positive":"claude-flow memory list","negative":"agentic-flow model list"}
+{"anchor":"Help me retrieve memory","positive":"claude-flow memory retrieve","negative":"ruvector vector get"}
+{"anchor":"I need to generate embeddings","positive":"claude-flow embeddings generate","negative":"agentic-flow embed"}
+{"anchor":"Can you list task?","positive":"claude-flow task list","negative":"ruvector snapshot list"}
+{"anchor":"Can you info collection?","positive":"ruvector collection info","negative":"ruvector quantize info"}
+{"anchor":"post-task the hooks","positive":"claude-flow hooks post-task","negative":"agentic-flow embed"}
+{"anchor":"multiple in search","positive":"ruvector search batch","negative":"agentic-flow batch-embed"}
+{"anchor":"Can you pretrain hooks?","positive":"claude-flow hooks pretrain","negative":"ruvector index build"}
+{"anchor":"completion in hooks","positive":"claude-flow hooks post-task","negative":"agentic-flow embed"}
+{"anchor":"Can you create task?","positive":"claude-flow task create","negative":"ruvector collection create"}
+{"anchor":"How do I optimize index for search performance?","positive":"ruvector index optimize","negative":"claude-flow performance optimize"}
+{"anchor":"nearest search","positive":"agentic-flow search nearest","negative":"ruvector search knn"}
+{"anchor":"How do I get current swarm status and agent health?","positive":"claude-flow swarm status","negative":"claude-flow agent status"}
+{"anchor":"I need a way to make predictions using neural model","positive":"claude-flow neural predict","negative":"agentic-flow embed"}
+{"anchor":"Help me list model","positive":"agentic-flow model list","negative":"ruvector snapshot list"}
+{"anchor":"Can you info model?","positive":"agentic-flow model info","negative":"claude-flow agent status"}
+{"anchor":"I need to optimize index","positive":"ruvector index optimize","negative":"claude-flow performance optimize"}
+{"anchor":"I need to get cache","positive":"agentic-flow cache get","negative":"claude-flow memory retrieve"}
+{"anchor":"I need to info model","positive":"agentic-flow model info","negative":"ruvector collection info"}
+{"anchor":"Encode sentences into embeddings","positive":"agentic-flow embed","negative":"claude-flow embeddings generate"}
+{"anchor":"complete the task","positive":"claude-flow task complete","negative":"agentic-flow embed"}
+{"anchor":"stats the index","positive":"ruvector index stats","negative":"claude-flow hooks metrics"}
+{"anchor":"Find k-nearest matches to this embedding","positive":"ruvector search knn","negative":"claude-flow memory search"}
+{"anchor":"I need a way to get collection information","positive":"ruvector collection info","negative":"agentic-flow model info"}
+{"anchor":"Can you filter search?","positive":"ruvector search filter","negative":"agentic-flow search hybrid"}
+{"anchor":"I need to post-task hooks","positive":"claude-flow hooks post-task","negative":"ruvector collection create"}
+{"anchor":"I need to check workflow","positive":"claude-flow workflow status","negative":"claude-flow swarm status"}
+{"anchor":"I need a way to list all collections","positive":"ruvector collection list","negative":"claude-flow task list"}
+{"anchor":"I want to get status of a specific agent","positive":"claude-flow agent status","negative":"ruvector quantize info"}
+{"anchor":"I want to find memory","positive":"claude-flow memory search","negative":"agentic-flow search hybrid"}
+{"anchor":"I want to store a value in memory with optional namespace","positive":"claude-flow memory store","negative":"ruvector collection create"}
+{"anchor":"I need to get cache","positive":"agentic-flow cache get","negative":"ruvector vector get"}
+{"anchor":"I need to create collection","positive":"ruvector collection create","negative":"claude-flow task create"}
+{"anchor":"I want to list available models","positive":"agentic-flow model list","negative":"ruvector collection list"}
+{"anchor":"Analyze potential prompt injection","positive":"claude-flow aidefence analyze","negative":"claude-flow hooks route"}
+{"anchor":"Can you check swarm?","positive":"claude-flow swarm status","negative":"claude-flow workflow status"}
+{"anchor":"I need a way to list all tasks","positive":"claude-flow task list","negative":"claude-flow agent list"}
+{"anchor":"create in agent","positive":"claude-flow agent spawn","negative":"claude-flow hive-mind spawn"}
+{"anchor":"Help me optimize index","positive":"ruvector index optimize","negative":"claude-flow performance optimize"}
+{"anchor":"batch the search","positive":"ruvector search batch","negative":"agentic-flow batch-embed"}
+{"anchor":"I need a way to bootstrap intelligence from repository","positive":"claude-flow hooks pretrain","negative":"ruvector index build"}
+{"anchor":"Embed large corpus in parallel","positive":"agentic-flow batch-embed","negative":"ruvector vector insert"}
+{"anchor":"How do I get cache statistics?","positive":"agentic-flow cache stats","negative":"ruvector collection info"}
+{"anchor":"How do I get status of a specific agent?","positive":"claude-flow agent status","negative":"claude-flow workflow status"}
+{"anchor":"show snapshot","positive":"ruvector snapshot list","negative":"agentic-flow model list"}
+{"anchor":"I need a way to list memory entries","positive":"claude-flow memory list","negative":"claude-flow agent list"}
+{"anchor":"I want to list memory entries","positive":"claude-flow memory list","negative":"agentic-flow model list"}
+{"anchor":"I need radius functionality","positive":"agentic-flow search range","negative":"ruvector collection create"}
+{"anchor":"I need combined functionality","positive":"agentic-flow search hybrid","negative":"claude-flow embeddings search"}
+{"anchor":"I need to stop agent","positive":"claude-flow agent terminate","negative":"ruvector collection create"}
+{"anchor":"Search vectors with metadata filters","positive":"ruvector search filter","negative":"claude-flow memory search"}
+{"anchor":"I want to find nearest neighbors to query vector","positive":"agentic-flow search nearest","negative":"ruvector search knn"}
+{"anchor":"I need a way to batch search multiple queries","positive":"ruvector search batch","negative":"agentic-flow batch-embed"}
+{"anchor":"Can you list model?","positive":"agentic-flow model list","negative":"claude-flow memory list"}
+{"anchor":"I want to record task completion for learning","positive":"claude-flow hooks post-task","negative":"ruvector collection create"}
+{"anchor":"I want to get quantization info","positive":"ruvector quantize info","negative":"agentic-flow model info"}
+{"anchor":"Help me list session","positive":"claude-flow session list","negative":"claude-flow memory list"}
+{"anchor":"I want to show model","positive":"agentic-flow model list","negative":"claude-flow agent list"}
+{"anchor":"create collection","positive":"ruvector collection create","negative":"claude-flow memory store"}
+{"anchor":"Get cached embedding","positive":"agentic-flow cache get","negative":"claude-flow memory retrieve"}
+{"anchor":"Can you predict neural?","positive":"claude-flow neural predict","negative":"ruvector collection create"}
+{"anchor":"How do I hybrid search combining keyword and semantic?","positive":"agentic-flow search hybrid","negative":"claude-flow embeddings search"}
+{"anchor":"I need a way to create a new workflow","positive":"claude-flow workflow create","negative":"agentic-flow pipeline create"}
+{"anchor":"list task","positive":"claude-flow task list","negative":"claude-flow memory list"}
+{"anchor":"I need info functionality","positive":"ruvector index stats","negative":"agentic-flow cache stats"}
+{"anchor":"I want to show memory","positive":"claude-flow memory list","negative":"claude-flow agent list"}
+{"anchor":"I want to list all active agents","positive":"claude-flow agent list","negative":"agentic-flow model list"}
+{"anchor":"I need to create pipeline","positive":"agentic-flow pipeline create","negative":"claude-flow swarm init"}
+{"anchor":"I want to get agent","positive":"claude-flow agent status","negative":"claude-flow workflow status"}
+{"anchor":"list task","positive":"claude-flow task list","negative":"agentic-flow model list"}
+{"anchor":"I need a way to semantic search across stored embeddings","positive":"claude-flow embeddings search","negative":"agentic-flow search hybrid"}
+{"anchor":"create collection","positive":"ruvector collection create","negative":"ruvector snapshot create"}
+{"anchor":"store memory","positive":"claude-flow memory store","negative":"agentic-flow cache set"}
+{"anchor":"Build HNSW index for faster search","positive":"ruvector index build","negative":"claude-flow hooks pretrain"}
+{"anchor":"graph in pipeline","positive":"agentic-flow pipeline visualize","negative":"ruvector collection create"}
+{"anchor":"Benchmark system performance","positive":"claude-flow performance benchmark","negative":"claude-flow hooks metrics"}
+{"anchor":"worker hooks","positive":"claude-flow hooks worker dispatch","negative":"ruvector collection create"}
+{"anchor":"I want to spawn workers and join to hive-mind","positive":"claude-flow hive-mind spawn","negative":"claude-flow agent spawn"}
+{"anchor":"I need a way to create a snapshot of collection","positive":"ruvector snapshot create","negative":"claude-flow session save"}
+{"anchor":"list the collection","positive":"ruvector collection list","negative":"claude-flow agent list"}
+{"anchor":"I want to create a new workflow","positive":"claude-flow workflow create","negative":"claude-flow task create"}
+{"anchor":"show task","positive":"claude-flow task list","negative":"ruvector collection list"}
+{"anchor":"Create a new vector collection for documents","positive":"ruvector collection create","negative":"claude-flow memory store"}
+{"anchor":"I want to build hnsw index for collection","positive":"ruvector index build","negative":"claude-flow hooks pretrain"}
+{"anchor":"Save the current session state","positive":"claude-flow session save","negative":"claude-flow memory store"}
+{"anchor":"I need a way to compare similarity between texts","positive":"claude-flow embeddings compare","negative":"agentic-flow similarity"}
+{"anchor":"Help me filter search","positive":"ruvector search filter","negative":"agentic-flow search hybrid"}
+{"anchor":"list the model","positive":"agentic-flow model list","negative":"claude-flow task list"}
+{"anchor":"Help me create task","positive":"claude-flow task create","negative":"ruvector collection create"}
+{"anchor":"Can you retrieve memory?","positive":"claude-flow memory retrieve","negative":"ruvector vector get"}
+{"anchor":"list agent","positive":"claude-flow agent list","negative":"claude-flow task list"}
+{"anchor":"I need store functionality","positive":"agentic-flow cache set","negative":"ruvector vector insert"}
+{"anchor":"How do I execute a workflow?","positive":"claude-flow workflow execute","negative":"agentic-flow pipeline run"}
+{"anchor":"show agent","positive":"claude-flow agent list","negative":"claude-flow task list"}
+{"anchor":"get workflow","positive":"claude-flow workflow status","negative":"claude-flow agent status"}
+{"anchor":"Can you shutdown swarm?","positive":"claude-flow swarm shutdown","negative":"agentic-flow embed"}
+{"anchor":"Load the ONNX model for inference","positive":"agentic-flow model load","negative":"claude-flow neural train"}
+{"anchor":"I want to hybrid search combining keyword and semantic","positive":"agentic-flow search hybrid","negative":"ruvector search filter"}
+{"anchor":"I need unclaim functionality","positive":"claude-flow claims release","negative":"ruvector collection create"}
+{"anchor":"I need a way to hybrid search combining keyword and semantic","positive":"agentic-flow search hybrid","negative":"ruvector search filter"}
+{"anchor":"Can you hybrid search?","positive":"agentic-flow search hybrid","negative":"claude-flow embeddings search"}
+{"anchor":"Insert embeddings into the database","positive":"ruvector vector insert","negative":"claude-flow memory store"}
+{"anchor":"Help me list snapshot","positive":"ruvector snapshot list","negative":"claude-flow memory list"}
+{"anchor":"combined in search","positive":"agentic-flow search hybrid","negative":"claude-flow memory search"}
+{"anchor":"make workflow","positive":"claude-flow workflow create","negative":"agentic-flow pipeline create"}
+{"anchor":"I need to list task","positive":"claude-flow task list","negative":"claude-flow agent list"}
+{"anchor":"Analyze codebase to bootstrap intelligence","positive":"claude-flow hooks pretrain","negative":"claude-flow neural train"}
+{"anchor":"I want to retrieve a value from memory by key","positive":"claude-flow memory retrieve","negative":"ruvector vector get"}
+{"anchor":"metadata in search","positive":"ruvector search filter","negative":"agentic-flow search hybrid"}
+{"anchor":"I need a way to store embedding in cache","positive":"agentic-flow cache set","negative":"ruvector vector insert"}
+{"anchor":"restore the snapshot","positive":"ruvector snapshot restore","negative":"claude-flow session restore"}
+{"anchor":"Help me list model","positive":"agentic-flow model list","negative":"claude-flow memory list"}
+{"anchor":"batch search","positive":"ruvector search batch","negative":"agentic-flow batch-embed"}
+{"anchor":"Record task completion for learning","positive":"claude-flow hooks post-task","negative":"claude-flow hooks metrics"}
+{"anchor":"release the claims","positive":"claude-flow claims release","negative":"agentic-flow embed"}
+{"anchor":"Can you create workflow?","positive":"claude-flow workflow create","negative":"claude-flow task create"}
+{"anchor":"I need a way to insert vectors into collection","positive":"ruvector vector insert","negative":"agentic-flow cache set"}
+{"anchor":"How do I list available snapshots?","positive":"ruvector snapshot list","negative":"claude-flow task list"}
+{"anchor":"build the index","positive":"ruvector index build","negative":"claude-flow hooks pretrain"}
+{"anchor":"create the workflow","positive":"claude-flow workflow create","negative":"agentic-flow pipeline create"}
+{"anchor":"store the memory","positive":"claude-flow memory store","negative":"ruvector collection create"}
+{"anchor":"Help me list collection","positive":"ruvector collection list","negative":"claude-flow memory list"}
+{"anchor":"I need a way to hybrid search combining keyword and semantic","positive":"agentic-flow search hybrid","negative":"claude-flow embeddings search"}
+{"anchor":"load in session","positive":"claude-flow session restore","negative":"ruvector snapshot restore"}
+{"anchor":"I need to create snapshot","positive":"ruvector snapshot create","negative":"ruvector collection create"}
+{"anchor":"Can you list agent?","positive":"claude-flow agent list","negative":"ruvector snapshot list"}
+{"anchor":"I want to execute a pipeline with input data","positive":"agentic-flow pipeline run","negative":"claude-flow workflow execute"}
+{"anchor":"I need to check agent","positive":"claude-flow agent status","negative":"ruvector quantize info"}
+{"anchor":"visualize the pipeline","positive":"agentic-flow pipeline visualize","negative":"claude-flow swarm init"}
+{"anchor":"I need to compare embeddings","positive":"claude-flow embeddings compare","negative":"agentic-flow similarity"}
+{"anchor":"Can you search memory?","positive":"claude-flow memory search","negative":"claude-flow embeddings search"}
+{"anchor":"Help me delete vector","positive":"ruvector vector delete","negative":"ruvector collection delete"}
+{"anchor":"search embeddings","positive":"claude-flow embeddings search","negative":"claude-flow memory search"}
+{"anchor":"Help me list memory","positive":"claude-flow memory list","negative":"agentic-flow model list"}
+{"anchor":"create workflow","positive":"claude-flow workflow create","negative":"agentic-flow pipeline create"}
+{"anchor":"I want to find memory","positive":"claude-flow memory search","negative":"claude-flow embeddings search"}
+{"anchor":"Help me delete memory","positive":"claude-flow memory delete","negative":"ruvector collection delete"}
+{"anchor":"I want to list memory entries","positive":"claude-flow memory list","negative":"claude-flow task list"}
+{"anchor":"I need a way to get quantization info","positive":"ruvector quantize info","negative":"claude-flow agent status"}
+{"anchor":"I want to show snapshot","positive":"ruvector snapshot list","negative":"claude-flow memory list"}
+{"anchor":"How do I rebuild existing index?","positive":"ruvector index rebuild","negative":"claude-flow swarm init"}
+{"anchor":"I want to initialize hive-mind collective","positive":"claude-flow hive-mind init","negative":"claude-flow swarm init"}
+{"anchor":"search the memory","positive":"claude-flow memory search","negative":"claude-flow embeddings search"}
+{"anchor":"Help me stats index","positive":"ruvector index stats","negative":"agentic-flow cache stats"}
+{"anchor":"I need a way to list saved sessions","positive":"claude-flow session list","negative":"claude-flow agent list"}
+{"anchor":"I need to list task","positive":"claude-flow task list","negative":"ruvector snapshot list"}
+{"anchor":"I need to release claims","positive":"claude-flow claims release","negative":"agentic-flow embed"}
+{"anchor":"pretrain the hooks","positive":"claude-flow hooks pretrain","negative":"ruvector index build"}
+{"anchor":"optimize index","positive":"ruvector index optimize","negative":"claude-flow performance optimize"}
+{"anchor":"Help me info collection","positive":"ruvector collection info","negative":"claude-flow agent status"}
+{"anchor":"spawn the agent","positive":"claude-flow agent spawn","negative":"claude-flow hive-mind spawn"}
+{"anchor":"How do I get status of a specific agent?","positive":"claude-flow agent status","negative":"claude-flow swarm status"}
+{"anchor":"Compare similarity between two texts","positive":"agentic-flow similarity","negative":"claude-flow embeddings compare"}
+{"anchor":"How do I retrieve a value from memory by key?","positive":"claude-flow memory retrieve","negative":"ruvector vector get"}
+{"anchor":"Help me nearest search","positive":"agentic-flow search nearest","negative":"ruvector search knn"}
+{"anchor":"Help me list task","positive":"claude-flow task list","negative":"claude-flow memory list"}
+{"anchor":"Help me list snapshot","positive":"ruvector snapshot list","negative":"claude-flow task list"}
+{"anchor":"compare embeddings","positive":"claude-flow embeddings compare","negative":"agentic-flow similarity"}
+{"anchor":"Insert embeddings into the database","positive":"ruvector vector insert","negative":"agentic-flow cache set"}
+{"anchor":"How do I list available models?","positive":"agentic-flow model list","negative":"ruvector collection list"}
+{"anchor":"Can you range search?","positive":"agentic-flow search range","negative":"claude-flow swarm init"}
+{"anchor":"I need a way to delete a memory entry","positive":"claude-flow memory delete","negative":"ruvector vector delete"}
+{"anchor":"get memory","positive":"claude-flow memory retrieve","negative":"agentic-flow cache get"}
+{"anchor":"Can you list model?","positive":"agentic-flow model list","negative":"ruvector snapshot list"}
+{"anchor":"I need to set cache","positive":"agentic-flow cache set","negative":"claude-flow memory store"}
+{"anchor":"list the model","positive":"agentic-flow model list","negative":"ruvector collection list"}
+{"anchor":"Help me info collection","positive":"ruvector collection info","negative":"agentic-flow model info"}
+{"anchor":"statistics in cache","positive":"agentic-flow cache stats","negative":"ruvector collection info"}
+{"anchor":"get agent","positive":"claude-flow agent status","negative":"ruvector quantize info"}
+{"anchor":"make pipeline","positive":"agentic-flow pipeline create","negative":"claude-flow workflow create"}
+{"anchor":"I need to spawn agent","positive":"claude-flow agent spawn","negative":"claude-flow hive-mind spawn"}
+{"anchor":"How do I list available snapshots?","positive":"ruvector snapshot list","negative":"agentic-flow model list"}
+{"anchor":"list the agent","positive":"claude-flow agent list","negative":"agentic-flow model list"}
+{"anchor":"check the agent","positive":"claude-flow agent status","negative":"claude-flow swarm status"}
+{"anchor":"Help me list model","positive":"agentic-flow model list","negative":"claude-flow task list"}
+{"anchor":"I need a way to create a new task","positive":"claude-flow task create","negative":"claude-flow workflow create"}
+{"anchor":"stats in collection","positive":"ruvector collection info","negative":"agentic-flow cache stats"}
+{"anchor":"I need to list task","positive":"claude-flow task list","negative":"ruvector collection list"}
+{"anchor":"I want to batch search multiple queries","positive":"ruvector search batch","negative":"agentic-flow batch-embed"}
+{"anchor":"create index","positive":"ruvector index build","negative":"claude-flow hooks pretrain"}
+{"anchor":"I need to info quantize","positive":"ruvector quantize info","negative":"ruvector collection info"}
+{"anchor":"I want to release a claim on an issue","positive":"claude-flow claims release","negative":"ruvector collection create"}
+{"anchor":"Help me check swarm","positive":"claude-flow swarm status","negative":"claude-flow workflow status"}
+{"anchor":"run pipeline","positive":"agentic-flow pipeline run","negative":"claude-flow workflow execute"}
+{"anchor":"I need similarity functionality","positive":"claude-flow embeddings compare","negative":"agentic-flow similarity"}
+{"anchor":"Help me hybrid search","positive":"agentic-flow search hybrid","negative":"claude-flow memory search"}
+{"anchor":"I want to show snapshot","positive":"ruvector snapshot list","negative":"claude-flow task list"}
+{"anchor":"I need to nearest search","positive":"agentic-flow search nearest","negative":"ruvector search knn"}
+{"anchor":"build index","positive":"ruvector index build","negative":"claude-flow hooks pretrain"}
+{"anchor":"Help me spawn hive-mind","positive":"claude-flow hive-mind spawn","negative":"claude-flow agent spawn"}
+{"anchor":"Can you create collection?","positive":"ruvector collection create","negative":"claude-flow task create"}
+{"anchor":"I need to check swarm","positive":"claude-flow swarm status","negative":"claude-flow workflow status"}
+{"anchor":"Can you compare embeddings?","positive":"claude-flow embeddings compare","negative":"agentic-flow similarity"}
+{"anchor":"Hand off issue to another agent","positive":"claude-flow claims handoff","negative":"claude-flow claims release"}
+{"anchor":"How do I create a snapshot of collection?","positive":"ruvector snapshot create","negative":"ruvector collection create"}
+{"anchor":"I want to list all tasks","positive":"claude-flow task list","negative":"claude-flow memory list"}
+{"anchor":"init the swarm","positive":"claude-flow swarm init","negative":"agentic-flow pipeline create"}
+{"anchor":"I want to restore collection from snapshot","positive":"ruvector snapshot restore","negative":"claude-flow session restore"}
+{"anchor":"I need dashboard functionality","positive":"claude-flow hooks metrics","negative":"ruvector index stats"}
+{"anchor":"How do I list all tasks?","positive":"claude-flow task list","negative":"agentic-flow model list"}
+{"anchor":"I need a way to delete a memory entry","positive":"claude-flow memory delete","negative":"ruvector collection delete"}
+{"anchor":"Can you build index?","positive":"ruvector index build","negative":"claude-flow hooks pretrain"}
+{"anchor":"stop the agent","positive":"claude-flow agent terminate","negative":"agentic-flow embed"}
+{"anchor":"check the swarm","positive":"claude-flow swarm status","negative":"claude-flow workflow status"}
+{"anchor":"Vectorize code snippets for search","positive":"agentic-flow embed","negative":"ruvector vector insert"}
+{"anchor":"I want to find embeddings","positive":"claude-flow embeddings search","negative":"claude-flow memory search"}
+{"anchor":"Help me search embeddings","positive":"claude-flow embeddings search","negative":"claude-flow memory search"}
+{"anchor":"Get agent suggestions before starting work","positive":"claude-flow hooks pre-task","negative":"claude-flow hooks route"}
+{"anchor":"release claims","positive":"claude-flow claims release","negative":"agentic-flow embed"}
+{"anchor":"Help me list snapshot","positive":"ruvector snapshot list","negative":"agentic-flow model list"}
+{"anchor":"I need to create pipeline","positive":"agentic-flow pipeline create","negative":"claude-flow workflow create"}
+{"anchor":"Help me predict neural","positive":"claude-flow neural predict","negative":"agentic-flow embed"}
+{"anchor":"Can you set cache?","positive":"agentic-flow cache set","negative":"ruvector vector insert"}
+{"anchor":"Help me create task","positive":"claude-flow task create","negative":"claude-flow workflow create"}
+{"anchor":"Help me init swarm","positive":"claude-flow swarm init","negative":"claude-flow hive-mind init"}
+{"anchor":"show collection","positive":"ruvector collection list","negative":"claude-flow task list"}
+{"anchor":"I need to list memory","positive":"claude-flow memory list","negative":"ruvector snapshot list"}
+{"anchor":"hybrid search","positive":"agentic-flow search hybrid","negative":"ruvector search filter"}
+{"anchor":"Can you list collection?","positive":"ruvector collection list","negative":"claude-flow task list"}
+{"anchor":"Mark this task as complete","positive":"claude-flow task complete","negative":"claude-flow hooks post-task"}
+{"anchor":"I want to get workflow execution status","positive":"claude-flow workflow status","negative":"claude-flow swarm status"}
+{"anchor":"make task","positive":"claude-flow task create","negative":"claude-flow workflow create"}
+{"anchor":"I need a way to get cache statistics","positive":"agentic-flow cache stats","negative":"ruvector collection info"}
+{"anchor":"I need to apply quantize","positive":"ruvector quantize apply","negative":"agentic-flow model quantize"}
+{"anchor":"I need a way to get status of a specific agent","positive":"claude-flow agent status","negative":"claude-flow swarm status"}
+{"anchor":"How do I restore collection from snapshot?","positive":"ruvector snapshot restore","negative":"claude-flow session restore"}
+{"anchor":"Help me create snapshot","positive":"ruvector snapshot create","negative":"claude-flow session save"}
+{"anchor":"nearest the search","positive":"agentic-flow search nearest","negative":"ruvector search knn"}
+{"anchor":"I want to show memory","positive":"claude-flow memory list","negative":"ruvector collection list"}
+{"anchor":"Can you create snapshot?","positive":"ruvector snapshot create","negative":"claude-flow session save"}
+{"anchor":"How do I initialize hive-mind collective?","positive":"claude-flow hive-mind init","negative":"claude-flow swarm init"}
+{"anchor":"View the claims board","positive":"claude-flow claims board","negative":"claude-flow task list"}
+{"anchor":"delete memory","positive":"claude-flow memory delete","negative":"ruvector collection delete"}
+{"anchor":"How do I get collection information?","positive":"ruvector collection info","negative":"agentic-flow model info"}
+{"anchor":"Help me retrieve memory","positive":"claude-flow memory retrieve","negative":"agentic-flow cache get"}
+{"anchor":"Can you init swarm?","positive":"claude-flow swarm init","negative":"claude-flow hive-mind init"}
+{"anchor":"show snapshot","positive":"ruvector snapshot list","negative":"ruvector collection list"}
+{"anchor":"show task","positive":"claude-flow task list","negative":"claude-flow agent list"}
+{"anchor":"I need to visualize pipeline","positive":"agentic-flow pipeline visualize","negative":"ruvector collection create"}
+{"anchor":"I want to initialize a swarm with specified topology","positive":"claude-flow swarm init","negative":"agentic-flow pipeline create"}
+{"anchor":"Can you stats cache?","positive":"agentic-flow cache stats","negative":"ruvector index stats"}
+{"anchor":"list snapshot","positive":"ruvector snapshot list","negative":"agentic-flow model list"}
+{"anchor":"list the task","positive":"claude-flow task list","negative":"ruvector snapshot list"}
+{"anchor":"visualize pipeline","positive":"agentic-flow pipeline visualize","negative":"ruvector collection create"}
+{"anchor":"Save the current session state","positive":"claude-flow session save","negative":"ruvector snapshot create"}
+{"anchor":"Help me list task","positive":"claude-flow task list","negative":"ruvector snapshot list"}
+{"anchor":"I need a way to get status of a specific agent","positive":"claude-flow agent status","negative":"ruvector quantize info"}
+{"anchor":"I need to hybrid search","positive":"agentic-flow search hybrid","negative":"ruvector search filter"}
+{"anchor":"list task","positive":"claude-flow task list","negative":"ruvector collection list"}
+{"anchor":"I need to execute workflow","positive":"claude-flow workflow execute","negative":"agentic-flow pipeline run"}
+{"anchor":"Can you run pipeline?","positive":"agentic-flow pipeline run","negative":"claude-flow workflow execute"}
+{"anchor":"Help me complete task","positive":"claude-flow task complete","negative":"agentic-flow embed"}
+{"anchor":"I want to gracefully shutdown the swarm","positive":"claude-flow swarm shutdown","negative":"ruvector collection create"}
+{"anchor":"I want to list available snapshots","positive":"ruvector snapshot list","negative":"claude-flow task list"}
+{"anchor":"load in snapshot","positive":"ruvector snapshot restore","negative":"claude-flow session restore"}
+{"anchor":"get agent","positive":"claude-flow agent status","negative":"claude-flow workflow status"}
+{"anchor":"I need a way to list available snapshots","positive":"ruvector snapshot list","negative":"ruvector collection list"}
+{"anchor":"info the quantize","positive":"ruvector quantize info","negative":"claude-flow agent status"}
+{"anchor":"I need a way to get collection information","positive":"ruvector collection info","negative":"agentic-flow cache stats"}
+{"anchor":"shutdown swarm","positive":"claude-flow swarm shutdown","negative":"ruvector collection create"}
+{"anchor":"spawn the hive-mind","positive":"claude-flow hive-mind spawn","negative":"claude-flow agent spawn"}
+{"anchor":"How do I get quantization info?","positive":"ruvector quantize info","negative":"agentic-flow model info"}
+{"anchor":"insert the vector","positive":"ruvector vector insert","negative":"agentic-flow cache set"}
+{"anchor":"I need a way to list all tasks","positive":"claude-flow task list","negative":"agentic-flow model list"}
+{"anchor":"list collection","positive":"ruvector collection list","negative":"claude-flow memory list"}
+{"anchor":"I want to save memory","positive":"claude-flow memory store","negative":"ruvector collection create"}
+{"anchor":"I want to optimize index for search performance","positive":"ruvector index optimize","negative":"claude-flow performance optimize"}
+{"anchor":"I need to info quantize","positive":"ruvector quantize info","negative":"claude-flow agent status"}
+{"anchor":"Restore previous session","positive":"claude-flow session restore","negative":"ruvector snapshot restore"}
+{"anchor":"I need to list memory","positive":"claude-flow memory list","negative":"ruvector collection list"}
+{"anchor":"Help me info quantize","positive":"ruvector quantize info","negative":"claude-flow agent status"}
+{"anchor":"I need persist functionality","positive":"claude-flow session save","negative":"ruvector snapshot create"}
+{"anchor":"I need to list session","positive":"claude-flow session list","negative":"claude-flow task list"}
+{"anchor":"I want to execute a workflow","positive":"claude-flow workflow execute","negative":"agentic-flow pipeline run"}
+{"anchor":"Help me list memory","positive":"claude-flow memory list","negative":"ruvector snapshot list"}
+{"anchor":"hybrid the search","positive":"agentic-flow search hybrid","negative":"ruvector search filter"}
+{"anchor":"Help me search memory","positive":"claude-flow memory search","negative":"ruvector search knn"}
+{"anchor":"tune index","positive":"ruvector index optimize","negative":"claude-flow performance optimize"}
+{"anchor":"I need to list collection","positive":"ruvector collection list","negative":"claude-flow memory list"}
+{"anchor":"How do I get quantization info?","positive":"ruvector quantize info","negative":"claude-flow agent status"}
+{"anchor":"How do I delete vectors from collection?","positive":"ruvector vector delete","negative":"claude-flow memory delete"}
+{"anchor":"Can you list snapshot?","positive":"ruvector snapshot list","negative":"claude-flow agent list"}
+{"anchor":"Can you retrieve memory?","positive":"claude-flow memory retrieve","negative":"agentic-flow cache get"}
+{"anchor":"I need to check agent","positive":"claude-flow agent status","negative":"claude-flow swarm status"}
+{"anchor":"list snapshot","positive":"ruvector snapshot list","negative":"claude-flow task list"}
+{"anchor":"check the agent","positive":"claude-flow agent status","negative":"agentic-flow model info"}
+{"anchor":"I need a way to dispatch a background worker","positive":"claude-flow hooks worker dispatch","negative":"ruvector collection create"}
+{"anchor":"list snapshot","positive":"ruvector snapshot list","negative":"claude-flow memory list"}
+{"anchor":"get swarm","positive":"claude-flow swarm status","negative":"claude-flow workflow status"}
+{"anchor":"I want to show agent","positive":"claude-flow agent list","negative":"ruvector snapshot list"}
+{"anchor":"init the swarm","positive":"claude-flow swarm init","negative":"claude-flow hive-mind init"}
+{"anchor":"How do I get collection information?","positive":"ruvector collection info","negative":"agentic-flow cache stats"}
+{"anchor":"I need stats functionality","positive":"ruvector collection info","negative":"agentic-flow model info"}
+{"anchor":"I need to check agent","positive":"claude-flow agent status","negative":"ruvector collection info"}
+{"anchor":"How do I list available snapshots?","positive":"ruvector snapshot list","negative":"claude-flow memory list"}
+{"anchor":"How do I retrieve a value from memory by key?","positive":"claude-flow memory retrieve","negative":"agentic-flow cache get"}
+{"anchor":"I want to get cache statistics","positive":"agentic-flow cache stats","negative":"ruvector collection info"}
+{"anchor":"How do I list all collections?","positive":"ruvector collection list","negative":"claude-flow agent list"}
+{"anchor":"I want to make pipeline","positive":"agentic-flow pipeline create","negative":"claude-flow workflow create"}
+{"anchor":"list memory","positive":"claude-flow memory list","negative":"agentic-flow model list"}
+{"anchor":"I need to delete vector","positive":"ruvector vector delete","negative":"ruvector collection delete"}
+{"anchor":"Can you check agent?","positive":"claude-flow agent status","negative":"ruvector collection info"}
+{"anchor":"I want to list available snapshots","positive":"ruvector snapshot list","negative":"agentic-flow model list"}
+{"anchor":"kill agent","positive":"claude-flow agent terminate","negative":"ruvector collection create"}
+{"anchor":"create snapshot","positive":"ruvector snapshot create","negative":"ruvector collection create"}
+{"anchor":"retrieve in cache","positive":"agentic-flow cache get","negative":"claude-flow memory retrieve"}
+{"anchor":"Can you delete memory?","positive":"claude-flow memory delete","negative":"ruvector collection delete"}
+{"anchor":"check agent","positive":"claude-flow agent status","negative":"agentic-flow model info"}
+{"anchor":"I need a way to view learning metrics dashboard","positive":"claude-flow hooks metrics","negative":"ruvector index stats"}
+{"anchor":"dispatch in hooks","positive":"claude-flow hooks worker dispatch","negative":"ruvector collection create"}
+{"anchor":"list the memory","positive":"claude-flow memory list","negative":"claude-flow agent list"}
+{"anchor":"list memory","positive":"claude-flow memory list","negative":"ruvector collection list"}
+{"anchor":"Help me insert vector","positive":"ruvector vector insert","negative":"agentic-flow cache set"}
+{"anchor":"create snapshot","positive":"ruvector snapshot create","negative":"claude-flow session save"}
+{"anchor":"I want to delete a memory entry","positive":"claude-flow memory delete","negative":"ruvector collection delete"}
+{"anchor":"search memory","positive":"claude-flow memory search","negative":"agentic-flow search hybrid"}
+{"anchor":"I want to show snapshot","positive":"ruvector snapshot list","negative":"ruvector collection list"}
+{"anchor":"Can you create workflow?","positive":"claude-flow workflow create","negative":"ruvector collection create"}
+{"anchor":"I want to list all collections","positive":"ruvector collection list","negative":"agentic-flow model list"}
+{"anchor":"List pending tasks","positive":"claude-flow task list","negative":"claude-flow agent list"}
+{"anchor":"info the quantize","positive":"ruvector quantize info","negative":"ruvector collection info"}
+{"anchor":"I need to list memory","positive":"claude-flow memory list","negative":"claude-flow agent list"}
+{"anchor":"show memory","positive":"claude-flow memory list","negative":"claude-flow agent list"}
+{"anchor":"show collection","positive":"ruvector collection list","negative":"claude-flow agent list"}
+{"anchor":"I want to create a snapshot of collection","positive":"ruvector snapshot create","negative":"ruvector collection create"}
+{"anchor":"I need statistics functionality","positive":"agentic-flow cache stats","negative":"ruvector index stats"}
+{"anchor":"I need to delete vector","positive":"ruvector vector delete","negative":"claude-flow memory delete"}
+{"anchor":"delete vector","positive":"ruvector vector delete","negative":"claude-flow memory delete"}
+{"anchor":"info in index","positive":"ruvector index stats","negative":"agentic-flow cache stats"}
+{"anchor":"I need to delete memory","positive":"claude-flow memory delete","negative":"ruvector vector delete"}
+{"anchor":"Can you delete vector?","positive":"ruvector vector delete","negative":"claude-flow memory delete"}
+{"anchor":"How do I record task completion for learning?","positive":"claude-flow hooks post-task","negative":"ruvector collection create"}
+{"anchor":"I need a way to retrieve a value from memory by key","positive":"claude-flow memory retrieve","negative":"agentic-flow cache get"}
+{"anchor":"Help me create workflow","positive":"claude-flow workflow create","negative":"agentic-flow pipeline create"}
+{"anchor":"I want to create a snapshot of collection","positive":"ruvector snapshot create","negative":"claude-flow session save"}
+{"anchor":"I want to list all collections","positive":"ruvector collection list","negative":"claude-flow agent list"}
+{"anchor":"I need to search memory","positive":"claude-flow memory search","negative":"claude-flow embeddings search"}
+{"anchor":"I need a way to store a value in memory with optional namespace","positive":"claude-flow memory store","negative":"agentic-flow cache set"}
+{"anchor":"How do I delete vectors from collection?","positive":"ruvector vector delete","negative":"ruvector collection delete"}
+{"anchor":"Can you create snapshot?","positive":"ruvector snapshot create","negative":"ruvector collection create"}
+{"anchor":"I want to semantic vector search in memory","positive":"claude-flow memory search","negative":"agentic-flow search hybrid"}
+{"anchor":"worker the hooks","positive":"claude-flow hooks worker dispatch","negative":"agentic-flow embed"}
+{"anchor":"I need to stats index","positive":"ruvector index stats","negative":"claude-flow hooks metrics"}
+{"anchor":"I want to semantic vector search in memory","positive":"claude-flow memory search","negative":"ruvector search knn"}
+{"anchor":"Can you list memory?","positive":"claude-flow memory list","negative":"ruvector collection list"}
+{"anchor":"list memory","positive":"claude-flow memory list","negative":"claude-flow agent list"}
+{"anchor":"show memory","positive":"claude-flow memory list","negative":"agentic-flow model list"}
+{"anchor":"I want to create a new workflow","positive":"claude-flow workflow create","negative":"agentic-flow pipeline create"}
+{"anchor":"How do I insert vectors into collection?","positive":"ruvector vector insert","negative":"agentic-flow cache set"}
+{"anchor":"I need stats functionality","positive":"ruvector collection info","negative":"ruvector quantize info"}
+{"anchor":"I want to view learning metrics dashboard","positive":"claude-flow hooks metrics","negative":"ruvector index stats"}
+{"anchor":"Make prediction with neural model","positive":"claude-flow neural predict","negative":"claude-flow hooks route"}
+{"anchor":"I need to create collection","positive":"ruvector collection create","negative":"claude-flow memory store"}
+{"anchor":"Help me list memory","positive":"claude-flow memory list","negative":"claude-flow task list"}
+{"anchor":"Can you spawn agent?","positive":"claude-flow agent spawn","negative":"claude-flow hive-mind spawn"}
+{"anchor":"make snapshot","positive":"ruvector snapshot create","negative":"claude-flow session save"}

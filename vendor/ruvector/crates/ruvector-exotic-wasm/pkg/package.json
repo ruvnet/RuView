@@ -1,0 +1,43 @@
+{
+  "name": "@ruvector/exotic-wasm",
+  "type": "module",
+  "collaborators": [
+    "RuVector Team"
+  ],
+  "author": "RuVector Team <ruvnet@users.noreply.github.com>",
+  "description": "Exotic AI mechanisms for emergent behavior - Neural Autonomous Orgs, Morphogenetic Networks, Time Crystals",
+  "version": "0.1.29",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector"
+  },
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "files": [
+    "ruvector_exotic_wasm_bg.wasm",
+    "ruvector_exotic_wasm.js",
+    "ruvector_exotic_wasm.d.ts",
+    "ruvector_exotic_wasm_bg.wasm.d.ts",
+    "README.md"
+  ],
+  "main": "ruvector_exotic_wasm.js",
+  "homepage": "https://ruv.io",
+  "types": "ruvector_exotic_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ],
+  "keywords": [
+    "wasm",
+    "exotic-ai",
+    "neural-autonomous-org",
+    "morphogenetic",
+    "time-crystals",
+    "ruvector",
+    "webassembly",
+    "emergent-behavior",
+    "swarm-intelligence",
+    "artificial-life"
+  ]
+}

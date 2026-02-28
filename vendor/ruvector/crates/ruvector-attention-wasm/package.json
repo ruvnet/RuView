@@ -1,0 +1,66 @@
+{
+  "name": "@ruvector/attention-wasm",
+  "version": "0.1.32",
+  "description": "High-performance WebAssembly attention mechanisms for transformers and LLMs: Multi-Head, Flash Attention, Hyperbolic, Linear (Performer), MoE, Local-Global, and CGT Sheaf Attention with coherence gating. GPU-accelerated with SIMD fallback.",
+  "main": "pkg/ruvector_attention_wasm.js",
+  "module": "pkg/ruvector_attention_wasm.js",
+  "types": "pkg/ruvector_attention_wasm.d.ts",
+  "files": [
+    "pkg/",
+    "js/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "wasm-pack build --target web --out-dir pkg",
+    "build:node": "wasm-pack build --target nodejs --out-dir pkg-node",
+    "build:bundler": "wasm-pack build --target bundler --out-dir pkg-bundler",
+    "build:all": "npm run build && npm run build:node && npm run build:bundler",
+    "test": "wasm-pack test --headless --firefox",
+    "test:chrome": "wasm-pack test --headless --chrome",
+    "clean": "rm -rf pkg pkg-node pkg-bundler target",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ruvnet/ruvector.git"
+  },
+  "keywords": [
+    "wasm",
+    "webassembly",
+    "attention",
+    "transformer",
+    "llm",
+    "machine-learning",
+    "neural-networks",
+    "multi-head-attention",
+    "flash-attention",
+    "hyperbolic",
+    "moe",
+    "mixture-of-experts",
+    "coherence",
+    "cgt",
+    "sheaf-attention",
+    "ai",
+    "deep-learning",
+    "gpu",
+    "simd",
+    "infonce",
+    "contrastive-learning"
+  ],
+  "author": "rUv <team@ruvector.dev>",
+  "license": "MIT OR Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "homepage": "https://ruv.io/ruvector",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

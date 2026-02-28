@@ -1,0 +1,214 @@
+{
+  "version": "1.0.0",
+  "updated": "2026-01-03T00:00:00.000Z",
+  "gcs_bucket": "ruvector-models",
+  "ipfs_gateway": "https://ipfs.io/ipfs",
+  "models": {
+    "minilm-l6": {
+      "name": "MiniLM-L6-v2",
+      "type": "embedding",
+      "huggingface": "Xenova/all-MiniLM-L6-v2",
+      "dimensions": 384,
+      "size": "22MB",
+      "tier": 1,
+      "quantized": ["int8", "fp16"],
+      "description": "Fast, good quality embeddings for edge deployment",
+      "recommended_for": ["edge-minimal", "low-memory"],
+      "artifacts": {}
+    },
+    "e5-small": {
+      "name": "E5-Small-v2",
+      "type": "embedding",
+      "huggingface": "Xenova/e5-small-v2",
+      "dimensions": 384,
+      "size": "28MB",
+      "tier": 1,
+      "quantized": ["int8", "fp16"],
+      "description": "Microsoft E5 - excellent for retrieval tasks",
+      "recommended_for": ["retrieval", "semantic-search"],
+      "artifacts": {}
+    },
+    "bge-small": {
+      "name": "BGE-Small-EN-v1.5",
+      "type": "embedding",
+      "huggingface": "Xenova/bge-small-en-v1.5",
+      "dimensions": 384,
+      "size": "33MB",
+      "tier": 2,
+      "quantized": ["int8", "fp16"],
+      "description": "BAAI BGE - best for retrieval and ranking",
+      "recommended_for": ["retrieval", "reranking"],
+      "artifacts": {}
+    },
+    "gte-small": {
+      "name": "GTE-Small",
+      "type": "embedding",
+      "huggingface": "Xenova/gte-small",
+      "dimensions": 384,
+      "size": "67MB",
+      "tier": 2,
+      "quantized": ["int8", "fp16"],
+      "description": "General Text Embeddings - high quality",
+      "recommended_for": ["general", "quality"],
+      "artifacts": {}
+    },
+    "gte-base": {
+      "name": "GTE-Base",
+      "type": "embedding",
+      "huggingface": "Xenova/gte-base",
+      "dimensions": 768,
+      "size": "100MB",
+      "tier": 3,
+      "quantized": ["int8", "fp16"],
+      "description": "GTE Base - 768 dimensions for higher quality",
+      "recommended_for": ["cloud", "high-quality"],
+      "artifacts": {}
+    },
+    "multilingual-e5": {
+      "name": "Multilingual-E5-Small",
+      "type": "embedding",
+      "huggingface": "Xenova/multilingual-e5-small",
+      "dimensions": 384,
+      "size": "118MB",
+      "tier": 3,
+      "quantized": ["int8", "fp16"],
+      "description": "Supports 100+ languages",
+      "recommended_for": ["multilingual", "international"],
+      "artifacts": {}
+    },
+    "distilgpt2": {
+      "name": "DistilGPT2",
+      "type": "generation",
+      "huggingface": "Xenova/distilgpt2",
+      "size": "82MB",
+      "tier": 1,
+      "quantized": ["int8", "int4", "fp16"],
+      "capabilities": ["general", "completion"],
+      "description": "Fast distilled GPT-2 for text generation",
+      "recommended_for": ["edge", "fast-inference"],
+      "artifacts": {}
+    },
+    "tinystories": {
+      "name": "TinyStories-33M",
+      "type": "generation",
+      "huggingface": "Xenova/TinyStories-33M",
+      "size": "65MB",
+      "tier": 1,
+      "quantized": ["int8", "int4"],
+      "capabilities": ["stories", "creative"],
+      "description": "Ultra-small model trained on children's stories",
+      "recommended_for": ["creative", "stories", "minimal"],
+      "artifacts": {}
+    },
+    "starcoder-tiny": {
+      "name": "TinyStarCoder-Py",
+      "type": "generation",
+      "huggingface": "Xenova/tiny_starcoder_py",
+      "size": "40MB",
+      "tier": 1,
+      "quantized": ["int8", "int4"],
+      "capabilities": ["code", "python"],
+      "description": "Ultra-small Python code generation",
+      "recommended_for": ["code", "python", "edge"],
+      "artifacts": {}
+    },
+    "phi-1.5": {
+      "name": "Phi-1.5",
+      "type": "generation",
+      "huggingface": "Xenova/phi-1_5",
+      "size": "280MB",
+      "tier": 2,
+      "quantized": ["int8", "int4", "fp16"],
+      "capabilities": ["code", "reasoning", "math"],
+      "description": "Microsoft Phi-1.5 - excellent code and reasoning",
+      "recommended_for": ["code", "reasoning", "balanced"],
+      "artifacts": {}
+    },
+    "codegen-350m": {
+      "name": "CodeGen-350M-Mono",
+      "type": "generation",
+      "huggingface": "Xenova/codegen-350M-mono",
+      "size": "320MB",
+      "tier": 2,
+      "quantized": ["int8", "int4", "fp16"],
+      "capabilities": ["code", "python"],
+      "description": "Salesforce CodeGen - Python specialist",
+      "recommended_for": ["code", "python"],
+      "artifacts": {}
+    },
+    "qwen-0.5b": {
+      "name": "Qwen-1.5-0.5B",
+      "type": "generation",
+      "huggingface": "Xenova/Qwen1.5-0.5B",
+      "size": "430MB",
+      "tier": 3,
+      "quantized": ["int8", "int4", "fp16"],
+      "capabilities": ["multilingual", "general", "code"],
+      "description": "Alibaba Qwen 0.5B - multilingual capabilities",
+      "recommended_for": ["multilingual", "general"],
+      "artifacts": {}
+    },
+    "phi-2": {
+      "name": "Phi-2",
+      "type": "generation",
+      "huggingface": "Xenova/phi-2",
+      "size": "550MB",
+      "tier": 3,
+      "quantized": ["int8", "int4", "fp16"],
+      "capabilities": ["code", "reasoning", "math", "general"],
+      "description": "Microsoft Phi-2 - advanced reasoning model",
+      "recommended_for": ["reasoning", "code", "quality"],
+      "artifacts": {}
+    },
+    "gemma-2b": {
+      "name": "Gemma-2B-IT",
+      "type": "generation",
+      "huggingface": "Xenova/gemma-2b-it",
+      "size": "1.1GB",
+      "tier": 4,
+      "quantized": ["int8", "int4", "fp16"],
+      "capabilities": ["instruction", "general", "code", "reasoning"],
+      "description": "Google Gemma 2B instruction-tuned",
+      "recommended_for": ["cloud", "high-quality", "instruction"],
+      "artifacts": {}
+    }
+  },
+  "profiles": {
+    "edge-minimal": {
+      "description": "Minimal footprint for constrained edge devices",
+      "embedding": "minilm-l6",
+      "generation": "tinystories",
+      "total_size": "~87MB",
+      "quantization": "int4"
+    },
+    "edge-balanced": {
+      "description": "Best quality/size ratio for edge deployment",
+      "embedding": "e5-small",
+      "generation": "phi-1.5",
+      "total_size": "~308MB",
+      "quantization": "int8"
+    },
+    "edge-code": {
+      "description": "Optimized for code generation tasks",
+      "embedding": "bge-small",
+      "generation": "starcoder-tiny",
+      "total_size": "~73MB",
+      "quantization": "int8"
+    },
+    "edge-full": {
+      "description": "Maximum quality on edge devices",
+      "embedding": "gte-base",
+      "generation": "phi-2",
+      "total_size": "~650MB",
+      "quantization": "int8"
+    },
+    "cloud-optimal": {
+      "description": "Best quality for cloud/server deployment",
+      "embedding": "gte-base",
+      "generation": "gemma-2b",
+      "total_size": "~1.2GB",
+      "quantization": "fp16"
+    }
+  },
+  "adapters": {}
+}

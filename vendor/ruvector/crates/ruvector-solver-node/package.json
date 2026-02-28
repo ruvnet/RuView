@@ -1,0 +1,55 @@
+{
+  "name": "@ruvector/solver",
+  "version": "0.1.0",
+  "description": "Sublinear-time sparse linear solver for Node.js via NAPI-RS",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "solver",
+    "triples": {
+      "defaults": true,
+      "additional": [
+        "x86_64-unknown-linux-musl",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-unknown-linux-musl",
+        "aarch64-apple-darwin",
+        "x86_64-pc-windows-msvc"
+      ]
+    }
+  },
+  "scripts": {
+    "artifacts": "napi artifacts",
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "prepublishOnly": "napi prepublish -t npm",
+    "test": "node --test test/*.test.js",
+    "version": "napi version"
+  },
+  "keywords": [
+    "ruvector",
+    "solver",
+    "sparse-matrix",
+    "linear-algebra",
+    "pagerank",
+    "sublinear",
+    "neumann-series",
+    "napi-rs",
+    "rust"
+  ],
+  "author": "Ruvector Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.16.0"
+  },
+  "engines": {
+    "node": ">= 18"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  }
+}

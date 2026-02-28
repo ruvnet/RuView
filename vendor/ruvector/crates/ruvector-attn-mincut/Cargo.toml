@@ -1,0 +1,21 @@
+[package]
+name = "ruvector-attn-mincut"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Min-cut gating attention operator: dynamic graph-based alternative to softmax attention"
+keywords = ["attention", "min-cut", "gating", "transformer", "graph"]
+categories = ["algorithms", "science", "mathematics"]
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.10"
+
+[dev-dependencies]

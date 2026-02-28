@@ -1,0 +1,18 @@
+[package]
+name = "ruvector-temporal-tensor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Temporal tensor compression with tiered quantization for RuVector"
+
+[features]
+default = []
+ffi = []          # Enable WASM/C FFI exports
+simd = []         # Enable SIMD-accelerated quantization (future)
+persistence = []  # Enable disk-backed BlockIO and MetaLog (uses std::fs)
+
+[lib]
+crate-type = ["lib"]

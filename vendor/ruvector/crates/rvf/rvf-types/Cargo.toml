@@ -1,0 +1,24 @@
+[package]
+name = "rvf-types"
+version = "0.2.0"
+edition = "2021"
+description = "RuVector Format core types -- segment headers, enums, flags"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector"
+readme = "README.md"
+categories = ["data-structures", "no-std"]
+keywords = ["vector", "database", "binary-format", "simd"]
+rust-version = "1.87"
+
+[features]
+default = []
+alloc = []
+std = ["alloc"]
+serde = ["dep:serde"]
+ed25519 = ["dep:ed25519-dalek", "dep:rand_core"]
+
+[dependencies]
+serde = { version = "1", default-features = false, features = ["derive"], optional = true }
+ed25519-dalek = { version = "2", default-features = false, features = ["alloc", "rand_core"], optional = true }
+rand_core = { version = "0.6", default-features = false, optional = true }

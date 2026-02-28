@@ -1,0 +1,44 @@
+[package]
+name = "ruvector-learning-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "Ultra-fast MicroLoRA adaptation for WASM - rank-2 LoRA with <100us latency for per-operator learning"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://ruv.io"
+documentation = "https://docs.rs/ruvector-learning-wasm"
+authors = ["rUv <ruvnet@users.noreply.github.com>"]
+keywords = ["lora", "machine-learning", "wasm", "neural-network", "adaptation"]
+categories = ["algorithms", "wasm", "science", "no-std"]
+rust-version = "1.70"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde-wasm-bindgen = { version = "0.6", optional = true }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[features]
+default = ["std"]
+std = []
+serde = ["dep:serde", "dep:serde-wasm-bindgen"]
+simd = []  # Enable SIMD optimizations when available
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.release.package."*"]
+opt-level = "z"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

@@ -1,0 +1,11 @@
+[package]
+name = "ruvector-attention-integration-test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ruvector-attention = "0.1.0"
+
+[[bin]]
+name = "test-attention"
+path = "src/main.rs"

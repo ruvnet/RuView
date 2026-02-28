@@ -1,0 +1,181 @@
+[package]
+name = "ruvllm"
+version = "2.0.0"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT"
+authors = ["Ruvector Team"]
+description = "Self-learning LLM with LFM2, Ruvector integration, and optimized NEON/Metal kernels"
+repository = "https://github.com/ruvnet/ruvector"
+readme = "README.md"
+keywords = ["llm", "self-learning", "vector-database", "rag", "lfm2", "neon", "simd"]
+categories = ["science", "machine-learning"]
+
+[dependencies]
+# Internal dependencies
+ruvector-core = { path = "../../crates/ruvector-core", default-features = false }
+ruvector-gnn = { path = "../../crates/ruvector-gnn", default-features = false }
+ruvector-attention = { path = "../../crates/ruvector-attention" }
+ruvector-graph = { path = "../../crates/ruvector-graph" }
+
+# Optimized inference backend (ruvllm crate)
+ruvllm-lib = { package = "ruvllm", path = "../../crates/ruvllm", default-features = false, features = ["async-runtime"] }
+
+# Async runtime
+tokio = { version = "1.41", features = ["rt-multi-thread", "sync", "macros", "time", "fs"] }
+futures = "0.3"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = { version = "2.0.0-rc.3", features = ["serde"] }
+toml = "0.8"
+
+# Numerics
+ndarray = { version = "0.16", features = ["serde", "rayon"] }
+rand = "0.8"
+rand_distr = "0.4"
+simsimd = "5.9"
+
+# Real LLM Inference (CPU + SIMD optimized)
+candle-core = { version = "0.8", optional = true }
+candle-nn = { version = "0.8", optional = true }
+candle-transformers = { version = "0.8", optional = true }
+hf-hub = { version = "0.3", features = ["tokio"], optional = true }
+tokenizers = { version = "0.20", optional = true }
+
+# Memory-mapped file support for large models
+memmap2 = { version = "0.9", optional = true }
+byteorder = { version = "1.5", optional = true }
+half = { version = "2.4", features = ["num-traits", "serde"], optional = true }
+dirs = { version = "5.0", optional = true }
+
+# SONA Export (optional - for HuggingFace export)
+ruvector-sona = { path = "../../crates/sona", optional = true }
+
+# Utilities
+uuid = { version = "1.11", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Performance
+dashmap = "6.1"
+parking_lot = "0.12"
+lru = "0.16"
+rayon = "1.10"
+crossbeam = "0.8"
+once_cell = "1.20"
+
+# Hashing for deduplication
+ahash = "0.8"
+
+# Metrics
+prometheus = { version = "0.13", optional = true }
+
+# HTTP (optional server)
+axum = { version = "0.7", optional = true }
+tower = { version = "0.4", optional = true }
+tower-http = { version = "0.5", features = ["cors", "trace"], optional = true }
+
+# N-API bindings for Node.js
+napi = { version = "2.16", features = ["async", "serde-json"], optional = true }
+napi-derive = { version = "2.16", optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+proptest = "1.5"
+tokio-test = "0.4"
+tempfile = "3.13"
+approx = "0.5"
+
+[features]
+default = ["storage", "metrics"]
+storage = ["ruvector-core/storage", "ruvector-core/hnsw"]
+metrics = ["prometheus"]
+server = ["axum", "tower", "tower-http"]
+# Real LLM inference with CPU SIMD optimization
+real-inference = ["candle-core", "candle-nn", "candle-transformers", "hf-hub", "tokenizers", "memmap2", "byteorder", "half", "dirs"]
+# HuggingFace export for learned patterns and LoRA weights
+hf-export = ["ruvector-sona"]
+# N-API bindings for Node.js
+napi = ["dep:napi", "dep:napi-derive"]
+# Multi-threaded GEMM/GEMV with rayon (4-6x speedup)
+parallel = ["ruvllm-lib/parallel"]
+# Candle backend for LLM inference (Rust-native, Metal acceleration on Mac)
+candle = ["ruvllm-lib/candle"]
+# Metal GPU acceleration for Apple Silicon (M1/M2/M3/M4)
+metal = ["ruvllm-lib/metal"]
+# Full inference with Metal
+inference-metal = ["candle", "metal", "parallel"]
+full = ["storage", "metrics", "server", "real-inference", "hf-export", "parallel"]
+
+[[bench]]
+name = "pipeline"
+harness = false
+
+[[bench]]
+name = "router"
+harness = false
+
+[[bench]]
+name = "memory"
+harness = false
+
+[[bench]]
+name = "attention"
+harness = false
+
+[[bench]]
+name = "sona_bench"
+harness = false
+
+[lib]
+name = "ruvllm"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "ruvllm-demo"
+path = "src/bin/demo.rs"
+
+[[bin]]
+name = "ruvllm-server"
+path = "src/bin/server.rs"
+required-features = ["server"]
+
+[[bin]]
+name = "ruvllm-bench"
+path = "src/bin/bench.rs"
+
+[[bin]]
+name = "ruvllm-benchmark-suite"
+path = "src/bin/benchmark_suite.rs"
+
+[[bin]]
+name = "ruvllm-simd-demo"
+path = "src/bin/simd_demo.rs"
+
+[[bin]]
+name = "ruvllm-pretrain"
+path = "src/bin/pretrain.rs"
+
+[[bin]]
+name = "ruvllm-export"
+path = "src/bin/export.rs"
+required-features = ["hf-export"]
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+[profile.bench]
+inherits = "release"
+debug = true

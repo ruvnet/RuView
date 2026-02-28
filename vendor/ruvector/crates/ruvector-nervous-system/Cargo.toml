@@ -1,0 +1,119 @@
+[package]
+name = "ruvector-nervous-system"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Bio-inspired neural system with spiking networks, BTSP learning, and EWC plasticity"
+keywords = ["neural", "spiking", "neuromorphic", "plasticity", "learning"]
+categories = ["science", "algorithms", "simulation"]
+readme = "README.md"
+
+[dependencies]
+# Core deps
+rand = { workspace = true }
+rand_distr = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+ndarray = { workspace = true }
+anyhow = { workspace = true }
+parking_lot = { workspace = true }
+
+# Parallel processing (optional for EWC)
+rayon = { workspace = true, optional = true }
+
+# Optional serialization
+bincode = { workspace = true, optional = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+proptest = { workspace = true }
+approx = "0.5"
+
+[features]
+default = ["parallel"]
+serde = ["dep:bincode"]
+parallel = ["rayon"]
+
+[[bench]]
+name = "pattern_separation"
+harness = false
+
+[[bench]]
+name = "eprop_bench"
+harness = false
+
+[[bench]]
+name = "ewc_bench"
+harness = false
+
+[[bench]]
+name = "btsp_bench"
+harness = false
+
+[[bench]]
+name = "hdc_bench"
+harness = false
+
+[[bench]]
+name = "latency_benchmarks"
+harness = false
+
+# Unified Tier Examples (in examples/tiers/)
+# Tier 1: Immediate Practical Applications
+[[example]]
+name = "t1_anomaly_detection"
+path = "examples/tiers/t1_anomaly_detection.rs"
+
+[[example]]
+name = "t1_edge_autonomy"
+path = "examples/tiers/t1_edge_autonomy.rs"
+
+[[example]]
+name = "t1_medical_wearable"
+path = "examples/tiers/t1_medical_wearable.rs"
+
+# Tier 2: Near-Term Transformative Applications
+[[example]]
+name = "t2_self_optimizing"
+path = "examples/tiers/t2_self_optimizing.rs"
+
+[[example]]
+name = "t2_swarm_intelligence"
+path = "examples/tiers/t2_swarm_intelligence.rs"
+
+[[example]]
+name = "t2_adaptive_simulation"
+path = "examples/tiers/t2_adaptive_simulation.rs"
+
+# Tier 3: Exotic But Real Applications
+[[example]]
+name = "t3_self_awareness"
+path = "examples/tiers/t3_self_awareness.rs"
+
+[[example]]
+name = "t3_synthetic_nervous"
+path = "examples/tiers/t3_synthetic_nervous.rs"
+
+[[example]]
+name = "t3_bio_machine"
+path = "examples/tiers/t3_bio_machine.rs"
+
+# Tier 4: SOTA & Exotic Research Applications
+[[example]]
+name = "t4_neuromorphic_rag"
+path = "examples/tiers/t4_neuromorphic_rag.rs"
+
+[[example]]
+name = "t4_agentic_self_model"
+path = "examples/tiers/t4_agentic_self_model.rs"
+
+[[example]]
+name = "t4_collective_dreaming"
+path = "examples/tiers/t4_collective_dreaming.rs"
+
+[[example]]
+name = "t4_compositional_hdc"
+path = "examples/tiers/t4_compositional_hdc.rs"

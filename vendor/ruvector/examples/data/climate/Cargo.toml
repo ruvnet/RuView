@@ -1,0 +1,52 @@
+[package]
+name = "ruvector-data-climate"
+version.workspace = true
+edition.workspace = true
+description = "NOAA/NASA climate data integration with regime shift detection for RuVector"
+license.workspace = true
+repository.workspace = true
+keywords = ["climate", "noaa", "nasa", "time-series", "regime-shift"]
+categories = ["science", "database"]
+
+[dependencies]
+# Core framework
+ruvector-data-framework = { path = "../framework" }
+
+# Async runtime
+tokio.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# HTTP client
+reqwest.workspace = true
+
+# Time handling
+chrono.workspace = true
+
+# Logging
+tracing.workspace = true
+thiserror.workspace = true
+
+# Data processing & numerical analysis
+rayon.workspace = true
+ndarray.workspace = true
+ndarray-stats = "0.6"
+
+# Statistical analysis
+statrs = "0.17"
+
+# Geospatial
+geo = "0.28"
+
+[dev-dependencies]
+tokio-test = "0.4"
+approx = "0.5"
+rand = "0.8"
+
+[[example]]
+name = "regime_detector"
+path = "examples/regime_detector.rs"

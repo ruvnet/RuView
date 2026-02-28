@@ -1,0 +1,65 @@
+{
+  "name": "@ruvector/graph-transformer",
+  "version": "2.0.4",
+  "description": "Proof-gated graph transformer with 8 verified modules — physics, biological, manifold, temporal, economic graph intelligence via NAPI-RS",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "ruvector-graph-transformer",
+    "triples": {
+      "defaults": false,
+      "additional": [
+        "x86_64-unknown-linux-gnu",
+        "x86_64-unknown-linux-musl",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-unknown-linux-musl",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+        "x86_64-pc-windows-msvc"
+      ]
+    }
+  },
+  "scripts": {
+    "artifacts": "napi artifacts",
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "prepublishOnly": "napi prepublish -t npm",
+    "test": "cargo test -p ruvector-graph-transformer-node",
+    "version": "napi version"
+  },
+  "keywords": [
+    "ruvector",
+    "graph-transformer",
+    "proof-gated",
+    "attention",
+    "verified-training",
+    "gnn",
+    "graph-neural-network",
+    "napi-rs"
+  ],
+  "author": "Ruvector Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.16.0"
+  },
+  "engines": {
+    "node": ">= 10"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "optionalDependencies": {
+    "@ruvector/graph-transformer-linux-x64-gnu": "2.0.4",
+    "@ruvector/graph-transformer-linux-x64-musl": "2.0.4",
+    "@ruvector/graph-transformer-linux-arm64-gnu": "2.0.4",
+    "@ruvector/graph-transformer-linux-arm64-musl": "2.0.4",
+    "@ruvector/graph-transformer-darwin-x64": "2.0.4",
+    "@ruvector/graph-transformer-darwin-arm64": "2.0.4",
+    "@ruvector/graph-transformer-win32-x64-msvc": "2.0.4"
+  }
+}

@@ -1,0 +1,373 @@
+{
+  "suggestions": [
+    {
+      "id": "sug-1766696869695",
+      "suggested": "rust-developer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:07:49.695Z"
+    },
+    {
+      "id": "sug-1766696869696",
+      "suggested": "typescript-developer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:07:49.696Z"
+    },
+    {
+      "id": "sug-1766696944932",
+      "suggested": "typescript-developer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:09:04.932Z"
+    },
+    {
+      "id": "sug-1766697047022",
+      "suggested": "coder",
+      "confidence": 0,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:10:47.022Z"
+    },
+    {
+      "id": "sug-1766697047023",
+      "suggested": "rust-developer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:10:47.023Z"
+    },
+    {
+      "id": "sug-1766697047024",
+      "suggested": "technical-writer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:10:47.024Z"
+    },
+    {
+      "id": "sug-1766697047025",
+      "suggested": "typescript-developer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:10:47.025Z"
+    },
+    {
+      "id": "sug-1766697051733",
+      "suggested": "rust-developer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:10:51.733Z"
+    },
+    {
+      "id": "sug-1766697051734",
+      "suggested": "typescript-developer",
+      "confidence": 0.8175744761936437,
+      "followed": true,
+      "outcome": true,
+      "timestamp": "2025-12-25T21:10:51.734Z"
+    },
+    {
+      "id": "sug-1766697099517",
+      "suggested": "coder",
+      "confidence": 0,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:11:39.517Z"
+    },
+    {
+      "id": "sug-1766697575536",
+      "suggested": "reviewer",
+      "confidence": 0,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:19:35.536Z"
+    },
+    {
+      "id": "sug-1766697575537",
+      "suggested": "rust-developer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:19:35.537Z"
+    },
+    {
+      "id": "sug-1766697575538",
+      "suggested": "technical-writer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:19:35.538Z"
+    },
+    {
+      "id": "sug-1766697575539",
+      "suggested": "typescript-developer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:19:35.539Z"
+    },
+    {
+      "id": "sug-1766697579838",
+      "suggested": "rust-developer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:19:39.838Z"
+    },
+    {
+      "id": "sug-1766697579839",
+      "suggested": "typescript-developer",
+      "confidence": 0.8175744761936437,
+      "followed": true,
+      "outcome": true,
+      "timestamp": "2025-12-25T21:19:39.839Z"
+    },
+    {
+      "id": "sug-1766698024399",
+      "suggested": "coder",
+      "confidence": 0,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:27:04.399Z"
+    },
+    {
+      "id": "sug-1766698092742",
+      "suggested": "coder",
+      "confidence": 0,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:28:12.742Z"
+    },
+    {
+      "id": "sug-1766698123187",
+      "suggested": "config-specialist",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:28:43.187Z"
+    },
+    {
+      "id": "sug-1766698142174",
+      "suggested": "config-specialist",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:29:02.174Z"
+    },
+    {
+      "id": "sug-1766698164035",
+      "suggested": "config-specialist",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:29:24.035Z"
+    },
+    {
+      "id": "sug-1766698182650",
+      "suggested": "config-specialist",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:29:42.650Z"
+    },
+    {
+      "id": "sug-1766698214182",
+      "suggested": "coder",
+      "confidence": 0,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:30:14.182Z"
+    },
+    {
+      "id": "sug-1766698342945",
+      "suggested": "technical-writer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:32:22.945Z"
+    },
+    {
+      "id": "sug-1766698412240",
+      "suggested": "coder",
+      "confidence": 0,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:33:32.240Z"
+    },
+    {
+      "id": "sug-1766698552484",
+      "suggested": "javascript-developer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:35:52.484Z"
+    },
+    {
+      "id": "sug-1766698573803",
+      "suggested": "javascript-developer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:36:13.803Z"
+    },
+    {
+      "id": "sug-1766698588851",
+      "suggested": "javascript-developer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:36:28.851Z"
+    },
+    {
+      "id": "sug-1766698602266",
+      "suggested": "javascript-developer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:36:42.266Z"
+    },
+    {
+      "id": "sug-1766698629011",
+      "suggested": "javascript-developer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:37:09.011Z"
+    },
+    {
+      "id": "sug-1766698648872",
+      "suggested": "coder",
+      "confidence": 0,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:37:28.872Z"
+    },
+    {
+      "id": "sug-1766698813467",
+      "suggested": "javascript-developer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:40:13.467Z"
+    },
+    {
+      "id": "sug-1766698845700",
+      "suggested": "reviewer",
+      "confidence": 0,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:40:45.700Z"
+    },
+    {
+      "id": "sug-1766698892111",
+      "suggested": "javascript-developer",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:41:32.111Z"
+    },
+    {
+      "id": "sug-1766698923390",
+      "suggested": "rust-developer",
+      "confidence": 0.8008878553727657,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:42:03.390Z"
+    },
+    {
+      "id": "sug-1766698948917",
+      "suggested": "config-specialist",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:42:28.917Z"
+    },
+    {
+      "id": "sug-1766698974976",
+      "suggested": "rust-developer",
+      "confidence": 0.8008878553727657,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:42:54.976Z"
+    },
+    {
+      "id": "sug-1766698996374",
+      "suggested": "rust-developer",
+      "confidence": 0.810964637699407,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:43:16.374Z"
+    },
+    {
+      "id": "sug-1766699010522",
+      "suggested": "coder",
+      "confidence": 0,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:43:30.522Z"
+    },
+    {
+      "id": "sug-1766699232113",
+      "suggested": "config-specialist",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:47:12.113Z"
+    },
+    {
+      "id": "sug-1766699268392",
+      "suggested": "config-specialist",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:47:48.392Z"
+    },
+    {
+      "id": "sug-1766699294975",
+      "suggested": "rust-developer",
+      "confidence": 0.8008878553727657,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-25T21:48:14.975Z"
+    },
+    {
+      "id": "sug-1766795726259",
+      "suggested": "rust-developer",
+      "confidence": 0.8008878553727657,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-27T00:35:26.259Z"
+    },
+    {
+      "id": "sug-1766795757011",
+      "suggested": "tester",
+      "confidence": 0,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-27T00:35:57.011Z"
+    },
+    {
+      "id": "sug-1767032540203",
+      "suggested": "system-admin",
+      "confidence": 0.8175744761936437,
+      "followed": null,
+      "outcome": null,
+      "timestamp": "2025-12-29T18:22:20.203Z"
+    }
+  ],
+  "followRates": {
+    "typescript-developer": {
+      "total": 2,
+      "followed": 2,
+      "followedSuccess": 2,
+      "ignoredSuccess": 0
+    }
+  },
+  "lastUpdated": "2025-12-25T21:07:36.675Z"
+}

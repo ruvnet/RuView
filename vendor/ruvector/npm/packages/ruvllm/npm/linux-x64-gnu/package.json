@@ -1,0 +1,30 @@
+{
+  "name": "@ruvector/ruvllm-linux-x64-gnu",
+  "version": "2.0.0",
+  "description": "RuvLLM native bindings for Linux x64 (glibc)",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "ruvllm.linux-x64-gnu.node",
+  "files": [
+    "ruvllm.linux-x64-gnu.node"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "npm/packages/ruvllm"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">= 16"
+  },
+  "libc": [
+    "glibc"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

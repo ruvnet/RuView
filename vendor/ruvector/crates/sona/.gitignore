@@ -1,0 +1,8 @@
+/target/
+/pkg/
+/wasm-example/pkg/
+/wasm-example/node_modules/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+.DS_Store

@@ -1,0 +1,30 @@
+[package]
+name = "rvf-runtime"
+version = "0.2.0"
+edition = "2021"
+description = "RuVector Format runtime -- RvfStore API, compaction, and streaming I/O"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector"
+readme = "README.md"
+categories = ["database-implementations", "data-structures"]
+keywords = ["vector", "database", "storage", "compaction", "rvf"]
+rust-version = "1.87"
+
+[features]
+default = ["std"]
+std = []
+wasm = []
+qr = []
+ed25519 = ["rvf-types/ed25519"]
+
+[dependencies]
+rvf-types = { version = "0.2.0", path = "../rvf-types", features = ["std"] }
+
+[dev-dependencies]
+tempfile = "3"
+rand = "0.8"
+
+[[example]]
+name = "qr_seed_encode"
+required-features = ["qr"]

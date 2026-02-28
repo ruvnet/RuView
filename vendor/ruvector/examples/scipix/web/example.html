@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mathpix WASM Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .upload-section {
+            border: 2px dashed #667eea;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 30px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .upload-section:hover {
+            background: #f8f9ff;
+            border-color: #764ba2;
+        }
+
+        .upload-section.dragover {
+            background: #e8ebff;
+            border-color: #667eea;
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin: 5px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .options {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .option-group {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        select, input[type="range"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .threshold-value {
+            display: inline-block;
+            margin-left: 10px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .preview-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .preview-box {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            background: #f9f9f9;
+        }
+
+        .preview-box h3 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        canvas {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
+        }
+
+        .results-section {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            background: #f9f9f9;
+            margin-top: 20px;
+        }
+
+        .result-item {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            border-left: 4px solid #667eea;
+        }
+
+        .result-label {
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .result-value {
+            font-family: 'Courier New', monospace;
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .confidence-bar {
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .confidence-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #fee;
+            border-left: 4px solid #f44;
+            color: #c33;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 10px;
+        }
+
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+
+        .stat-card {
+            flex: 1;
+            min-width: 150px;
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            color: #666;
+            margin-top: 5px;
+        }
+
+        @media (max-width: 768px) {
+            .preview-section {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔬 Mathpix WASM Demo</h1>
+            <p class="subtitle">OCR with LaTeX support powered by WebAssembly</p>
+        </header>
+
+        <div class="content">
+            <!-- Upload Section -->
+            <div class="upload-section" id="dropZone">
+                <div class="upload-icon">📸</div>
+                <h2>Drop an image here or click to upload</h2>
+                <p>Supports PNG, JPEG, and other image formats</p>
+                <input type="file" id="fileInput" accept="image/*">
+                <button class="btn" onclick="document.getElementById('fileInput').click()">
+                    Choose File
+                </button>
+            </div>
+
+            <!-- Options -->
+            <div class="options">
+                <div class="option-group">
+                    <label for="formatSelect">Output Format:</label>
+                    <select id="formatSelect">
+                        <option value="both">Both (Text + LaTeX)</option>
+                        <option value="text">Text Only</option>
+                        <option value="latex">LaTeX Only</option>
+                    </select>
+                </div>
+
+                <div class="option-group">
+                    <label for="thresholdSlider">
+                        Confidence Threshold:
+                        <span class="threshold-value" id="thresholdValue">0.50</span>
+                    </label>
+                    <input type="range" id="thresholdSlider" min="0" max="100" value="50">
+                </div>
+
+                <div class="option-group">
+                    <label for="workerCheckbox">
+                        <input type="checkbox" id="workerCheckbox" checked>
+                        Use Web Worker
+                    </label>
+                </div>
+            </div>
+
+            <!-- Preview Section -->
+            <div class="preview-section" style="display: none;" id="previewSection">
+                <div class="preview-box">
+                    <h3>Original Image</h3>
+                    <canvas id="canvas"></canvas>
+                </div>
+
+                <div class="preview-box">
+                    <h3>Processing Info</h3>
+                    <div id="processingInfo"></div>
+                    <button class="btn" id="processBtn" disabled>Process Image</button>
+                </div>
+            </div>
+
+            <!-- Results Section -->
+            <div class="results-section" style="display: none;" id="resultsSection">
+                <h3>Recognition Results</h3>
+                <div id="results"></div>
+            </div>
+
+            <!-- Stats -->
+            <div class="stats" style="display: none;" id="statsSection">
+                <div class="stat-card">
+                    <div class="stat-value" id="imageCount">0</div>
+                    <div class="stat-label">Images Processed</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="avgTime">0ms</div>
+                    <div class="stat-label">Avg. Processing Time</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="wasmVersion">-</div>
+                    <div class="stat-label">WASM Version</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import scipix from './index.js';
+
+        let currentImage = null;
+        let stats = {
+            count: 0,
+            totalTime: 0
+        };
+
+        // Initialize
+        (async () => {
+            try {
+                const version = await scipix.getVersion();
+                document.getElementById('wasmVersion').textContent = version;
+                console.log('Mathpix initialized, version:', version);
+            } catch (error) {
+                console.error('Failed to initialize:', error);
+                showError('Failed to initialize WASM module: ' + error.message);
+            }
+        })();
+
+        // File input handler
+        const fileInput = document.getElementById('fileInput');
+        const dropZone = document.getElementById('dropZone');
+        const canvas = document.getElementById('canvas');
+        const processBtn = document.getElementById('processBtn');
+        const thresholdSlider = document.getElementById('thresholdSlider');
+        const thresholdValue = document.getElementById('thresholdValue');
+
+        fileInput.addEventListener('change', handleFileSelect);
+        processBtn.addEventListener('click', processImage);
+
+        thresholdSlider.addEventListener('input', (e) => {
+            const value = (e.target.value / 100).toFixed(2);
+            thresholdValue.textContent = value;
+        });
+
+        // Drag and drop
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+
+        dropZone.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        function handleFileSelect(e) {
+            const files = e.target.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        }
+
+        async function handleFile(file) {
+            if (!file.type.startsWith('image/')) {
+                showError('Please select an image file');
+                return;
+            }
+
+            try {
+                currentImage = file;
+
+                // Show preview
+                const img = await createImageBitmap(file);
+                const ctx = canvas.getContext('2d');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                ctx.drawImage(img, 0, 0);
+
+                // Show preview section
+                document.getElementById('previewSection').style.display = 'grid';
+                document.getElementById('processingInfo').innerHTML = `
+                    <div class="result-item">
+                        <div class="result-label">File Name:</div>
+                        <div class="result-value">${file.name}</div>
+                    </div>
+                    <div class="result-item">
+                        <div class="result-label">Size:</div>
+                        <div class="result-value">${(file.size / 1024).toFixed(2)} KB</div>
+                    </div>
+                    <div class="result-item">
+                        <div class="result-label">Dimensions:</div>
+                        <div class="result-value">${img.width} × ${img.height}</div>
+                    </div>
+                `;
+
+                processBtn.disabled = false;
+            } catch (error) {
+                showError('Failed to load image: ' + error.message);
+            }
+        }
+
+        async function processImage() {
+            if (!currentImage) return;
+
+            processBtn.disabled = true;
+            showLoading();
+
+            try {
+                const format = document.getElementById('formatSelect').value;
+                const threshold = parseFloat(thresholdSlider.value) / 100;
+                const useWorker = document.getElementById('workerCheckbox').checked;
+
+                const startTime = performance.now();
+
+                let result;
+                if (useWorker) {
+                    const worker = scipix.createWorker();
+                    result = await worker.recognize(
+                        new Uint8Array(await currentImage.arrayBuffer()),
+                        { format, confidenceThreshold: threshold }
+                    );
+                    worker.terminate();
+                } else {
+                    result = await scipix.recognizeFile(currentImage, {
+                        format,
+                        confidenceThreshold: threshold
+                    });
+                }
+
+                const endTime = performance.now();
+                const processingTime = Math.round(endTime - startTime);
+
+                // Update stats
+                stats.count++;
+                stats.totalTime += processingTime;
+                updateStats(processingTime);
+
+                // Show results
+                showResults(result, processingTime);
+
+            } catch (error) {
+                showError('Processing failed: ' + error.message);
+            } finally {
+                processBtn.disabled = false;
+            }
+        }
+
+        function showLoading() {
+            const resultsSection = document.getElementById('resultsSection');
+            resultsSection.style.display = 'block';
+            resultsSection.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Processing image...</p>
+                </div>
+            `;
+        }
+
+        function showResults(result, processingTime) {
+            const resultsSection = document.getElementById('resultsSection');
+            resultsSection.style.display = 'block';
+
+            const confidencePercent = (result.confidence * 100).toFixed(1);
+
+            let html = `
+                <div class="result-item">
+                    <div class="result-label">Text:</div>
+                    <div class="result-value">${result.text || '(empty)'}</div>
+                </div>
+            `;
+
+            if (result.latex) {
+                html += `
+                    <div class="result-item">
+                        <div class="result-label">LaTeX:</div>
+                        <div class="result-value">${result.latex}</div>
+                    </div>
+                `;
+            }
+
+            html += `
+                <div class="result-item">
+                    <div class="result-label">Confidence: ${confidencePercent}%</div>
+                    <div class="confidence-bar">
+                        <div class="confidence-fill" style="width: ${confidencePercent}%"></div>
+                    </div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">Processing Time:</div>
+                    <div class="result-value">${processingTime}ms</div>
+                </div>
+            `;
+
+            resultsSection.innerHTML = `<h3>Recognition Results</h3>${html}`;
+        }
+
+        function showError(message) {
+            const resultsSection = document.getElementById('resultsSection');
+            resultsSection.style.display = 'block';
+            resultsSection.innerHTML = `
+                <div class="error">
+                    <strong>Error:</strong> ${message}
+                </div>
+            `;
+        }
+
+        function updateStats(lastTime) {
+            document.getElementById('statsSection').style.display = 'flex';
+            document.getElementById('imageCount').textContent = stats.count;
+            document.getElementById('avgTime').textContent =
+                Math.round(stats.totalTime / stats.count) + 'ms';
+        }
+    </script>
+</body>
+</html>

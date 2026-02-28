@@ -1,0 +1,26 @@
+[package]
+name = "sevensense-interpretation"
+description = "LLM-powered interpretation for 7sense bioacoustics platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "README.md"
+
+[dependencies]
+sevensense-core = { workspace = true, version = "0.1.0" }
+sevensense-analysis = { workspace = true, version = "0.1.0" }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }
+
+[features]
+default = []

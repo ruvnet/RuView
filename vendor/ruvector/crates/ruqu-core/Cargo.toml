@@ -1,0 +1,34 @@
+[package]
+name = "ruqu-core"
+version = "2.0.5"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "High-performance quantum circuit simulator in pure Rust - state-vector simulation with SIMD acceleration, noise models, and multi-threading"
+keywords = ["quantum", "simulation", "state-vector", "quantum-computing", "qubits"]
+categories = ["science", "simulation", "algorithms"]
+
+[features]
+default = ["std"]
+std = []
+parallel = ["rayon"]
+simd = []
+
+[dependencies]
+rand = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true, optional = true }
+rayon = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+proptest = { workspace = true }
+approx = "0.5"
+
+[[bench]]
+name = "quantum_sim"
+harness = false

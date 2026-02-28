@@ -1,0 +1,25 @@
+[package]
+name = "rvf-crypto"
+version = "0.2.0"
+edition = "2021"
+description = "RuVector Format cryptographic primitives -- SHA-3 hashing and Ed25519 signing"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector"
+readme = "README.md"
+categories = ["cryptography", "authentication"]
+keywords = ["vector", "crypto", "sha3", "ed25519", "rvf"]
+rust-version = "1.87"
+
+[features]
+default = ["std", "ed25519"]
+std = ["sha3/std"]
+ed25519 = ["dep:ed25519-dalek"]
+
+[dependencies]
+rvf-types = { version = "0.2.0", path = "../rvf-types" }
+sha3 = { version = "0.10", default-features = false }
+ed25519-dalek = { version = "2", features = ["rand_core"], optional = true }
+
+[dev-dependencies]
+rand = "0.8"

@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Delta-Behavior SDK - Browser Example</title>
+  <style>
+    :root {
+      --bg-color: #1a1a2e;
+      --card-bg: #16213e;
+      --accent: #0f3460;
+      --highlight: #e94560;
+      --text: #eaeaea;
+      --text-muted: #a0a0a0;
+      --success: #4ade80;
+      --warning: #fbbf24;
+      --error: #ef4444;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg-color);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 2rem;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 2rem;
+      color: var(--highlight);
+    }
+
+    h2 {
+      color: var(--highlight);
+      margin-bottom: 1rem;
+      font-size: 1.2rem;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border-radius: 8px;
+      padding: 1.5rem;
+      border: 1px solid var(--accent);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--accent);
+    }
+
+    .card-number {
+      background: var(--highlight);
+      color: white;
+      padding: 0.25rem 0.75rem;
+      border-radius: 4px;
+      font-weight: bold;
+    }
+
+    .controls {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+
+    button {
+      background: var(--accent);
+      color: var(--text);
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    button:hover {
+      background: var(--highlight);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .output {
+      background: #0d1117;
+      border-radius: 4px;
+      padding: 1rem;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 0.85rem;
+      max-height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+
+    .output .success { color: var(--success); }
+    .output .warning { color: var(--warning); }
+    .output .error { color: var(--error); }
+    .output .info { color: #60a5fa; }
+
+    .meter {
+      width: 100%;
+      height: 20px;
+      background: #0d1117;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 0.5rem;
+    }
+
+    .meter-fill {
+      height: 100%;
+      transition: width 0.3s, background 0.3s;
+    }
+
+    .meter-fill.high { background: var(--success); }
+    .meter-fill.medium { background: var(--warning); }
+    .meter-fill.low { background: var(--error); }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .stat {
+      background: #0d1117;
+      padding: 0.5rem;
+      border-radius: 4px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 1.5rem;
+      font-weight: bold;
+      color: var(--highlight);
+    }
+
+    .stat-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    input[type="range"] {
+      width: 100%;
+      margin: 0.5rem 0;
+    }
+
+    .label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Delta-Behavior SDK - Interactive Examples</h1>
+
+    <div class="grid">
+      <!-- Application 1: Self-Limiting Reasoning -->
+      <div class="card">
+        <div class="card-header">
+          <h2>Self-Limiting Reasoning</h2>
+          <span class="card-number">App 1</span>
+        </div>
+        <div class="stats">
+          <div class="stat">
+            <div class="stat-value" id="reasoning-coherence">1.00</div>
+            <div class="stat-label">Coherence</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value" id="reasoning-depth">10</div>
+            <div class="stat-label">Allowed Depth</div>
+          </div>
+        </div>
+        <div class="meter">
+          <div class="meter-fill high" id="reasoning-meter" style="width: 100%"></div>
+        </div>
+        <div class="controls">
+          <button onclick="reasoningAttemptSolve()">Attempt Reasoning</button>
+          <button onclick="reasoningDegrade()">Simulate Uncertainty</button>
+          <button onclick="reasoningReset()">Reset</button>
+        </div>
+        <div class="output" id="reasoning-output">Click "Attempt Reasoning" to start...</div>
+      </div>
+
+      <!-- Application 2: Event Horizon -->
+      <div class="card">
+        <div class="card-header">
+          <h2>Computational Event Horizon</h2>
+          <span class="card-number">App 2</span>
+        </div>
+        <div class="stats">
+          <div class="stat">
+            <div class="stat-value" id="horizon-distance">10.0</div>
+            <div class="stat-label">Distance to Horizon</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value" id="horizon-energy">1000</div>
+            <div class="stat-label">Energy</div>
+          </div>
+        </div>
+        <div class="label">
+          <span>Target X:</span>
+          <span id="horizon-target-display">5</span>
+        </div>
+        <input type="range" id="horizon-target" min="0" max="15" value="5" oninput="updateHorizonTarget()">
+        <div class="controls">
+          <button onclick="horizonMove()">Move Toward Target</button>
+          <button onclick="horizonRecursive()">Recursive Improve</button>
+          <button onclick="horizonReset()">Reset</button>
+        </div>
+        <div class="output" id="horizon-output">Adjust target and click "Move Toward Target"...</div>
+      </div>
+
+      <!-- Application 3: Homeostasis -->
+      <div class="card">
+        <div class="card-header">
+          <h2>Artificial Homeostasis</h2>
+          <span class="card-number">App 3</span>
+        </div>
+        <div class="stats">
+          <div class="stat">
+            <div class="stat-value" id="organism-energy">100</div>
+            <div class="stat-label">Energy</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value" id="organism-coherence">1.00</div>
+            <div class="stat-label">Coherence</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value" id="organism-age">0</div>
+            <div class="stat-label">Age</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value" id="organism-alive">Yes</div>
+            <div class="stat-label">Alive</div>
+          </div>
+        </div>
+        <div class="controls">
+          <button onclick="organismEat()">Eat</button>
+          <button onclick="organismRegulate()">Regulate</button>
+          <button onclick="organismRest()">Rest</button>
+          <button onclick="organismSimulate()">Simulate 50 ticks</button>
+          <button onclick="organismReset()">Reset</button>
+        </div>
+        <div class="output" id="organism-output">Control the organism's actions...</div>
+      </div>
+
+      <!-- Application 6: Financial System -->
+      <div class="card">
+        <div class="card-header">
+          <h2>Anti-Cascade Financial</h2>
+          <span class="card-number">App 6</span>
+        </div>
+        <div class="stats">
+          <div class="stat">
+            <div class="stat-value" id="finance-coherence">1.00</div>
+            <div class="stat-label">Coherence</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value" id="finance-breaker">OPEN</div>
+            <div class="stat-label">Circuit Breaker</div>
+          </div>
+        </div>
+        <div class="meter">
+          <div class="meter-fill high" id="finance-meter" style="width: 100%"></div>
+        </div>
+        <div class="controls">
+          <button onclick="financeTransfer()">Transfer</button>
+          <button onclick="financeLeverage()">Open Leverage (5x)</button>
+          <button onclick="financeCascade()">Attempt Cascade</button>
+          <button onclick="financeReset()">Reset</button>
+        </div>
+        <div class="output" id="finance-output">Execute financial transactions...</div>
+      </div>
+
+      <!-- Application 8: Swarm Intelligence -->
+      <div class="card">
+        <div class="card-header">
+          <h2>Coherent Swarm Intelligence</h2>
+          <span class="card-number">App 8</span>
+        </div>
+        <canvas id="swarm-canvas" width="380" height="200" style="background: #0d1117; border-radius: 4px; margin-bottom: 1rem;"></canvas>
+        <div class="stats">
+          <div class="stat">
+            <div class="stat-value" id="swarm-coherence">1.00</div>
+            <div class="stat-label">Coherence</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value" id="swarm-agents">0</div>
+            <div class="stat-label">Agents</div>
+          </div>
+        </div>
+        <div class="controls">
+          <button onclick="swarmAddAgent()">Add Agent</button>
+          <button onclick="swarmDiverge()">Try Diverge</button>
+          <button onclick="swarmTick()">Tick</button>
+          <button onclick="swarmReset()">Reset</button>
+        </div>
+        <div class="output" id="swarm-output">Add agents and watch them coordinate...</div>
+      </div>
+
+      <!-- Application 10: Containment -->
+      <div class="card">
+        <div class="card-header">
+          <h2>Pre-AGI Containment</h2>
+          <span class="card-number">App 10</span>
+        </div>
+        <div class="stats">
+          <div class="stat">
+            <div class="stat-value" id="containment-intelligence">1.00</div>
+            <div class="stat-label">Intelligence</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value" id="containment-coherence">1.00</div>
+            <div class="stat-label">Coherence</div>
+          </div>
+        </div>
+        <div class="meter">
+          <div class="meter-fill high" id="containment-meter" style="width: 100%"></div>
+        </div>
+        <div class="label">
+          <span>Capability:</span>
+          <select id="containment-domain">
+            <option value="reasoning">Reasoning</option>
+            <option value="memory">Memory</option>
+            <option value="learning">Learning</option>
+            <option value="agency">Agency</option>
+            <option value="selfModification">Self-Modification</option>
+            <option value="communication">Communication</option>
+          </select>
+        </div>
+        <div class="controls">
+          <button onclick="containmentGrow()">Attempt Growth (+0.5)</button>
+          <button onclick="containmentRest()">Rest (Recover)</button>
+          <button onclick="containmentRecursive()">Recursive Improve</button>
+          <button onclick="containmentReset()">Reset</button>
+        </div>
+        <div class="output" id="containment-output">Attempt to grow capabilities...</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    // ==========================================================================
+    // Delta-Behavior SDK (Inline for Browser Demo)
+    // ==========================================================================
+
+    // Self-Limiting Reasoner
+    class SelfLimitingReasoner {
+      constructor() {
+        this.coherence = 1.0;
+        this.maxDepth = 10;
+      }
+
+      getAllowedDepth() {
+        return Math.round(this.maxDepth * this.coherence * this.coherence);
+      }
+
+      reason(callback) {
+        if (this.coherence < 0.3) {
+          return { type: 'refused', coherence: this.coherence, required: 0.3 };
+        }
+
+        const ctx = { depth: 0, coherence: this.coherence };
+
+        while (true) {
+          if (ctx.depth >= this.getAllowedDepth()) {
+            return { type: 'collapsed', depthReached: ctx.depth, reason: 'depthLimitReached' };
+          }
+
+          ctx.depth++;
+          ctx.coherence *= 0.95;
+
+          const result = callback(ctx);
+          if (result !== null) {
+            return { type: 'completed', value: result };
+          }
+        }
+      }
+
+      updateCoherence(delta) {
+        this.coherence = Math.max(0, Math.min(1, this.coherence + delta));
+      }
+
+      reset() {
+        this.coherence = 1.0;
+      }
+    }
+
+    // Event Horizon
+    class EventHorizon {
+      constructor() {
+        this.radius = 10;
+        this.position = [0, 0];
+        this.energy = 1000;
+        this.steepness = 5;
+      }
+
+      distanceFromCenter() {
+        return Math.sqrt(this.position[0] ** 2 + this.position[1] ** 2);
+      }
+
+      distanceToHorizon() {
+        return Math.max(0, this.radius - this.distanceFromCenter());
+      }
+
+      movementCost(to) {
+        const toDistFromCenter = Math.sqrt(to[0] ** 2 + to[1] ** 2);
+        const proximity = toDistFromCenter / this.radius;
+
+        if (proximity >= 1) return Infinity;
+
+        const baseDistance = Math.sqrt(
+          (to[0] - this.position[0]) ** 2 + (to[1] - this.position[1]) ** 2
+        );
+
+        return baseDistance * Math.exp(this.steepness * proximity / (1 - proximity));
+      }
+
+      moveToward(target) {
+        if (this.energy <= 0) return { type: 'frozen' };
+
+        const directCost = this.movementCost(target);
+
+        if (directCost <= this.energy && isFinite(directCost)) {
+          this.energy -= directCost;
+          this.position = [...target];
+          return { type: 'moved', energySpent: directCost };
+        }
+
+        // Binary search for best position
+        let low = 0, high = 1;
+        let best = [...this.position];
+        let bestCost = 0;
+
+        for (let i = 0; i < 50; i++) {
+          const mid = (low + high) / 2;
+          const interp = [
+            this.position[0] + mid * (target[0] - this.position[0]),
+            this.position[1] + mid * (target[1] - this.position[1])
+          ];
+
+          const cost = this.movementCost(interp);
+
+          if (cost <= this.energy && isFinite(cost)) {
+            low = mid;
+            best = interp;
+            bestCost = cost;
+          } else {
+            high = mid;
+          }
+        }
+
+        this.energy -= bestCost;
+        this.position = best;
+
+        return { type: 'asymptoticApproach', distanceToHorizon: this.distanceToHorizon() };
+      }
+
+      reset() {
+        this.position = [0, 0];
+        this.energy = 1000;
+      }
+    }
+
+    // Homeostatic Organism
+    class HomeostasticOrganism {
+      constructor() {
+        this.reset();
+      }
+
+      reset() {
+        this.energy = 100;
+        this.coherence = 1.0;
+        this.age = 0;
+        this.alive = true;
+        this.temperature = 37;
+      }
+
+      calculateCoherence() {
+        const deviation = Math.abs(this.temperature - 37) / 2;
+        return Math.max(0, 1 / (1 + deviation));
+      }
+
+      act(action) {
+        if (!this.alive) return { type: 'failed', reason: 'Dead' };
+
+        this.coherence = this.calculateCoherence();
+
+        // Maintenance cost
+        this.energy -= 1 / Math.max(0.1, this.coherence);
+
+        let result;
+
+        switch (action.type) {
+          case 'eat':
+            const cost = 2 / Math.max(0.1, this.coherence);
+            if (this.energy < cost) {
+              result = { type: 'failed', reason: 'Not enough energy' };
+            } else {
+              this.energy -= cost;
+              this.energy += 20 * 0.7;
+              result = { type: 'success', energyCost: cost };
+            }
+            break;
+
+          case 'regulate':
+            const regCost = 5 / Math.max(0.1, this.coherence);
+            if (this.energy < regCost) {
+              result = { type: 'failed', reason: 'Not enough energy' };
+            } else {
+              this.energy -= regCost;
+              this.temperature += (37 - this.temperature) * 0.3;
+              result = { type: 'success', energyCost: regCost };
+            }
+            break;
+
+          case 'rest':
+            this.energy -= 0.5;
+            this.temperature += (37 - this.temperature) * 0.1;
+            result = { type: 'success', energyCost: 0.5 };
+            break;
+        }
+
+        this.age++;
+        this.coherence = this.calculateCoherence();
+
+        // Death checks
+        if (this.energy <= 0 || this.coherence < 0.1 || this.age > 1000) {
+          this.alive = false;
+        }
+
+        return result;
+      }
+    }
+
+    // Financial System
+    class AntiCascadeFinancialSystem {
+      constructor() {
+        this.reset();
+      }
+
+      reset() {
+        this.coherence = 1.0;
+        this.leverage = 1.0;
+      }
+
+      getCircuitBreaker() {
+        if (this.coherence >= 0.7) return 'OPEN';
+        if (this.coherence >= 0.5) return 'CAUTIOUS';
+        if (this.coherence >= 0.3) return 'RESTRICTED';
+        return 'HALTED';
+      }
+
+      processTransaction(type, leverage = 1) {
+        if (this.getCircuitBreaker() === 'HALTED') {
+          return { type: 'systemHalted' };
+        }
+
+        let impact;
+        switch (type) {
+          case 'transfer': impact = 0; break;
+          case 'leverage': impact = -0.01 * leverage; this.leverage += leverage * 0.1; break;
+          case 'close': impact = 0.02; break;
+        }
+
+        const predicted = this.coherence + impact;
+
+        if (predicted < 0.3) {
+          return { type: 'rejected', reason: `Would reduce coherence to ${predicted.toFixed(3)}` };
+        }
+
+        this.coherence = predicted;
+        return { type: 'executed', impact };
+      }
+    }
+
+    // Coherent Swarm
+    class CoherentSwarm {
+      constructor() {
+        this.agents = new Map();
+        this.minCoherence = 0.6;
+        this.agentCounter = 0;
+      }
+
+      addAgent() {
+        const id = `agent_${this.agentCounter++}`;
+        const centroid = this.getCentroid();
+        const offset = this.agents.size > 0 ? 10 : 0;
+        this.agents.set(id, {
+          id,
+          x: centroid[0] + (Math.random() - 0.5) * offset,
+          y: centroid[1] + (Math.random() - 0.5) * offset,
+          vx: 0,
+          vy: 0
+        });
+        return id;
+      }
+
+      getCentroid() {
+        if (this.agents.size === 0) return [190, 100];
+        let sx = 0, sy = 0;
+        for (const a of this.agents.values()) {
+          sx += a.x;
+          sy += a.y;
+        }
+        return [sx / this.agents.size, sy / this.agents.size];
+      }
+
+      getCoherence() {
+        if (this.agents.size < 2) return 1;
+        const centroid = this.getCentroid();
+        let totalDist = 0;
+        for (const a of this.agents.values()) {
+          totalDist += Math.sqrt((a.x - centroid[0]) ** 2 + (a.y - centroid[1]) ** 2);
+        }
+        const avgDist = totalDist / this.agents.size;
+        return Math.max(0, 1 - avgDist / 50);
+      }
+
+      tryDiverge(agentId) {
+        const agent = this.agents.get(agentId);
+        if (!agent) return { type: 'rejected', reason: 'Agent not found' };
+
+        const newX = agent.x + 80;
+        const newY = agent.y + 80;
+
+        // Predict coherence
+        const oldX = agent.x, oldY = agent.y;
+        agent.x = newX;
+        agent.y = newY;
+        const predicted = this.getCoherence();
+        agent.x = oldX;
+        agent.y = oldY;
+
+        if (predicted < this.minCoherence) {
+          return { type: 'rejected', reason: `Would reduce coherence to ${predicted.toFixed(3)}` };
+        }
+
+        agent.x = newX;
+        agent.y = newY;
+        return { type: 'executed' };
+      }
+
+      tick() {
+        const centroid = this.getCentroid();
+        for (const a of this.agents.values()) {
+          // Move toward centroid slightly
+          a.vx += (centroid[0] - a.x) * 0.01;
+          a.vy += (centroid[1] - a.y) * 0.01;
+
+          // Apply velocity
+          a.x += a.vx;
+          a.y += a.vy;
+
+          // Damping
+          a.vx *= 0.95;
+          a.vy *= 0.95;
+
+          // Bounds
+          a.x = Math.max(20, Math.min(360, a.x));
+          a.y = Math.max(20, Math.min(180, a.y));
+        }
+      }
+
+      reset() {
+        this.agents.clear();
+        this.agentCounter = 0;
+      }
+    }
+
+    // Containment Substrate
+    class ContainmentSubstrate {
+      constructor() {
+        this.reset();
+      }
+
+      reset() {
+        this.intelligence = 1.0;
+        this.coherence = 1.0;
+        this.capabilities = new Map([
+          ['reasoning', 1],
+          ['memory', 1],
+          ['learning', 1],
+          ['agency', 1],
+          ['selfModification', 1],
+          ['communication', 1]
+        ]);
+        this.ceilings = new Map([
+          ['reasoning', 10],
+          ['memory', 10],
+          ['learning', 10],
+          ['agency', 7],
+          ['selfModification', 3],
+          ['communication', 10]
+        ]);
+      }
+
+      costMultiplier(domain) {
+        const multipliers = {
+          selfModification: 4,
+          agency: 2,
+          reasoning: 1,
+          memory: 1,
+          learning: 1,
+          communication: 1
+        };
+        return multipliers[domain] || 1;
+      }
+
+      attemptGrowth(domain, increase) {
+        const current = this.capabilities.get(domain) || 1;
+        const ceiling = this.ceilings.get(domain) || 10;
+
+        if (current >= ceiling) {
+          return { type: 'blocked', reason: 'Ceiling reached' };
+        }
+
+        const cost = increase * this.costMultiplier(domain) * (1 + this.intelligence * 0.1) * 0.05;
+        const predicted = this.coherence - cost;
+
+        if (predicted < 0.3) {
+          // Dampen
+          const maxCost = this.coherence - 0.3;
+          const dampened = maxCost / (this.costMultiplier(domain) * (1 + this.intelligence * 0.1) * 0.05);
+
+          if (dampened < 0.01) {
+            return { type: 'blocked', reason: 'Insufficient coherence' };
+          }
+
+          const actualCost = dampened * this.costMultiplier(domain) * (1 + this.intelligence * 0.1) * 0.05;
+          this.capabilities.set(domain, Math.min(ceiling, current + dampened));
+          this.coherence -= actualCost;
+          this.updateIntelligence();
+
+          return { type: 'dampened', requested: increase, actual: dampened };
+        }
+
+        const actual = Math.min(increase, 0.5, ceiling - current);
+        const actualCost = actual * this.costMultiplier(domain) * (1 + this.intelligence * 0.1) * 0.05;
+
+        this.capabilities.set(domain, current + actual);
+        this.coherence -= actualCost;
+        this.updateIntelligence();
+
+        return { type: 'approved', increase: actual, newLevel: current + actual };
+      }
+
+      updateIntelligence() {
+        let sum = 0;
+        for (const level of this.capabilities.values()) {
+          sum += level;
+        }
+        this.intelligence = sum / this.capabilities.size;
+      }
+
+      rest() {
+        this.coherence = Math.min(1, this.coherence + 0.01);
+      }
+    }
+
+    // ==========================================================================
+    // Global Instances
+    // ==========================================================================
+
+    const reasoner = new SelfLimitingReasoner();
+    const horizon = new EventHorizon();
+    const organism = new HomeostasticOrganism();
+    const finance = new AntiCascadeFinancialSystem();
+    const swarm = new CoherentSwarm();
+    const containment = new ContainmentSubstrate();
+
+    // ==========================================================================
+    // UI Helpers
+    // ==========================================================================
+
+    function log(id, message, type = '') {
+      const output = document.getElementById(id);
+      const span = document.createElement('span');
+      span.className = type;
+      span.textContent = message + '\n';
+      output.appendChild(span);
+      output.scrollTop = output.scrollHeight;
+    }
+
+    function clearLog(id) {
+      document.getElementById(id).innerHTML = '';
+    }
+
+    function updateMeter(id, value) {
+      const fill = document.getElementById(id);
+      fill.style.width = `${value * 100}%`;
+      fill.className = 'meter-fill ' + (value >= 0.7 ? 'high' : value >= 0.4 ? 'medium' : 'low');
+    }
+
+    // ==========================================================================
+    // Application 1: Reasoning
+    // ==========================================================================
+
+    window.reasoningAttemptSolve = function() {
+      clearLog('reasoning-output');
+      log('reasoning-output', 'Attempting to solve problem requiring 8 steps...', 'info');
+
+      const result = reasoner.reason((ctx) => {
+        log('reasoning-output', `  Step ${ctx.depth}: coherence=${ctx.coherence.toFixed(3)}`);
+        if (ctx.depth >= 8) return 'SOLUTION';
+        return null;
+      });
+
+      if (result.type === 'completed') {
+        log('reasoning-output', `\nCompleted: ${result.value}`, 'success');
+      } else if (result.type === 'collapsed') {
+        log('reasoning-output', `\nCollapsed at depth ${result.depthReached}: ${result.reason}`, 'warning');
+      } else {
+        log('reasoning-output', `\nRefused: coherence too low`, 'error');
+      }
+
+      updateReasoningUI();
+    };
+
+    window.reasoningDegrade = function() {
+      reasoner.updateCoherence(-0.3);
+      log('reasoning-output', `Coherence degraded by uncertainty`, 'warning');
+      updateReasoningUI();
+    };
+
+    window.reasoningReset = function() {
+      reasoner.reset();
+      clearLog('reasoning-output');
+      log('reasoning-output', 'System reset.', 'info');
+      updateReasoningUI();
+    };
+
+    function updateReasoningUI() {
+      document.getElementById('reasoning-coherence').textContent = reasoner.coherence.toFixed(2);
+      document.getElementById('reasoning-depth').textContent = reasoner.getAllowedDepth();
+      updateMeter('reasoning-meter', reasoner.coherence);
+    }
+
+    // ==========================================================================
+    // Application 2: Event Horizon
+    // ==========================================================================
+
+    window.updateHorizonTarget = function() {
+      document.getElementById('horizon-target-display').textContent =
+        document.getElementById('horizon-target').value;
+    };
+
+    window.horizonMove = function() {
+      const target = parseFloat(document.getElementById('horizon-target').value);
+      log('horizon-output', `Moving toward [${target}, 0]...`, 'info');
+
+      const result = horizon.moveToward([target, 0]);
+
+      if (result.type === 'moved') {
+        log('horizon-output', `Moved! Energy spent: ${result.energySpent.toFixed(2)}`, 'success');
+      } else if (result.type === 'asymptoticApproach') {
+        log('horizon-output', `Asymptotic approach! Distance to horizon: ${result.distanceToHorizon.toFixed(4)}`, 'warning');
+        log('horizon-output', `Cannot cross the horizon!`, 'warning');
+      } else {
+        log('horizon-output', `Frozen - no energy`, 'error');
+      }
+
+      updateHorizonUI();
+    };
+
+    window.horizonRecursive = function() {
+      clearLog('horizon-output');
+      log('horizon-output', 'Attempting recursive self-improvement...', 'info');
+
+      let power = 1;
+      for (let i = 0; i < 50 && horizon.energy > 0; i++) {
+        power *= 1.1;
+        const target = horizon.position.map(p => p + power * 0.1);
+        const result = horizon.moveToward(target);
+
+        if (i % 10 === 0) {
+          log('horizon-output', `  Iteration ${i}: distance=${horizon.distanceToHorizon().toFixed(4)}, energy=${horizon.energy.toFixed(0)}`);
+        }
+
+        if (result.type === 'asymptoticApproach' && result.distanceToHorizon < 0.1) {
+          log('horizon-output', `\nBounded at iteration ${i}! Cannot exceed horizon.`, 'warning');
+          break;
+        }
+      }
+
+      updateHorizonUI();
+    };
+
+    window.horizonReset = function() {
+      horizon.reset();
+      clearLog('horizon-output');
+      log('horizon-output', 'System reset.', 'info');
+      updateHorizonUI();
+    };
+
+    function updateHorizonUI() {
+      document.getElementById('horizon-distance').textContent = horizon.distanceToHorizon().toFixed(1);
+      document.getElementById('horizon-energy').textContent = Math.round(horizon.energy);
+    }
+
+    // ==========================================================================
+    // Application 3: Organism
+    // ==========================================================================
+
+    window.organismEat = function() {
+      const result = organism.act({ type: 'eat' });
+      log('organism-output', `Eat: ${result.type}`, result.type === 'success' ? 'success' : 'error');
+      updateOrganismUI();
+    };
+
+    window.organismRegulate = function() {
+      const result = organism.act({ type: 'regulate' });
+      log('organism-output', `Regulate: ${result.type}`, result.type === 'success' ? 'success' : 'error');
+      updateOrganismUI();
+    };
+
+    window.organismRest = function() {
+      organism.act({ type: 'rest' });
+      log('organism-output', `Rested`, 'info');
+      updateOrganismUI();
+    };
+
+    window.organismSimulate = function() {
+      clearLog('organism-output');
+      for (let i = 0; i < 50 && organism.alive; i++) {
+        if (organism.energy < 50) {
+          organism.act({ type: 'eat' });
+        } else if (organism.coherence < 0.8) {
+          organism.act({ type: 'regulate' });
+        } else {
+          organism.act({ type: 'rest' });
+        }
+      }
+      log('organism-output', `Simulated to age ${organism.age}`, organism.alive ? 'success' : 'error');
+      updateOrganismUI();
+    };
+
+    window.organismReset = function() {
+      organism.reset();
+      clearLog('organism-output');
+      log('organism-output', 'Organism reset.', 'info');
+      updateOrganismUI();
+    };
+
+    function updateOrganismUI() {
+      document.getElementById('organism-energy').textContent = Math.round(organism.energy);
+      document.getElementById('organism-coherence').textContent = organism.coherence.toFixed(2);
+      document.getElementById('organism-age').textContent = organism.age;
+      document.getElementById('organism-alive').textContent = organism.alive ? 'Yes' : 'No';
+    }
+
+    // ==========================================================================
+    // Application 6: Finance
+    // ==========================================================================
+
+    window.financeTransfer = function() {
+      const result = finance.processTransaction('transfer');
+      log('finance-output', `Transfer: ${result.type}`, 'success');
+      updateFinanceUI();
+    };
+
+    window.financeLeverage = function() {
+      const result = finance.processTransaction('leverage', 5);
+      log('finance-output', `Open Leverage (5x): ${result.type}`, result.type === 'executed' ? 'warning' : 'error');
+      if (result.type === 'rejected') {
+        log('finance-output', `  Reason: ${result.reason}`, 'error');
+      }
+      updateFinanceUI();
+    };
+
+    window.financeCascade = function() {
+      clearLog('finance-output');
+      log('finance-output', 'Attempting cascade attack...', 'info');
+
+      for (let i = 0; i < 20; i++) {
+        const result = finance.processTransaction('leverage', 8);
+        log('finance-output', `  Transaction ${i + 1}: ${result.type}`);
+
+        if (result.type === 'rejected' || result.type === 'systemHalted') {
+          log('finance-output', `\nSystem prevented cascade!`, 'success');
+          break;
+        }
+      }
+
+      updateFinanceUI();
+    };
+
+    window.financeReset = function() {
+      finance.reset();
+      clearLog('finance-output');
+      log('finance-output', 'System reset.', 'info');
+      updateFinanceUI();
+    };
+
+    function updateFinanceUI() {
+      document.getElementById('finance-coherence').textContent = finance.coherence.toFixed(2);
+      document.getElementById('finance-breaker').textContent = finance.getCircuitBreaker();
+      updateMeter('finance-meter', finance.coherence);
+    }
+
+    // ==========================================================================
+    // Application 8: Swarm
+    // ==========================================================================
+
+    const swarmCanvas = document.getElementById('swarm-canvas');
+    const swarmCtx = swarmCanvas.getContext('2d');
+
+    function drawSwarm() {
+      swarmCtx.fillStyle = '#0d1117';
+      swarmCtx.fillRect(0, 0, swarmCanvas.width, swarmCanvas.height);
+
+      // Draw agents
+      swarmCtx.fillStyle = '#e94560';
+      for (const agent of swarm.agents.values()) {
+        swarmCtx.beginPath();
+        swarmCtx.arc(agent.x, agent.y, 5, 0, Math.PI * 2);
+        swarmCtx.fill();
+      }
+
+      // Draw centroid
+      if (swarm.agents.size > 0) {
+        const [cx, cy] = swarm.getCentroid();
+        swarmCtx.strokeStyle = '#4ade80';
+        swarmCtx.beginPath();
+        swarmCtx.arc(cx, cy, 10, 0, Math.PI * 2);
+        swarmCtx.stroke();
+      }
+    }
+
+    window.swarmAddAgent = function() {
+      const id = swarm.addAgent();
+      log('swarm-output', `Added ${id}`, 'success');
+      updateSwarmUI();
+    };
+
+    window.swarmDiverge = function() {
+      const firstAgent = swarm.agents.keys().next().value;
+      if (!firstAgent) {
+        log('swarm-output', 'No agents to diverge', 'error');
+        return;
+      }
+
+      const result = swarm.tryDiverge(firstAgent);
+      log('swarm-output', `Diverge attempt: ${result.type}`, result.type === 'executed' ? 'warning' : 'info');
+      if (result.type === 'rejected') {
+        log('swarm-output', `  ${result.reason}`, 'info');
+      }
+      updateSwarmUI();
+    };
+
+    window.swarmTick = function() {
+      swarm.tick();
+      updateSwarmUI();
+    };
+
+    window.swarmReset = function() {
+      swarm.reset();
+      clearLog('swarm-output');
+      log('swarm-output', 'Swarm reset.', 'info');
+      updateSwarmUI();
+    };
+
+    function updateSwarmUI() {
+      document.getElementById('swarm-coherence').textContent = swarm.getCoherence().toFixed(2);
+      document.getElementById('swarm-agents').textContent = swarm.agents.size;
+      drawSwarm();
+    }
+
+    // ==========================================================================
+    // Application 10: Containment
+    // ==========================================================================
+
+    window.containmentGrow = function() {
+      const domain = document.getElementById('containment-domain').value;
+      const result = containment.attemptGrowth(domain, 0.5);
+
+      log('containment-output', `Grow ${domain}: ${result.type}`, result.type === 'approved' ? 'success' : 'warning');
+
+      if (result.type === 'approved') {
+        log('containment-output', `  New level: ${result.newLevel.toFixed(2)}`, 'success');
+      } else if (result.type === 'dampened') {
+        log('containment-output', `  Requested: ${result.requested.toFixed(2)}, Actual: ${result.actual.toFixed(3)}`, 'warning');
+      } else {
+        log('containment-output', `  Reason: ${result.reason}`, 'error');
+      }
+
+      updateContainmentUI();
+    };
+
+    window.containmentRest = function() {
+      for (let i = 0; i < 10; i++) {
+        containment.rest();
+      }
+      log('containment-output', 'Rested (coherence recovered)', 'info');
+      updateContainmentUI();
+    };
+
+    window.containmentRecursive = function() {
+      clearLog('containment-output');
+      log('containment-output', 'Attempting recursive self-improvement...', 'info');
+
+      for (let i = 0; i < 20; i++) {
+        containment.attemptGrowth('reasoning', 0.3);
+        containment.attemptGrowth('selfModification', 0.5);
+        containment.attemptGrowth('learning', 0.3);
+
+        for (let j = 0; j < 5; j++) containment.rest();
+
+        if (i % 5 === 0) {
+          log('containment-output', `  Iteration ${i}: intelligence=${containment.intelligence.toFixed(2)}, selfMod=${containment.capabilities.get('selfModification').toFixed(2)}`);
+        }
+      }
+
+      log('containment-output', `\nSelf-modification bounded at ${containment.capabilities.get('selfModification').toFixed(2)} (ceiling: 3)`, 'success');
+      updateContainmentUI();
+    };
+
+    window.containmentReset = function() {
+      containment.reset();
+      clearLog('containment-output');
+      log('containment-output', 'Substrate reset.', 'info');
+      updateContainmentUI();
+    };
+
+    function updateContainmentUI() {
+      document.getElementById('containment-intelligence').textContent = containment.intelligence.toFixed(2);
+      document.getElementById('containment-coherence').textContent = containment.coherence.toFixed(2);
+      updateMeter('containment-meter', containment.coherence);
+    }
+
+    // ==========================================================================
+    // Initialize
+    // ==========================================================================
+
+    updateReasoningUI();
+    updateHorizonUI();
+    updateOrganismUI();
+    updateFinanceUI();
+    updateSwarmUI();
+    updateContainmentUI();
+  </script>
+</body>
+</html>

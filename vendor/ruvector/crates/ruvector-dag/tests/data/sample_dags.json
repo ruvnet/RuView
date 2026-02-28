@@ -1,0 +1,28 @@
+{
+  "simple_scan": {
+    "nodes": [
+      {"id": 0, "type": "SeqScan", "table": "users", "cost": 100.0},
+      {"id": 1, "type": "Filter", "predicate": "id > 0", "cost": 10.0},
+      {"id": 2, "type": "Result", "cost": 1.0}
+    ],
+    "edges": [[0, 1], [1, 2]]
+  },
+  "vector_search": {
+    "nodes": [
+      {"id": 0, "type": "HnswScan", "index": "vec_idx", "ef_search": 64, "cost": 50.0},
+      {"id": 1, "type": "Limit", "count": 10, "cost": 1.0},
+      {"id": 2, "type": "Result", "cost": 1.0}
+    ],
+    "edges": [[0, 1], [1, 2]]
+  },
+  "join_query": {
+    "nodes": [
+      {"id": 0, "type": "SeqScan", "table": "orders", "cost": 500.0},
+      {"id": 1, "type": "IndexScan", "index": "products_pkey", "cost": 100.0},
+      {"id": 2, "type": "HashJoin", "key": "product_id", "cost": 200.0},
+      {"id": 3, "type": "Sort", "keys": ["created_at"], "cost": 50.0},
+      {"id": 4, "type": "Result", "cost": 1.0}
+    ],
+    "edges": [[0, 2], [1, 2], [2, 3], [3, 4]]
+  }
+}

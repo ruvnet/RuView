@@ -1,0 +1,68 @@
+name: ruvector-verified CI
+
+on:
+  push:
+    paths:
+      - "crates/ruvector-verified/**"
+      - "Cargo.lock"
+  pull_request:
+    paths:
+      - "crates/ruvector-verified/**"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        feature-set:
+          - ""
+          - "--features hnsw-proofs"
+          - "--features rvf-proofs"
+          - "--features coherence-proofs"
+          - "--features all-proofs"
+          - "--features ultra"
+          - "--features serde"
+          - "--all-features"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check (${{ matrix.feature-set || 'default' }})
+        run: cargo check -p ruvector-verified ${{ matrix.feature-set }}
+
+  test:
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run tests (all features)
+        run: cargo test -p ruvector-verified --all-features
+      - name: Run tests (default features)
+        run: cargo test -p ruvector-verified
+
+  bench:
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run benchmarks (dry-run)
+        run: cargo bench -p ruvector-verified --all-features -- --test
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy (all features)
+        run: cargo clippy -p ruvector-verified --all-features -- -D warnings

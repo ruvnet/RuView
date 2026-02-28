@@ -1,0 +1,45 @@
+{
+  "generated_at": "2025-12-02T00:14:28.298539006+00:00",
+  "results": [
+    {
+      "batch_size": 0,
+      "build_time_secs": 0.0,
+      "dimensions": 256,
+      "gpu_enabled": false,
+      "gpu_name": null,
+      "iterations": 25,
+      "k": 0,
+      "max_time_ms": 119.165886,
+      "mean_time_ms": 75.38600736,
+      "memory_mb": 5.07354736328125,
+      "metadata": {
+        "num_edges": "25000",
+        "num_layers": "3"
+      },
+      "min_time_ms": 51.651304,
+      "name": "gnn_5000n_25000e_3l",
+      "num_queries": 0,
+      "num_vectors": 5000,
+      "operation": "gnn_forward",
+      "p50_ms": 69.119,
+      "p95_ms": 110.463,
+      "p999_ms": 119.167,
+      "p99_ms": 119.167,
+      "qps": 13.265061183364946,
+      "recall_at_1": null,
+      "recall_at_10": null,
+      "recall_at_100": null,
+      "std_time_ms": 17.47617622046848,
+      "throughput_vectors_sec": 66325.30591682473,
+      "timestamp": "2025-12-02T00:14:26.106004780+00:00"
+    }
+  ],
+  "system_info": {
+    "cpu_count": 2,
+    "gpu_available": false,
+    "gpu_memory_gb": null,
+    "gpu_name": null,
+    "platform": "linux",
+    "total_memory_gb": 7.758457183837891
+  }
+}

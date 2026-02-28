@@ -1,0 +1,51 @@
+[package]
+name = "exo-exotic"
+version = "0.1.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["rUv <ruv@ruv.io>"]
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://ruv.io"
+documentation = "https://docs.rs/exo-exotic"
+description = "Exotic cognitive experiments: Strange Loops, Dreams, Free Energy, Morphogenesis, Collective Consciousness, Temporal Qualia, Multiple Selves, Cognitive Thermodynamics, Emergence Detection, Cognitive Black Holes"
+keywords = ["consciousness", "cognitive", "dreams", "emergence", "ai"]
+categories = ["science", "algorithms", "simulation"]
+readme = "README.md"
+
+[dependencies]
+exo-core = "0.1"
+exo-temporal = "0.1"
+ruvector-domain-expansion = "2.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+
+# Collections
+uuid = { version = "1.0", features = ["v4", "serde"] }
+dashmap = "6.1"
+petgraph = "0.6"
+
+# Additional dependencies for exotic experiments
+rand = "0.8"
+ordered-float = "4.2"
+parking_lot = "0.12"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "exotic_benchmarks"
+harness = false
+
+[features]
+default = []
+simd = []
+parallel = ["rayon"]
+
+[dependencies.rayon]
+version = "1.10"
+optional = true

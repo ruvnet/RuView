@@ -1,0 +1,10 @@
+{
+  "name": "@ruvector/sona-linux-arm64-gnu",
+  "version": "0.1.5",
+  "os": ["linux"],
+  "cpu": ["arm64"],
+  "main": "sona.linux-arm64-gnu.node",
+  "files": ["sona.linux-arm64-gnu.node"],
+  "license": "MIT",
+  "repository": {"type": "git", "url": "https://github.com/ruvnet/ruvector.git"}
+}

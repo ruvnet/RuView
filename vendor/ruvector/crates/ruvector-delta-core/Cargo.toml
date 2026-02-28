@@ -1,0 +1,51 @@
+[package]
+name = "ruvector-delta-core"
+version = "0.1.0"
+edition = "2021"
+description = "Core delta types and traits for behavioral vector change tracking"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+keywords = ["delta", "vector", "database", "incremental", "streaming"]
+categories = ["data-structures", "encoding", "algorithms"]
+
+[features]
+default = ["std"]
+std = []
+simd = ["simsimd"]
+serde = ["dep:serde", "dep:serde_json", "smallvec/serde"]
+compression = ["dep:lz4_flex", "dep:zstd"]
+
+[dependencies]
+# Core
+thiserror = "2.0"
+bincode = "2.0.0-rc.3"
+
+# Optional SIMD
+simsimd = { version = "5.9", optional = true }
+
+# Optional serialization
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+
+# Optional compression
+lz4_flex = { version = "0.11", optional = true }
+zstd = { version = "0.13", optional = true, default-features = false }
+
+# Utilities
+parking_lot = "0.12"
+smallvec = { version = "1.13", features = ["union", "const_generics"] }
+arrayvec = "0.7"
+
+[dev-dependencies]
+criterion = "0.6"
+rand = "0.8"
+proptest = "1.4"
+
+# Benchmarks will be added later
+# [[bench]]
+# name = "delta_operations"
+# harness = false
+#
+# [[bench]]
+# name = "encoding_bench"
+# harness = false

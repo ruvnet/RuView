@@ -1,0 +1,57 @@
+[package]
+name = "ruvector-delta-index"
+version = "0.1.0"
+edition = "2021"
+description = "Delta-aware HNSW index with incremental updates and repair strategies"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+keywords = ["hnsw", "delta", "index", "incremental", "vector"]
+categories = ["data-structures", "algorithms"]
+
+[features]
+default = ["parallel"]
+parallel = ["rayon"]
+simd = ["simsimd"]
+persistence = ["bincode"]
+
+[dependencies]
+# Core delta library
+ruvector-delta-core = { path = "../ruvector-delta-core" }
+
+# Error handling
+thiserror = "2.0"
+
+# Data structures
+parking_lot = "0.12"
+dashmap = "6.0"
+smallvec = { version = "1.13", features = ["union"] }
+
+# Priority queue for HNSW
+priority-queue = "2.0"
+
+# Random number generation
+rand = "0.8"
+rand_xorshift = "0.3"
+
+# Optional parallelism
+rayon = { version = "1.10", optional = true }
+
+# Optional SIMD
+simsimd = { version = "5.9", optional = true }
+
+# Optional serialization
+bincode = { version = "2.0.0-rc.3", optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+
+[dev-dependencies]
+criterion = "0.6"
+proptest = "1.4"
+
+# Benchmarks will be added later
+# [[bench]]
+# name = "incremental_update"
+# harness = false
+#
+# [[bench]]
+# name = "repair_strategies"
+# harness = false

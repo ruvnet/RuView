@@ -1,0 +1,103 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'examples/scipix/**'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - 'examples/scipix/**'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-docs:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build documentation
+        run: |
+          cd examples/scipix
+          cargo doc --all-features --no-deps
+
+      - name: Add index redirect
+        run: |
+          echo '<meta http-equiv="refresh" content="0; url=ruvector_scipix/index.html">' > examples/scipix/target/doc/index.html
+
+      - name: Upload documentation
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation
+          path: examples/scipix/target/doc
+
+  deploy-docs:
+    name: Deploy Documentation
+    needs: build-docs
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download documentation
+        uses: actions/download-artifact@v4
+        with:
+          name: documentation
+          path: docs
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          force_orphan: true
+
+  check-links:
+    name: Check Documentation Links
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deadlinks
+        run: cargo install cargo-deadlinks
+
+      - name: Build and check documentation
+        run: |
+          cd examples/scipix
+          cargo doc --all-features --no-deps
+          cargo deadlinks --dir target/doc
+
+  readme-sync:
+    name: Sync README to docs.rs
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify README exists
+        run: test -f examples/scipix/README.md
+
+      - name: Check README formatting
+        run: |
+          cd examples/scipix
+          if ! grep -q "# RuVector Mathpix" README.md; then
+            echo "README.md should start with '# RuVector Mathpix'"
+            exit 1
+          fi

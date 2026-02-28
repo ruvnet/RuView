@@ -1,0 +1,24 @@
+[package]
+name = "rvf-wire"
+version = "0.1.0"
+edition = "2021"
+description = "RuVector Format wire format reader/writer -- zero-copy segment serialization"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector"
+readme = "README.md"
+categories = ["encoding", "data-structures"]
+keywords = ["vector", "database", "binary-format", "wire-protocol", "rvf"]
+rust-version = "1.87"
+
+[features]
+default = ["std"]
+std = ["rvf-types/std"]
+
+[dependencies]
+rvf-types = { version = "0.2.0", path = "../rvf-types" }
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+crc32c = "0.6"
+
+[dev-dependencies]
+tempfile = "3"

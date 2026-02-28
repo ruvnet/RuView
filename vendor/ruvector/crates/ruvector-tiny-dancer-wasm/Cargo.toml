@@ -1,0 +1,34 @@
+[package]
+name = "ruvector-tiny-dancer-wasm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "WASM bindings for Tiny Dancer neural routing"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ruvector-tiny-dancer-core = { version = "2.0", path = "../ruvector-tiny-dancer-core" }
+
+# WASM dependencies
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+js-sys = { workspace = true }
+web-sys = { version = "0.3", features = ["console"] }
+
+# Workspace dependencies
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

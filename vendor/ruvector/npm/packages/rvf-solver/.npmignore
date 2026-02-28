@@ -1,0 +1,5 @@
+src/
+tsconfig.json
+*.js.map
+pkg/.gitignore
+pkg/.gitkeep

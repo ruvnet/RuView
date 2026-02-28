@@ -1,0 +1,62 @@
+[
+  {
+    "image_path": "test_images/quadratic_1.png",
+    "ground_truth_text": "x^2 + 2x + 1 = 0",
+    "ground_truth_latex": "x^{2} + 2x + 1 = 0",
+    "category": "quadratic"
+  },
+  {
+    "image_path": "test_images/linear_1.png",
+    "ground_truth_text": "y = mx + b",
+    "ground_truth_latex": "y = mx + b",
+    "category": "linear"
+  },
+  {
+    "image_path": "test_images/integral_1.png",
+    "ground_truth_text": "∫ x^2 dx = x^3/3 + C",
+    "ground_truth_latex": "\\int x^{2} dx = \\frac{x^{3}}{3} + C",
+    "category": "calculus"
+  },
+  {
+    "image_path": "test_images/derivative_1.png",
+    "ground_truth_text": "d/dx(sin(x)) = cos(x)",
+    "ground_truth_latex": "\\frac{d}{dx}(\\sin(x)) = \\cos(x)",
+    "category": "calculus"
+  },
+  {
+    "image_path": "test_images/matrix_1.png",
+    "ground_truth_text": "[1 2; 3 4]",
+    "ground_truth_latex": "\\begin{bmatrix} 1 & 2 \\\\ 3 & 4 \\end{bmatrix}",
+    "category": "linear_algebra"
+  },
+  {
+    "image_path": "test_images/sum_1.png",
+    "ground_truth_text": "Σ(i=1 to n) i = n(n+1)/2",
+    "ground_truth_latex": "\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}",
+    "category": "summation"
+  },
+  {
+    "image_path": "test_images/fraction_1.png",
+    "ground_truth_text": "(a + b) / (c - d)",
+    "ground_truth_latex": "\\frac{a + b}{c - d}",
+    "category": "fraction"
+  },
+  {
+    "image_path": "test_images/sqrt_1.png",
+    "ground_truth_text": "√(a^2 + b^2) = c",
+    "ground_truth_latex": "\\sqrt{a^{2} + b^{2}} = c",
+    "category": "radical"
+  },
+  {
+    "image_path": "test_images/limit_1.png",
+    "ground_truth_text": "lim(x→0) sin(x)/x = 1",
+    "ground_truth_latex": "\\lim_{x \\to 0} \\frac{\\sin(x)}{x} = 1",
+    "category": "calculus"
+  },
+  {
+    "image_path": "test_images/exponent_1.png",
+    "ground_truth_text": "e^(iπ) + 1 = 0",
+    "ground_truth_latex": "e^{i\\pi} + 1 = 0",
+    "category": "exponential"
+  }
+]

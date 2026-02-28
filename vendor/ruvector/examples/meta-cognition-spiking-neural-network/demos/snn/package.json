@@ -1,0 +1,33 @@
+{
+  "name": "snn-simd",
+  "version": "1.0.0",
+  "description": "State-of-the-art Spiking Neural Network with SIMD optimization via N-API",
+  "main": "lib/SpikingNeuralNetwork.js",
+  "scripts": {
+    "install": "node-gyp rebuild",
+    "build": "node-gyp rebuild",
+    "clean": "node-gyp clean",
+    "test": "node examples/pattern-recognition.js",
+    "benchmark": "node examples/benchmark.js"
+  },
+  "keywords": [
+    "spiking-neural-network",
+    "neuromorphic",
+    "stdp",
+    "simd",
+    "napi",
+    "machine-learning"
+  ],
+  "author": "AgentDB Team",
+  "license": "MIT",
+  "dependencies": {
+    "node-addon-api": "^7.0.0"
+  },
+  "devDependencies": {
+    "node-gyp": "^10.0.0"
+  },
+  "gypfile": true,
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

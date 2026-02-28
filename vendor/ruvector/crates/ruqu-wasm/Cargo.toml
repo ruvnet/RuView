@@ -1,0 +1,34 @@
+[package]
+name = "ruqu-wasm"
+version = "2.0.5"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Run quantum simulations in the browser - WebAssembly bindings for quantum circuits with 25-qubit support, VQE, Grover, QAOA"
+keywords = ["quantum", "wasm", "webassembly", "quantum-computing", "browser"]
+categories = ["wasm", "science", "simulation"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+
+[dependencies]
+ruqu-core = { version = "2.0.5", path = "../ruqu-core" }
+ruqu-algorithms = { version = "2.0.5", path = "../ruqu-algorithms" }
+wasm-bindgen = { workspace = true }
+js-sys = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde-wasm-bindgen = "0.6"
+getrandom = { version = "0.2", features = ["js"] }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

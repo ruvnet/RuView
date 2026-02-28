@@ -1,0 +1,41 @@
+[package]
+name = "ruvector-robotics-examples"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+ruvector-robotics = { path = "../../crates/ruvector-robotics" }
+serde_json = "1.0"
+rand = "0.8"
+
+[[bin]]
+name = "01_basic_perception"
+path = "src/bin/01_basic_perception.rs"
+[[bin]]
+name = "02_obstacle_avoidance"
+path = "src/bin/02_obstacle_avoidance.rs"
+[[bin]]
+name = "03_scene_graph"
+path = "src/bin/03_scene_graph.rs"
+[[bin]]
+name = "04_behavior_tree"
+path = "src/bin/04_behavior_tree.rs"
+[[bin]]
+name = "05_cognitive_robot"
+path = "src/bin/05_cognitive_robot.rs"
+[[bin]]
+name = "06_swarm_coordination"
+path = "src/bin/06_swarm_coordination.rs"
+[[bin]]
+name = "07_skill_learning"
+path = "src/bin/07_skill_learning.rs"
+[[bin]]
+name = "08_world_model"
+path = "src/bin/08_world_model.rs"
+[[bin]]
+name = "09_mcp_tools"
+path = "src/bin/09_mcp_tools.rs"
+[[bin]]
+name = "10_full_pipeline"
+path = "src/bin/10_full_pipeline.rs"

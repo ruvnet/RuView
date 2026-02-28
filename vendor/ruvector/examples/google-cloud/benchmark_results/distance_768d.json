@@ -1,0 +1,42 @@
+{
+  "generated_at": "2025-12-02T00:14:13.845654480+00:00",
+  "results": [
+    {
+      "batch_size": 64,
+      "build_time_secs": 0.0,
+      "dimensions": 768,
+      "gpu_enabled": false,
+      "gpu_name": null,
+      "iterations": 50,
+      "k": 0,
+      "max_time_ms": 232.243293,
+      "mean_time_ms": 78.59453122,
+      "memory_mb": 146.484375,
+      "metadata": {},
+      "min_time_ms": 42.454137,
+      "name": "distance_768d_50000v",
+      "num_queries": 0,
+      "num_vectors": 50000,
+      "operation": "distance_computation",
+      "p50_ms": 72.703,
+      "p95_ms": 117.503,
+      "p999_ms": 232.319,
+      "p99_ms": 232.319,
+      "qps": 12.7235315800895,
+      "recall_at_1": null,
+      "recall_at_10": null,
+      "recall_at_100": null,
+      "std_time_ms": 34.18277056989714,
+      "throughput_vectors_sec": 636176.5790044749,
+      "timestamp": "2025-12-02T00:14:09.189674634+00:00"
+    }
+  ],
+  "system_info": {
+    "cpu_count": 2,
+    "gpu_available": false,
+    "gpu_memory_gb": null,
+    "gpu_name": null,
+    "platform": "linux",
+    "total_memory_gb": 7.758457183837891
+  }
+}

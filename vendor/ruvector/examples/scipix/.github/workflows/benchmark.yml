@@ -1,0 +1,207 @@
+name: Benchmark
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'examples/scipix/**'
+  pull_request:
+    paths:
+      - 'examples/scipix/**'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark:
+    name: Run Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install critcmp
+        run: cargo install critcmp
+
+      - name: Download baseline
+        if: github.event_name == 'pull_request'
+        run: |
+          mkdir -p target/criterion
+          gh release download baseline --pattern 'benchmark-baseline.tar.gz' --dir target/criterion || true
+          cd target/criterion && tar -xzf benchmark-baseline.tar.gz || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run benchmarks
+        run: |
+          cd examples/scipix
+          cargo bench --all-features -- --save-baseline current
+
+      - name: Compare benchmarks
+        if: github.event_name == 'pull_request'
+        id: compare
+        run: |
+          cd examples/scipix
+          critcmp baseline current > benchmark-comparison.txt || echo "No baseline found"
+          cat benchmark-comparison.txt
+
+      - name: Comment PR with results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const comparison = fs.readFileSync('examples/scipix/benchmark-comparison.txt', 'utf8');
+
+            const body = `## Benchmark Results
+
+            \`\`\`
+            ${comparison}
+            \`\`\`
+
+            <details>
+            <summary>Benchmark Details</summary>
+
+            - **Event**: ${{ github.event_name }}
+            - **Branch**: ${{ github.head_ref }}
+            - **Commit**: ${{ github.sha }}
+
+            </details>`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+      - name: Store baseline (main branch only)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cd target/criterion
+          tar -czf benchmark-baseline.tar.gz */*/base
+
+      - name: Upload baseline
+        if: github.ref == 'refs/heads/main'
+        run: |
+          gh release create baseline \
+            --title "Benchmark Baseline" \
+            --notes "Automatically generated benchmark baseline" \
+            target/criterion/benchmark-baseline.tar.gz \
+            --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            examples/scipix/target/criterion
+            examples/scipix/benchmark-comparison.txt
+
+  performance-regression:
+    name: Check Performance Regression
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: benchmark
+    steps:
+      - name: Download benchmark results
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-results
+
+      - name: Check for regressions
+        id: check
+        run: |
+          # Parse benchmark results and check for >10% regression
+          if grep -q "regressed" benchmark-comparison.txt; then
+            echo "regression=true" >> $GITHUB_OUTPUT
+            echo "REGRESSION DETECTED!"
+          else
+            echo "regression=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Fail if regression
+        if: steps.check.outputs.regression == 'true'
+        run: |
+          echo "::error::Performance regression detected. Please optimize before merging."
+          exit 1
+
+  memory-profiling:
+    name: Memory Profiling
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install valgrind
+        run: sudo apt-get update && sudo apt-get install -y valgrind
+
+      - name: Build with debug symbols
+        run: |
+          cd examples/scipix
+          cargo build --profile bench
+
+      - name: Run memory profiling
+        run: |
+          cd examples/scipix
+          valgrind --tool=massif --massif-out-file=massif.out \
+            target/release/scipix-benchmark
+
+      - name: Analyze memory usage
+        run: |
+          cd examples/scipix
+          ms_print massif.out > memory-profile.txt
+          cat memory-profile.txt
+
+      - name: Upload memory profile
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-profile
+          path: examples/scipix/memory-profile.txt
+
+  flamegraph:
+    name: Generate Flamegraph
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-flamegraph
+        run: cargo install flamegraph
+
+      - name: Install perf
+        run: sudo apt-get update && sudo apt-get install -y linux-tools-common linux-tools-generic
+
+      - name: Generate flamegraph
+        run: |
+          cd examples/scipix
+          sudo cargo flamegraph --bench scipix_benchmark -- --bench
+
+      - name: Upload flamegraph
+        uses: actions/upload-artifact@v4
+        with:
+          name: flamegraph
+          path: examples/scipix/flamegraph.svg

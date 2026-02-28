@@ -1,0 +1,91 @@
+[package]
+name = "ruvector-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "CLI and MCP server for Ruvector"
+
+[[bin]]
+name = "ruvector"
+path = "src/main.rs"
+
+[[bin]]
+name = "ruvector-mcp"
+path = "src/mcp_server.rs"
+
+[features]
+default = []
+postgres = ["tokio-postgres", "deadpool-postgres"]
+
+[dependencies]
+ruvector-core = { version = "2.0.3", path = "../ruvector-core" }
+ruvector-graph = { version = "2.0.3", path = "../ruvector-graph", features = ["storage"] }
+ruvector-gnn = { version = "2.0.3", path = "../ruvector-gnn" }
+
+# PostgreSQL support (optional)
+tokio-postgres = { version = "0.7", optional = true }
+deadpool-postgres = { version = "0.14", optional = true }
+
+# LRU cache for performance optimization
+lru = "0.16"
+
+# Compression for storage
+flate2 = "1.0"
+
+# CLI
+clap = { workspace = true }
+indicatif = { workspace = true }
+console = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+futures = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Configuration
+toml = "0.8"
+
+# Data formats
+csv = "1.3"
+ndarray-npy = "0.9"
+ndarray = { workspace = true }
+
+# Terminal colors
+colored = "2.1"
+prettytable-rs = "0.10"
+
+# HTTP for MCP SSE transport
+hyper = { version = "1.5", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+http-body-util = "0.1"
+
+# MCP support
+async-trait = "0.1"
+tower = "0.5"
+axum = { version = "0.7", features = ["ws"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+async-stream = "0.3"
+
+# Additional utilities
+uuid = { version = "1.11", features = ["v4"] }
+chrono = "0.4"
+shellexpand = "3.1"
+rand = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+tempfile = "3.13"

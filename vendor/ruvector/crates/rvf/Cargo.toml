@@ -1,0 +1,63 @@
+[workspace]
+resolver = "2"
+members = [
+    "rvf-types",
+    "rvf-wire",
+    "rvf-manifest",
+    "rvf-index",
+    "rvf-quant",
+    "rvf-crypto",
+    "rvf-runtime",
+    "rvf-kernel",
+    "rvf-wasm",
+    "rvf-solver-wasm",
+    "rvf-node",
+    "rvf-server",
+    "rvf-import",
+    "rvf-adapters/claude-flow",
+    "rvf-adapters/agentdb",
+    "rvf-adapters/ospipe",
+    "rvf-adapters/agentic-flow",
+    "rvf-adapters/rvlite",
+    "rvf-adapters/sona",
+    "rvf-launch",
+    "rvf-ebpf",
+    "rvf-cli",
+    "tests/rvf-integration",
+    "benches",
+    "rvf-federation",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.87"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+authors = ["ruv.io", "RuVector Team"]
+
+[workspace.dependencies]
+# Internal
+rvf-types = { path = "rvf-types" }
+rvf-wire = { path = "rvf-wire" }
+rvf-manifest = { path = "rvf-manifest" }
+rvf-index = { path = "rvf-index" }
+rvf-quant = { path = "rvf-quant" }
+rvf-crypto = { path = "rvf-crypto" }
+rvf-runtime = { path = "rvf-runtime" }
+rvf-adapter-claude-flow = { path = "rvf-adapters/claude-flow" }
+rvf-adapter-agentdb = { path = "rvf-adapters/agentdb" }
+rvf-adapter-ospipe = { path = "rvf-adapters/ospipe" }
+rvf-adapter-agentic-flow = { path = "rvf-adapters/agentic-flow" }
+rvf-adapter-rvlite = { path = "rvf-adapters/rvlite" }
+rvf-adapter-sona = { path = "rvf-adapters/sona" }
+rvf-import = { path = "rvf-import" }
+
+# External
+serde = { version = "1", default-features = false, features = ["derive"] }
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+crc32c = "0.6"
+sha3 = "0.10"
+ed25519-dalek = "2"
+rand = "0.8"
+tempfile = "3"

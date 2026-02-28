@@ -1,0 +1,101 @@
+{
+  "name": "@ruvector/wasm",
+  "version": "0.1.29",
+  "description": "Unified meta-package for RuVector WASM modules - learning, economy, exotic AI, nervous system, and attention",
+  "type": "module",
+  "main": "./index.js",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./index.js",
+      "types": "./index.d.ts"
+    },
+    "./learning": {
+      "import": "./node_modules/@ruvector/learning-wasm/ruvector_learning_wasm.js",
+      "types": "./node_modules/@ruvector/learning-wasm/ruvector_learning_wasm.d.ts"
+    },
+    "./economy": {
+      "import": "./node_modules/@ruvector/economy-wasm/ruvector_economy_wasm.js",
+      "types": "./node_modules/@ruvector/economy-wasm/ruvector_economy_wasm.d.ts"
+    },
+    "./exotic": {
+      "import": "./node_modules/@ruvector/exotic-wasm/ruvector_exotic_wasm.js",
+      "types": "./node_modules/@ruvector/exotic-wasm/ruvector_exotic_wasm.d.ts"
+    },
+    "./nervous-system": {
+      "import": "./node_modules/@ruvector/nervous-system-wasm/ruvector_nervous_system_wasm.js",
+      "types": "./node_modules/@ruvector/nervous-system-wasm/ruvector_nervous_system_wasm.d.ts"
+    },
+    "./attention": {
+      "import": "./node_modules/@ruvector/attention-unified-wasm/ruvector_attention_unified_wasm.js",
+      "types": "./node_modules/@ruvector/attention-unified-wasm/ruvector_attention_unified_wasm.d.ts"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "echo 'Meta-package - no build required'",
+    "test": "node --test",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck"
+  },
+  "dependencies": {
+    "@ruvector/learning-wasm": "^0.1.0",
+    "@ruvector/economy-wasm": "^0.1.0",
+    "@ruvector/exotic-wasm": "^0.1.29",
+    "@ruvector/nervous-system-wasm": "^0.1.0",
+    "@ruvector/attention-unified-wasm": "^0.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  },
+  "peerDependencies": {
+    "typescript": ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "ruvector",
+    "wasm",
+    "webassembly",
+    "machine-learning",
+    "neural-network",
+    "ai",
+    "learning",
+    "lora",
+    "economy",
+    "crdt",
+    "distributed",
+    "exotic",
+    "nervous-system",
+    "attention",
+    "vector-database",
+    "embeddings",
+    "browser",
+    "edge-computing"
+  ],
+  "author": "RuVector Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "packages/ruvector-wasm"
+  },
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "homepage": "https://github.com/ruvnet/ruvector/tree/main/packages/ruvector-wasm",
+  "publishConfig": {
+    "access": "public"
+  }
+}

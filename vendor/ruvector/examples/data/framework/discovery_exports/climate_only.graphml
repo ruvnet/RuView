@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns
+         http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
+  <key id="domain" for="node" attr.name="domain" attr.type="string"/>
+  <key id="external_id" for="node" attr.name="external_id" attr.type="string"/>
+  <key id="weight" for="node" attr.name="weight" attr.type="double"/>
+  <key id="timestamp" for="node" attr.name="timestamp" attr.type="string"/>
+  <key id="edge_weight" for="edge" attr.name="weight" attr.type="double"/>
+  <key id="edge_type" for="edge" attr.name="type" attr.type="string"/>
+  <key id="edge_timestamp" for="edge" attr.name="timestamp" attr.type="string"/>
+  <key id="cross_domain" for="edge" attr.name="cross_domain" attr.type="boolean"/>
+  <graph id="discovery" edgedefault="undirected">
+    <!-- 60 nodes in graph -->
+    <!-- 1027 edges in graph -->
+    <!-- Cross-domain edges: 655 -->
+  </graph>
+</graphml>

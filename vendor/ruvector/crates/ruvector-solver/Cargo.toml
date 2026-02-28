@@ -1,0 +1,67 @@
+[package]
+name = "ruvector-solver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Sublinear-time solver for RuVector: O(log n) to O(√n) algorithms for sparse linear systems, PageRank, and spectral methods"
+keywords = ["linear-algebra", "sparse-matrix", "pagerank", "solver", "sublinear"]
+categories = ["mathematics", "science", "algorithms"]
+
+[features]
+default = ["neumann", "cg", "forward-push"]
+nalgebra-backend = ["nalgebra"]
+parallel = ["rayon", "crossbeam"]
+simd = []
+wasm = []
+full = ["nalgebra-backend", "parallel", "all-algorithms"]
+neumann = []
+forward-push = []
+backward-push = []
+hybrid-random-walk = ["getrandom"]
+true-solver = ["neumann"]
+cg = []
+bmssp = []
+all-algorithms = ["neumann", "forward-push", "backward-push", "hybrid-random-walk", "true-solver", "cg", "bmssp"]
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+nalgebra = { version = "0.33", default-features = false, features = ["std"], optional = true }
+rayon = { workspace = true, optional = true }
+crossbeam = { workspace = true, optional = true }
+getrandom = { version = "0.2", optional = true }
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+
+[dev-dependencies]
+criterion = { workspace = true }
+proptest = { workspace = true }
+approx = "0.5"
+
+[[bench]]
+name = "solver_baseline"
+harness = false
+
+[[bench]]
+name = "solver_neumann"
+harness = false
+
+[[bench]]
+name = "solver_cg"
+harness = false
+
+[[bench]]
+name = "solver_push"
+harness = false
+
+[[bench]]
+name = "solver_e2e"
+harness = false

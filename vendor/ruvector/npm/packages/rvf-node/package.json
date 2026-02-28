@@ -1,0 +1,44 @@
+{
+  "name": "@ruvector/rvf-node",
+  "version": "0.1.7",
+  "description": "RuVector Format Node.js native bindings",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "*.node"
+  ],
+  "napi": {
+    "binaryName": "rvf-node",
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "aarch64-unknown-linux-gnu"
+    ]
+  },
+  "scripts": {
+    "build": "napi build --platform --release"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector"
+  },
+  "engines": {
+    "node": ">= 16"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "optionalDependencies": {
+    "@ruvector/rvf-node-linux-x64-gnu": "0.1.7",
+    "@ruvector/rvf-node-darwin-x64": "0.1.7",
+    "@ruvector/rvf-node-darwin-arm64": "0.1.7",
+    "@ruvector/rvf-node-win32-x64-msvc": "0.1.7",
+    "@ruvector/rvf-node-linux-arm64-gnu": "0.1.7"
+  }
+}

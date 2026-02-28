@@ -1,0 +1,70 @@
+[package]
+name = "ruvllm-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "CLI for RuvLLM model management and inference on Apple Silicon"
+
+[[bin]]
+name = "ruvllm"
+path = "src/main.rs"
+
+[dependencies]
+# RuvLLM core library
+ruvllm = { path = "../ruvllm", features = ["candle"] }
+
+# CLI framework
+clap = { version = "4.5", features = ["derive", "cargo", "env"] }
+indicatif = { workspace = true }
+console = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true, features = ["full", "signal"] }
+futures = { workspace = true }
+
+# HuggingFace Hub for model downloads
+hf-hub = { version = "0.3", features = ["tokio"] }
+
+# HTTP server for inference API
+axum = { version = "0.7", features = ["ws"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Utilities
+chrono = { workspace = true }
+uuid = { workspace = true }
+dirs = "5.0"
+colored = "2.1"
+rustyline = "14.0"
+ctrlc = "3.4"
+bytesize = "1.3"
+prettytable-rs = "0.10"
+dialoguer = "0.11"
+
+# Streaming
+async-stream = "0.3"
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+tempfile = "3.13"
+
+[features]
+default = []
+# Metal acceleration for Apple Silicon (M1/M2/M3/M4)
+metal = ["ruvllm/metal"]
+# CUDA acceleration for NVIDIA GPUs
+cuda = ["ruvllm/cuda"]

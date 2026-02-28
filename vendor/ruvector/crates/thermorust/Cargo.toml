@@ -1,0 +1,24 @@
+[package]
+name = "thermorust"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["rUv <ruv@ruv.io>"]
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://ruv.io"
+documentation = "https://docs.rs/thermorust"
+description = "Thermodynamic neural motif engine: energy-driven state transitions with Landauer dissipation and Langevin noise"
+keywords = ["thermodynamics", "neural", "ising", "langevin", "physics"]
+categories = ["science", "algorithms", "simulation"]
+readme = "README.md"
+
+[dependencies]
+rand = { version = "0.8", features = ["small_rng"] }
+rand_distr = "0.4"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "motif_bench"
+harness = false

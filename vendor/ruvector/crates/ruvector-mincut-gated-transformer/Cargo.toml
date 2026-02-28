@@ -1,0 +1,73 @@
+[package]
+name = "ruvector-mincut-gated-transformer"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+authors = ["RuVector Team"]
+license = "MIT OR Apache-2.0"
+description = "Ultra low latency transformer inference with mincut-gated coherence control"
+repository = "https://github.com/ruvnet/ruvector"
+keywords = ["transformer", "inference", "mincut", "low-latency", "coherence"]
+categories = ["algorithms", "science", "embedded"]
+readme = "README.md"
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = ["sliding_window"]
+full = ["simd", "trace", "linear_attention", "int4", "fixed_point_softmax", "rmsnorm", "spike_attention", "spectral_pe", "sparse_attention", "energy_gate"]
+
+# Core features
+sliding_window = []
+linear_attention = []
+
+# Novel attention mechanisms
+spike_attention = []    # Spike-driven attention (Yao et al., 2023) - 87.2x energy reduction
+spectral_pe = []        # Spectral position encoding (Kreuzer et al., 2021) - Laplacian eigenvectors
+sparse_attention = []   # Mincut-aware sparse attention (MInference 2024) - 10x speedup
+energy_gate = []        # Energy-based gate policy (Gladstone et al., 2025)
+
+# Optimization features
+simd = []
+int4 = []
+fixed_point_softmax = []
+rmsnorm = []
+
+# Debugging and tracing
+trace = []
+
+# Target-specific
+wasm = ["getrandom/js"]
+
+# No-std support for gateways
+no_std_gateway = []
+
+[dependencies]
+# Core types only - avoid heavy dependencies
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+
+# Optional WASM support
+getrandom = { version = "0.2", optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.5"
+rand = "0.8"
+
+[[bench]]
+name = "latency"
+harness = false
+
+[[bench]]
+name = "gate"
+harness = false
+
+[[bench]]
+name = "kernel"
+harness = false
+
+[[example]]
+name = "scorer"
+path = "examples/scorer.rs"

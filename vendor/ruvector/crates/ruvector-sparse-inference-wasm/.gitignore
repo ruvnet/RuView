@@ -1,0 +1,21 @@
+# WASM build outputs
+pkg/
+target/
+*.wasm
+*.wasm.map
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

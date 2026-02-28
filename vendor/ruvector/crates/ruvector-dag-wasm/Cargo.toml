@@ -1,0 +1,38 @@
+[package]
+name = "ruvector-dag-wasm"
+version = "0.1.0"
+edition = "2021"
+authors = ["RuVector Contributors"]
+description = "Minimal WASM DAG library for browser and embedded systems"
+license = "MIT OR Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+
+[dependencies.wee_alloc]
+version = "0.4"
+optional = true
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[features]
+default = []
+# Enable wee_alloc for ~10KB smaller WASM binary
+wee_alloc = ["dep:wee_alloc"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

@@ -1,0 +1,127 @@
+[package]
+name = "ruvector-mincut"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "World's first subpolynomial dynamic min-cut: self-healing networks, AI optimization, real-time graph analysis"
+keywords = ["graph", "minimum-cut", "network-analysis", "self-healing", "dynamic-graph"]
+categories = ["algorithms", "data-structures", "science", "mathematics", "simulation"]
+homepage = "https://ruv.io"
+documentation = "https://docs.rs/ruvector-mincut"
+
+[dependencies]
+# RuVector dependencies
+ruvector-core = { version = "2.0.1", path = "../ruvector-core", default-features = false }
+ruvector-graph = { version = "2.0.1", path = "../ruvector-graph", default-features = false, optional = true }
+
+# Core dependencies
+petgraph = "0.6"
+rayon = { workspace = true }
+crossbeam = { workspace = true }
+parking_lot = { workspace = true }
+dashmap = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rand = { workspace = true }
+
+# Data structures
+roaring = "0.10"
+ordered-float = "4.2"
+
+[dev-dependencies]
+criterion = { workspace = true }
+proptest = { workspace = true }
+mockall = { workspace = true }
+
+[features]
+default = ["exact", "approximate"]
+full = ["exact", "approximate", "integration", "monitoring", "simd", "agentic", "jtree", "tiered", "canonical"]
+exact = []  # Exact minimum cut algorithm
+approximate = []  # (1+ε)-approximate algorithm
+integration = ["ruvector-graph"]  # GraphDB integration
+monitoring = []  # Real-time monitoring with callbacks
+simd = ["ruvector-core/simd"]
+wasm = []  # WASM compatibility mode
+agentic = []  # 256-core parallel agentic chip backend
+jtree = []  # j-Tree hierarchical decomposition (ADR-002)
+tiered = ["jtree", "exact"]  # Two-tier coordinator (j-tree + exact)
+canonical = []  # Pseudo-deterministic canonical min-cut via cactus representation
+all-cut-queries = ["jtree"]  # Sparsest cut, multiway, multicut queries
+
+[lib]
+crate-type = ["rlib"]
+bench = false
+
+[[bench]]
+name = "mincut_bench"
+harness = false
+
+[[bench]]
+name = "bounded_bench"
+harness = false
+
+[[bench]]
+name = "sota_bench"
+harness = false
+
+[[bench]]
+name = "paper_algorithms_bench"
+harness = false
+
+[[bench]]
+name = "snn_bench"
+harness = false
+
+[[bench]]
+name = "jtree_bench"
+harness = false
+
+[[bench]]
+name = "optimization_bench"
+harness = false
+
+[[example]]
+name = "temporal_attractors"
+path = "../../examples/mincut/temporal_attractors/src/main.rs"
+required-features = ["exact"]
+
+[[example]]
+name = "strange_loop"
+path = "../../examples/mincut/strange_loop/main.rs"
+required-features = ["exact"]
+
+[[example]]
+name = "causal_discovery"
+path = "../../examples/mincut/causal_discovery/main.rs"
+required-features = ["exact"]
+
+[[example]]
+name = "time_crystal"
+path = "../../examples/mincut/time_crystal/main.rs"
+required-features = ["exact"]
+
+[[example]]
+name = "morphogenetic"
+path = "../../examples/mincut/morphogenetic/main.rs"
+required-features = ["exact"]
+
+[[example]]
+name = "neural_optimizer"
+path = "../../examples/mincut/neural_optimizer/main.rs"
+required-features = ["exact"]
+
+[[example]]
+name = "benchmarks"
+path = "../../examples/mincut/benchmarks/main.rs"
+required-features = ["exact"]
+
+[[example]]
+name = "subpoly_bench"
+required-features = ["exact"]

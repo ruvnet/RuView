@@ -1,0 +1,93 @@
+{
+  "name": "@ruvector/agentic-synth-examples",
+  "version": "0.1.0",
+  "description": "Production-ready examples for @ruvector/agentic-synth - DSPy training, multi-model benchmarking, and advanced synthetic data generation patterns",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "bin": {
+    "agentic-synth-examples": "./bin/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./dspy": {
+      "types": "./dist/dspy/index.d.ts",
+      "import": "./dist/dspy/index.js",
+      "require": "./dist/dspy/index.cjs"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.cjs",
+    "dist/**/*.d.ts",
+    "bin",
+    "examples",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "build:dspy": "tsup src/dspy/index.ts --format esm,cjs --dts --out-dir dist/dspy",
+    "build:all": "npm run build && npm run build:dspy",
+    "dev": "tsup src/index.ts --format esm --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build:all",
+    "pretest": "npm run typecheck"
+  },
+  "keywords": [
+    "agentic-synth",
+    "examples",
+    "dspy",
+    "dspy-ts",
+    "synthetic-data",
+    "multi-model",
+    "benchmarking",
+    "machine-learning",
+    "ai-training",
+    "prompt-engineering",
+    "self-learning",
+    "claude",
+    "gpt4",
+    "gemini",
+    "llama",
+    "tutorials",
+    "getting-started"
+  ],
+  "author": "ruvnet",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "packages/agentic-synth-examples"
+  },
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "homepage": "https://github.com/ruvnet/ruvector/tree/main/packages/agentic-synth-examples#readme",
+  "dependencies": {
+    "@ruvector/agentic-synth": "file:../agentic-synth",
+    "commander": "^11.1.0",
+    "dspy.ts": "^2.1.1",
+    "zod": "^4.1.12"
+  },
+  "peerDependencies": {
+    "@ruvector/agentic-synth": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@vitest/coverage-v8": "^3.2.4",
+    "@vitest/ui": "^3.2.4",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

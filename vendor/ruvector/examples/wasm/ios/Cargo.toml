@@ -1,0 +1,76 @@
+[package]
+name = "ruvector-ios-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "iOS & Browser optimized WASM vector database with HNSW, quantization, and ML"
+license = "MIT"
+authors = ["Ruvector Team"]
+repository = "https://github.com/ruvnet/ruvector"
+
+# Keep out of parent workspace
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Browser support (optional - adds ~50KB)
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", features = ["console"], optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde-wasm-bindgen = { version = "0.6", optional = true }
+serde_json = { version = "1.0", optional = true }
+
+[features]
+default = []
+
+# Browser target with wasm-bindgen (Safari, Chrome, Firefox)
+browser = ["dep:wasm-bindgen", "dep:js-sys", "dep:web-sys", "dep:serde", "dep:serde-wasm-bindgen", "dep:serde_json"]
+
+# SIMD acceleration (iOS 16.4+ / Safari 16.4+ / Chrome 91+)
+simd = []
+
+# All features for maximum capability
+full = ["browser", "simd"]
+
+# ============================================
+# Build Profiles
+# ============================================
+
+[profile.release]
+opt-level = "z"          # Maximum size optimization
+lto = "fat"              # Link-Time Optimization
+codegen-units = 1        # Single codegen unit
+panic = "abort"          # No unwinding
+strip = "symbols"        # Strip debug symbols
+incremental = false      # Better optimization
+
+[profile.release.package."*"]
+opt-level = "z"
+
+# Speed-optimized profile (larger binary, faster execution)
+[profile.release-fast]
+inherits = "release"
+opt-level = 3            # Speed optimization
+lto = "thin"             # Faster linking
+
+[profile.dev]
+opt-level = 1
+debug = true
+
+[profile.bench]
+inherits = "release"
+debug = false
+
+# ============================================
+# Benchmarks
+# ============================================
+
+[[bin]]
+name = "benchmark"
+path = "benches/performance.rs"
+
+[[bin]]
+name = "ios_simulation"
+path = "benches/ios_simulation.rs"

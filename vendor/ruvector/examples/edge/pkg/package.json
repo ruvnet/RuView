@@ -1,0 +1,74 @@
+{
+  "name": "@ruvector/edge",
+  "version": "0.1.9",
+  "type": "module",
+  "description": "Free edge-based AI swarms in the browser - P2P, crypto, vector search, neural networks. Install @ruvector/edge-full for graph DB, SQL, ONNX embeddings.",
+  "main": "ruvector_edge.js",
+  "module": "ruvector_edge.js",
+  "types": "ruvector_edge.d.ts",
+  "keywords": [
+    "wasm",
+    "rust",
+    "ai",
+    "swarm",
+    "p2p",
+    "cryptography",
+    "post-quantum",
+    "hnsw",
+    "vector-search",
+    "neural-network",
+    "raft",
+    "consensus",
+    "ed25519",
+    "aes-gcm",
+    "webassembly",
+    "semantic-search",
+    "machine-learning"
+  ],
+  "author": "RuVector Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector"
+  },
+  "homepage": "https://github.com/ruvnet/ruvector/tree/main/examples/edge",
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "files": [
+    "ruvector_edge_bg.wasm",
+    "ruvector_edge.js",
+    "ruvector_edge.d.ts",
+    "ruvector_edge_bg.wasm.d.ts",
+    "worker.js",
+    "worker-pool.js",
+    "generator.html",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "import": "./ruvector_edge.js",
+      "types": "./ruvector_edge.d.ts"
+    },
+    "./worker": {
+      "import": "./worker.js"
+    },
+    "./worker-pool": {
+      "import": "./worker-pool.js"
+    }
+  },
+  "sideEffects": [
+    "./snippets/*"
+  ],
+  "optionalDependencies": {
+    "@ruvector/edge-full": "^0.1.0"
+  },
+  "peerDependencies": {
+    "@ruvector/edge-full": "^0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@ruvector/edge-full": {
+      "optional": true
+    }
+  }
+}

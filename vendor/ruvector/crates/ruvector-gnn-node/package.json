@@ -1,0 +1,64 @@
+{
+  "name": "@ruvector/gnn",
+  "version": "0.1.25",
+  "description": "Graph Neural Network capabilities for Ruvector - Node.js bindings",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "ruvector-gnn",
+    "triples": {
+      "defaults": false,
+      "additional": [
+        "x86_64-unknown-linux-gnu",
+        "x86_64-unknown-linux-musl",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-unknown-linux-musl",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+        "x86_64-pc-windows-msvc"
+      ]
+    }
+  },
+  "scripts": {
+    "artifacts": "napi artifacts",
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "prepublishOnly": "napi prepublish -t npm",
+    "test": "node --test test/*.test.js",
+    "version": "napi version"
+  },
+  "keywords": [
+    "ruvector",
+    "gnn",
+    "graph-neural-network",
+    "machine-learning",
+    "vector-database",
+    "hnsw",
+    "napi-rs"
+  ],
+  "author": "Ruvector Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.16.0"
+  },
+  "engines": {
+    "node": ">= 10"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "optionalDependencies": {
+    "@ruvector/gnn-linux-x64-gnu": "0.1.25",
+    "@ruvector/gnn-linux-x64-musl": "0.1.25",
+    "@ruvector/gnn-linux-arm64-gnu": "0.1.25",
+    "@ruvector/gnn-linux-arm64-musl": "0.1.25",
+    "@ruvector/gnn-darwin-x64": "0.1.25",
+    "@ruvector/gnn-darwin-arm64": "0.1.25",
+    "@ruvector/gnn-win32-x64-msvc": "0.1.25"
+  }
+}

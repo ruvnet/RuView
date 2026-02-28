@@ -1,0 +1,84 @@
+{
+  "name": "@ruvector/delta-behavior",
+  "version": "0.1.0",
+  "description": "Delta-Behavior: TypeScript/JavaScript SDK for coherence-preserving state transitions and self-limiting AI systems",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js"
+    },
+    "./wasm": {
+      "import": "./pkg/delta_behavior.js",
+      "types": "./pkg/delta_behavior.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "pkg/",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "examples/delta-behavior/wasm"
+  },
+  "keywords": [
+    "wasm",
+    "webassembly",
+    "rust",
+    "ai-safety",
+    "coherence",
+    "state-machine",
+    "containment",
+    "homeostasis",
+    "delta-behavior",
+    "self-limiting",
+    "attractors",
+    "swarm-intelligence"
+  ],
+  "author": "RuVector Team",
+  "license": "MIT OR Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "homepage": "https://github.com/ruvnet/ruvector/tree/main/examples/delta-behavior#readme",
+  "scripts": {
+    "build": "tsup src/index.ts src/types.ts --format esm,cjs --dts --clean",
+    "build:wasm": "cd .. && wasm-pack build --target web --release --out-dir wasm/pkg .",
+    "build:wasm:dev": "cd .. && wasm-pack build --target web --dev --out-dir wasm/pkg .",
+    "build:wasm:nodejs": "cd .. && wasm-pack build --target nodejs --out-dir wasm/pkg-node .",
+    "build:all": "npm run build:wasm && npm run build",
+    "dev": "tsup src/index.ts src/types.ts --format esm,cjs --dts --watch",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:wasm": "wasm-pack test --node ..",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write 'src/**/*.ts'",
+    "example:node": "tsx examples/node-example.ts",
+    "clean": "rm -rf dist pkg pkg-node",
+    "prepublishOnly": "npm run build:all"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "eslint": "^8.55.0",
+    "prettier": "^3.1.0",
+    "tsup": "^8.0.1",
+    "tsx": "^4.6.2",
+    "typescript": "^5.3.2",
+    "vitest": "^1.0.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "sideEffects": false
+}

@@ -1,0 +1,51 @@
+[package]
+name = "ruvector-attention"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Attention mechanisms for ruvector - geometric, graph, and sparse attention"
+keywords = ["attention", "machine-learning", "vector-search", "graph-attention"]
+categories = ["algorithms", "science"]
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = ["simd"]
+simd = []
+wasm = []
+napi = ["dep:napi-derive", "dep:napi"]
+# Enable advanced math-based attention mechanisms
+math = ["dep:ruvector-math"]
+# Enable sheaf attention (Coherence-Gated Transformer per ADR-015)
+sheaf = []
+
+[dependencies]
+thiserror = "1.0"
+rayon = "1.10"
+serde = { version = "1.0", features = ["derive"] }
+rand = "0.8"
+napi = { version = "2", optional = true }
+napi-derive = { version = "2", optional = true }
+
+# Advanced math primitives for OT, mixed-curvature, and topology-gated attention
+ruvector-math = { version = "2.0", path = "../ruvector-math", optional = true }
+
+[dev-dependencies]
+criterion = "0.5"
+approx = "0.5"
+rand = "0.8"
+
+[[bench]]
+name = "attention_bench"
+harness = false
+
+[[bench]]
+name = "attention_benchmarks"
+harness = false
+
+[[bin]]
+name = "bench_runner"
+path = "benches/attention_benchmarks.rs"

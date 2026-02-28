@@ -1,0 +1,23 @@
+{
+  "name": "@ruvector/tiny-dancer-darwin-arm64",
+  "version": "0.1.15",
+  "description": "macOS ARM64 (Apple Silicon) native bindings for @ruvector/tiny-dancer",
+  "main": "ruvector-tiny-dancer.darwin-arm64.node",
+  "files": [
+    "ruvector-tiny-dancer.darwin-arm64.node"
+  ],
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "author": "ruv.io Team <info@ruv.io> (https://ruv.io)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

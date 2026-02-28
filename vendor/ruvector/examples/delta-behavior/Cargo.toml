@@ -1,0 +1,170 @@
+[package]
+name = "delta-behavior"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75.0"
+authors = ["RuVector Team <team@ruvector.io>"]
+license = "MIT OR Apache-2.0"
+description = "Delta-behavior: constrained state transitions that preserve global coherence - systems that refuse to collapse"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector/tree/main/examples/delta-behavior"
+documentation = "https://docs.rs/delta-behavior"
+readme = "README.md"
+keywords = ["ai-safety", "coherence", "state-machine", "containment", "stability"]
+categories = ["algorithms", "science", "simulation"]
+include = [
+    "src/**/*",
+    "applications/**/*",
+    "docs/**/*",
+    "examples/**/*",
+    "benches/**/*",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "CHANGELOG.md",
+    "WHITEPAPER.md",
+]
+exclude = [
+    "target/",
+    ".git/",
+    ".github/",
+]
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "run_benchmarks"
+path = "src/bin/run_benchmarks.rs"
+required-features = ["benchmarks"]
+
+[[bench]]
+name = "coherence_benchmarks"
+path = "benches/coherence_benchmarks.rs"
+harness = false
+required-features = ["benchmarks"]
+
+# Examples
+[[example]]
+name = "demo"
+path = "examples/demo.rs"
+
+[[example]]
+name = "self_limiting"
+path = "examples/self_limiting.rs"
+required-features = ["self-limiting-reasoning"]
+
+[[example]]
+name = "swarm"
+path = "examples/swarm.rs"
+required-features = ["swarm-intelligence"]
+
+[[example]]
+name = "containment"
+path = "examples/containment.rs"
+required-features = ["containment"]
+
+[dependencies]
+rand = { version = "0.8", optional = true }
+thiserror = { version = "1.0", optional = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# WASM dependencies
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+
+# Optional: better panic messages in browser console
+console_error_panic_hook = { version = "0.1", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+rand = "0.8"
+wasm-bindgen-test = "0.3"
+
+[features]
+default = ["std", "console_error_panic_hook"]
+std = []
+
+# Enable all optional dependencies
+full = ["rand", "thiserror"]
+
+# Benchmark support
+benchmarks = ["rand"]
+
+# WASM feature
+wasm = ["console_error_panic_hook"]
+
+# Individual application features
+self-limiting-reasoning = []
+event-horizon = []
+homeostasis = []
+world-model = []
+coherence-creativity = []
+anti-cascade = []
+graceful-aging = []
+swarm-intelligence = []
+graceful-shutdown = []
+containment = []
+
+# Application groups
+all-applications = [
+    "self-limiting-reasoning",
+    "event-horizon",
+    "homeostasis",
+    "world-model",
+    "coherence-creativity",
+    "anti-cascade",
+    "graceful-aging",
+    "swarm-intelligence",
+    "graceful-shutdown",
+    "containment",
+]
+
+# Safety-critical applications
+safety-critical = [
+    "self-limiting-reasoning",
+    "graceful-shutdown",
+    "containment",
+]
+
+# Distributed systems applications
+distributed = [
+    "graceful-aging",
+    "swarm-intelligence",
+    "anti-cascade",
+]
+
+# AI/ML applications
+ai-ml = [
+    "self-limiting-reasoning",
+    "world-model",
+    "coherence-creativity",
+    "containment",
+]
+
+# Memory tracking for debugging
+memory-tracking = []
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "s"
+
+[profile.bench]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = false
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O4"]

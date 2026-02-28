@@ -1,0 +1,45 @@
+# Build in the same environment as runtime
+FROM debian:bookworm-slim AS builder
+
+# Install Rust and build dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /build
+
+# Copy workspace files
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
+COPY examples/ examples/
+
+# Build the benchmark binary
+RUN cargo build --release -p ruvector-cloudrun-gpu
+
+# Runtime stage - same base as builder
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    libssl3 \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /build/target/release/gpu-benchmark ./
+
+ENV PORT=8080
+ENV RUST_LOG=info
+
+EXPOSE 8080
+
+CMD ["./gpu-benchmark", "serve", "--port", "8080"]

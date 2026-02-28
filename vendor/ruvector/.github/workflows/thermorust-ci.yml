@@ -1,0 +1,62 @@
+name: thermorust CI
+
+on:
+  push:
+    paths:
+      - "crates/thermorust/**"
+      - ".github/workflows/thermorust-ci.yml"
+  pull_request:
+    paths:
+      - "crates/thermorust/**"
+      - ".github/workflows/thermorust-ci.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-thermorust-${{ hashFiles('crates/thermorust/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-thermorust-
+
+      - name: Check formatting
+        run: cargo fmt --package thermorust -- --check
+
+      - name: Clippy
+        run: cargo clippy --package thermorust --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build --package thermorust
+
+      - name: Run tests
+        run: cargo test --package thermorust
+
+  bench-check:
+    name: Benchmarks compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check benchmarks compile
+        run: cargo bench --package thermorust --no-run

@@ -1,0 +1,28 @@
+# Learning Patterns Configuration
+# This file teaches the hooks system about YAML file handling
+
+learning:
+  enabled: true
+  rate: 0.1
+  patterns:
+    - type: yaml_config
+      confidence_threshold: 0.7
+    - type: rust_source
+      confidence_threshold: 0.8
+    - type: typescript
+      confidence_threshold: 0.75
+
+agent_routing:
+  default_agent: coder
+  file_mappings:
+    "*.rs": rust-developer
+    "*.ts": typescript-developer
+    "*.yaml": config-specialist
+    "*.json": data-analyst
+    "*.sh": devops-engineer
+    "*.md": documentation-writer
+
+metrics:
+  track_q_values: true
+  track_trajectories: true
+  export_interval: 300

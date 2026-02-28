@@ -1,0 +1,37 @@
+[package]
+name = "ruvector-hyperbolic-hnsw-wasm"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT"
+authors = ["RuVector Team"]
+repository = "https://github.com/ruvnet/ruvector"
+description = "WebAssembly bindings for hyperbolic HNSW embeddings - hierarchy-aware vector search in the browser"
+keywords = ["wasm", "hyperbolic", "poincare", "hnsw", "vector-search"]
+categories = ["wasm", "mathematics", "algorithms"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["console_error_panic_hook"]
+parallel = ["rayon", "wasm-bindgen-rayon"]
+
+[dependencies]
+ruvector-hyperbolic-hnsw = { path = "../ruvector-hyperbolic-hnsw", default-features = false }
+wasm-bindgen = "0.2.106"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["console"] }
+getrandom = { version = "0.2", features = ["js"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde-wasm-bindgen = "0.6"
+console_error_panic_hook = { version = "0.1", optional = true }
+rayon = { version = "1.10", optional = true }
+wasm-bindgen-rayon = { version = "1.2", optional = true }
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O3", "--enable-simd"]
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

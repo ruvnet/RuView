@@ -1,0 +1,64 @@
+[package]
+name = "sevensense-embedding"
+description = "Embedding bounded context for 7sense bioacoustics - Perch 2.0 ONNX integration"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "README.md"
+
+[dependencies]
+# Internal crates
+sevensense-core = { workspace = true, version = "0.1.0" }
+sevensense-audio = { workspace = true, version = "0.1.0" }
+
+# ONNX Runtime for Rust
+ort = { workspace = true }
+
+# Numerical computing
+ndarray = { workspace = true }
+half = { version = "2.4", features = ["serde", "num-traits"] }
+
+# Async runtime
+tokio = { workspace = true }
+rayon = "1.10"
+parking_lot = "0.12"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Tracing and observability
+tracing = { workspace = true }
+
+# Cryptographic hashing for model verification
+sha2 = "0.10"
+hex = "0.4"
+
+# UUID for identifiers
+uuid = { workspace = true }
+
+# Time handling
+chrono = { workspace = true }
+
+# Async traits
+async-trait = { workspace = true }
+
+# CPU detection
+num_cpus = "1.16"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }
+tempfile = "3.10"
+approx = "0.5"
+
+[features]
+default = []
+cuda = []
+coreml = []

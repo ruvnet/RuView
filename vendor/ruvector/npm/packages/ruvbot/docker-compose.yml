@@ -1,0 +1,118 @@
+# =============================================================================
+# RuvBot - Local Development Docker Compose
+# =============================================================================
+# Run: docker-compose up -d
+#
+# Services:
+# - ruvbot: Main application (port 8080)
+# - postgres: PostgreSQL database (port 5432)
+# - redis: Redis cache (port 6379)
+# - adminer: Database admin UI (port 8081)
+# =============================================================================
+
+version: '3.9'
+
+services:
+  # ---------------------------------------------------------------------------
+  # RuvBot Application
+  # ---------------------------------------------------------------------------
+  ruvbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      NODE_ENV: development
+      PORT: 8080
+
+      # Database
+      DATABASE_URL: postgresql://ruvbot:ruvbot_dev@postgres:5432/ruvbot
+
+      # Redis
+      REDIS_URL: redis://redis:6379
+
+      # LLM Providers (set in .env)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+
+      # Vector Store
+      VECTOR_STORE_TYPE: memory
+
+      # Logging
+      LOG_LEVEL: debug
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ruvbot
+      POSTGRES_PASSWORD: ruvbot_dev
+      POSTGRES_DB: ruvbot
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deploy/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ruvbot -d ruvbot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Redis Cache
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Database Admin UI (optional)
+  # ---------------------------------------------------------------------------
+  adminer:
+    image: adminer:latest
+    ports:
+      - "8081:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    profiles:
+      - admin
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: ruvbot-network

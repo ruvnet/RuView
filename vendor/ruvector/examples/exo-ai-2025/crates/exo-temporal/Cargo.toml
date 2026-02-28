@@ -1,0 +1,50 @@
+[package]
+name = "exo-temporal"
+version = "0.1.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["rUv <ruv@ruv.io>"]
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://ruv.io"
+documentation = "https://docs.rs/exo-temporal"
+description = "Temporal memory coordinator with causal structure for EXO-AI cognitive substrate"
+keywords = ["memory", "temporal", "causal", "cognitive", "ai"]
+categories = ["science", "algorithms", "data-structures"]
+readme = "README.md"
+
+[dependencies]
+# Core types from exo-core
+exo-core = "0.1"
+ruvector-domain-expansion = "2.0"
+
+# Concurrent data structures
+dashmap = "6.1"
+parking_lot = "0.12"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+
+# Error handling
+thiserror = "2.0"
+
+# Async runtime
+tokio = { version = "1.0", features = ["sync", "time"], optional = true }
+
+# Graph algorithms
+petgraph = "0.6"
+
+# UUID generation
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# Hashing
+ahash = "0.8"
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["full", "test-util"] }
+
+[features]
+default = []
+async = ["tokio"]

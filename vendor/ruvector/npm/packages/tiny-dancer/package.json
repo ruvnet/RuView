@@ -1,0 +1,63 @@
+{
+  "name": "@ruvector/tiny-dancer",
+  "version": "0.1.17",
+  "description": "Neural router for AI agent orchestration - FastGRNN-based intelligent routing with circuit breaker, uncertainty estimation, and hot-reload",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "author": "ruv.io Team <info@ruv.io> (https://ruv.io)",
+  "homepage": "https://ruv.io",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "npm/packages/tiny-dancer"
+  },
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "build:napi": "napi build --platform --release --cargo-cwd ../../../crates/ruvector-tiny-dancer-node",
+    "test": "node test.js",
+    "publish:platforms": "node scripts/publish-platforms.js"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  },
+  "optionalDependencies": {
+    "@ruvector/tiny-dancer-linux-x64-gnu": "0.1.15",
+    "@ruvector/tiny-dancer-linux-arm64-gnu": "0.1.17",
+    "@ruvector/tiny-dancer-darwin-x64": "0.1.15",
+    "@ruvector/tiny-dancer-darwin-arm64": "0.1.15",
+    "@ruvector/tiny-dancer-win32-x64-msvc": "0.1.15"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "neural-router",
+    "ai-routing",
+    "agent-orchestration",
+    "fastgrnn",
+    "circuit-breaker",
+    "uncertainty-estimation",
+    "hot-reload",
+    "llm-routing",
+    "model-routing",
+    "native",
+    "napi",
+    "rust",
+    "simd",
+    "fast",
+    "performance",
+    "ruv",
+    "ruvector"
+  ]
+}

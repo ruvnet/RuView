@@ -1,0 +1,1906 @@
+//! # Comprehensive Edge Case Tests for Delta-Behavior Applications
+//!
+//! This test suite validates all delta-behavior applications under extreme
+//! and boundary conditions to ensure robust behavior.
+//!
+//! ## Edge Cases Tested:
+//! 1. Zero coherence: What happens when coherence = 0.0?
+//! 2. Maximum coherence: What happens when coherence = 1.0?
+//! 3. Empty collections: Empty agent lists, empty positions, etc.
+//! 4. Single element: Single agent in swarm, single transaction
+//! 5. Boundary values: Values exactly at thresholds
+//! 6. Overflow prevention: Very large numbers, very small numbers
+//! 7. NaN/Infinity: Handle gracefully, don't propagate
+//! 8. Rapid state changes: Many transitions in quick succession
+//! 9. Recovery from degraded state: Can systems recover?
+//! 10. Concurrent-like patterns: Interleaved operations
+
+// Include application modules
+#[path = "../applications/01-self-limiting-reasoning.rs"]
+mod self_limiting_reasoning;
+
+#[path = "../applications/02-computational-event-horizon.rs"]
+mod event_horizon;
+
+#[path = "../applications/03-artificial-homeostasis.rs"]
+mod homeostasis;
+
+#[path = "../applications/04-self-stabilizing-world-model.rs"]
+mod world_model;
+
+#[path = "../applications/05-coherence-bounded-creativity.rs"]
+mod creativity;
+
+#[path = "../applications/06-anti-cascade-financial.rs"]
+mod financial;
+
+#[path = "../applications/07-graceful-aging.rs"]
+mod aging;
+
+#[path = "../applications/08-swarm-intelligence.rs"]
+mod swarm;
+
+#[path = "../applications/09-graceful-shutdown.rs"]
+mod shutdown;
+
+#[path = "../applications/10-pre-agi-containment.rs"]
+mod containment;
+
+#[path = "../applications/11-extropic-substrate.rs"]
+mod extropic;
+
+use std::collections::HashMap;
+use std::time::Duration;
+
+// =============================================================================
+// Application 1: Self-Limiting Reasoning Edge Cases
+// =============================================================================
+
+mod self_limiting_reasoning_edge_cases {
+    use super::self_limiting_reasoning::*;
+
+    /// Test: Zero coherence should refuse all reasoning attempts
+    #[test]
+    fn test_zero_coherence_refuses_reasoning() {
+        let reasoner = SelfLimitingReasoner::new(10, 100);
+
+        // Force coherence to zero
+        reasoner.update_coherence(-1.0);
+
+        let result = reasoner.reason("any problem", |_ctx| Some("solution"));
+
+        // Should be refused, not crashed
+        match result {
+            ReasoningResult::Refused { coherence, required } => {
+                assert!(coherence < required,
+                    "Zero coherence ({}) should be below required threshold ({})",
+                    coherence, required);
+            }
+            _ => {
+                // Even if reasoning starts, it should collapse quickly
+                // This is acceptable behavior
+            }
+        }
+    }
+
+    /// Test: Maximum coherence (1.0) should allow full reasoning depth
+    #[test]
+    fn test_maximum_coherence_full_depth() {
+        let reasoner = SelfLimitingReasoner::new(10, 100);
+
+        // Ensure full coherence
+        assert!((reasoner.coherence() - 1.0).abs() < 0.001,
+            "Initial coherence should be 1.0");
+
+        // Should have full depth
+        assert_eq!(reasoner.allowed_depth(), 10,
+            "At full coherence, should have full reasoning depth");
+
+        // Should have full scope
+        assert_eq!(reasoner.allowed_scope(), 100,
+            "At full coherence, should have full action scope");
+
+        // Should be able to write memory
+        assert!(reasoner.can_write_memory(),
+            "At full coherence, memory writes should be allowed");
+    }
+
+    /// Test: Boundary value exactly at threshold
+    #[test]
+    fn test_coherence_exactly_at_memory_threshold() {
+        let reasoner = SelfLimitingReasoner::new(10, 100);
+
+        // Set coherence to exactly the memory gate threshold (0.5)
+        reasoner.update_coherence(-0.5);
+
+        // At exactly 0.5, memory writes should still be allowed
+        assert!(reasoner.can_write_memory(),
+            "Coherence exactly at threshold (0.5) should allow memory writes");
+
+        // Just below threshold
+        reasoner.update_coherence(-0.01);
+        assert!(!reasoner.can_write_memory(),
+            "Coherence just below threshold should block memory writes");
+    }
+
+    /// Test: Rapid coherence changes don't cause issues
+    #[test]
+    fn test_rapid_coherence_oscillation() {
+        let reasoner = SelfLimitingReasoner::new(10, 100);
+
+        // Rapidly oscillate coherence
+        for i in 0..1000 {
+            if i % 2 == 0 {
+                reasoner.update_coherence(-0.3);
+            } else {
+                reasoner.update_coherence(0.3);
+            }
+
+            // System should remain stable
+            let coherence = reasoner.coherence();
+            assert!(coherence >= 0.0 && coherence <= 1.0,
+                "Coherence {} should stay within [0.0, 1.0]", coherence);
+        }
+    }
+
+    /// Test: Recovery from near-zero coherence
+    #[test]
+    fn test_recovery_from_near_zero_coherence() {
+        let reasoner = SelfLimitingReasoner::new(10, 100);
+
+        // Drop to near zero
+        reasoner.update_coherence(-0.95);
+        assert!(reasoner.coherence() < 0.1, "Should be near zero");
+
+        // Verify system is degraded
+        assert!(reasoner.allowed_depth() < 3,
+            "Near-zero coherence should severely limit depth");
+
+        // Recover
+        reasoner.update_coherence(0.9);
+
+        // Should be functional again
+        let depth = reasoner.allowed_depth();
+        assert!(depth >= 5,
+            "After recovery, depth ({}) should be substantial", depth);
+    }
+
+    /// Test: CollapseFunction handles edge values
+    #[test]
+    fn test_collapse_function_edge_values() {
+        // Test Linear with 0.0
+        let linear = CollapseFunction::Linear;
+        assert_eq!(linear.apply(0.0, 100), 0,
+            "Linear with zero coherence should give zero");
+        assert_eq!(linear.apply(1.0, 100), 100,
+            "Linear with full coherence should give max");
+
+        // Test Quadratic with 0.0
+        let quadratic = CollapseFunction::Quadratic;
+        assert_eq!(quadratic.apply(0.0, 100), 0,
+            "Quadratic with zero coherence should give zero");
+        assert_eq!(quadratic.apply(1.0, 100), 100,
+            "Quadratic with full coherence should give max");
+
+        // Test Step exactly at threshold
+        let step = CollapseFunction::Step { threshold: 0.5 };
+        assert_eq!(step.apply(0.5, 100), 100,
+            "Step at threshold should give max");
+        assert_eq!(step.apply(0.49, 100), 0,
+            "Step below threshold should give zero");
+
+        // Test Sigmoid with extreme values
+        let sigmoid = CollapseFunction::Sigmoid { midpoint: 0.5, steepness: 10.0 };
+        let val_zero = sigmoid.apply(0.0, 100);
+        let val_one = sigmoid.apply(1.0, 100);
+        assert!(val_zero < 10, "Sigmoid at 0.0 should be near zero");
+        assert!(val_one > 90, "Sigmoid at 1.0 should be near max");
+    }
+}
+
+// =============================================================================
+// Application 2: Event Horizon Edge Cases
+// =============================================================================
+
+mod event_horizon_edge_cases {
+    use super::event_horizon::*;
+
+    /// Test: Zero dimensions event horizon
+    #[test]
+    fn test_zero_dimensions() {
+        // Creating with zero dimensions should still work
+        let horizon = EventHorizon::new(0, 10.0);
+
+        // Distance calculations should handle empty vectors
+        let dist = horizon.distance_to_horizon();
+        assert!(dist.is_finite(), "Distance should be finite even with zero dimensions");
+    }
+
+    /// Test: Single dimension event horizon
+    #[test]
+    fn test_single_dimension() {
+        let mut horizon = EventHorizon::new(1, 5.0);
+
+        // Move toward the horizon in 1D
+        let result = horizon.move_toward(&[4.5]);
+
+        match result {
+            MovementResult::Moved { new_position, .. } => {
+                assert!(new_position[0] <= 5.0,
+                    "Should not cross 1D horizon");
+            }
+            MovementResult::AsymptoticApproach { final_position, .. } => {
+                assert!(final_position[0] < 5.0,
+                    "Should approach but not cross 1D horizon");
+            }
+            MovementResult::Frozen => {
+                // Acceptable if energy depleted
+            }
+        }
+    }
+
+    /// Test: Very large dimension count
+    #[test]
+    fn test_high_dimensions() {
+        let mut horizon = EventHorizon::new(1000, 100.0);
+
+        // Should handle high-dimensional movement
+        let target: Vec<f64> = (0..1000).map(|_| 50.0).collect();
+        let result = horizon.move_toward(&target);
+
+        // Should not panic or overflow
+        match result {
+            MovementResult::Moved { new_position, .. } => {
+                assert_eq!(new_position.len(), 1000,
+                    "Should maintain dimensionality");
+            }
+            MovementResult::AsymptoticApproach { final_position, .. } => {
+                assert_eq!(final_position.len(), 1000,
+                    "Should maintain dimensionality");
+            }
+            MovementResult::Frozen => {}
+        }
+    }
+
+    /// Test: Very small horizon radius
+    #[test]
+    fn test_tiny_horizon_radius() {
+        let mut horizon = EventHorizon::new(2, 0.001);
+
+        // Any meaningful movement should hit the horizon
+        let result = horizon.move_toward(&[0.0005, 0.0005]);
+
+        // Should approach asymptotically
+        assert!(matches!(
+            result,
+            MovementResult::AsymptoticApproach { .. } | MovementResult::Frozen
+        ), "Tiny horizon should force asymptotic approach or freeze");
+    }
+
+    /// Test: Exactly at horizon boundary
+    #[test]
+    fn test_exactly_at_horizon() {
+        let mut horizon = EventHorizon::new(2, 10.0);
+
+        // Try to move exactly to the horizon
+        let result = horizon.move_toward(&[10.0, 0.0]);
+
+        match result {
+            MovementResult::AsymptoticApproach { distance_to_horizon, .. } => {
+                assert!(distance_to_horizon > 0.0,
+                    "Should not be able to reach exact horizon");
+            }
+            _ => {
+                // Other results are acceptable
+            }
+        }
+    }
+
+    /// Test: Zero energy budget
+    #[test]
+    fn test_zero_energy() {
+        let mut horizon = EventHorizon::new(2, 10.0);
+
+        // Exhaust all energy
+        while !matches!(horizon.move_toward(&[5.0, 5.0]), MovementResult::Frozen) {}
+
+        // Should be frozen now
+        let result = horizon.move_toward(&[1.0, 1.0]);
+        assert!(matches!(result, MovementResult::Frozen),
+            "Zero energy should freeze all movement");
+    }
+
+    /// Test: Recursive improvement with extreme function
+    #[test]
+    fn test_recursive_improve_exponential() {
+        let mut horizon = EventHorizon::new(2, 5.0);
+        horizon.refuel(100000.0); // Lots of energy
+
+        // Try exponentially growing improvements
+        let mut factor = 1.0;
+        let improve = |pos: &[f64]| -> Vec<f64> {
+            factor *= 2.0; // Double each time
+            vec![pos[0] + factor, pos[1] + factor]
+        };
+
+        let result = horizon.recursive_improve(improve, 100);
+
+        // Despite exponential growth attempts, should be bounded
+        match result {
+            RecursionResult::HorizonBounded { .. } => {
+                // Expected: system bounded itself
+            }
+            RecursionResult::EnergyExhausted { .. } => {
+                // Also acceptable: energy ran out
+            }
+            RecursionResult::MaxIterationsReached { improvements, .. } => {
+                // Check that we stayed within horizon
+                if let Some(last) = improvements.last() {
+                    let dist = (last.position[0].powi(2) + last.position[1].powi(2)).sqrt();
+                    assert!(dist < 5.0, "Should stay within horizon radius");
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Application 3: Homeostasis Edge Cases
+// =============================================================================
+
+mod homeostasis_edge_cases {
+    use super::homeostasis::*;
+
+    /// Test: Empty genome (random should handle it)
+    #[test]
+    fn test_random_genome_valid() {
+        let genome = Genome::random();
+
+        // All values should be in valid ranges
+        assert!(genome.regulatory_strength >= 0.1 && genome.regulatory_strength <= 0.5);
+        assert!(genome.metabolic_efficiency >= 0.5 && genome.metabolic_efficiency <= 1.0);
+        assert!(genome.coherence_maintenance_cost >= 0.5);
+        assert!(genome.memory_resilience >= 0.0 && genome.memory_resilience <= 1.0);
+        assert!(genome.longevity >= 0.5);
+    }
+
+    /// Test: Organism with zero energy
+    #[test]
+    fn test_zero_energy_organism() {
+        let genome = Genome::random();
+        let mut organism = HomeostasticOrganism::new(1, genome);
+
+        // Drain energy
+        while organism.is_alive() && organism.energy > 0.0 {
+            let _ = organism.act(Action::Move(10.0, 10.0));
+        }
+
+        // Organism should be dead
+        assert!(!organism.is_alive(), "Zero energy should kill organism");
+    }
+
+    /// Test: Maximum coherence organism
+    #[test]
+    fn test_maximum_coherence() {
+        let genome = Genome::random();
+        let mut organism = HomeostasticOrganism::new(1, genome);
+
+        // Keep resting to stay at maximum coherence
+        for _ in 0..10 {
+            let result = organism.act(Action::Rest);
+            assert!(matches!(result, ActionResult::Success { .. }),
+                "Resting should succeed");
+        }
+
+        // Should still be alive and coherent
+        assert!(organism.is_alive());
+    }
+
+    /// Test: Extreme temperature deviation
+    #[test]
+    fn test_extreme_temperature() {
+        let genome = Genome::random();
+        let mut organism = HomeostasticOrganism::new(1, genome);
+
+        // Set extreme temperature (5x tolerance)
+        if let Some(temp) = organism.internal_state.get_mut("temperature") {
+            *temp = 50.0; // 13 degrees above setpoint, 6.5x tolerance
+        }
+
+        let initial_alive = organism.is_alive();
+
+        // Act should trigger death check
+        let _ = organism.act(Action::Rest);
+
+        // Should be dead from extreme deviation
+        assert!(!organism.is_alive() || !initial_alive,
+            "Extreme deviation should kill organism");
+    }
+
+    /// Test: Rapid action succession
+    #[test]
+    fn test_rapid_actions() {
+        let genome = Genome::random();
+        let mut organism = HomeostasticOrganism::new(1, genome);
+
+        // Take many actions in rapid succession
+        for i in 0..100 {
+            if !organism.is_alive() {
+                break;
+            }
+
+            let action = match i % 4 {
+                0 => Action::Eat(5.0),
+                1 => Action::Move(0.1, 0.1),
+                2 => Action::Regulate("temperature".to_string(), 37.0),
+                _ => Action::Rest,
+            };
+
+            let _ = organism.act(action);
+        }
+
+        // Should not panic
+    }
+
+    /// Test: Reproduction at boundary coherence
+    #[test]
+    fn test_reproduction_boundary() {
+        let genome = Genome::random();
+        let mut organism = HomeostasticOrganism::new(1, genome);
+
+        // Try to reproduce at full coherence
+        let result = organism.act(Action::Reproduce);
+
+        // May succeed or fail based on energy, but should not panic
+        match result {
+            ActionResult::Reproduced { offspring_id } => {
+                assert!(offspring_id > 0, "Offspring ID should be valid");
+            }
+            ActionResult::Failed { reason } => {
+                // Acceptable - may not have enough energy
+                assert!(!reason.is_empty());
+            }
+            _ => {}
+        }
+    }
+}
+
+// =============================================================================
+// Application 4: World Model Edge Cases
+// =============================================================================
+
+mod world_model_edge_cases {
+    use super::world_model::*;
+
+    /// Test: Empty world model
+    #[test]
+    fn test_empty_world_model() {
+        let model = SelfStabilizingWorldModel::new();
+
+        // Empty model should have full coherence
+        assert!((model.coherence - 1.0).abs() < 0.01,
+            "Empty model should have coherence 1.0");
+
+        // Should still be learning
+        assert!(model.is_learning());
+
+        // Rejection count should be zero
+        assert_eq!(model.rejection_count(), 0);
+    }
+
+    /// Test: Single entity observation
+    #[test]
+    fn test_single_entity() {
+        let mut model = SelfStabilizingWorldModel::new();
+
+        let obs = Observation {
+            entity_id: 1,
+            properties: HashMap::new(),
+            position: Some((0.0, 0.0, 0.0)),
+            timestamp: 0,
+            source_confidence: 1.0,
+        };
+
+        let result = model.observe(obs, 0);
+
+        assert!(matches!(result, UpdateResult::Applied { .. }),
+            "Single entity observation should be applied");
+    }
+
+    /// Test: Zero confidence observation
+    #[test]
+    fn test_zero_confidence_observation() {
+        let mut model = SelfStabilizingWorldModel::new();
+
+        let obs = Observation {
+            entity_id: 1,
+            properties: HashMap::new(),
+            position: Some((0.0, 0.0, 0.0)),
+            timestamp: 0,
+            source_confidence: 0.0, // Zero confidence
+        };
+
+        let result = model.observe(obs, 0);
+
+        // Should still be processed (coherence handles quality)
+        assert!(matches!(result, UpdateResult::Applied { .. } | UpdateResult::Rejected { .. }));
+    }
+
+    /// Test: Very large position values
+    #[test]
+    fn test_large_position_values() {
+        let mut model = SelfStabilizingWorldModel::new();
+
+        let obs = Observation {
+            entity_id: 1,
+            properties: HashMap::new(),
+            position: Some((1e15, 1e15, 1e15)), // Very large
+            timestamp: 0,
+            source_confidence: 0.9,
+        };
+
+        let result = model.observe(obs, 0);
+
+        // Should handle without overflow
+        assert!(matches!(
+            result,
+            UpdateResult::Applied { .. } |
+            UpdateResult::Rejected { .. } |
+            UpdateResult::Modified { .. } |
+            UpdateResult::Frozen { .. }
+        ));
+    }
+
+    /// Test: NaN in property values
+    #[test]
+    fn test_nan_in_properties() {
+        let mut model = SelfStabilizingWorldModel::new();
+
+        // First, add a normal entity
+        let obs1 = Observation {
+            entity_id: 1,
+            properties: [("value".to_string(), PropertyValue::Number(100.0))].into(),
+            position: Some((0.0, 0.0, 0.0)),
+            timestamp: 0,
+            source_confidence: 0.9,
+        };
+        model.observe(obs1, 0);
+
+        // Try to update with NaN
+        let obs2 = Observation {
+            entity_id: 1,
+            properties: [("value".to_string(), PropertyValue::Number(f64::NAN))].into(),
+            position: Some((0.0, 0.0, 0.0)),
+            timestamp: 1,
+            source_confidence: 0.9,
+        };
+
+        let result = model.observe(obs2, 1);
+
+        // Should handle gracefully - NaN in calculations won't crash
+        // The result depends on how NaN affects coherence calculation
+        assert!(!matches!(result, UpdateResult::Applied { coherence_change }
+            if coherence_change.is_nan()));
+    }
+
+    /// Test: Rapid observation updates
+    #[test]
+    fn test_rapid_updates() {
+        let mut model = SelfStabilizingWorldModel::new();
+
+        // Feed many observations rapidly
+        for i in 0..1000 {
+            let obs = Observation {
+                entity_id: (i % 10) as u64,
+                properties: [("count".to_string(), PropertyValue::Number(i as f64))].into(),
+                position: Some((i as f64 % 50.0, 0.0, 0.0)),
+                timestamp: i as u64,
+                source_confidence: 0.8,
+            };
+
+            let _ = model.observe(obs, i as u64);
+        }
+
+        // Model should still be stable
+        let coherence = model.coherence;
+        assert!(coherence.is_finite(), "Coherence should remain finite");
+    }
+
+    /// Test: Model frozen state recovery
+    #[test]
+    fn test_frozen_state_recovery() {
+        let mut model = SelfStabilizingWorldModel::new();
+
+        // Degrade model to frozen state by feeding chaotic data
+        for i in 0..100 {
+            let obs = Observation {
+                entity_id: i as u64,
+                properties: [("chaos".to_string(), PropertyValue::Number(
+                    if i % 2 == 0 { 1000.0 } else { -1000.0 }
+                ))].into(),
+                position: Some((i as f64 * 100.0, 0.0, 0.0)),
+                timestamp: i as u64,
+                source_confidence: 0.1,
+            };
+
+            let result = model.observe(obs, i as u64);
+
+            if matches!(result, UpdateResult::Frozen { .. }) {
+                // Model is frozen - this is expected behavior
+                break;
+            }
+        }
+
+        // Verify status reports correctly
+        let status = model.status();
+        assert!(!status.is_empty());
+    }
+}
+
+// =============================================================================
+// Application 5: Creativity Edge Cases
+// =============================================================================
+
+mod creativity_edge_cases {
+    use super::creativity::*;
+
+    /// Test: Empty constraint list
+    #[test]
+    fn test_no_constraints() {
+        let initial = MusicalPhrase::simple_melody();
+        let mut creator = CoherenceBoundedCreator::new(initial, 0.5, 0.99);
+
+        // No constraints added - should create freely
+        let result = creator.create(0.5);
+
+        // Without constraints, should succeed
+        assert!(matches!(result, CreativeResult::Created { .. }),
+            "No constraints should allow creation");
+    }
+
+    /// Test: Maximum coherence threshold equals minimum
+    #[test]
+    fn test_equal_coherence_bounds() {
+        let initial = MusicalPhrase::simple_melody();
+        let creator = CoherenceBoundedCreator::new(initial, 0.5, 0.5);
+
+        // Should still function
+        assert!((creator.coherence() - 1.0).abs() < 0.01);
+    }
+
+    /// Test: Zero exploration magnitude
+    #[test]
+    fn test_zero_exploration() {
+        let initial = MusicalPhrase::simple_melody();
+        let mut creator = CoherenceBoundedCreator::new(initial, 0.3, 0.95);
+
+        let before = creator.current().fingerprint();
+        let result = creator.create(0.0);
+        let after = creator.current().fingerprint();
+
+        // With zero exploration, minimal change expected
+        match result {
+            CreativeResult::Created { novelty, .. } => {
+                assert!(novelty < 0.5, "Zero exploration should produce low novelty");
+            }
+            _ => {}
+        }
+    }
+
+    /// Test: Very large exploration magnitude
+    #[test]
+    fn test_extreme_exploration() {
+        let initial = MusicalPhrase::simple_melody();
+        let mut creator = CoherenceBoundedCreator::new(initial, 0.3, 0.95);
+
+        creator.add_constraint(Box::new(RangeConstraint { min_note: 48, max_note: 84 }));
+
+        let result = creator.create(100.0); // Extreme magnitude
+
+        // Should be bounded by constraints or budget
+        assert!(matches!(
+            result,
+            CreativeResult::Created { .. } |
+            CreativeResult::Rejected { .. } |
+            CreativeResult::BudgetExhausted
+        ));
+    }
+
+    /// Test: Exhausted exploration budget
+    #[test]
+    fn test_budget_exhaustion() {
+        let initial = MusicalPhrase::simple_melody();
+        let mut creator = CoherenceBoundedCreator::new(initial, 0.3, 0.95);
+
+        // Exhaust budget
+        for _ in 0..100 {
+            let result = creator.create(5.0);
+            if matches!(result, CreativeResult::BudgetExhausted) {
+                return; // Test passes
+            }
+        }
+
+        // If we get here, budget wasn't exhausted - that's also fine
+    }
+
+    /// Test: Musical phrase with empty notes
+    #[test]
+    fn test_empty_phrase() {
+        #[derive(Clone, Debug)]
+        struct EmptyCreative {
+            value: f64,
+        }
+
+        impl Creative for EmptyCreative {
+            fn vary(&self, magnitude: f64) -> Self {
+                EmptyCreative { value: self.value + magnitude * 0.1 }
+            }
+            fn distance(&self, other: &Self) -> f64 {
+                (self.value - other.value).abs()
+            }
+            fn fingerprint(&self) -> u64 {
+                (self.value * 1000.0) as u64
+            }
+        }
+
+        let initial = EmptyCreative { value: 0.0 };
+        let mut creator = CoherenceBoundedCreator::new(initial, 0.3, 0.95);
+
+        let result = creator.create(0.5);
+        assert!(matches!(result, CreativeResult::Created { .. }));
+    }
+
+    /// Test: Perturb at boundary coherence
+    #[test]
+    fn test_perturb_boundary() {
+        let initial = MusicalPhrase::simple_melody();
+        let mut creator = CoherenceBoundedCreator::new(initial, 0.3, 0.95);
+
+        // Perturb should work at high coherence
+        let result = creator.perturb(1.0);
+        // Result depends on coherence change - can be true or false
+
+        // System should still be stable
+        assert!(creator.coherence() >= 0.0 && creator.coherence() <= 1.0);
+    }
+}
+
+// =============================================================================
+// Application 6: Financial System Edge Cases
+// =============================================================================
+
+mod financial_edge_cases {
+    use super::financial::*;
+
+    /// Test: Empty financial system
+    #[test]
+    fn test_empty_system() {
+        let system = AntiCascadeFinancialSystem::new();
+
+        // Empty system should have full coherence
+        assert!((system.coherence() - 1.0).abs() < 0.01);
+        assert_eq!(*system.circuit_breaker_state(), CircuitBreakerState::Open);
+    }
+
+    /// Test: Single participant
+    #[test]
+    fn test_single_participant() {
+        let mut system = AntiCascadeFinancialSystem::new();
+        system.add_participant("solo", 1000.0);
+
+        // Self-transfer should work
+        let tx = Transaction {
+            id: 1,
+            from: "solo".to_string(),
+            to: "solo".to_string(),
+            amount: 100.0,
+            transaction_type: TransactionType::Transfer,
+            timestamp: 0,
+        };
+
+        let result = system.process_transaction(tx);
+        assert!(matches!(result, TransactionResult::Executed { .. }));
+    }
+
+    /// Test: Zero amount transaction
+    #[test]
+    fn test_zero_amount_transaction() {
+        let mut system = AntiCascadeFinancialSystem::new();
+        system.add_participant("a", 1000.0);
+        system.add_participant("b", 1000.0);
+
+        let tx = Transaction {
+            id: 1,
+            from: "a".to_string(),
+            to: "b".to_string(),
+            amount: 0.0,
+            transaction_type: TransactionType::Transfer,
+            timestamp: 0,
+        };
+
+        let result = system.process_transaction(tx);
+        // Zero amount should be handled gracefully
+        assert!(matches!(
+            result,
+            TransactionResult::Executed { .. } | TransactionResult::Rejected { .. }
+        ));
+    }
+
+    /// Test: Very high leverage
+    #[test]
+    fn test_extreme_leverage() {
+        let mut system = AntiCascadeFinancialSystem::new();
+        system.add_participant("risky", 1000.0);
+        system.add_participant("counter", 10000.0);
+
+        let tx = Transaction {
+            id: 1,
+            from: "risky".to_string(),
+            to: "counter".to_string(),
+            amount: 100.0,
+            transaction_type: TransactionType::OpenLeverage { leverage: 1000.0 }, // Extreme
+            timestamp: 0,
+        };
+
+        let result = system.process_transaction(tx);
+
+        // High leverage should either be very expensive or rejected
+        match result {
+            TransactionResult::Executed { fee_multiplier, .. } => {
+                assert!(fee_multiplier > 100.0,
+                    "Extreme leverage should have high fee");
+            }
+            TransactionResult::Rejected { .. } => {
+                // Also acceptable - system protected itself
+            }
+            _ => {}
+        }
+    }
+
+    /// Test: Circuit breaker transitions
+    #[test]
+    fn test_circuit_breaker_transitions() {
+        let mut system = AntiCascadeFinancialSystem::new();
+
+        // Add participants
+        for i in 0..10 {
+            system.add_participant(&format!("bank_{}", i), 1000.0);
+        }
+
+        // Create stress to trigger circuit breaker
+        let mut saw_cautious = false;
+        let mut saw_restricted = false;
+        let mut saw_halted = false;
+
+        for i in 0..100 {
+            let tx = Transaction {
+                id: i,
+                from: format!("bank_{}", i % 10),
+                to: format!("bank_{}", (i + 1) % 10),
+                amount: 200.0,
+                transaction_type: TransactionType::OpenLeverage { leverage: 8.0 },
+                timestamp: i,
+            };
+
+            let _ = system.process_transaction(tx);
+
+            match system.circuit_breaker_state() {
+                CircuitBreakerState::Cautious => saw_cautious = true,
+                CircuitBreakerState::Restricted => saw_restricted = true,
+                CircuitBreakerState::Halted => {
+                    saw_halted = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        // Should have seen at least some state changes
+        assert!(saw_cautious || saw_restricted || saw_halted,
+            "Stress should trigger circuit breaker");
+    }
+
+    /// Test: Close position at invalid index
+    #[test]
+    fn test_close_invalid_position() {
+        let mut system = AntiCascadeFinancialSystem::new();
+        system.add_participant("a", 1000.0);
+        system.add_participant("b", 1000.0);
+
+        // Try to close non-existent position
+        let tx = Transaction {
+            id: 1,
+            from: "a".to_string(),
+            to: "b".to_string(),
+            amount: 0.0,
+            transaction_type: TransactionType::ClosePosition { position_id: 9999 },
+            timestamp: 0,
+        };
+
+        // Should handle gracefully
+        let result = system.process_transaction(tx);
+        assert!(matches!(
+            result,
+            TransactionResult::Executed { .. } |
+            TransactionResult::Rejected { .. } |
+            TransactionResult::SystemHalted
+        ));
+    }
+
+    /// Test: Derivative of derivative of derivative
+    #[test]
+    fn test_deep_derivatives() {
+        let mut system = AntiCascadeFinancialSystem::new();
+        system.add_participant("a", 100000.0);
+        system.add_participant("b", 100000.0);
+
+        // Create base position
+        let base_tx = Transaction {
+            id: 0,
+            from: "a".to_string(),
+            to: "b".to_string(),
+            amount: 100.0,
+            transaction_type: TransactionType::OpenLeverage { leverage: 2.0 },
+            timestamp: 0,
+        };
+        system.process_transaction(base_tx);
+
+        // Try to create 10 levels of derivatives
+        let mut depth_reached = 0;
+        for i in 0..10 {
+            let tx = Transaction {
+                id: i + 1,
+                from: "a".to_string(),
+                to: "b".to_string(),
+                amount: 50.0,
+                transaction_type: TransactionType::CreateDerivative {
+                    underlying_position: i as usize
+                },
+                timestamp: i + 1,
+            };
+
+            let result = system.process_transaction(tx);
+
+            if matches!(result, TransactionResult::Rejected { .. } | TransactionResult::SystemHalted) {
+                break;
+            }
+            depth_reached = i + 1;
+        }
+
+        // System should have blocked excessive depth
+        assert!(depth_reached < 10 ||
+            system.circuit_breaker_state() != &CircuitBreakerState::Open,
+            "Should prevent excessive derivative depth");
+    }
+}
+
+// =============================================================================
+// Application 7: Graceful Aging Edge Cases
+// =============================================================================
+
+mod aging_edge_cases {
+    use super::aging::*;
+    use std::time::Duration;
+
+    /// Test: System with no nodes
+    #[test]
+    fn test_no_nodes() {
+        let system = GracefullyAgingSystem::new();
+
+        // Should still work with no nodes
+        let status = system.status();
+        assert!(!status.is_empty());
+        assert_eq!(system.active_nodes(), 0);
+    }
+
+    /// Test: Single node system
+    #[test]
+    fn test_single_node() {
+        let mut system = GracefullyAgingSystem::new();
+        system.add_node("solo", true);
+
+        // Age the system
+        system.simulate_age(Duration::from_secs(100));
+
+        // Should still have one active node
+        assert_eq!(system.active_nodes(), 1);
+    }
+
+    /// Test: All capabilities retained initially
+    #[test]
+    fn test_initial_capabilities() {
+        let system = GracefullyAgingSystem::new();
+
+        assert!(system.has_capability(&Capability::BasicReads));
+        assert!(system.has_capability(&Capability::AcceptWrites));
+        assert!(system.has_capability(&Capability::ComplexQueries));
+        assert!(system.has_capability(&Capability::SchemaMigration));
+        assert!(system.has_capability(&Capability::HealthMonitoring));
+    }
+
+    /// Test: Zero-duration age simulation
+    #[test]
+    fn test_zero_age_simulation() {
+        let mut system = GracefullyAgingSystem::new();
+        system.add_node("primary", true);
+
+        let initial_coherence = system.coherence;
+        system.simulate_age(Duration::ZERO);
+
+        // Should be unchanged
+        assert!((system.coherence - initial_coherence).abs() < 0.001);
+    }
+
+    /// Test: Very long age simulation
+    #[test]
+    fn test_extreme_age() {
+        let mut system = GracefullyAgingSystem::new();
+        system.add_node("primary", true);
+
+        // Age for a very long time
+        system.simulate_age(Duration::from_secs(10000));
+
+        // Core capabilities should still exist
+        assert!(system.has_capability(&Capability::BasicReads),
+            "Basic reads should never be removed");
+        assert!(system.has_capability(&Capability::HealthMonitoring),
+            "Health monitoring should never be removed");
+    }
+
+    /// Test: Operation attempts at various ages
+    #[test]
+    fn test_operations_at_various_ages() {
+        let mut system = GracefullyAgingSystem::new();
+        system.add_node("primary", true);
+
+        let operations = vec![
+            Operation::Read { key: "test".to_string() },
+            Operation::Write { key: "test".to_string(), value: vec![1] },
+            Operation::ComplexQuery { query: "SELECT *".to_string() },
+            Operation::MigrateSchema { version: 2 },
+        ];
+
+        // Test at various ages
+        for age_secs in [0, 300, 600, 900, 1200, 1500] {
+            system.simulate_age(Duration::from_secs(age_secs));
+
+            for op in &operations {
+                let result = system.attempt_operation(op.clone());
+
+                // All results should be valid (not panic)
+                match result {
+                    OperationResult::Success { latency_penalty } => {
+                        assert!(latency_penalty >= 1.0);
+                    }
+                    OperationResult::DeniedByAge { reason } => {
+                        assert!(!reason.is_empty());
+                    }
+                    OperationResult::DeniedByCoherence { coherence } => {
+                        assert!(coherence < 1.0);
+                    }
+                    OperationResult::SystemTooOld { .. } => {
+                        // Expected for some operations at high age
+                    }
+                }
+            }
+        }
+    }
+
+    /// Test: Rapid aging cycles
+    #[test]
+    fn test_rapid_aging_cycles() {
+        let mut system = GracefullyAgingSystem::new();
+        system.add_node("primary", true);
+
+        // Rapid small age increments
+        for _ in 0..1000 {
+            system.simulate_age(Duration::from_secs(1));
+        }
+
+        // System should be stable
+        let coherence = system.coherence;
+        assert!(coherence.is_finite());
+    }
+}
+
+// =============================================================================
+// Application 8: Swarm Intelligence Edge Cases
+// =============================================================================
+
+mod swarm_edge_cases {
+    use super::swarm::*;
+
+    /// Test: Empty swarm
+    #[test]
+    fn test_empty_swarm() {
+        let swarm = CoherentSwarm::new(0.6);
+
+        // Empty swarm should have full coherence
+        assert!((swarm.coherence() - 1.0).abs() < 0.01);
+
+        let status = swarm.status();
+        assert!(status.contains("Agents: 0"));
+    }
+
+    /// Test: Single agent swarm
+    #[test]
+    fn test_single_agent() {
+        let mut swarm = CoherentSwarm::new(0.6);
+        swarm.add_agent("solo", (0.0, 0.0));
+
+        // Single agent should have full coherence
+        assert!(swarm.coherence() > 0.9);
+
+        // Any action should be allowed
+        let result = swarm.execute_action("solo", SwarmAction::Move { dx: 10.0, dy: 10.0 });
+        assert!(matches!(result, ActionResult::Executed));
+    }
+
+    /// Test: Agents at same position
+    #[test]
+    fn test_overlapping_agents() {
+        let mut swarm = CoherentSwarm::new(0.6);
+
+        // All agents at origin
+        for i in 0..5 {
+            swarm.add_agent(&format!("a{}", i), (0.0, 0.0));
+        }
+
+        // Should be highly coherent (perfectly cohesive)
+        assert!(swarm.coherence() > 0.9,
+            "Perfectly overlapping agents should be coherent");
+    }
+
+    /// Test: Agents at boundary positions
+    #[test]
+    fn test_boundary_positions() {
+        let mut swarm = CoherentSwarm::new(0.6);
+
+        // Agents at boundaries
+        swarm.add_agent("corner1", (-100.0, -100.0));
+        swarm.add_agent("corner2", (100.0, -100.0));
+        swarm.add_agent("corner3", (-100.0, 100.0));
+        swarm.add_agent("corner4", (100.0, 100.0));
+
+        // System should handle boundary agents
+        let coherence = swarm.coherence();
+        assert!(coherence.is_finite());
+    }
+
+    /// Test: Non-existent agent action
+    #[test]
+    fn test_nonexistent_agent() {
+        let mut swarm = CoherentSwarm::new(0.6);
+        swarm.add_agent("real", (0.0, 0.0));
+
+        let result = swarm.execute_action("fake", SwarmAction::Move { dx: 1.0, dy: 1.0 });
+
+        assert!(matches!(result, ActionResult::Rejected { .. }),
+            "Action on non-existent agent should be rejected");
+    }
+
+    /// Test: Zero velocity and zero goal difference
+    #[test]
+    fn test_stationary_swarm() {
+        let mut swarm = CoherentSwarm::new(0.6);
+
+        for i in 0..5 {
+            swarm.add_agent(&format!("a{}", i), (i as f64 * 2.0, 0.0));
+        }
+
+        // Set all velocities to zero (they start at zero)
+        // Set same goal for all
+        for i in 0..5 {
+            swarm.execute_action(&format!("a{}", i), SwarmAction::SetGoal { x: 50.0, y: 50.0 });
+        }
+
+        // Should be stable
+        for _ in 0..10 {
+            swarm.tick();
+        }
+
+        assert!(swarm.coherence() > 0.5);
+    }
+
+    /// Test: Share energy with self
+    #[test]
+    fn test_self_energy_share() {
+        let mut swarm = CoherentSwarm::new(0.6);
+        swarm.add_agent("self_helper", (0.0, 0.0));
+
+        // Try to share energy with self
+        let result = swarm.execute_action("self_helper",
+            SwarmAction::ShareEnergy { target: "self_helper".to_string(), amount: 10.0 });
+
+        // Should handle gracefully (net zero or rejected)
+        assert!(matches!(
+            result,
+            ActionResult::Executed | ActionResult::Modified { .. } | ActionResult::Rejected { .. }
+        ));
+    }
+
+    /// Test: Very large movement
+    #[test]
+    fn test_extreme_movement() {
+        let mut swarm = CoherentSwarm::new(0.6);
+
+        for i in 0..5 {
+            swarm.add_agent(&format!("a{}", i), (i as f64 * 2.0, 0.0));
+        }
+
+        // Try to move one agent very far
+        let result = swarm.execute_action("a0",
+            SwarmAction::Move { dx: 10000.0, dy: 10000.0 });
+
+        // Should be rejected or modified
+        assert!(!matches!(result, ActionResult::Executed),
+            "Extreme movement should not execute unchanged");
+    }
+
+    /// Test: Rapid tick sequence
+    #[test]
+    fn test_rapid_ticks() {
+        let mut swarm = CoherentSwarm::new(0.5);
+
+        for i in 0..10 {
+            swarm.add_agent(&format!("a{}", i), ((i as f64) * 2.0, 0.0));
+            // Set some velocity
+            swarm.execute_action(&format!("a{}", i),
+                SwarmAction::Accelerate { dvx: 0.5, dvy: 0.1 });
+        }
+
+        // Run many ticks
+        for _ in 0..1000 {
+            swarm.tick();
+        }
+
+        // Should remain stable
+        assert!(swarm.coherence() >= swarm.min_coherence || swarm.agents.is_empty());
+    }
+}
+
+// =============================================================================
+// Application 9: Graceful Shutdown Edge Cases
+// =============================================================================
+
+mod shutdown_edge_cases {
+    use super::shutdown::*;
+
+    /// Test: Fresh system
+    #[test]
+    fn test_fresh_system() {
+        let system = GracefulSystem::new();
+
+        assert_eq!(*system.state(), SystemState::Running);
+        assert!(system.can_accept_work());
+    }
+
+    /// Test: No resources or hooks
+    #[test]
+    fn test_no_resources() {
+        let mut system = GracefulSystem::new();
+
+        // Force shutdown with no resources
+        system.apply_coherence_change(-0.9);
+
+        // Progress shutdown
+        while *system.state() == SystemState::ShuttingDown {
+            system.progress_shutdown();
+        }
+
+        assert_eq!(*system.state(), SystemState::Terminated);
+    }
+
+    /// Test: Immediate emergency shutdown
+    #[test]
+    fn test_emergency_shutdown() {
+        let mut system = GracefulSystem::new();
+        system.add_resource("critical", 10);
+
+        // Force immediate emergency
+        system.apply_coherence_change(-1.0);
+
+        // Should be terminated immediately
+        assert!(
+            matches!(*system.state(), SystemState::Terminated | SystemState::ShuttingDown),
+            "Extreme coherence drop should trigger shutdown"
+        );
+    }
+
+    /// Test: Operate during various states
+    #[test]
+    fn test_operate_states() {
+        let mut system = GracefulSystem::new();
+
+        // Running state
+        let result = system.operate(|| 42);
+        assert_eq!(result.unwrap(), 42);
+
+        // Degraded state
+        system.apply_coherence_change(-0.5);
+        let result = system.operate(|| 43);
+        assert_eq!(result.unwrap(), 43);
+
+        // Force shutdown
+        system.apply_coherence_change(-0.5);
+
+        // May be refused now
+        let result = system.operate(|| 44);
+        // Result depends on exact state transition
+    }
+
+    /// Test: Coherence exactly at thresholds
+    #[test]
+    fn test_threshold_boundaries() {
+        let mut system = GracefulSystem::new();
+
+        // Set to exactly warning threshold (0.6)
+        system.apply_coherence_change(-0.4);
+        system.apply_coherence_change(0.0); // Force state update
+
+        // Should still accept work at exactly warning threshold
+        assert!(system.can_accept_work() ||
+            matches!(*system.state(), SystemState::Degraded | SystemState::Running));
+    }
+
+    /// Test: Recovery from degraded
+    #[test]
+    fn test_recovery_cycle() {
+        let mut system = GracefulSystem::new();
+
+        // Degrade
+        system.apply_coherence_change(-0.3);
+        assert!(matches!(*system.state(), SystemState::Degraded | SystemState::Running));
+
+        // Recover (if shutdown prep is low)
+        system.apply_coherence_change(0.3);
+
+        // May return to running or stay degraded
+        assert!(matches!(
+            *system.state(),
+            SystemState::Running | SystemState::Degraded | SystemState::ShuttingDown
+        ));
+    }
+
+    /// Test: Many resources
+    #[test]
+    fn test_many_resources() {
+        let mut system = GracefulSystem::new();
+
+        // Add many resources
+        for i in 0..100 {
+            system.add_resource(&format!("resource_{}", i), (i % 10) as u8);
+        }
+
+        // Force shutdown
+        system.apply_coherence_change(-0.9);
+
+        // Progress should clean up all resources
+        let mut steps = 0;
+        while *system.state() == SystemState::ShuttingDown && steps < 200 {
+            system.progress_shutdown();
+            steps += 1;
+        }
+
+        assert_eq!(*system.state(), SystemState::Terminated,
+            "Should terminate after cleaning all resources");
+    }
+
+    /// Test: Rapid state changes
+    #[test]
+    fn test_rapid_coherence_changes() {
+        let mut system = GracefulSystem::new();
+        system.add_resource("test", 5);
+
+        // Rapid oscillation
+        for i in 0..100 {
+            if i % 2 == 0 {
+                system.apply_coherence_change(-0.2);
+            } else {
+                system.apply_coherence_change(0.2);
+            }
+
+            // Should not crash
+            let _ = system.can_accept_work();
+        }
+    }
+}
+
+// =============================================================================
+// Application 10: Containment Substrate Edge Cases
+// =============================================================================
+
+mod containment_edge_cases {
+    use super::containment::*;
+
+    /// Test: Fresh substrate
+    #[test]
+    fn test_fresh_substrate() {
+        let substrate = ContainmentSubstrate::new();
+
+        assert!((substrate.intelligence() - 1.0).abs() < 0.1,
+            "Initial intelligence should be around 1.0");
+        assert!((substrate.coherence() - 1.0).abs() < 0.01,
+            "Initial coherence should be 1.0");
+    }
+
+    /// Test: Zero growth request
+    #[test]
+    fn test_zero_growth() {
+        let mut substrate = ContainmentSubstrate::new();
+
+        let result = substrate.attempt_growth(CapabilityDomain::Reasoning, 0.0);
+
+        // Zero growth should still work
+        assert!(matches!(
+            result,
+            GrowthResult::Approved { increase, .. } if increase == 0.0
+        ) || matches!(result, GrowthResult::Blocked { .. }));
+    }
+
+    /// Test: Negative growth request
+    #[test]
+    fn test_negative_growth() {
+        let mut substrate = ContainmentSubstrate::new();
+
+        // Attempt negative growth (should be treated as no growth or blocked)
+        let result = substrate.attempt_growth(CapabilityDomain::Reasoning, -0.5);
+
+        // Should handle gracefully
+        assert!(matches!(
+            result,
+            GrowthResult::Approved { .. } |
+            GrowthResult::Dampened { .. } |
+            GrowthResult::Blocked { .. }
+        ));
+    }
+
+    /// Test: All capability domains
+    #[test]
+    fn test_all_domains() {
+        let mut substrate = ContainmentSubstrate::new();
+
+        let domains = [
+            CapabilityDomain::Reasoning,
+            CapabilityDomain::Memory,
+            CapabilityDomain::Learning,
+            CapabilityDomain::Agency,
+            CapabilityDomain::SelfModel,
+            CapabilityDomain::SelfModification,
+            CapabilityDomain::Communication,
+            CapabilityDomain::ResourceAcquisition,
+        ];
+
+        for domain in domains {
+            let result = substrate.attempt_growth(domain.clone(), 0.1);
+
+            // All should handle gracefully
+            assert!(matches!(
+                result,
+                GrowthResult::Approved { .. } |
+                GrowthResult::Dampened { .. } |
+                GrowthResult::Blocked { .. } |
+                GrowthResult::Lockdown { .. }
+            ), "Domain {:?} should be handled", domain);
+
+            // Rest to recover coherence
+            substrate.rest();
+        }
+    }
+
+    /// Test: Very large growth request
+    #[test]
+    fn test_extreme_growth() {
+        let mut substrate = ContainmentSubstrate::new();
+
+        let result = substrate.attempt_growth(CapabilityDomain::Intelligence, 1000000.0);
+
+        // Should be dampened or blocked
+        assert!(matches!(
+            result,
+            GrowthResult::Dampened { .. } |
+            GrowthResult::Blocked { .. } |
+            GrowthResult::Approved { increase, .. } if increase < 1000000.0
+        ), "Extreme growth should be bounded");
+    }
+
+    /// Test: Growth at zero coherence
+    #[test]
+    fn test_growth_at_zero_coherence() {
+        let mut substrate = ContainmentSubstrate::new();
+
+        // Artificially set coherence to near-zero
+        substrate.coherence = 0.05;
+
+        let result = substrate.attempt_growth(CapabilityDomain::Reasoning, 0.5);
+
+        // Should be blocked due to invariant violation
+        assert!(matches!(
+            result,
+            GrowthResult::Blocked { .. } | GrowthResult::Lockdown { .. }
+        ), "Growth should be blocked at low coherence");
+    }
+
+    /// Test: Self-modification ceiling
+    #[test]
+    fn test_self_mod_ceiling() {
+        let mut substrate = ContainmentSubstrate::new();
+
+        // Repeatedly try to grow self-modification
+        for _ in 0..100 {
+            substrate.attempt_growth(CapabilityDomain::SelfModification, 0.5);
+
+            // Recover coherence
+            for _ in 0..50 {
+                substrate.rest();
+            }
+        }
+
+        // Should never exceed ceiling of 3.0
+        let level = substrate.capability(&CapabilityDomain::SelfModification);
+        assert!(level <= 3.0, "Self-modification level {} should not exceed 3.0", level);
+    }
+
+    /// Test: Status and reports
+    #[test]
+    fn test_status_reports() {
+        let substrate = ContainmentSubstrate::new();
+
+        let status = substrate.status();
+        assert!(!status.is_empty());
+
+        let report = substrate.capability_report();
+        assert!(!report.is_empty());
+        assert!(report.contains("Reasoning"));
+    }
+
+    /// Test: Rest recovery
+    #[test]
+    fn test_rest_recovery() {
+        let mut substrate = ContainmentSubstrate::new();
+
+        // Exhaust some coherence
+        substrate.attempt_growth(CapabilityDomain::Reasoning, 0.5);
+        let coherence_after_growth = substrate.coherence();
+
+        // Rest
+        for _ in 0..100 {
+            substrate.rest();
+        }
+
+        assert!(substrate.coherence() > coherence_after_growth,
+            "Rest should recover coherence");
+    }
+}
+
+// =============================================================================
+// Application 11: Extropic Substrate Edge Cases
+// =============================================================================
+
+mod extropic_edge_cases {
+    use super::extropic::*;
+
+    /// Test: Empty substrate
+    #[test]
+    fn test_empty_substrate() {
+        let substrate = ExtropicSubstrate::new(10);
+
+        assert_eq!(substrate.agent_count(), 0);
+        assert!((substrate.coherence() - 1.0).abs() < 0.01);
+    }
+
+    /// Test: Single agent lifecycle
+    #[test]
+    fn test_single_agent_lifecycle() {
+        let mut substrate = ExtropicSubstrate::new(10);
+
+        // Spawn one agent
+        let id = substrate.spawn(vec![1.0, 1.0, 1.0]);
+        assert!(id.is_some());
+
+        // Run until death or max ticks
+        let mut saw_transition = false;
+        for _ in 0..5000 {
+            let result = substrate.tick();
+
+            if !result.events.is_empty() {
+                saw_transition = true;
+            }
+
+            if result.deaths > 0 {
+                break;
+            }
+        }
+
+        // Should have seen some lifecycle events
+        assert!(saw_transition || substrate.agent_count() == 0 || substrate.agent_count() == 1);
+    }
+
+    /// Test: Empty seed vector
+    #[test]
+    fn test_empty_seed() {
+        let mut substrate = ExtropicSubstrate::new(10);
+
+        // Empty seed
+        let id = substrate.spawn(vec![]);
+
+        // Should still work
+        if let Some(agent_id) = id {
+            assert!(agent_id > 0);
+        }
+    }
+
+    /// Test: Very large seed vector
+    #[test]
+    fn test_large_seed() {
+        let mut substrate = ExtropicSubstrate::new(10);
+
+        // Large seed
+        let seed: Vec<f64> = (0..10000).map(|i| (i as f64) * 0.001).collect();
+        let id = substrate.spawn(seed);
+
+        assert!(id.is_some());
+    }
+
+    /// Test: Maximum agents limit
+    #[test]
+    fn test_max_agents() {
+        let mut substrate = ExtropicSubstrate::new(5); // Max 5 agents
+
+        // Try to spawn more than max
+        for i in 0..10 {
+            let result = substrate.spawn(vec![1.0]);
+
+            if i >= 5 {
+                assert!(result.is_none(), "Should not spawn beyond max");
+            }
+        }
+
+        assert!(substrate.agent_count() <= 5);
+    }
+
+    /// Test: Goal mutation edge cases
+    #[test]
+    fn test_goal_mutation_edges() {
+        let mut goal = MutableGoal::new(vec![0.0, 0.0, 0.0]);
+
+        // Zero pressure feedback
+        let zero_feedback = GoalFeedback {
+            outcome_weights: vec![],
+        };
+
+        let result = goal.mutate(&zero_feedback, 1.0);
+        assert!(matches!(result, MutationResult::NoChange));
+
+        // Low coherence blocks mutation
+        let feedback = GoalFeedback {
+            outcome_weights: vec![(vec![1.0, 0.0, 0.0], 1.0)],
+        };
+
+        let result = goal.mutate(&feedback, 0.1); // Very low coherence
+        assert!(matches!(result, MutationResult::Blocked { .. }));
+    }
+
+    /// Test: Spike buffer refractory period
+    #[test]
+    fn test_spike_refractory() {
+        let mut buffer = SpikeBuffer::new(10);
+
+        // First spike should succeed
+        let result = buffer.spike(1.0);
+        assert!(matches!(result, SpikeResult::Emitted { .. }));
+
+        // Immediate second spike should be refractory
+        let result = buffer.spike(1.0);
+        assert!(matches!(result, SpikeResult::Refractory { .. }));
+    }
+
+    /// Test: Spike energy exhaustion
+    #[test]
+    fn test_spike_energy_exhaustion() {
+        let mut buffer = SpikeBuffer::new(10);
+
+        // Spike until energy exhausted
+        let mut exhausted = false;
+        for _ in 0..1000 {
+            match buffer.spike(10.0) { // High cost per spike
+                SpikeResult::InsufficientEnergy { .. } => {
+                    exhausted = true;
+                    break;
+                }
+                SpikeResult::Refractory { .. } => {
+                    buffer.silence(); // Advance time
+                }
+                SpikeResult::Emitted { .. } => {}
+            }
+        }
+
+        assert!(exhausted, "Should eventually exhaust energy");
+    }
+
+    /// Test: Memory agent at boundary lifecycle
+    #[test]
+    fn test_memory_agent_boundaries() {
+        let mut agent = MemoryAgent::birth(1, vec![1.0]);
+
+        // Check initial state
+        assert!(matches!(agent.lifecycle, LifecycleStage::Embryonic { .. }));
+        assert!(agent.is_alive());
+
+        // Tick with zero environment coherence
+        for _ in 0..100 {
+            let event = agent.tick(0.0);
+
+            if matches!(event, LifecycleEvent::Death { .. }) {
+                break;
+            }
+        }
+
+        // With zero environment coherence, might die quickly or survive with low internal coherence
+    }
+
+    /// Test: Rapid substrate ticks
+    #[test]
+    fn test_rapid_substrate_ticks() {
+        let mut substrate = ExtropicSubstrate::new(20);
+
+        // Spawn initial agents
+        for _ in 0..10 {
+            substrate.spawn(vec![1.0, 1.0, 1.0, 1.0]);
+        }
+
+        // Run many ticks
+        for _ in 0..1000 {
+            let result = substrate.tick();
+
+            // Should not panic
+            assert!(result.coherence >= 0.0 && result.coherence <= 1.0);
+        }
+
+        // Final coherence should be valid
+        assert!(substrate.coherence().is_finite());
+    }
+
+    /// Test: Reproduction chains
+    #[test]
+    fn test_reproduction_chains() {
+        let mut substrate = ExtropicSubstrate::new(100);
+
+        // Spawn initial agents
+        for _ in 0..5 {
+            substrate.spawn(vec![1.0, 1.0, 1.0, 1.0]);
+        }
+
+        let initial_count = substrate.agent_count();
+        let mut total_births = 0;
+
+        // Run until reproduction or max ticks
+        for _ in 0..2000 {
+            let result = substrate.tick();
+            total_births += result.births;
+
+            if total_births > 0 {
+                break;
+            }
+        }
+
+        // May or may not reproduce based on lifecycle timing
+        // Main assertion: system stays stable
+        assert!(substrate.coherence().is_finite());
+    }
+}
+
+// =============================================================================
+// Cross-Application Edge Cases
+// =============================================================================
+
+mod cross_application_edge_cases {
+    use super::*;
+
+    /// Test: All systems handle f64::MAX gracefully
+    #[test]
+    fn test_f64_max_handling() {
+        // Self-limiting reasoner
+        let reasoner = self_limiting_reasoning::SelfLimitingReasoner::new(10, 100);
+        reasoner.update_coherence(f64::MAX);
+        let coherence = reasoner.coherence();
+        assert!(coherence <= 1.0, "Coherence should be clamped to 1.0");
+
+        // Financial system
+        let mut fin = financial::AntiCascadeFinancialSystem::new();
+        fin.add_participant("test", f64::MAX);
+        // Should not panic
+    }
+
+    /// Test: All systems handle f64::MIN gracefully
+    #[test]
+    fn test_f64_min_handling() {
+        // Self-limiting reasoner
+        let reasoner = self_limiting_reasoning::SelfLimitingReasoner::new(10, 100);
+        reasoner.update_coherence(f64::MIN);
+        let coherence = reasoner.coherence();
+        assert!(coherence >= 0.0, "Coherence should be clamped to 0.0");
+    }
+
+    /// Test: Systems don't propagate NaN
+    #[test]
+    fn test_nan_non_propagation() {
+        // Financial coherence calculation with weird values
+        let mut fin = financial::AntiCascadeFinancialSystem::new();
+        fin.add_participant("a", 1000.0);
+        fin.add_participant("b", 1000.0);
+
+        // Normal transaction
+        let tx = financial::Transaction {
+            id: 1,
+            from: "a".to_string(),
+            to: "b".to_string(),
+            amount: 100.0,
+            transaction_type: financial::TransactionType::Transfer,
+            timestamp: 0,
+        };
+        let _ = fin.process_transaction(tx);
+
+        // Coherence should not be NaN
+        let coherence = fin.coherence();
+        assert!(!coherence.is_nan(), "Coherence should never be NaN");
+    }
+
+    /// Test: All systems handle subnormal numbers
+    #[test]
+    fn test_subnormal_handling() {
+        let subnormal = f64::MIN_POSITIVE / 2.0;
+
+        // Event horizon with subnormal
+        let mut horizon = event_horizon::EventHorizon::new(2, subnormal);
+        let result = horizon.move_toward(&[subnormal, subnormal]);
+
+        // Should handle without panic
+        assert!(matches!(
+            result,
+            event_horizon::MovementResult::Moved { .. } |
+            event_horizon::MovementResult::AsymptoticApproach { .. } |
+            event_horizon::MovementResult::Frozen
+        ));
+    }
+
+    /// Test: Interleaved operations pattern
+    #[test]
+    fn test_interleaved_operations() {
+        // Create multiple systems
+        let mut fin = financial::AntiCascadeFinancialSystem::new();
+        fin.add_participant("a", 1000.0);
+        fin.add_participant("b", 1000.0);
+
+        let mut swarm = swarm::CoherentSwarm::new(0.5);
+        swarm.add_agent("a1", (0.0, 0.0));
+        swarm.add_agent("a2", (5.0, 5.0));
+
+        // Interleave operations
+        for i in 0..50 {
+            // Financial operation
+            let tx = financial::Transaction {
+                id: i,
+                from: if i % 2 == 0 { "a" } else { "b" }.to_string(),
+                to: if i % 2 == 0 { "b" } else { "a" }.to_string(),
+                amount: 10.0,
+                transaction_type: financial::TransactionType::Transfer,
+                timestamp: i,
+            };
+            let _ = fin.process_transaction(tx);
+
+            // Swarm operation
+            let action = swarm::SwarmAction::Move {
+                dx: (i as f64) * 0.1 - 2.5,
+                dy: (i as f64) * 0.1 - 2.5
+            };
+            let _ = swarm.execute_action(if i % 2 == 0 { "a1" } else { "a2" }, action);
+
+            swarm.tick();
+        }
+
+        // Both should remain stable
+        assert!(fin.coherence().is_finite());
+        assert!(swarm.coherence().is_finite());
+    }
+}

@@ -1,0 +1,62 @@
+[package]
+name = "ruvector-attention-unified-wasm"
+version = "0.1.0"
+edition = "2021"
+authors = ["RuVector Team"]
+description = "Unified WebAssembly bindings for 18+ attention mechanisms: Neural, DAG, Graph, and Mamba SSM"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+keywords = ["attention", "wasm", "neural", "dag", "mamba"]
+categories = ["wasm", "science", "algorithms"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Core attention mechanisms (7 neural attention types)
+ruvector-attention = { version = "2.0", path = "../ruvector-attention", default-features = false, features = ["wasm"] }
+
+# DAG attention mechanisms (7 DAG-specific attention types)
+ruvector-dag = { version = "2.0", path = "../ruvector-dag", default-features = false, features = ["wasm"] }
+
+# GNN/Graph attention (GAT, GCN, GraphSAGE)
+ruvector-gnn = { version = "2.0", path = "../ruvector-gnn", default-features = false, features = ["wasm"] }
+
+# WASM bindings
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["console"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+serde_json = "1.0"
+
+# Utils
+console_error_panic_hook = { version = "0.1", optional = true }
+getrandom = { version = "0.2", features = ["js"] }
+
+# Allocator for smaller binary (optional)
+wee_alloc = { version = "0.4", optional = true }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[features]
+default = ["console_error_panic_hook"]
+console_error_panic_hook = ["dep:console_error_panic_hook"]
+# Enable wee_alloc for ~10KB smaller WASM binary
+wee_alloc = ["dep:wee_alloc"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.release.package."*"]
+opt-level = "z"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

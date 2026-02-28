@@ -1,0 +1,28 @@
+{
+  "name": "@ruvector/ios-wasm-types",
+  "version": "0.1.0",
+  "description": "TypeScript definitions for Ruvector iOS WASM - Privacy-preserving on-device AI",
+  "types": "ruvector-ios.d.ts",
+  "files": [
+    "ruvector-ios.d.ts"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "examples/wasm/ios/types"
+  },
+  "keywords": [
+    "wasm",
+    "webassembly",
+    "ios",
+    "safari",
+    "vector-database",
+    "hnsw",
+    "machine-learning",
+    "privacy",
+    "on-device-ai",
+    "typescript"
+  ],
+  "author": "Ruvector Team",
+  "license": "MIT"
+}

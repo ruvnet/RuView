@@ -1,0 +1,43 @@
+{
+  "name": "@ruvector/nervous-system-wasm",
+  "type": "module",
+  "collaborators": [
+    "RuVector Team"
+  ],
+  "author": "RuVector Team <ruvnet@users.noreply.github.com>",
+  "description": "WASM bindings for ruvector-nervous-system bio-inspired AI components - HDC, BTSP, neuromorphic computing",
+  "version": "0.1.29",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector"
+  },
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "files": [
+    "ruvector_nervous_system_wasm_bg.wasm",
+    "ruvector_nervous_system_wasm.js",
+    "ruvector_nervous_system_wasm.d.ts",
+    "ruvector_nervous_system_wasm_bg.wasm.d.ts",
+    "README.md"
+  ],
+  "main": "ruvector_nervous_system_wasm.js",
+  "homepage": "https://ruv.io",
+  "types": "ruvector_nervous_system_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ],
+  "keywords": [
+    "wasm",
+    "neural",
+    "hdc",
+    "btsp",
+    "neuromorphic",
+    "ruvector",
+    "webassembly",
+    "hyperdimensional-computing",
+    "spiking-neural-networks",
+    "bio-inspired"
+  ]
+}

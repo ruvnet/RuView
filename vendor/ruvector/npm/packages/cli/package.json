@@ -1,0 +1,46 @@
+{
+  "name": "@ruvector/cli",
+  "version": "0.1.28",
+  "description": "Command-line interface for RuVector vector database with self-learning hooks",
+  "main": "dist/cli.js",
+  "types": "dist/cli.d.ts",
+  "bin": {
+    "ruvector": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "test": "echo \"Tests not yet implemented\"",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts"
+  },
+  "keywords": [
+    "vector",
+    "database",
+    "cli",
+    "command-line",
+    "hooks",
+    "intelligence",
+    "claude-code"
+  ],
+  "author": "RuVector Team",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "commander": "^12.0.0"
+  },
+  "optionalDependencies": {
+    "pg": "^8.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/pg": "^8.11.0",
+    "typescript": "^5.0.0"
+  }
+}

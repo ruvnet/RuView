@@ -1,0 +1,798 @@
+{
+  "metadata": {
+    "name": "ruvector-ecosystem-capabilities",
+    "version": "1.0.0",
+    "generated": "2026-01-20",
+    "description": "Comprehensive capability manifest for the RuVector ecosystem - Rust crates, NPM packages, and CLI tools"
+  },
+  "rust_crates": [
+    {
+      "name": "ruvector-core",
+      "description": "High-performance Rust vector database core with HNSW indexing and SIMD-optimized distance calculations",
+      "keywords": ["vector-database", "hnsw", "simd", "ann", "similarity-search", "rust"],
+      "category": "vector-search",
+      "features": ["simd", "parallel", "storage", "hnsw", "memory-only", "api-embeddings"],
+      "example_prompts": [
+        "Build a vector database with HNSW indexing",
+        "Search for similar vectors using SIMD acceleration",
+        "Implement approximate nearest neighbor search",
+        "Store and index high-dimensional embeddings",
+        "Perform semantic similarity search on vectors"
+      ]
+    },
+    {
+      "name": "ruvector-sona",
+      "description": "Self-Optimizing Neural Architecture - Runtime-adaptive learning with two-tier LoRA, EWC++, and ReasoningBank for LLM routers",
+      "keywords": ["neural", "learning", "lora", "ewc", "adaptive", "llm", "self-optimizing"],
+      "category": "machine-learning",
+      "features": ["wasm", "napi", "serde-support"],
+      "example_prompts": [
+        "Implement adaptive learning with SONA",
+        "Use LoRA for efficient fine-tuning",
+        "Prevent catastrophic forgetting with EWC++",
+        "Build a self-optimizing neural router",
+        "Apply continual learning patterns to LLM"
+      ]
+    },
+    {
+      "name": "ruvector-attention",
+      "description": "Attention mechanisms for ruvector - geometric, graph, and sparse attention with SIMD acceleration",
+      "keywords": ["attention", "machine-learning", "vector-search", "graph-attention", "transformer"],
+      "category": "machine-learning",
+      "features": ["simd", "wasm", "napi", "math"],
+      "example_prompts": [
+        "Implement graph attention mechanisms",
+        "Apply sparse attention patterns",
+        "Use geometric attention for vector search",
+        "Build transformer attention layers",
+        "Optimize attention computation with SIMD"
+      ]
+    },
+    {
+      "name": "ruvector-gnn",
+      "description": "Graph Neural Network layer for Ruvector on HNSW topology with message passing and neighbor aggregation",
+      "keywords": ["gnn", "graph-neural-network", "hnsw", "message-passing", "ml"],
+      "category": "machine-learning",
+      "features": ["simd", "wasm", "napi", "mmap"],
+      "example_prompts": [
+        "Build graph neural networks on HNSW topology",
+        "Implement message passing between vector nodes",
+        "Apply GNN for semantic understanding",
+        "Aggregate neighbor embeddings in graph",
+        "Train GNN models on vector relationships"
+      ]
+    },
+    {
+      "name": "ruvector-graph",
+      "description": "Distributed Neo4j-compatible hypergraph database with SIMD optimization, Cypher queries, and vector embeddings",
+      "keywords": ["graph-database", "hypergraph", "cypher", "neo4j", "simd", "distributed"],
+      "category": "database",
+      "features": ["full", "simd", "storage", "async-runtime", "compression", "distributed", "federation"],
+      "example_prompts": [
+        "Create a Neo4j-compatible graph database",
+        "Execute Cypher queries on hypergraph",
+        "Build distributed graph storage with RAFT",
+        "Implement federated graph queries",
+        "Store knowledge graphs with vector embeddings"
+      ]
+    },
+    {
+      "name": "ruvllm",
+      "description": "LLM serving runtime with Ruvector integration - Paged attention, KV cache, SONA learning, and Metal/CUDA acceleration",
+      "keywords": ["llm", "inference", "serving", "paged-attention", "kv-cache", "metal", "cuda"],
+      "category": "llm-inference",
+      "features": ["candle", "metal", "cuda", "parallel", "attention", "graph", "gnn", "mmap", "coreml"],
+      "example_prompts": [
+        "Build an LLM serving engine with paged attention",
+        "Implement KV cache management for inference",
+        "Use Metal acceleration for Apple Silicon",
+        "Load GGUF models for inference",
+        "Integrate SONA learning into LLM serving"
+      ]
+    },
+    {
+      "name": "ruvector-hyperbolic-hnsw",
+      "description": "Hyperbolic (Poincare ball) embeddings with HNSW integration for hierarchy-aware vector search",
+      "keywords": ["hyperbolic", "poincare", "hnsw", "vector-search", "embeddings", "hierarchy"],
+      "category": "vector-search",
+      "features": ["simd", "parallel", "wasm"],
+      "example_prompts": [
+        "Implement hyperbolic embeddings for hierarchical data",
+        "Use Poincare ball model for vector search",
+        "Build hierarchy-aware similarity search",
+        "Apply hyperbolic geometry to embeddings",
+        "Search hierarchical structures efficiently"
+      ]
+    },
+    {
+      "name": "ruvector-router-core",
+      "description": "Core vector database and neural routing inference engine with semantic matching",
+      "keywords": ["router", "semantic", "inference", "vector-search", "neural"],
+      "category": "routing",
+      "features": [],
+      "example_prompts": [
+        "Build semantic routing for AI agents",
+        "Implement intent matching with vectors",
+        "Route queries to optimal handlers",
+        "Create neural-based task routing",
+        "Match user intents to agent capabilities"
+      ]
+    },
+    {
+      "name": "ruvector-nervous-system",
+      "description": "Bio-inspired neural system with spiking networks, BTSP learning, and EWC plasticity for neuromorphic computing",
+      "keywords": ["neural", "spiking", "neuromorphic", "plasticity", "learning", "bio-inspired"],
+      "category": "neuromorphic",
+      "features": ["parallel", "serde"],
+      "example_prompts": [
+        "Build spiking neural networks",
+        "Implement BTSP learning patterns",
+        "Create bio-inspired neural systems",
+        "Apply neuromorphic computing patterns",
+        "Design plastic neural architectures"
+      ]
+    },
+    {
+      "name": "ruvector-mincut",
+      "description": "World's first subpolynomial dynamic min-cut algorithm for self-healing networks and AI optimization",
+      "keywords": ["graph", "minimum-cut", "network-analysis", "self-healing", "dynamic-graph", "optimization"],
+      "category": "algorithms",
+      "features": ["exact", "approximate", "integration", "monitoring", "simd", "agentic"],
+      "example_prompts": [
+        "Compute minimum cut in dynamic graphs",
+        "Build self-healing network topologies",
+        "Optimize graph partitioning",
+        "Implement real-time graph analysis",
+        "Apply min-cut to AI agent coordination"
+      ]
+    },
+    {
+      "name": "ruvector-sparse-inference",
+      "description": "PowerInfer-style sparse inference engine for efficient neural network inference on edge devices",
+      "keywords": ["sparse-inference", "neural-network", "quantization", "simd", "edge-ai"],
+      "category": "inference",
+      "features": [],
+      "example_prompts": [
+        "Implement sparse neural network inference",
+        "Optimize inference for edge devices",
+        "Build PowerInfer-style sparse engine",
+        "Apply quantization for efficient inference",
+        "Run models on resource-constrained hardware"
+      ]
+    },
+    {
+      "name": "ruvector-cli",
+      "description": "CLI and MCP server for Ruvector with vector database operations and graph queries",
+      "keywords": ["cli", "mcp", "vector-database", "graph", "server"],
+      "category": "tooling",
+      "features": ["postgres"],
+      "example_prompts": [
+        "Use ruvector CLI for vector operations",
+        "Start MCP server for Ruvector",
+        "Execute vector database commands",
+        "Query graph data via CLI",
+        "Manage vector collections from terminal"
+      ]
+    },
+    {
+      "name": "ruvector-tiny-dancer-core",
+      "description": "Production-grade AI agent routing system with FastGRNN neural inference, circuit breakers, and uncertainty estimation",
+      "keywords": ["router", "fastgrnn", "circuit-breaker", "uncertainty", "agent-routing"],
+      "category": "routing",
+      "features": [],
+      "example_prompts": [
+        "Build AI agent routing with FastGRNN",
+        "Implement circuit breakers for reliability",
+        "Estimate routing uncertainty",
+        "Create production-grade agent orchestration",
+        "Route tasks with confidence scoring"
+      ]
+    },
+    {
+      "name": "ruvector-math",
+      "description": "Advanced mathematics for next-gen vector search: Optimal Transport, Information Geometry, Product Manifolds",
+      "keywords": ["vector-search", "optimal-transport", "wasserstein", "information-geometry", "hyperbolic"],
+      "category": "mathematics",
+      "features": ["std", "simd", "parallel", "serde"],
+      "example_prompts": [
+        "Apply optimal transport to embeddings",
+        "Use Wasserstein distance for similarity",
+        "Implement information geometry metrics",
+        "Work with product manifolds",
+        "Build advanced mathematical distance functions"
+      ]
+    },
+    {
+      "name": "ruvector-dag",
+      "description": "Directed Acyclic Graph structures for query plan optimization with neural learning and post-quantum cryptography",
+      "keywords": ["dag", "query-optimization", "neural-learning", "post-quantum", "workflow"],
+      "category": "data-structures",
+      "features": ["production-crypto", "full", "wasm"],
+      "example_prompts": [
+        "Optimize query execution plans with DAGs",
+        "Build workflow engines with neural learning",
+        "Implement topological sorting",
+        "Create task dependency graphs",
+        "Apply post-quantum signatures to DAGs"
+      ]
+    },
+    {
+      "name": "ruvector-fpga-transformer",
+      "description": "FPGA Transformer backend with deterministic latency, quantization-first design, and coherence gating",
+      "keywords": ["fpga", "transformer", "inference", "quantization", "low-latency", "coherence"],
+      "category": "hardware",
+      "features": ["daemon", "native_sim", "pcie", "wasm", "witness"],
+      "example_prompts": [
+        "Build FPGA-accelerated transformer inference",
+        "Implement deterministic latency inference",
+        "Design quantization-first architectures",
+        "Use coherence gating for quality control",
+        "Deploy transformers on FPGA hardware"
+      ]
+    },
+    {
+      "name": "ruvector-mincut-gated-transformer",
+      "description": "Ultra low latency transformer inference with mincut-gated coherence control and spike attention",
+      "keywords": ["transformer", "inference", "mincut", "low-latency", "coherence", "spike-attention"],
+      "category": "inference",
+      "features": ["sliding_window", "linear_attention", "spike_attention", "spectral_pe", "sparse_attention", "energy_gate"],
+      "example_prompts": [
+        "Build ultra-low latency transformer inference",
+        "Implement mincut-gated attention",
+        "Use spike-driven attention (87x energy reduction)",
+        "Apply sparse attention with mincut awareness",
+        "Create energy-efficient transformer layers"
+      ]
+    },
+    {
+      "name": "cognitum-gate-kernel",
+      "description": "No-std WASM kernel for 256-tile coherence gate fabric with mincut integration",
+      "keywords": ["wasm", "coherence", "mincut", "distributed", "no_std", "embedded"],
+      "category": "embedded",
+      "features": ["std"],
+      "example_prompts": [
+        "Build WASM coherence gate kernels",
+        "Implement 256-tile distributed fabric",
+        "Create no-std embedded systems",
+        "Design coherence validation kernels",
+        "Deploy on edge with minimal footprint"
+      ]
+    },
+    {
+      "name": "mcp-gate",
+      "description": "MCP (Model Context Protocol) server for the Anytime-Valid Coherence Gate with permission control",
+      "keywords": ["mcp", "coherence", "gate", "agent", "permission", "protocol"],
+      "category": "protocol",
+      "features": [],
+      "example_prompts": [
+        "Build MCP servers for AI agents",
+        "Implement coherence gate protocols",
+        "Create permission-controlled AI access",
+        "Design agent communication protocols",
+        "Integrate with Model Context Protocol"
+      ]
+    },
+    {
+      "name": "ruqu",
+      "description": "Classical nervous system for quantum machines - real-time coherence assessment via dynamic min-cut",
+      "keywords": ["quantum", "coherence", "gate", "min-cut", "error-correction"],
+      "category": "quantum",
+      "features": ["structural", "tilezero", "decoder", "attention", "parallel", "tracing"],
+      "example_prompts": [
+        "Build classical control for quantum systems",
+        "Implement quantum coherence assessment",
+        "Apply min-cut to quantum error correction",
+        "Design hybrid classical-quantum interfaces",
+        "Monitor quantum gate coherence"
+      ]
+    },
+    {
+      "name": "ruvllm-cli",
+      "description": "CLI for RuvLLM model management and inference on Apple Silicon with Metal acceleration",
+      "keywords": ["cli", "llm", "apple-silicon", "metal", "inference", "model-management"],
+      "category": "tooling",
+      "features": ["metal", "cuda"],
+      "example_prompts": [
+        "Run LLM inference from command line",
+        "Manage GGUF models with ruvllm CLI",
+        "Download models from HuggingFace Hub",
+        "Start inference server on Apple Silicon",
+        "Benchmark model performance via CLI"
+      ]
+    },
+    {
+      "name": "rvlite",
+      "description": "Standalone lightweight vector database with SQL, SPARQL, and Cypher queries - runs everywhere (Node.js, Browser, Edge)",
+      "keywords": ["vector-database", "sql", "sparql", "cypher", "wasm", "lightweight"],
+      "category": "database",
+      "features": [],
+      "example_prompts": [
+        "Run vector database in the browser",
+        "Query vectors with SQL syntax",
+        "Use SPARQL for semantic queries",
+        "Execute Cypher on embedded database",
+        "Deploy lightweight vector search on edge"
+      ]
+    }
+  ],
+  "npm_packages": [
+    {
+      "name": "@ruvector/ruvllm",
+      "version": "2.3.0",
+      "description": "Self-learning LLM orchestration with SONA adaptive learning, HNSW memory, FastGRNN routing, and SIMD inference",
+      "keywords": ["ruvllm", "llm", "self-learning", "adaptive-learning", "sona", "lora", "ewc", "hnsw", "fastgrnn", "simd", "inference"],
+      "category": "llm-orchestration",
+      "example_prompts": [
+        "Build self-learning LLM systems",
+        "Implement adaptive routing for AI models",
+        "Use FastGRNN for intelligent task routing",
+        "Apply SONA learning to Claude workflows",
+        "Create federated learning pipelines"
+      ]
+    },
+    {
+      "name": "ruvector",
+      "version": "0.1.88",
+      "description": "High-performance vector database for Node.js with automatic native/WASM fallback and semantic search",
+      "keywords": ["vector", "database", "vector-search", "embeddings", "hnsw", "ann", "ai", "rag", "wasm", "native"],
+      "category": "vector-database",
+      "example_prompts": [
+        "Create vector database in Node.js",
+        "Build RAG applications with ruvector",
+        "Implement semantic search",
+        "Store and query embeddings",
+        "Use ONNX for automatic embeddings"
+      ]
+    },
+    {
+      "name": "@ruvector/core",
+      "version": "0.1.30",
+      "description": "High-performance vector database with HNSW indexing - 50k+ inserts/sec, built in Rust for AI/ML similarity search",
+      "keywords": ["vector-database", "hnsw", "ann", "similarity-search", "ai", "ml", "rag", "native", "simd"],
+      "category": "vector-database",
+      "example_prompts": [
+        "Build high-performance vector search",
+        "Store millions of vectors efficiently",
+        "Query similar embeddings at scale",
+        "Create AI retrieval systems",
+        "Implement production vector database"
+      ]
+    },
+    {
+      "name": "@ruvector/sona",
+      "version": "0.1.4",
+      "description": "Self-Optimizing Neural Architecture (SONA) - Runtime-adaptive learning with LoRA, EWC++, and ReasoningBank",
+      "keywords": ["sona", "neural-network", "adaptive-learning", "lora", "ewc", "reasoningbank", "continual-learning"],
+      "category": "machine-learning",
+      "example_prompts": [
+        "Implement SONA for adaptive AI",
+        "Use LoRA fine-tuning in Node.js",
+        "Apply EWC++ to prevent forgetting",
+        "Build reasoning pattern banks",
+        "Create self-improving AI agents"
+      ]
+    },
+    {
+      "name": "@ruvector/router",
+      "version": "0.1.25",
+      "description": "Semantic router for AI agents - vector-based intent matching with HNSW indexing and SIMD acceleration",
+      "keywords": ["semantic-router", "intent-matching", "ai-routing", "hnsw", "similarity-search", "simd"],
+      "category": "routing",
+      "example_prompts": [
+        "Build semantic routing for chatbots",
+        "Match user intents to handlers",
+        "Create AI agent dispatcher",
+        "Route queries by semantic similarity",
+        "Implement multi-agent coordination"
+      ]
+    },
+    {
+      "name": "@ruvector/tiny-dancer",
+      "version": "0.1.15",
+      "description": "Neural router for AI agent orchestration - FastGRNN-based routing with circuit breaker and uncertainty estimation",
+      "keywords": ["neural-router", "fastgrnn", "circuit-breaker", "uncertainty-estimation", "agent-orchestration"],
+      "category": "routing",
+      "example_prompts": [
+        "Build neural routing for AI agents",
+        "Implement circuit breakers for reliability",
+        "Estimate confidence in routing decisions",
+        "Create hot-reload capable routers",
+        "Orchestrate multi-model inference"
+      ]
+    },
+    {
+      "name": "@ruvector/graph-node",
+      "version": "0.1.25",
+      "description": "Native Node.js bindings for RuVector Graph Database with hypergraph support and Cypher queries",
+      "keywords": ["graph-database", "hypergraph", "cypher", "neo4j", "vector-database", "knowledge-graph"],
+      "category": "database",
+      "example_prompts": [
+        "Build knowledge graphs in Node.js",
+        "Execute Cypher queries",
+        "Store hypergraph relationships",
+        "Create Neo4j-compatible databases",
+        "Combine vectors with graph structure"
+      ]
+    },
+    {
+      "name": "@ruvector/rudag",
+      "version": "0.1.0",
+      "description": "Fast DAG library with Rust/WASM - topological sort, critical path, task scheduling, and self-learning attention",
+      "keywords": ["dag", "topological-sort", "critical-path", "task-scheduler", "workflow", "wasm"],
+      "category": "data-structures",
+      "example_prompts": [
+        "Build workflow engines with DAGs",
+        "Compute critical paths in projects",
+        "Schedule tasks with dependencies",
+        "Implement topological sorting",
+        "Create data pipelines with DAGs"
+      ]
+    },
+    {
+      "name": "rvlite",
+      "version": "0.2.0",
+      "description": "Lightweight vector database with SQL, SPARQL, and Cypher - runs everywhere (Node.js, Browser, Edge)",
+      "keywords": ["vector-database", "sql", "sparql", "cypher", "wasm", "lightweight", "graph-database"],
+      "category": "database",
+      "example_prompts": [
+        "Run vector database in browser",
+        "Query vectors with SQL",
+        "Use SPARQL for semantic queries",
+        "Execute Cypher in JavaScript",
+        "Deploy on edge devices"
+      ]
+    },
+    {
+      "name": "@ruvector/agentic-synth",
+      "version": "0.1.6",
+      "description": "High-performance synthetic data generator for AI/ML training, RAG systems, and agentic workflows with DSPy.ts",
+      "keywords": ["synthetic-data", "data-generation", "ai-training", "rag", "dspy", "gemini", "openrouter"],
+      "category": "data-generation",
+      "example_prompts": [
+        "Generate synthetic training data",
+        "Create datasets for AI models",
+        "Build RAG test collections",
+        "Augment training data programmatically",
+        "Generate edge cases for testing"
+      ]
+    },
+    {
+      "name": "@ruvector/spiking-neural",
+      "version": "1.0.1",
+      "description": "High-performance Spiking Neural Network (SNN) with SIMD optimization - CLI and SDK",
+      "keywords": ["spiking-neural-network", "snn", "neuromorphic", "simd", "stdp", "lif-neuron"],
+      "category": "neuromorphic",
+      "example_prompts": [
+        "Build spiking neural networks in JS",
+        "Implement STDP learning rules",
+        "Create neuromorphic computing systems",
+        "Simulate LIF neurons",
+        "Apply bio-inspired pattern recognition"
+      ]
+    },
+    {
+      "name": "@ruvector/agentic-integration",
+      "version": "1.0.0",
+      "description": "Distributed agent coordination for ruvector with claude-flow integration and swarm management",
+      "keywords": ["distributed-systems", "agent-coordination", "claude-flow", "swarm", "mesh-coordination"],
+      "category": "coordination",
+      "example_prompts": [
+        "Coordinate distributed AI agents",
+        "Integrate with Claude Flow swarms",
+        "Build multi-region agent systems",
+        "Implement agent mesh topologies",
+        "Create fault-tolerant AI coordination"
+      ]
+    }
+  ],
+  "cli_commands": [
+    {
+      "name": "ruvector",
+      "description": "Main CLI for RuVector vector database operations",
+      "category": "vector-database",
+      "subcommands": ["index", "search", "insert", "delete", "info", "mcp"],
+      "example_prompts": [
+        "Create vector index with ruvector CLI",
+        "Search vectors from command line",
+        "Insert vectors into database",
+        "Start MCP server for ruvector"
+      ]
+    },
+    {
+      "name": "ruvllm",
+      "description": "CLI for LLM model management and inference",
+      "category": "llm-inference",
+      "subcommands": ["download", "list", "run", "serve", "benchmark", "quantize"],
+      "example_prompts": [
+        "Download GGUF models from HuggingFace",
+        "List available local models",
+        "Run LLM inference from CLI",
+        "Start inference server",
+        "Benchmark model performance"
+      ]
+    },
+    {
+      "name": "rudag",
+      "description": "CLI for DAG operations and workflow management",
+      "category": "workflow",
+      "subcommands": ["create", "topo-sort", "critical-path", "schedule", "visualize"],
+      "example_prompts": [
+        "Create DAG workflows",
+        "Compute topological sort",
+        "Find critical paths",
+        "Schedule tasks with dependencies"
+      ]
+    },
+    {
+      "name": "rvlite",
+      "description": "CLI for lightweight vector database with SQL/SPARQL/Cypher",
+      "category": "database",
+      "subcommands": ["query", "insert", "index", "export", "import"],
+      "example_prompts": [
+        "Query vectors with SQL syntax",
+        "Execute SPARQL queries",
+        "Run Cypher on embedded database"
+      ]
+    },
+    {
+      "name": "agentic-synth",
+      "description": "CLI for synthetic data generation",
+      "category": "data-generation",
+      "subcommands": ["generate", "config", "validate", "export"],
+      "example_prompts": [
+        "Generate synthetic training data",
+        "Configure data generation pipelines",
+        "Validate generated datasets"
+      ]
+    },
+    {
+      "name": "spiking-neural",
+      "description": "CLI for spiking neural network simulation",
+      "category": "neuromorphic",
+      "subcommands": ["simulate", "train", "test", "benchmark", "demo"],
+      "example_prompts": [
+        "Simulate spiking neural networks",
+        "Train SNN with STDP",
+        "Run pattern recognition demos"
+      ]
+    }
+  ],
+  "capabilities": {
+    "vector_search": {
+      "description": "High-performance vector similarity search with multiple algorithms and optimizations",
+      "features": [
+        {
+          "name": "HNSW Indexing",
+          "description": "Hierarchical Navigable Small World graphs for approximate nearest neighbor search",
+          "performance": "O(log n) search complexity, 2.5K queries/sec on 10K vectors",
+          "keywords": ["hnsw", "ann", "approximate-nearest-neighbor"]
+        },
+        {
+          "name": "SIMD Distance",
+          "description": "SimSIMD-powered distance calculations with AVX2/AVX-512/NEON acceleration",
+          "performance": "16M+ ops/sec for 512-dimensional vectors",
+          "keywords": ["simd", "avx", "neon", "distance"]
+        },
+        {
+          "name": "Hyperbolic Search",
+          "description": "Poincare ball model for hierarchy-aware similarity search",
+          "keywords": ["hyperbolic", "poincare", "hierarchy"]
+        },
+        {
+          "name": "Quantization",
+          "description": "Multiple compression strategies: Scalar (4x), Int4 (8x), Product (8-16x), Binary (32x)",
+          "keywords": ["quantization", "compression", "memory-efficient"]
+        }
+      ]
+    },
+    "llm_inference": {
+      "description": "Production-grade LLM serving with multiple acceleration backends",
+      "features": [
+        {
+          "name": "Paged Attention",
+          "description": "Memory-efficient attention with page tables for long contexts",
+          "keywords": ["paged-attention", "memory-efficient", "long-context"]
+        },
+        {
+          "name": "KV Cache",
+          "description": "Two-tier FP16 tail + quantized store for optimal memory/quality tradeoff",
+          "keywords": ["kv-cache", "inference", "memory"]
+        },
+        {
+          "name": "Metal Acceleration",
+          "description": "Apple Silicon GPU acceleration via Candle and native Metal shaders",
+          "keywords": ["metal", "apple-silicon", "gpu", "m1", "m2", "m3", "m4"]
+        },
+        {
+          "name": "CUDA Acceleration",
+          "description": "NVIDIA GPU acceleration for datacenter deployment",
+          "keywords": ["cuda", "nvidia", "gpu"]
+        },
+        {
+          "name": "GGUF Support",
+          "description": "Load and run GGUF quantized models with memory mapping",
+          "keywords": ["gguf", "quantized", "llama", "mistral"]
+        },
+        {
+          "name": "Speculative Decoding",
+          "description": "Fast inference with draft models and tree-based speculation",
+          "keywords": ["speculative-decoding", "fast-inference"]
+        }
+      ]
+    },
+    "adaptive_learning": {
+      "description": "Self-optimizing neural architectures for continuous improvement",
+      "features": [
+        {
+          "name": "SONA Engine",
+          "description": "Self-Optimizing Neural Architecture with three-tier learning loops",
+          "keywords": ["sona", "self-optimizing", "adaptive"]
+        },
+        {
+          "name": "Micro-LoRA",
+          "description": "Ultra-low rank (1-2) LoRA for instant learning adaptation",
+          "performance": "<0.05ms adaptation latency",
+          "keywords": ["lora", "micro-lora", "fine-tuning"]
+        },
+        {
+          "name": "EWC++",
+          "description": "Elastic Weight Consolidation to prevent catastrophic forgetting",
+          "keywords": ["ewc", "continual-learning", "forgetting"]
+        },
+        {
+          "name": "ReasoningBank",
+          "description": "Pattern extraction and similarity search for learned strategies",
+          "keywords": ["reasoning-bank", "patterns", "learning"]
+        }
+      ]
+    },
+    "agent_routing": {
+      "description": "Intelligent routing and orchestration for AI agents",
+      "features": [
+        {
+          "name": "FastGRNN Router",
+          "description": "Neural routing with FastGRNN for sub-millisecond decisions",
+          "keywords": ["fastgrnn", "neural-router", "fast"]
+        },
+        {
+          "name": "Semantic Router",
+          "description": "Vector-based intent matching with HNSW indexing",
+          "keywords": ["semantic-router", "intent-matching"]
+        },
+        {
+          "name": "Circuit Breaker",
+          "description": "Reliability patterns for fault-tolerant routing",
+          "keywords": ["circuit-breaker", "reliability", "fault-tolerant"]
+        },
+        {
+          "name": "Uncertainty Estimation",
+          "description": "Confidence scoring for routing decisions",
+          "keywords": ["uncertainty", "confidence", "calibration"]
+        }
+      ]
+    },
+    "graph_database": {
+      "description": "Neo4j-compatible graph database with vector embeddings",
+      "features": [
+        {
+          "name": "Hypergraph Support",
+          "description": "Store and query hyperedges connecting multiple nodes",
+          "keywords": ["hypergraph", "graph", "edges"]
+        },
+        {
+          "name": "Cypher Queries",
+          "description": "Execute Neo4j-compatible Cypher queries",
+          "keywords": ["cypher", "query", "neo4j"]
+        },
+        {
+          "name": "Distributed Storage",
+          "description": "RAFT-based distributed graph with federation",
+          "keywords": ["distributed", "raft", "federation"]
+        },
+        {
+          "name": "Vector+Graph",
+          "description": "Combine vector embeddings with graph relationships",
+          "keywords": ["vector-graph", "hybrid", "knowledge-graph"]
+        }
+      ]
+    },
+    "neuromorphic": {
+      "description": "Bio-inspired neural computing with spiking networks",
+      "features": [
+        {
+          "name": "Spiking Neural Networks",
+          "description": "LIF neurons with STDP learning rules",
+          "keywords": ["snn", "spiking", "lif", "stdp"]
+        },
+        {
+          "name": "BTSP Learning",
+          "description": "Biological-plausible temporal spike patterns",
+          "keywords": ["btsp", "temporal", "biological"]
+        },
+        {
+          "name": "Pattern Separation",
+          "description": "Hippocampal-inspired pattern separation",
+          "keywords": ["pattern-separation", "hippocampus"]
+        }
+      ]
+    },
+    "hardware_acceleration": {
+      "description": "Multi-platform hardware acceleration",
+      "features": [
+        {
+          "name": "Apple Silicon (Metal)",
+          "description": "Native Metal acceleration for M1/M2/M3/M4",
+          "keywords": ["metal", "apple-silicon", "m1", "m2", "m3", "m4"]
+        },
+        {
+          "name": "Apple Neural Engine",
+          "description": "Core ML integration for ANE acceleration",
+          "keywords": ["ane", "coreml", "neural-engine"]
+        },
+        {
+          "name": "NVIDIA CUDA",
+          "description": "CUDA acceleration for NVIDIA GPUs",
+          "keywords": ["cuda", "nvidia", "gpu"]
+        },
+        {
+          "name": "FPGA Backend",
+          "description": "Deterministic latency transformer inference on FPGA",
+          "keywords": ["fpga", "deterministic", "low-latency"]
+        },
+        {
+          "name": "ARM NEON",
+          "description": "SIMD acceleration for ARM processors",
+          "keywords": ["neon", "arm", "simd"]
+        }
+      ]
+    },
+    "quantum_integration": {
+      "description": "Classical nervous system for quantum machines",
+      "features": [
+        {
+          "name": "Coherence Assessment",
+          "description": "Real-time quantum gate coherence monitoring",
+          "keywords": ["coherence", "quantum", "gate"]
+        },
+        {
+          "name": "Min-Cut Decoding",
+          "description": "Dynamic min-cut for quantum error correction",
+          "keywords": ["min-cut", "error-correction", "decoding"]
+        }
+      ]
+    }
+  },
+  "integrations": {
+    "claude_flow": {
+      "description": "Deep integration with Claude Flow for AI agent orchestration",
+      "features": ["agent-routing", "swarm-coordination", "hooks-integration", "memory-bridge"]
+    },
+    "huggingface": {
+      "description": "Model download and upload with HuggingFace Hub",
+      "features": ["model-download", "model-upload", "model-cards", "datasets"]
+    },
+    "mcp": {
+      "description": "Model Context Protocol server for AI assistants",
+      "features": ["tool-execution", "resource-access", "prompt-templates"]
+    },
+    "onnx": {
+      "description": "ONNX runtime for cross-platform embeddings",
+      "features": ["embedding-generation", "model-inference"]
+    }
+  },
+  "performance_benchmarks": {
+    "vector_search": {
+      "insertions": "50,000+ vectors/sec",
+      "queries": "2,500 queries/sec on 10K vectors",
+      "simd_distance": "16M+ ops/sec for 512-dim"
+    },
+    "learning": {
+      "sona_adaptation": "<0.05ms latency",
+      "pattern_search": "150x-12,500x faster with HNSW"
+    },
+    "inference": {
+      "flash_attention": "2.49x-7.47x speedup",
+      "memory_reduction": "50-75% with quantization"
+    }
+  }
+}
