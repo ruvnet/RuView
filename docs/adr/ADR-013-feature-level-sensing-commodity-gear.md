@@ -1,7 +1,7 @@
 # ADR-013: Feature-Level Sensing on Commodity Gear (Option 3)
 
 ## Status
-Proposed
+Accepted — Implemented (36/36 unit tests pass, see `v1/src/sensing/` and `v1/tests/unit/test_sensing.py`)
 
 ## Date
 2026-02-28
@@ -372,6 +372,24 @@ class CommodityBackend(SensingBackend):
 - **Environmental sensitivity**: Commodity RSSI is more affected by interference than CSI
 - **Not a "pose estimation" demo**: This module honestly cannot do what the project name implies
 - **Lower credibility ceiling**: RSSI sensing is well-known; less impressive than CSI
+
+### Implementation Status
+
+The full commodity sensing pipeline is implemented in `v1/src/sensing/`:
+
+| Module | File | Description |
+|--------|------|-------------|
+| RSSI Collector | `rssi_collector.py` | `LinuxWifiCollector` (live hardware) + `SimulatedCollector` (deterministic testing) with ring buffer |
+| Feature Extractor | `feature_extractor.py` | `RssiFeatureExtractor` with Hann-windowed FFT, band power (breathing 0.1-0.5 Hz, motion 0.5-3 Hz), CUSUM change-point detection |
+| Classifier | `classifier.py` | `PresenceClassifier` with ABSENT/PRESENT_STILL/ACTIVE levels, confidence scoring |
+| Backend | `backend.py` | `CommodityBackend` wiring collector → extractor → classifier, reports PRESENCE + MOTION capabilities |
+
+**Test coverage**: 36 tests in `v1/tests/unit/test_sensing.py` — all passing:
+- `TestRingBuffer` (4), `TestSimulatedCollector` (5), `TestFeatureExtractor` (8), `TestCusum` (4), `TestPresenceClassifier` (7), `TestCommodityBackend` (6), `TestBandPower` (2)
+
+**Dependencies**: `numpy`, `scipy` (for FFT and spectral analysis)
+
+**Note**: `LinuxWifiCollector` requires a connected Linux WiFi interface (`/proc/net/wireless` or `iw`). On Windows or disconnected interfaces, use `SimulatedCollector` for development and testing.
 
 ## References
 

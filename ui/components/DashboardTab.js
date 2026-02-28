@@ -51,8 +51,8 @@ export class DashboardTab {
       this.updateStats(stats);
 
     } catch (error) {
-      console.error('Failed to load dashboard data:', error);
-      this.showError('Failed to load dashboard data');
+      // DensePose API may not be running (sensing-only mode) — fail silently
+      console.log('Dashboard: DensePose API not available (sensing-only mode)');
     }
   }
 

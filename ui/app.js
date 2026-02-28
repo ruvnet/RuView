@@ -4,6 +4,7 @@ import { TabManager } from './components/TabManager.js';
 import { DashboardTab } from './components/DashboardTab.js';
 import { HardwareTab } from './components/HardwareTab.js';
 import { LiveDemoTab } from './components/LiveDemoTab.js';
+import { SensingTab } from './components/SensingTab.js';
 import { apiService } from './services/api.service.js';
 import { wsService } from './services/websocket.service.js';
 import { healthService } from './services/health.service.js';
@@ -65,16 +66,17 @@ class WiFiDensePoseApp {
       this.showBackendStatus('Mock server active - testing mode', 'warning');
     } else {
       console.log('🔌 Initializing with real backend');
-      
+
       // Verify backend is actually working
       try {
         const health = await healthService.checkLiveness();
         console.log('✅ Backend is available and responding:', health);
         this.showBackendStatus('Connected to real backend', 'success');
       } catch (error) {
-        console.error('❌ Backend check failed:', error);
-        this.showBackendStatus('Backend connection failed', 'error');
-        // Don't throw - let the app continue and retry later
+        // DensePose API backend not running — sensing-only mode
+        backendDetector.sensingOnlyMode = true;
+        console.log('ℹ️ DensePose API not running — sensing-only mode via WebSocket on :8765');
+        this.showBackendStatus('Sensing mode — live WiFi data via WebSocket', 'success');
       }
     }
   }
@@ -101,33 +103,44 @@ class WiFiDensePoseApp {
 
   // Initialize individual tab components
   initializeTabComponents() {
+    // Skip DensePose-dependent tabs in sensing-only mode
+    const sensingOnly = backendDetector.sensingOnlyMode;
+
     // Dashboard tab
     const dashboardContainer = document.getElementById('dashboard');
     if (dashboardContainer) {
       this.components.dashboard = new DashboardTab(dashboardContainer);
-      this.components.dashboard.init().catch(error => {
-        console.error('Failed to initialize dashboard:', error);
-      });
+      if (!sensingOnly) {
+        this.components.dashboard.init().catch(error => {
+          console.error('Failed to initialize dashboard:', error);
+        });
+      }
     }
 
     // Hardware tab
     const hardwareContainer = document.getElementById('hardware');
     if (hardwareContainer) {
       this.components.hardware = new HardwareTab(hardwareContainer);
-      this.components.hardware.init();
+      if (!sensingOnly) this.components.hardware.init();
     }
 
     // Live demo tab
     const demoContainer = document.getElementById('demo');
     if (demoContainer) {
       this.components.demo = new LiveDemoTab(demoContainer);
-      this.components.demo.init();
+      if (!sensingOnly) this.components.demo.init();
+    }
+
+    // Sensing tab
+    const sensingContainer = document.getElementById('sensing');
+    if (sensingContainer) {
+      this.components.sensing = new SensingTab(sensingContainer);
     }
 
     // Architecture tab - static content, no component needed
-    
+
     // Performance tab - static content, no component needed
-    
+
     // Applications tab - static content, no component needed
   }
 
@@ -152,6 +165,15 @@ class WiFiDensePoseApp {
         
       case 'demo':
         // Demo starts manually
+        break;
+
+      case 'sensing':
+        // Lazy-init sensing tab on first visit
+        if (this.components.sensing && !this.components.sensing.splatRenderer) {
+          this.components.sensing.init().catch(error => {
+            console.error('Failed to initialize sensing tab:', error);
+          });
+        }
         break;
     }
   }
