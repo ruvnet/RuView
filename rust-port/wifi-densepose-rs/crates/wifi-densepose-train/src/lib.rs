@@ -52,9 +52,9 @@ pub mod subcarrier;
 pub mod trainer;
 
 // Convenient re-exports at the crate root.
-pub use config::TrainingConfig;
-pub use dataset::{CsiDataset, CsiSample, DataLoader, MmFiDataset, SyntheticCsiDataset, SyntheticConfig};
-pub use error::{ConfigError, DatasetError, SubcarrierError, TrainError, TrainResult};
+pub use config::{ConfigError, TrainingConfig};
+pub use dataset::{CsiDataset, CsiSample, DataLoader, DatasetError, MmFiDataset, SyntheticCsiDataset, SyntheticConfig};
+pub use error::{TrainError, TrainResult};
 pub use subcarrier::{compute_interp_weights, interpolate_subcarriers, select_subcarriers_by_variance};
 
 /// Crate version string.
