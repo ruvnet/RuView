@@ -53,14 +53,14 @@ USER appuser
 EXPOSE 8000
 
 # Development command
-CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "v1.src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
 # Production stage
 FROM base as production
 
 # Copy only necessary files
 COPY requirements.txt .
-COPY src/ ./src/
+COPY v1/src/ ./v1/src/
 COPY assets/ ./assets/
 
 # Create necessary directories
@@ -79,16 +79,16 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 EXPOSE 8000
 
 # Production command
-CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+CMD ["uvicorn", "v1.src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
 
 # Testing stage
 FROM development as testing
 
 # Copy test files
-COPY tests/ ./tests/
+COPY v1/tests/ ./v1/tests/
 
 # Run tests
-RUN python -m pytest tests/ -v
+RUN python -m pytest v1/tests/ -v
 
 # Security scanning stage
 FROM production as security
@@ -99,6 +99,6 @@ RUN pip install --no-cache-dir safety bandit
 
 # Run security scans
 RUN safety check
-RUN bandit -r src/ -f json -o /tmp/bandit-report.json
+RUN bandit -r v1/src/ -f json -o /tmp/bandit-report.json
 
 USER appuser

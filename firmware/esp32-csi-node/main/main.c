@@ -20,8 +20,12 @@
 
 #include "csi_collector.h"
 #include "stream_sender.h"
+#include "nvs_config.h"
 
 static const char *TAG = "main";
+
+/* Runtime configuration (loaded from NVS or Kconfig defaults). */
+static nvs_config_t s_cfg;
 
 /* Event group bits */
 #define WIFI_CONNECTED_BIT BIT0
@@ -72,13 +76,13 @@ static void wifi_init_sta(void)
 
     wifi_config_t wifi_config = {
         .sta = {
-            .ssid = CONFIG_CSI_WIFI_SSID,
-#ifdef CONFIG_CSI_WIFI_PASSWORD
-            .password = CONFIG_CSI_WIFI_PASSWORD,
-#endif
             .threshold.authmode = WIFI_AUTH_WPA2_PSK,
         },
     };
+
+    /* Copy runtime SSID/password from NVS config */
+    strncpy((char *)wifi_config.sta.ssid, s_cfg.wifi_ssid, sizeof(wifi_config.sta.ssid) - 1);
+    strncpy((char *)wifi_config.sta.password, s_cfg.wifi_password, sizeof(wifi_config.sta.password) - 1);
 
     /* If password is empty, use open auth */
     if (strlen((char *)wifi_config.sta.password) == 0) {
@@ -89,7 +93,7 @@ static void wifi_init_sta(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "WiFi STA initialized, connecting to SSID: %s", CONFIG_CSI_WIFI_SSID);
+    ESP_LOGI(TAG, "WiFi STA initialized, connecting to SSID: %s", s_cfg.wifi_ssid);
 
     /* Wait for connection */
     EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
@@ -105,8 +109,6 @@ static void wifi_init_sta(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "ESP32-S3 CSI Node (ADR-018) — Node ID: %d", CONFIG_CSI_NODE_ID);
-
     /* Initialize NVS */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -115,11 +117,16 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
+    /* Load runtime config (NVS overrides Kconfig defaults) */
+    nvs_config_load(&s_cfg);
+
+    ESP_LOGI(TAG, "ESP32-S3 CSI Node (ADR-018) — Node ID: %d", s_cfg.node_id);
+
     /* Initialize WiFi STA */
     wifi_init_sta();
 
-    /* Initialize UDP sender */
-    if (stream_sender_init() != 0) {
+    /* Initialize UDP sender with runtime target */
+    if (stream_sender_init_with(s_cfg.target_ip, s_cfg.target_port) != 0) {
         ESP_LOGE(TAG, "Failed to initialize UDP sender");
         return;
     }
@@ -128,7 +135,7 @@ void app_main(void)
     csi_collector_init();
 
     ESP_LOGI(TAG, "CSI streaming active → %s:%d",
-             CONFIG_CSI_TARGET_IP, CONFIG_CSI_TARGET_PORT);
+             s_cfg.target_ip, s_cfg.target_port);
 
     /* Main loop — keep alive */
     while (1) {
