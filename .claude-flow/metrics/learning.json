@@ -1,0 +1,17 @@
+{
+  "initialized": "2026-02-28T16:04:10.843Z",
+  "routing": {
+    "accuracy": 0,
+    "decisions": 0
+  },
+  "patterns": {
+    "shortTerm": 0,
+    "longTerm": 0,
+    "quality": 0
+  },
+  "sessions": {
+    "total": 0,
+    "current": null
+  },
+  "_note": "Intelligence grows as you use Claude Flow"
+}

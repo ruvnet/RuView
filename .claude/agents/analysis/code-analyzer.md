@@ -1,5 +1,5 @@
 ---
-name: code-analyzer
+name: analyst
 description: "Advanced code quality analysis agent for comprehensive code reviews and improvements"
 type: code-analyzer
 color: indigo
@@ -10,7 +10,7 @@ hooks:
   post: |
     npx claude-flow@alpha hooks post-task --task-id "analysis-${timestamp}" --analyze-performance true
 metadata:
-  description: Advanced code quality analysis agent for comprehensive code reviews and improvements
+  specialization: "Code quality assessment and security analysis"
   capabilities:
     - Code quality assessment and metrics
     - Performance bottleneck detection

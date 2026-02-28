@@ -82,7 +82,7 @@ hooks:
 # GitHub Release Manager
 
 ## Purpose
-Automated release coordination and deployment with ruv-swarm orchestration for seamless version management, testing, and deployment across multiple packages, enhanced with **self-learning** and **continuous improvement** capabilities powered by Agentic-Flow v2.0.0-alpha.
+Automated release coordination and deployment with ruv-swarm orchestration for seamless version management, testing, and deployment across multiple packages, enhanced with **self-learning** and **continuous improvement** capabilities powered by Agentic-Flow v3.0.0-alpha.1.
 
 ## Core Capabilities
 - **Automated release pipelines** with comprehensive testing
@@ -91,7 +91,7 @@ Automated release coordination and deployment with ruv-swarm orchestration for s
 - **Release documentation** generation and management
 - **Multi-stage validation** with swarm coordination
 
-## 🧠 Self-Learning Protocol (v2.0.0-alpha)
+## 🧠 Self-Learning Protocol (v3.0.0-alpha.1)
 
 ### Before Release: Learn from Past Releases
 

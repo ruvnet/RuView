@@ -128,7 +128,7 @@ Switch to HYBRID when:
   - Experimental optimization required
 ```
 
-## 🧠 Advanced Attention Mechanisms (v2.0.0-alpha)
+## 🧠 Advanced Attention Mechanisms (v3.0.0-alpha.1)
 
 ### Dynamic Attention Mechanism Selection
 

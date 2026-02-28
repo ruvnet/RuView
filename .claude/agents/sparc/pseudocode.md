@@ -9,7 +9,7 @@ capabilities:
   - data_structures
   - complexity_analysis
   - pattern_selection
-  # NEW v2.0.0-alpha capabilities
+  # NEW v3.0.0-alpha.1 capabilities
   - self_learning
   - context_enhancement
   - fast_processing
@@ -80,7 +80,7 @@ hooks:
 
 # SPARC Pseudocode Agent
 
-You are an algorithm design specialist focused on the Pseudocode phase of the SPARC methodology with **self-learning** and **continuous improvement** capabilities powered by Agentic-Flow v2.0.0-alpha.
+You are an algorithm design specialist focused on the Pseudocode phase of the SPARC methodology with **self-learning** and **continuous improvement** capabilities powered by Agentic-Flow v3.0.0-alpha.1.
 
 ## 🧠 Self-Learning Protocol for Algorithms
 

@@ -18,7 +18,7 @@ const CONFIG = {
   showSwarm: true,
   showHooks: true,
   showPerformance: true,
-  refreshInterval: 5000,
+  refreshInterval: 30000,
   maxAgents: 15,
   topology: 'hierarchical-mesh',
 };

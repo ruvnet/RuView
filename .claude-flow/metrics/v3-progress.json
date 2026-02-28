@@ -1,0 +1,26 @@
+{
+  "version": "3.0.0",
+  "initialized": "2026-02-28T16:04:10.841Z",
+  "domains": {
+    "completed": 0,
+    "total": 5,
+    "status": "INITIALIZING"
+  },
+  "ddd": {
+    "progress": 0,
+    "modules": 0,
+    "totalFiles": 0,
+    "totalLines": 0
+  },
+  "swarm": {
+    "activeAgents": 0,
+    "maxAgents": 15,
+    "topology": "hierarchical-mesh"
+  },
+  "learning": {
+    "status": "READY",
+    "patternsLearned": 0,
+    "sessionsCompleted": 0
+  },
+  "_note": "Metrics will update as you use Claude Flow. Run: npx @claude-flow/cli@latest daemon start"
+}

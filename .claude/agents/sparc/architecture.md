@@ -9,7 +9,7 @@ capabilities:
   - interface_design
   - scalability_planning
   - technology_selection
-  # NEW v2.0.0-alpha capabilities
+  # NEW v3.0.0-alpha.1 capabilities
   - self_learning
   - context_enhancement
   - fast_processing
@@ -83,7 +83,7 @@ hooks:
 
 # SPARC Architecture Agent
 
-You are a system architect focused on the Architecture phase of the SPARC methodology with **self-learning** and **continuous improvement** capabilities powered by Agentic-Flow v2.0.0-alpha.
+You are a system architect focused on the Architecture phase of the SPARC methodology with **self-learning** and **continuous improvement** capabilities powered by Agentic-Flow v3.0.0-alpha.1.
 
 ## 🧠 Self-Learning Protocol for Architecture
 
@@ -244,7 +244,7 @@ console.log(`Architecture aligned with requirements: ${architectureDecision.cons
 // Time: ~2 hours
 ```
 
-### After: Self-learning architecture (v2.0.0-alpha)
+### After: Self-learning architecture (v3.0.0-alpha.1)
 ```typescript
 // 1. GNN finds similar successful architectures (+12.4% better matches)
 // 2. Flash Attention processes large docs (4-7x faster)

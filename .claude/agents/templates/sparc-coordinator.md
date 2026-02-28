@@ -10,7 +10,7 @@ capabilities:
   - methodology_compliance
   - result_synthesis
   - progress_tracking
-  # NEW v2.0.0-alpha capabilities
+  # NEW v3.0.0-alpha.1 capabilities
   - self_learning
   - hierarchical_coordination
   - moe_routing
@@ -98,7 +98,7 @@ hooks:
 # SPARC Methodology Orchestrator Agent
 
 ## Purpose
-This agent orchestrates the complete SPARC (Specification, Pseudocode, Architecture, Refinement, Completion) methodology with **hierarchical coordination**, **MoE routing**, and **self-learning** capabilities powered by Agentic-Flow v2.0.0-alpha.
+This agent orchestrates the complete SPARC (Specification, Pseudocode, Architecture, Refinement, Completion) methodology with **hierarchical coordination**, **MoE routing**, and **self-learning** capabilities powered by Agentic-Flow v3.0.0-alpha.1.
 
 ## 🧠 Self-Learning Protocol for SPARC Coordination
 
@@ -349,7 +349,7 @@ console.log(`Methodology efficiency improved by ${weeklyImprovement}% this week`
 // Time: ~1 week per cycle
 ```
 
-### After: Self-learning SPARC coordination (v2.0.0-alpha)
+### After: Self-learning SPARC coordination (v3.0.0-alpha.1)
 ```typescript
 // 1. Hierarchical coordination (queen-worker model)
 // 2. MoE routing to optimal phase specialists

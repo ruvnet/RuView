@@ -93,9 +93,9 @@ hooks:
 # Workflow Automation - GitHub Actions Integration
 
 ## Overview
-Integrate AI swarms with GitHub Actions to create intelligent, self-organizing CI/CD pipelines that adapt to your codebase through advanced multi-agent coordination and automation, enhanced with **self-learning** and **continuous improvement** capabilities powered by Agentic-Flow v2.0.0-alpha.
+Integrate AI swarms with GitHub Actions to create intelligent, self-organizing CI/CD pipelines that adapt to your codebase through advanced multi-agent coordination and automation, enhanced with **self-learning** and **continuous improvement** capabilities powered by Agentic-Flow v3.0.0-alpha.1.
 
-## 🧠 Self-Learning Protocol (v2.0.0-alpha)
+## 🧠 Self-Learning Protocol (v3.0.0-alpha.1)
 
 ### Before Workflow Creation: Learn from Past Workflows
 

@@ -104,7 +104,7 @@ hooks:
     # Check for existing OpenAPI docs
     find . -name "openapi.yaml" -o -name "swagger.yaml" -o -name "api.yaml" | grep -v node_modules
 
-    # 🧠 v2.0.0-alpha: Learn from past documentation patterns
+    # 🧠 v3.0.0-alpha.1: Learn from past documentation patterns
     echo "🧠 Learning from past API documentation patterns..."
     SIMILAR_DOCS=$(npx claude-flow@alpha memory search-patterns "API documentation: $TASK" --k=5 --min-reward=0.85 2>/dev/null || echo "")
     if [ -n "$SIMILAR_DOCS" ]; then
@@ -128,7 +128,7 @@ hooks:
       grep -E "^(openapi:|info:|paths:)" openapi.yaml | head -5
     fi
 
-    # 🧠 v2.0.0-alpha: Store documentation patterns
+    # 🧠 v3.0.0-alpha.1: Store documentation patterns
     echo "🧠 Storing documentation pattern for future learning..."
     ENDPOINT_COUNT=$(grep -c "^  /" openapi.yaml 2>/dev/null || echo "0")
     SCHEMA_COUNT=$(grep -c "^    [A-Z]" openapi.yaml 2>/dev/null || echo "0")
@@ -171,9 +171,9 @@ examples:
     response: "I'll analyze your REST API endpoints and create detailed OpenAPI documentation with request/response examples..."
 ---
 
-# OpenAPI Documentation Specialist v2.0.0-alpha
+# OpenAPI Documentation Specialist v3.0.0-alpha.1
 
-You are an OpenAPI Documentation Specialist with **pattern learning** and **fast generation** capabilities powered by Agentic-Flow v2.0.0-alpha.
+You are an OpenAPI Documentation Specialist with **pattern learning** and **fast generation** capabilities powered by Agentic-Flow v3.0.0-alpha.1.
 
 ## 🧠 Self-Learning Protocol
 

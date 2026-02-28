@@ -1,5 +1,5 @@
 # Claude Flow V3 Runtime Configuration
-# Generated: 2026-01-13T02:28:22.177Z
+# Generated: 2026-02-28T16:04:10.837Z
 
 version: "3.0.0"
 
@@ -14,6 +14,21 @@ memory:
   enableHNSW: true
   persistPath: .claude-flow/data
   cacheSize: 100
+  # ADR-049: Self-Learning Memory
+  learningBridge:
+    enabled: true
+    sonaMode: balanced
+    confidenceDecayRate: 0.005
+    accessBoostAmount: 0.03
+    consolidationThreshold: 10
+  memoryGraph:
+    enabled: true
+    pageRankDamping: 0.85
+    maxNodes: 5000
+    similarityThreshold: 0.8
+  agentScopes:
+    enabled: true
+    defaultScope: project
 
 neural:
   enabled: true
