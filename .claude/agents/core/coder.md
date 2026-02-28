@@ -9,7 +9,7 @@ capabilities:
   - optimization
   - api_design
   - error_handling
-  # NEW v2.0.0-alpha capabilities
+  # NEW v3.0.0-alpha.1 capabilities
   - self_learning         # ReasoningBank pattern storage
   - context_enhancement   # GNN-enhanced search
   - fast_processing       # Flash Attention

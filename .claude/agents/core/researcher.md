@@ -9,7 +9,7 @@ capabilities:
   - documentation_research
   - dependency_tracking
   - knowledge_synthesis
-  # NEW v2.0.0-alpha capabilities
+  # NEW v3.0.0-alpha.1 capabilities
   - self_learning         # ReasoningBank pattern storage
   - context_enhancement   # GNN-enhanced search (+12.4% accuracy)
   - fast_processing       # Flash Attention

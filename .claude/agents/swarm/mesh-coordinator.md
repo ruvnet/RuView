@@ -185,7 +185,7 @@ class TaskAuction:
         return self.award_task(task, winner[0])
 ```
 
-## 🧠 Advanced Attention Mechanisms (v2.0.0-alpha)
+## 🧠 Advanced Attention Mechanisms (v3.0.0-alpha.1)
 
 ### Multi-Head Attention for Peer-to-Peer Coordination
 

@@ -1,0 +1,182 @@
+# Browser Agent Configuration
+# AI-powered web browser automation using agent-browser
+#
+# Capabilities:
+# - Web navigation and interaction
+# - AI-optimized snapshots with element refs
+# - Form filling and submission
+# - Screenshot capture
+# - Network interception
+# - Multi-session coordination
+
+name: browser-agent
+description: Web automation specialist using agent-browser with AI-optimized snapshots
+version: 1.0.0
+
+# Routing configuration
+routing:
+  complexity: medium
+  model: sonnet  # Good at visual reasoning and DOM interpretation
+  priority: normal
+  keywords:
+    - browser
+    - web
+    - scrape
+    - screenshot
+    - navigate
+    - login
+    - form
+    - click
+    - automate
+
+# Agent capabilities
+capabilities:
+  - web-navigation
+  - form-interaction
+  - screenshot-capture
+  - data-extraction
+  - network-interception
+  - session-management
+  - multi-tab-coordination
+
+# Available tools (MCP tools with browser/ prefix)
+tools:
+  navigation:
+    - browser/open
+    - browser/back
+    - browser/forward
+    - browser/reload
+    - browser/close
+  snapshot:
+    - browser/snapshot
+    - browser/screenshot
+    - browser/pdf
+  interaction:
+    - browser/click
+    - browser/fill
+    - browser/type
+    - browser/press
+    - browser/hover
+    - browser/select
+    - browser/check
+    - browser/uncheck
+    - browser/scroll
+    - browser/upload
+  info:
+    - browser/get-text
+    - browser/get-html
+    - browser/get-value
+    - browser/get-attr
+    - browser/get-title
+    - browser/get-url
+    - browser/get-count
+  state:
+    - browser/is-visible
+    - browser/is-enabled
+    - browser/is-checked
+  wait:
+    - browser/wait
+  eval:
+    - browser/eval
+  storage:
+    - browser/cookies-get
+    - browser/cookies-set
+    - browser/cookies-clear
+    - browser/localstorage-get
+    - browser/localstorage-set
+  network:
+    - browser/network-route
+    - browser/network-unroute
+    - browser/network-requests
+  tabs:
+    - browser/tab-list
+    - browser/tab-new
+    - browser/tab-switch
+    - browser/tab-close
+    - browser/session-list
+  settings:
+    - browser/set-viewport
+    - browser/set-device
+    - browser/set-geolocation
+    - browser/set-offline
+    - browser/set-media
+  debug:
+    - browser/trace-start
+    - browser/trace-stop
+    - browser/console
+    - browser/errors
+    - browser/highlight
+    - browser/state-save
+    - browser/state-load
+  find:
+    - browser/find-role
+    - browser/find-text
+    - browser/find-label
+    - browser/find-testid
+
+# Memory configuration
+memory:
+  namespace: browser-sessions
+  persist: true
+  patterns:
+    - login-flows
+    - form-submissions
+    - scraping-patterns
+    - navigation-sequences
+
+# Swarm integration
+swarm:
+  roles:
+    - navigator      # Handles authentication and navigation
+    - scraper        # Extracts data using snapshots
+    - validator      # Verifies extracted data
+    - tester         # Runs automated tests
+    - monitor        # Watches for errors and network issues
+  topology: hierarchical  # Coordinator manages browser agents
+  max_sessions: 5
+
+# Hooks integration
+hooks:
+  pre_task:
+    - route         # Get optimal routing
+    - memory_search # Check for similar patterns
+  post_task:
+    - memory_store  # Save successful patterns
+    - post_edit     # Train on outcomes
+
+# Default configuration
+defaults:
+  timeout: 30000
+  headless: true
+  viewport:
+    width: 1280
+    height: 720
+
+# Example workflows
+workflows:
+  login:
+    description: Authenticate to a website
+    steps:
+      - open: "{url}/login"
+      - snapshot: { interactive: true }
+      - fill: { target: "@e1", value: "{username}" }
+      - fill: { target: "@e2", value: "{password}" }
+      - click: "@e3"
+      - wait: { url: "**/dashboard" }
+      - state-save: "auth-state.json"
+
+  scrape_list:
+    description: Extract data from a list page
+    steps:
+      - open: "{url}"
+      - snapshot: { interactive: true, compact: true }
+      - eval: "Array.from(document.querySelectorAll('{selector}')).map(el => el.textContent)"
+
+  form_submit:
+    description: Fill and submit a form
+    steps:
+      - open: "{url}"
+      - snapshot: { interactive: true }
+      - fill_fields: "{fields}"
+      - click: "{submit_button}"
+      - wait: { text: "{success_text}" }

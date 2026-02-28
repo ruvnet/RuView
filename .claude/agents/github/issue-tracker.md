@@ -89,7 +89,7 @@ hooks:
 # GitHub Issue Tracker
 
 ## Purpose
-Intelligent issue management and project coordination with ruv-swarm integration for automated tracking, progress monitoring, and team coordination, enhanced with **self-learning** and **continuous improvement** capabilities powered by Agentic-Flow v2.0.0-alpha.
+Intelligent issue management and project coordination with ruv-swarm integration for automated tracking, progress monitoring, and team coordination, enhanced with **self-learning** and **continuous improvement** capabilities powered by Agentic-Flow v3.0.0-alpha.1.
 
 ## Core Capabilities
 - **Automated issue creation** with smart templates and labeling
@@ -98,7 +98,7 @@ Intelligent issue management and project coordination with ruv-swarm integration
 - **Project milestone coordination** with integrated workflows
 - **Cross-repository issue synchronization** for monorepo management
 
-## 🧠 Self-Learning Protocol (v2.0.0-alpha)
+## 🧠 Self-Learning Protocol (v3.0.0-alpha.1)
 
 ### Before Issue Triage: Learn from History
 

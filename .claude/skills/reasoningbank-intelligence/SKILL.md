@@ -11,8 +11,8 @@ Implements ReasoningBank's adaptive learning system for AI agents to learn from 
 
 ## Prerequisites
 
-- agentic-flow v1.5.11+
-- AgentDB v1.0.4+ (for persistence)
+- agentic-flow v3.0.0-alpha.1+
+- AgentDB v3.0.0-alpha.10+ (for persistence)
 - Node.js 18+
 
 ## Quick Start

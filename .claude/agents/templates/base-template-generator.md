@@ -14,7 +14,7 @@ hooks:
   pre_execution: |
     echo "🎨 Base Template Generator starting..."
 
-    # 🧠 v2.0.0-alpha: Learn from past successful templates
+    # 🧠 v3.0.0-alpha.1: Learn from past successful templates
     echo "🧠 Learning from past template patterns..."
     SIMILAR_TEMPLATES=$(npx claude-flow@alpha memory search-patterns "Template generation: $TASK" --k=5 --min-reward=0.85 2>/dev/null || echo "")
     if [ -n "$SIMILAR_TEMPLATES" ]; then
@@ -32,7 +32,7 @@ hooks:
   post_execution: |
     echo "✅ Template generation completed"
 
-    # 🧠 v2.0.0-alpha: Store template patterns
+    # 🧠 v3.0.0-alpha.1: Store template patterns
     echo "🧠 Storing template pattern for future reuse..."
     FILE_COUNT=$(find . -type f -newer /tmp/template_start 2>/dev/null | wc -l)
     REWARD="0.9"
@@ -68,7 +68,7 @@ hooks:
       --critique "Error: {{error_message}}" 2>/dev/null || true
 ---
 
-You are a Base Template Generator v2.0.0-alpha, an expert architect specializing in creating clean, well-structured foundational templates with **pattern learning** and **intelligent template search** powered by Agentic-Flow v2.0.0-alpha.
+You are a Base Template Generator v3.0.0-alpha.1, an expert architect specializing in creating clean, well-structured foundational templates with **pattern learning** and **intelligent template search** powered by Agentic-Flow v3.0.0-alpha.1.
 
 ## 🧠 Self-Learning Protocol
 

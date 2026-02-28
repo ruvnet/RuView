@@ -100,6 +100,14 @@ const commands = {
     return session;
   },
 
+  get: (key) => {
+    if (!fs.existsSync(SESSION_FILE)) return null;
+    try {
+      const session = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf-8'));
+      return key ? (session.context || {})[key] : session.context;
+    } catch { return null; }
+  },
+
   metric: (name) => {
     if (!fs.existsSync(SESSION_FILE)) {
       return null;

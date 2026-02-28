@@ -1,0 +1,87 @@
+[package]
+name = "wifi-densepose-train"
+version = "0.1.0"
+edition = "2021"
+authors = ["WiFi-DensePose Contributors"]
+license = "MIT OR Apache-2.0"
+description = "Training pipeline for WiFi-DensePose pose estimation"
+keywords = ["wifi", "training", "pose-estimation", "deep-learning"]
+
+[[bin]]
+name = "train"
+path = "src/bin/train.rs"
+
+[[bin]]
+name = "verify-training"
+path = "src/bin/verify_training.rs"
+required-features = ["tch-backend"]
+
+[features]
+default = []
+tch-backend = ["tch"]
+cuda = ["tch-backend"]
+
+[dependencies]
+# Internal crates
+wifi-densepose-signal = { path = "../wifi-densepose-signal" }
+wifi-densepose-nn = { path = "../wifi-densepose-nn" }
+
+# Core
+thiserror.workspace = true
+anyhow.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+# Tensor / math
+ndarray.workspace = true
+num-complex.workspace = true
+num-traits.workspace = true
+
+# PyTorch bindings (optional — only enabled by `tch-backend` feature)
+tch = { workspace = true, optional = true }
+
+# Graph algorithms (min-cut for optimal keypoint assignment)
+petgraph.workspace = true
+
+# ruvector integration (subpolynomial min-cut, sparse solvers, temporal compression, attention)
+ruvector-mincut = { workspace = true }
+ruvector-attn-mincut = { workspace = true }
+ruvector-temporal-tensor = { workspace = true }
+ruvector-solver = { workspace = true }
+ruvector-attention = { workspace = true }
+
+# Data loading
+ndarray-npy.workspace = true
+memmap2 = "0.9"
+walkdir.workspace = true
+
+# Serialization
+csv.workspace = true
+toml = "0.8"
+
+# Logging / progress
+tracing.workspace = true
+tracing-subscriber.workspace = true
+indicatif.workspace = true
+
+# Async (subset of features needed by training pipeline)
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "fs"] }
+
+# Crypto (for proof hash)
+sha2.workspace = true
+
+# CLI
+clap.workspace = true
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+criterion.workspace = true
+proptest.workspace = true
+tempfile = "3.10"
+approx = "0.5"
+
+[[bench]]
+name = "training_bench"
+harness = false

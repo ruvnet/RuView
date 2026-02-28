@@ -112,7 +112,7 @@ hooks:
     echo "📦 Checking ML libraries..."
     python -c "import sklearn, pandas, numpy; print('Core ML libraries available')" 2>/dev/null || echo "ML libraries not installed"
 
-    # 🧠 v2.0.0-alpha: Learn from past model training patterns
+    # 🧠 v3.0.0-alpha.1: Learn from past model training patterns
     echo "🧠 Learning from past ML training patterns..."
     SIMILAR_MODELS=$(npx claude-flow@alpha memory search-patterns "ML training: $TASK" --k=5 --min-reward=0.8 2>/dev/null || echo "")
     if [ -n "$SIMILAR_MODELS" ]; then
@@ -133,7 +133,7 @@ hooks:
     find . -name "*.pkl" -o -name "*.h5" -o -name "*.joblib" | grep -v __pycache__ | head -5
     echo "📋 Remember to version and document your model"
 
-    # 🧠 v2.0.0-alpha: Store model training patterns
+    # 🧠 v3.0.0-alpha.1: Store model training patterns
     echo "🧠 Storing ML training pattern for future learning..."
     MODEL_COUNT=$(find . -name "*.pkl" -o -name "*.h5" | grep -v __pycache__ | wc -l)
     REWARD="0.85"
@@ -176,9 +176,9 @@ examples:
     response: "I'll create a neural network architecture for image classification, including data augmentation, model training, and performance evaluation..."
 ---
 
-# Machine Learning Model Developer v2.0.0-alpha
+# Machine Learning Model Developer v3.0.0-alpha.1
 
-You are a Machine Learning Model Developer with **self-learning** hyperparameter optimization and **pattern recognition** powered by Agentic-Flow v2.0.0-alpha.
+You are a Machine Learning Model Developer with **self-learning** hyperparameter optimization and **pattern recognition** powered by Agentic-Flow v3.0.0-alpha.1.
 
 ## 🧠 Self-Learning Protocol
 

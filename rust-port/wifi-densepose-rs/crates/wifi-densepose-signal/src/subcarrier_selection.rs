@@ -9,6 +9,7 @@
 //! - WiGest: Using WiFi Gestures for Device-Free Sensing (SenSys 2015)
 
 use ndarray::Array2;
+use ruvector_mincut::MinCutBuilder;
 
 /// Configuration for subcarrier selection.
 #[derive(Debug, Clone)]
@@ -168,6 +169,76 @@ fn column_variance(data: &Array2<f64>, col: usize) -> f64 {
     col_data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0)
 }
 
+/// Partition subcarriers into (sensitive, insensitive) groups via DynamicMinCut.
+///
+/// Builds a similarity graph: subcarriers are vertices, edges encode inverse
+/// variance-ratio distance. The min-cut separates high-sensitivity from
+/// low-sensitivity subcarriers in O(n^1.5 log n) amortized time.
+///
+/// # Arguments
+/// * `sensitivity` - Per-subcarrier sensitivity score (variance_motion / variance_static)
+///
+/// # Returns
+/// (sensitive_indices, insensitive_indices) — indices into the input slice
+pub fn mincut_subcarrier_partition(sensitivity: &[f32]) -> (Vec<usize>, Vec<usize>) {
+    let n = sensitivity.len();
+    if n < 4 {
+        // Too small for meaningful cut — put all in sensitive
+        return ((0..n).collect(), Vec::new());
+    }
+
+    // Build similarity graph: edge weight = 1 / |sensitivity_i - sensitivity_j|
+    // Only include edges where weight > min_weight (prune very weak similarities)
+    let min_weight = 0.5_f64;
+    let mut edges: Vec<(u64, u64, f64)> = Vec::new();
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let diff = (sensitivity[i] - sensitivity[j]).abs() as f64;
+            let weight = if diff > 1e-9 { 1.0 / diff } else { 1e6_f64 };
+            if weight > min_weight {
+                edges.push((i as u64, j as u64, weight));
+            }
+        }
+    }
+
+    if edges.is_empty() {
+        // All subcarriers equally sensitive — split by median
+        let median_idx = n / 2;
+        return ((0..median_idx).collect(), (median_idx..n).collect());
+    }
+
+    let mc = MinCutBuilder::new()
+        .exact()
+        .with_edges(edges)
+        .build()
+        .expect("MinCutBuilder::build failed");
+    let (side_a, side_b) = mc.partition();
+
+    // The side with higher mean sensitivity is the "sensitive" group
+    let mean_a: f32 = if side_a.is_empty() {
+        0.0_f32
+    } else {
+        side_a.iter().map(|&i| sensitivity[i as usize]).sum::<f32>() / side_a.len() as f32
+    };
+    let mean_b: f32 = if side_b.is_empty() {
+        0.0_f32
+    } else {
+        side_b.iter().map(|&i| sensitivity[i as usize]).sum::<f32>() / side_b.len() as f32
+    };
+
+    if mean_a >= mean_b {
+        (
+            side_a.into_iter().map(|x| x as usize).collect(),
+            side_b.into_iter().map(|x| x as usize).collect(),
+        )
+    } else {
+        (
+            side_b.into_iter().map(|x| x as usize).collect(),
+            side_a.into_iter().map(|x| x as usize).collect(),
+        )
+    }
+}
+
 /// Errors from subcarrier selection.
 #[derive(Debug, thiserror::Error)]
 pub enum SelectionError {
@@ -288,5 +359,30 @@ mod tests {
             select_sensitive_subcarriers(&motion, &statik, &SubcarrierSelectionConfig::default()),
             Err(SelectionError::SubcarrierCountMismatch { .. })
         ));
+    }
+}
+
+#[cfg(test)]
+mod mincut_tests {
+    use super::*;
+
+    #[test]
+    fn mincut_partition_separates_high_low() {
+        // High sensitivity: indices 0,1,2; low: 3,4,5
+        let sensitivity = vec![0.9_f32, 0.85, 0.92, 0.1, 0.12, 0.08];
+        let (sensitive, insensitive) = mincut_subcarrier_partition(&sensitivity);
+        // High-sensitivity indices should cluster together
+        assert!(!sensitive.is_empty());
+        assert!(!insensitive.is_empty());
+        let sens_mean: f32 = sensitive.iter().map(|&i| sensitivity[i]).sum::<f32>() / sensitive.len() as f32;
+        let insens_mean: f32 = insensitive.iter().map(|&i| sensitivity[i]).sum::<f32>() / insensitive.len() as f32;
+        assert!(sens_mean > insens_mean, "sensitive mean {sens_mean} should exceed insensitive mean {insens_mean}");
+    }
+
+    #[test]
+    fn mincut_partition_small_input() {
+        let sensitivity = vec![0.5_f32, 0.8];
+        let (sensitive, insensitive) = mincut_subcarrier_partition(&sensitivity);
+        assert_eq!(sensitive.len() + insensitive.len(), 2);
     }
 }

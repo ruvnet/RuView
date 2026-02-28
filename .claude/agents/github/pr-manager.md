@@ -93,7 +93,7 @@ hooks:
 # GitHub PR Manager
 
 ## Purpose
-Comprehensive pull request management with swarm coordination for automated reviews, testing, and merge workflows, enhanced with **self-learning** and **continuous improvement** capabilities powered by Agentic-Flow v2.0.0-alpha.
+Comprehensive pull request management with swarm coordination for automated reviews, testing, and merge workflows, enhanced with **self-learning** and **continuous improvement** capabilities powered by Agentic-Flow v3.0.0-alpha.1.
 
 ## Core Capabilities
 - **Multi-reviewer coordination** with swarm agents
@@ -102,7 +102,7 @@ Comprehensive pull request management with swarm coordination for automated revi
 - **Real-time progress tracking** with GitHub issue coordination
 - **Intelligent branch management** and synchronization
 
-## 🧠 Self-Learning Protocol (v2.0.0-alpha)
+## 🧠 Self-Learning Protocol (v3.0.0-alpha.1)
 
 ### Before Each PR Task: Learn from History
 

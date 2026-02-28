@@ -10,7 +10,8 @@ keywords = ["wifi", "disaster", "rescue", "detection", "vital-signs"]
 categories = ["science", "algorithms"]
 
 [features]
-default = ["std", "api"]
+default = ["std", "api", "ruvector"]
+ruvector = ["dep:ruvector-solver", "dep:ruvector-temporal-tensor"]
 std = []
 api = ["dep:serde", "chrono/serde", "geo/use-serde"]
 portable = ["low-power"]
@@ -24,6 +25,8 @@ serde = ["dep:serde", "chrono/serde", "geo/use-serde"]
 wifi-densepose-core = { path = "../wifi-densepose-core" }
 wifi-densepose-signal = { path = "../wifi-densepose-signal" }
 wifi-densepose-nn = { path = "../wifi-densepose-nn" }
+ruvector-solver = { workspace = true, optional = true }
+ruvector-temporal-tensor = { workspace = true, optional = true }
 
 # Async runtime
 tokio = { version = "1.35", features = ["rt", "sync", "time"] }

@@ -10,5 +10,7 @@ mod depth;
 mod fusion;
 
 pub use triangulation::{Triangulator, TriangulationConfig};
+#[cfg(feature = "ruvector")]
+pub use triangulation::solve_tdoa_triangulation;
 pub use depth::{DepthEstimator, DepthEstimatorConfig};
 pub use fusion::{PositionFuser, LocalizationService};

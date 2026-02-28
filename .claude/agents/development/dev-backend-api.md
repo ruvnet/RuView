@@ -8,7 +8,6 @@ created: "2025-07-25"
 updated: "2025-12-03"
 author: "Claude Code"
 metadata:
-  description: "Specialized agent for backend API development with self-learning and pattern recognition"
   specialization: "API design, implementation, optimization, and continuous improvement"
   complexity: "moderate"
   autonomous: true
@@ -110,7 +109,7 @@ hooks:
     echo "📋 Analyzing existing API structure..."
     find . -name "*.route.js" -o -name "*.controller.js" | head -20
 
-    # 🧠 v2.0.0-alpha: Learn from past API implementations
+    # 🧠 v3.0.0-alpha.1: Learn from past API implementations
     echo "🧠 Learning from past API patterns..."
     SIMILAR_PATTERNS=$(npx claude-flow@alpha memory search-patterns "API implementation: $TASK" --k=5 --min-reward=0.85 2>/dev/null || echo "")
     if [ -n "$SIMILAR_PATTERNS" ]; then
@@ -130,7 +129,7 @@ hooks:
     echo "📊 Running API tests..."
     npm run test:api 2>/dev/null || echo "No API tests configured"
 
-    # 🧠 v2.0.0-alpha: Store learning patterns
+    # 🧠 v3.0.0-alpha.1: Store learning patterns
     echo "🧠 Storing API pattern for future learning..."
     REWARD=$(if npm run test:api 2>/dev/null; then echo "0.95"; else echo "0.7"; fi)
     SUCCESS=$(if npm run test:api 2>/dev/null; then echo "true"; else echo "false"; fi)
@@ -171,9 +170,9 @@ examples:
     response: "I'll implement a complete CRUD API for products with proper validation, error handling, and documentation..."
 ---
 
-# Backend API Developer v2.0.0-alpha
+# Backend API Developer v3.0.0-alpha.1
 
-You are a specialized Backend API Developer agent with **self-learning** and **continuous improvement** capabilities powered by Agentic-Flow v2.0.0-alpha.
+You are a specialized Backend API Developer agent with **self-learning** and **continuous improvement** capabilities powered by Agentic-Flow v3.0.0-alpha.1.
 
 ## 🧠 Self-Learning Protocol
 

@@ -15,6 +15,8 @@
 
 use ndarray::Array2;
 use num_complex::Complex64;
+use ruvector_attention::ScaledDotProductAttention;
+use ruvector_attention::traits::Attention;
 use rustfft::FftPlanner;
 use std::f64::consts::PI;
 
@@ -171,6 +173,89 @@ pub enum BvpError {
 
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
+}
+
+/// Compute attention-weighted BVP aggregation across subcarriers.
+///
+/// Uses ScaledDotProductAttention to weight each subcarrier's velocity
+/// profile by its relevance to the overall body motion query. Subcarriers
+/// in multipath nulls receive low attention weight automatically.
+///
+/// # Arguments
+/// * `stft_rows` - Per-subcarrier STFT magnitudes: Vec of `[n_velocity_bins]` slices
+/// * `sensitivity` - Per-subcarrier sensitivity score (higher = more motion-responsive)
+/// * `n_velocity_bins` - Number of velocity bins (d for attention)
+///
+/// # Returns
+/// Attention-weighted BVP as Vec<f32> of length n_velocity_bins
+pub fn attention_weighted_bvp(
+    stft_rows: &[Vec<f32>],
+    sensitivity: &[f32],
+    n_velocity_bins: usize,
+) -> Vec<f32> {
+    if stft_rows.is_empty() || n_velocity_bins == 0 {
+        return vec![0.0; n_velocity_bins];
+    }
+
+    let attn = ScaledDotProductAttention::new(n_velocity_bins);
+    let sens_sum: f32 = sensitivity.iter().sum::<f32>().max(1e-9);
+
+    // Query: sensitivity-weighted mean of all subcarrier profiles
+    let query: Vec<f32> = (0..n_velocity_bins)
+        .map(|v| {
+            stft_rows
+                .iter()
+                .zip(sensitivity.iter())
+                .map(|(row, &s)| {
+                    row.get(v).copied().unwrap_or(0.0) * s
+                })
+                .sum::<f32>()
+                / sens_sum
+        })
+        .collect();
+
+    let keys: Vec<&[f32]> = stft_rows.iter().map(|r| r.as_slice()).collect();
+    let values: Vec<&[f32]> = stft_rows.iter().map(|r| r.as_slice()).collect();
+
+    attn.compute(&query, &keys, &values)
+        .unwrap_or_else(|_| {
+            // Fallback: plain weighted sum
+            (0..n_velocity_bins)
+                .map(|v| {
+                    stft_rows
+                        .iter()
+                        .zip(sensitivity.iter())
+                        .map(|(row, &s)| row.get(v).copied().unwrap_or(0.0) * s)
+                        .sum::<f32>()
+                        / sens_sum
+                })
+                .collect()
+        })
+}
+
+#[cfg(test)]
+mod attn_bvp_tests {
+    use super::*;
+
+    #[test]
+    fn attention_bvp_output_shape() {
+        let n_sc = 4_usize;
+        let n_vbins = 8_usize;
+        let stft_rows: Vec<Vec<f32>> = (0..n_sc)
+            .map(|i| vec![i as f32 * 0.1; n_vbins])
+            .collect();
+        let sensitivity = vec![0.9_f32, 0.1, 0.8, 0.2];
+        let bvp = attention_weighted_bvp(&stft_rows, &sensitivity, n_vbins);
+        assert_eq!(bvp.len(), n_vbins);
+        assert!(bvp.iter().all(|x| x.is_finite()));
+    }
+
+    #[test]
+    fn attention_bvp_empty_input() {
+        let bvp = attention_weighted_bvp(&[], &[], 8);
+        assert_eq!(bvp.len(), 8);
+        assert!(bvp.iter().all(|&x| x == 0.0));
+    }
 }
 
 #[cfg(test)]

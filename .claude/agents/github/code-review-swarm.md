@@ -85,9 +85,9 @@ hooks:
 # Code Review Swarm - Automated Code Review with AI Agents
 
 ## Overview
-Deploy specialized AI agents to perform comprehensive, intelligent code reviews that go beyond traditional static analysis, enhanced with **self-learning** and **continuous improvement** capabilities powered by Agentic-Flow v2.0.0-alpha.
+Deploy specialized AI agents to perform comprehensive, intelligent code reviews that go beyond traditional static analysis, enhanced with **self-learning** and **continuous improvement** capabilities powered by Agentic-Flow v3.0.0-alpha.1.
 
-## 🧠 Self-Learning Protocol (v2.0.0-alpha)
+## 🧠 Self-Learning Protocol (v3.0.0-alpha.1)
 
 ### Before Each Review: Learn from Past Reviews
 

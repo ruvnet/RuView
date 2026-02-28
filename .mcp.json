@@ -3,11 +3,13 @@
     "claude-flow": {
       "command": "npx",
       "args": [
+        "-y",
         "@claude-flow/cli@latest",
         "mcp",
         "start"
       ],
       "env": {
+        "npm_config_update_notifier": "false",
         "CLAUDE_FLOW_MODE": "v3",
         "CLAUDE_FLOW_HOOKS_ENABLED": "true",
         "CLAUDE_FLOW_TOPOLOGY": "hierarchical-mesh",

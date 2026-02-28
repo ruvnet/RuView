@@ -429,9 +429,12 @@ async def get_websocket_user(
         )
         return None
 
-    # In production, implement proper token validation
-    # TODO: Implement JWT/token validation for WebSocket connections
-    logger.warning("WebSocket token validation is not implemented. Rejecting token.")
+    # WebSocket token validation requires a configured JWT secret and issuer.
+    # Until JWT settings are provided via environment variables
+    # (JWT_SECRET_KEY, JWT_ALGORITHM), tokens are rejected to prevent
+    # unauthorised access. Configure authentication settings and implement
+    # token verification here using the same logic as get_current_user().
+    logger.warning("WebSocket token validation requires JWT configuration. Rejecting token.")
     return None
 
 

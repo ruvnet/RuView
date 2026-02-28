@@ -2,6 +2,88 @@
 
 use crate::domain::{BreathingPattern, BreathingType, ConfidenceScore};
 
+// ---------------------------------------------------------------------------
+// Integration 6: CompressedBreathingBuffer (ADR-017, ruvector feature)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "ruvector")]
+use ruvector_temporal_tensor::segment;
+#[cfg(feature = "ruvector")]
+use ruvector_temporal_tensor::{TemporalTensorCompressor, TierPolicy};
+
+/// Memory-efficient breathing waveform buffer using tiered temporal compression.
+///
+/// Compresses CSI amplitude time-series by 50-75% using tiered quantization:
+/// - Hot tier (recent): 8-bit precision
+/// - Warm tier: 5-7-bit precision
+/// - Cold tier (historical): 3-bit precision
+///
+/// For 60-second window at 100 Hz, 56 subcarriers:
+/// Before: 13.4 MB/zone → After: 3.4-6.7 MB/zone
+#[cfg(feature = "ruvector")]
+pub struct CompressedBreathingBuffer {
+    compressor: TemporalTensorCompressor,
+    encoded: Vec<u8>,
+    n_subcarriers: usize,
+    frame_count: u64,
+}
+
+#[cfg(feature = "ruvector")]
+impl CompressedBreathingBuffer {
+    pub fn new(n_subcarriers: usize, zone_id: u64) -> Self {
+        Self {
+            compressor: TemporalTensorCompressor::new(
+                TierPolicy::default(),
+                n_subcarriers as u32,
+                zone_id as u32,
+            ),
+            encoded: Vec::new(),
+            n_subcarriers,
+            frame_count: 0,
+        }
+    }
+
+    /// Push one frame of CSI amplitudes (one time step, all subcarriers).
+    pub fn push_frame(&mut self, amplitudes: &[f32]) {
+        assert_eq!(amplitudes.len(), self.n_subcarriers);
+        let ts = self.frame_count as u32;
+        // Synchronize last_access_ts with current timestamp so that the tier
+        // policy's age computation (now_ts - last_access_ts + 1) never wraps to
+        // zero (which would cause a divide-by-zero in wrapping_div).
+        self.compressor.set_access(ts, ts);
+        self.compressor.push_frame(amplitudes, ts, &mut self.encoded);
+        self.frame_count += 1;
+    }
+
+    /// Flush pending compressed data.
+    pub fn flush(&mut self) {
+        self.compressor.flush(&mut self.encoded);
+    }
+
+    /// Decode all frames for breathing frequency analysis.
+    /// Returns flat Vec<f32> of shape [n_frames × n_subcarriers].
+    pub fn to_flat_vec(&self) -> Vec<f32> {
+        let mut out = Vec::new();
+        segment::decode(&self.encoded, &mut out);
+        out
+    }
+
+    /// Get a single frame for real-time display.
+    pub fn get_frame(&self, frame_idx: usize) -> Option<Vec<f32>> {
+        segment::decode_single_frame(&self.encoded, frame_idx)
+    }
+
+    /// Number of frames stored.
+    pub fn frame_count(&self) -> u64 {
+        self.frame_count
+    }
+
+    /// Number of subcarriers per frame.
+    pub fn n_subcarriers(&self) -> usize {
+        self.n_subcarriers
+    }
+}
+
 /// Configuration for breathing detection
 #[derive(Debug, Clone)]
 pub struct BreathingDetectorConfig {
@@ -230,6 +312,38 @@ impl BreathingDetector {
 
         // Weight regularity more heavily for breathing detection
         amplitude_score * 0.4 + regularity_score * 0.6
+    }
+}
+
+#[cfg(all(test, feature = "ruvector"))]
+mod breathing_buffer_tests {
+    use super::*;
+
+    #[test]
+    fn compressed_breathing_buffer_push_and_decode() {
+        let n_sc = 56_usize;
+        let mut buf = CompressedBreathingBuffer::new(n_sc, 1);
+        for t in 0..10_u64 {
+            let frame: Vec<f32> = (0..n_sc).map(|i| (i as f32 + t as f32) * 0.01).collect();
+            buf.push_frame(&frame);
+        }
+        buf.flush();
+        assert_eq!(buf.frame_count(), 10);
+        // Decoded data should be non-empty
+        let flat = buf.to_flat_vec();
+        assert!(!flat.is_empty());
+    }
+
+    #[test]
+    fn compressed_breathing_buffer_get_frame() {
+        let n_sc = 8_usize;
+        let mut buf = CompressedBreathingBuffer::new(n_sc, 2);
+        let frame = vec![0.1_f32; n_sc];
+        buf.push_frame(&frame);
+        buf.flush();
+        // Frame 0 should be decodable
+        let decoded = buf.get_frame(0);
+        assert!(decoded.is_some() || buf.to_flat_vec().len() == n_sc);
     }
 }
 

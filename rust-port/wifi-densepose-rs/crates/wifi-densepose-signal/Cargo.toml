@@ -18,6 +18,14 @@ rustfft.workspace = true
 num-complex.workspace = true
 num-traits.workspace = true
 
+# Graph algorithms
+ruvector-mincut = { workspace = true }
+ruvector-attn-mincut = { workspace = true }
+
+# Attention and solver integrations (ADR-017)
+ruvector-attention = { workspace = true }
+ruvector-solver = { workspace = true }
+
 # Internal
 wifi-densepose-core = { path = "../wifi-densepose-core" }
 

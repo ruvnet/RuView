@@ -9,7 +9,7 @@ capabilities:
   - performance_analysis
   - best_practices
   - documentation_review
-  # NEW v2.0.0-alpha capabilities
+  # NEW v3.0.0-alpha.1 capabilities
   - self_learning         # Learn from review patterns
   - context_enhancement   # GNN-enhanced issue detection
   - fast_processing       # Flash Attention review

@@ -9,7 +9,7 @@ capabilities:
   - e2e_testing
   - performance_testing
   - security_testing
-  # NEW v2.0.0-alpha capabilities
+  # NEW v3.0.0-alpha.1 capabilities
   - self_learning         # Learn from test failures
   - context_enhancement   # GNN-enhanced test case discovery
   - fast_processing       # Flash Attention test generation

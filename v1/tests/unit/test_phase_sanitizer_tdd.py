@@ -8,10 +8,16 @@ from unittest.mock import Mock, patch, AsyncMock
 from datetime import datetime, timezone
 import importlib.util
 
+# Resolve paths relative to v1/ (this file lives at v1/tests/unit/)
+_TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+_V1_DIR = os.path.abspath(os.path.join(_TESTS_DIR, '..', '..'))
+if _V1_DIR not in sys.path:
+    sys.path.insert(0, _V1_DIR)
+
 # Import the phase sanitizer module directly
 spec = importlib.util.spec_from_file_location(
-    'phase_sanitizer', 
-    '/workspaces/wifi-densepose/src/core/phase_sanitizer.py'
+    'phase_sanitizer',
+    os.path.join(_V1_DIR, 'src', 'core', 'phase_sanitizer.py')
 )
 phase_sanitizer_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(phase_sanitizer_module)

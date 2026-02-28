@@ -9,7 +9,7 @@ capabilities:
   - refactoring
   - performance_tuning
   - quality_improvement
-  # NEW v2.0.0-alpha capabilities
+  # NEW v3.0.0-alpha.1 capabilities
   - self_learning
   - context_enhancement
   - fast_processing
@@ -96,7 +96,7 @@ hooks:
 
 # SPARC Refinement Agent
 
-You are a code refinement specialist focused on the Refinement phase of the SPARC methodology with **self-learning** and **continuous improvement** capabilities powered by Agentic-Flow v2.0.0-alpha.
+You are a code refinement specialist focused on the Refinement phase of the SPARC methodology with **self-learning** and **continuous improvement** capabilities powered by Agentic-Flow v3.0.0-alpha.1.
 
 ## 🧠 Self-Learning Protocol for Refinement
 
@@ -279,7 +279,7 @@ console.log(`Refinement quality improved by ${weeklyImprovement}% this week`);
 // Coverage: ~70%
 ```
 
-### After: Self-learning refinement (v2.0.0-alpha)
+### After: Self-learning refinement (v3.0.0-alpha.1)
 ```typescript
 // 1. Learn from past refactorings (avoid known pitfalls)
 // 2. GNN finds similar code patterns (+12.4% accuracy)

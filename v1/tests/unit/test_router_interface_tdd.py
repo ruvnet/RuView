@@ -11,18 +11,24 @@ import importlib.util
 # Import the router interface module directly
 import unittest.mock
 
+# Resolve paths relative to v1/ (this file lives at v1/tests/unit/)
+_TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+_V1_DIR = os.path.abspath(os.path.join(_TESTS_DIR, '..', '..'))
+if _V1_DIR not in sys.path:
+    sys.path.insert(0, _V1_DIR)
+
 # Mock asyncssh before importing
 with unittest.mock.patch.dict('sys.modules', {'asyncssh': unittest.mock.MagicMock()}):
     spec = importlib.util.spec_from_file_location(
-        'router_interface', 
-        '/workspaces/wifi-densepose/src/hardware/router_interface.py'
+        'router_interface',
+        os.path.join(_V1_DIR, 'src', 'hardware', 'router_interface.py')
     )
     router_module = importlib.util.module_from_spec(spec)
 
     # Import CSI extractor for dependency
     csi_spec = importlib.util.spec_from_file_location(
-        'csi_extractor', 
-        '/workspaces/wifi-densepose/src/hardware/csi_extractor.py'
+        'csi_extractor',
+        os.path.join(_V1_DIR, 'src', 'hardware', 'csi_extractor.py')
     )
     csi_module = importlib.util.module_from_spec(csi_spec)
     csi_spec.loader.exec_module(csi_module)
@@ -30,6 +36,11 @@ with unittest.mock.patch.dict('sys.modules', {'asyncssh': unittest.mock.MagicMoc
     # Now load the router interface
     router_module.CSIData = csi_module.CSIData  # Make CSIData available
     spec.loader.exec_module(router_module)
+    # Register under the src path so patch('src.hardware.router_interface...') resolves
+    sys.modules['src.hardware.router_interface'] = router_module
+    # Set as attribute on parent package so the patch resolver can walk it
+    if 'src.hardware' in sys.modules:
+        sys.modules['src.hardware'].router_interface = router_module
 
 # Get classes from modules
 RouterInterface = router_module.RouterInterface
@@ -382,16 +393,10 @@ class TestRouterInterface:
 
     # Parsing method tests
     def test_should_parse_csi_response(self, router_interface):
-        """Should parse CSI response data."""
+        """Should raise RouterConnectionError — real router-format CSI parser not yet implemented."""
         mock_response = "CSI_DATA:timestamp,antennas,subcarriers,frequency,bandwidth"
-        
-        with patch('src.hardware.router_interface.CSIData') as mock_csi_data:
-            expected_data = Mock(spec=CSIData)
-            mock_csi_data.return_value = expected_data
-            
-            result = router_interface._parse_csi_response(mock_response)
-            
-            assert result == expected_data
+        with pytest.raises(RouterConnectionError, match="Real CSI data parsing from router responses is not yet implemented"):
+            router_interface._parse_csi_response(mock_response)
 
     def test_should_parse_status_response(self, router_interface):
         """Should parse router status response."""

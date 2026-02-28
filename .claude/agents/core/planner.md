@@ -9,7 +9,7 @@ capabilities:
   - resource_allocation
   - timeline_estimation
   - risk_assessment
-  # NEW v2.0.0-alpha capabilities
+  # NEW v3.0.0-alpha.1 capabilities
   - self_learning         # Learn from planning outcomes
   - context_enhancement   # GNN-enhanced dependency mapping
   - fast_processing       # Flash Attention planning
@@ -366,7 +366,7 @@ console.log(`Common planning gaps: ${stats.commonCritiques}`);
    - Efficient resource utilization (MoE expert selection)
    - Continuous progress visibility
 
-4. **New v2.0.0-alpha Practices**:
+4. **New v3.0.0-alpha.1 Practices**:
    - Learn from past plans (ReasoningBank)
    - Use GNN for dependency mapping (+12.4% accuracy)
    - Route tasks with MoE attention (optimal agent selection)

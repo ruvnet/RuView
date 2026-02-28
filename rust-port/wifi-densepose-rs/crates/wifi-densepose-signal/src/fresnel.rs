@@ -9,6 +9,8 @@
 //! - FarSense: Pushing the Range Limit (MobiCom 2019)
 //! - Wi-Sleep: Contactless Sleep Staging (UbiComp 2021)
 
+use ruvector_solver::neumann::NeumannSolver;
+use ruvector_solver::types::CsrMatrix;
 use std::f64::consts::PI;
 
 /// Physical constants and defaults for WiFi sensing.
@@ -228,6 +230,89 @@ fn amplitude_variation(signal: &[f64]) -> f64 {
     let max = signal.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
     let min = signal.iter().cloned().fold(f64::INFINITY, f64::min);
     max - min
+}
+
+/// Estimate TX-body and body-RX distances from multi-subcarrier Fresnel observations.
+///
+/// When exact geometry is unknown, multiple subcarrier wavelengths provide
+/// different Fresnel zone crossings for the same chest displacement. This
+/// function solves the resulting over-determined system to estimate d1 (TX→body)
+/// and d2 (body→RX) distances.
+///
+/// # Arguments
+/// * `observations` - Vec of (wavelength_m, observed_amplitude_variation) from different subcarriers
+/// * `d_total` - Known TX-RX straight-line distance in metres
+///
+/// # Returns
+/// Some((d1, d2)) if solvable with ≥3 observations, None otherwise
+pub fn solve_fresnel_geometry(
+    observations: &[(f32, f32)],
+    d_total: f32,
+) -> Option<(f32, f32)> {
+    let n = observations.len();
+    if n < 3 {
+        return None;
+    }
+
+    // Collect per-wavelength coefficients
+    let inv_w_sq_sum: f32 = observations.iter().map(|(w, _)| 1.0 / (w * w)).sum();
+    let a_over_w_sum: f32 = observations.iter().map(|(w, a)| a / w).sum();
+
+    // Normal equations for [d1, d2]^T with relative Tikhonov regularization λ=0.5*inv_w_sq_sum.
+    // Relative scaling ensures the Jacobi iteration matrix has spectral radius ~0.667,
+    // well within the convergence bound required by NeumannSolver.
+    // (A^T A + λI) x = A^T b
+    // For the linearized system: coefficient[0] = 1/w, coefficient[1] = -1/w
+    // So A^T A = [[inv_w_sq_sum, -inv_w_sq_sum], [-inv_w_sq_sum, inv_w_sq_sum]] + λI
+    let lambda = 0.5 * inv_w_sq_sum;
+    let a00 = inv_w_sq_sum + lambda;
+    let a11 = inv_w_sq_sum + lambda;
+    let a01 = -inv_w_sq_sum;
+
+    let ata = CsrMatrix::<f32>::from_coo(
+        2,
+        2,
+        vec![(0, 0, a00), (0, 1, a01), (1, 0, a01), (1, 1, a11)],
+    );
+    let atb = vec![a_over_w_sum, -a_over_w_sum];
+
+    let solver = NeumannSolver::new(1e-5, 300);
+    match solver.solve(&ata, &atb) {
+        Ok(result) => {
+            let d1 = result.solution[0].abs().clamp(0.1, d_total - 0.1);
+            let d2 = (d_total - d1).clamp(0.1, d_total - 0.1);
+            Some((d1, d2))
+        }
+        Err(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod solver_fresnel_tests {
+    use super::*;
+
+    #[test]
+    fn fresnel_geometry_insufficient_obs() {
+        // < 3 observations → None
+        let obs = vec![(0.06_f32, 0.5_f32), (0.05, 0.4)];
+        assert!(solve_fresnel_geometry(&obs, 5.0).is_none());
+    }
+
+    #[test]
+    fn fresnel_geometry_returns_valid_distances() {
+        let obs = vec![
+            (0.06_f32, 0.3_f32),
+            (0.055, 0.25),
+            (0.05, 0.35),
+            (0.045, 0.2),
+        ];
+        let result = solve_fresnel_geometry(&obs, 5.0);
+        assert!(result.is_some(), "should solve with 4 observations");
+        let (d1, d2) = result.unwrap();
+        assert!(d1 > 0.0 && d1 < 5.0, "d1={d1} out of range");
+        assert!(d2 > 0.0 && d2 < 5.0, "d2={d2} out of range");
+        assert!((d1 + d2 - 5.0).abs() < 0.01, "d1+d2 should ≈ d_total");
+    }
 }
 
 /// Errors from Fresnel computations.

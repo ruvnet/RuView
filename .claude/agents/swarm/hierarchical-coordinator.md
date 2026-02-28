@@ -142,7 +142,7 @@ WORKERS WORKERS WORKERS WORKERS
    - Lessons learned documentation
 ```
 
-## 🧠 Advanced Attention Mechanisms (v2.0.0-alpha)
+## 🧠 Advanced Attention Mechanisms (v3.0.0-alpha.1)
 
 ### Hyperbolic Attention for Hierarchical Coordination
 

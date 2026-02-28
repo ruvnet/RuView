@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from src.hardware.csi_extractor import (
     CSIExtractor,
+    CSIExtractionError,
     CSIParseError,
     CSIData,
     ESP32CSIParser,
@@ -219,8 +220,11 @@ class TestESP32CSIParser:
 
     @pytest.fixture
     def raw_esp32_data(self):
-        """Sample raw ESP32 CSI data."""
-        return b"CSI_DATA:1234567890,3,56,2400,20,15.5,[1.0,2.0,3.0],[0.5,1.5,2.5]"
+        """Sample raw ESP32 CSI data with correct 3×56 amplitude and phase values."""
+        n_ant, n_sub = 3, 56
+        amp = ",".join(["1.0"] * (n_ant * n_sub))
+        pha = ",".join(["0.5"] * (n_ant * n_sub))
+        return f"CSI_DATA:1234567890,{n_ant},{n_sub},2400,20,15.5,{amp},{pha}".encode()
 
     def test_should_parse_valid_esp32_data(self, parser, raw_esp32_data):
         """Should parse valid ESP32 CSI data successfully."""
