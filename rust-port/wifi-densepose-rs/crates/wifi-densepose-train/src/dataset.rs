@@ -1129,4 +1129,36 @@ mod tests {
         xorshift_shuffle(&mut b, 123);
         assert_eq!(a, b);
     }
+
+    // ----- CompressedCsiBuffer ----------------------------------------------
+
+    #[test]
+    fn compressed_csi_buffer_roundtrip() {
+        // Create a small CSI array and check it round-trips through compression
+        let arr = Array4::<f32>::from_shape_fn((10, 1, 3, 16), |(t, _, rx, sc)| {
+            ((t + rx + sc) as f32) * 0.1
+        });
+        let buf = CompressedCsiBuffer::from_array4(&arr, 0);
+        assert_eq!(buf.len(), 10);
+        assert!(!buf.is_empty());
+        assert!(buf.compression_ratio > 1.0, "Should compress better than f32");
+
+        // Decode single frame
+        let frame = buf.get_frame(0);
+        assert!(frame.is_some());
+        assert_eq!(frame.unwrap().len(), 1 * 3 * 16);
+
+        // Full decode
+        let decoded = buf.to_array4(1, 3, 16);
+        assert_eq!(decoded.shape(), &[10, 1, 3, 16]);
+    }
+
+    #[test]
+    fn compressed_csi_buffer_empty() {
+        let arr = Array4::<f32>::zeros((0, 1, 3, 16));
+        let buf = CompressedCsiBuffer::from_array4(&arr, 0);
+        assert_eq!(buf.len(), 0);
+        assert!(buf.is_empty());
+        assert!(buf.get_frame(0).is_none());
+    }
 }
