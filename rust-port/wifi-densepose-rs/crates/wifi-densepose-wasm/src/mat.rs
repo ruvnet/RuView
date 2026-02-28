@@ -1301,6 +1301,122 @@ impl MatDashboard {
     }
 
     // ========================================================================
+    // CSI Data Ingestion (ADR-009: Signal Pipeline Exposure)
+    // ========================================================================
+
+    /// Push raw CSI amplitude/phase data into the dashboard for signal analysis.
+    ///
+    /// This is the primary data ingestion path for browser-based applications
+    /// receiving CSI data from a WebSocket or fetch endpoint. The data is
+    /// processed through a lightweight signal analysis to extract breathing
+    /// rate and confidence estimates.
+    ///
+    /// @param {Float64Array} amplitudes - CSI amplitude samples
+    /// @param {Float64Array} phases - CSI phase samples (same length as amplitudes)
+    /// @returns {string} JSON string with analysis results, or error string
+    #[wasm_bindgen(js_name = pushCsiData)]
+    pub fn push_csi_data(&self, amplitudes: &[f64], phases: &[f64]) -> String {
+        if amplitudes.len() != phases.len() {
+            return serde_json::json!({
+                "error": "Amplitudes and phases must have equal length"
+            }).to_string();
+        }
+
+        if amplitudes.is_empty() {
+            return serde_json::json!({
+                "error": "CSI data cannot be empty"
+            }).to_string();
+        }
+
+        // Lightweight breathing rate extraction using zero-crossing analysis
+        // on amplitude envelope. This runs entirely in WASM without Rust signal crate.
+        let n = amplitudes.len();
+
+        // Compute amplitude mean and variance
+        let mean: f64 = amplitudes.iter().sum::<f64>() / n as f64;
+        let variance: f64 = amplitudes.iter()
+            .map(|a| (a - mean).powi(2))
+            .sum::<f64>() / n as f64;
+
+        // Count zero crossings (crossings of mean value) for frequency estimation
+        let mut zero_crossings = 0usize;
+        for i in 1..n {
+            let prev = amplitudes[i - 1] - mean;
+            let curr = amplitudes[i] - mean;
+            if prev.signum() != curr.signum() {
+                zero_crossings += 1;
+            }
+        }
+
+        // Estimate frequency from zero crossings (each full cycle = 2 crossings)
+        // Assuming ~100 Hz sample rate for typical WiFi CSI
+        let assumed_sample_rate = 100.0_f64;
+        let duration_secs = n as f64 / assumed_sample_rate;
+        let estimated_freq = if duration_secs > 0.0 {
+            zero_crossings as f64 / (2.0 * duration_secs)
+        } else {
+            0.0
+        };
+
+        // Convert to breaths per minute
+        let breathing_rate_bpm = estimated_freq * 60.0;
+
+        // Confidence based on signal variance and consistency
+        let confidence = if variance > 0.001 && breathing_rate_bpm > 4.0 && breathing_rate_bpm < 40.0 {
+            let regularity = 1.0 - (variance.sqrt() / mean.abs().max(0.01)).min(1.0);
+            (regularity * 0.8 + 0.2).min(1.0)
+        } else {
+            0.0
+        };
+
+        // Phase coherence (how correlated phase is with amplitude)
+        let phase_mean: f64 = phases.iter().sum::<f64>() / n as f64;
+        let _phase_coherence: f64 = if n > 1 {
+            let cov: f64 = amplitudes.iter().zip(phases.iter())
+                .map(|(a, p)| (a - mean) * (p - phase_mean))
+                .sum::<f64>() / n as f64;
+            let std_a = variance.sqrt();
+            let std_p = (phases.iter().map(|p| (p - phase_mean).powi(2)).sum::<f64>() / n as f64).sqrt();
+            if std_a > 0.0 && std_p > 0.0 { (cov / (std_a * std_p)).abs() } else { 0.0 }
+        } else {
+            0.0
+        };
+
+        log::debug!(
+            "CSI analysis: {} samples, rate={:.1} BPM, confidence={:.2}",
+            n, breathing_rate_bpm, confidence
+        );
+
+        let result = serde_json::json!({
+            "accepted": true,
+            "samples": n,
+            "analysis": {
+                "estimated_breathing_rate_bpm": breathing_rate_bpm,
+                "confidence": confidence,
+                "signal_variance": variance,
+                "duration_secs": duration_secs,
+                "zero_crossings": zero_crossings,
+            }
+        });
+
+        result.to_string()
+    }
+
+    /// Get the current pipeline analysis configuration.
+    ///
+    /// @returns {string} JSON configuration
+    #[wasm_bindgen(js_name = getPipelineConfig)]
+    pub fn get_pipeline_config(&self) -> String {
+        serde_json::json!({
+            "sample_rate": 100.0,
+            "breathing_freq_range": [0.1, 0.67],
+            "heartbeat_freq_range": [0.8, 3.0],
+            "min_confidence": 0.3,
+            "buffer_duration_secs": 10.0,
+        }).to_string()
+    }
+
+    // ========================================================================
     // WebSocket Integration
     // ========================================================================
 
@@ -1506,6 +1622,10 @@ export class MatDashboard {
     // Rendering
     renderZones(ctx: CanvasRenderingContext2D): void;
     renderSurvivors(ctx: CanvasRenderingContext2D): void;
+
+    // CSI Signal Processing
+    pushCsiData(amplitudes: Float64Array, phases: Float64Array): string;
+    getPipelineConfig(): string;
 
     // WebSocket
     connectWebSocket(url: string): Promise<void>;

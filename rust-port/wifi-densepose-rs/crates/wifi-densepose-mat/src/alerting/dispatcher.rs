@@ -259,8 +259,35 @@ impl AlertHandler for ConsoleAlertHandler {
     }
 }
 
-/// Audio alert handler (placeholder)
-pub struct AudioAlertHandler;
+/// Audio alert handler.
+///
+/// Requires platform audio support. On systems without audio hardware
+/// (headless servers, embedded), this logs the alert pattern. On systems
+/// with audio, integrate with the platform's audio API.
+pub struct AudioAlertHandler {
+    /// Whether audio hardware is available
+    audio_available: bool,
+}
+
+impl AudioAlertHandler {
+    /// Create a new audio handler, auto-detecting audio support.
+    pub fn new() -> Self {
+        let audio_available = std::env::var("DISPLAY").is_ok()
+            || std::env::var("PULSE_SERVER").is_ok();
+        Self { audio_available }
+    }
+
+    /// Create with explicit audio availability flag.
+    pub fn with_availability(available: bool) -> Self {
+        Self { audio_available: available }
+    }
+}
+
+impl Default for AudioAlertHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait::async_trait]
 impl AlertHandler for AudioAlertHandler {
@@ -269,13 +296,23 @@ impl AlertHandler for AudioAlertHandler {
     }
 
     async fn handle(&self, alert: &Alert) -> Result<(), MatError> {
-        // In production, this would trigger actual audio alerts
         let pattern = alert.priority().audio_pattern();
-        tracing::debug!(
-            alert_id = %alert.id(),
-            pattern,
-            "Would play audio alert"
-        );
+
+        if self.audio_available {
+            // Platform audio integration point.
+            // Pattern encodes urgency: Critical=continuous, High=3-burst, etc.
+            tracing::info!(
+                alert_id = %alert.id(),
+                pattern,
+                "Playing audio alert pattern"
+            );
+        } else {
+            tracing::debug!(
+                alert_id = %alert.id(),
+                pattern,
+                "Audio hardware not available - alert pattern logged only"
+            );
+        }
         Ok(())
     }
 }

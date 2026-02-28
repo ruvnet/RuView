@@ -3435,6 +3435,15 @@ version = "0.1.0"
 [[package]]
 name = "wifi-densepose-hardware"
 version = "0.1.0"
+dependencies = [
+ "approx",
+ "byteorder",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+]
 
 [[package]]
 name = "wifi-densepose-mat"

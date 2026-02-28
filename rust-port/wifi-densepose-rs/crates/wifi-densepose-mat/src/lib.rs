@@ -97,7 +97,7 @@ pub use domain::{
     },
     triage::{TriageStatus, TriageCalculator},
     coordinates::{Coordinates3D, LocationUncertainty, DepthEstimate},
-    events::{DetectionEvent, AlertEvent, DomainEvent},
+    events::{DetectionEvent, AlertEvent, DomainEvent, EventStore, InMemoryEventStore},
 };
 
 pub use detection::{
@@ -105,6 +105,7 @@ pub use detection::{
     HeartbeatDetector, HeartbeatDetectorConfig,
     MovementClassifier, MovementClassifierConfig,
     VitalSignsDetector, DetectionPipeline, DetectionConfig,
+    EnsembleClassifier, EnsembleConfig, EnsembleResult,
 };
 
 pub use localization::{
@@ -286,6 +287,8 @@ pub struct DisasterResponse {
     detection_pipeline: DetectionPipeline,
     localization_service: LocalizationService,
     alert_dispatcher: AlertDispatcher,
+    event_store: std::sync::Arc<dyn domain::events::EventStore>,
+    ensemble_classifier: EnsembleClassifier,
     running: std::sync::atomic::AtomicBool,
 }
 
@@ -297,6 +300,9 @@ impl DisasterResponse {
 
         let localization_service = LocalizationService::new();
         let alert_dispatcher = AlertDispatcher::new(config.alert_config.clone());
+        let event_store: std::sync::Arc<dyn domain::events::EventStore> =
+            std::sync::Arc::new(InMemoryEventStore::new());
+        let ensemble_classifier = EnsembleClassifier::new(EnsembleConfig::default());
 
         Self {
             config,
@@ -304,8 +310,66 @@ impl DisasterResponse {
             detection_pipeline,
             localization_service,
             alert_dispatcher,
+            event_store,
+            ensemble_classifier,
             running: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Create with a custom event store (e.g. for persistence or testing)
+    pub fn with_event_store(
+        config: DisasterConfig,
+        event_store: std::sync::Arc<dyn domain::events::EventStore>,
+    ) -> Self {
+        let detection_config = DetectionConfig::from_disaster_config(&config);
+        let detection_pipeline = DetectionPipeline::new(detection_config);
+        let localization_service = LocalizationService::new();
+        let alert_dispatcher = AlertDispatcher::new(config.alert_config.clone());
+        let ensemble_classifier = EnsembleClassifier::new(EnsembleConfig::default());
+
+        Self {
+            config,
+            event: None,
+            detection_pipeline,
+            localization_service,
+            alert_dispatcher,
+            event_store,
+            ensemble_classifier,
+            running: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Push CSI data into the detection pipeline for processing.
+    ///
+    /// This is the primary data ingestion point. Call this with real CSI
+    /// amplitude and phase readings from hardware (ESP32, Intel 5300, etc).
+    /// Returns an error string if data is invalid.
+    pub fn push_csi_data(&self, amplitudes: &[f64], phases: &[f64]) -> Result<()> {
+        if amplitudes.len() != phases.len() {
+            return Err(MatError::Detection(
+                "Amplitude and phase arrays must have equal length".into(),
+            ));
+        }
+        if amplitudes.is_empty() {
+            return Err(MatError::Detection("CSI data cannot be empty".into()));
+        }
+        self.detection_pipeline.add_data(amplitudes, phases);
+        Ok(())
+    }
+
+    /// Get the event store for querying domain events
+    pub fn event_store(&self) -> &std::sync::Arc<dyn domain::events::EventStore> {
+        &self.event_store
+    }
+
+    /// Get the ensemble classifier
+    pub fn ensemble_classifier(&self) -> &EnsembleClassifier {
+        &self.ensemble_classifier
+    }
+
+    /// Get the detection pipeline (for direct buffer inspection / data push)
+    pub fn detection_pipeline(&self) -> &DetectionPipeline {
+        &self.detection_pipeline
     }
 
     /// Initialize a new disaster event
@@ -358,8 +422,14 @@ impl DisasterResponse {
         self.running.store(false, Ordering::SeqCst);
     }
 
-    /// Execute a single scan cycle
+    /// Execute a single scan cycle.
+    ///
+    /// Processes all active zones, runs detection pipeline on buffered CSI data,
+    /// applies ensemble classification, emits domain events to the EventStore,
+    /// and dispatches alerts for newly detected survivors.
     async fn scan_cycle(&mut self) -> Result<()> {
+        let scan_start = std::time::Instant::now();
+
         // Collect detections first to avoid borrowing issues
         let mut detections = Vec::new();
 
@@ -372,17 +442,33 @@ impl DisasterResponse {
                     continue;
                 }
 
-                // This would integrate with actual hardware in production
-                // For now, we process any available CSI data
+                // Process buffered CSI data through the detection pipeline
                 let detection_result = self.detection_pipeline.process_zone(zone).await?;
 
                 if let Some(vital_signs) = detection_result {
-                    // Attempt localization
-                    let location = self.localization_service
-                        .estimate_position(&vital_signs, zone);
+                    // Run ensemble classifier to combine breathing + heartbeat + movement
+                    let ensemble_result = self.ensemble_classifier.classify(&vital_signs);
 
-                    detections.push((zone.id().clone(), vital_signs, location));
+                    // Only proceed if ensemble confidence meets threshold
+                    if ensemble_result.confidence >= self.config.confidence_threshold {
+                        // Attempt localization
+                        let location = self.localization_service
+                            .estimate_position(&vital_signs, zone);
+
+                        detections.push((zone.id().clone(), zone.name().to_string(), vital_signs, location, ensemble_result));
+                    }
                 }
+
+                // Emit zone scan completed event
+                let scan_duration = scan_start.elapsed();
+                let _ = self.event_store.append(DomainEvent::Zone(
+                    domain::events::ZoneEvent::ZoneScanCompleted {
+                        zone_id: zone.id().clone(),
+                        detections_found: detections.len() as u32,
+                        scan_duration_ms: scan_duration.as_millis() as u64,
+                        timestamp: chrono::Utc::now(),
+                    },
+                ));
             }
         }
 
@@ -390,12 +476,37 @@ impl DisasterResponse {
         let event = self.event.as_mut()
             .ok_or_else(|| MatError::Domain("No active disaster event".into()))?;
 
-        for (zone_id, vital_signs, location) in detections {
-            let survivor = event.record_detection(zone_id, vital_signs, location)?;
+        for (zone_id, _zone_name, vital_signs, location, _ensemble) in detections {
+            let survivor = event.record_detection(zone_id.clone(), vital_signs.clone(), location.clone())?;
 
-            // Generate alert if needed
+            // Emit SurvivorDetected domain event
+            let _ = self.event_store.append(DomainEvent::Detection(
+                DetectionEvent::SurvivorDetected {
+                    survivor_id: survivor.id().clone(),
+                    zone_id,
+                    vital_signs,
+                    location,
+                    timestamp: chrono::Utc::now(),
+                },
+            ));
+
+            // Generate and dispatch alert if needed
             if survivor.should_alert() {
                 let alert = self.alert_dispatcher.generate_alert(survivor)?;
+                let alert_id = alert.id().clone();
+                let priority = alert.priority();
+                let survivor_id = alert.survivor_id().clone();
+
+                // Emit AlertGenerated domain event
+                let _ = self.event_store.append(DomainEvent::Alert(
+                    AlertEvent::AlertGenerated {
+                        alert_id,
+                        survivor_id,
+                        priority,
+                        timestamp: chrono::Utc::now(),
+                    },
+                ));
+
                 self.alert_dispatcher.dispatch(alert).await?;
             }
         }
@@ -434,8 +545,12 @@ pub mod prelude {
         ScanZone, ZoneBounds, TriageStatus,
         VitalSignsReading, BreathingPattern, HeartbeatSignature,
         Coordinates3D, Alert, Priority,
+        // Event sourcing
+        DomainEvent, EventStore, InMemoryEventStore,
+        DetectionEvent, AlertEvent,
         // Detection
         DetectionPipeline, VitalSignsDetector,
+        EnsembleClassifier, EnsembleConfig, EnsembleResult,
         // Localization
         LocalizationService,
         // Alerting
