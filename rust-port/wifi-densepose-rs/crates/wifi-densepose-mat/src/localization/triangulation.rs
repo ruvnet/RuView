@@ -380,7 +380,9 @@ mod tests {
 // Integration 5: Multi-AP TDoA triangulation via NeumannSolver
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "ruvector")]
 use ruvector_solver::neumann::NeumannSolver;
+#[cfg(feature = "ruvector")]
 use ruvector_solver::types::CsrMatrix;
 
 /// Solve multi-AP TDoA survivor localization using NeumannSolver.
@@ -396,6 +398,7 @@ use ruvector_solver::types::CsrMatrix;
 ///
 /// # Returns
 /// Some((x, y)) estimated survivor position in metres, or None if underdetermined
+#[cfg(feature = "ruvector")]
 pub fn solve_tdoa_triangulation(
     tdoa_measurements: &[(usize, usize, f32)],
     ap_positions: &[(f32, f32)],
@@ -466,7 +469,7 @@ pub fn solve_tdoa_triangulation(
     Some((x_sol + x_ref, y_sol + y_ref))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "ruvector"))]
 mod triangulation_tests {
     use super::*;
 
