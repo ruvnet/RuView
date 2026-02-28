@@ -1,0 +1,80 @@
+[package]
+name = "wifi-densepose-train"
+version = "0.1.0"
+edition = "2021"
+authors = ["WiFi-DensePose Contributors"]
+license = "MIT OR Apache-2.0"
+description = "Training pipeline for WiFi-DensePose pose estimation"
+keywords = ["wifi", "training", "pose-estimation", "deep-learning"]
+
+[[bin]]
+name = "train"
+path = "src/bin/train.rs"
+
+[[bin]]
+name = "verify-training"
+path = "src/bin/verify_training.rs"
+
+[features]
+default = ["tch-backend"]
+tch-backend = ["tch"]
+cuda = ["tch-backend"]
+
+[dependencies]
+# Internal crates
+wifi-densepose-signal = { path = "../wifi-densepose-signal" }
+wifi-densepose-nn = { path = "../wifi-densepose-nn", default-features = false }
+
+# Core
+thiserror = "1.0"
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Tensor / math
+ndarray = { version = "0.15", features = ["serde"] }
+ndarray-linalg = { version = "0.16", features = ["openblas-static"] }
+num-complex = "0.4"
+num-traits = "0.2"
+
+# PyTorch bindings (training)
+tch = { version = "0.14", optional = true }
+
+# Graph algorithms (min-cut for optimal keypoint assignment)
+petgraph = "0.6"
+
+# Data loading
+ndarray-npy = "0.8"
+memmap2 = "0.9"
+walkdir = "2.4"
+
+# Serialization
+csv = "1.3"
+toml = "0.8"
+
+# Logging / progress
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+indicatif = "0.17"
+
+# Async
+tokio = { version = "1.35", features = ["rt", "rt-multi-thread", "macros", "fs"] }
+
+# Crypto (for proof hash)
+sha2 = "0.10"
+
+# CLI
+clap = { version = "4.4", features = ["derive"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.4"
+tempfile = "3.10"
+approx = "0.5"
+
+[[bench]]
+name = "training_bench"
+harness = false
