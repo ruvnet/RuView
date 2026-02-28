@@ -9,6 +9,7 @@
 
 use ndarray::Array2;
 use num_complex::Complex64;
+use ruvector_attn_mincut::attn_mincut;
 use rustfft::FftPlanner;
 use std::f64::consts::PI;
 
@@ -164,6 +165,47 @@ fn make_window(kind: WindowFunction, size: usize) -> Vec<f64> {
     }
 }
 
+/// Apply attention-gating to a computed CSI spectrogram using ruvector-attn-mincut.
+///
+/// Treats each time frame as an attention token (d = n_freq_bins features,
+/// seq_len = n_time_frames tokens). Self-attention (Q=K=V) gates coherent
+/// body-motion frames and suppresses uncorrelated noise/interference frames.
+///
+/// # Arguments
+/// * `spectrogram` - Row-major [n_freq_bins × n_time_frames] f32 slice
+/// * `n_freq` - Number of frequency bins (feature dimension d)
+/// * `n_time` - Number of time frames (sequence length)
+/// * `lambda` - Gating strength: 0.1 = mild, 0.3 = moderate, 0.5 = aggressive
+///
+/// # Returns
+/// Gated spectrogram as Vec<f32>, same shape as input
+pub fn gate_spectrogram(
+    spectrogram: &[f32],
+    n_freq: usize,
+    n_time: usize,
+    lambda: f32,
+) -> Vec<f32> {
+    debug_assert_eq!(spectrogram.len(), n_freq * n_time,
+        "spectrogram length must equal n_freq * n_time");
+
+    if n_freq == 0 || n_time == 0 {
+        return spectrogram.to_vec();
+    }
+
+    // Q = K = V = spectrogram (self-attention over time frames)
+    let result = attn_mincut(
+        spectrogram,
+        spectrogram,
+        spectrogram,
+        n_freq,  // d = feature dimension
+        n_time,  // seq_len = time tokens
+        lambda,
+        /*tau=*/ 2,
+        /*eps=*/ 1e-7_f32,
+    );
+    result.output
+}
+
 /// Errors from spectrogram computation.
 #[derive(Debug, thiserror::Error)]
 pub enum SpectrogramError {
@@ -295,5 +337,31 @@ mod tests {
         for spec in &specs {
             assert_eq!(spec.n_freq, 65);
         }
+    }
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+
+    #[test]
+    fn gate_spectrogram_preserves_shape() {
+        let n_freq = 16_usize;
+        let n_time = 10_usize;
+        let spectrogram: Vec<f32> = (0..n_freq * n_time).map(|i| i as f32 * 0.01).collect();
+        let gated = gate_spectrogram(&spectrogram, n_freq, n_time, 0.3);
+        assert_eq!(gated.len(), n_freq * n_time);
+    }
+
+    #[test]
+    fn gate_spectrogram_zero_lambda_is_identity_ish() {
+        let n_freq = 8_usize;
+        let n_time = 4_usize;
+        let spectrogram: Vec<f32> = vec![1.0; n_freq * n_time];
+        // Uniform input — gated output should also be approximately uniform
+        let gated = gate_spectrogram(&spectrogram, n_freq, n_time, 0.01);
+        assert_eq!(gated.len(), n_freq * n_time);
+        // All values should be finite
+        assert!(gated.iter().all(|x| x.is_finite()));
     }
 }

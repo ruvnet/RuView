@@ -39,13 +39,13 @@
       "isRunning": false
     },
     "testgaps": {
-      "runCount": 26,
+      "runCount": 27,
       "successCount": 0,
-      "failureCount": 26,
+      "failureCount": 27,
       "averageDurationMs": 0,
-      "lastRun": "2026-02-28T15:41:19.031Z",
+      "lastRun": "2026-02-28T16:08:19.369Z",
       "nextRun": "2026-02-28T16:22:19.355Z",
-      "isRunning": true
+      "isRunning": false
     },
     "predict": {
       "runCount": 0,
@@ -131,5 +131,5 @@
       }
     ]
   },
-  "savedAt": "2026-02-28T16:05:19.091Z"
+  "savedAt": "2026-02-28T16:08:19.369Z"
 }
