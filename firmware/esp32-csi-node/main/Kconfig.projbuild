@@ -1,0 +1,42 @@
+menu "CSI Node Configuration"
+
+    config CSI_NODE_ID
+        int "Node ID (0-255)"
+        default 1
+        range 0 255
+        help
+            Unique identifier for this ESP32 CSI node.
+
+    config CSI_TARGET_IP
+        string "Aggregator IP address"
+        default "192.168.1.100"
+        help
+            IP address of the UDP aggregator host.
+
+    config CSI_TARGET_PORT
+        int "Aggregator UDP port"
+        default 5005
+        range 1024 65535
+        help
+            UDP port the aggregator listens on.
+
+    config CSI_WIFI_SSID
+        string "WiFi SSID"
+        default "wifi-densepose"
+        help
+            SSID of the WiFi network to connect to.
+
+    config CSI_WIFI_PASSWORD
+        string "WiFi Password"
+        default ""
+        help
+            Password for the WiFi network. Leave empty for open networks.
+
+    config CSI_WIFI_CHANNEL
+        int "WiFi Channel (1-13)"
+        default 6
+        range 1 13
+        help
+            WiFi channel to listen on for CSI data.
+
+endmenu

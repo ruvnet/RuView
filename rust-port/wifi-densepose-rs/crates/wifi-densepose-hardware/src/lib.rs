@@ -3,11 +3,9 @@
 //! This crate provides platform-agnostic types and parsers for WiFi CSI data
 //! from various hardware sources:
 //!
-//! - **ESP32/ESP32-S3**: Parses binary CSI frames from ESP-IDF `wifi_csi_info_t`
-//!   streamed over serial (UART) or UDP
-//! - **Intel 5300**: Parses CSI log files from the Linux CSI Tool
-//! - **Linux WiFi**: Reads RSSI/signal info from standard Linux wireless interfaces
-//!   for commodity sensing (ADR-013)
+//! - **ESP32/ESP32-S3**: Parses ADR-018 binary CSI frames streamed over UDP
+//! - **UDP Aggregator**: Receives frames from multiple ESP32 nodes (ADR-018 Layer 2)
+//! - **Bridge**: Converts CsiFrame → CsiData for the detection pipeline (ADR-018 Layer 3)
 //!
 //! # Design Principles
 //!
@@ -21,8 +19,8 @@
 //! ```rust
 //! use wifi_densepose_hardware::{CsiFrame, Esp32CsiParser, ParseError};
 //!
-//! // Parse ESP32 CSI data from serial bytes
-//! let raw_bytes: &[u8] = &[/* ESP32 CSI binary frame */];
+//! // Parse ESP32 CSI data from UDP bytes
+//! let raw_bytes: &[u8] = &[/* ADR-018 binary frame */];
 //! match Esp32CsiParser::parse_frame(raw_bytes) {
 //!     Ok((frame, consumed)) => {
 //!         println!("Parsed {} subcarriers ({} bytes)", frame.subcarrier_count(), consumed);
@@ -39,7 +37,10 @@
 mod csi_frame;
 mod error;
 mod esp32_parser;
+pub mod aggregator;
+mod bridge;
 
 pub use csi_frame::{CsiFrame, CsiMetadata, SubcarrierData, Bandwidth, AntennaConfig};
 pub use error::ParseError;
 pub use esp32_parser::Esp32CsiParser;
+pub use bridge::CsiData;

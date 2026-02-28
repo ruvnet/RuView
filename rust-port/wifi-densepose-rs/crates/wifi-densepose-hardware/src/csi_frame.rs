@@ -57,25 +57,27 @@ impl CsiFrame {
     }
 }
 
-/// Metadata associated with a CSI frame.
+/// Metadata associated with a CSI frame (ADR-018 format).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CsiMetadata {
     /// Timestamp when frame was received
     pub timestamp: DateTime<Utc>,
-    /// RSSI in dBm (typically -100 to 0)
-    pub rssi: i32,
-    /// Noise floor in dBm
-    pub noise_floor: i32,
-    /// WiFi channel number
-    pub channel: u8,
-    /// Secondary channel offset (0, 1, or 2)
-    pub secondary_channel: u8,
-    /// Channel bandwidth
+    /// Node identifier (0-255)
+    pub node_id: u8,
+    /// Number of antennas
+    pub n_antennas: u8,
+    /// Number of subcarriers
+    pub n_subcarriers: u16,
+    /// Channel center frequency in MHz
+    pub channel_freq_mhz: u32,
+    /// RSSI in dBm (signed byte, typically -100 to 0)
+    pub rssi_dbm: i8,
+    /// Noise floor in dBm (signed byte)
+    pub noise_floor_dbm: i8,
+    /// Channel bandwidth (derived from n_subcarriers)
     pub bandwidth: Bandwidth,
-    /// Antenna configuration
+    /// Antenna configuration (populated from n_antennas)
     pub antenna_config: AntennaConfig,
-    /// Source MAC address (if available)
-    pub source_mac: Option<[u8; 6]>,
     /// Sequence number for ordering
     pub sequence: u32,
 }
@@ -143,13 +145,14 @@ mod tests {
         CsiFrame {
             metadata: CsiMetadata {
                 timestamp: Utc::now(),
-                rssi: -50,
-                noise_floor: -95,
-                channel: 6,
-                secondary_channel: 0,
+                node_id: 1,
+                n_antennas: 1,
+                n_subcarriers: 3,
+                channel_freq_mhz: 2437,
+                rssi_dbm: -50,
+                noise_floor_dbm: -95,
                 bandwidth: Bandwidth::Bw20,
                 antenna_config: AntennaConfig::default(),
-                source_mac: None,
                 sequence: 1,
             },
             subcarriers: vec![

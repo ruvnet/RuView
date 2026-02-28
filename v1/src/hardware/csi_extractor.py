@@ -1,6 +1,7 @@
 """CSI data extraction from WiFi hardware using Test-Driven Development approach."""
 
 import asyncio
+import struct
 import numpy as np
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Callable, Protocol
@@ -129,6 +130,106 @@ class ESP32CSIParser:
             raise CSIParseError(f"Failed to parse ESP32 data: {e}")
 
 
+class ESP32BinaryParser:
+    """Parser for ADR-018 binary CSI frames from ESP32 nodes.
+
+    Binary frame format:
+        Offset  Size  Field
+        0       4     Magic: 0xC5110001 (LE)
+        4       1     Node ID
+        5       1     Number of antennas
+        6       2     Number of subcarriers (LE u16)
+        8       4     Frequency MHz (LE u32)
+        12      4     Sequence number (LE u32)
+        16      1     RSSI (i8)
+        17      1     Noise floor (i8)
+        18      2     Reserved
+        20      N*2   I/Q pairs (n_antennas * n_subcarriers * 2 bytes, signed i8)
+    """
+
+    MAGIC = 0xC5110001
+    HEADER_SIZE = 20
+    HEADER_FMT = '<IBBHIIBB2x'  # magic, node_id, n_ant, n_sc, freq, seq, rssi, noise
+
+    def parse(self, raw_data: bytes) -> CSIData:
+        """Parse an ADR-018 binary frame into CSIData.
+
+        Args:
+            raw_data: Raw binary frame bytes.
+
+        Returns:
+            Parsed CSI data with amplitude/phase arrays shaped (n_antennas, n_subcarriers).
+
+        Raises:
+            CSIParseError: If frame is too short, has invalid magic, or malformed I/Q data.
+        """
+        if len(raw_data) < self.HEADER_SIZE:
+            raise CSIParseError(
+                f"Frame too short: need {self.HEADER_SIZE} bytes, got {len(raw_data)}"
+            )
+
+        magic, node_id, n_antennas, n_subcarriers, freq_mhz, sequence, rssi_u8, noise_u8 = \
+            struct.unpack_from(self.HEADER_FMT, raw_data, 0)
+
+        if magic != self.MAGIC:
+            raise CSIParseError(
+                f"Invalid magic: expected 0x{self.MAGIC:08X}, got 0x{magic:08X}"
+            )
+
+        # Convert unsigned bytes to signed i8
+        rssi = rssi_u8 if rssi_u8 < 128 else rssi_u8 - 256
+        noise_floor = noise_u8 if noise_u8 < 128 else noise_u8 - 256
+
+        iq_count = n_antennas * n_subcarriers
+        iq_bytes = iq_count * 2
+        expected_len = self.HEADER_SIZE + iq_bytes
+
+        if len(raw_data) < expected_len:
+            raise CSIParseError(
+                f"Frame too short for I/Q data: need {expected_len} bytes, got {len(raw_data)}"
+            )
+
+        # Parse I/Q pairs as signed bytes
+        iq_raw = struct.unpack_from(f'<{iq_count * 2}b', raw_data, self.HEADER_SIZE)
+        i_vals = np.array(iq_raw[0::2], dtype=np.float64).reshape(n_antennas, n_subcarriers)
+        q_vals = np.array(iq_raw[1::2], dtype=np.float64).reshape(n_antennas, n_subcarriers)
+
+        amplitude = np.sqrt(i_vals ** 2 + q_vals ** 2)
+        phase = np.arctan2(q_vals, i_vals)
+
+        snr = float(rssi - noise_floor)
+        frequency = float(freq_mhz) * 1e6
+        bandwidth = 20e6  # default; could infer from n_subcarriers
+
+        if n_subcarriers <= 56:
+            bandwidth = 20e6
+        elif n_subcarriers <= 114:
+            bandwidth = 40e6
+        elif n_subcarriers <= 242:
+            bandwidth = 80e6
+        else:
+            bandwidth = 160e6
+
+        return CSIData(
+            timestamp=datetime.now(tz=timezone.utc),
+            amplitude=amplitude,
+            phase=phase,
+            frequency=frequency,
+            bandwidth=bandwidth,
+            num_subcarriers=n_subcarriers,
+            num_antennas=n_antennas,
+            snr=snr,
+            metadata={
+                'source': 'esp32_binary',
+                'node_id': node_id,
+                'sequence': sequence,
+                'rssi_dbm': rssi,
+                'noise_floor_dbm': noise_floor,
+                'channel_freq_mhz': freq_mhz,
+            }
+        )
+
+
 class RouterCSIParser:
     """Parser for router CSI data format."""
     
@@ -203,7 +304,10 @@ class CSIExtractor:
         
         # Create appropriate parser
         if self.hardware_type == 'esp32':
-            self.parser = ESP32CSIParser()
+            if config.get('parser_format') == 'binary':
+                self.parser = ESP32BinaryParser()
+            else:
+                self.parser = ESP32CSIParser()
         elif self.hardware_type == 'router':
             self.parser = RouterCSIParser()
         else:
@@ -352,6 +456,61 @@ class CSIExtractor:
         pass
     
     async def _read_raw_data(self) -> bytes:
-        """Read raw data from hardware (to be implemented by subclasses)."""
-        # Placeholder implementation for testing
+        """Read raw data from hardware.
+
+        When parser_format='binary', reads from the configured UDP socket.
+        Otherwise returns placeholder text data for legacy compatibility.
+
+        Raises:
+            CSIExtractionError: If UDP read times out or fails.
+        """
+        if self.config.get('parser_format') == 'binary':
+            return await self._read_udp_data()
+        # Placeholder implementation for legacy text-mode testing
         return b"CSI_DATA:1234567890,3,56,2400,20,15.5,[1.0,2.0,3.0],[0.5,1.5,2.5]"
+
+    async def _read_udp_data(self) -> bytes:
+        """Read a single UDP packet from the aggregator.
+
+        Raises:
+            CSIExtractionError: If read times out or connection fails.
+        """
+        host = self.config.get('aggregator_host', '0.0.0.0')
+        port = self.config.get('aggregator_port', 5005)
+
+        loop = asyncio.get_event_loop()
+
+        # Create UDP endpoint if not already cached
+        if not hasattr(self, '_udp_transport'):
+            self._udp_future: asyncio.Future = loop.create_future()
+
+            class _UdpProtocol(asyncio.DatagramProtocol):
+                def __init__(self, future):
+                    self._future = future
+
+                def datagram_received(self, data, addr):
+                    if not self._future.done():
+                        self._future.set_result(data)
+
+                def error_received(self, exc):
+                    if not self._future.done():
+                        self._future.set_exception(exc)
+
+            transport, protocol = await loop.create_datagram_endpoint(
+                lambda: _UdpProtocol(self._udp_future),
+                local_addr=(host, port),
+            )
+            self._udp_transport = transport
+            self._udp_protocol = protocol
+
+        try:
+            data = await asyncio.wait_for(self._udp_future, timeout=self.timeout)
+            # Reset future for next read
+            self._udp_future = loop.create_future()
+            self._udp_protocol._future = self._udp_future
+            return data
+        except asyncio.TimeoutError:
+            raise CSIExtractionError(
+                f"UDP read timed out after {self.timeout}s. "
+                f"Ensure the aggregator is running and sending to {host}:{port}."
+            )

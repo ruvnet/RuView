@@ -3966,6 +3966,7 @@ dependencies = [
  "approx",
  "byteorder",
  "chrono",
+ "clap",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

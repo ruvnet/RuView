@@ -39,6 +39,12 @@ pub enum ParseError {
         value: i32,
     },
 
+    /// Invalid antenna count (must be 1-4 for ESP32).
+    #[error("Invalid antenna count: {count} (expected 1-4)")]
+    InvalidAntennaCount {
+        count: u8,
+    },
+
     /// Generic byte-level parse error.
     #[error("Parse error at offset {offset}: {message}")]
     ByteError {

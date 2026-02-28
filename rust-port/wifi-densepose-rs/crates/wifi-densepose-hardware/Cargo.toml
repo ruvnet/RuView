@@ -17,6 +17,8 @@ intel5300 = []
 linux-wifi = []
 
 [dependencies]
+# CLI argument parsing (for bin/aggregator)
+clap = { version = "4.4", features = ["derive"] }
 # Byte parsing
 byteorder = "1.5"
 # Time
