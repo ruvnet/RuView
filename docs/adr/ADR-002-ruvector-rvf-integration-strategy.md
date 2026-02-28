@@ -128,29 +128,39 @@ crates/wifi-densepose-rvf/
 
 ### Dependency Strategy
 
+**Verified published crates** (crates.io, all at v2.0.4 as of 2026-02-28):
+
 ```toml
 # In Cargo.toml workspace dependencies
 [workspace.dependencies]
-ruvector-core = { version = "0.1", features = ["hnsw", "sona", "gnn"] }
-ruvector-data-framework = { version = "0.1", features = ["rvf", "witness", "crypto"] }
-ruvector-consensus = { version = "0.1", features = ["raft"] }
-ruvector-wasm = { version = "0.1", features = ["edge-runtime"] }
+ruvector-mincut = "2.0.4"           # Dynamic min-cut, O(n^1.5 log n) graph partitioning
+ruvector-attn-mincut = "2.0.4"     # Attention + mincut gating in one pass
+ruvector-temporal-tensor = "2.0.4"  # Tiered temporal compression (50-75% memory reduction)
+ruvector-solver = "2.0.4"           # NeumannSolver — O(√n) Neumann series convergence
+ruvector-attention = "2.0.4"        # ScaledDotProductAttention
 ```
 
-Feature flags control which RuVector capabilities are compiled in:
+> **Note (ADR-017 correction):** Earlier versions of this ADR specified
+> `ruvector-core`, `ruvector-data-framework`, `ruvector-consensus`, and
+> `ruvector-wasm` at version `"0.1"`. These crates do not exist at crates.io.
+> The five crates above are the verified published API surface at v2.0.4.
+> Capabilities such as RVF cognitive containers (ADR-003), HNSW search (ADR-004),
+> SONA (ADR-005), GNN patterns (ADR-006), post-quantum crypto (ADR-007),
+> Raft consensus (ADR-008), and WASM runtime (ADR-009) are internal capabilities
+> accessible through these five crates or remain as forward-looking architecture.
+> See ADR-017 for the corrected integration map.
+
+Feature flags control which ruvector capabilities are compiled in:
 
 ```toml
 [features]
-default = ["rvf-store", "hnsw-search"]
-rvf-store = ["ruvector-data-framework/rvf"]
-hnsw-search = ["ruvector-core/hnsw"]
-sona-learning = ["ruvector-core/sona"]
-gnn-patterns = ["ruvector-core/gnn"]
-post-quantum = ["ruvector-data-framework/crypto"]
-witness-chains = ["ruvector-data-framework/witness"]
-raft-consensus = ["ruvector-consensus/raft"]
-wasm-edge = ["ruvector-wasm/edge-runtime"]
-full = ["rvf-store", "hnsw-search", "sona-learning", "gnn-patterns", "post-quantum", "witness-chains", "raft-consensus", "wasm-edge"]
+default = ["mincut-matching", "solver-interpolation"]
+mincut-matching = ["ruvector-mincut"]
+attn-mincut = ["ruvector-attn-mincut"]
+temporal-compress = ["ruvector-temporal-tensor"]
+solver-interpolation = ["ruvector-solver"]
+attention = ["ruvector-attention"]
+full = ["mincut-matching", "attn-mincut", "temporal-compress", "solver-interpolation", "attention"]
 ```
 
 ## Consequences
