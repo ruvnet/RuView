@@ -195,11 +195,23 @@ class RouterInterface:
         return csi_data
     
     async def _collect_real_csi_data(self) -> Optional[np.ndarray]:
-        """Collect real CSI data from router (placeholder implementation)."""
-        # This would implement the actual CSI data collection
-        # For now, return None to indicate no real implementation
-        self.logger.warning("Real CSI data collection not implemented")
-        return None
+        """Collect real CSI data from the router.
+
+        Raises:
+            RuntimeError: Always in the current state, because real CSI
+                data collection requires hardware setup that has not been
+                configured. This method must never silently return random
+                or placeholder data.
+        """
+        raise RuntimeError(
+            f"Real CSI data collection from router '{self.router_id}' requires "
+            "hardware setup that is not configured. You must: "
+            "(1) install CSI-capable firmware (e.g., Atheros CSI Tool, Nexmon CSI) on the router, "
+            "(2) configure the SSH connection to the router, and "
+            "(3) implement the CSI extraction command for your specific firmware. "
+            "For development/testing, use mock_mode=True. "
+            "See docs/hardware-setup.md for complete setup instructions."
+        )
     
     async def check_health(self) -> bool:
         """Check if the router connection is healthy.
