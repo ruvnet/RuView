@@ -21,13 +21,13 @@
       "isRunning": false
     },
     "optimize": {
-      "runCount": 19,
+      "runCount": 20,
       "successCount": 0,
-      "failureCount": 19,
+      "failureCount": 20,
       "averageDurationMs": 0,
-      "lastRun": "2026-02-28T06:31:41.399Z",
+      "lastRun": "2026-02-28T06:51:41.405Z",
       "nextRun": "2026-02-28T06:46:41.399Z",
-      "isRunning": true
+      "isRunning": false
     },
     "consolidate": {
       "runCount": 14,
@@ -131,5 +131,5 @@
       }
     ]
   },
-  "savedAt": "2026-02-28T06:49:41.427Z"
+  "savedAt": "2026-02-28T06:51:41.405Z"
 }
