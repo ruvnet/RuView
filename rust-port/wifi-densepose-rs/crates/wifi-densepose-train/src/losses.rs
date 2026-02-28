@@ -26,9 +26,12 @@ use tch::{Kind, Reduction, Tensor};
 // Public types
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Scalar components produced by a single forward pass through the combined loss.
+/// Scalar components produced by a single forward pass through [`WiFiDensePoseLoss::forward`].
+///
+/// Contains `f32` scalar values extracted from the computation graph for
+/// logging and checkpointing (they are not used for back-propagation).
 #[derive(Debug, Clone)]
-pub struct LossOutput {
+pub struct WiFiLossComponents {
     /// Total weighted loss value (scalar, in ℝ≥0).
     pub total: f32,
     /// Keypoint heatmap MSE loss component.
@@ -159,7 +162,7 @@ impl WiFiDensePoseLoss {
 
         // ── 2. UV regression: Smooth-L1 masked by foreground pixels ────────
         // Foreground mask: pixels where target part ≠ 0, shape [B, H, W].
-        let fg_mask = target_int.not_equal(0);
+        let fg_mask = target_int.not_equal(0_i64);
         // Expand to [B, 1, H, W] then broadcast to [B, 48, H, W].
         let fg_mask_f = fg_mask
             .unsqueeze(1)
@@ -218,7 +221,7 @@ impl WiFiDensePoseLoss {
         target_uv: Option<&Tensor>,
         student_features: Option<&Tensor>,
         teacher_features: Option<&Tensor>,
-    ) -> (Tensor, LossOutput) {
+    ) -> (Tensor, WiFiLossComponents) {
         let mut details = HashMap::new();
 
         // ── Keypoint loss (always computed) ───────────────────────────────
@@ -243,7 +246,7 @@ impl WiFiDensePoseLoss {
                 let part_val = part_loss.double_value(&[]) as f32;
 
                 // UV loss (foreground masked)
-                let fg_mask = target_int.not_equal(0);
+                let fg_mask = target_int.not_equal(0_i64);
                 let fg_mask_f = fg_mask
                     .unsqueeze(1)
                     .expand_as(pu)
@@ -280,7 +283,7 @@ impl WiFiDensePoseLoss {
 
         let total_val = total.double_value(&[]) as f32;
 
-        let output = LossOutput {
+        let output = WiFiLossComponents {
             total: total_val,
             keypoint: kp_val as f32,
             densepose: dp_val,

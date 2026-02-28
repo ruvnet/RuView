@@ -15,9 +15,10 @@
 use thiserror::Error;
 use std::path::PathBuf;
 
-// Import module-local error types so TrainError can wrap them via #[from].
-use crate::config::ConfigError;
-use crate::dataset::DatasetError;
+// Import module-local error types so TrainError can wrap them via #[from],
+// and re-export them so `lib.rs` can forward them from `error::*`.
+pub use crate::config::ConfigError;
+pub use crate::dataset::DatasetError;
 
 // ---------------------------------------------------------------------------
 // Top-level training error
@@ -41,13 +42,17 @@ pub enum TrainError {
     #[error("Dataset error: {0}")]
     Dataset(#[from] DatasetError),
 
-    /// An underlying I/O error not covered by a more specific variant.
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
-
     /// JSON (de)serialization error.
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+
+    /// An underlying I/O error not wrapped by Config or Dataset.
+    ///
+    /// Note: [`std::io::Error`] cannot be wrapped via `#[from]` here because
+    /// both [`ConfigError`] and [`DatasetError`] already implement
+    /// `From<std::io::Error>`. Callers should convert via those types instead.
+    #[error("I/O error: {0}")]
+    Io(String),
 
     /// An operation was attempted on an empty dataset.
     #[error("Dataset is empty")]
@@ -111,5 +116,69 @@ impl TrainError {
     /// Create a [`TrainError::ShapeMismatch`] error.
     pub fn shape_mismatch(expected: Vec<usize>, actual: Vec<usize>) -> Self {
         TrainError::ShapeMismatch { expected, actual }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SubcarrierError
+// ---------------------------------------------------------------------------
+
+/// Errors produced by the subcarrier resampling / interpolation functions.
+///
+/// These are separate from [`DatasetError`] because subcarrier operations are
+/// also usable outside the dataset loading pipeline (e.g. in real-time
+/// inference preprocessing).
+#[derive(Debug, Error)]
+pub enum SubcarrierError {
+    /// The source or destination subcarrier count is zero.
+    #[error("Subcarrier count must be >= 1, got {count}")]
+    ZeroCount {
+        /// The offending count.
+        count: usize,
+    },
+
+    /// The input array's last dimension does not match the declared source count.
+    #[error(
+        "Subcarrier shape mismatch: last dimension is {actual_sc} \
+         but `src_n` was declared as {expected_sc} (full shape: {shape:?})"
+    )]
+    InputShapeMismatch {
+        /// Expected subcarrier count (as declared by the caller).
+        expected_sc: usize,
+        /// Actual last-dimension size of the input array.
+        actual_sc: usize,
+        /// Full shape of the input array.
+        shape: Vec<usize>,
+    },
+
+    /// The requested interpolation method is not yet implemented.
+    #[error("Interpolation method `{method}` is not implemented")]
+    MethodNotImplemented {
+        /// Human-readable name of the unsupported method.
+        method: String,
+    },
+
+    /// `src_n == dst_n` — no resampling is needed.
+    ///
+    /// Callers should check [`TrainingConfig::needs_subcarrier_interp`] before
+    /// calling the interpolation routine.
+    ///
+    /// [`TrainingConfig::needs_subcarrier_interp`]:
+    ///     crate::config::TrainingConfig::needs_subcarrier_interp
+    #[error("src_n == dst_n == {count}; no interpolation needed")]
+    NopInterpolation {
+        /// The equal count.
+        count: usize,
+    },
+
+    /// A numerical error during interpolation (e.g. division by zero).
+    #[error("Numerical error: {0}")]
+    NumericalError(String),
+}
+
+impl SubcarrierError {
+    /// Construct a [`SubcarrierError::NumericalError`].
+    pub fn numerical<S: Into<String>>(msg: S) -> Self {
+        SubcarrierError::NumericalError(msg.into())
     }
 }

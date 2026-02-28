@@ -16,62 +16,61 @@ name = "verify-training"
 path = "src/bin/verify_training.rs"
 
 [features]
-default = ["tch-backend"]
+default = []
 tch-backend = ["tch"]
 cuda = ["tch-backend"]
 
 [dependencies]
 # Internal crates
 wifi-densepose-signal = { path = "../wifi-densepose-signal" }
-wifi-densepose-nn = { path = "../wifi-densepose-nn", default-features = false }
+wifi-densepose-nn = { path = "../wifi-densepose-nn" }
 
 # Core
-thiserror = "1.0"
-anyhow = "1.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+thiserror.workspace = true
+anyhow.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 
 # Tensor / math
-ndarray = { version = "0.15", features = ["serde"] }
-ndarray-linalg = { version = "0.16", features = ["openblas-static"] }
-num-complex = "0.4"
-num-traits = "0.2"
+ndarray.workspace = true
+num-complex.workspace = true
+num-traits.workspace = true
 
-# PyTorch bindings (training)
-tch = { version = "0.14", optional = true }
+# PyTorch bindings (optional — only enabled by `tch-backend` feature)
+tch = { workspace = true, optional = true }
 
 # Graph algorithms (min-cut for optimal keypoint assignment)
-petgraph = "0.6"
+petgraph.workspace = true
 
 # Data loading
-ndarray-npy = "0.8"
+ndarray-npy.workspace = true
 memmap2 = "0.9"
-walkdir = "2.4"
+walkdir.workspace = true
 
 # Serialization
-csv = "1.3"
+csv.workspace = true
 toml = "0.8"
 
 # Logging / progress
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-indicatif = "0.17"
+tracing.workspace = true
+tracing-subscriber.workspace = true
+indicatif.workspace = true
 
-# Async
-tokio = { version = "1.35", features = ["rt", "rt-multi-thread", "macros", "fs"] }
+# Async (subset of features needed by training pipeline)
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "fs"] }
 
 # Crypto (for proof hash)
-sha2 = "0.10"
+sha2.workspace = true
 
 # CLI
-clap = { version = "4.4", features = ["derive"] }
+clap.workspace = true
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
-proptest = "1.4"
+criterion.workspace = true
+proptest.workspace = true
 tempfile = "3.10"
 approx = "0.5"
 
