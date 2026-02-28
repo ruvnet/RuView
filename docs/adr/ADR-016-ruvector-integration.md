@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementing
+Accepted
 
 ## Context
 
@@ -300,11 +300,11 @@ crates are pure Rust with no C FFI, so they add no platform constraints.
 |-------|--------|
 | Cargo.toml (workspace + crate) | **Complete** |
 | ADR-016 documentation | **Complete** |
-| ruvector-mincut in metrics.rs | Implementing |
-| ruvector-attn-mincut in model.rs | Implementing |
-| ruvector-temporal-tensor in dataset.rs | Implementing |
-| ruvector-solver in subcarrier.rs | Implementing |
-| ruvector-attention in model.rs spatial decoder | Implementing |
+| ruvector-mincut in metrics.rs | **Complete** |
+| ruvector-attn-mincut in model.rs | **Complete** |
+| ruvector-temporal-tensor in dataset.rs | **Complete** |
+| ruvector-solver in subcarrier.rs | **Complete** |
+| ruvector-attention in model.rs spatial decoder | **Complete** |
 
 ---
 
