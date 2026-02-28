@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WiFi DensePose - 3D Visualization</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #050510;
+      font-family: 'Courier New', 'Consolas', monospace;
+      color: #88bbdd;
+    }
+    #viz-container {
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+    #loading-overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #050510;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      transition: opacity 0.6s ease;
+    }
+    #loading-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .loading-title {
+      font-size: 22px;
+      color: #aaddff;
+      margin-bottom: 16px;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+    }
+    .loading-bar-track {
+      width: 280px;
+      height: 3px;
+      background: #112233;
+      border-radius: 2px;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    .loading-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #0066ff, #00ccff);
+      border-radius: 2px;
+      transition: width 0.3s ease;
+    }
+    .loading-status {
+      font-size: 11px;
+      color: #446688;
+    }
+
+    /* Stats.js panel positioning */
+    #stats-container {
+      position: absolute;
+      top: 40px;
+      right: 140px;
+      z-index: 200;
+    }
+  </style>
+</head>
+<body>
+  <div id="viz-container">
+    <!-- Loading overlay -->
+    <div id="loading-overlay">
+      <div class="loading-title">WiFi DensePose</div>
+      <div class="loading-bar-track">
+        <div class="loading-bar-fill" id="loading-fill"></div>
+      </div>
+      <div class="loading-status" id="loading-status">Initializing...</div>
+    </div>
+    <!-- Stats.js container -->
+    <div id="stats-container"></div>
+  </div>
+
+  <!-- Three.js and OrbitControls from CDN -->
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
+  <!-- Stats.js for performance monitoring -->
+  <script src="https://unpkg.com/stats.js@0.17.0/build/stats.min.js"></script>
+
+  <!-- Application modules loaded as ES modules via importmap workaround -->
+  <script type="module">
+    // Import all modules
+    import { Scene } from './components/scene.js';
+    import { BodyModel, BodyModelManager } from './components/body-model.js';
+    import { SignalVisualization } from './components/signal-viz.js';
+    import { Environment } from './components/environment.js';
+    import { DashboardHUD } from './components/dashboard-hud.js';
+    import { WebSocketClient } from './services/websocket-client.js';
+    import { DataProcessor } from './services/data-processor.js';
+
+    // -- Application State --
+    const state = {
+      scene: null,
+      environment: null,
+      bodyModelManager: null,
+      signalViz: null,
+      hud: null,
+      wsClient: null,
+      dataProcessor: null,
+      stats: null,
+      isDemoMode: true,
+      startTime: Date.now()
+    };
+
+    // -- Loading Progress --
+    function setLoadingProgress(pct, msg) {
+      const fill = document.getElementById('loading-fill');
+      const status = document.getElementById('loading-status');
+      if (fill) fill.style.width = pct + '%';
+      if (status) status.textContent = msg;
+    }
+
+    function hideLoading() {
+      const overlay = document.getElementById('loading-overlay');
+      if (overlay) overlay.classList.add('hidden');
+      setTimeout(() => {
+        if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      }, 700);
+    }
+
+    // -- Initialize Stats.js --
+    function initStats() {
+      const stats = new Stats();
+      stats.showPanel(0); // FPS panel
+      stats.dom.style.position = 'relative';
+      document.getElementById('stats-container').appendChild(stats.dom);
+      return stats;
+    }
+
+    // -- Main Initialization --
+    async function init() {
+      const container = document.getElementById('viz-container');
+
+      try {
+        setLoadingProgress(10, 'Creating 3D scene...');
+
+        // 1. Scene setup
+        state.scene = new Scene(container);
+        setLoadingProgress(25, 'Building environment...');
+
+        // 2. Environment (room, grid, APs, zones)
+        state.environment = new Environment(state.scene.getScene());
+        setLoadingProgress(40, 'Preparing body models...');
+
+        // 3. Body model manager
+        state.bodyModelManager = new BodyModelManager(state.scene.getScene());
+        setLoadingProgress(55, 'Setting up signal visualization...');
+
+        // 4. Signal visualization
+        state.signalViz = new SignalVisualization(state.scene.getScene());
+        setLoadingProgress(65, 'Creating HUD...');
+
+        // 5. Dashboard HUD
+        state.hud = new DashboardHUD(container);
+        setLoadingProgress(75, 'Initializing data processor...');
+
+        // 6. Data processor
+        state.dataProcessor = new DataProcessor();
+        setLoadingProgress(80, 'Setting up Stats.js...');
+
+        // 7. Stats.js
+        state.stats = initStats();
+        setLoadingProgress(85, 'Connecting to server...');
+
+        // 8. WebSocket client
+        state.wsClient = new WebSocketClient({
+          url: 'ws://localhost:8000/ws/pose',
+          onMessage: (msg) => handleWebSocketMessage(msg),
+          onStateChange: (newState, oldState) => handleConnectionStateChange(newState, oldState),
+          onError: (err) => console.error('[VIZ] WebSocket error:', err)
+        });
+
+        // Attempt connection (will fall back to demo mode if server unavailable)
+        state.wsClient.connect();
+        setLoadingProgress(95, 'Starting render loop...');
+
+        // 9. Register the main update loop
+        state.scene.onUpdate((delta, elapsed) => {
+          mainUpdate(delta, elapsed);
+        });
+
+        // Start rendering
+        state.scene.start();
+        setLoadingProgress(100, 'Ready');
+
+        // Hide loading after a brief moment
+        setTimeout(hideLoading, 400);
+
+        console.log('[VIZ] Initialization complete');
+
+      } catch (err) {
+        console.error('[VIZ] Initialization failed:', err);
+        setLoadingProgress(100, 'Error: ' + err.message);
+      }
+    }
+
+    // -- Main Update Loop (called every frame) --
+    function mainUpdate(delta, elapsed) {
+      // Stats.js begin
+      if (state.stats) state.stats.begin();
+
+      // Determine data source
+      let vizData = null;
+
+      if (state.isDemoMode) {
+        // Generate demo data
+        vizData = state.dataProcessor.generateDemoData(delta);
+
+        // Generate demo signal data
+        const demoSignal = SignalVisualization.generateDemoData(elapsed);
+        state.signalViz.updateSignalData(demoSignal);
+      }
+
+      // If we have viz data (from demo or last processed real data), update visualizations
+      if (vizData) {
+        // Update body models
+        state.bodyModelManager.update(vizData.persons, delta);
+
+        // Update zone occupancy
+        state.environment.updateZoneOccupancy(vizData.zoneOccupancy);
+
+        // Update confidence heatmap
+        const heatmap = state.dataProcessor.generateConfidenceHeatmap(
+          vizData.persons, 20, 15, 8, 6
+        );
+        state.environment.updateConfidenceHeatmap(heatmap);
+      }
+
+      // Update environment animations (AP pulse, signal paths)
+      state.environment.update(delta, elapsed);
+
+      // Update signal visualization animations
+      state.signalViz.update(delta, elapsed);
+
+      // Update HUD
+      if (state.hud) {
+        state.hud.tickFPS();
+
+        const wsMetrics = state.wsClient.getMetrics();
+        state.hud.updateState({
+          connectionStatus: state.wsClient.state,
+          isRealData: state.wsClient.isRealData && !state.isDemoMode,
+          latency: wsMetrics.latency,
+          messageCount: wsMetrics.messageCount,
+          uptime: wsMetrics.uptime,
+          personCount: state.bodyModelManager.getActiveCount(),
+          confidence: state.bodyModelManager.getAverageConfidence(),
+          sensingMode: state.isDemoMode ? 'Mock' : (state.wsClient.isRealData ? 'CSI' : 'Mock')
+        });
+      }
+
+      // Stats.js end
+      if (state.stats) state.stats.end();
+    }
+
+    // -- Handle incoming WebSocket messages --
+    function handleWebSocketMessage(message) {
+      const processed = state.dataProcessor.processMessage(message);
+      if (!processed) return;
+
+      // Switch off demo mode when we get real data
+      if (processed.persons.length > 0) {
+        if (state.isDemoMode) {
+          state.isDemoMode = false;
+          console.log('[VIZ] Switched to live data mode');
+        }
+
+        // Update body models
+        state.bodyModelManager.update(processed.persons, 0.016);
+
+        // Update zone occupancy
+        state.environment.updateZoneOccupancy(processed.zoneOccupancy);
+
+        // Update signal data if available
+        if (processed.signalData) {
+          state.signalViz.updateSignalData(processed.signalData);
+        }
+
+        // Update confidence heatmap
+        const heatmap = state.dataProcessor.generateConfidenceHeatmap(
+          processed.persons, 20, 15, 8, 6
+        );
+        state.environment.updateConfidenceHeatmap(heatmap);
+      }
+    }
+
+    // -- Handle WebSocket connection state changes --
+    function handleConnectionStateChange(newState, oldState) {
+      console.log(`[VIZ] Connection: ${oldState} -> ${newState}`);
+
+      if (newState === 'connected') {
+        // Will switch from demo to real when data arrives
+        console.log('[VIZ] Connected to server, waiting for data...');
+      } else if (newState === 'error' || newState === 'disconnected') {
+        // Fall back to demo mode
+        if (!state.isDemoMode) {
+          state.isDemoMode = true;
+          console.log('[VIZ] Switched to demo mode (server unavailable)');
+        }
+      }
+    }
+
+    // -- Cleanup on page unload --
+    window.addEventListener('beforeunload', () => {
+      if (state.wsClient) state.wsClient.dispose();
+      if (state.bodyModelManager) state.bodyModelManager.dispose();
+      if (state.signalViz) state.signalViz.dispose();
+      if (state.environment) state.environment.dispose();
+      if (state.hud) state.hud.dispose();
+      if (state.scene) state.scene.dispose();
+    });
+
+    // -- Keyboard shortcuts --
+    document.addEventListener('keydown', (e) => {
+      switch (e.key.toLowerCase()) {
+        case 'r':
+          // Reset camera
+          if (state.scene) state.scene.resetCamera();
+          break;
+        case 'd':
+          // Toggle demo mode
+          state.isDemoMode = !state.isDemoMode;
+          console.log(`[VIZ] Demo mode: ${state.isDemoMode ? 'ON' : 'OFF'}`);
+          break;
+        case 'c':
+          // Force reconnect
+          if (state.wsClient) {
+            state.wsClient.disconnect();
+            state.wsClient.autoReconnect = true;
+            state.wsClient.reconnectAttempts = 0;
+            state.wsClient.connect();
+          }
+          break;
+      }
+    });
+
+    // -- Start --
+    init();
+  </script>
+</body>
+</html>
