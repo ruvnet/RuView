@@ -64,7 +64,7 @@ A high-performance Rust port is available in `/rust-port/wifi-densepose-rs/`:
 | Memory Usage | ~500MB | ~100MB |
 | WASM Support | ❌ | ✅ |
 | Binary Size | N/A | ~10MB |
-| Test Coverage | 100% | 107 tests |
+| Test Coverage | 100% | 313 tests |
 
 **Quick Start (Rust):**
 ```bash
@@ -82,6 +82,19 @@ Mathematical correctness validated:
 - ✅ Doppler shift: 33.33 Hz (exact)
 - ✅ Correlation: 1.0 for identical signals
 - ✅ Phase coherence: 1.0 for coherent signals
+
+### SOTA Signal Processing (ADR-014)
+
+Six research-grade algorithms implemented in the `wifi-densepose-signal` crate:
+
+| Algorithm | Purpose | Reference |
+|-----------|---------|-----------|
+| **Conjugate Multiplication** | Cancels CFO/SFO from raw CSI phase via antenna ratio | SpotFi (SIGCOMM 2015) |
+| **Hampel Filter** | Robust outlier removal using median/MAD (resists 50% contamination) | Hampel (1974) |
+| **Fresnel Zone Model** | Physics-based breathing detection from chest displacement | FarSense (MobiCom 2019) |
+| **CSI Spectrogram** | STFT time-frequency matrices for CNN-based activity recognition | Standard since 2018 |
+| **Subcarrier Selection** | Variance-ratio ranking to pick top-K motion-sensitive subcarriers | WiDance (MobiCom 2017) |
+| **Body Velocity Profile** | Domain-independent velocity x time representation from Doppler | Widar 3.0 (MobiSys 2019) |
 
 See [Rust Port Documentation](/rust-port/wifi-densepose-rs/docs/) for ADRs and DDD patterns.
 
