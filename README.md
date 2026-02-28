@@ -1,5 +1,17 @@
 # WiFi DensePose
 
+> **Hardware Required:** This system processes real WiFi Channel State Information (CSI) data. To capture live CSI you need one of:
+>
+> | Option | Hardware | Cost | Capabilities |
+> |--------|----------|------|-------------|
+> | **ESP32 Mesh** (recommended) | 3-6x ESP32-S3 boards + consumer WiFi router | ~$54 | Presence, motion, respiration detection |
+> | **Research NIC** | Intel 5300 or Atheros AR9580 (discontinued) | ~$50-100 | Full CSI with 3x3 MIMO |
+> | **Commodity WiFi** | Any Linux laptop with WiFi | $0 | Presence and coarse motion only (RSSI-based) |
+>
+> Without CSI-capable hardware, you can verify the signal processing pipeline using the included deterministic reference signal: `python v1/data/proof/verify.py`
+>
+> See [docs/adr/ADR-012-esp32-csi-sensor-mesh.md](docs/adr/ADR-012-esp32-csi-sensor-mesh.md) for the ESP32 setup guide and [docs/adr/ADR-013-feature-level-sensing-commodity-gear.md](docs/adr/ADR-013-feature-level-sensing-commodity-gear.md) for the zero-cost RSSI path.
+
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.95+-green.svg)](https://fastapi.tiangolo.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
