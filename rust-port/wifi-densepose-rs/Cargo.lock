@@ -3989,6 +3989,8 @@ dependencies = [
  "parking_lot",
  "proptest",
  "rustfft",
+ "ruvector-solver",
+ "ruvector-temporal-tensor",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

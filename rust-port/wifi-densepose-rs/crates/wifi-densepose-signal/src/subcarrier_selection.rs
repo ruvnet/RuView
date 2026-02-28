@@ -207,17 +207,21 @@ pub fn mincut_subcarrier_partition(sensitivity: &[f32]) -> (Vec<usize>, Vec<usiz
         return ((0..median_idx).collect(), (median_idx..n).collect());
     }
 
-    let mc = MinCutBuilder::new().exact().with_edges(edges).build();
+    let mc = MinCutBuilder::new()
+        .exact()
+        .with_edges(edges)
+        .build()
+        .expect("MinCutBuilder::build failed");
     let (side_a, side_b) = mc.partition();
 
     // The side with higher mean sensitivity is the "sensitive" group
     let mean_a: f32 = if side_a.is_empty() {
-        0.0
+        0.0_f32
     } else {
         side_a.iter().map(|&i| sensitivity[i as usize]).sum::<f32>() / side_a.len() as f32
     };
     let mean_b: f32 = if side_b.is_empty() {
-        0.0
+        0.0_f32
     } else {
         side_b.iter().map(|&i| sensitivity[i as usize]).sum::<f32>() / side_b.len() as f32
     };

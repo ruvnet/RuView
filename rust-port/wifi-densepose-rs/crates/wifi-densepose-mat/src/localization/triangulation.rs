@@ -375,3 +375,121 @@ mod tests {
         assert!(result.is_none());
     }
 }
+
+// ---------------------------------------------------------------------------
+// Integration 5: Multi-AP TDoA triangulation via NeumannSolver
+// ---------------------------------------------------------------------------
+
+use ruvector_solver::neumann::NeumannSolver;
+use ruvector_solver::types::CsrMatrix;
+
+/// Solve multi-AP TDoA survivor localization using NeumannSolver.
+///
+/// For N access points with TDoA measurements, linearizes the hyperbolic
+/// equations and solves the 2×2 normal equations system. Complexity is O(1)
+/// in AP count (always solves a 2×2 system regardless of N).
+///
+/// # Arguments
+/// * `tdoa_measurements` - Vec of (ap_i_idx, ap_j_idx, tdoa_seconds)
+///   where tdoa = t_i - t_j (positive if closer to AP_i)
+/// * `ap_positions` - Vec of (x_metres, y_metres) for each AP
+///
+/// # Returns
+/// Some((x, y)) estimated survivor position in metres, or None if underdetermined
+pub fn solve_tdoa_triangulation(
+    tdoa_measurements: &[(usize, usize, f32)],
+    ap_positions: &[(f32, f32)],
+) -> Option<(f32, f32)> {
+    let n_meas = tdoa_measurements.len();
+    if n_meas < 3 || ap_positions.len() < 2 {
+        return None;
+    }
+
+    const C: f32 = 3e8_f32; // speed of light m/s
+    let (x_ref, y_ref) = ap_positions[0];
+
+    // Accumulate (A^T A) and (A^T b) for 2×2 normal equations
+    let mut ata = [[0.0_f32; 2]; 2];
+    let mut atb = [0.0_f32; 2];
+
+    for &(i, j, tdoa) in tdoa_measurements {
+        let (xi, yi) = ap_positions.get(i).copied().unwrap_or((x_ref, y_ref));
+        let (xj, yj) = ap_positions.get(j).copied().unwrap_or((x_ref, y_ref));
+
+        // Row of A: [xi - xj, yi - yj] (linearized TDoA)
+        let ai0 = xi - xj;
+        let ai1 = yi - yj;
+
+        // RHS: C * tdoa / 2 + (xi^2 - xj^2 + yi^2 - yj^2) / 2 - x_ref*(xi-xj) - y_ref*(yi-yj)
+        let bi = C * tdoa / 2.0
+            + ((xi * xi - xj * xj) + (yi * yi - yj * yj)) / 2.0
+            - x_ref * ai0 - y_ref * ai1;
+
+        ata[0][0] += ai0 * ai0;
+        ata[0][1] += ai0 * ai1;
+        ata[1][0] += ai1 * ai0;
+        ata[1][1] += ai1 * ai1;
+        atb[0] += ai0 * bi;
+        atb[1] += ai1 * bi;
+    }
+
+    // Tikhonov regularization
+    let lambda = 0.01_f32;
+    ata[0][0] += lambda;
+    ata[1][1] += lambda;
+
+    let csr = CsrMatrix::<f32>::from_coo(
+        2,
+        2,
+        vec![
+            (0, 0, ata[0][0]),
+            (0, 1, ata[0][1]),
+            (1, 0, ata[1][0]),
+            (1, 1, ata[1][1]),
+        ],
+    );
+
+    // Attempt the Neumann-series solver first; fall back to Cramer's rule for
+    // the 2×2 case when the iterative solver cannot converge (e.g. the
+    // diagonal is very large relative to f32 precision).
+    if let Ok(r) = NeumannSolver::new(1e-5, 500).solve(&csr, &atb) {
+        return Some((r.solution[0] + x_ref, r.solution[1] + y_ref));
+    }
+
+    // Cramer's rule fallback for the 2×2 normal equations.
+    let det = ata[0][0] * ata[1][1] - ata[0][1] * ata[1][0];
+    if det.abs() < 1e-10 {
+        return None;
+    }
+    let x_sol = (atb[0] * ata[1][1] - atb[1] * ata[0][1]) / det;
+    let y_sol = (ata[0][0] * atb[1] - ata[1][0] * atb[0]) / det;
+    Some((x_sol + x_ref, y_sol + y_ref))
+}
+
+#[cfg(test)]
+mod triangulation_tests {
+    use super::*;
+
+    #[test]
+    fn tdoa_triangulation_insufficient_data() {
+        let result = solve_tdoa_triangulation(&[(0, 1, 1e-9)], &[(0.0, 0.0), (5.0, 0.0)]);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn tdoa_triangulation_symmetric_case() {
+        // Target at centre (2.5, 2.5), APs at corners of 5m×5m square
+        let aps = vec![(0.0_f32, 0.0), (5.0, 0.0), (5.0, 5.0), (0.0, 5.0)];
+        // Target equidistant from all APs → TDoA ≈ 0 for all pairs
+        let measurements = vec![
+            (0_usize, 1_usize, 0.0_f32),
+            (1, 2, 0.0),
+            (2, 3, 0.0),
+            (0, 3, 0.0),
+        ];
+        let result = solve_tdoa_triangulation(&measurements, &aps);
+        assert!(result.is_some(), "should solve symmetric case");
+        let (x, y) = result.unwrap();
+        assert!(x.is_finite() && y.is_finite());
+    }
+}

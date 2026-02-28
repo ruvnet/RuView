@@ -2,6 +2,82 @@
 
 use crate::domain::{HeartbeatSignature, SignalStrength};
 
+// ---------------------------------------------------------------------------
+// Integration 7: CompressedHeartbeatSpectrogram (ADR-017, ruvector feature)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "ruvector")]
+use ruvector_temporal_tensor::segment;
+#[cfg(feature = "ruvector")]
+use ruvector_temporal_tensor::{TemporalTensorCompressor, TierPolicy};
+
+/// Memory-efficient heartbeat micro-Doppler spectrogram using tiered temporal compression.
+///
+/// Stores one TemporalTensorCompressor per frequency bin, each compressing
+/// that bin's time-evolution. Hot tier (recent 10 seconds) at 8-bit,
+/// warm at 5-7-bit, cold at 3-bit — preserving recent heartbeat cycles.
+#[cfg(feature = "ruvector")]
+pub struct CompressedHeartbeatSpectrogram {
+    bin_buffers: Vec<TemporalTensorCompressor>,
+    encoded: Vec<Vec<u8>>,
+    n_freq_bins: usize,
+    frame_count: u64,
+}
+
+#[cfg(feature = "ruvector")]
+impl CompressedHeartbeatSpectrogram {
+    pub fn new(n_freq_bins: usize) -> Self {
+        let bin_buffers: Vec<_> = (0..n_freq_bins)
+            .map(|i| TemporalTensorCompressor::new(TierPolicy::default(), 1, i as u32))
+            .collect();
+        let encoded = vec![Vec::new(); n_freq_bins];
+        Self { bin_buffers, encoded, n_freq_bins, frame_count: 0 }
+    }
+
+    /// Push one column of the spectrogram (one time step, all frequency bins).
+    pub fn push_column(&mut self, column: &[f32]) {
+        assert_eq!(column.len(), self.n_freq_bins);
+        let ts = self.frame_count as u32;
+        for (i, &val) in column.iter().enumerate() {
+            // Synchronize last_access_ts with current timestamp so that the
+            // tier policy's age computation (now_ts - last_access_ts + 1) never
+            // wraps to zero (which would cause a divide-by-zero in wrapping_div).
+            self.bin_buffers[i].set_access(ts, ts);
+            self.bin_buffers[i].push_frame(&[val], ts, &mut self.encoded[i]);
+        }
+        self.frame_count += 1;
+    }
+
+    /// Flush all bin buffers.
+    pub fn flush(&mut self) {
+        for (buf, enc) in self.bin_buffers.iter_mut().zip(self.encoded.iter_mut()) {
+            buf.flush(enc);
+        }
+    }
+
+    /// Compute mean power in a frequency bin range (e.g., heartbeat 0.8-1.5 Hz).
+    /// Uses most recent `n_recent` frames for real-time triage.
+    pub fn band_power(&self, low_bin: usize, high_bin: usize, n_recent: usize) -> f32 {
+        let high = high_bin.min(self.n_freq_bins.saturating_sub(1));
+        if low_bin > high {
+            return 0.0;
+        }
+        let mut total = 0.0_f32;
+        let mut count = 0_usize;
+        for b in low_bin..=high {
+            let mut out = Vec::new();
+            segment::decode(&self.encoded[b], &mut out);
+            let recent: f32 = out.iter().rev().take(n_recent).map(|x| x * x).sum();
+            total += recent;
+            count += 1;
+        }
+        if count == 0 { 0.0 } else { total / count as f32 }
+    }
+
+    pub fn frame_count(&self) -> u64 { self.frame_count }
+    pub fn n_freq_bins(&self) -> usize { self.n_freq_bins }
+}
+
 /// Configuration for heartbeat detection
 #[derive(Debug, Clone)]
 pub struct HeartbeatDetectorConfig {
@@ -335,6 +411,31 @@ impl HeartbeatDetector {
         };
 
         strength_score * 0.7 + hrv_score * 0.3
+    }
+}
+
+#[cfg(all(test, feature = "ruvector"))]
+mod heartbeat_buffer_tests {
+    use super::*;
+
+    #[test]
+    fn compressed_heartbeat_push_and_band_power() {
+        let n_bins = 32_usize;
+        let mut spec = CompressedHeartbeatSpectrogram::new(n_bins);
+        for t in 0..20_u64 {
+            let col: Vec<f32> = (0..n_bins)
+                .map(|b| if b < 16 { 1.0 } else { 0.1 })
+                .collect();
+            let _ = t;
+            spec.push_column(&col);
+        }
+        spec.flush();
+        assert_eq!(spec.frame_count(), 20);
+        // Low bins (0..15) should have higher power than high bins (16..31)
+        let low_power = spec.band_power(0, 15, 20);
+        let high_power = spec.band_power(16, 31, 20);
+        assert!(low_power >= high_power,
+            "low_power={low_power} should >= high_power={high_power}");
     }
 }
 

@@ -12,8 +12,8 @@ mod heartbeat;
 mod movement;
 mod pipeline;
 
-pub use breathing::{BreathingDetector, BreathingDetectorConfig};
+pub use breathing::{BreathingDetector, BreathingDetectorConfig, CompressedBreathingBuffer};
 pub use ensemble::{EnsembleClassifier, EnsembleConfig, EnsembleResult, SignalConfidences};
-pub use heartbeat::{HeartbeatDetector, HeartbeatDetectorConfig};
+pub use heartbeat::{HeartbeatDetector, HeartbeatDetectorConfig, CompressedHeartbeatSpectrogram};
 pub use movement::{MovementClassifier, MovementClassifierConfig};
 pub use pipeline::{DetectionPipeline, DetectionConfig, VitalSignsDetector, CsiDataBuffer};
