@@ -152,7 +152,8 @@ async def _get_database_status(settings: Settings) -> Dict[str, Any]:
         
         # Get table counts
         async with db_manager.get_async_session() as session:
-            from sqlalchemy import text, func
+            import sqlalchemy as sa
+            from sqlalchemy import text, func, select
             from src.database.models import Device, Session, CSIData, PoseDetection, SystemMetric, AuditLog
             
             tables = {
@@ -164,10 +165,19 @@ async def _get_database_status(settings: Settings) -> Dict[str, Any]:
                 "audit_logs": AuditLog,
             }
             
+            # Whitelist of allowed table names to prevent SQL injection
+            allowed_table_names = set(tables.keys())
+            
             for table_name, model in tables.items():
                 try:
+                    # Validate table_name against whitelist to prevent SQL injection
+                    if table_name not in allowed_table_names:
+                        db_status["tables"][table_name] = {"error": "Invalid table name"}
+                        continue
+                    
+                    # Use SQLAlchemy ORM model for safe query instead of raw SQL
                     result = await session.execute(
-                        text(f"SELECT COUNT(*) FROM {table_name}")
+                        select(func.count()).select_from(model)
                     )
                     count = result.scalar()
                     db_status["tables"][table_name] = {"count": count}
