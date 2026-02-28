@@ -19,6 +19,15 @@ class CSIValidationError(Exception):
     pass
 
 
+class CSIExtractionError(Exception):
+    """Exception raised when CSI data extraction fails.
+
+    This error is raised instead of silently returning random/placeholder data.
+    Callers should handle this to inform users that real hardware data is required.
+    """
+    pass
+
+
 @dataclass
 class CSIData:
     """Data structure for CSI measurements."""
@@ -78,10 +87,32 @@ class ESP32CSIParser:
             frequency = frequency_mhz * 1e6  # MHz to Hz
             bandwidth = bandwidth_mhz * 1e6  # MHz to Hz
             
-            # Parse amplitude and phase arrays (simplified for now)
-            # In real implementation, this would parse actual CSI matrix data
-            amplitude = np.random.rand(num_antennas, num_subcarriers)
-            phase = np.random.rand(num_antennas, num_subcarriers)
+            # Parse amplitude and phase arrays from the remaining CSV fields.
+            # Expected format after the header fields: comma-separated float values
+            # representing interleaved amplitude and phase per antenna per subcarrier.
+            data_values = parts[6:]
+            expected_values = num_antennas * num_subcarriers * 2  # amplitude + phase
+
+            if len(data_values) < expected_values:
+                raise CSIExtractionError(
+                    f"ESP32 CSI data incomplete: expected {expected_values} values "
+                    f"(amplitude + phase for {num_antennas} antennas x {num_subcarriers} subcarriers), "
+                    f"but received {len(data_values)} values. "
+                    "Ensure the ESP32 firmware is configured to output full CSI matrix data. "
+                    "See docs/hardware-setup.md for ESP32 CSI configuration."
+                )
+
+            try:
+                float_values = [float(v) for v in data_values[:expected_values]]
+            except ValueError as ve:
+                raise CSIExtractionError(
+                    f"ESP32 CSI data contains non-numeric values: {ve}. "
+                    "Raw CSI fields must be numeric float values."
+                )
+
+            all_values = np.array(float_values)
+            amplitude = all_values[:num_antennas * num_subcarriers].reshape(num_antennas, num_subcarriers)
+            phase = all_values[num_antennas * num_subcarriers:].reshape(num_antennas, num_subcarriers)
             
             return CSIData(
                 timestamp=datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc),
@@ -126,19 +157,20 @@ class RouterCSIParser:
             raise CSIParseError("Unknown router CSI format")
     
     def _parse_atheros_format(self, raw_data: bytes) -> CSIData:
-        """Parse Atheros CSI format (placeholder implementation)."""
-        # This would implement actual Atheros CSI parsing
-        # For now, return mock data for testing
-        return CSIData(
-            timestamp=datetime.now(timezone.utc),
-            amplitude=np.random.rand(3, 56),
-            phase=np.random.rand(3, 56),
-            frequency=2.4e9,
-            bandwidth=20e6,
-            num_subcarriers=56,
-            num_antennas=3,
-            snr=12.0,
-            metadata={'source': 'atheros_router'}
+        """Parse Atheros CSI format.
+
+        Raises:
+            CSIExtractionError: Always, because Atheros CSI parsing requires
+                the Atheros CSI Tool binary format parser which has not been
+                implemented yet. Use the ESP32 parser or contribute an
+                Atheros implementation.
+        """
+        raise CSIExtractionError(
+            "Atheros CSI format parsing is not yet implemented. "
+            "The Atheros CSI Tool outputs a binary format that requires a dedicated parser. "
+            "To collect real CSI data from Atheros-based routers, you must implement "
+            "the binary format parser following the Atheros CSI Tool specification. "
+            "See docs/hardware-setup.md for supported hardware and data formats."
         )
 
 

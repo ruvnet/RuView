@@ -385,13 +385,54 @@ class CSIProcessor:
         return correlation_matrix
     
     def _extract_doppler_features(self, csi_data: CSIData) -> tuple:
-        """Extract Doppler and frequency domain features."""
-        # Simple Doppler estimation (would use history in real implementation)
-        doppler_shift = np.random.rand(10)  # Placeholder
-        
-        # Power spectral density
-        psd = np.abs(scipy.fft.fft(csi_data.amplitude.flatten(), n=128))**2
-        
+        """Extract Doppler and frequency domain features from temporal CSI history.
+
+        Computes Doppler spectrum by analyzing temporal phase differences across
+        frames in self.csi_history, then applying FFT to obtain the Doppler shift
+        frequency components. If fewer than 2 history frames are available, returns
+        a zero-filled Doppler array (never random data).
+
+        Returns:
+            tuple: (doppler_shift, power_spectral_density) as numpy arrays
+        """
+        n_doppler_bins = 64
+
+        if len(self.csi_history) >= 2:
+            # Build temporal phase matrix from history frames
+            # Each row is the mean phase across antennas for one time step
+            history_list = list(self.csi_history)
+            phase_series = []
+            for frame in history_list:
+                # Average phase across antennas to get per-subcarrier phase
+                if frame.phase.ndim == 2:
+                    phase_series.append(np.mean(frame.phase, axis=0))
+                else:
+                    phase_series.append(frame.phase.flatten())
+
+            phase_matrix = np.array(phase_series)  # shape: (num_frames, num_subcarriers)
+
+            # Compute temporal phase differences between consecutive frames
+            phase_diffs = np.diff(phase_matrix, axis=0)  # shape: (num_frames-1, num_subcarriers)
+
+            # Average phase diff across subcarriers for each time step
+            mean_phase_diff = np.mean(phase_diffs, axis=1)  # shape: (num_frames-1,)
+
+            # Apply FFT to get Doppler spectrum from the temporal phase differences
+            doppler_spectrum = np.abs(scipy.fft.fft(mean_phase_diff, n=n_doppler_bins)) ** 2
+
+            # Normalize to prevent scale issues
+            max_val = np.max(doppler_spectrum)
+            if max_val > 0:
+                doppler_spectrum = doppler_spectrum / max_val
+
+            doppler_shift = doppler_spectrum
+        else:
+            # Not enough history for Doppler estimation -- return zeros, never random
+            doppler_shift = np.zeros(n_doppler_bins)
+
+        # Power spectral density of the current frame
+        psd = np.abs(scipy.fft.fft(csi_data.amplitude.flatten(), n=128)) ** 2
+
         return doppler_shift, psd
     
     def _analyze_motion_patterns(self, features: CSIFeatures) -> float:
