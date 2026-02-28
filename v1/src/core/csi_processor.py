@@ -81,6 +81,10 @@ class CSIProcessor:
         # Processing state
         self.csi_history = deque(maxlen=self.max_history_size)
         self.previous_detection_confidence = 0.0
+
+        # Doppler cache: pre-computed mean phase per frame for O(1) append
+        self._phase_cache = deque(maxlen=self.max_history_size)
+        self._doppler_window = min(config.get('doppler_window', 64), self.max_history_size)
         
         # Statistics tracking
         self._total_processed = 0
@@ -261,15 +265,21 @@ class CSIProcessor:
     
     def add_to_history(self, csi_data: CSIData) -> None:
         """Add CSI data to processing history.
-        
+
         Args:
             csi_data: CSI data to add to history
         """
         self.csi_history.append(csi_data)
+        # Cache mean phase for fast Doppler extraction
+        if csi_data.phase.ndim == 2:
+            self._phase_cache.append(np.mean(csi_data.phase, axis=0))
+        else:
+            self._phase_cache.append(csi_data.phase.flatten())
     
     def clear_history(self) -> None:
         """Clear the CSI data history."""
         self.csi_history.clear()
+        self._phase_cache.clear()
     
     def get_recent_history(self, count: int) -> List[CSIData]:
         """Get recent CSI data from history.
@@ -385,13 +395,45 @@ class CSIProcessor:
         return correlation_matrix
     
     def _extract_doppler_features(self, csi_data: CSIData) -> tuple:
-        """Extract Doppler and frequency domain features."""
-        # Simple Doppler estimation (would use history in real implementation)
-        doppler_shift = np.random.rand(10)  # Placeholder
-        
-        # Power spectral density
-        psd = np.abs(scipy.fft.fft(csi_data.amplitude.flatten(), n=128))**2
-        
+        """Extract Doppler and frequency domain features from temporal CSI history.
+
+        Uses cached mean-phase values for O(1) access instead of recomputing
+        from raw CSI frames. Only uses the last `doppler_window` frames
+        (default 64) for bounded computation time.
+
+        Returns:
+            tuple: (doppler_shift, power_spectral_density) as numpy arrays
+        """
+        n_doppler_bins = 64
+
+        if len(self._phase_cache) >= 2:
+            # Use cached mean-phase values (pre-computed in add_to_history)
+            # Only take the last doppler_window frames for bounded cost
+            window = min(len(self._phase_cache), self._doppler_window)
+            cache_list = list(self._phase_cache)
+            phase_matrix = np.array(cache_list[-window:])
+
+            # Temporal phase differences between consecutive frames
+            phase_diffs = np.diff(phase_matrix, axis=0)
+
+            # Average across subcarriers for each time step
+            mean_phase_diff = np.mean(phase_diffs, axis=1)
+
+            # FFT for Doppler spectrum
+            doppler_spectrum = np.abs(scipy.fft.fft(mean_phase_diff, n=n_doppler_bins)) ** 2
+
+            # Normalize
+            max_val = np.max(doppler_spectrum)
+            if max_val > 0:
+                doppler_spectrum = doppler_spectrum / max_val
+
+            doppler_shift = doppler_spectrum
+        else:
+            doppler_shift = np.zeros(n_doppler_bins)
+
+        # Power spectral density of the current frame
+        psd = np.abs(scipy.fft.fft(csi_data.amplitude.flatten(), n=128)) ** 2
+
         return doppler_shift, psd
     
     def _analyze_motion_patterns(self, features: CSIFeatures) -> float:

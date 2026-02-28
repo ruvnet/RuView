@@ -1,0 +1,85 @@
+{
+  "description": "Metadata for the SYNTHETIC deterministic CSI reference signal. Documents all generation parameters so the signal can be independently reproduced and verified.",
+  "is_synthetic": true,
+  "is_real_capture": false,
+  "generator_script": "generate_reference_signal.py",
+  "numpy_seed": 42,
+  "system_parameters": {
+    "num_antennas": 3,
+    "num_subcarriers": 56,
+    "sampling_rate_hz": 100,
+    "duration_s": 10.0,
+    "center_frequency_hz": 5210000000.0,
+    "subcarrier_spacing_hz": 312500.0,
+    "total_frames": 1000
+  },
+  "multipath_channel": {
+    "num_paths": 5,
+    "path_delays_ns": [
+      0.0,
+      15.0,
+      42.0,
+      78.0,
+      120.0
+    ],
+    "path_amplitudes": [
+      1.0,
+      0.6,
+      0.35,
+      0.18,
+      0.08
+    ],
+    "path_phase_offsets_rad": [
+      [
+        -0.788287681898749,
+        2.8319215077704234,
+        1.4576609265440963
+      ],
+      [
+        0.6198895383354297,
+        -2.1612986243157413,
+        -2.1614501754128375
+      ],
+      [
+        -2.776642555026645,
+        2.3007525789727232,
+        0.6353243561202211
+      ],
+      [
+        1.3073585636350948,
+        -3.012256461474685,
+        2.952530678803174
+      ],
+      [
+        2.088798716157191,
+        -1.8074266732364683,
+        -1.9991526911557285
+      ]
+    ],
+    "description": "5-path indoor multipath model with deterministic delays and amplitudes. Path amplitudes decrease with delay (typical indoor)."
+  },
+  "human_motion_signals": {
+    "breathing": {
+      "frequency_hz": 0.3,
+      "modulation_depth": 0.02,
+      "per_antenna_phase_offsets_rad": [
+        1.152364521581569,
+        1.9116103907867292,
+        3.297141901079666
+      ],
+      "description": "Sinusoidal amplitude modulation at 0.3 Hz modeling human breathing (typical adult resting rate: 12-20 breaths/min = 0.2-0.33 Hz)."
+    },
+    "walking": {
+      "frequency_hz": 1.2,
+      "modulation_depth": 0.08,
+      "per_antenna_phase_offsets_rad": [
+        2.713990594641554,
+        1.8298466547148808,
+        3.844385118274953
+      ],
+      "description": "Sinusoidal amplitude modulation at 1.2 Hz modeling human walking motion (typical stride rate: ~1.0-1.4 Hz)."
+    }
+  },
+  "generation_formula": "CSI[a,k,t] = sum_p { A_p * exp(j*(2*pi*f_k*tau_p + phi_{p,a})) * (1 + d_breathe * sin(2*pi*0.3*t + psi_breathe_a)) * (1 + d_walk * sin(2*pi*1.2*t + psi_walk_a)) }",
+  "determinism_guarantee": "All parameters are derived from numpy.random.RandomState(42) at script initialization. The generation loop itself uses NO randomness. Running this script on any platform with the same numpy version will produce bit-identical output."
+}

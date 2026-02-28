@@ -884,3 +884,194 @@ fn matches_priority(a: &PriorityDto, b: &PriorityDto) -> bool {
 fn matches_alert_status(a: &AlertStatusDto, b: &AlertStatusDto) -> bool {
     std::mem::discriminant(a) == std::mem::discriminant(b)
 }
+
+// ============================================================================
+// Scan Control Handlers
+// ============================================================================
+
+/// Push CSI data into the detection pipeline.
+///
+/// # OpenAPI Specification
+///
+/// ```yaml
+/// /api/v1/mat/scan/csi:
+///   post:
+///     summary: Push CSI data
+///     description: Push raw CSI amplitude/phase data into the detection pipeline
+///     tags: [Scan]
+///     requestBody:
+///       required: true
+///       content:
+///         application/json:
+///           schema:
+///             $ref: '#/components/schemas/PushCsiDataRequest'
+///     responses:
+///       200:
+///         description: Data accepted
+///       400:
+///         description: Invalid data (mismatched array lengths, empty data)
+/// ```
+#[tracing::instrument(skip(state, request))]
+pub async fn push_csi_data(
+    State(state): State<AppState>,
+    Json(request): Json<PushCsiDataRequest>,
+) -> ApiResult<Json<PushCsiDataResponse>> {
+    if request.amplitudes.len() != request.phases.len() {
+        return Err(ApiError::validation(
+            "Amplitudes and phases arrays must have equal length",
+            Some("amplitudes/phases".to_string()),
+        ));
+    }
+    if request.amplitudes.is_empty() {
+        return Err(ApiError::validation(
+            "CSI data cannot be empty",
+            Some("amplitudes".to_string()),
+        ));
+    }
+
+    let pipeline = state.detection_pipeline();
+    let sample_count = request.amplitudes.len();
+    pipeline.add_data(&request.amplitudes, &request.phases);
+
+    let approx_duration = sample_count as f64 / pipeline.config().sample_rate;
+
+    tracing::debug!(samples = sample_count, "Ingested CSI data");
+
+    Ok(Json(PushCsiDataResponse {
+        accepted: true,
+        samples_ingested: sample_count,
+        buffer_duration_secs: approx_duration,
+    }))
+}
+
+/// Control the scanning process (start/stop/pause/resume/clear).
+///
+/// # OpenAPI Specification
+///
+/// ```yaml
+/// /api/v1/mat/scan/control:
+///   post:
+///     summary: Control scanning
+///     description: Start, stop, pause, resume, or clear the scan buffer
+///     tags: [Scan]
+///     requestBody:
+///       required: true
+///       content:
+///         application/json:
+///           schema:
+///             $ref: '#/components/schemas/ScanControlRequest'
+///     responses:
+///       200:
+///         description: Action performed
+/// ```
+#[tracing::instrument(skip(state))]
+pub async fn scan_control(
+    State(state): State<AppState>,
+    Json(request): Json<ScanControlRequest>,
+) -> ApiResult<Json<ScanControlResponse>> {
+    use super::dto::ScanAction;
+
+    let (state_str, message) = match request.action {
+        ScanAction::Start => {
+            state.set_scanning(true);
+            ("scanning", "Scanning started")
+        }
+        ScanAction::Stop => {
+            state.set_scanning(false);
+            state.detection_pipeline().clear_buffer();
+            ("stopped", "Scanning stopped and buffer cleared")
+        }
+        ScanAction::Pause => {
+            state.set_scanning(false);
+            ("paused", "Scanning paused (buffer retained)")
+        }
+        ScanAction::Resume => {
+            state.set_scanning(true);
+            ("scanning", "Scanning resumed")
+        }
+        ScanAction::ClearBuffer => {
+            state.detection_pipeline().clear_buffer();
+            ("buffer_cleared", "CSI data buffer cleared")
+        }
+    };
+
+    tracing::info!(action = ?request.action, "Scan control action");
+
+    Ok(Json(ScanControlResponse {
+        success: true,
+        state: state_str.to_string(),
+        message: message.to_string(),
+    }))
+}
+
+/// Get detection pipeline status.
+///
+/// # OpenAPI Specification
+///
+/// ```yaml
+/// /api/v1/mat/scan/status:
+///   get:
+///     summary: Get pipeline status
+///     description: Returns current status of the detection pipeline
+///     tags: [Scan]
+///     responses:
+///       200:
+///         description: Pipeline status
+/// ```
+#[tracing::instrument(skip(state))]
+pub async fn pipeline_status(
+    State(state): State<AppState>,
+) -> ApiResult<Json<PipelineStatusResponse>> {
+    let pipeline = state.detection_pipeline();
+    let config = pipeline.config();
+
+    Ok(Json(PipelineStatusResponse {
+        scanning: state.is_scanning(),
+        buffer_duration_secs: 0.0,
+        ml_enabled: config.enable_ml,
+        ml_ready: pipeline.ml_ready(),
+        sample_rate: config.sample_rate,
+        heartbeat_enabled: config.enable_heartbeat,
+        min_confidence: config.min_confidence,
+    }))
+}
+
+/// List domain events from the event store.
+///
+/// # OpenAPI Specification
+///
+/// ```yaml
+/// /api/v1/mat/events/domain:
+///   get:
+///     summary: List domain events
+///     description: Returns domain events from the event store
+///     tags: [Events]
+///     responses:
+///       200:
+///         description: Domain events
+/// ```
+#[tracing::instrument(skip(state))]
+pub async fn list_domain_events(
+    State(state): State<AppState>,
+) -> ApiResult<Json<DomainEventsResponse>> {
+    let store = state.event_store();
+    let events = store.all().map_err(|e| ApiError::internal(
+        format!("Failed to read event store: {}", e),
+    ))?;
+
+    let event_dtos: Vec<DomainEventDto> = events
+        .iter()
+        .map(|e| DomainEventDto {
+            event_type: e.event_type().to_string(),
+            timestamp: e.timestamp(),
+            details: format!("{:?}", e),
+        })
+        .collect();
+
+    let total = event_dtos.len();
+
+    Ok(Json(DomainEventsResponse {
+        events: event_dtos,
+        total,
+    }))
+}

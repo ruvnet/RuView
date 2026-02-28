@@ -220,27 +220,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         except Exception as e:
             raise ValueError(f"Token verification error: {e}")
     
-    def _log_authentication_event(self, request: Request, event_type: str, details: Dict[str, Any] = None):
-        """Log authentication events for security monitoring."""
-        client_ip = request.client.host if request.client else "unknown"
-        user_agent = request.headers.get("user-agent", "unknown")
-        
-        log_data = {
-            "event_type": event_type,
-            "timestamp": datetime.utcnow().isoformat(),
-            "client_ip": client_ip,
-            "user_agent": user_agent,
-            "path": request.url.path,
-            "method": request.method
-        }
-        
-        if details:
-            log_data.update(details)
-        
-        if event_type in ["authentication_failed", "token_expired", "invalid_token"]:
-            logger.warning(f"Auth event: {log_data}")
-        else:
-            logger.info(f"Auth event: {log_data}")
+    # TODO: Wire up authentication event logging in dispatch() for
+    # security monitoring (login failures, token expiry, etc.).
 
 
 class TokenBlacklist:

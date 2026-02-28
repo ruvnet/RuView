@@ -593,7 +593,7 @@ impl VitalSignsClassifier {
             .enumerate()
             .skip(1)  // Skip DC
             .take(30) // Up to ~30% of Nyquist
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or((0, &0.0));
 
         // Store dominant frequency in last position

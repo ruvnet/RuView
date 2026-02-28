@@ -175,6 +175,9 @@ class RouterInterface:
         """
         try:
             channel = config.get('channel', 6)
+            # Validate channel is an integer in a safe range to prevent command injection
+            if not isinstance(channel, int) or not (1 <= channel <= 196):
+                raise ValueError(f"Invalid WiFi channel: {channel}. Must be an integer between 1 and 196.")
             command = f"iwconfig wlan0 channel {channel} && echo 'CSI monitoring configured'"
             await self.execute_command(command)
             return True
@@ -197,25 +200,25 @@ class RouterInterface:
     
     def _parse_csi_response(self, response: str) -> CSIData:
         """Parse CSI response data.
-        
+
         Args:
             response: Raw response from router
-            
+
         Returns:
             Parsed CSI data
+
+        Raises:
+            RouterConnectionError: Always in current state, because real CSI
+                parsing from router command output requires hardware-specific
+                format knowledge that must be implemented per router model.
         """
-        # Mock implementation for testing
-        # In real implementation, this would parse actual router CSI format
-        return CSIData(
-            timestamp=datetime.now(timezone.utc),
-            amplitude=np.random.rand(3, 56),
-            phase=np.random.rand(3, 56),
-            frequency=2.4e9,
-            bandwidth=20e6,
-            num_subcarriers=56,
-            num_antennas=3,
-            snr=15.0,
-            metadata={'source': 'router', 'raw_response': response}
+        raise RouterConnectionError(
+            "Real CSI data parsing from router responses is not yet implemented. "
+            "Collecting CSI data from a router requires: "
+            "(1) a router with CSI-capable firmware (e.g., Atheros CSI Tool, Nexmon), "
+            "(2) proper hardware setup and configuration, and "
+            "(3) a parser for the specific binary/text format produced by the firmware. "
+            "See docs/hardware-setup.md for instructions on configuring your router for CSI collection."
         )
     
     def _parse_status_response(self, response: str) -> Dict[str, Any]:

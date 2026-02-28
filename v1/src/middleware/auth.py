@@ -61,10 +61,16 @@ class TokenManager:
             logger.warning(f"JWT verification failed: {e}")
             raise AuthenticationError("Invalid token")
     
-    def decode_token(self, token: str) -> Optional[Dict[str, Any]]:
-        """Decode token without verification (for debugging)."""
+    def decode_token_claims(self, token: str) -> Optional[Dict[str, Any]]:
+        """Decode and verify token, returning its claims.
+
+        Unlike the previous implementation, this method always verifies
+        the token signature.  Use verify_token() for full validation
+        including expiry checks; this helper is provided only for
+        inspecting claims from an already-verified token.
+        """
         try:
-            return jwt.decode(token, options={"verify_signature": False})
+            return jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
         except JWTError:
             return None
 
@@ -73,26 +79,10 @@ class UserManager:
     """User management for authentication."""
     
     def __init__(self):
-        # In a real application, this would connect to a database
-        # For now, we'll use a simple in-memory store
-        self._users: Dict[str, Dict[str, Any]] = {
-            "admin": {
-                "username": "admin",
-                "email": "admin@example.com",
-                "hashed_password": self.hash_password("admin123"),
-                "roles": ["admin"],
-                "is_active": True,
-                "created_at": datetime.utcnow(),
-            },
-            "user": {
-                "username": "user",
-                "email": "user@example.com",
-                "hashed_password": self.hash_password("user123"),
-                "roles": ["user"],
-                "is_active": True,
-                "created_at": datetime.utcnow(),
-            }
-        }
+        # In a real application, this would connect to a database.
+        # No default users are created -- users must be provisioned
+        # through the create_user() method or an external identity provider.
+        self._users: Dict[str, Dict[str, Any]] = {}
     
     @staticmethod
     def hash_password(password: str) -> str:

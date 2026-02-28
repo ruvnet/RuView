@@ -2,6 +2,32 @@
 name = "wifi-densepose-hardware"
 version.workspace = true
 edition.workspace = true
-description = "Hardware interface for WiFi-DensePose"
+description = "Hardware interface abstractions for WiFi CSI sensors (ESP32, Intel 5300, Atheros)"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/wifi-densepose"
+
+[features]
+default = ["std"]
+std = []
+# Enable ESP32 serial parsing (no actual ESP-IDF dependency; parses streamed bytes)
+esp32 = []
+# Enable Intel 5300 CSI Tool log parsing
+intel5300 = []
+# Enable Linux WiFi interface for commodity sensing (ADR-013)
+linux-wifi = []
 
 [dependencies]
+# Byte parsing
+byteorder = "1.5"
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+# Error handling
+thiserror = "1.0"
+# Logging
+tracing = "0.1"
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+approx = "0.5"

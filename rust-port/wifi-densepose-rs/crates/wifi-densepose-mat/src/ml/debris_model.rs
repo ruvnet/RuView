@@ -164,7 +164,7 @@ impl DebrisClassification {
     pub fn new(probabilities: Vec<f32>) -> Self {
         let (max_idx, &max_prob) = probabilities.iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or((7, &0.0));
 
         // Check for composite materials (multiple high probabilities)
@@ -216,7 +216,7 @@ impl DebrisClassification {
         self.class_probabilities.iter()
             .enumerate()
             .filter(|(i, _)| *i != primary_idx)
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| MaterialType::from_index(i))
     }
 }

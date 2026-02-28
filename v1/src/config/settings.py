@@ -77,6 +77,8 @@ class Settings(BaseSettings):
     wifi_interface: str = Field(default="wlan0", description="WiFi interface name")
     csi_buffer_size: int = Field(default=1000, description="CSI data buffer size")
     hardware_polling_interval: float = Field(default=0.1, description="Hardware polling interval in seconds")
+    router_ssh_username: str = Field(default="admin", description="Default SSH username for router connections")
+    router_ssh_password: str = Field(default="", description="Default SSH password for router connections (set via ROUTER_SSH_PASSWORD env var)")
     
     # CSI Processing settings
     csi_sampling_rate: int = Field(default=1000, description="CSI sampling rate")

@@ -12,7 +12,9 @@ use uuid::Uuid;
 
 use crate::domain::{
     DisasterEvent, Alert,
+    events::{EventStore, InMemoryEventStore},
 };
+use crate::detection::{DetectionPipeline, DetectionConfig};
 use super::dto::WebSocketMessage;
 
 /// Shared application state for the API.
@@ -34,6 +36,12 @@ struct AppStateInner {
     broadcast_tx: broadcast::Sender<WebSocketMessage>,
     /// Configuration
     config: ApiConfig,
+    /// Shared detection pipeline for CSI data push
+    detection_pipeline: Arc<DetectionPipeline>,
+    /// Domain event store
+    event_store: Arc<dyn EventStore>,
+    /// Scanning state flag
+    scanning: std::sync::atomic::AtomicBool,
 }
 
 /// Alert with its associated event ID for lookup.
@@ -73,6 +81,8 @@ impl AppState {
     /// Create a new application state with custom configuration.
     pub fn with_config(config: ApiConfig) -> Self {
         let (broadcast_tx, _) = broadcast::channel(config.broadcast_capacity);
+        let detection_pipeline = Arc::new(DetectionPipeline::new(DetectionConfig::default()));
+        let event_store: Arc<dyn EventStore> = Arc::new(InMemoryEventStore::new());
 
         Self {
             inner: Arc::new(AppStateInner {
@@ -80,8 +90,31 @@ impl AppState {
                 alerts: RwLock::new(HashMap::new()),
                 broadcast_tx,
                 config,
+                detection_pipeline,
+                event_store,
+                scanning: std::sync::atomic::AtomicBool::new(false),
             }),
         }
+    }
+
+    /// Get the detection pipeline for CSI data ingestion.
+    pub fn detection_pipeline(&self) -> &DetectionPipeline {
+        &self.inner.detection_pipeline
+    }
+
+    /// Get the domain event store.
+    pub fn event_store(&self) -> &Arc<dyn EventStore> {
+        &self.inner.event_store
+    }
+
+    /// Get scanning state.
+    pub fn is_scanning(&self) -> bool {
+        self.inner.scanning.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Set scanning state.
+    pub fn set_scanning(&self, state: bool) {
+        self.inner.scanning.store(state, std::sync::atomic::Ordering::SeqCst);
     }
 
     // ========================================================================

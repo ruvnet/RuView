@@ -181,7 +181,7 @@ class ConnectionManager:
             if connection.is_active:
                 try:
                     await connection.websocket.close()
-                except:
+                except Exception:
                     pass  # Connection might already be closed
             
             # Remove connection

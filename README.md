@@ -1,5 +1,17 @@
 # WiFi DensePose
 
+> **Hardware Required:** This system processes real WiFi Channel State Information (CSI) data. To capture live CSI you need one of:
+>
+> | Option | Hardware | Cost | Capabilities |
+> |--------|----------|------|-------------|
+> | **ESP32 Mesh** (recommended) | 3-6x ESP32-S3 boards + consumer WiFi router | ~$54 | Presence, motion, respiration detection |
+> | **Research NIC** | Intel 5300 or Atheros AR9580 (discontinued) | ~$50-100 | Full CSI with 3x3 MIMO |
+> | **Commodity WiFi** | Any Linux laptop with WiFi | $0 | Presence and coarse motion only (RSSI-based) |
+>
+> Without CSI-capable hardware, you can verify the signal processing pipeline using the included deterministic reference signal: `python v1/data/proof/verify.py`
+>
+> See [docs/adr/ADR-012-esp32-csi-sensor-mesh.md](docs/adr/ADR-012-esp32-csi-sensor-mesh.md) for the ESP32 setup guide and [docs/adr/ADR-013-feature-level-sensing-commodity-gear.md](docs/adr/ADR-013-feature-level-sensing-commodity-gear.md) for the zero-cost RSSI path.
+
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.95+-green.svg)](https://fastapi.tiangolo.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -52,7 +64,7 @@ A high-performance Rust port is available in `/rust-port/wifi-densepose-rs/`:
 | Memory Usage | ~500MB | ~100MB |
 | WASM Support | ❌ | ✅ |
 | Binary Size | N/A | ~10MB |
-| Test Coverage | 100% | 107 tests |
+| Test Coverage | 100% | 313 tests |
 
 **Quick Start (Rust):**
 ```bash
@@ -70,6 +82,19 @@ Mathematical correctness validated:
 - ✅ Doppler shift: 33.33 Hz (exact)
 - ✅ Correlation: 1.0 for identical signals
 - ✅ Phase coherence: 1.0 for coherent signals
+
+### SOTA Signal Processing (ADR-014)
+
+Six research-grade algorithms implemented in the `wifi-densepose-signal` crate:
+
+| Algorithm | Purpose | Reference |
+|-----------|---------|-----------|
+| **Conjugate Multiplication** | Cancels CFO/SFO from raw CSI phase via antenna ratio | SpotFi (SIGCOMM 2015) |
+| **Hampel Filter** | Robust outlier removal using median/MAD (resists 50% contamination) | Hampel (1974) |
+| **Fresnel Zone Model** | Physics-based breathing detection from chest displacement | FarSense (MobiCom 2019) |
+| **CSI Spectrogram** | STFT time-frequency matrices for CNN-based activity recognition | Standard since 2018 |
+| **Subcarrier Selection** | Variance-ratio ranking to pick top-K motion-sensitive subcarriers | WiDance (MobiCom 2017) |
+| **Body Velocity Profile** | Domain-independent velocity x time representation from Doppler | Widar 3.0 (MobiSys 2019) |
 
 See [Rust Port Documentation](/rust-port/wifi-densepose-rs/docs/) for ADRs and DDD patterns.
 
@@ -140,8 +165,10 @@ cargo test --package wifi-densepose-mat
 - [WiFi-Mat Disaster Response](#-wifi-mat-disaster-response-module)
 - [System Architecture](#️-system-architecture)
 - [Installation](#-installation)
-  - [Using pip (Recommended)](#using-pip-recommended)
-  - [From Source](#from-source)
+  - [Guided Installer (Recommended)](#guided-installer-recommended)
+  - [Install Profiles](#install-profiles)
+  - [From Source (Rust)](#from-source-rust--primary)
+  - [From Source (Python)](#from-source-python)
   - [Using Docker](#using-docker)
   - [System Requirements](#system-requirements)
 - [Quick Start](#-quick-start)
@@ -177,7 +204,7 @@ cargo test --package wifi-densepose-mat
 - [Testing](#-testing)
   - [Running Tests](#running-tests)
   - [Test Categories](#test-categories)
-  - [Mock Testing](#mock-testing)
+  - [Testing Without Hardware](#testing-without-hardware)
   - [Continuous Integration](#continuous-integration)
 - [Deployment](#-deployment)
   - [Production Deployment](#production-deployment)
@@ -254,30 +281,89 @@ WiFi DensePose consists of several key components working together:
 
 ## 📦 Installation
 
-### Using pip (Recommended)
+### Guided Installer (Recommended)
 
-WiFi-DensePose is now available on PyPI for easy installation:
+The interactive installer detects your hardware, checks your environment, and builds the right profile automatically:
 
 ```bash
-# Install the latest stable version
-pip install wifi-densepose
-
-# Install with specific version
-pip install wifi-densepose==1.0.0
-
-# Install with optional dependencies
-pip install wifi-densepose[gpu]  # For GPU acceleration
-pip install wifi-densepose[dev]  # For development
-pip install wifi-densepose[all]  # All optional dependencies
+./install.sh
 ```
 
-### From Source
+It walks through 7 steps:
+1. **System detection** — OS, RAM, disk, GPU
+2. **Toolchain detection** — Python, Rust, Docker, Node.js, ESP-IDF
+3. **WiFi hardware detection** — interfaces, ESP32 USB, Intel CSI debug
+4. **Profile recommendation** — picks the best profile for your hardware
+5. **Dependency installation** — installs what's missing
+6. **Build** — compiles the selected profile
+7. **Summary** — shows next steps and verification commands
+
+#### Install Profiles
+
+| Profile | What it installs | Size | Requirements |
+|---------|-----------------|------|-------------|
+| `verify` | Pipeline verification only | ~5 MB | Python 3.8+ |
+| `python` | Full Python API server + sensing | ~500 MB | Python 3.8+ |
+| `rust` | Rust pipeline (~810x faster) | ~200 MB | Rust 1.70+ |
+| `browser` | WASM for in-browser execution | ~10 MB | Rust + wasm-pack |
+| `iot` | ESP32 sensor mesh + aggregator | varies | Rust + ESP-IDF |
+| `docker` | Docker-based deployment | ~1 GB | Docker |
+| `field` | WiFi-Mat disaster response kit | ~62 MB | Rust + wasm-pack |
+| `full` | Everything available | ~2 GB | All toolchains |
+
+#### Non-Interactive Install
+
+```bash
+# Install a specific profile without prompts
+./install.sh --profile rust --yes
+
+# Just run hardware detection (no install)
+./install.sh --check-only
+
+# Or use make targets
+make install              # Interactive
+make install-verify       # Verification only
+make install-python       # Python pipeline
+make install-rust         # Rust pipeline
+make install-browser      # WASM browser build
+make install-docker       # Docker deployment
+make install-field        # Disaster response kit
+make install-full         # Everything
+make check                # Hardware check only
+```
+
+### From Source (Rust — Primary)
+
+```bash
+git clone https://github.com/ruvnet/wifi-densepose.git
+cd wifi-densepose
+
+# Install Rust pipeline (810x faster than Python)
+./install.sh --profile rust --yes
+
+# Or manually:
+cd rust-port/wifi-densepose-rs
+cargo build --release
+cargo test --workspace
+```
+
+### From Source (Python)
 
 ```bash
 git clone https://github.com/ruvnet/wifi-densepose.git
 cd wifi-densepose
 pip install -r requirements.txt
 pip install -e .
+```
+
+### Using pip (Python only)
+
+```bash
+pip install wifi-densepose
+
+# With optional dependencies
+pip install wifi-densepose[gpu]  # For GPU acceleration
+pip install wifi-densepose[all]  # All optional dependencies
 ```
 
 ### Using Docker
@@ -289,19 +375,23 @@ docker run -p 8000:8000 ruvnet/wifi-densepose:latest
 
 ### System Requirements
 
-- **Python**: 3.8 or higher
+- **Rust**: 1.70+ (primary runtime — install via [rustup](https://rustup.rs/))
+- **Python**: 3.8+ (for verification and legacy v1 API)
 - **Operating System**: Linux (Ubuntu 18.04+), macOS (10.15+), Windows 10+
 - **Memory**: Minimum 4GB RAM, Recommended 8GB+
 - **Storage**: 2GB free space for models and data
-- **Network**: WiFi interface with CSI capability
-- **GPU**: Optional but recommended (NVIDIA GPU with CUDA support)
+- **Network**: WiFi interface with CSI capability (optional — installer detects what you have)
+- **GPU**: Optional (NVIDIA CUDA or Apple Metal)
 
 ## 🚀 Quick Start
 
 ### 1. Basic Setup
 
 ```bash
-# Install the package
+# Install the package (Rust — recommended)
+./install.sh --profile rust --yes
+
+# Or Python legacy
 pip install wifi-densepose
 
 # Copy example configuration
@@ -879,17 +969,16 @@ pytest tests/performance/  # Performance tests
 - Memory usage profiling
 - Stress testing
 
-### Mock Testing
+### Testing Without Hardware
 
-For development without hardware:
+For development without WiFi CSI hardware, use the deterministic reference signal:
 
 ```bash
-# Enable mock mode
-export MOCK_HARDWARE=true
-export MOCK_POSE_DATA=true
+# Verify the full signal processing pipeline (no hardware needed)
+./verify
 
-# Run tests with mocked hardware
-pytest tests/ --mock-hardware
+# Run Rust tests (all use real signal processing, no mocks)
+cd rust-port/wifi-densepose-rs && cargo test --workspace
 ```
 
 ### Continuous Integration
@@ -1289,6 +1378,34 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Changelog
+
+### v2.2.0 — 2026-02-28
+
+- **Guided installer** — `./install.sh` with 7-step hardware detection, WiFi interface discovery, toolchain checks, and environment-specific RVF builds (verify/python/rust/browser/iot/docker/field/full profiles)
+- **Make targets** — `make install`, `make check`, `make install-rust`, `make build-wasm`, `make bench`, and 15+ other targets
+- **Real-only inference** — `forward()` and hardware adapters return explicit errors without weights/hardware instead of silent empty data
+- **5.7x Doppler FFT speedup** — Phase cache ring buffer reduces full pipeline from 719us to 254us per frame
+- **Trust kill switch** — `./verify` with SHA-256 proof replay, `--audit` mode, and production code integrity scan
+- **Security hardening** — 10 vulnerabilities fixed (hardcoded creds, JWT bypass, NaN panics), 12 dead code instances removed
+- **SOTA research** — Comprehensive WiFi sensing + RuVector analysis with 30+ citations and 20-year projection (docs/research/)
+- **6 SOTA signal algorithms (ADR-014)** — Conjugate multiplication (SpotFi), Hampel filter, Fresnel zone breathing model, CSI spectrogram, subcarrier sensitivity selection, Body Velocity Profile (Widar 3.0) — 83 new tests
+- **WiFi-Mat disaster response** — Ensemble classifier with START triage, scan zone management, API endpoints (ADR-001) — 139 tests
+- **ESP32 CSI hardware parser** — Real binary frame parsing with I/Q extraction, amplitude/phase conversion, stream resync (ADR-012) — 28 tests
+- **313 total Rust tests** — All passing, zero mocks
+
+### v2.1.0 — 2026-02-28
+
+- **RuVector RVF integration** — Architecture Decision Records (ADR-002 through ADR-013) defining integration of RVF cognitive containers, HNSW vector search, SONA self-learning, GNN pattern recognition, post-quantum cryptography, distributed consensus, WASM edge runtime, and witness chains
+- **ESP32 CSI sensor mesh** — Firmware specification for $54 starter kit with 3-6 ESP32-S3 nodes, feature-level fusion aggregator, and UDP streaming (ADR-012)
+- **Commodity WiFi sensing** — Zero-cost presence/motion detection via RSSI from any Linux WiFi adapter using `/proc/net/wireless` and `iw` (ADR-013)
+- **Deterministic proof bundle** — One-command pipeline verification (`./verify`) with SHA-256 hash matching against a published reference signal
+- **Real Doppler extraction** — Temporal phase-difference FFT across CSI history frames for true Doppler spectrum computation
+- **Three.js visualization** — 3D body model with 24 DensePose body parts, signal visualization, environment rendering, and WebSocket streaming
+- **Commodity sensing module** — `RssiFeatureExtractor` with FFT spectral analysis, CUSUM change detection, and `PresenceClassifier` with rule-based logic
+- **CI verification pipeline** — GitHub Actions workflow that verifies pipeline determinism and scans for unseeded random calls in production code
+- **Rust hardware adapters** — ESP32, Intel 5300, Atheros, UDP, and PCAP adapters now return explicit errors when no hardware is connected instead of silent empty data
 
 ## 🙏 Acknowledgments
 

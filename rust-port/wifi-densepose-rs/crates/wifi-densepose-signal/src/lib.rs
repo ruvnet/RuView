@@ -31,10 +31,16 @@
 //! let processor = CsiProcessor::new(config);
 //! ```
 
+pub mod bvp;
 pub mod csi_processor;
+pub mod csi_ratio;
 pub mod features;
+pub mod fresnel;
+pub mod hampel;
 pub mod motion;
 pub mod phase_sanitizer;
+pub mod spectrogram;
+pub mod subcarrier_selection;
 
 // Re-export main types for convenience
 pub use csi_processor::{

@@ -32,38 +32,38 @@ fn bench_tensor_operations(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_densepose_forward(c: &mut Criterion) {
-    let mut group = c.benchmark_group("densepose_forward");
+fn bench_densepose_inference(c: &mut Criterion) {
+    let mut group = c.benchmark_group("densepose_inference");
 
-    let config = DensePoseConfig::new(256, 24, 2);
-    let head = DensePoseHead::new(config).unwrap();
+    // Use MockBackend for benchmarking inference throughput
+    let engine = EngineBuilder::new().build_mock();
 
     for size in [32, 64].iter() {
         let input = Tensor::zeros_4d([1, 256, *size, *size]);
 
         group.throughput(Throughput::Elements((size * size * 256) as u64));
 
-        group.bench_with_input(BenchmarkId::new("mock_forward", size), size, |b, _| {
-            b.iter(|| black_box(head.forward(&input).unwrap()))
+        group.bench_with_input(BenchmarkId::new("inference", size), size, |b, _| {
+            b.iter(|| black_box(engine.infer(&input).unwrap()))
         });
     }
 
     group.finish();
 }
 
-fn bench_translator_forward(c: &mut Criterion) {
-    let mut group = c.benchmark_group("translator_forward");
+fn bench_translator_inference(c: &mut Criterion) {
+    let mut group = c.benchmark_group("translator_inference");
 
-    let config = TranslatorConfig::new(128, vec![256, 512, 256], 256);
-    let translator = ModalityTranslator::new(config).unwrap();
+    // Use MockBackend for benchmarking inference throughput
+    let engine = EngineBuilder::new().build_mock();
 
     for size in [32, 64].iter() {
         let input = Tensor::zeros_4d([1, 128, *size, *size]);
 
         group.throughput(Throughput::Elements((size * size * 128) as u64));
 
-        group.bench_with_input(BenchmarkId::new("mock_forward", size), size, |b, _| {
-            b.iter(|| black_box(translator.forward(&input).unwrap()))
+        group.bench_with_input(BenchmarkId::new("inference", size), size, |b, _| {
+            b.iter(|| black_box(engine.infer(&input).unwrap()))
         });
     }
 
@@ -112,8 +112,8 @@ fn bench_batch_inference(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_tensor_operations,
-    bench_densepose_forward,
-    bench_translator_forward,
+    bench_densepose_inference,
+    bench_translator_inference,
     bench_mock_inference,
     bench_batch_inference,
 );

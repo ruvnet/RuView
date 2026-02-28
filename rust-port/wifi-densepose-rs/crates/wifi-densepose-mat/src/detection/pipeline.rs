@@ -183,14 +183,19 @@ impl DetectionPipeline {
         self.ml_pipeline.as_ref().map_or(true, |ml| ml.is_ready())
     }
 
-    /// Process a scan zone and return detected vital signs
+    /// Process a scan zone and return detected vital signs.
+    ///
+    /// CSI data must be pushed into the pipeline via [`add_data`] before calling
+    /// this method. The pipeline processes buffered amplitude/phase samples through
+    /// breathing, heartbeat, and movement detectors. If ML is enabled and ready,
+    /// results are enhanced with ML predictions.
+    ///
+    /// Returns `None` if insufficient data is buffered (< 5 seconds) or if
+    /// detection confidence is below the configured threshold.
     pub async fn process_zone(&self, zone: &ScanZone) -> Result<Option<VitalSignsReading>, MatError> {
-        // In a real implementation, this would:
-        // 1. Collect CSI data from sensors in the zone
-        // 2. Preprocess the data
-        // 3. Run detection algorithms
-
-        // For now, check if we have buffered data
+        // Process buffered CSI data through the signal processing pipeline.
+        // Data arrives via add_data() from hardware adapters (ESP32, Intel 5300, etc.)
+        // or from the CSI push API endpoint.
         let buffer = self.data_buffer.read();
 
         if !buffer.has_sufficient_data(5.0) {

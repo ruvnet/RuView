@@ -745,88 +745,28 @@ impl HardwareAdapter {
             _ => return Err(AdapterError::Config("Invalid settings for ESP32".into())),
         };
 
-        // In a real implementation, this would read from the serial port
-        // and parse ESP-CSI format data
-        tracing::trace!("Reading ESP32 CSI from {}", settings.port);
-
-        // Simulate read delay
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-
-        // Return placeholder - real implementation would parse serial data
-        Ok(CsiReadings {
-            timestamp: Utc::now(),
-            readings: vec![],
-            metadata: CsiMetadata {
-                device_type: DeviceType::Esp32,
-                channel: config.channel_config.channel,
-                bandwidth: config.channel_config.bandwidth,
-                num_subcarriers: config.channel_config.num_subcarriers,
-                rssi: None,
-                noise_floor: None,
-                fc_type: FrameControlType::Data,
-            },
-        })
+        Err(AdapterError::Hardware(format!(
+            "ESP32 CSI hardware adapter not yet implemented. Serial port {} configured but no parser available. See ADR-012 for ESP32 firmware specification.",
+            settings.port
+        )))
     }
 
     /// Read CSI from Intel 5300 NIC
-    async fn read_intel_5300_csi(config: &HardwareConfig) -> Result<CsiReadings, AdapterError> {
-        // Intel 5300 uses connector interface from Linux CSI Tool
-        tracing::trace!("Reading Intel 5300 CSI");
-
-        // In a real implementation, this would:
-        // 1. Open /proc/net/connector (netlink socket)
-        // 2. Listen for BFEE_NOTIF messages
-        // 3. Parse the bfee struct
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-
-        Ok(CsiReadings {
-            timestamp: Utc::now(),
-            readings: vec![],
-            metadata: CsiMetadata {
-                device_type: DeviceType::Intel5300,
-                channel: config.channel_config.channel,
-                bandwidth: config.channel_config.bandwidth,
-                num_subcarriers: 30, // Intel 5300 provides 30 subcarriers
-                rssi: None,
-                noise_floor: None,
-                fc_type: FrameControlType::Data,
-            },
-        })
+    async fn read_intel_5300_csi(_config: &HardwareConfig) -> Result<CsiReadings, AdapterError> {
+        Err(AdapterError::Hardware(
+            "Intel 5300 CSI adapter not yet implemented. Requires Linux CSI Tool kernel module and netlink connector parsing.".into()
+        ))
     }
 
     /// Read CSI from Atheros NIC
     async fn read_atheros_csi(
-        config: &HardwareConfig,
+        _config: &HardwareConfig,
         driver: AtherosDriver,
     ) -> Result<CsiReadings, AdapterError> {
-        tracing::trace!("Reading Atheros ({:?}) CSI", driver);
-
-        // In a real implementation, this would:
-        // 1. Read from debugfs CSI buffer
-        // 2. Parse driver-specific CSI format
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-
-        let num_subcarriers = match driver {
-            AtherosDriver::Ath9k => 56,
-            AtherosDriver::Ath10k => 114,
-            AtherosDriver::Ath11k => 234,
-        };
-
-        Ok(CsiReadings {
-            timestamp: Utc::now(),
-            readings: vec![],
-            metadata: CsiMetadata {
-                device_type: DeviceType::Atheros(driver),
-                channel: config.channel_config.channel,
-                bandwidth: config.channel_config.bandwidth,
-                num_subcarriers,
-                rssi: None,
-                noise_floor: None,
-                fc_type: FrameControlType::Data,
-            },
-        })
+        Err(AdapterError::Hardware(format!(
+            "Atheros {:?} CSI adapter not yet implemented. Requires debugfs CSI buffer parsing.",
+            driver
+        )))
     }
 
     /// Read CSI from UDP socket
@@ -836,24 +776,10 @@ impl HardwareAdapter {
             _ => return Err(AdapterError::Config("Invalid settings for UDP".into())),
         };
 
-        tracing::trace!("Reading UDP CSI on {}:{}", settings.bind_address, settings.port);
-
-        // Placeholder - real implementation would receive and parse UDP packets
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-
-        Ok(CsiReadings {
-            timestamp: Utc::now(),
-            readings: vec![],
-            metadata: CsiMetadata {
-                device_type: DeviceType::UdpReceiver,
-                channel: config.channel_config.channel,
-                bandwidth: config.channel_config.bandwidth,
-                num_subcarriers: config.channel_config.num_subcarriers,
-                rssi: None,
-                noise_floor: None,
-                fc_type: FrameControlType::Data,
-            },
-        })
+        Err(AdapterError::Hardware(format!(
+            "UDP CSI receiver not yet implemented. Bind address {}:{} configured but no packet parser available.",
+            settings.bind_address, settings.port
+        )))
     }
 
     /// Read CSI from PCAP file
@@ -863,27 +789,10 @@ impl HardwareAdapter {
             _ => return Err(AdapterError::Config("Invalid settings for PCAP".into())),
         };
 
-        tracing::trace!("Reading PCAP CSI from {}", settings.file_path);
-
-        // Placeholder - real implementation would read and parse PCAP packets
-        tokio::time::sleep(tokio::time::Duration::from_millis(
-            (10.0 / settings.playback_speed) as u64,
-        ))
-        .await;
-
-        Ok(CsiReadings {
-            timestamp: Utc::now(),
-            readings: vec![],
-            metadata: CsiMetadata {
-                device_type: DeviceType::PcapFile,
-                channel: config.channel_config.channel,
-                bandwidth: config.channel_config.bandwidth,
-                num_subcarriers: config.channel_config.num_subcarriers,
-                rssi: None,
-                noise_floor: None,
-                fc_type: FrameControlType::Data,
-            },
-        })
+        Err(AdapterError::Hardware(format!(
+            "PCAP CSI reader not yet implemented. File {} configured but no packet parser available.",
+            settings.file_path
+        )))
     }
 
     /// Generate simulated CSI data
@@ -896,7 +805,7 @@ impl HardwareAdapter {
         let num_subcarriers = config.channel_config.num_subcarriers;
         let t = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs_f64();
 
         // Generate simulated breathing pattern (~0.3 Hz)
@@ -1193,7 +1102,7 @@ fn rand_simple() -> f64 {
     use std::time::SystemTime;
     let nanos = SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .subsec_nanos();
     (nanos % 1000) as f64 / 1000.0 - 0.5
 }

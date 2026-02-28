@@ -98,8 +98,11 @@ pub fn moving_average(data: &Array1<f64>, window_size: usize) -> Array1<f64> {
     let mut result = Array1::zeros(data.len());
     let half_window = window_size / 2;
 
-    // Safe unwrap: ndarray Array1 is always contiguous
-    let slice = data.as_slice().expect("Array1 should be contiguous");
+    // ndarray Array1 is always contiguous, but handle gracefully if not
+    let slice = match data.as_slice() {
+        Some(s) => s,
+        None => return data.clone(),
+    };
 
     for i in 0..data.len() {
         let start = i.saturating_sub(half_window);

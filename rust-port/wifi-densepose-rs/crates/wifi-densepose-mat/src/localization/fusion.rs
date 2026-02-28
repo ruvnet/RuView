@@ -73,17 +73,21 @@ impl LocalizationService {
         Some(position_3d)
     }
 
-    /// Simulate RSSI measurements (placeholder for real sensor data)
+    /// Read RSSI measurements from sensors.
+    ///
+    /// Returns empty when no real sensor hardware is connected.
+    /// Real RSSI readings require ESP32 mesh (ADR-012) or Linux WiFi interface (ADR-013).
+    /// Caller handles empty readings by returning None/default.
     fn simulate_rssi_measurements(
         &self,
-        sensors: &[crate::domain::SensorPosition],
+        _sensors: &[crate::domain::SensorPosition],
         _vitals: &VitalSignsReading,
     ) -> Vec<(String, f64)> {
-        // In production, this would read actual sensor values
-        // For now, return placeholder values
-        sensors.iter()
-            .map(|s| (s.id.clone(), -50.0 + rand_range(-10.0, 10.0)))
-            .collect()
+        // No real sensor hardware connected - return empty.
+        // Real RSSI readings require ESP32 mesh (ADR-012) or Linux WiFi interface (ADR-013).
+        // Caller handles empty readings by returning None from estimate_position.
+        tracing::warn!("No sensor hardware connected. Real RSSI readings require ESP32 mesh (ADR-012) or Linux WiFi interface (ADR-013).");
+        vec![]
     }
 
     /// Estimate debris profile for the zone
@@ -309,18 +313,6 @@ impl Default for PositionFuser {
     }
 }
 
-/// Simple random range (for simulation)
-fn rand_range(min: f64, max: f64) -> f64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-
-    let pseudo_random = ((seed * 1103515245 + 12345) % (1 << 31)) as f64 / (1u64 << 31) as f64;
-    min + pseudo_random * (max - min)
-}
 
 #[cfg(test)]
 mod tests {

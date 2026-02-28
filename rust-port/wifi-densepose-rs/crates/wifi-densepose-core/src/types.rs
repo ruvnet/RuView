@@ -172,16 +172,6 @@ impl Confidence {
 
     /// Creates a confidence value without validation (for internal use).
     ///
-    /// # Safety
-    ///
-    /// The caller must ensure the value is in [0.0, 1.0].
-    #[must_use]
-    #[allow(dead_code)]
-    pub(crate) fn new_unchecked(value: f32) -> Self {
-        debug_assert!((0.0..=1.0).contains(&value));
-        Self(value)
-    }
-
     /// Returns the raw confidence value.
     #[must_use]
     pub fn value(&self) -> f32 {
@@ -1009,7 +999,12 @@ impl PoseEstimate {
     pub fn highest_confidence_person(&self) -> Option<&PersonPose> {
         self.persons
             .iter()
-            .max_by(|a, b| a.confidence.value().partial_cmp(&b.confidence.value()).unwrap())
+            .max_by(|a, b| {
+                a.confidence
+                    .value()
+                    .partial_cmp(&b.confidence.value())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
     }
 }
 

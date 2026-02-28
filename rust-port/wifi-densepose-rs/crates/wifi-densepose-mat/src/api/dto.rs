@@ -849,6 +849,129 @@ pub struct ListAlertsQuery {
     pub active_only: bool,
 }
 
+// ============================================================================
+// Scan Control DTOs
+// ============================================================================
+
+/// Request to push CSI data into the pipeline.
+///
+/// ## Example
+///
+/// ```json
+/// {
+///   "amplitudes": [0.5, 0.6, 0.4, 0.7, 0.3],
+///   "phases": [0.1, -0.2, 0.15, -0.1, 0.05],
+///   "sample_rate": 1000.0
+/// }
+/// ```
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PushCsiDataRequest {
+    /// CSI amplitude samples
+    pub amplitudes: Vec<f64>,
+    /// CSI phase samples (must be same length as amplitudes)
+    pub phases: Vec<f64>,
+    /// Sample rate in Hz (optional, defaults to pipeline config)
+    #[serde(default)]
+    pub sample_rate: Option<f64>,
+}
+
+/// Response after pushing CSI data.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PushCsiDataResponse {
+    /// Whether data was accepted
+    pub accepted: bool,
+    /// Number of samples ingested
+    pub samples_ingested: usize,
+    /// Current buffer duration in seconds
+    pub buffer_duration_secs: f64,
+}
+
+/// Scan control action request.
+///
+/// ## Example
+///
+/// ```json
+/// { "action": "start" }
+/// ```
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ScanControlRequest {
+    /// Action to perform
+    pub action: ScanAction,
+}
+
+/// Available scan actions.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScanAction {
+    /// Start scanning
+    Start,
+    /// Stop scanning
+    Stop,
+    /// Pause scanning (retain buffer)
+    Pause,
+    /// Resume from pause
+    Resume,
+    /// Clear the CSI data buffer
+    ClearBuffer,
+}
+
+/// Response for scan control actions.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ScanControlResponse {
+    /// Whether action was performed
+    pub success: bool,
+    /// Current scan state
+    pub state: String,
+    /// Description of what happened
+    pub message: String,
+}
+
+/// Response for pipeline status query.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PipelineStatusResponse {
+    /// Whether scanning is active
+    pub scanning: bool,
+    /// Current buffer duration in seconds
+    pub buffer_duration_secs: f64,
+    /// Whether ML pipeline is enabled
+    pub ml_enabled: bool,
+    /// Whether ML pipeline is ready
+    pub ml_ready: bool,
+    /// Detection config summary
+    pub sample_rate: f64,
+    /// Heartbeat detection enabled
+    pub heartbeat_enabled: bool,
+    /// Minimum confidence threshold
+    pub min_confidence: f64,
+}
+
+/// Domain events list response.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DomainEventsResponse {
+    /// List of domain events
+    pub events: Vec<DomainEventDto>,
+    /// Total count
+    pub total: usize,
+}
+
+/// Serializable domain event for API response.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DomainEventDto {
+    /// Event type
+    pub event_type: String,
+    /// Timestamp
+    pub timestamp: DateTime<Utc>,
+    /// JSON-serialized event details
+    pub details: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

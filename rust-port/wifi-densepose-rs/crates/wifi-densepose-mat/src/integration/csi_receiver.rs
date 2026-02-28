@@ -701,8 +701,14 @@ impl PcapCsiReader {
         };
 
         if pcap_config.playback_speed > 0.0 {
-            let packet_offset = packet.timestamp - self.start_time.unwrap();
-            let real_offset = Utc::now() - self.playback_time.unwrap();
+            let Some(start_time) = self.start_time else {
+                return Ok(None);
+            };
+            let Some(playback_time) = self.playback_time else {
+                return Ok(None);
+            };
+            let packet_offset = packet.timestamp - start_time;
+            let real_offset = Utc::now() - playback_time;
             let scaled_offset = packet_offset
                 .num_milliseconds()
                 .checked_div((pcap_config.playback_speed * 1000.0) as i64)
@@ -1104,25 +1110,12 @@ impl CsiParser {
             return Err(AdapterError::DataFormat("PicoScenes packet too short".into()));
         }
 
-        // Simplified parsing - real implementation would parse all segments
-        let rssi = data[20] as i8;
-        let channel = data[24];
-
-        // Placeholder - full implementation would parse the CSI segment
-        Ok(CsiPacket {
-            timestamp: Utc::now(),
-            source_id: "picoscenes".to_string(),
-            amplitudes: vec![],
-            phases: vec![],
-            rssi,
-            noise_floor: -92,
-            metadata: CsiPacketMetadata {
-                channel,
-                format: CsiPacketFormat::PicoScenes,
-                ..Default::default()
-            },
-            raw_data: Some(data.to_vec()),
-        })
+        // PicoScenes CSI segment parsing is not yet implemented.
+        // The format requires parsing DeviceType, RxSBasic, CSI, and MVMExtra segments.
+        // See https://ps.zpj.io/packet-format.html for the full specification.
+        Err(AdapterError::DataFormat(
+            "PicoScenes CSI parser not yet implemented. Packet received but segment parsing (DeviceType, RxSBasic, CSI, MVMExtra) is required. See https://ps.zpj.io/packet-format.html".into()
+        ))
     }
 
     /// Parse JSON CSI format
