@@ -248,13 +248,9 @@ class RouterInterface:
         """
         try:
             if self.mock_mode:
-                # Update mock generator parameters
-                if 'sampling_rate' in config:
-                    self.mock_data_generator['frequency'] = config['sampling_rate'] / 1000.0
-                
-                if 'noise_level' in config:
-                    self.mock_data_generator['noise_level'] = config['noise_level']
-                
+                if self._mock_csi_generator is None:
+                    self._initialize_mock_generator()
+                self._mock_csi_generator.configure(config)
                 self.logger.info(f"Mock CSI collection configured for router {self.router_id}")
                 return True
             
