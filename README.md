@@ -54,23 +54,26 @@ ESP32-S3 (STA + promiscuous)     UDP/5005      Rust aggregator
 | Latency | < 1ms (UDP loopback) |
 | Presence detection | Motion score 10/10 at 3m |
 
-**Quick start:**
+**Quick start (pre-built binaries — no toolchain required):**
 
 ```bash
-# 1. Build firmware (Docker)
-cd firmware/esp32-csi-node
-docker run --rm -v "$(pwd):/project" -w /project espressif/idf:v5.2 \
-  bash -c "idf.py set-target esp32s3 && idf.py build"
+# 1. Download binaries from GitHub release
+#    https://github.com/ruvnet/wifi-densepose/releases/tag/v0.1.0-esp32
 
-# 2. Flash to ESP32-S3
+# 2. Flash to ESP32-S3 (pip install esptool)
 python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
-  write-flash @build/flash_args
+  write-flash --flash-mode dio --flash-size 4MB \
+  0x0 bootloader.bin 0x8000 partition-table.bin 0x10000 esp32-csi-node.bin
 
-# 3. Run aggregator
-cargo run -p wifi-densepose-hardware --bin aggregator -- --bind 0.0.0.0:5005
+# 3. Provision WiFi (no recompile needed)
+python scripts/provision.py --port COM7 \
+  --ssid "YourWiFi" --password "secret" --target-ip 192.168.1.20
+
+# 4. Run aggregator
+cargo run -p wifi-densepose-hardware --bin aggregator -- --bind 0.0.0.0:5005 --verbose
 ```
 
-See [`firmware/esp32-csi-node/README.md`](firmware/esp32-csi-node/README.md) for detailed setup.
+Or build from source with Docker — see [`firmware/esp32-csi-node/README.md`](firmware/esp32-csi-node/README.md) for full guide and [Issue #34](https://github.com/ruvnet/wifi-densepose/issues/34) for step-by-step tutorial.
 
 ## 🦀 Rust Implementation (v2)
 
