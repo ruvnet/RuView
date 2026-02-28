@@ -107,7 +107,11 @@ export function buildApiUrl(endpoint, params = {}) {
 
 // Helper function to build WebSocket URLs
 export function buildWsUrl(endpoint, params = {}) {
-  const protocol = window.location.protocol === 'https:' 
+  // Always use secure WebSocket (wss://) in production or when using HTTPS
+  // Use ws:// only for localhost development
+  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const isProduction = window.location.protocol === 'https:' || process.env.NODE_ENV === 'production';
+  const protocol = (isProduction || !isLocalhost) 
     ? API_CONFIG.WSS_PREFIX 
     : API_CONFIG.WS_PREFIX;
   
