@@ -1390,6 +1390,10 @@ SOFTWARE.
 - **Trust kill switch** — `./verify` with SHA-256 proof replay, `--audit` mode, and production code integrity scan
 - **Security hardening** — 10 vulnerabilities fixed (hardcoded creds, JWT bypass, NaN panics), 12 dead code instances removed
 - **SOTA research** — Comprehensive WiFi sensing + RuVector analysis with 30+ citations and 20-year projection (docs/research/)
+- **6 SOTA signal algorithms (ADR-014)** — Conjugate multiplication (SpotFi), Hampel filter, Fresnel zone breathing model, CSI spectrogram, subcarrier sensitivity selection, Body Velocity Profile (Widar 3.0) — 83 new tests
+- **WiFi-Mat disaster response** — Ensemble classifier with START triage, scan zone management, API endpoints (ADR-001) — 139 tests
+- **ESP32 CSI hardware parser** — Real binary frame parsing with I/Q extraction, amplitude/phase conversion, stream resync (ADR-012) — 28 tests
+- **313 total Rust tests** — All passing, zero mocks
 
 ### v2.1.0 — 2026-02-28
 
