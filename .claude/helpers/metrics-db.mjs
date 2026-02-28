@@ -7,7 +7,7 @@
 
 import initSqlJs from 'sql.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'fs';
-import { dirname, join, basename } from 'path';
+import { dirname, join, basename, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 
@@ -154,7 +154,19 @@ function countFilesAndLines(dir, ext = '.ts') {
     try {
       const entries = readdirSync(currentDir, { withFileTypes: true });
       for (const entry of entries) {
+        // Validate entry name to prevent path traversal
+        if (entry.name.includes('..') || entry.name.includes('/') || entry.name.includes('\\')) {
+          continue;
+        }
+        
         const fullPath = join(currentDir, entry.name);
+        // Additional validation: ensure resolved path is within the base directory
+        const resolvedPath = resolve(fullPath);
+        const resolvedCurrentDir = resolve(currentDir);
+        if (!resolvedPath.startsWith(resolvedCurrentDir)) {
+          continue; // Path traversal attempt detected
+        }
+        
         if (entry.isDirectory() && !entry.name.includes('node_modules')) {
           walk(fullPath);
         } else if (entry.isFile() && entry.name.endsWith(ext)) {
@@ -209,7 +221,20 @@ function calculateModuleProgress(moduleDir) {
  * Check security file status
  */
 function checkSecurityFile(filename, minLines = 100) {
+  // Validate filename to prevent path traversal
+  if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+    return false;
+  }
+  
   const filePath = join(V3_DIR, '@claude-flow/security/src', filename);
+  
+  // Additional validation: ensure resolved path is within the expected directory
+  const resolvedPath = resolve(filePath);
+  const expectedDir = resolve(join(V3_DIR, '@claude-flow/security/src'));
+  if (!resolvedPath.startsWith(expectedDir)) {
+    return false; // Path traversal attempt detected
+  }
+  
   if (!existsSync(filePath)) return false;
 
   try {
