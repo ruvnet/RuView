@@ -1,7 +1,7 @@
 # ADR-012: ESP32 CSI Sensor Mesh for Distributed Sensing
 
 ## Status
-Proposed
+Accepted — Partially Implemented (firmware + aggregator working, see ADR-018)
 
 ## Date
 2026-02-28
@@ -112,22 +112,24 @@ We will build an ESP32 CSI Sensor Mesh as the primary hardware integration path,
 ```
 firmware/esp32-csi-node/
 ├── CMakeLists.txt
-├── sdkconfig.defaults      # Menuconfig defaults with CSI enabled
+├── sdkconfig.defaults      # Menuconfig defaults with CSI enabled (gitignored)
 ├── main/
 │   ├── CMakeLists.txt
-│   ├── main.c              # Entry point, WiFi init, CSI callback
-│   ├── csi_collector.c     # CSI data collection and buffering
+│   ├── main.c              # Entry point, NVS config, WiFi init, CSI callback
+│   ├── csi_collector.c     # CSI collection, promiscuous mode, ADR-018 serialization
 │   ├── csi_collector.h
-│   ├── feature_extract.c   # On-device FFT and feature extraction
-│   ├── feature_extract.h
+│   ├── nvs_config.c        # Runtime config from NVS (WiFi creds, target IP)
+│   ├── nvs_config.h
 │   ├── stream_sender.c     # UDP stream to aggregator
 │   ├── stream_sender.h
-│   ├── config.h             # Node configuration (SSID, aggregator IP)
 │   └── Kconfig.projbuild   # Menuconfig options
-├── components/
-│   └── esp_dsp/            # Espressif DSP library for FFT
-└── README.md               # Flash instructions
+└── README.md               # Flash instructions (verified working)
 ```
+
+> **Implementation note**: On-device feature extraction (`feature_extract.c`) is deferred.
+> The current firmware streams raw I/Q data in ADR-018 binary format; feature extraction
+> happens in the Rust aggregator. This simplifies the firmware and keeps the ESP32 code
+> under 200 lines of C.
 
 **On-device processing** (reduces bandwidth, node does pre-processing):
 
@@ -257,34 +259,58 @@ Specifically:
 
 ### Minimal Build Spec (Clone-Flash-Run)
 
+**Option A: Use pre-built binaries (no toolchain required)**
+
+```bash
+# Download binaries from GitHub Release v0.1.0-esp32
+# Flash with esptool (pip install esptool)
+python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
+  write-flash --flash-mode dio --flash-size 4MB \
+  0x0 bootloader.bin 0x8000 partition-table.bin 0x10000 esp32-csi-node.bin
+
+# Provision WiFi credentials (no recompile needed)
+python scripts/provision.py --port COM7 \
+  --ssid "YourWiFi" --password "secret" --target-ip 192.168.1.20
+
+# Run aggregator
+cargo run -p wifi-densepose-hardware --bin aggregator -- --bind 0.0.0.0:5005 --verbose
 ```
-# Step 1: Flash one node (requires ESP-IDF installed)
+
+**Option B: Build from source with Docker (no ESP-IDF install needed)**
+
+```bash
+# Step 1: Edit WiFi credentials
+vim firmware/esp32-csi-node/sdkconfig.defaults
+
+# Step 2: Build with Docker
 cd firmware/esp32-csi-node
-idf.py set-target esp32s3
-idf.py menuconfig  # Set WiFi SSID/password, aggregator IP
-idf.py build flash monitor
+MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd):/project" -w /project \
+  espressif/idf:v5.2 bash -c "idf.py set-target esp32s3 && idf.py build"
 
-# Step 2: Run aggregator (Docker)
-docker compose -f docker-compose.esp32.yml up
+# Step 3: Flash
+cd build
+python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
+  write-flash --flash-mode dio --flash-size 4MB \
+  0x0 bootloader/bootloader.bin 0x8000 partition_table/partition-table.bin \
+  0x10000 esp32-csi-node.bin
 
-# Step 3: Verify with proof bundle
-# Aggregator captures 10 seconds, produces feature JSON, verifies hash
-docker exec aggregator python verify_esp32.py
-
-# Step 4: Open visualization
-open http://localhost:3000  # Three.js dashboard
+# Step 4: Run aggregator
+cargo run -p wifi-densepose-hardware --bin aggregator -- --bind 0.0.0.0:5005 --verbose
 ```
+
+**Verified**: 20 Hz CSI streaming, 64/128/192 subcarrier frames, RSSI -47 to -88 dBm.
+See tutorial: https://github.com/ruvnet/wifi-densepose/issues/34
 
 ### Proof of Reality for ESP32
 
-```
-firmware/esp32-csi-node/proof/
-├── captured_csi_10sec.bin          # Real 10-second CSI capture from ESP32
-├── captured_csi_meta.json          # Board: ESP32-S3-DevKitC, ESP-IDF: 5.2, Router: TP-Link AX1800
-├── expected_features.json          # Feature extraction output
-├── expected_features.sha256        # Hash verification
-└── capture_photo.jpg               # Photo of actual hardware setup
-```
+**Live verified** with ESP32-S3-DevKitC-1 (CP2102, MAC 3C:0F:02:EC:C2:28):
+- 693 frames in 18 seconds (~21.6 fps)
+- Sequence numbers contiguous (zero frame loss)
+- Presence detection confirmed: motion score 10/10 with per-second amplitude variance
+- Frame types: 64 sc (148 B), 128 sc (276 B), 192 sc (404 B)
+- 20 Rust tests + 6 Python tests pass
+
+Pre-built binaries: https://github.com/ruvnet/wifi-densepose/releases/tag/v0.1.0-esp32
 
 ## Consequences
 
@@ -316,3 +342,6 @@ firmware/esp32-csi-node/proof/
 - [ESP32 CSI Research Papers](https://ieeexplore.ieee.org/document/9439871)
 - [Wi-Fi Sensing with ESP32: A Tutorial](https://arxiv.org/abs/2207.07859)
 - ADR-011: Python Proof-of-Reality and Mock Elimination
+- ADR-018: ESP32 Development Implementation (binary frame format specification)
+- [Pre-built firmware release v0.1.0-esp32](https://github.com/ruvnet/wifi-densepose/releases/tag/v0.1.0-esp32)
+- [Step-by-step tutorial (Issue #34)](https://github.com/ruvnet/wifi-densepose/issues/34)
