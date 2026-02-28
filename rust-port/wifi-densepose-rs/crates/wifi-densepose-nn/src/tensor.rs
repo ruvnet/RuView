@@ -285,7 +285,7 @@ impl Tensor {
                 let result = a.map_axis(ndarray::Axis(axis), |row| {
                     row.iter()
                         .enumerate()
-                        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                         .map(|(i, _)| i as i64)
                         .unwrap_or(0)
                 });

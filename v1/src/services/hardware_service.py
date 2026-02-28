@@ -121,9 +121,9 @@ class HardwareService:
                 router_interface = RouterInterface(
                     router_id=router_id,
                     host=router_config.ip_address,
-                    port=22,  # Default SSH port
-                    username="admin",  # Default username
-                    password="admin",  # Default password
+                    port=getattr(router_config, 'ssh_port', 22),
+                    username=getattr(router_config, 'ssh_username', None) or self.settings.router_ssh_username,
+                    password=getattr(router_config, 'ssh_password', None) or self.settings.router_ssh_password,
                     interface=router_config.interface,
                     mock_mode=self.settings.mock_hardware
                 )

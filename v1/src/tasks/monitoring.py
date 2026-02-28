@@ -8,9 +8,8 @@ import psutil
 import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
-from contextlib import asynccontextmanager
 
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.settings import Settings

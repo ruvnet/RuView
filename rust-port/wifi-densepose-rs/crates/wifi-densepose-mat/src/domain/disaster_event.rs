@@ -310,7 +310,8 @@ impl DisasterEvent {
         // Create new survivor
         let survivor = Survivor::new(zone_id, vitals, location);
         self.survivors.push(survivor);
-        Ok(self.survivors.last().unwrap())
+        // Safe: we just pushed, so last() is always Some
+        Ok(self.survivors.last().expect("survivors is non-empty after push"))
     }
 
     /// Find a survivor near a location

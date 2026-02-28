@@ -805,7 +805,7 @@ impl HardwareAdapter {
         let num_subcarriers = config.channel_config.num_subcarriers;
         let t = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs_f64();
 
         // Generate simulated breathing pattern (~0.3 Hz)
@@ -1102,7 +1102,7 @@ fn rand_simple() -> f64 {
     use std::time::SystemTime;
     let nanos = SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .subsec_nanos();
     (nanos % 1000) as f64 / 1000.0 - 0.5
 }

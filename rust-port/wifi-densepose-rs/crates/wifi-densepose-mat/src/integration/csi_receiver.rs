@@ -701,8 +701,14 @@ impl PcapCsiReader {
         };
 
         if pcap_config.playback_speed > 0.0 {
-            let packet_offset = packet.timestamp - self.start_time.unwrap();
-            let real_offset = Utc::now() - self.playback_time.unwrap();
+            let Some(start_time) = self.start_time else {
+                return Ok(None);
+            };
+            let Some(playback_time) = self.playback_time else {
+                return Ok(None);
+            };
+            let packet_offset = packet.timestamp - start_time;
+            let real_offset = Utc::now() - playback_time;
             let scaled_offset = packet_offset
                 .num_milliseconds()
                 .checked_div((pcap_config.playback_speed * 1000.0) as i64)

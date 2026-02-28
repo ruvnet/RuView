@@ -175,6 +175,9 @@ class RouterInterface:
         """
         try:
             channel = config.get('channel', 6)
+            # Validate channel is an integer in a safe range to prevent command injection
+            if not isinstance(channel, int) or not (1 <= channel <= 196):
+                raise ValueError(f"Invalid WiFi channel: {channel}. Must be an integer between 1 and 196.")
             command = f"iwconfig wlan0 channel {channel} && echo 'CSI monitoring configured'"
             await self.execute_command(command)
             return True

@@ -5,7 +5,6 @@ Command-line interface for WiFi-DensePose API
 import asyncio
 import click
 import sys
-from pathlib import Path
 from typing import Optional
 
 from src.config.settings import get_settings, load_settings_from_file

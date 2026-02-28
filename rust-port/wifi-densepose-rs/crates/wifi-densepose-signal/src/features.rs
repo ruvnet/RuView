@@ -490,7 +490,9 @@ impl PowerSpectralDensity {
         let peak_idx = positive_psd
             .iter()
             .enumerate()
-            .max_by(|(_, a): &(usize, &f64), (_, b): &(usize, &f64)| a.partial_cmp(b).unwrap())
+            .max_by(|(_, a): &(usize, &f64), (_, b): &(usize, &f64)| {
+                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|(i, _)| i)
             .unwrap_or(0);
         let peak_frequency = positive_freq[peak_idx];

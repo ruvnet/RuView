@@ -3,7 +3,6 @@ FastAPI application factory and configuration
 """
 
 import logging
-import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -17,7 +16,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from src.config.settings import Settings
 from src.services.orchestrator import ServiceOrchestrator
 from src.middleware.auth import AuthenticationMiddleware
-from fastapi.middleware.cors import CORSMiddleware
 from src.middleware.rate_limit import RateLimitMiddleware
 from src.middleware.error_handler import ErrorHandlingMiddleware
 from src.api.routers import pose, stream, health
@@ -294,10 +292,21 @@ def setup_root_endpoints(app: FastAPI, settings: Settings):
     if settings.is_development and settings.enable_test_endpoints:
         @app.get(f"{settings.api_prefix}/dev/config")
         async def dev_config():
-            """Get current configuration (development only)."""
+            """Get current configuration (development only).
+
+            Returns a sanitized view of settings.  Secret keys,
+            passwords, and raw environment variables are never exposed.
+            """
+            # Build a sanitized copy -- redact any key that looks secret
+            _sensitive = {"secret", "password", "token", "key", "credential", "auth"}
+            raw = settings.dict()
+            sanitized = {
+                k: "***REDACTED***" if any(s in k.lower() for s in _sensitive) else v
+                for k, v in raw.items()
+            }
             return {
-                "settings": settings.dict(),
-                "environment_variables": dict(os.environ)
+                "settings": sanitized,
+                "environment": settings.environment,
             }
         
         @app.post(f"{settings.api_prefix}/dev/reset")

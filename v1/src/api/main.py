@@ -380,10 +380,19 @@ if settings.metrics_enabled:
 if settings.is_development and settings.enable_test_endpoints:
     @app.get(f"{settings.api_prefix}/dev/config")
     async def dev_config():
-        """Get current configuration (development only)."""
+        """Get current configuration (development only).
+
+        Returns a sanitized view -- secret keys and passwords are redacted.
+        """
+        _sensitive = {"secret", "password", "token", "key", "credential", "auth"}
+        raw = settings.dict()
+        sanitized = {
+            k: "***REDACTED***" if any(s in k.lower() for s in _sensitive) else v
+            for k, v in raw.items()
+        }
         domain_config = get_domain_config()
         return {
-            "settings": settings.dict(),
+            "settings": sanitized,
             "domain_config": domain_config.to_dict()
         }
     
