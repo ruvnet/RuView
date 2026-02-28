@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-02-28T14:34:03.461Z",
+  "timestamp": "2026-02-28T15:43:19.045Z",
   "projectRoot": "/home/user/wifi-densepose",
   "structure": {
     "hasPackageJson": false,
@@ -7,5 +7,5 @@
     "hasClaudeConfig": true,
     "hasClaudeFlow": true
   },
-  "scannedAt": 1772289243462
+  "scannedAt": 1772293399045
 }
