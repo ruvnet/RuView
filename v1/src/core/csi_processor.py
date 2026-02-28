@@ -81,6 +81,10 @@ class CSIProcessor:
         # Processing state
         self.csi_history = deque(maxlen=self.max_history_size)
         self.previous_detection_confidence = 0.0
+
+        # Doppler cache: pre-computed mean phase per frame for O(1) append
+        self._phase_cache = deque(maxlen=self.max_history_size)
+        self._doppler_window = min(config.get('doppler_window', 64), self.max_history_size)
         
         # Statistics tracking
         self._total_processed = 0
@@ -261,15 +265,21 @@ class CSIProcessor:
     
     def add_to_history(self, csi_data: CSIData) -> None:
         """Add CSI data to processing history.
-        
+
         Args:
             csi_data: CSI data to add to history
         """
         self.csi_history.append(csi_data)
+        # Cache mean phase for fast Doppler extraction
+        if csi_data.phase.ndim == 2:
+            self._phase_cache.append(np.mean(csi_data.phase, axis=0))
+        else:
+            self._phase_cache.append(csi_data.phase.flatten())
     
     def clear_history(self) -> None:
         """Clear the CSI data history."""
         self.csi_history.clear()
+        self._phase_cache.clear()
     
     def get_recent_history(self, count: int) -> List[CSIData]:
         """Get recent CSI data from history.
@@ -387,47 +397,38 @@ class CSIProcessor:
     def _extract_doppler_features(self, csi_data: CSIData) -> tuple:
         """Extract Doppler and frequency domain features from temporal CSI history.
 
-        Computes Doppler spectrum by analyzing temporal phase differences across
-        frames in self.csi_history, then applying FFT to obtain the Doppler shift
-        frequency components. If fewer than 2 history frames are available, returns
-        a zero-filled Doppler array (never random data).
+        Uses cached mean-phase values for O(1) access instead of recomputing
+        from raw CSI frames. Only uses the last `doppler_window` frames
+        (default 64) for bounded computation time.
 
         Returns:
             tuple: (doppler_shift, power_spectral_density) as numpy arrays
         """
         n_doppler_bins = 64
 
-        if len(self.csi_history) >= 2:
-            # Build temporal phase matrix from history frames
-            # Each row is the mean phase across antennas for one time step
-            history_list = list(self.csi_history)
-            phase_series = []
-            for frame in history_list:
-                # Average phase across antennas to get per-subcarrier phase
-                if frame.phase.ndim == 2:
-                    phase_series.append(np.mean(frame.phase, axis=0))
-                else:
-                    phase_series.append(frame.phase.flatten())
+        if len(self._phase_cache) >= 2:
+            # Use cached mean-phase values (pre-computed in add_to_history)
+            # Only take the last doppler_window frames for bounded cost
+            window = min(len(self._phase_cache), self._doppler_window)
+            cache_list = list(self._phase_cache)
+            phase_matrix = np.array(cache_list[-window:])
 
-            phase_matrix = np.array(phase_series)  # shape: (num_frames, num_subcarriers)
+            # Temporal phase differences between consecutive frames
+            phase_diffs = np.diff(phase_matrix, axis=0)
 
-            # Compute temporal phase differences between consecutive frames
-            phase_diffs = np.diff(phase_matrix, axis=0)  # shape: (num_frames-1, num_subcarriers)
+            # Average across subcarriers for each time step
+            mean_phase_diff = np.mean(phase_diffs, axis=1)
 
-            # Average phase diff across subcarriers for each time step
-            mean_phase_diff = np.mean(phase_diffs, axis=1)  # shape: (num_frames-1,)
-
-            # Apply FFT to get Doppler spectrum from the temporal phase differences
+            # FFT for Doppler spectrum
             doppler_spectrum = np.abs(scipy.fft.fft(mean_phase_diff, n=n_doppler_bins)) ** 2
 
-            # Normalize to prevent scale issues
+            # Normalize
             max_val = np.max(doppler_spectrum)
             if max_val > 0:
                 doppler_spectrum = doppler_spectrum / max_val
 
             doppler_shift = doppler_spectrum
         else:
-            # Not enough history for Doppler estimation -- return zeros, never random
             doppler_shift = np.zeros(n_doppler_bins)
 
         # Power spectral density of the current frame
