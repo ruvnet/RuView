@@ -16,6 +16,9 @@ from src.config.settings import get_settings
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Recorded at module import time — proxy for application startup time
+_APP_START_TIME = datetime.now()
+
 
 # Response models
 class ComponentHealth(BaseModel):
@@ -167,8 +170,7 @@ async def health_check(request: Request):
         # Get system metrics
         system_metrics = get_system_metrics()
         
-        # Calculate system uptime (placeholder - would need actual startup time)
-        uptime_seconds = 0.0  # TODO: Implement actual uptime tracking
+        uptime_seconds = (datetime.now() - _APP_START_TIME).total_seconds()
         
         return SystemHealth(
             status=overall_status,

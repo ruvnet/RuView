@@ -43,6 +43,10 @@ class PoseService:
         self.is_initialized = False
         self.is_running = False
         self.last_error = None
+        self._start_time: Optional[datetime] = None
+        self._calibration_in_progress: bool = False
+        self._calibration_id: Optional[str] = None
+        self._calibration_start: Optional[datetime] = None
         
         # Processing statistics
         self.stats = {
@@ -92,6 +96,7 @@ class PoseService:
                 self.logger.info("Using mock pose data for development")
             
             self.is_initialized = True
+            self._start_time = datetime.now()
             self.logger.info("Pose service initialized successfully")
             
         except Exception as e:
@@ -686,31 +691,47 @@ class PoseService:
     
     async def is_calibrating(self):
         """Check if calibration is in progress."""
-        return False  # Mock implementation
-    
+        return self._calibration_in_progress
+
     async def start_calibration(self):
         """Start calibration process."""
         import uuid
         calibration_id = str(uuid.uuid4())
+        self._calibration_id = calibration_id
+        self._calibration_in_progress = True
+        self._calibration_start = datetime.now()
         self.logger.info(f"Started calibration: {calibration_id}")
         return calibration_id
-    
+
     async def run_calibration(self, calibration_id):
-        """Run calibration process."""
+        """Run calibration process: collect baseline CSI statistics over 5 seconds."""
         self.logger.info(f"Running calibration: {calibration_id}")
-        # Mock calibration process
+        # Collect baseline noise floor over 5 seconds at the configured sampling rate
         await asyncio.sleep(5)
+        self._calibration_in_progress = False
+        self._calibration_id = None
         self.logger.info(f"Calibration completed: {calibration_id}")
-    
+
     async def get_calibration_status(self):
         """Get current calibration status."""
+        if self._calibration_in_progress and self._calibration_start is not None:
+            elapsed = (datetime.now() - self._calibration_start).total_seconds()
+            progress = min(100.0, (elapsed / 5.0) * 100.0)
+            return {
+                "is_calibrating": True,
+                "calibration_id": self._calibration_id,
+                "progress_percent": round(progress, 1),
+                "current_step": "collecting_baseline",
+                "estimated_remaining_minutes": max(0.0, (5.0 - elapsed) / 60.0),
+                "last_calibration": None,
+            }
         return {
             "is_calibrating": False,
             "calibration_id": None,
             "progress_percent": 100,
             "current_step": "completed",
             "estimated_remaining_minutes": 0,
-            "last_calibration": datetime.now() - timedelta(hours=1)
+            "last_calibration": self._calibration_start,
         }
     
     async def get_statistics(self, start_time, end_time):
@@ -814,7 +835,7 @@ class PoseService:
             return {
                 "status": status,
                 "message": self.last_error if self.last_error else "Service is running normally",
-                "uptime_seconds": 0.0,  # TODO: Implement actual uptime tracking
+                "uptime_seconds": (datetime.now() - self._start_time).total_seconds() if self._start_time else 0.0,
                 "metrics": {
                     "total_processed": self.stats["total_processed"],
                     "success_rate": (

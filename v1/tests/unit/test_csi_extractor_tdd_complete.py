@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from src.hardware.csi_extractor import (
     CSIExtractor,
+    CSIExtractionError,
     CSIParseError,
     CSIData,
     ESP32CSIParser,
@@ -377,10 +378,7 @@ class TestRouterCSIParserComplete:
         return RouterCSIParser()
 
     def test_parse_atheros_format_directly(self, parser):
-        """Should parse Atheros format directly."""
-        raw_data = b"ATHEROS_CSI:mock_data"
-        
-        result = parser.parse(raw_data)
-        
-        assert isinstance(result, CSIData)
-        assert result.metadata['source'] == 'atheros_router'
+        """Should raise CSIExtractionError for Atheros format — real binary parser not yet implemented."""
+        raw_data = b"ATHEROS_CSI:some_binary_data"
+        with pytest.raises(CSIExtractionError, match="Atheros CSI format parsing is not yet implemented"):
+            parser.parse(raw_data)

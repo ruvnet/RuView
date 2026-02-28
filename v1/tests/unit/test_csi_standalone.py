@@ -9,16 +9,23 @@ import asyncio
 from datetime import datetime, timezone
 import importlib.util
 
+# Resolve paths relative to v1/ (this file lives at v1/tests/unit/)
+_TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+_V1_DIR = os.path.abspath(os.path.join(_TESTS_DIR, '..', '..'))
+if _V1_DIR not in sys.path:
+    sys.path.insert(0, _V1_DIR)
+
 # Import the module directly to avoid circular imports
 spec = importlib.util.spec_from_file_location(
-    'csi_extractor', 
-    '/workspaces/wifi-densepose/src/hardware/csi_extractor.py'
+    'csi_extractor',
+    os.path.join(_V1_DIR, 'src', 'hardware', 'csi_extractor.py')
 )
 csi_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(csi_module)
 
 # Get classes from the module
 CSIExtractor = csi_module.CSIExtractor
+CSIExtractionError = csi_module.CSIExtractionError
 CSIParseError = csi_module.CSIParseError
 CSIData = csi_module.CSIData
 ESP32CSIParser = csi_module.ESP32CSIParser
@@ -531,8 +538,11 @@ class TestESP32CSIParserStandalone:
 
     def test_parse_valid_data(self, parser):
         """Should parse valid ESP32 data."""
-        data = b"CSI_DATA:1234567890,3,56,2400,20,15.5,[1.0,2.0,3.0],[0.5,1.5,2.5]"
-        
+        n_ant, n_sub = 3, 56
+        amp = ",".join(["1.0"] * (n_ant * n_sub))
+        pha = ",".join(["0.5"] * (n_ant * n_sub))
+        data = f"CSI_DATA:1234567890,{n_ant},{n_sub},2400,20,15.5,{amp},{pha}".encode()
+
         result = parser.parse(data)
         
         assert isinstance(result, CSIData)
@@ -583,13 +593,10 @@ class TestRouterCSIParserStandalone:
             parser.parse(b"")
 
     def test_parse_atheros_format(self, parser):
-        """Should parse Atheros format."""
-        data = b"ATHEROS_CSI:mock_data"
-        
-        result = parser.parse(data)
-        
-        assert isinstance(result, CSIData)
-        assert result.metadata['source'] == 'atheros_router'
+        """Should raise CSIExtractionError for Atheros format — real parser not yet implemented."""
+        data = b"ATHEROS_CSI:some_binary_data"
+        with pytest.raises(CSIExtractionError, match="Atheros CSI format parsing is not yet implemented"):
+            parser.parse(data)
 
     def test_parse_unknown_format(self, parser):
         """Should reject unknown format."""

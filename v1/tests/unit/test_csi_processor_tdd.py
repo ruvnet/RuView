@@ -9,17 +9,23 @@ from datetime import datetime, timezone
 import importlib.util
 from typing import Dict, List, Any
 
+# Resolve paths relative to the v1/ root (this file is at v1/tests/unit/)
+_TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+_V1_DIR = os.path.abspath(os.path.join(_TESTS_DIR, '..', '..'))
+if _V1_DIR not in sys.path:
+    sys.path.insert(0, _V1_DIR)
+
 # Import the CSI processor module directly
 spec = importlib.util.spec_from_file_location(
-    'csi_processor', 
-    '/workspaces/wifi-densepose/src/core/csi_processor.py'
+    'csi_processor',
+    os.path.join(_V1_DIR, 'src', 'core', 'csi_processor.py')
 )
 csi_processor_module = importlib.util.module_from_spec(spec)
 
 # Import CSI extractor for dependencies
 csi_spec = importlib.util.spec_from_file_location(
-    'csi_extractor', 
-    '/workspaces/wifi-densepose/src/hardware/csi_extractor.py'
+    'csi_extractor',
+    os.path.join(_V1_DIR, 'src', 'hardware', 'csi_extractor.py')
 )
 csi_module = importlib.util.module_from_spec(csi_spec)
 csi_spec.loader.exec_module(csi_module)
