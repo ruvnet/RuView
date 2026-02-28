@@ -103,6 +103,8 @@ class RssiFeatureExtractor:
 
         # Trim to window
         samples = self._trim_to_window(samples)
+        if len(samples) < 4:
+            return RssiFeatures(n_samples=len(samples))
         rssi = np.array([s.rssi_dbm for s in samples], dtype=np.float64)
         timestamps = np.array([s.timestamp for s in samples], dtype=np.float64)
 
@@ -158,6 +160,17 @@ class RssiFeatureExtractor:
 
         return features
 
+    # -- window trimming -----------------------------------------------------
+
+    def _trim_to_window(self, samples: List[WifiSample]) -> List[WifiSample]:
+        """Keep only samples within the most recent ``window_seconds``."""
+        if not samples:
+            return samples
+        latest_ts = samples[-1].timestamp
+        cutoff = latest_ts - self._window_seconds
+        trimmed = [s for s in samples if s.timestamp >= cutoff]
+        return trimmed
+
     # -- time-domain ---------------------------------------------------------
 
     @staticmethod
@@ -165,9 +178,15 @@ class RssiFeatureExtractor:
         features.mean = float(np.mean(rssi))
         features.variance = float(np.var(rssi, ddof=1)) if len(rssi) > 1 else 0.0
         features.std = float(np.std(rssi, ddof=1)) if len(rssi) > 1 else 0.0
-        features.skewness = float(scipy_stats.skew(rssi, bias=False)) if len(rssi) > 2 else 0.0
-        features.kurtosis = float(scipy_stats.kurtosis(rssi, bias=False)) if len(rssi) > 3 else 0.0
         features.range = float(np.ptp(rssi))
+
+        # Guard against constant signals where higher moments are undefined
+        if features.std < 1e-12:
+            features.skewness = 0.0
+            features.kurtosis = 0.0
+        else:
+            features.skewness = float(scipy_stats.skew(rssi, bias=False)) if len(rssi) > 2 else 0.0
+            features.kurtosis = float(scipy_stats.kurtosis(rssi, bias=False)) if len(rssi) > 3 else 0.0
 
         q75, q25 = np.percentile(rssi, [75, 25])
         features.iqr = float(q75 - q25)
