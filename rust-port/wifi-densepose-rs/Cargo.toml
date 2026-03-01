@@ -14,6 +14,7 @@ members = [
     "crates/wifi-densepose-train",
     "crates/wifi-densepose-sensing-server",
     "crates/wifi-densepose-wifiscan",
+    "crates/wifi-densepose-vitals",
 ]
 
 [workspace.package]

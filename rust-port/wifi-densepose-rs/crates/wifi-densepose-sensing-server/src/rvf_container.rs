@@ -298,6 +298,12 @@ impl RvfBuilder {
         self.push_segment(SEG_QUANT, &payload);
     }
 
+    /// Add a raw segment with arbitrary type and payload.
+    /// Used by `rvf_pipeline` for extended segment types.
+    pub fn add_raw_segment(&mut self, seg_type: u8, payload: &[u8]) {
+        self.push_segment(seg_type, payload);
+    }
+
     /// Add witness/proof data as a Witness segment.
     pub fn add_witness(&mut self, training_hash: &str, metrics: &serde_json::Value) {
         let witness = serde_json::json!({

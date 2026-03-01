@@ -4115,6 +4115,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "wifi-densepose-wifiscan",
 ]
 
 [[package]]
@@ -4177,6 +4178,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "wifi-densepose-vitals"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "wifi-densepose-wasm"
 version = "0.1.0"
 dependencies = [
@@ -4203,6 +4213,7 @@ name = "wifi-densepose-wifiscan"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "tokio",
  "tracing",
 ]
 

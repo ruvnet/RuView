@@ -34,5 +34,8 @@ chrono = { version = "0.4", features = ["serde"] }
 # CLI
 clap = { workspace = true }
 
+# Multi-BSSID WiFi scanning pipeline (ADR-022 Phase 3)
+wifi-densepose-wifiscan = { path = "../wifi-densepose-wifiscan" }
+
 [dev-dependencies]
 tempfile = "3.10"
