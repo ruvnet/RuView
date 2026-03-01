@@ -41,6 +41,17 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 
 ---
 
+## 📖 Documentation
+
+| Document | Description |
+|----------|-------------|
+| [User Guide](docs/user-guide.md) | Step-by-step guide: installation, first run, API usage, hardware setup, training |
+| [WiFi-Mat User Guide](docs/wifi-mat-user-guide.md) | Disaster response module: search & rescue, START triage |
+| [Build Guide](docs/build-guide.md) | Building from source (Rust and Python) |
+| [Architecture Decisions](docs/adr/) | 24 ADRs covering signal processing, training, hardware, security |
+
+---
+
 ## 🚀 Key Features
 
 | | Feature | What It Means |
@@ -317,6 +328,44 @@ docker run --rm -v $(pwd):/out ruvnet/wifi-densepose:latest --export-rvf /out/mo
 
 </details>
 
+<details>
+<summary><strong>Rust Crates</strong> — Individual crates on crates.io</summary>
+
+The Rust workspace consists of 14 crates, all published to [crates.io](https://crates.io/):
+
+```bash
+# Add individual crates to your Cargo.toml
+cargo add wifi-densepose-core       # Types, traits, errors
+cargo add wifi-densepose-signal     # CSI signal processing (6 SOTA algorithms)
+cargo add wifi-densepose-nn         # Neural inference (ONNX, PyTorch, Candle)
+cargo add wifi-densepose-vitals     # Vital sign extraction (breathing + heart rate)
+cargo add wifi-densepose-mat        # Disaster response (MAT survivor detection)
+cargo add wifi-densepose-hardware   # ESP32, Intel 5300, Atheros sensors
+cargo add wifi-densepose-train      # Training pipeline (MM-Fi dataset)
+cargo add wifi-densepose-wifiscan   # Multi-BSSID WiFi scanning
+```
+
+| Crate | Description | RuVector | crates.io |
+|-------|-------------|----------|-----------|
+| [`wifi-densepose-core`](https://crates.io/crates/wifi-densepose-core) | Foundation types, traits, and utilities | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-core.svg)](https://crates.io/crates/wifi-densepose-core) |
+| [`wifi-densepose-signal`](https://crates.io/crates/wifi-densepose-signal) | SOTA CSI signal processing (SpotFi, FarSense, Widar 3.0) | `mincut`, `attn-mincut`, `attention`, `solver` | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-signal.svg)](https://crates.io/crates/wifi-densepose-signal) |
+| [`wifi-densepose-nn`](https://crates.io/crates/wifi-densepose-nn) | Multi-backend inference (ONNX, PyTorch, Candle) | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-nn.svg)](https://crates.io/crates/wifi-densepose-nn) |
+| [`wifi-densepose-train`](https://crates.io/crates/wifi-densepose-train) | Training pipeline with MM-Fi dataset (NeurIPS 2023) | **All 5** | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-train.svg)](https://crates.io/crates/wifi-densepose-train) |
+| [`wifi-densepose-mat`](https://crates.io/crates/wifi-densepose-mat) | Mass Casualty Assessment Tool (disaster survivor detection) | `solver`, `temporal-tensor` | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-mat.svg)](https://crates.io/crates/wifi-densepose-mat) |
+| [`wifi-densepose-vitals`](https://crates.io/crates/wifi-densepose-vitals) | Vital signs: breathing (6-30 BPM), heart rate (40-120 BPM) | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-vitals.svg)](https://crates.io/crates/wifi-densepose-vitals) |
+| [`wifi-densepose-hardware`](https://crates.io/crates/wifi-densepose-hardware) | ESP32, Intel 5300, Atheros CSI sensor interfaces | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-hardware.svg)](https://crates.io/crates/wifi-densepose-hardware) |
+| [`wifi-densepose-wifiscan`](https://crates.io/crates/wifi-densepose-wifiscan) | Multi-BSSID WiFi scanning (Windows-enhanced) | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-wifiscan.svg)](https://crates.io/crates/wifi-densepose-wifiscan) |
+| [`wifi-densepose-wasm`](https://crates.io/crates/wifi-densepose-wasm) | WebAssembly bindings for browser deployment | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-wasm.svg)](https://crates.io/crates/wifi-densepose-wasm) |
+| [`wifi-densepose-sensing-server`](https://crates.io/crates/wifi-densepose-sensing-server) | Axum server: UDP ingestion, WebSocket broadcast | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-sensing-server.svg)](https://crates.io/crates/wifi-densepose-sensing-server) |
+| [`wifi-densepose-cli`](https://crates.io/crates/wifi-densepose-cli) | Command-line tool for MAT disaster scanning | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-cli.svg)](https://crates.io/crates/wifi-densepose-cli) |
+| [`wifi-densepose-api`](https://crates.io/crates/wifi-densepose-api) | REST + WebSocket API layer | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-api.svg)](https://crates.io/crates/wifi-densepose-api) |
+| [`wifi-densepose-config`](https://crates.io/crates/wifi-densepose-config) | Configuration management | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-config.svg)](https://crates.io/crates/wifi-densepose-config) |
+| [`wifi-densepose-db`](https://crates.io/crates/wifi-densepose-db) | Database persistence (PostgreSQL, SQLite, Redis) | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-db.svg)](https://crates.io/crates/wifi-densepose-db) |
+
+All crates integrate with [RuVector v2.0.4](https://github.com/ruvnet/ruvector) for graph algorithms and neural network optimization.
+
+</details>
+
 ---
 
 ## 🚀 Quick Start
@@ -548,8 +597,8 @@ cargo bench --package wifi-densepose-signal
 | **Confidence** | 0.0-1.0 per sign | Spectral coherence + signal quality |
 
 ```bash
-./target/release/sensing-server --source simulate --ui-path ../../ui
-curl http://localhost:8080/api/v1/vital-signs
+./target/release/sensing-server --source simulate --http-port 3000 --ws-port 3001 --ui-path ../../ui
+curl http://localhost:3000/api/v1/vital-signs
 ```
 
 See [ADR-021](docs/adr/ADR-021-vital-sign-detection-rvdna-pipeline.md).
@@ -1026,9 +1075,9 @@ GET  /api/v1/model/sona/profiles  # SONA profiles
 POST /api/v1/model/sona/activate  # Activate SONA profile
 ```
 
-WebSocket: `ws://localhost:8765/ws/sensing` (real-time sensing + vital signs)
+WebSocket: `ws://localhost:3001/ws/sensing` (real-time sensing + vital signs)
 
-> Default ports: HTTP 8080, WS 8765. Docker images remap to 3000/3001 via `--http-port` / `--ws-port`.
+> Default ports (Docker): HTTP 3000, WS 3001. Binary defaults: HTTP 8080, WS 8765. Override with `--http-port` / `--ws-port`.
 
 </details>
 
