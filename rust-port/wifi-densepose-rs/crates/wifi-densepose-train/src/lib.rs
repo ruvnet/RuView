@@ -77,5 +77,14 @@ pub use error::{ConfigError, DatasetError, SubcarrierError, TrainError};
 pub use error::TrainResult as TrainResultAlias;
 pub use subcarrier::{compute_interp_weights, interpolate_subcarriers, select_subcarriers_by_variance};
 
+// MERIDIAN (ADR-027) re-exports.
+pub use domain::{
+    AdversarialSchedule, DomainClassifier, DomainFactorizer, GradientReversalLayer,
+};
+pub use eval::CrossDomainEvaluator;
+pub use geometry::{FilmLayer, FourierPositionalEncoding, GeometryEncoder, MeridianGeometryConfig};
+pub use rapid_adapt::{AdaptError, AdaptationLoss, AdaptationResult, RapidAdaptation};
+pub use virtual_aug::VirtualDomainAugmentor;
+
 /// Crate version string.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

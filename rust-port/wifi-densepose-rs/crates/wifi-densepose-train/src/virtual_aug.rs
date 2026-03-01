@@ -149,8 +149,8 @@ impl VirtualDomainAugmentor {
         let mut out = Vec::with_capacity(n);
         for (k, &val) in frame.iter().enumerate() {
             let k_f = k as f32;
-            // 1. Room-scale amplitude attenuation
-            let scaled = val / domain.room_scale;
+            // 1. Room-scale amplitude attenuation (guard against zero scale)
+            let scaled = if domain.room_scale.abs() < 1e-10 { val } else { val / domain.room_scale };
             // 2. Reflection coefficient modulation (per-subcarrier)
             let refl = domain.reflection_coeff
                 + (1.0 - domain.reflection_coeff) * (PI * k_f / n_f).cos();

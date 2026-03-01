@@ -50,6 +50,7 @@ impl Linear {
 }
 
 /// Deterministic xorshift64 uniform in `[lo, hi)`.
+/// Uses 24-bit precision (matching f32 mantissa) for uniform distribution.
 fn det_uniform(n: usize, lo: f32, hi: f32, seed: u64) -> Vec<f32> {
     let r = hi - lo;
     let mut s = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -58,7 +59,7 @@ fn det_uniform(n: usize, lo: f32, hi: f32, seed: u64) -> Vec<f32> {
             s ^= s << 13;
             s ^= s >> 7;
             s ^= s << 17;
-            lo + (s >> 11) as f32 / (1u64 << 53) as f32 * r
+            lo + (s >> 40) as f32 / (1u64 << 24) as f32 * r
         })
         .collect()
 }

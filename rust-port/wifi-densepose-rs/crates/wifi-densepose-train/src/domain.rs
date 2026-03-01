@@ -61,14 +61,22 @@ pub struct Linear {
     pub out_features: usize,
 }
 
+/// Global instance counter to ensure distinct seeds for layers with same dimensions.
+static INSTANCE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 impl Linear {
     /// New layer with deterministic Kaiming-uniform weights.
+    ///
+    /// Each call produces unique weights even for identical `(in_features, out_features)`
+    /// because an atomic instance counter is mixed into the seed.
     pub fn new(in_features: usize, out_features: usize) -> Self {
+        let instance = INSTANCE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let bound = (1.0 / in_features as f64).sqrt() as f32;
         let n = out_features * in_features;
         let mut seed: u64 = (in_features as u64)
             .wrapping_mul(6364136223846793005)
-            .wrapping_add(out_features as u64);
+            .wrapping_add(out_features as u64)
+            .wrapping_add(instance.wrapping_mul(2654435761));
         let mut next = || -> f32 {
             seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
             ((seed >> 33) as f32) / (u32::MAX as f32 / 2.0) - 1.0
