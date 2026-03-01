@@ -73,9 +73,9 @@ The system learns on its own and gets smarter over time — no hand-tuning, no l
 
 | | Feature | What It Means |
 |---|---------|---------------|
-| 🧠 | **Self-Learning** | Teaches itself from raw WiFi data — no labeled training sets, no cameras needed to bootstrap ([ADR-024](#self-learning-wifi-ai-adr-024)) |
-| 🎯 | **AI Signal Processing** | Attention networks, graph algorithms, and smart compression replace hand-tuned thresholds — adapts to each room automatically ([RuVector](#ai-backbone-ruvector)) |
-| 🌍 | **Works Everywhere** | Train once, deploy in any room — adversarial domain generalization strips environment bias so models transfer across rooms, buildings, and hardware ([ADR-027](#cross-environment-generalization-adr-027)) |
+| 🧠 | **Self-Learning** | Teaches itself from raw WiFi data — no labeled training sets, no cameras needed to bootstrap ([ADR-024](docs/adr/ADR-024-contrastive-csi-embedding-model.md)) |
+| 🎯 | **AI Signal Processing** | Attention networks, graph algorithms, and smart compression replace hand-tuned thresholds — adapts to each room automatically ([RuVector](https://github.com/ruvnet/ruvector)) |
+| 🌍 | **Works Everywhere** | Train once, deploy in any room — adversarial domain generalization strips environment bias so models transfer across rooms, buildings, and hardware ([ADR-027](docs/adr/ADR-027-cross-environment-domain-generalization.md)) |
 
 ### Performance & Deployment
 
@@ -108,7 +108,7 @@ Neural Network maps processed signals → 17 body keypoints + vital signs
 Output: real-time pose, breathing rate, heart rate, presence, room fingerprint
 ```
 
-No training cameras required — the [Self-Learning system (ADR-024)](#self-learning-wifi-ai-adr-024) bootstraps from raw WiFi data alone. [MERIDIAN (ADR-027)](#cross-environment-generalization-adr-027) ensures the model works in any room, not just the one it trained in.
+No training cameras required — the [Self-Learning system (ADR-024)](docs/adr/ADR-024-contrastive-csi-embedding-model.md) bootstraps from raw WiFi data alone. [MERIDIAN (ADR-027)](docs/adr/ADR-027-cross-environment-domain-generalization.md) ensures the model works in any room, not just the one it trained in.
 
 ---
 
@@ -274,6 +274,59 @@ cargo run -p wifi-densepose-sensing-server -- --model model.rvf --build-index en
 The self-learning system builds on the [AI Backbone (RuVector)](#ai-backbone-ruvector) signal-processing layer — attention, graph algorithms, and compression — adding contrastive learning on top.
 
 See [`docs/adr/ADR-024-contrastive-csi-embedding-model.md`](docs/adr/ADR-024-contrastive-csi-embedding-model.md) for full architectural details.
+
+</details>
+
+<details>
+<summary><a id="cross-environment-generalization-adr-027"></a><strong>🌍 Cross-Environment Generalization (ADR-027 — Project MERIDIAN)</strong> — Train once, deploy in any room without retraining</summary>
+
+WiFi pose models trained in one room lose 40-70% accuracy when moved to another — even in the same building. The model memorizes room-specific multipath patterns instead of learning human motion. MERIDIAN forces the network to forget which room it's in while retaining everything about how people move.
+
+**What it does in plain terms:**
+- Models trained in Room A work in Room B, C, D — without any retraining or calibration data
+- Handles different WiFi hardware (ESP32, Intel 5300, Atheros) with automatic chipset normalization
+- Knows where the WiFi transmitters are positioned and compensates for layout differences
+- Generates synthetic "virtual rooms" during training so the model sees thousands of environments
+- At deployment, adapts to a new room in seconds using a handful of unlabeled WiFi frames
+
+**Key Components**
+
+| What | How it works | Why it matters |
+|------|-------------|----------------|
+| **Gradient Reversal Layer** | An adversarial classifier tries to guess which room the signal came from; the main network is trained to fool it | Forces the model to discard room-specific shortcuts |
+| **Geometry Encoder (FiLM)** | Transmitter/receiver positions are Fourier-encoded and injected as scale+shift conditioning on every layer | The model knows *where* the hardware is, so it doesn't need to memorize layout |
+| **Hardware Normalizer** | Resamples any chipset's CSI to a canonical 56-subcarrier format with standardized amplitude | Intel 5300 and ESP32 data look identical to the model |
+| **Virtual Domain Augmentation** | Generates synthetic environments with random room scale, wall reflections, scatterers, and noise profiles | Training sees 1000s of rooms even with data from just 2-3 |
+| **Rapid Adaptation (TTT)** | Contrastive test-time training with LoRA weight generation from a few unlabeled frames | Zero-shot deployment — the model self-tunes on arrival |
+| **Cross-Domain Evaluator** | Leave-one-out evaluation across all training environments with per-environment PCK/OKS metrics | Proves generalization, not just memorization |
+
+**Architecture**
+
+```
+CSI Frame [any chipset]
+    │
+    ▼
+HardwareNormalizer ──→ canonical 56 subcarriers, N(0,1) amplitude
+    │
+    ▼
+CSI Encoder (existing) ──→ latent features
+    │
+    ├──→ Pose Head ──→ 17-joint pose (environment-invariant)
+    │
+    ├──→ Gradient Reversal Layer ──→ Domain Classifier (adversarial)
+    │         λ ramps 0→1 via cosine/exponential schedule
+    │
+    └──→ Geometry Encoder ──→ FiLM conditioning (scale + shift)
+              Fourier positional encoding → DeepSets → per-layer modulation
+```
+
+**Security hardening:**
+- Bounded calibration buffer (max 10,000 frames) prevents memory exhaustion
+- `adapt()` returns `Result<_, AdaptError>` — no panics on bad input
+- Atomic instance counter ensures unique weight initialization across threads
+- Division-by-zero guards on all augmentation parameters
+
+See [`docs/adr/ADR-027-cross-environment-domain-generalization.md`](docs/adr/ADR-027-cross-environment-domain-generalization.md) for full architectural details.
 
 </details>
 
@@ -512,7 +565,7 @@ The neural pipeline uses a graph transformer with cross-attention to map CSI fea
 | [RuVector Crates](#ruvector-crates) | 11 vendored Rust crates from [ruvector](https://github.com/ruvnet/ruvector): attention, min-cut, solver, GNN, HNSW, temporal compression, sparse inference | [GitHub](https://github.com/ruvnet/ruvector) · [Source](vendor/ruvector/) |
 | [AI Backbone (RuVector)](#ai-backbone-ruvector) | 5 AI capabilities replacing hand-tuned thresholds: attention, graph min-cut, sparse solvers, tiered compression | [crates.io](https://crates.io/crates/wifi-densepose-ruvector) |
 | [Self-Learning WiFi AI (ADR-024)](#self-learning-wifi-ai-adr-024) | Contrastive self-supervised learning, room fingerprinting, anomaly detection, 55 KB model | [ADR-024](docs/adr/ADR-024-contrastive-csi-embedding-model.md) |
-| [Cross-Environment Generalization (ADR-027)](#cross-environment-generalization-adr-027) | Domain-adversarial training, geometry-conditioned inference, hardware normalization, zero-shot deployment | [ADR-027](docs/adr/ADR-027-cross-environment-domain-generalization.md) |
+| [Cross-Environment Generalization (ADR-027)](docs/adr/ADR-027-cross-environment-domain-generalization.md) | Domain-adversarial training, geometry-conditioned inference, hardware normalization, zero-shot deployment | [ADR-027](docs/adr/ADR-027-cross-environment-domain-generalization.md) |
 
 </details>
 
@@ -1351,10 +1404,11 @@ Major release: AETHER contrastive embedding model, AI signal processing backbone
 - **AI Backbone (`wifi-densepose-ruvector`)** — 7 RuVector integration points replacing hand-tuned thresholds with attention, graph algorithms, and smart compression; [published to crates.io](https://crates.io/crates/wifi-densepose-ruvector)
 - **Cross-platform RSSI adapters** — macOS CoreWLAN and Linux `iw` Rust adapters with `#[cfg(target_os)]` gating (ADR-025)
 - **Docker images published** — `ruvnet/wifi-densepose:latest` (132 MB Rust) and `:python` (569 MB)
-- **8-phase DensePose training pipeline (ADR-023)** — Graph transformer, 6-term composite loss, SONA adaptation, RVF packaging
+- **Project MERIDIAN (ADR-027)** — Cross-environment domain generalization: gradient reversal, geometry-conditioned FiLM, virtual domain augmentation, contrastive test-time training; zero-shot room transfer
+- **10-phase DensePose training pipeline (ADR-023/027)** — Graph transformer, 6-term composite loss, SONA adaptation, RVF packaging, hardware normalization, domain-adversarial training
 - **Vital sign detection (ADR-021)** — FFT-based breathing (6-30 BPM) and heartbeat (40-120 BPM), 11,665 fps
 - **WiFi scan domain layer (ADR-022/025)** — 8-stage signal intelligence pipeline for Windows, macOS, and Linux
-- **542+ Rust tests** — All passing, zero mocks
+- **700+ Rust tests** — All passing, zero mocks
 
 ### v2.0.0 — 2026-02-28
 
