@@ -332,6 +332,42 @@ See [`docs/adr/ADR-027-cross-environment-domain-generalization.md`](docs/adr/ADR
 
 ---
 
+<details>
+<summary><strong>🔍 Independent Capability Audit (ADR-028)</strong> — 1,031 tests, SHA-256 proof, self-verifying witness bundle</summary>
+
+A [3-agent parallel audit](docs/adr/ADR-028-esp32-capability-audit.md) independently verified every claim in this repository — ESP32 hardware, signal processing, neural networks, training pipeline, deployment, and security. Results:
+
+```
+Rust tests:     1,031 passed, 0 failed
+Python proof:   VERDICT: PASS (SHA-256: 8c0680d7...)
+Bundle verify:  7/7 checks PASS
+```
+
+**33-row attestation matrix:** 31 capabilities verified YES, 2 not measured at audit time (benchmark throughput, Kubernetes deploy).
+
+**Verify it yourself** (no hardware needed):
+```bash
+# Run all tests
+cd rust-port/wifi-densepose-rs && cargo test --workspace --no-default-features
+
+# Run the deterministic proof
+python v1/data/proof/verify.py
+
+# Generate + verify the witness bundle
+bash scripts/generate-witness-bundle.sh
+cd dist/witness-bundle-ADR028-*/ && bash VERIFY.sh
+```
+
+| Document | What it contains |
+|----------|-----------------|
+| [ADR-028](docs/adr/ADR-028-esp32-capability-audit.md) | Full audit: ESP32 specs, signal algorithms, NN architectures, training phases, deployment infra |
+| [Witness Log](docs/WITNESS-LOG-028.md) | 11 reproducible verification steps + 33-row attestation matrix with evidence per row |
+| [`generate-witness-bundle.sh`](scripts/generate-witness-bundle.sh) | Creates self-contained tar.gz with test logs, proof output, firmware hashes, crate versions, VERIFY.sh |
+
+</details>
+
+---
+
 ## 📦 Installation
 
 <details>
