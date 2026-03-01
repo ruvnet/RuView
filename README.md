@@ -180,7 +180,7 @@ See [firmware/esp32-csi-node/README.md](firmware/esp32-csi-node/README.md) and [
 
 </details>
 
-<details open>
+<details>
 <summary><strong>🦀 Rust Implementation (v2)</strong> — 810x faster, 54K fps pipeline</summary>
 
 ### Performance Benchmarks (Validated)
@@ -824,7 +824,7 @@ POSE_MAX_PERSONS=10              # Max tracked individuals
 
 ## 📊 Performance Metrics
 
-<details open>
+<details>
 <summary><strong>Measured benchmarks</strong> — Rust sensing server, validated via cargo bench</summary>
 
 ### Rust Sensing Server
