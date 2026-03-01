@@ -237,7 +237,7 @@ python scripts/provision.py --port COM7 \
 | Verifier | `v1/data/proof/verify.py` | SHA-256 hash comparison |
 | Expected hash | `v1/data/proof/expected_features.sha256` | `0b82bd45...` |
 
-**Audit-time result:** Hash MISMATCH (numpy 2.4.2 vs pinned version). This is expected — the hash was generated with an earlier numpy. The pipeline itself executes correctly; the hash needs regeneration with current dependencies.
+**Audit-time result:** PASS. Hash regenerated with numpy 2.4.2 + scipy 1.17.1. Pipeline hash: `8c0680d7d285739ea9597715e84959d9c356c87ee3ad35b5f1e69a4ca41151c6`.
 
 ### 5.4 Security Posture
 
@@ -283,7 +283,7 @@ Firmware (C): 606 lines. Python v1: 34 test files, 41 dependencies.
 | INT8 quantization for ESP32 | Designed (ADR-023), not shipped | Model fits in 55 KB but no deployed quantized binary |
 | Real WiFi CSI dataset | Synthetic only | No real-world captures in repo; MM-Fi/Wi-Pose referenced but not bundled |
 | Kubernetes blue-green deploy | CI/CD workflow exists | Requires actual cluster; not testable in audit |
-| Python proof hash | MISMATCH with current numpy | Needs `--generate-hash` with pinned numpy version |
+| Python proof hash | PASS (regenerated at audit time) | Requires numpy 2.4.2 + scipy 1.17.1 |
 
 ---
 
@@ -293,8 +293,7 @@ This ADR accepts the audit findings as a witness record. The repository contains
 
 ### Recommendations
 
-1. **Regenerate proof hash** with pinned numpy version in `requirements-lock.txt`
-2. **Bundle a small real CSI capture** (even 10 seconds from one ESP32) alongside the synthetic reference
+1. **Bundle a small real CSI capture** (even 10 seconds from one ESP32) alongside the synthetic reference
 3. **Run Criterion benchmarks** and record actual throughput numbers
 4. **Publish ESP32 firmware** as a GitHub Release binary for COM7-ready flashing
 
