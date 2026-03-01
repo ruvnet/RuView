@@ -21,33 +21,77 @@ All 5 ruvector crates integrated in workspace:
 - `ruvector-attention` → `model.rs` (apply_spatial_attention) + `bvp.rs`
 
 ### Architecture Decisions
-All ADRs in `docs/adr/` (ADR-001 through ADR-017). Key ones:
+28 ADRs in `docs/adr/` (ADR-001 through ADR-028). Key ones:
 - ADR-014: SOTA signal processing (Accepted)
 - ADR-015: MM-Fi + Wi-Pose training datasets (Accepted)
 - ADR-016: RuVector training pipeline integration (Accepted — complete)
 - ADR-017: RuVector signal + MAT integration (Proposed — next target)
+- ADR-024: Contrastive CSI embedding / AETHER (Accepted)
+- ADR-027: Cross-environment domain generalization / MERIDIAN (Accepted)
+- ADR-028: ESP32 capability audit + witness verification (Accepted)
 
 ### Build & Test Commands (this repo)
 ```bash
-# Rust — check training crate (no GPU needed)
+# Rust — full workspace tests (1,031 tests, ~2 min)
 cd rust-port/wifi-densepose-rs
+cargo test --workspace --no-default-features
+
+# Rust — single crate check (no GPU needed)
 cargo check -p wifi-densepose-train --no-default-features
 
-# Rust — run all tests
-cargo test -p wifi-densepose-train --no-default-features
-
-# Rust — full workspace check
-cargo check --workspace --no-default-features
-
-# Python — proof verification
+# Python — deterministic proof verification (SHA-256)
 python v1/data/proof/verify.py
 
 # Python — test suite
 cd v1 && python -m pytest tests/ -x -q
 ```
 
+### Validation & Witness Verification (ADR-028)
+
+**After any significant code change, run the full validation:**
+
+```bash
+# 1. Rust tests — must be 1,031+ passed, 0 failed
+cd rust-port/wifi-densepose-rs
+cargo test --workspace --no-default-features
+
+# 2. Python proof — must print VERDICT: PASS
+cd ../..
+python v1/data/proof/verify.py
+
+# 3. Generate witness bundle (includes both above + firmware hashes)
+bash scripts/generate-witness-bundle.sh
+
+# 4. Self-verify the bundle — must be 7/7 PASS
+cd dist/witness-bundle-ADR028-*/
+bash VERIFY.sh
+```
+
+**If the Python proof hash changes** (e.g., numpy/scipy version update):
+```bash
+# Regenerate the expected hash, then verify it passes
+python v1/data/proof/verify.py --generate-hash
+python v1/data/proof/verify.py
+```
+
+**Witness bundle contents** (`dist/witness-bundle-ADR028-<sha>.tar.gz`):
+- `WITNESS-LOG-028.md` — 33-row attestation matrix with evidence per capability
+- `ADR-028-esp32-capability-audit.md` — Full audit findings
+- `proof/verify.py` + `expected_features.sha256` — Deterministic pipeline proof
+- `test-results/rust-workspace-tests.log` — Full cargo test output
+- `firmware-manifest/source-hashes.txt` — SHA-256 of all 7 ESP32 firmware files
+- `crate-manifest/versions.txt` — All 15 crates with versions
+- `VERIFY.sh` — One-command self-verification for recipients
+
+**Key proof artifacts:**
+- `v1/data/proof/verify.py` — Trust Kill Switch: feeds reference signal through production pipeline, hashes output
+- `v1/data/proof/expected_features.sha256` — Published expected hash
+- `v1/data/proof/sample_csi_data.json` — 1,000 synthetic CSI frames (seed=42)
+- `docs/WITNESS-LOG-028.md` — 11-step reproducible verification procedure
+- `docs/adr/ADR-028-esp32-capability-audit.md` — Complete audit record
+
 ### Branch
-All development on: `claude/validate-code-quality-WNrNw`
+Default branch: `main`
 
 ---
 
@@ -93,14 +137,16 @@ All development on: `claude/validate-code-quality-WNrNw`
 
 Before merging any PR, verify each item applies and is addressed:
 
-1. **Tests pass** — `cargo test` (Rust) and `python -m pytest` (Python) green
-2. **README.md** — Update platform tables, crate descriptions, hardware tables, feature summaries if scope changed
-3. **CHANGELOG.md** — Add entry under `[Unreleased]` with what was added/fixed/changed
-4. **User guide** (`docs/user-guide.md`) — Update if new data sources, CLI flags, or setup steps were added
-5. **ADR index** — Update ADR count in README docs table if a new ADR was created
-6. **Docker Hub image** — Only rebuild if Dockerfile, dependencies, or runtime behavior changed (not needed for platform-gated code that doesn't affect the Linux container)
-7. **Crate publishing** — Only needed if a crate is published to crates.io and its public API changed (workspace-internal crates don't need publishing)
-8. **`.gitignore`** — Add any new build artifacts or binaries
+1. **Rust tests pass** — `cargo test --workspace --no-default-features` (1,031+ passed, 0 failed)
+2. **Python proof passes** — `python v1/data/proof/verify.py` (VERDICT: PASS)
+3. **README.md** — Update platform tables, crate descriptions, hardware tables, feature summaries if scope changed
+4. **CHANGELOG.md** — Add entry under `[Unreleased]` with what was added/fixed/changed
+5. **User guide** (`docs/user-guide.md`) — Update if new data sources, CLI flags, or setup steps were added
+6. **ADR index** — Update ADR count in README docs table if a new ADR was created
+7. **Witness bundle** — Regenerate if tests or proof hash changed: `bash scripts/generate-witness-bundle.sh`
+8. **Docker Hub image** — Only rebuild if Dockerfile, dependencies, or runtime behavior changed
+9. **Crate publishing** — Only needed if a crate is published to crates.io and its public API changed
+10. **`.gitignore`** — Add any new build artifacts or binaries
 
 ## Build & Test
 
