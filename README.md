@@ -48,7 +48,7 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 | 🔒 | **Privacy-First** | Tracks human pose using only WiFi signals — no cameras, no video, no images stored |
 | ⚡ | **Real-Time** | Analyzes WiFi signals in under 100 microseconds per frame — fast enough for live monitoring |
 | 💓 | **Vital Signs** | Detects breathing rate (6-30 breaths/min) and heart rate (40-120 bpm) without any wearable |
-| 👥 | **Multi-Person** | Simultaneously tracks up to 10 people, each with independent pose and vitals |
+| 👥 | **Multi-Person** | Simultaneously tracks multiple people (default 10, configurable up to 50+), each with independent pose and vitals |
 | 🧱 | **Through-Wall** | WiFi passes through walls, furniture, and debris — works where cameras cannot |
 | 🚑 | **Disaster Response** | Detects trapped survivors through rubble and classifies injury severity (START triage) |
 | 🐳 | **One-Command Setup** | `docker pull ruvnet/wifi-densepose:latest` — live sensing in 30 seconds, no toolchain needed |
