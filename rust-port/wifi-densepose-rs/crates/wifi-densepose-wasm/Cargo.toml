@@ -59,7 +59,7 @@ uuid = { version = "1.6", features = ["v4", "serde", "js"] }
 getrandom = { version = "0.2", features = ["js"] }
 
 # Optional: wifi-densepose-mat integration
-wifi-densepose-mat = { version = "0.1.0", path = "../wifi-densepose-mat", optional = true, features = ["serde"] }
+wifi-densepose-mat = { version = "0.2.0", path = "../wifi-densepose-mat", optional = true, features = ["serde"] }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
