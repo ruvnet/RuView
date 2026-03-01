@@ -602,3 +602,137 @@ class WindowsWifiCollector:
             retry_count=0,
             interface=self._interface,
         )
+
+
+# ---------------------------------------------------------------------------
+# macOS WiFi collector (real hardware via Swift CoreWLAN utility)
+# ---------------------------------------------------------------------------
+
+class MacosWifiCollector:
+    """
+    Collects real RSSI data from a macOS WiFi interface using a Swift utility.
+
+    Data source: A small compiled Swift binary (`mac_wifi`) that polls the
+    CoreWLAN `CWWiFiClient.shared().interface()` at a high rate.
+    """
+
+    def __init__(
+        self,
+        sample_rate_hz: float = 10.0,
+        buffer_seconds: int = 120,
+    ) -> None:
+        self._rate = sample_rate_hz
+        self._buffer = RingBuffer(max_size=int(sample_rate_hz * buffer_seconds))
+        self._running = False
+        self._thread: Optional[threading.Thread] = None
+        self._process: Optional[subprocess.Popen] = None
+        self._interface = "en0"  # CoreWLAN automatically targets the active Wi-Fi interface
+
+        # Compile the Swift utility if the binary doesn't exist
+        import os
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.swift_src = os.path.join(base_dir, "mac_wifi.swift")
+        self.swift_bin = os.path.join(base_dir, "mac_wifi")
+
+    # -- public API ----------------------------------------------------------
+
+    @property
+    def sample_rate_hz(self) -> float:
+        return self._rate
+
+    def start(self) -> None:
+        if self._running:
+            return
+        
+        # Ensure binary exists
+        import os
+        if not os.path.exists(self.swift_bin):
+            logger.info("Compiling mac_wifi.swift to %s", self.swift_bin)
+            try:
+                subprocess.run(["swiftc", "-O", "-o", self.swift_bin, self.swift_src], check=True, capture_output=True)
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(f"Failed to compile macOS WiFi utility: {e.stderr.decode('utf-8')}")
+            except FileNotFoundError:
+                raise RuntimeError("swiftc is not installed. Please install Xcode Command Line Tools to use native macOS WiFi sensing.")
+
+        self._running = True
+        self._thread = threading.Thread(
+            target=self._sample_loop, daemon=True, name="mac-rssi-collector"
+        )
+        self._thread.start()
+        logger.info("MacosWifiCollector started at %.1f Hz", self._rate)
+
+    def stop(self) -> None:
+        self._running = False
+        if self._process:
+            self._process.terminate()
+            try:
+                self._process.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+            self._process = None
+
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+        logger.info("MacosWifiCollector stopped")
+
+    def get_samples(self, n: Optional[int] = None) -> List[WifiSample]:
+        if n is not None:
+            return self._buffer.get_last_n(n)
+        return self._buffer.get_all()
+
+    # -- internals -----------------------------------------------------------
+
+    def _sample_loop(self) -> None:
+        import json
+        
+        # Start the Swift binary
+        self._process = subprocess.Popen(
+            [self.swift_bin],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1  # Line buffered
+        )
+
+        while self._running and self._process and self._process.poll() is None:
+            try:
+                line = self._process.stdout.readline()
+                if not line:
+                    continue
+
+                line = line.strip()
+                if not line:
+                    continue
+
+                if line.startswith("{"):
+                    data = json.loads(line)
+                    if "error" in data:
+                        logger.error("macOS WiFi utility error: %s", data["error"])
+                        continue
+
+                    rssi = float(data.get("rssi", -80.0))
+                    noise = float(data.get("noise", -95.0))
+
+                    link_quality = max(0.0, min(1.0, (rssi + 100.0) / 60.0))
+
+                    sample = WifiSample(
+                        timestamp=time.time(),
+                        rssi_dbm=rssi,
+                        noise_dbm=noise,
+                        link_quality=link_quality,
+                        tx_bytes=0,
+                        rx_bytes=0,
+                        retry_count=0,
+                        interface=self._interface,
+                    )
+                    self._buffer.append(sample)
+            except Exception as e:
+                logger.error("Error reading macOS WiFi stream: %s", e)
+                time.sleep(1.0)
+
+        # Process exited unexpectedly
+        if self._running:
+            logger.error("macOS WiFi utility exited unexpectedly. Collector stopped.")
+            self._running = False

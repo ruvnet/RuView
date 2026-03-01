@@ -6,8 +6,10 @@
 //!
 //! - **Domain types**: [`BssidId`], [`BssidObservation`], [`BandType`], [`RadioType`]
 //! - **Port**: [`WlanScanPort`] -- trait abstracting the platform scan backend
-//! - **Adapter**: [`NetshBssidScanner`] -- Tier 1 adapter that parses
-//!   `netsh wlan show networks mode=bssid` output
+//! - **Adapters**:
+//!   - [`NetshBssidScanner`] -- Windows, parses `netsh wlan show networks mode=bssid`
+//!   - `MacosCoreWlanScanner` -- macOS, invokes CoreWLAN Swift helper (ADR-025)
+//!   - `LinuxIwScanner` -- Linux, parses `iw dev <iface> scan` output
 
 pub mod adapter;
 pub mod domain;
@@ -19,6 +21,16 @@ pub mod port;
 pub use adapter::NetshBssidScanner;
 pub use adapter::parse_netsh_output;
 pub use adapter::WlanApiScanner;
+
+#[cfg(target_os = "macos")]
+pub use adapter::MacosCoreWlanScanner;
+#[cfg(target_os = "macos")]
+pub use adapter::parse_macos_scan_output;
+
+#[cfg(target_os = "linux")]
+pub use adapter::LinuxIwScanner;
+#[cfg(target_os = "linux")]
+pub use adapter::parse_iw_scan_output;
 pub use domain::bssid::{BandType, BssidId, BssidObservation, RadioType};
 pub use domain::frame::MultiApFrame;
 pub use domain::registry::{BssidEntry, BssidMeta, BssidRegistry, RunningStats};
