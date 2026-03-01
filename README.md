@@ -75,6 +75,7 @@ The system learns on its own and gets smarter over time — no hand-tuning, no l
 |---|---------|---------------|
 | 🧠 | **Self-Learning** | Teaches itself from raw WiFi data — no labeled training sets, no cameras needed to bootstrap ([ADR-024](#self-learning-wifi-ai-adr-024)) |
 | 🎯 | **AI Signal Processing** | Attention networks, graph algorithms, and smart compression replace hand-tuned thresholds — adapts to each room automatically ([RuVector](#ai-backbone-ruvector)) |
+| 🌍 | **Works Everywhere** | Train once, deploy in any room — adversarial domain generalization strips environment bias so models transfer across rooms, buildings, and hardware ([ADR-027](#cross-environment-generalization-adr-027)) |
 
 ### Performance & Deployment
 
@@ -107,7 +108,7 @@ Neural Network maps processed signals → 17 body keypoints + vital signs
 Output: real-time pose, breathing rate, heart rate, presence, room fingerprint
 ```
 
-No training cameras required — the [Self-Learning system (ADR-024)](#self-learning-wifi-ai-adr-024) bootstraps from raw WiFi data alone.
+No training cameras required — the [Self-Learning system (ADR-024)](#self-learning-wifi-ai-adr-024) bootstraps from raw WiFi data alone. [MERIDIAN (ADR-027)](#cross-environment-generalization-adr-027) ensures the model works in any room, not just the one it trained in.
 
 ---
 

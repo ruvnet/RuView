@@ -1,7 +1,9 @@
 # ADR-005: SONA Self-Learning for Pose Estimation
 
 ## Status
-Proposed
+Partially realized in [ADR-023](ADR-023-trained-densepose-model-ruvector-pipeline.md); extended by [ADR-027](ADR-027-cross-environment-domain-generalization.md)
+
+> **Note:** ADR-023 implements SONA with MicroLoRA rank-4 adapters and EWC++ memory preservation. ADR-027 (MERIDIAN) extends SONA with unsupervised rapid adaptation: 10 seconds of unlabeled WiFi data in a new room automatically generates environment-specific LoRA weights via contrastive test-time training.
 
 ## Date
 2026-02-28

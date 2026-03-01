@@ -1,7 +1,9 @@
 # ADR-006: GNN-Enhanced CSI Pattern Recognition
 
 ## Status
-Proposed
+Partially realized in [ADR-023](ADR-023-trained-densepose-model-ruvector-pipeline.md); extended by [ADR-027](ADR-027-cross-environment-domain-generalization.md)
+
+> **Note:** ADR-023 implements a 2-layer GCN on the COCO skeleton graph for spatial reasoning. ADR-027 (MERIDIAN) adds domain-adversarial regularization via a gradient reversal layer that forces the GCN to learn environment-invariant graph features, shedding room-specific multipath patterns.
 
 ## Date
 2026-02-28
