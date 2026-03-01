@@ -57,6 +57,162 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 
 ---
 
+## 📦 Installation
+
+<details>
+<summary><strong>Guided Installer</strong> — Interactive hardware detection and profile selection</summary>
+
+```bash
+./install.sh
+```
+
+The installer walks through 7 steps: system detection, toolchain check, WiFi hardware scan, profile recommendation, dependency install, build, and verification.
+
+| Profile | What it installs | Size | Requirements |
+|---------|-----------------|------|-------------|
+| `verify` | Pipeline verification only | ~5 MB | Python 3.8+ |
+| `python` | Full Python API server + sensing | ~500 MB | Python 3.8+ |
+| `rust` | Rust pipeline (~810x faster) | ~200 MB | Rust 1.70+ |
+| `browser` | WASM for in-browser execution | ~10 MB | Rust + wasm-pack |
+| `iot` | ESP32 sensor mesh + aggregator | varies | Rust + ESP-IDF |
+| `docker` | Docker-based deployment | ~1 GB | Docker |
+| `field` | WiFi-Mat disaster response kit | ~62 MB | Rust + wasm-pack |
+| `full` | Everything available | ~2 GB | All toolchains |
+
+```bash
+# Non-interactive
+./install.sh --profile rust --yes
+
+# Hardware check only
+./install.sh --check-only
+```
+
+</details>
+
+<details>
+<summary><strong>From Source</strong> — Rust (primary) or Python</summary>
+
+```bash
+git clone https://github.com/ruvnet/wifi-densepose.git
+cd wifi-densepose
+
+# Rust (primary — 810x faster)
+cd rust-port/wifi-densepose-rs
+cargo build --release
+cargo test --workspace
+
+# Python (legacy v1)
+pip install -r requirements.txt
+pip install -e .
+
+# Or via pip
+pip install wifi-densepose
+pip install wifi-densepose[gpu]   # GPU acceleration
+pip install wifi-densepose[all]   # All optional deps
+```
+
+</details>
+
+<details>
+<summary><strong>Docker</strong> — Pre-built images, no toolchain needed</summary>
+
+```bash
+# Rust sensing server (132 MB — recommended)
+docker pull ruvnet/wifi-densepose:latest
+docker run -p 3000:3000 -p 3001:3001 -p 5005:5005/udp ruvnet/wifi-densepose:latest
+
+# Python sensing pipeline (569 MB)
+docker pull ruvnet/wifi-densepose:python
+docker run -p 8765:8765 -p 8080:8080 ruvnet/wifi-densepose:python
+
+# Both via docker-compose
+cd docker && docker compose up
+
+# Export RVF model
+docker run --rm -v $(pwd):/out ruvnet/wifi-densepose:latest --export-rvf /out/model.rvf
+```
+
+| Image | Tag | Size | Ports |
+|-------|-----|------|-------|
+| `ruvnet/wifi-densepose` | `latest`, `rust` | 132 MB | 3000 (REST), 3001 (WS), 5005/udp (ESP32) |
+| `ruvnet/wifi-densepose` | `python` | 569 MB | 8765 (WS), 8080 (UI) |
+
+</details>
+
+<details>
+<summary><strong>System Requirements</strong></summary>
+
+- **Rust**: 1.70+ (primary runtime — install via [rustup](https://rustup.rs/))
+- **Python**: 3.8+ (for verification and legacy v1 API)
+- **OS**: Linux (Ubuntu 18.04+), macOS (10.15+), Windows 10+
+- **Memory**: Minimum 4GB RAM, Recommended 8GB+
+- **Storage**: 2GB free space for models and data
+- **Network**: WiFi interface with CSI capability (optional — installer detects what you have)
+- **GPU**: Optional (NVIDIA CUDA or Apple Metal)
+
+</details>
+
+---
+
+## 🚀 Quick Start
+
+<details open>
+<summary><strong>First API call in 3 commands</strong></summary>
+
+### 1. Install
+
+```bash
+# Fastest path — Docker
+docker pull ruvnet/wifi-densepose:latest
+docker run -p 3000:3000 ruvnet/wifi-densepose:latest
+
+# Or from source (Rust)
+./install.sh --profile rust --yes
+```
+
+### 2. Start the System
+
+```python
+from wifi_densepose import WiFiDensePose
+
+system = WiFiDensePose()
+system.start()
+poses = system.get_latest_poses()
+print(f"Detected {len(poses)} persons")
+system.stop()
+```
+
+### 3. REST API
+
+```bash
+# Health check
+curl http://localhost:3000/api/v1/health
+
+# Latest sensing frame
+curl http://localhost:3000/api/v1/sensing
+
+# Vital signs
+curl http://localhost:3000/api/v1/vital-signs
+```
+
+### 4. Real-time WebSocket
+
+```python
+import asyncio, websockets, json
+
+async def stream():
+    async with websockets.connect("ws://localhost:3001/ws/sensing") as ws:
+        async for msg in ws:
+            data = json.loads(msg)
+            print(f"Persons: {len(data.get('persons', []))}")
+
+asyncio.run(stream())
+```
+
+</details>
+
+---
+
 ## 📋 Table of Contents
 
 <details open>
@@ -488,162 +644,6 @@ See `vendor/ruvector/` for full source.
 | **REST API** | Axum (Rust) or FastAPI (Python) for data access and control |
 | **WebSocket** | Real-time pose, sensing, and vital sign streaming |
 | **Analytics** | Fall detection, activity recognition, START triage |
-
-</details>
-
----
-
-## 📦 Installation
-
-<details>
-<summary><strong>Guided Installer</strong> — Interactive hardware detection and profile selection</summary>
-
-```bash
-./install.sh
-```
-
-The installer walks through 7 steps: system detection, toolchain check, WiFi hardware scan, profile recommendation, dependency install, build, and verification.
-
-| Profile | What it installs | Size | Requirements |
-|---------|-----------------|------|-------------|
-| `verify` | Pipeline verification only | ~5 MB | Python 3.8+ |
-| `python` | Full Python API server + sensing | ~500 MB | Python 3.8+ |
-| `rust` | Rust pipeline (~810x faster) | ~200 MB | Rust 1.70+ |
-| `browser` | WASM for in-browser execution | ~10 MB | Rust + wasm-pack |
-| `iot` | ESP32 sensor mesh + aggregator | varies | Rust + ESP-IDF |
-| `docker` | Docker-based deployment | ~1 GB | Docker |
-| `field` | WiFi-Mat disaster response kit | ~62 MB | Rust + wasm-pack |
-| `full` | Everything available | ~2 GB | All toolchains |
-
-```bash
-# Non-interactive
-./install.sh --profile rust --yes
-
-# Hardware check only
-./install.sh --check-only
-```
-
-</details>
-
-<details>
-<summary><strong>From Source</strong> — Rust (primary) or Python</summary>
-
-```bash
-git clone https://github.com/ruvnet/wifi-densepose.git
-cd wifi-densepose
-
-# Rust (primary — 810x faster)
-cd rust-port/wifi-densepose-rs
-cargo build --release
-cargo test --workspace
-
-# Python (legacy v1)
-pip install -r requirements.txt
-pip install -e .
-
-# Or via pip
-pip install wifi-densepose
-pip install wifi-densepose[gpu]   # GPU acceleration
-pip install wifi-densepose[all]   # All optional deps
-```
-
-</details>
-
-<details>
-<summary><strong>Docker</strong> — Pre-built images, no toolchain needed</summary>
-
-```bash
-# Rust sensing server (132 MB — recommended)
-docker pull ruvnet/wifi-densepose:latest
-docker run -p 3000:3000 -p 3001:3001 -p 5005:5005/udp ruvnet/wifi-densepose:latest
-
-# Python sensing pipeline (569 MB)
-docker pull ruvnet/wifi-densepose:python
-docker run -p 8765:8765 -p 8080:8080 ruvnet/wifi-densepose:python
-
-# Both via docker-compose
-cd docker && docker compose up
-
-# Export RVF model
-docker run --rm -v $(pwd):/out ruvnet/wifi-densepose:latest --export-rvf /out/model.rvf
-```
-
-| Image | Tag | Size | Ports |
-|-------|-----|------|-------|
-| `ruvnet/wifi-densepose` | `latest`, `rust` | 132 MB | 3000 (REST), 3001 (WS), 5005/udp (ESP32) |
-| `ruvnet/wifi-densepose` | `python` | 569 MB | 8765 (WS), 8080 (UI) |
-
-</details>
-
-<details>
-<summary><strong>System Requirements</strong></summary>
-
-- **Rust**: 1.70+ (primary runtime — install via [rustup](https://rustup.rs/))
-- **Python**: 3.8+ (for verification and legacy v1 API)
-- **OS**: Linux (Ubuntu 18.04+), macOS (10.15+), Windows 10+
-- **Memory**: Minimum 4GB RAM, Recommended 8GB+
-- **Storage**: 2GB free space for models and data
-- **Network**: WiFi interface with CSI capability (optional — installer detects what you have)
-- **GPU**: Optional (NVIDIA CUDA or Apple Metal)
-
-</details>
-
----
-
-## 🚀 Quick Start
-
-<details open>
-<summary><strong>First API call in 3 commands</strong></summary>
-
-### 1. Install
-
-```bash
-# Fastest path — Docker
-docker pull ruvnet/wifi-densepose:latest
-docker run -p 3000:3000 ruvnet/wifi-densepose:latest
-
-# Or from source (Rust)
-./install.sh --profile rust --yes
-```
-
-### 2. Start the System
-
-```python
-from wifi_densepose import WiFiDensePose
-
-system = WiFiDensePose()
-system.start()
-poses = system.get_latest_poses()
-print(f"Detected {len(poses)} persons")
-system.stop()
-```
-
-### 3. REST API
-
-```bash
-# Health check
-curl http://localhost:3000/api/v1/health
-
-# Latest sensing frame
-curl http://localhost:3000/api/v1/sensing
-
-# Vital signs
-curl http://localhost:3000/api/v1/vital-signs
-```
-
-### 4. Real-time WebSocket
-
-```python
-import asyncio, websockets, json
-
-async def stream():
-    async with websockets.connect("ws://localhost:3001/ws/sensing") as ws:
-        async for msg in ws:
-            data = json.loads(msg)
-            print(f"Persons: {len(data.get('persons', []))}")
-
-asyncio.run(stream())
-```
 
 </details>
 
