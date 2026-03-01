@@ -437,10 +437,8 @@ See `vendor/ruvector/` for full source.
 
 ---
 
-## 🏗️ System Architecture
-
 <details>
-<summary><strong>End-to-end data flow</strong> — From CSI capture to REST/WebSocket API</summary>
+<summary><strong>🏗️ System Architecture</strong> — End-to-end data flow from CSI capture to REST/WebSocket API</summary>
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
