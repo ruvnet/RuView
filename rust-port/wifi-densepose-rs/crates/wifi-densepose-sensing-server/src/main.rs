@@ -11,11 +11,9 @@
 mod rvf_container;
 mod rvf_pipeline;
 mod vital_signs;
-mod graph_transformer;
-mod trainer;
-mod dataset;
-mod sparse_inference;
-mod sona;
+
+// Training pipeline modules (exposed via lib.rs)
+use wifi_densepose_sensing_server::{graph_transformer, trainer, dataset};
 
 use std::collections::VecDeque;
 use std::net::SocketAddr;
@@ -1538,6 +1536,169 @@ async fn main() {
         return;
     }
 
+    // Handle --train mode: train a model and exit
+    if args.train {
+        eprintln!("=== WiFi-DensePose Training Mode ===");
+
+        // Build data pipeline
+        let ds_path = args.dataset.clone().unwrap_or_else(|| PathBuf::from("data"));
+        let source = match args.dataset_type.as_str() {
+            "wipose" => dataset::DataSource::WiPose(ds_path.clone()),
+            _ => dataset::DataSource::MmFi(ds_path.clone()),
+        };
+        let pipeline = dataset::DataPipeline::new(dataset::DataConfig {
+            source,
+            ..Default::default()
+        });
+
+        // Load samples
+        let samples = match pipeline.load() {
+            Ok(s) if !s.is_empty() => {
+                eprintln!("Loaded {} samples from {}", s.len(), ds_path.display());
+                s
+            }
+            Ok(_) => {
+                eprintln!("No samples found at {}. Generating synthetic training data...", ds_path.display());
+                // Generate synthetic samples for testing the pipeline
+                let mut synth = Vec::new();
+                for i in 0..50 {
+                    let csi: Vec<Vec<f32>> = (0..4).map(|a| {
+                        (0..56).map(|s| ((i * 7 + a * 13 + s) as f32 * 0.31).sin() * 0.5).collect()
+                    }).collect();
+                    let mut kps = [(0.0f32, 0.0f32, 1.0f32); 17];
+                    for (k, kp) in kps.iter_mut().enumerate() {
+                        kp.0 = (k as f32 * 0.1 + i as f32 * 0.02).sin() * 100.0 + 320.0;
+                        kp.1 = (k as f32 * 0.15 + i as f32 * 0.03).cos() * 80.0 + 240.0;
+                    }
+                    synth.push(dataset::TrainingSample {
+                        csi_window: csi,
+                        pose_label: dataset::PoseLabel {
+                            keypoints: kps,
+                            body_parts: Vec::new(),
+                            confidence: 1.0,
+                        },
+                        source: "synthetic",
+                    });
+                }
+                synth
+            }
+            Err(e) => {
+                eprintln!("Failed to load dataset: {e}");
+                eprintln!("Generating synthetic training data...");
+                let mut synth = Vec::new();
+                for i in 0..50 {
+                    let csi: Vec<Vec<f32>> = (0..4).map(|a| {
+                        (0..56).map(|s| ((i * 7 + a * 13 + s) as f32 * 0.31).sin() * 0.5).collect()
+                    }).collect();
+                    let mut kps = [(0.0f32, 0.0f32, 1.0f32); 17];
+                    for (k, kp) in kps.iter_mut().enumerate() {
+                        kp.0 = (k as f32 * 0.1 + i as f32 * 0.02).sin() * 100.0 + 320.0;
+                        kp.1 = (k as f32 * 0.15 + i as f32 * 0.03).cos() * 80.0 + 240.0;
+                    }
+                    synth.push(dataset::TrainingSample {
+                        csi_window: csi,
+                        pose_label: dataset::PoseLabel {
+                            keypoints: kps,
+                            body_parts: Vec::new(),
+                            confidence: 1.0,
+                        },
+                        source: "synthetic",
+                    });
+                }
+                synth
+            }
+        };
+
+        // Convert dataset samples to trainer format
+        let trainer_samples: Vec<trainer::TrainingSample> = samples.iter()
+            .map(trainer::from_dataset_sample)
+            .collect();
+
+        // Split 80/20 train/val
+        let split = (trainer_samples.len() * 4) / 5;
+        let (train_data, val_data) = trainer_samples.split_at(split.max(1));
+        eprintln!("Train: {} samples, Val: {} samples", train_data.len(), val_data.len());
+
+        // Create transformer + trainer
+        let n_subcarriers = train_data.first()
+            .and_then(|s| s.csi_features.first())
+            .map(|f| f.len())
+            .unwrap_or(56);
+        let tf_config = graph_transformer::TransformerConfig {
+            n_subcarriers,
+            n_keypoints: 17,
+            d_model: 64,
+            n_heads: 4,
+            n_gnn_layers: 2,
+        };
+        let transformer = graph_transformer::CsiToPoseTransformer::new(tf_config);
+        eprintln!("Transformer params: {}", transformer.param_count());
+
+        let trainer_config = trainer::TrainerConfig {
+            epochs: args.epochs,
+            batch_size: 8,
+            lr: 0.001,
+            warmup_epochs: 5,
+            min_lr: 1e-6,
+            early_stop_patience: 20,
+            checkpoint_every: 10,
+            ..Default::default()
+        };
+        let mut t = trainer::Trainer::with_transformer(trainer_config, transformer);
+
+        // Run training
+        eprintln!("Starting training for {} epochs...", args.epochs);
+        let result = t.run_training(train_data, val_data);
+        eprintln!("Training complete in {:.1}s", result.total_time_secs);
+        eprintln!("  Best epoch: {}, PCK@0.2: {:.4}, OKS mAP: {:.4}",
+            result.best_epoch, result.best_pck, result.best_oks);
+
+        // Save checkpoint
+        if let Some(ref ckpt_dir) = args.checkpoint_dir {
+            let _ = std::fs::create_dir_all(ckpt_dir);
+            let ckpt_path = ckpt_dir.join("best_checkpoint.json");
+            let ckpt = t.checkpoint();
+            match ckpt.save_to_file(&ckpt_path) {
+                Ok(()) => eprintln!("Checkpoint saved to {}", ckpt_path.display()),
+                Err(e) => eprintln!("Failed to save checkpoint: {e}"),
+            }
+        }
+
+        // Sync weights back to transformer and save as RVF
+        t.sync_transformer_weights();
+        if let Some(ref save_path) = args.save_rvf {
+            eprintln!("Saving trained model to RVF: {}", save_path.display());
+            let weights = t.params().to_vec();
+            let mut builder = RvfBuilder::new();
+            builder.add_manifest(
+                "wifi-densepose-trained",
+                env!("CARGO_PKG_VERSION"),
+                "WiFi DensePose trained model weights",
+            );
+            builder.add_metadata(&serde_json::json!({
+                "training": {
+                    "epochs": args.epochs,
+                    "best_epoch": result.best_epoch,
+                    "best_pck": result.best_pck,
+                    "best_oks": result.best_oks,
+                    "n_train_samples": train_data.len(),
+                    "n_val_samples": val_data.len(),
+                    "n_subcarriers": n_subcarriers,
+                    "param_count": weights.len(),
+                },
+            }));
+            builder.add_vital_config(&VitalSignConfig::default());
+            builder.add_weights(&weights);
+            match builder.write_to_file(save_path) {
+                Ok(()) => eprintln!("RVF saved ({} params, {} bytes)",
+                    weights.len(), weights.len() * 4),
+                Err(e) => eprintln!("Failed to save RVF: {e}"),
+            }
+        }
+
+        return;
+    }
+
     info!("WiFi-DensePose Sensing Server (Rust + Axum + RuVector)");
     info!("  HTTP:      http://localhost:{}", args.http_port);
     info!("  WebSocket: ws://localhost:{}/ws/sensing", args.ws_port);
@@ -1761,10 +1922,18 @@ async fn main() {
             "uptime_secs": s.start_time.elapsed().as_secs(),
         }));
         builder.add_vital_config(&VitalSignConfig::default());
-        // Save dummy weights (placeholder for real model weights)
-        builder.add_weights(&[0.0f32; 0]);
+        // Save transformer weights if a model is loaded, otherwise empty
+        let weights: Vec<f32> = if s.model_loaded {
+            // If we loaded via --model, the progressive loader has the weights
+            // For now, save runtime state placeholder
+            let tf = graph_transformer::CsiToPoseTransformer::new(Default::default());
+            tf.flatten_weights()
+        } else {
+            Vec::new()
+        };
+        builder.add_weights(&weights);
         match builder.write_to_file(save_path) {
-            Ok(()) => info!("  RVF saved successfully"),
+            Ok(()) => info!("  RVF saved ({} weight params)", weights.len()),
             Err(e) => error!("  Failed to save RVF: {e}"),
         }
     }

@@ -687,4 +687,67 @@ mod tests {
         assert!(r.speedup > 0.0);
         assert!(r.accuracy_loss.is_finite());
     }
+
+    // ── Quantization integration tests ────────────────────────────
+
+    #[test]
+    fn apply_quantization_enables_quantized_forward() {
+        let w = vec![
+            vec![1.0, 2.0, 3.0, 4.0],
+            vec![-1.0, -2.0, -3.0, -4.0],
+            vec![0.5, 1.5, 2.5, 3.5],
+        ];
+        let b = vec![0.1, 0.2, 0.3];
+        let mut m = SparseModel::new(SparseConfig {
+            quant_mode: QuantMode::Int8Symmetric,
+            ..Default::default()
+        });
+        m.add_layer("fc1", w.clone(), b.clone());
+
+        // Before quantization: dense forward
+        let input = vec![1.0, 0.5, -1.0, 0.0];
+        let dense_out = m.forward(&input);
+
+        // Apply quantization
+        m.apply_quantization();
+
+        // After quantization: should use dequantized weights
+        let quant_out = m.forward(&input);
+
+        // Output should be close to dense (within INT8 precision)
+        for (d, q) in dense_out.iter().zip(quant_out.iter()) {
+            let rel_err = if d.abs() > 0.01 { (d - q).abs() / d.abs() } else { (d - q).abs() };
+            assert!(rel_err < 0.05, "quantized error too large: dense={d}, quant={q}, err={rel_err}");
+        }
+    }
+
+    #[test]
+    fn quantized_forward_accuracy_within_5_percent() {
+        // Multi-layer model
+        let mut m = SparseModel::new(SparseConfig {
+            quant_mode: QuantMode::Int8Symmetric,
+            ..Default::default()
+        });
+        let w1: Vec<Vec<f32>> = (0..8).map(|r| {
+            (0..8).map(|c| ((r * 8 + c) as f32 * 0.17).sin() * 2.0).collect()
+        }).collect();
+        let b1 = vec![0.0f32; 8];
+        let w2: Vec<Vec<f32>> = (0..4).map(|r| {
+            (0..8).map(|c| ((r * 8 + c) as f32 * 0.23).cos() * 1.5).collect()
+        }).collect();
+        let b2 = vec![0.0f32; 4];
+        m.add_layer("fc1", w1, b1);
+        m.add_layer("fc2", w2, b2);
+
+        let input = vec![1.0, -0.5, 0.3, 0.7, -0.2, 0.9, -0.4, 0.6];
+        let dense_out = m.forward(&input);
+
+        m.apply_quantization();
+        let quant_out = m.forward(&input);
+
+        // MSE between dense and quantized should be small
+        let mse: f32 = dense_out.iter().zip(quant_out.iter())
+            .map(|(d, q)| (d - q).powi(2)).sum::<f32>() / dense_out.len() as f32;
+        assert!(mse < 0.5, "quantization MSE too large: {mse}");
+    }
 }

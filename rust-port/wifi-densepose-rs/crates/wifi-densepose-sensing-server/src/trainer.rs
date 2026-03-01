@@ -777,4 +777,98 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
     }
+
+    // ── Integration tests: transformer + trainer pipeline ──────────
+
+    #[test]
+    fn dataset_to_trainer_conversion() {
+        let ds = crate::dataset::TrainingSample {
+            csi_window: vec![vec![1.0; 8]; 4],
+            pose_label: crate::dataset::PoseLabel {
+                keypoints: {
+                    let mut kp = [(0.0f32, 0.0f32, 1.0f32); 17];
+                    for (i, k) in kp.iter_mut().enumerate() {
+                        k.0 = i as f32; k.1 = i as f32 * 2.0;
+                    }
+                    kp
+                },
+                body_parts: Vec::new(),
+                confidence: 1.0,
+            },
+            source: "test",
+        };
+        let ts = from_dataset_sample(&ds);
+        assert_eq!(ts.csi_features.len(), 4);
+        assert_eq!(ts.csi_features[0].len(), 8);
+        assert_eq!(ts.target_keypoints.len(), 17);
+        assert!((ts.target_keypoints[0].0 - 0.0).abs() < 1e-6);
+        assert!((ts.target_keypoints[1].0 - 1.0).abs() < 1e-6);
+        assert!(ts.target_body_parts.is_empty()); // no body parts in source
+    }
+
+    #[test]
+    fn trainer_with_transformer_runs_epoch() {
+        use crate::graph_transformer::{CsiToPoseTransformer, TransformerConfig};
+        let tf_config = TransformerConfig {
+            n_subcarriers: 8, n_keypoints: 17, d_model: 8, n_heads: 2, n_gnn_layers: 1,
+        };
+        let transformer = CsiToPoseTransformer::new(tf_config);
+        let config = TrainerConfig {
+            epochs: 2, batch_size: 4, lr: 0.001,
+            warmup_epochs: 0, early_stop_patience: 100,
+            ..Default::default()
+        };
+        let mut t = Trainer::with_transformer(config, transformer);
+
+        // The params should be the transformer's flattened weights
+        assert!(t.params().len() > 100, "transformer should have many params");
+
+        // Create samples matching the transformer's n_subcarriers=8
+        let samples: Vec<TrainingSample> = (0..8).map(|i| TrainingSample {
+            csi_features: vec![vec![(i as f32 * 0.1).sin(); 8]; 4],
+            target_keypoints: (0..17).map(|k| (k as f32 * 0.5, k as f32 * 0.3, 1.0)).collect(),
+            target_body_parts: vec![0, 1, 2],
+            target_uv: (vec![0.5; 3], vec![0.5; 3]),
+        }).collect();
+
+        let stats = t.train_epoch(&samples);
+        assert!(stats.train_loss.is_finite(), "loss should be finite");
+    }
+
+    #[test]
+    fn trainer_with_transformer_loss_finite_after_training() {
+        use crate::graph_transformer::{CsiToPoseTransformer, TransformerConfig};
+        let tf_config = TransformerConfig {
+            n_subcarriers: 8, n_keypoints: 17, d_model: 8, n_heads: 2, n_gnn_layers: 1,
+        };
+        let transformer = CsiToPoseTransformer::new(tf_config);
+        let config = TrainerConfig {
+            epochs: 3, batch_size: 4, lr: 0.0001,
+            warmup_epochs: 0, early_stop_patience: 100,
+            ..Default::default()
+        };
+        let mut t = Trainer::with_transformer(config, transformer);
+
+        let samples: Vec<TrainingSample> = (0..4).map(|i| TrainingSample {
+            csi_features: vec![vec![(i as f32 * 0.2).sin(); 8]; 4],
+            target_keypoints: (0..17).map(|k| (k as f32 * 0.5, k as f32 * 0.3, 1.0)).collect(),
+            target_body_parts: vec![],
+            target_uv: (vec![], vec![]),
+        }).collect();
+
+        let result = t.run_training(&samples, &[]);
+        assert!(result.history.iter().all(|s| s.train_loss.is_finite()),
+            "all losses should be finite");
+
+        // Sync weights back and verify transformer still works
+        t.sync_transformer_weights();
+        if let Some(tf) = t.transformer() {
+            let out = tf.forward(&vec![vec![1.0; 8]; 4]);
+            assert_eq!(out.keypoints.len(), 17);
+            for (i, &(x, y, z)) in out.keypoints.iter().enumerate() {
+                assert!(x.is_finite() && y.is_finite() && z.is_finite(),
+                    "kp {i} not finite after training");
+            }
+        }
+    }
 }

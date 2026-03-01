@@ -1,0 +1,36 @@
+[package]
+name = "wifi-densepose-vitals"
+version.workspace = true
+edition.workspace = true
+description = "ESP32 CSI-grade vital sign extraction (ADR-021): heart rate and respiratory rate from WiFi Channel State Information"
+license.workspace = true
+
+[dependencies]
+tracing.workspace = true
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[features]
+default = ["serde"]
+serde = ["dep:serde"]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
+doc_markdown = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+cast_precision_loss = "allow"
+cast_lossless = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+many_single_char_names = "allow"
+uninlined_format_args = "allow"
+assigning_clones = "allow"
