@@ -1,0 +1,22 @@
+[package]
+name = "ruvector-snapshot"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Point-in-time snapshots and backup for Ruvector vector databases"
+
+[dependencies]
+ruvector-core = { version = "2.0", path = "../ruvector-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bincode = { workspace = true, features = ["serde"] }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+flate2 = "1.0"
+sha2 = "0.10"
+tokio = { workspace = true, features = ["fs", "io-util"] }
+async-trait = "0.1"

@@ -1,0 +1,53 @@
+{
+  "$schema": "./schemas/config.schema.json",
+  "apiKeys": {
+    "gemini": "${GEMINI_API_KEY}",
+    "openRouter": "${OPENROUTER_API_KEY}"
+  },
+  "cache": {
+    "enabled": true,
+    "maxSize": 1000,
+    "ttl": 3600000,
+    "persistPath": "./.cache/agentic-synth",
+    "strategy": "lru"
+  },
+  "models": {
+    "routing": {
+      "strategy": "cost-optimized",
+      "fallbackChain": ["gemini-pro", "gpt-4", "claude-3"],
+      "budgetLimit": 1.0,
+      "timeoutMs": 30000
+    },
+    "defaults": {
+      "timeseries": "gemini-pro",
+      "events": "gpt-4-turbo",
+      "structured": "claude-3-sonnet",
+      "custom": "gemini-pro"
+    }
+  },
+  "integrations": {
+    "midstreamer": {
+      "enabled": false,
+      "pipeline": "synthetic-data-stream",
+      "bufferSize": 1000,
+      "flushInterval": 5000
+    },
+    "agenticRobotics": {
+      "enabled": false,
+      "workflowEngine": "default",
+      "defaultWorkflow": "data-generation"
+    },
+    "ruvector": {
+      "enabled": false,
+      "dbPath": "./data/vectors.db",
+      "collectionName": "synthetic-data",
+      "embeddingModel": "text-embedding-004",
+      "dimensions": 768
+    }
+  },
+  "logging": {
+    "level": "info",
+    "format": "pretty",
+    "file": "./logs/agentic-synth.log"
+  }
+}

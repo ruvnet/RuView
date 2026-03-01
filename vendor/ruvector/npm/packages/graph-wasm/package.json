@@ -1,0 +1,50 @@
+{
+  "name": "@ruvector/graph-wasm",
+  "version": "2.0.2",
+  "type": "module",
+  "description": "Neo4j-compatible hypergraph database in WebAssembly - Cypher queries, SIMD optimization, knowledge graphs",
+  "main": "ruvector_graph_wasm.js",
+  "types": "ruvector_graph_wasm.d.ts",
+  "module": "ruvector_graph_wasm.js",
+  "sideEffects": [
+    "./snippets/*"
+  ],
+  "keywords": [
+    "graph-database",
+    "neo4j",
+    "cypher",
+    "hypergraph",
+    "wasm",
+    "webassembly",
+    "vector-database",
+    "knowledge-graph",
+    "property-graph",
+    "graph-query",
+    "embeddings",
+    "ai",
+    "machine-learning",
+    "rag",
+    "rust",
+    "browser"
+  ],
+  "author": "RuVector Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ruvnet/ruvector.git",
+    "directory": "crates/ruvector-graph-wasm"
+  },
+  "homepage": "https://github.com/ruvnet/ruvector#readme",
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "files": [
+    "ruvector_graph_wasm_bg.wasm",
+    "ruvector_graph_wasm.js",
+    "ruvector_graph_wasm.d.ts",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

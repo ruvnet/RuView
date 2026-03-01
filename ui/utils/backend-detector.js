@@ -7,6 +7,7 @@ export class BackendDetector {
     this.isBackendAvailable = null;
     this.lastCheck = 0;
     this.checkInterval = 30000; // Check every 30 seconds
+    this.sensingOnlyMode = false; // True when DensePose API is down, sensing WS is the only backend
   }
 
   // Check if the real backend is available

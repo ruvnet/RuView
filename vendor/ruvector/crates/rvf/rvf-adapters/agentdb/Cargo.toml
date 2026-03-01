@@ -1,0 +1,18 @@
+[package]
+name = "rvf-adapter-agentdb"
+version = "0.1.0"
+edition = "2021"
+description = "AgentDB adapter for RuVector Format -- maps agent memory to RVF segments"
+license = "MIT OR Apache-2.0"
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+rvf-runtime = { path = "../../rvf-runtime", features = ["std"] }
+rvf-types = { path = "../../rvf-types", features = ["std"] }
+rvf-index = { path = "../../rvf-index", features = ["std"] }
+
+[dev-dependencies]
+tempfile = "3"

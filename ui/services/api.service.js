@@ -69,7 +69,7 @@ export class ApiService {
     try {
       // Process request through interceptors
       const processed = await this.processRequest(url, options);
-      
+
       // Determine the correct base URL (real backend vs mock)
       let finalUrl = processed.url;
       if (processed.url.startsWith(API_CONFIG.BASE_URL)) {
@@ -99,7 +99,10 @@ export class ApiService {
       return data;
 
     } catch (error) {
-      console.error('API Request Error:', error);
+      // Only log if not a connection refusal (expected when DensePose API is down)
+      if (error.message && !error.message.includes('Failed to fetch')) {
+        console.error('API Request Error:', error);
+      }
       throw error;
     }
   }

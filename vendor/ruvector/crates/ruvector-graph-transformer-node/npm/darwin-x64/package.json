@@ -1,0 +1,16 @@
+{
+  "name": "@ruvector/graph-transformer-darwin-x64",
+  "version": "2.0.4",
+  "os": ["darwin"],
+  "cpu": ["x64"],
+  
+  "main": "ruvector-graph-transformer.darwin-x64.node",
+  "files": ["ruvector-graph-transformer.darwin-x64.node"],
+  "description": "Proof-gated graph transformer - darwin-x64 platform binary",
+  "keywords": ["ruvector", "graph-transformer", "napi-rs"],
+  "author": "Ruvector Team",
+  "license": "MIT",
+  "repository": {"type": "git", "url": "https://github.com/ruvnet/ruvector"},
+  "engines": {"node": ">= 10"},
+  "publishConfig": {"registry": "https://registry.npmjs.org/", "access": "public"}
+}

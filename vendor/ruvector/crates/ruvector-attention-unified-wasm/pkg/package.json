@@ -1,0 +1,43 @@
+{
+  "name": "@ruvector/attention-unified-wasm",
+  "type": "module",
+  "collaborators": [
+    "RuVector Team"
+  ],
+  "author": "RuVector Team <ruvnet@users.noreply.github.com>",
+  "description": "Unified WebAssembly bindings for 18+ attention mechanisms: Neural, DAG, Graph, and Mamba SSM",
+  "version": "0.1.29",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector"
+  },
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "files": [
+    "ruvector_attention_unified_wasm_bg.wasm",
+    "ruvector_attention_unified_wasm.js",
+    "ruvector_attention_unified_wasm.d.ts",
+    "ruvector_attention_unified_wasm_bg.wasm.d.ts",
+    "README.md"
+  ],
+  "main": "ruvector_attention_unified_wasm.js",
+  "homepage": "https://ruv.io",
+  "types": "ruvector_attention_unified_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ],
+  "keywords": [
+    "attention",
+    "wasm",
+    "neural",
+    "dag",
+    "mamba",
+    "ruvector",
+    "webassembly",
+    "transformer",
+    "graph-attention",
+    "state-space-models"
+  ]
+}

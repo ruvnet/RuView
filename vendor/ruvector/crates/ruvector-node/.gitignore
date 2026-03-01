@@ -1,0 +1,41 @@
+# Node modules
+node_modules/
+
+# Build outputs
+*.node
+index.js
+index.d.ts
+npm/
+target/
+
+# Test databases
+*.db
+*.db-shm
+*.db-wal
+
+# Examples output
+examples/*.db
+examples/*.db-shm
+examples/*.db-wal
+simple-example.db*
+advanced-example.db*
+semantic-search.db*
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test artifacts
+.ava/
+coverage/

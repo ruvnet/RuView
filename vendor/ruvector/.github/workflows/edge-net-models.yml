@@ -1,0 +1,455 @@
+# Edge-Net Model Optimization Workflow
+#
+# Automatically optimizes ONNX models when a new release is created
+# - Quantizes models to INT4 and INT8
+# - Uploads to Google Cloud Storage
+# - Optionally pins to IPFS
+# - Updates registry.json
+
+name: Edge-Net Model Optimization
+
+on:
+  # Trigger on release creation
+  release:
+    types: [published]
+
+  # Manual trigger with model selection
+  workflow_dispatch:
+    inputs:
+      models:
+        description: 'Comma-separated list of model IDs to optimize (or "all")'
+        required: true
+        default: 'minilm-l6,distilgpt2'
+      quantization:
+        description: 'Quantization types to generate'
+        required: true
+        default: 'int4,int8'
+        type: choice
+        options:
+          - 'int4,int8'
+          - 'int4'
+          - 'int8'
+          - 'fp16'
+          - 'int4,int8,fp16'
+      upload_ipfs:
+        description: 'Upload to IPFS'
+        required: false
+        default: false
+        type: boolean
+      upload_gcs:
+        description: 'Upload to Google Cloud Storage'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  NODE_VERSION: '20'
+  PYTHON_VERSION: '3.11'
+  GCS_BUCKET: ruvector-models
+  MODELS_DIR: examples/edge-net/pkg/models
+  ONNX_CACHE_DIR: /tmp/.ruvector/models/onnx
+
+jobs:
+  # Determine which models to process
+  prepare:
+    name: Prepare Model List
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      quantizations: ${{ steps.set-matrix.outputs.quantizations }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set model matrix
+        id: set-matrix
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            MODELS="${{ github.event.inputs.models }}"
+            QUANT="${{ github.event.inputs.quantization }}"
+          else
+            # On release, optimize tier 1 models by default
+            MODELS="minilm-l6,e5-small,distilgpt2,tinystories,starcoder-tiny"
+            QUANT="int4,int8"
+          fi
+
+          if [ "$MODELS" = "all" ]; then
+            MODELS=$(jq -r '.models | keys | join(",")' ${{ env.MODELS_DIR }}/registry.json)
+          fi
+
+          # Convert to JSON array
+          MODELS_JSON=$(echo "$MODELS" | tr ',' '\n' | jq -R . | jq -s .)
+          QUANT_JSON=$(echo "$QUANT" | tr ',' '\n' | jq -R . | jq -s .)
+
+          echo "matrix=$MODELS_JSON" >> $GITHUB_OUTPUT
+          echo "quantizations=$QUANT_JSON" >> $GITHUB_OUTPUT
+
+          echo "Models to process: $MODELS"
+          echo "Quantizations: $QUANT"
+
+  # Optimize models in parallel
+  optimize:
+    name: Optimize ${{ matrix.model }}
+    runs-on: ubuntu-latest
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        model: ${{ fromJson(needs.prepare.outputs.matrix) }}
+        quantization: ${{ fromJson(needs.prepare.outputs.quantizations) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: ${{ env.MODELS_DIR }}/../package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        working-directory: ${{ env.MODELS_DIR }}/..
+        run: |
+          npm ci
+          pip install onnxruntime onnx onnxruntime-tools
+
+      - name: Cache ONNX models
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.ONNX_CACHE_DIR }}
+          key: onnx-${{ matrix.model }}-${{ hashFiles('**/registry.json') }}
+          restore-keys: |
+            onnx-${{ matrix.model }}-
+            onnx-
+
+      - name: Download model
+        working-directory: ${{ env.MODELS_DIR }}/..
+        run: |
+          echo "Downloading model: ${{ matrix.model }}"
+          node models/models-cli.js download ${{ matrix.model }} --verify
+        env:
+          ONNX_CACHE_DIR: ${{ env.ONNX_CACHE_DIR }}
+
+      - name: Optimize model
+        working-directory: ${{ env.MODELS_DIR }}/..
+        run: |
+          echo "Optimizing ${{ matrix.model }} with ${{ matrix.quantization }}"
+
+          # Create output directory
+          OUTPUT_DIR="optimized/${{ matrix.model }}/${{ matrix.quantization }}"
+          mkdir -p "$OUTPUT_DIR"
+
+          # Run optimization via CLI
+          node models/models-cli.js optimize ${{ matrix.model }} \
+            --quantize ${{ matrix.quantization }} \
+            --output "$OUTPUT_DIR"
+
+          # List output files
+          echo "Optimized files:"
+          ls -lh "$OUTPUT_DIR"
+        env:
+          ONNX_CACHE_DIR: ${{ env.ONNX_CACHE_DIR }}
+
+      - name: Calculate checksums
+        working-directory: ${{ env.MODELS_DIR }}/..
+        run: |
+          OUTPUT_DIR="optimized/${{ matrix.model }}/${{ matrix.quantization }}"
+
+          # Generate checksums
+          cd "$OUTPUT_DIR"
+          sha256sum *.onnx > checksums.sha256 2>/dev/null || true
+
+          echo "Checksums:"
+          cat checksums.sha256 || echo "No ONNX files found"
+
+      - name: Upload optimized model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-${{ matrix.model }}-${{ matrix.quantization }}
+          path: ${{ env.MODELS_DIR }}/../optimized/${{ matrix.model }}/${{ matrix.quantization }}
+          retention-days: 7
+
+  # Upload to Google Cloud Storage
+  upload-gcs:
+    name: Upload to GCS
+    runs-on: ubuntu-latest
+    needs: [prepare, optimize]
+    if: github.event.inputs.upload_gcs != 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Upload to GCS
+        run: |
+          echo "Uploading models to gs://${{ env.GCS_BUCKET }}"
+
+          for model_dir in artifacts/model-*; do
+            if [ -d "$model_dir" ]; then
+              MODEL_NAME=$(basename "$model_dir" | sed 's/model-//' | sed 's/-int[48]//' | sed 's/-fp16//')
+              QUANT=$(basename "$model_dir" | grep -oE '(int4|int8|fp16)')
+
+              echo "Uploading $MODEL_NAME ($QUANT)"
+              gsutil -m cp -r "$model_dir/*" "gs://${{ env.GCS_BUCKET }}/$MODEL_NAME/$QUANT/"
+            fi
+          done
+
+          echo "Upload complete!"
+          gsutil ls -l "gs://${{ env.GCS_BUCKET }}/"
+
+  # Upload to IPFS via Pinata
+  upload-ipfs:
+    name: Upload to IPFS
+    runs-on: ubuntu-latest
+    needs: [prepare, optimize]
+    if: github.event.inputs.upload_ipfs == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Pin to IPFS via Pinata
+        run: |
+          echo "Pinning models to IPFS via Pinata"
+
+          for model_dir in artifacts/model-*; do
+            if [ -d "$model_dir" ]; then
+              MODEL_NAME=$(basename "$model_dir")
+
+              echo "Pinning $MODEL_NAME"
+
+              # Create a tar archive for the model
+              tar -czf "${MODEL_NAME}.tar.gz" -C "$model_dir" .
+
+              # Pin to Pinata
+              RESPONSE=$(curl -s -X POST \
+                -H "pinata_api_key: ${{ secrets.PINATA_API_KEY }}" \
+                -H "pinata_secret_api_key: ${{ secrets.PINATA_SECRET }}" \
+                -F "file=@${MODEL_NAME}.tar.gz" \
+                -F "pinataMetadata={\"name\":\"${MODEL_NAME}\",\"keyvalues\":{\"type\":\"onnx-model\",\"repo\":\"ruvector\"}}" \
+                "https://api.pinata.cloud/pinning/pinFileToIPFS")
+
+              CID=$(echo "$RESPONSE" | jq -r '.IpfsHash')
+              echo "  IPFS CID: $CID"
+              echo "  Gateway URL: https://ipfs.io/ipfs/$CID"
+
+              # Save CID for registry update
+              echo "$MODEL_NAME=$CID" >> ipfs_cids.txt
+            fi
+          done
+        env:
+          PINATA_API_KEY: ${{ secrets.PINATA_API_KEY }}
+          PINATA_SECRET: ${{ secrets.PINATA_SECRET }}
+
+      - name: Upload IPFS CIDs
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipfs-cids
+          path: ipfs_cids.txt
+          retention-days: 30
+
+  # Update registry with new model information
+  update-registry:
+    name: Update Registry
+    runs-on: ubuntu-latest
+    needs: [optimize, upload-gcs]
+    if: always() && needs.optimize.result == 'success'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Update registry.json
+        working-directory: ${{ env.MODELS_DIR }}
+        run: |
+          echo "Updating registry with new model artifacts"
+
+          # Load current registry
+          REGISTRY=$(cat registry.json)
+
+          for model_dir in ../../../artifacts/model-*; do
+            if [ -d "$model_dir" ]; then
+              MODEL_INFO=$(basename "$model_dir" | sed 's/model-//')
+              MODEL_NAME=$(echo "$MODEL_INFO" | sed 's/-int[48]$//' | sed 's/-fp16$//')
+              QUANT=$(echo "$MODEL_INFO" | grep -oE '(int4|int8|fp16)' || echo "original")
+
+              echo "Processing: $MODEL_NAME ($QUANT)"
+
+              # Get file sizes
+              TOTAL_SIZE=0
+              FILES_JSON="[]"
+              for file in "$model_dir"/*.onnx; do
+                if [ -f "$file" ]; then
+                  FILENAME=$(basename "$file")
+                  SIZE=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file")
+                  HASH=$(sha256sum "$file" | cut -d' ' -f1)
+
+                  FILES_JSON=$(echo "$FILES_JSON" | jq --arg f "$FILENAME" --argjson s "$SIZE" --arg h "$HASH" \
+                    '. + [{"file": $f, "size": $s, "sha256": $h}]')
+
+                  TOTAL_SIZE=$((TOTAL_SIZE + SIZE))
+                fi
+              done
+
+              # Update registry
+              REGISTRY=$(echo "$REGISTRY" | jq \
+                --arg model "$MODEL_NAME" \
+                --arg quant "$QUANT" \
+                --argjson files "$FILES_JSON" \
+                --arg size "$TOTAL_SIZE" \
+                --arg updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                --arg gcs "https://storage.googleapis.com/${{ env.GCS_BUCKET }}/$MODEL_NAME/$QUANT" \
+                '.models[$model].artifacts[$quant] = {
+                  "files": $files,
+                  "totalSize": ($size | tonumber),
+                  "gcsUrl": $gcs,
+                  "updated": $updated
+                } | .updated = $updated')
+            fi
+          done
+
+          # Save updated registry
+          echo "$REGISTRY" | jq '.' > registry.json
+
+          echo "Registry updated:"
+          jq '.models | to_entries[] | "\(.key): \(.value.artifacts | keys)"' registry.json
+
+      - name: Commit registry updates
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          git add ${{ env.MODELS_DIR }}/registry.json
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore(models): update registry with optimized models
+
+            Updated models: ${{ needs.prepare.outputs.matrix }}
+            Quantizations: ${{ needs.prepare.outputs.quantizations }}
+
+            [skip ci]"
+            git push
+          fi
+
+  # Run benchmarks on optimized models
+  benchmark:
+    name: Benchmark Models
+    runs-on: ubuntu-latest
+    needs: [optimize]
+    if: github.event_name == 'release'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: ${{ env.MODELS_DIR }}/../package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ env.MODELS_DIR }}/..
+        run: npm ci
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Run benchmarks
+        working-directory: ${{ env.MODELS_DIR }}/..
+        run: |
+          echo "Running model benchmarks"
+
+          RESULTS="[]"
+
+          for model_dir in ../artifacts/model-*; do
+            if [ -d "$model_dir" ]; then
+              MODEL_INFO=$(basename "$model_dir" | sed 's/model-//')
+              MODEL_NAME=$(echo "$MODEL_INFO" | sed 's/-int[48]$//' | sed 's/-fp16$//')
+
+              echo "Benchmarking: $MODEL_NAME"
+
+              # Run benchmark
+              RESULT=$(node models/models-cli.js benchmark "$MODEL_NAME" \
+                --iterations 5 \
+                --warmup 1 \
+                --output /tmp/bench_${MODEL_NAME}.json 2>/dev/null || echo "{}")
+
+              if [ -f "/tmp/bench_${MODEL_NAME}.json" ]; then
+                RESULTS=$(echo "$RESULTS" | jq --slurpfile r "/tmp/bench_${MODEL_NAME}.json" '. + $r')
+              fi
+            fi
+          done
+
+          # Save all results
+          echo "$RESULTS" | jq '.' > benchmark_results.json
+
+          echo "Benchmark Results:"
+          jq '.' benchmark_results.json
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: ${{ env.MODELS_DIR }}/../benchmark_results.json
+          retention-days: 30
+
+      - name: Comment on release
+        if: github.event_name == 'release'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.release.id }}
+          body: |
+            ## Model Optimization Complete
+
+            Optimized models have been processed and uploaded.
+
+            **Models processed:**
+            ${{ needs.prepare.outputs.matrix }}
+
+            **Quantizations:**
+            ${{ needs.prepare.outputs.quantizations }}
+
+            **Artifacts:**
+            - GCS: `gs://${{ env.GCS_BUCKET }}/`
+            - Benchmark results available in workflow artifacts

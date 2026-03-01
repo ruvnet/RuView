@@ -1,0 +1,26 @@
+{
+  "name": "@ruvector/rvf-solver",
+  "version": "0.1.7",
+  "description": "RVF self-learning temporal solver — Thompson Sampling, PolicyKernel, ReasoningBank",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist/", "pkg/", "package.json"],
+  "scripts": {
+    "build": "tsc",
+    "build:wasm": "cargo build --release --target wasm32-unknown-unknown --manifest-path ../../crates/rvf/rvf-solver-wasm/Cargo.toml && wasm-opt -Oz ../../crates/rvf/target/wasm32-unknown-unknown/release/rvf_solver_wasm.wasm -o pkg/rvf_solver_bg.wasm"
+  },
+  "keywords": ["solver", "wasm", "thompson-sampling", "reasoning-bank", "self-learning", "rvf", "agi"],
+  "license": "MIT",
+  "repository": "https://github.com/ruvnet/ruvector",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  }
+}

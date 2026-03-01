@@ -1,0 +1,117 @@
+{
+  "name": "@ruvector/graph-data-generator",
+  "version": "0.1.0",
+  "description": "AI-powered synthetic graph data generation with OpenRouter/Kimi K2 integration for Neo4j knowledge graphs, social networks, and temporal events",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "bin": {
+    "graph-synth": "./bin/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./generators": {
+      "types": "./dist/generators/index.d.ts",
+      "import": "./dist/generators/index.js",
+      "require": "./dist/generators/index.cjs"
+    },
+    "./schemas": {
+      "types": "./dist/schemas/index.d.ts",
+      "import": "./dist/schemas/index.js",
+      "require": "./dist/schemas/index.cjs"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.cjs",
+    "dist/**/*.d.ts",
+    "dist/**/*.map",
+    "bin",
+    "config",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "build:generators": "tsup src/generators/index.ts --format esm,cjs --dts --out-dir dist/generators",
+    "build:schemas": "tsup src/schemas/index.ts --format esm,cjs --dts --out-dir dist/schemas",
+    "build:all": "npm run build && npm run build:generators && npm run build:schemas",
+    "dev": "tsup src/index.ts --format esm --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests --ext .ts,.js",
+    "lint:fix": "eslint src tests --ext .ts,.js --fix",
+    "format": "prettier --write \"src/**/*.{ts,js}\" \"tests/**/*.{ts,js}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,js}\" \"tests/**/*.{ts,js}\"",
+    "prepublishOnly": "npm run build:all"
+  },
+  "dependencies": {
+    "@ruvector/agentic-synth": "^0.1.0",
+    "dotenv": "^16.6.1",
+    "p-retry": "^6.2.1",
+    "p-throttle": "^6.2.0",
+    "zod": "^4.1.12"
+  },
+  "peerDependencies": {
+    "@ruvector/agentic-synth": "^0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@ruvector/agentic-synth": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.25",
+    "@typescript-eslint/eslint-plugin": "^8.47.0",
+    "@typescript-eslint/parser": "^8.47.0",
+    "@vitest/coverage-v8": "^3.2.4",
+    "eslint": "^8.57.1",
+    "prettier": "^3.6.2",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "keywords": [
+    "graph-data",
+    "knowledge-graph",
+    "social-network",
+    "neo4j",
+    "cypher",
+    "synthetic-data",
+    "openrouter",
+    "kimi-k2",
+    "graph-generation",
+    "vector-embeddings",
+    "temporal-graphs",
+    "entity-relationships",
+    "ruvector",
+    "ai-training",
+    "llm",
+    "typescript"
+  ],
+  "author": {
+    "name": "rUv",
+    "url": "https://github.com/ruvnet"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "packages/graph-data-generator"
+  },
+  "homepage": "https://github.com/ruvnet/ruvector/tree/main/packages/graph-data-generator#readme",
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}

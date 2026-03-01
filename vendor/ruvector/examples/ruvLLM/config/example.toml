@@ -1,0 +1,46 @@
+# RuvLLM Example Configuration
+# Copy this file to ruvllm.toml and customize
+
+[system]
+device_class = "server"      # edge, mobile, server, gpu
+max_memory_mb = 8192
+max_concurrent_requests = 10
+data_dir = "./data"
+
+[embedding]
+dimension = 768              # Embedding vector size
+max_tokens = 512             # Max tokens per input
+batch_size = 8               # Batch size for embedding
+
+[memory]
+db_path = "./data/memory.db"
+hnsw_m = 16                  # Connections per node
+hnsw_ef_construction = 100   # Build quality
+hnsw_ef_search = 64          # Search quality
+max_nodes = 1000000          # Max memory nodes
+writeback_batch_size = 100   # Batch size for writes
+writeback_interval_ms = 1000 # Write interval
+
+[router]
+input_dim = 128              # Input feature dimension
+hidden_dim = 64              # Hidden state size
+sparsity = 0.9               # Weight matrix sparsity
+rank = 8                     # Low-rank decomposition rank
+confidence_threshold = 0.7   # Fallback threshold
+
+[inference]
+models = ["tiny", "small", "medium", "large"]
+quantization = "q4"          # Quantization type
+max_context = 8192           # Max context length
+max_loaded_models = 2        # Max concurrent models
+kv_cache_size = 1024         # KV cache entries
+
+[learning]
+enabled = true               # Enable self-learning
+quality_threshold = 0.7      # Min quality for writeback
+replay_capacity = 10000      # Replay buffer size
+batch_size = 32              # Training batch size
+learning_rate = 0.001        # Learning rate
+ewc_lambda = 0.4             # EWC regularization
+training_interval_ms = 3600000  # Training interval (1 hour)
+min_samples = 100            # Min samples before training

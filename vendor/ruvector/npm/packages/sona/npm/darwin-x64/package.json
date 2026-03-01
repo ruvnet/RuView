@@ -1,0 +1,10 @@
+{
+  "name": "@ruvector/sona-darwin-x64",
+  "version": "0.1.5",
+  "os": ["darwin"],
+  "cpu": ["x64"],
+  "main": "sona.darwin-x64.node",
+  "files": ["sona.darwin-x64.node"],
+  "license": "MIT",
+  "repository": {"type": "git", "url": "https://github.com/ruvnet/ruvector.git"}
+}

@@ -1,0 +1,112 @@
+{
+  "name": "@ruvector/postgres-cli",
+  "version": "0.2.7",
+  "description": "Advanced AI vector database CLI for PostgreSQL - pgvector drop-in replacement with 53+ SQL functions, 39 attention mechanisms, GNN layers, hyperbolic embeddings, and self-learning capabilities",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "bin": {
+    "ruvector-pg": "dist/cli.js",
+    "rvpg": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "test": "node --test tests/*.test.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ruvector",
+    "vector-database",
+    "postgres",
+    "postgresql",
+    "vector",
+    "embeddings",
+    "semantic-search",
+    "similarity-search",
+    "pgvector",
+    "hnsw",
+    "ivfflat",
+    "ann",
+    "approximate-nearest-neighbor",
+    "machine-learning",
+    "ai",
+    "artificial-intelligence",
+    "deep-learning",
+    "neural-network",
+    "gnn",
+    "graph-neural-network",
+    "gcn",
+    "graphsage",
+    "gat",
+    "attention",
+    "transformer",
+    "multi-head-attention",
+    "flash-attention",
+    "hyperbolic",
+    "poincare",
+    "lorentz",
+    "hierarchical-embeddings",
+    "knowledge-graph",
+    "graph-database",
+    "cypher",
+    "sparse-vectors",
+    "bm25",
+    "tf-idf",
+    "splade",
+    "hybrid-search",
+    "agent-routing",
+    "llm",
+    "rag",
+    "retrieval-augmented-generation",
+    "self-learning",
+    "reasoning",
+    "quantization",
+    "vector-quantization",
+    "cli",
+    "command-line"
+  ],
+  "author": "ruv.io Team <info@ruv.io> (https://ruv.io)",
+  "license": "MIT",
+  "homepage": "https://github.com/ruvnet/ruvector#readme",
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ruvnet/ruvector.git",
+    "directory": "npm/packages/postgres-cli"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/ruvnet"
+  },
+  "files": [
+    "dist",
+    "benchmarks",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "commander": "^11.1.0",
+    "chalk": "^5.3.0",
+    "pg": "^8.11.3",
+    "inquirer": "^9.2.12",
+    "ora": "^8.0.1",
+    "cli-table3": "^0.6.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "@types/pg": "^8.10.9",
+    "@types/inquirer": "^9.0.7",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

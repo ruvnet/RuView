@@ -1,0 +1,52 @@
+[package]
+name = "mincut-examples"
+version = "0.1.0"
+edition = "2021"
+description = "Exotic MinCut examples: temporal attractors, strange loops, causal discovery, and more"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace]
+
+[dependencies]
+ruvector-mincut = { path = "../../crates/ruvector-mincut", features = ["monitoring", "approximate", "exact"] }
+
+[[example]]
+name = "temporal_attractors"
+path = "temporal_attractors/src/main.rs"
+
+[[example]]
+name = "strange_loop"
+path = "strange_loop/main.rs"
+
+[[example]]
+name = "causal_discovery"
+path = "causal_discovery/main.rs"
+
+[[example]]
+name = "time_crystal"
+path = "time_crystal/main.rs"
+
+[[example]]
+name = "morphogenetic"
+path = "morphogenetic/main.rs"
+
+[[example]]
+name = "neural_optimizer"
+path = "neural_optimizer/main.rs"
+
+[[example]]
+name = "benchmarks"
+path = "benchmarks/main.rs"
+
+[[example]]
+name = "snn_integration"
+path = "snn_integration/main.rs"
+
+[[example]]
+name = "temporal_hypergraph"
+path = "temporal_hypergraph/main.rs"
+
+[[example]]
+name = "federated_loops"
+path = "federated_loops/main.rs"

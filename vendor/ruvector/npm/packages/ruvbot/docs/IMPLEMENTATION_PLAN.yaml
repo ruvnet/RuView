@@ -1,0 +1,916 @@
+# RuvBot Implementation Plan
+# High-performance AI assistant bot with WASM embeddings, vector memory, and multi-platform integration
+
+plan:
+  objective: "Build RuvBot npm package - a self-learning AI assistant with WASM embeddings, vector memory, and Slack/webhook integrations"
+
+  version: "0.1.0"
+  estimated_duration: "6-8 weeks"
+
+  success_criteria:
+    - "Package installable via npx @ruvector/ruvbot"
+    - "CLI supports local and remote deployment modes"
+    - "WASM embeddings working in Node.js and browser"
+    - "Vector memory with HNSW search < 10ms"
+    - "Slack integration with real-time message handling"
+    - "Background workers processing async tasks"
+    - "Extensible skill system with hot-reload"
+    - "Session persistence across restarts"
+    - "85%+ test coverage on core modules"
+
+  phases:
+    # ============================================================================
+    # PHASE 1: Core Foundation (Week 1-2)
+    # ============================================================================
+    - name: "Phase 1: Core Foundation"
+      duration: "2 weeks"
+      description: "Establish package structure and core domain entities"
+
+      tasks:
+        - id: "p1-t1"
+          description: "Initialize package with tsup, TypeScript, and ESM/CJS dual build"
+          agent: "coder"
+          dependencies: []
+          estimated_time: "2h"
+          priority: "critical"
+          files:
+            - "package.json"
+            - "tsconfig.json"
+            - "tsup.config.ts"
+            - ".npmignore"
+
+        - id: "p1-t2"
+          description: "Create core domain entities (Agent, Session, Message, Skill)"
+          agent: "coder"
+          dependencies: ["p1-t1"]
+          estimated_time: "4h"
+          priority: "high"
+          files:
+            - "src/core/entities/Agent.ts"
+            - "src/core/entities/Session.ts"
+            - "src/core/entities/Message.ts"
+            - "src/core/entities/Skill.ts"
+            - "src/core/entities/index.ts"
+            - "src/core/types.ts"
+
+        - id: "p1-t3"
+          description: "Implement RuvBot main class with lifecycle management"
+          agent: "coder"
+          dependencies: ["p1-t2"]
+          estimated_time: "4h"
+          priority: "high"
+          files:
+            - "src/RuvBot.ts"
+            - "src/core/BotConfig.ts"
+            - "src/core/BotState.ts"
+
+        - id: "p1-t4"
+          description: "Create error types and result monads"
+          agent: "coder"
+          dependencies: ["p1-t1"]
+          estimated_time: "2h"
+          priority: "medium"
+          files:
+            - "src/core/errors.ts"
+            - "src/core/Result.ts"
+
+        - id: "p1-t5"
+          description: "Set up unit testing with vitest"
+          agent: "tester"
+          dependencies: ["p1-t3"]
+          estimated_time: "3h"
+          priority: "high"
+          files:
+            - "vitest.config.ts"
+            - "tests/unit/core/RuvBot.test.ts"
+            - "tests/unit/core/entities/*.test.ts"
+
+    # ============================================================================
+    # PHASE 2: Infrastructure Layer (Week 2-3)
+    # ============================================================================
+    - name: "Phase 2: Infrastructure Layer"
+      duration: "1.5 weeks"
+      description: "Database, messaging, and worker infrastructure"
+
+      tasks:
+        - id: "p2-t1"
+          description: "Implement SessionStore with SQLite and PostgreSQL adapters"
+          agent: "coder"
+          dependencies: ["p1-t2"]
+          estimated_time: "6h"
+          priority: "high"
+          files:
+            - "src/infrastructure/storage/SessionStore.ts"
+            - "src/infrastructure/storage/adapters/SQLiteAdapter.ts"
+            - "src/infrastructure/storage/adapters/PostgresAdapter.ts"
+            - "src/infrastructure/storage/adapters/BaseAdapter.ts"
+
+        - id: "p2-t2"
+          description: "Create MessageQueue with in-memory and Redis backends"
+          agent: "coder"
+          dependencies: ["p1-t2"]
+          estimated_time: "5h"
+          priority: "high"
+          files:
+            - "src/infrastructure/messaging/MessageQueue.ts"
+            - "src/infrastructure/messaging/InMemoryQueue.ts"
+            - "src/infrastructure/messaging/RedisQueue.ts"
+
+        - id: "p2-t3"
+          description: "Implement WorkerPool using agentic-flow patterns"
+          agent: "coder"
+          dependencies: ["p2-t2"]
+          estimated_time: "6h"
+          priority: "high"
+          files:
+            - "src/infrastructure/workers/WorkerPool.ts"
+            - "src/infrastructure/workers/Worker.ts"
+            - "src/infrastructure/workers/TaskScheduler.ts"
+            - "src/infrastructure/workers/tasks/index.ts"
+
+        - id: "p2-t4"
+          description: "Create EventBus for internal pub/sub communication"
+          agent: "coder"
+          dependencies: ["p1-t1"]
+          estimated_time: "3h"
+          priority: "medium"
+          files:
+            - "src/infrastructure/events/EventBus.ts"
+            - "src/infrastructure/events/types.ts"
+
+        - id: "p2-t5"
+          description: "Add connection pooling and health checks"
+          agent: "coder"
+          dependencies: ["p2-t1", "p2-t2"]
+          estimated_time: "4h"
+          priority: "medium"
+          files:
+            - "src/infrastructure/health/HealthChecker.ts"
+            - "src/infrastructure/pool/ConnectionPool.ts"
+
+    # ============================================================================
+    # PHASE 3: Learning Layer - WASM & ruvllm (Week 3-4)
+    # ============================================================================
+    - name: "Phase 3: Learning Layer"
+      duration: "1.5 weeks"
+      description: "WASM embeddings and ruvllm integration for self-learning"
+
+      tasks:
+        - id: "p3-t1"
+          description: "Create MemoryManager with HNSW vector search"
+          agent: "coder"
+          dependencies: ["p2-t1"]
+          estimated_time: "8h"
+          priority: "critical"
+          files:
+            - "src/learning/memory/MemoryManager.ts"
+            - "src/learning/memory/VectorIndex.ts"
+            - "src/learning/memory/types.ts"
+          dependencies_pkg:
+            - "@ruvector/wasm-unified"
+
+        - id: "p3-t2"
+          description: "Integrate @ruvector/wasm-unified for WASM embeddings"
+          agent: "coder"
+          dependencies: ["p3-t1"]
+          estimated_time: "6h"
+          priority: "critical"
+          files:
+            - "src/learning/embeddings/WasmEmbedder.ts"
+            - "src/learning/embeddings/EmbeddingCache.ts"
+            - "src/learning/embeddings/index.ts"
+
+        - id: "p3-t3"
+          description: "Integrate @ruvector/ruvllm for LLM orchestration"
+          agent: "coder"
+          dependencies: ["p3-t2"]
+          estimated_time: "6h"
+          priority: "high"
+          files:
+            - "src/learning/llm/LLMOrchestrator.ts"
+            - "src/learning/llm/ModelRouter.ts"
+            - "src/learning/llm/SessionContext.ts"
+          dependencies_pkg:
+            - "@ruvector/ruvllm"
+
+        - id: "p3-t4"
+          description: "Implement trajectory learning and pattern extraction"
+          agent: "coder"
+          dependencies: ["p3-t3"]
+          estimated_time: "5h"
+          priority: "medium"
+          files:
+            - "src/learning/trajectory/TrajectoryRecorder.ts"
+            - "src/learning/trajectory/PatternExtractor.ts"
+            - "src/learning/trajectory/types.ts"
+
+        - id: "p3-t5"
+          description: "Add semantic search and retrieval pipeline"
+          agent: "coder"
+          dependencies: ["p3-t1", "p3-t2"]
+          estimated_time: "4h"
+          priority: "high"
+          files:
+            - "src/learning/retrieval/SemanticSearch.ts"
+            - "src/learning/retrieval/RetrievalPipeline.ts"
+
+    # ============================================================================
+    # PHASE 4: Skill System (Week 4-5)
+    # ============================================================================
+    - name: "Phase 4: Skill System"
+      duration: "1 week"
+      description: "Extensible skill registry with hot-reload support"
+
+      tasks:
+        - id: "p4-t1"
+          description: "Create SkillRegistry with plugin architecture"
+          agent: "coder"
+          dependencies: ["p1-t2", "p3-t3"]
+          estimated_time: "6h"
+          priority: "high"
+          files:
+            - "src/skills/SkillRegistry.ts"
+            - "src/skills/SkillLoader.ts"
+            - "src/skills/SkillContext.ts"
+            - "src/skills/types.ts"
+
+        - id: "p4-t2"
+          description: "Implement built-in skills (search, summarize, code)"
+          agent: "coder"
+          dependencies: ["p4-t1"]
+          estimated_time: "8h"
+          priority: "high"
+          files:
+            - "src/skills/builtin/SearchSkill.ts"
+            - "src/skills/builtin/SummarizeSkill.ts"
+            - "src/skills/builtin/CodeSkill.ts"
+            - "src/skills/builtin/MemorySkill.ts"
+            - "src/skills/builtin/index.ts"
+
+        - id: "p4-t3"
+          description: "Add skill hot-reload with file watching"
+          agent: "coder"
+          dependencies: ["p4-t1"]
+          estimated_time: "4h"
+          priority: "medium"
+          files:
+            - "src/skills/HotReloader.ts"
+            - "src/skills/SkillValidator.ts"
+
+        - id: "p4-t4"
+          description: "Create skill template generator"
+          agent: "coder"
+          dependencies: ["p4-t1"]
+          estimated_time: "3h"
+          priority: "low"
+          files:
+            - "src/skills/templates/skill-template.ts"
+            - "src/skills/generator.ts"
+
+    # ============================================================================
+    # PHASE 5: Integrations (Week 5-6)
+    # ============================================================================
+    - name: "Phase 5: Integrations"
+      duration: "1.5 weeks"
+      description: "Slack, webhooks, and external service integrations"
+
+      tasks:
+        - id: "p5-t1"
+          description: "Implement SlackAdapter with Socket Mode"
+          agent: "coder"
+          dependencies: ["p1-t3", "p4-t1"]
+          estimated_time: "8h"
+          priority: "high"
+          files:
+            - "src/integrations/slack/SlackAdapter.ts"
+            - "src/integrations/slack/SlackEventHandler.ts"
+            - "src/integrations/slack/SlackMessageFormatter.ts"
+            - "src/integrations/slack/types.ts"
+          dependencies_pkg:
+            - "@slack/bolt"
+            - "@slack/web-api"
+
+        - id: "p5-t2"
+          description: "Create WebhookServer for HTTP callbacks"
+          agent: "coder"
+          dependencies: ["p1-t3"]
+          estimated_time: "5h"
+          priority: "high"
+          files:
+            - "src/integrations/webhooks/WebhookServer.ts"
+            - "src/integrations/webhooks/WebhookValidator.ts"
+            - "src/integrations/webhooks/routes.ts"
+
+        - id: "p5-t3"
+          description: "Add Discord adapter"
+          agent: "coder"
+          dependencies: ["p5-t1"]
+          estimated_time: "6h"
+          priority: "medium"
+          files:
+            - "src/integrations/discord/DiscordAdapter.ts"
+            - "src/integrations/discord/DiscordEventHandler.ts"
+          dependencies_pkg:
+            - "discord.js"
+
+        - id: "p5-t4"
+          description: "Create generic ChatAdapter interface"
+          agent: "coder"
+          dependencies: ["p5-t1", "p5-t3"]
+          estimated_time: "3h"
+          priority: "medium"
+          files:
+            - "src/integrations/ChatAdapter.ts"
+            - "src/integrations/AdapterFactory.ts"
+            - "src/integrations/types.ts"
+
+    # ============================================================================
+    # PHASE 6: API Layer (Week 6)
+    # ============================================================================
+    - name: "Phase 6: API Layer"
+      duration: "1 week"
+      description: "REST and GraphQL endpoints for external access"
+
+      tasks:
+        - id: "p6-t1"
+          description: "Create REST API server with Express/Fastify"
+          agent: "coder"
+          dependencies: ["p1-t3", "p4-t1"]
+          estimated_time: "6h"
+          priority: "high"
+          files:
+            - "src/api/rest/server.ts"
+            - "src/api/rest/routes/chat.ts"
+            - "src/api/rest/routes/sessions.ts"
+            - "src/api/rest/routes/skills.ts"
+            - "src/api/rest/routes/health.ts"
+            - "src/api/rest/middleware/auth.ts"
+            - "src/api/rest/middleware/rateLimit.ts"
+          dependencies_pkg:
+            - "fastify"
+            - "@fastify/cors"
+            - "@fastify/rate-limit"
+
+        - id: "p6-t2"
+          description: "Add GraphQL API with subscriptions"
+          agent: "coder"
+          dependencies: ["p6-t1"]
+          estimated_time: "6h"
+          priority: "medium"
+          files:
+            - "src/api/graphql/schema.ts"
+            - "src/api/graphql/resolvers/chat.ts"
+            - "src/api/graphql/resolvers/sessions.ts"
+            - "src/api/graphql/subscriptions.ts"
+          dependencies_pkg:
+            - "mercurius"
+            - "graphql"
+
+        - id: "p6-t3"
+          description: "Implement OpenAPI spec generation"
+          agent: "coder"
+          dependencies: ["p6-t1"]
+          estimated_time: "3h"
+          priority: "low"
+          files:
+            - "src/api/openapi/generator.ts"
+            - "src/api/openapi/decorators.ts"
+
+    # ============================================================================
+    # PHASE 7: CLI & Distribution (Week 6-7)
+    # ============================================================================
+    - name: "Phase 7: CLI & Distribution"
+      duration: "1 week"
+      description: "CLI interface and npx distribution setup"
+
+      tasks:
+        - id: "p7-t1"
+          description: "Create CLI entry point with commander"
+          agent: "coder"
+          dependencies: ["p1-t3", "p5-t1", "p6-t1"]
+          estimated_time: "6h"
+          priority: "critical"
+          files:
+            - "bin/cli.js"
+            - "src/cli/index.ts"
+            - "src/cli/commands/start.ts"
+            - "src/cli/commands/config.ts"
+            - "src/cli/commands/skills.ts"
+            - "src/cli/commands/status.ts"
+          dependencies_pkg:
+            - "commander"
+            - "chalk"
+            - "ora"
+            - "inquirer"
+
+        - id: "p7-t2"
+          description: "Add local vs remote deployment modes"
+          agent: "coder"
+          dependencies: ["p7-t1"]
+          estimated_time: "4h"
+          priority: "high"
+          files:
+            - "src/cli/modes/local.ts"
+            - "src/cli/modes/remote.ts"
+            - "src/cli/modes/docker.ts"
+
+        - id: "p7-t3"
+          description: "Create configuration wizard"
+          agent: "coder"
+          dependencies: ["p7-t1"]
+          estimated_time: "4h"
+          priority: "medium"
+          files:
+            - "src/cli/wizard/ConfigWizard.ts"
+            - "src/cli/wizard/prompts.ts"
+
+        - id: "p7-t4"
+          description: "Build install script for curl | bash deployment"
+          agent: "coder"
+          dependencies: ["p7-t1"]
+          estimated_time: "3h"
+          priority: "medium"
+          files:
+            - "scripts/install.sh"
+            - "scripts/uninstall.sh"
+
+        - id: "p7-t5"
+          description: "Create Docker configuration"
+          agent: "coder"
+          dependencies: ["p7-t2"]
+          estimated_time: "3h"
+          priority: "medium"
+          files:
+            - "Dockerfile"
+            - "docker-compose.yml"
+            - ".dockerignore"
+
+    # ============================================================================
+    # PHASE 8: Testing & Documentation (Week 7-8)
+    # ============================================================================
+    - name: "Phase 8: Testing & Documentation"
+      duration: "1 week"
+      description: "Comprehensive testing and documentation"
+
+      tasks:
+        - id: "p8-t1"
+          description: "Integration tests for all modules"
+          agent: "tester"
+          dependencies: ["p7-t1"]
+          estimated_time: "8h"
+          priority: "high"
+          files:
+            - "tests/integration/bot.test.ts"
+            - "tests/integration/memory.test.ts"
+            - "tests/integration/skills.test.ts"
+            - "tests/integration/slack.test.ts"
+            - "tests/integration/api.test.ts"
+
+        - id: "p8-t2"
+          description: "E2E tests with real services"
+          agent: "tester"
+          dependencies: ["p8-t1"]
+          estimated_time: "6h"
+          priority: "medium"
+          files:
+            - "tests/e2e/full-flow.test.ts"
+            - "tests/e2e/slack-flow.test.ts"
+            - "tests/fixtures/"
+
+        - id: "p8-t3"
+          description: "Performance benchmarks"
+          agent: "tester"
+          dependencies: ["p8-t1"]
+          estimated_time: "4h"
+          priority: "medium"
+          files:
+            - "benchmarks/memory.bench.ts"
+            - "benchmarks/embeddings.bench.ts"
+            - "benchmarks/throughput.bench.ts"
+
+  # ============================================================================
+  # CRITICAL PATH
+  # ============================================================================
+  critical_path:
+    - "p1-t1"  # Package init
+    - "p1-t2"  # Core entities
+    - "p1-t3"  # RuvBot class
+    - "p3-t1"  # MemoryManager
+    - "p3-t2"  # WASM embeddings
+    - "p4-t1"  # SkillRegistry
+    - "p5-t1"  # SlackAdapter
+    - "p7-t1"  # CLI
+
+  # ============================================================================
+  # RISK ASSESSMENT
+  # ============================================================================
+  risks:
+    - id: "risk-1"
+      description: "WASM module compatibility issues across Node versions"
+      likelihood: "medium"
+      impact: "high"
+      mitigation: "Test on Node 18, 20, 22. Provide pure JS fallback for critical paths"
+
+    - id: "risk-2"
+      description: "Slack API rate limiting during high traffic"
+      likelihood: "medium"
+      impact: "medium"
+      mitigation: "Implement exponential backoff and message batching"
+
+    - id: "risk-3"
+      description: "Memory leaks in long-running bot instances"
+      likelihood: "medium"
+      impact: "high"
+      mitigation: "Add memory monitoring, implement LRU caches, periodic cleanup"
+
+    - id: "risk-4"
+      description: "Breaking changes in upstream @ruvector packages"
+      likelihood: "low"
+      impact: "high"
+      mitigation: "Pin specific versions, maintain compatibility layer"
+
+    - id: "risk-5"
+      description: "Vector index corruption on unexpected shutdown"
+      likelihood: "medium"
+      impact: "high"
+      mitigation: "WAL logging, periodic snapshots, automatic recovery"
+
+  # ============================================================================
+  # PACKAGE STRUCTURE
+  # ============================================================================
+  package_structure:
+    root: "npm/packages/ruvbot"
+    directories:
+      - path: "src/core"
+        purpose: "Domain entities and core types"
+        files:
+          - "entities/Agent.ts"
+          - "entities/Session.ts"
+          - "entities/Message.ts"
+          - "entities/Skill.ts"
+          - "types.ts"
+          - "errors.ts"
+          - "Result.ts"
+          - "BotConfig.ts"
+          - "BotState.ts"
+
+      - path: "src/infrastructure"
+        purpose: "Database, messaging, and worker infrastructure"
+        files:
+          - "storage/SessionStore.ts"
+          - "storage/adapters/SQLiteAdapter.ts"
+          - "storage/adapters/PostgresAdapter.ts"
+          - "messaging/MessageQueue.ts"
+          - "messaging/InMemoryQueue.ts"
+          - "messaging/RedisQueue.ts"
+          - "workers/WorkerPool.ts"
+          - "workers/Worker.ts"
+          - "workers/TaskScheduler.ts"
+          - "events/EventBus.ts"
+          - "health/HealthChecker.ts"
+
+      - path: "src/learning"
+        purpose: "WASM embeddings, vector memory, and ruvllm integration"
+        files:
+          - "memory/MemoryManager.ts"
+          - "memory/VectorIndex.ts"
+          - "embeddings/WasmEmbedder.ts"
+          - "embeddings/EmbeddingCache.ts"
+          - "llm/LLMOrchestrator.ts"
+          - "llm/ModelRouter.ts"
+          - "trajectory/TrajectoryRecorder.ts"
+          - "trajectory/PatternExtractor.ts"
+          - "retrieval/SemanticSearch.ts"
+
+      - path: "src/skills"
+        purpose: "Extensible skill system"
+        files:
+          - "SkillRegistry.ts"
+          - "SkillLoader.ts"
+          - "SkillContext.ts"
+          - "HotReloader.ts"
+          - "builtin/SearchSkill.ts"
+          - "builtin/SummarizeSkill.ts"
+          - "builtin/CodeSkill.ts"
+          - "builtin/MemorySkill.ts"
+
+      - path: "src/integrations"
+        purpose: "Slack, Discord, and webhook integrations"
+        files:
+          - "ChatAdapter.ts"
+          - "AdapterFactory.ts"
+          - "slack/SlackAdapter.ts"
+          - "slack/SlackEventHandler.ts"
+          - "discord/DiscordAdapter.ts"
+          - "webhooks/WebhookServer.ts"
+
+      - path: "src/api"
+        purpose: "REST and GraphQL endpoints"
+        files:
+          - "rest/server.ts"
+          - "rest/routes/chat.ts"
+          - "rest/routes/sessions.ts"
+          - "rest/routes/skills.ts"
+          - "graphql/schema.ts"
+          - "graphql/resolvers/*.ts"
+
+      - path: "src/cli"
+        purpose: "CLI interface"
+        files:
+          - "index.ts"
+          - "commands/start.ts"
+          - "commands/config.ts"
+          - "commands/skills.ts"
+          - "modes/local.ts"
+          - "modes/remote.ts"
+          - "wizard/ConfigWizard.ts"
+
+      - path: "bin"
+        purpose: "CLI entry point for npx"
+        files:
+          - "cli.js"
+
+      - path: "tests"
+        purpose: "Test suites"
+        files:
+          - "unit/**/*.test.ts"
+          - "integration/**/*.test.ts"
+          - "e2e/**/*.test.ts"
+
+      - path: "scripts"
+        purpose: "Installation and utility scripts"
+        files:
+          - "install.sh"
+          - "uninstall.sh"
+
+  # ============================================================================
+  # DEPENDENCIES
+  # ============================================================================
+  dependencies:
+    production:
+      core:
+        - name: "@ruvector/wasm-unified"
+          version: "^1.0.0"
+          purpose: "WASM embeddings and attention mechanisms"
+
+        - name: "@ruvector/ruvllm"
+          version: "^2.3.0"
+          purpose: "LLM orchestration with SONA learning"
+
+        - name: "@ruvector/postgres-cli"
+          version: "^0.2.6"
+          purpose: "PostgreSQL vector storage"
+
+      infrastructure:
+        - name: "better-sqlite3"
+          version: "^9.0.0"
+          purpose: "Local SQLite storage"
+
+        - name: "ioredis"
+          version: "^5.3.0"
+          purpose: "Redis message queue"
+
+        - name: "fastify"
+          version: "^4.24.0"
+          purpose: "REST API server"
+
+      integrations:
+        - name: "@slack/bolt"
+          version: "^3.16.0"
+          purpose: "Slack bot framework"
+
+        - name: "discord.js"
+          version: "^14.14.0"
+          purpose: "Discord integration"
+          optional: true
+
+      cli:
+        - name: "commander"
+          version: "^12.0.0"
+          purpose: "CLI framework"
+
+        - name: "chalk"
+          version: "^4.1.2"
+          purpose: "Terminal styling"
+
+        - name: "ora"
+          version: "^5.4.1"
+          purpose: "Terminal spinners"
+
+        - name: "inquirer"
+          version: "^9.2.0"
+          purpose: "Interactive prompts"
+
+    development:
+      - name: "typescript"
+        version: "^5.3.0"
+
+      - name: "tsup"
+        version: "^8.0.0"
+        purpose: "Build tool"
+
+      - name: "vitest"
+        version: "^1.1.0"
+        purpose: "Testing framework"
+
+      - name: "@types/node"
+        version: "^20.10.0"
+
+  # ============================================================================
+  # NPX DISTRIBUTION
+  # ============================================================================
+  npx_distribution:
+    package_name: "@ruvector/ruvbot"
+    binary_name: "ruvbot"
+
+    commands:
+      - command: "npx @ruvector/ruvbot init"
+        description: "Initialize RuvBot in current directory"
+
+      - command: "npx @ruvector/ruvbot start"
+        description: "Start bot in local mode"
+
+      - command: "npx @ruvector/ruvbot start --remote"
+        description: "Start bot connected to remote services"
+
+      - command: "npx @ruvector/ruvbot config"
+        description: "Interactive configuration wizard"
+
+      - command: "npx @ruvector/ruvbot skills list"
+        description: "List available skills"
+
+      - command: "npx @ruvector/ruvbot skills add <name>"
+        description: "Add a skill from registry"
+
+      - command: "npx @ruvector/ruvbot status"
+        description: "Show bot status and health"
+
+    install_script:
+      url: "https://get.ruvector.dev/ruvbot"
+      method: "curl -fsSL https://get.ruvector.dev/ruvbot | bash"
+
+    environment_variables:
+      required:
+        - name: "SLACK_BOT_TOKEN"
+          description: "Slack bot OAuth token"
+
+        - name: "SLACK_SIGNING_SECRET"
+          description: "Slack app signing secret"
+
+      optional:
+        - name: "RUVBOT_PORT"
+          description: "HTTP server port"
+          default: "3000"
+
+        - name: "RUVBOT_LOG_LEVEL"
+          description: "Logging verbosity"
+          default: "info"
+
+        - name: "RUVBOT_STORAGE"
+          description: "Storage backend (sqlite|postgres|memory)"
+          default: "sqlite"
+
+        - name: "RUVBOT_MEMORY_PATH"
+          description: "Path for vector memory storage"
+          default: "./data/memory"
+
+        - name: "DATABASE_URL"
+          description: "PostgreSQL connection string"
+
+        - name: "REDIS_URL"
+          description: "Redis connection string"
+
+        - name: "ANTHROPIC_API_KEY"
+          description: "Anthropic API key for Claude"
+
+        - name: "OPENAI_API_KEY"
+          description: "OpenAI API key"
+
+  # ============================================================================
+  # CONFIGURATION FILES
+  # ============================================================================
+  config_files:
+    - name: "ruvbot.config.json"
+      purpose: "Main configuration file"
+      example: |
+        {
+          "name": "my-ruvbot",
+          "port": 3000,
+          "storage": {
+            "type": "sqlite",
+            "path": "./data/ruvbot.db"
+          },
+          "memory": {
+            "dimensions": 384,
+            "maxVectors": 100000,
+            "indexType": "hnsw"
+          },
+          "skills": {
+            "enabled": ["search", "summarize", "code", "memory"],
+            "custom": ["./skills/*.js"]
+          },
+          "integrations": {
+            "slack": {
+              "enabled": true,
+              "socketMode": true
+            }
+          }
+        }
+
+    - name: ".env"
+      purpose: "Environment variables"
+      example: |
+        SLACK_BOT_TOKEN=xoxb-xxx
+        SLACK_SIGNING_SECRET=xxx
+        SLACK_APP_TOKEN=xapp-xxx
+        ANTHROPIC_API_KEY=sk-ant-xxx
+
+  # ============================================================================
+  # MILESTONES
+  # ============================================================================
+  milestones:
+    - name: "M1: Core Bot"
+      date: "Week 2"
+      deliverables:
+        - "RuvBot class with lifecycle management"
+        - "Core entities (Agent, Session, Message)"
+        - "Basic unit tests"
+
+    - name: "M2: Infrastructure"
+      date: "Week 3"
+      deliverables:
+        - "Session persistence"
+        - "Message queue"
+        - "Worker pool"
+
+    - name: "M3: Learning"
+      date: "Week 4"
+      deliverables:
+        - "WASM embeddings working"
+        - "Vector memory with HNSW"
+        - "Semantic search"
+
+    - name: "M4: Skills & Integrations"
+      date: "Week 5"
+      deliverables:
+        - "Skill registry with built-in skills"
+        - "Slack integration working"
+
+    - name: "M5: API & CLI"
+      date: "Week 6"
+      deliverables:
+        - "REST API"
+        - "CLI with npx support"
+
+    - name: "M6: Production Ready"
+      date: "Week 8"
+      deliverables:
+        - "85%+ test coverage"
+        - "Performance benchmarks passing"
+        - "Published to npm"
+
+  # ============================================================================
+  # TEAM ALLOCATION
+  # ============================================================================
+  team_allocation:
+    agents:
+      - role: "architect"
+        tasks: ["p1-t2", "p3-t1", "p4-t1"]
+        focus: "System design and core architecture"
+
+      - role: "coder"
+        tasks: ["p1-t1", "p1-t3", "p2-*", "p3-*", "p5-*", "p6-*", "p7-*"]
+        focus: "Implementation"
+
+      - role: "tester"
+        tasks: ["p1-t5", "p8-*"]
+        focus: "Testing and quality assurance"
+
+      - role: "reviewer"
+        tasks: ["all"]
+        focus: "Code review and security"
+
+  # ============================================================================
+  # QUALITY GATES
+  # ============================================================================
+  quality_gates:
+    - name: "Unit Test Coverage"
+      threshold: ">= 80%"
+      tool: "vitest"
+
+    - name: "Type Coverage"
+      threshold: ">= 95%"
+      tool: "typescript --noEmit"
+
+    - name: "No High Severity Vulnerabilities"
+      threshold: "0 high/critical"
+      tool: "npm audit"
+
+    - name: "Performance Benchmarks"
+      thresholds:
+        - metric: "embedding_latency"
+          value: "< 50ms"
+        - metric: "vector_search_latency"
+          value: "< 10ms"
+        - metric: "message_throughput"
+          value: "> 1000 msg/s"

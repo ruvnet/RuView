@@ -1,0 +1,19 @@
+{
+  "name": "@ruvector/attention-darwin-arm64",
+  "version": "0.1.1",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "main": "attention.darwin-arm64.node",
+  "files": [
+    "attention.darwin-arm64.node"
+  ],
+  "license": "MIT OR Apache-2.0",
+  "engines": {
+    "node": ">= 10"
+  },
+  "repository": "https://github.com/ruvnet/ruvector"
+}

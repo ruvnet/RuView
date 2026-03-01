@@ -24,6 +24,7 @@ are required.
 from v1.src.sensing.rssi_collector import (
     LinuxWifiCollector,
     SimulatedCollector,
+    WindowsWifiCollector,
     WifiSample,
 )
 from v1.src.sensing.feature_extractor import (
@@ -44,6 +45,7 @@ from v1.src.sensing.backend import (
 __all__ = [
     "LinuxWifiCollector",
     "SimulatedCollector",
+    "WindowsWifiCollector",
     "WifiSample",
     "RssiFeatureExtractor",
     "RssiFeatures",

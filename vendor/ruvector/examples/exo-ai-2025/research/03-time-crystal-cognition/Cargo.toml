@@ -1,0 +1,33 @@
+[package]
+name = "time-crystal-cognition"
+version = "0.1.0"
+edition = "2021"
+authors = ["Research Team"]
+description = "Cognitive Time Crystals - Discrete Time Translation Symmetry Breaking in Working Memory"
+
+[lib]
+name = "time_crystal_cognition"
+path = "src/lib.rs"
+
+[[bench]]
+name = "time_crystal_bench"
+harness = false
+
+[dependencies]
+ndarray = "0.15"
+rand = "0.8"
+rustfft = "6.1"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[workspace]
+# This allows the crate to be compiled standalone
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+[profile.bench]
+inherits = "release"

@@ -1,0 +1,34 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const __wbg_jsgraphtransformer_free: (a: number, b: number) => void;
+export const init: () => void;
+export const jsgraphtransformer_causal_attention: (a: number, b: number, c: number, d: number, e: number) => void;
+export const jsgraphtransformer_compose_proofs: (a: number, b: number, c: number) => void;
+export const jsgraphtransformer_create_attestation: (a: number, b: number, c: number) => void;
+export const jsgraphtransformer_create_proof_gate: (a: number, b: number, c: number) => void;
+export const jsgraphtransformer_game_theoretic_attention: (a: number, b: number, c: number, d: number) => void;
+export const jsgraphtransformer_granger_extract: (a: number, b: number, c: number, d: number, e: number) => void;
+export const jsgraphtransformer_hamiltonian_step: (a: number, b: number, c: number, d: number, e: number) => void;
+export const jsgraphtransformer_hebbian_update: (a: number, b: number, c: number, d: number, e: number) => void;
+export const jsgraphtransformer_new: (a: number, b: number) => void;
+export const jsgraphtransformer_ppr_scores: (a: number, b: number, c: number, d: number, e: number) => void;
+export const jsgraphtransformer_product_manifold_attention: (a: number, b: number, c: number, d: number) => void;
+export const jsgraphtransformer_product_manifold_distance: (a: number, b: number, c: number, d: number, e: number) => void;
+export const jsgraphtransformer_prove_dimension: (a: number, b: number, c: number, d: number) => void;
+export const jsgraphtransformer_reset: (a: number) => void;
+export const jsgraphtransformer_spiking_step: (a: number, b: number, c: number, d: number) => void;
+export const jsgraphtransformer_stats: (a: number, b: number) => void;
+export const jsgraphtransformer_sublinear_attention: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+export const jsgraphtransformer_verified_step: (a: number, b: number, c: number, d: number, e: number) => void;
+export const jsgraphtransformer_verified_training_step: (a: number, b: number, c: number, d: number, e: number) => void;
+export const jsgraphtransformer_verify_attestation: (a: number, b: number, c: number) => number;
+export const jsgraphtransformer_verify_energy_conservation: (a: number, b: number, c: number, d: number, e: number) => void;
+export const jsgraphtransformer_version: (a: number, b: number) => void;
+export const version: (a: number) => void;
+export const __wbindgen_export: (a: number, b: number) => number;
+export const __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
+export const __wbindgen_export3: (a: number) => void;
+export const __wbindgen_add_to_stack_pointer: (a: number) => number;
+export const __wbindgen_export4: (a: number, b: number, c: number) => void;
+export const __wbindgen_start: () => void;

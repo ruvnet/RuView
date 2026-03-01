@@ -1,0 +1,49 @@
+{
+  "name": "@ruvector/ruqu-wasm",
+  "version": "2.0.5",
+  "type": "module",
+  "description": "Run quantum simulations in the browser - WebAssembly bindings for quantum circuits with 25-qubit support, VQE, Grover, QAOA",
+  "main": "ruqu_wasm.js",
+  "types": "ruqu_wasm.d.ts",
+  "module": "ruqu_wasm.js",
+  "sideEffects": [
+    "./snippets/*"
+  ],
+  "keywords": [
+    "quantum",
+    "quantum-computing",
+    "quantum-simulation",
+    "quantum-circuit",
+    "wasm",
+    "webassembly",
+    "vqe",
+    "grover",
+    "qaoa",
+    "qubits",
+    "state-vector",
+    "rust",
+    "browser",
+    "surface-code",
+    "error-correction"
+  ],
+  "author": "RuVector Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ruvnet/ruvector.git",
+    "directory": "crates/ruqu-wasm"
+  },
+  "homepage": "https://github.com/ruvnet/ruvector/tree/main/crates/ruqu-wasm#readme",
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "files": [
+    "ruqu_wasm_bg.wasm",
+    "ruqu_wasm.js",
+    "ruqu_wasm.d.ts",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

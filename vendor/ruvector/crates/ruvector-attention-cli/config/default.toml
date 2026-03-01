@@ -1,0 +1,28 @@
+# RuVector Attention CLI Configuration
+
+[attention]
+default_dim = 512
+default_heads = 8
+default_type = "scaled_dot"
+dropout = 0.1
+max_sequence_length = 4096
+
+[server]
+host = "0.0.0.0"
+port = 8080
+max_batch_size = 32
+timeout_ms = 30000
+enable_cors = true
+enable_metrics = true
+
+[output]
+format = "json"
+pretty = true
+precision = 4
+color = true
+
+[benchmark]
+iterations = 100
+warmup = 10
+sample_size = 10
+dimensions = [128, 256, 512, 1024, 2048]

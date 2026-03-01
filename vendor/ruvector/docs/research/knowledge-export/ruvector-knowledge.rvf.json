@@ -1,0 +1,371 @@
+{
+  "_rvf_version": "0.2.0",
+  "_format": "RVF Knowledge Export — human-readable JSON representation of RVF segments",
+  "_generated": "2026-02-26",
+  "_purpose": "Developer onboarding, AI agent context, and architecture reference",
+
+  "META_SEG": {
+    "project": "RuVector",
+    "description": "High-performance Rust-native vector/graph computation platform with 91 crates spanning HNSW indexing, GNN, graph transformers, LLM serving, sparse inference, formal verification, and quantum simulation",
+    "repository": "https://github.com/ruvnet/ruvector",
+    "license": "MIT (workspace default)",
+    "version": "2.0.5",
+    "rust_edition": "2021",
+    "rust_version": "1.83+",
+    "timeline": {
+      "first_commit": "2025-11-19",
+      "latest_commit": "2026-02-26",
+      "total_commits": 3135,
+      "duration_days": 99
+    },
+    "scale": {
+      "crates": 91,
+      "adrs": 55,
+      "npm_packages": "50+",
+      "wasm_targets": "20+",
+      "napi_targets": "6+",
+      "sql_functions": "230+",
+      "benchmark_suites": "30+"
+    }
+  },
+
+  "PROFILE_SEG": {
+    "architecture_overview": "Layered computation platform: persistence (PostgreSQL/redb) -> graph database (ruvector-graph) -> compute engines (GNN, transformers, solvers, LLM) -> bindings (WASM, NAPI, CLI) -> applications (postgres extension, MCP server, REST API)",
+
+    "crate_taxonomy": {
+      "core_engine": {
+        "ruvector-core": "HNSW vector database with SIMD, quantization (scalar/int4/product/binary), redb storage, ~2.5K queries/sec on 10K vectors",
+        "ruvector-graph": "Distributed Neo4j-compatible hypergraph database with Cypher parsing (nom/pest/lalrpop), petgraph + roaring bitmaps, federation support",
+        "ruvector-math": "Mathematical primitives — optimal transport, mixed-curvature geometry, topological data analysis",
+        "ruvector-collections": "Typed collection abstractions over the core vector database"
+      },
+
+      "neural_networks": {
+        "ruvector-gnn": "Graph Neural Network layer on HNSW topology — message passing, multi-head attention, cold-tier training for graphs exceeding RAM",
+        "ruvector-attention": "39 attention mechanisms — geometric, graph, sparse, sheaf (ADR-015), multi-head. SIMD accelerated",
+        "ruvector-graph-transformer": "Unified graph transformer with proof-gated mutation — 8 verified modules: sublinear, physics, biological, self-organizing, verified-training, manifold, temporal, economic",
+        "ruvector-mincut-gated-transformer": "Min-cut gated transformer combining graph partitioning with attention",
+        "ruvector-sparse-inference": "PowerInfer-style sparse inference for edge devices — GGUF model loading, rayon parallelism, memmap2",
+        "ruvector-fpga-transformer": "FPGA-targeted transformer backend"
+      },
+
+      "solvers_and_algorithms": {
+        "ruvector-solver": "Sublinear-time O(log n) to O(sqrt(n)) algorithms for sparse linear systems, PageRank, spectral methods — Neumann series, conjugate gradient, forward/backward push, hybrid random walk",
+        "ruvector-mincut": "World's first subpolynomial dynamic min-cut — j-Tree decomposition, tiered coordinator, canonical cactus representation, 256-core agentic chip backend",
+        "ruvector-filter": "Bloom filter and probabilistic data structures",
+        "ruvector-dag": "Directed acyclic graph operations and topological sorting"
+      },
+
+      "llm_serving": {
+        "ruvllm": "LLM serving runtime — paged attention, KV cache, SONA learning, Candle backend, Metal/CUDA/CoreML acceleration, GGUF loading, LoRA adapters",
+        "ruvllm-cli": "CLI interface for ruvllm model management and inference",
+        "ruvllm-wasm": "WASM build of ruvllm for browser-based inference"
+      },
+
+      "persistence": {
+        "ruvector-postgres": "PostgreSQL extension (pg14-17) via pgrx — pgvector drop-in replacement with 230+ SQL functions, SIMD, Flash Attention, GNN, Cypher, SPARQL, hyperbolic embeddings, multi-tenancy, self-healing, self-learning",
+        "ruvector-server": "REST API server (axum) for the vector database",
+        "ruvector-snapshot": "Point-in-time backup/restore with gzip compression and SHA-256 checksums",
+        "ruvector-replication": "CDC-based replication with vector clocks, conflict resolution (LWW/custom merge), automatic failover",
+        "ruvector-raft": "Raft consensus for distributed vector database",
+        "ruvector-cluster": "Cluster management and sharding"
+      },
+
+      "rvf_format": {
+        "rvf-types": "Core types — 25 segment types, headers, enums, flags (no_std)",
+        "rvf-wire": "Binary wire format reader/writer (no_std)",
+        "rvf-manifest": "Two-level manifest with 4KB instant boot",
+        "rvf-index": "HNSW progressive indexing (Layer A/B/C)",
+        "rvf-quant": "Temperature-tiered quantization (fp16/int8/PQ/binary)",
+        "rvf-crypto": "ML-DSA-65 post-quantum signatures, SHAKE-256, Ed25519",
+        "rvf-runtime": "Full runtime with compaction, streaming, query",
+        "rvf-kernel": "Embedded kernel for self-booting RVF files",
+        "rvf-wasm": "WASM microkernel (<8KB budget)",
+        "rvf-node": "N-API bindings for Node.js",
+        "rvf-server": "TCP/HTTP streaming server",
+        "rvf-import": "Legacy format importers",
+        "rvf-ebpf": "eBPF programs for kernel fast path",
+        "rvf-cli": "Command-line interface for RVF operations",
+        "rvf-launch": "RVF file launcher and bootstrapper"
+      },
+
+      "rvf_adapters": {
+        "rvf-adapter-claude-flow": "Claude-flow memory → RVF with WITNESS_SEG audit trails",
+        "rvf-adapter-agentdb": "AgentDB HNSW → RVF with RVText profile",
+        "rvf-adapter-ospipe": "Observation-State pipeline → RVF with META_SEG",
+        "rvf-adapter-agentic-flow": "Swarm coordination → RVF streaming protocol",
+        "rvf-adapter-rvlite": "rvlite embedded store → RVF Core Profile",
+        "rvf-adapter-sona": "SONA learning patterns → RVF SKETCH_SEG"
+      },
+
+      "verification_and_coherence": {
+        "ruvector-verified": "Formal verification with proof systems, HNSW proofs, ultra mode",
+        "ruvector-coherence": "Sheaf-Laplacian coherence engine — energy-based consistency scoring",
+        "ruvector-delta-consensus": "Delta-based consensus protocol",
+        "ruvector-delta-core": "Core delta encoding/decoding",
+        "ruvector-delta-graph": "Graph-aware delta operations",
+        "ruvector-delta-index": "Index-level delta tracking"
+      },
+
+      "exotic_and_research": {
+        "ruQu": "Quantum simulation engine — VQE, QAOA, Grover search, surface code error correction",
+        "ruvector-hyperbolic-hnsw": "HNSW indexing in hyperbolic (Poincare/Lorentz) space",
+        "ruvector-temporal-tensor": "Temporal tensor compression and time-series graph operations",
+        "ruvector-domain-expansion": "Cross-domain transfer learning with policy kernels",
+        "ruvector-nervous-system": "Bio-inspired neural architecture",
+        "ruvector-economy-wasm": "Economic graph modeling in WASM",
+        "sona": "Self-Optimizing Neural Architecture with LoRA fine-tuning"
+      },
+
+      "bindings_and_packaging": {
+        "ruvector-wasm": "Core WASM build",
+        "ruvector-node": "Core NAPI-RS bindings",
+        "ruvector-gnn-node": "GNN NAPI-RS bindings (linux-x64, darwin-arm64, etc.)",
+        "ruvector-gnn-wasm": "GNN WASM build",
+        "ruvector-graph-node": "Graph NAPI-RS bindings",
+        "ruvector-graph-wasm": "Graph WASM build",
+        "ruvector-graph-transformer-node": "Graph transformer NAPI-RS bindings",
+        "ruvector-graph-transformer-wasm": "Graph transformer WASM build",
+        "ruvector-attention-node": "Attention NAPI-RS bindings",
+        "ruvector-attention-wasm": "Attention WASM build",
+        "ruvector-solver-node": "Solver NAPI-RS bindings",
+        "ruvector-solver-wasm": "Solver WASM build",
+        "ruvector-mincut-node": "Min-cut NAPI-RS bindings",
+        "ruvector-mincut-wasm": "Min-cut WASM build",
+        "micro-hnsw-wasm": "Minimal HNSW for WASM environments",
+        "ruvector-cli": "Main CLI tool",
+        "ruvector-router-core": "Request routing core",
+        "ruvector-router-wasm": "Routing in WASM",
+        "ruvector-router-ffi": "Routing FFI bindings",
+        "ruvector-tiny-dancer-core": "Tiny Dancer neural routing core",
+        "mcp-gate": "MCP server gateway"
+      },
+
+      "infrastructure": {
+        "ruvector-bench": "Benchmark harness",
+        "ruvector-profiler": "Performance profiling (publish = false)",
+        "ruvector-metrics": "Metrics collection",
+        "rvlite": "Lightweight embedded vector store",
+        "prime-radiant": "Visualization/dashboard component",
+        "cognitum-gate-kernel": "Cognitum kernel gate",
+        "cognitum-gate-tilezero": "Cognitum tile zero gate"
+      }
+    }
+  },
+
+  "WITNESS_SEG": {
+    "description": "Architecture Decision Records — the project's design history",
+
+    "foundation_decisions": {
+      "ADR-001": { "title": "Core Architecture", "status": "accepted", "summary": "HNSW-based vector database with REDB storage, SIMD acceleration, modular crate structure" },
+      "ADR-002": { "title": "ruvLLM Integration", "status": "accepted", "summary": "LLM serving runtime integrated with ruvector-core for embedding-aware inference" },
+      "ADR-003": { "title": "SIMD Optimization Strategy", "status": "accepted", "summary": "SimSIMD for distance calculations, 64-byte alignment, AVX2/AVX-512/NEON dispatch" },
+      "ADR-004": { "title": "KV-Cache Management", "status": "accepted", "summary": "Paged attention with block-level memory management for LLM inference" },
+      "ADR-005": { "title": "WASM Runtime Integration", "status": "accepted", "summary": "Compile-time feature flags for WASM compatibility, memory-only storage mode" },
+      "ADR-006": { "title": "Memory Management", "status": "accepted", "summary": "Arena allocation, cache-optimized layouts, parallel processing with rayon" }
+    },
+
+    "security_decisions": {
+      "ADR-007": { "title": "Security Review & Technical Debt", "status": "accepted", "summary": "Comprehensive security audit findings and remediation plan" },
+      "ADR-012": { "title": "Security Remediation", "status": "accepted", "summary": "Path traversal fixes (CWE-22), input validation, dependency auditing" },
+      "ADR-042": { "title": "RVF AIDefence TEE", "status": "accepted", "summary": "Confidential computing with SGX/SEV-SNP/TDX attestation in WITNESS_SEG" }
+    },
+
+    "format_decisions": {
+      "ADR-029": { "title": "RVF Canonical Format", "status": "accepted", "summary": "Single binary format for all RuVector libraries — 25 segment types, crash-safe append-only, progressive indexing, post-quantum crypto", "importance": "CRITICAL" },
+      "ADR-030": { "title": "RVF Cognitive Containers", "status": "accepted", "summary": "Self-booting RVF files with embedded kernel/WASM/eBPF" },
+      "ADR-031": { "title": "RVCOW Branching", "status": "accepted", "summary": "Copy-on-write branching for RVF files, cluster mapping, reference counting" },
+      "ADR-032": { "title": "RVF WASM Integration", "status": "accepted", "summary": "WASM microkernel <8KB budget, self-bootstrapping execution" },
+      "ADR-033": { "title": "Progressive Indexing Hardening", "status": "accepted", "summary": "Layer A/B/C index progression with acceptance criteria" },
+      "ADR-034": { "title": "QR Cognitive Seed", "status": "accepted", "summary": "QR codes encoding RVF bootstrap payloads" }
+    },
+
+    "computation_decisions": {
+      "ADR-014": { "title": "Coherence Engine", "status": "accepted", "summary": "Sheaf-Laplacian coherence scoring for graph consistency" },
+      "ADR-015": { "title": "Coherence-Gated Transformer", "status": "accepted", "summary": "Sheaf attention mechanism gated by coherence energy" },
+      "ADR-016": { "title": "Delta Behavior DDD Architecture", "status": "accepted", "summary": "Domain-driven design for delta-based state management" },
+      "ADR-046": { "title": "Graph Transformer Architecture", "status": "accepted", "summary": "Unified graph transformer with proof-gated mutation substrate" },
+      "ADR-047": { "title": "Proof-Gated Mutation Protocol", "status": "accepted", "summary": "Formal verification gates on graph mutations" },
+      "ADR-048": { "title": "Sublinear Graph Attention", "status": "accepted", "summary": "O(sqrt(n)) attention mechanisms for large graphs" },
+      "ADR-049": { "title": "Verified Training Pipeline", "status": "accepted", "summary": "Formally verified training with proof witnesses" },
+      "ADR-051": { "title": "Physics-Informed Graph Layers", "status": "accepted", "summary": "Conservation law enforcement in graph neural networks" },
+      "ADR-052": { "title": "Biological Graph Layers", "status": "accepted", "summary": "Gene regulatory network and protein interaction modeling" },
+      "ADR-054": { "title": "Economic Graph Layers", "status": "accepted", "summary": "Market equilibrium and economic network modeling" },
+      "ADR-055": { "title": "Manifold Graph Layers", "status": "accepted", "summary": "Riemannian manifold operations in graph space" }
+    },
+
+    "postgres_decisions": {
+      "ADR-044": { "title": "PostgreSQL v0.3 Extension Upgrade", "status": "accepted", "summary": "43 new SQL functions — solver, math distances, TDA, extended attention, SONA learning, domain expansion" }
+    }
+  },
+
+  "INDEX_SEG": {
+    "description": "Inter-crate dependency graph — the architecture's wiring",
+
+    "dependency_chains": {
+      "graph_transformer_stack": [
+        "ruvector-core (HNSW, SIMD, storage)",
+        "  -> ruvector-gnn (GNN on HNSW topology)",
+        "  -> ruvector-attention (39 attention mechanisms)",
+        "  -> ruvector-mincut (subpolynomial min-cut)",
+        "  -> ruvector-solver (sublinear sparse solvers)",
+        "  -> ruvector-coherence (sheaf-Laplacian scoring)",
+        "  -> ruvector-verified (proof systems)",
+        "  -> ruvector-graph-transformer (unified 8-module transformer)"
+      ],
+      "llm_stack": [
+        "ruvector-core (HNSW, storage)",
+        "  -> sona (self-optimizing neural architecture)",
+        "  -> ruvector-attention (optional)",
+        "  -> ruvector-graph (optional)",
+        "  -> ruvector-gnn (optional)",
+        "  -> ruvllm (LLM serving with paged attention, KV cache)"
+      ],
+      "postgres_stack": [
+        "pgrx (PostgreSQL extension framework)",
+        "  -> simsimd (SIMD distance)",
+        "  -> ruvector-solver (optional)",
+        "  -> ruvector-math (optional)",
+        "  -> ruvector-attention (optional)",
+        "  -> ruvector-sona (optional)",
+        "  -> ruvector-domain-expansion (optional)",
+        "  -> ruvector-mincut-gated-transformer (optional)",
+        "  -> ruvector-postgres (230+ SQL functions)"
+      ],
+      "rvf_stack": [
+        "rvf-types (no_std core types)",
+        "  -> rvf-wire (binary read/write)",
+        "  -> rvf-manifest (two-level manifest)",
+        "  -> rvf-index (progressive HNSW)",
+        "  -> rvf-quant (temperature-tiered quantization)",
+        "  -> rvf-crypto (ML-DSA-65, Ed25519, SHAKE-256)",
+        "  -> rvf-runtime (full runtime)",
+        "  -> rvf-adapters/* (claude-flow, agentdb, sona, etc.)"
+      ]
+    }
+  },
+
+  "OVERLAY_SEG": {
+    "description": "Project evolution timeline — major milestones",
+
+    "timeline": [
+      { "date": "2025-11-19", "event": "Initial commit — Ruvector Phase 1 foundation", "era": "v0.1" },
+      { "date": "2025-11-19", "event": "Complete all phases — production-ready vector database", "era": "v0.1" },
+      { "date": "2025-11", "event": "Repository reorganization, HNSW optimization, deadlock fix", "era": "v0.1" },
+      { "date": "2025-11", "event": "Streaming optimization for 500M concurrent streams", "era": "v0.1" },
+      { "date": "2025-12", "event": "Multi-platform NAPI-RS builds, Tiny Dancer routing", "era": "v0.1" },
+      { "date": "2025-12", "event": "ruvector-core@0.1.3 published to crates.io", "era": "v0.1" },
+      { "date": "2026-01", "event": "WASM architecture with in-memory storage (Phase 3)", "era": "v1.0" },
+      { "date": "2026-01", "event": "ruQu quantum simulation engine published", "era": "v2.0" },
+      { "date": "2026-01", "event": "ruvector-solver with sublinear-time algorithms", "era": "v2.0" },
+      { "date": "2026-02", "event": "RVF canonical format (ADR-029) — single binary format for all libraries", "era": "v2.0" },
+      { "date": "2026-02", "event": "Cognitive containers (ADR-030) — self-booting RVF files", "era": "v2.0" },
+      { "date": "2026-02", "event": "ruvector-postgres v0.3 — 230+ SQL functions, solver/math/TDA integration", "era": "v2.0" },
+      { "date": "2026-02", "event": "Proof-gated graph transformer with 8 verified modules", "era": "v2.0" },
+      { "date": "2026-02", "event": "Formal verification with lean-agentic dependent types", "era": "v2.0" },
+      { "date": "2026-02", "event": "MCP server security hardening (command injection, CORS, prototype pollution)", "era": "v2.0" },
+      { "date": "2026-02", "event": "Quantum RAG — decoherence-aware retrieval with 5 SOTA properties", "era": "v2.0" },
+      { "date": "2026-02", "event": "Workspace bumped to v2.0.5, @ruvector/gnn to v0.1.25", "era": "v2.0" }
+    ],
+
+    "architectural_eras": {
+      "v0.1_foundation": "Core vector database with HNSW, SIMD, redb storage. Single-crate focus.",
+      "v1.0_expansion": "WASM targets, NAPI-RS bindings, multi-platform CI. Crate ecosystem grows to 30+.",
+      "v2.0_unification": "RVF canonical format, graph transformers, formal verification, PostgreSQL extension, 91 crates. Full computation platform."
+    }
+  },
+
+  "SKETCH_SEG": {
+    "description": "Patterns and conventions learned across 3,135 commits",
+
+    "coding_patterns": {
+      "feature_flags": "Every crate uses Cargo features for conditional compilation. 'default' includes the most common set. 'full' enables everything. 'wasm' disables storage/SIMD/parallel. Every WASM crate has a matching non-WASM crate.",
+      "error_handling": "thiserror for library errors, anyhow for application errors. Never panic in library code.",
+      "serialization": "serde + bincode for binary, serde_json for human-readable. rkyv for zero-copy deserialization in hot paths.",
+      "concurrency": "rayon for data parallelism, crossbeam for channels, dashmap for concurrent maps, parking_lot for locks. Never use std Mutex.",
+      "testing": "proptest for property-based, criterion for benchmarks, mockall for mocks. London-school TDD preferred for new code.",
+      "simd": "simsimd for distance calculations. Feature-gated behind 'simd' flag. Disabled in WASM builds.",
+      "storage": "redb for embedded KV, memmap2 for memory-mapped I/O. Both feature-gated behind 'storage'. WASM uses in-memory fallback.",
+      "napi_bindings": "napi-rs v2 with platform-specific packages (@ruvector/gnn-linux-x64-gnu, etc.). Prebuilt binaries committed to repo."
+    },
+
+    "project_conventions": {
+      "crate_naming": "ruvector-{domain} for core crates, ruvector-{domain}-wasm for WASM, ruvector-{domain}-node for NAPI. rvf-{module} for format crates.",
+      "version_management": "Workspace versioning via Cargo.toml [workspace.package]. Current: 2.0.5.",
+      "publishing_order": "Leaf crates first (no deps), then dependents. ruvector-solver -> ruvector-solver-wasm/node.",
+      "adr_format": "docs/adr/ADR-NNN-title.md. Status: Accepted/Proposed/Superseded. Includes context, decision, consequences, risks.",
+      "ci_cd": "GitHub Actions with multi-platform matrix (linux-x64, darwin-arm64, win32-x64). NAPI-RS build → commit binaries → npm publish.",
+      "security": "Path traversal validation on all user-supplied paths. Never commit secrets. Input validation at system boundaries. npm audit + cargo audit in CI."
+    },
+
+    "debugging_insights": {
+      "redb_locking": "Global database connection pool (Arc<Database>) prevents 'Database already open' errors when multiple VectorDB instances share a file.",
+      "napi_binaries": "Use 'git add -f' in CI to commit .node binaries past .gitignore. Platform packages must match exact NAPI-RS output structure.",
+      "wasm_size": "WASM microkernel budget is 8KB max. Use wasm-opt -Oz. CI asserts size < 8192 bytes.",
+      "pgrx_versions": "pgrx 0.12 requires pg17 by default. Feature flags control pg14/15/16 support.",
+      "hnsw_deadlock": "Fixed early in project history — caused by lock ordering in concurrent insert/search paths."
+    }
+  },
+
+  "JOURNAL_SEG": {
+    "description": "Critical lessons learned and security findings",
+
+    "security_findings": [
+      "CWE-22: Path traversal in MCP server vector_db_backup — fixed with canonicalization and boundary checks",
+      "Command injection in MCP servers — hardened against shell metacharacter injection",
+      "CORS bypass in MCP servers — restricted origins to prevent unauthorized cross-origin access",
+      "Prototype pollution in MCP servers — input sanitization for JSON parsing",
+      "lru crate security — upgraded to address known vulnerabilities",
+      "HNSW index bugs — array indexing vulnerabilities fixed",
+      "Agent/SPARQL crashes — null pointer and edge case handling"
+    ],
+
+    "performance_discoveries": [
+      "SimSIMD achieves ~16M ops/sec for 512-dim distance calculations",
+      "ruvector-core search: ~2.5K queries/sec on 10K vectors (benchmarked)",
+      "Spectral coherence optimized 10x via algorithmic improvements",
+      "RVF cold boot: <5ms with 4KB Level0 manifest read",
+      "RVF streaming ingest: 200K-500K vectors/sec on NVMe",
+      "ruvllm parallel GEMM: 4-6x speedup on M4 Pro 10-core with rayon"
+    ],
+
+    "build_system_lessons": [
+      "Rust 1.87+ required for rvf crates (edition2024 features)",
+      "Rust 1.83+ required for main workspace",
+      "Docker builds need Rust 1.85+ for edition2024",
+      "Node.js 20+ required for NAPI-RS builds",
+      "pgrx test commands need explicit pg17 feature flag",
+      "cargo publish --dry-run --allow-dirty before real publish",
+      "ruvector-profiler has publish = false — intentionally not publishable"
+    ]
+  },
+
+  "CRYPTO_SEG": {
+    "description": "Trust and verification model",
+    "signing": {
+      "development": "Ed25519 — fast signing for local trust and CI",
+      "production": "ML-DSA-65 (FIPS 204) — post-quantum for published releases",
+      "migration": "Dual signatures (Ed25519 + ML-DSA-65) during transition periods"
+    },
+    "attestation": {
+      "tee_platforms": ["SGX", "SEV-SNP", "TDX", "ARM CCA"],
+      "witness_types": ["Platform (0x05)", "Key Binding (0x06)", "Computation Proof (0x07)", "Data Provenance (0x08)", "Derivation (0x09)"],
+      "testing": "SoftwareTee platform variant (0xFE) for CI synthetic quotes"
+    }
+  },
+
+  "VEC_SEG": {
+    "description": "Key embedding/vector capabilities",
+    "distance_metrics": ["cosine", "euclidean", "inner_product", "hamming", "jaccard"],
+    "quantization_types": ["scalar (SQ8, 4x compression)", "int4 (8x)", "product (PQ, 8-16x)", "binary (32x)"],
+    "index_types": ["HNSW (default)", "IVFFlat", "flat scan"],
+    "max_dimensions": 16000,
+    "domain_profiles": {
+      "rvf": "General-purpose vectors (.rvf)",
+      "rvdna": "Genomics — codon, k-mer, motif embeddings (.rvdna)",
+      "rvtext": "Language — sentence, document embeddings (.rvtext)",
+      "rvgraph": "Graph — node, edge, subgraph embeddings (.rvgraph)",
+      "rvvis": "Vision — patch, image, object embeddings (.rvvis)"
+    }
+  }
+}

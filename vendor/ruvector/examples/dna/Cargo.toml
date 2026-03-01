@@ -1,0 +1,83 @@
+[package]
+name = "rvdna"
+version = "0.3.0"
+edition = "2021"
+description = "rvDNA — AI-native genomic analysis. 20-SNP biomarker risk scoring, streaming anomaly detection, 64-dim profile vectors, 23andMe genotyping, CYP2D6/CYP2C19 pharmacogenomics, variant calling, protein prediction, and HNSW vector search in pure Rust."
+license = "MIT"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector/tree/main/examples/dna"
+documentation = "https://docs.rs/rvdna"
+readme = "README.md"
+keywords = ["genomics", "bioinformatics", "dna", "pharmacogenomics", "23andme"]
+categories = ["science", "algorithms", "wasm"]
+
+[dependencies]
+# RuVector core for HNSW vector storage
+ruvector-core = { version = "2.0.2", path = "../../crates/ruvector-core" }
+
+# Attention for sequence analysis
+ruvector-attention = { version = "2.0", path = "../../crates/ruvector-attention" }
+
+# GNN for protein structure and interaction networks
+ruvector-gnn = { version = "2.0.2", path = "../../crates/ruvector-gnn" }
+
+# Graph operations for biological networks
+ruvector-graph = { version = "2.0.2", path = "../../crates/ruvector-graph" }
+
+# DAG pipeline orchestration
+ruvector-dag = { version = "2.0", path = "../../crates/ruvector-dag" }
+
+# Math primitives
+ruvector-math = { version = "2.0.2", path = "../../crates/ruvector-math" }
+
+# Filter expressions for metadata queries
+ruvector-filter = { version = "2.0.2", path = "../../crates/ruvector-filter" }
+
+# Collections
+ruvector-collections = { version = "2.0.2", path = "../../crates/ruvector-collections" }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = { version = "2.0.0-rc.3", features = ["serde"] }
+
+# Math and numerics
+ndarray = { version = "0.16", features = ["serde"] }
+rand = "0.8"
+rand_distr = "0.4"
+
+# Async runtime
+tokio = { version = "1.41", features = ["rt-multi-thread", "macros", "time"] }
+
+# Sublinear solver for k-mer graph PageRank
+ruvector-solver = { version = "2.0.3", path = "../../crates/ruvector-solver", default-features = false, features = ["forward-push", "neumann", "cg"] }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Utilities
+uuid = { version = "1.11", features = ["v4"] }
+chrono = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[[bin]]
+name = "rvdna-cli"
+path = "src/main.rs"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3.8"
+
+[[bench]]
+name = "dna_bench"
+harness = false
+
+[[bench]]
+name = "solver_bench"
+harness = false
+
+[[bench]]
+name = "biomarker_bench"
+harness = false

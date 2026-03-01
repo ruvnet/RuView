@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <defs>
+    <linearGradient id="crystalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0ea5e9"/>
+      <stop offset="50%" style="stop-color:#7c3aed"/>
+      <stop offset="100%" style="stop-color:#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="innerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#06b6d4"/>
+      <stop offset="100%" style="stop-color:#0ea5e9"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Outer crystal -->
+  <polygon
+    points="50,5 95,50 50,95 5,50"
+    fill="url(#crystalGrad)"
+    filter="url(#glow)"
+  />
+
+  <!-- Inner crystal -->
+  <polygon
+    points="50,20 80,50 50,80 20,50"
+    fill="url(#innerGrad)"
+    opacity="0.8"
+  />
+
+  <!-- Center highlight -->
+  <circle
+    cx="50"
+    cy="50"
+    r="8"
+    fill="white"
+    opacity="0.5"
+  />
+</svg>

@@ -1,0 +1,26 @@
+[package]
+name = "rvf-import"
+version = "0.1.0"
+edition = "2021"
+description = "Import tools for migrating data from JSON, CSV, and NumPy formats into RVF stores"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector"
+readme = "README.md"
+categories = ["database-implementations", "command-line-utilities"]
+keywords = ["rvf", "import", "json", "csv", "numpy"]
+
+[[bin]]
+name = "rvf-import"
+path = "src/bin/rvf_import.rs"
+
+[dependencies]
+rvf-runtime = { version = "0.2.0", path = "../rvf-runtime", features = ["std"] }
+rvf-types = { version = "0.2.0", path = "../rvf-types", features = ["std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+csv = "1"
+
+[dev-dependencies]
+tempfile = "3"

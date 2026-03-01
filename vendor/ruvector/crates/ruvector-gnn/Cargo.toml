@@ -1,0 +1,60 @@
+[package]
+name = "ruvector-gnn"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Graph Neural Network layer for Ruvector on HNSW topology"
+
+[dependencies]
+# Core
+ruvector-core = { version = "2.0.1", path = "../ruvector-core", default-features = false }
+
+# Math and numerics
+ndarray = { workspace = true, features = ["serde"] }
+rand = { workspace = true }
+rand_distr = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Performance
+rayon = { workspace = true }
+parking_lot = { workspace = true }
+dashmap = { workspace = true }
+
+# Memory mapping (non-WASM only)
+memmap2 = { workspace = true, optional = true }
+page_size = { version = "0.6", optional = true }
+
+# Platform-specific dependencies
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+# Optional dependencies
+napi = { workspace = true, optional = true }
+napi-derive = { workspace = true, optional = true }
+
+[features]
+default = ["simd", "mmap"]
+simd = []
+wasm = []
+napi = ["dep:napi", "dep:napi-derive"]
+mmap = ["dep:memmap2", "dep:page_size"]
+cold-tier = ["mmap"]  # Hyperbatch training for graphs exceeding RAM
+
+[dev-dependencies]
+criterion = { workspace = true }
+proptest = { workspace = true }
+tempfile = "3.10"
+
+[lib]
+crate-type = ["rlib"]

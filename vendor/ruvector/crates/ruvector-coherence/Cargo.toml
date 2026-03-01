@@ -1,0 +1,17 @@
+[package]
+name = "ruvector-coherence"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Coherence measurement proxies for comparing attention mechanisms"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[features]
+default = []
+spectral = []  # Spectral coherence scoring for graph index health

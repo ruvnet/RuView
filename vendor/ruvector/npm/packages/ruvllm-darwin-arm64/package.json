@@ -1,0 +1,35 @@
+{
+  "name": "@ruvector/ruvllm-darwin-arm64",
+  "version": "2.0.0",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "main": "ruvllm.darwin-arm64.node",
+  "files": ["ruvllm.darwin-arm64.node"],
+  "description": "RuvLLM native SIMD acceleration - darwin-arm64 (Apple Silicon) platform",
+  "keywords": [
+    "ruvllm",
+    "llm",
+    "simd",
+    "neon",
+    "apple-silicon",
+    "m1",
+    "m2",
+    "m3",
+    "vector-database",
+    "napi-rs"
+  ],
+  "author": "rUv Team <team@ruv.io>",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "npm/packages/ruvllm-darwin-arm64"
+  },
+  "engines": {
+    "node": ">= 18"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  }
+}

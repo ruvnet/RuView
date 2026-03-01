@@ -1,0 +1,33 @@
+{
+  "name": "agentic-jujutsu-tests",
+  "version": "1.0.0",
+  "description": "Comprehensive test suite for agentic-jujutsu",
+  "private": true,
+  "scripts": {
+    "test": "jest",
+    "test:integration": "jest integration-tests.ts",
+    "test:performance": "jest performance-tests.ts",
+    "test:validation": "jest validation-tests.ts",
+    "test:all": "./run-all-tests.sh",
+    "test:coverage": "./run-all-tests.sh --coverage",
+    "test:watch": "jest --watch",
+    "test:verbose": "./run-all-tests.sh --verbose"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.0.0"
+  },
+  "keywords": [
+    "testing",
+    "agentic-jujutsu",
+    "version-control",
+    "ai-agents",
+    "quantum-resistant"
+  ],
+  "author": "QA Agent",
+  "license": "MIT"
+}

@@ -1,0 +1,404 @@
+name: RuvLTRA-Small Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'crates/ruvllm/**'
+      - 'crates/ruvllm-cli/**'
+      - '.github/workflows/ruvltra-tests.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'crates/ruvllm/**'
+      - 'crates/ruvllm-cli/**'
+  workflow_dispatch:
+    inputs:
+      run_benchmarks:
+        description: 'Run performance benchmarks'
+        required: false
+        default: 'false'
+        type: boolean
+      run_stress_tests:
+        description: 'Run stress tests'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ============================================================================
+  # Unit Tests - Model Loading, Quantization, SONA, ANE Dispatch
+  # ============================================================================
+  unit-tests:
+    name: Unit Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            features: ""
+          - os: macos-latest
+            features: "coreml"
+          - os: windows-latest
+            features: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}-unit-tests
+
+      - name: Run RuvLTRA Unit Tests
+        run: |
+          cargo test --package ruvllm ruvltra_tests \
+            ${{ matrix.features && format('--features {0}', matrix.features) || '' }} \
+            -- --nocapture
+        env:
+          RUST_LOG: debug
+
+      - name: Run Quantization Tests
+        run: |
+          cargo test --package ruvllm quantization_accuracy \
+            -- --nocapture
+
+      - name: Run SONA Integration Tests
+        run: |
+          cargo test --package ruvllm sona_integration \
+            -- --nocapture
+
+      - name: Run ANE Dispatch Tests
+        if: matrix.os == 'macos-latest'
+        run: |
+          cargo test --package ruvllm ane_dispatch --features coreml \
+            -- --nocapture
+
+  # ============================================================================
+  # End-to-End Tests - Full Inference Pipeline
+  # ============================================================================
+  e2e-tests:
+    name: E2E Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}-e2e-tests
+
+      - name: Run E2E Pipeline Tests
+        run: |
+          cargo test --package ruvllm ruvltra_e2e::full_inference_pipeline \
+            -- --nocapture
+
+      - name: Run Streaming Tests
+        run: |
+          cargo test --package ruvllm ruvltra_e2e::streaming_generation \
+            -- --nocapture
+
+      - name: Run Quality Validation Tests
+        run: |
+          cargo test --package ruvllm ruvltra_e2e::quality_validation \
+            -- --nocapture
+
+      - name: Run Memory Validation Tests
+        run: |
+          cargo test --package ruvllm ruvltra_e2e::memory_validation \
+            -- --nocapture
+
+  # ============================================================================
+  # Apple Silicon Specific Tests
+  # ============================================================================
+  apple-silicon-tests:
+    name: Apple Silicon Tests
+    runs-on: macos-14  # M1/M2 runners
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-arm64-tests
+
+      - name: Check Architecture
+        run: |
+          uname -m
+          sysctl -n machdep.cpu.brand_string || true
+
+      - name: Run ANE Integration Tests
+        run: |
+          cargo test --package ruvllm --features coreml,hybrid-ane \
+            ane_integration -- --nocapture
+
+      - name: Run SONA on Apple Silicon
+        run: |
+          cargo test --package ruvllm --features coreml \
+            sona_integration -- --nocapture
+
+      - name: Run Full RuvLTRA Test Suite
+        run: |
+          cargo test --package ruvllm --features coreml \
+            ruvltra_tests -- --nocapture
+
+      - name: Verify ANE Capabilities Detection
+        run: |
+          cargo test --package ruvllm --features coreml \
+            test_ane_capabilities_detection -- --nocapture --exact
+
+  # ============================================================================
+  # Quantization Accuracy Tests
+  # ============================================================================
+  quantization-tests:
+    name: Quantization Accuracy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: quantization-tests
+
+      - name: Test All Quantization Formats
+        run: |
+          cargo test --package ruvllm quantization \
+            -- --nocapture
+
+      - name: Test Q4_K Accuracy
+        run: |
+          cargo test --package ruvllm test_q4_k_dequantization \
+            -- --nocapture --exact
+
+      - name: Test Q8_0 Accuracy
+        run: |
+          cargo test --package ruvllm test_q8_0_dequantization \
+            -- --nocapture --exact
+
+      - name: Test Tensor Size Calculations
+        run: |
+          cargo test --package ruvllm test_tensor_size \
+            -- --nocapture
+
+  # ============================================================================
+  # Thread Safety Tests
+  # ============================================================================
+  thread-safety-tests:
+    name: Thread Safety
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: thread-safety-tests
+
+      - name: Run Thread Safety Tests
+        run: |
+          cargo test --package ruvllm thread_safety \
+            -- --nocapture --test-threads=4
+
+      - name: Run Concurrent Inference Tests
+        run: |
+          cargo test --package ruvllm ruvltra_e2e::stress_tests::test_concurrent_inference \
+            -- --nocapture --exact
+
+  # ============================================================================
+  # Performance Benchmarks (Optional)
+  # ============================================================================
+  benchmarks:
+    name: Performance Benchmarks
+    runs-on: macos-14
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_benchmarks == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: benchmarks
+
+      - name: Run Performance Benchmarks
+        run: |
+          cargo test --package ruvllm --release --features coreml \
+            -- --ignored --nocapture 2>&1 | tee benchmark-results.txt
+
+      - name: Upload Benchmark Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark-results.txt
+
+  # ============================================================================
+  # Stress Tests (Optional)
+  # ============================================================================
+  stress-tests:
+    name: Stress Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_stress_tests == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: stress-tests
+
+      - name: Run Stress Tests
+        run: |
+          cargo test --package ruvllm --release \
+            ruvltra_e2e::stress_tests -- --nocapture --test-threads=1
+        timeout-minutes: 30
+
+  # ============================================================================
+  # Code Quality
+  # ============================================================================
+  code-quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: code-quality
+
+      - name: Check Formatting
+        run: |
+          cargo fmt --package ruvllm -- --check
+
+      - name: Run Clippy
+        run: |
+          cargo clippy --package ruvllm --all-targets -- -D warnings
+
+      - name: Check Documentation
+        run: |
+          cargo doc --package ruvllm --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  # ============================================================================
+  # Test Coverage
+  # ============================================================================
+  coverage:
+    name: Test Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: coverage
+
+      - name: Generate Coverage Report
+        run: |
+          cargo llvm-cov --package ruvllm \
+            --html --output-dir coverage \
+            -- --nocapture
+
+      - name: Upload Coverage Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+
+      - name: Check Coverage Threshold
+        run: |
+          COVERAGE=$(cargo llvm-cov --package ruvllm --json 2>/dev/null | jq -r '.data[0].totals.lines.percent // 0')
+          echo "Coverage: ${COVERAGE}%"
+          # Require at least 60% line coverage
+          if (( $(echo "$COVERAGE < 60" | bc -l) )); then
+            echo "Coverage ${COVERAGE}% is below threshold of 60%"
+            exit 1
+          fi
+        continue-on-error: true
+
+  # ============================================================================
+  # Summary Job
+  # ============================================================================
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [unit-tests, e2e-tests, quantization-tests, thread-safety-tests, code-quality]
+    if: always()
+    steps:
+      - name: Check Test Results
+        run: |
+          echo "## RuvLTRA-Small Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Test Suite | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Unit Tests | ${{ needs.unit-tests.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| E2E Tests | ${{ needs.e2e-tests.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Quantization | ${{ needs.quantization-tests.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Thread Safety | ${{ needs.thread-safety-tests.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Code Quality | ${{ needs.code-quality.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail if Any Test Failed
+        if: |
+          needs.unit-tests.result == 'failure' ||
+          needs.e2e-tests.result == 'failure' ||
+          needs.quantization-tests.result == 'failure' ||
+          needs.thread-safety-tests.result == 'failure' ||
+          needs.code-quality.result == 'failure'
+        run: exit 1

@@ -1,0 +1,154 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Time Crystal Theme Base Styles */
+:root {
+  --crystal-glow: rgba(14, 165, 233, 0.5);
+  --temporal-glow: rgba(124, 58, 237, 0.5);
+  --quantum-glow: rgba(6, 182, 212, 0.5);
+}
+
+/* Dark mode base */
+html {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-[#0a0a0f] text-zinc-200 antialiased;
+  background-image:
+    radial-gradient(ellipse at 20% 30%, rgba(14, 165, 233, 0.05) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 70%, rgba(124, 58, 237, 0.05) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 50%, rgba(6, 182, 212, 0.03) 0%, transparent 70%);
+  min-height: 100vh;
+  margin: 0;
+}
+
+/* Time Crystal Card Effects */
+.crystal-card {
+  @apply relative overflow-hidden rounded-xl border border-white/10 bg-zinc-900/50 backdrop-blur-xl;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 4px 6px -1px rgba(0, 0, 0, 0.3),
+    0 2px 4px -1px rgba(0, 0, 0, 0.2);
+}
+
+.crystal-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(14, 165, 233, 0.5), transparent);
+}
+
+.crystal-card:hover {
+  border-color: rgba(14, 165, 233, 0.3);
+  box-shadow:
+    0 0 0 1px rgba(14, 165, 233, 0.1),
+    0 4px 20px -2px rgba(14, 165, 233, 0.15),
+    0 2px 4px -1px rgba(0, 0, 0, 0.2);
+}
+
+/* Glowing elements */
+.glow-text {
+  text-shadow: 0 0 10px var(--crystal-glow), 0 0 20px var(--crystal-glow);
+}
+
+.glow-border {
+  box-shadow: 0 0 10px var(--crystal-glow), inset 0 0 10px rgba(14, 165, 233, 0.1);
+}
+
+/* Time Crystal Animation */
+.crystal-pulse {
+  animation: crystal-pulse 2s ease-in-out infinite;
+}
+
+@keyframes crystal-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.02);
+  }
+}
+
+/* Data stream animation */
+.data-stream {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(14, 165, 233, 0.3),
+    rgba(124, 58, 237, 0.3),
+    transparent
+  );
+  background-size: 200% 100%;
+  animation: data-flow 2s linear infinite;
+}
+
+@keyframes data-flow {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Quantum grid background */
+.quantum-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 50px 50px;
+}
+
+/* Network node visualization */
+.network-node {
+  @apply relative;
+}
+
+.network-node::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(14, 165, 233, 0.3) 0%, transparent 70%);
+  animation: node-pulse 2s ease-in-out infinite;
+}
+
+@keyframes node-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.5; }
+  50% { transform: scale(1.5); opacity: 0; }
+}
+
+/* Stat counter animation */
+.stat-value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(14, 165, 233, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(14, 165, 233, 0.5);
+}
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+  .crystal-card {
+    @apply rounded-lg;
+  }
+}

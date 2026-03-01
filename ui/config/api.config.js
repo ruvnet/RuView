@@ -1,7 +1,7 @@
 // API Configuration for WiFi-DensePose UI
 
 export const API_CONFIG = {
-  BASE_URL: 'http://localhost:8000',  // FastAPI backend port
+  BASE_URL: 'http://localhost:8080',  // Rust sensing server port
   API_VERSION: '/api/v1',
   WS_PREFIX: 'ws://',
   WSS_PREFIX: 'wss://',
@@ -9,7 +9,7 @@ export const API_CONFIG = {
   // Mock server configuration (only for testing)
   MOCK_SERVER: {
     ENABLED: false,  // Set to true only for testing without backend
-    AUTO_DETECT: true,  // Automatically detect if backend is available
+    AUTO_DETECT: false,  // Disabled — sensing tab uses its own WebSocket on :8765
   },
   
   // API Endpoints
@@ -111,8 +111,8 @@ export function buildWsUrl(endpoint, params = {}) {
     ? API_CONFIG.WSS_PREFIX 
     : API_CONFIG.WS_PREFIX;
   
-  // Use localhost:8000 for WebSocket connections to match FastAPI backend
-  const host = 'localhost:8000';
+  // Match Rust sensing server port
+  const host = 'localhost:8080';
   let url = `${protocol}${host}${endpoint}`;
   
   // Add query parameters

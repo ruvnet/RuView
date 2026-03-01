@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RuvBot - AI Assistant</title>
+  <meta name="description" content="Enterprise-grade self-learning AI assistant with military-strength security">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+  <style>
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #12121a;
+      --bg-tertiary: #1a1a25;
+      --bg-hover: #22222f;
+      --text-primary: #f0f0f5;
+      --text-secondary: #a0a0b0;
+      --text-muted: #606070;
+      --accent: #6366f1;
+      --accent-hover: #818cf8;
+      --accent-subtle: rgba(99, 102, 241, 0.1);
+      --border: #2a2a35;
+      --success: #22c55e;
+      --error: #ef4444;
+      --warning: #f59e0b;
+      --radius: 12px;
+      --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    [data-theme="light"] {
+      --bg-primary: #ffffff;
+      --bg-secondary: #f8f9fa;
+      --bg-tertiary: #f0f1f3;
+      --bg-hover: #e8e9eb;
+      --text-primary: #1a1a2e;
+      --text-secondary: #4a4a5a;
+      --text-muted: #8a8a9a;
+      --border: #e0e0e5;
+      --shadow: 0 4px 24px rgba(0, 0, 0, 0.1);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 24px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 1.25rem;
+      font-weight: 600;
+    }
+
+    .logo-icon {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, var(--accent), #8b5cf6);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.25rem;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: none;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-secondary);
+    }
+
+    .btn-ghost:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-hover);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* Skill Badges */
+    .skill-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+
+    .skill-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+    }
+
+    .skill-badge.success {
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--success);
+    }
+
+    .skill-badge.failed {
+      background: rgba(239, 68, 68, 0.15);
+      color: #ef4444;
+    }
+
+    .skill-badge::before {
+      content: '✨';
+      margin-right: 4px;
+    }
+
+    .skill-badge.failed::before {
+      content: '⚠️';
+    }
+
+    /* Main Chat Container */
+    .chat-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      max-width: 900px;
+      margin: 0 auto;
+      width: 100%;
+      padding: 0 16px;
+    }
+
+    /* Messages */
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .message {
+      display: flex;
+      gap: 16px;
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message.user {
+      flex-direction: row-reverse;
+    }
+
+    .message-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+
+    .message.assistant .message-avatar {
+      background: linear-gradient(135deg, var(--accent), #8b5cf6);
+    }
+
+    .message.user .message-avatar {
+      background: var(--bg-tertiary);
+    }
+
+    .message-content {
+      max-width: 75%;
+      padding: 14px 18px;
+      border-radius: var(--radius);
+      font-size: 0.9375rem;
+    }
+
+    .message.assistant .message-content {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+    }
+
+    .message.user .message-content {
+      background: var(--accent);
+      color: white;
+    }
+
+    .message-content p {
+      margin-bottom: 12px;
+    }
+
+    .message-content p:last-child {
+      margin-bottom: 0;
+    }
+
+    .message-content pre {
+      background: var(--bg-primary);
+      border-radius: 8px;
+      padding: 12px 16px;
+      overflow-x: auto;
+      margin: 12px 0;
+      font-size: 0.875rem;
+    }
+
+    .message-content code {
+      font-family: 'SF Mono', Consolas, monospace;
+      font-size: 0.875em;
+    }
+
+    .message-content code:not(pre code) {
+      background: var(--bg-tertiary);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .message.user .message-content code:not(pre code) {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .message-time {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 6px;
+    }
+
+    .message.user .message-time {
+      text-align: right;
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    /* Typing indicator */
+    .typing-indicator {
+      display: flex;
+      gap: 4px;
+      padding: 8px 0;
+    }
+
+    .typing-indicator span {
+      width: 8px;
+      height: 8px;
+      background: var(--text-muted);
+      border-radius: 50%;
+      animation: typing 1.4s infinite;
+    }
+
+    .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes typing {
+      0%, 60%, 100% { transform: translateY(0); }
+      30% { transform: translateY(-8px); }
+    }
+
+    /* Input Area */
+    .input-container {
+      padding: 16px 0 24px;
+      background: var(--bg-primary);
+      border-top: 1px solid var(--border);
+      position: sticky;
+      bottom: 0;
+    }
+
+    .input-wrapper {
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 8px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .input-wrapper:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-subtle);
+    }
+
+    .input-wrapper textarea {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text-primary);
+      font-size: 0.9375rem;
+      padding: 8px 12px;
+      resize: none;
+      min-height: 24px;
+      max-height: 200px;
+      line-height: 1.5;
+      font-family: inherit;
+    }
+
+    .input-wrapper textarea:focus {
+      outline: none;
+    }
+
+    .input-wrapper textarea::placeholder {
+      color: var(--text-muted);
+    }
+
+    .send-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: var(--accent);
+      border: none;
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      flex-shrink: 0;
+    }
+
+    .send-btn:hover:not(:disabled) {
+      background: var(--accent-hover);
+      transform: scale(1.05);
+    }
+
+    .send-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .send-btn svg {
+      width: 20px;
+      height: 20px;
+    }
+
+    /* Welcome Screen */
+    .welcome {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 40px 20px;
+    }
+
+    .welcome-icon {
+      width: 80px;
+      height: 80px;
+      background: linear-gradient(135deg, var(--accent), #8b5cf6);
+      border-radius: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2.5rem;
+      margin-bottom: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .welcome h1 {
+      font-size: 1.75rem;
+      margin-bottom: 8px;
+    }
+
+    .welcome p {
+      color: var(--text-secondary);
+      max-width: 400px;
+      margin-bottom: 32px;
+    }
+
+    .suggestions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+      max-width: 600px;
+    }
+
+    .suggestion {
+      padding: 10px 16px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      color: var(--text-secondary);
+      font-size: 0.875rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .suggestion:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+      border-color: var(--accent);
+    }
+
+    /* Model Selector */
+    .model-selector {
+      position: relative;
+    }
+
+    .model-selector select {
+      appearance: none;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 32px 8px 12px;
+      color: var(--text-primary);
+      font-size: 0.875rem;
+      cursor: pointer;
+    }
+
+    .model-selector::after {
+      content: '▼';
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 0.625rem;
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+
+    /* Theme Toggle */
+    .theme-toggle {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .theme-toggle:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    /* Footer */
+    .footer {
+      text-align: center;
+      padding: 12px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      .header {
+        padding: 12px 16px;
+      }
+
+      .message-content {
+        max-width: 85%;
+      }
+
+      .suggestions {
+        flex-direction: column;
+      }
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 3px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--text-muted);
+    }
+
+    /* Markdown */
+    .message-content ul, .message-content ol {
+      margin: 12px 0;
+      padding-left: 24px;
+    }
+
+    .message-content li {
+      margin: 4px 0;
+    }
+
+    .message-content blockquote {
+      border-left: 3px solid var(--accent);
+      padding-left: 16px;
+      margin: 12px 0;
+      color: var(--text-secondary);
+    }
+
+    .message-content a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .message-content a:hover {
+      text-decoration: underline;
+    }
+
+    .message-content h1, .message-content h2, .message-content h3 {
+      margin: 16px 0 8px;
+    }
+
+    .message-content hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 16px 0;
+    }
+
+    /* Error state */
+    .error-message {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid var(--error);
+      color: var(--error);
+      padding: 12px 16px;
+      border-radius: 8px;
+      margin: 12px 0;
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="logo">
+      <div class="logo-icon">🤖</div>
+      <span>RuvBot</span>
+      <div class="status-dot" title="Online"></div>
+    </div>
+    <div class="header-actions">
+      <div class="model-selector">
+        <select id="modelSelect">
+          <option value="google/gemini-2.0-flash-001">Gemini 2.0 Flash</option>
+          <option value="google/gemini-2.5-pro-preview">Gemini 2.5 Pro</option>
+          <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+          <option value="openai/gpt-4o">GPT-4o</option>
+          <option value="deepseek/deepseek-r1">DeepSeek R1</option>
+        </select>
+      </div>
+      <button class="btn btn-ghost" id="newChatBtn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+        New Chat
+      </button>
+      <button class="theme-toggle" id="themeToggle" title="Toggle theme">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="5"/>
+          <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="chat-container">
+    <div class="messages" id="messages">
+      <div class="welcome" id="welcome">
+        <div class="welcome-icon">🤖</div>
+        <h1>Welcome to RuvBot</h1>
+        <p>Enterprise-grade AI assistant with military-strength security, 150x faster vector search, and 12+ LLM models.</p>
+        <div class="suggestions">
+          <button class="suggestion" data-prompt="What can you help me with?">What can you help me with?</button>
+          <button class="suggestion" data-prompt="Explain how RuvBot's security works">Explain security features</button>
+          <button class="suggestion" data-prompt="Help me write a Python function">Help me code</button>
+          <button class="suggestion" data-prompt="What LLM models are available?">Available models</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="input-container">
+      <div class="input-wrapper">
+        <textarea
+          id="messageInput"
+          placeholder="Message RuvBot..."
+          rows="1"
+          autofocus
+        ></textarea>
+        <button class="send-btn" id="sendBtn" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    Powered by <a href="https://github.com/ruvnet/ruvector" target="_blank">RuvBot</a> •
+    <a href="/api/models" target="_blank">API</a> •
+    <a href="/health" target="_blank">Health</a>
+  </footer>
+
+  <script>
+    // State
+    let sessionId = null;
+    let isLoading = false;
+
+    // Elements
+    const messagesEl = document.getElementById('messages');
+    const welcomeEl = document.getElementById('welcome');
+    const inputEl = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const modelSelect = document.getElementById('modelSelect');
+    const newChatBtn = document.getElementById('newChatBtn');
+    const themeToggle = document.getElementById('themeToggle');
+
+    // Theme
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+
+    themeToggle.addEventListener('click', () => {
+      const current = document.documentElement.getAttribute('data-theme');
+      const next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+    });
+
+    // Auto-resize textarea
+    inputEl.addEventListener('input', () => {
+      inputEl.style.height = 'auto';
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + 'px';
+      sendBtn.disabled = !inputEl.value.trim() || isLoading;
+    });
+
+    // Send on Enter (Shift+Enter for newline)
+    inputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (!sendBtn.disabled) sendMessage();
+      }
+    });
+
+    sendBtn.addEventListener('click', sendMessage);
+
+    // Suggestions
+    document.querySelectorAll('.suggestion').forEach(btn => {
+      btn.addEventListener('click', () => {
+        inputEl.value = btn.dataset.prompt;
+        inputEl.dispatchEvent(new Event('input'));
+        sendMessage();
+      });
+    });
+
+    // New chat
+    newChatBtn.addEventListener('click', () => {
+      sessionId = null;
+      messagesEl.innerHTML = '';
+      messagesEl.appendChild(welcomeEl);
+      welcomeEl.style.display = 'flex';
+      inputEl.value = '';
+      inputEl.focus();
+    });
+
+    // Create session
+    async function createSession() {
+      console.log('[RuvBot] Creating new session...');
+      try {
+        const res = await fetch('/api/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agentId: 'default-agent' })
+        });
+        const data = await res.json();
+        console.log('[RuvBot] Session created:', data);
+        sessionId = data.id || data.sessionId;
+        return sessionId;
+      } catch (err) {
+        console.error('[RuvBot] Failed to create session:', err);
+        throw err;
+      }
+    }
+
+    // Send message
+    async function sendMessage() {
+      const message = inputEl.value.trim();
+      if (!message || isLoading) return;
+
+      isLoading = true;
+      sendBtn.disabled = true;
+      inputEl.value = '';
+      inputEl.style.height = 'auto';
+
+      // Hide welcome
+      welcomeEl.style.display = 'none';
+
+      // Add user message
+      addMessage('user', message);
+
+      // Show typing indicator
+      const typingEl = addTypingIndicator();
+
+      try {
+        // Create session if needed
+        if (!sessionId) {
+          await createSession();
+        }
+
+        // Send chat request
+        console.log('[RuvBot] Sending message:', { sessionId, message, model: modelSelect.value });
+        const startTime = performance.now();
+
+        const res = await fetch(`/api/sessions/${sessionId}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message,
+            model: modelSelect.value
+          })
+        });
+
+        const responseTime = (performance.now() - startTime).toFixed(0);
+        console.log(`[RuvBot] Response received in ${responseTime}ms, status: ${res.status}`);
+
+        if (!res.ok) {
+          const error = await res.json();
+          console.error('[RuvBot] API error:', error);
+          throw new Error(error.message || error.error || 'Request failed');
+        }
+
+        const data = await res.json();
+        console.log('[RuvBot] Chat response:', data);
+
+        // Remove typing indicator
+        typingEl.remove();
+
+        // Build skill badges if skills were used
+        let skillBadges = '';
+        if (data.skillsUsed && data.skillsUsed.length > 0) {
+          const badges = data.skillsUsed.map(s =>
+            `<span class="skill-badge ${s.success ? 'success' : 'failed'}">${s.skillName}</span>`
+          ).join(' ');
+          skillBadges = `<div class="skill-badges">${badges}</div>`;
+          console.log('[RuvBot] Skills used:', data.skillsUsed.map(s => s.skillId));
+        }
+
+        // Add assistant message
+        const content = data.content || data.message || data.response || 'No response';
+        console.log('[RuvBot] Displaying content:', content.substring(0, 100) + '...');
+        addMessage('assistant', skillBadges + content);
+
+      } catch (err) {
+        typingEl.remove();
+        addMessage('assistant', `<div class="error-message">Error: ${err.message}</div>`, true);
+      } finally {
+        isLoading = false;
+        sendBtn.disabled = !inputEl.value.trim();
+        inputEl.focus();
+      }
+    }
+
+    // Add message to chat
+    function addMessage(role, content, isHtml = false) {
+      const messageEl = document.createElement('div');
+      messageEl.className = `message ${role}`;
+
+      const avatar = role === 'user' ? '👤' : '🤖';
+      const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      messageEl.innerHTML = `
+        <div class="message-avatar">${avatar}</div>
+        <div class="message-content">
+          ${isHtml ? content : formatMarkdown(content)}
+          <div class="message-time">${time}</div>
+        </div>
+      `;
+
+      messagesEl.appendChild(messageEl);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      return messageEl;
+    }
+
+    // Add typing indicator
+    function addTypingIndicator() {
+      const el = document.createElement('div');
+      el.className = 'message assistant';
+      el.innerHTML = `
+        <div class="message-avatar">🤖</div>
+        <div class="message-content">
+          <div class="typing-indicator">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+      `;
+      messagesEl.appendChild(el);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      return el;
+    }
+
+    // Simple markdown formatter
+    function formatMarkdown(text) {
+      if (!text) return '';
+
+      return text
+        // Code blocks
+        .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
+        // Inline code
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        // Bold
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        // Italic
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+        // Links
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
+        // Headers
+        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+        // Lists
+        .replace(/^\* (.+)$/gm, '<li>$1</li>')
+        .replace(/^- (.+)$/gm, '<li>$1</li>')
+        .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
+        // Blockquotes
+        .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+        // Horizontal rule
+        .replace(/^---$/gm, '<hr>')
+        // Paragraphs
+        .replace(/\n\n/g, '</p><p>')
+        .replace(/^(.+)$/gm, (match) => {
+          if (match.startsWith('<')) return match;
+          return `<p>${match}</p>`;
+        })
+        // Clean up
+        .replace(/<p><\/p>/g, '')
+        .replace(/<p>(<[hul])/g, '$1')
+        .replace(/(<\/[hul].*>)<\/p>/g, '$1');
+    }
+
+    // Check API health and status
+    async function checkHealth() {
+      console.log('[RuvBot] Checking system health...');
+      try {
+        const [healthRes, statusRes] = await Promise.all([
+          fetch('/health'),
+          fetch('/api/status')
+        ]);
+        const health = await healthRes.json();
+        const status = await statusRes.json();
+        console.log('[RuvBot] Health:', health);
+        console.log('[RuvBot] Status:', status);
+
+        // Show LLM status indicator
+        if (status.llm?.configured) {
+          console.log('[RuvBot] LLM configured:', status.llm.provider, status.llm.model);
+        } else {
+          console.warn('[RuvBot] LLM not configured! Check ANTHROPIC_API_KEY or OPENROUTER_API_KEY');
+        }
+      } catch (err) {
+        console.warn('[RuvBot] Health check failed:', err);
+      }
+    }
+
+    // Init
+    console.log('[RuvBot] Chat UI initialized');
+    checkHealth();
+    inputEl.focus();
+  </script>
+</body>
+</html>

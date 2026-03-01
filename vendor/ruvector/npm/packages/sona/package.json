@@ -1,0 +1,82 @@
+{
+  "name": "@ruvector/sona",
+  "version": "0.1.4",
+  "description": "Self-Optimizing Neural Architecture (SONA) - Runtime-adaptive learning with LoRA, EWC++, and ReasoningBank for LLM routers and AI systems. Sub-millisecond learning overhead, WASM and Node.js support.",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "binaryName": "sona",
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "aarch64-pc-windows-msvc"
+    ]
+  },
+  "scripts": {
+    "artifacts": "napi artifacts",
+    "build": "napi build --platform --release -p ruvector-sona --manifest-path ../../../crates/sona/Cargo.toml -F napi",
+    "build:debug": "napi build --platform -p ruvector-sona --manifest-path ../../../crates/sona/Cargo.toml -F napi",
+    "test": "node --test",
+    "universal": "napi universal",
+    "version": "napi version"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  },
+  "keywords": [
+    "sona",
+    "neural-network",
+    "adaptive-learning",
+    "lora",
+    "low-rank-adaptation",
+    "ewc",
+    "elastic-weight-consolidation",
+    "reasoningbank",
+    "llm",
+    "llm-router",
+    "machine-learning",
+    "ai",
+    "deep-learning",
+    "continual-learning",
+    "napi",
+    "rust",
+    "ruvector"
+  ],
+  "author": "rUv Team <team@ruv.io>",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "npm/packages/sona"
+  },
+  "homepage": "https://github.com/ruvnet/ruvector/tree/main/crates/sona",
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "engines": {
+    "node": ">= 16"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md",
+    "*.node"
+  ],
+  "optionalDependencies": {
+    "@ruvector/sona-linux-x64-gnu": "0.1.4",
+    "@ruvector/sona-linux-x64-musl": "0.1.4",
+    "@ruvector/sona-linux-arm64-gnu": "0.1.4",
+    "@ruvector/sona-darwin-x64": "0.1.4",
+    "@ruvector/sona-darwin-arm64": "0.1.4",
+    "@ruvector/sona-win32-x64-msvc": "0.1.4",
+    "@ruvector/sona-win32-arm64-msvc": "0.1.4"
+  }
+}

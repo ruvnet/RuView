@@ -1,0 +1,37 @@
+[package]
+name = "micro-hnsw-wasm"
+version = "2.3.2"
+edition = "2021"
+description = "Neuromorphic HNSW vector search with spiking neural networks - 11.8KB WASM for edge AI, ASIC, and embedded systems. Features LIF neurons, STDP learning, winner-take-all, dendritic computation."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://ruv.io"
+documentation = "https://docs.rs/micro-hnsw-wasm"
+readme = "README.md"
+authors = ["rUv <ruvnet@users.noreply.github.com>"]
+keywords = ["hnsw", "neuromorphic", "snn", "vector-search", "wasm"]
+categories = ["algorithms", "wasm", "embedded", "science", "no-std"]
+rust-version = "1.70"
+include = ["src/**/*", "README.md", "LICENSE*", "Cargo.toml"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[workspace]
+
+[dependencies]
+
+[dev-dependencies]
+
+[features]
+default = []
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.release.package."*"]
+opt-level = "z"

@@ -1,0 +1,10 @@
+# RuVector PostgreSQL Extension v2
+# High-performance vector similarity search - pgvector drop-in replacement
+# Features: 230+ SQL functions, Flash Attention, GNN, hybrid search, multi-tenancy, self-healing
+
+comment = 'RuVector v0.3: SIMD-optimized vector similarity search with solver, math, TDA, and AI capabilities'
+default_version = '0.3.0'
+module_pathname = '$libdir/ruvector'
+relocatable = false
+superuser = false
+trusted = true

@@ -1,0 +1,44 @@
+[package]
+name = "ruvector-tiny-dancer-node"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Node.js bindings for Tiny Dancer neural routing via NAPI-RS"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ruvector-tiny-dancer-core = { version = "2.0", path = "../ruvector-tiny-dancer-core" }
+
+# Node.js bindings
+napi = { workspace = true }
+napi-derive = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Time
+chrono = { workspace = true }
+
+# Concurrency
+parking_lot = { workspace = true }
+
+[build-dependencies]
+napi-build = "2.1"
+
+[profile.release]
+lto = true
+strip = true

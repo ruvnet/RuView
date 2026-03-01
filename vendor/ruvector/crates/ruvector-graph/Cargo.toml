@@ -1,0 +1,166 @@
+[package]
+name = "ruvector-graph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Distributed Neo4j-compatible hypergraph database with SIMD optimization"
+
+[dependencies]
+# RuVector dependencies
+ruvector-core = { version = "2.0.1", path = "../ruvector-core", default-features = false, features = ["simd", "parallel"] }
+ruvector-raft = { version = "2.0.1", path = "../ruvector-raft", optional = true }
+ruvector-cluster = { version = "2.0.1", path = "../ruvector-cluster", optional = true }
+ruvector-replication = { version = "2.0.1", path = "../ruvector-replication", optional = true }
+
+# Storage and indexing (optional for WASM)
+redb = { workspace = true, optional = true }
+memmap2 = { workspace = true, optional = true }
+hnsw_rs = { workspace = true, optional = true }
+
+# SIMD and performance
+simsimd = { workspace = true, optional = true }
+rayon = { workspace = true }
+crossbeam = { workspace = true }
+num_cpus = "1.16"
+
+# Serialization
+rkyv = { workspace = true }
+bincode = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Async runtime (optional for WASM)
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "macros", "time", "net"], optional = true }
+futures = { workspace = true, optional = true }
+
+# Error handling and logging
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+
+# Data structures
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
+once_cell = { workspace = true }
+
+# Math and numerics
+ndarray = { workspace = true }
+rand = { workspace = true }
+rand_distr = { workspace = true }
+ordered-float = "4.2"
+
+# Time and UUID
+chrono = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+
+# Graph algorithms and partitioning
+petgraph = "0.6"
+roaring = "0.10"  # Roaring bitmaps for label indexes
+
+# Query parsing (Cypher)
+nom = "7.1"
+nom_locate = "4.2"
+pest = { version = "2.7", optional = true }
+pest_derive = { version = "2.7", optional = true }
+lalrpop-util = { version = "0.21", optional = true }
+
+# Cache
+lru = "0.16"
+moka = { version = "0.12", features = ["future"], optional = true }
+
+# Compression (for storage optimization, optional for WASM)
+zstd = { version = "0.13", optional = true }
+lz4 = { version = "1.24", optional = true }
+
+# Networking (for federation)
+tonic = { version = "0.12", features = ["transport"], optional = true }
+prost = { version = "0.13", optional = true }
+tower = { version = "0.4", optional = true }
+hyper = { version = "1.4", optional = true }
+
+# Hashing for sharding
+blake3 = { version = "1.5", optional = true }
+xxhash-rust = { version = "0.8", features = ["xxh3"], optional = true }
+
+# Metrics
+prometheus = { version = "0.13", optional = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+proptest = { workspace = true }
+mockall = { workspace = true }
+tempfile = "3.13"
+tracing-subscriber = { workspace = true }
+tokio-test = "0.4"
+
+# Benchmark datasets
+csv = "1.3"
+
+[build-dependencies]
+pest_generator = "2.7"
+
+[features]
+default = ["full"]
+
+# Full feature set (non-WASM)
+full = ["simd", "storage", "async-runtime", "compression", "hnsw_rs", "ruvector-core/hnsw"]
+
+# SIMD optimizations
+simd = ["ruvector-core/simd", "simsimd"]
+
+# Storage backends
+storage = ["redb", "memmap2"]
+
+# Async runtime support
+async-runtime = ["tokio", "futures", "moka"]
+
+# Compression support
+compression = ["zstd", "lz4"]
+
+# WASM-compatible minimal build (parser + core graph operations)
+wasm = []
+
+# Distributed deployment with RAFT
+distributed = ["ruvector-raft", "ruvector-cluster", "ruvector-replication", "blake3", "xxhash-rust", "full"]
+
+# Cross-cluster federation
+federation = ["tonic", "prost", "tower", "hyper", "distributed"]
+
+# Advanced query optimization
+jit = []  # JIT compilation for hot paths (future)
+
+# Monitoring and metrics
+metrics = ["prometheus"]
+
+# Full-text search support
+fulltext = []
+
+# Geospatial indexing
+geospatial = []
+
+# Temporal graph support (time-varying graphs)
+temporal = []
+
+# Query parser implementations
+cypher-pest = ["pest", "pest_derive"]
+cypher-lalrpop = ["lalrpop-util"]
+
+[[example]]
+name = "test_cypher_parser"
+path = "examples/test_cypher_parser.rs"
+
+[[bench]]
+name = "new_capabilities_bench"
+harness = false
+
+[lib]
+crate-type = ["rlib"]
+bench = false
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

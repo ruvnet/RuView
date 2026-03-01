@@ -1,0 +1,38 @@
+[package]
+name = "sparse-persistent-homology"
+version = "0.1.0"
+edition = "2021"
+authors = ["ExoAI Research Team"]
+description = "Sub-cubic persistent homology with SIMD acceleration for real-time consciousness measurement"
+license = "MIT"
+repository = "https://github.com/ruvnet/ruvector"
+
+# Enable workspace for standalone compilation
+[workspace]
+
+[dependencies]
+# No external dependencies for core algorithms (pure Rust)
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+rand = "0.8"
+
+[lib]
+name = "sparse_persistent_homology"
+path = "src/lib.rs"
+
+[[bench]]
+name = "sparse_homology_bench"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+
+[profile.bench]
+inherits = "release"
+
+[features]
+default = []
+simd = []

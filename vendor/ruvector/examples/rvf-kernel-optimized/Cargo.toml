@@ -1,0 +1,38 @@
+[package]
+name = "rvf-kernel-optimized"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT"
+description = "Hyper-optimized RVF example: Linux kernel embedding with ruvector-verified formal proofs"
+publish = false
+
+[dependencies]
+# Formal verification + ultra-optimizations (FastTermArena, gated routing, pools, cache)
+ruvector-verified = { path = "../../crates/ruvector-verified", features = ["ultra", "hnsw-proofs"] }
+
+# RVF stack
+rvf-types = { path = "../../crates/rvf/rvf-types", features = ["std"] }
+rvf-runtime = { path = "../../crates/rvf/rvf-runtime" }
+rvf-kernel = { path = "../../crates/rvf/rvf-kernel" }
+rvf-ebpf = { path = "../../crates/rvf/rvf-ebpf" }
+rvf-quant = { path = "../../crates/rvf/rvf-quant", features = ["std"] }
+
+# Utilities
+rand = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tempfile = "3"
+
+[dev-dependencies]
+criterion = { workspace = true }
+tempfile = "3"
+
+[[bin]]
+name = "rvf-kernel-opt"
+path = "src/main.rs"
+
+[[bench]]
+name = "verified_rvf"
+harness = false

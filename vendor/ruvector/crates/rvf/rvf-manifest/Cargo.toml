@@ -1,0 +1,23 @@
+[package]
+name = "rvf-manifest"
+version = "0.1.0"
+edition = "2021"
+description = "RuVector Format two-level manifest system for segment tracking and compaction"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector"
+readme = "README.md"
+categories = ["data-structures", "database-implementations"]
+keywords = ["vector", "database", "manifest", "compaction", "rvf"]
+rust-version = "1.87"
+
+[features]
+default = ["std"]
+std = ["rvf-types/std"]
+
+[dependencies]
+rvf-types = { version = "0.2.0", path = "../rvf-types" }
+crc32c = "0.6"
+
+[dev-dependencies]
+tempfile = "3"

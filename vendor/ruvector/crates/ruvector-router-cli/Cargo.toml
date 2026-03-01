@@ -1,0 +1,33 @@
+[package]
+name = "ruvector-router-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "CLI for testing and benchmarking ruvector-router-core"
+
+[[bin]]
+name = "ruvector"
+path = "src/main.rs"
+
+[dependencies]
+ruvector-router-core = { version = "2.0", path = "../ruvector-router-core" }
+
+# CLI dependencies
+clap = { version = "4.5", features = ["derive"] }
+colored = "2.1"
+rand = "0.8"
+chrono = "0.4"
+
+# Workspace dependencies
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1

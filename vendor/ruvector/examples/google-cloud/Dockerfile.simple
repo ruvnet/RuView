@@ -1,0 +1,22 @@
+# Simple RuVector Cloud Run Dockerfile
+# Copies pre-built binary for fast deployment
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    libssl3 \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy pre-built binary
+COPY target/release/gpu-benchmark ./
+
+ENV PORT=8080
+ENV RUST_LOG=info
+
+EXPOSE 8080
+
+CMD ["./gpu-benchmark", "serve", "--port", "8080"]

@@ -1,0 +1,28 @@
+[package]
+name = "agentic-robotics-embedded"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+description.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+[dependencies]
+agentic-robotics-core = { path = "../agentic-robotics-core", version = "0.1.1" }
+serde = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Embedded-specific dependencies (optional for non-embedded builds)
+# embassy-executor = { version = "0.7", optional = true }
+# rtic = { version = "2.1", optional = true }
+
+[features]
+default = []
+embassy = []
+rtic = []

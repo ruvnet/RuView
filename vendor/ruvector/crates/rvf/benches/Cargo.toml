@@ -1,0 +1,22 @@
+[package]
+name = "rvf-benches"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bench]]
+name = "rvf_benchmarks"
+harness = false
+
+[dependencies]
+rvf-types = { path = "../rvf-types", features = ["std"] }
+rvf-wire = { path = "../rvf-wire" }
+rvf-manifest = { path = "../rvf-manifest" }
+rvf-index = { path = "../rvf-index", features = ["std"] }
+rvf-quant = { path = "../rvf-quant", features = ["std"] }
+rvf-crypto = { path = "../rvf-crypto", features = ["std"] }
+rvf-runtime = { path = "../rvf-runtime", features = ["std"] }
+criterion = { version = "0.5", features = ["html_reports"] }
+rand = "0.8"
+tempfile = "3"
+ed25519-dalek = { version = "2", features = ["rand_core"] }

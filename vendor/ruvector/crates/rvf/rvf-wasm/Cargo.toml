@@ -1,0 +1,26 @@
+[package]
+name = "rvf-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "RuVector Format WASM microkernel for browser and edge vector operations"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector"
+readme = "README.md"
+categories = ["wasm", "database-implementations"]
+keywords = ["vector", "wasm", "webassembly", "embedding", "rvf"]
+rust-version = "1.87"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+rvf-types = { version = "0.2.0", path = "../rvf-types", default-features = false }
+rvf-crypto = { version = "0.2.0", path = "../rvf-crypto", default-features = false }
+dlmalloc = { version = "0.2", features = ["global"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

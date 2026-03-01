@@ -1,0 +1,96 @@
+{
+  "buckets": {
+    "0.9": {
+      "total": 4369,
+      "correct": 4369
+    },
+    "0.7": {
+      "total": 2858,
+      "correct": 2858
+    },
+    "0.5": {
+      "total": 1296,
+      "correct": 1296
+    },
+    "0.8": {
+      "total": 4,
+      "correct": 4
+    },
+    "0.6": {
+      "total": 3,
+      "correct": 0
+    }
+  },
+  "predictions": [
+    {
+      "predicted": "coder",
+      "actual": "coder",
+      "correct": true,
+      "confidence": 0.8,
+      "timestamp": "2025-12-25T21:07:49.690Z"
+    },
+    {
+      "predicted": "coder",
+      "actual": "reviewer",
+      "correct": false,
+      "confidence": 0.6,
+      "timestamp": "2025-12-25T21:07:49.690Z"
+    },
+    {
+      "predicted": "tester",
+      "actual": "tester",
+      "correct": true,
+      "confidence": 0.9,
+      "timestamp": "2025-12-25T21:07:49.691Z"
+    },
+    {
+      "predicted": "coder",
+      "actual": "coder",
+      "correct": true,
+      "confidence": 0.8,
+      "timestamp": "2025-12-25T21:09:04.929Z"
+    },
+    {
+      "predicted": "coder",
+      "actual": "coder",
+      "correct": true,
+      "confidence": 0.8,
+      "timestamp": "2025-12-25T21:10:51.728Z"
+    },
+    {
+      "predicted": "coder",
+      "actual": "reviewer",
+      "correct": false,
+      "confidence": 0.6,
+      "timestamp": "2025-12-25T21:10:51.728Z"
+    },
+    {
+      "predicted": "tester",
+      "actual": "tester",
+      "correct": true,
+      "confidence": 0.9,
+      "timestamp": "2025-12-25T21:10:51.728Z"
+    },
+    {
+      "predicted": "coder",
+      "actual": "coder",
+      "correct": true,
+      "confidence": 0.8,
+      "timestamp": "2025-12-25T21:19:39.833Z"
+    },
+    {
+      "predicted": "coder",
+      "actual": "reviewer",
+      "correct": false,
+      "confidence": 0.6,
+      "timestamp": "2025-12-25T21:19:39.833Z"
+    },
+    {
+      "predicted": "tester",
+      "actual": "tester",
+      "correct": true,
+      "confidence": 0.9,
+      "timestamp": "2025-12-25T21:19:39.833Z"
+    }
+  ]
+}

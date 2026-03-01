@@ -1,0 +1,277 @@
+# =============================================================================
+# RuVector Cloud Run Service Configuration
+# Multi-service deployment with GPU, Raft, and Replication support
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Benchmark Service (GPU-enabled)
+# -----------------------------------------------------------------------------
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: ruvector-benchmark
+  labels:
+    app: ruvector
+    component: benchmark
+  annotations:
+    run.googleapis.com/description: "RuVector GPU Benchmark Service"
+    run.googleapis.com/launch-stage: BETA
+spec:
+  template:
+    metadata:
+      annotations:
+        # GPU Configuration
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/gpu-type: nvidia-l4
+        run.googleapis.com/gpu-count: "1"
+
+        # Scaling Configuration
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "10"
+
+        # Performance Configuration
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/startup-cpu-boost: "true"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 3600
+      serviceAccountName: ruvector-sa
+      containers:
+        - name: ruvector
+          image: gcr.io/PROJECT_ID/ruvector-benchmark:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+              nvidia.com/gpu: "1"
+          env:
+            - name: RUVECTOR_GPU_ENABLED
+              value: "true"
+            - name: RUST_LOG
+              value: "info"
+            - name: RUVECTOR_MODE
+              value: "benchmark"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 10
+
+---
+# -----------------------------------------------------------------------------
+# Attention/GNN Service (High Memory GPU)
+# -----------------------------------------------------------------------------
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: ruvector-attention
+  labels:
+    app: ruvector
+    component: attention
+  annotations:
+    run.googleapis.com/description: "RuVector Attention/GNN Inference Service"
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/gpu-type: nvidia-l4
+        run.googleapis.com/gpu-count: "1"
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "5"
+        run.googleapis.com/cpu-throttling: "false"
+    spec:
+      containerConcurrency: 20
+      timeoutSeconds: 3600
+      containers:
+        - name: ruvector
+          image: gcr.io/PROJECT_ID/ruvector-benchmark:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "8"
+              memory: "16Gi"
+              nvidia.com/gpu: "1"
+          env:
+            - name: RUVECTOR_MODE
+              value: "attention"
+            - name: RUVECTOR_GNN_LAYERS
+              value: "3"
+            - name: RUVECTOR_GNN_HEADS
+              value: "8"
+            - name: RUVECTOR_GNN_HIDDEN_DIM
+              value: "512"
+            - name: RUST_LOG
+              value: "info"
+
+---
+# -----------------------------------------------------------------------------
+# Raft Consensus Node (Stateful)
+# -----------------------------------------------------------------------------
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: ruvector-raft-node-1
+  labels:
+    app: ruvector
+    component: raft
+    raft-node-id: "0"
+  annotations:
+    run.googleapis.com/description: "RuVector Raft Consensus Node"
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "1"
+        run.googleapis.com/cpu-throttling: "false"
+    spec:
+      containerConcurrency: 100
+      timeoutSeconds: 3600
+      containers:
+        - name: ruvector
+          image: gcr.io/PROJECT_ID/ruvector-benchmark:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          env:
+            - name: RUVECTOR_MODE
+              value: "raft"
+            - name: RUVECTOR_NODE_ID
+              value: "0"
+            - name: RUVECTOR_CLUSTER_SIZE
+              value: "3"
+            - name: RUVECTOR_RAFT_ELECTION_TIMEOUT
+              value: "150"
+            - name: RUVECTOR_RAFT_HEARTBEAT_INTERVAL
+              value: "50"
+            - name: RUST_LOG
+              value: "info,raft=debug"
+          volumeMounts:
+            - name: raft-data
+              mountPath: /data/raft
+      volumes:
+        - name: raft-data
+          emptyDir:
+            sizeLimit: "10Gi"
+
+---
+# -----------------------------------------------------------------------------
+# Replication Primary Node
+# -----------------------------------------------------------------------------
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: ruvector-primary
+  labels:
+    app: ruvector
+    component: replication
+    role: primary
+  annotations:
+    run.googleapis.com/description: "RuVector Primary Node (Replication)"
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/gpu-type: nvidia-l4
+        run.googleapis.com/gpu-count: "1"
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "1"
+        run.googleapis.com/cpu-throttling: "false"
+    spec:
+      containerConcurrency: 100
+      timeoutSeconds: 3600
+      containers:
+        - name: ruvector
+          image: gcr.io/PROJECT_ID/ruvector-benchmark:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+              nvidia.com/gpu: "1"
+          env:
+            - name: RUVECTOR_MODE
+              value: "primary"
+            - name: RUVECTOR_REPLICATION_FACTOR
+              value: "3"
+            - name: RUVECTOR_SYNC_MODE
+              value: "async"
+            - name: RUST_LOG
+              value: "info"
+
+---
+# -----------------------------------------------------------------------------
+# Replication Replica Node
+# -----------------------------------------------------------------------------
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: ruvector-replica
+  labels:
+    app: ruvector
+    component: replication
+    role: replica
+  annotations:
+    run.googleapis.com/description: "RuVector Replica Node (Replication)"
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/gpu-type: nvidia-l4
+        run.googleapis.com/gpu-count: "1"
+        autoscaling.knative.dev/minScale: "2"
+        autoscaling.knative.dev/maxScale: "5"
+        run.googleapis.com/cpu-throttling: "false"
+    spec:
+      containerConcurrency: 100
+      timeoutSeconds: 3600
+      containers:
+        - name: ruvector
+          image: gcr.io/PROJECT_ID/ruvector-benchmark:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+              nvidia.com/gpu: "1"
+          env:
+            - name: RUVECTOR_MODE
+              value: "replica"
+            - name: RUVECTOR_PRIMARY_URL
+              value: "https://ruvector-primary-HASH.run.app"
+            - name: RUST_LOG
+              value: "info"
+
+---
+# -----------------------------------------------------------------------------
+# Service Account
+# -----------------------------------------------------------------------------
+apiVersion: iam.cnrm.cloud.google.com/v1beta1
+kind: IAMServiceAccount
+metadata:
+  name: ruvector-sa
+spec:
+  displayName: "RuVector Cloud Run Service Account"

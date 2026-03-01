@@ -1,0 +1,28 @@
+{
+  "name": "ruvector-attention-wasm",
+  "collaborators": [
+    "Ruvector Team"
+  ],
+  "description": "High-performance WebAssembly attention mechanisms: Multi-Head, Flash, Hyperbolic, MoE, CGT Sheaf Attention with GPU acceleration for transformers and LLMs",
+  "version": "2.0.5",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector"
+  },
+  "files": [
+    "ruvector_attention_wasm_bg.wasm",
+    "ruvector_attention_wasm.js",
+    "ruvector_attention_wasm.d.ts"
+  ],
+  "main": "ruvector_attention_wasm.js",
+  "homepage": "https://ruv.io/ruvector",
+  "types": "ruvector_attention_wasm.d.ts",
+  "keywords": [
+    "wasm",
+    "attention",
+    "transformer",
+    "flash-attention",
+    "llm"
+  ]
+}

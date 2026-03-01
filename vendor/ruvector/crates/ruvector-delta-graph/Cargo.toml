@@ -1,0 +1,42 @@
+[package]
+name = "ruvector-delta-graph"
+version = "0.1.0"
+edition = "2021"
+description = "Delta operations for graph structures - edge and node changes"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+keywords = ["graph", "delta", "incremental", "streaming"]
+categories = ["data-structures", "algorithms"]
+
+[features]
+default = []
+parallel = ["rayon"]
+serde = ["dep:serde", "dep:serde_json"]
+
+[dependencies]
+# Core delta library
+ruvector-delta-core = { path = "../ruvector-delta-core" }
+
+# Error handling
+thiserror = "2.0"
+
+# Data structures
+parking_lot = "0.12"
+dashmap = "6.0"
+smallvec = { version = "1.13", features = ["union"] }
+
+# Optional parallelism
+rayon = { version = "1.10", optional = true }
+
+# Optional serialization
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+
+[dev-dependencies]
+criterion = "0.6"
+proptest = "1.4"
+
+# Benchmarks will be added later
+# [[bench]]
+# name = "graph_delta"
+# harness = false

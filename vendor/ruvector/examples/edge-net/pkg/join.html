@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Join Edge-Net | RuVector Distributed Compute</title>
+    <style>
+        :root {
+            --bg: #0a0a0f;
+            --surface: #12121a;
+            --border: #2a2a3a;
+            --primary: #6366f1;
+            --primary-hover: #818cf8;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --text: #e2e8f0;
+            --text-muted: #94a3b8;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        h1 {
+            font-size: 2rem;
+            background: linear-gradient(135deg, var(--primary), var(--success));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .card h2 {
+            font-size: 1rem;
+            color: var(--primary);
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        label {
+            display: block;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 0.75rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-family: inherit;
+            font-size: 0.9rem;
+        }
+        input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.5rem;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn:hover { background: var(--primary-hover); }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid var(--border);
+        }
+        .btn-secondary:hover {
+            background: var(--surface);
+        }
+        .identity-display {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            font-size: 0.85rem;
+        }
+        .identity-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+        .identity-row:last-child { border-bottom: none; }
+        .identity-label { color: var(--text-muted); }
+        .identity-value {
+            font-weight: 600;
+            word-break: break-all;
+        }
+        .pi-key { color: var(--success); }
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            font-size: 0.85rem;
+        }
+        .status.info { background: rgba(99, 102, 241, 0.1); border: 1px solid var(--primary); }
+        .status.success { background: rgba(34, 197, 94, 0.1); border: 1px solid var(--success); }
+        .status.warning { background: rgba(245, 158, 11, 0.1); border: 1px solid var(--warning); }
+        .network-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .stat {
+            text-align: center;
+            padding: 1rem;
+            background: var(--bg);
+            border-radius: 8px;
+        }
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary);
+        }
+        .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+        }
+        .contribution-log {
+            max-height: 200px;
+            overflow-y: auto;
+            background: var(--bg);
+            border-radius: 8px;
+            padding: 1rem;
+            font-size: 0.8rem;
+        }
+        .log-entry {
+            padding: 0.25rem 0;
+            color: var(--text-muted);
+        }
+        .log-entry.success { color: var(--success); }
+        .log-entry.highlight { color: var(--primary); }
+        .hidden { display: none; }
+        .actions {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        #qr-code {
+            display: flex;
+            justify-content: center;
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+        .crypto-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.25rem 0.5rem;
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid var(--success);
+            border-radius: 4px;
+            font-size: 0.7rem;
+            color: var(--success);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🌐 Edge-Net Join</h1>
+            <p class="subtitle">Contribute browser compute, earn credits</p>
+            <div style="margin-top: 0.5rem;">
+                <span class="crypto-badge">🔐 Ed25519</span>
+                <span class="crypto-badge">🛡️ Argon2id</span>
+                <span class="crypto-badge">🔒 AES-256-GCM</span>
+            </div>
+        </header>
+
+        <!-- Step 1: Generate or Restore Identity -->
+        <div class="card" id="identity-section">
+            <h2>🔑 Your Identity</h2>
+
+            <div id="no-identity">
+                <div class="status info">
+                    <span>ℹ️</span>
+                    <span>Create a new identity or restore an existing one to join the network.</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="site-id">Site ID (your unique identifier)</label>
+                    <input type="text" id="site-id" placeholder="e.g., alice, bob, node-42" />
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password (for encrypted backup)</label>
+                    <input type="password" id="password" placeholder="Strong password for identity encryption" />
+                </div>
+
+                <div class="actions">
+                    <button class="btn" id="generate-btn" onclick="generateIdentity()">
+                        <span>✨</span> Generate New Identity
+                    </button>
+                    <button class="btn btn-secondary" onclick="document.getElementById('restore-file').click()">
+                        <span>📥</span> Restore from Backup
+                    </button>
+                    <input type="file" id="restore-file" class="hidden" accept=".identity" onchange="restoreIdentity(event)" />
+                </div>
+            </div>
+
+            <div id="has-identity" class="hidden">
+                <div class="status success">
+                    <span>✅</span>
+                    <span>Identity active and connected to network</span>
+                </div>
+
+                <div class="identity-display">
+                    <div class="identity-row">
+                        <span class="identity-label">Site ID</span>
+                        <span class="identity-value" id="display-site-id">-</span>
+                    </div>
+                    <div class="identity-row">
+                        <span class="identity-label">Pi-Key</span>
+                        <span class="identity-value pi-key" id="display-pi-key">-</span>
+                    </div>
+                    <div class="identity-row">
+                        <span class="identity-label">Public Key</span>
+                        <span class="identity-value" id="display-pubkey">-</span>
+                    </div>
+                    <div class="identity-row">
+                        <span class="identity-label">Created</span>
+                        <span class="identity-value" id="display-created">-</span>
+                    </div>
+                </div>
+
+                <div class="actions" style="margin-top: 1rem;">
+                    <button class="btn btn-secondary" onclick="exportIdentity()">
+                        <span>📤</span> Export Backup
+                    </button>
+                    <button class="btn btn-secondary" onclick="copyPublicKey()">
+                        <span>📋</span> Copy Public Key
+                    </button>
+                    <button class="btn btn-secondary" onclick="showQR()">
+                        <span>📱</span> Show QR
+                    </button>
+                </div>
+                <div id="qr-code" class="hidden"></div>
+            </div>
+        </div>
+
+        <!-- Step 2: Network Status -->
+        <div class="card" id="network-section">
+            <h2>📡 Network Status</h2>
+
+            <div class="network-stats">
+                <div class="stat">
+                    <div class="stat-value" id="stat-peers">0</div>
+                    <div class="stat-label">Connected Peers</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="stat-contributions">0</div>
+                    <div class="stat-label">Contributions</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="stat-credits">0</div>
+                    <div class="stat-label">Credits Earned</div>
+                </div>
+            </div>
+
+            <div class="contribution-log" id="contribution-log">
+                <div class="log-entry">Waiting for identity...</div>
+            </div>
+        </div>
+
+        <!-- Step 3: Contribute -->
+        <div class="card" id="contribute-section">
+            <h2>⚡ Contribute Compute</h2>
+
+            <div class="status warning" id="contribute-status">
+                <span>⏳</span>
+                <span>Generate or restore identity to start contributing</span>
+            </div>
+
+            <div class="actions">
+                <button class="btn" id="start-btn" disabled onclick="startContributing()">
+                    <span>▶️</span> Start Contributing
+                </button>
+                <button class="btn btn-secondary" id="stop-btn" disabled onclick="stopContributing()">
+                    <span>⏹️</span> Stop
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Import WASM module
+        import init, * as wasm from './ruvector_edge_net.js';
+
+        let wasmModule = null;
+        let identity = null;
+        let contributing = false;
+        let contributionCount = 0;
+        let creditsEarned = 0;
+        let peerCount = 0;
+
+        // Initialize WASM
+        async function initWasm() {
+            try {
+                await init();
+                wasmModule = wasm;
+                log('WASM module loaded', 'success');
+                checkStoredIdentity();
+            } catch (err) {
+                log('Failed to load WASM: ' + err.message, 'error');
+            }
+        }
+
+        // Check for stored identity in localStorage
+        function checkStoredIdentity() {
+            const stored = localStorage.getItem('edge-net-identity');
+            if (stored) {
+                try {
+                    identity = JSON.parse(stored);
+                    showIdentity();
+                    log('Identity restored from storage', 'success');
+                } catch (e) {
+                    log('Stored identity corrupted', 'error');
+                }
+            }
+        }
+
+        // Generate new identity
+        window.generateIdentity = async function() {
+            const siteId = document.getElementById('site-id').value.trim();
+            const password = document.getElementById('password').value;
+
+            if (!siteId) {
+                alert('Please enter a Site ID');
+                return;
+            }
+            if (password.length < 8) {
+                alert('Password must be at least 8 characters');
+                return;
+            }
+
+            document.getElementById('generate-btn').disabled = true;
+            log('Generating identity...', 'highlight');
+
+            try {
+                // Generate Pi-Key identity using WASM
+                const piKeyData = wasmModule.generate_pi_key();
+
+                // Create identity object
+                identity = {
+                    siteId: siteId,
+                    piKey: arrayToHex(piKeyData.pi_key).slice(0, 20),
+                    publicKey: arrayToHex(piKeyData.public_key),
+                    created: new Date().toISOString(),
+                    sessions: 1,
+                    contributions: [],
+                    // Store encrypted private key for backup
+                    encryptedPrivateKey: await encryptData(piKeyData.private_key, password)
+                };
+
+                // Save to localStorage
+                localStorage.setItem('edge-net-identity', JSON.stringify(identity));
+                localStorage.setItem('edge-net-password-hint', password.length.toString());
+
+                showIdentity();
+                log('Identity generated: π:' + identity.piKey, 'success');
+
+                // Announce to network
+                announceToNetwork();
+
+            } catch (err) {
+                log('Generation failed: ' + err.message, 'error');
+            }
+
+            document.getElementById('generate-btn').disabled = false;
+        };
+
+        // Show identity UI
+        function showIdentity() {
+            document.getElementById('no-identity').classList.add('hidden');
+            document.getElementById('has-identity').classList.remove('hidden');
+
+            document.getElementById('display-site-id').textContent = identity.siteId;
+            document.getElementById('display-pi-key').textContent = 'π:' + identity.piKey;
+            document.getElementById('display-pubkey').textContent = identity.publicKey.slice(0, 16) + '...';
+            document.getElementById('display-created').textContent = new Date(identity.created).toLocaleDateString();
+
+            document.getElementById('start-btn').disabled = false;
+            document.getElementById('contribute-status').innerHTML = '<span>✅</span><span>Ready to contribute compute to the network</span>';
+            document.getElementById('contribute-status').className = 'status success';
+        }
+
+        // Export encrypted identity backup
+        window.exportIdentity = async function() {
+            const password = prompt('Enter password to encrypt backup:');
+            if (!password) return;
+
+            const backup = {
+                version: 1,
+                identity: identity,
+                exported: new Date().toISOString()
+            };
+
+            const encrypted = await encryptData(JSON.stringify(backup), password);
+            const blob = new Blob([encrypted], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${identity.siteId}.identity`;
+            a.click();
+
+            URL.revokeObjectURL(url);
+            log('Identity exported to ' + identity.siteId + '.identity', 'success');
+        };
+
+        // Restore identity from backup
+        window.restoreIdentity = async function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const password = prompt('Enter backup password:');
+            if (!password) return;
+
+            try {
+                const encrypted = await file.text();
+                const decrypted = await decryptData(encrypted, password);
+                const backup = JSON.parse(decrypted);
+
+                identity = backup.identity;
+                identity.sessions = (identity.sessions || 0) + 1;
+
+                localStorage.setItem('edge-net-identity', JSON.stringify(identity));
+                showIdentity();
+
+                log('Identity restored: π:' + identity.piKey, 'success');
+                announceToNetwork();
+
+            } catch (err) {
+                alert('Failed to restore: ' + err.message);
+            }
+        };
+
+        // Copy public key
+        window.copyPublicKey = function() {
+            navigator.clipboard.writeText(identity.publicKey);
+            log('Public key copied to clipboard', 'success');
+        };
+
+        // Show QR code
+        window.showQR = function() {
+            const qrDiv = document.getElementById('qr-code');
+            if (qrDiv.classList.contains('hidden')) {
+                // Simple text QR representation (in production, use a QR library)
+                qrDiv.innerHTML = `<div style="text-align: center; color: #000;">
+                    <div style="font-size: 0.8rem; margin-bottom: 0.5rem;">Scan to verify</div>
+                    <div style="font-family: monospace; font-size: 0.7rem; word-break: break-all; max-width: 200px;">
+                        ${identity.publicKey}
+                    </div>
+                </div>`;
+                qrDiv.classList.remove('hidden');
+            } else {
+                qrDiv.classList.add('hidden');
+            }
+        };
+
+        // Start contributing compute
+        window.startContributing = function() {
+            if (!identity) return;
+
+            contributing = true;
+            document.getElementById('start-btn').disabled = true;
+            document.getElementById('stop-btn').disabled = false;
+
+            log('Starting compute contribution...', 'highlight');
+            contributeLoop();
+        };
+
+        // Stop contributing
+        window.stopContributing = function() {
+            contributing = false;
+            document.getElementById('start-btn').disabled = false;
+            document.getElementById('stop-btn').disabled = true;
+            log('Compute contribution stopped', 'warning');
+        };
+
+        // Contribution loop
+        async function contributeLoop() {
+            while (contributing) {
+                try {
+                    // Simulate compute task
+                    const taskId = Math.random().toString(36).slice(2, 10);
+                    log(`Processing task ${taskId}...`);
+
+                    // Do actual WASM computation
+                    const start = performance.now();
+
+                    // Vector computation task
+                    const vectors = [];
+                    for (let i = 0; i < 100; i++) {
+                        vectors.push(new Float32Array(128).map(() => Math.random()));
+                    }
+
+                    // Compute similarities (actual work)
+                    let computed = 0;
+                    for (let i = 0; i < vectors.length; i++) {
+                        for (let j = i + 1; j < vectors.length; j++) {
+                            dotProduct(vectors[i], vectors[j]);
+                            computed++;
+                        }
+                    }
+
+                    const elapsed = performance.now() - start;
+
+                    // Record contribution
+                    contributionCount++;
+                    const credits = Math.floor(computed / 100);
+                    creditsEarned += credits;
+
+                    // Update stats
+                    document.getElementById('stat-contributions').textContent = contributionCount;
+                    document.getElementById('stat-credits').textContent = creditsEarned;
+
+                    // Save contribution
+                    identity.contributions.push({
+                        taskId,
+                        computed,
+                        credits,
+                        timestamp: Date.now()
+                    });
+                    localStorage.setItem('edge-net-identity', JSON.stringify(identity));
+
+                    log(`Task ${taskId} complete: ${computed} ops, +${credits} credits (${elapsed.toFixed(1)}ms)`, 'success');
+
+                    // Wait before next task
+                    await sleep(2000);
+
+                } catch (err) {
+                    log('Task error: ' + err.message, 'error');
+                    await sleep(5000);
+                }
+            }
+        }
+
+        // Announce presence to network (simulated P2P)
+        function announceToNetwork() {
+            // In production, this would use WebRTC or WebSocket to P2P network
+            peerCount = Math.floor(Math.random() * 5) + 1;
+            document.getElementById('stat-peers').textContent = peerCount;
+            log(`Connected to ${peerCount} peers`, 'success');
+
+            // Simulate peer discovery
+            setInterval(() => {
+                if (identity) {
+                    const delta = Math.random() > 0.5 ? 1 : -1;
+                    peerCount = Math.max(1, peerCount + delta);
+                    document.getElementById('stat-peers').textContent = peerCount;
+                }
+            }, 10000);
+        }
+
+        // Utility functions
+        function log(message, type = '') {
+            const logDiv = document.getElementById('contribution-log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry ' + type;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.insertBefore(entry, logDiv.firstChild);
+
+            // Keep only last 50 entries
+            while (logDiv.children.length > 50) {
+                logDiv.removeChild(logDiv.lastChild);
+            }
+        }
+
+        function arrayToHex(arr) {
+            return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        function dotProduct(a, b) {
+            let sum = 0;
+            for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
+            return sum;
+        }
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // Simple encryption (in production, use Web Crypto API with Argon2)
+        async function encryptData(data, password) {
+            const encoder = new TextEncoder();
+            const dataBytes = typeof data === 'string' ? encoder.encode(data) : data;
+            const keyMaterial = await crypto.subtle.importKey(
+                'raw',
+                encoder.encode(password),
+                'PBKDF2',
+                false,
+                ['deriveBits', 'deriveKey']
+            );
+
+            const salt = crypto.getRandomValues(new Uint8Array(16));
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+
+            const key = await crypto.subtle.deriveKey(
+                { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+                keyMaterial,
+                { name: 'AES-GCM', length: 256 },
+                false,
+                ['encrypt']
+            );
+
+            const encrypted = await crypto.subtle.encrypt(
+                { name: 'AES-GCM', iv },
+                key,
+                dataBytes
+            );
+
+            // Combine salt + iv + encrypted
+            const result = new Uint8Array(salt.length + iv.length + encrypted.byteLength);
+            result.set(salt, 0);
+            result.set(iv, salt.length);
+            result.set(new Uint8Array(encrypted), salt.length + iv.length);
+
+            return btoa(String.fromCharCode(...result));
+        }
+
+        async function decryptData(encryptedBase64, password) {
+            const encoder = new TextEncoder();
+            const encrypted = Uint8Array.from(atob(encryptedBase64), c => c.charCodeAt(0));
+
+            const salt = encrypted.slice(0, 16);
+            const iv = encrypted.slice(16, 28);
+            const data = encrypted.slice(28);
+
+            const keyMaterial = await crypto.subtle.importKey(
+                'raw',
+                encoder.encode(password),
+                'PBKDF2',
+                false,
+                ['deriveBits', 'deriveKey']
+            );
+
+            const key = await crypto.subtle.deriveKey(
+                { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+                keyMaterial,
+                { name: 'AES-GCM', length: 256 },
+                false,
+                ['decrypt']
+            );
+
+            const decrypted = await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv },
+                key,
+                data
+            );
+
+            return new TextDecoder().decode(decrypted);
+        }
+
+        // Initialize on load
+        initWasm();
+    </script>
+</body>
+</html>

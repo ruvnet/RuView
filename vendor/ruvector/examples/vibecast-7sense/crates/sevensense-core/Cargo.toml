@@ -1,0 +1,20 @@
+[package]
+name = "sevensense-core"
+description = "Core types and traits for 7sense bioacoustic analysis"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "README.md"
+keywords = ["bioacoustics", "audio-analysis", "ddd", "domain-driven-design"]
+categories = ["science", "multimedia::audio"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"

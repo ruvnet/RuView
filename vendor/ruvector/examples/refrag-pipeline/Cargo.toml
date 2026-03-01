@@ -1,0 +1,50 @@
+[package]
+name = "refrag-pipeline-example"
+version = "0.1.0"
+edition = "2021"
+description = "REFRAG Pipeline Example - Compress-Sense-Expand for 30x RAG latency reduction"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "refrag-demo"
+path = "src/main.rs"
+
+[[bin]]
+name = "refrag-benchmark"
+path = "src/benchmark.rs"
+
+[dependencies]
+# RuVector core for vector storage
+ruvector-core = { path = "../../crates/ruvector-core" }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = { version = "2.0.0-rc.3", features = ["serde"] }
+base64 = "0.22"
+
+# Math and numerics
+ndarray = { version = "0.16", features = ["serde"] }
+rand = "0.8"
+rand_distr = "0.4"
+
+# Async runtime
+tokio = { version = "1.41", features = ["rt-multi-thread", "macros", "time"] }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Utilities
+uuid = { version = "1.11", features = ["v4"] }
+chrono = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "refrag_bench"
+harness = false

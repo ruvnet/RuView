@@ -1,0 +1,171 @@
+name: Release RVF CLI
+
+on:
+  push:
+    tags:
+      - 'rvf-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. rvf-v0.1.0)'
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+            name: rvf-linux-x64
+            ext: ''
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04
+            name: rvf-linux-arm64
+            ext: ''
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-14
+            name: rvf-darwin-x64
+            ext: ''
+          - target: aarch64-apple-darwin
+            os: macos-14
+            name: rvf-darwin-arm64
+            ext: ''
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+            name: rvf-windows-x64
+            ext: .exe
+
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: rvf-cli-${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Build
+        shell: bash
+        run: cargo build -p rvf-cli --release --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Package
+        shell: bash
+        run: |
+          BINARY="target/${{ matrix.target }}/release/rvf${{ matrix.ext }}"
+          ARCHIVE="${{ matrix.name }}${{ matrix.ext }}"
+
+          if [ "${{ matrix.ext }}" = ".exe" ]; then
+            cp "$BINARY" "$ARCHIVE"
+          else
+            chmod +x "$BINARY"
+            cp "$BINARY" "$ARCHIVE"
+          fi
+
+          ls -lh "$ARCHIVE"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}${{ matrix.ext }}
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-22.04
+    if: startsWith(github.ref, 'refs/tags/rvf-v') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          for dir in artifacts/*/; do
+            name=$(basename "$dir")
+            file=$(ls "$dir" | head -1)
+            cp "$dir/$file" "release/$file"
+          done
+          ls -lh release/
+
+      - name: Compute checksums
+        working-directory: release
+        run: |
+          sha256sum * > checksums-sha256.txt
+          cat checksums-sha256.txt
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "RVF CLI ${{ steps.tag.outputs.tag }}"
+          body: |
+            ## RVF CLI Release
+
+            Standalone vector database CLI for creating, querying, and managing RVF stores.
+
+            ### Download
+
+            | Platform | Binary |
+            |----------|--------|
+            | Linux x64 | `rvf-linux-x64` |
+            | Linux ARM64 | `rvf-linux-arm64` |
+            | macOS x64 (Intel) | `rvf-darwin-x64` |
+            | macOS ARM64 (Apple Silicon) | `rvf-darwin-arm64` |
+            | Windows x64 | `rvf-windows-x64.exe` |
+
+            ### Quick start
+
+            ```bash
+            # Download (macOS ARM64 example)
+            curl -L -o rvf https://github.com/ruvnet/ruvector/releases/download/${{ steps.tag.outputs.tag }}/rvf-darwin-arm64
+            chmod +x rvf
+
+            # Create a store and query
+            ./rvf create mydb.rvf --dimension 128 --metric cosine
+            ./rvf status mydb.rvf
+            ```
+
+            See the [CLI README](https://github.com/ruvnet/ruvector/tree/main/crates/rvf/rvf-cli) for full documentation.
+          files: release/*
+          draft: false
+          prerelease: false

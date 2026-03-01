@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "./dist-cjs",
+    "target": "ES2020"
+  },
+  "include": ["src/index.cjs.ts"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -1,0 +1,112 @@
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[package]
+name = "ruvector-edge"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+description = "Edge AI swarm communication with ruv-swarm-transport and RuVector intelligence"
+authors = ["RuVector Team"]
+repository = "https://github.com/ruvnet/ruvector"
+
+[features]
+default = ["websocket", "shared-memory", "native"]
+native = ["ruv-swarm-transport", "tokio"]
+websocket = ["ruv-swarm-transport/default", "native"]
+shared-memory = ["native"]
+wasm = ["wasm-bindgen", "web-sys", "js-sys", "serde-wasm-bindgen", "console_error_panic_hook", "getrandom/js"]
+gun = ["dep:gundb", "native"]
+full = ["websocket", "shared-memory", "gun", "native"]
+
+[dependencies]
+# Swarm transport (not used in wasm mode)
+ruv-swarm-transport = { version = "1.0.5", optional = true }
+
+# Async runtime (not used in wasm mode)
+tokio = { version = "1.41", features = ["rt-multi-thread", "sync", "macros", "time", "net", "signal"], optional = true }
+futures = "0.3"
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+
+# Utilities
+thiserror = "2.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.11", features = ["v4", "serde", "js"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Compression (for tensor sync)
+lz4_flex = "0.11"
+
+# Cryptography (for P2P security)
+ed25519-dalek = { version = "2.1", features = ["rand_core", "serde"] }
+x25519-dalek = { version = "2.0", features = ["static_secrets", "serde"] }
+curve25519-dalek = { version = "4.1", features = ["serde", "rand_core"] }
+aes-gcm = "0.10"
+hkdf = "0.12"
+sha2 = "0.10"
+rand = "0.8"
+base64 = "0.22"
+multihash = "0.19"
+parking_lot = "0.12"
+hex = { version = "0.4", features = ["serde"] }
+serde_bytes = "0.11"
+serde-big-array = "0.5"
+ordered-float = "4.2"
+
+# Production ZK proofs
+bulletproofs = "5.0"
+merlin = "3.0"
+subtle = "2.5"
+lazy_static = "1.4"
+zeroize = { version = "1.8", features = ["derive"] }
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# GUN decentralized database (optional)
+gundb = { version = "0.2", optional = true }
+
+# WASM support (optional)
+wasm-bindgen = { version = "0.2", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["console"] }
+js-sys = { version = "0.3", optional = true }
+serde-wasm-bindgen = { version = "0.6", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+getrandom = { version = "0.2", optional = true }
+
+[dev-dependencies]
+criterion = "0.5"
+tokio-test = "0.4"
+
+[[bin]]
+name = "edge-agent"
+path = "src/bin/agent.rs"
+
+[[bin]]
+name = "edge-coordinator"
+path = "src/bin/coordinator.rs"
+
+[[bin]]
+name = "edge-demo"
+path = "src/bin/demo.rs"
+
+[[example]]
+name = "local_swarm"
+path = "examples/local_swarm.rs"
+
+[[example]]
+name = "distributed_learning"
+path = "examples/distributed_learning.rs"
+
+[profile.release]
+opt-level = 3
+lto = "thin"

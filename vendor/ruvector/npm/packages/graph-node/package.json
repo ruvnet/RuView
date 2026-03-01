@@ -1,0 +1,67 @@
+{
+  "name": "@ruvector/graph-node",
+  "version": "2.0.2",
+  "description": "Native Node.js bindings for RuVector Graph Database with hypergraph support, Cypher queries, and persistence - 10x faster than WASM",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "author": "ruv.io Team <info@ruv.io> (https://ruv.io)",
+  "homepage": "https://ruv.io",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "npm/packages/graph-node"
+  },
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "build:napi": "napi build --platform --release --cargo-cwd ../../../crates/ruvector-graph-node",
+    "test": "node test.js",
+    "benchmark": "node benchmark.js",
+    "publish:platforms": "node scripts/publish-platforms.js"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  },
+  "optionalDependencies": {
+    "@ruvector/graph-node-linux-x64-gnu": "2.0.2",
+    "@ruvector/graph-node-linux-arm64-gnu": "2.0.2",
+    "@ruvector/graph-node-darwin-x64": "2.0.2",
+    "@ruvector/graph-node-darwin-arm64": "2.0.2",
+    "@ruvector/graph-node-win32-x64-msvc": "2.0.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "graph-database",
+    "graph",
+    "hypergraph",
+    "cypher",
+    "neo4j",
+    "vector-database",
+    "graph-query",
+    "knowledge-graph",
+    "property-graph",
+    "native",
+    "napi",
+    "rust",
+    "fast",
+    "performance",
+    "zero-copy",
+    "ai",
+    "machine-learning",
+    "rag",
+    "ruv",
+    "ruvector"
+  ]
+}

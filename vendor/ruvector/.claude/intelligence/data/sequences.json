@@ -1,0 +1,21 @@
+{
+  "sequences": {},
+  "coedits": {},
+  "testPairs": {
+    "crates/core/src/lib.rs|crates/core/tests/lib.test.rs": {
+      "source": "crates/core/src/lib.rs",
+      "test": "crates/core/tests/lib.test.rs",
+      "editCount": 1
+    },
+    "crates/micro-hnsw-wasm/src/lib.rs|crates/micro-hnsw-wasm/tests/lib.test.rs": {
+      "source": "crates/micro-hnsw-wasm/src/lib.rs",
+      "test": "crates/micro-hnsw-wasm/tests/lib.test.rs",
+      "editCount": 1
+    },
+    "crates/ruvector-core/src/lib.rs|crates/ruvector-core/tests/lib.test.rs": {
+      "source": "crates/ruvector-core/src/lib.rs",
+      "test": "crates/ruvector-core/tests/lib.test.rs",
+      "editCount": 1
+    }
+  }
+}

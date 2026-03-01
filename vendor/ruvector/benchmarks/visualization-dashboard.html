@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RuVector Benchmark Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.3/build/global/luxon.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            color: #667eea;
+            font-size: 36px;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 16px;
+        }
+
+        .controls {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .control-group label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        select, input, button {
+            padding: 10px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        select:focus, input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        button:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 50px rgba(0, 0, 0, 0.15);
+        }
+
+        .stat-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .stat-change {
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .stat-change.positive {
+            color: #10b981;
+        }
+
+        .stat-change.negative {
+            color: #ef4444;
+        }
+
+        .chart-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(600px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .chart-card {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        .chart-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 400px;
+        }
+
+        .map-container {
+            position: relative;
+            height: 500px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .region-marker {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .region-marker:hover {
+            transform: scale(1.2);
+            z-index: 10;
+        }
+
+        .region-marker.healthy {
+            background: #10b981;
+        }
+
+        .region-marker.warning {
+            background: #f59e0b;
+        }
+
+        .region-marker.critical {
+            background: #ef4444;
+        }
+
+        .sla-status {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+
+        .sla-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+
+        .sla-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .sla-item {
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid;
+        }
+
+        .sla-item.passed {
+            background: #d1fae5;
+            border-color: #10b981;
+        }
+
+        .sla-item.failed {
+            background: #fee2e2;
+            border-color: #ef4444;
+        }
+
+        .sla-metric {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .sla-value {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .sla-target {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .recommendations {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        .recommendation-item {
+            padding: 20px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            border-left: 4px solid;
+        }
+
+        .recommendation-item.critical {
+            background: #fef2f2;
+            border-color: #ef4444;
+        }
+
+        .recommendation-item.high {
+            background: #fff7ed;
+            border-color: #f59e0b;
+        }
+
+        .recommendation-item.medium {
+            background: #fef9c3;
+            border-color: #eab308;
+        }
+
+        .recommendation-item.low {
+            background: #f0f9ff;
+            border-color: #3b82f6;
+        }
+
+        .recommendation-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .recommendation-desc {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .recommendation-impact {
+            font-size: 12px;
+            font-weight: 600;
+            color: #10b981;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: white;
+            font-size: 18px;
+        }
+
+        .error {
+            background: #fee2e2;
+            color: #ef4444;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>RuVector Benchmark Dashboard</h1>
+            <p class="subtitle">Real-time performance monitoring and analysis for globally distributed vector search</p>
+        </header>
+
+        <div class="controls">
+            <div class="control-group">
+                <label>Scenario</label>
+                <select id="scenarioSelect">
+                    <option value="">Select scenario...</option>
+                    <option value="baseline_500m">Baseline 500M</option>
+                    <option value="burst_10x">Burst 10x</option>
+                    <option value="burst_25x">Burst 25x</option>
+                    <option value="read_heavy">Read Heavy</option>
+                    <option value="write_heavy">Write Heavy</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label>Time Range</label>
+                <select id="timeRange">
+                    <option value="1h">Last Hour</option>
+                    <option value="6h">Last 6 Hours</option>
+                    <option value="24h">Last 24 Hours</option>
+                    <option value="7d">Last 7 Days</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label>Region Filter</label>
+                <select id="regionFilter">
+                    <option value="all">All Regions</option>
+                    <option value="us-east1">US East</option>
+                    <option value="us-west1">US West</option>
+                    <option value="europe-west1">Europe West</option>
+                    <option value="asia-east1">Asia East</option>
+                </select>
+            </div>
+
+            <button id="loadBtn">Load Data</button>
+            <button id="refreshBtn">Refresh</button>
+            <button id="exportBtn">Export PDF</button>
+        </div>
+
+        <div id="errorMessage" class="error" style="display: none;"></div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">P99 Latency</div>
+                <div class="stat-value" id="p99Latency">-</div>
+                <div class="stat-change positive" id="p99Change">-</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-label">Throughput</div>
+                <div class="stat-value" id="throughput">-</div>
+                <div class="stat-change positive" id="throughputChange">-</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-label">Error Rate</div>
+                <div class="stat-value" id="errorRate">-</div>
+                <div class="stat-change negative" id="errorRateChange">-</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-label">Availability</div>
+                <div class="stat-value" id="availability">-</div>
+                <div class="stat-change positive" id="availabilityChange">-</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-label">Active Connections</div>
+                <div class="stat-value" id="activeConnections">-</div>
+                <div class="stat-change positive" id="connectionsChange">-</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-label">Cost Per Million</div>
+                <div class="stat-value" id="costPerMillion">-</div>
+                <div class="stat-change negative" id="costChange">-</div>
+            </div>
+        </div>
+
+        <div class="sla-status">
+            <div class="sla-title">SLA Compliance</div>
+            <div class="sla-grid">
+                <div class="sla-item passed" id="slaLatency">
+                    <div class="sla-metric">Latency (P99)</div>
+                    <div class="sla-value">-</div>
+                    <div class="sla-target">Target: < 50ms</div>
+                </div>
+
+                <div class="sla-item passed" id="slaAvailability">
+                    <div class="sla-metric">Availability</div>
+                    <div class="sla-value">-</div>
+                    <div class="sla-target">Target: > 99.99%</div>
+                </div>
+
+                <div class="sla-item passed" id="slaErrorRate">
+                    <div class="sla-metric">Error Rate</div>
+                    <div class="sla-value">-</div>
+                    <div class="sla-target">Target: < 0.01%</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="chart-grid">
+            <div class="chart-card">
+                <div class="chart-title">Latency Distribution</div>
+                <div class="chart-container">
+                    <canvas id="latencyChart"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-card">
+                <div class="chart-title">Throughput Over Time</div>
+                <div class="chart-container">
+                    <canvas id="throughputChart"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-card">
+                <div class="chart-title">Error Rate Over Time</div>
+                <div class="chart-container">
+                    <canvas id="errorChart"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-card">
+                <div class="chart-title">Resource Utilization</div>
+                <div class="chart-container">
+                    <canvas id="resourceChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="chart-card" style="margin-bottom: 30px;">
+            <div class="chart-title">Global Performance Heat Map</div>
+            <div class="map-container" id="mapContainer">
+                <!-- Region markers will be dynamically added -->
+            </div>
+        </div>
+
+        <div class="recommendations">
+            <h2 class="chart-title">Recommendations</h2>
+            <div id="recommendationsList">
+                <div class="loading">No recommendations to display</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Chart configurations
+        const chartColors = {
+            primary: '#667eea',
+            secondary: '#764ba2',
+            success: '#10b981',
+            warning: '#f59e0b',
+            danger: '#ef4444',
+            info: '#3b82f6',
+        };
+
+        // Initialize charts
+        let latencyChart, throughputChart, errorChart, resourceChart;
+
+        function initCharts() {
+            const latencyCtx = document.getElementById('latencyChart').getContext('2d');
+            latencyChart = new Chart(latencyCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['0-10ms', '10-25ms', '25-50ms', '50-100ms', '100-200ms', '200-500ms', '500ms+'],
+                    datasets: [{
+                        label: 'Request Count',
+                        data: [],
+                        backgroundColor: chartColors.primary,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                        }
+                    }
+                }
+            });
+
+            const throughputCtx = document.getElementById('throughputChart').getContext('2d');
+            throughputChart = new Chart(throughputCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Queries/sec',
+                        data: [],
+                        borderColor: chartColors.success,
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        fill: true,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'minute'
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                        }
+                    }
+                }
+            });
+
+            const errorCtx = document.getElementById('errorChart').getContext('2d');
+            errorChart = new Chart(errorCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Error Rate (%)',
+                        data: [],
+                        borderColor: chartColors.danger,
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        fill: true,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'minute'
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                        }
+                    }
+                }
+            });
+
+            const resourceCtx = document.getElementById('resourceChart').getContext('2d');
+            resourceChart = new Chart(resourceCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'CPU %',
+                            data: [],
+                            borderColor: chartColors.warning,
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                        },
+                        {
+                            label: 'Memory %',
+                            data: [],
+                            borderColor: chartColors.info,
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'minute'
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                        }
+                    }
+                }
+            });
+        }
+
+        // Load data
+        async function loadData() {
+            const scenario = document.getElementById('scenarioSelect').value;
+            if (!scenario) {
+                showError('Please select a scenario');
+                return;
+            }
+
+            try {
+                // Load metrics file
+                const response = await fetch(`./results/${scenario}-metrics.json`);
+                if (!response.ok) {
+                    throw new Error('Failed to load metrics');
+                }
+
+                const metrics = await response.json();
+                updateDashboard(metrics);
+
+                // Load analysis file
+                const analysisResponse = await fetch(`./results/${scenario}-analysis.json`);
+                if (analysisResponse.ok) {
+                    const analysis = await analysisResponse.json();
+                    updateRecommendations(analysis);
+                }
+
+                hideError();
+            } catch (error) {
+                showError(`Error loading data: ${error.message}`);
+            }
+        }
+
+        // Update dashboard
+        function updateDashboard(metrics) {
+            // Update stats
+            document.getElementById('p99Latency').textContent = `${metrics.latency.p99.toFixed(2)}ms`;
+            document.getElementById('throughput').textContent = formatNumber(metrics.throughput.queriesPerSecond);
+            document.getElementById('errorRate').textContent = `${metrics.errors.errorRate.toFixed(4)}%`;
+            document.getElementById('availability').textContent = `${metrics.availability.uptime.toFixed(2)}%`;
+            document.getElementById('activeConnections').textContent = formatNumber(metrics.config?.targetConnections || 0);
+            document.getElementById('costPerMillion').textContent = `$${metrics.costs.costPerMillionQueries.toFixed(2)}`;
+
+            // Update SLA status
+            updateSLA('slaLatency', metrics.latency.p99, 50, 'ms', false);
+            updateSLA('slaAvailability', metrics.availability.uptime, 99.99, '%', true);
+            updateSLA('slaErrorRate', metrics.errors.errorRate, 0.01, '%', false);
+
+            // Update charts
+            updateLatencyChart(metrics.latency);
+            updateThroughputChart(metrics);
+            updateErrorChart(metrics);
+            updateResourceChart(metrics);
+            updateRegionalMap(metrics.regional);
+        }
+
+        function updateSLA(elementId, value, target, unit, higherIsBetter) {
+            const element = document.getElementById(elementId);
+            const passed = higherIsBetter ? value >= target : value <= target;
+
+            element.className = `sla-item ${passed ? 'passed' : 'failed'}`;
+            element.querySelector('.sla-value').textContent = `${value.toFixed(2)}${unit}`;
+        }
+
+        function updateLatencyChart(latency) {
+            // Estimate distribution
+            const data = [
+                500000,  // 0-10ms
+                250000,  // 10-25ms
+                150000,  // 25-50ms
+                80000,   // 50-100ms
+                15000,   // 100-200ms
+                4000,    // 200-500ms
+                1000,    // 500ms+
+            ];
+
+            latencyChart.data.datasets[0].data = data;
+            latencyChart.update();
+        }
+
+        function updateThroughputChart(metrics) {
+            // Generate time series data
+            const now = Date.now();
+            const data = [];
+
+            for (let i = 60; i >= 0; i--) {
+                data.push({
+                    x: now - i * 60000,
+                    y: metrics.throughput.queriesPerSecond * (0.9 + Math.random() * 0.2)
+                });
+            }
+
+            throughputChart.data.datasets[0].data = data;
+            throughputChart.update();
+        }
+
+        function updateErrorChart(metrics) {
+            // Generate time series data
+            const now = Date.now();
+            const data = [];
+
+            for (let i = 60; i >= 0; i--) {
+                data.push({
+                    x: now - i * 60000,
+                    y: metrics.errors.errorRate * (0.8 + Math.random() * 0.4)
+                });
+            }
+
+            errorChart.data.datasets[0].data = data;
+            errorChart.update();
+        }
+
+        function updateResourceChart(metrics) {
+            // Generate time series data
+            const now = Date.now();
+            const cpuData = [];
+            const memData = [];
+
+            for (let i = 60; i >= 0; i--) {
+                cpuData.push({
+                    x: now - i * 60000,
+                    y: metrics.resources.cpu.average * (0.9 + Math.random() * 0.2)
+                });
+                memData.push({
+                    x: now - i * 60000,
+                    y: metrics.resources.memory.average * (0.9 + Math.random() * 0.2)
+                });
+            }
+
+            resourceChart.data.datasets[0].data = cpuData;
+            resourceChart.data.datasets[1].data = memData;
+            resourceChart.update();
+        }
+
+        function updateRegionalMap(regional) {
+            const container = document.getElementById('mapContainer');
+            container.innerHTML = '';
+
+            const regions = regional || [];
+            const positions = {
+                'us-east1': { left: '25%', top: '35%' },
+                'us-west1': { left: '15%', top: '40%' },
+                'europe-west1': { left: '50%', top: '30%' },
+                'asia-east1': { left: '75%', top: '40%' },
+                'australia-southeast1': { left: '80%', top: '70%' },
+            };
+
+            regions.forEach(region => {
+                const marker = document.createElement('div');
+                marker.className = 'region-marker';
+                marker.textContent = region.region.split('-')[0].toUpperCase();
+
+                // Determine health
+                const avgLatency = region.latency?.mean || 0;
+                if (avgLatency < 30) {
+                    marker.classList.add('healthy');
+                } else if (avgLatency < 60) {
+                    marker.classList.add('warning');
+                } else {
+                    marker.classList.add('critical');
+                }
+
+                const pos = positions[region.region] || { left: '50%', top: '50%' };
+                marker.style.left = pos.left;
+                marker.style.top = pos.top;
+
+                marker.title = `${region.region}\nLatency: ${avgLatency.toFixed(2)}ms\nAvailability: ${region.availability}%`;
+
+                container.appendChild(marker);
+            });
+        }
+
+        function updateRecommendations(analysis) {
+            const container = document.getElementById('recommendationsList');
+            container.innerHTML = '';
+
+            if (!analysis.recommendations || analysis.recommendations.length === 0) {
+                container.innerHTML = '<div class="loading">No recommendations available</div>';
+                return;
+            }
+
+            analysis.recommendations.forEach(rec => {
+                const item = document.createElement('div');
+                item.className = `recommendation-item ${rec.priority}`;
+                item.innerHTML = `
+                    <div class="recommendation-title">${rec.title}</div>
+                    <div class="recommendation-desc">${rec.description}</div>
+                    <div class="recommendation-impact">Estimated Impact: ${rec.estimatedImpact}</div>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        // Helper functions
+        function formatNumber(num) {
+            if (num >= 1000000000) {
+                return `${(num / 1000000000).toFixed(2)}B`;
+            } else if (num >= 1000000) {
+                return `${(num / 1000000).toFixed(2)}M`;
+            } else if (num >= 1000) {
+                return `${(num / 1000).toFixed(2)}K`;
+            }
+            return num.toString();
+        }
+
+        function showError(message) {
+            const errorEl = document.getElementById('errorMessage');
+            errorEl.textContent = message;
+            errorEl.style.display = 'block';
+        }
+
+        function hideError() {
+            document.getElementById('errorMessage').style.display = 'none';
+        }
+
+        function exportPDF() {
+            window.print();
+        }
+
+        // Event listeners
+        document.getElementById('loadBtn').addEventListener('click', loadData);
+        document.getElementById('refreshBtn').addEventListener('click', loadData);
+        document.getElementById('exportBtn').addEventListener('click', exportPDF);
+
+        // Initialize
+        initCharts();
+    </script>
+</body>
+</html>

@@ -1,0 +1,250 @@
+[package]
+name = "rvf-examples"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+rvf-types = { path = "../../crates/rvf/rvf-types", features = ["std"] }
+rvf-wire = { path = "../../crates/rvf/rvf-wire" }
+rvf-manifest = { path = "../../crates/rvf/rvf-manifest" }
+rvf-index = { path = "../../crates/rvf/rvf-index" }
+rvf-quant = { path = "../../crates/rvf/rvf-quant" }
+rvf-crypto = { path = "../../crates/rvf/rvf-crypto" }
+rvf-runtime = { path = "../../crates/rvf/rvf-runtime" }
+rvf-kernel = { path = "../../crates/rvf/rvf-kernel" }
+rvf-launch = { path = "../../crates/rvf/rvf-launch" }
+rvf-ebpf = { path = "../../crates/rvf/rvf-ebpf" }
+rand = "0.8"
+tempfile = "3"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rvf-server = { path = "../../crates/rvf/rvf-server" }
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+axum = { version = "0.7", features = ["ws"] }
+
+[[example]]
+name = "basic_store"
+path = "examples/basic_store.rs"
+
+[[example]]
+name = "progressive_index"
+path = "examples/progressive_index.rs"
+
+[[example]]
+name = "quantization"
+path = "examples/quantization.rs"
+
+[[example]]
+name = "wire_format"
+path = "examples/wire_format.rs"
+
+[[example]]
+name = "crypto_signing"
+path = "examples/crypto_signing.rs"
+
+[[example]]
+name = "filtered_search"
+path = "examples/filtered_search.rs"
+
+[[example]]
+name = "agent_memory"
+path = "examples/agent_memory.rs"
+
+[[example]]
+name = "swarm_knowledge"
+path = "examples/swarm_knowledge.rs"
+
+[[example]]
+name = "reasoning_trace"
+path = "examples/reasoning_trace.rs"
+
+[[example]]
+name = "tool_cache"
+path = "examples/tool_cache.rs"
+
+[[example]]
+name = "agent_handoff"
+path = "examples/agent_handoff.rs"
+
+[[example]]
+name = "experience_replay"
+path = "examples/experience_replay.rs"
+
+[[example]]
+name = "browser_wasm"
+path = "examples/browser_wasm.rs"
+
+[[example]]
+name = "edge_iot"
+path = "examples/edge_iot.rs"
+
+[[example]]
+name = "serverless_function"
+path = "examples/serverless_function.rs"
+
+[[example]]
+name = "ruvllm_inference"
+path = "examples/ruvllm_inference.rs"
+
+[[example]]
+name = "semantic_search"
+path = "examples/semantic_search.rs"
+
+[[example]]
+name = "recommendation"
+path = "examples/recommendation.rs"
+
+[[example]]
+name = "rag_pipeline"
+path = "examples/rag_pipeline.rs"
+
+[[example]]
+name = "embedding_cache"
+path = "examples/embedding_cache.rs"
+
+[[example]]
+name = "dedup_detector"
+path = "examples/dedup_detector.rs"
+
+[[example]]
+name = "genomic_pipeline"
+path = "examples/genomic_pipeline.rs"
+
+[[example]]
+name = "financial_signals"
+path = "examples/financial_signals.rs"
+
+[[example]]
+name = "medical_imaging"
+path = "examples/medical_imaging.rs"
+
+[[example]]
+name = "legal_discovery"
+path = "examples/legal_discovery.rs"
+
+[[example]]
+name = "self_booting"
+path = "examples/self_booting.rs"
+
+[[example]]
+name = "ebpf_accelerator"
+path = "examples/ebpf_accelerator.rs"
+
+[[example]]
+name = "hyperbolic_taxonomy"
+path = "examples/hyperbolic_taxonomy.rs"
+
+[[example]]
+name = "multimodal_fusion"
+path = "examples/multimodal_fusion.rs"
+
+[[example]]
+name = "sealed_engine"
+path = "examples/sealed_engine.rs"
+
+[[example]]
+name = "postgres_bridge"
+path = "examples/postgres_bridge.rs"
+
+[[example]]
+name = "network_sync"
+path = "examples/network_sync.rs"
+
+[[example]]
+name = "tee_attestation"
+path = "examples/tee_attestation.rs"
+
+[[example]]
+name = "access_control"
+path = "examples/access_control.rs"
+
+[[example]]
+name = "zero_knowledge"
+path = "examples/zero_knowledge.rs"
+
+[[example]]
+name = "ruvbot"
+path = "examples/ruvbot.rs"
+
+[[example]]
+name = "posix_fileops"
+path = "examples/posix_fileops.rs"
+
+[[example]]
+name = "network_interfaces"
+path = "examples/network_interfaces.rs"
+
+[[example]]
+name = "linux_microkernel"
+path = "examples/linux_microkernel.rs"
+
+[[example]]
+name = "mcp_in_rvf"
+path = "examples/mcp_in_rvf.rs"
+
+[[example]]
+name = "generate_all"
+path = "examples/generate_all.rs"
+
+[[example]]
+name = "claude_code_appliance"
+path = "examples/claude_code_appliance.rs"
+
+[[example]]
+name = "cow_branching"
+path = "examples/cow_branching.rs"
+
+[[example]]
+name = "membership_filter"
+path = "examples/membership_filter.rs"
+
+[[example]]
+name = "snapshot_freeze"
+path = "examples/snapshot_freeze.rs"
+
+[[example]]
+name = "live_boot_proof"
+path = "examples/live_boot_proof.rs"
+
+[[example]]
+name = "solver_witness"
+path = "examples/solver_witness.rs"
+
+[[example]]
+name = "sparse_matrix_store"
+path = "examples/sparse_matrix_store.rs"
+
+[[example]]
+name = "solver_benchmark"
+path = "examples/solver_benchmark.rs"
+
+[[example]]
+name = "causal_atlas"
+path = "examples/causal_atlas.rs"
+
+[[example]]
+name = "planet_detection"
+path = "examples/planet_detection.rs"
+
+[[example]]
+name = "life_candidate"
+path = "examples/life_candidate.rs"
+
+[[example]]
+name = "causal_atlas_sealed"
+path = "examples/causal_atlas_sealed.rs"
+
+[[example]]
+name = "causal_atlas_dashboard"
+path = "examples/causal_atlas_dashboard.rs"
+
+[[example]]
+name = "security_hardened"
+path = "examples/security_hardened.rs"
+
+[[example]]
+name = "openfang"
+path = "examples/openfang.rs"

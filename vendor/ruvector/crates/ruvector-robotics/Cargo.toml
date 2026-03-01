@@ -1,0 +1,32 @@
+[package]
+name = "ruvector-robotics"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Cognitive robotics platform: bridge types, perception pipeline, cognitive architecture, and MCP tools"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector"
+keywords = ["robotics", "perception", "cognitive", "behavior-tree", "spatial-indexing"]
+categories = ["science::robotics", "algorithms"]
+
+[features]
+default = []
+domain-expansion = ["dep:ruvector-domain-expansion", "dep:rand"]
+rvf = ["dep:rvf-runtime", "dep:rvf-types", "dep:tempfile"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+ruvector-domain-expansion = { version = "2.0.4", path = "../ruvector-domain-expansion", optional = true }
+rand = { version = "0.8", optional = true }
+rvf-runtime = { version = "0.2", path = "../rvf/rvf-runtime", optional = true }
+rvf-types = { version = "0.2", path = "../rvf/rvf-types", features = ["std"], optional = true }
+tempfile = { version = "3", optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "robotics_benchmarks"
+harness = false

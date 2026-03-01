@@ -1,0 +1,38 @@
+{
+  "name": "@agentdb/autonomous-discovery",
+  "version": "1.0.0",
+  "description": "Autonomous discovery system combining SNN + Attention + SIMD for emergent capabilities",
+  "main": "discoveries.js",
+  "scripts": {
+    "discover": "node discoveries.js",
+    "explore": "node cognitive-explorer.js",
+    "test": "node discoveries.js"
+  },
+  "keywords": [
+    "spiking-neural-networks",
+    "attention-mechanisms",
+    "autonomous-discovery",
+    "emergent-behavior",
+    "agentdb",
+    "neuromorphic",
+    "machine-learning",
+    "research"
+  ],
+  "author": "AgentDB Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/vibecast.git",
+    "directory": "demos/exploration"
+  },
+  "dependencies": {
+    "@ruvector/core": "^2.0.0",
+    "@ruvector/attention": "^2.0.0"
+  },
+  "peerDependencies": {
+    "@agentdb/snn-simd": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

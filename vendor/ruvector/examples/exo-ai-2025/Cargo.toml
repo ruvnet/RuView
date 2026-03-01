@@ -1,0 +1,75 @@
+[workspace]
+members = [
+    "crates/exo-core",
+    "crates/exo-hypergraph",
+    "crates/exo-manifold",
+    "crates/exo-temporal",
+    "crates/exo-wasm",
+    "crates/exo-federation",
+    "crates/exo-node",
+    "crates/exo-backend-classical",
+    "crates/exo-exotic",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["EXO-AI Team"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+
+[workspace.dependencies]
+# Core dependencies
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+dashmap = "6.1"
+
+# Graph and topology
+petgraph = "0.6"
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[profile.dev]
+opt-level = 0
+debug = true
+debug-assertions = true
+overflow-checks = true
+incremental = true
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = false
+debug-assertions = false
+overflow-checks = false
+strip = true
+
+[profile.bench]
+inherits = "release"
+lto = true
+codegen-units = 1
+
+[profile.test]
+opt-level = 1
+debug = true
+
+# Patch crates.io deps with local paths for development
+[patch.crates-io]
+exo-core = { path = "crates/exo-core" }
+exo-temporal = { path = "crates/exo-temporal" }
+exo-hypergraph = { path = "crates/exo-hypergraph" }
+exo-manifold = { path = "crates/exo-manifold" }
+exo-federation = { path = "crates/exo-federation" }
+exo-exotic = { path = "crates/exo-exotic" }
+exo-backend-classical = { path = "crates/exo-backend-classical" }
+ruvector-domain-expansion = { path = "../../crates/ruvector-domain-expansion" }
+thermorust = { path = "../../crates/thermorust" }
+ruvector-dither = { path = "../../crates/ruvector-dither" }

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Decode RVF cognitive seeds and witness bundles in-browser using WASM">
+  <meta name="theme-color" content="#6c8cff">
+  <title>RVF Seed Decoder</title>
+  <link rel="manifest" href="./manifest.json">
+  <link rel="stylesheet" href="./style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%230f1117'/><text x='32' y='42' font-size='28' text-anchor='middle' fill='%236c8cff' font-family='monospace' font-weight='bold'>RV</text></svg>">
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1><span>RVF</span> Seed Decoder</h1>
+      <button id="btn-theme" class="theme-toggle" type="button">Light Mode</button>
+    </header>
+
+    <div id="drop-zone" class="drop-zone">
+      <p>Drop an .rvf, seed binary, or witness bundle here</p>
+      <div class="btn-row">
+        <button id="btn-browse" class="btn btn-primary" type="button">Browse Files</button>
+        <button id="btn-scan" class="btn" type="button">Scan QR Code</button>
+      </div>
+      <input id="file-input" type="file" accept=".rvf,.bin,.rvqs,.seed,*/*">
+    </div>
+
+    <div id="status" class="status-bar">Initializing...</div>
+
+    <div id="scanner" class="scanner-container">
+      <div class="scanner-video-wrap">
+        <video id="scanner-video" playsinline muted></video>
+        <canvas id="scanner-canvas"></canvas>
+      </div>
+      <div class="scanner-controls">
+        <button id="btn-scan-stop" class="btn" type="button">Stop Scanner</button>
+      </div>
+    </div>
+
+    <div id="results" class="results"></div>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>

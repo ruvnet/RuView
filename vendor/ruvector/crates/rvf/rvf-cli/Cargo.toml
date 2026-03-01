@@ -1,0 +1,36 @@
+[package]
+name = "rvf-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Unified CLI for RuVector Format vector stores"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector"
+readme = "README.md"
+categories = ["command-line-utilities", "database-implementations"]
+keywords = ["rvf", "vector", "database", "cli", "cognitive-container"]
+rust-version = "1.87"
+
+[[bin]]
+name = "rvf"
+path = "src/main.rs"
+
+[dependencies]
+rvf-runtime = { version = "0.2.0", path = "../rvf-runtime" }
+rvf-types = { version = "0.2.0", path = "../rvf-types", features = ["std"] }
+rvf-wire = { version = "0.1.0", path = "../rvf-wire" }
+rvf-manifest = { version = "0.1.0", path = "../rvf-manifest" }
+rvf-crypto = { version = "0.2.0", path = "../rvf-crypto" }
+rvf-server = { version = "0.1.0", path = "../rvf-server", optional = true }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
+
+rvf-launch = { version = "0.1.0", path = "../rvf-launch", optional = true }
+ctrlc = { version = "3", optional = true }
+
+[features]
+default = []
+serve = ["dep:rvf-server", "dep:tokio"]
+launch = ["dep:rvf-launch", "dep:ctrlc"]

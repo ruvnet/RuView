@@ -1,0 +1,11 @@
+{
+  "provider": "gemini",
+  "model": "gemini-2.0-flash-exp",
+  "cacheStrategy": "memory",
+  "cacheTTL": 3600,
+  "maxRetries": 3,
+  "timeout": 30000,
+  "streaming": false,
+  "automation": false,
+  "vectorDB": false
+}

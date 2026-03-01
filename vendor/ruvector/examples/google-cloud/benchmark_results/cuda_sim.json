@@ -1,0 +1,216 @@
+{
+  "gpu_info": {
+    "available": false,
+    "compute_capability": "N/A",
+    "cuda_version": "N/A",
+    "driver_version": "N/A",
+    "max_threads_per_block": 0,
+    "memory_gb": 0.0,
+    "name": "N/A",
+    "num_sms": 0
+  },
+  "results": [
+    {
+      "efficiency_percent": 0.9881420625225114,
+      "gpu_info": {
+        "available": false,
+        "compute_capability": "N/A",
+        "cuda_version": "N/A",
+        "driver_version": "N/A",
+        "max_threads_per_block": 0,
+        "memory_gb": 0.0,
+        "name": "N/A",
+        "num_sms": 0
+      },
+      "iterations": 50,
+      "max_time_ms": 3.174368,
+      "mean_time_ms": 0.16471358,
+      "metadata": {
+        "bandwidth_gb_s": "5.93",
+        "size_mb": "1"
+      },
+      "min_time_ms": 0.040596,
+      "name": "memory_bandwidth_1MB",
+      "operation": "memory_transfer",
+      "std_time_ms": 0.5062852803394976,
+      "throughput": 5.928852375135068
+    },
+    {
+      "efficiency_percent": 0.713928028478,
+      "gpu_info": {
+        "available": false,
+        "compute_capability": "N/A",
+        "cuda_version": "N/A",
+        "driver_version": "N/A",
+        "max_threads_per_block": 0,
+        "memory_gb": 0.0,
+        "name": "N/A",
+        "num_sms": 0
+      },
+      "iterations": 50,
+      "max_time_ms": 17.299856,
+      "mean_time_ms": 2.2797874599999997,
+      "metadata": {
+        "bandwidth_gb_s": "4.28",
+        "size_mb": "10"
+      },
+      "min_time_ms": 0.37521899999999997,
+      "name": "memory_bandwidth_10MB",
+      "operation": "memory_transfer",
+      "std_time_ms": 3.4558740220220883,
+      "throughput": 4.283568170868
+    },
+    {
+      "efficiency_percent": 0.08924861363335496,
+      "gpu_info": {
+        "available": false,
+        "compute_capability": "N/A",
+        "cuda_version": "N/A",
+        "driver_version": "N/A",
+        "max_threads_per_block": 0,
+        "memory_gb": 0.0,
+        "name": "N/A",
+        "num_sms": 0
+      },
+      "iterations": 50,
+      "max_time_ms": 330.599246,
+      "mean_time_ms": 182.36744532,
+      "metadata": {
+        "bandwidth_gb_s": "0.54",
+        "size_mb": "100"
+      },
+      "min_time_ms": 104.69545500000001,
+      "name": "memory_bandwidth_100MB",
+      "operation": "memory_transfer",
+      "std_time_ms": 55.7021010042311,
+      "throughput": 0.5354916818001297
+    },
+    {
+      "efficiency_percent": 0.1439795903913544,
+      "gpu_info": {
+        "available": false,
+        "compute_capability": "N/A",
+        "cuda_version": "N/A",
+        "driver_version": "N/A",
+        "max_threads_per_block": 0,
+        "memory_gb": 0.0,
+        "name": "N/A",
+        "num_sms": 0
+      },
+      "iterations": 50,
+      "max_time_ms": 1279.9928280000001,
+      "mean_time_ms": 565.2204462599999,
+      "metadata": {
+        "bandwidth_gb_s": "0.86",
+        "size_mb": "500"
+      },
+      "min_time_ms": 199.191355,
+      "name": "memory_bandwidth_500MB",
+      "operation": "memory_transfer",
+      "std_time_ms": 243.53272527540335,
+      "throughput": 0.8638775423481264
+    },
+    {
+      "efficiency_percent": null,
+      "gpu_info": {
+        "available": false,
+        "compute_capability": "N/A",
+        "cuda_version": "N/A",
+        "driver_version": "N/A",
+        "max_threads_per_block": 0,
+        "memory_gb": 0.0,
+        "name": "N/A",
+        "num_sms": 0
+      },
+      "iterations": 20,
+      "max_time_ms": 16.490006,
+      "mean_time_ms": 8.214337000000002,
+      "metadata": {
+        "matrix_size": "128",
+        "tflops": "0.001"
+      },
+      "min_time_ms": 3.316313,
+      "name": "gemm_128x128",
+      "operation": "gemm",
+      "std_time_ms": 4.271369656748477,
+      "throughput": 0.0005106077337708447
+    },
+    {
+      "efficiency_percent": null,
+      "gpu_info": {
+        "available": false,
+        "compute_capability": "N/A",
+        "cuda_version": "N/A",
+        "driver_version": "N/A",
+        "max_threads_per_block": 0,
+        "memory_gb": 0.0,
+        "name": "N/A",
+        "num_sms": 0
+      },
+      "iterations": 20,
+      "max_time_ms": 175.19369,
+      "mean_time_ms": 85.41927405,
+      "metadata": {
+        "matrix_size": "256",
+        "tflops": "0.000"
+      },
+      "min_time_ms": 37.718396,
+      "name": "gemm_256x256",
+      "operation": "gemm",
+      "std_time_ms": 38.2258611390462,
+      "throughput": 0.00039282038360989797
+    },
+    {
+      "efficiency_percent": null,
+      "gpu_info": {
+        "available": false,
+        "compute_capability": "N/A",
+        "cuda_version": "N/A",
+        "driver_version": "N/A",
+        "max_threads_per_block": 0,
+        "memory_gb": 0.0,
+        "name": "N/A",
+        "num_sms": 0
+      },
+      "iterations": 20,
+      "max_time_ms": 1099.584508,
+      "mean_time_ms": 720.2384636500001,
+      "metadata": {
+        "matrix_size": "512",
+        "tflops": "0.000"
+      },
+      "min_time_ms": 416.415041,
+      "name": "gemm_512x512",
+      "operation": "gemm",
+      "std_time_ms": 183.51006806750456,
+      "throughput": 0.0003727035829767156
+    },
+    {
+      "efficiency_percent": 0.0,
+      "gpu_info": {
+        "available": false,
+        "compute_capability": "N/A",
+        "cuda_version": "N/A",
+        "driver_version": "N/A",
+        "max_threads_per_block": 0,
+        "memory_gb": 0.0,
+        "name": "N/A",
+        "num_sms": 0
+      },
+      "iterations": 50,
+      "max_time_ms": 383.561285,
+      "mean_time_ms": 236.66858410000003,
+      "metadata": {
+        "batch_size": "64",
+        "dims": "128",
+        "num_vectors": "10000"
+      },
+      "min_time_ms": 121.239973,
+      "name": "l2_distance_128d_10000v",
+      "operation": "l2_distance",
+      "std_time_ms": 62.27295731680189,
+      "throughput": 2704203.443113428
+    }
+  ],
+  "timestamp": "2025-12-02T00:16:10.163679757+00:00"
+}

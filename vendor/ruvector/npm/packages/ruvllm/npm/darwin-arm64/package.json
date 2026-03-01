@@ -1,0 +1,21 @@
+{
+  "name": "@ruvector/ruvllm-darwin-arm64",
+  "version": "2.0.0",
+  "description": "RuvLLM native bindings for macOS ARM64 (Apple Silicon)",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "main": "ruvllm.darwin-arm64.node",
+  "files": ["ruvllm.darwin-arm64.node"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "npm/packages/ruvllm"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">= 16"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

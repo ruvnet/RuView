@@ -1,0 +1,68 @@
+[package]
+name = "spiking-network"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT"
+authors = ["Ruvector Team"]
+description = "Event-driven spiking neural network for ASIC-optimized neuromorphic computing"
+readme = "docs/README.md"
+
+[dependencies]
+# Core ruvector dependencies
+ruvector-core = { path = "../../crates/ruvector-core", default-features = false }
+ruvector-gnn = { path = "../../crates/ruvector-gnn", default-features = false }
+
+# Math and numerics
+ndarray = { version = "0.16", features = ["serde"] }
+rand = "0.8"
+rand_distr = "0.4"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Performance
+rayon = "1.10"
+parking_lot = "0.12"
+dashmap = "6.1"
+
+# Collections for sparse operations
+indexmap = { version = "2.0", features = ["serde"] }
+smallvec = { version = "1.11", features = ["serde"] }
+
+# Bitsets for spike encoding
+bitvec = { version = "1.0", features = ["serde"] }
+
+# Priority queue for event scheduling
+priority-queue = "2.0"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.5"
+
+[features]
+default = ["simd"]
+simd = []
+wasm = []
+visualization = []
+
+[[bench]]
+name = "spiking_bench"
+harness = false
+
+[[example]]
+name = "edge_detection"
+path = "src/examples/edge_detection.rs"
+
+[[example]]
+name = "pattern_recognition"
+path = "src/examples/pattern_recognition.rs"
+
+[[example]]
+name = "asic_simulation"
+path = "src/examples/asic_simulation.rs"

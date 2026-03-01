@@ -1,0 +1,75 @@
+[package]
+name = "ruvector-sona"
+version = "0.1.6"
+edition = "2021"
+rust-version = "1.70"
+authors = ["RuVector Team <team@ruvector.dev>"]
+description = "Self-Optimizing Neural Architecture - Runtime-adaptive learning for LLM routers with two-tier LoRA, EWC++, and ReasoningBank"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector/tree/main/crates/sona"
+documentation = "https://docs.rs/ruvector-sona"
+readme = "README.md"
+keywords = ["neural", "learning", "lora", "llm", "adaptive"]
+categories = ["science", "algorithms", "wasm"]
+include = [
+    "src/**/*",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+]
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["serde-support"]
+wasm = ["wasm-bindgen", "wasm-bindgen-futures", "console_error_panic_hook", "js-sys", "web-sys", "getrandom", "serde-support"]
+napi = ["dep:napi", "dep:napi-derive", "serde-support"]
+serde-support = ["serde", "serde_json"]
+
+[dependencies]
+# Core dependencies
+parking_lot = "0.12"
+crossbeam = "0.8"
+rand = "0.8"
+
+# Serialization (optional)
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+
+# WASM dependencies (optional)
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+js-sys = { version = "0.3", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+getrandom = { version = "0.2", features = ["js"], optional = true }
+
+# NAPI dependencies (optional)
+napi = { version = "2.16", optional = true }
+napi-derive = { version = "2.16", optional = true }
+
+[dependencies.web-sys]
+version = "0.3"
+optional = true
+features = [
+    "console",
+    "Performance",
+    "Window",
+]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+
+[dev-dependencies]
+criterion = "0.5"
+rand = "0.8"
+once_cell = "1.19"
+
+[[bench]]
+name = "sona_bench"
+harness = false

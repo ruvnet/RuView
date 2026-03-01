@@ -1,0 +1,20 @@
+{
+  "name": "@ruvector/rvf-node-darwin-arm64",
+  "version": "0.1.7",
+  "cpu": [
+    "arm64"
+  ],
+  "main": "rvf-node.darwin-arm64.node",
+  "files": [
+    "rvf-node.darwin-arm64.node"
+  ],
+  "description": "RuVector Format Node.js native bindings",
+  "license": "MIT",
+  "os": [
+    "darwin"
+  ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  }
+}

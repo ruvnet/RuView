@@ -1,0 +1,242 @@
+[package]
+name = "ruvllm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "LLM serving runtime with Ruvector integration - Paged attention, KV cache, and SONA learning"
+keywords = ["llm", "inference", "paged-attention", "kv-cache", "ruvector"]
+categories = ["science", "algorithms"]
+
+[dependencies]
+# Ruvector integration
+ruvector-core = { version = "2.0", path = "../ruvector-core", default-features = false, features = ["storage", "hnsw", "parallel", "simd"] }
+ruvector-sona = { version = "0.1.6", path = "../sona", default-features = false, features = ["serde-support"] }
+
+# Optional Ruvector crates for advanced features
+ruvector-attention = { version = "2.0", path = "../ruvector-attention", optional = true }
+ruvector-graph = { version = "2.0", path = "../ruvector-graph", optional = true, default-features = false }
+ruvector-gnn = { version = "2.0", path = "../ruvector-gnn", optional = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+
+# Performance
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
+once_cell = { workspace = true }
+smallvec = "1.13"
+
+# Time and UUID
+chrono = { workspace = true, features = ["serde"] }
+uuid = { workspace = true, features = ["v4", "serde"] }
+
+# Math
+ndarray = { workspace = true }
+rand = { workspace = true }
+
+# Pattern matching
+regex = "1.10"
+
+# Parallelism (optional)
+rayon = { version = "1.10", optional = true }
+
+# Serialization (binary) - needs to match workspace for ruvector-core compatibility
+bincode = { workspace = true }
+
+# Async (optional for non-WASM)
+tokio = { workspace = true, optional = true }
+
+# Async traits and streams
+async-trait = "0.1"
+futures-core = "0.3"
+tokio-stream = { version = "0.1", optional = true }
+
+# Candle ML framework (optional)
+candle-core = { version = "0.8", optional = true }
+candle-nn = { version = "0.8", optional = true }
+candle-transformers = { version = "0.8", optional = true }
+
+# Tokenizers
+tokenizers = { version = "0.20", optional = true, default-features = false, features = ["onig"] }
+
+# HuggingFace Hub for model downloads
+hf-hub = { version = "0.3", optional = true, features = ["tokio"] }
+
+# mistral-rs backend for high-performance inference (optional)
+# NOTE: mistralrs crate is not yet on crates.io - use git dependency when available:
+# mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs", optional = true }
+# Or when published to crates.io, uncomment:
+# mistralrs = { version = "0.4", optional = true, default-features = false }
+# mistralrs-core = { version = "0.4", optional = true }
+
+# Directories for cache
+dirs = "5.0"
+
+# Half-precision floating point
+half = "2.4"
+
+# Memory mapping for efficient large file access (optional)
+memmap2 = { version = "0.9", optional = true }
+
+# SHA256 hashing for model integrity verification
+sha2 = "0.10"
+
+# MD5 hashing for input hashing in semantic cache
+md5 = "0.7"
+
+# Metal GPU acceleration (macOS only)
+[target.'cfg(target_os = "macos")'.dependencies]
+metal = { version = "0.29", optional = true }
+objc = { version = "0.2", optional = true }
+
+# Core ML bindings (macOS/iOS) - for Apple Neural Engine acceleration
+objc2 = { version = "0.6", optional = true }
+objc2-foundation = { version = "0.3", optional = true, features = ["NSString", "NSError", "NSURL", "NSArray", "NSDictionary", "NSData"] }
+objc2-core-ml = { version = "0.3", optional = true, features = ["MLModel", "MLModelConfiguration", "MLFeatureProvider", "MLFeatureValue", "MLMultiArray", "MLPredictionOptions", "MLModelDescription", "MLFeatureDescription", "MLDictionaryFeatureProvider", "MLModelError"] }
+block2 = { version = "0.6", optional = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+tempfile = "3.13"
+tracing-subscriber = { workspace = true }
+
+[features]
+# Default includes candle for working inference out of the box
+default = ["async-runtime", "candle"]
+async-runtime = ["tokio", "tokio-stream"]
+
+# Minimal build without inference (for embedding/library use only)
+minimal = ["async-runtime"]
+wasm = []
+wasm-simd = []
+
+# Ruvector integration features
+attention = ["dep:ruvector-attention"]
+graph = ["dep:ruvector-graph"]
+gnn = ["dep:ruvector-gnn"]
+
+# Full Ruvector integration (all optional crates)
+ruvector-full = ["attention", "graph", "gnn"]
+
+# Multi-threaded GEMM/GEMV with rayon (4-6x speedup on M4 Pro 10-core)
+parallel = ["dep:rayon"]
+
+# Candle backend for LLM inference (Rust-native, Metal acceleration on Mac)
+candle = ["candle-core", "candle-nn", "candle-transformers", "tokenizers", "hf-hub"]
+
+# Metal acceleration for Apple Silicon (M1/M2/M3/M4) via Candle
+metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
+
+# Native Metal compute shaders (low-level, M4 Pro optimized)
+metal-compute = ["dep:metal", "dep:objc"]
+
+# CUDA acceleration for NVIDIA GPUs
+cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+
+# Full inference backend with Metal (recommended for Mac)
+inference-metal = ["candle", "metal"]
+
+# Full Metal compute with native shaders (best performance on M4 Pro)
+inference-metal-native = ["candle", "metal", "metal-compute"]
+
+# Full inference backend with CUDA (recommended for NVIDIA)
+inference-cuda = ["candle", "cuda"]
+
+# Memory-mapped file access for efficient GGUF loading
+mmap = ["dep:memmap2"]
+
+# GGUF support with memory mapping (recommended for large models)
+gguf-mmap = ["mmap"]
+
+# Apple Accelerate framework for BLAS operations (macOS only, ~2x GEMV speedup)
+accelerate = []
+
+# Apple Neural Engine via Core ML (macOS/iOS, optimal for small models and batch inference)
+# Provides 38 TOPS dedicated ML acceleration with 3-4x better power efficiency
+coreml = ["dep:objc2", "dep:objc2-foundation", "dep:objc2-core-ml", "dep:block2"]
+
+# Hybrid GPU+ANE pipeline (use ANE for MLP, GPU for attention)
+hybrid-ane = ["metal-compute", "coreml"]
+
+# mistral-rs backend feature (enables full mistral-rs integration)
+# NOTE: Uncomment when mistralrs crate is available
+# mistral-rs = ["dep:mistralrs", "dep:mistralrs-core", "tokenizers"]
+# mistral-rs-metal = ["mistral-rs", "mistralrs/metal"]
+# mistral-rs-cuda = ["mistral-rs", "mistralrs/cuda"]
+
+[lib]
+crate-type = ["rlib"]
+
+# Benchmark configurations
+[[bench]]
+name = "attention_bench"
+harness = false
+
+[[bench]]
+name = "rope_bench"
+harness = false
+
+[[bench]]
+name = "norm_bench"
+harness = false
+
+[[bench]]
+name = "matmul_bench"
+harness = false
+
+[[bench]]
+name = "lora_bench"
+harness = false
+
+[[bench]]
+name = "e2e_bench"
+harness = false
+
+[[bench]]
+name = "metal_bench"
+harness = false
+
+[[bench]]
+name = "serving_bench"
+harness = false
+
+[[bench]]
+name = "ane_bench"
+harness = false
+
+[[bench]]
+name = "ruvltra_benchmark"
+harness = false
+
+# Test configurations
+[[test]]
+name = "real_model_test"
+path = "tests/real_model_test.rs"
+
+# Example binaries
+[[example]]
+name = "download_test_model"
+path = "examples/download_test_model.rs"
+
+[[example]]
+name = "hub_cli"
+path = "examples/hub_cli.rs"
+
+[[example]]
+name = "benchmark_model"
+path = "examples/benchmark_model.rs"
+
+[[example]]
+name = "run_eval"
+path = "examples/run_eval.rs"
+required-features = ["async-runtime"]

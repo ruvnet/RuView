@@ -1,0 +1,24 @@
+[package]
+name = "exo-manifold"
+version = "0.1.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["rUv <ruv@ruv.io>"]
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://ruv.io"
+documentation = "https://docs.rs/exo-manifold"
+description = "Continuous embedding space with SIREN networks for smooth manifold deformation in cognitive AI"
+keywords = ["manifold", "siren", "embedding", "neural", "ai"]
+categories = ["science", "algorithms", "mathematics"]
+readme = "README.md"
+
+[dependencies]
+exo-core = "0.1"
+ruvector-domain-expansion = "2.0"
+ndarray = "0.16"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+parking_lot = "0.12"
+
+[dev-dependencies]
+approx = "0.5"

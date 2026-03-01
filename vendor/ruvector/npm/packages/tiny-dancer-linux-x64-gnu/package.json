@@ -1,0 +1,24 @@
+{
+  "name": "@ruvector/tiny-dancer-linux-x64-gnu",
+  "version": "0.1.15",
+  "description": "Linux x64 (glibc) native bindings for @ruvector/tiny-dancer",
+  "main": "ruvector-tiny-dancer.linux-x64-gnu.node",
+  "files": [
+    "ruvector-tiny-dancer.linux-x64-gnu.node"
+  ],
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "libc": ["glibc"],
+  "author": "ruv.io Team <info@ruv.io> (https://ruv.io)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

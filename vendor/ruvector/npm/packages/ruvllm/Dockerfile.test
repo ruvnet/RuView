@@ -1,0 +1,19 @@
+# Test Dockerfile for @ruvector/ruvllm
+FROM node:20-slim
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json tsconfig.json tsconfig.esm.json ./
+COPY src/ ./src/
+COPY bin/ ./bin/
+COPY test/ ./test/
+
+# Install dependencies
+RUN npm install --ignore-scripts
+
+# Build TypeScript
+RUN npm run build
+
+# Run tests
+CMD ["npm", "test"]

@@ -1,0 +1,110 @@
+{
+  "name": "@ruvector/rudag",
+  "version": "0.1.0",
+  "description": "Fast DAG (Directed Acyclic Graph) library with Rust/WASM. Topological sort, critical path, task scheduling, dependency resolution, workflow optimization. Self-learning ML attention. Browser & Node.js with auto-persistence.",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "rudag": "./bin/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "import": "./dist/browser.js",
+      "require": "./dist/browser.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js",
+      "require": "./dist/node.js"
+    },
+    "./wasm": {
+      "types": "./pkg/ruvector_dag_wasm.d.ts",
+      "import": "./pkg/ruvector_dag_wasm.js",
+      "require": "./pkg-node/ruvector_dag_wasm.js"
+    }
+  },
+  "files": [
+    "dist",
+    "pkg",
+    "pkg-node",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build:wasm": "npm run build:wasm:bundler && npm run build:wasm:node",
+    "build:wasm:bundler": "cd ../../../crates/ruvector-dag-wasm && wasm-pack build --target bundler --out-dir ../../npm/packages/rudag/pkg",
+    "build:wasm:node": "cd ../../../crates/ruvector-dag-wasm && wasm-pack build --target nodejs --out-dir ../../npm/packages/rudag/pkg-node",
+    "build:ts": "tsc && tsc -p tsconfig.esm.json",
+    "build": "npm run build:wasm && npm run build:ts",
+    "test": "node --test dist/**/*.test.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "dag",
+    "directed-acyclic-graph",
+    "graph",
+    "topological-sort",
+    "topo-sort",
+    "critical-path",
+    "task-scheduler",
+    "task-scheduling",
+    "job-scheduler",
+    "dependency-graph",
+    "dependency-resolution",
+    "workflow",
+    "workflow-engine",
+    "pipeline",
+    "data-pipeline",
+    "etl",
+    "build-system",
+    "wasm",
+    "webassembly",
+    "rust",
+    "indexeddb",
+    "persistence",
+    "query-optimizer",
+    "sql-optimizer",
+    "self-learning",
+    "machine-learning",
+    "attention-mechanism",
+    "bottleneck",
+    "performance",
+    "typescript",
+    "browser",
+    "nodejs"
+  ],
+  "author": "rUv Team <team@ruv.io>",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "npm/packages/rudag"
+  },
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "homepage": "https://github.com/ruvnet/ruvector/tree/main/crates/ruvector-dag",
+  "engines": {
+    "node": ">= 16"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.25",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "idb": "^8.0.0"
+  }
+}

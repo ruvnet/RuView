@@ -1,0 +1,849 @@
+openapi: 3.0.0
+info:
+  title: EXO-AI 2025 Cognitive Substrate API
+  version: 0.1.0
+  description: |
+    REST API for the EXO-AI 2025 cognitive substrate. This API provides access to:
+    - Pattern storage with continuous manifold deformation
+    - Similarity search via gradient descent
+    - Hypergraph topological queries
+    - Temporal memory with causal tracking
+    - Federated mesh networking
+  license:
+    name: MIT OR Apache-2.0
+    url: https://github.com/ruvnet/ruvector
+  contact:
+    name: EXO-AI Team
+    url: https://github.com/ruvnet/ruvector/issues
+
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local development server
+  - url: https://api.exo-ai.example.com/v1
+    description: Production server
+
+tags:
+  - name: patterns
+    description: Pattern storage and retrieval
+  - name: search
+    description: Similarity search operations
+  - name: hypergraph
+    description: Topological queries on hypergraph substrate
+  - name: temporal
+    description: Temporal memory and causal queries
+  - name: federation
+    description: Federated mesh operations
+  - name: system
+    description: System information and health
+
+paths:
+  /patterns:
+    post:
+      summary: Store a pattern
+      description: Stores a pattern in the cognitive substrate via continuous manifold deformation
+      operationId: storePattern
+      tags:
+        - patterns
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Pattern'
+            example:
+              embedding: [0.1, 0.2, 0.3, 0.4]
+              metadata:
+                text: "Example pattern"
+                category: "demo"
+              antecedents: []
+              salience: 0.95
+      responses:
+        '201':
+          description: Pattern stored successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    description: Unique pattern identifier
+                  timestamp:
+                    type: integer
+                    format: int64
+                    description: Nanoseconds since epoch
+              example:
+                id: "550e8400-e29b-41d4-a716-446655440000"
+                timestamp: 1706553600000000000
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /patterns/{patternId}:
+    get:
+      summary: Retrieve a pattern by ID
+      description: Gets a specific pattern from the substrate
+      operationId: getPattern
+      tags:
+        - patterns
+      parameters:
+        - $ref: '#/components/parameters/PatternId'
+      responses:
+        '200':
+          description: Pattern found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pattern'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      summary: Delete a pattern
+      description: Removes a pattern from the substrate (strategic forgetting)
+      operationId: deletePattern
+      tags:
+        - patterns
+      parameters:
+        - $ref: '#/components/parameters/PatternId'
+      responses:
+        '204':
+          description: Pattern deleted successfully
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /search:
+    post:
+      summary: Similarity search
+      description: |
+        Performs similarity search using gradient descent on the learned manifold.
+        Returns k-nearest patterns to the query embedding.
+      operationId: search
+      tags:
+        - search
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchQuery'
+            example:
+              embedding: [0.1, 0.2, 0.3, 0.4]
+              k: 10
+              filter:
+                conditions:
+                  - field: "category"
+                    operator: "Equal"
+                    value: "demo"
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SearchResult'
+                  query_time_ms:
+                    type: number
+                    format: float
+                    description: Query execution time in milliseconds
+              example:
+                results:
+                  - pattern_id: "550e8400-e29b-41d4-a716-446655440000"
+                    score: 0.95
+                    distance: 0.05
+                    pattern:
+                      embedding: [0.11, 0.21, 0.31, 0.41]
+                      metadata:
+                        text: "Similar pattern"
+                query_time_ms: 12.5
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /hypergraph/query:
+    post:
+      summary: Topological query
+      description: |
+        Executes topological data analysis queries on the hypergraph substrate.
+        Supports persistent homology, Betti numbers, and sheaf consistency checks.
+      operationId: hypergraphQuery
+      tags:
+        - hypergraph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TopologicalQuery'
+            examples:
+              betti:
+                summary: Betti numbers query
+                value:
+                  type: "BettiNumbers"
+                  max_dimension: 3
+              homology:
+                summary: Persistent homology query
+                value:
+                  type: "PersistentHomology"
+                  dimension: 1
+                  epsilon_range: [0.0, 1.0]
+      responses:
+        '200':
+          description: Query results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HypergraphResult'
+              examples:
+                betti:
+                  summary: Betti numbers result
+                  value:
+                    type: "BettiNumbers"
+                    numbers: [5, 2, 0, 0]
+                homology:
+                  summary: Persistent homology result
+                  value:
+                    type: "PersistenceDiagram"
+                    birth_death_pairs:
+                      - [0.1, 0.8]
+                      - [0.2, 0.6]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /hypergraph/hyperedges:
+    post:
+      summary: Create hyperedge
+      description: Creates a higher-order relation (hyperedge) spanning multiple entities
+      operationId: createHyperedge
+      tags:
+        - hypergraph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - entities
+                - relation
+              properties:
+                entities:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: Entity IDs to connect
+                relation:
+                  $ref: '#/components/schemas/Relation'
+            example:
+              entities:
+                - "550e8400-e29b-41d4-a716-446655440000"
+                - "550e8400-e29b-41d4-a716-446655440001"
+                - "550e8400-e29b-41d4-a716-446655440002"
+              relation:
+                relation_type: "collaboration"
+                properties:
+                  weight: 0.9
+                  role: "development"
+      responses:
+        '201':
+          description: Hyperedge created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hyperedge_id:
+                    type: string
+                    format: uuid
+              example:
+                hyperedge_id: "660e8400-e29b-41d4-a716-446655440000"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /temporal/causal-query:
+    post:
+      summary: Causal query
+      description: |
+        Queries patterns within a causal cone (past, future, or light-cone).
+        Results are ranked by combined similarity, temporal, and causal distance.
+      operationId: causalQuery
+      tags:
+        - temporal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - embedding
+                - reference_time
+                - cone_type
+              properties:
+                embedding:
+                  type: array
+                  items:
+                    type: number
+                    format: float
+                reference_time:
+                  type: integer
+                  format: int64
+                  description: Reference timestamp (nanoseconds)
+                cone_type:
+                  type: string
+                  enum: [Past, Future, LightCone]
+                origin_pattern_id:
+                  type: string
+                  format: uuid
+                  description: Origin pattern for causal tracking
+            example:
+              embedding: [0.1, 0.2, 0.3]
+              reference_time: 1706553600000000000
+              cone_type: "Past"
+              origin_pattern_id: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: Causal query results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CausalResult'
+              example:
+                results:
+                  - pattern_id: "550e8400-e29b-41d4-a716-446655440001"
+                    similarity: 0.92
+                    causal_distance: 2
+                    temporal_distance_ns: 1000000000
+                    combined_score: 0.85
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /temporal/consolidate:
+    post:
+      summary: Memory consolidation
+      description: Triggers consolidation from short-term to long-term memory
+      operationId: consolidate
+      tags:
+        - temporal
+      responses:
+        '200':
+          description: Consolidation completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  promoted_count:
+                    type: integer
+                    description: Patterns promoted to long-term
+                  discarded_count:
+                    type: integer
+                    description: Low-salience patterns discarded
+                  avg_salience:
+                    type: number
+                    format: float
+                    description: Average salience of promoted patterns
+              example:
+                promoted_count: 42
+                discarded_count: 8
+                avg_salience: 0.87
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /federation/join:
+    post:
+      summary: Join federation
+      description: Initiates post-quantum cryptographic handshake to join a federation
+      operationId: joinFederation
+      tags:
+        - federation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - peer_host
+                - peer_port
+                - peer_public_key
+              properties:
+                peer_host:
+                  type: string
+                peer_port:
+                  type: integer
+                peer_public_key:
+                  type: string
+                  format: base64
+            example:
+              peer_host: "peer.example.com"
+              peer_port: 9000
+              peer_public_key: "base64encodedkey=="
+      responses:
+        '200':
+          description: Joined federation successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FederationToken'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+      security:
+        - PostQuantumAuth: []
+
+  /federation/query:
+    post:
+      summary: Federated query
+      description: Executes a query across the federated mesh
+      operationId: federatedQuery
+      tags:
+        - federation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query_data
+                - scope
+              properties:
+                query_data:
+                  type: string
+                  format: base64
+                scope:
+                  type: object
+                  oneOf:
+                    - type: object
+                      properties:
+                        type:
+                          type: string
+                          enum: [Local]
+                    - type: object
+                      properties:
+                        type:
+                          type: string
+                          enum: [Direct]
+                    - type: object
+                      properties:
+                        type:
+                          type: string
+                          enum: [Global]
+                        max_hops:
+                          type: integer
+      responses:
+        '200':
+          description: Federated query results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FederatedResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+      security:
+        - PostQuantumAuth: []
+
+  /system/health:
+    get:
+      summary: Health check
+      description: Returns system health status
+      operationId: healthCheck
+      tags:
+        - system
+      responses:
+        '200':
+          description: System is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [healthy, degraded, unhealthy]
+                  uptime_seconds:
+                    type: integer
+                  version:
+                    type: string
+              example:
+                status: "healthy"
+                uptime_seconds: 86400
+                version: "0.1.0"
+
+  /system/stats:
+    get:
+      summary: System statistics
+      description: Returns comprehensive substrate statistics
+      operationId: getStats
+      tags:
+        - system
+      responses:
+        '200':
+          description: System statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubstrateStats'
+              example:
+                dimensions: 384
+                pattern_count: 1000000
+                manifold_size: 256000
+                hypergraph:
+                  entity_count: 50000
+                  hyperedge_count: 25000
+                  max_hyperedge_size: 8
+                temporal:
+                  short_term_count: 1000
+                  long_term_count: 999000
+                  causal_graph_edges: 150000
+                federation:
+                  peer_count: 5
+                  local_peer_id: "abc123"
+
+components:
+  schemas:
+    Pattern:
+      type: object
+      required:
+        - embedding
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique pattern identifier
+        embedding:
+          type: array
+          items:
+            type: number
+            format: float
+          description: Vector embedding
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Arbitrary metadata
+        timestamp:
+          type: integer
+          format: int64
+          description: Creation timestamp (nanoseconds since epoch)
+        antecedents:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Causal antecedent pattern IDs
+        salience:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: Importance score
+
+    SearchQuery:
+      type: object
+      required:
+        - embedding
+        - k
+      properties:
+        embedding:
+          type: array
+          items:
+            type: number
+            format: float
+        k:
+          type: integer
+          minimum: 1
+          description: Number of results to return
+        filter:
+          $ref: '#/components/schemas/Filter'
+
+    SearchResult:
+      type: object
+      properties:
+        pattern_id:
+          type: string
+          format: uuid
+        score:
+          type: number
+          format: float
+          description: Similarity score
+        distance:
+          type: number
+          format: float
+          description: Distance metric value
+        pattern:
+          $ref: '#/components/schemas/Pattern'
+
+    Filter:
+      type: object
+      properties:
+        conditions:
+          type: array
+          items:
+            type: object
+            required:
+              - field
+              - operator
+              - value
+            properties:
+              field:
+                type: string
+              operator:
+                type: string
+                enum: [Equal, NotEqual, GreaterThan, LessThan, Contains]
+              value:
+                oneOf:
+                  - type: string
+                  - type: number
+                  - type: boolean
+
+    TopologicalQuery:
+      oneOf:
+        - type: object
+          required:
+            - type
+            - max_dimension
+          properties:
+            type:
+              type: string
+              enum: [BettiNumbers]
+            max_dimension:
+              type: integer
+        - type: object
+          required:
+            - type
+            - dimension
+            - epsilon_range
+          properties:
+            type:
+              type: string
+              enum: [PersistentHomology]
+            dimension:
+              type: integer
+            epsilon_range:
+              type: array
+              items:
+                type: number
+                format: float
+              minItems: 2
+              maxItems: 2
+
+    HypergraphResult:
+      oneOf:
+        - type: object
+          properties:
+            type:
+              type: string
+              enum: [BettiNumbers]
+            numbers:
+              type: array
+              items:
+                type: integer
+        - type: object
+          properties:
+            type:
+              type: string
+              enum: [PersistenceDiagram]
+            birth_death_pairs:
+              type: array
+              items:
+                type: array
+                items:
+                  type: number
+                  format: float
+                minItems: 2
+                maxItems: 2
+
+    Relation:
+      type: object
+      required:
+        - relation_type
+      properties:
+        relation_type:
+          type: string
+        properties:
+          type: object
+          additionalProperties: true
+
+    CausalResult:
+      type: object
+      properties:
+        pattern_id:
+          type: string
+          format: uuid
+        similarity:
+          type: number
+          format: float
+        causal_distance:
+          type: integer
+          nullable: true
+          description: Hops in causal graph
+        temporal_distance_ns:
+          type: integer
+          format: int64
+        combined_score:
+          type: number
+          format: float
+
+    FederationToken:
+      type: object
+      properties:
+        peer_id:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        expiry:
+          type: integer
+          format: int64
+
+    FederatedResult:
+      type: object
+      properties:
+        source:
+          type: string
+          description: Source peer ID
+        data:
+          type: string
+          format: base64
+        score:
+          type: number
+          format: float
+        timestamp:
+          type: integer
+          format: int64
+
+    SubstrateStats:
+      type: object
+      properties:
+        dimensions:
+          type: integer
+        pattern_count:
+          type: integer
+        manifold_size:
+          type: integer
+        hypergraph:
+          type: object
+          properties:
+            entity_count:
+              type: integer
+            hyperedge_count:
+              type: integer
+            max_hyperedge_size:
+              type: integer
+        temporal:
+          type: object
+          properties:
+            short_term_count:
+              type: integer
+            long_term_count:
+              type: integer
+            causal_graph_edges:
+              type: integer
+        federation:
+          type: object
+          properties:
+            peer_count:
+              type: integer
+            local_peer_id:
+              type: string
+
+    Error:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error type
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: object
+          additionalProperties: true
+          description: Additional error context
+
+  parameters:
+    PatternId:
+      name: patternId
+      in: path
+      required: true
+      description: Pattern UUID
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "BadRequest"
+            message: "Invalid embedding dimension: expected 384, got 128"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "NotFound"
+            message: "Pattern not found: 550e8400-e29b-41d4-a716-446655440000"
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "InternalError"
+            message: "Manifold deformation failed"
+
+  securitySchemes:
+    PostQuantumAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: PQC
+      description: Post-quantum cryptographic authentication using CRYSTALS-Dilithium

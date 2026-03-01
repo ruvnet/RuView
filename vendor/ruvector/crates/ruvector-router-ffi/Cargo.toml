@@ -1,0 +1,37 @@
+[package]
+name = "ruvector-router-ffi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "NAPI-RS bindings for ruvector-router-core vector database"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ruvector-router-core = { version = "2.0", path = "../ruvector-router-core" }
+
+# NAPI-RS dependencies
+napi = { workspace = true }
+napi-derive = { workspace = true }
+
+# Workspace dependencies
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+
+# Additional dependencies
+chrono = "0.4"
+
+[build-dependencies]
+napi-build = "2.1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+strip = true

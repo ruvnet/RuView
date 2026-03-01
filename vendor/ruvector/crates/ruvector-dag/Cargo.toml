@@ -1,0 +1,93 @@
+[package]
+name = "ruvector-dag"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Directed Acyclic Graph (DAG) structures for query plan optimization with neural learning"
+
+[features]
+default = ["full"]
+# Enable when using real ML-DSA/ML-KEM implementations
+# This flag indicates production-ready cryptography is in use
+production-crypto = ["pqcrypto-dilithium", "pqcrypto-kyber"]
+# Full feature set (non-WASM)
+full = ["tokio", "dashmap", "crossbeam", "parking_lot"]
+# WASM-compatible minimal feature set (core DAG + attention only)
+wasm = ["getrandom/js"]
+
+[dependencies]
+# Post-quantum cryptography (optional, for production use)
+pqcrypto-dilithium = { version = "0.5", optional = true }
+pqcrypto-kyber = { version = "0.8", optional = true }
+ruvector-core = { version = "2.0", path = "../ruvector-core", default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+dashmap = { version = "5.5", optional = true }
+crossbeam = { version = "0.8", optional = true }
+parking_lot = { version = "0.12", optional = true }
+ndarray = "0.15"
+rand = "0.8"
+tokio = { version = "1", features = ["full"], optional = true }
+tracing = "0.1"
+getrandom = "0.2"
+zeroize = { version = "1.7", features = ["derive"] }
+sha2 = "0.10"
+
+[dev-dependencies]
+criterion = "0.5"
+proptest = "1.4"
+tokio-test = "0.4"
+
+[[bench]]
+name = "dag_benchmarks"
+harness = false
+
+[[test]]
+name = "integration"
+path = "tests/integration/mod.rs"
+
+[[example]]
+name = "basic_usage"
+
+[[example]]
+name = "attention_selection"
+
+[[example]]
+name = "learning_workflow"
+
+[[example]]
+name = "self_healing"
+
+[[example]]
+name = "synthetic_reflex_organism"
+path = "examples/exotic/synthetic_reflex_organism.rs"
+
+[[example]]
+name = "timing_synchronization"
+path = "examples/exotic/timing_synchronization.rs"
+
+[[example]]
+name = "coherence_safety"
+path = "examples/exotic/coherence_safety.rs"
+
+[[example]]
+name = "artificial_instincts"
+path = "examples/exotic/artificial_instincts.rs"
+
+[[example]]
+name = "living_simulation"
+path = "examples/exotic/living_simulation.rs"
+
+[[example]]
+name = "thought_integrity"
+path = "examples/exotic/thought_integrity.rs"
+
+[[example]]
+name = "federated_coherence"
+path = "examples/exotic/federated_coherence.rs"
+
+[[example]]
+name = "synthetic_haptic"

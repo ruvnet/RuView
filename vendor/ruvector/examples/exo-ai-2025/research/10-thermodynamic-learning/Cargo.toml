@@ -1,0 +1,40 @@
+[package]
+name = "thermodynamic-learning"
+version = "0.1.0"
+edition = "2021"
+authors = ["ruvector contributors"]
+description = "Nobel-level thermodynamic learning research: Physics-based intelligence approaching Landauer limits"
+license = "MIT"
+readme = "README.md"
+
+# Enable standalone compilation
+[workspace]
+
+[lib]
+name = "thermodynamic_learning"
+path = "src/lib.rs"
+
+[[bench]]
+name = "thermodynamic_bench"
+harness = false
+
+[dependencies]
+# For random number generation (already used in existing code)
+rand = "0.8"
+
+[dev-dependencies]
+# Benchmarking framework
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
+[profile.bench]
+inherits = "release"
+
+[features]
+default = ["simd"]
+simd = []

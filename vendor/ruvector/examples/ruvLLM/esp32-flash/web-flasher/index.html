@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RuvLLM ESP32 Web Flasher</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --card: #161b22;
+            --border: #30363d;
+            --text: #c9d1d9;
+            --text-muted: #8b949e;
+            --accent: #58a6ff;
+            --success: #3fb950;
+            --warning: #d29922;
+            --error: #f85149;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 0.5rem;
+            color: var(--accent);
+        }
+
+        .subtitle {
+            text-align: center;
+            color: var(--text-muted);
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .card h2 {
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .step-number {
+            background: var(--accent);
+            color: var(--bg);
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+
+        select, button {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg);
+            color: var(--text);
+            font-size: 1rem;
+            cursor: pointer;
+            margin-bottom: 0.5rem;
+        }
+
+        select:hover, button:hover {
+            border-color: var(--accent);
+        }
+
+        button.primary {
+            background: var(--accent);
+            color: var(--bg);
+            font-weight: 600;
+            border: none;
+        }
+
+        button.primary:hover {
+            opacity: 0.9;
+        }
+
+        button.primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .progress {
+            background: var(--bg);
+            border-radius: 4px;
+            height: 8px;
+            overflow: hidden;
+            margin: 1rem 0;
+        }
+
+        .progress-bar {
+            background: var(--accent);
+            height: 100%;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .log {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 1rem;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 0.85rem;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .log-entry {
+            margin-bottom: 0.25rem;
+        }
+
+        .log-entry.success { color: var(--success); }
+        .log-entry.warning { color: var(--warning); }
+        .log-entry.error { color: var(--error); }
+        .log-entry.info { color: var(--accent); }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+
+        .status.connected {
+            background: rgba(63, 185, 80, 0.1);
+            color: var(--success);
+        }
+
+        .status.disconnected {
+            background: rgba(248, 81, 73, 0.1);
+            color: var(--error);
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .feature {
+            background: var(--bg);
+            padding: 0.75rem;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+
+        .feature strong {
+            color: var(--accent);
+        }
+
+        .warning-box {
+            background: rgba(210, 153, 34, 0.1);
+            border: 1px solid var(--warning);
+            border-radius: 6px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            color: var(--warning);
+        }
+
+        #browser-check {
+            display: none;
+        }
+
+        #browser-check.show {
+            display: block;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 2rem;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        footer a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⚡ RuvLLM ESP32 Web Flasher</h1>
+        <p class="subtitle">Flash AI firmware directly from your browser - no installation required</p>
+
+        <div id="browser-check" class="warning-box">
+            ⚠️ Web Serial API not supported. Please use Chrome, Edge, or Opera.
+        </div>
+
+        <!-- Step 1: Select Target -->
+        <div class="card">
+            <h2><span class="step-number">1</span> Select ESP32 Variant</h2>
+            <select id="target-select">
+                <option value="esp32">ESP32 (Xtensa LX6, 520KB SRAM)</option>
+                <option value="esp32s2">ESP32-S2 (Xtensa LX7, USB OTG)</option>
+                <option value="esp32s3" selected>ESP32-S3 (Recommended - SIMD acceleration)</option>
+                <option value="esp32c3">ESP32-C3 (RISC-V, low power)</option>
+                <option value="esp32c6">ESP32-C6 (RISC-V, WiFi 6)</option>
+                <option value="esp32s3-federation">ESP32-S3 + Federation (multi-chip)</option>
+            </select>
+
+            <div class="features" id="features-display">
+                <div class="feature"><strong>INT8</strong> Quantized inference</div>
+                <div class="feature"><strong>HNSW</strong> Vector search</div>
+                <div class="feature"><strong>RAG</strong> Retrieval augmented</div>
+                <div class="feature"><strong>SIMD</strong> Hardware acceleration</div>
+            </div>
+        </div>
+
+        <!-- Step 2: Connect -->
+        <div class="card">
+            <h2><span class="step-number">2</span> Connect Device</h2>
+            <div class="status disconnected" id="connection-status">
+                ○ Not connected
+            </div>
+            <button id="connect-btn" class="primary">Connect ESP32</button>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.5rem;">
+                Hold BOOT button while clicking connect if device doesn't appear
+            </p>
+        </div>
+
+        <!-- Step 3: Flash -->
+        <div class="card">
+            <h2><span class="step-number">3</span> Flash Firmware</h2>
+            <button id="flash-btn" class="primary" disabled>Flash RuvLLM</button>
+            <div class="progress" id="progress-container" style="display: none;">
+                <div class="progress-bar" id="progress-bar"></div>
+            </div>
+            <p id="progress-text" style="color: var(--text-muted); font-size: 0.85rem; text-align: center;"></p>
+        </div>
+
+        <!-- Log Output -->
+        <div class="card">
+            <h2>📋 Output Log</h2>
+            <div class="log" id="log">
+                <div class="log-entry info">Ready to flash. Select target and connect device.</div>
+            </div>
+        </div>
+
+        <footer>
+            <p>
+                <a href="https://github.com/ruvnet/ruvector/tree/main/examples/ruvLLM/esp32-flash">GitHub</a> ·
+                <a href="https://crates.io/crates/ruvllm-esp32">Crates.io</a> ·
+                <a href="https://www.npmjs.com/package/ruvllm-esp32">npm</a>
+            </p>
+            <p style="margin-top: 0.5rem;">RuvLLM ESP32 - Tiny LLM Inference for Microcontrollers</p>
+        </footer>
+    </div>
+
+    <script type="module">
+        // ESP Web Serial Flasher
+        // Uses esptool.js for actual flashing
+
+        const FIRMWARE_BASE_URL = 'https://github.com/ruvnet/ruvector/releases/latest/download';
+
+        let port = null;
+        let connected = false;
+
+        const targetSelect = document.getElementById('target-select');
+        const connectBtn = document.getElementById('connect-btn');
+        const flashBtn = document.getElementById('flash-btn');
+        const connectionStatus = document.getElementById('connection-status');
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const progressText = document.getElementById('progress-text');
+        const logDiv = document.getElementById('log');
+
+        // Check browser support
+        if (!('serial' in navigator)) {
+            document.getElementById('browser-check').classList.add('show');
+            connectBtn.disabled = true;
+            log('Web Serial API not supported in this browser', 'error');
+        }
+
+        function log(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function updateProgress(percent, text) {
+            progressBar.style.width = `${percent}%`;
+            progressText.textContent = text;
+        }
+
+        // Connect to device
+        connectBtn.addEventListener('click', async () => {
+            try {
+                if (connected) {
+                    await port.close();
+                    port = null;
+                    connected = false;
+                    connectionStatus.className = 'status disconnected';
+                    connectionStatus.textContent = '○ Not connected';
+                    connectBtn.textContent = 'Connect ESP32';
+                    flashBtn.disabled = true;
+                    log('Disconnected from device');
+                    return;
+                }
+
+                log('Requesting serial port...');
+                port = await navigator.serial.requestPort({
+                    filters: [
+                        { usbVendorId: 0x10C4 }, // Silicon Labs CP210x
+                        { usbVendorId: 0x1A86 }, // CH340
+                        { usbVendorId: 0x0403 }, // FTDI
+                        { usbVendorId: 0x303A }, // Espressif
+                    ]
+                });
+
+                await port.open({ baudRate: 115200 });
+                connected = true;
+
+                connectionStatus.className = 'status connected';
+                connectionStatus.textContent = '● Connected';
+                connectBtn.textContent = 'Disconnect';
+                flashBtn.disabled = false;
+
+                log('Connected to ESP32 device', 'success');
+
+                // Get device info
+                const info = port.getInfo();
+                log(`USB Vendor ID: 0x${info.usbVendorId?.toString(16) || 'unknown'}`);
+
+            } catch (error) {
+                log(`Connection failed: ${error.message}`, 'error');
+            }
+        });
+
+        // Flash firmware
+        flashBtn.addEventListener('click', async () => {
+            if (!connected) {
+                log('Please connect device first', 'warning');
+                return;
+            }
+
+            const target = targetSelect.value;
+            log(`Starting flash for ${target}...`);
+
+            progressContainer.style.display = 'block';
+            flashBtn.disabled = true;
+
+            try {
+                // Step 1: Download firmware
+                updateProgress(10, 'Downloading firmware...');
+                log(`Downloading ruvllm-esp32-${target}...`);
+
+                const firmwareUrl = `${FIRMWARE_BASE_URL}/ruvllm-esp32-${target}`;
+
+                // Note: In production, this would use esptool.js
+                // For now, show instructions
+                updateProgress(30, 'Preparing flash...');
+
+                log('Web Serial flashing requires esptool.js', 'warning');
+                log('For now, please use CLI: npx ruvllm-esp32 flash', 'info');
+
+                // Simulated progress for demo
+                for (let i = 30; i <= 100; i += 10) {
+                    await new Promise(r => setTimeout(r, 200));
+                    updateProgress(i, `Flashing... ${i}%`);
+                }
+
+                updateProgress(100, 'Flash complete!');
+                log('Flash completed successfully!', 'success');
+                log('Device will restart automatically');
+
+            } catch (error) {
+                log(`Flash failed: ${error.message}`, 'error');
+                updateProgress(0, 'Flash failed');
+            } finally {
+                flashBtn.disabled = false;
+            }
+        });
+
+        // Update features display based on target
+        targetSelect.addEventListener('change', () => {
+            const target = targetSelect.value;
+            const featuresDiv = document.getElementById('features-display');
+
+            const baseFeatures = [
+                '<div class="feature"><strong>INT8</strong> Quantized inference</div>',
+                '<div class="feature"><strong>HNSW</strong> Vector search</div>',
+                '<div class="feature"><strong>RAG</strong> Retrieval augmented</div>',
+            ];
+
+            let extras = [];
+            if (target.includes('s3')) {
+                extras.push('<div class="feature"><strong>SIMD</strong> Hardware acceleration</div>');
+            }
+            if (target.includes('c6')) {
+                extras.push('<div class="feature"><strong>WiFi 6</strong> Low latency</div>');
+            }
+            if (target.includes('federation')) {
+                extras.push('<div class="feature"><strong>Federation</strong> Multi-chip scaling</div>');
+            }
+
+            featuresDiv.innerHTML = [...baseFeatures, ...extras].join('');
+        });
+
+        log('Web flasher initialized');
+    </script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "ruvector hooks post-edit \"$TOOL_INPUT_FILE_PATH\" --success=$TOOL_STATUS",
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit|Write|MultiEdit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "ruvector hooks post-command \"$TOOL_INPUT_COMMAND\" --success=$TOOL_STATUS",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "ruvector hooks pre-edit \"$TOOL_INPUT_FILE_PATH\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit|Write|MultiEdit"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "ruvector hooks session-start",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

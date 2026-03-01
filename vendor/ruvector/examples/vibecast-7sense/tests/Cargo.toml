@@ -1,0 +1,64 @@
+[package]
+name = "vibecast-tests"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+description = "Integration tests for 7sense bioacoustics platform"
+publish = false
+
+[lib]
+name = "vibecast_tests"
+path = "lib.rs"
+
+[dependencies]
+# Core dependencies for test fixtures
+uuid = { version = "1.10", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Testing utilities
+proptest = "1.4"
+test-case = "3.3"
+
+[dev-dependencies]
+# Async testing
+tokio = { version = "1.40", features = ["full", "test-util"] }
+tokio-test = "0.4"
+
+# Property-based testing
+proptest = "1.4"
+
+# Parameterized tests
+test-case = "3.3"
+
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Assertions
+pretty_assertions = "1.4"
+
+[[test]]
+name = "audio_test"
+path = "integration/audio_test.rs"
+
+[[test]]
+name = "embedding_test"
+path = "integration/embedding_test.rs"
+
+[[test]]
+name = "vector_test"
+path = "integration/vector_test.rs"
+
+[[test]]
+name = "analysis_test"
+path = "integration/analysis_test.rs"
+
+[[test]]
+name = "interpretation_test"
+path = "integration/interpretation_test.rs"
+
+[[test]]
+name = "api_test"
+path = "integration/api_test.rs"

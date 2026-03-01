@@ -1,0 +1,235 @@
+name: RuvLLM Build & Publish
+
+on:
+  push:
+    tags:
+      - 'ruvllm-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish'
+        required: false
+        default: ''
+
+env:
+  DEBUG: napi:*
+  APP_NAME: ruvllm
+  MACOSX_DEPLOYMENT_TARGET: '10.13'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: macos-latest
+            target: x86_64-apple-darwin
+            build: |
+              cd examples/ruvLLM
+              cargo build --release --features napi
+              strip -x ../../target/release/libruvllm.dylib || true
+            artifact: libruvllm.dylib
+            artifact_name: ruvllm.darwin-x64.node
+
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            build: |
+              cd examples/ruvLLM
+              cargo build --release --features napi --target aarch64-apple-darwin
+              strip -x ../../target/aarch64-apple-darwin/release/libruvllm.dylib || true
+            artifact: target/aarch64-apple-darwin/release/libruvllm.dylib
+            artifact_name: ruvllm.darwin-arm64.node
+
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
+            build: |
+              cd examples/ruvLLM
+              cargo build --release --features napi
+              strip ../../target/release/libruvllm.so
+            artifact: libruvllm.so
+            artifact_name: ruvllm.linux-x64-gnu.node
+
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
+            build: |
+              cd examples/ruvLLM
+              cargo build --release --features napi --target aarch64-unknown-linux-gnu
+              aarch64-linux-gnu-strip ../../target/aarch64-unknown-linux-gnu/release/libruvllm.so || true
+            artifact: target/aarch64-unknown-linux-gnu/release/libruvllm.so
+            artifact_name: ruvllm.linux-arm64-gnu.node
+
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+            build: |
+              cd examples/ruvLLM
+              cargo build --release --features napi
+            artifact: ruvllm.dll
+            artifact_name: ruvllm.win32-x64-msvc.node
+
+    name: Build - ${{ matrix.settings.target }}
+    runs-on: ${{ matrix.settings.host }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        if: ${{ !matrix.settings.docker }}
+        with:
+          targets: ${{ matrix.settings.target }}
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.settings.target }}
+
+      - name: Build (Native)
+        if: ${{ !matrix.settings.docker }}
+        shell: bash
+        run: ${{ matrix.settings.build }}
+
+      - name: Build (Docker)
+        if: ${{ matrix.settings.docker }}
+        uses: addnab/docker-run-action@v3
+        with:
+          image: ${{ matrix.settings.docker }}
+          options: --user 0:0 -v ${{ github.workspace }}:/workspace -w /workspace
+          run: ${{ matrix.settings.build }}
+
+      - name: Copy artifact
+        shell: bash
+        run: |
+          mkdir -p npm/packages/ruvllm/npm/${{ matrix.settings.target }}
+          if [ -f "target/release/${{ matrix.settings.artifact }}" ]; then
+            cp target/release/${{ matrix.settings.artifact }} npm/packages/ruvllm/npm/${{ matrix.settings.target }}/${{ matrix.settings.artifact_name }}
+          elif [ -f "${{ matrix.settings.artifact }}" ]; then
+            cp ${{ matrix.settings.artifact }} npm/packages/ruvllm/npm/${{ matrix.settings.target }}/${{ matrix.settings.artifact_name }}
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.settings.target }}
+          path: npm/packages/ruvllm/npm/${{ matrix.settings.target }}/${{ matrix.settings.artifact_name }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish npm packages
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Move artifacts to npm directories
+        run: |
+          # Darwin x64
+          mkdir -p npm/packages/ruvllm/npm/darwin-x64
+          cp artifacts/bindings-x86_64-apple-darwin/ruvllm.darwin-x64.node npm/packages/ruvllm/npm/darwin-x64/ || true
+
+          # Darwin arm64
+          mkdir -p npm/packages/ruvllm/npm/darwin-arm64
+          cp artifacts/bindings-aarch64-apple-darwin/ruvllm.darwin-arm64.node npm/packages/ruvllm/npm/darwin-arm64/ || true
+
+          # Linux x64
+          mkdir -p npm/packages/ruvllm/npm/linux-x64-gnu
+          cp artifacts/bindings-x86_64-unknown-linux-gnu/ruvllm.linux-x64-gnu.node npm/packages/ruvllm/npm/linux-x64-gnu/ || true
+
+          # Linux arm64
+          mkdir -p npm/packages/ruvllm/npm/linux-arm64-gnu
+          cp artifacts/bindings-aarch64-unknown-linux-gnu/ruvllm.linux-arm64-gnu.node npm/packages/ruvllm/npm/linux-arm64-gnu/ || true
+
+          # Windows x64
+          mkdir -p npm/packages/ruvllm/npm/win32-x64-msvc
+          cp artifacts/bindings-x86_64-pc-windows-msvc/ruvllm.win32-x64-msvc.node npm/packages/ruvllm/npm/win32-x64-msvc/ || true
+
+      - name: Install dependencies
+        run: |
+          cd npm/packages/ruvllm
+          npm install
+
+      - name: Build TypeScript
+        run: |
+          cd npm/packages/ruvllm
+          npm run build
+
+      - name: Publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # Publish darwin-arm64
+          cd npm/packages/ruvllm/npm/darwin-arm64
+          npm publish --access public || true
+          cd -
+
+          # Publish darwin-x64
+          cd npm/packages/ruvllm/npm/darwin-x64
+          npm publish --access public || true
+          cd -
+
+          # Publish linux-x64-gnu
+          cd npm/packages/ruvllm/npm/linux-x64-gnu
+          npm publish --access public || true
+          cd -
+
+          # Publish linux-arm64-gnu
+          cd npm/packages/ruvllm/npm/linux-arm64-gnu
+          npm publish --access public || true
+          cd -
+
+          # Publish win32-x64-msvc
+          cd npm/packages/ruvllm/npm/win32-x64-msvc
+          npm publish --access public || true
+          cd -
+
+      - name: Publish main package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd npm/packages/ruvllm
+          npm publish --access public
+
+  test:
+    name: Test npm package
+    runs-on: ${{ matrix.os }}
+    needs: publish
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [18, 20]
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Test installation
+        run: |
+          npm install @ruvector/ruvllm
+          node -e "const { RuvLLM, version } = require('@ruvector/ruvllm'); console.log('Version:', version()); const llm = new RuvLLM(); console.log('Native:', llm.isNativeLoaded()); console.log('SIMD:', llm.simdCapabilities());"
+
+      - name: Test CLI
+        run: |
+          npx @ruvector/ruvllm info
+          npx @ruvector/ruvllm benchmark --iterations 100

@@ -1,0 +1,28 @@
+[package]
+name = "ruvector-dither"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["rUv <ruv@ruv.io>"]
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://ruv.io"
+documentation = "https://docs.rs/ruvector-dither"
+description = "Deterministic low-discrepancy dithering for low-bit quantization: golden-ratio and π-digit sequences for blue-noise error shaping"
+keywords = ["quantization", "dither", "golden-ratio", "inference", "wasm"]
+categories = ["science", "algorithms", "no-std"]
+readme = "README.md"
+
+[features]
+default = []
+# Enable no_std mode (requires an allocator)
+no_std = []
+
+[dependencies]
+# No runtime deps — fully no_std compatible
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "dither_bench"
+harness = false

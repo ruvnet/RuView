@@ -1,0 +1,74 @@
+{
+  "name": "@ruvector/node",
+  "version": "0.1.22",
+  "description": "Unified Ruvector package - High-performance vector database with GNN capabilities for Node.js",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./gnn": {
+      "import": "./dist/gnn.mjs",
+      "require": "./dist/gnn.js",
+      "types": "./dist/gnn.d.ts"
+    }
+  },
+  "engines": {
+    "node": ">= 18"
+  },
+  "scripts": {
+    "build": "npm run build:esm && npm run build:cjs",
+    "build:esm": "tsc --project tsconfig.esm.json",
+    "build:cjs": "tsc --project tsconfig.cjs.json",
+    "prepublishOnly": "npm run build",
+    "test": "node --test",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@ruvector/core": "^0.1.15",
+    "@ruvector/gnn": "^0.1.15"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.25",
+    "typescript": "^5.9.3"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "vector",
+    "database",
+    "embeddings",
+    "similarity-search",
+    "hnsw",
+    "gnn",
+    "graph-neural-network",
+    "rust",
+    "napi",
+    "semantic-search",
+    "machine-learning",
+    "rag",
+    "simd",
+    "performance"
+  ],
+  "author": "rUv",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "npm/packages/node"
+  },
+  "homepage": "https://github.com/ruvnet/ruvector#readme",
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

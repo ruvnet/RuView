@@ -1,0 +1,101 @@
+[package]
+name = "ruvector-edge-net"
+version = "0.1.0"
+edition = "2021"
+authors = ["RuVector Team"]
+license = "MIT"
+description = "Distributed compute intelligence network - contribute browser compute, earn credits"
+repository = "https://github.com/ruvnet/ruvector"
+keywords = ["wasm", "p2p", "distributed-computing", "web-workers", "ai"]
+categories = ["wasm", "web-programming", "cryptography"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[features]
+default = ["console_error_panic_hook"]
+full = ["embeddings", "neural", "exotic", "learning-enhanced"]
+embeddings = []
+neural = []
+bench = []
+# Exotic AI capabilities
+exotic = ["dep:ruvector-exotic-wasm"]
+# Self-learning with MicroLoRA, BTSP, HDC
+learning-enhanced = ["dep:ruvector-learning-wasm", "dep:ruvector-nervous-system-wasm"]
+# CRDT-based enhanced economy
+economy-enhanced = ["dep:ruvector-economy-wasm"]
+# All exotic capabilities
+exotic-full = ["exotic", "learning-enhanced", "economy-enhanced"]
+
+[dependencies]
+# WASM bindings
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "console",
+    "Window",
+    "Document",
+    "Navigator",
+    "Performance",
+    "Worker",
+    "MessageEvent",
+    "MessagePort",
+    "MessageChannel",
+    "BroadcastChannel",
+    "Crypto",
+    "SubtleCrypto",
+    "CryptoKey",
+    "Storage",
+    "Request",
+    "Response",
+    "Headers",
+    "Screen",
+]}
+serde-wasm-bindgen = "0.6"  # WASM <-> Serde bindings
+
+# Crypto
+ed25519-dalek = { version = "2.1", default-features = false, features = ["rand_core"] }
+x25519-dalek = { version = "2.0", default-features = false }
+aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"] }
+sha2 = { version = "0.10", default-features = false }
+rand = { version = "0.8", default-features = false, features = ["getrandom"] }
+getrandom = { version = "0.2", features = ["js"] }
+argon2 = { version = "0.5", default-features = false, features = ["alloc"] }  # Memory-hard KDF
+zeroize = { version = "1.7", features = ["derive"] }  # Secure memory cleanup
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+
+# Utilities
+thiserror = "1.0"
+uuid = { version = "1.0", features = ["v4", "js", "serde"] }
+hex = "0.4"
+base64 = "0.22"  # Base64 encoding for MCP
+parking_lot = "0.12"  # Fast RwLock for WASM
+rustc-hash = "2.0"  # FxHashMap for 30-50% faster hashing
+typed-arena = "2.0"  # Arena allocation for events (2-3x faster)
+string_cache = "0.8"  # String interning for node IDs (60-80% memory reduction)
+
+# Error handling for WASM
+console_error_panic_hook = { version = "0.1", optional = true }
+
+# Exotic AI capabilities (optional features)
+ruvector-exotic-wasm = { path = "../../crates/ruvector-exotic-wasm", optional = true }
+ruvector-learning-wasm = { path = "../../crates/ruvector-learning-wasm", optional = true }
+ruvector-nervous-system-wasm = { path = "../../crates/ruvector-nervous-system-wasm", optional = true }
+ruvector-economy-wasm = { path = "../../crates/ruvector-economy-wasm", optional = true }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[profile.release]
+lto = true
+opt-level = "s"
+codegen-units = 1
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

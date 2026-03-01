@@ -1,0 +1,109 @@
+[package]
+name = "ruvector-onnx-embeddings"
+version = "0.1.0"
+edition = "2021"
+authors = ["RuVector Team"]
+description = "ONNX-based embedding generation for RuVector - Reimagined embedding pipeline in pure Rust"
+license = "MIT"
+repository = "https://github.com/ruvnet/ruvector"
+keywords = ["onnx", "embeddings", "vector-database", "rust", "ml"]
+categories = ["science", "algorithms"]
+
+# Make this a standalone package, not part of the workspace
+[workspace]
+
+[dependencies]
+# ONNX Runtime - Core inference engine
+ort = { version = "2.0.0-rc.9", features = ["download-binaries", "half"] }
+
+# Tokenization - HuggingFace tokenizers in Rust
+tokenizers = { version = "0.20", default-features = false, features = ["progressbar", "onig"] }
+
+# Tensor operations
+ndarray = { version = "0.16", features = ["rayon"] }
+half = "2.4"
+
+# Async runtime
+tokio = { version = "1.41", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# HTTP client for model downloads
+reqwest = { version = "0.12", features = ["blocking", "stream"] }
+futures-util = "0.3"
+
+# Progress bars and CLI
+indicatif = "0.17"
+console = "0.15"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# File operations
+sha2 = "0.10"
+hex = "0.4"
+tempfile = "3.14"
+dirs = "5.0"
+
+# Parallel processing
+rayon = "1.10"
+
+# Concurrency
+parking_lot = "0.12"
+
+# UUID for vector IDs
+uuid = { version = "1.11", features = ["v4"] }
+
+# GPU acceleration (optional)
+wgpu = { version = "23.0", optional = true }
+bytemuck = { version = "1.14", optional = true, features = ["derive"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+approx = "0.5"
+
+[[bench]]
+name = "embedding_benchmark"
+harness = false
+
+[[bench]]
+name = "gpu_benchmark"
+harness = false
+required-features = ["gpu"]
+
+[[example]]
+name = "basic_embedding"
+path = "examples/basic.rs"
+
+[[example]]
+name = "batch_embedding"
+path = "examples/batch.rs"
+
+[[example]]
+name = "semantic_search"
+path = "examples/semantic_search.rs"
+
+[features]
+default = ["download-models"]
+download-models = []
+cuda = ["ort/cuda"]
+tensorrt = ["ort/tensorrt"]
+coreml = ["ort/coreml"]
+simsimd = []  # Optional SIMD acceleration (not yet implemented)
+
+# GPU acceleration features
+gpu = ["dep:wgpu", "dep:bytemuck"]
+cuda-wasm = ["gpu"]  # CUDA-WASM transpilation (requires gpu)
+webgpu = ["gpu"]     # WebGPU backend alias
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

@@ -1,0 +1,26 @@
+{
+  "patterns": {
+    "rust:E0308": {
+      "count": 1,
+      "category": "type-mismatch",
+      "contexts": [],
+      "lastSeen": "2025-12-25T21:19:11.236Z"
+    }
+  },
+  "fixes": {},
+  "recentErrors": [
+    {
+      "errors": [
+        {
+          "type": "rust",
+          "code": "E0308",
+          "category": "type-mismatch"
+        }
+      ],
+      "command": "cargo build",
+      "file": null,
+      "crate": null,
+      "timestamp": "2025-12-25T21:19:11.236Z"
+    }
+  ]
+}

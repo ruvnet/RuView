@@ -1,0 +1,51 @@
+[package]
+name = "sevensense-benches"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+sevensense-core.workspace = true
+sevensense-audio.workspace = true
+sevensense-embedding.workspace = true
+sevensense-vector.workspace = true
+sevensense-learning.workspace = true
+sevensense-analysis.workspace = true
+sevensense-interpretation.workspace = true
+sevensense-api.workspace = true
+
+# Core dependencies
+uuid.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+ndarray.workspace = true
+
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+ordered-float = "4.2"
+half = "2.4"
+rand = "0.8"
+
+[lib]
+name = "sevensense_benches"
+path = "src/lib.rs"
+
+[[bench]]
+name = "hnsw_benchmark"
+harness = false
+
+[[bench]]
+name = "embedding_benchmark"
+harness = false
+
+[[bench]]
+name = "clustering_benchmark"
+harness = false
+
+[[bench]]
+name = "api_benchmark"
+harness = false

@@ -1,0 +1,125 @@
+# =============================================================================
+# RuvBot - Google Cloud Build CI/CD Pipeline
+# =============================================================================
+# Trigger: Push to main branch or tag
+# Deploy to: Cloud Run (serverless)
+#
+# Cost optimization:
+# - Uses e2-standard-2 machine for builds
+# - Caches npm dependencies
+# - Multi-stage Docker builds
+# =============================================================================
+
+steps:
+  # ---------------------------------------------------------------------------
+  # Step 1: Build and Push Docker Image
+  # ---------------------------------------------------------------------------
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-image'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/ruvbot:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/ruvbot:latest'
+      - '-f'
+      - 'Dockerfile'
+      - '--cache-from'
+      - 'gcr.io/$PROJECT_ID/ruvbot:latest'
+      - '.'
+
+  # ---------------------------------------------------------------------------
+  # Step 2: Push to Container Registry
+  # ---------------------------------------------------------------------------
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-image'
+    args:
+      - 'push'
+      - '--all-tags'
+      - 'gcr.io/$PROJECT_ID/ruvbot'
+
+  # ---------------------------------------------------------------------------
+  # Step 3: Deploy to Cloud Run
+  # ---------------------------------------------------------------------------
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-cloud-run'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'ruvbot'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/ruvbot:$COMMIT_SHA'
+      - '--region'
+      - '${_REGION}'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--port'
+      - '8080'
+      - '--memory'
+      - '512Mi'
+      - '--cpu'
+      - '1'
+      - '--min-instances'
+      - '0'
+      - '--max-instances'
+      - '10'
+      - '--timeout'
+      - '300'
+      - '--concurrency'
+      - '80'
+      - '--set-env-vars'
+      - 'NODE_ENV=production'
+      - '--set-secrets'
+      - 'ANTHROPIC_API_KEY=anthropic-api-key:latest,OPENROUTER_API_KEY=openrouter-api-key:latest,DATABASE_URL=database-url:latest'
+      - '--service-account'
+      - 'ruvbot-runner@$PROJECT_ID.iam.gserviceaccount.com'
+
+  # ---------------------------------------------------------------------------
+  # Step 4: Run Database Migrations (if needed)
+  # ---------------------------------------------------------------------------
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'run-migrations'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud run jobs execute ruvbot-migrations \
+          --region ${_REGION} \
+          --wait \
+          || echo "No migrations job configured, skipping"
+
+# ---------------------------------------------------------------------------
+# Substitutions (can be overridden)
+# ---------------------------------------------------------------------------
+substitutions:
+  _REGION: 'us-central1'
+
+# ---------------------------------------------------------------------------
+# Build Options
+# ---------------------------------------------------------------------------
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
+  dynamicSubstitutions: true
+
+# ---------------------------------------------------------------------------
+# Images to push
+# ---------------------------------------------------------------------------
+images:
+  - 'gcr.io/$PROJECT_ID/ruvbot:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/ruvbot:latest'
+
+# ---------------------------------------------------------------------------
+# Timeout
+# ---------------------------------------------------------------------------
+timeout: '1200s'
+
+# ---------------------------------------------------------------------------
+# Tags for organization
+# ---------------------------------------------------------------------------
+tags:
+  - 'ruvbot'
+  - 'cloud-run'
+  - 'production'

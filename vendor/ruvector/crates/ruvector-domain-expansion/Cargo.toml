@@ -1,0 +1,37 @@
+[package]
+name = "ruvector-domain-expansion"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Cross-domain transfer learning engine: Rust synthesis, structured planning, tool orchestration"
+keywords = ["transfer-learning", "domain-expansion", "generalization", "rust-synthesis", "planning"]
+categories = ["algorithms", "science"]
+
+[features]
+default = []
+rvf = ["dep:rvf-types", "dep:rvf-wire", "dep:rvf-crypto"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+rand = { workspace = true }
+
+# RVF integration (optional, behind "rvf" feature)
+rvf-types = { version = "0.2.0", path = "../rvf/rvf-types", optional = true }
+rvf-wire = { version = "0.1.0", path = "../rvf/rvf-wire", optional = true }
+rvf-crypto = { version = "0.2.0", path = "../rvf/rvf-crypto", optional = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "domain_expansion_bench"
+harness = false
+
+[lib]
+crate-type = ["rlib"]

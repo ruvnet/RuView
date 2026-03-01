@@ -1,0 +1,48 @@
+{
+  "description": "Expected query results for validation",
+  "test_cases": [
+    {
+      "name": "count_all_nodes",
+      "query": "MATCH (n) RETURN COUNT(n)",
+      "dataset": "movie_database",
+      "expected": [{"COUNT(n)": 4}]
+    },
+    {
+      "name": "match_person_nodes",
+      "query": "MATCH (p:Person) RETURN p.name ORDER BY p.name",
+      "dataset": "movie_database",
+      "expected": [
+        {"p.name": "Carrie-Anne Moss"},
+        {"p.name": "Keanu Reeves"},
+        {"p.name": "Laurence Fishburne"}
+      ]
+    },
+    {
+      "name": "count_relationships",
+      "query": "MATCH ()-[r:ACTED_IN]->() RETURN COUNT(r)",
+      "dataset": "movie_database",
+      "expected": [{"COUNT(r)": 3}]
+    },
+    {
+      "name": "social_network_friends",
+      "query": "MATCH (p:Person {name: 'Alice'})-[:KNOWS]->(friend) RETURN friend.name ORDER BY friend.name",
+      "dataset": "social_network",
+      "expected": [
+        {"friend.name": "Bob"},
+        {"friend.name": "Charlie"}
+      ]
+    },
+    {
+      "name": "average_age",
+      "query": "MATCH (p:Person) RETURN AVG(p.age) AS avg_age",
+      "dataset": "social_network",
+      "expected": [{"avg_age": 30.4}]
+    },
+    {
+      "name": "people_born_after_1965",
+      "query": "MATCH (p:Person) WHERE p.born > 1965 RETURN p.name",
+      "dataset": "movie_database",
+      "expected": [{"p.name": "Carrie-Anne Moss"}]
+    }
+  ]
+}

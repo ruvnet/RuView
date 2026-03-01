@@ -1,0 +1,17 @@
+[package]
+name = "verified-applications"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT OR Apache-2.0"
+description = "10 exotic applications of ruvector-verified: from weapons filters to legal forensics"
+publish = false
+
+[dependencies]
+ruvector-verified = { path = "../../crates/ruvector-verified", features = ["ultra", "hnsw-proofs"] }
+rand = { workspace = true }
+anyhow = { workspace = true }
+
+[[bin]]
+name = "verified-apps"
+path = "src/main.rs"

@@ -1,0 +1,122 @@
+{
+  "name": "@ruvector/ruvllm",
+  "version": "2.5.1",
+  "description": "Self-learning LLM orchestration with SONA adaptive learning, HNSW memory, FastGRNN routing, and SIMD inference",
+  "main": "dist/cjs/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/cjs/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    },
+    "./simd": {
+      "import": {
+        "types": "./dist/esm/simd.d.ts",
+        "default": "./dist/esm/simd.js"
+      },
+      "require": {
+        "types": "./dist/cjs/simd.d.ts",
+        "default": "./dist/cjs/simd.js"
+      }
+    }
+  },
+  "bin": {
+    "ruvllm": "./bin/cli.js"
+  },
+  "napi": {
+    "binaryName": "ruvllm",
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "scripts": {
+    "artifacts": "napi artifacts",
+    "build": "npm run build:cjs && npm run build:esm",
+    "build:cjs": "tsc",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "build:native": "napi build --platform --release -p ruvllm --manifest-path ../../../examples/ruvLLM/Cargo.toml -F napi",
+    "build:debug": "napi build --platform -p ruvllm --manifest-path ../../../examples/ruvLLM/Cargo.toml -F napi",
+    "prepublishOnly": "npm run build",
+    "test": "node --test test/*.test.js",
+    "universal": "napi universal",
+    "version": "napi version",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0",
+    "@types/node": "^20.10.5",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "commander": "^12.0.0",
+    "ora": "^5.4.1"
+  },
+  "optionalDependencies": {
+    "@ruvector/ruvllm-linux-x64-gnu": "2.3.0",
+    "@ruvector/ruvllm-linux-arm64-gnu": "2.3.0",
+    "@ruvector/ruvllm-darwin-x64": "2.3.0",
+    "@ruvector/ruvllm-darwin-arm64": "2.3.0",
+    "@ruvector/ruvllm-win32-x64-msvc": "2.3.0"
+  },
+  "keywords": [
+    "ruvllm",
+    "llm",
+    "self-learning",
+    "adaptive-learning",
+    "sona",
+    "lora",
+    "ewc",
+    "hnsw",
+    "vector-database",
+    "fastgrnn",
+    "router",
+    "simd",
+    "inference",
+    "federated-learning",
+    "continual-learning",
+    "machine-learning",
+    "ai",
+    "deep-learning",
+    "napi",
+    "rust",
+    "ruvector"
+  ],
+  "author": "rUv Team <team@ruv.io>",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "npm/packages/ruvllm"
+  },
+  "homepage": "https://github.com/ruvnet/ruvector/tree/main/examples/ruvLLM",
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "engines": {
+    "node": ">= 18"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "scripts",
+    "*.node",
+    "README.md"
+  ]
+}

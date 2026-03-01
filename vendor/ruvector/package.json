@@ -1,0 +1,60 @@
+{
+  "name": "ruvector",
+  "version": "0.1.2",
+  "description": "High-performance Rust-native vector database with AgenticDB compatibility",
+  "private": true,
+  "workspaces": [
+    "crates/ruvector-node",
+    "crates/ruvector-wasm",
+    "crates/ruvector-graph-node",
+    "crates/ruvector-graph-wasm"
+  ],
+  "scripts": {
+    "build": "cargo build --release",
+    "build:node": "cd crates/ruvector-node && npm run build",
+    "build:wasm": "cd crates/ruvector-wasm && npm run build",
+    "build:graph": "npm run build:graph-node && npm run build:graph-wasm",
+    "build:graph-node": "cd crates/ruvector-graph-node && napi build --platform --release",
+    "build:graph-wasm": "cd crates/ruvector-graph-wasm && bash build.sh",
+    "build:all": "npm run build && npm run build:node && npm run build:wasm && npm run build:graph",
+    "test": "cargo test --workspace",
+    "test:graph": "cargo test -p ruvector-graph --all-features",
+    "test:integration": "cargo test --test graph_full_integration",
+    "bench": "cargo bench -p ruvector-bench",
+    "bench:graph": "cargo bench -p ruvector-graph",
+    "cli": "cargo run -p ruvector-cli --",
+    "mcp": "cargo run -p ruvector-cli --bin ruvector-mcp",
+    "example:graph": "cargo run --example simple_graph -p ruvector-graph",
+    "example:cypher": "cargo run --example cypher_queries -p ruvector-graph",
+    "example:hybrid": "cargo run --example hybrid_search -p ruvector-graph",
+    "example:distributed": "cargo run --example distributed_setup -p ruvector-graph --features distributed",
+    "lint": "cargo clippy --workspace -- -D warnings",
+    "format": "cargo fmt --all",
+    "check": "cargo check --workspace",
+    "check:graph": "cargo check -p ruvector-graph --all-features"
+  },
+  "keywords": [
+    "vector",
+    "database",
+    "embeddings",
+    "rust",
+    "hnsw",
+    "agentic",
+    "ai"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "overrides": {
+    "axios": "^1.13.2",
+    "body-parser": "^2.2.1"
+  },
+  "dependencies": {
+    "@claude-flow/memory": "^3.0.0-alpha.7"
+  }
+}

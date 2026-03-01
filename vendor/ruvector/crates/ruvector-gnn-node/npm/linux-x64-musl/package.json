@@ -1,0 +1,37 @@
+{
+  "name": "@ruvector/gnn-linux-x64-musl",
+  "version": "0.1.25",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "ruvector-gnn.linux-x64-musl.node",
+  "files": [
+    "ruvector-gnn.linux-x64-musl.node"
+  ],
+  "description": "Graph Neural Network capabilities for Ruvector - linux-x64-musl platform",
+  "keywords": [
+    "ruvector",
+    "gnn",
+    "graph-neural-network",
+    "napi-rs"
+  ],
+  "author": "Ruvector Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector"
+  },
+  "engines": {
+    "node": ">= 10"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "libc": [
+    "musl"
+  ]
+}

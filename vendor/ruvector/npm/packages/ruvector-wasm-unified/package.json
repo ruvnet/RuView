@@ -1,0 +1,85 @@
+{
+  "name": "@ruvector/wasm-unified",
+  "version": "1.0.0",
+  "description": "Unified TypeScript API surface for RuVector WASM - attention, learning, economy, and exotic features",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./attention": {
+      "import": "./dist/attention.mjs",
+      "require": "./dist/attention.js",
+      "types": "./dist/attention.d.ts"
+    },
+    "./learning": {
+      "import": "./dist/learning.mjs",
+      "require": "./dist/learning.js",
+      "types": "./dist/learning.d.ts"
+    },
+    "./nervous": {
+      "import": "./dist/nervous.mjs",
+      "require": "./dist/nervous.js",
+      "types": "./dist/nervous.d.ts"
+    },
+    "./economy": {
+      "import": "./dist/economy.mjs",
+      "require": "./dist/economy.js",
+      "types": "./dist/economy.d.ts"
+    },
+    "./exotic": {
+      "import": "./dist/exotic.mjs",
+      "require": "./dist/exotic.js",
+      "types": "./dist/exotic.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "build:watch": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src --ext .ts",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "eslint": "^8.55.0",
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.3",
+    "vitest": "^1.1.0"
+  },
+  "peerDependencies": {
+    "typescript": ">=5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "ruvector",
+    "wasm",
+    "attention",
+    "neural",
+    "learning",
+    "ai",
+    "machine-learning",
+    "webassembly"
+  ],
+  "author": "RuVector Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvector/ruvector.git",
+    "directory": "packages/ruvector-wasm-unified"
+  }
+}

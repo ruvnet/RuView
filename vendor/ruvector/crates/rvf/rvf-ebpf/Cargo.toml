@@ -1,0 +1,16 @@
+[package]
+name = "rvf-ebpf"
+version = "0.1.0"
+edition = "2021"
+description = "Real eBPF programs for RVF vector distance computation"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector"
+readme = "README.md"
+categories = ["network-programming", "os"]
+keywords = ["rvf", "ebpf", "xdp", "bpf", "vector-acceleration"]
+
+[dependencies]
+rvf-types = { version = "0.2.0", path = "../rvf-types" }
+sha3 = "0.10"
+tempfile = "3"

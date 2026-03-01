@@ -1,0 +1,45 @@
+[package]
+name = "cognitum-gate-kernel"
+version = "0.1.1"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+authors = ["RuVector Contributors"]
+description = "No-std WASM kernel for 256-tile coherence gate fabric"
+keywords = ["wasm", "coherence", "mincut", "distributed", "no_std"]
+categories = ["algorithms", "no-std", "wasm"]
+repository = "https://github.com/ruvnet/ruvector"
+readme = "README.md"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Path dependency to ruvector-mincut for shared types (only for std builds)
+ruvector-mincut = { version = "2.0", path = "../ruvector-mincut", default-features = false, features = ["wasm"], optional = true }
+
+# no_std compatible math
+libm = "0.2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# WASM-specific dependencies (none needed for core kernel)
+
+[dev-dependencies]
+proptest = "1.4"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "benchmarks"
+harness = false
+
+[features]
+default = ["std"]
+std = ["ruvector-mincut"]
+canonical-witness = []  # Canonical pseudo-deterministic witness fragments
+
+[profile.release]
+opt-level = "z"      # Optimize for size
+lto = true           # Enable LTO for smaller binaries
+codegen-units = 1    # Better optimization
+panic = "abort"      # Smaller binary, no unwinding
+strip = true         # Strip symbols

@@ -1,0 +1,268 @@
+name: RuvLLM Benchmarks
+
+on:
+  pull_request:
+    paths:
+      - 'crates/ruvllm/**'
+      - '.github/workflows/ruvllm-benchmarks.yml'
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'crates/ruvllm/**'
+  workflow_dispatch:
+    inputs:
+      run_ane_benchmarks:
+        description: 'Run ANE benchmarks (macOS only)'
+        required: false
+        default: 'true'
+        type: boolean
+      run_full_suite:
+        description: 'Run full benchmark suite (takes longer)'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  # macOS ARM64 benchmarks (Apple Silicon with ANE)
+  macos-arm64-benchmarks:
+    name: macOS ARM64 Benchmarks (M-series)
+    runs-on: macos-14  # M1/M2 runner
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-ruvllm-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-ruvllm-bench-
+            ${{ runner.os }}-cargo-build-
+
+      - name: Build ruvllm with ANE support
+        run: |
+          cargo build --release -p ruvllm --features "coreml,accelerate"
+
+      - name: Run ANE vs NEON benchmarks
+        if: github.event.inputs.run_ane_benchmarks != 'false'
+        working-directory: crates/ruvllm
+        run: |
+          # Run the ANE comparison benchmarks
+          cargo bench --features "coreml,accelerate" --bench ane_bench -- \
+            --output-format bencher 2>&1 | tee ../../ane_bench_results.txt
+
+      - name: Run crossover detection benchmark
+        if: github.event.inputs.run_full_suite == 'true'
+        working-directory: crates/ruvllm
+        run: |
+          cargo bench --features "coreml,accelerate" --bench ane_bench -- \
+            crossover_detection --output-format bencher 2>&1 | tee -a ../../ane_bench_results.txt
+
+      - name: Run hybrid pipeline benchmark
+        if: github.event.inputs.run_full_suite == 'true'
+        working-directory: crates/ruvllm
+        run: |
+          cargo bench --features "coreml,accelerate" --bench ane_bench -- \
+            hybrid_pipeline --output-format bencher 2>&1 | tee -a ../../ane_bench_results.txt
+
+      - name: Run matmul benchmarks
+        working-directory: crates/ruvllm
+        run: |
+          cargo bench --features "coreml,accelerate" --bench matmul_bench -- \
+            --output-format bencher 2>&1 | tee ../../matmul_bench_results.txt
+
+      - name: Run attention benchmarks
+        working-directory: crates/ruvllm
+        run: |
+          cargo bench --features "coreml,accelerate" --bench attention_bench -- \
+            --output-format bencher 2>&1 | tee ../../attention_bench_results.txt
+
+      - name: Generate benchmark summary
+        run: |
+          cat > benchmark_summary.md << 'EOF'
+          # RuvLLM Benchmark Results (macOS ARM64 with ANE)
+
+          ## System Information
+          - Runner: macOS 14 (Apple Silicon M-series)
+          - Features: coreml, accelerate
+
+          ## ANE vs NEON Performance
+
+          The ANE (Apple Neural Engine) benchmarks measure:
+          - Matrix multiplication at various sizes
+          - Activation functions (SiLU, GELU, Softmax)
+          - Normalization (LayerNorm, RMSNorm)
+          - Hybrid pipeline (ANE + GPU coordination)
+
+          ### Expected Performance Characteristics (M4 Pro)
+
+          | Matrix Size | ANE Advantage |
+          |-------------|---------------|
+          | < 512       | +30-50% faster |
+          | 512-1024    | +10-30% faster |
+          | 1024-1536   | ~Similar       |
+          | 1536-2048   | GPU preferred  |
+          | > 2048      | GPU wins 30-50%|
+
+          ## Results
+
+          ### ANE Benchmark Results
+          ```
+          EOF
+          head -n 100 ane_bench_results.txt >> benchmark_summary.md
+          cat >> benchmark_summary.md << 'EOF'
+          ```
+
+          ### Matrix Multiplication Results
+          ```
+          EOF
+          head -n 50 matmul_bench_results.txt >> benchmark_summary.md
+          cat >> benchmark_summary.md << 'EOF'
+          ```
+
+          ### Attention Results
+          ```
+          EOF
+          head -n 50 attention_bench_results.txt >> benchmark_summary.md
+          echo '```' >> benchmark_summary.md
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruvllm-macos-arm64-benchmarks
+          path: |
+            ane_bench_results.txt
+            matmul_bench_results.txt
+            attention_bench_results.txt
+            benchmark_summary.md
+          retention-days: 30
+
+      - name: Comment PR with results
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('benchmark_summary.md', 'utf8');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });
+
+  # Linux benchmarks (NEON only baseline)
+  linux-benchmarks:
+    name: Linux Benchmarks (NEON baseline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-cargo-ruvllm-bench-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run matmul benchmarks (NEON simulation)
+        working-directory: crates/ruvllm
+        run: |
+          cargo bench --bench matmul_bench -- --output-format bencher 2>&1 | tee ../../linux_matmul_bench.txt
+
+      - name: Run attention benchmarks
+        working-directory: crates/ruvllm
+        run: |
+          cargo bench --bench attention_bench -- --output-format bencher 2>&1 | tee ../../linux_attention_bench.txt
+
+      - name: Upload Linux benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruvllm-linux-benchmarks
+          path: |
+            linux_matmul_bench.txt
+            linux_attention_bench.txt
+          retention-days: 30
+
+  # Benchmark comparison job
+  benchmark-comparison:
+    name: Compare Benchmarks
+    runs-on: ubuntu-latest
+    needs: [macos-arm64-benchmarks, linux-benchmarks]
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Download macOS results
+        uses: actions/download-artifact@v4
+        with:
+          name: ruvllm-macos-arm64-benchmarks
+          path: macos-results
+
+      - name: Download Linux results
+        uses: actions/download-artifact@v4
+        with:
+          name: ruvllm-linux-benchmarks
+          path: linux-results
+
+      - name: Generate comparison report
+        run: |
+          cat > comparison.md << 'EOF'
+          # Cross-Platform Benchmark Comparison
+
+          ## macOS ARM64 (Apple Silicon with ANE)
+
+          ```
+          EOF
+          head -n 30 macos-results/ane_bench_results.txt >> comparison.md
+          cat >> comparison.md << 'EOF'
+          ```
+
+          ## Linux x86_64 (Baseline)
+
+          ```
+          EOF
+          head -n 30 linux-results/linux_matmul_bench.txt >> comparison.md
+          echo '```' >> comparison.md
+
+      - name: Upload comparison
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-comparison
+          path: comparison.md
+          retention-days: 30

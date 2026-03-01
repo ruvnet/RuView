@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RuVector VWM - 4D Gaussian Splatting Viewer (Canvas2D)</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a0f; color: #e0e0e8; font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; }
+    canvas { display: block; width: 100%; height: 100%; }
+    #overlay { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+    #overlay > * { pointer-events: auto; }
+    #stats-panel {
+      position: absolute; top: 12px; left: 12px;
+      background: rgba(10,10,20,0.85); backdrop-filter: blur(6px);
+      border: 1px solid rgba(100,120,255,0.25); border-radius: 8px;
+      padding: 10px 14px; font-size: 0.75rem; line-height: 1.7; min-width: 200px;
+    }
+    .label { color: #888; } .value { color: #a0c4ff; font-weight: 600; }
+    .coherence-badge {
+      position: absolute; top: 12px; right: 12px;
+      background: rgba(10,10,20,0.85); backdrop-filter: blur(6px);
+      border: 1px solid rgba(100,120,255,0.25); border-radius: 8px;
+      padding: 6px 14px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .coherence-badge.coherent { border-color: #4ade80; color: #4ade80; }
+    .coherence-badge.degraded { border-color: #facc15; color: #facc15; }
+    #transport-bar {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: rgba(10,10,20,0.9); backdrop-filter: blur(6px);
+      border-top: 1px solid rgba(100,120,255,0.2);
+      display: flex; align-items: center; gap: 12px; padding: 8px 16px; font-size: 0.75rem;
+    }
+    #play-btn {
+      background: rgba(100,120,255,0.2); border: 1px solid rgba(100,120,255,0.4);
+      color: #a0c4ff; border-radius: 4px; padding: 4px 12px; cursor: pointer;
+      font-family: inherit; font-size: 0.75rem;
+    }
+    #play-btn:hover { background: rgba(100,120,255,0.35); }
+    #time-slider { flex: 1; accent-color: #6478ff; height: 4px; }
+    #time-label { color: #888; min-width: 5rem; text-align: right; }
+    #search-box {
+      position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+      background: rgba(10,10,20,0.85); backdrop-filter: blur(6px);
+      border: 1px solid rgba(100,120,255,0.25); border-radius: 8px;
+      padding: 6px 14px; color: #e0e0e8; font-family: inherit; font-size: 0.75rem;
+      width: 240px; outline: none;
+    }
+    #search-box::placeholder { color: #555; }
+    #search-box:focus { border-color: rgba(100,120,255,0.6); }
+    #status-text { position: absolute; bottom: 44px; left: 16px; font-size: 0.65rem; color: #555; }
+    #legend {
+      position: absolute; bottom: 52px; right: 12px;
+      background: rgba(10,10,20,0.85); backdrop-filter: blur(6px);
+      border: 1px solid rgba(100,120,255,0.15); border-radius: 8px;
+      padding: 8px 12px; font-size: 0.65rem; line-height: 1.8;
+    }
+    .legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  </style>
+</head>
+<body>
+  <canvas id="viewport"></canvas>
+  <div id="overlay">
+    <div id="stats-panel">
+      <div><span class="label">FPS </span><span class="value" id="fps-value">--</span></div>
+      <div><span class="label">Gaussians </span><span class="value" id="gaussian-count">0</span></div>
+      <div><span class="label">Visible </span><span class="value" id="visible-count">0</span></div>
+      <div><span class="label">Mode </span><span class="value">canvas2d</span></div>
+      <div><span class="label">Entities </span><span class="value" id="entity-count">5</span></div>
+    </div>
+    <div id="coherence-state" class="coherence-badge coherent">coherent</div>
+    <input id="search-box" type="text" placeholder="Search: background, planet, shuttle, core..." />
+    <div id="status-text">initializing...</div>
+    <div id="legend">
+      <div><span class="legend-dot" style="background:#4466cc"></span>background (60%)</div>
+      <div><span class="legend-dot" style="background:#ee6633"></span>planet-alpha (15%)</div>
+      <div><span class="legend-dot" style="background:#44cc66"></span>planet-beta (10%)</div>
+      <div><span class="legend-dot" style="background:#eeee55"></span>shuttle (5%)</div>
+      <div><span class="legend-dot" style="background:#ee88ff"></span>core (10%)</div>
+    </div>
+    <div id="transport-bar">
+      <button id="play-btn">Pause</button>
+      <input id="time-slider" type="range" min="0" max="1000" value="0" />
+      <span id="time-label">t=0.000</span>
+    </div>
+  </div>
+
+  <script>
+  // ---- Demo Data Generator (same algorithm as demo-data.js) ----
+  function rand(a, b) { return Math.random() * (b - a) + a; }
+
+  function generateGaussians(count, timeSteps) {
+    const gs = [], labels = [];
+    const bgN = Math.floor(count * 0.6);
+    for (let i = 0; i < bgN; i++) {
+      const r = rand(2, 12), th = rand(0, Math.PI*2), ph = rand(-Math.PI/2, Math.PI/2);
+      gs.push({ positions: [[r*Math.cos(ph)*Math.sin(th), r*Math.sin(ph), r*Math.cos(ph)*Math.cos(th)]],
+        color: [rand(0.15,0.35), rand(0.15,0.35), rand(0.4,0.7)], opacity: rand(0.3,0.7),
+        scale: [rand(0.05,0.15), rand(0.05,0.15), rand(0.05,0.15)] });
+      labels.push('background');
+    }
+    function orbit(n, radius, colorFn, label) {
+      for (let i = 0; i < n; i++) {
+        const ox=rand(-0.4,0.4), oy=rand(-0.4,0.4), oz=rand(-0.4,0.4), positions=[];
+        for (let t=0; t<timeSteps; t++) {
+          const a = (t/timeSteps)*Math.PI*2;
+          positions.push([radius*Math.sin(a)+ox, Math.sin(a*2)*0.5+oy, radius*Math.cos(a)+oz]);
+        }
+        gs.push({ positions, color: colorFn(), opacity: rand(0.6,0.95), scale: [rand(0.08,0.2),rand(0.08,0.2),rand(0.08,0.2)] });
+        labels.push(label);
+      }
+    }
+    orbit(Math.floor(count*0.15), 3.0, ()=>[rand(0.8,1),rand(0.3,0.5),rand(0.1,0.3)], 'planet-alpha');
+    orbit(Math.floor(count*0.1), 5.0, ()=>[rand(0.2,0.4),rand(0.8,1),rand(0.3,0.5)], 'planet-beta');
+    const shN = Math.floor(count*0.05);
+    for (let i=0; i<shN; i++) {
+      const ox=rand(-0.2,0.2), oy=rand(-0.2,0.2), oz=rand(-0.2,0.2), positions=[];
+      for (let t=0; t<timeSteps; t++) {
+        const f=t/timeSteps, cx=(f<0.5?f*2-0.5:1.5-f*2)*10;
+        positions.push([cx+ox, 2+oy, oz]);
+      }
+      gs.push({ positions, color: [rand(0.9,1),rand(0.9,1),rand(0.3,0.5)], opacity: rand(0.7,1), scale: [rand(0.05,0.12),rand(0.05,0.12),rand(0.15,0.3)] });
+      labels.push('shuttle');
+    }
+    const coreN = count - bgN - Math.floor(count*0.15) - Math.floor(count*0.1) - shN;
+    for (let i=0; i<coreN; i++) {
+      const a=(i/coreN)*Math.PI*2, br=rand(0.2,0.6), x=br*Math.cos(a), z=br*Math.sin(a), positions=[];
+      for (let t=0; t<timeSteps; t++) {
+        const p=1+0.3*Math.sin((t/timeSteps)*Math.PI*4);
+        positions.push([x*p, rand(-0.1,0.1), z*p]);
+      }
+      gs.push({ positions, color: [rand(0.9,1),rand(0.5,0.7),rand(0.8,1)], opacity: rand(0.7,1), scale: [rand(0.1,0.25),rand(0.1,0.25),rand(0.1,0.25)] });
+      labels.push('core');
+    }
+    return { gaussians: gs, labels, timeSteps };
+  }
+
+  function samplePos(g, t) {
+    const p = g.positions;
+    if (p.length === 1) return p[0];
+    const ft = t*(p.length-1), i0 = Math.floor(ft), i1 = Math.min(i0+1,p.length-1), f = ft-i0;
+    return [p[i0][0]+(p[i1][0]-p[i0][0])*f, p[i0][1]+(p[i1][1]-p[i0][1])*f, p[i0][2]+(p[i1][2]-p[i0][2])*f];
+  }
+
+  // ---- Camera (orbit) ----
+  class Camera {
+    constructor() {
+      this.theta = 0.3; this.phi = 0.3; this.radius = 14;
+      this.target = [0,0,0]; this.fov = Math.PI/4;
+    }
+    eye() {
+      return [
+        this.target[0]+this.radius*Math.cos(this.phi)*Math.sin(this.theta),
+        this.target[1]+this.radius*Math.sin(this.phi),
+        this.target[2]+this.radius*Math.cos(this.phi)*Math.cos(this.theta)
+      ];
+    }
+    viewProj(w, h) {
+      // Build view matrix
+      const e = this.eye(), t = this.target;
+      let fx=e[0]-t[0], fy=e[1]-t[1], fz=e[2]-t[2];
+      let l=Math.sqrt(fx*fx+fy*fy+fz*fz); fx/=l; fy/=l; fz/=l;
+      let rx=fy*0-0*fz, ry=0*fx-1*fz, rz=1*fy-fy*fx; // up=[0,1,0] x forward... simplified
+      // Proper cross: up x forward
+      rx = 1*fz - 0*fy; ry = 0*fx - 0*fz; rz = 0*fy - 1*fx;
+      // Actually: up=[0,1,0], cross(up, f) = [up.y*fz - up.z*fy, up.z*fx - up.x*fz, up.x*fy - up.y*fx]
+      rx = fz; ry = 0; rz = -fx;
+      l=Math.sqrt(rx*rx+ry*ry+rz*rz); if(l>1e-6){rx/=l; ry/=l; rz/=l;}
+      const ux=fy*rz-fz*ry, uy=fz*rx-fx*rz, uz=fx*ry-fy*rx;
+      const V = [
+        rx,ux,fx,0, ry,uy,fy,0, rz,uz,fz,0,
+        -(rx*e[0]+ry*e[1]+rz*e[2]), -(ux*e[0]+uy*e[1]+uz*e[2]), -(fx*e[0]+fy*e[1]+fz*e[2]), 1
+      ];
+      // Build projection
+      const f = 1/Math.tan(this.fov/2), a = w/h, ri = 1/(0.1-200);
+      const P = [f/a,0,0,0, 0,f,0,0, 0,0,200*ri,-1, 0,0,200*0.1*ri,0];
+      // Multiply P * V
+      const M = new Array(16);
+      for (let i=0;i<4;i++) for (let j=0;j<4;j++) {
+        M[j*4+i] = P[0*4+i]*V[j*4+0]+P[1*4+i]*V[j*4+1]+P[2*4+i]*V[j*4+2]+P[3*4+i]*V[j*4+3];
+      }
+      return M;
+    }
+  }
+
+  // ---- Main ----
+  const canvas = document.getElementById('viewport');
+  const ctx = canvas.getContext('2d');
+  const cam = new Camera();
+  const COUNT = 2000, STEPS = 120;
+  const demo = generateGaussians(COUNT, STEPS);
+  const activeMask = new Array(COUNT).fill(true);
+  let animTime = 0, playing = true;
+  let searchQuery = '';
+
+  // Coherence simulation
+  const coherenceStates = ['coherent','coherent','coherent','degraded','coherent'];
+  let coherenceIdx = 0, coherenceTimer = 0;
+
+  // DOM refs
+  const fpsEl = document.getElementById('fps-value');
+  const gcEl = document.getElementById('gaussian-count');
+  const vcEl = document.getElementById('visible-count');
+  const cohEl = document.getElementById('coherence-state');
+  const statusEl = document.getElementById('status-text');
+  const slider = document.getElementById('time-slider');
+  const timeLabel = document.getElementById('time-label');
+
+  gcEl.textContent = COUNT.toLocaleString();
+  statusEl.textContent = `Demo: ${COUNT} gaussians, 5 entity groups, ${STEPS} time steps`;
+
+  // Mouse orbit
+  let dragging = false, lx = 0, ly = 0;
+  canvas.addEventListener('mousedown', e => { dragging=true; lx=e.clientX; ly=e.clientY; });
+  window.addEventListener('mouseup', () => dragging=false);
+  window.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    cam.theta -= (e.clientX-lx)*0.005; cam.phi += (e.clientY-ly)*0.005;
+    cam.phi = Math.max(-1.5,Math.min(1.5,cam.phi));
+    lx=e.clientX; ly=e.clientY;
+  });
+  canvas.addEventListener('wheel', e => { e.preventDefault(); cam.radius *= 1+e.deltaY*0.001; cam.radius = Math.max(1,Math.min(50,cam.radius)); }, {passive:false});
+
+  // UI
+  document.getElementById('play-btn').addEventListener('click', () => {
+    playing = !playing;
+    document.getElementById('play-btn').textContent = playing ? 'Pause' : 'Play';
+  });
+  slider.addEventListener('input', () => {
+    animTime = parseInt(slider.value)/1000; playing = false;
+    document.getElementById('play-btn').textContent = 'Play';
+    timeLabel.textContent = `t=${animTime.toFixed(3)}`;
+  });
+  document.getElementById('search-box').addEventListener('input', e => {
+    searchQuery = e.target.value.trim().toLowerCase();
+    for (let i = 0; i < COUNT; i++) activeMask[i] = !searchQuery || demo.labels[i].includes(searchQuery);
+  });
+
+  // FPS
+  const frameTimes = [];
+
+  // Render loop
+  let lastT = performance.now();
+  function frame(now) {
+    requestAnimationFrame(frame);
+    const dt = (now - lastT)/1000; lastT = now;
+
+    // Canvas resize
+    const dpr = window.devicePixelRatio || 1;
+    const cw = Math.floor(canvas.clientWidth * dpr), ch = Math.floor(canvas.clientHeight * dpr);
+    if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
+
+    // Animation
+    if (playing) { animTime = (animTime + dt * 0.15) % 1; slider.value = Math.round(animTime*1000); timeLabel.textContent = `t=${animTime.toFixed(3)}`; }
+
+    // Coherence
+    coherenceTimer += dt;
+    if (coherenceTimer > 5) { coherenceTimer=0; coherenceIdx=(coherenceIdx+1)%coherenceStates.length;
+      const s=coherenceStates[coherenceIdx]; cohEl.textContent=s; cohEl.className='coherence-badge '+s; }
+
+    // Project & sort
+    const W = canvas.width, H = canvas.height;
+    const vp = cam.viewProj(W, H);
+    const focal = H / (2 * Math.tan(cam.fov/2));
+    const projected = [];
+
+    for (let i = 0; i < COUNT; i++) {
+      if (!activeMask[i]) continue;
+      const g = demo.gaussians[i];
+      const [wx,wy,wz] = samplePos(g, animTime);
+      const cx=vp[0]*wx+vp[4]*wy+vp[8]*wz+vp[12];
+      const cy=vp[1]*wx+vp[5]*wy+vp[9]*wz+vp[13];
+      const cz=vp[2]*wx+vp[6]*wy+vp[10]*wz+vp[14];
+      const cw2=vp[3]*wx+vp[7]*wy+vp[11]*wz+vp[15];
+      if (cw2 <= 0.001) continue;
+      const nx=cx/cw2, ny=cy/cw2;
+      const sx=(nx*0.5+0.5)*W, sy=(1-(ny*0.5+0.5))*H;
+      if (sx<-100||sx>W+100||sy<-100||sy>H+100) continue;
+      const avgS = (g.scale[0]+g.scale[1]+g.scale[2])/3;
+      const pr = (focal*avgS)/cw2;
+      if (pr < 0.3) continue;
+      const sigma = Math.max(pr*0.5, 0.5);
+      projected.push({ sx, sy, depth: cz/cw2, sigma, r: g.color[0], g: g.color[1], b: g.color[2], opacity: g.opacity });
+    }
+
+    // Sort back to front
+    projected.sort((a,b) => b.depth - a.depth);
+
+    // Draw
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#0a0a0f';
+    ctx.fillRect(0, 0, W, H);
+
+    for (const p of projected) {
+      const rad = Math.min(p.sigma * 3, 300);
+      if (rad < 0.5) continue;
+      const gradient = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, rad);
+      const r = Math.round(p.r*255), g = Math.round(p.g*255), b = Math.round(p.b*255);
+      gradient.addColorStop(0, `rgba(${r},${g},${b},${p.opacity})`);
+      gradient.addColorStop(0.5, `rgba(${r},${g},${b},${p.opacity*0.3})`);
+      gradient.addColorStop(1, `rgba(${r},${g},${b},0)`);
+      ctx.fillStyle = gradient;
+      ctx.fillRect(p.sx - rad, p.sy - rad, rad*2, rad*2);
+    }
+
+    // FPS
+    frameTimes.push(now);
+    if (frameTimes.length > 60) frameTimes.shift();
+    if (frameTimes.length > 1) {
+      const fps = 1000 / ((frameTimes[frameTimes.length-1]-frameTimes[0])/(frameTimes.length-1));
+      fpsEl.textContent = fps.toFixed(1);
+    }
+    vcEl.textContent = projected.length.toLocaleString();
+  }
+  requestAnimationFrame(frame);
+  </script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "name": "@ruvector/rvf-node-linux-x64-gnu",
+  "version": "0.1.7",
+  "cpu": [
+    "x64"
+  ],
+  "main": "rvf-node.linux-x64-gnu.node",
+  "files": [
+    "rvf-node.linux-x64-gnu.node"
+  ],
+  "description": "RuVector Format Node.js native bindings",
+  "license": "MIT",
+  "os": [
+    "linux"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  }
+}

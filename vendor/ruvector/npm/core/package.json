@@ -1,0 +1,68 @@
+{
+  "name": "@ruvector/core",
+  "version": "0.1.17",
+  "description": "High-performance Rust vector database for Node.js with HNSW indexing and SIMD optimizations",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "engines": {
+    "node": ">= 18"
+  },
+  "scripts": {
+    "build": "npm run build:esm && npm run build:cjs && npm run build:rename-cjs",
+    "build:esm": "tsc --project tsconfig.json",
+    "build:cjs": "tsc --project tsconfig.cjs.json",
+    "build:rename-cjs": "mv dist-cjs/index.cjs.js dist/index.cjs && rm -rf dist-cjs",
+    "prepublishOnly": "npm run build",
+    "test": "node --test",
+    "clean": "rm -rf dist dist-cjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.25",
+    "typescript": "^5.9.3"
+  },
+  "optionalDependencies": {
+    "@ruvector/attention": "^0.1.0"
+  },
+  "files": [
+    "dist",
+    "platforms",
+    "native",
+    "*.node",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "vector",
+    "database",
+    "embeddings",
+    "similarity-search",
+    "hnsw",
+    "rust",
+    "napi",
+    "semantic-search",
+    "machine-learning",
+    "rag",
+    "simd",
+    "performance",
+    "napi-rs"
+  ],
+  "author": "rUv",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "npm/core"
+  },
+  "homepage": "https://github.com/ruvnet/ruvector#readme",
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  }
+}

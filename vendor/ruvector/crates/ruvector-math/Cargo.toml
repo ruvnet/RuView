@@ -1,0 +1,54 @@
+[package]
+name = "ruvector-math"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Advanced mathematics for next-gen vector search: Optimal Transport, Information Geometry, Product Manifolds"
+keywords = ["vector-search", "optimal-transport", "wasserstein", "information-geometry", "hyperbolic"]
+categories = ["mathematics", "science", "algorithms"]
+
+[features]
+default = ["std"]
+std = []
+simd = []
+parallel = ["rayon"]
+serde = ["dep:serde"]
+
+[dependencies]
+# Core math - pure Rust, no BLAS (WASM compatible)
+nalgebra = { version = "0.33", default-features = false, features = ["std"] }
+rand = { workspace = true }
+rand_distr = { workspace = true }
+thiserror = { workspace = true }
+
+# Optional features
+rayon = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+proptest = { workspace = true }
+approx = "0.5"
+
+[[bench]]
+name = "optimal_transport"
+harness = false
+
+[[bench]]
+name = "information_geometry"
+harness = false
+
+[[bench]]
+name = "product_manifold"
+harness = false
+
+[[bench]]
+name = "tropical"
+harness = false
+
+[[bench]]
+name = "spectral"
+harness = false

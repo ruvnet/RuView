@@ -1,0 +1,66 @@
+[package]
+name = "prime-radiant-advanced-wasm"
+version = "0.1.0"
+edition = "2021"
+authors = ["Prime-Radiant Team"]
+license = "MIT OR Apache-2.0"
+description = "WASM bindings for Prime-Radiant Advanced Math modules"
+repository = "https://github.com/ruvnet/ruvector"
+keywords = ["wasm", "category-theory", "homotopy-type-theory", "spectral-analysis", "causal-inference"]
+categories = ["wasm", "mathematics", "science"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["console_error_panic_hook"]
+# Enable parallel computation in web workers
+parallel = ["rayon", "wasm-bindgen-rayon"]
+
+[dependencies]
+# WASM bindings
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "console",
+    "Performance",
+    "Window",
+] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde-wasm-bindgen = "0.6"
+
+# Random number generation for WASM
+getrandom = { version = "0.2", features = ["js"] }
+
+# Error handling in WASM
+console_error_panic_hook = { version = "0.1", optional = true }
+
+# Async support
+wasm-bindgen-futures = "0.4"
+
+# Local prime-radiant module
+# Note: In production, use: prime-radiant = { path = ".." }
+# For now we implement the engines directly
+
+# Optional parallel support
+rayon = { version = "1.10", optional = true }
+wasm-bindgen-rayon = { version = "1.2", optional = true }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[profile.release]
+# Optimize for small binary size
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Os", "--enable-mutable-globals"]
+
+# Exclude from parent workspace
+[workspace]

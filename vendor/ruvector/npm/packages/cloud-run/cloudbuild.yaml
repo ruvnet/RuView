@@ -1,0 +1,250 @@
+# Cloud Build configuration for ruvector streaming service
+# Multi-region deployment with canary strategy
+
+steps:
+  # Step 1: Build Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-image'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/ruvector-streaming:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/ruvector-streaming:latest'
+      - '-f'
+      - 'src/cloud-run/Dockerfile'
+      - '--cache-from'
+      - 'gcr.io/$PROJECT_ID/ruvector-streaming:latest'
+      - '--build-arg'
+      - 'BUILDKIT_INLINE_CACHE=1'
+      - '.'
+    timeout: 1800s
+
+  # Step 2: Push image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-image'
+    args:
+      - 'push'
+      - '--all-tags'
+      - 'gcr.io/$PROJECT_ID/ruvector-streaming'
+    waitFor: ['build-image']
+
+  # Step 3: Run tests
+  - name: 'gcr.io/$PROJECT_ID/ruvector-streaming:$COMMIT_SHA'
+    id: 'run-tests'
+    entrypoint: '/nodejs/bin/node'
+    args:
+      - '-e'
+      - 'console.log("Tests would run here")'
+    waitFor: ['push-image']
+
+  # Step 4: Security scan
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'security-scan'
+    args:
+      - 'container'
+      - 'images'
+      - 'scan'
+      - 'gcr.io/$PROJECT_ID/ruvector-streaming:$COMMIT_SHA'
+    waitFor: ['push-image']
+
+  # Step 5: Deploy to Cloud Run - US Central (10% canary)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-us-central-canary'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'ruvector-streaming-us-central'
+      - '--image=gcr.io/$PROJECT_ID/ruvector-streaming:$COMMIT_SHA'
+      - '--region=us-central1'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--memory=4Gi'
+      - '--cpu=4'
+      - '--min-instances=2'
+      - '--max-instances=1000'
+      - '--concurrency=1000'
+      - '--timeout=300s'
+      - '--set-env-vars=NODE_ENV=production,MAX_CONNECTIONS=100000,ENABLE_METRICS=true,ENABLE_TRACING=true,SERVICE_VERSION=$COMMIT_SHA'
+      - '--tag=canary'
+      - '--no-traffic'
+    waitFor: ['run-tests', 'security-scan']
+
+  # Step 6: Gradual rollout to US Central (50%)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'rollout-us-central-50'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'services'
+      - 'update-traffic'
+      - 'ruvector-streaming-us-central'
+      - '--region=us-central1'
+      - '--to-tags=canary=50'
+    waitFor: ['deploy-us-central-canary']
+
+  # Step 7: Health check
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'health-check-us-central'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        SERVICE_URL=$(gcloud run services describe ruvector-streaming-us-central --region=us-central1 --format='value(status.url)')
+        for i in {1..30}; do
+          if curl -f "$SERVICE_URL/health"; then
+            echo "Health check passed"
+            exit 0
+          fi
+          echo "Waiting for service to be healthy... ($i/30)"
+          sleep 10
+        done
+        echo "Health check failed"
+        exit 1
+    waitFor: ['rollout-us-central-50']
+
+  # Step 8: Full rollout to US Central (100%)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'rollout-us-central-100'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'services'
+      - 'update-traffic'
+      - 'ruvector-streaming-us-central'
+      - '--region=us-central1'
+      - '--to-latest'
+    waitFor: ['health-check-us-central']
+
+  # Step 9: Deploy to Europe West
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-europe-west'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'ruvector-streaming-europe-west'
+      - '--image=gcr.io/$PROJECT_ID/ruvector-streaming:$COMMIT_SHA'
+      - '--region=europe-west1'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--memory=4Gi'
+      - '--cpu=4'
+      - '--min-instances=2'
+      - '--max-instances=1000'
+      - '--concurrency=1000'
+      - '--timeout=300s'
+      - '--set-env-vars=NODE_ENV=production,MAX_CONNECTIONS=100000,ENABLE_METRICS=true,ENABLE_TRACING=true,SERVICE_VERSION=$COMMIT_SHA'
+    waitFor: ['rollout-us-central-100']
+
+  # Step 10: Deploy to Asia East
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-asia-east'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'ruvector-streaming-asia-east'
+      - '--image=gcr.io/$PROJECT_ID/ruvector-streaming:$COMMIT_SHA'
+      - '--region=asia-east1'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--memory=4Gi'
+      - '--cpu=4'
+      - '--min-instances=2'
+      - '--max-instances=1000'
+      - '--concurrency=1000'
+      - '--timeout=300s'
+      - '--set-env-vars=NODE_ENV=production,MAX_CONNECTIONS=100000,ENABLE_METRICS=true,ENABLE_TRACING=true,SERVICE_VERSION=$COMMIT_SHA'
+    waitFor: ['rollout-us-central-100']
+
+  # Step 11: Setup Global Load Balancer
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'setup-global-lb'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        # Create backend service if not exists
+        gcloud compute backend-services describe ruvector-streaming-backend --global || \
+        gcloud compute backend-services create ruvector-streaming-backend \
+          --global \
+          --load-balancing-scheme=EXTERNAL_MANAGED \
+          --protocol=HTTP2 \
+          --health-checks=ruvector-streaming-health-check \
+          --enable-cdn \
+          --cache-mode=USE_ORIGIN_HEADERS
+
+        # Add regional backends
+        for region in us-central1 europe-west1 asia-east1; do
+          NEG_NAME="ruvector-streaming-$region-neg"
+          gcloud compute network-endpoint-groups describe $NEG_NAME --region=$region || \
+          gcloud compute network-endpoint-groups create $NEG_NAME \
+            --region=$region \
+            --network-endpoint-type=SERVERLESS \
+            --cloud-run-service=ruvector-streaming-$region
+
+          gcloud compute backend-services add-backend ruvector-streaming-backend \
+            --global \
+            --network-endpoint-group=$NEG_NAME \
+            --network-endpoint-group-region=$region || true
+        done
+
+        # Create URL map
+        gcloud compute url-maps describe ruvector-streaming-url-map || \
+        gcloud compute url-maps create ruvector-streaming-url-map \
+          --default-service=ruvector-streaming-backend
+
+        # Create HTTPS proxy
+        gcloud compute target-https-proxies describe ruvector-streaming-https-proxy || \
+        gcloud compute target-https-proxies create ruvector-streaming-https-proxy \
+          --url-map=ruvector-streaming-url-map \
+          --ssl-certificates=ruvector-ssl-cert
+
+        # Create forwarding rule
+        gcloud compute forwarding-rules describe ruvector-streaming-https-rule --global || \
+        gcloud compute forwarding-rules create ruvector-streaming-https-rule \
+          --global \
+          --target-https-proxy=ruvector-streaming-https-proxy \
+          --ports=443
+    waitFor: ['deploy-europe-west', 'deploy-asia-east']
+
+  # Step 12: Notify deployment
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'notify-deployment'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Deployment completed successfully!"
+        echo "Commit: $COMMIT_SHA"
+        echo "Regions: us-central1, europe-west1, asia-east1"
+        echo "Image: gcr.io/$PROJECT_ID/ruvector-streaming:$COMMIT_SHA"
+    waitFor: ['setup-global-lb']
+
+# Build options
+options:
+  machineType: 'E2_HIGHCPU_8'
+  diskSizeGb: 100
+  logging: CLOUD_LOGGING_ONLY
+  dynamic_substitutions: true
+
+# Timeout
+timeout: 3600s
+
+# Substitutions
+substitutions:
+  _SERVICE_VERSION: 'v1.0.0'
+
+# Images to push
+images:
+  - 'gcr.io/$PROJECT_ID/ruvector-streaming:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/ruvector-streaming:latest'
+
+# Artifacts
+artifacts:
+  objects:
+    location: 'gs://$PROJECT_ID-build-artifacts'
+    paths:
+      - 'dist/**/*'

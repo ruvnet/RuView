@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ruvector WASM - Vanilla JS Example</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+
+    h1 {
+      color: #667eea;
+      margin-bottom: 10px;
+      font-size: 2.5em;
+    }
+
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+      font-size: 1.1em;
+    }
+
+    .status {
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      font-weight: 500;
+    }
+
+    .status.info {
+      background: #e3f2fd;
+      color: #1976d2;
+    }
+
+    .status.success {
+      background: #e8f5e9;
+      color: #388e3c;
+    }
+
+    .status.error {
+      background: #ffebee;
+      color: #c62828;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 10px;
+      margin-bottom: 30px;
+    }
+
+    button {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      color: white;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-primary {
+      background: #667eea;
+    }
+
+    .btn-success {
+      background: #51cf66;
+    }
+
+    .btn-danger {
+      background: #ff6b6b;
+    }
+
+    .btn-info {
+      background: #4dabf7;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 15px;
+      margin-bottom: 30px;
+    }
+
+    .stat-card {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 20px;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 2em;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+
+    .stat-label {
+      font-size: 0.9em;
+      opacity: 0.9;
+    }
+
+    .results {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 20px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .results h3 {
+      color: #495057;
+      margin-bottom: 15px;
+    }
+
+    .result-item {
+      background: white;
+      padding: 12px;
+      margin-bottom: 10px;
+      border-radius: 6px;
+      border-left: 4px solid #667eea;
+    }
+
+    .result-id {
+      font-weight: 600;
+      color: #495057;
+      margin-bottom: 5px;
+    }
+
+    .result-score {
+      color: #667eea;
+      font-family: 'Courier New', monospace;
+    }
+
+    .loading {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(255,255,255,0.3);
+      border-radius: 50%;
+      border-top-color: white;
+      animation: spin 1s ease-in-out infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    pre {
+      background: #2d3748;
+      color: #e2e8f0;
+      padding: 15px;
+      border-radius: 6px;
+      overflow-x: auto;
+      margin-top: 10px;
+    }
+
+    code {
+      font-family: 'Courier New', monospace;
+      font-size: 0.9em;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🚀 Ruvector WASM</h1>
+    <p class="subtitle">High-performance vector database running in your browser</p>
+
+    <div id="status" class="status info">
+      <div class="loading"></div> Initializing WASM module...
+    </div>
+
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-value" id="vectorCount">0</div>
+        <div class="stat-label">Vectors</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="dimensions">384</div>
+        <div class="stat-label">Dimensions</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="simdSupport">❌</div>
+        <div class="stat-label">SIMD</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="lastOpTime">-</div>
+        <div class="stat-label">Last Op (ms)</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="btn-primary" onclick="insertRandomVectors()">
+        Insert 100 Vectors
+      </button>
+      <button class="btn-success" onclick="searchSimilar()">
+        Search Similar
+      </button>
+      <button class="btn-info" onclick="runBenchmark()">
+        Run Benchmark
+      </button>
+      <button class="btn-danger" onclick="clearDatabase()">
+        Clear All
+      </button>
+    </div>
+
+    <div class="results">
+      <h3>Results</h3>
+      <div id="results">
+        <p style="color: #6c757d;">No operations yet. Try inserting some vectors!</p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import init, { VectorDB, detectSIMD, version, benchmark } from '../../crates/ruvector-wasm/pkg/ruvector_wasm.js';
+
+    let db = null;
+    const DIMENSIONS = 384;
+
+    // Initialize WASM
+    async function initWasm() {
+      try {
+        await init();
+
+        const simd = detectSIMD();
+        document.getElementById('simdSupport').textContent = simd ? '✅' : '❌';
+
+        db = new VectorDB(DIMENSIONS, 'cosine', true);
+
+        updateStatus('success', `✅ Ruvector v${version()} initialized successfully! SIMD: ${simd ? 'Enabled' : 'Disabled'}`);
+        updateVectorCount();
+      } catch (error) {
+        updateStatus('error', `❌ Failed to initialize: ${error.message}`);
+        console.error(error);
+      }
+    }
+
+    // Update status message
+    function updateStatus(type, message) {
+      const statusEl = document.getElementById('status');
+      statusEl.className = `status ${type}`;
+      statusEl.innerHTML = message;
+    }
+
+    // Update vector count
+    async function updateVectorCount() {
+      if (!db) return;
+      try {
+        const count = db.len();
+        document.getElementById('vectorCount').textContent = count;
+      } catch (error) {
+        console.error('Failed to get count:', error);
+      }
+    }
+
+    // Generate random vector
+    function randomVector(dimensions) {
+      const vector = new Float32Array(dimensions);
+      for (let i = 0; i < dimensions; i++) {
+        vector[i] = Math.random() * 2 - 1;
+      }
+      // Normalize
+      const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
+      for (let i = 0; i < dimensions; i++) {
+        vector[i] /= norm;
+      }
+      return vector;
+    }
+
+    // Insert random vectors
+    window.insertRandomVectors = async function() {
+      if (!db) {
+        updateStatus('error', '❌ Database not initialized');
+        return;
+      }
+
+      const startTime = performance.now();
+
+      try {
+        const entries = [];
+        for (let i = 0; i < 100; i++) {
+          entries.push({
+            vector: randomVector(DIMENSIONS),
+            id: `vec_${Date.now()}_${i}`,
+            metadata: { index: i, timestamp: Date.now() }
+          });
+        }
+
+        const ids = db.insertBatch(entries);
+
+        const duration = performance.now() - startTime;
+        document.getElementById('lastOpTime').textContent = duration.toFixed(2);
+
+        updateStatus('success', `✅ Inserted ${ids.length} vectors in ${duration.toFixed(2)}ms`);
+        updateVectorCount();
+
+        showResults([
+          { title: 'Operation', value: 'Batch Insert' },
+          { title: 'Count', value: ids.length },
+          { title: 'Duration', value: `${duration.toFixed(2)}ms` },
+          { title: 'Throughput', value: `${(ids.length / (duration / 1000)).toFixed(0)} vectors/sec` }
+        ]);
+      } catch (error) {
+        updateStatus('error', `❌ Insert failed: ${error.message}`);
+        console.error(error);
+      }
+    };
+
+    // Search for similar vectors
+    window.searchSimilar = async function() {
+      if (!db) {
+        updateStatus('error', '❌ Database not initialized');
+        return;
+      }
+
+      const startTime = performance.now();
+
+      try {
+        const query = randomVector(DIMENSIONS);
+        const results = db.search(query, 10, null);
+
+        const duration = performance.now() - startTime;
+        document.getElementById('lastOpTime').textContent = duration.toFixed(2);
+
+        updateStatus('success', `✅ Found ${results.length} similar vectors in ${duration.toFixed(2)}ms`);
+
+        const resultItems = results.map((r, i) => ({
+          title: `#${i + 1}: ${r.id}`,
+          value: `Score: ${r.score.toFixed(6)}`
+        }));
+
+        showResults(resultItems);
+      } catch (error) {
+        updateStatus('error', `❌ Search failed: ${error.message}`);
+        console.error(error);
+      }
+    };
+
+    // Run benchmark
+    window.runBenchmark = async function() {
+      if (!db) {
+        updateStatus('error', '❌ Database not initialized');
+        return;
+      }
+
+      updateStatus('info', '🔄 Running benchmark...');
+
+      try {
+        const opsPerSec = benchmark('insert_benchmark', 1000, DIMENSIONS);
+
+        updateStatus('success', `✅ Benchmark complete: ${opsPerSec.toFixed(0)} ops/sec`);
+
+        showResults([
+          { title: 'Benchmark', value: 'Insert Performance' },
+          { title: 'Operations', value: '1000' },
+          { title: 'Throughput', value: `${opsPerSec.toFixed(0)} ops/sec` }
+        ]);
+      } catch (error) {
+        updateStatus('error', `❌ Benchmark failed: ${error.message}`);
+        console.error(error);
+      }
+    };
+
+    // Clear database
+    window.clearDatabase = async function() {
+      if (!db) {
+        updateStatus('error', '❌ Database not initialized');
+        return;
+      }
+
+      if (!confirm('Are you sure you want to clear all vectors?')) {
+        return;
+      }
+
+      try {
+        // Recreate database
+        db = new VectorDB(DIMENSIONS, 'cosine', true);
+
+        updateStatus('success', '✅ Database cleared');
+        updateVectorCount();
+
+        document.getElementById('results').innerHTML =
+          '<p style="color: #6c757d;">Database cleared. Ready for new vectors!</p>';
+      } catch (error) {
+        updateStatus('error', `❌ Clear failed: ${error.message}`);
+        console.error(error);
+      }
+    };
+
+    // Show results
+    function showResults(items) {
+      const resultsEl = document.getElementById('results');
+      resultsEl.innerHTML = items.map(item => `
+        <div class="result-item">
+          <div class="result-id">${item.title}</div>
+          <div class="result-score">${item.value}</div>
+        </div>
+      `).join('');
+    }
+
+    // Initialize on load
+    initWasm();
+  </script>
+</body>
+</html>

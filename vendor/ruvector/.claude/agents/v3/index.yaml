@@ -1,0 +1,17 @@
+# Generated Agent Index
+# Focus: quality
+# Generated: 2026-01-04T16:47:39.389Z
+
+agents:
+  - typescript-specialist
+  - python-specialist
+  - database-specialist
+  - test-architect
+  - project-coordinator
+
+detected:
+  languages:
+    - typescript
+    - python
+  frameworks:
+    - database

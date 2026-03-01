@@ -1,0 +1,34 @@
+{
+  "name": "@ruvector/gnn-darwin-x64",
+  "version": "0.1.25",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "ruvector-gnn.darwin-x64.node",
+  "files": [
+    "ruvector-gnn.darwin-x64.node"
+  ],
+  "description": "Graph Neural Network capabilities for Ruvector - darwin-x64 platform",
+  "keywords": [
+    "ruvector",
+    "gnn",
+    "graph-neural-network",
+    "napi-rs"
+  ],
+  "author": "Ruvector Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector"
+  },
+  "engines": {
+    "node": ">= 10"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  }
+}

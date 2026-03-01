@@ -1,0 +1,33 @@
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[package]
+name = "ruvector-graph-transformer-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "WASM bindings for ruvector-graph-transformer: proof-gated graph attention in the browser"
+readme = "README.md"
+keywords = ["wasm", "graph-transformer", "attention", "verified", "webassembly"]
+categories = ["wasm", "science", "mathematics"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+js-sys = "0.3"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1

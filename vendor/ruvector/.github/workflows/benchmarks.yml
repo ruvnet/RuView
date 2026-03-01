@@ -1,0 +1,343 @@
+name: Benchmarks
+
+on:
+  pull_request:
+    paths:
+      - 'crates/ruvector-postgres/**'
+      - '.github/workflows/benchmarks.yml'
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      run_sql_benchmarks:
+        description: 'Run SQL benchmarks'
+        required: false
+        default: 'false'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  rust-benchmarks:
+    name: Rust Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-benchmarks-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-benchmarks-
+            ${{ runner.os }}-cargo-build-
+
+      - name: Install PostgreSQL 17
+        run: |
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          sudo apt-get update
+          sudo apt-get install -y postgresql-17 postgresql-server-dev-17
+
+      - name: Install cargo-pgrx
+        run: cargo install cargo-pgrx --version 0.12.6 --locked
+
+      - name: Initialize pgrx
+        working-directory: crates/ruvector-postgres
+        run: cargo pgrx init --pg17=/usr/lib/postgresql/17/bin/pg_config
+
+      - name: Install criterion
+        run: cargo install cargo-criterion || true
+
+      - name: Run distance benchmarks
+        working-directory: crates/ruvector-postgres
+        run: |
+          cargo bench --features pg17 --bench distance_bench -- --output-format bencher | tee ../../distance_bench.txt
+
+      - name: Run index benchmarks
+        working-directory: crates/ruvector-postgres
+        run: |
+          cargo bench --features pg17 --bench index_bench -- --output-format bencher | tee ../../index_bench.txt
+
+      - name: Run quantization benchmarks
+        working-directory: crates/ruvector-postgres
+        run: |
+          cargo bench --features pg17 --bench quantization_bench -- --output-format bencher | tee ../../quantization_bench.txt
+
+      - name: Run quantized distance benchmarks
+        working-directory: crates/ruvector-postgres
+        run: |
+          cargo bench --features pg17 --bench quantized_distance_bench -- --output-format bencher | tee ../../quantized_distance_bench.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            distance_bench.txt
+            index_bench.txt
+            quantization_bench.txt
+            quantized_distance_bench.txt
+          retention-days: 30
+
+      - name: Store benchmark result
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: Rust Benchmarks
+          tool: 'cargo'
+          output-file-path: distance_bench.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: '150%'
+          comment-on-alert: true
+          fail-on-alert: true
+
+      - name: Generate benchmark summary
+        run: |
+          cat > benchmark_summary.md <<EOF
+          # Benchmark Results Summary
+
+          ## Distance Function Benchmarks
+
+          \`\`\`
+          $(head -n 50 distance_bench.txt)
+          \`\`\`
+
+          ## HNSW Index Benchmarks
+
+          \`\`\`
+          $(head -n 50 index_bench.txt)
+          \`\`\`
+
+          ## Quantization Benchmarks
+
+          \`\`\`
+          $(head -n 50 quantization_bench.txt)
+          \`\`\`
+
+          See full results in the artifacts.
+          EOF
+
+      - name: Comment PR with results
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('benchmark_summary.md', 'utf8');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });
+
+  sql-benchmarks:
+    name: SQL Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_sql_benchmarks == 'true'
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ruvector_bench
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Install pgrx
+        run: |
+          cargo install --locked cargo-pgrx
+          cargo pgrx init --pg16 /usr/lib/postgresql/16/bin/pg_config
+
+      - name: Install ruvector extension
+        working-directory: crates/ruvector-postgres
+        run: |
+          cargo pgrx install --release --pg-config /usr/lib/postgresql/16/bin/pg_config
+
+      - name: Install pgvector for comparison
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-server-dev-16
+          git clone --branch v0.5.1 https://github.com/pgvector/pgvector.git /tmp/pgvector
+          cd /tmp/pgvector
+          make
+          sudo make install
+
+      - name: Setup test database
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: ruvector_bench
+        run: |
+          psql -c 'CREATE EXTENSION IF NOT EXISTS ruvector;'
+          psql -c 'CREATE EXTENSION IF NOT EXISTS pgvector;'
+
+      - name: Run quick SQL benchmark
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: ruvector_bench
+        working-directory: crates/ruvector-postgres
+        run: |
+          psql -f benches/sql/quick_benchmark.sql | tee ../../sql_quick_bench.txt
+
+      - name: Run full workload benchmark
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: ruvector_bench
+        working-directory: crates/ruvector-postgres
+        run: |
+          psql -f benches/sql/benchmark_workload.sql | tee ../../sql_workload_bench.txt
+
+      - name: Upload SQL benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: sql-benchmark-results
+          path: |
+            sql_quick_bench.txt
+            sql_workload_bench.txt
+          retention-days: 30
+
+  benchmark-comparison:
+    name: Compare with Baseline
+    runs-on: ubuntu-latest
+    needs: rust-benchmarks
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download current benchmarks
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-results
+          path: current
+
+      - name: Checkout base branch
+        run: |
+          git checkout ${{ github.base_ref }}
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Install PostgreSQL 17
+        run: |
+          sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          sudo apt-get update
+          sudo apt-get install -y postgresql-17 postgresql-server-dev-17
+
+      - name: Install cargo-pgrx
+        run: cargo install cargo-pgrx --version 0.12.6 --locked
+
+      - name: Initialize pgrx
+        working-directory: crates/ruvector-postgres
+        run: cargo pgrx init --pg17=/usr/lib/postgresql/17/bin/pg_config
+
+      - name: Run baseline benchmarks
+        working-directory: crates/ruvector-postgres
+        run: |
+          cargo bench --features pg17 --bench distance_bench -- --output-format bencher | tee ../../baseline_distance.txt
+          cargo bench --features pg17 --bench index_bench -- --output-format bencher | tee ../../baseline_index.txt
+
+      - name: Compare results
+        run: |
+          echo "# Benchmark Comparison" > comparison.md
+          echo "" >> comparison.md
+          echo "## Distance Benchmarks" >> comparison.md
+          echo "" >> comparison.md
+          echo "### Baseline (main)" >> comparison.md
+          echo "\`\`\`" >> comparison.md
+          head -n 20 baseline_distance.txt >> comparison.md
+          echo "\`\`\`" >> comparison.md
+          echo "" >> comparison.md
+          echo "### Current (PR)" >> comparison.md
+          echo "\`\`\`" >> comparison.md
+          head -n 20 current/distance_bench.txt >> comparison.md
+          echo "\`\`\`" >> comparison.md
+
+      - name: Comment comparison
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const comparison = fs.readFileSync('comparison.md', 'utf8');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comparison
+            });

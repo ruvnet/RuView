@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Causal Atlas</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; width: 100%; overflow: hidden; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: #0B0F14;
+      color: #E6EDF3;
+    }
+    #shell {
+      display: flex;
+      height: 100%;
+      width: 100%;
+    }
+    /* Left nav rail */
+    #nav-rail {
+      width: 72px;
+      min-width: 72px;
+      background: #0B0F14;
+      border-right: 1px solid #1E2630;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 16px;
+      gap: 2px;
+      z-index: 20;
+    }
+    #nav-rail a {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: 56px;
+      height: 52px;
+      border-radius: 8px;
+      text-decoration: none;
+      color: #8B949E;
+      transition: color 0.15s, background 0.15s;
+    }
+    #nav-rail a svg {
+      width: 20px;
+      height: 20px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    #nav-rail a span {
+      font-size: 9px;
+      font-weight: 500;
+      margin-top: 3px;
+      letter-spacing: 0.3px;
+    }
+    #nav-rail a:hover {
+      color: #E6EDF3;
+      background: rgba(255,255,255,0.04);
+    }
+    #nav-rail a.active {
+      color: #00E5FF;
+      background: rgba(0,229,255,0.08);
+    }
+    /* Main area */
+    #main-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    /* Top bar */
+    #top-bar {
+      height: 40px;
+      min-height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      background: #0B0F14;
+      border-bottom: 1px solid #1E2630;
+    }
+    #top-bar .sys-name {
+      font-size: 13px;
+      font-weight: 300;
+      color: #E6EDF3;
+      letter-spacing: 1px;
+    }
+    #top-bar .hash-display {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    #top-bar .hash-display .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #2ECC71;
+    }
+    #top-bar .hash-display code {
+      font-family: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', monospace;
+      font-size: 11px;
+      color: #8B949E;
+    }
+    /* App container */
+    #app {
+      flex: 1;
+      width: 100%;
+      overflow: auto;
+    }
+  </style>
+</head>
+<body>
+  <div id="shell">
+    <nav id="nav-rail">
+      <a href="#/atlas" title="Atlas Explorer">
+        <svg viewBox="0 0 24 24"><circle cx="5" cy="5" r="1.5"/><circle cx="19" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="5" cy="19" r="1.5"/><circle cx="19" cy="19" r="1.5"/><line x1="5" y1="5" x2="12" y2="12"/><line x1="19" y1="5" x2="12" y2="12"/><line x1="12" y1="12" x2="5" y2="19"/><line x1="12" y1="12" x2="19" y2="19"/></svg>
+        <span>Atlas</span>
+      </a>
+      <a href="#/coherence" title="Coherence Field">
+        <svg viewBox="0 0 24 24"><path d="M2 12c2-3 4-5 6-5s4 5 6 5 4-5 6-5"/><path d="M2 17c2-3 4-5 6-5s4 5 6 5 4-5 6-5" opacity="0.5"/></svg>
+        <span>Coherence</span>
+      </a>
+      <a href="#/boundaries" title="Boundary Evolution">
+        <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        <span>Bounds</span>
+      </a>
+      <a href="#/memory" title="Memory Tiers">
+        <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="14" x2="20" y2="14"/><circle cx="8" cy="6.5" r="0.5" fill="currentColor" stroke="none"/><circle cx="8" cy="11.5" r="0.5" fill="currentColor" stroke="none"/><circle cx="8" cy="16.5" r="0.5" fill="currentColor" stroke="none"/></svg>
+        <span>Memory</span>
+      </a>
+      <a href="#/planets" title="Planet Candidates">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/><ellipse cx="12" cy="12" rx="11" ry="4" transform="rotate(-20 12 12)"/></svg>
+        <span>Planets</span>
+      </a>
+      <a href="#/life" title="Life Candidates">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="4" r="1.5"/><circle cx="19" cy="16" r="1.5"/><circle cx="5" cy="16" r="1.5"/><line x1="12" y1="9" x2="12" y2="5.5"/><line x1="14.6" y1="13.5" x2="17.5" y2="15"/><line x1="9.4" y1="13.5" x2="6.5" y2="15"/></svg>
+        <span>Life</span>
+      </a>
+      <a href="#/witness" title="Witness Chain">
+        <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        <span>Witness</span>
+      </a>
+      <a href="#/solver" title="RVF Solver">
+        <svg viewBox="0 0 24 24"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
+        <span>Solver</span>
+      </a>
+      <a href="#/blind-test" title="Blind Test: Discover Exoplanets">
+        <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        <span>Blind Test</span>
+      </a>
+      <a href="#/discover" title="Discover New Planets">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41"/><circle cx="12" cy="12" r="9" fill="none" stroke-dasharray="3 3"/></svg>
+        <span>Discover</span>
+      </a>
+      <a href="#/dyson" title="Dyson Sphere Detection">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><ellipse cx="12" cy="12" rx="10" ry="10" fill="none" stroke-dasharray="4 2"/><ellipse cx="12" cy="12" rx="10" ry="5" fill="none" stroke-dasharray="4 2" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="5" fill="none" stroke-dasharray="4 2" transform="rotate(-60 12 12)"/></svg>
+        <span>Dyson</span>
+      </a>
+      <a href="#/docs" title="Documentation">
+        <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><line x1="9" y1="7" x2="16" y2="7"/><line x1="9" y1="11" x2="16" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/></svg>
+        <span>Docs</span>
+      </a>
+      <a href="#/status" title="System Status">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        <span>Status</span>
+      </a>
+    </nav>
+    <div id="main-area">
+      <header id="top-bar">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span class="sys-name">CAUSAL ATLAS</span>
+          <span style="font-size:9px;font-weight:600;letter-spacing:0.5px;font-family:'JetBrains Mono',monospace" id="pipeline-status">...</span>
+        </div>
+        <div class="hash-display">
+          <svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:#00E5FF;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:0.7"><circle cx="12" cy="12" r="6"/><ellipse cx="12" cy="12" rx="11" ry="4" transform="rotate(-20 12 12)"/><circle cx="12" cy="12" r="1.5" fill="#00E5FF" stroke="none"/></svg>
+          <span style="font-size:9px;font-weight:600;letter-spacing:0.5px;font-family:'JetBrains Mono',monospace;color:#8B949E">RVF <span style="color:#00E5FF">v2.0</span></span>
+          <span style="font-size:8px;padding:1px 5px;border-radius:3px;background:rgba(0,229,255,0.08);border:1px solid rgba(0,229,255,0.15);color:#00E5FF;font-weight:600;letter-spacing:0.3px;font-family:'JetBrains Mono',monospace">WASM + Ed25519</span>
+          <div style="width:1px;height:14px;background:#1E2630;margin:0 4px"></div>
+          <div class="dot"></div>
+          <code id="root-hash">0x52564...</code>
+          <div style="width:1px;height:14px;background:#1E2630;margin:0 4px"></div>
+          <a href="#/download" title="Download RVF" style="display:flex;align-items:center;gap:5px;text-decoration:none;padding:3px 10px;border-radius:4px;border:1px solid rgba(0,229,255,0.2);background:rgba(0,229,255,0.06);color:#00E5FF;font-size:9px;font-weight:600;letter-spacing:0.3px;font-family:'JetBrains Mono',monospace;transition:background 0.15s,border-color 0.15s" onmouseenter="this.style.background='rgba(0,229,255,0.12)';this.style.borderColor='rgba(0,229,255,0.4)'" onmouseleave="this.style.background='rgba(0,229,255,0.06)';this.style.borderColor='rgba(0,229,255,0.2)'">
+            <svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download
+          </a>
+        </div>
+      </header>
+      <div id="app"></div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

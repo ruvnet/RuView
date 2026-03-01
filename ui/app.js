@@ -4,6 +4,7 @@ import { TabManager } from './components/TabManager.js';
 import { DashboardTab } from './components/DashboardTab.js';
 import { HardwareTab } from './components/HardwareTab.js';
 import { LiveDemoTab } from './components/LiveDemoTab.js';
+import { SensingTab } from './components/SensingTab.js';
 import { apiService } from './services/api.service.js';
 import { wsService } from './services/websocket.service.js';
 import { healthService } from './services/health.service.js';
@@ -64,17 +65,15 @@ class WiFiDensePoseApp {
       // Show notification to user
       this.showBackendStatus('Mock server active - testing mode', 'warning');
     } else {
-      console.log('🔌 Initializing with real backend');
-      
-      // Verify backend is actually working
+      console.log('🔌 Connecting to backend...');
+
       try {
         const health = await healthService.checkLiveness();
-        console.log('✅ Backend is available and responding:', health);
-        this.showBackendStatus('Connected to real backend', 'success');
+        console.log('✅ Backend responding:', health);
+        this.showBackendStatus('Connected to Rust sensing server', 'success');
       } catch (error) {
-        console.error('❌ Backend check failed:', error);
-        this.showBackendStatus('Backend connection failed', 'error');
-        // Don't throw - let the app continue and retry later
+        console.warn('⚠️ Backend not available:', error.message);
+        this.showBackendStatus('Backend unavailable — start sensing-server', 'warning');
       }
     }
   }
@@ -97,6 +96,7 @@ class WiFiDensePoseApp {
     this.components.tabManager.onTabChange((newTab, oldTab) => {
       this.handleTabChange(newTab, oldTab);
     });
+
   }
 
   // Initialize individual tab components
@@ -124,10 +124,16 @@ class WiFiDensePoseApp {
       this.components.demo.init();
     }
 
+    // Sensing tab
+    const sensingContainer = document.getElementById('sensing');
+    if (sensingContainer) {
+      this.components.sensing = new SensingTab(sensingContainer);
+    }
+
     // Architecture tab - static content, no component needed
-    
+
     // Performance tab - static content, no component needed
-    
+
     // Applications tab - static content, no component needed
   }
 
@@ -152,6 +158,15 @@ class WiFiDensePoseApp {
         
       case 'demo':
         // Demo starts manually
+        break;
+
+      case 'sensing':
+        // Lazy-init sensing tab on first visit
+        if (this.components.sensing && !this.components.sensing.splatRenderer) {
+          this.components.sensing.init().catch(error => {
+            console.error('Failed to initialize sensing tab:', error);
+          });
+        }
         break;
     }
   }

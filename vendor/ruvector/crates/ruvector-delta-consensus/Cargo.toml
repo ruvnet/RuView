@@ -1,0 +1,47 @@
+[package]
+name = "ruvector-delta-consensus"
+version = "0.1.0"
+edition = "2021"
+description = "Distributed delta consensus using CRDTs and causal ordering"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+keywords = ["crdt", "consensus", "distributed", "delta", "causal"]
+categories = ["data-structures", "algorithms", "concurrency"]
+
+[features]
+default = []
+async = ["tokio"]
+
+[dependencies]
+# Core delta library
+ruvector-delta-core = { path = "../ruvector-delta-core", features = ["serde"] }
+
+# Error handling
+thiserror = "2.0"
+
+# Data structures
+parking_lot = "0.12"
+dashmap = "6.0"
+smallvec = { version = "1.13", features = ["union"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+bincode = "2.0.0-rc.3"
+
+# UUID generation
+uuid = { version = "1.10", features = ["v4", "serde"] }
+
+# Time
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+
+# Optional async
+tokio = { version = "1.40", features = ["sync", "time"], optional = true }
+
+[dev-dependencies]
+criterion = "0.6"
+proptest = "1.4"
+
+# Benchmarks will be added later
+# [[bench]]
+# name = "consensus"
+# harness = false

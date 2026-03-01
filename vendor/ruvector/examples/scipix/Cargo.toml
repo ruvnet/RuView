@@ -1,0 +1,241 @@
+[package]
+name = "ruvector-scipix"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Rust OCR engine for scientific documents - extract LaTeX, MathML from math equations, research papers, and technical diagrams with ONNX GPU acceleration"
+readme = "README.md"
+keywords = ["ocr", "latex", "mathml", "scientific-computing", "image-recognition"]
+categories = ["science", "text-processing", "multimedia::images", "command-line-utilities"]
+documentation = "https://docs.rs/ruvector-scipix"
+homepage = "https://github.com/ruvnet/ruvector/tree/main/examples/scipix"
+rust-version = "1.77"
+exclude = [
+    "assets/fonts/*.ttf",
+    "models/*",
+    "tests/fixtures/*",
+    ".github/*",
+    "benches/*",
+]
+
+[dependencies]
+# Workspace dependencies
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# CLI dependencies
+clap = { workspace = true, features = ["derive", "cargo", "env", "unicode", "wrap_help"] }
+clap_complete = "4.5"
+indicatif.workspace = true
+console.workspace = true
+
+# Additional CLI dependencies
+comfy-table = "7.1"
+colored = "2.1"
+dialoguer = "0.11"
+glob = "0.3"
+rand.workspace = true
+
+# Config and file handling
+toml = "0.8"
+dirs = "5.0"
+
+# HTTP server
+axum = { version = "0.7", features = ["multipart", "macros"] }
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.5", features = ["fs", "trace", "cors", "compression-gzip", "limit"] }
+hyper = { version = "1.0", features = ["full"] }
+
+# Validation
+validator = { version = "0.18", features = ["derive"] }
+
+# Rate limiting
+governor = "0.6"
+nonzero_ext = "0.3"
+
+# Caching
+moka = { version = "0.12", features = ["future"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["multipart", "stream", "json"] }
+
+# Time and UUID (already in workspace)
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.11", features = ["v4", "serde"] }
+
+# Configuration
+dotenvy = "0.15"
+
+# Async utilities
+futures = "0.3"
+async-trait = "0.1"
+
+# Security
+sha2 = "0.10"
+base64 = "0.22"
+hmac = "0.12"
+
+# SSE support
+axum-streams = { version = "0.15", features = ["json"] }
+
+# Image processing (for future OCR integration)
+image = "0.25"
+imageproc = { version = "0.25", optional = true }
+rayon = { version = "1.10", optional = true }
+nalgebra = { version = "0.33", optional = true }
+ndarray = { version = "0.16", optional = true }
+
+# ML inference with ONNX Runtime
+ort = { version = "2.0.0-rc.10", optional = true, features = ["load-dynamic"] }
+
+# Concurrent data structures
+parking_lot = "0.12"
+dashmap = "6.1"
+
+# Math parsing and processing
+nom = "7.1"
+once_cell = "1.19"
+
+# Font rendering for benchmarks
+rusttype = "0.9"
+
+# System info
+num_cpus = "1.16"
+
+# Performance optimizations
+memmap2 = { version = "0.9", optional = true }
+
+# WebAssembly dependencies (optional)
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", features = ["console", "Window", "Document", "CanvasRenderingContext2d", "HtmlCanvasElement", "ImageData"], optional = true }
+[dev-dependencies]
+axum-test = "15.0"
+mockall = "0.13"
+proptest = "1.5"
+tempfile = "3.8"
+approx = "0.5"
+criterion = { version = "0.5", features = ["html_reports"] }
+rusttype = "0.9"
+env_logger = "0.11"
+predicates = "3.1"
+assert_cmd = "2.0"
+ab_glyph = "0.2"
+tokio = { workspace = true, features = ["process"] }
+reqwest = { version = "0.12", features = ["blocking"] }
+
+[features]
+default = ["preprocess", "cache", "optimize"]
+preprocess = ["imageproc", "rayon", "nalgebra", "ndarray"]
+cache = []
+ocr = ["ort", "preprocess"]
+math = []
+optimize = ["memmap2", "rayon"]
+wasm = ["wasm-bindgen", "wasm-bindgen-futures", "js-sys", "web-sys"]
+
+[[bin]]
+name = "scipix-cli"
+path = "src/bin/cli.rs"
+
+[[bin]]
+name = "scipix-server"
+path = "src/bin/server.rs"
+
+[[bin]]
+name = "scipix-benchmark"
+path = "src/bin/benchmark.rs"
+
+[lib]
+name = "ruvector_scipix"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+# Examples
+[[example]]
+name = "simple_ocr"
+path = "examples/simple_ocr.rs"
+
+[[example]]
+name = "batch_processing"
+path = "examples/batch_processing.rs"
+required-features = ["ocr"]
+
+[[example]]
+name = "api_server"
+path = "examples/api_server.rs"
+
+[[example]]
+name = "streaming"
+path = "examples/streaming.rs"
+required-features = ["ocr"]
+
+[[example]]
+name = "custom_pipeline"
+path = "examples/custom_pipeline.rs"
+
+[[example]]
+name = "lean_agentic"
+path = "examples/lean_agentic.rs"
+
+[[example]]
+name = "accuracy_test"
+path = "examples/accuracy_test.rs"
+
+# Benchmark configurations
+[[bench]]
+name = "ocr_latency"
+harness = false
+
+[[bench]]
+name = "preprocessing"
+harness = false
+
+[[bench]]
+name = "latex_generation"
+harness = false
+
+[[bench]]
+name = "inference"
+harness = false
+
+[[bench]]
+name = "cache"
+harness = false
+
+[[bench]]
+name = "api"
+harness = false
+
+[[bench]]
+name = "memory"
+harness = false
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "ImageData",
+    "Blob",
+    "Url",
+    "MessageEvent",
+    "Worker",
+    "DedicatedWorkerGlobalScope",
+    "console"
+] }
+getrandom = { version = "0.3", features = ["wasm_js"] }
+console_error_panic_hook = "0.1"
+serde-wasm-bindgen = "0.6"
+tracing-wasm = "0.2"

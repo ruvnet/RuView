@@ -1,0 +1,15 @@
+[package]
+name = "ruvector-temporal-tensor-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "WASM bindings for temporal tensor compression"
+
+[dependencies]
+ruvector-temporal-tensor = { path = "../ruvector-temporal-tensor", features = ["ffi"] }
+
+[lib]
+crate-type = ["cdylib"]

@@ -1,0 +1,65 @@
+{
+  "name": "@ruvector/rvdna",
+  "version": "0.3.0",
+  "description": "rvDNA — AI-native genomic analysis. 20-SNP biomarker risk scoring, streaming anomaly detection, 64-dim profile vectors, 23andMe genotyping, CYP2D6/CYP2C19 pharmacogenomics, variant calling, protein prediction, and HNSW vector search.",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "author": "rUv <info@ruv.io> (https://ruv.io)",
+  "homepage": "https://github.com/ruvnet/ruvector/tree/main/examples/dna",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "npm/packages/rvdna"
+  },
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "src/",
+    "README.md"
+  ],
+  "scripts": {
+    "build:napi": "napi build --platform --release --cargo-cwd ../../../examples/dna",
+    "test": "node tests/test-biomarker.js"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  },
+  "optionalDependencies": {
+    "@ruvector/rvdna-linux-x64-gnu": "0.1.0",
+    "@ruvector/rvdna-linux-arm64-gnu": "0.1.0",
+    "@ruvector/rvdna-darwin-x64": "0.1.0",
+    "@ruvector/rvdna-darwin-arm64": "0.1.0",
+    "@ruvector/rvdna-win32-x64-msvc": "0.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "genomics",
+    "bioinformatics",
+    "dna",
+    "rvdna",
+    "biomarker",
+    "health",
+    "risk-score",
+    "streaming",
+    "anomaly-detection",
+    "23andme",
+    "pharmacogenomics",
+    "variant-calling",
+    "protein",
+    "hnsw",
+    "vector-search",
+    "napi",
+    "rust",
+    "ai",
+    "wasm"
+  ]
+}

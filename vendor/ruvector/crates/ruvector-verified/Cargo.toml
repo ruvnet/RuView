@@ -1,0 +1,48 @@
+[package]
+name = "ruvector-verified"
+version = "0.1.1"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT OR Apache-2.0"
+description = "Formal verification layer for RuVector: proof-carrying vector operations with sub-microsecond overhead using lean-agentic dependent types"
+repository = "https://github.com/ruvnet/ruvector"
+homepage = "https://github.com/ruvnet/ruvector"
+documentation = "https://docs.rs/ruvector-verified"
+readme = "README.md"
+keywords = ["verification", "vector-database", "dependent-types", "proof-carrying", "formal-methods"]
+categories = ["science", "mathematics", "database-implementations"]
+
+[dependencies]
+lean-agentic = { workspace = true }
+thiserror = { workspace = true }
+
+ruvector-core = { version = "2.0.4", path = "../ruvector-core", optional = true, default-features = false, features = ["hnsw"] }
+ruvector-coherence = { version = "2.0.4", path = "../ruvector-coherence", optional = true }
+ruvector-cognitive-container = { version = "2.0.4", path = "../ruvector-cognitive-container", optional = true }
+
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+proptest = { workspace = true }
+
+[features]
+default = []
+hnsw-proofs = ["dep:ruvector-core"]
+rvf-proofs = ["dep:ruvector-cognitive-container"]
+coherence-proofs = ["dep:ruvector-coherence"]
+serde = ["dep:serde", "dep:serde_json", "lean-agentic/serde"]
+fast-arena = []
+simd-hash = []
+gated-proofs = []
+ultra = ["fast-arena", "simd-hash", "gated-proofs"]
+all-proofs = ["hnsw-proofs", "rvf-proofs", "coherence-proofs"]
+
+[[bench]]
+name = "proof_generation"
+harness = false
+
+[[bench]]
+name = "arena_throughput"
+harness = false

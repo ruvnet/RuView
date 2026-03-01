@@ -1,0 +1,112 @@
+# Source files
+src/
+*.ts
+!*.d.ts
+tsconfig.json
+tsup.config.ts
+
+# Tests
+tests/
+*.test.ts
+*.spec.ts
+__tests__/
+coverage/
+.nyc_output/
+
+# Documentation (except main README and LICENSE)
+docs/development/
+docs/internal/
+*.md
+!README.md
+!CHANGELOG.md
+!LICENSE.md
+
+# Examples and demos
+examples/
+demos/
+samples/
+
+# Development files
+.git/
+.github/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.log
+*.tmp
+*.temp
+.cache/
+.temp/
+tmp/
+
+# Development dependencies
+node_modules/
+.pnpm-store/
+.yarn/
+.npm/
+
+# Environment and config
+.env
+.env.*
+!.env.example
+.envrc
+*.local
+
+# CI/CD
+.travis.yml
+.gitlab-ci.yml
+.circleci/
+azure-pipelines.yml
+.jenkins/
+
+# Package managers
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+bun.lockb
+
+# Linting and formatting
+.eslintrc*
+.prettierrc*
+.editorconfig
+.stylelintrc*
+
+# Git
+.gitignore
+.gitattributes
+.gitmodules
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Scripts
+scripts/dev/
+scripts/test/
+scripts/build-internal/
+
+# Benchmarks
+benchmarks/
+perf/
+
+# Miscellaneous
+TODO.md
+NOTES.md
+ROADMAP.md
+ARCHITECTURE.md
+
+# Keep these important files
+!LICENSE
+!README.md
+!CHANGELOG.md
+!package.json
+!dist/**/*
+!bin/**/*
+!config/**/*

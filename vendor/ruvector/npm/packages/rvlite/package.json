@@ -1,0 +1,88 @@
+{
+  "name": "rvlite",
+  "version": "0.2.4",
+  "type": "module",
+  "description": "Lightweight vector database with SQL, SPARQL, and Cypher - runs everywhere (Node.js, Browser, Edge)",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "rvlite": "bin/cli.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./wasm": {
+      "import": "./dist/wasm/rvlite.js",
+      "types": "./dist/wasm/rvlite.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "bin",
+    "wasm"
+  ],
+  "scripts": {
+    "build": "npm run build:wasm && npm run build:sdk",
+    "build:wasm": "cd ../../../crates/rvlite && wasm-pack build --target web --release && cp -r pkg/* ../../npm/packages/rvlite/dist/wasm/",
+    "build:sdk": "tsc && esbuild src/index.ts --bundle --platform=node --outfile=dist/index.js --format=cjs && esbuild src/index.ts --bundle --platform=node --outfile=dist/index.mjs --format=esm",
+    "test": "node --test test/*.test.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "vector-database",
+    "embeddings",
+    "semantic-search",
+    "sql",
+    "sparql",
+    "cypher",
+    "graph-database",
+    "wasm",
+    "ai",
+    "llm",
+    "rag",
+    "knowledge-graph"
+  ],
+  "author": "RuVector Contributors",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git",
+    "directory": "npm/packages/rvlite"
+  },
+  "homepage": "https://github.com/ruvnet/ruvector/tree/main/npm/packages/rvlite",
+  "bugs": {
+    "url": "https://github.com/ruvnet/ruvector/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "commander": "^12.0.0",
+    "chalk": "^5.3.0",
+    "ora": "^8.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "esbuild": "^0.20.0",
+    "@types/node": "^20.0.0"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/sdk": ">=0.20.0",
+    "@ruvector/rvf-wasm": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "@ruvector/rvf-wasm": {
+      "optional": true
+    }
+  },
+  "optionalDependencies": {
+    "@ruvector/rvf-wasm": "^0.1.0"
+  }
+}

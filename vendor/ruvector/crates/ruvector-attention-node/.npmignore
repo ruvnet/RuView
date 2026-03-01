@@ -1,0 +1,12 @@
+target
+Cargo.lock
+.cargo
+.github
+*.node
+*.so
+*.dylib
+*.dll
+build
+.vscode
+.idea
+*.iml

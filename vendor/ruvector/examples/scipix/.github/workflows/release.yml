@@ -1,0 +1,220 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'scipix-v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release'
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - name: Get version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/scipix-v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: scipix-v${{ steps.get_version.outputs.version }}
+          release_name: RuVector Mathpix v${{ steps.get_version.outputs.version }}
+          draft: false
+          prerelease: false
+          body: |
+            # RuVector Mathpix v${{ steps.get_version.outputs.version }}
+
+            ## What's New
+            - High-performance mathematical expression recognition
+            - ONNX model integration
+            - WASM support for web applications
+            - Comprehensive benchmarking suite
+
+            ## Installation
+
+            ### Rust
+            ```bash
+            cargo add ruvector-scipix
+            ```
+
+            ### WASM/JavaScript
+            ```bash
+            npm install @ruvector/scipix-wasm
+            ```
+
+            ## Downloads
+            See assets below for pre-built binaries.
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact_name: libruvector_scipix.so
+            asset_name: libruvector_scipix-linux-x86_64.so
+
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact_name: libruvector_scipix.so
+            asset_name: libruvector_scipix-linux-aarch64.so
+
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            artifact_name: libruvector_scipix.dylib
+            asset_name: libruvector_scipix-macos-x86_64.dylib
+
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact_name: libruvector_scipix.dylib
+            asset_name: libruvector_scipix-macos-aarch64.dylib
+
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact_name: ruvector_scipix.dll
+            asset_name: ruvector_scipix-windows-x86_64.dll
+
+          - target: wasm32-unknown-unknown
+            os: ubuntu-latest
+            artifact_name: ruvector_scipix_bg.wasm
+            asset_name: ruvector_scipix.wasm
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build
+        run: |
+          cd examples/scipix
+          cargo build --release --target ${{ matrix.target }} --features release
+
+      - name: Strip binary (Linux/macOS)
+        if: matrix.os != 'windows-latest' && matrix.target != 'wasm32-unknown-unknown'
+        run: strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+          asset_name: ${{ matrix.asset_name }}
+          asset_content_type: application/octet-stream
+
+  publish-crates:
+    name: Publish to crates.io
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish to crates.io
+        run: |
+          cd examples/scipix
+          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  publish-npm:
+    name: Publish WASM to npm
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WASM package
+        run: |
+          cd examples/scipix
+          wasm-pack build --target web --scope ruvector
+
+      - name: Update package.json version
+        run: |
+          cd examples/scipix/pkg
+          npm version ${{ needs.create-release.outputs.version }} --no-git-tag-version
+
+      - name: Publish to npm
+        run: |
+          cd examples/scipix/pkg
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-models:
+    name: Upload ONNX Models
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download models
+        run: |
+          cd examples/scipix
+          ./scripts/download_models.sh
+
+      - name: Create model archive
+        run: |
+          cd examples/scipix/models
+          tar -czf scipix-models-${{ needs.create-release.outputs.version }}.tar.gz *.onnx
+
+      - name: Upload models
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: examples/scipix/models/scipix-models-${{ needs.create-release.outputs.version }}.tar.gz
+          asset_name: scipix-models-${{ needs.create-release.outputs.version }}.tar.gz
+          asset_content_type: application/gzip

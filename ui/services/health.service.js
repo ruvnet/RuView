@@ -55,15 +55,16 @@ export class HealthService {
       return;
     }
 
-    // Initial check
-    this.getSystemHealth().catch(error => {
-      console.error('Initial health check failed:', error);
+    // Initial check (silent on failure — DensePose API may not be running)
+    this.getSystemHealth().catch(() => {
+      // DensePose API not running — sensing-only mode, skip polling
+      this._backendUnavailable = true;
     });
 
-    // Set up periodic checks
+    // Set up periodic checks only if backend was reachable
     this.healthCheckInterval = setInterval(() => {
+      if (this._backendUnavailable) return;
       this.getSystemHealth().catch(error => {
-        console.error('Health check failed:', error);
         this.notifySubscribers({
           status: 'error',
           error: error.message,

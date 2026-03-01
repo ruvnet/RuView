@@ -1,0 +1,160 @@
+{
+  "model_info": {
+    "name": "RuvLTRA-Small-0.5B",
+    "version": "1.0.0",
+    "description": "ANE-optimized small language model based on Qwen2.5-0.5B-Instruct for edge deployment",
+    "base_model": "Qwen/Qwen2.5-0.5B-Instruct",
+    "license": "Apache-2.0",
+    "created": "2026-01-19",
+    "author": "RuvVector Team"
+  },
+  "architecture": {
+    "model_type": "qwen2",
+    "architecture_class": "Qwen2ForCausalLM",
+    "hidden_size": 896,
+    "intermediate_size": 4864,
+    "num_hidden_layers": 24,
+    "num_attention_heads": 14,
+    "num_key_value_heads": 2,
+    "vocab_size": 151936,
+    "max_position_embeddings": 32768,
+    "rope_theta": 1000000.0,
+    "rms_norm_eps": 1e-6,
+    "hidden_act": "silu",
+    "attention_dropout": 0.0,
+    "tie_word_embeddings": true,
+    "use_sliding_window": false,
+    "sliding_window": 32768,
+    "max_window_layers": 21,
+    "bos_token_id": 151643,
+    "eos_token_id": 151645
+  },
+  "parameters": {
+    "total": "0.49B",
+    "total_exact": 494000000,
+    "non_embedding": "0.36B",
+    "non_embedding_exact": 360000000
+  },
+  "features": {
+    "attention_mechanism": "grouped_query_attention",
+    "positional_encoding": "rotary_position_embedding",
+    "activation_function": "swiglu",
+    "normalization": "rmsnorm",
+    "has_qkv_bias": true,
+    "multilingual": true,
+    "supported_languages": 29
+  },
+  "optimizations": {
+    "ane_optimized": true,
+    "sona_enabled": true,
+    "flash_attention_compatible": true,
+    "continuous_batching": true,
+    "speculative_decoding_ready": true,
+    "target_hardware": [
+      "apple_neural_engine",
+      "metal_gpu",
+      "cpu_arm64",
+      "cpu_x86_64"
+    ],
+    "memory_optimizations": [
+      "kv_cache_compression",
+      "activation_checkpointing",
+      "weight_sharing"
+    ]
+  },
+  "quantization": {
+    "recommended": "Q4_K_M",
+    "targets": {
+      "Q4_K_M": {
+        "description": "4-bit quantization with K-means clustering (medium)",
+        "size_mb": 491,
+        "quality": "good",
+        "speed": "fast",
+        "memory_reduction": "75%",
+        "recommended_for": ["mobile", "edge", "resource_constrained"]
+      },
+      "Q5_K_M": {
+        "description": "5-bit quantization with K-means clustering (medium)",
+        "size_mb": 522,
+        "quality": "better",
+        "speed": "fast",
+        "memory_reduction": "68%",
+        "recommended_for": ["balanced", "quality_conscious"]
+      },
+      "Q8_0": {
+        "description": "8-bit quantization (round-to-nearest)",
+        "size_mb": 676,
+        "quality": "best",
+        "speed": "moderate",
+        "memory_reduction": "50%",
+        "recommended_for": ["accuracy_critical", "development"]
+      }
+    },
+    "additional_quantizations": {
+      "Q2_K": {"size_mb": 415, "quality": "acceptable"},
+      "Q3_K_M": {"size_mb": 432, "quality": "fair"},
+      "Q4_0": {"size_mb": 429, "quality": "good"},
+      "Q5_0": {"size_mb": 490, "quality": "better"},
+      "Q6_K": {"size_mb": 650, "quality": "very_good"}
+    }
+  },
+  "download_urls": {
+    "official_gguf": {
+      "base_url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+      "files": {
+        "Q4_K_M": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+        "Q5_K_M": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q5_k_m.gguf",
+        "Q8_0": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q8_0.gguf"
+      }
+    },
+    "safetensors": {
+      "base_url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct",
+      "format": "safetensors",
+      "dtype": "bfloat16"
+    },
+    "third_party_gguf": {
+      "bartowski": "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+      "tensorblock": "https://huggingface.co/tensorblock/Qwen2.5-0.5B-GGUF"
+    }
+  },
+  "cli_download_commands": {
+    "Q4_K_M": "huggingface-cli download Qwen/Qwen2.5-0.5B-Instruct-GGUF qwen2.5-0.5b-instruct-q4_k_m.gguf --local-dir . --local-dir-use-symlinks False",
+    "Q5_K_M": "huggingface-cli download Qwen/Qwen2.5-0.5B-Instruct-GGUF qwen2.5-0.5b-instruct-q5_k_m.gguf --local-dir . --local-dir-use-symlinks False",
+    "Q8_0": "huggingface-cli download Qwen/Qwen2.5-0.5B-Instruct-GGUF qwen2.5-0.5b-instruct-q8_0.gguf --local-dir . --local-dir-use-symlinks False"
+  },
+  "performance_targets": {
+    "inference_latency_ms": {
+      "first_token": 50,
+      "per_token": 15
+    },
+    "throughput_tokens_per_sec": {
+      "ane": 150,
+      "metal_gpu": 120,
+      "cpu": 40
+    },
+    "memory_usage_mb": {
+      "Q4_K_M": 600,
+      "Q5_K_M": 650,
+      "Q8_0": 800
+    },
+    "context_window": {
+      "default": 8192,
+      "max": 32768
+    }
+  },
+  "ruvllm_integration": {
+    "loader": "gguf",
+    "backend_priority": ["ane", "metal", "cpu"],
+    "tokenizer": "qwen2",
+    "chat_template": "qwen2_instruct",
+    "system_prompt_support": true,
+    "function_calling": false,
+    "streaming": true
+  },
+  "benchmarks": {
+    "mmlu": "pending",
+    "humaneval": "pending",
+    "gsm8k": "pending",
+    "arc_challenge": "pending"
+  }
+}

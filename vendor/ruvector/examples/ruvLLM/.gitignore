@@ -1,0 +1,27 @@
+# Build artifacts
+/target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Generated files
+*.db
+*.bin
+*.weights
+
+# Local configuration (keep example.toml)
+/config/ruvllm.toml
+/config/local.toml
+
+# Data directory
+/data/
+
+# Metrics (auto-generated)
+/.claude-flow/metrics/
+
+# OS files
+.DS_Store
+Thumbs.db

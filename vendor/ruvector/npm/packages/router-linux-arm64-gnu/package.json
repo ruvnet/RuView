@@ -1,0 +1,30 @@
+{
+  "name": "@ruvector/router-linux-arm64-gnu",
+  "version": "0.1.27",
+  "description": "Linux ARM64 (glibc) native bindings for @ruvector/router",
+  "main": "ruvector-router.linux-arm64-gnu.node",
+  "files": [
+    "ruvector-router.linux-arm64-gnu.node"
+  ],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "author": "ruv.io Team <info@ruv.io> (https://ruv.io)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
