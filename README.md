@@ -26,15 +26,18 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 # Open http://localhost:3000
 ```
 
+> [!NOTE]
+> **CSI-capable hardware required.** Pose estimation, vital signs, and through-wall sensing rely on Channel State Information (CSI) — per-subcarrier amplitude and phase data that standard consumer WiFi does not expose. You need CSI-capable hardware (ESP32-S3 or a research NIC) for full functionality. Consumer WiFi laptops can only provide RSSI-based presence detection, which is significantly less capable.
+
 > **Hardware options** for live CSI capture:
 >
-> | Option | Hardware | Cost | Capabilities |
-> |--------|----------|------|-------------|
-> | **ESP32 Mesh** (recommended) | 3-6x ESP32-S3 + WiFi router | ~$54 | Presence, motion, breathing, heartbeat |
-> | **Research NIC** | Intel 5300 / Atheros AR9580 | ~$50-100 | Full CSI with 3x3 MIMO |
-> | **Any WiFi** | Windows/Linux laptop | $0 | RSSI-based presence and motion |
+> | Option | Hardware | Cost | Full CSI | Capabilities |
+> |--------|----------|------|----------|-------------|
+> | **ESP32 Mesh** (recommended) | 3-6x ESP32-S3 + WiFi router | ~$54 | Yes | Pose, breathing, heartbeat, motion, presence |
+> | **Research NIC** | Intel 5300 / Atheros AR9580 | ~$50-100 | Yes | Full CSI with 3x3 MIMO |
+> | **Any WiFi** | Windows/Linux laptop | $0 | No | RSSI-only: coarse presence and motion |
 >
-> No hardware? Verify the pipeline with the deterministic reference signal: `python v1/data/proof/verify.py`
+> No hardware? Verify the signal processing pipeline with the deterministic reference signal: `python v1/data/proof/verify.py`
 
 ---
 
