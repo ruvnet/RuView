@@ -64,6 +64,8 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 | 🚑 | **Disaster Response** | Detects trapped survivors through rubble and classifies injury severity (START triage) |
 | 🐳 | **One-Command Setup** | `docker pull ruvnet/wifi-densepose:latest` — live sensing in 30 seconds, no toolchain needed |
 | 📦 | **Portable Models** | Trained models package into a single `.rvf` file — runs on edge, cloud, or browser (WASM) |
+| 🧠 | **Self-Learning** | Teaches itself from raw WiFi data — no labeled training sets, no cameras needed to bootstrap ([ADR-024](#self-learning-wifi-ai-adr-024)) |
+| 🎯 | **AI Signal Processing** | Attention networks, graph algorithms, and smart compression replace hand-tuned thresholds — adapts to each room automatically ([RuVector](#ai-backbone-ruvector)) |
 | 🦀 | **810x Faster** | Complete Rust rewrite: 54,000 frames/sec pipeline, 132 MB Docker image, 542+ tests |
 
 ---
