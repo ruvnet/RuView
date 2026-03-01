@@ -477,7 +477,64 @@ cargo run -p wifi-densepose-sensing-server -- \
 
 ---
 
-## 6. References
+## 6. Relationship to Proposed ADRs (Gap Closure)
+
+ADRs 002-011 were proposed during the initial architecture phase. MERIDIAN directly addresses, subsumes, or enables several of these gaps. This section maps each proposed ADR to its current status and how ADR-027 interacts with it.
+
+### 6.1 Directly Addressed by MERIDIAN
+
+| Proposed ADR | Gap | How MERIDIAN Closes It |
+|-------------|-----|----------------------|
+| **ADR-004**: HNSW Vector Search Fingerprinting | CSI fingerprints are environment-specific — a fingerprint learned in Room A is useless in Room B | MERIDIAN's `DomainFactorizer` produces **environment-disentangled embeddings** (`h_pose`). When fed into ADR-024's `FingerprintIndex`, these embeddings match across rooms because environment information has been factored out. The `h_env` path captures room identity separately, enabling both cross-room matching AND room identification in a single model. |
+| **ADR-005**: SONA Self-Learning for Pose Estimation | SONA LoRA adapters must be manually created per environment with labeled data | MERIDIAN Phase 5 (`RapidAdaptation`) extends SONA with **unsupervised adapter generation**: 10 seconds of unlabeled WiFi data + contrastive test-time training automatically produces a per-room LoRA adapter. No labels, no manual intervention. The existing `SonaProfile` in `sona.rs` gains a `meridian_calibration` field for storing adaptation state. |
+| **ADR-006**: GNN-Enhanced CSI Pattern Recognition | GNN treats each environment's patterns independently; no cross-environment transfer | MERIDIAN's domain-adversarial training regularizes the GCN layers (ADR-023's `GnnStack`) to learn **structure-preserving, environment-invariant** graph features. The gradient reversal layer forces the GCN to shed room-specific multipath patterns while retaining body-pose-relevant spatial relationships between keypoints. |
+
+### 6.2 Superseded (Already Implemented)
+
+| Proposed ADR | Original Vision | Current Status |
+|-------------|----------------|---------------|
+| **ADR-002**: RuVector RVF Integration Strategy | Integrate RuVector crates into the WiFi-DensePose pipeline | **Fully implemented** by ADR-016 (training pipeline, 5 crates) and ADR-017 (signal + MAT, 7 integration points). The `wifi-densepose-ruvector` crate is published on crates.io. No further action needed. |
+
+### 6.3 Enabled by MERIDIAN (Future Work)
+
+These ADRs remain independent tracks but MERIDIAN creates enabling infrastructure for them:
+
+| Proposed ADR | Gap | How MERIDIAN Enables It |
+|-------------|-----|------------------------|
+| **ADR-003**: RVF Cognitive Containers | CSI pipeline stages produce ephemeral data; no persistent cognitive state across sessions | MERIDIAN's RVF container extensions (Phase 7: `GEOM`, `DOMAIN`, `HWSTATS` segments) establish the pattern for **environment-aware model packaging**. A cognitive container could store per-room adaptation history, geometry profiles, and domain statistics — building on MERIDIAN's segment format. The `h_env` embeddings are natural candidates for persistent environment memory. |
+| **ADR-008**: Distributed Consensus for Multi-AP | Multiple APs need coordinated sensing; no agreement protocol for conflicting observations | MERIDIAN's `GeometryEncoder` already models variable-count AP positions via permutation-invariant `DeepSets`. This provides the **geometric foundation** for multi-AP fusion: each AP's CSI is geometry-conditioned independently, then fused. A consensus layer (Raft or BFT) would sit above MERIDIAN to reconcile conflicting pose estimates from different AP vantage points. The `HardwareNormalizer` ensures mixed hardware (ESP32 + Intel 5300 across APs) produces comparable features. |
+| **ADR-009**: RVF WASM Runtime for Edge | Self-contained WASM model execution without server dependency | MERIDIAN's +12K parameter overhead (67K total) remains within the WASM size budget. The `HardwareNormalizer` is critical for WASM deployment: browser-based inference must handle whatever CSI format the connected hardware provides. WASM builds should include the geometry conditioning path so users can specify AP layout in the browser UI. |
+
+### 6.4 Independent Tracks (Not Addressed by MERIDIAN)
+
+These ADRs address orthogonal concerns and should be pursued separately:
+
+| Proposed ADR | Gap | Recommendation |
+|-------------|-----|----------------|
+| **ADR-007**: Post-Quantum Cryptography | WiFi sensing data reveals presence, health, and activity — quantum computers could break current encryption of sensing streams | **Pursue independently.** MERIDIAN does not address data-in-transit security. PQC should be applied to WebSocket streams (`/ws/sensing`, `/ws/mat/stream`) and RVF model containers (replace Ed25519 signing with ML-DSA/Dilithium). Priority: medium — no imminent quantum threat, but healthcare deployments may require PQC compliance for long-term data retention. |
+| **ADR-010**: Witness Chains for Audit Trail | Disaster triage decisions (ADR-001) need tamper-proof audit trails for legal/regulatory compliance | **Pursue independently.** MERIDIAN's domain adaptation improves triage accuracy in unfamiliar environments (rubble, collapsed buildings), which reduces the need for audit trail corrections. But the audit trail itself — hash chains, Merkle proofs, timestamped triage events — is a separate integrity concern. Priority: high for disaster response deployments. |
+| **ADR-011**: Python Proof-of-Reality (URGENT) | Python v1 contains mock/placeholder code that undermines credibility; `verify.py` exists but mock paths remain | **Pursue independently.** This is a Python v1 code quality issue, not an ML/architecture concern. The Rust port (v2+) has no mock code — all 542+ tests run against real algorithm implementations. Recommendation: either complete the mock elimination in Python v1 or formally deprecate Python v1 in favor of the Rust stack. Priority: high for credibility. |
+
+### 6.5 Gap Closure Summary
+
+```
+Proposed ADRs (002-011)          Status After ADR-027
+─────────────────────────        ─────────────────────
+ADR-002  RVF Integration    ──→  ✅ Superseded (ADR-016/017 implemented)
+ADR-003  Cognitive Containers ─→ 🔜 Enabled (MERIDIAN RVF segments provide pattern)
+ADR-004  HNSW Fingerprinting ──→ ✅ Addressed (domain-disentangled embeddings)
+ADR-005  SONA Self-Learning  ──→ ✅ Addressed (unsupervised rapid adaptation)
+ADR-006  GNN Patterns        ──→ ✅ Addressed (adversarial GCN regularization)
+ADR-007  Post-Quantum Crypto ──→ ⏳ Independent (pursue separately, medium priority)
+ADR-008  Distributed Consensus → 🔜 Enabled (GeometryEncoder + HardwareNormalizer)
+ADR-009  WASM Runtime        ──→ 🔜 Enabled (67K model fits WASM budget)
+ADR-010  Witness Chains      ──→ ⏳ Independent (pursue separately, high priority)
+ADR-011  Proof-of-Reality    ──→ ⏳ Independent (Python v1 issue, high priority)
+```
+
+---
+
+## 7. References
 
 1. Chen, L., et al. (2026). "Breaking Coordinate Overfitting: Geometry-Aware WiFi Sensing for Cross-Layout 3D Pose Estimation." arXiv:2601.12252. https://arxiv.org/abs/2601.12252
 2. Zhou, Y., et al. (2024). "AdaPose: Towards Cross-Site Device-Free Human Pose Estimation with Commodity WiFi." IEEE Internet of Things Journal. arXiv:2309.16964. https://arxiv.org/abs/2309.16964
