@@ -2,12 +2,14 @@
 name = "wifi-densepose-mat"
 version = "0.1.0"
 edition = "2021"
-authors = ["WiFi-DensePose Team"]
+authors = ["rUv <ruv@ruv.net>", "WiFi-DensePose Contributors"]
 description = "Mass Casualty Assessment Tool - WiFi-based disaster survivor detection"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ruvnet/wifi-densepose"
+documentation = "https://docs.rs/wifi-densepose-mat"
 keywords = ["wifi", "disaster", "rescue", "detection", "vital-signs"]
 categories = ["science", "algorithms"]
+readme = "README.md"
 
 [features]
 default = ["std", "api", "ruvector"]
@@ -22,9 +24,9 @@ serde = ["dep:serde", "chrono/serde", "geo/use-serde"]
 
 [dependencies]
 # Workspace dependencies
-wifi-densepose-core = { path = "../wifi-densepose-core" }
-wifi-densepose-signal = { path = "../wifi-densepose-signal" }
-wifi-densepose-nn = { path = "../wifi-densepose-nn" }
+wifi-densepose-core = { version = "0.1.0", path = "../wifi-densepose-core" }
+wifi-densepose-signal = { version = "0.1.0", path = "../wifi-densepose-signal" }
+wifi-densepose-nn = { version = "0.1.0", path = "../wifi-densepose-nn" }
 ruvector-solver = { workspace = true, optional = true }
 ruvector-temporal-tensor = { workspace = true, optional = true }
 

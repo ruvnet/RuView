@@ -12,3 +12,4 @@ pub mod trainer;
 pub mod dataset;
 pub mod sona;
 pub mod sparse_inference;
+pub mod embedding;

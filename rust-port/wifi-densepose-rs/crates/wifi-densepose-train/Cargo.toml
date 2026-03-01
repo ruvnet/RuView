@@ -2,10 +2,14 @@
 name = "wifi-densepose-train"
 version = "0.1.0"
 edition = "2021"
-authors = ["WiFi-DensePose Contributors"]
+authors = ["rUv <ruv@ruv.net>", "WiFi-DensePose Contributors"]
 license = "MIT OR Apache-2.0"
 description = "Training pipeline for WiFi-DensePose pose estimation"
+repository = "https://github.com/ruvnet/wifi-densepose"
+documentation = "https://docs.rs/wifi-densepose-train"
 keywords = ["wifi", "training", "pose-estimation", "deep-learning"]
+categories = ["science", "computer-vision"]
+readme = "README.md"
 
 [[bin]]
 name = "train"
@@ -23,8 +27,8 @@ cuda = ["tch-backend"]
 
 [dependencies]
 # Internal crates
-wifi-densepose-signal = { path = "../wifi-densepose-signal" }
-wifi-densepose-nn = { path = "../wifi-densepose-nn" }
+wifi-densepose-signal = { version = "0.1.0", path = "../wifi-densepose-signal" }
+wifi-densepose-nn = { version = "0.1.0", path = "../wifi-densepose-nn" }
 
 # Core
 thiserror.workspace = true

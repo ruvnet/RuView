@@ -3,5 +3,12 @@ name = "wifi-densepose-db"
 version.workspace = true
 edition.workspace = true
 description = "Database layer for WiFi-DensePose"
+license.workspace = true
+authors = ["rUv <ruv@ruv.net>", "WiFi-DensePose Contributors"]
+repository.workspace = true
+documentation.workspace = true
+keywords = ["wifi", "database", "storage", "densepose", "persistence"]
+categories = ["database", "science"]
+readme = "README.md"
 
 [dependencies]

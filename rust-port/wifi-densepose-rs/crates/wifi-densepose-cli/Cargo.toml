@@ -6,6 +6,10 @@ description = "CLI for WiFi-DensePose"
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+documentation = "https://docs.rs/wifi-densepose-cli"
+keywords = ["wifi", "cli", "densepose", "disaster", "detection"]
+categories = ["command-line-utilities", "science"]
+readme = "README.md"
 
 [[bin]]
 name = "wifi-densepose"
@@ -17,7 +21,7 @@ mat = []
 
 [dependencies]
 # Internal crates
-wifi-densepose-mat = { path = "../wifi-densepose-mat" }
+wifi-densepose-mat = { version = "0.1.0", path = "../wifi-densepose-mat" }
 
 # CLI framework
 clap = { version = "4.4", features = ["derive", "env", "cargo"] }

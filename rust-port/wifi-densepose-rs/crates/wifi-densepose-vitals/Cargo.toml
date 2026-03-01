@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 description = "ESP32 CSI-grade vital sign extraction (ADR-021): heart rate and respiratory rate from WiFi Channel State Information"
 license.workspace = true
+authors = ["rUv <ruv@ruv.net>", "WiFi-DensePose Contributors"]
+repository.workspace = true
+documentation = "https://docs.rs/wifi-densepose-vitals"
+keywords = ["wifi", "vital-signs", "breathing", "heart-rate", "csi"]
+categories = ["science", "computer-vision"]
+readme = "README.md"
 
 [dependencies]
 tracing.workspace = true

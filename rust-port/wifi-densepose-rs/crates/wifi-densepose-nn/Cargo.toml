@@ -9,6 +9,7 @@ documentation.workspace = true
 keywords = ["neural-network", "onnx", "inference", "densepose", "deep-learning"]
 categories = ["science", "computer-vision"]
 description = "Neural network inference for WiFi-DensePose pose estimation"
+readme = "README.md"
 
 [features]
 default = ["onnx"]

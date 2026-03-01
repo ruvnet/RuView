@@ -4,7 +4,12 @@ version.workspace = true
 edition.workspace = true
 description = "WebAssembly bindings for WiFi-DensePose"
 license = "MIT OR Apache-2.0"
+authors = ["rUv <ruv@ruv.net>", "WiFi-DensePose Contributors"]
 repository = "https://github.com/ruvnet/wifi-densepose"
+documentation = "https://docs.rs/wifi-densepose-wasm"
+keywords = ["wifi", "wasm", "webassembly", "densepose", "browser"]
+categories = ["wasm", "web-programming"]
+readme = "README.md"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -54,7 +59,7 @@ uuid = { version = "1.6", features = ["v4", "serde", "js"] }
 getrandom = { version = "0.2", features = ["js"] }
 
 # Optional: wifi-densepose-mat integration
-wifi-densepose-mat = { path = "../wifi-densepose-mat", optional = true, features = ["serde"] }
+wifi-densepose-mat = { version = "0.1.0", path = "../wifi-densepose-mat", optional = true, features = ["serde"] }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"

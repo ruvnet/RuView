@@ -142,6 +142,86 @@ These scenarios exploit WiFi's ability to penetrate solid materials — concrete
 
 ---
 
+<details>
+<summary><strong>🧠 Contrastive CSI Embedding Model (ADR-024)</strong> — Self-supervised WiFi fingerprinting, similarity search, and anomaly detection</summary>
+
+Every WiFi signal that passes through a room creates a unique fingerprint of that space. WiFi-DensePose already reads these fingerprints to track people, but until now it threw away the internal "understanding" after each reading. The Contrastive CSI Embedding Model captures and preserves that understanding as compact, reusable vectors.
+
+**What it does in plain terms:**
+- Turns any WiFi signal into a 128-number "fingerprint" that uniquely describes what's happening in a room
+- Learns entirely on its own from raw WiFi data — no cameras, no labeling, no human supervision needed
+- Recognizes rooms, detects intruders, identifies people, and classifies activities using only WiFi
+- Runs on an $8 ESP32 chip (the entire model fits in 60 KB of memory)
+- Produces both body pose tracking AND environment fingerprints in a single computation
+
+**Key Capabilities**
+
+| What | How it works | Why it matters |
+|------|-------------|----------------|
+| **Self-supervised learning** | The model watches WiFi signals and teaches itself what "similar" and "different" look like, without any human-labeled data | Deploy anywhere — just plug in a WiFi sensor and wait 10 minutes |
+| **Room identification** | Each room produces a distinct WiFi fingerprint pattern | Know which room someone is in without GPS or beacons |
+| **Anomaly detection** | An unexpected person or event creates a fingerprint that doesn't match anything seen before | Automatic intrusion and fall detection as a free byproduct |
+| **Person re-identification** | Each person disturbs WiFi in a slightly different way, creating a personal signature | Track individuals across sessions without cameras |
+| **Environment adaptation** | MicroLoRA adapters (1,792 parameters per room) fine-tune the model for each new space | Adapts to a new room with minimal data — 93% less than retraining from scratch |
+| **Memory preservation** | EWC++ regularization remembers what was learned during pretraining | Switching to a new task doesn't erase prior knowledge |
+| **Hard-negative mining** | Training focuses on the most confusing examples to learn faster | Better accuracy with the same amount of training data |
+
+**Architecture**
+
+```
+WiFi Signal [56 channels] → Transformer + Graph Neural Network
+                                  ├→ 128-dim environment fingerprint (for search + identification)
+                                  └→ 17-joint body pose (for human tracking)
+```
+
+**Quick Start**
+
+```bash
+# Step 1: Learn from raw WiFi data (no labels needed)
+cargo run -p wifi-densepose-sensing-server -- --pretrain --dataset data/csi/ --pretrain-epochs 50
+
+# Step 2: Fine-tune with pose labels for full capability
+cargo run -p wifi-densepose-sensing-server -- --train --dataset data/mmfi/ --epochs 100 --save-rvf model.rvf
+
+# Step 3: Use the model — extract fingerprints from live WiFi
+cargo run -p wifi-densepose-sensing-server -- --model model.rvf --embed
+
+# Step 4: Search — find similar environments or detect anomalies
+cargo run -p wifi-densepose-sensing-server -- --model model.rvf --build-index env
+```
+
+**Training Modes**
+
+| Mode | What you need | What you get |
+|------|--------------|-------------|
+| Self-Supervised | Just raw WiFi data | A model that understands WiFi signal structure |
+| Supervised | WiFi data + body pose labels | Full pose tracking + environment fingerprints |
+| Cross-Modal | WiFi data + camera footage | Fingerprints aligned with visual understanding |
+
+**Fingerprint Index Types**
+
+| Index | What it stores | Real-world use |
+|-------|---------------|----------------|
+| `env_fingerprint` | Average room fingerprint | "Is this the kitchen or the bedroom?" |
+| `activity_pattern` | Activity boundaries | "Is someone cooking, sleeping, or exercising?" |
+| `temporal_baseline` | Normal conditions | "Something unusual just happened in this room" |
+| `person_track` | Individual movement signatures | "Person A just entered the living room" |
+
+**Model Size**
+
+| Component | Parameters | Memory (on ESP32) |
+|-----------|-----------|-------------------|
+| Transformer backbone | ~28,000 | 28 KB |
+| Embedding projection head | ~25,000 | 25 KB |
+| Per-room MicroLoRA adapter | ~1,800 | 2 KB |
+| **Total** | **~55,000** | **55 KB** (of 520 KB available) |
+
+See [`docs/adr/ADR-024-contrastive-csi-embedding-model.md`](docs/adr/ADR-024-contrastive-csi-embedding-model.md) for full architectural details.
+
+</details>
+
+---
+
 ## 📦 Installation
 
 <details>

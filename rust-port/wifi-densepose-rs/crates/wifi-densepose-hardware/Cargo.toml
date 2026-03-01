@@ -4,7 +4,12 @@ version.workspace = true
 edition.workspace = true
 description = "Hardware interface abstractions for WiFi CSI sensors (ESP32, Intel 5300, Atheros)"
 license = "MIT OR Apache-2.0"
+authors = ["rUv <ruv@ruv.net>", "WiFi-DensePose Contributors"]
 repository = "https://github.com/ruvnet/wifi-densepose"
+documentation = "https://docs.rs/wifi-densepose-hardware"
+keywords = ["wifi", "esp32", "csi", "hardware", "sensor"]
+categories = ["hardware-support", "science"]
+readme = "README.md"
 
 [features]
 default = ["std"]

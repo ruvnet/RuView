@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 description = "WiFi CSI signal processing for DensePose estimation"
 license.workspace = true
+authors = ["rUv <ruv@ruv.net>", "WiFi-DensePose Contributors"]
+repository.workspace = true
+documentation = "https://docs.rs/wifi-densepose-signal"
+keywords = ["wifi", "csi", "signal-processing", "densepose", "rust"]
+categories = ["science", "computer-vision"]
+readme = "README.md"
 
 [dependencies]
 # Core utilities
@@ -27,7 +33,7 @@ ruvector-attention = { workspace = true }
 ruvector-solver = { workspace = true }
 
 # Internal
-wifi-densepose-core = { path = "../wifi-densepose-core" }
+wifi-densepose-core = { version = "0.1.0", path = "../wifi-densepose-core" }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

@@ -486,6 +486,16 @@ impl CsiToPoseTransformer {
     }
     pub fn config(&self) -> &TransformerConfig { &self.config }
 
+    /// Extract body-part feature embeddings without regression heads.
+    /// Returns 17 vectors of dimension d_model (same as forward() but stops
+    /// before xyz_head/conf_head).
+    pub fn embed(&self, csi_features: &[Vec<f32>]) -> Vec<Vec<f32>> {
+        let embedded: Vec<Vec<f32>> = csi_features.iter()
+            .map(|f| self.csi_embed.forward(f)).collect();
+        let attended = self.cross_attn.forward(&self.keypoint_queries, &embedded, &embedded);
+        self.gnn.forward(&attended)
+    }
+
     /// Collect all trainable parameters into a flat vec.
     ///
     /// Layout: csi_embed | keypoint_queries (flat) | cross_attn | gnn | xyz_head | conf_head

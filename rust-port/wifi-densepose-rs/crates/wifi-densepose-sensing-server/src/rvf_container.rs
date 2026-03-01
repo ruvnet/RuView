@@ -37,6 +37,10 @@ const SEG_META: u8 = 0x07;
 const SEG_WITNESS: u8 = 0x0A;
 /// Domain profile declarations.
 const SEG_PROFILE: u8 = 0x0B;
+/// Contrastive embedding model weights and configuration (ADR-024).
+pub const SEG_EMBED: u8 = 0x0C;
+/// LoRA adaptation profile (named LoRA weight sets for environment-specific fine-tuning).
+pub const SEG_LORA: u8 = 0x0D;
 
 // ── Pure-Rust CRC32 (IEEE 802.3 polynomial) ────────────────────────────────
 
@@ -304,6 +308,35 @@ impl RvfBuilder {
         self.push_segment(seg_type, payload);
     }
 
+    /// Add a named LoRA adaptation profile (ADR-024 Phase 7).
+    ///
+    /// Segment format: `[name_len: u16 LE][name_bytes: UTF-8][weights: f32 LE...]`
+    pub fn add_lora_profile(&mut self, name: &str, lora_weights: &[f32]) {
+        let name_bytes = name.as_bytes();
+        let name_len = name_bytes.len() as u16;
+        let mut payload = Vec::with_capacity(2 + name_bytes.len() + lora_weights.len() * 4);
+        payload.extend_from_slice(&name_len.to_le_bytes());
+        payload.extend_from_slice(name_bytes);
+        for &w in lora_weights {
+            payload.extend_from_slice(&w.to_le_bytes());
+        }
+        self.push_segment(SEG_LORA, &payload);
+    }
+
+    /// Add contrastive embedding config and projection head weights (ADR-024).
+    /// Serializes embedding config as JSON followed by projection weights as f32 LE.
+    pub fn add_embedding(&mut self, config_json: &serde_json::Value, proj_weights: &[f32]) {
+        let config_bytes = serde_json::to_vec(config_json).unwrap_or_default();
+        let config_len = config_bytes.len() as u32;
+        let mut payload = Vec::with_capacity(4 + config_bytes.len() + proj_weights.len() * 4);
+        payload.extend_from_slice(&config_len.to_le_bytes());
+        payload.extend_from_slice(&config_bytes);
+        for &w in proj_weights {
+            payload.extend_from_slice(&w.to_le_bytes());
+        }
+        self.push_segment(SEG_EMBED, &payload);
+    }
+
     /// Add witness/proof data as a Witness segment.
     pub fn add_witness(&mut self, training_hash: &str, metrics: &serde_json::Value) {
         let witness = serde_json::json!({
@@ -526,6 +559,73 @@ impl RvfReader {
     pub fn witness(&self) -> Option<serde_json::Value> {
         self.find_segment(SEG_WITNESS)
             .and_then(|data| serde_json::from_slice(data).ok())
+    }
+
+    /// Parse and return the embedding config JSON and projection weights, if present.
+    pub fn embedding(&self) -> Option<(serde_json::Value, Vec<f32>)> {
+        let data = self.find_segment(SEG_EMBED)?;
+        if data.len() < 4 {
+            return None;
+        }
+        let config_len = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+        if 4 + config_len > data.len() {
+            return None;
+        }
+        let config: serde_json::Value = serde_json::from_slice(&data[4..4 + config_len]).ok()?;
+        let weight_data = &data[4 + config_len..];
+        if weight_data.len() % 4 != 0 {
+            return None;
+        }
+        let weights: Vec<f32> = weight_data
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
+        Some((config, weights))
+    }
+
+    /// Retrieve a named LoRA profile's weights, if present.
+    /// Returns None if no profile with the given name exists.
+    pub fn lora_profile(&self, name: &str) -> Option<Vec<f32>> {
+        for (h, payload) in &self.segments {
+            if h.seg_type != SEG_LORA || payload.len() < 2 {
+                continue;
+            }
+            let name_len = u16::from_le_bytes([payload[0], payload[1]]) as usize;
+            if 2 + name_len > payload.len() {
+                continue;
+            }
+            let seg_name = std::str::from_utf8(&payload[2..2 + name_len]).ok()?;
+            if seg_name == name {
+                let weight_data = &payload[2 + name_len..];
+                if weight_data.len() % 4 != 0 {
+                    return None;
+                }
+                let weights: Vec<f32> = weight_data
+                    .chunks_exact(4)
+                    .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                    .collect();
+                return Some(weights);
+            }
+        }
+        None
+    }
+
+    /// List all stored LoRA profile names.
+    pub fn lora_profiles(&self) -> Vec<String> {
+        let mut names = Vec::new();
+        for (h, payload) in &self.segments {
+            if h.seg_type != SEG_LORA || payload.len() < 2 {
+                continue;
+            }
+            let name_len = u16::from_le_bytes([payload[0], payload[1]]) as usize;
+            if 2 + name_len > payload.len() {
+                continue;
+            }
+            if let Ok(name) = std::str::from_utf8(&payload[2..2 + name_len]) {
+                names.push(name.to_string());
+            }
+        }
+        names
     }
 
     /// Number of segments in the container.
@@ -910,5 +1010,92 @@ mod tests {
         assert!(!info.has_vital_config);
         assert!(!info.has_quant_info);
         assert!(!info.has_witness);
+    }
+
+    #[test]
+    fn test_rvf_embedding_segment_roundtrip() {
+        let config = serde_json::json!({
+            "d_model": 64,
+            "d_proj": 128,
+            "temperature": 0.07,
+            "normalize": true,
+        });
+        let weights: Vec<f32> = (0..256).map(|i| (i as f32 * 0.13).sin()).collect();
+
+        let mut builder = RvfBuilder::new();
+        builder.add_manifest("embed-test", "1.0", "embedding test");
+        builder.add_embedding(&config, &weights);
+        let data = builder.build();
+
+        let reader = RvfReader::from_bytes(&data).unwrap();
+        assert_eq!(reader.segment_count(), 2);
+
+        let (decoded_config, decoded_weights) = reader.embedding()
+            .expect("embedding segment should be present");
+        assert_eq!(decoded_config["d_model"], 64);
+        assert_eq!(decoded_config["d_proj"], 128);
+        assert!((decoded_config["temperature"].as_f64().unwrap() - 0.07).abs() < 1e-4);
+        assert_eq!(decoded_weights.len(), weights.len());
+        for (a, b) in decoded_weights.iter().zip(weights.iter()) {
+            assert_eq!(a.to_bits(), b.to_bits(), "weight mismatch");
+        }
+    }
+
+    // ── Phase 7: RVF LoRA profile tests ───────────────────────────────
+
+    #[test]
+    fn test_rvf_lora_profile_roundtrip() {
+        let weights: Vec<f32> = (0..100).map(|i| (i as f32 * 0.37).sin()).collect();
+
+        let mut builder = RvfBuilder::new();
+        builder.add_manifest("lora-test", "1.0", "LoRA profile test");
+        builder.add_lora_profile("office-env", &weights);
+        let data = builder.build();
+
+        let reader = RvfReader::from_bytes(&data).unwrap();
+        assert_eq!(reader.segment_count(), 2);
+
+        let profiles = reader.lora_profiles();
+        assert_eq!(profiles, vec!["office-env"]);
+
+        let decoded = reader.lora_profile("office-env")
+            .expect("LoRA profile should be present");
+        assert_eq!(decoded.len(), weights.len());
+        for (a, b) in decoded.iter().zip(weights.iter()) {
+            assert_eq!(a.to_bits(), b.to_bits(), "LoRA weight mismatch");
+        }
+
+        // Non-existent profile returns None
+        assert!(reader.lora_profile("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_rvf_multiple_lora_profiles() {
+        let w1: Vec<f32> = vec![1.0, 2.0, 3.0];
+        let w2: Vec<f32> = vec![4.0, 5.0, 6.0, 7.0];
+        let w3: Vec<f32> = vec![-1.0, -2.0];
+
+        let mut builder = RvfBuilder::new();
+        builder.add_lora_profile("office", &w1);
+        builder.add_lora_profile("home", &w2);
+        builder.add_lora_profile("outdoor", &w3);
+        let data = builder.build();
+
+        let reader = RvfReader::from_bytes(&data).unwrap();
+        assert_eq!(reader.segment_count(), 3);
+
+        let profiles = reader.lora_profiles();
+        assert_eq!(profiles.len(), 3);
+        assert!(profiles.contains(&"office".to_string()));
+        assert!(profiles.contains(&"home".to_string()));
+        assert!(profiles.contains(&"outdoor".to_string()));
+
+        // Verify each profile's weights
+        let d1 = reader.lora_profile("office").unwrap();
+        assert_eq!(d1, w1);
+        let d2 = reader.lora_profile("home").unwrap();
+        assert_eq!(d2, w2);
+        let d3 = reader.lora_profile("outdoor").unwrap();
+        assert_eq!(d3, w3);
     }
 }

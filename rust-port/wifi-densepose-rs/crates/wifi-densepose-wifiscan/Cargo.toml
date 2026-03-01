@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 description = "Multi-BSSID WiFi scanning domain layer for enhanced Windows WiFi DensePose sensing (ADR-022)"
 license.workspace = true
+authors = ["rUv <ruv@ruv.net>", "WiFi-DensePose Contributors"]
+repository.workspace = true
+documentation = "https://docs.rs/wifi-densepose-wifiscan"
+keywords = ["wifi", "bssid", "scanning", "windows", "sensing"]
+categories = ["science", "computer-vision"]
+readme = "README.md"
 
 [dependencies]
 # Logging

@@ -3,5 +3,12 @@ name = "wifi-densepose-config"
 version.workspace = true
 edition.workspace = true
 description = "Configuration management for WiFi-DensePose"
+license.workspace = true
+authors = ["rUv <ruv@ruv.net>", "WiFi-DensePose Contributors"]
+repository.workspace = true
+documentation.workspace = true
+keywords = ["wifi", "configuration", "densepose", "settings", "toml"]
+categories = ["config", "science"]
+readme = "README.md"
 
 [dependencies]
