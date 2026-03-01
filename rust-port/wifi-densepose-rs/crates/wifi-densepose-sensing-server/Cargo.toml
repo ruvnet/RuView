@@ -1,0 +1,31 @@
+[package]
+name = "wifi-densepose-sensing-server"
+version.workspace = true
+edition.workspace = true
+description = "Lightweight Axum server for WiFi sensing UI with RuVector signal processing"
+license.workspace = true
+
+[[bin]]
+name = "sensing-server"
+path = "src/main.rs"
+
+[dependencies]
+# Web framework
+axum = { workspace = true }
+tower-http = { version = "0.5", features = ["fs", "cors", "set-header"] }
+tokio = { workspace = true, features = ["full", "process"] }
+futures-util = "0.3"
+
+# Serialization
+serde = { workspace = true }
+serde_json.workspace = true
+
+# Logging
+tracing.workspace = true
+tracing-subscriber = { workspace = true }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# CLI
+clap = { workspace = true }

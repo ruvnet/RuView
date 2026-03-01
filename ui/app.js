@@ -65,18 +65,15 @@ class WiFiDensePoseApp {
       // Show notification to user
       this.showBackendStatus('Mock server active - testing mode', 'warning');
     } else {
-      console.log('🔌 Initializing with real backend');
+      console.log('🔌 Connecting to backend...');
 
-      // Verify backend is actually working
       try {
         const health = await healthService.checkLiveness();
-        console.log('✅ Backend is available and responding:', health);
-        this.showBackendStatus('Connected to real backend', 'success');
+        console.log('✅ Backend responding:', health);
+        this.showBackendStatus('Connected to Rust sensing server', 'success');
       } catch (error) {
-        // DensePose API backend not running — sensing-only mode
-        backendDetector.sensingOnlyMode = true;
-        console.log('ℹ️ DensePose API not running — sensing-only mode via WebSocket on :8765');
-        this.showBackendStatus('Sensing mode — live WiFi data via WebSocket', 'success');
+        console.warn('⚠️ Backend not available:', error.message);
+        this.showBackendStatus('Backend unavailable — start sensing-server', 'warning');
       }
     }
   }
@@ -99,36 +96,32 @@ class WiFiDensePoseApp {
     this.components.tabManager.onTabChange((newTab, oldTab) => {
       this.handleTabChange(newTab, oldTab);
     });
+
   }
 
   // Initialize individual tab components
   initializeTabComponents() {
-    // Skip DensePose-dependent tabs in sensing-only mode
-    const sensingOnly = backendDetector.sensingOnlyMode;
-
     // Dashboard tab
     const dashboardContainer = document.getElementById('dashboard');
     if (dashboardContainer) {
       this.components.dashboard = new DashboardTab(dashboardContainer);
-      if (!sensingOnly) {
-        this.components.dashboard.init().catch(error => {
-          console.error('Failed to initialize dashboard:', error);
-        });
-      }
+      this.components.dashboard.init().catch(error => {
+        console.error('Failed to initialize dashboard:', error);
+      });
     }
 
     // Hardware tab
     const hardwareContainer = document.getElementById('hardware');
     if (hardwareContainer) {
       this.components.hardware = new HardwareTab(hardwareContainer);
-      if (!sensingOnly) this.components.hardware.init();
+      this.components.hardware.init();
     }
 
     // Live demo tab
     const demoContainer = document.getElementById('demo');
     if (demoContainer) {
       this.components.demo = new LiveDemoTab(demoContainer);
-      if (!sensingOnly) this.components.demo.init();
+      this.components.demo.init();
     }
 
     // Sensing tab

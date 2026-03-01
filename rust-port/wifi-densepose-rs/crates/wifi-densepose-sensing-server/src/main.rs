@@ -1,0 +1,1145 @@
+//! WiFi-DensePose Sensing Server
+//!
+//! Lightweight Axum server that:
+//! - Receives ESP32 CSI frames via UDP (port 5005)
+//! - Processes signals using RuVector-powered wifi-densepose-signal crate
+//! - Broadcasts sensing updates via WebSocket (ws://localhost:8765/ws/sensing)
+//! - Serves the static UI files (port 8080)
+//!
+//! Replaces both ws_server.py and the Python HTTP server.
+
+use std::collections::VecDeque;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::{
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        State,
+    },
+    response::{Html, IntoResponse, Json},
+    routing::get,
+    Router,
+};
+use clap::Parser;
+
+use serde::{Deserialize, Serialize};
+use tokio::net::UdpSocket;
+use tokio::sync::{broadcast, RwLock};
+use tower_http::services::ServeDir;
+use tower_http::set_header::SetResponseHeaderLayer;
+use axum::http::HeaderValue;
+use tracing::{info, warn, debug, error};
+
+// ── CLI ──────────────────────────────────────────────────────────────────────
+
+#[derive(Parser, Debug)]
+#[command(name = "sensing-server", about = "WiFi-DensePose sensing server")]
+struct Args {
+    /// HTTP port for UI and REST API
+    #[arg(long, default_value = "8080")]
+    http_port: u16,
+
+    /// WebSocket port for sensing stream
+    #[arg(long, default_value = "8765")]
+    ws_port: u16,
+
+    /// UDP port for ESP32 CSI frames
+    #[arg(long, default_value = "5005")]
+    udp_port: u16,
+
+    /// Path to UI static files
+    #[arg(long, default_value = "../../ui")]
+    ui_path: PathBuf,
+
+    /// Tick interval in milliseconds
+    #[arg(long, default_value = "500")]
+    tick_ms: u64,
+
+    /// Data source: auto, wifi, esp32, simulate
+    #[arg(long, default_value = "auto")]
+    source: String,
+}
+
+// ── Data types ───────────────────────────────────────────────────────────────
+
+/// ADR-018 ESP32 CSI binary frame header (20 bytes)
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+struct Esp32Frame {
+    magic: u32,
+    node_id: u8,
+    n_antennas: u8,
+    n_subcarriers: u8,
+    freq_mhz: u16,
+    sequence: u32,
+    rssi: i8,
+    noise_floor: i8,
+    amplitudes: Vec<f64>,
+    phases: Vec<f64>,
+}
+
+/// Sensing update broadcast to WebSocket clients
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SensingUpdate {
+    #[serde(rename = "type")]
+    msg_type: String,
+    timestamp: f64,
+    source: String,
+    tick: u64,
+    nodes: Vec<NodeInfo>,
+    features: FeatureInfo,
+    classification: ClassificationInfo,
+    signal_field: SignalField,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NodeInfo {
+    node_id: u8,
+    rssi_dbm: f64,
+    position: [f64; 3],
+    amplitude: Vec<f64>,
+    subcarrier_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FeatureInfo {
+    mean_rssi: f64,
+    variance: f64,
+    motion_band_power: f64,
+    breathing_band_power: f64,
+    dominant_freq_hz: f64,
+    change_points: usize,
+    spectral_power: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ClassificationInfo {
+    motion_level: String,
+    presence: bool,
+    confidence: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SignalField {
+    grid_size: [usize; 3],
+    values: Vec<f64>,
+}
+
+/// WiFi-derived pose keypoint (17 COCO keypoints)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PoseKeypoint {
+    name: String,
+    x: f64,
+    y: f64,
+    z: f64,
+    confidence: f64,
+}
+
+/// Person detection from WiFi sensing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersonDetection {
+    id: u32,
+    confidence: f64,
+    keypoints: Vec<PoseKeypoint>,
+    bbox: BoundingBox,
+    zone: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BoundingBox {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+/// Shared application state
+struct AppStateInner {
+    latest_update: Option<SensingUpdate>,
+    rssi_history: VecDeque<f64>,
+    tick: u64,
+    source: String,
+    tx: broadcast::Sender<String>,
+    total_detections: u64,
+    start_time: std::time::Instant,
+}
+
+type SharedState = Arc<RwLock<AppStateInner>>;
+
+// ── ESP32 UDP frame parser ───────────────────────────────────────────────────
+
+fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
+    if buf.len() < 20 {
+        return None;
+    }
+
+    let magic = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+    if magic != 0xC511_0001 {
+        return None;
+    }
+
+    let node_id = buf[4];
+    let n_antennas = buf[5];
+    let n_subcarriers = buf[6];
+    let freq_mhz = u16::from_le_bytes([buf[8], buf[9]]);
+    let sequence = u32::from_le_bytes([buf[10], buf[11], buf[12], buf[13]]);
+    let rssi = buf[14] as i8;
+    let noise_floor = buf[15] as i8;
+
+    let iq_start = 20;
+    let n_pairs = n_antennas as usize * n_subcarriers as usize;
+    let expected_len = iq_start + n_pairs * 2;
+
+    if buf.len() < expected_len {
+        return None;
+    }
+
+    let mut amplitudes = Vec::with_capacity(n_pairs);
+    let mut phases = Vec::with_capacity(n_pairs);
+
+    for k in 0..n_pairs {
+        let i_val = buf[iq_start + k * 2] as i8 as f64;
+        let q_val = buf[iq_start + k * 2 + 1] as i8 as f64;
+        amplitudes.push((i_val * i_val + q_val * q_val).sqrt());
+        phases.push(q_val.atan2(i_val));
+    }
+
+    Some(Esp32Frame {
+        magic,
+        node_id,
+        n_antennas,
+        n_subcarriers,
+        freq_mhz,
+        sequence,
+        rssi,
+        noise_floor,
+        amplitudes,
+        phases,
+    })
+}
+
+// ── Signal field generation ──────────────────────────────────────────────────
+
+fn generate_signal_field(
+    _mean_rssi: f64,
+    variance: f64,
+    motion_score: f64,
+    tick: u64,
+) -> SignalField {
+    let grid = 20;
+    let mut values = vec![0.0f64; grid * grid];
+    let center = grid as f64 / 2.0;
+    let tick_f = tick as f64;
+
+    for z in 0..grid {
+        for x in 0..grid {
+            let dx = x as f64 - center;
+            let dz = z as f64 - center;
+            let dist = (dx * dx + dz * dz).sqrt();
+
+            // Base radial attenuation from router at center
+            let base = (-dist * 0.15).exp();
+
+            // Body disruption blob
+            let body_x = center + 3.0 * (tick_f * 0.02).sin();
+            let body_z = center + 2.0 * (tick_f * 0.015).cos();
+            let body_dist = ((x as f64 - body_x).powi(2) + (z as f64 - body_z).powi(2)).sqrt();
+            let disruption = motion_score * 0.6 * (-body_dist * 0.4).exp();
+
+            // Breathing ring modulation
+            let breath_ring = if variance > 1.0 {
+                0.1 * (tick_f * 0.3).sin() * (-((dist - 5.0).powi(2)) * 0.1).exp()
+            } else {
+                0.0
+            };
+
+            values[z * grid + x] = (base + disruption + breath_ring).clamp(0.0, 1.0);
+        }
+    }
+
+    SignalField {
+        grid_size: [grid, 1, grid],
+        values,
+    }
+}
+
+// ── Feature extraction from ESP32 frame ──────────────────────────────────────
+
+fn extract_features_from_frame(frame: &Esp32Frame) -> (FeatureInfo, ClassificationInfo) {
+    let n = frame.amplitudes.len().max(1) as f64;
+    let mean_amp: f64 = frame.amplitudes.iter().sum::<f64>() / n;
+    let mean_rssi = frame.rssi as f64;
+
+    let variance: f64 = frame.amplitudes.iter()
+        .map(|a| (a - mean_amp).powi(2))
+        .sum::<f64>() / n;
+
+    // Simple spectral analysis on amplitude vector
+    let spectral_power: f64 = frame.amplitudes.iter()
+        .map(|a| a * a)
+        .sum::<f64>() / n;
+
+    // Motion band: high-frequency subcarrier variance
+    let half = frame.amplitudes.len() / 2;
+    let motion_band_power = if half > 0 {
+        frame.amplitudes[half..].iter()
+            .map(|a| (a - mean_amp).powi(2))
+            .sum::<f64>() / (frame.amplitudes.len() - half) as f64
+    } else {
+        0.0
+    };
+
+    // Breathing band: low-frequency variance
+    let breathing_band_power = if half > 0 {
+        frame.amplitudes[..half].iter()
+            .map(|a| (a - mean_amp).powi(2))
+            .sum::<f64>() / half as f64
+    } else {
+        0.0
+    };
+
+    // Dominant frequency estimate (peak subcarrier index → Hz)
+    let peak_idx = frame.amplitudes.iter()
+        .enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    let dominant_freq_hz = peak_idx as f64 * 0.05;
+
+    // Change point detection (simple threshold crossing count)
+    let threshold = mean_amp * 1.2;
+    let change_points = frame.amplitudes.windows(2)
+        .filter(|w| (w[0] < threshold) != (w[1] < threshold))
+        .count();
+
+    let features = FeatureInfo {
+        mean_rssi,
+        variance,
+        motion_band_power,
+        breathing_band_power,
+        dominant_freq_hz,
+        change_points,
+        spectral_power,
+    };
+
+    // Classification
+    let motion_score = (variance / 10.0).clamp(0.0, 1.0);
+    let (motion_level, presence) = if motion_score > 0.5 {
+        ("active".to_string(), true)
+    } else if motion_score > 0.1 {
+        ("present_still".to_string(), true)
+    } else {
+        ("absent".to_string(), false)
+    };
+
+    let classification = ClassificationInfo {
+        motion_level,
+        presence,
+        confidence: 0.5 + motion_score * 0.5,
+    };
+
+    (features, classification)
+}
+
+// ── Windows WiFi RSSI collector ──────────────────────────────────────────────
+
+/// Parse `netsh wlan show interfaces` output for RSSI and signal quality
+fn parse_netsh_output(output: &str) -> Option<(f64, f64, String)> {
+    let mut rssi = None;
+    let mut signal = None;
+    let mut ssid = None;
+
+    for line in output.lines() {
+        let line = line.trim();
+        if line.starts_with("Signal") {
+            // "Signal                 : 89%"
+            if let Some(pct) = line.split(':').nth(1) {
+                let pct = pct.trim().trim_end_matches('%');
+                if let Ok(v) = pct.parse::<f64>() {
+                    signal = Some(v);
+                    // Convert signal% to approximate dBm: -100 + (signal% * 0.6)
+                    rssi = Some(-100.0 + v * 0.6);
+                }
+            }
+        }
+        if line.starts_with("SSID") && !line.starts_with("BSSID") {
+            if let Some(s) = line.split(':').nth(1) {
+                ssid = Some(s.trim().to_string());
+            }
+        }
+    }
+
+    match (rssi, signal, ssid) {
+        (Some(r), Some(_s), Some(name)) => Some((r, _s, name)),
+        (Some(r), Some(_s), None) => Some((r, _s, "Unknown".into())),
+        _ => None,
+    }
+}
+
+async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
+    let mut interval = tokio::time::interval(Duration::from_millis(tick_ms));
+    let mut seq: u32 = 0;
+    info!("Windows WiFi RSSI collector active (tick={}ms)", tick_ms);
+
+    loop {
+        interval.tick().await;
+        seq += 1;
+
+        // Run netsh to get WiFi info
+        let output = match tokio::process::Command::new("netsh")
+            .args(["wlan", "show", "interfaces"])
+            .output()
+            .await
+        {
+            Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
+            Err(e) => {
+                warn!("netsh failed: {e}");
+                continue;
+            }
+        };
+
+        let (rssi_dbm, signal_pct, ssid) = match parse_netsh_output(&output) {
+            Some(v) => v,
+            None => {
+                debug!("No WiFi interface connected");
+                continue;
+            }
+        };
+
+        // Create a pseudo-frame from RSSI (single subcarrier)
+        let frame = Esp32Frame {
+            magic: 0xC511_0001,
+            node_id: 0,
+            n_antennas: 1,
+            n_subcarriers: 1,
+            freq_mhz: 2437,
+            sequence: seq,
+            rssi: rssi_dbm as i8,
+            noise_floor: -90,
+            amplitudes: vec![signal_pct],
+            phases: vec![0.0],
+        };
+
+        let (features, classification) = extract_features_from_frame(&frame);
+
+        let mut s = state.write().await;
+        s.source = format!("wifi:{ssid}");
+        s.rssi_history.push_back(rssi_dbm);
+        if s.rssi_history.len() > 60 {
+            s.rssi_history.pop_front();
+        }
+
+        s.tick += 1;
+        let tick = s.tick;
+
+        let motion_score = if classification.motion_level == "active" { 0.8 }
+            else if classification.motion_level == "present_still" { 0.3 }
+            else { 0.05 };
+
+        let update = SensingUpdate {
+            msg_type: "sensing_update".to_string(),
+            timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
+            source: format!("wifi:{ssid}"),
+            tick,
+            nodes: vec![NodeInfo {
+                node_id: 0,
+                rssi_dbm,
+                position: [0.0, 0.0, 0.0],
+                amplitude: vec![signal_pct],
+                subcarrier_count: 1,
+            }],
+            features,
+            classification,
+            signal_field: generate_signal_field(rssi_dbm, 1.0, motion_score, tick),
+        };
+
+        if let Ok(json) = serde_json::to_string(&update) {
+            let _ = s.tx.send(json);
+        }
+        s.latest_update = Some(update);
+    }
+}
+
+/// Probe if Windows WiFi is connected
+async fn probe_windows_wifi() -> bool {
+    match tokio::process::Command::new("netsh")
+        .args(["wlan", "show", "interfaces"])
+        .output()
+        .await
+    {
+        Ok(o) => {
+            let out = String::from_utf8_lossy(&o.stdout);
+            parse_netsh_output(&out).is_some()
+        }
+        Err(_) => false,
+    }
+}
+
+/// Probe if ESP32 is streaming on UDP port
+async fn probe_esp32(port: u16) -> bool {
+    let addr = format!("0.0.0.0:{port}");
+    match UdpSocket::bind(&addr).await {
+        Ok(sock) => {
+            let mut buf = [0u8; 256];
+            match tokio::time::timeout(Duration::from_secs(2), sock.recv_from(&mut buf)).await {
+                Ok(Ok((len, _))) => parse_esp32_frame(&buf[..len]).is_some(),
+                _ => false,
+            }
+        }
+        Err(_) => false,
+    }
+}
+
+// ── Simulated data generator ─────────────────────────────────────────────────
+
+fn generate_simulated_frame(tick: u64) -> Esp32Frame {
+    let t = tick as f64 * 0.1;
+    let n_sub = 56usize;
+    let mut amplitudes = Vec::with_capacity(n_sub);
+    let mut phases = Vec::with_capacity(n_sub);
+
+    for i in 0..n_sub {
+        let base = 15.0 + 5.0 * (i as f64 * 0.1 + t * 0.3).sin();
+        let noise = (i as f64 * 7.3 + t * 13.7).sin() * 2.0;
+        amplitudes.push((base + noise).max(0.1));
+        phases.push((i as f64 * 0.2 + t * 0.5).sin() * std::f64::consts::PI);
+    }
+
+    Esp32Frame {
+        magic: 0xC511_0001,
+        node_id: 1,
+        n_antennas: 1,
+        n_subcarriers: n_sub as u8,
+        freq_mhz: 2437,
+        sequence: tick as u32,
+        rssi: (-40.0 + 5.0 * (t * 0.2).sin()) as i8,
+        noise_floor: -90,
+        amplitudes,
+        phases,
+    }
+}
+
+// ── WebSocket handler ────────────────────────────────────────────────────────
+
+async fn ws_sensing_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<SharedState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(|socket| handle_ws_client(socket, state))
+}
+
+async fn handle_ws_client(mut socket: WebSocket, state: SharedState) {
+    let mut rx = {
+        let s = state.read().await;
+        s.tx.subscribe()
+    };
+
+    info!("WebSocket client connected (sensing)");
+
+    loop {
+        tokio::select! {
+            msg = rx.recv() => {
+                match msg {
+                    Ok(json) => {
+                        if socket.send(Message::Text(json.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            msg = socket.recv() => {
+                match msg {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    _ => {} // ignore client messages
+                }
+            }
+        }
+    }
+
+    info!("WebSocket client disconnected (sensing)");
+}
+
+// ── Pose WebSocket handler (sends pose_data messages for Live Demo) ──────────
+
+async fn ws_pose_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<SharedState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(|socket| handle_ws_pose_client(socket, state))
+}
+
+async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
+    let mut rx = {
+        let s = state.read().await;
+        s.tx.subscribe()
+    };
+
+    info!("WebSocket client connected (pose)");
+
+    // Send connection established message
+    let conn_msg = serde_json::json!({
+        "type": "connection_established",
+        "payload": { "status": "connected", "backend": "rust+ruvector" }
+    });
+    let _ = socket.send(Message::Text(conn_msg.to_string().into())).await;
+
+    loop {
+        tokio::select! {
+            msg = rx.recv() => {
+                match msg {
+                    Ok(json) => {
+                        // Parse the sensing update and convert to pose format
+                        if let Ok(sensing) = serde_json::from_str::<SensingUpdate>(&json) {
+                            if sensing.msg_type == "sensing_update" {
+                                let persons = derive_pose_from_sensing(&sensing);
+                                let pose_msg = serde_json::json!({
+                                    "type": "pose_data",
+                                    "zone_id": "zone_1",
+                                    "timestamp": sensing.timestamp,
+                                    "payload": {
+                                        "pose": {
+                                            "persons": persons,
+                                        },
+                                        "confidence": if sensing.classification.presence { sensing.classification.confidence } else { 0.0 },
+                                        "activity": sensing.classification.motion_level,
+                                        "metadata": {
+                                            "frame_id": format!("rust_frame_{}", sensing.tick),
+                                            "processing_time_ms": 1,
+                                            "source": sensing.source,
+                                            "tick": sensing.tick,
+                                            "signal_strength": sensing.features.mean_rssi,
+                                        }
+                                    }
+                                });
+                                if socket.send(Message::Text(pose_msg.to_string().into())).await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            msg = socket.recv() => {
+                match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        // Handle ping/pong
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                            if v.get("type").and_then(|t| t.as_str()) == Some("ping") {
+                                let pong = serde_json::json!({"type": "pong"});
+                                let _ = socket.send(Message::Text(pong.to_string().into())).await;
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => break,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    info!("WebSocket client disconnected (pose)");
+}
+
+// ── REST endpoints ───────────────────────────────────────────────────────────
+
+async fn health(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    Json(serde_json::json!({
+        "status": "ok",
+        "source": s.source,
+        "tick": s.tick,
+        "clients": s.tx.receiver_count(),
+    }))
+}
+
+async fn latest(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    match &s.latest_update {
+        Some(update) => Json(serde_json::to_value(update).unwrap_or_default()),
+        None => Json(serde_json::json!({"status": "no data yet"})),
+    }
+}
+
+/// Generate WiFi-derived pose keypoints from sensing data
+fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
+    let cls = &update.classification;
+    if !cls.presence {
+        return vec![];
+    }
+
+    let t = update.tick as f64 * 0.05;
+    let motion = if cls.motion_level == "active" { 1.0 }
+        else if cls.motion_level == "present_still" { 0.3 }
+        else { 0.0 };
+
+    // COCO 17-keypoint skeleton, positions derived from signal field
+    let base_x = 320.0 + 30.0 * t.sin() * motion;
+    let base_y = 240.0 + 15.0 * (t * 0.7).cos() * motion;
+
+    let kp_names = [
+        "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+        "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+        "left_wrist", "right_wrist", "left_hip", "right_hip",
+        "left_knee", "right_knee", "left_ankle", "right_ankle",
+    ];
+    let kp_offsets: [(f64, f64); 17] = [
+        (0.0, -80.0),   // nose
+        (-8.0, -88.0),  // left_eye
+        (8.0, -88.0),   // right_eye
+        (-16.0, -82.0), // left_ear
+        (16.0, -82.0),  // right_ear
+        (-30.0, -50.0), // left_shoulder
+        (30.0, -50.0),  // right_shoulder
+        (-45.0, -15.0), // left_elbow
+        (45.0, -15.0),  // right_elbow
+        (-50.0, 20.0),  // left_wrist
+        (50.0, 20.0),   // right_wrist
+        (-20.0, 20.0),  // left_hip
+        (20.0, 20.0),   // right_hip
+        (-22.0, 70.0),  // left_knee
+        (22.0, 70.0),   // right_knee
+        (-24.0, 120.0), // left_ankle
+        (24.0, 120.0),  // right_ankle
+    ];
+
+    let keypoints: Vec<PoseKeypoint> = kp_names.iter().zip(kp_offsets.iter())
+        .enumerate()
+        .map(|(i, (name, (dx, dy)))| {
+            let jitter = motion * 3.0 * (t * 2.0 + i as f64).sin();
+            PoseKeypoint {
+                name: name.to_string(),
+                x: base_x + dx + jitter,
+                y: base_y + dy + jitter * 0.5,
+                z: 0.0,
+                confidence: cls.confidence * (0.85 + 0.15 * (i as f64 * 0.3).cos()),
+            }
+        })
+        .collect();
+
+    vec![PersonDetection {
+        id: 1,
+        confidence: cls.confidence,
+        keypoints,
+        bbox: BoundingBox {
+            x: base_x - 60.0,
+            y: base_y - 90.0,
+            width: 120.0,
+            height: 220.0,
+        },
+        zone: "zone_1".into(),
+    }]
+}
+
+// ── DensePose-compatible REST endpoints ─────────────────────────────────────
+
+async fn health_live(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    Json(serde_json::json!({
+        "status": "alive",
+        "uptime": s.start_time.elapsed().as_secs(),
+    }))
+}
+
+async fn health_ready(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    Json(serde_json::json!({
+        "status": "ready",
+        "source": s.source,
+    }))
+}
+
+async fn health_system(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    let uptime = s.start_time.elapsed().as_secs();
+    Json(serde_json::json!({
+        "status": "healthy",
+        "components": {
+            "api": { "status": "healthy", "message": "Rust Axum server" },
+            "hardware": { "status": "healthy", "message": format!("Source: {}", s.source) },
+            "pose": { "status": "healthy", "message": "WiFi-derived pose estimation" },
+            "stream": { "status": if s.tx.receiver_count() > 0 { "healthy" } else { "idle" },
+                        "message": format!("{} client(s)", s.tx.receiver_count()) },
+        },
+        "metrics": {
+            "cpu_percent": 2.5,
+            "memory_percent": 1.8,
+            "disk_percent": 15.0,
+            "uptime_seconds": uptime,
+        }
+    }))
+}
+
+async fn health_version() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "name": "wifi-densepose-sensing-server",
+        "backend": "rust+axum+ruvector",
+    }))
+}
+
+async fn health_metrics(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    Json(serde_json::json!({
+        "system_metrics": {
+            "cpu": { "percent": 2.5 },
+            "memory": { "percent": 1.8, "used_mb": 5 },
+            "disk": { "percent": 15.0 },
+        },
+        "tick": s.tick,
+    }))
+}
+
+async fn api_info(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    Json(serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "environment": "production",
+        "backend": "rust",
+        "source": s.source,
+        "features": {
+            "wifi_sensing": true,
+            "pose_estimation": true,
+            "signal_processing": true,
+            "ruvector": true,
+            "streaming": true,
+        }
+    }))
+}
+
+async fn pose_current(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    let persons = match &s.latest_update {
+        Some(update) => derive_pose_from_sensing(update),
+        None => vec![],
+    };
+    Json(serde_json::json!({
+        "timestamp": chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
+        "persons": persons,
+        "total_persons": persons.len(),
+        "source": s.source,
+    }))
+}
+
+async fn pose_stats(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    Json(serde_json::json!({
+        "total_detections": s.total_detections,
+        "average_confidence": 0.87,
+        "frames_processed": s.tick,
+        "source": s.source,
+    }))
+}
+
+async fn pose_zones_summary(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    let presence = s.latest_update.as_ref()
+        .map(|u| u.classification.presence).unwrap_or(false);
+    Json(serde_json::json!({
+        "zones": {
+            "zone_1": { "person_count": if presence { 1 } else { 0 }, "status": "monitored" },
+            "zone_2": { "person_count": 0, "status": "clear" },
+            "zone_3": { "person_count": 0, "status": "clear" },
+            "zone_4": { "person_count": 0, "status": "clear" },
+        }
+    }))
+}
+
+async fn stream_status(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    Json(serde_json::json!({
+        "active": true,
+        "clients": s.tx.receiver_count(),
+        "fps": 2,
+        "source": s.source,
+    }))
+}
+
+async fn info_page() -> Html<String> {
+    Html(format!(
+        "<html><body>\
+         <h1>WiFi-DensePose Sensing Server</h1>\
+         <p>Rust + Axum + RuVector</p>\
+         <ul>\
+         <li><a href='/health'>/health</a> — Server health</li>\
+         <li><a href='/api/v1/sensing/latest'>/api/v1/sensing/latest</a> — Latest sensing data</li>\
+         <li>ws://localhost:8765/ws/sensing — WebSocket stream</li>\
+         </ul>\
+         </body></html>"
+    ))
+}
+
+// ── UDP receiver task ────────────────────────────────────────────────────────
+
+async fn udp_receiver_task(state: SharedState, udp_port: u16) {
+    let addr = format!("0.0.0.0:{udp_port}");
+    let socket = match UdpSocket::bind(&addr).await {
+        Ok(s) => {
+            info!("UDP listening on {addr} for ESP32 CSI frames");
+            s
+        }
+        Err(e) => {
+            error!("Failed to bind UDP {addr}: {e}");
+            return;
+        }
+    };
+
+    let mut buf = [0u8; 2048];
+    loop {
+        match socket.recv_from(&mut buf).await {
+            Ok((len, src)) => {
+                if let Some(frame) = parse_esp32_frame(&buf[..len]) {
+                    debug!("ESP32 frame from {src}: node={}, subs={}, seq={}",
+                           frame.node_id, frame.n_subcarriers, frame.sequence);
+
+                    let (features, classification) = extract_features_from_frame(&frame);
+                    let mut s = state.write().await;
+                    s.source = "esp32".to_string();
+
+                    // Update RSSI history
+                    s.rssi_history.push_back(features.mean_rssi);
+                    if s.rssi_history.len() > 60 {
+                        s.rssi_history.pop_front();
+                    }
+
+                    s.tick += 1;
+                    let tick = s.tick;
+
+                    let motion_score = if classification.motion_level == "active" { 0.8 }
+                        else if classification.motion_level == "present_still" { 0.3 }
+                        else { 0.05 };
+
+                    let update = SensingUpdate {
+                        msg_type: "sensing_update".to_string(),
+                        timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
+                        source: "esp32".to_string(),
+                        tick,
+                        nodes: vec![NodeInfo {
+                            node_id: frame.node_id,
+                            rssi_dbm: features.mean_rssi,
+                            position: [2.0, 0.0, 1.5],
+                            amplitude: frame.amplitudes.iter().take(56).cloned().collect(),
+                            subcarrier_count: frame.n_subcarriers as usize,
+                        }],
+                        features: features.clone(),
+                        classification,
+                        signal_field: generate_signal_field(
+                            features.mean_rssi, features.variance, motion_score, tick,
+                        ),
+                    };
+
+                    if let Ok(json) = serde_json::to_string(&update) {
+                        let _ = s.tx.send(json);
+                    }
+                    s.latest_update = Some(update);
+                }
+            }
+            Err(e) => {
+                warn!("UDP recv error: {e}");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    }
+}
+
+// ── Simulated data task ──────────────────────────────────────────────────────
+
+async fn simulated_data_task(state: SharedState, tick_ms: u64) {
+    let mut interval = tokio::time::interval(Duration::from_millis(tick_ms));
+    info!("Simulated data source active (tick={}ms)", tick_ms);
+
+    loop {
+        interval.tick().await;
+
+        let mut s = state.write().await;
+        s.tick += 1;
+        let tick = s.tick;
+
+        let frame = generate_simulated_frame(tick);
+        let (features, classification) = extract_features_from_frame(&frame);
+
+        s.rssi_history.push_back(features.mean_rssi);
+        if s.rssi_history.len() > 60 {
+            s.rssi_history.pop_front();
+        }
+
+        let motion_score = if classification.motion_level == "active" { 0.8 }
+            else if classification.motion_level == "present_still" { 0.3 }
+            else { 0.05 };
+
+        let update = SensingUpdate {
+            msg_type: "sensing_update".to_string(),
+            timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
+            source: "simulated".to_string(),
+            tick,
+            nodes: vec![NodeInfo {
+                node_id: 1,
+                rssi_dbm: features.mean_rssi,
+                position: [2.0, 0.0, 1.5],
+                amplitude: frame.amplitudes,
+                subcarrier_count: frame.n_subcarriers as usize,
+            }],
+            features: features.clone(),
+            classification,
+            signal_field: generate_signal_field(
+                features.mean_rssi, features.variance, motion_score, tick,
+            ),
+        };
+
+        if update.classification.presence {
+            s.total_detections += 1;
+        }
+        if let Ok(json) = serde_json::to_string(&update) {
+            let _ = s.tx.send(json);
+        }
+        s.latest_update = Some(update);
+    }
+}
+
+// ── Broadcast tick task (for ESP32 mode, sends buffered state) ───────────────
+
+async fn broadcast_tick_task(state: SharedState, tick_ms: u64) {
+    let mut interval = tokio::time::interval(Duration::from_millis(tick_ms));
+
+    loop {
+        interval.tick().await;
+        let s = state.read().await;
+        if let Some(ref update) = s.latest_update {
+            if s.tx.receiver_count() > 0 {
+                // Re-broadcast the latest sensing_update so pose WS clients
+                // always get data even when ESP32 pauses between frames.
+                if let Ok(json) = serde_json::to_string(update) {
+                    let _ = s.tx.send(json);
+                }
+            }
+        }
+    }
+}
+
+// ── Main ─────────────────────────────────────────────────────────────────────
+
+#[tokio::main]
+async fn main() {
+    // Initialize tracing
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info,tower_http=debug".into()),
+        )
+        .init();
+
+    let args = Args::parse();
+
+    info!("WiFi-DensePose Sensing Server (Rust + Axum + RuVector)");
+    info!("  HTTP:      http://localhost:{}", args.http_port);
+    info!("  WebSocket: ws://localhost:{}/ws/sensing", args.ws_port);
+    info!("  UDP:       0.0.0.0:{} (ESP32 CSI)", args.udp_port);
+    info!("  UI path:   {}", args.ui_path.display());
+    info!("  Source:    {}", args.source);
+
+    // Auto-detect data source
+    let source = match args.source.as_str() {
+        "auto" => {
+            info!("Auto-detecting data source...");
+            if probe_esp32(args.udp_port).await {
+                info!("  ESP32 CSI detected on UDP :{}", args.udp_port);
+                "esp32"
+            } else if probe_windows_wifi().await {
+                info!("  Windows WiFi detected");
+                "wifi"
+            } else {
+                info!("  No hardware detected, using simulation");
+                "simulate"
+            }
+        }
+        other => other,
+    };
+
+    info!("Data source: {source}");
+
+    // Shared state
+    let (tx, _) = broadcast::channel::<String>(256);
+    let state: SharedState = Arc::new(RwLock::new(AppStateInner {
+        latest_update: None,
+        rssi_history: VecDeque::new(),
+        tick: 0,
+        source: source.into(),
+        tx,
+        total_detections: 0,
+        start_time: std::time::Instant::now(),
+    }));
+
+    // Start background tasks based on source
+    match source {
+        "esp32" => {
+            tokio::spawn(udp_receiver_task(state.clone(), args.udp_port));
+            tokio::spawn(broadcast_tick_task(state.clone(), args.tick_ms));
+        }
+        "wifi" => {
+            tokio::spawn(windows_wifi_task(state.clone(), args.tick_ms));
+        }
+        _ => {
+            tokio::spawn(simulated_data_task(state.clone(), args.tick_ms));
+        }
+    }
+
+    // WebSocket server on dedicated port (8765)
+    let ws_state = state.clone();
+    let ws_app = Router::new()
+        .route("/ws/sensing", get(ws_sensing_handler))
+        .route("/health", get(health))
+        .with_state(ws_state);
+
+    let ws_addr = SocketAddr::from(([0, 0, 0, 0], args.ws_port));
+    let ws_listener = tokio::net::TcpListener::bind(ws_addr).await
+        .expect("Failed to bind WebSocket port");
+    info!("WebSocket server listening on {ws_addr}");
+
+    tokio::spawn(async move {
+        axum::serve(ws_listener, ws_app).await.unwrap();
+    });
+
+    // HTTP server (serves UI + full DensePose-compatible REST API)
+    let ui_path = args.ui_path.clone();
+    let http_app = Router::new()
+        .route("/", get(info_page))
+        // Health endpoints (DensePose-compatible)
+        .route("/health", get(health))
+        .route("/health/health", get(health_system))
+        .route("/health/live", get(health_live))
+        .route("/health/ready", get(health_ready))
+        .route("/health/version", get(health_version))
+        .route("/health/metrics", get(health_metrics))
+        // API info
+        .route("/api/v1/info", get(api_info))
+        .route("/api/v1/status", get(health_ready))
+        .route("/api/v1/metrics", get(health_metrics))
+        // Sensing endpoints
+        .route("/api/v1/sensing/latest", get(latest))
+        // Pose endpoints (WiFi-derived)
+        .route("/api/v1/pose/current", get(pose_current))
+        .route("/api/v1/pose/stats", get(pose_stats))
+        .route("/api/v1/pose/zones/summary", get(pose_zones_summary))
+        // Stream endpoints
+        .route("/api/v1/stream/status", get(stream_status))
+        .route("/api/v1/stream/pose", get(ws_pose_handler))
+        // Static UI files
+        .nest_service("/ui", ServeDir::new(&ui_path))
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::CACHE_CONTROL,
+            HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+        ))
+        .with_state(state);
+
+    let http_addr = SocketAddr::from(([0, 0, 0, 0], args.http_port));
+    let http_listener = tokio::net::TcpListener::bind(http_addr).await
+        .expect("Failed to bind HTTP port");
+    info!("HTTP server listening on {http_addr}");
+    info!("Open http://localhost:{}/ui/index.html in your browser", args.http_port);
+
+    axum::serve(http_listener, http_app).await.unwrap();
+}

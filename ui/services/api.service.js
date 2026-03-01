@@ -67,11 +67,6 @@ export class ApiService {
   // Generic request method
   async request(url, options = {}) {
     try {
-      // In sensing-only mode, skip all DensePose API calls
-      if (backendDetector.sensingOnlyMode) {
-        throw new Error('DensePose API unavailable (sensing-only mode)');
-      }
-
       // Process request through interceptors
       const processed = await this.processRequest(url, options);
 

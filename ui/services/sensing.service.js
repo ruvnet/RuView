@@ -8,7 +8,7 @@
  * always shows something.
  */
 
-const SENSING_WS_URL = 'ws://localhost:8765';
+const SENSING_WS_URL = 'ws://localhost:8765/ws/sensing';
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000];
 const MAX_RECONNECT_ATTEMPTS = 10;
 const SIMULATION_INTERVAL = 500; // ms

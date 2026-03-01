@@ -309,8 +309,11 @@ export class WebSocketService {
       clearTimeout(connection.reconnectTimer);
     }
 
-    // Clear ping interval
-    this.clearPingInterval(connection.url);
+    // Clear heartbeat timer
+    if (connection.heartbeatTimer) {
+      clearInterval(connection.heartbeatTimer);
+      connection.heartbeatTimer = null;
+    }
 
     // Close WebSocket
     if (connection.ws.readyState === WebSocket.OPEN) {
