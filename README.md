@@ -35,7 +35,7 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 > |--------|----------|------|----------|-------------|
 > | **ESP32 Mesh** (recommended) | 3-6x ESP32-S3 + WiFi router | ~$54 | Yes | Pose, breathing, heartbeat, motion, presence |
 > | **Research NIC** | Intel 5300 / Atheros AR9580 | ~$50-100 | Yes | Full CSI with 3x3 MIMO |
-> | **Any WiFi** | Windows/Linux laptop | $0 | No | RSSI-only: coarse presence and motion |
+> | **Any WiFi** | Windows, macOS, or Linux laptop | $0 | No | RSSI-only: coarse presence and motion |
 >
 > No hardware? Verify the signal processing pipeline with the deterministic reference signal: `python v1/data/proof/verify.py`
 
@@ -356,7 +356,7 @@ cargo add wifi-densepose-ruvector   # RuVector v2.0.4 integration layer (ADR-017
 | [`wifi-densepose-ruvector`](https://crates.io/crates/wifi-densepose-ruvector) | RuVector v2.0.4 integration layer — 7 signal+MAT integration points (ADR-017) | **All 5** | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-ruvector.svg)](https://crates.io/crates/wifi-densepose-ruvector) |
 | [`wifi-densepose-vitals`](https://crates.io/crates/wifi-densepose-vitals) | Vital signs: breathing (6-30 BPM), heart rate (40-120 BPM) | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-vitals.svg)](https://crates.io/crates/wifi-densepose-vitals) |
 | [`wifi-densepose-hardware`](https://crates.io/crates/wifi-densepose-hardware) | ESP32, Intel 5300, Atheros CSI sensor interfaces | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-hardware.svg)](https://crates.io/crates/wifi-densepose-hardware) |
-| [`wifi-densepose-wifiscan`](https://crates.io/crates/wifi-densepose-wifiscan) | Multi-BSSID WiFi scanning (Windows-enhanced) | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-wifiscan.svg)](https://crates.io/crates/wifi-densepose-wifiscan) |
+| [`wifi-densepose-wifiscan`](https://crates.io/crates/wifi-densepose-wifiscan) | Multi-BSSID WiFi scanning (Windows, macOS, Linux) | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-wifiscan.svg)](https://crates.io/crates/wifi-densepose-wifiscan) |
 | [`wifi-densepose-wasm`](https://crates.io/crates/wifi-densepose-wasm) | WebAssembly bindings for browser deployment | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-wasm.svg)](https://crates.io/crates/wifi-densepose-wasm) |
 | [`wifi-densepose-sensing-server`](https://crates.io/crates/wifi-densepose-sensing-server) | Axum server: UDP ingestion, WebSocket broadcast | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-sensing-server.svg)](https://crates.io/crates/wifi-densepose-sensing-server) |
 | [`wifi-densepose-cli`](https://crates.io/crates/wifi-densepose-cli) | Command-line tool for MAT disaster scanning | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-cli.svg)](https://crates.io/crates/wifi-densepose-cli) |
@@ -622,7 +622,7 @@ See [ADR-021](docs/adr/ADR-021-vital-sign-detection-rvdna-pipeline.md).
 </details>
 
 <details>
-<summary><a id="wifi-scan-domain-layer"></a><strong>📡 WiFi Scan Domain Layer (ADR-022)</strong> — 8-stage RSSI pipeline for Windows WiFi</summary>
+<summary><a id="wifi-scan-domain-layer"></a><strong>📡 WiFi Scan Domain Layer (ADR-022/025)</strong> — 8-stage RSSI pipeline for Windows, macOS, and Linux WiFi</summary>
 
 | Stage | Purpose |
 |-------|---------|
@@ -1106,6 +1106,8 @@ WebSocket: `ws://localhost:3001/ws/sensing` (real-time sensing + vital signs)
 | Intel 5300 | Firmware mod | ~$15 | Linux `iwl-csi` |
 | Atheros AR9580 | ath9k patch | ~$20 | Linux only |
 | Any Windows WiFi | RSSI only | $0 | [Tutorial #36](https://github.com/ruvnet/wifi-densepose/issues/36) |
+| Any macOS WiFi | RSSI only (CoreWLAN) | $0 | [ADR-025](docs/adr/ADR-025-macos-corewlan-wifi-sensing.md) |
+| Any Linux WiFi | RSSI only (`iw`) | $0 | Requires `iw` + `CAP_NET_ADMIN` |
 
 </details>
 
@@ -1279,7 +1281,7 @@ The largest release to date — delivers the complete end-to-end training pipeli
 - **`--export-rvf` CLI flag** — Standalone RVF model container generation with vital config, training proof, and SONA profiles
 - **`--train` CLI flag** — Full training mode with best-epoch snapshotting and checkpoint saving
 - **Vital sign detection (ADR-021)** — FFT-based breathing (6-30 BPM) and heartbeat (40-120 BPM) extraction, 11,665 fps benchmark
-- **WiFi scan domain layer (ADR-022)** — 8-stage pure-Rust signal intelligence pipeline for Windows WiFi RSSI
+- **WiFi scan domain layer (ADR-022/025)** — 8-stage pure-Rust signal intelligence pipeline for Windows, macOS, and Linux WiFi RSSI
 - **New crates** — `wifi-densepose-vitals` (1,863 lines) and `wifi-densepose-wifiscan` (4,829 lines)
 - **542+ Rust tests** — All passing, zero mocks
 

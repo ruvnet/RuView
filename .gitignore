@@ -193,6 +193,9 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# Compiled Swift helper binaries (macOS WiFi sensing)
+v1/src/sensing/mac_wifi
+
 # Cursor
 #  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
 #  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
