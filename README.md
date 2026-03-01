@@ -364,33 +364,7 @@ cargo add wifi-densepose-ruvector   # RuVector v2.0.4 integration layer (ADR-017
 | [`wifi-densepose-config`](https://crates.io/crates/wifi-densepose-config) | Configuration management | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-config.svg)](https://crates.io/crates/wifi-densepose-config) |
 | [`wifi-densepose-db`](https://crates.io/crates/wifi-densepose-db) | Database persistence (PostgreSQL, SQLite, Redis) | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-db.svg)](https://crates.io/crates/wifi-densepose-db) |
 
-#### AI Backbone: [RuVector v2.0.4](https://github.com/ruvnet/ruvector)
-
-Raw WiFi signals are noisy, redundant, and environment-dependent. [RuVector](https://github.com/ruvnet/ruvector) is the AI intelligence layer that transforms them into clean, structured input for the DensePose neural network. It uses **attention mechanisms** to learn which signals to trust, **graph algorithms** that automatically discover which WiFi channels are sensitive to body motion, and **compressed representations** that make edge inference possible on an $8 microcontroller.
-
-```
-Raw WiFi CSI (56 subcarriers, noisy)
-    |
-    +-- ruvector-mincut ---------- Which channels carry body-motion signal? (learned graph partitioning)
-    +-- ruvector-attn-mincut ----- Which time frames are signal vs noise? (attention-gated filtering)
-    +-- ruvector-attention ------- How to fuse multi-antenna data? (learned weighted aggregation)
-    |
-    v
-Clean, structured signal --> DensePose Neural Network --> 17-keypoint body pose
-                         --> FFT Vital Signs -----------> breathing rate, heart rate
-                         --> ruvector-solver ------------> physics-based localization
-```
-
-The [`wifi-densepose-ruvector`](https://crates.io/crates/wifi-densepose-ruvector) crate ([ADR-017](docs/adr/ADR-017-ruvector-signal-mat-integration.md)) connects all 7 integration points:
-
-| AI Capability | What It Replaces | RuVector Crate | Result |
-|--------------|-----------------|----------------|--------|
-| **Self-optimizing channel selection** | Hand-tuned thresholds that break when rooms change | `ruvector-mincut` | Graph min-cut adapts to any environment automatically |
-| **Attention-based signal cleaning** | Fixed energy cutoffs that miss subtle breathing | `ruvector-attn-mincut` | Learned gating amplifies body signals, suppresses noise |
-| **Learned signal fusion** | Simple averaging where one bad channel corrupts all | `ruvector-attention` | Transformer-style attention downweights corrupted channels |
-| **Physics-informed localization** | Expensive nonlinear solvers | `ruvector-solver` | Sparse least-squares Fresnel geometry in real-time |
-| **O(1) survivor triangulation** | O(N^3) matrix inversion | `ruvector-solver` | Neumann series linearization for instant position updates |
-| **75% memory compression** | 13.4 MB breathing buffers that overflow edge devices | `ruvector-temporal-tensor` | Tiered 3-8 bit quantization fits 60s of vitals in 3.4 MB |
+All crates integrate with [RuVector v2.0.4](https://github.com/ruvnet/ruvector) — see [AI Backbone](#ai-backbone-ruvector) below.
 
 </details>
 
@@ -723,6 +697,41 @@ See [ADR-014](docs/adr/ADR-014-sota-signal-processing.md) for full mathematical 
 ---
 
 ## 🧠 Models & Training
+
+<details>
+<summary><a id="ai-backbone-ruvector"></a><strong>🤖 AI Backbone: RuVector</strong> — Attention, graph algorithms, and edge-AI compression powering the sensing pipeline</summary>
+
+Raw WiFi signals are noisy, redundant, and environment-dependent. [RuVector](https://github.com/ruvnet/ruvector) is the AI intelligence layer that transforms them into clean, structured input for the DensePose neural network. It uses **attention mechanisms** to learn which signals to trust, **graph algorithms** that automatically discover which WiFi channels are sensitive to body motion, and **compressed representations** that make edge inference possible on an $8 microcontroller.
+
+Without RuVector, WiFi DensePose would need hand-tuned thresholds, brute-force matrix math, and 4x more memory — making real-time edge inference impossible.
+
+```
+Raw WiFi CSI (56 subcarriers, noisy)
+    |
+    +-- ruvector-mincut ---------- Which channels carry body-motion signal? (learned graph partitioning)
+    +-- ruvector-attn-mincut ----- Which time frames are signal vs noise? (attention-gated filtering)
+    +-- ruvector-attention ------- How to fuse multi-antenna data? (learned weighted aggregation)
+    |
+    v
+Clean, structured signal --> DensePose Neural Network --> 17-keypoint body pose
+                         --> FFT Vital Signs -----------> breathing rate, heart rate
+                         --> ruvector-solver ------------> physics-based localization
+```
+
+The [`wifi-densepose-ruvector`](https://crates.io/crates/wifi-densepose-ruvector) crate ([ADR-017](docs/adr/ADR-017-ruvector-signal-mat-integration.md)) connects all 7 integration points:
+
+| AI Capability | What It Replaces | RuVector Crate | Result |
+|--------------|-----------------|----------------|--------|
+| **Self-optimizing channel selection** | Hand-tuned thresholds that break when rooms change | `ruvector-mincut` | Graph min-cut adapts to any environment automatically |
+| **Attention-based signal cleaning** | Fixed energy cutoffs that miss subtle breathing | `ruvector-attn-mincut` | Learned gating amplifies body signals, suppresses noise |
+| **Learned signal fusion** | Simple averaging where one bad channel corrupts all | `ruvector-attention` | Transformer-style attention downweights corrupted channels |
+| **Physics-informed localization** | Expensive nonlinear solvers | `ruvector-solver` | Sparse least-squares Fresnel geometry in real-time |
+| **O(1) survivor triangulation** | O(N^3) matrix inversion | `ruvector-solver` | Neumann series linearization for instant position updates |
+| **75% memory compression** | 13.4 MB breathing buffers that overflow edge devices | `ruvector-temporal-tensor` | Tiered 3-8 bit quantization fits 60s of vitals in 3.4 MB |
+
+See [issue #67](https://github.com/ruvnet/wifi-densepose/issues/67) for a deep dive with code examples, or [`cargo add wifi-densepose-ruvector`](https://crates.io/crates/wifi-densepose-ruvector) to use it directly.
+
+</details>
 
 <details>
 <summary><a id="rvf-model-container"></a><strong>📦 RVF Model Container</strong> — Single-file deployment with progressive loading</summary>
