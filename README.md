@@ -271,13 +271,19 @@ system.stop()
 
 ```bash
 # Health check
-curl http://localhost:3000/api/v1/health
+curl http://localhost:3000/health
 
 # Latest sensing frame
-curl http://localhost:3000/api/v1/sensing
+curl http://localhost:3000/api/v1/sensing/latest
 
 # Vital signs
 curl http://localhost:3000/api/v1/vital-signs
+
+# Pose estimation
+curl http://localhost:3000/api/v1/pose/current
+
+# Server info
+curl http://localhost:3000/api/v1/info
 ```
 
 ### 4. Real-time WebSocket
@@ -941,6 +947,8 @@ POST /api/v1/model/sona/activate  # Activate SONA profile
 ```
 
 WebSocket: `ws://localhost:8765/ws/sensing` (real-time sensing + vital signs)
+
+> Default ports: HTTP 8080, WS 8765. Docker images remap to 3000/3001 via `--http-port` / `--ws-port`.
 
 </details>
 

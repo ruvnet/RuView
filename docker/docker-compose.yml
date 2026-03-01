@@ -12,7 +12,7 @@ services:
       - "5005:5005/udp"  # ESP32 UDP
     environment:
       - RUST_LOG=info
-    command: ["--source", "simulated", "--tick-ms", "100", "--ui-path", "/app/ui"]
+    command: ["--source", "simulated", "--tick-ms", "100", "--ui-path", "/app/ui", "--http-port", "3000", "--ws-port", "3001"]
 
   python-sensing:
     build:

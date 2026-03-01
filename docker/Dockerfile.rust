@@ -43,4 +43,4 @@ EXPOSE 5005/udp
 ENV RUST_LOG=info
 
 ENTRYPOINT ["/app/sensing-server"]
-CMD ["--source", "simulated", "--tick-ms", "100", "--ui-path", "/app/ui"]
+CMD ["--source", "simulated", "--tick-ms", "100", "--ui-path", "/app/ui", "--http-port", "3000", "--ws-port", "3001"]
