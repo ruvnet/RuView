@@ -47,7 +47,6 @@ tokio = { workspace = true, features = ["sync", "rt"] }
 
 # Additional utilities
 parking_lot = "0.12"
-once_cell = "1.19"
 memmap2 = "0.9"
 
 [dev-dependencies]
