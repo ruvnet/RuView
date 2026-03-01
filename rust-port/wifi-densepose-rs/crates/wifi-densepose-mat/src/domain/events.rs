@@ -19,6 +19,8 @@ pub enum DomainEvent {
     Zone(ZoneEvent),
     /// System-level events
     System(SystemEvent),
+    /// Tracking-related events
+    Tracking(TrackingEvent),
 }
 
 impl DomainEvent {
@@ -29,6 +31,7 @@ impl DomainEvent {
             DomainEvent::Alert(e) => e.timestamp(),
             DomainEvent::Zone(e) => e.timestamp(),
             DomainEvent::System(e) => e.timestamp(),
+            DomainEvent::Tracking(e) => e.timestamp(),
         }
     }
 
@@ -39,6 +42,7 @@ impl DomainEvent {
             DomainEvent::Alert(e) => e.event_type(),
             DomainEvent::Zone(e) => e.event_type(),
             DomainEvent::System(e) => e.event_type(),
+            DomainEvent::Tracking(e) => e.event_type(),
         }
     }
 }
@@ -410,6 +414,69 @@ pub enum ErrorSeverity {
     Error,
     /// Critical - immediate attention required
     Critical,
+}
+
+/// Tracking-related domain events.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum TrackingEvent {
+    /// A tentative track has been confirmed (Tentative → Active).
+    TrackBorn {
+        track_id: String,  // TrackId as string (avoids circular dep)
+        survivor_id: SurvivorId,
+        zone_id: ScanZoneId,
+        timestamp: DateTime<Utc>,
+    },
+    /// An active track lost its signal (Active → Lost).
+    TrackLost {
+        track_id: String,
+        survivor_id: SurvivorId,
+        last_position: Option<Coordinates3D>,
+        timestamp: DateTime<Utc>,
+    },
+    /// A lost track was re-linked via fingerprint (Lost → Active).
+    TrackReidentified {
+        track_id: String,
+        survivor_id: SurvivorId,
+        gap_secs: f64,
+        fingerprint_distance: f32,
+        timestamp: DateTime<Utc>,
+    },
+    /// A lost track expired without re-identification (Lost → Terminated).
+    TrackTerminated {
+        track_id: String,
+        survivor_id: SurvivorId,
+        lost_duration_secs: f64,
+        timestamp: DateTime<Utc>,
+    },
+    /// Operator confirmed a survivor as rescued.
+    TrackRescued {
+        track_id: String,
+        survivor_id: SurvivorId,
+        timestamp: DateTime<Utc>,
+    },
+}
+
+impl TrackingEvent {
+    pub fn timestamp(&self) -> DateTime<Utc> {
+        match self {
+            TrackingEvent::TrackBorn { timestamp, .. } => *timestamp,
+            TrackingEvent::TrackLost { timestamp, .. } => *timestamp,
+            TrackingEvent::TrackReidentified { timestamp, .. } => *timestamp,
+            TrackingEvent::TrackTerminated { timestamp, .. } => *timestamp,
+            TrackingEvent::TrackRescued { timestamp, .. } => *timestamp,
+        }
+    }
+
+    pub fn event_type(&self) -> &'static str {
+        match self {
+            TrackingEvent::TrackBorn { .. } => "TrackBorn",
+            TrackingEvent::TrackLost { .. } => "TrackLost",
+            TrackingEvent::TrackReidentified { .. } => "TrackReidentified",
+            TrackingEvent::TrackTerminated { .. } => "TrackTerminated",
+            TrackingEvent::TrackRescued { .. } => "TrackRescued",
+        }
+    }
 }
 
 /// Event store for persisting domain events
