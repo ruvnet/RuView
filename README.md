@@ -162,7 +162,7 @@ Every WiFi signal that passes through a room creates a unique fingerprint of tha
 - Turns any WiFi signal into a 128-number "fingerprint" that uniquely describes what's happening in a room
 - Learns entirely on its own from raw WiFi data — no cameras, no labeling, no human supervision needed
 - Recognizes rooms, detects intruders, identifies people, and classifies activities using only WiFi
-- Runs on an $8 ESP32 chip (the entire model fits in 60 KB of memory)
+- Runs on an $8 ESP32 chip (the entire model fits in 55 KB of memory)
 - Produces both body pose tracking AND environment fingerprints in a single computation
 
 **Key Capabilities**
@@ -226,6 +226,8 @@ cargo run -p wifi-densepose-sensing-server -- --model model.rvf --build-index en
 | Embedding projection head | ~25,000 | 25 KB |
 | Per-room MicroLoRA adapter | ~1,800 | 2 KB |
 | **Total** | **~55,000** | **55 KB** (of 520 KB available) |
+
+The self-learning system builds on the [AI Backbone (RuVector)](#ai-backbone-ruvector) signal-processing layer — attention, graph algorithms, and compression — adding contrastive learning on top.
 
 See [`docs/adr/ADR-024-contrastive-csi-embedding-model.md`](docs/adr/ADR-024-contrastive-csi-embedding-model.md) for full architectural details.
 
