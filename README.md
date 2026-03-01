@@ -38,6 +38,22 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 
 ---
 
+## 🚀 Key Features
+
+| | Feature | What It Means |
+|---|---------|---------------|
+| 🔒 | **Privacy-First** | Tracks human pose using only WiFi signals — no cameras, no video, no images stored |
+| ⚡ | **Real-Time** | Analyzes WiFi signals in under 100 microseconds per frame — fast enough for live monitoring |
+| 💓 | **Vital Signs** | Detects breathing rate (6-30 breaths/min) and heart rate (40-120 bpm) without any wearable |
+| 👥 | **Multi-Person** | Simultaneously tracks up to 10 people, each with independent pose and vitals |
+| 🧱 | **Through-Wall** | WiFi passes through walls, furniture, and debris — works where cameras cannot |
+| 🚑 | **Disaster Response** | Detects trapped survivors through rubble and classifies injury severity (START triage) |
+| 🐳 | **One-Command Setup** | `docker pull ruvnet/wifi-densepose:latest` — live sensing in 30 seconds, no toolchain needed |
+| 📦 | **Portable Models** | Trained models package into a single `.rvf` file — runs on edge, cloud, or browser (WASM) |
+| 🦀 | **810x Faster** | Complete Rust rewrite: 54,000 frames/sec pipeline, 132 MB Docker image, 542+ tests |
+
+---
+
 ## 📋 Table of Contents
 
 <details open>
@@ -119,20 +135,6 @@ WiFi DensePose is MIT-licensed open source, developed by [ruvnet](https://github
 | [Support](#support) | Bug reports, feature requests, community discussion | [Issues](https://github.com/ruvnet/wifi-densepose/issues) · [Discussions](https://github.com/ruvnet/wifi-densepose/discussions) |
 
 </details>
-
----
-
-## 🚀 Key Features
-
-| Feature | Description |
-|---------|-------------|
-| **Privacy-First** | No cameras — uses WiFi signals for pose detection |
-| **Real-Time** | Sub-100µs/frame (Rust), 11,665 fps vital sign benchmark |
-| **Vital Signs** | Contactless breathing (6-30 BPM) and heart rate (40-120 BPM) |
-| **Multi-Person** | Simultaneous tracking of up to 10 individuals |
-| **Docker Ready** | `docker pull ruvnet/wifi-densepose:latest` (132 MB) |
-| **RVF Portable Models** | Single-file `.rvf` containers with progressive loading |
-| **542+ Tests** | Comprehensive Rust test suite, zero mocks |
 
 ---
 
@@ -249,12 +251,26 @@ See [ADR-022](docs/adr/ADR-022-windows-wifi-enhanced-fidelity-ruvector.md) and [
 <details>
 <summary><a id="wifi-mat-disaster-response"></a><strong>🚨 WiFi-Mat: Disaster Response</strong> — Search & rescue, START triage, 3D localization</summary>
 
-| Feature | Description |
-|---------|-------------|
-| **Vital Signs** | Breathing (4-60 BPM), heartbeat via micro-Doppler |
-| **3D Localization** | Position estimation through debris up to 5m |
-| **START Triage** | Automatic Immediate/Delayed/Minor/Deceased classification |
-| **Real-time Alerts** | Priority-based notifications with escalation |
+WiFi signals penetrate non-metallic debris (concrete, wood, drywall) where cameras and thermal sensors cannot reach. The WiFi-Mat module (`wifi-densepose-mat`, 139 tests) uses CSI analysis to detect survivors trapped under rubble, classify their condition using the START triage protocol, and estimate their 3D position — giving rescue teams actionable intelligence within seconds of deployment.
+
+| Capability | How It Works | Performance Target |
+|------------|-------------|-------------------|
+| **Breathing Detection** | Bandpass 0.07-1.0 Hz + Fresnel zone modeling detects chest displacement of 5-10mm at 5 GHz | 4-60 BPM, <500ms latency |
+| **Heartbeat Detection** | Micro-Doppler shift extraction from fine-grained CSI phase variation | Via ruvector-temporal-tensor |
+| **3D Localization** | Multi-AP triangulation + CSI fingerprint matching + depth estimation through rubble layers | 3-5m penetration |
+| **START Triage** | Ensemble classifier votes on breathing + movement + vital stability → P1-P4 priority | <1% false negative |
+| **Zone Scanning** | 16+ concurrent scan zones with periodic re-scan and audit logging | Full disaster site |
+
+**Triage classification (START protocol compatible):**
+
+| Status | Color | Detection Criteria | Priority |
+|--------|-------|-------------------|----------|
+| Immediate | Red | Breathing detected, no movement | P1 |
+| Delayed | Yellow | Movement + breathing, stable vitals | P2 |
+| Minor | Green | Strong movement, responsive patterns | P3 |
+| Deceased | Black | No vitals for >30 min continuous scan | P4 |
+
+**Deployment modes:** portable (single TX/RX handheld), distributed (multiple APs around collapse site), drone-mounted (UAV scanning), vehicle-mounted (mobile command post).
 
 ```rust
 use wifi_densepose_mat::{DisasterResponse, DisasterConfig, DisasterType, ScanZone, ZoneBounds};
@@ -271,6 +287,8 @@ response.add_zone(ScanZone::new("North Wing", ZoneBounds::rectangle(0.0, 0.0, 30
 response.start_scanning().await?;
 ```
 
+**Safety guarantees:** fail-safe defaults (assume life present on ambiguous signals), redundant multi-algorithm voting, complete audit trail, offline-capable (no network required).
+
 - [WiFi-Mat User Guide](docs/wifi-mat-user-guide.md) | [ADR-001](docs/adr/ADR-001-wifi-mat-disaster-detection.md) | [Domain Model](docs/ddd/wifi-mat-domain-model.md)
 
 </details>
@@ -278,14 +296,20 @@ response.start_scanning().await?;
 <details>
 <summary><a id="sota-signal-processing"></a><strong>🔬 SOTA Signal Processing (ADR-014)</strong> — 6 research-grade algorithms</summary>
 
-| Algorithm | Purpose | Reference |
-|-----------|---------|-----------|
-| **Conjugate Multiplication** | Cancels CFO/SFO from raw CSI phase | SpotFi (SIGCOMM 2015) |
-| **Hampel Filter** | Robust outlier removal using median/MAD | Hampel (1974) |
-| **Fresnel Zone Model** | Physics-based breathing detection | FarSense (MobiCom 2019) |
-| **CSI Spectrogram** | STFT time-frequency matrices | Standard since 2018 |
-| **Subcarrier Selection** | Variance-ratio top-K ranking | WiDance (MobiCom 2017) |
-| **Body Velocity Profile** | Domain-independent velocity x time | Widar 3.0 (MobiSys 2019) |
+The signal processing layer bridges the gap between raw commodity WiFi hardware output and research-grade sensing accuracy. Each algorithm addresses a specific limitation of naive CSI processing — from hardware-induced phase corruption to environment-dependent multipath interference. All six are implemented in `wifi-densepose-signal/src/` with deterministic tests and no mock data.
+
+| Algorithm | What It Does | Why It Matters | Math | Source |
+|-----------|-------------|----------------|------|--------|
+| **Conjugate Multiplication** | Multiplies CSI antenna pairs: `H₁[k] × conj(H₂[k])` | Cancels CFO, SFO, and packet detection delay that corrupt raw phase — preserves only environment-caused phase differences | `CSI_ratio[k] = H₁[k] * conj(H₂[k])` | [SpotFi](https://dl.acm.org/doi/10.1145/2789168.2790124) (SIGCOMM 2015) |
+| **Hampel Filter** | Replaces outliers using running median ± scaled MAD | Z-score uses mean/std which are corrupted by the very outliers it detects (masking effect). Hampel uses median/MAD, resisting up to 50% contamination | `σ̂ = 1.4826 × MAD` | Standard DSP; WiGest (2015) |
+| **Fresnel Zone Model** | Models signal variation from chest displacement crossing Fresnel zone boundaries | Zero-crossing counting fails in multipath-rich environments. Fresnel predicts *where* breathing should appear based on TX-RX-body geometry | `ΔΦ = 2π × 2Δd / λ`, `A = \|sin(ΔΦ/2)\|` | [FarSense](https://dl.acm.org/doi/10.1145/3300061.3345431) (MobiCom 2019) |
+| **CSI Spectrogram** | Sliding-window FFT (STFT) per subcarrier → 2D time-frequency matrix | Breathing = 0.2-0.4 Hz band, walking = 1-2 Hz, static = noise. 2D structure enables CNN spatial pattern recognition that 1D features miss | `S[t,f] = \|Σₙ x[n] w[n-t] e^{-j2πfn}\|²` | Standard since 2018 |
+| **Subcarrier Selection** | Ranks subcarriers by motion sensitivity (variance ratio) and selects top-K | Not all subcarriers respond to motion — some sit in multipath nulls. Selecting the 10-20 most sensitive improves SNR by 6-10 dB | `sensitivity[k] = var_motion / var_static` | [WiDance](https://dl.acm.org/doi/10.1145/3117811.3117826) (MobiCom 2017) |
+| **Body Velocity Profile** | Extracts velocity distribution from Doppler shifts across subcarriers | BVP is domain-independent — same velocity profile regardless of room layout, furniture, or AP placement. Basis for cross-environment recognition | `BVP[v,t] = Σₖ \|STFTₖ[v,t]\|` | [Widar 3.0](https://dl.acm.org/doi/10.1145/3328916) (MobiSys 2019) |
+
+**Processing pipeline order:** Raw CSI → Conjugate multiplication (phase cleaning) → Hampel filter (outlier removal) → Subcarrier selection (top-K) → CSI spectrogram (time-frequency) → Fresnel model (breathing) + BVP (activity)
+
+See [ADR-014](docs/adr/ADR-014-sota-signal-processing.md) for full mathematical derivations.
 
 </details>
 
@@ -296,13 +320,40 @@ response.start_scanning().await?;
 <details>
 <summary><a id="rvf-model-container"></a><strong>📦 RVF Model Container</strong> — Single-file deployment with progressive loading</summary>
 
+The RuVector Format (RVF) packages an entire trained model — weights, HNSW indexes, quantization codebooks, SONA adaptation deltas, and WASM inference runtime — into a single self-contained binary file. No external dependencies are needed at deployment time.
+
+**Container structure:**
+
+```
+┌──────────────────────────────────────────────────────┐
+│ RVF Container (.rvf)                                  │
+│                                                       │
+│  ┌─────────────┐  64-byte header per segment          │
+│  │ Manifest     │  Magic: 0x52564653 ("RVFS")         │
+│  ├─────────────┤  Type + content hash + compression   │
+│  │ Weights      │  Model parameters (f32/f16/u8)      │
+│  ├─────────────┤                                      │
+│  │ HNSW Index   │  Vector search index                │
+│  ├─────────────┤                                      │
+│  │ Quant        │  Quantization codebooks              │
+│  ├─────────────┤                                      │
+│  │ SONA Profile │  LoRA deltas + EWC++ Fisher matrix  │
+│  ├─────────────┤                                      │
+│  │ Witness      │  Ed25519 training proof              │
+│  ├─────────────┤                                      │
+│  │ Vitals Config│  Breathing/HR filter parameters     │
+│  └─────────────┘                                      │
+└──────────────────────────────────────────────────────┘
+```
+
 | Property | Detail |
 |----------|--------|
-| **Format** | Segment-based binary (magic `0x52564653`) with 64-byte headers |
-| **Progressive Loading** | Layer A <5ms, Layer B 100ms-1s, Layer C full graph |
-| **Signing** | Ed25519 training proofs for verifiable provenance |
-| **Quantization** | f32/f16/u8 via `rvf-quant` with SIMD distance |
-| **CLI** | `--export-rvf`, `--save-rvf`, `--load-rvf`, `--model` |
+| **Format** | Segment-based binary, 20+ segment types, CRC32 integrity per segment |
+| **Progressive Loading** | **Layer A** (<5ms): manifest + entry points → **Layer B** (100ms-1s): hot weights + adjacency → **Layer C** (seconds): full graph |
+| **Signing** | Ed25519 training proofs for verifiable provenance — chain of custody from training data to deployed model |
+| **Quantization** | Per-segment temperature-tiered: f32 (full), f16 (half), u8 (int8), binary — with SIMD-accelerated distance computation |
+| **CLI** | `--export-rvf` (generate), `--load-rvf` (config), `--save-rvf` (persist), `--model` (inference), `--progressive` (3-layer load) |
+| **Size** | Typical: 13 KB (sensing-only) to 50+ MB (full DensePose) |
 
 ```bash
 # Export model package
@@ -310,6 +361,9 @@ response.start_scanning().await?;
 
 # Load and run with progressive loading
 ./target/release/sensing-server --model wifi-densepose-v1.rvf --progressive
+
+# Export via Docker
+docker run --rm -v $(pwd):/out ruvnet/wifi-densepose:latest --export-rvf /out/model.rvf
 ```
 
 See [ADR-023](docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md).
@@ -319,20 +373,44 @@ See [ADR-023](docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md).
 <details>
 <summary><a id="training--fine-tuning"></a><strong>🧬 Training & Fine-Tuning</strong> — MM-Fi/Wi-Pose pre-training, SONA adaptation</summary>
 
-Three-tier data strategy:
+The training pipeline implements 8 phases in pure Rust (7,832 lines, zero external ML dependencies). It trains a graph transformer with cross-attention to map CSI feature matrices to 17 COCO body keypoints and DensePose UV coordinates — following the approach from the CMU "DensePose From WiFi" paper (arXiv:2301.00250).
 
-1. **Pre-train** on public datasets (MM-Fi, Wi-Pose) for cross-environment generalization
-2. **Fine-tune** with ESP32 data + camera pseudo-labels for environment-specific multipath
-3. **SONA adaptation** via micro-LoRA + EWC++ for continuous on-device learning
+**Three-tier data strategy:**
+
+| Tier | Method | Purpose |
+|------|--------|---------|
+| **1. Pre-train** | MM-Fi + Wi-Pose public datasets | Cross-environment generalization (multi-subject, multi-room) |
+| **2. Fine-tune** | ESP32 CSI + camera pseudo-labels | Environment-specific multipath adaptation |
+| **3. SONA adapt** | Micro-LoRA (rank-4) + EWC++ | Continuous on-device learning without catastrophic forgetting |
+
+**Training pipeline components:**
+
+| Phase | Module | What It Does |
+|-------|--------|-------------|
+| 1 | `dataset.rs` (850 lines) | MM-Fi `.npy` + Wi-Pose `.mat` loaders, subcarrier resampling (114→56, 30→56), windowing, normalization |
+| 2 | `graph_transformer.rs` (855 lines) | COCO BodyGraph (17 kp, 16 edges), AntennaGraph, multi-head CrossAttention, GCN message passing |
+| 3 | `trainer.rs` (881 lines) | 6-term composite loss (MSE, cross-entropy, UV regression, temporal consistency, bone length, symmetry), SGD+momentum, cosine+warmup scheduler, PCK/OKS metrics |
+| 4 | `sona.rs` (639 lines) | LoRA adapters (A×B delta), EWC++ Fisher regularization, EnvironmentDetector (3-sigma drift detection) |
+| 5 | `sparse_inference.rs` (753 lines) | NeuronProfiler hot/cold partitioning, SparseLinear (skip cold rows), INT8/FP16 quantization with <0.01 MSE |
+| 6 | `rvf_pipeline.rs` (1,027 lines) | Progressive 3-layer loader, HNSW index, OverlayGraph, `RvfModelBuilder` |
+| 7 | `rvf_container.rs` (914 lines) | Binary container format, 6+ segment types, CRC32 integrity |
+| 8 | `main.rs` integration | `--train`, `--model`, `--progressive` CLI flags, REST endpoints |
+
+**Best-epoch snapshotting**: the trainer saves the best validation loss weights and restores them before checkpoint/export — prevents exporting overfit final-epoch parameters.
 
 ```bash
-# Pre-train
+# Pre-train on MM-Fi dataset
 ./target/release/sensing-server --train --dataset data/ --dataset-type mmfi --epochs 100
 
-# Or via Docker
+# Train and export to RVF in one step
+./target/release/sensing-server --train --dataset data/ --epochs 100 --save-rvf model.rvf
+
+# Via Docker (no toolchain needed)
 docker run --rm -v $(pwd)/data:/data ruvnet/wifi-densepose:latest \
   --train --dataset /data --epochs 100 --export-rvf /data/model.rvf
 ```
+
+See [ADR-023](docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md).
 
 </details>
 
@@ -361,7 +439,7 @@ See `vendor/ruvector/` for full source.
 
 ## 🏗️ System Architecture
 
-<details open>
+<details>
 <summary><strong>End-to-end data flow</strong> — From CSI capture to REST/WebSocket API</summary>
 
 ```
@@ -674,7 +752,7 @@ wifi-densepose tasks list               # List background tasks
 
 ## 🧪 Testing
 
-<details open>
+<details>
 <summary><strong>542+ tests across 7 suites</strong> — zero mocks, hardware-free simulation</summary>
 
 ```bash
@@ -804,7 +882,7 @@ pre-commit install
 
 ## 📄 Changelog
 
-<details open>
+<details>
 <summary><strong>Release history</strong></summary>
 
 ### v2.3.0 — 2026-03-01
