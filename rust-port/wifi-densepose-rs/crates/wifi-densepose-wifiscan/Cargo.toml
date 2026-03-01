@@ -1,0 +1,40 @@
+[package]
+name = "wifi-densepose-wifiscan"
+version.workspace = true
+edition.workspace = true
+description = "Multi-BSSID WiFi scanning domain layer for enhanced Windows WiFi DensePose sensing (ADR-022)"
+license.workspace = true
+
+[dependencies]
+# Logging
+tracing.workspace = true
+
+# Serialization (optional, for domain types)
+serde = { workspace = true, optional = true }
+
+# Async runtime (optional, for Tier 2 async scanning)
+tokio = { workspace = true, optional = true }
+
+[features]
+default = ["serde", "pipeline"]
+serde = ["dep:serde"]
+pipeline = []
+## Tier 2: enables async scan_async() method on WlanApiScanner via tokio
+wlanapi = ["dep:tokio"]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
+doc_markdown = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+cast_precision_loss = "allow"
+cast_lossless = "allow"
+many_single_char_names = "allow"
+uninlined_format_args = "allow"
+assigning_clones = "allow"

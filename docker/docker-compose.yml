@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  sensing-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.rust
+    image: ruvnet/wifi-densepose:latest
+    ports:
+      - "3000:3000"   # REST API
+      - "3001:3001"   # WebSocket
+      - "5005:5005/udp"  # ESP32 UDP
+    environment:
+      - RUST_LOG=info
+    command: ["--source", "simulated", "--tick-ms", "100", "--ui-path", "/app/ui"]
+
+  python-sensing:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.python
+    image: ruvnet/wifi-densepose:python
+    ports:
+      - "8765:8765"   # WebSocket
+      - "8080:8080"   # UI
+    environment:
+      - PYTHONUNBUFFERED=1

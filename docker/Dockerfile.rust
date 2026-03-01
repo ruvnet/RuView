@@ -1,0 +1,46 @@
+# WiFi-DensePose Rust Sensing Server
+# Includes RuVector signal intelligence crates
+# Multi-stage build for minimal final image
+
+# Stage 1: Build
+FROM rust:1.85-bookworm AS builder
+
+WORKDIR /build
+
+# Copy workspace files
+COPY rust-port/wifi-densepose-rs/Cargo.toml rust-port/wifi-densepose-rs/Cargo.lock ./
+COPY rust-port/wifi-densepose-rs/crates/ ./crates/
+
+# Copy vendored RuVector crates
+COPY vendor/ruvector/ /build/vendor/ruvector/
+
+# Build release binary
+RUN cargo build --release -p wifi-densepose-sensing-server 2>&1 \
+    && strip target/release/sensing-server
+
+# Stage 2: Runtime
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy binary
+COPY --from=builder /build/target/release/sensing-server /app/sensing-server
+
+# Copy UI assets
+COPY ui/ /app/ui/
+
+# HTTP API
+EXPOSE 3000
+# WebSocket
+EXPOSE 3001
+# ESP32 UDP
+EXPOSE 5005/udp
+
+ENV RUST_LOG=info
+
+ENTRYPOINT ["/app/sensing-server"]
+CMD ["--source", "simulated", "--tick-ms", "100", "--ui-path", "/app/ui"]

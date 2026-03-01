@@ -1,5 +1,6 @@
 target/
 .git/
+*.md
 *.log
 __pycache__/
 *.pyc
