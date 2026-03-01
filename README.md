@@ -707,51 +707,174 @@ The full RuVector ecosystem includes 90+ crates. See [github.com/ruvnet/ruvector
 <details>
 <summary><strong>🏗️ System Architecture</strong> — End-to-end data flow from CSI capture to REST/WebSocket API</summary>
 
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   WiFi Router   │    │   WiFi Router   │    │   WiFi Router   │
-│   (CSI Source)  │    │   (CSI Source)  │    │   (CSI Source)  │
-└─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
-          │                      │                      │
-          └──────────────────────┼──────────────────────┘
-                                 │
-                    ┌─────────────▼─────────────┐
-                    │     CSI Data Collector    │
-                    │   (Hardware Interface)    │
-                    └─────────────┬─────────────┘
-                                  │
-                    ┌─────────────▼─────────────┐
-                    │    Signal Processor       │
-                    │  (RuVector + Phase San.)  │
-                    └─────────────┬─────────────┘
-                                  │
-                    ┌─────────────▼─────────────┐
-                    │   Graph Transformer       │
-                    │  (DensePose + GNN Head)   │
-                    └─────────────┬─────────────┘
-                                  │
-                    ┌─────────────▼─────────────┐
-                    │   Vital Signs + Tracker   │
-                    │  (Breathing, Heart, Pose) │
-                    └─────────────┬─────────────┘
-                                  │
-          ┌───────────────────────┼───────────────────────┐
-          │                       │                       │
-┌─────────▼─────────┐   ┌─────────▼─────────┐   ┌─────────▼─────────┐
-│   REST API        │   │  WebSocket API    │   │   Analytics       │
-│  (Axum / FastAPI) │   │ (Real-time Stream)│   │  (Fall Detection) │
-└───────────────────┘   └───────────────────┘   └───────────────────┘
+### End-to-End Pipeline
+
+```mermaid
+graph TB
+    subgraph HW ["📡 Hardware Layer"]
+        direction LR
+        R1["WiFi Router 1<br/><small>CSI Source</small>"]
+        R2["WiFi Router 2<br/><small>CSI Source</small>"]
+        R3["WiFi Router 3<br/><small>CSI Source</small>"]
+        ESP["ESP32-S3 Mesh<br/><small>20 Hz · 56 subcarriers</small>"]
+        WIN["Windows WiFi<br/><small>RSSI scanning</small>"]
+    end
+
+    subgraph INGEST ["⚡ Ingestion"]
+        AGG["Aggregator<br/><small>UDP :5005 · ADR-018 frames</small>"]
+        BRIDGE["Bridge<br/><small>I/Q → amplitude + phase</small>"]
+    end
+
+    subgraph SIGNAL ["🔬 Signal Processing — RuVector v2.0.4"]
+        direction TB
+        PHASE["Phase Sanitization<br/><small>SpotFi conjugate multiply</small>"]
+        HAMPEL["Hampel Filter<br/><small>Outlier rejection · σ=3</small>"]
+        SUBSEL["Subcarrier Selection<br/><small>ruvector-mincut · sensitive/insensitive split</small>"]
+        SPEC["Spectrogram<br/><small>ruvector-attn-mincut · gated STFT</small>"]
+        FRESNEL["Fresnel Geometry<br/><small>ruvector-solver · TX-body-RX distance</small>"]
+        BVP["Body Velocity Profile<br/><small>ruvector-attention · weighted BVP</small>"]
+    end
+
+    subgraph ML ["🧠 Neural Pipeline"]
+        direction TB
+        GRAPH["Graph Transformer<br/><small>17 COCO keypoints · 16 edges</small>"]
+        CROSS["Cross-Attention<br/><small>CSI features → body pose</small>"]
+        SONA["SONA Adapter<br/><small>LoRA rank-4 · EWC++</small>"]
+    end
+
+    subgraph VITAL ["💓 Vital Signs"]
+        direction LR
+        BREATH["Breathing<br/><small>0.1–0.5 Hz · FFT peak</small>"]
+        HEART["Heart Rate<br/><small>0.8–2.0 Hz · FFT peak</small>"]
+        MOTION["Motion Level<br/><small>Variance + band power</small>"]
+    end
+
+    subgraph API ["🌐 Output Layer"]
+        direction LR
+        REST["REST API<br/><small>Axum :3000 · 6 endpoints</small>"]
+        WS["WebSocket<br/><small>:3001 · real-time stream</small>"]
+        ANALYTICS["Analytics<br/><small>Fall · Activity · START triage</small>"]
+        UI["Web UI<br/><small>Three.js · Gaussian splats</small>"]
+    end
+
+    R1 & R2 & R3 --> AGG
+    ESP --> AGG
+    WIN --> BRIDGE
+    AGG --> BRIDGE
+    BRIDGE --> PHASE
+    PHASE --> HAMPEL
+    HAMPEL --> SUBSEL
+    SUBSEL --> SPEC
+    SPEC --> FRESNEL
+    FRESNEL --> BVP
+    BVP --> GRAPH
+    GRAPH --> CROSS
+    CROSS --> SONA
+    SONA --> BREATH & HEART & MOTION
+    BREATH & HEART & MOTION --> REST & WS & ANALYTICS
+    WS --> UI
+
+    style HW fill:#1a1a2e,stroke:#e94560,color:#eee
+    style INGEST fill:#16213e,stroke:#0f3460,color:#eee
+    style SIGNAL fill:#0f3460,stroke:#533483,color:#eee
+    style ML fill:#533483,stroke:#e94560,color:#eee
+    style VITAL fill:#2d132c,stroke:#e94560,color:#eee
+    style API fill:#1a1a2e,stroke:#0f3460,color:#eee
 ```
 
-| Component | Description |
-|-----------|-------------|
-| **CSI Processor** | Extracts Channel State Information from WiFi signals (ESP32 or RSSI) |
-| **Signal Processor** | RuVector-powered phase sanitization, Hampel filter, Fresnel model |
-| **Graph Transformer** | GNN body-graph reasoning with cross-attention CSI-to-pose mapping |
-| **Vital Signs** | FFT-based breathing (0.1-0.5 Hz) and heartbeat (0.8-2.0 Hz) extraction |
-| **REST API** | Axum (Rust) or FastAPI (Python) for data access and control |
-| **WebSocket** | Real-time pose, sensing, and vital sign streaming |
-| **Analytics** | Fall detection, activity recognition, START triage |
+### Signal Processing Detail
+
+```mermaid
+graph LR
+    subgraph RAW ["Raw CSI Frame"]
+        IQ["I/Q Samples<br/><small>56–192 subcarriers × N antennas</small>"]
+    end
+
+    subgraph CLEAN ["Phase Cleanup"]
+        CONJ["Conjugate Multiply<br/><small>Remove carrier freq offset</small>"]
+        UNWRAP["Phase Unwrap<br/><small>Remove 2π discontinuities</small>"]
+        HAMPEL2["Hampel Filter<br/><small>Remove impulse noise</small>"]
+    end
+
+    subgraph SELECT ["Subcarrier Intelligence"]
+        MINCUT["Min-Cut Partition<br/><small>ruvector-mincut</small>"]
+        GATE["Attention Gate<br/><small>ruvector-attn-mincut</small>"]
+    end
+
+    subgraph EXTRACT ["Feature Extraction"]
+        STFT["STFT Spectrogram<br/><small>Time-frequency decomposition</small>"]
+        FRESNELZ["Fresnel Zones<br/><small>ruvector-solver</small>"]
+        BVPE["BVP Estimation<br/><small>ruvector-attention</small>"]
+    end
+
+    subgraph OUT ["Output Features"]
+        AMP["Amplitude Matrix"]
+        PHASE2["Phase Matrix"]
+        DOPPLER["Doppler Shifts"]
+        VITALS["Vital Band Power"]
+    end
+
+    IQ --> CONJ --> UNWRAP --> HAMPEL2
+    HAMPEL2 --> MINCUT --> GATE
+    GATE --> STFT --> FRESNELZ --> BVPE
+    BVPE --> AMP & PHASE2 & DOPPLER & VITALS
+
+    style RAW fill:#0d1117,stroke:#58a6ff,color:#c9d1d9
+    style CLEAN fill:#161b22,stroke:#58a6ff,color:#c9d1d9
+    style SELECT fill:#161b22,stroke:#d29922,color:#c9d1d9
+    style EXTRACT fill:#161b22,stroke:#3fb950,color:#c9d1d9
+    style OUT fill:#0d1117,stroke:#8b949e,color:#c9d1d9
+```
+
+### Deployment Topology
+
+```mermaid
+graph TB
+    subgraph EDGE ["Edge (ESP32-S3 Mesh)"]
+        E1["Node 1<br/><small>Kitchen</small>"]
+        E2["Node 2<br/><small>Living room</small>"]
+        E3["Node 3<br/><small>Bedroom</small>"]
+    end
+
+    subgraph SERVER ["Server (Rust · 132 MB Docker)"]
+        SENSE["Sensing Server<br/><small>:3000 REST · :3001 WS · :5005 UDP</small>"]
+        RVF["RVF Model<br/><small>Progressive 3-layer load</small>"]
+        STORE["Time-Series Store<br/><small>In-memory ring buffer</small>"]
+    end
+
+    subgraph CLIENT ["Clients"]
+        BROWSER["Browser<br/><small>Three.js UI · Gaussian splats</small>"]
+        MOBILE["Mobile App<br/><small>WebSocket stream</small>"]
+        DASH["Dashboard<br/><small>REST polling</small>"]
+        IOT["Home Automation<br/><small>MQTT bridge</small>"]
+    end
+
+    E1 -->|"UDP :5005<br/>ADR-018 frames"| SENSE
+    E2 -->|"UDP :5005"| SENSE
+    E3 -->|"UDP :5005"| SENSE
+    SENSE <--> RVF
+    SENSE <--> STORE
+    SENSE -->|"WS :3001<br/>real-time JSON"| BROWSER & MOBILE
+    SENSE -->|"REST :3000<br/>on-demand"| DASH & IOT
+
+    style EDGE fill:#1a1a2e,stroke:#e94560,color:#eee
+    style SERVER fill:#16213e,stroke:#533483,color:#eee
+    style CLIENT fill:#0f3460,stroke:#0f3460,color:#eee
+```
+
+| Component | Crate / Module | Description |
+|-----------|---------------|-------------|
+| **Aggregator** | `wifi-densepose-hardware` | ESP32 UDP listener, ADR-018 frame parser, I/Q → amplitude/phase bridge |
+| **Signal Processor** | `wifi-densepose-signal` | SpotFi phase sanitization, Hampel filter, STFT spectrogram, Fresnel geometry, BVP |
+| **Subcarrier Selection** | `ruvector-mincut` + `ruvector-attn-mincut` | Dynamic sensitive/insensitive partitioning, attention-gated noise suppression |
+| **Fresnel Solver** | `ruvector-solver` | Sparse Neumann series O(sqrt(n)) for TX-body-RX distance estimation |
+| **Graph Transformer** | `wifi-densepose-train` | COCO BodyGraph (17 kp, 16 edges), cross-attention CSI→pose, GCN message passing |
+| **SONA** | `sona` crate | Micro-LoRA (rank-4) adaptation, EWC++ catastrophic forgetting prevention |
+| **Vital Signs** | `wifi-densepose-signal` | FFT-based breathing (0.1-0.5 Hz) and heartbeat (0.8-2.0 Hz) extraction |
+| **REST API** | `wifi-densepose-sensing-server` | Axum server: `/api/v1/sensing`, `/health`, `/vital-signs`, `/bssid`, `/sona` |
+| **WebSocket** | `wifi-densepose-sensing-server` | Real-time pose, sensing, and vital sign streaming on `:3001` |
+| **Analytics** | `wifi-densepose-mat` | Fall detection, activity recognition, START triage (WiFi-Mat disaster module) |
+| **Web UI** | `ui/` | Three.js scene, Gaussian splat visualization, signal dashboard |
 
 </details>
 
