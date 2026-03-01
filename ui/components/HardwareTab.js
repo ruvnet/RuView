@@ -107,20 +107,29 @@ export class HardwareTab {
     const txActive = activeAntennas.filter(a => a.classList.contains('tx')).length;
     const rxActive = activeAntennas.filter(a => a.classList.contains('rx')).length;
     
-    arrayStatus.innerHTML = `
-      <div class="array-info">
-        <span class="info-label">Active TX:</span>
-        <span class="info-value">${txActive}/3</span>
-      </div>
-      <div class="array-info">
-        <span class="info-label">Active RX:</span>
-        <span class="info-value">${rxActive}/6</span>
-      </div>
-      <div class="array-info">
-        <span class="info-label">Signal Quality:</span>
-        <span class="info-value">${this.calculateSignalQuality(txActive, rxActive)}%</span>
-      </div>
-    `;
+    // Clear and rebuild using safe DOM methods to prevent XSS
+    arrayStatus.innerHTML = '';
+    
+    const createInfoDiv = (label, value) => {
+      const div = document.createElement('div');
+      div.className = 'array-info';
+      
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'info-label';
+      labelSpan.textContent = label;
+      
+      const valueSpan = document.createElement('span');
+      valueSpan.className = 'info-value';
+      valueSpan.textContent = value;
+      
+      div.appendChild(labelSpan);
+      div.appendChild(valueSpan);
+      return div;
+    };
+    
+    arrayStatus.appendChild(createInfoDiv('Active TX:', `${txActive}/3`));
+    arrayStatus.appendChild(createInfoDiv('Active RX:', `${rxActive}/6`));
+    arrayStatus.appendChild(createInfoDiv('Signal Quality:', `${this.calculateSignalQuality(txActive, rxActive)}%`));
   }
 
   // Calculate signal quality based on active antennas

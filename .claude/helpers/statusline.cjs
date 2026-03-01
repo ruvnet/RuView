@@ -47,8 +47,27 @@ const c = {
 };
 
 // Safe execSync with strict timeout (returns empty string on failure)
+// Validates command to prevent command injection
 function safeExec(cmd, timeoutMs = 2000) {
   try {
+    // Validate command to prevent command injection
+    // Only allow commands that match safe patterns (no shell metacharacters)
+    if (typeof cmd !== 'string') {
+      return '';
+    }
+    
+    // Check for dangerous shell metacharacters that could allow injection
+    const dangerousChars = /[;&|`$(){}[\]<>'"\\]/;
+    if (dangerousChars.test(cmd)) {
+      // If dangerous chars found, only allow if it's a known safe pattern
+      // Allow 'sh -c' with single-quoted script (already escaped)
+      const safeShPattern = /^sh\s+-c\s+'[^']*'$/;
+      if (!safeShPattern.test(cmd)) {
+        console.warn('safeExec: Command contains potentially dangerous characters');
+        return '';
+      }
+    }
+    
     return execSync(cmd, {
       encoding: 'utf-8',
       timeout: timeoutMs,

@@ -259,7 +259,19 @@ function parseMemoryDir(dir, entries) {
   try {
     const files = fs.readdirSync(dir).filter(f => f.endsWith('.md'));
     for (const file of files) {
+      // Validate file name to prevent path traversal
+      if (file.includes('..') || file.includes('/') || file.includes('\\')) {
+        continue;
+      }
+      
       const filePath = path.join(dir, file);
+      // Additional validation: ensure resolved path is within the base directory
+      const resolvedPath = path.resolve(filePath);
+      const resolvedDir = path.resolve(dir);
+      if (!resolvedPath.startsWith(resolvedDir)) {
+        continue; // Path traversal attempt detected
+      }
+      
       const content = fs.readFileSync(filePath, 'utf-8');
       if (!content.trim()) continue;
 
