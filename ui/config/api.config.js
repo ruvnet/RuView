@@ -1,11 +1,17 @@
 // API Configuration for WiFi-DensePose UI
 
+// Auto-detect the backend URL from the page origin so the UI works whether
+// served from Docker (:3000), local dev (:8080), or any other port.
+const _origin = (typeof window !== 'undefined' && window.location && window.location.origin)
+  ? window.location.origin
+  : 'http://localhost:3000';
+
 export const API_CONFIG = {
-  BASE_URL: 'http://localhost:8080',  // Rust sensing server port
+  BASE_URL: _origin,
   API_VERSION: '/api/v1',
   WS_PREFIX: 'ws://',
   WSS_PREFIX: 'wss://',
-  
+
   // Mock server configuration (only for testing)
   MOCK_SERVER: {
     ENABLED: false,  // Set to true only for testing without backend
@@ -114,9 +120,9 @@ export function buildWsUrl(endpoint, params = {}) {
   const protocol = (isSecure || !isLocalhost)
     ? API_CONFIG.WSS_PREFIX
     : API_CONFIG.WS_PREFIX;
-  
-  // Match Rust sensing server port
-  const host = 'localhost:8080';
+
+  // Derive host from the page origin so it works on any port (Docker :3000, dev :8080, etc.)
+  const host = window.location.host;
   let url = `${protocol}${host}${endpoint}`;
   
   // Add query parameters

@@ -8,7 +8,11 @@
  * always shows something.
  */
 
-const SENSING_WS_URL = 'ws://localhost:8765/ws/sensing';
+// Derive WebSocket URL from the page origin so it works on any port
+// (Docker :3000, native :8080, etc.)
+const _wsProto = (typeof window !== 'undefined' && window.location.protocol === 'https:') ? 'wss:' : 'ws:';
+const _wsHost  = (typeof window !== 'undefined' && window.location.host) ? window.location.host : 'localhost:3000';
+const SENSING_WS_URL = `${_wsProto}//${_wsHost}/ws/sensing`;
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000];
 const MAX_RECONNECT_ATTEMPTS = 10;
 const SIMULATION_INTERVAL = 500; // ms

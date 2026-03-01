@@ -2091,6 +2091,8 @@ async fn main() {
         // Stream endpoints
         .route("/api/v1/stream/status", get(stream_status))
         .route("/api/v1/stream/pose", get(ws_pose_handler))
+        // Sensing WebSocket on the HTTP port so the UI can reach it without a second port
+        .route("/ws/sensing", get(ws_sensing_handler))
         // Static UI files
         .nest_service("/ui", ServeDir::new(&ui_path))
         .layer(SetResponseHeaderLayer::overriding(
