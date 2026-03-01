@@ -4101,6 +4101,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "wifi-densepose-ruvector"
+version = "0.1.0"
+dependencies = [
+ "ruvector-attention",
+ "ruvector-attn-mincut",
+ "ruvector-mincut",
+ "ruvector-solver",
+ "ruvector-temporal-tensor",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "wifi-densepose-sensing-server"
 version = "0.1.0"
 dependencies = [
