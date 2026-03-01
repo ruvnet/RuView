@@ -45,8 +45,13 @@
 
 pub mod config;
 pub mod dataset;
+pub mod domain;
 pub mod error;
+pub mod eval;
+pub mod geometry;
+pub mod rapid_adapt;
 pub mod subcarrier;
+pub mod virtual_aug;
 
 // The following modules use `tch` (PyTorch Rust bindings) for GPU-accelerated
 // training and are only compiled when the `tch-backend` feature is enabled.

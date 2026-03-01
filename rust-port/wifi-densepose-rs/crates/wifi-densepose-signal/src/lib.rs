@@ -37,6 +37,7 @@ pub mod csi_ratio;
 pub mod features;
 pub mod fresnel;
 pub mod hampel;
+pub mod hardware_norm;
 pub mod motion;
 pub mod phase_sanitizer;
 pub mod spectrogram;
@@ -53,6 +54,9 @@ pub use features::{
 };
 pub use motion::{
     HumanDetectionResult, MotionAnalysis, MotionDetector, MotionDetectorConfig, MotionScore,
+};
+pub use hardware_norm::{
+    CanonicalCsiFrame, HardwareNormError, HardwareNormalizer, HardwareType,
 };
 pub use phase_sanitizer::{
     PhaseSanitizationError, PhaseSanitizer, PhaseSanitizerConfig, UnwrappingMethod,
