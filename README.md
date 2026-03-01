@@ -110,7 +110,7 @@ All benchmarks are measured on the Rust sensing server using `cargo bench` and t
 <details>
 <summary><strong>📄 Meta</strong> — License, changelog, support</summary>
 
-WiFi DensePose is MIT-licensed open source, developed by [ruvnet](https://github.com/ruvnet). The project has been in active development since February 2026, with 3 major releases delivering the Rust port, SOTA signal processing, disaster response module, and end-to-end training pipeline.
+WiFi DensePose is MIT-licensed open source, developed by [ruvnet](https://github.com/ruvnet). The project has been in active development since March 2025, with 3 major releases delivering the Rust port, SOTA signal processing, disaster response module, and end-to-end training pipeline.
 
 | Section | Description | Link |
 |---------|-------------|------|
