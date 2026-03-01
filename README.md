@@ -8,8 +8,8 @@ WiFi DensePose turns commodity WiFi signals into real-time human pose estimation
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Tests: 542+](https://img.shields.io/badge/tests-542%2B-brightgreen.svg)](https://github.com/ruvnet/wifi-densepose)
 [![Docker: 132 MB](https://img.shields.io/badge/docker-132%20MB-blue.svg)](https://hub.docker.com/r/ruvnet/wifi-densepose)
-[![Vital Signs](https://img.shields.io/badge/vital%20signs-breathing%20%2B%20heartbeat-red.svg)](#-vital-sign-detection-adr-021)
-[![ESP32 Ready](https://img.shields.io/badge/ESP32--S3-CSI%20streaming-purple.svg)](#esp32-s3-hardware-pipeline-adr-018)
+[![Vital Signs](https://img.shields.io/badge/vital%20signs-breathing%20%2B%20heartbeat-red.svg)](#vital-sign-detection)
+[![ESP32 Ready](https://img.shields.io/badge/ESP32--S3-CSI%20streaming-purple.svg)](#esp32-s3-hardware-pipeline)
 
 > | What | How | Speed |
 > |------|-----|-------|
@@ -36,6 +36,92 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 >
 > No hardware? Verify the pipeline with the deterministic reference signal: `python v1/data/proof/verify.py`
 
+---
+
+## 📋 Table of Contents
+
+<details open>
+<summary><strong>📡 Signal Processing & Sensing</strong> — From raw WiFi frames to vital signs</summary>
+
+The signal processing stack transforms raw WiFi Channel State Information into actionable human sensing data. Starting from 56-192 subcarrier complex values captured at 20 Hz, the pipeline applies research-grade algorithms (SpotFi phase correction, Hampel outlier rejection, Fresnel zone modeling) to extract breathing rate, heart rate, motion level, and multi-person body pose — all in pure Rust with zero external ML dependencies.
+
+| Section | Description | Docs |
+|---------|-------------|------|
+| [Key Features](#key-features) | Privacy-first sensing, real-time performance, multi-person tracking, Docker | — |
+| [ESP32-S3 Hardware Pipeline](#esp32-s3-hardware-pipeline) | 20 Hz CSI streaming, binary frame parsing, flash & provision | [ADR-018](docs/adr/ADR-018-esp32-dev-implementation.md) · [Tutorial #34](https://github.com/ruvnet/wifi-densepose/issues/34) |
+| [Vital Sign Detection](#vital-sign-detection) | Breathing 6-30 BPM, heartbeat 40-120 BPM, FFT peak detection | [ADR-021](docs/adr/ADR-021-vital-sign-detection-rvdna-pipeline.md) |
+| [WiFi Scan Domain Layer](#wifi-scan-domain-layer) | 8-stage RSSI pipeline, multi-BSSID fingerprinting, Windows WiFi | [ADR-022](docs/adr/ADR-022-windows-wifi-enhanced-fidelity-ruvector.md) · [Tutorial #36](https://github.com/ruvnet/wifi-densepose/issues/36) |
+| [WiFi-Mat Disaster Response](#wifi-mat-disaster-response) | Search & rescue, START triage, 3D localization through debris | [ADR-001](docs/adr/ADR-001-wifi-mat-disaster-detection.md) · [User Guide](docs/wifi-mat-user-guide.md) |
+| [SOTA Signal Processing](#sota-signal-processing) | SpotFi, Hampel, Fresnel, STFT spectrogram, subcarrier selection, BVP | [ADR-014](docs/adr/ADR-014-sota-signal-processing.md) |
+
+</details>
+
+<details>
+<summary><strong>🧠 Models & Training</strong> — DensePose pipeline, RVF containers, SONA adaptation</summary>
+
+The neural pipeline uses a graph transformer with cross-attention to map CSI feature matrices to 17 COCO body keypoints and DensePose UV coordinates. Models are packaged as single-file `.rvf` containers with progressive loading (Layer A instant, Layer B warm, Layer C full). SONA (Self-Optimizing Neural Architecture) enables continuous on-device adaptation via micro-LoRA + EWC++ without catastrophic forgetting.
+
+| Section | Description | Docs |
+|---------|-------------|------|
+| [RVF Model Container](#rvf-model-container) | Binary packaging with Ed25519 signing, progressive 3-layer loading, SIMD quantization | [ADR-023](docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md) |
+| [Training & Fine-Tuning](#training--fine-tuning) | MM-Fi/Wi-Pose pre-training, 6-term composite loss, cosine-scheduled SGD, SONA LoRA | [ADR-023](docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md) |
+| [RuVector Crates](#ruvector-crates) | 11 vendored Rust crates: HNSW, attention, GNN, temporal compression, min-cut, solver | [Source](vendor/ruvector/) |
+
+</details>
+
+<details>
+<summary><strong>🖥️ Usage & Configuration</strong> — CLI flags, API endpoints, hardware setup</summary>
+
+The Rust sensing server is the primary interface, offering a comprehensive CLI with flags for data source selection, model loading, training, benchmarking, and RVF export. A REST API (Axum) and WebSocket server provide real-time data access. The Python v1 CLI remains available for legacy workflows.
+
+| Section | Description | Docs |
+|---------|-------------|------|
+| [CLI Usage](#cli-usage) | `--source`, `--train`, `--benchmark`, `--export-rvf`, `--model`, `--progressive` | — |
+| [REST API & WebSocket](#rest-api--websocket) | 6 REST endpoints (sensing, vitals, BSSID, SONA), WebSocket real-time stream | — |
+| [Hardware Support](#hardware-support-1) | ESP32-S3 ($8), Intel 5300 ($15), Atheros AR9580 ($20), Windows RSSI ($0) | [ADR-012](docs/adr/ADR-012-esp32-csi-sensor-mesh.md) · [ADR-013](docs/adr/ADR-013-feature-level-sensing-commodity-gear.md) |
+
+</details>
+
+<details>
+<summary><strong>⚙️ Development & Testing</strong> — 542+ tests, CI, deployment</summary>
+
+The project maintains 542+ pure-Rust tests across 7 crate suites with zero mocks — every test runs against real algorithm implementations. Hardware-free simulation mode (`--source simulate`) enables full-stack testing without physical devices. Docker images are published on Docker Hub for zero-setup deployment.
+
+| Section | Description | Docs |
+|---------|-------------|------|
+| [Testing](#testing) | 7 test suites: sensing-server (229), signal (83), mat (139), wifiscan (91), RVF (16), vitals (18) | — |
+| [Deployment](#deployment) | Docker images (132 MB Rust / 569 MB Python), docker-compose, env vars | — |
+| [Contributing](#contributing) | Fork → branch → test → PR workflow, Rust and Python dev setup | — |
+
+</details>
+
+<details>
+<summary><strong>📊 Performance & Benchmarks</strong> — Measured throughput, latency, resource usage</summary>
+
+All benchmarks are measured on the Rust sensing server using `cargo bench` and the built-in `--benchmark` CLI flag. The Rust v2 implementation delivers 810x end-to-end speedup over the Python v1 baseline, with motion detection reaching 5,400x improvement. The vital sign detector processes 11,665 frames/second in a single-threaded benchmark.
+
+| Section | Description | Key Metric |
+|---------|-------------|------------|
+| [Performance Metrics](#performance-metrics) | Vital signs, CSI pipeline, motion detection, Docker image, memory | 11,665 fps vitals · 54K fps pipeline |
+| [Rust vs Python](#python-vs-rust) | Side-by-side benchmarks across 5 operations | **810x** full pipeline speedup |
+
+</details>
+
+<details>
+<summary><strong>📄 Meta</strong> — License, changelog, support</summary>
+
+WiFi DensePose is MIT-licensed open source, developed by [ruvnet](https://github.com/ruvnet). The project has been in active development since February 2026, with 3 major releases delivering the Rust port, SOTA signal processing, disaster response module, and end-to-end training pipeline.
+
+| Section | Description | Link |
+|---------|-------------|------|
+| [Changelog](#changelog) | v2.3.0 (training pipeline + Docker), v2.2.0 (SOTA + WiFi-Mat), v2.1.0 (Rust port) | — |
+| [License](#license) | MIT License | [LICENSE](LICENSE) |
+| [Support](#support) | Bug reports, feature requests, community discussion | [Issues](https://github.com/ruvnet/wifi-densepose/issues) · [Discussions](https://github.com/ruvnet/wifi-densepose/discussions) |
+
+</details>
+
+---
+
 ## 🚀 Key Features
 
 | Feature | Description |
@@ -48,8 +134,12 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 | **RVF Portable Models** | Single-file `.rvf` containers with progressive loading |
 | **542+ Tests** | Comprehensive Rust test suite, zero mocks |
 
+---
+
+## 📡 Signal Processing & Sensing
+
 <details>
-<summary><strong>📡 ESP32-S3 Hardware Pipeline (ADR-018)</strong> — 20 Hz CSI streaming, flash & provision</summary>
+<summary><a id="esp32-s3-hardware-pipeline"></a><strong>📡 ESP32-S3 Hardware Pipeline (ADR-018)</strong> — 20 Hz CSI streaming, flash & provision</summary>
 
 ```
 ESP32-S3 (STA + promiscuous)     UDP/5005      Rust aggregator
@@ -116,7 +206,7 @@ cargo bench --package wifi-densepose-signal
 </details>
 
 <details>
-<summary><strong>💓 Vital Sign Detection (ADR-021)</strong> — Breathing and heartbeat via FFT</summary>
+<summary><a id="vital-sign-detection"></a><strong>💓 Vital Sign Detection (ADR-021)</strong> — Breathing and heartbeat via FFT</summary>
 
 | Capability | Range | Method |
 |------------|-------|--------|
@@ -135,7 +225,7 @@ See [ADR-021](docs/adr/ADR-021-vital-sign-detection-rvdna-pipeline.md).
 </details>
 
 <details>
-<summary><strong>📡 WiFi Scan Domain Layer (ADR-022)</strong> — 8-stage RSSI pipeline for Windows WiFi</summary>
+<summary><a id="wifi-scan-domain-layer"></a><strong>📡 WiFi Scan Domain Layer (ADR-022)</strong> — 8-stage RSSI pipeline for Windows WiFi</summary>
 
 | Stage | Purpose |
 |-------|---------|
@@ -157,7 +247,7 @@ See [ADR-022](docs/adr/ADR-022-windows-wifi-enhanced-fidelity-ruvector.md) and [
 </details>
 
 <details>
-<summary><strong>🚨 WiFi-Mat: Disaster Response</strong> — Search & rescue, START triage, 3D localization</summary>
+<summary><a id="wifi-mat-disaster-response"></a><strong>🚨 WiFi-Mat: Disaster Response</strong> — Search & rescue, START triage, 3D localization</summary>
 
 | Feature | Description |
 |---------|-------------|
@@ -186,7 +276,25 @@ response.start_scanning().await?;
 </details>
 
 <details>
-<summary><strong>📦 RVF Model Container</strong> — Single-file deployment with progressive loading</summary>
+<summary><a id="sota-signal-processing"></a><strong>🔬 SOTA Signal Processing (ADR-014)</strong> — 6 research-grade algorithms</summary>
+
+| Algorithm | Purpose | Reference |
+|-----------|---------|-----------|
+| **Conjugate Multiplication** | Cancels CFO/SFO from raw CSI phase | SpotFi (SIGCOMM 2015) |
+| **Hampel Filter** | Robust outlier removal using median/MAD | Hampel (1974) |
+| **Fresnel Zone Model** | Physics-based breathing detection | FarSense (MobiCom 2019) |
+| **CSI Spectrogram** | STFT time-frequency matrices | Standard since 2018 |
+| **Subcarrier Selection** | Variance-ratio top-K ranking | WiDance (MobiCom 2017) |
+| **Body Velocity Profile** | Domain-independent velocity x time | Widar 3.0 (MobiSys 2019) |
+
+</details>
+
+---
+
+## 🧠 Models & Training
+
+<details>
+<summary><a id="rvf-model-container"></a><strong>📦 RVF Model Container</strong> — Single-file deployment with progressive loading</summary>
 
 | Property | Detail |
 |----------|--------|
@@ -209,7 +317,7 @@ See [ADR-023](docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md).
 </details>
 
 <details>
-<summary><strong>🧬 Training & Fine-Tuning</strong> — MM-Fi/Wi-Pose pre-training, SONA adaptation</summary>
+<summary><a id="training--fine-tuning"></a><strong>🧬 Training & Fine-Tuning</strong> — MM-Fi/Wi-Pose pre-training, SONA adaptation</summary>
 
 Three-tier data strategy:
 
@@ -229,7 +337,7 @@ docker run --rm -v $(pwd)/data:/data ruvnet/wifi-densepose:latest \
 </details>
 
 <details>
-<summary><strong>🔩 RuVector Crates</strong> — 11 vendored signal intelligence crates</summary>
+<summary><a id="ruvector-crates"></a><strong>🔩 RuVector Crates</strong> — 11 vendored signal intelligence crates</summary>
 
 | Crate | Purpose |
 |-------|---------|
@@ -249,107 +357,12 @@ See `vendor/ruvector/` for full source.
 
 </details>
 
-<details>
-<summary><strong>🔬 SOTA Signal Processing (ADR-014)</strong> — 6 research-grade algorithms</summary>
+---
 
-| Algorithm | Purpose | Reference |
-|-----------|---------|-----------|
-| **Conjugate Multiplication** | Cancels CFO/SFO from raw CSI phase | SpotFi (SIGCOMM 2015) |
-| **Hampel Filter** | Robust outlier removal using median/MAD | Hampel (1974) |
-| **Fresnel Zone Model** | Physics-based breathing detection | FarSense (MobiCom 2019) |
-| **CSI Spectrogram** | STFT time-frequency matrices | Standard since 2018 |
-| **Subcarrier Selection** | Variance-ratio top-K ranking | WiDance (MobiCom 2017) |
-| **Body Velocity Profile** | Domain-independent velocity x time | Widar 3.0 (MobiSys 2019) |
-
-</details>
-
-## 📋 Table of Contents
+## 🏗️ System Architecture
 
 <details open>
-<summary><strong>🚀 Getting Started</strong> — Install, Docker, first API call</summary>
-
-| Section | What You'll Learn |
-|---------|-------------------|
-| [Key Features](#-key-features) | Capabilities overview — privacy, real-time, multi-person |
-| [Rust Implementation (v2)](#-rust-implementation-v2) | 810x faster signal processing, 54K fps pipeline |
-| [Installation](#-installation) | Guided installer, Docker, Rust, or Python setup |
-| [Quick Start](#-quick-start) | First API call in 3 commands |
-| [Using Docker](#using-docker) | `docker pull` and run — 132 MB, no toolchain needed |
-
-</details>
-
-<details>
-<summary><strong>📡 Signal Processing & Sensing</strong> — From raw WiFi frames to vital signs</summary>
-
-| Section | What You'll Learn |
-|---------|-------------------|
-| [ESP32-S3 Hardware Pipeline](#esp32-s3-hardware-pipeline-adr-018) | 20 Hz CSI streaming, flash & provision guide |
-| [Vital Sign Detection (ADR-021)](#-vital-sign-detection-adr-021) | Breathing 6-30 BPM, heartbeat 40-120 BPM via FFT |
-| [WiFi Scan Domain Layer (ADR-022)](#-wifi-scan-domain-layer-adr-022) | 8-stage RSSI pipeline for Windows WiFi |
-| [WiFi-Mat Disaster Response](#-wifi-mat-disaster-response-module) | Search & rescue, START triage, 3D localization |
-| [SOTA Signal Processing (ADR-014)](#sota-signal-processing-adr-014) | Conjugate multiplication, Hampel filter, Fresnel model |
-
-</details>
-
-<details>
-<summary><strong>🧠 Models & Training</strong> — DensePose pipeline, RVF containers, SONA adaptation</summary>
-
-| Section | What You'll Learn |
-|---------|-------------------|
-| [RVF Model Container](#-rvf-model-container-format) | Single-file `.rvf` packaging with progressive loading |
-| [Training and Fine-Tuning](#-training-and-fine-tuning) | MM-Fi/Wi-Pose pre-training, `--train` CLI mode |
-| [RuVector Crates](#-ruvector-crates) | 11 vendored signal intelligence crates |
-| [System Architecture](#️-system-architecture) | End-to-end data flow from CSI to API |
-
-</details>
-
-<details>
-<summary><strong>🖥️ Usage & Configuration</strong> — CLI flags, API endpoints, hardware setup</summary>
-
-| Section | What You'll Learn |
-|---------|-------------------|
-| [CLI Usage](#️-cli-usage) | `--export-rvf`, `--train`, `--benchmark`, `--source` |
-| [Documentation](#-documentation) | Core docs, API overview, quick links |
-| [Hardware Setup](#-hardware-setup) | Supported devices, physical placement, calibration |
-| [Configuration](#️-configuration) | Environment variables, domain-specific configs |
-
-</details>
-
-<details>
-<summary><strong>⚙️ Development & Testing</strong> — 542+ tests, CI, deployment</summary>
-
-| Section | What You'll Learn |
-|---------|-------------------|
-| [Testing](#-testing) | 542+ tests, hardware-free simulation, CI pipeline |
-| [Deployment](#-deployment) | Docker, docker-compose, production monitoring |
-| [Contributing](#-contributing) | Dev setup, code standards, review checklist |
-
-</details>
-
-<details>
-<summary><strong>📊 Performance & Benchmarks</strong> — Measured throughput, latency, resource usage</summary>
-
-| Section | What You'll Learn |
-|---------|-------------------|
-| [Performance Metrics](#-performance-metrics) | 11,665 fps vital signs, 54K fps signal pipeline |
-| [Rust vs Python](#performance-benchmarks-validated) | 810x full pipeline, 5400x motion detection |
-| [Docker Images](#using-docker) | 132 MB Rust / 569 MB Python, port mappings |
-
-</details>
-
-<details>
-<summary><strong>📄 Meta</strong> — License, acknowledgments, support</summary>
-
-| | |
-|---|---|
-| [License](#-license) | MIT |
-| [Acknowledgments](#-acknowledgments) | Research references and credits |
-| [Support](#-support) | Issues, discussions, contact |
-
-</details>
-
-<details>
-<summary><strong>🏗️ System Architecture</strong> — End-to-end data flow from CSI to API</summary>
+<summary><strong>End-to-end data flow</strong> — From CSI capture to REST/WebSocket API</summary>
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
@@ -399,27 +412,18 @@ See `vendor/ruvector/` for full source.
 
 </details>
 
+---
+
+## 📦 Installation
+
 <details>
-<summary><strong>📦 Installation</strong> — Guided installer, Docker, Rust, or Python</summary>
-
-### Guided Installer (Recommended)
-
-The interactive installer detects your hardware, checks your environment, and builds the right profile automatically:
+<summary><strong>Guided Installer</strong> — Interactive hardware detection and profile selection</summary>
 
 ```bash
 ./install.sh
 ```
 
-It walks through 7 steps:
-1. **System detection** — OS, RAM, disk, GPU
-2. **Toolchain detection** — Python, Rust, Docker, Node.js, ESP-IDF
-3. **WiFi hardware detection** — interfaces, ESP32 USB, Intel CSI debug
-4. **Profile recommendation** — picks the best profile for your hardware
-5. **Dependency installation** — installs what's missing
-6. **Build** — compiles the selected profile
-7. **Summary** — shows next steps and verification commands
-
-#### Install Profiles
+The installer walks through 7 steps: system detection, toolchain check, WiFi hardware scan, profile recommendation, dependency install, build, and verification.
 
 | Profile | What it installs | Size | Requirements |
 |---------|-----------------|------|-------------|
@@ -432,64 +436,42 @@ It walks through 7 steps:
 | `field` | WiFi-Mat disaster response kit | ~62 MB | Rust + wasm-pack |
 | `full` | Everything available | ~2 GB | All toolchains |
 
-#### Non-Interactive Install
-
 ```bash
-# Install a specific profile without prompts
+# Non-interactive
 ./install.sh --profile rust --yes
 
-# Just run hardware detection (no install)
+# Hardware check only
 ./install.sh --check-only
-
-# Or use make targets
-make install              # Interactive
-make install-verify       # Verification only
-make install-python       # Python pipeline
-make install-rust         # Rust pipeline
-make install-browser      # WASM browser build
-make install-docker       # Docker deployment
-make install-field        # Disaster response kit
-make install-full         # Everything
-make check                # Hardware check only
 ```
 
-### From Source (Rust — Primary)
+</details>
+
+<details>
+<summary><strong>From Source</strong> — Rust (primary) or Python</summary>
 
 ```bash
 git clone https://github.com/ruvnet/wifi-densepose.git
 cd wifi-densepose
 
-# Install Rust pipeline (810x faster than Python)
-./install.sh --profile rust --yes
-
-# Or manually:
+# Rust (primary — 810x faster)
 cd rust-port/wifi-densepose-rs
 cargo build --release
 cargo test --workspace
-```
 
-### From Source (Python)
-
-```bash
-git clone https://github.com/ruvnet/wifi-densepose.git
-cd wifi-densepose
+# Python (legacy v1)
 pip install -r requirements.txt
 pip install -e .
-```
 
-### Using pip (Python only)
-
-```bash
+# Or via pip
 pip install wifi-densepose
-
-# With optional dependencies
-pip install wifi-densepose[gpu]  # For GPU acceleration
-pip install wifi-densepose[all]  # All optional dependencies
+pip install wifi-densepose[gpu]   # GPU acceleration
+pip install wifi-densepose[all]   # All optional deps
 ```
 
-### Using Docker
+</details>
 
-Pre-built images are published on Docker Hub:
+<details>
+<summary><strong>Docker</strong> — Pre-built images, no toolchain needed</summary>
 
 ```bash
 # Rust sensing server (132 MB — recommended)
@@ -500,8 +482,11 @@ docker run -p 3000:3000 -p 3001:3001 -p 5005:5005/udp ruvnet/wifi-densepose:late
 docker pull ruvnet/wifi-densepose:python
 docker run -p 8765:8765 -p 8080:8080 ruvnet/wifi-densepose:python
 
-# Or use docker-compose for both
+# Both via docker-compose
 cd docker && docker compose up
+
+# Export RVF model
+docker run --rm -v $(pwd):/out ruvnet/wifi-densepose:latest --export-rvf /out/model.rvf
 ```
 
 | Image | Tag | Size | Ports |
@@ -509,16 +494,14 @@ cd docker && docker compose up
 | `ruvnet/wifi-densepose` | `latest`, `rust` | 132 MB | 3000 (REST), 3001 (WS), 5005/udp (ESP32) |
 | `ruvnet/wifi-densepose` | `python` | 569 MB | 8765 (WS), 8080 (UI) |
 
-**Export RVF model package:**
-```bash
-docker run --rm -v $(pwd):/out ruvnet/wifi-densepose:latest --export-rvf /out/wifi-densepose-v1.rvf
-```
+</details>
 
-### System Requirements
+<details>
+<summary><strong>System Requirements</strong></summary>
 
 - **Rust**: 1.70+ (primary runtime — install via [rustup](https://rustup.rs/))
 - **Python**: 3.8+ (for verification and legacy v1 API)
-- **Operating System**: Linux (Ubuntu 18.04+), macOS (10.15+), Windows 10+
+- **OS**: Linux (Ubuntu 18.04+), macOS (10.15+), Windows 10+
 - **Memory**: Minimum 4GB RAM, Recommended 8GB+
 - **Storage**: 2GB free space for models and data
 - **Network**: WiFi interface with CSI capability (optional — installer detects what you have)
@@ -526,23 +509,22 @@ docker run --rm -v $(pwd):/out ruvnet/wifi-densepose:latest --export-rvf /out/wi
 
 </details>
 
-<details>
-<summary><strong>🚀 Quick Start</strong> — First API call in 3 commands</summary>
+---
 
-### 1. Basic Setup
+## 🚀 Quick Start
+
+<details open>
+<summary><strong>First API call in 3 commands</strong></summary>
+
+### 1. Install
 
 ```bash
-# Install the package (Rust — recommended)
+# Fastest path — Docker
+docker pull ruvnet/wifi-densepose:latest
+docker run -p 3000:3000 ruvnet/wifi-densepose:latest
+
+# Or from source (Rust)
 ./install.sh --profile rust --yes
-
-# Or Python legacy
-pip install wifi-densepose
-
-# Copy example configuration
-cp example.env .env
-
-# Edit configuration (set your WiFi interface)
-nano .env
 ```
 
 ### 2. Start the System
@@ -550,67 +532,48 @@ nano .env
 ```python
 from wifi_densepose import WiFiDensePose
 
-# Initialize with default configuration
 system = WiFiDensePose()
-
-# Start pose estimation
 system.start()
-
-# Get latest pose data
 poses = system.get_latest_poses()
 print(f"Detected {len(poses)} persons")
-
-# Stop the system
 system.stop()
 ```
 
-### 3. Using the REST API
+### 3. REST API
 
 ```bash
-# Start the API server
-wifi-densepose start
+# Health check
+curl http://localhost:3000/api/v1/health
 
-# Start with custom configuration
-wifi-densepose -c /path/to/config.yaml start
+# Latest sensing frame
+curl http://localhost:3000/api/v1/sensing
 
-# Start with verbose logging
-wifi-densepose -v start
-
-# Check server status
-wifi-densepose status
+# Vital signs
+curl http://localhost:3000/api/v1/vital-signs
 ```
 
-The API will be available at `http://localhost:8000`
-
-- **API Documentation**: http://localhost:8000/docs
-- **Health Check**: http://localhost:8000/api/v1/health
-- **Latest Poses**: http://localhost:8000/api/v1/pose/latest
-
-### 4. Real-time Streaming
+### 4. Real-time WebSocket
 
 ```python
-import asyncio
-import websockets
-import json
+import asyncio, websockets, json
 
-async def stream_poses():
-    uri = "ws://localhost:8000/ws/pose/stream"
-    async with websockets.connect(uri) as websocket:
-        while True:
-            data = await websocket.recv()
-            poses = json.loads(data)
-            print(f"Received poses: {len(poses['persons'])} persons detected")
+async def stream():
+    async with websockets.connect("ws://localhost:3001/ws/sensing") as ws:
+        async for msg in ws:
+            data = json.loads(msg)
+            print(f"Persons: {len(data.get('persons', []))}")
 
-# Run the streaming client
-asyncio.run(stream_poses())
+asyncio.run(stream())
 ```
 
 </details>
 
-<details>
-<summary><strong>🖥️ CLI Usage</strong> — Server management, Rust sensing server flags</summary>
+---
 
-#### Rust Sensing Server (Primary)
+## 🖥️ CLI Usage
+
+<details>
+<summary><strong>Rust Sensing Server</strong> — Primary CLI interface</summary>
 
 ```bash
 # Start with simulated data (no hardware)
@@ -651,146 +614,28 @@ asyncio.run(stream_poses())
 | `--dataset` | Path to dataset directory (MM-Fi or Wi-Pose) |
 | `--epochs` | Training epochs (default: 100) |
 
-#### Python Legacy CLI
+</details>
 
-WiFi DensePose provides a comprehensive command-line interface for easy system management, configuration, and monitoring.
+<details>
+<summary><a id="rest-api--websocket"></a><strong>REST API & WebSocket</strong> — Endpoints reference</summary>
 
-### CLI Installation
-
-The CLI is automatically installed with the package:
-
-```bash
-# Install WiFi DensePose with CLI
-pip install wifi-densepose
-
-# Verify CLI installation
-wifi-densepose --help
-wifi-densepose version
-```
-
-### Basic Commands
-
-The WiFi-DensePose CLI provides the following commands:
+#### REST API (Rust Sensing Server)
 
 ```bash
-wifi-densepose [OPTIONS] COMMAND [ARGS]...
-
-Options:
-  -c, --config PATH  Path to configuration file
-  -v, --verbose      Enable verbose logging
-  --debug            Enable debug mode
-  --help             Show this message and exit.
-
-Commands:
-  config   Configuration management commands.
-  db       Database management commands.
-  start    Start the WiFi-DensePose API server.
-  status   Show the status of the WiFi-DensePose API server.
-  stop     Stop the WiFi-DensePose API server.
-  tasks    Background task management commands.
-  version  Show version information.
-```
-
-#### Server Management
-```bash
-# Start the WiFi-DensePose API server
-wifi-densepose start
-
-# Start with custom configuration
-wifi-densepose -c /path/to/config.yaml start
-
-# Start with verbose logging
-wifi-densepose -v start
-
-# Start with debug mode
-wifi-densepose --debug start
-
-# Check server status
-wifi-densepose status
-
-# Stop the server
-wifi-densepose stop
-
-# Show version information
-wifi-densepose version
-```
-
-### Configuration Commands
-
-#### Configuration Management
-```bash
-# Configuration management commands
-wifi-densepose config [SUBCOMMAND]
-
-# Examples:
-# Show current configuration
-wifi-densepose config show
-
-# Validate configuration file
-wifi-densepose config validate
-
-# Create default configuration
-wifi-densepose config init
-
-# Edit configuration
-wifi-densepose config edit
-```
-
-#### Database Management
-```bash
-# Database management commands
-wifi-densepose db [SUBCOMMAND]
-
-# Examples:
-# Initialize database
-wifi-densepose db init
-
-# Run database migrations
-wifi-densepose db migrate
-
-# Check database status
-wifi-densepose db status
-
-# Backup database
-wifi-densepose db backup
-
-# Restore database
-wifi-densepose db restore
-```
-
-#### Background Tasks
-```bash
-# Background task management commands
-wifi-densepose tasks [SUBCOMMAND]
-
-# Examples:
-# List running tasks
-wifi-densepose tasks list
-
-# Start background tasks
-wifi-densepose tasks start
-
-# Stop background tasks
-wifi-densepose tasks stop
-
-# Check task status
-wifi-densepose tasks status
-```
-
-### REST API (Rust Sensing Server)
-
-```bash
-GET  /api/v1/sensing           # Latest sensing frame
-GET  /api/v1/vital-signs       # Breathing, heart rate, confidence
-GET  /api/v1/bssid             # Multi-BSSID registry
-GET  /api/v1/model/layers      # Progressive loading status
+GET  /api/v1/sensing              # Latest sensing frame
+GET  /api/v1/vital-signs          # Breathing, heart rate, confidence
+GET  /api/v1/bssid                # Multi-BSSID registry
+GET  /api/v1/model/layers         # Progressive loading status
 GET  /api/v1/model/sona/profiles  # SONA profiles
 POST /api/v1/model/sona/activate  # Activate SONA profile
 ```
 
 WebSocket: `ws://localhost:8765/ws/sensing` (real-time sensing + vital signs)
 
-### Hardware Support
+</details>
+
+<details>
+<summary><a id="hardware-support-1"></a><strong>Hardware Support</strong> — Devices, cost, and guides</summary>
 
 | Hardware | CSI | Cost | Guide |
 |----------|-----|------|-------|
@@ -799,18 +644,41 @@ WebSocket: `ws://localhost:8765/ws/sensing` (real-time sensing + vital signs)
 | Atheros AR9580 | ath9k patch | ~$20 | Linux only |
 | Any Windows WiFi | RSSI only | $0 | [Tutorial #36](https://github.com/ruvnet/wifi-densepose/issues/36) |
 
-### Docs
+</details>
 
-- [User Guide](docs/user_guide.md) | [API Reference](docs/api_reference.md) | [Deployment](docs/deployment.md) | [Troubleshooting](docs/troubleshooting.md)
-- [ADR-021](docs/adr/ADR-021-vital-sign-detection-rvdna-pipeline.md) | [ADR-022](docs/adr/ADR-022-windows-wifi-enhanced-fidelity-ruvector.md) | [ADR-023](docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md)
+<details>
+<summary><strong>Python Legacy CLI</strong> — v1 API server commands</summary>
+
+```bash
+wifi-densepose start                    # Start API server
+wifi-densepose -c config.yaml start     # Custom config
+wifi-densepose -v start                 # Verbose logging
+wifi-densepose status                   # Check status
+wifi-densepose stop                     # Stop server
+wifi-densepose config show              # Show configuration
+wifi-densepose db init                  # Initialize database
+wifi-densepose tasks list               # List background tasks
+```
 
 </details>
 
 <details>
-<summary><strong>🧪 Testing</strong> — 542+ tests, hardware-free simulation, CI</summary>
+<summary><strong>Documentation Links</strong></summary>
+
+- [WiFi-Mat User Guide](docs/wifi-mat-user-guide.md) | [Domain Model](docs/ddd/wifi-mat-domain-model.md)
+- [ADR-021](docs/adr/ADR-021-vital-sign-detection-rvdna-pipeline.md) | [ADR-022](docs/adr/ADR-022-windows-wifi-enhanced-fidelity-ruvector.md) | [ADR-023](docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md)
+
+</details>
+
+---
+
+## 🧪 Testing
+
+<details open>
+<summary><strong>542+ tests across 7 suites</strong> — zero mocks, hardware-free simulation</summary>
 
 ```bash
-# Rust tests (primary — 542+ tests, zero mocks)
+# Rust tests (primary — 542+ tests)
 cd rust-port/wifi-densepose-rs
 cargo test --workspace
 
@@ -839,10 +707,12 @@ python -m pytest v1/tests/ -v
 
 </details>
 
-<details>
-<summary><strong>🚀 Deployment</strong> — Docker, docker-compose, production</summary>
+---
 
-### Docker (Recommended)
+## 🚀 Deployment
+
+<details>
+<summary><strong>Docker deployment</strong> — Production setup with docker-compose</summary>
 
 ```bash
 # Rust sensing server (132 MB)
@@ -871,8 +741,12 @@ POSE_MAX_PERSONS=10              # Max tracked individuals
 
 </details>
 
-<details>
-<summary><strong>📊 Performance Metrics</strong> — Measured benchmarks</summary>
+---
+
+## 📊 Performance Metrics
+
+<details open>
+<summary><strong>Measured benchmarks</strong> — Rust sensing server, validated via cargo bench</summary>
 
 ### Rust Sensing Server
 
@@ -897,8 +771,12 @@ POSE_MAX_PERSONS=10              # Max tracked individuals
 
 </details>
 
+---
+
+## 🤝 Contributing
+
 <details>
-<summary><strong>🤝 Contributing</strong> — Dev setup, code standards, PR process</summary>
+<summary><strong>Dev setup, code standards, PR process</strong></summary>
 
 ```bash
 git clone https://github.com/ruvnet/wifi-densepose.git
@@ -922,35 +800,48 @@ pre-commit install
 
 </details>
 
-<details>
-<summary><strong>📄 Changelog</strong> — Release history</summary>
+---
+
+## 📄 Changelog
+
+<details open>
+<summary><strong>Release history</strong></summary>
 
 ### v2.3.0 — 2026-03-01
 
+The largest release to date — delivers the complete end-to-end training pipeline, Docker images, and vital sign detection. The Rust sensing server now supports full model training, RVF export, and progressive model loading from a single binary.
+
 - **Docker images published** — `ruvnet/wifi-densepose:latest` (132 MB Rust) and `:python` (569 MB)
-- **8-phase DensePose training pipeline (ADR-023)** — Dataset loaders, graph transformer, trainer, SONA adaptation, sparse inference, RVF pipeline, server integration
-- **`--export-rvf` CLI flag** — Standalone RVF model package generation
-- **`--train` CLI flag** — Full training mode with cosine-scheduled SGD, PCK/OKS validation
-- **Vital sign detection (ADR-021)** — FFT-based breathing and heartbeat extraction, 11,665 fps
+- **8-phase DensePose training pipeline (ADR-023)** — Dataset loaders (MM-Fi, Wi-Pose), graph transformer with cross-attention, 6-term composite loss, cosine-scheduled SGD, PCK/OKS validation, SONA adaptation, sparse inference engine, RVF model packaging
+- **`--export-rvf` CLI flag** — Standalone RVF model container generation with vital config, training proof, and SONA profiles
+- **`--train` CLI flag** — Full training mode with best-epoch snapshotting and checkpoint saving
+- **Vital sign detection (ADR-021)** — FFT-based breathing (6-30 BPM) and heartbeat (40-120 BPM) extraction, 11,665 fps benchmark
+- **WiFi scan domain layer (ADR-022)** — 8-stage pure-Rust signal intelligence pipeline for Windows WiFi RSSI
+- **New crates** — `wifi-densepose-vitals` (1,863 lines) and `wifi-densepose-wifiscan` (4,829 lines)
 - **542+ Rust tests** — All passing, zero mocks
 
 ### v2.2.0 — 2026-02-28
 
-- **Guided installer** — `./install.sh` with 7-step hardware detection
-- **6 SOTA signal algorithms (ADR-014)** — SpotFi, Hampel, Fresnel, spectrogram, subcarrier selection, BVP
-- **WiFi-Mat disaster response** — START triage, scan zones, API endpoints — 139 tests
+Introduced the guided installer, SOTA signal processing algorithms, and the WiFi-Mat disaster response module. This release established the ESP32 hardware path and security hardening.
+
+- **Guided installer** — `./install.sh` with 7-step hardware detection and 8 install profiles
+- **6 SOTA signal algorithms (ADR-014)** — SpotFi conjugate multiplication, Hampel filter, Fresnel zone model, CSI spectrogram, subcarrier selection, body velocity profile
+- **WiFi-Mat disaster response** — START triage, scan zones, 3D localization, priority alerts — 139 tests
 - **ESP32 CSI hardware parser** — Binary frame parsing with I/Q extraction — 28 tests
-- **WiFi scan domain layer (ADR-022)** — 8-stage pure-Rust signal intelligence pipeline
-- **Security hardening** — 10 vulnerabilities fixed
+- **Security hardening** — 10 vulnerabilities fixed (CVE remediation, input validation, path security)
 
 ### v2.1.0 — 2026-02-28
 
-- **RuVector RVF integration** — ADR-002 through ADR-013
-- **ESP32 CSI sensor mesh** — $54 starter kit with 3-6 ESP32-S3 nodes
-- **Three.js visualization** — 3D body model with WebSocket streaming
-- **CI verification pipeline** — Determinism checks and unseeded random scan
+The foundational Rust release — ported the Python v1 pipeline to Rust with 810x speedup, integrated the RuVector signal intelligence crates, and added the Three.js real-time visualization.
+
+- **RuVector integration** — 11 vendored crates (ADR-002 through ADR-013) for HNSW indexing, attention, GNN, temporal compression, min-cut, solver
+- **ESP32 CSI sensor mesh** — $54 starter kit with 3-6 ESP32-S3 nodes streaming at 20 Hz
+- **Three.js visualization** — 3D body model with 17 joints, real-time WebSocket streaming
+- **CI verification pipeline** — Determinism checks and unseeded random scan across all signal operations
 
 </details>
+
+---
 
 ## 📄 License
 
