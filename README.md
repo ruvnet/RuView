@@ -364,21 +364,33 @@ cargo add wifi-densepose-ruvector   # RuVector v2.0.4 integration layer (ADR-017
 | [`wifi-densepose-config`](https://crates.io/crates/wifi-densepose-config) | Configuration management | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-config.svg)](https://crates.io/crates/wifi-densepose-config) |
 | [`wifi-densepose-db`](https://crates.io/crates/wifi-densepose-db) | Database persistence (PostgreSQL, SQLite, Redis) | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-db.svg)](https://crates.io/crates/wifi-densepose-db) |
 
-All crates integrate with [RuVector v2.0.4](https://github.com/ruvnet/ruvector) for graph algorithms and neural network optimization.
+#### AI Backbone: [RuVector v2.0.4](https://github.com/ruvnet/ruvector)
 
-#### `wifi-densepose-ruvector` — ADR-017 Integration Layer
+Raw WiFi signals are noisy, redundant, and environment-dependent. [RuVector](https://github.com/ruvnet/ruvector) is the AI intelligence layer that transforms them into clean, structured input for the DensePose neural network. It uses **attention mechanisms** to learn which signals to trust, **graph algorithms** that automatically discover which WiFi channels are sensitive to body motion, and **compressed representations** that make edge inference possible on an $8 microcontroller.
 
-The `wifi-densepose-ruvector` crate ([`docs/adr/ADR-017-ruvector-signal-mat-integration.md`](docs/adr/ADR-017-ruvector-signal-mat-integration.md)) implements all 7 ruvector integration points across the signal processing and disaster detection domains:
+```
+Raw WiFi CSI (56 subcarriers, noisy)
+    |
+    +-- ruvector-mincut ---------- Which channels carry body-motion signal? (learned graph partitioning)
+    +-- ruvector-attn-mincut ----- Which time frames are signal vs noise? (attention-gated filtering)
+    +-- ruvector-attention ------- How to fuse multi-antenna data? (learned weighted aggregation)
+    |
+    v
+Clean, structured signal --> DensePose Neural Network --> 17-keypoint body pose
+                         --> FFT Vital Signs -----------> breathing rate, heart rate
+                         --> ruvector-solver ------------> physics-based localization
+```
 
-| Module | Integration | RuVector crate | Benefit |
-|--------|-------------|----------------|---------|
-| `signal::subcarrier` | `mincut_subcarrier_partition` | `ruvector-mincut` | O(n^1.5 log n) dynamic partition vs O(n log n) static sort |
-| `signal::spectrogram` | `gate_spectrogram` | `ruvector-attn-mincut` | Attention gating suppresses noise frames in STFT output |
-| `signal::bvp` | `attention_weighted_bvp` | `ruvector-attention` | Sensitivity-weighted aggregation across subcarriers |
-| `signal::fresnel` | `solve_fresnel_geometry` | `ruvector-solver` | Data-driven TX-body-RX geometry from multi-subcarrier observations |
-| `mat::triangulation` | `solve_triangulation` | `ruvector-solver` | O(1) 2×2 Neumann system vs O(N³) Gaussian elimination |
-| `mat::breathing` | `CompressedBreathingBuffer` | `ruvector-temporal-tensor` | 13.4 MB/zone → 3.4–6.7 MB (50–75% reduction per zone) |
-| `mat::heartbeat` | `CompressedHeartbeatSpectrogram` | `ruvector-temporal-tensor` | Tiered hot/warm/cold compression for micro-Doppler spectrograms |
+The [`wifi-densepose-ruvector`](https://crates.io/crates/wifi-densepose-ruvector) crate ([ADR-017](docs/adr/ADR-017-ruvector-signal-mat-integration.md)) connects all 7 integration points:
+
+| AI Capability | What It Replaces | RuVector Crate | Result |
+|--------------|-----------------|----------------|--------|
+| **Self-optimizing channel selection** | Hand-tuned thresholds that break when rooms change | `ruvector-mincut` | Graph min-cut adapts to any environment automatically |
+| **Attention-based signal cleaning** | Fixed energy cutoffs that miss subtle breathing | `ruvector-attn-mincut` | Learned gating amplifies body signals, suppresses noise |
+| **Learned signal fusion** | Simple averaging where one bad channel corrupts all | `ruvector-attention` | Transformer-style attention downweights corrupted channels |
+| **Physics-informed localization** | Expensive nonlinear solvers | `ruvector-solver` | Sparse least-squares Fresnel geometry in real-time |
+| **O(1) survivor triangulation** | O(N^3) matrix inversion | `ruvector-solver` | Neumann series linearization for instant position updates |
+| **75% memory compression** | 13.4 MB breathing buffers that overflow edge devices | `ruvector-temporal-tensor` | Tiered 3-8 bit quantization fits 60s of vitals in 3.4 MB |
 
 </details>
 
