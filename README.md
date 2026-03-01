@@ -143,9 +143,9 @@ These scenarios exploit WiFi's ability to penetrate solid materials — concrete
 ---
 
 <details>
-<summary><strong>🧠 Contrastive CSI Embedding Model (ADR-024)</strong> — Self-supervised WiFi fingerprinting, similarity search, and anomaly detection</summary>
+<summary><strong>🧠 Self-Learning WiFi AI (ADR-024)</strong> — Adaptive recognition, self-optimization, and intelligent anomaly detection</summary>
 
-Every WiFi signal that passes through a room creates a unique fingerprint of that space. WiFi-DensePose already reads these fingerprints to track people, but until now it threw away the internal "understanding" after each reading. The Contrastive CSI Embedding Model captures and preserves that understanding as compact, reusable vectors.
+Every WiFi signal that passes through a room creates a unique fingerprint of that space. WiFi-DensePose already reads these fingerprints to track people, but until now it threw away the internal "understanding" after each reading. The Self-Learning WiFi AI captures and preserves that understanding as compact, reusable vectors — and continuously optimizes itself for each new environment.
 
 **What it does in plain terms:**
 - Turns any WiFi signal into a 128-number "fingerprint" that uniquely describes what's happening in a room
