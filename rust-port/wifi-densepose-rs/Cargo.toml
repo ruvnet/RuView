@@ -15,6 +15,7 @@ members = [
     "crates/wifi-densepose-sensing-server",
     "crates/wifi-densepose-wifiscan",
     "crates/wifi-densepose-vitals",
+    "crates/wifi-densepose-ruvector",
 ]
 
 [workspace.package]
@@ -120,6 +121,7 @@ wifi-densepose-config = { version = "0.1.0", path = "crates/wifi-densepose-confi
 wifi-densepose-hardware = { version = "0.1.0", path = "crates/wifi-densepose-hardware" }
 wifi-densepose-wasm = { version = "0.1.0", path = "crates/wifi-densepose-wasm" }
 wifi-densepose-mat = { version = "0.1.0", path = "crates/wifi-densepose-mat" }
+wifi-densepose-ruvector = { version = "0.1.0", path = "crates/wifi-densepose-ruvector" }
 
 [profile.release]
 lto = true

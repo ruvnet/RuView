@@ -3,7 +3,7 @@
 //! This module provides both traditional signal-processing-based detection
 //! and optional ML-enhanced detection for improved accuracy.
 
-use crate::domain::{ScanZone, VitalSignsReading, ConfidenceScore};
+use crate::domain::{ScanZone, VitalSignsReading};
 use crate::ml::{MlDetectionConfig, MlDetectionPipeline, MlDetectionResult};
 use crate::{DisasterConfig, MatError};
 use super::{

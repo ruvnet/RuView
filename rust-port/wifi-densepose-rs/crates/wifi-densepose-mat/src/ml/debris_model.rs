@@ -15,14 +15,13 @@
 //! - Attenuation regression head (linear output)
 //! - Depth estimation head with uncertainty (mean + variance output)
 
+#![allow(unexpected_cfgs)]
+
 use super::{DebrisFeatures, DepthEstimate, MlError, MlResult};
-use ndarray::{Array1, Array2, Array4, s};
-use std::collections::HashMap;
+use ndarray::{Array2, Array4};
 use std::path::Path;
-use std::sync::Arc;
-use parking_lot::RwLock;
 use thiserror::Error;
-use tracing::{debug, info, instrument, warn};
+use tracing::{info, instrument, warn};
 
 #[cfg(feature = "onnx")]
 use wifi_densepose_nn::{OnnxBackend, OnnxSession, InferenceOptions, Tensor, TensorShape};

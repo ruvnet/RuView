@@ -21,18 +21,27 @@
 //!                             [Uncertainty]   [Confidence]    [Voluntary Flag]
 //! ```
 
+#![allow(unexpected_cfgs)]
+
 use super::{MlError, MlResult};
 use crate::detection::CsiDataBuffer;
 use crate::domain::{
     BreathingPattern, BreathingType, HeartbeatSignature, MovementProfile,
     MovementType, SignalStrength, VitalSignsReading,
 };
-use ndarray::{Array1, Array2, Array4, s};
-use std::collections::HashMap;
 use std::path::Path;
+use tracing::{info, instrument, warn};
+
+#[cfg(feature = "onnx")]
+use ndarray::{Array1, Array2, Array4, s};
+#[cfg(feature = "onnx")]
+use std::collections::HashMap;
+#[cfg(feature = "onnx")]
 use std::sync::Arc;
+#[cfg(feature = "onnx")]
 use parking_lot::RwLock;
-use tracing::{debug, info, instrument, warn};
+#[cfg(feature = "onnx")]
+use tracing::debug;
 
 #[cfg(feature = "onnx")]
 use wifi_densepose_nn::{OnnxBackend, OnnxSession, InferenceOptions, Tensor, TensorShape};
@@ -813,7 +822,7 @@ impl VitalSignsClassifier {
     }
 
     /// Compute breathing class probabilities
-    fn compute_breathing_probabilities(&self, rate_bpm: f32, features: &VitalSignsFeatures) -> Vec<f32> {
+    fn compute_breathing_probabilities(&self, rate_bpm: f32, _features: &VitalSignsFeatures) -> Vec<f32> {
         let mut probs = vec![0.0; 6]; // Normal, Shallow, Labored, Irregular, Agonal, Apnea
 
         // Simple probability assignment based on rate

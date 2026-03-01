@@ -28,8 +28,6 @@ use chrono::{DateTime, Utc};
 use std::collections::VecDeque;
 use std::io::{BufReader, Read};
 use std::path::Path;
-use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
 
 /// Configuration for CSI receivers
 #[derive(Debug, Clone)]
@@ -921,7 +919,7 @@ impl CsiParser {
         }
 
         // Parse header
-        let timestamp_low = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+        let _timestamp_low = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
         let bfee_count = u16::from_le_bytes([data[4], data[5]]);
         let _nrx = data[8];
         let ntx = data[9];
@@ -929,8 +927,8 @@ impl CsiParser {
         let rssi_b = data[11] as i8;
         let rssi_c = data[12] as i8;
         let noise = data[13] as i8;
-        let agc = data[14];
-        let perm = [data[15], data[16], data[17]];
+        let _agc = data[14];
+        let _perm = [data[15], data[16], data[17]];
         let rate = u16::from_le_bytes([data[18], data[19]]);
 
         // Average RSSI

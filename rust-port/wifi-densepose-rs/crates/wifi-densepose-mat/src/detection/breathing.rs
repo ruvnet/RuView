@@ -1,6 +1,6 @@
 //! Breathing pattern detection from CSI signals.
 
-use crate::domain::{BreathingPattern, BreathingType, ConfidenceScore};
+use crate::domain::{BreathingPattern, BreathingType};
 
 // ---------------------------------------------------------------------------
 // Integration 6: CompressedBreathingBuffer (ADR-017, ruvector feature)

@@ -35,9 +35,7 @@ pub use vital_signs_classifier::{
 };
 
 use crate::detection::CsiDataBuffer;
-use crate::domain::{VitalSignsReading, BreathingPattern, HeartbeatSignature};
 use async_trait::async_trait;
-use std::path::Path;
 use thiserror::Error;
 
 /// Errors that can occur in ML operations

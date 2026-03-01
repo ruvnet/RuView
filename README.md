@@ -48,7 +48,7 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 | [User Guide](docs/user-guide.md) | Step-by-step guide: installation, first run, API usage, hardware setup, training |
 | [WiFi-Mat User Guide](docs/wifi-mat-user-guide.md) | Disaster response module: search & rescue, START triage |
 | [Build Guide](docs/build-guide.md) | Building from source (Rust and Python) |
-| [Architecture Decisions](docs/adr/) | 25 ADRs covering signal processing, training, hardware, security |
+| [Architecture Decisions](docs/adr/) | 26 ADRs covering signal processing, training, hardware, security |
 
 ---
 
@@ -331,7 +331,7 @@ docker run --rm -v $(pwd):/out ruvnet/wifi-densepose:latest --export-rvf /out/mo
 <details>
 <summary><strong>Rust Crates</strong> — Individual crates on crates.io</summary>
 
-The Rust workspace consists of 14 crates, all published to [crates.io](https://crates.io/):
+The Rust workspace consists of 15 crates, all published to [crates.io](https://crates.io/):
 
 ```bash
 # Add individual crates to your Cargo.toml
@@ -343,6 +343,7 @@ cargo add wifi-densepose-mat        # Disaster response (MAT survivor detection)
 cargo add wifi-densepose-hardware   # ESP32, Intel 5300, Atheros sensors
 cargo add wifi-densepose-train      # Training pipeline (MM-Fi dataset)
 cargo add wifi-densepose-wifiscan   # Multi-BSSID WiFi scanning
+cargo add wifi-densepose-ruvector   # RuVector v2.0.4 integration layer (ADR-017)
 ```
 
 | Crate | Description | RuVector | crates.io |
@@ -352,6 +353,7 @@ cargo add wifi-densepose-wifiscan   # Multi-BSSID WiFi scanning
 | [`wifi-densepose-nn`](https://crates.io/crates/wifi-densepose-nn) | Multi-backend inference (ONNX, PyTorch, Candle) | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-nn.svg)](https://crates.io/crates/wifi-densepose-nn) |
 | [`wifi-densepose-train`](https://crates.io/crates/wifi-densepose-train) | Training pipeline with MM-Fi dataset (NeurIPS 2023) | **All 5** | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-train.svg)](https://crates.io/crates/wifi-densepose-train) |
 | [`wifi-densepose-mat`](https://crates.io/crates/wifi-densepose-mat) | Mass Casualty Assessment Tool (disaster survivor detection) | `solver`, `temporal-tensor` | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-mat.svg)](https://crates.io/crates/wifi-densepose-mat) |
+| [`wifi-densepose-ruvector`](https://crates.io/crates/wifi-densepose-ruvector) | RuVector v2.0.4 integration layer — 7 signal+MAT integration points (ADR-017) | **All 5** | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-ruvector.svg)](https://crates.io/crates/wifi-densepose-ruvector) |
 | [`wifi-densepose-vitals`](https://crates.io/crates/wifi-densepose-vitals) | Vital signs: breathing (6-30 BPM), heart rate (40-120 BPM) | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-vitals.svg)](https://crates.io/crates/wifi-densepose-vitals) |
 | [`wifi-densepose-hardware`](https://crates.io/crates/wifi-densepose-hardware) | ESP32, Intel 5300, Atheros CSI sensor interfaces | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-hardware.svg)](https://crates.io/crates/wifi-densepose-hardware) |
 | [`wifi-densepose-wifiscan`](https://crates.io/crates/wifi-densepose-wifiscan) | Multi-BSSID WiFi scanning (Windows, macOS, Linux) | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-wifiscan.svg)](https://crates.io/crates/wifi-densepose-wifiscan) |
@@ -363,6 +365,20 @@ cargo add wifi-densepose-wifiscan   # Multi-BSSID WiFi scanning
 | [`wifi-densepose-db`](https://crates.io/crates/wifi-densepose-db) | Database persistence (PostgreSQL, SQLite, Redis) | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-db.svg)](https://crates.io/crates/wifi-densepose-db) |
 
 All crates integrate with [RuVector v2.0.4](https://github.com/ruvnet/ruvector) for graph algorithms and neural network optimization.
+
+#### `wifi-densepose-ruvector` — ADR-017 Integration Layer
+
+The `wifi-densepose-ruvector` crate ([`docs/adr/ADR-017-ruvector-signal-mat-integration.md`](docs/adr/ADR-017-ruvector-signal-mat-integration.md)) implements all 7 ruvector integration points across the signal processing and disaster detection domains:
+
+| Module | Integration | RuVector crate | Benefit |
+|--------|-------------|----------------|---------|
+| `signal::subcarrier` | `mincut_subcarrier_partition` | `ruvector-mincut` | O(n^1.5 log n) dynamic partition vs O(n log n) static sort |
+| `signal::spectrogram` | `gate_spectrogram` | `ruvector-attn-mincut` | Attention gating suppresses noise frames in STFT output |
+| `signal::bvp` | `attention_weighted_bvp` | `ruvector-attention` | Sensitivity-weighted aggregation across subcarriers |
+| `signal::fresnel` | `solve_fresnel_geometry` | `ruvector-solver` | Data-driven TX-body-RX geometry from multi-subcarrier observations |
+| `mat::triangulation` | `solve_triangulation` | `ruvector-solver` | O(1) 2×2 Neumann system vs O(N³) Gaussian elimination |
+| `mat::breathing` | `CompressedBreathingBuffer` | `ruvector-temporal-tensor` | 13.4 MB/zone → 3.4–6.7 MB (50–75% reduction per zone) |
+| `mat::heartbeat` | `CompressedHeartbeatSpectrogram` | `ruvector-temporal-tensor` | Tiered hot/warm/cold compression for micro-Doppler spectrograms |
 
 </details>
 

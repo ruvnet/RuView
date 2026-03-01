@@ -84,6 +84,7 @@ pub mod domain;
 pub mod integration;
 pub mod localization;
 pub mod ml;
+pub mod tracking;
 
 // Re-export main types
 pub use domain::{
@@ -97,7 +98,7 @@ pub use domain::{
     },
     triage::{TriageStatus, TriageCalculator},
     coordinates::{Coordinates3D, LocationUncertainty, DepthEstimate},
-    events::{DetectionEvent, AlertEvent, DomainEvent, EventStore, InMemoryEventStore},
+    events::{DetectionEvent, AlertEvent, DomainEvent, EventStore, InMemoryEventStore, TrackingEvent},
 };
 
 pub use detection::{
@@ -139,6 +140,13 @@ pub use ml::{
     VitalSignsClassifier, VitalSignsClassifierConfig,
     BreathingClassification, HeartbeatClassification,
     UncertaintyEstimate, ClassifierOutput,
+};
+
+pub use tracking::{
+    SurvivorTracker, TrackerConfig, TrackId, TrackedSurvivor,
+    DetectionObservation, AssociationResult,
+    KalmanState, CsiFingerprint,
+    TrackState, TrackLifecycle,
 };
 
 /// Library version
@@ -289,6 +297,7 @@ pub struct DisasterResponse {
     alert_dispatcher: AlertDispatcher,
     event_store: std::sync::Arc<dyn domain::events::EventStore>,
     ensemble_classifier: EnsembleClassifier,
+    tracker: tracking::SurvivorTracker,
     running: std::sync::atomic::AtomicBool,
 }
 
@@ -312,6 +321,7 @@ impl DisasterResponse {
             alert_dispatcher,
             event_store,
             ensemble_classifier,
+            tracker: tracking::SurvivorTracker::with_defaults(),
             running: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -335,6 +345,7 @@ impl DisasterResponse {
             alert_dispatcher,
             event_store,
             ensemble_classifier,
+            tracker: tracking::SurvivorTracker::with_defaults(),
             running: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -370,6 +381,16 @@ impl DisasterResponse {
     /// Get the detection pipeline (for direct buffer inspection / data push)
     pub fn detection_pipeline(&self) -> &DetectionPipeline {
         &self.detection_pipeline
+    }
+
+    /// Get the survivor tracker
+    pub fn tracker(&self) -> &tracking::SurvivorTracker {
+        &self.tracker
+    }
+
+    /// Get mutable access to the tracker (for integration in scan_cycle)
+    pub fn tracker_mut(&mut self) -> &mut tracking::SurvivorTracker {
+        &mut self.tracker
     }
 
     /// Initialize a new disaster event
@@ -547,7 +568,7 @@ pub mod prelude {
         Coordinates3D, Alert, Priority,
         // Event sourcing
         DomainEvent, EventStore, InMemoryEventStore,
-        DetectionEvent, AlertEvent,
+        DetectionEvent, AlertEvent, TrackingEvent,
         // Detection
         DetectionPipeline, VitalSignsDetector,
         EnsembleClassifier, EnsembleConfig, EnsembleResult,
@@ -559,6 +580,8 @@ pub mod prelude {
         MlDetectionConfig, MlDetectionPipeline, MlDetectionResult,
         DebrisModel, MaterialType, DebrisClassification,
         VitalSignsClassifier, UncertaintyEstimate,
+        // Tracking
+        SurvivorTracker, TrackerConfig, TrackId, DetectionObservation, AssociationResult,
     };
 }
 
