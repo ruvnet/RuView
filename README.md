@@ -105,7 +105,7 @@ A high-performance Rust port is available in `/rust-port/wifi-densepose-rs/`:
 | Memory Usage | ~500MB | ~100MB |
 | WASM Support | ❌ | ✅ |
 | Binary Size | N/A | ~10MB |
-| Test Coverage | 100% | 313 tests |
+| Test Coverage | 100% | 542+ tests |
 
 **Quick Start (Rust):**
 ```bash
@@ -261,7 +261,7 @@ The RuVector Format (RVF) packages model weights, HNSW index, metadata, and WASM
 | **Progressive Loading** | Layer A in <5ms (entry points), Layer B in 100ms-1s (hot adjacency), Layer C (full graph) |
 | **Signing** | Ed25519-signed training proofs for verifiable provenance |
 | **Quantization** | Temperature-tiered (f32/f16/u8) via `rvf-quant` with SIMD distance |
-| **CLI Flags** | `--save-rvf <path>` and `--load-rvf <path>` for model persistence |
+| **CLI Flags** | `--export-rvf`, `--save-rvf`, `--load-rvf`, `--model` for model persistence |
 
 An RVF container is a self-contained artifact: no external model files, no Python runtime, no pip dependencies. Load it on any host with the Rust binary.
 
@@ -529,9 +529,29 @@ pip install wifi-densepose[all]  # All optional dependencies
 
 ### Using Docker
 
+Pre-built images are published on Docker Hub:
+
 ```bash
+# Rust sensing server (132 MB — recommended)
 docker pull ruvnet/wifi-densepose:latest
-docker run -p 8000:8000 ruvnet/wifi-densepose:latest
+docker run -p 3000:3000 -p 3001:3001 -p 5005:5005/udp ruvnet/wifi-densepose:latest
+
+# Python sensing pipeline (569 MB)
+docker pull ruvnet/wifi-densepose:python
+docker run -p 8765:8765 -p 8080:8080 ruvnet/wifi-densepose:python
+
+# Or use docker-compose for both
+cd docker && docker compose up
+```
+
+| Image | Tag | Size | Ports |
+|-------|-----|------|-------|
+| `ruvnet/wifi-densepose` | `latest`, `rust` | 132 MB | 3000 (REST), 3001 (WS), 5005/udp (ESP32) |
+| `ruvnet/wifi-densepose` | `python` | 569 MB | 8765 (WS), 8080 (UI) |
+
+**Export RVF model package:**
+```bash
+docker run --rm -v $(pwd):/out ruvnet/wifi-densepose:latest --export-rvf /out/wifi-densepose-v1.rvf
 ```
 
 ### System Requirements

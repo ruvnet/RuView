@@ -260,15 +260,44 @@ struct ModelLayer {
     sparse: Option<SparseLinear>,
     profiler: NeuronProfiler,
     is_sparse: bool,
+    /// Quantized weights per row (populated by apply_quantization).
+    quantized: Option<Vec<QuantizedWeights>>,
+    /// Whether to use quantized weights for forward pass.
+    use_quantized: bool,
 }
 
 impl ModelLayer {
     fn new(name: &str, weights: Vec<Vec<f32>>, bias: Vec<f32>) -> Self {
         let n = weights.len();
-        Self { name: name.into(), weights, bias, sparse: None, profiler: NeuronProfiler::new(n), is_sparse: false }
+        Self {
+            name: name.into(), weights, bias, sparse: None,
+            profiler: NeuronProfiler::new(n), is_sparse: false,
+            quantized: None, use_quantized: false,
+        }
     }
     fn forward_dense(&self, input: &[f32]) -> Vec<f32> {
+        if self.use_quantized {
+            if let Some(ref qrows) = self.quantized {
+                return self.forward_quantized(input, qrows);
+            }
+        }
         self.weights.iter().enumerate().map(|(r, row)| dot_bias(row, input, self.bias[r])).collect()
+    }
+    /// Forward using dequantized weights: val = q_val * scale (symmetric).
+    fn forward_quantized(&self, input: &[f32], qrows: &[QuantizedWeights]) -> Vec<f32> {
+        let n_out = qrows.len().min(self.bias.len());
+        let mut out = vec![0.0f32; n_out];
+        for r in 0..n_out {
+            let qw = &qrows[r];
+            let len = qw.data.len().min(input.len());
+            let mut s = self.bias[r];
+            for i in 0..len {
+                let w = (qw.data[i] as f32 - qw.zero_point as f32) * qw.scale;
+                s += w * input[i];
+            }
+            out[r] = s;
+        }
+        out
     }
     fn forward(&self, input: &[f32]) -> Vec<f32> {
         if self.is_sparse { if let Some(ref s) = self.sparse { return s.forward(input); } }
@@ -327,11 +356,20 @@ impl SparseModel {
         }
     }
 
-    /// Quantize weights (stores metadata; actual inference uses original weights).
+    /// Quantize weights using INT8 codebook per the config. After this call,
+    /// forward() uses dequantized weights (val = (q - zero_point) * scale).
     pub fn apply_quantization(&mut self) {
-        // Quantization metadata is computed per the config but the sparse forward
-        // path uses the original f32 weights for simplicity in this implementation.
-        // The stats() method reflects the memory savings.
+        for layer in &mut self.layers {
+            let qrows: Vec<QuantizedWeights> = layer.weights.iter().map(|row| {
+                match self.config.quant_mode {
+                    QuantMode::Int8Symmetric => Quantizer::quantize_symmetric(row),
+                    QuantMode::Int8Asymmetric => Quantizer::quantize_asymmetric(row),
+                    _ => Quantizer::quantize_symmetric(row),
+                }
+            }).collect();
+            layer.quantized = Some(qrows);
+            layer.use_quantized = true;
+        }
     }
 
     /// Forward pass through all layers with ReLU activation.

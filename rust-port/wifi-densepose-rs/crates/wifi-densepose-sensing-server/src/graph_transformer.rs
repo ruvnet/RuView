@@ -100,6 +100,32 @@ impl Linear {
         assert_eq!(b.len(), self.out_features);
         self.bias = b;
     }
+
+    /// Push all weights (row-major) then bias into a flat vec.
+    pub fn flatten_into(&self, out: &mut Vec<f32>) {
+        for row in &self.weights {
+            out.extend_from_slice(row);
+        }
+        out.extend_from_slice(&self.bias);
+    }
+
+    /// Restore from a flat slice. Returns (Self, number of f32s consumed).
+    pub fn unflatten_from(data: &[f32], in_f: usize, out_f: usize) -> (Self, usize) {
+        let n = in_f * out_f + out_f;
+        assert!(data.len() >= n, "unflatten_from: need {n} floats, got {}", data.len());
+        let mut weights = Vec::with_capacity(out_f);
+        for r in 0..out_f {
+            let start = r * in_f;
+            weights.push(data[start..start + in_f].to_vec());
+        }
+        let bias = data[in_f * out_f..n].to_vec();
+        (Self { in_features: in_f, out_features: out_f, weights, bias }, n)
+    }
+
+    /// Total number of trainable parameters.
+    pub fn param_count(&self) -> usize {
+        self.in_features * self.out_features + self.out_features
+    }
 }
 
 // ── AntennaGraph ─────────────────────────────────────────────────────────
@@ -254,6 +280,35 @@ impl CrossAttention {
     }
     pub fn d_model(&self) -> usize { self.d_model }
     pub fn n_heads(&self) -> usize { self.n_heads }
+
+    /// Push all cross-attention weights (w_q, w_k, w_v, w_o) into flat vec.
+    pub fn flatten_into(&self, out: &mut Vec<f32>) {
+        self.w_q.flatten_into(out);
+        self.w_k.flatten_into(out);
+        self.w_v.flatten_into(out);
+        self.w_o.flatten_into(out);
+    }
+
+    /// Restore cross-attention weights from flat slice. Returns (Self, consumed).
+    pub fn unflatten_from(data: &[f32], d_model: usize, n_heads: usize) -> (Self, usize) {
+        let mut offset = 0;
+        let (w_q, n) = Linear::unflatten_from(&data[offset..], d_model, d_model);
+        offset += n;
+        let (w_k, n) = Linear::unflatten_from(&data[offset..], d_model, d_model);
+        offset += n;
+        let (w_v, n) = Linear::unflatten_from(&data[offset..], d_model, d_model);
+        offset += n;
+        let (w_o, n) = Linear::unflatten_from(&data[offset..], d_model, d_model);
+        offset += n;
+        let d_k = d_model / n_heads;
+        (Self { d_model, n_heads, d_k, w_q, w_k, w_v, w_o }, offset)
+    }
+
+    /// Total trainable params in cross-attention.
+    pub fn param_count(&self) -> usize {
+        self.w_q.param_count() + self.w_k.param_count()
+            + self.w_v.param_count() + self.w_o.param_count()
+    }
 }
 
 // ── GraphMessagePassing ──────────────────────────────────────────────────
@@ -261,8 +316,10 @@ impl CrossAttention {
 /// GCN layer: H' = ReLU(A_norm H W) where A_norm = D^{-1/2} A D^{-1/2}.
 #[derive(Debug, Clone)]
 pub struct GraphMessagePassing {
-    in_features: usize, out_features: usize,
-    weight: Linear, norm_adj: [[f32; 17]; 17],
+    pub(crate) in_features: usize,
+    pub(crate) out_features: usize,
+    pub(crate) weight: Linear,
+    norm_adj: [[f32; 17]; 17],
 }
 
 impl GraphMessagePassing {
@@ -285,23 +342,54 @@ impl GraphMessagePassing {
     }
     pub fn in_features(&self) -> usize { self.in_features }
     pub fn out_features(&self) -> usize { self.out_features }
+
+    /// Push all layer weights into a flat vec.
+    pub fn flatten_into(&self, out: &mut Vec<f32>) {
+        self.weight.flatten_into(out);
+    }
+
+    /// Restore from a flat slice. Returns number of f32s consumed.
+    pub fn unflatten_from(&mut self, data: &[f32]) -> usize {
+        let (lin, consumed) = Linear::unflatten_from(data, self.in_features, self.out_features);
+        self.weight = lin;
+        consumed
+    }
+
+    /// Total trainable params in this GCN layer.
+    pub fn param_count(&self) -> usize { self.weight.param_count() }
 }
 
 /// Stack of GCN layers.
 #[derive(Debug, Clone)]
-struct GnnStack { layers: Vec<GraphMessagePassing> }
+pub struct GnnStack { pub(crate) layers: Vec<GraphMessagePassing> }
 
 impl GnnStack {
-    fn new(in_f: usize, out_f: usize, n: usize, g: &BodyGraph) -> Self {
+    pub fn new(in_f: usize, out_f: usize, n: usize, g: &BodyGraph) -> Self {
         assert!(n >= 1);
         let mut layers = vec![GraphMessagePassing::new(in_f, out_f, g)];
         for _ in 1..n { layers.push(GraphMessagePassing::new(out_f, out_f, g)); }
         Self { layers }
     }
-    fn forward(&self, feats: &[Vec<f32>]) -> Vec<Vec<f32>> {
+    pub fn forward(&self, feats: &[Vec<f32>]) -> Vec<Vec<f32>> {
         let mut h = feats.to_vec();
         for l in &self.layers { h = l.forward(&h); }
         h
+    }
+    /// Push all GNN weights into a flat vec.
+    pub fn flatten_into(&self, out: &mut Vec<f32>) {
+        for l in &self.layers { l.flatten_into(out); }
+    }
+    /// Restore GNN weights from flat slice. Returns number of f32s consumed.
+    pub fn unflatten_from(&mut self, data: &[f32]) -> usize {
+        let mut offset = 0;
+        for l in &mut self.layers {
+            offset += l.unflatten_from(&data[offset..]);
+        }
+        offset
+    }
+    /// Total trainable params across all GCN layers.
+    pub fn param_count(&self) -> usize {
+        self.layers.iter().map(|l| l.param_count()).sum()
     }
 }
 
@@ -380,6 +468,77 @@ impl CsiToPoseTransformer {
         PoseOutput { keypoints: kps, confidences: confs, body_part_features: gnn_out }
     }
     pub fn config(&self) -> &TransformerConfig { &self.config }
+
+    /// Collect all trainable parameters into a flat vec.
+    ///
+    /// Layout: csi_embed | keypoint_queries (flat) | cross_attn | gnn | xyz_head | conf_head
+    pub fn flatten_weights(&self) -> Vec<f32> {
+        let mut out = Vec::with_capacity(self.param_count());
+        self.csi_embed.flatten_into(&mut out);
+        for kq in &self.keypoint_queries {
+            out.extend_from_slice(kq);
+        }
+        self.cross_attn.flatten_into(&mut out);
+        self.gnn.flatten_into(&mut out);
+        self.xyz_head.flatten_into(&mut out);
+        self.conf_head.flatten_into(&mut out);
+        out
+    }
+
+    /// Restore all trainable parameters from a flat slice.
+    pub fn unflatten_weights(&mut self, params: &[f32]) -> Result<(), String> {
+        let expected = self.param_count();
+        if params.len() != expected {
+            return Err(format!("expected {expected} params, got {}", params.len()));
+        }
+        let mut offset = 0;
+
+        // csi_embed
+        let (embed, n) = Linear::unflatten_from(&params[offset..],
+            self.config.n_subcarriers, self.config.d_model);
+        self.csi_embed = embed;
+        offset += n;
+
+        // keypoint_queries
+        let d = self.config.d_model;
+        for kq in &mut self.keypoint_queries {
+            kq.copy_from_slice(&params[offset..offset + d]);
+            offset += d;
+        }
+
+        // cross_attn
+        let (ca, n) = CrossAttention::unflatten_from(&params[offset..],
+            self.config.d_model, self.cross_attn.n_heads());
+        self.cross_attn = ca;
+        offset += n;
+
+        // gnn
+        let n = self.gnn.unflatten_from(&params[offset..]);
+        offset += n;
+
+        // xyz_head
+        let (xyz, n) = Linear::unflatten_from(&params[offset..], self.config.d_model, 3);
+        self.xyz_head = xyz;
+        offset += n;
+
+        // conf_head
+        let (conf, n) = Linear::unflatten_from(&params[offset..], self.config.d_model, 1);
+        self.conf_head = conf;
+        offset += n;
+
+        debug_assert_eq!(offset, expected);
+        Ok(())
+    }
+
+    /// Total number of trainable parameters.
+    pub fn param_count(&self) -> usize {
+        self.csi_embed.param_count()
+            + self.config.n_keypoints * self.config.d_model  // keypoint queries
+            + self.cross_attn.param_count()
+            + self.gnn.param_count()
+            + self.xyz_head.param_count()
+            + self.conf_head.param_count()
+    }
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────

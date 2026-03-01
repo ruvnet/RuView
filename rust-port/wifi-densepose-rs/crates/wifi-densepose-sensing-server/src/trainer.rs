@@ -5,6 +5,8 @@
 //! All arithmetic uses f32. No external ML framework dependencies.
 
 use std::path::Path;
+use crate::graph_transformer::{CsiToPoseTransformer, TransformerConfig};
+use crate::dataset;
 
 /// Standard COCO keypoint sigmas for OKS (17 keypoints).
 pub const COCO_KEYPOINT_SIGMAS: [f32; 17] = [
@@ -272,6 +274,25 @@ pub struct TrainingSample {
     pub target_uv: (Vec<f32>, Vec<f32>),
 }
 
+/// Convert a dataset::TrainingSample into a trainer::TrainingSample.
+pub fn from_dataset_sample(ds: &dataset::TrainingSample) -> TrainingSample {
+    let csi_features = ds.csi_window.clone();
+    let target_keypoints: Vec<(f32, f32, f32)> = ds.pose_label.keypoints.to_vec();
+    let target_body_parts: Vec<u8> = ds.pose_label.body_parts.iter()
+        .map(|bp| bp.part_id)
+        .collect();
+    let (tu, tv) = if ds.pose_label.body_parts.is_empty() {
+        (Vec::new(), Vec::new())
+    } else {
+        let u: Vec<f32> = ds.pose_label.body_parts.iter()
+            .flat_map(|bp| bp.u_coords.iter().copied()).collect();
+        let v: Vec<f32> = ds.pose_label.body_parts.iter()
+            .flat_map(|bp| bp.v_coords.iter().copied()).collect();
+        (u, v)
+    };
+    TrainingSample { csi_features, target_keypoints, target_body_parts, target_uv: (tu, tv) }
+}
+
 // ── Checkpoint ─────────────────────────────────────────────────────────────
 
 /// Serializable version of EpochStats for checkpoint storage.
@@ -377,6 +398,10 @@ pub struct Trainer {
     best_val_loss: f32,
     best_epoch: usize,
     epochs_without_improvement: usize,
+    /// When set, predict_keypoints delegates to the transformer's forward().
+    transformer: Option<CsiToPoseTransformer>,
+    /// Transformer config (needed for unflatten during gradient estimation).
+    transformer_config: Option<TransformerConfig>,
 }
 
 impl Trainer {
@@ -389,8 +414,34 @@ impl Trainer {
         Self {
             config, optimizer, scheduler, params, history: Vec::new(),
             best_val_loss: f32::MAX, best_epoch: 0, epochs_without_improvement: 0,
+            transformer: None, transformer_config: None,
         }
     }
+
+    /// Create a trainer backed by the graph transformer. Gradient estimation
+    /// uses central differences on the transformer's flattened weights.
+    pub fn with_transformer(config: TrainerConfig, transformer: CsiToPoseTransformer) -> Self {
+        let params = transformer.flatten_weights();
+        let optimizer = SgdOptimizer::new(config.lr, config.momentum, config.weight_decay);
+        let scheduler = WarmupCosineScheduler::new(
+            config.warmup_epochs, config.lr, config.min_lr, config.epochs,
+        );
+        let tc = transformer.config().clone();
+        Self {
+            config, optimizer, scheduler, params, history: Vec::new(),
+            best_val_loss: f32::MAX, best_epoch: 0, epochs_without_improvement: 0,
+            transformer: Some(transformer), transformer_config: Some(tc),
+        }
+    }
+
+    /// Access the transformer (if any).
+    pub fn transformer(&self) -> Option<&CsiToPoseTransformer> { self.transformer.as_ref() }
+
+    /// Get a mutable reference to the transformer.
+    pub fn transformer_mut(&mut self) -> Option<&mut CsiToPoseTransformer> { self.transformer.as_mut() }
+
+    /// Return current flattened params (transformer or simple).
+    pub fn params(&self) -> &[f32] { &self.params }
 
     pub fn train_epoch(&mut self, samples: &[TrainingSample]) -> EpochStats {
         let epoch = self.history.len();
@@ -400,17 +451,23 @@ impl Trainer {
         let mut acc = LossComponents::default();
         let bs = self.config.batch_size.max(1);
         let nb = (samples.len() + bs - 1) / bs;
+        let tc = self.transformer_config.clone();
 
         for bi in 0..nb {
             let batch = &samples[bi * bs..(bi * bs + bs).min(samples.len())];
             let snap = self.params.clone();
             let w = self.config.loss_weights.clone();
-            let loss_fn = |p: &[f32]| Self::batch_loss(p, batch, &w);
+            let loss_fn = |p: &[f32]| {
+                match &tc {
+                    Some(tconf) => Self::batch_loss_with_transformer(p, batch, &w, tconf),
+                    None => Self::batch_loss(p, batch, &w),
+                }
+            };
             let mut grad = estimate_gradient(loss_fn, &snap, 1e-4);
             clip_gradients(&mut grad, 1.0);
             self.optimizer.step(&mut self.params, &grad);
 
-            let c = Self::batch_loss_components(&self.params, batch);
+            let c = Self::batch_loss_components_impl(&self.params, batch, tc.as_ref());
             acc.keypoint += c.keypoint;
             acc.body_part += c.body_part;
             acc.uv += c.uv;
@@ -447,8 +504,9 @@ impl Trainer {
         let start = std::time::Instant::now();
         for _ in 0..self.config.epochs {
             let mut stats = self.train_epoch(train);
+            let tc = self.transformer_config.clone();
             let val_loss = if !val.is_empty() {
-                let c = Self::batch_loss_components(&self.params, val);
+                let c = Self::batch_loss_components_impl(&self.params, val, tc.as_ref());
                 composite_loss(&c, &self.config.loss_weights)
             } else { stats.train_loss };
             stats.val_loss = val_loss;
@@ -496,15 +554,30 @@ impl Trainer {
     }
 
     fn batch_loss(params: &[f32], batch: &[TrainingSample], w: &LossWeights) -> f32 {
-        composite_loss(&Self::batch_loss_components(params, batch), w)
+        composite_loss(&Self::batch_loss_components_impl(params, batch, None), w)
+    }
+
+    fn batch_loss_with_transformer(
+        params: &[f32], batch: &[TrainingSample], w: &LossWeights, tc: &TransformerConfig,
+    ) -> f32 {
+        composite_loss(&Self::batch_loss_components_impl(params, batch, Some(tc)), w)
     }
 
     fn batch_loss_components(params: &[f32], batch: &[TrainingSample]) -> LossComponents {
+        Self::batch_loss_components_impl(params, batch, None)
+    }
+
+    fn batch_loss_components_impl(
+        params: &[f32], batch: &[TrainingSample], tc: Option<&TransformerConfig>,
+    ) -> LossComponents {
         if batch.is_empty() { return LossComponents::default(); }
         let mut acc = LossComponents::default();
         let mut prev_kp: Option<Vec<(f32, f32, f32)>> = None;
         for sample in batch {
-            let pred_kp = Self::predict_keypoints(params, sample);
+            let pred_kp = match tc {
+                Some(tconf) => Self::predict_keypoints_transformer(params, sample, tconf),
+                None => Self::predict_keypoints(params, sample),
+            };
             acc.keypoint += keypoint_mse(&pred_kp, &sample.target_keypoints);
             let n_parts = 24usize;
             let logits: Vec<f32> = sample.target_body_parts.iter().flat_map(|_| {
@@ -552,13 +625,38 @@ impl Trainer {
         }).collect()
     }
 
+    /// Predict keypoints using the graph transformer. Creates a temporary
+    /// transformer with the given params and runs forward().
+    fn predict_keypoints_transformer(
+        params: &[f32], sample: &TrainingSample, tc: &TransformerConfig,
+    ) -> Vec<(f32, f32, f32)> {
+        let mut t = CsiToPoseTransformer::new(tc.clone());
+        if t.unflatten_weights(params).is_err() {
+            return Self::predict_keypoints(params, sample);
+        }
+        let output = t.forward(&sample.csi_features);
+        output.keypoints
+    }
+
     fn evaluate_metrics(&self, samples: &[TrainingSample]) -> (f32, f32) {
         if samples.is_empty() { return (0.0, 0.0); }
-        let preds: Vec<Vec<_>> = samples.iter().map(|s| Self::predict_keypoints(&self.params, s)).collect();
+        let preds: Vec<Vec<_>> = samples.iter().map(|s| {
+            match &self.transformer_config {
+                Some(tc) => Self::predict_keypoints_transformer(&self.params, s, tc),
+                None => Self::predict_keypoints(&self.params, s),
+            }
+        }).collect();
         let targets: Vec<Vec<_>> = samples.iter().map(|s| s.target_keypoints.clone()).collect();
         let pck = preds.iter().zip(targets.iter())
             .map(|(p, t)| pck_at_threshold(p, t, 0.2)).sum::<f32>() / samples.len() as f32;
         (pck, oks_map(&preds, &targets))
+    }
+
+    /// Sync the internal transformer's weights from the flat params after training.
+    pub fn sync_transformer_weights(&mut self) {
+        if let Some(ref mut t) = self.transformer {
+            let _ = t.unflatten_weights(&self.params);
+        }
     }
 }
 
