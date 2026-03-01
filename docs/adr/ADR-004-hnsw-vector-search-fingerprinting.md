@@ -1,7 +1,9 @@
 # ADR-004: HNSW Vector Search for Signal Fingerprinting
 
 ## Status
-Proposed
+Partially realized by [ADR-024](ADR-024-contrastive-csi-embedding-model.md); extended by [ADR-027](ADR-027-cross-environment-domain-generalization.md)
+
+> **Note:** ADR-024 (AETHER) implements HNSW-compatible fingerprint indices with 4 index types. ADR-027 (MERIDIAN) extends this with domain-disentangled embeddings so fingerprints match across environments, not just within a single room.
 
 ## Date
 2026-02-28

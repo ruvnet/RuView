@@ -49,7 +49,7 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 | [User Guide](docs/user-guide.md) | Step-by-step guide: installation, first run, API usage, hardware setup, training |
 | [WiFi-Mat User Guide](docs/wifi-mat-user-guide.md) | Disaster response module: search & rescue, START triage |
 | [Build Guide](docs/build-guide.md) | Building from source (Rust and Python) |
-| [Architecture Decisions](docs/adr/) | 26 ADRs covering signal processing, training, hardware, security |
+| [Architecture Decisions](docs/adr/) | 27 ADRs covering signal processing, training, hardware, security, domain generalization |
 
 ---
 
@@ -75,6 +75,7 @@ The system learns on its own and gets smarter over time — no hand-tuning, no l
 |---|---------|---------------|
 | 🧠 | **Self-Learning** | Teaches itself from raw WiFi data — no labeled training sets, no cameras needed to bootstrap ([ADR-024](#self-learning-wifi-ai-adr-024)) |
 | 🎯 | **AI Signal Processing** | Attention networks, graph algorithms, and smart compression replace hand-tuned thresholds — adapts to each room automatically ([RuVector](#ai-backbone-ruvector)) |
+| 🌍 | **Works Everywhere** | Train once, deploy in any room — adversarial domain generalization strips environment bias so models transfer across rooms, buildings, and hardware ([ADR-027](#cross-environment-generalization-adr-027)) |
 
 ### Performance & Deployment
 
@@ -107,7 +108,7 @@ Neural Network maps processed signals → 17 body keypoints + vital signs
 Output: real-time pose, breathing rate, heart rate, presence, room fingerprint
 ```
 
-No training cameras required — the [Self-Learning system (ADR-024)](#self-learning-wifi-ai-adr-024) bootstraps from raw WiFi data alone.
+No training cameras required — the [Self-Learning system (ADR-024)](#self-learning-wifi-ai-adr-024) bootstraps from raw WiFi data alone. [MERIDIAN (ADR-027)](#cross-environment-generalization-adr-027) ensures the model works in any room, not just the one it trained in.
 
 ---
 
@@ -511,6 +512,7 @@ The neural pipeline uses a graph transformer with cross-attention to map CSI fea
 | [RuVector Crates](#ruvector-crates) | 11 vendored Rust crates from [ruvector](https://github.com/ruvnet/ruvector): attention, min-cut, solver, GNN, HNSW, temporal compression, sparse inference | [GitHub](https://github.com/ruvnet/ruvector) · [Source](vendor/ruvector/) |
 | [AI Backbone (RuVector)](#ai-backbone-ruvector) | 5 AI capabilities replacing hand-tuned thresholds: attention, graph min-cut, sparse solvers, tiered compression | [crates.io](https://crates.io/crates/wifi-densepose-ruvector) |
 | [Self-Learning WiFi AI (ADR-024)](#self-learning-wifi-ai-adr-024) | Contrastive self-supervised learning, room fingerprinting, anomaly detection, 55 KB model | [ADR-024](docs/adr/ADR-024-contrastive-csi-embedding-model.md) |
+| [Cross-Environment Generalization (ADR-027)](#cross-environment-generalization-adr-027) | Domain-adversarial training, geometry-conditioned inference, hardware normalization, zero-shot deployment | [ADR-027](docs/adr/ADR-027-cross-environment-domain-generalization.md) |
 
 </details>
 

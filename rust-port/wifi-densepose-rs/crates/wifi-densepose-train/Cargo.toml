@@ -1,6 +1,6 @@
 [package]
 name = "wifi-densepose-train"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["rUv <ruv@ruv.net>", "WiFi-DensePose Contributors"]
 license = "MIT OR Apache-2.0"
@@ -27,8 +27,8 @@ cuda = ["tch-backend"]
 
 [dependencies]
 # Internal crates
-wifi-densepose-signal = { version = "0.1.0", path = "../wifi-densepose-signal" }
-wifi-densepose-nn = { version = "0.1.0", path = "../wifi-densepose-nn" }
+wifi-densepose-signal = { version = "0.2.0", path = "../wifi-densepose-signal" }
+wifi-densepose-nn = { version = "0.2.0", path = "../wifi-densepose-nn" }
 
 # Core
 thiserror.workspace = true

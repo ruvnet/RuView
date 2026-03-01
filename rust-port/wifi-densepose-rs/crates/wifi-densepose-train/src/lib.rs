@@ -45,8 +45,13 @@
 
 pub mod config;
 pub mod dataset;
+pub mod domain;
 pub mod error;
+pub mod eval;
+pub mod geometry;
+pub mod rapid_adapt;
 pub mod subcarrier;
+pub mod virtual_aug;
 
 // The following modules use `tch` (PyTorch Rust bindings) for GPU-accelerated
 // training and are only compiled when the `tch-backend` feature is enabled.
@@ -71,6 +76,15 @@ pub use error::{ConfigError, DatasetError, SubcarrierError, TrainError};
 // TrainResult struct from trainer.rs is accessed via trainer::TrainResult.
 pub use error::TrainResult as TrainResultAlias;
 pub use subcarrier::{compute_interp_weights, interpolate_subcarriers, select_subcarriers_by_variance};
+
+// MERIDIAN (ADR-027) re-exports.
+pub use domain::{
+    AdversarialSchedule, DomainClassifier, DomainFactorizer, GradientReversalLayer,
+};
+pub use eval::CrossDomainEvaluator;
+pub use geometry::{FilmLayer, FourierPositionalEncoding, GeometryEncoder, MeridianGeometryConfig};
+pub use rapid_adapt::{AdaptError, AdaptationLoss, AdaptationResult, RapidAdaptation};
+pub use virtual_aug::VirtualDomainAugmentor;
 
 /// Crate version string.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

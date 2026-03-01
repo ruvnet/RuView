@@ -19,7 +19,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["rUv <ruv@ruv.net>", "WiFi-DensePose Contributors"]
 license = "MIT OR Apache-2.0"
@@ -112,16 +112,16 @@ ruvector-attention = "2.0.4"
 
 
 # Internal crates
-wifi-densepose-core = { version = "0.1.0", path = "crates/wifi-densepose-core" }
-wifi-densepose-signal = { version = "0.1.0", path = "crates/wifi-densepose-signal" }
-wifi-densepose-nn = { version = "0.1.0", path = "crates/wifi-densepose-nn" }
-wifi-densepose-api = { version = "0.1.0", path = "crates/wifi-densepose-api" }
-wifi-densepose-db = { version = "0.1.0", path = "crates/wifi-densepose-db" }
-wifi-densepose-config = { version = "0.1.0", path = "crates/wifi-densepose-config" }
-wifi-densepose-hardware = { version = "0.1.0", path = "crates/wifi-densepose-hardware" }
-wifi-densepose-wasm = { version = "0.1.0", path = "crates/wifi-densepose-wasm" }
-wifi-densepose-mat = { version = "0.1.0", path = "crates/wifi-densepose-mat" }
-wifi-densepose-ruvector = { version = "0.1.0", path = "crates/wifi-densepose-ruvector" }
+wifi-densepose-core = { version = "0.2.0", path = "crates/wifi-densepose-core" }
+wifi-densepose-signal = { version = "0.2.0", path = "crates/wifi-densepose-signal" }
+wifi-densepose-nn = { version = "0.2.0", path = "crates/wifi-densepose-nn" }
+wifi-densepose-api = { version = "0.2.0", path = "crates/wifi-densepose-api" }
+wifi-densepose-db = { version = "0.2.0", path = "crates/wifi-densepose-db" }
+wifi-densepose-config = { version = "0.2.0", path = "crates/wifi-densepose-config" }
+wifi-densepose-hardware = { version = "0.2.0", path = "crates/wifi-densepose-hardware" }
+wifi-densepose-wasm = { version = "0.2.0", path = "crates/wifi-densepose-wasm" }
+wifi-densepose-mat = { version = "0.2.0", path = "crates/wifi-densepose-mat" }
+wifi-densepose-ruvector = { version = "0.2.0", path = "crates/wifi-densepose-ruvector" }
 
 [profile.release]
 lto = true
