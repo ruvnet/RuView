@@ -696,15 +696,12 @@ class MacosWifiCollector:
             bufsize=1  # Line buffered
         )
 
-        synth_tx = 0
-        synth_rx = 0
-
         while self._running and self._process and self._process.poll() is None:
             try:
                 line = self._process.stdout.readline()
                 if not line:
                     continue
-                
+
                 line = line.strip()
                 if not line:
                     continue
@@ -714,22 +711,19 @@ class MacosWifiCollector:
                     if "error" in data:
                         logger.error("macOS WiFi utility error: %s", data["error"])
                         continue
-                        
+
                     rssi = float(data.get("rssi", -80.0))
                     noise = float(data.get("noise", -95.0))
-                    
+
                     link_quality = max(0.0, min(1.0, (rssi + 100.0) / 60.0))
-                    
-                    synth_tx += 1500
-                    synth_rx += 3000
-                    
+
                     sample = WifiSample(
                         timestamp=time.time(),
                         rssi_dbm=rssi,
                         noise_dbm=noise,
                         link_quality=link_quality,
-                        tx_bytes=synth_tx,
-                        rx_bytes=synth_rx,
+                        tx_bytes=0,
+                        rx_bytes=0,
                         retry_count=0,
                         interface=self._interface,
                     )
