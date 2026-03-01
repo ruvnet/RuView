@@ -194,6 +194,121 @@ cargo build --release --package wifi-densepose-mat
 cargo test --package wifi-densepose-mat
 ```
 
+## 💓 Vital Sign Detection (ADR-021)
+
+Contactless breathing and heart rate monitoring extracted from WiFi CSI signals using the rvdna (RuVector DNA) signal processing pipeline. All processing runs locally on-device with no raw data leaving the host.
+
+| Capability | Range | Method |
+|------------|-------|--------|
+| **Breathing Rate** | 6-30 BPM (0.1-0.5 Hz band) | Bandpass filter + FFT peak detection |
+| **Heart Rate** | 40-120 BPM (0.8-2.0 Hz band) | Bandpass filter + FFT peak detection |
+| **Sampling Rate** | 20 Hz (ESP32 CSI frames) | Real-time streaming |
+| **Confidence Score** | 0.0-1.0 per vital sign | Spectral coherence + signal quality |
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/vital-signs` | GET | Latest breathing rate, heart rate, and confidence scores |
+| `/ws/sensing` | WebSocket | Real-time stream with `vital_signs` field in each frame |
+
+### Quick Start (Vital Signs)
+
+```bash
+cd rust-port/wifi-densepose-rs
+cargo build --release -p wifi-densepose-sensing-server
+./target/release/sensing-server --source simulate --ui-path ../../ui
+
+# Check vital signs
+curl http://localhost:8080/api/v1/vital-signs
+
+# Save model state as RVF container
+./target/release/sensing-server --source simulate --save-rvf model.rvf
+```
+
+See [ADR-021](docs/adr/ADR-021-vital-sign-detection-rvdna-pipeline.md) for the full signal processing pipeline design.
+
+## 📡 WiFi Scan Domain Layer (ADR-022)
+
+**wifi-densepose-wifiscan**: Multi-BSSID WiFi scanning domain layer for enhanced Windows WiFi sensing (ADR-022). Features an 8-stage pure-Rust signal intelligence pipeline: predictive gating, attention weighting, spatial correlation, motion estimation, breathing extraction, quality gating, fingerprint matching, and orchestration. Transforms multi-AP RSSI data into presence, motion, breathing rate, and posture estimates.
+
+| Stage | Purpose |
+|-------|---------|
+| **Predictive Gating** | Pre-filter scan results using temporal prediction |
+| **Attention Weighting** | Weight BSSIDs by signal relevance |
+| **Spatial Correlation** | Cross-AP spatial signal correlation |
+| **Motion Estimation** | Detect movement from RSSI variance |
+| **Breathing Extraction** | Extract respiratory rate from sub-Hz RSSI oscillations |
+| **Quality Gating** | Reject low-confidence estimates |
+| **Fingerprint Matching** | Location and posture classification via RF fingerprints |
+| **Orchestration** | Fuse all stages into unified sensing output |
+
+**Build & Test:**
+```bash
+cd rust-port/wifi-densepose-rs
+cargo test -p wifi-densepose-wifiscan
+```
+
+See [ADR-022](docs/adr/ADR-022-windows-wifi-enhanced-fidelity-ruvector.md) for the full pipeline design.
+
+## 📦 RVF Model Container Format
+
+The RuVector Format (RVF) packages model weights, HNSW index, metadata, and WASM runtime into a single `.rvf` file for portable, single-file deployment.
+
+| Property | Detail |
+|----------|--------|
+| **Format** | Segment-based binary (magic `0x52564653`) with 64-byte segment headers |
+| **Progressive Loading** | Layer A in <5ms (entry points), Layer B in 100ms-1s (hot adjacency), Layer C (full graph) |
+| **Signing** | Ed25519-signed training proofs for verifiable provenance |
+| **Quantization** | Temperature-tiered (f32/f16/u8) via `rvf-quant` with SIMD distance |
+| **CLI Flags** | `--save-rvf <path>` and `--load-rvf <path>` for model persistence |
+
+An RVF container is a self-contained artifact: no external model files, no Python runtime, no pip dependencies. Load it on any host with the Rust binary.
+
+See [ADR-023](docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md) for the full trained DensePose pipeline.
+
+## 🧬 Training and Fine-Tuning
+
+The DensePose model uses a three-tier data strategy:
+
+1. **Pre-train** on public datasets (MM-Fi, Wi-Pose) for cross-environment generalization. These provide paired WiFi CSI + camera pose labels across diverse environments and subjects.
+2. **Fine-tune** with self-collected ESP32 data using a camera-based teacher model to generate pseudo-labels. Environment-specific multipath patterns are learned at this stage.
+3. **SONA runtime adaptation** via micro-LoRA + EWC++ for continuous on-device learning. The model adapts to furniture changes, new occupants, and seasonal RF propagation shifts without retraining from scratch.
+
+```bash
+# Pre-train on MM-Fi dataset
+cargo run -p wifi-densepose-train -- \
+  --dataset mmfi --epochs 100 --lr 1e-3
+
+# Fine-tune with local ESP32 captures
+cargo run -p wifi-densepose-train -- \
+  --dataset local --fine-tune --base-model pretrained.rvf \
+  --epochs 20 --lr 1e-4 --save-rvf finetuned.rvf
+
+# Enable SONA runtime adaptation (in sensing server)
+./target/release/sensing-server --source esp32 --load-rvf finetuned.rvf --sona-adapt
+```
+
+## 🔩 RuVector Crates
+
+Eleven RuVector crates from `vendor/ruvector/` power the signal intelligence and neural network layers:
+
+| Crate | Description | Used For |
+|-------|-------------|----------|
+| `ruvector-core` | VectorDB, HNSW index, SIMD distance, quantization | Waveform template matching, RVF container I/O |
+| `ruvector-attention` | Scaled dot-product, MoE, PDE, sparse attention | Subcarrier weighting, spatial decoder |
+| `ruvector-gnn` | Graph neural network, graph attention, EWC training | Body-graph reasoning, subcarrier correlation |
+| `ruvector-nervous-system` | PredictiveLayer, OscillatoryRouter, EventBus, Hopfield | CSI preprocessing, frequency band isolation |
+| `ruvector-coherence` | Spectral coherence, HNSW health, Fiedler value | Signal quality scoring, breathing/heartbeat isolation |
+| `ruvector-temporal-tensor` | Tiered temporal compression (8/7/5/3-bit) | CSI frame buffering, vital sign storage |
+| `ruvector-mincut` | Subpolynomial dynamic min-cut | Multi-person assignment |
+| `ruvector-attn-mincut` | Attention-gated min-cut | Noise-suppressed spectrogram |
+| `ruvector-solver` | Sparse Neumann solver O(sqrt(n)) | Subcarrier resampling, Fresnel geometry |
+| `ruvector-graph-transformer` | Proof-gated graph transformer | CSI-to-pose cross-attention |
+| `ruvector-sparse-inference` | PowerInfer-style sparse execution | Edge deployment, low-latency inference |
+
+See `vendor/ruvector/` for the full crate source and documentation.
+
 ## 📋 Table of Contents
 
 <table>
@@ -204,6 +319,11 @@ cargo test --package wifi-densepose-mat
 - [Key Features](#-key-features)
 - [Rust Implementation (v2)](#-rust-implementation-v2)
 - [WiFi-Mat Disaster Response](#-wifi-mat-disaster-response-module)
+- [Vital Sign Detection](#-vital-sign-detection-adr-021)
+- [WiFi Scan Domain Layer](#-wifi-scan-domain-layer-adr-022)
+- [RVF Model Container](#-rvf-model-container-format)
+- [Training and Fine-Tuning](#-training-and-fine-tuning)
+- [RuVector Crates](#-ruvector-crates)
 - [System Architecture](#️-system-architecture)
 - [Installation](#-installation)
   - [Guided Installer (Recommended)](#guided-installer-recommended)
@@ -1020,6 +1140,9 @@ For development without WiFi CSI hardware, use the deterministic reference signa
 
 # Run Rust tests (all use real signal processing, no mocks)
 cd rust-port/wifi-densepose-rs && cargo test --workspace
+
+# Test wifiscan crate
+cargo test -p wifi-densepose-wifiscan
 ```
 
 ### Continuous Integration
@@ -1435,6 +1558,8 @@ SOFTWARE.
 - **WiFi-Mat disaster response** — Ensemble classifier with START triage, scan zone management, API endpoints (ADR-001) — 139 tests
 - **ESP32 CSI hardware parser** — Real binary frame parsing with I/Q extraction, amplitude/phase conversion, stream resync (ADR-012) — 28 tests
 - **313 total Rust tests** — All passing, zero mocks
+- **WiFi scan domain layer (ADR-022)** — Multi-BSSID WiFi scanning with 8-stage pure-Rust signal intelligence pipeline for enhanced Windows WiFi sensing: predictive gating, attention weighting, spatial correlation, motion estimation, breathing extraction, quality gating, fingerprint matching, and orchestration
+- **Vital sign detection pipeline (ADR-021)** — Contactless breathing and heart rate monitoring via rvdna signal processing
 
 ### v2.1.0 — 2026-02-28
 

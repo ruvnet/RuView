@@ -8,6 +8,9 @@
 //!
 //! Replaces both ws_server.py and the Python HTTP server.
 
+mod rvf_container;
+mod vital_signs;
+
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -32,6 +35,9 @@ use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
 use axum::http::HeaderValue;
 use tracing::{info, warn, debug, error};
+
+use rvf_container::{RvfBuilder, RvfContainerInfo, RvfReader, VitalSignConfig};
+use vital_signs::{VitalSignDetector, VitalSigns};
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
@@ -61,6 +67,18 @@ struct Args {
     /// Data source: auto, wifi, esp32, simulate
     #[arg(long, default_value = "auto")]
     source: String,
+
+    /// Run vital sign detection benchmark (1000 frames) and exit
+    #[arg(long)]
+    benchmark: bool,
+
+    /// Load model config from an RVF container at startup
+    #[arg(long, value_name = "PATH")]
+    load_rvf: Option<PathBuf>,
+
+    /// Save current model state as an RVF container on shutdown
+    #[arg(long, value_name = "PATH")]
+    save_rvf: Option<PathBuf>,
 }
 
 // ── Data types ───────────────────────────────────────────────────────────────
@@ -93,6 +111,9 @@ struct SensingUpdate {
     features: FeatureInfo,
     classification: ClassificationInfo,
     signal_field: SignalField,
+    /// Vital sign estimates (breathing rate, heart rate, confidence).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vital_signs: Option<VitalSigns>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,6 +186,14 @@ struct AppStateInner {
     tx: broadcast::Sender<String>,
     total_detections: u64,
     start_time: std::time::Instant,
+    /// Vital sign detector (processes CSI frames to estimate HR/RR).
+    vital_detector: VitalSignDetector,
+    /// Most recent vital sign reading for the REST endpoint.
+    latest_vitals: VitalSigns,
+    /// RVF container info if a model was loaded via `--load-rvf`.
+    rvf_info: Option<RvfContainerInfo>,
+    /// Path to save RVF container on shutdown (set via `--save-rvf`).
+    save_rvf_path: Option<PathBuf>,
 }
 
 type SharedState = Arc<RwLock<AppStateInner>>;
@@ -439,6 +468,12 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
             else if classification.motion_level == "present_still" { 0.3 }
             else { 0.05 };
 
+        let vitals = s.vital_detector.process_frame(
+            &frame.amplitudes,
+            &frame.phases,
+        );
+        s.latest_vitals = vitals.clone();
+
         let update = SensingUpdate {
             msg_type: "sensing_update".to_string(),
             timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
@@ -454,6 +489,7 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
             features,
             classification,
             signal_field: generate_signal_field(rssi_dbm, 1.0, motion_score, tick),
+            vital_signs: Some(vitals),
         };
 
         if let Ok(json) = serde_json::to_string(&update) {
@@ -859,6 +895,43 @@ async fn stream_status(State(state): State<SharedState>) -> Json<serde_json::Val
     }))
 }
 
+async fn vital_signs_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    let vs = &s.latest_vitals;
+    let (br_len, br_cap, hb_len, hb_cap) = s.vital_detector.buffer_status();
+    Json(serde_json::json!({
+        "vital_signs": {
+            "breathing_rate_bpm": vs.breathing_rate_bpm,
+            "heart_rate_bpm": vs.heart_rate_bpm,
+            "breathing_confidence": vs.breathing_confidence,
+            "heartbeat_confidence": vs.heartbeat_confidence,
+            "signal_quality": vs.signal_quality,
+        },
+        "buffer_status": {
+            "breathing_samples": br_len,
+            "breathing_capacity": br_cap,
+            "heartbeat_samples": hb_len,
+            "heartbeat_capacity": hb_cap,
+        },
+        "source": s.source,
+        "tick": s.tick,
+    }))
+}
+
+async fn model_info(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    match &s.rvf_info {
+        Some(info) => Json(serde_json::json!({
+            "status": "loaded",
+            "container": info,
+        })),
+        None => Json(serde_json::json!({
+            "status": "no_model",
+            "message": "No RVF container loaded. Use --load-rvf <path> to load one.",
+        })),
+    }
+}
+
 async fn info_page() -> Html<String> {
     Html(format!(
         "<html><body>\
@@ -867,6 +940,8 @@ async fn info_page() -> Html<String> {
          <ul>\
          <li><a href='/health'>/health</a> — Server health</li>\
          <li><a href='/api/v1/sensing/latest'>/api/v1/sensing/latest</a> — Latest sensing data</li>\
+         <li><a href='/api/v1/vital-signs'>/api/v1/vital-signs</a> — Vital sign estimates (HR/RR)</li>\
+         <li><a href='/api/v1/model/info'>/api/v1/model/info</a> — RVF model container info</li>\
          <li>ws://localhost:8765/ws/sensing — WebSocket stream</li>\
          </ul>\
          </body></html>"
@@ -913,6 +988,12 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         else if classification.motion_level == "present_still" { 0.3 }
                         else { 0.05 };
 
+                    let vitals = s.vital_detector.process_frame(
+                        &frame.amplitudes,
+                        &frame.phases,
+                    );
+                    s.latest_vitals = vitals.clone();
+
                     let update = SensingUpdate {
                         msg_type: "sensing_update".to_string(),
                         timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
@@ -930,6 +1011,7 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         signal_field: generate_signal_field(
                             features.mean_rssi, features.variance, motion_score, tick,
                         ),
+                        vital_signs: Some(vitals),
                     };
 
                     if let Ok(json) = serde_json::to_string(&update) {
@@ -971,6 +1053,12 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
             else if classification.motion_level == "present_still" { 0.3 }
             else { 0.05 };
 
+        let vitals = s.vital_detector.process_frame(
+            &frame.amplitudes,
+            &frame.phases,
+        );
+        s.latest_vitals = vitals.clone();
+
         let update = SensingUpdate {
             msg_type: "sensing_update".to_string(),
             timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
@@ -988,6 +1076,7 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
             signal_field: generate_signal_field(
                 features.mean_rssi, features.variance, motion_score, tick,
             ),
+            vital_signs: Some(vitals),
         };
 
         if update.classification.presence {
@@ -1034,6 +1123,16 @@ async fn main() {
 
     let args = Args::parse();
 
+    // Handle --benchmark mode: run vital sign benchmark and exit
+    if args.benchmark {
+        eprintln!("Running vital sign detection benchmark (1000 frames)...");
+        let (total, per_frame) = vital_signs::run_benchmark(1000);
+        eprintln!();
+        eprintln!("Summary: {} total, {} per frame",
+            format!("{total:?}"), format!("{per_frame:?}"));
+        return;
+    }
+
     info!("WiFi-DensePose Sensing Server (Rust + Axum + RuVector)");
     info!("  HTTP:      http://localhost:{}", args.http_port);
     info!("  WebSocket: ws://localhost:{}/ws/sensing", args.ws_port);
@@ -1062,6 +1161,53 @@ async fn main() {
     info!("Data source: {source}");
 
     // Shared state
+    // Vital sign sample rate derives from tick interval (e.g. 500ms tick => 2 Hz)
+    let vital_sample_rate = 1000.0 / args.tick_ms as f64;
+    info!("Vital sign detector sample rate: {vital_sample_rate:.1} Hz");
+
+    // Load RVF container if --load-rvf was specified
+    let rvf_info = if let Some(ref rvf_path) = args.load_rvf {
+        info!("Loading RVF container from {}", rvf_path.display());
+        match RvfReader::from_file(rvf_path) {
+            Ok(reader) => {
+                let info = reader.info();
+                info!(
+                    "  RVF loaded: {} segments, {} bytes",
+                    info.segment_count, info.total_size
+                );
+                if let Some(ref manifest) = info.manifest {
+                    if let Some(model_id) = manifest.get("model_id") {
+                        info!("  Model ID: {model_id}");
+                    }
+                    if let Some(version) = manifest.get("version") {
+                        info!("  Version:  {version}");
+                    }
+                }
+                if info.has_weights {
+                    if let Some(w) = reader.weights() {
+                        info!("  Weights: {} parameters", w.len());
+                    }
+                }
+                if info.has_vital_config {
+                    info!("  Vital sign config: present");
+                }
+                if info.has_quant_info {
+                    info!("  Quantization info: present");
+                }
+                if info.has_witness {
+                    info!("  Witness/proof: present");
+                }
+                Some(info)
+            }
+            Err(e) => {
+                error!("Failed to load RVF container: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let (tx, _) = broadcast::channel::<String>(256);
     let state: SharedState = Arc::new(RwLock::new(AppStateInner {
         latest_update: None,
@@ -1071,6 +1217,10 @@ async fn main() {
         tx,
         total_detections: 0,
         start_time: std::time::Instant::now(),
+        vital_detector: VitalSignDetector::new(vital_sample_rate),
+        latest_vitals: VitalSigns::default(),
+        rvf_info,
+        save_rvf_path: args.save_rvf.clone(),
     }));
 
     // Start background tasks based on source
@@ -1120,6 +1270,10 @@ async fn main() {
         .route("/api/v1/metrics", get(health_metrics))
         // Sensing endpoints
         .route("/api/v1/sensing/latest", get(latest))
+        // Vital sign endpoints
+        .route("/api/v1/vital-signs", get(vital_signs_endpoint))
+        // RVF model container info
+        .route("/api/v1/model/info", get(model_info))
         // Pose endpoints (WiFi-derived)
         .route("/api/v1/pose/current", get(pose_current))
         .route("/api/v1/pose/stats", get(pose_stats))
@@ -1133,7 +1287,7 @@ async fn main() {
             axum::http::header::CACHE_CONTROL,
             HeaderValue::from_static("no-cache, no-store, must-revalidate"),
         ))
-        .with_state(state);
+        .with_state(state.clone());
 
     let http_addr = SocketAddr::from(([0, 0, 0, 0], args.http_port));
     let http_listener = tokio::net::TcpListener::bind(http_addr).await
@@ -1141,5 +1295,42 @@ async fn main() {
     info!("HTTP server listening on {http_addr}");
     info!("Open http://localhost:{}/ui/index.html in your browser", args.http_port);
 
-    axum::serve(http_listener, http_app).await.unwrap();
+    // Run the HTTP server with graceful shutdown support
+    let shutdown_state = state.clone();
+    let server = axum::serve(http_listener, http_app)
+        .with_graceful_shutdown(async {
+            tokio::signal::ctrl_c()
+                .await
+                .expect("failed to install CTRL+C handler");
+            info!("Shutdown signal received");
+        });
+
+    server.await.unwrap();
+
+    // Save RVF container on shutdown if --save-rvf was specified
+    let s = shutdown_state.read().await;
+    if let Some(ref save_path) = s.save_rvf_path {
+        info!("Saving RVF container to {}", save_path.display());
+        let mut builder = RvfBuilder::new();
+        builder.add_manifest(
+            "wifi-densepose-sensing",
+            env!("CARGO_PKG_VERSION"),
+            "WiFi DensePose sensing model state",
+        );
+        builder.add_metadata(&serde_json::json!({
+            "source": s.source,
+            "total_ticks": s.tick,
+            "total_detections": s.total_detections,
+            "uptime_secs": s.start_time.elapsed().as_secs(),
+        }));
+        builder.add_vital_config(&VitalSignConfig::default());
+        // Save dummy weights (placeholder for real model weights)
+        builder.add_weights(&[0.0f32; 0]);
+        match builder.write_to_file(save_path) {
+            Ok(()) => info!("  RVF saved successfully"),
+            Err(e) => error!("  Failed to save RVF: {e}"),
+        }
+    }
+
+    info!("Server shut down cleanly");
 }

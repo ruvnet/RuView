@@ -5,6 +5,10 @@ edition.workspace = true
 description = "Lightweight Axum server for WiFi sensing UI with RuVector signal processing"
 license.workspace = true
 
+[lib]
+name = "wifi_densepose_sensing_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "sensing-server"
 path = "src/main.rs"
@@ -29,3 +33,6 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # CLI
 clap = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.10"

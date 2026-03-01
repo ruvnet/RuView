@@ -4110,6 +4110,7 @@ dependencies = [
  "futures-util",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tower-http",
  "tracing",
@@ -4195,6 +4196,14 @@ dependencies = [
  "wasm-logger",
  "web-sys",
  "wifi-densepose-mat",
+]
+
+[[package]]
+name = "wifi-densepose-wifiscan"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tracing",
 ]
 
 [[package]]

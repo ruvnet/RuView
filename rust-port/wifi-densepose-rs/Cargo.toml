@@ -13,6 +13,7 @@ members = [
     "crates/wifi-densepose-mat",
     "crates/wifi-densepose-train",
     "crates/wifi-densepose-sensing-server",
+    "crates/wifi-densepose-wifiscan",
 ]
 
 [workspace.package]
@@ -106,6 +107,7 @@ ruvector-attn-mincut = "2.0.4"
 ruvector-temporal-tensor = "2.0.4"
 ruvector-solver = "2.0.4"
 ruvector-attention = "2.0.4"
+
 
 # Internal crates
 wifi-densepose-core = { path = "crates/wifi-densepose-core" }
