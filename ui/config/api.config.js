@@ -107,12 +107,12 @@ export function buildApiUrl(endpoint, params = {}) {
 
 // Helper function to build WebSocket URLs
 export function buildWsUrl(endpoint, params = {}) {
-  // Always use secure WebSocket (wss://) in production or when using HTTPS
+  // Use secure WebSocket (wss://) when serving over HTTPS or on non-localhost
   // Use ws:// only for localhost development
   const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-  const isProduction = window.location.protocol === 'https:' || process.env.NODE_ENV === 'production';
-  const protocol = (isProduction || !isLocalhost) 
-    ? API_CONFIG.WSS_PREFIX 
+  const isSecure = window.location.protocol === 'https:';
+  const protocol = (isSecure || !isLocalhost)
+    ? API_CONFIG.WSS_PREFIX
     : API_CONFIG.WS_PREFIX;
   
   // Use localhost:8000 for WebSocket connections to match FastAPI backend
