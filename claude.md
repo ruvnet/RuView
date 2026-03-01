@@ -89,6 +89,19 @@ All development on: `claude/validate-code-quality-WNrNw`
 - **HNSW**: Enabled
 - **Neural**: Enabled
 
+## Pre-Merge Checklist
+
+Before merging any PR, verify each item applies and is addressed:
+
+1. **Tests pass** — `cargo test` (Rust) and `python -m pytest` (Python) green
+2. **README.md** — Update platform tables, crate descriptions, hardware tables, feature summaries if scope changed
+3. **CHANGELOG.md** — Add entry under `[Unreleased]` with what was added/fixed/changed
+4. **User guide** (`docs/user-guide.md`) — Update if new data sources, CLI flags, or setup steps were added
+5. **ADR index** — Update ADR count in README docs table if a new ADR was created
+6. **Docker Hub image** — Only rebuild if Dockerfile, dependencies, or runtime behavior changed (not needed for platform-gated code that doesn't affect the Linux container)
+7. **Crate publishing** — Only needed if a crate is published to crates.io and its public API changed (workspace-internal crates don't need publishing)
+8. **`.gitignore`** — Add any new build artifacts or binaries
+
 ## Build & Test
 
 ```bash

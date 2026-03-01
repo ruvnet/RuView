@@ -194,6 +194,29 @@ docker run --network host ruvnet/wifi-densepose:latest --source windows --tick-m
 
 See [Tutorial #36](https://github.com/ruvnet/wifi-densepose/issues/36) for a walkthrough.
 
+### macOS WiFi (RSSI Only)
+
+Uses CoreWLAN via a Swift helper binary. macOS Sonoma 14.4+ redacts real BSSIDs; the adapter generates deterministic synthetic MACs so the multi-BSSID pipeline still works.
+
+```bash
+# Compile the Swift helper (once)
+swiftc -O v1/src/sensing/mac_wifi.swift -o mac_wifi
+
+# Run natively
+./target/release/sensing-server --source macos --http-port 3000 --ws-port 3001 --tick-ms 500
+```
+
+See [ADR-025](adr/ADR-025-macos-corewlan-wifi-sensing.md) for details.
+
+### Linux WiFi (RSSI Only)
+
+Uses `iw dev <iface> scan` to capture RSSI. Requires `CAP_NET_ADMIN` (root) for active scans; use `scan dump` for cached results without root.
+
+```bash
+# Run natively (requires root for active scanning)
+sudo ./target/release/sensing-server --source linux --http-port 3000 --ws-port 3001 --tick-ms 500
+```
+
 ### ESP32-S3 (Full CSI)
 
 Real Channel State Information at 20 Hz with 56-192 subcarriers. Required for pose estimation, vital signs, and through-wall sensing.

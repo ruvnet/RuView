@@ -8,7 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- macOS CoreWLAN WiFi sensing adapter with user guide (`a6382fb`)
+- **Cross-platform RSSI adapters** — macOS CoreWLAN (`MacosCoreWlanScanner`) and Linux `iw` (`LinuxIwScanner`) Rust adapters with `#[cfg(target_os)]` gating
+- macOS CoreWLAN Python sensing adapter with Swift helper (`mac_wifi.swift`)
+- macOS synthetic BSSID generation (FNV-1a hash) for Sonoma 14.4+ BSSID redaction
+- Linux `iw dev <iface> scan` parser with freq-to-channel conversion and `scan dump` (no-root) mode
+- ADR-025: macOS CoreWLAN WiFi Sensing (ORCA)
+
+### Fixed
+- Removed synthetic byte counters from Python `MacosWifiCollector` — now reports `tx_bytes=0, rx_bytes=0` instead of fake incrementing values
 
 ---
 
