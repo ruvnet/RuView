@@ -41,6 +41,7 @@ from v1.src.sensing.rssi_collector import (
     LinuxWifiCollector,
     SimulatedCollector,
     WindowsWifiCollector,
+    MacosWifiCollector,
     WifiSample,
     RingBuffer,
 )
@@ -340,12 +341,26 @@ class SensingWebSocketServer:
             except Exception as e:
                 logger.warning("Windows WiFi unavailable (%s), falling back", e)
         elif system == "Linux":
+            # In Docker on Mac, Linux is detected but no wireless extensions exist.
+            # Force SimulatedCollector if /proc/net/wireless doesn't exist.
+            import os
+            if os.path.exists("/proc/net/wireless"):
+                try:
+                    collector = LinuxWifiCollector(sample_rate_hz=10.0)
+                    self.source = "linux_wifi"
+                    return collector
+                except RuntimeError:
+                    logger.warning("Linux WiFi unavailable, falling back")
+            else:
+                logger.warning("Linux detected but /proc/net/wireless missing (likely Docker). Falling back.")
+        elif system == "Darwin":
             try:
-                collector = LinuxWifiCollector(sample_rate_hz=10.0)
-                self.source = "linux_wifi"
+                collector = MacosWifiCollector(sample_rate_hz=10.0)
+                logger.info("Using MacosWifiCollector")
+                self.source = "macos_wifi"
                 return collector
-            except RuntimeError:
-                logger.warning("Linux WiFi unavailable, falling back")
+            except Exception as e:
+                logger.warning("macOS WiFi unavailable (%s), falling back", e)
 
         # 3. Simulated
         logger.info("Using SimulatedCollector")
