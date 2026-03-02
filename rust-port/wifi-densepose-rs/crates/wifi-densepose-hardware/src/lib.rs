@@ -39,6 +39,7 @@ mod error;
 mod esp32_parser;
 pub mod aggregator;
 mod bridge;
+pub mod esp32;
 
 pub use csi_frame::{CsiFrame, CsiMetadata, SubcarrierData, Bandwidth, AntennaConfig};
 pub use error::ParseError;

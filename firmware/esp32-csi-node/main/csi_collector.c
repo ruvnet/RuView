@@ -4,6 +4,11 @@
  *
  * Registers the ESP-IDF WiFi CSI callback and serializes incoming CSI data
  * into the ADR-018 binary frame format for UDP transmission.
+ *
+ * ADR-029 extensions:
+ *   - Channel-hop table for multi-band sensing (channels 1/6/11 by default)
+ *   - Timer-driven channel hopping at configurable dwell intervals
+ *   - NDP frame injection stub for sensing-first TX
  */
 
 #include "csi_collector.h"
@@ -12,6 +17,7 @@
 #include <string.h>
 #include "esp_log.h"
 #include "esp_wifi.h"
+#include "esp_timer.h"
 #include "sdkconfig.h"
 
 static const char *TAG = "csi_collector";
@@ -20,6 +26,23 @@ static uint32_t s_sequence = 0;
 static uint32_t s_cb_count = 0;
 static uint32_t s_send_ok = 0;
 static uint32_t s_send_fail = 0;
+
+/* ---- ADR-029: Channel-hop state ---- */
+
+/** Channel hop table (populated from NVS at boot or via set_hop_table). */
+static uint8_t  s_hop_channels[CSI_HOP_CHANNELS_MAX] = {1, 6, 11, 36, 40, 44};
+
+/** Number of active channels in the hop table. 1 = single-channel (no hop). */
+static uint8_t  s_hop_count   = 1;
+
+/** Dwell time per channel in milliseconds. */
+static uint32_t s_dwell_ms    = 50;
+
+/** Current index into s_hop_channels. */
+static uint8_t  s_hop_index   = 0;
+
+/** Handle for the periodic hop timer. NULL when timer is not running. */
+static esp_timer_handle_t s_hop_timer = NULL;
 
 /**
  * Serialize CSI data into ADR-018 binary frame format.
@@ -173,4 +196,147 @@ void csi_collector_init(void)
 
     ESP_LOGI(TAG, "CSI collection initialized (node_id=%d, channel=%d)",
              CONFIG_CSI_NODE_ID, CONFIG_CSI_WIFI_CHANNEL);
+}
+
+/* ---- ADR-029: Channel hopping ---- */
+
+void csi_collector_set_hop_table(const uint8_t *channels, uint8_t hop_count, uint32_t dwell_ms)
+{
+    if (channels == NULL) {
+        ESP_LOGW(TAG, "csi_collector_set_hop_table: channels is NULL");
+        return;
+    }
+    if (hop_count == 0 || hop_count > CSI_HOP_CHANNELS_MAX) {
+        ESP_LOGW(TAG, "csi_collector_set_hop_table: invalid hop_count=%u (max=%u)",
+                 (unsigned)hop_count, (unsigned)CSI_HOP_CHANNELS_MAX);
+        return;
+    }
+    if (dwell_ms < 10) {
+        ESP_LOGW(TAG, "csi_collector_set_hop_table: dwell_ms=%lu too small, clamping to 10",
+                 (unsigned long)dwell_ms);
+        dwell_ms = 10;
+    }
+
+    memcpy(s_hop_channels, channels, hop_count);
+    s_hop_count = hop_count;
+    s_dwell_ms  = dwell_ms;
+    s_hop_index = 0;
+
+    ESP_LOGI(TAG, "Hop table set: %u channels, dwell=%lu ms", (unsigned)hop_count,
+             (unsigned long)dwell_ms);
+    for (uint8_t i = 0; i < hop_count; i++) {
+        ESP_LOGI(TAG, "  hop[%u] = channel %u", (unsigned)i, (unsigned)channels[i]);
+    }
+}
+
+void csi_hop_next_channel(void)
+{
+    if (s_hop_count <= 1) {
+        /* Single-channel mode: no-op for backward compatibility. */
+        return;
+    }
+
+    s_hop_index = (s_hop_index + 1) % s_hop_count;
+    uint8_t channel = s_hop_channels[s_hop_index];
+
+    /*
+     * esp_wifi_set_channel() changes the primary channel.
+     * The second parameter is the secondary channel offset for HT40;
+     * we use HT20 (no secondary) for sensing.
+     */
+    esp_err_t err = esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Channel hop to %u failed: %s", (unsigned)channel, esp_err_to_name(err));
+    } else if ((s_cb_count % 200) == 0) {
+        /* Periodic log to confirm hopping is working (not every hop). */
+        ESP_LOGI(TAG, "Hopped to channel %u (index %u/%u)",
+                 (unsigned)channel, (unsigned)s_hop_index, (unsigned)s_hop_count);
+    }
+}
+
+/**
+ * Timer callback for channel hopping.
+ * Called every s_dwell_ms milliseconds from the esp_timer context.
+ */
+static void hop_timer_cb(void *arg)
+{
+    (void)arg;
+    csi_hop_next_channel();
+}
+
+void csi_collector_start_hop_timer(void)
+{
+    if (s_hop_count <= 1) {
+        ESP_LOGI(TAG, "Single-channel mode: hop timer not started");
+        return;
+    }
+
+    if (s_hop_timer != NULL) {
+        ESP_LOGW(TAG, "Hop timer already running");
+        return;
+    }
+
+    esp_timer_create_args_t timer_args = {
+        .callback = hop_timer_cb,
+        .arg      = NULL,
+        .name     = "csi_hop",
+    };
+
+    esp_err_t err = esp_timer_create(&timer_args, &s_hop_timer);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create hop timer: %s", esp_err_to_name(err));
+        return;
+    }
+
+    uint64_t period_us = (uint64_t)s_dwell_ms * 1000;
+    err = esp_timer_start_periodic(s_hop_timer, period_us);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start hop timer: %s", esp_err_to_name(err));
+        esp_timer_delete(s_hop_timer);
+        s_hop_timer = NULL;
+        return;
+    }
+
+    ESP_LOGI(TAG, "Hop timer started: period=%lu ms, channels=%u",
+             (unsigned long)s_dwell_ms, (unsigned)s_hop_count);
+}
+
+/* ---- ADR-029: NDP frame injection stub ---- */
+
+esp_err_t csi_inject_ndp_frame(void)
+{
+    /*
+     * TODO: Construct a proper 802.11 Null Data Packet frame.
+     *
+     * A real NDP is preamble-only (~24 us airtime, no payload) and is the
+     * sensing-first TX mechanism described in ADR-029. For now we send a
+     * minimal null-data frame as a placeholder so the API is wired up.
+     *
+     * Frame structure (IEEE 802.11 Null Data):
+     *   FC (2) | Duration (2) | Addr1 (6) | Addr2 (6) | Addr3 (6) | SeqCtl (2)
+     *   = 24 bytes total, no body, no FCS (hardware appends FCS).
+     */
+    uint8_t ndp_frame[24];
+    memset(ndp_frame, 0, sizeof(ndp_frame));
+
+    /* Frame Control: Type=Data (0x02), Subtype=Null (0x04) -> 0x0048 */
+    ndp_frame[0] = 0x48;
+    ndp_frame[1] = 0x00;
+
+    /* Duration: 0 (let hardware fill) */
+
+    /* Addr1 (destination): broadcast */
+    memset(&ndp_frame[4], 0xFF, 6);
+
+    /* Addr2 (source): will be overwritten by hardware with own MAC */
+
+    /* Addr3 (BSSID): broadcast */
+    memset(&ndp_frame[16], 0xFF, 6);
+
+    esp_err_t err = esp_wifi_80211_tx(WIFI_IF_STA, ndp_frame, sizeof(ndp_frame), false);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "NDP inject failed: %s", esp_err_to_name(err));
+    }
+
+    return err;
 }
