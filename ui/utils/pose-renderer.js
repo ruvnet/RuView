@@ -183,31 +183,132 @@ export class PoseRenderer {
     }
   }
 
-  // Keypoints only mode
+  // Keypoints only mode — large colored dots with labels, no skeleton lines
   renderKeypointsMode(poseData, metadata) {
     const persons = poseData.persons || [];
-    
+
     persons.forEach((person, index) => {
       if (person.confidence >= this.config.confidenceThreshold && person.keypoints) {
         this.renderKeypoints(person.keypoints, person.confidence, true);
+
+        // Render bounding box
+        if (this.config.showBoundingBox && person.bbox) {
+          this.renderBoundingBox(person.bbox, person.confidence, index);
+        }
+        if (this.config.showConfidence) {
+          this.renderConfidenceScore(person, index);
+        }
       }
     });
+
+    if (this.config.showZones && poseData.zone_summary) {
+      this.renderZones(poseData.zone_summary);
+    }
   }
 
-  // Heatmap rendering mode
+  // Heatmap rendering mode — Gaussian blobs around each keypoint
   renderHeatmapMode(poseData, metadata) {
-    // This would render a heatmap visualization
-    // For now, fall back to skeleton mode
-    this.logger.debug('Heatmap mode not fully implemented, using skeleton mode');
-    this.renderSkeletonMode(poseData, metadata);
+    const persons = poseData.persons || [];
+
+    persons.forEach((person, personIdx) => {
+      if (person.confidence < this.config.confidenceThreshold || !person.keypoints) return;
+
+      const hue = (personIdx * 60) % 360; // different hue per person
+
+      person.keypoints.forEach((kp) => {
+        if (kp.confidence <= this.config.keypointConfidenceThreshold) return;
+
+        const cx = this.scaleX(kp.x);
+        const cy = this.scaleY(kp.y);
+        const radius = 30 + kp.confidence * 20;
+
+        const grad = this.ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+        grad.addColorStop(0, `hsla(${hue}, 100%, 55%, ${kp.confidence * 0.7})`);
+        grad.addColorStop(0.5, `hsla(${hue}, 100%, 45%, ${kp.confidence * 0.3})`);
+        grad.addColorStop(1, `hsla(${hue}, 100%, 40%, 0)`);
+
+        this.ctx.fillStyle = grad;
+        this.ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
+      });
+
+      // Light skeleton overlay so joints are connected
+      if (person.keypoints) {
+        this.ctx.globalAlpha = 0.25;
+        this.renderSkeleton(person.keypoints, person.confidence);
+        this.ctx.globalAlpha = 1.0;
+      }
+
+      if (this.config.showConfidence) {
+        this.renderConfidenceScore(person, personIdx);
+      }
+    });
+
+    if (this.config.showZones && poseData.zone_summary) {
+      this.renderZones(poseData.zone_summary);
+    }
   }
 
-  // Dense pose rendering mode
+  // Dense pose rendering mode — body region segmentation with filled polygons
   renderDenseMode(poseData, metadata) {
-    // This would render dense pose segmentation
-    // For now, fall back to skeleton mode
-    this.logger.debug('Dense mode not fully implemented, using skeleton mode');
-    this.renderSkeletonMode(poseData, metadata);
+    const persons = poseData.persons || [];
+
+    // Body part groups: [start_kp, end_kp, color]
+    const bodyParts = [
+      { name: 'head',      kps: [0, 1, 2, 3, 4],           color: 'rgba(255, 100, 100, 0.4)' },
+      { name: 'torso',     kps: [5, 6, 12, 11],             color: 'rgba(100, 200, 255, 0.4)' },
+      { name: 'left_arm',  kps: [5, 7, 9],                  color: 'rgba(100, 255, 150, 0.4)' },
+      { name: 'right_arm', kps: [6, 8, 10],                 color: 'rgba(255, 200, 100, 0.4)' },
+      { name: 'left_leg',  kps: [11, 13, 15],               color: 'rgba(200, 100, 255, 0.4)' },
+      { name: 'right_leg', kps: [12, 14, 16],               color: 'rgba(255, 255, 100, 0.4)' },
+    ];
+
+    persons.forEach((person, personIdx) => {
+      if (person.confidence < this.config.confidenceThreshold || !person.keypoints) return;
+
+      const kps = person.keypoints;
+
+      bodyParts.forEach((part) => {
+        // Collect valid keypoints for this body part
+        const points = part.kps
+          .filter(i => kps[i] && kps[i].confidence > this.config.keypointConfidenceThreshold)
+          .map(i => ({ x: this.scaleX(kps[i].x), y: this.scaleY(kps[i].y) }));
+
+        if (points.length < 2) return;
+
+        // Draw filled region with padding around joints
+        this.ctx.fillStyle = part.color;
+        this.ctx.strokeStyle = part.color.replace('0.4', '0.7');
+        this.ctx.lineWidth = 8;
+        this.ctx.lineJoin = 'round';
+        this.ctx.lineCap = 'round';
+
+        // Draw thick path as a "region"
+        this.ctx.beginPath();
+        this.ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+          this.ctx.lineTo(points[i].x, points[i].y);
+        }
+        this.ctx.stroke();
+
+        // Draw circles at each joint to widen the region
+        points.forEach(p => {
+          this.ctx.beginPath();
+          this.ctx.arc(p.x, p.y, 10, 0, Math.PI * 2);
+          this.ctx.fill();
+        });
+      });
+
+      // Subtle keypoint dots on top
+      this.renderKeypoints(kps, person.confidence, false);
+
+      if (this.config.showConfidence) {
+        this.renderConfidenceScore(person, personIdx);
+      }
+    });
+
+    if (this.config.showZones && poseData.zone_summary) {
+      this.renderZones(poseData.zone_summary);
+    }
   }
 
   // Render skeleton connections
