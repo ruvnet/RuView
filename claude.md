@@ -4,13 +4,49 @@
 
 WiFi-based human pose estimation using Channel State Information (CSI).
 Dual codebase: Python v1 (`v1/`) and Rust port (`rust-port/wifi-densepose-rs/`).
-
 ### Key Rust Crates
-- `wifi-densepose-signal` — SOTA signal processing (conjugate mult, Hampel, Fresnel, BVP, spectrogram)
-- `wifi-densepose-train` — Training pipeline with ruvector integration (ADR-016)
-- `wifi-densepose-mat` — Disaster detection module (MAT, multi-AP, triage)
-- `wifi-densepose-nn` — Neural network inference (DensePose head, RCNN)
-- `wifi-densepose-hardware` — ESP32 aggregator, hardware interfaces
+| Crate | Description |
+|-------|-------------|
+| `wifi-densepose-core` | Core types, traits, error types, CSI frame primitives |
+| `wifi-densepose-signal` | SOTA signal processing + RuvSense multistatic sensing (14 modules) |
+| `wifi-densepose-nn` | Neural network inference (ONNX, PyTorch, Candle backends) |
+| `wifi-densepose-train` | Training pipeline with ruvector integration + ruview_metrics |
+| `wifi-densepose-mat` | Mass Casualty Assessment Tool — disaster survivor detection |
+| `wifi-densepose-hardware` | ESP32 aggregator, TDM protocol, channel hopping firmware |
+| `wifi-densepose-ruvector` | RuVector v2.0.4 integration + cross-viewpoint fusion (5 modules) |
+| `wifi-densepose-api` | REST API (Axum) |
+| `wifi-densepose-db` | Database layer (Postgres, SQLite, Redis) |
+| `wifi-densepose-config` | Configuration management |
+| `wifi-densepose-wasm` | WebAssembly bindings for browser deployment |
+| `wifi-densepose-cli` | CLI tool (`wifi-densepose` binary) |
+| `wifi-densepose-sensing-server` | Lightweight Axum server for WiFi sensing UI |
+| `wifi-densepose-wifiscan` | Multi-BSSID WiFi scanning (ADR-022) |
+| `wifi-densepose-vitals` | ESP32 CSI-grade vital sign extraction (ADR-021) |
+
+### RuvSense Modules (`signal/src/ruvsense/`)
+| Module | Purpose |
+|--------|---------|
+| `multiband.rs` | Multi-band CSI frame fusion, cross-channel coherence |
+| `phase_align.rs` | Iterative LO phase offset estimation, circular mean |
+| `multistatic.rs` | Attention-weighted fusion, geometric diversity |
+| `coherence.rs` | Z-score coherence scoring, DriftProfile |
+| `coherence_gate.rs` | Accept/PredictOnly/Reject/Recalibrate gate decisions |
+| `pose_tracker.rs` | 17-keypoint Kalman tracker with AETHER re-ID embeddings |
+| `field_model.rs` | SVD room eigenstructure, perturbation extraction |
+| `tomography.rs` | RF tomography, ISTA L1 solver, voxel grid |
+| `longitudinal.rs` | Welford stats, biomechanics drift detection |
+| `intention.rs` | Pre-movement lead signals (200-500ms) |
+| `cross_room.rs` | Environment fingerprinting, transition graph |
+| `gesture.rs` | DTW template matching gesture classifier |
+| `adversarial.rs` | Physically impossible signal detection, multi-link consistency |
+
+### Cross-Viewpoint Fusion (`ruvector/src/viewpoint/`)
+| Module | Purpose |
+|--------|---------|
+| `attention.rs` | CrossViewpointAttention, GeometricBias, softmax with G_bias |
+| `geometry.rs` | GeometricDiversityIndex, Cramer-Rao bounds, Fisher Information |
+| `coherence.rs` | Phase phasor coherence, hysteresis gate |
+| `fusion.rs` | MultistaticArray aggregate root, domain events |
 
 ### RuVector v2.0.4 Integration (ADR-016 complete, ADR-017 proposed)
 All 5 ruvector crates integrated in workspace:
@@ -21,7 +57,7 @@ All 5 ruvector crates integrated in workspace:
 - `ruvector-attention` → `model.rs` (apply_spatial_attention) + `bvp.rs`
 
 ### Architecture Decisions
-31 ADRs in `docs/adr/` (ADR-001 through ADR-031). Key ones:
+32 ADRs in `docs/adr/` (ADR-001 through ADR-032). Key ones:
 - ADR-014: SOTA signal processing (Accepted)
 - ADR-015: MM-Fi + Wi-Pose training datasets (Accepted)
 - ADR-016: RuVector training pipeline integration (Accepted — complete)
@@ -32,15 +68,21 @@ All 5 ruvector crates integrated in workspace:
 - ADR-029: RuvSense multistatic sensing mode (Proposed)
 - ADR-030: RuvSense persistent field model (Proposed)
 - ADR-031: RuView sensing-first RF mode (Proposed)
+- ADR-032: Multistatic mesh security hardening (Proposed)
 
 ### Build & Test Commands (this repo)
 ```bash
-# Rust — full workspace tests (1,031 tests, ~2 min)
+# Rust — full workspace tests (1,031+ tests, ~2 min)
 cd rust-port/wifi-densepose-rs
 cargo test --workspace --no-default-features
 
 # Rust — single crate check (no GPU needed)
 cargo check -p wifi-densepose-train --no-default-features
+
+# Rust — publish crates (dependency order)
+cargo publish -p wifi-densepose-core --no-default-features
+cargo publish -p wifi-densepose-signal --no-default-features
+# ... see crate publishing order below
 
 # Python — deterministic proof verification (SHA-256)
 python v1/data/proof/verify.py
@@ -48,6 +90,24 @@ python v1/data/proof/verify.py
 # Python — test suite
 cd v1 && python -m pytest tests/ -x -q
 ```
+
+### Crate Publishing Order
+Crates must be published in dependency order:
+1. `wifi-densepose-core` (no internal deps)
+2. `wifi-densepose-vitals` (no internal deps)
+3. `wifi-densepose-wifiscan` (no internal deps)
+4. `wifi-densepose-hardware` (no internal deps)
+5. `wifi-densepose-config` (no internal deps)
+6. `wifi-densepose-db` (no internal deps)
+7. `wifi-densepose-signal` (depends on core)
+8. `wifi-densepose-nn` (no internal deps, workspace only)
+9. `wifi-densepose-ruvector` (no internal deps, workspace only)
+10. `wifi-densepose-train` (depends on signal, nn)
+11. `wifi-densepose-mat` (depends on core, signal, nn)
+12. `wifi-densepose-api` (no internal deps)
+13. `wifi-densepose-wasm` (depends on mat)
+14. `wifi-densepose-sensing-server` (depends on wifiscan)
+15. `wifi-densepose-cli` (depends on mat)
 
 ### Validation & Witness Verification (ADR-028)
 
@@ -95,6 +155,7 @@ python v1/data/proof/verify.py
 
 ### Branch
 Default branch: `main`
+Active feature branch: `ruvsense-full-implementation` (PR #77)
 
 ---
 
@@ -112,8 +173,13 @@ Default branch: `main`
 ## File Organization
 
 - NEVER save to root folder — use the directories below
-- `docs/adr/` — Architecture Decision Records
-- `rust-port/wifi-densepose-rs/crates/` — Rust workspace crates (signal, train, mat, nn, hardware)
+- `docs/adr/` — Architecture Decision Records (32 ADRs)
+- `docs/ddd/` — Domain-Driven Design models
+- `rust-port/wifi-densepose-rs/crates/` — Rust workspace crates (15 crates)
+- `rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/` — RuvSense multistatic modules (14 files)
+- `rust-port/wifi-densepose-rs/crates/wifi-densepose-ruvector/src/viewpoint/` — Cross-viewpoint fusion (5 files)
+- `rust-port/wifi-densepose-rs/crates/wifi-densepose-hardware/src/esp32/` — ESP32 TDM protocol
+- `firmware/esp32-csi-node/main/` — ESP32 C firmware (channel hopping, NVS config, TDM)
 - `v1/src/` — Python source (core, hardware, services, api)
 - `v1/data/proof/` — Deterministic CSI proof bundles
 - `.claude-flow/` — Claude Flow coordination state (committed for team sharing)
@@ -143,13 +209,15 @@ Before merging any PR, verify each item applies and is addressed:
 1. **Rust tests pass** — `cargo test --workspace --no-default-features` (1,031+ passed, 0 failed)
 2. **Python proof passes** — `python v1/data/proof/verify.py` (VERDICT: PASS)
 3. **README.md** — Update platform tables, crate descriptions, hardware tables, feature summaries if scope changed
-4. **CHANGELOG.md** — Add entry under `[Unreleased]` with what was added/fixed/changed
-5. **User guide** (`docs/user-guide.md`) — Update if new data sources, CLI flags, or setup steps were added
-6. **ADR index** — Update ADR count in README docs table if a new ADR was created
-7. **Witness bundle** — Regenerate if tests or proof hash changed: `bash scripts/generate-witness-bundle.sh`
-8. **Docker Hub image** — Only rebuild if Dockerfile, dependencies, or runtime behavior changed
-9. **Crate publishing** — Only needed if a crate is published to crates.io and its public API changed
-10. **`.gitignore`** — Add any new build artifacts or binaries
+4. **CLAUDE.md** — Update crate table, ADR list, module tables, version if scope changed
+5. **CHANGELOG.md** — Add entry under `[Unreleased]` with what was added/fixed/changed
+6. **User guide** (`docs/user-guide.md`) — Update if new data sources, CLI flags, or setup steps were added
+7. **ADR index** — Update ADR count in README docs table if a new ADR was created
+8. **Witness bundle** — Regenerate if tests or proof hash changed: `bash scripts/generate-witness-bundle.sh`
+9. **Docker Hub image** — Only rebuild if Dockerfile, dependencies, or runtime behavior changed
+10. **Crate publishing** — Only needed if a crate is published to crates.io and its public API changed
+11. **`.gitignore`** — Add any new build artifacts or binaries
+12. **Security audit** — Run security review for new modules touching hardware/network boundaries
 
 ## Build & Test
 
