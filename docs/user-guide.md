@@ -484,12 +484,12 @@ The training pipeline is implemented in pure Rust (7,832 lines, zero external ML
 
 The system supports two public WiFi CSI datasets:
 
-| Dataset | Source | Format | Subjects | Environments |
-|---------|--------|--------|----------|-------------|
-| [MM-Fi](https://mmfi.github.io/) | NeurIPS 2023 | `.npy` | 40 | 4 rooms |
-| [Wi-Pose](https://github.com/aiot-lab/Wi-Pose) | AAAI 2024 | `.mat` | 8 | 3 rooms |
+| Dataset | Source | Format | Subjects | Environments | Download |
+|---------|--------|--------|----------|-------------|----------|
+| [MM-Fi](https://ntu-aiot-lab.github.io/mm-fi) | NeurIPS 2023 | `.npy` | 40 | 4 rooms | [GitHub repo](https://github.com/ybhbingo/MMFi_dataset) (Google Drive / Baidu links inside) |
+| [Wi-Pose](https://github.com/NjtechCVLab/Wi-PoseDataset) | Entropy 2023 | `.mat` | 12 | 1 room | [GitHub repo](https://github.com/NjtechCVLab/Wi-PoseDataset) (Google Drive / Baidu links inside) |
 
-Download and place in a `data/` directory.
+Download the dataset files and place them in a `data/` directory.
 
 ### Step 2: Train
 
