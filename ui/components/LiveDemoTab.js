@@ -229,8 +229,8 @@ export class LiveDemoTab {
         flex-direction: column;
         height: 100%;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: #333;
+        background: #0a0f1a;
+        color: #e0e0e0;
       }
 
       .demo-header {
@@ -238,10 +238,10 @@ export class LiveDemoTab {
         justify-content: space-between;
         align-items: center;
         padding: 20px 24px;
-        background: rgba(255, 255, 255, 0.95);
+        background: rgba(15, 20, 35, 0.95);
         backdrop-filter: blur(10px);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-        box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
         position: relative;
         z-index: 10;
       }
@@ -254,10 +254,10 @@ export class LiveDemoTab {
 
       .demo-title h2 {
         margin: 0;
-        color: #333;
+        color: #e0e0e0;
         font-size: 22px;
         font-weight: 700;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #667eea 0%, #a78bfa 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
@@ -268,9 +268,9 @@ export class LiveDemoTab {
         align-items: center;
         gap: 10px;
         padding: 8px 16px;
-        background: rgba(248, 249, 250, 0.8);
+        background: rgba(30, 40, 60, 0.8);
         border-radius: 20px;
-        border: 1px solid rgba(222, 226, 230, 0.5);
+        border: 1px solid rgba(255, 255, 255, 0.1);
       }
 
       .status-indicator {
@@ -304,7 +304,7 @@ export class LiveDemoTab {
       .status-text {
         font-size: 13px;
         font-weight: 500;
-        color: #495057;
+        color: #b0b8c8;
       }
 
       .demo-controls {
@@ -338,19 +338,19 @@ export class LiveDemoTab {
 
       .btn--primary:hover:not(:disabled) {
         transform: translateY(-2px);
-        box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+        box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
       }
 
       .btn--secondary {
-        background: #f8f9fa;
-        color: #495057;
-        border-color: #dee2e6;
+        background: rgba(30, 40, 60, 0.8);
+        color: #b0b8c8;
+        border-color: rgba(255, 255, 255, 0.1);
       }
 
       .btn--secondary:hover:not(:disabled) {
-        background: #e9ecef;
+        background: rgba(40, 50, 75, 0.9);
         transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
       }
 
       .btn:disabled {
@@ -368,19 +368,20 @@ export class LiveDemoTab {
 
       .zone-select {
         padding: 10px 14px;
-        border: 1px solid #dee2e6;
+        border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 8px;
-        background: white;
+        background: rgba(30, 40, 60, 0.8);
+        color: #b0b8c8;
         font-size: 14px;
         cursor: pointer;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
         transition: all 0.2s ease;
       }
 
       .zone-select:focus {
         outline: none;
         border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
       }
 
       .demo-content {
@@ -388,18 +389,17 @@ export class LiveDemoTab {
         flex: 1;
         gap: 24px;
         padding: 24px;
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
+        background: #0a0f1a;
       }
 
       .demo-main {
         flex: 2;
         min-height: 500px;
-        background: white;
+        background: #111827;
         border-radius: 12px;
         overflow: hidden;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(255, 255, 255, 0.06);
       }
 
       .pose-detection-container {
@@ -416,15 +416,15 @@ export class LiveDemoTab {
       }
 
       .metrics-panel, .health-panel, .debug-panel {
-        background: #fff;
-        border: 1px solid #ddd;
+        background: rgba(17, 24, 39, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 8px;
         padding: 15px;
       }
 
       .metrics-panel h4, .health-panel h4, .debug-panel h4 {
         margin: 0 0 15px 0;
-        color: #333;
+        color: #e0e0e0;
         font-size: 14px;
         font-weight: 600;
       }
@@ -438,12 +438,12 @@ export class LiveDemoTab {
       }
 
       .metric label, .health-check label {
-        color: #666;
+        color: #8899aa;
       }
 
       .metric span, .health-check span {
         font-weight: 500;
-        color: #333;
+        color: #c8d0dc;
       }
 
       .debug-actions {
@@ -455,18 +455,20 @@ export class LiveDemoTab {
 
       .debug-info textarea {
         width: 100%;
-        border: 1px solid #ddd;
+        border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 4px;
         padding: 8px;
         font-family: monospace;
         font-size: 11px;
         resize: vertical;
+        background: #0a0f1a;
+        color: #c8d0dc;
       }
 
       .error-display {
-        background: #f8d7da;
-        color: #721c24;
-        border: 1px solid #f5c6cb;
+        background: rgba(220, 53, 69, 0.15);
+        color: #f5a0a8;
+        border: 1px solid rgba(220, 53, 69, 0.3);
         border-radius: 4px;
         padding: 12px;
         margin: 10px 20px;
@@ -479,15 +481,15 @@ export class LiveDemoTab {
 
       /* Pose estimation mode indicator */
       .pose-source-panel {
-        background: #fff;
-        border: 1px solid #ddd;
+        background: rgba(17, 24, 39, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 8px;
         padding: 15px;
       }
 
       .pose-source-panel h4 {
         margin: 0 0 12px 0;
-        color: #333;
+        color: #e0e0e0;
         font-size: 14px;
         font-weight: 600;
       }
@@ -510,40 +512,40 @@ export class LiveDemoTab {
       }
 
       .pose-source-unknown {
-        background: #f0f0f0;
-        color: #6c757d;
-        border: 1px solid #dee2e6;
+        background: rgba(108, 117, 125, 0.15);
+        color: #8899aa;
+        border: 1px solid rgba(108, 117, 125, 0.3);
       }
 
       .pose-source-signal {
-        background: #e8f5e9;
-        color: #2e7d32;
-        border: 1px solid #a5d6a7;
+        background: rgba(0, 204, 136, 0.12);
+        color: #00cc88;
+        border: 1px solid rgba(0, 204, 136, 0.3);
       }
 
       .pose-source-model {
-        background: #e3f2fd;
-        color: #1565c0;
-        border: 1px solid #90caf9;
+        background: rgba(102, 126, 234, 0.12);
+        color: #8ea4f0;
+        border: 1px solid rgba(102, 126, 234, 0.3);
       }
 
       .pose-source-description {
         margin: 0;
         font-size: 11px;
-        color: #666;
+        color: #8899aa;
         line-height: 1.4;
       }
 
       .setup-guide-panel {
-        background: #fff;
-        border: 1px solid #ddd;
+        background: rgba(17, 24, 39, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 8px;
         padding: 15px;
       }
 
       .setup-guide-panel h4 {
         margin: 0 0 12px 0;
-        color: #333;
+        color: #e0e0e0;
         font-size: 14px;
         font-weight: 600;
       }
@@ -560,8 +562,8 @@ export class LiveDemoTab {
         gap: 10px;
         padding: 8px;
         border-radius: 6px;
-        background: #f8f9fa;
-        border: 1px solid #e9ecef;
+        background: rgba(30, 40, 60, 0.6);
+        border: 1px solid rgba(255, 255, 255, 0.06);
       }
 
       .setup-level-icon {
@@ -580,25 +582,26 @@ export class LiveDemoTab {
 
       .setup-level-info strong {
         font-size: 12px;
-        color: #333;
+        color: #c8d0dc;
         display: block;
       }
 
       .setup-level-info p {
         margin: 2px 0 0;
         font-size: 11px;
-        color: #666;
+        color: #8899aa;
       }
 
       .setup-note {
         margin: 10px 0 0;
         font-size: 11px;
-        color: #888;
+        color: #6b7a8d;
         line-height: 1.5;
       }
 
       .setup-note code {
-        background: #f0f0f0;
+        background: rgba(102, 126, 234, 0.12);
+        color: #8ea4f0;
         padding: 1px 4px;
         border-radius: 3px;
         font-size: 10px;
