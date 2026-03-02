@@ -700,7 +700,7 @@ fn compute_p95_max_error(per_kp_errors: &[Vec<f32>]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::{array, Array1, Array2};
+    use ndarray::{Array1, Array2};
 
     fn make_perfect_kpts() -> (Array2<f32>, Array2<f32>, Array1<f32>) {
         let kp = Array2::from_shape_fn((17, 2), |(j, d)| {
@@ -712,9 +712,11 @@ mod tests {
 
     fn make_noisy_kpts(noise: f32) -> (Array2<f32>, Array2<f32>, Array1<f32>) {
         let gt = Array2::from_shape_fn((17, 2), |(j, d)| {
-            if d == 0 { j as f32 * 0.05 } else { j as f32 * 0.03 }
+            if d == 0 { j as f32 * 0.03 } else { j as f32 * 0.02 }
         });
         let pred = Array2::from_shape_fn((17, 2), |(j, d)| {
+            // Apply deterministic noise that varies per joint so some joints
+            // are definitely outside the PCK threshold.
             gt[[j, d]] + noise * ((j * 7 + d * 3) as f32).sin()
         });
         let vis = Array1::ones(17);
@@ -749,7 +751,7 @@ mod tests {
 
     #[test]
     fn joint_error_noisy_predictions_lower_pck() {
-        let (pred, gt, vis) = make_noisy_kpts(0.1);
+        let (pred, gt, vis) = make_noisy_kpts(0.5);
         let result = evaluate_joint_error(
             &[pred],
             &[gt],
