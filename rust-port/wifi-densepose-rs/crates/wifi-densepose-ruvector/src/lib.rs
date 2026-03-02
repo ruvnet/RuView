@@ -28,3 +28,4 @@
 
 pub mod mat;
 pub mod signal;
+pub mod viewpoint;

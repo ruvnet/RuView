@@ -40,6 +40,7 @@ pub mod hampel;
 pub mod hardware_norm;
 pub mod motion;
 pub mod phase_sanitizer;
+pub mod ruvsense;
 pub mod spectrogram;
 pub mod subcarrier_selection;
 
