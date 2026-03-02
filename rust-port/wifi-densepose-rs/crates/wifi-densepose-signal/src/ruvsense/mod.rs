@@ -43,6 +43,10 @@ pub mod intention;
 pub mod longitudinal;
 pub mod tomography;
 
+// ADR-032a: Midstreamer-enhanced sensing
+pub mod temporal_gesture;
+pub mod attractor_drift;
+
 // ADR-029: Core multistatic pipeline
 pub mod coherence;
 pub mod coherence_gate;

@@ -6,7 +6,7 @@ WiFi DensePose turns commodity WiFi signals into real-time human pose estimation
 
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests: 1031+](https://img.shields.io/badge/tests-1031%2B-brightgreen.svg)](https://github.com/ruvnet/wifi-densepose)
+[![Tests: 1100+](https://img.shields.io/badge/tests-1100%2B-brightgreen.svg)](https://github.com/ruvnet/wifi-densepose)
 [![Docker: 132 MB](https://img.shields.io/badge/docker-132%20MB-blue.svg)](https://hub.docker.com/r/ruvnet/wifi-densepose)
 [![Vital Signs](https://img.shields.io/badge/vital%20signs-breathing%20%2B%20heartbeat-red.svg)](#vital-sign-detection)
 [![ESP32 Ready](https://img.shields.io/badge/ESP32--S3-CSI%20streaming-purple.svg)](#esp32-s3-hardware-pipeline)
@@ -49,7 +49,7 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 | [User Guide](docs/user-guide.md) | Step-by-step guide: installation, first run, API usage, hardware setup, training |
 | [WiFi-Mat User Guide](docs/wifi-mat-user-guide.md) | Disaster response module: search & rescue, START triage |
 | [Build Guide](docs/build-guide.md) | Building from source (Rust and Python) |
-| [Architecture Decisions](docs/adr/) | 31 ADRs covering signal processing, training, hardware, security, domain generalization, multistatic sensing |
+| [Architecture Decisions](docs/adr/) | 33 ADRs covering signal processing, training, hardware, security, domain generalization, multistatic sensing, CRV signal-line integration |
 | [DDD Domain Model](docs/ddd/ruvsense-domain-model.md) | RuvSense bounded contexts, aggregates, domain events, and ubiquitous language |
 
 ---
@@ -80,6 +80,7 @@ The system learns on its own and gets smarter over time — no hand-tuning, no l
 | 🎯 | **AI Signal Processing** | Attention networks, graph algorithms, and smart compression replace hand-tuned thresholds — adapts to each room automatically ([RuVector](https://github.com/ruvnet/ruvector)) |
 | 🌍 | **Works Everywhere** | Train once, deploy in any room — adversarial domain generalization strips environment bias so models transfer across rooms, buildings, and hardware ([ADR-027](docs/adr/ADR-027-cross-environment-domain-generalization.md)) |
 | 👁️ | **Cross-Viewpoint Fusion** | Learned attention fuses multiple viewpoints with geometric bias — reduces body occlusion and depth ambiguity that physics prevents any single sensor from solving ([ADR-031](docs/adr/ADR-031-ruview-sensing-first-rf-mode.md)) |
+| 🔮 | **Signal-Line Protocol** | `ruvector-crv` 6-stage CRV pipeline maps CSI sensing to Poincare ball embeddings, GNN topology, SNN temporal encoding, and MinCut partitioning | -- |
 
 ### Performance & Deployment
 
@@ -112,6 +113,8 @@ Coherence Gate: accept/reject measurements → stable for days without tuning
 Signal Processing: Hampel, SpotFi, Fresnel, BVP, spectrogram → clean features
     ↓
 AI Backbone (RuVector): attention, graph algorithms, compression, field model
+    ↓
+Signal-Line Protocol (CRV): 6-stage gestalt → sensory → topology → coherence → search → model
     ↓
 Neural Network: processed signals → 17 body keypoints + vital signs + room model
     ↓
@@ -460,6 +463,48 @@ Pose Tracker + DensePose     17-keypoint Kalman, re-ID via AETHER embeddings
 **DDD Domain Model** — 6 bounded contexts: Multistatic Sensing, Coherence, Pose Tracking, Field Model, Cross-Room Identity, Adversarial Detection. Full specification: [`docs/ddd/ruvsense-domain-model.md`](docs/ddd/ruvsense-domain-model.md).
 
 See the ADR documents for full architectural details, GOAP integration plans, and research references.
+
+</details>
+
+<details>
+<summary><b>🔮 Signal-Line Protocol (CRV)</b></summary>
+
+### 6-Stage CSI Signal Line
+
+Maps the CRV (Coordinate Remote Viewing) signal-line methodology to WiFi CSI processing via `ruvector-crv`:
+
+| Stage | CRV Name | WiFi CSI Mapping | ruvector Component |
+|-------|----------|-----------------|-------------------|
+| I | Ideograms | Raw CSI gestalt (manmade/natural/movement/energy) | Poincare ball hyperbolic embeddings |
+| II | Sensory | Amplitude textures, phase patterns, frequency colors | Multi-head attention vectors |
+| III | Dimensional | AP mesh spatial topology, node geometry | GNN graph topology |
+| IV | Emotional/AOL | Coherence gating — signal vs noise separation | SNN temporal encoding |
+| V | Interrogation | Cross-stage probing — query pose against CSI history | Differentiable search |
+| VI | 3D Model | Composite person estimation, MinCut partitioning | Graph partitioning |
+
+**Cross-Session Convergence**: When multiple AP clusters observe the same person, CRV convergence analysis finds agreement in their signal embeddings — directly mapping to cross-room identity continuity.
+
+```rust
+use wifi_densepose_ruvector::crv::WifiCrvPipeline;
+
+let mut pipeline = WifiCrvPipeline::new(WifiCrvConfig::default());
+pipeline.create_session("room-a", "person-001")?;
+
+// Process CSI frames through 6-stage pipeline
+let result = pipeline.process_csi_frame("room-a", &amplitudes, &phases)?;
+// result.gestalt = Movement, confidence = 0.87
+// result.sensory_embedding = [0.12, -0.34, ...]
+
+// Cross-room identity matching via convergence
+let convergence = pipeline.find_cross_room_convergence("person-001", 0.75)?;
+```
+
+**Architecture**:
+- `CsiGestaltClassifier` — Maps CSI amplitude/phase patterns to 6 gestalt types
+- `CsiSensoryEncoder` — Extracts texture/color/temperature/luminosity features from subcarriers
+- `MeshTopologyEncoder` — Encodes AP mesh as GNN graph (Stage III)
+- `CoherenceAolDetector` — Maps coherence gate states to AOL noise detection (Stage IV)
+- `WifiCrvPipeline` — Orchestrates all 6 stages into unified sensing session
 
 </details>
 
@@ -1539,6 +1584,9 @@ Multistatic sensing, persistent field model, and cross-viewpoint fusion — the 
 - **TDM Hardware Protocol** — ESP32 sensing coordinator: sync beacons, slot scheduling, clock drift compensation (±10ppm), 20 Hz aggregate rate
 - **Channel-Hopping Firmware** — ESP32 firmware extended with hop table, timer-driven channel switching, NDP injection stub; NVS config for all TDM parameters; fully backward-compatible
 - **DDD Domain Model** — 6 bounded contexts, ubiquitous language, aggregate roots, domain events, full event bus specification
+- **`ruvector-crv` 6-stage CRV signal-line integration (ADR-033)** — Maps Coordinate Remote Viewing methodology to WiFi CSI: gestalt classification, sensory encoding, GNN topology, SNN coherence gating, differentiable search, MinCut partitioning; cross-session convergence for multi-room identity continuity
+- **ADR-032 multistatic mesh security hardening** — Bounded calibration buffers, atomic counters, division-by-zero guards, NaN-safe normalization across all multistatic modules
+- **ADR-033 CRV signal-line sensing integration** — Architecture decision record for the 6-stage CRV pipeline mapping to ruvector components
 - **9,000+ lines of new Rust code** across 17 modules with 300+ tests
 - **Security hardened** — Bounded buffers, NaN guards, no panics in public APIs, input validation at all boundaries
 

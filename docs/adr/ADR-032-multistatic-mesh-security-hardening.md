@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | Proposed |
+| **Status** | Accepted |
 | **Date** | 2026-03-01 |
 | **Deciders** | ruv |
 | **Relates to** | ADR-029 (RuvSense Multistatic), ADR-030 (Persistent Field Model), ADR-031 (RuView Sensing-First RF), ADR-018 (ESP32 Implementation), ADR-012 (ESP32 Mesh) |
@@ -403,19 +403,96 @@ Default: 1 (transitional, for backward compatibility during rollout)
 
 ---
 
-## 6. Related ADRs
+## 6. QUIC Transport Layer (ADR-032a Amendment)
 
-| ADR | Relationship |
-|-----|-------------|
-| ADR-029 (RuvSense Multistatic) | **Hardened**: TDM beacon and CSI frame authentication, NDP rate limiting |
-| ADR-030 (Persistent Field Model) | **Protected**: Coherence gate timeout prevents indefinite recalibration; transition log bounded |
-| ADR-031 (RuView RF Mode) | **Hardened**: Authenticated beacons protect cross-viewpoint synchronization |
-| ADR-018 (ESP32 Implementation) | **Extended**: CSI frame header bumped to v2 with SipHash tag; backward-compatible magic check |
-| ADR-012 (ESP32 Mesh) | **Hardened**: Mesh key management, NVS credential zeroing, atomic firmware state |
+### 6.1 Motivation
+
+The original ADR-032 design (Sections 2.1--2.2) uses manual HMAC-SHA256 and SipHash-2-4 over plain UDP. While correct and efficient on constrained ESP32 hardware, this approach has operational drawbacks:
+
+- **Manual key rotation**: Requires custom key exchange protocol and coordinator broadcast.
+- **No congestion control**: Plain UDP has no backpressure; burst CSI traffic can overwhelm the aggregator.
+- **No connection migration**: Node roaming (e.g., repositioning an ESP32) requires manual reconnect.
+- **Duplicate replay-window code**: Custom nonce tracking duplicates QUIC's built-in replay protection.
+
+### 6.2 Decision: Adopt `midstreamer-quic` for Aggregator Uplinks
+
+For aggregator-class nodes (Raspberry Pi, x86 gateway) that have sufficient CPU and memory, replace the manual crypto layer with `midstreamer-quic` v0.1.0, which provides:
+
+| Capability | Manual (ADR-032 original) | QUIC (`midstreamer-quic`) |
+|---|---|---|
+| Authentication | HMAC-SHA256 truncated 8B | TLS 1.3 AEAD (AES-128-GCM) |
+| Frame integrity | SipHash-2-4 tag | QUIC packet-level AEAD |
+| Replay protection | Manual nonce + window | QUIC packet numbers (monotonic) |
+| Key rotation | Custom coordinator broadcast | TLS 1.3 `KeyUpdate` message |
+| Congestion control | None | QUIC cubic/BBR |
+| Connection migration | Not supported | QUIC connection ID migration |
+| Multi-stream | N/A | QUIC streams (beacon, CSI, control) |
+
+**Constrained devices (ESP32-S3) retain the manual crypto path** from Sections 2.1--2.2 as a fallback. The `SecurityMode` enum selects the transport:
+
+```rust
+pub enum SecurityMode {
+    /// Manual HMAC/SipHash over plain UDP (ESP32-S3, ADR-032 original).
+    ManualCrypto,
+    /// QUIC transport with TLS 1.3 (aggregator-class nodes).
+    QuicTransport,
+}
+```
+
+### 6.3 QUIC Stream Mapping
+
+Three dedicated QUIC streams separate traffic by priority:
+
+| Stream ID | Purpose | Direction | Priority |
+|---|---|---|---|
+| 0 | Sync beacons | Coordinator -> Nodes | Highest (TDM timing-critical) |
+| 1 | CSI frames | Nodes -> Aggregator | High (sensing data) |
+| 2 | Control plane | Bidirectional | Normal (config, key rotation, health) |
+
+### 6.4 Additional Midstreamer Integrations
+
+Beyond QUIC transport, three additional midstreamer crates enhance the sensing pipeline:
+
+1. **`midstreamer-scheduler` v0.1.0** -- Replaces manual timer-based TDM slot scheduling with an ultra-low-latency real-time task scheduler. Provides deterministic slot firing with sub-microsecond jitter.
+
+2. **`midstreamer-temporal-compare` v0.1.0** -- Enhances gesture DTW matching (ADR-030 Tier 6) with temporal sequence comparison primitives. Provides optimized Sakoe-Chiba band DTW, LCS, and edit-distance kernels.
+
+3. **`midstreamer-attractor` v0.1.0** -- Enhances longitudinal drift detection (ADR-030 Tier 4) with dynamical systems analysis. Detects phase-space attractor shifts that indicate biomechanical regime changes before they manifest as simple metric drift.
+
+### 6.5 Fallback Strategy
+
+The QUIC transport layer is additive, not a replacement:
+
+- **ESP32-S3 nodes**: Continue using manual HMAC/SipHash over UDP (Sections 2.1--2.2). These devices lack the memory for a full TLS 1.3 stack.
+- **Aggregator nodes**: Use `midstreamer-quic` by default. Fall back to manual crypto if QUIC handshake fails (e.g., network partitions).
+- **Mixed deployments**: The aggregator auto-detects whether an incoming connection is QUIC (by TLS ClientHello) or plain UDP (by magic byte) and routes accordingly.
+
+### 6.6 Acceptance Criteria (QUIC)
+
+| ID | Criterion | Test Method |
+|----|-----------|-------------|
+| Q-1 | QUIC connection established between two nodes within 100ms | Integration test: connect, measure handshake time |
+| Q-2 | Beacon stream delivers beacons with < 1ms jitter | Unit test: send 1000 beacons, measure inter-arrival variance |
+| Q-3 | CSI stream achieves >= 95% of plain UDP throughput | Benchmark: criterion comparison |
+| Q-4 | Connection migration succeeds after simulated IP change | Integration test: rebind, verify stream continuity |
+| Q-5 | Fallback to manual crypto when QUIC unavailable | Unit test: reject QUIC, verify ManualCrypto path |
+| Q-6 | SecurityMode::ManualCrypto produces identical wire format to ADR-032 original | Unit test: byte-level comparison |
 
 ---
 
-## 7. References
+## 7. Related ADRs
+
+| ADR | Relationship |
+|-----|-------------|
+| ADR-029 (RuvSense Multistatic) | **Hardened**: TDM beacon and CSI frame authentication, NDP rate limiting, QUIC transport |
+| ADR-030 (Persistent Field Model) | **Protected**: Coherence gate timeout; transition log bounded; gesture DTW enhanced (midstreamer-temporal-compare); drift detection enhanced (midstreamer-attractor) |
+| ADR-031 (RuView RF Mode) | **Hardened**: Authenticated beacons protect cross-viewpoint synchronization via QUIC streams |
+| ADR-018 (ESP32 Implementation) | **Extended**: CSI frame header bumped to v2 with SipHash tag; backward-compatible magic check |
+| ADR-012 (ESP32 Mesh) | **Hardened**: Mesh key management, NVS credential zeroing, atomic firmware state, QUIC connection migration |
+
+---
+
+## 8. References
 
 1. Aumasson, J.-P. & Bernstein, D.J. (2012). "SipHash: a fast short-input PRF." INDOCRYPT 2012.
 2. Krawczyk, H. et al. (1997). "HMAC: Keyed-Hashing for Message Authentication." RFC 2104.
@@ -423,3 +500,8 @@ Default: 1 (transitional, for backward compatibility during rollout)
 4. Espressif. "ESP32-S3 Technical Reference Manual." Section 26: SHA Accelerator.
 5. Turner, J. (2006). "Token Bucket Rate Limiting." RFC 2697 (adapted).
 6. ADR-029 through ADR-031 (internal).
+7. `midstreamer-quic` v0.1.0 -- QUIC multi-stream support. crates.io.
+8. `midstreamer-scheduler` v0.1.0 -- Ultra-low-latency real-time task scheduler. crates.io.
+9. `midstreamer-temporal-compare` v0.1.0 -- Temporal sequence comparison. crates.io.
+10. `midstreamer-attractor` v0.1.0 -- Dynamical systems analysis. crates.io.
+11. Iyengar, J. & Thomson, M. (2021). "QUIC: A UDP-Based Multiplexed and Secure Transport." RFC 9000.

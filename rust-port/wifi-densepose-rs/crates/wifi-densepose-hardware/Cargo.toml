@@ -36,5 +36,18 @@ tracing = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
+# QUIC transport (ADR-032a)
+midstreamer-quic = { workspace = true }
+# Real-time TDM scheduling (ADR-032a)
+midstreamer-scheduler = { workspace = true }
+# Async runtime
+tokio = { workspace = true }
+
 [dev-dependencies]
 approx = "0.5"
+criterion = { version = "0.5", features = ["html_reports"] }
+tokio = { workspace = true }
+
+[[bench]]
+name = "transport_bench"
+harness = false
