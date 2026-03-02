@@ -875,3 +875,621 @@ RuvSense achieves high-fidelity WiFi DensePose by exploiting three physical leve
 The architecture is incrementally deployable: start with 2 nodes for basic improvement, scale to 4+ for full multistatic sensing. The same software stack runs on ESP32 mesh or Cognitum hardware, with only the CSI input interface changing.
 
 **The winning move is not inventing new WiFi. It is making existing WiFi see better.**
+
+---
+
+## Part II: The Persistent Field Model
+
+*The most exotic capabilities come from treating RF as a persistent world model, not a momentary pose estimate.*
+
+---
+
+## 16. Beyond Pose: RF as Spatial Intelligence
+
+Sections 1-15 treat WiFi as a pose estimator. That is the floor. The ceiling is treating the electromagnetic field as a **persistent, self-updating model of the physical world** — a model that remembers, predicts, and explains.
+
+The shift: instead of asking "where are the keypoints right now?", ask "how has this room changed since yesterday, and what does that change mean?"
+
+This requires three architectural upgrades:
+1. **Field normal modes**: Model the room itself, not just the people in it
+2. **Longitudinal memory**: Store structured embeddings over days/weeks via RuVector
+3. **Coherence as reasoning**: Use coherence gating not just for quality control, but as a semantic signal — when coherence breaks, something meaningful happened
+
+---
+
+## 17. The Seven Exotic Capability Tiers
+
+### Tier 1: Field Normal Modes
+
+The room becomes the thing you model. You learn the stable electromagnetic baseline — the set of propagation paths, reflection coefficients, and interference patterns that exist when nobody is present. This is the **field normal mode**: the eigenstructure of the empty room's channel transfer function.
+
+People and objects become **structured perturbations** to this baseline. A person entering the room does not create a new signal — they perturb existing modes. The perturbation has structure: it is spatially localized (the person is somewhere), spectrally colored (different body parts affect different subcarriers), and temporally smooth (people move continuously).
+
+```rust
+/// Field Normal Mode — the room's electromagnetic eigenstructure
+pub struct FieldNormalMode {
+    /// Baseline CSI per link (measured during empty-room calibration)
+    pub baseline: Vec<Vec<Complex<f32>>>,  // [n_links × n_subcarriers]
+    /// Principal components of baseline variation (temperature, humidity)
+    pub environmental_modes: Vec<Vec<f32>>,  // [n_modes × n_subcarriers]
+    /// Eigenvalues: how much variance each mode explains
+    pub mode_energies: Vec<f32>,
+    /// Timestamp of last baseline update
+    pub calibrated_at: u64,
+    /// Room geometry hash (invalidate if nodes move)
+    pub geometry_hash: u64,
+}
+
+impl FieldNormalMode {
+    /// Compute perturbation: subtract baseline, project out environmental modes.
+    /// What remains is body-caused change.
+    pub fn extract_perturbation(
+        &self,
+        current_csi: &[Vec<Complex<f32>>],
+    ) -> Vec<Vec<f32>> {
+        current_csi.iter().zip(self.baseline.iter()).map(|(curr, base)| {
+            let delta: Vec<f32> = curr.iter().zip(base.iter())
+                .map(|(c, b)| (c - b).norm())
+                .collect();
+
+            // Project out environmental modes (slow drift)
+            let mut residual = delta.clone();
+            for mode in &self.environmental_modes {
+                let projection: f32 = residual.iter().zip(mode.iter())
+                    .map(|(r, m)| r * m).sum();
+                for (r, m) in residual.iter_mut().zip(mode.iter()) {
+                    *r -= projection * m;
+                }
+            }
+            residual  // Pure body perturbation
+        }).collect()
+    }
+}
+```
+
+**Why this matters:** The field normal mode enables a building that **senses itself**. Changes are explained as deltas from baseline. A new chair is a permanent mode shift. A person walking is a transient perturbation. A door opening changes specific path coefficients. The system does not need to be told what changed — it can decompose the change into structural categories.
+
+**RuVector integration:** `ruvector-solver` fits the environmental mode matrix via low-rank SVD. `ruvector-temporal-tensor` stores the baseline history with adaptive quantization.
+
+### Tier 2: Coarse RF Tomography
+
+With multiple viewpoints, you can infer a low-resolution 3D occupancy volume, not just skeleton keypoints.
+
+```
+          Node A
+          ╱    ╲
+        ╱        ╲        Link A→B passes through voxel (2,3)
+      ╱            ╲      Link A→C passes through voxels (2,3), (3,4)
+    ╱    ┌─────┐     ╲    Link B→D passes through voxel (3,3)
+  ╱      │ occ │       ╲
+Node B   │upa- │   Node C    From 12 link attenuations,
+  ╲      │ ncy │       ╱    solve for voxel occupancy
+    ╲    └─────┘     ╱      using ruvector-solver (L1)
+      ╲            ╱
+        ╲        ╱
+          ╲    ╱
+          Node D
+```
+
+This is not a camera. It is a **probabilistic density field** that tells you where mass is, not what it looks like. It stays useful in darkness, smoke, occlusion, and clutter.
+
+```rust
+/// Coarse RF tomography — 3D occupancy from link attenuations
+pub struct RfTomographer {
+    /// 3D voxel grid dimensions
+    pub grid_dims: [usize; 3],  // e.g., [8, 10, 4] for 4m × 5m × 2m at 0.5m resolution
+    /// Voxel size in metres
+    pub voxel_size: f32,  // 0.5m
+    /// Projection matrix: which voxels does each link pass through
+    /// Shape: [n_links × n_voxels], sparse
+    pub projection: Vec<Vec<(usize, f32)>>,  // (voxel_idx, path_weight)
+    /// Regularization strength (sparsity prior)
+    pub lambda: f32,  // default: 0.01
+}
+
+impl RfTomographer {
+    /// Reconstruct occupancy volume from link perturbation magnitudes.
+    /// Uses ruvector-solver for L1-regularized least squares.
+    pub fn reconstruct(
+        &self,
+        link_perturbations: &[f32],  // [n_links], magnitude of body perturbation
+    ) -> Vec<f32> {
+        // Sparse tomographic inversion: find occupancy x such that
+        // ||Ax - b||₂ + λ||x||₁ → min
+        // where A is projection matrix, b is link perturbations
+        let n_voxels = self.grid_dims.iter().product();
+        let solver = NeumannSolver::new(n_voxels, self.lambda);
+        solver.solve_sparse(&self.projection, link_perturbations)
+    }
+}
+```
+
+**Resolution:** With 4 nodes (12 links) and 0.5m voxels, the tomographic grid is 8×10×4 = 320 voxels. 12 measurements for 320 unknowns is severely underdetermined, but L1 regularization exploits sparsity — typically only 5-15 voxels are occupied by a person. At 8+ nodes (56 links), resolution improves to ~0.25m.
+
+### Tier 3: Intention Lead Signals
+
+Subtle pre-movement dynamics appear **before visible motion**. Lean, weight shift, arm tension, center-of-mass displacement. These are not noise — they are the body's preparatory phase for action.
+
+With contrastive embeddings plus temporal memory, you can **predict action onset** early enough to drive safety and robotics applications.
+
+```rust
+/// Intention lead signal detector.
+/// Monitors the embedding trajectory for pre-movement patterns.
+pub struct IntentionDetector {
+    /// Temporal window of AETHER embeddings (last 2 seconds at 20 Hz = 40 frames)
+    pub embedding_history: VecDeque<Vec<f32>>,  // [40 × 128]
+    /// Trained classifiers for pre-movement signatures
+    pub lean_classifier: MicroClassifier,
+    pub weight_shift_classifier: MicroClassifier,
+    pub reach_intent_classifier: MicroClassifier,
+    /// Lead time budget: how far ahead we predict (ms)
+    pub max_lead_ms: u32,  // default: 500ms
+}
+
+impl IntentionDetector {
+    /// Detect pre-movement intention from embedding trajectory.
+    /// Returns predicted action and time-to-onset.
+    pub fn detect(&self) -> Option<IntentionSignal> {
+        let trajectory = self.compute_trajectory_features();
+
+        // Pre-movement signatures:
+        // 1. Embedding velocity increases before visible motion
+        // 2. Embedding curvature changes (trajectory bends toward action cluster)
+        // 3. Subcarrier variance pattern matches stored pre-action templates
+
+        let lean = self.lean_classifier.score(&trajectory);
+        let shift = self.weight_shift_classifier.score(&trajectory);
+        let reach = self.reach_intent_classifier.score(&trajectory);
+
+        let best = [
+            (lean, IntentionType::Lean),
+            (shift, IntentionType::WeightShift),
+            (reach, IntentionType::Reach),
+        ].iter().max_by(|a, b| a.0.partial_cmp(&b.0).unwrap())?;
+
+        if best.0 > 0.7 {
+            Some(IntentionSignal {
+                intent_type: best.1,
+                confidence: best.0,
+                estimated_lead_ms: self.estimate_lead_time(&trajectory),
+            })
+        } else {
+            None
+        }
+    }
+}
+```
+
+**How much lead time is realistic?** Research on anticipatory postural adjustments shows 200-500ms of preparatory muscle activation before voluntary movement. At 20 Hz with 2-second embedding history, we observe 4-10 frames of pre-movement dynamics. Contrastive pre-training teaches the encoder to separate pre-movement from noise.
+
+### Tier 4: Longitudinal Biomechanics Drift
+
+Not diagnosis. **Drift.** You build a personal baseline for gait symmetry, stability, breathing regularity, and micro-tremor, then detect meaningful deviation over days.
+
+RuVector is the memory and the audit trail.
+
+```rust
+/// Personal biomechanics baseline — stores longitudinal embedding statistics
+pub struct PersonalBaseline {
+    pub person_id: PersonId,
+    /// Per-metric rolling statistics (Welford online algorithm)
+    pub gait_symmetry: WelfordStats,      // left-right step ratio
+    pub stability_index: WelfordStats,    // center-of-mass sway area
+    pub breathing_regularity: WelfordStats, // coefficient of variation of breath interval
+    pub micro_tremor: WelfordStats,       // high-frequency (4-12 Hz) limb oscillation power
+    pub activity_level: WelfordStats,     // average movement energy per hour
+    /// Embedding centroid (EMA, 128-dim)
+    pub embedding_centroid: Vec<f32>,
+    /// Days of data accumulated
+    pub observation_days: u32,
+    /// Last update timestamp
+    pub updated_at: u64,
+}
+
+/// Drift detection result
+pub struct DriftReport {
+    pub person_id: PersonId,
+    pub metric: DriftMetric,
+    /// How many standard deviations from personal baseline
+    pub z_score: f32,
+    /// Direction of change
+    pub direction: DriftDirection,  // Increasing / Decreasing
+    /// Duration over which drift occurred
+    pub window_days: u32,
+    /// Confidence that this is a real change (not noise)
+    pub confidence: f32,
+    /// Supporting evidence: stored embeddings bracketing the change
+    pub evidence_embeddings: Vec<(u64, Vec<f32>)>,
+}
+
+pub enum DriftMetric {
+    GaitSymmetry,
+    StabilityIndex,
+    BreathingRegularity,
+    MicroTremor,
+    ActivityLevel,
+}
+```
+
+**What can be detected (signals, not diagnoses):**
+
+| Signal | Physiological Proxy | Detectable Via |
+|--------|---------------------|---------------|
+| Gait symmetry shift | Asymmetric loading, injury compensation | Left-right step timing ratio from pose tracks |
+| Stability decrease | Balance degradation | CoM sway area increase (static standing) |
+| Breathing irregularity | Respiratory pattern change | Coefficient of variation in breath interval |
+| Micro-tremor onset | Involuntary oscillation | 4-12 Hz power in limb keypoint FFT |
+| Activity decline | Reduced mobility | Hourly movement energy integral |
+
+**The output:** "Your movement symmetry has shifted 18 percent over 14 days." That is actionable without being diagnostic.
+
+**RuVector integration:** `ruvector-temporal-tensor` stores compressed daily summaries. HNSW indexes embeddings for fast similarity search across the longitudinal record. `ruvector-attention` weights which metrics contribute to the overall drift score.
+
+### Tier 5: Cross-Room Continuity Without Optics
+
+Environment fingerprints plus track graphs let you carry identity continuity across spaces. You can know who moved where without storing images.
+
+```rust
+/// Cross-room identity continuity via environment fingerprinting
+pub struct CrossRoomTracker {
+    /// Per-room AETHER environment fingerprints (HNSW indexed)
+    pub room_index: HnswIndex,
+    /// Per-person embedding profiles (HNSW indexed)
+    pub person_index: HnswIndex,
+    /// Transition graph: room_a → room_b with timestamps
+    pub transitions: Vec<RoomTransition>,
+    /// Active tracks per room
+    pub active_tracks: HashMap<RoomId, Vec<TrackId>>,
+}
+
+pub struct RoomTransition {
+    pub person_id: PersonId,
+    pub from_room: RoomId,
+    pub to_room: RoomId,
+    pub exit_time: u64,
+    pub entry_time: u64,
+    /// Embedding at exit (for matching at entry)
+    pub exit_embedding: Vec<f32>,
+}
+
+impl CrossRoomTracker {
+    /// When a person appears in a new room, match against recent exits.
+    pub fn match_entry(
+        &self,
+        room_id: RoomId,
+        entry_embedding: &[f32],
+        entry_time: u64,
+    ) -> Option<PersonId> {
+        // Search recent exits (within 60 seconds) from adjacent rooms
+        let candidates: Vec<_> = self.transitions.iter()
+            .filter(|t| entry_time - t.exit_time < 60_000_000) // 60s window
+            .collect();
+
+        // HNSW similarity match
+        let best = candidates.iter()
+            .map(|t| {
+                let sim = cosine_similarity(&t.exit_embedding, entry_embedding);
+                (t, sim)
+            })
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+
+        match best {
+            Some((transition, sim)) if sim > 0.80 => Some(transition.person_id),
+            _ => None,
+        }
+    }
+}
+```
+
+**Privacy advantage:** No images are stored. The system stores 128-dimensional embeddings (not reconstructable to appearance) and structural transition events. Identity is established by **behavioral consistency**, not visual recognition.
+
+### Tier 6: Invisible Interaction Layer
+
+A room becomes an interface. Multi-user gesture control that works through clothing, in darkness, with line-of-sight blocked.
+
+The key insight: the same multistatic CSI pipeline that estimates pose can detect **gestural micro-patterns** when the pose is held relatively still. A hand wave, a pointing gesture, a beckoning motion — all produce characteristic CSI perturbation signatures that are person-localized (thanks to the multi-person separator) and geometry-invariant (thanks to MERIDIAN conditioning).
+
+```rust
+/// Gesture recognition from multistatic CSI
+pub struct GestureRecognizer {
+    /// Per-gesture template embeddings (trained contrastively)
+    pub gesture_templates: HashMap<GestureType, Vec<f32>>,  // [128-dim each]
+    /// Temporal window for gesture detection
+    pub window_frames: usize,  // 20 frames = 1 second at 20 Hz
+    /// Minimum confidence for gesture trigger
+    pub trigger_threshold: f32,  // default: 0.8
+}
+
+pub enum GestureType {
+    Wave,
+    Point,
+    Beckon,
+    PushAway,
+    CircularMotion,
+    StandUp,
+    SitDown,
+    Custom(String),
+}
+```
+
+**Multi-user:** Because person separation (§5.4) already isolates each person's CSI contribution, gesture detection runs independently per person. Two people can gesture simultaneously without interference.
+
+### Tier 7: Adversarial and Spoofing Detection
+
+You can detect when the signal looks **physically impossible** given the room model. Coherence gating becomes a **security primitive**, not just a quality check.
+
+```rust
+/// Adversarial signal detector — identifies physically impossible CSI
+pub struct AdversarialDetector {
+    /// Room field normal modes (baseline)
+    pub field_model: FieldNormalMode,
+    /// Physical constraints: maximum possible CSI change per frame
+    pub max_delta_per_frame: f32,  // based on max human velocity
+    /// Subcarrier correlation structure (from room geometry)
+    pub expected_correlation: Vec<Vec<f32>>,  // [n_sub × n_sub]
+}
+
+impl AdversarialDetector {
+    /// Check if a CSI frame is physically plausible.
+    pub fn check(&self, frame: &[Complex<f32>], prev_frame: &[Complex<f32>]) -> SecurityVerdict {
+        // 1. Rate-of-change check: no human can cause faster CSI change
+        let delta = frame_delta_magnitude(frame, prev_frame);
+        if delta > self.max_delta_per_frame {
+            return SecurityVerdict::RateViolation(delta);
+        }
+
+        // 2. Correlation structure check: body perturbations have specific
+        //    cross-subcarrier correlation patterns (from Fresnel zone geometry).
+        //    Injected signals typically lack this structure.
+        let observed_corr = compute_correlation(frame);
+        let structure_score = correlation_similarity(&observed_corr, &self.expected_correlation);
+        if structure_score < 0.5 {
+            return SecurityVerdict::StructureViolation(structure_score);
+        }
+
+        // 3. Multi-link consistency: a real body affects multiple links
+        //    consistently with its position. A spoofed signal on one link
+        //    will be inconsistent with other links.
+        // (Handled at the aggregator level, not per-frame)
+
+        SecurityVerdict::Plausible
+    }
+}
+
+pub enum SecurityVerdict {
+    Plausible,
+    RateViolation(f32),
+    StructureViolation(f32),
+    MultiLinkInconsistency(Vec<usize>),  // which links disagree
+}
+```
+
+**Why multistatic helps security:** To spoof a single-link system, an attacker injects a signal into one receiver. To spoof a multistatic mesh, the attacker must simultaneously inject consistent signals into all receivers — signals that are geometrically consistent with a fake body position. This is physically difficult because each receiver sees a different projection.
+
+---
+
+## 18. Signals, Not Diagnoses
+
+### 18.1 The Regulatory Boundary
+
+RF sensing can capture **biophysical proxies**:
+- Breathing rate variability
+- Gait asymmetry
+- Posture instability
+- Micro-tremor
+- Activity level drift
+- Sleep movement patterns
+
+**Diagnosis** requires:
+1. Clinical gold standard validation
+2. Controlled datasets with IRB approval
+3. Regulatory approval (FDA Class II or III)
+4. Extremely low false positive and false negative rates
+
+Without that, you are in **"risk signal detection"**, not medical diagnosis.
+
+### 18.2 The Three Levels
+
+| Level | What It Is | What It Says | Regulatory Load |
+|-------|-----------|-------------|-----------------|
+| **Level 1: Physiological Monitoring** | Respiratory rate trends, movement stability index, fall likelihood score | "Your breathing rate averaged 18.3 BPM today" | Consumer wellness (low) |
+| **Level 2: Drift Detection** | Change from personal baseline, early anomaly detection | "Your gait symmetry shifted 18% over 14 days" | Consumer wellness (low) |
+| **Level 3: Condition Risk Correlation** | Pattern consistent with respiratory distress, motor instability | "Pattern consistent with increased fall risk" | Clinical decision support (medium-high) |
+
+**What you never say:**
+- "You have Parkinson's."
+- "You have heart failure."
+- "You have Alzheimer's."
+
+### 18.3 The Defensible Pipeline
+
+```
+RF (CSI)
+  → AETHER contrastive embedding
+    → RuVector longitudinal memory
+      → Coherence-gated drift detection
+        → Risk flag with traceable evidence
+```
+
+That gives you: *"Your movement symmetry has shifted 18 percent over 14 days."*
+
+That is actionable without being diagnostic. The evidence chain (stored embeddings, drift statistics, coherence scores) is fully traceable and auditable via RuVector's graph memory.
+
+### 18.4 Path to Regulated Claims
+
+If you ever want to make diagnostic claims:
+
+| Requirement | Status | Effort |
+|-------------|--------|--------|
+| IRB-approved clinical studies | Not started | 6-12 months |
+| Clinically labeled datasets | Not started | Requires clinical partner |
+| Statistical power analysis | Feasible once data exists | 1-2 months |
+| FDA 510(k) or De Novo pathway | Not started | 12-24 months + legal |
+| CE marking (EU MDR) | Not started | 12-18 months |
+
+The opportunity is massive, but the regulatory surface explodes the moment you use the word "diagnosis."
+
+### 18.5 The Decision: Device Classification
+
+| Class | Example | Regulatory Path | Time to Market |
+|-------|---------|----------------|----------------|
+| **Consumer wellness** | Breathing rate tracker, activity monitor | Self-certification, FCC Part 15 only | 3-6 months |
+| **Clinical decision support** | Fall risk alert, respiratory distress pattern | FDA Class II 510(k) or De Novo | 12-24 months |
+| **Regulated medical device** | Diagnostic tool for specific conditions | FDA Class II/III, clinical trials | 24-48 months |
+
+**Recommendation:** Start as consumer wellness device with Level 1-2 signals. Build longitudinal dataset. Pursue FDA pathway only after 12+ months of real-world data proves statistical power.
+
+---
+
+## 19. Appliance Product Categories
+
+Treating RF spatial intelligence as a persistent field model enables appliances that were not possible before because they required cameras, wearables, or invasive sensors.
+
+### 19.1 Invisible Guardian
+
+**Wall-mounted unit that models gait, fall dynamics, and breathing baselines without optics.**
+
+| Attribute | Specification |
+|-----------|--------------|
+| Form factor | Wall puck, 80mm diameter |
+| Nodes | 4 ESP32-S3 pucks per room |
+| Processing | Central hub (RPi 5 or x86) |
+| Power | PoE or USB-C |
+| Storage | Embeddings + deltas only, no images |
+| Privacy | No camera, no microphone, no reconstructable data |
+| Output | Risk flags, drift alerts, occupancy timeline |
+| Vertical | Elderly care, independent living, home health |
+
+**Acceptance test:** Runs locally for 30 days, no camera, detects meaningful environmental or behavioral drift with less than 5% false alarms.
+
+### 19.2 Spatial Digital Twin Node
+
+**Small appliance that builds a live electromagnetic twin of a room.**
+
+Tracks occupancy flow, environmental changes, and structural anomalies. Facilities teams get a time-indexed behavioral map of space usage without video storage risk.
+
+| Attribute | Specification |
+|-----------|--------------|
+| Output | Occupancy heatmap, flow vectors, dwell time, anomaly events |
+| Data retention | 30-day rolling summary, GDPR-compliant |
+| Integration | MQTT/REST API for BMS and CAFM systems |
+| Vertical | Smart buildings, workplace analytics, retail |
+
+### 19.3 Collective Behavior Engine
+
+**Real-time crowd density, clustering, agitation patterns, and flow bottlenecks.**
+
+| Attribute | Specification |
+|-----------|--------------|
+| Scale | 10-100 people per zone |
+| Metrics | Density, flow velocity, dwell clusters, evacuation rate |
+| Latency | <1s for crowd-level metrics |
+| Vertical | Fire safety, event management, transit, retail |
+
+### 19.4 RF Interaction Surface
+
+**Turn any room into a gesture interface. No cameras. Multi-user. Works in darkness or smoke.**
+
+Lighting, media, robotics respond to posture and intent.
+
+| Attribute | Specification |
+|-----------|--------------|
+| Gestures | Wave, point, beckon, push, circle + custom |
+| Multi-user | Up to 4 simultaneous users |
+| Latency | <100ms gesture recognition |
+| Vertical | Smart home, hospitality, accessibility, gaming |
+
+### 19.5 Pre-Incident Drift Monitor
+
+**Detect subtle changes in movement patterns that precede falls or medical instability.**
+
+Not diagnosis. Early warning via longitudinal embedding drift.
+
+| Attribute | Specification |
+|-----------|--------------|
+| Metrics | Gait symmetry, stability index, breathing regularity, micro-tremor |
+| Baseline | 7-day calibration period per person |
+| Alert | When any metric drifts >2σ from personal baseline for >3 days |
+| Evidence | Stored embedding trajectory + statistical report |
+| Vertical | Elderly care, rehabilitation, occupational health |
+
+### 19.6 Cognitum Nervous System Appliance
+
+For the premium lane: always-on, local, coherence-gated, storing structured memory in RuVector.
+
+This appliance was never possible before because we did not have:
+- Small edge embedding models (AETHER on ESP32-S3 or Cognitum)
+- Persistent vector graph memory (RuVector with HNSW)
+- Cheap multistatic RF (ESP32 mesh at $73-91)
+
+---
+
+## 20. Extended Acceptance Tests
+
+### 20.1 Pose Fidelity (Tier 0 — ADR-029)
+
+Two people in a room, 20 Hz, stable tracks for 10 minutes with no identity swaps and low jitter in the torso keypoints.
+
+### 20.2 Longitudinal Stability (Tier 1-4)
+
+**Seven-day run, no manual tuning.** The system:
+1. Flags one real environmental change (furniture moved, door state changed)
+2. Flags one real human drift event (gait asymmetry shift, breathing pattern change)
+3. Produces a traceable explanation using stored embeddings plus graph constraints
+4. Zero false alarms on days with no real change
+
+### 20.3 Appliance Validation (Tier 5-7)
+
+**Thirty-day local run, no camera.** The system:
+1. Detects meaningful environmental or behavioral drift
+2. Less than 5% false alarm rate
+3. Provides traceable evidence chain for every alert
+4. Operates autonomously — no manual calibration after initial setup
+
+---
+
+## 21. Decision Questions (Exotic Tier)
+
+### Q3: Which exotic tier first?
+
+**Recommendation: Field normal modes (Tier 1).**
+
+Rationale:
+- It is the foundation for everything else. Without a room baseline, you cannot detect drift (Tier 4), cross-room transitions (Tier 5), or adversarial signals (Tier 7).
+- It requires no new hardware — just a calibration phase during empty-room periods.
+- It immediately improves pose quality by separating environmental from body-caused CSI variation.
+- It uses `ruvector-solver` (SVD) and `ruvector-temporal-tensor` (baseline storage), both already integrated.
+
+Second priority: **Longitudinal biomechanics drift (Tier 4)**, because it unlocks the Invisible Guardian and Pre-Incident Drift Monitor appliance categories.
+
+Third priority: **Cross-room continuity (Tier 5)**, because it unlocks the Spatial Digital Twin Node.
+
+### Q4: Commodity ESP32 mesh only, or premium Cognitum lane too?
+
+**Recommendation: ESP32 mesh as the primary development and validation platform. Design the software abstraction layer so Cognitum can slot in as a premium SKU without code changes.**
+
+The ESP32 mesh ($73-91) proves the algorithms. The Cognitum lane ($500-1000) proves the fidelity ceiling. Both share the same RuvSense aggregator, AETHER embeddings, and RuVector memory. The only difference is the CSI input quality.
+
+### Q5: Consumer wellness, clinical decision support, or regulated medical device?
+
+**Recommendation: Consumer wellness device first.** Build the longitudinal dataset. Pursue clinical decision support after 12 months of real-world data proves statistical power. Do not attempt regulated medical device claims without a clinical partner and IRB approval.
+
+---
+
+## 22. Conclusion (Extended)
+
+RuvSense is not a pose estimator. It is a **spatial intelligence platform** built on the insight that WiFi RF is a persistent, self-updating model of the physical world.
+
+The architecture decomposes into three layers:
+
+| Layer | Capability | Timeframe |
+|-------|-----------|-----------|
+| **Pose** (§1-15) | Multistatic DensePose at 20 Hz, <30mm jitter, zero ID swaps | 10 weeks |
+| **Field** (§16-17) | Room modeling, drift detection, intention signals, tomography | +8 weeks |
+| **Appliance** (§19) | Product categories: Guardian, Digital Twin, Interaction Surface | +12 weeks |
+
+Each layer builds on the one below. The complete stack — from ESP32 NDP injection to 30-day autonomous drift monitoring — uses no cameras, stores no images, and runs on $73-91 of commodity hardware.
+
+RuVector provides the algorithmic spine: solving, attention, graph partitioning, temporal compression, and coherence gating. AETHER provides the embedding space. MERIDIAN provides domain generalization. The result is a system that remembers rooms, recognizes people, detects drift, and explains change — all through WiFi.
+
+**You can detect signals, not diagnoses. That distinction matters legally, ethically, and technically. But the signals are rich enough to build products that were never possible before.**

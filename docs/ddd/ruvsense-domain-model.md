@@ -591,3 +591,437 @@ pub trait MeshRepository {
 - Re-ID window: Lost tracks eligible for re-identification for 5 seconds
 - Embedding EMA decay: 0.95 (slow adaptation preserves identity across environmental changes)
 - Joint assignment cost must use both position (60%) and embedding (40%) terms
+
+---
+
+## Part II: Persistent Field Model Bounded Contexts (ADR-030)
+
+### Ubiquitous Language (Extended)
+
+| Term | Definition |
+|------|------------|
+| **Field Normal Mode** | The room's electromagnetic eigenstructure — stable propagation baseline when unoccupied |
+| **Body Perturbation** | Structured change to field caused by a person, after environmental drift is removed |
+| **Environmental Mode** | Principal component of baseline variation due to temperature, humidity, time-of-day |
+| **Personal Baseline** | Per-person rolling statistical profile of biophysical proxies over days/weeks |
+| **Drift Event** | Statistically significant deviation from personal baseline (>2sigma for >3 days) |
+| **Drift Report** | Traceable evidence package: z-score, direction, window, supporting embeddings |
+| **Risk Signal** | Actionable observation about biophysical change — not a diagnosis |
+| **Intention Lead Signal** | Pre-movement dynamics (lean, weight shift) detected 200-500ms before visible motion |
+| **Occupancy Volume** | Low-resolution 3D probabilistic density field from RF tomography |
+| **Room Fingerprint** | HNSW-indexed embedding characterizing a room's electromagnetic identity |
+| **Transition Event** | Person exiting one room and entering another, matched by embedding similarity |
+
+---
+
+### 4. Field Model Context
+
+**Responsibility:** Learn and maintain the room's electromagnetic baseline. Decompose all CSI observations into environmental drift, body perturbation, and anomalies. Provide the foundation for all downstream exotic capabilities.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                  Field Model Context                       │
+├──────────────────────────────────────────────────────────┤
+│                                                            │
+│  ┌───────────────┐    ┌───────────────┐                   │
+│  │  Calibration  │    │  Mode         │                   │
+│  │  Collector    │    │  Extractor    │                   │
+│  │  (empty-room  │    │  (SVD on      │                   │
+│  │   CSI frames) │    │   baseline)   │                   │
+│  └───────┬───────┘    └───────┬───────┘                   │
+│          │                    │                            │
+│          └────────┬───────────┘                           │
+│                   ▼                                        │
+│          ┌────────────────┐                               │
+│          │  Perturbation  │                               │
+│          │  Extractor     │                               │
+│          │  (subtract     │                               │
+│          │   baseline +   │──▶ BodyPerturbation           │
+│          │   project out  │                               │
+│          │   env modes)   │                               │
+│          └────────┬───────┘                               │
+│                   │                                        │
+│          ┌────────▼───────┐                               │
+│          │  RF Tomographer│                               │
+│          │  (sparse 3D    │──▶ OccupancyVolume            │
+│          │   inversion)   │                               │
+│          └────────────────┘                               │
+│                                                            │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Aggregates:**
+- `FieldNormalMode` (Aggregate Root)
+
+**Value Objects:**
+- `BodyPerturbation` — Per-link CSI residual after baseline + environmental mode removal
+- `EnvironmentalMode` — One principal component of baseline variation
+- `OccupancyVolume` — 3D voxel grid of estimated mass density
+- `CalibrationStatus` — Fresh / Stale / Expired (based on time since last empty-room)
+
+**Domain Services:**
+- `CalibrationService` — Detects empty-room windows, collects calibration data
+- `ModeExtractionService` — SVD computation for environmental modes
+- `PerturbationService` — Baseline subtraction + mode projection
+- `TomographyService` — Sparse L1 inversion for occupancy volume
+
+**RuVector Integration:**
+- `ruvector-solver` → SVD for mode extraction; L1 for tomographic inversion
+- `ruvector-temporal-tensor` → Baseline history compression
+- `ruvector-attn-mincut` → Mode-subcarrier assignment partitioning
+
+---
+
+### 5. Longitudinal Monitoring Context
+
+**Responsibility:** Maintain per-person biophysical baselines over days/weeks. Detect meaningful drift. Produce traceable evidence reports. Enforce the signals-not-diagnoses boundary.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│             Longitudinal Monitoring Context                 │
+├──────────────────────────────────────────────────────────┤
+│                                                            │
+│  ┌───────────────┐    ┌───────────────┐                   │
+│  │  Metric       │    │  Baseline     │                   │
+│  │  Extractor    │    │  Updater      │                   │
+│  │  (pose → gait,│    │  (Welford     │                   │
+│  │   stability,  │    │   online      │                   │
+│  │   breathing)  │    │   statistics) │                   │
+│  └───────┬───────┘    └───────┬───────┘                   │
+│          │                    │                            │
+│          └────────┬───────────┘                           │
+│                   ▼                                        │
+│          ┌────────────────┐                               │
+│          │  Drift Detector│                               │
+│          │  (z-score vs   │                               │
+│          │   personal     │                               │
+│          │   baseline)    │                               │
+│          └────────┬───────┘                               │
+│                   ▼                                        │
+│          ┌────────────────┐                               │
+│          │  Evidence      │                               │
+│          │  Assembler     │──▶ DriftReport                │
+│          │  (embeddings + │                               │
+│          │   timestamps + │                               │
+│          │   graph links) │                               │
+│          └────────────────┘                               │
+│                                                            │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Aggregates:**
+- `PersonalBaseline` (Aggregate Root)
+
+**Entities:**
+- `DailyMetricSummary` — One day's worth of compressed metric statistics per person
+
+**Value Objects:**
+- `DriftReport` — Evidence package with z-score, direction, window, embeddings
+- `DriftMetric` — GaitSymmetry / StabilityIndex / BreathingRegularity / MicroTremor / ActivityLevel
+- `DriftDirection` — Increasing / Decreasing
+- `MonitoringLevel` — Physiological (Level 1) / Drift (Level 2) / RiskCorrelation (Level 3)
+- `WelfordStats` — Online mean/variance accumulator (count, mean, M2)
+
+**Domain Services:**
+- `MetricExtractionService` — Extract biomechanical proxies from pose tracks
+- `BaselineUpdateService` — Update Welford statistics with daily observations
+- `DriftDetectionService` — Compute z-scores, identify significant deviations
+- `EvidenceAssemblyService` — Package supporting embeddings and graph constraints
+
+**RuVector Integration:**
+- `ruvector-temporal-tensor` → Compressed daily summary storage
+- `ruvector-attention` → Weight metric significance in drift score
+- `ruvector-mincut` → Temporal changepoint detection in metric series
+- HNSW → Similarity search across longitudinal embedding record
+
+**Invariants:**
+- Baseline requires 7+ observation days before drift detection activates
+- Drift alert requires >2sigma deviation sustained for >3 consecutive days
+- Evidence chain must include start/end embeddings bracketing the drift window
+- System never outputs diagnostic language — only metric values and deviations
+- Personal baseline decay: Welford stats use full history (no windowing) for stability
+
+---
+
+### 6. Spatial Identity Context
+
+**Responsibility:** Maintain cross-room identity continuity via environment fingerprinting and transition graphs. Track who is where across spaces without storing images.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│               Spatial Identity Context                     │
+├──────────────────────────────────────────────────────────┤
+│                                                            │
+│  ┌───────────────┐    ┌───────────────┐                   │
+│  │  Room         │    │  Transition   │                   │
+│  │  Fingerprint  │    │  Detector     │                   │
+│  │  Index (HNSW) │    │  (exit/entry  │                   │
+│  └───────┬───────┘    │   events)     │                   │
+│          │            └───────┬───────┘                   │
+│          │                    │                            │
+│          └────────┬───────────┘                           │
+│                   ▼                                        │
+│          ┌────────────────┐                               │
+│          │  Cross-Room    │                               │
+│          │  Matcher       │                               │
+│          │  (exit embed ↔ │──▶ TransitionEvent            │
+│          │   entry embed) │                               │
+│          └────────┬───────┘                               │
+│                   │                                        │
+│          ┌────────▼───────┐                               │
+│          │  Transition    │                               │
+│          │  Graph         │                               │
+│          │  (rooms,       │                               │
+│          │   persons,     │                               │
+│          │   timestamps)  │                               │
+│          └────────────────┘                               │
+│                                                            │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Aggregates:**
+- `SpatialIdentityGraph` (Aggregate Root)
+
+**Entities:**
+- `RoomProfile` — HNSW-indexed electromagnetic fingerprint of a room
+- `PersonSpatialRecord` — Which rooms a person has visited, in order
+
+**Value Objects:**
+- `TransitionEvent` — Person, from_room, to_room, timestamps, embedding similarity
+- `RoomFingerprint` — 128-dim AETHER embedding of the room's CSI profile
+- `SpatialContinuity` — Confidence score for cross-room identity chain
+
+**Domain Services:**
+- `RoomFingerprintService` — Compute and index room electromagnetic profiles
+- `TransitionDetectionService` — Detect exits (track lost near boundary) and entries (new track)
+- `CrossRoomMatchingService` — HNSW similarity between exit and entry embeddings
+- `TransitionGraphService` — Build and query the room-person-time graph
+
+**RuVector Integration:**
+- HNSW → Room and person fingerprint similarity search
+- `ruvector-mincut` → Transition graph partitioning for occupancy analysis
+
+**Invariants:**
+- Cross-room match requires >0.80 cosine similarity AND <60s temporal gap
+- Room fingerprint must be recalculated if mesh topology changes
+- Transition graph edges are immutable once created (append-only audit trail)
+- No image data stored — only 128-dim embeddings and structural events
+
+---
+
+### Domain Events (Extended)
+
+#### Field Model Events
+
+```rust
+pub enum FieldModelEvent {
+    /// Baseline calibration completed (empty room detected and measured)
+    BaselineCalibrated {
+        room_id: RoomId,
+        n_modes: usize,
+        variance_explained: f32,  // fraction of total variance captured
+        timestamp_us: u64,
+    },
+
+    /// Environmental drift detected (baseline shift without body cause)
+    EnvironmentalDriftDetected {
+        room_id: RoomId,
+        magnitude: f32,
+        drift_type: DriftProfile,
+        timestamp_us: u64,
+    },
+
+    /// Anomalous perturbation detected (does not match body or environment)
+    AnomalousPerturbation {
+        room_id: RoomId,
+        anomaly_score: f32,
+        affected_links: Vec<usize>,
+        timestamp_us: u64,
+    },
+
+    /// Occupancy volume updated
+    OccupancyUpdated {
+        room_id: RoomId,
+        occupied_voxels: usize,
+        total_voxels: usize,
+        timestamp_us: u64,
+    },
+}
+```
+
+#### Longitudinal Monitoring Events
+
+```rust
+pub enum LongitudinalEvent {
+    /// Personal baseline established (7-day calibration complete)
+    BaselineEstablished {
+        person_id: PersonId,
+        observation_days: u32,
+        metrics_tracked: Vec<DriftMetric>,
+        timestamp_us: u64,
+    },
+
+    /// Drift detected — biophysical metric significantly changed
+    DriftDetected {
+        person_id: PersonId,
+        report: DriftReport,
+        timestamp_us: u64,
+    },
+
+    /// Drift resolved — metric returned to baseline range
+    DriftResolved {
+        person_id: PersonId,
+        metric: DriftMetric,
+        resolution_days: u32,
+        timestamp_us: u64,
+    },
+
+    /// Daily summary computed for a person
+    DailySummaryComputed {
+        person_id: PersonId,
+        date: u64,  // day timestamp
+        metrics: Vec<(DriftMetric, f32)>,  // metric, today's value
+        timestamp_us: u64,
+    },
+}
+```
+
+#### Spatial Identity Events
+
+```rust
+pub enum SpatialEvent {
+    /// New room fingerprinted
+    RoomFingerprinted {
+        room_id: RoomId,
+        fingerprint_dims: usize,
+        timestamp_us: u64,
+    },
+
+    /// Person transitioned between rooms
+    PersonTransitioned {
+        person_id: PersonId,
+        from_room: RoomId,
+        to_room: RoomId,
+        similarity: f32,
+        gap_duration_ms: u64,
+        timestamp_us: u64,
+    },
+
+    /// Cross-room match failed (new person in destination room)
+    CrossRoomMatchFailed {
+        entry_room: RoomId,
+        entry_embedding: Vec<f32>,
+        candidates_checked: usize,
+        best_similarity: f32,
+        timestamp_us: u64,
+    },
+}
+```
+
+---
+
+### Extended Context Map
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                    RuvSense Full System (ADR-029 + ADR-030)            │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                        │
+│  ┌───────────────┐  FusedFrame  ┌──────────────┐                     │
+│  │  Multistatic  │────────────▶│ Pose Tracking │                     │
+│  │  Sensing      │             │ Context       │                     │
+│  └───────┬───────┘             └───────┬───────┘                     │
+│          │                             │                              │
+│          │                             │ TrackedPose                  │
+│          │                             │                              │
+│          ▼                     ┌───────▼───────┐                     │
+│  ┌───────────────┐             │  Longitudinal │                     │
+│  │  Coherence    │             │  Monitoring   │                     │
+│  │  Context      │             │  Context      │                     │
+│  └───────┬───────┘             └───────┬───────┘                     │
+│          │ Gates                       │ DriftReport                  │
+│          │                             │                              │
+│          ▼                             ▼                              │
+│  ┌───────────────┐             ┌───────────────┐                     │
+│  │  Field Model  │             │  Spatial      │                     │
+│  │  Context      │             │  Identity     │                     │
+│  │  (baseline,   │             │  Context      │                     │
+│  │   modes,      │             │  (cross-room, │                     │
+│  │   tomography) │             │   transitions)│                     │
+│  └───────────────┘             └───────────────┘                     │
+│                                                                        │
+│  ──────────────── Event Bus ──────────────────                       │
+│  SensingEvent | CoherenceEvent | TrackingEvent |                     │
+│  FieldModelEvent | LongitudinalEvent | SpatialEvent                  │
+│                                                                        │
+├──────────────────────────────────────────────────────────────────────┤
+│  UPSTREAM:  wifi-densepose-{hardware, nn, signal}                     │
+│  SIBLINGS:  AETHER (embeddings) | MERIDIAN (geometry) | MAT (triage) │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+**New Relationship Types:**
+- Multistatic Sensing → Field Model: **Partnership** (sensing provides raw CSI; field model provides perturbation extraction)
+- Pose Tracking → Longitudinal Monitoring: **Customer/Supplier** (tracking provides daily pose metrics; monitoring builds baselines)
+- Pose Tracking → Spatial Identity: **Customer/Supplier** (tracking provides track exit/entry events; spatial maintains transition graph)
+- Coherence → Field Model: **Subscriber** (coherence events inform baseline recalibration)
+- Longitudinal Monitoring → Spatial Identity: **Partnership** (person profiles shared for cross-room matching)
+
+---
+
+### Extended Repository Interfaces
+
+```rust
+/// Persists field normal modes and calibration history
+pub trait FieldModelRepository {
+    fn save_baseline(&self, room_id: RoomId, mode: &FieldNormalMode);
+    fn load_baseline(&self, room_id: RoomId) -> Option<FieldNormalMode>;
+    fn list_rooms(&self) -> Vec<RoomId>;
+    fn save_occupancy_snapshot(&self, room_id: RoomId, volume: &OccupancyVolume, timestamp_us: u64);
+}
+
+/// Persists personal baselines and drift history
+pub trait LongitudinalRepository {
+    fn save_baseline(&self, baseline: &PersonalBaseline);
+    fn load_baseline(&self, person_id: &PersonId) -> Option<PersonalBaseline>;
+    fn save_daily_summary(&self, person_id: &PersonId, summary: &DailyMetricSummary);
+    fn load_summaries(&self, person_id: &PersonId, days: u32) -> Vec<DailyMetricSummary>;
+    fn save_drift_report(&self, report: &DriftReport);
+    fn load_drift_history(&self, person_id: &PersonId) -> Vec<DriftReport>;
+}
+
+/// Persists room fingerprints and transition graphs
+pub trait SpatialIdentityRepository {
+    fn save_room_fingerprint(&self, room_id: RoomId, fingerprint: &RoomFingerprint);
+    fn load_room_fingerprint(&self, room_id: RoomId) -> Option<RoomFingerprint>;
+    fn save_transition(&self, transition: &TransitionEvent);
+    fn load_transitions(&self, person_id: &PersonId, window_ms: u64) -> Vec<TransitionEvent>;
+    fn load_room_occupancy(&self, room_id: RoomId) -> Vec<PersonId>;
+}
+```
+
+---
+
+### Extended Invariants
+
+#### Field Model
+- Baseline calibration requires ≥10 minutes of empty-room CSI (≥12,000 frames at 20 Hz)
+- Environmental modes capped at K=5 (more modes overfit to noise)
+- Tomographic inversion only valid with ≥8 links (4 nodes minimum)
+- Baseline expires after 24 hours if not refreshed during quiet period
+- Perturbation energy must be non-negative (enforced by magnitude computation)
+
+#### Longitudinal Monitoring
+- Personal baseline requires ≥7 observation days before drift detection activates
+- Drift alert requires >2sigma deviation sustained for ≥3 consecutive days
+- Evidence chain must include embedding pairs bracketing the drift window
+- Output must never use diagnostic language — only metric values and statistical deviations
+- Daily summaries stored for ≥90 days (rolling retention policy)
+- Welford statistics use full history (no windowing) for maximum stability
+
+#### Spatial Identity
+- Cross-room match requires >0.80 cosine similarity AND <60s temporal gap
+- Room fingerprint recalculated when mesh topology changes (node added/removed/moved)
+- Transition graph is append-only (immutable audit trail)
+- No image data stored — only 128-dim embeddings and structural events
+- Maximum 100 rooms indexed per deployment (HNSW scaling constraint)
