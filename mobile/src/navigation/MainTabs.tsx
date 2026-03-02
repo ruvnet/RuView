@@ -1,10 +1,11 @@
-import React, { Suspense, useEffect, useState } from 'react';
+import React, { Suspense } from 'react';
 import { ActivityIndicator } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { ThemedText } from '../components/ThemedText';
 import { ThemedView } from '../components/ThemedView';
 import { colors } from '../theme/colors';
+import { useMatStore } from '../stores/matStore';
 import { MainTabsParamList } from './types';
 
 const createPlaceholder = (label: string) => {
@@ -74,29 +75,6 @@ const toIconName = (routeName: keyof MainTabsParamList) => {
   }
 };
 
-const getMatAlertCount = async (): Promise<number> => {
-  try {
-    const mod = (await import('../stores/matStore')) as Record<string, unknown>;
-    const candidates = [mod.useMatStore, mod.useStore].filter((candidate) => {
-      return (
-        !!candidate &&
-        typeof candidate === 'function' &&
-        typeof (candidate as { getState?: () => unknown }).getState === 'function'
-      );
-    }) as Array<{ getState: () => { alerts?: unknown[] } }>;
-
-    for (const store of candidates) {
-      const alerts = store.getState().alerts;
-      if (Array.isArray(alerts)) {
-        return alerts.length;
-      }
-    }
-  } catch {
-    return 0;
-  }
-  return 0;
-};
-
 const screens: ReadonlyArray<{ name: keyof MainTabsParamList; component: React.ComponentType }> = [
   { name: 'Live', component: LiveScreen },
   { name: 'Vitals', component: VitalsScreen },
@@ -114,18 +92,7 @@ const Suspended = ({ component: Component }: { component: React.ComponentType })
 );
 
 export const MainTabs = () => {
-  const [matAlertCount, setMatAlertCount] = useState(0);
-
-  useEffect(() => {
-    const readCount = async () => {
-      const count = await getMatAlertCount();
-      setMatAlertCount(count);
-    };
-
-    void readCount();
-    const timer = setInterval(readCount, 2000);
-    return () => clearInterval(timer);
-  }, []);
+  const matAlertCount = useMatStore((state) => state.alerts.length);
 
   return (
     <Tab.Navigator

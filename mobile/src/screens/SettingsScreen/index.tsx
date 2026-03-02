@@ -98,10 +98,11 @@ export const SettingsScreen = () => {
   const intervalSummary = useMemo(() => `${scanInterval}s`, [scanInterval]);
 
   const handleSaveUrl = () => {
-    setServerUrl(draftUrl);
-    apiService.setBaseUrl(draftUrl);
+    const newUrl = draftUrl.trim();
+    setServerUrl(newUrl);
     wsService.disconnect();
-    wsService.connect(draftUrl);
+    wsService.connect(newUrl);
+    apiService.setBaseUrl(newUrl);
   };
 
   const handleOpenGitHub = async () => {
