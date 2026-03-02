@@ -35,6 +35,10 @@ typedef struct {
     uint32_t dwell_ms;                        /**< Dwell time per channel in ms. */
     uint8_t  tdm_slot_index;                  /**< This node's TDM slot index (0-based). */
     uint8_t  tdm_node_count;                  /**< Total nodes in the TDM schedule. */
+
+    /* MAC address filter for CSI source selection (Issue #98) */
+    uint8_t  filter_mac[6];                   /**< Transmitter MAC to accept (all zeros = no filter). */
+    uint8_t  filter_mac_enabled;              /**< 1 = filter active, 0 = accept all. */
 } nvs_config_t;
 
 /**

@@ -26,6 +26,15 @@ static uint32_t s_sequence = 0;
 static uint32_t s_cb_count = 0;
 static uint32_t s_send_ok = 0;
 static uint32_t s_send_fail = 0;
+static uint32_t s_filtered = 0;
+
+/* ---- MAC address filter (Issue #98) ---- */
+
+/** When non-zero, only CSI from s_filter_mac is accepted. */
+static uint8_t s_filter_enabled = 0;
+
+/** The accepted transmitter MAC address (6 bytes). */
+static uint8_t s_filter_mac[6] = {0};
 
 /* ---- ADR-029: Channel-hop state ---- */
 
@@ -124,18 +133,52 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
     return frame_size;
 }
 
+void csi_collector_set_filter_mac(const uint8_t *mac)
+{
+    if (mac == NULL) {
+        s_filter_enabled = 0;
+        memset(s_filter_mac, 0, 6);
+        ESP_LOGI(TAG, "MAC filter disabled — accepting CSI from all transmitters");
+    } else {
+        memcpy(s_filter_mac, mac, 6);
+        s_filter_enabled = 1;
+        ESP_LOGI(TAG, "MAC filter enabled: only accepting %02X:%02X:%02X:%02X:%02X:%02X",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
+    s_filtered = 0;
+}
+
 /**
  * WiFi CSI callback — invoked by ESP-IDF when CSI data is available.
+ *
+ * When a MAC filter is active, frames from non-matching transmitters are
+ * silently dropped to prevent signal mixing in multi-AP environments.
  */
 static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
 {
     (void)ctx;
     s_cb_count++;
 
+    /* ---- MAC address filter (Issue #98) ---- */
+    if (s_filter_enabled) {
+        if (memcmp(info->mac, s_filter_mac, 6) != 0) {
+            s_filtered++;
+            if (s_filtered <= 3 || (s_filtered % 500) == 0) {
+                ESP_LOGD(TAG, "Filtered CSI from %02X:%02X:%02X:%02X:%02X:%02X (dropped %lu)",
+                         info->mac[0], info->mac[1], info->mac[2],
+                         info->mac[3], info->mac[4], info->mac[5],
+                         (unsigned long)s_filtered);
+            }
+            return;
+        }
+    }
+
     if (s_cb_count <= 3 || (s_cb_count % 100) == 0) {
-        ESP_LOGI(TAG, "CSI cb #%lu: len=%d rssi=%d ch=%d",
+        ESP_LOGI(TAG, "CSI cb #%lu: len=%d rssi=%d ch=%d mac=%02X:%02X:%02X:%02X:%02X:%02X",
                  (unsigned long)s_cb_count, info->len,
-                 info->rx_ctrl.rssi, info->rx_ctrl.channel);
+                 info->rx_ctrl.rssi, info->rx_ctrl.channel,
+                 info->mac[0], info->mac[1], info->mac[2],
+                 info->mac[3], info->mac[4], info->mac[5]);
     }
 
     uint8_t frame_buf[CSI_MAX_FRAME_SIZE];

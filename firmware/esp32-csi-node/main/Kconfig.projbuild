@@ -39,4 +39,18 @@ menu "CSI Node Configuration"
         help
             WiFi channel to listen on for CSI data.
 
+    config CSI_FILTER_MAC
+        string "CSI source MAC filter (AA:BB:CC:DD:EE:FF or empty)"
+        default ""
+        help
+            When set to a valid MAC address (e.g. "AA:BB:CC:DD:EE:FF"),
+            only CSI frames from that transmitter are processed. All
+            other frames are silently dropped. This prevents signal
+            mixing in multi-AP environments.
+
+            Leave empty to accept CSI from all transmitters.
+
+            Can be overridden at runtime via NVS key "filter_mac"
+            (6-byte blob) without reflashing.
+
 endmenu

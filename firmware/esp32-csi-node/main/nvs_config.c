@@ -9,6 +9,7 @@
 #include "nvs_config.h"
 
 #include <string.h>
+#include <stdio.h>
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -50,6 +51,29 @@ void nvs_config_load(nvs_config_t *cfg)
     cfg->dwell_ms       = 50;
     cfg->tdm_slot_index = 0;
     cfg->tdm_node_count = 1;
+
+    /* MAC filter: default disabled (all zeros) */
+    memset(cfg->filter_mac, 0, 6);
+    cfg->filter_mac_enabled = 0;
+
+    /* Parse compile-time Kconfig MAC filter if set (format: "AA:BB:CC:DD:EE:FF") */
+#ifdef CONFIG_CSI_FILTER_MAC
+    {
+        const char *mac_str = CONFIG_CSI_FILTER_MAC;
+        unsigned int m[6];
+        if (mac_str[0] != '\0' &&
+            sscanf(mac_str, "%x:%x:%x:%x:%x:%x",
+                   &m[0], &m[1], &m[2], &m[3], &m[4], &m[5]) == 6) {
+            for (int i = 0; i < 6; i++) {
+                cfg->filter_mac[i] = (uint8_t)m[i];
+            }
+            cfg->filter_mac_enabled = 1;
+            ESP_LOGI(TAG, "Kconfig MAC filter: %02X:%02X:%02X:%02X:%02X:%02X",
+                     cfg->filter_mac[0], cfg->filter_mac[1], cfg->filter_mac[2],
+                     cfg->filter_mac[3], cfg->filter_mac[4], cfg->filter_mac[5]);
+        }
+    }
+#endif
 
     /* Try to override from NVS */
     nvs_handle_t handle;
@@ -149,6 +173,27 @@ void nvs_config_load(nvs_config_t *cfg)
             ESP_LOGI(TAG, "NVS override: tdm_node_count=%u", (unsigned)cfg->tdm_node_count);
         } else {
             ESP_LOGW(TAG, "NVS tdm_nodes=%u invalid, ignored", (unsigned)tdm_nodes_val);
+        }
+    }
+
+    /* MAC filter (stored as a 6-byte blob in NVS key "filter_mac") */
+    uint8_t mac_blob[6];
+    size_t mac_len = 6;
+    if (nvs_get_blob(handle, "filter_mac", mac_blob, &mac_len) == ESP_OK && mac_len == 6) {
+        /* Check it's not all zeros (which would mean "no filter") */
+        uint8_t is_zero = 1;
+        for (int i = 0; i < 6; i++) {
+            if (mac_blob[i] != 0) { is_zero = 0; break; }
+        }
+        if (!is_zero) {
+            memcpy(cfg->filter_mac, mac_blob, 6);
+            cfg->filter_mac_enabled = 1;
+            ESP_LOGI(TAG, "NVS override: filter_mac=%02X:%02X:%02X:%02X:%02X:%02X",
+                     mac_blob[0], mac_blob[1], mac_blob[2],
+                     mac_blob[3], mac_blob[4], mac_blob[5]);
+        } else {
+            cfg->filter_mac_enabled = 0;
+            ESP_LOGI(TAG, "NVS override: filter_mac disabled (all zeros)");
         }
     }
 

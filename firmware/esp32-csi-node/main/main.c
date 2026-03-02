@@ -134,6 +134,13 @@ void app_main(void)
     /* Initialize CSI collection */
     csi_collector_init();
 
+    /* Apply MAC address filter if configured (Issue #98) */
+    if (s_cfg.filter_mac_enabled) {
+        csi_collector_set_filter_mac(s_cfg.filter_mac);
+    } else {
+        ESP_LOGI(TAG, "No MAC filter — accepting CSI from all transmitters");
+    }
+
     ESP_LOGI(TAG, "CSI streaming active → %s:%d",
              s_cfg.target_ip, s_cfg.target_port);
 
