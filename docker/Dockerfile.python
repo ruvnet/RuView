@@ -26,4 +26,9 @@ EXPOSE 8080
 
 ENV PYTHONUNBUFFERED=1
 
+#Prevent Python from writing .pyc files and __pycache__ folders to disk
+#Make the runtime faster
+
+ENV PYTHONDONTWRITEBYTECODE=1
+
 CMD ["python", "-m", "v1.src.sensing.ws_server"]
