@@ -60,14 +60,37 @@ Issue #86 reported that the live demo shows a static/barely-animated stick figur
 - Goertzel filter bank adds ~O(9×N) computation per frame (negligible at 100 frames).
 - Users with only 1 ESP32 may still be disappointed that arm tracking doesn't work — but the UI now explains why.
 
+### 5. Dark mode consistency
+- Live Demo tab converted from light theme to dark mode matching the rest of the UI.
+- All sidebar panels, badges, buttons, dropdowns use dark backgrounds with muted text.
+
+### 6. Render mode implementations
+All four render modes in the pose visualization dropdown now produce distinct visual output:
+
+| Mode | Rendering |
+|------|-----------|
+| **Skeleton** | Green lines connecting joints + red keypoint dots |
+| **Keypoints** | Large colored dots with glow and labels, no connecting lines |
+| **Heatmap** | Gaussian radial blobs per keypoint (hue per person), faint skeleton overlay at 25% opacity |
+| **Dense** | Body region segmentation with colored filled polygons — head (red), torso (blue), left arm (green), right arm (orange), left leg (purple), right leg (yellow) |
+
+Previously heatmap and dense were stubs that fell back to skeleton mode.
+
+### 7. pose_source passthrough fix
+The `pose_source` field from the WebSocket message was being dropped in `convertZoneDataToRestFormat()` in `pose.service.js`. Now passed through so the Estimation Mode badge displays correctly.
+
 ## Files Changed
 - `docker/Dockerfile.rust` — `CSI_SOURCE=auto` env, shell entrypoint for variable expansion
 - `docker/docker-compose.yml` — `CSI_SOURCE=${CSI_SOURCE:-auto}`, shell command string
 - `wifi-densepose-sensing-server/src/main.rs` — frame history buffer, Goertzel breathing estimation, temporal motion score, signal-driven pose derivation, pose_source field, 100ms tick default
 - `ui/services/sensing.service.js` — `dataSource` state, delayed simulation fallback, `_simulated` marker
+- `ui/services/pose.service.js` — `pose_source` passthrough in data conversion
 - `ui/components/SensingTab.js` — data source banner, "About This Data" card
-- `ui/components/LiveDemoTab.js` — estimation mode badge, setup guide panel
-- `ui/style.css` — banner, badge, and guide panel styles
+- `ui/components/LiveDemoTab.js` — estimation mode badge, setup guide panel, dark mode theme
+- `ui/utils/pose-renderer.js` — heatmap (Gaussian blobs) and dense (body region segmentation) render modes
+- `ui/style.css` — banner, badge, guide panel, and about-text styles
+- `README.md` — live pose detection screenshot
+- `assets/screen.png` — screenshot asset
 
 ## References
 - Issue: https://github.com/ruvnet/wifi-densepose/issues/86
