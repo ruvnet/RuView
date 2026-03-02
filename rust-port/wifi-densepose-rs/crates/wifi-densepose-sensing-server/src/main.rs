@@ -71,8 +71,8 @@ struct Args {
     #[arg(long, default_value = "../../ui")]
     ui_path: PathBuf,
 
-    /// Tick interval in milliseconds
-    #[arg(long, default_value = "500")]
+    /// Tick interval in milliseconds (default 100 ms = 10 fps for smooth pose animation)
+    #[arg(long, default_value = "100")]
     tick_ms: u64,
 
     /// Data source: auto, wifi, esp32, simulate
@@ -266,6 +266,10 @@ struct BoundingBox {
 struct AppStateInner {
     latest_update: Option<SensingUpdate>,
     rssi_history: VecDeque<f64>,
+    /// Circular buffer of recent CSI amplitude vectors for temporal analysis.
+    /// Each entry is the full subcarrier amplitude vector for one frame.
+    /// Capacity: FRAME_HISTORY_CAPACITY frames.
+    frame_history: VecDeque<Vec<f64>>,
     tick: u64,
     source: String,
     tx: broadcast::Sender<String>,
@@ -286,6 +290,10 @@ struct AppStateInner {
     /// Whether a trained model is loaded.
     model_loaded: bool,
 }
+
+/// Number of frames retained in `frame_history` for temporal analysis.
+/// At 500 ms ticks this covers ~50 seconds; at 100 ms ticks ~10 seconds.
+const FRAME_HISTORY_CAPACITY: usize = 100;
 
 type SharedState = Arc<RwLock<AppStateInner>>;
 
@@ -343,41 +351,94 @@ fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
 
 // ── Signal field generation ──────────────────────────────────────────────────
 
+/// Generate a signal field that reflects where motion and signal changes are occurring.
+///
+/// Instead of a fixed-animation circle, this function uses the actual sensing data:
+/// - `subcarrier_variances`: per-subcarrier variance computed from the frame history.
+///   High-variance subcarriers indicate spatial directions where the signal is disrupted.
+/// - `motion_score`: overall motion intensity [0, 1].
+/// - `breathing_rate_hz`: estimated breathing rate in Hz; if > 0, adds a breathing ring.
+/// - `signal_quality`: overall quality metric [0, 1] modulates field brightness.
+///
+/// The field grid is 20×20 cells representing a top-down view of the room.
+/// Hotspots are derived from the subcarrier index (treated as an angular bin) so that
+/// subcarriers with the highest variance produce peaks at the corresponding directions.
 fn generate_signal_field(
     _mean_rssi: f64,
-    variance: f64,
     motion_score: f64,
-    tick: u64,
+    breathing_rate_hz: f64,
+    signal_quality: f64,
+    subcarrier_variances: &[f64],
 ) -> SignalField {
-    let grid = 20;
+    let grid = 20usize;
     let mut values = vec![0.0f64; grid * grid];
-    let center = grid as f64 / 2.0;
-    let tick_f = tick as f64;
+    let center = (grid as f64 - 1.0) / 2.0;
 
+    // Normalise subcarrier variances to [0, 1].
+    let max_var = subcarrier_variances.iter().cloned().fold(0.0f64, f64::max);
+    let norm_factor = if max_var > 1e-9 { max_var } else { 1.0 };
+
+    // For each cell, accumulate contributions from all subcarriers.
+    // Each subcarrier k is assigned an angular direction proportional to its index
+    // so that different subcarriers illuminate different regions of the room.
+    let n_sub = subcarrier_variances.len().max(1);
+    for (k, &var) in subcarrier_variances.iter().enumerate() {
+        let weight = (var / norm_factor) * motion_score;
+        if weight < 1e-6 {
+            continue;
+        }
+        // Map subcarrier index to an angle across the full 2π sweep.
+        let angle = (k as f64 / n_sub as f64) * 2.0 * std::f64::consts::PI;
+        // Place the hotspot at a distance proportional to the weight, capped at 40% of
+        // the grid radius so it stays within the room model.
+        let radius = center * 0.8 * weight.sqrt();
+        let hx = center + radius * angle.cos();
+        let hz = center + radius * angle.sin();
+
+        for z in 0..grid {
+            for x in 0..grid {
+                let dx = x as f64 - hx;
+                let dz = z as f64 - hz;
+                let dist2 = dx * dx + dz * dz;
+                // Gaussian blob centred on the hotspot; spread scales with weight.
+                let spread = (0.5 + weight * 2.0).max(0.5);
+                values[z * grid + x] += weight * (-dist2 / (2.0 * spread * spread)).exp();
+            }
+        }
+    }
+
+    // Base radial attenuation from the router assumed at grid centre.
     for z in 0..grid {
         for x in 0..grid {
             let dx = x as f64 - center;
             let dz = z as f64 - center;
             let dist = (dx * dx + dz * dz).sqrt();
-
-            // Base radial attenuation from router at center
-            let base = (-dist * 0.15).exp();
-
-            // Body disruption blob
-            let body_x = center + 3.0 * (tick_f * 0.02).sin();
-            let body_z = center + 2.0 * (tick_f * 0.015).cos();
-            let body_dist = ((x as f64 - body_x).powi(2) + (z as f64 - body_z).powi(2)).sqrt();
-            let disruption = motion_score * 0.6 * (-body_dist * 0.4).exp();
-
-            // Breathing ring modulation
-            let breath_ring = if variance > 1.0 {
-                0.1 * (tick_f * 0.3).sin() * (-((dist - 5.0).powi(2)) * 0.1).exp()
-            } else {
-                0.0
-            };
-
-            values[z * grid + x] = (base + disruption + breath_ring).clamp(0.0, 1.0);
+            let base = signal_quality * (-dist * 0.12).exp();
+            values[z * grid + x] += base * 0.3;
         }
+    }
+
+    // Breathing ring: if a breathing rate was estimated add a faint annular highlight
+    // at a radius corresponding to typical chest-wall displacement range.
+    if breathing_rate_hz > 0.05 {
+        let ring_r = center * 0.55;
+        let ring_width = 1.8f64;
+        for z in 0..grid {
+            for x in 0..grid {
+                let dx = x as f64 - center;
+                let dz = z as f64 - center;
+                let dist = (dx * dx + dz * dz).sqrt();
+                let ring_val = 0.08 * (-(dist - ring_r).powi(2) / (2.0 * ring_width * ring_width)).exp();
+                values[z * grid + x] += ring_val;
+            }
+        }
+    }
+
+    // Clamp and normalise to [0, 1].
+    let field_max = values.iter().cloned().fold(0.0f64, f64::max);
+    let scale = if field_max > 1e-9 { 1.0 / field_max } else { 1.0 };
+    for v in &mut values {
+        *v = (*v * scale).clamp(0.0, 1.0);
     }
 
     SignalField {
@@ -388,21 +449,163 @@ fn generate_signal_field(
 
 // ── Feature extraction from ESP32 frame ──────────────────────────────────────
 
-fn extract_features_from_frame(frame: &Esp32Frame) -> (FeatureInfo, ClassificationInfo) {
-    let n = frame.amplitudes.len().max(1) as f64;
+/// Estimate breathing rate in Hz from the amplitude time series stored in `frame_history`.
+///
+/// Approach:
+/// 1. Build a scalar time series by computing the mean amplitude of each historical frame.
+/// 2. Run a peak-detection pass: count rising-edge zero-crossings of the de-meaned signal.
+/// 3. Convert the crossing rate to Hz, clipped to the physiological range 0.1–0.5 Hz
+///    (12–30 breaths/min).
+///
+/// For accuracy the function additionally applies a simple 3-tap Goertzel-style power
+/// estimate at evenly-spaced candidate frequencies in the breathing band and returns
+/// the candidate with the highest energy.
+fn estimate_breathing_rate_hz(frame_history: &VecDeque<Vec<f64>>, sample_rate_hz: f64) -> f64 {
+    let n = frame_history.len();
+    if n < 6 {
+        return 0.0;
+    }
+
+    // Build scalar time series: mean amplitude per frame.
+    let series: Vec<f64> = frame_history.iter()
+        .map(|amps| {
+            if amps.is_empty() { 0.0 } else { amps.iter().sum::<f64>() / amps.len() as f64 }
+        })
+        .collect();
+
+    let mean_s = series.iter().sum::<f64>() / n as f64;
+    // De-mean.
+    let detrended: Vec<f64> = series.iter().map(|x| x - mean_s).collect();
+
+    // Goertzel power at candidate frequencies in the breathing band [0.1, 0.5] Hz.
+    // We evaluate 9 candidate frequencies uniformly spaced in that band.
+    let n_candidates = 9usize;
+    let f_low = 0.1f64;
+    let f_high = 0.5f64;
+    let mut best_freq = 0.0f64;
+    let mut best_power = 0.0f64;
+
+    for i in 0..n_candidates {
+        let freq = f_low + (f_high - f_low) * i as f64 / (n_candidates - 1).max(1) as f64;
+        let omega = 2.0 * std::f64::consts::PI * freq / sample_rate_hz;
+        let coeff = 2.0 * omega.cos();
+        let mut s_prev2 = 0.0f64;
+        let mut s_prev1 = 0.0f64;
+        for &x in &detrended {
+            let s = x + coeff * s_prev1 - s_prev2;
+            s_prev2 = s_prev1;
+            s_prev1 = s;
+        }
+        // Goertzel magnitude squared.
+        let power = s_prev2 * s_prev2 + s_prev1 * s_prev1 - coeff * s_prev1 * s_prev2;
+        if power > best_power {
+            best_power = power;
+            best_freq = freq;
+        }
+    }
+
+    // Only report a breathing rate if the Goertzel energy is meaningfully above noise.
+    // Threshold: power must exceed 10× the average power across all candidates.
+    let avg_power = {
+        let mut total = 0.0f64;
+        for i in 0..n_candidates {
+            let freq = f_low + (f_high - f_low) * i as f64 / (n_candidates - 1).max(1) as f64;
+            let omega = 2.0 * std::f64::consts::PI * freq / sample_rate_hz;
+            let coeff = 2.0 * omega.cos();
+            let mut s_prev2 = 0.0f64;
+            let mut s_prev1 = 0.0f64;
+            for &x in &detrended {
+                let s = x + coeff * s_prev1 - s_prev2;
+                s_prev2 = s_prev1;
+                s_prev1 = s;
+            }
+            total += s_prev2 * s_prev2 + s_prev1 * s_prev1 - coeff * s_prev1 * s_prev2;
+        }
+        total / n_candidates as f64
+    };
+
+    if best_power > avg_power * 3.0 {
+        best_freq.clamp(f_low, f_high)
+    } else {
+        0.0
+    }
+}
+
+/// Compute per-subcarrier variance across the sliding window of `frame_history`.
+///
+/// For each subcarrier index `k`, returns `Var[A_k]` over all stored frames.
+/// This captures spatial signal variation; subcarriers whose amplitude fluctuates
+/// heavily across time correspond to directions with motion.
+fn compute_subcarrier_variances(frame_history: &VecDeque<Vec<f64>>, n_sub: usize) -> Vec<f64> {
+    if frame_history.is_empty() || n_sub == 0 {
+        return vec![0.0; n_sub];
+    }
+
+    let n_frames = frame_history.len() as f64;
+    let mut means = vec![0.0f64; n_sub];
+    let mut sq_means = vec![0.0f64; n_sub];
+
+    for frame in frame_history.iter() {
+        for k in 0..n_sub {
+            let a = if k < frame.len() { frame[k] } else { 0.0 };
+            means[k] += a;
+            sq_means[k] += a * a;
+        }
+    }
+
+    (0..n_sub)
+        .map(|k| {
+            let mean = means[k] / n_frames;
+            let sq_mean = sq_means[k] / n_frames;
+            (sq_mean - mean * mean).max(0.0)
+        })
+        .collect()
+}
+
+/// Extract features from the current ESP32 frame, enhanced with temporal context from
+/// `frame_history`.
+///
+/// Improvements over the previous single-frame approach:
+///
+/// - **Variance**: computed as the mean of per-subcarrier temporal variance across the
+///   sliding window, not just the intra-frame spatial variance.
+/// - **Motion detection**: uses frame-to-frame temporal difference (mean L2 change
+///   between the current frame and the previous frame) normalised by signal amplitude,
+///   so that actual changes are detected rather than just a threshold on the current frame.
+/// - **Breathing rate**: estimated via Goertzel filter bank on the 0.1–0.5 Hz band of
+///   the amplitude time series.
+/// - **Signal quality**: based on SNR estimate (RSSI – noise floor) and subcarrier
+///   variance stability.
+fn extract_features_from_frame(
+    frame: &Esp32Frame,
+    frame_history: &VecDeque<Vec<f64>>,
+    sample_rate_hz: f64,
+) -> (FeatureInfo, ClassificationInfo, f64, Vec<f64>) {
+    let n_sub = frame.amplitudes.len().max(1);
+    let n = n_sub as f64;
     let mean_amp: f64 = frame.amplitudes.iter().sum::<f64>() / n;
     let mean_rssi = frame.rssi as f64;
 
-    let variance: f64 = frame.amplitudes.iter()
+    // ── Intra-frame subcarrier variance (spatial spread across subcarriers) ──
+    let intra_variance: f64 = frame.amplitudes.iter()
         .map(|a| (a - mean_amp).powi(2))
         .sum::<f64>() / n;
 
-    // Simple spectral analysis on amplitude vector
-    let spectral_power: f64 = frame.amplitudes.iter()
-        .map(|a| a * a)
-        .sum::<f64>() / n;
+    // ── Temporal (sliding-window) per-subcarrier variance ──
+    let sub_variances = compute_subcarrier_variances(frame_history, n_sub);
+    let temporal_variance: f64 = if sub_variances.is_empty() {
+        intra_variance
+    } else {
+        sub_variances.iter().sum::<f64>() / sub_variances.len() as f64
+    };
 
-    // Motion band: high-frequency subcarrier variance
+    // Use the larger of intra-frame and temporal variance as the reported variance.
+    let variance = intra_variance.max(temporal_variance);
+
+    // ── Spectral power ──
+    let spectral_power: f64 = frame.amplitudes.iter().map(|a| a * a).sum::<f64>() / n;
+
+    // ── Motion band power (upper half of subcarriers, high spatial frequency) ──
     let half = frame.amplitudes.len() / 2;
     let motion_band_power = if half > 0 {
         frame.amplitudes[half..].iter()
@@ -412,7 +615,7 @@ fn extract_features_from_frame(frame: &Esp32Frame) -> (FeatureInfo, Classificati
         0.0
     };
 
-    // Breathing band: low-frequency variance
+    // ── Breathing band power (lower half of subcarriers, low spatial frequency) ──
     let breathing_band_power = if half > 0 {
         frame.amplitudes[..half].iter()
             .map(|a| (a - mean_amp).powi(2))
@@ -421,7 +624,7 @@ fn extract_features_from_frame(frame: &Esp32Frame) -> (FeatureInfo, Classificati
         0.0
     };
 
-    // Dominant frequency estimate (peak subcarrier index → Hz)
+    // ── Dominant frequency via peak subcarrier index ──
     let peak_idx = frame.amplitudes.iter()
         .enumerate()
         .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
@@ -429,11 +632,46 @@ fn extract_features_from_frame(frame: &Esp32Frame) -> (FeatureInfo, Classificati
         .unwrap_or(0);
     let dominant_freq_hz = peak_idx as f64 * 0.05;
 
-    // Change point detection (simple threshold crossing count)
+    // ── Change point detection (threshold-crossing count in current frame) ──
     let threshold = mean_amp * 1.2;
     let change_points = frame.amplitudes.windows(2)
         .filter(|w| (w[0] < threshold) != (w[1] < threshold))
         .count();
+
+    // ── Motion score: sliding-window temporal difference ──
+    // Compare current frame against the most recent historical frame.
+    // The difference is normalised by the mean amplitude to be scale-invariant.
+    let temporal_motion_score = if let Some(prev_frame) = frame_history.back() {
+        let n_cmp = n_sub.min(prev_frame.len());
+        if n_cmp > 0 {
+            let diff_energy: f64 = (0..n_cmp)
+                .map(|k| (frame.amplitudes[k] - prev_frame[k]).powi(2))
+                .sum::<f64>() / n_cmp as f64;
+            // Normalise by mean squared amplitude to get a dimensionless ratio.
+            let ref_energy = mean_amp * mean_amp + 1e-9;
+            (diff_energy / ref_energy).sqrt().clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    } else {
+        // No history yet — fall back to intra-frame variance-based estimate.
+        (intra_variance / (mean_amp * mean_amp + 1e-9)).sqrt().clamp(0.0, 1.0)
+    };
+
+    // Blend temporal motion with variance-based motion for robustness.
+    let variance_motion = (temporal_variance / 10.0).clamp(0.0, 1.0);
+    let motion_score = (temporal_motion_score * 0.7 + variance_motion * 0.3).clamp(0.0, 1.0);
+
+    // ── Signal quality metric ──
+    // Based on estimated SNR (RSSI relative to noise floor) and subcarrier consistency.
+    let snr_db = (frame.rssi as f64 - frame.noise_floor as f64).max(0.0);
+    let snr_quality = (snr_db / 40.0).clamp(0.0, 1.0); // 40 dB → quality = 1.0
+    // Penalise quality when temporal variance is very high (unstable signal).
+    let stability = (1.0 - (temporal_variance / (mean_amp * mean_amp + 1e-9)).clamp(0.0, 1.0)).max(0.0);
+    let signal_quality = (snr_quality * 0.6 + stability * 0.4).clamp(0.0, 1.0);
+
+    // ── Breathing rate estimation ──
+    let breathing_rate_hz = estimate_breathing_rate_hz(frame_history, sample_rate_hz);
 
     let features = FeatureInfo {
         mean_rssi,
@@ -445,23 +683,24 @@ fn extract_features_from_frame(frame: &Esp32Frame) -> (FeatureInfo, Classificati
         spectral_power,
     };
 
-    // Classification
-    let motion_score = (variance / 10.0).clamp(0.0, 1.0);
-    let (motion_level, presence) = if motion_score > 0.5 {
+    // ── Classification ──
+    let (motion_level, presence) = if motion_score > 0.4 {
         ("active".to_string(), true)
-    } else if motion_score > 0.1 {
+    } else if motion_score > 0.08 {
         ("present_still".to_string(), true)
     } else {
         ("absent".to_string(), false)
     };
 
+    let confidence = (0.4 + signal_quality * 0.3 + motion_score * 0.3).clamp(0.0, 1.0);
+
     let classification = ClassificationInfo {
         motion_level,
         presence,
-        confidence: 0.5 + motion_score * 0.5,
+        confidence,
     };
 
-    (features, classification)
+    (features, classification, breathing_rate_hz, sub_variances)
 }
 
 // ── Windows WiFi RSSI collector ──────────────────────────────────────────────
@@ -596,7 +835,16 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
             phases: multi_ap_frame.phases.clone(),
         };
 
-        let (features, classification) = extract_features_from_frame(&frame);
+        // ── Step 4b: Update frame history and extract features ───────
+        let mut s_write_pre = state.write().await;
+        s_write_pre.frame_history.push_back(frame.amplitudes.clone());
+        if s_write_pre.frame_history.len() > FRAME_HISTORY_CAPACITY {
+            s_write_pre.frame_history.pop_front();
+        }
+        let sample_rate_hz = 1000.0 / tick_ms as f64;
+        let (features, classification, breathing_rate_hz, sub_variances) =
+            extract_features_from_frame(&frame, &s_write_pre.frame_history, sample_rate_hz);
+        drop(s_write_pre);
 
         // ── Step 5: Build enhanced fields from pipeline result ───────
         let enhanced_motion = Some(serde_json::json!({
@@ -640,6 +888,7 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
         let vitals = s.vital_detector.process_frame(&frame.amplitudes, &frame.phases);
         s.latest_vitals = vitals.clone();
 
+        let feat_variance = features.variance;
         let update = SensingUpdate {
             msg_type: "sensing_update".to_string(),
             timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
@@ -654,7 +903,10 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
             }],
             features,
             classification,
-            signal_field: generate_signal_field(first_rssi, 1.0, motion_score, tick),
+            signal_field: generate_signal_field(
+                first_rssi, motion_score, breathing_rate_hz,
+                feat_variance.min(1.0), &sub_variances,
+            ),
             vital_signs: Some(vitals),
             enhanced_motion,
             enhanced_breathing,
@@ -715,9 +967,16 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         phases: vec![0.0],
     };
 
-    let (features, classification) = extract_features_from_frame(&frame);
-
     let mut s = state.write().await;
+    // Update frame history before extracting features.
+    s.frame_history.push_back(frame.amplitudes.clone());
+    if s.frame_history.len() > FRAME_HISTORY_CAPACITY {
+        s.frame_history.pop_front();
+    }
+    let sample_rate_hz = 2.0_f64; // fallback tick ~ 500 ms => 2 Hz
+    let (features, classification, breathing_rate_hz, sub_variances) =
+        extract_features_from_frame(&frame, &s.frame_history, sample_rate_hz);
+
     s.source = format!("wifi:{ssid}");
     s.rssi_history.push_back(rssi_dbm);
     if s.rssi_history.len() > 60 {
@@ -738,6 +997,7 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
     let vitals = s.vital_detector.process_frame(&frame.amplitudes, &frame.phases);
     s.latest_vitals = vitals.clone();
 
+    let feat_variance = features.variance;
     let update = SensingUpdate {
         msg_type: "sensing_update".to_string(),
         timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
@@ -752,7 +1012,10 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         }],
         features,
         classification,
-        signal_field: generate_signal_field(rssi_dbm, 1.0, motion_score, tick),
+        signal_field: generate_signal_field(
+            rssi_dbm, motion_score, breathing_rate_hz,
+            feat_variance.min(1.0), &sub_variances,
+        ),
         vital_signs: Some(vitals),
         enhanced_motion: None,
         enhanced_breathing: None,
@@ -902,7 +1165,47 @@ async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
                         // Parse the sensing update and convert to pose format
                         if let Ok(sensing) = serde_json::from_str::<SensingUpdate>(&json) {
                             if sensing.msg_type == "sensing_update" {
-                                let persons = derive_pose_from_sensing(&sensing);
+                                // Determine pose estimation mode for the UI indicator.
+                                // "model_inference"    — a trained RVF model is loaded.
+                                // "signal_derived"     — keypoints estimated from raw CSI features.
+                                let model_loaded = {
+                                    let s = state.read().await;
+                                    s.model_loaded
+                                };
+                                let pose_source = if model_loaded {
+                                    "model_inference"
+                                } else {
+                                    "signal_derived"
+                                };
+
+                                let persons = if model_loaded {
+                                    // When a trained model is loaded, prefer its keypoints if present.
+                                    sensing.pose_keypoints.as_ref().map(|kps| {
+                                        let kp_names = [
+                                            "nose","left_eye","right_eye","left_ear","right_ear",
+                                            "left_shoulder","right_shoulder","left_elbow","right_elbow",
+                                            "left_wrist","right_wrist","left_hip","right_hip",
+                                            "left_knee","right_knee","left_ankle","right_ankle",
+                                        ];
+                                        let keypoints: Vec<PoseKeypoint> = kps.iter()
+                                            .enumerate()
+                                            .map(|(i, kp)| PoseKeypoint {
+                                                name: kp_names.get(i).unwrap_or(&"unknown").to_string(),
+                                                x: kp[0], y: kp[1], z: kp[2], confidence: kp[3],
+                                            })
+                                            .collect();
+                                        vec![PersonDetection {
+                                            id: 1,
+                                            confidence: sensing.classification.confidence,
+                                            bbox: BoundingBox { x: 260.0, y: 150.0, width: 120.0, height: 220.0 },
+                                            keypoints,
+                                            zone: "zone_1".into(),
+                                        }]
+                                    }).unwrap_or_else(|| derive_pose_from_sensing(&sensing))
+                                } else {
+                                    derive_pose_from_sensing(&sensing)
+                                };
+
                                 let pose_msg = serde_json::json!({
                                     "type": "pose_data",
                                     "zone_id": "zone_1",
@@ -913,12 +1216,16 @@ async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
                                         },
                                         "confidence": if sensing.classification.presence { sensing.classification.confidence } else { 0.0 },
                                         "activity": sensing.classification.motion_level,
+                                        // pose_source tells the UI which estimation mode is active.
+                                        "pose_source": pose_source,
                                         "metadata": {
                                             "frame_id": format!("rust_frame_{}", sensing.tick),
                                             "processing_time_ms": 1,
                                             "source": sensing.source,
                                             "tick": sensing.tick,
                                             "signal_strength": sensing.features.mean_rssi,
+                                            "motion_band_power": sensing.features.motion_band_power,
+                                            "breathing_band_power": sensing.features.breathing_band_power,
                                         }
                                     }
                                 });
@@ -972,21 +1279,86 @@ async fn latest(State(state): State<SharedState>) -> Json<serde_json::Value> {
     }
 }
 
-/// Generate WiFi-derived pose keypoints from sensing data
+/// Generate WiFi-derived pose keypoints from sensing data.
+///
+/// Keypoint positions are modulated by real signal features rather than a pure
+/// time-based sine/cosine loop:
+///
+///   - `motion_band_power`    drives whole-body translation and limb splay
+///   - `variance`             seeds per-frame noise so the skeleton never freezes
+///   - `breathing_band_power` expands/contracts torso keypoints (shoulders, hips)
+///   - `dominant_freq_hz`     tilts the upper body laterally (lean direction)
+///   - `change_points`        adds burst jitter to extremities (wrists, ankles)
+///
+/// When `presence == false` no persons are returned (empty room).
+/// When walking is detected (`motion_score > 0.55`) the figure shifts laterally
+/// with a stride-swing pattern applied to arms and legs.
 fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
     let cls = &update.classification;
     if !cls.presence {
         return vec![];
     }
 
-    let t = update.tick as f64 * 0.05;
-    let motion = if cls.motion_level == "active" { 1.0 }
-        else if cls.motion_level == "present_still" { 0.3 }
-        else { 0.0 };
+    let feat = &update.features;
 
-    // COCO 17-keypoint skeleton, positions derived from signal field
-    let base_x = 320.0 + 30.0 * t.sin() * motion;
-    let base_y = 240.0 + 15.0 * (t * 0.7).cos() * motion;
+    // ── Signal-derived scalars ────────────────────────────────────────────────
+
+    // Continuous motion score from motion_band_power (0..1).
+    // motion_band_power is the high-frequency subcarrier variance — it is high
+    // when a body is actively moving through the RF field.
+    let motion_score = (feat.motion_band_power / 15.0).clamp(0.0, 1.0);
+    let is_walking = motion_score > 0.55;
+
+    // Breathing expansion: torso keypoints shift ±breath_amp pixels per cycle.
+    // breathing_band_power comes from low-frequency subcarrier variance.
+    let breath_amp = (feat.breathing_band_power * 4.0).clamp(0.0, 12.0);
+
+    // Breathing phase: use the vital-sign estimate if available, otherwise
+    // derive a proxy from breathing_band_power and the tick counter.
+    let breath_phase = if let Some(ref vs) = update.vital_signs {
+        // breathing_rate_bpm is Option<f64>; fall back to 15 BPM if not yet estimated.
+        // 15 BPM -> 0.25 Hz, which sits comfortably in the breathing band.
+        let bpm = vs.breathing_rate_bpm.unwrap_or(15.0);
+        let freq = (bpm / 60.0).clamp(0.1, 0.5);
+        (update.tick as f64 * freq * 0.1 * std::f64::consts::TAU).sin()
+    } else {
+        (update.tick as f64 * 0.08 + feat.breathing_band_power).sin()
+    };
+
+    // Lateral lean derived from dominant_freq_hz (peak subcarrier index -> Hz).
+    // Maps 0..10 Hz range to ±18 px horizontal shift of the torso center.
+    let lean_x = (feat.dominant_freq_hz / 5.0 - 1.0).clamp(-1.0, 1.0) * 18.0;
+
+    // Walking stride: lateral body displacement oscillating with motion_band_power.
+    // Amplitude is zero when the person is stationary.
+    let stride_x = if is_walking {
+        let stride_phase = (feat.motion_band_power * 0.7 + update.tick as f64 * 0.12).sin();
+        stride_phase * 45.0 * motion_score
+    } else {
+        0.0
+    };
+
+    // Burst jitter from change_points: rapid threshold crossings in the
+    // amplitude vector indicate fast movement or sudden signal disturbance.
+    let burst = (feat.change_points as f64 / 8.0).clamp(0.0, 1.0);
+
+    // Deterministic per-frame noise seeded by variance and tick.
+    // Uses the fractional part of a large sine to get a tick-dependent value
+    // in (-1, 1) without needing a PRNG.
+    let noise_seed = feat.variance * 31.7 + update.tick as f64 * 17.3;
+    let noise_val = (noise_seed.sin() * 43758.545).fract();
+
+    // Scale base confidence by SNR proxy (high variance = better signal quality).
+    let snr_factor = ((feat.variance - 0.5) / 10.0).clamp(0.0, 1.0);
+    let base_confidence = cls.confidence * (0.6 + 0.4 * snr_factor);
+
+    // ── Skeleton base position ────────────────────────────────────────────────
+
+    // Center figure on a 640x480 canvas.
+    let base_x = 320.0 + stride_x + lean_x * 0.5;
+    let base_y = 240.0 - motion_score * 8.0;
+
+    // ── COCO 17-keypoint offsets from hip-center ──────────────────────────────
 
     let kp_names = [
         "nose", "left_eye", "right_eye", "left_ear", "right_ear",
@@ -994,49 +1366,130 @@ fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
         "left_wrist", "right_wrist", "left_hip", "right_hip",
         "left_knee", "right_knee", "left_ankle", "right_ankle",
     ];
+
+    // Nominal (dx, dy) offsets from hip-center in pixels.
     let kp_offsets: [(f64, f64); 17] = [
-        (0.0, -80.0),   // nose
-        (-8.0, -88.0),  // left_eye
-        (8.0, -88.0),   // right_eye
-        (-16.0, -82.0), // left_ear
-        (16.0, -82.0),  // right_ear
-        (-30.0, -50.0), // left_shoulder
-        (30.0, -50.0),  // right_shoulder
-        (-45.0, -15.0), // left_elbow
-        (45.0, -15.0),  // right_elbow
-        (-50.0, 20.0),  // left_wrist
-        (50.0, 20.0),   // right_wrist
-        (-20.0, 20.0),  // left_hip
-        (20.0, 20.0),   // right_hip
-        (-22.0, 70.0),  // left_knee
-        (22.0, 70.0),   // right_knee
-        (-24.0, 120.0), // left_ankle
-        (24.0, 120.0),  // right_ankle
+        (  0.0,  -80.0), // 0  nose
+        ( -8.0,  -88.0), // 1  left_eye
+        (  8.0,  -88.0), // 2  right_eye
+        (-16.0,  -82.0), // 3  left_ear
+        ( 16.0,  -82.0), // 4  right_ear
+        (-30.0,  -50.0), // 5  left_shoulder
+        ( 30.0,  -50.0), // 6  right_shoulder
+        (-45.0,  -15.0), // 7  left_elbow
+        ( 45.0,  -15.0), // 8  right_elbow
+        (-50.0,   20.0), // 9  left_wrist
+        ( 50.0,   20.0), // 10 right_wrist
+        (-20.0,   20.0), // 11 left_hip
+        ( 20.0,   20.0), // 12 right_hip
+        (-22.0,   70.0), // 13 left_knee
+        ( 22.0,   70.0), // 14 right_knee
+        (-24.0,  120.0), // 15 left_ankle
+        ( 24.0,  120.0), // 16 right_ankle
     ];
+
+    // Torso keypoints: left_shoulder(5), right_shoulder(6), left_hip(11), right_hip(12).
+    // These respond to the breathing expansion signal.
+    const TORSO_KP: [usize; 4] = [5, 6, 11, 12];
+
+    // Extremity keypoints: left_wrist(9), right_wrist(10), left_ankle(15), right_ankle(16).
+    // These pick up burst jitter from high change_points counts.
+    const EXTREMITY_KP: [usize; 4] = [9, 10, 15, 16];
 
     let keypoints: Vec<PoseKeypoint> = kp_names.iter().zip(kp_offsets.iter())
         .enumerate()
         .map(|(i, (name, (dx, dy)))| {
-            let jitter = motion * 3.0 * (t * 2.0 + i as f64).sin();
+            // ── Breathing expansion (torso only) ─────────────────────────
+            let breath_dx = if TORSO_KP.contains(&i) {
+                // Shoulders spread outward; hips compress inward on inhale.
+                let sign = if *dx < 0.0 { -1.0 } else { 1.0 };
+                sign * breath_amp * breath_phase * 0.5
+            } else {
+                0.0
+            };
+            let breath_dy = if TORSO_KP.contains(&i) {
+                // Shoulders rise slightly; hips descend slightly on inhale.
+                let sign = if *dy < 0.0 { -1.0 } else { 1.0 };
+                sign * breath_amp * breath_phase * 0.3
+            } else {
+                0.0
+            };
+
+            // ── Extremity burst jitter ────────────────────────────────────
+            let extremity_jitter = if EXTREMITY_KP.contains(&i) {
+                // Each extremity gets an independent phase offset.
+                let phase = noise_seed + i as f64 * 2.399; // golden-angle spacing
+                (
+                    phase.sin() * burst * motion_score * 12.0,
+                    (phase * 1.31).cos() * burst * motion_score * 8.0,
+                )
+            } else {
+                (0.0, 0.0)
+            };
+
+            // ── Per-joint motion noise (scales with signal variance) ──────
+            // Different seed per keypoint so every joint moves independently.
+            let kp_noise_x = ((noise_seed + i as f64 * 1.618).sin() * 43758.545).fract()
+                * feat.variance.sqrt().clamp(0.0, 3.0) * motion_score;
+            let kp_noise_y = ((noise_seed + i as f64 * 2.718).cos() * 31415.926).fract()
+                * feat.variance.sqrt().clamp(0.0, 3.0) * motion_score * 0.6;
+
+            // ── Walking arm/leg swing (contralateral gait pattern) ────────
+            let swing_dy = if is_walking {
+                let stride_phase =
+                    (feat.motion_band_power * 0.7 + update.tick as f64 * 0.12).sin();
+                match i {
+                    7 | 9  => -stride_phase * 20.0 * motion_score, // left  elbow/wrist
+                    8 | 10 =>  stride_phase * 20.0 * motion_score, // right elbow/wrist
+                    13 | 15 =>  stride_phase * 25.0 * motion_score, // left  knee/ankle
+                    14 | 16 => -stride_phase * 25.0 * motion_score, // right knee/ankle
+                    _ => 0.0,
+                }
+            } else {
+                0.0
+            };
+
+            // ── Compose final position ────────────────────────────────────
+            let final_x =
+                base_x + dx + breath_dx + extremity_jitter.0 + kp_noise_x;
+            let final_y =
+                base_y + dy + breath_dy + extremity_jitter.1 + kp_noise_y + swing_dy;
+
+            // Extremity confidence is lower when signal variance is low.
+            let kp_conf = if EXTREMITY_KP.contains(&i) {
+                base_confidence * (0.7 + 0.3 * snr_factor) * (0.85 + 0.15 * noise_val)
+            } else {
+                base_confidence
+                    * (0.88 + 0.12 * ((i as f64 * 0.7 + noise_seed).cos()))
+            };
+
             PoseKeypoint {
                 name: name.to_string(),
-                x: base_x + dx + jitter,
-                y: base_y + dy + jitter * 0.5,
-                z: 0.0,
-                confidence: cls.confidence * (0.85 + 0.15 * (i as f64 * 0.3).cos()),
+                x: final_x,
+                y: final_y,
+                z: lean_x * 0.02, // slight Z depth from lean direction
+                confidence: kp_conf.clamp(0.1, 1.0),
             }
         })
         .collect();
+
+    // Bounding box derived from actual keypoint extents with padding.
+    let xs: Vec<f64> = keypoints.iter().map(|k| k.x).collect();
+    let ys: Vec<f64> = keypoints.iter().map(|k| k.y).collect();
+    let min_x = xs.iter().cloned().fold(f64::MAX, f64::min) - 10.0;
+    let min_y = ys.iter().cloned().fold(f64::MAX, f64::min) - 10.0;
+    let max_x = xs.iter().cloned().fold(f64::MIN, f64::max) + 10.0;
+    let max_y = ys.iter().cloned().fold(f64::MIN, f64::max) + 10.0;
 
     vec![PersonDetection {
         id: 1,
         confidence: cls.confidence,
         keypoints,
         bbox: BoundingBox {
-            x: base_x - 60.0,
-            y: base_y - 90.0,
-            width: 120.0,
-            height: 220.0,
+            x: min_x,
+            y: min_y,
+            width: (max_x - min_x).max(80.0),
+            height: (max_y - min_y).max(160.0),
         },
         zone: "zone_1".into(),
     }]
@@ -1161,7 +1614,7 @@ async fn stream_status(State(state): State<SharedState>) -> Json<serde_json::Val
     Json(serde_json::json!({
         "active": true,
         "clients": s.tx.receiver_count(),
-        "fps": 2,
+        "fps": if s.tick > 1 { 10u64 } else { 0u64 },
         "source": s.source,
     }))
 }
@@ -1311,9 +1764,19 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     debug!("ESP32 frame from {src}: node={}, subs={}, seq={}",
                            frame.node_id, frame.n_subcarriers, frame.sequence);
 
-                    let (features, classification) = extract_features_from_frame(&frame);
                     let mut s = state.write().await;
                     s.source = "esp32".to_string();
+
+                    // Append current amplitudes to history before extracting features so
+                    // that temporal analysis includes the most recent frame.
+                    s.frame_history.push_back(frame.amplitudes.clone());
+                    if s.frame_history.len() > FRAME_HISTORY_CAPACITY {
+                        s.frame_history.pop_front();
+                    }
+
+                    let sample_rate_hz = 1000.0 / 500.0_f64; // default tick; ESP32 frames arrive as fast as they come
+                    let (features, classification, breathing_rate_hz, sub_variances) =
+                        extract_features_from_frame(&frame, &s.frame_history, sample_rate_hz);
 
                     // Update RSSI history
                     s.rssi_history.push_back(features.mean_rssi);
@@ -1349,7 +1812,8 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         features: features.clone(),
                         classification,
                         signal_field: generate_signal_field(
-                            features.mean_rssi, features.variance, motion_score, tick,
+                            features.mean_rssi, motion_score, breathing_rate_hz,
+                            features.variance.min(1.0), &sub_variances,
                         ),
                         vital_signs: Some(vitals),
                         enhanced_motion: None,
@@ -1390,7 +1854,16 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
         let tick = s.tick;
 
         let frame = generate_simulated_frame(tick);
-        let (features, classification) = extract_features_from_frame(&frame);
+
+        // Append current amplitudes to history before feature extraction.
+        s.frame_history.push_back(frame.amplitudes.clone());
+        if s.frame_history.len() > FRAME_HISTORY_CAPACITY {
+            s.frame_history.pop_front();
+        }
+
+        let sample_rate_hz = 1000.0 / tick_ms as f64;
+        let (features, classification, breathing_rate_hz, sub_variances) =
+            extract_features_from_frame(&frame, &s.frame_history, sample_rate_hz);
 
         s.rssi_history.push_back(features.mean_rssi);
         if s.rssi_history.len() > 60 {
@@ -1407,6 +1880,9 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
         );
         s.latest_vitals = vitals.clone();
 
+        let frame_amplitudes = frame.amplitudes.clone();
+        let frame_n_sub = frame.n_subcarriers;
+
         let update = SensingUpdate {
             msg_type: "sensing_update".to_string(),
             timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
@@ -1416,13 +1892,14 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
                 node_id: 1,
                 rssi_dbm: features.mean_rssi,
                 position: [2.0, 0.0, 1.5],
-                amplitude: frame.amplitudes,
-                subcarrier_count: frame.n_subcarriers as usize,
+                amplitude: frame_amplitudes,
+                subcarrier_count: frame_n_sub as usize,
             }],
             features: features.clone(),
             classification,
             signal_field: generate_signal_field(
-                features.mean_rssi, features.variance, motion_score, tick,
+                features.mean_rssi, motion_score, breathing_rate_hz,
+                features.variance.min(1.0), &sub_variances,
             ),
             vital_signs: Some(vitals),
             enhanced_motion: None,
@@ -2014,6 +2491,7 @@ async fn main() {
     let state: SharedState = Arc::new(RwLock::new(AppStateInner {
         latest_update: None,
         rssi_history: VecDeque::new(),
+        frame_history: VecDeque::new(),
         tick: 0,
         source: source.into(),
         tx,

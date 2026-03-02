@@ -14,7 +14,9 @@ export class LiveDemoTab {
       currentZone: 'zone_1',
       debugMode: false,
       autoReconnect: true,
-      renderMode: 'skeleton'
+      renderMode: 'skeleton',
+      // 'unknown' | 'signal_derived' | 'model_inference'
+      poseSource: 'unknown'
     };
     
     this.components = {
@@ -136,6 +138,48 @@ export class LiveDemoTab {
                 </div>
               </div>
               
+              <div class="pose-source-panel">
+                <h4>Estimation Mode</h4>
+                <div class="pose-source-indicator" id="pose-source-indicator">
+                  <span class="pose-source-badge pose-source-unknown" id="pose-source-badge">Unknown</span>
+                  <p class="pose-source-description" id="pose-source-description">
+                    Waiting for first frame...
+                  </p>
+                </div>
+              </div>
+
+              <div class="setup-guide-panel">
+                <h4>Setup Guide</h4>
+                <div class="setup-levels">
+                  <div class="setup-level">
+                    <span class="setup-level-icon">1x</span>
+                    <div class="setup-level-info">
+                      <strong>1 ESP32 + 1 AP</strong>
+                      <p>Presence, breathing, gross motion</p>
+                    </div>
+                  </div>
+                  <div class="setup-level">
+                    <span class="setup-level-icon">3x</span>
+                    <div class="setup-level-info">
+                      <strong>2-3 ESP32s</strong>
+                      <p>Body localization, motion direction</p>
+                    </div>
+                  </div>
+                  <div class="setup-level">
+                    <span class="setup-level-icon">4x+</span>
+                    <div class="setup-level-info">
+                      <strong>4+ ESP32s + trained model</strong>
+                      <p>Individual limb tracking, full pose</p>
+                    </div>
+                  </div>
+                </div>
+                <p class="setup-note">
+                  Signal-Derived mode uses aggregate CSI features.
+                  For per-limb tracking, load a trained <code>.rvf</code> model
+                  with <code>--model path.rvf</code> and use 4+ sensors.
+                </p>
+              </div>
+
               <div class="health-panel">
                 <h4>System Health</h4>
                 <div class="health-check">
@@ -185,8 +229,8 @@ export class LiveDemoTab {
         flex-direction: column;
         height: 100%;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: #333;
+        background: #0a0f1a;
+        color: #e0e0e0;
       }
 
       .demo-header {
@@ -194,10 +238,10 @@ export class LiveDemoTab {
         justify-content: space-between;
         align-items: center;
         padding: 20px 24px;
-        background: rgba(255, 255, 255, 0.95);
+        background: rgba(15, 20, 35, 0.95);
         backdrop-filter: blur(10px);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-        box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
         position: relative;
         z-index: 10;
       }
@@ -210,10 +254,10 @@ export class LiveDemoTab {
 
       .demo-title h2 {
         margin: 0;
-        color: #333;
+        color: #e0e0e0;
         font-size: 22px;
         font-weight: 700;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #667eea 0%, #a78bfa 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
@@ -224,9 +268,9 @@ export class LiveDemoTab {
         align-items: center;
         gap: 10px;
         padding: 8px 16px;
-        background: rgba(248, 249, 250, 0.8);
+        background: rgba(30, 40, 60, 0.8);
         border-radius: 20px;
-        border: 1px solid rgba(222, 226, 230, 0.5);
+        border: 1px solid rgba(255, 255, 255, 0.1);
       }
 
       .status-indicator {
@@ -260,7 +304,7 @@ export class LiveDemoTab {
       .status-text {
         font-size: 13px;
         font-weight: 500;
-        color: #495057;
+        color: #b0b8c8;
       }
 
       .demo-controls {
@@ -294,19 +338,19 @@ export class LiveDemoTab {
 
       .btn--primary:hover:not(:disabled) {
         transform: translateY(-2px);
-        box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+        box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
       }
 
       .btn--secondary {
-        background: #f8f9fa;
-        color: #495057;
-        border-color: #dee2e6;
+        background: rgba(30, 40, 60, 0.8);
+        color: #b0b8c8;
+        border-color: rgba(255, 255, 255, 0.1);
       }
 
       .btn--secondary:hover:not(:disabled) {
-        background: #e9ecef;
+        background: rgba(40, 50, 75, 0.9);
         transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
       }
 
       .btn:disabled {
@@ -324,19 +368,20 @@ export class LiveDemoTab {
 
       .zone-select {
         padding: 10px 14px;
-        border: 1px solid #dee2e6;
+        border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 8px;
-        background: white;
+        background: rgba(30, 40, 60, 0.8);
+        color: #b0b8c8;
         font-size: 14px;
         cursor: pointer;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
         transition: all 0.2s ease;
       }
 
       .zone-select:focus {
         outline: none;
         border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
       }
 
       .demo-content {
@@ -344,18 +389,17 @@ export class LiveDemoTab {
         flex: 1;
         gap: 24px;
         padding: 24px;
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
+        background: #0a0f1a;
       }
 
       .demo-main {
         flex: 2;
         min-height: 500px;
-        background: white;
+        background: #111827;
         border-radius: 12px;
         overflow: hidden;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(255, 255, 255, 0.06);
       }
 
       .pose-detection-container {
@@ -372,15 +416,15 @@ export class LiveDemoTab {
       }
 
       .metrics-panel, .health-panel, .debug-panel {
-        background: #fff;
-        border: 1px solid #ddd;
+        background: rgba(17, 24, 39, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 8px;
         padding: 15px;
       }
 
       .metrics-panel h4, .health-panel h4, .debug-panel h4 {
         margin: 0 0 15px 0;
-        color: #333;
+        color: #e0e0e0;
         font-size: 14px;
         font-weight: 600;
       }
@@ -394,12 +438,12 @@ export class LiveDemoTab {
       }
 
       .metric label, .health-check label {
-        color: #666;
+        color: #8899aa;
       }
 
       .metric span, .health-check span {
         font-weight: 500;
-        color: #333;
+        color: #c8d0dc;
       }
 
       .debug-actions {
@@ -411,18 +455,20 @@ export class LiveDemoTab {
 
       .debug-info textarea {
         width: 100%;
-        border: 1px solid #ddd;
+        border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 4px;
         padding: 8px;
         font-family: monospace;
         font-size: 11px;
         resize: vertical;
+        background: #0a0f1a;
+        color: #c8d0dc;
       }
 
       .error-display {
-        background: #f8d7da;
-        color: #721c24;
-        border: 1px solid #f5c6cb;
+        background: rgba(220, 53, 69, 0.15);
+        color: #f5a0a8;
+        border: 1px solid rgba(220, 53, 69, 0.3);
         border-radius: 4px;
         padding: 12px;
         margin: 10px 20px;
@@ -432,6 +478,134 @@ export class LiveDemoTab {
       .health-good { color: #28a745; }
       .health-poor { color: #ffc107; }
       .health-bad { color: #dc3545; }
+
+      /* Pose estimation mode indicator */
+      .pose-source-panel {
+        background: rgba(17, 24, 39, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        padding: 15px;
+      }
+
+      .pose-source-panel h4 {
+        margin: 0 0 12px 0;
+        color: #e0e0e0;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .pose-source-indicator {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .pose-source-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        width: fit-content;
+      }
+
+      .pose-source-unknown {
+        background: rgba(108, 117, 125, 0.15);
+        color: #8899aa;
+        border: 1px solid rgba(108, 117, 125, 0.3);
+      }
+
+      .pose-source-signal {
+        background: rgba(0, 204, 136, 0.12);
+        color: #00cc88;
+        border: 1px solid rgba(0, 204, 136, 0.3);
+      }
+
+      .pose-source-model {
+        background: rgba(102, 126, 234, 0.12);
+        color: #8ea4f0;
+        border: 1px solid rgba(102, 126, 234, 0.3);
+      }
+
+      .pose-source-description {
+        margin: 0;
+        font-size: 11px;
+        color: #8899aa;
+        line-height: 1.4;
+      }
+
+      .setup-guide-panel {
+        background: rgba(17, 24, 39, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        padding: 15px;
+      }
+
+      .setup-guide-panel h4 {
+        margin: 0 0 12px 0;
+        color: #e0e0e0;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .setup-levels {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .setup-level {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px;
+        border-radius: 6px;
+        background: rgba(30, 40, 60, 0.6);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+      }
+
+      .setup-level-icon {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        font-size: 11px;
+        font-weight: 700;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+
+      .setup-level-info strong {
+        font-size: 12px;
+        color: #c8d0dc;
+        display: block;
+      }
+
+      .setup-level-info p {
+        margin: 2px 0 0;
+        font-size: 11px;
+        color: #8899aa;
+      }
+
+      .setup-note {
+        margin: 10px 0 0;
+        font-size: 11px;
+        color: #6b7a8d;
+        line-height: 1.5;
+      }
+
+      .setup-note code {
+        background: rgba(102, 126, 234, 0.12);
+        color: #8ea4f0;
+        padding: 1px 4px;
+        border-radius: 3px;
+        font-size: 10px;
+      }
     `;
     
     if (!document.querySelector('#live-demo-enhanced-styles')) {
@@ -545,7 +719,11 @@ export class LiveDemoTab {
   handlePoseUpdate(data) {
     this.metrics.frameCount++;
     this.metrics.lastUpdate = Date.now();
-    this.updateDebugOutput(`Pose update: ${data.persons?.length || 0} persons detected`);
+    // Update pose source indicator if the backend supplies it
+    if (data.pose_source && data.pose_source !== this.state.poseSource) {
+      this.setState({ poseSource: data.pose_source });
+    }
+    this.updateDebugOutput(`Pose update: ${data.persons?.length || 0} persons detected (${data.pose_source || 'unknown'})`);
   }
 
   handleCanvasError(error) {
@@ -706,6 +884,7 @@ export class LiveDemoTab {
     this.updateStatusIndicator();
     this.updateControls();
     this.updateMetricsDisplay();
+    this.updatePoseSourceIndicator();
   }
 
   updateStatusIndicator() {
@@ -786,6 +965,33 @@ export class LiveDemoTab {
       const lastUpdate = this.metrics.lastUpdate ? 
         new Date(this.metrics.lastUpdate).toLocaleTimeString() : 'Never';
       elements.lastUpdate.textContent = lastUpdate;
+    }
+  }
+
+  updatePoseSourceIndicator() {
+    const badge = this.container.querySelector('#pose-source-badge');
+    const description = this.container.querySelector('#pose-source-description');
+
+    if (!badge || !description) return;
+
+    const source = this.state.poseSource;
+
+    if (source === 'model_inference') {
+      badge.className = 'pose-source-badge pose-source-model';
+      badge.textContent = 'Model Inference';
+      description.textContent =
+        'Pose is estimated by a trained neural network ' +
+        'loaded from an RVF container.';
+    } else if (source === 'signal_derived') {
+      badge.className = 'pose-source-badge pose-source-signal';
+      badge.textContent = 'Signal-Derived';
+      description.textContent =
+        'Keypoints are derived from live CSI signal features ' +
+        '(motion power, breathing rate, variance).';
+    } else {
+      badge.className = 'pose-source-badge pose-source-unknown';
+      badge.textContent = 'Unknown';
+      description.textContent = 'Waiting for first frame...';
     }
   }
 

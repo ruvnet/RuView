@@ -42,5 +42,15 @@ EXPOSE 5005/udp
 
 ENV RUST_LOG=info
 
-ENTRYPOINT ["/app/sensing-server"]
-CMD ["--source", "simulated", "--tick-ms", "100", "--ui-path", "/app/ui", "--http-port", "3000", "--ws-port", "3001"]
+# CSI_SOURCE controls which data source the sensing server uses at startup.
+# auto      — probe UDP port 5005 for an ESP32 first; fall back to simulation (default)
+# esp32     — receive real CSI frames from an ESP32 device over UDP port 5005
+# wifi      — use host Wi-Fi RSSI/scan data (Windows netsh; not available in containers)
+# simulated — generate synthetic CSI frames (no hardware required)
+# Override at runtime:  docker run -e CSI_SOURCE=esp32 ...
+ENV CSI_SOURCE=auto
+
+ENTRYPOINT ["/bin/sh", "-c"]
+# Shell-form CMD allows $CSI_SOURCE to be substituted at container start.
+# The ENV default above (CSI_SOURCE=auto) applies when the variable is unset.
+CMD ["/app/sensing-server --source ${CSI_SOURCE} --tick-ms 100 --ui-path /app/ui --http-port 3000 --ws-port 3001"]

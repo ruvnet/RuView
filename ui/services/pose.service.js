@@ -511,6 +511,7 @@ export class PoseService {
       persons: persons,
       zone_summary: zoneSummary,
       processing_time_ms: zoneData.metadata?.processing_time_ms || 0,
+      pose_source: originalMessage.pose_source || zoneData.pose_source || null,
       metadata: {
         mock_data: false,
         source: 'websocket',

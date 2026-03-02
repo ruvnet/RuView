@@ -32,9 +32,28 @@ export interface SignalField {
 }
 
 export interface VitalsData {
-  breathing_bpm: number;
-  hr_proxy_bpm: number;
+  breathing_bpm?: number;
+  hr_proxy_bpm?: number;
+  // Rust sensing server uses these field names
+  breathing_rate_bpm?: number;
+  breathing_confidence?: number;
+  heart_rate_bpm?: number;
+  heart_confidence?: number;
+  confidence?: number;
+}
+
+export interface PoseKeypoint {
+  name?: string;
+  x: number;
+  y: number;
+  z: number;
   confidence: number;
+}
+
+export interface PersonDetection {
+  id?: number;
+  confidence: number;
+  keypoints: PoseKeypoint[];
 }
 
 export interface SensingFrame {
@@ -47,4 +66,8 @@ export interface SensingFrame {
   classification: Classification;
   signal_field: SignalField;
   vital_signs?: VitalsData;
+  pose_keypoints?: [number, number, number, number][];
+  persons?: PersonDetection[];
+  posture?: string;
+  signal_quality_score?: number;
 }

@@ -1754,11 +1754,62 @@ canvas {
   background: var(--color-error);
 }
 
+.sensing-dot.reconnecting {
+  background: var(--color-warning);
+  animation: pulse 1.5s infinite;
+}
+
 .sensing-source {
   margin-left: auto;
   font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
   font-family: var(--font-family-mono);
+}
+
+.sensing-about-text {
+  margin: 0;
+  font-size: 12px;
+  color: #aaa;
+  line-height: 1.5;
+}
+
+.sensing-about-text strong {
+  color: #ccc;
+}
+
+/* Data-source status banner (live / reconnecting / simulated) */
+.sensing-source-banner {
+  display: block;
+  width: 100%;
+  padding: var(--space-8) var(--space-12);
+  margin-bottom: var(--space-12);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  font-family: var(--font-family-mono);
+  text-align: center;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  box-sizing: border-box;
+}
+
+.sensing-source-live {
+  background: rgba(0, 204, 136, 0.15);
+  border: 1px solid #00cc88;
+  color: #00cc88;
+}
+
+.sensing-source-reconnecting {
+  background: rgba(255, 180, 0, 0.12);
+  border: 1px solid var(--color-warning);
+  color: var(--color-warning);
+  animation: pulse 1.5s infinite;
+}
+
+.sensing-source-simulated {
+  background: rgba(255, 60, 60, 0.12);
+  border: 1px solid var(--color-error);
+  color: var(--color-error);
 }
 
 /* Big RSSI value */

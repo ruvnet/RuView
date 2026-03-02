@@ -33,6 +33,13 @@ export class SensingTab {
   _buildDOM() {
     this.container.innerHTML = `
       <h2>Live WiFi Sensing</h2>
+
+      <!-- Data-source status banner — updated by _onStateChange -->
+      <div id="sensingSourceBanner" class="sensing-source-banner sensing-source-reconnecting"
+           role="status" aria-live="polite">
+        RECONNECTING...
+      </div>
+
       <div class="sensing-layout">
         <!-- 3D viewport -->
         <div class="sensing-viewport" id="sensingViewport">
@@ -96,6 +103,17 @@ export class SensingTab {
                 <span class="sensing-meter-val" id="valConfidence">0%</span>
               </div>
             </div>
+          </div>
+
+          <!-- Setup info -->
+          <div class="sensing-card">
+            <div class="sensing-card-title">About This Data</div>
+            <p class="sensing-about-text">
+              Metrics are computed from WiFi Channel State Information (CSI).
+              With <strong>1 ESP32</strong> you get presence detection, breathing
+              estimation, and gross motion. Add <strong>3-4+ ESP32 nodes</strong>
+              around the room for spatial resolution and limb-level tracking.
+            </p>
           </div>
 
           <!-- Extra info -->
@@ -178,19 +196,34 @@ export class SensingTab {
   }
 
   _onStateChange(state) {
-    const dot  = this.container.querySelector('#sensingDot');
-    const text = this.container.querySelector('#sensingState');
-    if (!dot || !text) return;
+    const dot    = this.container.querySelector('#sensingDot');
+    const text   = this.container.querySelector('#sensingState');
+    const banner = this.container.querySelector('#sensingSourceBanner');
 
-    const labels = {
-      disconnected: 'Disconnected',
-      connecting:   'Connecting...',
-      connected:    'Connected',
-      simulated:    'Simulated',
-    };
+    if (dot && text) {
+      const stateLabels = {
+        disconnected: 'Disconnected',
+        connecting:   'Connecting...',
+        connected:    'Connected',
+        reconnecting: 'Reconnecting...',
+        simulated:    'Simulated',
+      };
+      dot.className = 'sensing-dot ' + state;
+      text.textContent = stateLabels[state] || state;
+    }
 
-    dot.className = 'sensing-dot ' + state;
-    text.textContent = labels[state] || state;
+    if (banner) {
+      // Map the service's dataSource to banner text and CSS modifier class.
+      const dataSource = sensingService.dataSource;
+      const bannerConfig = {
+        live:         { text: 'LIVE - ESP32',     cls: 'sensing-source-live' },
+        reconnecting: { text: 'RECONNECTING...', cls: 'sensing-source-reconnecting' },
+        simulated:    { text: 'SIMULATED DATA',  cls: 'sensing-source-simulated' },
+      };
+      const cfg = bannerConfig[dataSource] || bannerConfig.reconnecting;
+      banner.textContent = cfg.text;
+      banner.className = 'sensing-source-banner ' + cfg.cls;
+    }
   }
 
   // ---- HUD update --------------------------------------------------------
