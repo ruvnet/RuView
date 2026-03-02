@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
+    />
+    <title>WiFi DensePose Splat Viewer</title>
+    <style>
+      html,
+      body,
+      #gaussian-splat-root {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #0a0e1a;
+        touch-action: none;
+      }
+
+      #gaussian-splat-root {
+        position: relative;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="gaussian-splat-root"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r165/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.165.0/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+      (function () {
+        const postMessageToRN = (message) => {
+          if (!window.ReactNativeWebView || typeof window.ReactNativeWebView.postMessage !== 'function') {
+            return;
+          }
+
+          try {
+            window.ReactNativeWebView.postMessage(JSON.stringify(message));
+          } catch (error) {
+            console.error('Failed to post RN message', error);
+          }
+        };
+
+        const postError = (message) => {
+          postMessageToRN({
+            type: 'ERROR',
+            payload: {
+              message: typeof message === 'string' ? message : 'Unknown bridge error',
+            },
+          });
+        };
+
+        // Use global THREE from CDN
+        const getThree = () => window.THREE;
+
+        // ---- Custom Splat Shaders --------------------------------------------
+
+        const SPLAT_VERTEX = `
+          attribute float splatSize;
+          attribute vec3  splatColor;
+          attribute float splatOpacity;
+
+          varying vec3  vColor;
+          varying float vOpacity;
+
+          void main() {
+            vColor   = splatColor;
+            vOpacity = splatOpacity;
+
+            vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+            gl_PointSize = splatSize * (300.0 / -mvPosition.z);
+            gl_Position  = projectionMatrix * mvPosition;
+          }
+        `;
+
+        const SPLAT_FRAGMENT = `
+          varying vec3  vColor;
+          varying float vOpacity;
+
+          void main() {
+            // Circular soft-edge disc
+            float dist = length(gl_PointCoord - vec2(0.5));
+            if (dist > 0.5) discard;
+            float alpha = smoothstep(0.5, 0.2, dist) * vOpacity;
+            gl_FragColor = vec4(vColor, alpha);
+          }
+        `;
+
+        // ---- Color helpers ---------------------------------------------------
+
+        /** Map a scalar 0-1 to blue -> green -> red gradient */
+        function valueToColor(v) {
+          const clamped = Math.max(0, Math.min(1, v));
+          // blue(0) -> cyan(0.25) -> green(0.5) -> yellow(0.75) -> red(1)
+          let r;
+          let g;
+          let b;
+          if (clamped < 0.5) {
+            const t = clamped * 2;
+            r = 0;
+            g = t;
+            b = 1 - t;
+          } else {
+            const t = (clamped - 0.5) * 2;
+            r = t;
+            g = 1 - t;
+            b = 0;
+          }
+          return [r, g, b];
+        }
+
+        // ---- GaussianSplatRenderer -------------------------------------------
+
+        class GaussianSplatRenderer {
+          /** @param {HTMLElement} container - DOM element to attach the renderer to */
+          constructor(container, opts = {}) {
+            const THREE = getThree();
+            if (!THREE) {
+              throw new Error('Three.js not loaded');
+            }
+
+            this.container = container;
+            this.width = opts.width || container.clientWidth || 800;
+            this.height = opts.height || 500;
+
+            // Scene
+            this.scene = new THREE.Scene();
+            this.scene.background = new THREE.Color(0x0a0e1a);
+
+            // Camera — perspective looking down at the room
+            this.camera = new THREE.PerspectiveCamera(45, this.width / this.height, 0.1, 200);
+            this.camera.position.set(0, 10, 12);
+            this.camera.lookAt(0, 0, 0);
+
+            // Renderer
+            this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            this.renderer.setSize(this.width, this.height);
+            this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(this.renderer.domElement);
+
+            // Lights
+            const ambient = new THREE.AmbientLight(0x9ec7ff, 0.35);
+            this.scene.add(ambient);
+
+            const directional = new THREE.DirectionalLight(0x9ec7ff, 0.65);
+            directional.position.set(4, 10, 6);
+            directional.castShadow = false;
+            this.scene.add(directional);
+
+            // Grid & room
+            this._createRoom(THREE);
+
+            // Signal field splats (20x20 = 400 points on the floor plane)
+            this.gridSize = 20;
+            this._createFieldSplats(THREE);
+
+            // Node markers (ESP32 / router positions)
+            this._createNodeMarkers(THREE);
+
+            // Body disruption blob
+            this._createBodyBlob(THREE);
+
+            // Orbit controls for drag + pinch zoom
+            this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+            this.controls.target.set(0, 0, 0);
+            this.controls.minDistance = 6;
+            this.controls.maxDistance = 40;
+            this.controls.enableDamping = true;
+            this.controls.dampingFactor = 0.08;
+            this.controls.update();
+
+            // Animation state
+            this._animFrame = null;
+            this._lastData = null;
+            this._fpsFrames = [];
+            this._lastFpsReport = 0;
+
+            // Start render loop
+            this._animate();
+          }
+
+          // ---- Scene setup ---------------------------------------------------
+
+          _createRoom(THREE) {
+            // Floor grid (on y = 0), 20 units
+            const grid = new THREE.GridHelper(20, 20, 0x1a3a4a, 0x0d1f28);
+            grid.position.y = 0;
+            this.scene.add(grid);
+
+            // Room boundary wireframe
+            const boxGeo = new THREE.BoxGeometry(20, 6, 20);
+            const edges = new THREE.EdgesGeometry(boxGeo);
+            const line = new THREE.LineSegments(
+              edges,
+              new THREE.LineBasicMaterial({ color: 0x1a4a5a, opacity: 0.3, transparent: true }),
+            );
+            line.position.y = 3;
+            this.scene.add(line);
+          }
+
+          _createFieldSplats(THREE) {
+            const count = this.gridSize * this.gridSize;
+
+            const positions = new Float32Array(count * 3);
+            const sizes = new Float32Array(count);
+            const colors = new Float32Array(count * 3);
+            const opacities = new Float32Array(count);
+
+            // Lay splats on the floor plane (y = 0.05 to sit just above grid)
+            for (let iz = 0; iz < this.gridSize; iz++) {
+              for (let ix = 0; ix < this.gridSize; ix++) {
+                const idx = iz * this.gridSize + ix;
+                positions[idx * 3 + 0] = (ix - this.gridSize / 2) + 0.5; // x
+                positions[idx * 3 + 1] = 0.05; // y
+                positions[idx * 3 + 2] = (iz - this.gridSize / 2) + 0.5; // z
+
+                sizes[idx] = 1.5;
+                colors[idx * 3] = 0.1;
+                colors[idx * 3 + 1] = 0.2;
+                colors[idx * 3 + 2] = 0.6;
+                opacities[idx] = 0.15;
+              }
+            }
+
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geo.setAttribute('splatSize', new THREE.BufferAttribute(sizes, 1));
+            geo.setAttribute('splatColor', new THREE.BufferAttribute(colors, 3));
+            geo.setAttribute('splatOpacity', new THREE.BufferAttribute(opacities, 1));
+
+            const mat = new THREE.ShaderMaterial({
+              vertexShader: SPLAT_VERTEX,
+              fragmentShader: SPLAT_FRAGMENT,
+              transparent: true,
+              depthWrite: false,
+              blending: THREE.AdditiveBlending,
+            });
+
+            this.fieldPoints = new THREE.Points(geo, mat);
+            this.scene.add(this.fieldPoints);
+          }
+
+          _createNodeMarkers(THREE) {
+            // Router at center — green sphere
+            const routerGeo = new THREE.SphereGeometry(0.3, 16, 16);
+            const routerMat = new THREE.MeshBasicMaterial({ color: 0x00ff88, transparent: true, opacity: 0.8 });
+            this.routerMarker = new THREE.Mesh(routerGeo, routerMat);
+            this.routerMarker.position.set(0, 0.5, 0);
+            this.scene.add(this.routerMarker);
+
+            // ESP32 node — cyan sphere (default position, updated from data)
+            const nodeGeo = new THREE.SphereGeometry(0.25, 16, 16);
+            const nodeMat = new THREE.MeshBasicMaterial({ color: 0x00ccff, transparent: true, opacity: 0.8 });
+            this.nodeMarker = new THREE.Mesh(nodeGeo, nodeMat);
+            this.nodeMarker.position.set(2, 0.5, 1.5);
+            this.scene.add(this.nodeMarker);
+          }
+
+          _createBodyBlob(THREE) {
+            // A cluster of splats representing body disruption
+            const count = 64;
+            const positions = new Float32Array(count * 3);
+            const sizes = new Float32Array(count);
+            const colors = new Float32Array(count * 3);
+            const opacities = new Float32Array(count);
+
+            for (let i = 0; i < count; i++) {
+              // Random sphere distribution
+              const theta = Math.random() * Math.PI * 2;
+              const phi = Math.acos(2 * Math.random() - 1);
+              const r = Math.random() * 1.5;
+              positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+              positions[i * 3 + 1] = r * Math.cos(phi) + 2;
+              positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+
+              sizes[i] = 2 + Math.random() * 3;
+              colors[i * 3] = 0.2;
+              colors[i * 3 + 1] = 0.8;
+              colors[i * 3 + 2] = 0.3;
+              opacities[i] = 0.0; // hidden until presence detected
+            }
+
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geo.setAttribute('splatSize', new THREE.BufferAttribute(sizes, 1));
+            geo.setAttribute('splatColor', new THREE.BufferAttribute(colors, 3));
+            geo.setAttribute('splatOpacity', new THREE.BufferAttribute(opacities, 1));
+
+            const mat = new THREE.ShaderMaterial({
+              vertexShader: SPLAT_VERTEX,
+              fragmentShader: SPLAT_FRAGMENT,
+              transparent: true,
+              depthWrite: false,
+              blending: THREE.AdditiveBlending,
+            });
+
+            this.bodyBlob = new THREE.Points(geo, mat);
+            this.scene.add(this.bodyBlob);
+          }
+
+          // ---- Data update --------------------------------------------------
+
+          /**
+           * Update the visualization with new sensing data.
+           * @param {object} data - sensing_update JSON from ws_server
+           */
+          update(data) {
+            this._lastData = data;
+            if (!data) return;
+
+            const features = data.features || {};
+            const classification = data.classification || {};
+            const signalField = data.signal_field || {};
+            const nodes = data.nodes || [];
+
+            // -- Update signal field splats ------------------------------------
+            if (signalField.values && this.fieldPoints) {
+              const geo = this.fieldPoints.geometry;
+              const clr = geo.attributes.splatColor.array;
+              const sizes = geo.attributes.splatSize.array;
+              const opac = geo.attributes.splatOpacity.array;
+              const vals = signalField.values;
+              const count = Math.min(vals.length, this.gridSize * this.gridSize);
+
+              for (let i = 0; i < count; i++) {
+                const v = vals[i];
+                const [r, g, b] = valueToColor(v);
+                clr[i * 3] = r;
+                clr[i * 3 + 1] = g;
+                clr[i * 3 + 2] = b;
+                sizes[i] = 1.0 + v * 4.0;
+                opac[i] = 0.1 + v * 0.6;
+              }
+
+              geo.attributes.splatColor.needsUpdate = true;
+              geo.attributes.splatSize.needsUpdate = true;
+              geo.attributes.splatOpacity.needsUpdate = true;
+            }
+
+            // -- Update body blob ----------------------------------------------
+            if (this.bodyBlob) {
+              const bGeo = this.bodyBlob.geometry;
+              const bOpac = bGeo.attributes.splatOpacity.array;
+              const bClr = bGeo.attributes.splatColor.array;
+              const bSize = bGeo.attributes.splatSize.array;
+
+              const presence = classification.presence || false;
+              const motionLvl = classification.motion_level || 'absent';
+              const confidence = classification.confidence || 0;
+              const breathing = features.breathing_band_power || 0;
+
+              // Breathing pulsation
+              const breathPulse = 1.0 + Math.sin(Date.now() * 0.004) * Math.min(breathing * 3, 0.4);
+
+              for (let i = 0; i < bOpac.length; i++) {
+                if (presence) {
+                  bOpac[i] = confidence * 0.4;
+
+                  // Color by motion level
+                  if (motionLvl === 'active') {
+                    bClr[i * 3] = 1.0;
+                    bClr[i * 3 + 1] = 0.2;
+                    bClr[i * 3 + 2] = 0.1;
+                  } else {
+                    bClr[i * 3] = 0.1;
+                    bClr[i * 3 + 1] = 0.8;
+                    bClr[i * 3 + 2] = 0.4;
+                  }
+
+                  bSize[i] = (2 + Math.random() * 2) * breathPulse;
+                } else {
+                  bOpac[i] = 0.0;
+                }
+              }
+
+              bGeo.attributes.splatOpacity.needsUpdate = true;
+              bGeo.attributes.splatColor.needsUpdate = true;
+              bGeo.attributes.splatSize.needsUpdate = true;
+            }
+
+            // -- Update node positions -----------------------------------------
+            if (nodes.length > 0 && nodes[0].position && this.nodeMarker) {
+              const pos = nodes[0].position;
+              this.nodeMarker.position.set(pos[0], 0.5, pos[2]);
+            }
+          }
+
+          // ---- Render loop -------------------------------------------------
+
+          _animate() {
+            this._animFrame = requestAnimationFrame(() => this._animate());
+
+            const now = performance.now();
+
+            // Gentle router glow pulse
+            if (this.routerMarker) {
+              const pulse = 0.6 + 0.3 * Math.sin(now * 0.003);
+              this.routerMarker.material.opacity = pulse;
+            }
+
+            this.controls.update();
+            this.renderer.render(this.scene, this.camera);
+
+            this._fpsFrames.push(now);
+            while (this._fpsFrames.length > 0 && this._fpsFrames[0] < now - 1000) {
+              this._fpsFrames.shift();
+            }
+
+            if (now - this._lastFpsReport >= 1000) {
+              const fps = this._fpsFrames.length;
+              this._lastFpsReport = now;
+              postMessageToRN({
+                type: 'FPS_TICK',
+                payload: { fps },
+              });
+            }
+          }
+
+          // ---- Resize / cleanup --------------------------------------------
+
+          resize(width, height) {
+            if (!width || !height) return;
+            this.width = width;
+            this.height = height;
+            this.camera.aspect = width / height;
+            this.camera.updateProjectionMatrix();
+            this.renderer.setSize(width, height);
+          }
+
+          dispose() {
+            if (this._animFrame) {
+              cancelAnimationFrame(this._animFrame);
+            }
+
+            this.controls?.dispose();
+            this.renderer.dispose();
+            if (this.renderer.domElement.parentNode) {
+              this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);
+            }
+          }
+        }
+
+        // Expose renderer constructor for debugging/interop
+        window.GaussianSplatRenderer = GaussianSplatRenderer;
+
+        let renderer = null;
+        let pendingFrame = null;
+        let pendingResize = null;
+
+        const postSafeReady = () => {
+          postMessageToRN({ type: 'READY' });
+        };
+
+        const routeMessage = (event) => {
+          let raw = event.data;
+          if (typeof raw === 'object' && raw != null && 'data' in raw) {
+            raw = raw.data;
+          }
+
+          let message = raw;
+          if (typeof raw === 'string') {
+            try {
+              message = JSON.parse(raw);
+            } catch (err) {
+              postError('Failed to parse RN message payload');
+              return;
+            }
+          }
+
+          if (!message || typeof message !== 'object') {
+            return;
+          }
+
+          if (message.type === 'FRAME_UPDATE') {
+            const payload = message.payload || null;
+            if (!payload) {
+              return;
+            }
+
+            if (!renderer) {
+              pendingFrame = payload;
+              return;
+            }
+
+            try {
+              renderer.update(payload);
+            } catch (error) {
+              postError((error && error.message) || 'Failed to update frame');
+            }
+            return;
+          }
+
+          if (message.type === 'RESIZE') {
+            const dims = message.payload || {};
+            const w = Number(dims.width);
+            const h = Number(dims.height);
+            if (!Number.isFinite(w) || !Number.isFinite(h) || !w || !h) {
+              return;
+            }
+
+            if (!renderer) {
+              pendingResize = { width: w, height: h };
+              return;
+            }
+
+            try {
+              renderer.resize(w, h);
+            } catch (error) {
+              postError((error && error.message) || 'Failed to resize renderer');
+            }
+            return;
+          }
+
+          if (message.type === 'DISPOSE') {
+            if (!renderer) {
+              return;
+            }
+
+            try {
+              renderer.dispose();
+            } catch (error) {
+              postError((error && error.message) || 'Failed to dispose renderer');
+            }
+            renderer = null;
+            return;
+          }
+        };
+
+        const buildRenderer = () => {
+          const container = document.getElementById('gaussian-splat-root');
+          if (!container) {
+            return;
+          }
+
+          try {
+            renderer = new GaussianSplatRenderer(container, {
+              width: container.clientWidth || window.innerWidth,
+              height: container.clientHeight || window.innerHeight,
+            });
+
+            if (pendingFrame) {
+              renderer.update(pendingFrame);
+              pendingFrame = null;
+            }
+
+            if (pendingResize) {
+              renderer.resize(pendingResize.width, pendingResize.height);
+              pendingResize = null;
+            }
+
+            postSafeReady();
+          } catch (error) {
+            renderer = null;
+            postError((error && error.message) || 'Failed to initialize renderer');
+          }
+        };
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', buildRenderer);
+        } else {
+          buildRenderer();
+        }
+
+        window.addEventListener('message', routeMessage);
+        window.addEventListener('resize', () => {
+          if (!renderer) {
+            pendingResize = {
+              width: window.innerWidth,
+              height: window.innerHeight,
+            };
+            return;
+          }
+          renderer.resize(window.innerWidth, window.innerHeight);
+        });
+      })();
+    </script>
+  </body>
+</html>

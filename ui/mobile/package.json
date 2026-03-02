@@ -1,0 +1,53 @@
+{
+  "name": "mobile",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "test": "jest",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@expo/vector-icons": "^15.0.2",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-navigation/bottom-tabs": "^7.15.3",
+    "@react-navigation/native": "^7.1.31",
+    "@types/three": "^0.183.1",
+    "axios": "^1.13.6",
+    "expo": "~55.0.4",
+    "expo-status-bar": "~55.0.4",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-native": "0.83.2",
+    "react-native-gesture-handler": "~2.30.0",
+    "react-native-reanimated": "4.2.1",
+    "react-native-safe-area-context": "~5.6.2",
+    "react-native-screens": "~4.23.0",
+    "react-native-svg": "15.15.3",
+    "react-native-web": "^0.21.0",
+    "react-native-webview": "13.16.0",
+    "react-native-wifi-reborn": "^4.13.6",
+    "three": "^0.183.2",
+    "victory-native": "^41.20.2",
+    "zustand": "^5.0.11"
+  },
+  "devDependencies": {
+    "@testing-library/jest-native": "^5.4.3",
+    "@testing-library/react-native": "^13.3.3",
+    "@types/jest": "^30.0.0",
+    "@types/react": "~19.2.2",
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
+    "babel-preset-expo": "^55.0.10",
+    "eslint": "^10.0.2",
+    "jest": "^30.2.0",
+    "jest-expo": "^55.0.9",
+    "prettier": "^3.8.1",
+    "react-native-worklets": "^0.7.4",
+    "typescript": "~5.9.2"
+  },
+  "private": true
+}
