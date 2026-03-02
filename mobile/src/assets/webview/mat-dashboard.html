@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MAT Dashboard</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: #0a0e1a;
+        color: #e5e7eb;
+        font-family: 'Courier New', 'Consolas', monospace;
+        overflow: hidden;
+      }
+
+      #app {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: 100%;
+        height: 100%;
+        padding: 8px;
+      }
+
+      #status {
+        color: #6dd4df;
+        font-size: 12px;
+        letter-spacing: 0.5px;
+      }
+
+      #mapCanvas {
+        flex: 1;
+        width: 100%;
+        border: 1px solid #1e293b;
+        border-radius: 8px;
+        min-height: 180px;
+        background: #0a0e1a;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="status">Initializing MAT dashboard...</div>
+      <canvas id="mapCanvas"></canvas>
+    </div>
+
+    <script>
+      (function () {
+        const TRIAGE = {
+          Immediate: 0,
+          Delayed: 1,
+          Minimal: 2,
+          Expectant: 3,
+          Unknown: 4,
+        };
+
+        const TRIAGE_COLOR = ['#ff0000', '#ffcc00', '#00cc00', '#111111', '#888888'];
+        const PRIORITY = { Critical: 0, High: 1, Medium: 2, Low: 3 };
+
+        const toRgba = (status) => TRIAGE_COLOR[status] || TRIAGE_COLOR[4];
+        const safeId = () =>
+          typeof crypto !== 'undefined' && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `id-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+
+        const isNumber = (value) => typeof value === 'number' && Number.isFinite(value);
+
+        class MatDashboard {
+          constructor() {
+            this.event = null;
+            this.zones = new Map();
+            this.survivors = new Map();
+            this.alerts = new Map();
+            this.motionVector = { x: 0, y: 0 };
+          }
+
+          createEvent(type, lat, lon, name) {
+            const eventId = safeId();
+            this.event = {
+              event_id: eventId,
+              disaster_type: type,
+              latitude: lat,
+              longitude: lon,
+              description: name,
+              createdAt: Date.now(),
+            };
+            this.zones.clear();
+            this.survivors.clear();
+            this.alerts.clear();
+            return eventId;
+          }
+
+          addRectangleZone(name, x, y, w, h) {
+            const id = safeId();
+            this.zones.set(id, {
+              id,
+              name,
+              zone_type: 'rectangle',
+              status: 0,
+              scan_count: 0,
+              detection_count: 0,
+              x,
+              y,
+              width: w,
+              height: h,
+            });
+            return id;
+          }
+
+          addCircleZone(name, cx, cy, radius) {
+            const id = safeId();
+            this.zones.set(id, {
+              id,
+              name,
+              zone_type: 'circle',
+              status: 0,
+              scan_count: 0,
+              detection_count: 0,
+              center_x: cx,
+              center_y: cy,
+              radius,
+            });
+            return id;
+          }
+
+          addZoneFromPayload(payload) {
+            if (!payload || typeof payload !== 'object') {
+              return;
+            }
+
+            const source = payload;
+            const type = source.zone_type || source.type || 'rectangle';
+            const name = source.name || `Zone-${safeId().slice(0, 4)}`;
+
+            if (type === 'circle' || source.center_x !== undefined) {
+              const cx = isNumber(source.center_x) ? source.center_x : 120;
+              const cy = isNumber(source.center_y) ? source.center_y : 120;
+              const radius = isNumber(source.radius) ? source.radius : 50;
+              return this.addCircleZone(name, cx, cy, radius);
+            }
+
+            const x = isNumber(source.x) ? source.x : 40;
+            const y = isNumber(source.y) ? source.y : 40;
+            const width = isNumber(source.width) ? source.width : 100;
+            const height = isNumber(source.height) ? source.height : 100;
+            return this.addRectangleZone(name, x, y, width, height);
+          }
+
+          inferTriage(vitalSigns, confidence) {
+            const breathing = isNumber(vitalSigns?.breathing_rate) ? vitalSigns.breathing_rate : 14;
+            const heart = isNumber(vitalSigns?.heart_rate)
+              ? vitalSigns.heart_rate
+              : isNumber(vitalSigns?.hr)
+                ? vitalSigns.hr
+                : 70;
+
+            if (!isNumber(confidence) || confidence > 0.82) {
+              if (breathing < 10 || breathing > 35 || heart > 150) {
+                return TRIAGE.Immediate;
+              }
+              if (breathing >= 8 && breathing <= 34) {
+                return TRIAGE.Delayed;
+              }
+            }
+
+            if (breathing >= 6 && breathing <= 28 && heart > 45 && heart < 180) {
+              return TRIAGE.Minimal;
+            }
+
+            return TRIAGE.Expectant;
+          }
+
+          locateZoneForPoint(x, y) {
+            for (const [id, zone] of this.zones.entries()) {
+              if (zone.zone_type === 'circle') {
+                const dx = x - zone.center_x;
+                const dy = y - zone.center_y;
+                const inside = Math.sqrt(dx * dx + dy * dy) <= zone.radius;
+                if (inside) {
+                  return id;
+                }
+                continue;
+              }
+
+              if (x >= zone.x && x <= zone.x + zone.width && y >= zone.y && y <= zone.y + zone.height) {
+                return id;
+              }
+            }
+            return this.zones.size > 0 ? this.zones.keys().next().value : safeId();
+          }
+
+          processSurvivorDetection(zone, confidence = 0.6, vital_signs = {}) {
+            const zoneKey =
+              typeof zone === 'string'
+                ? [...this.zones.values()].find((entry) => entry.id === zone || entry.name === zone)
+                : null;
+
+            const selectedZone =
+              zoneKey
+                || (this.zones.size > 0
+                  ? [...this.zones.values()][Math.floor(Math.random() * Math.max(1, this.zones.size))]
+                  : null);
+
+            const bounds = this._pickPointInZone(selectedZone);
+            const triageStatus = this.inferTriage(vital_signs, confidence);
+            const breathingRate = isNumber(vital_signs?.breathing_rate)
+              ? vital_signs.breathing_rate
+              : 10 + confidence * 28;
+            const heartRate = isNumber(vital_signs?.heart_rate)
+              ? vital_signs.heart_rate
+              : isNumber(vital_signs?.hr)
+                ? vital_signs.hr
+              : 55 + confidence * 60;
+
+            const id = safeId();
+            const zone_id = this.locateZoneForPoint(bounds.x, bounds.y);
+
+            const survivor = {
+              id,
+              zone_id,
+              x: bounds.x,
+              y: bounds.y,
+              depth: -Math.abs(isNumber(vital_signs.depth) ? vital_signs.depth : Math.random() * 3),
+              triage_status: triageStatus,
+              triage_color: toRgba(triageStatus),
+              confidence,
+              breathing_rate: breathingRate,
+              heart_rate: heartRate,
+              first_detected: new Date().toISOString(),
+              last_updated: new Date().toISOString(),
+              is_deteriorating: false,
+            };
+
+            this.survivors.set(id, survivor);
+            if (selectedZone) {
+              selectedZone.detection_count = (selectedZone.detection_count || 0) + 1;
+            }
+
+            if (typeof this.postMessage === 'function') {
+              this.postMessage({
+                type: 'SURVIVOR_DETECTED',
+                payload: survivor,
+              });
+            }
+
+            this.generateAlerts();
+            return id;
+          }
+
+          _pickPointInZone(zone) {
+            if (!zone) {
+              return {
+                x: 220 + Math.random() * 80,
+                y: 120 + Math.random() * 80,
+              };
+            }
+
+            if (zone.zone_type === 'circle') {
+              const angle = Math.random() * Math.PI * 2;
+              const radius = Math.random() * (zone.radius || 20);
+              return {
+                x: Math.max(10, Math.min(560, zone.center_x + Math.cos(angle) * radius)),
+                y: Math.max(10, Math.min(280, zone.center_y + Math.sin(angle) * radius)),
+              };
+            }
+
+            return {
+              x: Math.max(zone.x || 5, Math.min((zone.x || 5) + (zone.width || 40), (zone.x || 5) + Math.random() * (zone.width || 40))),
+              y: Math.max(zone.y || 5, Math.min((zone.y || 5) + (zone.height || 40), (zone.y || 5) + Math.random() * (zone.height || 40))),
+            };
+          }
+
+          generateAlerts() {
+            for (const survivor of this.survivors.values()) {
+              if ((survivor.triage_status !== TRIAGE.Immediate && survivor.triage_status !== TRIAGE.Delayed)) {
+                continue;
+              }
+
+              const alertId = `alert-${survivor.id}`;
+              if (this.alerts.has(alertId)) {
+                continue;
+              }
+
+              const priority =
+                survivor.triage_status === TRIAGE.Immediate ? PRIORITY.Critical : PRIORITY.High;
+              const message =
+                survivor.triage_status === TRIAGE.Immediate
+                  ? `Immediate rescue required at (${survivor.x.toFixed(0)}, ${survivor.y.toFixed(0)})`
+                  : `High-priority rescue needed at (${survivor.x.toFixed(0)}, ${survivor.y.toFixed(0)})`;
+              const alert = {
+                id: alertId,
+                survivor_id: survivor.id,
+                priority,
+                title: survivor.triage_status === TRIAGE.Immediate ? 'URGENT' : 'HIGH',
+                message,
+                recommended_action: survivor.triage_status === TRIAGE.Immediate ? 'Dispatch now' : 'Coordinate rescue',
+                triage_status: survivor.triage_status,
+                location_x: survivor.x,
+                location_y: survivor.y,
+                created_at: new Date().toISOString(),
+                priority_color: survivor.triage_status === TRIAGE.Immediate ? '#ff0000' : '#ff8c00',
+              };
+
+              this.alerts.set(alertId, alert);
+              if (typeof this.postMessage === 'function') {
+                this.postMessage({
+                  type: 'ALERT_GENERATED',
+                  payload: alert,
+                });
+              }
+            }
+          }
+
+          processFrame(frame) {
+            const motion = Number(frame?.features?.motion_band_power || 0);
+            const xDelta = isNumber(motion) ? (motion - 0.1) * 4 : 0;
+            const yDelta = isNumber(frame?.features?.breathing_band_power || 0)
+              ? (frame.features.breathing_band_power - 0.1) * 3
+              : 0;
+            this.motionVector = { x: xDelta || 0, y: yDelta || 0 };
+
+            for (const survivor of this.survivors.values()) {
+              const jitterX = (Math.random() - 0.5) * 2;
+              const jitterY = (Math.random() - 0.5) * 2;
+              survivor.x = Math.max(5, Math.min(560, survivor.x + this.motionVector.x + jitterX));
+              survivor.y = Math.max(5, Math.min(280, survivor.y + this.motionVector.y + jitterY));
+              survivor.last_updated = new Date().toISOString();
+            }
+          }
+
+          renderZones(ctx) {
+            for (const zone of this.zones.values()) {
+              const fill = 'rgba(0, 150, 255, 0.3)';
+              ctx.strokeStyle = '#0096ff';
+              ctx.fillStyle = fill;
+              ctx.lineWidth = 2;
+
+              if (zone.zone_type === 'circle') {
+                ctx.beginPath();
+                ctx.arc(zone.center_x, zone.center_y, zone.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '12px monospace';
+                ctx.fillText(zone.name, zone.center_x - 22, zone.center_y);
+              } else {
+                ctx.fillRect(zone.x, zone.y, zone.width, zone.height);
+                ctx.strokeRect(zone.x, zone.y, zone.width, zone.height);
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '12px monospace';
+                ctx.fillText(zone.name, zone.x + 4, zone.y + 14);
+              }
+            }
+          }
+
+          renderSurvivors(ctx) {
+            for (const survivor of this.survivors.values()) {
+              const radius = survivor.is_deteriorating ? 11 : 9;
+
+              if (survivor.triage_status === TRIAGE.Immediate) {
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.26)';
+                ctx.beginPath();
+                ctx.arc(survivor.x, survivor.y, radius + 6, 0, Math.PI * 2);
+                ctx.fill();
+              }
+
+              ctx.fillStyle = survivor.triage_color || toRgba(TRIAGE.Minimal);
+              ctx.font = 'bold 18px monospace';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText('✦', survivor.x, survivor.y);
+              ctx.strokeStyle = '#ffffff';
+              ctx.lineWidth = 1.5;
+              ctx.beginPath();
+              ctx.arc(survivor.x, survivor.y, radius, 0, Math.PI * 2);
+              ctx.stroke();
+
+              if (survivor.depth < 0) {
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '9px monospace';
+                ctx.fillText(`${Math.abs(survivor.depth).toFixed(1)}m`, survivor.x + radius + 4, survivor.y + 4);
+              }
+            }
+          }
+
+          render(ctx, width, height) {
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = '#0a0e1a';
+            ctx.fillRect(0, 0, width, height);
+
+            ctx.strokeStyle = '#1f2a3d';
+            ctx.lineWidth = 1;
+            const grid = 40;
+            for (let x = 0; x <= width; x += grid) {
+              ctx.beginPath();
+              ctx.moveTo(x, 0);
+              ctx.lineTo(x, height);
+              ctx.stroke();
+            }
+            for (let y = 0; y <= height; y += grid) {
+              ctx.beginPath();
+              ctx.moveTo(0, y);
+              ctx.lineTo(width, y);
+              ctx.stroke();
+            }
+
+            this.renderZones(ctx);
+            this.renderSurvivors(ctx);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '12px monospace';
+            const stats = {
+              survivors: this.survivors.size,
+              alerts: this.alerts.size,
+            };
+            ctx.fillText(`Survivors: ${stats.survivors}`, 12, 20);
+            ctx.fillText(`Alerts: ${stats.alerts}`, 12, 36);
+          }
+
+          postMessage(message) {
+            if (typeof window.ReactNativeWebView !== 'undefined' && window.ReactNativeWebView.postMessage) {
+              window.ReactNativeWebView.postMessage(JSON.stringify(message));
+            }
+          }
+        }
+
+        const dashboard = new MatDashboard();
+        const canvas = document.getElementById('mapCanvas');
+        const ctx = canvas.getContext('2d');
+        const status = document.getElementById('status');
+
+        const resize = () => {
+          canvas.width = Math.max(200, Math.floor(canvas.parentElement.clientWidth - 2));
+          canvas.height = Math.max(180, Math.floor(canvas.parentElement.clientHeight - 20));
+        };
+
+        const startup = () => {
+          dashboard.createEvent('earthquake', 37.7749, -122.4194, 'Training Scenario');
+          dashboard.addRectangleZone('Zone A', 60, 45, 170, 120);
+          dashboard.addCircleZone('Zone B', 300, 170, 70);
+          dashboard.processSurvivorDetection('Zone A', 0.94, { breathing_rate: 11, hr: 128 });
+          dashboard.processSurvivorDetection('Zone A', 0.88, { breathing_rate: 16, hr: 118 });
+          dashboard.processSurvivorDetection('Zone B', 0.71, { breathing_rate: 9, hr: 142 });
+          status.textContent = 'MAT dashboard ready';
+          dashboard.postMessage({ type: 'READY' });
+        };
+
+        const loop = () => {
+          if (dashboard.zones.size > 0) {
+            dashboard.render(ctx, canvas.width, canvas.height);
+          }
+          requestAnimationFrame(loop);
+        };
+
+        window.addEventListener('resize', resize);
+
+        window.addEventListener('message', (evt) => {
+          let incoming = evt.data;
+          try {
+            if (typeof incoming === 'string') {
+              incoming = JSON.parse(incoming);
+            }
+          } catch {
+            incoming = null;
+          }
+
+          if (!incoming || typeof incoming !== 'object') {
+            return;
+          }
+
+          if (incoming.type === 'CREATE_EVENT') {
+            const payload = incoming.payload || {};
+            dashboard.createEvent(
+              payload.type || payload.disaster_type || 'earthquake',
+              payload.latitude || 0,
+              payload.longitude || 0,
+              payload.name || payload.description || 'Disaster Event',
+            );
+            return;
+          }
+
+          if (incoming.type === 'ADD_ZONE') {
+            dashboard.addZoneFromPayload(incoming.payload || {});
+            return;
+          }
+
+          if (incoming.type === 'FRAME_UPDATE') {
+            dashboard.processFrame(incoming.payload || {});
+          }
+        });
+
+        resize();
+        startup();
+        loop();
+      })();
+    </script>
+  </body>
+</html>
