@@ -257,7 +257,7 @@ fn attention_weighted_fusion(
     }
 
     // Compute attention weights based on similarity to consensus
-    let mut weights = vec![0.0_f32; n_nodes];
+    let mut logits = vec![0.0_f32; n_nodes];
     for (n, amp) in amplitudes.iter().enumerate() {
         let mut dot = 0.0_f32;
         let mut norm_a = 0.0_f32;
@@ -269,10 +269,15 @@ fn attention_weighted_fusion(
         }
         let denom = (norm_a * norm_b).sqrt().max(1e-12);
         let similarity = dot / denom;
-        weights[n] = (similarity / temperature).exp();
+        logits[n] = similarity / temperature;
     }
 
-    // Normalize weights (softmax-style)
+    // Numerically stable softmax: subtract max to prevent exp() overflow
+    let max_logit = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let mut weights = vec![0.0_f32; n_nodes];
+    for (n, &logit) in logits.iter().enumerate() {
+        weights[n] = (logit - max_logit).exp();
+    }
     let weight_sum: f32 = weights.iter().sum::<f32>().max(1e-12);
     for w in &mut weights {
         *w /= weight_sum;

@@ -199,7 +199,12 @@ impl RfTomographer {
             ));
         }
 
-        let n_voxels = config.nx * config.ny * config.nz;
+        let n_voxels = config.nx
+            .checked_mul(config.ny)
+            .and_then(|v| v.checked_mul(config.nz))
+            .ok_or_else(|| TomographyError::InvalidGrid(
+                format!("Grid dimensions overflow: {}x{}x{}", config.nx, config.ny, config.nz),
+            ))?;
 
         // Precompute weight matrix
         let weight_matrix: Vec<Vec<(usize, f64)>> = links

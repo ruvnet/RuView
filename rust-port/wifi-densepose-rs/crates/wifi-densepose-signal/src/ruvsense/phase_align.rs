@@ -281,8 +281,11 @@ fn mean_phase_on_indices(phase: &[f32], indices: &[usize]) -> f32 {
     let mut sin_sum = 0.0_f32;
     let mut cos_sum = 0.0_f32;
     for &i in indices {
-        sin_sum += phase[i].sin();
-        cos_sum += phase[i].cos();
+        // Defensive bounds check: skip out-of-range indices rather than panic
+        if let Some(&p) = phase.get(i) {
+            sin_sum += p.sin();
+            cos_sum += p.cos();
+        }
     }
 
     sin_sum.atan2(cos_sum)

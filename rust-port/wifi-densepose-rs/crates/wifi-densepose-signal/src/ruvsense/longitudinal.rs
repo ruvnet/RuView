@@ -252,15 +252,23 @@ impl PersonalBaseline {
 
         let mut reports = Vec::new();
 
-        for &(metric, value) in &summary.metrics {
-            let stats = self.stats_for_mut(metric);
-            stats.update(value);
+        let observation_days = self.observation_days;
 
-            if !self.is_ready_at(self.observation_days) {
+        for &(metric, value) in &summary.metrics {
+            // Update stats and extract values before releasing the mutable borrow
+            let (z, baseline_mean, baseline_std) = {
+                let stats = self.stats_for_mut(metric);
+                stats.update(value);
+                let z = stats.z_score(value);
+                let mean = stats.mean;
+                let std = stats.std_dev();
+                (z, mean, std)
+            };
+
+            if !self.is_ready_at(observation_days) {
                 continue;
             }
 
-            let z = stats.z_score(value);
             let idx = Self::metric_index(metric);
 
             if z.abs() > 2.0 {
@@ -288,8 +296,8 @@ impl PersonalBaseline {
                     direction,
                     z_score: z,
                     current_value: value,
-                    baseline_mean: stats.mean,
-                    baseline_std: stats.std_dev(),
+                    baseline_mean,
+                    baseline_std,
                     sustained_days: self.drift_counters[idx],
                     level,
                     timestamp_us,
