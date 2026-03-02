@@ -21,7 +21,7 @@ All 5 ruvector crates integrated in workspace:
 - `ruvector-attention` → `model.rs` (apply_spatial_attention) + `bvp.rs`
 
 ### Architecture Decisions
-28 ADRs in `docs/adr/` (ADR-001 through ADR-028). Key ones:
+31 ADRs in `docs/adr/` (ADR-001 through ADR-031). Key ones:
 - ADR-014: SOTA signal processing (Accepted)
 - ADR-015: MM-Fi + Wi-Pose training datasets (Accepted)
 - ADR-016: RuVector training pipeline integration (Accepted — complete)
@@ -29,6 +29,9 @@ All 5 ruvector crates integrated in workspace:
 - ADR-024: Contrastive CSI embedding / AETHER (Accepted)
 - ADR-027: Cross-environment domain generalization / MERIDIAN (Accepted)
 - ADR-028: ESP32 capability audit + witness verification (Accepted)
+- ADR-029: RuvSense multistatic sensing mode (Proposed)
+- ADR-030: RuvSense persistent field model (Proposed)
+- ADR-031: RuView sensing-first RF mode (Proposed)
 
 ### Build & Test Commands (this repo)
 ```bash

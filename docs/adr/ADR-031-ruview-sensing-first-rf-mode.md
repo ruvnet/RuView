@@ -1,4 +1,4 @@
-# ADR-028: Project RuView -- Sensing-First RF Mode for Multistatic Fidelity Enhancement
+# ADR-031: Project RuView -- Sensing-First RF Mode for Multistatic Fidelity Enhancement
 
 | Field | Value |
 |-------|-------|

@@ -4072,11 +4072,11 @@ dependencies = [
 
 [[package]]
 name = "wifi-densepose-api"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "wifi-densepose-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -4101,11 +4101,11 @@ dependencies = [
 
 [[package]]
 name = "wifi-densepose-config"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "wifi-densepose-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4121,11 +4121,11 @@ dependencies = [
 
 [[package]]
 name = "wifi-densepose-db"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "wifi-densepose-hardware"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "approx",
  "byteorder",
@@ -4139,7 +4139,7 @@ dependencies = [
 
 [[package]]
 name = "wifi-densepose-mat"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "approx",
@@ -4170,7 +4170,7 @@ dependencies = [
 
 [[package]]
 name = "wifi-densepose-nn"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -4193,7 +4193,7 @@ dependencies = [
 
 [[package]]
 name = "wifi-densepose-ruvector"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ruvector-attention",
  "ruvector-attn-mincut",
@@ -4205,7 +4205,7 @@ dependencies = [
 
 [[package]]
 name = "wifi-densepose-sensing-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "chrono",
@@ -4223,7 +4223,7 @@ dependencies = [
 
 [[package]]
 name = "wifi-densepose-signal"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "criterion",
@@ -4244,7 +4244,7 @@ dependencies = [
 
 [[package]]
 name = "wifi-densepose-train"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "approx",
@@ -4282,7 +4282,7 @@ dependencies = [
 
 [[package]]
 name = "wifi-densepose-vitals"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4291,7 +4291,7 @@ dependencies = [
 
 [[package]]
 name = "wifi-densepose-wasm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "console_error_panic_hook",
@@ -4313,7 +4313,7 @@ dependencies = [
 
 [[package]]
 name = "wifi-densepose-wifiscan"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "tokio",
