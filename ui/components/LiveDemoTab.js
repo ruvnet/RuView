@@ -14,7 +14,9 @@ export class LiveDemoTab {
       currentZone: 'zone_1',
       debugMode: false,
       autoReconnect: true,
-      renderMode: 'skeleton'
+      renderMode: 'skeleton',
+      // 'unknown' | 'signal_derived' | 'model_inference'
+      poseSource: 'unknown'
     };
     
     this.components = {
@@ -136,6 +138,48 @@ export class LiveDemoTab {
                 </div>
               </div>
               
+              <div class="pose-source-panel">
+                <h4>Estimation Mode</h4>
+                <div class="pose-source-indicator" id="pose-source-indicator">
+                  <span class="pose-source-badge pose-source-unknown" id="pose-source-badge">Unknown</span>
+                  <p class="pose-source-description" id="pose-source-description">
+                    Waiting for first frame...
+                  </p>
+                </div>
+              </div>
+
+              <div class="setup-guide-panel">
+                <h4>Setup Guide</h4>
+                <div class="setup-levels">
+                  <div class="setup-level">
+                    <span class="setup-level-icon">1x</span>
+                    <div class="setup-level-info">
+                      <strong>1 ESP32 + 1 AP</strong>
+                      <p>Presence, breathing, gross motion</p>
+                    </div>
+                  </div>
+                  <div class="setup-level">
+                    <span class="setup-level-icon">3x</span>
+                    <div class="setup-level-info">
+                      <strong>2-3 ESP32s</strong>
+                      <p>Body localization, motion direction</p>
+                    </div>
+                  </div>
+                  <div class="setup-level">
+                    <span class="setup-level-icon">4x+</span>
+                    <div class="setup-level-info">
+                      <strong>4+ ESP32s + trained model</strong>
+                      <p>Individual limb tracking, full pose</p>
+                    </div>
+                  </div>
+                </div>
+                <p class="setup-note">
+                  Signal-Derived mode uses aggregate CSI features.
+                  For per-limb tracking, load a trained <code>.rvf</code> model
+                  with <code>--model path.rvf</code> and use 4+ sensors.
+                </p>
+              </div>
+
               <div class="health-panel">
                 <h4>System Health</h4>
                 <div class="health-check">
@@ -432,6 +476,133 @@ export class LiveDemoTab {
       .health-good { color: #28a745; }
       .health-poor { color: #ffc107; }
       .health-bad { color: #dc3545; }
+
+      /* Pose estimation mode indicator */
+      .pose-source-panel {
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 15px;
+      }
+
+      .pose-source-panel h4 {
+        margin: 0 0 12px 0;
+        color: #333;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .pose-source-indicator {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .pose-source-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        width: fit-content;
+      }
+
+      .pose-source-unknown {
+        background: #f0f0f0;
+        color: #6c757d;
+        border: 1px solid #dee2e6;
+      }
+
+      .pose-source-signal {
+        background: #e8f5e9;
+        color: #2e7d32;
+        border: 1px solid #a5d6a7;
+      }
+
+      .pose-source-model {
+        background: #e3f2fd;
+        color: #1565c0;
+        border: 1px solid #90caf9;
+      }
+
+      .pose-source-description {
+        margin: 0;
+        font-size: 11px;
+        color: #666;
+        line-height: 1.4;
+      }
+
+      .setup-guide-panel {
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 15px;
+      }
+
+      .setup-guide-panel h4 {
+        margin: 0 0 12px 0;
+        color: #333;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .setup-levels {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .setup-level {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px;
+        border-radius: 6px;
+        background: #f8f9fa;
+        border: 1px solid #e9ecef;
+      }
+
+      .setup-level-icon {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        font-size: 11px;
+        font-weight: 700;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+
+      .setup-level-info strong {
+        font-size: 12px;
+        color: #333;
+        display: block;
+      }
+
+      .setup-level-info p {
+        margin: 2px 0 0;
+        font-size: 11px;
+        color: #666;
+      }
+
+      .setup-note {
+        margin: 10px 0 0;
+        font-size: 11px;
+        color: #888;
+        line-height: 1.5;
+      }
+
+      .setup-note code {
+        background: #f0f0f0;
+        padding: 1px 4px;
+        border-radius: 3px;
+        font-size: 10px;
+      }
     `;
     
     if (!document.querySelector('#live-demo-enhanced-styles')) {
@@ -545,7 +716,11 @@ export class LiveDemoTab {
   handlePoseUpdate(data) {
     this.metrics.frameCount++;
     this.metrics.lastUpdate = Date.now();
-    this.updateDebugOutput(`Pose update: ${data.persons?.length || 0} persons detected`);
+    // Update pose source indicator if the backend supplies it
+    if (data.pose_source && data.pose_source !== this.state.poseSource) {
+      this.setState({ poseSource: data.pose_source });
+    }
+    this.updateDebugOutput(`Pose update: ${data.persons?.length || 0} persons detected (${data.pose_source || 'unknown'})`);
   }
 
   handleCanvasError(error) {
@@ -706,6 +881,7 @@ export class LiveDemoTab {
     this.updateStatusIndicator();
     this.updateControls();
     this.updateMetricsDisplay();
+    this.updatePoseSourceIndicator();
   }
 
   updateStatusIndicator() {
@@ -786,6 +962,33 @@ export class LiveDemoTab {
       const lastUpdate = this.metrics.lastUpdate ? 
         new Date(this.metrics.lastUpdate).toLocaleTimeString() : 'Never';
       elements.lastUpdate.textContent = lastUpdate;
+    }
+  }
+
+  updatePoseSourceIndicator() {
+    const badge = this.container.querySelector('#pose-source-badge');
+    const description = this.container.querySelector('#pose-source-description');
+
+    if (!badge || !description) return;
+
+    const source = this.state.poseSource;
+
+    if (source === 'model_inference') {
+      badge.className = 'pose-source-badge pose-source-model';
+      badge.textContent = 'Model Inference';
+      description.textContent =
+        'Pose is estimated by a trained neural network ' +
+        'loaded from an RVF container.';
+    } else if (source === 'signal_derived') {
+      badge.className = 'pose-source-badge pose-source-signal';
+      badge.textContent = 'Signal-Derived';
+      description.textContent =
+        'Keypoints are derived from live CSI signal features ' +
+        '(motion power, breathing rate, variance).';
+    } else {
+      badge.className = 'pose-source-badge pose-source-unknown';
+      badge.textContent = 'Unknown';
+      description.textContent = 'Waiting for first frame...';
     }
   }
 
