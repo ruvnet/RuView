@@ -1,0 +1,23 @@
+[package]
+name = "ruvector-crv"
+version = "0.1.1"
+edition = "2021"
+authors = ["ruvector contributors"]
+description = "CRV (Coordinate Remote Viewing) protocol integration for ruvector - maps 6-stage signal line methodology to vector database subsystems"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/ruvector"
+
+[lib]
+name = "ruvector_crv"
+path = "src/lib.rs"
+
+[dependencies]
+ruvector-attention = "0.1.31"
+ruvector-gnn = { version = "2.0", default-features = false }
+ruvector-mincut = { version = "2.0", default-features = false, features = ["exact"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+
+[dev-dependencies]
+approx = "0.5"

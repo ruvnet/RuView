@@ -103,12 +103,20 @@ proptest = "1.4"
 mockall = "0.12"
 wiremock = "0.5"
 
-# ruvector integration (all at v2.0.4 — published on crates.io)
+# midstreamer integration (published on crates.io)
+midstreamer-quic = "0.1.0"
+midstreamer-scheduler = "0.1.0"
+midstreamer-temporal-compare = "0.1.0"
+midstreamer-attractor = "0.1.0"
+
+# ruvector integration (published on crates.io)
 ruvector-mincut = "2.0.4"
 ruvector-attn-mincut = "2.0.4"
 ruvector-temporal-tensor = "2.0.4"
 ruvector-solver = "2.0.4"
 ruvector-attention = "2.0.4"
+ruvector-crv = "0.1.1"
+ruvector-gnn = { version = "2.0.5", default-features = false }
 
 
 # Internal crates
@@ -122,6 +130,11 @@ wifi-densepose-hardware = { version = "0.2.0", path = "crates/wifi-densepose-har
 wifi-densepose-wasm = { version = "0.2.0", path = "crates/wifi-densepose-wasm" }
 wifi-densepose-mat = { version = "0.2.0", path = "crates/wifi-densepose-mat" }
 wifi-densepose-ruvector = { version = "0.2.0", path = "crates/wifi-densepose-ruvector" }
+
+# Patch ruvector-crv to fix RuvectorLayer::new() Result API mismatch
+# with ruvector-gnn 2.0.5 (upstream ruvector-crv 0.1.1 was built against 2.0.1).
+[patch.crates-io]
+ruvector-crv = { path = "patches/ruvector-crv" }
 
 [profile.release]
 lto = true

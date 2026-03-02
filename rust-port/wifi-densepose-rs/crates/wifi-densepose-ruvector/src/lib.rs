@@ -26,6 +26,7 @@
 
 #![warn(missing_docs)]
 
+pub mod crv;
 pub mod mat;
 pub mod signal;
 pub mod viewpoint;
