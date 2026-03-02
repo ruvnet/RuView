@@ -83,8 +83,23 @@ export class WebSocketService {
       const ws = await this.createWebSocketWithTimeout(url);
       connectionData.ws = ws;
 
-      // Set up event handlers
+      // Set up event handlers (replaces onopen/onmessage/etc.)
       this.setupEventHandlers(url, ws, handlers);
+
+      // The WebSocket is already open at this point (createWebSocketWithTimeout
+      // resolved on the original onopen).  setupEventHandlers replaced onopen, so
+      // the new handler never fires.  Manually trigger the connected path now.
+      if (ws.readyState === WebSocket.OPEN) {
+        connectionData.status = 'connected';
+        connectionData.lastActivity = Date.now();
+        this.reconnectAttempts.set(url, 0);
+        this.notifyConnectionState(url, 'connected');
+        if (handlers.onOpen) {
+          try { handlers.onOpen(new Event('open')); } catch (e) {
+            this.logger.error('Error in onOpen handler', { url, error: e.message });
+          }
+        }
+      }
 
       // Start heartbeat
       this.startHeartbeat(url);

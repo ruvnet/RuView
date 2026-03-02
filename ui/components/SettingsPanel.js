@@ -55,7 +55,23 @@ export class SettingsPanel {
       // Advanced settings
       heartbeatInterval: 30000,
       maxReconnectAttempts: 10,
-      enableSmoothing: true
+      enableSmoothing: true,
+
+      // Model settings
+      defaultModelPath: 'data/models/',
+      autoLoadModel: false,
+      inferenceDevice: 'CPU',
+      inferenceThreads: 4,
+      progressiveLoading: true,
+
+      // Training settings
+      defaultEpochs: 100,
+      defaultBatchSize: 32,
+      defaultLearningRate: 0.0003,
+      earlyStoppingPatience: 15,
+      checkpointDirectory: 'data/models/',
+      autoExportOnCompletion: true,
+      recordingDirectory: 'data/recordings/'
     };
 
     this.callbacks = {
@@ -245,6 +261,67 @@ export class SettingsPanel {
             </div>
           </div>
           
+          <!-- Model Settings -->
+          <div class="settings-section">
+            <h4>Model Configuration</h4>
+            <div class="setting-row">
+              <label for="default-model-path-${this.containerId}">Default Model Path:</label>
+              <input type="text" id="default-model-path-${this.containerId}" class="setting-input setting-input-wide" placeholder="data/models/">
+            </div>
+            <div class="setting-row">
+              <label for="auto-load-model-${this.containerId}">Auto-load Model on Startup:</label>
+              <input type="checkbox" id="auto-load-model-${this.containerId}" class="setting-checkbox">
+            </div>
+            <div class="setting-row">
+              <label for="inference-device-${this.containerId}">Inference Device:</label>
+              <select id="inference-device-${this.containerId}" class="setting-select">
+                <option value="CPU">CPU</option>
+                <option value="GPU">GPU</option>
+              </select>
+            </div>
+            <div class="setting-row">
+              <label for="inference-threads-${this.containerId}">Inference Threads:</label>
+              <input type="number" id="inference-threads-${this.containerId}" class="setting-input" min="1" max="16">
+            </div>
+            <div class="setting-row">
+              <label for="progressive-loading-${this.containerId}">Progressive Loading:</label>
+              <input type="checkbox" id="progressive-loading-${this.containerId}" class="setting-checkbox">
+            </div>
+          </div>
+
+          <!-- Training Settings -->
+          <div class="settings-section">
+            <h4>Training Configuration</h4>
+            <div class="setting-row">
+              <label for="default-epochs-${this.containerId}">Default Epochs:</label>
+              <input type="number" id="default-epochs-${this.containerId}" class="setting-input" min="1" max="10000">
+            </div>
+            <div class="setting-row">
+              <label for="default-batch-size-${this.containerId}">Default Batch Size:</label>
+              <input type="number" id="default-batch-size-${this.containerId}" class="setting-input" min="1" max="512">
+            </div>
+            <div class="setting-row">
+              <label for="default-learning-rate-${this.containerId}">Default Learning Rate:</label>
+              <input type="number" id="default-learning-rate-${this.containerId}" class="setting-input" min="0.000001" max="1" step="0.0001">
+            </div>
+            <div class="setting-row">
+              <label for="early-stopping-patience-${this.containerId}">Early Stopping Patience:</label>
+              <input type="number" id="early-stopping-patience-${this.containerId}" class="setting-input" min="1" max="100">
+            </div>
+            <div class="setting-row">
+              <label for="checkpoint-directory-${this.containerId}">Checkpoint Directory:</label>
+              <input type="text" id="checkpoint-directory-${this.containerId}" class="setting-input setting-input-wide" placeholder="data/models/">
+            </div>
+            <div class="setting-row">
+              <label for="auto-export-on-completion-${this.containerId}">Auto-export on Completion:</label>
+              <input type="checkbox" id="auto-export-on-completion-${this.containerId}" class="setting-checkbox">
+            </div>
+            <div class="setting-row">
+              <label for="recording-directory-${this.containerId}">Recording Directory:</label>
+              <input type="text" id="recording-directory-${this.containerId}" class="setting-input setting-input-wide" placeholder="data/recordings/">
+            </div>
+          </div>
+
           <div class="settings-toggle">
             <button class="btn btn-sm" id="toggle-advanced-${this.containerId}">Show Advanced</button>
           </div>
@@ -267,11 +344,12 @@ export class SettingsPanel {
     const style = document.createElement('style');
     style.textContent = `
       .settings-panel {
-        background: #fff;
-        border: 1px solid #ddd;
+        background: #0d1117;
+        border: 1px solid rgba(56, 68, 89, 0.6);
         border-radius: 8px;
-        font-family: Arial, sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         overflow: hidden;
+        color: #e0e0e0;
       }
 
       .settings-header {
@@ -279,13 +357,13 @@ export class SettingsPanel {
         justify-content: space-between;
         align-items: center;
         padding: 15px 20px;
-        background: #f8f9fa;
-        border-bottom: 1px solid #ddd;
+        background: rgba(15, 20, 35, 0.95);
+        border-bottom: 1px solid rgba(56, 68, 89, 0.6);
       }
 
       .settings-header h3 {
         margin: 0;
-        color: #333;
+        color: #e0e0e0;
         font-size: 16px;
         font-weight: 600;
       }
@@ -297,26 +375,43 @@ export class SettingsPanel {
 
       .settings-content {
         padding: 20px;
-        max-height: 400px;
+        max-height: 500px;
         overflow-y: auto;
+      }
+
+      .settings-content::-webkit-scrollbar {
+        width: 6px;
+      }
+
+      .settings-content::-webkit-scrollbar-track {
+        background: rgba(15, 20, 35, 0.5);
+      }
+
+      .settings-content::-webkit-scrollbar-thumb {
+        background: rgba(56, 68, 89, 0.8);
+        border-radius: 3px;
+      }
+
+      .settings-content::-webkit-scrollbar-thumb:hover {
+        background: rgba(80, 96, 120, 0.9);
       }
 
       .settings-section {
         margin-bottom: 25px;
-        padding-bottom: 20px;
-        border-bottom: 1px solid #eee;
+        padding: 16px;
+        background: rgba(17, 24, 39, 0.9);
+        border: 1px solid rgba(56, 68, 89, 0.4);
+        border-radius: 8px;
       }
 
       .settings-section:last-child {
-        border-bottom: none;
         margin-bottom: 0;
-        padding-bottom: 0;
       }
 
       .settings-section h4 {
         margin: 0 0 15px 0;
-        color: #555;
-        font-size: 14px;
+        color: #8899aa;
+        font-size: 12px;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.5px;
@@ -332,7 +427,7 @@ export class SettingsPanel {
 
       .setting-row label {
         flex: 1;
-        color: #666;
+        color: #8899aa;
         font-size: 13px;
         font-weight: 500;
       }
@@ -340,9 +435,26 @@ export class SettingsPanel {
       .setting-input, .setting-select {
         flex: 0 0 120px;
         padding: 6px 8px;
-        border: 1px solid #ddd;
+        border: 1px solid rgba(56, 68, 89, 0.6);
         border-radius: 4px;
         font-size: 13px;
+        background: rgba(15, 20, 35, 0.8);
+        color: #e0e0e0;
+      }
+
+      .setting-input:focus, .setting-select:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.15);
+      }
+
+      .setting-input-wide {
+        flex: 0 0 160px;
+      }
+
+      .setting-select option {
+        background: #1a2234;
+        color: #c8d0dc;
       }
 
       .setting-range {
@@ -353,41 +465,45 @@ export class SettingsPanel {
       .setting-value {
         flex: 0 0 40px;
         font-size: 12px;
-        color: #666;
+        color: #b0b8c8;
         text-align: center;
-        background: #f8f9fa;
+        background: rgba(15, 20, 35, 0.8);
         padding: 2px 6px;
         border-radius: 3px;
-        border: 1px solid #ddd;
+        border: 1px solid rgba(56, 68, 89, 0.6);
       }
 
       .setting-checkbox {
         flex: 0 0 auto;
         width: 18px;
         height: 18px;
+        accent-color: #667eea;
       }
 
       .setting-color {
         flex: 0 0 50px;
         height: 30px;
-        border: 1px solid #ddd;
+        border: 1px solid rgba(56, 68, 89, 0.6);
         border-radius: 4px;
         cursor: pointer;
+        background: rgba(15, 20, 35, 0.8);
       }
 
       .btn {
         padding: 6px 12px;
-        border: 1px solid #ddd;
+        border: 1px solid rgba(56, 68, 89, 0.6);
         border-radius: 4px;
-        background: #fff;
+        background: rgba(30, 40, 60, 0.8);
+        color: #b0b8c8;
         cursor: pointer;
         font-size: 12px;
         transition: all 0.2s;
       }
 
       .btn:hover {
-        background: #f8f9fa;
-        border-color: #adb5bd;
+        background: rgba(40, 55, 80, 0.9);
+        border-color: rgba(80, 96, 120, 0.8);
+        color: #e0e0e0;
       }
 
       .btn-sm {
@@ -398,32 +514,32 @@ export class SettingsPanel {
       .settings-toggle {
         text-align: center;
         padding-top: 15px;
-        border-top: 1px solid #eee;
+        border-top: 1px solid rgba(56, 68, 89, 0.4);
       }
 
       .settings-footer {
         padding: 10px 20px;
-        background: #f8f9fa;
-        border-top: 1px solid #ddd;
+        background: rgba(15, 20, 35, 0.95);
+        border-top: 1px solid rgba(56, 68, 89, 0.6);
         text-align: center;
       }
 
       .settings-status {
         font-size: 12px;
-        color: #666;
+        color: #6b7a8d;
       }
 
       .advanced-section {
-        background: #f9f9f9;
+        background: rgba(20, 28, 45, 0.9);
         margin: 0 -20px 25px -20px;
         padding: 20px;
         border: none;
-        border-top: 1px solid #ddd;
-        border-bottom: 1px solid #ddd;
+        border-top: 1px solid rgba(56, 68, 89, 0.4);
+        border-bottom: 1px solid rgba(56, 68, 89, 0.4);
       }
 
       .advanced-section h4 {
-        color: #dc3545;
+        color: #ef4444;
       }
     `;
     
@@ -492,7 +608,9 @@ export class SettingsPanel {
     const checkboxes = [
       'auto-reconnect', 'show-keypoints', 'show-skeleton', 'show-bounding-box',
       'show-confidence', 'show-zones', 'show-debug-info', 'enable-validation',
-      'enable-performance-tracking', 'enable-debug-logging', 'enable-smoothing'
+      'enable-performance-tracking', 'enable-debug-logging', 'enable-smoothing',
+      'auto-load-model', 'progressive-loading',
+      'auto-export-on-completion'
     ];
     
     checkboxes.forEach(id => {
@@ -503,18 +621,46 @@ export class SettingsPanel {
       });
     });
 
-    // Number inputs
+    // Number inputs (integers)
     const numberInputs = [
-      'connection-timeout', 'max-persons', 'max-fps', 
-      'heartbeat-interval', 'max-reconnect-attempts'
+      'connection-timeout', 'max-persons', 'max-fps',
+      'heartbeat-interval', 'max-reconnect-attempts',
+      'inference-threads', 'default-epochs', 'default-batch-size',
+      'early-stopping-patience'
     ];
-    
+
     numberInputs.forEach(id => {
       const input = document.getElementById(`${id}-${this.containerId}`);
       input?.addEventListener('change', (e) => {
         const settingKey = this.camelCase(id);
         this.updateSetting(settingKey, parseInt(e.target.value));
       });
+    });
+
+    // Float number inputs
+    const floatInputs = ['default-learning-rate'];
+    floatInputs.forEach(id => {
+      const input = document.getElementById(`${id}-${this.containerId}`);
+      input?.addEventListener('change', (e) => {
+        const settingKey = this.camelCase(id);
+        this.updateSetting(settingKey, parseFloat(e.target.value));
+      });
+    });
+
+    // Text inputs
+    const textInputs = ['default-model-path', 'checkpoint-directory', 'recording-directory'];
+    textInputs.forEach(id => {
+      const input = document.getElementById(`${id}-${this.containerId}`);
+      input?.addEventListener('change', (e) => {
+        const settingKey = this.camelCase(id);
+        this.updateSetting(settingKey, e.target.value);
+      });
+    });
+
+    // Inference device select
+    const inferenceDeviceSelect = document.getElementById(`inference-device-${this.containerId}`);
+    inferenceDeviceSelect?.addEventListener('change', (e) => {
+      this.updateSetting('inferenceDevice', e.target.value);
     });
 
     // Color inputs
@@ -696,7 +842,19 @@ export class SettingsPanel {
       enableDebugLogging: false,
       heartbeatInterval: 30000,
       maxReconnectAttempts: 10,
-      enableSmoothing: true
+      enableSmoothing: true,
+      defaultModelPath: 'data/models/',
+      autoLoadModel: false,
+      inferenceDevice: 'CPU',
+      inferenceThreads: 4,
+      progressiveLoading: true,
+      defaultEpochs: 100,
+      defaultBatchSize: 32,
+      defaultLearningRate: 0.0003,
+      earlyStoppingPatience: 15,
+      checkpointDirectory: 'data/models/',
+      autoExportOnCompletion: true,
+      recordingDirectory: 'data/recordings/'
     };
   }
 

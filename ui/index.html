@@ -28,6 +28,7 @@
             <button class="nav-tab" data-tab="performance">Performance</button>
             <button class="nav-tab" data-tab="applications">Applications</button>
             <button class="nav-tab" data-tab="sensing">Sensing</button>
+            <button class="nav-tab" data-tab="training">Training</button>
         </nav>
 
         <!-- Dashboard Tab -->
@@ -64,6 +65,11 @@
                         </div>
                         <div class="component-status" data-component="streaming">
                             <span class="component-name">Streaming</span>
+                            <span class="status-text">-</span>
+                            <span class="status-message"></span>
+                        </div>
+                        <div class="component-status" data-component="datasource" id="dashboard-datasource">
+                            <span class="component-name">Data Source</span>
                             <span class="status-text">-</span>
                             <span class="status-message"></span>
                         </div>
@@ -482,6 +488,18 @@
 
         <!-- Sensing Tab -->
         <section id="sensing" class="tab-content"></section>
+
+        <!-- Training Tab -->
+        <section id="training" class="tab-content">
+            <div class="tab-header">
+                <h2>Model Training</h2>
+                <p>Record CSI data, train pose estimation models, and manage .rvf files</p>
+            </div>
+            <div id="training-container" style="display: flex; gap: 20px; flex-wrap: wrap;">
+                <div id="training-panel-container" style="flex: 1; min-width: 400px;"></div>
+                <div id="model-panel-container" style="flex: 1; min-width: 350px; max-width: 450px;"></div>
+            </div>
+        </section>
     </div>
 
     <!-- Error Toast -->

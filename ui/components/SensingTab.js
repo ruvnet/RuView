@@ -216,9 +216,10 @@ export class SensingTab {
       // Map the service's dataSource to banner text and CSS modifier class.
       const dataSource = sensingService.dataSource;
       const bannerConfig = {
-        live:         { text: 'LIVE - ESP32',     cls: 'sensing-source-live' },
-        reconnecting: { text: 'RECONNECTING...', cls: 'sensing-source-reconnecting' },
-        simulated:    { text: 'SIMULATED DATA',  cls: 'sensing-source-simulated' },
+        'live':              { text: 'LIVE \u2014 ESP32 HARDWARE',           cls: 'sensing-source-live' },
+        'server-simulated':  { text: 'SIMULATED \u2014 NO HARDWARE',        cls: 'sensing-source-server-sim' },
+        'reconnecting':      { text: 'RECONNECTING...',                    cls: 'sensing-source-reconnecting' },
+        'simulated':         { text: 'OFFLINE \u2014 CLIENT SIMULATION',    cls: 'sensing-source-simulated' },
       };
       const cfg = bannerConfig[dataSource] || bannerConfig.reconnecting;
       banner.textContent = cfg.text;
@@ -256,7 +257,8 @@ export class SensingTab {
     // Details
     this._setText('valDomFreq', (f.dominant_freq_hz || 0).toFixed(3) + ' Hz');
     this._setText('valChangePoints', String(f.change_points || 0));
-    this._setText('valSampleRate', data.source === 'simulated' ? 'sim' : 'live');
+    const srcLabel = (data.source === 'simulated' || data.source === 'simulate') ? 'sim' : data.source || 'live';
+    this._setText('valSampleRate', srcLabel);
 
     // Sparkline
     this._drawSparkline();

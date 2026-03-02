@@ -45,7 +45,12 @@ export class PoseDetectionCanvas {
     
     // Initialize settings panel
     this.settingsPanel = null;
-    
+
+    // Pose trail state
+    this.poseTrail = [];
+    this.showTrail = false;
+    this.maxTrailLength = 10;
+
     // Initialize component
     this.initializeComponent();
   }
@@ -88,7 +93,7 @@ export class PoseDetectionCanvas {
               <span class="status-text" id="status-text-${this.containerId}">Disconnected</span>
             </div>
           </div>
-          <div class="pose-canvas-controls" id="controls-${this.containerId}">
+          <div class="pose-canvas-controls" id="controls-${this.containerId}" ${!this.config.enableControls ? 'style="display:none"' : ''}>
             <button class="btn btn-start" id="start-btn-${this.containerId}">&#9654; Start</button>
             <button class="btn btn-stop" id="stop-btn-${this.containerId}" disabled>&#9632; Stop</button>
             <button class="btn btn-reconnect" id="reconnect-btn-${this.containerId}" disabled>&#8635; Reconnect</button>
@@ -99,6 +104,7 @@ export class PoseDetectionCanvas {
               <option value="heatmap">Heatmap</option>
               <option value="dense">Dense</option>
             </select>
+            <button class="btn btn-trail" id="trail-btn-${this.containerId}">&#9676; Trail</button>
             <button class="btn btn-settings" id="settings-btn-${this.containerId}">&#9881; Settings</button>
           </div>
         </div>
@@ -285,6 +291,25 @@ export class PoseDetectionCanvas {
         border-color: rgba(100, 116, 139, 0.5);
       }
 
+      .btn-trail {
+        background: rgba(0, 212, 255, 0.1);
+        color: #5ec4d4;
+        border-color: rgba(0, 212, 255, 0.25);
+      }
+
+      .btn-trail:hover:not(:disabled) {
+        background: rgba(0, 212, 255, 0.2);
+        border-color: rgba(0, 212, 255, 0.45);
+        box-shadow: 0 4px 12px rgba(0, 212, 255, 0.15);
+      }
+
+      .btn-trail.active {
+        background: rgba(0, 212, 255, 0.2);
+        color: #00d4ff;
+        border-color: rgba(0, 212, 255, 0.5);
+        box-shadow: 0 0 8px rgba(0, 212, 255, 0.2);
+      }
+
       .mode-select {
         padding: 8px 12px;
         border: 1px solid rgba(255, 255, 255, 0.1);
@@ -416,6 +441,10 @@ export class PoseDetectionCanvas {
     const demoBtn = document.getElementById(`demo-btn-${this.containerId}`);
     demoBtn.addEventListener('click', () => this.toggleDemo());
 
+    // Trail toggle button
+    const trailBtn = document.getElementById(`trail-btn-${this.containerId}`);
+    trailBtn.addEventListener('click', () => this.toggleTrail());
+
     // Settings button
     const settingsBtn = document.getElementById(`settings-btn-${this.containerId}`);
     settingsBtn.addEventListener('click', () => this.showSettings());
@@ -445,6 +474,7 @@ export class PoseDetectionCanvas {
         case 'pose_update':
           this.state.lastPoseData = update.data;
           this.state.frameCount++;
+          this.updateTrail(update.data);
           this.renderPoseData(update.data);
           this.updateStats();
           this.notifyCallback('onPoseUpdate', update.data);
@@ -488,13 +518,39 @@ export class PoseDetectionCanvas {
     }
 
     try {
+      // Render trail before the current frame if enabled
+      if (this.showTrail && this.poseTrail.length > 1) {
+        // The renderer.render() clears the canvas, so we render trail
+        // by hooking into the renderer's canvas context after clear.
+        // We override the render flow: clear, trail, then current.
+        this.renderer.clearCanvas();
+        this.renderTrail(this.renderer.ctx);
+        // Now render current frame without clearing again
+        this.renderCurrentFrameNoClean(poseData);
+      } else {
+        this.renderer.render(poseData, {
+          frameCount: this.state.frameCount,
+          connectionState: this.state.connectionState
+        });
+      }
+    } catch (error) {
+      this.logger.error('Render error', { error: error.message });
+      this.showError(`Render error: ${error.message}`);
+    }
+  }
+
+  renderCurrentFrameNoClean(poseData) {
+    // Call the renderer's render logic without clearing the canvas.
+    // We temporarily stub clearCanvas, render, then restore.
+    const origClear = this.renderer.clearCanvas.bind(this.renderer);
+    this.renderer.clearCanvas = () => {}; // no-op
+    try {
       this.renderer.render(poseData, {
         frameCount: this.state.frameCount,
         connectionState: this.state.connectionState
       });
-    } catch (error) {
-      this.logger.error('Render error', { error: error.message });
-      this.showError(`Render error: ${error.message}`);
+    } finally {
+      this.renderer.clearCanvas = origClear;
     }
   }
 
@@ -648,6 +704,104 @@ export class PoseDetectionCanvas {
       this.renderer.setMode(mode);
       this.logger.info('Render mode changed', { mode });
     }
+  }
+
+  // --- Pose Trail Methods ---
+
+  toggleTrail() {
+    this.showTrail = !this.showTrail;
+    const trailBtn = document.getElementById(`trail-btn-${this.containerId}`);
+    if (trailBtn) {
+      trailBtn.classList.toggle('active', this.showTrail);
+      trailBtn.textContent = this.showTrail ? '\u25CB Trail On' : '\u25CB Trail';
+    }
+    if (!this.showTrail) {
+      this.poseTrail = [];
+    }
+    this.logger.info('Trail toggled', { showTrail: this.showTrail });
+  }
+
+  updateTrail(poseData) {
+    if (!this.showTrail) return;
+    if (!poseData || !poseData.persons || poseData.persons.length === 0) return;
+
+    // Deep clone the keypoints from all persons for this frame
+    const frameKeypoints = poseData.persons.map(person => {
+      if (!person.keypoints) return null;
+      return person.keypoints.map(kp => ({
+        x: kp.x,
+        y: kp.y,
+        confidence: kp.confidence
+      }));
+    }).filter(Boolean);
+
+    if (frameKeypoints.length > 0) {
+      this.poseTrail.push(frameKeypoints);
+      if (this.poseTrail.length > this.maxTrailLength) {
+        this.poseTrail.shift();
+      }
+    }
+  }
+
+  renderTrail(ctx) {
+    if (!this.poseTrail || this.poseTrail.length < 2) return;
+
+    const totalFrames = this.poseTrail.length;
+
+    // Keypoint color palette (same as renderer's body part colors)
+    const kpColors = [
+      '#ff0000', '#ff4500', '#ffa500', '#ffff00', '#adff2f',
+      '#00ff00', '#00ff7f', '#00ffff', '#0080ff', '#0000ff',
+      '#4000ff', '#8000ff', '#ff00ff', '#ff0080', '#ff0040',
+      '#ff8080', '#ffb380'
+    ];
+
+    // Render ghosted keypoints and trajectory lines for each frame in the trail
+    // (skip the last frame since it's the current one rendered by the normal pipeline)
+    for (let frameIdx = 0; frameIdx < totalFrames - 1; frameIdx++) {
+      const alpha = 0.1 + (frameIdx / totalFrames) * 0.7;
+      const framePersons = this.poseTrail[frameIdx];
+      const nextFramePersons = this.poseTrail[frameIdx + 1];
+
+      framePersons.forEach((personKeypoints, personIdx) => {
+        if (!personKeypoints) return;
+
+        personKeypoints.forEach((kp, kpIdx) => {
+          if (kp.confidence <= 0.1) return;
+
+          const x = this.renderer.scaleX(kp.x);
+          const y = this.renderer.scaleY(kp.y);
+          const color = kpColors[kpIdx % kpColors.length];
+
+          // Draw ghosted keypoint dot
+          ctx.globalAlpha = alpha * 0.6;
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Draw trajectory line to same keypoint in next frame
+          if (nextFramePersons && nextFramePersons[personIdx]) {
+            const nextKp = nextFramePersons[personIdx][kpIdx];
+            if (nextKp && nextKp.confidence > 0.1) {
+              const nx = this.renderer.scaleX(nextKp.x);
+              const ny = this.renderer.scaleY(nextKp.y);
+
+              ctx.globalAlpha = alpha * 0.4;
+              ctx.strokeStyle = color;
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(x, y);
+              ctx.lineTo(nx, ny);
+              ctx.stroke();
+            }
+          }
+        });
+      });
+    }
+
+    // Reset alpha
+    ctx.globalAlpha = 1.0;
   }
 
   // Toggle demo mode

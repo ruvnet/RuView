@@ -21,13 +21,17 @@ export class PoseService {
     };
     this.validationErrors = [];
     this.logger = this.createLogger();
-    
+
+    // Model inference mode tracking
+    this.modelActive = false;
+
     // Configuration
     this.config = {
       enableValidation: true,
       enablePerformanceTracking: true,
       maxValidationErrors: 10,
       confidenceThreshold: 0.3,
+      confidenceThresholdModelInference: 0.15,
       maxPersons: 10,
       timeoutMs: 5000
     };
@@ -127,9 +131,14 @@ export class PoseService {
       throw new Error(`Invalid stream options: ${validationResult.errors.join(', ')}`);
     }
 
+    // Use a lower confidence threshold when model inference is active
+    const defaultThreshold = this.modelActive
+      ? this.config.confidenceThresholdModelInference
+      : this.config.confidenceThreshold;
+
     const params = {
       zone_ids: options.zoneIds?.join(','),
-      min_confidence: options.minConfidence || this.config.confidenceThreshold,
+      min_confidence: options.minConfidence || defaultThreshold,
       max_fps: options.maxFps || 30,
       token: options.token || apiService.authToken
     };
@@ -494,9 +503,18 @@ export class PoseService {
       };
     }
 
-    // Extract persons from zone data
-    const persons = zoneData.pose.persons || [];
-    console.log('👥 Extracted persons:', persons);
+    // Determine the pose source for this message
+    const poseSource = originalMessage.pose_source || zoneData.pose_source || null;
+
+    // Choose confidence threshold based on pose source
+    const threshold = (poseSource === 'model_inference' || this.modelActive)
+      ? this.config.confidenceThresholdModelInference
+      : this.config.confidenceThreshold;
+
+    // Extract persons from zone data, applying source-aware filtering
+    const rawPersons = zoneData.pose.persons || [];
+    const persons = rawPersons.filter(p => p.confidence === undefined || p.confidence >= threshold);
+    console.log('Extracted persons:', persons.length, '/', rawPersons.length, '(threshold:', threshold, ')');
     
     // Create zone summary
     const zoneSummary = {};
@@ -511,7 +529,7 @@ export class PoseService {
       persons: persons,
       zone_summary: zoneSummary,
       processing_time_ms: zoneData.metadata?.processing_time_ms || 0,
-      pose_source: originalMessage.pose_source || zoneData.pose_source || null,
+      pose_source: poseSource,
       metadata: {
         mock_data: false,
         source: 'websocket',
@@ -651,6 +669,14 @@ export class PoseService {
   updateConfig(newConfig) {
     this.config = { ...this.config, ...newConfig };
     this.logger.info('Configuration updated', { config: this.config });
+  }
+
+  // Enable or disable model inference mode.
+  // When active, confidence thresholds are lowered because model inference
+  // produces more reliable detections than raw signal-derived heuristics.
+  setModelMode(active) {
+    this.modelActive = !!active;
+    this.logger.info('Model mode updated', { modelActive: this.modelActive });
   }
 
   // Health check

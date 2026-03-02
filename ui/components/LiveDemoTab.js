@@ -4,6 +4,11 @@ import { PoseDetectionCanvas } from './PoseDetectionCanvas.js';
 import { poseService } from '../services/pose.service.js';
 import { streamService } from '../services/stream.service.js';
 import { wsService } from '../services/websocket.service.js';
+import { sensingService } from '../services/sensing.service.js';
+
+// Optional services - loaded lazily in init() to avoid blocking module graph
+let modelService = null;
+let trainingService = null;
 
 export class LiveDemoTab {
   constructor(containerElement) {
@@ -32,6 +37,27 @@ export class LiveDemoTab {
       connectionAttempts: 0
     };
     
+    // Model control state
+    this.modelState = {
+      models: [],
+      activeModelId: null,
+      activeModelInfo: null,
+      loraProfiles: [],
+      selectedLoraProfile: null,
+      loading: false
+    };
+
+    // Training state
+    this.trainingState = {
+      status: 'idle',       // 'idle' | 'training' | 'recording'
+      epoch: 0,
+      totalEpochs: 0,
+      showTrainingPanel: false
+    };
+
+    // A/B split view state
+    this.splitViewActive = false;
+
     this.subscriptions = [];
     this.logger = this.createLogger();
     
@@ -58,7 +84,17 @@ export class LiveDemoTab {
   async init() {
     try {
       this.logger.info('Initializing LiveDemoTab component');
-      
+
+      // Load optional services (non-blocking)
+      try {
+        const mod = await import('../services/model.service.js');
+        modelService = mod.modelService;
+      } catch (e) { /* model features disabled */ }
+      try {
+        const mod = await import('../services/training.service.js');
+        trainingService = mod.trainingService;
+      } catch (e) { /* training features disabled */ }
+
       // Create enhanced DOM structure
       this.createEnhancedStructure();
       
@@ -71,9 +107,31 @@ export class LiveDemoTab {
       // Set up monitoring and health checks
       this.setupMonitoring();
       
+      // Fetch available models on init
+      this.fetchModels();
+
+      // Set up model/training event listeners
+      this.setupServiceListeners();
+
       // Initialize state
       this.updateUI();
-      
+
+      // Auto-start pose detection when a backend is reachable.
+      // Check after a brief delay (sensing WS may still be connecting).
+      this._autoStartOnce = false;
+      const tryAutoStart = () => {
+        if (this._autoStartOnce || this.state.isActive) return;
+        const ds = sensingService.dataSource;
+        if (ds === 'live' || ds === 'server-simulated') {
+          this._autoStartOnce = true;
+          this.logger.info('Auto-starting pose detection (data source: ' + ds + ')');
+          this.startDemo();
+        }
+      };
+      setTimeout(tryAutoStart, 2000);
+      // Also listen for sensing state changes in case server connects later
+      this._autoStartUnsub = sensingService.onStateChange(tryAutoStart);
+
       this.logger.info('LiveDemoTab component initialized successfully');
     } catch (error) {
       this.logger.error('Failed to initialize LiveDemoTab', { error: error.message });
@@ -88,6 +146,11 @@ export class LiveDemoTab {
       // Create enhanced structure if it doesn't exist
       const enhancedHTML = `
         <div class="live-demo-enhanced">
+          <!-- Data source banner — prominent indicator for live vs simulated -->
+          <div id="demo-source-banner" class="demo-source-banner demo-source-unknown" role="status" aria-live="polite">
+            Detecting data source...
+          </div>
+
           <div class="demo-header">
             <div class="demo-title">
               <h2>Live Human Pose Detection</h2>
@@ -99,6 +162,7 @@ export class LiveDemoTab {
             <div class="demo-controls">
               <button class="btn btn--primary" id="start-enhanced-demo">Start Detection</button>
               <button class="btn btn--secondary" id="stop-enhanced-demo" disabled>Stop Detection</button>
+              <button class="btn btn--accent" id="run-offline-demo">Demo</button>
               <button class="btn btn--primary" id="toggle-debug">Debug Mode</button>
               <select class="zone-select" id="zone-selector">
                 <option value="zone_1">Zone 1</option>
@@ -145,6 +209,49 @@ export class LiveDemoTab {
                   <p class="pose-source-description" id="pose-source-description">
                     Waiting for first frame...
                   </p>
+                </div>
+              </div>
+
+              <div class="model-control-panel" id="model-control-panel">
+                <h4>Model Control</h4>
+                <div class="setting-row-ld">
+                  <label class="ld-label">Model:</label>
+                  <select class="ld-select" id="model-selector">
+                    <option value="">Signal-Derived (no model)</option>
+                  </select>
+                </div>
+                <div class="model-info-row" id="model-active-info" style="display: none;">
+                  <span class="ld-label" id="model-active-name"></span>
+                  <span class="model-pck-badge" id="model-active-pck"></span>
+                </div>
+                <div class="setting-row-ld" id="lora-profile-row" style="display: none;">
+                  <label class="ld-label">LoRA Profile:</label>
+                  <select class="ld-select" id="lora-profile-selector">
+                    <option value="">None</option>
+                  </select>
+                </div>
+                <div class="model-actions">
+                  <button class="btn-ld btn-ld-accent" id="load-model-btn">Load Model</button>
+                  <button class="btn-ld btn-ld-muted" id="unload-model-btn" disabled>Unload</button>
+                </div>
+                <div class="model-status-text" id="model-status-text">No model loaded</div>
+              </div>
+
+              <div class="split-view-panel">
+                <div class="setting-row-ld">
+                  <label class="ld-label">Compare: Signal vs Model</label>
+                  <button class="btn-ld btn-ld-toggle" id="split-view-toggle" disabled>Off</button>
+                </div>
+              </div>
+
+              <div class="training-quick-panel" id="training-quick-panel">
+                <h4>Training</h4>
+                <div class="training-status-row">
+                  <span class="training-status-badge" id="training-status-badge">Idle</span>
+                </div>
+                <div class="training-actions">
+                  <button class="btn-ld btn-ld-accent" id="open-training-panel-btn">Open Training Panel</button>
+                  <button class="btn-ld btn-ld-muted" id="quick-record-btn">Record 60s</button>
                 </div>
               </div>
 
@@ -606,6 +713,270 @@ export class LiveDemoTab {
         border-radius: 3px;
         font-size: 10px;
       }
+
+      /* Model Control Panel */
+      .model-control-panel,
+      .split-view-panel,
+      .training-quick-panel {
+        background: rgba(17, 24, 39, 0.9);
+        border: 1px solid rgba(56, 68, 89, 0.6);
+        border-radius: 12px;
+        padding: 16px;
+      }
+
+      .model-control-panel h4,
+      .training-quick-panel h4 {
+        margin: 0 0 12px 0;
+        color: #e0e0e0;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .setting-row-ld {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+        gap: 8px;
+      }
+
+      .ld-label {
+        color: #8899aa;
+        font-size: 11px;
+        flex-shrink: 0;
+      }
+
+      .ld-select {
+        flex: 1;
+        padding: 6px 10px;
+        border: 1px solid rgba(56, 68, 89, 0.6);
+        border-radius: 6px;
+        background: rgba(15, 20, 35, 0.8);
+        color: #b0b8c8;
+        font-size: 12px;
+        cursor: pointer;
+        min-width: 0;
+      }
+
+      .ld-select:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.15);
+      }
+
+      .ld-select option {
+        background: #1a2234;
+        color: #c8d0dc;
+      }
+
+      .model-info-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+        padding: 6px 8px;
+        background: rgba(30, 40, 60, 0.6);
+        border-radius: 6px;
+      }
+
+      .model-pck-badge {
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 8px;
+        background: rgba(102, 126, 234, 0.15);
+        color: #8ea4f0;
+      }
+
+      .model-actions,
+      .training-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .btn-ld {
+        flex: 1;
+        padding: 7px 12px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-align: center;
+      }
+
+      .btn-ld:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      .btn-ld-accent {
+        background: rgba(102, 126, 234, 0.15);
+        color: #8ea4f0;
+        border-color: rgba(102, 126, 234, 0.3);
+      }
+
+      .btn-ld-accent:hover:not(:disabled) {
+        background: rgba(102, 126, 234, 0.25);
+        border-color: rgba(102, 126, 234, 0.5);
+      }
+
+      .btn-ld-muted {
+        background: rgba(30, 40, 60, 0.8);
+        color: #8899aa;
+        border-color: rgba(255, 255, 255, 0.08);
+      }
+
+      .btn-ld-muted:hover:not(:disabled) {
+        background: rgba(40, 50, 70, 0.9);
+        color: #b0b8c8;
+      }
+
+      .btn-ld-toggle {
+        min-width: 44px;
+        flex: 0;
+        padding: 4px 10px;
+        background: rgba(30, 40, 60, 0.8);
+        color: #8899aa;
+        border-color: rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        font-size: 11px;
+      }
+
+      .btn-ld-toggle.active {
+        background: rgba(0, 212, 255, 0.15);
+        color: #00d4ff;
+        border-color: rgba(0, 212, 255, 0.4);
+      }
+
+      .model-status-text {
+        margin-top: 8px;
+        font-size: 11px;
+        color: #6b7a8d;
+      }
+
+      .training-status-row {
+        margin-bottom: 8px;
+      }
+
+      .training-status-badge {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        background: rgba(108, 117, 125, 0.15);
+        color: #8899aa;
+        border: 1px solid rgba(108, 117, 125, 0.3);
+      }
+
+      .training-status-badge.training {
+        background: rgba(251, 191, 36, 0.12);
+        color: #fbbf24;
+        border-color: rgba(251, 191, 36, 0.3);
+      }
+
+      .training-status-badge.recording {
+        background: rgba(239, 68, 68, 0.12);
+        color: #ef4444;
+        border-color: rgba(239, 68, 68, 0.3);
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+
+      /* A/B Split View Overlay */
+      .split-view-divider {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 50%;
+        width: 2px;
+        background: repeating-linear-gradient(
+          to bottom,
+          rgba(255, 255, 255, 0.4) 0px,
+          rgba(255, 255, 255, 0.4) 6px,
+          transparent 6px,
+          transparent 12px
+        );
+        z-index: 15;
+        pointer-events: none;
+      }
+
+      .split-view-label {
+        position: absolute;
+        top: 8px;
+        z-index: 16;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 3px 8px;
+        border-radius: 4px;
+        pointer-events: none;
+      }
+
+      .split-view-label.left {
+        left: 8px;
+        background: rgba(0, 204, 136, 0.2);
+        color: #00cc88;
+      }
+
+      .split-view-label.right {
+        right: 8px;
+        background: rgba(102, 126, 234, 0.2);
+        color: #8ea4f0;
+      }
+
+      /* Training modal overlay */
+      .training-panel-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+      }
+
+      .training-panel-modal {
+        background: #0d1117;
+        border: 1px solid rgba(56, 68, 89, 0.6);
+        border-radius: 12px;
+        padding: 24px;
+        min-width: 400px;
+        max-width: 600px;
+        max-height: 80vh;
+        overflow-y: auto;
+        color: #e0e0e0;
+      }
+
+      .training-panel-modal h3 {
+        margin: 0 0 16px 0;
+        font-size: 18px;
+        color: #e0e0e0;
+      }
+
+      .training-panel-modal .close-btn {
+        float: right;
+        background: rgba(30, 40, 60, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: #8899aa;
+        border-radius: 6px;
+        padding: 4px 10px;
+        cursor: pointer;
+        font-size: 12px;
+      }
+
+      .training-panel-modal .close-btn:hover {
+        background: rgba(50, 60, 80, 0.9);
+        color: #c8d0dc;
+      }
     `;
     
     if (!document.querySelector('#live-demo-enhanced-styles')) {
@@ -664,6 +1035,16 @@ export class LiveDemoTab {
       stopBtn.addEventListener('click', () => this.stopDemo());
     }
 
+    // Offline demo button — runs client-side animated demo (no server needed)
+    const offlineDemoBtn = this.container.querySelector('#run-offline-demo');
+    if (offlineDemoBtn) {
+      offlineDemoBtn.addEventListener('click', () => {
+        if (this.components.poseCanvas) {
+          this.components.poseCanvas.toggleDemo();
+        }
+      });
+    }
+
     if (debugBtn) {
       debugBtn.addEventListener('click', () => this.toggleDebugMode());
     }
@@ -690,6 +1071,9 @@ export class LiveDemoTab {
       exportLogsBtn.addEventListener('click', () => this.exportLogs());
     }
 
+    // Model, training, and split-view controls
+    this.setupModelTrainingControls();
+
     this.logger.debug('Enhanced controls set up');
   }
 
@@ -705,6 +1089,23 @@ export class LiveDemoTab {
     this.uiUpdateInterval = setInterval(() => {
       this.updateMetricsDisplay();
     }, 1000);
+
+    // Subscribe to sensing service for data-source changes
+    this._sensingStateUnsub = sensingService.onStateChange(() => {
+      this.updateSourceBanner();
+      this.updateStatusIndicator();
+    });
+    // Throttle data-based banner updates (frames arrive at 10Hz)
+    let lastBannerUpdate = 0;
+    this._sensingDataUnsub = sensingService.onData(() => {
+      const now = Date.now();
+      if (now - lastBannerUpdate > 2000) {
+        lastBannerUpdate = now;
+        this.updateSourceBanner();
+      }
+    });
+    // Initial banner update
+    this.updateSourceBanner();
 
     this.logger.debug('Monitoring set up');
   }
@@ -901,17 +1302,40 @@ export class LiveDemoTab {
   }
 
   getStatusClass() {
-    if (this.state.isActive) {
-      return this.state.connectionState === 'connected' ? 'active' : 'connecting';
+    if (!this.state.isActive) {
+      return this.state.connectionState === 'error' ? 'error' : '';
     }
-    return this.state.connectionState === 'error' ? 'error' : '';
+    const ds = sensingService.dataSource;
+    if (ds === 'live') return 'active';
+    if (ds === 'server-simulated') return 'sim';
+    return 'connecting';
   }
 
   getStatusText() {
-    if (this.state.isActive) {
-      return this.state.connectionState === 'connected' ? 'Active' : 'Connecting...';
+    if (!this.state.isActive) {
+      return this.state.connectionState === 'error' ? 'Error' : 'Ready';
     }
-    return this.state.connectionState === 'error' ? 'Error' : 'Ready';
+    const ds = sensingService.dataSource;
+    if (ds === 'live') return 'Active \u2014 ESP32 Live';
+    if (ds === 'server-simulated') return 'Active \u2014 Simulated Data';
+    if (ds === 'simulated') return 'Active \u2014 Offline Simulation';
+    return 'Connecting...';
+  }
+
+  /** Update the prominent data-source banner at the top of Live Demo. */
+  updateSourceBanner() {
+    const banner = this.container.querySelector('#demo-source-banner');
+    if (!banner) return;
+    const ds = sensingService.dataSource;
+    const config = {
+      'live':             { text: 'LIVE \u2014 ESP32 Hardware Connected',           cls: 'demo-source-live' },
+      'server-simulated': { text: 'SIMULATED DATA \u2014 No Hardware Detected',     cls: 'demo-source-sim' },
+      'reconnecting':     { text: 'RECONNECTING TO SERVER...',                      cls: 'demo-source-reconnecting' },
+      'simulated':        { text: 'OFFLINE \u2014 Server Unreachable, Local Sim',   cls: 'demo-source-offline' },
+    };
+    const cfg = config[ds] || config['reconnecting'];
+    banner.textContent = cfg.text;
+    banner.className = 'demo-source-banner ' + cfg.cls;
   }
 
   updateControls() {
@@ -942,8 +1366,20 @@ export class LiveDemoTab {
     };
 
     if (elements.connectionStatus) {
-      elements.connectionStatus.textContent = this.state.connectionState;
-      elements.connectionStatus.className = `health-${this.getHealthClass(this.state.connectionState)}`;
+      const ds = sensingService.dataSource;
+      const dsLabels = {
+        'live':              'Connected \u2014 ESP32',
+        'server-simulated':  'Connected \u2014 Simulated',
+        'reconnecting':      'Reconnecting...',
+        'simulated':         'Offline \u2014 Simulated',
+      };
+      const label = dsLabels[ds] || this.state.connectionState;
+      elements.connectionStatus.textContent = label;
+      const cls = ds === 'live' ? 'good'
+        : ds === 'server-simulated' ? 'sim'
+        : ds === 'simulated' ? 'bad'
+        : this.getHealthClass(this.state.connectionState);
+      elements.connectionStatus.className = `health-${cls}`;
     }
 
     if (elements.frameCount) {
@@ -1061,6 +1497,356 @@ export class LiveDemoTab {
     }
   }
 
+  // --- Model Control Methods ---
+
+  async fetchModels() {
+    if (!modelService) return;
+    try {
+      const data = await modelService.listModels();
+      this.modelState.models = data?.models || [];
+      this.populateModelSelector();
+      // Check if a model is already active
+      const active = await modelService.getActiveModel();
+      if (active && active.model_id) {
+        this.modelState.activeModelId = active.model_id;
+        this.modelState.activeModelInfo = active;
+        this.updateModelUI();
+      }
+    } catch (error) {
+      this.logger.warn('Could not fetch models', { error: error.message });
+    }
+  }
+
+  populateModelSelector() {
+    const selector = this.container.querySelector('#model-selector');
+    if (!selector) return;
+    // Keep the first "Signal-Derived" option
+    selector.innerHTML = '<option value="">Signal-Derived (no model)</option>';
+    this.modelState.models.forEach(model => {
+      const opt = document.createElement('option');
+      opt.value = model.id || model.model_id || model.name;
+      opt.textContent = model.name || model.id || 'Unknown Model';
+      selector.appendChild(opt);
+    });
+    if (this.modelState.activeModelId) {
+      selector.value = this.modelState.activeModelId;
+    }
+  }
+
+  async handleLoadModel() {
+    if (!modelService) return;
+    const selector = this.container.querySelector('#model-selector');
+    const modelId = selector?.value;
+    if (!modelId) {
+      this.setModelStatus('Select a model first');
+      return;
+    }
+    try {
+      this.modelState.loading = true;
+      this.setModelStatus('Loading...');
+      const loadBtn = this.container.querySelector('#load-model-btn');
+      if (loadBtn) loadBtn.disabled = true;
+
+      await modelService.loadModel(modelId);
+      this.modelState.activeModelId = modelId;
+
+      // Try to fetch full info
+      try {
+        const info = await modelService.getModel(modelId);
+        this.modelState.activeModelInfo = info;
+      } catch (e) {
+        this.modelState.activeModelInfo = { model_id: modelId };
+      }
+
+      // Fetch LoRA profiles
+      try {
+        const profiles = await modelService.getLoraProfiles();
+        this.modelState.loraProfiles = profiles || [];
+      } catch (e) {
+        this.modelState.loraProfiles = [];
+      }
+
+      this.modelState.loading = false;
+      this.updateModelUI();
+      this.updateSplitViewAvailability();
+
+      // Update pose source badge to model inference
+      this.setState({ poseSource: 'model_inference' });
+
+    } catch (error) {
+      this.modelState.loading = false;
+      this.setModelStatus(`Error: ${error.message}`);
+      const loadBtn = this.container.querySelector('#load-model-btn');
+      if (loadBtn) loadBtn.disabled = false;
+      this.logger.error('Failed to load model', { error: error.message });
+    }
+  }
+
+  async handleUnloadModel() {
+    if (!modelService) return;
+    try {
+      await modelService.unloadModel();
+      this.modelState.activeModelId = null;
+      this.modelState.activeModelInfo = null;
+      this.modelState.loraProfiles = [];
+      this.modelState.selectedLoraProfile = null;
+      this.updateModelUI();
+      this.updateSplitViewAvailability();
+      this.disableSplitView();
+      this.setState({ poseSource: 'signal_derived' });
+    } catch (error) {
+      this.setModelStatus(`Error: ${error.message}`);
+      this.logger.error('Failed to unload model', { error: error.message });
+    }
+  }
+
+  async handleLoraProfileChange(profileName) {
+    if (!modelService || !this.modelState.activeModelId) return;
+    if (!profileName) return;
+    try {
+      await modelService.activateLoraProfile(this.modelState.activeModelId, profileName);
+      this.modelState.selectedLoraProfile = profileName;
+      this.setModelStatus(`LoRA: ${profileName} active`);
+    } catch (error) {
+      this.setModelStatus(`LoRA error: ${error.message}`);
+    }
+  }
+
+  updateModelUI() {
+    const loadBtn = this.container.querySelector('#load-model-btn');
+    const unloadBtn = this.container.querySelector('#unload-model-btn');
+    const infoRow = this.container.querySelector('#model-active-info');
+    const nameEl = this.container.querySelector('#model-active-name');
+    const pckEl = this.container.querySelector('#model-active-pck');
+    const loraRow = this.container.querySelector('#lora-profile-row');
+    const loraSel = this.container.querySelector('#lora-profile-selector');
+
+    const isLoaded = !!this.modelState.activeModelId;
+
+    if (loadBtn) loadBtn.disabled = isLoaded;
+    if (unloadBtn) unloadBtn.disabled = !isLoaded;
+
+    if (infoRow) {
+      infoRow.style.display = isLoaded ? 'flex' : 'none';
+    }
+
+    if (isLoaded && this.modelState.activeModelInfo) {
+      const info = this.modelState.activeModelInfo;
+      const name = info.name || info.model_id || this.modelState.activeModelId;
+      const version = info.version ? ` v${info.version}` : '';
+      const pck = info.pck_score != null ? info.pck_score.toFixed(2) : '--';
+      if (nameEl) nameEl.textContent = `${name}${version}`;
+      if (pckEl) pckEl.textContent = `PCK: ${pck}`;
+      this.setModelStatus(`Model: ${name} (PCK: ${pck})`);
+    } else if (!isLoaded) {
+      this.setModelStatus('No model loaded');
+    }
+
+    // LoRA profiles
+    if (loraRow && loraSel) {
+      if (isLoaded && this.modelState.loraProfiles.length > 0) {
+        loraRow.style.display = 'flex';
+        loraSel.innerHTML = '<option value="">None</option>';
+        this.modelState.loraProfiles.forEach(profile => {
+          const opt = document.createElement('option');
+          opt.value = profile.name || profile;
+          opt.textContent = profile.name || profile;
+          loraSel.appendChild(opt);
+        });
+      } else {
+        loraRow.style.display = 'none';
+      }
+    }
+  }
+
+  setModelStatus(text) {
+    const el = this.container.querySelector('#model-status-text');
+    if (el) el.textContent = text;
+  }
+
+  // --- A/B Split View Methods ---
+
+  updateSplitViewAvailability() {
+    const toggle = this.container.querySelector('#split-view-toggle');
+    if (toggle) {
+      toggle.disabled = !this.modelState.activeModelId;
+    }
+  }
+
+  toggleSplitView() {
+    if (!this.modelState.activeModelId) return;
+    this.splitViewActive = !this.splitViewActive;
+    const toggle = this.container.querySelector('#split-view-toggle');
+    if (toggle) {
+      toggle.textContent = this.splitViewActive ? 'On' : 'Off';
+      toggle.classList.toggle('active', this.splitViewActive);
+    }
+    this.updateSplitViewOverlay();
+  }
+
+  disableSplitView() {
+    this.splitViewActive = false;
+    const toggle = this.container.querySelector('#split-view-toggle');
+    if (toggle) {
+      toggle.textContent = 'Off';
+      toggle.classList.remove('active');
+    }
+    this.updateSplitViewOverlay();
+  }
+
+  updateSplitViewOverlay() {
+    const mainContainer = this.container.querySelector('.pose-detection-container');
+    if (!mainContainer) return;
+
+    // Remove existing overlays
+    mainContainer.querySelectorAll('.split-view-divider, .split-view-label').forEach(el => el.remove());
+
+    if (this.splitViewActive) {
+      const divider = document.createElement('div');
+      divider.className = 'split-view-divider';
+      mainContainer.appendChild(divider);
+
+      const leftLabel = document.createElement('div');
+      leftLabel.className = 'split-view-label left';
+      leftLabel.textContent = 'Signal-Derived';
+      mainContainer.appendChild(leftLabel);
+
+      const rightLabel = document.createElement('div');
+      rightLabel.className = 'split-view-label right';
+      rightLabel.textContent = 'Model Inference';
+      mainContainer.appendChild(rightLabel);
+    }
+  }
+
+  // --- Training Quick-Panel Methods ---
+
+  updateTrainingStatus() {
+    const badge = this.container.querySelector('#training-status-badge');
+    if (!badge) return;
+
+    const state = this.trainingState.status;
+    badge.classList.remove('training', 'recording');
+
+    if (state === 'training') {
+      badge.classList.add('training');
+      badge.textContent = `Training epoch ${this.trainingState.epoch}/${this.trainingState.totalEpochs}`;
+    } else if (state === 'recording') {
+      badge.classList.add('recording');
+      badge.textContent = 'Recording...';
+    } else {
+      badge.textContent = 'Idle';
+    }
+  }
+
+  async handleQuickRecord() {
+    if (!trainingService) {
+      this.logger.warn('Training service not available');
+      return;
+    }
+    try {
+      await trainingService.startRecording({ session_name: `quick_${Date.now()}`, duration_secs: 60 });
+      this.trainingState.status = 'recording';
+      this.updateTrainingStatus();
+      // Auto-reset after ~65 seconds
+      setTimeout(() => {
+        if (this.trainingState.status === 'recording') {
+          this.trainingState.status = 'idle';
+          this.updateTrainingStatus();
+        }
+      }, 65000);
+    } catch (error) {
+      this.logger.error('Quick record failed', { error: error.message });
+    }
+  }
+
+  showTrainingPanel() {
+    // Create a simple modal overlay for the training panel
+    const existing = document.querySelector('.training-panel-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'training-panel-overlay';
+    overlay.innerHTML = `
+      <div class="training-panel-modal">
+        <button class="close-btn" id="close-training-modal">Close</button>
+        <h3>Training Panel</h3>
+        <p style="color: #8899aa; font-size: 13px; margin-bottom: 16px;">
+          Configure and start model training from here. Connect to the backend training API to manage epochs, datasets, and checkpoints.
+        </p>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div class="setting-row-ld">
+            <label class="ld-label" style="flex: 1;">Status:</label>
+            <span style="color: #c8d0dc; font-size: 12px;">${this.trainingState.status}</span>
+          </div>
+          <div class="setting-row-ld">
+            <label class="ld-label" style="flex: 1;">Training service:</label>
+            <span style="color: ${trainingService ? '#00cc88' : '#ef4444'}; font-size: 12px;">${trainingService ? 'Connected' : 'Not available'}</span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    // Close handler
+    overlay.querySelector('#close-training-modal').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+  }
+
+  // --- Service Event Listeners ---
+
+  setupServiceListeners() {
+    if (modelService) {
+      const unsub1 = modelService.on('model-loaded', (data) => {
+        this.logger.info('Model loaded event', data);
+      });
+      const unsub2 = modelService.on('model-unloaded', () => {
+        this.modelState.activeModelId = null;
+        this.modelState.activeModelInfo = null;
+        this.updateModelUI();
+        this.disableSplitView();
+      });
+      this.subscriptions.push(unsub1, unsub2);
+    }
+
+    if (trainingService) {
+      const unsub3 = trainingService.on('progress', (data) => {
+        if (data && data.epoch != null) {
+          this.trainingState.epoch = data.epoch;
+          this.trainingState.totalEpochs = data.total_epochs || data.totalEpochs || this.trainingState.totalEpochs;
+          this.trainingState.status = 'training';
+          this.updateTrainingStatus();
+        }
+      });
+      const unsub4 = trainingService.on('training-stopped', () => {
+        this.trainingState.status = 'idle';
+        this.updateTrainingStatus();
+      });
+      this.subscriptions.push(unsub3, unsub4);
+    }
+  }
+
+  // --- Enhanced Controls Setup ---
+
+  setupModelTrainingControls() {
+    // Model control buttons
+    const loadBtn = this.container.querySelector('#load-model-btn');
+    const unloadBtn = this.container.querySelector('#unload-model-btn');
+    const loraSel = this.container.querySelector('#lora-profile-selector');
+    const splitToggle = this.container.querySelector('#split-view-toggle');
+    const openTrainingBtn = this.container.querySelector('#open-training-panel-btn');
+    const quickRecordBtn = this.container.querySelector('#quick-record-btn');
+
+    if (loadBtn) loadBtn.addEventListener('click', () => this.handleLoadModel());
+    if (unloadBtn) unloadBtn.addEventListener('click', () => this.handleUnloadModel());
+    if (loraSel) loraSel.addEventListener('change', (e) => this.handleLoraProfileChange(e.target.value));
+    if (splitToggle) splitToggle.addEventListener('click', () => this.toggleSplitView());
+    if (openTrainingBtn) openTrainingBtn.addEventListener('click', () => this.showTrainingPanel());
+    if (quickRecordBtn) quickRecordBtn.addEventListener('click', () => this.handleQuickRecord());
+  }
+
   // Clean up
   dispose() {
     try {
@@ -1088,6 +1874,9 @@ export class LiveDemoTab {
       // Unsubscribe from services
       this.subscriptions.forEach(unsubscribe => unsubscribe());
       this.subscriptions = [];
+      if (this._sensingStateUnsub) this._sensingStateUnsub();
+      if (this._sensingDataUnsub) this._sensingDataUnsub();
+      if (this._autoStartUnsub) this._autoStartUnsub();
       
       this.logger.info('LiveDemoTab component disposed successfully');
     } catch (error) {

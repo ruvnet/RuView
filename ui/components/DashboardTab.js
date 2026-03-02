@@ -2,6 +2,7 @@
 
 import { healthService } from '../services/health.service.js';
 import { poseService } from '../services/pose.service.js';
+import { sensingService } from '../services/sensing.service.js';
 
 export class DashboardTab {
   constructor(containerElement) {
@@ -63,6 +64,17 @@ export class DashboardTab {
       this.updateHealthStatus(health);
     });
 
+    // Subscribe to sensing service state changes for data source indicator
+    this._sensingUnsub = sensingService.onStateChange(() => {
+      this.updateDataSourceIndicator();
+    });
+    // Also update on data — catches source changes mid-stream
+    this._sensingDataUnsub = sensingService.onData(() => {
+      this.updateDataSourceIndicator();
+    });
+    // Initial update
+    this.updateDataSourceIndicator();
+
     // Start periodic stats updates
     this.statsInterval = setInterval(() => {
       this.updateLiveStats();
@@ -70,6 +82,25 @@ export class DashboardTab {
 
     // Start health monitoring
     healthService.startHealthMonitoring(30000);
+  }
+
+  // Update the data source indicator on the dashboard
+  updateDataSourceIndicator() {
+    const el = this.container.querySelector('#dashboard-datasource');
+    if (!el) return;
+    const ds = sensingService.dataSource;
+    const statusText = el.querySelector('.status-text');
+    const statusMsg  = el.querySelector('.status-message');
+    const config = {
+      'live':              { text: 'ESP32',     status: 'healthy', msg: 'Real hardware connected' },
+      'server-simulated':  { text: 'SIMULATED', status: 'warning', msg: 'Server running without hardware' },
+      'reconnecting':      { text: 'RECONNECTING', status: 'degraded', msg: 'Attempting to connect...' },
+      'simulated':         { text: 'OFFLINE',   status: 'unhealthy', msg: 'Server unreachable, local fallback' },
+    };
+    const cfg = config[ds] || config['reconnecting'];
+    el.className = `component-status status-${cfg.status}`;
+    if (statusText) statusText.textContent = cfg.text;
+    if (statusMsg)  statusMsg.textContent = cfg.msg;
   }
 
   // Update API info display
@@ -394,11 +425,13 @@ export class DashboardTab {
     if (this.healthSubscription) {
       this.healthSubscription();
     }
-    
+    if (this._sensingUnsub) this._sensingUnsub();
+    if (this._sensingDataUnsub) this._sensingDataUnsub();
+
     if (this.statsInterval) {
       clearInterval(this.statsInterval);
     }
-    
+
     healthService.stopHealthMonitoring();
   }
 }

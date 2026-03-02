@@ -32,8 +32,14 @@ class SensingService {
     this._simTimer = null;
     // Connection state: disconnected | connecting | connected | reconnecting | simulated
     this._state = 'disconnected';
-    // Data-source label exposed to the UI: "live" | "reconnecting" | "simulated"
+    // Data-source label exposed to the UI:
+    //   "live"              — real ESP32 hardware connected
+    //   "server-simulated"  — server is running but using synthetic data (no hardware)
+    //   "reconnecting"      — WebSocket disconnected, retrying
+    //   "simulated"         — client-side fallback simulation (server unreachable)
     this._dataSource = 'reconnecting';
+    // The raw source string from the server (e.g. "esp32", "simulated", "simulate")
+    this._serverSource = null;
     this._lastMessage = null;
 
     // Ring buffer of recent RSSI values for sparkline
@@ -113,7 +119,9 @@ class SensingService {
       this._reconnectAttempt = 0;
       this._stopSimulation();
       this._setState('connected');
-      this._setDataSource('live');
+      // Don't assume "live" yet — wait for first frame's source field.
+      // Fetch server status to determine actual data source immediately.
+      this._detectServerSource();
     };
 
     this._ws.onmessage = (evt) => {
@@ -256,10 +264,60 @@ class SensingService {
     };
   }
 
+  // ---- Server source detection -------------------------------------------
+
+  /**
+   * Fetch `/api/v1/status` to find out if the server is using real
+   * hardware or simulation. Called once on WebSocket open.
+   */
+  async _detectServerSource() {
+    try {
+      const resp = await fetch('/api/v1/status');
+      if (resp.ok) {
+        const json = await resp.json();
+        this._applyServerSource(json.source);
+      } else {
+        // Can't reach status endpoint — assume live until first frame tells us
+        this._setDataSource('live');
+      }
+    } catch {
+      this._setDataSource('live');
+    }
+  }
+
+  /**
+   * Map a raw server source string to the UI data-source label.
+   */
+  _applyServerSource(rawSource) {
+    this._serverSource = rawSource;
+    if (rawSource === 'esp32' || rawSource === 'wifi' || rawSource === 'live') {
+      this._setDataSource('live');
+    } else if (rawSource === 'simulated' || rawSource === 'simulate') {
+      this._setDataSource('server-simulated');
+    } else {
+      // Unknown source — show as server-simulated to be safe
+      this._setDataSource('server-simulated');
+    }
+  }
+
+  /** @return {string|null} Raw server source (e.g. "esp32", "simulated") */
+  get serverSource() {
+    return this._serverSource;
+  }
+
   // ---- Data handling -----------------------------------------------------
 
   _handleData(data) {
     this._lastMessage = data;
+
+    // Track the server's source field from each frame so the UI
+    // can react if the server switches between esp32 ↔ simulated at runtime.
+    if (data.source && this._state === 'connected') {
+      const raw = data.source;
+      if (raw !== this._serverSource) {
+        this._applyServerSource(raw);
+      }
+    }
 
     // Update RSSI history for sparkline
     if (data.features && data.features.mean_rssi != null) {
@@ -292,7 +350,7 @@ class SensingService {
   /**
    * Update the dataSource label and notify state listeners so the UI can
    * react without needing a separate subscription.
-   * @param {'live'|'reconnecting'|'simulated'} source
+   * @param {'live'|'server-simulated'|'reconnecting'|'simulated'} source
    */
   _setDataSource(source) {
     if (source === this._dataSource) return;
