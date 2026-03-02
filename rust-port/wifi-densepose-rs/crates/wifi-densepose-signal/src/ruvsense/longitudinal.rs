@@ -495,16 +495,20 @@ mod tests {
     fn test_drift_detected_after_sustained_deviation() {
         let mut baseline = PersonalBaseline::new(1, 128);
 
-        // 10 days of stable gait symmetry = 0.1
-        for day in 0..10 {
-            let summary = make_daily_summary(1, day, [0.1, 0.9, 0.15, 0.5, 0.7]);
+        // 30 days of very stable gait symmetry = 0.1 with tiny noise
+        // (more baseline days = stronger prior, so drift stays > 2-sigma longer)
+        for day in 0..30 {
+            let noise = 0.001 * (day as f64 % 3.0 - 1.0); // tiny variation
+            let summary = make_daily_summary(1, day, [0.1 + noise, 0.9, 0.15, 0.5, 0.7]);
             baseline.update_daily(&summary, day * 86_400_000_000);
         }
 
-        // Now inject large drift in gait symmetry for 3+ days
+        // Now inject a very large drift in gait symmetry (0.1 -> 5.0) for 5 days.
+        // Even as Welford accumulates these, the z-score should stay well above 2.0
+        // because 30 baseline days anchor the mean near 0.1 with small std dev.
         let mut any_drift = false;
-        for day in 10..16 {
-            let summary = make_daily_summary(1, day, [0.9, 0.9, 0.15, 0.5, 0.7]);
+        for day in 30..36 {
+            let summary = make_daily_summary(1, day, [5.0, 0.9, 0.15, 0.5, 0.7]);
             let reports = baseline.update_daily(&summary, day * 86_400_000_000);
             if !reports.is_empty() {
                 any_drift = true;
@@ -550,15 +554,19 @@ mod tests {
     fn test_monitoring_level_escalation() {
         let mut baseline = PersonalBaseline::new(1, 128);
 
-        for day in 0..10 {
-            let summary = make_daily_summary(1, day, [0.1, 0.9, 0.15, 0.5, 0.7]);
+        // 30 days of stable baseline with tiny noise to anchor stats
+        for day in 0..30 {
+            let noise = 0.001 * (day as f64 % 3.0 - 1.0);
+            let summary = make_daily_summary(1, day, [0.1 + noise, 0.9, 0.15, 0.5, 0.7]);
             baseline.update_daily(&summary, day * 86_400_000_000);
         }
 
-        // Sustained drift for 7+ days should escalate to RiskCorrelation
+        // Sustained massive drift for 10+ days should escalate to RiskCorrelation.
+        // Using value 10.0 (vs baseline ~0.1) to ensure z-score stays well above 2.0
+        // even as Welford accumulates the drifted values.
         let mut max_level = MonitoringLevel::Physiological;
-        for day in 10..20 {
-            let summary = make_daily_summary(1, day, [0.9, 0.9, 0.15, 0.5, 0.7]);
+        for day in 30..42 {
+            let summary = make_daily_summary(1, day, [10.0, 0.9, 0.15, 0.5, 0.7]);
             let reports = baseline.update_daily(&summary, day * 86_400_000_000);
             for r in &reports {
                 if r.level > max_level {

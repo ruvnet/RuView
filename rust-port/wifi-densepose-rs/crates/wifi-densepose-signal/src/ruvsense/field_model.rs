@@ -728,22 +728,43 @@ mod tests {
 
     #[test]
     fn test_perturbation_extraction() {
-        let config = make_config(2, 4, 5);
+        // Use 8 subcarriers and only 2 modes so that most subcarriers
+        // are NOT captured by environmental modes, leaving body perturbation
+        // visible in the residual.
+        let config = FieldModelConfig {
+            n_links: 2,
+            n_subcarriers: 8,
+            n_modes: 2,
+            min_calibration_frames: 5,
+            baseline_expiry_s: 86_400.0,
+        };
         let mut model = FieldModel::new(config).unwrap();
 
-        // Calibrate with baseline
-        for _ in 0..5 {
-            let obs = make_observations(2, 4, 1.0);
+        // Calibrate with drift on subcarriers 0 and 1 only
+        for i in 0..10 {
+            let obs = vec![
+                vec![1.0 + 0.5 * i as f64, 2.0 + 0.3 * i as f64, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+                vec![1.1 + 0.5 * i as f64, 2.1 + 0.3 * i as f64, 3.1, 4.1, 5.1, 6.1, 7.1, 8.1],
+            ];
             model.feed_calibration(&obs).unwrap();
         }
         model.finalize_calibration(1_000_000, 0).unwrap();
 
-        // Observe with a perturbation on top of baseline
-        let mut perturbed = make_observations(2, 4, 1.0);
-        perturbed[0][2] += 5.0; // big perturbation on link 0, subcarrier 2
+        // Observe with a big perturbation on subcarrier 5 (not an env mode)
+        let mean_0 = 1.0 + 0.5 * 4.5; // midpoint mean
+        let mean_1 = 2.0 + 0.3 * 4.5;
+        let mut perturbed = vec![
+            vec![mean_0, mean_1, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+            vec![mean_0 + 0.1, mean_1 + 0.1, 3.1, 4.1, 5.1, 6.1, 7.1, 8.1],
+        ];
+        perturbed[0][5] += 10.0; // big perturbation on link 0, subcarrier 5
 
         let perturbation = model.extract_perturbation(&perturbed).unwrap();
-        assert!(perturbation.total_energy > 0.0);
+        assert!(
+            perturbation.total_energy > 0.0,
+            "Perturbation on non-mode subcarrier should be visible, got {}",
+            perturbation.total_energy
+        );
         assert!(perturbation.energies[0] > perturbation.energies[1]);
     }
 
