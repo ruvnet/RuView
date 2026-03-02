@@ -10,17 +10,21 @@ keywords = ["wifi", "csi", "ruvector", "signal-processing", "disaster-detection"
 categories = ["science", "computer-vision"]
 readme = "README.md"
 
+[features]
+default = []
+crv = ["dep:ruvector-crv", "dep:ruvector-gnn", "dep:serde", "dep:serde_json"]
+
 [dependencies]
 ruvector-mincut = { workspace = true }
 ruvector-attn-mincut = { workspace = true }
 ruvector-temporal-tensor = { workspace = true }
 ruvector-solver = { workspace = true }
 ruvector-attention = { workspace = true }
-ruvector-crv = { workspace = true }
-ruvector-gnn = { workspace = true }
+ruvector-crv = { workspace = true, optional = true }
+ruvector-gnn = { workspace = true, optional = true }
 thiserror = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 
 [dev-dependencies]
 approx = "0.5"

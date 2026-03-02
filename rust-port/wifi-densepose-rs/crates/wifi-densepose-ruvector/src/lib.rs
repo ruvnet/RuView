@@ -26,6 +26,7 @@
 
 #![warn(missing_docs)]
 
+#[cfg(feature = "crv")]
 pub mod crv;
 pub mod mat;
 pub mod signal;
