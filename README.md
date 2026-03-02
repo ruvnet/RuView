@@ -12,12 +12,7 @@ WiFi DensePose turns commodity WiFi signals into real-time human pose estimation
 [![ESP32 Ready](https://img.shields.io/badge/ESP32--S3-CSI%20streaming-purple.svg)](#esp32-s3-hardware-pipeline)
 [![crates.io](https://img.shields.io/crates/v/wifi-densepose-ruvector.svg)](https://crates.io/crates/wifi-densepose-ruvector)
 
-<p align="center">
-  <img src="assets/screen.png" alt="WiFi DensePose — Live pose detection with setup guide" width="800">
-  <br>
-  <em>Real-time pose skeleton from WiFi CSI signals — no cameras, no wearables</em>
-</p>
-
+ 
 > | What | How | Speed |
 > |------|-----|-------|
 > | **Pose estimation** | CSI subcarrier amplitude/phase → DensePose UV maps | 54K fps (Rust) |
@@ -59,6 +54,12 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 | [DDD Domain Model](docs/ddd/ruvsense-domain-model.md) | RuvSense bounded contexts, aggregates, domain events, and ubiquitous language |
 
 ---
+
+
+  <img src="assets/screen-1.png" alt="WiFi DensePose — Live pose detection with setup guide" width="800">
+  <br>
+  <em>Real-time pose skeleton from WiFi CSI signals — no cameras, no wearables</em>
+
 
 ## 🚀 Key Features
 
