@@ -18,6 +18,9 @@
 #define NVS_CFG_PASS_MAX     65
 #define NVS_CFG_IP_MAX       16
 
+/** Maximum channels in the hop list (must match CSI_HOP_CHANNELS_MAX). */
+#define NVS_CFG_HOP_MAX      6
+
 /** Runtime configuration loaded from NVS or Kconfig defaults. */
 typedef struct {
     char     wifi_ssid[NVS_CFG_SSID_MAX];
@@ -25,6 +28,13 @@ typedef struct {
     char     target_ip[NVS_CFG_IP_MAX];
     uint16_t target_port;
     uint8_t  node_id;
+
+    /* ADR-029: Channel hopping and TDM configuration */
+    uint8_t  channel_hop_count;               /**< Number of channels to hop (1 = no hop). */
+    uint8_t  channel_list[NVS_CFG_HOP_MAX];   /**< Channel numbers for hopping. */
+    uint32_t dwell_ms;                        /**< Dwell time per channel in ms. */
+    uint8_t  tdm_slot_index;                  /**< This node's TDM slot index (0-based). */
+    uint8_t  tdm_node_count;                  /**< Total nodes in the TDM schedule. */
 } nvs_config_t;
 
 /**

@@ -16,4 +16,16 @@ ruvector-attn-mincut = { workspace = true }
 ruvector-temporal-tensor = { workspace = true }
 ruvector-solver = { workspace = true }
 ruvector-attention = { workspace = true }
+ruvector-crv = { workspace = true }
+ruvector-gnn = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"
+criterion = { workspace = true }
+
+[[bench]]
+name = "crv_bench"
+harness = false
