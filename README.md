@@ -56,7 +56,7 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 ---
 
 
-  <img src="assets/screen-1.png" alt="WiFi DensePose — Live pose detection with setup guide" width="800">
+  <img src="assets/screen.png" alt="WiFi DensePose — Live pose detection with setup guide" width="800">
   <br>
   <em>Real-time pose skeleton from WiFi CSI signals — no cameras, no wearables</em>
 
