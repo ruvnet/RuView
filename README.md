@@ -1,4 +1,4 @@
-# WiFi DensePose
+# π RuView: WiFi DensePose:  
 
 **See through walls with WiFi.** No cameras. No wearables. Just radio waves.
 
@@ -80,7 +80,8 @@ The system learns on its own and gets smarter over time — no hand-tuning, no l
 | 🎯 | **AI Signal Processing** | Attention networks, graph algorithms, and smart compression replace hand-tuned thresholds — adapts to each room automatically ([RuVector](https://github.com/ruvnet/ruvector)) |
 | 🌍 | **Works Everywhere** | Train once, deploy in any room — adversarial domain generalization strips environment bias so models transfer across rooms, buildings, and hardware ([ADR-027](docs/adr/ADR-027-cross-environment-domain-generalization.md)) |
 | 👁️ | **Cross-Viewpoint Fusion** | Learned attention fuses multiple viewpoints with geometric bias — reduces body occlusion and depth ambiguity that physics prevents any single sensor from solving ([ADR-031](docs/adr/ADR-031-ruview-sensing-first-rf-mode.md)) |
-| 🔮 | **Signal-Line Protocol** | `ruvector-crv` 6-stage CRV pipeline maps CSI sensing to Poincare ball embeddings, GNN topology, SNN temporal encoding, and MinCut partitioning | -- |
+| 🔮 | **Signal-Line Protocol** | `ruvector-crv` 6-stage CRV pipeline maps CSI sensing to Poincare ball embeddings, GNN topology, SNN temporal encoding, and MinCut partitioning ([ADR-033](docs/adr/ADR-033-crv-signal-line-sensing-integration.md)) |
+| 🔒 | **QUIC Mesh Security** | `midstreamer-quic` TLS 1.3 AEAD transport with HMAC-authenticated beacons, SipHash frame integrity, replay protection, and connection migration ([ADR-032](docs/adr/ADR-032-multistatic-mesh-security-hardening.md)) |
 
 ### Performance & Deployment
 
@@ -1585,9 +1586,13 @@ Multistatic sensing, persistent field model, and cross-viewpoint fusion — the 
 - **Channel-Hopping Firmware** — ESP32 firmware extended with hop table, timer-driven channel switching, NDP injection stub; NVS config for all TDM parameters; fully backward-compatible
 - **DDD Domain Model** — 6 bounded contexts, ubiquitous language, aggregate roots, domain events, full event bus specification
 - **`ruvector-crv` 6-stage CRV signal-line integration (ADR-033)** — Maps Coordinate Remote Viewing methodology to WiFi CSI: gestalt classification, sensory encoding, GNN topology, SNN coherence gating, differentiable search, MinCut partitioning; cross-session convergence for multi-room identity continuity
-- **ADR-032 multistatic mesh security hardening** — Bounded calibration buffers, atomic counters, division-by-zero guards, NaN-safe normalization across all multistatic modules
+- **ADR-032 multistatic mesh security hardening** — HMAC-SHA256 beacon auth, SipHash-2-4 frame integrity, NDP rate limiter, coherence gate timeout, bounded buffers, NVS credential zeroing, atomic firmware state
+- **ADR-032a QUIC transport layer** — `midstreamer-quic` TLS 1.3 AEAD for aggregator nodes, dual-mode security (ManualCrypto/QuicTransport), QUIC stream mapping, connection migration, congestion control
 - **ADR-033 CRV signal-line sensing integration** — Architecture decision record for the 6-stage CRV pipeline mapping to ruvector components
-- **9,000+ lines of new Rust code** across 17 modules with 300+ tests
+- **Temporal gesture matching** — `midstreamer-temporal-compare` DTW/LCS/edit-distance gesture classification with quantized feature comparison
+- **Attractor drift analysis** — `midstreamer-attractor` Takens' theorem phase-space embedding with Lyapunov exponent regime detection (Stable/Periodic/Chaotic)
+- **v0.3.0 published** — All 15 workspace crates published to [crates.io](https://crates.io/crates/wifi-densepose-core) with updated dependencies
+- **28,000+ lines of new Rust code** across 26 modules with 400+ tests
 - **Security hardened** — Bounded buffers, NaN guards, no panics in public APIs, input validation at all boundaries
 
 ### v3.0.0 — 2026-03-01
