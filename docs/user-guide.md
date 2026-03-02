@@ -10,6 +10,7 @@ WiFi DensePose turns commodity WiFi signals into real-time human pose estimation
 2. [Installation](#installation)
    - [Docker (Recommended)](#docker-recommended)
    - [From Source (Rust)](#from-source-rust)
+   - [From crates.io](#from-cratesio-individual-crates)
    - [From Source (Python)](#from-source-python)
    - [Guided Installer](#guided-installer)
 3. [Quick Start](#quick-start)
@@ -19,12 +20,14 @@ WiFi DensePose turns commodity WiFi signals into real-time human pose estimation
    - [Simulated Mode (No Hardware)](#simulated-mode-no-hardware)
    - [Windows WiFi (RSSI Only)](#windows-wifi-rssi-only)
    - [ESP32-S3 (Full CSI)](#esp32-s3-full-csi)
+   - [ESP32 Multistatic Mesh (Advanced)](#esp32-multistatic-mesh-advanced)
 5. [REST API Reference](#rest-api-reference)
 6. [WebSocket Streaming](#websocket-streaming)
 7. [Web UI](#web-ui)
 8. [Vital Sign Detection](#vital-sign-detection)
 9. [CLI Reference](#cli-reference)
 10. [Training a Model](#training-a-model)
+    - [CRV Signal-Line Protocol](#crv-signal-line-protocol)
 11. [RVF Model Containers](#rvf-model-containers)
 12. [Hardware Setup](#hardware-setup)
     - [ESP32-S3 Mesh](#esp32-s3-mesh)
@@ -79,11 +82,40 @@ cd wifi-densepose/rust-port/wifi-densepose-rs
 # Build
 cargo build --release
 
-# Verify (runs 700+ tests)
+# Verify (runs 1,100+ tests)
 cargo test --workspace
 ```
 
 The compiled binary is at `target/release/sensing-server`.
+
+### From crates.io (Individual Crates)
+
+All 15 crates are published to crates.io at v0.3.0. Add individual crates to your own Rust project:
+
+```bash
+# Core types and traits
+cargo add wifi-densepose-core
+
+# Signal processing (includes RuvSense multistatic sensing)
+cargo add wifi-densepose-signal
+
+# Neural network inference
+cargo add wifi-densepose-nn
+
+# Mass Casualty Assessment Tool
+cargo add wifi-densepose-mat
+
+# ESP32 hardware + TDM protocol + QUIC transport
+cargo add wifi-densepose-hardware
+
+# RuVector integration (add --features crv for CRV signal-line protocol)
+cargo add wifi-densepose-ruvector --features crv
+
+# WebAssembly bindings
+cargo add wifi-densepose-wasm
+```
+
+See the full crate list and dependency order in [CLAUDE.md](../CLAUDE.md#crate-publishing-order).
 
 ### From Source (Python)
 
@@ -231,6 +263,27 @@ docker run -p 3000:3000 -p 3001:3001 -p 5005:5005/udp ruvnet/wifi-densepose:late
 
 The ESP32 nodes stream binary CSI frames over UDP to port 5005. See [Hardware Setup](#esp32-s3-mesh) for flashing instructions.
 
+### ESP32 Multistatic Mesh (Advanced)
+
+For higher accuracy with through-wall tracking, deploy 3-6 ESP32-S3 nodes in a **multistatic mesh** configuration. Each node acts as both transmitter and receiver, creating multiple sensing paths through the environment.
+
+```bash
+# Start the aggregator with multistatic mode
+./target/release/sensing-server --source esp32 --udp-port 5005 --http-port 3000 --ws-port 3001
+```
+
+The mesh uses a **Time-Division Multiplexing (TDM)** protocol so nodes take turns transmitting, avoiding self-interference. Key features:
+
+| Feature | Description |
+|---------|-------------|
+| TDM coordination | Nodes cycle through TX/RX slots (configurable guard intervals) |
+| Channel hopping | Automatic 2.4/5 GHz band cycling for multiband fusion |
+| QUIC transport | TLS 1.3-encrypted streams on aggregator nodes (ADR-032a) |
+| Manual crypto fallback | HMAC-SHA256 beacon auth on constrained ESP32-S3 nodes |
+| Attention-weighted fusion | Cross-viewpoint attention with geometric diversity bias |
+
+See [ADR-029](adr/ADR-029-ruvsense-multistatic-sensing-mode.md) and [ADR-032](adr/ADR-032-multistatic-mesh-security-hardening.md) for the full design.
+
 ---
 
 ## REST API Reference
@@ -369,7 +422,7 @@ The system extracts breathing rate and heart rate from CSI signal fluctuations u
 
 **Requirements:**
 - CSI-capable hardware (ESP32-S3 or research NIC) for accurate readings
-- Subject within ~3-5 meters of an access point
+- Subject within ~3-5 meters of an access point (up to ~8 m with multistatic mesh)
 - Relatively stationary subject (large movements mask vital sign oscillations)
 
 **Simulated mode** produces synthetic vital sign data for testing.
@@ -493,6 +546,26 @@ MERIDIAN components (all pure Rust, +12K parameters):
 
 See [ADR-027](adr/ADR-027-cross-environment-domain-generalization.md) for the full design.
 
+### CRV Signal-Line Protocol
+
+The CRV (Coordinate Remote Viewing) signal-line protocol (ADR-033) maps a 6-stage cognitive sensing methodology onto WiFi CSI processing. This enables structured anomaly classification and multi-person disambiguation.
+
+| Stage | CRV Term | WiFi Mapping |
+|-------|----------|-------------|
+| I | Gestalt | Detrended autocorrelation → periodicity / chaos / transient classification |
+| II | Sensory | 6-modality CSI feature encoding (texture, temperature, luminosity, etc.) |
+| III | Topology | AP mesh topology graph with link quality weights |
+| IV | Coherence | Phase phasor coherence gate (Accept/PredictOnly/Reject/Recalibrate) |
+| V | Interrogation | Person-specific signal extraction with targeted subcarrier selection |
+| VI | Partition | Multi-person partition with cross-room convergence scoring |
+
+```bash
+# Enable CRV in your Cargo.toml
+cargo add wifi-densepose-ruvector --features crv
+```
+
+See [ADR-033](adr/ADR-033-crv-signal-line-sensing-integration.md) for the full design.
+
 ---
 
 ## RVF Model Containers
@@ -535,7 +608,7 @@ A 3-6 node ESP32-S3 mesh provides full CSI at 20 Hz. Total cost: ~$54 for a 3-no
 **What you need:**
 - 3-6x ESP32-S3 development boards (~$8 each)
 - A WiFi router (the CSI source)
-- A computer running the sensing server
+- A computer running the sensing server (aggregator)
 
 **Flashing firmware:**
 
@@ -557,6 +630,33 @@ python scripts/provision.py --port COM7 \
 
 Replace `192.168.1.20` with the IP of the machine running the sensing server.
 
+**Mesh key provisioning (secure mode):**
+
+For multistatic mesh deployments with authenticated beacons (ADR-032), provision a shared mesh key:
+
+```bash
+python scripts/provision.py --port COM7 \
+  --ssid "YourWiFi" --password "YourPassword" --target-ip 192.168.1.20 \
+  --mesh-key "$(openssl rand -hex 32)"
+```
+
+All nodes in a mesh must share the same 256-bit mesh key for HMAC-SHA256 beacon authentication. The key is stored in ESP32 NVS flash and zeroed on firmware erase.
+
+**TDM slot assignment:**
+
+Each node in a multistatic mesh needs a unique TDM slot ID (0-based):
+
+```bash
+# Node 0 (slot 0) — first transmitter
+python scripts/provision.py --port COM7 --tdm-slot 0 --tdm-total 3
+
+# Node 1 (slot 1)
+python scripts/provision.py --port COM8 --tdm-slot 1 --tdm-total 3
+
+# Node 2 (slot 2)
+python scripts/provision.py --port COM9 --tdm-slot 2 --tdm-total 3
+```
+
 **Start the aggregator:**
 
 ```bash
@@ -567,7 +667,7 @@ Replace `192.168.1.20` with the IP of the machine running the sensing server.
 docker run -p 3000:3000 -p 3001:3001 -p 5005:5005/udp ruvnet/wifi-densepose:latest --source esp32
 ```
 
-See [ADR-018](../docs/adr/ADR-018-esp32-dev-implementation.md) and [Tutorial #34](https://github.com/ruvnet/wifi-densepose/issues/34).
+See [ADR-018](../docs/adr/ADR-018-esp32-dev-implementation.md), [ADR-029](../docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md), and [Tutorial #34](https://github.com/ruvnet/wifi-densepose/issues/34).
 
 ### Intel 5300 / Atheros NIC
 
@@ -626,7 +726,7 @@ docker run -p 3000:3000 -p 3001:3001 ruvnet/wifi-densepose:latest
 
 ### Build: Rust compilation errors
 
-Ensure Rust 1.70+ is installed:
+Ensure Rust 1.75+ is installed (1.85+ recommended):
 ```bash
 rustup update stable
 rustc --version
@@ -656,7 +756,7 @@ No. Consumer WiFi exposes only RSSI (one number per access point), not CSI (56+ 
 Accuracy depends on hardware and environment. With a 3-node ESP32 mesh in a single room, the system tracks 17 COCO keypoints. The core algorithm follows the CMU "DensePose From WiFi" paper ([arXiv:2301.00250](https://arxiv.org/abs/2301.00250)). The MERIDIAN domain generalization system (ADR-027) reduces cross-environment accuracy loss from 40-70% to under 15% via 10-second automatic calibration.
 
 **Q: Does it work through walls?**
-Yes. WiFi signals penetrate non-metallic materials (drywall, wood, concrete up to ~30cm). Metal walls/doors significantly attenuate the signal. The effective through-wall range is approximately 5 meters.
+Yes. WiFi signals penetrate non-metallic materials (drywall, wood, concrete up to ~30cm). Metal walls/doors significantly attenuate the signal. With a single AP the effective through-wall range is approximately 5 meters. With a 3-6 node multistatic mesh (ADR-029), attention-weighted cross-viewpoint fusion extends the effective range to ~8 meters through standard residential walls.
 
 **Q: How many people can it track?**
 Each access point can distinguish ~3-5 people with 56 subcarriers. Multi-AP deployments multiply linearly (e.g., 4 APs cover ~15-20 people). There is no hard software limit; the practical ceiling is signal physics.
@@ -671,7 +771,7 @@ The Rust implementation (v2) is 810x faster than Python (v1) for the full CSI pi
 
 ## Further Reading
 
-- [Architecture Decision Records](../docs/adr/) - 27 ADRs covering all design decisions
+- [Architecture Decision Records](../docs/adr/) - 33 ADRs covering all design decisions
 - [WiFi-Mat Disaster Response Guide](wifi-mat-user-guide.md) - Search & rescue module
 - [Build Guide](build-guide.md) - Detailed build instructions
 - [RuVector](https://github.com/ruvnet/ruvector) - Signal intelligence crate ecosystem
