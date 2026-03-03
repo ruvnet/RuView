@@ -9,6 +9,7 @@
 
 #include <string.h>
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
 #include "sdkconfig.h"
@@ -17,6 +18,17 @@ static const char *TAG = "stream_sender";
 
 static int s_sock = -1;
 static struct sockaddr_in s_dest_addr;
+
+/**
+ * ENOMEM backoff state.
+ * When sendto fails with ENOMEM (errno 12), we suppress further sends for
+ * a cooldown period to let lwIP reclaim packet buffers.  Without this,
+ * rapid-fire CSI callbacks can exhaust the pbuf pool and crash the device.
+ */
+static int64_t s_backoff_until_us = 0;       /* esp_timer timestamp to resume */
+#define ENOMEM_COOLDOWN_MS  100              /* suppress sends for 100 ms */
+#define ENOMEM_LOG_INTERVAL 50               /* log every Nth suppressed send */
+static uint32_t s_enomem_suppressed = 0;
 
 static int sender_init_internal(const char *ip, uint16_t port)
 {
@@ -57,10 +69,37 @@ int stream_sender_send(const uint8_t *data, size_t len)
         return -1;
     }
 
+    /* ENOMEM backoff: if we recently exhausted lwIP buffers, skip sends
+     * until the cooldown expires.  This prevents the cascade of failed
+     * sendto calls that leads to a guru meditation crash. */
+    if (s_backoff_until_us > 0) {
+        int64_t now = esp_timer_get_time();
+        if (now < s_backoff_until_us) {
+            s_enomem_suppressed++;
+            if ((s_enomem_suppressed % ENOMEM_LOG_INTERVAL) == 1) {
+                ESP_LOGW(TAG, "sendto suppressed (ENOMEM backoff, %lu dropped)",
+                         (unsigned long)s_enomem_suppressed);
+            }
+            return -1;
+        }
+        /* Cooldown expired — resume sending */
+        ESP_LOGI(TAG, "ENOMEM backoff expired, resuming sends (%lu were suppressed)",
+                 (unsigned long)s_enomem_suppressed);
+        s_backoff_until_us = 0;
+        s_enomem_suppressed = 0;
+    }
+
     int sent = sendto(s_sock, data, len, 0,
                       (struct sockaddr *)&s_dest_addr, sizeof(s_dest_addr));
     if (sent < 0) {
-        ESP_LOGW(TAG, "sendto failed: errno %d", errno);
+        if (errno == ENOMEM) {
+            /* Start backoff to let lwIP reclaim buffers */
+            s_backoff_until_us = esp_timer_get_time() +
+                                 (int64_t)ENOMEM_COOLDOWN_MS * 1000;
+            ESP_LOGW(TAG, "sendto ENOMEM — backing off for %d ms", ENOMEM_COOLDOWN_MS);
+        } else {
+            ESP_LOGW(TAG, "sendto failed: errno %d", errno);
+        }
         return -1;
     }
 

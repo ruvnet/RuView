@@ -27,6 +27,16 @@ static uint32_t s_sequence = 0;
 static uint32_t s_cb_count = 0;
 static uint32_t s_send_ok = 0;
 static uint32_t s_send_fail = 0;
+static uint32_t s_rate_skip = 0;
+
+/**
+ * Minimum interval between UDP sends in microseconds.
+ * CSI callbacks can fire hundreds of times per second in promiscuous mode.
+ * We cap the send rate to avoid exhausting lwIP packet buffers (ENOMEM).
+ * Default: 20 ms = 50 Hz max send rate.
+ */
+#define CSI_MIN_SEND_INTERVAL_US  (20 * 1000)
+static int64_t s_last_send_us = 0;
 
 /* ---- ADR-029: Channel-hop state ---- */
 
@@ -143,14 +153,23 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
     size_t frame_len = csi_serialize_frame(info, frame_buf, sizeof(frame_buf));
 
     if (frame_len > 0) {
-        int ret = stream_sender_send(frame_buf, frame_len);
-        if (ret > 0) {
-            s_send_ok++;
-        } else {
-            s_send_fail++;
-            if (s_send_fail <= 5) {
-                ESP_LOGW(TAG, "sendto failed (fail #%lu)", (unsigned long)s_send_fail);
+        /* Rate-limit UDP sends to avoid ENOMEM from lwIP pbuf exhaustion.
+         * In promiscuous mode, CSI callbacks can fire 100-500+ times/sec.
+         * We only need 20-50 Hz for the sensing pipeline. */
+        int64_t now = esp_timer_get_time();
+        if ((now - s_last_send_us) >= CSI_MIN_SEND_INTERVAL_US) {
+            int ret = stream_sender_send(frame_buf, frame_len);
+            if (ret > 0) {
+                s_send_ok++;
+                s_last_send_us = now;
+            } else {
+                s_send_fail++;
+                if (s_send_fail <= 5) {
+                    ESP_LOGW(TAG, "sendto failed (fail #%lu)", (unsigned long)s_send_fail);
+                }
             }
+        } else {
+            s_rate_skip++;
         }
     }
 
