@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "esp_err.h"
 #include "esp_wifi_types.h"
 
 /** ADR-018 magic number. */
@@ -22,27 +23,11 @@
 /** Maximum number of channels in the hop table (ADR-029). */
 #define CSI_HOP_CHANNELS_MAX 6
 
-/** Length of a MAC address in bytes. */
-#define CSI_MAC_LEN 6
-
 /**
  * Initialize CSI collection.
  * Registers the WiFi CSI callback.
  */
 void csi_collector_init(void);
-
-/**
- * Set a MAC address filter for CSI collection.
- *
- * When set, only CSI frames from the specified transmitter MAC are processed;
- * all others are silently dropped. This prevents signal mixing in multi-AP
- * environments.
- *
- * Pass NULL to disable filtering (accept CSI from all transmitters).
- *
- * @param mac  6-byte MAC address to accept, or NULL to disable filtering.
- */
-void csi_collector_set_filter_mac(const uint8_t *mac);
 
 /**
  * Serialize CSI data into ADR-018 binary frame format.

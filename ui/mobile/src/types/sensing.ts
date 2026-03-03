@@ -70,4 +70,6 @@ export interface SensingFrame {
   persons?: PersonDetection[];
   posture?: string;
   signal_quality_score?: number;
+  /** Estimated person count from CSI feature heuristics (1-3 for single ESP32). */
+  estimated_persons?: number;
 }

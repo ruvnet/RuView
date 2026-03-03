@@ -21,11 +21,22 @@
 #include "csi_collector.h"
 #include "stream_sender.h"
 #include "nvs_config.h"
+#include "edge_processing.h"
+#include "ota_update.h"
+#include "power_mgmt.h"
+#include "wasm_runtime.h"
+#include "wasm_upload.h"
+
+#include "esp_timer.h"
 
 static const char *TAG = "main";
 
-/* Runtime configuration (loaded from NVS or Kconfig defaults). */
-static nvs_config_t s_cfg;
+/* ADR-040: WASM timer handle (calls on_timer at configurable interval). */
+static esp_timer_handle_t s_wasm_timer;
+
+/* Runtime configuration (loaded from NVS or Kconfig defaults).
+ * Global so other modules (wasm_upload.c) can access pubkey, etc. */
+nvs_config_t g_nvs_config;
 
 /* Event group bits */
 #define WIFI_CONNECTED_BIT BIT0
@@ -81,8 +92,8 @@ static void wifi_init_sta(void)
     };
 
     /* Copy runtime SSID/password from NVS config */
-    strncpy((char *)wifi_config.sta.ssid, s_cfg.wifi_ssid, sizeof(wifi_config.sta.ssid) - 1);
-    strncpy((char *)wifi_config.sta.password, s_cfg.wifi_password, sizeof(wifi_config.sta.password) - 1);
+    strncpy((char *)wifi_config.sta.ssid, g_nvs_config.wifi_ssid, sizeof(wifi_config.sta.ssid) - 1);
+    strncpy((char *)wifi_config.sta.password, g_nvs_config.wifi_password, sizeof(wifi_config.sta.password) - 1);
 
     /* If password is empty, use open auth */
     if (strlen((char *)wifi_config.sta.password) == 0) {
@@ -93,7 +104,7 @@ static void wifi_init_sta(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "WiFi STA initialized, connecting to SSID: %s", s_cfg.wifi_ssid);
+    ESP_LOGI(TAG, "WiFi STA initialized, connecting to SSID: %s", g_nvs_config.wifi_ssid);
 
     /* Wait for connection */
     EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
@@ -118,15 +129,15 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     /* Load runtime config (NVS overrides Kconfig defaults) */
-    nvs_config_load(&s_cfg);
+    nvs_config_load(&g_nvs_config);
 
-    ESP_LOGI(TAG, "ESP32-S3 CSI Node (ADR-018) — Node ID: %d", s_cfg.node_id);
+    ESP_LOGI(TAG, "ESP32-S3 CSI Node (ADR-018) — Node ID: %d", g_nvs_config.node_id);
 
     /* Initialize WiFi STA */
     wifi_init_sta();
 
     /* Initialize UDP sender with runtime target */
-    if (stream_sender_init_with(s_cfg.target_ip, s_cfg.target_port) != 0) {
+    if (stream_sender_init_with(g_nvs_config.target_ip, g_nvs_config.target_port) != 0) {
         ESP_LOGE(TAG, "Failed to initialize UDP sender");
         return;
     }
@@ -134,15 +145,69 @@ void app_main(void)
     /* Initialize CSI collection */
     csi_collector_init();
 
-    /* Apply MAC address filter if configured (Issue #98) */
-    if (s_cfg.filter_mac_enabled) {
-        csi_collector_set_filter_mac(s_cfg.filter_mac);
-    } else {
-        ESP_LOGI(TAG, "No MAC filter — accepting CSI from all transmitters");
+    /* ADR-039: Initialize edge processing pipeline. */
+    edge_config_t edge_cfg = {
+        .tier              = g_nvs_config.edge_tier,
+        .presence_thresh   = g_nvs_config.presence_thresh,
+        .fall_thresh       = g_nvs_config.fall_thresh,
+        .vital_window      = g_nvs_config.vital_window,
+        .vital_interval_ms = g_nvs_config.vital_interval_ms,
+        .top_k_count       = g_nvs_config.top_k_count,
+        .power_duty        = g_nvs_config.power_duty,
+    };
+    esp_err_t edge_ret = edge_processing_init(&edge_cfg);
+    if (edge_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Edge processing init failed: %s (continuing without edge DSP)",
+                 esp_err_to_name(edge_ret));
     }
 
-    ESP_LOGI(TAG, "CSI streaming active → %s:%d",
-             s_cfg.target_ip, s_cfg.target_port);
+    /* Initialize OTA update HTTP server. */
+    httpd_handle_t ota_server = NULL;
+    esp_err_t ota_ret = ota_update_init_ex(&ota_server);
+    if (ota_ret != ESP_OK) {
+        ESP_LOGW(TAG, "OTA server init failed: %s", esp_err_to_name(ota_ret));
+    }
+
+    /* ADR-040: Initialize WASM programmable sensing runtime. */
+    esp_err_t wasm_ret = wasm_runtime_init();
+    if (wasm_ret != ESP_OK) {
+        ESP_LOGW(TAG, "WASM runtime init failed: %s", esp_err_to_name(wasm_ret));
+    } else {
+        /* Register WASM upload endpoints on the OTA HTTP server. */
+        if (ota_server != NULL) {
+            wasm_upload_register(ota_server);
+        }
+
+        /* Start periodic timer for wasm_runtime_on_timer(). */
+        esp_timer_create_args_t timer_args = {
+            .callback = (void (*)(void *))wasm_runtime_on_timer,
+            .arg = NULL,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "wasm_timer",
+        };
+        esp_err_t timer_ret = esp_timer_create(&timer_args, &s_wasm_timer);
+        if (timer_ret == ESP_OK) {
+#ifdef CONFIG_WASM_TIMER_INTERVAL_MS
+            uint64_t interval_us = (uint64_t)CONFIG_WASM_TIMER_INTERVAL_MS * 1000ULL;
+#else
+            uint64_t interval_us = 1000000ULL;  /* Default: 1 second. */
+#endif
+            esp_timer_start_periodic(s_wasm_timer, interval_us);
+            ESP_LOGI(TAG, "WASM on_timer() periodic: %llu ms",
+                     (unsigned long long)(interval_us / 1000));
+        } else {
+            ESP_LOGW(TAG, "WASM timer create failed: %s", esp_err_to_name(timer_ret));
+        }
+    }
+
+    /* Initialize power management. */
+    power_mgmt_init(g_nvs_config.power_duty);
+
+    ESP_LOGI(TAG, "CSI streaming active → %s:%d (edge_tier=%u, OTA=%s, WASM=%s)",
+             g_nvs_config.target_ip, g_nvs_config.target_port,
+             g_nvs_config.edge_tier,
+             (ota_ret == ESP_OK) ? "ready" : "off",
+             (wasm_ret == ESP_OK) ? "ready" : "off");
 
     /* Main loop — keep alive */
     while (1) {

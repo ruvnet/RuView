@@ -11,9 +11,6 @@
 mod rvf_container;
 mod rvf_pipeline;
 mod vital_signs;
-mod recording;
-mod model_manager;
-mod training_api;
 
 // Training pipeline modules (exposed via lib.rs)
 use wifi_densepose_sensing_server::{graph_transformer, trainer, dataset, embedding};
@@ -202,6 +199,13 @@ struct SensingUpdate {
     /// Model status when a trained model is loaded.
     #[serde(skip_serializing_if = "Option::is_none")]
     model_status: Option<serde_json::Value>,
+    // ── Multi-person detection (issue #97) ──
+    /// Detected persons from WiFi sensing (multi-person support).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    persons: Option<Vec<PersonDetection>>,
+    /// Estimated person count from CSI feature heuristics (1-3 for single ESP32).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    estimated_persons: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -275,9 +279,6 @@ struct AppStateInner {
     frame_history: VecDeque<Vec<f64>>,
     tick: u64,
     source: String,
-    /// Timestamp of the last ESP32 UDP frame received.
-    /// Used by the hybrid auto-detect task to switch between esp32 and simulation.
-    last_esp32_frame: Option<std::time::Instant>,
     tx: broadcast::Sender<String>,
     total_detections: u64,
     start_time: std::time::Instant,
@@ -295,14 +296,12 @@ struct AppStateInner {
     active_sona_profile: Option<String>,
     /// Whether a trained model is loaded.
     model_loaded: bool,
-    /// CSI frame recording state (ADR-036).
-    recording_state: recording::RecordingState,
-    /// Currently loaded model via model_manager API (ADR-036).
-    loaded_model: Option<model_manager::LoadedModelState>,
-    /// Training pipeline state (ADR-036).
-    training_state: training_api::TrainingState,
-    /// Broadcast channel for training progress WebSocket (ADR-036).
-    training_progress_tx: tokio::sync::broadcast::Sender<String>,
+    /// Smoothed person count (EMA) for hysteresis — prevents frame-to-frame jumping.
+    smoothed_person_score: f64,
+    /// ADR-039: Latest edge vitals packet from ESP32.
+    edge_vitals: Option<Esp32VitalsPacket>,
+    /// ADR-040: Latest WASM output packet from ESP32.
+    latest_wasm_events: Option<WasmOutputPacket>,
 }
 
 /// Number of frames retained in `frame_history` for temporal analysis.
@@ -310,6 +309,111 @@ struct AppStateInner {
 const FRAME_HISTORY_CAPACITY: usize = 100;
 
 type SharedState = Arc<RwLock<AppStateInner>>;
+
+// ── ESP32 Edge Vitals Packet (ADR-039, magic 0xC511_0002) ────────────────────
+
+/// Decoded vitals packet from ESP32 edge processing pipeline.
+#[derive(Debug, Clone, Serialize)]
+struct Esp32VitalsPacket {
+    node_id: u8,
+    presence: bool,
+    fall_detected: bool,
+    motion: bool,
+    breathing_rate_bpm: f64,
+    heartrate_bpm: f64,
+    rssi: i8,
+    n_persons: u8,
+    motion_energy: f32,
+    presence_score: f32,
+    timestamp_ms: u32,
+}
+
+/// Parse a 32-byte edge vitals packet (magic 0xC511_0002).
+fn parse_esp32_vitals(buf: &[u8]) -> Option<Esp32VitalsPacket> {
+    if buf.len() < 32 {
+        return None;
+    }
+    let magic = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+    if magic != 0xC511_0002 {
+        return None;
+    }
+
+    let node_id = buf[4];
+    let flags = buf[5];
+    let breathing_raw = u16::from_le_bytes([buf[6], buf[7]]);
+    let heartrate_raw = u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]);
+    let rssi = buf[12] as i8;
+    let n_persons = buf[13];
+    let motion_energy = f32::from_le_bytes([buf[16], buf[17], buf[18], buf[19]]);
+    let presence_score = f32::from_le_bytes([buf[20], buf[21], buf[22], buf[23]]);
+    let timestamp_ms = u32::from_le_bytes([buf[24], buf[25], buf[26], buf[27]]);
+
+    Some(Esp32VitalsPacket {
+        node_id,
+        presence: (flags & 0x01) != 0,
+        fall_detected: (flags & 0x02) != 0,
+        motion: (flags & 0x04) != 0,
+        breathing_rate_bpm: breathing_raw as f64 / 100.0,
+        heartrate_bpm: heartrate_raw as f64 / 10000.0,
+        rssi,
+        n_persons,
+        motion_energy,
+        presence_score,
+        timestamp_ms,
+    })
+}
+
+// ── ADR-040: WASM Output Packet (magic 0xC511_0004) ───────────────────────────
+
+/// Single WASM event (type + value).
+#[derive(Debug, Clone, Serialize)]
+struct WasmEvent {
+    event_type: u8,
+    value: f32,
+}
+
+/// Decoded WASM output packet from ESP32 Tier 3 runtime.
+#[derive(Debug, Clone, Serialize)]
+struct WasmOutputPacket {
+    node_id: u8,
+    module_id: u8,
+    events: Vec<WasmEvent>,
+}
+
+/// Parse a WASM output packet (magic 0xC511_0004).
+fn parse_wasm_output(buf: &[u8]) -> Option<WasmOutputPacket> {
+    if buf.len() < 8 {
+        return None;
+    }
+    let magic = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+    if magic != 0xC511_0004 {
+        return None;
+    }
+
+    let node_id = buf[4];
+    let module_id = buf[5];
+    let event_count = u16::from_le_bytes([buf[6], buf[7]]) as usize;
+
+    let mut events = Vec::with_capacity(event_count);
+    let mut offset = 8;
+    for _ in 0..event_count {
+        if offset + 5 > buf.len() {
+            break;
+        }
+        let event_type = buf[offset];
+        let value = f32::from_le_bytes([
+            buf[offset + 1], buf[offset + 2], buf[offset + 3], buf[offset + 4],
+        ]);
+        events.push(WasmEvent { event_type, value });
+        offset += 5;
+    }
+
+    Some(WasmOutputPacket {
+        node_id,
+        module_id,
+        events,
+    })
+}
 
 // ── ESP32 UDP frame parser ───────────────────────────────────────────────────
 
@@ -904,17 +1008,16 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
 
         let feat_variance = features.variance;
 
-        // ADR-036: Capture data for recording before values are moved.
-        let rec_amps = multi_ap_frame.amplitudes.clone();
-        let rec_rssi = first_rssi;
-        let rec_features = serde_json::json!({
-            "variance": feat_variance,
-            "motion_band_power": features.motion_band_power,
-            "breathing_band_power": features.breathing_band_power,
-            "spectral_power": features.spectral_power,
-        });
+        // Multi-person estimation with temporal smoothing (EMA α=0.15).
+        let raw_score = compute_person_score(&features);
+        s.smoothed_person_score = s.smoothed_person_score * 0.85 + raw_score * 0.15;
+        let est_persons = if classification.presence {
+            score_to_person_count(s.smoothed_person_score)
+        } else {
+            0
+        };
 
-        let update = SensingUpdate {
+        let mut update = SensingUpdate {
             msg_type: "sensing_update".to_string(),
             timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
             source: format!("wifi:{ssid}"),
@@ -941,19 +1044,20 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
             bssid_count: bssid_n,
             pose_keypoints: None,
             model_status: None,
+            persons: None,
+            estimated_persons: if est_persons > 0 { Some(est_persons) } else { None },
         };
+
+        // Populate persons from the sensing update.
+        let persons = derive_pose_from_sensing(&update);
+        if !persons.is_empty() {
+            update.persons = Some(persons);
+        }
 
         if let Ok(json) = serde_json::to_string(&update) {
             let _ = s.tx.send(json);
         }
-
         s.latest_update = Some(update);
-        drop(s);
-
-        // ADR-036: Record frame if recording is active.
-        recording::maybe_record_frame(
-            &state, &rec_amps, rec_rssi, -90.0, &rec_features,
-        ).await;
 
         debug!(
             "Multi-BSSID tick #{tick}: {obs_count} BSSIDs, quality={:.2}, verdict={:?}",
@@ -1031,16 +1135,16 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
 
     let feat_variance = features.variance;
 
-    // ADR-036: Capture data for recording before values are moved.
-    let rec_amps = vec![signal_pct];
-    let rec_features = serde_json::json!({
-        "variance": feat_variance,
-        "motion_band_power": features.motion_band_power,
-        "breathing_band_power": features.breathing_band_power,
-        "spectral_power": features.spectral_power,
-    });
+    // Multi-person estimation with temporal smoothing.
+    let raw_score = compute_person_score(&features);
+    s.smoothed_person_score = s.smoothed_person_score * 0.85 + raw_score * 0.15;
+    let est_persons = if classification.presence {
+        score_to_person_count(s.smoothed_person_score)
+    } else {
+        0
+    };
 
-    let update = SensingUpdate {
+    let mut update = SensingUpdate {
         msg_type: "sensing_update".to_string(),
         timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
         source: format!("wifi:{ssid}"),
@@ -1067,19 +1171,19 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         bssid_count: None,
         pose_keypoints: None,
         model_status: None,
+        persons: None,
+        estimated_persons: if est_persons > 0 { Some(est_persons) } else { None },
     };
+
+    let persons = derive_pose_from_sensing(&update);
+    if !persons.is_empty() {
+        update.persons = Some(persons);
+    }
 
     if let Ok(json) = serde_json::to_string(&update) {
         let _ = s.tx.send(json);
     }
-
     s.latest_update = Some(update);
-    drop(s);
-
-    // ADR-036: Record frame if recording is active.
-    recording::maybe_record_frame(
-        state, &rec_amps, rssi_dbm, -90.0, &rec_features,
-    ).await;
 }
 
 /// Probe if Windows WiFi is connected
@@ -1275,6 +1379,7 @@ async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
                                             "signal_strength": sensing.features.mean_rssi,
                                             "motion_band_power": sensing.features.motion_band_power,
                                             "breathing_band_power": sensing.features.breathing_band_power,
+                                            "estimated_persons": persons.len(),
                                         }
                                     }
                                 });
@@ -1342,69 +1447,112 @@ async fn latest(State(state): State<SharedState>) -> Json<serde_json::Value> {
 /// When `presence == false` no persons are returned (empty room).
 /// When walking is detected (`motion_score > 0.55`) the figure shifts laterally
 /// with a stride-swing pattern applied to arms and legs.
-fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
-    let cls = &update.classification;
-    if !cls.presence {
-        return vec![];
-    }
+// ── Multi-person estimation (issue #97) ──────────────────────────────────────
 
+/// Estimate person count from CSI features using a weighted composite heuristic.
+///
+/// Single ESP32 link limitations: variance-based detection can reliably detect
+/// 1-2 persons. 3+ is speculative and requires ≥3 nodes for spatial resolution.
+///
+/// Returns a raw score (0.0..1.0) that the caller converts to person count
+/// after temporal smoothing.
+fn compute_person_score(feat: &FeatureInfo) -> f64 {
+    // Normalize each feature to [0, 1] using calibrated ranges:
+    //
+    //   variance: intra-frame amp variance. 1-person ~2-15, 2-person ~15-60,
+    //     real ESP32 can go higher. Use 30.0 as scaling midpoint.
+    let var_norm = (feat.variance / 30.0).clamp(0.0, 1.0);
+
+    //   change_points: threshold crossings in 56 subcarriers. 1-person ~5-15,
+    //     2-person ~15-30. Scale by 30.0 (half of max 55).
+    let cp_norm = (feat.change_points as f64 / 30.0).clamp(0.0, 1.0);
+
+    //   motion_band_power: upper-half subcarrier variance. 1-person ~1-8,
+    //     2-person ~8-25. Scale by 20.0.
+    let motion_norm = (feat.motion_band_power / 20.0).clamp(0.0, 1.0);
+
+    //   spectral_power: mean squared amplitude. Highly variable (~100-1000+).
+    //     Use relative change indicator: high spectral_power with high variance
+    //     suggests multiple reflectors. Scale by 500.0.
+    let sp_norm = (feat.spectral_power / 500.0).clamp(0.0, 1.0);
+
+    // Weighted composite — variance and change_points carry the most signal.
+    var_norm * 0.35 + cp_norm * 0.30 + motion_norm * 0.20 + sp_norm * 0.15
+}
+
+/// Convert smoothed person score to discrete count with hysteresis.
+///
+/// Uses asymmetric thresholds: higher threshold to add a person, lower to remove.
+/// This prevents flickering at the boundary.
+fn score_to_person_count(smoothed_score: f64) -> usize {
+    // Thresholds chosen conservatively for single-ESP32 link:
+    //   score > 0.50 → 2 persons (needs sustained high variance + change points)
+    //   score > 0.80 → 3 persons (very high activity, rare with single link)
+    if smoothed_score > 0.80 {
+        3
+    } else if smoothed_score > 0.50 {
+        2
+    } else {
+        1
+    }
+}
+
+/// Generate a single person's skeleton with per-person spatial offset and phase stagger.
+///
+/// `person_idx`: 0-based index of this person.
+/// `total_persons`: total number of detected persons (for spacing calculation).
+fn derive_single_person_pose(
+    update: &SensingUpdate,
+    person_idx: usize,
+    total_persons: usize,
+) -> PersonDetection {
+    let cls = &update.classification;
     let feat = &update.features;
+
+    // Per-person phase offset: ~120 degrees apart so they don't move in sync.
+    let phase_offset = person_idx as f64 * 2.094;
+
+    // Spatial spread: persons distributed symmetrically around center.
+    let half = (total_persons as f64 - 1.0) / 2.0;
+    let person_x_offset = (person_idx as f64 - half) * 120.0; // 120px spacing
+
+    // Confidence decays for additional persons (less certain about person 2, 3).
+    let conf_decay = 1.0 - person_idx as f64 * 0.15;
 
     // ── Signal-derived scalars ────────────────────────────────────────────────
 
-    // Continuous motion score from motion_band_power (0..1).
-    // motion_band_power is the high-frequency subcarrier variance — it is high
-    // when a body is actively moving through the RF field.
     let motion_score = (feat.motion_band_power / 15.0).clamp(0.0, 1.0);
     let is_walking = motion_score > 0.55;
-
-    // Breathing expansion: torso keypoints shift ±breath_amp pixels per cycle.
-    // breathing_band_power comes from low-frequency subcarrier variance.
     let breath_amp = (feat.breathing_band_power * 4.0).clamp(0.0, 12.0);
 
-    // Breathing phase: use the vital-sign estimate if available, otherwise
-    // derive a proxy from breathing_band_power and the tick counter.
     let breath_phase = if let Some(ref vs) = update.vital_signs {
-        // breathing_rate_bpm is Option<f64>; fall back to 15 BPM if not yet estimated.
-        // 15 BPM -> 0.25 Hz, which sits comfortably in the breathing band.
         let bpm = vs.breathing_rate_bpm.unwrap_or(15.0);
         let freq = (bpm / 60.0).clamp(0.1, 0.5);
-        (update.tick as f64 * freq * 0.1 * std::f64::consts::TAU).sin()
+        (update.tick as f64 * freq * 0.1 * std::f64::consts::TAU + phase_offset).sin()
     } else {
-        (update.tick as f64 * 0.08 + feat.breathing_band_power).sin()
+        (update.tick as f64 * 0.08 + feat.breathing_band_power + phase_offset).sin()
     };
 
-    // Lateral lean derived from dominant_freq_hz (peak subcarrier index -> Hz).
-    // Maps 0..10 Hz range to ±18 px horizontal shift of the torso center.
     let lean_x = (feat.dominant_freq_hz / 5.0 - 1.0).clamp(-1.0, 1.0) * 18.0;
 
-    // Walking stride: lateral body displacement oscillating with motion_band_power.
-    // Amplitude is zero when the person is stationary.
     let stride_x = if is_walking {
-        let stride_phase = (feat.motion_band_power * 0.7 + update.tick as f64 * 0.12).sin();
+        let stride_phase = (feat.motion_band_power * 0.7 + update.tick as f64 * 0.12 + phase_offset).sin();
         stride_phase * 45.0 * motion_score
     } else {
         0.0
     };
 
-    // Burst jitter from change_points: rapid threshold crossings in the
-    // amplitude vector indicate fast movement or sudden signal disturbance.
     let burst = (feat.change_points as f64 / 8.0).clamp(0.0, 1.0);
 
-    // Deterministic per-frame noise seeded by variance and tick.
-    // Uses the fractional part of a large sine to get a tick-dependent value
-    // in (-1, 1) without needing a PRNG.
-    let noise_seed = feat.variance * 31.7 + update.tick as f64 * 17.3;
+    let noise_seed = feat.variance * 31.7 + update.tick as f64 * 17.3 + person_idx as f64 * 97.1;
     let noise_val = (noise_seed.sin() * 43758.545).fract();
 
-    // Scale base confidence by SNR proxy (high variance = better signal quality).
     let snr_factor = ((feat.variance - 0.5) / 10.0).clamp(0.0, 1.0);
-    let base_confidence = cls.confidence * (0.6 + 0.4 * snr_factor);
+    let base_confidence = cls.confidence * (0.6 + 0.4 * snr_factor) * conf_decay;
 
     // ── Skeleton base position ────────────────────────────────────────────────
 
-    // Center figure on a 640x480 canvas.
-    let base_x = 320.0 + stride_x + lean_x * 0.5;
+    let base_x = 320.0 + stride_x + lean_x * 0.5 + person_x_offset;
     let base_y = 240.0 - motion_score * 8.0;
 
     // ── COCO 17-keypoint offsets from hip-center ──────────────────────────────
@@ -1416,7 +1564,6 @@ fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
         "left_knee", "right_knee", "left_ankle", "right_ankle",
     ];
 
-    // Nominal (dx, dy) offsets from hip-center in pixels.
     let kp_offsets: [(f64, f64); 17] = [
         (  0.0,  -80.0), // 0  nose
         ( -8.0,  -88.0), // 1  left_eye
@@ -1437,37 +1584,27 @@ fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
         ( 24.0,  120.0), // 16 right_ankle
     ];
 
-    // Torso keypoints: left_shoulder(5), right_shoulder(6), left_hip(11), right_hip(12).
-    // These respond to the breathing expansion signal.
     const TORSO_KP: [usize; 4] = [5, 6, 11, 12];
-
-    // Extremity keypoints: left_wrist(9), right_wrist(10), left_ankle(15), right_ankle(16).
-    // These pick up burst jitter from high change_points counts.
     const EXTREMITY_KP: [usize; 4] = [9, 10, 15, 16];
 
     let keypoints: Vec<PoseKeypoint> = kp_names.iter().zip(kp_offsets.iter())
         .enumerate()
         .map(|(i, (name, (dx, dy)))| {
-            // ── Breathing expansion (torso only) ─────────────────────────
             let breath_dx = if TORSO_KP.contains(&i) {
-                // Shoulders spread outward; hips compress inward on inhale.
                 let sign = if *dx < 0.0 { -1.0 } else { 1.0 };
                 sign * breath_amp * breath_phase * 0.5
             } else {
                 0.0
             };
             let breath_dy = if TORSO_KP.contains(&i) {
-                // Shoulders rise slightly; hips descend slightly on inhale.
                 let sign = if *dy < 0.0 { -1.0 } else { 1.0 };
                 sign * breath_amp * breath_phase * 0.3
             } else {
                 0.0
             };
 
-            // ── Extremity burst jitter ────────────────────────────────────
             let extremity_jitter = if EXTREMITY_KP.contains(&i) {
-                // Each extremity gets an independent phase offset.
-                let phase = noise_seed + i as f64 * 2.399; // golden-angle spacing
+                let phase = noise_seed + i as f64 * 2.399;
                 (
                     phase.sin() * burst * motion_score * 12.0,
                     (phase * 1.31).cos() * burst * motion_score * 8.0,
@@ -1476,53 +1613,44 @@ fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
                 (0.0, 0.0)
             };
 
-            // ── Per-joint motion noise (scales with signal variance) ──────
-            // Different seed per keypoint so every joint moves independently.
             let kp_noise_x = ((noise_seed + i as f64 * 1.618).sin() * 43758.545).fract()
                 * feat.variance.sqrt().clamp(0.0, 3.0) * motion_score;
             let kp_noise_y = ((noise_seed + i as f64 * 2.718).cos() * 31415.926).fract()
                 * feat.variance.sqrt().clamp(0.0, 3.0) * motion_score * 0.6;
 
-            // ── Walking arm/leg swing (contralateral gait pattern) ────────
             let swing_dy = if is_walking {
                 let stride_phase =
-                    (feat.motion_band_power * 0.7 + update.tick as f64 * 0.12).sin();
+                    (feat.motion_band_power * 0.7 + update.tick as f64 * 0.12 + phase_offset).sin();
                 match i {
-                    7 | 9  => -stride_phase * 20.0 * motion_score, // left  elbow/wrist
-                    8 | 10 =>  stride_phase * 20.0 * motion_score, // right elbow/wrist
-                    13 | 15 =>  stride_phase * 25.0 * motion_score, // left  knee/ankle
-                    14 | 16 => -stride_phase * 25.0 * motion_score, // right knee/ankle
+                    7 | 9  => -stride_phase * 20.0 * motion_score,
+                    8 | 10 =>  stride_phase * 20.0 * motion_score,
+                    13 | 15 =>  stride_phase * 25.0 * motion_score,
+                    14 | 16 => -stride_phase * 25.0 * motion_score,
                     _ => 0.0,
                 }
             } else {
                 0.0
             };
 
-            // ── Compose final position ────────────────────────────────────
-            let final_x =
-                base_x + dx + breath_dx + extremity_jitter.0 + kp_noise_x;
-            let final_y =
-                base_y + dy + breath_dy + extremity_jitter.1 + kp_noise_y + swing_dy;
+            let final_x = base_x + dx + breath_dx + extremity_jitter.0 + kp_noise_x;
+            let final_y = base_y + dy + breath_dy + extremity_jitter.1 + kp_noise_y + swing_dy;
 
-            // Extremity confidence is lower when signal variance is low.
             let kp_conf = if EXTREMITY_KP.contains(&i) {
                 base_confidence * (0.7 + 0.3 * snr_factor) * (0.85 + 0.15 * noise_val)
             } else {
-                base_confidence
-                    * (0.88 + 0.12 * ((i as f64 * 0.7 + noise_seed).cos()))
+                base_confidence * (0.88 + 0.12 * ((i as f64 * 0.7 + noise_seed).cos()))
             };
 
             PoseKeypoint {
                 name: name.to_string(),
                 x: final_x,
                 y: final_y,
-                z: lean_x * 0.02, // slight Z depth from lean direction
+                z: lean_x * 0.02,
                 confidence: kp_conf.clamp(0.1, 1.0),
             }
         })
         .collect();
 
-    // Bounding box derived from actual keypoint extents with padding.
     let xs: Vec<f64> = keypoints.iter().map(|k| k.x).collect();
     let ys: Vec<f64> = keypoints.iter().map(|k| k.y).collect();
     let min_x = xs.iter().cloned().fold(f64::MAX, f64::min) - 10.0;
@@ -1530,9 +1658,9 @@ fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
     let max_x = xs.iter().cloned().fold(f64::MIN, f64::max) + 10.0;
     let max_y = ys.iter().cloned().fold(f64::MIN, f64::max) + 10.0;
 
-    vec![PersonDetection {
-        id: 1,
-        confidence: cls.confidence,
+    PersonDetection {
+        id: (person_idx + 1) as u32,
+        confidence: cls.confidence * conf_decay,
         keypoints,
         bbox: BoundingBox {
             x: min_x,
@@ -1540,8 +1668,22 @@ fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
             width: (max_x - min_x).max(80.0),
             height: (max_y - min_y).max(160.0),
         },
-        zone: "zone_1".into(),
-    }]
+        zone: format!("zone_{}", person_idx + 1),
+    }
+}
+
+fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
+    let cls = &update.classification;
+    if !cls.presence {
+        return vec![];
+    }
+
+    // Use estimated_persons if set by the tick loop; otherwise default to 1.
+    let person_count = update.estimated_persons.unwrap_or(1).max(1);
+
+    (0..person_count)
+        .map(|idx| derive_single_person_pose(update, idx, person_count))
+        .collect()
 }
 
 // ── DensePose-compatible REST endpoints ─────────────────────────────────────
@@ -1691,6 +1833,38 @@ async fn vital_signs_endpoint(State(state): State<SharedState>) -> Json<serde_js
     }))
 }
 
+/// GET /api/v1/edge-vitals — latest edge vitals from ESP32 (ADR-039).
+async fn edge_vitals_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    match &s.edge_vitals {
+        Some(v) => Json(serde_json::json!({
+            "status": "ok",
+            "edge_vitals": v,
+        })),
+        None => Json(serde_json::json!({
+            "status": "no_data",
+            "edge_vitals": null,
+            "message": "No edge vitals packet received yet. Ensure ESP32 edge_tier >= 1.",
+        })),
+    }
+}
+
+/// GET /api/v1/wasm-events — latest WASM events from ESP32 (ADR-040).
+async fn wasm_events_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    match &s.latest_wasm_events {
+        Some(w) => Json(serde_json::json!({
+            "status": "ok",
+            "wasm_events": w,
+        })),
+        None => Json(serde_json::json!({
+            "status": "no_data",
+            "wasm_events": null,
+            "message": "No WASM output packet received yet. Upload and start a .wasm module on the ESP32.",
+        })),
+    }
+}
+
 async fn model_info(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
     match &s.rvf_info {
@@ -1809,13 +1983,57 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
     loop {
         match socket.recv_from(&mut buf).await {
             Ok((len, src)) => {
+                // ADR-039: Try edge vitals packet first (magic 0xC511_0002).
+                if let Some(vitals) = parse_esp32_vitals(&buf[..len]) {
+                    debug!("ESP32 vitals from {src}: node={} br={:.1} hr={:.1} pres={}",
+                           vitals.node_id, vitals.breathing_rate_bpm,
+                           vitals.heartrate_bpm, vitals.presence);
+                    let mut s = state.write().await;
+                    // Broadcast vitals via WebSocket.
+                    if let Ok(json) = serde_json::to_string(&serde_json::json!({
+                        "type": "edge_vitals",
+                        "node_id": vitals.node_id,
+                        "presence": vitals.presence,
+                        "fall_detected": vitals.fall_detected,
+                        "motion": vitals.motion,
+                        "breathing_rate_bpm": vitals.breathing_rate_bpm,
+                        "heartrate_bpm": vitals.heartrate_bpm,
+                        "n_persons": vitals.n_persons,
+                        "motion_energy": vitals.motion_energy,
+                        "presence_score": vitals.presence_score,
+                        "rssi": vitals.rssi,
+                    })) {
+                        let _ = s.tx.send(json);
+                    }
+                    s.edge_vitals = Some(vitals);
+                    continue;
+                }
+
+                // ADR-040: Try WASM output packet (magic 0xC511_0004).
+                if let Some(wasm_output) = parse_wasm_output(&buf[..len]) {
+                    debug!("WASM output from {src}: node={} module={} events={}",
+                           wasm_output.node_id, wasm_output.module_id,
+                           wasm_output.events.len());
+                    let mut s = state.write().await;
+                    // Broadcast WASM events via WebSocket.
+                    if let Ok(json) = serde_json::to_string(&serde_json::json!({
+                        "type": "wasm_event",
+                        "node_id": wasm_output.node_id,
+                        "module_id": wasm_output.module_id,
+                        "events": wasm_output.events,
+                    })) {
+                        let _ = s.tx.send(json);
+                    }
+                    s.latest_wasm_events = Some(wasm_output);
+                    continue;
+                }
+
                 if let Some(frame) = parse_esp32_frame(&buf[..len]) {
                     debug!("ESP32 frame from {src}: node={}, subs={}, seq={}",
                            frame.node_id, frame.n_subcarriers, frame.sequence);
 
                     let mut s = state.write().await;
                     s.source = "esp32".to_string();
-                    s.last_esp32_frame = Some(std::time::Instant::now());
 
                     // Append current amplitudes to history before extracting features so
                     // that temporal analysis includes the most recent frame.
@@ -1847,7 +2065,16 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     );
                     s.latest_vitals = vitals.clone();
 
-                    let update = SensingUpdate {
+                    // Multi-person estimation with temporal smoothing.
+                    let raw_score = compute_person_score(&features);
+                    s.smoothed_person_score = s.smoothed_person_score * 0.85 + raw_score * 0.15;
+                    let est_persons = if classification.presence {
+                        score_to_person_count(s.smoothed_person_score)
+                    } else {
+                        0
+                    };
+
+                    let mut update = SensingUpdate {
                         msg_type: "sensing_update".to_string(),
                         timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
                         source: "esp32".to_string(),
@@ -1874,30 +2101,19 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         bssid_count: None,
                         pose_keypoints: None,
                         model_status: None,
+                        persons: None,
+                        estimated_persons: if est_persons > 0 { Some(est_persons) } else { None },
                     };
+
+                    let persons = derive_pose_from_sensing(&update);
+                    if !persons.is_empty() {
+                        update.persons = Some(persons);
+                    }
 
                     if let Ok(json) = serde_json::to_string(&update) {
                         let _ = s.tx.send(json);
                     }
-
-                    // Capture data for recording before storing.
-                    let rec_amps = frame.amplitudes.iter().take(56).cloned().collect::<Vec<_>>();
-                    let rec_rssi = features.mean_rssi;
-                    let rec_features = serde_json::json!({
-                        "variance": features.variance,
-                        "motion_band_power": features.motion_band_power,
-                        "breathing_band_power": features.breathing_band_power,
-                        "spectral_power": features.spectral_power,
-                    });
-
                     s.latest_update = Some(update);
-                    drop(s);
-
-                    // ADR-036: Record frame if recording is active.
-                    recording::maybe_record_frame(
-                        &state, &rec_amps, rec_rssi,
-                        frame.noise_floor as f64, &rec_features,
-                    ).await;
                 }
             }
             Err(e) => {
@@ -1910,9 +2126,6 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
 
 // ── Simulated data task ──────────────────────────────────────────────────────
 
-/// Duration without ESP32 frames before falling back to simulation.
-const ESP32_TIMEOUT: Duration = Duration::from_secs(3);
-
 async fn simulated_data_task(state: SharedState, tick_ms: u64) {
     let mut interval = tokio::time::interval(Duration::from_millis(tick_ms));
     info!("Simulated data source active (tick={}ms)", tick_ms);
@@ -1920,23 +2133,7 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
     loop {
         interval.tick().await;
 
-        // If ESP32 sent a frame recently, skip simulation — real data is flowing.
-        {
-            let s = state.read().await;
-            if let Some(last) = s.last_esp32_frame {
-                if last.elapsed() < ESP32_TIMEOUT {
-                    continue; // ESP32 is active, don't emit simulated frames
-                }
-            }
-        }
-
         let mut s = state.write().await;
-
-        // If we just transitioned from esp32 → simulated, log once.
-        if s.source == "esp32" {
-            info!("ESP32 silent for {}s — switching to simulation", ESP32_TIMEOUT.as_secs());
-        }
-        s.source = "simulated".to_string();
         s.tick += 1;
         let tick = s.tick;
 
@@ -1970,7 +2167,16 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
         let frame_amplitudes = frame.amplitudes.clone();
         let frame_n_sub = frame.n_subcarriers;
 
-        let update = SensingUpdate {
+        // Multi-person estimation with temporal smoothing.
+        let raw_score = compute_person_score(&features);
+        s.smoothed_person_score = s.smoothed_person_score * 0.85 + raw_score * 0.15;
+        let est_persons = if classification.presence {
+            score_to_person_count(s.smoothed_person_score)
+        } else {
+            0
+        };
+
+        let mut update = SensingUpdate {
             msg_type: "sensing_update".to_string(),
             timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
             source: "simulated".to_string(),
@@ -2007,7 +2213,15 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
             } else {
                 None
             },
+            persons: None,
+            estimated_persons: if est_persons > 0 { Some(est_persons) } else { None },
         };
+
+        // Populate persons from the sensing update.
+        let persons = derive_pose_from_sensing(&update);
+        if !persons.is_empty() {
+            update.persons = Some(persons);
+        }
 
         if update.classification.presence {
             s.total_detections += 1;
@@ -2015,24 +2229,7 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
         if let Ok(json) = serde_json::to_string(&update) {
             let _ = s.tx.send(json);
         }
-
-        // Capture data for recording before storing.
-        let rec_amps = frame.amplitudes.clone();
-        let rec_rssi = features.mean_rssi;
-        let rec_features = serde_json::json!({
-            "variance": features.variance,
-            "motion_band_power": features.motion_band_power,
-            "breathing_band_power": features.breathing_band_power,
-            "spectral_power": features.spectral_power,
-        });
-
         s.latest_update = Some(update);
-        drop(s);
-
-        // ADR-036: Record frame if recording is active.
-        recording::maybe_record_frame(
-            &state, &rec_amps, rec_rssi, -90.0, &rec_features,
-        ).await;
     }
 }
 
@@ -2500,7 +2697,6 @@ async fn main() {
     info!("  Source:    {}", args.source);
 
     // Auto-detect data source
-    let is_auto_mode = args.source == "auto";
     let source = match args.source.as_str() {
         "auto" => {
             info!("Auto-detecting data source...");
@@ -2511,7 +2707,7 @@ async fn main() {
                 info!("  Windows WiFi detected");
                 "wifi"
             } else {
-                info!("  No hardware detected, starting with simulation (hot-plug enabled)");
+                info!("  No hardware detected, using simulation");
                 "simulate"
             }
         }
@@ -2593,14 +2789,12 @@ async fn main() {
     }
 
     let (tx, _) = broadcast::channel::<String>(256);
-    let (training_progress_tx, _) = broadcast::channel::<String>(512);
     let state: SharedState = Arc::new(RwLock::new(AppStateInner {
         latest_update: None,
         rssi_history: VecDeque::new(),
         frame_history: VecDeque::new(),
         tick: 0,
         source: source.into(),
-        last_esp32_frame: if source == "esp32" { Some(std::time::Instant::now()) } else { None },
         tx,
         total_detections: 0,
         start_time: std::time::Instant::now(),
@@ -2611,39 +2805,22 @@ async fn main() {
         progressive_loader,
         active_sona_profile: None,
         model_loaded,
-        recording_state: recording::RecordingState::default(),
-        loaded_model: None,
-        training_state: training_api::TrainingState::default(),
-        training_progress_tx,
+        smoothed_person_score: 0.0,
+        edge_vitals: None,
+        latest_wasm_events: None,
     }));
 
-    // Ensure data directories exist (ADR-036).
-    for dir in &[recording::RECORDINGS_DIR, model_manager::MODELS_DIR] {
-        if let Err(e) = std::fs::create_dir_all(dir) {
-            warn!("Failed to create directory {dir}: {e}");
+    // Start background tasks based on source
+    match source {
+        "esp32" => {
+            tokio::spawn(udp_receiver_task(state.clone(), args.udp_port));
+            tokio::spawn(broadcast_tick_task(state.clone(), args.tick_ms));
         }
-    }
-
-    // Start background tasks based on source.
-    // In auto mode we always start BOTH the UDP listener (for ESP32 hot-plug)
-    // and the simulation task (which self-pauses when ESP32 packets arrive).
-    if is_auto_mode {
-        info!("Auto mode: UDP listener + simulation fallback both active (hot-plug enabled)");
-        tokio::spawn(udp_receiver_task(state.clone(), args.udp_port));
-        tokio::spawn(simulated_data_task(state.clone(), args.tick_ms));
-        tokio::spawn(broadcast_tick_task(state.clone(), args.tick_ms));
-    } else {
-        match source {
-            "esp32" => {
-                tokio::spawn(udp_receiver_task(state.clone(), args.udp_port));
-                tokio::spawn(broadcast_tick_task(state.clone(), args.tick_ms));
-            }
-            "wifi" => {
-                tokio::spawn(windows_wifi_task(state.clone(), args.tick_ms));
-            }
-            _ => {
-                tokio::spawn(simulated_data_task(state.clone(), args.tick_ms));
-            }
+        "wifi" => {
+            tokio::spawn(windows_wifi_task(state.clone(), args.tick_ms));
+        }
+        _ => {
+            tokio::spawn(simulated_data_task(state.clone(), args.tick_ms));
         }
     }
 
@@ -2682,6 +2859,8 @@ async fn main() {
         .route("/api/v1/sensing/latest", get(latest))
         // Vital sign endpoints
         .route("/api/v1/vital-signs", get(vital_signs_endpoint))
+        .route("/api/v1/edge-vitals", get(edge_vitals_endpoint))
+        .route("/api/v1/wasm-events", get(wasm_events_endpoint))
         // RVF model container info
         .route("/api/v1/model/info", get(model_info))
         // Progressive loading & SONA endpoints (Phase 7-8)
@@ -2698,10 +2877,6 @@ async fn main() {
         .route("/api/v1/stream/pose", get(ws_pose_handler))
         // Sensing WebSocket on the HTTP port so the UI can reach it without a second port
         .route("/ws/sensing", get(ws_sensing_handler))
-        // ADR-036: Recording, model management, and training APIs
-        .merge(recording::routes())
-        .merge(model_manager::routes())
-        .merge(training_api::routes())
         // Static UI files
         .nest_service("/ui", ServeDir::new(&ui_path))
         .layer(SetResponseHeaderLayer::overriding(

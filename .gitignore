@@ -1,11 +1,14 @@
-# Local machine configuration (not shared)
-CLAUDE.local.md
-
 # ESP32 firmware build artifacts and local config (contains WiFi credentials)
 firmware/esp32-csi-node/build/
 firmware/esp32-csi-node/sdkconfig
 firmware/esp32-csi-node/sdkconfig.defaults
 firmware/esp32-csi-node/sdkconfig.old
+# Downloaded WASM3 source (fetched at configure time)
+firmware/esp32-csi-node/components/wasm3/wasm3-src/
+
+# NVS partition images and CSVs (contain WiFi credentials)
+nvs.bin
+nvs_config.csv
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

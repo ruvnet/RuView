@@ -36,9 +36,20 @@ typedef struct {
     uint8_t  tdm_slot_index;                  /**< This node's TDM slot index (0-based). */
     uint8_t  tdm_node_count;                  /**< Total nodes in the TDM schedule. */
 
-    /* MAC address filter for CSI source selection (Issue #98) */
-    uint8_t  filter_mac[6];                   /**< Transmitter MAC to accept (all zeros = no filter). */
-    uint8_t  filter_mac_enabled;              /**< 1 = filter active, 0 = accept all. */
+    /* ADR-039: Edge intelligence configuration */
+    uint8_t  edge_tier;                       /**< Processing tier (0=raw, 1=basic, 2=full). */
+    float    presence_thresh;                 /**< Presence threshold (0 = auto-calibrate). */
+    float    fall_thresh;                     /**< Fall detection threshold (rad/s^2). */
+    uint16_t vital_window;                    /**< Phase history window for BPM. */
+    uint16_t vital_interval_ms;              /**< Vitals packet interval (ms). */
+    uint8_t  top_k_count;                    /**< Number of top subcarriers to track. */
+    uint8_t  power_duty;                     /**< Power duty cycle (10-100%). */
+
+    /* ADR-040: WASM programmable sensing configuration */
+    uint8_t  wasm_max_modules;               /**< Max concurrent WASM modules (1-8). */
+    uint8_t  wasm_verify;                    /**< Require Ed25519 signature for uploads. */
+    uint8_t  wasm_pubkey[32];               /**< Ed25519 public key for WASM signature. */
+    uint8_t  wasm_pubkey_valid;             /**< 1 if pubkey was loaded from NVS. */
 } nvs_config_t;
 
 /**

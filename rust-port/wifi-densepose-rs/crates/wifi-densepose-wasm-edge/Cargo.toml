@@ -1,0 +1,31 @@
+[package]
+name = "wifi-densepose-wasm-edge"
+version = "0.3.0"
+edition = "2021"
+authors = ["rUv <ruv@ruv.net>", "WiFi-DensePose Contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/wifi-densepose"
+description = "WASM-compilable sensing algorithms for ESP32 edge deployment (ADR-040)"
+keywords = ["wifi", "wasm", "sensing", "esp32", "dsp"]
+categories = ["embedded", "wasm", "science"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# no_std math
+libm = "0.2"
+# SHA-256 for RVF build hash (optional, used by builder)
+sha2 = { version = "0.10", optional = true, default-features = false }
+
+[features]
+default = []
+# Enable std for testing on host + RVF builder
+std = ["sha2/std"]
+
+[profile.release]
+opt-level = "s"        # Optimize for size
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
