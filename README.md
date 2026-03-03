@@ -50,7 +50,7 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 | [User Guide](docs/user-guide.md) | Step-by-step guide: installation, first run, API usage, hardware setup, training |
 | [Build Guide](docs/build-guide.md) | Building from source (Rust and Python) |
 | [Architecture Decisions](docs/adr/README.md) | 44 ADRs — why each technical choice was made, organized by domain (hardware, signal processing, ML, platform, infrastructure) |
-| [DDD Domain Model](docs/ddd/ruvsense-domain-model.md) | RuvSense bounded contexts, aggregates, domain events, and ubiquitous language |
+| [Domain Models](docs/ddd/README.md) | 3 DDD models (RuvSense, WiFi-Mat, CHCI) — bounded contexts, aggregates, domain events, and ubiquitous language |
 
 ---
 

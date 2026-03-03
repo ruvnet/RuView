@@ -1,12 +1,32 @@
 # RuvSense Domain Model
 
+RuvSense is the multistatic WiFi sensing subsystem of RuView. It turns raw radio signals from multiple ESP32 sensors into tracked human poses, vital signs, and spatial awareness — all without cameras.
+
+This document defines the system using [Domain-Driven Design](https://martinfowler.com/bliki/DomainDrivenDesign.html) (DDD): bounded contexts that own their data and rules, aggregate roots that enforce invariants, value objects that carry meaning, and domain events that connect everything. The goal is to make the system's structure match the physics it models — so that anyone reading the code (or an AI agent modifying it) understands *why* each piece exists, not just *what* it does.
+
+**Bounded Contexts:**
+
+| # | Context | Responsibility | Key ADRs | Code |
+|---|---------|----------------|----------|------|
+| 1 | [Multistatic Sensing](#1-multistatic-sensing-context) | Collect and fuse CSI from multiple nodes and channels | [ADR-029](../adr/ADR-029-ruvsense-multistatic-sensing-mode.md) | `signal/src/ruvsense/{multiband,phase_align,multistatic}.rs` |
+| 2 | [Coherence](#2-coherence-context) | Monitor signal quality, gate bad data | [ADR-029](../adr/ADR-029-ruvsense-multistatic-sensing-mode.md) | `signal/src/ruvsense/{coherence,coherence_gate}.rs` |
+| 3 | [Pose Tracking](#3-pose-tracking-context) | Track people as persistent skeletons with re-ID | [ADR-024](../adr/ADR-024-contrastive-csi-embedding-model.md), [ADR-037](../adr/ADR-037-multi-person-pose-detection.md) | `signal/src/ruvsense/pose_tracker.rs` |
+| 4 | [Field Model](#4-field-model-context) | Learn room baselines, extract body perturbations | [ADR-030](../adr/ADR-030-ruvsense-persistent-field-model.md) | `signal/src/ruvsense/{field_model,tomography}.rs` |
+| 5 | [Longitudinal Monitoring](#5-longitudinal-monitoring-context) | Track health trends over days/weeks | [ADR-030](../adr/ADR-030-ruvsense-persistent-field-model.md) | `signal/src/ruvsense/longitudinal.rs` |
+| 6 | [Spatial Identity](#6-spatial-identity-context) | Cross-room tracking via environment fingerprints | [ADR-030](../adr/ADR-030-ruvsense-persistent-field-model.md) | `signal/src/ruvsense/cross_room.rs` |
+| 7 | [Edge Intelligence](#7-edge-intelligence-context) | On-device sensing (no server needed) | [ADR-039](../adr/ADR-039-esp32-edge-intelligence.md), [ADR-040](../adr/ADR-040-wasm-programmable-sensing.md) | `firmware/esp32-csi-node/main/edge_processing.c` |
+
+All code paths shown are relative to `rust-port/wifi-densepose-rs/crates/wifi-densepose-` unless otherwise noted.
+
+---
+
 ## Domain-Driven Design Specification
 
 ### Ubiquitous Language
 
 | Term | Definition |
 |------|------------|
-| **Sensing Cycle** | One complete TDMA round (all nodes TX once): 50ms at 20 Hz |
+| **Sensing Cycle** | One complete TDMA round (all nodes TX once): ~35ms at 28.5 Hz (measured) |
 | **Link** | A single TX-RX pair; with N nodes there are N×(N-1) directed links |
 | **Multi-Band Frame** | Fused CSI from one node hopping across multiple channels in one dwell cycle |
 | **Fused Sensing Frame** | Aggregated observation from all nodes at one sensing cycle, ready for inference |
@@ -15,6 +35,8 @@
 | **Pose Track** | A temporally persistent per-person 17-keypoint trajectory with Kalman state |
 | **Track Lifecycle** | State machine: Tentative → Active → Lost → Terminated |
 | **Re-ID Embedding** | 128-dim AETHER contrastive vector encoding body identity |
+| **Edge Tier** | Processing level on the ESP32: 0 = raw passthrough, 1 = signal cleanup, 2 = vitals, 3 = WASM modules |
+| **WASM Module** | A small program compiled to WebAssembly that runs on the ESP32 for custom on-device sensing |
 | **Node** | An ESP32-S3 device acting as both TX and RX in the multistatic mesh |
 | **Aggregator** | Central device (ESP32/RPi/x86) that collects CSI from all nodes and runs fusion |
 | **Sensing Schedule** | TDMA slot assignment: which node transmits when |
@@ -194,7 +216,7 @@
 **Domain Services:**
 - `PersonSeparationService` — Min-cut partitioning of cross-link correlation graph
 - `TrackAssignmentService` — Bipartite matching of detections to existing tracks
-- `KalmanPredictionService` — Predict step at 20 Hz (decoupled from measurement rate)
+- `KalmanPredictionService` — Predict step at 28 Hz (decoupled from measurement rate)
 - `KalmanUpdateService` — Gated measurement update (subject to coherence gate)
 - `EmbeddingIdentifierService` — AETHER cosine similarity for re-ID
 
@@ -575,7 +597,7 @@ pub trait MeshRepository {
 ### Multistatic Sensing
 - At least 2 nodes must be active for multistatic fusion (fallback to single-node mode otherwise)
 - Channel hop sequence must contain at least 1 non-overlapping channel
-- TDMA cycle period must be ≤50ms for 20 Hz output
+- TDMA cycle period must be ≤50ms for 28 Hz output
 - Guard interval must be ≥2× clock drift budget (≥1ms for 50ms cycle)
 
 ### Coherence
@@ -1005,7 +1027,7 @@ pub trait SpatialIdentityRepository {
 ### Extended Invariants
 
 #### Field Model
-- Baseline calibration requires ≥10 minutes of empty-room CSI (≥12,000 frames at 20 Hz)
+- Baseline calibration requires ≥10 minutes of empty-room CSI (≥12,000 frames at 28 Hz)
 - Environmental modes capped at K=5 (more modes overfit to noise)
 - Tomographic inversion only valid with ≥8 links (4 nodes minimum)
 - Baseline expires after 24 hours if not refreshed during quiet period
@@ -1025,3 +1047,154 @@ pub trait SpatialIdentityRepository {
 - Transition graph is append-only (immutable audit trail)
 - No image data stored — only 128-dim embeddings and structural events
 - Maximum 100 rooms indexed per deployment (HNSW scaling constraint)
+
+---
+
+## Part III: Edge Intelligence Bounded Context (ADR-039, ADR-040, ADR-041)
+
+### 7. Edge Intelligence Context
+
+**Responsibility:** Run signal processing and sensing algorithms directly on the ESP32-S3, without requiring a server. The node detects presence, measures breathing and heart rate, alerts on falls, and runs custom WASM modules — all locally with instant response.
+
+This is the only bounded context that runs on the microcontroller rather than the aggregator. It operates independently: the server is optional for visualization, but the ESP32 handles real-time sensing on its own.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│              Edge Intelligence Context                     │
+│              (runs on ESP32-S3, Core 1)                    │
+├──────────────────────────────────────────────────────────┤
+│                                                            │
+│  ┌───────────────┐    ┌───────────────┐                   │
+│  │  Phase        │    │  Welford      │                   │
+│  │  Extractor    │    │  Variance     │                   │
+│  │  (I/Q → φ,   │    │  Tracker      │                   │
+│  │   unwrap)     │    │  (per-subk)   │                   │
+│  └───────┬───────┘    └───────┬───────┘                   │
+│          │                    │                            │
+│          └────────┬───────────┘                           │
+│                   ▼                                        │
+│          ┌────────────────┐                               │
+│          │  Top-K Select  │                               │
+│          │  + Bandpass     │                               │
+│          │  (breathing:    │                               │
+│          │   0.1-0.5 Hz,   │                               │
+│          │   HR: 0.8-2 Hz) │                               │
+│          └────────┬───────┘                               │
+│                   ▼                                        │
+│     ┌─────────────┼─────────────┐                        │
+│     ▼             ▼             ▼                        │
+│  ┌────────┐  ┌──────────┐  ┌──────────┐                 │
+│  │Presence│  │ Vitals   │  │  Fall    │                  │
+│  │Detector│  │ (BPM via │  │ Detector │                  │
+│  │(motion │  │  zero-   │  │ (phase   │                  │
+│  │ energy)│  │  crossing)│  │  accel)  │                  │
+│  └────┬───┘  └────┬─────┘  └────┬─────┘                 │
+│       └───────────┼──────────────┘                       │
+│                   ▼                                        │
+│          ┌────────────────┐                               │
+│          │  Vitals Packet │──▶ UDP 32-byte (0xC5110002)   │
+│          │  Assembler     │    at 1 Hz to aggregator      │
+│          └────────┬───────┘                               │
+│                   │                                        │
+│          ┌────────▼───────┐                               │
+│          │  WASM3 Runtime │                               │
+│          │  (Tier 3: hot- │──▶ Custom module outputs      │
+│          │   loadable     │                               │
+│          │   modules)     │                               │
+│          └────────────────┘                               │
+│                                                            │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Aggregates:**
+- `EdgeProcessingState` (Aggregate Root) — Holds all per-subcarrier state, filter history, and detection flags
+
+**Value Objects:**
+- `VitalsPacket` — 32-byte UDP packet: presence, motion, breathing BPM, heart rate BPM, confidence, fall flag, occupancy
+- `EdgeTier` — Off (0) / BasicSignal (1) / FullVitals (2) / WasmExtended (3)
+- `PresenceState` — Empty / Present / Moving
+- `BandpassOutput` — Filtered signal in breathing or heart rate band
+- `FallAlert` — Phase acceleration exceeding configurable threshold
+
+**Entities:**
+- `WasmModule` — A loaded WASM binary with its own memory arena (160 KB), frame budget (10 ms), and timer interval
+
+**Domain Services:**
+- `PhaseExtractionService` — Converts raw I/Q to unwrapped phase per subcarrier
+- `VarianceTrackingService` — Welford running stats for subcarrier selection
+- `TopKSelectionService` — Picks highest-variance subcarriers for downstream analysis
+- `BandpassFilterService` — Biquad IIR filters for breathing (0.1-0.5 Hz) and heart rate (0.8-2.0 Hz)
+- `PresenceDetectionService` — Adaptive threshold calibration (3-sigma over 1200-frame window)
+- `VitalSignService` — Zero-crossing BPM estimation from filtered phase signals
+- `FallDetectionService` — Phase acceleration exceeding threshold triggers alert
+- `WasmRuntimeService` — WASM3 interpreter: load, execute, and sandbox custom modules
+
+**NVS Configuration (runtime, no reflash needed):**
+
+| Key | Type | Default | Purpose |
+|-----|------|---------|---------|
+| `edge_tier` | u8 | 0 | Processing tier (0/1/2/3) |
+| `pres_thresh` | u16 | 0 | Presence threshold (0 = auto-calibrate) |
+| `fall_thresh` | u16 | 2000 | Fall detection threshold (rad/s^2 x 1000) |
+| `vital_win` | u16 | 256 | Phase history window (frames) |
+| `vital_int` | u16 | 1000 | Vitals packet interval (ms) |
+| `subk_count` | u8 | 8 | Top-K subcarrier count |
+| `wasm_max` | u8 | 4 | Max concurrent WASM modules |
+| `wasm_verify` | u8 | 0 | Require Ed25519 signature for uploads |
+
+**Implementation files:**
+- `firmware/esp32-csi-node/main/edge_processing.c` — DSP pipeline (~750 lines)
+- `firmware/esp32-csi-node/main/edge_processing.h` — Types and API
+- `firmware/esp32-csi-node/main/nvs_config.c` — NVS key reader (20 keys)
+- `firmware/esp32-csi-node/provision.py` — CLI provisioning tool
+
+**Invariants:**
+- Edge processing runs on Core 1; WiFi and CSI callbacks run on Core 0 (no contention)
+- CSI data flows from Core 0 to Core 1 via a lock-free SPSC ring buffer
+- UDP sends are rate-limited to 50 Hz to prevent lwIP buffer exhaustion (Issue #127)
+- ENOMEM backoff suppresses sends for 100 ms if lwIP runs out of packet buffers
+- WASM modules are sandboxed: 160 KB arena, 10 ms frame budget, no direct hardware access
+- Tier changes via NVS take effect on next reboot — no hot-reconfiguration of the DSP pipeline
+- Fall detection threshold should be tuned per deployment (default 2000 causes false positives in static environments)
+
+**Domain Events:**
+```rust
+pub enum EdgeEvent {
+    /// Presence state changed
+    PresenceChanged {
+        node_id: u8,
+        state: PresenceState,  // Empty / Present / Moving
+        motion_energy: f32,
+        timestamp_ms: u32,
+    },
+
+    /// Fall detected on-device
+    FallDetected {
+        node_id: u8,
+        acceleration: f32,  // rad/s^2
+        timestamp_ms: u32,
+    },
+
+    /// Vitals packet emitted
+    VitalsEmitted {
+        node_id: u8,
+        breathing_bpm: f32,
+        heart_rate_bpm: f32,
+        confidence: f32,
+        timestamp_ms: u32,
+    },
+
+    /// WASM module loaded or failed
+    WasmModuleLoaded {
+        slot: u8,
+        module_name: String,
+        success: bool,
+        timestamp_ms: u32,
+    },
+}
+```
+
+**Relationship to other contexts:**
+- Edge Intelligence → Multistatic Sensing: **Alternative** (edge runs on-device; multistatic runs on aggregator — same physics, different compute location)
+- Edge Intelligence → Pose Tracking: **Upstream** (edge provides presence/vitals; aggregator can skip detection if edge already confirmed occupancy)
+- Edge Intelligence → Coherence: **Simplified** (edge uses simple variance thresholds instead of full coherence gating)
