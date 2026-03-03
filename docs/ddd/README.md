@@ -9,8 +9,12 @@ DDD organizes the codebase around the problem being solved — not around techni
 | Model | What it covers | Bounded Contexts |
 |-------|---------------|------------------|
 | [RuvSense](ruvsense-domain-model.md) | Multistatic WiFi sensing, pose tracking, vital signs, edge intelligence | 7 contexts: Sensing, Coherence, Tracking, Field Model, Longitudinal, Spatial Identity, Edge Intelligence |
-| [WiFi-Mat](wifi-mat-domain-model.md) | Disaster response: survivor detection, START triage, mass casualty assessment | Scan Zone, Survivor Tracking, Triage |
-| [CHCI](chci-domain-model.md) | Coherent Human Channel Imaging: sub-millimeter body surface reconstruction | Sounding, Channel Estimation, Imaging |
+| [Signal Processing](signal-processing-domain-model.md) | SOTA signal processing: phase cleaning, feature extraction, motion analysis | 3 contexts: CSI Preprocessing, Feature Extraction, Motion Analysis |
+| [Training Pipeline](training-pipeline-domain-model.md) | ML training: datasets, model architecture, embeddings, domain generalization | 4 contexts: Dataset Management, Model Architecture, Training Orchestration, Embedding & Transfer |
+| [Hardware Platform](hardware-platform-domain-model.md) | ESP32 firmware, edge intelligence, WASM runtime, aggregation, provisioning | 5 contexts: Sensor Node, Edge Processing, WASM Runtime, Aggregation, Provisioning |
+| [Sensing Server](sensing-server-domain-model.md) | Single-binary Axum server: CSI ingestion, model management, recording, training, visualization | 5 contexts: CSI Ingestion, Model Management, CSI Recording, Training Pipeline, Visualization |
+| [WiFi-Mat](wifi-mat-domain-model.md) | Disaster response: survivor detection, START triage, mass casualty assessment | 3 contexts: Detection, Localization, Alerting |
+| [CHCI](chci-domain-model.md) | Coherent Human Channel Imaging: sub-millimeter body surface reconstruction | 3 contexts: Sounding, Channel Estimation, Imaging |
 
 ## How to read these
 
