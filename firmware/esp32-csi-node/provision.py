@@ -30,22 +30,40 @@ NVS_PARTITION_OFFSET = 0x9000
 NVS_PARTITION_SIZE = 0x6000  # 24 KiB
 
 
-def build_nvs_csv(ssid, password, target_ip, target_port, node_id):
+def build_nvs_csv(args):
     """Build an NVS CSV string for the csi_cfg namespace."""
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["key", "type", "encoding", "value"])
     writer.writerow(["csi_cfg", "namespace", "", ""])
-    if ssid:
-        writer.writerow(["ssid", "data", "string", ssid])
-    if password is not None:
-        writer.writerow(["password", "data", "string", password])
-    if target_ip:
-        writer.writerow(["target_ip", "data", "string", target_ip])
-    if target_port is not None:
-        writer.writerow(["target_port", "data", "u16", str(target_port)])
-    if node_id is not None:
-        writer.writerow(["node_id", "data", "u8", str(node_id)])
+    if args.ssid:
+        writer.writerow(["ssid", "data", "string", args.ssid])
+    if args.password is not None:
+        writer.writerow(["password", "data", "string", args.password])
+    if args.target_ip:
+        writer.writerow(["target_ip", "data", "string", args.target_ip])
+    if args.target_port is not None:
+        writer.writerow(["target_port", "data", "u16", str(args.target_port)])
+    if args.node_id is not None:
+        writer.writerow(["node_id", "data", "u8", str(args.node_id)])
+    # TDM mesh settings
+    if args.tdm_slot is not None:
+        writer.writerow(["tdm_slot", "data", "u8", str(args.tdm_slot)])
+    if args.tdm_total is not None:
+        writer.writerow(["tdm_nodes", "data", "u8", str(args.tdm_total)])
+    # Edge intelligence settings (ADR-039)
+    if args.edge_tier is not None:
+        writer.writerow(["edge_tier", "data", "u8", str(args.edge_tier)])
+    if args.pres_thresh is not None:
+        writer.writerow(["pres_thresh", "data", "u16", str(args.pres_thresh)])
+    if args.fall_thresh is not None:
+        writer.writerow(["fall_thresh", "data", "u16", str(args.fall_thresh)])
+    if args.vital_win is not None:
+        writer.writerow(["vital_win", "data", "u16", str(args.vital_win)])
+    if args.vital_int is not None:
+        writer.writerow(["vital_int", "data", "u16", str(args.vital_int)])
+    if args.subk_count is not None:
+        writer.writerow(["subk_count", "data", "u8", str(args.subk_count)])
     return buf.getvalue()
 
 
@@ -127,14 +145,37 @@ def main():
     parser.add_argument("--target-ip", help="Aggregator host IP (e.g. 192.168.1.20)")
     parser.add_argument("--target-port", type=int, help="Aggregator UDP port (default: 5005)")
     parser.add_argument("--node-id", type=int, help="Node ID 0-255 (default: 1)")
+    # TDM mesh settings
+    parser.add_argument("--tdm-slot", type=int, help="TDM slot index for this node (0-based)")
+    parser.add_argument("--tdm-total", type=int, help="Total number of TDM nodes in mesh")
+    # Edge intelligence settings (ADR-039)
+    parser.add_argument("--edge-tier", type=int, choices=[0, 1, 2],
+                        help="Edge processing tier: 0=off, 1=stats, 2=vitals")
+    parser.add_argument("--pres-thresh", type=int, help="Presence detection threshold (default: 50)")
+    parser.add_argument("--fall-thresh", type=int, help="Fall detection threshold (default: 500)")
+    parser.add_argument("--vital-win", type=int, help="Phase history window in frames (default: 300)")
+    parser.add_argument("--vital-int", type=int, help="Vitals packet interval in ms (default: 1000)")
+    parser.add_argument("--subk-count", type=int, help="Top-K subcarrier count (default: 32)")
     parser.add_argument("--dry-run", action="store_true", help="Generate NVS binary but don't flash")
 
     args = parser.parse_args()
 
-    if not any([args.ssid, args.password is not None, args.target_ip,
-                args.target_port, args.node_id is not None]):
-        parser.error("At least one config value must be specified "
-                     "(--ssid, --password, --target-ip, --target-port, --node-id)")
+    has_value = any([
+        args.ssid, args.password is not None, args.target_ip,
+        args.target_port, args.node_id is not None,
+        args.tdm_slot is not None, args.tdm_total is not None,
+        args.edge_tier is not None, args.pres_thresh is not None,
+        args.fall_thresh is not None, args.vital_win is not None,
+        args.vital_int is not None, args.subk_count is not None,
+    ])
+    if not has_value:
+        parser.error("At least one config value must be specified")
+
+    # Validate TDM: if one is given, both should be
+    if (args.tdm_slot is not None) != (args.tdm_total is not None):
+        parser.error("--tdm-slot and --tdm-total must be specified together")
+    if args.tdm_slot is not None and args.tdm_slot >= args.tdm_total:
+        parser.error(f"--tdm-slot ({args.tdm_slot}) must be less than --tdm-total ({args.tdm_total})")
 
     print("Building NVS configuration:")
     if args.ssid:
@@ -147,9 +188,23 @@ def main():
         print(f"  Target Port:   {args.target_port}")
     if args.node_id is not None:
         print(f"  Node ID:       {args.node_id}")
+    if args.tdm_slot is not None:
+        print(f"  TDM Slot:      {args.tdm_slot} of {args.tdm_total}")
+    if args.edge_tier is not None:
+        tier_desc = {0: "off (raw CSI)", 1: "stats", 2: "vitals"}
+        print(f"  Edge Tier:     {args.edge_tier} ({tier_desc.get(args.edge_tier, '?')})")
+    if args.pres_thresh is not None:
+        print(f"  Pres Thresh:   {args.pres_thresh}")
+    if args.fall_thresh is not None:
+        print(f"  Fall Thresh:   {args.fall_thresh}")
+    if args.vital_win is not None:
+        print(f"  Vital Window:  {args.vital_win} frames")
+    if args.vital_int is not None:
+        print(f"  Vital Interval:{args.vital_int} ms")
+    if args.subk_count is not None:
+        print(f"  Top-K Subcarr: {args.subk_count}")
 
-    csv_content = build_nvs_csv(args.ssid, args.password, args.target_ip,
-                                args.target_port, args.node_id)
+    csv_content = build_nvs_csv(args)
 
     try:
         nvs_bin = generate_nvs_binary(csv_content, NVS_PARTITION_SIZE)
