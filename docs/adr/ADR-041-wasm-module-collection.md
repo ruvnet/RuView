@@ -38,17 +38,23 @@ algorithms that share the same underlying CSI primitives. A module collection
 allows vertical specialists to build on a common sensing substrate without
 understanding RF engineering.
 
-This ADR defines a curated collection of 37 modules across 6 categories,
+This ADR defines a curated collection of 60 modules across 13 categories,
 with event type registries, budget tiers, implementation priorities, and a
-community contribution workflow.
+community contribution workflow. 24 vendor-integrated modules leverage
+algorithms from three vendored libraries (ruvector, midstream,
+sublinear-time-solver) to extend the platform from pure-CSI threshold
+sensing into adaptive learning, quantum-inspired coherence, autonomous
+planning, and AI security at the edge.
 
 ## Decision
 
 ### Module Collection Overview
 
-37 modules organized into 6 categories. Every module targets Host API v1
+60 modules organized into 13 categories. Every module targets Host API v1
 (ADR-040), ships as an RVF container, and declares its event type IDs,
-budget tier, and capability bitmask.
+budget tier, and capability bitmask. Categories 1--6 are pure-CSI modules;
+Category 7 (subdivided into 7 sub-categories) integrates algorithms from
+vendored libraries for advanced edge computation.
 
 ### Budget Tiers
 
@@ -1273,6 +1279,861 @@ contactless sensing. WiFi CSI makes the invisible visible.
 
 ---
 
+## Category 7: Vendor-Integrated Modules (Event IDs 700--899)
+
+The following modules leverage algorithms from three vendored libraries to extend
+the WASM module collection from pure-CSI sensing into advanced computation at
+the edge. Each module wraps vendor functionality behind the standard Host API v1
+contract, compiles to `wasm32-unknown-unknown`, and ships as an RVF container.
+
+**Vendor sources:**
+
+| Vendor | Path | Key capabilities |
+|--------|------|------------------|
+| **ruvector** | `vendor/ruvector/` | 76 crates: attention mechanisms, min-cut graphs, sublinear solvers, temporal tensor compression, spiking neural networks, HNSW vector search, coherence gating |
+| **midstream** | `vendor/midstream/` | 10 crates: DTW/LCS temporal comparison, nanosecond scheduling, attractor dynamics, LTL verification, meta-learning, AIMDS threat detection, QUIC multistream |
+| **sublinear-time-solver** | `vendor/sublinear-time-solver/` | 11 crates: O(log n) matrix solvers, PageRank, spectral sparsification, GOAP planning, psycho-symbolic reasoning, WASM-native neural inference |
+
+### Budget Tier Note
+
+Vendor-integrated modules tend to be computationally heavier than pure-threshold
+modules. Many require the S or H budget tier. When running vendor modules,
+prefer loading only one H-tier vendor module alongside L-tier core modules.
+
+### Naming Convention
+
+| Category | Prefix | Event ID range |
+|----------|--------|----------------|
+| Signal Intelligence | `wdp-sig-` | 700--729 |
+| Adaptive Learning | `wdp-lrn-` | 730--759 |
+| Spatial Reasoning | `wdp-spt-` | 760--789 |
+| Temporal Analysis | `wdp-tmp-` | 790--819 |
+| Security Intelligence | `wdp-ais-` | 820--849 |
+| Quantum-Inspired | `wdp-qnt-` | 850--879 |
+| Autonomous Systems | `wdp-aut-` | 880--899 |
+
+---
+
+### 7.1 `wdp-sig-flash-attention`
+
+**Description**: Applies Flash Attention (O(n) memory, tiled computation) to
+CSI subcarrier data for real-time spatial focus estimation. Instead of treating
+all 56 subcarriers equally, this module computes attention weights that identify
+which subcarrier groups carry the most motion information. The output is a
+per-frame "attention heatmap" across subcarrier bins that highlights the spatial
+regions of maximum perturbation. Enables downstream modules to focus computation
+on the most informative channels.
+
+**Vendor source**: `ruvector-attention` (sparse/flash.rs)
+
+**Host API dependencies**: `csi_get_phase`, `csi_get_amplitude`,
+`csi_get_variance`, `csi_get_timestamp`, `csi_emit_event`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 700 | `ATTENTION_PEAK_SC` | Subcarrier index with highest attention weight |
+| 701 | `ATTENTION_SPREAD` | Entropy of attention distribution (0=focused, 1=uniform) |
+| 702 | `SPATIAL_FOCUS_ZONE` | Estimated zone ID from attention peak |
+
+**Estimated .wasm size**: 12 KB
+**Budget tier**: S (standard, < 5 ms)
+**Difficulty**: Medium
+
+---
+
+### 7.2 `wdp-sig-temporal-compress`
+
+**Description**: Applies RuVector's temporal tensor compression to CSI phase
+history, achieving 4--10x compression with tiered quantization (Hot: 8-bit
+< 0.5% error, Warm: 5-bit < 3%, Cold: 3-bit archival). This enables the ESP32
+to store hours of CSI history in limited PSRAM for long-term trend analysis.
+Modules like `vital-trend` and `energy-audit` benefit from compressed history
+extending from minutes to hours on-device.
+
+**Vendor source**: `ruvector-temporal-tensor` (quantizer.rs, compressor.rs)
+
+**Host API dependencies**: `csi_get_phase`, `csi_get_amplitude`,
+`csi_get_phase_history`, `csi_get_timestamp`, `csi_emit_event`, `csi_log`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 705 | `COMPRESSION_RATIO` | Current compression ratio (e.g., 6.4x) |
+| 706 | `TIER_TRANSITION` | New tier (0=hot, 1=warm, 2=cold) |
+| 707 | `HISTORY_DEPTH_HOURS` | Hours of history stored in compressed buffer |
+
+**Estimated .wasm size**: 14 KB
+**Budget tier**: S (standard, < 5 ms)
+**Difficulty**: Medium
+
+---
+
+### 7.3 `wdp-sig-coherence-gate`
+
+**Description**: Implements RuVector's coherence-gated attention switching.
+Computes a Z-score coherence metric across subcarrier phase phasors and
+uses hysteresis gating to decide whether the current CSI frame is
+trustworthy (Accept), marginal (PredictOnly), or corrupted (Reject/Recalibrate).
+Frames passing the gate feed downstream modules; rejected frames are
+suppressed to prevent false alarms from transient interference, co-channel
+transmitters, or hardware glitches.
+
+**Vendor source**: `ruvector-attn-mincut` (hysteresis.rs), `ruvector-coherence`
+
+**Host API dependencies**: `csi_get_phase`, `csi_get_amplitude`,
+`csi_get_variance`, `csi_get_timestamp`, `csi_emit_event`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 710 | `GATE_DECISION` | 0=reject, 1=predict-only, 2=accept |
+| 711 | `COHERENCE_SCORE` | Z-score coherence value (0.0--1.0) |
+| 712 | `RECALIBRATE_NEEDED` | Drift exceeds hysteresis threshold |
+
+**Estimated .wasm size**: 8 KB
+**Budget tier**: L (lightweight, < 2 ms)
+**Difficulty**: Medium
+
+---
+
+### 7.4 `wdp-sig-sparse-recovery`
+
+**Description**: Uses RuVector's sublinear sparse solver to recover missing
+or corrupted subcarrier data. When the ESP32 receives CSI frames with
+null subcarriers (interference, hardware dropout), this module applies
+ISTA-like L1 sparse recovery to interpolate missing values from the
+remaining subcarriers' correlation structure. Recovers full 56-subcarrier
+frames from as few as 20 valid subcarriers using the known sparsity of
+indoor RF channels.
+
+**Vendor source**: `ruvector-solver` (forward_push.rs, neumann.rs)
+
+**Host API dependencies**: `csi_get_phase`, `csi_get_amplitude`,
+`csi_get_variance`, `csi_get_timestamp`, `csi_emit_event`, `csi_log`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 715 | `RECOVERY_COMPLETE` | Number of subcarriers recovered |
+| 716 | `RECOVERY_ERROR` | Reconstruction error norm |
+| 717 | `DROPOUT_RATE` | Fraction of null subcarriers (0.0--1.0) |
+
+**Estimated .wasm size**: 16 KB
+**Budget tier**: H (heavy, < 10 ms)
+**Difficulty**: Hard
+
+---
+
+### 7.5 `wdp-sig-mincut-person-match`
+
+**Description**: Uses RuVector's dynamic min-cut algorithm for multi-person
+identity tracking across consecutive CSI frames. Models each person as a
+node in a bipartite assignment graph with edge weights derived from CSI
+signature similarity. The minimum cut partitions the graph into person-to-
+person correspondences across time, maintaining stable person IDs even when
+people cross paths or temporarily occlude each other.
+
+**Vendor source**: `ruvector-mincut` (graph/mod.rs, algorithm/approximate.rs)
+
+**Host API dependencies**: `csi_get_phase`, `csi_get_variance`,
+`csi_get_n_persons`, `csi_get_motion_energy`, `csi_get_timestamp`,
+`csi_emit_event`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 720 | `PERSON_ID_ASSIGNED` | Stable person ID (0--7) |
+| 721 | `PERSON_ID_SWAP` | IDs swapped (encoded: old << 4 | new) |
+| 722 | `MATCH_CONFIDENCE` | Assignment confidence (0.0--1.0) |
+
+**Estimated .wasm size**: 18 KB
+**Budget tier**: H (heavy, < 10 ms)
+**Difficulty**: Hard
+
+---
+
+### 7.6 `wdp-lrn-dtw-gesture-learn`
+
+**Description**: Extends the ADR-040 gesture module with Midstream's Dynamic
+Time Warping engine, enabling users to teach the ESP32 new gestures by
+example. The user performs a gesture 3 times; the module extracts a DTW
+template from the phase trajectory and stores it in WASM linear memory.
+Subsequent frames are matched against all learned templates. Supports up
+to 16 custom gestures. Unlike the fixed 5-gesture ADR-040 module, this
+is a learning system.
+
+**Vendor source**: `midstream/temporal-compare` (DTW, pattern matching)
+
+**Host API dependencies**: `csi_get_phase`, `csi_get_amplitude`,
+`csi_get_phase_history`, `csi_get_motion_energy`, `csi_get_presence`,
+`csi_get_timestamp`, `csi_emit_event`, `csi_log`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 730 | `GESTURE_LEARNED` | Gesture slot ID (0--15) |
+| 731 | `GESTURE_MATCHED` | Matched gesture ID |
+| 732 | `MATCH_DISTANCE` | DTW distance to best template |
+| 733 | `TEMPLATE_COUNT` | Number of stored templates |
+
+**Estimated .wasm size**: 14 KB
+**Budget tier**: H (heavy, < 10 ms)
+**Difficulty**: Medium
+
+---
+
+### 7.7 `wdp-lrn-anomaly-attractor`
+
+**Description**: Uses Midstream's temporal attractor studio to characterize
+the "normal" dynamical behavior of a room's CSI signature as a phase-space
+attractor. Over the first hour, the module learns the attractor shape
+(point attractor for empty rooms, limit cycle for HVAC-only, strange
+attractor for occupied). Novel anomalies are detected as trajectories that
+leave the learned attractor basin. Computes Lyapunov exponents to
+quantify room stability. More principled than threshold-based anomaly
+detection.
+
+**Vendor source**: `midstream/temporal-attractor-studio` (attractor analysis, Lyapunov)
+
+**Host API dependencies**: `csi_get_phase`, `csi_get_variance`,
+`csi_get_amplitude`, `csi_get_motion_energy`, `csi_get_presence`,
+`csi_get_timestamp`, `csi_emit_event`, `csi_log`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 735 | `ATTRACTOR_TYPE` | 0=point, 1=limit-cycle, 2=strange |
+| 736 | `LYAPUNOV_EXPONENT` | Largest Lyapunov exponent (>0 = chaotic) |
+| 737 | `BASIN_DEPARTURE` | Trajectory distance from attractor (0.0--1.0) |
+| 738 | `LEARNING_COMPLETE` | 1.0 when attractor is characterized |
+
+**Estimated .wasm size**: 10 KB
+**Budget tier**: S (standard, < 5 ms)
+**Difficulty**: Hard
+
+---
+
+### 7.8 `wdp-lrn-meta-adapt`
+
+**Description**: Uses Midstream's strange-loop meta-learning engine for
+on-device self-optimization of sensing parameters. The module observes
+which threshold settings produce the most accurate detections (via
+feedback from the host confirming/denying events) and adjusts thresholds
+across iterations. Implements safety-constrained self-modification:
+parameters can only change within bounded ranges, and a rollback mechanism
+reverts changes that increase false positives.
+
+**Vendor source**: `midstream/strange-loop` (meta-learning, safety constraints)
+
+**Host API dependencies**: `csi_get_presence`, `csi_get_motion_energy`,
+`csi_get_variance`, `csi_get_timestamp`, `csi_emit_event`, `csi_log`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 740 | `PARAM_ADJUSTED` | Parameter ID that was tuned |
+| 741 | `ADAPTATION_SCORE` | Current meta-learning score (0.0--1.0) |
+| 742 | `ROLLBACK_TRIGGERED` | Parameter reverted due to degradation |
+| 743 | `META_LEVEL` | Current meta-learning recursion depth |
+
+**Estimated .wasm size**: 10 KB
+**Budget tier**: S (standard, < 5 ms)
+**Difficulty**: Hard
+
+---
+
+### 7.9 `wdp-spt-pagerank-influence`
+
+**Description**: Applies the sublinear-time-solver's PageRank algorithm to
+model influence propagation in multi-person sensing fields. Each detected
+person is a node; edge weights represent CSI cross-correlation between
+person-associated subcarrier groups. PageRank scores identify the
+"dominant mover" -- the person whose motion most affects the CSI channel.
+Useful for multi-person scenarios where you need to track the primary
+actor (e.g., a nurse in a patient room, a presenter in a meeting).
+
+**Vendor source**: `sublinear-time-solver` (forward_push, PageRank)
+
+**Host API dependencies**: `csi_get_phase`, `csi_get_variance`,
+`csi_get_n_persons`, `csi_get_motion_energy`, `csi_get_timestamp`,
+`csi_emit_event`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 760 | `DOMINANT_PERSON` | Person ID with highest PageRank |
+| 761 | `INFLUENCE_SCORE` | PageRank score of dominant person (0.0--1.0) |
+| 762 | `INFLUENCE_CHANGE` | Person ID whose rank changed most |
+
+**Estimated .wasm size**: 12 KB
+**Budget tier**: S (standard, < 5 ms)
+**Difficulty**: Medium
+
+---
+
+### 7.10 `wdp-spt-micro-hnsw`
+
+**Description**: Deploys RuVector's micro-HNSW (11.8 KB WASM footprint) for
+on-device vector similarity search against a library of reference CSI
+fingerprints. The ESP32 stores up to 256 reference vectors representing
+known room states, person locations, or activity patterns. Each new CSI
+frame is encoded as a vector and nearest-neighbor searched against the
+library. Returns the closest match with distance. Enables location
+fingerprinting, activity recognition, and environment classification
+without server roundtrips.
+
+**Vendor source**: `ruvector/micro-hnsw-wasm` (neuromorphic HNSW, 11.8 KB)
+
+**Host API dependencies**: `csi_get_phase`, `csi_get_amplitude`,
+`csi_get_variance`, `csi_get_timestamp`, `csi_emit_event`, `csi_log`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 765 | `NEAREST_MATCH_ID` | Index of closest reference vector (0--255) |
+| 766 | `MATCH_DISTANCE` | Cosine distance to nearest match (0.0--2.0) |
+| 767 | `CLASSIFICATION` | Semantic label ID of matched reference |
+| 768 | `LIBRARY_SIZE` | Current number of stored reference vectors |
+
+**Estimated .wasm size**: 12 KB (micro-HNSW is 11.8 KB)
+**Budget tier**: S (standard, < 5 ms)
+**Difficulty**: Medium
+
+---
+
+### 7.11 `wdp-spt-spiking-tracker`
+
+**Description**: Replaces the traditional Kalman filter with RuVector's
+bio-inspired spiking neural network for person tracking. LIF (Leaky
+Integrate-and-Fire) neurons process CSI phase changes as spike trains;
+STDP (Spike-Timing-Dependent Plasticity) learns temporal correlations
+between subcarrier activations. The network self-organizes to track
+person movement trajectories. More adaptive than Kalman to non-linear
+motion and automatically handles multi-person scenarios through
+winner-take-all competition between neuron populations.
+
+**Vendor source**: `ruvector-nervous-system` (LIF neurons, STDP, winner-take-all)
+
+**Host API dependencies**: `csi_get_phase`, `csi_get_amplitude`,
+`csi_get_variance`, `csi_get_motion_energy`, `csi_get_n_persons`,
+`csi_get_phase_history`, `csi_get_timestamp`, `csi_emit_event`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 770 | `TRACK_UPDATE` | Person ID (high nibble) + zone (low nibble) |
+| 771 | `TRACK_VELOCITY` | Estimated velocity proxy (0.0--1.0) |
+| 772 | `SPIKE_RATE` | Network firing rate (Hz, proxy for motion complexity) |
+| 773 | `TRACK_LOST` | Person ID whose track was lost |
+
+**Estimated .wasm size**: 16 KB
+**Budget tier**: H (heavy, < 10 ms)
+**Difficulty**: Hard
+
+---
+
+### 7.12 `wdp-tmp-pattern-sequence`
+
+**Description**: Uses Midstream's temporal-compare engine to detect recurring
+temporal patterns in CSI data: daily routines, periodic activities, and
+behavioral sequences. Computes Longest Common Subsequence (LCS) across
+time windows to find repeating motion signatures. After a week of
+operation, the module can predict "person arrives at kitchen at 7:15 AM"
+or "office empties at 6 PM on weekdays." Outputs pattern confidence
+scores and deviation alerts when the routine breaks.
+
+**Vendor source**: `midstream/temporal-compare` (LCS, edit distance, pattern detection)
+
+**Host API dependencies**: `csi_get_presence`, `csi_get_motion_energy`,
+`csi_get_n_persons`, `csi_get_timestamp`, `csi_emit_event`, `csi_log`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 790 | `PATTERN_DETECTED` | Pattern ID (0--31) |
+| 791 | `PATTERN_CONFIDENCE` | Confidence (0.0--1.0) |
+| 792 | `ROUTINE_DEVIATION` | Deviation from expected (minutes) |
+| 793 | `PREDICTION_NEXT` | Predicted next activity pattern ID |
+
+**Estimated .wasm size**: 10 KB
+**Budget tier**: S (standard, < 5 ms)
+**Difficulty**: Medium
+
+---
+
+### 7.13 `wdp-tmp-temporal-logic-guard`
+
+**Description**: Uses Midstream's temporal neural solver to enforce safety
+invariants on sensing outputs using Linear Temporal Logic (LTL). Example
+rules: "Globally(presence=0 implies no fall_alert)" prevents false fall
+alarms in empty rooms. "Finally(intrusion implies alert within 10s)"
+ensures alerts are timely. The module monitors the event stream from
+other modules and flags LTL violations -- detecting impossible event
+combinations that indicate sensor malfunction or adversarial tampering.
+
+**Vendor source**: `midstream/temporal-neural-solver` (LTL verification)
+
+**Host API dependencies**: `csi_get_presence`, `csi_get_motion_energy`,
+`csi_get_timestamp`, `csi_emit_event`, `csi_log`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 795 | `LTL_VIOLATION` | Violated rule ID |
+| 796 | `LTL_SATISFACTION` | All rules satisfied (periodic heartbeat) |
+| 797 | `COUNTEREXAMPLE` | Frame index of first violation |
+
+**Estimated .wasm size**: 12 KB
+**Budget tier**: S (standard, < 5 ms)
+**Difficulty**: Hard
+
+---
+
+### 7.14 `wdp-tmp-goap-autonomy`
+
+**Description**: Uses the sublinear-time-solver's Goal-Oriented Action
+Planning (GOAP) engine to make the ESP32 node autonomously decide which
+sensing modules to activate based on context. When presence is detected,
+the planner activates fall detection; when room is empty, it activates
+intrusion detection; when multiple people are present, it activates
+occupancy counting. The module dynamically loads/unloads WASM modules
+to optimize the limited 4-slot runtime. The ESP32 becomes self-directing.
+
+**Vendor source**: `sublinear-time-solver` (temporal_consciousness_goap.rs, A* planning)
+
+**Host API dependencies**: `csi_get_presence`, `csi_get_n_persons`,
+`csi_get_motion_energy`, `csi_get_timestamp`, `csi_emit_event`, `csi_log`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 800 | `GOAL_SELECTED` | Goal ID (e.g., 1=monitor, 2=secure, 3=track) |
+| 801 | `MODULE_ACTIVATED` | Module slot ID activated |
+| 802 | `MODULE_DEACTIVATED` | Module slot ID freed |
+| 803 | `PLAN_COST` | Estimated plan cost (lower is better) |
+
+**Estimated .wasm size**: 14 KB
+**Budget tier**: S (standard, < 5 ms)
+**Difficulty**: Hard
+
+---
+
+### 7.15 `wdp-ais-prompt-shield`
+
+**Description**: Adapts Midstream's AIMDS (AI Manipulation Defense System)
+pattern matcher for CSI event stream integrity. Detects adversarial
+manipulation of CSI signals designed to trigger false events -- e.g.,
+a replay attack that plays back recorded CSI to fake "empty room" while
+someone is present. The module compares incoming CSI statistical
+fingerprints against known attack patterns (replay, injection, jamming)
+using regex-like signature matching on temporal sequences.
+
+**Vendor source**: `midstream/aimds-detection` (pattern_matcher.rs, sanitizer.rs)
+
+**Host API dependencies**: `csi_get_phase`, `csi_get_amplitude`,
+`csi_get_variance`, `csi_get_phase_history`, `csi_get_timestamp`,
+`csi_emit_event`, `csi_log`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 820 | `REPLAY_ATTACK` | Confidence (0.0--1.0) |
+| 821 | `INJECTION_DETECTED` | Anomalous subcarrier count |
+| 822 | `JAMMING_DETECTED` | SNR degradation (dB) |
+| 823 | `SIGNAL_INTEGRITY` | Overall integrity score (0.0--1.0) |
+
+**Estimated .wasm size**: 10 KB
+**Budget tier**: S (standard, < 5 ms)
+**Difficulty**: Medium
+
+---
+
+### 7.16 `wdp-ais-behavioral-profiler`
+
+**Description**: Uses Midstream's behavioral analyzer (attractor-based
+anomaly detection with Mahalanobis scoring) to build a behavioral profile
+of the monitored space. Over days, the module learns the space's "normal"
+multivariate behavior (motion patterns, occupancy rhythms, presence
+durations). Deviations exceeding 3 sigma trigger anomaly alerts with
+severity scoring. Detects novel threats that pattern-matching cannot:
+an unfamiliar gait pattern, unusual occupancy at an unexpected hour, or
+motion in a direction never seen before.
+
+**Vendor source**: `midstream/aimds-analysis` (behavioral.rs, anomaly scoring)
+
+**Host API dependencies**: `csi_get_presence`, `csi_get_motion_energy`,
+`csi_get_variance`, `csi_get_n_persons`, `csi_get_timestamp`,
+`csi_emit_event`, `csi_log`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 825 | `BEHAVIOR_ANOMALY` | Anomaly score (0.0--1.0, >0.7 = alert) |
+| 826 | `PROFILE_DEVIATION` | Mahalanobis distance from baseline |
+| 827 | `NOVEL_PATTERN` | 1.0 when a never-seen pattern occurs |
+| 828 | `PROFILE_MATURITY` | Days of profiling data (0 = learning) |
+
+**Estimated .wasm size**: 12 KB
+**Budget tier**: S (standard, < 5 ms)
+**Difficulty**: Hard
+
+---
+
+### 7.17 `wdp-qnt-quantum-coherence`
+
+**Description**: Applies RuVector's quantum circuit simulator to model
+CSI phase coherence as a quantum-inspired state. Each subcarrier's phase
+is mapped to a qubit on the Bloch sphere; multi-subcarrier coherence
+is quantified via entanglement entropy. Decoherence events (sudden loss
+of inter-subcarrier phase correlation) are detected as "wave function
+collapse." This provides a mathematically rigorous coherence metric that
+is more sensitive than classical correlation measures for detecting
+subtle environmental changes.
+
+**Vendor source**: `ruvector/ruqu-core` (state-vector simulation, noise models)
+
+**Host API dependencies**: `csi_get_phase`, `csi_get_amplitude`,
+`csi_get_variance`, `csi_get_phase_history`, `csi_get_timestamp`,
+`csi_emit_event`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 850 | `ENTANGLEMENT_ENTROPY` | Von Neumann entropy (0.0 = coherent, 1.0 = decoherent) |
+| 851 | `DECOHERENCE_EVENT` | Entropy jump magnitude |
+| 852 | `BLOCH_DRIFT` | Aggregate Bloch vector drift rate |
+
+**Estimated .wasm size**: 16 KB
+**Budget tier**: H (heavy, < 10 ms)
+**Difficulty**: Hard
+
+---
+
+### 7.18 `wdp-qnt-interference-search`
+
+**Description**: Uses quantum-inspired interference patterns (from
+RuVector's ruqu-exotic) to perform multi-hypothesis search over possible
+room configurations. Each hypothesis (e.g., "1 person in zone A",
+"2 people in zones A+C") is modeled as an amplitude in a quantum-inspired
+superposition. CSI evidence constructively interferes with correct
+hypotheses and destructively cancels incorrect ones. After sufficient
+frames, the surviving hypothesis is the most likely room state.
+Grover-inspired quadratic speedup over exhaustive search.
+
+**Vendor source**: `ruvector/ruqu-exotic` (interference search, Grover-inspired)
+
+**Host API dependencies**: `csi_get_phase`, `csi_get_amplitude`,
+`csi_get_variance`, `csi_get_n_persons`, `csi_get_presence`,
+`csi_get_timestamp`, `csi_emit_event`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 855 | `HYPOTHESIS_WINNER` | Winning configuration ID |
+| 856 | `HYPOTHESIS_AMPLITUDE` | Probability amplitude (0.0--1.0) |
+| 857 | `SEARCH_ITERATIONS` | Frames used for convergence |
+
+**Estimated .wasm size**: 14 KB
+**Budget tier**: H (heavy, < 10 ms)
+**Difficulty**: Hard
+
+---
+
+### 7.19 `wdp-aut-psycho-symbolic`
+
+**Description**: Adapts the sublinear-time-solver's psycho-symbolic
+reasoning engine for context-aware CSI interpretation. The module
+maintains a knowledge graph of sensing rules: "IF presence AND high_motion
+AND time=night THEN possible_intruder" with confidence propagation.
+Rules are inferred from patterns, not hardcoded. The reasoner can
+detect emotional context (stressed movement patterns from the emotion
+module) and adjust security sensitivity accordingly. Supports 14+
+reasoning styles including abductive, analogical, and counterfactual.
+
+**Vendor source**: `sublinear-time-solver/psycho-symbolic-reasoner` (graph_reasoner, extractors)
+
+**Host API dependencies**: `csi_get_presence`, `csi_get_motion_energy`,
+`csi_get_variance`, `csi_get_n_persons`, `csi_get_timestamp`,
+`csi_emit_event`, `csi_log`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 880 | `INFERENCE_RESULT` | Concluded state ID |
+| 881 | `INFERENCE_CONFIDENCE` | Reasoning confidence (0.0--1.0) |
+| 882 | `RULE_FIRED` | Rule ID that triggered |
+| 883 | `CONTRADICTION` | 1.0 when conflicting evidence detected |
+
+**Estimated .wasm size**: 16 KB
+**Budget tier**: H (heavy, < 10 ms)
+**Difficulty**: Hard
+
+---
+
+### 7.20 `wdp-aut-self-healing-mesh`
+
+**Description**: Uses RuVector's min-cut self-healing network algorithms
+for multi-node ESP32 mesh resilience. In a deployment with multiple ESP32
+nodes, this module monitors inter-node CSI cross-correlation to detect
+node failures, interference, or physical obstruction. When a node's
+contribution degrades, the module recomputes the mesh topology via
+min-cut to identify the optimal remaining node subset that maintains
+sensing coverage. Emits reconfiguration events for the mesh coordinator.
+
+**Vendor source**: `ruvector-mincut` (dynamic min-cut, self-healing network)
+
+**Host API dependencies**: `csi_get_phase`, `csi_get_amplitude`,
+`csi_get_variance`, `csi_get_timestamp`, `csi_emit_event`, `csi_log`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 885 | `NODE_DEGRADED` | Node ID with degraded CSI quality |
+| 886 | `MESH_RECONFIGURE` | New optimal node count |
+| 887 | `COVERAGE_SCORE` | Sensing coverage quality (0.0--1.0) |
+| 888 | `HEALING_COMPLETE` | 1.0 when mesh has stabilized |
+
+**Estimated .wasm size**: 14 KB
+**Budget tier**: S (standard, < 5 ms)
+**Difficulty**: Hard
+
+---
+
+### 7.21 `wdp-sig-optimal-transport`
+
+**Description**: Uses RuVector's sliced Wasserstein distance (optimal
+transport) to measure the "earth mover distance" between consecutive CSI
+frame distributions. Unlike variance-based motion detection that loses
+spatial information, optimal transport preserves the geometry of how
+energy moves across subcarriers between frames. Detects subtle motions
+(hand gestures, typing) that variance-based methods miss because the
+total variance doesn't change -- only the distribution shifts.
+
+**Vendor source**: `ruvector-math` (transport/sliced_wasserstein.rs)
+
+**Host API dependencies**: `csi_get_phase`, `csi_get_amplitude`,
+`csi_get_variance`, `csi_get_phase_history`, `csi_get_timestamp`,
+`csi_emit_event`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 725 | `WASSERSTEIN_DISTANCE` | Earth mover distance between frames |
+| 726 | `DISTRIBUTION_SHIFT` | Shift direction (subcarrier region) |
+| 727 | `SUBTLE_MOTION` | 1.0 when transport > threshold but variance < threshold |
+
+**Estimated .wasm size**: 12 KB
+**Budget tier**: S (standard, < 5 ms)
+**Difficulty**: Hard
+
+---
+
+### 7.22 `wdp-lrn-ewc-lifelong`
+
+**Description**: Implements Elastic Weight Consolidation (EWC++) from
+RuVector's SONA for lifelong on-device learning that doesn't forget.
+When the module learns new activity patterns (via `dtw-gesture-learn`
+or `anomaly-attractor`), EWC prevents catastrophic forgetting of
+previously learned patterns by penalizing changes to important weights.
+The ESP32 can learn continuously over months without degrading early
+knowledge. Fisher Information matrix diagonal approximation keeps
+memory footprint under 4 KB.
+
+**Vendor source**: `ruvector/sona` (EWC++ implementation), `ruvector-gnn` (EWC)
+
+**Host API dependencies**: `csi_get_timestamp`, `csi_emit_event`, `csi_log`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 745 | `KNOWLEDGE_RETAINED` | Retention score (0.0--1.0) |
+| 746 | `NEW_TASK_LEARNED` | Task ID learned without forgetting |
+| 747 | `FISHER_UPDATE` | Fisher diagonal updated (periodic) |
+| 748 | `FORGETTING_RISK` | Risk of forgetting old patterns (0.0--1.0) |
+
+**Estimated .wasm size**: 8 KB
+**Budget tier**: L (lightweight, < 2 ms)
+**Difficulty**: Hard
+
+---
+
+### 7.23 `wdp-exo-time-crystal`
+
+**Description**: Uses RuVector's time crystal pattern recognition to detect
+periodic temporal structures in CSI data that are invisible to standard
+spectral analysis. Time crystals are discrete temporal symmetry-breaking
+patterns: repeating structures whose period is a multiple of the driving
+frequency. In CSI terms, this detects phenomena like a person's
+breathing-motion interference pattern (breath rate * gait rate modulation)
+that creates "sub-harmonic" signatures. Detects multi-person temporal
+interference patterns that indicate coordinated activity.
+
+**Vendor source**: `ruvector-mincut/snn` (time_crystal.rs)
+
+**Host API dependencies**: `csi_get_phase`, `csi_get_variance`,
+`csi_get_phase_history`, `csi_get_motion_energy`, `csi_get_presence`,
+`csi_get_timestamp`, `csi_emit_event`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 680 | `CRYSTAL_DETECTED` | Period multiplier (e.g., 2 = period doubling) |
+| 681 | `CRYSTAL_STABILITY` | Stability score (0.0--1.0) |
+| 682 | `COORDINATION_INDEX` | Multi-person coordination (0.0--1.0) |
+
+**Estimated .wasm size**: 12 KB
+**Budget tier**: H (heavy, < 10 ms)
+**Difficulty**: Hard
+
+---
+
+### 7.24 `wdp-exo-hyperbolic-space`
+
+**Description**: Uses RuVector's Poincare ball model to embed CSI
+fingerprints in hyperbolic space, where hierarchical relationships
+(room > zone > spot) are naturally represented by distance from the
+origin. Points near the Poincare disk center represent room-level
+features; points near the boundary represent fine-grained location
+features. Hierarchical location classification becomes a radial
+distance check rather than a multi-stage classifier. Provably better
+than Euclidean embedding for tree-structured spatial hierarchies.
+
+**Vendor source**: `ruvector-hyperbolic-hnsw` (Poincare ball), `ruvector-attention/hyperbolic`
+
+**Host API dependencies**: `csi_get_phase`, `csi_get_amplitude`,
+`csi_get_variance`, `csi_get_timestamp`, `csi_emit_event`
+
+**Event types emitted**:
+
+| Event ID | Name | Value semantics |
+|----------|------|-----------------|
+| 685 | `HIERARCHY_LEVEL` | Depth in location tree (0=room, 1=zone, 2=spot) |
+| 686 | `HYPERBOLIC_RADIUS` | Distance from Poincare origin (specificity) |
+| 687 | `LOCATION_LABEL` | Best-match location ID from hierarchy |
+
+**Estimated .wasm size**: 12 KB
+**Budget tier**: S (standard, < 5 ms)
+**Difficulty**: Hard
+
+---
+
+## Updated Module Summary Table (Vendor-Integrated)
+
+| # | Module | Category | Events | .wasm | Budget | Vendor | Difficulty |
+|---|--------|----------|--------|-------|--------|--------|------------|
+| 37 | `wdp-sig-flash-attention` | Signal | 700--702 | 12 KB | S | ruvector | Medium |
+| 38 | `wdp-sig-temporal-compress` | Signal | 705--707 | 14 KB | S | ruvector | Medium |
+| 39 | `wdp-sig-coherence-gate` | Signal | 710--712 | 8 KB | L | ruvector | Medium |
+| 40 | `wdp-sig-sparse-recovery` | Signal | 715--717 | 16 KB | H | ruvector | Hard |
+| 41 | `wdp-sig-mincut-person-match` | Signal | 720--722 | 18 KB | H | ruvector | Hard |
+| 42 | `wdp-sig-optimal-transport` | Signal | 725--727 | 12 KB | S | ruvector | Hard |
+| 43 | `wdp-lrn-dtw-gesture-learn` | Learning | 730--733 | 14 KB | H | midstream | Medium |
+| 44 | `wdp-lrn-anomaly-attractor` | Learning | 735--738 | 10 KB | S | midstream | Hard |
+| 45 | `wdp-lrn-meta-adapt` | Learning | 740--743 | 10 KB | S | midstream | Hard |
+| 46 | `wdp-lrn-ewc-lifelong` | Learning | 745--748 | 8 KB | L | ruvector | Hard |
+| 47 | `wdp-spt-pagerank-influence` | Spatial | 760--762 | 12 KB | S | sublinear | Medium |
+| 48 | `wdp-spt-micro-hnsw` | Spatial | 765--768 | 12 KB | S | ruvector | Medium |
+| 49 | `wdp-spt-spiking-tracker` | Spatial | 770--773 | 16 KB | H | ruvector | Hard |
+| 50 | `wdp-tmp-pattern-sequence` | Temporal | 790--793 | 10 KB | S | midstream | Medium |
+| 51 | `wdp-tmp-temporal-logic-guard` | Temporal | 795--797 | 12 KB | S | midstream | Hard |
+| 52 | `wdp-tmp-goap-autonomy` | Temporal | 800--803 | 14 KB | S | sublinear | Hard |
+| 53 | `wdp-ais-prompt-shield` | AI Security | 820--823 | 10 KB | S | midstream | Medium |
+| 54 | `wdp-ais-behavioral-profiler` | AI Security | 825--828 | 12 KB | S | midstream | Hard |
+| 55 | `wdp-qnt-quantum-coherence` | Quantum | 850--852 | 16 KB | H | ruvector | Hard |
+| 56 | `wdp-qnt-interference-search` | Quantum | 855--857 | 14 KB | H | ruvector | Hard |
+| 57 | `wdp-aut-psycho-symbolic` | Autonomous | 880--883 | 16 KB | H | sublinear | Hard |
+| 58 | `wdp-aut-self-healing-mesh` | Autonomous | 885--888 | 14 KB | S | ruvector | Hard |
+| 59 | `wdp-exo-time-crystal` | Exotic | 680--682 | 12 KB | H | ruvector | Hard |
+| 60 | `wdp-exo-hyperbolic-space` | Exotic | 685--687 | 12 KB | S | ruvector | Hard |
+
+**Grand Totals**: 60 modules, 224 event types, 13 vendor categories.
+
+### Combined Collection Statistics
+
+| Metric | Original (1--36) | Vendor (37--60) | Total |
+|--------|-----------------|-----------------|-------|
+| Modules | 36 | 24 | 60 |
+| Event types | 133 | 91 | 224 |
+| Median .wasm size | 6 KB | 12 KB | 8 KB |
+| Lightweight (L) | 13 | 3 | 16 |
+| Standard (S) | 13 | 14 | 27 |
+| Heavy (H) | 10 | 7 | 17 |
+| Easy | 8 | 0 | 8 |
+| Medium | 12 | 8 | 20 |
+| Hard | 16 | 16 | 32 |
+
+---
+
+### Vendor Module Implementation Priority
+
+#### Phase 2a -- Vendor Quick Wins (Q2--Q3 2026)
+
+Modules that wrap existing, well-tested vendor algorithms with minimal
+adaptation. These deliver advanced capabilities with low implementation risk.
+
+| Module | Vendor | Rationale |
+|--------|--------|-----------|
+| `wdp-sig-coherence-gate` | ruvector | Already implemented in firmware Tier 2; wrap for WASM composability |
+| `wdp-sig-temporal-compress` | ruvector | Extends on-device history from minutes to hours; high utility |
+| `wdp-lrn-dtw-gesture-learn` | midstream | Natural extension of ADR-040 gesture module; user-facing feature |
+| `wdp-ais-prompt-shield` | midstream | Security hardening; pattern matcher is battle-tested |
+| `wdp-spt-micro-hnsw` | ruvector | Smallest WASM footprint (11.8 KB); enables on-device fingerprinting |
+| `wdp-tmp-pattern-sequence` | midstream | LCS/DTW are mature algorithms; high user value for routine detection |
+
+#### Phase 2b -- Vendor Advanced (Q3--Q4 2026)
+
+| Module | Vendor | Rationale |
+|--------|--------|-----------|
+| `wdp-sig-flash-attention` | ruvector | Enables smart subcarrier selection; multiplier for all modules |
+| `wdp-sig-mincut-person-match` | ruvector | Solves the multi-person tracking identity problem |
+| `wdp-lrn-anomaly-attractor` | midstream | Principled anomaly detection; replaces ad-hoc thresholds |
+| `wdp-tmp-goap-autonomy` | sublinear | Makes nodes self-directing; significant differentiation |
+| `wdp-spt-pagerank-influence` | sublinear | Novel approach to multi-person scene understanding |
+| `wdp-ais-behavioral-profiler` | midstream | Long-term security through learned baselines |
+
+#### Phase 3 -- Vendor Frontier (2027+)
+
+| Module | Vendor | Rationale |
+|--------|--------|-----------|
+| `wdp-qnt-quantum-coherence` | ruvector | Novel coherence metric; needs validation dataset |
+| `wdp-qnt-interference-search` | ruvector | Quadratic speedup for configuration search; theoretical |
+| `wdp-aut-psycho-symbolic` | sublinear | Context-aware interpretation; requires knowledge base curation |
+| `wdp-spt-spiking-tracker` | ruvector | Bio-inspired tracking; needs extensive comparison with Kalman |
+| `wdp-exo-time-crystal` | ruvector | Temporal symmetry breaking; novel research direction |
+| `wdp-exo-hyperbolic-space` | ruvector | Hierarchical embedding; needs spatial ground truth data |
+| `wdp-lrn-meta-adapt` | midstream | Self-modifying thresholds; safety constraints critical |
+| `wdp-lrn-ewc-lifelong` | ruvector | Lifelong learning; needs months of longitudinal testing |
+| `wdp-sig-sparse-recovery` | ruvector | Subcarrier recovery; needs controlled dropout experiments |
+| `wdp-sig-optimal-transport` | ruvector | Geometric motion detection; needs comparison study |
+| `wdp-tmp-temporal-logic-guard` | midstream | Formal safety verification; needs LTL rule library |
+| `wdp-aut-self-healing-mesh` | ruvector | Multi-node resilience; needs mesh deployment hardware |
+
+---
+
 ## Module Manifest Convention
 
 ### RVF Manifest Fields
@@ -1337,8 +2198,14 @@ min_subcarriers = 8
 | 300--399 | Smart Building | 6 modules, ~20 event types allocated |
 | 400--499 | Retail & Hospitality | 5 modules, ~16 event types allocated |
 | 500--599 | Industrial & Specialized | 5 modules, ~16 event types allocated |
-| 600--699 | Exotic & Research | 8 modules, ~30 event types allocated |
-| 700--899 | Reserved for future categories | Unallocated |
+| 600--699 | Exotic & Research | 10 modules, ~36 event types allocated |
+| 700--729 | Signal Intelligence (vendor) | 6 modules, ~18 event types (ruvector) |
+| 730--759 | Adaptive Learning (vendor) | 4 modules, ~16 event types (midstream, ruvector) |
+| 760--789 | Spatial Reasoning (vendor) | 3 modules, ~12 event types (ruvector, sublinear) |
+| 790--819 | Temporal Analysis (vendor) | 3 modules, ~12 event types (midstream, sublinear) |
+| 820--849 | Security Intelligence (vendor) | 2 modules, ~8 event types (midstream) |
+| 850--879 | Quantum-Inspired (vendor) | 2 modules, ~6 event types (ruvector) |
+| 880--899 | Autonomous Systems (vendor) | 2 modules, ~8 event types (sublinear, ruvector) |
 | 900--999 | Community / third-party | Open allocation via registry PR |
 
 Within each range, modules are assigned 10-ID blocks (e.g., sleep-apnea
@@ -1402,15 +2269,75 @@ modules/
       ...
     ghost-hunter/
       ...
+    time-crystal/
+      ...
+    hyperbolic-space/
+      ...
+  vendor-signal/
+    flash-attention/
+      wdp-sig-flash-attention.rvf
+      wdp-sig-flash-attention.toml
+      src/
+        lib.rs
+        Cargo.toml
+      VENDOR_SOURCE.md              # Documents vendor crate origin
+    temporal-compress/
+      ...
+    coherence-gate/
+      ...
+    sparse-recovery/
+      ...
+    mincut-person-match/
+      ...
+    optimal-transport/
+      ...
+  vendor-learning/
+    dtw-gesture-learn/
+      ...
+    anomaly-attractor/
+      ...
+    meta-adapt/
+      ...
+    ewc-lifelong/
+      ...
+  vendor-spatial/
+    pagerank-influence/
+      ...
+    micro-hnsw/
+      ...
+    spiking-tracker/
+      ...
+  vendor-temporal/
+    pattern-sequence/
+      ...
+    temporal-logic-guard/
+      ...
+    goap-autonomy/
+      ...
+  vendor-security/
+    prompt-shield/
+      ...
+    behavioral-profiler/
+      ...
+  vendor-quantum/
+    quantum-coherence/
+      ...
+    interference-search/
+      ...
+  vendor-autonomous/
+    psycho-symbolic/
+      ...
+    self-healing-mesh/
+      ...
 ```
 
 ### `registry.toml` Format
 
 ```toml
 [registry]
-version = "1.0.0"
+version = "2.0.0"
 host_api_version = 1
-total_modules = 37
+total_modules = 60
 
 [[modules]]
 name = "wdp-med-sleep-apnea"
@@ -1443,7 +2370,8 @@ sha256 = "def456..."
    sensing platform. A hospital buys one SKU and deploys sleep apnea
    detection in the ICU, fall detection in geriatrics, and queue management
    in the ER -- all via WASM module uploads. No hardware changes, no
-   reflashing.
+   reflashing. With vendor-integrated modules, the same node gains
+   adaptive learning, autonomous planning, and quantum-inspired analysis.
 
 2. **Community velocity**: The module contract (12 host functions, RVF
    container, TOML manifest) is simple enough for a graduate student to
@@ -1474,6 +2402,20 @@ sha256 = "def456..."
    the runtime auto-stops it and the rest continue. There is no single
    point of failure in the module collection.
 
+7. **Vendor algorithm leverage**: The 24 vendor-integrated modules bring
+   algorithms that would take years to develop from scratch -- sublinear
+   solvers, attention mechanisms, temporal logic verification, spiking
+   neural networks, quantum-inspired search. By wrapping existing
+   battle-tested code behind the Host API, we convert library value
+   into edge deployment value without duplicating research effort.
+
+8. **Practical-to-exotic spectrum**: The catalog spans from immediately
+   deployable modules (HVAC presence, queue counting) through advanced
+   ML (attractor-based anomaly detection, lifelong learning) to
+   frontier research (quantum coherence, time crystals, psycho-symbolic
+   reasoning). Users can start practical and grow exotic as comfort
+   increases.
+
 ### Negative
 
 1. **Event type sprawl**: 133 event types across 37 modules create a
@@ -1498,10 +2440,17 @@ sha256 = "def456..."
    deduplication. The event type ID system makes this tractable but
    not automatic.
 
-5. **WASM size growth**: The exotic modules (gesture-language at 18 KB,
-   dream-stage at 14 KB) approach the PSRAM arena limit. Only 2-3 heavy
-   modules can coexist in the 4-slot runtime. Module authors must
-   optimize aggressively for size.
+5. **WASM size growth**: The exotic and vendor modules (gesture-language
+   at 18 KB, mincut-person-match at 18 KB, quantum-coherence at 16 KB)
+   approach the PSRAM arena limit. Only 2-3 heavy modules can coexist
+   in the 4-slot runtime. Module authors must optimize aggressively for
+   size. Vendor modules average 12 KB vs 6 KB for core modules.
+
+6. **Vendor dependency management**: Vendor-integrated modules depend on
+   code in `vendor/`. Changes to vendor source require rebuilding
+   affected WASM modules. Vendor updates must be manually pulled and
+   tested. The `VENDOR_SOURCE.md` file in each module directory
+   documents the exact crate, file, and commit used.
 
 6. **Calibration requirements**: Many modules (occupancy-zones, perimeter-
    breach, gait-analysis) require environment-specific calibration.
@@ -1771,6 +2720,12 @@ Unsigned modules can still be loaded on nodes with `wasm_verify=0`
 
 - ADR-039: ESP32-S3 Edge Intelligence Pipeline
 - ADR-040: WASM Programmable Sensing (Tier 3)
+- `vendor/ruvector/` -- 76 crates: attention, min-cut, solvers, temporal
+  tensor, spiking networks, HNSW, quantum circuits, coherence gating
+- `vendor/midstream/` -- 10 crates: AIMDS threat detection, DTW/LCS
+  temporal comparison, attractor dynamics, LTL verification, meta-learning
+- `vendor/sublinear-time-solver/` -- 11 crates: O(log n) solvers,
+  PageRank, GOAP planning, psycho-symbolic reasoning, WASM neural inference
 - Liu et al., "Monitoring Vital Signs and Postures During Sleep Using
   WiFi Signals," MobiCom 2020
 - Niu et al., "WiFi-Based Sleep Stage Monitoring," IEEE TMC 2022
