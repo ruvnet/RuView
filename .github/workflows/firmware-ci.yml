@@ -15,7 +15,7 @@ jobs:
     name: Build ESP32-S3 Firmware
     runs-on: ubuntu-latest
     container:
-      image: espressif/idf:v5.4
+      image: espressif/idf:v5.2
 
     steps:
       - uses: actions/checkout@v4
@@ -23,6 +23,7 @@ jobs:
       - name: Build firmware
         working-directory: firmware/esp32-csi-node
         run: |
+          . $IDF_PATH/export.sh
           idf.py set-target esp32s3
           idf.py build
 
