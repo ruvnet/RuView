@@ -612,7 +612,7 @@ A 3-6 node ESP32-S3 mesh provides full CSI at 20 Hz. Total cost: ~$54 for a 3-no
 
 **Flashing firmware:**
 
-Pre-built binaries are available at [Releases](https://github.com/ruvnet/wifi-densepose/releases/tag/v0.1.0-esp32).
+Pre-built binaries are available at [Releases](https://github.com/ruvnet/wifi-densepose/releases/tag/v0.2.0-esp32).
 
 ```bash
 # Flash an ESP32-S3 (requires esptool: pip install esptool)
@@ -624,7 +624,7 @@ python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
 **Provisioning:**
 
 ```bash
-python scripts/provision.py --port COM7 \
+python firmware/esp32-csi-node/provision.py --port COM7 \
   --ssid "YourWiFi" --password "YourPassword" --target-ip 192.168.1.20
 ```
 
@@ -635,7 +635,7 @@ Replace `192.168.1.20` with the IP of the machine running the sensing server.
 For multistatic mesh deployments with authenticated beacons (ADR-032), provision a shared mesh key:
 
 ```bash
-python scripts/provision.py --port COM7 \
+python firmware/esp32-csi-node/provision.py --port COM7 \
   --ssid "YourWiFi" --password "YourPassword" --target-ip 192.168.1.20 \
   --mesh-key "$(openssl rand -hex 32)"
 ```
@@ -648,13 +648,13 @@ Each node in a multistatic mesh needs a unique TDM slot ID (0-based):
 
 ```bash
 # Node 0 (slot 0) — first transmitter
-python scripts/provision.py --port COM7 --tdm-slot 0 --tdm-total 3
+python firmware/esp32-csi-node/provision.py --port COM7 --tdm-slot 0 --tdm-total 3
 
 # Node 1 (slot 1)
-python scripts/provision.py --port COM8 --tdm-slot 1 --tdm-total 3
+python firmware/esp32-csi-node/provision.py --port COM8 --tdm-slot 1 --tdm-total 3
 
 # Node 2 (slot 2)
-python scripts/provision.py --port COM9 --tdm-slot 2 --tdm-total 3
+python firmware/esp32-csi-node/provision.py --port COM9 --tdm-slot 2 --tdm-total 3
 ```
 
 **Start the aggregator:**
@@ -720,7 +720,7 @@ docker run -p 3000:3000 -p 3001:3001 ruvnet/wifi-densepose:latest
 ### ESP32: No data arriving
 
 1. Verify the ESP32 is connected to the same WiFi network
-2. Check the target IP matches the sensing server machine: `python scripts/provision.py --port COM7 --target-ip <YOUR_IP>`
+2. Check the target IP matches the sensing server machine: `python firmware/esp32-csi-node/provision.py --port COM7 --target-ip <YOUR_IP>`
 3. Verify UDP port 5005 is not blocked by firewall
 4. Test with: `nc -lu 5005` (Linux) or similar UDP listener
 
