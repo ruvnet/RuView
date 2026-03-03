@@ -831,16 +831,16 @@ ESP32-S3 (STA + promiscuous)     UDP/5005      Rust aggregator
 
 ```bash
 # Pre-built binaries — no toolchain required
-# https://github.com/ruvnet/wifi-densepose/releases/tag/v0.1.0-esp32
+# https://github.com/ruvnet/wifi-densepose/releases/tag/v0.2.0-esp32
 
 python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
   write-flash --flash-mode dio --flash-size 4MB \
   0x0 bootloader.bin 0x8000 partition-table.bin 0x10000 esp32-csi-node.bin
 
-python scripts/provision.py --port COM7 \
+python firmware/esp32-csi-node/provision.py --port COM7 \
   --ssid "YourWiFi" --password "secret" --target-ip 192.168.1.20
 
-cargo run -p wifi-densepose-hardware --bin aggregator -- --bind 0.0.0.0:5005 --verbose
+cargo run -p wifi-densepose-sensing-server -- --http-port 3000 --source esp32
 ```
 
 See [firmware/esp32-csi-node/README.md](firmware/esp32-csi-node/README.md) and [Tutorial #34](https://github.com/ruvnet/wifi-densepose/issues/34).
