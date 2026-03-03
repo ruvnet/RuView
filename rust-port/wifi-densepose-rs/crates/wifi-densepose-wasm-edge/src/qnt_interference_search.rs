@@ -574,7 +574,7 @@ mod tests {
         for _ in 0..30 {
             search.process_frame(0, 0.0, 0);
         }
-        let w1 = search.winner();
+        let _w1 = search.winner();
 
         // Now suddenly switch to high motion single person.
         // The winner should eventually change, emitting an event.

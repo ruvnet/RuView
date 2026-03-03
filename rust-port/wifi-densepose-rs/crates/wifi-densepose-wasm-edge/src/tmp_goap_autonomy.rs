@@ -52,7 +52,6 @@ impl Action {
     const fn ok(&self, ws: WorldState) -> bool { (ws & self.pre_mask) == (self.pre_vals & self.pre_mask) }
     const fn apply(&self, ws: WorldState) -> WorldState { (ws | self.eset) & !self.eclr }
 }
-const B: fn(usize) -> u8 = |p| 1u8 << p; // bit helper (not const, used below via literals)
 const ACTIONS: [Action; NUM_ACTIONS] = [
     Action { pre_mask: 1<<P_PRES, pre_vals: 1<<P_PRES, eset: 1<<P_VIT,  eclr: 0, cost: 2 }, // activate_vitals
     Action { pre_mask: 0,         pre_vals: 0,          eset: 1<<P_PRES, eclr: 0, cost: 1 }, // activate_intrusion

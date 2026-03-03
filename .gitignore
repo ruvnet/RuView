@@ -9,6 +9,12 @@ firmware/esp32-csi-node/components/wasm3/wasm3-src/
 # NVS partition images and CSVs (contain WiFi credentials)
 nvs.bin
 nvs_config.csv
+nvs_provision.bin
+
+# Working artifacts that should not land in root
+/*.wasm
+/esp32_*.txt
+/serial_error.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

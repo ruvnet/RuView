@@ -85,12 +85,20 @@ impl TemporalLogicGuard {
         }
 
         // Rule 4: F(motion_start -> motion_end within 300s).
-        self.check_deadline_rule(4, input.motion_energy > 0.1, true,
-                                 MOTION_STOP_DEADLINE, &mut n);
+        if self.check_deadline_rule(4, input.motion_energy > 0.1, MOTION_STOP_DEADLINE) {
+            if n + 1 < 12 { unsafe {
+                EV[n] = (EVENT_LTL_VIOLATION, 4.0);
+                EV[n+1] = (EVENT_COUNTEREXAMPLE, self.frame_idx as f32);
+            } n += 2; }
+        }
 
         // Rule 5: G(breathing>40 -> alert within 5s).
-        self.check_deadline_rule(5, input.breathing_bpm > 40.0, true,
-                                 FAST_BREATH_DEADLINE, &mut n);
+        if self.check_deadline_rule(5, input.breathing_bpm > 40.0, FAST_BREATH_DEADLINE) {
+            if n + 1 < 12 { unsafe {
+                EV[n] = (EVENT_LTL_VIOLATION, 5.0);
+                EV[n+1] = (EVENT_COUNTEREXAMPLE, self.frame_idx as f32);
+            } n += 2; }
+        }
 
         // Rule 7: G(seizure -> !normal_gait within 60s).
         match self.rules[7].state {
@@ -128,29 +136,30 @@ impl TemporalLogicGuard {
     }
 
     /// Generic deadline rule: condition triggers pending, expiry = violation,
-    /// condition clearing = satisfied.
-    fn check_deadline_rule(&mut self, rid: usize, cond: bool, viol_on_expire: bool,
-                           deadline: u32, n: &mut usize) {
-        static mut EV: [(i32, f32); 12] = [(0, 0.0); 12]; // shadow -- we write through on_frame's EV
+    /// condition clearing = satisfied. Returns true if a new violation just occurred.
+    fn check_deadline_rule(&mut self, rid: usize, cond: bool, deadline: u32) -> bool {
         match self.rules[rid].state {
             RuleState::Satisfied => {
                 if cond {
                     self.rules[rid].state = RuleState::Pending;
                     self.rules[rid].deadline = self.frame_idx + deadline;
                 }
+                false
             }
             RuleState::Pending => {
                 if !cond {
                     self.rules[rid].state = RuleState::Satisfied;
+                    false
                 } else if self.frame_idx >= self.rules[rid].deadline {
                     self.rules[rid].state = RuleState::Violated;
                     self.rules[rid].vio_frame = self.frame_idx;
                     self.vio_counts[rid] += 1;
-                    // Note: events are emitted by on_frame's static, not this one.
-                    // We signal via n only; caller handles the actual write.
+                    true
+                } else {
+                    false
                 }
             }
-            RuleState::Violated => { if !cond { self.rules[rid].state = RuleState::Satisfied; } }
+            RuleState::Violated => { if !cond { self.rules[rid].state = RuleState::Satisfied; } false }
         }
     }
 

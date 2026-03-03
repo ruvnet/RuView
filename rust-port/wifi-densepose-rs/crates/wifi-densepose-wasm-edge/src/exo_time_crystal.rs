@@ -238,44 +238,59 @@ impl TimeCrystalDetector {
     }
 
     /// Compute mean and variance of the circular buffer contents.
+    ///
+    /// PERF: Single-pass computation using sum and sum-of-squares identity:
+    ///   var = E[x^2] - E[x]^2 = (sum_sq / n) - (sum / n)^2
+    /// Reduces from 2 passes (2 * fill get() calls with modulus) to 1 pass.
     fn compute_stats(&mut self, fill: usize) {
         let n = fill as f32;
         let mut sum = 0.0f32;
+        let mut sum_sq = 0.0f32;
         for i in 0..fill {
-            sum += self.motion_buf.get(i);
+            let v = self.motion_buf.get(i);
+            sum += v;
+            sum_sq += v * v;
         }
         self.buf_mean = sum / n;
-
-        let mut var_sum = 0.0f32;
-        for i in 0..fill {
-            let d = self.motion_buf.get(i) - self.buf_mean;
-            var_sum += d * d;
-        }
-        self.buf_var = var_sum / n;
+        // var = E[x^2] - (E[x])^2, clamped to avoid negative due to float rounding.
+        let var = sum_sq / n - self.buf_mean * self.buf_mean;
+        self.buf_var = if var > 0.0 { var } else { 0.0 };
     }
 
     /// Compute normalized autocorrelation r(k) for lags k=1..MAX_LAG.
     ///
     /// r(k) = (1/(N-k)) * sum_{t=0}^{N-k-1} (x[t]-mean)*(x[t+k]-mean) / var
+    ///
+    /// PERF: Pre-linearize circular buffer to contiguous stack array, eliminating
+    /// modulus operations in the inner loop and improving cache locality.
+    /// Reduces ~64K modulus ops to 0 for full buffer (256 * 128 * 2 get() calls).
     fn compute_autocorrelation(&mut self, fill: usize) {
         let max_lag = if fill / 2 < MAX_LAG { fill / 2 } else { MAX_LAG };
         let inv_var = 1.0 / self.buf_var;
+
+        // Pre-linearize: copy circular buffer to contiguous array, subtracting
+        // mean so we avoid the subtraction in the inner loop (saves fill*max_lag
+        // subtractions).
+        let mut linear = [0.0f32; BUF_LEN];
+        for t in 0..fill {
+            linear[t] = self.motion_buf.get(t) - self.buf_mean;
+        }
 
         for k in 0..max_lag {
             let lag = k + 1; // lags 1..MAX_LAG
             let pairs = fill - lag;
             let mut sum = 0.0f32;
-            for t in 0..pairs {
-                let a = self.motion_buf.get(t) - self.buf_mean;
-                let b = self.motion_buf.get(t + lag) - self.buf_mean;
-                sum += a * b;
+            // Inner loop now accesses contiguous memory with no modulus.
+            let mut t = 0;
+            while t < pairs {
+                sum += linear[t] * linear[t + lag];
+                t += 1;
             }
             self.autocorr[k] = (sum / pairs as f32) * inv_var;
         }
 
         // Zero out unused lags.
-        let max_lag_capped = if fill / 2 < MAX_LAG { fill / 2 } else { MAX_LAG };
-        for k in max_lag_capped..MAX_LAG {
+        for k in max_lag..MAX_LAG {
             self.autocorr[k] = 0.0;
         }
     }

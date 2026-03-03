@@ -1,0 +1,78 @@
+é chip revision: v0.2
+I (34) boot.esp32s3: Boot SPI Speed : 80MHz
+I (38) boot.esp32s3: SPI Mode       : DIO
+I (43) boot.esp32s3: SPI Flash Size : 8MB
+I (48) boot: Enabling RNG early entropy source...
+I (53) boot: Partition Table:
+I (57) boot: ## Label            Usage          Type ST Offset   Length
+I (64) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (71) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (79) boot:  2 factory          factory app      00 00 00010000 00100000
+I (86) boot: End of partition table
+I (91) esp_image: segment 0: paddr=00010020 vaddr=3c0b0020 size=2e5ach (189868) map
+I (133) esp_image: segment 1: paddr=0003e5d4 vaddr=3fc97e00 size=01a44h (  6724) load
+I (135) esp_image: segment 2: paddr=00040020 vaddr=42000020 size=a0acch (658124) map
+I (257) esp_image: segment 3: paddr=000e0af4 vaddr=3fc99844 size=02bbch ( 11196) load
+I (260) esp_image: segment 4: paddr=000e36b8 vaddr=40374000 size=13d5ch ( 81244) load
+I (289) boot: Loaded app from partition at offset 0x10000
+I (289) boot: Disabling RNG early entropy source...
+I (300) cpu_start: Multicore app
+I (310) cpu_start: Pro cpu start user code
+I (310) cpu_start: cpu freq: 160000000 Hz
+I (310) cpu_start: Application information:
+I (313) cpu_start: Project name:     esp32-csi-node
+I (319) cpu_start: App version:      1
+I (323) cpu_start: Compile time:     Mar  3 2026 04:15:10
+I (329) cpu_start: ELF file SHA256:  50c89a9ed...
+I (334) cpu_start: ESP-IDF:          v5.2
+I (339) cpu_start: Min chip rev:     v0.0
+I (344) cpu_start: Max chip rev:     v0.99 
+I (349) cpu_start: Chip rev:         v0.2
+I (353) heap_init: Initializing. RAM available for dynamic allocation:
+I (361) heap_init: At 3FCA9468 len 000402A8 (256 KiB): RAM
+I (367) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (373) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (379) heap_init: At 600FE010 len 00001FD8 (7 KiB): RTCRAM
+I (386) spi_flash: detected chip: gd
+I (390) spi_flash: flash io: dio
+I (394) sleep: Configure to isolate all GPIO pins in sleep state
+I (400) sleep: Enable automatic switching of GPIO sleep configuration
+I (408) main_task: Started on CPU0
+I (412) main_task: Calling app_main()
+I (441) nvs_config: NVS override: ssid=ruv.net
+I (442) nvs_config: NVS override: password=***
+I (443) nvs_config: NVS override: target_ip=192.168.1.20
+I (448) nvs_config: NVS override: wasm_verify=0
+I (452) main: ESP32-S3 CSI Node (ADR-018) â?? Node ID: 1
+I (460) pp: pp rom version: e7ae62f
+I (462) net80211: net80211 rom version: e7ae62f
+I (469) wifi:wifi driver task: 3fcb3784, prio:23, stack:6656, core=0
+I (489) wifi:wifi firmware version: cc1dd81
+I (489) wifi:wifi certification version: v7.0
+I (489) wifi:config NVS flash: enabled
+I (490) wifi:config nano formating: disabled
+I (494) wifi:Init data frame dynamic rx buffer num: 32
+I (499) wifi:Init static rx mgmt buffer num: 5
+I (503) wifi:Init management short buffer num: 32
+I (507) wifi:Init dynamic tx buffer num: 32
+I (511) wifi:Init static tx FG buffer num: 2
+I (515) wifi:Init static rx buffer size: 2212
+I (519) wifi:Init static rx buffer num: 16
+I (523) wifi:Init dynamic rx buffer num: 32
+I (527) wifi_init: rx ba win: 16
+I (531) wifi_init: tcpip mbox: 32
+I (535) wifi_init: udp mbox: 32
+I (538) wifi_init: tcp mbox: 6
+I (542) wifi_init: tcp tx win: 5760
+I (546) wifi_init: tcp rx win: 5760
+I (550) wifi_init: tcp mss: 1440
+I (554) wifi_init: WiFi IRAM OP enabled
+I (559) wifi_init: WiFi RX IRAM OP enabled
+I (566) phy_init: phy_version 620,ec7ec30,Sep  5 2023,13:49:13
+I (612) wifi:mode : sta (3c:0f:02:ec:c2:28)
+I (612) wifi:enable tsf
+I (614) main: WiFi STA initialized, connecting to SSID: ruv.net
+I (623) wifi:new:<5,0>, old:<1,0>, ap:<255,255>, sta:<5,0>, prof:1
+I (625) wifi:state: init -> auth (b0)
+I (656) wifi:state: auth -> assoc (0)
+I (749) wifi:state: assoc -> run (10)

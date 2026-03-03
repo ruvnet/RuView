@@ -410,7 +410,7 @@ mod tests {
         let mut sr = SparseRecovery::new();
 
         // Build model.
-        let mut valid_amps = [2.0f32; 16];
+        let valid_amps = [2.0f32; 16];
         for _ in 0..15 {
             let mut frame = valid_amps;
             sr.process_frame(&mut frame);
@@ -441,7 +441,7 @@ mod tests {
         }
 
         // Frame 20 should emit dropout rate event.
-        let events = sr.process_frame(&mut amps);
+        let _events = sr.process_frame(&mut amps);
         // frame_count is now 21, not divisible by 20 — check frame 20.
         // We already processed it above. Let's just verify the counter.
         assert_eq!(sr.frame_count, 21);

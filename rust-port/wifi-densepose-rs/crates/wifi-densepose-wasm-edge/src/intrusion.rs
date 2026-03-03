@@ -8,11 +8,12 @@
 //!
 //! Security-grade: low false-negative rate at the cost of higher false-positive.
 
-use libm::fabsf;
 #[cfg(not(feature = "std"))]
-use libm::sqrtf;
+use libm::{fabsf, sqrtf};
 #[cfg(feature = "std")]
 fn sqrtf(x: f32) -> f32 { x.sqrt() }
+#[cfg(feature = "std")]
+fn fabsf(x: f32) -> f32 { x.abs() }
 
 /// Maximum subcarriers.
 const MAX_SC: usize = 32;

@@ -233,3 +233,103 @@ fn dtw_distance(a: &[f32], b: &[f32]) -> f32 {
     let path_len = (n + m) as f32;
     cost[n - 1][m - 1] / path_len
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gesture_detector_init() {
+        let det = GestureDetector::new();
+        assert!(!det.initialized);
+        assert_eq!(det.window_len, 0);
+        assert_eq!(det.cooldown, 0);
+    }
+
+    #[test]
+    fn test_empty_phases_returns_none() {
+        let mut det = GestureDetector::new();
+        assert!(det.process_frame(&[]).is_none());
+    }
+
+    #[test]
+    fn test_first_frame_initializes() {
+        let mut det = GestureDetector::new();
+        assert!(det.process_frame(&[0.5]).is_none());
+        assert!(det.initialized);
+        assert_eq!(det.window_len, 0); // first frame only initializes prev_phase
+    }
+
+    #[test]
+    fn test_constant_phase_no_gesture_after_cooldown() {
+        let mut det = GestureDetector::new();
+        // Feed constant phase (no gesture) for many frames.
+        // With constant phase, delta=0 every frame. This may match some
+        // template at low distance. After any initial match, cooldown
+        // prevents further detections.
+        let mut detection_count = 0u32;
+        for _ in 0..200 {
+            if det.process_frame(&[1.0]).is_some() {
+                detection_count += 1;
+            }
+        }
+        // Even if a false match occurs, cooldown limits total detections.
+        assert!(detection_count <= 5, "constant phase should not trigger many gestures, got {}", detection_count);
+    }
+
+    #[test]
+    fn test_dtw_identical_sequences() {
+        let a = [0.1, 0.2, 0.3, 0.4, 0.5];
+        let b = [0.1, 0.2, 0.3, 0.4, 0.5];
+        let dist = dtw_distance(&a, &b);
+        assert!(dist < 0.01, "identical sequences should have near-zero DTW distance, got {}", dist);
+    }
+
+    #[test]
+    fn test_dtw_different_sequences() {
+        let a = [0.0, 0.0, 0.0, 0.0, 0.0];
+        let b = [1.0, 1.0, 1.0, 1.0, 1.0];
+        let dist = dtw_distance(&a, &b);
+        // DTW normalized by path length (5+5=10). Cost = 5*1.0 = 5.0, normalized = 0.5.
+        assert!(dist >= 0.5, "very different sequences should have large DTW distance, got {}", dist);
+    }
+
+    #[test]
+    fn test_dtw_empty_input() {
+        assert_eq!(dtw_distance(&[], &[1.0, 2.0]), f32::MAX);
+        assert_eq!(dtw_distance(&[1.0, 2.0], &[]), f32::MAX);
+        assert_eq!(dtw_distance(&[], &[]), f32::MAX);
+    }
+
+    #[test]
+    fn test_cooldown_prevents_duplicate_detection() {
+        let mut det = GestureDetector::new();
+        // Initialize
+        det.process_frame(&[0.0]);
+
+        // Feed wave-like pattern to try to trigger gesture
+        let mut phase = 0.0f32;
+        let mut detected_count = 0;
+        for i in 0..200 {
+            // Oscillating phase to simulate wave gesture
+            phase += if i % 6 < 3 { 0.8 } else { -0.8 };
+            if det.process_frame(&[phase]).is_some() {
+                detected_count += 1;
+            }
+        }
+        // If any gestures detected, cooldown should prevent immediate re-detection.
+        // With 200 frames and 40-frame cooldown, at most ~4-5 detections.
+        assert!(detected_count <= 5, "cooldown should limit detections, got {}", detected_count);
+    }
+
+    #[test]
+    fn test_window_ring_buffer_wraps() {
+        let mut det = GestureDetector::new();
+        det.process_frame(&[0.0]); // init
+        // Fill more than MAX_WINDOW_LEN frames to verify wrapping works.
+        for i in 0..100 {
+            det.process_frame(&[i as f32 * 0.01]);
+        }
+        assert_eq!(det.window_len, MAX_WINDOW_LEN);
+    }
+}

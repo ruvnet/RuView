@@ -165,29 +165,32 @@ impl QuantumCoherenceMonitor {
     ///   theta = |phase|  (polar angle)
     ///   phi   = sign(phase) * pi/2  (azimuthal angle)
     ///   bloch = (sin(theta)*cos(phi), sin(theta)*sin(phi), cos(theta))
+    /// PERF: phi is always +/- pi/2, so cos(phi) = 0 and sin(phi) = +/- 1.
+    /// This eliminates 2 trig calls (cosf, sinf) per subcarrier, and since
+    /// sum_x is always zero (sin_theta * cos(pi/2) = 0), we skip it entirely.
+    /// Net savings: 2*n_sc trig calls eliminated per frame (32-64 cosf/sinf calls).
     fn compute_mean_bloch(&self, phases: &[f32], n_sc: usize) -> [f32; 3] {
-        let mut sum_x = 0.0f32;
+        // sum_x is always 0 because cos(+/-pi/2) = 0.
         let mut sum_y = 0.0f32;
         let mut sum_z = 0.0f32;
-
-        let half_pi = core::f32::consts::FRAC_PI_2;
 
         for i in 0..n_sc {
             let phase = phases[i];
             let theta = fabsf(phase);
-            // phi = sign(phase) * pi/2; cos(pi/2)=0, sin(pi/2)=1, sin(-pi/2)=-1.
-            let phi = if phase >= 0.0 { half_pi } else { -half_pi };
-
             let sin_theta = sinf(theta);
             let cos_theta = cosf(theta);
 
-            sum_x += sin_theta * cosf(phi);
-            sum_y += sin_theta * sinf(phi);
+            // sin(+pi/2) = 1, sin(-pi/2) = -1 -> factor out as sign(phase).
+            if phase >= 0.0 {
+                sum_y += sin_theta;  // sin_theta * sin(pi/2) = sin_theta * 1
+            } else {
+                sum_y -= sin_theta;  // sin_theta * sin(-pi/2) = sin_theta * (-1)
+            }
             sum_z += cos_theta;
         }
 
         let inv_n = 1.0 / (n_sc as f32);
-        [sum_x * inv_n, sum_y * inv_n, sum_z * inv_n]
+        [0.0, sum_y * inv_n, sum_z * inv_n]
     }
 
     /// Get the current EMA-smoothed Von Neumann entropy.

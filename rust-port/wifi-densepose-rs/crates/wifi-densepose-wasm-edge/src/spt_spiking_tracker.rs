@@ -173,9 +173,15 @@ impl SpikingTracker {
         }
 
         // ── 3. STDP learning ─────────────────────────────────────────────
+        // PERF: Only iterate over neurons that actually fired (skip silent inputs).
+        // Typical sparsity: ~10-30% of inputs fire, so this skips 70-90% of
+        // the 32*4=128 weight update iterations.
         for i in 0..n_sc {
+            if !input_spikes[i] {
+                continue; // Skip silent input neurons entirely.
+            }
             for z in 0..N_OUTPUT {
-                if input_spikes[i] && output_spikes[z] {
+                if output_spikes[z] {
                     // Pre fires, post fires -> potentiate.
                     let dt = if self.input_spike_time[i] >= self.output_spike_time[z] {
                         self.input_spike_time[i] - self.output_spike_time[z]
@@ -188,7 +194,7 @@ impl SpikingTracker {
                             self.weights[i][z] = W_MAX;
                         }
                     }
-                } else if input_spikes[i] && !output_spikes[z] {
+                } else {
                     // Pre fires, post silent -> depress slightly.
                     self.weights[i][z] -= STDP_LR_MINUS;
                     if self.weights[i][z] < W_MIN {

@@ -60,7 +60,7 @@ idf_component_register(
 target_compile_definitions(${COMPONENT_LIB} PUBLIC
     d_m3HasFloat=1                   # Enable float support (needed for DSP)
     d_m3Use32BitSlots=1              # 32-bit value slots (saves RAM on ESP32)
-    d_m3MaxFunctionStackHeight=128   # Conservative stack depth
+    d_m3MaxFunctionStackHeight=512   # Raised for Rust WASM modules (was 128)
     d_m3CodePageAlignSize=4096       # Page alignment for Xtensa
     d_m3LogOutput=0                  # Disable WASM3 stdout logging (use ESP_LOG)
     d_m3FixedHeap=0                  # Use dynamic allocation (PSRAM-friendly)

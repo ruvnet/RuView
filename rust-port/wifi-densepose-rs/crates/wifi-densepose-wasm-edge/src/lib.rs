@@ -45,6 +45,41 @@ pub mod occupancy;
 pub mod vital_trend;
 pub mod intrusion;
 
+// ── Category 1: Medical & Health (ADR-041, event IDs 100-199) ───────────────
+pub mod med_sleep_apnea;
+pub mod med_cardiac_arrhythmia;
+pub mod med_respiratory_distress;
+pub mod med_gait_analysis;
+pub mod med_seizure_detect;
+
+// ── Category 2: Security & Safety (ADR-041, event IDs 200-299) ──────────────
+pub mod sec_perimeter_breach;
+pub mod sec_weapon_detect;
+pub mod sec_tailgating;
+pub mod sec_loitering;
+pub mod sec_panic_motion;
+
+// ── Category 3: Smart Building (ADR-041, event IDs 300-399) ─────────────────
+pub mod bld_hvac_presence;
+pub mod bld_lighting_zones;
+pub mod bld_elevator_count;
+pub mod bld_meeting_room;
+pub mod bld_energy_audit;
+
+// ── Category 4: Retail & Hospitality (ADR-041, event IDs 400-499) ───────────
+pub mod ret_queue_length;
+pub mod ret_dwell_heatmap;
+pub mod ret_customer_flow;
+pub mod ret_table_turnover;
+pub mod ret_shelf_engagement;
+
+// ── Category 5: Industrial & Specialized (ADR-041, event IDs 500-599) ───────
+pub mod ind_forklift_proximity;
+pub mod ind_confined_space;
+pub mod ind_clean_room;
+pub mod ind_livestock_monitor;
+pub mod ind_structural_vibration;
+
 // ── Shared vendor utilities (ADR-041) ────────────────────────────────────────
 
 pub mod vendor_common;
@@ -91,13 +126,24 @@ pub mod qnt_interference_search;
 pub mod aut_psycho_symbolic;
 pub mod aut_self_healing_mesh;
 //
-// Exotic / Research (wdp-exo-*, event IDs 680-687)
+// Exotic / Research (wdp-exo-*, event IDs 600-699)
 pub mod exo_time_crystal;
 pub mod exo_hyperbolic_space;
+
+// ── Category 6: Exotic & Research (ADR-041, event IDs 600-699) ──────────────
+pub mod exo_dream_stage;
+pub mod exo_emotion_detect;
+pub mod exo_gesture_language;
+pub mod exo_music_conductor;
+pub mod exo_plant_growth;
+pub mod exo_ghost_hunter;
+pub mod exo_rain_detect;
+pub mod exo_breathing_sync;
 
 // ── Host API FFI bindings ────────────────────────────────────────────────────
 
 #[cfg(target_arch = "wasm32")]
+#[link(wasm_import_module = "csi")]
 extern "C" {
     #[link_name = "csi_get_phase"]
     pub fn host_get_phase(subcarrier: i32) -> f32;
@@ -147,7 +193,8 @@ extern "C" {
 ///   300-399: Smart Building (occupancy zones, HVAC, lighting)
 ///   400-499: Retail (foot traffic, dwell time)
 ///   500-599: Industrial (vibration, proximity)
-///   600-699: Exotic (time crystals 680-682, hyperbolic space 685-687)
+///   600-699: Exotic (dream stage 600-603, emotion 610-613, gesture lang 620-623,
+///            music conductor 630-634, time crystals 680-682, hyperbolic 685-687)
 ///   700-729: Vendor Signal Intelligence
 ///   730-759: Vendor Adaptive Learning
 ///   760-789: Vendor Spatial Reasoning
@@ -174,12 +221,177 @@ pub mod event_types {
     pub const INTRUSION_ALERT: i32 = 200;
     pub const INTRUSION_ZONE: i32 = 201;
 
+    // sec_perimeter_breach (210-213)
+    pub const PERIMETER_BREACH: i32 = 210;
+    pub const APPROACH_DETECTED: i32 = 211;
+    pub const DEPARTURE_DETECTED: i32 = 212;
+    pub const SEC_ZONE_TRANSITION: i32 = 213;
+
+    // sec_weapon_detect (220-222)
+    pub const METAL_ANOMALY: i32 = 220;
+    pub const WEAPON_ALERT: i32 = 221;
+    pub const CALIBRATION_NEEDED: i32 = 222;
+
+    // sec_tailgating (230-232)
+    pub const TAILGATE_DETECTED: i32 = 230;
+    pub const SINGLE_PASSAGE: i32 = 231;
+    pub const MULTI_PASSAGE: i32 = 232;
+
+    // sec_loitering (240-242)
+    pub const LOITERING_START: i32 = 240;
+    pub const LOITERING_ONGOING: i32 = 241;
+    pub const LOITERING_END: i32 = 242;
+
+    // sec_panic_motion (250-252)
+    pub const PANIC_DETECTED: i32 = 250;
+    pub const STRUGGLE_PATTERN: i32 = 251;
+    pub const FLEEING_DETECTED: i32 = 252;
+
     // ── Smart Building (300-399) ─────────────────────────────────────────
     pub const ZONE_OCCUPIED: i32 = 300;
     pub const ZONE_COUNT: i32 = 301;
     pub const ZONE_TRANSITION: i32 = 302;
 
+    // bld_hvac_presence (310-312)
+    pub const HVAC_OCCUPIED: i32 = 310;
+    pub const ACTIVITY_LEVEL: i32 = 311;
+    pub const DEPARTURE_COUNTDOWN: i32 = 312;
+
+    // bld_lighting_zones (320-322)
+    pub const LIGHT_ON: i32 = 320;
+    pub const LIGHT_DIM: i32 = 321;
+    pub const LIGHT_OFF: i32 = 322;
+
+    // bld_elevator_count (330-333)
+    pub const ELEVATOR_COUNT: i32 = 330;
+    pub const DOOR_OPEN: i32 = 331;
+    pub const DOOR_CLOSE: i32 = 332;
+    pub const OVERLOAD_WARNING: i32 = 333;
+
+    // bld_meeting_room (340-343)
+    pub const MEETING_START: i32 = 340;
+    pub const MEETING_END: i32 = 341;
+    pub const PEAK_HEADCOUNT: i32 = 342;
+    pub const ROOM_AVAILABLE: i32 = 343;
+
+    // bld_energy_audit (350-352)
+    pub const SCHEDULE_SUMMARY: i32 = 350;
+    pub const AFTER_HOURS_ALERT: i32 = 351;
+    pub const UTILIZATION_RATE: i32 = 352;
+
+    // ── Retail & Hospitality (400-499) ─────────────────────────────────────
+
+    // ret_queue_length (400-403)
+    pub const QUEUE_LENGTH: i32 = 400;
+    pub const WAIT_TIME_ESTIMATE: i32 = 401;
+    pub const SERVICE_RATE: i32 = 402;
+    pub const QUEUE_ALERT: i32 = 403;
+
+    // ret_dwell_heatmap (410-413)
+    pub const DWELL_ZONE_UPDATE: i32 = 410;
+    pub const HOT_ZONE: i32 = 411;
+    pub const COLD_ZONE: i32 = 412;
+    pub const SESSION_SUMMARY: i32 = 413;
+
+    // ret_customer_flow (420-423)
+    pub const INGRESS: i32 = 420;
+    pub const EGRESS: i32 = 421;
+    pub const NET_OCCUPANCY: i32 = 422;
+    pub const HOURLY_TRAFFIC: i32 = 423;
+
+    // ret_table_turnover (430-433)
+    pub const TABLE_SEATED: i32 = 430;
+    pub const TABLE_VACATED: i32 = 431;
+    pub const TABLE_AVAILABLE: i32 = 432;
+    pub const TURNOVER_RATE: i32 = 433;
+
+    // ret_shelf_engagement (440-443)
+    pub const SHELF_BROWSE: i32 = 440;
+    pub const SHELF_CONSIDER: i32 = 441;
+    pub const SHELF_ENGAGE: i32 = 442;
+    pub const REACH_DETECTED: i32 = 443;
+
+    // ── Industrial & Specialized (500-599) ────────────────────────────────
+
+    // ind_forklift_proximity (500-502)
+    pub const PROXIMITY_WARNING: i32 = 500;
+    pub const VEHICLE_DETECTED: i32 = 501;
+    pub const HUMAN_NEAR_VEHICLE: i32 = 502;
+
+    // ind_confined_space (510-514)
+    pub const WORKER_ENTRY: i32 = 510;
+    pub const WORKER_EXIT: i32 = 511;
+    pub const BREATHING_OK: i32 = 512;
+    pub const EXTRACTION_ALERT: i32 = 513;
+    pub const IMMOBILE_ALERT: i32 = 514;
+
+    // ind_clean_room (520-523)
+    pub const OCCUPANCY_COUNT: i32 = 520;
+    pub const OCCUPANCY_VIOLATION: i32 = 521;
+    pub const TURBULENT_MOTION: i32 = 522;
+    pub const COMPLIANCE_REPORT: i32 = 523;
+
+    // ind_livestock_monitor (530-533)
+    pub const ANIMAL_PRESENT: i32 = 530;
+    pub const ABNORMAL_STILLNESS: i32 = 531;
+    pub const LABORED_BREATHING: i32 = 532;
+    pub const ESCAPE_ALERT: i32 = 533;
+
+    // ind_structural_vibration (540-543)
+    pub const SEISMIC_DETECTED: i32 = 540;
+    pub const MECHANICAL_RESONANCE: i32 = 541;
+    pub const STRUCTURAL_DRIFT: i32 = 542;
+    pub const VIBRATION_SPECTRUM: i32 = 543;
+
     // ── Exotic / Research (600-699) ──────────────────────────────────────
+
+    // exo_dream_stage (600-603)
+    pub const SLEEP_STAGE: i32 = 600;
+    pub const SLEEP_QUALITY: i32 = 601;
+    pub const REM_EPISODE: i32 = 602;
+    pub const DEEP_SLEEP_RATIO: i32 = 603;
+
+    // exo_emotion_detect (610-613)
+    pub const AROUSAL_LEVEL: i32 = 610;
+    pub const STRESS_INDEX: i32 = 611;
+    pub const CALM_DETECTED: i32 = 612;
+    pub const AGITATION_DETECTED: i32 = 613;
+
+    // exo_gesture_language (620-623)
+    pub const LETTER_RECOGNIZED: i32 = 620;
+    pub const LETTER_CONFIDENCE: i32 = 621;
+    pub const WORD_BOUNDARY: i32 = 622;
+    pub const GESTURE_REJECTED: i32 = 623;
+
+    // exo_music_conductor (630-634)
+    pub const CONDUCTOR_BPM: i32 = 630;
+    pub const BEAT_POSITION: i32 = 631;
+    pub const DYNAMIC_LEVEL: i32 = 632;
+    pub const GESTURE_CUTOFF: i32 = 633;
+    pub const GESTURE_FERMATA: i32 = 634;
+
+    // exo_plant_growth (640-643)
+    pub const GROWTH_RATE: i32 = 640;
+    pub const CIRCADIAN_PHASE: i32 = 641;
+    pub const WILT_DETECTED: i32 = 642;
+    pub const WATERING_EVENT: i32 = 643;
+
+    // exo_ghost_hunter (650-653)
+    pub const EXO_ANOMALY_DETECTED: i32 = 650;
+    pub const EXO_ANOMALY_CLASS: i32 = 651;
+    pub const HIDDEN_PRESENCE: i32 = 652;
+    pub const ENVIRONMENTAL_DRIFT: i32 = 653;
+
+    // exo_rain_detect (660-662)
+    pub const RAIN_ONSET: i32 = 660;
+    pub const RAIN_INTENSITY: i32 = 661;
+    pub const RAIN_CESSATION: i32 = 662;
+
+    // exo_breathing_sync (670-673)
+    pub const SYNC_DETECTED: i32 = 670;
+    pub const SYNC_PAIR_COUNT: i32 = 671;
+    pub const GROUP_COHERENCE: i32 = 672;
+    pub const SYNC_LOST: i32 = 673;
 
     // exo_time_crystal (680-682)
     pub const CRYSTAL_DETECTED: i32 = 680;
