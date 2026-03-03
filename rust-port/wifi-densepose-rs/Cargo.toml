@@ -17,6 +17,12 @@ members = [
     "crates/wifi-densepose-vitals",
     "crates/wifi-densepose-ruvector",
 ]
+# ADR-040: WASM edge crate targets wasm32-unknown-unknown (no_std),
+# excluded from workspace to avoid breaking `cargo test --workspace`.
+# Build separately: cargo build -p wifi-densepose-wasm-edge --target wasm32-unknown-unknown --release
+exclude = [
+    "crates/wifi-densepose-wasm-edge",
+]
 
 [workspace.package]
 version = "0.3.0"

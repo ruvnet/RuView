@@ -1,4 +1,4 @@
-# π RuView: WiFi DensePose:  
+# π RuView
 
 **See through walls with WiFi.** No cameras. No wearables. Just radio waves.
 
@@ -6,7 +6,7 @@ WiFi DensePose turns commodity WiFi signals into real-time human pose estimation
 
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests: 1100+](https://img.shields.io/badge/tests-1100%2B-brightgreen.svg)](https://github.com/ruvnet/wifi-densepose)
+[![Tests: 1300+](https://img.shields.io/badge/tests-1300%2B-brightgreen.svg)](https://github.com/ruvnet/wifi-densepose)
 [![Docker: 132 MB](https://img.shields.io/badge/docker-132%20MB-blue.svg)](https://hub.docker.com/r/ruvnet/wifi-densepose)
 [![Vital Signs](https://img.shields.io/badge/vital%20signs-breathing%20%2B%20heartbeat-red.svg)](#vital-sign-detection)
 [![ESP32 Ready](https://img.shields.io/badge/ESP32--S3-CSI%20streaming-purple.svg)](#esp32-s3-hardware-pipeline)
@@ -50,7 +50,7 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 | [User Guide](docs/user-guide.md) | Step-by-step guide: installation, first run, API usage, hardware setup, training |
 | [WiFi-Mat User Guide](docs/wifi-mat-user-guide.md) | Disaster response module: search & rescue, START triage |
 | [Build Guide](docs/build-guide.md) | Building from source (Rust and Python) |
-| [Architecture Decisions](docs/adr/) | 33 ADRs covering signal processing, training, hardware, security, domain generalization, multistatic sensing, CRV signal-line integration |
+| [Architecture Decisions](docs/adr/) | 41 ADRs covering signal processing, training, hardware, security, domain generalization, multistatic sensing, CRV signal-line integration, edge intelligence |
 | [DDD Domain Model](docs/ddd/ruvsense-domain-model.md) | RuvSense bounded contexts, aggregates, domain events, and ubiquitous language |
 
 ---
@@ -74,8 +74,8 @@ See people, breathing, and heartbeats through walls — using only WiFi signals 
 | 👥 | **Multi-Person** | Tracks multiple people simultaneously, each with independent pose and vitals — no hard software limit (physics: ~3-5 per AP with 56 subcarriers, more with multi-AP) |
 | 🧱 | **Through-Wall** | WiFi passes through walls, furniture, and debris — works where cameras cannot |
 | 🚑 | **Disaster Response** | Detects trapped survivors through rubble and classifies injury severity (START triage) |
-| 📡 | **Multistatic Mesh** | 4-6 ESP32 nodes fuse 12+ TX-RX links for 360-degree coverage, <30mm jitter, zero identity swaps ([ADR-029](docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md)) |
-| 🌐 | **Persistent Field Model** | Room eigenstructure via SVD enables RF tomography, drift detection, intention prediction, and adversarial detection ([ADR-030](docs/adr/ADR-030-ruvsense-persistent-field-model.md)) |
+| 📡 | **Multistatic Mesh** | 4-6 low-cost sensor nodes work together, combining 12+ overlapping signal paths for full 360-degree room coverage with sub-inch accuracy and no person mix-ups ([ADR-029](docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md)) |
+| 🌐 | **Persistent Field Model** | The system learns the RF signature of each room — then subtracts the room to isolate human motion, detect drift over days, predict intent before movement starts, and flag spoofing attempts ([ADR-030](docs/adr/ADR-030-ruvsense-persistent-field-model.md)) |
 
 ### Intelligence
 
@@ -86,9 +86,9 @@ The system learns on its own and gets smarter over time — no hand-tuning, no l
 | 🧠 | **Self-Learning** | Teaches itself from raw WiFi data — no labeled training sets, no cameras needed to bootstrap ([ADR-024](docs/adr/ADR-024-contrastive-csi-embedding-model.md)) |
 | 🎯 | **AI Signal Processing** | Attention networks, graph algorithms, and smart compression replace hand-tuned thresholds — adapts to each room automatically ([RuVector](https://github.com/ruvnet/ruvector)) |
 | 🌍 | **Works Everywhere** | Train once, deploy in any room — adversarial domain generalization strips environment bias so models transfer across rooms, buildings, and hardware ([ADR-027](docs/adr/ADR-027-cross-environment-domain-generalization.md)) |
-| 👁️ | **Cross-Viewpoint Fusion** | Learned attention fuses multiple viewpoints with geometric bias — reduces body occlusion and depth ambiguity that physics prevents any single sensor from solving ([ADR-031](docs/adr/ADR-031-ruview-sensing-first-rf-mode.md)) |
-| 🔮 | **Signal-Line Protocol** | `ruvector-crv` 6-stage CRV pipeline maps CSI sensing to Poincare ball embeddings, GNN topology, SNN temporal encoding, and MinCut partitioning ([ADR-033](docs/adr/ADR-033-crv-signal-line-sensing-integration.md)) |
-| 🔒 | **QUIC Mesh Security** | `midstreamer-quic` TLS 1.3 AEAD transport with HMAC-authenticated beacons, SipHash frame integrity, replay protection, and connection migration ([ADR-032](docs/adr/ADR-032-multistatic-mesh-security-hardening.md)) |
+| 👁️ | **Cross-Viewpoint Fusion** | AI combines what each sensor sees from its own angle — fills in blind spots and depth ambiguity that no single viewpoint can resolve on its own ([ADR-031](docs/adr/ADR-031-ruview-sensing-first-rf-mode.md)) |
+| 🔮 | **Signal-Line Protocol** | A 6-stage processing pipeline transforms raw WiFi signals into structured body representations — from signal cleanup through graph-based spatial reasoning to final pose output ([ADR-033](docs/adr/ADR-033-crv-signal-line-sensing-integration.md)) |
+| 🔒 | **QUIC Mesh Security** | All sensor-to-sensor communication is encrypted end-to-end with tamper detection, replay protection, and seamless reconnection if a node moves or drops offline ([ADR-032](docs/adr/ADR-032-multistatic-mesh-security-hardening.md)) |
 
 ### Performance & Deployment
 
@@ -150,33 +150,33 @@ WiFi sensing works anywhere WiFi exists. No new hardware in most cases — just 
 <details>
 <summary><strong>🏥 Everyday</strong> — Healthcare, retail, office, hospitality (commodity WiFi)</summary>
 
-| Use Case | What It Does | Hardware | Key Metric |
-|----------|-------------|----------|------------|
-| **Elderly care / assisted living** | Fall detection, nighttime activity monitoring, breathing rate during sleep — no wearable compliance needed | 1 ESP32-S3 per room ($8) | Fall alert <2s |
-| **Hospital patient monitoring** | Continuous breathing + heart rate for non-critical beds without wired sensors; nurse alert on anomaly | 1-2 APs per ward | Breathing: 6-30 BPM |
-| **Emergency room triage** | Automated occupancy count + wait-time estimation; detect patient distress (abnormal breathing) in waiting areas | Existing hospital WiFi | Occupancy accuracy >95% |
-| **Retail occupancy & flow** | Real-time foot traffic, dwell time by zone, queue length — no cameras, no opt-in, GDPR-friendly | Existing store WiFi + 1 ESP32 | Dwell resolution ~1m |
-| **Office space utilization** | Which desks/rooms are actually occupied, meeting room no-shows, HVAC optimization based on real presence | Existing enterprise WiFi | Presence latency <1s |
-| **Hotel & hospitality** | Room occupancy without door sensors, minibar/bathroom usage patterns, energy savings on empty rooms | Existing hotel WiFi | 15-30% HVAC savings |
-| **Restaurants & food service** | Table turnover tracking, kitchen staff presence, restroom occupancy displays — no cameras in dining areas | Existing WiFi | Queue wait ±30s |
-| **Parking garages** | Pedestrian presence in stairwells and elevators where cameras have blind spots; security alert if someone lingers | Existing WiFi | Through-concrete walls |
+| Use Case | What It Does | Hardware | Key Metric | Edge Module |
+|----------|-------------|----------|------------|-------------|
+| **Elderly care / assisted living** | Fall detection, nighttime activity monitoring, breathing rate during sleep — no wearable compliance needed | 1 ESP32-S3 per room ($8) | Fall alert <2s | [Sleep Apnea](docs/adr/ADR-041-wasm-module-collection.md#category-1-medical--health-event-ids-100199), [Gait Analysis](docs/adr/ADR-041-wasm-module-collection.md#category-1-medical--health-event-ids-100199) |
+| **Hospital patient monitoring** | Continuous breathing + heart rate for non-critical beds without wired sensors; nurse alert on anomaly | 1-2 APs per ward | Breathing: 6-30 BPM | [Respiratory Distress](docs/adr/ADR-041-wasm-module-collection.md#category-1-medical--health-event-ids-100199), [Cardiac Arrhythmia](docs/adr/ADR-041-wasm-module-collection.md#category-1-medical--health-event-ids-100199) |
+| **Emergency room triage** | Automated occupancy count + wait-time estimation; detect patient distress (abnormal breathing) in waiting areas | Existing hospital WiFi | Occupancy accuracy >95% | [Queue Length](docs/adr/ADR-041-wasm-module-collection.md#category-4-retail--hospitality-event-ids-400499), [Panic Motion](docs/adr/ADR-041-wasm-module-collection.md#category-2-security--safety-event-ids-200299) |
+| **Retail occupancy & flow** | Real-time foot traffic, dwell time by zone, queue length — no cameras, no opt-in, GDPR-friendly | Existing store WiFi + 1 ESP32 | Dwell resolution ~1m | [Customer Flow](docs/adr/ADR-041-wasm-module-collection.md#category-4-retail--hospitality-event-ids-400499), [Dwell Heatmap](docs/adr/ADR-041-wasm-module-collection.md#category-4-retail--hospitality-event-ids-400499) |
+| **Office space utilization** | Which desks/rooms are actually occupied, meeting room no-shows, HVAC optimization based on real presence | Existing enterprise WiFi | Presence latency <1s | [Meeting Room](docs/adr/ADR-041-wasm-module-collection.md#category-3-smart-building-event-ids-300399), [HVAC Presence](docs/adr/ADR-041-wasm-module-collection.md#category-3-smart-building-event-ids-300399) |
+| **Hotel & hospitality** | Room occupancy without door sensors, minibar/bathroom usage patterns, energy savings on empty rooms | Existing hotel WiFi | 15-30% HVAC savings | [Energy Audit](docs/adr/ADR-041-wasm-module-collection.md#category-3-smart-building-event-ids-300399), [Lighting Zones](docs/adr/ADR-041-wasm-module-collection.md#category-3-smart-building-event-ids-300399) |
+| **Restaurants & food service** | Table turnover tracking, kitchen staff presence, restroom occupancy displays — no cameras in dining areas | Existing WiFi | Queue wait ±30s | [Table Turnover](docs/adr/ADR-041-wasm-module-collection.md#category-4-retail--hospitality-event-ids-400499), [Queue Length](docs/adr/ADR-041-wasm-module-collection.md#category-4-retail--hospitality-event-ids-400499) |
+| **Parking garages** | Pedestrian presence in stairwells and elevators where cameras have blind spots; security alert if someone lingers | Existing WiFi | Through-concrete walls | [Loitering](docs/adr/ADR-041-wasm-module-collection.md#category-2-security--safety-event-ids-200299), [Elevator Count](docs/adr/ADR-041-wasm-module-collection.md#category-3-smart-building-event-ids-300399) |
 
 </details>
 
 <details>
 <summary><strong>🏟️ Specialized</strong> — Events, fitness, education, civic (CSI-capable hardware)</summary>
 
-| Use Case | What It Does | Hardware | Key Metric |
-|----------|-------------|----------|------------|
-| **Smart home automation** | Room-level presence triggers (lights, HVAC, music) that work through walls — no dead zones, no motion-sensor timeouts | 2-3 ESP32-S3 nodes ($24) | Through-wall range ~5m |
-| **Fitness & sports** | Rep counting, posture correction, breathing cadence during exercise — no wearable, no camera in locker rooms | 3+ ESP32-S3 mesh | Pose: 17 keypoints |
-| **Childcare & schools** | Naptime breathing monitoring, playground headcount, restricted-area alerts — privacy-safe for minors | 2-4 ESP32-S3 per zone | Breathing: ±1 BPM |
-| **Event venues & concerts** | Crowd density mapping, crush-risk detection via breathing compression, emergency evacuation flow tracking | Multi-AP mesh (4-8 APs) | Density per m² |
-| **Stadiums & arenas** | Section-level occupancy for dynamic pricing, concession staffing, emergency egress flow modeling | Enterprise AP grid | 15-20 per AP mesh |
-| **Houses of worship** | Attendance counting without facial recognition — privacy-sensitive congregations, multi-room campus tracking | Existing WiFi | Zone-level accuracy |
-| **Warehouse & logistics** | Worker safety zones, forklift proximity alerts, occupancy in hazardous areas — works through shelving and pallets | Industrial AP mesh | Alert latency <500ms |
-| **Civic infrastructure** | Public restroom occupancy (no cameras possible), subway platform crowding, shelter headcount during emergencies | Municipal WiFi + ESP32 | Real-time headcount |
-| **Museums & galleries** | Visitor flow heatmaps, exhibit dwell time, crowd bottleneck alerts — no cameras near artwork (flash/theft risk) | Existing WiFi | Zone dwell ±5s |
+| Use Case | What It Does | Hardware | Key Metric | Edge Module |
+|----------|-------------|----------|------------|-------------|
+| **Smart home automation** | Room-level presence triggers (lights, HVAC, music) that work through walls — no dead zones, no motion-sensor timeouts | 2-3 ESP32-S3 nodes ($24) | Through-wall range ~5m | [HVAC Presence](docs/adr/ADR-041-wasm-module-collection.md#category-3-smart-building-event-ids-300399), [Lighting Zones](docs/adr/ADR-041-wasm-module-collection.md#category-3-smart-building-event-ids-300399) |
+| **Fitness & sports** | Rep counting, posture correction, breathing cadence during exercise — no wearable, no camera in locker rooms | 3+ ESP32-S3 mesh | Pose: 17 keypoints | [Breathing Sync](docs/adr/ADR-041-wasm-module-collection.md#category-6-exotic--research-event-ids-600699), [Gait Analysis](docs/adr/ADR-041-wasm-module-collection.md#category-1-medical--health-event-ids-100199) |
+| **Childcare & schools** | Naptime breathing monitoring, playground headcount, restricted-area alerts — privacy-safe for minors | 2-4 ESP32-S3 per zone | Breathing: ±1 BPM | [Sleep Apnea](docs/adr/ADR-041-wasm-module-collection.md#category-1-medical--health-event-ids-100199), [Perimeter Breach](docs/adr/ADR-041-wasm-module-collection.md#category-2-security--safety-event-ids-200299) |
+| **Event venues & concerts** | Crowd density mapping, crush-risk detection via breathing compression, emergency evacuation flow tracking | Multi-AP mesh (4-8 APs) | Density per m² | [Customer Flow](docs/adr/ADR-041-wasm-module-collection.md#category-4-retail--hospitality-event-ids-400499), [Panic Motion](docs/adr/ADR-041-wasm-module-collection.md#category-2-security--safety-event-ids-200299) |
+| **Stadiums & arenas** | Section-level occupancy for dynamic pricing, concession staffing, emergency egress flow modeling | Enterprise AP grid | 15-20 per AP mesh | [Dwell Heatmap](docs/adr/ADR-041-wasm-module-collection.md#category-4-retail--hospitality-event-ids-400499), [Queue Length](docs/adr/ADR-041-wasm-module-collection.md#category-4-retail--hospitality-event-ids-400499) |
+| **Houses of worship** | Attendance counting without facial recognition — privacy-sensitive congregations, multi-room campus tracking | Existing WiFi | Zone-level accuracy | [Elevator Count](docs/adr/ADR-041-wasm-module-collection.md#category-3-smart-building-event-ids-300399), [Energy Audit](docs/adr/ADR-041-wasm-module-collection.md#category-3-smart-building-event-ids-300399) |
+| **Warehouse & logistics** | Worker safety zones, forklift proximity alerts, occupancy in hazardous areas — works through shelving and pallets | Industrial AP mesh | Alert latency <500ms | [Forklift Proximity](docs/adr/ADR-041-wasm-module-collection.md#category-5-industrial--specialized-event-ids-500599), [Confined Space](docs/adr/ADR-041-wasm-module-collection.md#category-5-industrial--specialized-event-ids-500599) |
+| **Civic infrastructure** | Public restroom occupancy (no cameras possible), subway platform crowding, shelter headcount during emergencies | Municipal WiFi + ESP32 | Real-time headcount | [Customer Flow](docs/adr/ADR-041-wasm-module-collection.md#category-4-retail--hospitality-event-ids-400499), [Loitering](docs/adr/ADR-041-wasm-module-collection.md#category-2-security--safety-event-ids-200299) |
+| **Museums & galleries** | Visitor flow heatmaps, exhibit dwell time, crowd bottleneck alerts — no cameras near artwork (flash/theft risk) | Existing WiFi | Zone dwell ±5s | [Dwell Heatmap](docs/adr/ADR-041-wasm-module-collection.md#category-4-retail--hospitality-event-ids-400499), [Shelf Engagement](docs/adr/ADR-041-wasm-module-collection.md#category-4-retail--hospitality-event-ids-400499) |
 
 </details>
 
@@ -185,16 +185,16 @@ WiFi sensing works anywhere WiFi exists. No new hardware in most cases — just 
 
 WiFi sensing gives robots and autonomous systems a spatial awareness layer that works where LIDAR and cameras fail — through dust, smoke, fog, and around corners. The CSI signal field acts as a "sixth sense" for detecting humans in the environment without requiring line-of-sight.
 
-| Use Case | What It Does | Hardware | Key Metric |
-|----------|-------------|----------|------------|
-| **Cobot safety zones** | Detect human presence near collaborative robots — auto-slow or stop before contact, even behind obstructions | 2-3 ESP32-S3 per cell | Presence latency <100ms |
-| **Warehouse AMR navigation** | Autonomous mobile robots sense humans around blind corners, through shelving racks — no LIDAR occlusion | ESP32 mesh along aisles | Through-shelf detection |
-| **Android / humanoid spatial awareness** | Ambient human pose sensing for social robots — detect gestures, approach direction, and personal space without cameras always on | Onboard ESP32-S3 module | 17-keypoint pose |
-| **Manufacturing line monitoring** | Worker presence at each station, ergonomic posture alerts, headcount for shift compliance — works through equipment | Industrial AP per zone | Pose + breathing |
-| **Construction site safety** | Exclusion zone enforcement around heavy machinery, fall detection from scaffolding, personnel headcount | Ruggedized ESP32 mesh | Alert <2s, through-dust |
-| **Agricultural robotics** | Detect farm workers near autonomous harvesters in dusty/foggy field conditions where cameras are unreliable | Weatherproof ESP32 nodes | Range ~10m open field |
-| **Drone landing zones** | Verify landing area is clear of humans — WiFi sensing works in rain, dust, and low light where downward cameras fail | Ground ESP32 nodes | Presence: >95% accuracy |
-| **Clean room monitoring** | Personnel tracking without cameras (particle contamination risk from camera fans) — gown compliance via pose | Existing cleanroom WiFi | No particulate emission |
+| Use Case | What It Does | Hardware | Key Metric | Edge Module |
+|----------|-------------|----------|------------|-------------|
+| **Cobot safety zones** | Detect human presence near collaborative robots — auto-slow or stop before contact, even behind obstructions | 2-3 ESP32-S3 per cell | Presence latency <100ms | [Forklift Proximity](docs/adr/ADR-041-wasm-module-collection.md#category-5-industrial--specialized-event-ids-500599), [Perimeter Breach](docs/adr/ADR-041-wasm-module-collection.md#category-2-security--safety-event-ids-200299) |
+| **Warehouse AMR navigation** | Autonomous mobile robots sense humans around blind corners, through shelving racks — no LIDAR occlusion | ESP32 mesh along aisles | Through-shelf detection | [Forklift Proximity](docs/adr/ADR-041-wasm-module-collection.md#category-5-industrial--specialized-event-ids-500599), [Loitering](docs/adr/ADR-041-wasm-module-collection.md#category-2-security--safety-event-ids-200299) |
+| **Android / humanoid spatial awareness** | Ambient human pose sensing for social robots — detect gestures, approach direction, and personal space without cameras always on | Onboard ESP32-S3 module | 17-keypoint pose | [Gesture Language](docs/adr/ADR-041-wasm-module-collection.md#category-6-exotic--research-event-ids-600699), [Emotion Detection](docs/adr/ADR-041-wasm-module-collection.md#category-6-exotic--research-event-ids-600699) |
+| **Manufacturing line monitoring** | Worker presence at each station, ergonomic posture alerts, headcount for shift compliance — works through equipment | Industrial AP per zone | Pose + breathing | [Confined Space](docs/adr/ADR-041-wasm-module-collection.md#category-5-industrial--specialized-event-ids-500599), [Gait Analysis](docs/adr/ADR-041-wasm-module-collection.md#category-1-medical--health-event-ids-100199) |
+| **Construction site safety** | Exclusion zone enforcement around heavy machinery, fall detection from scaffolding, personnel headcount | Ruggedized ESP32 mesh | Alert <2s, through-dust | [Panic Motion](docs/adr/ADR-041-wasm-module-collection.md#category-2-security--safety-event-ids-200299), [Structural Vibration](docs/adr/ADR-041-wasm-module-collection.md#category-5-industrial--specialized-event-ids-500599) |
+| **Agricultural robotics** | Detect farm workers near autonomous harvesters in dusty/foggy field conditions where cameras are unreliable | Weatherproof ESP32 nodes | Range ~10m open field | [Forklift Proximity](docs/adr/ADR-041-wasm-module-collection.md#category-5-industrial--specialized-event-ids-500599), [Rain Detection](docs/adr/ADR-041-wasm-module-collection.md#category-6-exotic--research-event-ids-600699) |
+| **Drone landing zones** | Verify landing area is clear of humans — WiFi sensing works in rain, dust, and low light where downward cameras fail | Ground ESP32 nodes | Presence: >95% accuracy | [Perimeter Breach](docs/adr/ADR-041-wasm-module-collection.md#category-2-security--safety-event-ids-200299), [Tailgating](docs/adr/ADR-041-wasm-module-collection.md#category-2-security--safety-event-ids-200299) |
+| **Clean room monitoring** | Personnel tracking without cameras (particle contamination risk from camera fans) — gown compliance via pose | Existing cleanroom WiFi | No particulate emission | [Clean Room](docs/adr/ADR-041-wasm-module-collection.md#category-5-industrial--specialized-event-ids-500599), [Livestock Monitor](docs/adr/ADR-041-wasm-module-collection.md#category-5-industrial--specialized-event-ids-500599) |
 
 </details>
 
@@ -203,16 +203,186 @@ WiFi sensing gives robots and autonomous systems a spatial awareness layer that 
 
 These scenarios exploit WiFi's ability to penetrate solid materials — concrete, rubble, earth — where no optical or infrared sensor can reach. The WiFi-Mat disaster module (ADR-001) is specifically designed for this tier.
 
-| Use Case | What It Does | Hardware | Key Metric |
-|----------|-------------|----------|------------|
-| **Search & rescue (WiFi-Mat)** | Detect survivors through rubble/debris via breathing signature, START triage color classification, 3D localization | Portable ESP32 mesh + laptop | Through 30cm concrete |
-| **Firefighting** | Locate occupants through smoke and walls before entry; breathing detection confirms life signs remotely | Portable mesh on truck | Works in zero visibility |
-| **Prison & secure facilities** | Cell occupancy verification, distress detection (abnormal vitals), perimeter sensing — no camera blind spots | Dedicated AP infrastructure | 24/7 vital signs |
-| **Military / tactical** | Through-wall personnel detection, room clearing confirmation, hostage vital signs at standoff distance | Directional WiFi + custom FW | Range: 5m through wall |
-| **Border & perimeter security** | Detect human presence in tunnels, behind fences, in vehicles — passive sensing, no active illumination to reveal position | Concealed ESP32 mesh | Passive / covert |
-| **Mining & underground** | Worker presence in tunnels where GPS/cameras fail, breathing detection after collapse, headcount at safety points | Ruggedized ESP32 mesh | Through rock/earth |
-| **Maritime & naval** | Below-deck personnel tracking through steel bulkheads (limited range, requires tuning), man-overboard detection | Ship WiFi + ESP32 | Through 1-2 bulkheads |
-| **Wildlife research** | Non-invasive animal activity monitoring in enclosures or dens — no light pollution, no visual disturbance | Weatherproof ESP32 nodes | Zero light emission |
+| Use Case | What It Does | Hardware | Key Metric | Edge Module |
+|----------|-------------|----------|------------|-------------|
+| **Search & rescue (WiFi-Mat)** | Detect survivors through rubble/debris via breathing signature, START triage color classification, 3D localization | Portable ESP32 mesh + laptop | Through 30cm concrete | [Respiratory Distress](docs/adr/ADR-041-wasm-module-collection.md#category-1-medical--health-event-ids-100199), [Seizure Detection](docs/adr/ADR-041-wasm-module-collection.md#category-1-medical--health-event-ids-100199) |
+| **Firefighting** | Locate occupants through smoke and walls before entry; breathing detection confirms life signs remotely | Portable mesh on truck | Works in zero visibility | [Sleep Apnea](docs/adr/ADR-041-wasm-module-collection.md#category-1-medical--health-event-ids-100199), [Panic Motion](docs/adr/ADR-041-wasm-module-collection.md#category-2-security--safety-event-ids-200299) |
+| **Prison & secure facilities** | Cell occupancy verification, distress detection (abnormal vitals), perimeter sensing — no camera blind spots | Dedicated AP infrastructure | 24/7 vital signs | [Cardiac Arrhythmia](docs/adr/ADR-041-wasm-module-collection.md#category-1-medical--health-event-ids-100199), [Loitering](docs/adr/ADR-041-wasm-module-collection.md#category-2-security--safety-event-ids-200299) |
+| **Military / tactical** | Through-wall personnel detection, room clearing confirmation, hostage vital signs at standoff distance | Directional WiFi + custom FW | Range: 5m through wall | [Perimeter Breach](docs/adr/ADR-041-wasm-module-collection.md#category-2-security--safety-event-ids-200299), [Weapon Detection](docs/adr/ADR-041-wasm-module-collection.md#category-2-security--safety-event-ids-200299) |
+| **Border & perimeter security** | Detect human presence in tunnels, behind fences, in vehicles — passive sensing, no active illumination to reveal position | Concealed ESP32 mesh | Passive / covert | [Perimeter Breach](docs/adr/ADR-041-wasm-module-collection.md#category-2-security--safety-event-ids-200299), [Tailgating](docs/adr/ADR-041-wasm-module-collection.md#category-2-security--safety-event-ids-200299) |
+| **Mining & underground** | Worker presence in tunnels where GPS/cameras fail, breathing detection after collapse, headcount at safety points | Ruggedized ESP32 mesh | Through rock/earth | [Confined Space](docs/adr/ADR-041-wasm-module-collection.md#category-5-industrial--specialized-event-ids-500599), [Respiratory Distress](docs/adr/ADR-041-wasm-module-collection.md#category-1-medical--health-event-ids-100199) |
+| **Maritime & naval** | Below-deck personnel tracking through steel bulkheads (limited range, requires tuning), man-overboard detection | Ship WiFi + ESP32 | Through 1-2 bulkheads | [Structural Vibration](docs/adr/ADR-041-wasm-module-collection.md#category-5-industrial--specialized-event-ids-500599), [Panic Motion](docs/adr/ADR-041-wasm-module-collection.md#category-2-security--safety-event-ids-200299) |
+| **Wildlife research** | Non-invasive animal activity monitoring in enclosures or dens — no light pollution, no visual disturbance | Weatherproof ESP32 nodes | Zero light emission | [Livestock Monitor](docs/adr/ADR-041-wasm-module-collection.md#category-5-industrial--specialized-event-ids-500599), [Dream Stage](docs/adr/ADR-041-wasm-module-collection.md#category-6-exotic--research-event-ids-600699) |
+
+</details>
+
+### Edge Intelligence ([ADR-041](docs/adr/ADR-041-wasm-module-collection.md))
+
+Small programs that run directly on the ESP32 sensor — no internet needed, no cloud fees, instant response. Each module is a tiny WASM file (5-30 KB) that you upload to the device over-the-air. It reads WiFi signal data and makes decisions locally in under 10 ms. [ADR-041](docs/adr/ADR-041-wasm-module-collection.md) defines 60 modules across 13 categories — all 60 are implemented with 609 tests passing.
+
+| | Category | Examples |
+|---|----------|---------|
+| 🏥 | [**Medical & Health**](docs/adr/ADR-041-wasm-module-collection.md#category-1-medical--health-event-ids-100199) | Sleep apnea detection, cardiac arrhythmia, gait analysis, seizure detection |
+| 🔐 | [**Security & Safety**](docs/adr/ADR-041-wasm-module-collection.md#category-2-security--safety-event-ids-200299) | Intrusion detection, perimeter breach, loitering, panic motion |
+| 🏢 | [**Smart Building**](docs/adr/ADR-041-wasm-module-collection.md#category-3-smart-building-event-ids-300399) | Zone occupancy, HVAC control, elevator counting, meeting room tracking |
+| 🛒 | [**Retail & Hospitality**](docs/adr/ADR-041-wasm-module-collection.md#category-4-retail--hospitality-event-ids-400499) | Queue length, dwell heatmaps, customer flow, table turnover |
+| 🏭 | [**Industrial**](docs/adr/ADR-041-wasm-module-collection.md#category-5-industrial--specialized-event-ids-500599) | Forklift proximity, confined space monitoring, structural vibration |
+| 🔮 | [**Exotic & Research**](docs/adr/ADR-041-wasm-module-collection.md#category-6-exotic--research-event-ids-600699) | Sleep staging, emotion detection, sign language, breathing sync |
+| 📡 | [**Signal Intelligence**](#edge-module-list) | Cleans and sharpens raw WiFi signals — focuses on important regions, filters noise, fills in missing data, and tracks which person is which |
+| 🧠 | [**Adaptive Learning**](#edge-module-list) | The sensor learns new gestures and patterns on its own over time — no cloud needed, remembers what it learned even after updates |
+| 🗺️ | [**Spatial Reasoning**](#edge-module-list) | Figures out where people are in a room, which zones matter most, and tracks movement across areas using graph-based spatial logic |
+| ⏱️ | [**Temporal Analysis**](#edge-module-list) | Learns daily routines, detects when patterns break (someone didn't get up), and verifies safety rules are being followed over time |
+| 🛡️ | [**AI Security**](#edge-module-list) | Detects signal replay attacks, WiFi jamming, injection attempts, and flags abnormal behavior that could indicate tampering |
+| ⚛️ | [**Quantum-Inspired**](#edge-module-list) | Uses quantum-inspired math to map room-wide signal coherence and search for optimal sensor configurations |
+| 🤖 | [**Autonomous & Exotic**](#edge-module-list) | Self-managing sensor mesh — auto-heals dropped nodes, plans its own actions, and explores experimental signal representations |
+
+All implemented modules are `no_std` Rust, share a [common utility library](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/vendor_common.rs), and talk to the host through a 12-function API. See the [complete implemented module list](#edge-module-list) below.
+
+<details id="edge-module-list">
+<summary><strong>🧩 Edge Intelligence — <a href="docs/adr/ADR-041-wasm-module-collection.md">All 60 Modules Implemented</a></strong> (ADR-041 complete)</summary>
+
+All 60 modules are implemented, tested (609 tests passing), and ready to deploy. They compile to `wasm32-unknown-unknown`, run on ESP32-S3 via WASM3, and share a [common utility library](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/vendor_common.rs). Source: [`crates/wifi-densepose-wasm-edge/src/`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/)
+
+**Core modules** (ADR-040 flagship + early implementations):
+
+| Module | File | What It Does |
+|--------|------|-------------|
+| Gesture Classifier | [`gesture.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/gesture.rs) | DTW template matching for hand gestures |
+| Coherence Filter | [`coherence.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/coherence.rs) | Phase coherence gating for signal quality |
+| Adversarial Detector | [`adversarial.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/adversarial.rs) | Detects physically impossible signal patterns |
+| Intrusion Detector | [`intrusion.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/intrusion.rs) | Human vs non-human motion classification |
+| Occupancy Counter | [`occupancy.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/occupancy.rs) | Zone-level person counting |
+| Vital Trend | [`vital_trend.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/vital_trend.rs) | Long-term breathing and heart rate trending |
+| RVF Parser | [`rvf.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/rvf.rs) | RVF container format parsing |
+
+**Vendor-integrated modules** (24 modules, ADR-041 Category 7):
+
+**📡 Signal Intelligence** — Real-time CSI analysis and feature extraction
+
+| Module | File | What It Does | Budget |
+|--------|------|-------------|--------|
+| Flash Attention | [`sig_flash_attention.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sig_flash_attention.rs) | Tiled attention over 8 subcarrier groups — finds spatial focus regions and entropy | S (<5ms) |
+| Coherence Gate | [`sig_coherence_gate.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sig_coherence_gate.rs) | Z-score phasor gating with hysteresis: Accept / PredictOnly / Reject / Recalibrate | L (<2ms) |
+| Temporal Compress | [`sig_temporal_compress.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sig_temporal_compress.rs) | 3-tier adaptive quantization (8-bit hot / 5-bit warm / 3-bit cold) | L (<2ms) |
+| Sparse Recovery | [`sig_sparse_recovery.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sig_sparse_recovery.rs) | ISTA L1 reconstruction for dropped subcarriers | H (<10ms) |
+| Person Match | [`sig_mincut_person_match.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sig_mincut_person_match.rs) | Hungarian-lite bipartite assignment for multi-person tracking | S (<5ms) |
+| Optimal Transport | [`sig_optimal_transport.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sig_optimal_transport.rs) | Sliced Wasserstein-1 distance with 4 projections | L (<2ms) |
+
+**🧠 Adaptive Learning** — On-device learning without cloud connectivity
+
+| Module | File | What It Does | Budget |
+|--------|------|-------------|--------|
+| DTW Gesture Learn | [`lrn_dtw_gesture_learn.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/lrn_dtw_gesture_learn.rs) | User-teachable gesture recognition — 3-rehearsal protocol, 16 templates | S (<5ms) |
+| Anomaly Attractor | [`lrn_anomaly_attractor.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/lrn_anomaly_attractor.rs) | 4D dynamical system attractor classification with Lyapunov exponents | H (<10ms) |
+| Meta Adapt | [`lrn_meta_adapt.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/lrn_meta_adapt.rs) | Hill-climbing self-optimization with safety rollback | L (<2ms) |
+| EWC Lifelong | [`lrn_ewc_lifelong.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/lrn_ewc_lifelong.rs) | Elastic Weight Consolidation — remembers past tasks while learning new ones | S (<5ms) |
+
+**🗺️ Spatial Reasoning** — Location, proximity, and influence mapping
+
+| Module | File | What It Does | Budget |
+|--------|------|-------------|--------|
+| PageRank Influence | [`spt_pagerank_influence.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/spt_pagerank_influence.rs) | 4x4 cross-correlation graph with power iteration PageRank | L (<2ms) |
+| Micro HNSW | [`spt_micro_hnsw.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/spt_micro_hnsw.rs) | 64-vector navigable small-world graph for nearest-neighbor search | S (<5ms) |
+| Spiking Tracker | [`spt_spiking_tracker.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/spt_spiking_tracker.rs) | 32 LIF neurons + 4 output zone neurons with STDP learning | S (<5ms) |
+
+**⏱️ Temporal Analysis** — Activity patterns, logic verification, autonomous planning
+
+| Module | File | What It Does | Budget |
+|--------|------|-------------|--------|
+| Pattern Sequence | [`tmp_pattern_sequence.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/tmp_pattern_sequence.rs) | Activity routine detection and deviation alerts | S (<5ms) |
+| Temporal Logic Guard | [`tmp_temporal_logic_guard.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/tmp_temporal_logic_guard.rs) | LTL formula verification on CSI event streams | S (<5ms) |
+| GOAP Autonomy | [`tmp_goap_autonomy.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/tmp_goap_autonomy.rs) | Goal-Oriented Action Planning for autonomous module management | S (<5ms) |
+
+**🛡️ AI Security** — Tamper detection and behavioral anomaly profiling
+
+| Module | File | What It Does | Budget |
+|--------|------|-------------|--------|
+| Prompt Shield | [`ais_prompt_shield.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ais_prompt_shield.rs) | FNV-1a replay detection, injection detection (10x amplitude), jamming (SNR) | L (<2ms) |
+| Behavioral Profiler | [`ais_behavioral_profiler.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ais_behavioral_profiler.rs) | 6D behavioral profile with Mahalanobis anomaly scoring | S (<5ms) |
+
+**⚛️ Quantum-Inspired** — Quantum computing metaphors applied to CSI analysis
+
+| Module | File | What It Does | Budget |
+|--------|------|-------------|--------|
+| Quantum Coherence | [`qnt_quantum_coherence.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/qnt_quantum_coherence.rs) | Bloch sphere mapping, Von Neumann entropy, decoherence detection | S (<5ms) |
+| Interference Search | [`qnt_interference_search.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/qnt_interference_search.rs) | 16 room-state hypotheses with Grover-inspired oracle + diffusion | S (<5ms) |
+
+**🤖 Autonomous Systems** — Self-governing and self-healing behaviors
+
+| Module | File | What It Does | Budget |
+|--------|------|-------------|--------|
+| Psycho-Symbolic | [`aut_psycho_symbolic.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/aut_psycho_symbolic.rs) | 16-rule forward-chaining knowledge base with contradiction detection | S (<5ms) |
+| Self-Healing Mesh | [`aut_self_healing_mesh.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/aut_self_healing_mesh.rs) | 8-node mesh with health tracking, degradation/recovery, coverage healing | S (<5ms) |
+
+**🔮 Exotic (Vendor)** — Novel mathematical models for CSI interpretation
+
+| Module | File | What It Does | Budget |
+|--------|------|-------------|--------|
+| Time Crystal | [`exo_time_crystal.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_time_crystal.rs) | Autocorrelation subharmonic detection in 256-frame history | S (<5ms) |
+| Hyperbolic Space | [`exo_hyperbolic_space.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_hyperbolic_space.rs) | Poincare ball embedding with 32 reference locations, hyperbolic distance | S (<5ms) |
+
+**🏥 Medical & Health** (Category 1) — Contactless health monitoring
+
+| Module | File | What It Does | Budget |
+|--------|------|-------------|--------|
+| Sleep Apnea | [`med_sleep_apnea.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/med_sleep_apnea.rs) | Detects breathing pauses during sleep | S (<5ms) |
+| Cardiac Arrhythmia | [`med_cardiac_arrhythmia.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/med_cardiac_arrhythmia.rs) | Monitors heart rate for irregular rhythms | S (<5ms) |
+| Respiratory Distress | [`med_respiratory_distress.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/med_respiratory_distress.rs) | Alerts on abnormal breathing patterns | S (<5ms) |
+| Gait Analysis | [`med_gait_analysis.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/med_gait_analysis.rs) | Tracks walking patterns and detects changes | S (<5ms) |
+| Seizure Detection | [`med_seizure_detect.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/med_seizure_detect.rs) | 6-state machine for tonic-clonic seizure recognition | S (<5ms) |
+
+**🔐 Security & Safety** (Category 2) — Perimeter and threat detection
+
+| Module | File | What It Does | Budget |
+|--------|------|-------------|--------|
+| Perimeter Breach | [`sec_perimeter_breach.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sec_perimeter_breach.rs) | Detects boundary crossings with approach/departure | S (<5ms) |
+| Weapon Detection | [`sec_weapon_detect.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sec_weapon_detect.rs) | Metal anomaly detection via CSI amplitude shifts | S (<5ms) |
+| Tailgating | [`sec_tailgating.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sec_tailgating.rs) | Detects unauthorized follow-through at access points | S (<5ms) |
+| Loitering | [`sec_loitering.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sec_loitering.rs) | Alerts when someone lingers too long in a zone | S (<5ms) |
+| Panic Motion | [`sec_panic_motion.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sec_panic_motion.rs) | Detects fleeing, struggling, or panic movement | S (<5ms) |
+
+**🏢 Smart Building** (Category 3) — Automation and energy efficiency
+
+| Module | File | What It Does | Budget |
+|--------|------|-------------|--------|
+| HVAC Presence | [`bld_hvac_presence.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/bld_hvac_presence.rs) | Occupancy-driven HVAC control with departure countdown | S (<5ms) |
+| Lighting Zones | [`bld_lighting_zones.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/bld_lighting_zones.rs) | Auto-dim/off lighting based on zone activity | S (<5ms) |
+| Elevator Count | [`bld_elevator_count.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/bld_elevator_count.rs) | Counts people entering/leaving with overload warning | S (<5ms) |
+| Meeting Room | [`bld_meeting_room.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/bld_meeting_room.rs) | Tracks meeting lifecycle: start, headcount, end, availability | S (<5ms) |
+| Energy Audit | [`bld_energy_audit.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/bld_energy_audit.rs) | Tracks after-hours usage and room utilization rates | S (<5ms) |
+
+**🛒 Retail & Hospitality** (Category 4) — Customer insights without cameras
+
+| Module | File | What It Does | Budget |
+|--------|------|-------------|--------|
+| Queue Length | [`ret_queue_length.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ret_queue_length.rs) | Estimates queue size and wait times | S (<5ms) |
+| Dwell Heatmap | [`ret_dwell_heatmap.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ret_dwell_heatmap.rs) | Shows where people spend time (hot/cold zones) | S (<5ms) |
+| Customer Flow | [`ret_customer_flow.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ret_customer_flow.rs) | Counts ins/outs and tracks net occupancy | S (<5ms) |
+| Table Turnover | [`ret_table_turnover.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ret_table_turnover.rs) | Restaurant table lifecycle: seated, dining, vacated | S (<5ms) |
+| Shelf Engagement | [`ret_shelf_engagement.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ret_shelf_engagement.rs) | Detects browsing, considering, and reaching for products | S (<5ms) |
+
+**🏭 Industrial & Specialized** (Category 5) — Safety and compliance
+
+| Module | File | What It Does | Budget |
+|--------|------|-------------|--------|
+| Forklift Proximity | [`ind_forklift_proximity.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ind_forklift_proximity.rs) | Warns when people get too close to vehicles | S (<5ms) |
+| Confined Space | [`ind_confined_space.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ind_confined_space.rs) | OSHA-compliant worker monitoring with extraction alerts | S (<5ms) |
+| Clean Room | [`ind_clean_room.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ind_clean_room.rs) | Occupancy limits and turbulent motion detection | S (<5ms) |
+| Livestock Monitor | [`ind_livestock_monitor.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ind_livestock_monitor.rs) | Animal presence, stillness, and escape alerts | S (<5ms) |
+| Structural Vibration | [`ind_structural_vibration.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ind_structural_vibration.rs) | Seismic events, mechanical resonance, structural drift | S (<5ms) |
+
+**🔮 Exotic & Research** (Category 6) — Experimental sensing applications
+
+| Module | File | What It Does | Budget |
+|--------|------|-------------|--------|
+| Dream Stage | [`exo_dream_stage.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_dream_stage.rs) | Contactless sleep stage classification (wake/light/deep/REM) | S (<5ms) |
+| Emotion Detection | [`exo_emotion_detect.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_emotion_detect.rs) | Arousal, stress, and calm detection from micro-movements | S (<5ms) |
+| Gesture Language | [`exo_gesture_language.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_gesture_language.rs) | Sign language letter recognition via WiFi | S (<5ms) |
+| Music Conductor | [`exo_music_conductor.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_music_conductor.rs) | Tempo and dynamic tracking from conducting gestures | S (<5ms) |
+| Plant Growth | [`exo_plant_growth.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_plant_growth.rs) | Monitors plant growth, circadian rhythms, wilt detection | S (<5ms) |
+| Ghost Hunter | [`exo_ghost_hunter.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_ghost_hunter.rs) | Environmental anomaly classification (draft/insect/wind/unknown) | S (<5ms) |
+| Rain Detection | [`exo_rain_detect.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_rain_detect.rs) | Detects rain onset, intensity, and cessation via signal scatter | S (<5ms) |
+| Breathing Sync | [`exo_breathing_sync.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_breathing_sync.rs) | Detects synchronized breathing between multiple people | S (<5ms) |
 
 </details>
 
@@ -295,224 +465,6 @@ cargo run -p wifi-densepose-sensing-server -- --model model.rvf --build-index en
 The self-learning system builds on the [AI Backbone (RuVector)](#ai-backbone-ruvector) signal-processing layer — attention, graph algorithms, and compression — adding contrastive learning on top.
 
 See [`docs/adr/ADR-024-contrastive-csi-embedding-model.md`](docs/adr/ADR-024-contrastive-csi-embedding-model.md) for full architectural details.
-
-</details>
-
-<details>
-<summary><a id="cross-environment-generalization-adr-027"></a><strong>🌍 Cross-Environment Generalization (ADR-027 — Project MERIDIAN)</strong> — Train once, deploy in any room without retraining</summary>
-
-WiFi pose models trained in one room lose 40-70% accuracy when moved to another — even in the same building. The model memorizes room-specific multipath patterns instead of learning human motion. MERIDIAN forces the network to forget which room it's in while retaining everything about how people move.
-
-**What it does in plain terms:**
-- Models trained in Room A work in Room B, C, D — without any retraining or calibration data
-- Handles different WiFi hardware (ESP32, Intel 5300, Atheros) with automatic chipset normalization
-- Knows where the WiFi transmitters are positioned and compensates for layout differences
-- Generates synthetic "virtual rooms" during training so the model sees thousands of environments
-- At deployment, adapts to a new room in seconds using a handful of unlabeled WiFi frames
-
-**Key Components**
-
-| What | How it works | Why it matters |
-|------|-------------|----------------|
-| **Gradient Reversal Layer** | An adversarial classifier tries to guess which room the signal came from; the main network is trained to fool it | Forces the model to discard room-specific shortcuts |
-| **Geometry Encoder (FiLM)** | Transmitter/receiver positions are Fourier-encoded and injected as scale+shift conditioning on every layer | The model knows *where* the hardware is, so it doesn't need to memorize layout |
-| **Hardware Normalizer** | Resamples any chipset's CSI to a canonical 56-subcarrier format with standardized amplitude | Intel 5300 and ESP32 data look identical to the model |
-| **Virtual Domain Augmentation** | Generates synthetic environments with random room scale, wall reflections, scatterers, and noise profiles | Training sees 1000s of rooms even with data from just 2-3 |
-| **Rapid Adaptation (TTT)** | Contrastive test-time training with LoRA weight generation from a few unlabeled frames | Zero-shot deployment — the model self-tunes on arrival |
-| **Cross-Domain Evaluator** | Leave-one-out evaluation across all training environments with per-environment PCK/OKS metrics | Proves generalization, not just memorization |
-
-**Architecture**
-
-```
-CSI Frame [any chipset]
-    │
-    ▼
-HardwareNormalizer ──→ canonical 56 subcarriers, N(0,1) amplitude
-    │
-    ▼
-CSI Encoder (existing) ──→ latent features
-    │
-    ├──→ Pose Head ──→ 17-joint pose (environment-invariant)
-    │
-    ├──→ Gradient Reversal Layer ──→ Domain Classifier (adversarial)
-    │         λ ramps 0→1 via cosine/exponential schedule
-    │
-    └──→ Geometry Encoder ──→ FiLM conditioning (scale + shift)
-              Fourier positional encoding → DeepSets → per-layer modulation
-```
-
-**Security hardening:**
-- Bounded calibration buffer (max 10,000 frames) prevents memory exhaustion
-- `adapt()` returns `Result<_, AdaptError>` — no panics on bad input
-- Atomic instance counter ensures unique weight initialization across threads
-- Division-by-zero guards on all augmentation parameters
-
-See [`docs/adr/ADR-027-cross-environment-domain-generalization.md`](docs/adr/ADR-027-cross-environment-domain-generalization.md) for full architectural details.
-
-</details>
-
----
-
-<details>
-<summary><strong>🔍 Independent Capability Audit (ADR-028)</strong> — 1,031 tests, SHA-256 proof, self-verifying witness bundle</summary>
-
-A [3-agent parallel audit](docs/adr/ADR-028-esp32-capability-audit.md) independently verified every claim in this repository — ESP32 hardware, signal processing, neural networks, training pipeline, deployment, and security. Results:
-
-```
-Rust tests:     1,031 passed, 0 failed
-Python proof:   VERDICT: PASS (SHA-256: 8c0680d7...)
-Bundle verify:  7/7 checks PASS
-```
-
-**33-row attestation matrix:** 31 capabilities verified YES, 2 not measured at audit time (benchmark throughput, Kubernetes deploy).
-
-**Verify it yourself** (no hardware needed):
-```bash
-# Run all tests
-cd rust-port/wifi-densepose-rs && cargo test --workspace --no-default-features
-
-# Run the deterministic proof
-python v1/data/proof/verify.py
-
-# Generate + verify the witness bundle
-bash scripts/generate-witness-bundle.sh
-cd dist/witness-bundle-ADR028-*/ && bash VERIFY.sh
-```
-
-| Document | What it contains |
-|----------|-----------------|
-| [ADR-028](docs/adr/ADR-028-esp32-capability-audit.md) | Full audit: ESP32 specs, signal algorithms, NN architectures, training phases, deployment infra |
-| [Witness Log](docs/WITNESS-LOG-028.md) | 11 reproducible verification steps + 33-row attestation matrix with evidence per row |
-| [`generate-witness-bundle.sh`](scripts/generate-witness-bundle.sh) | Creates self-contained tar.gz with test logs, proof output, firmware hashes, crate versions, VERIFY.sh |
-
-</details>
-
-<details>
-<summary><strong>📡 Multistatic Sensing (ADR-029/030/031 — Project RuvSense + RuView)</strong> — Multiple ESP32 nodes fuse viewpoints for production-grade pose, tracking, and exotic sensing</summary>
-
-A single WiFi receiver can track people, but has blind spots — limbs behind the torso are invisible, depth is ambiguous, and two people at similar range create overlapping signals. RuvSense solves this by coordinating multiple ESP32 nodes into a **multistatic mesh** where every node acts as both transmitter and receiver, creating N×(N-1) measurement links from N devices.
-
-**What it does in plain terms:**
-- 4 ESP32-S3 nodes ($48 total) provide 12 TX-RX measurement links covering 360 degrees
-- Each node hops across WiFi channels 1/6/11, tripling effective bandwidth from 20→60 MHz
-- Coherence gating rejects noisy frames automatically — no manual tuning, stable for days
-- Two-person tracking at 20 Hz with zero identity swaps over 10 minutes
-- The room itself becomes a persistent model — the system remembers, predicts, and explains
-
-**Three ADRs, one pipeline:**
-
-| ADR | Codename | What it adds |
-|-----|----------|-------------|
-| [ADR-029](docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md) | **RuvSense** | Channel hopping, TDM protocol, multi-node fusion, coherence gating, 17-keypoint Kalman tracker |
-| [ADR-030](docs/adr/ADR-030-ruvsense-persistent-field-model.md) | **RuvSense Field** | Room electromagnetic eigenstructure (SVD), RF tomography, longitudinal drift detection, intention prediction, gesture recognition, adversarial detection |
-| [ADR-031](docs/adr/ADR-031-ruview-sensing-first-rf-mode.md) | **RuView** | Cross-viewpoint attention with geometric bias, viewpoint diversity optimization, embedding-level fusion |
-
-**Architecture**
-
-```
-4x ESP32-S3 nodes ($48)     TDM: each transmits in turn, all others receive
-        │                    Channel hop: ch1→ch6→ch11 per dwell (50ms)
-        ▼
-Per-Node Signal Processing   Phase sanitize → Hampel → BVP → subcarrier select
-        │                    (ADR-014, unchanged per viewpoint)
-        ▼
-Multi-Band Frame Fusion      3 channels × 56 subcarriers = 168 virtual subcarriers
-        │                    Cross-channel phase alignment via NeumannSolver
-        ▼
-Multistatic Viewpoint Fusion  N nodes → attention-weighted fusion → single embedding
-        │                    Geometric bias from node placement angles
-        ▼
-Coherence Gate               Accept / PredictOnly / Reject / Recalibrate
-        │                    Prevents model drift, stable for days
-        ▼
-Persistent Field Model       SVD baseline → body = observation - environment
-        │                    RF tomography, drift detection, intention signals
-        ▼
-Pose Tracker + DensePose     17-keypoint Kalman, re-ID via AETHER embeddings
-                             Multi-person min-cut separation, zero ID swaps
-```
-
-**Seven Exotic Sensing Tiers (ADR-030)**
-
-| Tier | Capability | What it detects |
-|------|-----------|-----------------|
-| 1 | Field Normal Modes | Room electromagnetic eigenstructure via SVD |
-| 2 | Coarse RF Tomography | 3D occupancy volume from link attenuations |
-| 3 | Intention Lead Signals | Pre-movement prediction 200-500ms before action |
-| 4 | Longitudinal Biomechanics | Personal movement changes over days/weeks |
-| 5 | Cross-Room Continuity | Identity preserved across rooms without cameras |
-| 6 | Invisible Interaction | Multi-user gesture control through walls |
-| 7 | Adversarial Detection | Physically impossible signal identification |
-
-**Acceptance Test**
-
-| Metric | Threshold | What it proves |
-|--------|-----------|---------------|
-| Torso keypoint jitter | < 30mm RMS | Precision sufficient for applications |
-| Identity swaps | 0 over 10 minutes (12,000 frames) | Reliable multi-person tracking |
-| Update rate | 20 Hz (50ms cycle) | Real-time response |
-| Breathing SNR | > 10 dB at 3m | Small-motion sensitivity confirmed |
-
-**New Rust modules (9,000+ lines)**
-
-| Crate | New modules | Purpose |
-|-------|------------|---------|
-| `wifi-densepose-signal` | `ruvsense/` (10 modules) | Multiband fusion, phase alignment, multistatic fusion, coherence, field model, tomography, longitudinal drift, intention detection |
-| `wifi-densepose-ruvector` | `viewpoint/` (5 modules) | Cross-viewpoint attention with geometric bias, diversity index, coherence gating, fusion orchestrator |
-| `wifi-densepose-hardware` | `esp32/tdm.rs` | TDM sensing protocol, sync beacons, clock drift compensation |
-
-**Firmware extensions (C, backward-compatible)**
-
-| File | Addition |
-|------|---------|
-| `csi_collector.c` | Channel hop table, timer-driven hop, NDP injection stub |
-| `nvs_config.c` | 5 new NVS keys: hop_count, channel_list, dwell_ms, tdm_slot, tdm_node_count |
-
-**DDD Domain Model** — 6 bounded contexts: Multistatic Sensing, Coherence, Pose Tracking, Field Model, Cross-Room Identity, Adversarial Detection. Full specification: [`docs/ddd/ruvsense-domain-model.md`](docs/ddd/ruvsense-domain-model.md).
-
-See the ADR documents for full architectural details, GOAP integration plans, and research references.
-
-</details>
-
-<details>
-<summary><b>🔮 Signal-Line Protocol (CRV)</b></summary>
-
-### 6-Stage CSI Signal Line
-
-Maps the CRV (Coordinate Remote Viewing) signal-line methodology to WiFi CSI processing via `ruvector-crv`:
-
-| Stage | CRV Name | WiFi CSI Mapping | ruvector Component |
-|-------|----------|-----------------|-------------------|
-| I | Ideograms | Raw CSI gestalt (manmade/natural/movement/energy) | Poincare ball hyperbolic embeddings |
-| II | Sensory | Amplitude textures, phase patterns, frequency colors | Multi-head attention vectors |
-| III | Dimensional | AP mesh spatial topology, node geometry | GNN graph topology |
-| IV | Emotional/AOL | Coherence gating — signal vs noise separation | SNN temporal encoding |
-| V | Interrogation | Cross-stage probing — query pose against CSI history | Differentiable search |
-| VI | 3D Model | Composite person estimation, MinCut partitioning | Graph partitioning |
-
-**Cross-Session Convergence**: When multiple AP clusters observe the same person, CRV convergence analysis finds agreement in their signal embeddings — directly mapping to cross-room identity continuity.
-
-```rust
-use wifi_densepose_ruvector::crv::WifiCrvPipeline;
-
-let mut pipeline = WifiCrvPipeline::new(WifiCrvConfig::default());
-pipeline.create_session("room-a", "person-001")?;
-
-// Process CSI frames through 6-stage pipeline
-let result = pipeline.process_csi_frame("room-a", &amplitudes, &phases)?;
-// result.gestalt = Movement, confidence = 0.87
-// result.sensory_embedding = [0.12, -0.34, ...]
-
-// Cross-room identity matching via convergence
-let convergence = pipeline.find_cross_room_convergence("person-001", 0.75)?;
-```
-
-**Architecture**:
-- `CsiGestaltClassifier` — Maps CSI amplitude/phase patterns to 6 gestalt types
-- `CsiSensoryEncoder` — Extracts texture/color/temperature/luminosity features from subcarriers
-- `MeshTopologyEncoder` — Encodes AP mesh as GNN graph (Stage III)
-- `CoherenceAolDetector` — Maps coherence gate states to AOL noise detection (Stage IV)
-- `WifiCrvPipeline` — Orchestrates all 6 stages into unified sensing session
 
 </details>
 
@@ -808,6 +760,213 @@ WiFi DensePose is MIT-licensed open source, developed by [ruvnet](https://github
 
 ---
 
+<details>
+<summary><strong>🌍 Cross-Environment Generalization (ADR-027 — Project MERIDIAN)</strong> — Train once, deploy in any room without retraining</summary>
+
+| What | How it works | Why it matters |
+|------|-------------|----------------|
+| **Gradient Reversal Layer** | An adversarial classifier tries to guess which room the signal came from; the main network is trained to fool it | Forces the model to discard room-specific shortcuts |
+| **Geometry Encoder (FiLM)** | Transmitter/receiver positions are Fourier-encoded and injected as scale+shift conditioning on every layer | The model knows *where* the hardware is, so it doesn't need to memorize layout |
+| **Hardware Normalizer** | Resamples any chipset's CSI to a canonical 56-subcarrier format with standardized amplitude | Intel 5300 and ESP32 data look identical to the model |
+| **Virtual Domain Augmentation** | Generates synthetic environments with random room scale, wall reflections, scatterers, and noise profiles | Training sees 1000s of rooms even with data from just 2-3 |
+| **Rapid Adaptation (TTT)** | Contrastive test-time training with LoRA weight generation from a few unlabeled frames | Zero-shot deployment — the model self-tunes on arrival |
+| **Cross-Domain Evaluator** | Leave-one-out evaluation across all training environments with per-environment PCK/OKS metrics | Proves generalization, not just memorization |
+
+**Architecture**
+
+```
+CSI Frame [any chipset]
+    │
+    ▼
+HardwareNormalizer ──→ canonical 56 subcarriers, N(0,1) amplitude
+    │
+    ▼
+CSI Encoder (existing) ──→ latent features
+    │
+    ├──→ Pose Head ──→ 17-joint pose (environment-invariant)
+    │
+    ├──→ Gradient Reversal Layer ──→ Domain Classifier (adversarial)
+    │         λ ramps 0→1 via cosine/exponential schedule
+    │
+    └──→ Geometry Encoder ──→ FiLM conditioning (scale + shift)
+              Fourier positional encoding → DeepSets → per-layer modulation
+```
+
+**Security hardening:**
+- Bounded calibration buffer (max 10,000 frames) prevents memory exhaustion
+- `adapt()` returns `Result<_, AdaptError>` — no panics on bad input
+- Atomic instance counter ensures unique weight initialization across threads
+- Division-by-zero guards on all augmentation parameters
+
+See [`docs/adr/ADR-027-cross-environment-domain-generalization.md`](docs/adr/ADR-027-cross-environment-domain-generalization.md) for full architectural details.
+
+</details>
+
+<details>
+<summary><strong>🔍 Independent Capability Audit (ADR-028)</strong> — 1,031 tests, SHA-256 proof, self-verifying witness bundle</summary>
+
+A [3-agent parallel audit](docs/adr/ADR-028-esp32-capability-audit.md) independently verified every claim in this repository — ESP32 hardware, signal processing, neural networks, training pipeline, deployment, and security. Results:
+
+```
+Rust tests:     1,031 passed, 0 failed
+Python proof:   VERDICT: PASS (SHA-256: 8c0680d7...)
+Bundle verify:  7/7 checks PASS
+```
+
+**33-row attestation matrix:** 31 capabilities verified YES, 2 not measured at audit time (benchmark throughput, Kubernetes deploy).
+
+**Verify it yourself** (no hardware needed):
+```bash
+# Run all tests
+cd rust-port/wifi-densepose-rs && cargo test --workspace --no-default-features
+
+# Run the deterministic proof
+python v1/data/proof/verify.py
+
+# Generate + verify the witness bundle
+bash scripts/generate-witness-bundle.sh
+cd dist/witness-bundle-ADR028-*/ && bash VERIFY.sh
+```
+
+| Document | What it contains |
+|----------|-----------------|
+| [ADR-028](docs/adr/ADR-028-esp32-capability-audit.md) | Full audit: ESP32 specs, signal algorithms, NN architectures, training phases, deployment infra |
+| [Witness Log](docs/WITNESS-LOG-028.md) | 11 reproducible verification steps + 33-row attestation matrix with evidence per row |
+| [`generate-witness-bundle.sh`](scripts/generate-witness-bundle.sh) | Creates self-contained tar.gz with test logs, proof output, firmware hashes, crate versions, VERIFY.sh |
+
+</details>
+
+<details>
+<summary><strong>📡 Multistatic Sensing (ADR-029/030/031 — Project RuvSense + RuView)</strong> — Multiple ESP32 nodes fuse viewpoints for production-grade pose, tracking, and exotic sensing</summary>
+
+A single WiFi receiver can track people, but has blind spots — limbs behind the torso are invisible, depth is ambiguous, and two people at similar range create overlapping signals. RuvSense solves this by coordinating multiple ESP32 nodes into a **multistatic mesh** where every node acts as both transmitter and receiver, creating N×(N-1) measurement links from N devices.
+
+**What it does in plain terms:**
+- 4 ESP32-S3 nodes ($48 total) provide 12 TX-RX measurement links covering 360 degrees
+- Each node hops across WiFi channels 1/6/11, tripling effective bandwidth from 20→60 MHz
+- Coherence gating rejects noisy frames automatically — no manual tuning, stable for days
+- Two-person tracking at 20 Hz with zero identity swaps over 10 minutes
+- The room itself becomes a persistent model — the system remembers, predicts, and explains
+
+**Three ADRs, one pipeline:**
+
+| ADR | Codename | What it adds |
+|-----|----------|-------------|
+| [ADR-029](docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md) | **RuvSense** | Channel hopping, TDM protocol, multi-node fusion, coherence gating, 17-keypoint Kalman tracker |
+| [ADR-030](docs/adr/ADR-030-ruvsense-persistent-field-model.md) | **RuvSense Field** | Room electromagnetic eigenstructure (SVD), RF tomography, longitudinal drift detection, intention prediction, gesture recognition, adversarial detection |
+| [ADR-031](docs/adr/ADR-031-ruview-sensing-first-rf-mode.md) | **RuView** | Cross-viewpoint attention with geometric bias, viewpoint diversity optimization, embedding-level fusion |
+
+**Architecture**
+
+```
+4x ESP32-S3 nodes ($48)     TDM: each transmits in turn, all others receive
+        │                    Channel hop: ch1→ch6→ch11 per dwell (50ms)
+        ▼
+Per-Node Signal Processing   Phase sanitize → Hampel → BVP → subcarrier select
+        │                    (ADR-014, unchanged per viewpoint)
+        ▼
+Multi-Band Frame Fusion      3 channels × 56 subcarriers = 168 virtual subcarriers
+        │                    Cross-channel phase alignment via NeumannSolver
+        ▼
+Multistatic Viewpoint Fusion  N nodes → attention-weighted fusion → single embedding
+        │                    Geometric bias from node placement angles
+        ▼
+Coherence Gate               Accept / PredictOnly / Reject / Recalibrate
+        │                    Prevents model drift, stable for days
+        ▼
+Persistent Field Model       SVD baseline → body = observation - environment
+        │                    RF tomography, drift detection, intention signals
+        ▼
+Pose Tracker + DensePose     17-keypoint Kalman, re-ID via AETHER embeddings
+                             Multi-person min-cut separation, zero ID swaps
+```
+
+**Seven Exotic Sensing Tiers (ADR-030)**
+
+| Tier | Capability | What it detects |
+|------|-----------|-----------------|
+| 1 | Field Normal Modes | Room electromagnetic eigenstructure via SVD |
+| 2 | Coarse RF Tomography | 3D occupancy volume from link attenuations |
+| 3 | Intention Lead Signals | Pre-movement prediction 200-500ms before action |
+| 4 | Longitudinal Biomechanics | Personal movement changes over days/weeks |
+| 5 | Cross-Room Continuity | Identity preserved across rooms without cameras |
+| 6 | Invisible Interaction | Multi-user gesture control through walls |
+| 7 | Adversarial Detection | Physically impossible signal identification |
+
+**Acceptance Test**
+
+| Metric | Threshold | What it proves |
+|--------|-----------|---------------|
+| Torso keypoint jitter | < 30mm RMS | Precision sufficient for applications |
+| Identity swaps | 0 over 10 minutes (12,000 frames) | Reliable multi-person tracking |
+| Update rate | 20 Hz (50ms cycle) | Real-time response |
+| Breathing SNR | > 10 dB at 3m | Small-motion sensitivity confirmed |
+
+**New Rust modules (9,000+ lines)**
+
+| Crate | New modules | Purpose |
+|-------|------------|---------|
+| `wifi-densepose-signal` | `ruvsense/` (10 modules) | Multiband fusion, phase alignment, multistatic fusion, coherence, field model, tomography, longitudinal drift, intention detection |
+| `wifi-densepose-ruvector` | `viewpoint/` (5 modules) | Cross-viewpoint attention with geometric bias, diversity index, coherence gating, fusion orchestrator |
+| `wifi-densepose-hardware` | `esp32/tdm.rs` | TDM sensing protocol, sync beacons, clock drift compensation |
+
+**Firmware extensions (C, backward-compatible)**
+
+| File | Addition |
+|------|---------|
+| `csi_collector.c` | Channel hop table, timer-driven hop, NDP injection stub |
+| `nvs_config.c` | 5 new NVS keys: hop_count, channel_list, dwell_ms, tdm_slot, tdm_node_count |
+
+**DDD Domain Model** — 6 bounded contexts: Multistatic Sensing, Coherence, Pose Tracking, Field Model, Cross-Room Identity, Adversarial Detection. Full specification: [`docs/ddd/ruvsense-domain-model.md`](docs/ddd/ruvsense-domain-model.md).
+
+See the ADR documents for full architectural details, GOAP integration plans, and research references.
+
+</details>
+
+<details>
+<summary><b>🔮 Signal-Line Protocol (CRV)</b></summary>
+
+### 6-Stage CSI Signal Line
+
+Maps the CRV (Coordinate Remote Viewing) signal-line methodology to WiFi CSI processing via `ruvector-crv`:
+
+| Stage | CRV Name | WiFi CSI Mapping | ruvector Component |
+|-------|----------|-----------------|-------------------|
+| I | Ideograms | Raw CSI gestalt (manmade/natural/movement/energy) | Poincare ball hyperbolic embeddings |
+| II | Sensory | Amplitude textures, phase patterns, frequency colors | Multi-head attention vectors |
+| III | Dimensional | AP mesh spatial topology, node geometry | GNN graph topology |
+| IV | Emotional/AOL | Coherence gating — signal vs noise separation | SNN temporal encoding |
+| V | Interrogation | Cross-stage probing — query pose against CSI history | Differentiable search |
+| VI | 3D Model | Composite person estimation, MinCut partitioning | Graph partitioning |
+
+**Cross-Session Convergence**: When multiple AP clusters observe the same person, CRV convergence analysis finds agreement in their signal embeddings — directly mapping to cross-room identity continuity.
+
+```rust
+use wifi_densepose_ruvector::crv::WifiCrvPipeline;
+
+let mut pipeline = WifiCrvPipeline::new(WifiCrvConfig::default());
+pipeline.create_session("room-a", "person-001")?;
+
+// Process CSI frames through 6-stage pipeline
+let result = pipeline.process_csi_frame("room-a", &amplitudes, &phases)?;
+// result.gestalt = Movement, confidence = 0.87
+// result.sensory_embedding = [0.12, -0.34, ...]
+
+// Cross-room identity matching via convergence
+let convergence = pipeline.find_cross_room_convergence("person-001", 0.75)?;
+```
+
+**Architecture**:
+- `CsiGestaltClassifier` — Maps CSI amplitude/phase patterns to 6 gestalt types
+- `CsiSensoryEncoder` — Extracts texture/color/temperature/luminosity features from subcarriers
+- `MeshTopologyEncoder` — Encodes AP mesh as GNN graph (Stage III)
+- `CoherenceAolDetector` — Maps coherence gate states to AOL noise detection (Stage IV)
+- `WifiCrvPipeline` — Orchestrates all 6 stages into unified sensing session
+
+</details>
+
+---
+
 ## 📡 Signal Processing & Sensing
 
 <details>
@@ -829,21 +988,49 @@ ESP32-S3 (STA + promiscuous)     UDP/5005      Rust aggregator
 | Latency | < 1ms (UDP loopback) |
 | Presence detection | Motion score 10/10 at 3m |
 
-```bash
-# Pre-built binaries — no toolchain required
-# https://github.com/ruvnet/wifi-densepose/releases/tag/v0.2.0-esp32
+**Firmware releases** (pre-built, no toolchain required):
 
+| Release | Features | Tag |
+|---------|----------|-----|
+| [v0.2.0](https://github.com/ruvnet/wifi-densepose/releases/tag/v0.2.0-esp32) | Stable — raw CSI streaming, TDM, channel hopping, QUIC mesh | `v0.2.0-esp32` |
+| [v0.3.0-alpha](https://github.com/ruvnet/wifi-densepose/releases/tag/v0.3.0-alpha-esp32) | Alpha — adds on-device edge intelligence ([ADR-039](docs/adr/ADR-039-esp32-edge-intelligence.md)) | `v0.3.0-alpha-esp32` |
+
+```bash
+# Flash (works with either release)
 python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
   write-flash --flash-mode dio --flash-size 4MB \
   0x0 bootloader.bin 0x8000 partition-table.bin 0x10000 esp32-csi-node.bin
 
+# Provision WiFi (no credentials baked into the binary)
 python firmware/esp32-csi-node/provision.py --port COM7 \
   --ssid "YourWiFi" --password "secret" --target-ip 192.168.1.20
 
+# Start the aggregator
 cargo run -p wifi-densepose-sensing-server -- --http-port 3000 --source esp32
 ```
 
-See [firmware/esp32-csi-node/README.md](firmware/esp32-csi-node/README.md) and [Tutorial #34](https://github.com/ruvnet/wifi-densepose/issues/34).
+**Edge Intelligence (v0.3.0-alpha only):**
+
+The alpha firmware adds on-device CSI processing — the ESP32 analyzes signals locally and sends compact results instead of raw data. Disabled by default (tier 0) for backward compatibility.
+
+| Tier | What It Does | Extra RAM |
+|------|-------------|-----------|
+| **0** | Off — raw CSI streaming only (same as v0.2.0) | 0 KB |
+| **1** | Phase unwrapping, running stats, top-K subcarrier selection, delta compression | ~30 KB |
+| **2** | Tier 1 + presence detection, breathing rate, heart rate, fall detection | ~33 KB |
+
+Enable via NVS — no reflash needed:
+
+```bash
+# Turn on Tier 2 (vitals) on an already-flashed node
+python firmware/esp32-csi-node/provision.py --port COM7 \
+  --ssid "YourWiFi" --password "secret" --target-ip 192.168.1.20 \
+  --edge-tier 2
+```
+
+When active, the node sends a 32-byte vitals packet at 1 Hz with presence, motion, breathing BPM, heart rate BPM, confidence, fall flag, and occupancy. Binary size: 777 KB (24% free).
+
+See [firmware/esp32-csi-node/README.md](firmware/esp32-csi-node/README.md), [ADR-039](docs/adr/ADR-039-esp32-edge-intelligence.md), and [Tutorial #34](https://github.com/ruvnet/wifi-densepose/issues/34).
 
 </details>
 
@@ -1581,6 +1768,20 @@ pre-commit install
 
 <details>
 <summary><strong>Release history</strong></summary>
+
+### v3.2.0 — 2026-03-03
+
+Edge intelligence: 24 hot-loadable WASM modules for on-device CSI processing on ESP32-S3.
+
+- **ADR-041 Edge Intelligence Modules** — 24 `no_std` Rust modules compiled to `wasm32-unknown-unknown`, loaded via WASM3 on ESP32; 8 categories covering signal intelligence, adaptive learning, spatial reasoning, temporal analysis, AI security, quantum-inspired, autonomous systems, and exotic algorithms
+- **Vendor Integration** — Algorithms ported from `midstream` (DTW, attractors, Flash Attention, min-cut, optimal transport) and `sublinear-time-solver` (PageRank, HNSW, sparse recovery, spiking NN)
+- **On-device gesture learning** — User-teachable DTW gesture recognition with 3-rehearsal protocol and 16 template slots
+- **Lifelong learning (EWC++)** — Elastic Weight Consolidation prevents catastrophic forgetting when learning new tasks
+- **AI security modules** — FNV-1a replay detection, injection/jamming detection, 6D behavioral anomaly profiling with Mahalanobis scoring
+- **Self-healing mesh** — 8-node mesh with health tracking, degradation/recovery hysteresis, and coverage redistribution
+- **Common utility library** — `vendor_common.rs` shared across all 24 modules: CircularBuffer, EMA, WelfordStats, DTW, FixedPriorityQueue, vector math
+- **243 tests passing** — All modules include comprehensive inline tests; 0 failures
+- **Security audit** — 15 findings addressed (1 critical, 3 high, 6 medium, 5 low)
 
 ### v3.1.0 — 2026-03-02
 

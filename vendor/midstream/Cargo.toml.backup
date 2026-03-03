@@ -1,0 +1,94 @@
+[workspace]
+members = [
+    "crates/temporal-compare",
+    "crates/nanosecond-scheduler",
+    "crates/temporal-attractor-studio",
+    "crates/temporal-neural-solver",
+    "crates/strange-loop",
+    "crates/quic-multistream",
+]
+
+[package]
+name = "midstream"
+version = "0.1.0"
+edition = "2021"
+description = "Real-time LLM streaming with inflight analysis"
+
+[dependencies]
+hyprstream = { path = "hyprstream-main" }
+tokio = { version = "1.42.0", features = ["full"] }
+arrow = "54.0.0"
+arrow-flight = { version = "54.0.0", features = ["flight-sql-experimental"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+async-trait = "0.1"
+futures = "0.3.31"
+tracing = "0.1"
+config = { version = "0.13", features = ["toml"] }
+chrono = "0.4"
+reqwest = { version = "0.11", features = ["json", "stream"] }
+eventsource-stream = "0.2"
+tokio-stream = "0.1"
+dotenv = "0.15"
+async-stream = "0.3"
+# Lean Agentic dependencies
+thiserror = "2.0"
+dashmap = "6.1"
+lru = "0.12"
+
+# Phase 1: Temporal and Scheduling integrations (workspace crates)
+temporal-compare = { path = "crates/temporal-compare" }
+nanosecond-scheduler = { path = "crates/nanosecond-scheduler" }
+
+# Phase 2: Dynamical systems and temporal logic (workspace crates)
+temporal-attractor-studio = { path = "crates/temporal-attractor-studio" }
+temporal-neural-solver = { path = "crates/temporal-neural-solver" }
+
+# Phase 3: Meta-learning and self-reference (workspace crates)
+strange-loop = { path = "crates/strange-loop" }
+
+# Additional dependencies for advanced integrations
+nalgebra = "0.33" # For linear algebra in attractor analysis
+ndarray = "0.16" # For multi-dimensional arrays
+
+[dev-dependencies]
+mockall = "0.11"
+tokio = "1.42.0"
+tokio-test = "0.4"
+criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
+
+[[bench]]
+name = "lean_agentic_bench"
+harness = false
+
+[[bench]]
+name = "temporal_bench"
+harness = false
+
+[[bench]]
+name = "scheduler_bench"
+harness = false
+
+[[bench]]
+name = "attractor_bench"
+harness = false
+
+[[bench]]
+name = "solver_bench"
+harness = false
+
+[[bench]]
+name = "meta_bench"
+harness = false
+
+[[bench]]
+name = "quic_bench"
+harness = false
+
+[[example]]
+name = "openrouter"
+path = "examples/openrouter.rs"
+
+[[example]]
+name = "lean_agentic_streaming"
+path = "examples/lean_agentic_streaming.rs"

@@ -10,6 +10,8 @@ type Props = {
   frame: SensingFrame | null;
 };
 
+const MAX_PERSONS = 3;
+
 // COCO skeleton bones
 const BONES: [number, number][] = [
   [0,1],[0,2],[1,3],[2,4],[5,6],[5,7],[7,9],[6,8],[8,10],
@@ -37,44 +39,79 @@ const BASE_POSE: [number, number, number][] = [
   [ 0.12, 0.04, 0.00],  // 16 right ankle
 ];
 
-// DensePose-style body part colors (24 parts → simplified per-segment)
+// DensePose-style body part colors
 const DENSEPOSE_COLORS: Record<string, number> = {
-  head:       0xf4a582,  // warm skin
-  neck:       0xd6604d,  // darker warm
-  torsoFront: 0x92c5de,  // blue-gray
-  torsoSide:  0x4393c3,  // steel blue
-  pelvis:     0x2166ac,  // deep blue
-  lUpperArm:  0xd73027,  // red
-  rUpperArm:  0xf46d43,  // orange-red
-  lForearm:   0xfdae61,  // orange
-  rForearm:   0xfee090,  // light orange
-  lHand:      0xffffbf,  // pale yellow
+  head:       0xf4a582,
+  neck:       0xd6604d,
+  torsoFront: 0x92c5de,
+  torsoSide:  0x4393c3,
+  pelvis:     0x2166ac,
+  lUpperArm:  0xd73027,
+  rUpperArm:  0xf46d43,
+  lForearm:   0xfdae61,
+  rForearm:   0xfee090,
+  lHand:      0xffffbf,
   rHand:      0xffffbf,
-  lThigh:     0xa6d96a,  // green
-  rThigh:     0x66bd63,  // darker green
-  lShin:      0x1a9850,  // deep green
-  rShin:      0x006837,  // forest
-  lFoot:      0x762a83,  // purple
-  rFoot:      0x9970ab,  // light purple
+  lThigh:     0xa6d96a,
+  rThigh:     0x66bd63,
+  lShin:      0x1a9850,
+  rShin:      0x006837,
+  lFoot:      0x762a83,
+  rFoot:      0x9970ab,
 };
+
+// Per-person tint offsets to visually distinguish multiple bodies
+const PERSON_HUES = [0, 0.12, -0.10];
 
 // Body segments: [jointA, jointB, topRadius, botRadius, colorKey]
 const BODY_SEGS: [number, number, number, number, string][] = [
-  [5,  6,  0.10, 0.10, 'torsoFront'], // collar
-  [5,  11, 0.09, 0.07, 'torsoSide'],  // L torso
-  [6,  12, 0.09, 0.07, 'torsoSide'],  // R torso
-  [11, 12, 0.08, 0.08, 'pelvis'],     // pelvis
-  [5,  7,  0.045,0.040,'lUpperArm'],   // L upper arm
-  [7,  9,  0.038,0.032,'lForearm'],    // L forearm
-  [6,  8,  0.045,0.040,'rUpperArm'],   // R upper arm
-  [8,  10, 0.038,0.032,'rForearm'],    // R forearm
-  [11, 13, 0.065,0.050,'lThigh'],      // L thigh
-  [13, 15, 0.048,0.038,'lShin'],       // L shin
-  [12, 14, 0.065,0.050,'rThigh'],      // R thigh
-  [14, 16, 0.048,0.038,'rShin'],       // R shin
+  [5,  6,  0.10, 0.10, 'torsoFront'],
+  [5,  11, 0.09, 0.07, 'torsoSide'],
+  [6,  12, 0.09, 0.07, 'torsoSide'],
+  [11, 12, 0.08, 0.08, 'pelvis'],
+  [5,  7,  0.045,0.040,'lUpperArm'],
+  [7,  9,  0.038,0.032,'lForearm'],
+  [6,  8,  0.045,0.040,'rUpperArm'],
+  [8,  10, 0.038,0.032,'rForearm'],
+  [11, 13, 0.065,0.050,'lThigh'],
+  [13, 15, 0.048,0.038,'lShin'],
+  [12, 14, 0.065,0.050,'rThigh'],
+  [14, 16, 0.048,0.038,'rShin'],
 ];
 
-function makePart(scene: THREE.Scene, rTop: number, rBot: number, color: number, glow: boolean = false): THREE.Mesh {
+function tintColor(base: number, hueShift: number): number {
+  const c = new THREE.Color(base);
+  const hsl = { h: 0, s: 0, l: 0 };
+  c.getHSL(hsl);
+  c.setHSL((hsl.h + hueShift + 1) % 1, hsl.s, hsl.l);
+  return c.getHex();
+}
+
+interface BodyGroup {
+  head: THREE.Mesh;
+  headGlow: THREE.Mesh;
+  eyeL: THREE.Mesh;
+  eyeR: THREE.Mesh;
+  pupilL: THREE.Mesh;
+  pupilR: THREE.Mesh;
+  neck: THREE.Mesh;
+  torso: THREE.Mesh;
+  torsoGlow: THREE.Mesh;
+  handL: THREE.Mesh;
+  handR: THREE.Mesh;
+  footL: THREE.Mesh;
+  footR: THREE.Mesh;
+  limbs: THREE.Mesh[];
+  limbGlows: THREE.Mesh[];
+  jDots: THREE.Mesh[];
+  skelLines: { line: THREE.Line; a: number; b: number }[];
+  smoothKps: THREE.Vector3[];
+  targetKps: THREE.Vector3[];
+  fadeIn: number;
+  allMeshes: THREE.Object3D[];
+}
+
+function makePart(scene: THREE.Scene, rTop: number, rBot: number, color: number, glow = false): THREE.Mesh {
   const geo = new THREE.CapsuleGeometry((rTop + rBot) / 2, 1, 6, 12);
   const mat = new THREE.MeshPhysicalMaterial({
     color, emissive: color,
@@ -91,16 +128,144 @@ function makePart(scene: THREE.Scene, rTop: number, rBot: number, color: number,
   return m;
 }
 
+function createBodyGroup(scene: THREE.Scene, personIdx: number): BodyGroup {
+  const hue = PERSON_HUES[personIdx] ?? 0;
+  const tc = (key: string) => tintColor(DENSEPOSE_COLORS[key], hue);
+
+  // Head
+  const headGeo = new THREE.SphereGeometry(0.105, 20, 16);
+  headGeo.scale(1, 1.08, 1);
+  const headMat = new THREE.MeshPhysicalMaterial({
+    color: tc('head'), emissive: tc('head'),
+    emissiveIntensity: 0.08, roughness: 0.3, metalness: 0.05,
+    clearcoat: 0.4, clearcoatRoughness: 0.3, transparent: true, opacity: 0.9,
+  });
+  const head = new THREE.Mesh(headGeo, headMat);
+  head.castShadow = true; head.visible = false; scene.add(head);
+
+  const headGlowGeo = new THREE.SphereGeometry(0.14, 12, 10);
+  const headGlowMat = new THREE.MeshBasicMaterial({
+    color: tc('head'), transparent: true, opacity: 0.08, side: THREE.BackSide,
+  });
+  const headGlow = new THREE.Mesh(headGlowGeo, headGlowMat);
+  headGlow.visible = false; scene.add(headGlow);
+
+  // Eyes
+  const eyeGeo = new THREE.SphereGeometry(0.015, 8, 6);
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xeeffff });
+  const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
+  const eyeR = new THREE.Mesh(eyeGeo, eyeMat.clone());
+  eyeL.visible = eyeR.visible = false;
+  scene.add(eyeL); scene.add(eyeR);
+
+  const pupilGeo = new THREE.SphereGeometry(0.008, 6, 4);
+  const pupilMat = new THREE.MeshBasicMaterial({ color: 0x112233 });
+  const pupilL = new THREE.Mesh(pupilGeo, pupilMat);
+  const pupilR = new THREE.Mesh(pupilGeo, pupilMat.clone());
+  pupilL.visible = pupilR.visible = false;
+  scene.add(pupilL); scene.add(pupilR);
+
+  // Neck
+  const neckGeo = new THREE.CapsuleGeometry(0.04, 0.08, 4, 8);
+  const neckMat = new THREE.MeshPhysicalMaterial({
+    color: tc('neck'), emissive: tc('neck'),
+    emissiveIntensity: 0.05, roughness: 0.4, transparent: true, opacity: 0.85,
+  });
+  const neck = new THREE.Mesh(neckGeo, neckMat);
+  neck.castShadow = true; neck.visible = false; scene.add(neck);
+
+  // Torso
+  const torsoGeo = new THREE.BoxGeometry(0.34, 0.50, 0.18, 2, 3, 2);
+  const torsoPos = torsoGeo.attributes.position;
+  for (let i = 0; i < torsoPos.count; i++) {
+    const x = torsoPos.getX(i), y = torsoPos.getY(i), z = torsoPos.getZ(i);
+    const r = Math.sqrt(x * x + z * z);
+    if (r > 0.01) {
+      const bulge = 1 + 0.15 * Math.cos(y * 3.5);
+      torsoPos.setX(i, x * bulge);
+      torsoPos.setZ(i, z * bulge);
+    }
+  }
+  torsoGeo.computeVertexNormals();
+  const torsoMat = new THREE.MeshPhysicalMaterial({
+    color: tc('torsoFront'), emissive: tc('torsoFront'),
+    emissiveIntensity: 0.06, roughness: 0.35, metalness: 0.05,
+    clearcoat: 0.2, transparent: true, opacity: 0.88,
+  });
+  const torso = new THREE.Mesh(torsoGeo, torsoMat);
+  torso.castShadow = true; torso.visible = false; scene.add(torso);
+
+  const torsoGlowGeo = new THREE.BoxGeometry(0.40, 0.55, 0.24);
+  const torsoGlowMat = new THREE.MeshBasicMaterial({
+    color: tc('torsoFront'), transparent: true, opacity: 0.06, side: THREE.BackSide,
+  });
+  const torsoGlow = new THREE.Mesh(torsoGlowGeo, torsoGlowMat);
+  torsoGlow.visible = false; scene.add(torsoGlow);
+
+  // Hands
+  const handGeo = new THREE.BoxGeometry(0.05, 0.08, 0.025);
+  const handL = new THREE.Mesh(handGeo, new THREE.MeshPhysicalMaterial({
+    color: tc('lHand'), emissive: tc('lHand'), emissiveIntensity: 0.1, roughness: 0.3, transparent: true, opacity: 0.85,
+  }));
+  const handR = new THREE.Mesh(handGeo, new THREE.MeshPhysicalMaterial({
+    color: tc('rHand'), emissive: tc('rHand'), emissiveIntensity: 0.1, roughness: 0.3, transparent: true, opacity: 0.85,
+  }));
+  handL.visible = handR.visible = false; scene.add(handL); scene.add(handR);
+
+  // Feet
+  const footGeo = new THREE.BoxGeometry(0.06, 0.04, 0.14);
+  const footL = new THREE.Mesh(footGeo, new THREE.MeshPhysicalMaterial({
+    color: tc('lFoot'), emissive: tc('lFoot'), emissiveIntensity: 0.1, roughness: 0.4, transparent: true, opacity: 0.85,
+  }));
+  const footR = new THREE.Mesh(footGeo, new THREE.MeshPhysicalMaterial({
+    color: tc('rFoot'), emissive: tc('rFoot'), emissiveIntensity: 0.1, roughness: 0.4, transparent: true, opacity: 0.85,
+  }));
+  footL.visible = footR.visible = false; scene.add(footL); scene.add(footR);
+
+  // Limb capsules + glow
+  const limbs = BODY_SEGS.map(([,, rT, rB, ck]) => makePart(scene, rT, rB, tc(ck)));
+  const limbGlows = BODY_SEGS.map(([,, rT, rB, ck]) => makePart(scene, rT * 1.6, rB * 1.6, tc(ck), true));
+
+  // Joint dots
+  const jDotGeo = new THREE.SphereGeometry(0.018, 6, 4);
+  const jDots = Array.from({ length: 17 }, () => {
+    const mat = new THREE.MeshBasicMaterial({ color: 0x88ddee, transparent: true, opacity: 0.7 });
+    const m = new THREE.Mesh(jDotGeo, mat); m.visible = false; scene.add(m); return m;
+  });
+
+  // Skeleton lines
+  const skelMat = new THREE.LineBasicMaterial({ color: 0x55ccdd, transparent: true, opacity: 0.25 });
+  const skelLines = BONES.map(([a, b]) => {
+    const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+    const l = new THREE.Line(g, skelMat); l.visible = false; scene.add(l); return { line: l, a, b };
+  });
+
+  const allMeshes: THREE.Object3D[] = [
+    head, headGlow, eyeL, eyeR, pupilL, pupilR, neck,
+    torso, torsoGlow, handL, handR, footL, footR,
+    ...limbs, ...limbGlows, ...jDots,
+    ...skelLines.map((s) => s.line),
+  ];
+
+  return {
+    head, headGlow, eyeL, eyeR, pupilL, pupilR, neck,
+    torso, torsoGlow, handL, handR, footL, footR,
+    limbs, limbGlows, jDots, skelLines,
+    smoothKps: BASE_POSE.map(([x, y, z]) => new THREE.Vector3(x, y, z)),
+    targetKps: BASE_POSE.map(([x, y, z]) => new THREE.Vector3(x, y, z)),
+    fadeIn: 0,
+    allMeshes,
+  };
+}
+
 function positionLimb(mesh: THREE.Mesh, a: THREE.Vector3, b: THREE.Vector3, rTop: number, rBot: number) {
   const mid = new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5);
   mesh.position.copy(mid);
   const len = a.distanceTo(b);
-  // CapsuleGeometry height param = 1, so scale Y to actual length
   mesh.scale.set((rTop + rBot) * 10, len, (rTop + rBot) * 10);
   const dir = new THREE.Vector3().subVectors(b, a).normalize();
   const up = new THREE.Vector3(0, 1, 0);
-  const quat = new THREE.Quaternion().setFromUnitVectors(up, dir);
-  mesh.quaternion.copy(quat);
+  mesh.quaternion.copy(new THREE.Quaternion().setFromUnitVectors(up, dir));
 }
 
 function lerp3(out: THREE.Vector3, target: THREE.Vector3, alpha: number) {
@@ -156,46 +321,31 @@ export const GaussianSplatWebViewWeb = ({ onReady, onFps, onError, frame }: Prop
       camera.position.set(0, 1.4, 3.5);
       camera.lookAt(0, 0.9, 0);
 
-      // --- Lighting (3-point + rim) ---
+      // --- Lighting ---
       scene.add(new THREE.AmbientLight(0x223344, 0.5));
-
       const key = new THREE.DirectionalLight(0xddeeff, 1.0);
       key.position.set(2, 5, 3);
       key.castShadow = true;
       key.shadow.mapSize.set(1024, 1024);
-      key.shadow.camera.near = 0.5;
-      key.shadow.camera.far = 15;
-      key.shadow.camera.left = -3;
-      key.shadow.camera.right = 3;
-      key.shadow.camera.top = 3;
-      key.shadow.camera.bottom = -1;
+      key.shadow.camera.near = 0.5; key.shadow.camera.far = 15;
+      key.shadow.camera.left = -3; key.shadow.camera.right = 3;
+      key.shadow.camera.top = 3; key.shadow.camera.bottom = -1;
       scene.add(key);
 
       const rim = new THREE.PointLight(0x32b8c6, 1.5, 12);
-      rim.position.set(-1.5, 2.5, -2);
-      scene.add(rim);
-
+      rim.position.set(-1.5, 2.5, -2); scene.add(rim);
       const fill = new THREE.PointLight(0x554488, 0.5, 8);
-      fill.position.set(1.5, 0.8, 2.5);
-      scene.add(fill);
-
+      fill.position.set(1.5, 0.8, 2.5); scene.add(fill);
       const under = new THREE.PointLight(0x225566, 0.4, 5);
-      under.position.set(0, 0.1, 1);
-      scene.add(under);
+      under.position.set(0, 0.1, 1); scene.add(under);
 
       // --- Ground ---
       const groundGeo = new THREE.PlaneGeometry(20, 20);
-      const groundMat = new THREE.MeshStandardMaterial({
-        color: 0x0a0e1a, roughness: 0.9, metalness: 0.1,
-      });
+      const groundMat = new THREE.MeshStandardMaterial({ color: 0x0a0e1a, roughness: 0.9, metalness: 0.1 });
       const ground = new THREE.Mesh(groundGeo, groundMat);
-      ground.rotation.x = -Math.PI / 2;
-      ground.receiveShadow = true;
-      scene.add(ground);
-
+      ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
       const gridH = new THREE.GridHelper(20, 40, 0x1a3050, 0x0e1826);
-      gridH.position.y = 0.002;
-      scene.add(gridH);
+      gridH.position.y = 0.002; scene.add(gridH);
 
       // --- Signal field (20x20) ---
       const GS = 20;
@@ -222,119 +372,17 @@ export const GaussianSplatWebViewWeb = ({ onReady, onFps, onError, frame }: Prop
         const m = new THREE.Mesh(nodeGeo, mat); m.visible = false; scene.add(m); nodeMs.push(m);
       }
 
-      // --- Human body: DensePose-colored capsule mesh ---
-      // Head: slightly oblate sphere
-      const headGeo = new THREE.SphereGeometry(0.105, 20, 16);
-      headGeo.scale(1, 1.08, 1);
-      const headMat = new THREE.MeshPhysicalMaterial({
-        color: DENSEPOSE_COLORS.head, emissive: DENSEPOSE_COLORS.head,
-        emissiveIntensity: 0.08, roughness: 0.3, metalness: 0.05,
-        clearcoat: 0.4, clearcoatRoughness: 0.3, transparent: true, opacity: 0.9,
-      });
-      const headM = new THREE.Mesh(headGeo, headMat);
-      headM.castShadow = true; headM.visible = false; scene.add(headM);
+      // --- Multi-person body groups (Issue #97) ---
+      const bodies: BodyGroup[] = Array.from({ length: MAX_PERSONS }, (_, i) =>
+        createBodyGroup(scene, i)
+      );
 
-      // Head glow
-      const headGlowGeo = new THREE.SphereGeometry(0.14, 12, 10);
-      const headGlowMat = new THREE.MeshBasicMaterial({
-        color: DENSEPOSE_COLORS.head, transparent: true, opacity: 0.08, side: THREE.BackSide,
-      });
-      const headGlowM = new THREE.Mesh(headGlowGeo, headGlowMat);
-      headGlowM.visible = false; scene.add(headGlowM);
-
-      // Eyes
-      const eyeGeo = new THREE.SphereGeometry(0.015, 8, 6);
-      const eyeMat = new THREE.MeshBasicMaterial({ color: 0xeeffff });
-      const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
-      const eyeR = new THREE.Mesh(eyeGeo, eyeMat.clone());
-      eyeL.visible = eyeR.visible = false;
-      scene.add(eyeL); scene.add(eyeR);
-
-      // Pupils
-      const pupilGeo = new THREE.SphereGeometry(0.008, 6, 4);
-      const pupilMat = new THREE.MeshBasicMaterial({ color: 0x112233 });
-      const pupilL = new THREE.Mesh(pupilGeo, pupilMat);
-      const pupilR = new THREE.Mesh(pupilGeo, pupilMat.clone());
-      pupilL.visible = pupilR.visible = false;
-      scene.add(pupilL); scene.add(pupilR);
-
-      // Neck
-      const neckGeo = new THREE.CapsuleGeometry(0.04, 0.08, 4, 8);
-      const neckMat = new THREE.MeshPhysicalMaterial({
-        color: DENSEPOSE_COLORS.neck, emissive: DENSEPOSE_COLORS.neck,
-        emissiveIntensity: 0.05, roughness: 0.4, transparent: true, opacity: 0.85,
-      });
-      const neckM = new THREE.Mesh(neckGeo, neckMat);
-      neckM.castShadow = true; neckM.visible = false; scene.add(neckM);
-
-      // Torso: front plate
-      const torsoGeo = new THREE.BoxGeometry(0.34, 0.50, 0.18, 2, 3, 2);
-      // Round the torso vertices slightly
-      const torsoPos = torsoGeo.attributes.position;
-      for (let i = 0; i < torsoPos.count; i++) {
-        const x = torsoPos.getX(i), y = torsoPos.getY(i), z = torsoPos.getZ(i);
-        const r = Math.sqrt(x * x + z * z);
-        if (r > 0.01) {
-          const bulge = 1 + 0.15 * Math.cos(y * 3.5); // chest & hip curvature
-          torsoPos.setX(i, x * bulge);
-          torsoPos.setZ(i, z * bulge);
-        }
-      }
-      torsoGeo.computeVertexNormals();
-      const torsoMat = new THREE.MeshPhysicalMaterial({
-        color: DENSEPOSE_COLORS.torsoFront, emissive: DENSEPOSE_COLORS.torsoFront,
-        emissiveIntensity: 0.06, roughness: 0.35, metalness: 0.05,
-        clearcoat: 0.2, transparent: true, opacity: 0.88,
-      });
-      const torsoM = new THREE.Mesh(torsoGeo, torsoMat);
-      torsoM.castShadow = true; torsoM.visible = false; scene.add(torsoM);
-
-      // Torso glow
-      const torsoGlowGeo = new THREE.BoxGeometry(0.40, 0.55, 0.24);
-      const torsoGlowMat = new THREE.MeshBasicMaterial({
-        color: DENSEPOSE_COLORS.torsoFront, transparent: true, opacity: 0.06, side: THREE.BackSide,
-      });
-      const torsoGlowM = new THREE.Mesh(torsoGlowGeo, torsoGlowMat);
-      torsoGlowM.visible = false; scene.add(torsoGlowM);
-
-      // Hands (small boxes)
-      const handGeo = new THREE.BoxGeometry(0.05, 0.08, 0.025, 1, 1, 1);
-      const handLMat = new THREE.MeshPhysicalMaterial({ color: DENSEPOSE_COLORS.lHand, emissive: DENSEPOSE_COLORS.lHand, emissiveIntensity: 0.1, roughness: 0.3, transparent: true, opacity: 0.85 });
-      const handRMat = new THREE.MeshPhysicalMaterial({ color: DENSEPOSE_COLORS.rHand, emissive: DENSEPOSE_COLORS.rHand, emissiveIntensity: 0.1, roughness: 0.3, transparent: true, opacity: 0.85 });
-      const handL = new THREE.Mesh(handGeo, handLMat); handL.visible = false; scene.add(handL);
-      const handR = new THREE.Mesh(handGeo, handRMat); handR.visible = false; scene.add(handR);
-
-      // Feet (wedge-like boxes)
-      const footGeo = new THREE.BoxGeometry(0.06, 0.04, 0.14, 1, 1, 1);
-      const footLMat = new THREE.MeshPhysicalMaterial({ color: DENSEPOSE_COLORS.lFoot, emissive: DENSEPOSE_COLORS.lFoot, emissiveIntensity: 0.1, roughness: 0.4, transparent: true, opacity: 0.85 });
-      const footRMat = new THREE.MeshPhysicalMaterial({ color: DENSEPOSE_COLORS.rFoot, emissive: DENSEPOSE_COLORS.rFoot, emissiveIntensity: 0.1, roughness: 0.4, transparent: true, opacity: 0.85 });
-      const footL = new THREE.Mesh(footGeo, footLMat); footL.visible = false; scene.add(footL);
-      const footR = new THREE.Mesh(footGeo, footRMat); footR.visible = false; scene.add(footR);
-
-      // Limb capsules + glow capsules
-      const limbMs = BODY_SEGS.map(([,, rT, rB, ck]) => makePart(scene, rT, rB, DENSEPOSE_COLORS[ck]));
-      const limbGlowMs = BODY_SEGS.map(([,, rT, rB, ck]) => makePart(scene, rT * 1.6, rB * 1.6, DENSEPOSE_COLORS[ck], true));
-
-      // Joint dots
-      const jDotGeo = new THREE.SphereGeometry(0.018, 6, 4);
-      const jDots = Array.from({ length: 17 }, () => {
-        const mat = new THREE.MeshBasicMaterial({ color: 0x88ddee, transparent: true, opacity: 0.7 });
-        const m = new THREE.Mesh(jDotGeo, mat); m.visible = false; scene.add(m); return m;
-      });
-
-      // Skeleton lines (thin wireframe overlay)
-      const skelMat = new THREE.LineBasicMaterial({ color: 0x55ccdd, transparent: true, opacity: 0.25 });
-      const skelLines = BONES.map(([a, b]) => {
-        const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
-        const l = new THREE.Line(g, skelMat); l.visible = false; scene.add(l); return { line: l, a, b };
-      });
-
-      // Heart ring
+      // Heart ring (shared, positioned on person 0)
       const hrGeo = new THREE.TorusGeometry(0.18, 0.006, 8, 32);
       const hrMat = new THREE.MeshBasicMaterial({ color: 0xff3355, transparent: true, opacity: 0 });
       const hrRing = new THREE.Mesh(hrGeo, hrMat); hrRing.visible = false; scene.add(hrRing);
 
-      // Breathing indicator rings (concentric around chest)
+      // Breathing rings (on person 0)
       const brRings = [0.22, 0.28, 0.34].map((r) => {
         const geo = new THREE.TorusGeometry(r, 0.003, 6, 32);
         const mat = new THREE.MeshBasicMaterial({ color: 0x44ddaa, transparent: true, opacity: 0 });
@@ -358,9 +406,7 @@ export const GaussianSplatWebViewWeb = ({ onReady, onFps, onError, frame }: Prop
         pA[i * 3 + 2] = (Math.random() - 0.5) * 12;
       }
       pGeo.setAttribute('position', new THREE.BufferAttribute(pA, 3));
-      scene.add(new THREE.Points(pGeo, new THREE.PointsMaterial({
-        color: 0x3399bb, size: 0.018, transparent: true, opacity: 0.25,
-      })));
+      scene.add(new THREE.Points(pGeo, new THREE.PointsMaterial({ color: 0x3399bb, size: 0.018, transparent: true, opacity: 0.25 })));
 
       // --- HUD ---
       const hudC = document.createElement('canvas'); hudC.width = 640; hudC.height = 128;
@@ -368,9 +414,6 @@ export const GaussianSplatWebViewWeb = ({ onReady, onFps, onError, frame }: Prop
       const hudS = new THREE.Sprite(new THREE.SpriteMaterial({ map: hudT, transparent: true }));
       hudS.scale.set(3.2, 0.64, 1); hudS.position.set(0, 3.2, 0); scene.add(hudS);
 
-      // --- Smooth keypoints ---
-      const smoothKps: THREE.Vector3[] = BASE_POSE.map(([x, y, z]) => new THREE.Vector3(x, y, z));
-      const targetKps: THREE.Vector3[] = BASE_POSE.map(([x, y, z]) => new THREE.Vector3(x, y, z));
       const tmpA = new THREE.Vector3();
       const tmpB = new THREE.Vector3();
       const hc = new THREE.Color();
@@ -380,7 +423,6 @@ export const GaussianSplatWebViewWeb = ({ onReady, onFps, onError, frame }: Prop
         renderer, scene, camera, animId: 0,
         camAngle: 0, camR: 3.5, camY: 1.4,
         drag: false, fCount: 0, fpsT: performance.now(),
-        prevPresence: false, fadeIn: 0,
       };
       sceneRef.current = state;
 
@@ -390,7 +432,10 @@ export const GaussianSplatWebViewWeb = ({ onReady, onFps, onError, frame }: Prop
       cvs.addEventListener('mouseup', () => { state.drag = false; });
       cvs.addEventListener('mouseleave', () => { state.drag = false; });
       cvs.addEventListener('mousemove', (e: MouseEvent) => {
-        if (state.drag) { state.camAngle += e.movementX * 0.006; state.camY = Math.max(0.2, Math.min(4, state.camY - e.movementY * 0.006)); }
+        if (state.drag) {
+          state.camAngle += e.movementX * 0.006;
+          state.camY = Math.max(0.2, Math.min(4, state.camY - e.movementY * 0.006));
+        }
       });
       cvs.addEventListener('wheel', (e: WheelEvent) => {
         state.camR = Math.max(1.5, Math.min(10, state.camR + e.deltaY * 0.003));
@@ -416,179 +461,180 @@ export const GaussianSplatWebViewWeb = ({ onReady, onFps, onError, frame }: Prop
         const bPow = fr?.features?.breathing_band_power ?? 0;
         const rssi = fr?.features?.mean_rssi ?? -80;
 
-        // Fade body in/out (gradual transitions)
-        if (pres && conf > 0.2) state.fadeIn = Math.min(1, state.fadeIn + 0.015);
-        else state.fadeIn = Math.max(0, state.fadeIn - 0.008);
-        const show = state.fadeIn > 0.01;
-        const alpha = state.fadeIn;
+        // How many persons to show (from server estimate, or 1 if presence)
+        const nPersons = pres && conf > 0.2
+          ? Math.min(MAX_PERSONS, fr?.estimated_persons ?? 1)
+          : 0;
 
-        // --- Compute target keypoints ---
-        for (let i = 0; i < 17; i++) {
-          const [bx, by, bz] = BASE_POSE[i];
-          let ax = bx, ay = by, az = bz;
+        // X-offset spacing for multi-person layout (meters)
+        const personSpacing = 0.9;
 
-          if (pres) {
-            // Breathing: gentle chest rise/fall
-            const bFreq = 0.25 + bPow * 0.5; // ~15 bpm base
-            const bAmp = 0.004 + bPow * 0.008;
-            const bPhase = Math.sin(t * bFreq * Math.PI * 2);
-            if (i >= 5 && i <= 10) { ay += bPhase * bAmp; }
-            if (i <= 4) ay += bPhase * bAmp * 0.3;
+        // --- Update each body group ---
+        for (let pi = 0; pi < MAX_PERSONS; pi++) {
+          const body = bodies[pi];
+          const active = pi < nPersons;
 
-            // Very subtle sway
-            ax += Math.sin(t * 0.35) * 0.004;
-            az += Math.cos(t * 0.25) * 0.002;
+          // Fade in/out per body
+          if (active) body.fadeIn = Math.min(1, body.fadeIn + 0.015);
+          else body.fadeIn = Math.max(0, body.fadeIn - 0.008);
+          const show = body.fadeIn > 0.01;
+          const alpha = body.fadeIn;
 
-            if (mot === 'active') {
-              const ws = 1.8 + mPow * 2;
-              const wa = 0.03 + mPow * 0.06;
-              const ph = t * ws;
+          if (!show) {
+            body.allMeshes.forEach((m) => { m.visible = false; });
+            continue;
+          }
 
-              // Legs
-              if (i === 13) { az += Math.sin(ph) * wa * 0.7; ay -= Math.abs(Math.sin(ph)) * 0.015; }
-              if (i === 14) { az += Math.sin(ph + Math.PI) * wa * 0.7; ay -= Math.abs(Math.sin(ph + Math.PI)) * 0.015; }
-              if (i === 15) { az += Math.sin(ph - 0.2) * wa * 0.8; }
-              if (i === 16) { az += Math.sin(ph + Math.PI - 0.2) * wa * 0.8; }
+          // Per-person X offset: spread evenly from center
+          const half = (nPersons - 1) / 2;
+          const xOff = (pi - half) * personSpacing;
 
-              // Arms counter-swing (subtle)
-              if (i === 7) az += Math.sin(ph + Math.PI) * wa * 0.35;
-              if (i === 8) az += Math.sin(ph) * wa * 0.35;
-              if (i === 9) az += Math.sin(ph + Math.PI) * wa * 0.45;
-              if (i === 10) az += Math.sin(ph) * wa * 0.45;
+          // Per-person animation phase offset (prevent sync)
+          const phOff = pi * 2.094; // ~120 degrees
 
-              // Tiny vertical bob
-              ay += Math.abs(Math.sin(ph)) * 0.006;
+          // --- Compute target keypoints ---
+          for (let i = 0; i < 17; i++) {
+            const [bx, by, bz] = BASE_POSE[i];
+            let ax = bx + xOff, ay = by, az = bz;
 
-            } else if (mot === 'present_still') {
-              const it = t * 0.25;
-              // Very subtle weight shift
-              if (i >= 11) ax += Math.sin(it * 0.4) * 0.004;
-              // Barely perceptible hand drift
-              if (i === 9) { ax += Math.sin(it * 0.8) * 0.005; }
-              if (i === 10) { ax += Math.sin(it * 0.6 + 0.5) * 0.005; }
+            if (active) {
+              const bFreq = 0.25 + bPow * 0.5;
+              const bAmp = 0.004 + bPow * 0.008;
+              const bPhase = Math.sin(t * bFreq * Math.PI * 2 + phOff);
+              if (i >= 5 && i <= 10) ay += bPhase * bAmp;
+              if (i <= 4) ay += bPhase * bAmp * 0.3;
+
+              // Subtle sway (different per person)
+              ax += Math.sin(t * 0.35 + phOff) * 0.004;
+              az += Math.cos(t * 0.25 + phOff) * 0.002;
+
+              if (mot === 'active') {
+                const ws = 1.8 + mPow * 2;
+                const wa = 0.03 + mPow * 0.06;
+                const ph = t * ws + phOff;
+                if (i === 13) { az += Math.sin(ph) * wa * 0.7; ay -= Math.abs(Math.sin(ph)) * 0.015; }
+                if (i === 14) { az += Math.sin(ph + Math.PI) * wa * 0.7; ay -= Math.abs(Math.sin(ph + Math.PI)) * 0.015; }
+                if (i === 15) az += Math.sin(ph - 0.2) * wa * 0.8;
+                if (i === 16) az += Math.sin(ph + Math.PI - 0.2) * wa * 0.8;
+                if (i === 7) az += Math.sin(ph + Math.PI) * wa * 0.35;
+                if (i === 8) az += Math.sin(ph) * wa * 0.35;
+                if (i === 9) az += Math.sin(ph + Math.PI) * wa * 0.45;
+                if (i === 10) az += Math.sin(ph) * wa * 0.45;
+                ay += Math.abs(Math.sin(ph)) * 0.006;
+              } else if (mot === 'present_still') {
+                const it = t * 0.25 + phOff;
+                if (i >= 11) ax += Math.sin(it * 0.4) * 0.004;
+                if (i === 9) ax += Math.sin(it * 0.8) * 0.005;
+                if (i === 10) ax += Math.sin(it * 0.6 + 0.5) * 0.005;
+              }
             }
+            body.targetKps[i].set(ax, ay, az);
           }
-          targetKps[i].set(ax, ay, az);
-        }
 
-        // Smooth interpolation (lower = smoother, less jumpy)
-        const lerpA = 0.04;
-        for (let i = 0; i < 17; i++) lerp3(smoothKps[i], targetKps[i], lerpA);
+          // Smooth interpolation
+          const lerpA = 0.04;
+          for (let i = 0; i < 17; i++) lerp3(body.smoothKps[i], body.targetKps[i], lerpA);
+          const kps = body.smoothKps;
 
-        // --- Head ---
-        headM.visible = headGlowM.visible = show;
-        if (show) {
-          tmpA.copy(smoothKps[0]).add(new THREE.Vector3(0, 0.06, 0));
-          headM.position.copy(tmpA);
-          headGlowM.position.copy(tmpA);
-          (headM.material as THREE.MeshPhysicalMaterial).opacity = alpha * 0.9;
-          headGlowMat.opacity = alpha * 0.08;
-        }
+          // Head
+          body.head.visible = body.headGlow.visible = show;
+          tmpA.copy(kps[0]).add(new THREE.Vector3(0, 0.06, 0));
+          body.head.position.copy(tmpA);
+          body.headGlow.position.copy(tmpA);
+          (body.head.material as THREE.MeshPhysicalMaterial).opacity = alpha * 0.9;
+          (body.headGlow.material as THREE.MeshBasicMaterial).opacity = alpha * 0.08;
 
-        // Eyes + pupils
-        eyeL.visible = eyeR.visible = pupilL.visible = pupilR.visible = show;
-        if (show) {
-          const headPos = headM.position;
-          eyeL.position.set(headPos.x - 0.032, headPos.y + 0.01, headPos.z + 0.09);
-          eyeR.position.set(headPos.x + 0.032, headPos.y + 0.01, headPos.z + 0.09);
-          pupilL.position.set(eyeL.position.x, eyeL.position.y, eyeL.position.z + 0.012);
-          pupilR.position.set(eyeR.position.x, eyeR.position.y, eyeR.position.z + 0.012);
-        }
+          // Eyes + pupils
+          body.eyeL.visible = body.eyeR.visible = body.pupilL.visible = body.pupilR.visible = show;
+          const hp = body.head.position;
+          body.eyeL.position.set(hp.x - 0.032, hp.y + 0.01, hp.z + 0.09);
+          body.eyeR.position.set(hp.x + 0.032, hp.y + 0.01, hp.z + 0.09);
+          body.pupilL.position.set(body.eyeL.position.x, body.eyeL.position.y, body.eyeL.position.z + 0.012);
+          body.pupilR.position.set(body.eyeR.position.x, body.eyeR.position.y, body.eyeR.position.z + 0.012);
 
-        // Neck
-        neckM.visible = show;
-        if (show) {
-          const neckTop = new THREE.Vector3().copy(smoothKps[0]).add(new THREE.Vector3(0, -0.04, 0));
-          const neckBot = tmpA.addVectors(smoothKps[5], smoothKps[6]).multiplyScalar(0.5).add(new THREE.Vector3(0, 0.04, 0));
-          neckM.position.addVectors(neckTop, neckBot).multiplyScalar(0.5);
-          neckM.scale.y = neckTop.distanceTo(neckBot) * 4;
-          (neckM.material as THREE.MeshPhysicalMaterial).opacity = alpha * 0.85;
-        }
+          // Neck
+          body.neck.visible = show;
+          const neckTop = new THREE.Vector3().copy(kps[0]).add(new THREE.Vector3(0, -0.04, 0));
+          const neckBot = tmpA.addVectors(kps[5], kps[6]).multiplyScalar(0.5).add(new THREE.Vector3(0, 0.04, 0));
+          body.neck.position.addVectors(neckTop, neckBot).multiplyScalar(0.5);
+          body.neck.scale.y = neckTop.distanceTo(neckBot) * 4;
+          (body.neck.material as THREE.MeshPhysicalMaterial).opacity = alpha * 0.85;
 
-        // Torso
-        torsoM.visible = torsoGlowM.visible = show;
-        if (show) {
-          const mSh = tmpA.addVectors(smoothKps[5], smoothKps[6]).multiplyScalar(0.5);
-          const mHp = tmpB.addVectors(smoothKps[11], smoothKps[12]).multiplyScalar(0.5);
+          // Torso
+          body.torso.visible = body.torsoGlow.visible = show;
+          const mSh = tmpA.addVectors(kps[5], kps[6]).multiplyScalar(0.5);
+          const mHp = tmpB.addVectors(kps[11], kps[12]).multiplyScalar(0.5);
           const tPos = new THREE.Vector3().addVectors(mSh, mHp).multiplyScalar(0.5);
-          torsoM.position.copy(tPos);
-          torsoGlowM.position.copy(tPos);
-          const bScale = 1 + Math.sin(t * (0.9 + bPow * 4) * Math.PI * 2) * 0.02 * (1 + bPow * 3);
-          torsoM.scale.set(1, 1, bScale);
-          (torsoM.material as THREE.MeshPhysicalMaterial).opacity = alpha * 0.88;
-          torsoGlowMat.opacity = alpha * 0.06;
-        }
+          body.torso.position.copy(tPos);
+          body.torsoGlow.position.copy(tPos);
+          const bScale = 1 + Math.sin(t * (0.9 + bPow * 4) * Math.PI * 2 + phOff) * 0.02 * (1 + bPow * 3);
+          body.torso.scale.set(1, 1, bScale);
+          (body.torso.material as THREE.MeshPhysicalMaterial).opacity = alpha * 0.88;
+          (body.torsoGlow.material as THREE.MeshBasicMaterial).opacity = alpha * 0.06;
 
-        // Hands
-        handL.visible = handR.visible = show;
-        if (show) {
-          handL.position.copy(smoothKps[9]).add(new THREE.Vector3(0, -0.04, 0));
-          handR.position.copy(smoothKps[10]).add(new THREE.Vector3(0, -0.04, 0));
-          (handL.material as THREE.MeshPhysicalMaterial).opacity = alpha * 0.85;
-          (handR.material as THREE.MeshPhysicalMaterial).opacity = alpha * 0.85;
-        }
+          // Hands
+          body.handL.visible = body.handR.visible = show;
+          body.handL.position.copy(kps[9]).add(new THREE.Vector3(0, -0.04, 0));
+          body.handR.position.copy(kps[10]).add(new THREE.Vector3(0, -0.04, 0));
+          (body.handL.material as THREE.MeshPhysicalMaterial).opacity = alpha * 0.85;
+          (body.handR.material as THREE.MeshPhysicalMaterial).opacity = alpha * 0.85;
 
-        // Feet
-        footL.visible = footR.visible = show;
-        if (show) {
-          footL.position.copy(smoothKps[15]).add(new THREE.Vector3(0, 0.02, 0.04));
-          footR.position.copy(smoothKps[16]).add(new THREE.Vector3(0, 0.02, 0.04));
-          (footL.material as THREE.MeshPhysicalMaterial).opacity = alpha * 0.85;
-          (footR.material as THREE.MeshPhysicalMaterial).opacity = alpha * 0.85;
-        }
+          // Feet
+          body.footL.visible = body.footR.visible = show;
+          body.footL.position.copy(kps[15]).add(new THREE.Vector3(0, 0.02, 0.04));
+          body.footR.position.copy(kps[16]).add(new THREE.Vector3(0, 0.02, 0.04));
+          (body.footL.material as THREE.MeshPhysicalMaterial).opacity = alpha * 0.85;
+          (body.footR.material as THREE.MeshPhysicalMaterial).opacity = alpha * 0.85;
 
-        // Limb capsules — emissive reacts to motion intensity
-        BODY_SEGS.forEach(([ai, bi, rT, rB], idx) => {
-          limbMs[idx].visible = limbGlowMs[idx].visible = show;
-          if (show) {
-            positionLimb(limbMs[idx], smoothKps[ai], smoothKps[bi], rT, rB);
-            positionLimb(limbGlowMs[idx], smoothKps[ai], smoothKps[bi], rT * 1.6, rB * 1.6);
-            const limbMat = limbMs[idx].material as THREE.MeshPhysicalMaterial;
+          // Limb capsules
+          BODY_SEGS.forEach(([ai, bi, rT, rB], idx) => {
+            body.limbs[idx].visible = body.limbGlows[idx].visible = show;
+            positionLimb(body.limbs[idx], kps[ai], kps[bi], rT, rB);
+            positionLimb(body.limbGlows[idx], kps[ai], kps[bi], rT * 1.6, rB * 1.6);
+            const limbMat = body.limbs[idx].material as THREE.MeshPhysicalMaterial;
             limbMat.opacity = alpha * 0.82;
-            // Glow brighter with more motion (direct sensor feedback)
             limbMat.emissiveIntensity = 0.06 + mPow * 0.4;
-            const glowMat = limbGlowMs[idx].material as THREE.MeshPhysicalMaterial;
+            const glowMat = body.limbGlows[idx].material as THREE.MeshPhysicalMaterial;
             glowMat.opacity = alpha * (0.06 + mPow * 0.15);
-          }
-        });
+          });
 
-        // Joint dots & skeleton lines
-        jDots.forEach((d, i) => { d.visible = show; if (show) d.position.copy(smoothKps[i]); });
-        skelLines.forEach(({ line, a, b }) => {
-          line.visible = show;
-          if (show) {
+          // Joint dots & skeleton lines
+          body.jDots.forEach((d, i) => { d.visible = show; d.position.copy(kps[i]); });
+          body.skelLines.forEach(({ line, a, b }) => {
+            line.visible = show;
             const p = line.geometry.attributes.position as THREE.BufferAttribute;
-            p.setXYZ(0, smoothKps[a].x, smoothKps[a].y, smoothKps[a].z);
-            p.setXYZ(1, smoothKps[b].x, smoothKps[b].y, smoothKps[b].z);
+            p.setXYZ(0, kps[a].x, kps[a].y, kps[a].z);
+            p.setXYZ(1, kps[b].x, kps[b].y, kps[b].z);
             p.needsUpdate = true;
-          }
-        });
+          });
+        }
 
-        // Heart ring
+        // Heart ring (person 0 only)
         const vs = fr?.vital_signs as Record<string, unknown> | undefined;
         const hrBpm = Number(vs?.hr_proxy_bpm ?? vs?.heart_rate_bpm ?? 0);
-        hrRing.visible = show && hrBpm > 0;
+        const showP0 = bodies[0].fadeIn > 0.01;
+        hrRing.visible = showP0 && hrBpm > 0;
         if (hrRing.visible) {
-          const chst = tmpA.addVectors(smoothKps[5], smoothKps[6]).multiplyScalar(0.5);
+          const chst = tmpA.addVectors(bodies[0].smoothKps[5], bodies[0].smoothKps[6]).multiplyScalar(0.5);
           chst.y -= 0.08;
           hrRing.position.copy(chst);
           hrRing.lookAt(camera.position);
           const bp = (t * (hrBpm / 60) * Math.PI * 2) % (Math.PI * 2);
           const beat = Math.pow(Math.max(0, Math.sin(bp)), 10);
-          hrMat.opacity = beat * 0.5 * alpha;
+          hrMat.opacity = beat * 0.5 * bodies[0].fadeIn;
           hrRing.scale.setScalar(1 + beat * 0.12);
         }
 
-        // Breathing rings
+        // Breathing rings (person 0 only)
         brRings.forEach((ring, ri) => {
-          ring.visible = show && bPow > 0.01;
+          ring.visible = showP0 && bPow > 0.01;
           if (ring.visible) {
-            const chst = tmpA.addVectors(smoothKps[5], smoothKps[6]).multiplyScalar(0.5);
+            const chst = tmpA.addVectors(bodies[0].smoothKps[5], bodies[0].smoothKps[6]).multiplyScalar(0.5);
             chst.y -= 0.05;
             ring.position.copy(chst);
             ring.lookAt(camera.position);
             const bph = Math.sin(t * (0.9 + bPow * 4) * Math.PI * 2 - ri * 0.5);
-            (ring.material as THREE.MeshBasicMaterial).opacity = Math.max(0, bph * 0.2 * alpha);
+            (ring.material as THREE.MeshBasicMaterial).opacity = Math.max(0, bph * 0.2 * bodies[0].fadeIn);
             ring.scale.setScalar(1 + bph * 0.08);
           }
         });
@@ -654,14 +700,15 @@ export const GaussianSplatWebViewWeb = ({ onReady, onFps, onError, frame }: Prop
               ctx.fillText(`Breathing: ${br.toFixed(1)} bpm    Heart: ${hrBpm.toFixed(1)} bpm`, 12, 62);
             }
           }
-          if (show) {
+          const anyShow = bodies.some((b) => b.fadeIn > 0.01);
+          if (anyShow) {
             ctx.fillStyle = pres ? (mot === 'active' ? '#ff8844' : '#44bbcc') : '#556677';
             const mBar = Math.min(20, Math.round(mPow * 40));
             const mBarStr = '\u2588'.repeat(mBar) + '\u2591'.repeat(20 - mBar);
             ctx.fillText(`Motion: [${mBarStr}] ${(mPow * 100).toFixed(0)}%`, 12, 82);
-            ctx.fillStyle = '#556677';
+            ctx.fillStyle = nPersons > 1 ? '#ffaa44' : '#556677';
             ctx.font = '10px "SF Mono", Menlo, monospace';
-            ctx.fillText('Pose: procedural (load NN model for limb tracking)', 12, 100);
+            ctx.fillText(`Persons: ${nPersons}   Pose: procedural (CSI-driven)`, 12, 100);
           }
           hudT.needsUpdate = true;
         }

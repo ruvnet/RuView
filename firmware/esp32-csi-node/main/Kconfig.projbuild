@@ -39,18 +39,84 @@ menu "CSI Node Configuration"
         help
             WiFi channel to listen on for CSI data.
 
-    config CSI_FILTER_MAC
-        string "CSI source MAC filter (AA:BB:CC:DD:EE:FF or empty)"
-        default ""
+endmenu
+
+menu "Edge Intelligence (ADR-039)"
+
+    config EDGE_TIER
+        int "Edge processing tier (0=raw, 1=basic, 2=full)"
+        default 2
+        range 0 2
         help
-            When set to a valid MAC address (e.g. "AA:BB:CC:DD:EE:FF"),
-            only CSI frames from that transmitter are processed. All
-            other frames are silently dropped. This prevents signal
-            mixing in multi-AP environments.
+            0 = Raw passthrough (no on-device DSP).
+            1 = Basic presence/motion detection.
+            2 = Full pipeline (vitals, compression, multi-person).
 
-            Leave empty to accept CSI from all transmitters.
+    config EDGE_VITAL_INTERVAL_MS
+        int "Vitals packet send interval (ms)"
+        default 1000
+        range 100 10000
+        help
+            How often to send vitals packets over UDP.
 
-            Can be overridden at runtime via NVS key "filter_mac"
-            (6-byte blob) without reflashing.
+    config EDGE_TOP_K
+        int "Top-K subcarriers to track"
+        default 8
+        range 1 32
+        help
+            Number of highest-variance subcarriers to use for DSP.
+
+    config EDGE_FALL_THRESH
+        int "Fall detection threshold (x1000)"
+        default 2000
+        range 100 50000
+        help
+            Phase acceleration threshold for fall detection.
+            Stored as integer; divided by 1000 at runtime.
+            Default 2000 = 2.0 rad/s^2.
+
+    config EDGE_POWER_DUTY
+        int "Power duty cycle percentage"
+        default 100
+        range 10 100
+        help
+            Active duty cycle for battery-powered nodes.
+            100 = always on. 50 = active half the time.
+
+endmenu
+
+menu "WASM Programmable Sensing (ADR-040)"
+
+    config WASM_ENABLE
+        bool "Enable WASM Tier 3 runtime"
+        default y
+        help
+            Enable the WASM3 interpreter for hot-loadable sensing modules.
+            Requires WASM3 source in components/wasm3/wasm3-src/.
+            Adds ~120 KB flash and ~20 KB SRAM.
+
+    config WASM_MAX_MODULES
+        int "Maximum concurrent WASM modules"
+        default 4
+        range 1 8
+        help
+            Number of WASM module slots.  Each slot can hold one
+            loaded .wasm binary (stored in PSRAM, max 128 KB each).
+
+    config WASM_VERIFY_SIGNATURE
+        bool "Require Ed25519 signature verification for WASM uploads"
+        default y
+        help
+            When enabled, uploaded .wasm binaries must include a valid
+            Ed25519 signature.  Uses the same signing key as OTA firmware.
+            Disable with provision.py --no-wasm-verify for lab/dev use.
+
+    config WASM_TIMER_INTERVAL_MS
+        int "WASM on_timer() interval (ms)"
+        default 1000
+        range 100 60000
+        help
+            How often to call on_timer() on running WASM modules.
+            Default 1000 ms = 1 Hz.
 
 endmenu

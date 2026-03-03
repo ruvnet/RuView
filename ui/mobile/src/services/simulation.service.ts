@@ -103,5 +103,6 @@ export function generateSimulatedData(timeMs = Date.now()): SensingFrame {
       hr_proxy_bpm: hrProxy,
       confidence,
     },
+    estimated_persons: isPresent ? 1 : 0,
   };
 }

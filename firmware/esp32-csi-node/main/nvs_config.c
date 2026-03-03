@@ -9,7 +9,6 @@
 #include "nvs_config.h"
 
 #include <string.h>
-#include <stdio.h>
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -52,27 +51,44 @@ void nvs_config_load(nvs_config_t *cfg)
     cfg->tdm_slot_index = 0;
     cfg->tdm_node_count = 1;
 
-    /* MAC filter: default disabled (all zeros) */
-    memset(cfg->filter_mac, 0, 6);
-    cfg->filter_mac_enabled = 0;
+    /* ADR-039: Edge intelligence defaults from Kconfig. */
+#ifdef CONFIG_EDGE_TIER
+    cfg->edge_tier = (uint8_t)CONFIG_EDGE_TIER;
+#else
+    cfg->edge_tier = 2;
+#endif
+    cfg->presence_thresh = 0.0f;  /* 0 = auto-calibrate. */
+#ifdef CONFIG_EDGE_FALL_THRESH
+    cfg->fall_thresh = (float)CONFIG_EDGE_FALL_THRESH / 1000.0f;
+#else
+    cfg->fall_thresh = 2.0f;
+#endif
+    cfg->vital_window = 256;
+#ifdef CONFIG_EDGE_VITAL_INTERVAL_MS
+    cfg->vital_interval_ms = (uint16_t)CONFIG_EDGE_VITAL_INTERVAL_MS;
+#else
+    cfg->vital_interval_ms = 1000;
+#endif
+#ifdef CONFIG_EDGE_TOP_K
+    cfg->top_k_count = (uint8_t)CONFIG_EDGE_TOP_K;
+#else
+    cfg->top_k_count = 8;
+#endif
+#ifdef CONFIG_EDGE_POWER_DUTY
+    cfg->power_duty = (uint8_t)CONFIG_EDGE_POWER_DUTY;
+#else
+    cfg->power_duty = 100;
+#endif
 
-    /* Parse compile-time Kconfig MAC filter if set (format: "AA:BB:CC:DD:EE:FF") */
-#ifdef CONFIG_CSI_FILTER_MAC
-    {
-        const char *mac_str = CONFIG_CSI_FILTER_MAC;
-        unsigned int m[6];
-        if (mac_str[0] != '\0' &&
-            sscanf(mac_str, "%x:%x:%x:%x:%x:%x",
-                   &m[0], &m[1], &m[2], &m[3], &m[4], &m[5]) == 6) {
-            for (int i = 0; i < 6; i++) {
-                cfg->filter_mac[i] = (uint8_t)m[i];
-            }
-            cfg->filter_mac_enabled = 1;
-            ESP_LOGI(TAG, "Kconfig MAC filter: %02X:%02X:%02X:%02X:%02X:%02X",
-                     cfg->filter_mac[0], cfg->filter_mac[1], cfg->filter_mac[2],
-                     cfg->filter_mac[3], cfg->filter_mac[4], cfg->filter_mac[5]);
-        }
-    }
+    /* ADR-040: WASM programmable sensing defaults from Kconfig. */
+#ifdef CONFIG_WASM_MAX_MODULES
+    cfg->wasm_max_modules = (uint8_t)CONFIG_WASM_MAX_MODULES;
+#else
+    cfg->wasm_max_modules = 4;
+#endif
+    cfg->wasm_verify = 1;  /* Default: verify enabled (secure-by-default). */
+#ifndef CONFIG_WASM_VERIFY_SIGNATURE
+    cfg->wasm_verify = 0;  /* Kconfig disabled signature verification. */
 #endif
 
     /* Try to override from NVS */
@@ -176,25 +192,89 @@ void nvs_config_load(nvs_config_t *cfg)
         }
     }
 
-    /* MAC filter (stored as a 6-byte blob in NVS key "filter_mac") */
-    uint8_t mac_blob[6];
-    size_t mac_len = 6;
-    if (nvs_get_blob(handle, "filter_mac", mac_blob, &mac_len) == ESP_OK && mac_len == 6) {
-        /* Check it's not all zeros (which would mean "no filter") */
-        uint8_t is_zero = 1;
-        for (int i = 0; i < 6; i++) {
-            if (mac_blob[i] != 0) { is_zero = 0; break; }
+    /* ADR-039: Edge intelligence overrides. */
+    uint8_t edge_tier_val;
+    if (nvs_get_u8(handle, "edge_tier", &edge_tier_val) == ESP_OK) {
+        if (edge_tier_val <= 2) {
+            cfg->edge_tier = edge_tier_val;
+            ESP_LOGI(TAG, "NVS override: edge_tier=%u", (unsigned)cfg->edge_tier);
         }
-        if (!is_zero) {
-            memcpy(cfg->filter_mac, mac_blob, 6);
-            cfg->filter_mac_enabled = 1;
-            ESP_LOGI(TAG, "NVS override: filter_mac=%02X:%02X:%02X:%02X:%02X:%02X",
-                     mac_blob[0], mac_blob[1], mac_blob[2],
-                     mac_blob[3], mac_blob[4], mac_blob[5]);
-        } else {
-            cfg->filter_mac_enabled = 0;
-            ESP_LOGI(TAG, "NVS override: filter_mac disabled (all zeros)");
+    }
+
+    /* Presence threshold stored as u16 (value * 1000). */
+    uint16_t pres_thresh_val;
+    if (nvs_get_u16(handle, "pres_thresh", &pres_thresh_val) == ESP_OK) {
+        cfg->presence_thresh = (float)pres_thresh_val / 1000.0f;
+        ESP_LOGI(TAG, "NVS override: presence_thresh=%.3f", cfg->presence_thresh);
+    }
+
+    /* Fall threshold stored as u16 (value * 1000). */
+    uint16_t fall_thresh_val;
+    if (nvs_get_u16(handle, "fall_thresh", &fall_thresh_val) == ESP_OK) {
+        cfg->fall_thresh = (float)fall_thresh_val / 1000.0f;
+        ESP_LOGI(TAG, "NVS override: fall_thresh=%.3f", cfg->fall_thresh);
+    }
+
+    uint16_t vital_win_val;
+    if (nvs_get_u16(handle, "vital_win", &vital_win_val) == ESP_OK) {
+        if (vital_win_val >= 32 && vital_win_val <= 256) {
+            cfg->vital_window = vital_win_val;
+            ESP_LOGI(TAG, "NVS override: vital_window=%u", cfg->vital_window);
         }
+    }
+
+    uint16_t vital_int_val;
+    if (nvs_get_u16(handle, "vital_int", &vital_int_val) == ESP_OK) {
+        if (vital_int_val >= 100) {
+            cfg->vital_interval_ms = vital_int_val;
+            ESP_LOGI(TAG, "NVS override: vital_interval_ms=%u", cfg->vital_interval_ms);
+        }
+    }
+
+    uint8_t topk_val;
+    if (nvs_get_u8(handle, "subk_count", &topk_val) == ESP_OK) {
+        if (topk_val >= 1 && topk_val <= 32) {
+            cfg->top_k_count = topk_val;
+            ESP_LOGI(TAG, "NVS override: top_k_count=%u", (unsigned)cfg->top_k_count);
+        }
+    }
+
+    uint8_t duty_val;
+    if (nvs_get_u8(handle, "power_duty", &duty_val) == ESP_OK) {
+        if (duty_val >= 10 && duty_val <= 100) {
+            cfg->power_duty = duty_val;
+            ESP_LOGI(TAG, "NVS override: power_duty=%u%%", (unsigned)cfg->power_duty);
+        }
+    }
+
+    /* ADR-040: WASM configuration overrides. */
+    uint8_t wasm_max_val;
+    if (nvs_get_u8(handle, "wasm_max", &wasm_max_val) == ESP_OK) {
+        if (wasm_max_val >= 1 && wasm_max_val <= 8) {
+            cfg->wasm_max_modules = wasm_max_val;
+            ESP_LOGI(TAG, "NVS override: wasm_max_modules=%u", (unsigned)cfg->wasm_max_modules);
+        }
+    }
+
+    uint8_t wasm_verify_val;
+    if (nvs_get_u8(handle, "wasm_verify", &wasm_verify_val) == ESP_OK) {
+        cfg->wasm_verify = wasm_verify_val ? 1 : 0;
+        ESP_LOGI(TAG, "NVS override: wasm_verify=%u", (unsigned)cfg->wasm_verify);
+    }
+
+    /* ADR-040: Load WASM signing public key from NVS (32-byte blob). */
+    cfg->wasm_pubkey_valid = 0;
+    memset(cfg->wasm_pubkey, 0, 32);
+    size_t pubkey_len = 32;
+    if (nvs_get_blob(handle, "wasm_pubkey", cfg->wasm_pubkey, &pubkey_len) == ESP_OK
+        && pubkey_len == 32)
+    {
+        cfg->wasm_pubkey_valid = 1;
+        ESP_LOGI(TAG, "NVS: wasm_pubkey loaded (%02x%02x...%02x%02x)",
+                 cfg->wasm_pubkey[0], cfg->wasm_pubkey[1],
+                 cfg->wasm_pubkey[30], cfg->wasm_pubkey[31]);
+    } else if (cfg->wasm_verify) {
+        ESP_LOGW(TAG, "wasm_verify=1 but no wasm_pubkey in NVS — uploads will be rejected");
     }
 
     /* Validate tdm_slot_index < tdm_node_count */

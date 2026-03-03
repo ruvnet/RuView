@@ -1,0 +1,8 @@
+[target.wasm32-unknown-unknown]
+rustflags = [
+  "-C", "link-arg=-z",
+  "-C", "link-arg=stack-size=8192",
+  "-C", "link-arg=--initial-memory=131072",
+  "-C", "link-arg=--max-memory=131072",
+  "-C", "target-feature=-bulk-memory,-nontrapping-fptoint,-sign-ext,-reference-types,-multivalue,-mutable-globals",
+]

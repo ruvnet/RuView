@@ -612,7 +612,12 @@ A 3-6 node ESP32-S3 mesh provides full CSI at 20 Hz. Total cost: ~$54 for a 3-no
 
 **Flashing firmware:**
 
-Pre-built binaries are available at [Releases](https://github.com/ruvnet/wifi-densepose/releases/tag/v0.2.0-esp32).
+Pre-built binaries are available at [Releases](https://github.com/ruvnet/wifi-densepose/releases):
+
+| Release | What It Includes | Tag |
+|---------|-----------------|-----|
+| [v0.2.0](https://github.com/ruvnet/wifi-densepose/releases/tag/v0.2.0-esp32) | Stable — raw CSI streaming, TDM, channel hopping, QUIC mesh | `v0.2.0-esp32` |
+| [v0.3.0-alpha](https://github.com/ruvnet/wifi-densepose/releases/tag/v0.3.0-alpha-esp32) | Alpha — adds on-device edge intelligence (ADR-039) | `v0.3.0-alpha-esp32` |
 
 ```bash
 # Flash an ESP32-S3 (requires esptool: pip install esptool)
@@ -656,6 +661,42 @@ python firmware/esp32-csi-node/provision.py --port COM8 --tdm-slot 1 --tdm-total
 # Node 2 (slot 2)
 python firmware/esp32-csi-node/provision.py --port COM9 --tdm-slot 2 --tdm-total 3
 ```
+
+**Edge Intelligence (v0.3.0-alpha, [ADR-039](../docs/adr/ADR-039-esp32-edge-intelligence.md)):**
+
+The v0.3.0-alpha firmware adds on-device signal processing that runs directly on the ESP32-S3 — no host PC needed for basic presence and vital signs. Edge processing is disabled by default for full backward compatibility.
+
+| Tier | What It Does | Extra RAM |
+|------|-------------|-----------|
+| **0** | Disabled (default) — streams raw CSI to the aggregator | 0 KB |
+| **1** | Phase unwrapping, running statistics, top-K subcarrier selection, delta compression | ~30 KB |
+| **2** | Everything in Tier 1, plus presence detection, breathing/heart rate, motion scoring, fall detection | ~33 KB |
+
+Enable via NVS (no reflash needed):
+
+```bash
+# Enable Tier 2 (full vitals) on an already-flashed node
+python firmware/esp32-csi-node/provision.py --port COM7 \
+  --ssid "YourWiFi" --password "YourPassword" --target-ip 192.168.1.20 \
+  --edge-tier 2
+```
+
+Key NVS settings for edge processing:
+
+| NVS Key | Default | What It Controls |
+|---------|---------|-----------------|
+| `edge_tier` | 0 | Processing tier (0=off, 1=stats, 2=vitals) |
+| `pres_thresh` | 50 | Sensitivity for presence detection (lower = more sensitive) |
+| `fall_thresh` | 500 | Fall detection threshold (variance spike trigger) |
+| `vital_win` | 300 | How many frames of phase history to keep for breathing/HR extraction |
+| `vital_int` | 1000 | How often to send a vitals packet, in milliseconds |
+| `subk_count` | 32 | Number of best subcarriers to keep (out of 56) |
+
+When Tier 2 is active, the node sends a 32-byte vitals packet at 1 Hz (configurable) containing presence state, motion score, breathing BPM, heart rate BPM, confidence values, fall flag, and occupancy estimate. The packet uses magic `0xC5110002` and is sent to the same aggregator IP and port as raw CSI frames.
+
+Binary size: 777 KB (24% free in the 1 MB app partition).
+
+> **Alpha notice**: Vital sign estimation uses heuristic BPM extraction. Accuracy is best with stationary subjects in controlled environments. Not for medical use.
 
 **Start the aggregator:**
 

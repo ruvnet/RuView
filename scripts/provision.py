@@ -30,7 +30,10 @@ NVS_PARTITION_OFFSET = 0x9000
 NVS_PARTITION_SIZE = 0x6000  # 24 KiB
 
 
-def build_nvs_csv(ssid, password, target_ip, target_port, node_id):
+def build_nvs_csv(ssid, password, target_ip, target_port, node_id,
+                   edge_tier=None, pres_thresh=None, fall_thresh=None,
+                   vital_window=None, vital_interval_ms=None, subk_count=None,
+                   wasm_verify=None, wasm_pubkey=None):
     """Build an NVS CSV string for the csi_cfg namespace."""
     buf = io.StringIO()
     writer = csv.writer(buf)
@@ -46,6 +49,25 @@ def build_nvs_csv(ssid, password, target_ip, target_port, node_id):
         writer.writerow(["target_port", "data", "u16", str(target_port)])
     if node_id is not None:
         writer.writerow(["node_id", "data", "u8", str(node_id)])
+    # ADR-039: Edge intelligence configuration.
+    if edge_tier is not None:
+        writer.writerow(["edge_tier", "data", "u8", str(edge_tier)])
+    if pres_thresh is not None:
+        writer.writerow(["pres_thresh", "data", "u16", str(int(pres_thresh * 1000))])
+    if fall_thresh is not None:
+        writer.writerow(["fall_thresh", "data", "u16", str(int(fall_thresh * 1000))])
+    if vital_window is not None:
+        writer.writerow(["vital_win", "data", "u16", str(vital_window)])
+    if vital_interval_ms is not None:
+        writer.writerow(["vital_int", "data", "u16", str(vital_interval_ms)])
+    if subk_count is not None:
+        writer.writerow(["subk_count", "data", "u8", str(subk_count)])
+    # ADR-040: WASM signature verification.
+    if wasm_verify is not None:
+        writer.writerow(["wasm_verify", "data", "u8", str(1 if wasm_verify else 0)])
+    if wasm_pubkey is not None:
+        # Store 32-byte Ed25519 public key as hex-encoded blob.
+        writer.writerow(["wasm_pubkey", "data", "hex2bin", wasm_pubkey])
     return buf.getvalue()
 
 
@@ -127,14 +149,56 @@ def main():
     parser.add_argument("--target-ip", help="Aggregator host IP (e.g. 192.168.1.20)")
     parser.add_argument("--target-port", type=int, help="Aggregator UDP port (default: 5005)")
     parser.add_argument("--node-id", type=int, help="Node ID 0-255 (default: 1)")
+    # ADR-039: Edge intelligence configuration.
+    parser.add_argument("--edge-tier", type=int, choices=[0, 1, 2],
+                        help="Edge processing tier: 0=raw, 1=basic, 2=full")
+    parser.add_argument("--pres-thresh", type=float,
+                        help="Presence detection threshold (0=auto-calibrate)")
+    parser.add_argument("--fall-thresh", type=float,
+                        help="Fall detection threshold in rad/s^2 (default: 2.0)")
+    parser.add_argument("--vital-window", type=int,
+                        help="Phase history window for BPM estimation (32-256)")
+    parser.add_argument("--vital-interval", type=int,
+                        help="Vitals packet send interval in ms (100-10000)")
+    parser.add_argument("--subk-count", type=int,
+                        help="Number of top-K subcarriers to track (1-32)")
+    wasm_verify_group = parser.add_mutually_exclusive_group()
+    wasm_verify_group.add_argument("--wasm-verify", action="store_true", default=None,
+                                   help="Enable Ed25519 signature verification for WASM uploads (ADR-040)")
+    wasm_verify_group.add_argument("--no-wasm-verify", action="store_true", default=None,
+                                   help="Disable WASM signature verification (lab/dev use only)")
+    parser.add_argument("--wasm-pubkey", type=str,
+                        help="Ed25519 public key for WASM signature verification (64 hex chars)")
     parser.add_argument("--dry-run", action="store_true", help="Generate NVS binary but don't flash")
 
     args = parser.parse_args()
 
+    # Resolve wasm_verify: --wasm-verify → True, --no-wasm-verify → False, neither → None
+    wasm_verify_val = None
+    if args.wasm_verify:
+        wasm_verify_val = True
+    elif args.no_wasm_verify:
+        wasm_verify_val = False
+
+    # Validate wasm_pubkey format.
+    wasm_pubkey_val = None
+    if args.wasm_pubkey:
+        pk = args.wasm_pubkey.strip()
+        if len(pk) != 64 or not all(c in '0123456789abcdefABCDEF' for c in pk):
+            parser.error("--wasm-pubkey must be exactly 64 hex characters (32 bytes)")
+        wasm_pubkey_val = pk.lower()
+
     if not any([args.ssid, args.password is not None, args.target_ip,
-                args.target_port, args.node_id is not None]):
+                args.target_port, args.node_id is not None,
+                args.edge_tier is not None, args.pres_thresh is not None,
+                args.fall_thresh is not None, args.vital_window is not None,
+                args.vital_interval is not None, args.subk_count is not None,
+                wasm_verify_val is not None, wasm_pubkey_val is not None]):
         parser.error("At least one config value must be specified "
-                     "(--ssid, --password, --target-ip, --target-port, --node-id)")
+                     "(--ssid, --password, --target-ip, --target-port, --node-id, "
+                     "--edge-tier, --pres-thresh, --fall-thresh, --vital-window, "
+                     "--vital-interval, --subk-count, --wasm-verify/--no-wasm-verify, "
+                     "--wasm-pubkey)")
 
     print("Building NVS configuration:")
     if args.ssid:
@@ -147,9 +211,30 @@ def main():
         print(f"  Target Port:   {args.target_port}")
     if args.node_id is not None:
         print(f"  Node ID:       {args.node_id}")
+    if args.edge_tier is not None:
+        print(f"  Edge Tier:     {args.edge_tier}")
+    if args.pres_thresh is not None:
+        print(f"  Pres Thresh:   {args.pres_thresh}")
+    if args.fall_thresh is not None:
+        print(f"  Fall Thresh:   {args.fall_thresh}")
+    if args.vital_window is not None:
+        print(f"  Vital Window:  {args.vital_window}")
+    if args.vital_interval is not None:
+        print(f"  Vital Int(ms): {args.vital_interval}")
+    if args.subk_count is not None:
+        print(f"  Top-K Subs:    {args.subk_count}")
+    if wasm_verify_val is not None:
+        print(f"  WASM Verify:   {'enabled' if wasm_verify_val else 'disabled'}")
+    if wasm_pubkey_val is not None:
+        print(f"  WASM Pubkey:   {wasm_pubkey_val[:8]}...{wasm_pubkey_val[-8:]}")
 
-    csv_content = build_nvs_csv(args.ssid, args.password, args.target_ip,
-                                args.target_port, args.node_id)
+    csv_content = build_nvs_csv(
+        args.ssid, args.password, args.target_ip, args.target_port, args.node_id,
+        edge_tier=args.edge_tier, pres_thresh=args.pres_thresh,
+        fall_thresh=args.fall_thresh, vital_window=args.vital_window,
+        vital_interval_ms=args.vital_interval, subk_count=args.subk_count,
+        wasm_verify=wasm_verify_val, wasm_pubkey=wasm_pubkey_val,
+    )
 
     try:
         nvs_bin = generate_nvs_binary(csv_content, NVS_PARTITION_SIZE)
