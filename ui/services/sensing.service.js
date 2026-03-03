@@ -9,8 +9,8 @@
  * emit simulated frames so the UI can clearly distinguish live vs. fallback data.
  */
 
-// Derive WebSocket URL from the page origin so it works on any port
-// (Docker :3000, native :8080, etc.)
+// Derive WebSocket URL from the page origin so it works on any port.
+// The /ws/sensing endpoint is available on the same HTTP port (3000).
 const _wsProto = (typeof window !== 'undefined' && window.location.protocol === 'https:') ? 'wss:' : 'ws:';
 const _wsHost  = (typeof window !== 'undefined' && window.location.host) ? window.location.host : 'localhost:3000';
 const SENSING_WS_URL = `${_wsProto}//${_wsHost}/ws/sensing`;

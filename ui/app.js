@@ -8,6 +8,7 @@ import { SensingTab } from './components/SensingTab.js';
 import { apiService } from './services/api.service.js';
 import { wsService } from './services/websocket.service.js';
 import { healthService } from './services/health.service.js';
+import { sensingService } from './services/sensing.service.js';
 import { backendDetector } from './utils/backend-detector.js';
 
 class WiFiDensePoseApp {
@@ -75,6 +76,10 @@ class WiFiDensePoseApp {
         console.warn('⚠️ Backend not available:', error.message);
         this.showBackendStatus('Backend unavailable — start sensing-server', 'warning');
       }
+
+      // Start the sensing WebSocket service early so the dashboard and
+      // live-demo tabs can show the correct data-source status immediately.
+      sensingService.start();
     }
   }
 

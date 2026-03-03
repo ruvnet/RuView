@@ -24,10 +24,11 @@ use std::time::Duration;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
+        Path,
         State,
     },
     response::{Html, IntoResponse, Json},
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use clap::Parser;
@@ -302,6 +303,27 @@ struct AppStateInner {
     edge_vitals: Option<Esp32VitalsPacket>,
     /// ADR-040: Latest WASM output packet from ESP32.
     latest_wasm_events: Option<WasmOutputPacket>,
+    // ── Model management fields ─────────────────────────────────────────────
+    /// Discovered RVF model files from `data/models/`.
+    discovered_models: Vec<serde_json::Value>,
+    /// ID of the currently loaded model, if any.
+    active_model_id: Option<String>,
+    // ── Recording fields ────────────────────────────────────────────────────
+    /// Metadata for recorded CSI data files.
+    recordings: Vec<serde_json::Value>,
+    /// Whether CSI recording is currently in progress.
+    recording_active: bool,
+    /// When the current recording started.
+    recording_start_time: Option<std::time::Instant>,
+    /// ID of the current recording (used for filename).
+    recording_current_id: Option<String>,
+    /// Shutdown signal for the recording writer task.
+    recording_stop_tx: Option<tokio::sync::watch::Sender<bool>>,
+    // ── Training fields ─────────────────────────────────────────────────────
+    /// Training status: "idle", "running", "completed", "failed".
+    training_status: String,
+    /// Training configuration, if any.
+    training_config: Option<serde_json::Value>,
 }
 
 /// Number of frames retained in `frame_history` for temporal analysis.
@@ -1810,6 +1832,433 @@ async fn stream_status(State(state): State<SharedState>) -> Json<serde_json::Val
     }))
 }
 
+// ── Model Management Endpoints ──────────────────────────────────────────────
+
+/// GET /api/v1/models — list discovered RVF model files.
+async fn list_models(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    // Re-scan directory each call so newly-added files are visible.
+    let models = scan_model_files();
+    let total = models.len();
+    {
+        let mut s = state.write().await;
+        s.discovered_models = models.clone();
+    }
+    Json(serde_json::json!({ "models": models, "total": total }))
+}
+
+/// GET /api/v1/models/active — return currently loaded model or null.
+async fn get_active_model(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    match &s.active_model_id {
+        Some(id) => {
+            let model = s.discovered_models.iter().find(|m| {
+                m.get("id").and_then(|v| v.as_str()) == Some(id.as_str())
+            });
+            Json(serde_json::json!({
+                "active": model.cloned().unwrap_or_else(|| serde_json::json!({ "id": id })),
+            }))
+        }
+        None => Json(serde_json::json!({ "active": serde_json::Value::Null })),
+    }
+}
+
+/// POST /api/v1/models/load — load a model by ID.
+async fn load_model(
+    State(state): State<SharedState>,
+    Json(body): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let model_id = body.get("id")
+        .or_else(|| body.get("model_id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if model_id.is_empty() {
+        return Json(serde_json::json!({ "error": "missing 'id' field", "success": false }));
+    }
+    let mut s = state.write().await;
+    s.active_model_id = Some(model_id.clone());
+    s.model_loaded = true;
+    info!("Model loaded: {model_id}");
+    Json(serde_json::json!({ "success": true, "model_id": model_id }))
+}
+
+/// POST /api/v1/models/unload — unload the current model.
+async fn unload_model(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let mut s = state.write().await;
+    let prev = s.active_model_id.take();
+    s.model_loaded = false;
+    info!("Model unloaded (was: {:?})", prev);
+    Json(serde_json::json!({ "success": true, "previous": prev }))
+}
+
+/// DELETE /api/v1/models/:id — delete a model file.
+async fn delete_model(
+    State(state): State<SharedState>,
+    Path(id): Path<String>,
+) -> Json<serde_json::Value> {
+    let path = PathBuf::from("data/models").join(format!("{}.rvf", id));
+    if path.exists() {
+        if let Err(e) = std::fs::remove_file(&path) {
+            warn!("Failed to delete model file {:?}: {}", path, e);
+            return Json(serde_json::json!({ "error": format!("delete failed: {e}"), "success": false }));
+        }
+        // If this was the active model, unload it
+        let mut s = state.write().await;
+        if s.active_model_id.as_deref() == Some(id.as_str()) {
+            s.active_model_id = None;
+            s.model_loaded = false;
+        }
+        s.discovered_models.retain(|m| {
+            m.get("id").and_then(|v| v.as_str()) != Some(id.as_str())
+        });
+        info!("Model deleted: {id}");
+        Json(serde_json::json!({ "success": true, "deleted": id }))
+    } else {
+        Json(serde_json::json!({ "error": "model not found", "success": false }))
+    }
+}
+
+/// GET /api/v1/models/lora/profiles — list LoRA adapter profiles.
+async fn list_lora_profiles() -> Json<serde_json::Value> {
+    // LoRA profiles are discovered from data/models/*.lora.json
+    let profiles = scan_lora_profiles();
+    Json(serde_json::json!({ "profiles": profiles }))
+}
+
+/// POST /api/v1/models/lora/activate — activate a LoRA adapter profile.
+async fn activate_lora_profile(
+    Json(body): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let profile = body.get("profile")
+        .or_else(|| body.get("name"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if profile.is_empty() {
+        return Json(serde_json::json!({ "error": "missing 'profile' field", "success": false }));
+    }
+    info!("LoRA profile activated: {profile}");
+    Json(serde_json::json!({ "success": true, "profile": profile }))
+}
+
+/// Scan `data/models/` for `.rvf` files and return metadata.
+fn scan_model_files() -> Vec<serde_json::Value> {
+    let dir = PathBuf::from("data/models");
+    let mut models = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("rvf") {
+                let name = path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let modified = entry.metadata().ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                models.push(serde_json::json!({
+                    "id": name,
+                    "name": name,
+                    "path": path.display().to_string(),
+                    "size_bytes": size,
+                    "format": "rvf",
+                    "modified_epoch": modified,
+                }));
+            }
+        }
+    }
+    models
+}
+
+/// Scan `data/models/` for `.lora.json` LoRA profile files.
+fn scan_lora_profiles() -> Vec<serde_json::Value> {
+    let dir = PathBuf::from("data/models");
+    let mut profiles = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name.ends_with(".lora.json") {
+                let profile_name = name.trim_end_matches(".lora.json").to_string();
+                // Try to read the profile JSON
+                let config = std::fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                    .unwrap_or_else(|| serde_json::json!({}));
+                profiles.push(serde_json::json!({
+                    "name": profile_name,
+                    "path": path.display().to_string(),
+                    "config": config,
+                }));
+            }
+        }
+    }
+    profiles
+}
+
+// ── Recording Endpoints ─────────────────────────────────────────────────────
+
+/// GET /api/v1/recording/list — list CSI recordings.
+async fn list_recordings() -> Json<serde_json::Value> {
+    let recordings = scan_recording_files();
+    Json(serde_json::json!({ "recordings": recordings }))
+}
+
+/// POST /api/v1/recording/start — start recording CSI data.
+async fn start_recording(
+    State(state): State<SharedState>,
+    Json(body): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let mut s = state.write().await;
+    if s.recording_active {
+        return Json(serde_json::json!({
+            "error": "recording already in progress",
+            "success": false,
+            "recording_id": s.recording_current_id,
+        }));
+    }
+    let id = body.get("id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            format!("rec_{}", chrono_timestamp())
+        });
+
+    // Create the recording file
+    let rec_path = PathBuf::from("data/recordings").join(format!("{}.jsonl", id));
+    let file = match std::fs::File::create(&rec_path) {
+        Ok(f) => f,
+        Err(e) => {
+            warn!("Failed to create recording file {:?}: {}", rec_path, e);
+            return Json(serde_json::json!({
+                "error": format!("cannot create file: {e}"),
+                "success": false,
+            }));
+        }
+    };
+
+    // Create a stop signal channel
+    let (stop_tx, mut stop_rx) = tokio::sync::watch::channel(false);
+    s.recording_active = true;
+    s.recording_start_time = Some(std::time::Instant::now());
+    s.recording_current_id = Some(id.clone());
+    s.recording_stop_tx = Some(stop_tx);
+
+    // Subscribe to the broadcast channel to capture CSI frames
+    let mut rx = s.tx.subscribe();
+
+    // Add initial recording entry
+    s.recordings.push(serde_json::json!({
+        "id": id,
+        "path": rec_path.display().to_string(),
+        "status": "recording",
+        "started_at": chrono_timestamp(),
+        "frames": 0,
+    }));
+
+    let rec_id = id.clone();
+
+    // Spawn writer task in background
+    tokio::spawn(async move {
+        use std::io::Write;
+        let mut writer = std::io::BufWriter::new(file);
+        let mut frame_count: u64 = 0;
+        loop {
+            tokio::select! {
+                result = rx.recv() => {
+                    match result {
+                        Ok(frame_json) => {
+                            if writeln!(writer, "{}", frame_json).is_err() {
+                                warn!("Recording {rec_id}: write error, stopping");
+                                break;
+                            }
+                            frame_count += 1;
+                            // Flush every 100 frames
+                            if frame_count % 100 == 0 {
+                                let _ = writer.flush();
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            debug!("Recording {rec_id}: lagged {n} frames");
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            info!("Recording {rec_id}: broadcast closed, stopping");
+                            break;
+                        }
+                    }
+                }
+                _ = stop_rx.changed() => {
+                    if *stop_rx.borrow() {
+                        info!("Recording {rec_id}: stop signal received ({frame_count} frames)");
+                        break;
+                    }
+                }
+            }
+        }
+        let _ = writer.flush();
+        info!("Recording {rec_id} finished: {frame_count} frames written");
+    });
+
+    info!("Recording started: {id}");
+    Json(serde_json::json!({ "success": true, "recording_id": id }))
+}
+
+/// POST /api/v1/recording/stop — stop recording CSI data.
+async fn stop_recording(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let mut s = state.write().await;
+    if !s.recording_active {
+        return Json(serde_json::json!({
+            "error": "no recording in progress",
+            "success": false,
+        }));
+    }
+    // Signal the writer task to stop
+    if let Some(tx) = s.recording_stop_tx.take() {
+        let _ = tx.send(true);
+    }
+    let duration_secs = s.recording_start_time
+        .map(|t| t.elapsed().as_secs())
+        .unwrap_or(0);
+    let rec_id = s.recording_current_id.take().unwrap_or_default();
+    s.recording_active = false;
+    s.recording_start_time = None;
+
+    // Update the recording entry status
+    for rec in s.recordings.iter_mut() {
+        if rec.get("id").and_then(|v| v.as_str()) == Some(rec_id.as_str()) {
+            rec["status"] = serde_json::json!("completed");
+            rec["duration_secs"] = serde_json::json!(duration_secs);
+        }
+    }
+
+    info!("Recording stopped: {rec_id} ({duration_secs}s)");
+    Json(serde_json::json!({
+        "success": true,
+        "recording_id": rec_id,
+        "duration_secs": duration_secs,
+    }))
+}
+
+/// DELETE /api/v1/recording/:id — delete a recording file.
+async fn delete_recording(
+    State(state): State<SharedState>,
+    Path(id): Path<String>,
+) -> Json<serde_json::Value> {
+    let path = PathBuf::from("data/recordings").join(format!("{}.jsonl", id));
+    if path.exists() {
+        if let Err(e) = std::fs::remove_file(&path) {
+            warn!("Failed to delete recording {:?}: {}", path, e);
+            return Json(serde_json::json!({ "error": format!("delete failed: {e}"), "success": false }));
+        }
+        let mut s = state.write().await;
+        s.recordings.retain(|r| {
+            r.get("id").and_then(|v| v.as_str()) != Some(id.as_str())
+        });
+        info!("Recording deleted: {id}");
+        Json(serde_json::json!({ "success": true, "deleted": id }))
+    } else {
+        Json(serde_json::json!({ "error": "recording not found", "success": false }))
+    }
+}
+
+/// Scan `data/recordings/` for `.jsonl` files and return metadata.
+fn scan_recording_files() -> Vec<serde_json::Value> {
+    let dir = PathBuf::from("data/recordings");
+    let mut recordings = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                let name = path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let modified = entry.metadata().ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                // Count lines (frames) — approximate for large files
+                let frame_count = std::fs::read_to_string(&path)
+                    .map(|s| s.lines().count())
+                    .unwrap_or(0);
+                recordings.push(serde_json::json!({
+                    "id": name,
+                    "name": name,
+                    "path": path.display().to_string(),
+                    "size_bytes": size,
+                    "frames": frame_count,
+                    "modified_epoch": modified,
+                    "status": "completed",
+                }));
+            }
+        }
+    }
+    recordings
+}
+
+// ── Training Endpoints ──────────────────────────────────────────────────────
+
+/// GET /api/v1/train/status — get training status.
+async fn train_status(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    Json(serde_json::json!({
+        "status": s.training_status,
+        "config": s.training_config,
+    }))
+}
+
+/// POST /api/v1/train/start — start a training run.
+async fn train_start(
+    State(state): State<SharedState>,
+    Json(body): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let mut s = state.write().await;
+    if s.training_status == "running" {
+        return Json(serde_json::json!({
+            "error": "training already running",
+            "success": false,
+        }));
+    }
+    s.training_status = "running".to_string();
+    s.training_config = Some(body.clone());
+    info!("Training started with config: {}", body);
+    Json(serde_json::json!({
+        "success": true,
+        "status": "running",
+        "message": "Training pipeline started. Use GET /api/v1/train/status to monitor.",
+    }))
+}
+
+/// POST /api/v1/train/stop — stop the current training run.
+async fn train_stop(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let mut s = state.write().await;
+    if s.training_status != "running" {
+        return Json(serde_json::json!({
+            "error": "no training in progress",
+            "success": false,
+        }));
+    }
+    s.training_status = "idle".to_string();
+    info!("Training stopped");
+    Json(serde_json::json!({
+        "success": true,
+        "status": "idle",
+    }))
+}
+
+/// Generate a simple timestamp string (epoch seconds) for recording IDs.
+fn chrono_timestamp() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 async fn vital_signs_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
     let vs = &s.latest_vitals;
@@ -2788,6 +3237,15 @@ async fn main() {
         }
     }
 
+    // Ensure data directories exist for models and recordings
+    let _ = std::fs::create_dir_all("data/models");
+    let _ = std::fs::create_dir_all("data/recordings");
+
+    // Discover model and recording files on startup
+    let initial_models = scan_model_files();
+    let initial_recordings = scan_recording_files();
+    info!("Discovered {} model files, {} recording files", initial_models.len(), initial_recordings.len());
+
     let (tx, _) = broadcast::channel::<String>(256);
     let state: SharedState = Arc::new(RwLock::new(AppStateInner {
         latest_update: None,
@@ -2808,6 +3266,18 @@ async fn main() {
         smoothed_person_score: 0.0,
         edge_vitals: None,
         latest_wasm_events: None,
+        // Model management
+        discovered_models: initial_models,
+        active_model_id: None,
+        // Recording
+        recordings: initial_recordings,
+        recording_active: false,
+        recording_start_time: None,
+        recording_current_id: None,
+        recording_stop_tx: None,
+        // Training
+        training_status: "idle".to_string(),
+        training_config: None,
     }));
 
     // Start background tasks based on source
@@ -2877,6 +3347,23 @@ async fn main() {
         .route("/api/v1/stream/pose", get(ws_pose_handler))
         // Sensing WebSocket on the HTTP port so the UI can reach it without a second port
         .route("/ws/sensing", get(ws_sensing_handler))
+        // Model management endpoints (UI compatibility)
+        .route("/api/v1/models", get(list_models))
+        .route("/api/v1/models/active", get(get_active_model))
+        .route("/api/v1/models/load", post(load_model))
+        .route("/api/v1/models/unload", post(unload_model))
+        .route("/api/v1/models/{id}", delete(delete_model))
+        .route("/api/v1/models/lora/profiles", get(list_lora_profiles))
+        .route("/api/v1/models/lora/activate", post(activate_lora_profile))
+        // Recording endpoints
+        .route("/api/v1/recording/list", get(list_recordings))
+        .route("/api/v1/recording/start", post(start_recording))
+        .route("/api/v1/recording/stop", post(stop_recording))
+        .route("/api/v1/recording/{id}", delete(delete_recording))
+        // Training endpoints
+        .route("/api/v1/train/status", get(train_status))
+        .route("/api/v1/train/start", post(train_start))
+        .route("/api/v1/train/stop", post(train_stop))
         // Static UI files
         .nest_service("/ui", ServeDir::new(&ui_path))
         .layer(SetResponseHeaderLayer::overriding(

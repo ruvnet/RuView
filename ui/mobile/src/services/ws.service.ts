@@ -100,13 +100,8 @@ class WsService {
   private buildWsUrl(rawUrl: string): string {
     const parsed = new URL(rawUrl);
     const proto = parsed.protocol === 'https:' || parsed.protocol === 'wss:' ? 'wss:' : 'ws:';
-    // Sensing server runs WS on port 3001 at /ws/sensing
-    // If the HTTP server is on port 3000, connect WS to 3001
-    const wsHost = parsed.port === '3000'
-      ? `${parsed.hostname}:3001`
-      : parsed.host;
-    const wsPath = parsed.port === '3000' ? '/ws/sensing' : WS_PATH;
-    return `${proto}//${wsHost}${wsPath}`;
+    // The /ws/sensing endpoint is served on the same HTTP port (no separate WS port needed).
+    return `${proto}//${parsed.host}/ws/sensing`;
   }
 
   private handleStatusChange(status: ConnectionStatus): void {
