@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+scrape_configs:
+  - job_name: 'aimds-gateway'
+    static_configs:
+      - targets: ['aimds-gateway:9090']
+  - job_name: 'aimds-backend'
+    static_configs:
+      - targets: ['aimds-backend:9091']

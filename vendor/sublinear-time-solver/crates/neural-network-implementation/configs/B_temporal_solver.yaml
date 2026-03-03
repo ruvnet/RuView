@@ -1,0 +1,60 @@
+# Configuration for System B - Temporal solver net
+
+common:
+  horizon_ms: 500
+  window_ms: 128
+  sample_rate_hz: 2000
+  features: ["x", "y", "vx", "vy"]
+  quantize: true
+  random_seed: 42
+  verbose: false
+
+model:
+  model_type: "micro_gru"
+  hidden_size: 32
+  num_layers: 1
+  dropout: 0.1
+  residual: true
+  activation: "tanh"
+  layer_norm: false
+
+training:
+  optimizer: "adam"
+  learning_rate: 0.001
+  batch_size: 256
+  epochs: 15
+  patience: 5
+  val_frequency: 1
+  grad_clip: 1.0
+  weight_decay: 0.0001
+  smoothness_weight: 0.1
+  checkpoint_frequency: 5
+
+inference:
+  target_latency_ms: 0.9
+  enable_simd: true
+  num_threads: 1
+  pin_memory: true
+  cpu_affinity: null
+  batch_size: 1
+
+system:
+  type: "TemporalSolver"
+  prior:
+    process_noise: 0.01
+    measurement_noise: 0.1
+    initial_uncertainty: 1.0
+    transition_model: "constant_velocity"
+    update_frequency: 2000.0
+  solver_gate:
+    algorithm: "neumann"
+    epsilon: 0.02
+    budget: 200000
+    max_cert_error: 0.02
+    fallback_strategy: "kalman_only"
+  active_selection:
+    k: 15
+    pagerank_eps: 0.03
+    samples_per_epoch: 1000
+    error_weight: 0.8
+    diversity_weight: 0.2

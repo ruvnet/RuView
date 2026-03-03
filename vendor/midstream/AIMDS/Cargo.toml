@@ -1,0 +1,90 @@
+[workspace]
+members = [
+    "crates/aimds-core",
+    "crates/aimds-detection",
+    "crates/aimds-analysis",
+    "crates/aimds-response",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["AIMDS Team"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/your-org/aimds"
+
+[workspace.dependencies]
+# Midstream platform (validated benchmarks - production-ready)
+midstreamer-temporal-compare = { version = "0.1", path = "../crates/temporal-compare" }
+midstreamer-scheduler = { version = "0.1", path = "../crates/nanosecond-scheduler" }
+midstreamer-attractor = { version = "0.1", path = "../crates/temporal-attractor-studio" }
+midstreamer-neural-solver = { version = "0.1", path = "../crates/temporal-neural-solver" }
+midstreamer-strange-loop = { version = "0.1", path = "../crates/strange-loop" }
+
+# AIMDS internal crates
+aimds-core = { version = "0.1.0", path = "crates/aimds-core" }
+aimds-detection = { version = "0.1.0", path = "crates/aimds-detection" }
+aimds-analysis = { version = "0.1.0", path = "crates/aimds-analysis" }
+aimds-response = { version = "0.1.0", path = "crates/aimds-response" }
+
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+tokio-util = { version = "0.7", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+
+# Metrics and monitoring
+prometheus = "0.13"
+metrics = "0.21"
+metrics-exporter-prometheus = "0.12"
+
+# HTTP and networking
+hyper = { version = "1.0", features = ["full"] }
+axum = "0.7"
+tower = { version = "0.4", features = ["full"] }
+reqwest = { version = "0.11", features = ["json"] }
+
+# Cryptography and security
+sha2 = "0.10"
+blake3 = "1.5"
+ring = "0.17"
+
+# Testing
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.4"
+quickcheck = "1.0"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
+parking_lot = "0.12"
+crossbeam = "0.8"
+rayon = "1.8"
+dashmap = "5.5"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.bench]
+inherits = "release"
+debug = true
+
+[profile.dev]
+opt-level = 0
+debug = true

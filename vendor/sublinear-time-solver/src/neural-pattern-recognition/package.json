@@ -1,0 +1,103 @@
+{
+  "name": "neural-pattern-recognition",
+  "version": "1.0.0",
+  "description": "Advanced AI system for detecting, analyzing, and interacting with emergent computational patterns",
+  "main": "src/server.js",
+  "type": "module",
+  "bin": {
+    "neural-patterns": "./cli/index.js",
+    "npr": "./cli/index.js"
+  },
+  "scripts": {
+    "start": "node scripts/start-mcp.js",
+    "dev": "node --watch src/server.js",
+    "mcp": "node scripts/start-mcp.js",
+    "cli": "node cli/index.js",
+    "test": "node --test tests/",
+    "build": "npm run build:docs",
+    "build:docs": "node scripts/generate-docs.js",
+    "benchmark": "node benchmarks/performance.js",
+    "validate": "node scripts/validate-patterns.js",
+    "monitor": "node scripts/monitor-patterns.js",
+    "detect": "node cli/index.js detect",
+    "analyze": "node cli/index.js analyze",
+    "interactive": "node cli/index.js interactive"
+  },
+  "dependencies": {
+    "fastmcp": "^2.0.0",
+    "commander": "^11.1.0",
+    "chalk": "^5.3.0",
+    "ora": "^8.0.1",
+    "inquirer": "^9.2.12",
+    "ws": "^8.18.0",
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "express-rate-limit": "^7.3.1",
+    "winston": "^3.11.0",
+    "lodash": "^4.17.21",
+    "ml-matrix": "^6.10.7",
+    "fft-js": "^0.0.12",
+    "simple-statistics": "^7.8.3",
+    "node-fetch": "^3.3.2",
+    "uuid": "^10.0.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "nodemon": "^3.0.2"
+  },
+  "keywords": [
+    "neural-patterns",
+    "pattern-recognition",
+    "emergent-signals",
+    "consciousness-detection",
+    "statistical-analysis",
+    "real-time-monitoring",
+    "ai-research",
+    "mcp-server",
+    "fastmcp",
+    "signal-processing",
+    "anomaly-detection",
+    "variance-analysis",
+    "entropy-decoding",
+    "adaptive-learning",
+    "quantum-patterns"
+  ],
+  "author": {
+    "name": "rUv",
+    "url": "https://github.com/ruvnet",
+    "email": "github@ruv.net"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/sublinear-time-solver.git",
+    "directory": "src/neural-pattern-recognition"
+  },
+  "bugs": {
+    "url": "https://github.com/ruvnet/sublinear-time-solver/issues"
+  },
+  "homepage": "https://github.com/ruvnet/sublinear-time-solver/tree/main/src/neural-pattern-recognition",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "exports": {
+    ".": {
+      "import": "./src/index.js"
+    },
+    "./cli": {
+      "import": "./cli/index.js"
+    },
+    "./server": {
+      "import": "./src/server.js"
+    }
+  },
+  "files": [
+    "src/",
+    "cli/",
+    "scripts/",
+    "README.md",
+    "LICENSE"
+  ]
+}

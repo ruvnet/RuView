@@ -1,0 +1,13 @@
+[build]
+target = "web"
+out-dir = "pkg"
+out-name = "graph_reasoner"
+
+[build.profile.release]
+wee-alloc = true
+
+[build.profile.dev]
+debug = true
+
+[pack]
+name = "@psycho-symbolic/graph-reasoner"

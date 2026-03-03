@@ -1,0 +1,49 @@
+[workspace]
+members = [
+    "graph_reasoner",
+    "extractors",
+    "planner",
+]
+resolver = "2"
+
+
+[workspace.dependencies]
+# Core dependencies
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+thiserror = "1.0"
+log = "0.4"
+env_logger = "0.10"
+
+# Graph processing
+petgraph = "0.6"
+
+# WASM support
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
+console_error_panic_hook = "0.1"
+
+# Text processing
+regex = "1.0"
+unicode-segmentation = "1.10"
+
+# Collections and utilities
+indexmap = { version = "2.0", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4", "js"] }
+
+# Random number generation (WASM-compatible)
+rand = { version = "0.8", features = ["small_rng"] }
+getrandom = { version = "0.2", features = ["js"] }
+
+# Search algorithms
+pathfinding = "4.0"
+
+# Benchmarking dependencies
+criterion = { version = "0.5", features = ["html_reports"] }
+memory-stats = "1.1"
+sysinfo = "0.30"
+fake = "2.9"
+proptest = "1.4"
+

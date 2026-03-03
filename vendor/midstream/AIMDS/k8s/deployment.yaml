@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aimds-gateway
+  namespace: aimds
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: aimds-gateway
+  template:
+    metadata:
+      labels:
+        app: aimds-gateway
+    spec:
+      containers:
+      - name: gateway
+        image: ghcr.io/your-org/aimds-gateway:latest
+        ports:
+        - containerPort: 3000
+        - containerPort: 9090
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "2000m"
+            memory: "2Gi"

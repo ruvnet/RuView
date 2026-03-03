@@ -1,0 +1,42 @@
+# Configuration for System A - Traditional micro-net
+
+common:
+  horizon_ms: 500
+  window_ms: 128
+  sample_rate_hz: 2000
+  features: ["x", "y", "vx", "vy"]
+  quantize: true
+  random_seed: 42
+  verbose: false
+
+model:
+  model_type: "micro_gru"
+  hidden_size: 32
+  num_layers: 1
+  dropout: 0.1
+  residual: true
+  activation: "tanh"
+  layer_norm: false
+
+training:
+  optimizer: "adam"
+  learning_rate: 0.001
+  batch_size: 256
+  epochs: 15
+  patience: 5
+  val_frequency: 1
+  grad_clip: 1.0
+  weight_decay: 0.0001
+  smoothness_weight: 0.1
+  checkpoint_frequency: 5
+
+inference:
+  target_latency_ms: 0.9
+  enable_simd: true
+  num_threads: 1
+  pin_memory: true
+  cpu_affinity: null
+  batch_size: 1
+
+system:
+  type: "Traditional"

@@ -1,0 +1,53 @@
+[package]
+name = "bit-parallel-search"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.65"
+authors = ["ruv <ruv@ruv.net>", "Performance Engineering Team"]
+description = "Blazing fast string search using bit-parallel algorithms - up to 8x faster than naive search"
+documentation = "https://docs.rs/bit-parallel-search"
+repository = "https://github.com/ruvnet/bit-parallel-search"
+homepage = "https://github.com/ruvnet/bit-parallel-search"
+license = "MIT OR Apache-2.0"
+keywords = ["string", "search", "pattern", "bit-parallel", "performance"]
+categories = ["algorithms", "no-std", "text-processing", "parsing"]
+readme = "README.md"
+
+[badges]
+maintenance = { status = "actively-developed" }
+
+[features]
+default = ["std"]
+std = []
+simd = []  # Future SIMD optimizations
+unsafe_optimizations = []  # Unsafe but faster variants
+
+[dependencies]
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.4"
+rand = "0.8"
+memchr = "2.7"  # For comparison benchmarks
+aho-corasick = "1.1"  # For comparison benchmarks
+regex = "1.10"  # For real-world benchmarks
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+
+[profile.bench]
+inherits = "release"
+
+[[bench]]
+name = "search_bench"
+harness = false
+
+[[bench]]
+name = "real_world"
+harness = false
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

@@ -1,0 +1,20 @@
+[package]
+name = "bit-parallel-search"
+version = "0.1.0"
+edition = "2021"
+authors = ["Novel Algorithms Lab"]
+description = "Fast bit-parallel string matching using 64-bit parallelism"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/bit-parallel-search"
+keywords = ["string", "search", "bit-parallel", "pattern-matching", "fast"]
+categories = ["algorithms", "text-processing"]
+
+[dependencies]
+
+[dev-dependencies]
+criterion = "0.5"
+rand = "0.8"
+
+[[bench]]
+name = "benchmark"
+harness = false

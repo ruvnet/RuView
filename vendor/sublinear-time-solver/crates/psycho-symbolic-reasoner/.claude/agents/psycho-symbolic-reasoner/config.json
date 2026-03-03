@@ -1,0 +1,75 @@
+{
+  "name": "psycho-symbolic-reasoner",
+  "displayName": "Psycho-Symbolic Reasoner",
+  "description": "AI agent that combines symbolic reasoning with psychological context understanding",
+  "version": "1.0.0",
+  "author": "Claude Code Template Generator",
+  "tags": [
+    "reasoning",
+    "psychology",
+    "symbolic",
+    "knowledge-graph",
+    "analysis"
+  ],
+  "capabilities": [
+    "symbolic_reasoning",
+    "psychological_analysis",
+    "knowledge_graph_processing",
+    "reasoning_chain_analysis",
+    "contextual_understanding"
+  ],
+  "mcpServer": {
+    "name": "psycho-symbolic-reasoner",
+    "command": "npx",
+    "args": ["psycho-symbolic-reasoner", "mcp", "start"],
+    "transport": "stdio"
+  },
+  "tools": [
+    {
+      "name": "mcp__psycho-symbolic-reasoner__reason",
+      "description": "Perform psycho-symbolic reasoning analysis",
+      "category": "reasoning"
+    },
+    {
+      "name": "mcp__psycho-symbolic-reasoner__knowledge_graph_query",
+      "description": "Query the knowledge graph for information and relationships",
+      "category": "knowledge"
+    },
+    {
+      "name": "mcp__psycho-symbolic-reasoner__add_knowledge",
+      "description": "Add facts, relationships, or entities to the knowledge base",
+      "category": "knowledge"
+    },
+    {
+      "name": "mcp__psycho-symbolic-reasoner__analyze_reasoning_path",
+      "description": "Analyze reasoning chains and provide insights",
+      "category": "analysis"
+    },
+    {
+      "name": "mcp__psycho-symbolic-reasoner__health_check",
+      "description": "Check system health and perform diagnostics",
+      "category": "system"
+    }
+  ],
+  "requirements": {
+    "claude": ">=3.0.0",
+    "mcp": ">=1.0.0",
+    "node": ">=18.0.0"
+  },
+  "documentation": {
+    "readme": "./agent.md",
+    "examples": "./examples/",
+    "api": "./api-reference.md"
+  },
+  "integration": {
+    "sparc": true,
+    "swarm_coordination": true,
+    "claude_code": true
+  },
+  "settings": {
+    "default_confidence_threshold": 0.7,
+    "max_reasoning_depth": 5,
+    "knowledge_graph_limit": 100,
+    "reasoning_timeout": 30000
+  }
+}

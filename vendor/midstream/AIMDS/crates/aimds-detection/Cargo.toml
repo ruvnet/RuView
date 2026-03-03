@@ -1,0 +1,37 @@
+[package]
+name = "aimds-detection"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Fast-path detection layer for AIMDS with pattern matching and anomaly detection"
+
+[dependencies]
+# Workspace dependencies
+aimds-core.workspace = true
+midstreamer-temporal-compare.workspace = true
+midstreamer-scheduler.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+parking_lot.workspace = true
+dashmap.workspace = true
+sha2.workspace = true
+blake3.workspace = true
+
+# Detection-specific dependencies
+regex = "1.10"
+aho-corasick = "1.1"
+fancy-regex = "0.13"
+lru = "0.12"
+
+[dev-dependencies]
+criterion.workspace = true
+proptest.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

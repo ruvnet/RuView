@@ -1,0 +1,73 @@
+{
+  "name": "strange-loops",
+  "version": "0.5.0",
+  "description": "A framework where thousands of tiny agents collaborate in real-time, each operating within nanosecond budgets, forming emergent intelligence through temporal consciousness and quantum-classical hybrid computing",
+  "main": "index.js",
+  "bin": {
+    "strange-loops": "bin/cli.js",
+    "strange-loops-mcp": "mcp/server.js",
+    "strange-loops-mcp-extended": "mcp/server-extended.js"
+  },
+  "scripts": {
+    "build": "node scripts/build-wasm.js",
+    "dev": "node bin/cli.js",
+    "demo": "node bin/cli.js demo",
+    "benchmark": "node bin/cli.js benchmark",
+    "interactive": "node bin/cli.js interactive",
+    "test": "node test/test.js"
+  },
+  "keywords": [
+    "temporal",
+    "consciousness",
+    "quantum",
+    "nano-agents",
+    "real-time",
+    "emergent-intelligence",
+    "wasm",
+    "strange-loops",
+    "hybrid-computing"
+  ],
+  "author": "rUv <ruv@ruv.io>",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ruvnet/sublinear-time-solver.git",
+    "directory": "npx-strange-loop"
+  },
+  "homepage": "https://github.com/ruvnet/sublinear-time-solver",
+  "bugs": {
+    "url": "https://github.com/ruvnet/sublinear-time-solver/issues"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.1",
+    "@types/node": "^24.5.2",
+    "boxen": "^5.1.2",
+    "chalk": "^4.1.2",
+    "commander": "^9.4.1",
+    "figlet": "^1.6.0",
+    "inquirer": "^8.2.5",
+    "ora": "^5.4.1",
+    "table": "^6.8.1",
+    "typescript": "^5.9.2"
+  },
+  "devDependencies": {
+    "fs-extra": "^11.1.1"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "mcp/",
+    "wasm/",
+    "templates/",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "preferGlobal": true
+}

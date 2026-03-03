@@ -1,0 +1,38 @@
+# Core inference dependencies
+onnxruntime>=1.12.0
+numpy>=1.21.0
+
+# Web server dependencies (for deployment)
+fastapi>=0.68.0
+uvicorn[standard]>=0.15.0
+pydantic>=1.8.0
+
+# Benchmarking and analysis
+matplotlib>=3.5.0
+seaborn>=0.11.0
+pandas>=1.3.0
+scipy>=1.7.0
+
+# Utilities
+tqdm>=4.62.0
+psutil>=5.8.0
+
+# Jupyter notebook support (optional)
+jupyter>=1.0.0
+ipywidgets>=7.6.0
+plotly>=5.0.0
+
+# HuggingFace integration
+huggingface-hub>=0.8.0
+transformers>=4.20.0
+
+# Deployment tools
+docker>=5.0.0
+pyyaml>=5.4.0
+requests>=2.25.0
+
+# Development tools (optional)
+pytest>=6.2.0
+black>=21.0.0
+isort>=5.9.0
+mypy>=0.910

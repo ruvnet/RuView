@@ -1,0 +1,31 @@
+[package]
+name = "aimds-analysis"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deep behavioral analysis layer for AIMDS with temporal neural verification"
+
+[dependencies]
+aimds-core.workspace = true
+midstreamer-attractor.workspace = true
+midstreamer-neural-solver.workspace = true
+midstreamer-strange-loop.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+dashmap.workspace = true
+ndarray = "0.15"
+statrs = "0.16"
+petgraph = "0.6"
+
+[dev-dependencies]
+criterion.workspace = true
+proptest.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

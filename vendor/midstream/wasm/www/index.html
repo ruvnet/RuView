@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lean Agentic WASM - Ultra Low Latency Streaming</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            padding: 30px;
+        }
+
+        h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            opacity: 0.9;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+        }
+
+        .demo-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .demo-section h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 1em;
+            min-width: 200px;
+        }
+
+        button {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: bold;
+            transition: transform 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .log {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 5px;
+            border-left: 3px solid #667eea;
+            padding-left: 10px;
+        }
+
+        .log-entry.error {
+            border-left-color: #e74c3c;
+            background: rgba(231, 76, 60, 0.1);
+        }
+
+        .log-entry.success {
+            border-left-color: #2ecc71;
+            background: rgba(46, 204, 113, 0.1);
+        }
+
+        .latency-meter {
+            height: 100px;
+            background: #f0f0f0;
+            border-radius: 6px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .latency-bar {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: linear-gradient(180deg, #2ecc71 0%, #27ae60 100%);
+            transition: height 0.3s ease;
+        }
+
+        .tab-container {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            background: #e0e0e0;
+            border: none;
+            border-radius: 6px 6px 0 0;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .tab.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .connecting {
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Lean Agentic WASM</h1>
+        <p class="subtitle">Ultra-low-latency stream learning with WebSocket, SSE, and HTTP streaming</p>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-label">Avg Latency</div>
+                <div class="stat-value" id="avg-latency">0.0ms</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Messages Processed</div>
+                <div class="stat-value" id="msg-count">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Throughput</div>
+                <div class="stat-value" id="throughput">0/s</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Connection Status</div>
+                <div class="stat-value" id="status">Disconnected</div>
+            </div>
+        </div>
+
+        <div class="tab-container">
+            <button class="tab active" onclick="switchTab('websocket')">WebSocket</button>
+            <button class="tab" onclick="switchTab('sse')">SSE</button>
+            <button class="tab" onclick="switchTab('http')">HTTP Streaming</button>
+            <button class="tab" onclick="switchTab('benchmark')">Benchmark</button>
+        </div>
+
+        <div id="websocket-tab" class="tab-content active">
+            <div class="demo-section">
+                <h2>WebSocket Streaming</h2>
+                <div class="controls">
+                    <input type="text" id="ws-url" placeholder="ws://localhost:8080/ws" value="ws://localhost:8080/ws">
+                    <button onclick="connectWebSocket()">Connect</button>
+                    <button onclick="disconnectWebSocket()">Disconnect</button>
+                </div>
+                <div class="controls">
+                    <input type="text" id="ws-message" placeholder="Enter message...">
+                    <button onclick="sendWebSocketMessage()">Send</button>
+                    <button onclick="startWebSocketBurst()">Burst Test (1000 msgs)</button>
+                </div>
+                <div class="log" id="ws-log"></div>
+            </div>
+        </div>
+
+        <div id="sse-tab" class="tab-content">
+            <div class="demo-section">
+                <h2>Server-Sent Events (SSE)</h2>
+                <div class="controls">
+                    <input type="text" id="sse-url" placeholder="http://localhost:8080/sse" value="http://localhost:8080/sse">
+                    <button onclick="connectSSE()">Connect</button>
+                    <button onclick="disconnectSSE()">Disconnect</button>
+                </div>
+                <div class="log" id="sse-log"></div>
+            </div>
+        </div>
+
+        <div id="http-tab" class="tab-content">
+            <div class="demo-section">
+                <h2>HTTP Streaming</h2>
+                <div class="controls">
+                    <input type="text" id="http-url" placeholder="http://localhost:8080/stream" value="http://localhost:8080/stream">
+                    <button onclick="startHTTPStream()">Start Stream</button>
+                </div>
+                <div class="log" id="http-log"></div>
+            </div>
+        </div>
+
+        <div id="benchmark-tab" class="tab-content">
+            <div class="demo-section">
+                <h2>Performance Benchmark</h2>
+                <div class="controls">
+                    <button onclick="runLatencyBenchmark()">Latency Test</button>
+                    <button onclick="runThroughputBenchmark()">Throughput Test</button>
+                    <button onclick="runConcurrentBenchmark()">Concurrent Test</button>
+                </div>
+                <div class="log" id="benchmark-log"></div>
+                <div class="latency-meter" id="latency-meter">
+                    <div class="latency-bar" id="latency-bar"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="./index.js"></script>
+</body>
+</html>

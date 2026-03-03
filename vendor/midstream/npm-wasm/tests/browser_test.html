@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Midstream WASM Browser Test Suite</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+    }
+    h1 { margin: 0; font-size: 2em; }
+    .subtitle { opacity: 0.9; margin-top: 5px; }
+    .test-section {
+      background: white;
+      padding: 20px;
+      margin-bottom: 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .test-item {
+      padding: 10px;
+      margin: 5px 0;
+      border-left: 4px solid #ddd;
+      background: #f9f9f9;
+      font-family: monospace;
+    }
+    .test-item.pass { border-color: #4caf50; background: #e8f5e9; }
+    .test-item.fail { border-color: #f44336; background: #ffebee; }
+    .test-item.running { border-color: #2196f3; background: #e3f2fd; }
+    .summary {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      margin-top: 20px;
+    }
+    .metric {
+      display: inline-block;
+      margin: 10px 20px 10px 0;
+      font-size: 1.2em;
+    }
+    .metric strong { color: #667eea; }
+    button {
+      background: #667eea;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 16px;
+      margin: 5px;
+    }
+    button:hover { background: #5568d3; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    pre {
+      background: #2d3748;
+      color: #e2e8f0;
+      padding: 15px;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🚀 Midstream WASM Browser Test Suite</h1>
+    <p class="subtitle">Comprehensive validation of WebAssembly functionality</p>
+  </div>
+
+  <div class="test-section">
+    <h2>🎮 Test Controls</h2>
+    <button onclick="runAllTests()">Run All Tests</button>
+    <button onclick="clearResults()">Clear Results</button>
+  </div>
+
+  <div id="results"></div>
+
+  <div class="summary" id="summary" style="display: none;">
+    <h2>📊 Test Summary</h2>
+    <div id="summaryContent"></div>
+  </div>
+
+  <script type="module">
+    import init, {
+      version,
+      TemporalCompare,
+      NanoScheduler,
+      StrangeLoop,
+      QuicMultistream,
+      benchmark_dtw
+    } from '../pkg/midstream_wasm.js';
+
+    let wasmInitialized = false;
+    let results = { total: 0, passed: 0, failed: 0, tests: [] };
+
+    async function initWasm() {
+      if (!wasmInitialized) {
+        await init();
+        wasmInitialized = true;
+        console.log('✅ WASM initialized');
+      }
+    }
+
+    function addResult(category, name, status, details = '') {
+      results.total++;
+      if (status === 'pass') results.passed++;
+      if (status === 'fail') results.failed++;
+
+      results.tests.push({ category, name, status, details });
+
+      const resultsDiv = document.getElementById('results');
+      let categorySection = document.getElementById('cat-' + category.replace(/\s+/g, '-'));
+
+      if (!categorySection) {
+        categorySection = document.createElement('div');
+        categorySection.className = 'test-section';
+        categorySection.id = 'cat-' + category.replace(/\s+/g, '-');
+        categorySection.innerHTML = `<h2>${category}</h2>`;
+        resultsDiv.appendChild(categorySection);
+      }
+
+      const testItem = document.createElement('div');
+      testItem.className = `test-item ${status}`;
+
+      const icon = status === 'pass' ? '✅' : status === 'fail' ? '❌' : '⏳';
+      testItem.innerHTML = `
+        ${icon} ${name}
+        ${details ? `<pre>${details}</pre>` : ''}
+      `;
+
+      categorySection.appendChild(testItem);
+    }
+
+    function updateSummary() {
+      const summaryDiv = document.getElementById('summary');
+      const contentDiv = document.getElementById('summaryContent');
+
+      summaryDiv.style.display = 'block';
+
+      const successRate = results.total > 0
+        ? ((results.passed / results.total) * 100).toFixed(1)
+        : 0;
+
+      contentDiv.innerHTML = `
+        <div class="metric">Total: <strong>${results.total}</strong></div>
+        <div class="metric">✅ Passed: <strong>${results.passed}</strong></div>
+        <div class="metric">❌ Failed: <strong>${results.failed}</strong></div>
+        <div class="metric">Success Rate: <strong>${successRate}%</strong></div>
+      `;
+    }
+
+    window.clearResults = function() {
+      document.getElementById('results').innerHTML = '';
+      document.getElementById('summary').style.display = 'none';
+      results = { total: 0, passed: 0, failed: 0, tests: [] };
+    };
+
+    window.runAllTests = async function() {
+      clearResults();
+
+      try {
+        await initWasm();
+
+        // Module Information
+        testModuleInfo();
+
+        // Temporal Comparison
+        await testTemporalCompare();
+
+        // NanoScheduler
+        await testNanoScheduler();
+
+        // Meta-Learning
+        testMetaLearning();
+
+        // QUIC Multistream
+        testQuicMultistream();
+
+        // Performance
+        testPerformance();
+
+        // Browser Compatibility
+        testBrowserAPIs();
+
+        updateSummary();
+
+      } catch (error) {
+        addResult('Initialization', 'WASM Module', 'fail', error.message);
+        updateSummary();
+      }
+    };
+
+    function testModuleInfo() {
+      try {
+        const ver = version();
+        addResult('Module Info', `Version: ${ver}`, 'pass');
+      } catch (e) {
+        addResult('Module Info', 'Version', 'fail', e.message);
+      }
+    }
+
+    async function testTemporalCompare() {
+      try {
+        const tc = new TemporalCompare();
+        addResult('Temporal Compare', 'Constructor', 'pass');
+
+        // DTW test
+        const seq1 = new Float64Array([1, 2, 3, 4, 5]);
+        const seq2 = new Float64Array([1, 2, 3, 4, 5]);
+        const dtwDist = tc.dtw(seq1, seq2);
+
+        if (dtwDist === 0) {
+          addResult('Temporal Compare', 'DTW (identical sequences)', 'pass',
+            `Distance: ${dtwDist}`);
+        } else {
+          addResult('Temporal Compare', 'DTW (identical sequences)', 'fail',
+            `Expected 0, got ${dtwDist}`);
+        }
+
+        // LCS test
+        const lcsSeq1 = new Int32Array([1, 2, 3, 4, 5]);
+        const lcsSeq2 = new Int32Array([1, 3, 5]);
+        const lcsLen = tc.lcs(lcsSeq1, lcsSeq2);
+
+        if (lcsLen === 3) {
+          addResult('Temporal Compare', 'LCS', 'pass', `Length: ${lcsLen}`);
+        } else {
+          addResult('Temporal Compare', 'LCS', 'fail',
+            `Expected 3, got ${lcsLen}`);
+        }
+
+        // Edit distance
+        const editDist = tc.edit_distance('kitten', 'sitting');
+        if (editDist === 3) {
+          addResult('Temporal Compare', 'Edit Distance', 'pass',
+            `Distance: ${editDist}`);
+        } else {
+          addResult('Temporal Compare', 'Edit Distance', 'fail',
+            `Expected 3, got ${editDist}`);
+        }
+
+        // Comprehensive analysis
+        const testSeq1 = Float64Array.from({length: 50}, (_, i) => Math.sin(i/5));
+        const testSeq2 = Float64Array.from({length: 50}, (_, i) => Math.sin(i/5 + 0.3));
+        const metrics = tc.analyze(testSeq1, testSeq2);
+
+        addResult('Temporal Compare', 'Comprehensive Analysis', 'pass',
+          `DTW: ${metrics.dtw_distance.toFixed(2)}\n` +
+          `LCS: ${metrics.lcs_length}\n` +
+          `Edit: ${metrics.edit_distance}\n` +
+          `Similarity: ${(metrics.similarity_score * 100).toFixed(1)}%`
+        );
+
+      } catch (e) {
+        addResult('Temporal Compare', 'Tests', 'fail', e.message);
+      }
+    }
+
+    async function testNanoScheduler() {
+      try {
+        const scheduler = new NanoScheduler();
+        addResult('NanoScheduler', 'Constructor', 'pass');
+
+        // Test now_ns
+        const now = scheduler.now_ns();
+        if (typeof now === 'number' && now > 0) {
+          addResult('NanoScheduler', 'now_ns()', 'pass',
+            `Time: ${now.toFixed(0)}ns`);
+        } else {
+          addResult('NanoScheduler', 'now_ns()', 'fail',
+            `Invalid time: ${now}`);
+        }
+
+        // Test scheduling
+        let taskExecuted = false;
+        const taskId = scheduler.schedule(() => {
+          taskExecuted = true;
+        }, 10000000); // 10ms
+
+        if (typeof taskId === 'number' && taskId > 0) {
+          addResult('NanoScheduler', 'schedule()', 'pass',
+            `Task ID: ${taskId}`);
+        } else {
+          addResult('NanoScheduler', 'schedule()', 'fail',
+            `Invalid task ID: ${taskId}`);
+        }
+
+        // Test pending count
+        const pending = scheduler.pending_count;
+        addResult('NanoScheduler', 'pending_count', 'pass',
+          `Pending: ${pending}`);
+
+        // Test tick after delay
+        await new Promise(resolve => setTimeout(resolve, 20));
+        const executed = scheduler.tick();
+
+        if (taskExecuted) {
+          addResult('NanoScheduler', 'tick() execution', 'pass',
+            `Executed ${executed} tasks`);
+        } else {
+          addResult('NanoScheduler', 'tick() execution', 'fail',
+            'Task not executed');
+        }
+
+        // Test cancel
+        const cancelId = scheduler.schedule(() => {}, 1000000000);
+        const cancelled = scheduler.cancel(cancelId);
+
+        if (cancelled) {
+          addResult('NanoScheduler', 'cancel()', 'pass');
+        } else {
+          addResult('NanoScheduler', 'cancel()', 'fail',
+            'Failed to cancel task');
+        }
+
+      } catch (e) {
+        addResult('NanoScheduler', 'Tests', 'fail', e.message);
+      }
+    }
+
+    function testMetaLearning() {
+      try {
+        const loop = new StrangeLoop(0.1);
+        addResult('Meta-Learning', 'Constructor', 'pass');
+
+        // Test observation
+        loop.observe('pattern-a', 0.5);
+        loop.observe('pattern-b', 0.8);
+        loop.observe('pattern-c', 0.3);
+
+        if (loop.iteration_count === 3 && loop.pattern_count === 3) {
+          addResult('Meta-Learning', 'observe()', 'pass',
+            `Iterations: ${loop.iteration_count}, Patterns: ${loop.pattern_count}`);
+        } else {
+          addResult('Meta-Learning', 'observe()', 'fail',
+            `Unexpected counts: ${loop.iteration_count}, ${loop.pattern_count}`);
+        }
+
+        // Test get_confidence
+        const confidence = loop.get_confidence('pattern-b');
+        if (confidence !== undefined && confidence >= 0 && confidence <= 1) {
+          addResult('Meta-Learning', 'get_confidence()', 'pass',
+            `Confidence: ${(confidence * 100).toFixed(1)}%`);
+        } else {
+          addResult('Meta-Learning', 'get_confidence()', 'fail',
+            `Invalid confidence: ${confidence}`);
+        }
+
+        // Test best pattern
+        const best = loop.best_pattern();
+        if (best && best.pattern_id === 'pattern-b') {
+          addResult('Meta-Learning', 'best_pattern()', 'pass',
+            `Best: ${best.pattern_id} (${(best.confidence * 100).toFixed(1)}%)`);
+        } else {
+          addResult('Meta-Learning', 'best_pattern()', 'fail',
+            `Unexpected best pattern: ${best?.pattern_id}`);
+        }
+
+        // Test reflection
+        const reflection = loop.reflect();
+        if (reflection && typeof reflection === 'object') {
+          addResult('Meta-Learning', 'reflect()', 'pass',
+            `Patterns: ${JSON.stringify(Object.keys(reflection))}`);
+        } else {
+          addResult('Meta-Learning', 'reflect()', 'fail',
+            'Invalid reflection object');
+        }
+
+      } catch (e) {
+        addResult('Meta-Learning', 'Tests', 'fail', e.message);
+      }
+    }
+
+    function testQuicMultistream() {
+      try {
+        const quic = new QuicMultistream();
+        addResult('QUIC Multistream', 'Constructor', 'pass');
+
+        // Test open stream
+        const streamId = quic.open_stream(128);
+        if (typeof streamId === 'number' && quic.stream_count === 1) {
+          addResult('QUIC Multistream', 'open_stream()', 'pass',
+            `Stream ID: ${streamId}, Count: ${quic.stream_count}`);
+        } else {
+          addResult('QUIC Multistream', 'open_stream()', 'fail',
+            `Invalid stream: ${streamId}`);
+        }
+
+        // Test send
+        const data = new Uint8Array([1, 2, 3, 4, 5]);
+        const sent = quic.send(streamId, data);
+        if (sent === 5) {
+          addResult('QUIC Multistream', 'send()', 'pass',
+            `Sent: ${sent} bytes`);
+        } else {
+          addResult('QUIC Multistream', 'send()', 'fail',
+            `Expected 5, got ${sent}`);
+        }
+
+        // Test receive
+        const received = quic.receive(streamId, 100);
+        if (received instanceof Uint8Array && received.length === 100) {
+          addResult('QUIC Multistream', 'receive()', 'pass',
+            `Received: ${received.length} bytes`);
+        } else {
+          addResult('QUIC Multistream', 'receive()', 'fail',
+            `Invalid receive: ${received?.length}`);
+        }
+
+        // Test stats
+        const stats = quic.get_stats(streamId);
+        if (stats && stats.stream_id === streamId) {
+          addResult('QUIC Multistream', 'get_stats()', 'pass',
+            `Sent: ${stats.bytes_sent}, Recv: ${stats.bytes_received}`);
+        } else {
+          addResult('QUIC Multistream', 'get_stats()', 'fail',
+            'Invalid stats');
+        }
+
+        // Test close
+        const closed = quic.close_stream(streamId);
+        if (closed && quic.stream_count === 0) {
+          addResult('QUIC Multistream', 'close_stream()', 'pass');
+        } else {
+          addResult('QUIC Multistream', 'close_stream()', 'fail',
+            `Failed to close stream`);
+        }
+
+      } catch (e) {
+        addResult('QUIC Multistream', 'Tests', 'fail', e.message);
+      }
+    }
+
+    function testPerformance() {
+      try {
+        // Benchmark DTW
+        const avgTime = benchmark_dtw(100, 100);
+        const throughput = 1000 / avgTime;
+
+        addResult('Performance', 'DTW Benchmark', 'pass',
+          `Avg time: ${avgTime.toFixed(3)}ms\n` +
+          `Throughput: ${throughput.toFixed(0)} ops/sec`
+        );
+
+        // Test different sizes
+        const time50 = benchmark_dtw(50, 50);
+        const time100 = benchmark_dtw(100, 50);
+        const time200 = benchmark_dtw(200, 50);
+
+        addResult('Performance', 'DTW Scaling', 'pass',
+          `50 elements: ${time50.toFixed(3)}ms\n` +
+          `100 elements: ${time100.toFixed(3)}ms\n` +
+          `200 elements: ${time200.toFixed(3)}ms`
+        );
+
+      } catch (e) {
+        addResult('Performance', 'Benchmarks', 'fail', e.message);
+      }
+    }
+
+    function testBrowserAPIs() {
+      // Check WebAssembly support
+      if (typeof WebAssembly !== 'undefined') {
+        addResult('Browser Compatibility', 'WebAssembly', 'pass',
+          'Full WASM support');
+      } else {
+        addResult('Browser Compatibility', 'WebAssembly', 'fail',
+          'No WASM support');
+      }
+
+      // Check Performance API
+      if (window.performance && typeof window.performance.now === 'function') {
+        addResult('Browser Compatibility', 'Performance API', 'pass',
+          `High-resolution timing available`);
+      } else {
+        addResult('Browser Compatibility', 'Performance API', 'fail',
+          'No Performance API');
+      }
+
+      // Check Crypto API
+      if (window.crypto && window.crypto.getRandomValues) {
+        addResult('Browser Compatibility', 'Crypto API', 'pass',
+          'Secure random available');
+      } else {
+        addResult('Browser Compatibility', 'Crypto API', 'fail',
+          'No Crypto API');
+      }
+
+      // Check typed arrays
+      const typedArrays = ['Float64Array', 'Int32Array', 'Uint8Array'];
+      const supported = typedArrays.filter(name => typeof window[name] !== 'undefined');
+
+      if (supported.length === typedArrays.length) {
+        addResult('Browser Compatibility', 'Typed Arrays', 'pass',
+          supported.join(', '));
+      } else {
+        addResult('Browser Compatibility', 'Typed Arrays', 'fail',
+          `Missing: ${typedArrays.filter(n => !supported.includes(n)).join(', ')}`);
+      }
+
+      // Check user agent
+      addResult('Browser Compatibility', 'User Agent', 'pass',
+        navigator.userAgent);
+    }
+
+    // Auto-run tests on load
+    window.addEventListener('load', () => {
+      console.log('Page loaded, ready to run tests');
+    });
+
+  </script>
+</body>
+</html>

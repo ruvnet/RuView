@@ -1,0 +1,52 @@
+[tool.poetry]
+name = "hyprstream-client"
+version = "0.1.0"
+description = "Python client for Hyprstream metrics service"
+authors = ["Erica Windisch <erica@cyberdione.ai>"]
+readme = "README.md"
+packages = [{include = "hyprstream_client"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+numpy = "1.24.3"
+pandas = "2.0.3"
+pyarrow = "12.0.1"
+adbc-driver-flightsql = "0.8.0"
+typing-extensions = "4.8.0"
+click = "^8.1.7"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.3"
+black = "^23.11.0"
+isort = "^5.12.0"
+mypy = "^1.7.0"
+ruff = "^0.1.5"
+
+[tool.poetry.scripts]
+hyprstream = "hyprstream_client.cli:cli"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+
+[tool.ruff]
+select = ["E", "F", "B", "I"]
+ignore = []
+line-length = 88
+target-version = "py38"

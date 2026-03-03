@@ -1,0 +1,61 @@
+/* tslint:disable */
+/* eslint-disable */
+export function init_wasm(): void;
+export function get_version(): string;
+export function create_nano_swarm(agent_count: number): string;
+export function run_swarm_ticks(ticks: number): number;
+export function quantum_superposition(qubits: number): string;
+export function quantum_superposition_old(qubits: number): string;
+export function measure_quantum_state(qubits: number): number;
+export function measure_quantum_state_old(qubits: number): number;
+export function evolve_consciousness(iterations: number): number;
+export function create_lorenz_attractor(sigma: number, rho: number, beta: number): string;
+export function step_attractor(x: number, y: number, z: number, dt: number): string;
+export function solve_linear_system_sublinear(size: number, tolerance: number): string;
+export function solve_linear_system_sublinear_old(size: number, tolerance: number): string;
+export function compute_pagerank(nodes: number, damping: number): string;
+export function create_retrocausal_loop(horizon: number): string;
+export function predict_future_state(current_value: number, horizon_ms: number): number;
+export function create_lipschitz_loop(constant: number): string;
+export function verify_convergence(lipschitz_constant: number, iterations: number): boolean;
+export function calculate_phi(elements: number, connections: number): number;
+export function verify_consciousness(phi: number, emergence: number, coherence: number): string;
+export function detect_temporal_patterns(window_size: number): string;
+export function quantum_classical_hybrid(qubits: number, classical_bits: number): string;
+export function create_self_modifying_loop(learning_rate: number): string;
+export function benchmark_nano_agents(agent_count: number): string;
+export function get_system_info(): string;
+export function create_bell_state(pair_type: number): string;
+export function quantum_entanglement_entropy(qubits: number): number;
+export function quantum_gate_teleportation(value: number): string;
+export function quantum_decoherence_time(qubits: number, temperature_mk: number): number;
+export function quantum_grover_iterations(database_size: number): number;
+export function quantum_phase_estimation(theta: number): string;
+/**
+ * HONEST quantum simulation - simplified but real
+ */
+export function quantum_simulate_honest(qubits: number): string;
+/**
+ * HONEST quantum measurement with real randomness
+ */
+export function quantum_measure_honest(qubits: number): number;
+/**
+ * HONEST consciousness metric - acknowledges it's just math
+ */
+export function consciousness_simulate_honest(iterations: number): string;
+/**
+ * HONEST swarm simulation - single-threaded for WASM
+ */
+export function swarm_simulate_honest(agents: number): string;
+/**
+ * HONEST solver - actually does simple computation
+ */
+export function solve_simple_honest(size: number): string;
+/**
+ * Get real random number between 0 and 1
+ */
+export function random_real(): number;
+/**
+ * Benchmark honesty check
+ */
+export function benchmark_honest(): string;

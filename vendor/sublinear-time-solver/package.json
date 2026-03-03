@@ -1,0 +1,120 @@
+{
+  "name": "sublinear-time-solver",
+  "version": "1.5.0",
+  "description": "The Ultimate Mathematical & AI Toolkit: Sublinear algorithms, consciousness exploration, psycho-symbolic reasoning, chaos analysis, and temporal prediction in one unified MCP interface. WASM-accelerated with Lyapunov exponents and attractor dynamics.",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "bin": {
+    "sublinear-time-solver": "dist/cli/index.js",
+    "sublinear-solver": "dist/cli/index.js",
+    "sublinear": "dist/cli/index.js",
+    "strange-loops": "dist/cli/index.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./mcp": {
+      "import": "./dist/mcp/index.js",
+      "types": "./dist/mcp/index.d.ts"
+    },
+    "./core": {
+      "import": "./dist/core/solver.js",
+      "types": "./dist/core/solver.d.ts"
+    },
+    "./tools": {
+      "import": "./dist/mcp/tools/index.js",
+      "types": "./dist/mcp/tools/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "npm run clean && npm run build:ts && npm run build:wasm",
+    "build:ts": "tsc",
+    "build:wasm": "node scripts/copy-wasm.js",
+    "build:dev": "tsc --watch",
+    "clean": "rm -rf dist/",
+    "test": "npm run build && node --test tests/",
+    "lint": "echo 'Linting would go here'",
+    "start": "npm run build && node dist/mcp/server.js",
+    "serve": "npm run build && node dist/cli/index.js serve",
+    "dev:serve": "tsx src/cli/index.ts serve",
+    "solve": "npm run build && node dist/cli/index.js solve",
+    "analyze": "npm run build && node dist/cli/index.js analyze",
+    "pagerank": "npm run build && node dist/cli/index.js pagerank"
+  },
+  "devDependencies": {
+    "wasm-pack": "^0.12.1"
+  },
+  "dependencies": {
+    "@ruvnet/strange-loop": "^0.3.0",
+    "strange-loops": "^0.5.1",
+    "@modelcontextprotocol/sdk": "^1.18.1",
+    "@ruvnet/bmssp": "^1.0.0",
+    "@types/node": "^24.5.2",
+    "chalk": "^4.1.2",
+    "commander": "^9.4.1",
+    "compression": "^1.7.4",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^7.1.0",
+    "ora": "^5.4.1",
+    "temporal-lead-solver": "^0.1.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "uuid": "^9.0.1",
+    "ws": "^8.14.2"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "keywords": [
+    "linear-algebra",
+    "solver",
+    "sublinear-time",
+    "diagonally-dominant",
+    "pagerank",
+    "random-walk",
+    "neumann-series",
+    "mcp",
+    "model-context-protocol",
+    "typescript",
+    "cli",
+    "graph-algorithms",
+    "asymmetric-matrices",
+    "consciousness",
+    "enhanced-ai",
+    "dynamic-responses",
+    "information-theory",
+    "emergence",
+    "self-modification",
+    "persistent-learning",
+    "stochastic-exploration",
+    "cross-tool-sharing",
+    "feedback-loops",
+    "emergent-behavior",
+    "johnson-lindenstrauss",
+    "spectral-sparsification",
+    "true-sublinear",
+    "o-log-n",
+    "dimension-reduction"
+  ],
+  "author": "rUv <github.com/ruvnet>",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ruvnet/sublinear-time-solver.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ruvnet/sublinear-time-solver/issues"
+  },
+  "homepage": "https://github.com/ruvnet/sublinear-time-solver#readme"
+}

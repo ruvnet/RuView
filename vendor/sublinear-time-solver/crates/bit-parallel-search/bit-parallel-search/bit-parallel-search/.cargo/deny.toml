@@ -1,0 +1,57 @@
+# Security audit configuration for cargo-deny
+
+[licenses]
+# We want all licenses to be explicitly approved
+unlicensed = "deny"
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+]
+deny = [
+    "GPL-2.0",
+    "GPL-3.0",
+    "AGPL-1.0",
+    "AGPL-3.0",
+]
+
+[bans]
+# Ban specific crates that are problematic
+multiple-versions = "warn"
+wildcards = "allow"
+
+# Security-sensitive dependencies to monitor
+[[bans.deny]]
+name = "openssl"
+use-instead = "rustls"
+
+[[bans.deny]]
+name = "chrono"
+version = "<0.4.20"  # Versions before this had security issues
+
+[advisories]
+# Security advisories database
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+
+# Warn about security advisories
+vulnerability = "deny"
+unmaintained = "warn"
+yanked = "deny"
+notice = "warn"
+
+[sources]
+# Only allow crates from these sources
+unknown-registry = "warn"
+unknown-git = "warn"
+
+[sources.allow-registry]
+urls = ["https://github.com/rust-lang/crates.io-index"]
+
+[sources.allow-git]
+# Allow git dependencies from trusted sources only
+# (none currently)

@@ -1,0 +1,49 @@
+{
+  "name": "psycho-symbolic-reasoner-mcp",
+  "version": "1.0.0",
+  "description": "FastMCP integration for psycho-symbolic reasoner WASM modules",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "build:wasm": "cd .. && cargo build --target wasm32-unknown-unknown --release",
+    "build:wasm-pack": "cd .. && wasm-pack build --target nodejs --out-dir mcp-integration/wasm",
+    "prepare": "npm run build:wasm-pack && npm run build",
+    "start": "node dist/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "wasm",
+    "reasoning",
+    "symbolic",
+    "ai",
+    "fastmcp"
+  ],
+  "author": "Psycho-Symbolic Reasoner Team",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.5.0",
+    "zod": "^3.22.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/uuid": "^9.0.0",
+    "@types/jest": "^29.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "jest": "^29.0.0",
+    "ts-jest": "^29.0.0",
+    "typescript": "^5.0.0",
+    "wasm-pack": "^0.12.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "timestamp": "2025-09-21T02:00:25.813Z",
+  "system": "Psycho-Symbolic Reasoner",
+  "environment": {
+    "node": "v22.17.0",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": {
+      "user": 105036,
+      "system": 23559
+    }
+  },
+  "benchmarks": {
+    "Simple Query": {
+      "iterations": 10000,
+      "mean": "0.000",
+      "median": "0.000",
+      "stdev": "0.001",
+      "min": "0.000",
+      "max": "0.049",
+      "p95": "0.000",
+      "p99": "0.001",
+      "unit": "ms"
+    },
+    "Complex Reasoning": {
+      "iterations": 10000,
+      "mean": "0.017",
+      "median": "0.015",
+      "stdev": "0.012",
+      "min": "0.013",
+      "max": "0.284",
+      "p95": "0.026",
+      "p99": "0.036",
+      "unit": "ms"
+    },
+    "Graph Traversal": {
+      "iterations": 10000,
+      "mean": "0.533",
+      "median": "0.502",
+      "stdev": "0.082",
+      "min": "0.439",
+      "max": "1.044",
+      "p95": "0.698",
+      "p99": "0.815",
+      "unit": "ms"
+    },
+    "GOAP Planning": {
+      "iterations": 10000,
+      "mean": "0.004",
+      "median": "0.003",
+      "stdev": "0.004",
+      "min": "0.003",
+      "max": "0.248",
+      "p95": "0.006",
+      "p99": "0.008",
+      "unit": "ms"
+    }
+  },
+  "highResolution": {
+    "mean": 0.00022313306000011046,
+    "median": 0.000191,
+    "min": 0.00016,
+    "max": 0.342039
+  }
+}

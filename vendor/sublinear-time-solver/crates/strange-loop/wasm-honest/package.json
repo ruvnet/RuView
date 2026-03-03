@@ -1,0 +1,27 @@
+{
+  "name": "strange-loop",
+  "collaborators": [
+    "rUv <ruv@ruv.io>"
+  ],
+  "description": "Hyper-optimized strange loops with temporal consciousness and quantum-classical hybrid computing. NPX: npx strange-loops",
+  "version": "0.2.0",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/sublinear-time-solver"
+  },
+  "files": [
+    "strange_loop_bg.wasm",
+    "strange_loop.js",
+    "strange_loop.d.ts"
+  ],
+  "main": "strange_loop.js",
+  "types": "strange_loop.d.ts",
+  "keywords": [
+    "temporal",
+    "consciousness",
+    "quantum",
+    "optimization",
+    "strange-loop"
+  ]
+}

@@ -1,0 +1,171 @@
+{
+  "name": "psycho-symbolic-reasoner",
+  "version": "1.0.7",
+  "description": "A psycho-symbolic reasoning framework combining symbolic AI with psychological context using Rust WASM and FastMCP integration",
+  "main": "dist/typescript/index.js",
+  "module": "dist/typescript/index.js",
+  "types": "dist/typescript/index.d.ts",
+  "type": "module",
+  "bin": {
+    "psycho-symbolic-reasoner": "./dist/typescript/cli/index.js",
+    "psycho-reasoner": "./dist/typescript/cli/index.js",
+    "psr": "./dist/typescript/cli/index.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/typescript/index.js",
+      "types": "./dist/typescript/index.d.ts"
+    },
+    "./mcp": {
+      "import": "./dist/typescript/mcp/index.js",
+      "types": "./dist/typescript/mcp/index.d.ts"
+    },
+    "./reasoner": {
+      "import": "./dist/typescript/reasoner/index.js",
+      "types": "./dist/typescript/reasoner/index.d.ts"
+    },
+    "./extractors": {
+      "import": "./dist/typescript/extractors/index.js",
+      "types": "./dist/typescript/extractors/index.d.ts"
+    },
+    "./planner": {
+      "import": "./dist/typescript/planner/index.js",
+      "types": "./dist/typescript/planner/index.d.ts"
+    },
+    "./wasm": {
+      "import": "./wasm/pkg/index.js",
+      "types": "./wasm/pkg/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "wasm/",
+    "docs/",
+    "examples/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "npm run clean && npm run build:ts",
+    "build:wasm": "wasm-pack build --target nodejs --out-dir ../wasm/pkg graph_reasoner && wasm-pack build --target nodejs --out-dir ../wasm/extractors extractors && wasm-pack build --target nodejs --out-dir ../wasm/planner planner",
+    "build:ts": "tsc && chmod +x dist/typescript/cli/index.js",
+    "build:dev": "tsc --watch",
+    "copy-wasm": "cp -r wasm/ dist/wasm/",
+    "clean": "rm -rf dist/ wasm/pkg/ wasm/extractors/ wasm/planner/",
+    "test": "npm run build && npm run test:rust && npm run test:ts",
+    "test:rust": "cargo test",
+    "test:ts": "node --test tests/",
+    "test:integration": "npm run build && node tests/integration.test.js",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "format": "prettier --write 'src/**/*.{ts,js,json}'",
+    "format:check": "prettier --check 'src/**/*.{ts,js,json}'",
+    "typecheck": "tsc --noEmit",
+    "start": "npm run build && node dist/typescript/mcp/server.js",
+    "serve": "npm run build && node dist/typescript/cli/index.js serve",
+    "dev:serve": "tsx src/typescript/cli/index.ts serve",
+    "dev:mcp": "tsx src/typescript/mcp/server.ts",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build:wasm && npm run build:ts && chmod +x dist/typescript/cli/index.js",
+    "release": "npm run test && npm run build && npm publish",
+    "release:beta": "npm run test && npm run build && npm publish --tag beta",
+    "version:patch": "npm version patch",
+    "version:minor": "npm version minor",
+    "version:major": "npm version major",
+    "docs:build": "typedoc --out docs/api src/",
+    "docs:serve": "http-server docs/",
+    "benchmark": "node dist/benchmarks/index.js",
+    "example:basic": "node examples/basic-usage.js",
+    "example:advanced": "node examples/advanced-reasoning.js",
+    "example:mcp": "node examples/mcp-integration.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@typescript-eslint/eslint-plugin": "^7.13.0",
+    "@typescript-eslint/parser": "^7.13.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.1.3",
+    "http-server": "^14.1.1",
+    "prettier": "^3.3.2",
+    "tsx": "^4.20.5",
+    "typedoc": "^0.26.3",
+    "typescript": "^5.9.2",
+    "wasm-pack": "^0.12.1"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.1",
+    "chalk": "^5.3.0",
+    "commander": "^11.1.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.3.1",
+    "fastmcp": "^2.0.0",
+    "helmet": "^7.1.0",
+    "ora": "^8.0.1",
+    "uuid": "^10.0.0",
+    "ws": "^8.18.0",
+    "winston": "^3.11.0",
+    "yaml": "^2.3.4",
+    "zod": "^3.22.4"
+  },
+  "peerDependencies": {
+    "node": ">=18.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "keywords": [
+    "psycho-symbolic",
+    "reasoning",
+    "symbolic-ai",
+    "psychology",
+    "affect",
+    "preferences",
+    "planning",
+    "wasm",
+    "webassembly",
+    "rust",
+    "mcp",
+    "model-context-protocol",
+    "fastmcp",
+    "ai-agents",
+    "autonomous-agents",
+    "graph-reasoning",
+    "sentiment-analysis",
+    "goal-oriented-planning",
+    "typescript",
+    "cli",
+    "sdk",
+    "framework",
+    "inference-engine",
+    "rule-based-planning",
+    "sandboxed-execution",
+    "verifiable-reasoning"
+  ],
+  "author": {
+    "name": "rUv",
+    "url": "https://github.com/ruvnet",
+    "email": "github@ruv.net"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/sublinear-time-solver.git",
+    "directory": "psycho-symbolic-reasoner"
+  },
+  "bugs": {
+    "url": "https://github.com/ruvnet/sublinear-time-solver/issues"
+  },
+  "homepage": "https://github.com/ruvnet/sublinear-time-solver/tree/main/psycho-symbolic-reasoner#readme",
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/ruvnet"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}

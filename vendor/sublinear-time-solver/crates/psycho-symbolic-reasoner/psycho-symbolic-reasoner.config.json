@@ -1,0 +1,39 @@
+{
+  "server": {
+    "transport": "stdio",
+    "port": 3000,
+    "host": "localhost",
+    "cors": true,
+    "maxConnections": 100,
+    "timeout": 30000
+  },
+  "knowledgeBase": {
+    "autoSave": true,
+    "saveInterval": 30000,
+    "format": "json",
+    "compression": false
+  },
+  "logging": {
+    "level": "info",
+    "console": true,
+    "json": false,
+    "timestamp": true,
+    "maxSize": "10m",
+    "maxFiles": 5
+  },
+  "performance": {
+    "maxMemoryUsage": "512m",
+    "gcInterval": 60000,
+    "enableProfiling": false,
+    "metricsInterval": 10000
+  },
+  "security": {
+    "enableAuth": false,
+    "rateLimit": {
+      "enabled": true,
+      "windowMs": 60000,
+      "maxRequests": 100
+    },
+    "allowedOrigins": ["*"]
+  }
+}

@@ -1,0 +1,54 @@
+[package]
+name = "midstream-wasm"
+version = "1.0.0"
+authors = ["Midstream Contributors"]
+edition = "2021"
+description = "WebAssembly bindings for Midstream temporal comparison, scheduling, and meta-learning"
+license = "MIT"
+repository = "https://github.com/midstream/midstream"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["temporal", "scheduler", "strange-loop", "quic"]
+temporal = []
+scheduler = []
+strange-loop = []
+quic = []
+
+[dependencies]
+wasm-bindgen = "0.2.89"
+wasm-bindgen-futures = "0.4.39"
+js-sys = "0.3.66"
+serde = { version = "1.0", features = ["derive"] }
+serde-wasm-bindgen = "0.6.3"
+getrandom = { version = "0.2", features = ["js"] }
+console_error_panic_hook = "0.1.7"
+
+# Web APIs
+web-sys = { version = "0.3.66", features = [
+    "console",
+    "Performance",
+    "Window",
+    "Navigator",
+    "WorkerGlobalScope",
+    "DedicatedWorkerGlobalScope",
+    "MessageEvent",
+    "MessagePort",
+    "Crypto",
+    "SubtleCrypto",
+] }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3.39"
+
+[profile.release]
+opt-level = "z"     # Optimize for size
+lto = true          # Enable Link Time Optimization
+codegen-units = 1   # Reduce number of codegen units to increase optimizations
+panic = "abort"     # Abort on panic (smaller binary)
+strip = true        # Strip symbols
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Oz", "--enable-mutable-globals", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]

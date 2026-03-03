@@ -1,0 +1,97 @@
+{
+  "timestamp": "2025-09-21T02:00:11.144Z",
+  "verification": "Performance Claims Verification",
+  "environment": {
+    "node": "v22.17.0",
+    "platform": "linux",
+    "arch": "x64",
+    "cores": 4
+  },
+  "psychoSymbolicResults": {
+    "Psycho-Symbolic Simple": {
+      "claimed": 0.3,
+      "measured": {
+        "median": "0.000",
+        "mean": "0.000",
+        "hrMedian": "0.000",
+        "hrMean": "0.000",
+        "p95": "0.000",
+        "p99": "0.000",
+        "min": "0.000",
+        "max": "0.583"
+      },
+      "iterations": 100000,
+      "withinClaim": true
+    },
+    "Psycho-Symbolic Complex": {
+      "claimed": 2.1,
+      "measured": {
+        "median": "0.015",
+        "mean": "0.017",
+        "hrMedian": "0.015",
+        "hrMean": "0.017",
+        "p95": "0.025",
+        "p99": "0.060",
+        "min": "0.013",
+        "max": "2.285"
+      },
+      "iterations": 10000,
+      "withinClaim": true
+    },
+    "Psycho-Symbolic Graph": {
+      "claimed": 1.2,
+      "measured": {
+        "median": "0.494",
+        "mean": "0.528",
+        "hrMedian": "0.495",
+        "hrMean": "0.529",
+        "p95": "0.712",
+        "p99": "0.826",
+        "min": "0.430",
+        "max": "1.489"
+      },
+      "iterations": 10000,
+      "withinClaim": true
+    },
+    "Psycho-Symbolic GOAP": {
+      "claimed": 1.8,
+      "measured": {
+        "median": "0.003",
+        "mean": "0.004",
+        "hrMedian": "0.003",
+        "hrMean": "0.004",
+        "p95": "0.008",
+        "p99": "0.009",
+        "min": "0.003",
+        "max": "0.321"
+      },
+      "iterations": 10000,
+      "withinClaim": true
+    }
+  },
+  "comparisons": [
+    {
+      "operation": "Simple Query/Reasoning",
+      "traditional": "GPT-4: 206.8ms",
+      "psychoSymbolic": "0.000ms",
+      "speedup": "1284423x faster"
+    },
+    {
+      "operation": "Complex Reasoning",
+      "traditional": "GPT-4: 743.2ms",
+      "psychoSymbolic": "0.015ms",
+      "speedup": "50260x faster"
+    },
+    {
+      "operation": "Logic Programming",
+      "traditional": "Prolog: 33.0ms",
+      "psychoSymbolic": "0.000ms",
+      "speedup": "204664x faster"
+    }
+  ],
+  "summary": {
+    "claimsVerified": 4,
+    "totalClaims": 4,
+    "averageSpeedup": 513116
+  }
+}

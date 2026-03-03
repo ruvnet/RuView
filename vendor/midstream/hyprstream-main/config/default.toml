@@ -1,0 +1,18 @@
+# Server Configuration
+[server]
+host = "127.0.0.1"
+port = 50051
+
+# Primary Storage Engine Configuration
+[engine]
+engine = "duckdb"
+connection = ":memory:"
+options = {}
+
+# Cache Configuration
+[cache]
+enabled = true
+engine = "duckdb"
+connection = ":memory:"
+max_duration_secs = 3600
+options = {} 

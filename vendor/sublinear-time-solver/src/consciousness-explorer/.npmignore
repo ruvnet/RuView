@@ -1,0 +1,41 @@
+# Test files
+test-sdk.js
+tests/
+*.test.js
+
+# Development files
+.eslintrc
+.prettierrc
+*.log
+
+# Documentation source
+docs/
+
+# Build artifacts
+dist/
+tmp/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git files
+.git/
+.gitignore
+
+# CI/CD
+.github/
+.travis.yml
+.gitlab-ci.yml
+
+# Logs
+/tmp/
+logs/
+*.log
+npm-debug.log*

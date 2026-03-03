@@ -1,0 +1,28 @@
+{
+  "name": "psycho-symbolic-performance-validation",
+  "version": "1.0.0",
+  "description": "Verifiable performance benchmarks for Psycho-Symbolic Reasoner",
+  "type": "module",
+  "scripts": {
+    "benchmark:all": "node benchmarks/run-all.js",
+    "benchmark:psycho": "node benchmarks/psycho-symbolic-bench.js",
+    "benchmark:traditional": "node benchmarks/traditional-bench.js",
+    "benchmark:verify": "node benchmarks/verify-claims.js",
+    "report:generate": "node scripts/generate-report.js",
+    "docker:build": "docker build -t psycho-benchmark .",
+    "docker:run": "docker run --rm psycho-benchmark"
+  },
+  "dependencies": {
+    "benchmark": "^2.1.4",
+    "chalk": "^5.3.0",
+    "cli-table3": "^0.6.3",
+    "mathjs": "^12.2.1",
+    "perf_hooks": "^0.0.1",
+    "stats-lite": "^2.2.0"
+  },
+  "devDependencies": {
+    "@types/benchmark": "^2.1.5",
+    "@types/node": "^20.10.5",
+    "typescript": "^5.3.3"
+  }
+}

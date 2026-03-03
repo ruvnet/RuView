@@ -1,0 +1,24 @@
+{
+  "name": "lean-agentic-wasm-demo",
+  "version": "1.0.0",
+  "description": "Ultra-low-latency WASM demo with WebSocket and SSE support",
+  "main": "index.js",
+  "scripts": {
+    "build": "webpack --mode production",
+    "dev": "webpack serve --mode development",
+    "test": "jest"
+  },
+  "dependencies": {
+    "lean-agentic-wasm": "file:../pkg",
+    "agentic-flow": "^1.8.10",
+    "@midstream/lean-agentic": "file:../../lean-agentic-js"
+  },
+  "devDependencies": {
+    "@wasm-tool/wasm-pack-plugin": "^1.7.0",
+    "copy-webpack-plugin": "^11.0.0",
+    "html-webpack-plugin": "^5.5.3",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^4.15.1"
+  }
+}

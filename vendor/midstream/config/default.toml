@@ -1,0 +1,25 @@
+# Default Hyprstream Configuration
+
+[engine]
+engine = "duckdb"
+connection = ":memory:"
+
+[engine.options]
+threads = "4"
+memory_limit = "4GB"
+
+[cache]
+enabled = true
+engine = "duckdb"
+connection = ":memory:"
+max_duration_secs = 3600  # 1 hour
+
+[tools.weather]
+api_url = "https://api.weather.example.com"
+api_key = "default_key"  # Override this in local.toml or environment variables
+default_location = "San Francisco"
+
+[tools.calendar]
+api_url = "https://api.calendar.example.com"
+api_key = "default_key"  # Override this in local.toml or environment variables
+timezone = "UTC"
