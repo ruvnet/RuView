@@ -301,6 +301,20 @@ Base URL: `http://localhost:3000` (Docker) or `http://localhost:8080` (binary de
 | `GET` | `/api/v1/model/layers` | Progressive model loading status | Layer A/B/C load state |
 | `GET` | `/api/v1/model/sona/profiles` | SONA adaptation profiles | List of environment profiles |
 | `POST` | `/api/v1/model/sona/activate` | Activate a SONA profile for a specific room | `{"profile":"kitchen"}` |
+| `GET` | `/api/v1/models` | List available RVF model files | `{"models":[...],"count":0}` |
+| `GET` | `/api/v1/models/active` | Currently loaded model (or null) | `{"model":null}` |
+| `POST` | `/api/v1/models/load` | Load a model by ID | `{"status":"loaded","model_id":"..."}` |
+| `POST` | `/api/v1/models/unload` | Unload the active model | `{"status":"unloaded"}` |
+| `DELETE` | `/api/v1/models/:id` | Delete a model file from disk | `{"status":"deleted"}` |
+| `GET` | `/api/v1/models/lora/profiles` | List LoRA adapter profiles | `{"profiles":[]}` |
+| `POST` | `/api/v1/models/lora/activate` | Activate a LoRA profile | `{"status":"activated"}` |
+| `GET` | `/api/v1/recording/list` | List CSI recording sessions | `{"recordings":[...],"count":0}` |
+| `POST` | `/api/v1/recording/start` | Start recording CSI frames to JSONL | `{"status":"recording","session_id":"..."}` |
+| `POST` | `/api/v1/recording/stop` | Stop the active recording | `{"status":"stopped","duration_secs":...}` |
+| `DELETE` | `/api/v1/recording/:id` | Delete a recording file | `{"status":"deleted"}` |
+| `GET` | `/api/v1/train/status` | Training run status | `{"phase":"idle"}` |
+| `POST` | `/api/v1/train/start` | Start a training run | `{"status":"started"}` |
+| `POST` | `/api/v1/train/stop` | Stop the active training run | `{"status":"stopped"}` |
 
 ### Example: Get Vital Signs
 
@@ -347,7 +361,9 @@ curl -s http://localhost:3000/api/v1/pose/current | python -m json.tool
 
 Real-time sensing data is available via WebSocket.
 
-**URL:** `ws://localhost:3001/ws/sensing` (Docker) or `ws://localhost:8765/ws/sensing` (binary default).
+**URL:** `ws://localhost:3000/ws/sensing` (same port as HTTP — recommended) or `ws://localhost:3001/ws/sensing` (dedicated WS port).
+
+> **Note:** The `/ws/sensing` WebSocket endpoint is available on both the HTTP port (3000) and the dedicated WebSocket port (3001/8765). The web UI uses the HTTP port so only one port needs to be exposed. The dedicated WS port remains available for backward compatibility.
 
 ### Python Example
 
@@ -812,7 +828,7 @@ The Rust implementation (v2) is 810x faster than Python (v1) for the full CSI pi
 
 ## Further Reading
 
-- [Architecture Decision Records](../docs/adr/) - 33 ADRs covering all design decisions
+- [Architecture Decision Records](../docs/adr/) - 43 ADRs covering all design decisions
 - [WiFi-Mat Disaster Response Guide](wifi-mat-user-guide.md) - Search & rescue module
 - [Build Guide](build-guide.md) - Detailed build instructions
 - [RuVector](https://github.com/ruvnet/ruvector) - Signal intelligence crate ecosystem

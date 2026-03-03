@@ -57,7 +57,7 @@ All 5 ruvector crates integrated in workspace:
 - `ruvector-attention` → `model.rs` (apply_spatial_attention) + `bvp.rs`
 
 ### Architecture Decisions
-32 ADRs in `docs/adr/` (ADR-001 through ADR-032). Key ones:
+43 ADRs in `docs/adr/` (ADR-001 through ADR-043). Key ones:
 - ADR-014: SOTA signal processing (Accepted)
 - ADR-015: MM-Fi + Wi-Pose training datasets (Accepted)
 - ADR-016: RuVector training pipeline integration (Accepted — complete)
@@ -173,7 +173,7 @@ Active feature branch: `ruvsense-full-implementation` (PR #77)
 ## File Organization
 
 - NEVER save to root folder — use the directories below
-- `docs/adr/` — Architecture Decision Records (32 ADRs)
+- `docs/adr/` — Architecture Decision Records (43 ADRs)
 - `docs/ddd/` — Domain-Driven Design models
 - `rust-port/wifi-densepose-rs/crates/` — Rust workspace crates (15 crates)
 - `rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/` — RuvSense multistatic modules (14 files)
