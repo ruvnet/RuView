@@ -35,6 +35,8 @@
 #![allow(clippy::missing_safety_doc)]
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
+// ── ADR-040 flagship modules ─────────────────────────────────────────────────
+
 pub mod gesture;
 pub mod coherence;
 pub mod adversarial;
@@ -42,6 +44,56 @@ pub mod rvf;
 pub mod occupancy;
 pub mod vital_trend;
 pub mod intrusion;
+
+// ── Shared vendor utilities (ADR-041) ────────────────────────────────────────
+
+pub mod vendor_common;
+
+// ── Vendor-integrated modules (ADR-041 Category 7) ──────────────────────────
+//
+// 24 modules organised into 7 sub-categories.  Each module file lives in
+// `src/` and follows the same pattern as the flagship modules: a no_std
+// struct with `const fn new()` and a `process_frame`-style entry point.
+//
+// Signal Intelligence (wdp-sig-*, event IDs 680-727)
+pub mod sig_coherence_gate;
+pub mod sig_flash_attention;
+pub mod sig_temporal_compress;
+pub mod sig_sparse_recovery;
+pub mod sig_mincut_person_match;
+pub mod sig_optimal_transport;
+//
+// Adaptive Learning (wdp-lrn-*, event IDs 730-748)
+pub mod lrn_dtw_gesture_learn;
+pub mod lrn_anomaly_attractor;
+pub mod lrn_meta_adapt;
+pub mod lrn_ewc_lifelong;
+//
+// Spatial Reasoning (wdp-spt-*, event IDs 760-773)
+pub mod spt_pagerank_influence;
+pub mod spt_micro_hnsw;
+pub mod spt_spiking_tracker;
+//
+// Temporal Analysis (wdp-tmp-*, event IDs 790-803)
+pub mod tmp_pattern_sequence;
+pub mod tmp_temporal_logic_guard;
+pub mod tmp_goap_autonomy;
+//
+// AI Security (wdp-ais-*, event IDs 820-828)
+pub mod ais_prompt_shield;
+pub mod ais_behavioral_profiler;
+//
+// Quantum-Inspired (wdp-qnt-*, event IDs 850-857)
+pub mod qnt_quantum_coherence;
+pub mod qnt_interference_search;
+//
+// Autonomous Systems (wdp-aut-*, event IDs 880-888)
+pub mod aut_psycho_symbolic;
+pub mod aut_self_healing_mesh;
+//
+// Exotic / Research (wdp-exo-*, event IDs 680-687)
+pub mod exo_time_crystal;
+pub mod exo_hyperbolic_space;
 
 // ── Host API FFI bindings ────────────────────────────────────────────────────
 
@@ -89,21 +141,28 @@ extern "C" {
 /// Event type constants emitted via `csi_emit_event`.
 ///
 /// Registry (ADR-041):
-///   0-99:   Core (gesture, coherence, anomaly, custom)
+///   0-99:    Core (gesture, coherence, anomaly, custom)
 ///   100-199: Medical (vital trends, apnea, brady/tachycardia)
 ///   200-299: Security (intrusion, tamper, perimeter)
 ///   300-399: Smart Building (occupancy zones, HVAC, lighting)
 ///   400-499: Retail (foot traffic, dwell time)
 ///   500-599: Industrial (vibration, proximity)
-///   600-699: Exotic (weather, wildlife, paranormal)
+///   600-699: Exotic (time crystals 680-682, hyperbolic space 685-687)
+///   700-729: Vendor Signal Intelligence
+///   730-759: Vendor Adaptive Learning
+///   760-789: Vendor Spatial Reasoning
+///   790-819: Vendor Temporal Analysis
+///   820-849: Vendor AI Security
+///   850-879: Vendor Quantum-Inspired
+///   880-899: Vendor Autonomous Systems
 pub mod event_types {
-    // Core (0-99)
+    // ── Core (0-99) ──────────────────────────────────────────────────────
     pub const GESTURE_DETECTED: i32 = 1;
     pub const COHERENCE_SCORE: i32 = 2;
     pub const ANOMALY_DETECTED: i32 = 3;
     pub const CUSTOM_METRIC: i32 = 10;
 
-    // Medical (100-199) — see vital_trend module
+    // ── Medical (100-199) ────────────────────────────────────────────────
     pub const VITAL_TREND: i32 = 100;
     pub const BRADYPNEA: i32 = 101;
     pub const TACHYPNEA: i32 = 102;
@@ -111,14 +170,162 @@ pub mod event_types {
     pub const TACHYCARDIA: i32 = 104;
     pub const APNEA: i32 = 105;
 
-    // Security (200-299) — see intrusion module
+    // ── Security (200-299) ───────────────────────────────────────────────
     pub const INTRUSION_ALERT: i32 = 200;
     pub const INTRUSION_ZONE: i32 = 201;
 
-    // Smart Building (300-399) — see occupancy module
+    // ── Smart Building (300-399) ─────────────────────────────────────────
     pub const ZONE_OCCUPIED: i32 = 300;
     pub const ZONE_COUNT: i32 = 301;
     pub const ZONE_TRANSITION: i32 = 302;
+
+    // ── Exotic / Research (600-699) ──────────────────────────────────────
+
+    // exo_time_crystal (680-682)
+    pub const CRYSTAL_DETECTED: i32 = 680;
+    pub const CRYSTAL_STABILITY: i32 = 681;
+    pub const COORDINATION_INDEX: i32 = 682;
+
+    // exo_hyperbolic_space (685-687)
+    pub const HIERARCHY_LEVEL: i32 = 685;
+    pub const HYPERBOLIC_RADIUS: i32 = 686;
+    pub const LOCATION_LABEL: i32 = 687;
+
+    // ── Signal Intelligence (700-729) ────────────────────────────────────
+
+    // sig_flash_attention (700-702)
+    pub const ATTENTION_PEAK_SC: i32 = 700;
+    pub const ATTENTION_SPREAD: i32 = 701;
+    pub const SPATIAL_FOCUS_ZONE: i32 = 702;
+
+    // sig_temporal_compress (705-707)
+    pub const COMPRESSION_RATIO: i32 = 705;
+    pub const TIER_TRANSITION: i32 = 706;
+    pub const HISTORY_DEPTH_HOURS: i32 = 707;
+
+    // sig_coherence_gate (710-712)
+    pub const GATE_DECISION: i32 = 710;
+    pub const SIG_COHERENCE_SCORE: i32 = 711;
+    pub const RECALIBRATE_NEEDED: i32 = 712;
+
+    // sig_sparse_recovery (715-717)
+    pub const RECOVERY_COMPLETE: i32 = 715;
+    pub const RECOVERY_ERROR: i32 = 716;
+    pub const DROPOUT_RATE: i32 = 717;
+
+    // sig_mincut_person_match (720-722)
+    pub const PERSON_ID_ASSIGNED: i32 = 720;
+    pub const PERSON_ID_SWAP: i32 = 721;
+    pub const MATCH_CONFIDENCE: i32 = 722;
+
+    // sig_optimal_transport (725-727)
+    pub const WASSERSTEIN_DISTANCE: i32 = 725;
+    pub const DISTRIBUTION_SHIFT: i32 = 726;
+    pub const SUBTLE_MOTION: i32 = 727;
+
+    // ── Adaptive Learning (730-759) ──────────────────────────────────────
+
+    // lrn_dtw_gesture_learn (730-733)
+    pub const GESTURE_LEARNED: i32 = 730;
+    pub const GESTURE_MATCHED: i32 = 731;
+    pub const LRN_MATCH_DISTANCE: i32 = 732;
+    pub const TEMPLATE_COUNT: i32 = 733;
+
+    // lrn_anomaly_attractor (735-738)
+    pub const ATTRACTOR_TYPE: i32 = 735;
+    pub const LYAPUNOV_EXPONENT: i32 = 736;
+    pub const BASIN_DEPARTURE: i32 = 737;
+    pub const LEARNING_COMPLETE: i32 = 738;
+
+    // lrn_meta_adapt (740-743)
+    pub const PARAM_ADJUSTED: i32 = 740;
+    pub const ADAPTATION_SCORE: i32 = 741;
+    pub const ROLLBACK_TRIGGERED: i32 = 742;
+    pub const META_LEVEL: i32 = 743;
+
+    // lrn_ewc_lifelong (745-748)
+    pub const KNOWLEDGE_RETAINED: i32 = 745;
+    pub const NEW_TASK_LEARNED: i32 = 746;
+    pub const FISHER_UPDATE: i32 = 747;
+    pub const FORGETTING_RISK: i32 = 748;
+
+    // ── Spatial Reasoning (760-789) ──────────────────────────────────────
+
+    // spt_pagerank_influence (760-762)
+    pub const DOMINANT_PERSON: i32 = 760;
+    pub const INFLUENCE_SCORE: i32 = 761;
+    pub const INFLUENCE_CHANGE: i32 = 762;
+
+    // spt_micro_hnsw (765-768)
+    pub const NEAREST_MATCH_ID: i32 = 765;
+    pub const HNSW_MATCH_DISTANCE: i32 = 766;
+    pub const CLASSIFICATION: i32 = 767;
+    pub const LIBRARY_SIZE: i32 = 768;
+
+    // spt_spiking_tracker (770-773)
+    pub const TRACK_UPDATE: i32 = 770;
+    pub const TRACK_VELOCITY: i32 = 771;
+    pub const SPIKE_RATE: i32 = 772;
+    pub const TRACK_LOST: i32 = 773;
+
+    // ── Temporal Analysis (790-819) ──────────────────────────────────────
+
+    // tmp_pattern_sequence (790-793)
+    pub const PATTERN_DETECTED: i32 = 790;
+    pub const PATTERN_CONFIDENCE: i32 = 791;
+    pub const ROUTINE_DEVIATION: i32 = 792;
+    pub const PREDICTION_NEXT: i32 = 793;
+
+    // tmp_temporal_logic_guard (795-797)
+    pub const LTL_VIOLATION: i32 = 795;
+    pub const LTL_SATISFACTION: i32 = 796;
+    pub const COUNTEREXAMPLE: i32 = 797;
+
+    // tmp_goap_autonomy (800-803)
+    pub const GOAL_SELECTED: i32 = 800;
+    pub const MODULE_ACTIVATED: i32 = 801;
+    pub const MODULE_DEACTIVATED: i32 = 802;
+    pub const PLAN_COST: i32 = 803;
+
+    // ── AI Security (820-849) ────────────────────────────────────────────
+
+    // ais_prompt_shield (820-823)
+    pub const REPLAY_ATTACK: i32 = 820;
+    pub const INJECTION_DETECTED: i32 = 821;
+    pub const JAMMING_DETECTED: i32 = 822;
+    pub const SIGNAL_INTEGRITY: i32 = 823;
+
+    // ais_behavioral_profiler (825-828)
+    pub const BEHAVIOR_ANOMALY: i32 = 825;
+    pub const PROFILE_DEVIATION: i32 = 826;
+    pub const NOVEL_PATTERN: i32 = 827;
+    pub const PROFILE_MATURITY: i32 = 828;
+
+    // ── Quantum-Inspired (850-879) ───────────────────────────────────────
+
+    // qnt_quantum_coherence (850-852)
+    pub const ENTANGLEMENT_ENTROPY: i32 = 850;
+    pub const DECOHERENCE_EVENT: i32 = 851;
+    pub const BLOCH_DRIFT: i32 = 852;
+
+    // qnt_interference_search (855-857)
+    pub const HYPOTHESIS_WINNER: i32 = 855;
+    pub const HYPOTHESIS_AMPLITUDE: i32 = 856;
+    pub const SEARCH_ITERATIONS: i32 = 857;
+
+    // ── Autonomous Systems (880-899) ─────────────────────────────────────
+
+    // aut_psycho_symbolic (880-883)
+    pub const INFERENCE_RESULT: i32 = 880;
+    pub const INFERENCE_CONFIDENCE: i32 = 881;
+    pub const RULE_FIRED: i32 = 882;
+    pub const CONTRADICTION: i32 = 883;
+
+    // aut_self_healing_mesh (885-888)
+    pub const NODE_DEGRADED: i32 = 885;
+    pub const MESH_RECONFIGURE: i32 = 886;
+    pub const COVERAGE_SCORE: i32 = 887;
+    pub const HEALING_COMPLETE: i32 = 888;
 }
 
 /// Log a message string to the ESP32 console (via host_log import).
@@ -181,7 +388,8 @@ pub extern "C" fn on_init() {
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
 pub extern "C" fn on_frame(n_subcarriers: i32) {
-    let n_sc = n_subcarriers as usize;
+    // M-01 fix: treat negative host values as 0 instead of wrapping to usize::MAX.
+    let n_sc = if n_subcarriers < 0 { 0 } else { n_subcarriers as usize };
     let state = unsafe { &mut *core::ptr::addr_of_mut!(STATE) };
     state.frame_count += 1;
 

@@ -68,6 +68,11 @@ impl CoherenceMonitor {
     pub fn process_frame(&mut self, phases: &[f32]) -> f32 {
         let n_sc = if phases.len() > MAX_SC { MAX_SC } else { phases.len() };
 
+        // H-01 fix: guard against zero subcarriers to prevent division by zero.
+        if n_sc == 0 {
+            return self.smoothed_coherence;
+        }
+
         if !self.initialized {
             for i in 0..n_sc {
                 self.prev_phases[i] = phases[i];
@@ -94,6 +99,10 @@ impl CoherenceMonitor {
         let n = n_sc as f32;
         let mean_re = sum_re / n;
         let mean_im = sum_im / n;
+
+        // M-02 fix: store per-frame mean phasor so mean_phasor_angle() is accurate.
+        self.phasor_re = mean_re;
+        self.phasor_im = mean_im;
 
         // Coherence = magnitude of mean phasor [0, 1].
         let coherence = sqrtf(mean_re * mean_re + mean_im * mean_im);

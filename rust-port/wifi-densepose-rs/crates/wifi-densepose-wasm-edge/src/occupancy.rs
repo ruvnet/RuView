@@ -98,6 +98,11 @@ impl OccupancyDetector {
             let end = if z == zone_count - 1 { n_sc } else { start + subs_per_zone };
             let count = (end - start) as f32;
 
+            // H-02 fix: guard against zero-count zones to prevent division by zero.
+            if count < 1.0 {
+                continue;
+            }
+
             let mut mean = 0.0f32;
             for i in start..end {
                 mean += amplitudes[i];
