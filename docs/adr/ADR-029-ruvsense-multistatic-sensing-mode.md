@@ -74,6 +74,8 @@ static uint32_t s_dwell_ms = 50;  // 50ms per channel
 
 At 100 Hz raw CSI rate with 50 ms dwell across 3 channels, each channel yields ~33 frames/second. The existing ADR-018 binary frame format already carries `channel_freq_mhz` at offset 8, so no wire format change is needed.
 
+> **Note (Issue #127 fix):** In promiscuous mode, CSI callbacks fire 100-500+ times/sec — far exceeding the channel dwell rate. The firmware now rate-limits UDP sends to 50 Hz and applies a 100 ms ENOMEM backoff if lwIP buffers are exhausted. This is essential for stable channel hopping under load.
+
 **NDP frame injection:** `esp_wifi_80211_tx()` injects deterministic Null Data Packet frames (preamble-only, no payload, ~24 us airtime) at GPIO-triggered intervals. This is sensing-first: the primary RF emission purpose is CSI measurement, not data communication.
 
 ### 2.3 Multi-Band Frame Fusion
@@ -364,6 +366,7 @@ No new workspace dependencies. All ruvector crates are already in the workspace 
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
 | ESP32 channel hop causes CSI gaps | Medium | Reduced effective rate | Measure gap duration; increase dwell if >5ms |
+| CSI callback rate exhausts lwIP pbufs | **Resolved** | Guru meditation crash | 50 Hz rate limiter + 100 ms ENOMEM backoff (Issue #127, PR #132) |
 | 5 GHz CSI unavailable on S3 | High | Lose frequency diversity | Fallback: 3-channel 2.4 GHz still provides 3x BW; ESP32-C6 for dual-band |
 | Model inference >40ms | Medium | Miss 20 Hz target | Run model at 10 Hz; Kalman predict at 20 Hz interpolates |
 | Two-person separation fails at 3 nodes | Low | Identity swaps | AETHER re-ID recovers; increase to 4-6 nodes |

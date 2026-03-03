@@ -96,6 +96,13 @@ static void csi_data_callback(void *ctx, wifi_csi_info_t *info) {
 
 **No on-device FFT** (contradicting ADR-012's optional feature extraction path): The Rust aggregator will do feature extraction using the SOTA `wifi-densepose-signal` pipeline. Raw I/Q is cheaper to stream at ESP32 sampling rates (~100 Hz at 56 subcarriers = ~35 KB/s per node).
 
+**Rate-limiting and ENOMEM backoff** (Issue #127 fix):
+
+CSI callbacks fire 100-500+ times/sec in promiscuous mode. Two safeguards prevent lwIP pbuf exhaustion:
+
+1. **50 Hz rate limiter** (`csi_collector.c`): `sendto()` is skipped if less than 20 ms have elapsed since the last successful send. Excess CSI callbacks are dropped silently.
+2. **ENOMEM backoff** (`stream_sender.c`): When `sendto()` returns `ENOMEM` (errno 12), all sends are suppressed for 100 ms to let lwIP reclaim packet buffers. Without this, rapid-fire failed sends cause a guru meditation crash.
+
 **`sdkconfig.defaults`** must enable:
 
 ```
