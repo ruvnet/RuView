@@ -972,67 +972,103 @@ let convergence = pipeline.find_cross_room_convergence("person-001", 0.75)?;
 ## 📡 Signal Processing & Sensing
 
 <details>
-<summary><a id="esp32-s3-hardware-pipeline"></a><strong>📡 ESP32-S3 Hardware Pipeline (ADR-018)</strong> — 20 Hz CSI streaming, flash & provision</summary>
+<summary><a id="esp32-s3-hardware-pipeline"></a><strong>📡 ESP32-S3 Hardware Pipeline (ADR-018)</strong> — 28 Hz CSI streaming, flash & provision</summary>
+
+A single ESP32-S3 board (~$9) captures WiFi signal data 28 times per second and streams it over UDP. A host server can visualize and record the data, but the ESP32 can also run on its own — detecting presence, measuring breathing and heart rate, and alerting on falls without any server at all.
 
 ```
-ESP32-S3 (STA + promiscuous)     UDP/5005      Rust aggregator
-┌─────────────────────────┐    ──────────>    ┌──────────────────┐
-│ WiFi CSI callback 20 Hz │    ADR-018        │ Esp32CsiParser   │
-│ ADR-018 binary frames   │    binary         │ CsiFrame output  │
-│ stream_sender (UDP)     │                   │ presence detect  │
-└─────────────────────────┘                   └──────────────────┘
+ESP32-S3 node                    UDP/5005        Host server (optional)
+┌───────────────────────┐      ──────────>      ┌──────────────────────┐
+│ Captures WiFi signals │      binary frames    │ Parses frames        │
+│ 28 Hz, up to 192 sub- │      or 32-byte       │ Visualizes poses     │
+│ carriers per frame     │      vitals packets   │ Records CSI data     │
+│                        │                       │ REST API + WebSocket │
+│ On-device (optional):  │                       └──────────────────────┘
+│  Presence detection    │
+│  Breathing + heart rate│
+│  Fall detection        │
+│  WASM custom modules   │
+└───────────────────────┘
 ```
 
-| Metric | Measured |
-|--------|----------|
-| Frame rate | ~20 Hz sustained |
-| Subcarriers | 64 / 128 / 192 (LLTF, HT, HT40) |
-| Latency | < 1ms (UDP loopback) |
-| Presence detection | Motion score 10/10 at 3m |
+| Metric | Measured on hardware |
+|--------|----------------------|
+| CSI frame rate | 28.5 Hz (channel 5, BW20) |
+| Subcarriers per frame | 64 / 128 / 192 (depends on WiFi mode) |
+| UDP latency | < 1 ms on local network |
+| Presence detection range | Reliable at 3 m through walls |
+| Binary size | 947 KB (fits in 1 MB flash partition) |
+| Boot to ready | ~3.9 seconds |
 
-**Firmware releases** (pre-built, no toolchain required):
+### Flash and provision
 
-| Release | Features | Tag |
-|---------|----------|-----|
-| [v0.2.0](https://github.com/ruvnet/wifi-densepose/releases/tag/v0.2.0-esp32) | Stable — raw CSI streaming, TDM, channel hopping, QUIC mesh | `v0.2.0-esp32` |
-| [v0.3.0-alpha](https://github.com/ruvnet/wifi-densepose/releases/tag/v0.3.0-alpha-esp32) | Alpha — adds on-device edge intelligence ([ADR-039](docs/adr/ADR-039-esp32-edge-intelligence.md)) | `v0.3.0-alpha-esp32` |
+Download a pre-built binary — no build toolchain needed:
+
+| Release | What's included | Tag |
+|---------|-----------------|-----|
+| [v0.2.0](https://github.com/ruvnet/wifi-densepose/releases/tag/v0.2.0-esp32) | Stable — raw CSI streaming, multi-node TDM, channel hopping | `v0.2.0-esp32` |
+| [v0.3.0-alpha](https://github.com/ruvnet/wifi-densepose/releases/tag/v0.3.0-alpha-esp32) | Alpha — adds on-device edge intelligence and WASM modules ([ADR-039](docs/adr/ADR-039-esp32-edge-intelligence.md), [ADR-040](docs/adr/ADR-040-wasm-programmable-sensing.md)) | `v0.3.0-alpha-esp32` |
 
 ```bash
-# Flash (works with either release)
+# 1. Flash the firmware to your ESP32-S3
 python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
-  write-flash --flash-mode dio --flash-size 4MB \
+  write_flash --flash_mode dio --flash_size 8MB \
   0x0 bootloader.bin 0x8000 partition-table.bin 0x10000 esp32-csi-node.bin
 
-# Provision WiFi (no credentials baked into the binary)
+# 2. Set WiFi credentials and server address (stored in flash, survives reboots)
 python firmware/esp32-csi-node/provision.py --port COM7 \
   --ssid "YourWiFi" --password "secret" --target-ip 192.168.1.20
 
-# Start the aggregator
-cargo run -p wifi-densepose-sensing-server -- --http-port 3000 --source esp32
+# 3. (Optional) Start the host server to visualize data
+cargo run -p wifi-densepose-sensing-server -- --http-port 3000 --source auto
+# Open http://localhost:3000
 ```
 
-**Edge Intelligence (v0.3.0-alpha only):**
+### Multi-node mesh
 
-The alpha firmware adds on-device CSI processing — the ESP32 analyzes signals locally and sends compact results instead of raw data. Disabled by default (tier 0) for backward compatibility.
+For better accuracy and room coverage, deploy 3-6 nodes with time-division multiplexing (TDM) so they take turns transmitting:
 
-| Tier | What It Does | Extra RAM |
-|------|-------------|-----------|
-| **0** | Off — raw CSI streaming only (same as v0.2.0) | 0 KB |
-| **1** | Phase unwrapping, running stats, top-K subcarrier selection, delta compression | ~30 KB |
-| **2** | Tier 1 + presence detection, breathing rate, heart rate, fall detection | ~33 KB |
+```bash
+# Node 0 of a 3-node mesh
+python firmware/esp32-csi-node/provision.py --port COM7 \
+  --ssid "YourWiFi" --password "secret" --target-ip 192.168.1.20 \
+  --node-id 0 --tdm-slot 0 --tdm-total 3
 
-Enable via NVS — no reflash needed:
+# Node 1
+python firmware/esp32-csi-node/provision.py --port COM8 \
+  --ssid "YourWiFi" --password "secret" --target-ip 192.168.1.20 \
+  --node-id 1 --tdm-slot 1 --tdm-total 3
+```
+
+Nodes can also hop across WiFi channels (1, 6, 11) to increase sensing bandwidth — configured via [ADR-029](docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md) channel hopping.
+
+### On-device intelligence (v0.3.0-alpha)
+
+The alpha firmware can analyze signals locally and send compact results instead of raw data. This means the ESP32 works standalone — no server needed for basic sensing. Disabled by default for backward compatibility.
+
+| Tier | What it does | RAM used |
+|------|-------------|----------|
+| **0** | Off — streams raw CSI only (same as v0.2.0) | 0 KB |
+| **1** | Cleans up signals, picks the best subcarriers, compresses data (saves 30-50% bandwidth) | ~30 KB |
+| **2** | Everything in Tier 1 + detects presence, measures breathing and heart rate, detects falls | ~33 KB |
+| **3** | Everything in Tier 2 + runs custom WASM modules (gesture recognition, intrusion detection, and [63 more](docs/edge-modules/README.md)) | ~160 KB/module |
+
+Enable without reflashing — just reprovision:
 
 ```bash
 # Turn on Tier 2 (vitals) on an already-flashed node
 python firmware/esp32-csi-node/provision.py --port COM7 \
   --ssid "YourWiFi" --password "secret" --target-ip 192.168.1.20 \
   --edge-tier 2
+
+# Fine-tune detection thresholds
+python firmware/esp32-csi-node/provision.py --port COM7 \
+  --edge-tier 2 --vital-int 500 --fall-thresh 5000 --subk-count 16
 ```
 
-When active, the node sends a 32-byte vitals packet at 1 Hz with presence, motion, breathing BPM, heart rate BPM, confidence, fall flag, and occupancy. Binary size: 777 KB (24% free).
+When Tier 2 is active, the node sends a 32-byte vitals packet once per second containing: presence, motion level, breathing BPM, heart rate BPM, confidence scores, fall alert flag, and occupancy count.
 
-See [firmware/esp32-csi-node/README.md](firmware/esp32-csi-node/README.md), [ADR-039](docs/adr/ADR-039-esp32-edge-intelligence.md), and [Tutorial #34](https://github.com/ruvnet/wifi-densepose/issues/34).
+See [firmware/esp32-csi-node/README.md](firmware/esp32-csi-node/README.md), [ADR-039](docs/adr/ADR-039-esp32-edge-intelligence.md), [ADR-044](docs/adr/ADR-044-provisioning-tool-enhancements.md), and [Tutorial #34](https://github.com/ruvnet/wifi-densepose/issues/34).
 
 </details>
 
