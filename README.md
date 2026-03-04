@@ -1,7 +1,7 @@
 # π RuView
 
 <p align="center">
-  <img src="assets/ruview-small.jpg" alt="RuView - WiFi DensePose" width="100%">
+  <img src="assets/ruview-small-gemini.jpg" alt="RuView - WiFi DensePose" width="100%">
 </p>
 
 **See through walls with WiFi.** No cameras. No wearables. No Internet. Just radio waves.
