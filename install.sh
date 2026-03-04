@@ -485,11 +485,13 @@ recommend_profile() {
     echo "  Available profiles based on your system:"
     echo ""
 
-    local idx=1
-    declare -A PROFILE_MAP
+    local idx=0
+    # Use indexed array instead of associative array for Bash 3.2 (macOS) compatibility
+    local profile_names=()
 
     for p in "${available_profiles[@]}"; do
         local marker=""
+        idx=$((idx + 1))
         if [ "$p" == "$recommended" ]; then
             marker=" ${GREEN}(recommended)${RESET}"
         fi
@@ -502,13 +504,13 @@ recommend_profile() {
             iot)     echo -e "    ${BOLD}${idx})${RESET} iot     - ESP32 sensor mesh + aggregator${marker}" ;;
             field)   echo -e "    ${BOLD}${idx})${RESET} field   - WiFi-Mat disaster response kit (~62 MB)${marker}" ;;
         esac
-        PROFILE_MAP[$idx]="$p"
-        idx=$((idx + 1))
+        profile_names+=("$p")
     done
 
     # Always show full as the last option
+    idx=$((idx + 1))
     echo -e "    ${BOLD}${idx})${RESET} full    - Install everything available"
-    PROFILE_MAP[$idx]="full"
+    profile_names+=("full")
 
     if [ -n "$PROFILE" ]; then
         echo ""
@@ -525,8 +527,8 @@ recommend_profile() {
 
     if [ -z "$choice" ]; then
         PROFILE="$recommended"
-    elif [[ -n "${PROFILE_MAP[$choice]+x}" ]]; then
-        PROFILE="${PROFILE_MAP[$choice]}"
+    elif [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$idx" ]; then
+        PROFILE="${profile_names[$((choice - 1))]}"
     else
         echo -e "  ${RED}Invalid choice. Using ${recommended}.${RESET}"
         PROFILE="$recommended"
