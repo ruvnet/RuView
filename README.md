@@ -1,5 +1,9 @@
 # π RuView
 
+<p align="center">
+  <img src="assets/ruview-small.jpg" alt="RuView - WiFi DensePose" width="100%">
+</p>
+
 **See through walls with WiFi.** No cameras. No wearables. No Internet. Just radio waves.
 
 WiFi DensePose turns commodity WiFi signals into real-time human pose estimation, vital sign monitoring, and presence detection — all without a single pixel of video. 
@@ -10,8 +14,8 @@ By analyzing Channel State Information (CSI) disturbances caused by human moveme
 
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests: 1300+](https://img.shields.io/badge/tests-1300%2B-brightgreen.svg)](https://github.com/ruvnet/wifi-densepose)
-[![Docker: 132 MB](https://img.shields.io/badge/docker-132%20MB-blue.svg)](https://hub.docker.com/r/ruvnet/wifi-densepose)
+[![Tests: 1300+](https://img.shields.io/badge/tests-1300%2B-brightgreen.svg)](https://github.com/ruvnet/RuView)
+[![Docker: multi-arch](https://img.shields.io/badge/docker-amd64%20%2B%20arm64-blue.svg)](https://hub.docker.com/r/ruvnet/wifi-densepose)
 [![Vital Signs](https://img.shields.io/badge/vital%20signs-breathing%20%2B%20heartbeat-red.svg)](#vital-sign-detection)
 [![ESP32 Ready](https://img.shields.io/badge/ESP32--S3-CSI%20streaming-purple.svg)](#esp32-s3-hardware-pipeline)
 [![crates.io](https://img.shields.io/crates/v/wifi-densepose-ruvector.svg)](https://crates.io/crates/wifi-densepose-ruvector)
@@ -102,8 +106,8 @@ Fast enough for real-time use, small enough for edge devices, simple enough for 
 | | Feature | What It Means |
 |---|---------|---------------|
 | ⚡ | **Real-Time** | Analyzes WiFi signals in under 100 microseconds per frame — fast enough for live monitoring |
-| 🦀 | **810x Faster** | Complete Rust rewrite: 54,000 frames/sec pipeline, 132 MB Docker image, 1,031+ tests |
-| 🐳 | **One-Command Setup** | `docker pull ruvnet/wifi-densepose:latest` — live sensing in 30 seconds, no toolchain needed |
+| 🦀 | **810x Faster** | Complete Rust rewrite: 54,000 frames/sec pipeline, multi-arch Docker image, 1,031+ tests |
+| 🐳 | **One-Command Setup** | `docker pull ruvnet/wifi-densepose:latest` — live sensing in 30 seconds, no toolchain needed (amd64 + arm64 / Apple Silicon) |
 | 📡 | **Fully Local** | Runs completely on a $9 ESP32 — no internet connection, no cloud account, no recurring fees. Detects presence, vital signs, and falls on-device with instant response |
 | 📦 | **Portable Models** | Trained models package into a single `.rvf` file — runs on edge, cloud, or browser (WASM) |
 
@@ -512,8 +516,8 @@ The installer walks through 7 steps: system detection, toolchain check, WiFi har
 <summary><strong>From Source</strong> — Rust (primary) or Python</summary>
 
 ```bash
-git clone https://github.com/ruvnet/wifi-densepose.git
-cd wifi-densepose
+git clone https://github.com/ruvnet/RuView.git
+cd RuView
 
 # Rust (primary — 810x faster)
 cd rust-port/wifi-densepose-rs
@@ -551,10 +555,10 @@ cd docker && docker compose up
 docker run --rm -v $(pwd):/out ruvnet/wifi-densepose:latest --export-rvf /out/model.rvf
 ```
 
-| Image | Tag | Size | Ports |
-|-------|-----|------|-------|
-| `ruvnet/wifi-densepose` | `latest`, `rust` | 132 MB | 3000 (REST), 3001 (WS), 5005/udp (ESP32) |
-| `ruvnet/wifi-densepose` | `python` | 569 MB | 8765 (WS), 8080 (UI) |
+| Image | Tag | Platforms | Ports |
+|-------|-----|-----------|-------|
+| `ruvnet/wifi-densepose` | `latest`, `rust` | linux/amd64, linux/arm64 | 3000 (REST), 3001 (WS), 5005/udp (ESP32) |
+| `ruvnet/wifi-densepose` | `python` | linux/amd64 | 8765 (WS), 8080 (UI) |
 
 </details>
 
@@ -689,9 +693,9 @@ The signal processing stack transforms raw WiFi Channel State Information into a
 |---------|-------------|------|
 | [Key Features](#key-features) | Sensing, Intelligence, and Performance & Deployment capabilities | — |
 | [How It Works](#how-it-works) | End-to-end pipeline: radio waves → CSI capture → signal processing → AI → pose + vitals | — |
-| [ESP32-S3 Hardware Pipeline](#esp32-s3-hardware-pipeline) | 20 Hz CSI streaming, binary frame parsing, flash & provision | [ADR-018](docs/adr/ADR-018-esp32-dev-implementation.md) · [Tutorial #34](https://github.com/ruvnet/wifi-densepose/issues/34) |
+| [ESP32-S3 Hardware Pipeline](#esp32-s3-hardware-pipeline) | 20 Hz CSI streaming, binary frame parsing, flash & provision | [ADR-018](docs/adr/ADR-018-esp32-dev-implementation.md) · [Tutorial #34](https://github.com/ruvnet/RuView/issues/34) |
 | [Vital Sign Detection](#vital-sign-detection) | Breathing 6-30 BPM, heartbeat 40-120 BPM, FFT peak detection | [ADR-021](docs/adr/ADR-021-vital-sign-detection-rvdna-pipeline.md) |
-| [WiFi Scan Domain Layer](#wifi-scan-domain-layer) | 8-stage RSSI pipeline, multi-BSSID fingerprinting, Windows WiFi | [ADR-022](docs/adr/ADR-022-windows-wifi-enhanced-fidelity-ruvector.md) · [Tutorial #36](https://github.com/ruvnet/wifi-densepose/issues/36) |
+| [WiFi Scan Domain Layer](#wifi-scan-domain-layer) | 8-stage RSSI pipeline, multi-BSSID fingerprinting, Windows WiFi | [ADR-022](docs/adr/ADR-022-windows-wifi-enhanced-fidelity-ruvector.md) · [Tutorial #36](https://github.com/ruvnet/RuView/issues/36) |
 | [WiFi-Mat Disaster Response](#wifi-mat-disaster-response) | Search & rescue, START triage, 3D localization through debris | [ADR-001](docs/adr/ADR-001-wifi-mat-disaster-detection.md) · [User Guide](docs/wifi-mat-user-guide.md) |
 | [SOTA Signal Processing](#sota-signal-processing) | SpotFi, Hampel, Fresnel, STFT spectrogram, subcarrier selection, BVP | [ADR-014](docs/adr/ADR-014-sota-signal-processing.md) |
 
@@ -760,7 +764,7 @@ WiFi DensePose is MIT-licensed open source, developed by [ruvnet](https://github
 |---------|-------------|------|
 | [Changelog](#changelog) | v3.0.0 (AETHER AI + Docker), v2.0.0 (Rust port + SOTA + WiFi-Mat) | [CHANGELOG.md](CHANGELOG.md) |
 | [License](#license) | MIT License | [LICENSE](LICENSE) |
-| [Support](#support) | Bug reports, feature requests, community discussion | [Issues](https://github.com/ruvnet/wifi-densepose/issues) · [Discussions](https://github.com/ruvnet/wifi-densepose/discussions) |
+| [Support](#support) | Bug reports, feature requests, community discussion | [Issues](https://github.com/ruvnet/RuView/issues) · [Discussions](https://github.com/ruvnet/RuView/discussions) |
 
 </details>
 
@@ -1010,8 +1014,8 @@ Download a pre-built binary — no build toolchain needed:
 
 | Release | What's included | Tag |
 |---------|-----------------|-----|
-| [v0.2.0](https://github.com/ruvnet/wifi-densepose/releases/tag/v0.2.0-esp32) | Stable — raw CSI streaming, multi-node TDM, channel hopping | `v0.2.0-esp32` |
-| [v0.3.0-alpha](https://github.com/ruvnet/wifi-densepose/releases/tag/v0.3.0-alpha-esp32) | Alpha — adds on-device edge intelligence and WASM modules ([ADR-039](docs/adr/ADR-039-esp32-edge-intelligence.md), [ADR-040](docs/adr/ADR-040-wasm-programmable-sensing.md)) | `v0.3.0-alpha-esp32` |
+| [v0.2.0](https://github.com/ruvnet/RuView/releases/tag/v0.2.0-esp32) | Stable — raw CSI streaming, multi-node TDM, channel hopping | `v0.2.0-esp32` |
+| [v0.3.0-alpha](https://github.com/ruvnet/RuView/releases/tag/v0.3.0-alpha-esp32) | Alpha — adds on-device edge intelligence and WASM modules ([ADR-039](docs/adr/ADR-039-esp32-edge-intelligence.md), [ADR-040](docs/adr/ADR-040-wasm-programmable-sensing.md)) | `v0.3.0-alpha-esp32` |
 
 ```bash
 # 1. Flash the firmware to your ESP32-S3
@@ -1072,7 +1076,7 @@ python firmware/esp32-csi-node/provision.py --port COM7 \
 
 When Tier 2 is active, the node sends a 32-byte vitals packet once per second containing: presence, motion level, breathing BPM, heart rate BPM, confidence scores, fall alert flag, and occupancy count.
 
-See [firmware/esp32-csi-node/README.md](firmware/esp32-csi-node/README.md), [ADR-039](docs/adr/ADR-039-esp32-edge-intelligence.md), [ADR-044](docs/adr/ADR-044-provisioning-tool-enhancements.md), and [Tutorial #34](https://github.com/ruvnet/wifi-densepose/issues/34).
+See [firmware/esp32-csi-node/README.md](firmware/esp32-csi-node/README.md), [ADR-039](docs/adr/ADR-039-esp32-edge-intelligence.md), [ADR-044](docs/adr/ADR-044-provisioning-tool-enhancements.md), and [Tutorial #34](https://github.com/ruvnet/RuView/issues/34).
 
 </details>
 
@@ -1143,7 +1147,7 @@ See [ADR-021](docs/adr/ADR-021-vital-sign-detection-rvdna-pipeline.md).
 cargo test -p wifi-densepose-wifiscan
 ```
 
-See [ADR-022](docs/adr/ADR-022-windows-wifi-enhanced-fidelity-ruvector.md) and [Tutorial #36](https://github.com/ruvnet/wifi-densepose/issues/36).
+See [ADR-022](docs/adr/ADR-022-windows-wifi-enhanced-fidelity-ruvector.md) and [Tutorial #36](https://github.com/ruvnet/RuView/issues/36).
 
 </details>
 
@@ -1247,7 +1251,7 @@ The [`wifi-densepose-ruvector`](https://crates.io/crates/wifi-densepose-ruvector
 | **O(1) survivor triangulation** | O(N^3) matrix inversion | `ruvector-solver` | Neumann series linearization for instant position updates |
 | **75% memory compression** | 13.4 MB breathing buffers that overflow edge devices | `ruvector-temporal-tensor` | Tiered 3-8 bit quantization fits 60s of vitals in 3.4 MB |
 
-See [issue #67](https://github.com/ruvnet/wifi-densepose/issues/67) for a deep dive with code examples, or [`cargo add wifi-densepose-ruvector`](https://crates.io/crates/wifi-densepose-ruvector) to use it directly.
+See [issue #67](https://github.com/ruvnet/RuView/issues/67) for a deep dive with code examples, or [`cargo add wifi-densepose-ruvector`](https://crates.io/crates/wifi-densepose-ruvector) to use it directly.
 
 </details>
 
@@ -1641,10 +1645,10 @@ WebSocket: `ws://localhost:3001/ws/sensing` (real-time sensing + vital signs)
 
 | Hardware | CSI | Cost | Guide |
 |----------|-----|------|-------|
-| **ESP32-S3** | Native | ~$8 | [Tutorial #34](https://github.com/ruvnet/wifi-densepose/issues/34) |
+| **ESP32-S3** | Native | ~$8 | [Tutorial #34](https://github.com/ruvnet/RuView/issues/34) |
 | Intel 5300 | Firmware mod | ~$15 | Linux `iwl-csi` |
 | Atheros AR9580 | ath9k patch | ~$20 | Linux only |
-| Any Windows WiFi | RSSI only | $0 | [Tutorial #36](https://github.com/ruvnet/wifi-densepose/issues/36) |
+| Any Windows WiFi | RSSI only | $0 | [Tutorial #36](https://github.com/ruvnet/RuView/issues/36) |
 | Any macOS WiFi | RSSI only (CoreWLAN) | $0 | [ADR-025](docs/adr/ADR-025-macos-corewlan-wifi-sensing.md) |
 | Any Linux WiFi | RSSI only (`iw`) | $0 | Requires `iw` + `CAP_NET_ADMIN` |
 
@@ -1783,8 +1787,8 @@ POSE_MAX_PERSONS=10              # Max tracked individuals
 <summary><strong>Dev setup, code standards, PR process</strong></summary>
 
 ```bash
-git clone https://github.com/ruvnet/wifi-densepose.git
-cd wifi-densepose
+git clone https://github.com/ruvnet/RuView.git
+cd RuView
 
 # Rust development
 cd rust-port/wifi-densepose-rs
@@ -1882,7 +1886,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## 📞 Support
 
-[GitHub Issues](https://github.com/ruvnet/wifi-densepose/issues) | [Discussions](https://github.com/ruvnet/wifi-densepose/discussions) | [PyPI](https://pypi.org/project/wifi-densepose/)
+[GitHub Issues](https://github.com/ruvnet/RuView/issues) | [Discussions](https://github.com/ruvnet/RuView/discussions) | [PyPI](https://pypi.org/project/wifi-densepose/)
 
 ---
 
