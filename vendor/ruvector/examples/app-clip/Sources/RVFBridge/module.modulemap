@@ -1,5 +1,0 @@
-module RVFBridge [system] {
-    header "rvf_bridge.h"
-    link "rvf_runtime"
-    export *
-}

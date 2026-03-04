@@ -1,9 +1,0 @@
-[package]
-name = "subpolynomial-time-mincut-demo"
-version = "0.1.0"
-edition = "2021"
-description = "Demo of subpolynomial-time dynamic minimum cut algorithm"
-
-[dependencies]
-ruvector-mincut = { path = "../../crates/ruvector-mincut", features = ["monitoring"] }
-rand = "0.8"

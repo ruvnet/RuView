@@ -1,8 +1,0 @@
-# Configuration for NAPI-RS native module builds
-# Allows undefined symbols that are provided by Node.js at runtime
-
-[target.x86_64-apple-darwin]
-rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
-
-[target.aarch64-apple-darwin]
-rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
