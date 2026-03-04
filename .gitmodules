@@ -1,9 +1,12 @@
 [submodule "vendor/midstream"]
 	path = vendor/midstream
 	url = https://github.com/ruvnet/midstream
+	branch = main
 [submodule "vendor/ruvector"]
 	path = vendor/ruvector
 	url = https://github.com/ruvnet/ruvector
+	branch = main
 [submodule "vendor/sublinear-time-solver"]
 	path = vendor/sublinear-time-solver
 	url = https://github.com/ruvnet/sublinear-time-solver
+	branch = main
