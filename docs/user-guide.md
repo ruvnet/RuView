@@ -71,13 +71,13 @@ The fastest path. No toolchain installation needed.
 docker pull ruvnet/wifi-densepose:latest
 ```
 
-Image size: ~132 MB. Contains the Rust sensing server, Three.js UI, and all signal processing.
+Multi-architecture image (amd64 + arm64). Works on Intel/AMD and Apple Silicon Macs. Contains the Rust sensing server, Three.js UI, and all signal processing.
 
 ### From Source (Rust)
 
 ```bash
-git clone https://github.com/ruvnet/wifi-densepose.git
-cd wifi-densepose/rust-port/wifi-densepose-rs
+git clone https://github.com/ruvnet/RuView.git
+cd RuView/rust-port/wifi-densepose-rs
 
 # Build
 cargo build --release
@@ -120,8 +120,8 @@ See the full crate list and dependency order in [CLAUDE.md](../CLAUDE.md#crate-p
 ### From Source (Python)
 
 ```bash
-git clone https://github.com/ruvnet/wifi-densepose.git
-cd wifi-densepose
+git clone https://github.com/ruvnet/RuView.git
+cd RuView
 
 pip install -r requirements.txt
 pip install -e .
@@ -137,8 +137,8 @@ pip install wifi-densepose[all]   # All optional deps
 An interactive installer that detects your hardware and recommends a profile:
 
 ```bash
-git clone https://github.com/ruvnet/wifi-densepose.git
-cd wifi-densepose
+git clone https://github.com/ruvnet/RuView.git
+cd RuView
 ./install.sh
 ```
 
@@ -224,7 +224,7 @@ Uses `netsh wlan` to capture RSSI from nearby access points. No special hardware
 docker run --network host ruvnet/wifi-densepose:latest --source windows --tick-ms 500
 ```
 
-See [Tutorial #36](https://github.com/ruvnet/wifi-densepose/issues/36) for a walkthrough.
+See [Tutorial #36](https://github.com/ruvnet/RuView/issues/36) for a walkthrough.
 
 ### macOS WiFi (RSSI Only)
 
@@ -628,12 +628,12 @@ A 3-6 node ESP32-S3 mesh provides full CSI at 20 Hz. Total cost: ~$54 for a 3-no
 
 **Flashing firmware:**
 
-Pre-built binaries are available at [Releases](https://github.com/ruvnet/wifi-densepose/releases):
+Pre-built binaries are available at [Releases](https://github.com/ruvnet/RuView/releases):
 
 | Release | What It Includes | Tag |
 |---------|-----------------|-----|
-| [v0.2.0](https://github.com/ruvnet/wifi-densepose/releases/tag/v0.2.0-esp32) | Stable — raw CSI streaming, TDM, channel hopping, QUIC mesh | `v0.2.0-esp32` |
-| [v0.3.0-alpha](https://github.com/ruvnet/wifi-densepose/releases/tag/v0.3.0-alpha-esp32) | Alpha — adds on-device edge intelligence (ADR-039) | `v0.3.0-alpha-esp32` |
+| [v0.2.0](https://github.com/ruvnet/RuView/releases/tag/v0.2.0-esp32) | Stable — raw CSI streaming, TDM, channel hopping, QUIC mesh | `v0.2.0-esp32` |
+| [v0.3.0-alpha](https://github.com/ruvnet/RuView/releases/tag/v0.3.0-alpha-esp32) | Alpha — adds on-device edge intelligence (ADR-039) | `v0.3.0-alpha-esp32` |
 
 ```bash
 # Flash an ESP32-S3 (requires esptool: pip install esptool)
@@ -724,7 +724,7 @@ Binary size: 777 KB (24% free in the 1 MB app partition).
 docker run -p 3000:3000 -p 3001:3001 -p 5005:5005/udp ruvnet/wifi-densepose:latest --source esp32
 ```
 
-See [ADR-018](../docs/adr/ADR-018-esp32-dev-implementation.md), [ADR-029](../docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md), and [Tutorial #34](https://github.com/ruvnet/wifi-densepose/issues/34).
+See [ADR-018](../docs/adr/ADR-018-esp32-dev-implementation.md), [ADR-029](../docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md), and [Tutorial #34](https://github.com/ruvnet/RuView/issues/34).
 
 ### Intel 5300 / Atheros NIC
 
@@ -755,6 +755,20 @@ This starts:
 ---
 
 ## Troubleshooting
+
+### Docker: "no matching manifest for linux/arm64" on macOS
+
+The `latest` tag supports both amd64 and arm64. Pull the latest image:
+
+```bash
+docker pull ruvnet/wifi-densepose:latest
+```
+
+If you still see this error, your local Docker may have a stale cached manifest. Try:
+
+```bash
+docker pull --platform linux/arm64 ruvnet/wifi-densepose:latest
+```
 
 ### Docker: "Connection refused" on localhost:3000
 
