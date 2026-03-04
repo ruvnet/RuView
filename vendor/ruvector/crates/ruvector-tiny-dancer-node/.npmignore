@@ -1,6 +1,0 @@
-target
-Cargo.toml
-Cargo.lock
-.cargo
-src
-build.rs

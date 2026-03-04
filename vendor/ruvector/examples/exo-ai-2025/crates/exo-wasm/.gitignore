@@ -1,9 +1,0 @@
-/target
-/pkg
-**/*.rs.bk
-Cargo.lock
-node_modules
-*.wasm
-*.js
-*.ts
-!src/**/*.rs
