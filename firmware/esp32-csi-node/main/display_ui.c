@@ -89,7 +89,7 @@ static void init_styles(void)
 
     lv_style_init(&s_style_label_big);
     lv_style_set_text_color(&s_style_label_big, COLOR_CYAN);
-    lv_style_set_text_font(&s_style_label_big, &lv_font_montserrat_20);
+    lv_style_set_text_font(&s_style_label_big, &lv_font_montserrat_14);
 }
 
 static lv_obj_t *make_label(lv_obj_t *parent, const char *text, const lv_style_t *style)
