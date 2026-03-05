@@ -66,6 +66,8 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
   <img src="assets/v2-screen.png" alt="WiFi DensePose — Live pose detection with setup guide" width="800">
   <br>
   <em>Real-time pose skeleton from WiFi CSI signals — no cameras, no wearables</em>
+  <br>
+  <a href="https://ruvnet.github.io/RuView/"><strong>▶ Live Observatory Demo</strong></a>
 
 > The [server](#-quick-start) is optional for visualization and aggregation — the ESP32 [runs independently](#esp32-s3-hardware-pipeline) for presence detection, vital signs, and fall alerts.
 
