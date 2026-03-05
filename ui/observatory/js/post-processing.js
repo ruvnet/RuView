@@ -77,9 +77,9 @@ export class PostProcessing {
     // Bloom — tuned for green wireframe glow
     this._bloomPass = new UnrealBloomPass(
       new THREE.Vector2(size.x, size.y),
-      1.0,   // strength (less aggressive than before)
-      0.5,   // radius
-      0.25   // threshold
+      0.08,  // strength — subtle glow, overridden by settings
+      0.2,   // radius
+      0.6    // threshold
     );
     this.composer.addPass(this._bloomPass);
 
