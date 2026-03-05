@@ -145,7 +145,7 @@ class Observatory {
   // ---- Lighting ----
 
   _setupLighting() {
-    this._ambient = new THREE.AmbientLight(0x446688, this.settings.ambient * 3.0);
+    this._ambient = new THREE.AmbientLight(0xccccdd, this.settings.ambient * 5.0);
     this._scene.add(this._ambient);
 
     const hemi = new THREE.HemisphereLight(0x6688bb, 0x203040, 1.2);

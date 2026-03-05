@@ -28,7 +28,7 @@ export const DEFAULTS = {
   scenario: 'auto', cycle: 30, dataSource: 'demo', wsUrl: '',
 };
 
-export const SETTINGS_VERSION = '5';
+export const SETTINGS_VERSION = '6';
 
 export const PRESETS = {
   foundation: {},
@@ -196,7 +196,7 @@ export class HudController {
     this._bindRange('opt-aura', 'aura');
     this._bindRange('opt-field', 'field', v => { obs._fieldMat.opacity = v; });
     this._bindRange('opt-waves', 'waves');
-    this._bindRange('opt-ambient', 'ambient', v => { obs._ambient.intensity = v * 3.0; });
+    this._bindRange('opt-ambient', 'ambient', v => { obs._ambient.intensity = v * 5.0; });
     this._bindRange('opt-reflect', 'reflect', v => {
       obs._floorMat.roughness = 1.0 - v * 0.7;
       obs._floorMat.metalness = v * 0.5;
@@ -346,7 +346,7 @@ export class HudController {
     obs._applyPostSettings();
     obs._renderer.toneMappingExposure = obs.settings.exposure;
     obs._fieldMat.opacity = obs.settings.field;
-    obs._ambient.intensity = obs.settings.ambient * 3.0;
+    obs._ambient.intensity = obs.settings.ambient * 5.0;
     obs._floorMat.roughness = 1.0 - obs.settings.reflect * 0.7;
     obs._floorMat.metalness = obs.settings.reflect * 0.5;
     obs._camera.fov = obs.settings.fov;
