@@ -8,6 +8,7 @@
 //!
 //! Replaces both ws_server.py and the Python HTTP server.
 
+mod adaptive_classifier;
 mod rvf_container;
 mod rvf_pipeline;
 mod vital_signs;
@@ -299,6 +300,34 @@ struct AppStateInner {
     model_loaded: bool,
     /// Smoothed person count (EMA) for hysteresis — prevents frame-to-frame jumping.
     smoothed_person_score: f64,
+    // ── Motion smoothing & adaptive baseline (ADR-047 tuning) ────────────
+    /// EMA-smoothed motion score (alpha ~0.15 for ~10 FPS → ~1s time constant).
+    smoothed_motion: f64,
+    /// Current classification state for hysteresis debounce.
+    current_motion_level: String,
+    /// How many consecutive frames the *raw* classification has agreed with a
+    /// *candidate* new level.  State only changes after DEBOUNCE_FRAMES.
+    debounce_counter: u32,
+    /// The candidate motion level that the debounce counter is tracking.
+    debounce_candidate: String,
+    /// Adaptive baseline: EMA of motion score when room is "quiet" (low motion).
+    /// Subtracted from raw score so slow environmental drift doesn't inflate readings.
+    baseline_motion: f64,
+    /// Number of frames processed so far (for baseline warm-up).
+    baseline_frames: u64,
+    // ── Vital signs smoothing ────────────────────────────────────────────
+    /// EMA-smoothed heart rate (BPM).
+    smoothed_hr: f64,
+    /// EMA-smoothed breathing rate (BPM).
+    smoothed_br: f64,
+    /// EMA-smoothed HR confidence.
+    smoothed_hr_conf: f64,
+    /// EMA-smoothed BR confidence.
+    smoothed_br_conf: f64,
+    /// Median filter buffer for HR (last N raw values for outlier rejection).
+    hr_buffer: VecDeque<f64>,
+    /// Median filter buffer for BR.
+    br_buffer: VecDeque<f64>,
     /// ADR-039: Latest edge vitals packet from ESP32.
     edge_vitals: Option<Esp32VitalsPacket>,
     /// ADR-040: Latest WASM output packet from ESP32.
@@ -324,6 +353,9 @@ struct AppStateInner {
     training_status: String,
     /// Training configuration, if any.
     training_config: Option<serde_json::Value>,
+    // ── Adaptive classifier (environment-tuned) ──────────────────────────
+    /// Trained adaptive model (loaded from data/adaptive_model.json or trained at runtime).
+    adaptive_model: Option<adaptive_classifier::AdaptiveModel>,
 }
 
 /// Number of frames retained in `frame_history` for temporal analysis.
@@ -716,11 +748,12 @@ fn compute_subcarrier_variances(frame_history: &VecDeque<Vec<f64>>, n_sub: usize
 ///   the amplitude time series.
 /// - **Signal quality**: based on SNR estimate (RSSI – noise floor) and subcarrier
 ///   variance stability.
+/// Returns (features, raw_classification, breathing_rate_hz, sub_variances, raw_motion_score).
 fn extract_features_from_frame(
     frame: &Esp32Frame,
     frame_history: &VecDeque<Vec<f64>>,
     sample_rate_hz: f64,
-) -> (FeatureInfo, ClassificationInfo, f64, Vec<f64>) {
+) -> (FeatureInfo, ClassificationInfo, f64, Vec<f64>, f64) {
     let n_sub = frame.amplitudes.len().max(1);
     let n = n_sub as f64;
     let mean_amp: f64 = frame.amplitudes.iter().sum::<f64>() / n;
@@ -799,8 +832,11 @@ fn extract_features_from_frame(
     };
 
     // Blend temporal motion with variance-based motion for robustness.
+    // Also factor in motion_band_power and change_points for ESP32 real-world sensitivity.
     let variance_motion = (temporal_variance / 10.0).clamp(0.0, 1.0);
-    let motion_score = (temporal_motion_score * 0.7 + variance_motion * 0.3).clamp(0.0, 1.0);
+    let mbp_motion = (motion_band_power / 25.0).clamp(0.0, 1.0);
+    let cp_motion = (change_points as f64 / 15.0).clamp(0.0, 1.0);
+    let motion_score = (temporal_motion_score * 0.4 + variance_motion * 0.2 + mbp_motion * 0.25 + cp_motion * 0.15).clamp(0.0, 1.0);
 
     // ── Signal quality metric ──
     // Based on estimated SNR (RSSI relative to noise floor) and subcarrier consistency.
@@ -823,24 +859,198 @@ fn extract_features_from_frame(
         spectral_power,
     };
 
-    // ── Classification ──
-    let (motion_level, presence) = if motion_score > 0.4 {
-        ("active".to_string(), true)
-    } else if motion_score > 0.08 {
-        ("present_still".to_string(), true)
+    // Return raw motion_score and signal_quality — classification is done by
+    // `smooth_and_classify()` which has access to EMA state and hysteresis.
+    let raw_classification = ClassificationInfo {
+        motion_level: raw_classify(motion_score),
+        presence: motion_score > 0.04,
+        confidence: (0.4 + signal_quality * 0.3 + motion_score * 0.3).clamp(0.0, 1.0),
+    };
+
+    (features, raw_classification, breathing_rate_hz, sub_variances, motion_score)
+}
+
+/// Simple threshold classification (no smoothing) — used as the "raw" input.
+fn raw_classify(score: f64) -> String {
+    if score > 0.25 { "active".into() }
+    else if score > 0.12 { "present_moving".into() }
+    else if score > 0.04 { "present_still".into() }
+    else { "absent".into() }
+}
+
+/// Debounce frames required before state transition (at ~10 FPS = ~0.4s).
+const DEBOUNCE_FRAMES: u32 = 4;
+/// EMA alpha for motion smoothing (~1s time constant at 10 FPS).
+const MOTION_EMA_ALPHA: f64 = 0.15;
+/// EMA alpha for slow-adapting baseline (~30s time constant at 10 FPS).
+const BASELINE_EMA_ALPHA: f64 = 0.003;
+/// Number of warm-up frames before baseline subtraction kicks in.
+const BASELINE_WARMUP: u64 = 50;
+
+/// Apply EMA smoothing, adaptive baseline subtraction, and hysteresis debounce
+/// to the raw classification.  Mutates the smoothing state in `AppStateInner`.
+fn smooth_and_classify(state: &mut AppStateInner, raw: &mut ClassificationInfo, raw_motion: f64) {
+    // 1. Adaptive baseline: slowly track the "quiet room" floor.
+    //    Only update baseline when raw score is below the current smoothed level
+    //    (i.e. during calm periods) so walking doesn't inflate the baseline.
+    state.baseline_frames += 1;
+    if state.baseline_frames < BASELINE_WARMUP {
+        // During warm-up, aggressively learn the baseline.
+        state.baseline_motion = state.baseline_motion * 0.9 + raw_motion * 0.1;
+    } else if raw_motion < state.smoothed_motion + 0.05 {
+        state.baseline_motion = state.baseline_motion * (1.0 - BASELINE_EMA_ALPHA)
+                              + raw_motion * BASELINE_EMA_ALPHA;
+    }
+
+    // 2. Subtract baseline and clamp.
+    let adjusted = (raw_motion - state.baseline_motion * 0.7).max(0.0);
+
+    // 3. EMA smooth the adjusted score.
+    state.smoothed_motion = state.smoothed_motion * (1.0 - MOTION_EMA_ALPHA)
+                          + adjusted * MOTION_EMA_ALPHA;
+    let sm = state.smoothed_motion;
+
+    // 4. Classify from smoothed score.
+    let candidate = raw_classify(sm);
+
+    // 5. Hysteresis debounce: require N consecutive frames agreeing on a new state.
+    if candidate == state.current_motion_level {
+        // Already in this state — reset debounce.
+        state.debounce_counter = 0;
+        state.debounce_candidate = candidate;
+    } else if candidate == state.debounce_candidate {
+        state.debounce_counter += 1;
+        if state.debounce_counter >= DEBOUNCE_FRAMES {
+            // Transition accepted.
+            state.current_motion_level = candidate;
+            state.debounce_counter = 0;
+        }
     } else {
-        ("absent".to_string(), false)
-    };
+        // New candidate — restart counter.
+        state.debounce_candidate = candidate;
+        state.debounce_counter = 1;
+    }
 
-    let confidence = (0.4 + signal_quality * 0.3 + motion_score * 0.3).clamp(0.0, 1.0);
+    // 6. Write the smoothed result back into the classification.
+    raw.motion_level = state.current_motion_level.clone();
+    raw.presence = sm > 0.03;
+    raw.confidence = (0.4 + sm * 0.6).clamp(0.0, 1.0);
+}
 
-    let classification = ClassificationInfo {
-        motion_level,
-        presence,
-        confidence,
-    };
+/// If an adaptive model is loaded, override the classification with the
+/// model's prediction.  Uses the full 15-feature vector for higher accuracy.
+fn adaptive_override(state: &AppStateInner, features: &FeatureInfo, classification: &mut ClassificationInfo) {
+    if let Some(ref model) = state.adaptive_model {
+        // Get current frame amplitudes from the latest history entry.
+        let amps = state.frame_history.back()
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+        let feat_arr = adaptive_classifier::features_from_runtime(
+            &serde_json::json!({
+                "variance": features.variance,
+                "motion_band_power": features.motion_band_power,
+                "breathing_band_power": features.breathing_band_power,
+                "spectral_power": features.spectral_power,
+                "dominant_freq_hz": features.dominant_freq_hz,
+                "change_points": features.change_points,
+                "mean_rssi": features.mean_rssi,
+            }),
+            amps,
+        );
+        let (label, conf) = model.classify(&feat_arr);
+        classification.motion_level = label.to_string();
+        classification.presence = label != "absent";
+        // Blend model confidence with existing smoothed confidence.
+        classification.confidence = (conf * 0.7 + classification.confidence * 0.3).clamp(0.0, 1.0);
+    }
+}
 
-    (features, classification, breathing_rate_hz, sub_variances)
+/// Size of the median filter window for vital signs outlier rejection.
+const VITAL_MEDIAN_WINDOW: usize = 21;
+/// EMA alpha for vital signs (~5s time constant at 10 FPS).
+const VITAL_EMA_ALPHA: f64 = 0.02;
+/// Maximum BPM jump per frame before a value is rejected as an outlier.
+const HR_MAX_JUMP: f64 = 8.0;
+const BR_MAX_JUMP: f64 = 2.0;
+/// Minimum change from current smoothed value before EMA updates (dead-band).
+/// Prevents micro-drift from creeping in.
+const HR_DEAD_BAND: f64 = 2.0;
+const BR_DEAD_BAND: f64 = 0.5;
+
+/// Smooth vital signs using median-filter outlier rejection + EMA.
+/// Mutates `state.smoothed_hr`, `state.smoothed_br`, etc.
+/// Returns the smoothed VitalSigns to broadcast.
+fn smooth_vitals(state: &mut AppStateInner, raw: &VitalSigns) -> VitalSigns {
+    let raw_hr = raw.heart_rate_bpm.unwrap_or(0.0);
+    let raw_br = raw.breathing_rate_bpm.unwrap_or(0.0);
+
+    // -- Outlier rejection: skip values that jump too far from current EMA --
+    let hr_ok = state.smoothed_hr < 1.0 || (raw_hr - state.smoothed_hr).abs() < HR_MAX_JUMP;
+    let br_ok = state.smoothed_br < 1.0 || (raw_br - state.smoothed_br).abs() < BR_MAX_JUMP;
+
+    // Push into buffer (only non-outlier values)
+    if hr_ok && raw_hr > 0.0 {
+        state.hr_buffer.push_back(raw_hr);
+        if state.hr_buffer.len() > VITAL_MEDIAN_WINDOW { state.hr_buffer.pop_front(); }
+    }
+    if br_ok && raw_br > 0.0 {
+        state.br_buffer.push_back(raw_br);
+        if state.br_buffer.len() > VITAL_MEDIAN_WINDOW { state.br_buffer.pop_front(); }
+    }
+
+    // Compute trimmed mean: drop top/bottom 25% then average the middle 50%.
+    // This is more stable than pure median and less noisy than raw mean.
+    let trimmed_hr = trimmed_mean(&state.hr_buffer);
+    let trimmed_br = trimmed_mean(&state.br_buffer);
+
+    // EMA smooth with dead-band: only update if the trimmed mean differs
+    // from the current smoothed value by more than the dead-band.
+    // This prevents the display from constantly creeping by tiny amounts.
+    if trimmed_hr > 0.0 {
+        if state.smoothed_hr < 1.0 {
+            state.smoothed_hr = trimmed_hr;
+        } else if (trimmed_hr - state.smoothed_hr).abs() > HR_DEAD_BAND {
+            state.smoothed_hr = state.smoothed_hr * (1.0 - VITAL_EMA_ALPHA)
+                              + trimmed_hr * VITAL_EMA_ALPHA;
+        }
+        // else: within dead-band, hold current value
+    }
+    if trimmed_br > 0.0 {
+        if state.smoothed_br < 1.0 {
+            state.smoothed_br = trimmed_br;
+        } else if (trimmed_br - state.smoothed_br).abs() > BR_DEAD_BAND {
+            state.smoothed_br = state.smoothed_br * (1.0 - VITAL_EMA_ALPHA)
+                              + trimmed_br * VITAL_EMA_ALPHA;
+        }
+    }
+
+    // Smooth confidence
+    state.smoothed_hr_conf = state.smoothed_hr_conf * 0.92 + raw.heartbeat_confidence * 0.08;
+    state.smoothed_br_conf = state.smoothed_br_conf * 0.92 + raw.breathing_confidence * 0.08;
+
+    VitalSigns {
+        breathing_rate_bpm: if state.smoothed_br > 1.0 { Some(state.smoothed_br) } else { None },
+        heart_rate_bpm: if state.smoothed_hr > 1.0 { Some(state.smoothed_hr) } else { None },
+        breathing_confidence: state.smoothed_br_conf,
+        heartbeat_confidence: state.smoothed_hr_conf,
+        signal_quality: raw.signal_quality,
+    }
+}
+
+/// Trimmed mean: sort, drop top/bottom 25%, average the middle 50%.
+/// More robust than median (uses more data) and less noisy than raw mean.
+fn trimmed_mean(buf: &VecDeque<f64>) -> f64 {
+    if buf.is_empty() { return 0.0; }
+    let mut sorted: Vec<f64> = buf.iter().copied().collect();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n = sorted.len();
+    let trim = n / 4; // drop 25% from each end
+    let middle = &sorted[trim..n - trim.max(0)];
+    if middle.is_empty() {
+        sorted[n / 2] // fallback to median if too few samples
+    } else {
+        middle.iter().sum::<f64>() / middle.len() as f64
+    }
 }
 
 // ── Windows WiFi RSSI collector ──────────────────────────────────────────────
@@ -982,8 +1192,10 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
             s_write_pre.frame_history.pop_front();
         }
         let sample_rate_hz = 1000.0 / tick_ms as f64;
-        let (features, classification, breathing_rate_hz, sub_variances) =
+        let (features, mut classification, breathing_rate_hz, sub_variances, raw_motion) =
             extract_features_from_frame(&frame, &s_write_pre.frame_history, sample_rate_hz);
+        smooth_and_classify(&mut s_write_pre, &mut classification, raw_motion);
+        adaptive_override(&s_write_pre, &features, &mut classification);
         drop(s_write_pre);
 
         // ── Step 5: Build enhanced fields from pipeline result ───────
@@ -1025,7 +1237,8 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
             0.05
         };
 
-        let vitals = s.vital_detector.process_frame(&frame.amplitudes, &frame.phases);
+        let raw_vitals = s.vital_detector.process_frame(&frame.amplitudes, &frame.phases);
+        let vitals = smooth_vitals(&mut s, &raw_vitals);
         s.latest_vitals = vitals.clone();
 
         let feat_variance = features.variance;
@@ -1132,8 +1345,10 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         s.frame_history.pop_front();
     }
     let sample_rate_hz = 2.0_f64; // fallback tick ~ 500 ms => 2 Hz
-    let (features, classification, breathing_rate_hz, sub_variances) =
+    let (features, mut classification, breathing_rate_hz, sub_variances, raw_motion) =
         extract_features_from_frame(&frame, &s.frame_history, sample_rate_hz);
+    smooth_and_classify(&mut s, &mut classification, raw_motion);
+    adaptive_override(&s, &features, &mut classification);
 
     s.source = format!("wifi:{ssid}");
     s.rssi_history.push_back(rssi_dbm);
@@ -1152,7 +1367,8 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         0.05
     };
 
-    let vitals = s.vital_detector.process_frame(&frame.amplitudes, &frame.phases);
+    let raw_vitals = s.vital_detector.process_frame(&frame.amplitudes, &frame.phases);
+    let vitals = smooth_vitals(&mut s, &raw_vitals);
     s.latest_vitals = vitals.clone();
 
     let feat_variance = features.variance;
@@ -2251,6 +2467,77 @@ async fn train_stop(State(state): State<SharedState>) -> Json<serde_json::Value>
     }))
 }
 
+// ── Adaptive classifier endpoints ────────────────────────────────────────────
+
+/// POST /api/v1/adaptive/train — train the adaptive classifier from recordings.
+async fn adaptive_train(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let rec_dir = PathBuf::from("data/recordings");
+    eprintln!("=== Adaptive Classifier Training ===");
+    match adaptive_classifier::train_from_recordings(&rec_dir) {
+        Ok(model) => {
+            let accuracy = model.training_accuracy;
+            let frames = model.trained_frames;
+            let stats: Vec<_> = model.class_stats.iter().map(|cs| {
+                serde_json::json!({
+                    "class": cs.label,
+                    "samples": cs.count,
+                    "feature_means": cs.mean,
+                })
+            }).collect();
+
+            // Save to disk.
+            if let Err(e) = model.save(&adaptive_classifier::model_path()) {
+                warn!("Failed to save adaptive model: {e}");
+            } else {
+                info!("Adaptive model saved to {}", adaptive_classifier::model_path().display());
+            }
+
+            // Load into runtime state.
+            let mut s = state.write().await;
+            s.adaptive_model = Some(model);
+
+            Json(serde_json::json!({
+                "success": true,
+                "trained_frames": frames,
+                "accuracy": accuracy,
+                "class_stats": stats,
+            }))
+        }
+        Err(e) => {
+            Json(serde_json::json!({
+                "success": false,
+                "error": e,
+            }))
+        }
+    }
+}
+
+/// GET /api/v1/adaptive/status — check adaptive model status.
+async fn adaptive_status(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    match &s.adaptive_model {
+        Some(model) => Json(serde_json::json!({
+            "loaded": true,
+            "trained_frames": model.trained_frames,
+            "accuracy": model.training_accuracy,
+            "version": model.version,
+            "classes": adaptive_classifier::CLASSES,
+            "class_stats": model.class_stats,
+        })),
+        None => Json(serde_json::json!({
+            "loaded": false,
+            "message": "No adaptive model. POST /api/v1/adaptive/train to train one.",
+        })),
+    }
+}
+
+/// POST /api/v1/adaptive/unload — unload the adaptive model (revert to thresholds).
+async fn adaptive_unload(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let mut s = state.write().await;
+    s.adaptive_model = None;
+    Json(serde_json::json!({ "success": true, "message": "Adaptive model unloaded." }))
+}
+
 /// Generate a simple timestamp string (epoch seconds) for recording IDs.
 fn chrono_timestamp() -> u64 {
     std::time::SystemTime::now()
@@ -2492,8 +2779,10 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     }
 
                     let sample_rate_hz = 1000.0 / 500.0_f64; // default tick; ESP32 frames arrive as fast as they come
-                    let (features, classification, breathing_rate_hz, sub_variances) =
+                    let (features, mut classification, breathing_rate_hz, sub_variances, raw_motion) =
                         extract_features_from_frame(&frame, &s.frame_history, sample_rate_hz);
+                    smooth_and_classify(&mut s, &mut classification, raw_motion);
+    adaptive_override(&s, &features, &mut classification);
 
                     // Update RSSI history
                     s.rssi_history.push_back(features.mean_rssi);
@@ -2508,10 +2797,11 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         else if classification.motion_level == "present_still" { 0.3 }
                         else { 0.05 };
 
-                    let vitals = s.vital_detector.process_frame(
+                    let raw_vitals = s.vital_detector.process_frame(
                         &frame.amplitudes,
                         &frame.phases,
                     );
+                    let vitals = smooth_vitals(&mut s, &raw_vitals);
                     s.latest_vitals = vitals.clone();
 
                     // Multi-person estimation with temporal smoothing.
@@ -2595,8 +2885,10 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
         }
 
         let sample_rate_hz = 1000.0 / tick_ms as f64;
-        let (features, classification, breathing_rate_hz, sub_variances) =
+        let (features, mut classification, breathing_rate_hz, sub_variances, raw_motion) =
             extract_features_from_frame(&frame, &s.frame_history, sample_rate_hz);
+        smooth_and_classify(&mut s, &mut classification, raw_motion);
+    adaptive_override(&s, &features, &mut classification);
 
         s.rssi_history.push_back(features.mean_rssi);
         if s.rssi_history.len() > 60 {
@@ -2607,10 +2899,11 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
             else if classification.motion_level == "present_still" { 0.3 }
             else { 0.05 };
 
-        let vitals = s.vital_detector.process_frame(
+        let raw_vitals = s.vital_detector.process_frame(
             &frame.amplitudes,
             &frame.phases,
         );
+        let vitals = smooth_vitals(&mut s, &raw_vitals);
         s.latest_vitals = vitals.clone();
 
         let frame_amplitudes = frame.amplitudes.clone();
@@ -3264,6 +3557,18 @@ async fn main() {
         active_sona_profile: None,
         model_loaded,
         smoothed_person_score: 0.0,
+        smoothed_motion: 0.0,
+        current_motion_level: "absent".to_string(),
+        debounce_counter: 0,
+        debounce_candidate: "absent".to_string(),
+        baseline_motion: 0.0,
+        baseline_frames: 0,
+        smoothed_hr: 0.0,
+        smoothed_br: 0.0,
+        smoothed_hr_conf: 0.0,
+        smoothed_br_conf: 0.0,
+        hr_buffer: VecDeque::with_capacity(8),
+        br_buffer: VecDeque::with_capacity(8),
         edge_vitals: None,
         latest_wasm_events: None,
         // Model management
@@ -3278,6 +3583,11 @@ async fn main() {
         // Training
         training_status: "idle".to_string(),
         training_config: None,
+        adaptive_model: adaptive_classifier::AdaptiveModel::load(&adaptive_classifier::model_path()).ok().map(|m| {
+            info!("Loaded adaptive classifier: {} frames, {:.1}% accuracy",
+                  m.trained_frames, m.training_accuracy * 100.0);
+            m
+        }),
     }));
 
     // Start background tasks based on source
@@ -3364,6 +3674,10 @@ async fn main() {
         .route("/api/v1/train/status", get(train_status))
         .route("/api/v1/train/start", post(train_start))
         .route("/api/v1/train/stop", post(train_stop))
+        // Adaptive classifier endpoints
+        .route("/api/v1/adaptive/train", post(adaptive_train))
+        .route("/api/v1/adaptive/status", get(adaptive_status))
+        .route("/api/v1/adaptive/unload", post(adaptive_unload))
         // Static UI files
         .nest_service("/ui", ServeDir::new(&ui_path))
         .layer(SetResponseHeaderLayer::overriding(

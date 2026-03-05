@@ -26,15 +26,20 @@ WiFi DensePose turns commodity WiFi signals into real-time human pose estimation
 7. [Web UI](#web-ui)
 8. [Vital Sign Detection](#vital-sign-detection)
 9. [CLI Reference](#cli-reference)
-10. [Training a Model](#training-a-model)
+10. [Observatory Visualization](#observatory-visualization)
+11. [Adaptive Classifier](#adaptive-classifier)
+    - [Recording Training Data](#recording-training-data)
+    - [Training the Model](#training-the-model)
+    - [Using the Trained Model](#using-the-trained-model)
+12. [Training a Model](#training-a-model)
     - [CRV Signal-Line Protocol](#crv-signal-line-protocol)
-11. [RVF Model Containers](#rvf-model-containers)
-12. [Hardware Setup](#hardware-setup)
+13. [RVF Model Containers](#rvf-model-containers)
+14. [Hardware Setup](#hardware-setup)
     - [ESP32-S3 Mesh](#esp32-s3-mesh)
     - [Intel 5300 / Atheros NIC](#intel-5300--atheros-nic)
-13. [Docker Compose (Multi-Service)](#docker-compose-multi-service)
-14. [Troubleshooting](#troubleshooting)
-15. [FAQ](#faq)
+15. [Docker Compose (Multi-Service)](#docker-compose-multi-service)
+16. [Troubleshooting](#troubleshooting)
+17. [FAQ](#faq)
 
 ---
 
@@ -42,12 +47,12 @@ WiFi DensePose turns commodity WiFi signals into real-time human pose estimation
 
 | Requirement | Minimum | Recommended |
 |-------------|---------|-------------|
-| **OS** | Windows 10, macOS 10.15, Ubuntu 18.04 | Latest stable |
+| **OS** | Windows 10/11, macOS 10.15, Ubuntu 18.04 | Latest stable |
 | **RAM** | 4 GB | 8 GB+ |
 | **Disk** | 2 GB free | 5 GB free |
 | **Docker** (for Docker path) | Docker 20+ | Docker 24+ |
 | **Rust** (for source build) | 1.70+ | 1.85+ |
-| **Python** (for legacy v1) | 3.8+ | 3.11+ |
+| **Python** (for legacy v1) | 3.10+ | 3.13+ |
 
 **Hardware for live sensing (optional):**
 
@@ -82,15 +87,15 @@ cd RuView/rust-port/wifi-densepose-rs
 # Build
 cargo build --release
 
-# Verify (runs 1,100+ tests)
-cargo test --workspace
+# Verify (runs 1,400+ tests)
+cargo test --workspace --no-default-features
 ```
 
 The compiled binary is at `target/release/sensing-server`.
 
 ### From crates.io (Individual Crates)
 
-All 15 crates are published to crates.io at v0.3.0. Add individual crates to your own Rust project:
+All 16 crates are published to crates.io at v0.3.0. Add individual crates to your own Rust project:
 
 ```bash
 # Core types and traits
@@ -113,6 +118,9 @@ cargo add wifi-densepose-ruvector --features crv
 
 # WebAssembly bindings
 cargo add wifi-densepose-wasm
+
+# WASM edge runtime (lightweight, for embedded/IoT)
+cargo add wifi-densepose-wasm-edge
 ```
 
 See the full crate list and dependency order in [CLAUDE.md](../CLAUDE.md#crate-publishing-order).
@@ -206,25 +214,27 @@ Default in Docker. Generates synthetic CSI data exercising the full pipeline.
 ```bash
 # Docker
 docker run -p 3000:3000 ruvnet/wifi-densepose:latest
-# (--source simulated is the default)
+# (--source auto is the default; falls back to simulate when no hardware detected)
 
 # From source
-./target/release/sensing-server --source simulated --http-port 3000 --ws-port 3001
+./target/release/sensing-server --source simulate --http-port 3000 --ws-port 3001
 ```
 
 ### Windows WiFi (RSSI Only)
 
-Uses `netsh wlan` to capture RSSI from nearby access points. No special hardware needed, but capabilities are limited to coarse presence and motion detection (no pose estimation or vital signs).
+Uses `netsh wlan` to capture RSSI from nearby access points. No special hardware needed. Supports presence detection, motion classification, and coarse breathing rate estimation. No pose estimation (requires CSI).
 
 ```bash
 # From source (Windows only)
-./target/release/sensing-server --source windows --http-port 3000 --ws-port 3001 --tick-ms 500
+./target/release/sensing-server --source wifi --http-port 3000 --ws-port 3001 --tick-ms 500
 
 # Docker (requires --network host on Windows)
-docker run --network host ruvnet/wifi-densepose:latest --source windows --tick-ms 500
+docker run --network host ruvnet/wifi-densepose:latest --source wifi --tick-ms 500
 ```
 
-See [Tutorial #36](https://github.com/ruvnet/RuView/issues/36) for a walkthrough.
+> **Community verified:** Tested on Windows 10 (10.0.26200) with Intel Wi-Fi 6 AX201 160MHz, Python 3.14, StormFiber 5 GHz network. All 7 tutorial steps passed with stable RSSI readings at -48 dBm. See [Tutorial #36](https://github.com/ruvnet/RuView/issues/36) for the full walkthrough and test results.
+
+**Vital signs from RSSI:** The sensing server now supports breathing rate estimation from RSSI variance patterns (requires stationary subject near AP) and motion classification with confidence scoring. RSSI-based vital sign detection has lower fidelity than ESP32 CSI — it is best for presence detection and coarse motion classification.
 
 ### macOS WiFi (RSSI Only)
 
@@ -315,6 +325,9 @@ Base URL: `http://localhost:3000` (Docker) or `http://localhost:8080` (binary de
 | `GET` | `/api/v1/train/status` | Training run status | `{"phase":"idle"}` |
 | `POST` | `/api/v1/train/start` | Start a training run | `{"status":"started"}` |
 | `POST` | `/api/v1/train/stop` | Stop the active training run | `{"status":"stopped"}` |
+| `POST` | `/api/v1/adaptive/train` | Train adaptive classifier from recordings | `{"success":true,"accuracy":0.85}` |
+| `GET` | `/api/v1/adaptive/status` | Adaptive model status and accuracy | `{"loaded":true,"accuracy":0.85}` |
+| `POST` | `/api/v1/adaptive/unload` | Unload adaptive model | `{"success":true}` |
 
 ### Example: Get Vital Signs
 
@@ -410,9 +423,16 @@ wscat -c ws://localhost:3001/ws/sensing
 
 ## Web UI
 
-The built-in Three.js UI is served at `http://localhost:3000/` (Docker) or the configured HTTP port.
+The built-in Three.js UI is served at `http://localhost:3000/ui/` (Docker) or the configured HTTP port.
 
-**What you see:**
+**Two visualization modes:**
+
+| Page | URL | Purpose |
+|------|-----|---------|
+| **Dashboard** | `/ui/index.html` | Tabbed monitoring dashboard with body model, signal heatmap, phase plot, vital signs |
+| **Observatory** | `/ui/observatory.html` | Immersive 3D room visualization with cinematic lighting and wireframe figures |
+
+**Dashboard panels:**
 
 | Panel | Description |
 |-------|-------------|
@@ -423,7 +443,7 @@ The built-in Three.js UI is served at `http://localhost:3000/` (Docker) or the c
 | Vital Signs | Live breathing rate (BPM) and heart rate (BPM) |
 | Dashboard | System stats, throughput, connected WebSocket clients |
 
-The UI updates in real-time via the WebSocket connection.
+Both UIs update in real-time via WebSocket and auto-detect the sensing server on the same origin.
 
 ---
 
@@ -441,6 +461,8 @@ The system extracts breathing rate and heart rate from CSI signal fluctuations u
 - Subject within ~3-5 meters of an access point (up to ~8 m with multistatic mesh)
 - Relatively stationary subject (large movements mask vital sign oscillations)
 
+**Signal smoothing:** Vital sign estimates pass through a three-stage smoothing pipeline (ADR-048): outlier rejection (±8 BPM HR, ±2 BPM BR per frame), 21-frame trimmed mean, and EMA with α=0.02. This produces stable readings that hold steady for 5-10+ seconds instead of jumping every frame. See [Adaptive Classifier](#adaptive-classifier) for details.
+
 **Simulated mode** produces synthetic vital sign data for testing.
 
 ---
@@ -451,7 +473,7 @@ The Rust sensing server binary accepts the following flags:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--source` | `auto` | Data source: `auto`, `simulated`, `windows`, `esp32` |
+| `--source` | `auto` | Data source: `auto`, `simulate`, `wifi`, `esp32` |
 | `--http-port` | `8080` | HTTP port for REST API and UI |
 | `--ws-port` | `8765` | WebSocket port |
 | `--udp-port` | `5005` | UDP port for ESP32 CSI frames |
@@ -472,13 +494,13 @@ The Rust sensing server binary accepts the following flags:
 
 ```bash
 # Simulated mode with UI (development)
-./target/release/sensing-server --source simulated --http-port 3000 --ws-port 3001 --ui-path ../../ui
+./target/release/sensing-server --source simulate --http-port 3000 --ws-port 3001 --ui-path ../../ui
 
 # ESP32 hardware mode
 ./target/release/sensing-server --source esp32 --udp-port 5005
 
 # Windows WiFi RSSI
-./target/release/sensing-server --source windows --tick-ms 500
+./target/release/sensing-server --source wifi --tick-ms 500
 
 # Run benchmark
 ./target/release/sensing-server --benchmark
@@ -489,6 +511,149 @@ The Rust sensing server binary accepts the following flags:
 # Load trained model with progressive loading
 ./target/release/sensing-server --model model.rvf --progressive
 ```
+
+---
+
+## Observatory Visualization
+
+The Observatory is an immersive Three.js visualization that renders WiFi sensing data as a cinematic 3D experience. It features room-scale props, wireframe human figures, WiFi signal animations, and a live data HUD.
+
+**URL:** `http://localhost:3000/ui/observatory.html`
+
+**Features:**
+
+| Feature | Description |
+|---------|-------------|
+| Room scene | Furniture, walls, floor with emissive materials and 6-point lighting |
+| Wireframe figures | Up to 4 human skeletons with joint pulsation synced to breathing |
+| Signal field | Volumetric WiFi wave visualization |
+| Live HUD | Heart rate, breathing rate, confidence, RSSI, motion level |
+| Auto-detect | Automatically connects to live ESP32 data when sensing server is running |
+| Scenario cycling | 6 preset scenarios with smooth transitions (demo mode) |
+
+**Keyboard shortcuts:**
+
+| Key | Action |
+|-----|--------|
+| `1-6` | Switch scenario |
+| `A` | Toggle auto-cycle |
+| `P` | Pause/resume |
+| `S` | Open settings |
+| `R` | Reset camera |
+
+**Live data auto-detect:** When served by the sensing server, the Observatory probes `/health` on the same origin and automatically connects via WebSocket. The HUD badge switches from `DEMO` to `LIVE`. No configuration needed.
+
+---
+
+## Adaptive Classifier
+
+The adaptive classifier (ADR-048) learns your environment's specific WiFi signal patterns from labeled recordings. It replaces static threshold-based classification with a trained logistic regression model that uses 15 features (7 server-computed + 8 subcarrier-derived statistics).
+
+### Signal Smoothing Pipeline
+
+All CSI-derived metrics pass through a three-stage pipeline before reaching the UI:
+
+| Stage | What It Does | Key Parameters |
+|-------|-------------|----------------|
+| **Adaptive baseline** | Learns quiet-room noise floor, subtracts drift | α=0.003, 50-frame warm-up |
+| **EMA + median filter** | Smooths motion score and vital signs | Motion α=0.15; Vitals: 21-frame trimmed mean, α=0.02 |
+| **Hysteresis debounce** | Prevents rapid state flickering | 4 frames (~0.4s) required for state transition |
+
+Vital signs use additional stabilization:
+
+| Parameter | Value | Effect |
+|-----------|-------|--------|
+| HR dead-band | ±2 BPM | Prevents micro-drift |
+| BR dead-band | ±0.5 BPM | Prevents micro-drift |
+| HR max jump | 8 BPM/frame | Rejects noise spikes |
+| BR max jump | 2 BPM/frame | Rejects noise spikes |
+
+### Recording Training Data
+
+Record labeled CSI sessions while performing distinct activities. Each recording captures full sensing frames (features + raw subcarrier amplitudes) at ~10-25 FPS.
+
+```bash
+# 1. Record empty room (leave the room for 30 seconds)
+curl -X POST http://localhost:3000/api/v1/recording/start \
+  -H "Content-Type: application/json" -d '{"id":"train_empty_room"}'
+# ... wait 30 seconds ...
+curl -X POST http://localhost:3000/api/v1/recording/stop
+
+# 2. Record sitting still (sit near ESP32 for 30 seconds)
+curl -X POST http://localhost:3000/api/v1/recording/start \
+  -H "Content-Type: application/json" -d '{"id":"train_sitting_still"}'
+# ... wait 30 seconds ...
+curl -X POST http://localhost:3000/api/v1/recording/stop
+
+# 3. Record walking (walk around the room for 30 seconds)
+curl -X POST http://localhost:3000/api/v1/recording/start \
+  -H "Content-Type: application/json" -d '{"id":"train_walking"}'
+# ... wait 30 seconds ...
+curl -X POST http://localhost:3000/api/v1/recording/stop
+
+# 4. Record active movement (jumping jacks, arm waving for 30 seconds)
+curl -X POST http://localhost:3000/api/v1/recording/start \
+  -H "Content-Type: application/json" -d '{"id":"train_active"}'
+# ... wait 30 seconds ...
+curl -X POST http://localhost:3000/api/v1/recording/stop
+```
+
+Recordings are saved as JSONL files in `data/recordings/`. Filenames must start with `train_` and contain a class keyword:
+
+| Filename pattern | Class |
+|-----------------|-------|
+| `*empty*` or `*absent*` | absent |
+| `*still*` or `*sitting*` | present_still |
+| `*walking*` or `*moving*` | present_moving |
+| `*active*` or `*exercise*` | active |
+
+### Training the Model
+
+Train the adaptive classifier from your labeled recordings:
+
+```bash
+curl -X POST http://localhost:3000/api/v1/adaptive/train
+```
+
+The server trains a multiclass logistic regression on 15 features using mini-batch SGD (200 epochs). Training completes in under 1 second for typical recording sets. The trained model is saved to `data/adaptive_model.json` and automatically loaded on server restart.
+
+**Check model status:**
+
+```bash
+curl http://localhost:3000/api/v1/adaptive/status
+```
+
+**Unload the model (revert to threshold-based classification):**
+
+```bash
+curl -X POST http://localhost:3000/api/v1/adaptive/unload
+```
+
+### Using the Trained Model
+
+Once trained, the adaptive model runs automatically:
+
+1. Each CSI frame is classified using the learned weights instead of static thresholds
+2. Model confidence is blended with smoothed threshold confidence (70/30 split)
+3. The model persists across server restarts (loaded from `data/adaptive_model.json`)
+
+**Tips for better accuracy:**
+
+- Record with clearly distinct activities (actually leave the room for "empty")
+- Record 30-60 seconds per activity (more data = better model)
+- Re-record and retrain if you move the ESP32 or rearrange the room
+- The model is environment-specific — retrain when the physical setup changes
+
+### Adaptive Classifier API
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/adaptive/train` | Train from `train_*` recordings |
+| `GET` | `/api/v1/adaptive/status` | Model status, accuracy, class stats |
+| `POST` | `/api/v1/adaptive/unload` | Unload model, revert to thresholds |
+| `POST` | `/api/v1/recording/start` | Start recording CSI frames |
+| `POST` | `/api/v1/recording/stop` | Stop recording |
+| `GET` | `/api/v1/recording/list` | List recordings |
 
 ---
 
@@ -805,13 +970,28 @@ rustc --version
 
 ### Windows: RSSI mode shows no data
 
-Run the terminal as Administrator (required for `netsh wlan` access).
+Run the terminal as Administrator (required for `netsh wlan` access). Verified working on Windows 10 and 11 with Intel AX201 and Intel BE201 adapters.
 
 ### Vital signs show 0 BPM
 
 - Vital sign detection requires CSI-capable hardware (ESP32 or research NIC)
 - RSSI-only mode (Windows WiFi) does not have sufficient resolution for vital signs
 - In simulated mode, synthetic vital signs are generated after a few seconds of warm-up
+- With real ESP32 data, vital signs take ~5 seconds to stabilize (smoothing pipeline warm-up)
+
+### Vital signs jumping around
+
+The server applies a 3-stage smoothing pipeline (ADR-048). If readings are still unstable:
+- Ensure the subject is relatively still (large movements mask vital sign oscillations)
+- Train the adaptive classifier for your specific environment: `curl -X POST http://localhost:3000/api/v1/adaptive/train`
+- Check signal quality: `curl http://localhost:3000/api/v1/sensing/latest` — look for `signal_quality > 0.4`
+
+### Observatory shows DEMO instead of LIVE
+
+- Verify the sensing server is running: `curl http://localhost:3000/health`
+- Access Observatory via the server URL: `http://localhost:3000/ui/observatory.html` (not a file:// URL)
+- Hard refresh with Ctrl+Shift+R to clear cached settings
+- The auto-detect probes `/health` on the same origin — cross-origin won't work
 
 ---
 
@@ -838,11 +1018,20 @@ The system uses WiFi radio signals, not cameras. No images or video are captured
 **Q: What's the Python vs Rust difference?**
 The Rust implementation (v2) is 810x faster than Python (v1) for the full CSI pipeline. The Docker image is 132 MB vs 569 MB. Rust is the primary and recommended runtime. Python v1 remains available for legacy workflows.
 
+**Q: Can I use an ESP8266 instead of ESP32-S3?**
+No. The ESP8266 does not expose WiFi Channel State Information (CSI) through its SDK, has insufficient RAM (~80 KB vs 512 KB), and runs a single-core 80 MHz CPU that cannot handle the signal processing pipeline. The ESP32-S3 is the minimum supported CSI capture device. See [Issue #138](https://github.com/ruvnet/RuView/issues/138) for alternatives including using cheap Android TV boxes as aggregation hubs.
+
+**Q: Does the Windows WiFi tutorial work on Windows 10?**
+Yes. Community-tested on Windows 10 (build 26200) with an Intel Wi-Fi 6 AX201 160MHz adapter on a 5 GHz network. All 7 tutorial steps passed with Python 3.14. See [Issue #36](https://github.com/ruvnet/RuView/issues/36) for full test results.
+
+**Q: Can I run the sensing server on an ARM device (Raspberry Pi, TV box)?**
+ARM64 deployment is planned ([ADR-046](adr/ADR-046-android-tv-box-armbian-deployment.md)) but not yet available as a pre-built binary. You can cross-compile from source using `cross build --release --target aarch64-unknown-linux-gnu -p wifi-densepose-sensing-server` if you have the Rust cross-compilation toolchain set up.
+
 ---
 
 ## Further Reading
 
-- [Architecture Decision Records](../docs/adr/) - 43 ADRs covering all design decisions
+- [Architecture Decision Records](../docs/adr/) - 48 ADRs covering all design decisions
 - [WiFi-Mat Disaster Response Guide](wifi-mat-user-guide.md) - Search & rescue module
 - [Build Guide](build-guide.md) - Detailed build instructions
 - [RuVector](https://github.com/ruvnet/ruvector) - Signal intelligence crate ecosystem
