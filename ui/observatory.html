@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RuView Observatory — WiFi DensePose</title>
+  <link rel="stylesheet" href="observatory/css/observatory.css">
+</head>
+<body>
+  <canvas id="observatory-canvas"></canvas>
+
+  <!-- ======= HUD Overlay ======= -->
+  <div id="hud">
+
+    <!-- Top-left: Branding -->
+    <div id="brand">
+      <div id="brand-logo"><span class="pi">&pi;</span> RuView</div>
+      <div id="brand-tagline">WiFi DensePose Sensing Observatory</div>
+    </div>
+
+    <!-- Top-right: Connection + status + gear -->
+    <div id="status-bar">
+      <div id="data-source-badge">
+        <span class="dot dot--demo"></span>
+        <span id="data-source-label">DEMO</span>
+      </div>
+      <div id="scenario-area">
+        <span id="autoplay-icon" title="Auto-cycling">&#9654;</span>
+        <select id="scenario-quick-select" title="Change scenario">
+          <option value="auto">Auto-Cycle</option>
+          <option value="empty_room">Empty Room</option>
+          <option value="single_breathing">Vital Signs</option>
+          <option value="two_walking">Multi-Person</option>
+          <option value="fall_event">Fall Detect</option>
+          <option value="sleep_monitoring">Sleep Monitor</option>
+          <option value="intrusion_detect">Intrusion</option>
+          <option value="gesture_control">Gesture Ctrl</option>
+          <option value="crowd_occupancy">Crowd (4 ppl)</option>
+          <option value="search_rescue">Search Rescue</option>
+          <option value="elderly_care">Elderly Care</option>
+          <option value="fitness_tracking">Fitness</option>
+          <option value="security_patrol">Security Patrol</option>
+        </select>
+      </div>
+      <div id="scenario-description"></div>
+      <div id="fps-counter" style="display:none">60 FPS</div>
+      <button id="settings-btn" title="Settings">&#9881;</button>
+    </div>
+
+    <!-- Left panel: Vital Signs -->
+    <div id="panel-vitals" class="data-panel">
+      <div class="panel-header">Vital Signs</div>
+      <div class="vital-row">
+        <div class="vital-icon">&#9825;</div>
+        <div class="vital-data">
+          <div class="vital-label">Heart Rate</div>
+          <div class="vital-value"><span id="hr-value">--</span> <span class="vital-unit">BPM</span></div>
+          <div class="vital-bar"><div id="hr-bar" class="vital-bar-fill vital-bar--hr"></div></div>
+        </div>
+      </div>
+      <div class="vital-row">
+        <div class="vital-icon">&#9788;</div>
+        <div class="vital-data">
+          <div class="vital-label">Respiration</div>
+          <div class="vital-value"><span id="br-value">--</span> <span class="vital-unit">RPM</span></div>
+          <div class="vital-bar"><div id="br-bar" class="vital-bar-fill vital-bar--br"></div></div>
+        </div>
+      </div>
+      <div class="vital-row">
+        <div class="vital-icon">&#9878;</div>
+        <div class="vital-data">
+          <div class="vital-label">Confidence</div>
+          <div class="vital-value"><span id="conf-value">--</span><span class="vital-unit">%</span></div>
+          <div class="vital-bar"><div id="conf-bar" class="vital-bar-fill vital-bar--conf"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right panel: Signal & Presence -->
+    <div id="panel-signal" class="data-panel">
+      <div class="panel-header">WiFi Signal</div>
+      <div class="signal-row">
+        <span class="signal-label">RSSI</span>
+        <span class="signal-value" id="rssi-value">-- dBm</span>
+      </div>
+      <div class="signal-row">
+        <span class="signal-label">Variance</span>
+        <span class="signal-value" id="var-value">--</span>
+      </div>
+      <div class="signal-row">
+        <span class="signal-label">Motion</span>
+        <span class="signal-value" id="motion-value">--</span>
+      </div>
+      <div class="signal-row">
+        <span class="signal-label">Persons</span>
+        <span class="signal-value" id="persons-value">0</span>
+        <span id="persons-dots" class="persons-dots"></span>
+      </div>
+      <canvas id="rssi-sparkline" width="200" height="48"></canvas>
+
+      <div class="panel-header" style="margin-top:12px">Presence</div>
+      <div id="presence-indicator" class="presence-state presence--absent">
+        <span id="presence-label">ABSENT</span>
+      </div>
+      <div id="fall-alert" class="fall-alert" style="display:none">FALL DETECTED</div>
+    </div>
+
+    <!-- Edge module badges (populated dynamically by HudController) -->
+    <div id="edge-modules-bar"></div>
+
+    <!-- Bottom bar: capabilities -->
+    <div id="capabilities-bar">
+      <div class="cap-item"><span class="cap-icon">&#9898;</span><span>Human Pose Estimation</span></div>
+      <div class="cap-divider"></div>
+      <div class="cap-item"><span class="cap-icon">&#9829;</span><span>Vital Sign Monitoring</span></div>
+      <div class="cap-divider"></div>
+      <div class="cap-item"><span class="cap-icon">&#9784;</span><span>Presence Detection</span></div>
+    </div>
+
+    <!-- Bottom-right: keyboard hints -->
+    <div id="key-hints">
+      <span class="key-hint">[A] Orbit</span>
+      <span class="key-hint">[D] Scenario</span>
+      <span class="key-hint">[F] FPS</span>
+      <span class="key-hint">[S] Settings</span>
+      <span class="key-hint">[Space] Pause</span>
+    </div>
+  </div>
+
+  <!-- ======= Settings Dialog ======= -->
+  <div id="settings-overlay" class="settings-overlay" style="display:none">
+    <div class="settings-dialog">
+      <div class="settings-header">
+        <span>Settings</span>
+        <button id="settings-close">&times;</button>
+      </div>
+
+      <div class="settings-tabs">
+        <button class="stab active" data-stab="rendering">Rendering</button>
+        <button class="stab" data-stab="wireframe">Wireframe</button>
+        <button class="stab" data-stab="scene">Scene</button>
+        <button class="stab" data-stab="data">Data</button>
+      </div>
+
+      <!-- Rendering tab -->
+      <div class="stab-content active" id="stab-rendering">
+        <label class="setting-row">
+          <span>Bloom Strength</span>
+          <input type="range" id="opt-bloom" min="0" max="3" step="0.1" value="1.0">
+          <span class="range-val" id="opt-bloom-val">1.0</span>
+        </label>
+        <label class="setting-row">
+          <span>Bloom Radius</span>
+          <input type="range" id="opt-bloom-radius" min="0" max="1" step="0.05" value="0.5">
+          <span class="range-val" id="opt-bloom-radius-val">0.5</span>
+        </label>
+        <label class="setting-row">
+          <span>Bloom Threshold</span>
+          <input type="range" id="opt-bloom-thresh" min="0" max="1" step="0.05" value="0.25">
+          <span class="range-val" id="opt-bloom-thresh-val">0.25</span>
+        </label>
+        <label class="setting-row">
+          <span>Exposure</span>
+          <input type="range" id="opt-exposure" min="0.3" max="2" step="0.05" value="0.9">
+          <span class="range-val" id="opt-exposure-val">0.9</span>
+        </label>
+        <label class="setting-row">
+          <span>Vignette</span>
+          <input type="range" id="opt-vignette" min="0" max="1" step="0.05" value="0.5">
+          <span class="range-val" id="opt-vignette-val">0.5</span>
+        </label>
+        <label class="setting-row">
+          <span>Film Grain</span>
+          <input type="range" id="opt-grain" min="0" max="0.15" step="0.005" value="0.03">
+          <span class="range-val" id="opt-grain-val">0.03</span>
+        </label>
+        <label class="setting-row">
+          <span>Chromatic Aberration</span>
+          <input type="range" id="opt-chromatic" min="0" max="0.008" step="0.0005" value="0.0015">
+          <span class="range-val" id="opt-chromatic-val">0.0015</span>
+        </label>
+      </div>
+
+      <!-- Wireframe tab -->
+      <div class="stab-content" id="stab-wireframe">
+        <label class="setting-row">
+          <span>Bone Thickness</span>
+          <input type="range" id="opt-bone-thick" min="0.005" max="0.06" step="0.002" value="0.02">
+          <span class="range-val" id="opt-bone-thick-val">0.02</span>
+        </label>
+        <label class="setting-row">
+          <span>Joint Size</span>
+          <input type="range" id="opt-joint-size" min="0.02" max="0.12" step="0.005" value="0.05">
+          <span class="range-val" id="opt-joint-size-val">0.05</span>
+        </label>
+        <label class="setting-row">
+          <span>Glow Intensity</span>
+          <input type="range" id="opt-glow" min="0" max="2" step="0.1" value="0.8">
+          <span class="range-val" id="opt-glow-val">0.8</span>
+        </label>
+        <label class="setting-row">
+          <span>Particle Trail</span>
+          <input type="range" id="opt-trail" min="0" max="1" step="0.05" value="0.6">
+          <span class="range-val" id="opt-trail-val">0.6</span>
+        </label>
+        <label class="setting-row">
+          <span>Wireframe Color</span>
+          <input type="color" id="opt-wire-color" value="#00d878">
+        </label>
+        <label class="setting-row">
+          <span>Joint Color</span>
+          <input type="color" id="opt-joint-color" value="#ff4060">
+        </label>
+        <label class="setting-row">
+          <span>Aura Opacity</span>
+          <input type="range" id="opt-aura" min="0" max="0.2" step="0.01" value="0.06">
+          <span class="range-val" id="opt-aura-val">0.06</span>
+        </label>
+      </div>
+
+      <!-- Scene tab -->
+      <div class="stab-content" id="stab-scene">
+        <label class="setting-row">
+          <span>Signal Field</span>
+          <input type="range" id="opt-field" min="0" max="1" step="0.05" value="0.5">
+          <span class="range-val" id="opt-field-val">0.5</span>
+        </label>
+        <label class="setting-row">
+          <span>WiFi Waves</span>
+          <input type="range" id="opt-waves" min="0" max="1" step="0.05" value="0.6">
+          <span class="range-val" id="opt-waves-val">0.6</span>
+        </label>
+        <label class="setting-row">
+          <span>Room Brightness</span>
+          <input type="range" id="opt-ambient" min="0" max="1" step="0.05" value="0.4">
+          <span class="range-val" id="opt-ambient-val">0.4</span>
+        </label>
+        <label class="setting-row">
+          <span>Floor Reflection</span>
+          <input type="range" id="opt-reflect" min="0" max="1" step="0.05" value="0.3">
+          <span class="range-val" id="opt-reflect-val">0.3</span>
+        </label>
+        <label class="setting-row">
+          <span>FOV</span>
+          <input type="range" id="opt-fov" min="30" max="90" step="1" value="50">
+          <span class="range-val" id="opt-fov-val">50</span>
+        </label>
+        <label class="setting-row">
+          <span>Orbit Speed</span>
+          <input type="range" id="opt-orbit-speed" min="0.02" max="0.5" step="0.02" value="0.15">
+          <span class="range-val" id="opt-orbit-speed-val">0.15</span>
+        </label>
+        <label class="setting-row check-row">
+          <span>Show Grid</span>
+          <input type="checkbox" id="opt-grid" checked>
+        </label>
+        <label class="setting-row check-row">
+          <span>Show Room Boundary</span>
+          <input type="checkbox" id="opt-room" checked>
+        </label>
+      </div>
+
+      <!-- Data tab -->
+      <div class="stab-content" id="stab-data">
+        <label class="setting-row">
+          <span>Scenario</span>
+          <select id="opt-scenario">
+            <option value="auto">Auto-Cycle (30s)</option>
+            <optgroup label="Core Sensing">
+              <option value="empty_room">Empty Room</option>
+              <option value="single_breathing">Vital Signs (Breathing)</option>
+              <option value="two_walking">Multi-Person Tracking</option>
+              <option value="fall_event">Fall Detection</option>
+            </optgroup>
+            <optgroup label="Medical / Health">
+              <option value="sleep_monitoring">Sleep Monitoring (Apnea)</option>
+              <option value="elderly_care">Elderly Care (Gait)</option>
+              <option value="fitness_tracking">Fitness Tracking</option>
+            </optgroup>
+            <optgroup label="Security">
+              <option value="intrusion_detect">Intrusion Detection</option>
+              <option value="security_patrol">Security Patrol</option>
+            </optgroup>
+            <optgroup label="Building / Retail">
+              <option value="crowd_occupancy">Crowd Occupancy (4 ppl)</option>
+              <option value="gesture_control">Gesture Control (DTW)</option>
+            </optgroup>
+            <optgroup label="Disaster / Tactical">
+              <option value="search_rescue">Search &amp; Rescue (WiFi-Mat)</option>
+            </optgroup>
+          </select>
+        </label>
+        <label class="setting-row">
+          <span>Cycle Speed (s)</span>
+          <input type="range" id="opt-cycle" min="10" max="120" step="5" value="30">
+          <span class="range-val" id="opt-cycle-val">30</span>
+        </label>
+        <label class="setting-row">
+          <span>Style Preset</span>
+          <select id="opt-preset">
+            <option value="custom">Custom</option>
+            <option value="foundation">Foundation (Default)</option>
+            <option value="cinematic">Cinematic</option>
+            <option value="minimal">Minimal / Clean</option>
+            <option value="neon">Neon Glow</option>
+            <option value="tactical">Tactical / Military</option>
+            <option value="medical">Medical Monitor</option>
+          </select>
+        </label>
+        <label class="setting-row">
+          <span>Data Source</span>
+          <select id="opt-data-source">
+            <option value="demo" selected>Demo Generator</option>
+            <option value="ws">Live WebSocket</option>
+          </select>
+        </label>
+        <label class="setting-row" id="ws-url-row" style="display:none">
+          <span>WS URL</span>
+          <input type="text" id="opt-ws-url" value="" placeholder="ws://localhost:3000/ws/sensing">
+        </label>
+        <button id="btn-reset-camera" class="settings-btn">Reset Camera</button>
+        <button id="btn-reset-settings" class="settings-btn">Reset to Defaults</button>
+        <button id="btn-export-settings" class="settings-btn">Export Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Three.js r160 + addons from CDN -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module" src="observatory/js/main.js"></script>
+</body>
+</html>

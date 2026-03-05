@@ -1,0 +1,10 @@
+## ESP-IDF Managed Component Dependencies (ADR-045)
+dependencies:
+  ## LVGL graphics library
+  lvgl/lvgl: "~8.3"
+
+  ## CST816S capacitive touch driver
+  espressif/esp_lcd_touch_cst816s: "^1.0"
+
+  ## LCD touch abstraction
+  espressif/esp_lcd_touch: "^1.0"

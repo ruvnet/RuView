@@ -85,6 +85,87 @@ menu "Edge Intelligence (ADR-039)"
 
 endmenu
 
+menu "AMOLED Display (ADR-045)"
+
+    config DISPLAY_ENABLE
+        bool "Enable AMOLED display support"
+        default y
+        help
+            Enable RM67162 QSPI AMOLED display and LVGL UI.
+            Auto-detects at boot; gracefully skips if no display hardware.
+            Requires SPIRAM for frame buffers.
+
+    config DISPLAY_FPS_LIMIT
+        int "Display refresh rate limit (FPS)"
+        default 30
+        range 10 60
+        depends on DISPLAY_ENABLE
+        help
+            Maximum display refresh rate. Lower values save CPU.
+
+    config DISPLAY_BRIGHTNESS
+        int "Default backlight brightness (%)"
+        default 80
+        range 0 100
+        depends on DISPLAY_ENABLE
+
+    config DISPLAY_QSPI_CS
+        int "QSPI CS GPIO"
+        default 6
+        depends on DISPLAY_ENABLE
+
+    config DISPLAY_QSPI_CLK
+        int "QSPI CLK GPIO"
+        default 47
+        depends on DISPLAY_ENABLE
+
+    config DISPLAY_QSPI_D0
+        int "QSPI D0 GPIO"
+        default 18
+        depends on DISPLAY_ENABLE
+
+    config DISPLAY_QSPI_D1
+        int "QSPI D1 GPIO"
+        default 7
+        depends on DISPLAY_ENABLE
+
+    config DISPLAY_QSPI_D2
+        int "QSPI D2 GPIO"
+        default 48
+        depends on DISPLAY_ENABLE
+
+    config DISPLAY_QSPI_D3
+        int "QSPI D3 GPIO"
+        default 5
+        depends on DISPLAY_ENABLE
+
+    config DISPLAY_TOUCH_SDA
+        int "Touch I2C SDA GPIO"
+        default 3
+        depends on DISPLAY_ENABLE
+
+    config DISPLAY_TOUCH_SCL
+        int "Touch I2C SCL GPIO"
+        default 2
+        depends on DISPLAY_ENABLE
+
+    config DISPLAY_TOUCH_INT
+        int "Touch INT GPIO"
+        default 21
+        depends on DISPLAY_ENABLE
+
+    config DISPLAY_TOUCH_RST
+        int "Touch RST GPIO"
+        default 17
+        depends on DISPLAY_ENABLE
+
+    config DISPLAY_BL_PIN
+        int "Backlight PWM GPIO"
+        default 38
+        depends on DISPLAY_ENABLE
+
+endmenu
+
 menu "WASM Programmable Sensing (ADR-040)"
 
     config WASM_ENABLE

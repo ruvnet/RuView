@@ -8,6 +8,16 @@ firmware/esp32-csi-node/sdkconfig.defaults
 firmware/esp32-csi-node/sdkconfig.old
 # Downloaded WASM3 source (fetched at configure time)
 firmware/esp32-csi-node/components/wasm3/wasm3-src/
+# ESP-IDF managed components (downloaded at build time)
+firmware/esp32-csi-node/managed_components/
+firmware/esp32-csi-node/dependencies.lock
+firmware/esp32-csi-node/sdkconfig.defaults.bak
+
+# Claude Flow swarm runtime state
+.swarm/
+
+# CSI recordings (local training data, machine-specific)
+rust-port/wifi-densepose-rs/data/recordings/
 
 # NVS partition images and CSVs (contain WiFi credentials)
 nvs.bin

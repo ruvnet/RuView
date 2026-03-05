@@ -26,6 +26,7 @@
 #include "power_mgmt.h"
 #include "wasm_runtime.h"
 #include "wasm_upload.h"
+#include "display_task.h"
 
 #include "esp_timer.h"
 
@@ -202,6 +203,12 @@ void app_main(void)
 
     /* Initialize power management. */
     power_mgmt_init(g_nvs_config.power_duty);
+
+    /* ADR-045: Start AMOLED display task (gracefully skips if no display). */
+    esp_err_t disp_ret = display_task_start();
+    if (disp_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Display init returned: %s", esp_err_to_name(disp_ret));
+    }
 
     ESP_LOGI(TAG, "CSI streaming active → %s:%d (edge_tier=%u, OTA=%s, WASM=%s)",
              g_nvs_config.target_ip, g_nvs_config.target_port,

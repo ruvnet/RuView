@@ -57,13 +57,13 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 |----------|-------------|
 | [User Guide](docs/user-guide.md) | Step-by-step guide: installation, first run, API usage, hardware setup, training |
 | [Build Guide](docs/build-guide.md) | Building from source (Rust and Python) |
-| [Architecture Decisions](docs/adr/README.md) | 44 ADRs — why each technical choice was made, organized by domain (hardware, signal processing, ML, platform, infrastructure) |
+| [Architecture Decisions](docs/adr/README.md) | 48 ADRs — why each technical choice was made, organized by domain (hardware, signal processing, ML, platform, infrastructure) |
 | [Domain Models](docs/ddd/README.md) | 7 DDD models (RuvSense, Signal Processing, Training Pipeline, Hardware Platform, Sensing Server, WiFi-Mat, CHCI) — bounded contexts, aggregates, domain events, and ubiquitous language |
 
 ---
 
 
-  <img src="assets/screen.png" alt="WiFi DensePose — Live pose detection with setup guide" width="800">
+  <img src="assets/v2-screen.png" alt="WiFi DensePose — Live pose detection with setup guide" width="800">
   <br>
   <em>Real-time pose skeleton from WiFi CSI signals — no cameras, no wearables</em>
 
@@ -98,6 +98,7 @@ The system learns on its own and gets smarter over time — no hand-tuning, no l
 | 👁️ | **Cross-Viewpoint Fusion** | AI combines what each sensor sees from its own angle — fills in blind spots and depth ambiguity that no single viewpoint can resolve on its own ([ADR-031](docs/adr/ADR-031-ruview-sensing-first-rf-mode.md)) |
 | 🔮 | **Signal-Line Protocol** | A 6-stage processing pipeline transforms raw WiFi signals into structured body representations — from signal cleanup through graph-based spatial reasoning to final pose output ([ADR-033](docs/adr/ADR-033-crv-signal-line-sensing-integration.md)) |
 | 🔒 | **QUIC Mesh Security** | All sensor-to-sensor communication is encrypted end-to-end with tamper detection, replay protection, and seamless reconnection if a node moves or drops offline ([ADR-032](docs/adr/ADR-032-multistatic-mesh-security-hardening.md)) |
+| 🎯 | **Adaptive Classifier** | Records labeled CSI sessions, trains a 15-feature logistic regression model in pure Rust, and learns your room's unique signal characteristics — replaces hand-tuned thresholds with data-driven classification ([ADR-048](docs/adr/ADR-048-adaptive-csi-classifier.md)) |
 
 ### Performance & Deployment
 
@@ -110,6 +111,8 @@ Fast enough for real-time use, small enough for edge devices, simple enough for 
 | 🐳 | **One-Command Setup** | `docker pull ruvnet/wifi-densepose:latest` — live sensing in 30 seconds, no toolchain needed (amd64 + arm64 / Apple Silicon) |
 | 📡 | **Fully Local** | Runs completely on a $9 ESP32 — no internet connection, no cloud account, no recurring fees. Detects presence, vital signs, and falls on-device with instant response |
 | 📦 | **Portable Models** | Trained models package into a single `.rvf` file — runs on edge, cloud, or browser (WASM) |
+| 🔭 | **Observatory Visualization** | Cinematic Three.js dashboard with 5 holographic panels — subcarrier manifold, vital signs oracle, presence heatmap, phase constellation, convergence engine — all driven by live or demo CSI data ([ADR-047](docs/adr/ADR-047-psychohistory-observatory-visualization.md)) |
+| 📟 | **AMOLED Display** | ESP32-S3 boards with built-in AMOLED screens show real-time presence, vital signs, and room status directly on the sensor — no phone or PC needed ([ADR-045](docs/adr/ADR-045-amoled-display-support.md)) |
 
 ---
 
