@@ -24,7 +24,6 @@ import asyncio
 import json
 import logging
 import math
-import platform
 import signal
 import socket
 import struct
@@ -38,10 +37,6 @@ import numpy as np
 
 # Sensing pipeline imports
 from v1.src.sensing.rssi_collector import (
-    LinuxWifiCollector,
-    SimulatedCollector,
-    WindowsWifiCollector,
-    MacosWifiCollector,
     WifiSample,
     RingBuffer,
 )
@@ -321,7 +316,13 @@ class SensingWebSocketServer:
         self._running = False
 
     def _create_collector(self):
-        """Auto-detect data source: ESP32 UDP > Windows WiFi > Linux WiFi > simulated."""
+        """Auto-detect data source: ESP32 UDP > platform WiFi > simulated.
+
+        Uses the ``create_collector`` factory (ADR-049) for platform WiFi
+        detection, which never raises and logs actionable fallback messages.
+        """
+        from .rssi_collector import create_collector
+
         # 1. Try ESP32 UDP first
         print("  Probing for ESP32 on UDP :5005 ...")
         if probe_esp32_udp(ESP32_UDP_PORT, timeout=2.0):
@@ -329,43 +330,18 @@ class SensingWebSocketServer:
             self.source = "esp32"
             return Esp32UdpCollector(port=ESP32_UDP_PORT, sample_rate_hz=10.0)
 
-        # 2. Platform-specific WiFi
-        system = platform.system()
-        if system == "Windows":
-            try:
-                collector = WindowsWifiCollector(sample_rate_hz=2.0)
-                collector.collect_once()  # test that it works
-                logger.info("Using WindowsWifiCollector")
-                self.source = "windows_wifi"
-                return collector
-            except Exception as e:
-                logger.warning("Windows WiFi unavailable (%s), falling back", e)
-        elif system == "Linux":
-            # In Docker on Mac, Linux is detected but no wireless extensions exist.
-            # Force SimulatedCollector if /proc/net/wireless doesn't exist.
-            import os
-            if os.path.exists("/proc/net/wireless"):
-                try:
-                    collector = LinuxWifiCollector(sample_rate_hz=10.0)
-                    self.source = "linux_wifi"
-                    return collector
-                except RuntimeError:
-                    logger.warning("Linux WiFi unavailable, falling back")
-            else:
-                logger.warning("Linux detected but /proc/net/wireless missing (likely Docker). Falling back.")
-        elif system == "Darwin":
-            try:
-                collector = MacosWifiCollector(sample_rate_hz=10.0)
-                logger.info("Using MacosWifiCollector")
-                self.source = "macos_wifi"
-                return collector
-            except Exception as e:
-                logger.warning("macOS WiFi unavailable (%s), falling back", e)
+        # 2. Platform-specific WiFi (auto-detect with graceful fallback)
+        collector = create_collector(preferred="auto", sample_rate_hz=10.0)
 
-        # 3. Simulated
-        logger.info("Using SimulatedCollector")
-        self.source = "simulated"
-        return SimulatedCollector(seed=42, sample_rate_hz=10.0)
+        # Map collector class to source label
+        source_map = {
+            "LinuxWifiCollector": "linux_wifi",
+            "WindowsWifiCollector": "windows_wifi",
+            "MacosWifiCollector": "macos_wifi",
+            "SimulatedCollector": "simulated",
+        }
+        self.source = source_map.get(type(collector).__name__, "unknown")
+        return collector
 
     def _build_message(self, features: RssiFeatures, result: SensingResult) -> str:
         """Build the JSON message to broadcast."""

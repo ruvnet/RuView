@@ -702,3 +702,106 @@ class TestBandPower:
         # Band 0.21-0.39 has no power
         p = _band_power(freqs, psd, 0.21, 0.39)
         assert p == 0.0
+
+
+# ===========================================================================
+# LinuxWifiCollector.is_available() tests (ADR-049)
+# ===========================================================================
+
+from unittest.mock import patch, mock_open
+from v1.src.sensing.rssi_collector import LinuxWifiCollector, create_collector
+
+
+class TestLinuxWifiCollectorAvailability:
+    def test_unavailable_when_proc_missing(self):
+        """is_available returns False when /proc/net/wireless doesn't exist."""
+        with patch("v1.src.sensing.rssi_collector.os.path.exists", return_value=False):
+            available, reason = LinuxWifiCollector.is_available("wlan0")
+            assert available is False
+            assert "/proc/net/wireless not found" in reason
+
+    def test_unavailable_when_interface_not_listed(self):
+        """is_available returns False when the interface isn't in proc."""
+        proc_content = (
+            "Inter-| sta-|   Quality        |   Discarded packets\n"
+            " face | tus | link level noise | nwid crypt frag retry misc\n"
+            " wlan1:  0000  60.  -50.  -95.        0      0      0      0      0\n"
+        )
+        with patch("v1.src.sensing.rssi_collector.os.path.exists", return_value=True):
+            with patch("builtins.open", mock_open(read_data=proc_content)):
+                available, reason = LinuxWifiCollector.is_available("wlan0")
+                assert available is False
+                assert "wlan0" in reason
+                assert "wlan1" in reason
+
+    def test_available_when_interface_listed(self):
+        """is_available returns True when the interface is present."""
+        proc_content = (
+            "Inter-| sta-|   Quality        |   Discarded packets\n"
+            " face | tus | link level noise | nwid crypt frag retry misc\n"
+            " wlan0:  0000  60.  -50.  -95.        0      0      0      0      0\n"
+        )
+        with patch("v1.src.sensing.rssi_collector.os.path.exists", return_value=True):
+            with patch("builtins.open", mock_open(read_data=proc_content)):
+                available, reason = LinuxWifiCollector.is_available("wlan0")
+                assert available is True
+                assert reason == "ok"
+
+    def test_unavailable_when_file_unreadable(self):
+        """is_available returns False when /proc/net/wireless exists but can't be read."""
+        with patch("v1.src.sensing.rssi_collector.os.path.exists", return_value=True):
+            with patch("builtins.open", side_effect=PermissionError("Permission denied")):
+                available, reason = LinuxWifiCollector.is_available("wlan0")
+                assert available is False
+                assert "Cannot read" in reason
+
+
+# ===========================================================================
+# create_collector() factory tests (ADR-049)
+# ===========================================================================
+
+class TestCreateCollector:
+    def test_returns_simulated_when_no_wifi(self):
+        """On Linux without /proc/net/wireless, should return SimulatedCollector."""
+        with patch("v1.src.sensing.rssi_collector.platform.system", return_value="Linux"):
+            with patch("v1.src.sensing.rssi_collector.os.path.exists", return_value=False):
+                collector = create_collector(preferred="auto")
+                assert isinstance(collector, SimulatedCollector)
+
+    def test_returns_simulated_for_explicit_preference(self):
+        """preferred='simulated' always returns SimulatedCollector."""
+        collector = create_collector(preferred="simulated")
+        assert isinstance(collector, SimulatedCollector)
+
+    def test_returns_linux_collector_when_available(self):
+        """On Linux with /proc/net/wireless, should return LinuxWifiCollector."""
+        proc_content = (
+            "Inter-| sta-|   Quality        |   Discarded packets\n"
+            " face | tus | link level noise | nwid crypt frag retry misc\n"
+            " wlan0:  0000  60.  -50.  -95.        0      0      0      0      0\n"
+        )
+        with patch("v1.src.sensing.rssi_collector.platform.system", return_value="Linux"):
+            with patch("v1.src.sensing.rssi_collector.os.path.exists", return_value=True):
+                with patch("builtins.open", mock_open(read_data=proc_content)):
+                    collector = create_collector(preferred="auto", interface="wlan0")
+                    assert isinstance(collector, LinuxWifiCollector)
+
+    def test_never_raises(self):
+        """create_collector should never raise, regardless of platform."""
+        for plat in ["Linux", "Windows", "Darwin", "FreeBSD", "SunOS"]:
+            with patch("v1.src.sensing.rssi_collector.platform.system", return_value=plat):
+                with patch("v1.src.sensing.rssi_collector.os.path.exists", return_value=False):
+                    with patch("subprocess.run", side_effect=FileNotFoundError("not found")):
+                        try:
+                            collector = create_collector(preferred="auto")
+                            assert collector is not None
+                        except Exception as exc:
+                            pytest.fail(f"create_collector raised on {plat}: {exc}")
+
+    def test_windows_default_interface_mapping(self):
+        """On Windows with default interface='wlan0', should map to 'Wi-Fi'."""
+        with patch("v1.src.sensing.rssi_collector.platform.system", return_value="Windows"):
+            with patch("subprocess.run", side_effect=FileNotFoundError("netsh not found")):
+                collector = create_collector(preferred="auto", interface="wlan0")
+                # Should fall back to SimulatedCollector since netsh isn't available
+                assert isinstance(collector, SimulatedCollector)
