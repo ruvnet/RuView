@@ -24,6 +24,9 @@ linux-wifi = []
 [dependencies]
 # CLI argument parsing (for bin/aggregator)
 clap = { version = "4.4", features = ["derive"] }
+# Cryptographic HMAC (ADR-050: replace fake XOR-fold HMAC)
+hmac = "0.12"
+sha2 = "0.10"
 # Byte parsing
 byteorder = "1.5"
 # Time

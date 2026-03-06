@@ -77,6 +77,10 @@ struct Args {
     #[arg(long, default_value = "100")]
     tick_ms: u64,
 
+    /// Bind address (default 127.0.0.1; set to 0.0.0.0 for network access)
+    #[arg(long, default_value = "127.0.0.1", env = "SENSING_BIND_ADDR")]
+    bind_addr: String,
+
     /// Data source: auto, wifi, esp32, simulate
     #[arg(long, default_value = "auto")]
     source: String,
@@ -2112,7 +2116,15 @@ async fn delete_model(
     State(state): State<SharedState>,
     Path(id): Path<String>,
 ) -> Json<serde_json::Value> {
-    let path = PathBuf::from("data/models").join(format!("{}.rvf", id));
+    // ADR-050: Sanitize path to prevent directory traversal
+    let safe_id = std::path::Path::new(&id)
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("");
+    if safe_id.is_empty() || safe_id != id {
+        return Json(serde_json::json!({ "error": "invalid model id", "success": false }));
+    }
+    let path = PathBuf::from("data/models").join(format!("{}.rvf", safe_id));
     if path.exists() {
         if let Err(e) = std::fs::remove_file(&path) {
             warn!("Failed to delete model file {:?}: {}", path, e);
@@ -2363,7 +2375,15 @@ async fn delete_recording(
     State(state): State<SharedState>,
     Path(id): Path<String>,
 ) -> Json<serde_json::Value> {
-    let path = PathBuf::from("data/recordings").join(format!("{}.jsonl", id));
+    // ADR-050: Sanitize path to prevent directory traversal
+    let safe_id = std::path::Path::new(&id)
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("");
+    if safe_id.is_empty() || safe_id != id {
+        return Json(serde_json::json!({ "error": "invalid recording id", "success": false }));
+    }
+    let path = PathBuf::from("data/recordings").join(format!("{}.jsonl", safe_id));
     if path.exists() {
         if let Err(e) = std::fs::remove_file(&path) {
             warn!("Failed to delete recording {:?}: {}", path, e);
@@ -3604,6 +3624,10 @@ async fn main() {
         }
     }
 
+    // ADR-050: Parse bind address once, use for all listeners
+    let bind_ip: std::net::IpAddr = args.bind_addr.parse()
+        .expect("Invalid --bind-addr (use 127.0.0.1 or 0.0.0.0)");
+
     // WebSocket server on dedicated port (8765)
     let ws_state = state.clone();
     let ws_app = Router::new()
@@ -3611,7 +3635,7 @@ async fn main() {
         .route("/health", get(health))
         .with_state(ws_state);
 
-    let ws_addr = SocketAddr::from(([0, 0, 0, 0], args.ws_port));
+    let ws_addr = SocketAddr::from((bind_ip, args.ws_port));
     let ws_listener = tokio::net::TcpListener::bind(ws_addr).await
         .expect("Failed to bind WebSocket port");
     info!("WebSocket server listening on {ws_addr}");
@@ -3686,7 +3710,7 @@ async fn main() {
         ))
         .with_state(state.clone());
 
-    let http_addr = SocketAddr::from(([0, 0, 0, 0], args.http_port));
+    let http_addr = SocketAddr::from((bind_ip, args.http_port));
     let http_listener = tokio::net::TcpListener::bind(http_addr).await
         .expect("Failed to bind HTTP port");
     info!("HTTP server listening on {http_addr}");

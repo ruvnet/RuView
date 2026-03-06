@@ -33,8 +33,12 @@ use super::quic_transport::{
     QuicTransportHandle, QuicTransportError, SecurityMode,
 };
 use super::tdm::{SyncBeacon, TdmCoordinator, TdmSchedule, TdmSlotCompleted};
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 use std::collections::VecDeque;
 use std::fmt;
+
+type HmacSha256 = Hmac<Sha256>;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -245,19 +249,17 @@ impl AuthenticatedBeacon {
         })
     }
 
-    /// Compute the expected HMAC tag for this beacon using the given key.
+    /// Compute the HMAC-SHA256 tag for this beacon, truncated to 8 bytes.
     ///
-    /// Uses a simplified HMAC approximation for testing. In production,
-    /// this calls mbedtls HMAC-SHA256 via the ESP-IDF hardware accelerator
-    /// or the `sha2` crate on aggregator nodes.
+    /// Uses the `hmac` + `sha2` crates for cryptographically secure
+    /// message authentication (ADR-050, Sprint 1).
     pub fn compute_tag(payload_and_nonce: &[u8], key: &[u8; 16]) -> [u8; HMAC_TAG_SIZE] {
-        // Simplified HMAC: XOR key into payload hash. In production, use
-        // real HMAC-SHA256 from sha2 crate. This is sufficient for
-        // testing the protocol structure.
+        let mut mac = HmacSha256::new_from_slice(key)
+            .expect("HMAC-SHA256 accepts any key length");
+        mac.update(payload_and_nonce);
+        let result = mac.finalize().into_bytes();
         let mut tag = [0u8; HMAC_TAG_SIZE];
-        for (i, byte) in payload_and_nonce.iter().enumerate() {
-            tag[i % HMAC_TAG_SIZE] ^= byte ^ key[i % 16];
-        }
+        tag.copy_from_slice(&result[..HMAC_TAG_SIZE]);
         tag
     }
 
@@ -973,6 +975,97 @@ mod tests {
         assert_eq!(SecLevel::Permissive as u8, 0);
         assert_eq!(SecLevel::Transitional as u8, 1);
         assert_eq!(SecLevel::Enforcing as u8, 2);
+    }
+
+    // ---- Security tests (ADR-050) ----
+
+    #[test]
+    fn test_hmac_different_keys_produce_different_tags() {
+        let msg = b"test payload with nonce";
+        let key1: [u8; 16] = [0x01; 16];
+        let key2: [u8; 16] = [0x02; 16];
+        let tag1 = AuthenticatedBeacon::compute_tag(msg, &key1);
+        let tag2 = AuthenticatedBeacon::compute_tag(msg, &key2);
+        assert_ne!(tag1, tag2, "Different keys must produce different HMAC tags");
+    }
+
+    #[test]
+    fn test_hmac_different_messages_produce_different_tags() {
+        let key: [u8; 16] = DEFAULT_TEST_KEY;
+        let tag1 = AuthenticatedBeacon::compute_tag(b"message one", &key);
+        let tag2 = AuthenticatedBeacon::compute_tag(b"message two", &key);
+        assert_ne!(tag1, tag2, "Different messages must produce different HMAC tags");
+    }
+
+    #[test]
+    fn test_hmac_is_deterministic() {
+        let key: [u8; 16] = DEFAULT_TEST_KEY;
+        let msg = b"determinism test";
+        let tag1 = AuthenticatedBeacon::compute_tag(msg, &key);
+        let tag2 = AuthenticatedBeacon::compute_tag(msg, &key);
+        assert_eq!(tag1, tag2, "Same key + message must produce identical tags");
+    }
+
+    #[test]
+    fn test_wrong_key_fails_verification() {
+        let beacon = SyncBeacon {
+            cycle_id: 42,
+            cycle_period: Duration::from_millis(50),
+            drift_correction_us: 0,
+            generated_at: std::time::Instant::now(),
+        };
+        let correct_key: [u8; 16] = DEFAULT_TEST_KEY;
+        let wrong_key: [u8; 16] = [0xFF; 16];
+        let nonce = 1u32;
+
+        let mut msg = [0u8; 20];
+        msg[..16].copy_from_slice(&beacon.to_bytes());
+        msg[16..20].copy_from_slice(&nonce.to_le_bytes());
+        let tag = AuthenticatedBeacon::compute_tag(&msg, &correct_key);
+
+        let auth = AuthenticatedBeacon { beacon, nonce, hmac_tag: tag };
+        assert!(auth.verify(&wrong_key).is_err(), "Wrong key must fail verification");
+    }
+
+    #[test]
+    fn test_single_bit_flip_in_payload_fails_verification() {
+        let beacon = SyncBeacon {
+            cycle_id: 42,
+            cycle_period: Duration::from_millis(50),
+            drift_correction_us: 0,
+            generated_at: std::time::Instant::now(),
+        };
+        let key: [u8; 16] = DEFAULT_TEST_KEY;
+        let nonce = 1u32;
+
+        let mut msg = [0u8; 20];
+        msg[..16].copy_from_slice(&beacon.to_bytes());
+        msg[16..20].copy_from_slice(&nonce.to_le_bytes());
+        let tag = AuthenticatedBeacon::compute_tag(&msg, &key);
+
+        let auth = AuthenticatedBeacon { beacon, nonce, hmac_tag: tag };
+        let mut wire = auth.to_bytes();
+        // Flip one bit in the beacon payload
+        wire[0] ^= 0x01;
+        let tampered = AuthenticatedBeacon::from_bytes(&wire).unwrap();
+        assert!(tampered.verify(&key).is_err(), "Single bit flip must fail verification");
+    }
+
+    #[test]
+    fn test_enforcing_mode_rejects_unauthenticated() {
+        let mut cfg = manual_config();
+        cfg.sec_level = SecLevel::Enforcing;
+        let mut coord = SecureTdmCoordinator::new(test_schedule(), cfg).unwrap();
+
+        // Raw 16-byte beacon without HMAC
+        let raw = SyncBeacon {
+            cycle_id: 1,
+            cycle_period: Duration::from_millis(50),
+            drift_correction_us: 0,
+            generated_at: std::time::Instant::now(),
+        }.to_bytes();
+
+        assert!(coord.verify_beacon(&raw).is_err());
     }
 
     // ---- Error display tests ----

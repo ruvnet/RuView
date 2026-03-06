@@ -101,7 +101,7 @@ csv = "1.3"
 indicatif = "0.17"
 
 # CLI
-clap = { version = "4.4", features = ["derive"] }
+clap = { version = "4.4", features = ["derive", "env"] }
 
 # Testing
 criterion = { version = "0.5", features = ["html_reports"] }

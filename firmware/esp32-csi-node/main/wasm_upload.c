@@ -107,8 +107,9 @@ static esp_err_t wasm_upload_handler(httpd_req_t *req)
             return ESP_FAIL;
         }
 
-        /* Verify signature if wasm_verify is enabled. */
-#ifdef CONFIG_WASM_VERIFY_SIGNATURE
+        /* ADR-050: Verify signature (default-on; skip only if
+         * CONFIG_WASM_SKIP_SIGNATURE is explicitly set for dev/lab). */
+#ifndef CONFIG_WASM_SKIP_SIGNATURE
         {
             /* Load pubkey from NVS config (set via provision.py --wasm-pubkey). */
             extern nvs_config_t g_nvs_config;
@@ -173,11 +174,11 @@ static esp_err_t wasm_upload_handler(httpd_req_t *req)
 
     } else if (rvf_is_raw_wasm(buf, (uint32_t)total)) {
         /* ── Raw WASM path (dev/lab only) ── */
-#ifdef CONFIG_WASM_VERIFY_SIGNATURE
+#ifndef CONFIG_WASM_SKIP_SIGNATURE
         free(buf);
         httpd_resp_send_err(req, HTTPD_403_FORBIDDEN,
-                            "Raw WASM upload rejected (wasm_verify enabled). "
-                            "Use RVF container with signature.");
+                            "Raw WASM upload rejected (signature verification enabled). "
+                            "Use RVF container with signature, or set CONFIG_WASM_SKIP_SIGNATURE for dev.");
         return ESP_FAIL;
 #else
         format = "raw";
