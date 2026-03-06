@@ -12,13 +12,15 @@ from __future__ import annotations
 
 import logging
 import math
+import os
+import platform
 import re
 import subprocess
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Deque, List, Optional, Protocol
+from typing import Deque, List, Optional, Protocol, Union
 
 import numpy as np
 
@@ -173,27 +175,47 @@ class LinuxWifiCollector:
         """Collect a single sample right now (blocking)."""
         return self._read_sample()
 
+    # -- availability check --------------------------------------------------
+
+    @classmethod
+    def is_available(cls, interface: str = "wlan0") -> tuple[bool, str]:
+        """Check if Linux WiFi collection is possible without raising.
+
+        Returns
+        -------
+        (available, reason) : tuple[bool, str]
+            ``available`` is True when /proc/net/wireless exists and lists
+            the requested interface.  ``reason`` is a human-readable
+            explanation when unavailable.
+        """
+        if not os.path.exists("/proc/net/wireless"):
+            return False, (
+                "/proc/net/wireless not found. "
+                "This environment has no Linux wireless subsystem "
+                "(common in Docker, WSL, or headless servers)."
+            )
+        try:
+            with open("/proc/net/wireless", "r") as f:
+                content = f.read()
+        except OSError as exc:
+            return False, f"Cannot read /proc/net/wireless: {exc}"
+
+        if interface not in content:
+            names = cls._parse_interface_names(content)
+            return False, (
+                f"Interface '{interface}' not listed in /proc/net/wireless. "
+                f"Available: {names or '(none)'}. "
+                f"Ensure the interface is up and associated with an AP."
+            )
+        return True, "ok"
+
     # -- internals -----------------------------------------------------------
 
     def _validate_interface(self) -> None:
         """Check that the interface exists on this machine."""
-        try:
-            with open("/proc/net/wireless", "r") as f:
-                content = f.read()
-            if self._interface not in content:
-                raise RuntimeError(
-                    f"WiFi interface '{self._interface}' not found in "
-                    f"/proc/net/wireless. Available interfaces may include: "
-                    f"{self._parse_interface_names(content)}. "
-                    f"Ensure the interface is up and associated with an AP."
-                )
-        except FileNotFoundError:
-            raise RuntimeError(
-                "Cannot read /proc/net/wireless. "
-                "This collector requires a Linux system with wireless-extensions support. "
-                "If running in a container or VM without WiFi hardware, use "
-                "SimulatedCollector instead."
-            )
+        available, reason = self.is_available(self._interface)
+        if not available:
+            raise RuntimeError(reason)
 
     @staticmethod
     def _parse_interface_names(proc_content: str) -> List[str]:
@@ -736,3 +758,86 @@ class MacosWifiCollector:
         if self._running:
             logger.error("macOS WiFi utility exited unexpectedly. Collector stopped.")
             self._running = False
+
+
+# ---------------------------------------------------------------------------
+# Collector factory (ADR-049)
+# ---------------------------------------------------------------------------
+
+CollectorType = Union[LinuxWifiCollector, WindowsWifiCollector, MacosWifiCollector, SimulatedCollector]
+
+
+def create_collector(
+    preferred: str = "auto",
+    interface: str = "wlan0",
+    sample_rate_hz: float = 10.0,
+) -> CollectorType:
+    """Create the best available WiFi collector for the current platform.
+
+    Resolution order (when ``preferred="auto"``):
+      1. Platform-native WiFi:
+         - Linux: LinuxWifiCollector (requires /proc/net/wireless + active interface)
+         - Windows: WindowsWifiCollector (netsh wlan)
+         - macOS: MacosWifiCollector (CoreWLAN)
+      2. SimulatedCollector (always available)
+
+    This function never raises -- it always returns a usable collector.
+
+    Parameters
+    ----------
+    preferred : str
+        ``"auto"`` for platform detection, or one of ``"linux"``,
+        ``"windows"``, ``"macos"``, ``"simulated"`` to force a specific
+        collector.
+    interface : str
+        WiFi interface name (Linux/Windows only).
+    sample_rate_hz : float
+        Target sampling rate.
+    """
+    _VALID_PREFERRED = {"auto", "linux", "windows", "macos", "simulated"}
+    if preferred not in _VALID_PREFERRED:
+        logger.warning(
+            "WiFi collector: unknown preferred=%r (valid: %s). Falling back to auto.",
+            preferred, ", ".join(sorted(_VALID_PREFERRED)),
+        )
+        preferred = "auto"
+
+    system = platform.system()
+
+    if preferred == "auto":
+        if system == "Linux":
+            available, reason = LinuxWifiCollector.is_available(interface)
+            if available:
+                logger.info("WiFi collector: using LinuxWifiCollector on %s", interface)
+                return LinuxWifiCollector(interface=interface, sample_rate_hz=sample_rate_hz)
+            logger.warning("WiFi collector: LinuxWifiCollector unavailable (%s).", reason)
+        elif system == "Windows":
+            try:
+                win_iface = interface if interface != "wlan0" else "Wi-Fi"
+                collector = WindowsWifiCollector(interface=win_iface, sample_rate_hz=min(sample_rate_hz, 2.0))
+                collector.collect_once()
+                logger.info("WiFi collector: using WindowsWifiCollector on '%s'", interface)
+                return collector
+            except Exception as exc:
+                logger.warning("WiFi collector: WindowsWifiCollector unavailable (%s).", exc)
+        elif system == "Darwin":
+            try:
+                collector = MacosWifiCollector(sample_rate_hz=sample_rate_hz)
+                logger.info("WiFi collector: using MacosWifiCollector")
+                return collector
+            except Exception as exc:
+                logger.warning("WiFi collector: MacosWifiCollector unavailable (%s).", exc)
+    elif preferred == "linux":
+        return LinuxWifiCollector(interface=interface, sample_rate_hz=sample_rate_hz)
+    elif preferred == "windows":
+        return WindowsWifiCollector(interface=interface, sample_rate_hz=min(sample_rate_hz, 2.0))
+    elif preferred == "macos":
+        return MacosWifiCollector(sample_rate_hz=sample_rate_hz)
+    elif preferred == "simulated":
+        return SimulatedCollector(seed=42, sample_rate_hz=sample_rate_hz)
+
+    logger.info(
+        "WiFi collector: falling back to SimulatedCollector. "
+        "For real sensing, connect ESP32 nodes via UDP:5005 or install platform WiFi drivers."
+    )
+    return SimulatedCollector(seed=42, sample_rate_hz=sample_rate_hz)
