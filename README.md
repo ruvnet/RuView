@@ -6,12 +6,23 @@
   </a>
 </p>
 
-**See through walls with WiFi.** No cameras. No wearables. No Internet. Just radio waves.
+## **See through walls with WiFi.** ##
 
-WiFi DensePose turns commodity WiFi signals into real-time human pose estimation, vital sign monitoring, and presence detection — all without a single pixel of video. 
+**Perceive the world through signals.** No cameras. No wearables. No Internet. Just physics.
 
-By analyzing Channel State Information (CSI) disturbances caused by human movement, the system reconstructs body position, breathing rate, and heartbeat using physics-based signal processing and machine learning. 
+### π RuView is an edge AI perception system that learns directly from the environment around it. 
 
+Instead of relying on cameras or cloud models, it observes whatever signals exist in a space such as WiFi, radio waves (full spectrum), motion patterns, vibration, sounds, or other sensory inputs and builds an understanding of what is happening locally.
+
+The project became popular, infamous?? for its work in WiFi DensePose, the first sensing capability using WiFi. By analyzing Channel State Information (CSI) disturbances caused by human movement, RuView reconstructs body position, breathing rate, heart rate, and presence in real time using physics based signal processing and machine learning.
+
+The system runs entirely at the edge on inexpensive hardware such as an ESP32 sensor mesh (as low as $1 per node). Small programmable edge modules analyze signals locally and learn the RF signature of a room over time, allowing the system to separate the environment from the activity happening inside it.
+
+Because RuView learns in proximity to the signals it observes, it improves as it operates. Each deployment develops a local model of its surroundings and continuously adapts without requiring cameras, labeled data, or cloud infrastructure.
+
+In practice this means ordinary environments gain a new kind of spatial awareness. Rooms, buildings, and devices begin to sense presence, movement, and vital activity using the signals that already fill the space.
+
+### Build for low power, edge applications. 
 [Edge modules](#edge-intelligence-adr-041) are small programs that run directly on the ESP32 sensor — no internet needed, no cloud fees, instant response.
 
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org/)
