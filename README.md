@@ -10,19 +10,24 @@
 
 **Perceive the world through signals.** No cameras. No wearables. No Internet. Just physics.
 
-### π RuView is an edge AI perception system that learns directly from the environment around it. 
+### π RuView is an edge AI perception system that learns directly from the environment around it.
 
-Instead of relying on cameras or cloud models, it observes whatever signals exist in a space such as WiFi, radio waves (full spectrum), motion patterns, vibration, sounds, or other sensory inputs and builds an understanding of what is happening locally.
+Instead of relying on cameras or cloud models, it observes whatever signals exist in a space such as WiFi, radio waves across the spectrum, motion patterns, vibration, sound, or other sensory inputs and builds an understanding of what is happening locally.
 
-The project became popular, infamous?? for its work in WiFi DensePose, the first sensing capability using WiFi. By analyzing Channel State Information (CSI) disturbances caused by human movement, RuView reconstructs body position, breathing rate, heart rate, and presence in real time using physics based signal processing and machine learning.
+Built on top of [RuVector](https://github.com/ruvnet/ruvector/), the project became widely known for its implementation of WiFi DensePose — a sensing technique first explored in academic research such as Carnegie Mellon University's *DensePose From WiFi* work. That research demonstrated that WiFi signals can be used to reconstruct human pose.
 
-The system runs entirely at the edge on inexpensive hardware such as an ESP32 sensor mesh (as low as $1 per node). Small programmable edge modules analyze signals locally and learn the RF signature of a room over time, allowing the system to separate the environment from the activity happening inside it.
+RuView extends that concept into a practical edge system. By analyzing Channel State Information (CSI) disturbances caused by human movement, RuView reconstructs body position, breathing rate, heart rate, and presence in real time using physics-based signal processing and machine learning.
+
+Unlike research systems that rely on synchronized cameras for training, RuView is designed to operate entirely from radio signals and self-learned embeddings at the edge.
+
+The system runs entirely on inexpensive hardware such as an ESP32 sensor mesh (as low as ~$1 per node). Small programmable edge modules analyze signals locally and learn the RF signature of a room over time, allowing the system to separate the environment from the activity happening inside it.
 
 Because RuView learns in proximity to the signals it observes, it improves as it operates. Each deployment develops a local model of its surroundings and continuously adapts without requiring cameras, labeled data, or cloud infrastructure.
 
 In practice this means ordinary environments gain a new kind of spatial awareness. Rooms, buildings, and devices begin to sense presence, movement, and vital activity using the signals that already fill the space.
 
-### Build for low power, edge applications. 
+### Built for low-power edge applications
+
 [Edge modules](#edge-intelligence-adr-041) are small programs that run directly on the ESP32 sensor — no internet needed, no cloud fees, instant response.
 
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org/)
