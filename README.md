@@ -6,7 +6,7 @@
   </a>
 </p>
 
-## **See through walls with WiFi.** ##
+## **See through walls with WiFi + Ai** ##
 
 **Perceive the world through signals.** No cameras. No wearables. No Internet. Just physics.
 
