@@ -9,11 +9,11 @@ use wifi_densepose_cli::{Cli, Commands};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize logging
-    tracing_subscriber::registry()
+    // Initialize logging (use try_init to avoid panics if already initialized)
+    let _ = tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .with(tracing_subscriber::fmt::layer().with_target(false))
-        .init();
+        .try_init();
 
     let cli = Cli::parse();
 
