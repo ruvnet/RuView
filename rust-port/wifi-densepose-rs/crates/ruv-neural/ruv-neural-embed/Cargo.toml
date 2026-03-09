@@ -1,0 +1,25 @@
+[package]
+name = "ruv-neural-embed"
+description = "rUv Neural — Graph embedding generation for brain connectivity states using RuVector format"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[features]
+default = ["std"]
+std = []
+wasm = []
+rvf = []
+
+[dependencies]
+ruv-neural-core = { workspace = true }
+ndarray = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+num-traits = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }

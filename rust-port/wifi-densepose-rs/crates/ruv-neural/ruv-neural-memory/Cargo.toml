@@ -1,0 +1,28 @@
+[package]
+name = "ruv-neural-memory"
+description = "rUv Neural — Persistent neural state memory with vector search and longitudinal tracking"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[features]
+default = ["std"]
+std = []
+wasm = []
+
+[dependencies]
+ruv-neural-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bincode = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }
+rand = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "benchmarks"
+harness = false

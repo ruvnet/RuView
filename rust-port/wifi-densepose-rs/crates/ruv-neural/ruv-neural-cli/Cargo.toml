@@ -1,0 +1,28 @@
+[package]
+name = "ruv-neural-cli"
+description = "rUv Neural — CLI tool for brain topology analysis, simulation, and visualization"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ruv-neural"
+path = "src/main.rs"
+
+[dependencies]
+ruv-neural-core = { workspace = true }
+ruv-neural-sensor = { workspace = true }
+ruv-neural-signal = { workspace = true }
+ruv-neural-graph = { workspace = true }
+ruv-neural-mincut = { workspace = true }
+ruv-neural-embed = { workspace = true }
+ruv-neural-memory = { workspace = true }
+ruv-neural-decoder = { workspace = true }
+ruv-neural-viz = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio = { workspace = true }

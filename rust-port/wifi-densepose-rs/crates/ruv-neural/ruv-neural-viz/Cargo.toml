@@ -1,0 +1,23 @@
+[package]
+name = "ruv-neural-viz"
+description = "rUv Neural — Brain topology visualization data structures and ASCII rendering"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[features]
+default = ["std"]
+std = []
+ascii = []  # ASCII art rendering for terminal
+
+[dependencies]
+ruv-neural-core = { workspace = true }
+ruv-neural-graph = { workspace = true }
+ruv-neural-mincut = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }

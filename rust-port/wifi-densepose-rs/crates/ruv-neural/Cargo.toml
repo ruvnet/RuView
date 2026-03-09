@@ -1,0 +1,98 @@
+[workspace]
+resolver = "2"
+members = [
+    "ruv-neural-core",
+    "ruv-neural-sensor",
+    "ruv-neural-signal",
+    "ruv-neural-graph",
+    "ruv-neural-mincut",
+    "ruv-neural-embed",
+    "ruv-neural-memory",
+    "ruv-neural-decoder",
+    "ruv-neural-esp32",
+    "ruv-neural-wasm",
+    "ruv-neural-viz",
+    "ruv-neural-cli",
+]
+# WASM crate excluded from default workspace to avoid breaking `cargo test --workspace`
+# Build separately: cargo build -p ruv-neural-wasm --target wasm32-unknown-unknown --release
+exclude = [
+    "ruv-neural-wasm",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["rUv <ruv@ruv.net>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ruvnet/RuView"
+documentation = "https://docs.rs/ruv-neural"
+keywords = ["neural", "brain", "topology", "mincut", "quantum-sensing"]
+categories = ["science", "algorithms"]
+
+[workspace.dependencies]
+# Core utilities
+thiserror = "1.0"
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Math and signal processing
+ndarray = { version = "0.15", features = ["serde"] }
+num-complex = "0.4"
+num-traits = "0.2"
+rustfft = "6.1"
+
+# Graph algorithms
+petgraph = "0.6"
+
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# WASM support
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["console"] }
+
+# ESP32 / embedded
+embedded-hal = "1.0"
+
+# CLI
+clap = { version = "4.4", features = ["derive", "env"] }
+
+# Serialization
+bincode = "1.3"
+
+# Random
+rand = "0.8"
+
+# Cryptographic verification
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+sha2 = "0.10"
+
+# Testing
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.4"
+approx = "0.5"
+
+# Internal crates
+ruv-neural-core = { version = "0.1.0", path = "ruv-neural-core" }
+ruv-neural-sensor = { version = "0.1.0", path = "ruv-neural-sensor" }
+ruv-neural-signal = { version = "0.1.0", path = "ruv-neural-signal" }
+ruv-neural-graph = { version = "0.1.0", path = "ruv-neural-graph" }
+ruv-neural-mincut = { version = "0.1.0", path = "ruv-neural-mincut" }
+ruv-neural-embed = { version = "0.1.0", path = "ruv-neural-embed" }
+ruv-neural-memory = { version = "0.1.0", path = "ruv-neural-memory" }
+ruv-neural-decoder = { version = "0.1.0", path = "ruv-neural-decoder" }
+ruv-neural-esp32 = { version = "0.1.0", path = "ruv-neural-esp32" }
+ruv-neural-viz = { version = "0.1.0", path = "ruv-neural-viz" }
+ruv-neural-cli = { version = "0.1.0", path = "ruv-neural-cli" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+opt-level = 3

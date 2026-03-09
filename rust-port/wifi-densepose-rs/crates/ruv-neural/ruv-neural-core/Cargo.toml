@@ -1,0 +1,25 @@
+[package]
+name = "ruv-neural-core"
+description = "rUv Neural — Core types, traits, and error types for brain topology analysis"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["neural", "brain", "topology", "types", "core"]
+
+[features]
+default = ["std"]
+std = []
+no_std = []  # For ESP32/embedded targets
+wasm = []    # For WASM targets
+rvf = []     # RuVector RVF format support
+
+[dependencies]
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+num-traits = { workspace = true }
+ed25519-dalek = { workspace = true }
+sha2 = { workspace = true }
+rand = { workspace = true }

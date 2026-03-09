@@ -1,0 +1,24 @@
+[package]
+name = "ruv-neural-esp32"
+description = "rUv Neural — ESP32 edge integration for neural sensor data acquisition and preprocessing"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[features]
+default = ["std"]
+std = []
+no_std = []
+simulator = ["std"]
+
+[dependencies]
+ruv-neural-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+num-traits = { workspace = true }
+
+[dev-dependencies]
+rand = { workspace = true }
+approx = { workspace = true }

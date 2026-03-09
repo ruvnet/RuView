@@ -1,0 +1,21 @@
+[package]
+name = "ruv-neural-graph"
+description = "rUv Neural — Brain connectivity graph construction from neural signals"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+ruv-neural-core = { workspace = true }
+ruv-neural-signal = { workspace = true }
+petgraph = { workspace = true }
+ndarray = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+num-traits = { workspace = true }
+
+[dev-dependencies]
+approx = { workspace = true }
+rand = { workspace = true }
