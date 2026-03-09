@@ -2,7 +2,7 @@ pub mod commands;
 pub mod domain;
 pub mod state;
 
-use commands::{discovery, flash, ota, provision, server, wasm};
+use commands::{discovery, flash, ota, provision, server, settings, wasm};
 
 pub fn run() {
     tauri::Builder::default()
@@ -30,6 +30,9 @@ pub fn run() {
             // Provision
             provision::provision_node,
             provision::read_nvs,
+            // Settings
+            settings::get_settings,
+            settings::save_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
