@@ -4,7 +4,7 @@
   "version": "0.3.0",
   "identifier": "net.ruv.ruview",
   "build": {
-    "frontendDist": "../ui/dist",
+    "frontendDist": "ui/dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "cd ../ui && npm run dev",
     "beforeBuildCommand": "cd ../ui && npm run build"

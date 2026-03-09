@@ -1,0 +1,180 @@
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - 'desktop-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.3.0)'
+        required: true
+        default: '0.3.0'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install frontend dependencies
+        working-directory: rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/ui
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/ui
+        run: npm run build
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2.0.0"
+
+      - name: Build Tauri app
+        working-directory: rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop
+        run: cargo tauri build --target ${{ matrix.target }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Get architecture name
+        id: arch
+        run: |
+          if [ "${{ matrix.target }}" = "aarch64-apple-darwin" ]; then
+            echo "arch=arm64" >> $GITHUB_OUTPUT
+          else
+            echo "arch=x64" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Package macOS app
+        run: |
+          cd rust-port/wifi-densepose-rs/target/${{ matrix.target }}/release/bundle/macos
+          zip -r "RuView-Desktop-${{ github.event.inputs.version || '0.3.0' }}-macos-${{ steps.arch.outputs.arch }}.zip" "RuView Desktop.app"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruview-macos-${{ steps.arch.outputs.arch }}
+          path: rust-port/wifi-densepose-rs/target/${{ matrix.target }}/release/bundle/macos/*.zip
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Install frontend dependencies
+        working-directory: rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/ui
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/ui
+        run: npm run build
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2.0.0"
+
+      - name: Build Tauri app
+        working-directory: rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop
+        run: cargo tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Upload Windows MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruview-windows-msi
+          path: rust-port/wifi-densepose-rs/target/release/bundle/msi/*.msi
+
+      - name: Upload Windows NSIS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruview-windows-nsis
+          path: rust-port/wifi-densepose-rs/target/release/bundle/nsis/*.exe
+
+  create-release:
+    name: Create Release
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: RuView Desktop v${{ github.event.inputs.version || '0.3.0' }}
+          tag_name: desktop-v${{ github.event.inputs.version || '0.3.0' }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.zip
+            artifacts/**/*.msi
+            artifacts/**/*.exe
+            artifacts/**/*.dmg
+          body: |
+            ## RuView Desktop v${{ github.event.inputs.version || '0.3.0' }}
+
+            WiFi-based human pose estimation desktop application.
+
+            ### Downloads
+
+            | Platform | Architecture | Download |
+            |----------|--------------|----------|
+            | macOS | Apple Silicon (M1/M2/M3) | `RuView-Desktop-*-macos-arm64.zip` |
+            | macOS | Intel | `RuView-Desktop-*-macos-x64.zip` |
+            | Windows | x64 | `RuView-Desktop-*.msi` or `RuView-Desktop-*.exe` |
+
+            ### Installation
+
+            **macOS:**
+            1. Download the appropriate `.zip` file for your Mac
+            2. Extract the zip file
+            3. Move `RuView Desktop.app` to your Applications folder
+            4. Right-click and select "Open" (first time only, to bypass Gatekeeper)
+
+            **Windows:**
+            1. Download the `.msi` installer
+            2. Run the installer
+            3. Launch RuView Desktop from the Start menu
+
+            ### Requirements
+            - macOS 11.0+ (Big Sur or later)
+            - Windows 10/11 (64-bit)
