@@ -31,7 +31,7 @@ jobs:
           node-version: '20'
 
       - name: Setup Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
@@ -86,7 +86,7 @@ jobs:
           node-version: '20'
 
       - name: Setup Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install frontend dependencies
         working-directory: rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/ui
