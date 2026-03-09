@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"RuView default capability set","local":true,"windows":["main"],"permissions":["core:default","shell:allow-execute","shell:allow-open","dialog:allow-open","dialog:allow-save"]}}

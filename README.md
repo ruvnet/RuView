@@ -77,6 +77,7 @@ docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 | [Build Guide](docs/build-guide.md) | Building from source (Rust and Python) |
 | [Architecture Decisions](docs/adr/README.md) | 48 ADRs — why each technical choice was made, organized by domain (hardware, signal processing, ML, platform, infrastructure) |
 | [Domain Models](docs/ddd/README.md) | 7 DDD models (RuvSense, Signal Processing, Training Pipeline, Hardware Platform, Sensing Server, WiFi-Mat, CHCI) — bounded contexts, aggregates, domain events, and ubiquitous language |
+| [Desktop App](rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/README.md) | **WIP** — Tauri v2 desktop app for node management, OTA updates, WASM deployment, and mesh visualization |
 
 ---
 

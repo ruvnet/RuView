@@ -1,0 +1,25 @@
+[package]
+name = "wifi-densepose-desktop"
+version.workspace = true
+edition.workspace = true
+description = "Tauri v2 desktop frontend for RuView WiFi DensePose"
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "wifi_densepose_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }

@@ -1,0 +1,12 @@
+{
+  "identifier": "default",
+  "description": "RuView default capability set",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-execute",
+    "shell:allow-open",
+    "dialog:allow-open",
+    "dialog:allow-save"
+  ]
+}
