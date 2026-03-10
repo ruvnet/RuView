@@ -276,11 +276,24 @@ fn parse_beacon_response(data: &[u8], addr: SocketAddr) -> Option<DiscoveredNode
 /// Filters for known ESP32 USB-to-serial chips (CP2102, CH340, FTDI).
 #[tauri::command]
 pub async fn list_serial_ports() -> Result<Vec<SerialPortInfo>, String> {
-    let ports = available_ports().map_err(|e| format!("Failed to enumerate ports: {}", e))?;
+    tracing::info!("list_serial_ports called");
+
+    let ports = match available_ports() {
+        Ok(p) => {
+            tracing::info!("Found {} ports from tokio_serial", p.len());
+            p
+        }
+        Err(e) => {
+            tracing::error!("Failed to enumerate ports: {}", e);
+            // Fallback: try to list /dev/cu.usb* manually on macOS
+            return list_serial_ports_fallback();
+        }
+    };
 
     let mut result = Vec::new();
 
     for port in ports {
+        tracing::debug!("Processing port: {}", port.port_name);
         let info = match port.port_type {
             tokio_serial::SerialPortType::UsbPort(usb_info) => {
                 SerialPortInfo {
@@ -294,12 +307,13 @@ pub async fn list_serial_ports() -> Result<Vec<SerialPortInfo>, String> {
             }
             _ => {
                 SerialPortInfo {
-                    name: port.port_name,
+                    name: port.port_name.clone(),
                     vid: None,
                     pid: None,
                     manufacturer: None,
                     serial_number: None,
-                    is_esp32_compatible: false,
+                    // Mark /dev/cu.usb* ports as potentially compatible
+                    is_esp32_compatible: port.port_name.contains("usb"),
                 }
             }
         };
@@ -307,9 +321,72 @@ pub async fn list_serial_ports() -> Result<Vec<SerialPortInfo>, String> {
         result.push(info);
     }
 
+    // If no ports found via tokio_serial, try fallback
+    if result.is_empty() {
+        tracing::warn!("No ports from tokio_serial, trying fallback");
+        return list_serial_ports_fallback();
+    }
+
     // Sort ESP32-compatible ports first
     result.sort_by(|a, b| b.is_esp32_compatible.cmp(&a.is_esp32_compatible));
 
+    tracing::info!("Returning {} serial ports", result.len());
+    Ok(result)
+}
+
+/// Fallback serial port listing for macOS when tokio_serial fails
+fn list_serial_ports_fallback() -> Result<Vec<SerialPortInfo>, String> {
+    tracing::info!("Using fallback serial port listing");
+
+    let mut result = Vec::new();
+
+    // List /dev/cu.usb* devices on macOS
+    #[cfg(target_os = "macos")]
+    {
+        use std::fs;
+        if let Ok(entries) = fs::read_dir("/dev") {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with("cu.usb") {
+                    let path = format!("/dev/{}", name);
+                    tracing::info!("Fallback found port: {}", path);
+                    result.push(SerialPortInfo {
+                        name: path,
+                        vid: None,
+                        pid: None,
+                        manufacturer: Some("USB Serial".to_string()),
+                        serial_number: None,
+                        is_esp32_compatible: true, // Assume USB serial is ESP32
+                    });
+                }
+            }
+        }
+    }
+
+    // Linux fallback
+    #[cfg(target_os = "linux")]
+    {
+        use std::fs;
+        if let Ok(entries) = fs::read_dir("/dev") {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with("ttyUSB") || name.starts_with("ttyACM") {
+                    let path = format!("/dev/{}", name);
+                    tracing::info!("Fallback found port: {}", path);
+                    result.push(SerialPortInfo {
+                        name: path,
+                        vid: None,
+                        pid: None,
+                        manufacturer: Some("USB Serial".to_string()),
+                        serial_number: None,
+                        is_esp32_compatible: true,
+                    });
+                }
+            }
+        }
+    }
+
+    tracing::info!("Fallback found {} ports", result.len());
     Ok(result)
 }
 

@@ -92,7 +92,7 @@ const App: React.FC = () => {
   const renderPage = () => {
     switch (activePage) {
       case "dashboard": return <Dashboard onNavigate={navigateTo} />;
-      case "discovery": return <NetworkDiscovery />;
+      case "discovery": return <NetworkDiscovery onNavigate={navigateTo} />;
       case "nodes": return <Nodes />;
       case "flash": return <FlashFirmware />;
       case "ota": return <OtaUpdate />;

@@ -3,6 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { StatusBadge } from "../components/StatusBadge";
 import type { HealthStatus, Chip, MeshRole, DiscoveryMethod } from "../types";
 
+type Page = "dashboard" | "discovery" | "nodes" | "flash" | "ota" | "wasm" | "sensing" | "mesh" | "settings";
+
+interface NetworkDiscoveryProps {
+  onNavigate?: (page: Page) => void;
+}
+
 interface DiscoveredNode {
   ip: string;
   mac: string | null;
@@ -34,7 +40,7 @@ interface SerialPortInfo {
 
 type DiscoveryTab = "network" | "serial" | "manual";
 
-const NetworkDiscovery: React.FC = () => {
+const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({ onNavigate }) => {
   const [activeTab, setActiveTab] = useState<DiscoveryTab>("network");
   const [nodes, setNodes] = useState<DiscoveredNode[]>([]);
   const [serialPorts, setSerialPorts] = useState<SerialPortInfo[]>([]);
@@ -112,15 +118,21 @@ const NetworkDiscovery: React.FC = () => {
     }
   }, [manualIp, manualMac]);
 
+  // Scan both network and serial ports on mount
   useEffect(() => {
     scanNetwork();
+    scanSerialPorts();
   }, []);
 
+  // Also refresh serial ports when switching to that tab
   useEffect(() => {
     if (activeTab === "serial") {
       scanSerialPorts();
     }
   }, [activeTab, scanSerialPorts]);
+
+  // Count ESP32-compatible serial ports
+  const esp32SerialCount = serialPorts.filter((p) => p.is_esp32_compatible).length;
 
   const filteredNodes = nodes.filter((node) => {
     if (filterOnline && node.health !== "online") return false;
@@ -302,21 +314,61 @@ const NetworkDiscovery: React.FC = () => {
             <div className="card empty-state">
               <div className="empty-state-icon">{"◉"}</div>
               <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-secondary)" }}>
-                {isScanning ? "Scanning for nodes..." : "No nodes discovered"}
+                {isScanning ? "Scanning for nodes..." : "No network nodes found"}
               </div>
               <div
                 style={{
                   fontSize: 13,
                   color: "var(--text-muted)",
-                  maxWidth: 300,
+                  maxWidth: 340,
                   textAlign: "center",
                   lineHeight: 1.5,
                 }}
               >
                 {isScanning
                   ? "Please wait while we search for ESP32 devices on your network."
-                  : "Click 'Scan Network' to discover ESP32 devices using mDNS and UDP broadcast."}
+                  : "Network discovery uses mDNS/UDP to find ESP32 devices running firmware on WiFi."}
               </div>
+
+              {/* USB device hint */}
+              {!isScanning && esp32SerialCount > 0 && (
+                <div
+                  style={{
+                    marginTop: "var(--space-4)",
+                    padding: "var(--space-3) var(--space-4)",
+                    background: "rgba(56, 139, 253, 0.1)",
+                    border: "1px solid rgba(56, 139, 253, 0.3)",
+                    borderRadius: 8,
+                    maxWidth: 340,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 16 }}>🔌</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--accent)" }}>
+                      {esp32SerialCount} USB device{esp32SerialCount > 1 ? "s" : ""} detected!
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 10 }}>
+                    Your ESP32 is connected via USB. To flash firmware or configure it:
+                  </div>
+                  <button
+                    onClick={() => setActiveTab("serial")}
+                    style={{
+                      padding: "8px 16px",
+                      background: "var(--accent)",
+                      border: "none",
+                      borderRadius: 6,
+                      color: "#fff",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      width: "100%",
+                    }}
+                  >
+                    View Serial Ports →
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div
@@ -384,6 +436,7 @@ const NetworkDiscovery: React.FC = () => {
                     <Th>Manufacturer</Th>
                     <Th>VID:PID</Th>
                     <Th>Compatible</Th>
+                    <Th>Actions</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -415,6 +468,25 @@ const NetworkDiscovery: React.FC = () => {
                           </span>
                         ) : (
                           <span style={{ color: "var(--text-muted)" }}>--</span>
+                        )}
+                      </Td>
+                      <Td>
+                        {port.is_esp32_compatible && onNavigate && (
+                          <button
+                            onClick={() => onNavigate("flash")}
+                            style={{
+                              padding: "4px 12px",
+                              background: "var(--accent)",
+                              border: "none",
+                              borderRadius: 4,
+                              color: "#fff",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              cursor: "pointer",
+                            }}
+                          >
+                            Flash →
+                          </button>
                         )}
                       </Td>
                     </tr>

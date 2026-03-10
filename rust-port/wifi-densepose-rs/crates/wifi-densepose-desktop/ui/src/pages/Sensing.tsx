@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useServer } from "../hooks/useServer";
-import type { SensingUpdate } from "../types";
+import type { SensingUpdate, DataSource } from "../types";
 
 // ---------------------------------------------------------------------------
 // Log entry model
@@ -176,11 +176,12 @@ function LogViewer({
   paused: boolean;
   onTogglePause: () => void;
 }) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!paused && bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: "smooth" });
+    // Scroll to bottom within the container only (not the page)
+    if (!paused && containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
   }, [entries, paused]);
 
@@ -254,6 +255,7 @@ function LogViewer({
 
       {/* Log entries */}
       <div
+        ref={containerRef}
         style={{
           height: 320,
           overflowY: "auto",
@@ -286,7 +288,6 @@ function LogViewer({
             </div>
           ))
         )}
-        <div ref={bottomRef} />
       </div>
     </div>
   );
@@ -300,6 +301,9 @@ export const Sensing: React.FC = () => {
   const { status, isRunning, error, start, stop } = useServer({ pollInterval: 5000 });
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
+
+  // Data source selection
+  const [dataSource, setDataSource] = useState<DataSource>("simulate");
 
   // Log viewer state
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
@@ -430,7 +434,7 @@ export const Sensing: React.FC = () => {
   const handleStart = async () => {
     setStarting(true);
     try {
-      await start();
+      await start({ source: dataSource });
     } finally {
       setStarting(false);
     }
@@ -524,24 +528,61 @@ export const Sensing: React.FC = () => {
             )}
           </div>
 
-          {/* Right: action button */}
-          <button
-            onClick={isRunning ? handleStop : handleStart}
-            disabled={starting || stopping}
-            style={{
-              padding: "var(--space-2) var(--space-4)",
-              borderRadius: 6,
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: starting || stopping ? "not-allowed" : "pointer",
-              border: "none",
-              background: isRunning ? "var(--status-error)" : "var(--accent)",
-              color: "#fff",
-              opacity: starting || stopping ? 0.6 : 1,
-            }}
-          >
-            {starting ? "Starting..." : stopping ? "Stopping..." : isRunning ? "Stop Server" : "Start Server"}
-          </button>
+          {/* Right: data source + action button */}
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+            {/* Data source selector */}
+            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+              <label
+                style={{
+                  fontSize: 12,
+                  color: "var(--text-muted)",
+                  fontWeight: 500,
+                }}
+              >
+                Source:
+              </label>
+              <select
+                value={dataSource}
+                onChange={(e) => setDataSource(e.target.value as DataSource)}
+                disabled={isRunning}
+                style={{
+                  padding: "var(--space-1) var(--space-2)",
+                  borderRadius: 4,
+                  fontSize: 12,
+                  fontWeight: 500,
+                  border: "1px solid var(--border)",
+                  background: isRunning ? "var(--bg-hover)" : "var(--bg-surface)",
+                  color: "var(--text-primary)",
+                  cursor: isRunning ? "not-allowed" : "pointer",
+                  opacity: isRunning ? 0.6 : 1,
+                }}
+              >
+                <option value="simulate">Simulate</option>
+                <option value="esp32">ESP32 (Real)</option>
+                <option value="wifi">WiFi (RSSI)</option>
+                <option value="auto">Auto Detect</option>
+              </select>
+            </div>
+
+            {/* Action button */}
+            <button
+              onClick={isRunning ? handleStop : handleStart}
+              disabled={starting || stopping}
+              style={{
+                padding: "var(--space-2) var(--space-4)",
+                borderRadius: 6,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: starting || stopping ? "not-allowed" : "pointer",
+                border: "none",
+                background: isRunning ? "var(--status-error)" : "var(--accent)",
+                color: "#fff",
+                opacity: starting || stopping ? 0.6 : 1,
+              }}
+            >
+              {starting ? "Starting..." : stopping ? "Stopping..." : isRunning ? "Stop Server" : "Start Server"}
+            </button>
+          </div>
         </div>
 
         {/* Error display */}

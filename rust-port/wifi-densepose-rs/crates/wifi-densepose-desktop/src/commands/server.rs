@@ -148,14 +148,15 @@ pub async fn start_server(
 /// First attempts graceful termination (SIGTERM), then SIGKILL after timeout.
 #[tauri::command]
 pub async fn stop_server(state: State<'_, AppState>) -> Result<(), String> {
-    // Extract child process ID and take ownership of child for killing
-    // This releases the lock before any await points
-    let child_id = {
-        let srv = state.server.lock().map_err(|e| e.to_string())?;
+    // Extract child process and take ownership for killing
+    let (child_id, mut child_process) = {
+        let mut srv = state.server.lock().map_err(|e| e.to_string())?;
         if !srv.running {
             return Err("Server is not running".into());
         }
-        srv.pid
+        let pid = srv.pid;
+        let child = srv.child.take(); // Take ownership of child
+        (pid, child)
     };
 
     let child_id = match child_id {
@@ -163,52 +164,79 @@ pub async fn stop_server(state: State<'_, AppState>) -> Result<(), String> {
         None => return Err("No server process found".into()),
     };
 
-    // First try graceful termination
+    tracing::info!("Stopping sensing server with PID {}", child_id);
+
+    // First try graceful termination via SIGTERM
     #[cfg(unix)]
     {
         unsafe {
-            libc::kill(child_id as i32, libc::SIGTERM);
+            // Kill the process group (negative PID) to kill all children too
+            let _ = libc::kill(-(child_id as i32), libc::SIGTERM);
+            // Also kill the main process directly
+            let _ = libc::kill(child_id as i32, libc::SIGTERM);
         }
     }
 
-    // Wait briefly for graceful shutdown (async operation - no lock held)
-    let wait_result: Result<Result<bool, _>, _> = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        tokio::task::spawn_blocking({
-            move || {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                // Check if process is still alive
-                let mut sys = System::new();
-                let pid = Pid::from_u32(child_id);
-                sys.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
-                sys.process(pid).is_some()
-            }
-        })
-    ).await;
+    // Wait briefly for graceful shutdown
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-    // Force kill if still running - re-acquire lock
-    let still_running = match wait_result {
-        Ok(Ok(running)) => running,
-        _ => true,
+    // Check if still running
+    let still_running = {
+        let mut sys = System::new();
+        let pid = Pid::from_u32(child_id);
+        sys.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+        sys.process(pid).is_some()
     };
 
-    {
-        let mut srv = state.server.lock().map_err(|e| e.to_string())?;
+    // Force kill if still running
+    if still_running {
+        tracing::warn!("Server still running after SIGTERM, sending SIGKILL");
 
-        if still_running {
-            if let Some(ref mut child) = srv.child {
-                let _ = child.kill();
-                let _ = child.wait();
+        #[cfg(unix)]
+        {
+            unsafe {
+                // SIGKILL the process group and main process
+                let _ = libc::kill(-(child_id as i32), libc::SIGKILL);
+                let _ = libc::kill(child_id as i32, libc::SIGKILL);
             }
         }
 
-        // Clear state
+        // Also use the child handle if available
+        if let Some(ref mut child) = child_process {
+            let _ = child.kill();
+        }
+    }
+
+    // Wait for process to actually terminate
+    if let Some(ref mut child) = child_process {
+        let _ = child.wait();
+    }
+
+    // Final verification and cleanup
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    // Clear state
+    {
+        let mut srv = state.server.lock().map_err(|e| e.to_string())?;
         srv.running = false;
         srv.pid = None;
         srv.http_port = None;
         srv.ws_port = None;
         srv.udp_port = None;
         srv.child = None;
+    }
+
+    // Verify process is dead
+    let still_alive = {
+        let mut sys = System::new();
+        let pid = Pid::from_u32(child_id);
+        sys.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+        sys.process(pid).is_some()
+    };
+
+    if still_alive {
+        tracing::error!("Failed to kill server process {}", child_id);
+        return Err(format!("Failed to stop server process {}", child_id));
     }
 
     tracing::info!("Stopped sensing server");
@@ -366,6 +394,7 @@ mod tests {
             log_level: None,
             bind_address: None,
             server_path: None,
+            source: Some("simulate".to_string()),
         };
 
         assert_eq!(config.http_port, Some(8080));
