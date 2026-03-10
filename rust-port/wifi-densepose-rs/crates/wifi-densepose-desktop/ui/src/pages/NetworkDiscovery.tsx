@@ -49,6 +49,12 @@ const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({ onNavigate }) => {
   const [error, setError] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<DiscoveredNode | null>(null);
   const [filterOnline, setFilterOnline] = useState(false);
+  // WiFi config state
+  const [wifiConfigPort, setWifiConfigPort] = useState<string | null>(null);
+  const [wifiSsid, setWifiSsid] = useState("");
+  const [wifiPassword, setWifiPassword] = useState("");
+  const [configuringWifi, setConfiguringWifi] = useState(false);
+  const [wifiResult, setWifiResult] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   // Manual add state
   const [manualIp, setManualIp] = useState("");
@@ -82,6 +88,24 @@ const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({ onNavigate }) => {
       setIsScanning(false);
     }
   }, []);
+
+  const configureWifi = useCallback(async () => {
+    if (!wifiConfigPort || !wifiSsid) return;
+    setConfiguringWifi(true);
+    setWifiResult(null);
+    try {
+      const result = await invoke<string>("configure_esp32_wifi", {
+        port: wifiConfigPort,
+        ssid: wifiSsid,
+        password: wifiPassword,
+      });
+      setWifiResult(result);
+    } catch (err) {
+      setWifiResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setConfiguringWifi(false);
+    }
+  }, [wifiConfigPort, wifiSsid, wifiPassword]);
 
   const addManualNode = useCallback(async () => {
     if (!manualIp.trim()) return;
@@ -471,23 +495,47 @@ const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({ onNavigate }) => {
                         )}
                       </Td>
                       <Td>
-                        {port.is_esp32_compatible && onNavigate && (
-                          <button
-                            onClick={() => onNavigate("flash")}
-                            style={{
-                              padding: "4px 12px",
-                              background: "var(--accent)",
-                              border: "none",
-                              borderRadius: 4,
-                              color: "#fff",
-                              fontSize: 11,
-                              fontWeight: 600,
-                              cursor: "pointer",
-                            }}
-                          >
-                            Flash →
-                          </button>
-                        )}
+                        <div style={{ display: "flex", gap: 6 }}>
+                          {port.is_esp32_compatible && (
+                            <button
+                              onClick={() => {
+                                setWifiConfigPort(port.name);
+                                setWifiSsid("");
+                                setWifiPassword("");
+                                setWifiResult(null);
+                              }}
+                              style={{
+                                padding: "4px 10px",
+                                background: "rgba(56, 139, 253, 0.15)",
+                                border: "1px solid rgba(56, 139, 253, 0.3)",
+                                borderRadius: 4,
+                                color: "var(--accent)",
+                                fontSize: 11,
+                                fontWeight: 600,
+                                cursor: "pointer",
+                              }}
+                            >
+                              WiFi
+                            </button>
+                          )}
+                          {port.is_esp32_compatible && onNavigate && (
+                            <button
+                              onClick={() => onNavigate("flash")}
+                              style={{
+                                padding: "4px 10px",
+                                background: "var(--accent)",
+                                border: "none",
+                                borderRadius: 4,
+                                color: "#fff",
+                                fontSize: 11,
+                                fontWeight: 600,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Flash
+                            </button>
+                          )}
+                        </div>
                       </Td>
                     </tr>
                   ))}
@@ -578,6 +626,224 @@ const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({ onNavigate }) => {
       {/* Node Detail Modal */}
       {selectedNode && (
         <NodeDetailModal node={selectedNode} onClose={() => setSelectedNode(null)} />
+      )}
+
+      {/* WiFi Configuration Modal */}
+      {wifiConfigPort && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: "var(--space-5)",
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !configuringWifi) {
+              setWifiConfigPort(null);
+            }
+          }}
+        >
+          <div
+            style={{
+              background: "var(--bg-surface)",
+              borderRadius: 12,
+              padding: "var(--space-5)",
+              maxWidth: 420,
+              width: "100%",
+              border: "1px solid var(--border)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "start",
+                marginBottom: "var(--space-4)",
+              }}
+            >
+              <div>
+                <h2 className="heading-md" style={{ margin: 0 }}>
+                  Configure WiFi
+                </h2>
+                <p className="mono" style={{ color: "var(--text-muted)", marginTop: 4, fontSize: 13 }}>
+                  {wifiConfigPort}
+                </p>
+              </div>
+              <button
+                onClick={() => setWifiConfigPort(null)}
+                disabled={configuringWifi}
+                style={{
+                  background: "none",
+                  border: "none",
+                  fontSize: 20,
+                  cursor: configuringWifi ? "not-allowed" : "pointer",
+                  color: "var(--text-muted)",
+                  padding: 4,
+                  opacity: configuringWifi ? 0.5 : 1,
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "var(--text-secondary)",
+                    marginBottom: 4,
+                  }}
+                >
+                  WiFi SSID *
+                </label>
+                <input
+                  type="text"
+                  placeholder="Your WiFi network name"
+                  value={wifiSsid}
+                  onChange={(e) => setWifiSsid(e.target.value)}
+                  disabled={configuringWifi}
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    borderRadius: 6,
+                    border: "1px solid var(--border)",
+                    background: "var(--bg-base)",
+                    color: "var(--text-primary)",
+                    fontSize: 13,
+                  }}
+                />
+              </div>
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "var(--text-secondary)",
+                    marginBottom: 4,
+                  }}
+                >
+                  WiFi Password
+                </label>
+                <input
+                  type="password"
+                  placeholder="WiFi password"
+                  value={wifiPassword}
+                  onChange={(e) => setWifiPassword(e.target.value)}
+                  disabled={configuringWifi}
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    borderRadius: 6,
+                    border: "1px solid var(--border)",
+                    background: "var(--bg-base)",
+                    color: "var(--text-primary)",
+                    fontSize: 13,
+                  }}
+                />
+              </div>
+
+              {wifiResult && (
+                <div
+                  style={{
+                    padding: "var(--space-3)",
+                    borderRadius: 6,
+                    fontSize: 12,
+                    background: wifiResult.startsWith("Error")
+                      ? "rgba(248, 81, 73, 0.1)"
+                      : wifiResult.includes("configured") || wifiResult.includes("saved")
+                        ? "rgba(63, 185, 80, 0.1)"
+                        : "rgba(56, 139, 253, 0.1)",
+                    border: wifiResult.startsWith("Error")
+                      ? "1px solid rgba(248, 81, 73, 0.3)"
+                      : wifiResult.includes("configured") || wifiResult.includes("saved")
+                        ? "1px solid rgba(63, 185, 80, 0.3)"
+                        : "1px solid rgba(56, 139, 253, 0.3)",
+                    color: wifiResult.startsWith("Error")
+                      ? "var(--status-error)"
+                      : wifiResult.includes("configured") || wifiResult.includes("saved")
+                        ? "var(--status-online)"
+                        : "var(--accent)",
+                  }}
+                >
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                    {wifiResult.startsWith("Error") ? "Error" :
+                     wifiResult.includes("configured") || wifiResult.includes("saved") ? "Success!" : "Commands Sent"}
+                  </div>
+                  <div style={{ fontFamily: "var(--font-mono)", whiteSpace: "pre-wrap", maxHeight: 100, overflow: "auto" }}>
+                    {wifiResult}
+                  </div>
+                  {!wifiResult.startsWith("Error") && !wifiResult.includes("configured") && (
+                    <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-secondary)" }}>
+                      If the ESP32 doesn't connect, try pressing its Reset button or re-flashing with WiFi credentials in the firmware.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: "var(--space-3)", marginTop: "var(--space-2)" }}>
+                <button
+                  onClick={() => setWifiConfigPort(null)}
+                  disabled={configuringWifi}
+                  style={{
+                    flex: 1,
+                    padding: "10px 16px",
+                    borderRadius: 6,
+                    border: "1px solid var(--border)",
+                    background: wifiResult ? "var(--accent)" : "transparent",
+                    color: wifiResult ? "#fff" : "var(--text-secondary)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: configuringWifi ? "not-allowed" : "pointer",
+                    opacity: configuringWifi ? 0.5 : 1,
+                  }}
+                >
+                  {wifiResult ? "Done" : "Cancel"}
+                </button>
+                {!wifiResult && (
+                  <button
+                    onClick={configureWifi}
+                    disabled={!wifiSsid.trim() || configuringWifi}
+                    className="btn-gradient"
+                    style={{
+                      flex: 1,
+                      opacity: !wifiSsid.trim() || configuringWifi ? 0.5 : 1,
+                    }}
+                  >
+                    {configuringWifi ? "Configuring..." : "Configure WiFi"}
+                  </button>
+                )}
+                {wifiResult && !wifiResult.startsWith("Error") && (
+                  <button
+                    onClick={() => {
+                      setWifiResult(null);
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: "10px 16px",
+                      borderRadius: 6,
+                      border: "1px solid var(--border)",
+                      background: "transparent",
+                      color: "var(--text-secondary)",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Try Again
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

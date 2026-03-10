@@ -411,6 +411,91 @@ fn is_esp32_compatible(vid: u16, pid: u16) -> bool {
     false
 }
 
+/// Configure WiFi credentials on an ESP32 via serial port.
+///
+/// Sends WiFi credentials to the ESP32 using a simple serial protocol.
+/// The ESP32 firmware should accept: `wifi_config <ssid> <password>\n`
+#[tauri::command]
+pub async fn configure_esp32_wifi(
+    port: String,
+    ssid: String,
+    password: String,
+) -> Result<String, String> {
+    use std::io::{Read, Write};
+    use std::time::Duration;
+
+    tracing::info!("Configuring WiFi on port: {}", port);
+
+    // Open serial port
+    let mut serial = serialport::new(&port, 115200)
+        .timeout(Duration::from_secs(3))
+        .open()
+        .map_err(|e| format!("Failed to open port {}: {}", port, e))?;
+
+    // Wait for ESP32 to be ready
+    std::thread::sleep(Duration::from_millis(500));
+
+    // Try multiple command formats that different firmware versions might accept
+    let commands = [
+        format!("wifi_config {} {}\r\n", ssid, password),
+        format!("wifi {} {}\r\n", ssid, password),
+        format!("set ssid {}\r\n", ssid),
+    ];
+
+    let mut response = String::new();
+    let mut buf = [0u8; 512];
+
+    for cmd in &commands {
+        // Clear any pending data
+        let _ = serial.read(&mut buf);
+
+        // Send command
+        serial.write_all(cmd.as_bytes())
+            .map_err(|e| format!("Failed to write: {}", e))?;
+        serial.flush().map_err(|e| format!("Failed to flush: {}", e))?;
+
+        // Wait and read response
+        std::thread::sleep(Duration::from_millis(500));
+
+        match serial.read(&mut buf) {
+            Ok(n) if n > 0 => {
+                let text = String::from_utf8_lossy(&buf[..n]).to_string();
+                response.push_str(&text);
+
+                // Check for success indicators
+                if text.to_lowercase().contains("ok")
+                    || text.to_lowercase().contains("saved")
+                    || text.to_lowercase().contains("configured") {
+                    tracing::info!("WiFi config successful: {}", text.trim());
+                    return Ok(format!("WiFi configured! Response: {}", text.trim()));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Also try to send password separately if ssid command was sent
+    let pwd_cmd = format!("set password {}\r\n", password);
+    let _ = serial.write_all(pwd_cmd.as_bytes());
+    let _ = serial.flush();
+    std::thread::sleep(Duration::from_millis(300));
+    if let Ok(n) = serial.read(&mut buf) {
+        if n > 0 {
+            response.push_str(&String::from_utf8_lossy(&buf[..n]));
+        }
+    }
+
+    // Send reboot command
+    let _ = serial.write_all(b"reboot\r\n");
+    let _ = serial.flush();
+
+    if response.is_empty() {
+        Ok("Commands sent. ESP32 may need manual reboot to apply WiFi settings.".to_string())
+    } else {
+        Ok(format!("Commands sent. Response: {}", response.trim()))
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SerialPortInfo {
     pub name: String,

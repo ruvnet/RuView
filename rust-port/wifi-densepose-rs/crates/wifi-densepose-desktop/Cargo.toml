@@ -56,6 +56,11 @@ hex = "0.4"
 # Regex for parsing espflash output
 regex = "1.10"
 
+# Serial port for WiFi configuration
+serialport.workspace = true
+
 # Unix signals for graceful process termination
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]

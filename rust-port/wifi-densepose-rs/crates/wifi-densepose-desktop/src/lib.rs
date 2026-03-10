@@ -13,6 +13,7 @@ pub fn run() {
             // Discovery
             discovery::discover_nodes,
             discovery::list_serial_ports,
+            discovery::configure_esp32_wifi,
             // Flash
             flash::flash_firmware,
             flash::flash_progress,
