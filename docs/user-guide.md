@@ -78,6 +78,17 @@ docker pull ruvnet/wifi-densepose:latest
 
 Multi-architecture image (amd64 + arm64). Works on Intel/AMD and Apple Silicon Macs. Contains the Rust sensing server, Three.js UI, and all signal processing.
 
+**Data source selection:** Use the `CSI_SOURCE` environment variable to select the sensing mode:
+
+| Value | Description |
+|-------|-------------|
+| `auto` | (default) Probe for ESP32 on UDP 5005, fall back to simulation |
+| `esp32` | Receive real CSI frames from ESP32 devices over UDP |
+| `simulated` | Generate synthetic CSI frames (no hardware required) |
+| `wifi` | Host Wi-Fi RSSI (not available inside containers) |
+
+Example: `docker run -e CSI_SOURCE=esp32 -p 3000:3000 -p 5005:5005/udp ruvnet/wifi-densepose:latest`
+
 ### From Source (Rust)
 
 ```bash
@@ -267,8 +278,8 @@ Real Channel State Information at 20 Hz with 56-192 subcarriers. Required for po
 # From source
 ./target/release/sensing-server --source esp32 --udp-port 5005 --http-port 3000 --ws-port 3001
 
-# Docker
-docker run -p 3000:3000 -p 3001:3001 -p 5005:5005/udp ruvnet/wifi-densepose:latest --source esp32
+# Docker (use CSI_SOURCE environment variable)
+docker run -p 3000:3000 -p 3001:3001 -p 5005:5005/udp -e CSI_SOURCE=esp32 ruvnet/wifi-densepose:latest
 ```
 
 The ESP32 nodes stream binary CSI frames over UDP to port 5005. See [Hardware Setup](#esp32-s3-mesh) for flashing instructions.
@@ -679,9 +690,11 @@ Download the dataset files and place them in a `data/` directory.
 ./target/release/sensing-server --train --dataset data/ --dataset-type mmfi --epochs 100 --save-rvf model.rvf
 
 # Via Docker (mount your data directory)
+# Note: Training mode requires overriding the default entrypoint
 docker run --rm \
   -v $(pwd)/data:/data \
   -v $(pwd)/output:/output \
+  --entrypoint /app/sensing-server \
   ruvnet/wifi-densepose:latest \
   --train --dataset /data --epochs 100 --export-rvf /output/model.rvf
 ```
@@ -885,8 +898,8 @@ Binary size: 777 KB (24% free in the 1 MB app partition).
 # From source
 ./target/release/sensing-server --source esp32 --udp-port 5005 --http-port 3000 --ws-port 3001
 
-# Docker
-docker run -p 3000:3000 -p 3001:3001 -p 5005:5005/udp ruvnet/wifi-densepose:latest --source esp32
+# Docker (use CSI_SOURCE environment variable)
+docker run -p 3000:3000 -p 3001:3001 -p 5005:5005/udp -e CSI_SOURCE=esp32 ruvnet/wifi-densepose:latest
 ```
 
 See [ADR-018](../docs/adr/ADR-018-esp32-dev-implementation.md), [ADR-029](../docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md), and [Tutorial #34](https://github.com/ruvnet/RuView/issues/34).
