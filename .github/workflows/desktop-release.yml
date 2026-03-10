@@ -7,9 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g., 0.3.0)'
+        description: 'Version to release (e.g., 0.4.0)'
         required: true
-        default: '0.3.0'
+        default: '0.4.0'
+      attach_to_existing:
+        description: 'Attach to existing release tag (leave empty to create new)'
+        required: false
+        default: ''
 
 env:
   CARGO_TERM_COLOR: always
@@ -65,7 +69,7 @@ jobs:
       - name: Package macOS app
         run: |
           cd rust-port/wifi-densepose-rs/target/${{ matrix.target }}/release/bundle/macos
-          zip -r "RuView-Desktop-${{ github.event.inputs.version || '0.3.0' }}-macos-${{ steps.arch.outputs.arch }}.zip" "RuView Desktop.app"
+          zip -r "RuView-Desktop-${{ github.event.inputs.version || '0.4.0' }}-macos-${{ steps.arch.outputs.arch }}.zip" "RuView Desktop.app"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
@@ -136,21 +140,21 @@ jobs:
       - name: List artifacts
         run: find artifacts -type f
 
-      - name: Create Release
+      - name: Create or Update Release
         uses: softprops/action-gh-release@v2
         with:
-          name: RuView Desktop v${{ github.event.inputs.version || '0.3.0' }}
-          tag_name: desktop-v${{ github.event.inputs.version || '0.3.0' }}
+          name: RuView Desktop v${{ github.event.inputs.version || '0.4.0' }}
+          tag_name: ${{ github.event.inputs.attach_to_existing || format('desktop-v{0}', github.event.inputs.version || '0.4.0') }}
           draft: false
           prerelease: false
-          generate_release_notes: true
+          generate_release_notes: ${{ github.event.inputs.attach_to_existing == '' }}
           files: |
             artifacts/**/*.zip
             artifacts/**/*.msi
             artifacts/**/*.exe
             artifacts/**/*.dmg
           body: |
-            ## RuView Desktop v${{ github.event.inputs.version || '0.3.0' }}
+            ## RuView Desktop v${{ github.event.inputs.version || '0.4.0' }}
 
             WiFi-based human pose estimation desktop application.
 
