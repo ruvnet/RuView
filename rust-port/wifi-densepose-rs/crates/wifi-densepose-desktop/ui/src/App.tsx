@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { APP_VERSION } from "./version";
 import Dashboard from "./pages/Dashboard";
 import { Nodes } from "./pages/Nodes";
 import NetworkDiscovery from "./pages/NetworkDiscovery";
@@ -90,7 +91,7 @@ const App: React.FC = () => {
 
   const renderPage = () => {
     switch (activePage) {
-      case "dashboard": return <Dashboard />;
+      case "dashboard": return <Dashboard onNavigate={navigateTo} />;
       case "discovery": return <NetworkDiscovery />;
       case "nodes": return <Nodes />;
       case "flash": return <FlashFirmware />;
@@ -167,7 +168,7 @@ const App: React.FC = () => {
                     letterSpacing: "0.02em",
                   }}
                 >
-                  v0.4.0
+                  v{APP_VERSION}
                 </span>
               </div>
             </div>

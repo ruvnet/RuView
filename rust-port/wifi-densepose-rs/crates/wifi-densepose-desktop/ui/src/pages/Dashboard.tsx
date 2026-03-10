@@ -19,19 +19,31 @@ interface ServerStatus {
   ws_port: number | null;
 }
 
-const Dashboard: React.FC = () => {
+type Page = "dashboard" | "discovery" | "nodes" | "flash" | "ota" | "wasm" | "sensing" | "mesh" | "settings";
+
+interface DashboardProps {
+  onNavigate?: (page: Page) => void;
+}
+
+const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const [nodes, setNodes] = useState<DiscoveredNode[]>([]);
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
 
   const handleScan = async () => {
     setScanning(true);
+    setScanError(null);
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       const found = await invoke<DiscoveredNode[]>("discover_nodes", { timeoutMs: 3000 });
       setNodes(found);
+      if (found.length === 0) {
+        setScanError("No nodes found. Ensure ESP32 devices are powered on and connected to the network.");
+      }
     } catch (err) {
       console.error("Discovery failed:", err);
+      setScanError(`Scan failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setScanning(false);
     }
@@ -133,9 +145,9 @@ const Dashboard: React.FC = () => {
         <div className="card">
           <h3 className="heading-sm" style={{ marginBottom: "var(--space-3)" }}>Quick Actions</h3>
           <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-            <QuickAction label="Flash Firmware" desc="Flash via serial port" />
-            <QuickAction label="Push OTA Update" desc="Over-the-air to nodes" />
-            <QuickAction label="Upload WASM" desc="Deploy edge modules" />
+            <QuickAction label="Flash Firmware" desc="Flash via serial port" onClick={() => onNavigate?.("flash")} />
+            <QuickAction label="Push OTA Update" desc="Over-the-air to nodes" onClick={() => onNavigate?.("ota")} />
+            <QuickAction label="Upload WASM" desc="Deploy edge modules" onClick={() => onNavigate?.("wasm")} />
           </div>
         </div>
       </div>
@@ -145,7 +157,23 @@ const Dashboard: React.FC = () => {
         <h3 className="heading-sm">Discovered Nodes ({nodes.length})</h3>
       </div>
 
-      {nodes.length === 0 ? (
+      {scanError && (
+        <div
+          style={{
+            padding: "var(--space-3) var(--space-4)",
+            background: "rgba(248, 81, 73, 0.1)",
+            border: "1px solid rgba(248, 81, 73, 0.3)",
+            borderRadius: "var(--radius-md)",
+            marginBottom: "var(--space-4)",
+            fontSize: 13,
+            color: "var(--status-error)",
+          }}
+        >
+          {scanError}
+        </div>
+      )}
+
+      {nodes.length === 0 && !scanError ? (
         <div className="card empty-state">
           <div className="empty-state-icon">{"\u25C9"}</div>
           <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-secondary)" }}>
@@ -155,7 +183,7 @@ const Dashboard: React.FC = () => {
             Click "Scan Network" to discover ESP32 devices on your local network.
           </div>
         </div>
-      ) : (
+      ) : nodes.length === 0 ? null : (
         <div
           style={{
             display: "grid",
@@ -258,9 +286,10 @@ function PortTag({ label, port }: { label: string; port: number }) {
   );
 }
 
-function QuickAction({ label, desc }: { label: string; desc: string }) {
+function QuickAction({ label, desc, onClick }: { label: string; desc: string; onClick?: () => void }) {
   return (
     <div
+      onClick={onClick}
       style={{
         display: "flex",
         justifyContent: "space-between",
