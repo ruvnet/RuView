@@ -23,3 +23,39 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
+
+# Discovery (mDNS + UDP)
+mdns-sd = "0.11"
+flume = "0.11"
+
+# Serial port (cross-platform)
+tokio-serial = "5.4"
+
+# HTTP client for OTA/WASM (native-tls for Windows compatibility)
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "native-tls"] }
+
+# Crypto for OTA PSK
+sha2 = "0.10"
+hmac = "0.12"
+
+# System info for server management
+sysinfo = "0.32"
+
+# Async utilities
+futures = "0.3"
+
+# Logging
+tracing = "0.1"
+
+# UUID for session IDs
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# Hex encoding for hashes
+hex = "0.4"
+
+# Regex for parsing espflash output
+regex = "1.10"
+
+# Unix signals for graceful process termination
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
