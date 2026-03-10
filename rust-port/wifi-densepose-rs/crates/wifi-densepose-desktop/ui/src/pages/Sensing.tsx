@@ -17,34 +17,58 @@ interface LogEntry {
 }
 
 // ---------------------------------------------------------------------------
-// Mock data generators
+// WebSocket message types from sensing server
 // ---------------------------------------------------------------------------
 
-const MOCK_LOG_TEMPLATES: { level: LogLevel; source: string; message: string }[] = [
-  { level: "INFO", source: "sensing-server", message: "HTTP listening on 127.0.0.1:8080" },
-  { level: "INFO", source: "udp_receiver", message: "CSI frame from 192.168.1.42" },
-  { level: "WARN", source: "vital_signs", message: "Low signal quality on node 2" },
-  { level: "INFO", source: "pose_engine", message: "Activity: walking (confidence: 0.87)" },
-  { level: "ERROR", source: "ws_session", message: "Client disconnected unexpectedly" },
-  { level: "INFO", source: "udp_receiver", message: "CSI frame from 192.168.1.15" },
-  { level: "INFO", source: "pose_engine", message: "Activity: sitting (confidence: 0.93)" },
-  { level: "INFO", source: "sensing-server", message: "WebSocket client connected from 127.0.0.1" },
-  { level: "WARN", source: "mesh_sync", message: "Node 4 heartbeat delayed by 1200ms" },
-  { level: "INFO", source: "pose_engine", message: "Activity: standing (confidence: 0.91)" },
-  { level: "INFO", source: "udp_receiver", message: "CSI frame from 192.168.1.78" },
-  { level: "ERROR", source: "udp_receiver", message: "Malformed CSI payload (len=0)" },
-  { level: "INFO", source: "csi_pipeline", message: "Subcarrier FFT complete (52 bins)" },
-  { level: "WARN", source: "vital_signs", message: "Breathing rate out of range on node 5" },
-  { level: "INFO", source: "pose_engine", message: "Activity: sleeping (confidence: 0.78)" },
-];
+interface WsNodeInfo {
+  node_id: number;
+  rssi_dbm: number;
+  position: [number, number, number];
+  amplitude: number[];
+  subcarrier_count: number;
+}
 
-const MOCK_ACTIVITIES = [
-  { activity: "walking", confidence: 0.87 },
-  { activity: "sitting", confidence: 0.93 },
-  { activity: "standing", confidence: 0.91 },
-  { activity: "sleeping", confidence: 0.78 },
-  { activity: "exercising", confidence: 0.65 },
-];
+interface WsClassification {
+  motion_level: string;
+  presence: boolean;
+  confidence: number;
+}
+
+interface WsFeatures {
+  mean_rssi: number;
+  variance: number;
+  motion_band_power: number;
+  breathing_band_power: number;
+  dominant_freq_hz: number;
+  change_points: number;
+  spectral_power: number;
+}
+
+interface WsVitalSigns {
+  breathing_rate_hz?: number;
+  heart_rate_bpm?: number;
+  confidence?: number;
+}
+
+interface WsSensingUpdate {
+  type: string;
+  timestamp: number;
+  source: string;
+  tick: number;
+  nodes: WsNodeInfo[];
+  features: WsFeatures;
+  classification: WsClassification;
+  vital_signs?: WsVitalSigns;
+  posture?: string;
+  signal_quality_score?: number;
+  quality_verdict?: string;
+  bssid_count?: number;
+  estimated_persons?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function formatTimestamp(d: Date): string {
   const hh = String(d.getHours()).padStart(2, "0");
@@ -56,26 +80,71 @@ function formatTimestamp(d: Date): string {
 
 let nextLogId = 1;
 
-function createMockLogEntry(): LogEntry {
-  const template = MOCK_LOG_TEMPLATES[Math.floor(Math.random() * MOCK_LOG_TEMPLATES.length)];
-  return {
-    id: nextLogId++,
-    timestamp: formatTimestamp(new Date()),
-    level: template.level,
-    source: template.source,
-    message: template.message,
-  };
+function createLogFromWsUpdate(update: WsSensingUpdate): LogEntry[] {
+  const entries: LogEntry[] = [];
+  const ts = formatTimestamp(new Date(update.timestamp * 1000));
+
+  // Log each node's CSI data
+  for (const node of update.nodes) {
+    entries.push({
+      id: nextLogId++,
+      timestamp: ts,
+      level: "INFO",
+      source: "csi_receiver",
+      message: `Node ${node.node_id}: RSSI ${node.rssi_dbm.toFixed(1)} dBm, ${node.subcarrier_count} subcarriers`,
+    });
+  }
+
+  // Log classification
+  if (update.classification) {
+    const level: LogLevel = update.classification.confidence < 0.5 ? "WARN" : "INFO";
+    entries.push({
+      id: nextLogId++,
+      timestamp: ts,
+      level,
+      source: "classifier",
+      message: `Motion: ${update.classification.motion_level} (presence=${update.classification.presence}, conf=${(update.classification.confidence * 100).toFixed(0)}%)`,
+    });
+  }
+
+  // Log vital signs if present
+  if (update.vital_signs) {
+    const vs = update.vital_signs;
+    const level: LogLevel = (vs.confidence ?? 0) < 0.5 ? "WARN" : "INFO";
+    entries.push({
+      id: nextLogId++,
+      timestamp: ts,
+      level,
+      source: "vital_signs",
+      message: `Breathing: ${vs.breathing_rate_hz?.toFixed(2) ?? "--"} Hz, HR: ${vs.heart_rate_bpm?.toFixed(0) ?? "--"} bpm`,
+    });
+  }
+
+  // Log quality verdict if present
+  if (update.quality_verdict && update.quality_verdict !== "Permit") {
+    entries.push({
+      id: nextLogId++,
+      timestamp: ts,
+      level: update.quality_verdict === "Deny" ? "ERROR" : "WARN",
+      source: "quality_gate",
+      message: `Signal quality: ${update.quality_verdict} (score=${(update.signal_quality_score ?? 0).toFixed(2)})`,
+    });
+  }
+
+  return entries;
 }
 
-function createMockSensingUpdate(): SensingUpdate {
-  const act = MOCK_ACTIVITIES[Math.floor(Math.random() * MOCK_ACTIVITIES.length)];
+function createActivityFromWsUpdate(update: WsSensingUpdate): SensingUpdate | null {
+  if (!update.classification) return null;
+
+  const node = update.nodes[0];
   return {
-    timestamp: new Date().toISOString(),
-    node_id: Math.floor(Math.random() * 6) + 1,
-    subcarrier_count: 52,
-    rssi: -(Math.floor(Math.random() * 40) + 30),
-    activity: act.activity,
-    confidence: parseFloat((act.confidence + (Math.random() * 0.1 - 0.05)).toFixed(2)),
+    timestamp: new Date(update.timestamp * 1000).toISOString(),
+    node_id: node?.node_id ?? 1,
+    subcarrier_count: node?.subcarrier_count ?? 52,
+    rssi: node?.rssi_dbm ?? -50,
+    activity: update.posture ?? update.classification.motion_level,
+    confidence: update.classification.confidence,
   };
 }
 
@@ -84,7 +153,7 @@ function createMockSensingUpdate(): SensingUpdate {
 // ---------------------------------------------------------------------------
 
 const MAX_LOG_ENTRIES = 200;
-const LOG_INTERVAL_MS = 2000;
+const WS_RECONNECT_DELAY_MS = 3000;
 
 // ---------------------------------------------------------------------------
 // LogViewer component (ADR-053)
@@ -241,28 +310,119 @@ export const Sensing: React.FC = () => {
   // Activity feed state
   const [activities, setActivities] = useState<SensingUpdate[]>([]);
 
-  // Simulated log feed
+  // WebSocket connection state
+  const [wsConnected, setWsConnected] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<number | null>(null);
+
+  // Connect to real WebSocket when server is running
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (pausedRef.current) return;
-      const entry = createMockLogEntry();
-      setLogEntries((prev) => {
-        const next = [...prev, entry];
-        return next.length > MAX_LOG_ENTRIES ? next.slice(next.length - MAX_LOG_ENTRIES) : next;
-      });
-
-      // Also push an activity update every ~3rd tick
-      if (Math.random() < 0.35) {
-        setActivities((prev) => {
-          const update = createMockSensingUpdate();
-          const next = [update, ...prev];
-          return next.slice(0, 5);
-        });
+    if (!isRunning || !status?.ws_port) {
+      // Server not running, disconnect if connected
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+        setWsConnected(false);
       }
-    }, LOG_INTERVAL_MS);
+      return;
+    }
 
-    return () => clearInterval(interval);
-  }, []);
+    const connect = () => {
+      const wsUrl = `ws://127.0.0.1:${status.ws_port}/ws/sensing`;
+      const ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        setWsConnected(true);
+        setLogEntries((prev) => [
+          ...prev,
+          {
+            id: nextLogId++,
+            timestamp: formatTimestamp(new Date()),
+            level: "INFO",
+            source: "desktop",
+            message: `WebSocket connected to ${wsUrl}`,
+          },
+        ]);
+      };
+
+      ws.onmessage = (event) => {
+        if (pausedRef.current) return;
+
+        try {
+          const update = JSON.parse(event.data) as WsSensingUpdate;
+
+          // Create log entries from the update
+          const entries = createLogFromWsUpdate(update);
+          if (entries.length > 0) {
+            setLogEntries((prev) => {
+              const next = [...prev, ...entries];
+              return next.length > MAX_LOG_ENTRIES ? next.slice(next.length - MAX_LOG_ENTRIES) : next;
+            });
+          }
+
+          // Create activity update
+          const activity = createActivityFromWsUpdate(update);
+          if (activity) {
+            setActivities((prev) => {
+              const next = [activity, ...prev];
+              return next.slice(0, 5);
+            });
+          }
+        } catch (err) {
+          console.error("Failed to parse WebSocket message:", err);
+        }
+      };
+
+      ws.onclose = () => {
+        setWsConnected(false);
+        wsRef.current = null;
+
+        // Only add disconnect log if server is still supposed to be running
+        if (isRunning) {
+          setLogEntries((prev) => [
+            ...prev,
+            {
+              id: nextLogId++,
+              timestamp: formatTimestamp(new Date()),
+              level: "WARN",
+              source: "desktop",
+              message: "WebSocket disconnected, reconnecting...",
+            },
+          ]);
+
+          // Attempt reconnect
+          reconnectTimeoutRef.current = window.setTimeout(connect, WS_RECONNECT_DELAY_MS);
+        }
+      };
+
+      ws.onerror = () => {
+        setLogEntries((prev) => [
+          ...prev,
+          {
+            id: nextLogId++,
+            timestamp: formatTimestamp(new Date()),
+            level: "ERROR",
+            source: "desktop",
+            message: "WebSocket connection error",
+          },
+        ]);
+      };
+
+      wsRef.current = ws;
+    };
+
+    connect();
+
+    return () => {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, [isRunning, status?.ws_port]);
 
   const handleClearLog = useCallback(() => setLogEntries([]), []);
   const handleTogglePause = useCallback(() => setPaused((p) => !p), []);
@@ -349,6 +509,17 @@ export const Sensing: React.FC = () => {
                 {status.pid != null && <span>PID {status.pid}</span>}
                 {status.http_port != null && <span>HTTP :{status.http_port}</span>}
                 {status.ws_port != null && <span>WS :{status.ws_port}</span>}
+                <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: wsConnected ? "var(--status-online)" : "var(--status-warning)",
+                    }}
+                  />
+                  {wsConnected ? "Live" : "Connecting..."}
+                </span>
               </div>
             )}
           </div>

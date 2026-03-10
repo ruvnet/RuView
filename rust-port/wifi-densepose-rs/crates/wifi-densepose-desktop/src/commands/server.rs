@@ -2,21 +2,77 @@ use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
 use sysinfo::{Pid, ProcessesToUpdate, System};
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 use crate::state::AppState;
 
-/// Default path to the sensing server binary (relative to resources).
-const DEFAULT_SERVER_BIN: &str = "wifi-densepose-sensing-server";
+/// Default binary name for the sensing server.
+const DEFAULT_SERVER_BIN: &str = "sensing-server";
+
+/// Find the sensing server binary path.
+///
+/// Search order:
+/// 1. Custom path from config.server_path
+/// 2. Bundled in app resources (macOS: Contents/Resources/bin/)
+/// 3. Next to the app executable
+/// 4. System PATH
+fn find_server_binary(app: &AppHandle, custom_path: Option<&str>) -> Result<String, String> {
+    // 1. Custom path from settings
+    if let Some(path) = custom_path {
+        if std::path::Path::new(path).exists() {
+            return Ok(path.to_string());
+        }
+    }
+
+    // 2. Bundled in resources (Tauri bundles to Contents/Resources/)
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = resource_dir.join("bin").join(DEFAULT_SERVER_BIN);
+        if bundled.exists() {
+            return Ok(bundled.to_string_lossy().to_string());
+        }
+        // Also check directly in resources
+        let direct = resource_dir.join(DEFAULT_SERVER_BIN);
+        if direct.exists() {
+            return Ok(direct.to_string_lossy().to_string());
+        }
+    }
+
+    // 3. Next to the executable
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            let sibling = exe_dir.join(DEFAULT_SERVER_BIN);
+            if sibling.exists() {
+                return Ok(sibling.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    // 4. Check if it's in PATH
+    if let Ok(output) = Command::new("which").arg(DEFAULT_SERVER_BIN).output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Ok(path);
+            }
+        }
+    }
+
+    Err(format!(
+        "Sensing server binary '{}' not found. Please build it with: cargo build --release -p wifi-densepose-sensing-server",
+        DEFAULT_SERVER_BIN
+    ))
+}
 
 /// Start the sensing server as a managed child process.
 ///
 /// The server binary is looked up in the following order:
 /// 1. Settings `server_path` if set
 /// 2. Bundled resource path
-/// 3. System PATH
+/// 3. Next to executable
+/// 4. System PATH
 #[tauri::command]
 pub async fn start_server(
+    app: AppHandle,
     config: ServerConfig,
     state: State<'_, AppState>,
 ) -> Result<ServerStartResult, String> {
@@ -28,10 +84,10 @@ pub async fn start_server(
         }
     }
 
-    // Determine server binary path
-    let server_path = config.server_path
-        .clone()
-        .unwrap_or_else(|| DEFAULT_SERVER_BIN.to_string());
+    // Find server binary
+    let server_path = find_server_binary(&app, config.server_path.as_deref())?;
+
+    tracing::info!("Starting sensing server from: {}", server_path);
 
     // Build command with configuration
     let mut cmd = Command::new(&server_path);
@@ -51,6 +107,10 @@ pub async fn start_server(
     if let Some(ref log_level) = config.log_level {
         cmd.args(["--log-level", log_level]);
     }
+
+    // Set data source (default to "simulate" if not specified for demo mode)
+    let source = config.source.as_deref().unwrap_or("simulate");
+    cmd.args(["--source", source]);
 
     // Redirect stdout/stderr to pipes for monitoring
     cmd.stdout(Stdio::piped());
@@ -207,6 +267,7 @@ pub async fn server_status(state: State<'_, AppState>) -> Result<ServerStatusRes
 /// Restart the sensing server with the same or new configuration.
 #[tauri::command]
 pub async fn restart_server(
+    app: AppHandle,
     config: Option<ServerConfig>,
     state: State<'_, AppState>,
 ) -> Result<ServerStartResult, String> {
@@ -222,6 +283,7 @@ pub async fn restart_server(
             log_level: None,
             bind_address: None,
             server_path: None,
+            source: None, // Use default (simulate)
         }
     };
 
@@ -232,7 +294,7 @@ pub async fn restart_server(
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     // Start with new config
-    start_server(restart_config, state).await
+    start_server(app, restart_config, state).await
 }
 
 /// Get server logs (last N lines from stdout/stderr).
@@ -260,6 +322,8 @@ pub struct ServerConfig {
     pub log_level: Option<String>,
     pub bind_address: Option<String>,
     pub server_path: Option<String>,
+    /// Data source: "auto", "wifi", "esp32", "simulate"
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

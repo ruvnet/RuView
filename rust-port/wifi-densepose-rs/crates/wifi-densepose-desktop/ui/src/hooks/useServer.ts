@@ -9,6 +9,7 @@ const DEFAULT_CONFIG: ServerConfig = {
   static_dir: null,
   model_dir: null,
   log_level: "info",
+  source: "simulate",
 };
 
 interface UseServerOptions {
