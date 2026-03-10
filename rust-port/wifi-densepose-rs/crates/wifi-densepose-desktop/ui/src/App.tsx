@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Dashboard from "./pages/Dashboard";
 import { Nodes } from "./pages/Nodes";
+import NetworkDiscovery from "./pages/NetworkDiscovery";
 import { FlashFirmware } from "./pages/FlashFirmware";
 import { OtaUpdate } from "./pages/OtaUpdate";
 import { EdgeModules } from "./pages/EdgeModules";
@@ -10,6 +11,7 @@ import { Settings } from "./pages/Settings";
 
 type Page =
   | "dashboard"
+  | "discovery"
   | "nodes"
   | "flash"
   | "ota"
@@ -26,6 +28,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: "\u25A6" },
+  { id: "discovery", label: "Discovery", icon: "\u25CE" },
   { id: "nodes", label: "Nodes", icon: "\u25C9" },
   { id: "flash", label: "Flash", icon: "\u26A1" },
   { id: "ota", label: "OTA", icon: "\u2B06" },
@@ -88,6 +91,7 @@ const App: React.FC = () => {
   const renderPage = () => {
     switch (activePage) {
       case "dashboard": return <Dashboard />;
+      case "discovery": return <NetworkDiscovery />;
       case "nodes": return <Nodes />;
       case "flash": return <FlashFirmware />;
       case "ota": return <OtaUpdate />;
@@ -163,7 +167,7 @@ const App: React.FC = () => {
                     letterSpacing: "0.02em",
                   }}
                 >
-                  v0.3.0
+                  v0.4.0
                 </span>
               </div>
             </div>

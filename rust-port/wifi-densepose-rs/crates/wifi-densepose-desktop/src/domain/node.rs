@@ -31,6 +31,47 @@ impl Default for HealthStatus {
     }
 }
 
+/// Chip type for ESP32 variants.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Chip {
+    #[default]
+    Esp32,
+    Esp32s2,
+    Esp32s3,
+    Esp32c3,
+    Esp32c6,
+}
+
+/// Node role in the mesh network.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MeshRole {
+    Coordinator,
+    #[default]
+    Node,
+    Aggregator,
+}
+
+/// Discovery method used to find the node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DiscoveryMethod {
+    #[default]
+    Mdns,
+    UdpProbe,
+    HttpSweep,
+    Manual,
+}
+
+/// Node capabilities.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct NodeCapabilities {
+    pub wasm: bool,
+    pub ota: bool,
+    pub csi: bool,
+}
+
 /// A discovered ESP32 CSI node.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscoveredNode {
@@ -41,6 +82,17 @@ pub struct DiscoveredNode {
     pub firmware_version: Option<String>,
     pub health: HealthStatus,
     pub last_seen: String,
+    // Extended fields
+    pub chip: Chip,
+    pub mesh_role: MeshRole,
+    pub discovery_method: DiscoveryMethod,
+    pub tdm_slot: Option<u8>,
+    pub tdm_total: Option<u8>,
+    pub edge_tier: Option<u8>,
+    pub uptime_secs: Option<u64>,
+    pub capabilities: Option<NodeCapabilities>,
+    pub friendly_name: Option<String>,
+    pub notes: Option<String>,
 }
 
 /// Aggregate root: maintains the set of all known nodes, keyed by MAC.

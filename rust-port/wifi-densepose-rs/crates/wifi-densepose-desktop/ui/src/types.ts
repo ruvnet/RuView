@@ -14,7 +14,7 @@ export type DiscoveryMethod = "mdns" | "udp_probe" | "http_sweep" | "manual";
 
 export type MeshRole = "coordinator" | "node" | "aggregator";
 
-export type Chip = "esp32" | "esp32s3" | "esp32c3";
+export type Chip = "esp32" | "esp32s2" | "esp32s3" | "esp32c3" | "esp32c6";
 
 export interface TdmConfig {
   slot: number;
@@ -161,6 +161,9 @@ export interface WasmModule {
   node_ip: string;
   loaded_at: string | null;
   error: string | null;
+  memory_used_kb: number | null;
+  cpu_usage_pct: number | null;
+  exec_count: number | null;
 }
 
 // ---------------------------------------------------------------------------
