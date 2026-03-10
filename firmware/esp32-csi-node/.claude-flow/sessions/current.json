@@ -1,0 +1,12 @@
+{
+  "id": "session-1773152560779",
+  "startedAt": "2026-03-10T14:22:40.779Z",
+  "cwd": "/Users/cohen/GitHub/ruvnet/RuView/firmware/esp32-csi-node",
+  "context": {},
+  "metrics": {
+    "edits": 1,
+    "commands": 0,
+    "tasks": 0,
+    "errors": 0
+  }
+}
