@@ -80,7 +80,16 @@ def generate_nvs_binary(csv_content, size):
     bin_path = csv_path.replace(".csv", ".bin")
 
     try:
-        # Try the pip-installed version first
+        # Try the pip-installed version first (esp_idf_nvs_partition_gen package)
+        try:
+            from esp_idf_nvs_partition_gen import nvs_partition_gen
+            nvs_partition_gen.generate(csv_path, bin_path, size)
+            with open(bin_path, "rb") as f:
+                return f.read()
+        except ImportError:
+            pass
+
+        # Try legacy import name (older versions)
         try:
             import nvs_partition_gen
             nvs_partition_gen.generate(csv_path, bin_path, size)

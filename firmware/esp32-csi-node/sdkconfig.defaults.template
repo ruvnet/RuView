@@ -1,0 +1,32 @@
+# ESP32-S3 CSI Node — Default SDK Configuration
+# This file is applied automatically by idf.py when no sdkconfig exists.
+
+# Target: ESP32-S3
+CONFIG_IDF_TARGET="esp32s3"
+
+# Use custom partition table (8MB flash with OTA — ADR-045)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_display.csv"
+
+# Flash configuration: 8MB (Quad SPI)
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+
+# Compiler optimization: optimize for size to reduce binary
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# Enable CSI (Channel State Information) in WiFi driver
+CONFIG_ESP_WIFI_CSI_ENABLED=y
+
+# Enable NVS encryption for secure credential storage
+CONFIG_NVS_ENCRYPTION=y
+
+# Disable unused features to reduce binary size
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# LWIP: enable extended socket options for UDP multicast
+CONFIG_LWIP_SO_RCVBUF=y
+
+# FreeRTOS: increase task stack for CSI processing
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
