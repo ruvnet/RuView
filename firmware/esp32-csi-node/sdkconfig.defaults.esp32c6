@@ -1,0 +1,18 @@
+# Target: ESP32-C6
+CONFIG_IDF_TARGET="esp32c6"
+
+# Partition table for 4MB flash (M5NanoC6 has 4MB)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_4mb.csv"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+
+# Disable Display
+CONFIG_DISPLAY_ENABLE=n
+
+# WASM can be enabled on C6 as it has more SRAM (512KB),
+# but we'll keep it disabled by default for maximum stability.
+CONFIG_WASM_ENABLE=n
+
+# RISC-V specific
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y

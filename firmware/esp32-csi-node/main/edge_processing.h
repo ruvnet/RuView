@@ -29,7 +29,11 @@
 #define EDGE_COMPRESSED_MAGIC 0xC5110003  /**< Compressed frame magic. */
 
 /* ---- Buffer sizes ---- */
+#if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C6)
+#define EDGE_RING_SLOTS       8     /**< Reduced slots for single-core RISC-V targets. */
+#else
 #define EDGE_RING_SLOTS       16    /**< SPSC ring buffer slots (power of 2). */
+#endif
 #define EDGE_MAX_IQ_BYTES     1024  /**< Max I/Q payload per slot. */
 #define EDGE_PHASE_HISTORY_LEN 256  /**< Phase history buffer depth. */
 #define EDGE_TOP_K            8     /**< Top-K subcarriers to track. */

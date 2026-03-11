@@ -35,7 +35,7 @@ static const char *TAG = "disp_task";
 
 #define DISP_TASK_STACK      (8 * 1024)
 #define DISP_TASK_PRIORITY   1
-#define DISP_TASK_CORE       0
+#define DISP_TASK_CORE       ((portNUM_PROCESSORS > 1) ? 0 : tskNO_AFFINITY)
 
 #define DISP_BUF_LINES       40
 

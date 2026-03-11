@@ -129,7 +129,6 @@ def flash_nvs(port, baud, nvs_bin):
     try:
         cmd = [
             sys.executable, "-m", "esptool",
-            "--chip", "esp32s3",
             "--port", port,
             "--baud", str(baud),
             "write_flash",

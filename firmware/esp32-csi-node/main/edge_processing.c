@@ -885,7 +885,7 @@ esp_err_t edge_processing_init(const edge_config_t *cfg)
         return ESP_OK;
     }
 
-    /* Start DSP task on Core 1. */
+    /* Start DSP task. Pin to Core 1 on multi-core, or tskNO_AFFINITY on single-core. */
     BaseType_t ret = xTaskCreatePinnedToCore(
         edge_task,
         "edge_dsp",
@@ -893,7 +893,7 @@ esp_err_t edge_processing_init(const edge_config_t *cfg)
         NULL,
         5,          /* Priority 5 — above idle, below WiFi. */
         NULL,
-        1           /* Pin to Core 1. */
+        (portNUM_PROCESSORS > 1) ? 1 : tskNO_AFFINITY
     );
 
     if (ret != pdPASS) {
