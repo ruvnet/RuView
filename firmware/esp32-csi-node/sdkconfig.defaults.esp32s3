@@ -18,8 +18,8 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 # Enable CSI (Channel State Information) in WiFi driver
 CONFIG_ESP_WIFI_CSI_ENABLED=y
 
-# Enable NVS encryption for secure credential storage
-CONFIG_NVS_ENCRYPTION=y
+# Disable NVS encryption (enabling this requires complex provision-time key management)
+CONFIG_NVS_ENCRYPTION=n
 
 # Disable unused features to reduce binary size
 CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y

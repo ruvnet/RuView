@@ -16,3 +16,6 @@ CONFIG_WASM_ENABLE=n
 
 # RISC-V specific
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# Disable NVS encryption (requires complex eFuse/HMAC setup on C3/C6)
+CONFIG_NVS_ENCRYPTION=n

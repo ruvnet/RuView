@@ -16,6 +16,9 @@ CONFIG_WASM_ENABLE=n
 # RISC-V specific
 CONFIG_ESP32C3_REV_MIN_3=y
 
+# Disable NVS encryption (requires complex eFuse/HMAC setup on C3/C6)
+CONFIG_NVS_ENCRYPTION=n
+
 # Memory optimization
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_LWIP_IRAM_OPTIMIZATION=n
