@@ -22,6 +22,18 @@ This guide covers building, flashing, and deploying the WiFi-DensePose firmware 
 
 Use Docker to build the firmware for your specific target. This ensures a consistent build environment without installing the full ESP-IDF toolchain.
 
+### For ESP32-S3
+```bash
+# From the repository root
+cd firmware/esp32-csi-node
+cp sdkconfig.defaults.esp32s3 sdkconfig.defaults
+
+MSYS_NO_PATHCONV=1 docker run --rm \
+  -v "$(pwd):/project" -w /project \
+  espressif/idf:v5.2 bash -c \
+  "rm -rf build sdkconfig && idf.py set-target esp32s3 && idf.py build"
+```
+
 ### For ESP32-C3
 ```bash
 # From the repository root

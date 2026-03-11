@@ -12,10 +12,23 @@ on:
 
 jobs:
   build:
-    name: Build ESP32-S3 Firmware
+    name: Build Firmware for ${{ matrix.target }}
     runs-on: ubuntu-latest
     container:
       image: espressif/idf:v5.2
+    strategy:
+      matrix:
+        target: [esp32s3, esp32c3, esp32c6]
+        include:
+          - target: esp32s3
+            sdkconfig: sdkconfig.defaults.esp32s3
+            max_size: 950
+          - target: esp32c3
+            sdkconfig: sdkconfig.defaults.esp32c3
+            max_size: 850
+          - target: esp32c6
+            sdkconfig: sdkconfig.defaults.esp32c6
+            max_size: 850
 
     steps:
       - uses: actions/checkout@v4
@@ -24,19 +37,21 @@ jobs:
         working-directory: firmware/esp32-csi-node
         run: |
           . $IDF_PATH/export.sh
-          idf.py set-target esp32s3
+          rm -rf build sdkconfig
+          cp ${{ matrix.sdkconfig }} sdkconfig.defaults
+          idf.py set-target ${{ matrix.target }}
           idf.py build
 
-      - name: Verify binary size (< 950 KB gate)
+      - name: Verify binary size (< ${{ matrix.max_size }} KB gate)
         working-directory: firmware/esp32-csi-node
         run: |
           BIN=build/esp32-csi-node.bin
           SIZE=$(stat -c%s "$BIN")
-          MAX=$((950 * 1024))
+          MAX=$(( ${{ matrix.max_size }} * 1024))
           echo "Binary size: $SIZE bytes ($(( SIZE / 1024 )) KB)"
-          echo "Size limit:  $MAX bytes (950 KB — includes Tier 3 WASM runtime)"
+          echo "Size limit:  $MAX bytes (${{ matrix.max_size }} KB)"
           if [ "$SIZE" -gt "$MAX" ]; then
-            echo "::error::Firmware binary exceeds 950 KB size gate ($SIZE > $MAX)"
+            echo "::error::Firmware binary exceeds ${{ matrix.max_size }} KB size gate ($SIZE > $MAX)"
             exit 1
           fi
           echo "Binary size OK: $SIZE <= $MAX"
@@ -83,16 +98,10 @@ jobs:
             echo "Flash image integrity verified"
           fi
 
-      - name: Check QEMU ESP32-S3 support status
-        run: |
-          echo "::notice::ESP32-S3 QEMU support is experimental in ESP-IDF v5.4. "
-          echo "Full smoke testing requires QEMU 8.2+ with xtensa-esp32s3 target."
-          echo "See: https://github.com/espressif/qemu/wiki"
-
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
-          name: esp32-csi-node-firmware
+          name: esp32-csi-node-firmware-${{ matrix.target }}
           path: |
             firmware/esp32-csi-node/build/esp32-csi-node.bin
             firmware/esp32-csi-node/build/bootloader/bootloader.bin

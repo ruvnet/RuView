@@ -179,6 +179,44 @@ jobs:
         name: performance-results
         path: locust_report.html
 
+  # Firmware Build (Multitarget)
+  firmware-build:
+    name: Build Firmware for ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.2
+    strategy:
+      matrix:
+        target: [esp32s3, esp32c3, esp32c6]
+        include:
+          - target: esp32s3
+            sdkconfig: sdkconfig.defaults.esp32s3
+          - target: esp32c3
+            sdkconfig: sdkconfig.defaults.esp32c3
+          - target: esp32c6
+            sdkconfig: sdkconfig.defaults.esp32c6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build firmware
+        working-directory: firmware/esp32-csi-node
+        run: |
+          . $IDF_PATH/export.sh
+          rm -rf build sdkconfig
+          cp ${{ matrix.sdkconfig }} sdkconfig.defaults
+          idf.py set-target ${{ matrix.target }}
+          idf.py build
+      - name: Prepare assets
+        run: |
+          mkdir -p assets
+          cp firmware/esp32-csi-node/build/esp32-csi-node.bin assets/esp32-csi-node-${{ matrix.target }}.bin
+          cp firmware/esp32-csi-node/build/bootloader/bootloader.bin assets/bootloader-${{ matrix.target }}.bin
+          cp firmware/esp32-csi-node/build/partition_table/partition-table.bin assets/partition-table-${{ matrix.target }}.bin
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.target }}
+          path: assets/*
+
   # Docker Build and Test
   docker-build:
     name: Docker Build & Test
@@ -282,7 +320,7 @@ jobs:
   notify:
     name: Notify
     runs-on: ubuntu-latest
-    needs: [code-quality, test, performance-test, docker-build, docs]
+    needs: [code-quality, test, performance-test, docker-build, docs, firmware-build]
     if: always()
     steps:
     - name: Notify Slack on success
@@ -305,6 +343,13 @@ jobs:
       env:
         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
+    - name: Download firmware assets
+      uses: actions/download-artifact@v4
+      with:
+        pattern: firmware-*
+        path: release-assets
+        merge-multiple: true
+
     - name: Create GitHub Release
       if: github.ref == 'refs/heads/main' && needs.docker-build.result == 'success'
       uses: softprops/action-gh-release@v2
@@ -319,5 +364,7 @@ jobs:
 
           **Docker Image:**
           `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}`
+        files: |
+          release-assets/*.bin
         draft: false
         prerelease: false
