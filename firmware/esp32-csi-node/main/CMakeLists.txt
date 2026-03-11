@@ -4,15 +4,16 @@ set(SRCS
     "wasm_runtime.c" "wasm_upload.c" "rvf_parser.c"
 )
 
-set(REQUIRES "")
-
-# ADR-045: AMOLED display support is now in a separate component
+# ADR-045: AMOLED display support (compile-time optional)
 if(CONFIG_DISPLAY_ENABLE)
-    list(APPEND REQUIRES "display")
+    list(APPEND SRCS "display_hal.c" "display_ui.c" "display_task.c")
+    set(PRIV_REQUIRES esp_lcd esp_lcd_touch lvgl)
+else()
+    set(PRIV_REQUIRES "")
 endif()
 
 idf_component_register(
     SRCS ${SRCS}
     INCLUDE_DIRS "."
-    REQUIRES ${REQUIRES}
+    PRIV_REQUIRES ${PRIV_REQUIRES}
 )

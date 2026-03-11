@@ -40,7 +40,6 @@ jobs:
           rm -rf build sdkconfig
           cp ${{ matrix.sdkconfig }} sdkconfig.defaults
           idf.py set-target ${{ matrix.target }}
-          # Use reconfigure to ensure idf_component.yml rules are applied
           idf.py reconfigure
           idf.py build
 

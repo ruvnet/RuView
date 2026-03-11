@@ -1,3 +1,19 @@
 ## ESP-IDF Managed Component Dependencies (ADR-045)
-# Note: Dependencies moved to components/display/idf_component.yml
-# to ensure they are only pulled when DISPLAY_ENABLE is y.
+dependencies:
+  ## LVGL graphics library
+  lvgl/lvgl:
+    version: "~8.3"
+    rules:
+      - if: "CONFIG_DISPLAY_ENABLE == y"
+
+  ## CST816S capacitive touch driver
+  espressif/esp_lcd_touch_cst816s:
+    version: "^1.0"
+    rules:
+      - if: "CONFIG_DISPLAY_ENABLE == y"
+
+  ## LCD touch abstraction
+  espressif/esp_lcd_touch:
+    version: "^1.0"
+    rules:
+      - if: "CONFIG_DISPLAY_ENABLE == y"

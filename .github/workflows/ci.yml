@@ -123,7 +123,7 @@ jobs:
         REDIS_URL: redis://localhost:6379/0
         ENVIRONMENT: test
       run: |
-        pytest tests/integration/ -v --junitxml=integration-junit.xml
+        pytest tests/ integration/ -v --junitxml=integration-junit.xml
 
     - name: Upload coverage reports
       uses: codecov/codecov-action@v4
@@ -204,6 +204,7 @@ jobs:
           rm -rf build sdkconfig
           cp ${{ matrix.sdkconfig }} sdkconfig.defaults
           idf.py set-target ${{ matrix.target }}
+          idf.py reconfigure
           idf.py build
       - name: Prepare assets
         run: |
