@@ -10,17 +10,74 @@ import { wsService } from './services/websocket.service.js';
 import { healthService } from './services/health.service.js';
 import { sensingService } from './services/sensing.service.js';
 import { backendDetector } from './utils/backend-detector.js';
+import { i18n } from './i18n/index.js';
+import zhCN from './i18n/locales/zh-CN.js';
+import enUS from './i18n/locales/en-US.js';
 
 class WiFiDensePoseApp {
   constructor() {
     this.components = {};
     this.isInitialized = false;
+    this.i18n = i18n;
+  }
+
+  /**
+   * 初始化国际化模块
+   */
+  initializeI18n() {
+    i18n.register('zh-CN', zhCN);
+    i18n.register('en-US', enUS);
+    const locale = i18n.init();
+    console.log(`[App] i18n initialized with locale: ${locale}`);
+    
+    i18n.onLocaleChange(() => {
+      i18n.updateDOM();
+    });
+    
+    i18n.updateDOM();
+  }
+
+  /**
+   * 获取当前语言
+   * @returns {string} 当前语言代码
+   */
+  getLocale() {
+    return i18n.getLocale();
+  }
+
+  /**
+   * 设置语言
+   * @param {string} locale - 语言代码
+   */
+  setLocale(locale) {
+    i18n.setLocale(locale);
+  }
+
+  /**
+   * 获取可用语言列表
+   * @returns {string[]} 语言代码数组
+   */
+  getAvailableLocales() {
+    return i18n.getAvailableLocales();
+  }
+
+  /**
+   * 翻译文本
+   * @param {string} key - 翻译键
+   * @param {Object} params - 参数
+   * @returns {string} 翻译后的文本
+   */
+  t(key, params = {}) {
+    return i18n.t(key, params);
   }
 
   // Initialize application
   async init() {
     try {
       console.log('Initializing WiFi DensePose UI...');
+      
+      // Initialize i18n first
+      this.initializeI18n();
       
       // Set up error handling
       this.setupErrorHandling();
@@ -39,7 +96,7 @@ class WiFiDensePoseApp {
       
     } catch (error) {
       console.error('Failed to initialize application:', error);
-      this.showGlobalError('Failed to initialize application. Please refresh the page.');
+      this.showGlobalError(i18n.t('errors.initFailed'));
     }
   }
 
@@ -227,6 +284,22 @@ class WiFiDensePoseApp {
     window.addEventListener('beforeunload', () => {
       this.cleanup();
     });
+
+    // Handle language selector
+    this.setupLanguageSelector();
+  }
+
+  /**
+   * 设置语言选择器
+   */
+  setupLanguageSelector() {
+    const selector = document.getElementById('languageSelector');
+    if (selector) {
+      selector.value = i18n.getLocale();
+      selector.addEventListener('change', (e) => {
+        i18n.setLocale(e.target.value);
+      });
+    }
   }
 
   // Handle window resize

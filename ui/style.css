@@ -1409,6 +1409,7 @@ canvas {
   justify-content: center;
   margin-top: var(--space-16);
   font-size: var(--font-size-sm);
+  align-items: center;
 }
 
 .api-version,
@@ -2423,4 +2424,41 @@ canvas {
 
 .pose-trail-btn:hover {
   background: rgba(var(--color-primary-rgb), 0.2);
+}
+
+/* Language Selector */
+.language-selector {
+  padding: var(--space-4) var(--space-12);
+  padding-right: var(--space-28);
+  border-radius: var(--radius-base);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  appearance: none;
+  background-image: var(--select-caret-light);
+  background-repeat: no-repeat;
+  background-position: right var(--space-8) center;
+  background-size: 12px;
+  transition: all 0.2s ease;
+  min-width: 100px;
+}
+
+.language-selector:hover {
+  border-color: var(--color-primary);
+  background-color: var(--color-secondary-hover);
+}
+
+.language-selector:focus {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-color: var(--color-primary);
+}
+
+.language-selector option {
+  padding: var(--space-8);
+  background-color: var(--color-surface);
+  color: var(--color-text);
 }
