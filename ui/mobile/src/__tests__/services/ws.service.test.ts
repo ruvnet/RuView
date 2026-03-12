@@ -109,6 +109,62 @@ describe('WsService', () => {
       expect(ws.getStatus()).toBe('simulated');
       ws.disconnect();
     });
+
+    it('cleans up active sockets and pending reconnects when switching to simulation mode', () => {
+      const sockets: MockWebSocketInstance[] = [];
+      const OrigWebSocket = globalThis.WebSocket;
+
+      class MockWebSocket {
+        static OPEN = 1;
+        static CONNECTING = 0;
+        static CLOSED = 3;
+        readyState = MockWebSocket.OPEN;
+        onopen: (() => void) | null = null;
+        onclose: ((event: { code: number }) => void) | null = null;
+        onerror: (() => void) | null = null;
+        onmessage: (() => void) | null = null;
+        close = jest.fn((code?: number) => {
+          this.readyState = MockWebSocket.CLOSED;
+          this.onclose?.({ code: code ?? 1000 });
+        });
+
+        constructor(_url: string) {
+          sockets.push(this as unknown as MockWebSocketInstance);
+        }
+      }
+
+      type MockWebSocketInstance = {
+        onclose: ((event: { code: number }) => void) | null;
+        close: jest.Mock;
+      };
+
+      globalThis.WebSocket = MockWebSocket as any;
+
+      try {
+        const ws = createWsService();
+        ws.connect('http://localhost:3000');
+        expect(sockets).toHaveLength(1);
+
+        ws.connect('');
+        expect(sockets[0].close).toHaveBeenCalledWith(1000, 'switch to simulation');
+        expect(ws.getStatus()).toBe('simulated');
+        ws.disconnect();
+
+        const wsWithReconnect = createWsService();
+        wsWithReconnect.connect('http://localhost:3000');
+        expect(sockets).toHaveLength(2);
+
+        sockets[1].onclose?.({ code: 1006 });
+        wsWithReconnect.connect('');
+
+        jest.advanceTimersByTime(60_000);
+        expect(sockets).toHaveLength(2);
+        expect(wsWithReconnect.getStatus()).toBe('simulated');
+        wsWithReconnect.disconnect();
+      } finally {
+        globalThis.WebSocket = OrigWebSocket;
+      }
+    });
   });
 
   describe('subscribe and unsubscribe', () => {

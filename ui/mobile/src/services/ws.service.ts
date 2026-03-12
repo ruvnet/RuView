@@ -22,6 +22,13 @@ class WsService {
     this.reconnectAttempt = 0;
 
     if (!url) {
+      this.clearReconnectTimer();
+      if (this.ws) {
+        const socket = this.ws;
+        this.ws = null;
+        socket.onclose = null;
+        socket.close(1000, 'switch to simulation');
+      }
       this.handleStatusChange('simulated');
       this.startSimulation();
       return;
