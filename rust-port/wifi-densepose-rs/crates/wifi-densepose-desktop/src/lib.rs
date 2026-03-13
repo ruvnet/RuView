@@ -2,7 +2,7 @@ pub mod commands;
 pub mod domain;
 pub mod state;
 
-use commands::{discovery, flash, ota, provision, server, settings, wasm};
+use commands::{discovery, flash, ota, provision, server, settings, training, wasm};
 
 pub fn run() {
     tauri::Builder::default()
@@ -46,6 +46,23 @@ pub fn run() {
             // Settings
             settings::get_settings,
             settings::save_settings,
+            // Training
+            training::detect_gpu,
+            training::list_datasets,
+            training::get_datasets,
+            training::download_dataset,
+            training::list_models,
+            training::list_checkpoints,
+            training::export_model,
+            training::start_training,
+            training::stop_training,
+            training::training_progress,
+            training::get_ruvector_config,
+            training::set_ruvector_config,
+            training::test_ruvector_live,
+            training::get_training_history,
+            training::get_evaluation_metrics,
+            training::get_joint_accuracies,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
