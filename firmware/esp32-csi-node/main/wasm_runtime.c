@@ -17,6 +17,7 @@
 
 #include "rvf_parser.h"
 #include "stream_sender.h"
+#include "nvs_config.h"
 
 #include <string.h>
 #include <math.h>
@@ -32,6 +33,7 @@
 #include "m3_env.h"
 
 static const char *TAG = "wasm_rt";
+extern nvs_config_t g_nvs_config;
 
 /* ======================================================================
  * Module Slot
@@ -380,11 +382,7 @@ static void send_wasm_output(uint8_t slot_id)
     memset(&pkt, 0, sizeof(pkt));
 
     pkt.magic = WASM_OUTPUT_MAGIC;
-#ifdef CONFIG_CSI_NODE_ID
-    pkt.node_id = (uint8_t)CONFIG_CSI_NODE_ID;
-#else
-    pkt.node_id = 0;
-#endif
+    pkt.node_id = g_nvs_config.node_id;
     pkt.module_id = slot_id;
     pkt.event_count = n_filtered;
 
