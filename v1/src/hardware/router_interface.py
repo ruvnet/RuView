@@ -1,7 +1,9 @@
 """Router interface for WiFi-DensePose system using TDD approach."""
 
 import asyncio
+import base64
 import logging
+import struct
 from typing import Dict, Any, Optional
 import asyncssh
 from datetime import datetime, timezone
@@ -17,6 +19,100 @@ except ImportError:
 class RouterConnectionError(Exception):
     """Exception raised for router connection errors."""
     pass
+
+
+class RouterCSIParser:
+    """Parser for router CSI matrices (Atheros / Nexmon)."""
+
+    class AtherosCSIFormat:
+        HEADER_SIZE = 25
+
+        @staticmethod
+        def parse_header(data: bytes) -> Dict[str, Any]:
+            if len(data) < RouterCSIParser.AtherosCSIFormat.HEADER_SIZE:
+                raise CSIParseError("Atheros header too short")
+            timestamp = struct.unpack('<Q', data[0:8])[0]
+            channel, rate = struct.unpack('<HH', data[8:12])
+            rssi = struct.unpack('<b', data[12:13])[0]
+            noise = struct.unpack('<b', data[13:14])[0]
+            antenna_config = data[14]
+            csi_length = struct.unpack('<H', data[15:17])[0]
+            mac_addr = struct.unpack('<Q', data[17:25])[0]
+            return {
+                'timestamp': timestamp,
+                'channel': channel,
+                'rate': rate,
+                'rssi': rssi,
+                'noise': noise,
+                'antenna_config': antenna_config,
+                'csi_length': csi_length,
+                'mac_address': mac_addr
+            }
+
+        @staticmethod
+        def _extract_10bit(data: bytes, bit_offset: int) -> int:
+            byte_offset = bit_offset // 8
+            bit_shift = bit_offset % 8
+            if byte_offset + 1 >= len(data):
+                return 0
+            window = (data[byte_offset] << 8) | data[byte_offset + 1]
+            return (window >> (6 - bit_shift)) & 0x3FF
+
+        @staticmethod
+        def parse_csi_data(data: bytes, header: Dict[str, Any]) -> np.ndarray:
+            start = RouterCSIParser.AtherosCSIFormat.HEADER_SIZE
+            length = header['csi_length']
+            if len(data) < start + length:
+                raise CSIParseError("Atheros CSI payload truncated")
+            payload = data[start:start + length]
+            samples = []
+            bit_offset = 0
+            while bit_offset + 20 <= len(payload) * 8:
+                real = RouterCSIParser.AtherosCSIFormat._extract_10bit(payload, bit_offset)
+                imag = RouterCSIParser.AtherosCSIFormat._extract_10bit(payload, bit_offset + 10)
+                real = real - 512 if real > 511 else real
+                imag = imag - 512 if imag > 511 else imag
+                samples.append(complex(real, imag))
+                bit_offset += 20
+            if not samples:
+                raise CSIParseError("No complex samples recovered from Atheros payload")
+            tx = 3 if header['antenna_config'] == 0x07 else 2
+            rx = 3
+            num_subcarriers = len(samples) // (tx * rx)
+            if num_subcarriers == 0:
+                raise CSIParseError("Subcarrier count is zero")
+            matrix = np.array(samples[:tx * rx * num_subcarriers])
+            matrix = matrix.reshape((tx * rx, num_subcarriers))
+            return matrix
+
+    def parse(self, raw_data: bytes) -> CSIData:
+        data = raw_data.strip()
+        if data.startswith(b'CSI_HEX:'):
+            data = bytes.fromhex(data.split(b':', 1)[1].strip().decode('utf-8'))
+        elif data.startswith(b'CSI_BASE64:'):
+            data = base64.b64decode(data.split(b':', 1)[1].strip())
+        elif data.startswith(b'0x'):
+            data = bytes.fromhex(data[2:].decode('utf-8'))
+
+        header = self.AtherosCSIFormat.parse_header(data)
+        matrix = self.AtherosCSIFormat.parse_csi_data(data, header)
+        amplitude = np.abs(matrix)
+        phase = np.angle(matrix)
+        return CSIData(
+            timestamp=datetime.now(tz=timezone.utc),
+            amplitude=amplitude,
+            phase=phase,
+            frequency=header['channel'] * 1e6,
+            bandwidth=20e6,
+            num_subcarriers=amplitude.shape[1],
+            num_antennas=amplitude.shape[0],
+            snr=float(header['rssi'] - header['noise']),
+            metadata={
+                'source': 'router',
+                'router_channel': header['channel'],
+                'mac_address': header['mac_address']
+            }
+        )
 
 
 class RouterInterface:
@@ -50,6 +146,9 @@ class RouterInterface:
         # Connection state
         self.is_connected = False
         self.ssh_client = None
+        self.parser = RouterCSIParser()
+        self.csi_command = config.get('csi_command', 'cat /tmp/csi.bin')
+        self.output_encoding = config.get('output_encoding', 'binary')
     
     def _validate_config(self, config: Dict[str, Any]) -> None:
         """Validate configuration parameters.
@@ -136,16 +235,17 @@ class RouterInterface:
     
     async def get_csi_data(self) -> CSIData:
         """Retrieve CSI data from router.
-        
+
         Returns:
             CSI data structure
-            
+
         Raises:
             RouterConnectionError: If data retrieval fails
         """
         try:
-            response = await self.execute_command("iwlist scan | grep CSI")
-            return self._parse_csi_response(response)
+            response = await self.execute_command(self.csi_command)
+            raw_bytes = self._decode_csi_output(response)
+            return self.parser.parse(raw_bytes)
         except Exception as e:
             raise RouterConnectionError(f"Failed to retrieve CSI data: {e}")
     
@@ -198,28 +298,18 @@ class RouterInterface:
             self.logger.error(f"Health check failed: {e}")
             return False
     
-    def _parse_csi_response(self, response: str) -> CSIData:
-        """Parse CSI response data.
-
-        Args:
-            response: Raw response from router
-
-        Returns:
-            Parsed CSI data
-
-        Raises:
-            RouterConnectionError: Always in current state, because real CSI
-                parsing from router command output requires hardware-specific
-                format knowledge that must be implemented per router model.
-        """
-        raise RouterConnectionError(
-            "Real CSI data parsing from router responses is not yet implemented. "
-            "Collecting CSI data from a router requires: "
-            "(1) a router with CSI-capable firmware (e.g., Atheros CSI Tool, Nexmon), "
-            "(2) proper hardware setup and configuration, and "
-            "(3) a parser for the specific binary/text format produced by the firmware. "
-            "See docs/hardware-setup.md for instructions on configuring your router for CSI collection."
-        )
+    def _decode_csi_output(self, response: str) -> bytes:
+        payload = response.strip()
+        if self.output_encoding == 'hex' or payload.startswith('0x'):
+            normalized = payload[2:] if payload.startswith('0x') else payload
+            return bytes.fromhex(normalized)
+        if self.output_encoding == 'base64' or payload.startswith('CSI_BASE64:'):
+            _, encoded = payload.split(':', 1) if ':' in payload else ('', payload)
+            return base64.b64decode(encoded.strip())
+        if payload.startswith('CSI_HEX:'):
+            _, encoded = payload.split(':', 1)
+            return bytes.fromhex(encoded.strip())
+        return payload.encode('latin-1')
     
     def _parse_status_response(self, response: str) -> Dict[str, Any]:
         """Parse router status response.

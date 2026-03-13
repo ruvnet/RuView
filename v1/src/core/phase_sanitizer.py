@@ -4,6 +4,7 @@ import numpy as np
 import logging
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime, timezone
+from collections import deque
 from scipy import signal
 
 
@@ -41,6 +42,9 @@ class PhaseSanitizer:
         self.enable_noise_filtering = config.get('enable_noise_filtering', False)
         self.noise_threshold = config.get('noise_threshold', 0.05)
         self.phase_range = config.get('phase_range', (-np.pi, np.pi))
+        self.temporal_window = config.get('temporal_window', 5)
+        self.noise_history_size = config.get('noise_history_size', 128)
+        self.noise_profile = deque(maxlen=self.noise_history_size)
         
         # Statistics tracking
         self._total_processed = 0
@@ -262,6 +266,41 @@ class PhaseSanitizer:
             filtered_data[i, :] = signal.filtfilt(b, a, phase_data[i, :])
         
         return filtered_data
+
+    def _apply_temporal_consistency(self, phase_data: np.ndarray) -> np.ndarray:
+        """Reduce sudden frame-to-frame jumps."""
+        if self.temporal_window <= 1 or phase_data.shape[1] < 2:
+            return phase_data
+
+        adjusted = phase_data.copy()
+        diffs = np.abs(np.diff(phase_data, axis=1))
+        threshold = self.outlier_threshold / 2
+
+        for idx in range(1, phase_data.shape[1]):
+            jump_mask = diffs[:, idx - 1] > threshold
+            if np.any(jump_mask):
+                adjusted[jump_mask, idx] = adjusted[jump_mask, idx - 1]
+        return adjusted
+
+    def _apply_phase_noise_filter(self, phase_data: np.ndarray) -> np.ndarray:
+        """Apply conservative noise filtering and track profile."""
+        if not self.enable_noise_filtering:
+            return phase_data
+
+        filtered = signal.medfilt(phase_data, kernel_size=(1, 3))
+        noise_level = float(np.nanmean(np.abs(phase_data - filtered)))
+        self.noise_profile.append(noise_level)
+        return filtered
+
+    def get_noise_profile(self) -> Dict[str, Any]:
+        """Return the recent noise metrics."""
+        if not self.noise_profile:
+            return {'avg_noise': 0.0}
+        avg_noise = float(sum(self.noise_profile) / len(self.noise_profile))
+        return {
+            'avg_noise': avg_noise,
+            'samples': len(self.noise_profile)
+        }
     
     def sanitize_phase(self, phase_data: np.ndarray) -> np.ndarray:
         """Sanitize phase data through complete pipeline.
@@ -281,9 +320,11 @@ class PhaseSanitizer:
             # Validate input data
             self.validate_phase_data(phase_data)
             
-            # Apply complete sanitization pipeline
+            # Apply complete sanitization pipeline with temporal consistency and noise tracking
             sanitized_data = self.unwrap_phase(phase_data)
+            sanitized_data = self._apply_temporal_consistency(sanitized_data)
             sanitized_data = self.remove_outliers(sanitized_data)
+            sanitized_data = self._apply_phase_noise_filter(sanitized_data)
             sanitized_data = self.smooth_phase(sanitized_data)
             sanitized_data = self.filter_noise(sanitized_data)
             
