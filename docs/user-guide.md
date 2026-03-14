@@ -258,14 +258,19 @@ docker run --network host ruvnet/wifi-densepose:latest --source wifi --tick-ms 5
 
 ### macOS WiFi (RSSI Only)
 
-Uses CoreWLAN via a Swift helper binary. macOS Sonoma 14.4+ redacts real BSSIDs; the adapter generates deterministic synthetic MACs so the multi-BSSID pipeline still works.
+Uses CoreWLAN via the canonical Swift helper built from `tools/macos-wifi-scan/main.swift`. macOS Sonoma 14.4+ redacts real BSSIDs; the helper emits deterministic synthetic MACs so the multi-BSSID pipeline still works.
+
+Native macOS mode is RSSI/scan-based sensing for presence and coarse motion. Breathing estimates are experimental because CoreWLAN scan rates are much slower than ESP32 CSI. This mode does not provide CSI parity and should not be described as pose-grade sensing.
 
 ```bash
-# Compile the Swift helper (once)
-swiftc -O v1/src/sensing/mac_wifi.swift -o mac_wifi
+# Build the Swift helper (once, on macOS)
+./scripts/build-mac-wifi.sh
 
-# Run natively
-./target/release/sensing-server --source macos --http-port 3000 --ws-port 3001 --tick-ms 500
+# Optional: point the server at a custom helper location
+export RUVIEW_MAC_WIFI_HELPER="$PWD/rust-port/wifi-densepose-rs/target/tools/macos-wifi-scan/macos-wifi-scan"
+
+# Run native macOS Wi-Fi sensing
+./target/release/sensing-server --source wifi --http-port 3000 --ws-port 3001 --tick-ms 500
 ```
 
 See [ADR-025](adr/ADR-025-macos-corewlan-wifi-sensing.md) for details.

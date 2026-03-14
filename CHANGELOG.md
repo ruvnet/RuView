@@ -53,8 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `CrossDomainEvaluator` — 6-metric evaluation protocol (MPJPE in-domain/cross-domain/few-shot/cross-hardware, domain gap ratio, adaptation speedup)
 - ADR-027: Cross-Environment Domain Generalization — 10 SOTA citations (PerceptAlign, X-Fi ICLR 2025, AM-FM, DGSense, CVPR 2024)
 - **Cross-platform RSSI adapters** — macOS CoreWLAN (`MacosCoreWlanScanner`) and Linux `iw` (`LinuxIwScanner`) Rust adapters with `#[cfg(target_os)]` gating
-- macOS CoreWLAN Python sensing adapter with Swift helper (`mac_wifi.swift`)
-- macOS synthetic BSSID generation (FNV-1a hash) for Sonoma 14.4+ BSSID redaction
+- macOS CoreWLAN tooling with canonical Swift helper (`tools/macos-wifi-scan/main.swift`)
+- macOS synthetic BSSID generation (SHA-256 with locally administered MACs) for Sonoma 14.4+ BSSID redaction
 - Linux `iw dev <iface> scan` parser with freq-to-channel conversion and `scan dump` (no-root) mode
 - ADR-025: macOS CoreWLAN WiFi Sensing (ORCA)
 
