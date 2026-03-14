@@ -16,6 +16,7 @@ Exit codes:
     3  Fatal (crash or corruption detected)
 """
 
+import argparse
 import re
 import sys
 from dataclasses import dataclass, field
@@ -364,11 +365,18 @@ def validate_log(log_text: str) -> ValidationReport:
 
 
 def main():
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <log_file>", file=sys.stderr)
-        sys.exit(3)
+    parser = argparse.ArgumentParser(
+        description="Validate QEMU ESP32-S3 UART output (ADR-061)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Example: python3 validate_qemu_output.py build/qemu_output.log",
+    )
+    parser.add_argument(
+        "log_file",
+        help="Path to QEMU UART log file",
+    )
+    args = parser.parse_args()
 
-    log_path = Path(sys.argv[1])
+    log_path = Path(args.log_file)
     if not log_path.exists():
         print(f"ERROR: Log file not found: {log_path}", file=sys.stderr)
         sys.exit(3)

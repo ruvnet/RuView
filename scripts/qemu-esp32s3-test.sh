@@ -12,10 +12,44 @@
 #   NVS_BIN         - Path to a pre-built NVS binary to inject (optional)
 #
 # Exit codes:
-#   0  All checks passed
-#   1  Warnings (non-critical checks failed)
-#   2  Errors (critical checks failed)
-#   3  Fatal (crash detected or build failure)
+#   0  PASS    — all checks passed
+#   1  WARN    — non-critical checks failed
+#   2  FAIL    — critical checks failed
+#   3  FATAL   — build error, crash, or infrastructure failure
+
+# ── Help ──────────────────────────────────────────────────────────────
+usage() {
+    cat <<'HELP'
+Usage: qemu-esp32s3-test.sh [OPTIONS]
+
+Build ESP32-S3 firmware with mock CSI, merge binaries into a single flash
+image, run under QEMU with a timeout, and validate the UART output.
+
+Options:
+  -h, --help      Show this help message and exit
+
+Environment variables:
+  QEMU_PATH       Path to qemu-system-xtensa      (default: qemu-system-xtensa)
+  QEMU_TIMEOUT    Timeout in seconds               (default: 60)
+  SKIP_BUILD      Set to "1" to skip idf.py build  (default: unset)
+  NVS_BIN         Path to pre-built NVS binary     (optional)
+  QEMU_NET        Set to "0" to disable networking  (default: 1)
+
+Examples:
+  ./qemu-esp32s3-test.sh
+  SKIP_BUILD=1 ./qemu-esp32s3-test.sh
+  QEMU_PATH=/opt/qemu/bin/qemu-system-xtensa QEMU_TIMEOUT=120 ./qemu-esp32s3-test.sh
+
+Exit codes:
+  0  PASS   — all checks passed
+  1  WARN   — non-critical checks failed
+  2  FAIL   — critical checks failed
+  3  FATAL  — build error, crash, or infrastructure failure
+HELP
+    exit 0
+}
+
+case "${1:-}" in -h|--help) usage ;; esac
 
 set -euo pipefail
 
@@ -35,10 +69,33 @@ echo "QEMU binary:  $QEMU_BIN"
 echo "Timeout:      ${TIMEOUT_SEC}s"
 echo ""
 
-# Verify QEMU is available
+# ── Prerequisite checks ───────────────────────────────────────────────
 if ! command -v "$QEMU_BIN" &>/dev/null; then
     echo "ERROR: QEMU binary not found: $QEMU_BIN"
-    echo "Set QEMU_PATH to the qemu-system-xtensa binary."
+    echo "  Install: sudo apt install qemu-system-misc   # Debian/Ubuntu"
+    echo "  Install: brew install qemu                    # macOS"
+    echo "  Or set QEMU_PATH to the qemu-system-xtensa binary."
+    exit 3
+fi
+
+if ! command -v python3 &>/dev/null; then
+    echo "ERROR: python3 not found."
+    echo "  Install: sudo apt install python3   # Debian/Ubuntu"
+    echo "  Install: brew install python         # macOS"
+    exit 3
+fi
+
+if ! python3 -m esptool version &>/dev/null 2>&1; then
+    echo "ERROR: esptool not found (needed to merge flash binaries)."
+    echo "  Install: pip install esptool"
+    exit 3
+fi
+
+# ── SKIP_BUILD precheck ──────────────────────────────────────────────
+if [ "${SKIP_BUILD:-}" = "1" ] && [ ! -f "$BUILD_DIR/esp32-csi-node.bin" ]; then
+    echo "ERROR: SKIP_BUILD=1 but flash image not found: $BUILD_DIR/esp32-csi-node.bin"
+    echo "Build the firmware first:  ./qemu-esp32s3-test.sh   (without SKIP_BUILD)"
+    echo "Or unset SKIP_BUILD to build automatically."
     exit 3
 fi
 

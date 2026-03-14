@@ -32,6 +32,98 @@ Currently, **every code change requires flashing to physical hardware** on COM7.
 
 Espressif maintains an official QEMU fork (`github.com/espressif/qemu`) with ESP32-S3 machine support, including dual-core Xtensa LX7, flash mapping, UART, GPIO, timers, and FreeRTOS.
 
+## Glossary
+
+| Term | Definition |
+|------|-----------|
+| CSI | Channel State Information — per-subcarrier amplitude/phase from WiFi |
+| NVS | Non-Volatile Storage — ESP-IDF key-value flash partition |
+| TDM | Time-Division Multiplexing — nodes transmit in assigned time slots |
+| UART | Universal Asynchronous Receiver-Transmitter — serial console output |
+| SLIRP | User-mode TCP/IP stack — enables networking without root/TAP |
+| QEMU | Quick Emulator — runs ESP32-S3 firmware without physical hardware |
+| QMP | QEMU Machine Protocol — JSON-based control interface |
+| LFSR | Linear Feedback Shift Register — deterministic pseudo-random generator |
+| SPSC | Single Producer Single Consumer — lock-free ring buffer pattern |
+| FreeRTOS | Real-time OS used by ESP-IDF for task scheduling |
+| gcov/lcov | GCC code coverage tools for line/branch analysis |
+| libFuzzer | LLVM coverage-guided fuzzer for finding crashes |
+| ASAN | AddressSanitizer — detects buffer overflows and use-after-free |
+| UBSAN | UndefinedBehaviorSanitizer — detects undefined C behavior |
+
+## Quick Start
+
+### Prerequisites
+
+Install required tools:
+
+```bash
+# QEMU (Espressif fork with ESP32-S3 support)
+git clone https://github.com/espressif/qemu.git
+cd qemu && ./configure --target-list=xtensa-softmmu && make -j$(nproc)
+export QEMU_PATH=/path/to/qemu/build/qemu-system-xtensa
+
+# ESP-IDF (for building firmware)
+# See https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/get-started/
+
+# Python tools
+pip install esptool esp-idf-nvs-partition-gen
+
+# Coverage tools (optional, Layer 5)
+sudo apt install lcov          # Debian/Ubuntu
+brew install lcov              # macOS
+
+# Fuzz testing (optional, Layer 6)
+sudo apt install clang         # Debian/Ubuntu
+
+# Mesh testing (optional, Layer 3 — requires root)
+sudo apt install socat bridge-utils iproute2
+```
+
+### Run the Full Test Suite
+
+```bash
+# Layer 2: Single-node test (build + run + validate)
+bash scripts/qemu-esp32s3-test.sh
+
+# Layer 3: Multi-node mesh (3 nodes, requires root)
+sudo bash scripts/qemu-mesh-test.sh 3
+
+# Layer 6: Fuzz testing (60 seconds per target)
+cd firmware/esp32-csi-node/test && make all CC=clang
+make run_serialize FUZZ_DURATION=60
+
+# Layer 7: Generate NVS test matrix
+python3 scripts/generate_nvs_matrix.py --output-dir build/nvs_matrix
+
+# Layer 8: Snapshot regression tests
+bash scripts/qemu-snapshot-test.sh --create
+bash scripts/qemu-snapshot-test.sh --restore csi-streaming
+
+# Layer 9: Chaos/fault injection
+bash scripts/qemu-chaos-test.sh --faults all --duration 120
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `QEMU_PATH` | `qemu-system-xtensa` | Path to Espressif QEMU binary |
+| `QEMU_TIMEOUT` | `60` (single) / `45` (mesh) / `120` (chaos) | Test timeout in seconds |
+| `SKIP_BUILD` | unset | Set to `1` to skip firmware build step |
+| `NVS_BIN` | unset | Path to pre-built NVS partition binary |
+| `QEMU_NET` | `1` | Set to `0` to disable SLIRP networking |
+| `CHAOS_SEED` | current time | Seed for reproducible chaos testing |
+
+### Exit Codes (all scripts)
+
+| Code | Meaning | Action |
+|------|---------|--------|
+| 0 | PASS | All checks passed |
+| 1 | WARN | Non-critical issues; review output |
+| 2 | FAIL | Critical checks failed; fix and re-run |
+| 3 | FATAL | Build error, crash, or missing tool; check prerequisites |
+
 ## Decision
 
 Introduce a **comprehensive QEMU testing platform** for the ESP32-S3 CSI node firmware with nine capability layers:
@@ -454,6 +546,53 @@ xtensa-esp-elf-gdb build/esp32-csi-node.elf \
   -ex "b mock_csi.c:mock_generate_csi_frame" \
   -ex "watch g_nvs_config.csi_channel" \
   -ex "continue"
+```
+
+### Debugging Walkthrough
+
+**1. Start QEMU with GDB stub (paused at reset vector):**
+
+```bash
+qemu-system-xtensa \
+  -machine esp32s3 \
+  -nographic \
+  -drive file=build/qemu_flash.bin,if=mtd,format=raw \
+  -serial mon:stdio \
+  -s -S
+# -s  opens GDB server on localhost:1234
+# -S  pauses CPU until GDB sends "continue"
+```
+
+**2. Connect from a second terminal:**
+
+```bash
+xtensa-esp-elf-gdb build/esp32-csi-node.elf \
+  -ex "target remote :1234" \
+  -ex "b app_main" \
+  -ex "continue"
+```
+
+**3. Set a breakpoint on DSP processing and inspect state:**
+
+```
+(gdb) b edge_processing.c:dsp_task
+(gdb) continue
+# ...breakpoint hit...
+(gdb) print g_nvs_config
+(gdb) print ring->head - ring->tail
+(gdb) continue
+```
+
+**4. Connect from VS Code** using the `launch.json` config below (set breakpoints in the editor gutter, then press F5).
+
+**5. Dump gcov coverage data (requires `sdkconfig.coverage` overlay):**
+
+```
+(gdb) monitor gcov dump
+# Writes .gcda files to the build directory.
+# Then generate the HTML report on the host:
+#   lcov --capture --directory build --output-file coverage.info
+#   genhtml coverage.info --output-directory build/coverage_report
 ```
 
 ### Key Breakpoint Locations

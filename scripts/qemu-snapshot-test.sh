@@ -16,10 +16,44 @@
 #   SKIP_SNAPSHOT   - Set to "1" to run without snapshots (baseline timing)
 #
 # Exit codes:
-#   0  All tests passed
-#   1  Some tests had warnings
-#   2  Some tests failed
-#   3  Fatal error (QEMU failed to start, crash detected)
+#   0  PASS    — all checks passed
+#   1  WARN    — non-critical checks failed
+#   2  FAIL    — critical checks failed
+#   3  FATAL   — build error, crash, or infrastructure failure
+
+# ── Help ──────────────────────────────────────────────────────────────
+usage() {
+    cat <<'HELP'
+Usage: qemu-snapshot-test.sh [OPTIONS]
+
+Use QEMU VM snapshots to accelerate repeated test runs. Snapshots the VM
+state after boot and after the first CSI frame, then restores from the
+snapshot for each individual test (~2s vs ~15s per test).
+
+Options:
+  -h, --help      Show this help message and exit
+
+Environment variables:
+  QEMU_PATH       Path to qemu-system-xtensa        (default: qemu-system-xtensa)
+  QEMU_TIMEOUT    Per-test timeout in seconds        (default: 10)
+  FLASH_IMAGE     Path to merged flash image         (default: build/qemu_flash.bin)
+  SKIP_SNAPSHOT   Set to "1" to run without snapshots (baseline timing)
+
+Examples:
+  ./qemu-snapshot-test.sh
+  QEMU_TIMEOUT=20 ./qemu-snapshot-test.sh
+  FLASH_IMAGE=/path/to/image.bin ./qemu-snapshot-test.sh
+
+Exit codes:
+  0  PASS   — all checks passed
+  1  WARN   — non-critical checks failed
+  2  FAIL   — critical checks failed
+  3  FATAL  — build error, crash, or infrastructure failure
+HELP
+    exit 0
+}
+
+case "${1:-}" in -h|--help) usage ;; esac
 
 set -euo pipefail
 
@@ -165,12 +199,23 @@ echo ""
 
 if ! command -v "$QEMU_BIN" &>/dev/null; then
     echo "ERROR: QEMU binary not found: $QEMU_BIN"
-    echo "Set QEMU_PATH to the qemu-system-xtensa binary."
+    echo "  Install: sudo apt install qemu-system-misc   # Debian/Ubuntu"
+    echo "  Install: brew install qemu                    # macOS"
+    echo "  Or set QEMU_PATH to the qemu-system-xtensa binary."
+    exit 3
+fi
+
+if ! command -v qemu-img &>/dev/null; then
+    echo "ERROR: qemu-img not found (needed for snapshot disk management)."
+    echo "  Install: sudo apt install qemu-utils   # Debian/Ubuntu"
+    echo "  Install: brew install qemu              # macOS"
     exit 3
 fi
 
 if ! command -v socat &>/dev/null; then
-    echo "ERROR: socat not found. Install socat for QEMU monitor communication."
+    echo "ERROR: socat not found (needed for QEMU monitor communication)."
+    echo "  Install: sudo apt install socat   # Debian/Ubuntu"
+    echo "  Install: brew install socat        # macOS"
     exit 3
 fi
 

@@ -61,8 +61,9 @@ jobs:
 
       - name: Verify QEMU binary
         run: |
+          file_size() { stat -c%s "$1" 2>/dev/null || stat -f%z "$1" 2>/dev/null || wc -c < "$1"; }
           /opt/qemu-esp32/bin/qemu-system-xtensa --version
-          echo "QEMU binary size: $(stat -c%s /opt/qemu-esp32/bin/qemu-system-xtensa) bytes"
+          echo "QEMU binary size: $(file_size /opt/qemu-esp32/bin/qemu-system-xtensa) bytes"
 
       - name: Upload QEMU artifact
         uses: actions/upload-artifact@v4
@@ -147,7 +148,8 @@ jobs:
             $OTA_ARGS \
             0x20000 build/esp32-csi-node.bin
 
-          echo "Flash image size: $(stat -c%s build/qemu_flash.bin) bytes"
+          file_size() { stat -c%s "$1" 2>/dev/null || stat -f%z "$1" 2>/dev/null || wc -c < "$1"; }
+          echo "Flash image size: $(file_size build/qemu_flash.bin) bytes"
 
       - name: Inject NVS partition
         if: matrix.nvs_config != 'default'
@@ -155,7 +157,8 @@ jobs:
         run: |
           NVS_BIN="build/nvs_matrix/nvs_${{ matrix.nvs_config }}.bin"
           if [ -f "$NVS_BIN" ]; then
-            echo "Injecting NVS: $NVS_BIN ($(stat -c%s "$NVS_BIN") bytes)"
+            file_size() { stat -c%s "$1" 2>/dev/null || stat -f%z "$1" 2>/dev/null || wc -c < "$1"; }
+            echo "Injecting NVS: $NVS_BIN ($(file_size "$NVS_BIN") bytes)"
             dd if="$NVS_BIN" of=build/qemu_flash.bin \
               bs=1 seek=$((0x9000)) conv=notrunc 2>/dev/null
           else
@@ -228,7 +231,7 @@ jobs:
       - name: Check for crashes
         working-directory: firmware/esp32-csi-node/test
         run: |
-          CRASHES=$(find . -name "crash-*" -o -name "oom-*" -o -name "timeout-*" 2>/dev/null | wc -l)
+          CRASHES=$(find . -type f -name "crash-*" -o -type f -name "oom-*" -o -type f -name "timeout-*" 2>/dev/null | wc -l)
           echo "Crash artifacts found: $CRASHES"
           if [ "$CRASHES" -gt 0 ]; then
             echo "::error::Fuzzer found $CRASHES crash/oom/timeout artifacts"
@@ -264,7 +267,7 @@ jobs:
       - name: Verify all binaries generated
         run: |
           EXPECTED=14
-          ACTUAL=$(ls build/nvs_matrix/nvs_*.bin 2>/dev/null | wc -l)
+          ACTUAL=$(find build/nvs_matrix -type f -name "nvs_*.bin" 2>/dev/null | wc -l)
           echo "Generated $ACTUAL / $EXPECTED NVS binaries"
           ls -la build/nvs_matrix/
 
@@ -275,8 +278,9 @@ jobs:
 
       - name: Verify binary sizes
         run: |
+          file_size() { stat -c%s "$1" 2>/dev/null || stat -f%z "$1" 2>/dev/null || wc -c < "$1"; }
           for f in build/nvs_matrix/nvs_*.bin; do
-            SIZE=$(stat -c%s "$f")
+            SIZE=$(file_size "$f")
             if [ "$SIZE" -ne 24576 ]; then
               echo "::error::$f has unexpected size $SIZE (expected 24576)"
               exit 1

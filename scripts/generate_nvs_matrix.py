@@ -314,12 +314,21 @@ def generate_nvs_binary(csv_content: str, size: int) -> bytes:
                 return f.read()
 
         # Last resort: try as a module
-        subprocess.check_call([
-            sys.executable, "-m", "nvs_partition_gen", "generate",
-            csv_path, bin_path, hex(size)
-        ])
-        with open(bin_path, "rb") as f:
-            return f.read()
+        try:
+            subprocess.check_call([
+                sys.executable, "-m", "nvs_partition_gen", "generate",
+                csv_path, bin_path, hex(size)
+            ])
+            with open(bin_path, "rb") as f:
+                return f.read()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            print("ERROR: NVS partition generator tool not found.", file=sys.stderr)
+            print("Install: pip install esp-idf-nvs-partition-gen", file=sys.stderr)
+            print("Or set IDF_PATH to your ESP-IDF installation", file=sys.stderr)
+            raise RuntimeError(
+                "NVS partition generator not available. "
+                "Install: pip install esp-idf-nvs-partition-gen"
+            )
 
     finally:
         for p in (csv_path, bin_path):

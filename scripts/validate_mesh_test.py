@@ -196,12 +196,18 @@ def validate_mesh(
 
     # Load aggregator results if available
     results: Optional[dict] = None
-    if results_path and results_path.exists():
-        try:
-            results = json.loads(results_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as exc:
-            report.add("Results JSON", Severity.ERROR,
-                        f"Failed to parse results: {exc}")
+    if results_path:
+        if not results_path.exists():
+            print(f"WARNING: Aggregator results file not found: {results_path}",
+                  file=sys.stderr)
+            report.add("Results JSON", Severity.WARN,
+                        f"Results file not found: {results_path}")
+        else:
+            try:
+                results = json.loads(results_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as exc:
+                report.add("Results JSON", Severity.ERROR,
+                            f"Failed to parse results: {exc}")
 
     # Load per-node logs
     node_logs: Dict[int, str] = {}
@@ -449,8 +455,14 @@ def validate_mesh(
 def main():
     parser = argparse.ArgumentParser(
         description="Validate multi-node mesh QEMU test output (ADR-061 Layer 3)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  python3 validate_mesh_test.py --nodes 3 --results mesh_results.json\n"
+            "  python3 validate_mesh_test.py --nodes 4 --log node0.log --log node1.log"
+        ),
     )
-    parser.add_argument("results", nargs="?", default=None,
+    parser.add_argument("--results", default=None,
                         help="Path to mesh_test_results.json from aggregator")
     parser.add_argument("--nodes", "-n", type=int, required=True,
                         help="Expected number of mesh nodes")

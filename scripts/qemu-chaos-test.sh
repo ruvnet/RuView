@@ -20,10 +20,52 @@
 #   FAULT_WAIT      - Seconds to wait after fault injection (default: 5)
 #
 # Exit codes:
-#   0  All faults handled gracefully
-#   1  Some faults caused degraded state
-#   2  Some faults caused failures
-#   3  Fatal — firmware crashed or QEMU died
+#   0  PASS    — all checks passed
+#   1  WARN    — non-critical checks failed
+#   2  FAIL    — critical checks failed
+#   3  FATAL   — build error, crash, or infrastructure failure
+
+# ── Help ──────────────────────────────────────────────────────────────
+usage() {
+    cat <<'HELP'
+Usage: qemu-chaos-test.sh [OPTIONS]
+
+Launch firmware under QEMU and inject a series of faults to verify the
+firmware's resilience. Each fault is injected via the QEMU monitor socket,
+followed by a recovery window and health check.
+
+Fault types:
+  wifi_kill         Pause/resume VM to simulate WiFi reconnect
+  ring_flood        Inject 1000 rapid mock frames (ring buffer stress)
+  heap_pressure     Write to heap metadata to simulate low memory
+  timer_starvation  Pause VM for 500ms to starve FreeRTOS timers
+  corrupt_frame     Inject a CSI frame with bad magic bytes
+  nvs_corrupt       Write garbage to NVS flash region
+
+Options:
+  -h, --help      Show this help message and exit
+
+Environment variables:
+  QEMU_PATH       Path to qemu-system-xtensa        (default: qemu-system-xtensa)
+  QEMU_TIMEOUT    Boot timeout in seconds            (default: 15)
+  FLASH_IMAGE     Path to merged flash image         (default: build/qemu_flash.bin)
+  FAULT_WAIT      Seconds to wait after injection    (default: 5)
+
+Examples:
+  ./qemu-chaos-test.sh
+  QEMU_TIMEOUT=30 FAULT_WAIT=10 ./qemu-chaos-test.sh
+  FLASH_IMAGE=/path/to/image.bin ./qemu-chaos-test.sh
+
+Exit codes:
+  0  PASS   — all checks passed
+  1  WARN   — non-critical checks failed
+  2  FAIL   — critical checks failed
+  3  FATAL  — build error, crash, or infrastructure failure
+HELP
+    exit 0
+}
+
+case "${1:-}" in -h|--help) usage ;; esac
 
 set -euo pipefail
 
@@ -160,16 +202,29 @@ echo ""
 
 if ! command -v "$QEMU_BIN" &>/dev/null; then
     echo "ERROR: QEMU binary not found: $QEMU_BIN"
+    echo "  Install: sudo apt install qemu-system-misc   # Debian/Ubuntu"
+    echo "  Install: brew install qemu                    # macOS"
+    echo "  Or set QEMU_PATH to the qemu-system-xtensa binary."
     exit 3
 fi
 
 if ! command -v socat &>/dev/null; then
-    echo "ERROR: socat not found. Install socat for QEMU monitor communication."
+    echo "ERROR: socat not found (needed for QEMU monitor communication)."
+    echo "  Install: sudo apt install socat   # Debian/Ubuntu"
+    echo "  Install: brew install socat        # macOS"
+    exit 3
+fi
+
+if ! command -v python3 &>/dev/null; then
+    echo "ERROR: python3 not found (needed for fault injection scripts)."
+    echo "  Install: sudo apt install python3   # Debian/Ubuntu"
+    echo "  Install: brew install python         # macOS"
     exit 3
 fi
 
 if [ ! -f "$FLASH_IMAGE" ]; then
     echo "ERROR: Flash image not found: $FLASH_IMAGE"
+    echo "Run qemu-esp32s3-test.sh first to build the flash image."
     exit 3
 fi
 

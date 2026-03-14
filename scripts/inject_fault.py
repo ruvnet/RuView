@@ -46,8 +46,12 @@ def connect_monitor(sock_path: str, timeout: float = CMD_TIMEOUT) -> socket.sock
         banner = s.recv(RECV_BUFSIZE).decode("utf-8", errors="replace")
         if banner:
             pass  # Consume silently
+        else:
+            print(f"WARNING: Connected to {sock_path} but received no banner data. "
+                  f"QEMU monitor may not be ready.", file=sys.stderr)
     except socket.timeout:
-        pass  # No banner is OK
+        print(f"WARNING: Connected to {sock_path} but timed out waiting for banner "
+              f"after {timeout}s. QEMU monitor may be unresponsive.", file=sys.stderr)
 
     return s
 

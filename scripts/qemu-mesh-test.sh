@@ -24,10 +24,52 @@
 #   - Rust workspace with wifi-densepose-hardware crate (aggregator binary)
 #
 # Exit codes:
-#   0  All checks passed
-#   1  Warnings (non-critical checks failed)
-#   2  Errors (critical checks failed)
-#   3  Fatal (build failure, crash, or infrastructure error)
+#   0  PASS    — all checks passed
+#   1  WARN    — non-critical checks failed
+#   2  FAIL    — critical checks failed
+#   3  FATAL   — build error, crash, or infrastructure failure
+
+# ── Help ──────────────────────────────────────────────────────────────
+usage() {
+    cat <<'HELP'
+Usage: sudo ./qemu-mesh-test.sh [OPTIONS] [N_NODES]
+
+Spawn N ESP32-S3 QEMU instances connected via a Linux bridge, each with
+unique NVS provisioning (node ID, TDM slot), and a Rust aggregator that
+collects frames from all nodes.
+
+NOTE: Requires root/sudo for TAP/bridge creation.
+
+Options:
+  -h, --help      Show this help message and exit
+
+Positional:
+  N_NODES         Number of mesh nodes (default: 3, minimum: 2)
+
+Environment variables:
+  QEMU_PATH       Path to qemu-system-xtensa        (default: qemu-system-xtensa)
+  QEMU_TIMEOUT    Timeout in seconds                 (default: 45)
+  MESH_TIMEOUT    Alias for QEMU_TIMEOUT (deprecated)(default: 45)
+  SKIP_BUILD      Set to "1" to skip idf.py build    (default: unset)
+  BRIDGE_NAME     Bridge interface name               (default: qemu-br0)
+  BRIDGE_SUBNET   Bridge IP/mask                      (default: 10.0.0.1/24)
+  AGGREGATOR_PORT UDP port for aggregator             (default: 5005)
+
+Examples:
+  sudo ./qemu-mesh-test.sh
+  sudo QEMU_TIMEOUT=90 ./qemu-mesh-test.sh 5
+  sudo SKIP_BUILD=1 ./qemu-mesh-test.sh 4
+
+Exit codes:
+  0  PASS   — all checks passed
+  1  WARN   — non-critical checks failed
+  2  FAIL   — critical checks failed
+  3  FATAL  — build error, crash, or infrastructure failure
+HELP
+    exit 0
+}
+
+case "${1:-}" in -h|--help) usage ;; esac
 
 set -euo pipefail
 
@@ -48,7 +90,7 @@ VALIDATE_SCRIPT="$SCRIPT_DIR/validate_mesh_test.py"
 # ---------------------------------------------------------------------------
 N_NODES="${1:-3}"
 QEMU_BIN="${QEMU_PATH:-qemu-system-xtensa}"
-MESH_TIMEOUT="${MESH_TIMEOUT:-45}"
+TIMEOUT="${QEMU_TIMEOUT:-${MESH_TIMEOUT:-45}}"
 BRIDGE="${BRIDGE_NAME:-qemu-br0}"
 BRIDGE_IP="${BRIDGE_SUBNET:-10.0.0.1/24}"
 AGG_PORT="${AGGREGATOR_PORT:-5005}"
@@ -59,7 +101,7 @@ echo "Nodes:        $N_NODES"
 echo "Bridge:       $BRIDGE ($BRIDGE_IP)"
 echo "Aggregator:   0.0.0.0:$AGG_PORT"
 echo "QEMU binary:  $QEMU_BIN"
-echo "Timeout:      ${MESH_TIMEOUT}s"
+echo "Timeout:      ${TIMEOUT}s"
 echo ""
 
 # ---------------------------------------------------------------------------
@@ -72,17 +114,41 @@ fi
 
 if ! command -v "$QEMU_BIN" &>/dev/null; then
     echo "ERROR: QEMU binary not found: $QEMU_BIN"
-    echo "Set QEMU_PATH to the qemu-system-xtensa binary."
+    echo "  Install: sudo apt install qemu-system-misc   # Debian/Ubuntu"
+    echo "  Install: brew install qemu                    # macOS"
+    echo "  Or set QEMU_PATH to the qemu-system-xtensa binary."
+    exit 3
+fi
+
+if ! command -v python3 &>/dev/null; then
+    echo "ERROR: python3 not found."
+    echo "  Install: sudo apt install python3   # Debian/Ubuntu"
+    echo "  Install: brew install python         # macOS"
     exit 3
 fi
 
 if ! command -v ip &>/dev/null; then
-    echo "ERROR: 'ip' command not found. Install iproute2."
+    echo "ERROR: 'ip' command not found."
+    echo "  Install: sudo apt install iproute2   # Debian/Ubuntu"
     exit 3
 fi
 
 if ! command -v brctl &>/dev/null && ! ip link help bridge &>/dev/null 2>&1; then
     echo "WARNING: bridge-utils not found; will use 'ip link' for bridge creation."
+fi
+
+if command -v socat &>/dev/null; then
+    true  # optional, available
+else
+    echo "NOTE: socat not found (optional, used for advanced monitor communication)."
+    echo "  Install: sudo apt install socat   # Debian/Ubuntu"
+    echo "  Install: brew install socat        # macOS"
+fi
+
+if ! command -v cargo &>/dev/null; then
+    echo "ERROR: cargo not found (needed to build the Rust aggregator)."
+    echo "  Install: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+    exit 3
 fi
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -288,13 +354,13 @@ for i in $(seq 0 $((N_NODES - 1))); do
 done
 
 echo ""
-echo "All nodes launched. Waiting ${MESH_TIMEOUT}s for mesh simulation..."
+echo "All nodes launched. Waiting ${TIMEOUT}s for mesh simulation..."
 echo ""
 
 # ---------------------------------------------------------------------------
 # Wait for timeout
 # ---------------------------------------------------------------------------
-sleep "$MESH_TIMEOUT"
+sleep "$TIMEOUT"
 
 echo "Timeout reached. Stopping all processes..."
 

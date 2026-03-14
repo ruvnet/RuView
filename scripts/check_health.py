@@ -256,6 +256,13 @@ def run_health_checks(
 def main():
     parser = argparse.ArgumentParser(
         description="QEMU Post-Fault Health Checker — ADR-061 Layer 9",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Example output:\n"
+            "  [HEALTHY] t=30s frames=150 (5.0 fps) crashes=0 heap_err=0 wdt=0 reboots=0\n"
+            "  \n"
+            "  VERDICT: Firmware is healthy. No critical issues detected."
+        ),
     )
     parser.add_argument(
         "--log", required=True,
