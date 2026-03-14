@@ -1,0 +1,40 @@
+{
+  "nodes": [
+    {
+      "node_id": 1,
+      "label": "node-1",
+      "position": [0.65, 0.6, 0.9]
+    },
+    {
+      "node_id": 2,
+      "label": "node-2",
+      "position": [-0.7, 0.5, 1.23]
+    }
+  ],
+  "zones": [
+    {
+      "zone_id": "center",
+      "label": "center",
+      "center": [0.0, 0.0, 1.0],
+      "radius": 0.7
+    },
+    {
+      "zone_id": "entrance",
+      "label": "entrance",
+      "center": [1.0, -0.2, 1.0],
+      "radius": 0.8
+    },
+    {
+      "zone_id": "left-closet",
+      "label": "left closet",
+      "center": [-1.5, -0.5, 1.0],
+      "radius": 0.8
+    },
+    {
+      "zone_id": "behind-closet",
+      "label": "behind closet",
+      "center": [0.0, -1.5, 1.0],
+      "radius": 0.55
+    }
+  ]
+}

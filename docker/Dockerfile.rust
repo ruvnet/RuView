@@ -32,6 +32,7 @@ COPY --from=builder /build/target/release/sensing-server /app/sensing-server
 
 # Copy UI assets
 COPY ui/ /app/ui/
+COPY config/ /app/config/
 
 # HTTP API
 EXPOSE 3000
