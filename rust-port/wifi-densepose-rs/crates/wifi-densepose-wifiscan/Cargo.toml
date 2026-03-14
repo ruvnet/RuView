@@ -17,6 +17,7 @@ tracing.workspace = true
 
 # Serialization (optional, for domain types)
 serde = { workspace = true, optional = true }
+serde_json.workspace = true
 
 # Async runtime (optional, for Tier 2 async scanning)
 tokio = { workspace = true, optional = true }
@@ -27,6 +28,9 @@ serde = ["dep:serde"]
 pipeline = []
 ## Tier 2: enables async scan_async() method on WlanApiScanner via tokio
 wlanapi = ["dep:tokio"]
+
+[dev-dependencies]
+tempfile = "3.10"
 
 [lints.rust]
 unsafe_code = "forbid"

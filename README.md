@@ -1631,6 +1631,10 @@ graph TB
 # Start with Windows WiFi RSSI
 ./target/release/sensing-server --source wifi
 
+# Start with the experimental macOS bridge fallback
+python3 scripts/macos_wifi_bridge.py --interval-ms 100 &
+./target/release/sensing-server --source macos-bridge --tick-ms 100
+
 # Run vital sign benchmark
 ./target/release/sensing-server --benchmark
 
@@ -1646,7 +1650,7 @@ graph TB
 
 | Flag | Description |
 |------|-------------|
-| `--source` | Data source: `auto`, `wifi`, `esp32`, `simulate` |
+| `--source` | Data source: `auto`, `wifi`, `esp32`, `simulate`, `macos-bridge` |
 | `--http-port` | HTTP port for UI and REST API (default: 8080) |
 | `--ws-port` | WebSocket port (default: 8765) |
 | `--udp-port` | UDP port for ESP32 CSI frames (default: 5005) |
@@ -1691,7 +1695,7 @@ WebSocket: `ws://localhost:3001/ws/sensing` (real-time sensing + vital signs)
 | Intel 5300 | Firmware mod | ~$15 | Linux `iwl-csi` |
 | Atheros AR9580 | ath9k patch | ~$20 | Linux only |
 | Any Windows WiFi | RSSI only | $0 | [Tutorial #36](https://github.com/ruvnet/RuView/issues/36) |
-| Any macOS WiFi | RSSI only (CoreWLAN) | $0 | [ADR-025](docs/adr/ADR-025-macos-corewlan-wifi-sensing.md) |
+| Any macOS WiFi | RSSI only (CoreWLAN, breathing experimental) | $0 | [ADR-025](docs/adr/ADR-025-macos-corewlan-wifi-sensing.md) |
 | Any Linux WiFi | RSSI only (`iw`) | $0 | Requires `iw` + `CAP_NET_ADMIN` |
 
 </details>

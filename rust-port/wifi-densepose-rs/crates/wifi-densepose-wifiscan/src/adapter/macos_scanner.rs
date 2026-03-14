@@ -1,78 +1,134 @@
-//! Adapter that scans WiFi BSSIDs on macOS by invoking a compiled Swift
-//! helper binary that uses Apple's CoreWLAN framework.
+//! Adapter that scans WiFi BSSIDs on macOS by invoking the canonical Swift
+//! CoreWLAN helper.
 //!
-//! This is the macOS counterpart to [`NetshBssidScanner`](super::NetshBssidScanner)
-//! on Windows. It follows ADR-025 (ORCA — macOS CoreWLAN WiFi Sensing).
+//! The helper lives at `tools/macos-wifi-scan/main.swift` and is built by
+//! `scripts/build-mac-wifi.sh` into the Rust workspace target tree. This
+//! adapter resolves the helper path in the following order:
 //!
-//! # Design
-//!
-//! Apple removed the `airport` CLI in macOS Sonoma 14.4+ and CoreWLAN is a
-//! Swift/Objective-C framework with no stable C ABI for Rust FFI. We therefore
-//! shell out to a small Swift helper (`mac_wifi`) that outputs JSON lines:
-//!
-//! ```json
-//! {"ssid":"MyNetwork","bssid":"aa:bb:cc:dd:ee:ff","rssi":-52,"noise":-90,"channel":36,"band":"5GHz"}
-//! ```
-//!
-//! macOS Sonoma+ redacts real BSSID MACs to `00:00:00:00:00:00` unless the app
-//! holds the `com.apple.wifi.scan` entitlement. When we detect a zeroed BSSID
-//! we generate a deterministic synthetic MAC via `SHA-256(ssid:channel)[:6]`,
-//! setting the locally-administered bit so it never collides with real OUI
-//! allocations.
-//!
-//! # Platform
-//!
-//! macOS only. Gated behind `#[cfg(target_os = "macos")]` at the module level.
+//! 1. `RUVIEW_MAC_WIFI_HELPER`
+//! 2. `target/tools/macos-wifi-scan/macos-wifi-scan`
+//! 3. `macos-wifi-scan` on `PATH`
 
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
+use serde::Deserialize;
+
 use crate::domain::bssid::{BandType, BssidId, BssidObservation, RadioType};
 use crate::error::WifiScanError;
+use crate::port::WlanScanPort;
 
-// ---------------------------------------------------------------------------
-// MacosCoreWlanScanner
-// ---------------------------------------------------------------------------
+const HELPER_ENV_VAR: &str = "RUVIEW_MAC_WIFI_HELPER";
+const HELPER_BINARY_NAME: &str = "macos-wifi-scan";
+const REPO_LOCAL_HELPER_REL: &str = "target/tools/macos-wifi-scan/macos-wifi-scan";
 
-/// Synchronous WiFi scanner that shells out to the `mac_wifi` Swift helper.
-///
-/// The helper binary must be compiled from `v1/src/sensing/mac_wifi.swift` and
-/// placed on `$PATH` or at a known location. The scanner invokes it with a
-/// `--scan-once` flag (single-shot mode) and parses the JSON output.
-///
-/// If the helper is not found, [`scan_sync`](Self::scan_sync) returns a
-/// [`WifiScanError::ProcessError`].
+#[derive(Debug, Deserialize)]
+struct ProbeStatus {
+    ok: bool,
+    interface: String,
+    message: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HelperObservation {
+    timestamp: f64,
+    interface: String,
+    ssid: String,
+    bssid: String,
+    bssid_synthetic: bool,
+    rssi: f64,
+    noise: f64,
+    channel: u8,
+    band: String,
+    tx_rate_mbps: f64,
+    is_connected: bool,
+}
+
+/// Synchronous WiFi scanner that shells out to the Swift helper.
+#[derive(Debug, Clone)]
 pub struct MacosCoreWlanScanner {
-    /// Path to the `mac_wifi` helper binary. Defaults to `"mac_wifi"` (on PATH).
-    helper_path: String,
+    helper_path: PathBuf,
 }
 
 impl MacosCoreWlanScanner {
-    /// Create a scanner that looks for `mac_wifi` on `$PATH`.
+    /// Create a scanner using the standard helper resolution order.
     pub fn new() -> Self {
         Self {
-            helper_path: "mac_wifi".to_owned(),
+            helper_path: resolve_helper_path_for(
+                workspace_root().as_path(),
+                std::env::var_os(HELPER_ENV_VAR),
+            ),
         }
     }
 
-    /// Create a scanner with an explicit path to the Swift helper binary.
-    pub fn with_path(path: impl Into<String>) -> Self {
+    /// Create a scanner with an explicit helper path.
+    pub fn with_path(path: impl Into<PathBuf>) -> Self {
         Self {
             helper_path: path.into(),
         }
     }
 
-    /// Run the Swift helper and parse the output synchronously.
-    ///
-    /// Returns one [`BssidObservation`] per BSSID seen in the scan.
+    /// Return the resolved helper path.
+    pub fn helper_path(&self) -> &Path {
+        &self.helper_path
+    }
+
+    /// Verify that the helper can reach CoreWLAN and report interface readiness.
+    pub fn probe_sync(&self) -> Result<(), WifiScanError> {
+        let output = self.run_helper(["--probe"])?;
+        let line = output
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .ok_or_else(|| {
+                WifiScanError::ParseError("macOS helper probe returned no JSON status".to_string())
+            })?;
+        let status: ProbeStatus = serde_json::from_str(line).map_err(|err| {
+            WifiScanError::ParseError(format!("probe output is not valid JSON: {err}"))
+        })?;
+
+        if status.ok {
+            Ok(())
+        } else {
+            Err(WifiScanError::ScanFailed {
+                reason: format!(
+                    "probe failed on interface {}: {}",
+                    status.interface,
+                    status
+                        .message
+                        .unwrap_or_else(|| "helper reported Wi-Fi unavailable".to_string())
+                ),
+            })
+        }
+    }
+
+    /// Run one visible-network scan.
     pub fn scan_sync(&self) -> Result<Vec<BssidObservation>, WifiScanError> {
+        let output = self.run_helper(["--scan-once"])?;
+        parse_macos_scan_output(&output)
+    }
+
+    /// Return the currently connected AP, if any.
+    pub fn connected_sync(&self) -> Result<Option<BssidObservation>, WifiScanError> {
+        match self.run_helper(["--connected"]) {
+            Ok(output) => Ok(parse_macos_scan_output(&output)?.into_iter().next()),
+            Err(WifiScanError::ScanFailed { reason }) if is_not_connected_reason(&reason) => {
+                Ok(None)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    fn run_helper<const N: usize>(&self, args: [&str; N]) -> Result<String, WifiScanError> {
         let output = Command::new(&self.helper_path)
-            .arg("--scan-once")
+            .args(args)
             .output()
-            .map_err(|e| {
+            .map_err(|err| {
                 WifiScanError::ProcessError(format!(
-                    "failed to run mac_wifi helper ({}): {e}",
-                    self.helper_path
+                    "failed to run macOS Wi-Fi helper '{}': {err}. Build it with scripts/build-mac-wifi.sh or set {HELPER_ENV_VAR}.",
+                    self.helper_path.display()
                 ))
             })?;
 
@@ -80,15 +136,18 @@ impl MacosCoreWlanScanner {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(WifiScanError::ScanFailed {
                 reason: format!(
-                    "mac_wifi exited with {}: {}",
+                    "macOS Wi-Fi helper '{}' exited {} while running {}: {}",
+                    self.helper_path.display(),
                     output.status,
+                    args.join(" "),
                     stderr.trim()
                 ),
             });
         }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        parse_macos_scan_output(&stdout)
+        String::from_utf8(output.stdout).map_err(|err| {
+            WifiScanError::ParseError(format!("macOS Wi-Fi helper emitted invalid UTF-8: {err}"))
+        })
     }
 }
 
@@ -98,263 +157,218 @@ impl Default for MacosCoreWlanScanner {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Parser
-// ---------------------------------------------------------------------------
+impl WlanScanPort for MacosCoreWlanScanner {
+    fn scan(&self) -> Result<Vec<BssidObservation>, WifiScanError> {
+        self.scan_sync()
+    }
 
-/// Parse the JSON-lines output from the `mac_wifi` Swift helper.
-///
-/// Each line is expected to be a JSON object with the fields:
-/// `ssid`, `bssid`, `rssi`, `noise`, `channel`, `band`.
-///
-/// Lines that fail to parse are silently skipped (the helper may emit
-/// status messages on stdout).
+    fn connected(&self) -> Result<Option<BssidObservation>, WifiScanError> {
+        self.connected_sync()
+    }
+}
+
+/// Parse the NDJSON output from the canonical macOS helper.
 pub fn parse_macos_scan_output(output: &str) -> Result<Vec<BssidObservation>, WifiScanError> {
-    let now = Instant::now();
-    let mut results = Vec::new();
+    let timestamp = Instant::now();
+    let mut observations = Vec::new();
 
-    for line in output.lines() {
+    for (line_index, line) in output.lines().enumerate() {
         let line = line.trim();
-        if line.is_empty() || !line.starts_with('{') {
+        if line.is_empty() {
             continue;
         }
 
-        if let Some(obs) = parse_json_line(line, now) {
-            results.push(obs);
-        }
+        let record: HelperObservation = serde_json::from_str(line).map_err(|err| {
+            WifiScanError::ParseError(format!(
+                "line {} is not valid helper JSON: {err}",
+                line_index + 1
+            ))
+        })?;
+        observations.push(helper_observation_to_domain(record, timestamp)?);
     }
 
-    Ok(results)
+    Ok(observations)
 }
 
-/// Parse a single JSON line into a [`BssidObservation`].
-///
-/// Uses a lightweight manual parser to avoid pulling in `serde_json` as a
-/// hard dependency. The JSON structure is simple and well-known.
-fn parse_json_line(line: &str, timestamp: Instant) -> Option<BssidObservation> {
-    let ssid = extract_string_field(line, "ssid")?;
-    let bssid_str = extract_string_field(line, "bssid")?;
-    let rssi = extract_number_field(line, "rssi")?;
-    let channel_f = extract_number_field(line, "channel")?;
-    let channel = channel_f as u8;
+fn helper_observation_to_domain(
+    record: HelperObservation,
+    timestamp: Instant,
+) -> Result<BssidObservation, WifiScanError> {
+    if record.channel == 0 {
+        return Err(WifiScanError::ParseError(
+            "field `channel` must be greater than 0".to_string(),
+        ));
+    }
 
-    // Resolve BSSID: use real MAC if available, otherwise generate synthetic.
-    let bssid = resolve_bssid(&bssid_str, &ssid, channel)?;
+    let _ = (
+        record.timestamp,
+        record.interface.as_str(),
+        record.bssid_synthetic,
+        record.noise,
+        record.tx_rate_mbps,
+        record.is_connected,
+    );
 
-    let band = BandType::from_channel(channel);
+    let bssid = BssidId::parse(&record.bssid).map_err(|_| {
+        WifiScanError::ParseError(format!(
+            "field `bssid` is not a valid MAC address: {}",
+            record.bssid
+        ))
+    })?;
+    let band = parse_band_label(&record.band, record.channel)?;
 
-    // macOS CoreWLAN doesn't report radio type directly; infer from band/channel.
-    let radio_type = infer_radio_type(channel);
-
-    // Convert RSSI to signal percentage using the standard mapping.
-    let signal_pct = ((rssi + 100.0) * 2.0).clamp(0.0, 100.0);
-
-    Some(BssidObservation {
+    Ok(BssidObservation {
         bssid,
-        rssi_dbm: rssi,
-        signal_pct,
-        channel,
+        rssi_dbm: record.rssi,
+        signal_pct: ((record.rssi + 100.0) * 2.0).clamp(0.0, 100.0),
+        channel: record.channel,
         band,
-        radio_type,
-        ssid,
+        radio_type: infer_radio_type(record.channel, band),
+        ssid: record.ssid,
         timestamp,
     })
 }
 
-/// Resolve a BSSID string to a [`BssidId`].
-///
-/// If the MAC is all-zeros (macOS redaction), generate a synthetic
-/// locally-administered MAC from `SHA-256(ssid:channel)`.
-fn resolve_bssid(bssid_str: &str, ssid: &str, channel: u8) -> Option<BssidId> {
-    // Try parsing the real BSSID first.
-    if let Ok(id) = BssidId::parse(bssid_str) {
-        // Check for the all-zeros redacted BSSID.
-        if id.0 != [0, 0, 0, 0, 0, 0] {
-            return Some(id);
-        }
-    }
-
-    // Generate synthetic BSSID: SHA-256(ssid:channel), take first 6 bytes,
-    // set locally-administered + unicast bits (byte 0: bit 1 set, bit 0 clear).
-    Some(synthetic_bssid(ssid, channel))
-}
-
-/// Generate a deterministic synthetic BSSID from SSID and channel.
-///
-/// Uses a simple hash (FNV-1a-inspired) to avoid pulling in `sha2` crate.
-/// The locally-administered bit is set so these never collide with real OUI MACs.
-fn synthetic_bssid(ssid: &str, channel: u8) -> BssidId {
-    // Simple but deterministic hash — FNV-1a 64-bit.
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for &byte in ssid.as_bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    hash ^= u64::from(channel);
-    hash = hash.wrapping_mul(0x0100_0000_01b3);
-
-    let bytes = hash.to_le_bytes();
-    let mut mac = [bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]];
-
-    // Set locally-administered bit (bit 1 of byte 0) and clear multicast (bit 0).
-    mac[0] = (mac[0] | 0x02) & 0xFE;
-
-    BssidId(mac)
-}
-
-/// Infer radio type from channel number (best effort on macOS).
-fn infer_radio_type(channel: u8) -> RadioType {
-    match channel {
-        // 5 GHz channels → likely 802.11ac or newer
-        36..=177 => RadioType::Ac,
-        // 2.4 GHz → at least 802.11n
-        _ => RadioType::N,
+fn parse_band_label(label: &str, channel: u8) -> Result<BandType, WifiScanError> {
+    let normalized = label.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "2.4ghz" | "2.4 ghz" | "2.4" => Ok(BandType::Band2_4GHz),
+        "5ghz" | "5 ghz" | "5" => Ok(BandType::Band5GHz),
+        "6ghz" | "6 ghz" | "6" => Ok(BandType::Band6GHz),
+        "" => Ok(BandType::from_channel(channel)),
+        _ => Err(WifiScanError::ParseError(format!(
+            "field `band` must be one of 2.4GHz, 5GHz, or 6GHz; got '{label}'"
+        ))),
     }
 }
 
-// ---------------------------------------------------------------------------
-// Lightweight JSON field extractors
-// ---------------------------------------------------------------------------
+fn infer_radio_type(channel: u8, band: BandType) -> RadioType {
+    match band {
+        BandType::Band6GHz => RadioType::Ax,
+        BandType::Band5GHz if channel >= 149 => RadioType::Ax,
+        BandType::Band5GHz => RadioType::Ac,
+        BandType::Band2_4GHz => RadioType::N,
+    }
+}
 
-/// Extract a string field value from a JSON object string.
-///
-/// Looks for `"key":"value"` or `"key": "value"` patterns.
-fn extract_string_field(json: &str, key: &str) -> Option<String> {
-    let pattern = format!("\"{}\"", key);
-    let key_pos = json.find(&pattern)?;
-    let after_key = &json[key_pos + pattern.len()..];
+fn is_not_connected_reason(reason: &str) -> bool {
+    let lower = reason.to_ascii_lowercase();
+    lower.contains("not connected to an access point")
+        || lower.contains("waiting for wi-fi association")
+}
 
-    // Skip optional whitespace and the colon.
-    let after_colon = after_key.trim_start().strip_prefix(':')?;
-    let after_colon = after_colon.trim_start();
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")))
+        .to_path_buf()
+}
 
-    // Expect opening quote.
-    let after_quote = after_colon.strip_prefix('"')?;
-
-    // Find closing quote (handle escaped quotes).
-    let mut end = 0;
-    let bytes = after_quote.as_bytes();
-    while end < bytes.len() {
-        if bytes[end] == b'"' && (end == 0 || bytes[end - 1] != b'\\') {
-            break;
-        }
-        end += 1;
+fn resolve_helper_path_for(workspace_root: &Path, env_override: Option<OsString>) -> PathBuf {
+    if let Some(env_override) = env_override.filter(|value| !value.is_empty()) {
+        return PathBuf::from(env_override);
     }
 
-    Some(after_quote[..end].to_owned())
+    let repo_local = workspace_root.join(REPO_LOCAL_HELPER_REL);
+    if repo_local.is_file() {
+        return repo_local;
+    }
+
+    PathBuf::from(HELPER_BINARY_NAME)
 }
-
-/// Extract a numeric field value from a JSON object string.
-///
-/// Looks for `"key": <number>` patterns.
-fn extract_number_field(json: &str, key: &str) -> Option<f64> {
-    let pattern = format!("\"{}\"", key);
-    let key_pos = json.find(&pattern)?;
-    let after_key = &json[key_pos + pattern.len()..];
-
-    let after_colon = after_key.trim_start().strip_prefix(':')?;
-    let after_colon = after_colon.trim_start();
-
-    // Collect digits, sign, and decimal point.
-    let num_str: String = after_colon
-        .chars()
-        .take_while(|c| c.is_ascii_digit() || *c == '-' || *c == '.' || *c == '+' || *c == 'e' || *c == 'E')
-        .collect();
-
-    num_str.parse().ok()
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const SAMPLE_OUTPUT: &str = r#"
-{"ssid":"HomeNetwork","bssid":"aa:bb:cc:dd:ee:ff","rssi":-52,"noise":-90,"channel":36,"band":"5GHz"}
-{"ssid":"GuestWifi","bssid":"11:22:33:44:55:66","rssi":-71,"noise":-92,"channel":6,"band":"2.4GHz"}
-{"ssid":"Redacted","bssid":"00:00:00:00:00:00","rssi":-65,"noise":-88,"channel":149,"band":"5GHz"}
-"#;
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "ruview-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    const SAMPLE_OUTPUT: &str = r#"{"timestamp":1710000000.0,"interface":"en0","ssid":"Home","bssid":"aa:bb:cc:dd:ee:ff","bssid_synthetic":false,"rssi":-52.0,"noise":-90.0,"channel":36,"band":"5GHz","tx_rate_mbps":866.7,"is_connected":true}
+{"timestamp":1710000001.0,"interface":"en0","ssid":"Guest","bssid":"11:22:33:44:55:66","bssid_synthetic":false,"rssi":-71.0,"noise":-92.0,"channel":6,"band":"2.4GHz","tx_rate_mbps":144.0,"is_connected":false}"#;
 
     #[test]
-    fn parse_valid_output() {
-        let obs = parse_macos_scan_output(SAMPLE_OUTPUT).unwrap();
-        assert_eq!(obs.len(), 3);
-
-        // First entry: real BSSID.
-        assert_eq!(obs[0].ssid, "HomeNetwork");
-        assert_eq!(obs[0].bssid.to_string(), "aa:bb:cc:dd:ee:ff");
-        assert!((obs[0].rssi_dbm - (-52.0)).abs() < f64::EPSILON);
-        assert_eq!(obs[0].channel, 36);
-        assert_eq!(obs[0].band, BandType::Band5GHz);
-
-        // Second entry: 2.4 GHz.
-        assert_eq!(obs[1].ssid, "GuestWifi");
-        assert_eq!(obs[1].channel, 6);
-        assert_eq!(obs[1].band, BandType::Band2_4GHz);
-        assert_eq!(obs[1].radio_type, RadioType::N);
-
-        // Third entry: redacted BSSID → synthetic MAC.
-        assert_eq!(obs[2].ssid, "Redacted");
-        // Should NOT be all-zeros.
-        assert_ne!(obs[2].bssid.0, [0, 0, 0, 0, 0, 0]);
-        // Should have locally-administered bit set.
-        assert_eq!(obs[2].bssid.0[0] & 0x02, 0x02);
-        // Should have unicast bit (multicast cleared).
-        assert_eq!(obs[2].bssid.0[0] & 0x01, 0x00);
+    fn parse_helper_output_uses_contract_fields() {
+        let observations = parse_macos_scan_output(SAMPLE_OUTPUT).unwrap();
+        assert_eq!(observations.len(), 2);
+        assert_eq!(observations[0].ssid, "Home");
+        assert_eq!(observations[0].bssid.to_string(), "aa:bb:cc:dd:ee:ff");
+        assert_eq!(observations[0].band, BandType::Band5GHz);
+        assert_eq!(observations[0].radio_type, RadioType::Ac);
+        assert_eq!(observations[1].band, BandType::Band2_4GHz);
+        assert_eq!(observations[1].radio_type, RadioType::N);
     }
 
     #[test]
-    fn synthetic_bssid_is_deterministic() {
-        let a = synthetic_bssid("TestNet", 36);
-        let b = synthetic_bssid("TestNet", 36);
-        assert_eq!(a, b);
+    fn parse_helper_output_reports_missing_fields() {
+        let err = parse_macos_scan_output(
+            r#"{"timestamp":1710000000.0,"interface":"en0","ssid":"Home","rssi":-52.0,"noise":-90.0,"channel":36,"band":"5GHz","tx_rate_mbps":866.7,"is_connected":true}"#,
+        )
+        .unwrap_err();
 
-        // Different SSID or channel → different MAC.
-        let c = synthetic_bssid("OtherNet", 36);
-        assert_ne!(a, c);
-
-        let d = synthetic_bssid("TestNet", 6);
-        assert_ne!(a, d);
+        assert!(err.to_string().contains("line 1"));
+        assert!(err.to_string().contains("bssid"));
     }
 
     #[test]
-    fn parse_empty_and_junk_lines() {
-        let output = "\n  \nnot json\n{broken json\n";
-        let obs = parse_macos_scan_output(output).unwrap();
-        assert!(obs.is_empty());
+    fn probe_status_json_is_supported() {
+        let status: ProbeStatus =
+            serde_json::from_str(r#"{"ok":true,"interface":"en0","message":"ready"}"#).unwrap();
+        assert!(status.ok);
+        assert_eq!(status.interface, "en0");
     }
 
     #[test]
-    fn extract_string_field_basic() {
-        let json = r#"{"ssid":"MyNet","bssid":"aa:bb:cc:dd:ee:ff"}"#;
-        assert_eq!(extract_string_field(json, "ssid").unwrap(), "MyNet");
-        assert_eq!(
-            extract_string_field(json, "bssid").unwrap(),
-            "aa:bb:cc:dd:ee:ff"
-        );
-        assert!(extract_string_field(json, "missing").is_none());
+    fn helper_path_prefers_env_override() {
+        let workspace = unique_temp_dir("env-path");
+        let resolved =
+            resolve_helper_path_for(&workspace, Some(OsString::from("/tmp/custom-helper")));
+        assert_eq!(resolved, PathBuf::from("/tmp/custom-helper"));
+        std::fs::remove_dir_all(workspace).unwrap();
     }
 
     #[test]
-    fn extract_number_field_basic() {
-        let json = r#"{"rssi":-52,"channel":36}"#;
-        assert!((extract_number_field(json, "rssi").unwrap() - (-52.0)).abs() < f64::EPSILON);
-        assert!((extract_number_field(json, "channel").unwrap() - 36.0).abs() < f64::EPSILON);
+    fn helper_path_uses_repo_local_binary_when_present() {
+        let workspace = unique_temp_dir("repo-path");
+        let helper = workspace.join(REPO_LOCAL_HELPER_REL);
+        std::fs::create_dir_all(helper.parent().unwrap()).unwrap();
+        std::fs::write(&helper, b"binary").unwrap();
+
+        let resolved = resolve_helper_path_for(&workspace, None);
+        assert_eq!(resolved, helper);
+
+        std::fs::remove_dir_all(workspace).unwrap();
     }
 
     #[test]
-    fn signal_pct_clamping() {
-        // RSSI -50 → pct = (-50+100)*2 = 100
-        let json = r#"{"ssid":"Test","bssid":"aa:bb:cc:dd:ee:ff","rssi":-50,"channel":1}"#;
-        let obs = parse_json_line(json, Instant::now()).unwrap();
-        assert!((obs.signal_pct - 100.0).abs() < f64::EPSILON);
+    fn helper_path_falls_back_to_path_binary() {
+        let workspace = unique_temp_dir("path-fallback");
+        let resolved = resolve_helper_path_for(&workspace, None);
+        assert_eq!(resolved, PathBuf::from(HELPER_BINARY_NAME));
+        std::fs::remove_dir_all(workspace).unwrap();
+    }
 
-        // RSSI -100 → pct = 0
-        let json = r#"{"ssid":"Test","bssid":"aa:bb:cc:dd:ee:ff","rssi":-100,"channel":1}"#;
-        let obs = parse_json_line(json, Instant::now()).unwrap();
-        assert!((obs.signal_pct - 0.0).abs() < f64::EPSILON);
+    #[test]
+    fn compile_time_trait_check() {
+        fn assert_port<T: WlanScanPort>() {}
+        assert_port::<MacosCoreWlanScanner>();
+    }
+
+    #[test]
+    fn connected_failure_reason_is_recognized() {
+        assert!(is_not_connected_reason(
+            "macOS Wi-Fi helper '/tmp/helper' exited 1 while running --connected: Wi-Fi interface en0 is not connected to an access point"
+        ));
     }
 }

@@ -14,19 +14,18 @@ mod rvf_pipeline;
 mod vital_signs;
 
 // Training pipeline modules (exposed via lib.rs)
-use wifi_densepose_sensing_server::{graph_transformer, trainer, dataset, embedding};
+use wifi_densepose_sensing_server::{dataset, embedding, graph_transformer, trainer};
 
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Path,
-        State,
+        Path, State,
     },
     response::{Html, IntoResponse, Json},
     routing::{delete, get, post},
@@ -34,13 +33,13 @@ use axum::{
 };
 use clap::Parser;
 
+use axum::http::HeaderValue;
 use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 use tokio::sync::{broadcast, RwLock};
 use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
-use axum::http::HeaderValue;
-use tracing::{info, warn, debug, error};
+use tracing::{debug, error, info, warn};
 
 use rvf_container::{RvfBuilder, RvfContainerInfo, RvfReader, VitalSignConfig};
 use rvf_pipeline::ProgressiveLoader;
@@ -48,9 +47,12 @@ use vital_signs::{VitalSignDetector, VitalSigns};
 
 // ADR-022 Phase 3: Multi-BSSID pipeline integration
 use wifi_densepose_wifiscan::{
-    BssidRegistry, WindowsWifiPipeline,
+    BandType, BssidId, BssidObservation, BssidRegistry, RadioType, WindowsWifiPipeline,
+    WlanApiScanner, WlanScanPort,
 };
-use wifi_densepose_wifiscan::parse_netsh_output as parse_netsh_bssid_output;
+
+#[cfg(target_os = "macos")]
+use wifi_densepose_wifiscan::MacosCoreWlanScanner;
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
@@ -81,7 +83,7 @@ struct Args {
     #[arg(long, default_value = "127.0.0.1", env = "SENSING_BIND_ADDR")]
     bind_addr: String,
 
-    /// Data source: auto, wifi, esp32, simulate
+    /// Data source: auto, wifi, esp32, simulate, macos-bridge
     #[arg(long, default_value = "auto")]
     source: String,
 
@@ -144,6 +146,74 @@ struct Args {
     /// Build fingerprint index from embeddings (env|activity|temporal|person)
     #[arg(long, value_name = "TYPE")]
     build_index: Option<String>,
+}
+
+const MACOS_BRIDGE_UDP_PORT: u16 = 5006;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RequestedSource {
+    Auto,
+    Wifi,
+    Esp32,
+    Simulate,
+    MacosBridge,
+}
+
+impl RequestedSource {
+    fn parse(raw: &str) -> Result<Self, String> {
+        match raw {
+            "auto" => Ok(Self::Auto),
+            "wifi" => Ok(Self::Wifi),
+            "esp32" => Ok(Self::Esp32),
+            "simulate" | "simulated" => Ok(Self::Simulate),
+            "macos-bridge" => Ok(Self::MacosBridge),
+            other => Err(format!(
+                "unsupported source '{other}'. Expected one of: auto, wifi, esp32, simulate, macos-bridge"
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResolvedSource {
+    Wifi,
+    Esp32,
+    Simulate,
+    MacosBridge,
+}
+
+impl ResolvedSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Wifi => "wifi",
+            Self::Esp32 => "esp32",
+            Self::Simulate => "simulate",
+            Self::MacosBridge => "macos-bridge",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlatformFlavor {
+    Macos,
+    Windows,
+    Other,
+}
+
+#[derive(Debug, Deserialize)]
+struct MacosBridgeRecord {
+    bridge_kind: String,
+    timestamp: f64,
+    interface: String,
+    ssid: String,
+    bssid: String,
+    bssid_synthetic: bool,
+    rssi: f64,
+    noise: f64,
+    channel: u8,
+    band: String,
+    tx_rate_mbps: f64,
+    is_connected: bool,
 }
 
 // ── Data types ───────────────────────────────────────────────────────────────
@@ -460,7 +530,10 @@ fn parse_wasm_output(buf: &[u8]) -> Option<WasmOutputPacket> {
         }
         let event_type = buf[offset];
         let value = f32::from_le_bytes([
-            buf[offset + 1], buf[offset + 2], buf[offset + 3], buf[offset + 4],
+            buf[offset + 1],
+            buf[offset + 2],
+            buf[offset + 3],
+            buf[offset + 4],
         ]);
         events.push(WasmEvent { event_type, value });
         offset += 5;
@@ -604,7 +677,8 @@ fn generate_signal_field(
                 let dx = x as f64 - center;
                 let dz = z as f64 - center;
                 let dist = (dx * dx + dz * dz).sqrt();
-                let ring_val = 0.08 * (-(dist - ring_r).powi(2) / (2.0 * ring_width * ring_width)).exp();
+                let ring_val =
+                    0.08 * (-(dist - ring_r).powi(2) / (2.0 * ring_width * ring_width)).exp();
                 values[z * grid + x] += ring_val;
             }
         }
@@ -612,7 +686,11 @@ fn generate_signal_field(
 
     // Clamp and normalise to [0, 1].
     let field_max = values.iter().cloned().fold(0.0f64, f64::max);
-    let scale = if field_max > 1e-9 { 1.0 / field_max } else { 1.0 };
+    let scale = if field_max > 1e-9 {
+        1.0 / field_max
+    } else {
+        1.0
+    };
     for v in &mut values {
         *v = (*v * scale).clamp(0.0, 1.0);
     }
@@ -643,9 +721,14 @@ fn estimate_breathing_rate_hz(frame_history: &VecDeque<Vec<f64>>, sample_rate_hz
     }
 
     // Build scalar time series: mean amplitude per frame.
-    let series: Vec<f64> = frame_history.iter()
+    let series: Vec<f64> = frame_history
+        .iter()
         .map(|amps| {
-            if amps.is_empty() { 0.0 } else { amps.iter().sum::<f64>() / amps.len() as f64 }
+            if amps.is_empty() {
+                0.0
+            } else {
+                amps.iter().sum::<f64>() / amps.len() as f64
+            }
         })
         .collect();
 
@@ -764,9 +847,12 @@ fn extract_features_from_frame(
     let mean_rssi = frame.rssi as f64;
 
     // ── Intra-frame subcarrier variance (spatial spread across subcarriers) ──
-    let intra_variance: f64 = frame.amplitudes.iter()
+    let intra_variance: f64 = frame
+        .amplitudes
+        .iter()
         .map(|a| (a - mean_amp).powi(2))
-        .sum::<f64>() / n;
+        .sum::<f64>()
+        / n;
 
     // ── Temporal (sliding-window) per-subcarrier variance ──
     let sub_variances = compute_subcarrier_variances(frame_history, n_sub);
@@ -785,24 +871,30 @@ fn extract_features_from_frame(
     // ── Motion band power (upper half of subcarriers, high spatial frequency) ──
     let half = frame.amplitudes.len() / 2;
     let motion_band_power = if half > 0 {
-        frame.amplitudes[half..].iter()
+        frame.amplitudes[half..]
+            .iter()
             .map(|a| (a - mean_amp).powi(2))
-            .sum::<f64>() / (frame.amplitudes.len() - half) as f64
+            .sum::<f64>()
+            / (frame.amplitudes.len() - half) as f64
     } else {
         0.0
     };
 
     // ── Breathing band power (lower half of subcarriers, low spatial frequency) ──
     let breathing_band_power = if half > 0 {
-        frame.amplitudes[..half].iter()
+        frame.amplitudes[..half]
+            .iter()
             .map(|a| (a - mean_amp).powi(2))
-            .sum::<f64>() / half as f64
+            .sum::<f64>()
+            / half as f64
     } else {
         0.0
     };
 
     // ── Dominant frequency via peak subcarrier index ──
-    let peak_idx = frame.amplitudes.iter()
+    let peak_idx = frame
+        .amplitudes
+        .iter()
         .enumerate()
         .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(i, _)| i)
@@ -811,7 +903,9 @@ fn extract_features_from_frame(
 
     // ── Change point detection (threshold-crossing count in current frame) ──
     let threshold = mean_amp * 1.2;
-    let change_points = frame.amplitudes.windows(2)
+    let change_points = frame
+        .amplitudes
+        .windows(2)
         .filter(|w| (w[0] < threshold) != (w[1] < threshold))
         .count();
 
@@ -823,7 +917,8 @@ fn extract_features_from_frame(
         if n_cmp > 0 {
             let diff_energy: f64 = (0..n_cmp)
                 .map(|k| (frame.amplitudes[k] - prev_frame[k]).powi(2))
-                .sum::<f64>() / n_cmp as f64;
+                .sum::<f64>()
+                / n_cmp as f64;
             // Normalise by mean squared amplitude to get a dimensionless ratio.
             let ref_energy = mean_amp * mean_amp + 1e-9;
             (diff_energy / ref_energy).sqrt().clamp(0.0, 1.0)
@@ -832,7 +927,9 @@ fn extract_features_from_frame(
         }
     } else {
         // No history yet — fall back to intra-frame variance-based estimate.
-        (intra_variance / (mean_amp * mean_amp + 1e-9)).sqrt().clamp(0.0, 1.0)
+        (intra_variance / (mean_amp * mean_amp + 1e-9))
+            .sqrt()
+            .clamp(0.0, 1.0)
     };
 
     // Blend temporal motion with variance-based motion for robustness.
@@ -840,14 +937,19 @@ fn extract_features_from_frame(
     let variance_motion = (temporal_variance / 10.0).clamp(0.0, 1.0);
     let mbp_motion = (motion_band_power / 25.0).clamp(0.0, 1.0);
     let cp_motion = (change_points as f64 / 15.0).clamp(0.0, 1.0);
-    let motion_score = (temporal_motion_score * 0.4 + variance_motion * 0.2 + mbp_motion * 0.25 + cp_motion * 0.15).clamp(0.0, 1.0);
+    let motion_score = (temporal_motion_score * 0.4
+        + variance_motion * 0.2
+        + mbp_motion * 0.25
+        + cp_motion * 0.15)
+        .clamp(0.0, 1.0);
 
     // ── Signal quality metric ──
     // Based on estimated SNR (RSSI relative to noise floor) and subcarrier consistency.
     let snr_db = (frame.rssi as f64 - frame.noise_floor as f64).max(0.0);
     let snr_quality = (snr_db / 40.0).clamp(0.0, 1.0); // 40 dB → quality = 1.0
-    // Penalise quality when temporal variance is very high (unstable signal).
-    let stability = (1.0 - (temporal_variance / (mean_amp * mean_amp + 1e-9)).clamp(0.0, 1.0)).max(0.0);
+                                                       // Penalise quality when temporal variance is very high (unstable signal).
+    let stability =
+        (1.0 - (temporal_variance / (mean_amp * mean_amp + 1e-9)).clamp(0.0, 1.0)).max(0.0);
     let signal_quality = (snr_quality * 0.6 + stability * 0.4).clamp(0.0, 1.0);
 
     // ── Breathing rate estimation ──
@@ -871,15 +973,26 @@ fn extract_features_from_frame(
         confidence: (0.4 + signal_quality * 0.3 + motion_score * 0.3).clamp(0.0, 1.0),
     };
 
-    (features, raw_classification, breathing_rate_hz, sub_variances, motion_score)
+    (
+        features,
+        raw_classification,
+        breathing_rate_hz,
+        sub_variances,
+        motion_score,
+    )
 }
 
 /// Simple threshold classification (no smoothing) — used as the "raw" input.
 fn raw_classify(score: f64) -> String {
-    if score > 0.25 { "active".into() }
-    else if score > 0.12 { "present_moving".into() }
-    else if score > 0.04 { "present_still".into() }
-    else { "absent".into() }
+    if score > 0.25 {
+        "active".into()
+    } else if score > 0.12 {
+        "present_moving".into()
+    } else if score > 0.04 {
+        "present_still".into()
+    } else {
+        "absent".into()
+    }
 }
 
 /// Debounce frames required before state transition (at ~10 FPS = ~0.4s).
@@ -902,16 +1015,16 @@ fn smooth_and_classify(state: &mut AppStateInner, raw: &mut ClassificationInfo, 
         // During warm-up, aggressively learn the baseline.
         state.baseline_motion = state.baseline_motion * 0.9 + raw_motion * 0.1;
     } else if raw_motion < state.smoothed_motion + 0.05 {
-        state.baseline_motion = state.baseline_motion * (1.0 - BASELINE_EMA_ALPHA)
-                              + raw_motion * BASELINE_EMA_ALPHA;
+        state.baseline_motion =
+            state.baseline_motion * (1.0 - BASELINE_EMA_ALPHA) + raw_motion * BASELINE_EMA_ALPHA;
     }
 
     // 2. Subtract baseline and clamp.
     let adjusted = (raw_motion - state.baseline_motion * 0.7).max(0.0);
 
     // 3. EMA smooth the adjusted score.
-    state.smoothed_motion = state.smoothed_motion * (1.0 - MOTION_EMA_ALPHA)
-                          + adjusted * MOTION_EMA_ALPHA;
+    state.smoothed_motion =
+        state.smoothed_motion * (1.0 - MOTION_EMA_ALPHA) + adjusted * MOTION_EMA_ALPHA;
     let sm = state.smoothed_motion;
 
     // 4. Classify from smoothed score.
@@ -943,10 +1056,16 @@ fn smooth_and_classify(state: &mut AppStateInner, raw: &mut ClassificationInfo, 
 
 /// If an adaptive model is loaded, override the classification with the
 /// model's prediction.  Uses the full 15-feature vector for higher accuracy.
-fn adaptive_override(state: &AppStateInner, features: &FeatureInfo, classification: &mut ClassificationInfo) {
+fn adaptive_override(
+    state: &AppStateInner,
+    features: &FeatureInfo,
+    classification: &mut ClassificationInfo,
+) {
     if let Some(ref model) = state.adaptive_model {
         // Get current frame amplitudes from the latest history entry.
-        let amps = state.frame_history.back()
+        let amps = state
+            .frame_history
+            .back()
             .map(|v| v.as_slice())
             .unwrap_or(&[]);
         let feat_arr = adaptive_classifier::features_from_runtime(
@@ -995,11 +1114,15 @@ fn smooth_vitals(state: &mut AppStateInner, raw: &VitalSigns) -> VitalSigns {
     // Push into buffer (only non-outlier values)
     if hr_ok && raw_hr > 0.0 {
         state.hr_buffer.push_back(raw_hr);
-        if state.hr_buffer.len() > VITAL_MEDIAN_WINDOW { state.hr_buffer.pop_front(); }
+        if state.hr_buffer.len() > VITAL_MEDIAN_WINDOW {
+            state.hr_buffer.pop_front();
+        }
     }
     if br_ok && raw_br > 0.0 {
         state.br_buffer.push_back(raw_br);
-        if state.br_buffer.len() > VITAL_MEDIAN_WINDOW { state.br_buffer.pop_front(); }
+        if state.br_buffer.len() > VITAL_MEDIAN_WINDOW {
+            state.br_buffer.pop_front();
+        }
     }
 
     // Compute trimmed mean: drop top/bottom 25% then average the middle 50%.
@@ -1014,8 +1137,8 @@ fn smooth_vitals(state: &mut AppStateInner, raw: &VitalSigns) -> VitalSigns {
         if state.smoothed_hr < 1.0 {
             state.smoothed_hr = trimmed_hr;
         } else if (trimmed_hr - state.smoothed_hr).abs() > HR_DEAD_BAND {
-            state.smoothed_hr = state.smoothed_hr * (1.0 - VITAL_EMA_ALPHA)
-                              + trimmed_hr * VITAL_EMA_ALPHA;
+            state.smoothed_hr =
+                state.smoothed_hr * (1.0 - VITAL_EMA_ALPHA) + trimmed_hr * VITAL_EMA_ALPHA;
         }
         // else: within dead-band, hold current value
     }
@@ -1023,8 +1146,8 @@ fn smooth_vitals(state: &mut AppStateInner, raw: &VitalSigns) -> VitalSigns {
         if state.smoothed_br < 1.0 {
             state.smoothed_br = trimmed_br;
         } else if (trimmed_br - state.smoothed_br).abs() > BR_DEAD_BAND {
-            state.smoothed_br = state.smoothed_br * (1.0 - VITAL_EMA_ALPHA)
-                              + trimmed_br * VITAL_EMA_ALPHA;
+            state.smoothed_br =
+                state.smoothed_br * (1.0 - VITAL_EMA_ALPHA) + trimmed_br * VITAL_EMA_ALPHA;
         }
     }
 
@@ -1033,8 +1156,16 @@ fn smooth_vitals(state: &mut AppStateInner, raw: &VitalSigns) -> VitalSigns {
     state.smoothed_br_conf = state.smoothed_br_conf * 0.92 + raw.breathing_confidence * 0.08;
 
     VitalSigns {
-        breathing_rate_bpm: if state.smoothed_br > 1.0 { Some(state.smoothed_br) } else { None },
-        heart_rate_bpm: if state.smoothed_hr > 1.0 { Some(state.smoothed_hr) } else { None },
+        breathing_rate_bpm: if state.smoothed_br > 1.0 {
+            Some(state.smoothed_br)
+        } else {
+            None
+        },
+        heart_rate_bpm: if state.smoothed_hr > 1.0 {
+            Some(state.smoothed_hr)
+        } else {
+            None
+        },
         breathing_confidence: state.smoothed_br_conf,
         heartbeat_confidence: state.smoothed_hr_conf,
         signal_quality: raw.signal_quality,
@@ -1044,7 +1175,9 @@ fn smooth_vitals(state: &mut AppStateInner, raw: &VitalSigns) -> VitalSigns {
 /// Trimmed mean: sort, drop top/bottom 25%, average the middle 50%.
 /// More robust than median (uses more data) and less noisy than raw mean.
 fn trimmed_mean(buf: &VecDeque<f64>) -> f64 {
-    if buf.is_empty() { return 0.0; }
+    if buf.is_empty() {
+        return 0.0;
+    }
     let mut sorted: Vec<f64> = buf.iter().copied().collect();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let n = sorted.len();
@@ -1055,6 +1188,225 @@ fn trimmed_mean(buf: &VecDeque<f64>) -> f64 {
     } else {
         middle.iter().sum::<f64>() / middle.len() as f64
     }
+}
+
+fn current_platform() -> PlatformFlavor {
+    #[cfg(target_os = "macos")]
+    {
+        return PlatformFlavor::Macos;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return PlatformFlavor::Windows;
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        PlatformFlavor::Other
+    }
+}
+
+fn infer_wifi_radio_type(channel: u8) -> RadioType {
+    match channel {
+        1..=14 => RadioType::N,
+        36..=177 => RadioType::Ac,
+        _ => RadioType::Ax,
+    }
+}
+
+fn parse_band_label(band: &str, channel: u8) -> Result<BandType, String> {
+    let normalized = band.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "2.4ghz" | "2.4 ghz" | "2ghz" | "2 ghz" | "2.4" => Ok(BandType::Band2_4GHz),
+        "5ghz" | "5 ghz" | "5" => Ok(BandType::Band5GHz),
+        "6ghz" | "6 ghz" | "6" => Ok(BandType::Band6GHz),
+        "" => Ok(BandType::from_channel(channel)),
+        _ => Err(format!(
+            "field `band` must be one of 2.4GHz, 5GHz, or 6GHz; got '{band}'"
+        )),
+    }
+}
+
+fn derive_wifi_source_label(observations: &[BssidObservation], fallback: &str) -> String {
+    observations
+        .iter()
+        .find_map(|obs| {
+            let ssid = obs.ssid.trim();
+            (!ssid.is_empty()).then(|| format!("wifi:{ssid}"))
+        })
+        .unwrap_or_else(|| fallback.to_owned())
+}
+
+fn resolve_auto_source(
+    platform: PlatformFlavor,
+    esp32_available: bool,
+    wifi_available: bool,
+) -> ResolvedSource {
+    if esp32_available {
+        ResolvedSource::Esp32
+    } else if matches!(platform, PlatformFlavor::Macos | PlatformFlavor::Windows) && wifi_available
+    {
+        ResolvedSource::Wifi
+    } else {
+        ResolvedSource::Simulate
+    }
+}
+
+fn resolve_explicit_source(
+    requested: RequestedSource,
+    platform: PlatformFlavor,
+    wifi_available: bool,
+) -> Result<ResolvedSource, String> {
+    match requested {
+        RequestedSource::Esp32 => Ok(ResolvedSource::Esp32),
+        RequestedSource::Simulate => Ok(ResolvedSource::Simulate),
+        RequestedSource::Wifi => match platform {
+            PlatformFlavor::Macos => wifi_available.then_some(ResolvedSource::Wifi).ok_or_else(|| {
+                "native macOS Wi-Fi is unavailable; build the helper, export `RUVIEW_MAC_WIFI_HELPER` if needed, then retry `--source wifi`".to_string()
+            }),
+            PlatformFlavor::Windows => wifi_available.then_some(ResolvedSource::Wifi).ok_or_else(|| {
+                "Windows Wi-Fi is unavailable; connect to Wi-Fi before starting `--source wifi`".to_string()
+            }),
+            PlatformFlavor::Other => Err(
+                "`--source wifi` is only supported on Windows and macOS in this server".to_string(),
+            ),
+        },
+        RequestedSource::MacosBridge => match platform {
+            PlatformFlavor::Macos => wifi_available
+                .then_some(ResolvedSource::MacosBridge)
+                .ok_or_else(|| {
+                    "`--source macos-bridge` requires a working macOS helper and active Wi-Fi association".to_string()
+                }),
+            _ => Err("`--source macos-bridge` is only supported on macOS".to_string()),
+        },
+        RequestedSource::Auto => Err("internal error: auto source must be resolved separately".into()),
+    }
+}
+
+async fn resolve_source(args: &Args) -> Result<ResolvedSource, String> {
+    let requested = RequestedSource::parse(args.source.trim())?;
+    let platform = current_platform();
+
+    match requested {
+        RequestedSource::Auto => {
+            info!("Auto-detecting data source...");
+            let esp32_available = probe_esp32(args.udp_port).await;
+            let wifi_available = match platform {
+                PlatformFlavor::Macos => probe_macos_wifi().await,
+                PlatformFlavor::Windows => probe_windows_wifi().await,
+                PlatformFlavor::Other => false,
+            };
+
+            let resolved = resolve_auto_source(platform, esp32_available, wifi_available);
+            match resolved {
+                ResolvedSource::Esp32 => {
+                    info!("  ESP32 CSI detected on UDP :{}", args.udp_port);
+                }
+                ResolvedSource::Wifi => match platform {
+                    PlatformFlavor::Macos => info!("  macOS WiFi detected"),
+                    PlatformFlavor::Windows => info!("  Windows WiFi detected"),
+                    PlatformFlavor::Other => {}
+                },
+                ResolvedSource::Simulate => info!("  No hardware detected, using simulation"),
+                ResolvedSource::MacosBridge => {}
+            }
+            Ok(resolved)
+        }
+        RequestedSource::Wifi => {
+            let wifi_available = match platform {
+                PlatformFlavor::Macos => probe_macos_wifi().await,
+                PlatformFlavor::Windows => probe_windows_wifi().await,
+                PlatformFlavor::Other => false,
+            };
+            resolve_explicit_source(requested, platform, wifi_available)
+        }
+        RequestedSource::MacosBridge => {
+            if !matches!(platform, PlatformFlavor::Macos) {
+                return Err("`--source macos-bridge` is only supported on macOS".to_string());
+            }
+            if !probe_macos_wifi().await {
+                return Err(
+                    "`--source macos-bridge` requires a working macOS helper and active Wi-Fi association"
+                        .to_string(),
+                );
+            }
+            if !probe_macos_bridge().await {
+                return Err(format!(
+                    "`--source macos-bridge` requires a local NDJSON bridge sender on udp://127.0.0.1:{MACOS_BRIDGE_UDP_PORT}"
+                ));
+            }
+            Ok(ResolvedSource::MacosBridge)
+        }
+        other => resolve_explicit_source(other, platform, false),
+    }
+}
+
+fn parse_macos_bridge_datagram(buf: &[u8]) -> Result<MacosBridgeRecord, String> {
+    if parse_esp32_frame(buf).is_some() {
+        return Err("macos-bridge expects JSON datagrams, not ESP32 binary frames".to_string());
+    }
+
+    let text = std::str::from_utf8(buf)
+        .map_err(|e| format!("macos-bridge datagram must be UTF-8 JSON: {e}"))?;
+    serde_json::from_str::<MacosBridgeRecord>(text.trim())
+        .map_err(|e| format!("invalid macos-bridge JSON payload: {e}"))
+}
+
+fn macos_bridge_to_observation(record: MacosBridgeRecord) -> Result<BssidObservation, String> {
+    if record.bridge_kind != "connected_rssi" {
+        return Err(format!(
+            "field `bridge_kind` must equal 'connected_rssi'; got '{}'",
+            record.bridge_kind
+        ));
+    }
+    if record.interface.trim().is_empty() {
+        return Err("field `interface` must not be empty".to_string());
+    }
+    if !record.is_connected {
+        return Err("field `is_connected` must be true for macos-bridge records".to_string());
+    }
+    if record.channel == 0 {
+        return Err("field `channel` must be greater than 0".to_string());
+    }
+
+    let band = parse_band_label(&record.band, record.channel)?;
+    let bssid = BssidId::parse(&record.bssid)
+        .map_err(|_| format!("field `bssid` is not a valid MAC address: {}", record.bssid))?;
+    let signal_pct = ((record.rssi + 100.0) * 2.0).clamp(0.0, 100.0);
+    let _ = (
+        record.timestamp,
+        record.bssid_synthetic,
+        record.noise,
+        record.tx_rate_mbps,
+    );
+
+    Ok(BssidObservation {
+        bssid,
+        rssi_dbm: record.rssi,
+        signal_pct,
+        channel: record.channel,
+        band,
+        radio_type: infer_wifi_radio_type(record.channel),
+        ssid: record.ssid,
+        timestamp: Instant::now(),
+    })
+}
+
+async fn scan_with_port<T>(scanner: Arc<T>) -> Result<Vec<BssidObservation>, String>
+where
+    T: WlanScanPort + 'static,
+{
+    tokio::task::spawn_blocking(move || scanner.scan().map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| format!("scan task failed: {e}"))?
+}
+
+async fn connected_with_port<T>(scanner: Arc<T>) -> Result<Option<BssidObservation>, String>
+where
+    T: WlanScanPort + 'static,
+{
+    tokio::task::spawn_blocking(move || scanner.connected().map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| format!("connected task failed: {e}"))?
 }
 
 // ── Windows WiFi RSSI collector ──────────────────────────────────────────────
@@ -1092,9 +1444,168 @@ fn parse_netsh_interfaces_output(output: &str) -> Option<(f64, f64, String)> {
     }
 }
 
+async fn publish_multi_bssid_tick(
+    state: &SharedState,
+    registry: &mut BssidRegistry,
+    pipeline: &mut WindowsWifiPipeline,
+    observations: Vec<BssidObservation>,
+    seq: u32,
+    tick_ms: u64,
+    fallback_source_label: &str,
+    source_override: Option<&str>,
+) {
+    if observations.is_empty() {
+        return;
+    }
+
+    let obs_count = observations.len();
+    let source_label = source_override
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| derive_wifi_source_label(&observations, fallback_source_label));
+
+    registry.update(&observations);
+    let multi_ap_frame = registry.to_multi_ap_frame();
+    let enhanced = pipeline.process(&multi_ap_frame);
+
+    let first_rssi = observations.first().map(|o| o.rssi_dbm).unwrap_or(-80.0);
+
+    let frame = Esp32Frame {
+        magic: 0xC511_0001,
+        node_id: 0,
+        n_antennas: 1,
+        n_subcarriers: obs_count.min(255) as u8,
+        freq_mhz: 2437,
+        sequence: seq,
+        rssi: first_rssi.clamp(-128.0, 127.0) as i8,
+        noise_floor: -90,
+        amplitudes: multi_ap_frame.amplitudes.clone(),
+        phases: multi_ap_frame.phases.clone(),
+    };
+
+    let mut s_write_pre = state.write().await;
+    s_write_pre
+        .frame_history
+        .push_back(frame.amplitudes.clone());
+    if s_write_pre.frame_history.len() > FRAME_HISTORY_CAPACITY {
+        s_write_pre.frame_history.pop_front();
+    }
+    let sample_rate_hz = 1000.0 / tick_ms as f64;
+    let (features, mut classification, breathing_rate_hz, sub_variances, raw_motion) =
+        extract_features_from_frame(&frame, &s_write_pre.frame_history, sample_rate_hz);
+    smooth_and_classify(&mut s_write_pre, &mut classification, raw_motion);
+    adaptive_override(&s_write_pre, &features, &mut classification);
+    drop(s_write_pre);
+
+    let enhanced_motion = Some(serde_json::json!({
+        "score": enhanced.motion.score,
+        "level": format!("{:?}", enhanced.motion.level),
+        "contributing_bssids": enhanced.motion.contributing_bssids,
+    }));
+
+    let enhanced_breathing = enhanced.breathing.as_ref().map(|b| {
+        serde_json::json!({
+            "rate_bpm": b.rate_bpm,
+            "confidence": b.confidence,
+            "bssid_count": b.bssid_count,
+        })
+    });
+
+    let posture_str = enhanced.posture.map(|p| format!("{p:?}"));
+    let sig_quality_score = Some(enhanced.signal_quality.score);
+    let verdict_str = Some(format!("{:?}", enhanced.verdict));
+    let bssid_n = Some(enhanced.bssid_count);
+
+    let mut s = state.write().await;
+    s.source = source_label.clone();
+    s.rssi_history.push_back(first_rssi);
+    if s.rssi_history.len() > 60 {
+        s.rssi_history.pop_front();
+    }
+
+    s.tick += 1;
+    let tick = s.tick;
+
+    let motion_score = if classification.motion_level == "active" {
+        0.8
+    } else if classification.motion_level == "present_still" {
+        0.3
+    } else {
+        0.05
+    };
+
+    let raw_vitals = s
+        .vital_detector
+        .process_frame(&frame.amplitudes, &frame.phases);
+    let vitals = smooth_vitals(&mut s, &raw_vitals);
+    s.latest_vitals = vitals.clone();
+
+    let feat_variance = features.variance;
+    let raw_score = compute_person_score(&features);
+    s.smoothed_person_score = s.smoothed_person_score * 0.85 + raw_score * 0.15;
+    let est_persons = if classification.presence {
+        score_to_person_count(s.smoothed_person_score)
+    } else {
+        0
+    };
+
+    let mut update = SensingUpdate {
+        msg_type: "sensing_update".to_string(),
+        timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
+        source: source_label.clone(),
+        tick,
+        nodes: vec![NodeInfo {
+            node_id: 0,
+            rssi_dbm: first_rssi,
+            position: [0.0, 0.0, 0.0],
+            amplitude: multi_ap_frame.amplitudes,
+            subcarrier_count: obs_count,
+        }],
+        features,
+        classification,
+        signal_field: generate_signal_field(
+            first_rssi,
+            motion_score,
+            breathing_rate_hz,
+            feat_variance.min(1.0),
+            &sub_variances,
+        ),
+        vital_signs: Some(vitals),
+        enhanced_motion,
+        enhanced_breathing,
+        posture: posture_str,
+        signal_quality_score: sig_quality_score,
+        quality_verdict: verdict_str,
+        bssid_count: bssid_n,
+        pose_keypoints: None,
+        model_status: None,
+        persons: None,
+        estimated_persons: if est_persons > 0 {
+            Some(est_persons)
+        } else {
+            None
+        },
+    };
+
+    let persons = derive_pose_from_sensing(&update);
+    if !persons.is_empty() {
+        update.persons = Some(persons);
+    }
+
+    if let Ok(json) = serde_json::to_string(&update) {
+        let _ = s.tx.send(json);
+    }
+    s.latest_update = Some(update);
+
+    debug!(
+        "WiFi tick #{tick}: {obs_count} BSSIDs, quality={:.2}, verdict={:?}",
+        enhanced.signal_quality.score, enhanced.verdict
+    );
+}
+
 async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
     let mut interval = tokio::time::interval(Duration::from_millis(tick_ms));
     let mut seq: u32 = 0;
+    let scanner = Arc::new(WlanApiScanner::new());
 
     // ADR-022 Phase 3: Multi-BSSID pipeline state (kept across ticks)
     let mut registry = BssidRegistry::new(32, 30);
@@ -1109,199 +1620,30 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
         interval.tick().await;
         seq += 1;
 
-        // ── Step 1: Run multi-BSSID scan via spawn_blocking ──────────
-        // NetshBssidScanner is not Send, so we run `netsh` and parse
-        // the output inside a blocking closure.
-        let bssid_scan_result = tokio::task::spawn_blocking(|| {
-            let output = std::process::Command::new("netsh")
-                .args(["wlan", "show", "networks", "mode=bssid"])
-                .output()
-                .map_err(|e| format!("netsh bssid scan failed: {e}"))?;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(format!(
-                    "netsh exited with {}: {}",
-                    output.status,
-                    stderr.trim()
-                ));
-            }
-
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            parse_netsh_bssid_output(&stdout).map_err(|e| format!("parse error: {e}"))
-        })
-        .await;
-
-        // Unwrap the JoinHandle result, then the inner Result.
-        let observations = match bssid_scan_result {
-            Ok(Ok(obs)) if !obs.is_empty() => obs,
-            Ok(Ok(_empty)) => {
+        let observations = match scan_with_port(scanner.clone()).await {
+            Ok(obs) if !obs.is_empty() => obs,
+            Ok(_) => {
                 debug!("Multi-BSSID scan returned 0 observations, falling back");
                 windows_wifi_fallback_tick(&state, seq).await;
                 continue;
             }
-            Ok(Err(e)) => {
+            Err(e) => {
                 warn!("Multi-BSSID scan error: {e}, falling back");
                 windows_wifi_fallback_tick(&state, seq).await;
                 continue;
             }
-            Err(join_err) => {
-                error!("spawn_blocking panicked: {join_err}");
-                continue;
-            }
         };
-
-        let obs_count = observations.len();
-
-        // Derive SSID from the first observation for the source label.
-        let ssid = observations
-            .first()
-            .map(|o| o.ssid.clone())
-            .unwrap_or_else(|| "Unknown".into());
-
-        // ── Step 2: Feed observations into registry ──────────────────
-        registry.update(&observations);
-        let multi_ap_frame = registry.to_multi_ap_frame();
-
-        // ── Step 3: Run enhanced pipeline ────────────────────────────
-        let enhanced = pipeline.process(&multi_ap_frame);
-
-        // ── Step 4: Build backward-compatible Esp32Frame ─────────────
-        let first_rssi = observations
-            .first()
-            .map(|o| o.rssi_dbm)
-            .unwrap_or(-80.0);
-        let _first_signal_pct = observations
-            .first()
-            .map(|o| o.signal_pct)
-            .unwrap_or(40.0);
-
-        let frame = Esp32Frame {
-            magic: 0xC511_0001,
-            node_id: 0,
-            n_antennas: 1,
-            n_subcarriers: obs_count.min(255) as u8,
-            freq_mhz: 2437,
-            sequence: seq,
-            rssi: first_rssi.clamp(-128.0, 127.0) as i8,
-            noise_floor: -90,
-            amplitudes: multi_ap_frame.amplitudes.clone(),
-            phases: multi_ap_frame.phases.clone(),
-        };
-
-        // ── Step 4b: Update frame history and extract features ───────
-        let mut s_write_pre = state.write().await;
-        s_write_pre.frame_history.push_back(frame.amplitudes.clone());
-        if s_write_pre.frame_history.len() > FRAME_HISTORY_CAPACITY {
-            s_write_pre.frame_history.pop_front();
-        }
-        let sample_rate_hz = 1000.0 / tick_ms as f64;
-        let (features, mut classification, breathing_rate_hz, sub_variances, raw_motion) =
-            extract_features_from_frame(&frame, &s_write_pre.frame_history, sample_rate_hz);
-        smooth_and_classify(&mut s_write_pre, &mut classification, raw_motion);
-        adaptive_override(&s_write_pre, &features, &mut classification);
-        drop(s_write_pre);
-
-        // ── Step 5: Build enhanced fields from pipeline result ───────
-        let enhanced_motion = Some(serde_json::json!({
-            "score": enhanced.motion.score,
-            "level": format!("{:?}", enhanced.motion.level),
-            "contributing_bssids": enhanced.motion.contributing_bssids,
-        }));
-
-        let enhanced_breathing = enhanced.breathing.as_ref().map(|b| {
-            serde_json::json!({
-                "rate_bpm": b.rate_bpm,
-                "confidence": b.confidence,
-                "bssid_count": b.bssid_count,
-            })
-        });
-
-        let posture_str = enhanced.posture.map(|p| format!("{p:?}"));
-        let sig_quality_score = Some(enhanced.signal_quality.score);
-        let verdict_str = Some(format!("{:?}", enhanced.verdict));
-        let bssid_n = Some(enhanced.bssid_count);
-
-        // ── Step 6: Update shared state ──────────────────────────────
-        let mut s = state.write().await;
-        s.source = format!("wifi:{ssid}");
-        s.rssi_history.push_back(first_rssi);
-        if s.rssi_history.len() > 60 {
-            s.rssi_history.pop_front();
-        }
-
-        s.tick += 1;
-        let tick = s.tick;
-
-        let motion_score = if classification.motion_level == "active" {
-            0.8
-        } else if classification.motion_level == "present_still" {
-            0.3
-        } else {
-            0.05
-        };
-
-        let raw_vitals = s.vital_detector.process_frame(&frame.amplitudes, &frame.phases);
-        let vitals = smooth_vitals(&mut s, &raw_vitals);
-        s.latest_vitals = vitals.clone();
-
-        let feat_variance = features.variance;
-
-        // Multi-person estimation with temporal smoothing (EMA α=0.15).
-        let raw_score = compute_person_score(&features);
-        s.smoothed_person_score = s.smoothed_person_score * 0.85 + raw_score * 0.15;
-        let est_persons = if classification.presence {
-            score_to_person_count(s.smoothed_person_score)
-        } else {
-            0
-        };
-
-        let mut update = SensingUpdate {
-            msg_type: "sensing_update".to_string(),
-            timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
-            source: format!("wifi:{ssid}"),
-            tick,
-            nodes: vec![NodeInfo {
-                node_id: 0,
-                rssi_dbm: first_rssi,
-                position: [0.0, 0.0, 0.0],
-                amplitude: multi_ap_frame.amplitudes,
-                subcarrier_count: obs_count,
-            }],
-            features,
-            classification,
-            signal_field: generate_signal_field(
-                first_rssi, motion_score, breathing_rate_hz,
-                feat_variance.min(1.0), &sub_variances,
-            ),
-            vital_signs: Some(vitals),
-            enhanced_motion,
-            enhanced_breathing,
-            posture: posture_str,
-            signal_quality_score: sig_quality_score,
-            quality_verdict: verdict_str,
-            bssid_count: bssid_n,
-            pose_keypoints: None,
-            model_status: None,
-            persons: None,
-            estimated_persons: if est_persons > 0 { Some(est_persons) } else { None },
-        };
-
-        // Populate persons from the sensing update.
-        let persons = derive_pose_from_sensing(&update);
-        if !persons.is_empty() {
-            update.persons = Some(persons);
-        }
-
-        if let Ok(json) = serde_json::to_string(&update) {
-            let _ = s.tx.send(json);
-        }
-        s.latest_update = Some(update);
-
-        debug!(
-            "Multi-BSSID tick #{tick}: {obs_count} BSSIDs, quality={:.2}, verdict={:?}",
-            enhanced.signal_quality.score, enhanced.verdict
-        );
+        publish_multi_bssid_tick(
+            &state,
+            &mut registry,
+            &mut pipeline,
+            observations,
+            seq,
+            tick_ms,
+            "wifi:unknown",
+            None,
+        )
+        .await;
     }
 }
 
@@ -1371,7 +1713,9 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         0.05
     };
 
-    let raw_vitals = s.vital_detector.process_frame(&frame.amplitudes, &frame.phases);
+    let raw_vitals = s
+        .vital_detector
+        .process_frame(&frame.amplitudes, &frame.phases);
     let vitals = smooth_vitals(&mut s, &raw_vitals);
     s.latest_vitals = vitals.clone();
 
@@ -1401,8 +1745,11 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         features,
         classification,
         signal_field: generate_signal_field(
-            rssi_dbm, motion_score, breathing_rate_hz,
-            feat_variance.min(1.0), &sub_variances,
+            rssi_dbm,
+            motion_score,
+            breathing_rate_hz,
+            feat_variance.min(1.0),
+            &sub_variances,
         ),
         vital_signs: Some(vitals),
         enhanced_motion: None,
@@ -1414,7 +1761,11 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         pose_keypoints: None,
         model_status: None,
         persons: None,
-        estimated_persons: if est_persons > 0 { Some(est_persons) } else { None },
+        estimated_persons: if est_persons > 0 {
+            Some(est_persons)
+        } else {
+            None
+        },
     };
 
     let persons = derive_pose_from_sensing(&update);
@@ -1428,6 +1779,147 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
     s.latest_update = Some(update);
 }
 
+#[cfg(target_os = "macos")]
+async fn macos_wifi_task(state: SharedState, tick_ms: u64) {
+    let mut interval = tokio::time::interval(Duration::from_millis(tick_ms));
+    let mut seq: u32 = 0;
+    let mut idle_ticks: u32 = 0;
+    let scanner = Arc::new(MacosCoreWlanScanner::new());
+    let mut registry = BssidRegistry::new(32, 30);
+    let mut pipeline = WindowsWifiPipeline::new();
+
+    info!("macOS CoreWLAN pipeline active (tick={}ms)", tick_ms);
+    state.write().await.source = "wifi:macos".to_string();
+
+    loop {
+        interval.tick().await;
+        seq += 1;
+
+        let observations = match scan_with_port(scanner.clone()).await {
+            Ok(obs) if !obs.is_empty() => obs,
+            Ok(_) => match connected_with_port(scanner.clone()).await {
+                Ok(Some(obs)) => vec![obs],
+                Ok(None) => {
+                    idle_ticks = idle_ticks.saturating_add(1);
+                    if idle_ticks == 1 || idle_ticks % 20 == 0 {
+                        warn!(
+                            "macOS Wi-Fi scan produced no visible or connected networks; waiting for CoreWLAN observations"
+                        );
+                    } else {
+                        debug!("macOS scan returned no connected observations");
+                    }
+                    continue;
+                }
+                Err(e) => {
+                    idle_ticks = idle_ticks.saturating_add(1);
+                    warn!("macOS connected probe failed after empty scan: {e}");
+                    continue;
+                }
+            },
+            Err(e) => {
+                idle_ticks = idle_ticks.saturating_add(1);
+                warn!("macOS Wi-Fi scan failed: {e}");
+                continue;
+            }
+        };
+        idle_ticks = 0;
+
+        publish_multi_bssid_tick(
+            &state,
+            &mut registry,
+            &mut pipeline,
+            observations,
+            seq,
+            tick_ms,
+            "wifi:macos",
+            None,
+        )
+        .await;
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn macos_wifi_task(_state: SharedState, _tick_ms: u64) {
+    error!("macOS Wi-Fi task requested on a non-macOS build");
+}
+
+async fn macos_bridge_task(state: SharedState, tick_ms: u64) {
+    let addr = SocketAddr::from(([127, 0, 0, 1], MACOS_BRIDGE_UDP_PORT));
+    let socket = match UdpSocket::bind(addr).await {
+        Ok(socket) => socket,
+        Err(e) => {
+            error!(
+                "Failed to bind macOS bridge UDP port {}: {e}",
+                MACOS_BRIDGE_UDP_PORT
+            );
+            return;
+        }
+    };
+
+    let mut seq: u32 = 0;
+    let mut registry = BssidRegistry::new(8, 16);
+    let mut pipeline = WindowsWifiPipeline::new();
+    let mut buf = vec![0u8; 4096];
+
+    info!(
+        "macOS bridge listener active on udp://127.0.0.1:{} (expected interval ≈ {} ms)",
+        MACOS_BRIDGE_UDP_PORT, tick_ms
+    );
+    state.write().await.source = "wifi-bridge:macos".to_string();
+
+    loop {
+        let (len, peer) =
+            match tokio::time::timeout(Duration::from_secs(5), socket.recv_from(&mut buf)).await {
+                Ok(Ok(result)) => result,
+                Ok(Err(e)) => {
+                    warn!("macOS bridge UDP receive failed: {e}");
+                    continue;
+                }
+                Err(_) => {
+                    warn!(
+                        "macOS bridge listener is waiting for NDJSON packets on udp://127.0.0.1:{}",
+                        MACOS_BRIDGE_UDP_PORT
+                    );
+                    continue;
+                }
+            };
+
+        if !peer.ip().is_loopback() {
+            warn!("Ignoring non-loopback macOS bridge sender: {peer}");
+            continue;
+        }
+
+        let record = match parse_macos_bridge_datagram(&buf[..len]) {
+            Ok(record) => record,
+            Err(e) => {
+                warn!("Rejected macOS bridge payload from {peer}: {e}");
+                continue;
+            }
+        };
+
+        let observation = match macos_bridge_to_observation(record) {
+            Ok(observation) => observation,
+            Err(e) => {
+                warn!("Rejected macOS bridge observation from {peer}: {e}");
+                continue;
+            }
+        };
+
+        seq = seq.wrapping_add(1);
+        publish_multi_bssid_tick(
+            &state,
+            &mut registry,
+            &mut pipeline,
+            vec![observation],
+            seq,
+            tick_ms,
+            "wifi-bridge:macos",
+            Some("wifi-bridge:macos"),
+        )
+        .await;
+    }
+}
+
 /// Probe if Windows WiFi is connected
 async fn probe_windows_wifi() -> bool {
     match tokio::process::Command::new("netsh")
@@ -1438,6 +1930,34 @@ async fn probe_windows_wifi() -> bool {
         Ok(o) => {
             let out = String::from_utf8_lossy(&o.stdout);
             parse_netsh_interfaces_output(&out).is_some()
+        }
+        Err(_) => false,
+    }
+}
+
+#[cfg(target_os = "macos")]
+async fn probe_macos_wifi() -> bool {
+    tokio::task::spawn_blocking(|| MacosCoreWlanScanner::new().probe_sync().is_ok())
+        .await
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn probe_macos_wifi() -> bool {
+    false
+}
+
+async fn probe_macos_bridge() -> bool {
+    let addr = SocketAddr::from(([127, 0, 0, 1], MACOS_BRIDGE_UDP_PORT));
+    match UdpSocket::bind(addr).await {
+        Ok(socket) => {
+            let mut buf = [0u8; 4096];
+            match tokio::time::timeout(Duration::from_secs(2), socket.recv_from(&mut buf)).await {
+                Ok(Ok((len, peer))) if peer.ip().is_loopback() => {
+                    parse_macos_bridge_datagram(&buf[..len]).is_ok()
+                }
+                _ => false,
+            }
         }
         Err(_) => false,
     }
@@ -1550,7 +2070,9 @@ async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
         "type": "connection_established",
         "payload": { "status": "connected", "backend": "rust+ruvector" }
     });
-    let _ = socket.send(Message::Text(conn_msg.to_string().into())).await;
+    let _ = socket
+        .send(Message::Text(conn_msg.to_string().into()))
+        .await;
 
     loop {
         tokio::select! {
@@ -1778,7 +2300,8 @@ fn derive_single_person_pose(
     let lean_x = (feat.dominant_freq_hz / 5.0 - 1.0).clamp(-1.0, 1.0) * 18.0;
 
     let stride_x = if is_walking {
-        let stride_phase = (feat.motion_band_power * 0.7 + update.tick as f64 * 0.12 + phase_offset).sin();
+        let stride_phase =
+            (feat.motion_band_power * 0.7 + update.tick as f64 * 0.12 + phase_offset).sin();
         stride_phase * 45.0 * motion_score
     } else {
         0.0
@@ -1800,36 +2323,51 @@ fn derive_single_person_pose(
     // ── COCO 17-keypoint offsets from hip-center ──────────────────────────────
 
     let kp_names = [
-        "nose", "left_eye", "right_eye", "left_ear", "right_ear",
-        "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
-        "left_wrist", "right_wrist", "left_hip", "right_hip",
-        "left_knee", "right_knee", "left_ankle", "right_ankle",
+        "nose",
+        "left_eye",
+        "right_eye",
+        "left_ear",
+        "right_ear",
+        "left_shoulder",
+        "right_shoulder",
+        "left_elbow",
+        "right_elbow",
+        "left_wrist",
+        "right_wrist",
+        "left_hip",
+        "right_hip",
+        "left_knee",
+        "right_knee",
+        "left_ankle",
+        "right_ankle",
     ];
 
     let kp_offsets: [(f64, f64); 17] = [
-        (  0.0,  -80.0), // 0  nose
-        ( -8.0,  -88.0), // 1  left_eye
-        (  8.0,  -88.0), // 2  right_eye
-        (-16.0,  -82.0), // 3  left_ear
-        ( 16.0,  -82.0), // 4  right_ear
-        (-30.0,  -50.0), // 5  left_shoulder
-        ( 30.0,  -50.0), // 6  right_shoulder
-        (-45.0,  -15.0), // 7  left_elbow
-        ( 45.0,  -15.0), // 8  right_elbow
-        (-50.0,   20.0), // 9  left_wrist
-        ( 50.0,   20.0), // 10 right_wrist
-        (-20.0,   20.0), // 11 left_hip
-        ( 20.0,   20.0), // 12 right_hip
-        (-22.0,   70.0), // 13 left_knee
-        ( 22.0,   70.0), // 14 right_knee
-        (-24.0,  120.0), // 15 left_ankle
-        ( 24.0,  120.0), // 16 right_ankle
+        (0.0, -80.0),   // 0  nose
+        (-8.0, -88.0),  // 1  left_eye
+        (8.0, -88.0),   // 2  right_eye
+        (-16.0, -82.0), // 3  left_ear
+        (16.0, -82.0),  // 4  right_ear
+        (-30.0, -50.0), // 5  left_shoulder
+        (30.0, -50.0),  // 6  right_shoulder
+        (-45.0, -15.0), // 7  left_elbow
+        (45.0, -15.0),  // 8  right_elbow
+        (-50.0, 20.0),  // 9  left_wrist
+        (50.0, 20.0),   // 10 right_wrist
+        (-20.0, 20.0),  // 11 left_hip
+        (20.0, 20.0),   // 12 right_hip
+        (-22.0, 70.0),  // 13 left_knee
+        (22.0, 70.0),   // 14 right_knee
+        (-24.0, 120.0), // 15 left_ankle
+        (24.0, 120.0),  // 16 right_ankle
     ];
 
     const TORSO_KP: [usize; 4] = [5, 6, 11, 12];
     const EXTREMITY_KP: [usize; 4] = [9, 10, 15, 16];
 
-    let keypoints: Vec<PoseKeypoint> = kp_names.iter().zip(kp_offsets.iter())
+    let keypoints: Vec<PoseKeypoint> = kp_names
+        .iter()
+        .zip(kp_offsets.iter())
         .enumerate()
         .map(|(i, (name, (dx, dy)))| {
             let breath_dx = if TORSO_KP.contains(&i) {
@@ -1856,17 +2394,20 @@ fn derive_single_person_pose(
             };
 
             let kp_noise_x = ((noise_seed + i as f64 * 1.618).sin() * 43758.545).fract()
-                * feat.variance.sqrt().clamp(0.0, 3.0) * motion_score;
+                * feat.variance.sqrt().clamp(0.0, 3.0)
+                * motion_score;
             let kp_noise_y = ((noise_seed + i as f64 * 2.718).cos() * 31415.926).fract()
-                * feat.variance.sqrt().clamp(0.0, 3.0) * motion_score * 0.6;
+                * feat.variance.sqrt().clamp(0.0, 3.0)
+                * motion_score
+                * 0.6;
 
             let swing_dy = if is_walking {
                 let stride_phase =
                     (feat.motion_band_power * 0.7 + update.tick as f64 * 0.12 + phase_offset).sin();
                 match i {
-                    7 | 9  => -stride_phase * 20.0 * motion_score,
-                    8 | 10 =>  stride_phase * 20.0 * motion_score,
-                    13 | 15 =>  stride_phase * 25.0 * motion_score,
+                    7 | 9 => -stride_phase * 20.0 * motion_score,
+                    8 | 10 => stride_phase * 20.0 * motion_score,
+                    13 | 15 => stride_phase * 25.0 * motion_score,
                     14 | 16 => -stride_phase * 25.0 * motion_score,
                     _ => 0.0,
                 }
@@ -2030,8 +2571,11 @@ async fn pose_stats(State(state): State<SharedState>) -> Json<serde_json::Value>
 
 async fn pose_zones_summary(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
-    let presence = s.latest_update.as_ref()
-        .map(|u| u.classification.presence).unwrap_or(false);
+    let presence = s
+        .latest_update
+        .as_ref()
+        .map(|u| u.classification.presence)
+        .unwrap_or(false);
     Json(serde_json::json!({
         "zones": {
             "zone_1": { "person_count": if presence { 1 } else { 0 }, "status": "monitored" },
@@ -2071,9 +2615,10 @@ async fn get_active_model(State(state): State<SharedState>) -> Json<serde_json::
     let s = state.read().await;
     match &s.active_model_id {
         Some(id) => {
-            let model = s.discovered_models.iter().find(|m| {
-                m.get("id").and_then(|v| v.as_str()) == Some(id.as_str())
-            });
+            let model = s
+                .discovered_models
+                .iter()
+                .find(|m| m.get("id").and_then(|v| v.as_str()) == Some(id.as_str()));
             Json(serde_json::json!({
                 "active": model.cloned().unwrap_or_else(|| serde_json::json!({ "id": id })),
             }))
@@ -2087,7 +2632,8 @@ async fn load_model(
     State(state): State<SharedState>,
     Json(body): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
-    let model_id = body.get("id")
+    let model_id = body
+        .get("id")
         .or_else(|| body.get("model_id"))
         .and_then(|v| v.as_str())
         .unwrap_or("")
@@ -2128,7 +2674,9 @@ async fn delete_model(
     if path.exists() {
         if let Err(e) = std::fs::remove_file(&path) {
             warn!("Failed to delete model file {:?}: {}", path, e);
-            return Json(serde_json::json!({ "error": format!("delete failed: {e}"), "success": false }));
+            return Json(
+                serde_json::json!({ "error": format!("delete failed: {e}"), "success": false }),
+            );
         }
         // If this was the active model, unload it
         let mut s = state.write().await;
@@ -2136,9 +2684,8 @@ async fn delete_model(
             s.active_model_id = None;
             s.model_loaded = false;
         }
-        s.discovered_models.retain(|m| {
-            m.get("id").and_then(|v| v.as_str()) != Some(id.as_str())
-        });
+        s.discovered_models
+            .retain(|m| m.get("id").and_then(|v| v.as_str()) != Some(id.as_str()));
         info!("Model deleted: {id}");
         Json(serde_json::json!({ "success": true, "deleted": id }))
     } else {
@@ -2154,10 +2701,9 @@ async fn list_lora_profiles() -> Json<serde_json::Value> {
 }
 
 /// POST /api/v1/models/lora/activate — activate a LoRA adapter profile.
-async fn activate_lora_profile(
-    Json(body): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
-    let profile = body.get("profile")
+async fn activate_lora_profile(Json(body): Json<serde_json::Value>) -> Json<serde_json::Value> {
+    let profile = body
+        .get("profile")
         .or_else(|| body.get("name"))
         .and_then(|v| v.as_str())
         .unwrap_or("")
@@ -2177,12 +2723,15 @@ fn scan_model_files() -> Vec<serde_json::Value> {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("rvf") {
-                let name = path.file_stem()
+                let name = path
+                    .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("unknown")
                     .to_string();
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                let modified = entry.metadata().ok()
+                let modified = entry
+                    .metadata()
+                    .ok()
                     .and_then(|m| m.modified().ok())
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map(|d| d.as_secs())
@@ -2248,12 +2797,11 @@ async fn start_recording(
             "recording_id": s.recording_current_id,
         }));
     }
-    let id = body.get("id")
+    let id = body
+        .get("id")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            format!("rec_{}", chrono_timestamp())
-        });
+        .unwrap_or_else(|| format!("rec_{}", chrono_timestamp()));
 
     // Create the recording file
     let rec_path = PathBuf::from("data/recordings").join(format!("{}.jsonl", id));
@@ -2347,7 +2895,8 @@ async fn stop_recording(State(state): State<SharedState>) -> Json<serde_json::Va
     if let Some(tx) = s.recording_stop_tx.take() {
         let _ = tx.send(true);
     }
-    let duration_secs = s.recording_start_time
+    let duration_secs = s
+        .recording_start_time
         .map(|t| t.elapsed().as_secs())
         .unwrap_or(0);
     let rec_id = s.recording_current_id.take().unwrap_or_default();
@@ -2387,12 +2936,13 @@ async fn delete_recording(
     if path.exists() {
         if let Err(e) = std::fs::remove_file(&path) {
             warn!("Failed to delete recording {:?}: {}", path, e);
-            return Json(serde_json::json!({ "error": format!("delete failed: {e}"), "success": false }));
+            return Json(
+                serde_json::json!({ "error": format!("delete failed: {e}"), "success": false }),
+            );
         }
         let mut s = state.write().await;
-        s.recordings.retain(|r| {
-            r.get("id").and_then(|v| v.as_str()) != Some(id.as_str())
-        });
+        s.recordings
+            .retain(|r| r.get("id").and_then(|v| v.as_str()) != Some(id.as_str()));
         info!("Recording deleted: {id}");
         Json(serde_json::json!({ "success": true, "deleted": id }))
     } else {
@@ -2408,12 +2958,15 @@ fn scan_recording_files() -> Vec<serde_json::Value> {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                let name = path.file_stem()
+                let name = path
+                    .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("unknown")
                     .to_string();
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                let modified = entry.metadata().ok()
+                let modified = entry
+                    .metadata()
+                    .ok()
                     .and_then(|m| m.modified().ok())
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map(|d| d.as_secs())
@@ -2497,19 +3050,26 @@ async fn adaptive_train(State(state): State<SharedState>) -> Json<serde_json::Va
         Ok(model) => {
             let accuracy = model.training_accuracy;
             let frames = model.trained_frames;
-            let stats: Vec<_> = model.class_stats.iter().map(|cs| {
-                serde_json::json!({
-                    "class": cs.label,
-                    "samples": cs.count,
-                    "feature_means": cs.mean,
+            let stats: Vec<_> = model
+                .class_stats
+                .iter()
+                .map(|cs| {
+                    serde_json::json!({
+                        "class": cs.label,
+                        "samples": cs.count,
+                        "feature_means": cs.mean,
+                    })
                 })
-            }).collect();
+                .collect();
 
             // Save to disk.
             if let Err(e) = model.save(&adaptive_classifier::model_path()) {
                 warn!("Failed to save adaptive model: {e}");
             } else {
-                info!("Adaptive model saved to {}", adaptive_classifier::model_path().display());
+                info!(
+                    "Adaptive model saved to {}",
+                    adaptive_classifier::model_path().display()
+                );
             }
 
             // Load into runtime state.
@@ -2523,12 +3083,10 @@ async fn adaptive_train(State(state): State<SharedState>) -> Json<serde_json::Va
                 "class_stats": stats,
             }))
         }
-        Err(e) => {
-            Json(serde_json::json!({
-                "success": false,
-                "error": e,
-            }))
-        }
+        Err(e) => Json(serde_json::json!({
+            "success": false,
+            "error": e,
+        })),
     }
 }
 
@@ -2741,9 +3299,13 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
             Ok((len, src)) => {
                 // ADR-039: Try edge vitals packet first (magic 0xC511_0002).
                 if let Some(vitals) = parse_esp32_vitals(&buf[..len]) {
-                    debug!("ESP32 vitals from {src}: node={} br={:.1} hr={:.1} pres={}",
-                           vitals.node_id, vitals.breathing_rate_bpm,
-                           vitals.heartrate_bpm, vitals.presence);
+                    debug!(
+                        "ESP32 vitals from {src}: node={} br={:.1} hr={:.1} pres={}",
+                        vitals.node_id,
+                        vitals.breathing_rate_bpm,
+                        vitals.heartrate_bpm,
+                        vitals.presence
+                    );
                     let mut s = state.write().await;
                     // Broadcast vitals via WebSocket.
                     if let Ok(json) = serde_json::to_string(&serde_json::json!({
@@ -2767,9 +3329,12 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
 
                 // ADR-040: Try WASM output packet (magic 0xC511_0004).
                 if let Some(wasm_output) = parse_wasm_output(&buf[..len]) {
-                    debug!("WASM output from {src}: node={} module={} events={}",
-                           wasm_output.node_id, wasm_output.module_id,
-                           wasm_output.events.len());
+                    debug!(
+                        "WASM output from {src}: node={} module={} events={}",
+                        wasm_output.node_id,
+                        wasm_output.module_id,
+                        wasm_output.events.len()
+                    );
                     let mut s = state.write().await;
                     // Broadcast WASM events via WebSocket.
                     if let Ok(json) = serde_json::to_string(&serde_json::json!({
@@ -2785,8 +3350,10 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                 }
 
                 if let Some(frame) = parse_esp32_frame(&buf[..len]) {
-                    debug!("ESP32 frame from {src}: node={}, subs={}, seq={}",
-                           frame.node_id, frame.n_subcarriers, frame.sequence);
+                    debug!(
+                        "ESP32 frame from {src}: node={}, subs={}, seq={}",
+                        frame.node_id, frame.n_subcarriers, frame.sequence
+                    );
 
                     let mut s = state.write().await;
                     s.source = "esp32".to_string();
@@ -2799,10 +3366,15 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     }
 
                     let sample_rate_hz = 1000.0 / 500.0_f64; // default tick; ESP32 frames arrive as fast as they come
-                    let (features, mut classification, breathing_rate_hz, sub_variances, raw_motion) =
-                        extract_features_from_frame(&frame, &s.frame_history, sample_rate_hz);
+                    let (
+                        features,
+                        mut classification,
+                        breathing_rate_hz,
+                        sub_variances,
+                        raw_motion,
+                    ) = extract_features_from_frame(&frame, &s.frame_history, sample_rate_hz);
                     smooth_and_classify(&mut s, &mut classification, raw_motion);
-    adaptive_override(&s, &features, &mut classification);
+                    adaptive_override(&s, &features, &mut classification);
 
                     // Update RSSI history
                     s.rssi_history.push_back(features.mean_rssi);
@@ -2813,14 +3385,17 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     s.tick += 1;
                     let tick = s.tick;
 
-                    let motion_score = if classification.motion_level == "active" { 0.8 }
-                        else if classification.motion_level == "present_still" { 0.3 }
-                        else { 0.05 };
+                    let motion_score = if classification.motion_level == "active" {
+                        0.8
+                    } else if classification.motion_level == "present_still" {
+                        0.3
+                    } else {
+                        0.05
+                    };
 
-                    let raw_vitals = s.vital_detector.process_frame(
-                        &frame.amplitudes,
-                        &frame.phases,
-                    );
+                    let raw_vitals = s
+                        .vital_detector
+                        .process_frame(&frame.amplitudes, &frame.phases);
                     let vitals = smooth_vitals(&mut s, &raw_vitals);
                     s.latest_vitals = vitals.clone();
 
@@ -2848,8 +3423,11 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         features: features.clone(),
                         classification,
                         signal_field: generate_signal_field(
-                            features.mean_rssi, motion_score, breathing_rate_hz,
-                            features.variance.min(1.0), &sub_variances,
+                            features.mean_rssi,
+                            motion_score,
+                            breathing_rate_hz,
+                            features.variance.min(1.0),
+                            &sub_variances,
                         ),
                         vital_signs: Some(vitals),
                         enhanced_motion: None,
@@ -2861,7 +3439,11 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         pose_keypoints: None,
                         model_status: None,
                         persons: None,
-                        estimated_persons: if est_persons > 0 { Some(est_persons) } else { None },
+                        estimated_persons: if est_persons > 0 {
+                            Some(est_persons)
+                        } else {
+                            None
+                        },
                     };
 
                     let persons = derive_pose_from_sensing(&update);
@@ -2908,21 +3490,24 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
         let (features, mut classification, breathing_rate_hz, sub_variances, raw_motion) =
             extract_features_from_frame(&frame, &s.frame_history, sample_rate_hz);
         smooth_and_classify(&mut s, &mut classification, raw_motion);
-    adaptive_override(&s, &features, &mut classification);
+        adaptive_override(&s, &features, &mut classification);
 
         s.rssi_history.push_back(features.mean_rssi);
         if s.rssi_history.len() > 60 {
             s.rssi_history.pop_front();
         }
 
-        let motion_score = if classification.motion_level == "active" { 0.8 }
-            else if classification.motion_level == "present_still" { 0.3 }
-            else { 0.05 };
+        let motion_score = if classification.motion_level == "active" {
+            0.8
+        } else if classification.motion_level == "present_still" {
+            0.3
+        } else {
+            0.05
+        };
 
-        let raw_vitals = s.vital_detector.process_frame(
-            &frame.amplitudes,
-            &frame.phases,
-        );
+        let raw_vitals = s
+            .vital_detector
+            .process_frame(&frame.amplitudes, &frame.phases);
         let vitals = smooth_vitals(&mut s, &raw_vitals);
         s.latest_vitals = vitals.clone();
 
@@ -2953,8 +3538,11 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
             features: features.clone(),
             classification,
             signal_field: generate_signal_field(
-                features.mean_rssi, motion_score, breathing_rate_hz,
-                features.variance.min(1.0), &sub_variances,
+                features.mean_rssi,
+                motion_score,
+                breathing_rate_hz,
+                features.variance.min(1.0),
+                &sub_variances,
             ),
             vital_signs: Some(vitals),
             enhanced_motion: None,
@@ -2976,7 +3564,11 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
                 None
             },
             persons: None,
-            estimated_persons: if est_persons > 0 { Some(est_persons) } else { None },
+            estimated_persons: if est_persons > 0 {
+                Some(est_persons)
+            } else {
+                None
+            },
         };
 
         // Populate persons from the sensing update.
@@ -3034,8 +3626,11 @@ async fn main() {
         eprintln!("Running vital sign detection benchmark (1000 frames)...");
         let (total, per_frame) = vital_signs::run_benchmark(1000);
         eprintln!();
-        eprintln!("Summary: {} total, {} per frame",
-            format!("{total:?}"), format!("{per_frame:?}"));
+        eprintln!(
+            "Summary: {} total, {} per frame",
+            format!("{total:?}"),
+            format!("{per_frame:?}")
+        );
         return;
     }
 
@@ -3096,22 +3691,32 @@ async fn main() {
     if args.pretrain {
         eprintln!("=== WiFi-DensePose Contrastive Pretraining (ADR-024) ===");
 
-        let ds_path = args.dataset.clone().unwrap_or_else(|| PathBuf::from("data"));
+        let ds_path = args
+            .dataset
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("data"));
         let source = match args.dataset_type.as_str() {
             "wipose" => dataset::DataSource::WiPose(ds_path.clone()),
             _ => dataset::DataSource::MmFi(ds_path.clone()),
         };
         let pipeline = dataset::DataPipeline::new(dataset::DataConfig {
-            source, ..Default::default()
+            source,
+            ..Default::default()
         });
 
         // Generate synthetic or load real CSI windows
         let generate_synthetic_windows = || -> Vec<Vec<Vec<f32>>> {
-            (0..50).map(|i| {
-                (0..4).map(|a| {
-                    (0..56).map(|s| ((i * 7 + a * 13 + s) as f32 * 0.31).sin() * 0.5).collect()
-                }).collect()
-            }).collect()
+            (0..50)
+                .map(|i| {
+                    (0..4)
+                        .map(|a| {
+                            (0..56)
+                                .map(|s| ((i * 7 + a * 13 + s) as f32 * 0.31).sin() * 0.5)
+                                .collect()
+                        })
+                        .collect()
+                })
+                .collect()
         };
 
         let csi_windows: Vec<Vec<Vec<f32>>> = match pipeline.load() {
@@ -3125,20 +3730,28 @@ async fn main() {
             }
         };
 
-        let n_subcarriers = csi_windows.first()
+        let n_subcarriers = csi_windows
+            .first()
             .and_then(|w| w.first())
             .map(|f| f.len())
             .unwrap_or(56);
 
         let tf_config = graph_transformer::TransformerConfig {
-            n_subcarriers, n_keypoints: 17, d_model: 64, n_heads: 4, n_gnn_layers: 2,
+            n_subcarriers,
+            n_keypoints: 17,
+            d_model: 64,
+            n_heads: 4,
+            n_gnn_layers: 2,
         };
         let transformer = graph_transformer::CsiToPoseTransformer::new(tf_config);
         eprintln!("Transformer params: {}", transformer.param_count());
 
         let trainer_config = trainer::TrainerConfig {
             epochs: args.pretrain_epochs,
-            batch_size: 8, lr: 0.001, warmup_epochs: 2, min_lr: 1e-6,
+            batch_size: 8,
+            lr: 0.001,
+            warmup_epochs: 2,
+            min_lr: 1e-6,
             early_stop_patience: args.pretrain_epochs + 1,
             pretrain_temperature: 0.07,
             ..Default::default()
@@ -3146,12 +3759,18 @@ async fn main() {
         let mut t = trainer::Trainer::with_transformer(trainer_config, transformer);
 
         let e_config = embedding::EmbeddingConfig {
-            d_model: 64, d_proj: 128, temperature: 0.07, normalize: true,
+            d_model: 64,
+            d_proj: 128,
+            temperature: 0.07,
+            normalize: true,
         };
         let mut projection = embedding::ProjectionHead::new(e_config.clone());
         let augmenter = embedding::CsiAugmenter::new();
 
-        eprintln!("Starting contrastive pretraining for {} epochs...", args.pretrain_epochs);
+        eprintln!(
+            "Starting contrastive pretraining for {} epochs...",
+            args.pretrain_epochs
+        );
         let start = std::time::Instant::now();
         for epoch in 0..args.pretrain_epochs {
             let loss = t.pretrain_epoch(&csi_windows, &augmenter, &mut projection, 0.07, epoch);
@@ -3188,8 +3807,11 @@ async fn main() {
                 &proj_weights,
             );
             match builder.write_to_file(save_path) {
-                Ok(()) => eprintln!("RVF saved ({} transformer + {} projection params)",
-                    weights.len(), proj_weights.len()),
+                Ok(()) => eprintln!(
+                    "RVF saved ({} transformer + {} projection params)",
+                    weights.len(),
+                    proj_weights.len()
+                ),
                 Err(e) => eprintln!("Failed to save RVF: {e}"),
             }
         }
@@ -3211,23 +3833,36 @@ async fn main() {
 
         let reader = match RvfReader::from_file(&model_path) {
             Ok(r) => r,
-            Err(e) => { eprintln!("Failed to load model: {e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("Failed to load model: {e}");
+                std::process::exit(1);
+            }
         };
 
         let weights = reader.weights().unwrap_or_default();
         let (embed_config_json, proj_weights) = reader.embedding().unwrap_or_else(|| {
             eprintln!("Warning: no embedding segment in RVF, using defaults");
-            (serde_json::json!({"d_model":64,"d_proj":128,"temperature":0.07,"normalize":true}), Vec::new())
+            (
+                serde_json::json!({"d_model":64,"d_proj":128,"temperature":0.07,"normalize":true}),
+                Vec::new(),
+            )
         });
 
         let d_model = embed_config_json["d_model"].as_u64().unwrap_or(64) as usize;
         let d_proj = embed_config_json["d_proj"].as_u64().unwrap_or(128) as usize;
 
         let tf_config = graph_transformer::TransformerConfig {
-            n_subcarriers: 56, n_keypoints: 17, d_model, n_heads: 4, n_gnn_layers: 2,
+            n_subcarriers: 56,
+            n_keypoints: 17,
+            d_model,
+            n_heads: 4,
+            n_gnn_layers: 2,
         };
         let e_config = embedding::EmbeddingConfig {
-            d_model, d_proj, temperature: 0.07, normalize: true,
+            d_model,
+            d_proj,
+            temperature: 0.07,
+            normalize: true,
         };
         let mut extractor = embedding::EmbeddingExtractor::new(tf_config, e_config.clone());
 
@@ -3244,20 +3879,35 @@ async fn main() {
         }
 
         // Load dataset and extract embeddings
-        let _ds_path = args.dataset.clone().unwrap_or_else(|| PathBuf::from("data"));
-        let csi_windows: Vec<Vec<Vec<f32>>> = (0..10).map(|i| {
-            (0..4).map(|a| {
-                (0..56).map(|s| ((i * 7 + a * 13 + s) as f32 * 0.31).sin() * 0.5).collect()
-            }).collect()
-        }).collect();
+        let _ds_path = args
+            .dataset
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("data"));
+        let csi_windows: Vec<Vec<Vec<f32>>> = (0..10)
+            .map(|i| {
+                (0..4)
+                    .map(|a| {
+                        (0..56)
+                            .map(|s| ((i * 7 + a * 13 + s) as f32 * 0.31).sin() * 0.5)
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect();
 
-        eprintln!("Extracting embeddings from {} CSI windows...", csi_windows.len());
+        eprintln!(
+            "Extracting embeddings from {} CSI windows...",
+            csi_windows.len()
+        );
         let embeddings = extractor.extract_batch(&csi_windows);
         for (i, emb) in embeddings.iter().enumerate() {
             let norm: f32 = emb.iter().map(|x| x * x).sum::<f32>().sqrt();
             eprintln!("  Window {i}: {d_proj}-dim embedding, ||e|| = {norm:.4}");
         }
-        eprintln!("Extracted {} embeddings of dimension {d_proj}", embeddings.len());
+        eprintln!(
+            "Extracted {} embeddings of dimension {d_proj}",
+            embeddings.len()
+        );
 
         return;
     }
@@ -3272,7 +3922,10 @@ async fn main() {
             "temporal" => embedding::IndexType::TemporalBaseline,
             "person" => embedding::IndexType::PersonTrack,
             _ => {
-                eprintln!("Unknown index type '{}'. Use: env, activity, temporal, person", index_type_str);
+                eprintln!(
+                    "Unknown index type '{}'. Use: env, activity, temporal, person",
+                    index_type_str
+                );
                 std::process::exit(1);
             }
         };
@@ -3282,11 +3935,17 @@ async fn main() {
         let mut extractor = embedding::EmbeddingExtractor::new(tf_config, e_config);
 
         // Generate synthetic CSI windows for demo
-        let csi_windows: Vec<Vec<Vec<f32>>> = (0..20).map(|i| {
-            (0..4).map(|a| {
-                (0..56).map(|s| ((i * 7 + a * 13 + s) as f32 * 0.31).sin() * 0.5).collect()
-            }).collect()
-        }).collect();
+        let csi_windows: Vec<Vec<Vec<f32>>> = (0..20)
+            .map(|i| {
+                (0..4)
+                    .map(|a| {
+                        (0..56)
+                            .map(|s| ((i * 7 + a * 13 + s) as f32 * 0.31).sin() * 0.5)
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect();
 
         let mut index = embedding::FingerprintIndex::new(index_type);
         for (i, window) in csi_windows.iter().enumerate() {
@@ -3301,7 +3960,10 @@ async fn main() {
         let results = index.search(&query_emb, 5);
         eprintln!("Top-5 nearest to window_0:");
         for r in &results {
-            eprintln!("  entry={}, distance={:.4}, metadata={}", r.entry, r.distance, r.metadata);
+            eprintln!(
+                "  entry={}, distance={:.4}, metadata={}",
+                r.entry, r.distance, r.metadata
+            );
         }
 
         return;
@@ -3312,7 +3974,10 @@ async fn main() {
         eprintln!("=== WiFi-DensePose Training Mode ===");
 
         // Build data pipeline
-        let ds_path = args.dataset.clone().unwrap_or_else(|| PathBuf::from("data"));
+        let ds_path = args
+            .dataset
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("data"));
         let source = match args.dataset_type.as_str() {
             "wipose" => dataset::DataSource::WiPose(ds_path.clone()),
             _ => dataset::DataSource::MmFi(ds_path.clone()),
@@ -3324,25 +3989,31 @@ async fn main() {
 
         // Generate synthetic training data (50 samples with deterministic CSI + keypoints)
         let generate_synthetic = || -> Vec<dataset::TrainingSample> {
-            (0..50).map(|i| {
-                let csi: Vec<Vec<f32>> = (0..4).map(|a| {
-                    (0..56).map(|s| ((i * 7 + a * 13 + s) as f32 * 0.31).sin() * 0.5).collect()
-                }).collect();
-                let mut kps = [(0.0f32, 0.0f32, 1.0f32); 17];
-                for (k, kp) in kps.iter_mut().enumerate() {
-                    kp.0 = (k as f32 * 0.1 + i as f32 * 0.02).sin() * 100.0 + 320.0;
-                    kp.1 = (k as f32 * 0.15 + i as f32 * 0.03).cos() * 80.0 + 240.0;
-                }
-                dataset::TrainingSample {
-                    csi_window: csi,
-                    pose_label: dataset::PoseLabel {
-                        keypoints: kps,
-                        body_parts: Vec::new(),
-                        confidence: 1.0,
-                    },
-                    source: "synthetic",
-                }
-            }).collect()
+            (0..50)
+                .map(|i| {
+                    let csi: Vec<Vec<f32>> = (0..4)
+                        .map(|a| {
+                            (0..56)
+                                .map(|s| ((i * 7 + a * 13 + s) as f32 * 0.31).sin() * 0.5)
+                                .collect()
+                        })
+                        .collect();
+                    let mut kps = [(0.0f32, 0.0f32, 1.0f32); 17];
+                    for (k, kp) in kps.iter_mut().enumerate() {
+                        kp.0 = (k as f32 * 0.1 + i as f32 * 0.02).sin() * 100.0 + 320.0;
+                        kp.1 = (k as f32 * 0.15 + i as f32 * 0.03).cos() * 80.0 + 240.0;
+                    }
+                    dataset::TrainingSample {
+                        csi_window: csi,
+                        pose_label: dataset::PoseLabel {
+                            keypoints: kps,
+                            body_parts: Vec::new(),
+                            confidence: 1.0,
+                        },
+                        source: "synthetic",
+                    }
+                })
+                .collect()
         };
 
         // Load samples (fall back to synthetic if dataset missing/empty)
@@ -3352,7 +4023,10 @@ async fn main() {
                 s
             }
             Ok(_) => {
-                eprintln!("No samples found at {}. Using synthetic data.", ds_path.display());
+                eprintln!(
+                    "No samples found at {}. Using synthetic data.",
+                    ds_path.display()
+                );
                 generate_synthetic()
             }
             Err(e) => {
@@ -3362,17 +4036,21 @@ async fn main() {
         };
 
         // Convert dataset samples to trainer format
-        let trainer_samples: Vec<trainer::TrainingSample> = samples.iter()
-            .map(trainer::from_dataset_sample)
-            .collect();
+        let trainer_samples: Vec<trainer::TrainingSample> =
+            samples.iter().map(trainer::from_dataset_sample).collect();
 
         // Split 80/20 train/val
         let split = (trainer_samples.len() * 4) / 5;
         let (train_data, val_data) = trainer_samples.split_at(split.max(1));
-        eprintln!("Train: {} samples, Val: {} samples", train_data.len(), val_data.len());
+        eprintln!(
+            "Train: {} samples, Val: {} samples",
+            train_data.len(),
+            val_data.len()
+        );
 
         // Create transformer + trainer
-        let n_subcarriers = train_data.first()
+        let n_subcarriers = train_data
+            .first()
             .and_then(|s| s.csi_features.first())
             .map(|f| f.len())
             .unwrap_or(56);
@@ -3402,8 +4080,10 @@ async fn main() {
         eprintln!("Starting training for {} epochs...", args.epochs);
         let result = t.run_training(train_data, val_data);
         eprintln!("Training complete in {:.1}s", result.total_time_secs);
-        eprintln!("  Best epoch: {}, PCK@0.2: {:.4}, OKS mAP: {:.4}",
-            result.best_epoch, result.best_pck, result.best_oks);
+        eprintln!(
+            "  Best epoch: {}, PCK@0.2: {:.4}, OKS mAP: {:.4}",
+            result.best_epoch, result.best_pck, result.best_oks
+        );
 
         // Save checkpoint
         if let Some(ref ckpt_dir) = args.checkpoint_dir {
@@ -3442,8 +4122,11 @@ async fn main() {
             builder.add_vital_config(&VitalSignConfig::default());
             builder.add_weights(&weights);
             match builder.write_to_file(save_path) {
-                Ok(()) => eprintln!("RVF saved ({} params, {} bytes)",
-                    weights.len(), weights.len() * 4),
+                Ok(()) => eprintln!(
+                    "RVF saved ({} params, {} bytes)",
+                    weights.len(),
+                    weights.len() * 4
+                ),
                 Err(e) => eprintln!("Failed to save RVF: {e}"),
             }
         }
@@ -3458,25 +4141,15 @@ async fn main() {
     info!("  UI path:   {}", args.ui_path.display());
     info!("  Source:    {}", args.source);
 
-    // Auto-detect data source
-    let source = match args.source.as_str() {
-        "auto" => {
-            info!("Auto-detecting data source...");
-            if probe_esp32(args.udp_port).await {
-                info!("  ESP32 CSI detected on UDP :{}", args.udp_port);
-                "esp32"
-            } else if probe_windows_wifi().await {
-                info!("  Windows WiFi detected");
-                "wifi"
-            } else {
-                info!("  No hardware detected, using simulation");
-                "simulate"
-            }
+    let source = match resolve_source(&args).await {
+        Ok(source) => source,
+        Err(e) => {
+            error!("{e}");
+            std::process::exit(1);
         }
-        other => other,
     };
 
-    info!("Data source: {source}");
+    info!("Data source: {}", source.as_str());
 
     // Shared state
     // Vital sign sample rate derives from tick interval (e.g. 500ms tick => 2 Hz)
@@ -3537,8 +4210,10 @@ async fn main() {
                 Ok(data) => match ProgressiveLoader::new(&data) {
                     Ok(mut loader) => {
                         if let Ok(la) = loader.load_layer_a() {
-                            info!("  Layer A ready: model={} v{} ({} segments)",
-                                  la.model_name, la.version, la.n_segments);
+                            info!(
+                                "  Layer A ready: model={} v{} ({} segments)",
+                                la.model_name, la.version, la.n_segments
+                            );
                         }
                         model_loaded = true;
                         progressive_loader = Some(loader);
@@ -3557,7 +4232,11 @@ async fn main() {
     // Discover model and recording files on startup
     let initial_models = scan_model_files();
     let initial_recordings = scan_recording_files();
-    info!("Discovered {} model files, {} recording files", initial_models.len(), initial_recordings.len());
+    info!(
+        "Discovered {} model files, {} recording files",
+        initial_models.len(),
+        initial_recordings.len()
+    );
 
     let (tx, _) = broadcast::channel::<String>(256);
     let state: SharedState = Arc::new(RwLock::new(AppStateInner {
@@ -3565,7 +4244,7 @@ async fn main() {
         rssi_history: VecDeque::new(),
         frame_history: VecDeque::new(),
         tick: 0,
-        source: source.into(),
+        source: source.as_str().into(),
         tx,
         total_detections: 0,
         start_time: std::time::Instant::now(),
@@ -3603,29 +4282,47 @@ async fn main() {
         // Training
         training_status: "idle".to_string(),
         training_config: None,
-        adaptive_model: adaptive_classifier::AdaptiveModel::load(&adaptive_classifier::model_path()).ok().map(|m| {
-            info!("Loaded adaptive classifier: {} frames, {:.1}% accuracy",
-                  m.trained_frames, m.training_accuracy * 100.0);
-            m
-        }),
+        adaptive_model:
+            adaptive_classifier::AdaptiveModel::load(&adaptive_classifier::model_path())
+                .ok()
+                .map(|m| {
+                    info!(
+                        "Loaded adaptive classifier: {} frames, {:.1}% accuracy",
+                        m.trained_frames,
+                        m.training_accuracy * 100.0
+                    );
+                    m
+                }),
     }));
 
     // Start background tasks based on source
     match source {
-        "esp32" => {
+        ResolvedSource::Esp32 => {
             tokio::spawn(udp_receiver_task(state.clone(), args.udp_port));
             tokio::spawn(broadcast_tick_task(state.clone(), args.tick_ms));
         }
-        "wifi" => {
-            tokio::spawn(windows_wifi_task(state.clone(), args.tick_ms));
+        ResolvedSource::Wifi => {
+            if matches!(current_platform(), PlatformFlavor::Windows) {
+                tokio::spawn(windows_wifi_task(state.clone(), args.tick_ms));
+            } else if matches!(current_platform(), PlatformFlavor::Macos) {
+                tokio::spawn(macos_wifi_task(state.clone(), args.tick_ms));
+            } else {
+                error!("Wi-Fi source selected on unsupported platform");
+                std::process::exit(1);
+            }
         }
-        _ => {
+        ResolvedSource::MacosBridge => {
+            tokio::spawn(macos_bridge_task(state.clone(), args.tick_ms));
+        }
+        ResolvedSource::Simulate => {
             tokio::spawn(simulated_data_task(state.clone(), args.tick_ms));
         }
     }
 
     // ADR-050: Parse bind address once, use for all listeners
-    let bind_ip: std::net::IpAddr = args.bind_addr.parse()
+    let bind_ip: std::net::IpAddr = args
+        .bind_addr
+        .parse()
         .expect("Invalid --bind-addr (use 127.0.0.1 or 0.0.0.0)");
 
     // WebSocket server on dedicated port (8765)
@@ -3636,7 +4333,8 @@ async fn main() {
         .with_state(ws_state);
 
     let ws_addr = SocketAddr::from((bind_ip, args.ws_port));
-    let ws_listener = tokio::net::TcpListener::bind(ws_addr).await
+    let ws_listener = tokio::net::TcpListener::bind(ws_addr)
+        .await
         .expect("Failed to bind WebSocket port");
     info!("WebSocket server listening on {ws_addr}");
 
@@ -3711,20 +4409,23 @@ async fn main() {
         .with_state(state.clone());
 
     let http_addr = SocketAddr::from((bind_ip, args.http_port));
-    let http_listener = tokio::net::TcpListener::bind(http_addr).await
+    let http_listener = tokio::net::TcpListener::bind(http_addr)
+        .await
         .expect("Failed to bind HTTP port");
     info!("HTTP server listening on {http_addr}");
-    info!("Open http://localhost:{}/ui/index.html in your browser", args.http_port);
+    info!(
+        "Open http://localhost:{}/ui/index.html in your browser",
+        args.http_port
+    );
 
     // Run the HTTP server with graceful shutdown support
     let shutdown_state = state.clone();
-    let server = axum::serve(http_listener, http_app)
-        .with_graceful_shutdown(async {
-            tokio::signal::ctrl_c()
-                .await
-                .expect("failed to install CTRL+C handler");
-            info!("Shutdown signal received");
-        });
+    let server = axum::serve(http_listener, http_app).with_graceful_shutdown(async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install CTRL+C handler");
+        info!("Shutdown signal received");
+    });
 
     server.await.unwrap();
 
@@ -3762,4 +4463,79 @@ async fn main() {
     }
 
     info!("Server shut down cleanly");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_source_prefers_esp32() {
+        let resolved = resolve_auto_source(PlatformFlavor::Macos, true, true);
+        assert_eq!(resolved, ResolvedSource::Esp32);
+    }
+
+    #[test]
+    fn auto_source_uses_wifi_on_supported_platforms() {
+        assert_eq!(
+            resolve_auto_source(PlatformFlavor::Macos, false, true),
+            ResolvedSource::Wifi
+        );
+        assert_eq!(
+            resolve_auto_source(PlatformFlavor::Windows, false, true),
+            ResolvedSource::Wifi
+        );
+    }
+
+    #[test]
+    fn auto_source_skips_wifi_on_unsupported_platforms() {
+        assert_eq!(
+            resolve_auto_source(PlatformFlavor::Other, false, true),
+            ResolvedSource::Simulate
+        );
+    }
+
+    #[test]
+    fn explicit_wifi_rejects_unsupported_platforms() {
+        let err = resolve_explicit_source(RequestedSource::Wifi, PlatformFlavor::Other, false)
+            .expect_err("unsupported platforms should reject wifi");
+        assert!(err.contains("only supported on Windows and macOS"));
+    }
+
+    #[test]
+    fn bridge_parser_accepts_ndjson_payload() {
+        let payload = br#"{"bridge_kind":"connected_rssi","timestamp":1.0,"interface":"en0","ssid":"Lab","bssid":"aa:bb:cc:dd:ee:ff","bssid_synthetic":false,"rssi":-51.0,"noise":-92.0,"channel":44,"band":"5ghz","tx_rate_mbps":400.0,"is_connected":true}"#;
+        let record = parse_macos_bridge_datagram(payload).expect("bridge payload should parse");
+        let obs = macos_bridge_to_observation(record).expect("bridge record should map");
+
+        assert_eq!(obs.ssid, "Lab");
+        assert_eq!(obs.bssid.to_string(), "aa:bb:cc:dd:ee:ff");
+        assert_eq!(obs.channel, 44);
+        assert_eq!(obs.band, BandType::Band5GHz);
+    }
+
+    #[test]
+    fn bridge_parser_rejects_esp32_frames() {
+        let mut frame = vec![0u8; 22];
+        frame[0..4].copy_from_slice(&0xC511_0001u32.to_le_bytes());
+        frame[4] = 1;
+        frame[5] = 1;
+        frame[6] = 1;
+        frame[8..10].copy_from_slice(&2437u16.to_le_bytes());
+        frame[10..14].copy_from_slice(&1u32.to_le_bytes());
+        frame[20] = 1;
+        frame[21] = 1;
+
+        let err = parse_macos_bridge_datagram(&frame).expect_err("ESP32 binary should be rejected");
+        assert!(err.contains("not ESP32 binary frames"));
+    }
+
+    #[test]
+    fn bridge_parser_rejects_disconnected_records() {
+        let payload = br#"{"bridge_kind":"connected_rssi","timestamp":1.0,"interface":"en0","ssid":"Lab","bssid":"aa:bb:cc:dd:ee:ff","bssid_synthetic":false,"rssi":-51.0,"noise":-92.0,"channel":44,"band":"5ghz","tx_rate_mbps":400.0,"is_connected":false}"#;
+        let record = parse_macos_bridge_datagram(payload).expect("bridge payload should parse");
+        let err = macos_bridge_to_observation(record)
+            .expect_err("disconnected bridge record should be rejected");
+        assert!(err.contains("is_connected"));
+    }
 }

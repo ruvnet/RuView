@@ -70,8 +70,8 @@ Implement a **macOS CoreWLAN sensing adapter** as a Swift helper binary + Rust a
 
 1. **Subprocess isolation** — Swift binary is a standalone tool, built and versioned independently of the Rust workspace.
 2. **Same domain types** — macOS adapter produces `Vec<BssidObservation>`, identical to the Windows path. All downstream processing reuses as-is.
-3. **SSID:channel as synthetic BSSID** — When real BSSIDs are redacted (no Location Services), `sha256(ssid + channel)[:12]` generates a stable pseudo-BSSID. Documented limitation: same-SSID same-channel APs collapse to one observation.
-4. **`#[cfg(target_os = "macos")]` gating** — macOS-specific code compiles only on macOS. Windows and Linux builds are unaffected.
+3. **Synthetic locally administered BSSID** — When real BSSIDs are redacted (no Location Services), the helper derives a stable synthetic MAC from `interface + ssid + channel`, marks `bssid_synthetic=true`, and keeps the observation usable by the Rust pipeline. Hidden SSIDs use a fixed placeholder in the hash input.
+4. **Runtime gating with cross-platform tests** — macOS helper execution remains runtime-gated to macOS, but the scanner/parser code compiles cross-platform so Linux CI can exercise contract and source-selection tests.
 5. **Graceful degradation** — If the Swift helper is not found or fails, `--source auto` skips macOS WiFi and falls back to simulated mode with a clear warning.
 
 ---
@@ -107,53 +107,40 @@ Implement a **macOS CoreWLAN sensing adapter** as a Swift helper binary + Rust a
 
 ### 3.2 Swift Helper Binary
 
-**File:** `rust-port/wifi-densepose-rs/tools/macos-wifi-scan/main.swift`
+**File:** `tools/macos-wifi-scan/main.swift`
 
 ```swift
 // Modes:
-//   (no args)    → Full scan, output JSON array to stdout
-//   --probe      → Quick availability check, output {"available": true/false}
-//   --connected  → Connected network info only
+//   --probe                        → One NDJSON line for the current association, exits immediately
+//   --scan-once                    → One NDJSON line per visible AP
+//   --connected                    → One NDJSON line for the current association
+//   --stream --interval-ms <N>     → Repeated connected-AP NDJSON records
 //
-// Output schema (scan mode):
-// [
-//   {
-//     "ssid": "MyNetwork",
-//     "rssi": -52,
-//     "noise": -90,
-//     "channel": 36,
-//     "band": "5GHz",
-//     "phy_mode": "802.11ax",
-//     "bssid": "aa:bb:cc:dd:ee:ff" | null,
-//     "security": "wpa2_personal"
-//   }
-// ]
+// Output schema (scan/connected/stream):
+// {"timestamp":1710000000.0,"interface":"en0","ssid":"MyNetwork","bssid":"aa:bb:cc:dd:ee:ff","bssid_synthetic":false,"rssi":-52,"noise":-90,"channel":36,"band":"5ghz","tx_rate_mbps":866.7,"is_connected":true}
 ```
 
 **Build:**
 
 ```bash
 # Requires Xcode Command Line Tools (xcode-select --install)
-cd tools/macos-wifi-scan
-swiftc -framework CoreWLAN -framework Foundation -O -o macos-wifi-scan main.swift
+./scripts/build-mac-wifi.sh
 ```
 
-**Build script:** `tools/macos-wifi-scan/build.sh`
+**Build script:** `scripts/build-mac-wifi.sh`
 
 ### 3.3 Rust Adapter
 
 **File:** `crates/wifi-densepose-wifiscan/src/adapter/macos_scanner.rs`
 
 ```rust
-// #[cfg(target_os = "macos")]
-
 pub struct MacosCoreWlanScanner {
-    helper_path: PathBuf,  // Resolved at construction: $PATH or sibling of server binary
+    helper_path: PathBuf,  // Resolved from env override, repo-local build output, then PATH
 }
 
 impl MacosCoreWlanScanner {
-    pub fn new() -> Result<Self, WifiScanError>  // Finds helper or errors
-    pub fn probe() -> bool                        // Runs --probe, returns availability
+    pub fn new() -> Self                         // Resolves helper path at construction
+    pub fn probe_sync(&self) -> Result<(), WifiScanError>
     pub fn scan_sync(&self) -> Result<Vec<BssidObservation>, WifiScanError>
     pub fn connected_sync(&self) -> Result<Option<BssidObservation>, WifiScanError>
 }
@@ -216,7 +203,7 @@ The existing 8-stage `WindowsWifiPipeline` (ADR-022) operates entirely on `Bssid
 | File | Purpose | Lines (est.) |
 |------|---------|-------------|
 | `tools/macos-wifi-scan/main.swift` | CoreWLAN scanner, JSON output | ~120 |
-| `tools/macos-wifi-scan/build.sh` | Build script (`swiftc` invocation) | ~15 |
+| `scripts/build-mac-wifi.sh` | Build script (`swiftc` invocation) | ~15 |
 | `crates/wifi-densepose-wifiscan/src/adapter/macos_scanner.rs` | Rust adapter: spawn helper, parse JSON, produce `BssidObservation` | ~200 |
 
 ### 4.2 Modified Files
@@ -231,7 +218,7 @@ The existing 8-stage `WindowsWifiPipeline` (ADR-022) operates entirely on `Bssid
 
 - `std::process::Command` — subprocess spawning (stdlib)
 - `serde_json` — JSON parsing (already in workspace)
-- No changes to `Cargo.toml`
+- `serde_json` in `wifi-densepose-wifiscan` for typed helper parsing
 
 ---
 
@@ -243,20 +230,29 @@ All verification on Mac Mini (M2 Pro, macOS 26.3).
 
 | Test | Command | Expected |
 |------|---------|----------|
-| Build | `cd tools/macos-wifi-scan && ./build.sh` | Produces `macos-wifi-scan` binary |
-| Probe | `./macos-wifi-scan --probe` | `{"available": true}` |
-| Scan | `./macos-wifi-scan` | JSON array with real SSIDs, RSSI in dBm, channels |
-| Connected | `./macos-wifi-scan --connected` | Single JSON object for connected network |
-| No WiFi | Disable WiFi → `./macos-wifi-scan` | `{"available": false}` or empty array |
+| Build | `./scripts/build-mac-wifi.sh` | Produces `rust-port/wifi-densepose-rs/target/tools/macos-wifi-scan/macos-wifi-scan` |
+| Probe | `./rust-port/wifi-densepose-rs/target/tools/macos-wifi-scan/macos-wifi-scan --probe` | One status JSON line (`ok`, `interface`, `message`) or non-zero with clear stderr if Wi-Fi is unavailable |
+| Scan | `./rust-port/wifi-densepose-rs/target/tools/macos-wifi-scan/macos-wifi-scan --scan-once` | NDJSON records with SSID/RSSI/channel/band |
+| Connected | `./rust-port/wifi-densepose-rs/target/tools/macos-wifi-scan/macos-wifi-scan --connected` | Single NDJSON object for connected network |
+| No WiFi | Disable WiFi → `... --probe` | Non-zero exit with clear stderr |
 
 ### 5.2 Rust Adapter
 
 | Test | Method | Expected |
 |------|--------|----------|
 | Unit: JSON parsing | `#[test]` with fixture JSON | Correct `BssidObservation` values |
-| Unit: synthetic BSSID | `#[test]` with nil bssid input | Stable `sha256(ssid:channel)[:12]` |
+| Unit: helper discovery | `#[test]` with env override/repo-local/PATH fixtures | Resolution order matches contract |
 | Unit: helper not found | `#[test]` with bad path | `WifiScanError::ProcessError` |
 | Integration: real scan | `cargo test` on Mac Mini | Live observations from CoreWLAN |
+
+### 5.2.1 Bridge Fallback
+
+| Test | Command | Expected |
+|------|---------|----------|
+| Bridge CLI validation | `python3 scripts/macos_wifi_bridge.py --help` | Shows helper/host/port/interval arguments |
+| Bridge syntax | `python3 -m py_compile scripts/macos_wifi_bridge.py` | Passes |
+| Bridge startup order | `python3 scripts/macos_wifi_bridge.py --interval-ms 100 &` then `./target/release/sensing-server --source macos-bridge --tick-ms 100` | Server binds and labels source `wifi-bridge:macos` |
+| Bridge payload rejection | Send ESP32 binary or malformed JSON | Server logs rejection and keeps waiting |
 
 ### 5.3 End-to-End
 
@@ -270,7 +266,15 @@ All verification on Mac Mini (M2 Pro, macOS 26.3).
 | 6 | Open UI at `http://localhost:8080` | Signal field updates with real RSSI variation |
 | 7 | `--source auto` | Auto-detects macOS WiFi, does not fall back to simulated |
 
-### 5.4 Cross-Platform Regression
+### 5.4 Review Checklist
+
+- No compiled helper binaries are committed.
+- Public docs describe macOS as RSSI-only presence/coarse-motion sensing, not CSI parity.
+- Helper discovery order is documented as env override, repo-local build output, then `PATH`.
+- `macos-bridge` stays explicit-only and is never auto-selected.
+- PR includes manual macOS QA evidence because CI is Linux-centric.
+
+### 5.5 Cross-Platform Regression
 
 | Platform | Build | Expected |
 |----------|-------|----------|
