@@ -90,9 +90,36 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
         return 0;
     }
 
+    /* Validate buffer size is sufficient for at least the header */
+    if (buf_len < CSI_HEADER_SIZE) {
+        ESP_LOGE(TAG, "Output buffer too small: %u < header size %u", (unsigned)buf_len, CSI_HEADER_SIZE);
+        return 0;
+    }
+
+    /* Validate CSI data length against maximum expected size to prevent buffer overflow.
+     * Maximum: CSI_MAX_FRAME_SIZE - CSI_HEADER_SIZE = 2048 bytes (4 antennas * 256 subcarriers * 2).
+     * This prevents malformed CSI packets with oversized n_subcarriers from triggering buffer overflow. */
+    if (info->len > (CSI_MAX_FRAME_SIZE - CSI_HEADER_SIZE)) {
+        ESP_LOGW(TAG, "CSI data length %d exceeds maximum %d, rejecting malformed packet",
+                 info->len, (CSI_MAX_FRAME_SIZE - CSI_HEADER_SIZE));
+        return 0;
+    }
+
+    /* Validate minimum CSI data length to prevent underflow and invalid packets */
+    if (info->len < 2) {
+        ESP_LOGW(TAG, "CSI data length %d too small, rejecting malformed packet", info->len);
+        return 0;
+    }
+
     uint8_t n_antennas = 1;  /* ESP32-S3 typically reports 1 antenna for CSI */
     uint16_t iq_len = (uint16_t)info->len;
     uint16_t n_subcarriers = iq_len / (2 * n_antennas);
+
+    /* Validate n_subcarriers is within reasonable bounds (1-256 subcarriers per antenna) */
+    if (n_subcarriers == 0 || n_subcarriers > 256) {
+        ESP_LOGW(TAG, "Invalid n_subcarriers=%u, rejecting malformed packet", n_subcarriers);
+        return 0;
+    }
 
     size_t frame_size = CSI_HEADER_SIZE + iq_len;
     if (frame_size > buf_len) {
@@ -143,7 +170,13 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
     buf[18] = 0;
     buf[19] = 0;
 
-    /* I/Q data */
+    /* I/Q data - Explicit bounds check before memcpy to prevent buffer overflow.
+     * Verify that iq_len bytes will fit in the destination buffer after the header. */
+    if (iq_len > (buf_len - CSI_HEADER_SIZE)) {
+        ESP_LOGE(TAG, "Buffer overflow prevented: iq_len=%u > available_space=%u",
+                 iq_len, (unsigned)(buf_len - CSI_HEADER_SIZE));
+        return 0;
+    }
     memcpy(&buf[CSI_HEADER_SIZE], info->buf, iq_len);
 
     return frame_size;
@@ -197,8 +230,13 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
 
     /* ADR-039: Enqueue raw I/Q into edge processing ring buffer. */
     if (info->buf && info->len > 0) {
-        edge_enqueue_csi((const uint8_t *)info->buf, (uint16_t)info->len,
-                         (int8_t)info->rx_ctrl.rssi, info->rx_ctrl.channel);
+        /* Validate CSI data length before enqueuing to prevent buffer overflow in edge processing */
+        if (info->len <= (CSI_MAX_FRAME_SIZE - CSI_HEADER_SIZE)) {
+            edge_enqueue_csi((const uint8_t *)info->buf, (uint16_t)info->len,
+                             (int8_t)info->rx_ctrl.rssi, info->rx_ctrl.channel);
+        } else {
+            ESP_LOGW(TAG, "Rejecting oversized CSI data (len=%d) for edge processing", info->len);
+        }
     }
 }
 
