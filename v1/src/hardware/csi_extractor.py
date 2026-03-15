@@ -1,6 +1,7 @@
 """CSI data extraction from WiFi hardware using Test-Driven Development approach."""
 
 import asyncio
+import contextlib
 import struct
 import numpy as np
 from datetime import datetime, timezone
@@ -301,6 +302,10 @@ class CSIExtractor:
         # State management
         self.is_connected = False
         self.is_streaming = False
+        self._udp_transport: Optional[asyncio.BaseTransport] = None
+        self._udp_protocol = None
+        self._udp_queue: Optional[asyncio.Queue] = None
+        self._udp_keepalive_task: Optional[asyncio.Task] = None
         
         # Create appropriate parser
         if self.hardware_type == 'esp32':
@@ -446,14 +451,31 @@ class CSIExtractor:
         self.is_streaming = False
     
     async def _establish_hardware_connection(self) -> bool:
-        """Establish connection to hardware (to be implemented by subclasses)."""
-        # Placeholder implementation for testing
-        return True
+        """Establish connection to the CSI source."""
+        if self.hardware_type == 'esp32':
+            host = self.config.get('aggregator_host', '0.0.0.0')
+            port = self.config.get('aggregator_port', 5005)
+            await self._setup_udp_endpoint(host, port)
+            return True
+        elif self.hardware_type == 'router':
+            # Router clients rely on RouterInterface; nothing to open here
+            return True
+
+        self.logger.warning(f"Unsupported hardware type for connection: {self.hardware_type}")
+        return False
     
     async def _close_hardware_connection(self) -> None:
-        """Close hardware connection (to be implemented by subclasses)."""
-        # Placeholder implementation for testing
-        pass
+        """Close any open hardware transport resources."""
+        if self._udp_transport:
+            self._udp_transport.close()
+            self._udp_transport = None
+        if self._udp_keepalive_task:
+            self._udp_keepalive_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._udp_keepalive_task
+            self._udp_keepalive_task = None
+        self._udp_queue = None
+        self._udp_protocol = None
     
     async def _read_raw_data(self) -> bytes:
         """Read raw data from hardware.
@@ -475,42 +497,70 @@ class CSIExtractor:
         Raises:
             CSIExtractionError: If read times out or connection fails.
         """
-        host = self.config.get('aggregator_host', '0.0.0.0')
-        port = self.config.get('aggregator_port', 5005)
-
-        loop = asyncio.get_event_loop()
-
-        # Create UDP endpoint if not already cached
-        if not hasattr(self, '_udp_transport'):
-            self._udp_future: asyncio.Future = loop.create_future()
-
-            class _UdpProtocol(asyncio.DatagramProtocol):
-                def __init__(self, future):
-                    self._future = future
-
-                def datagram_received(self, data, addr):
-                    if not self._future.done():
-                        self._future.set_result(data)
-
-                def error_received(self, exc):
-                    if not self._future.done():
-                        self._future.set_exception(exc)
-
-            transport, protocol = await loop.create_datagram_endpoint(
-                lambda: _UdpProtocol(self._udp_future),
-                local_addr=(host, port),
-            )
-            self._udp_transport = transport
-            self._udp_protocol = protocol
+        if not self._udp_queue:
+            raise CSIExtractionError("UDP endpoint is not initialized")
 
         try:
-            data = await asyncio.wait_for(self._udp_future, timeout=self.timeout)
-            # Reset future for next read
-            self._udp_future = loop.create_future()
-            self._udp_protocol._future = self._udp_future
+            data = await asyncio.wait_for(self._udp_queue.get(), timeout=self.timeout)
             return data
         except asyncio.TimeoutError:
+            host = self.config.get('aggregator_host', '0.0.0.0')
+            port = self.config.get('aggregator_port', 5005)
             raise CSIExtractionError(
                 f"UDP read timed out after {self.timeout}s. "
                 f"Ensure the aggregator is running and sending to {host}:{port}."
             )
+
+    async def _setup_udp_endpoint(self, host: str, port: int) -> None:
+        """Set up a UDP listener for the aggregator stream."""
+        loop = asyncio.get_event_loop()
+
+        queue = asyncio.Queue(maxsize=max(1, self.buffer_size * 2))
+        self._udp_queue = queue
+
+        class _UDPProtocol(asyncio.DatagramProtocol):
+            def __init__(self, queue: asyncio.Queue):
+                self.queue = queue
+
+            def datagram_received(self, data, addr):
+                if self.queue.full():
+                    try:
+                        self.queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        pass
+                try:
+                    self.queue.put_nowait(data)
+                except asyncio.QueueFull:
+                    pass
+
+            def error_received(self, exc):
+                logging.getLogger(__name__).error(f"UDP error: {exc}")
+
+        transport, protocol = await loop.create_datagram_endpoint(
+            lambda: _UDPProtocol(queue),
+            local_addr=(host, port),
+        )
+
+        self._udp_transport = transport
+        self._udp_protocol = protocol
+
+        keepalive_message = self.config.get('aggregator_keepalive_message')
+        keepalive_interval = self.config.get('aggregator_keepalive_interval', 5.0)
+
+        if isinstance(keepalive_message, str):
+            keepalive_message = keepalive_message.encode('utf-8')
+
+        if keepalive_message:
+            self._udp_keepalive_task = asyncio.create_task(
+                self._udp_keepalive_loop(host, port, keepalive_message, keepalive_interval)
+            )
+
+    async def _udp_keepalive_loop(self, host: str, port: int, message: bytes, interval: float):
+        """Periodically ping the aggregator to keep the socket open."""
+        while True:
+            try:
+                if self._udp_transport and message:
+                    self._udp_transport.sendto(message, (host, port))
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                break
