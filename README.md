@@ -1874,6 +1874,27 @@ POSE_CONFIDENCE_THRESHOLD=0.7    # Minimum confidence
 POSE_MAX_PERSONS=10              # Max tracked individuals
 ```
 
+### Troubleshooting
+
+#### Docker with ESP32 Source
+
+If you encounter `/bin/sh: 0: Illegal option --` when running Docker with ESP32 source:
+
+```bash
+# ❌ Wrong - passing arguments after the image name
+docker run -p 3000:3000 -p 5005:5005/udp ruvnet/wifi-densepose:latest --source esp32
+
+# ✅ Correct - use environment variables or docker-compose
+docker run -p 3000:3000 -p 5005:5005/udp \
+  -e WIFI_SOURCE=esp32 \
+  ruvnet/wifi-densepose:latest
+
+# Or use docker-compose with ESP32 configuration
+cd docker && docker compose up esp32
+```
+
+The Docker container's entrypoint doesn't accept command-line arguments. Use environment variables or modify the `docker-compose.yml` file for ESP32 source configuration.
+
 </details>
 
 ---
