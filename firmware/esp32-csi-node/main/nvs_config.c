@@ -61,7 +61,7 @@ void nvs_config_load(nvs_config_t *cfg)
 #ifdef CONFIG_EDGE_FALL_THRESH
     cfg->fall_thresh = (float)CONFIG_EDGE_FALL_THRESH / 1000.0f;
 #else
-    cfg->fall_thresh = 2.0f;
+    cfg->fall_thresh = 15.0f;  /* Default raised from 2.0 — see issue #263. */
 #endif
     cfg->vital_window = 256;
 #ifdef CONFIG_EDGE_VITAL_INTERVAL_MS

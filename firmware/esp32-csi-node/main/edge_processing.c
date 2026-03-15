@@ -244,6 +244,10 @@ static uint32_t s_frame_count;
 /** Previous phase velocity for fall detection (acceleration). */
 static float s_prev_phase_velocity;
 
+/** Fall detection debounce state (issue #263). */
+static uint8_t  s_fall_consec_count;   /**< Consecutive frames above threshold. */
+static int64_t  s_fall_last_alert_us;  /**< Timestamp of last fall alert (debounce). */
+
 /** Adaptive calibration state. */
 static bool     s_calibrated;
 static float    s_calib_sum;
@@ -689,7 +693,7 @@ static void process_frame(const edge_ring_slot_t *slot)
     }
     s_presence_detected = (s_presence_score > threshold);
 
-    /* --- Step 10: Fall detection (phase acceleration) --- */
+    /* --- Step 10: Fall detection (phase acceleration + debounce, issue #263) --- */
     if (s_history_len >= 3) {
         uint16_t i0 = (s_history_idx + EDGE_PHASE_HISTORY_LEN - 1) % EDGE_PHASE_HISTORY_LEN;
         uint16_t i1 = (s_history_idx + EDGE_PHASE_HISTORY_LEN - 2) % EDGE_PHASE_HISTORY_LEN;
@@ -697,10 +701,26 @@ static void process_frame(const edge_ring_slot_t *slot)
         float accel = fabsf(velocity - s_prev_phase_velocity);
         s_prev_phase_velocity = velocity;
 
-        s_fall_detected = (accel > s_cfg.fall_thresh);
-        if (s_fall_detected) {
-            ESP_LOGW(TAG, "Fall detected! accel=%.4f > thresh=%.4f",
-                     accel, s_cfg.fall_thresh);
+        if (accel > s_cfg.fall_thresh) {
+            s_fall_consec_count++;
+        } else {
+            s_fall_consec_count = 0;
+        }
+
+        /* Require EDGE_FALL_CONSEC_MIN consecutive frames above threshold,
+         * plus a cooldown period to prevent alert storms. */
+        int64_t now_us = esp_timer_get_time();
+        int64_t cooldown_us = (int64_t)EDGE_FALL_COOLDOWN_MS * 1000;
+        if (s_fall_consec_count >= EDGE_FALL_CONSEC_MIN
+            && (now_us - s_fall_last_alert_us) >= cooldown_us)
+        {
+            s_fall_detected = true;
+            s_fall_last_alert_us = now_us;
+            s_fall_consec_count = 0;
+            ESP_LOGW(TAG, "Fall detected! accel=%.4f > thresh=%.4f (consec=%u)",
+                     accel, s_cfg.fall_thresh, EDGE_FALL_CONSEC_MIN);
+        } else if (s_fall_consec_count == 0) {
+            s_fall_detected = false;
         }
     }
 
@@ -850,6 +870,8 @@ esp_err_t edge_processing_init(const edge_config_t *cfg)
     s_latest_rssi = 0;
     s_frame_count = 0;
     s_prev_phase_velocity = 0.0f;
+    s_fall_consec_count = 0;
+    s_fall_last_alert_us = 0;
     s_last_vitals_send_us = 0;
     s_has_prev_iq = false;
     s_prev_iq_len = 0;

@@ -42,6 +42,10 @@
 #define EDGE_CALIB_FRAMES     1200  /**< Frames for adaptive calibration (~60s at 20 Hz). */
 #define EDGE_CALIB_SIGMA_MULT 3.0f  /**< Threshold = mean + 3*sigma of ambient. */
 
+/* ---- Fall detection ---- */
+#define EDGE_FALL_COOLDOWN_MS 5000  /**< Minimum ms between fall alerts (debounce). */
+#define EDGE_FALL_CONSEC_MIN  3     /**< Consecutive frames above threshold to trigger. */
+
 /* ---- SPSC ring buffer slot ---- */
 typedef struct {
     uint8_t  iq_data[EDGE_MAX_IQ_BYTES]; /**< Raw I/Q bytes from CSI callback. */

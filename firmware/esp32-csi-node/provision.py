@@ -168,7 +168,9 @@ def main():
     parser.add_argument("--edge-tier", type=int, choices=[0, 1, 2],
                         help="Edge processing tier: 0=off, 1=stats, 2=vitals")
     parser.add_argument("--pres-thresh", type=int, help="Presence detection threshold (default: 50)")
-    parser.add_argument("--fall-thresh", type=int, help="Fall detection threshold (default: 500)")
+    parser.add_argument("--fall-thresh", type=int, help="Fall detection threshold in milli-units "
+                        "(value/1000 = rad/s²). Default: 15000 → 15.0 rad/s². "
+                        "Raise to reduce false positives in high-traffic areas.")
     parser.add_argument("--vital-win", type=int, help="Phase history window in frames (default: 300)")
     parser.add_argument("--vital-int", type=int, help="Vitals packet interval in ms (default: 1000)")
     parser.add_argument("--subk-count", type=int, help="Top-K subcarrier count (default: 32)")

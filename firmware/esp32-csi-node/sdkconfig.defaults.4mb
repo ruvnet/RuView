@@ -1,0 +1,29 @@
+# ESP32-S3 CSI Node — 4MB Flash SDK Configuration (issue #265)
+# For boards with 4MB flash (e.g. ESP32-S3 SuperMini 4MB).
+#
+# Build: cp sdkconfig.defaults.4mb sdkconfig.defaults && idf.py set-target esp32s3 && idf.py build
+# Or:    idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults.4mb" set-target esp32s3 && idf.py build
+
+CONFIG_IDF_TARGET="esp32s3"
+
+# 4MB flash partition table
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_4mb.csv"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+
+# Compiler: optimize for size (critical for 4MB)
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# CSI support
+CONFIG_ESP_WIFI_CSI_ENABLED=y
+
+# Disable display support to save flash (ADR-045 display requires 8MB)
+# CONFIG_DISPLAY_ENABLE is not set
+
+# Reduce logging to save flash
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+CONFIG_LWIP_SO_RCVBUF=y
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

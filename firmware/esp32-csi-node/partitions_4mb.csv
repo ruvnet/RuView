@@ -1,0 +1,15 @@
+# ESP32-S3 CSI Node — 4MB flash partition table (issue #265)
+# For boards with 4MB flash (e.g. ESP32-S3 SuperMini 4MB).
+# Binary is ~978KB so each OTA slot is 1.875MB — plenty of room.
+#
+# Usage: copy to partitions_display.csv OR set in sdkconfig:
+#   CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_4mb.csv"
+#   CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+#   CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+#
+# Name,      Type, SubType, Offset,   Size,      Flags
+nvs,         data, nvs,     0x9000,   0x6000,
+otadata,     data, ota,     0xF000,   0x2000,
+phy_init,    data, phy,     0x11000,  0x1000,
+ota_0,       app,  ota_0,   0x20000,  0x1D0000,
+ota_1,       app,  ota_1,   0x1F0000, 0x1D0000,
