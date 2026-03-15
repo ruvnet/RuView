@@ -1,13 +1,15 @@
 // API Configuration for WiFi-DensePose UI
 
-// Auto-detect the backend URL from the page origin so the UI works whether
-// served from Docker (:3000), local dev (:8080), or any other port.
-const _origin = (typeof window !== 'undefined' && window.location && window.location.origin)
-  ? window.location.origin
-  : 'http://localhost:3000';
+// Backend URL configuration
+// When running locally, frontend is on :3000 and backend is on :8000
+const _backendUrl = (typeof window !== 'undefined' && window.location) 
+  ? (window.location.port === '3000' 
+      ? 'http://localhost:8000'  // Local dev: frontend on :3000, backend on :8000
+      : window.location.origin)   // Production/Docker: same origin
+  : 'http://localhost:8000';
 
 export const API_CONFIG = {
-  BASE_URL: _origin,
+  BASE_URL: _backendUrl,
   API_VERSION: '/api/v1',
   WS_PREFIX: 'ws://',
   WSS_PREFIX: 'wss://',
@@ -121,9 +123,10 @@ export function buildWsUrl(endpoint, params = {}) {
     ? API_CONFIG.WSS_PREFIX
     : API_CONFIG.WS_PREFIX;
 
-  // Derive host from the page origin so it works on any port (Docker :3000, dev :8080, etc.)
-  const host = window.location.host;
-  let url = `${protocol}${host}${endpoint}`;
+  // Extract host from BASE_URL (e.g., "http://localhost:8000" → "localhost:8000")
+  // This ensures WebSocket connects to backend port, not frontend port
+  const backendHost = API_CONFIG.BASE_URL.replace(/^https?:\/\//, '');
+  let url = `${protocol}${backendHost}${endpoint}`;
   
   // Add query parameters
   const queryParams = new URLSearchParams(params);
