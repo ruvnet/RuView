@@ -17,6 +17,7 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
+#include "led_strip.h"
 
 #include "csi_collector.h"
 #include "stream_sender.h"
@@ -137,6 +138,23 @@ void app_main(void)
     nvs_config_load(&g_nvs_config);
 
     ESP_LOGI(TAG, "ESP32-S3 CSI Node (ADR-018) — Node ID: %d", g_nvs_config.node_id);
+
+    /* Turn off onboard WS2812 LED on GPIO 38 */
+    led_strip_handle_t led_strip;
+    led_strip_config_t strip_config = {
+        .strip_gpio_num = 38,
+        .max_leds = 1,
+        .led_model = LED_MODEL_WS2812,
+        .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB,
+        .flags.invert_out = false,
+    };
+    led_strip_rmt_config_t rmt_config = {
+        .resolution_hz = 10 * 1000 * 1000, // 10MHz
+        .flags.with_dma = false,
+    };
+    if (led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip) == ESP_OK) {
+        led_strip_clear(led_strip);
+    }
 
     /* Initialize WiFi STA (skip entirely under QEMU mock — no RF hardware) */
 #ifndef CONFIG_CSI_MOCK_SKIP_WIFI_CONNECT

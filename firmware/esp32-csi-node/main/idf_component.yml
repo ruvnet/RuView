@@ -8,3 +8,6 @@ dependencies:
 
   ## LCD touch abstraction
   espressif/esp_lcd_touch: "^1.0"
+
+  ## Onboard WS2812 LED Disabling
+  espressif/led_strip: "^3.0.0"
