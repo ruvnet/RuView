@@ -71,11 +71,17 @@ def build_nvs_csv(args):
         writer.writerow(["vital_int", "data", "u16", str(args.vital_int)])
     if args.subk_count is not None:
         writer.writerow(["subk_count", "data", "u8", str(args.subk_count)])
+    
+    # Generic Utility Settings
+    if args.status_led is not None:
+        writer.writerow(["status_led", "data", "u8", str(args.status_led)])
+
     # ADR-060: Channel override and MAC filter
     if args.channel is not None:
         writer.writerow(["csi_channel", "data", "u8", str(args.channel)])
     if args.filter_mac is not None:
-        mac_bytes = bytes(int(b, 16) for b in args.filter_mac.split(":"))
+        mac_str = str(args.filter_mac)
+        mac_bytes = bytes(int(b, 16) for b in mac_str.split(":")) # pyre-ignore
         # NVS blob: write as hex-encoded string for CSV compatibility
         writer.writerow(["filter_mac", "data", "hex2bin", mac_bytes.hex()])
     # ADR-073: Multi-frequency channel hopping
@@ -215,6 +221,8 @@ def main():
     parser.add_argument("--zone", type=str, help="Zone name for this node (e.g. lobby, hallway)")
     parser.add_argument("--swarm-hb", type=int, help="Swarm heartbeat interval in seconds (default 30)")
     parser.add_argument("--swarm-ingest", type=int, help="Swarm vector ingest interval in seconds (default 5)")
+    # Generic Utility
+    parser.add_argument("--status-led", type=int, choices=[0, 1], help="Enable (1) or disable (0) RGB status indicator (default: 1)")
     parser.add_argument("--dry-run", action="store_true", help="Generate NVS binary but don't flash")
     parser.add_argument("--force-partial", action="store_true",
                         help="Allow partial config without WiFi credentials. "
@@ -232,6 +240,7 @@ def main():
         args.vital_int is not None, args.subk_count is not None,
         args.channel is not None, args.filter_mac is not None,
         args.seed_url is not None, args.zone is not None,
+        args.status_led is not None,
     ])
     if not has_value:
         parser.error("At least one config value must be specified")
@@ -280,7 +289,7 @@ def main():
             parser.error(f"--filter-mac must be in AA:BB:CC:DD:EE:FF format, got '{args.filter_mac}'")
         try:
             for p in parts:
-                val = int(p, 16)
+                val = int(p, 16) # pyre-ignore
                 if val < 0 or val > 255:
                     raise ValueError
         except ValueError:
@@ -324,6 +333,8 @@ def main():
         print(f"  Swarm HB:      {args.swarm_hb}s")
     if args.swarm_ingest is not None:
         print(f"  Swarm Ingest:  {args.swarm_ingest}s")
+    if args.status_led is not None:
+        print(f"  Status LED:    {'On (1)' if args.status_led else 'Off (0)'}")
 
     csv_content = build_nvs_csv(args)
 
@@ -340,6 +351,12 @@ def main():
               f"nvs_partition_generator/nvs_partition_gen.py generate "
               f"{fallback_path} nvs.bin 0x6000", file=sys.stderr)
         sys.exit(1)
+
+    if not nvs_bin:
+        print("Failed to generate NVS binary", file=sys.stderr)
+        sys.exit(1)
+        
+    assert isinstance(nvs_bin, bytes)
 
     if args.dry_run:
         out = "nvs_provision.bin"
