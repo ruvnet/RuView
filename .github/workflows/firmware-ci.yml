@@ -27,16 +27,16 @@ jobs:
           idf.py set-target esp32s3
           idf.py build
 
-      - name: Verify binary size (< 950 KB gate)
+      - name: Verify binary size (< 1100 KB gate)
         working-directory: firmware/esp32-csi-node
         run: |
           BIN=build/esp32-csi-node.bin
           SIZE=$(stat -c%s "$BIN")
-          MAX=$((950 * 1024))
+          MAX=$((1100 * 1024))
           echo "Binary size: $SIZE bytes ($(( SIZE / 1024 )) KB)"
-          echo "Size limit:  $MAX bytes (950 KB — includes Tier 3 WASM runtime)"
+          echo "Size limit:  $MAX bytes (1100 KB — includes WASM runtime + HTTP client for Seed swarm bridge)"
           if [ "$SIZE" -gt "$MAX" ]; then
-            echo "::error::Firmware binary exceeds 950 KB size gate ($SIZE > $MAX)"
+            echo "::error::Firmware binary exceeds 1100 KB size gate ($SIZE > $MAX)"
             exit 1
           fi
           echo "Binary size OK: $SIZE <= $MAX"
