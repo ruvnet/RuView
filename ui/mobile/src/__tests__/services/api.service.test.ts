@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { API_POSE_STATUS_PATH } from '@/constants/api';
 
 jest.mock('axios', () => {
   const mockAxiosInstance = {
@@ -99,6 +100,25 @@ describe('ApiService', () => {
       apiService.get('/test');
       expect(mockRequest).toHaveBeenCalledWith(
         expect.objectContaining({ method: 'GET' }),
+      );
+    });
+  });
+
+  describe('getStatus', () => {
+    it('supports a one-off base URL override without mutating the saved base URL', async () => {
+      apiService.setBaseUrl('http://saved-host:3000');
+      mockRequest.mockResolvedValueOnce({ data: { ok: true } });
+      await apiService.getStatus('http://draft-host:4000');
+
+      expect(mockRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ url: `http://draft-host:4000${API_POSE_STATUS_PATH}` }),
+      );
+
+      mockRequest.mockResolvedValueOnce({ data: { ok: true } });
+      await apiService.get('/api/next');
+
+      expect(mockRequest).toHaveBeenLastCalledWith(
+        expect.objectContaining({ url: 'http://saved-host:3000/api/next' }),
       );
     });
   });
