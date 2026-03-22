@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RuView - WiFi DensePose Explorer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Sidebar Navigation -->
+  <nav id="sidebar" class="sidebar">
+    <div class="sidebar-header">
+      <h1 class="logo">RuView</h1>
+      <span class="logo-sub">WiFi DensePose</span>
+    </div>
+    <ul class="nav-list">
+      <li class="nav-item active" data-page="overview">
+        <span class="nav-icon">&#9673;</span> Overview
+      </li>
+      <li class="nav-item" data-page="architecture">
+        <span class="nav-icon">&#9645;</span> Architecture
+      </li>
+      <li class="nav-item" data-page="crates">
+        <span class="nav-icon">&#9638;</span> Crate Explorer
+      </li>
+      <li class="nav-item" data-page="demo">
+        <span class="nav-icon">&#9654;</span> Live Demo
+      </li>
+      <li class="nav-item" data-page="signals">
+        <span class="nav-icon">&#8767;</span> Signal Lab
+      </li>
+      <li class="nav-item" data-page="api">
+        <span class="nav-icon">&#8644;</span> API Playground
+      </li>
+      <li class="nav-item" data-page="guide">
+        <span class="nav-icon">&#9997;</span> Getting Started
+      </li>
+      <li class="nav-item" data-page="build">
+        <span class="nav-icon">&#9881;</span> Build & Run
+      </li>
+    </ul>
+    <div class="sidebar-footer">
+      <div class="status-indicator">
+        <span class="dot dot-green"></span> Mock Mode Active
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <main id="content" class="content">
+    <!-- Mobile header -->
+    <header class="mobile-header">
+      <button id="menuToggle" class="menu-toggle">&#9776;</button>
+      <span>RuView Explorer</span>
+    </header>
+
+    <!-- Pages are rendered dynamically by app.js -->
+    <div id="page-container"></div>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
