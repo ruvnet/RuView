@@ -4,6 +4,9 @@
   <a href="https://ruvnet.github.io/RuView/">
     <img src="assets/ruview-small-gemini.jpg" alt="RuView - WiFi DensePose" width="100%">
   </a>
+  <a href="https://gitcgr.com/ruvnet/RuView">
+    <img src="https://gitcgr.com/badge/ruvnet/RuView.svg" alt="gitcgr" />
+  </a>
 </p>
 
 ## **See through walls with WiFi + Ai** ##
