@@ -8,6 +8,7 @@ import { OtaUpdate } from "./pages/OtaUpdate";
 import { EdgeModules } from "./pages/EdgeModules";
 import { Sensing } from "./pages/Sensing";
 import { MeshView } from "./pages/MeshView";
+import Training from "./pages/Training";
 import { Settings } from "./pages/Settings";
 
 type Page =
@@ -19,6 +20,7 @@ type Page =
   | "wasm"
   | "sensing"
   | "mesh"
+  | "training"
   | "settings";
 
 interface NavItem {
@@ -36,6 +38,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "wasm", label: "Edge Modules", icon: "\u2B21" },
   { id: "sensing", label: "Sensing", icon: "\u2248" },
   { id: "mesh", label: "Mesh View", icon: "\u2B2F" },
+  { id: "training", label: "Training", icon: "\u2B50" },
   { id: "settings", label: "Settings", icon: "\u2699" },
 ];
 
@@ -99,6 +102,7 @@ const App: React.FC = () => {
       case "wasm": return <EdgeModules />;
       case "sensing": return <Sensing />;
       case "mesh": return <MeshView />;
+      case "training": return <Training />;
       case "settings": return <Settings />;
     }
   };

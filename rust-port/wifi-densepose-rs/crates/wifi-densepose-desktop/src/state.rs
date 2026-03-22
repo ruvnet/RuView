@@ -3,6 +3,10 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use crate::domain::node::DiscoveredNode;
+use crate::domain::training::{
+    CheckpointInfo, DatasetInfo, EpochMetrics, EvaluationMetrics,
+    GpuInfo, JointAccuracy, RuVectorConfig, TrainingJob,
+};
 
 /// Sub-state for discovered nodes.
 #[derive(Default)]
@@ -87,6 +91,33 @@ impl Default for SettingsState {
     }
 }
 
+/// Sub-state for training operations.
+pub struct TrainingState {
+    pub gpu_info: Option<GpuInfo>,
+    pub datasets: Vec<DatasetInfo>,
+    pub checkpoints: Vec<CheckpointInfo>,
+    pub current_job: Option<TrainingJob>,
+    pub ruvector_config: RuVectorConfig,
+    pub training_history: Vec<EpochMetrics>,
+    pub evaluation_metrics: Option<EvaluationMetrics>,
+    pub joint_accuracies: Vec<JointAccuracy>,
+}
+
+impl Default for TrainingState {
+    fn default() -> Self {
+        Self {
+            gpu_info: None,
+            datasets: Vec::new(),
+            checkpoints: Vec::new(),
+            current_job: None,
+            ruvector_config: RuVectorConfig::default(),
+            training_history: Vec::new(),
+            evaluation_metrics: None,
+            joint_accuracies: Vec::new(),
+        }
+    }
+}
+
 /// Top-level application state managed by Tauri.
 pub struct AppState {
     pub discovery: Mutex<DiscoveryState>,
@@ -94,6 +125,7 @@ pub struct AppState {
     pub flash: Mutex<FlashState>,
     pub ota: Mutex<OtaState>,
     pub settings: Mutex<SettingsState>,
+    pub training: Mutex<TrainingState>,
 }
 
 impl Default for AppState {
@@ -104,6 +136,7 @@ impl Default for AppState {
             flash: Mutex::new(FlashState::default()),
             ota: Mutex::new(OtaState::default()),
             settings: Mutex::new(SettingsState::default()),
+            training: Mutex::new(TrainingState::default()),
         }
     }
 }
@@ -134,6 +167,9 @@ impl AppState {
         }
         if let Ok(mut settings) = self.settings.lock() {
             *settings = SettingsState::default();
+        }
+        if let Ok(mut training) = self.training.lock() {
+            *training = TrainingState::default();
         }
     }
 }
