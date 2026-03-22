@@ -66,6 +66,10 @@ function valueToColor(v) {
   return [r, g, b];
 }
 
+// ---- Node marker color palette -------------------------------------------
+
+const NODE_MARKER_COLORS = [0x00ccff, 0xff6600, 0x00ff88, 0xff00cc, 0xffcc00, 0x8800ff, 0x00ffcc, 0xff0044];
+
 // ---- GaussianSplatRenderer -----------------------------------------------
 
 export class GaussianSplatRenderer {
@@ -107,6 +111,10 @@ export class GaussianSplatRenderer {
 
     // Node markers (ESP32 / router positions)
     this._createNodeMarkers(THREE);
+
+    // Dynamic per-node markers (multi-node support)
+    this.nodeMarkers = new Map(); // nodeId -> THREE.Mesh
+    this._THREE = THREE;
 
     // Body disruption blob
     this._createBodyBlob(THREE);
@@ -369,10 +377,42 @@ export class GaussianSplatRenderer {
       bGeo.attributes.splatSize.needsUpdate    = true;
     }
 
-    // -- Update node positions ---------------------------------------------
+    // -- Update node positions (legacy single-node) ------------------------
     if (nodes.length > 0 && nodes[0].position) {
       const pos = nodes[0].position;
       this.nodeMarker.position.set(pos[0], 0.5, pos[2]);
+    }
+
+    // -- Update dynamic per-node markers (multi-node support) --------------
+    if (nodes && nodes.length > 0 && this.scene) {
+      const THREE = this._THREE || window.THREE;
+      if (THREE) {
+        const activeIds = new Set();
+        for (const node of nodes) {
+          activeIds.add(node.node_id);
+          if (!this.nodeMarkers.has(node.node_id)) {
+            const geo = new THREE.SphereGeometry(0.25, 16, 16);
+            const mat = new THREE.MeshBasicMaterial({
+              color: NODE_MARKER_COLORS[node.node_id % NODE_MARKER_COLORS.length],
+              transparent: true,
+              opacity: 0.8,
+            });
+            const marker = new THREE.Mesh(geo, mat);
+            this.scene.add(marker);
+            this.nodeMarkers.set(node.node_id, marker);
+          }
+          const marker = this.nodeMarkers.get(node.node_id);
+          const pos = node.position || [0, 0, 0];
+          marker.position.set(pos[0], 0.5, pos[2]);
+        }
+        // Remove stale markers
+        for (const [id, marker] of this.nodeMarkers) {
+          if (!activeIds.has(id)) {
+            this.scene.remove(marker);
+            this.nodeMarkers.delete(id);
+          }
+        }
+      }
     }
   }
 
