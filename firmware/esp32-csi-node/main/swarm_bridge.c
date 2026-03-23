@@ -19,6 +19,7 @@
 #include "esp_app_desc.h"
 #include "esp_netif.h"
 #include "esp_http_client.h"
+#include "led_indicator.h"
 
 static const char *TAG = "swarm";
 
@@ -233,6 +234,7 @@ static void swarm_task(void *arg)
     /* Get firmware version string. */
     const esp_app_desc_t *app = esp_app_get_description();
     const char *fw_ver = app ? app->version : "unknown";
+    ESP_LOGI(TAG, "Firmware version: %s", fw_ver);
 
     /* Get local IP. */
     char ip_str[16];
@@ -251,8 +253,10 @@ static void swarm_task(void *arg)
         if (swarm_post_json(client, json, len) == ESP_OK) {
             s_cnt_regs++;
             ESP_LOGI(TAG, "registered node %u with seed (id=%lu)", s_node_id, (unsigned long)reg_id);
+            led_indicator_set_state(LED_STATE_SWARM_ACTIVE);
         } else {
             ESP_LOGW(TAG, "registration failed — will retry on next heartbeat");
+            led_indicator_set_state(LED_STATE_SWARM_ERROR);
         }
     }
 
@@ -278,14 +282,11 @@ static void swarm_task(void *arg)
         xSemaphoreGive(s_mutex);
 
         uint32_t uptime_s = (uint32_t)(esp_timer_get_time() / 1000000ULL);
-        uint32_t free_heap = esp_get_free_heap_size();
         uint32_t ts = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
         /* ---- Heartbeat ---- */
         if ((now - last_heartbeat) >= pdMS_TO_TICKS(s_cfg.heartbeat_sec * 1000U)) {
             last_heartbeat = now;
-
-            bool presence = vit_valid && (vit.flags & 0x01);
 
             /* Heartbeat ID: node_id * 1000000 + 100000 + ts_sec */
             uint32_t hb_id = (uint32_t)s_node_id * 1000000U + 100000U + (uptime_s % 100000U);
@@ -297,6 +298,9 @@ static void swarm_task(void *arg)
 
             if (swarm_post_json(client, json, len) == ESP_OK) {
                 s_cnt_heartbeats++;
+                led_indicator_set_state(LED_STATE_SWARM_ACTIVE);
+            } else {
+                led_indicator_set_state(LED_STATE_SWARM_ERROR);
             }
         }
 
@@ -316,6 +320,9 @@ static void swarm_task(void *arg)
 
                 if (swarm_post_json(client, json, len) == ESP_OK) {
                     s_cnt_ingests++;
+                    led_indicator_set_state(LED_STATE_SWARM_ACTIVE);
+                } else {
+                    led_indicator_set_state(LED_STATE_SWARM_ERROR);
                 }
             }
         }

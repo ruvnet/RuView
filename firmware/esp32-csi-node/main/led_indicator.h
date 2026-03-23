@@ -17,6 +17,9 @@ typedef enum {
     LED_STATE_CONNECTED,
     LED_STATE_WIFI_ERROR,
     LED_STATE_MOCK_MODE,
+    LED_STATE_MMWAVE_ERROR,
+    LED_STATE_SWARM_ERROR,
+    LED_STATE_SWARM_ACTIVE,
 } led_indicator_state_t;
 
 /**

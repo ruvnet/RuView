@@ -81,6 +81,40 @@ static void led_task(void *arg)
                 led_strip_refresh(s_led_strip);
                 vTaskDelay(pdMS_TO_TICKS(500));
                 break;
+                
+            case LED_STATE_MMWAVE_ERROR:
+                /* Slow Blinking Yellow */
+                toggle = !toggle;
+                if (toggle) {
+                    led_strip_set_pixel(s_led_strip, 0, 100, 100, 0);
+                } else {
+                    led_strip_clear(s_led_strip);
+                }
+                led_strip_refresh(s_led_strip);
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                break;
+
+            case LED_STATE_SWARM_ERROR:
+                /* Slow Blinking Magenta */
+                toggle = !toggle;
+                if (toggle) {
+                    led_strip_set_pixel(s_led_strip, 0, 100, 0, 100);
+                } else {
+                    led_strip_clear(s_led_strip);
+                }
+                led_strip_refresh(s_led_strip);
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                break;
+
+            case LED_STATE_SWARM_ACTIVE:
+                /* Quick Blip Magenta */
+                led_strip_set_pixel(s_led_strip, 0, 100, 0, 100);
+                led_strip_refresh(s_led_strip);
+                vTaskDelay(pdMS_TO_TICKS(100));
+                led_strip_clear(s_led_strip);
+                led_strip_refresh(s_led_strip);
+                s_current_state = LED_STATE_CONNECTED;
+                break;
         }
     }
 }
