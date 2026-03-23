@@ -64,11 +64,17 @@ def build_nvs_csv(args):
         writer.writerow(["vital_int", "data", "u16", str(args.vital_int)])
     if args.subk_count is not None:
         writer.writerow(["subk_count", "data", "u8", str(args.subk_count)])
+    
+    # Generic Utility Settings
+    if args.status_led is not None:
+        writer.writerow(["status_led", "data", "u8", str(args.status_led)])
+
     # ADR-060: Channel override and MAC filter
     if args.channel is not None:
         writer.writerow(["csi_channel", "data", "u8", str(args.channel)])
     if args.filter_mac is not None:
-        mac_bytes = bytes(int(b, 16) for b in args.filter_mac.split(":"))
+        mac_str = str(args.filter_mac)
+        mac_bytes = bytes(int(b, 16) for b in mac_str.split(":")) # pyre-ignore
         # NVS blob: write as hex-encoded string for CSV compatibility
         writer.writerow(["filter_mac", "data", "hex2bin", mac_bytes.hex()])
     # ADR-066: Swarm bridge configuration
@@ -181,6 +187,9 @@ def main():
     parser.add_argument("--channel", type=int, help="CSI channel (1-14 for 2.4GHz, 36-177 for 5GHz). "
                         "Overrides auto-detection from connected AP.")
     parser.add_argument("--filter-mac", type=str, help="MAC address to filter CSI frames (AA:BB:CC:DD:EE:FF)")
+    # Generic Utility
+    parser.add_argument("--status-led", type=int, choices=[0, 1], help="Enable (1) or disable (0) RGB status indicator (default: 1)")
+
     # ADR-066: Swarm bridge
     parser.add_argument("--seed-url", type=str, help="Cognitum Seed base URL (e.g. http://10.1.10.236)")
     parser.add_argument("--seed-token", type=str, help="Seed Bearer token (from pairing)")
@@ -199,6 +208,7 @@ def main():
         args.fall_thresh is not None, args.vital_win is not None,
         args.vital_int is not None, args.subk_count is not None,
         args.channel is not None, args.filter_mac is not None,
+        args.status_led is not None,
         args.seed_url is not None, args.zone is not None,
     ])
     if not has_value:
@@ -220,7 +230,7 @@ def main():
             parser.error(f"--filter-mac must be in AA:BB:CC:DD:EE:FF format, got '{args.filter_mac}'")
         try:
             for p in parts:
-                val = int(p, 16)
+                val = int(p, 16) # pyre-ignore
                 if val < 0 or val > 255:
                     raise ValueError
         except ValueError:
@@ -256,6 +266,8 @@ def main():
         print(f"  CSI Channel:   {args.channel}")
     if args.filter_mac is not None:
         print(f"  Filter MAC:    {args.filter_mac}")
+    if args.status_led is not None:
+        print(f"  Status LED:    {'On (1)' if args.status_led else 'Off (0)'}")
     if args.seed_url is not None:
         print(f"  Seed URL:      {args.seed_url}")
     if args.zone is not None:
@@ -280,6 +292,12 @@ def main():
               f"nvs_partition_generator/nvs_partition_gen.py generate "
               f"{fallback_path} nvs.bin 0x6000", file=sys.stderr)
         sys.exit(1)
+
+    if not nvs_bin:
+        print("Failed to generate NVS binary", file=sys.stderr)
+        sys.exit(1)
+        
+    assert isinstance(nvs_bin, bytes)
 
     if args.dry_run:
         out = "nvs_provision.bin"
