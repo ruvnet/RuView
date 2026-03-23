@@ -20,6 +20,11 @@ from src.core.csi_processor import CSIProcessor
 from src.core.phase_sanitizer import PhaseSanitizer
 from src.models.densepose_head import DensePoseHead
 from src.models.modality_translation import ModalityTranslationNetwork
+from src.services.multi_person_mvp import (
+    apply_multi_person_mvp,
+    estimate_motion_energy,
+    synthesize_secondary_person,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -260,20 +265,57 @@ class PoseService:
                 if pose.get("confidence", 0.0) >= self.settings.pose_confidence_threshold
             ]
             
+            # MVP multi-person fallback: when motion energy is high and model only
+            # yields one detection, synthesize a second nearby person hypothesis.
+            filtered_poses = self._apply_multi_person_mvp(filtered_poses, csi_data, metadata)
+
             # Limit number of persons
-            if len(filtered_poses) > self.settings.pose_max_persons:
+            requested_max = int(metadata.get("max_persons", self.settings.pose_max_persons))
+            effective_max_persons = max(1, min(requested_max, self.settings.pose_max_persons))
+            if len(filtered_poses) > effective_max_persons:
                 filtered_poses = sorted(
-                    filtered_poses, 
-                    key=lambda x: x.get("confidence", 0.0), 
+                    filtered_poses,
+                    key=lambda x: x.get("confidence", 0.0),
                     reverse=True
-                )[:self.settings.pose_max_persons]
-            
+                )[:effective_max_persons]
+
             return filtered_poses
-            
+
         except Exception as e:
             self.logger.error(f"Error in pose estimation: {e}")
             return []
-    
+
+    def _estimate_motion_energy(self, csi_data: np.ndarray) -> float:
+        """Estimate frame motion energy from CSI amplitude deltas."""
+        return estimate_motion_energy(csi_data)
+
+    def _synthesize_secondary_person(self, pose: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate a second person hypothesis with a small spatial offset."""
+        return synthesize_secondary_person(pose)
+
+    def _apply_multi_person_mvp(
+        self,
+        poses: List[Dict[str, Any]],
+        csi_data: np.ndarray,
+        metadata: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """MVP heuristic for issue #97: promote to 2 persons on high motion energy."""
+        requested_max = int(metadata.get("max_persons", self.settings.pose_max_persons))
+        threshold = float(getattr(self.settings, "pose_multi_person_mvp_energy_threshold", 0.35))
+        promoted = apply_multi_person_mvp(
+            poses,
+            csi_data,
+            max_persons=requested_max,
+            energy_threshold=threshold,
+        )
+        if len(promoted) > len(poses):
+            self.logger.debug(
+                "multi-person MVP promotion triggered: motion_energy=%.4f threshold=%.4f",
+                self._estimate_motion_energy(csi_data),
+                threshold,
+            )
+        return promoted
+
     def _parse_pose_outputs(self, outputs: torch.Tensor) -> List[Dict[str, Any]]:
         """Parse neural network outputs into pose detections.
 
