@@ -3,6 +3,7 @@ set(SRCS
     "edge_processing.c" "ota_update.c" "power_mgmt.c"
     "wasm_runtime.c" "wasm_upload.c" "rvf_parser.c"
     "mmwave_sensor.c" "led_indicator.c"
+    "swarm_bridge.c"
 )
 
 set(REQUIRES "")

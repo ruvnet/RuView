@@ -113,11 +113,11 @@ export function buildApiUrl(endpoint, params = {}) {
 
 // Helper function to build WebSocket URLs
 export function buildWsUrl(endpoint, params = {}) {
-  // Use secure WebSocket (wss://) when serving over HTTPS or on non-localhost
-  // Use ws:// only for localhost development
-  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  // Match WebSocket protocol to page protocol: https → wss, http → ws.
+  // Previous logic forced wss:// on non-localhost HTTP, breaking LAN/Docker
+  // deployments served over plain HTTP. See issue #272.
   const isSecure = window.location.protocol === 'https:';
-  const protocol = (isSecure || !isLocalhost)
+  const protocol = isSecure
     ? API_CONFIG.WSS_PREFIX
     : API_CONFIG.WS_PREFIX;
 

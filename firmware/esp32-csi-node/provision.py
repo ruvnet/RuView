@@ -77,6 +77,17 @@ def build_nvs_csv(args):
         mac_bytes = bytes(int(b, 16) for b in mac_str.split(":")) # pyre-ignore
         # NVS blob: write as hex-encoded string for CSV compatibility
         writer.writerow(["filter_mac", "data", "hex2bin", mac_bytes.hex()])
+    # ADR-066: Swarm bridge configuration
+    if args.seed_url is not None:
+        writer.writerow(["seed_url", "data", "string", args.seed_url])
+    if args.seed_token is not None:
+        writer.writerow(["seed_token", "data", "string", args.seed_token])
+    if args.zone is not None:
+        writer.writerow(["zone_name", "data", "string", args.zone])
+    if args.swarm_hb is not None:
+        writer.writerow(["swarm_hb", "data", "u16", str(args.swarm_hb)])
+    if args.swarm_ingest is not None:
+        writer.writerow(["swarm_ingest", "data", "u16", str(args.swarm_ingest)])
     return buf.getvalue()
 
 
@@ -176,10 +187,15 @@ def main():
     parser.add_argument("--channel", type=int, help="CSI channel (1-14 for 2.4GHz, 36-177 for 5GHz). "
                         "Overrides auto-detection from connected AP.")
     parser.add_argument("--filter-mac", type=str, help="MAC address to filter CSI frames (AA:BB:CC:DD:EE:FF)")
-    
     # Generic Utility
     parser.add_argument("--status-led", type=int, choices=[0, 1], help="Enable (1) or disable (0) RGB status indicator (default: 1)")
-    
+
+    # ADR-066: Swarm bridge
+    parser.add_argument("--seed-url", type=str, help="Cognitum Seed base URL (e.g. http://10.1.10.236)")
+    parser.add_argument("--seed-token", type=str, help="Seed Bearer token (from pairing)")
+    parser.add_argument("--zone", type=str, help="Zone name for this node (e.g. lobby, hallway)")
+    parser.add_argument("--swarm-hb", type=int, help="Swarm heartbeat interval in seconds (default 30)")
+    parser.add_argument("--swarm-ingest", type=int, help="Swarm vector ingest interval in seconds (default 5)")
     parser.add_argument("--dry-run", action="store_true", help="Generate NVS binary but don't flash")
 
     args = parser.parse_args()
@@ -193,6 +209,7 @@ def main():
         args.vital_int is not None, args.subk_count is not None,
         args.channel is not None, args.filter_mac is not None,
         args.status_led is not None,
+        args.seed_url is not None, args.zone is not None,
     ])
     if not has_value:
         parser.error("At least one config value must be specified")
@@ -251,6 +268,14 @@ def main():
         print(f"  Filter MAC:    {args.filter_mac}")
     if args.status_led is not None:
         print(f"  Status LED:    {'On (1)' if args.status_led else 'Off (0)'}")
+    if args.seed_url is not None:
+        print(f"  Seed URL:      {args.seed_url}")
+    if args.zone is not None:
+        print(f"  Zone:          {args.zone}")
+    if args.swarm_hb is not None:
+        print(f"  Swarm HB:      {args.swarm_hb}s")
+    if args.swarm_ingest is not None:
+        print(f"  Swarm Ingest:  {args.swarm_ingest}s")
 
     csv_content = build_nvs_csv(args)
 

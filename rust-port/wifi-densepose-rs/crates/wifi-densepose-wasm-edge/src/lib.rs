@@ -139,6 +139,7 @@ pub mod exo_plant_growth;
 pub mod exo_ghost_hunter;
 pub mod exo_rain_detect;
 pub mod exo_breathing_sync;
+pub mod exo_happiness_score;
 
 // ── Host API FFI bindings ────────────────────────────────────────────────────
 
@@ -382,6 +383,13 @@ pub mod event_types {
     pub const HIDDEN_PRESENCE: i32 = 652;
     pub const ENVIRONMENTAL_DRIFT: i32 = 653;
 
+    // exo_happiness_score (690-694)
+    pub const HAPPINESS_SCORE: i32 = 690;
+    pub const GAIT_ENERGY: i32 = 691;
+    pub const AFFECT_VALENCE: i32 = 692;
+    pub const SOCIAL_ENERGY: i32 = 693;
+    pub const TRANSIT_DIRECTION: i32 = 694;
+
     // exo_rain_detect (660-662)
     pub const RAIN_ONSET: i32 = 660;
     pub const RAIN_INTENSITY: i32 = 661;
@@ -569,10 +577,15 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 // Individual modules (gesture, coherence, adversarial) can define their own
 // on_init/on_frame/on_timer.  This default implementation demonstrates the
 // combined pipeline: gesture detection + coherence monitoring + anomaly check.
+//
+// Gated behind the "default-pipeline" feature so that standalone module
+// binaries (ghost_hunter, etc.) can define their own on_frame without
+// symbol collisions.
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "default-pipeline"))]
 static mut STATE: CombinedState = CombinedState::new();
 
+#[cfg(feature = "default-pipeline")]
 struct CombinedState {
     gesture: gesture::GestureDetector,
     coherence: coherence::CoherenceMonitor,
@@ -580,6 +593,7 @@ struct CombinedState {
     frame_count: u32,
 }
 
+#[cfg(feature = "default-pipeline")]
 impl CombinedState {
     const fn new() -> Self {
         Self {
@@ -591,13 +605,13 @@ impl CombinedState {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "default-pipeline"))]
 #[no_mangle]
 pub extern "C" fn on_init() {
     log_msg("wasm-edge: combined pipeline init");
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "default-pipeline"))]
 #[no_mangle]
 pub extern "C" fn on_frame(n_subcarriers: i32) {
     // M-01 fix: treat negative host values as 0 instead of wrapping to usize::MAX.
@@ -634,7 +648,7 @@ pub extern "C" fn on_frame(n_subcarriers: i32) {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "default-pipeline"))]
 #[no_mangle]
 pub extern "C" fn on_timer() {
     // Periodic summary.

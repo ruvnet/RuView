@@ -18,7 +18,11 @@
  */
 
 #include "edge_processing.h"
+#include "nvs_config.h"
 #include "mmwave_sensor.h"
+
+/* Runtime config — declared in main.c, loaded from NVS at boot. */
+extern nvs_config_t g_nvs_config;
 #include "wasm_runtime.h"
 #include "stream_sender.h"
 
@@ -426,11 +430,7 @@ static void send_compressed_frame(const uint8_t *iq_data, uint16_t iq_len,
     uint32_t magic = EDGE_COMPRESSED_MAGIC;
     memcpy(&pkt[0], &magic, 4);
 
-#ifdef CONFIG_CSI_NODE_ID
-    pkt[4] = (uint8_t)CONFIG_CSI_NODE_ID;
-#else
-    pkt[4] = 0;
-#endif
+    pkt[4] = g_nvs_config.node_id;
     pkt[5] = channel;
     memcpy(&pkt[6], &iq_len, 2);
     memcpy(&pkt[8], &comp_len, 2);
@@ -548,11 +548,7 @@ static void send_vitals_packet(void)
     memset(&pkt, 0, sizeof(pkt));
 
     pkt.magic = EDGE_VITALS_MAGIC;
-#ifdef CONFIG_CSI_NODE_ID
-    pkt.node_id = (uint8_t)CONFIG_CSI_NODE_ID;
-#else
-    pkt.node_id = 0;
-#endif
+    pkt.node_id = g_nvs_config.node_id;
 
     pkt.flags = 0;
     if (s_presence_detected) pkt.flags |= 0x01;

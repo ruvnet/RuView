@@ -312,6 +312,26 @@ void nvs_config_load(nvs_config_t *cfg)
         ESP_LOGI(TAG, "NVS override: status_led=%u", (unsigned)cfg->status_led);
     }
 
+    /* ADR-066: Swarm bridge */
+    len = sizeof(cfg->seed_url);
+    if (nvs_get_str(handle, "seed_url", cfg->seed_url, &len) != ESP_OK) {
+        cfg->seed_url[0] = '\0';  /* Disabled by default */
+    }
+    len = sizeof(cfg->seed_token);
+    if (nvs_get_str(handle, "seed_token", cfg->seed_token, &len) != ESP_OK) {
+        cfg->seed_token[0] = '\0';
+    }
+    len = sizeof(cfg->zone_name);
+    if (nvs_get_str(handle, "zone_name", cfg->zone_name, &len) != ESP_OK) {
+        strncpy(cfg->zone_name, "default", sizeof(cfg->zone_name) - 1);
+    }
+    if (nvs_get_u16(handle, "swarm_hb", &cfg->swarm_heartbeat_sec) != ESP_OK) {
+        cfg->swarm_heartbeat_sec = 30;
+    }
+    if (nvs_get_u16(handle, "swarm_ingest", &cfg->swarm_ingest_sec) != ESP_OK) {
+        cfg->swarm_ingest_sec = 5;
+    }
+
     /* Validate tdm_slot_index < tdm_node_count */
     if (cfg->tdm_slot_index >= cfg->tdm_node_count) {
         ESP_LOGW(TAG, "tdm_slot_index=%u >= tdm_node_count=%u, clamping to 0",

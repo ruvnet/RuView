@@ -1,0 +1,18 @@
+# ESP32-S3 Hello World — SDK Configuration
+CONFIG_IDF_TARGET="esp32s3"
+
+# Flash: 4MB (this chip has Embedded Flash 4MB)
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+
+# Enable WiFi CSI so we can probe it
+CONFIG_ESP_WIFI_CSI_ENABLED=y
+
+# Verbose logging so user sees everything
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# Bigger main task stack for printf-heavy capability dump
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# Enable temperature sensor driver
+CONFIG_SOC_TEMP_SENSOR_SUPPORTED=y

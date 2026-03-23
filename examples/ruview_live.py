@@ -17,12 +17,15 @@ Usage:
 
 import argparse
 import collections
+import json
 import math
 import re
 import serial
 import sys
 import threading
 import time
+import urllib.request
+import urllib.error
 
 try:
     import numpy as np
@@ -224,12 +227,153 @@ class BPEstimator:
         return round(max(80, min(200, sbp))), round(max(50, min(130, dbp)))
 
 
+class HappinessScorer:
+    """Multimodal happiness estimator fusing gait, breathing, and social signals."""
+
+    def __init__(self):
+        self.gait_speed = WelfordStats()
+        self.stride_regularity = WelfordStats()
+        self.movement_fluidity = 0.5
+        self.breathing_calm = 0.5
+        self.posture_score = 0.5
+        self.dwell_frames = 0
+        self._prev_motion = 0.0
+        self._motion_deltas = collections.deque(maxlen=30)
+        self._br_baseline = WelfordStats()
+        self._rssi_baseline = WelfordStats()
+
+    def update(self, motion_energy, br, hr, rssi):
+        # Gait speed proxy from motion energy
+        self.gait_speed.update(motion_energy)
+
+        # Stride regularity from motion delta consistency
+        delta = abs(motion_energy - self._prev_motion)
+        self._motion_deltas.append(delta)
+        self._prev_motion = motion_energy
+        if len(self._motion_deltas) >= 5:
+            deltas = list(self._motion_deltas)
+            mean_d = sum(deltas) / len(deltas)
+            var_d = sum((x - mean_d) ** 2 for x in deltas) / len(deltas)
+            self.stride_regularity.update(1.0 / (1.0 + math.sqrt(var_d)))
+
+        # Movement fluidity — smooth transitions score higher
+        if len(self._motion_deltas) >= 3:
+            recent = list(self._motion_deltas)[-3:]
+            jerk = abs(recent[-1] - recent[-2]) - abs(recent[-2] - recent[-3]) if len(recent) == 3 else 0
+            self.movement_fluidity = 0.9 * self.movement_fluidity + 0.1 * (1.0 / (1.0 + abs(jerk)))
+
+        # Breathing calm — low BR variance means relaxed
+        if br > 0:
+            self._br_baseline.update(br)
+            if self._br_baseline.count >= 5:
+                br_z = self._br_baseline.z_score(br)
+                self.breathing_calm = 0.9 * self.breathing_calm + 0.1 * max(0.0, 1.0 - br_z / 3.0)
+
+        # Posture proxy from RSSI stability
+        if rssi != 0:
+            self._rssi_baseline.update(rssi)
+            if self._rssi_baseline.count >= 5:
+                rssi_z = self._rssi_baseline.z_score(rssi)
+                self.posture_score = 0.9 * self.posture_score + 0.1 * max(0.0, 1.0 - rssi_z / 3.0)
+
+        # Dwell — presence accumulation
+        if motion_energy > 0.01 or br > 0:
+            self.dwell_frames += 1
+
+    def compute(self):
+        # Normalize gait energy to 0-1 range
+        gait_e = min(1.0, self.gait_speed.mean / 5.0) if self.gait_speed.count > 0 else 0.0
+
+        # Stride regularity average
+        stride_r = min(1.0, self.stride_regularity.mean) if self.stride_regularity.count > 0 else 0.5
+
+        # Dwell factor — saturates after ~300 frames (~5 min at 1 Hz)
+        dwell_factor = min(1.0, self.dwell_frames / 300.0)
+
+        # Weighted happiness score
+        happiness = (
+            0.25 * gait_e
+            + 0.15 * stride_r
+            + 0.20 * self.movement_fluidity
+            + 0.20 * self.breathing_calm
+            + 0.10 * self.posture_score
+            + 0.10 * dwell_factor
+        )
+        happiness = max(0.0, min(1.0, happiness))
+
+        # Affect valence: breathing_calm and fluidity dominant
+        affect_valence = 0.5 * self.breathing_calm + 0.3 * self.movement_fluidity + 0.2 * stride_r
+
+        # Social energy: gait + dwell
+        social_energy = 0.6 * gait_e + 0.4 * dwell_factor
+
+        vector = [
+            happiness, gait_e, stride_r, self.movement_fluidity,
+            self.breathing_calm, self.posture_score, dwell_factor, affect_valence,
+        ]
+
+        return {
+            "happiness": happiness,
+            "gait_energy": gait_e,
+            "affect_valence": affect_valence,
+            "social_energy": social_energy,
+            "vector": vector,
+        }
+
+
+class SeedBridge:
+    """HTTP bridge to Cognitum Seed for happiness vector ingestion."""
+
+    def __init__(self, base_url):
+        self.base_url = base_url.rstrip("/")
+        self._last_drift = None
+        self._drift_lock = threading.Lock()
+
+    def ingest(self, vector, metadata=None):
+        """POST happiness vector to Seed in a background thread."""
+        payload = json.dumps({"vector": vector, "metadata": metadata or {}}).encode()
+
+        def _post():
+            try:
+                req = urllib.request.Request(
+                    f"{self.base_url}/api/v1/store/ingest",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                urllib.request.urlopen(req, timeout=5)
+            except Exception:
+                pass  # silently ignore connection errors
+
+        threading.Thread(target=_post, daemon=True).start()
+
+    def get_drift(self):
+        """GET drift status from Seed. Returns dict or None."""
+        try:
+            req = urllib.request.Request(
+                f"{self.base_url}/api/v1/sensor/drift/status",
+                method="GET",
+            )
+            resp = urllib.request.urlopen(req, timeout=3)
+            data = json.loads(resp.read().decode())
+            with self._drift_lock:
+                self._last_drift = data
+            return data
+        except Exception:
+            return None
+
+    @property
+    def last_drift(self):
+        with self._drift_lock:
+            return self._last_drift
+
+
 # ====================================================================
 # Sensor Hub
 # ====================================================================
 
 class SensorHub:
-    def __init__(self):
+    def __init__(self, seed_url=None):
         self.lock = threading.Lock()
         self.mw_hr = 0.0
         self.mw_br = 0.0
@@ -254,6 +398,10 @@ class SensorHub:
         self.coherence_mw = CoherenceScorer()
         self.coherence_csi = CoherenceScorer()
         self.bp = BPEstimator()
+        # Happiness + Seed
+        self.happiness = HappinessScorer()
+        self.seed = SeedBridge(seed_url) if seed_url else None
+        self._last_seed_ingest = 0.0
 
     def update_mw(self, **kw):
         with self.lock:
@@ -283,6 +431,13 @@ class SensorHub:
             if rssi != 0:
                 self.longitudinal.observe("rssi", rssi)
                 self.coherence_csi.update(min(1.0, max(0.0, (rssi + 90) / 50)))
+            # Feed happiness scorer
+            self.happiness.update(
+                motion_energy=kw.get("motion", self.csi_motion),
+                br=kw.get("br", self.csi_br),
+                hr=kw.get("hr", self.csi_hr),
+                rssi=rssi,
+            )
 
     def add_event(self, msg):
         with self.lock:
@@ -337,6 +492,18 @@ class SensorHub:
                     if d:
                         drifts.append(d)
 
+            # Happiness
+            happy = self.happiness.compute()
+
+            # Seed ingestion every 5 seconds
+            now = time.time()
+            if self.seed and now - self._last_seed_ingest >= 5.0:
+                self._last_seed_ingest = now
+                self.seed.ingest(happy["vector"], {
+                    "hr": fused_hr, "br": fused_br, "rssi": self.csi_rssi,
+                    "presence": self.mw_presence or self.csi_presence,
+                })
+
             return {
                 "hr": fused_hr, "hr_src": hr_src,
                 "br": fused_br, "sbp": sbp, "dbp": dbp,
@@ -350,6 +517,11 @@ class SensorHub:
                 "fall": self.csi_fall, "drifts": drifts,
                 "events": list(self.events),
                 "longitudinal": self.longitudinal.summary(),
+                "happiness": happy["happiness"],
+                "gait_energy": happy["gait_energy"],
+                "affect_valence": happy["affect_valence"],
+                "social_energy": happy["social_energy"],
+                "happiness_vector": happy["vector"],
             }
 
 
@@ -426,21 +598,40 @@ def reader_csi(port, baud, hub, stop):
 # Display
 # ====================================================================
 
-def run_display(hub, duration, interval):
+def _happiness_bar(value, width=10):
+    """Render a bar like [====------] 0.62"""
+    filled = int(round(value * width))
+    return "[" + "=" * filled + "-" * (width - filled) + "]"
+
+
+def run_display(hub, duration, interval, mode="vitals"):
     start = time.time()
     last = 0
 
     print()
     print("=" * 80)
-    print("  RuView Live — Ambient Intelligence + RuVector Signal Processing")
+    if mode == "happiness":
+        print("  RuView Live — Happiness + Cognitum Seed Dashboard")
+    else:
+        print("  RuView Live — Ambient Intelligence + RuVector Signal Processing")
     print("=" * 80)
     print()
-    hdr = (f"{'s':>4} {'HR':>4} {'BR':>3} {'BP':>7} {'Stress':>8} "
-           f"{'SDNN':>5} {'RMSSD':>5} {'LF/HF':>5} "
-           f"{'Pres':>4} {'Dist':>5} {'Lux':>5} {'RSSI':>5} "
-           f"{'Coh':>4} {'CSI#':>5}")
-    print(hdr)
-    print("-" * 80)
+
+    if mode == "happiness":
+        hdr = (f"{'s':>4}  {'Happy':>16}  {'Gait':>5}  {'Calm':>5}  "
+               f"{'Social':>6}  {'Pres':>4}  {'RSSI':>5}  {'Seed':>6}  {'CSI#':>5}")
+        print(hdr)
+        print("-" * 80)
+    else:
+        hdr = (f"{'s':>4} {'HR':>4} {'BR':>3} {'BP':>7} {'Stress':>8} "
+               f"{'SDNN':>5} {'RMSSD':>5} {'LF/HF':>5} "
+               f"{'Pres':>4} {'Dist':>5} {'Lux':>5} {'RSSI':>5} "
+               f"{'Coh':>4} {'CSI#':>5}")
+        print(hdr)
+        print("-" * 80)
+
+    # Periodic Seed drift check (every 15s)
+    _last_drift_check = 0.0
 
     while time.time() - start < duration:
         time.sleep(0.5)
@@ -451,23 +642,52 @@ def run_display(hub, duration, interval):
 
         d = hub.compute()
 
-        hr_s = f"{d['hr']:>4.0f}" if d["hr"] > 0 else "  —"
-        br_s = f"{d['br']:>3.0f}" if d["br"] > 0 else " —"
-        bp_s = f"{d['sbp']:>3}/{d['dbp']:<3}" if d["sbp"] > 0 else "  —/—  "
-        sdnn_s = f"{d['sdnn']:>5.0f}" if d["sdnn"] > 0 else "  — "
-        rmssd_s = f"{d['rmssd']:>5.0f}" if d["rmssd"] > 0 else "  — "
-        lfhf_s = f"{d['lf_hf']:>5.2f}" if d["sdnn"] > 0 else "  — "
-        pres_s = "YES" if d["presence"] else " no"
-        dist_s = f"{d['distance']:>4.0f}cm" if d["distance"] > 0 else "   — "
-        lux_s = f"{d['lux']:>5.1f}" if d["lux"] > 0 else "  — "
-        rssi_s = f"{d['rssi']:>5}" if d["rssi"] != 0 else "  — "
-        coh = max(d["coh_mw"], d["coh_csi"])
-        coh_s = f"{coh:>.2f}"
+        if mode == "happiness":
+            h = d["happiness"]
+            bar = _happiness_bar(h)
+            gait_s = f"{d['gait_energy']:>5.2f}"
+            calm_s = f"{d['affect_valence']:>5.2f}"
+            social_s = f"{d['social_energy']:>6.2f}"
+            pres_s = "YES" if d["presence"] else " no"
+            rssi_s = f"{d['rssi']:>5}" if d["rssi"] != 0 else "  — "
 
-        print(f"{elapsed:>3}s {hr_s} {br_s} {bp_s} {d['stress']:>8} "
-              f"{sdnn_s} {rmssd_s} {lfhf_s} "
-              f"{pres_s:>4} {dist_s} {lux_s} {rssi_s} "
-              f"{coh_s:>4} {d['csi_frames']:>5}")
+            # Seed status
+            seed_s = "  —  "
+            if hub.seed:
+                now = time.time()
+                if now - _last_drift_check >= 15.0:
+                    _last_drift_check = now
+                    hub.seed.get_drift()
+                drift = hub.seed.last_drift
+                if drift:
+                    seed_s = f"{'OK' if not drift.get('drifting') else 'DRIFT':>6}"
+                else:
+                    seed_s = " conn?"
+
+            print(f"{elapsed:>3}s  {bar} {h:.2f}  {gait_s}  {calm_s}  "
+                  f"{social_s}  {pres_s:>4}  {rssi_s}  {seed_s}  {d['csi_frames']:>5}")
+
+            # Show drift detail if drifting
+            if hub.seed and hub.seed.last_drift and hub.seed.last_drift.get("drifting"):
+                print(f"      SEED DRIFT: {hub.seed.last_drift.get('message', 'unknown')}")
+        else:
+            hr_s = f"{d['hr']:>4.0f}" if d["hr"] > 0 else "  —"
+            br_s = f"{d['br']:>3.0f}" if d["br"] > 0 else " —"
+            bp_s = f"{d['sbp']:>3}/{d['dbp']:<3}" if d["sbp"] > 0 else "  —/—  "
+            sdnn_s = f"{d['sdnn']:>5.0f}" if d["sdnn"] > 0 else "  — "
+            rmssd_s = f"{d['rmssd']:>5.0f}" if d["rmssd"] > 0 else "  — "
+            lfhf_s = f"{d['lf_hf']:>5.2f}" if d["sdnn"] > 0 else "  — "
+            pres_s = "YES" if d["presence"] else " no"
+            dist_s = f"{d['distance']:>4.0f}cm" if d["distance"] > 0 else "   — "
+            lux_s = f"{d['lux']:>5.1f}" if d["lux"] > 0 else "  — "
+            rssi_s = f"{d['rssi']:>5}" if d["rssi"] != 0 else "  — "
+            coh = max(d["coh_mw"], d["coh_csi"])
+            coh_s = f"{coh:>.2f}"
+
+            print(f"{elapsed:>3}s {hr_s} {br_s} {bp_s} {d['stress']:>8} "
+                  f"{sdnn_s} {rmssd_s} {lfhf_s} "
+                  f"{pres_s:>4} {dist_s} {lux_s} {rssi_s} "
+                  f"{coh_s:>4} {d['csi_frames']:>5}")
 
         for drift in d["drifts"]:
             print(f"      DRIFT: {drift}")
@@ -506,6 +726,9 @@ def run_display(hub, duration, interval):
         print(f"  Baselines ({len(longi)} metrics tracked):")
         for name, stats in sorted(longi.items()):
             print(f"    {name}: mean={stats['mean']:.1f} std={stats['std']:.1f} n={stats['n']}")
+    # Happiness
+    if d.get("happiness", 0) > 0:
+        print(f"  Happiness:    {d['happiness']:.2f} (gait={d['gait_energy']:.2f} affect={d['affect_valence']:.2f} social={d['social_energy']:.2f})")
     # Signal coherence
     print(f"  Coherence:    mmWave={d['coh_mw']:.2f} CSI={d['coh_csi']:.2f}")
     events = d["events"]
@@ -518,13 +741,21 @@ def run_display(hub, duration, interval):
 
 def main():
     parser = argparse.ArgumentParser(description="RuView Live + RuVector Analysis")
-    parser.add_argument("--csi", default="COM7", help="CSI port (or 'none')")
+    parser.add_argument("--csi", default=None, help="CSI port (or 'none'); defaults to COM5 for happiness mode, COM7 otherwise")
     parser.add_argument("--mmwave", default="COM4", help="mmWave port (or 'none')")
     parser.add_argument("--duration", type=int, default=120)
     parser.add_argument("--interval", type=int, default=3)
+    parser.add_argument("--seed", default="none", help="Cognitum Seed HTTP base URL (e.g. 'http://169.254.42.1')")
+    parser.add_argument("--mode", default="vitals", choices=["vitals", "happiness"],
+                        help="Dashboard mode: vitals (default) or happiness")
     args = parser.parse_args()
 
-    hub = SensorHub()
+    # Default CSI port depends on mode
+    if args.csi is None:
+        args.csi = "COM5" if args.mode == "happiness" else "COM7"
+
+    seed_url = args.seed if args.seed.lower() != "none" else None
+    hub = SensorHub(seed_url=seed_url)
     stop = threading.Event()
 
     if args.mmwave.lower() != "none":
@@ -535,7 +766,7 @@ def main():
     time.sleep(2)
 
     try:
-        run_display(hub, args.duration, args.interval)
+        run_display(hub, args.duration, args.interval, mode=args.mode)
     except KeyboardInterrupt:
         print("\nStopping...")
     stop.set()

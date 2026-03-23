@@ -19,9 +19,12 @@ libm = "0.2"
 sha2 = { version = "0.10", optional = true, default-features = false }
 
 [features]
-default = []
+default = ["default-pipeline"]
 # Enable std for testing on host + RVF builder
 std = ["sha2/std"]
+# Include the default combined pipeline (gesture+coherence+adversarial) entry points.
+# Disable this when building standalone module binaries (ghost_hunter, etc.)
+default-pipeline = []
 
 [profile.release]
 opt-level = "s"        # Optimize for size

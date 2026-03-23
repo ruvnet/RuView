@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Happiness Vector",
+  "description": "8-dimensional happiness feature vector for Cognitum Seed ingestion (ADR-065). Each dimension is normalized to [0, 1] where higher values indicate more positive affect.",
+  "type": "object",
+  "properties": {
+    "vectors": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "prefixItems": [
+          {
+            "type": "integer",
+            "description": "Vector ID: node_id * 1000000 + type_offset + timestamp_component. Type offsets: 0=registration, 100000=heartbeat, 200000=happiness."
+          },
+          {
+            "type": "array",
+            "items": { "type": "number", "minimum": 0, "maximum": 1 },
+            "minItems": 8,
+            "maxItems": 8,
+            "description": "8-dim happiness vector: [happiness_score, gait_speed, stride_regularity, movement_fluidity, breathing_calm, posture_score, dwell_factor, social_energy]"
+          }
+        ],
+        "minItems": 2,
+        "maxItems": 2
+      }
+    }
+  },
+  "required": ["vectors"],
+
+  "$defs": {
+    "dimensions": {
+      "type": "object",
+      "description": "Happiness vector dimension definitions",
+      "properties": {
+        "dim_0_happiness_score": {
+          "description": "Composite happiness [0=sad, 0.5=neutral, 1=happy]. Weighted sum of dims 1-6.",
+          "weights": "gait=0.25, stride=0.15, fluidity=0.20, calm=0.20, posture=0.10, dwell=0.10"
+        },
+        "dim_1_gait_speed": {
+          "description": "Walking speed from CSI phase rate-of-change. Happy people walk ~12% faster.",
+          "source": "Phase Doppler shift",
+          "units": "normalized phase delta / MAX_GAIT_SPEED"
+        },
+        "dim_2_stride_regularity": {
+          "description": "Step interval consistency. Regular strides indicate confidence/positive affect.",
+          "source": "Variance coefficient of step intervals (inverted)",
+          "interpretation": "1.0=perfectly regular, 0.0=erratic/stumbling"
+        },
+        "dim_3_movement_fluidity": {
+          "description": "Smoothness of body movement trajectory. Jerky motion indicates anxiety.",
+          "source": "Phase second derivative (acceleration), inverted",
+          "interpretation": "1.0=smooth/flowing, 0.0=jerky/hesitant"
+        },
+        "dim_4_breathing_calm": {
+          "description": "Breathing rate mapped to calmness. Slow deep breathing = relaxed.",
+          "source": "0.15-0.5 Hz phase oscillation (breathing proxy)",
+          "interpretation": "1.0=calm (6-14 BPM), 0.0=rapid/stressed (>22 BPM)"
+        },
+        "dim_5_posture_score": {
+          "description": "Upright vs slouched posture from RF scattering cross-section.",
+          "source": "Amplitude coefficient of variation across subcarrier groups",
+          "interpretation": "1.0=upright (wide spread), 0.0=slouched (narrow spread)"
+        },
+        "dim_6_dwell_factor": {
+          "description": "How long the person stays in the sensing zone.",
+          "source": "Fraction of recent frames with presence detected",
+          "interpretation": "1.0=lingering (happy guests browse), 0.0=rushing through"
+        },
+        "dim_7_social_energy": {
+          "description": "Group animation and interaction level.",
+          "source": "Motion energy + dwell + heart rate proxy",
+          "interpretation": "1.0=animated group interaction, 0.0=solitary/withdrawn"
+        }
+      }
+    },
+    "event_ids": {
+      "type": "object",
+      "description": "WASM edge module event IDs (690-694)",
+      "properties": {
+        "690_HAPPINESS_SCORE": "Composite happiness [0, 1] — emitted every frame",
+        "691_GAIT_ENERGY": "Gait speed + stride regularity composite — emitted every 4th frame",
+        "692_AFFECT_VALENCE": "Breathing calm + fluidity + posture composite — emitted every 4th frame",
+        "693_SOCIAL_ENERGY": "Group animation level — emitted every 4th frame",
+        "694_TRANSIT_DIRECTION": "1.0=entering, 0.0=exiting — emitted every 4th frame"
+      }
+    },
+    "seed_id_scheme": {
+      "type": "object",
+      "description": "Vector ID encoding for Cognitum Seed",
+      "properties": {
+        "format": "node_id * 1000000 + type_offset + timestamp_component",
+        "registration": "offset 0 (e.g. node 1 = 1000000)",
+        "heartbeat": "offset 100000 + uptime_sec % 100000 (e.g. 1100042)",
+        "happiness": "offset 200000 + ms_timestamp / 1000 % 100000 (e.g. 1212345)"
+      }
+    }
+  }
+}
