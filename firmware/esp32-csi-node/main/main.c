@@ -246,8 +246,11 @@ void app_main(void)
             ESP_LOGI(TAG, "mmWave sensor: %s (caps=0x%04x)",
                      mmwave_type_name(mw.type), mw.capabilities);
         }
-    } else {
+    } else if (mmwave_ret == ESP_ERR_NOT_FOUND) {
         ESP_LOGI(TAG, "No mmWave sensor detected (CSI-only mode)");
+    } else {
+        ESP_LOGE(TAG, "mmWave sensor init error: %s", esp_err_to_name(mmwave_ret));
+        led_indicator_set_state(LED_STATE_MMWAVE_ERROR);
     }
 
     /* ADR-066: Initialize swarm bridge to Cognitum Seed (if configured). */
