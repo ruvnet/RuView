@@ -285,6 +285,8 @@ struct AppStateInner {
     frame_history: VecDeque<Vec<f64>>,
     tick: u64,
     source: String,
+    /// Instant of the last ESP32 UDP frame received (for offline detection).
+    last_esp32_frame: Option<std::time::Instant>,
     tx: broadcast::Sender<String>,
     total_detections: u64,
     start_time: std::time::Instant,
@@ -362,6 +364,25 @@ struct AppStateInner {
     // ── Adaptive classifier (environment-tuned) ──────────────────────────
     /// Trained adaptive model (loaded from data/adaptive_model.json or trained at runtime).
     adaptive_model: Option<adaptive_classifier::AdaptiveModel>,
+}
+
+/// If no ESP32 frame arrives within this duration, source reverts to offline.
+const ESP32_OFFLINE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+impl AppStateInner {
+    /// Return the effective data source, accounting for ESP32 frame timeout.
+    /// If the source is "esp32" but no frame has arrived in 5 seconds, returns
+    /// "esp32:offline" so the UI can distinguish active vs stale connections.
+    fn effective_source(&self) -> String {
+        if self.source == "esp32" {
+            if let Some(last) = self.last_esp32_frame {
+                if last.elapsed() > ESP32_OFFLINE_TIMEOUT {
+                    return "esp32:offline".to_string();
+                }
+            }
+        }
+        self.source.clone()
+    }
 }
 
 /// Number of frames retained in `frame_history` for temporal analysis.
@@ -1669,7 +1690,7 @@ async fn health(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
     Json(serde_json::json!({
         "status": "ok",
-        "source": s.source,
+        "source": s.effective_source(),
         "tick": s.tick,
         "clients": s.tx.receiver_count(),
     }))
@@ -1977,7 +1998,7 @@ async fn health_ready(State(state): State<SharedState>) -> Json<serde_json::Valu
     let s = state.read().await;
     Json(serde_json::json!({
         "status": "ready",
-        "source": s.source,
+        "source": s.effective_source(),
     }))
 }
 
@@ -1988,7 +2009,10 @@ async fn health_system(State(state): State<SharedState>) -> Json<serde_json::Val
         "status": "healthy",
         "components": {
             "api": { "status": "healthy", "message": "Rust Axum server" },
-            "hardware": { "status": "healthy", "message": format!("Source: {}", s.source) },
+            "hardware": {
+                "status": if s.effective_source().ends_with(":offline") { "degraded" } else { "healthy" },
+                "message": format!("Source: {}", s.effective_source())
+            },
             "pose": { "status": "healthy", "message": "WiFi-derived pose estimation" },
             "stream": { "status": if s.tx.receiver_count() > 0 { "healthy" } else { "idle" },
                         "message": format!("{} client(s)", s.tx.receiver_count()) },
@@ -2028,7 +2052,7 @@ async fn api_info(State(state): State<SharedState>) -> Json<serde_json::Value> {
         "version": env!("CARGO_PKG_VERSION"),
         "environment": "production",
         "backend": "rust",
-        "source": s.source,
+        "source": s.effective_source(),
         "features": {
             "wifi_sensing": true,
             "pose_estimation": true,
@@ -2049,7 +2073,7 @@ async fn pose_current(State(state): State<SharedState>) -> Json<serde_json::Valu
         "timestamp": chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
         "persons": persons,
         "total_persons": persons.len(),
-        "source": s.source,
+        "source": s.effective_source(),
     }))
 }
 
@@ -2059,7 +2083,7 @@ async fn pose_stats(State(state): State<SharedState>) -> Json<serde_json::Value>
         "total_detections": s.total_detections,
         "average_confidence": 0.87,
         "frames_processed": s.tick,
-        "source": s.source,
+        "source": s.effective_source(),
     }))
 }
 
@@ -2083,7 +2107,7 @@ async fn stream_status(State(state): State<SharedState>) -> Json<serde_json::Val
         "active": true,
         "clients": s.tx.receiver_count(),
         "fps": if s.tick > 1 { 10u64 } else { 0u64 },
-        "source": s.source,
+        "source": s.effective_source(),
     }))
 }
 
@@ -2619,7 +2643,7 @@ async fn vital_signs_endpoint(State(state): State<SharedState>) -> Json<serde_js
             "heartbeat_samples": hb_len,
             "heartbeat_capacity": hb_cap,
         },
-        "source": s.source,
+        "source": s.effective_source(),
         "tick": s.tick,
     }))
 }
@@ -2825,6 +2849,7 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
 
                     let mut s = state.write().await;
                     s.source = "esp32".to_string();
+                    s.last_esp32_frame = Some(std::time::Instant::now());
 
                     // Append current amplitudes to history before extracting features so
                     // that temporal analysis includes the most recent frame.
@@ -3607,6 +3632,7 @@ async fn main() {
         frame_history: VecDeque::new(),
         tick: 0,
         source: source.into(),
+        last_esp32_frame: None,
         tx,
         total_detections: 0,
         start_time: std::time::Instant::now(),
@@ -3781,7 +3807,7 @@ async fn main() {
             "WiFi DensePose sensing model state",
         );
         builder.add_metadata(&serde_json::json!({
-            "source": s.source,
+            "source": s.effective_source(),
             "total_ticks": s.tick,
             "total_detections": s.total_detections,
             "uptime_secs": s.start_time.elapsed().as_secs(),
