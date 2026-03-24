@@ -304,6 +304,8 @@ struct AppStateInner {
     model_loaded: bool,
     /// Smoothed person count (EMA) for hysteresis — prevents frame-to-frame jumping.
     smoothed_person_score: f64,
+    /// Previous person count for hysteresis (asymmetric up/down thresholds).
+    prev_person_count: usize,
     // ── Motion smoothing & adaptive baseline (ADR-047 tuning) ────────────
     /// EMA-smoothed motion score (alpha ~0.15 for ~10 FPS → ~1s time constant).
     smoothed_motion: f64,
@@ -1247,12 +1249,15 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
 
         let feat_variance = features.variance;
 
-        // Multi-person estimation with temporal smoothing (EMA α=0.15).
+        // Multi-person estimation with temporal smoothing (EMA α=0.10).
         let raw_score = compute_person_score(&features);
-        s.smoothed_person_score = s.smoothed_person_score * 0.85 + raw_score * 0.15;
+        s.smoothed_person_score = s.smoothed_person_score * 0.90 + raw_score * 0.10;
         let est_persons = if classification.presence {
-            score_to_person_count(s.smoothed_person_score)
+            let count = score_to_person_count(s.smoothed_person_score, s.prev_person_count);
+            s.prev_person_count = count;
+            count
         } else {
+            s.prev_person_count = 0;
             0
         };
 
@@ -1377,12 +1382,15 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
 
     let feat_variance = features.variance;
 
-    // Multi-person estimation with temporal smoothing.
+    // Multi-person estimation with temporal smoothing (EMA α=0.10).
     let raw_score = compute_person_score(&features);
-    s.smoothed_person_score = s.smoothed_person_score * 0.85 + raw_score * 0.15;
+    s.smoothed_person_score = s.smoothed_person_score * 0.90 + raw_score * 0.10;
     let est_persons = if classification.presence {
-        score_to_person_count(s.smoothed_person_score)
+        let count = score_to_person_count(s.smoothed_person_score, s.prev_person_count);
+        s.prev_person_count = count;
+        count
     } else {
+        s.prev_person_count = 0;
         0
     };
 
@@ -1724,18 +1732,45 @@ fn compute_person_score(feat: &FeatureInfo) -> f64 {
 
 /// Convert smoothed person score to discrete count with hysteresis.
 ///
-/// Uses asymmetric thresholds: higher threshold to add a person, lower to remove.
-/// This prevents flickering at the boundary.
-fn score_to_person_count(smoothed_score: f64) -> usize {
-    // Thresholds chosen conservatively for single-ESP32 link:
-    //   score > 0.50 → 2 persons (needs sustained high variance + change points)
-    //   score > 0.80 → 3 persons (very high activity, rare with single link)
-    if smoothed_score > 0.80 {
-        3
-    } else if smoothed_score > 0.50 {
-        2
-    } else {
-        1
+/// Uses asymmetric thresholds: higher threshold to *add* a person, lower to
+/// *drop* one.  This prevents flickering when the score hovers near a boundary
+/// (the #1 user-reported issue — see #237, #249, #280, #292).
+fn score_to_person_count(smoothed_score: f64, prev_count: usize) -> usize {
+    // Up-thresholds (must exceed to increase count):
+    //   1→2: 0.65  (raised from 0.50 — multipath in small rooms hit 0.50 easily)
+    //   2→3: 0.85  (raised from 0.80 — 3 persons needs strong sustained signal)
+    // Down-thresholds (must drop below to decrease count):
+    //   2→1: 0.45  (hysteresis gap of 0.20)
+    //   3→2: 0.70  (hysteresis gap of 0.15)
+    match prev_count {
+        0 | 1 => {
+            if smoothed_score > 0.85 {
+                3
+            } else if smoothed_score > 0.65 {
+                2
+            } else {
+                1
+            }
+        }
+        2 => {
+            if smoothed_score > 0.85 {
+                3
+            } else if smoothed_score < 0.45 {
+                1
+            } else {
+                2 // hold — within hysteresis band
+            }
+        }
+        _ => {
+            // prev_count >= 3
+            if smoothed_score < 0.45 {
+                1
+            } else if smoothed_score < 0.70 {
+                2
+            } else {
+                3 // hold
+            }
+        }
     }
 }
 
@@ -2824,12 +2859,15 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     let vitals = smooth_vitals(&mut s, &raw_vitals);
                     s.latest_vitals = vitals.clone();
 
-                    // Multi-person estimation with temporal smoothing.
+                    // Multi-person estimation with temporal smoothing (EMA α=0.10).
                     let raw_score = compute_person_score(&features);
-                    s.smoothed_person_score = s.smoothed_person_score * 0.85 + raw_score * 0.15;
+                    s.smoothed_person_score = s.smoothed_person_score * 0.90 + raw_score * 0.10;
                     let est_persons = if classification.presence {
-                        score_to_person_count(s.smoothed_person_score)
+                        let count = score_to_person_count(s.smoothed_person_score, s.prev_person_count);
+                        s.prev_person_count = count;
+                        count
                     } else {
+                        s.prev_person_count = 0;
                         0
                     };
 
@@ -2929,12 +2967,15 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
         let frame_amplitudes = frame.amplitudes.clone();
         let frame_n_sub = frame.n_subcarriers;
 
-        // Multi-person estimation with temporal smoothing.
+        // Multi-person estimation with temporal smoothing (EMA α=0.10).
         let raw_score = compute_person_score(&features);
-        s.smoothed_person_score = s.smoothed_person_score * 0.85 + raw_score * 0.15;
+        s.smoothed_person_score = s.smoothed_person_score * 0.90 + raw_score * 0.10;
         let est_persons = if classification.presence {
-            score_to_person_count(s.smoothed_person_score)
+            let count = score_to_person_count(s.smoothed_person_score, s.prev_person_count);
+            s.prev_person_count = count;
+            count
         } else {
+            s.prev_person_count = 0;
             0
         };
 
@@ -3577,6 +3618,7 @@ async fn main() {
         active_sona_profile: None,
         model_loaded,
         smoothed_person_score: 0.0,
+        prev_person_count: 0,
         smoothed_motion: 0.0,
         current_motion_level: "absent".to_string(),
         debounce_counter: 0,
