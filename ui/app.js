@@ -19,6 +19,7 @@ import { ActivityLog } from './utils/activity-log.js';
 import { DataExport } from './utils/data-export.js';
 import { FullscreenManager } from './utils/fullscreen.js';
 import { ConnectionStatus } from './utils/connection-status.js';
+import { MobileNav } from './utils/mobile-nav.js';
 
 class WiFiDensePoseApp {
   constructor() {
@@ -212,6 +213,10 @@ class WiFiDensePoseApp {
     this.commandPalette = new CommandPalette(this);
     this.commandPalette.init();
 
+    // Mobile navigation (hamburger menu for small screens)
+    this.mobileNav = new MobileNav();
+    this.mobileNav.init();
+
     // Keyboard shortcuts (pass app reference for tab switching)
     this.keyboardShortcuts = new KeyboardShortcuts(this);
     this.keyboardShortcuts.register('l', 'Toggle activity log', () => {
@@ -229,6 +234,20 @@ class WiFiDensePoseApp {
     document.addEventListener('show-shortcuts', () => {
       this.keyboardShortcuts.showHelp();
     });
+
+    // Register PWA service worker
+    this.registerServiceWorker();
+  }
+
+  // Register service worker for offline capability
+  registerServiceWorker() {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').then(reg => {
+        console.info('Service worker registered:', reg.scope);
+      }).catch(err => {
+        console.warn('Service worker registration failed:', err);
+      });
+    }
   }
 
   // Handle tab changes
@@ -375,6 +394,7 @@ class WiFiDensePoseApp {
     if (this.dataExport) this.dataExport.dispose();
     if (this.fullscreenManager) this.fullscreenManager.dispose();
     if (this.connectionStatus) this.connectionStatus.dispose();
+    if (this.mobileNav) this.mobileNav.dispose();
     toastManager.dispose();
   }
 

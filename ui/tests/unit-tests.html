@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RuView UI - Unit Tests</title>
+  <style>
+    * { margin: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 24px; }
+    h1 { font-size: 20px; margin-bottom: 4px; color: #32b8c6; }
+    .subtitle { font-size: 13px; color: #a7a9a9; margin-bottom: 20px; }
+    .suite { margin-bottom: 16px; }
+    .suite-name { font-size: 14px; font-weight: 600; margin-bottom: 6px; color: #a7a9a9; }
+    .test { padding: 4px 0 4px 16px; font-size: 13px; font-family: monospace; }
+    .pass { color: #32b8c6; }
+    .fail { color: #ff5459; }
+    .pass::before { content: "PASS "; font-weight: bold; }
+    .fail::before { content: "FAIL "; font-weight: bold; }
+    .summary { margin-top: 24px; padding: 12px; border-top: 1px solid #333; font-size: 14px; font-weight: 600; }
+    .error-detail { color: #ff8a8a; font-size: 12px; padding-left: 32px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>RuView UI - Unit Tests</h1>
+  <p class="subtitle">Tests for UI components and utility modules</p>
+  <div id="output"></div>
+  <div id="summary" class="summary"></div>
+
+  <script type="module">
+    // ---- Minimal test framework (zero deps) ----
+    const results = [];
+    let currentSuite = '';
+
+    function describe(name, fn) { currentSuite = name; fn(); }
+
+    function it(name, fn) {
+      try { fn(); results.push({ suite: currentSuite, name, passed: true }); }
+      catch (e) { results.push({ suite: currentSuite, name, passed: false, error: e.message }); }
+    }
+
+    function expect(actual) {
+      return {
+        toBe(exp) { if (actual !== exp) throw new Error(`Expected ${JSON.stringify(exp)}, got ${JSON.stringify(actual)}`); },
+        toEqual(exp) { if (JSON.stringify(actual) !== JSON.stringify(exp)) throw new Error(`Expected ${JSON.stringify(exp)}, got ${JSON.stringify(actual)}`); },
+        toBeTruthy() { if (!actual) throw new Error(`Expected truthy, got ${JSON.stringify(actual)}`); },
+        toBeFalsy() { if (actual) throw new Error(`Expected falsy, got ${JSON.stringify(actual)}`); },
+        toBeGreaterThan(n) { if (!(actual > n)) throw new Error(`Expected ${actual} > ${n}`); },
+        toContain(str) { if (typeof actual === 'string' ? !actual.includes(str) : !actual.includes(str)) throw new Error(`Expected to contain "${str}"`); },
+        not: {
+          toBe(exp) { if (actual === exp) throw new Error(`Expected not ${JSON.stringify(exp)}`); },
+          toContain(str) { if (typeof actual === 'string' && actual.includes(str)) throw new Error(`Expected not to contain "${str}"`); }
+        }
+      };
+    }
+
+    function mockDOM() {
+      const c = document.createElement('div');
+      c.className = 'container';
+      c.innerHTML = `
+        <header class="header"><div class="header-info"></div></header>
+        <nav class="nav-tabs">
+          <button class="nav-tab active" data-tab="dashboard" role="tab" aria-selected="true">Dashboard</button>
+          <button class="nav-tab" data-tab="hardware" role="tab" aria-selected="false">Hardware</button>
+          <button class="nav-tab" data-tab="demo" role="tab" aria-selected="false">Live Demo</button>
+        </nav>
+        <section id="dashboard" class="tab-content active" role="tabpanel"></section>
+        <section id="hardware" class="tab-content" role="tabpanel"></section>
+        <section id="demo" class="tab-content" role="tabpanel"></section>
+      `;
+      document.body.appendChild(c);
+      return c;
+    }
+
+    // ===== ToastManager =====
+    const { ToastManager } = await import('../utils/toast.js');
+
+    describe('ToastManager', () => {
+      it('creates container with role=region on init', () => {
+        const tm = new ToastManager();
+        tm.init();
+        expect(tm.container.getAttribute('role')).toBe('region');
+        expect(tm.container.getAttribute('aria-live')).toBe('polite');
+        tm.dispose();
+      });
+
+      it('show() returns unique incremental ids', () => {
+        const tm = new ToastManager();
+        tm.init();
+        const a = tm.show('A'); const b = tm.show('B');
+        expect(b).toBeGreaterThan(a);
+        tm.dispose();
+      });
+
+      it('dismiss() removes toast from list', () => {
+        const tm = new ToastManager();
+        tm.init();
+        const id = tm.show('X', { duration: 0 });
+        expect(tm.toasts.length).toBe(1);
+        tm.dismiss(id);
+        expect(tm.toasts.length).toBe(0);
+        tm.dispose();
+      });
+
+      it('dismiss() is safe to call with unknown id', () => {
+        const tm = new ToastManager();
+        tm.init();
+        tm.dismiss(99999); // should not throw
+        expect(tm.toasts.length).toBe(0);
+        tm.dispose();
+      });
+
+      it('success/error/warning/info create correct types', () => {
+        const tm = new ToastManager();
+        tm.init();
+        tm.success('a'); tm.error('b'); tm.warning('c'); tm.info('d');
+        expect(tm.toasts.length).toBe(4);
+        tm.dispose();
+      });
+
+      it('escapes HTML entities to prevent XSS', () => {
+        const tm = new ToastManager();
+        const safe = tm.escapeHtml('<img src=x onerror=alert(1)>');
+        expect(safe).not.toContain('<img');
+        expect(safe).toContain('&lt;img');
+      });
+
+      it('stacks multiple toasts in container', () => {
+        const tm = new ToastManager();
+        tm.init();
+        tm.show('1', { duration: 0 });
+        tm.show('2', { duration: 0 });
+        tm.show('3', { duration: 0 });
+        expect(tm.container.children.length).toBe(3);
+        tm.dispose();
+      });
+
+      it('dispose() removes container from DOM', () => {
+        const tm = new ToastManager();
+        tm.init();
+        tm.show('Z', { duration: 0 });
+        const c = tm.container;
+        tm.dispose();
+        expect(c.parentNode).toBeFalsy();
+        expect(tm.toasts.length).toBe(0);
+      });
+    });
+
+    // ===== ThemeToggle =====
+    const { ThemeToggle } = await import('../utils/theme-toggle.js');
+
+    describe('ThemeToggle', () => {
+      const dom = mockDOM();
+
+      it('detects system theme as dark or light', () => {
+        const tt = new ThemeToggle();
+        const t = tt.getSystemTheme();
+        expect(t === 'dark' || t === 'light').toBeTruthy();
+      });
+
+      it('creates button with aria-label in header', () => {
+        const tt = new ThemeToggle();
+        tt.init();
+        expect(tt.button).toBeTruthy();
+        expect(tt.button.getAttribute('aria-label')).toBeTruthy();
+        tt.dispose();
+      });
+
+      it('toggle() alternates between dark and light', () => {
+        const tt = new ThemeToggle();
+        tt.init();
+        const initial = tt.currentTheme;
+        tt.toggle();
+        expect(tt.currentTheme).not.toBe(initial);
+        tt.toggle();
+        expect(tt.currentTheme).toBe(initial);
+        tt.dispose();
+      });
+
+      it('applyTheme() sets data-color-scheme on <html>', () => {
+        const tt = new ThemeToggle();
+        tt.applyTheme('dark');
+        expect(document.documentElement.getAttribute('data-color-scheme')).toBe('dark');
+        tt.applyTheme('light');
+        expect(document.documentElement.getAttribute('data-color-scheme')).toBe('light');
+      });
+
+      it('persists and retrieves theme from localStorage', () => {
+        const tt = new ThemeToggle();
+        tt.saveTheme('dark');
+        expect(tt.getSavedTheme()).toBe('dark');
+        tt.saveTheme('light');
+        expect(tt.getSavedTheme()).toBe('light');
+        localStorage.removeItem('ruview-theme');
+      });
+
+      dom.remove();
+    });
+
+    // ===== KeyboardShortcuts =====
+    const { KeyboardShortcuts } = await import('../utils/keyboard-shortcuts.js');
+
+    describe('KeyboardShortcuts', () => {
+      it('has default shortcuts for ?, Escape, and number keys', () => {
+        const ks = new KeyboardShortcuts(null);
+        expect(ks.shortcuts.has('?')).toBeTruthy();
+        expect(ks.shortcuts.has('Escape')).toBeTruthy();
+        expect(ks.shortcuts.has('1')).toBeTruthy();
+        expect(ks.shortcuts.has('8')).toBeTruthy();
+        ks.dispose();
+      });
+
+      it('register() adds custom handler', () => {
+        const ks = new KeyboardShortcuts(null);
+        let ran = false;
+        ks.register('z', 'Test', () => { ran = true; });
+        expect(ks.shortcuts.has('z')).toBeTruthy();
+        ks.shortcuts.get('z').handler();
+        expect(ran).toBeTruthy();
+        ks.dispose();
+      });
+
+      it('formatKey() maps Escape to Esc', () => {
+        const ks = new KeyboardShortcuts(null);
+        expect(ks.formatKey('Escape')).toBe('Esc');
+        expect(ks.formatKey('a')).toBe('A');
+        ks.dispose();
+      });
+
+      it('init() creates dialog overlay', () => {
+        const ks = new KeyboardShortcuts(null);
+        ks.init();
+        expect(ks.overlay).toBeTruthy();
+        expect(ks.overlay.getAttribute('role')).toBe('dialog');
+        expect(ks.overlay.getAttribute('aria-modal')).toBe('true');
+        ks.dispose();
+      });
+
+      it('showHelp/hideHelp toggles overlay visibility', () => {
+        const ks = new KeyboardShortcuts(null);
+        ks.init();
+        ks.showHelp();
+        expect(ks.helpVisible).toBeTruthy();
+        expect(ks.overlay.classList.contains('visible')).toBeTruthy();
+        ks.hideHelp();
+        expect(ks.helpVisible).toBeFalsy();
+        ks.dispose();
+      });
+
+      it('buildHelpHTML() includes Navigation/Actions/General groups', () => {
+        const ks = new KeyboardShortcuts(null);
+        const html = ks.buildHelpHTML();
+        expect(html).toContain('Navigation');
+        expect(html).toContain('Actions');
+        expect(html).toContain('General');
+        ks.dispose();
+      });
+
+      it('dispose() removes overlay from DOM', () => {
+        const ks = new KeyboardShortcuts(null);
+        ks.init();
+        const o = ks.overlay;
+        ks.dispose();
+        expect(o.parentNode).toBeFalsy();
+      });
+    });
+
+    // ===== PerfMonitor =====
+    const { PerfMonitor } = await import('../utils/perf-monitor.js');
+
+    describe('PerfMonitor', () => {
+      it('creates panel with role=status and aria-label', () => {
+        const pm = new PerfMonitor();
+        pm.init();
+        expect(pm.panel.getAttribute('role')).toBe('status');
+        expect(pm.panel.getAttribute('aria-label')).toBe('Performance monitor');
+        pm.dispose();
+      });
+
+      it('show/hide updates visible state', () => {
+        const pm = new PerfMonitor();
+        pm.init();
+        pm.show();
+        expect(pm.visible).toBeTruthy();
+        expect(pm.panel.classList.contains('visible')).toBeTruthy();
+        pm.hide();
+        expect(pm.visible).toBeFalsy();
+        pm.dispose();
+      });
+
+      it('toggle() flips visibility', () => {
+        const pm = new PerfMonitor();
+        pm.init();
+        pm.toggle();
+        expect(pm.visible).toBeTruthy();
+        pm.toggle();
+        expect(pm.visible).toBeFalsy();
+        pm.dispose();
+      });
+
+      it('updateMetric() sets text and CSS class', () => {
+        const pm = new PerfMonitor();
+        pm.init();
+        pm.updateMetric('fps', 60, 'ok');
+        const el = pm.panel.querySelector('[data-metric="fps"]');
+        expect(el.textContent).toBe('60');
+        expect(el.className).toContain('perf-ok');
+        pm.updateMetric('fps', 15, 'warning');
+        expect(el.className).toContain('perf-warning');
+        pm.dispose();
+      });
+
+      it('pushSpark() appends data and caps at 60', () => {
+        const pm = new PerfMonitor();
+        pm.init();
+        for (let i = 0; i < 70; i++) pm.pushSpark('fps', i, 0, 120);
+        expect(pm.sparkData.fps.length).toBe(60);
+        pm.dispose();
+      });
+
+      it('dispose() cleans up panel', () => {
+        const pm = new PerfMonitor();
+        pm.init();
+        pm.show();
+        const p = pm.panel;
+        pm.dispose();
+        expect(p.parentNode).toBeFalsy();
+      });
+    });
+
+    // ===== TabManager =====
+    const { TabManager } = await import('../components/TabManager.js');
+
+    describe('TabManager', () => {
+      it('initializes and finds all tabs', () => {
+        const d = mockDOM();
+        const tm = new TabManager(d);
+        tm.init();
+        expect(tm.tabs.length).toBe(3);
+        expect(tm.activeTab).toBe('dashboard');
+        d.remove();
+      });
+
+      it('switchToTab() changes active tab', () => {
+        const d = mockDOM();
+        const tm = new TabManager(d);
+        tm.init();
+        tm.switchToTab('hardware');
+        expect(tm.activeTab).toBe('hardware');
+        expect(d.querySelector('[data-tab="hardware"]').classList.contains('active')).toBeTruthy();
+        expect(d.querySelector('[data-tab="dashboard"]').classList.contains('active')).toBeFalsy();
+        d.remove();
+      });
+
+      it('updates aria-selected on tab switch', () => {
+        const d = mockDOM();
+        const tm = new TabManager(d);
+        tm.init();
+        tm.switchToTab('demo');
+        expect(d.querySelector('[data-tab="dashboard"]').getAttribute('aria-selected')).toBe('false');
+        expect(d.querySelector('[data-tab="demo"]').getAttribute('aria-selected')).toBe('true');
+        d.remove();
+      });
+
+      it('fires onTabChange callbacks with correct args', () => {
+        const d = mockDOM();
+        const tm = new TabManager(d);
+        tm.init();
+        let newId = '', oldId = '';
+        tm.onTabChange((n, o) => { newId = n; oldId = o; });
+        tm.switchToTab('hardware');
+        expect(newId).toBe('hardware');
+        expect(oldId).toBe('dashboard');
+        d.remove();
+      });
+
+      it('does not fire callback when switching to already active tab', () => {
+        const d = mockDOM();
+        const tm = new TabManager(d);
+        tm.init();
+        let count = 0;
+        tm.onTabChange(() => { count++; });
+        tm.switchToTab('dashboard');
+        expect(count).toBe(0);
+        d.remove();
+      });
+
+      it('onTabChange() returns unsubscribe function', () => {
+        const d = mockDOM();
+        const tm = new TabManager(d);
+        tm.init();
+        let count = 0;
+        const unsub = tm.onTabChange(() => { count++; });
+        tm.switchToTab('hardware');
+        expect(count).toBe(1);
+        unsub();
+        tm.switchToTab('demo');
+        expect(count).toBe(1); // not incremented
+        d.remove();
+      });
+
+      it('setTabEnabled(false) disables tab button', () => {
+        const d = mockDOM();
+        const tm = new TabManager(d);
+        tm.init();
+        tm.setTabEnabled('hardware', false);
+        const btn = d.querySelector('[data-tab="hardware"]');
+        expect(btn.disabled).toBeTruthy();
+        expect(btn.classList.contains('disabled')).toBeTruthy();
+        tm.setTabEnabled('hardware', true);
+        expect(btn.disabled).toBeFalsy();
+        d.remove();
+      });
+
+      it('setTabVisible(false) hides tab', () => {
+        const d = mockDOM();
+        const tm = new TabManager(d);
+        tm.init();
+        tm.setTabVisible('demo', false);
+        expect(d.querySelector('[data-tab="demo"]').style.display).toBe('none');
+        tm.setTabVisible('demo', true);
+        expect(d.querySelector('[data-tab="demo"]').style.display).toBe('');
+        d.remove();
+      });
+
+      it('setTabBadge() adds/removes badge', () => {
+        const d = mockDOM();
+        const tm = new TabManager(d);
+        tm.init();
+        tm.setTabBadge('hardware', '3');
+        const badge = d.querySelector('[data-tab="hardware"] .tab-badge');
+        expect(badge).toBeTruthy();
+        expect(badge.textContent).toBe('3');
+        tm.setTabBadge('hardware', null);
+        expect(d.querySelector('[data-tab="hardware"] .tab-badge')).toBeFalsy();
+        d.remove();
+      });
+    });
+
+    // ===== RENDER RESULTS =====
+    const output = document.getElementById('output');
+    let lastSuite = '', passed = 0, failed = 0;
+
+    results.forEach(r => {
+      if (r.suite !== lastSuite) {
+        lastSuite = r.suite;
+        const s = document.createElement('div');
+        s.className = 'suite';
+        s.innerHTML = `<div class="suite-name">${r.suite}</div>`;
+        output.appendChild(s);
+      }
+      const t = document.createElement('div');
+      t.className = `test ${r.passed ? 'pass' : 'fail'}`;
+      t.textContent = r.name;
+      output.lastChild.appendChild(t);
+      if (!r.passed) {
+        const e = document.createElement('div');
+        e.className = 'error-detail';
+        e.textContent = r.error;
+        output.lastChild.appendChild(e);
+      }
+      r.passed ? passed++ : failed++;
+    });
+
+    const summary = document.getElementById('summary');
+    summary.textContent = `${passed + failed} tests: ${passed} passed, ${failed} failed`;
+    summary.style.color = failed === 0 ? '#32b8c6' : '#ff5459';
+
+    console.info(`[UNIT-TESTS] ${passed + failed} tests: ${passed} passed, ${failed} failed`);
+    if (failed > 0) results.filter(r => !r.passed).forEach(r => console.error(`[FAIL] ${r.suite} > ${r.name}: ${r.error}`));
+  </script>
+</body>
+</html>
