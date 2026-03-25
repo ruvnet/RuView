@@ -20,6 +20,10 @@ import { DataExport } from './utils/data-export.js';
 import { FullscreenManager } from './utils/fullscreen.js';
 import { ConnectionStatus } from './utils/connection-status.js';
 import { MobileNav } from './utils/mobile-nav.js';
+import { Router } from './utils/router.js';
+import { Onboarding } from './utils/onboarding.js';
+import { IdleManager } from './utils/idle-manager.js';
+import { NotificationCenter } from './utils/notification-center.js';
 
 class WiFiDensePoseApp {
   constructor() {
@@ -217,6 +221,10 @@ class WiFiDensePoseApp {
     this.mobileNav = new MobileNav();
     this.mobileNav.init();
 
+    // Notification center (bell icon in header)
+    this.notificationCenter = new NotificationCenter();
+    this.notificationCenter.init();
+
     // Keyboard shortcuts (pass app reference for tab switching)
     this.keyboardShortcuts = new KeyboardShortcuts(this);
     this.keyboardShortcuts.register('l', 'Toggle activity log', () => {
@@ -237,6 +245,26 @@ class WiFiDensePoseApp {
 
     // Register PWA service worker
     this.registerServiceWorker();
+
+    // URL hash router (bookmarkable tabs)
+    this.router = new Router(this);
+    this.router.init();
+
+    // Idle detection (pause updates when inactive)
+    this.idleManager = new IdleManager();
+    this.idleManager.onIdle(() => {
+      healthService.stopHealthMonitoring();
+      console.info('[App] Paused health monitoring (idle)');
+    });
+    this.idleManager.onActive(() => {
+      healthService.startHealthMonitoring();
+      console.info('[App] Resumed health monitoring (active)');
+    });
+    this.idleManager.init();
+
+    // Onboarding tour (first-run walkthrough)
+    this.onboarding = new Onboarding(this);
+    this.onboarding.init();
   }
 
   // Register service worker for offline capability
@@ -395,6 +423,10 @@ class WiFiDensePoseApp {
     if (this.fullscreenManager) this.fullscreenManager.dispose();
     if (this.connectionStatus) this.connectionStatus.dispose();
     if (this.mobileNav) this.mobileNav.dispose();
+    if (this.router) this.router.dispose();
+    if (this.onboarding) this.onboarding.dispose();
+    if (this.idleManager) this.idleManager.dispose();
+    if (this.notificationCenter) this.notificationCenter.dispose();
     toastManager.dispose();
   }
 
