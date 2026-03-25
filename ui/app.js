@@ -14,6 +14,10 @@ import { KeyboardShortcuts } from './utils/keyboard-shortcuts.js';
 import { PerfMonitor } from './utils/perf-monitor.js';
 import { toastManager } from './utils/toast.js';
 import { ThemeToggle } from './utils/theme-toggle.js';
+import { Router } from './utils/router.js';
+import { Onboarding } from './utils/onboarding.js';
+import { IdleManager } from './utils/idle-manager.js';
+import { NotificationCenter } from './utils/notification-center.js';
 
 class WiFiDensePoseApp {
   constructor() {
@@ -187,9 +191,33 @@ class WiFiDensePoseApp {
     this.perfMonitor = new PerfMonitor();
     this.perfMonitor.init();
 
+    // Notification center (bell icon in header)
+    this.notificationCenter = new NotificationCenter();
+    this.notificationCenter.init();
+
     // Keyboard shortcuts (pass app reference for tab switching)
     this.keyboardShortcuts = new KeyboardShortcuts(this);
     this.keyboardShortcuts.init();
+
+    // URL hash router (bookmarkable tabs)
+    this.router = new Router(this);
+    this.router.init();
+
+    // Idle detection (pause updates when inactive)
+    this.idleManager = new IdleManager();
+    this.idleManager.onIdle(() => {
+      healthService.stopHealthMonitoring();
+      console.info('[App] Paused health monitoring (idle)');
+    });
+    this.idleManager.onActive(() => {
+      healthService.startHealthMonitoring();
+      console.info('[App] Resumed health monitoring (active)');
+    });
+    this.idleManager.init();
+
+    // Onboarding tour (first-run walkthrough)
+    this.onboarding = new Onboarding(this);
+    this.onboarding.init();
   }
 
   // Handle tab changes
@@ -331,6 +359,10 @@ class WiFiDensePoseApp {
     if (this.keyboardShortcuts) this.keyboardShortcuts.dispose();
     if (this.perfMonitor) this.perfMonitor.dispose();
     if (this.themeToggle) this.themeToggle.dispose();
+    if (this.router) this.router.dispose();
+    if (this.onboarding) this.onboarding.dispose();
+    if (this.idleManager) this.idleManager.dispose();
+    if (this.notificationCenter) this.notificationCenter.dispose();
     toastManager.dispose();
   }
 
