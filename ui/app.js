@@ -14,6 +14,11 @@ import { KeyboardShortcuts } from './utils/keyboard-shortcuts.js';
 import { PerfMonitor } from './utils/perf-monitor.js';
 import { toastManager } from './utils/toast.js';
 import { ThemeToggle } from './utils/theme-toggle.js';
+import { CommandPalette } from './utils/command-palette.js';
+import { ActivityLog } from './utils/activity-log.js';
+import { DataExport } from './utils/data-export.js';
+import { FullscreenManager } from './utils/fullscreen.js';
+import { ConnectionStatus } from './utils/connection-status.js';
 
 class WiFiDensePoseApp {
   constructor() {
@@ -174,10 +179,14 @@ class WiFiDensePoseApp {
     }
   }
 
-  // Initialize enhancement modules (keyboard shortcuts, perf monitor, toast, theme)
+  // Initialize enhancement modules
   initializeEnhancements() {
     // Toast notifications
     toastManager.init();
+
+    // Connection status widget in header
+    this.connectionStatus = new ConnectionStatus();
+    this.connectionStatus.init();
 
     // Theme toggle
     this.themeToggle = new ThemeToggle();
@@ -187,9 +196,39 @@ class WiFiDensePoseApp {
     this.perfMonitor = new PerfMonitor();
     this.perfMonitor.init();
 
+    // Activity log
+    this.activityLog = new ActivityLog();
+    this.activityLog.init();
+
+    // Data export
+    this.dataExport = new DataExport();
+    this.dataExport.init();
+
+    // Fullscreen manager
+    this.fullscreenManager = new FullscreenManager();
+    this.fullscreenManager.init();
+
+    // Command palette (Ctrl+K)
+    this.commandPalette = new CommandPalette(this);
+    this.commandPalette.init();
+
     // Keyboard shortcuts (pass app reference for tab switching)
     this.keyboardShortcuts = new KeyboardShortcuts(this);
+    this.keyboardShortcuts.register('l', 'Toggle activity log', () => {
+      document.dispatchEvent(new CustomEvent('toggle-activity-log'));
+    });
+    this.keyboardShortcuts.register('e', 'Export sensor data', () => {
+      document.dispatchEvent(new CustomEvent('export-data'));
+    });
+    this.keyboardShortcuts.register('f', 'Toggle fullscreen', () => {
+      document.dispatchEvent(new CustomEvent('toggle-fullscreen'));
+    });
     this.keyboardShortcuts.init();
+
+    // Listen for show-shortcuts from command palette
+    document.addEventListener('show-shortcuts', () => {
+      this.keyboardShortcuts.showHelp();
+    });
   }
 
   // Handle tab changes
@@ -331,6 +370,11 @@ class WiFiDensePoseApp {
     if (this.keyboardShortcuts) this.keyboardShortcuts.dispose();
     if (this.perfMonitor) this.perfMonitor.dispose();
     if (this.themeToggle) this.themeToggle.dispose();
+    if (this.commandPalette) this.commandPalette.dispose();
+    if (this.activityLog) this.activityLog.dispose();
+    if (this.dataExport) this.dataExport.dispose();
+    if (this.fullscreenManager) this.fullscreenManager.dispose();
+    if (this.connectionStatus) this.connectionStatus.dispose();
     toastManager.dispose();
   }
 
