@@ -7,34 +7,37 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <!-- Skip to main content link for keyboard/screen reader users -->
+    <a href="#dashboard" class="skip-to-content">Skip to main content</a>
+
     <div class="container">
         <!-- Header -->
-        <header class="header">
+        <header class="header" role="banner">
             <h1>WiFi DensePose</h1>
             <p class="subtitle">Human Tracking Through Walls Using WiFi Signals</p>
             <div class="header-info">
-                <span class="api-version"></span>
-                <span class="api-environment"></span>
-                <span class="overall-health"></span>
+                <span class="api-version" aria-label="API version"></span>
+                <span class="api-environment" aria-label="Environment"></span>
+                <span class="overall-health" role="status" aria-live="polite" aria-label="System health"></span>
             </div>
         </header>
 
         <!-- Navigation -->
-        <nav class="nav-tabs">
-            <button class="nav-tab active" data-tab="dashboard">Dashboard</button>
-            <button class="nav-tab" data-tab="hardware">Hardware</button>
-            <button class="nav-tab" data-tab="demo">Live Demo</button>
-            <button class="nav-tab" data-tab="architecture">Architecture</button>
-            <button class="nav-tab" data-tab="performance">Performance</button>
-            <button class="nav-tab" data-tab="applications">Applications</button>
-            <button class="nav-tab" data-tab="sensing">Sensing</button>
-            <button class="nav-tab" data-tab="training">Training</button>
+        <nav class="nav-tabs" role="tablist" aria-label="Main navigation">
+            <button class="nav-tab active" data-tab="dashboard" role="tab" aria-selected="true" aria-controls="dashboard">Dashboard</button>
+            <button class="nav-tab" data-tab="hardware" role="tab" aria-selected="false" aria-controls="hardware">Hardware</button>
+            <button class="nav-tab" data-tab="demo" role="tab" aria-selected="false" aria-controls="demo">Live Demo</button>
+            <button class="nav-tab" data-tab="architecture" role="tab" aria-selected="false" aria-controls="architecture">Architecture</button>
+            <button class="nav-tab" data-tab="performance" role="tab" aria-selected="false" aria-controls="performance">Performance</button>
+            <button class="nav-tab" data-tab="applications" role="tab" aria-selected="false" aria-controls="applications">Applications</button>
+            <button class="nav-tab" data-tab="sensing" role="tab" aria-selected="false" aria-controls="sensing">Sensing</button>
+            <button class="nav-tab" data-tab="training" role="tab" aria-selected="false" aria-controls="training">Training</button>
             <a href="pose-fusion.html" class="nav-tab" style="text-decoration:none">Pose Fusion</a>
             <a href="observatory.html" class="nav-tab" style="text-decoration:none">Observatory</a>
         </nav>
 
         <!-- Dashboard Tab -->
-        <section id="dashboard" class="tab-content active">
+        <section id="dashboard" class="tab-content active" role="tabpanel" aria-labelledby="dashboard">
             <div class="hero-section">
                 <h2>Revolutionary WiFi-Based Human Pose Detection</h2>
                 <p class="hero-description">
@@ -181,7 +184,7 @@
         </section>
 
         <!-- Hardware Tab -->
-        <section id="hardware" class="tab-content">
+        <section id="hardware" class="tab-content" role="tabpanel" aria-labelledby="hardware" aria-hidden="true">
             <h2>Hardware Configuration</h2>
             
             <div class="hardware-grid">
@@ -259,7 +262,7 @@
         </section>
 
         <!-- Demo Tab -->
-        <section id="demo" class="tab-content">
+        <section id="demo" class="tab-content" role="tabpanel" aria-labelledby="demo" aria-hidden="true">
             <h2>Live Demonstration</h2>
             
             <div class="demo-controls">
@@ -312,7 +315,7 @@
         </section>
 
         <!-- Architecture Tab -->
-        <section id="architecture" class="tab-content">
+        <section id="architecture" class="tab-content" role="tabpanel" aria-labelledby="architecture" aria-hidden="true">
             <h2>System Architecture</h2>
             
             <div class="architecture-flow">
@@ -350,7 +353,7 @@
         </section>
 
         <!-- Performance Tab -->
-        <section id="performance" class="tab-content">
+        <section id="performance" class="tab-content" role="tabpanel" aria-labelledby="performance" aria-hidden="true">
             <h2>Performance Analysis</h2>
             
             <div class="performance-chart">
@@ -422,7 +425,7 @@
         </section>
 
         <!-- Applications Tab -->
-        <section id="applications" class="tab-content">
+        <section id="applications" class="tab-content" role="tabpanel" aria-labelledby="applications" aria-hidden="true">
             <h2>Real-World Applications</h2>
             
             <div class="applications-grid">
@@ -489,10 +492,10 @@
         </section>
 
         <!-- Sensing Tab -->
-        <section id="sensing" class="tab-content"></section>
+        <section id="sensing" class="tab-content" role="tabpanel" aria-labelledby="sensing" aria-hidden="true"></section>
 
         <!-- Training Tab -->
-        <section id="training" class="tab-content">
+        <section id="training" class="tab-content" role="tabpanel" aria-labelledby="training" aria-hidden="true">
             <div class="tab-header">
                 <h2>Model Training</h2>
                 <p>Record CSI data, train pose estimation models, and manage .rvf files</p>

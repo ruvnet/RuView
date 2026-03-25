@@ -1,0 +1,33 @@
+{
+  "env": {
+    "browser": true,
+    "es2022": true
+  },
+  "parserOptions": {
+    "ecmaVersion": 2022,
+    "sourceType": "module"
+  },
+  "rules": {
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
+    "no-undef": "error",
+    "no-var": "error",
+    "prefer-const": "warn",
+    "eqeqeq": ["error", "always"],
+    "no-eval": "error",
+    "no-implied-eval": "error",
+    "no-new-func": "error",
+    "no-script-url": "error",
+    "no-alert": "warn",
+    "no-console": ["warn", { "allow": ["warn", "error", "info"] }],
+    "curly": ["warn", "multi-line"],
+    "no-throw-literal": "error",
+    "prefer-template": "warn",
+    "no-duplicate-imports": "error"
+  },
+  "ignorePatterns": [
+    "node_modules/",
+    "mobile/",
+    "vendor/",
+    "*.min.js"
+  ]
+}
