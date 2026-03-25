@@ -24,6 +24,10 @@ import { Router } from './utils/router.js';
 import { Onboarding } from './utils/onboarding.js';
 import { IdleManager } from './utils/idle-manager.js';
 import { NotificationCenter } from './utils/notification-center.js';
+import { i18n } from './utils/i18n.js';
+import { ScreenshotTool } from './utils/screenshot.js';
+import { UptimeClock } from './utils/uptime-clock.js';
+import { QuickSettings } from './utils/quick-settings.js';
 
 class WiFiDensePoseApp {
   constructor() {
@@ -225,6 +229,21 @@ class WiFiDensePoseApp {
     this.notificationCenter = new NotificationCenter();
     this.notificationCenter.init();
 
+    // Screenshot tool
+    this.screenshotTool = new ScreenshotTool();
+    this.screenshotTool.init();
+
+    // Uptime clock
+    this.uptimeClock = new UptimeClock();
+    this.uptimeClock.init();
+
+    // Quick settings panel
+    this.quickSettings = new QuickSettings(this);
+    this.quickSettings.init();
+
+    // Internationalization (EN/PL)
+    i18n.init();
+
     // Keyboard shortcuts (pass app reference for tab switching)
     this.keyboardShortcuts = new KeyboardShortcuts(this);
     this.keyboardShortcuts.register('l', 'Toggle activity log', () => {
@@ -235,6 +254,9 @@ class WiFiDensePoseApp {
     });
     this.keyboardShortcuts.register('f', 'Toggle fullscreen', () => {
       document.dispatchEvent(new CustomEvent('toggle-fullscreen'));
+    });
+    this.keyboardShortcuts.register('s', 'Take screenshot', () => {
+      document.dispatchEvent(new CustomEvent('take-screenshot'));
     });
     this.keyboardShortcuts.init();
 
@@ -427,6 +449,10 @@ class WiFiDensePoseApp {
     if (this.onboarding) this.onboarding.dispose();
     if (this.idleManager) this.idleManager.dispose();
     if (this.notificationCenter) this.notificationCenter.dispose();
+    if (this.screenshotTool) this.screenshotTool.dispose();
+    if (this.uptimeClock) this.uptimeClock.dispose();
+    if (this.quickSettings) this.quickSettings.dispose();
+    i18n.dispose();
     toastManager.dispose();
   }
 
