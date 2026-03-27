@@ -1,7 +1,7 @@
 # π RuView
 
 <p align="center">
-  <a href="https://ruvnet.github.io/RuView/">
+  <a href="https://x.com/rUv/status/2037556932802761004">
     <img src="assets/ruview-small-gemini.jpg" alt="RuView - WiFi DensePose" width="100%">
   </a>
 </p>
