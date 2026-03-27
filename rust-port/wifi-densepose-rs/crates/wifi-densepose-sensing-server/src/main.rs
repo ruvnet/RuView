@@ -2846,7 +2846,7 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         mean_rssi: vitals.rssi as f64,
                         variance: vitals.motion_energy as f64,
                         motion_band_power: vitals.motion_energy as f64,
-                        breathing_band_power: 0.0,
+                        breathing_band_power: if vitals.presence { 0.5 } else { 0.0 },
                         dominant_freq_hz: vitals.breathing_rate_bpm / 60.0,
                         change_points: 0,
                         spectral_power: vitals.motion_energy as f64,
