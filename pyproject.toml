@@ -185,7 +185,7 @@ package-dir = {"" = "."}
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*"]
+include = ["wifi_densepose*", "src*"]
 exclude = ["tests*", "docs*", "scripts*"]
 
 [tool.setuptools.package-data]
