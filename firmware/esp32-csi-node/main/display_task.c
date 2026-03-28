@@ -118,8 +118,14 @@ esp_err_t display_task_start(void)
     if (!buf1 || !buf2) {
         ESP_LOGE(TAG, "Failed to allocate LVGL buffers (%u bytes, caps=0x%lx)",
                  (unsigned)buf_size, (unsigned long)alloc_caps);
-        if (buf1) free(buf1);
-        if (buf2) free(buf2);
+        if (buf1) {
+            free(buf1);
+            buf1 = NULL;
+        }
+        if (buf2) {
+            free(buf2);
+            buf2 = NULL;
+        }
         return ESP_OK;
     }
     ESP_LOGI(TAG, "LVGL buffers: 2x %u bytes (%u lines, %s)",
