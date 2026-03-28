@@ -20,14 +20,15 @@ class ApiService {
     this.baseUrl = url ?? '';
   }
 
-  private buildUrl(path: string): string {
-    if (!this.baseUrl) {
+  private buildUrl(path: string, baseUrlOverride?: string): string {
+    const baseUrl = baseUrlOverride ?? this.baseUrl;
+    if (!baseUrl) {
       return path;
     }
     if (path.startsWith('http://') || path.startsWith('https://')) {
       return path;
     }
-    const normalized = this.baseUrl.replace(/\/$/, '');
+    const normalized = baseUrl.replace(/\/$/, '');
     return `${normalized}${path.startsWith('/') ? path : `/${path}`}`;
   }
 
@@ -53,31 +54,35 @@ class ApiService {
     return { message: 'Unknown error' };
   }
 
-  private async requestWithRetry<T>(config: AxiosRequestConfig, retriesLeft: number): Promise<T> {
+  private async requestWithRetry<T>(
+    config: AxiosRequestConfig,
+    retriesLeft: number,
+    baseUrlOverride?: string,
+  ): Promise<T> {
     try {
       const response = await this.client.request<T>({
         ...config,
-        url: this.buildUrl(config.url || ''),
+        url: this.buildUrl(config.url || '', baseUrlOverride),
       });
       return response.data;
     } catch (error) {
       if (retriesLeft > 0) {
-        return this.requestWithRetry<T>(config, retriesLeft - 1);
+        return this.requestWithRetry<T>(config, retriesLeft - 1, baseUrlOverride);
       }
       throw this.normalizeError(error);
     }
   }
 
-  get<T>(path: string): Promise<T> {
-    return this.requestWithRetry<T>({ method: 'GET', url: path }, 2);
+  get<T>(path: string, baseUrlOverride?: string): Promise<T> {
+    return this.requestWithRetry<T>({ method: 'GET', url: path }, 2, baseUrlOverride);
   }
 
   post<T>(path: string, body: unknown): Promise<T> {
     return this.requestWithRetry<T>({ method: 'POST', url: path, data: body }, 2);
   }
 
-  getStatus(): Promise<PoseStatus> {
-    return this.get<PoseStatus>(API_POSE_STATUS_PATH);
+  getStatus(baseUrlOverride?: string): Promise<PoseStatus> {
+    return this.get<PoseStatus>(API_POSE_STATUS_PATH, baseUrlOverride);
   }
 
   getZones(): Promise<ZoneConfig[]> {
