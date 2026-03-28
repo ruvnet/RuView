@@ -205,6 +205,25 @@ menu "WASM Programmable Sensing (ADR-040)"
 
 endmenu
 
+menu "RGB Status Indicator LED"
+
+    config RGB_LED_ENABLED
+        bool "Enable onboard WS2812 status LED"
+        default y
+        help
+            Compiles the LED state machine to indicate boot, wifi,
+            and streaming status using the ESP32's onboard RGB LED.
+
+    config RGB_LED_GPIO
+        int "RGB LED GPIO Pin"
+        depends on RGB_LED_ENABLED
+        default 38
+        help
+            The GPIO pin connected to the NeoPixel (WS2812/SK6812).
+            Commonly 38 on generic S3 boards or 48 on older boards.
+
+endmenu
+
 menu "Mock CSI (QEMU Testing)"
     config CSI_MOCK_ENABLED
         bool "Enable mock CSI generator (for QEMU testing)"

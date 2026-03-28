@@ -33,6 +33,7 @@
 #include "mock_csi.h"
 #endif
 
+#include "led_indicator.h"
 #include "esp_timer.h"
 
 static const char *TAG = "main";
@@ -56,19 +57,23 @@ static void event_handler(void *arg, esp_event_base_t event_base,
                           int32_t event_id, void *event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        led_indicator_set_state(LED_STATE_WIFI_CONNECTING);
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         if (s_retry_num < MAX_RETRY) {
+            led_indicator_set_state(LED_STATE_WIFI_CONNECTING);
             esp_wifi_connect();
             s_retry_num++;
             ESP_LOGI(TAG, "Retrying WiFi connection (%d/%d)", s_retry_num, MAX_RETRY);
         } else {
+            led_indicator_set_state(LED_STATE_WIFI_ERROR);
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
         }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_num = 0;
+        led_indicator_set_state(LED_STATE_CONNECTED);
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }
@@ -137,6 +142,9 @@ void app_main(void)
     /* Load runtime config (NVS overrides Kconfig defaults) */
     nvs_config_load(&g_nvs_config);
 
+    /* Initialize visual status indicator subsystem */
+    led_indicator_init();
+
     ESP_LOGI(TAG, "ESP32-S3 CSI Node (ADR-018) — Node ID: %d", g_nvs_config.node_id);
 
     /* Initialize WiFi STA (skip entirely under QEMU mock — no RF hardware) */
@@ -159,6 +167,7 @@ void app_main(void)
     /* Initialize CSI collection */
 #ifdef CONFIG_CSI_MOCK_ENABLED
     /* ADR-061: Start mock CSI generator (replaces real WiFi CSI in QEMU) */
+    led_indicator_set_state(LED_STATE_MOCK_MODE);
     esp_err_t mock_ret = mock_csi_init(CONFIG_CSI_MOCK_SCENARIO);
     if (mock_ret != ESP_OK) {
         ESP_LOGE(TAG, "Mock CSI init failed: %s", esp_err_to_name(mock_ret));
@@ -237,8 +246,11 @@ void app_main(void)
             ESP_LOGI(TAG, "mmWave sensor: %s (caps=0x%04x)",
                      mmwave_type_name(mw.type), mw.capabilities);
         }
-    } else {
+    } else if (mmwave_ret == ESP_ERR_NOT_FOUND) {
         ESP_LOGI(TAG, "No mmWave sensor detected (CSI-only mode)");
+    } else {
+        ESP_LOGE(TAG, "mmWave sensor init error: %s", esp_err_to_name(mmwave_ret));
+        led_indicator_set_state(LED_STATE_MMWAVE_ERROR);
     }
 
     /* ADR-066: Initialize swarm bridge to Cognitum Seed (if configured). */

@@ -8,3 +8,6 @@ dependencies:
 
   ## LCD touch abstraction
   espressif/esp_lcd_touch: "^1.0"
+  
+  ## WS2812 LED Strip Driver
+  espressif/led_strip: "^3.0.0"
