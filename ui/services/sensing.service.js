@@ -84,6 +84,11 @@ class SensingService {
     return [...this._rssiHistory];
   }
 
+  /** Get per-node RSSI history (object keyed by node_id). */
+  getPerNodeRssiHistory() {
+    return { ...(this._perNodeRssiHistory || {}) };
+  }
+
   /** Current connection state. */
   get state() {
     return this._state;
@@ -324,6 +329,20 @@ class SensingService {
       this._rssiHistory.push(data.features.mean_rssi);
       if (this._rssiHistory.length > this._maxHistory) {
         this._rssiHistory.shift();
+      }
+    }
+
+    // Per-node RSSI tracking
+    if (!this._perNodeRssiHistory) this._perNodeRssiHistory = {};
+    if (data.node_features) {
+      for (const nf of data.node_features) {
+        if (!this._perNodeRssiHistory[nf.node_id]) {
+          this._perNodeRssiHistory[nf.node_id] = [];
+        }
+        this._perNodeRssiHistory[nf.node_id].push(nf.rssi_dbm);
+        if (this._perNodeRssiHistory[nf.node_id].length > this._maxHistory) {
+          this._perNodeRssiHistory[nf.node_id].shift();
+        }
       }
     }
 
