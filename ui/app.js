@@ -10,6 +10,15 @@ import { wsService } from './services/websocket.service.js';
 import { healthService } from './services/health.service.js';
 import { sensingService } from './services/sensing.service.js';
 import { backendDetector } from './utils/backend-detector.js';
+import { KeyboardShortcuts } from './utils/keyboard-shortcuts.js';
+import { PerfMonitor } from './utils/perf-monitor.js';
+import { toastManager } from './utils/toast.js';
+import { ThemeToggle } from './utils/theme-toggle.js';
+import { CommandPalette } from './utils/command-palette.js';
+import { ActivityLog } from './utils/activity-log.js';
+import { DataExport } from './utils/data-export.js';
+import { FullscreenManager } from './utils/fullscreen.js';
+import { ConnectionStatus } from './utils/connection-status.js';
 
 class WiFiDensePoseApp {
   constructor() {
@@ -30,10 +39,13 @@ class WiFiDensePoseApp {
       
       // Initialize UI components
       this.initializeComponents();
-      
+
+      // Initialize enhancements
+      this.initializeEnhancements();
+
       // Set up global event listeners
       this.setupEventListeners();
-      
+
       this.isInitialized = true;
       console.log('WiFi DensePose UI initialized successfully');
       
@@ -167,6 +179,58 @@ class WiFiDensePoseApp {
     }
   }
 
+  // Initialize enhancement modules
+  initializeEnhancements() {
+    // Toast notifications
+    toastManager.init();
+
+    // Connection status widget in header
+    this.connectionStatus = new ConnectionStatus();
+    this.connectionStatus.init();
+
+    // Theme toggle
+    this.themeToggle = new ThemeToggle();
+    this.themeToggle.init();
+
+    // Performance monitor
+    this.perfMonitor = new PerfMonitor();
+    this.perfMonitor.init();
+
+    // Activity log
+    this.activityLog = new ActivityLog();
+    this.activityLog.init();
+
+    // Data export
+    this.dataExport = new DataExport();
+    this.dataExport.init();
+
+    // Fullscreen manager
+    this.fullscreenManager = new FullscreenManager();
+    this.fullscreenManager.init();
+
+    // Command palette (Ctrl+K)
+    this.commandPalette = new CommandPalette(this);
+    this.commandPalette.init();
+
+    // Keyboard shortcuts (pass app reference for tab switching)
+    this.keyboardShortcuts = new KeyboardShortcuts(this);
+    this.keyboardShortcuts.register('l', 'Toggle activity log', () => {
+      document.dispatchEvent(new CustomEvent('toggle-activity-log'));
+    });
+    this.keyboardShortcuts.register('e', 'Export sensor data', () => {
+      document.dispatchEvent(new CustomEvent('export-data'));
+    });
+    this.keyboardShortcuts.register('f', 'Toggle fullscreen', () => {
+      document.dispatchEvent(new CustomEvent('toggle-fullscreen'));
+    });
+    this.keyboardShortcuts.init();
+
+    // Listen for show-shortcuts from command palette
+    document.addEventListener('show-shortcuts', () => {
+      this.keyboardShortcuts.showHelp();
+    });
+  }
+
   // Handle tab changes
   handleTabChange(newTab, oldTab) {
     console.log(`Tab changed from ${oldTab} to ${newTab}`);
@@ -272,45 +336,17 @@ class WiFiDensePoseApp {
     });
   }
 
-  // Show backend status notification
+  // Show backend status notification (uses enhanced toast system)
   showBackendStatus(message, type) {
-    // Create status notification if it doesn't exist
-    let statusToast = document.getElementById('backendStatusToast');
-    if (!statusToast) {
-      statusToast = document.createElement('div');
-      statusToast.id = 'backendStatusToast';
-      statusToast.className = 'backend-status-toast';
-      document.body.appendChild(statusToast);
-    }
-
-    statusToast.textContent = message;
-    statusToast.className = `backend-status-toast ${type}`;
-    statusToast.classList.add('show');
-
-    // Auto-hide success messages, keep warnings and errors longer
-    const timeout = type === 'success' ? 3000 : 8000;
-    setTimeout(() => {
-      statusToast.classList.remove('show');
-    }, timeout);
+    const toastType = type === 'success' ? 'success' : 'warning';
+    toastManager[toastType](message, {
+      duration: type === 'success' ? 3000 : 8000
+    });
   }
 
-  // Show global error message
+  // Show global error message (uses enhanced toast system)
   showGlobalError(message) {
-    // Create error toast if it doesn't exist
-    let errorToast = document.getElementById('globalErrorToast');
-    if (!errorToast) {
-      errorToast = document.createElement('div');
-      errorToast.id = 'globalErrorToast';
-      errorToast.className = 'error-toast';
-      document.body.appendChild(errorToast);
-    }
-
-    errorToast.textContent = message;
-    errorToast.classList.add('show');
-
-    setTimeout(() => {
-      errorToast.classList.remove('show');
-    }, 5000);
+    toastManager.error(message, { duration: 6000 });
   }
 
   // Clean up resources
@@ -326,9 +362,20 @@ class WiFiDensePoseApp {
 
     // Disconnect all WebSocket connections
     wsService.disconnectAll();
-    
+
     // Stop health monitoring
     healthService.dispose();
+
+    // Dispose enhancements
+    if (this.keyboardShortcuts) this.keyboardShortcuts.dispose();
+    if (this.perfMonitor) this.perfMonitor.dispose();
+    if (this.themeToggle) this.themeToggle.dispose();
+    if (this.commandPalette) this.commandPalette.dispose();
+    if (this.activityLog) this.activityLog.dispose();
+    if (this.dataExport) this.dataExport.dispose();
+    if (this.fullscreenManager) this.fullscreenManager.dispose();
+    if (this.connectionStatus) this.connectionStatus.dispose();
+    toastManager.dispose();
   }
 
   // Public API
