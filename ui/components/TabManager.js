@@ -19,6 +19,33 @@ export class TabManager {
       tab.addEventListener('click', () => this.switchTab(tab));
     });
 
+    // Arrow key navigation within tab bar (WCAG)
+    const nav = this.container.querySelector('.nav-tabs');
+    if (nav) {
+      nav.addEventListener('keydown', (e) => {
+        const buttonTabs = this.tabs.filter(t => t.tagName === 'BUTTON' && !t.disabled);
+        const currentIndex = buttonTabs.indexOf(document.activeElement);
+        if (currentIndex === -1) return;
+
+        let nextIndex = -1;
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+          nextIndex = (currentIndex + 1) % buttonTabs.length;
+        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+          nextIndex = (currentIndex - 1 + buttonTabs.length) % buttonTabs.length;
+        } else if (e.key === 'Home') {
+          nextIndex = 0;
+        } else if (e.key === 'End') {
+          nextIndex = buttonTabs.length - 1;
+        }
+
+        if (nextIndex >= 0) {
+          e.preventDefault();
+          buttonTabs[nextIndex].focus();
+          this.switchTab(buttonTabs[nextIndex]);
+        }
+      });
+    }
+
     // Activate first tab if none active
     const activeTab = this.tabs.find(tab => tab.classList.contains('active'));
     if (activeTab) {
@@ -36,14 +63,22 @@ export class TabManager {
       return;
     }
 
-    // Update tab states
+    // Update tab states and ARIA attributes
     this.tabs.forEach(tab => {
-      tab.classList.toggle('active', tab === tabElement);
+      const isActive = tab === tabElement;
+      tab.classList.toggle('active', isActive);
+      if (tab.hasAttribute('aria-selected')) {
+        tab.setAttribute('aria-selected', String(isActive));
+      }
     });
 
-    // Update content visibility
+    // Update content visibility and ARIA
     this.tabContents.forEach(content => {
-      content.classList.toggle('active', content.id === tabId);
+      const isActive = content.id === tabId;
+      content.classList.toggle('active', isActive);
+      if (content.hasAttribute('role')) {
+        content.setAttribute('aria-hidden', String(!isActive));
+      }
     });
 
     // Update active tab
