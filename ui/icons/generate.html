@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head><title>RuView Icon Generator</title></head>
+<body>
+<p>Open this file in a browser and right-click to save the canvas images as icon-192.png and icon-512.png</p>
+<canvas id="c192" width="192" height="192"></canvas>
+<canvas id="c512" width="512" height="512"></canvas>
+<script>
+function drawIcon(canvas) {
+  const ctx = canvas.getContext('2d');
+  const s = canvas.width;
+  // Background
+  ctx.fillStyle = '#1f2121';
+  ctx.beginPath();
+  ctx.roundRect(0, 0, s, s, s * 0.15);
+  ctx.fill();
+  // WiFi arcs
+  ctx.strokeStyle = '#32b8c6';
+  ctx.lineWidth = s * 0.035;
+  ctx.lineCap = 'round';
+  const cx = s * 0.5, cy = s * 0.55;
+  [0.35, 0.25, 0.15].forEach(r => {
+    ctx.beginPath();
+    ctx.arc(cx, cy, s * r, -Math.PI * 0.75, -Math.PI * 0.25);
+    ctx.stroke();
+  });
+  // Center dot
+  ctx.fillStyle = '#32b8c6';
+  ctx.beginPath();
+  ctx.arc(cx, cy, s * 0.03, 0, Math.PI * 2);
+  ctx.fill();
+  // Person silhouette
+  ctx.strokeStyle = '#21808d';
+  ctx.lineWidth = s * 0.025;
+  // Head
+  ctx.beginPath();
+  ctx.arc(cx, cy - s * 0.15, s * 0.045, 0, Math.PI * 2);
+  ctx.stroke();
+  // Body
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - s * 0.1);
+  ctx.lineTo(cx, cy + s * 0.05);
+  ctx.stroke();
+  // Arms
+  ctx.beginPath();
+  ctx.moveTo(cx - s * 0.08, cy - s * 0.04);
+  ctx.lineTo(cx + s * 0.08, cy - s * 0.04);
+  ctx.stroke();
+  // Legs
+  ctx.beginPath();
+  ctx.moveTo(cx, cy + s * 0.05);
+  ctx.lineTo(cx - s * 0.06, cy + s * 0.15);
+  ctx.moveTo(cx, cy + s * 0.05);
+  ctx.lineTo(cx + s * 0.06, cy + s * 0.15);
+  ctx.stroke();
+  // Text
+  ctx.fillStyle = '#f5f5f5';
+  ctx.font = `bold ${s * 0.08}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText('RuView', cx, s * 0.88);
+}
+drawIcon(document.getElementById('c192'));
+drawIcon(document.getElementById('c512'));
+</script>
+</body>
+</html>
