@@ -1,0 +1,16 @@
+{
+  "rust-analyzer.linkedProjects": [
+    "./rust-port/wifi-densepose-rs/Cargo.toml"
+  ],
+  "rust-analyzer.check.command": "clippy",
+  "editor.formatOnSave": true,
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer"
+  },
+  "git.autofetch": true,
+  "git.confirmSync": false,
+  "gitlens.defaultDateFormat": "DD/MM/YYYY",
+  "files.exclude": {
+    "**/target": true
+  }
+}
