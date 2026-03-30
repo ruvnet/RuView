@@ -3184,7 +3184,10 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     // We scope the mutable borrow of node_states so we can
                     // access other AppStateInner fields afterward.
                     let node_id = frame.node_id;
-                    let adaptive_model_ref = s.adaptive_model.as_ref().map(|m| m as *const _);
+                    // Clone adaptive model before mutable borrow of node_states
+                    // to avoid unsafe raw pointer (review finding #2).
+                    let adaptive_model_clone = s.adaptive_model.clone();
+
                     let ns = s.node_states.entry(node_id).or_insert_with(NodeState::new);
                     ns.last_frame_time = Some(std::time::Instant::now());
 
@@ -3198,12 +3201,8 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         extract_features_from_frame(&frame, &ns.frame_history, sample_rate_hz);
                     smooth_and_classify_node(ns, &mut classification, raw_motion);
 
-                    // SAFETY: adaptive_model_ref points into s which we hold
-                    // via write lock; the model is not mutated here. We use a
-                    // raw pointer to break the borrow-checker deadlock between
-                    // node_states and adaptive_model (both inside s).
-                    if let Some(model_ptr) = adaptive_model_ref {
-                        let model: &adaptive_classifier::AdaptiveModel = unsafe { &*model_ptr };
+                    // Adaptive override using cloned model (safe, no raw pointers).
+                    if let Some(ref model) = adaptive_model_clone {
                         let amps = ns.frame_history.back()
                             .map(|v| v.as_slice())
                             .unwrap_or(&[]);
@@ -3318,6 +3317,19 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         let _ = s.tx.send(json);
                     }
                     s.latest_update = Some(update);
+
+                    // Evict stale nodes every 100 ticks to prevent memory leak.
+                    if tick % 100 == 0 {
+                        let stale = Duration::from_secs(60);
+                        let before = s.node_states.len();
+                        s.node_states.retain(|_id, ns| {
+                            ns.last_frame_time.map_or(false, |t| now.duration_since(t) < stale)
+                        });
+                        let evicted = before - s.node_states.len();
+                        if evicted > 0 {
+                            info!("Evicted {} stale node(s), {} active", evicted, s.node_states.len());
+                        }
+                    }
                 }
             }
             Err(e) => {
