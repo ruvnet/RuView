@@ -309,9 +309,11 @@ struct NodeState {
 }
 
 /// Default EMA alpha for temporal keypoint smoothing (RuVector Phase 2).
-const TEMPORAL_EMA_ALPHA_DEFAULT: f64 = 0.3;
+/// Lower = smoother (more history, less jitter). 0.15 balances responsiveness
+/// with stability for WiFi CSI where per-frame noise is high.
+const TEMPORAL_EMA_ALPHA_DEFAULT: f64 = 0.15;
 /// Reduced EMA alpha when coherence is low (trust measurements less).
-const TEMPORAL_EMA_ALPHA_LOW_COHERENCE: f64 = 0.1;
+const TEMPORAL_EMA_ALPHA_LOW_COHERENCE: f64 = 0.05;
 /// Coherence threshold below which we reduce EMA alpha.
 const COHERENCE_LOW_THRESHOLD: f64 = 0.3;
 /// Maximum allowed bone-length change ratio between frames (20%).
@@ -2024,25 +2026,26 @@ fn compute_person_score(feat: &FeatureInfo) -> f64 {
 /// (the #1 user-reported issue — see #237, #249, #280, #292).
 fn score_to_person_count(smoothed_score: f64, prev_count: usize) -> usize {
     // Up-thresholds (must exceed to increase count):
-    //   1→2: 0.65  (raised from 0.50 — multipath in small rooms hit 0.50 easily)
-    //   2→3: 0.85  (raised from 0.80 — 3 persons needs strong sustained signal)
+    //   1→2: 0.80  (raised from 0.65 — single-person movement in multipath
+    //               rooms easily hits 0.65, causing false 2-person detection)
+    //   2→3: 0.92  (raised from 0.85 — 3 persons needs very strong signal)
     // Down-thresholds (must drop below to decrease count):
-    //   2→1: 0.45  (hysteresis gap of 0.20)
-    //   3→2: 0.70  (hysteresis gap of 0.15)
+    //   2→1: 0.55  (hysteresis gap of 0.25)
+    //   3→2: 0.78  (hysteresis gap of 0.14)
     match prev_count {
         0 | 1 => {
-            if smoothed_score > 0.85 {
+            if smoothed_score > 0.92 {
                 3
-            } else if smoothed_score > 0.65 {
+            } else if smoothed_score > 0.80 {
                 2
             } else {
                 1
             }
         }
         2 => {
-            if smoothed_score > 0.85 {
+            if smoothed_score > 0.92 {
                 3
-            } else if smoothed_score < 0.45 {
+            } else if smoothed_score < 0.55 {
                 1
             } else {
                 2 // hold — within hysteresis band
@@ -2050,9 +2053,9 @@ fn score_to_person_count(smoothed_score: f64, prev_count: usize) -> usize {
         }
         _ => {
             // prev_count >= 3
-            if smoothed_score < 0.45 {
+            if smoothed_score < 0.55 {
                 1
-            } else if smoothed_score < 0.70 {
+            } else if smoothed_score < 0.78 {
                 2
             } else {
                 3 // hold
@@ -2092,23 +2095,27 @@ fn derive_single_person_pose(
     let breath_phase = if let Some(ref vs) = update.vital_signs {
         let bpm = vs.breathing_rate_bpm.unwrap_or(15.0);
         let freq = (bpm / 60.0).clamp(0.1, 0.5);
-        (update.tick as f64 * freq * 0.1 * std::f64::consts::TAU + phase_offset).sin()
+        // Slow tick rate (0.02) for gentle breathing, not jerky oscillation.
+        (update.tick as f64 * freq * 0.02 * std::f64::consts::TAU + phase_offset).sin()
     } else {
-        (update.tick as f64 * 0.08 + feat.breathing_band_power + phase_offset).sin()
+        (update.tick as f64 * 0.02 + phase_offset).sin()
     };
 
     let lean_x = (feat.dominant_freq_hz / 5.0 - 1.0).clamp(-1.0, 1.0) * 18.0;
 
     let stride_x = if is_walking {
-        let stride_phase = (feat.motion_band_power * 0.7 + update.tick as f64 * 0.12 + phase_offset).sin();
-        stride_phase * 45.0 * motion_score
+        let stride_phase = (feat.motion_band_power * 0.7 + update.tick as f64 * 0.06 + phase_offset).sin();
+        stride_phase * 20.0 * motion_score
     } else {
         0.0
     };
 
-    let burst = (feat.change_points as f64 / 8.0).clamp(0.0, 1.0);
+    // Dampen burst and noise to reduce jitter.  The original used
+    // tick*17.3 which changed wildly every frame.  Now use slow tick
+    // rate and minimal burst scaling for a stable skeleton.
+    let burst = (feat.change_points as f64 / 20.0).clamp(0.0, 0.3);
 
-    let noise_seed = feat.variance * 31.7 + update.tick as f64 * 17.3 + person_idx as f64 * 97.1;
+    let noise_seed = person_idx as f64 * 97.1; // stable per-person, no tick
     let noise_val = (noise_seed.sin() * 43758.545).fract();
 
     let snr_factor = ((feat.variance - 0.5) / 10.0).clamp(0.0, 1.0);
@@ -2169,9 +2176,10 @@ fn derive_single_person_pose(
 
             let extremity_jitter = if EXTREMITY_KP.contains(&i) {
                 let phase = noise_seed + i as f64 * 2.399;
+                // Dampened from 12/8 to 4/3 to reduce visual jumping.
                 (
-                    phase.sin() * burst * motion_score * 12.0,
-                    (phase * 1.31).cos() * burst * motion_score * 8.0,
+                    phase.sin() * burst * motion_score * 4.0,
+                    (phase * 1.31).cos() * burst * motion_score * 3.0,
                 )
             } else {
                 (0.0, 0.0)

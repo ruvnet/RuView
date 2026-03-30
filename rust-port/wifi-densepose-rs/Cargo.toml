@@ -117,14 +117,14 @@ midstreamer-temporal-compare = "0.1.0"
 midstreamer-attractor = "0.1.0"
 
 # ruvector integration (published on crates.io)
-# Vendored at v2.1.0 in vendor/ruvector; using crates.io versions until published.
-ruvector-mincut = "2.0.4"
+# RuVector Phase 2: bumped to latest available crates.io versions.
+ruvector-mincut = "2.0.6"
 ruvector-attn-mincut = "2.0.4"
-ruvector-temporal-tensor = "2.0.4"
-ruvector-solver = "2.0.4"
-ruvector-attention = "2.0.4"
+ruvector-temporal-tensor = "2.0.6"
+ruvector-solver = "2.0.6"
+ruvector-attention = "2.1.0"
 ruvector-crv = "0.1.1"
-ruvector-gnn = { version = "2.0.5", default-features = false }
+ruvector-gnn = { version = "2.1.0", default-features = false }
 
 
 # Internal crates
