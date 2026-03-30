@@ -4,6 +4,9 @@
   <a href="https://x.com/rUv/status/2037556932802761004">
     <img src="assets/ruview-small-gemini.jpg" alt="RuView - WiFi DensePose" width="100%">
   </a>
+  <a href="https://gitcgr.com/ruvnet/RuView">
+    <img src="https://gitcgr.com/badge/ruvnet/RuView.svg" alt="gitcgr" />
+  </a>
 </p>
 
 > **Alpha Software** — This project is under active development. APIs, firmware behavior, and documentation may change. Known limitations:
