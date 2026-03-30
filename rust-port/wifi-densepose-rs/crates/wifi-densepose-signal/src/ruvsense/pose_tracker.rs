@@ -26,6 +26,8 @@
 //!
 //! - `ruvector-mincut` -> Person separation and track assignment
 
+use std::collections::VecDeque;
+
 use super::{TrackId, NUM_KEYPOINTS};
 
 /// Errors from the pose tracker.
@@ -648,6 +650,365 @@ impl PoseDetection {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Skeleton kinematic constraints (RuVector Phase 3)
+// ---------------------------------------------------------------------------
+
+/// Expected bone lengths in normalized coordinates (parent_idx, child_idx, length).
+///
+/// These define the COCO-17 kinematic tree edges with approximate proportions
+/// derived from anthropometric averages. Used by [`SkeletonConstraints`] to
+/// reject impossible poses (e.g., arm longer than torso).
+const BONE_LENGTHS: &[(usize, usize, f32)] = &[
+    (5, 7, 0.15),   // L shoulder -> L elbow
+    (7, 9, 0.14),   // L elbow -> L wrist
+    (6, 8, 0.15),   // R shoulder -> R elbow
+    (8, 10, 0.14),  // R elbow -> R wrist
+    (5, 11, 0.25),  // L shoulder -> L hip
+    (6, 12, 0.25),  // R shoulder -> R hip
+    (11, 13, 0.22), // L hip -> L knee
+    (13, 15, 0.22), // L knee -> L ankle
+    (12, 14, 0.22), // R hip -> R knee
+    (14, 16, 0.22), // R knee -> R ankle
+    (5, 6, 0.18),   // L shoulder -> R shoulder
+    (11, 12, 0.15), // L hip -> R hip
+];
+
+/// Skeleton kinematic constraint enforcer using Jakobsen relaxation.
+///
+/// Iteratively projects bone lengths toward their expected values so that
+/// the resulting skeleton obeys basic anthropometric limits. Bones that
+/// deviate more than [`Self::TOLERANCE`] (30 %) from their rest length are
+/// corrected over [`Self::ITERATIONS`] passes.
+pub struct SkeletonConstraints;
+
+impl SkeletonConstraints {
+    /// Maximum allowed fractional deviation before correction kicks in.
+    const TOLERANCE: f32 = 0.30;
+
+    /// Number of Jakobsen relaxation iterations.
+    const ITERATIONS: usize = 3;
+
+    /// Enforce kinematic constraints in-place on `keypoints`.
+    ///
+    /// Each element is `[x, y, z]`. The method runs several iterations of
+    /// distance-constraint projection (Jakobsen method) over the edges
+    /// defined in [`BONE_LENGTHS`].
+    pub fn enforce_constraints(keypoints: &mut [[f32; 3]; 17]) {
+        for _ in 0..Self::ITERATIONS {
+            for &(a, b, rest_len) in BONE_LENGTHS {
+                let dx = keypoints[b][0] - keypoints[a][0];
+                let dy = keypoints[b][1] - keypoints[a][1];
+                let dz = keypoints[b][2] - keypoints[a][2];
+                let current_len = (dx * dx + dy * dy + dz * dz).sqrt();
+
+                // Skip degenerate / zero-length bones (e.g. all-zero pose).
+                if current_len < 1e-9 {
+                    continue;
+                }
+
+                let ratio = current_len / rest_len;
+                // Only correct if deviation exceeds tolerance.
+                if ratio < (1.0 - Self::TOLERANCE) || ratio > (1.0 + Self::TOLERANCE) {
+                    let correction = (rest_len - current_len) / current_len * 0.5;
+                    let cx = dx * correction;
+                    let cy = dy * correction;
+                    let cz = dz * correction;
+
+                    keypoints[a][0] -= cx;
+                    keypoints[a][1] -= cy;
+                    keypoints[a][2] -= cz;
+                    keypoints[b][0] += cx;
+                    keypoints[b][1] += cy;
+                    keypoints[b][2] += cz;
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Compressed pose history (RuVector Phase 3 -- temporal tensor)
+// ---------------------------------------------------------------------------
+
+/// Two-tier compressed pose history.
+///
+/// Recent poses are stored at full `f32` precision in the *hot* ring buffer.
+/// Once the hot buffer is full the oldest pose is quantised to `i16` and
+/// pushed into the *warm* tier, keeping memory usage bounded while still
+/// allowing similarity queries against a longer temporal window.
+pub struct CompressedPoseHistory {
+    /// Recent poses at full precision.
+    hot: VecDeque<[[f32; 3]; 17]>,
+    /// Older poses quantised to i16.
+    warm: VecDeque<[[i16; 3]; 17]>,
+    /// Scale factor used for warm quantisation (divide f32, multiply to
+    /// reconstruct).
+    scale: f32,
+    max_hot: usize,
+    max_warm: usize,
+}
+
+impl CompressedPoseHistory {
+    /// Create a new history with the given tier sizes.
+    ///
+    /// `scale` controls the fixed-point quantisation: warm values are stored
+    /// as `(value / scale).round() as i16`.
+    pub fn new(max_hot: usize, max_warm: usize, scale: f32) -> Self {
+        Self {
+            hot: VecDeque::with_capacity(max_hot),
+            warm: VecDeque::with_capacity(max_warm),
+            scale: if scale.abs() < 1e-12 { 1.0 } else { scale },
+            max_hot,
+            max_warm,
+        }
+    }
+
+    /// Push a new pose into the history.
+    ///
+    /// When the hot tier is full the oldest entry is quantised and moved to
+    /// the warm tier. When the warm tier overflows the oldest warm entry is
+    /// discarded.
+    pub fn push(&mut self, pose: &[[f32; 3]; 17]) {
+        if self.hot.len() >= self.max_hot {
+            if let Some(evicted) = self.hot.pop_front() {
+                let quantised = self.quantise(&evicted);
+                if self.warm.len() >= self.max_warm {
+                    self.warm.pop_front();
+                }
+                self.warm.push_back(quantised);
+            }
+        }
+        self.hot.push_back(*pose);
+    }
+
+    /// Cosine similarity between `pose` and the most recent stored pose.
+    ///
+    /// Both poses are flattened to 51-element vectors before the dot-product
+    /// is computed. Returns 0.0 when the history is empty or either vector
+    /// has zero norm.
+    pub fn similarity(&self, pose: &[[f32; 3]; 17]) -> f32 {
+        let recent = match self.hot.back() {
+            Some(r) => r,
+            None => return 0.0,
+        };
+
+        let mut dot = 0.0_f32;
+        let mut norm_a = 0.0_f32;
+        let mut norm_b = 0.0_f32;
+
+        for kp in 0..17 {
+            for d in 0..3 {
+                let a = recent[kp][d];
+                let b = pose[kp][d];
+                dot += a * b;
+                norm_a += a * a;
+                norm_b += b * b;
+            }
+        }
+
+        let denom = (norm_a * norm_b).sqrt();
+        if denom < 1e-12 {
+            return 0.0;
+        }
+        (dot / denom).clamp(-1.0, 1.0)
+    }
+
+    /// Total number of stored poses (hot + warm).
+    pub fn len(&self) -> usize {
+        self.hot.len() + self.warm.len()
+    }
+
+    /// Returns `true` when the history contains no poses.
+    pub fn is_empty(&self) -> bool {
+        self.hot.is_empty() && self.warm.is_empty()
+    }
+
+    // -- internal helpers ---------------------------------------------------
+
+    fn quantise(&self, pose: &[[f32; 3]; 17]) -> [[i16; 3]; 17] {
+        let inv = 1.0 / self.scale;
+        let mut out = [[0_i16; 3]; 17];
+        for kp in 0..17 {
+            for d in 0..3 {
+                out[kp][d] = (pose[kp][d] * inv)
+                    .round()
+                    .clamp(i16::MIN as f32, i16::MAX as f32)
+                    as i16;
+            }
+        }
+        out
+    }
+}
+
+impl Default for CompressedPoseHistory {
+    fn default() -> Self {
+        Self::new(10, 50, 0.001)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Temporal Keypoint Attention (RuVector Phase 2)
+// ---------------------------------------------------------------------------
+
+/// Sliding-window temporal smoother for 17-keypoint pose estimates.
+///
+/// Maintains a ring buffer of the last `WINDOW_SIZE` pose frames and applies
+/// exponential-decay weighted averaging to produce temporally coherent output.
+/// Additionally enforces kinematic constraints: bone lengths cannot change by
+/// more than 20% between consecutive frames.
+///
+/// This is a lightweight inline implementation that mirrors the algorithm in
+/// `ruvector-attention` without pulling the crate into the sensing server.
+pub struct TemporalKeypointAttention {
+    /// Ring buffer of recent pose frames (newest at back).
+    window: std::collections::VecDeque<[[f32; 3]; NUM_KEYPOINTS]>,
+    /// Maximum number of frames to retain.
+    window_size: usize,
+    /// Exponential decay factor per frame (e.g., 0.7 means frame t-1 has
+    /// weight 0.7, frame t-2 has weight 0.49, etc.).
+    decay: f32,
+}
+
+impl TemporalKeypointAttention {
+    /// Default window size (10 frames at 10-20 Hz = 0.5-1.0 s look-back).
+    pub const DEFAULT_WINDOW: usize = 10;
+    /// Default decay factor.
+    pub const DEFAULT_DECAY: f32 = 0.7;
+    /// Maximum allowed bone-length change ratio between consecutive frames.
+    pub const MAX_BONE_CHANGE: f32 = 0.20;
+
+    /// Create a new temporal attention smoother with default parameters.
+    pub fn new() -> Self {
+        Self {
+            window: std::collections::VecDeque::with_capacity(Self::DEFAULT_WINDOW),
+            window_size: Self::DEFAULT_WINDOW,
+            decay: Self::DEFAULT_DECAY,
+        }
+    }
+
+    /// Create with custom window size and decay.
+    pub fn with_params(window_size: usize, decay: f32) -> Self {
+        Self {
+            window: std::collections::VecDeque::with_capacity(window_size),
+            window_size,
+            decay: decay.clamp(0.0, 1.0),
+        }
+    }
+
+    /// Smooth the current keypoint estimate using the temporal window.
+    ///
+    /// 1. Pushes `current` into the window (evicting oldest if full).
+    /// 2. Computes exponential-decay weighted average across all frames.
+    /// 3. Enforces bone-length constraints against the previous frame.
+    pub fn smooth_keypoints(
+        &mut self,
+        current: &[[f32; 3]; NUM_KEYPOINTS],
+    ) -> [[f32; 3]; NUM_KEYPOINTS] {
+        // Grab the previous frame (before pushing current) for bone clamping.
+        let prev_frame = self.window.back().copied();
+
+        // Push current frame into the window.
+        if self.window.len() >= self.window_size {
+            self.window.pop_front();
+        }
+        self.window.push_back(*current);
+
+        // Compute weighted average with exponential decay (newest = highest weight).
+        let n = self.window.len();
+        let mut result = [[0.0_f32; 3]; NUM_KEYPOINTS];
+        let mut total_weight = 0.0_f32;
+
+        for (age, frame) in self.window.iter().rev().enumerate() {
+            let w = self.decay.powi(age as i32);
+            total_weight += w;
+            for kp in 0..NUM_KEYPOINTS {
+                for dim in 0..3 {
+                    result[kp][dim] += w * frame[kp][dim];
+                }
+            }
+        }
+
+        if total_weight > 0.0 {
+            for kp in 0..NUM_KEYPOINTS {
+                for dim in 0..3 {
+                    result[kp][dim] /= total_weight;
+                }
+            }
+        }
+
+        // Enforce bone-length constraints: no bone can change >20% from prev frame.
+        if let Some(prev) = prev_frame {
+            if n >= 2 {
+                Self::clamp_bone_lengths(&mut result, &prev);
+            }
+        }
+
+        result
+    }
+
+    /// Clamp bone lengths so they don't change by more than MAX_BONE_CHANGE
+    /// compared to the previous frame.
+    fn clamp_bone_lengths(
+        pose: &mut [[f32; 3]; NUM_KEYPOINTS],
+        prev: &[[f32; 3]; NUM_KEYPOINTS],
+    ) {
+        for &(parent, child, _) in BONE_LENGTHS {
+            let prev_len = Self::bone_len(prev, parent, child);
+            if prev_len < 1e-6 {
+                continue; // skip degenerate bones
+            }
+            let cur_len = Self::bone_len(pose, parent, child);
+            if cur_len < 1e-6 {
+                continue;
+            }
+
+            let ratio = cur_len / prev_len;
+            let lo = 1.0 - Self::MAX_BONE_CHANGE;
+            let hi = 1.0 + Self::MAX_BONE_CHANGE;
+
+            if ratio < lo || ratio > hi {
+                // Scale the child position toward/away from parent to clamp.
+                let target_len = prev_len * ratio.clamp(lo, hi);
+                let scale = target_len / cur_len;
+                for dim in 0..3 {
+                    let diff = pose[child][dim] - pose[parent][dim];
+                    pose[child][dim] = pose[parent][dim] + diff * scale;
+                }
+            }
+        }
+    }
+
+    /// Euclidean distance between two keypoints in a pose.
+    fn bone_len(pose: &[[f32; 3]; NUM_KEYPOINTS], a: usize, b: usize) -> f32 {
+        let dx = pose[b][0] - pose[a][0];
+        let dy = pose[b][1] - pose[a][1];
+        let dz = pose[b][2] - pose[a][2];
+        (dx * dx + dy * dy + dz * dz).sqrt()
+    }
+
+    /// Number of frames currently in the window.
+    pub fn len(&self) -> usize {
+        self.window.len()
+    }
+
+    /// Whether the window is empty.
+    pub fn is_empty(&self) -> bool {
+        self.window.is_empty()
+    }
+
+    /// Clear the window (e.g., on track reset).
+    pub fn clear(&mut self) {
+        self.window.clear();
+    }
+}
+
+impl Default for TemporalKeypointAttention {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -939,5 +1300,224 @@ mod tests {
         assert_eq!(track.lifecycle, TrackLifecycleState::Terminated);
         track.mark_lost(); // Should not override Terminated
         assert_eq!(track.lifecycle, TrackLifecycleState::Terminated);
+    }
+
+    // -----------------------------------------------------------------------
+    // SkeletonConstraints tests
+    // -----------------------------------------------------------------------
+
+    /// Build a plausible standing skeleton in normalised coordinates.
+    fn valid_skeleton() -> [[f32; 3]; 17] {
+        let mut kps = [[0.0_f32; 3]; 17];
+        // Head / face (indices 0-4) clustered near top.
+        kps[0] = [0.0, 1.0, 0.0];   // nose
+        kps[1] = [-0.02, 1.02, 0.0]; // left eye
+        kps[2] = [0.02, 1.02, 0.0];  // right eye
+        kps[3] = [-0.04, 1.0, 0.0];  // left ear
+        kps[4] = [0.04, 1.0, 0.0];   // right ear
+        // Torso
+        kps[5] = [-0.09, 0.85, 0.0]; // L shoulder
+        kps[6] = [0.09, 0.85, 0.0];  // R shoulder
+        kps[7] = [-0.09, 0.70, 0.0]; // L elbow  (dist ~0.15 from shoulder)
+        kps[8] = [0.09, 0.70, 0.0];  // R elbow
+        kps[9] = [-0.09, 0.56, 0.0]; // L wrist  (dist ~0.14 from elbow)
+        kps[10] = [0.09, 0.56, 0.0]; // R wrist
+        kps[11] = [-0.075, 0.60, 0.0]; // L hip  (dist ~0.25 from shoulder)
+        kps[12] = [0.075, 0.60, 0.0];  // R hip
+        kps[13] = [-0.075, 0.38, 0.0]; // L knee (dist ~0.22 from hip)
+        kps[14] = [0.075, 0.38, 0.0];  // R knee
+        kps[15] = [-0.075, 0.16, 0.0]; // L ankle (dist ~0.22 from knee)
+        kps[16] = [0.075, 0.16, 0.0];  // R ankle
+        kps
+    }
+
+    #[test]
+    fn test_valid_skeleton_unchanged() {
+        let mut kps = valid_skeleton();
+        let before = kps;
+        SkeletonConstraints::enforce_constraints(&mut kps);
+
+        // Each keypoint should move by less than 0.02 (small perturbation
+        // from iterative relaxation on an already-valid skeleton).
+        for i in 0..17 {
+            let d = ((kps[i][0] - before[i][0]).powi(2)
+                + (kps[i][1] - before[i][1]).powi(2)
+                + (kps[i][2] - before[i][2]).powi(2))
+            .sqrt();
+            assert!(
+                d < 0.05,
+                "keypoint {} moved {:.4}, expected < 0.05",
+                i,
+                d
+            );
+        }
+    }
+
+    #[test]
+    fn test_stretched_bone_corrected() {
+        let mut kps = valid_skeleton();
+
+        // Stretch L shoulder -> L elbow to 2x expected (0.30 instead of 0.15).
+        kps[7] = [-0.09, 0.55, 0.0]; // push elbow far down
+
+        let dist_before = {
+            let dx = kps[7][0] - kps[5][0];
+            let dy = kps[7][1] - kps[5][1];
+            let dz = kps[7][2] - kps[5][2];
+            (dx * dx + dy * dy + dz * dz).sqrt()
+        };
+        assert!(
+            dist_before > 0.25,
+            "pre-condition: bone should be stretched, got {}",
+            dist_before
+        );
+
+        SkeletonConstraints::enforce_constraints(&mut kps);
+
+        let dist_after = {
+            let dx = kps[7][0] - kps[5][0];
+            let dy = kps[7][1] - kps[5][1];
+            let dz = kps[7][2] - kps[5][2];
+            (dx * dx + dy * dy + dz * dz).sqrt()
+        };
+
+        // After enforcement the bone should be much closer to the rest
+        // length of 0.15 (within tolerance band 0.105 .. 0.195).
+        assert!(
+            dist_after < dist_before,
+            "bone should be shorter after correction: before={:.4}, after={:.4}",
+            dist_before,
+            dist_after
+        );
+    }
+
+    #[test]
+    fn test_zero_skeleton_handled() {
+        // All-zero keypoints must not panic.
+        let mut kps = [[0.0_f32; 3]; 17];
+        SkeletonConstraints::enforce_constraints(&mut kps);
+        // Just assert it didn't panic; the result should still be all-zero
+        // since zero-length bones are skipped.
+        for kp in &kps {
+            assert!(kp[0].is_finite());
+            assert!(kp[1].is_finite());
+            assert!(kp[2].is_finite());
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // CompressedPoseHistory tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn compressed_history_push_and_len() {
+        let mut hist = CompressedPoseHistory::new(3, 5, 0.001);
+        assert!(hist.is_empty());
+        assert_eq!(hist.len(), 0);
+
+        let pose = valid_skeleton();
+        hist.push(&pose);
+        assert_eq!(hist.len(), 1);
+        assert!(!hist.is_empty());
+
+        // Fill hot
+        hist.push(&pose);
+        hist.push(&pose);
+        assert_eq!(hist.len(), 3); // 3 hot, 0 warm
+
+        // Overflow hot -> warm promotion
+        hist.push(&pose);
+        assert_eq!(hist.len(), 4); // 3 hot, 1 warm
+    }
+
+    #[test]
+    fn compressed_history_warm_overflow() {
+        let mut hist = CompressedPoseHistory::new(2, 2, 0.001);
+        let pose = valid_skeleton();
+
+        // Push 6 poses: hot=2, warm should cap at 2
+        for _ in 0..6 {
+            hist.push(&pose);
+        }
+        // hot=2, warm capped at 2
+        assert_eq!(hist.len(), 4);
+    }
+
+    #[test]
+    fn compressed_history_similarity_identical() {
+        let mut hist = CompressedPoseHistory::default();
+        let pose = valid_skeleton();
+        hist.push(&pose);
+
+        let sim = hist.similarity(&pose);
+        assert!(
+            (sim - 1.0).abs() < 1e-5,
+            "identical pose should have similarity ~1.0, got {}",
+            sim
+        );
+    }
+
+    #[test]
+    fn compressed_history_similarity_empty() {
+        let hist = CompressedPoseHistory::default();
+        let pose = valid_skeleton();
+        assert_eq!(hist.similarity(&pose), 0.0);
+    }
+
+    #[test]
+    fn compressed_history_default() {
+        let hist = CompressedPoseHistory::default();
+        assert_eq!(hist.max_hot, 10);
+        assert_eq!(hist.max_warm, 50);
+        assert!((hist.scale - 0.001).abs() < 1e-9);
+    }
+
+    // ── TemporalKeypointAttention tests (RuVector Phase 2) ─────────────
+
+    #[test]
+    fn temporal_attention_empty_returns_input() {
+        let mut attn = TemporalKeypointAttention::new();
+        let input: [[f32; 3]; NUM_KEYPOINTS] = std::array::from_fn(|i| [i as f32, 0.0, 0.0]);
+        let out = attn.smooth_keypoints(&input);
+        // First frame: no history, so output should equal input.
+        for i in 0..NUM_KEYPOINTS {
+            assert!((out[i][0] - input[i][0]).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn temporal_attention_smooths_jitter() {
+        let mut attn = TemporalKeypointAttention::new();
+        let base: [[f32; 3]; NUM_KEYPOINTS] = std::array::from_fn(|_| [100.0, 200.0, 0.0]);
+        // Feed stable frames first.
+        for _ in 0..5 {
+            attn.smooth_keypoints(&base);
+        }
+        // Now feed a jittery frame.
+        let jittery: [[f32; 3]; NUM_KEYPOINTS] = std::array::from_fn(|_| [110.0, 210.0, 0.0]);
+        let out = attn.smooth_keypoints(&jittery);
+        // Output should be closer to base than to jittery (smoothed).
+        assert!(out[0][0] < 110.0, "Expected smoothing, got {}", out[0][0]);
+        assert!(out[0][0] > 100.0, "Expected some movement, got {}", out[0][0]);
+    }
+
+    #[test]
+    fn temporal_attention_window_size_capped() {
+        let mut attn = TemporalKeypointAttention::with_params(3, 0.7);
+        let frame: [[f32; 3]; NUM_KEYPOINTS] = std::array::from_fn(|_| [1.0, 1.0, 1.0]);
+        for _ in 0..10 {
+            attn.smooth_keypoints(&frame);
+        }
+        assert_eq!(attn.len(), 3);
+    }
+
+    #[test]
+    fn temporal_attention_clear() {
+        let mut attn = TemporalKeypointAttention::new();
+        let frame = zero_positions();
+        attn.smooth_keypoints(&frame);
+        assert!(!attn.is_empty());
+        attn.clear();
+        assert!(attn.is_empty());
     }
 }

@@ -299,7 +299,25 @@ struct NodeState {
     latest_vitals: VitalSigns,
     last_frame_time: Option<std::time::Instant>,
     edge_vitals: Option<Esp32VitalsPacket>,
+    // ── RuVector Phase 2: Temporal smoothing & coherence gating ──
+    /// Previous frame's smoothed keypoint positions for EMA temporal smoothing.
+    prev_keypoints: Option<Vec<[f64; 3]>>,
+    /// Rolling buffer of motion_energy values for coherence scoring (last 20 frames).
+    motion_energy_history: VecDeque<f64>,
+    /// Coherence score [0.0, 1.0]: low variance in motion_energy = high coherence.
+    coherence_score: f64,
 }
+
+/// Default EMA alpha for temporal keypoint smoothing (RuVector Phase 2).
+const TEMPORAL_EMA_ALPHA_DEFAULT: f64 = 0.3;
+/// Reduced EMA alpha when coherence is low (trust measurements less).
+const TEMPORAL_EMA_ALPHA_LOW_COHERENCE: f64 = 0.1;
+/// Coherence threshold below which we reduce EMA alpha.
+const COHERENCE_LOW_THRESHOLD: f64 = 0.3;
+/// Maximum allowed bone-length change ratio between frames (20%).
+const MAX_BONE_CHANGE_RATIO: f64 = 0.20;
+/// Number of motion_energy frames to track for coherence scoring.
+const COHERENCE_WINDOW: usize = 20;
 
 impl NodeState {
     fn new() -> Self {
@@ -324,6 +342,43 @@ impl NodeState {
             latest_vitals: VitalSigns::default(),
             last_frame_time: None,
             edge_vitals: None,
+            prev_keypoints: None,
+            motion_energy_history: VecDeque::with_capacity(COHERENCE_WINDOW),
+            coherence_score: 1.0, // assume stable initially
+        }
+    }
+
+    /// Update the coherence score from the latest motion_energy value.
+    ///
+    /// Coherence is computed as 1.0 / (1.0 + running_variance) so that
+    /// low motion-energy variance maps to high coherence ([0, 1]).
+    fn update_coherence(&mut self, motion_energy: f64) {
+        if self.motion_energy_history.len() >= COHERENCE_WINDOW {
+            self.motion_energy_history.pop_front();
+        }
+        self.motion_energy_history.push_back(motion_energy);
+
+        let n = self.motion_energy_history.len();
+        if n < 2 {
+            self.coherence_score = 1.0;
+            return;
+        }
+
+        let mean: f64 = self.motion_energy_history.iter().sum::<f64>() / n as f64;
+        let variance: f64 = self.motion_energy_history.iter()
+            .map(|v| (v - mean) * (v - mean))
+            .sum::<f64>() / (n - 1) as f64;
+
+        // Map variance to [0, 1] coherence: higher variance = lower coherence.
+        self.coherence_score = (1.0 / (1.0 + variance)).clamp(0.0, 1.0);
+    }
+
+    /// Choose the EMA alpha based on current coherence score.
+    fn ema_alpha(&self) -> f64 {
+        if self.coherence_score < COHERENCE_LOW_THRESHOLD {
+            TEMPORAL_EMA_ALPHA_LOW_COHERENCE
+        } else {
+            TEMPORAL_EMA_ALPHA_DEFAULT
         }
     }
 }
@@ -2195,6 +2250,95 @@ fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
         .collect()
 }
 
+// ── RuVector Phase 2: Temporal EMA smoothing for keypoints ──────────────────
+
+/// Expected bone lengths in pixel-space for the COCO-17 skeleton as used by
+/// `derive_single_person_pose`. Pairs are (parent_idx, child_idx).
+const POSE_BONE_PAIRS: &[(usize, usize)] = &[
+    (5, 7), (7, 9), (6, 8), (8, 10),   // arms
+    (5, 11), (6, 12),                     // torso
+    (11, 13), (13, 15), (12, 14), (14, 16), // legs
+    (5, 6), (11, 12),                     // shoulders, hips
+];
+
+/// Apply temporal EMA smoothing and bone-length clamping to person detections.
+///
+/// For the *first* person (index 0) this uses the per-node `prev_keypoints`
+/// state. Multi-person smoothing is left for a future phase.
+fn apply_temporal_smoothing(persons: &mut [PersonDetection], ns: &mut NodeState) {
+    if persons.is_empty() {
+        return;
+    }
+
+    let alpha = ns.ema_alpha();
+    let person = &mut persons[0]; // smooth primary person only
+
+    let current_kps: Vec<[f64; 3]> = person.keypoints.iter()
+        .map(|kp| [kp.x, kp.y, kp.z])
+        .collect();
+
+    let smoothed = if let Some(ref prev) = ns.prev_keypoints {
+        let mut out = Vec::with_capacity(current_kps.len());
+        for (cur, prv) in current_kps.iter().zip(prev.iter()) {
+            out.push([
+                alpha * cur[0] + (1.0 - alpha) * prv[0],
+                alpha * cur[1] + (1.0 - alpha) * prv[1],
+                alpha * cur[2] + (1.0 - alpha) * prv[2],
+            ]);
+        }
+        // Clamp bone lengths to ±20% of previous frame.
+        clamp_bone_lengths_f64(&mut out, prev);
+        out
+    } else {
+        current_kps.clone()
+    };
+
+    // Write smoothed keypoints back into the person detection.
+    for (kp, s) in person.keypoints.iter_mut().zip(smoothed.iter()) {
+        kp.x = s[0];
+        kp.y = s[1];
+        kp.z = s[2];
+    }
+
+    ns.prev_keypoints = Some(smoothed);
+}
+
+/// Clamp bone lengths so no bone changes by more than MAX_BONE_CHANGE_RATIO
+/// compared to the previous frame.
+fn clamp_bone_lengths_f64(pose: &mut Vec<[f64; 3]>, prev: &[[f64; 3]]) {
+    for &(p, c) in POSE_BONE_PAIRS {
+        if p >= pose.len() || c >= pose.len() {
+            continue;
+        }
+        let prev_len = dist_f64(&prev[p], &prev[c]);
+        if prev_len < 1e-6 {
+            continue;
+        }
+        let cur_len = dist_f64(&pose[p], &pose[c]);
+        if cur_len < 1e-6 {
+            continue;
+        }
+        let ratio = cur_len / prev_len;
+        let lo = 1.0 - MAX_BONE_CHANGE_RATIO;
+        let hi = 1.0 + MAX_BONE_CHANGE_RATIO;
+        if ratio < lo || ratio > hi {
+            let target = prev_len * ratio.clamp(lo, hi);
+            let scale = target / cur_len;
+            for dim in 0..3 {
+                let diff = pose[c][dim] - pose[p][dim];
+                pose[c][dim] = pose[p][dim] + diff * scale;
+            }
+        }
+    }
+}
+
+fn dist_f64(a: &[f64; 3], b: &[f64; 3]) -> f64 {
+    let dx = b[0] - a[0];
+    let dy = b[1] - a[1];
+    let dz = b[2] - a[2];
+    (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
 // ── DensePose-compatible REST endpoints ─────────────────────────────────────
 
 async fn health_live(State(state): State<SharedState>) -> Json<serde_json::Value> {
@@ -3131,7 +3275,13 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         estimated_persons: if total_persons > 0 { Some(total_persons) } else { None },
                     };
 
-                    let persons = derive_pose_from_sensing(&update);
+                    let mut persons = derive_pose_from_sensing(&update);
+                    // RuVector Phase 2: temporal smoothing + coherence gating
+                    {
+                        let ns = s.node_states.entry(node_id).or_insert_with(NodeState::new);
+                        ns.update_coherence(vitals.motion_energy as f64);
+                        apply_temporal_smoothing(&mut persons, ns);
+                    }
                     if !persons.is_empty() {
                         update.persons = Some(persons);
                     }
@@ -3308,7 +3458,13 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         estimated_persons: if total_persons > 0 { Some(total_persons) } else { None },
                     };
 
-                    let persons = derive_pose_from_sensing(&update);
+                    let mut persons = derive_pose_from_sensing(&update);
+                    // RuVector Phase 2: temporal smoothing + coherence gating
+                    {
+                        let ns = s.node_states.entry(node_id).or_insert_with(NodeState::new);
+                        ns.update_coherence(features.motion_band_power);
+                        apply_temporal_smoothing(&mut persons, ns);
+                    }
                     if !persons.is_empty() {
                         update.persons = Some(persons);
                     }
