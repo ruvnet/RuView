@@ -3210,11 +3210,14 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         else { 0.05 };
 
                     // Aggregate person count across all active nodes.
+                    // Use max (not sum) because nodes in the same room see the
+                    // same people — summing would double-count.
                     let now = std::time::Instant::now();
                     let total_persons: usize = s.node_states.values()
                         .filter(|n| n.last_frame_time.map_or(false, |t| now.duration_since(t).as_secs() < 10))
                         .map(|n| n.prev_person_count)
-                        .sum();
+                        .max()
+                        .unwrap_or(0);
 
                     // Build nodes array with all active nodes.
                     let active_nodes: Vec<NodeInfo> = s.node_states.iter()
@@ -3413,11 +3416,14 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         else { 0.05 };
 
                     // Aggregate person count across all active nodes.
+                    // Use max (not sum) because nodes in the same room see the
+                    // same people — summing would double-count.
                     let now = std::time::Instant::now();
                     let total_persons: usize = s.node_states.values()
                         .filter(|n| n.last_frame_time.map_or(false, |t| now.duration_since(t).as_secs() < 10))
                         .map(|n| n.prev_person_count)
-                        .sum();
+                        .max()
+                        .unwrap_or(0);
 
                     // Build nodes array with all active nodes.
                     let active_nodes: Vec<NodeInfo> = s.node_states.iter()
