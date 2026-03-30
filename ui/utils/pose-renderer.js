@@ -56,8 +56,45 @@ export class PoseRenderer {
       [11, 13], [12, 14], [13, 15], [14, 16] // Legs
     ];
     
+    // Client-side keypoint smoothing: lerp between frames to reduce jitter.
+    // Maps person index → array of {x, y} for each keypoint.
+    this._smoothedKeypoints = new Map();
+    this._lerpAlpha = 0.25; // 0 = frozen, 1 = instant (no smoothing)
+
     // Initialize rendering context
     this.initializeContext();
+  }
+
+  // Lerp a single value toward target
+  _lerp(current, target, alpha) {
+    return current + (target - current) * alpha;
+  }
+
+  // Get smoothed keypoint positions for a person
+  _getSmoothedKeypoints(personIdx, keypoints) {
+    if (!this.config.enableSmoothing || !keypoints || keypoints.length === 0) {
+      return keypoints;
+    }
+
+    let prev = this._smoothedKeypoints.get(personIdx);
+    if (!prev || prev.length !== keypoints.length) {
+      // First frame or keypoint count changed — initialize
+      prev = keypoints.map(kp => ({ x: kp.x, y: kp.y, z: kp.z || 0, confidence: kp.confidence, name: kp.name }));
+      this._smoothedKeypoints.set(personIdx, prev);
+      return keypoints;
+    }
+
+    const alpha = this._lerpAlpha;
+    const smoothed = keypoints.map((kp, i) => ({
+      ...kp,
+      x: this._lerp(prev[i].x, kp.x, alpha),
+      y: this._lerp(prev[i].y, kp.y, alpha),
+    }));
+
+    // Update stored positions
+    this._smoothedKeypoints.set(personIdx, smoothed.map(kp => ({ x: kp.x, y: kp.y, z: kp.z || 0, confidence: kp.confidence, name: kp.name })));
+
+    return smoothed;
   }
 
   createLogger() {
@@ -150,18 +187,17 @@ export class PoseRenderer {
         return; // Skip low confidence detections
       }
 
-      console.log(`✅ [RENDERER] Rendering person ${index} with confidence: ${person.confidence}`);
+      // Apply client-side lerp smoothing to reduce visual jitter
+      const smoothedKps = this._getSmoothedKeypoints(index, person.keypoints);
 
       // Render skeleton connections
-      if (this.config.showSkeleton && person.keypoints) {
-        console.log(`🦴 [RENDERER] Rendering skeleton for person ${index}`);
-        this.renderSkeleton(person.keypoints, person.confidence);
+      if (this.config.showSkeleton && smoothedKps) {
+        this.renderSkeleton(smoothedKps, person.confidence);
       }
 
       // Render keypoints
-      if (this.config.showKeypoints && person.keypoints) {
-        console.log(`🔴 [RENDERER] Rendering keypoints for person ${index}`);
-        this.renderKeypoints(person.keypoints, person.confidence);
+      if (this.config.showKeypoints && smoothedKps) {
+        this.renderKeypoints(smoothedKps, person.confidence);
       }
 
       // Render bounding box
@@ -265,7 +301,7 @@ export class PoseRenderer {
     persons.forEach((person, personIdx) => {
       if (person.confidence < this.config.confidenceThreshold || !person.keypoints) return;
 
-      const kps = person.keypoints;
+      const kps = this._getSmoothedKeypoints(personIdx, person.keypoints);
 
       bodyParts.forEach((part) => {
         // Collect valid keypoints for this body part
