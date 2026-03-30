@@ -42,8 +42,10 @@ pub enum PhaseSanitizationError {
 
 /// Phase unwrapping method
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum UnwrappingMethod {
     /// Standard numpy-style unwrapping
+    #[default]
     Standard,
 
     /// Row-by-row custom unwrapping
@@ -56,11 +58,6 @@ pub enum UnwrappingMethod {
     QualityGuided,
 }
 
-impl Default for UnwrappingMethod {
-    fn default() -> Self {
-        Self::Standard
-    }
-}
 
 /// Configuration for phase sanitizer
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -578,7 +575,7 @@ impl PhaseSanitizer {
 
         // Ensure odd window size
         let mut window_size = self.config.smoothing_window;
-        if window_size % 2 == 0 {
+        if window_size.is_multiple_of(2) {
             window_size += 1;
         }
 
@@ -635,33 +632,28 @@ impl PhaseSanitizer {
         self.statistics.total_processed += 1;
 
         // Validate input
-        self.validate_phase_data(phase_data).map_err(|e| {
+        self.validate_phase_data(phase_data).inspect_err(|e| {
             self.statistics.sanitization_errors += 1;
-            e
         })?;
 
         // Unwrap phase
-        let unwrapped = self.unwrap_phase(phase_data).map_err(|e| {
+        let unwrapped = self.unwrap_phase(phase_data).inspect_err(|e| {
             self.statistics.sanitization_errors += 1;
-            e
         })?;
 
         // Remove outliers
-        let cleaned = self.remove_outliers(&unwrapped).map_err(|e| {
+        let cleaned = self.remove_outliers(&unwrapped).inspect_err(|e| {
             self.statistics.sanitization_errors += 1;
-            e
         })?;
 
         // Smooth phase
-        let smoothed = self.smooth_phase(&cleaned).map_err(|e| {
+        let smoothed = self.smooth_phase(&cleaned).inspect_err(|e| {
             self.statistics.sanitization_errors += 1;
-            e
         })?;
 
         // Filter noise
-        let filtered = self.filter_noise(&smoothed).map_err(|e| {
+        let filtered = self.filter_noise(&smoothed).inspect_err(|e| {
             self.statistics.sanitization_errors += 1;
-            e
         })?;
 
         Ok(filtered)

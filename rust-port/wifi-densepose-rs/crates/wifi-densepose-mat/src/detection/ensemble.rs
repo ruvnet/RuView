@@ -163,7 +163,7 @@ impl EnsembleClassifier {
             }
 
             let rate = breathing.rate_bpm;
-            if rate < 10.0 || rate > 30.0 {
+            if !(10.0..=30.0).contains(&rate) {
                 return TriageStatus::Immediate;
             }
         }
@@ -188,7 +188,7 @@ impl EnsembleClassifier {
         if let Some(ref breathing) = reading.breathing {
             let rate = breathing.rate_bpm;
 
-            if rate < 12.0 || rate > 24.0 {
+            if !(12.0..=24.0).contains(&rate) {
                 if has_movement {
                     return TriageStatus::Delayed;
                 }

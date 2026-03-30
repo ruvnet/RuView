@@ -42,6 +42,7 @@ impl std::fmt::Display for DisasterEventId {
 /// Types of disaster events
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Default)]
 pub enum DisasterType {
     /// Building collapse (explosion, structural failure)
     BuildingCollapse,
@@ -60,6 +61,7 @@ pub enum DisasterType {
     /// Tunnel collapse
     TunnelCollapse,
     /// Unknown or other
+    #[default]
     Unknown,
 }
 
@@ -131,11 +133,6 @@ impl DisasterType {
     }
 }
 
-impl Default for DisasterType {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
 
 /// Current status of the disaster event
 #[derive(Debug, Clone, PartialEq, Eq)]

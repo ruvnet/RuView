@@ -180,7 +180,7 @@ impl DetectionPipeline {
 
     /// Check if ML pipeline is ready
     pub fn ml_ready(&self) -> bool {
-        self.ml_pipeline.as_ref().map_or(true, |ml| ml.is_ready())
+        self.ml_pipeline.as_ref().is_none_or(|ml| ml.is_ready())
     }
 
     /// Process a scan zone and return detected vital signs.

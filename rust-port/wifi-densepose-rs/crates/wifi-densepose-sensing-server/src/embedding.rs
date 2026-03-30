@@ -713,7 +713,7 @@ impl EmbeddingExtractor {
 
     /// Whether an environment drift has been detected.
     pub fn drift_detected(&self) -> bool {
-        self.drift_detector.as_ref().map_or(false, |d| d.drift_detected())
+        self.drift_detector.as_ref().is_some_and(|d| d.drift_detected())
     }
 
     /// Get drift information if a detector is present.

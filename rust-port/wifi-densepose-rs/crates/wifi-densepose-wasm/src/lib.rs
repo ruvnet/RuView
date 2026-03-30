@@ -93,7 +93,7 @@ pub fn init_logging(level: &str) {
         _ => log::Level::Info,
     };
 
-    let _ = wasm_logger::init(wasm_logger::Config::new(log_level));
+    wasm_logger::init(wasm_logger::Config::new(log_level));
     log::info!("WiFi-DensePose WASM initialized with log level: {}", level);
 }
 

@@ -49,6 +49,7 @@ use wasm_bindgen::JsCast;
 /// JavaScript-friendly disaster type enumeration
 #[wasm_bindgen]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum JsDisasterType {
     BuildingCollapse = 0,
     Earthquake = 1,
@@ -58,14 +59,10 @@ pub enum JsDisasterType {
     MineCollapse = 5,
     Industrial = 6,
     TunnelCollapse = 7,
+    #[default]
     Unknown = 8,
 }
 
-impl Default for JsDisasterType {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
 
 /// JavaScript-friendly triage status
 #[wasm_bindgen]

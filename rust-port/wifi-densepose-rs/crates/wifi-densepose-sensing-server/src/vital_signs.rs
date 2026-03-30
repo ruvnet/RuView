@@ -383,7 +383,7 @@ pub fn bandpass_filter(data: &[f64], low_hz: f64, high_hz: f64, sample_rate: f64
     // FIR filter order: ~3 cycles of the lowest frequency, clamped to [5, 127]
     let filter_order = ((3.0 / low_norm).ceil() as usize).clamp(5, 127);
     // Ensure odd for type-I FIR symmetry
-    let filter_order = if filter_order % 2 == 0 {
+    let filter_order = if filter_order.is_multiple_of(2) {
         filter_order + 1
     } else {
         filter_order

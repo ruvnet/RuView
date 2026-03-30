@@ -338,7 +338,7 @@ pub async fn list_serial_ports() -> Result<Vec<SerialPortInfo>, String> {
 fn list_serial_ports_fallback() -> Result<Vec<SerialPortInfo>, String> {
     tracing::info!("Using fallback serial port listing");
 
-    let mut result = Vec::new();
+    let result = Vec::new();
 
     // List /dev/cu.usb* devices on macOS
     #[cfg(target_os = "macos")]

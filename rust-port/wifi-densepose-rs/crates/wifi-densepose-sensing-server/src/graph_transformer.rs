@@ -231,7 +231,7 @@ pub struct CrossAttention {
 
 impl CrossAttention {
     pub fn new(d_model: usize, n_heads: usize) -> Self {
-        assert!(d_model % n_heads == 0,
+        assert!(d_model.is_multiple_of(n_heads),
             "d_model ({d_model}) must be divisible by n_heads ({n_heads})");
         let d_k = d_model / n_heads;
         let s = 123u64;

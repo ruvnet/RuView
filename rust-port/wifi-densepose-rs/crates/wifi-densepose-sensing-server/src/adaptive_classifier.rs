@@ -12,7 +12,6 @@
 //! the classification thresholds adapt to the specific room and ESP32 placement.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 // ── Feature vector ───────────────────────────────────────────────────────────
@@ -192,7 +191,7 @@ impl AdaptiveModel {
     /// Save model to a JSON file.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         let json = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(|e| std::io::Error::other(e))?;
         std::fs::write(path, json)
     }
 
@@ -200,7 +199,7 @@ impl AdaptiveModel {
     pub fn load(path: &Path) -> std::io::Result<Self> {
         let json = std::fs::read_to_string(path)?;
         serde_json::from_str(&json)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            .map_err(|e| std::io::Error::other(e))
     }
 }
 
@@ -291,7 +290,7 @@ pub fn train_from_recordings(recordings_dir: &Path) -> Result<AdaptiveModel, Str
     // ── Compute per-class statistics ──
     let mut class_sums = vec![[0.0f64; N_FEATURES]; N_CLASSES];
     let mut class_sq = vec![[0.0f64; N_FEATURES]; N_CLASSES];
-    let mut class_counts = vec![0usize; N_CLASSES];
+    let mut class_counts = [0usize; N_CLASSES];
     for s in &samples {
         let c = s.class_idx;
         class_counts[c] += 1;
@@ -422,8 +421,8 @@ pub fn train_from_recordings(recordings_dir: &Path) -> Result<AdaptiveModel, Str
     eprintln!("Training accuracy: {correct}/{n} = {accuracy:.1}%");
 
     // ── Per-class accuracy ──
-    let mut class_correct = vec![0usize; N_CLASSES];
-    let mut class_total = vec![0usize; N_CLASSES];
+    let mut class_correct = [0usize; N_CLASSES];
+    let mut class_total = [0usize; N_CLASSES];
     for (x, target) in &norm_samples {
         class_total[*target] += 1;
         let mut logits = [0.0f64; N_CLASSES];

@@ -12,6 +12,7 @@ pub struct DiscoveryState {
 }
 
 /// Sub-state for the managed sensing server process.
+#[derive(Default)]
 pub struct ServerState {
     pub running: bool,
     pub pid: Option<u32>,
@@ -22,19 +23,6 @@ pub struct ServerState {
     pub start_time: Option<Instant>,
 }
 
-impl Default for ServerState {
-    fn default() -> Self {
-        Self {
-            running: false,
-            pid: None,
-            http_port: None,
-            ws_port: None,
-            udp_port: None,
-            child: None,
-            start_time: None,
-        }
-    }
-}
 
 /// Sub-state for flash progress tracking.
 #[derive(Default)]
@@ -73,19 +61,12 @@ impl Default for OtaUpdateTracker {
 }
 
 /// Sub-state for application settings cache.
+#[derive(Default)]
 pub struct SettingsState {
     pub loaded: bool,
     pub dirty: bool,
 }
 
-impl Default for SettingsState {
-    fn default() -> Self {
-        Self {
-            loaded: false,
-            dirty: false,
-        }
-    }
-}
 
 /// Top-level application state managed by Tauri.
 pub struct AppState {

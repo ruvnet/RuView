@@ -164,7 +164,7 @@ impl<'a> DataLoader<'a> {
         if n == 0 {
             return 0;
         }
-        (n + self.batch_size - 1) / self.batch_size
+        n.div_ceil(self.batch_size)
     }
 
     /// Return an iterator that yields `Vec<CsiSample>` batches.

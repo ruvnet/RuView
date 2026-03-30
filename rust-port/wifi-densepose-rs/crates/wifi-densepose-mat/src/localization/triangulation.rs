@@ -194,7 +194,7 @@ impl Triangulator {
         }
 
         // Calculate A^T * b
-        let mut atb = vec![0.0; 2];
+        let mut atb = [0.0; 2];
         for i in 0..2 {
             for k in 0..n {
                 atb[i] += a[k][i] * b[k];

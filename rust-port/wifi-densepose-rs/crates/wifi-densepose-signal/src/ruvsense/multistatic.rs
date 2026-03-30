@@ -379,8 +379,8 @@ pub fn geometric_diversity(positions: &[[f32; 3]]) -> f32 {
     // Perfect coverage (N equidistant nodes): max_gap = 2*pi/N
     // Worst case (all co-located): max_gap = 2*pi
     let ideal_gap = 2.0 * std::f32::consts::PI / positions.len() as f32;
-    let diversity = (ideal_gap / max_gap.max(1e-6)).clamp(0.0, 1.0);
-    diversity
+    
+    (ideal_gap / max_gap.max(1e-6)).clamp(0.0, 1.0)
 }
 
 /// Represents a cluster of TX-RX links attributed to one person.

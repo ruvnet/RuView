@@ -335,14 +335,13 @@ impl HeartbeatDetector {
         }
 
         // Check if it's a real peak (local maximum)
-        if max_bin_idx > 0 && max_bin_idx < spectrum.len() - 1 {
-            if spectrum[max_bin_idx] <= spectrum[max_bin_idx - 1]
-                || spectrum[max_bin_idx] <= spectrum[max_bin_idx + 1]
+        if max_bin_idx > 0 && max_bin_idx < spectrum.len() - 1
+            && (spectrum[max_bin_idx] <= spectrum[max_bin_idx - 1]
+                || spectrum[max_bin_idx] <= spectrum[max_bin_idx + 1])
             {
                 // Not a real peak
                 return None;
             }
-        }
 
         let freq = max_bin_idx as f64 * freq_resolution;
         let strength = max_power.sqrt(); // Convert power to amplitude

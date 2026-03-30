@@ -206,7 +206,8 @@ impl Backend for MockBackend {
         self.output_shapes.get(name).cloned()
     }
 
-    fn run(&self, inputs: HashMap<String, Tensor>) -> NnResult<HashMap<String, Tensor>> {
+    // ANTES
+    fn run(&self, _inputs: HashMap<String, Tensor>) -> NnResult<HashMap<String, Tensor>> {
         let mut outputs = HashMap::new();
 
         for (name, shape) in &self.output_shapes {
@@ -319,7 +320,10 @@ impl<B: Backend> InferenceEngine<B> {
 
     /// Run inference with named inputs
     #[instrument(skip(self, inputs))]
-    pub fn infer_named(&self, inputs: HashMap<String, Tensor>) -> NnResult<HashMap<String, Tensor>> {
+    pub fn infer_named(
+        &self,
+        inputs: HashMap<String, Tensor>,
+    ) -> NnResult<HashMap<String, Tensor>> {
         let start = std::time::Instant::now();
 
         let result = self.backend.run(inputs)?;
@@ -363,6 +367,7 @@ pub struct WiFiDensePosePipeline<B: Backend> {
     /// DensePose configuration
     densepose_config: DensePoseConfig,
     /// Inference options
+    #[allow(dead_code)]
     options: InferenceOptions,
 }
 

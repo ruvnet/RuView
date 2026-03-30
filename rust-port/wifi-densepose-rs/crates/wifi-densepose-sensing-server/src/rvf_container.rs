@@ -363,7 +363,7 @@ impl RvfBuilder {
             let written = SEGMENT_HEADER_SIZE + payload.len();
             let target = align_up(written);
             let pad = target - written;
-            buf.extend(std::iter::repeat(0u8).take(pad));
+            buf.extend(std::iter::repeat_n(0u8, pad));
         }
         buf
     }

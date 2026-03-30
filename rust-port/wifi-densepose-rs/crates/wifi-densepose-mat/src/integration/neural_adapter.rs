@@ -106,7 +106,7 @@ impl NeuralAdapter {
         let rate_bpm = (peak_freq * 60.0) as f32;
 
         // Validate rate
-        if rate_bpm < 4.0 || rate_bpm > 60.0 {
+        if !(4.0..=60.0).contains(&rate_bpm) {
             return None;
         }
 
@@ -148,7 +148,7 @@ impl NeuralAdapter {
         let rate_bpm = (peak_freq * 60.0) as f32;
 
         // Validate rate (30-200 BPM)
-        if rate_bpm < 30.0 || rate_bpm > 200.0 {
+        if !(30.0..=200.0).contains(&rate_bpm) {
             return None;
         }
 

@@ -187,7 +187,7 @@ impl HeartbeatClassification {
         Some(HeartbeatSignature {
             rate_bpm: self.rate_bpm,
             variability: self.hrv,
-            strength: self.signal_strength.clone(),
+            strength: self.signal_strength,
         })
     }
 
@@ -737,7 +737,7 @@ impl VitalSignsClassifier {
         // Estimate breathing rate from dominant frequency in breathing band
         let breathing_rate = self.estimate_breathing_rate(features);
 
-        if breathing_rate < 4.0 || breathing_rate > 60.0 {
+        if !(4.0..=60.0).contains(&breathing_rate) {
             return None;
         }
 
@@ -780,7 +780,7 @@ impl VitalSignsClassifier {
         };
 
         // If dominant frequency is in breathing range, use it
-        if dominant_freq >= 0.1 && dominant_freq <= 0.5 {
+        if (0.1..=0.5).contains(&dominant_freq) {
             dominant_freq * 60.0
         } else {
             // Estimate from band power ratio
@@ -836,7 +836,7 @@ impl VitalSignsClassifier {
         } else if rate_bpm > 30.0 {
             probs[2] = 0.8; // Labored
             probs[0] = 0.2;
-        } else if rate_bpm >= 12.0 && rate_bpm <= 20.0 {
+        } else if (12.0..=20.0).contains(&rate_bpm) {
             probs[0] = 0.8; // Normal
             probs[3] = 0.2;
         } else {
@@ -857,7 +857,7 @@ impl VitalSignsClassifier {
         // Estimate heart rate
         let heart_rate = self.estimate_heart_rate(features);
 
-        if heart_rate < 30.0 || heart_rate > 200.0 {
+        if !(30.0..=200.0).contains(&heart_rate) {
             return None;
         }
 

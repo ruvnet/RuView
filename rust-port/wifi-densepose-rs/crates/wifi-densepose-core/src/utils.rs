@@ -99,9 +99,8 @@ pub fn moving_average(data: &Array1<f64>, window_size: usize) -> Array1<f64> {
     let half_window = window_size / 2;
 
     // ndarray Array1 is always contiguous, but handle gracefully if not
-    let slice = match data.as_slice() {
-        Some(s) => s,
-        None => return data.clone(),
+    let Some(slice) = data.as_slice() else {
+        return data.clone();
     };
 
     for i in 0..data.len() {

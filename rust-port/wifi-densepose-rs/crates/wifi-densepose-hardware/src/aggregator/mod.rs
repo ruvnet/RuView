@@ -58,11 +58,7 @@ impl NodeState {
     fn update(&mut self, sequence: u32) -> u32 {
         self.frames_received += 1;
         let expected = self.last_sequence.wrapping_add(1);
-        let gap = if sequence > expected {
-            sequence - expected
-        } else {
-            0
-        };
+        let gap = sequence.saturating_sub(expected);
         self.frames_dropped += gap as u64;
         self.last_sequence = sequence;
         gap

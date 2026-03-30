@@ -563,9 +563,9 @@ impl MlDetectionPipeline {
     /// Check if the pipeline is ready for inference
     pub fn is_ready(&self) -> bool {
         let debris_ready = !self.config.enable_debris_classification
-            || self.debris_model.as_ref().map_or(false, |m| m.is_loaded());
+            || self.debris_model.as_ref().is_some_and(|m| m.is_loaded());
         let vital_ready = !self.config.enable_vital_classification
-            || self.vital_classifier.as_ref().map_or(false, |c| c.is_loaded());
+            || self.vital_classifier.as_ref().is_some_and(|c| c.is_loaded());
 
         debris_ready && vital_ready
     }

@@ -181,13 +181,13 @@ impl CsiFingerprint {
             1.0
         };
 
-        let distance = (W_BREATHING_RATE * d_breathing_rate
+        
+
+        (W_BREATHING_RATE * d_breathing_rate
             + W_BREATHING_AMP * d_breathing_amp
             + heartbeat_term
             + W_LOCATION * d_location)
-            * scale;
-
-        distance
+            * scale
     }
 
     /// Returns `true` if `self.distance(other) < threshold`.

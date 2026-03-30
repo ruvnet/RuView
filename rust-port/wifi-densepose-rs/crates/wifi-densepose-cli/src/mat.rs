@@ -591,13 +591,10 @@ async fn simulate_scan_output() -> Result<()> {
         "3".green().bold()
     );
     println!(
-        "  {} {}  {} {}  {} {}",
+        "  {} 1  {} 1  {} 1",
         "IMMEDIATE:".red().bold(),
-        "1",
         "DELAYED:".yellow().bold(),
-        "1",
-        "MINOR:".green().bold(),
-        "1"
+        "MINOR:".green().bold()
     );
 
     Ok(())

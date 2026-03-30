@@ -99,7 +99,7 @@ impl SignalAdapter {
         let rate_bpm = (rate_estimate * 60.0) as f32;
 
         // Validate rate
-        if rate_bpm < 4.0 || rate_bpm > 60.0 {
+        if !(4.0..=60.0).contains(&rate_bpm) {
             return None;
         }
 

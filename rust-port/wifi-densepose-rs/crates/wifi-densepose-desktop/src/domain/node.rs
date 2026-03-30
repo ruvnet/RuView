@@ -19,17 +19,14 @@ impl std::fmt::Display for MacAddress {
 /// Node health status.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum HealthStatus {
     Online,
+    #[default]
     Offline,
     Degraded,
 }
 
-impl Default for HealthStatus {
-    fn default() -> Self {
-        Self::Offline
-    }
-}
 
 /// Chip type for ESP32 variants.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]

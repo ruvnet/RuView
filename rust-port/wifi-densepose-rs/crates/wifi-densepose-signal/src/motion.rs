@@ -322,7 +322,7 @@ impl MotionDetector {
             .unwrap_or(0.0);
 
         // Motion direction from phase gradient
-        let motion_direction = if features.phase.gradient.len() > 0 {
+        let motion_direction = if !features.phase.gradient.is_empty() {
             let mean_grad: f64 =
                 features.phase.gradient.iter().sum::<f64>() / features.phase.gradient.len() as f64;
             Some(mean_grad.atan())

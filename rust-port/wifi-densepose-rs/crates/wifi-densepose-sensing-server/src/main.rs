@@ -1682,7 +1682,7 @@ async fn handle_ws_client(mut socket: WebSocket, state: SharedState) {
             msg = rx.recv() => {
                 match msg {
                     Ok(json) => {
-                        if socket.send(Message::Text(json.into())).await.is_err() {
+                        if socket.send(Message::Text(json)).await.is_err() {
                             break;
                         }
                     }
@@ -1723,7 +1723,7 @@ async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
         "type": "connection_established",
         "payload": { "status": "connected", "backend": "rust+ruvector" }
     });
-    let _ = socket.send(Message::Text(conn_msg.to_string().into())).await;
+    let _ = socket.send(Message::Text(conn_msg.to_string())).await;
 
     loop {
         tokio::select! {
@@ -1798,7 +1798,7 @@ async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
                                         }
                                     }
                                 });
-                                if socket.send(Message::Text(pose_msg.to_string().into())).await.is_err() {
+                                if socket.send(Message::Text(pose_msg.to_string())).await.is_err() {
                                     break;
                                 }
                             }
@@ -1814,7 +1814,7 @@ async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
                         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
                             if v.get("type").and_then(|t| t.as_str()) == Some("ping") {
                                 let pong = serde_json::json!({"type": "pong"});
-                                let _ = socket.send(Message::Text(pong.to_string().into())).await;
+                                let _ = socket.send(Message::Text(pong.to_string())).await;
                             }
                         }
                     }
@@ -2508,7 +2508,7 @@ async fn start_recording(
                             }
                             frame_count += 1;
                             // Flush every 100 frames
-                            if frame_count % 100 == 0 {
+                            if frame_count.is_multiple_of(100) {
                                 let _ = writer.flush();
                             }
                         }
@@ -2908,8 +2908,7 @@ async fn sona_activate(
 }
 
 async fn info_page() -> Html<String> {
-    Html(format!(
-        "<html><body>\
+    Html("<html><body>\
          <h1>WiFi-DensePose Sensing Server</h1>\
          <p>Rust + Axum + RuVector</p>\
          <ul>\
@@ -2919,8 +2918,7 @@ async fn info_page() -> Html<String> {
          <li><a href='/api/v1/model/info'>/api/v1/model/info</a> — RVF model container info</li>\
          <li>ws://localhost:8765/ws/sensing — WebSocket stream</li>\
          </ul>\
-         </body></html>"
-    ))
+         </body></html>".to_string())
 }
 
 // ── UDP receiver task ────────────────────────────────────────────────────────
@@ -3001,13 +2999,13 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     // Aggregate person count across all active nodes.
                     let now = std::time::Instant::now();
                     let total_persons: usize = s.node_states.values()
-                        .filter(|n| n.last_frame_time.map_or(false, |t| now.duration_since(t).as_secs() < 10))
+                        .filter(|n| n.last_frame_time.is_some_and(|t| now.duration_since(t).as_secs() < 10))
                         .map(|n| n.prev_person_count)
                         .sum();
 
                     // Build nodes array with all active nodes.
                     let active_nodes: Vec<NodeInfo> = s.node_states.iter()
-                        .filter(|(_, n)| n.last_frame_time.map_or(false, |t| now.duration_since(t).as_secs() < 10))
+                        .filter(|(_, n)| n.last_frame_time.is_some_and(|t| now.duration_since(t).as_secs() < 10))
                         .map(|(&id, n)| NodeInfo {
                             node_id: id,
                             rssi_dbm: n.rssi_history.back().copied().unwrap_or(0.0),
@@ -3199,13 +3197,13 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     // Aggregate person count across all active nodes.
                     let now = std::time::Instant::now();
                     let total_persons: usize = s.node_states.values()
-                        .filter(|n| n.last_frame_time.map_or(false, |t| now.duration_since(t).as_secs() < 10))
+                        .filter(|n| n.last_frame_time.is_some_and(|t| now.duration_since(t).as_secs() < 10))
                         .map(|n| n.prev_person_count)
                         .sum();
 
                     // Build nodes array with all active nodes.
                     let active_nodes: Vec<NodeInfo> = s.node_states.iter()
-                        .filter(|(_, n)| n.last_frame_time.map_or(false, |t| now.duration_since(t).as_secs() < 10))
+                        .filter(|(_, n)| n.last_frame_time.is_some_and(|t| now.duration_since(t).as_secs() < 10))
                         .map(|(&id, n)| NodeInfo {
                             node_id: id,
                             rssi_dbm: n.rssi_history.back().copied().unwrap_or(0.0),
@@ -3986,10 +3984,9 @@ async fn main() {
         // Training
         training_status: "idle".to_string(),
         training_config: None,
-        adaptive_model: adaptive_classifier::AdaptiveModel::load(&adaptive_classifier::model_path()).ok().map(|m| {
+        adaptive_model: adaptive_classifier::AdaptiveModel::load(&adaptive_classifier::model_path()).ok().inspect(|m| {
             info!("Loaded adaptive classifier: {} frames, {:.1}% accuracy",
                   m.trained_frames, m.training_accuracy * 100.0);
-            m
         }),
         node_states: HashMap::new(),
     }));

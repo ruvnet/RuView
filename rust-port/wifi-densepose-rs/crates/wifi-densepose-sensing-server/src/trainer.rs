@@ -327,13 +327,13 @@ pub struct Checkpoint {
 impl Checkpoint {
     pub fn save_to_file(&self, path: &Path) -> std::io::Result<()> {
         let json = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(|e| std::io::Error::other(e))?;
         std::fs::write(path, json)
     }
     pub fn load_from_file(path: &Path) -> std::io::Result<Self> {
         let json = std::fs::read_to_string(path)?;
         serde_json::from_str(&json)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            .map_err(|e| std::io::Error::other(e))
     }
 }
 
@@ -475,7 +475,7 @@ impl Trainer {
 
         let mut acc = LossComponents::default();
         let bs = self.config.batch_size.max(1);
-        let nb = (samples.len() + bs - 1) / bs;
+        let nb = samples.len().div_ceil(bs);
         let tc = self.transformer_config.clone();
 
         for bi in 0..nb {
@@ -594,7 +594,7 @@ impl Trainer {
         self.optimizer.set_lr(lr);
 
         let bs = self.config.batch_size.max(1);
-        let nb = (csi_windows.len() + bs - 1) / bs;
+        let nb = csi_windows.len().div_ceil(bs);
         let mut total_loss = 0.0f32;
 
         let tc = self.transformer_config.clone();
@@ -673,7 +673,7 @@ impl Trainer {
             total_loss += batch_loss;
 
             // Estimate gradient via central differences on combined params
-            let mut grad = estimate_gradient(&loss_fn, &combined, 1e-4);
+            let mut grad = estimate_gradient(loss_fn, &combined, 1e-4);
             clip_gradients(&mut grad, 1.0);
 
             // Update transformer params
