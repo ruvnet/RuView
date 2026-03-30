@@ -804,6 +804,40 @@ fn estimate_breathing_rate_hz(frame_history: &VecDeque<Vec<f64>>, sample_rate_hz
 /// For each subcarrier index `k`, returns `Var[A_k]` over all stored frames.
 /// This captures spatial signal variation; subcarriers whose amplitude fluctuates
 /// heavily across time correspond to directions with motion.
+/// Compute per-subcarrier importance weights using a simple sensitivity split.
+///
+/// Subcarriers whose sensitivity (amplitude magnitude) is above the median are
+/// considered "sensitive" and receive weight `1.0 + (sens / max_sens)` (range 1.0–2.0).
+/// The rest receive a baseline weight of 0.5. This mirrors the RuVector mincut
+/// partition logic without requiring the graph dependency.
+fn compute_subcarrier_importance_weights(sensitivity: &[f64]) -> Vec<f64> {
+    let n = sensitivity.len();
+    if n == 0 {
+        return vec![];
+    }
+    let max_sens = sensitivity.iter().cloned().fold(f64::NEG_INFINITY, f64::max).max(1e-9);
+
+    // Compute median via a sorted copy.
+    let mut sorted = sensitivity.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median = if n % 2 == 0 {
+        (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
+    } else {
+        sorted[n / 2]
+    };
+
+    sensitivity
+        .iter()
+        .map(|&s| {
+            if s >= median {
+                1.0 + (s / max_sens).min(1.0)
+            } else {
+                0.5
+            }
+        })
+        .collect()
+}
+
 fn compute_subcarrier_variances(frame_history: &VecDeque<Vec<f64>>, n_sub: usize) -> Vec<f64> {
     if frame_history.is_empty() || n_sub == 0 {
         return vec![0.0; n_sub];
@@ -852,13 +886,34 @@ fn extract_features_from_frame(
 ) -> (FeatureInfo, ClassificationInfo, f64, Vec<f64>, f64) {
     let n_sub = frame.amplitudes.len().max(1);
     let n = n_sub as f64;
-    let mean_amp: f64 = frame.amplitudes.iter().sum::<f64>() / n;
     let mean_rssi = frame.rssi as f64;
 
-    // ── Intra-frame subcarrier variance (spatial spread across subcarriers) ──
-    let intra_variance: f64 = frame.amplitudes.iter()
-        .map(|a| (a - mean_amp).powi(2))
-        .sum::<f64>() / n;
+    // ── RuVector Phase 1: subcarrier importance weighting ──
+    // Compute per-subcarrier sensitivity from amplitude magnitude, then weight
+    // sensitive subcarriers higher (>1.0) and insensitive ones lower (0.5).
+    // This emphasises body-motion-correlated subcarriers in all downstream metrics.
+    let sub_sensitivity: Vec<f64> = frame.amplitudes.iter().map(|a| a.abs()).collect();
+    let importance_weights = compute_subcarrier_importance_weights(&sub_sensitivity);
+
+    let weight_sum: f64 = importance_weights.iter().sum::<f64>();
+    let mean_amp: f64 = if weight_sum > 0.0 {
+        frame.amplitudes.iter().zip(importance_weights.iter())
+            .map(|(a, w)| a * w)
+            .sum::<f64>() / weight_sum
+    } else {
+        frame.amplitudes.iter().sum::<f64>() / n
+    };
+
+    // ── Intra-frame subcarrier variance (weighted by importance) ──
+    let intra_variance: f64 = if weight_sum > 0.0 {
+        frame.amplitudes.iter().zip(importance_weights.iter())
+            .map(|(a, w)| w * (a - mean_amp).powi(2))
+            .sum::<f64>() / weight_sum
+    } else {
+        frame.amplitudes.iter()
+            .map(|a| (a - mean_amp).powi(2))
+            .sum::<f64>() / n
+    };
 
     // ── Temporal (sliding-window) per-subcarrier variance ──
     let sub_variances = compute_subcarrier_variances(frame_history, n_sub);

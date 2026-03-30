@@ -21,3 +21,4 @@ pub use bvp::attention_weighted_bvp;
 pub use fresnel::solve_fresnel_geometry;
 pub use spectrogram::gate_spectrogram;
 pub use subcarrier::mincut_subcarrier_partition;
+pub use subcarrier::subcarrier_importance_weights;

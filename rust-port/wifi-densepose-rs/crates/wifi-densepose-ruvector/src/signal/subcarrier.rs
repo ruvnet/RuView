@@ -142,6 +142,29 @@ pub fn mincut_subcarrier_partition(sensitivity: &[f32]) -> (Vec<usize>, Vec<usiz
     }
 }
 
+/// Convert a mincut partition into per-subcarrier importance weights.
+///
+/// Sensitive subcarriers (high body-motion correlation) get weight > 1.0,
+/// insensitive ones get weight 0.5. This allows downstream feature extraction
+/// to emphasise the most informative subcarriers.
+pub fn subcarrier_importance_weights(sensitivity: &[f32]) -> Vec<f32> {
+    if sensitivity.is_empty() {
+        return vec![];
+    }
+    let (sensitive, _insensitive) = mincut_subcarrier_partition(sensitivity);
+    let max_sens = sensitivity
+        .iter()
+        .cloned()
+        .fold(f32::NEG_INFINITY, f32::max)
+        .max(1e-9);
+
+    let mut weights = vec![0.5f32; sensitivity.len()];
+    for &idx in &sensitive {
+        weights[idx] = 1.0 + (sensitivity[idx] / max_sens).min(1.0);
+    }
+    weights
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,5 +197,39 @@ mod tests {
         let (s, i) = mincut_subcarrier_partition(&[0.5]);
         assert_eq!(s, vec![0]);
         assert!(i.is_empty());
+    }
+
+    #[test]
+    fn test_importance_weights_empty() {
+        let w = subcarrier_importance_weights(&[]);
+        assert!(w.is_empty());
+    }
+
+    #[test]
+    fn test_importance_weights_all_equal() {
+        let sensitivity = vec![1.0f32; 8];
+        let w = subcarrier_importance_weights(&sensitivity);
+        assert_eq!(w.len(), 8);
+        // All subcarriers have identical sensitivity so all should be classified
+        // the same way (either all sensitive or all insensitive after mincut).
+        // At minimum, no weight should exceed 2.0 or be negative.
+        for &wt in &w {
+            assert!(wt >= 0.5 && wt <= 2.0, "weight {wt} out of range");
+        }
+    }
+
+    #[test]
+    fn test_importance_weights_sensitive_higher() {
+        // First 5 subcarriers have high sensitivity, last 5 low.
+        let sensitivity: Vec<f32> = (0..10).map(|i| if i < 5 { 0.9 } else { 0.1 }).collect();
+        let w = subcarrier_importance_weights(&sensitivity);
+        assert_eq!(w.len(), 10);
+
+        let mean_high: f32 = w[..5].iter().sum::<f32>() / 5.0;
+        let mean_low: f32 = w[5..].iter().sum::<f32>() / 5.0;
+        assert!(
+            mean_high > mean_low,
+            "sensitive subcarriers should have higher mean weight ({mean_high}) than insensitive ({mean_low})"
+        );
     }
 }
