@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g., 0.4.0)'
+        description: 'Version to release (e.g., 0.4.5)'
         required: true
-        default: '0.4.0'
+        default: '0.4.5'
       attach_to_existing:
         description: 'Attach to existing release tag (leave empty to create new)'
         required: false
@@ -20,11 +20,17 @@ env:
 
 jobs:
   build-macos:
-    name: Build macOS
-    runs-on: macos-latest
+    name: Build macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+        include:
+          - target: aarch64-apple-darwin
+            arch: arm64
+            runner: macos-14
+          - target: x86_64-apple-darwin
+            arch: x64
+            runner: macos-13
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,6 +45,19 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            rust-port/wifi-densepose-rs/target/
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+
       - name: Install frontend dependencies
         working-directory: rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/ui
         run: npm ci
@@ -48,7 +67,7 @@ jobs:
         run: npm run build
 
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2.0.0"
+        run: cargo install tauri-cli --version "^2.0.0" --locked
 
       - name: Build Tauri app
         working-directory: rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop
@@ -57,25 +76,138 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      - name: Get architecture name
-        id: arch
+      - name: Import signing certificate
+        if: env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
-          if [ "${{ matrix.target }}" = "aarch64-apple-darwin" ]; then
-            echo "arch=arm64" >> $GITHUB_OUTPUT
-          else
-            echo "arch=x64" >> $GITHUB_OUTPUT
-          fi
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+          rm certificate.p12
 
-      - name: Package macOS app
+      - name: Sign .app bundle
+        if: env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
-          cd rust-port/wifi-densepose-rs/target/${{ matrix.target }}/release/bundle/macos
-          zip -r "RuView-Desktop-${{ github.event.inputs.version || '0.4.0' }}-macos-${{ steps.arch.outputs.arch }}.zip" "RuView Desktop.app"
+          APP_PATH="rust-port/wifi-densepose-rs/target/${{ matrix.target }}/release/bundle/macos/RuView Desktop.app"
+          codesign --deep --force --options runtime \
+            --entitlements rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/entitlements.plist \
+            --sign "$APPLE_SIGNING_IDENTITY" "$APP_PATH"
 
-      - name: Upload macOS artifact
+      - name: Notarize app
+        if: env.APPLE_ID != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          APP_PATH="rust-port/wifi-densepose-rs/target/${{ matrix.target }}/release/bundle/macos/RuView Desktop.app"
+          ZIP_PATH="/tmp/RuView-notarize.zip"
+          ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
+          xcrun notarytool submit "$ZIP_PATH" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$APP_PATH"
+
+      - name: Package macOS DMG
+        run: |
+          VERSION="${{ github.event.inputs.version || '0.4.5' }}"
+          ARCH="${{ matrix.arch }}"
+          APP_PATH="rust-port/wifi-densepose-rs/target/${{ matrix.target }}/release/bundle/macos"
+          DMG_NAME="RuView-Desktop-${VERSION}-macos-${ARCH}.dmg"
+
+          # Create DMG with Applications symlink
+          mkdir -p /tmp/dmg-staging
+          cp -r "${APP_PATH}/RuView Desktop.app" /tmp/dmg-staging/
+          ln -s /Applications /tmp/dmg-staging/Applications
+
+          hdiutil create -volname "RuView Desktop" \
+            -srcfolder /tmp/dmg-staging \
+            -ov -format UDZO \
+            "${APP_PATH}/${DMG_NAME}"
+
+          rm -rf /tmp/dmg-staging
+
+      - name: Package macOS ZIP
+        run: |
+          VERSION="${{ github.event.inputs.version || '0.4.5' }}"
+          ARCH="${{ matrix.arch }}"
+          cd "rust-port/wifi-densepose-rs/target/${{ matrix.target }}/release/bundle/macos"
+          zip -r "RuView-Desktop-${VERSION}-macos-${ARCH}.zip" "RuView Desktop.app"
+
+      - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ruview-macos-${{ steps.arch.outputs.arch }}
-          path: rust-port/wifi-densepose-rs/target/${{ matrix.target }}/release/bundle/macos/*.zip
+          name: ruview-macos-${{ matrix.arch }}
+          path: |
+            rust-port/wifi-densepose-rs/target/${{ matrix.target }}/release/bundle/macos/*.zip
+            rust-port/wifi-densepose-rs/target/${{ matrix.target }}/release/bundle/macos/*.dmg
+
+  build-macos-universal:
+    name: Build macOS Universal
+    needs: [build-macos]
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download ARM64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ruview-macos-arm64
+          path: artifacts/arm64
+
+      - name: Download x64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ruview-macos-x64
+          path: artifacts/x64
+
+      - name: Create universal DMG
+        run: |
+          VERSION="${{ github.event.inputs.version || '0.4.5' }}"
+
+          # Extract both apps
+          mkdir -p /tmp/arm64 /tmp/x64
+          cd artifacts/arm64 && unzip -q "RuView-Desktop-${VERSION}-macos-arm64.zip" -d /tmp/arm64 && cd ../..
+          cd artifacts/x64 && unzip -q "RuView-Desktop-${VERSION}-macos-x64.zip" -d /tmp/x64 && cd ../..
+
+          # Use lipo to create universal binary from the main executable
+          ARM_BIN="/tmp/arm64/RuView Desktop.app/Contents/MacOS/RuView Desktop"
+          X64_BIN="/tmp/x64/RuView Desktop.app/Contents/MacOS/RuView Desktop"
+
+          if [ -f "$ARM_BIN" ] && [ -f "$X64_BIN" ]; then
+            mkdir -p /tmp/universal
+            cp -r "/tmp/arm64/RuView Desktop.app" "/tmp/universal/"
+            lipo -create "$ARM_BIN" "$X64_BIN" -output "/tmp/universal/RuView Desktop.app/Contents/MacOS/RuView Desktop"
+
+            # Create universal DMG
+            mkdir -p /tmp/dmg-universal
+            cp -r "/tmp/universal/RuView Desktop.app" /tmp/dmg-universal/
+            ln -s /Applications /tmp/dmg-universal/Applications
+
+            hdiutil create -volname "RuView Desktop" \
+              -srcfolder /tmp/dmg-universal \
+              -ov -format UDZO \
+              "artifacts/RuView-Desktop-${VERSION}-macos-universal.dmg"
+
+            rm -rf /tmp/dmg-universal /tmp/universal
+          fi
+
+      - name: Upload universal artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruview-macos-universal
+          path: artifacts/*.dmg
 
   build-windows:
     name: Build Windows
@@ -92,6 +224,19 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            rust-port/wifi-densepose-rs/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
       - name: Install frontend dependencies
         working-directory: rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/ui
         run: npm ci
@@ -101,7 +246,7 @@ jobs:
         run: npm run build
 
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2.0.0"
+        run: cargo install tauri-cli --version "^2.0.0" --locked
 
       - name: Build Tauri app
         working-directory: rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop
@@ -124,7 +269,7 @@ jobs:
 
   create-release:
     name: Create Release
-    needs: [build-macos, build-windows]
+    needs: [build-macos, build-macos-universal, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -143,38 +288,60 @@ jobs:
       - name: Create or Update Release
         uses: softprops/action-gh-release@v2
         with:
-          name: RuView Desktop v${{ github.event.inputs.version || '0.4.0' }}
-          tag_name: ${{ github.event.inputs.attach_to_existing || format('desktop-v{0}', github.event.inputs.version || '0.4.0') }}
+          name: RuView Desktop v${{ github.event.inputs.version || '0.4.5' }}
+          tag_name: ${{ github.event.inputs.attach_to_existing || format('desktop-v{0}', github.event.inputs.version || '0.4.5') }}
           draft: false
           prerelease: false
           generate_release_notes: ${{ github.event.inputs.attach_to_existing == '' }}
           files: |
             artifacts/**/*.zip
+            artifacts/**/*.dmg
             artifacts/**/*.msi
             artifacts/**/*.exe
-            artifacts/**/*.dmg
           body: |
-            ## RuView Desktop v${{ github.event.inputs.version || '0.4.0' }}
+            ## RuView Desktop v${{ github.event.inputs.version || '0.4.5' }}
 
             WiFi-based human pose estimation desktop application.
 
             ### Downloads
 
-            | Platform | Architecture | Download |
-            |----------|--------------|----------|
-            | macOS | Apple Silicon (M1/M2/M3) | `RuView-Desktop-*-macos-arm64.zip` |
-            | macOS | Intel | `RuView-Desktop-*-macos-x64.zip` |
-            | Windows | x64 | `RuView-Desktop-*.msi` or `RuView-Desktop-*.exe` |
+            | Platform | Architecture | Format | Download |
+            |----------|--------------|--------|----------|
+            | macOS | Apple Silicon (M1/M2/M3/M4) | DMG | `RuView-Desktop-*-macos-arm64.dmg` |
+            | macOS | Intel | DMG | `RuView-Desktop-*-macos-x64.dmg` |
+            | macOS | Universal | DMG | `RuView-Desktop-*-macos-universal.dmg` |
+            | macOS | Apple Silicon | ZIP | `RuView-Desktop-*-macos-arm64.zip` |
+            | macOS | Intel | ZIP | `RuView-Desktop-*-macos-x64.zip` |
+            | Windows | x64 | MSI | `RuView-Desktop-*.msi` |
+            | Windows | x64 | EXE | `RuView-Desktop-*.exe` |
 
-            ### Installation
+            ### macOS Installation
 
-            **macOS:**
-            1. Download the appropriate `.zip` file for your Mac
-            2. Extract the zip file
-            3. Move `RuView Desktop.app` to your Applications folder
-            4. Right-click and select "Open" (first time only, to bypass Gatekeeper)
+            **DMG (recommended):**
+            1. Download the `.dmg` for your Mac (Apple Silicon = M1+, Intel = older Macs, Universal = both)
+            2. Open the DMG and drag `RuView Desktop.app` to Applications
+            3. First launch: right-click > Open (bypasses Gatekeeper)
 
-            **Windows:**
+            **Homebrew:**
+            ```bash
+            brew install --cask ruview-desktop
+            ```
+
+            **ZIP:**
+            1. Download and extract the `.zip`
+            2. Move `RuView Desktop.app` to Applications
+
+            ### macOS Features (v0.4.5)
+            - Native WiFi diagnostics via CoreWLAN (SSID, RSSI, channel, noise)
+            - WiFi site survey for ESP32 node placement
+            - USB serial driver detection (CP210x, CH340, FTDI)
+            - macOS permissions checker
+            - Overlay titlebar with native traffic lights
+            - DMG installer with Applications shortcut
+            - Code signed and notarized (when secrets configured)
+            - Universal binary (runs native on both Intel and Apple Silicon)
+
+            ### Windows Installation
             1. Download the `.msi` installer
             2. Run the installer
             3. Launch RuView Desktop from the Start menu

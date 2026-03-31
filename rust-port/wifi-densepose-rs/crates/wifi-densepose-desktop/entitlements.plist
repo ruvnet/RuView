@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Allow outgoing network connections (mDNS discovery, OTA, HTTP API) -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <!-- Allow incoming network connections (UDP beacon listener) -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+    <!-- USB device access for ESP32 serial flashing/provisioning -->
+    <key>com.apple.security.device.usb</key>
+    <true/>
+    <!-- Serial port access for ESP32 communication -->
+    <key>com.apple.security.device.serial</key>
+    <true/>
+    <!-- Read/write access to user-selected files (firmware binaries) -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    <!-- Bonjour/mDNS service browsing -->
+    <key>com.apple.security.network.bonjour</key>
+    <true/>
+</dict>
+</plist>

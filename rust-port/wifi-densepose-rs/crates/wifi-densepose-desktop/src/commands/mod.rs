@@ -1,5 +1,7 @@
 pub mod discovery;
 pub mod flash;
+#[cfg(target_os = "macos")]
+pub mod macos;
 pub mod ota;
 pub mod provision;
 pub mod server;
