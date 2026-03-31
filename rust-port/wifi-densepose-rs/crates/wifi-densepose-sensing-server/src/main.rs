@@ -3584,12 +3584,9 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     let vitals = smooth_vitals_node(ns, &raw_vitals);
                     ns.latest_vitals = vitals.clone();
 
-                    // Use correlation-based person estimation from frame history.
-                    // This examines the temporal correlation structure of CSI
-                    // subcarriers — correlated subcarriers belong to the same
-                    // person, independent clusters indicate multiple people.
+                    // DynamicMinCut person estimation from subcarrier correlation.
                     let corr_persons = estimate_persons_from_correlation(&ns.frame_history);
-                    let raw_score = corr_persons as f64 / 3.0; // normalize to 0..1
+                    let raw_score = corr_persons as f64 / 3.0;
                     ns.smoothed_person_score = ns.smoothed_person_score * 0.92 + raw_score * 0.08;
                     if classification.presence {
                         let count = score_to_person_count(ns.smoothed_person_score, ns.prev_person_count);
