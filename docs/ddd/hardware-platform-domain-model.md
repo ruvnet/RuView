@@ -2,7 +2,7 @@
 
 The Hardware Platform domain covers everything from the ESP32-S3 silicon to the server-side aggregator: collecting raw CSI, processing it on-device, running programmable WASM modules at the edge, and provisioning fleets of sensor nodes. It is the physical foundation that all higher-level domains (RuvSense, WiFi-Mat, Pose Tracking) depend on for real radio data.
 
-This document defines the system using [Domain-Driven Design](https://martinfowler.com/bliki/DomainDrivenDesign.html) (DDD): bounded contexts that own their data and rules, aggregate roots that enforce invariants, value objects that carry meaning, and domain events that connect everything. The goal is to make the firmware and hardware layer's structure match the electronics it controls -- so that anyone reading the code (or an AI agent modifying it) understands *why* each piece exists, not just *what* it does.
+This document defines the system using [Domain-Driven Design](https://martinfowler.com/bliki/DomainDrivenDesign.html) (DDD): bounded contexts that own their data and rules, aggregate roots that enforce invariants, value objects that carry meaning, and domain events that connect everything. The goal is to make the firmware and hardware layer's structure match the electronics it controls - so that anyone reading the code (or an AI agent modifying it) understands *why* each piece exists, not just *what* it does.
 
 **Bounded Contexts:**
 
@@ -97,9 +97,9 @@ All firmware paths are relative to the repository root. Rust crate paths are rel
 - `ChannelHopConfig`
 
 **Domain Services:**
-- `CsiCollectionService` -- Registers ESP-IDF CSI callback, extracts I/Q, enforces 50 Hz rate limit
-- `StreamSendService` -- Serializes frames to ADR-018 binary format, sends UDP with sequence numbers
-- `NvsConfigService` -- Reads 20+ NVS keys at boot, provides typed config to all firmware components
+- `CsiCollectionService` - Registers ESP-IDF CSI callback, extracts I/Q, enforces 50 Hz rate limit
+- `StreamSendService` - Serializes frames to ADR-018 binary format, sends UDP with sequence numbers
+- `NvsConfigService` - Reads 20+ NVS keys at boot, provides typed config to all firmware components
 
 ---
 
@@ -175,13 +175,13 @@ All firmware paths are relative to the repository root. Rust crate paths are rel
 - `EdgeTier`
 
 **Domain Services:**
-- `PhaseExtractionService` -- Converts raw I/Q to amplitude + phase, applies unwrapping
-- `WelfordStatsService` -- Maintains per-subcarrier running mean and variance
-- `TopKSelectionService` -- Selects K subcarriers with highest variance for downstream processing
-- `BandpassFilterService` -- Biquad IIR filters for breathing and heart rate frequency bands
-- `PresenceDetectionService` -- Adaptive threshold with 1200-frame, 3-sigma calibration
-- `FallDetectionService` -- Phase acceleration exceeding configurable threshold (default 2.0 rad/s^2)
-- `DeltaCompressionService` -- XOR + RLE delta encoding for 30-50% bandwidth reduction
+- `PhaseExtractionService` - Converts raw I/Q to amplitude + phase, applies unwrapping
+- `WelfordStatsService` - Maintains per-subcarrier running mean and variance
+- `TopKSelectionService` - Selects K subcarriers with highest variance for downstream processing
+- `BandpassFilterService` - Biquad IIR filters for breathing and heart rate frequency bands
+- `PresenceDetectionService` - Adaptive threshold with 1200-frame, 3-sigma calibration
+- `FallDetectionService` - Phase acceleration exceeding configurable threshold (default 2.0 rad/s^2)
+- `DeltaCompressionService` - XOR + RLE delta encoding for 30-50% bandwidth reduction
 
 ---
 
@@ -258,11 +258,11 @@ All firmware paths are relative to the repository root. Rust crate paths are rel
 - `ModuleState`
 
 **Domain Services:**
-- `RvfVerificationService` -- Parses RVF header, verifies SHA-256 hash and Ed25519 signature
-- `ModuleLifecycleService` -- Handles load -> start -> run -> stop -> unload transitions
-- `BudgetControllerService` -- Computes per-frame budget from mincut eigenvalue gap, thermal, and battery pressure
-- `HostApiBindingService` -- Links 12 host functions to WASM3 imports in the "csi" namespace
-- `WasmUploadService` -- HTTP server on port 8032 for module management endpoints
+- `RvfVerificationService` - Parses RVF header, verifies SHA-256 hash and Ed25519 signature
+- `ModuleLifecycleService` - Handles load -> start -> run -> stop -> unload transitions
+- `BudgetControllerService` - Computes per-frame budget from mincut eigenvalue gap, thermal, and battery pressure
+- `HostApiBindingService` - Links 12 host functions to WASM3 imports in the "csi" namespace
+- `WasmUploadService` - HTTP server on port 8032 for module management endpoints
 
 ---
 
@@ -319,10 +319,10 @@ All firmware paths are relative to the repository root. Rust crate paths are rel
 - `FusedMotionEnergy`
 
 **Domain Services:**
-- `UdpReceiverService` -- Listens on UDP port 5005, demuxes by magic number and node ID
-- `TimestampAlignmentService` -- Maps per-node monotonic timestamps to aggregator-local time
-- `FeatureFusionService` -- Computes cross-node correlation, fused motion (max across nodes), fused breathing (highest SNR)
-- `PipelineBridgeService` -- Feeds fused frames into the wifi-densepose Rust pipeline via mpsc channel
+- `UdpReceiverService` - Listens on UDP port 5005, demuxes by magic number and node ID
+- `TimestampAlignmentService` - Maps per-node monotonic timestamps to aggregator-local time
+- `FeatureFusionService` - Computes cross-node correlation, fused motion (max across nodes), fused breathing (highest SNR)
+- `PipelineBridgeService` - Feeds fused frames into the wifi-densepose Rust pipeline via mpsc channel
 
 ---
 
@@ -394,11 +394,11 @@ All firmware paths are relative to the repository root. Rust crate paths are rel
 - `VerificationResult`
 
 **Domain Services:**
-- `NvsWriteService` -- Writes typed NVS key-value pairs to the ESP32 flash partition via esptool
-- `PresetResolverService` -- Maps named presets (basic, vitals, mesh-3, mesh-6-vitals) to NVS key sets
-- `MeshProvisionerService` -- Iterates over nodes in a config file, computing TDM slots automatically
-- `ReadBackService` -- Reads NVS partition, parses binary format, returns typed config
-- `BootVerificationService` -- Opens serial monitor post-provision, checks for expected log lines
+- `NvsWriteService` - Writes typed NVS key-value pairs to the ESP32 flash partition via esptool
+- `PresetResolverService` - Maps named presets (basic, vitals, mesh-3, mesh-6-vitals) to NVS key sets
+- `MeshProvisionerService` - Iterates over nodes in a config file, computing TDM slots automatically
+- `ReadBackService` - Reads NVS partition, parses binary format, returns typed config
+- `BootVerificationService` - Opens serial monitor post-provision, checks for expected log lines
 
 ---
 
@@ -674,23 +674,23 @@ pub enum EdgeTier {
 /// Complete NVS configuration for one ESP32 sensor node.
 /// Covers all 20+ firmware-readable keys.
 pub struct NvsConfig {
-    // -- Network --
+    // - Network --
     pub ssid: String,
     pub password: String,
     pub target_ip: Ipv4Addr,
     pub target_port: u16,       // default: 5005
     pub node_id: u8,            // default: 0
 
-    // -- TDM --
+    // - TDM --
     pub tdm_slot: u8,           // default: 0
     pub tdm_total: u8,          // default: 1 (no TDM)
 
-    // -- Channel Hopping --
+    // - Channel Hopping --
     pub hop_count: u8,          // default: 1 (no hop)
     pub chan_list: Vec<u8>,     // default: [1, 6, 11]
     pub dwell_ms: u32,          // default: 100
 
-    // -- Edge Processing --
+    // - Edge Processing --
     pub edge_tier: EdgeTier,    // default: Tier 2
     pub pres_thresh: u16,       // default: 0 (auto-calibrate)
     pub fall_thresh: u16,       // default: 2000 (2.0 rad/s^2)
@@ -698,15 +698,15 @@ pub struct NvsConfig {
     pub vital_int: u16,         // default: 1000 ms
     pub subk_count: u8,         // default: 8
 
-    // -- Power --
+    // - Power --
     pub power_duty: u8,         // default: 100 (always on)
 
-    // -- WASM --
+    // - WASM --
     pub wasm_max: u8,           // default: 4
     pub wasm_verify: bool,      // default: true (secure-by-default)
     pub wasm_pubkey: Option<[u8; 32]>, // Ed25519 public key
 
-    // -- MAC Filter --
+    // - MAC Filter --
     pub filter_mac: Option<MacAddress>,
 }
 ```
@@ -1328,11 +1328,11 @@ All ESP32 UDP packets share a 4-byte magic prefix for demuxing at the aggregator
 
 ## References
 
-- [ADR-012: ESP32 CSI Sensor Mesh](../adr/ADR-012-esp32-csi-sensor-mesh.md) -- Hardware selection, mesh architecture, BOM
-- [ADR-018: Dev Implementation](../adr/ADR-018-dev-implementation.md) -- Binary frame format, ADR-018 wire protocol
-- [ADR-039: ESP32-S3 Edge Intelligence](../adr/ADR-039-esp32-edge-intelligence.md) -- Tiered processing, DSP pipeline, hardware benchmarks
-- [ADR-040: WASM Programmable Sensing](../adr/ADR-040-wasm-programmable-sensing.md) -- WASM3 runtime, Host API, RVF container, adaptive budget
-- [ADR-041: WASM Module Collection](../adr/ADR-041-wasm-module-collection.md) -- 60-module catalog, event ID registry, budget tiers
-- [ADR-044: Provisioning Tool Enhancements](../adr/ADR-044-provisioning-tool-enhancements.md) -- NVS coverage, presets, mesh config, read-back
-- [RuvSense Domain Model](ruvsense-domain-model.md) -- Upstream signal processing domain
-- [WiFi-Mat Domain Model](wifi-mat-domain-model.md) -- Downstream disaster response domain
+- [ADR-012: ESP32 CSI Sensor Mesh](../adr/ADR-012-esp32-csi-sensor-mesh.md) - Hardware selection, mesh architecture, BOM
+- [ADR-018: Dev Implementation](../adr/ADR-018-dev-implementation.md) - Binary frame format, ADR-018 wire protocol
+- [ADR-039: ESP32-S3 Edge Intelligence](../adr/ADR-039-esp32-edge-intelligence.md) - Tiered processing, DSP pipeline, hardware benchmarks
+- [ADR-040: WASM Programmable Sensing](../adr/ADR-040-wasm-programmable-sensing.md) - WASM3 runtime, Host API, RVF container, adaptive budget
+- [ADR-041: WASM Module Collection](../adr/ADR-041-wasm-module-collection.md) - 60-module catalog, event ID registry, budget tiers
+- [ADR-044: Provisioning Tool Enhancements](../adr/ADR-044-provisioning-tool-enhancements.md) - NVS coverage, presets, mesh config, read-back
+- [RuvSense Domain Model](ruvsense-domain-model.md) - Upstream signal processing domain
+- [WiFi-Mat Domain Model](wifi-mat-domain-model.md) - Downstream disaster response domain

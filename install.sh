@@ -633,7 +633,7 @@ install_rust_deps() {
                 return 1
             fi
         fi
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s - -y
         # shellcheck source=/dev/null
         source "${HOME}/.cargo/env" 2>/dev/null || true
         HAS_RUST=true
@@ -881,7 +881,7 @@ build_wasm() {
 build_wasm_field() {
     echo ""
     echo -e "  ${CYAN}Building WASM package with WiFi-Mat (field profile ~62MB)...${RESET}"
-    (cd "${RUST_DIR}" && wasm-pack build crates/wifi-densepose-wasm --target web --release -- --features mat 2>&1 | tail -10)
+    (cd "${RUST_DIR}" && wasm-pack build crates/wifi-densepose-wasm --target web --release - --features mat 2>&1 | tail -10)
 
     if [ -d "${RUST_DIR}/crates/wifi-densepose-wasm/pkg" ]; then
         local wasm_size
@@ -975,7 +975,7 @@ post_install() {
             echo "       firmware/esp32-csi-node/sdkconfig.defaults"
             echo "    # Edit sdkconfig.defaults: set SSID, password, aggregator IP"
             echo ""
-            echo "    # 2. Build firmware (Docker — no local ESP-IDF needed):"
+            echo "    # 2. Build firmware (Docker - no local ESP-IDF needed):"
             echo "    cd firmware/esp32-csi-node"
             echo "    docker run --rm -v \"\$(pwd):/project\" -w /project \\"
             echo "      espressif/idf:v5.2 bash -c 'idf.py set-target esp32s3 && idf.py build'"
@@ -985,7 +985,7 @@ post_install() {
             echo "      --baud 460800 write-flash @flash_args"
             echo ""
             echo "    # 4. Run the aggregator:"
-            echo "    cargo run -p wifi-densepose-hardware --bin aggregator -- \\"
+            echo "    cargo run -p wifi-densepose-hardware --bin aggregator - \\"
             echo "      --bind 0.0.0.0:5005 --verbose"
             ;;
         docker)

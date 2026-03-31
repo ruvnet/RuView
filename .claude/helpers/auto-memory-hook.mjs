@@ -201,7 +201,7 @@ async function doImport() {
 
   const memPkg = await loadMemoryPackage();
   if (!memPkg || !memPkg.AutoMemoryBridge) {
-    dim('Memory package not available — skipping auto memory import');
+    dim('Memory package not available - skipping auto memory import');
     return;
   }
 
@@ -254,7 +254,7 @@ async function doSync() {
 
   const memPkg = await loadMemoryPackage();
   if (!memPkg || !memPkg.AutoMemoryBridge) {
-    dim('Memory package not available — skipping sync');
+    dim('Memory package not available - skipping sync');
     return;
   }
 

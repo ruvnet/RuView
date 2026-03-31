@@ -1,17 +1,17 @@
 #!/bin/bash
-# QEMU Chaos / Fault Injection Test Runner — ADR-061 Layer 9
+# QEMU Chaos / Fault Injection Test Runner - ADR-061 Layer 9
 #
 # Launches firmware under QEMU and injects a series of faults to verify
 # the firmware's resilience. Each fault is injected via the QEMU monitor
 # socket (or GDB stub), followed by a recovery window and health check.
 #
 # Fault types:
-#   1. wifi_kill        — Pause/resume VM to simulate WiFi reconnect
-#   2. ring_flood       — Inject 1000 rapid mock frames (ring buffer stress)
-#   3. heap_exhaust    — Write to heap metadata to simulate low memory
-#   4. timer_starvation — Pause VM for 500ms to starve FreeRTOS timers
-#   5. corrupt_frame    — Inject a CSI frame with bad magic bytes
-#   6. nvs_corrupt      — Write garbage to NVS flash region
+#   1. wifi_kill        - Pause/resume VM to simulate WiFi reconnect
+#   2. ring_flood       - Inject 1000 rapid mock frames (ring buffer stress)
+#   3. heap_exhaust    - Write to heap metadata to simulate low memory
+#   4. timer_starvation - Pause VM for 500ms to starve FreeRTOS timers
+#   5. corrupt_frame    - Inject a CSI frame with bad magic bytes
+#   6. nvs_corrupt      - Write garbage to NVS flash region
 #
 # Environment variables:
 #   QEMU_PATH       - Path to qemu-system-xtensa (default: qemu-system-xtensa)
@@ -20,10 +20,10 @@
 #   FAULT_WAIT      - Seconds to wait after fault injection (default: 5)
 #
 # Exit codes:
-#   0  PASS    — all checks passed
-#   1  WARN    — non-critical checks failed
-#   2  FAIL    — critical checks failed
-#   3  FATAL   — build error, crash, or infrastructure failure
+#   0  PASS    - all checks passed
+#   1  WARN    - non-critical checks failed
+#   2  FAIL    - critical checks failed
+#   3  FATAL   - build error, crash, or infrastructure failure
 
 # ── Help ──────────────────────────────────────────────────────────────
 usage() {
@@ -57,10 +57,10 @@ Examples:
   FLASH_IMAGE=/path/to/image.bin ./qemu-chaos-test.sh
 
 Exit codes:
-  0  PASS   — all checks passed
-  1  WARN   — non-critical checks failed
-  2  FAIL   — critical checks failed
-  3  FATAL  — build error, crash, or infrastructure failure
+  0  PASS   - all checks passed
+  1  WARN   - non-critical checks failed
+  2  FAIL   - critical checks failed
+  3  FATAL  - build error, crash, or infrastructure failure
 HELP
     exit 0
 }
@@ -193,7 +193,7 @@ inject_nvs_corrupt() {
 # Pre-flight checks
 # ──────────────────────────────────────────────────────────────────────
 
-echo "=== QEMU Chaos Test Runner — ADR-061 Layer 9 ==="
+echo "=== QEMU Chaos Test Runner - ADR-061 Layer 9 ==="
 echo "QEMU binary:  $QEMU_BIN"
 echo "Flash image:  $FLASH_IMAGE"
 echo "Boot timeout: ${BOOT_TIMEOUT}s"
@@ -344,9 +344,9 @@ for fault in "${FAULTS[@]}"; do
         --after-fault "$fault" || fault_exit=$?
 
     case "$fault_exit" in
-        0) echo "  [result] HEALTHY — firmware recovered gracefully" ;;
-        1) echo "  [result] DEGRADED — firmware running but with issues" ;;
-        *) echo "  [result] UNHEALTHY — firmware in bad state" ;;
+        0) echo "  [result] HEALTHY - firmware recovered gracefully" ;;
+        1) echo "  [result] DEGRADED - firmware running but with issues" ;;
+        *) echo "  [result] UNHEALTHY - firmware in bad state" ;;
     esac
 
     FAULT_RESULTS+=("${fault}:${fault_exit}")

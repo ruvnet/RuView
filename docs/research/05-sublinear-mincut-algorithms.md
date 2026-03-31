@@ -1,7 +1,7 @@
 # Sublinear and Near-Linear Time Minimum Cut Algorithms for Real-Time RF Sensing
 
 **Date**: 2026-03-08
-**Context**: RuVector v2.0.4 / RuvSense multistatic mesh — 16 ESP32 nodes, 120 link edges, 20 Hz update rate
+**Context**: RuVector v2.0.4 / RuvSense multistatic mesh - 16 ESP32 nodes, 120 link edges, 20 Hz update rate
 **Scope**: Algorithmic foundations for maintaining minimum cuts on dynamic RF link graphs under real-time constraints
 
 ---
@@ -13,7 +13,7 @@ C(16,2) = 120 edges, where each edge weight encodes the RF channel state
 information (CSI) attenuation or coherence between two nodes. Human bodies,
 moving objects, and environmental changes continuously perturb these weights.
 The minimum cut of this graph partitions the sensing field into regions of
-minimal RF coupling — directly useful for person segmentation, occupancy
+minimal RF coupling - directly useful for person segmentation, occupancy
 counting, and anomaly detection.
 
 At 20 Hz update rate, each mincut computation has a budget of 50 ms wall-clock
@@ -21,7 +21,7 @@ time. On a resource-constrained coordinator (ESP32-S3 at 240 MHz or a modest
 ARM host), classical algorithms are either too slow or carry too much overhead.
 This document surveys the algorithmic landscape from classical exact methods
 through sublinear approximations, dynamic maintenance, streaming, and
-sparsification — evaluating each for applicability to the RuVector RF sensing
+sparsification - evaluating each for applicability to the RuVector RF sensing
 pipeline.
 
 Throughout, V = 16 and E = 120 (complete graph). While these are small by
@@ -43,7 +43,7 @@ the total weight of edges crossing the partition:
 
 For RF sensing, w(u,v) typically represents the CSI coherence or signal
 attenuation between nodes u and v. A minimum cut identifies the partition
-where RF coupling is weakest — corresponding to physical obstructions
+where RF coupling is weakest - corresponding to physical obstructions
 (human bodies, walls, large objects) that attenuate the RF field.
 
 ### 1.2 Stoer-Wagner Algorithm (1997)
@@ -68,7 +68,7 @@ each performed via a maximum adjacency ordering.
 **Practical assessment:** For V = 16, Stoer-Wagner executes 15 phases, each
 scanning at most 120 edges. Total work is roughly 1,800 edge scans plus
 priority queue operations. On modern hardware this completes in microseconds.
-On ESP32 at 240 MHz, estimated wall time is 50-200 us — well within budget.
+On ESP32 at 240 MHz, estimated wall time is 50-200 us - well within budget.
 
 This is the baseline. The algorithm is exact, deterministic, and simple to
 implement. For V = 16, classical complexity is not actually the bottleneck.
@@ -100,7 +100,7 @@ then recursing on two independent copies. This reduces the repetition count
 from O(V^2) to O(V^2 / 2^depth), yielding O(V^2 log V) total time.
 
 **For our graph:**
-- O(256 * 4) = O(1024) total work — negligible
+- O(256 * 4) = O(1024) total work - negligible
 - Recursion depth: O(log V) = 4 levels
 
 **Practical assessment:** At V = 16, the recursion tree has ~4 levels with
@@ -168,7 +168,7 @@ This achieves a (1 +/- 0.1)-approximation by reading only 1/3 of the edges.
 ```
 
 The key insight: Stoer-Wagner on a sparse sample with ~40 edges and 16
-vertices runs in O(16 * 40) = O(640) operations — faster than on the full
+vertices runs in O(16 * 40) = O(640) operations - faster than on the full
 graph, and with provable approximation guarantees.
 
 ### 2.3 Cut Sparsifiers
@@ -181,9 +181,9 @@ For V = 16, epsilon = 0.1: O(16 * 4 / 0.01) = O(6400) edges. This exceeds
 our actual edge count of 120, so sparsification provides no benefit at this
 scale. However, it becomes critical for:
 
-- V = 64: E = 2016, sparsifier needs ~O(2560) edges — marginal savings
-- V = 128: E = 8128, sparsifier needs ~O(5120) edges — 37% reduction
-- V = 256: E = 32640, sparsifier needs ~O(10240) edges — 69% reduction
+- V = 64: E = 2016, sparsifier needs ~O(2560) edges - marginal savings
+- V = 128: E = 8128, sparsifier needs ~O(5120) edges - 37% reduction
+- V = 256: E = 32640, sparsifier needs ~O(10240) edges - 69% reduction
 
 ### 2.4 Spectral Sparsification
 
@@ -195,12 +195,12 @@ Laplacian preserves all cut values. Their algorithm:
 3. Reweight sampled edges to preserve expected cut values.
 
 Result: O(V log V / epsilon^2) edges suffice, same as combinatorial
-sparsification, but the spectral guarantee is stronger — it preserves the
+sparsification, but the spectral guarantee is stronger - it preserves the
 entire spectrum of the Laplacian, not just cut values.
 
 **For RF sensing:** The graph Laplacian eigenvectors correspond to spatial
 modes of the RF field. Spectral sparsification preserves these modes, which
-is useful beyond mincut — it preserves the spatial structure needed for
+is useful beyond mincut - it preserves the spatial structure needed for
 tomography and field modeling (RuvSense `field_model.rs`).
 
 ### 2.5 Query-Based Sublinear Algorithms
@@ -208,7 +208,7 @@ tomography and field modeling (RuvSense `field_model.rs`).
 Recent work by Rubinstein, Schramm, and Weinberg (2018) achieves
 O(V polylog V)-time algorithms that query the graph adjacency/weight oracle
 rather than reading all edges. For V = 16, this gives O(16 * 16) = O(256)
-queries — a 2x reduction over reading all 120 edges (not useful at this
+queries - a 2x reduction over reading all 120 edges (not useful at this
 scale, but relevant at V = 256 where it reduces from 32640 to ~4000 queries).
 
 ---
@@ -253,7 +253,7 @@ amortized update time.
 **For our setting:**
 - Update time: O(log^3(16) / 0.01) ~ O(6400) per edge update with
   epsilon = 0.1
-- Batch of 120 updates: O(768,000) — worse than recomputation!
+- Batch of 120 updates: O(768,000) - worse than recomputation!
 
 This reveals an important practical point: dynamic algorithms have excellent
 asymptotic behavior but carry large constant factors that dominate at small
@@ -263,9 +263,9 @@ known dynamic algorithm.
 ### 3.4 When Dynamic Algorithms Win
 
 Dynamic algorithms become beneficial when:
-1. **V > 1000** and E > 100,000 — amortized polylog update beats O(VE).
-2. **Sparse updates** — only a few edges change per frame, not all 120.
-3. **Incremental weight changes** — weights change by small deltas,
+1. **V > 1000** and E > 100,000 - amortized polylog update beats O(VE).
+2. **Sparse updates** - only a few edges change per frame, not all 120.
+3. **Incremental weight changes** - weights change by small deltas,
    allowing incremental sparsifier updates.
 
 For our RF mesh, a practical middle ground is:
@@ -296,7 +296,7 @@ Output: Updated mincut
 ```
 
 In practice, steps 1-4 handle >90% of frames (the minimum cut partition is
-spatially stable — people do not teleport), and full recomputation is
+spatially stable - people do not teleport), and full recomputation is
 triggered only when someone crosses the cut boundary. This reduces average
 per-frame cost to O(E) = O(120) for crossing-weight evaluation plus
 occasional O(VE) recomputation.
@@ -309,7 +309,7 @@ occasional O(VE) recomputation.
 
 In the streaming model, edges arrive one at a time (or in a stream from
 multiple ESP32 nodes), and we must estimate the mincut using limited working
-memory — ideally O(V polylog V) space rather than O(V^2).
+memory - ideally O(V polylog V) space rather than O(V^2).
 
 This is relevant when:
 - CSI data arrives asynchronously from 16 nodes via TDM (Time Division
@@ -350,7 +350,7 @@ Result: (1+epsilon)-approximate mincut from the refined sparsifier.
 
 For our TDM protocol, each complete CSI scan across all 16 nodes constitutes
 one "pass." A two-pass approach means using two consecutive TDM cycles
-(100 ms total at 20 Hz) to build and refine the sparsifier — acceptable
+(100 ms total at 20 Hz) to build and refine the sparsifier - acceptable
 if we can tolerate 100 ms latency on the initial estimate.
 
 ### 4.4 Turnstile Streaming
@@ -362,7 +362,7 @@ Ahn, Guha, and McGregor (2013) extended their sketching approach to the
 turnstile model. The key: L0-sampling sketches allow recovering edges from
 the sketch difference, enabling dynamic cut estimation.
 
-**Space complexity:** O(V * polylog(V) / epsilon^2) — same as the
+**Space complexity:** O(V * polylog(V) / epsilon^2) - same as the
 insertion-only case.
 
 **For RF sensing:** This means we can maintain a running sketch that
@@ -409,7 +409,7 @@ a subgraph H with O(V log V / epsilon^2) edges such that for every cut
 3. Reweight sampled edges: w_H(e) = w_G(e) / p_e.
 
 **Computing strong connectivity:** This requires O(VE) time using max-flow
-computations — as expensive as solving mincut directly. However, approximate
+computations - as expensive as solving mincut directly. However, approximate
 strong connectivity can be computed in O(E log^3 V) time using the
 sparsification itself (bootstrapping).
 
@@ -491,7 +491,7 @@ mincut computation and spatial field modeling.
 
 ### 6.1 Motivation
 
-Classical mincut algorithms are global — they examine the entire graph. Local
+Classical mincut algorithms are global - they examine the entire graph. Local
 partitioning algorithms find cuts by exploring only a small region of the
 graph, running in time proportional to the size of the smaller side of the
 cut rather than the full graph.
@@ -574,7 +574,7 @@ local partitioning can quickly confirm or refine the detection:
 ```
 
 This creates a feedback loop where the tracker guides the graph algorithm
-and the graph algorithm refines the tracker — running in O(1/alpha/epsilon)
+and the graph algorithm refines the tracker - running in O(1/alpha/epsilon)
 time rather than O(VE) for full mincut.
 
 ### 6.5 Multi-Seed Local Partitioning
@@ -582,7 +582,7 @@ time rather than O(VE) for full mincut.
 For multiple people, run local partitioning from multiple seeds
 simultaneously. With k people and V = 16 nodes, each person's local
 partition explores ~4-6 nodes, totaling ~O(k * 6 * degree) = O(k * 90)
-work. For k = 3 people, this is O(270) — less than half the cost of
+work. For k = 3 people, this is O(270) - less than half the cost of
 full Stoer-Wagner.
 
 The challenge is handling overlapping partitions. Two approaches:
@@ -720,7 +720,7 @@ pub struct RfGraph<const V: usize> {
 ```
 
 For V = 16, this uses 120 * 4 = 480 bytes for weights, plus 8 bytes for
-cached values. Total: 488 bytes — fits in a single cache line pair.
+cached values. Total: 488 bytes - fits in a single cache line pair.
 
 **Stoer-Wagner state:**
 ```rust
@@ -795,7 +795,7 @@ impl<const V: usize> RfGraph<V> {
             let j_side = (partition >> j) & 1;
 
             if i_side != j_side {
-                // Edge crosses the cut — must update cut value
+                // Edge crosses the cut - must update cut value
                 if let Some(ref mut cut_val) = self.cached_mincut {
                     *cut_val += new_weight - old_weight;
                     // Cut value changed but partition might still be optimal
@@ -809,7 +809,7 @@ impl<const V: usize> RfGraph<V> {
                     return true;
                 }
             }
-            // Edge does not cross the cut — partition still valid,
+            // Edge does not cross the cut - partition still valid,
             // but cut value might no longer be minimum
             // Heuristic: if weight decreased significantly, invalidate
             if new_weight < old_weight * 0.8 {
@@ -950,7 +950,7 @@ where
                     }
                 });
 
-            // Find max key (sequential — V is small)
+            // Find max key (sequential - V is small)
             let next = (0..V)
                 .filter(|&v| active[v] && !in_set[v])
                 .max_by(|&a, &b| key[a].partial_cmp(&key[b]).unwrap())
@@ -1027,7 +1027,7 @@ impl DynamicPersonMatcher {
             let normalized_cut = cut_value / smaller_side as f32;
 
             if normalized_cut > self.connectivity_threshold {
-                // Segment is internally well-connected — one person or empty
+                // Segment is internally well-connected - one person or empty
                 result.push(segment);
             } else {
                 // Split into two sub-segments and continue

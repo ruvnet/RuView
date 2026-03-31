@@ -37,7 +37,7 @@ of length `d` at wavelength `lambda` is:
 r_F = sqrt(lambda * d / 4)
 ```
 
-This is the *minimum detectable feature size* for a single link -- an
+This is the *minimum detectable feature size* for a single link - an
 object smaller than `r_F` cannot reliably perturb the link's CSI above
 noise floor.
 
@@ -70,7 +70,7 @@ r_F(d1) = sqrt(lambda * d1 * d2 / d)
 This reaches its maximum at the midpoint (`d1 = d2 = d/2`) and tapers
 to zero at both endpoints. The practical implication: objects near a node
 are harder to detect on that specific link because the Fresnel zone is
-narrow there. This is why mesh density matters -- nearby links cover
+narrow there. This is why mesh density matters - nearby links cover
 the "blind cone" of each individual link.
 
 ### 1.4 Fresnel Zone as Resolution Kernel
@@ -103,8 +103,8 @@ blocks the first Fresnel zone on a 5m link at 2.4 GHz. At 5 GHz the
 same person extends beyond the Fresnel zone, meaning:
 
 - At 2.4 GHz: person width approximately equals Fresnel radius on
-  medium links -- moderate SNR perturbation.
-- At 5 GHz: person width exceeds Fresnel radius -- stronger relative
+  medium links - moderate SNR perturbation.
+- At 5 GHz: person width exceeds Fresnel radius - stronger relative
   perturbation, better localization along perpendicular axis.
 
 The mincut algorithm partitions the graph at edges where coherence drops.
@@ -412,7 +412,7 @@ C(S, T) = sum_{(i,j) : i in S, j in T} w_ij
 When a person or object bisects the sensing region, links crossing the
 boundary experience coherence drops, reducing their weights. The mincut
 naturally identifies this boundary because it finds the cheapest way to
-separate the graph -- and disrupted links are cheap.
+separate the graph - and disrupted links are cheap.
 
 ### 4.2 Boundary Localization from Cut Edges
 
@@ -1330,7 +1330,7 @@ cross-room tracker) to weight their inputs by spatial confidence.
    Magazine, 22(4), 54-69.
 
 8. Shen, Y. and Win, M. Z. (2010). "Fundamental Limits of Wideband
-   Localization — Part I: A General Framework." IEEE Trans. Information
+   Localization - Part I: A General Framework." IEEE Trans. Information
    Theory, 56(10), 4956-4980.
 
 ### Graph Cuts and Spectral Methods

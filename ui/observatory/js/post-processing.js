@@ -1,5 +1,5 @@
 /**
- * Post-Processing — Subtle bloom for green glow wireframe,
+ * Post-Processing - Subtle bloom for green glow wireframe,
  * warm vignette, minimal grain. Foundation-style.
  */
 import * as THREE from 'three';
@@ -74,10 +74,10 @@ export class PostProcessing {
     this.composer = new EffectComposer(renderer);
     this.composer.addPass(new RenderPass(scene, camera));
 
-    // Bloom — tuned for green wireframe glow
+    // Bloom - tuned for green wireframe glow
     this._bloomPass = new UnrealBloomPass(
       new THREE.Vector2(size.x, size.y),
-      0.08,  // strength — subtle glow, overridden by settings
+      0.08,  // strength - subtle glow, overridden by settings
       0.2,   // radius
       0.6    // threshold
     );

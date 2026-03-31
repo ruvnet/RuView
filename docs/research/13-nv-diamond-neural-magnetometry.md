@@ -1,6 +1,6 @@
 # NV Diamond Magnetometers for Neural Current Detection
 
-## SOTA Research Document — RF Topological Sensing Series (13/22)
+## SOTA Research Document - RF Topological Sensing Series (13/22)
 
 **Date**: 2026-03-09
 **Domain**: Nitrogen-Vacancy Quantum Sensing × Neural Magnetometry × Graph Topology
@@ -10,7 +10,7 @@
 
 ## 1. Introduction
 
-Neurons communicate through ionic currents. Those currents generate magnetic fields — tiny
+Neurons communicate through ionic currents. Those currents generate magnetic fields - tiny
 ones, measured in femtotesla (10⁻¹⁵ T). For context, Earth's magnetic field is approximately
 50 μT, roughly 10¹⁰ times stronger than the magnetic signature of a single cortical column.
 
@@ -67,7 +67,7 @@ Where:
 - γₑ = 28 GHz/T (electron gyromagnetic ratio)
 - B = external magnetic field component along NV axis
 
-For a 1 fT field: Δf = 28 × 10⁻¹⁵ GHz = 28 μHz — extraordinarily small, requiring
+For a 1 fT field: Δf = 28 × 10⁻¹⁵ GHz = 28 μHz - extraordinarily small, requiring
 long integration times or ensemble measurements.
 
 ### 2.3 Sensitivity Fundamentals
@@ -79,7 +79,7 @@ long integration times or ensemble measurements.
 Where C is ODMR contrast (~0.03), R is photon count rate (~10⁵/s), T₂* is inhomogeneous
 dephasing time (~1 μs in bulk diamond).
 
-Typical single NV sensitivity: ~1 μT/√Hz — insufficient for neural signals.
+Typical single NV sensitivity: ~1 μT/√Hz - insufficient for neural signals.
 
 **NV ensemble**: N centers improve sensitivity by √N
 ```
@@ -502,18 +502,18 @@ NV's combination of high temporal resolution AND dense spatial sampling is uniqu
 
 ### 9.1 Leading Research Groups
 
-**MIT/Harvard**: Walsworth group — pioneered NV magnetometry, demonstrated cellular-scale
+**MIT/Harvard**: Walsworth group - pioneered NV magnetometry, demonstrated cellular-scale
 magnetic imaging, working on macroscale neural sensing arrays.
 
-**University of Stuttgart**: Wrachtrup group — single NV defect spectroscopy, advanced
+**University of Stuttgart**: Wrachtrup group - single NV defect spectroscopy, advanced
 dynamical decoupling protocols for NV magnetometry.
 
-**University of Melbourne**: Hollenberg group — NV-based quantum sensing for biological
+**University of Melbourne**: Hollenberg group - NV-based quantum sensing for biological
 applications, diamond fabrication optimization.
 
 **NIST Boulder**: NV ensemble magnetometry with optimized readout, approaching fT sensitivity.
 
-**UC Berkeley**: Budker group — NV magnetometry for fundamental physics and biomedical
+**UC Berkeley**: Budker group - NV magnetometry for fundamental physics and biomedical
 applications.
 
 ### 9.2 Commercial NV Sensor Companies
@@ -779,7 +779,7 @@ For the RuVector + dynamic mincut architecture, NV sensors offer:
 5. **Temporal resolution** sufficient for real-time topology tracking
 
 The combination of NV sensor arrays with RuVector graph memory and dynamic mincut analysis
-could create the first portable brain network topology observatory — measuring how cognition
+could create the first portable brain network topology observatory - measuring how cognition
 organizes itself in real time, without requiring the $3M SQUID MEG systems that currently
 dominate neuroimaging.
 

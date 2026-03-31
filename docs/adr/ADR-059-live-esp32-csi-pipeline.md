@@ -24,16 +24,16 @@ ESP32-S3 (CSI capture) → UDP:5005 → sensing-server (Rust/Axum) → WS:8765 �
 
 ### Components
 
-1. **ESP32 Firmware** — Rebuilt with native Windows ESP-IDF v5.4.0 toolchain (no Docker). Configured for target network and PC IP via `sdkconfig`. Helper scripts added:
-   - `build_firmware.ps1` — Sets up IDF environment, cleans, builds, and flashes
-   - `read_serial.ps1` — Serial monitor with DTR/RTS reset capability
+1. **ESP32 Firmware** - Rebuilt with native Windows ESP-IDF v5.4.0 toolchain (no Docker). Configured for target network and PC IP via `sdkconfig`. Helper scripts added:
+   - `build_firmware.ps1` - Sets up IDF environment, cleans, builds, and flashes
+   - `read_serial.ps1` - Serial monitor with DTR/RTS reset capability
 
-2. **Sensing Server** — `wifi-densepose-sensing-server` started with:
-   - `--source esp32` — Expect real ESP32 UDP frames
-   - `--bind-addr 0.0.0.0` — Accept connections from any interface
-   - `--ui-path <path>` — Serve the demo UI via HTTP
+2. **Sensing Server** - `wifi-densepose-sensing-server` started with:
+   - `--source esp32` - Expect real ESP32 UDP frames
+   - `--bind-addr 0.0.0.0` - Accept connections from any interface
+   - `--ui-path <path>` - Serve the demo UI via HTTP
 
-3. **Browser Demo** — `main.js` updated to auto-connect to `ws://localhost:8765/ws/sensing` on page load. Falls back to simulated CSI if the WebSocket is unavailable (GitHub Pages).
+3. **Browser Demo** - `main.js` updated to auto-connect to `ws://localhost:8765/ws/sensing` on page load. Falls back to simulated CSI if the WebSocket is unavailable (GitHub Pages).
 
 ### Network Configuration
 
@@ -77,7 +77,7 @@ The `build_firmware.ps1` script handles all of this automatically.
 
 ## Related
 
-- [ADR-018](ADR-018-esp32-dev-implementation.md) — ESP32 CSI frame format and UDP streaming
-- [ADR-058](ADR-058-ruvector-wasm-browser-pose-example.md) — Dual-modal WASM browser pose demo
-- [ADR-039](ADR-039-edge-intelligence-framework.md) — Edge intelligence on ESP32
-- Issue [#245](https://github.com/ruvnet/RuView/issues/245) — Tracking issue
+- [ADR-018](ADR-018-esp32-dev-implementation.md) - ESP32 CSI frame format and UDP streaming
+- [ADR-058](ADR-058-ruvector-wasm-browser-pose-example.md) - Dual-modal WASM browser pose demo
+- [ADR-039](ADR-039-edge-intelligence-framework.md) - Edge intelligence on ESP32
+- Issue [#245](https://github.com/ruvnet/RuView/issues/245) - Tracking issue

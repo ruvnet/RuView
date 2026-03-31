@@ -17,17 +17,17 @@ backends are [SQLx](https://docs.rs/sqlx) for relational storage (PostgreSQL and
 
 ## Planned Features
 
-- **Dual backend** -- PostgreSQL for production deployments, SQLite for single-node and embedded
+- **Dual backend** - PostgreSQL for production deployments, SQLite for single-node and embedded
   use. Selectable at compile time via feature flags.
-- **Redis caching** -- Connection-pooled Redis for low-latency pose estimate lookups, session
+- **Redis caching** - Connection-pooled Redis for low-latency pose estimate lookups, session
   state, and pub/sub event distribution.
-- **Migrations** -- Embedded SQL migrations managed by SQLx, applied automatically on startup.
-- **Repository pattern** -- Typed repository structs (`PoseRepository`, `SessionRepository`,
+- **Migrations** - Embedded SQL migrations managed by SQLx, applied automatically on startup.
+- **Repository pattern** - Typed repository structs (`PoseRepository`, `SessionRepository`,
   `AlertRepository`) implementing the core `DataStore` trait.
-- **Connection pooling** -- Configurable pool sizes via `sqlx::PgPool` / `sqlx::SqlitePool`.
-- **Transaction support** -- Scoped transactions for multi-table writes (e.g., survivor detection
+- **Connection pooling** - Configurable pool sizes via `sqlx::PgPool` / `sqlx::SqlitePool`.
+- **Transaction support** - Scoped transactions for multi-table writes (e.g., survivor detection
   plus alert creation).
-- **Time-series optimisation** -- Partitioned tables and retention policies for high-frequency CSI
+- **Time-series optimisation** - Partitioned tables and retention policies for high-frequency CSI
   frame storage.
 
 ### Planned feature flags

@@ -10,7 +10,7 @@ Proposed
 
 ADR-012 established the ESP32 CSI Sensor Mesh architecture: hardware rationale, firmware file structure, `csi_feature_frame_t` C struct, aggregator design, clock-drift handling via feature-level fusion, and a $54 starter BOM. That ADR answers *what* to build and *why*.
 
-This ADR answers *how* to build it — the concrete development sequence, the specific integration points in existing code, and how to test each layer before hardware is in hand.
+This ADR answers *how* to build it - the concrete development sequence, the specific integration points in existing code, and how to test each layer before hardware is in hand.
 
 ### Current State
 
@@ -18,12 +18,12 @@ This ADR answers *how* to build it — the concrete development sequence, the sp
 
 | Component | Location | Status |
 |-----------|----------|--------|
-| Binary frame parser | `wifi-densepose-hardware/src/esp32_parser.rs` | Complete — `Esp32CsiParser::parse_frame()`, `parse_stream()`, 7 passing tests |
-| Frame types | `wifi-densepose-hardware/src/csi_frame.rs` | Complete — `CsiFrame`, `CsiMetadata`, `SubcarrierData`, `to_amplitude_phase()` |
-| Parse error types | `wifi-densepose-hardware/src/error.rs` | Complete — `ParseError` enum with 6 variants |
-| Signal processing pipeline | `wifi-densepose-signal` crate | Complete — Hampel, Fresnel, BVP, Doppler, spectrogram |
-| CSI extractor (Python) | `v1/src/hardware/csi_extractor.py` | Stub — `_read_raw_data()` raises `NotImplementedError` |
-| Router interface (Python) | `v1/src/hardware/router_interface.py` | Stub — `_parse_csi_response()` raises `RouterConnectionError` |
+| Binary frame parser | `wifi-densepose-hardware/src/esp32_parser.rs` | Complete - `Esp32CsiParser::parse_frame()`, `parse_stream()`, 7 passing tests |
+| Frame types | `wifi-densepose-hardware/src/csi_frame.rs` | Complete - `CsiFrame`, `CsiMetadata`, `SubcarrierData`, `to_amplitude_phase()` |
+| Parse error types | `wifi-densepose-hardware/src/error.rs` | Complete - `ParseError` enum with 6 variants |
+| Signal processing pipeline | `wifi-densepose-signal` crate | Complete - Hampel, Fresnel, BVP, Doppler, spectrogram |
+| CSI extractor (Python) | `v1/src/hardware/csi_extractor.py` | Stub - `_read_raw_data()` raises `NotImplementedError` |
+| Router interface (Python) | `v1/src/hardware/router_interface.py` | Stub - `_parse_csi_response()` raises `RouterConnectionError` |
 
 **Not yet implemented:**
 
@@ -59,7 +59,7 @@ The firmware must write frames in this exact format. The parser already validate
 
 We will implement the ESP32 development stack in four sequential layers, each independently testable before hardware is available.
 
-### Layer 1 — ESP-IDF Firmware (`firmware/esp32-csi-node/`)
+### Layer 1 - ESP-IDF Firmware (`firmware/esp32-csi-node/`)
 
 Implement the C firmware project per the file structure in ADR-012. Key design decisions deferred from ADR-012:
 
@@ -113,7 +113,7 @@ CONFIG_FREERTOS_HZ=1000
 
 **Build toolchain**: ESP-IDF v5.2+ (pinned). Docker image: `espressif/idf:v5.2` for reproducible CI.
 
-### Layer 2 — UDP Aggregator (`crates/wifi-densepose-hardware/src/aggregator/`)
+### Layer 2 - UDP Aggregator (`crates/wifi-densepose-hardware/src/aggregator/`)
 
 New module within the hardware crate. Entry point: `aggregator_main()` callable as a binary target.
 
@@ -153,7 +153,7 @@ impl Esp32Aggregator {
                     let _ = self.tx.try_send(frame); // drop if pipeline is full
                 }
                 Err(e) => {
-                    // Log and continue — never crash on bad UDP packet
+                    // Log and continue - never crash on bad UDP packet
                     eprintln!("aggregator: parse error: {e}");
                 }
             }
@@ -164,7 +164,7 @@ impl Esp32Aggregator {
 
 **Testable without hardware**: The test suite generates frames using `build_test_frame()` (same helper pattern as `esp32_parser.rs` tests) and sends them over a loopback UDP socket. The aggregator receives and forwards them identically to real hardware frames.
 
-### Layer 3 — CsiFrame → CsiData Bridge
+### Layer 3 - CsiFrame → CsiData Bridge
 
 Bridge from `wifi-densepose-hardware::CsiFrame` to the signal processing type `wifi_densepose_signal::CsiData` (or a compatible intermediate type consumed by the Rust pipeline).
 
@@ -209,7 +209,7 @@ impl From<CsiFrame> for CsiData {
 
 The bridge test: parse a known binary frame, convert to `CsiData`, assert `amplitude[0]` = √(I₀² + Q₀²) to within f64 precision.
 
-### Layer 4 — Python `_read_raw_data()` Real Implementation
+### Layer 4 - Python `_read_raw_data()` Real Implementation
 
 Replace the `NotImplementedError` stub in `v1/src/hardware/csi_extractor.py` with a UDP socket reader. This allows the Python pipeline to receive real CSI from the aggregator while the Rust pipeline is being integrated.
 
@@ -240,7 +240,7 @@ class CSIExtractor:
             return data
         except _socket.timeout:
             raise CSIExtractionError(
-                "No CSI data received within timeout — "
+                "No CSI data received within timeout - "
                 "is the ESP32 aggregator running?"
             )
 ```
@@ -250,7 +250,7 @@ This is tested with a mock UDP server in the unit tests (existing `test_csi_extr
 ## Development Sequence
 
 ```
-Phase 1 (Firmware + Aggregator — no pipeline integration needed):
+Phase 1 (Firmware + Aggregator - no pipeline integration needed):
   1. Write firmware/esp32-csi-node/ C project (ESP-IDF v5.2)
   2. Flash to one ESP32-S3-DevKitC board
   3. Verify binary frames arrive on laptop UDP socket using Wireshark
@@ -312,8 +312,8 @@ The existing `esp32_parser.rs` test suite already validates parsing of correctly
 
 - [Espressif ESP-CSI Repository](https://github.com/espressif/esp-csi)
 - [ESP-IDF WiFi CSI API Reference](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/wifi.html#wi-fi-channel-state-information)
-- `wifi-densepose-hardware/src/esp32_parser.rs` — binary frame parser implementation
-- `wifi-densepose-hardware/src/csi_frame.rs` — `CsiFrame`, `to_amplitude_phase()`
+- `wifi-densepose-hardware/src/esp32_parser.rs` - binary frame parser implementation
+- `wifi-densepose-hardware/src/csi_frame.rs` - `CsiFrame`, `to_amplitude_phase()`
 - ADR-012: ESP32 CSI Sensor Mesh (architecture)
 - ADR-011: Python Proof-of-Reality and Mock Elimination
 - ADR-014: SOTA Signal Processing

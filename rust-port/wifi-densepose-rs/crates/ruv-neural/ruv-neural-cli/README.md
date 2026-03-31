@@ -17,12 +17,12 @@ exporting to multiple visualization formats.
 cargo install --path .
 
 # Or run directly
-cargo run -p ruv-neural-cli -- <command>
+cargo run -p ruv-neural-cli - <command>
 ```
 
 ## Commands
 
-### `simulate` -- Generate synthetic neural data
+### `simulate` - Generate synthetic neural data
 
 ```bash
 ruv-neural simulate --channels 64 --duration 10 --sample-rate 1000 --output data.json
@@ -35,7 +35,7 @@ ruv-neural simulate --channels 64 --duration 10 --sample-rate 1000 --output data
 | `-s, --sample-rate` | 1000.0 | Sample rate in Hz         |
 | `-o, --output`   | (none)  | Output file path (JSON)      |
 
-### `analyze` -- Analyze a brain connectivity graph
+### `analyze` - Analyze a brain connectivity graph
 
 ```bash
 ruv-neural analyze --input graph.json --ascii --csv metrics.csv
@@ -47,7 +47,7 @@ ruv-neural analyze --input graph.json --ascii --csv metrics.csv
 | `--ascii`      | false   | Show ASCII visualization       |
 | `--csv`        | (none)  | Export metrics to CSV file     |
 
-### `mincut` -- Compute minimum cut
+### `mincut` - Compute minimum cut
 
 ```bash
 ruv-neural mincut --input graph.json --k 4
@@ -58,7 +58,7 @@ ruv-neural mincut --input graph.json --k 4
 | `-i, --input`  | (required) | Input graph file (JSON)    |
 | `-k`           | (none)  | Multi-way cut with k partitions|
 
-### `pipeline` -- Full end-to-end pipeline
+### `pipeline` - Full end-to-end pipeline
 
 ```bash
 ruv-neural pipeline --channels 32 --duration 5 --dashboard
@@ -72,7 +72,7 @@ Runs: simulate -> preprocess -> build graph -> mincut -> embed -> decode.
 | `-d, --duration` | 5.0     | Duration in seconds            |
 | `--dashboard`    | false   | Show real-time ASCII dashboard |
 
-### `export` -- Export to visualization format
+### `export` - Export to visualization format
 
 ```bash
 ruv-neural export --input graph.json --format dot --output graph.dot
@@ -84,7 +84,7 @@ ruv-neural export --input graph.json --format dot --output graph.dot
 | `-f, --format`   | d3      | Output format: d3, dot, gexf, csv, rvf |
 | `-o, --output`   | (required) | Output file path                  |
 
-### `info` -- Show system information
+### `info` - Show system information
 
 ```bash
 ruv-neural info

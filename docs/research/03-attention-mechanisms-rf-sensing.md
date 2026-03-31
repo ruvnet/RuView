@@ -43,7 +43,7 @@ cut partitioning of this weighted graph identifies the boundary between
 perturbed and unperturbed subgraphs, localizing the person.
 
 ```
-    RF Topological Sensing — Conceptual Model
+    RF Topological Sensing - Conceptual Model
     ==========================================
 
     Physical Space                Signal Graph G = (V, E, W)
@@ -75,7 +75,7 @@ limitations:
    ignoring the sequential structure of human motion.
 
 Attention mechanisms address all three by learning to weight information
-sources — subcarriers, time steps, links, and nodes — according to their
+sources - subcarriers, time steps, links, and nodes - according to their
 relevance for the downstream task.
 
 ### 1.3 Notation
@@ -183,7 +183,7 @@ where e_ij in R^E contains link-level features:
 - Fresnel zone geometry (distance, angle)
 
 ```
-    Edge-Featured GAT — RF Sensing
+    Edge-Featured GAT - RF Sensing
     ================================
 
          x_i                    x_j
@@ -217,7 +217,7 @@ but before the dot product:
 
 This is strictly more expressive and important for RF sensing where the
 same node should attend differently depending on which neighbor it is
-evaluating — a dynamic property essential for tracking moving targets.
+evaluating - a dynamic property essential for tracking moving targets.
 
 ---
 
@@ -295,7 +295,7 @@ making the model invariant to window start time.
 
 ### 3.4 Causal vs. Bidirectional Attention
 
-For real-time sensing, causal (masked) attention is necessary — time step t
+For real-time sensing, causal (masked) attention is necessary - time step t
 can only attend to steps 1..t:
 
 ```
@@ -321,7 +321,7 @@ weight for graph construction. Attention-weighted temporal pooling:
 
 Here z_t^{ij} is the contextualized CSI representation for link (i,j)
 at time t, and g maps to a scalar coherence score. The attention weights
-alpha_t learn to focus on the most informative moments — for example,
+alpha_t learn to focus on the most informative moments - for example,
 the peak of a Doppler burst during a gesture.
 
 ---
@@ -400,7 +400,7 @@ link n:
 - beta, gamma: learnable parameters
 
 This is the concept implemented in RuVector's `CrossViewpointAttention`
-with `GeometricBias` — the attention mechanism is biased toward
+with `GeometricBias` - the attention mechanism is biased toward
 geometrically meaningful link combinations while still allowing the model
 to discover non-obvious correlations.
 
@@ -455,7 +455,7 @@ graph Laplacian L = D - W (D is the degree matrix):
     Relaxed: min_y  y^T L y / y^T D y,  y in R^N
 ```
 
-The solution is the Fiedler vector — the eigenvector of the smallest
+The solution is the Fiedler vector - the eigenvector of the smallest
 nonzero eigenvalue of the normalized Laplacian.
 
 ### 5.3 Attention as Edge Scoring for MinCut
@@ -508,7 +508,7 @@ The training signal for attention comes from two sources:
    should have low weights (those crossing the person's body).
 
 2. **Self-supervised**: The mincut objective itself provides a training
-   signal — attention weights that produce cleaner cuts (lower Ncut value
+   signal - attention weights that produce cleaner cuts (lower Ncut value
    with balanced partitions) are reinforced.
 
 ```
@@ -602,7 +602,7 @@ via the Cramer-Rao bound. The Geometric Diversity Index from RuVector's
 
 ### 6.5 Dynamic Node Dropout
 
-Spatial attention naturally enables dynamic node dropout — nodes with
+Spatial attention naturally enables dynamic node dropout - nodes with
 importance below a threshold are excluded from graph construction:
 
 ```
@@ -802,7 +802,7 @@ Instead of full T x T attention, use structured sparsity:
 ```
 
 Complexity: O(T * w) with w << T. For CSI at 100 Hz, w = 32 covers
-320 ms — sufficient for most motion events.
+320 ms - sufficient for most motion events.
 
 **Dilated Attention**: Attend to positions at exponentially increasing gaps:
 
@@ -841,7 +841,7 @@ computing attention only within buckets:
     With b = sqrt(T): O(T * sqrt(T))
 ```
 
-For RF sensing, LSH naturally groups similar CSI patterns — time steps
+For RF sensing, LSH naturally groups similar CSI patterns - time steps
 with similar signal characteristics attend to each other, which is
 physically meaningful (similar body poses produce similar CSI).
 
@@ -999,7 +999,7 @@ link-level activity labels. The model learns to identify active links.
 **Stage 3: End-to-end fine-tuning** with mincut loss (Section 5) and
 person location supervision. All attention mechanisms adapt jointly.
 
-**Stage 4: Distillation for edge deployment** — train efficient variants
+**Stage 4: Distillation for edge deployment** - train efficient variants
 (Section 8) to match the full model's attention patterns using KL
 divergence between attention distributions.
 

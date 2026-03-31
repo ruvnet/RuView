@@ -428,10 +428,10 @@ criterion = { workspace = true }
 
 ```bash
 # Generate a flamegraph of the full pipeline
-cargo flamegraph --bench full_pipeline -- --bench
+cargo flamegraph --bench full_pipeline - --bench
 
 # Memory profiling with DHAT
-cargo test --features dhat-heap -- --test full_pipeline
+cargo test --features dhat-heap - --test full_pipeline
 ```
 
 #### WASM Performance

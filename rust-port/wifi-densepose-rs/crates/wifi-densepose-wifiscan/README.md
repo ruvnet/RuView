@@ -18,16 +18,16 @@ pluggable platform adapters.
 
 ## Features
 
-- **BSSID registry** -- Tracks observed access points with running RSSI statistics, band/radio
+- **BSSID registry** - Tracks observed access points with running RSSI statistics, band/radio
   type classification, and metadata. Types: `BssidId`, `BssidObservation`, `BssidRegistry`,
   `BssidEntry`.
-- **Netsh adapter** (Tier 1) -- Parses `netsh wlan show networks mode=bssid` output into
+- **Netsh adapter** (Tier 1) - Parses `netsh wlan show networks mode=bssid` output into
   structured `BssidObservation` records. Zero platform dependencies.
-- **WLAN API scanner** (Tier 2, `wlanapi` feature) -- Async scanning via the Windows WLAN API
+- **WLAN API scanner** (Tier 2, `wlanapi` feature) - Async scanning via the Windows WLAN API
   with `tokio` integration.
-- **Multi-AP frame** -- `MultiApFrame` aggregates observations from multiple BSSIDs into a single
+- **Multi-AP frame** - `MultiApFrame` aggregates observations from multiple BSSIDs into a single
   timestamped frame for downstream processing.
-- **Sensing pipeline** (`pipeline` feature) -- `WindowsWifiPipeline` orchestrates motion
+- **Sensing pipeline** (`pipeline` feature) - `WindowsWifiPipeline` orchestrates motion
   detection, breathing estimation, attention-weighted AP selection, and location fingerprint
   matching.
 
@@ -72,16 +72,16 @@ let pipeline = WindowsWifiPipeline::new();
 
 ```text
 wifi-densepose-wifiscan/src/
-  lib.rs          -- Re-exports, feature gates
+  lib.rs          - Re-exports, feature gates
   domain/
-    bssid.rs      -- BssidId, BssidObservation, BandType, RadioType
-    registry.rs   -- BssidRegistry, BssidEntry, BssidMeta, RunningStats
-    frame.rs      -- MultiApFrame (multi-BSSID aggregated frame)
-    result.rs     -- EnhancedSensingResult
-  port.rs         -- WlanScanPort trait (platform abstraction)
-  adapter.rs      -- NetshBssidScanner (Tier 1), WlanApiScanner (Tier 2)
-  pipeline.rs     -- WindowsWifiPipeline (motion, breathing, attention, fingerprint)
-  error.rs        -- WifiScanError
+    bssid.rs      - BssidId, BssidObservation, BandType, RadioType
+    registry.rs   - BssidRegistry, BssidEntry, BssidMeta, RunningStats
+    frame.rs      - MultiApFrame (multi-BSSID aggregated frame)
+    result.rs     - EnhancedSensingResult
+  port.rs         - WlanScanPort trait (platform abstraction)
+  adapter.rs      - NetshBssidScanner (Tier 1), WlanApiScanner (Tier 2)
+  pipeline.rs     - WindowsWifiPipeline (motion, breathing, attention, fingerprint)
+  error.rs        - WifiScanError
 ```
 
 ## Related Crates

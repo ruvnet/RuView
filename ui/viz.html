@@ -101,7 +101,7 @@
     import { WebSocketClient } from './services/websocket-client.js';
     import { DataProcessor } from './services/data-processor.js';
 
-    // -- Application State --
+    // - Application State --
     const state = {
       scene: null,
       environment: null,
@@ -115,7 +115,7 @@
       startTime: Date.now()
     };
 
-    // -- Loading Progress --
+    // - Loading Progress --
     function setLoadingProgress(pct, msg) {
       const fill = document.getElementById('loading-fill');
       const status = document.getElementById('loading-status');
@@ -131,7 +131,7 @@
       }, 700);
     }
 
-    // -- Initialize Stats.js --
+    // - Initialize Stats.js --
     function initStats() {
       const stats = new Stats();
       stats.showPanel(0); // FPS panel
@@ -140,7 +140,7 @@
       return stats;
     }
 
-    // -- Main Initialization --
+    // - Main Initialization --
     async function init() {
       const container = document.getElementById('viz-container');
 
@@ -207,7 +207,7 @@
       }
     }
 
-    // -- Main Update Loop (called every frame) --
+    // - Main Update Loop (called every frame) --
     function mainUpdate(delta, elapsed) {
       // Stats.js begin
       if (state.stats) state.stats.begin();
@@ -266,7 +266,7 @@
       if (state.stats) state.stats.end();
     }
 
-    // -- Handle incoming WebSocket messages --
+    // - Handle incoming WebSocket messages --
     function handleWebSocketMessage(message) {
       const processed = state.dataProcessor.processMessage(message);
       if (!processed) return;
@@ -297,7 +297,7 @@
       }
     }
 
-    // -- Handle WebSocket connection state changes --
+    // - Handle WebSocket connection state changes --
     function handleConnectionStateChange(newState, oldState) {
       console.log(`[VIZ] Connection: ${oldState} -> ${newState}`);
 
@@ -313,7 +313,7 @@
       }
     }
 
-    // -- Cleanup on page unload --
+    // - Cleanup on page unload --
     window.addEventListener('beforeunload', () => {
       if (state.wsClient) state.wsClient.dispose();
       if (state.bodyModelManager) state.bodyModelManager.dispose();
@@ -323,7 +323,7 @@
       if (state.scene) state.scene.dispose();
     });
 
-    // -- Keyboard shortcuts --
+    // - Keyboard shortcuts --
     document.addEventListener('keydown', (e) => {
       switch (e.key.toLowerCase()) {
         case 'r':
@@ -347,7 +347,7 @@
       }
     });
 
-    // -- Start --
+    // - Start --
     init();
   </script>
 </body>

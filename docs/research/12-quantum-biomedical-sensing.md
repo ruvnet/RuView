@@ -1,6 +1,6 @@
-# Quantum Biomedical Sensing — From Anatomy to Field Dynamics
+# Quantum Biomedical Sensing - From Anatomy to Field Dynamics
 
-## SOTA Research Document — RF Topological Sensing Series (12/12)
+## SOTA Research Document - RF Topological Sensing Series (12/12)
 
 **Date**: 2026-03-08
 **Domain**: Quantum Biomedical Sensing × Graph Diagnostics × Ambient Health Monitoring
@@ -17,7 +17,7 @@ The heart's electrical cycle produces magnetic fields detectable meters away. Ne
 in femtotesla-scale magnetic fluctuations. Blood flow carries ionic currents that create
 measurable magnetic disturbances.
 
-Quantum sensors — operating at picotesla and femtotesla sensitivity — can observe these
+Quantum sensors - operating at picotesla and femtotesla sensitivity - can observe these
 fields directly. Combined with graph-based topological analysis (minimum cut, coherence
 detection, RuVector temporal tracking), this creates a fundamentally new diagnostic paradigm:
 
@@ -76,7 +76,7 @@ Dense Biomagnetic Array (conceptual):
     │  Q   Q   Q   Q   Q   Q   Q   Q    │    - Continuously at 1 kHz
     └────────────────────────────────────┘
 
-    Output: B(x, y, z, t) — 4D biomagnetic field map
+    Output: B(x, y, z, t) - 4D biomagnetic field map
 ```
 
 ### 2.3 Graph-Based Biomagnetic Analysis
@@ -137,10 +137,10 @@ Neural Field Generation:
     B ≈ 100 fT
 
     Required sensitivity: < 10 fT/√Hz
-    NV diamond (current): ~1 pT/√Hz — not yet sufficient
-    NV diamond (projected 2028): ~10 fT/√Hz — approaching
-    SERF magnetometer: ~0.16 fT/√Hz — sufficient now
-    OPM (optically pumped): ~5 fT/√Hz — sufficient now
+    NV diamond (current): ~1 pT/√Hz - not yet sufficient
+    NV diamond (projected 2028): ~10 fT/√Hz - approaching
+    SERF magnetometer: ~0.16 fT/√Hz - sufficient now
+    OPM (optically pumped): ~5 fT/√Hz - sufficient now
 ```
 
 ### 3.2 Wearable MEG with Quantum Sensors
@@ -371,9 +371,9 @@ Non-Contact Detection Ranges:
     ────────────────────────────────────────────────────────────
     Heart (magnetic) | 100 pT  | 1 pT   | 0.01 pT | NV (1m), SERF (3m)
     Heart (electric) | 1 mV/m  | 10 µV/m | 1 µV/m  | Rydberg (all)
-    Breathing (motion)| — via RF disturbance — | ESP32 mesh
-    Muscle tremor    | 10 pT   | 0.1 pT | —       | NV (1m)
-    Neural (MEG)     | 1 pT    | 0.01 pT| —       | SERF (1m only)
+    Breathing (motion)| - via RF disturbance - | ESP32 mesh
+    Muscle tremor    | 10 pT   | 0.1 pT | -       | NV (1m)
+    Neural (MEG)     | 1 pT    | 0.01 pT| -       | SERF (1m only)
 
     Practical non-contact vital signs at 1-3m:
     ✅ Heart rate (magnetic + RF)
@@ -816,7 +816,7 @@ Hospital Patient Monitoring Without Wires:
     ✅ Movement/activity (RF: excellent)
     ✅ Fall detection (RF: <2s)
     ⚠️ Heart rhythm detail (quantum: approaching clinical)
-    ❌ SpO2 (requires optical — not yet ambient)
+    ❌ SpO2 (requires optical - not yet ambient)
     ❌ Blood pressure (requires contact measurement)
 ```
 
@@ -1139,9 +1139,9 @@ Timeline:
 
 Quantum biomedical sensing represents the convergence of three advancing frontiers:
 
-1. **Quantum sensor technology** — Room-temperature sensors approaching fT sensitivity
-2. **Graph-based analysis** — Minimum cut and coherence topology for health monitoring
-3. **Ambient computing** — Non-contact, privacy-preserving, continuous measurement
+1. **Quantum sensor technology** - Room-temperature sensors approaching fT sensitivity
+2. **Graph-based analysis** - Minimum cut and coherence topology for health monitoring
+3. **Ambient computing** - Non-contact, privacy-preserving, continuous measurement
 
 The key insight is that **disease is a topological change in the body's electromagnetic
 coherence graph**. The same minimum cut algorithms that detect a person walking through

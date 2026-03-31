@@ -31,7 +31,7 @@ each with deterministic tests and no mock data.
 
 **What:** Multiply CSI from antenna pair (i,j) as `H_i * conj(H_j)` to cancel
 carrier frequency offset (CFO), sampling frequency offset (SFO), and packet
-detection delay — all of which corrupt raw phase measurements.
+detection delay - all of which corrupt raw phase measurements.
 
 **Why:** Raw CSI phase from commodity hardware (ESP32, Intel 5300) includes
 random offsets that change per packet. Conjugate multiplication preserves only
@@ -111,7 +111,7 @@ Select top-K subcarriers by sensitivity score.
 subcarriers. BVP is a 2D representation (velocity × time) that encodes how
 different body parts move at different speeds.
 
-**Why:** BVP is domain-independent — the same velocity profile appears regardless
+**Why:** BVP is domain-independent - the same velocity profile appears regardless
 of room layout, furniture, or AP placement. This makes it the basis for
 cross-environment gesture and activity recognition.
 
@@ -124,12 +124,12 @@ subcarriers: `BVP[v,t] = Σ_k |STFT_k[v,t]|` where v maps to velocity via
 ## Implementation
 
 All algorithms implemented in `wifi-densepose-signal/src/` as new modules:
-- `csi_ratio.rs` — Conjugate multiplication
-- `hampel.rs` — Hampel filter
-- `fresnel.rs` — Fresnel zone breathing model
-- `spectrogram.rs` — CSI spectrogram generation
-- `subcarrier_selection.rs` — Sensitivity-based selection
-- `bvp.rs` — Body Velocity Profile extraction
+- `csi_ratio.rs` - Conjugate multiplication
+- `hampel.rs` - Hampel filter
+- `fresnel.rs` - Fresnel zone breathing model
+- `spectrogram.rs` - CSI spectrogram generation
+- `subcarrier_selection.rs` - Sensitivity-based selection
+- `bvp.rs` - Body Velocity Profile extraction
 
 Each module has:
 - Deterministic unit tests with known input/output

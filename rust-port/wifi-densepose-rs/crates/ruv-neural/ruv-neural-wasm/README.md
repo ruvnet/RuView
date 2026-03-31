@@ -16,15 +16,15 @@ separately targeting `wasm32-unknown-unknown`.
 
 ## Features
 
-- **Graph parsing**: `create_brain_graph` -- parse `BrainGraph` from JSON
-- **Minimum cut**: `compute_mincut` -- Stoer-Wagner on graphs up to 500 nodes
-- **Topology metrics**: `compute_topology_metrics` -- density, efficiency,
+- **Graph parsing**: `create_brain_graph` - parse `BrainGraph` from JSON
+- **Minimum cut**: `compute_mincut` - Stoer-Wagner on graphs up to 500 nodes
+- **Topology metrics**: `compute_topology_metrics` - density, efficiency,
   modularity, Fiedler value, entropy, module count
-- **Spectral embedding**: `embed_graph` -- power iteration on normalized Laplacian
+- **Spectral embedding**: `embed_graph` - power iteration on normalized Laplacian
   (no LAPACK dependency)
-- **State decoding**: `decode_state` -- threshold-based cognitive state classification
+- **State decoding**: `decode_state` - threshold-based cognitive state classification
   from topology metrics
-- **RVF I/O**: `load_rvf` / `export_rvf` -- read and write RuVector binary files
+- **RVF I/O**: `load_rvf` / `export_rvf` - read and write RuVector binary files
 - **Streaming** (`streaming`): WebSocket-compatible streaming data processor
 - **Visualization data** (`viz_data`): Data structures for D3.js and Three.js rendering
 

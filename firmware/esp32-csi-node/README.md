@@ -2,7 +2,7 @@
 
 **Turn a $7 microcontroller into a privacy-first human sensing node.**
 
-This firmware captures WiFi Channel State Information (CSI) from an ESP32-S3 and transforms it into real-time presence detection, vital sign monitoring, and programmable sensing -- all without cameras or wearables. Part of the [WiFi-DensePose](../../README.md) project.
+This firmware captures WiFi Channel State Information (CSI) from an ESP32-S3 and transforms it into real-time presence detection, vital sign monitoring, and programmable sensing - all without cameras or wearables. Part of the [WiFi-DensePose](../../README.md) project.
 
 [![ESP-IDF v5.2](https://img.shields.io/badge/ESP--IDF-v5.2-blue.svg)](https://docs.espressif.com/projects/esp-idf/en/v5.2/)
 [![Target: ESP32-S3](https://img.shields.io/badge/target-ESP32--S3-purple.svg)](https://www.espressif.com/en/products/socs/esp32-s3)
@@ -25,7 +25,7 @@ This firmware captures WiFi Channel State Information (CSI) from an ESP32-S3 and
 
 For users who want to get running fast. Detailed explanations follow in later sections.
 
-### 1. Build (Docker -- the only reliable method)
+### 1. Build (Docker - the only reliable method)
 
 ```bash
 # From the repository root:
@@ -55,7 +55,7 @@ python scripts/provision.py --port COM7 \
 ### 4. Start the sensing server
 
 ```bash
-cargo run -p wifi-densepose-sensing-server -- --http-port 3000 --source auto
+cargo run -p wifi-densepose-sensing-server - --http-port 3000 --source auto
 ```
 
 ### 5. Open the UI
@@ -105,7 +105,7 @@ The firmware implements a tiered processing pipeline. Each tier builds on the pr
 +--------------------------------------------------------------------------+
 ```
 
-### Tier 0 -- Raw CSI Passthrough (Stable)
+### Tier 0 - Raw CSI Passthrough (Stable)
 
 The default, production-stable baseline. Captures CSI frames from the WiFi driver and streams them over UDP in the ADR-018 binary format.
 
@@ -114,29 +114,29 @@ The default, production-stable baseline. Captures CSI frames from the WiFi drive
 - **Payload:** 20-byte header + I/Q pairs (2 bytes per subcarrier per antenna)
 - **Bandwidth:** ~5 KB/s per node (64 subcarriers, 1 antenna)
 
-### Tier 1 -- Basic DSP (Stable)
+### Tier 1 - Basic DSP (Stable)
 
 Adds on-device signal conditioning to reduce bandwidth and improve signal quality.
 
-- **Phase unwrapping** -- removes 2-pi discontinuities
-- **Welford running statistics** -- incremental mean and variance per subcarrier
-- **Top-K subcarrier selection** -- tracks only the K highest-variance subcarriers
-- **Delta compression** -- XOR + RLE encoding reduces bandwidth by ~70%
+- **Phase unwrapping** - removes 2-pi discontinuities
+- **Welford running statistics** - incremental mean and variance per subcarrier
+- **Top-K subcarrier selection** - tracks only the K highest-variance subcarriers
+- **Delta compression** - XOR + RLE encoding reduces bandwidth by ~70%
 
-### Tier 2 -- Full Pipeline (Stable)
+### Tier 2 - Full Pipeline (Stable)
 
 Adds real-time health and safety monitoring.
 
-- **Breathing rate** -- biquad IIR bandpass 0.1-0.5 Hz, zero-crossing BPM (6-30 BPM)
-- **Heart rate** -- biquad IIR bandpass 0.8-2.0 Hz, zero-crossing BPM (40-120 BPM)
-- **Presence detection** -- adaptive threshold calibration (60 s ambient learning)
-- **Fall detection** -- phase acceleration exceeds configurable threshold
-- **Multi-person estimation** -- subcarrier group clustering (up to 4 persons)
-- **Vitals packet** -- 32-byte UDP packet at 1 Hz (magic `0xC5110002`)
+- **Breathing rate** - biquad IIR bandpass 0.1-0.5 Hz, zero-crossing BPM (6-30 BPM)
+- **Heart rate** - biquad IIR bandpass 0.8-2.0 Hz, zero-crossing BPM (40-120 BPM)
+- **Presence detection** - adaptive threshold calibration (60 s ambient learning)
+- **Fall detection** - phase acceleration exceeds configurable threshold
+- **Multi-person estimation** - subcarrier group clustering (up to 4 persons)
+- **Vitals packet** - 32-byte UDP packet at 1 Hz (magic `0xC5110002`)
 
-### Tier 3 -- WASM Programmable Sensing (Alpha)
+### Tier 3 - WASM Programmable Sensing (Alpha)
 
-Turns the ESP32 from a fixed-function sensor into a programmable sensing computer. Instead of reflashing firmware to change algorithms, you upload new sensing logic as small WASM modules -- compiled from Rust, packaged in signed RVF containers.
+Turns the ESP32 from a fixed-function sensor into a programmable sensing computer. Instead of reflashing firmware to change algorithms, you upload new sensing logic as small WASM modules - compiled from Rust, packaged in signed RVF containers.
 
 See the [WASM Programmable Sensing](#wasm-programmable-sensing-tier-3) section for full details.
 
@@ -197,8 +197,8 @@ Offset  Size  Field
 | Docker Desktop | 28.x+ | Cross-compile firmware in ESP-IDF container |
 | esptool | 5.x+ | Flash firmware to ESP32 (`pip install esptool`) |
 | Python 3.10+ | 3.10+ | Provisioning script, serial monitor |
-| ESP32-S3 board | -- | Target hardware |
-| CP210x driver | -- | USB-UART bridge driver ([download](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers)) |
+| ESP32-S3 board | - | Target hardware |
+| CP210x driver | - | USB-UART bridge driver ([download](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers)) |
 
 > **Why Docker?** ESP-IDF does NOT work from Git Bash/MSYS2 on Windows. The `idf.py` script detects the `MSYSTEM` environment variable and skips `main()`. Even removing `MSYSTEM`, the `cmd.exe` subprocess injects `doskey` aliases that break the ninja linker. Docker is the only reliable cross-platform build method.
 
@@ -215,9 +215,9 @@ MSYS_NO_PATHCONV=1 docker run --rm \
 The `MSYS_NO_PATHCONV=1` prefix prevents Git Bash from mangling the `/project` path to `C:/Program Files/Git/project`.
 
 **Build output:**
-- `build/bootloader/bootloader.bin` -- second-stage bootloader
-- `build/partition_table/partition-table.bin` -- flash partition layout
-- `build/esp32-csi-node.bin` -- application firmware
+- `build/bootloader/bootloader.bin` - second-stage bootloader
+- `build/partition_table/partition-table.bin` - flash partition layout
+- `build/esp32-csi-node.bin` - application firmware
 
 ### Custom Configuration
 
@@ -268,7 +268,7 @@ python -m serial.tools.miniterm COM7 115200
 Expected output after boot:
 
 ```
-I (321) main: ESP32-S3 CSI Node (ADR-018) -- Node ID: 1
+I (321) main: ESP32-S3 CSI Node (ADR-018) - Node ID: 1
 I (345) main: WiFi STA initialized, connecting to SSID: wifi-densepose
 I (1023) main: Connected to WiFi
 I (1025) main: CSI streaming active -> 192.168.1.100:5005 (edge_tier=2, OTA=ready, WASM=ready)
@@ -456,11 +456,11 @@ cargo build -p wifi-densepose-wasm-edge --target wasm32-unknown-unknown --releas
 
 | Component | SRAM | PSRAM | Flash |
 |-----------|------|-------|-------|
-| Base firmware (Tier 0) | ~12 KB | -- | ~820 KB |
-| Tier 1-2 DSP pipeline | ~10 KB | -- | ~33 KB |
-| WASM3 interpreter | ~10 KB | -- | ~100 KB |
-| WASM arenas (x4 slots) | -- | 640 KB | -- |
-| Host API + HTTP upload | ~3 KB | -- | ~23 KB |
+| Base firmware (Tier 0) | ~12 KB | - | ~820 KB |
+| Tier 1-2 DSP pipeline | ~10 KB | - | ~33 KB |
+| WASM3 interpreter | ~10 KB | - | ~100 KB |
+| WASM arenas (x4 slots) | - | 640 KB | - |
+| Host API + HTTP upload | ~3 KB | - | ~23 KB |
 | **Total** | **~35 KB** | **640 KB** | **~943 KB** |
 
 - **PSRAM remaining:** 7.36 MB (available for future use)
@@ -525,12 +525,12 @@ The firmware is continuously verified by [`.github/workflows/firmware-ci.yml`](.
 
 ## QEMU Testing (ADR-061)
 
-Test the firmware without physical hardware using Espressif's QEMU fork. A compile-time mock CSI generator (`CONFIG_CSI_MOCK_ENABLED=y`) replaces the real WiFi CSI callback with a timer-driven synthetic frame injector that exercises the full edge processing pipeline -- biquad filtering, Welford stats, top-K selection, presence/fall detection, and vitals extraction.
+Test the firmware without physical hardware using Espressif's QEMU fork. A compile-time mock CSI generator (`CONFIG_CSI_MOCK_ENABLED=y`) replaces the real WiFi CSI callback with a timer-driven synthetic frame injector that exercises the full edge processing pipeline - biquad filtering, Welford stats, top-K selection, presence/fall detection, and vitals extraction.
 
 ### Prerequisites
 
-- **ESP-IDF v5.4** -- [installation guide](https://docs.espressif.com/projects/esp-idf/en/v5.4/esp32s3/get-started/)
-- **Espressif QEMU fork** -- must be built from source (not in Ubuntu packages):
+- **ESP-IDF v5.4** - [installation guide](https://docs.espressif.com/projects/esp-idf/en/v5.4/esp32s3/get-started/)
+- **Espressif QEMU fork** - must be built from source (not in Ubuntu packages):
 
 ```bash
 git clone --depth 1 https://github.com/espressif/qemu.git /tmp/qemu
@@ -666,7 +666,7 @@ Key breakpoints:
 | `wasm_runtime.c:wasm_on_csi` | WASM module dispatch |
 | `mock_csi.c:mock_generate_csi_frame` | Synthetic frame generation |
 
-VS Code integration -- add to `.vscode/launch.json`:
+VS Code integration - add to `.vscode/launch.json`:
 
 ```json
 {
@@ -755,7 +755,7 @@ No physical ESP32 hardware is needed in CI.
 | No serial output | Wrong baud rate | Use `115200` in your serial monitor |
 | WiFi won't connect | Wrong SSID/password | Re-run `provision.py` with correct credentials |
 | No UDP frames received | Firewall blocking | Allow inbound UDP on port 5005 (see below) |
-| `idf.py` fails on Windows | Git Bash/MSYS2 incompatibility | Use Docker -- this is the only supported build method on Windows |
+| `idf.py` fails on Windows | Git Bash/MSYS2 incompatibility | Use Docker - this is the only supported build method on Windows |
 | CSI callback not firing | Promiscuous mode issue | Verify `esp_wifi_set_promiscuous(true)` in `csi_collector.c` |
 | WASM upload rejected | Signature verification | Disable with `wasm_verify=0` via NVS for development, or sign with Ed25519 |
 | High frame drop rate | Ring buffer overflow | Reduce `edge_tier` or increase `dwell_ms` |

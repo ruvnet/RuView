@@ -1,4 +1,4 @@
-# Witness Verification Log — ADR-028 ESP32 Capability Audit
+# Witness Verification Log - ADR-028 ESP32 Capability Audit
 
 > **Purpose:** Machine-verifiable attestation of repository capabilities at a specific commit.
 > Third parties can re-run these checks to confirm or refute each claim independently.
@@ -32,7 +32,7 @@ cd wifi-densepose
 git checkout 96b01008
 ```
 
-### Step 2: Rust Workspace — Full Test Suite
+### Step 2: Rust Workspace - Full Test Suite
 
 ```bash
 cd rust-port/wifi-densepose-rs
@@ -94,12 +94,12 @@ cargo test -p wifi-densepose-hardware --no-default-features
 ```
 
 **Expected:** 32 tests pass, including:
-- `parse_valid_frame` — validates magic 0xC5110001, field extraction
-- `parse_invalid_magic` — rejects non-CSI data
-- `parse_insufficient_data` — rejects truncated frames
-- `multi_antenna_frame` — handles MIMO configurations
-- `amplitude_phase_conversion` — I/Q → (amplitude, phase) math
-- `bridge_from_known_iq` — hardware→signal crate bridge
+- `parse_valid_frame` - validates magic 0xC5110001, field extraction
+- `parse_invalid_magic` - rejects non-CSI data
+- `parse_insufficient_data` - rejects truncated frames
+- `multi_antenna_frame` - handles MIMO configurations
+- `amplitude_phase_conversion` - I/Q → (amplitude, phase) math
+- `bridge_from_known_iq` - hardware→signal crate bridge
 
 ### Step 7: Verify Signal Processing Algorithms
 
@@ -122,13 +122,13 @@ cargo test -p wifi-densepose-train --no-default-features
 ```
 
 **Expected:** 174+ tests pass, including ADR-027 modules:
-- `domain_within_configured_ranges` — virtual domain parameter bounds
-- `augment_frame_preserves_length` — output shape correctness
-- `augment_frame_identity_domain_approx_input` — identity transform ≈ input
-- `deterministic_same_seed_same_output` — reproducibility
-- `adapt_empty_buffer_returns_error` — no panic on empty input
-- `adapt_zero_rank_returns_error` — no panic on invalid config
-- `buffer_cap_evicts_oldest` — bounded memory (max 10,000 frames)
+- `domain_within_configured_ranges` - virtual domain parameter bounds
+- `augment_frame_preserves_length` - output shape correctness
+- `augment_frame_identity_domain_approx_input` - identity transform ≈ input
+- `deterministic_same_seed_same_output` - reproducibility
+- `adapt_empty_buffer_returns_error` - no panic on empty input
+- `adapt_zero_rank_returns_error` - no panic on invalid config
+- `buffer_cap_evicts_oldest` - bounded memory (max 10,000 frames)
 
 ### Step 9: Verify Python Proof System
 
@@ -201,7 +201,7 @@ Each row is independently verifiable. Status reflects audit-time findings.
 | 20 | Contrastive self-supervised learning (ADR-024) | Yes | **YES** | Projection head, InfoNCE + VICReg in `model.rs` |
 | 21 | Vital sign detection (breathing + heartbeat) | Yes | **YES** | `vitals` crate (1,863 lines), 6-30 BPM / 40-120 BPM |
 | 22 | WiFi-MAT disaster response (START triage) | Yes | **YES** | `mat` crate, 153 tests, detection+localization+alerting |
-| 23 | Deterministic proof system (SHA-256) | Yes | **YES** | PASS — hash `8c0680d7...` matches (numpy 2.4.2, scipy 1.17.1) |
+| 23 | Deterministic proof system (SHA-256) | Yes | **YES** | PASS - hash `8c0680d7...` matches (numpy 2.4.2, scipy 1.17.1) |
 | 24 | 15 crates published on crates.io @ v0.2.0 | Yes | **YES** | All published 2026-03-01 |
 | 25 | Docker images on Docker Hub | Yes | **YES** | `ruvnet/wifi-densepose:latest` (132 MB), `:python` (569 MB) |
 | 26 | WASM browser deployment | Yes | **YES** | `wifi-densepose-wasm` crate, wasm-bindgen, Three.js |
@@ -236,7 +236,7 @@ Each row is independently verifiable. Status reflects audit-time findings.
 
 ### For Reviewers / Due Diligence
 1. Run Steps 2-10 (no hardware needed) to confirm all software claims
-2. Check the attestation matrix — rows marked **YES** have passing test evidence
+2. Check the attestation matrix - rows marked **YES** have passing test evidence
 3. Rows marked **NO** or **NOT MEASURED** are honest gaps, not hidden
 4. The proof system (Step 9) demonstrates commitment to verifiability
 

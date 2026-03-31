@@ -1,5 +1,5 @@
 /**
- * SensingTab — Live WiFi Sensing Visualization
+ * SensingTab - Live WiFi Sensing Visualization
  *
  * Connects to the sensing WebSocket service and renders:
  *   1. A 3D Gaussian-splat signal field (via gaussian-splats.js)
@@ -34,7 +34,7 @@ export class SensingTab {
     this.container.innerHTML = `
       <h2>Live WiFi Sensing</h2>
 
-      <!-- Data-source status banner — updated by _onStateChange -->
+      <!-- Data-source status banner - updated by _onStateChange -->
       <div id="sensingSourceBanner" class="sensing-source-banner sensing-source-reconnecting"
            role="status" aria-live="polite">
         RECONNECTING...

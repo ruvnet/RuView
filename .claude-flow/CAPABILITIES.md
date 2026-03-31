@@ -350,11 +350,11 @@ npx @claude-flow/cli@latest hive-mind consensus --propose "task"
 ### MCP Server Setup
 ```bash
 # Add Claude Flow MCP
-claude mcp add claude-flow -- npx -y @claude-flow/cli@latest
+claude mcp add claude-flow - npx -y @claude-flow/cli@latest
 
 # Optional servers
-claude mcp add ruv-swarm -- npx -y ruv-swarm mcp start
-claude mcp add flow-nexus -- npx -y flow-nexus@latest mcp start
+claude mcp add ruv-swarm - npx -y ruv-swarm mcp start
+claude mcp add flow-nexus - npx -y flow-nexus@latest mcp start
 ```
 
 ---

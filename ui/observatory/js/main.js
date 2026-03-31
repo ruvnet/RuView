@@ -1,5 +1,5 @@
 /**
- * RuView Observatory — Main Scene Orchestrator
+ * RuView Observatory - Main Scene Orchestrator
  *
  * Room-based WiFi sensing visualization with:
  * - Pool of 4 human wireframe figures (multi-person scenarios)
@@ -127,7 +127,7 @@ class Observatory {
     this._showFps = false;
     this._qualityLevel = 2;
 
-    // WebSocket for live data — always try auto-detect on startup
+    // WebSocket for live data - always try auto-detect on startup
     this._ws = null;
     this._liveData = null;
     this._autoDetectLive();
@@ -173,7 +173,7 @@ class Observatory {
     rim.position.set(0, 6, -5);
     this._scene.add(rim);
 
-    // Overhead room light — general illumination
+    // Overhead room light - general illumination
     const overhead = new THREE.PointLight(0x8899aa, 1.0, 20, 1.0);
     overhead.position.set(0, 3.8, 0);
     this._scene.add(overhead);

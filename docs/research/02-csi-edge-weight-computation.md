@@ -46,7 +46,7 @@ $$
 $$
 
 A high SAV on subcarrier $k$ indicates that the channel at that frequency is
-being perturbed -- typically by motion in a Fresnel zone that subcarrier is
+being perturbed - typically by motion in a Fresnel zone that subcarrier is
 sensitive to.
 
 **Amplitude Stability Index (ASI).** The reciprocal of the coefficient of
@@ -256,7 +256,7 @@ amplitude features are more reliable because phase noise dominates. At high SNR
 ### 3.1 Motivation
 
 The CSI vector captures the superposition of all multipath components. A stable
-CSI does not necessarily mean a stable environment -- it could mean that the
+CSI does not necessarily mean a stable environment - it could mean that the
 dominant path is stable while secondary paths fluctuate. Decomposing the channel
 into individual multipath components and tracking their stability provides richer
 information for edge weighting.
@@ -294,7 +294,7 @@ is the steering vector.
 **ESP32 Constraints.** With $K = 56$ subcarriers and $L = 20$, we can resolve
 up to $P = 5$ multipath components with delay resolution finer than the FFT
 limit. The eigendecomposition of a $20 \times 20$ Hermitian matrix requires
-approximately 15,000 floating-point operations -- feasible on the aggregator
+approximately 15,000 floating-point operations - feasible on the aggregator
 node at 20 Hz for 120 edges if batched efficiently, but not on each ESP32
 independently.
 
@@ -382,7 +382,7 @@ $O(LP)$ per update rather than $O(L^3)$ for full eigendecomposition.
 Grassmann manifold, providing guaranteed convergence with $O(LP)$ complexity.
 
 For the 20 Hz update rate with $L = 20$ and $P = 5$, subspace tracking costs
-approximately 200 multiply-accumulate operations per edge per update -- trivially
+approximately 200 multiply-accumulate operations per edge per update - trivially
 cheap even on the aggregator.
 
 ---
@@ -1048,7 +1048,7 @@ the specific multipath geometry of each link.
 8. Schmidt, R. O. (1986). Multiple emitter location and signal parameter
    estimation. IEEE Transactions on Antennas and Propagation.
 
-9. Roy, R., & Kailath, T. (1989). ESPRIT -- estimation of signal parameters via
+9. Roy, R., & Kailath, T. (1989). ESPRIT - estimation of signal parameters via
    rotational invariance techniques. IEEE Transactions on ASSP.
 
 10. Welford, B. P. (1962). Note on a method for calculating corrected sums of

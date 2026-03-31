@@ -1,4 +1,4 @@
-# Edge Intelligence Modules — WiFi-DensePose
+# Edge Intelligence Modules - WiFi-DensePose
 
 > 60 WASM modules that run directly on an ESP32 sensor. No internet needed, no cloud fees, instant response. Each module is a tiny file (5-30 KB) that reads WiFi signal data and makes decisions locally in under 10 ms.
 
@@ -37,9 +37,9 @@ python scripts/wasm_upload.py --port COM7 --module target/wasm32-unknown-unknown
 ## How It Works
 
 1. **WiFi signals bounce off people and objects** in a room, creating a unique pattern
-2. **The ESP32 chip reads these patterns** as Channel State Information (CSI) — 52 numbers that describe how each WiFi channel changed
+2. **The ESP32 chip reads these patterns** as Channel State Information (CSI) - 52 numbers that describe how each WiFi channel changed
 3. **WASM modules analyze the patterns** to detect specific things: someone fell, a room is occupied, breathing rate changed
-4. **Events are emitted locally** — no cloud round-trip, response time under 10 ms
+4. **Events are emitted locally** - no cloud round-trip, response time under 10 ms
 
 ## Architecture
 
@@ -86,8 +86,8 @@ Every module talks to the ESP32 through 12 functions:
 | `csi_get_motion_energy()` | `f32` | Overall movement level |
 | `csi_get_n_persons()` | `i32` | Estimated number of people |
 | `csi_get_timestamp()` | `i32` | Current timestamp (ms) |
-| `csi_emit_event(id, val)` | — | Send a detection result to the host |
-| `csi_log(ptr, len)` | — | Log a message to serial console |
+| `csi_emit_event(id, val)` | - | Send a detection result to the host |
+| `csi_log(ptr, len)` | - | Log a message to serial console |
 | `csi_get_phase_history(buf, max)` | `i32` | Past phase values for trend analysis |
 
 ## Event ID Registry
@@ -141,7 +141,7 @@ Every module talks to the ESP32 through 12 functions:
 
 ## References
 
-- [ADR-039](../adr/ADR-039-esp32-edge-intelligence.md) — Edge processing tiers
-- [ADR-040](../adr/ADR-040-wasm-programmable-sensing.md) — WASM runtime design
-- [ADR-041](../adr/ADR-041-wasm-module-collection.md) — Full module specification
+- [ADR-039](../adr/ADR-039-esp32-edge-intelligence.md) - Edge processing tiers
+- [ADR-040](../adr/ADR-040-wasm-programmable-sensing.md) - WASM runtime design
+- [ADR-041](../adr/ADR-041-wasm-module-collection.md) - Full module specification
 - [Source code](../../rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/)

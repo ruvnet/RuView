@@ -87,7 +87,7 @@ export class GaussianSplatRenderer {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0a0a12);
 
-    // Camera — perspective looking down at the room
+    // Camera - perspective looking down at the room
     this.camera = new THREE.PerspectiveCamera(55, this.width / this.height, 0.1, 200);
     this.camera.position.set(0, 14, 14);
     this.camera.lookAt(0, 0, 0);
@@ -183,14 +183,14 @@ export class GaussianSplatRenderer {
   }
 
   _createNodeMarkers(THREE) {
-    // Router at center — green sphere
+    // Router at center - green sphere
     const routerGeo = new THREE.SphereGeometry(0.3, 16, 16);
     const routerMat = new THREE.MeshBasicMaterial({ color: 0x00ff88, transparent: true, opacity: 0.8 });
     this.routerMarker = new THREE.Mesh(routerGeo, routerMat);
     this.routerMarker.position.set(0, 0.5, 0);
     this.scene.add(this.routerMarker);
 
-    // ESP32 node — cyan sphere (default position, updated from data)
+    // ESP32 node - cyan sphere (default position, updated from data)
     const nodeGeo = new THREE.SphereGeometry(0.25, 16, 16);
     const nodeMat = new THREE.MeshBasicMaterial({ color: 0x00ccff, transparent: true, opacity: 0.8 });
     this.nodeMarker = new THREE.Mesh(nodeGeo, nodeMat);
@@ -303,7 +303,7 @@ export class GaussianSplatRenderer {
     const signalField = data.signal_field || {};
     const nodes = data.nodes || [];
 
-    // -- Update signal field splats ----------------------------------------
+    // - Update signal field splats ----------------------------------------
     if (signalField.values && this.fieldPoints) {
       const geo    = this.fieldPoints.geometry;
       const clr    = geo.attributes.splatColor.array;
@@ -327,7 +327,7 @@ export class GaussianSplatRenderer {
       geo.attributes.splatOpacity.needsUpdate = true;
     }
 
-    // -- Update body blob --------------------------------------------------
+    // - Update body blob --------------------------------------------------
     if (this.bodyBlob) {
       const bGeo  = this.bodyBlob.geometry;
       const bOpac = bGeo.attributes.splatOpacity.array;
@@ -369,7 +369,7 @@ export class GaussianSplatRenderer {
       bGeo.attributes.splatSize.needsUpdate    = true;
     }
 
-    // -- Update node positions ---------------------------------------------
+    // - Update node positions ---------------------------------------------
     if (nodes.length > 0 && nodes[0].position) {
       const pos = nodes[0].position;
       this.nodeMarker.position.set(pos[0], 0.5, pos[2]);

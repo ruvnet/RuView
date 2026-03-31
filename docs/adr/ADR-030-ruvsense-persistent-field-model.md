@@ -1,11 +1,11 @@
-# ADR-030: RuvSense Persistent Field Model — Longitudinal Drift Detection and Exotic Sensing Tiers
+# ADR-030: RuvSense Persistent Field Model - Longitudinal Drift Detection and Exotic Sensing Tiers
 
 | Field | Value |
 |-------|-------|
 | **Status** | Proposed |
 | **Date** | 2026-03-02 |
 | **Deciders** | ruv |
-| **Codename** | **RuvSense Field** — Persistent Electromagnetic World Model |
+| **Codename** | **RuvSense Field** - Persistent Electromagnetic World Model |
 | **Relates to** | ADR-029 (RuvSense Multistatic), ADR-005 (SONA Self-Learning), ADR-024 (AETHER Embeddings), ADR-016 (RuVector Integration), ADR-026 (Survivor Track Lifecycle), ADR-027 (MERIDIAN Generalization) |
 
 ---
@@ -20,19 +20,19 @@ The most exotic capabilities come from this shift in abstraction level:
 - The room is the model, not the person
 - People are structured perturbations to a baseline
 - Changes are deltas from a known state, not raw measurements
-- Time is a first-class dimension — the system remembers days, not frames
+- Time is a first-class dimension - the system remembers days, not frames
 
 ### 1.2 The Seven Capability Tiers
 
 | Tier | Capability | Foundation |
 |------|-----------|-----------|
-| 1 | **Field Normal Modes** — Room electromagnetic eigenstructure | Baseline calibration + SVD |
-| 2 | **Coarse RF Tomography** — 3D occupancy volume from link attenuations | Sparse tomographic inversion |
-| 3 | **Intention Lead Signals** — Pre-movement prediction (200-500ms lead) | Temporal embedding trajectory analysis |
-| 4 | **Longitudinal Biomechanics Drift** — Personal baseline deviation over days | Welford statistics + HNSW memory |
-| 5 | **Cross-Room Continuity** — Identity persistence across spaces without optics | Environment fingerprinting + transition graph |
-| 6 | **Invisible Interaction Layer** — Multi-user gesture control through walls/darkness | Per-person CSI perturbation classification |
-| 7 | **Adversarial Detection** — Physically impossible signal identification | Multi-link consistency + field model constraints |
+| 1 | **Field Normal Modes** - Room electromagnetic eigenstructure | Baseline calibration + SVD |
+| 2 | **Coarse RF Tomography** - 3D occupancy volume from link attenuations | Sparse tomographic inversion |
+| 3 | **Intention Lead Signals** - Pre-movement prediction (200-500ms lead) | Temporal embedding trajectory analysis |
+| 4 | **Longitudinal Biomechanics Drift** - Personal baseline deviation over days | Welford statistics + HNSW memory |
+| 5 | **Cross-Room Continuity** - Identity persistence across spaces without optics | Environment fingerprinting + transition graph |
+| 6 | **Invisible Interaction Layer** - Multi-user gesture control through walls/darkness | Per-person CSI perturbation classification |
+| 7 | **Adversarial Detection** - Physically impossible signal identification | Multi-link consistency + field model constraints |
 
 ### 1.3 Signals, Not Diagnoses
 
@@ -133,7 +133,7 @@ wifi-densepose-signal/src/ruvsense/
 
 ### 2.3 Field Normal Modes (Tier 1)
 
-**What it is:** The room's electromagnetic eigenstructure — the stable propagation paths, reflection coefficients, and interference patterns when nobody is present.
+**What it is:** The room's electromagnetic eigenstructure - the stable propagation paths, reflection coefficients, and interference patterns when nobody is present.
 
 **How it works:**
 1. During quiet periods (empty room, overnight), collect 10 minutes of CSI across all links
@@ -260,7 +260,7 @@ Longitudinal biomechanics tracker for rehabilitation and occupational health.
 
 ### 3.5 Vertical Recommendation for First Hardware SKU
 
-**Invisible Guardian** — the elderly care wellness monitor. Rationale:
+**Invisible Guardian** - the elderly care wellness monitor. Rationale:
 1. Largest addressable market with immediate revenue (aging population, care facility demand)
 2. Lowest regulatory bar (consumer wellness, no diagnostic claims)
 3. Privacy advantage over cameras is a selling point, not a limitation
@@ -314,9 +314,9 @@ All five crates are exercised across the exotic tiers:
 
 - **Room becomes self-sensing**: Field normal modes provide a persistent baseline that explains change as structured deltas
 - **7-day autonomous operation**: Coherence gating + SONA adaptation + longitudinal memory eliminate manual tuning
-- **Privacy by design**: No images, no audio, no reconstructable data — only embeddings and statistical summaries
+- **Privacy by design**: No images, no audio, no reconstructable data - only embeddings and statistical summaries
 - **Traceable evidence**: Every drift alert links to stored embeddings, timestamps, and graph constraints
-- **Multiple product categories**: Same software stack, different packaging — Guardian, Twin, Interaction, Drift Monitor
+- **Multiple product categories**: Same software stack, different packaging - Guardian, Twin, Interaction, Drift Monitor
 - **Regulatory clarity**: Consumer wellness first, clinical decision support later with accumulated dataset
 - **Security primitive**: Coherence gating detects adversarial injection, not just quality issues
 

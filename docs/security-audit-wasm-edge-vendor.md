@@ -50,7 +50,7 @@ While this is safe in WASM3's single-threaded execution model, the returned `&[(
 
 ### HIGH
 
-#### H-01: `coherence.rs:94-96` -- Division by zero when `n_sc == 0`
+#### H-01: `coherence.rs:94-96` - Division by zero when `n_sc == 0`
 
 **Severity**: HIGH
 **File**: `coherence.rs:94`
@@ -69,18 +69,18 @@ While the `initialized` check at line 71 catches the first call with an early re
 
 **Recommendation**: Add `if n_sc == 0 { return self.smoothed_coherence; }` after the `initialized` check.
 
-#### H-02: `occupancy.rs:92,99,105,112` -- Division by zero when `zone_count == 1` and `n_sc < 4`
+#### H-02: `occupancy.rs:92,99,105,112` - Division by zero when `zone_count == 1` and `n_sc < 4`
 
 **Severity**: HIGH
 **File**: `occupancy.rs:92-112`
 
-**Description**: When `n_sc == 2` or `n_sc == 3`, `zone_count = (n_sc / 4).min(MAX_ZONES).max(1) = 1` and `subs_per_zone = n_sc / zone_count = n_sc`. The loop computes `count = (end - start) as f32` which is valid. However, when `n_sc == 1`, the function returns early at line 83-85. The real risk is if `n_sc == 0` somehow passes through -- but the check at line 83 `n_sc < 2` guards this. This is actually safe but fragile.
+**Description**: When `n_sc == 2` or `n_sc == 3`, `zone_count = (n_sc / 4).min(MAX_ZONES).max(1) = 1` and `subs_per_zone = n_sc / zone_count = n_sc`. The loop computes `count = (end - start) as f32` which is valid. However, when `n_sc == 1`, the function returns early at line 83-85. The real risk is if `n_sc == 0` somehow passes through - but the check at line 83 `n_sc < 2` guards this. This is actually safe but fragile.
 
 However, a more serious issue: the `count` variable at line 99 is computed as `(end - start) as f32` and used as a divisor at lines 105 and 112. If `subs_per_zone == 0` (which can happen if `zone_count > n_sc`), `count` would be 0, causing division by zero. Currently `zone_count` is capped by `n_sc / 4` so this cannot happen with `n_sc >= 2`, but the logic is fragile.
 
 **Recommendation**: Add a guard `if count < 1.0 { continue; }` before the division at line 105.
 
-#### H-03: `rvf.rs:209-215` -- `patch_signature` has no bounds check on `offset + RVF_SIGNATURE_LEN`
+#### H-03: `rvf.rs:209-215` - `patch_signature` has no bounds check on `offset + RVF_SIGNATURE_LEN`
 
 **Severity**: HIGH
 **File**: `rvf.rs:209-215` (std-only builder code)
@@ -104,7 +104,7 @@ If called with a truncated or malformed RVF buffer, or if `wasm_len` in the head
 
 ### MEDIUM
 
-#### M-01: `lib.rs:391` -- Negative `n_subcarriers` from host silently wraps to large `usize`
+#### M-01: `lib.rs:391` - Negative `n_subcarriers` from host silently wraps to large `usize`
 
 **Severity**: MEDIUM
 **File**: `lib.rs:391`
@@ -113,7 +113,7 @@ If called with a truncated or malformed RVF buffer, or if `wasm_len` in the head
 
 **Recommendation**: Add: `let n_sc = if n_subcarriers < 0 { 0 } else { n_subcarriers as usize };`
 
-#### M-02: `coherence.rs:142-144` -- `mean_phasor_angle()` uses stale `phasor_re/phasor_im` fields
+#### M-02: `coherence.rs:142-144` - `mean_phasor_angle()` uses stale `phasor_re/phasor_im` fields
 
 **Severity**: MEDIUM
 **File**: `coherence.rs:142-144`
@@ -124,7 +124,7 @@ If called with a truncated or malformed RVF buffer, or if `wasm_len` in the head
 
 **Recommendation**: Store the per-frame mean phasor components: `self.phasor_re = mean_re; self.phasor_im = mean_im;` at the end of `process_frame()`.
 
-#### M-03: `gesture.rs:200` -- DTW cost matrix uses 9.6 KB stack, no guard for mismatched sizes
+#### M-03: `gesture.rs:200` - DTW cost matrix uses 9.6 KB stack, no guard for mismatched sizes
 
 **Severity**: MEDIUM
 **File**: `gesture.rs:200`
@@ -148,7 +148,7 @@ The `vendor_common.rs` DTW functions use `[[f32::MAX; 64]; 64]` = 16384 bytes, w
 
 **Recommendation**: Use `.wrapping_add(1)` explicitly in all modules for clarity. For modules with threshold comparisons, add a `saturating` flag to prevent re-triggering.
 
-#### M-05: `tmp_pattern_sequence.rs:159` -- potential out-of-bounds write at day boundary
+#### M-05: `tmp_pattern_sequence.rs:159` - potential out-of-bounds write at day boundary
 
 **Severity**: MEDIUM
 **File**: `tmp_pattern_sequence.rs:159`
@@ -159,7 +159,7 @@ Actually, the issue is that `minute_counter` is `u16` and is compared against `D
 
 **Downgrading concern**: This is actually well-handled. Keeping as MEDIUM because the pattern of computing `DAY_LEN + minute_counter` without the guard would be dangerous.
 
-#### M-06: `spt_micro_hnsw.rs:187` -- neighbor index stored as `u8`, silent truncation for `MAX_VECTORS > 255`
+#### M-06: `spt_micro_hnsw.rs:187` - neighbor index stored as `u8`, silent truncation for `MAX_VECTORS > 255`
 
 **Severity**: MEDIUM
 **File**: `spt_micro_hnsw.rs:187,197`
@@ -172,7 +172,7 @@ Actually, the issue is that `minute_counter` is `u16` and is compared against `D
 
 ### LOW
 
-#### L-01: `lib.rs:35` -- `#![allow(clippy::missing_safety_doc)]` suppresses safety documentation
+#### L-01: `lib.rs:35` - `#![allow(clippy::missing_safety_doc)]` suppresses safety documentation
 
 **Severity**: LOW
 **File**: `lib.rs:35`
@@ -190,7 +190,7 @@ Actually, the issue is that `minute_counter` is `u16` and is compared against `D
 
 **Recommendation**: Run tests with `-- --test-threads=1` or add a note in the test configuration.
 
-#### L-03: `lrn_dtw_gesture_learn.rs:357` -- `next_id` wraps at 255, potentially colliding with built-in gesture IDs
+#### L-03: `lrn_dtw_gesture_learn.rs:357` - `next_id` wraps at 255, potentially colliding with built-in gesture IDs
 
 **Severity**: LOW
 **File**: `lrn_dtw_gesture_learn.rs:357`
@@ -199,7 +199,7 @@ Actually, the issue is that `minute_counter` is `u16` and is compared against `D
 
 **Recommendation**: Use `wrapping_add(1).max(100)` or saturating_add to stay in the 100-255 range.
 
-#### L-04: `ais_prompt_shield.rs:294` -- FNV-1a hash quantization resolution may cause false replay positives
+#### L-04: `ais_prompt_shield.rs:294` - FNV-1a hash quantization resolution may cause false replay positives
 
 **Severity**: LOW
 **File**: `ais_prompt_shield.rs:292-308`
@@ -208,12 +208,12 @@ Actually, the issue is that `minute_counter` is `u16` and is compared against `D
 
 **Recommendation**: Increase quantization resolution to 0.001 or add a secondary discriminator (e.g., include a frame sequence counter in the hash).
 
-#### L-05: `qnt_quantum_coherence.rs:188` -- `inv_n` computed without zero check
+#### L-05: `qnt_quantum_coherence.rs:188` - `inv_n` computed without zero check
 
 **Severity**: LOW
 **File**: `qnt_quantum_coherence.rs:188`
 
-**Description**: `let inv_n = 1.0 / (n_sc as f32);` -- While `n_sc < 2` is checked at line 94, the pattern of dividing without an explicit guard is inconsistent with other modules.
+**Description**: `let inv_n = 1.0 / (n_sc as f32);` - While `n_sc < 2` is checked at line 94, the pattern of dividing without an explicit guard is inconsistent with other modules.
 
 ---
 

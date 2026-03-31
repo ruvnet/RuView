@@ -1,6 +1,6 @@
-# AI Security Modules -- WiFi-DensePose Edge Intelligence
+# AI Security Modules - WiFi-DensePose Edge Intelligence
 
-> Tamper detection and behavioral anomaly profiling that protect the sensing system from manipulation. These modules detect replay attacks, signal injection, jamming, and unusual behavior patterns -- all running on-device with no cloud dependency.
+> Tamper detection and behavioral anomaly profiling that protect the sensing system from manipulation. These modules detect replay attacks, signal injection, jamming, and unusual behavior patterns - all running on-device with no cloud dependency.
 
 ## Overview
 
@@ -213,7 +213,7 @@ Day 3, 3am:
 | CSI frame replay | Signal Shield | FNV-1a hash ring matching | Low (1% quantization) |
 | Signal injection (e.g., rogue AP) | Signal Shield | >25% subcarriers with >10x amplitude spike | Very low |
 | Broadband jamming | Signal Shield | SNR drop below 10% of baseline for 5+ frames | Very low |
-| Narrowband jamming | Partially -- Signal Shield | May not trigger if < 25% subcarriers affected | Medium |
+| Narrowband jamming | Partially - Signal Shield | May not trigger if < 25% subcarriers affected | Medium |
 | Behavioral anomaly (intruder at unusual time) | Behavioral Profiler | Combined Z-score > 3.0 across 6 dimensions | Low after maturation |
 | Gradual environmental change | Behavioral Profiler | Welford stats adapt, may flag if change is abrupt | Very low |
 

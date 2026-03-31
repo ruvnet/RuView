@@ -1,5 +1,5 @@
 #!/bin/bash
-# install-qemu.sh — Install QEMU with ESP32-S3 support (Espressif fork)
+# install-qemu.sh - Install QEMU with ESP32-S3 support (Espressif fork)
 # Usage: bash scripts/install-qemu.sh [OPTIONS]
 set -euo pipefail
 
@@ -25,7 +25,7 @@ QEMU_REPO="https://github.com/espressif/qemu.git"
 # ── Usage ─────────────────────────────────────────────────────────────────────
 usage() {
     cat <<EOF
-${BOLD}install-qemu.sh${NC} — Install QEMU with ESP32-S3 support (Espressif fork)
+${BOLD}install-qemu.sh${NC} - Install QEMU with ESP32-S3 support (Espressif fork)
 
 ${BOLD}USAGE${NC}
     bash scripts/install-qemu.sh [OPTIONS]
@@ -211,7 +211,7 @@ install_deps() {
             brew install glib pixman ninja pkg-config libslirp libgcrypt || true
             ;;
         *)
-            warn "Unknown distro '$DISTRO' — install these manually:"
+            warn "Unknown distro '$DISTRO' - install these manually:"
             warn "  git, gcc/g++, python3, ninja, pkg-config, glib2-dev, pixman-dev, libslirp-dev"
             return 1
             ;;
@@ -260,7 +260,7 @@ step "Building QEMU ($JOBS parallel jobs)"
 make -j"$JOBS" -C "$BUILD_DIR" 2>&1 | tail -20
 
 if [ ! -x "$BUILD_DIR/qemu-system-xtensa" ]; then
-    err "Build failed — qemu-system-xtensa binary not found"
+    err "Build failed - qemu-system-xtensa binary not found"
     err "Troubleshooting:"
     err "  1. Check build output above for errors"
     err "  2. Ensure all dependencies are installed: re-run without --skip-deps"

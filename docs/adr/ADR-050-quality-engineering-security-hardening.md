@@ -1,4 +1,4 @@
-# ADR-050: Quality Engineering Response — Security Hardening & Code Quality
+# ADR-050: Quality Engineering Response - Security Hardening & Code Quality
 
 | Field | Value |
 |-------|-------|
@@ -16,17 +16,17 @@ An independent quality engineering analysis ([issue #170](https://github.com/ruv
 
 | # | Finding | Location | Verified |
 |---|---------|----------|----------|
-| 1 | Fake HMAC in `secure_tdm.rs` — XOR fold with hardcoded key | `hardware/src/esp32/secure_tdm.rs:253` | YES — comments say "sufficient for testing" |
-| 2 | `sensing-server/main.rs` is 3,741 lines — CC=65, god object | `sensing-server/src/main.rs` | YES — confirmed 3,741 lines |
-| 3 | WebSocket server has zero authentication | Rust WS codebase | YES — no auth/token checks found |
-| 4 | Zero security tests in Rust codebase | Entire workspace | YES — no auth/injection/tampering tests |
-| 5 | 54K fps claim has no supporting benchmark | No criterion benchmarks | YES — no benchmarks exist |
+| 1 | Fake HMAC in `secure_tdm.rs` - XOR fold with hardcoded key | `hardware/src/esp32/secure_tdm.rs:253` | YES - comments say "sufficient for testing" |
+| 2 | `sensing-server/main.rs` is 3,741 lines - CC=65, god object | `sensing-server/src/main.rs` | YES - confirmed 3,741 lines |
+| 3 | WebSocket server has zero authentication | Rust WS codebase | YES - no auth/token checks found |
+| 4 | Zero security tests in Rust codebase | Entire workspace | YES - no auth/injection/tampering tests |
+| 5 | 54K fps claim has no supporting benchmark | No criterion benchmarks | YES - no benchmarks exist |
 
 ### Findings Requiring Further Investigation
 
 | # | Finding | Status |
 |---|---------|--------|
-| 6 | Unauthenticated OTA firmware endpoint | Not found in Rust code — may be ESP32 C firmware level |
+| 6 | Unauthenticated OTA firmware endpoint | Not found in Rust code - may be ESP32 C firmware level |
 | 7 | WASM upload without mandatory signatures | Needs review of WASM loader |
 | 8 | O(n^2) autocorrelation in heart rate detection | Needs profiling to confirm impact |
 
@@ -87,7 +87,7 @@ Address findings in 3 priority sprints as recommended by the report.
 
 ### Neutral
 
-- The report correctly identifies that life-safety claims (disaster detection, vital signs) require rigorous verification — this is an ongoing process, not a single sprint
+- The report correctly identifies that life-safety claims (disaster detection, vital signs) require rigorous verification - this is an ongoing process, not a single sprint
 
 ## Acknowledgment
 

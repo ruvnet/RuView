@@ -1,4 +1,4 @@
-# Happiness Vector — WiFi CSI Guest Sentiment Sensing
+# Happiness Vector - WiFi CSI Guest Sentiment Sensing
 
 Contactless hotel guest happiness scoring using WiFi Channel State Information (CSI) from ESP32-S3 nodes, coordinated by a Cognitum Seed edge intelligence appliance.
 
@@ -179,14 +179,14 @@ Event IDs emitted by the WASM module:
 
 This system is designed to be privacy-preserving by construction:
 
-- **No images** — WiFi CSI captures RF signal patterns, not visual data
-- **No audio** — radio waves only
-- **No facial recognition** — physically impossible with CSI
-- **No individual identity** — cannot distinguish Bob from Alice
-- **Aggregate only** — 8 floating-point numbers per observation
-- **Works in the dark** — RF sensing needs no lighting
-- **Through-wall** — single sensor covers adjacent rooms without line-of-sight
-- **GDPR-friendly** — no personal data collected; happiness scores are anonymous statistical aggregates
+- **No images** - WiFi CSI captures RF signal patterns, not visual data
+- **No audio** - radio waves only
+- **No facial recognition** - physically impossible with CSI
+- **No individual identity** - cannot distinguish Bob from Alice
+- **Aggregate only** - 8 floating-point numbers per observation
+- **Works in the dark** - RF sensing needs no lighting
+- **Through-wall** - single sensor covers adjacent rooms without line-of-sight
+- **GDPR-friendly** - no personal data collected; happiness scores are anonymous statistical aggregates
 
 ## Files
 
@@ -199,8 +199,8 @@ This system is designed to be privacy-preserving by construction:
 
 ## Related
 
-- [ADR-065](../../docs/adr/ADR-065-happiness-scoring-seed-bridge.md) — Happiness scoring pipeline architecture
-- [ADR-066](../../docs/adr/ADR-066-esp32-swarm-seed-coordinator.md) — ESP32 swarm with Seed coordinator
-- [exo_happiness_score.rs](../../rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_happiness_score.rs) — WASM edge module (Rust)
-- [swarm_bridge.c](../../firmware/esp32-csi-node/main/swarm_bridge.c) — ESP32 firmware swarm bridge
-- [ruview_live.py](../ruview_live.py) — RuView Live dashboard with `--mode happiness`
+- [ADR-065](../../docs/adr/ADR-065-happiness-scoring-seed-bridge.md) - Happiness scoring pipeline architecture
+- [ADR-066](../../docs/adr/ADR-066-esp32-swarm-seed-coordinator.md) - ESP32 swarm with Seed coordinator
+- [exo_happiness_score.rs](../../rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_happiness_score.rs) - WASM edge module (Rust)
+- [swarm_bridge.c](../../firmware/esp32-csi-node/main/swarm_bridge.c) - ESP32 firmware swarm bridge
+- [ruview_live.py](../ruview_live.py) - RuView Live dashboard with `--mode happiness`

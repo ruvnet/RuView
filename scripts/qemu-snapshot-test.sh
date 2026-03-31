@@ -1,5 +1,5 @@
 #!/bin/bash
-# QEMU Snapshot-Based Test Runner — ADR-061 Layer 8
+# QEMU Snapshot-Based Test Runner - ADR-061 Layer 8
 #
 # Uses QEMU VM snapshots to accelerate repeated test runs.
 # Instead of rebooting and re-initializing for each test scenario,
@@ -16,10 +16,10 @@
 #   SKIP_SNAPSHOT   - Set to "1" to run without snapshots (baseline timing)
 #
 # Exit codes:
-#   0  PASS    — all checks passed
-#   1  WARN    — non-critical checks failed
-#   2  FAIL    — critical checks failed
-#   3  FATAL   — build error, crash, or infrastructure failure
+#   0  PASS    - all checks passed
+#   1  WARN    - non-critical checks failed
+#   2  FAIL    - critical checks failed
+#   3  FATAL   - build error, crash, or infrastructure failure
 
 # ── Help ──────────────────────────────────────────────────────────────
 usage() {
@@ -45,10 +45,10 @@ Examples:
   FLASH_IMAGE=/path/to/image.bin ./qemu-snapshot-test.sh
 
 Exit codes:
-  0  PASS   — all checks passed
-  1  WARN   — non-critical checks failed
-  2  FAIL   — critical checks failed
-  3  FATAL  — build error, crash, or infrastructure failure
+  0  PASS   - all checks passed
+  1  WARN   - non-critical checks failed
+  2  FAIL   - critical checks failed
+  3  FATAL  - build error, crash, or infrastructure failure
 HELP
     exit 0
 }
@@ -193,7 +193,7 @@ restore_snapshot() {
 # Pre-flight checks
 # ──────────────────────────────────────────────────────────────────────
 
-echo "=== QEMU Snapshot Test Runner — ADR-061 Layer 8 ==="
+echo "=== QEMU Snapshot Test Runner - ADR-061 Layer 8 ==="
 echo "QEMU binary:  $QEMU_BIN"
 echo "Flash image:  $FLASH_IMAGE"
 echo "Timeout/test: ${TIMEOUT_SEC}s"

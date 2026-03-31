@@ -27,7 +27,7 @@ RuView currently pins all five core RuVector crates at **v2.0.4** (from crates.i
 ### What Changed Upstream (v2.0.4 → v2.0.5 → HEAD)
 
 **ruvector-mincut:**
-- Flat capacity matrix + allocation reuse — **10-30% faster** for all min-cut operations
+- Flat capacity matrix + allocation reuse - **10-30% faster** for all min-cut operations
 - Tier 2-3 Dynamic MinCut (ADR-124): Gomory-Hu tree construction for fast global min-cut, incremental edge insert/delete without full recomputation
 - Source-anchored canonical min-cut with SHA-256 witness hashing
 - Fixed: unsafe indexing removed, WASM Node.js panic from `std::time`
@@ -40,10 +40,10 @@ RuView currently pins all five core RuVector crates at **v2.0.4** (from crates.i
 - Formatting fixes only (no API changes)
 
 **ruvector-gnn:**
-- Panic replaced with `Result` in `MultiHeadAttention` and `RuvectorLayer` constructors (breaking improvement — safer)
+- Panic replaced with `Result` in `MultiHeadAttention` and `RuvectorLayer` constructors (breaking improvement - safer)
 - Bumped to v2.0.5
 
-**sona (new — Self-Optimizing Neural Architecture):**
+**sona (new - Self-Optimizing Neural Architecture):**
 - v0.1.6 → v0.1.8: state persistence (`loadState`/`saveState`), trajectory counter fix
 - Micro-LoRA and Base-LoRA for instant and background learning
 - EWC++ (Elastic Weight Consolidation) to prevent catastrophic forgetting
@@ -69,11 +69,11 @@ RuView currently pins all five core RuVector crates at **v2.0.4** (from crates.i
 Bump the 5 core crates from v2.0.4 to v2.0.5 in the workspace `Cargo.toml`:
 
 ```toml
-ruvector-mincut = "2.0.5"        # was 2.0.4 — 10-30% faster, safer
-ruvector-attn-mincut = "2.0.5"   # was 2.0.4 — workspace versioning
-ruvector-temporal-tensor = "2.0.5" # was 2.0.4 — fmt only
-ruvector-solver = "2.0.5"        # was 2.0.4 — workspace versioning
-ruvector-attention = "2.0.5"     # was 2.0.4 — workspace versioning
+ruvector-mincut = "2.0.5"        # was 2.0.4 - 10-30% faster, safer
+ruvector-attn-mincut = "2.0.5"   # was 2.0.4 - workspace versioning
+ruvector-temporal-tensor = "2.0.5" # was 2.0.4 - fmt only
+ruvector-solver = "2.0.5"        # was 2.0.4 - workspace versioning
+ruvector-attention = "2.0.5"     # was 2.0.4 - workspace versioning
 ```
 
 **Expected impact:** The mincut performance improvement directly benefits `signal/subcarrier.rs` which runs subcarrier graph partitioning every tick. 10-30% faster partitioning reduces per-frame CPU cost.
@@ -82,9 +82,9 @@ ruvector-attention = "2.0.5"     # was 2.0.4 — workspace versioning
 
 Add `ruvector-coherence` with `spectral` feature to `wifi-densepose-ruvector`:
 
-**Use case:** Replace or augment the custom phase coherence logic in `viewpoint/coherence.rs` with spectral graph coherence scoring. The current implementation uses phasor magnitude for phase coherence — spectral Fiedler estimation would provide a more robust measure of multi-node CSI consistency, especially for detecting when a node's signal quality degrades.
+**Use case:** Replace or augment the custom phase coherence logic in `viewpoint/coherence.rs` with spectral graph coherence scoring. The current implementation uses phasor magnitude for phase coherence - spectral Fiedler estimation would provide a more robust measure of multi-node CSI consistency, especially for detecting when a node's signal quality degrades.
 
-**Integration point:** `viewpoint/coherence.rs` — add `SpectralCoherenceScore` as a secondary coherence metric alongside existing phase phasor coherence. Use spectral gap estimation to detect structural changes in the multi-node CSI graph (e.g., a node dropping out or a new reflector appearing).
+**Integration point:** `viewpoint/coherence.rs` - add `SpectralCoherenceScore` as a secondary coherence metric alongside existing phase phasor coherence. Use spectral gap estimation to detect structural changes in the multi-node CSI graph (e.g., a node dropping out or a new reflector appearing).
 
 ### Phase 3: Add SONA for Adaptive Learning (High Value)
 
@@ -93,10 +93,10 @@ Replace the logistic regression adaptive classifier in the sensing server with a
 **Current state:** The sensing server's adaptive training (`POST /api/v1/adaptive/train`) uses a hand-rolled logistic regression on 15 CSI features. It requires explicit labeled recordings and provides no cross-session persistence.
 
 **Proposed improvement:** Use `sona::SonaEngine` to:
-1. **Learn from implicit feedback** — trajectory tracking on person-count decisions (was the count stable? did the user correct it?)
-2. **Persist across sessions** — `saveState()`/`loadState()` replaces the current `adaptive_model.json`
-3. **Pattern matching** — `find_patterns()` enables "this CSI signature looks like room X where we learned Y"
-4. **Prevent forgetting** — EWC++ ensures learning in a new room doesn't overwrite patterns from previous rooms
+1. **Learn from implicit feedback** - trajectory tracking on person-count decisions (was the count stable? did the user correct it?)
+2. **Persist across sessions** - `saveState()`/`loadState()` replaces the current `adaptive_model.json`
+3. **Pattern matching** - `find_patterns()` enables "this CSI signature looks like room X where we learned Y"
+4. **Prevent forgetting** - EWC++ ensures learning in a new room doesn't overwrite patterns from previous rooms
 
 **Integration point:** New `adaptive_sona.rs` module in `wifi-densepose-sensing-server`, behind a `sona` feature flag. The existing logistic regression remains the default.
 
@@ -109,34 +109,34 @@ Replace the logistic regression adaptive classifier in the sensing server with a
 - Transfer learning: embeddings learned in one room partially transfer to similar rooms
 - Quantized storage: 4-32x memory reduction for pattern databases
 
-**Status:** Exploratory — requires training data collection and embedding model design. Not a near-term target.
+**Status:** Exploratory - requires training data collection and embedding model design. Not a near-term target.
 
 ## Consequences
 
 ### Positive
 - **Phase 1:** Free 10-30% performance gain in subcarrier partitioning. Security fixes (unsafe indexing, WASM panic). Zero API changes required.
 - **Phase 2:** More robust multi-node coherence detection. Helps with the "flickering persons" issue (#292) by providing a second opinion on signal quality.
-- **Phase 3:** Fundamentally improves the adaptive learning pipeline. Users no longer need to manually record labeled data — the system learns from ongoing use.
+- **Phase 3:** Fundamentally improves the adaptive learning pipeline. Users no longer need to manually record labeled data - the system learns from ongoing use.
 - **Phase 4:** Path toward real ML-based detection instead of heuristic thresholds.
 
 ### Negative
-- **Phase 1:** Minimal risk — semver minor bump, no API breaks.
+- **Phase 1:** Minimal risk - semver minor bump, no API breaks.
 - **Phase 2:** Adds a dependency. Spectral computation has O(n) cost per tick for Fiedler estimation (n = number of subcarriers, typically 56-128). Acceptable.
 - **Phase 3:** SONA adds ~200KB to the binary. The learning loop needs careful tuning to avoid adapting to noise.
 - **Phase 4:** Requires significant research and training data. Not guaranteed to outperform tuned heuristics for WiFi CSI.
 
 ### Risks
-- `ruvector-gnn` v2.0.5 changed constructors from panic to `Result` — any existing `crv` feature users need to handle the `Result`. Our vendored `ruvector-crv` may need updates.
-- SONA's WASM support is experimental — keep it behind a feature flag until validated.
+- `ruvector-gnn` v2.0.5 changed constructors from panic to `Result` - any existing `crv` feature users need to handle the `Result`. Our vendored `ruvector-crv` may need updates.
+- SONA's WASM support is experimental - keep it behind a feature flag until validated.
 
 ## Implementation Plan
 
 | Phase | Scope | Effort | Priority |
 |-------|-------|--------|----------|
-| 1 | Bump 5 crates to v2.0.5 | 1 hour | High — free perf + security |
-| 2 | Add ruvector-coherence | 1 day | Medium — improves multi-node stability |
-| 3 | SONA adaptive learning | 3 days | Medium — replaces manual training workflow |
-| 4 | CSI embeddings via ruvector-core | 1-2 weeks | Low — exploratory research |
+| 1 | Bump 5 crates to v2.0.5 | 1 hour | High - free perf + security |
+| 2 | Add ruvector-coherence | 1 day | Medium - improves multi-node stability |
+| 3 | SONA adaptive learning | 3 days | Medium - replaces manual training workflow |
+| 4 | CSI embeddings via ruvector-core | 1-2 weeks | Low - exploratory research |
 
 ## Vendor Submodule
 

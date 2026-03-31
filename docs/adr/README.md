@@ -8,28 +8,28 @@ Building a system that turns WiFi signals into human pose estimation involves hu
 
 ADRs capture the **context**, **options considered**, **decision made**, and **consequences** for each of these choices. They serve three purposes:
 
-1. **Institutional memory** — Six months from now, anyone (human or AI) can read *why* we chose IIR bandpass filters over FIR for vital sign extraction, not just see the code.
+1. **Institutional memory** - Six months from now, anyone (human or AI) can read *why* we chose IIR bandpass filters over FIR for vital sign extraction, not just see the code.
 
-2. **AI-assisted development** — When an AI agent works on this codebase, ADRs give it the constraints and rationale it needs to make changes that align with the existing architecture. Without them, AI-generated code tends to drift — reinventing patterns that already exist, contradicting earlier decisions, or optimizing for the wrong tradeoffs.
+2. **AI-assisted development** - When an AI agent works on this codebase, ADRs give it the constraints and rationale it needs to make changes that align with the existing architecture. Without them, AI-generated code tends to drift - reinventing patterns that already exist, contradicting earlier decisions, or optimizing for the wrong tradeoffs.
 
-3. **Review checkpoints** — Each ADR is a reviewable artifact. When a proposed change touches the architecture, the ADR forces the author to articulate tradeoffs *before* writing code, not after.
+3. **Review checkpoints** - Each ADR is a reviewable artifact. When a proposed change touches the architecture, the ADR forces the author to articulate tradeoffs *before* writing code, not after.
 
 ### ADRs and Domain-Driven Design
 
-The project uses [Domain-Driven Design](../ddd/) (DDD) to organize code into bounded contexts — each with its own language, types, and responsibilities. ADRs and DDD work together:
+The project uses [Domain-Driven Design](../ddd/) (DDD) to organize code into bounded contexts - each with its own language, types, and responsibilities. ADRs and DDD work together:
 
 - **ADRs define boundaries**: ADR-029 (RuvSense) established multistatic sensing as a separate bounded context from single-node CSI. ADR-042 (CHCI) defined a new aggregate root for coherent channel imaging.
 - **DDD models define the language**: The [RuvSense domain model](../ddd/ruvsense-domain-model.md) defines terms like "coherence gate", "dwell time", and "TDM slot" that ADRs reference precisely.
-- **Together they prevent drift**: An AI agent reading ADR-039 knows that edge processing tiers are configured via NVS keys, not compile-time flags — because the ADR says so. The DDD model tells it which aggregate owns that configuration.
+- **Together they prevent drift**: An AI agent reading ADR-039 knows that edge processing tiers are configured via NVS keys, not compile-time flags - because the ADR says so. The DDD model tells it which aggregate owns that configuration.
 
 ### How ADRs are structured
 
 Each ADR follows a consistent format:
 
-- **Context** — What problem or gap prompted this decision
-- **Decision** — What we chose to do and how
-- **Consequences** — What improved, what got harder, and what risks remain
-- **References** — Related ADRs, papers, and code paths
+- **Context** - What problem or gap prompted this decision
+- **Decision** - What we chose to do and how
+- **Consequences** - What improved, what got harder, and what risks remain
+- **References** - Related ADRs, papers, and code paths
 
 Statuses: **Proposed** (under discussion), **Accepted** (approved and/or implemented), **Superseded** (replaced by a later ADR).
 
@@ -110,6 +110,6 @@ Statuses: **Proposed** (under discussion), **Accepted** (approved and/or impleme
 
 ## Related
 
-- [DDD Domain Models](../ddd/) — Bounded context definitions, aggregate roots, and ubiquitous language
-- [User Guide](../user-guide.md) — Setup, API reference, and hardware instructions
-- [Build Guide](../build-guide.md) — Building from source
+- [DDD Domain Models](../ddd/) - Bounded context definitions, aggregate roots, and ubiquitous language
+- [User Guide](../user-guide.md) - Setup, API reference, and hardware instructions
+- [Build Guide](../build-guide.md) - Building from source

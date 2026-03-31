@@ -1,4 +1,4 @@
-# ADR-065: Hotel Guest Happiness Scoring -- WiFi CSI + Cognitum Seed Bridge
+# ADR-065: Hotel Guest Happiness Scoring - WiFi CSI + Cognitum Seed Bridge
 
 **Status:** Proposed
 **Date:** 2026-03-20
@@ -7,7 +7,7 @@
 
 ## Context
 
-Hotels lack objective, privacy-preserving methods to measure guest satisfaction in real time. Current approaches (post-stay surveys, NPS scores) are delayed, biased toward extremes, and capture less than 10% of guests. Meanwhile, ambient RF sensing can infer behavioral cues that correlate with comfort and well-being -- without cameras, wearables, or any guest interaction.
+Hotels lack objective, privacy-preserving methods to measure guest satisfaction in real time. Current approaches (post-stay surveys, NPS scores) are delayed, biased toward extremes, and capture less than 10% of guests. Meanwhile, ambient RF sensing can infer behavioral cues that correlate with comfort and well-being - without cameras, wearables, or any guest interaction.
 
 ### Hardware
 
@@ -16,7 +16,7 @@ Two ESP32-S3 variants are deployed:
 | Device | Flash | PSRAM | MAC | Port | Notes |
 |--------|-------|-------|-----|------|-------|
 | ESP32-S3 (QFN56 rev 0.2) | 4 MB | 2 MB | 1C:DB:D4:83:D2:40 | COM5 | Budget node, uses `sdkconfig.defaults.4mb` + `partitions_4mb.csv` |
-| ESP32-S3 | 8 MB | 8 MB | -- | COM7 | Full-featured node, existing deployment |
+| ESP32-S3 | 8 MB | 8 MB | - | COM7 | Full-featured node, existing deployment |
 
 Both run the Tier 2 DSP firmware with presence detection, vitals extraction, fall detection, and gait analysis.
 
@@ -217,12 +217,12 @@ Key Cognitum Seed endpoints used:
 ### Positive
 
 - Provides real-time, objective guest satisfaction measurement without surveys or wearables.
-- Reuses four existing WASM modules -- the happiness module is a fusion layer, not a rewrite.
+- Reuses four existing WASM modules - the happiness module is a fusion layer, not a rewrite.
 - The Seed's 8-dim vector store is a natural fit; no schema changes needed.
 - Ed25519 witness chain satisfies hospitality industry audit requirements and GDPR record-keeping.
 - Both 4MB and 8MB ESP32-S3 variants are supported, enabling low-cost deployment at scale (~$8 per room for the 4MB node).
 - Seed's environmental sensors (BME280, PIR) provide complementary context (room temperature, humidity) that can be correlated with happiness scores.
-- No cloud dependency -- all processing is local (ESP32 edge + Seed link-local network).
+- No cloud dependency - all processing is local (ESP32 edge + Seed link-local network).
 
 ### Negative
 

@@ -1,4 +1,4 @@
-# ADR-052: Tauri Desktop Frontend — RuView Hardware Management & Visualization
+# ADR-052: Tauri Desktop Frontend - RuView Hardware Management & Visualization
 
 | Field | Value |
 |-------|-------|
@@ -23,16 +23,16 @@ RuView currently requires users to interact with multiple disconnected tools to 
 | Mesh topology | Mental model | No visualization of TDM slots, sync, health |
 | Node discovery | Manual IP tracking | No mDNS/UDP broadcast discovery |
 
-There is no single tool that provides a unified view of the entire deployment — from ESP32 hardware through the sensing pipeline to pose visualization. Field operators deploying multi-node meshes must context-switch between terminals, browsers, and serial monitors.
+There is no single tool that provides a unified view of the entire deployment - from ESP32 hardware through the sensing pipeline to pose visualization. Field operators deploying multi-node meshes must context-switch between terminals, browsers, and serial monitors.
 
 ### Why a Desktop App
 
 A browser-based UI cannot access serial ports (for flashing), raw UDP sockets (for node discovery), or the local filesystem (for firmware binaries). A desktop application is required for hardware management. Tauri v2 is the natural choice because:
 
-1. **Rust backend** — integrates directly with the existing Rust workspace (`wifi-densepose-rs`). Crates like `wifi-densepose-hardware` (serial port parsing), `wifi-densepose-config`, and `wifi-densepose-sensing-server` can be linked as library dependencies.
-2. **Small binary** — Tauri bundles the system webview rather than shipping Chromium (~150 MB savings vs Electron).
-3. **Cross-platform** — Windows, macOS, Linux from the same codebase.
-4. **Security model** — Tauri's capability-based permissions system restricts frontend access to explicitly allowed Rust commands.
+1. **Rust backend** - integrates directly with the existing Rust workspace (`wifi-densepose-rs`). Crates like `wifi-densepose-hardware` (serial port parsing), `wifi-densepose-config`, and `wifi-densepose-sensing-server` can be linked as library dependencies.
+2. **Small binary** - Tauri bundles the system webview rather than shipping Chromium (~150 MB savings vs Electron).
+3. **Cross-platform** - Windows, macOS, Linux from the same codebase.
+4. **Security model** - Tauri's capability-based permissions system restricts frontend access to explicitly allowed Rust commands.
 
 ### Why Not Electron / Flutter / Native
 
@@ -55,7 +55,7 @@ Add a new crate to the workspace:
 rust-port/wifi-densepose-rs/
   Cargo.toml                          # Add "crates/wifi-densepose-desktop" to members
   crates/
-    wifi-densepose-desktop/           # NEW — Tauri app crate
+    wifi-densepose-desktop/           # NEW - Tauri app crate
       Cargo.toml
       tauri.conf.json
       capabilities/
@@ -122,7 +122,7 @@ rust-port/wifi-densepose-rs/
             types.ts                  # Shared TypeScript types
 ```
 
-### 2. Rust Backend — Tauri Commands
+### 2. Rust Backend - Tauri Commands
 
 #### 2.1 Node Discovery
 
@@ -130,7 +130,7 @@ rust-port/wifi-densepose-rs/
 // commands/discovery.rs
 
 /// Discover ESP32 CSI nodes on the local network.
-/// Strategy 1: mDNS — nodes announce _ruview._tcp service
+/// Strategy 1: mDNS - nodes announce _ruview._tcp service
 /// Strategy 2: UDP broadcast probe on port 5005 (CSI aggregator port)
 /// Strategy 3: HTTP health check sweep on port 8032 (OTA server)
 #[tauri::command]
@@ -224,7 +224,7 @@ async fn ota_update(
 #[tauri::command]
 async fn ota_status(node_ip: String, psk: Option<String>) -> Result<OtaStatus, String>;
 
-/// Batch OTA update — push firmware to multiple nodes sequentially.
+/// Batch OTA update - push firmware to multiple nodes sequentially.
 /// Skips nodes already running the target version.
 #[tauri::command]
 async fn ota_batch_update(
@@ -391,19 +391,19 @@ pub struct NvsConfig {
 +------------------------------------------+
 
 Nav items:
-  [D] Dashboard — overview of all nodes and server
-  [F] Flash — firmware flashing wizard
-  [W] WASM — edge module management
-  [S] Sensing — live sensing data view
-  [M] Mesh — topology visualization
-  [T] Settings — ports, paths, preferences
+  [D] Dashboard - overview of all nodes and server
+  [F] Flash - firmware flashing wizard
+  [W] WASM - edge module management
+  [S] Sensing - live sensing data view
+  [M] Mesh - topology visualization
+  [T] Settings - ports, paths, preferences
 ```
 
 #### 3.3 Dashboard Page
 
 The dashboard is the primary landing page showing:
 
-1. **Node Grid** — cards for each discovered ESP32 node showing:
+1. **Node Grid** - cards for each discovered ESP32 node showing:
    - IP address and hostname
    - Firmware version (with update indicator if newer available)
    - Node ID and TDM slot assignment
@@ -412,20 +412,20 @@ The dashboard is the primary landing page showing:
    - Health status (online/offline/degraded)
    - Quick actions: OTA update, configure, view logs
 
-2. **Sensing Server Panel** — start/stop button, port configuration, log tail
+2. **Sensing Server Panel** - start/stop button, port configuration, log tail
 
-3. **Discovery Controls** — scan button, auto-discovery toggle, network range filter
+3. **Discovery Controls** - scan button, auto-discovery toggle, network range filter
 
 #### 3.4 Flash Firmware Page
 
 A wizard-style flow:
 
-1. **Select Port** — dropdown of detected serial ports with chip info
-2. **Select Firmware** — file picker for `.bin` files, or select from bundled builds
-3. **Configure** — chip type, baud rate, flash mode
-4. **Flash** — progress bar with phase indicators (connecting, erasing, writing, verifying)
-5. **Provision** — optional NVS provisioning form (WiFi, target IP, TDM, edge tier)
-6. **Verify** — serial monitor showing boot log, success/fail indicator
+1. **Select Port** - dropdown of detected serial ports with chip info
+2. **Select Firmware** - file picker for `.bin` files, or select from bundled builds
+3. **Configure** - chip type, baud rate, flash mode
+4. **Flash** - progress bar with phase indicators (connecting, erasing, writing, verifying)
+5. **Provision** - optional NVS provisioning form (WiFi, target IP, TDM, edge tier)
+6. **Verify** - serial monitor showing boot log, success/fail indicator
 
 #### 3.5 WASM Module Manager Page
 
@@ -449,11 +449,11 @@ Embeds the existing web UI (`ui/`) via an iframe pointing at the sensing server'
 - Offline access to recorded data
 
 Key visualization components:
-- **CSI Heatmap** — subcarrier amplitude over time
-- **Signal Field** — 2D signal strength visualization
-- **Pose Skeleton** — detected body keypoints and connections
-- **Vital Signs** — real-time breathing rate and heart rate charts
-- **Activity Classification** — current activity label with confidence
+- **CSI Heatmap** - subcarrier amplitude over time
+- **Signal Field** - 2D signal strength visualization
+- **Pose Skeleton** - detected body keypoints and connections
+- **Vital Signs** - real-time breathing rate and heart rate charts
+- **Activity Classification** - current activity label with confidence
 
 #### 3.7 Mesh Topology Page
 
@@ -639,7 +639,7 @@ cargo build --release -p wifi-densepose-sensing-server
 
 ### 9. Persistent Node Registry
 
-Discovery alone is transient — nodes appear when they broadcast, disappear when they don't. A persistent local registry transforms discovery into **reconciliation**.
+Discovery alone is transient - nodes appear when they broadcast, disappear when they don't. A persistent local registry transforms discovery into **reconciliation**.
 
 ```
 ~/.ruview/nodes.db   (SQLite via rusqlite)
@@ -649,16 +649,16 @@ Discovery alone is transient — nodes appear when they broadcast, disappear whe
 
 ```sql
 CREATE TABLE nodes (
-    mac         TEXT PRIMARY KEY,        -- e.g. "AA:BB:CC:DD:EE:FF"
-    last_ip     TEXT,                    -- last known IP
-    last_seen   INTEGER NOT NULL,        -- Unix timestamp
-    firmware    TEXT,                    -- e.g. "0.3.1"
-    chip        TEXT DEFAULT 'esp32s3',  -- esp32, esp32s3, esp32c3
-    mesh_role   TEXT DEFAULT 'node',     -- 'coordinator' | 'node' | 'aggregator'
-    tdm_slot    INTEGER,                -- assigned TDM slot index
-    capabilities TEXT,                  -- JSON: {"wasm": true, "ota": true, "csi": true}
-    friendly_name TEXT,                 -- user-assigned label
-    notes       TEXT                    -- free-form notes
+    mac         TEXT PRIMARY KEY,        - e.g. "AA:BB:CC:DD:EE:FF"
+    last_ip     TEXT,                    - last known IP
+    last_seen   INTEGER NOT NULL,        - Unix timestamp
+    firmware    TEXT,                    - e.g. "0.3.1"
+    chip        TEXT DEFAULT 'esp32s3',  - esp32, esp32s3, esp32c3
+    mesh_role   TEXT DEFAULT 'node',     - 'coordinator' | 'node' | 'aggregator'
+    tdm_slot    INTEGER,                - assigned TDM slot index
+    capabilities TEXT,                  - JSON: {"wasm": true, "ota": true, "csi": true}
+    friendly_name TEXT,                 - user-assigned label
+    notes       TEXT                    - free-form notes
 );
 ```
 
@@ -672,7 +672,7 @@ CREATE TABLE nodes (
 
 This means the desktop app **remembers the mesh** across restarts, which is critical for field deployments where nodes may be offline temporarily.
 
-### 10. OTA Safety Gate — Rolling Updates
+### 10. OTA Safety Gate - Rolling Updates
 
 Mesh deployments cannot tolerate all nodes rebooting simultaneously. The OTA subsystem includes a **rolling update mode** that preserves sensing continuity:
 
@@ -766,21 +766,21 @@ Total estimated effort: ~11 weeks for a single developer.
 
 ### Positive
 
-- **Single pane of glass** — all hardware management, sensing, and visualization in one app
-- **No Python dependency** — Rust-native `espflash` replaces `esptool.py` for firmware flashing
-- **Replaces 6+ CLI tools** — flash, provision, OTA, WASM management, server control, visualization
-- **Accessible to non-developers** — GUI replaces CLI flags and curl commands
-- **Cross-platform** — one codebase for Windows, macOS, Linux
-- **Workspace integration** — shares types, config, and hardware crates with sensing server
-- **Small binary** — ~15-20 MB vs ~150 MB for Electron equivalent
+- **Single pane of glass** - all hardware management, sensing, and visualization in one app
+- **No Python dependency** - Rust-native `espflash` replaces `esptool.py` for firmware flashing
+- **Replaces 6+ CLI tools** - flash, provision, OTA, WASM management, server control, visualization
+- **Accessible to non-developers** - GUI replaces CLI flags and curl commands
+- **Cross-platform** - one codebase for Windows, macOS, Linux
+- **Workspace integration** - shares types, config, and hardware crates with sensing server
+- **Small binary** - ~15-20 MB vs ~150 MB for Electron equivalent
 
 ### Negative
 
-- **New frontend dependency** — introduces Node.js/npm build step into the Rust workspace
-- **Tauri version churn** — Tauri v2 is recent; API stability is not yet proven at scale
-- **webkit2gtk on Linux** — depends on system webview version; old distros may have stale webkit
-- **espflash limitations** — the `espflash` crate may not support all chip variants or flash modes that `esptool.py` handles; fallback to bundled Python is needed
-- **Maintenance surface** — adds ~5,000 lines of TypeScript and ~2,000 lines of Rust
+- **New frontend dependency** - introduces Node.js/npm build step into the Rust workspace
+- **Tauri version churn** - Tauri v2 is recent; API stability is not yet proven at scale
+- **webkit2gtk on Linux** - depends on system webview version; old distros may have stale webkit
+- **espflash limitations** - the `espflash` crate may not support all chip variants or flash modes that `esptool.py` handles; fallback to bundled Python is needed
+- **Maintenance surface** - adds ~5,000 lines of TypeScript and ~2,000 lines of Rust
 
 ### Risks
 
@@ -801,10 +801,10 @@ Total estimated effort: ~11 weeks for a single developer.
 - ADR-039: ESP32 Edge Intelligence
 - ADR-040: WASM Programmable Sensing
 - ADR-044: Provisioning Tool Enhancements
-- ADR-050: Quality Engineering — Security Hardening
+- ADR-050: Quality Engineering - Security Hardening
 - ADR-051: Sensing Server Decomposition
-- `firmware/esp32-csi-node/` — ESP32 firmware source
-- `firmware/esp32-csi-node/provision.py` — Current provisioning script
-- `rust-port/wifi-densepose-rs/crates/wifi-densepose-sensing-server/` — Sensing server
-- `rust-port/wifi-densepose-rs/crates/wifi-densepose-hardware/` — Hardware crate
-- `ui/` — Existing web UI
+- `firmware/esp32-csi-node/` - ESP32 firmware source
+- `firmware/esp32-csi-node/provision.py` - Current provisioning script
+- `rust-port/wifi-densepose-rs/crates/wifi-densepose-sensing-server/` - Sensing server
+- `rust-port/wifi-densepose-rs/crates/wifi-densepose-hardware/` - Hardware crate
+- `ui/` - Existing web UI

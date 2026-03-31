@@ -21,7 +21,7 @@ A modular Rust workspace for WiFi-based human pose estimation, vital sign monito
 | Feature Extraction | ~8 ms | 9.03 us | **~890x** |
 | Motion Detection | ~1 ms | 186 ns | **~5400x** |
 | Full Pipeline | ~15 ms | 18.47 us | **~810x** |
-| Vital Signs | N/A | 86 us (11,665 fps) | -- |
+| Vital Signs | N/A | 86 us (11,665 fps) | - |
 
 ## Crate Overview
 
@@ -38,21 +38,21 @@ A modular Rust workspace for WiFi-based human pose estimation, vital sign monito
 | Crate | Description | RuVector Integration | crates.io |
 |-------|-------------|---------------------|-----------|
 | [`wifi-densepose-signal`](wifi-densepose-signal/) | SOTA CSI signal processing (6 algorithms from SpotFi, FarSense, Widar 3.0) | `ruvector-mincut`, `ruvector-attn-mincut`, `ruvector-attention`, `ruvector-solver` | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-signal.svg)](https://crates.io/crates/wifi-densepose-signal) |
-| [`wifi-densepose-vitals`](wifi-densepose-vitals/) | Vital sign extraction: breathing (6-30 BPM) and heart rate (40-120 BPM) | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-vitals.svg)](https://crates.io/crates/wifi-densepose-vitals) |
-| [`wifi-densepose-wifiscan`](wifi-densepose-wifiscan/) | Multi-BSSID WiFi scanning for Windows-enhanced sensing | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-wifiscan.svg)](https://crates.io/crates/wifi-densepose-wifiscan) |
+| [`wifi-densepose-vitals`](wifi-densepose-vitals/) | Vital sign extraction: breathing (6-30 BPM) and heart rate (40-120 BPM) | - | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-vitals.svg)](https://crates.io/crates/wifi-densepose-vitals) |
+| [`wifi-densepose-wifiscan`](wifi-densepose-wifiscan/) | Multi-BSSID WiFi scanning for Windows-enhanced sensing | - | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-wifiscan.svg)](https://crates.io/crates/wifi-densepose-wifiscan) |
 
 ### Neural Network & Training
 
 | Crate | Description | RuVector Integration | crates.io |
 |-------|-------------|---------------------|-----------|
-| [`wifi-densepose-nn`](wifi-densepose-nn/) | Multi-backend inference (ONNX, PyTorch, Candle) with DensePose head (24 body parts) | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-nn.svg)](https://crates.io/crates/wifi-densepose-nn) |
+| [`wifi-densepose-nn`](wifi-densepose-nn/) | Multi-backend inference (ONNX, PyTorch, Candle) with DensePose head (24 body parts) | - | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-nn.svg)](https://crates.io/crates/wifi-densepose-nn) |
 | [`wifi-densepose-train`](wifi-densepose-train/) | Training pipeline with MM-Fi dataset, 114->56 subcarrier interpolation | **All 5 crates** | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-train.svg)](https://crates.io/crates/wifi-densepose-train) |
 
 ### Disaster Response
 
 | Crate | Description | RuVector Integration | crates.io |
 |-------|-------------|---------------------|-----------|
-| [`wifi-densepose-mat`](wifi-densepose-mat/) | Mass Casualty Assessment Tool -- survivor detection, triage, multi-AP localization | `ruvector-solver`, `ruvector-temporal-tensor` | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-mat.svg)](https://crates.io/crates/wifi-densepose-mat) |
+| [`wifi-densepose-mat`](wifi-densepose-mat/) | Mass Casualty Assessment Tool - survivor detection, triage, multi-AP localization | `ruvector-solver`, `ruvector-temporal-tensor` | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-mat.svg)](https://crates.io/crates/wifi-densepose-mat) |
 
 ### Hardware & Deployment
 
@@ -201,7 +201,7 @@ println!("RSSI: {} dBm, {} subcarriers", frame.metadata.rssi, frame.subcarriers.
 cargo check -p wifi-densepose-train --no-default-features
 
 # Run training with GPU (requires tch/libtorch)
-cargo run -p wifi-densepose-train --features tch-backend --bin train -- \
+cargo run -p wifi-densepose-train --features tch-backend --bin train - \
     --config training.toml --dataset /path/to/mmfi
 
 # Verify deterministic training proof
@@ -286,9 +286,9 @@ Key design decisions documented in [`docs/adr/`](https://github.com/ruvnet/wifi-
 
 ## Related Projects
 
-- **[WiFi-DensePose](https://github.com/ruvnet/wifi-densepose)** -- Main repository (Python v1 + Rust v2)
-- **[RuVector](https://github.com/ruvnet/ruvector)** -- Graph algorithms for neural networks (5 crates, v2.0.4)
-- **[rUv](https://github.com/ruvnet)** -- Creator and maintainer
+- **[WiFi-DensePose](https://github.com/ruvnet/wifi-densepose)** - Main repository (Python v1 + Rust v2)
+- **[RuVector](https://github.com/ruvnet/ruvector)** - Graph algorithms for neural networks (5 crates, v2.0.4)
+- **[rUv](https://github.com/ruvnet)** - Creator and maintainer
 
 ## License
 

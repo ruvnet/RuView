@@ -1,6 +1,6 @@
-# Brain State Observatory — Ten Application Domains
+# Brain State Observatory - Ten Application Domains
 
-## SOTA Research Document — RF Topological Sensing Series (22/22)
+## SOTA Research Document - RF Topological Sensing Series (22/22)
 
 **Date**: 2026-03-09
 **Domain**: Clinical Diagnostics × BCI × Cognitive Science × Commercial Applications
@@ -8,14 +8,14 @@
 
 ---
 
-## 1. Introduction — Not Mind Reading, Something Better
+## 1. Introduction - Not Mind Reading, Something Better
 
 If you build a system that combines high-sensitivity neural sensing, RuVector-style geometric
 memory, and dynamic mincut topology analysis, you are not building a mind reader. You are
 building a **brain state observatory**.
 
 The most valuable applications are not "reading thoughts." They are systems that measure how
-cognition organizes itself over time — and detect when that organization goes wrong.
+cognition organizes itself over time - and detect when that organization goes wrong.
 
 This document maps ten application domains where the RuVector + dynamic mincut architecture
 becomes unusually powerful, with honest assessment of feasibility, market reality, and
@@ -451,7 +451,7 @@ enables entirely new categories of scientific questions.
 ### 8.4 This Is Network Science of Cognition
 
 The field has studied individual brain regions and pairwise connections. Topology analysis
-studies the emergent organizational principles — how the whole network self-organizes to
+studies the emergent organizational principles - how the whole network self-organizes to
 produce cognition. This is analogous to studying traffic patterns in a city rather than
 individual cars.
 
@@ -682,7 +682,7 @@ neural network classifiers which can fail unpredictably.
 
 ---
 
-## 13. The Most Powerful Future Use — Google Maps for Cognition
+## 13. The Most Powerful Future Use - Google Maps for Cognition
 
 ### 13.1 The Vision
 
@@ -711,7 +711,7 @@ A real-time display showing:
 
 ### 13.3 How This Changes Neuroscience
 
-Current neuroscience is like having satellite photos of a city — you see the buildings but
+Current neuroscience is like having satellite photos of a city - you see the buildings but
 not the traffic. This observatory adds the traffic layer: real-time flow, congestion,
 routing, and reorganization.
 
@@ -805,9 +805,9 @@ routing, and reorganization.
 2. **Professional monitoring**: simplified system for aviation/military
 
 **Commercialization priorities**:
-- Cognitive workload monitoring (defense/aviation contracts) — fastest revenue
-- Epilepsy topology monitoring (clinical need, clear regulatory path) — largest impact
-- Brain health assessment (wellness market) — largest eventual market
+- Cognitive workload monitoring (defense/aviation contracts) - fastest revenue
+- Epilepsy topology monitoring (clinical need, clear regulatory path) - largest impact
+- Brain health assessment (wellness market) - largest eventual market
 
 ### Phase 4: Platform Expansion (Year 5–10)
 
@@ -839,7 +839,7 @@ The RuVector + mincut core engine is the reusable technology. It should be:
 **Why non-invasive is the right starting point**:
 1. Mincut topology analysis needs *breadth* of coverage (many regions), which non-invasive
    excels at
-2. Implants provide *depth* (single neuron) but only from tiny patches — the opposite of
+2. Implants provide *depth* (single neuron) but only from tiny patches - the opposite of
    what topology analysis needs
 3. OPM-MEG fidelity is sufficient for network-level topology analysis
 4. Regulatory pathway is simpler for non-invasive devices
@@ -857,8 +857,8 @@ Once the topology framework is validated non-invasively, combine with implant da
 
 The ten application domains for a brain state observatory are not speculative science fiction.
 They are engineering challenges with clear technical requirements, identifiable markets, and
-realistic development timelines. The enabling technologies — OPM sensors, graph algorithms,
-RuVector memory, dynamic mincut — exist today or are within reach.
+realistic development timelines. The enabling technologies - OPM sensors, graph algorithms,
+RuVector memory, dynamic mincut - exist today or are within reach.
 
 The strategic insight is this: while the rest of the field races to decode brain *content*
 (what people think, see, imagine), there is an entirely unexplored dimension of brain

@@ -76,14 +76,14 @@ ESP32 (UDP :5005) ──▶ Rust Axum server (:8000) ──▶ UI (browser)
                           ├── /health/*          (health checks)
                           ├── /api/v1/pose/*     (pose estimation)
                           ├── /api/v1/stream/*   (WebSocket pose stream)
-                          ├── /ws/sensing        (sensing WebSocket — replaces :8765)
+                          ├── /ws/sensing        (sensing WebSocket - replaces :8765)
                           └── /ws/mat/stream     (MAT domain events)
 ```
 
 ### Build Configuration
 
 ```toml
-# Lightweight build — no libtorch, no OpenBLAS
+# Lightweight build - no libtorch, no OpenBLAS
 cargo build --release -p wifi-densepose-mat --no-default-features --features "std,api,onnx"
 
 # Full build with all backends

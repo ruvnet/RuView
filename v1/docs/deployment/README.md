@@ -303,7 +303,7 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
 
 # Kubernetes security scan
 kubectl run --rm -i --tty kube-bench --image=aquasec/kube-bench:latest \
-  --restart=Never -- --version 1.20
+  --restart=Never - --version 1.20
 ```
 
 ## 🔄 CI/CD Pipelines
@@ -384,10 +384,10 @@ ansible-playbook -i inventory ansible/playbook.yml
 curl http://<ingress-url>/health
 
 # Database connectivity
-kubectl exec -it <pod-name> -n wifi-densepose -- pg_isready
+kubectl exec -it <pod-name> -n wifi-densepose - pg_isready
 
 # Redis connectivity
-kubectl exec -it <pod-name> -n wifi-densepose -- redis-cli ping
+kubectl exec -it <pod-name> -n wifi-densepose - redis-cli ping
 ```
 
 ## 📈 Scaling & Performance
@@ -431,11 +431,11 @@ kubectl logs -f deployment/cluster-autoscaler -n kube-system
 
 ```bash
 # Create database backup
-kubectl exec -it postgres-pod -n wifi-densepose -- \
+kubectl exec -it postgres-pod -n wifi-densepose - \
   pg_dump -U postgres wifi_densepose > backup.sql
 
 # Restore database
-kubectl exec -i postgres-pod -n wifi-densepose -- \
+kubectl exec -i postgres-pod -n wifi-densepose - \
   psql -U postgres wifi_densepose < backup.sql
 ```
 

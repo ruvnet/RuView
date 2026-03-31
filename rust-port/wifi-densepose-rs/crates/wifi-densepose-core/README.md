@@ -15,14 +15,14 @@ unsafe code.
 
 ## Features
 
-- **Core data types** -- `CsiFrame`, `ProcessedSignal`, `PoseEstimate`, `PersonPose`, `Keypoint`,
+- **Core data types** - `CsiFrame`, `ProcessedSignal`, `PoseEstimate`, `PersonPose`, `Keypoint`,
   `KeypointType`, `BoundingBox`, `Confidence`, `Timestamp`, and more.
-- **Trait abstractions** -- `SignalProcessor`, `NeuralInference`, and `DataStore` define the
+- **Trait abstractions** - `SignalProcessor`, `NeuralInference`, and `DataStore` define the
   contracts for signal processing, neural network inference, and data persistence respectively.
-- **Error hierarchy** -- `CoreError`, `SignalError`, `InferenceError`, and `StorageError` provide
+- **Error hierarchy** - `CoreError`, `SignalError`, `InferenceError`, and `StorageError` provide
   typed error handling across subsystem boundaries.
-- **`no_std` support** -- Disable the default `std` feature for embedded or WASM targets.
-- **Constants** -- `MAX_KEYPOINTS` (17, COCO format), `MAX_SUBCARRIERS` (256),
+- **`no_std` support** - Disable the default `std` feature for embedded or WASM targets.
+- **Constants** - `MAX_KEYPOINTS` (17, COCO format), `MAX_SUBCARRIERS` (256),
   `DEFAULT_CONFIDENCE_THRESHOLD` (0.5).
 
 ### Feature flags
@@ -59,11 +59,11 @@ use wifi_densepose_core::prelude::*;
 
 ```text
 wifi-densepose-core/src/
-  lib.rs          -- Re-exports, constants, prelude
-  types.rs        -- CsiFrame, PoseEstimate, Keypoint, etc.
-  traits.rs       -- SignalProcessor, NeuralInference, DataStore
-  error.rs        -- CoreError, SignalError, InferenceError, StorageError
-  utils.rs        -- Shared helper functions
+  lib.rs          - Re-exports, constants, prelude
+  types.rs        - CsiFrame, PoseEstimate, Keypoint, etc.
+  traits.rs       - SignalProcessor, NeuralInference, DataStore
+  error.rs        - CoreError, SignalError, InferenceError, StorageError
+  utils.rs        - Shared helper functions
 ```
 
 ## Related Crates

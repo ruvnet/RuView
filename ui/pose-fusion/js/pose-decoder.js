@@ -1,5 +1,5 @@
 /**
- * PoseDecoder — Maps motion detection grid → 17 COCO keypoints.
+ * PoseDecoder - Maps motion detection grid → 17 COCO keypoints.
  *
  * Uses per-cell motion intensity to track actual body part positions:
  * - Head: top-center motion cluster
@@ -345,15 +345,15 @@ export class PoseDecoder {
 
       // === Extended keypoints (17-25) ===
 
-      // 17: left_thumb — offset at thumb angle from wrist-elbow axis
+      // 17: left_thumb - offset at thumb angle from wrist-elbow axis
       { x: lWristX + fingerLen * Math.cos(lHandAngle + P.thumbAngle) * (0.6 + lHandOpen * 0.4),
         y: lWristY + fingerLen * Math.sin(lHandAngle + P.thumbAngle) * (0.6 + lHandOpen * 0.4),
         confidence: 0.68 * (0.5 + lHandOpen * 0.5) },
-      // 18: left_index — extends along wrist-elbow axis
+      // 18: left_index - extends along wrist-elbow axis
       { x: lWristX + fingerLen * Math.cos(lHandAngle) + fingerSpr * lHandOpen * Math.cos(lHandAngle + 0.3),
         y: lWristY + fingerLen * Math.sin(lHandAngle) + fingerSpr * lHandOpen * Math.sin(lHandAngle + 0.3),
         confidence: 0.72 * (0.5 + lHandOpen * 0.5) },
-      // 19: left_pinky — offset opposite thumb
+      // 19: left_pinky - offset opposite thumb
       { x: lWristX + fingerLen * 0.85 * Math.cos(lHandAngle - P.thumbAngle * 0.7),
         y: lWristY + fingerLen * 0.85 * Math.sin(lHandAngle - P.thumbAngle * 0.7),
         confidence: 0.60 * (0.5 + lHandOpen * 0.5) },
@@ -371,7 +371,7 @@ export class PoseDecoder {
         y: rWristY + fingerLen * 0.85 * Math.sin(rHandAngle + P.thumbAngle * 0.7),
         confidence: 0.60 * (0.5 + rHandOpen * 0.5) },
 
-      // 23: left_foot_index (toe tip) — extends forward from ankle
+      // 23: left_foot_index (toe tip) - extends forward from ankle
       { x: lAnkleX + P.ankleToToe * bodyH * 0.5,
         y: lAnkleY + P.ankleToToe * bodyH * 0.3,
         confidence: 0.65 },

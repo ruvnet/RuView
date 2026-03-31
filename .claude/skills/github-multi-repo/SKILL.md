@@ -112,7 +112,7 @@ mcp__claude-flow__swarm_init({
 
   // Execute task across repositories
   Bash(`cat /tmp/repos.txt | while read -r repo; do
-    gh repo clone org/$repo /tmp/$repo -- --depth=1
+    gh repo clone org/$repo /tmp/$repo - --depth=1
     cd /tmp/$repo
 
     # Apply changes
@@ -377,7 +377,7 @@ jobs:
 
   // Update each repository
   Bash(`echo "$TS_REPOS" | while read -r repo; do
-    gh repo clone org/$repo /tmp/$repo -- --depth=1
+    gh repo clone org/$repo /tmp/$repo - --depth=1
     cd /tmp/$repo
 
     npm install --save-dev typescript@5.0.0
@@ -430,7 +430,7 @@ Part of #$TRACKING_ISSUE"
   // Scan all repositories
   Bash(`gh repo list org --limit 100 --json name | jq -r '.[].name' | \
     while read -r repo; do
-      gh repo clone org/$repo /tmp/$repo -- --depth=1
+      gh repo clone org/$repo /tmp/$repo - --depth=1
       cd /tmp/$repo
       npm audit --json > /tmp/audit-$repo.json
     done`)

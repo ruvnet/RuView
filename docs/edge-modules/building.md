@@ -1,6 +1,6 @@
-# Smart Building Modules -- WiFi-DensePose Edge Intelligence
+# Smart Building Modules - WiFi-DensePose Edge Intelligence
 
-> Make any building smarter using WiFi signals you already have. Know which rooms are occupied, control HVAC and lighting automatically, count elevator passengers, track meeting room usage, and audit energy waste -- all without cameras or badges.
+> Make any building smarter using WiFi signals you already have. Know which rooms are occupied, control HVAC and lighting automatically, count elevator passengers, track meeting room usage, and audit energy waste - all without cameras or badges.
 
 ## Overview
 
@@ -20,7 +20,7 @@ All modules target the ESP32-S3 running WASM3 (ADR-040 Tier 3). They receive pre
 
 ### HVAC Presence Control (`bld_hvac_presence.rs`)
 
-**What it does**: Tells your HVAC system whether a room is occupied, with intentionally asymmetric timing -- fast arrival detection (10 seconds) so cooling/heating starts quickly, and slow departure timeout (5 minutes) to avoid premature shutoff when someone briefly steps out. Also classifies whether the occupant is sedentary (desk work, reading) or active (walking, exercising).
+**What it does**: Tells your HVAC system whether a room is occupied, with intentionally asymmetric timing - fast arrival detection (10 seconds) so cooling/heating starts quickly, and slow departure timeout (5 minutes) to avoid premature shutoff when someone briefly steps out. Also classifies whether the occupant is sedentary (desk work, reading) or active (walking, exercising).
 
 **How it works**: A four-state machine processes presence scores and motion energy each frame:
 
@@ -214,7 +214,7 @@ ec.set_overload_threshold(8); // Set custom overload limit
 
 ### Meeting Room Tracker (`bld_meeting_room.rs`)
 
-**What it does**: Tracks the full lifecycle of meeting room usage -- from someone entering, to confirming a genuine multi-person meeting, to detecting when the meeting ends and the room is available again. Distinguishes actual meetings (2+ people for more than 3 seconds) from a single person briefly using the room. Tracks peak headcount and calculates room utilization rate.
+**What it does**: Tracks the full lifecycle of meeting room usage - from someone entering, to confirming a genuine multi-person meeting, to detecting when the meeting ends and the room is available again. Distinguishes actual meetings (2+ people for more than 3 seconds) from a single person briefly using the room. Tracks peak headcount and calculates room utilization rate.
 
 **How it works**: A four-state machine processes presence and person count:
 

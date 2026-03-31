@@ -1,9 +1,9 @@
-# Exotic & Research Modules -- WiFi-DensePose Edge Intelligence
+# Exotic & Research Modules - WiFi-DensePose Edge Intelligence
 
 > Experimental sensing applications that push the boundaries of what WiFi
 > signals can detect. From contactless sleep staging to sign language
 > recognition, these modules explore novel uses of RF sensing. Some are
-> highly experimental -- marked with their maturity level.
+> highly experimental - marked with their maturity level.
 
 ## Maturity Levels
 
@@ -30,16 +30,16 @@
 
 All modules share these design constraints:
 
-- **`no_std`** -- no heap allocation, runs on WASM3 interpreter on ESP32-S3
-- **`const fn new()`** -- all state is stack-allocated and const-constructible
-- **Static event buffer** -- events are returned via `&[(i32, f32)]` from a static array (max 3-5 events per frame)
-- **Budget-aware** -- each module declares its per-frame time budget (L/S/H)
-- **Frame rate** -- all modules assume 20 Hz CSI frame rate from the host Tier 2 DSP
+- **`no_std`** - no heap allocation, runs on WASM3 interpreter on ESP32-S3
+- **`const fn new()`** - all state is stack-allocated and const-constructible
+- **Static event buffer** - events are returned via `&[(i32, f32)]` from a static array (max 3-5 events per frame)
+- **Budget-aware** - each module declares its per-frame time budget (L/S/H)
+- **Frame rate** - all modules assume 20 Hz CSI frame rate from the host Tier 2 DSP
 
 Shared utilities from `vendor_common.rs`:
-- `CircularBuffer<N>` -- fixed-size ring buffer with O(1) push and indexed access
-- `Ema` -- exponential moving average with configurable alpha
-- `WelfordStats` -- online mean/variance computation (Welford's algorithm)
+- `CircularBuffer<N>` - fixed-size ring buffer with O(1) push and indexed access
+- `Ema` - exponential moving average with configurable alpha
+- `WelfordStats` - online mean/variance computation (Welford's algorithm)
 
 ---
 
@@ -47,7 +47,7 @@ Shared utilities from `vendor_common.rs`:
 
 ### Sleep Stage Classification (`exo_dream_stage.rs`)
 
-**What it does**: Classifies sleep phases (Awake, NREM Light, NREM Deep, REM) from breathing patterns, heart rate variability, and micro-movements -- without touching the person.
+**What it does**: Classifies sleep phases (Awake, NREM Light, NREM Deep, REM) from breathing patterns, heart rate variability, and micro-movements - without touching the person.
 
 **Maturity**: Experimental
 
@@ -57,13 +57,13 @@ Shared utilities from `vendor_common.rs`:
 
 The module uses a four-feature state machine with hysteresis:
 
-1. **Breathing regularity** -- Coefficient of variation (CV) of a 64-sample breathing BPM window. Low CV (<0.08) indicates deep sleep; high CV (>0.20) indicates REM or wakefulness.
+1. **Breathing regularity** - Coefficient of variation (CV) of a 64-sample breathing BPM window. Low CV (<0.08) indicates deep sleep; high CV (>0.20) indicates REM or wakefulness.
 
-2. **Motion energy** -- EMA-smoothed motion from host Tier 2. Below 0.15 = sleep-like; above 0.5 = awake.
+2. **Motion energy** - EMA-smoothed motion from host Tier 2. Below 0.15 = sleep-like; above 0.5 = awake.
 
-3. **Heart rate variability (HRV)** -- Variance of recent HR BPM values. High HRV (>8.0) correlates with REM; very low HRV (<2.0) with deep sleep.
+3. **Heart rate variability (HRV)** - Variance of recent HR BPM values. High HRV (>8.0) correlates with REM; very low HRV (<2.0) with deep sleep.
 
-4. **Phase micro-movements** -- High-pass energy of the phase signal (successive differences). Captures muscle atonia disruption during REM.
+4. **Phase micro-movements** - High-pass energy of the phase signal (successive differences). Captures muscle atonia disruption during REM.
 
 Stage transitions require 10 consecutive frames of the candidate stage (hysteresis), preventing jittery classification.
 
@@ -114,7 +114,7 @@ let events = detector.process_frame(
     variance,        // f32: representative subcarrier variance
     presence,        // i32: 1 if person detected, 0 otherwise
 );
-// events: &[(i32, f32)] -- event ID + value pairs
+// events: &[(i32, f32)] - event ID + value pairs
 
 let stage = detector.stage();          // SleepStage enum
 let eff = detector.efficiency();       // f32 [0, 100]
@@ -128,7 +128,7 @@ let rem = detector.rem_ratio();        // f32 [0, 1]
 
 2. **Calibration**: Let the system run for 40+ frames (2 seconds at 20 Hz) with the person in bed before expecting valid stage classifications.
 
-3. **Interpreting Results**: Monitor `SLEEP_STAGE` events. A healthy sleep cycle progresses through Light -> Deep -> Light -> REM, repeating in ~90 minute cycles. The `SLEEP_QUALITY` event (601) gives an overall efficiency percentage -- above 85% is considered good.
+3. **Interpreting Results**: Monitor `SLEEP_STAGE` events. A healthy sleep cycle progresses through Light -> Deep -> Light -> REM, repeating in ~90 minute cycles. The `SLEEP_QUALITY` event (601) gives an overall efficiency percentage - above 85% is considered good.
 
 4. **Limitations**: The module requires the Tier 2 DSP to provide valid `breathing_bpm` and `heart_rate_bpm`. If the person is too far from the WiFi path or behind thick walls, these vitals may not be detectable.
 
@@ -140,7 +140,7 @@ let rem = detector.rem_ratio();        // f32 [0, 1]
 
 **Maturity**: Research
 
-**Limitations**: This module does NOT detect emotions directly. It detects physiological arousal -- elevated heart rate, rapid breathing, and fidgeting. These correlate with stress and anxiety but can also be caused by exercise, caffeine, or excitement. The module cannot distinguish between positive and negative arousal. It is a research tool for exploring the feasibility of affect sensing via RF, not a clinical instrument.
+**Limitations**: This module does NOT detect emotions directly. It detects physiological arousal - elevated heart rate, rapid breathing, and fidgeting. These correlate with stress and anxiety but can also be caused by exercise, caffeine, or excitement. The module cannot distinguish between positive and negative arousal. It is a research tool for exploring the feasibility of affect sensing via RF, not a clinical instrument.
 
 #### How It Works
 
@@ -287,7 +287,7 @@ let cutoff = detector.is_cutoff();     // bool
 
 ### Plant Growth Detection (`exo_plant_growth.rs`)
 
-**What it does**: Detects plant growth and leaf movement from micro-CSI changes over hours/days. Plants cause extremely slow, monotonic drift in CSI amplitude (growth) and diurnal phase oscillations (circadian leaf movement -- nyctinasty).
+**What it does**: Detects plant growth and leaf movement from micro-CSI changes over hours/days. Plants cause extremely slow, monotonic drift in CSI amplitude (growth) and diurnal phase oscillations (circadian leaf movement - nyctinasty).
 
 **Maturity**: Research
 
@@ -329,7 +329,7 @@ let empty = detector.empty_frames();        // frames of empty-room data
 
 ---
 
-### Ghost Hunter -- Environmental Anomaly Detector (`exo_ghost_hunter.rs`)
+### Ghost Hunter - Environmental Anomaly Detector (`exo_ghost_hunter.rs`)
 
 **What it does**: Monitors CSI when no humans are detected for any perturbation above the noise floor. When the room should be empty but CSI changes are detected, something unexplained is happening. Classifies anomalies by their temporal signature.
 
@@ -389,7 +389,7 @@ let energy = detector.anomaly_energy();               // f32
 #### How It Works
 
 1. **Requires empty room** (`presence == 0`) to avoid confounding with human motion.
-2. **Broadband criterion**: Compute per-group variance ratio (short-term / baseline). If >= 75% of groups (6/8) have elevated variance (ratio > 2.5x), the signal is broadband -- consistent with rain.
+2. **Broadband criterion**: Compute per-group variance ratio (short-term / baseline). If >= 75% of groups (6/8) have elevated variance (ratio > 2.5x), the signal is broadband - consistent with rain.
 3. **Hysteresis state machine**: Onset requires 10 consecutive broadband frames; cessation requires 20 consecutive quiet frames.
 4. **Intensity classification**: Based on smoothed excess energy above baseline.
 
@@ -479,7 +479,7 @@ let persons = detector.active_persons();     // usize
 
 ### Time Crystal Detection (`exo_time_crystal.rs`)
 
-**What it does**: Detects temporal symmetry breaking patterns -- specifically period doubling -- in motion energy. A "time crystal" in this context is when the system oscillates at a sub-harmonic of the driving frequency. Also counts independent non-harmonic periodic components as a "coordination index" for multi-person temporal coordination.
+**What it does**: Detects temporal symmetry breaking patterns - specifically period doubling - in motion energy. A "time crystal" in this context is when the system oscillates at a sub-harmonic of the driving frequency. Also counts independent non-harmonic periodic components as a "coordination index" for multi-person temporal coordination.
 
 **Maturity**: Research
 
@@ -602,14 +602,14 @@ All 10 modules have been reviewed for:
 
 ## Research References
 
-1. Liu, J., et al. "Monitoring Vital Signs and Postures During Sleep Using WiFi Signals." IEEE Internet of Things Journal, 2018. -- WiFi-based sleep monitoring using CSI breathing patterns.
-2. Zhao, M., et al. "Through-Wall Human Pose Estimation Using Radio Signals." CVPR 2018. -- RF-based pose estimation foundations.
-3. Wang, H., et al. "RT-Fall: A Real-Time and Contactless Fall Detection System with Commodity WiFi Devices." IEEE Transactions on Mobile Computing, 2017. -- WiFi CSI for human activity recognition.
-4. Li, H., et al. "WiFinger: Talk to Your Smart Devices with Finger Gesture." UbiComp 2016. -- WiFi-based gesture recognition using CSI.
-5. Ma, Y., et al. "SignFi: Sign Language Recognition Using WiFi." ACM IMWUT, 2018. -- WiFi CSI for sign language.
-6. Nickel, M. & Kiela, D. "Poincare Embeddings for Learning Hierarchical Representations." NeurIPS 2017. -- Hyperbolic embedding foundations.
-7. Wang, W., et al. "Understanding and Modeling of WiFi Signal Based Human Activity Recognition." MobiCom 2015. -- CSI-based activity recognition.
-8. Adib, F., et al. "Smart Homes that Monitor Breathing and Heart Rate." CHI 2015. -- Contactless vital sign monitoring via RF signals.
+1. Liu, J., et al. "Monitoring Vital Signs and Postures During Sleep Using WiFi Signals." IEEE Internet of Things Journal, 2018. - WiFi-based sleep monitoring using CSI breathing patterns.
+2. Zhao, M., et al. "Through-Wall Human Pose Estimation Using Radio Signals." CVPR 2018. - RF-based pose estimation foundations.
+3. Wang, H., et al. "RT-Fall: A Real-Time and Contactless Fall Detection System with Commodity WiFi Devices." IEEE Transactions on Mobile Computing, 2017. - WiFi CSI for human activity recognition.
+4. Li, H., et al. "WiFinger: Talk to Your Smart Devices with Finger Gesture." UbiComp 2016. - WiFi-based gesture recognition using CSI.
+5. Ma, Y., et al. "SignFi: Sign Language Recognition Using WiFi." ACM IMWUT, 2018. - WiFi CSI for sign language.
+6. Nickel, M. & Kiela, D. "Poincare Embeddings for Learning Hierarchical Representations." NeurIPS 2017. - Hyperbolic embedding foundations.
+7. Wang, W., et al. "Understanding and Modeling of WiFi Signal Based Human Activity Recognition." MobiCom 2015. - CSI-based activity recognition.
+8. Adib, F., et al. "Smart Homes that Monitor Breathing and Heart Rate." CHI 2015. - Contactless vital sign monitoring via RF signals.
 
 ## Contributing New Research Modules
 
@@ -634,7 +634,7 @@ All 10 modules have been reviewed for:
    - At minimum: `test_const_new`, `test_warmup_no_events`, one happy-path detection test, `test_reset`
    - Test edge cases: empty input, extreme values, insufficient data
    - Verify all output values are in their documented ranges
-   - Run: `cargo test --features std -- exo_` (from within the wasm-edge crate directory)
+   - Run: `cargo test --features std - exo_` (from within the wasm-edge crate directory)
 
 ### Design Constraints
 

@@ -1,4 +1,4 @@
-# Spatial & Temporal Intelligence -- WiFi-DensePose Edge Intelligence
+# Spatial & Temporal Intelligence - WiFi-DensePose Edge Intelligence
 
 > Location awareness, activity patterns, and autonomous decision-making running on the ESP32 chip. These modules figure out where people are, learn daily routines, verify safety rules, and let the device plan its own actions.
 

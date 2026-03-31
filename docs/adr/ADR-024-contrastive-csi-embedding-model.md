@@ -1,11 +1,11 @@
-# ADR-024: Project AETHER -- Contrastive CSI Embedding Model via CsiToPoseTransformer Backbone
+# ADR-024: Project AETHER - Contrastive CSI Embedding Model via CsiToPoseTransformer Backbone
 
 | Field | Value |
 |-------|-------|
 | **Status** | Proposed |
 | **Date** | 2026-03-01 |
 | **Deciders** | ruv |
-| **Codename** | **AETHER** -- Ambient Electromagnetic Topology for Hierarchical Embedding and Recognition |
+| **Codename** | **AETHER** - Ambient Electromagnetic Topology for Hierarchical Embedding and Recognition |
 | **Relates to** | ADR-004 (HNSW Fingerprinting), ADR-005 (SONA Self-Learning), ADR-006 (GNN-Enhanced CSI), ADR-014 (SOTA Signal Processing), ADR-015 (Public Datasets), ADR-016 (RuVector Integration), ADR-023 (Trained DensePose Pipeline) |
 
 ---
@@ -20,7 +20,7 @@ These representations are currently **task-coupled**: they exist only as transie
 
 1. **Extract and persist** these representations as reusable, queryable embedding vectors
 2. **Compare** CSI observations via learned similarity ("is this the same room?" / "is this the same person?")
-3. **Pretrain** the backbone in a self-supervised manner from unlabeled CSI streams -- the most abundant data source
+3. **Pretrain** the backbone in a self-supervised manner from unlabeled CSI streams - the most abundant data source
 4. **Transfer** learned representations across WiFi hardware, environments, or deployment sites
 5. **Feed** semantically meaningful vectors into HNSW indices (ADR-004) instead of hand-crafted feature encodings
 
@@ -28,7 +28,7 @@ The gap between what the transformer *internally knows* and what the system *ext
 
 ### 1.2 Why "AETHER"?
 
-The name reflects the historical concept of the luminiferous aether -- the invisible medium through which electromagnetic waves were once theorized to propagate. In our context, WiFi signals propagate through physical space, and AETHER extracts a latent geometric understanding of that space from the signals themselves. The name captures three core ideas:
+The name reflects the historical concept of the luminiferous aether - the invisible medium through which electromagnetic waves were once theorized to propagate. In our context, WiFi signals propagate through physical space, and AETHER extracts a latent geometric understanding of that space from the signals themselves. The name captures three core ideas:
 
 - **Ambient**: Works with the WiFi signals already present in any indoor environment
 - **Electromagnetic Topology**: Captures the topological structure of multipath propagation
@@ -40,10 +40,10 @@ We evaluated and rejected a generative "RuvLLM" approach. The GOAP analysis:
 
 | Factor | Generative (Autoregressive) | Contrastive (AETHER) |
 |--------|---------------------------|---------------------|
-| **Domain fit** | CSI is 56 continuous floats at 20 Hz -- not a discrete token vocabulary. Autoregressive generation is architecturally mismatched. | Contrastive learning on continuous sensor data is the established SOTA (SimCLR, BYOL, VICReg, CAPC). |
+| **Domain fit** | CSI is 56 continuous floats at 20 Hz - not a discrete token vocabulary. Autoregressive generation is architecturally mismatched. | Contrastive learning on continuous sensor data is the established SOTA (SimCLR, BYOL, VICReg, CAPC). |
 | **Model size** | Generative transformers need millions of parameters for meaningful sequence modeling. | Reuses existing 28K-param CsiToPoseTransformer + 25K projection head = 53K total. |
 | **Edge deployment** | Cannot run on ESP32 (240 MHz, 520 KB SRAM). | INT8-quantized 53K params = ~53 KB. 10% of ESP32 SRAM. |
-| **Training data** | Requires massive CSI corpus for autoregressive pretraining to converge. | Self-supervised augmentations work with any CSI stream -- even minutes of data. |
+| **Training data** | Requires massive CSI corpus for autoregressive pretraining to converge. | Self-supervised augmentations work with any CSI stream - even minutes of data. |
 | **Inference** | Autoregressive decoding is sequential; violates 20 Hz real-time constraint. | Single forward pass: <2 ms at INT8. |
 | **Infrastructure** | New model architecture, tokenizer, trainer, quantizer, RVF packaging. | One new module (`embedding.rs`), one new loss term, one new RVF segment type. |
 | **Collapse risk** | Mode collapse in generation manifests as repetitive outputs. | Embedding collapse is detectable (variance monitoring) and preventable (VICReg regularization). |
@@ -70,7 +70,7 @@ Recent advances that directly inform AETHER's design:
 
 - **IdentiFi** (2025): Contrastive learning for WiFi-based person identification using latent CSI representations. Demonstrates that contrastive pretraining in the signal domain produces identity-discriminative embeddings without requiring spatial position labels.
 - **WhoFi** (2025): Transformer-based WiFi CSI encoding for person re-identification achieving 95.5% accuracy on NTU-Fi. Validates that transformer backbones learn re-identification-quality features from CSI.
-- **CAPC** (2024): Context-Aware Predictive Coding for WiFi sensing -- integrates CPC and Barlow Twins to learn temporally and contextually consistent representations from unlabeled WiFi data.
+- **CAPC** (2024): Context-Aware Predictive Coding for WiFi sensing - integrates CPC and Barlow Twins to learn temporally and contextually consistent representations from unlabeled WiFi data.
 - **SSL for WiFi HAR Survey** (2025, arXiv:2506.12052): Comprehensive evaluation of SimCLR, VICReg, Barlow Twins, and SimSiam on WiFi CSI for human activity recognition. VICReg achieves best downstream accuracy but requires careful hyperparameter tuning; SimCLR shows more stable training.
 - **ContraWiMAE** (2024-2025): Masked autoencoder + contrastive pretraining for wireless channel representation learning, demonstrating that hybrid SSL objectives outperform pure contrastive or pure reconstructive approaches.
 - **Wi-PER81** (2025): Benchmark dataset of 162K wireless packets for WiFi-based person re-identification using Siamese networks on signal amplitude heatmaps.
@@ -120,7 +120,7 @@ CSI Frame(s) [n_pairs x n_subcarriers]
 
 2. **128-dim output**: Standard in contrastive learning literature (SimCLR, MoCo, CLIP). Large enough for high-recall HNSW search, small enough for edge deployment. L2-normalized to the unit hypersphere for cosine similarity.
 
-3. **BatchNorm1D in projection head**: Prevents representation collapse by maintaining feature variance across the batch dimension. Acts as an implicit contrastive mechanism (VICReg insight) -- decorrelates embedding dimensions.
+3. **BatchNorm1D in projection head**: Prevents representation collapse by maintaining feature variance across the batch dimension. Acts as an implicit contrastive mechanism (VICReg insight) - decorrelates embedding dimensions.
 
 4. **Shared backbone, independent heads**: The backbone (csi_embed, cross-attention, GNN) is shared between pose regression and embedding extraction. This enables multi-task training where contrastive and supervised signals co-regularize the backbone.
 
@@ -202,7 +202,7 @@ This ensures that CSI embeddings of the same pose are close in embedding space, 
 
 ### 2.3 Training Strategy: Three-Phase Pipeline
 
-#### Phase A -- Self-Supervised Pretraining (No Labels)
+#### Phase A - Self-Supervised Pretraining (No Labels)
 
 ```
 Raw CSI Window W (any stream, any environment)
@@ -220,7 +220,7 @@ Raw CSI Window W (any stream, any environment)
 - **Epochs**: 100-200 (convergence monitored via embedding uniformity and alignment metrics)
 - **Monitoring**: Track `alignment = E[||z_i - z_j||^2]` for positive pairs (should decrease) and `uniformity = log(E[exp(-2 * ||z_i - z_j||^2)])` over all pairs (should decrease, indicating uniform distribution on hypersphere)
 
-#### Phase B -- Supervised Fine-Tuning (Labeled Data)
+#### Phase B - Supervised Fine-Tuning (Labeled Data)
 
 After pretraining, attach `xyz_head` and `conf_head` and fine-tune with the existing 6-term composite loss (ADR-023 Phase 4), optionally keeping the contrastive loss as a regularizer:
 
@@ -232,7 +232,7 @@ lambda_c = 0.1 (contrastive acts as regularizer, not primary objective)
 
 The pretrained backbone starts with representations that already understand CSI spatial structure, typically requiring 3-10x fewer labeled samples for equivalent pose accuracy.
 
-#### Phase C -- Cross-Modal Alignment (Optional, requires paired data)
+#### Phase C - Cross-Modal Alignment (Optional, requires paired data)
 
 Adds `L_cross` to align CSI and pose embedding spaces. Only applicable when paired CSI + camera pose data is available (MM-Fi provides this).
 
@@ -511,7 +511,7 @@ pub struct TrainerConfig {
 // New method on Trainer:
 impl Trainer {
     /// Self-supervised pretraining epoch using AETHER contrastive loss.
-    /// No pose labels required -- only raw CSI windows.
+    /// No pose labels required - only raw CSI windows.
     pub fn pretrain_epoch(
         &mut self,
         csi_windows: &[Vec<Vec<f32>>],
@@ -716,7 +716,7 @@ The `embed()` method already exists and returns `[17 x d_model]`. No modificatio
 ### Positive
 
 - **Self-supervised pretraining from unlabeled CSI**: Any WiFi CSI stream (no cameras, no annotations) can pretrain the embedding backbone, radically reducing labeled data requirements. This is the single most impactful capability: WiFi signals are ubiquitous and free.
-- **Reuses 100% of existing infrastructure**: No new model architecture -- extends the existing CsiToPoseTransformer with one module, one loss term, one RVF segment type.
+- **Reuses 100% of existing infrastructure**: No new model architecture - extends the existing CsiToPoseTransformer with one module, one loss term, one RVF segment type.
 - **HNSW-ready embeddings**: 128-dim L2-normalized vectors plug directly into the HNSW indices proposed in ADR-004, fulfilling that ADR's "vector encode" pipeline gap.
 - **Multi-use embeddings**: Same model produces pose keypoints AND embedding vectors in a single forward pass. Two capabilities for the price of one inference.
 - **Anomaly detection without task-specific models**: OOD CSI frames produce embeddings distant from the training distribution. Fall detection, intrusion detection, and environment change detection emerge as byproducts of the embedding space geometry.
@@ -815,7 +815,7 @@ mod integration_tests {
 
 ---
 
-## 6. Phase 7: Deep RuVector Integration — MicroLoRA + EWC++ + Library Losses
+## 6. Phase 7: Deep RuVector Integration - MicroLoRA + EWC++ + Library Losses
 
 **Status**: Required (promoted from Future Work after capability audit)
 
@@ -841,11 +841,11 @@ pub struct ProjectionHead {
 - **Total: 1,792 params/env** vs 24,832 full ProjectionHead = **93% reduction**
 
 **Methods to add:**
-- `ProjectionHead::with_lora(rank: usize)` — constructor with LoRA adapters
+- `ProjectionHead::with_lora(rank: usize)` - constructor with LoRA adapters
 - `ProjectionHead::forward()` modified: `out = base_out + lora.forward(input)` when adapters present
-- `ProjectionHead::merge_lora()` / `unmerge_lora()` — for fast environment switching
-- `ProjectionHead::freeze_base()` — freeze base weights, train only LoRA
-- `ProjectionHead::lora_params() -> Vec<f32>` — flatten only LoRA weights for checkpoint
+- `ProjectionHead::merge_lora()` / `unmerge_lora()` - for fast environment switching
+- `ProjectionHead::freeze_base()` - freeze base weights, train only LoRA
+- `ProjectionHead::lora_params() -> Vec<f32>` - flatten only LoRA weights for checkpoint
 
 **Environment switching workflow:**
 1. Compute `z_csi` for incoming CSI

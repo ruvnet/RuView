@@ -953,7 +953,7 @@ docker run --rm -v $(pwd):/app node:20 \
 ### Issue: Test Failures in CI
 ```bash
 # Run tests with detailed output
-npm run test -- --verbose --coverage
+npm run test - --verbose --coverage
 
 # Check for environment-specific issues
 npm run test:ci

@@ -10,8 +10,8 @@ Mass Casualty Assessment Tool for WiFi-based disaster survivor detection and loc
 
 `wifi-densepose-mat` uses WiFi Channel State Information (CSI) to detect and locate survivors
 trapped in rubble, debris, or collapsed structures. The crate follows Domain-Driven Design (DDD)
-with event sourcing, organized into three bounded contexts -- detection, localization, and
-alerting -- plus a machine learning layer for debris penetration modeling and vital signs
+with event sourcing, organized into three bounded contexts - detection, localization, and
+alerting - plus a machine learning layer for debris penetration modeling and vital signs
 classification.
 
 Use cases include earthquake search and rescue, building collapse response, avalanche victim
@@ -19,18 +19,18 @@ location, flood rescue operations, and mine collapse detection.
 
 ## Features
 
-- **Vital signs detection** -- Breathing patterns, heartbeat signatures, and movement
+- **Vital signs detection** - Breathing patterns, heartbeat signatures, and movement
   classification with ensemble classifier combining all three modalities.
-- **Survivor localization** -- 3D position estimation through debris via triangulation, depth
+- **Survivor localization** - 3D position estimation through debris via triangulation, depth
   estimation, and position fusion.
-- **Triage classification** -- Automatic START protocol-compatible triage with priority-based
+- **Triage classification** - Automatic START protocol-compatible triage with priority-based
   alert generation and dispatch.
-- **Event sourcing** -- All state changes emitted as domain events (`DetectionEvent`,
+- **Event sourcing** - All state changes emitted as domain events (`DetectionEvent`,
   `AlertEvent`, `ZoneEvent`) stored in a pluggable `EventStore`.
-- **ML debris model** -- Debris material classification, signal attenuation prediction, and
+- **ML debris model** - Debris material classification, signal attenuation prediction, and
   uncertainty-aware vital signs classification.
-- **REST + WebSocket API** -- `axum`-based HTTP API for real-time monitoring dashboards.
-- **ruvector integration** -- `ruvector-solver` for triangulation math, `ruvector-temporal-tensor`
+- **REST + WebSocket API** - `axum`-based HTTP API for real-time monitoring dashboards.
+- **ruvector integration** - `ruvector-solver` for triangulation math, `ruvector-temporal-tensor`
   for compressed CSI buffering.
 
 ### Feature flags
@@ -80,22 +80,22 @@ async fn main() -> anyhow::Result<()> {
 
 ```text
 wifi-densepose-mat/src/
-  lib.rs            -- DisasterResponse coordinator, config builder, MatError
+  lib.rs            - DisasterResponse coordinator, config builder, MatError
   domain/
-    survivor.rs     -- Survivor aggregate root
-    disaster_event.rs -- DisasterEvent, DisasterType
-    scan_zone.rs    -- ScanZone, ZoneBounds
-    alert.rs        -- Alert, Priority
-    vital_signs.rs  -- VitalSignsReading, BreathingPattern, HeartbeatSignature
-    triage.rs       -- TriageStatus, TriageCalculator (START protocol)
-    coordinates.rs  -- Coordinates3D, LocationUncertainty
-    events.rs       -- DomainEvent, EventStore, InMemoryEventStore
-  detection/        -- BreathingDetector, HeartbeatDetector, MovementClassifier, EnsembleClassifier
-  localization/     -- Triangulator, DepthEstimator, PositionFuser
-  alerting/         -- AlertGenerator, AlertDispatcher, TriageService
-  ml/               -- DebrisPenetrationModel, VitalSignsClassifier, UncertaintyEstimate
-  api/              -- axum REST + WebSocket router
-  integration/      -- SignalAdapter, NeuralAdapter, HardwareAdapter
+    survivor.rs     - Survivor aggregate root
+    disaster_event.rs - DisasterEvent, DisasterType
+    scan_zone.rs    - ScanZone, ZoneBounds
+    alert.rs        - Alert, Priority
+    vital_signs.rs  - VitalSignsReading, BreathingPattern, HeartbeatSignature
+    triage.rs       - TriageStatus, TriageCalculator (START protocol)
+    coordinates.rs  - Coordinates3D, LocationUncertainty
+    events.rs       - DomainEvent, EventStore, InMemoryEventStore
+  detection/        - BreathingDetector, HeartbeatDetector, MovementClassifier, EnsembleClassifier
+  localization/     - Triangulator, DepthEstimator, PositionFuser
+  alerting/         - AlertGenerator, AlertDispatcher, TriageService
+  ml/               - DebrisPenetrationModel, VitalSignsClassifier, UncertaintyEstimate
+  api/              - axum REST + WebSocket router
+  integration/      - SignalAdapter, NeuralAdapter, HardwareAdapter
 ```
 
 ## Related Crates

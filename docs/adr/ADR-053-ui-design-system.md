@@ -1,4 +1,4 @@
-# ADR-053: UI Design System — Dark Professional + Unity-Inspired Interface
+# ADR-053: UI Design System - Dark Professional + Unity-Inspired Interface
 
 | Field | Value |
 |-------|-------|
@@ -9,13 +9,13 @@
 
 ## Context
 
-RuView Desktop (ADR-052) needs a UI design system that communicates precision and control — befitting a hardware management control plane for embedded sensing infrastructure. The interface must handle dense data (CSI heatmaps, node registries, log streams, mesh topologies) without feeling overwhelming, while remaining usable by both engineers and field operators.
+RuView Desktop (ADR-052) needs a UI design system that communicates precision and control - befitting a hardware management control plane for embedded sensing infrastructure. The interface must handle dense data (CSI heatmaps, node registries, log streams, mesh topologies) without feeling overwhelming, while remaining usable by both engineers and field operators.
 
 Two design inspirations:
 
-1. **Data-first professional tools** — Dense information displays where data speaks for itself. Clean typography, structured layouts, and deliberate use of color for status. The interface shows what matters and hides what doesn't. Think: network monitoring dashboards, embedded systems IDEs, infrastructure control panels.
+1. **Data-first professional tools** - Dense information displays where data speaks for itself. Clean typography, structured layouts, and deliberate use of color for status. The interface shows what matters and hides what doesn't. Think: network monitoring dashboards, embedded systems IDEs, infrastructure control panels.
 
-2. **Unity Editor** — Dockable panel system, inspector/hierarchy/scene separation, property grids, dark professional theme, and dense-but-organized data display. Unity's UI is purpose-built for managing complex real-time systems — exactly what RuView needs.
+2. **Unity Editor** - Dockable panel system, inspector/hierarchy/scene separation, property grids, dark professional theme, and dense-but-organized data display. Unity's UI is purpose-built for managing complex real-time systems - exactly what RuView needs.
 
 The combination yields a professional control panel for WiFi sensing infrastructure. Data is organized into scannable panels with clear hierarchy. Status is communicated through consistent color coding. The layout adapts from high-level overview down to individual node details through progressive disclosure.
 
@@ -23,13 +23,13 @@ The combination yields a professional control panel for WiFi sensing infrastruct
 
 ### Design Principles
 
-1. **Data is the interface** — The system reveals patterns through visualization, not through explanation. Every pixel earns its place.
-2. **Precision typography** — Typography is clean and authoritative. Technical values are displayed without ambiguity. Labels are concise.
-3. **Panel-based layout** — Dockable regions inspired by Unity's panel system. The operator can see the entire mesh at a glance, then drill into any node.
-4. **Status through color** — Deliberate color coding: green (online), amber (degraded), red (offline/failed), blue (scanning/new). No gratuitous color.
-5. **Progressive disclosure** — Dashboard shows the overview. Clicking a node reveals its details. Summary first, detail on interaction.
-6. **Dual typography** — Monospace for all technical values (MAC addresses, firmware versions, CSI amplitudes). Sans-serif for labels and descriptions. The contrast signals "data vs. context."
-7. **Powered by rUv** — Subtle branding: footer tagline, about dialog, splash screen.
+1. **Data is the interface** - The system reveals patterns through visualization, not through explanation. Every pixel earns its place.
+2. **Precision typography** - Typography is clean and authoritative. Technical values are displayed without ambiguity. Labels are concise.
+3. **Panel-based layout** - Dockable regions inspired by Unity's panel system. The operator can see the entire mesh at a glance, then drill into any node.
+4. **Status through color** - Deliberate color coding: green (online), amber (degraded), red (offline/failed), blue (scanning/new). No gratuitous color.
+5. **Progressive disclosure** - Dashboard shows the overview. Clicking a node reveals its details. Summary first, detail on interaction.
+6. **Dual typography** - Monospace for all technical values (MAC addresses, firmware versions, CSI amplitudes). Sans-serif for labels and descriptions. The contrast signals "data vs. context."
+7. **Powered by rUv** - Subtle branding: footer tagline, about dialog, splash screen.
 
 ### Color System
 
@@ -54,7 +54,7 @@ The combination yields a professional control panel for WiFi sensing infrastruct
   --status-info:    #58a6ff;     /* Scanning, discovering, info */
 
   /* Accent */
-  --accent:         #7c3aed;     /* rUv purple — primary actions */
+  --accent:         #7c3aed;     /* rUv purple - primary actions */
   --accent-hover:   #6d28d9;
 
   /* Borders */
@@ -107,7 +107,7 @@ Three-region layout: navigation sidebar, node list, and detail inspector. Unity'
 **Panel behaviors:**
 - Sidebar collapses to icon-only on narrow windows
 - Node List / Inspector split is resizable via drag handle
-- Inspector scrolls independently — drill into any node without losing the list
+- Inspector scrolls independently - drill into any node without losing the list
 - Status Bar shows global system state at a glance (node count, server status, port)
 
 ### Component Library
@@ -164,7 +164,7 @@ Interactive 3D visualization of the sensing network. Each node is a sphere. Edge
 - Camera: `OrbitControls` for pan/zoom/rotate, reset button returns to default view
 - Follows existing patterns: `BufferGeometry` + `BufferAttribute` for dynamic updates (see `ui/observatory/js/subcarrier-manifold.js`)
 - Raycasting for node click → opens detail in Inspector panel
-- Real-time updates as nodes join, leave, or change status — geometry attributes updated per frame
+- Real-time updates as nodes join, leave, or change status - geometry attributes updated per frame
 
 #### 4. PropertyGrid (Unity Inspector-style)
 
@@ -182,7 +182,7 @@ Interactive 3D visualization of the sensing network. Each node is a sphere. Edge
 |    Sync Drift       +0.12 ms                             |
 |  WASM Modules                                      [▼]  |
 |    [0] activity_detect  running    12.4 KB    83 us/f    |
-|    [1] vital_monitor    stopped     8.1 KB     — us/f   |
+|    [1] vital_monitor    stopped     8.1 KB     - us/f   |
 +-----------------------------------------------------------+
 ```
 
@@ -235,7 +235,7 @@ Minimal and purposeful:
 - Node card health transition: 300ms (color fade, not flash)
 - Progress bar fill: smooth 60fps CSS transition
 - Mesh graph: Three.js render loop at 60fps, force simulation on requestAnimationFrame
-- No loading spinners — use skeleton placeholders instead
+- No loading spinners - use skeleton placeholders instead
 
 ### Branding
 
@@ -262,7 +262,7 @@ Minimal and purposeful:
 
 ### Neutral
 
-- The design system is CSS-only with React components — no heavy UI framework dependency
+- The design system is CSS-only with React components - no heavy UI framework dependency
 - Component library can be extracted as a separate package if other rUv projects need it
 
 ## References

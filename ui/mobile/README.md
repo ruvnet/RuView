@@ -1,8 +1,8 @@
 # WiFi-DensePose Mobile
 
-**See through walls from your phone.** Real-time WiFi sensing, vital signs, and disaster response — in a cross-platform mobile app.
+**See through walls from your phone.** Real-time WiFi sensing, vital signs, and disaster response - in a cross-platform mobile app.
 
-WiFi-DensePose Mobile is a React Native / Expo companion app for the [WiFi-DensePose](../../README.md) sensing platform. It connects to a WiFi sensing server over WebSocket, renders live 3D Gaussian splat visualizations of detected humans, displays breathing and heart rate in real time, and provides a full WiFi-MAT disaster triage dashboard — all from a single codebase that runs on iOS, Android, and Web.
+WiFi-DensePose Mobile is a React Native / Expo companion app for the [WiFi-DensePose](../../README.md) sensing platform. It connects to a WiFi sensing server over WebSocket, renders live 3D Gaussian splat visualizations of detected humans, displays breathing and heart rate in real time, and provides a full WiFi-MAT disaster triage dashboard - all from a single codebase that runs on iOS, Android, and Web.
 
 > | Screen | What It Shows |
 > |--------|---------------|
@@ -13,7 +13,7 @@ WiFi-DensePose Mobile is a React Native / Expo companion app for the [WiFi-Dense
 > | **Settings** | Server URL, theme picker, RSSI-only toggle, alert sound control |
 
 ```bash
-# Quick start — web preview in 30 seconds
+# Quick start - web preview in 30 seconds
 cd ui/mobile
 npm install
 npx expo start --web
@@ -50,7 +50,7 @@ npx expo start --web
 | Expo CLI | Latest | Installed automatically via `npx` |
 | iOS Simulator | Xcode 15+ | macOS only; optional for iOS development |
 | Android Emulator | API 33+ | Android Studio; optional for Android development |
-| WiFi-DensePose Server | Any | Optional — app falls back to simulated data without a server |
+| WiFi-DensePose Server | Any | Optional - app falls back to simulated data without a server |
 
 ---
 
@@ -260,10 +260,10 @@ Mass Casualty Assessment Tool for disaster response. Displays a survivor counter
 ### Settings
 
 Configuration panel with four controls:
-- **Server URL** — text input with URL validation; changes trigger WebSocket reconnect
-- **Theme** — dark / light / system picker
-- **RSSI Scanning** — toggle for platform-native WiFi RSSI scanning
-- **Alert Sound** — toggle for MAT alert audio notifications
+- **Server URL** - text input with URL validation; changes trigger WebSocket reconnect
+- **Theme** - dark / light / system picker
+- **RSSI Scanning** - toggle for platform-native WiFi RSSI scanning
+- **Alert Sound** - toggle for MAT alert audio notifications
 
 All settings persist across app restarts via Zustand with AsyncStorage.
 
@@ -308,9 +308,9 @@ The REST client (`api.service.ts`) provides:
 
 | Method | Path | Returns |
 |--------|------|---------|
-| `GET` | `/api/pose/status` | `PoseStatus` — server health and capabilities |
-| `GET` | `/api/pose/zones` | `ZoneConfig[]` — configured sensing zones |
-| `GET` | `/api/pose/frames?limit=N` | `HistoricalFrames` — recent frame history |
+| `GET` | `/api/pose/status` | `PoseStatus` - server health and capabilities |
+| `GET` | `/api/pose/zones` | `ZoneConfig[]` - configured sensing zones |
+| `GET` | `/api/pose/frames?limit=N` | `HistoricalFrames` - recent frame history |
 
 All requests use Axios with a 5-second timeout and automatic retry (2 attempts).
 
@@ -401,7 +401,7 @@ Follow the project's existing patterns:
 
 ## Credits
 
-Mobile app by [@MaTriXy](https://github.com/MaTriXy) — original scaffold, screen architecture, and cross-platform service layer.
+Mobile app by [@MaTriXy](https://github.com/MaTriXy) - original scaffold, screen architecture, and cross-platform service layer.
 
 Built on the [WiFi-DensePose](../../README.md) sensing platform.
 

@@ -80,7 +80,7 @@ const CONFIG = {
 
 function initializeDatabase(db) {
   db.exec(`
-    -- Short-term patterns (session-level)
+    - Short-term patterns (session-level)
     CREATE TABLE IF NOT EXISTS short_term_patterns (
       id TEXT PRIMARY KEY,
       strategy TEXT NOT NULL,
@@ -96,7 +96,7 @@ function initializeDatabase(db) {
       metadata TEXT
     );
 
-    -- Long-term patterns (promoted from short-term)
+    - Long-term patterns (promoted from short-term)
     CREATE TABLE IF NOT EXISTS long_term_patterns (
       id TEXT PRIMARY KEY,
       strategy TEXT NOT NULL,
@@ -113,17 +113,17 @@ function initializeDatabase(db) {
       metadata TEXT
     );
 
-    -- HNSW index metadata
+    - HNSW index metadata
     CREATE TABLE IF NOT EXISTS hnsw_index (
       id INTEGER PRIMARY KEY,
-      pattern_type TEXT NOT NULL,  -- 'short_term' or 'long_term'
+      pattern_type TEXT NOT NULL,  - 'short_term' or 'long_term'
       pattern_id TEXT NOT NULL,
       vector_id INTEGER NOT NULL,
       created_at INTEGER NOT NULL,
       UNIQUE(pattern_type, pattern_id)
     );
 
-    -- Learning trajectories
+    - Learning trajectories
     CREATE TABLE IF NOT EXISTS trajectories (
       id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL,
@@ -136,7 +136,7 @@ function initializeDatabase(db) {
       distilled_pattern_id TEXT
     );
 
-    -- Learning metrics
+    - Learning metrics
     CREATE TABLE IF NOT EXISTS learning_metrics (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       timestamp INTEGER NOT NULL,
@@ -146,14 +146,14 @@ function initializeDatabase(db) {
       metadata TEXT
     );
 
-    -- Session state
+    - Session state
     CREATE TABLE IF NOT EXISTS session_state (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
       updated_at INTEGER NOT NULL
     );
 
-    -- Create indexes
+    - Create indexes
     CREATE INDEX IF NOT EXISTS idx_short_term_domain ON short_term_patterns(domain);
     CREATE INDEX IF NOT EXISTS idx_short_term_quality ON short_term_patterns(quality DESC);
     CREATE INDEX IF NOT EXISTS idx_short_term_usage ON short_term_patterns(usage_count DESC);

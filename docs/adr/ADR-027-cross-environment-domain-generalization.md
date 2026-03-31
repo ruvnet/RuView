@@ -1,11 +1,11 @@
-# ADR-027: Project MERIDIAN -- Cross-Environment Domain Generalization for WiFi Pose Estimation
+# ADR-027: Project MERIDIAN - Cross-Environment Domain Generalization for WiFi Pose Estimation
 
 | Field | Value |
 |-------|-------|
 | **Status** | Proposed |
 | **Date** | 2026-03-01 |
 | **Deciders** | ruv |
-| **Codename** | **MERIDIAN** -- Multi-Environment Robust Inference via Domain-Invariant Alignment Networks |
+| **Codename** | **MERIDIAN** - Multi-Environment Robust Inference via Domain-Invariant Alignment Networks |
 | **Relates to** | ADR-005 (SONA Self-Learning), ADR-014 (SOTA Signal Processing), ADR-015 (Public Datasets), ADR-016 (RuVector Integration), ADR-023 (Trained DensePose Pipeline), ADR-024 (AETHER Contrastive Embeddings) |
 
 ---
@@ -14,7 +14,7 @@
 
 ### 1.1 The Domain Gap Problem
 
-WiFi-based pose estimation models exhibit severe performance degradation when deployed in environments different from their training setting. A model trained in Room A with a specific transceiver layout, wall material composition, and furniture arrangement can lose 40-70% accuracy when moved to Room B -- even in the same building. This brittleness is the single largest barrier to real-world WiFi sensing deployment.
+WiFi-based pose estimation models exhibit severe performance degradation when deployed in environments different from their training setting. A model trained in Room A with a specific transceiver layout, wall material composition, and furniture arrangement can lose 40-70% accuracy when moved to Room B - even in the same building. This brittleness is the single largest barrier to real-world WiFi sensing deployment.
 
 The root cause is three-fold:
 
@@ -50,7 +50,7 @@ Five concurrent lines of research have converged on the domain generalization pr
 
 | Current Capability | Gap | MERIDIAN Addition |
 |-------------------|-----|------------------|
-| AETHER embeddings (ADR-024) | Embeddings encode environment identity -- useful for fingerprinting but harmful for cross-environment transfer | Environment-disentangled embeddings with explicit factorization |
+| AETHER embeddings (ADR-024) | Embeddings encode environment identity - useful for fingerprinting but harmful for cross-environment transfer | Environment-disentangled embeddings with explicit factorization |
 | SONA LoRA adapters (ADR-005) | Adapters must be manually created per environment; no mechanism to generate them from few-shot data | Zero-shot environment adaptation via geometry-conditioned inference |
 | MM-Fi/Wi-Pose training (ADR-015) | Single-environment train/eval; no cross-domain protocol | Multi-domain training protocol with environment augmentation |
 | SpotFi phase correction (ADR-014) | Hardware-specific phase calibration | Hardware-invariant CSI normalization layer |
@@ -130,7 +130,7 @@ Total loss:
                                            + lambda_env * L_env_recon
 ```
 
-The GRL reverses the gradient flowing from `L_domain` into `PoseEncoder`, meaning the PoseEncoder is trained to **maximize** domain classification error -- forcing `h_pose` to shed all environment-specific information.
+The GRL reverses the gradient flowing from `L_domain` into `PoseEncoder`, meaning the PoseEncoder is trained to **maximize** domain classification error - forcing `h_pose` to shed all environment-specific information.
 
 **Key hyperparameters:**
 - `lambda_adv`: Adversarial weight, annealed from 0.0 to 1.0 over first 20 epochs using the schedule `lambda_adv(p) = 2 / (1 + exp(-10 * p)) - 1` where `p = epoch / max_epochs`
@@ -291,7 +291,7 @@ This leverages the existing SONA infrastructure (ADR-005) to generate environmen
 
 ## 4. Implementation
 
-### 4.1 Phase 1 -- Hardware Normalizer (Week 1)
+### 4.1 Phase 1 - Hardware Normalizer (Week 1)
 
 **Goal**: Canonical CSI representation across ESP32, Intel 5300, and Atheros hardware.
 
@@ -308,7 +308,7 @@ This leverages the existing SONA infrastructure (ADR-005) to generate environmen
 - [ ] Phase sanitization removes linear trend (validated against SpotFi output)
 - [ ] Unit tests with synthetic ESP32 (64 sub) and Intel 5300 (30 sub) frames
 
-### 4.2 Phase 2 -- Domain Factorizer + GRL (Week 2-3)
+### 4.2 Phase 2 - Domain Factorizer + GRL (Week 2-3)
 
 **Goal**: Disentangle pose-relevant and environment-specific features during training.
 
@@ -318,7 +318,7 @@ This leverages the existing SONA infrastructure (ADR-005) to generate environmen
 - `crates/wifi-densepose-train/src/trainer.rs` (add L_domain to composite loss, GRL annealing)
 - `crates/wifi-densepose-train/src/dataset.rs` (add domain labels to DataPipeline)
 
-**Key implementation detail -- Gradient Reversal Layer:**
+**Key implementation detail - Gradient Reversal Layer:**
 
 ```rust
 /// Gradient Reversal Layer: identity in forward pass, negates gradient in backward.
@@ -345,7 +345,7 @@ impl GradientReversalLayer {
 - [ ] Pose accuracy on source domains degrades <5% vs non-adversarial baseline
 - [ ] Cross-domain pose accuracy improves >20% on held-out environment
 
-### 4.3 Phase 3 -- Geometry Encoder + FiLM Conditioning (Week 3-4)
+### 4.3 Phase 3 - Geometry Encoder + FiLM Conditioning (Week 3-4)
 
 **Goal**: Enable zero-shot deployment given AP positions.
 
@@ -360,7 +360,7 @@ impl GradientReversalLayer {
 - [ ] FiLM conditioning reduces cross-layout MPJPE by >30% vs unconditioned baseline
 - [ ] Inference overhead <100us per frame (geometry encoding is amortized per-session)
 
-### 4.4 Phase 4 -- Virtual Domain Augmentation (Week 4-5)
+### 4.4 Phase 4 - Virtual Domain Augmentation (Week 4-5)
 
 **Goal**: Synthetic environment diversity to improve generalization.
 
@@ -377,7 +377,7 @@ impl GradientReversalLayer {
 - [ ] Training with virtual augmentation improves unseen-environment accuracy by >15%
 - [ ] No regression on seen-environment accuracy (within 2%)
 
-### 4.5 Phase 5 -- Few-Shot Rapid Adaptation (Week 5-6)
+### 4.5 Phase 5 - Few-Shot Rapid Adaptation (Week 5-6)
 
 **Goal**: 10-second calibration enables environment-specific fine-tuning without labels.
 
@@ -392,7 +392,7 @@ impl GradientReversalLayer {
 - [ ] Calibration completes in <5 seconds on x86 (including contrastive TTT)
 - [ ] Adapted LoRA weights serializable to RVF container (ADR-023 Segment type)
 
-### 4.6 Phase 6 -- Cross-Domain Evaluation Protocol (Week 6-7)
+### 4.6 Phase 6 - Cross-Domain Evaluation Protocol (Week 6-7)
 
 **Goal**: Rigorous multi-domain evaluation using MM-Fi's scene/subject splits.
 
@@ -411,7 +411,7 @@ impl GradientReversalLayer {
 | **Domain gap ratio** | cross-domain / in-domain MPJPE (lower = better; target <1.5) |
 | **Adaptation speedup** | Labeled samples saved vs training from scratch (target >5x) |
 
-### 4.7 Phase 7 -- RVF Container + Deployment (Week 7-8)
+### 4.7 Phase 7 - RVF Container + Deployment (Week 7-8)
 
 **Goal**: Package MERIDIAN-enhanced models for edge deployment.
 
@@ -432,18 +432,18 @@ impl GradientReversalLayer {
 
 ```bash
 # Train with MERIDIAN domain generalization
-cargo run -p wifi-densepose-sensing-server -- \
+cargo run -p wifi-densepose-sensing-server - \
   --train --dataset data/mmfi/ --epochs 100 \
   --meridian --n-virtual-domains 3 \
   --save-rvf model-meridian.rvf
 
 # Deploy with geometry conditioning (zero-shot)
-cargo run -p wifi-densepose-sensing-server -- \
+cargo run -p wifi-densepose-sensing-server - \
   --model model-meridian.rvf \
   --ap-positions "0,0,2.5;3.5,0,2.5;1.75,4,2.5"
 
 # Calibrate in new environment (few-shot, 10 seconds)
-cargo run -p wifi-densepose-sensing-server -- \
+cargo run -p wifi-densepose-sensing-server - \
   --model model-meridian.rvf --calibrate --calibrate-duration 10
 ```
 
@@ -485,7 +485,7 @@ ADRs 002-011 were proposed during the initial architecture phase. MERIDIAN direc
 
 | Proposed ADR | Gap | How MERIDIAN Closes It |
 |-------------|-----|----------------------|
-| **ADR-004**: HNSW Vector Search Fingerprinting | CSI fingerprints are environment-specific — a fingerprint learned in Room A is useless in Room B | MERIDIAN's `DomainFactorizer` produces **environment-disentangled embeddings** (`h_pose`). When fed into ADR-024's `FingerprintIndex`, these embeddings match across rooms because environment information has been factored out. The `h_env` path captures room identity separately, enabling both cross-room matching AND room identification in a single model. |
+| **ADR-004**: HNSW Vector Search Fingerprinting | CSI fingerprints are environment-specific - a fingerprint learned in Room A is useless in Room B | MERIDIAN's `DomainFactorizer` produces **environment-disentangled embeddings** (`h_pose`). When fed into ADR-024's `FingerprintIndex`, these embeddings match across rooms because environment information has been factored out. The `h_env` path captures room identity separately, enabling both cross-room matching AND room identification in a single model. |
 | **ADR-005**: SONA Self-Learning for Pose Estimation | SONA LoRA adapters must be manually created per environment with labeled data | MERIDIAN Phase 5 (`RapidAdaptation`) extends SONA with **unsupervised adapter generation**: 10 seconds of unlabeled WiFi data + contrastive test-time training automatically produces a per-room LoRA adapter. No labels, no manual intervention. The existing `SonaProfile` in `sona.rs` gains a `meridian_calibration` field for storing adaptation state. |
 | **ADR-006**: GNN-Enhanced CSI Pattern Recognition | GNN treats each environment's patterns independently; no cross-environment transfer | MERIDIAN's domain-adversarial training regularizes the GCN layers (ADR-023's `GnnStack`) to learn **structure-preserving, environment-invariant** graph features. The gradient reversal layer forces the GCN to shed room-specific multipath patterns while retaining body-pose-relevant spatial relationships between keypoints. |
 
@@ -501,7 +501,7 @@ These ADRs remain independent tracks but MERIDIAN creates enabling infrastructur
 
 | Proposed ADR | Gap | How MERIDIAN Enables It |
 |-------------|-----|------------------------|
-| **ADR-003**: RVF Cognitive Containers | CSI pipeline stages produce ephemeral data; no persistent cognitive state across sessions | MERIDIAN's RVF container extensions (Phase 7: `GEOM`, `DOMAIN`, `HWSTATS` segments) establish the pattern for **environment-aware model packaging**. A cognitive container could store per-room adaptation history, geometry profiles, and domain statistics — building on MERIDIAN's segment format. The `h_env` embeddings are natural candidates for persistent environment memory. |
+| **ADR-003**: RVF Cognitive Containers | CSI pipeline stages produce ephemeral data; no persistent cognitive state across sessions | MERIDIAN's RVF container extensions (Phase 7: `GEOM`, `DOMAIN`, `HWSTATS` segments) establish the pattern for **environment-aware model packaging**. A cognitive container could store per-room adaptation history, geometry profiles, and domain statistics - building on MERIDIAN's segment format. The `h_env` embeddings are natural candidates for persistent environment memory. |
 | **ADR-008**: Distributed Consensus for Multi-AP | Multiple APs need coordinated sensing; no agreement protocol for conflicting observations | MERIDIAN's `GeometryEncoder` already models variable-count AP positions via permutation-invariant `DeepSets`. This provides the **geometric foundation** for multi-AP fusion: each AP's CSI is geometry-conditioned independently, then fused. A consensus layer (Raft or BFT) would sit above MERIDIAN to reconcile conflicting pose estimates from different AP vantage points. The `HardwareNormalizer` ensures mixed hardware (ESP32 + Intel 5300 across APs) produces comparable features. |
 | **ADR-009**: RVF WASM Runtime for Edge | Self-contained WASM model execution without server dependency | MERIDIAN's +12K parameter overhead (67K total) remains within the WASM size budget. The `HardwareNormalizer` is critical for WASM deployment: browser-based inference must handle whatever CSI format the connected hardware provides. WASM builds should include the geometry conditioning path so users can specify AP layout in the browser UI. |
 
@@ -511,9 +511,9 @@ These ADRs address orthogonal concerns and should be pursued separately:
 
 | Proposed ADR | Gap | Recommendation |
 |-------------|-----|----------------|
-| **ADR-007**: Post-Quantum Cryptography | WiFi sensing data reveals presence, health, and activity — quantum computers could break current encryption of sensing streams | **Pursue independently.** MERIDIAN does not address data-in-transit security. PQC should be applied to WebSocket streams (`/ws/sensing`, `/ws/mat/stream`) and RVF model containers (replace Ed25519 signing with ML-DSA/Dilithium). Priority: medium — no imminent quantum threat, but healthcare deployments may require PQC compliance for long-term data retention. |
-| **ADR-010**: Witness Chains for Audit Trail | Disaster triage decisions (ADR-001) need tamper-proof audit trails for legal/regulatory compliance | **Pursue independently.** MERIDIAN's domain adaptation improves triage accuracy in unfamiliar environments (rubble, collapsed buildings), which reduces the need for audit trail corrections. But the audit trail itself — hash chains, Merkle proofs, timestamped triage events — is a separate integrity concern. Priority: high for disaster response deployments. |
-| **ADR-011**: Python Proof-of-Reality (URGENT) | Python v1 contains mock/placeholder code that undermines credibility; `verify.py` exists but mock paths remain | **Pursue independently.** This is a Python v1 code quality issue, not an ML/architecture concern. The Rust port (v2+) has no mock code — all 542+ tests run against real algorithm implementations. Recommendation: either complete the mock elimination in Python v1 or formally deprecate Python v1 in favor of the Rust stack. Priority: high for credibility. |
+| **ADR-007**: Post-Quantum Cryptography | WiFi sensing data reveals presence, health, and activity - quantum computers could break current encryption of sensing streams | **Pursue independently.** MERIDIAN does not address data-in-transit security. PQC should be applied to WebSocket streams (`/ws/sensing`, `/ws/mat/stream`) and RVF model containers (replace Ed25519 signing with ML-DSA/Dilithium). Priority: medium - no imminent quantum threat, but healthcare deployments may require PQC compliance for long-term data retention. |
+| **ADR-010**: Witness Chains for Audit Trail | Disaster triage decisions (ADR-001) need tamper-proof audit trails for legal/regulatory compliance | **Pursue independently.** MERIDIAN's domain adaptation improves triage accuracy in unfamiliar environments (rubble, collapsed buildings), which reduces the need for audit trail corrections. But the audit trail itself - hash chains, Merkle proofs, timestamped triage events - is a separate integrity concern. Priority: high for disaster response deployments. |
+| **ADR-011**: Python Proof-of-Reality (URGENT) | Python v1 contains mock/placeholder code that undermines credibility; `verify.py` exists but mock paths remain | **Pursue independently.** This is a Python v1 code quality issue, not an ML/architecture concern. The Rust port (v2+) has no mock code - all 542+ tests run against real algorithm implementations. Recommendation: either complete the mock elimination in Python v1 or formally deprecate Python v1 in favor of the Rust stack. Priority: high for credibility. |
 
 ### 6.5 Gap Closure Summary
 

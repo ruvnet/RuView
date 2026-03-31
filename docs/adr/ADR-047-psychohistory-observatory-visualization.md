@@ -1,4 +1,4 @@
-# ADR-047: RuView Observatory — Immersive Three.js WiFi Sensing Visualization
+# ADR-047: RuView Observatory - Immersive Three.js WiFi Sensing Visualization
 
 ## Status
 
@@ -12,13 +12,13 @@ Accepted (Implemented)
 
 The project has a functional tabbed dashboard UI (`ui/index.html`) with existing Three.js components (body model, gaussian splats, signal visualization, environment). While effective for monitoring, it lacks a cinematic, immersive visualization suitable for demonstrations and stakeholder presentations.
 
-We need an immersive Three.js room-based visualization with practical WiFi sensing data overlays — human wireframe pose, dot-matrix body mass, vital signs HUD, signal field heatmap — powered by ESP32 CSI data (demo mode with live WebSocket path).
+We need an immersive Three.js room-based visualization with practical WiFi sensing data overlays - human wireframe pose, dot-matrix body mass, vital signs HUD, signal field heatmap - powered by ESP32 CSI data (demo mode with live WebSocket path).
 
 ## Decision
 
 ### Standalone Page Architecture
 
-`ui/observatory.html` is a standalone full-screen entry point, separate from the tabbed dashboard. Linked via "Observatory" nav tab in `ui/index.html`. No build step — vanilla JS modules with Three.js r160 via CDN importmap.
+`ui/observatory.html` is a standalone full-screen entry point, separate from the tabbed dashboard. Linked via "Observatory" nav tab in `ui/index.html`. No build step - vanilla JS modules with Three.js r160 via CDN importmap.
 
 ### Room-Based Visualization
 
@@ -147,6 +147,6 @@ EffectComposer chain: RenderPass → UnrealBloomPass → custom VignetteShader
 
 - ADR-045: AMOLED display support
 - ADR-046: Android TV / Armbian deployment
-- Existing `ui/components/scene.js` — Three.js scene pattern
-- Existing `ui/components/gaussian-splats.js` — ShaderMaterial pattern
-- Existing `ui/services/sensing.service.js` — WebSocket data contract
+- Existing `ui/components/scene.js` - Three.js scene pattern
+- Existing `ui/components/gaussian-splats.js` - ShaderMaterial pattern
+- Existing `ui/services/sensing.service.js` - WebSocket data contract

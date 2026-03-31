@@ -1,5 +1,5 @@
 /**
- * Module D — "The Phase Constellation"
+ * Module D - "The Phase Constellation"
  * I/Q star map with constellation lines and rotating temporal view
  */
 import * as THREE from 'three';

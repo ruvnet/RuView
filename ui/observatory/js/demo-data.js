@@ -1,5 +1,5 @@
 /**
- * Demo Data Generator — RuView Observatory
+ * Demo Data Generator - RuView Observatory
  *
  * Generates synthetic CSI data matching the SensingUpdate contract.
  * 12 scenarios covering all edge module categories.
@@ -94,7 +94,7 @@ function _gaussian(d, sigma) {
 }
 
 // ---------------------------------------------------------------------------
-// Noise bank — pre-allocated correlated noise channels per scenario
+// Noise bank - pre-allocated correlated noise channels per scenario
 // Each scenario gets its own set of noise functions so they don't interfere.
 // ---------------------------------------------------------------------------
 const _noiseBanks = {};
@@ -229,7 +229,7 @@ export class DemoDataGenerator {
   }
 
   // ========================================================================
-  // 1. Empty Room — environmental noise, interference spikes, day/night drift
+  // 1. Empty Room - environmental noise, interference spikes, day/night drift
   // ========================================================================
 
   _emptyRoom(t) {
@@ -290,7 +290,7 @@ export class DemoDataGenerator {
   }
 
   // ========================================================================
-  // 2. Single Breathing — HRV, respiratory sinus arrhythmia, natural irregularity
+  // 2. Single Breathing - HRV, respiratory sinus arrhythmia, natural irregularity
   // ========================================================================
 
   _singleBreathing(t) {
@@ -356,7 +356,7 @@ export class DemoDataGenerator {
   }
 
   // ========================================================================
-  // 3. Two Walking — collision avoidance, phone pause, confidence dip at crossing
+  // 3. Two Walking - collision avoidance, phone pause, confidence dip at crossing
   // ========================================================================
 
   _twoWalking(t) {
@@ -438,7 +438,7 @@ export class DemoDataGenerator {
   }
 
   // ========================================================================
-  // 4. Fall Event — pre-fall stumble, impact spike, micro-movements, shock HR
+  // 4. Fall Event - pre-fall stumble, impact spike, micro-movements, shock HR
   // ========================================================================
 
   _fallEvent(t) {
@@ -565,7 +565,7 @@ export class DemoDataGenerator {
   }
 
   // ========================================================================
-  // 5. Sleep Monitoring — sleep stages, REM, position changes, apnea buildup
+  // 5. Sleep Monitoring - sleep stages, REM, position changes, apnea buildup
   // ========================================================================
 
   _sleepMonitoring(t) {
@@ -709,7 +709,7 @@ export class DemoDataGenerator {
   }
 
   // ========================================================================
-  // 6. Intrusion Detection — door pressure, cautious movement, drawer search
+  // 6. Intrusion Detection - door pressure, cautious movement, drawer search
   // ========================================================================
 
   _intrusionDetect(t) {
@@ -846,7 +846,7 @@ export class DemoDataGenerator {
   }
 
   // ========================================================================
-  // 7. Gesture Control — distinct gesture signatures, recognition feedback
+  // 7. Gesture Control - distinct gesture signatures, recognition feedback
   // ========================================================================
 
   _gestureControl(t) {
@@ -963,7 +963,7 @@ export class DemoDataGenerator {
   }
 
   // ========================================================================
-  // 8. Crowd Occupancy — clustering, stationary person, rushing, entry/exit
+  // 8. Crowd Occupancy - clustering, stationary person, rushing, entry/exit
   // ========================================================================
 
   _crowdOccupancy(t) {
@@ -1115,7 +1115,7 @@ export class DemoDataGenerator {
   }
 
   // ========================================================================
-  // 9. Search & Rescue — scanning, false positives, triangulation, gradual lock-on
+  // 9. Search & Rescue - scanning, false positives, triangulation, gradual lock-on
   // ========================================================================
 
   _searchRescue(t) {
@@ -1241,7 +1241,7 @@ export class DemoDataGenerator {
   }
 
   // ========================================================================
-  // 10. Elderly Care — gait asymmetry, gradual transitions, rest & recover
+  // 10. Elderly Care - gait asymmetry, gradual transitions, rest & recover
   // ========================================================================
 
   _elderlyCare(t) {
@@ -1381,7 +1381,7 @@ export class DemoDataGenerator {
   }
 
   // ========================================================================
-  // 11. Fitness Tracking — warm-up, intensity ramp, rest intervals, HR lag
+  // 11. Fitness Tracking - warm-up, intensity ramp, rest intervals, HR lag
   // ========================================================================
 
   _fitnessTracking(t) {
@@ -1515,7 +1515,7 @@ export class DemoDataGenerator {
   }
 
   // ========================================================================
-  // 12. Security Patrol — checkpoint pauses, speed variation, anomaly buildup
+  // 12. Security Patrol - checkpoint pauses, speed variation, anomaly buildup
   // ========================================================================
 
   _securityPatrol(t) {

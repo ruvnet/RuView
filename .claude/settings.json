@@ -132,7 +132,7 @@
     ]
   },
   "attribution": {
-    "commit": "Co-Authored-By: claude-flow <ruv@ruv.net>",
+    "commit": "",
     "pr": "🤖 Generated with [claude-flow](https://github.com/ruvnet/claude-flow)"
   },
   "env": {

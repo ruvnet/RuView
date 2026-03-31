@@ -1,4 +1,4 @@
-# Quantum-Inspired & Autonomous Modules -- WiFi-DensePose Edge Intelligence
+# Quantum-Inspired & Autonomous Modules - WiFi-DensePose Edge Intelligence
 
 > Advanced algorithms inspired by quantum computing, neuroscience, and AI planning. These modules let the ESP32 make autonomous decisions, heal its own mesh network, interpret high-level scene semantics, and explore room states using quantum-inspired search.
 
@@ -13,7 +13,7 @@
 
 ### Quantum Coherence (`qnt_quantum_coherence.rs`)
 
-**What it does**: Maps each subcarrier's phase onto a point on the quantum Bloch sphere and computes an aggregate coherence metric from the mean Bloch vector magnitude. When all subcarrier phases are aligned, the system is "coherent" (like a quantum pure state). When phases scatter randomly, it is "decoherent" (like a maximally mixed state). Sudden decoherence -- a rapid entropy spike -- indicates an environmental disturbance such as a door opening, a person entering, or furniture being moved.
+**What it does**: Maps each subcarrier's phase onto a point on the quantum Bloch sphere and computes an aggregate coherence metric from the mean Bloch vector magnitude. When all subcarrier phases are aligned, the system is "coherent" (like a quantum pure state). When phases scatter randomly, it is "decoherent" (like a maximally mixed state). Sudden decoherence - a rapid entropy spike - indicates an environmental disturbance such as a door opening, a person entering, or furniture being moved.
 
 **Algorithm**: Each subcarrier phase is mapped to a 3D Bloch vector:
 - theta = |phase| (polar angle)
@@ -78,7 +78,7 @@ Frames 52-100: New stable multipath
 
 #### Bloch Sphere Intuition
 
-Think of each subcarrier as a compass needle. When the room is stable, all needles point roughly the same direction (high coherence, low entropy). When something changes the WiFi multipath -- a person enters, a door opens, furniture moves -- the needles scatter in different directions (low coherence, high entropy). The Bloch sphere formalism quantifies this in a way that is mathematically precise and computationally cheap.
+Think of each subcarrier as a compass needle. When the room is stable, all needles point roughly the same direction (high coherence, low entropy). When something changes the WiFi multipath - a person enters, a door opens, furniture moves - the needles scatter in different directions (low coherence, high entropy). The Bloch sphere formalism quantifies this in a way that is mathematically precise and computationally cheap.
 
 ---
 
@@ -377,7 +377,7 @@ Frame 100: Node 1 recovers (antenna repositioned)
 
 ## How Quantum-Inspired Algorithms Help WiFi Sensing
 
-These modules use quantum computing metaphors -- not because the ESP32 is a quantum computer, but because the mathematical frameworks from quantum mechanics map naturally onto CSI signal analysis:
+These modules use quantum computing metaphors - not because the ESP32 is a quantum computer, but because the mathematical frameworks from quantum mechanics map naturally onto CSI signal analysis:
 
 **Bloch Sphere / Coherence**: WiFi subcarrier phases behave like quantum phases. When multipath is stable, all phases align (pure state). When the environment changes, phases randomize (mixed state). The Von Neumann entropy quantifies this exactly, providing a single scalar "change detector" that is more robust than tracking individual subcarrier phases.
 
@@ -386,7 +386,7 @@ These modules use quantum computing metaphors -- not because the ESP32 is a quan
 **Why not just use classical statistics?** You could. But the quantum-inspired formulations have three practical advantages on embedded hardware:
 
 1. **Fixed memory**: The Bloch vector is always 3 floats. The hypothesis array is always 16 floats. No dynamic allocation needed.
-2. **Graceful degradation**: If CSI data is noisy, the Grover search does not crash or give a wrong answer immediately -- it just converges more slowly.
+2. **Graceful degradation**: If CSI data is noisy, the Grover search does not crash or give a wrong answer immediately - it just converges more slowly.
 3. **Composability**: The coherence score from the Bloch sphere module feeds directly into the Temporal Logic Guard (rule 3: "no vital signs when coherence < 0.3") and the Psycho-Symbolic engine (feature 5: coherence). This creates a pipeline where quantum-inspired metrics inform classical reasoning.
 
 ---

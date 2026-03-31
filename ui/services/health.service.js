@@ -55,9 +55,9 @@ export class HealthService {
       return;
     }
 
-    // Initial check (silent on failure — DensePose API may not be running)
+    // Initial check (silent on failure - DensePose API may not be running)
     this.getSystemHealth().catch(() => {
-      // DensePose API not running — sensing-only mode, skip polling
+      // DensePose API not running - sensing-only mode, skip polling
       this._backendUnavailable = true;
     });
 

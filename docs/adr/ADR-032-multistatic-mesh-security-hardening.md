@@ -17,9 +17,9 @@ A security audit of the RuvSense multistatic sensing stack (ADR-029 through ADR-
 
 The findings fall into three categories:
 
-1. **Missing cryptographic authentication** -- The TDM SyncBeacon and CSI frame formats lack any message authentication, allowing rogue nodes to inject spoofed beacons or frames into the mesh.
-2. **Unbounded or unprotected resources** -- The NDP injection path has no rate limiter, the coherence gate recalibration state has no timeout cap, and the cross-room transition log grows without bound.
-3. **Memory safety on embedded targets** -- NVS credential buffers are not zeroed after use, and static mutable globals in the CSI collector are accessed from both ESP32-S3 cores without synchronization.
+1. **Missing cryptographic authentication** - The TDM SyncBeacon and CSI frame formats lack any message authentication, allowing rogue nodes to inject spoofed beacons or frames into the mesh.
+2. **Unbounded or unprotected resources** - The NDP injection path has no rate limiter, the coherence gate recalibration state has no timeout cap, and the cross-room transition log grows without bound.
+3. **Memory safety on embedded targets** - NVS credential buffers are not zeroed after use, and static mutable globals in the CSI collector are accessed from both ESP32-S3 cores without synchronization.
 
 ### 1.2 Threat Model
 
@@ -38,8 +38,8 @@ The primary threat actor is a rogue ESP32 node on the same LAN subnet or within 
 ### 1.3 Design Constraints
 
 - ESP32-S3 has limited CPU budget: cryptographic operations must complete within the 1 ms guard interval between TDM slots.
-- HMAC-SHA256 on ESP32-S3 (hardware-accelerated via `mbedtls`) completes in approximately 15 us for 24-byte payloads -- well within budget.
-- SipHash-2-4 completes in approximately 2 us for 64-byte payloads on ESP32-S3 -- suitable for per-frame MAC.
+- HMAC-SHA256 on ESP32-S3 (hardware-accelerated via `mbedtls`) completes in approximately 15 us for 24-byte payloads - well within budget.
+- SipHash-2-4 completes in approximately 2 us for 64-byte payloads on ESP32-S3 - suitable for per-frame MAC.
 - No TLS or TCP is available on the sensing data path (UDP broadcast for latency).
 - Pre-shared key (PSK) model is acceptable because all nodes in a mesh deployment are provisioned by the same operator.
 
@@ -79,7 +79,7 @@ tag     = HMAC-SHA256(key, message)[0..8]  (truncated to 8 bytes)
 - Each receiver maintains a `last_accepted_nonce` per sender. A beacon is accepted only if `nonce > last_accepted_nonce - REPLAY_WINDOW`, where `REPLAY_WINDOW = 16` (accounts for packet reordering over UDP).
 - Nonce overflow (after 2^32 beacons at 20 Hz = ~6.8 years) triggers a mandatory key rotation.
 
-**Implementation location:** `crates/wifi-densepose-hardware/src/esp32/tdm.rs` -- extend `SyncBeacon::to_bytes()` and `SyncBeacon::from_bytes()` to produce/consume the 28-byte authenticated format. Add `SyncBeacon::verify()` method.
+**Implementation location:** `crates/wifi-densepose-hardware/src/esp32/tdm.rs` - extend `SyncBeacon::to_bytes()` and `SyncBeacon::from_bytes()` to produce/consume the 28-byte authenticated format. Add `SyncBeacon::verify()` method.
 
 ### 2.2 CSI Frame Integrity (M-3)
 
@@ -110,8 +110,8 @@ siphash_key = HMAC-SHA256(mesh_key, "csi-frame-siphash")[0..16]
 The SipHash key is derived once at boot from the mesh key and cached in memory.
 
 **Implementation locations:**
-- `firmware/esp32-csi-node/main/csi_collector.c` -- compute SipHash tag in `csi_serialize_frame()`, bump magic constant.
-- `crates/wifi-densepose-hardware/src/esp32/` -- add frame verification in the aggregator's frame parser.
+- `firmware/esp32-csi-node/main/csi_collector.c` - compute SipHash tag in `csi_serialize_frame()`, bump magic constant.
+- `crates/wifi-densepose-hardware/src/esp32/` - add frame verification in the aggregator's frame parser.
 
 ### 2.3 NDP Injection Rate Limiter (M-4)
 
@@ -135,7 +135,7 @@ typedef struct {
 
 `csi_inject_ndp_frame()` returns `ESP_ERR_NOT_ALLOWED` when the bucket is empty. The rate limiter parameters are configurable via NVS keys `ndp_max_tokens` and `ndp_refill_hz`.
 
-**Implementation location:** `firmware/esp32-csi-node/main/csi_collector.c` -- add `ndp_rate_limiter_t` state and check in `csi_inject_ndp_frame()`.
+**Implementation location:** `firmware/esp32-csi-node/main/csi_collector.c` - add `ndp_rate_limiter_t` state and check in `csi_inject_ndp_frame()`.
 
 ### 2.4 Coherence Gate Recalibration Timeout (M-5)
 
@@ -166,7 +166,7 @@ pub struct GatePolicyConfig {
 }
 ```
 
-**Implementation location:** `crates/wifi-densepose-signal/src/ruvsense/coherence_gate.rs` -- extend `GateDecision` enum, modify `GatePolicy::evaluate()`.
+**Implementation location:** `crates/wifi-densepose-signal/src/ruvsense/coherence_gate.rs` - extend `GateDecision` enum, modify `GatePolicy::evaluate()`.
 
 ### 2.5 Bounded Transition Log (L-1)
 
@@ -184,7 +184,7 @@ pub struct CrossRoomConfig {
 
 The ring buffer is implemented as a `VecDeque<TransitionEvent>` with a capacity check on push. When `transitions.len() >= max_transitions`, `transitions.pop_front()` before pushing. This preserves the append-only audit trail semantics (events are never mutated, only evicted by age).
 
-**Implementation location:** `crates/wifi-densepose-signal/src/ruvsense/cross_room.rs` -- change `transitions: Vec<TransitionEvent>` to `transitions: VecDeque<TransitionEvent>`, add eviction logic in `match_entry()`.
+**Implementation location:** `crates/wifi-densepose-signal/src/ruvsense/cross_room.rs` - change `transitions: Vec<TransitionEvent>` to `transitions: VecDeque<TransitionEvent>`, add eviction logic in `match_entry()`.
 
 ### 2.6 NVS Password Buffer Zeroing (L-4)
 
@@ -205,7 +205,7 @@ static void secure_zero(void *ptr, size_t len) {
 
 Apply to all three `nvs_get_str` call sites in `nvs_config_load()` (ssid, password, target_ip).
 
-**Implementation location:** `firmware/esp32-csi-node/main/nvs_config.c` -- add `explicit_bzero(buf, sizeof(buf))` after each `nvs_get_str` block.
+**Implementation location:** `firmware/esp32-csi-node/main/nvs_config.c` - add `explicit_bzero(buf, sizeof(buf))` after each `nvs_get_str` block.
 
 ### 2.7 Atomic Access for Static Mutable State (L-5)
 
@@ -228,7 +228,7 @@ static SemaphoreHandle_t s_hop_mutex = NULL;
 
 The mutex is created in `csi_collector_init()` and taken/released around hop table reads in `csi_hop_next_channel()` and writes in `csi_collector_set_hop_table()`.
 
-**Implementation location:** `firmware/esp32-csi-node/main/csi_collector.c` -- add `_Atomic` qualifiers, create and use `s_hop_mutex`.
+**Implementation location:** `firmware/esp32-csi-node/main/csi_collector.c` - add `_Atomic` qualifiers, create and use `s_hop_mutex`.
 
 ### 2.8 Key Management
 
@@ -453,11 +453,11 @@ Three dedicated QUIC streams separate traffic by priority:
 
 Beyond QUIC transport, three additional midstreamer crates enhance the sensing pipeline:
 
-1. **`midstreamer-scheduler` v0.1.0** -- Replaces manual timer-based TDM slot scheduling with an ultra-low-latency real-time task scheduler. Provides deterministic slot firing with sub-microsecond jitter.
+1. **`midstreamer-scheduler` v0.1.0** - Replaces manual timer-based TDM slot scheduling with an ultra-low-latency real-time task scheduler. Provides deterministic slot firing with sub-microsecond jitter.
 
-2. **`midstreamer-temporal-compare` v0.1.0** -- Enhances gesture DTW matching (ADR-030 Tier 6) with temporal sequence comparison primitives. Provides optimized Sakoe-Chiba band DTW, LCS, and edit-distance kernels.
+2. **`midstreamer-temporal-compare` v0.1.0** - Enhances gesture DTW matching (ADR-030 Tier 6) with temporal sequence comparison primitives. Provides optimized Sakoe-Chiba band DTW, LCS, and edit-distance kernels.
 
-3. **`midstreamer-attractor` v0.1.0** -- Enhances longitudinal drift detection (ADR-030 Tier 4) with dynamical systems analysis. Detects phase-space attractor shifts that indicate biomechanical regime changes before they manifest as simple metric drift.
+3. **`midstreamer-attractor` v0.1.0** - Enhances longitudinal drift detection (ADR-030 Tier 4) with dynamical systems analysis. Detects phase-space attractor shifts that indicate biomechanical regime changes before they manifest as simple metric drift.
 
 ### 6.5 Fallback Strategy
 
@@ -500,8 +500,8 @@ The QUIC transport layer is additive, not a replacement:
 4. Espressif. "ESP32-S3 Technical Reference Manual." Section 26: SHA Accelerator.
 5. Turner, J. (2006). "Token Bucket Rate Limiting." RFC 2697 (adapted).
 6. ADR-029 through ADR-031 (internal).
-7. `midstreamer-quic` v0.1.0 -- QUIC multi-stream support. crates.io.
-8. `midstreamer-scheduler` v0.1.0 -- Ultra-low-latency real-time task scheduler. crates.io.
-9. `midstreamer-temporal-compare` v0.1.0 -- Temporal sequence comparison. crates.io.
-10. `midstreamer-attractor` v0.1.0 -- Dynamical systems analysis. crates.io.
+7. `midstreamer-quic` v0.1.0 - QUIC multi-stream support. crates.io.
+8. `midstreamer-scheduler` v0.1.0 - Ultra-low-latency real-time task scheduler. crates.io.
+9. `midstreamer-temporal-compare` v0.1.0 - Temporal sequence comparison. crates.io.
+10. `midstreamer-attractor` v0.1.0 - Dynamical systems analysis. crates.io.
 11. Iyengar, J. & Thomson, M. (2021). "QUIC: A UDP-Based Multiplexed and Secure Transport." RFC 9000.

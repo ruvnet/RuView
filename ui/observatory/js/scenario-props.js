@@ -1,5 +1,5 @@
 /**
- * ScenarioProps — Scenario-specific room furniture and props
+ * ScenarioProps - Scenario-specific room furniture and props
  *
  * Extracted from main.js. Builds and manages visibility of all physical
  * objects that appear/disappear based on the active scenario: bed, chair,
@@ -102,7 +102,7 @@ export class ScenarioProps {
       bedGroup.add(this._cyl(lx, 0.13, lz, 0.04, 0.04, 0.26, 6, frameMat));
     }
 
-    // Headboard — tall panel at head of bed
+    // Headboard - tall panel at head of bed
     const headboardMat = new THREE.MeshStandardMaterial({ color: 0x6a5440, roughness: 0.65, emissive: 0x140e08, emissiveIntensity: 0.2 });
     const headboard = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.7, 1.2), headboardMat);
     headboard.position.set(2.38, 0.65, -3.5);
@@ -116,7 +116,7 @@ export class ScenarioProps {
     mattress.castShadow = true;
     bedGroup.add(mattress);
 
-    // Wrinkled sheet — wave-displaced plane
+    // Wrinkled sheet - wave-displaced plane
     const sheetGeo = new THREE.PlaneGeometry(1.4, 1.0, 20, 20);
     const posAttr = sheetGeo.getAttribute('position');
     for (let i = 0; i < posAttr.count; i++) {
@@ -135,7 +135,7 @@ export class ScenarioProps {
     sheet.castShadow = true;
     bedGroup.add(sheet);
 
-    // Pillow — soft shape using scaled sphere
+    // Pillow - soft shape using scaled sphere
     const pillowGeo = new THREE.SphereGeometry(0.18, 12, 8);
     pillowGeo.scale(1, 0.35, 1.4);
     const pillowMat = new THREE.MeshStandardMaterial({ color: 0x706868, roughness: 0.7, emissive: 0x141010, emissiveIntensity: 0.2 });
@@ -144,7 +144,7 @@ export class ScenarioProps {
     pillow.castShadow = true;
     bedGroup.add(pillow);
 
-    // Bedside lamp — small cylinder + sphere shade on a tiny table
+    // Bedside lamp - small cylinder + sphere shade on a tiny table
     const lampBaseMat = new THREE.MeshStandardMaterial({ color: 0x686870, roughness: 0.3, metalness: 0.7, emissive: 0x101018, emissiveIntensity: 0.15 });
     // Nightstand
     bedGroup.add(this._box(2.15, 0.25, -3.5, 0.35, 0.5, 0.35, darkMat));
@@ -181,7 +181,7 @@ export class ScenarioProps {
 
     // Seat
     chairGroup.add(this._box(0, 0.45, 0, 0.5, 0.04, 0.45, darkMat));
-    // Seat cushion — slightly puffy
+    // Seat cushion - slightly puffy
     const cushionGeo = new THREE.BoxGeometry(0.46, 0.06, 0.42);
     // Gentle puff on top vertices
     const cPos = cushionGeo.getAttribute('position');
@@ -299,14 +299,14 @@ export class ScenarioProps {
     handle.rotation.x = Math.PI / 2;
     doorGroup.add(handle);
 
-    // Hinge details — small cylinders at jamb
+    // Hinge details - small cylinders at jamb
     for (const hy of [0.4, 1.1, 1.8]) {
       const hinge = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.06, 6), hingeMat);
       hinge.position.set(-0.42, hy, 0.06);
       doorGroup.add(hinge);
     }
 
-    // Light spill through the gap — spotlight from outside
+    // Light spill through the gap - spotlight from outside
     const doorSpot = new THREE.SpotLight(0x88aacc, 3.0, 10, Math.PI / 4, 0.3, 0.6);
     doorSpot.position.set(-0.8, 1.2, -0.5);
     doorSpot.target.position.set(0.5, 0, 0.5);
@@ -314,7 +314,7 @@ export class ScenarioProps {
     doorGroup.add(doorSpot.target);
     this._doorSpotlight = doorSpot;
 
-    // Window next to door — simple frame with translucent pane
+    // Window next to door - simple frame with translucent pane
     const windowFrame = new THREE.MeshStandardMaterial({ color: 0x686878, roughness: 0.35, metalness: 0.6, emissive: 0x101018, emissiveIntensity: 0.15 });
     // Frame
     doorGroup.add(this._box(1.2, 1.5, 0, 0.04, 0.8, 0.06, windowFrame));
@@ -342,7 +342,7 @@ export class ScenarioProps {
     const rubbleMat = new THREE.MeshStandardMaterial({ color: 0x807868, roughness: 0.75, emissive: 0x181610, emissiveIntensity: 0.25 });
     const rebarMat = new THREE.MeshStandardMaterial({ color: 0x8a7858, roughness: 0.4, metalness: 0.7, emissive: 0x1a1408, emissiveIntensity: 0.2 });
 
-    // Broken wall — main slab
+    // Broken wall - main slab
     rubbleGroup.add(this._box(2, 1, 0, 0.4, 2, 3, rubbleMat));
 
     // Wall crack lines (thin dark boxes embedded in wall surface)
@@ -359,7 +359,7 @@ export class ScenarioProps {
       rubbleGroup.add(crack);
     }
 
-    // Rebar — thin metal cylinders protruding from the wall
+    // Rebar - thin metal cylinders protruding from the wall
     for (const [rx, ry, rz, rLen, rRot] of [
       [1.6, 1.7, -0.4, 0.8, 0.3],
       [1.5, 1.2, 0.6, 0.6, -0.2],
@@ -374,7 +374,7 @@ export class ScenarioProps {
       rubbleGroup.add(rebar);
     }
 
-    // Rubble pieces — more varied with random rotations
+    // Rubble pieces - more varied with random rotations
     const rubbleColors = [0x807868, 0x706860, 0x908878, 0x686058];
     for (let i = 0; i < 10; i++) {
       const s = 0.12 + Math.random() * 0.3;
@@ -430,7 +430,7 @@ export class ScenarioProps {
     screenGroup.add(screenSurf);
     this._screenGlow = screenSurfMat;
 
-    // Stand / mount — neck + base
+    // Stand / mount - neck + base
     screenGroup.add(this._box(0, 0.88, -4.7, 0.08, 0.16, 0.08, screenFrame));
     screenGroup.add(this._box(0, 0.78, -4.7, 0.4, 0.03, 0.2, metalMat));
 
@@ -510,7 +510,7 @@ export class ScenarioProps {
     const plantMat = new THREE.MeshStandardMaterial({ color: 0x2a7838, roughness: 0.7, emissive: 0x0c2810, emissiveIntensity: 0.3 });
     const potMat = new THREE.MeshStandardMaterial({ color: 0x706858, roughness: 0.6, emissive: 0x14120c, emissiveIntensity: 0.15 });
     desk2Group.add(this._cyl(3.2, 0.15, 0, 0.12, 0.1, 0.3, 8, potMat));
-    // Foliage — cluster of small spheres
+    // Foliage - cluster of small spheres
     for (const [fx, fy, fz] of [[3.2, 0.45, 0], [3.15, 0.4, 0.06], [3.25, 0.42, -0.05]]) {
       const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.08, 6, 5), plantMat);
       leaf.position.set(fx, fy, fz);

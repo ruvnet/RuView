@@ -52,7 +52,7 @@ def create_collector(
          - macOS: MacosWifiCollector (CoreWLAN)
       3. SimulatedCollector (always available)
 
-    Raises nothing — always returns a usable collector.
+    Raises nothing - always returns a usable collector.
     """
 ```
 
@@ -81,7 +81,7 @@ The existing `_validate_interface()` continues to raise `RuntimeError` for direc
 When auto-detection skips a collector, log at `WARNING` level with actionable context:
 
 ```
-WiFi collector: LinuxWifiCollector unavailable (/proc/net/wireless not found — likely Docker/WSL).
+WiFi collector: LinuxWifiCollector unavailable (/proc/net/wireless not found - likely Docker/WSL).
 WiFi collector: Falling back to SimulatedCollector. For real sensing, connect ESP32 nodes via UDP:5005.
 ```
 
@@ -93,18 +93,18 @@ Remove duplicated platform-detection logic from `ws_server.py` and `install.sh`.
 
 ### Positive
 
-- **Zero-crash startup**: `create_collector("auto")` never raises — Docker, WSL, and headless users get `SimulatedCollector` automatically with a clear log message.
+- **Zero-crash startup**: `create_collector("auto")` never raises - Docker, WSL, and headless users get `SimulatedCollector` automatically with a clear log message.
 - **Single detection path**: Platform logic lives in one place (`rssi_collector.py`), reducing drift between `ws_server.py`, `install.sh`, and future entry points.
 - **Better DX**: Error messages explain *why* a collector is unavailable and *what to do* (connect ESP32, install WiFi driver, etc.).
 
 ### Negative
 
 - **SimulatedCollector may mask hardware issues**: Users with real WiFi hardware that fails detection might unknowingly run on simulated data. Mitigated by the `WARNING`-level log.
-- **Breaking change for direct `LinuxWifiCollector` callers**: Code that catches `RuntimeError` from `_validate_interface()` as a signal needs to migrate to `is_available()` or `create_collector()`. This is a minor change — there are no known external consumers.
+- **Breaking change for direct `LinuxWifiCollector` callers**: Code that catches `RuntimeError` from `_validate_interface()` as a signal needs to migrate to `is_available()` or `create_collector()`. This is a minor change - there are no known external consumers.
 
 ### Neutral
 
-- `_validate_interface()` behavior is unchanged for existing direct callers — this is additive.
+- `_validate_interface()` behavior is unchanged for existing direct callers - this is additive.
 
 ## Implementation Notes
 

@@ -1,6 +1,6 @@
 # wifi-densepose-ruvector
 
-RuVector v2.0.4 integration layer for WiFi-DensePose — ADR-017.
+RuVector v2.0.4 integration layer for WiFi-DensePose - ADR-017.
 
 This crate implements all 7 ADR-017 ruvector integration points for the
 signal-processing pipeline and the Multi-AP Triage (MAT) disaster-detection

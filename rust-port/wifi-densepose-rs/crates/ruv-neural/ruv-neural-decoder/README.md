@@ -5,9 +5,9 @@ Cognitive state classification and BCI decoding from neural topology embeddings.
 ## Overview
 
 `ruv-neural-decoder` classifies cognitive states from brain graph embeddings and
-topology metrics. It provides multiple decoding strategies -- KNN classification
+topology metrics. It provides multiple decoding strategies - KNN classification
 from labeled exemplars, threshold-based rule systems, temporal transition detection,
-and clinical biomarker scoring -- plus an ensemble pipeline that combines all
+and clinical biomarker scoring - plus an ensemble pipeline that combines all
 strategies for robust real-time brain-computer interface (BCI) output.
 
 ## Features

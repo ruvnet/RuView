@@ -189,7 +189,7 @@ This release is production-ready with comprehensive validation and testing.
   Bash("gh api repos/:owner/:repo/git/refs --method POST -f ref='refs/heads/release/v1.0.72' -f sha=$(gh api repos/:owner/:repo/git/refs/heads/main --jq '.object.sha')")
   
   // Clone and update release files
-  Bash("gh repo clone :owner/:repo /tmp/release-v1.0.72 -- --branch release/v1.0.72 --depth=1")
+  Bash("gh repo clone :owner/:repo /tmp/release-v1.0.72 - --branch release/v1.0.72 --depth=1")
   
   // Update all release-related files
   Write("/tmp/release-v1.0.72/claude-code-flow/claude-code-flow/package.json", "[updated package.json]")

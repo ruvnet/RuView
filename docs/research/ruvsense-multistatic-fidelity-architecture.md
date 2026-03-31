@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-02
 **Author:** ruv
-**Codename:** **RuvSense** — RuVector-Enhanced Sensing for Multistatic Fidelity
+**Codename:** **RuvSense** - RuVector-Enhanced Sensing for Multistatic Fidelity
 **Scope:** Sensing-first RF mode design, multistatic ESP32 mesh, coherence-gated tracking, and complete RuVector integration for achieving sub-centimeter pose jitter, robust multi-person separation, and small-motion sensitivity on existing silicon.
 
 ---
@@ -21,7 +21,7 @@ WiFi-based DensePose estimation suffers from three fidelity bottlenecks that pre
 
 **Acceptance test:** Two people in a room, 20 Hz, stable tracks for 10 minutes with no identity swaps and low jitter in the torso keypoints.
 
-The fundamental insight: **you do not need to invent a new WiFi standard. You need a sensing-first RF mode that rides on existing silicon, bands, and regulations.** The improvement comes from better observability — more viewpoints, smarter bandwidth use, and coherent fusion — not from new spectrum.
+The fundamental insight: **you do not need to invent a new WiFi standard. You need a sensing-first RF mode that rides on existing silicon, bands, and regulations.** The improvement comes from better observability - more viewpoints, smarter bandwidth use, and coherent fusion - not from new spectrum.
 
 ---
 
@@ -45,7 +45,7 @@ More bandwidth separates multipath components better, making pose estimation les
 
 **RuvSense approach:** Use HT40 on ESP32-S3 (supported in ESP-IDF v5.2) to double subcarrier count from 56 to 114. Then apply `ruvector-solver` sparse interpolation (already integrated per ADR-016) to reconstruct virtual subcarriers between measured ones, achieving effective HT80-like resolution from HT40 hardware.
 
-The key algorithmic insight: the body reflection is spatially sparse — only a few multipath components carry pose information. `ruvector-solver`'s `NeumannSolver` exploits this sparsity via compressed sensing reconstruction:
+The key algorithmic insight: the body reflection is spatially sparse - only a few multipath components carry pose information. `ruvector-solver`'s `NeumannSolver` exploits this sparsity via compressed sensing reconstruction:
 
 ```
 ||y - Φx||₂ + λ||x||₁ → min
@@ -73,7 +73,7 @@ Shorter wavelength gives more phase sensitivity to tiny motion. The phase shift 
 
 1. **Coarse-to-fine resolution**: 2.4 GHz for robust detection (better wall penetration, wider coverage), 5 GHz for fine-grained pose (2x phase sensitivity)
 2. **Phase ambiguity resolution**: Different wavelengths resolve 2π phase wrapping ambiguities, similar to dual-frequency radar
-3. **Frequency diversity**: Body part reflections at different frequencies have different magnitudes — arms that are invisible at λ/4 = 3.1cm (2.4 GHz half-wavelength null) are visible at λ/4 = 1.45cm (5 GHz)
+3. **Frequency diversity**: Body part reflections at different frequencies have different magnitudes - arms that are invisible at λ/4 = 3.1cm (2.4 GHz half-wavelength null) are visible at λ/4 = 1.45cm (5 GHz)
 
 `ruvector-attention`'s `ScaledDotProductAttention` fuses dual-band CSI with learned frequency-dependent weights, automatically emphasizing the band that carries more information for each body region.
 
@@ -83,7 +83,7 @@ DensePose accuracy improves fundamentally with multiple viewpoints. A single TX-
 
 **The geometry argument:**
 
-A single link measures the body's effect on one ellipsoidal Fresnel zone (defined by TX and RX positions). The zone's intersection with the body produces a 1D integral of body conductivity along the ellipsoid. N links with different geometries provide N such integrals. With sufficient angular diversity, these can be inverted to recover the 3D body conductivity distribution — which is exactly what DensePose estimates.
+A single link measures the body's effect on one ellipsoidal Fresnel zone (defined by TX and RX positions). The zone's intersection with the body produces a 1D integral of body conductivity along the ellipsoid. N links with different geometries provide N such integrals. With sufficient angular diversity, these can be inverted to recover the 3D body conductivity distribution - which is exactly what DensePose estimates.
 
 **Required diversity:** For 17-keypoint pose estimation, theoretical minimum is ~6 independent viewpoints (each resolving 2-3 DOF). Practical minimum with noise: 8-12 links with >30° angular separation.
 
@@ -119,7 +119,7 @@ Each ESP32-S3 acts as both transmitter and receiver in time-division mode. With 
 | 5-9 | Node B | A | C | D | 4ms |
 | 10-14 | Node C | A | B | D | 4ms |
 | 15-19 | Node D | A | B | C | 4ms |
-| 20-49 | — | Processing + fusion | | | 30ms |
+| 20-49 | - | Processing + fusion | | | 30ms |
 
 **Total cycle: 50ms = 20 Hz update rate.**
 
@@ -171,7 +171,7 @@ NDP frames are already used by 802.11bf for sensing. They contain only preamble 
 RuvSense defines a lightweight time-division protocol for coordinating multistatic sensing:
 
 ```rust
-/// Sensing Schedule Protocol — coordinates multistatic ESP32 mesh
+/// Sensing Schedule Protocol - coordinates multistatic ESP32 mesh
 pub struct SensingSchedule {
     /// Nodes in the mesh, ordered by slot assignment
     nodes: Vec<NodeId>,
@@ -511,7 +511,7 @@ This ensures the system remains stable over days even as the environment slowly 
 The existing ESP32 firmware (ADR-018, 606 lines C) requires these additions:
 
 ```c
-// sensing_schedule.h — TDMA slot management
+// sensing_schedule.h - TDMA slot management
 typedef struct {
     uint8_t node_id;        // 0-3 for 4-node mesh
     uint8_t n_nodes;        // total nodes in mesh
@@ -552,7 +552,7 @@ The aggregator runs on the 5th ESP32 (or an x86/RPi host) and:
 4. Outputs fused pose estimates at 20 Hz
 
 ```rust
-/// RuvSense aggregator — collects and fuses multistatic CSI
+/// RuvSense aggregator - collects and fuses multistatic CSI
 pub struct RuvSenseAggregator {
     /// Per-link compressed ring buffers
     link_buffers: Vec<CompressedLinkBuffer>,  // ruvector-temporal-tensor
@@ -622,7 +622,7 @@ Pair Cognitum v1 hardware with the RuvSense software stack:
 | Cost per node | $10 | $200-500 (estimated) |
 | Deployment | DIY mesh | Integrated unit |
 
-The same RuvSense software stack runs on both — the only difference is the CSI input quality.
+The same RuvSense software stack runs on both - the only difference is the CSI input quality.
 
 ---
 
@@ -777,7 +777,7 @@ Measured over 10-minute windows with subject standing still.
 
 | Standard | Status | Relevance |
 |----------|--------|-----------|
-| IEEE 802.11bf | Published 2024 | WLAN Sensing — defines sensing frames, roles, measurements |
+| IEEE 802.11bf | Published 2024 | WLAN Sensing - defines sensing frames, roles, measurements |
 | IEEE 802.11be (WiFi 7) | Finalized 2025 | 320 MHz channels, 3,984 subcarriers |
 | IEEE 802.11bn (WiFi 8) | Draft | Sub-7 GHz + 45/60 GHz, native sensing |
 
@@ -870,7 +870,7 @@ Multistatic mesh with 4 nodes should exceed these single-node results by providi
 
 ## 15. Conclusion
 
-RuvSense achieves high-fidelity WiFi DensePose by exploiting three physical levers — bandwidth, frequency, and viewpoints — through a multistatic ESP32 mesh that implements a sensing-first RF mode on existing commodity silicon. The complete RuVector integration provides the algorithmic foundation for sparse CIR reconstruction (solver), multi-link attention fusion (attention), person separation (mincut), temporal compression (temporal-tensor), and coherence gating (attn-mincut).
+RuvSense achieves high-fidelity WiFi DensePose by exploiting three physical levers - bandwidth, frequency, and viewpoints - through a multistatic ESP32 mesh that implements a sensing-first RF mode on existing commodity silicon. The complete RuVector integration provides the algorithmic foundation for sparse CIR reconstruction (solver), multi-link attention fusion (attention), person separation (mincut), temporal compression (temporal-tensor), and coherence gating (attn-mincut).
 
 The architecture is incrementally deployable: start with 2 nodes for basic improvement, scale to 4+ for full multistatic sensing. The same software stack runs on ESP32 mesh or Cognitum hardware, with only the CSI input interface changing.
 
@@ -886,14 +886,14 @@ The architecture is incrementally deployable: start with 2 nodes for basic impro
 
 ## 16. Beyond Pose: RF as Spatial Intelligence
 
-Sections 1-15 treat WiFi as a pose estimator. That is the floor. The ceiling is treating the electromagnetic field as a **persistent, self-updating model of the physical world** — a model that remembers, predicts, and explains.
+Sections 1-15 treat WiFi as a pose estimator. That is the floor. The ceiling is treating the electromagnetic field as a **persistent, self-updating model of the physical world** - a model that remembers, predicts, and explains.
 
 The shift: instead of asking "where are the keypoints right now?", ask "how has this room changed since yesterday, and what does that change mean?"
 
 This requires three architectural upgrades:
 1. **Field normal modes**: Model the room itself, not just the people in it
 2. **Longitudinal memory**: Store structured embeddings over days/weeks via RuVector
-3. **Coherence as reasoning**: Use coherence gating not just for quality control, but as a semantic signal — when coherence breaks, something meaningful happened
+3. **Coherence as reasoning**: Use coherence gating not just for quality control, but as a semantic signal - when coherence breaks, something meaningful happened
 
 ---
 
@@ -901,12 +901,12 @@ This requires three architectural upgrades:
 
 ### Tier 1: Field Normal Modes
 
-The room becomes the thing you model. You learn the stable electromagnetic baseline — the set of propagation paths, reflection coefficients, and interference patterns that exist when nobody is present. This is the **field normal mode**: the eigenstructure of the empty room's channel transfer function.
+The room becomes the thing you model. You learn the stable electromagnetic baseline - the set of propagation paths, reflection coefficients, and interference patterns that exist when nobody is present. This is the **field normal mode**: the eigenstructure of the empty room's channel transfer function.
 
-People and objects become **structured perturbations** to this baseline. A person entering the room does not create a new signal — they perturb existing modes. The perturbation has structure: it is spatially localized (the person is somewhere), spectrally colored (different body parts affect different subcarriers), and temporally smooth (people move continuously).
+People and objects become **structured perturbations** to this baseline. A person entering the room does not create a new signal - they perturb existing modes. The perturbation has structure: it is spatially localized (the person is somewhere), spectrally colored (different body parts affect different subcarriers), and temporally smooth (people move continuously).
 
 ```rust
-/// Field Normal Mode — the room's electromagnetic eigenstructure
+/// Field Normal Mode - the room's electromagnetic eigenstructure
 pub struct FieldNormalMode {
     /// Baseline CSI per link (measured during empty-room calibration)
     pub baseline: Vec<Vec<Complex<f32>>>,  // [n_links × n_subcarriers]
@@ -947,7 +947,7 @@ impl FieldNormalMode {
 }
 ```
 
-**Why this matters:** The field normal mode enables a building that **senses itself**. Changes are explained as deltas from baseline. A new chair is a permanent mode shift. A person walking is a transient perturbation. A door opening changes specific path coefficients. The system does not need to be told what changed — it can decompose the change into structural categories.
+**Why this matters:** The field normal mode enables a building that **senses itself**. Changes are explained as deltas from baseline. A new chair is a permanent mode shift. A person walking is a transient perturbation. A door opening changes specific path coefficients. The system does not need to be told what changed - it can decompose the change into structural categories.
 
 **RuVector integration:** `ruvector-solver` fits the environmental mode matrix via low-rank SVD. `ruvector-temporal-tensor` stores the baseline history with adaptive quantization.
 
@@ -974,7 +974,7 @@ Node B   │upa- │   Node C    From 12 link attenuations,
 This is not a camera. It is a **probabilistic density field** that tells you where mass is, not what it looks like. It stays useful in darkness, smoke, occlusion, and clutter.
 
 ```rust
-/// Coarse RF tomography — 3D occupancy from link attenuations
+/// Coarse RF tomography - 3D occupancy from link attenuations
 pub struct RfTomographer {
     /// 3D voxel grid dimensions
     pub grid_dims: [usize; 3],  // e.g., [8, 10, 4] for 4m × 5m × 2m at 0.5m resolution
@@ -1004,11 +1004,11 @@ impl RfTomographer {
 }
 ```
 
-**Resolution:** With 4 nodes (12 links) and 0.5m voxels, the tomographic grid is 8×10×4 = 320 voxels. 12 measurements for 320 unknowns is severely underdetermined, but L1 regularization exploits sparsity — typically only 5-15 voxels are occupied by a person. At 8+ nodes (56 links), resolution improves to ~0.25m.
+**Resolution:** With 4 nodes (12 links) and 0.5m voxels, the tomographic grid is 8×10×4 = 320 voxels. 12 measurements for 320 unknowns is severely underdetermined, but L1 regularization exploits sparsity - typically only 5-15 voxels are occupied by a person. At 8+ nodes (56 links), resolution improves to ~0.25m.
 
 ### Tier 3: Intention Lead Signals
 
-Subtle pre-movement dynamics appear **before visible motion**. Lean, weight shift, arm tension, center-of-mass displacement. These are not noise — they are the body's preparatory phase for action.
+Subtle pre-movement dynamics appear **before visible motion**. Lean, weight shift, arm tension, center-of-mass displacement. These are not noise - they are the body's preparatory phase for action.
 
 With contrastive embeddings plus temporal memory, you can **predict action onset** early enough to drive safety and robotics applications.
 
@@ -1069,7 +1069,7 @@ Not diagnosis. **Drift.** You build a personal baseline for gait symmetry, stabi
 RuVector is the memory and the audit trail.
 
 ```rust
-/// Personal biomechanics baseline — stores longitudinal embedding statistics
+/// Personal biomechanics baseline - stores longitudinal embedding statistics
 pub struct PersonalBaseline {
     pub person_id: PersonId,
     /// Per-metric rolling statistics (Welford online algorithm)
@@ -1187,7 +1187,7 @@ impl CrossRoomTracker {
 
 A room becomes an interface. Multi-user gesture control that works through clothing, in darkness, with line-of-sight blocked.
 
-The key insight: the same multistatic CSI pipeline that estimates pose can detect **gestural micro-patterns** when the pose is held relatively still. A hand wave, a pointing gesture, a beckoning motion — all produce characteristic CSI perturbation signatures that are person-localized (thanks to the multi-person separator) and geometry-invariant (thanks to MERIDIAN conditioning).
+The key insight: the same multistatic CSI pipeline that estimates pose can detect **gestural micro-patterns** when the pose is held relatively still. A hand wave, a pointing gesture, a beckoning motion - all produce characteristic CSI perturbation signatures that are person-localized (thanks to the multi-person separator) and geometry-invariant (thanks to MERIDIAN conditioning).
 
 ```rust
 /// Gesture recognition from multistatic CSI
@@ -1219,7 +1219,7 @@ pub enum GestureType {
 You can detect when the signal looks **physically impossible** given the room model. Coherence gating becomes a **security primitive**, not just a quality check.
 
 ```rust
-/// Adversarial signal detector — identifies physically impossible CSI
+/// Adversarial signal detector - identifies physically impossible CSI
 pub struct AdversarialDetector {
     /// Room field normal modes (baseline)
     pub field_model: FieldNormalMode,
@@ -1264,7 +1264,7 @@ pub enum SecurityVerdict {
 }
 ```
 
-**Why multistatic helps security:** To spoof a single-link system, an attacker injects a signal into one receiver. To spoof a multistatic mesh, the attacker must simultaneously inject consistent signals into all receivers — signals that are geometrically consistent with a fake body position. This is physically difficult because each receiver sees a different projection.
+**Why multistatic helps security:** To spoof a single-link system, an attacker injects a signal into one receiver. To spoof a multistatic mesh, the attacker must simultaneously inject consistent signals into all receivers - signals that are geometrically consistent with a fake body position. This is physically difficult because each receiver sees a different projection.
 
 ---
 
@@ -1426,7 +1426,7 @@ This appliance was never possible before because we did not have:
 
 ## 20. Extended Acceptance Tests
 
-### 20.1 Pose Fidelity (Tier 0 — ADR-029)
+### 20.1 Pose Fidelity (Tier 0 - ADR-029)
 
 Two people in a room, 20 Hz, stable tracks for 10 minutes with no identity swaps and low jitter in the torso keypoints.
 
@@ -1444,7 +1444,7 @@ Two people in a room, 20 Hz, stable tracks for 10 minutes with no identity swaps
 1. Detects meaningful environmental or behavioral drift
 2. Less than 5% false alarm rate
 3. Provides traceable evidence chain for every alert
-4. Operates autonomously — no manual calibration after initial setup
+4. Operates autonomously - no manual calibration after initial setup
 
 ---
 
@@ -1456,7 +1456,7 @@ Two people in a room, 20 Hz, stable tracks for 10 minutes with no identity swaps
 
 Rationale:
 - It is the foundation for everything else. Without a room baseline, you cannot detect drift (Tier 4), cross-room transitions (Tier 5), or adversarial signals (Tier 7).
-- It requires no new hardware — just a calibration phase during empty-room periods.
+- It requires no new hardware - just a calibration phase during empty-room periods.
 - It immediately improves pose quality by separating environmental from body-caused CSI variation.
 - It uses `ruvector-solver` (SVD) and `ruvector-temporal-tensor` (baseline storage), both already integrated.
 
@@ -1488,8 +1488,8 @@ The architecture decomposes into three layers:
 | **Field** (§16-17) | Room modeling, drift detection, intention signals, tomography | +8 weeks |
 | **Appliance** (§19) | Product categories: Guardian, Digital Twin, Interaction Surface | +12 weeks |
 
-Each layer builds on the one below. The complete stack — from ESP32 NDP injection to 30-day autonomous drift monitoring — uses no cameras, stores no images, and runs on $73-91 of commodity hardware.
+Each layer builds on the one below. The complete stack - from ESP32 NDP injection to 30-day autonomous drift monitoring - uses no cameras, stores no images, and runs on $73-91 of commodity hardware.
 
-RuVector provides the algorithmic spine: solving, attention, graph partitioning, temporal compression, and coherence gating. AETHER provides the embedding space. MERIDIAN provides domain generalization. The result is a system that remembers rooms, recognizes people, detects drift, and explains change — all through WiFi.
+RuVector provides the algorithmic spine: solving, attention, graph partitioning, temporal compression, and coherence gating. AETHER provides the embedding space. MERIDIAN provides domain generalization. The result is a system that remembers rooms, recognizes people, detects drift, and explains change - all through WiFi.
 
 **You can detect signals, not diagnoses. That distinction matters legally, ethically, and technically. But the signals are rich enough to build products that were never possible before.**

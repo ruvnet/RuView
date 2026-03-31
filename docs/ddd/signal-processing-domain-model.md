@@ -9,7 +9,7 @@ Based on ADR-014 (SOTA Signal Processing) and the `wifi-densepose-signal` crate.
 | Term | Definition |
 |------|------------|
 | **CsiFrame** | A single CSI measurement: amplitude + phase per antenna per subcarrier at one timestamp |
-| **Conjugate Multiplication** | `H_ref[k] * conj(H_target[k])` — cancels CFO/SFO/PDD, isolating environment-induced phase |
+| **Conjugate Multiplication** | `H_ref[k] * conj(H_target[k])` - cancels CFO/SFO/PDD, isolating environment-induced phase |
 | **CSI Ratio** | The complex result of conjugate multiplication between two antenna streams |
 | **Hampel Filter** | Running median +/- scaled MAD outlier detector; resists up to 50% contamination |
 | **Phase Sanitization** | Pipeline of unwrapping, outlier removal, smoothing, and noise filtering on raw CSI phase |

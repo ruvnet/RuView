@@ -1,4 +1,4 @@
-# Core Modules -- WiFi-DensePose Edge Intelligence
+# Core Modules - WiFi-DensePose Edge Intelligence
 
 > The foundation modules that every ESP32 node runs. These handle gesture detection, signal quality monitoring, anomaly detection, zone occupancy, vital sign tracking, intrusion classification, and model packaging.
 
@@ -43,9 +43,9 @@ All seven modules compile to `wasm32-unknown-unknown` and run inside the WASM3 i
 
 | Parameter | Default | Range | Description |
 |-----------|---------|-------|-------------|
-| `DTW_THRESHOLD` | 2.5 | 0.5 -- 10.0 | Lower = stricter matching, fewer false positives but may miss soft gestures |
-| `BAND_WIDTH` | 5 | 1 -- 20 | Width of the Sakoe-Chiba band. Wider = more flexible time warping but more computation |
-| Cooldown frames | 40 | 10 -- 200 | Frames to wait before next detection. At 20 Hz, 40 frames = 2 seconds |
+| `DTW_THRESHOLD` | 2.5 | 0.5 - 10.0 | Lower = stricter matching, fewer false positives but may miss soft gestures |
+| `BAND_WIDTH` | 5 | 1 - 20 | Width of the Sakoe-Chiba band. Wider = more flexible time warping but more computation |
+| Cooldown frames | 40 | 10 - 200 | Frames to wait before next detection. At 20 Hz, 40 frames = 2 seconds |
 
 #### Events Emitted
 
@@ -109,16 +109,16 @@ if let Some(gesture_id) = detector.process_frame(&phases) {
 | `gate_state(&self) -> GateState` | method | Current gate classification (Accept, Warn, Reject). |
 | `mean_phasor_angle(&self) -> f32` | method | Dominant phase drift direction in radians. |
 | `coherence_score(&self) -> f32` | method | Current EMA-smoothed coherence score. |
-| `GateState` | enum | `Accept`, `Warn`, `Reject` -- signal quality classification. |
+| `GateState` | enum | `Accept`, `Warn`, `Reject` - signal quality classification. |
 
 #### Configuration
 
 | Parameter | Default | Range | Description |
 |-----------|---------|-------|-------------|
-| `ALPHA` | 0.1 | 0.01 -- 0.5 | EMA smoothing factor. Lower = slower response, more stable. Higher = faster response, more noisy |
-| `HIGH_THRESHOLD` | 0.7 | 0.5 -- 0.95 | Coherence above this = Accept |
-| `LOW_THRESHOLD` | 0.4 | 0.1 -- 0.6 | Coherence below this = Reject |
-| `MAX_SC` | 32 | 1 -- 64 | Maximum subcarriers tracked (compile-time) |
+| `ALPHA` | 0.1 | 0.01 - 0.5 | EMA smoothing factor. Lower = slower response, more stable. Higher = faster response, more noisy |
+| `HIGH_THRESHOLD` | 0.7 | 0.5 - 0.95 | Coherence above this = Accept |
+| `LOW_THRESHOLD` | 0.4 | 0.1 - 0.6 | Coherence below this = Reject |
+| `MAX_SC` | 32 | 1 - 64 | Maximum subcarriers tracked (compile-time) |
 
 #### Events Emitted
 
@@ -170,11 +170,11 @@ A 20-frame cooldown prevents event flooding.
 
 | Parameter | Default | Range | Description |
 |-----------|---------|-------|-------------|
-| `PHASE_JUMP_THRESHOLD` | 2.5 rad | 1.0 -- pi | Phase jump to flag per subcarrier |
-| `MIN_AMPLITUDE_VARIANCE` | 0.001 | 0.0001 -- 0.1 | Below this = flatline |
-| `MAX_ENERGY_RATIO` | 50.0 | 5.0 -- 500.0 | Energy spike threshold vs baseline |
-| `BASELINE_FRAMES` | 100 | 50 -- 500 | Frames to calibrate baseline |
-| `ANOMALY_COOLDOWN` | 20 | 5 -- 100 | Frames between anomaly reports |
+| `PHASE_JUMP_THRESHOLD` | 2.5 rad | 1.0 - pi | Phase jump to flag per subcarrier |
+| `MIN_AMPLITUDE_VARIANCE` | 0.001 | 0.0001 - 0.1 | Below this = flatline |
+| `MAX_ENERGY_RATIO` | 50.0 | 5.0 - 500.0 | Energy spike threshold vs baseline |
+| `BASELINE_FRAMES` | 100 | 50 - 500 | Frames to calibrate baseline |
+| `ANOMALY_COOLDOWN` | 20 | 5 - 100 | Frames between anomaly reports |
 
 #### Events Emitted
 
@@ -228,12 +228,12 @@ if detector.process_frame(&phases, &amplitudes) {
 
 | Parameter | Default | Range | Description |
 |-----------|---------|-------|-------------|
-| `INTRUSION_VELOCITY_THRESH` | 1.5 rad/frame | 0.5 -- 3.0 | Phase velocity that counts as fast movement |
-| `AMPLITUDE_CHANGE_THRESH` | 3.0 sigma | 1.0 -- 10.0 | Amplitude deviation in standard deviations |
-| `ARM_FRAMES` | 100 | 20 -- 500 | Quiet frames needed to arm (at 20 Hz: 5 sec) |
-| `DETECT_DEBOUNCE` | 3 | 1 -- 10 | Consecutive detection frames before alert |
-| `ALERT_COOLDOWN` | 100 | 20 -- 500 | Frames between alerts |
-| `BASELINE_FRAMES` | 200 | 100 -- 1000 | Calibration window |
+| `INTRUSION_VELOCITY_THRESH` | 1.5 rad/frame | 0.5 - 3.0 | Phase velocity that counts as fast movement |
+| `AMPLITUDE_CHANGE_THRESH` | 3.0 sigma | 1.0 - 10.0 | Amplitude deviation in standard deviations |
+| `ARM_FRAMES` | 100 | 20 - 500 | Quiet frames needed to arm (at 20 Hz: 5 sec) |
+| `DETECT_DEBOUNCE` | 3 | 1 - 10 | Consecutive detection frames before alert |
+| `ALERT_COOLDOWN` | 100 | 20 - 500 | Frames between alerts |
+| `BASELINE_FRAMES` | 200 | 100 - 1000 | Calibration window |
 
 #### Events Emitted
 
@@ -288,10 +288,10 @@ for &(event_type, value) in events {
 
 | Parameter | Default | Range | Description |
 |-----------|---------|-------|-------------|
-| `MAX_ZONES` | 8 | 1 -- 16 | Maximum number of spatial zones |
-| `ZONE_THRESHOLD` | 0.02 | 0.005 -- 0.5 | Score above this = occupied. Hysteresis exit at 0.5x |
-| `ALPHA` | 0.15 | 0.05 -- 0.5 | EMA smoothing factor for zone scores |
-| `BASELINE_FRAMES` | 200 | 100 -- 1000 | Calibration window length |
+| `MAX_ZONES` | 8 | 1 - 16 | Maximum number of spatial zones |
+| `ZONE_THRESHOLD` | 0.02 | 0.005 - 0.5 | Score above this = occupied. Hysteresis exit at 0.5x |
+| `ALPHA` | 0.15 | 0.05 - 0.5 | EMA smoothing factor for zone scores |
+| `BASELINE_FRAMES` | 200 | 100 - 1000 | Calibration window length |
 
 #### Events Emitted
 
@@ -349,12 +349,12 @@ Every 60 seconds, it emits 1-minute averages for both breathing and heart rate.
 
 | Parameter | Default | Range | Description |
 |-----------|---------|-------|-------------|
-| `BRADYPNEA_THRESH` | 12.0 BPM | 8 -- 15 | Below this = dangerously slow breathing |
-| `TACHYPNEA_THRESH` | 25.0 BPM | 20 -- 35 | Above this = dangerously fast breathing |
-| `BRADYCARDIA_THRESH` | 50.0 BPM | 40 -- 60 | Below this = dangerously slow heart rate |
-| `TACHYCARDIA_THRESH` | 120.0 BPM | 100 -- 150 | Above this = dangerously fast heart rate |
-| `APNEA_SECONDS` | 20 | 10 -- 60 | Seconds of near-zero breathing before alert |
-| `ALERT_DEBOUNCE` | 5 | 2 -- 15 | Consecutive abnormal samples before alert |
+| `BRADYPNEA_THRESH` | 12.0 BPM | 8 - 15 | Below this = dangerously slow breathing |
+| `TACHYPNEA_THRESH` | 25.0 BPM | 20 - 35 | Above this = dangerously fast breathing |
+| `BRADYCARDIA_THRESH` | 50.0 BPM | 40 - 60 | Below this = dangerously slow heart rate |
+| `TACHYCARDIA_THRESH` | 120.0 BPM | 100 - 150 | Above this = dangerously fast heart rate |
+| `APNEA_SECONDS` | 20 | 10 - 60 | Seconds of near-zero breathing before alert |
+| `ALERT_DEBOUNCE` | 5 | 2 - 15 | Consecutive abnormal samples before alert |
 
 #### Events Emitted
 
@@ -482,7 +482,7 @@ From the crate directory:
 
 ```bash
 cd rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge
-cargo test --features std -- gesture coherence adversarial intrusion occupancy vital_trend rvf
+cargo test --features std - gesture coherence adversarial intrusion occupancy vital_trend rvf
 ```
 
 This runs all tests whose names contain any of the seven module names. The `--features std` flag is required because the RVF builder tests need `sha2` and `std::io`.

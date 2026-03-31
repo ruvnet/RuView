@@ -25,10 +25,10 @@
 #   - Rust workspace with wifi-densepose-hardware crate (aggregator binary)
 #
 # Exit codes:
-#   0  PASS    — all checks passed
-#   1  WARN    — non-critical checks failed
-#   2  FAIL    — critical checks failed
-#   3  FATAL   — build error, crash, or infrastructure failure
+#   0  PASS    - all checks passed
+#   1  WARN    - non-critical checks failed
+#   2  FAIL    - critical checks failed
+#   3  FATAL   - build error, crash, or infrastructure failure
 
 # ── Help ──────────────────────────────────────────────────────────────
 usage() {
@@ -62,10 +62,10 @@ Examples:
   sudo SKIP_BUILD=1 ./qemu-mesh-test.sh 4
 
 Exit codes:
-  0  PASS   — all checks passed
-  1  WARN   — non-critical checks failed
-  2  FAIL   — critical checks failed
-  3  FATAL  — build error, crash, or infrastructure failure
+  0  PASS   - all checks passed
+  1  WARN   - non-critical checks failed
+  2  FAIL   - critical checks failed
+  3  FATAL  - build error, crash, or infrastructure failure
 HELP
     exit 0
 }
@@ -161,7 +161,7 @@ fi
 mkdir -p "$BUILD_DIR"
 
 # ---------------------------------------------------------------------------
-# Cleanup trap — runs on EXIT regardless of success/failure
+# Cleanup trap - runs on EXIT regardless of success/failure
 # ---------------------------------------------------------------------------
 QEMU_PIDS=()
 AGG_PID=""
@@ -315,7 +315,7 @@ echo "[5/6] Starting aggregator and $N_NODES QEMU nodes..."
 # Start Rust aggregator in background
 echo "  Starting aggregator: listen=0.0.0.0:$AGG_PORT expect-nodes=$N_NODES"
 cargo run --manifest-path "$RUST_DIR/Cargo.toml" \
-    -p wifi-densepose-hardware --bin aggregator -- \
+    -p wifi-densepose-hardware --bin aggregator - \
     --listen "0.0.0.0:$AGG_PORT" \
     --expect-nodes "$N_NODES" \
     --output "$RESULTS_FILE" \

@@ -194,19 +194,19 @@ The target users are embedded developers and field operators who are already run
 
 | Phase | Effort | Impact | Priority |
 |-------|--------|--------|----------|
-| Phase 1: Complete NVS coverage | Small (1 file, ~50 lines) | High — closes feature gap | P0 |
-| Phase 2: Config file + mesh | Medium (~100 lines) | High — biggest UX win | P1 |
-| Phase 3: Presets | Small (~40 lines) | Medium — convenience | P2 |
-| Phase 4: Read-back + verify | Medium (~150 lines) | Medium — debugging aid | P2 |
-| Phase 5: Auto-detect | Small (~30 lines) | Low — minor convenience | P3 |
+| Phase 1: Complete NVS coverage | Small (1 file, ~50 lines) | High - closes feature gap | P0 |
+| Phase 2: Config file + mesh | Medium (~100 lines) | High - biggest UX win | P1 |
+| Phase 3: Presets | Small (~40 lines) | Medium - convenience | P2 |
+| Phase 4: Read-back + verify | Medium (~150 lines) | Medium - debugging aid | P2 |
+| Phase 5: Auto-detect | Small (~30 lines) | Low - minor convenience | P3 |
 
 ---
 
 ## References
 
-- `firmware/esp32-csi-node/main/nvs_config.h` — NVS config struct (20 fields)
-- `firmware/esp32-csi-node/main/nvs_config.c` — NVS read logic (20 keys)
-- `firmware/esp32-csi-node/provision.py` — Current provisioning script (13 of 20 keys)
+- `firmware/esp32-csi-node/main/nvs_config.h` - NVS config struct (20 fields)
+- `firmware/esp32-csi-node/main/nvs_config.c` - NVS read logic (20 keys)
+- `firmware/esp32-csi-node/provision.py` - Current provisioning script (13 of 20 keys)
 - ADR-029: RuvSense multistatic sensing mode (TDM, channel hopping)
 - ADR-032: Multistatic mesh security hardening (mesh keys)
 - ADR-039: ESP32-S3 edge intelligence (edge tiers, vitals)

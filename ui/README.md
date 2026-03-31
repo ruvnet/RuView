@@ -96,12 +96,12 @@ Simulated frames include a `_simulated: true` marker so code can detect syntheti
 
 ### Rust Sensing Server (primary)
 The Rust-based `wifi-densepose-sensing-server` serves the UI and provides:
-- `GET /health` — server health
-- `GET /api/v1/sensing/latest` — latest sensing features
-- `GET /api/v1/vital-signs` — vital sign estimates (HR/RR)
-- `GET /api/v1/model/info` — RVF model container info
-- `WS /ws/sensing` — real-time sensing data stream
-- `WS /api/v1/stream/pose` — real-time pose keypoint stream
+- `GET /health` - server health
+- `GET /api/v1/sensing/latest` - latest sensing features
+- `GET /api/v1/vital-signs` - vital sign estimates (HR/RR)
+- `GET /api/v1/model/info` - RVF model container info
+- `WS /ws/sensing` - real-time sensing data stream
+- `WS /api/v1/stream/pose` - real-time pose keypoint stream
 
 ### Python FastAPI (legacy)
 The original Python backend on port 8000 is still supported. The UI auto-detects which backend is available via `backend-detector.js`.

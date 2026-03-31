@@ -1,6 +1,6 @@
-# Adaptive Learning Modules -- WiFi-DensePose Edge Intelligence
+# Adaptive Learning Modules - WiFi-DensePose Edge Intelligence
 
-> On-device machine learning that runs without cloud connectivity. The ESP32 chip teaches itself what "normal" looks like for each environment and adapts over time. No training data needed -- it learns from what it sees.
+> On-device machine learning that runs without cloud connectivity. The ESP32 chip teaches itself what "normal" looks like for each environment and adapts over time. No training data needed - it learns from what it sees.
 
 ## Overview
 
@@ -179,7 +179,7 @@ pub enum AttractorType { Unknown, PointAttractor, LimitCycle, StrangeAttractor }
 
 | ID | Name | Value | Meaning |
 |----|------|-------|---------|
-| 735 | `ATTRACTOR_TYPE` | 1/2/3 | Point(1), LimitCycle(2), Strange(3) -- emitted when classification changes |
+| 735 | `ATTRACTOR_TYPE` | 1/2/3 | Point(1), LimitCycle(2), Strange(3) - emitted when classification changes |
 | 736 | `LYAPUNOV_EXPONENT` | Lambda | Current Lyapunov exponent estimate |
 | 737 | `BASIN_DEPARTURE` | Distance ratio | Trajectory left the attractor basin (value = distance / radius) |
 | 738 | `LEARNING_COMPLETE` | 1.0 | Initial 200-frame learning phase finished |
@@ -200,13 +200,13 @@ pub enum AttractorType { Unknown, PointAttractor, LimitCycle, StrangeAttractor }
 #### Tutorial: Understanding Attractor Types
 
 **Point Attractor (lambda < -0.01)**
-The signal converges to a fixed point. This means the environment is completely static -- no people, no machinery, no airflow. The WiFi signal is deterministic and unchanging. Any disturbance will trigger a basin departure.
+The signal converges to a fixed point. This means the environment is completely static - no people, no machinery, no airflow. The WiFi signal is deterministic and unchanging. Any disturbance will trigger a basin departure.
 
 **Limit Cycle (lambda near 0)**
 The signal follows a periodic orbit. This typically indicates mechanical systems: HVAC cycling, fans, elevator machinery. The period usually matches the equipment's duty cycle. Human activity on top of a limit cycle will push the Lyapunov exponent positive.
 
 **Strange Attractor (lambda > 0.01)**
-The signal is bounded but aperiodic -- classical chaos. This is the signature of human activity: walking, gesturing, breathing all create complex but bounded signal dynamics. The more people, the higher the Lyapunov exponent tends to be.
+The signal is bounded but aperiodic - classical chaos. This is the signature of human activity: walking, gesturing, breathing all create complex but bounded signal dynamics. The more people, the higher the Lyapunov exponent tends to be.
 
 **Basin Departure**
 A basin departure means the current signal state is more than 3x the learned radius away from the attractor center. This can indicate:
@@ -408,7 +408,7 @@ WASM3 allocates a fixed linear memory region. There is no heap, no `malloc`, no 
 Without EWC, moving the device to a new room would erase everything learned about the previous room. EWC adds ~32 floats of overhead per task (the Fisher diagonal snapshot), which is negligible on the ESP32.
 
 ### Round-Robin Gradient Estimation
-Computing gradients for all 32 parameters every frame would take too long. Instead, the EWC module uses round-robin scheduling: 4 parameters per frame, cycling through all 32 in 8 frames. At 20 Hz, a full gradient pass takes 0.4 seconds -- fast enough for the slow dynamics of room occupancy.
+Computing gradients for all 32 parameters every frame would take too long. Instead, the EWC module uses round-robin scheduling: 4 parameters per frame, cycling through all 32 in 8 frames. At 20 Hz, a full gradient pass takes 0.4 seconds - fast enough for the slow dynamics of room occupancy.
 
 ### Task Boundary Detection
 The system automatically detects when it has "converged" on a new environment (100 consecutive stable frames = 5 seconds of consistent low loss). No manual intervention needed. The user just places the device in a new room, and the learning happens automatically.

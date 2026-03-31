@@ -52,7 +52,7 @@ export class DashboardTab {
       this.updateStats(stats);
 
     } catch (error) {
-      // DensePose API may not be running (sensing-only mode) — fail silently
+      // DensePose API may not be running (sensing-only mode) - fail silently
       console.log('Dashboard: DensePose API not available (sensing-only mode)');
     }
   }
@@ -68,7 +68,7 @@ export class DashboardTab {
     this._sensingUnsub = sensingService.onStateChange(() => {
       this.updateDataSourceIndicator();
     });
-    // Also update on data — catches source changes mid-stream
+    // Also update on data - catches source changes mid-stream
     this._sensingDataUnsub = sensingService.onData(() => {
       this.updateDataSourceIndicator();
     });

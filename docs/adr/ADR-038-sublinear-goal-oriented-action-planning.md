@@ -29,16 +29,16 @@ Manually navigating this decision space is error-prone. The developer must hold 
 Goal-Oriented Action Planning (GOAP), originally developed for game AI by Jeff Orkin (2003), models the world as a set of boolean/numeric state properties and defines actions with typed preconditions and effects. A planner searches from the current world state to a goal state, producing an optimal action sequence. GOAP is a natural fit for this problem because:
 
 1. **ADR implementations are actions** with clear preconditions (which other ADRs/hardware must exist) and effects (which capabilities are unlocked).
-2. **The world state is observable** -- we can query cargo test results, check hardware connections, read crate manifests, and measure accuracy metrics.
-3. **Goals are declarative** -- "I want multi-person tracking at 20 Hz" translates to `{multi_person_tracking: true, update_rate_hz: 20}`.
-4. **Replanning is cheap** -- when hardware becomes available or a user changes goals, the planner re-runs in milliseconds.
+2. **The world state is observable** - we can query cargo test results, check hardware connections, read crate manifests, and measure accuracy metrics.
+3. **Goals are declarative** - "I want multi-person tracking at 20 Hz" translates to `{multi_person_tracking: true, update_rate_hz: 20}`.
+4. **Replanning is cheap** - when hardware becomes available or a user changes goals, the planner re-runs in milliseconds.
 
 ### 1.3 Why Sublinear
 
 The naive GOAP planner uses A* search over the full action-state graph. With 37 ADRs, each potentially having multiple phases (ADR-037 has 4 phases, ADR-029 has 9 actions), the raw action count exceeds 80. The full state space is `2^N` for N boolean properties. Exhaustive search is wasteful because:
 
 - Most actions are irrelevant to any given goal (the user asking for vital signs does not need WebAssembly deployment actions in the search).
-- The dependency graph is sparse -- most actions depend on 1-3 prerequisites, not all other actions.
+- The dependency graph is sparse - most actions depend on 1-3 prerequisites, not all other actions.
 - Many state properties are independent (vital sign detection does not interact with WebAssembly compilation).
 
 A sublinear approach avoids exploring the full state space by exploiting this sparsity.
@@ -173,7 +173,7 @@ pub enum Effect {
 
 ### 2.3 Goal Specification
 
-Goals are expressed as partial world states -- a set of conditions that must be satisfied.
+Goals are expressed as partial world states - a set of conditions that must be satisfied.
 
 ```rust
 pub struct Goal {
@@ -411,7 +411,7 @@ When the user has not specified a single goal but asks "what should I work on ne
 
 1. Construct the adjacency matrix where `A[i][j] = 1` if action j depends on action i (i.e., completing i unblocks j).
 2. Run PageRank with damping factor 0.85.
-3. Actions with the highest PageRank scores are the most "load-bearing" -- they unblock the most downstream work.
+3. Actions with the highest PageRank scores are the most "load-bearing" - they unblock the most downstream work.
 4. Filter to actions whose preconditions are currently satisfiable.
 5. Return the top-K actions ranked by `PageRank_score * (1 / cost_days)` (value per effort).
 
@@ -427,13 +427,13 @@ The GOAP planner is implemented as a TypeScript module within the claude-flow co
 
 ```
 .claude-flow/goap/
-    state.ts          -- World state model and observation
-    actions.ts        -- Action catalog (all ~80 actions)
-    planner.ts        -- Sublinear A* planner with backward pruning
-    goals.ts          -- Goal templates and user goal parser
-    executor.ts       -- Swarm dispatch and action lifecycle
-    pagerank.ts       -- Dependency graph prioritization
-    visualize.ts      -- DOT graph export
+    state.ts          - World state model and observation
+    actions.ts        - Action catalog (all ~80 actions)
+    planner.ts        - Sublinear A* planner with backward pruning
+    goals.ts          - Goal templates and user goal parser
+    executor.ts       - Swarm dispatch and action lifecycle
+    pagerank.ts       - Dependency graph prioritization
+    visualize.ts      - DOT graph export
 ```
 
 ### 3.2 CLI Integration

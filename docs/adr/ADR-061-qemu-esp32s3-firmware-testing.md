@@ -13,16 +13,16 @@ The ESP32-S3 CSI node firmware (`firmware/esp32-csi-node/`) has grown to 16 sour
 
 | Module | File | Testable in QEMU? |
 |--------|------|--------------------|
-| NVS config load | `nvs_config.c` | Yes — NVS partition in flash image |
-| Edge processing (DSP) | `edge_processing.c` | Yes — all math, no HW dependency |
-| ADR-018 frame serialization | `csi_collector.c:csi_serialize_frame()` | Yes — pure buffer ops |
-| UDP stream sender | `stream_sender.c` | Yes — QEMU has lwIP via SLIRP |
-| WASM runtime | `wasm_runtime.c` | Yes — CPU only |
-| OTA update | `ota_update.c` | Partial — needs HTTP mock |
-| Power management | `power_mgmt.c` | Partial — no real light-sleep |
-| Display (OLED) | `display_*.c` | No — I2C hardware |
-| WiFi CSI callback | `csi_collector.c:wifi_csi_callback()` | **No** — requires RF PHY |
-| Channel hopping | `csi_collector.c:hop_timer_cb()` | **No** — requires `esp_wifi_set_channel()` |
+| NVS config load | `nvs_config.c` | Yes - NVS partition in flash image |
+| Edge processing (DSP) | `edge_processing.c` | Yes - all math, no HW dependency |
+| ADR-018 frame serialization | `csi_collector.c:csi_serialize_frame()` | Yes - pure buffer ops |
+| UDP stream sender | `stream_sender.c` | Yes - QEMU has lwIP via SLIRP |
+| WASM runtime | `wasm_runtime.c` | Yes - CPU only |
+| OTA update | `ota_update.c` | Partial - needs HTTP mock |
+| Power management | `power_mgmt.c` | Partial - no real light-sleep |
+| Display (OLED) | `display_*.c` | No - I2C hardware |
+| WiFi CSI callback | `csi_collector.c:wifi_csi_callback()` | **No** - requires RF PHY |
+| Channel hopping | `csi_collector.c:hop_timer_cb()` | **No** - requires `esp_wifi_set_channel()` |
 
 Currently, **every code change requires flashing to physical hardware** on COM7. This creates a bottleneck:
 - Build + flash cycle: ~20 seconds
@@ -36,20 +36,20 @@ Espressif maintains an official QEMU fork (`github.com/espressif/qemu`) with ESP
 
 | Term | Definition |
 |------|-----------|
-| CSI | Channel State Information — per-subcarrier amplitude/phase from WiFi |
-| NVS | Non-Volatile Storage — ESP-IDF key-value flash partition |
-| TDM | Time-Division Multiplexing — nodes transmit in assigned time slots |
-| UART | Universal Asynchronous Receiver-Transmitter — serial console output |
-| SLIRP | User-mode TCP/IP stack — enables networking without root/TAP |
-| QEMU | Quick Emulator — runs ESP32-S3 firmware without physical hardware |
-| QMP | QEMU Machine Protocol — JSON-based control interface |
-| LFSR | Linear Feedback Shift Register — deterministic pseudo-random generator |
-| SPSC | Single Producer Single Consumer — lock-free ring buffer pattern |
+| CSI | Channel State Information - per-subcarrier amplitude/phase from WiFi |
+| NVS | Non-Volatile Storage - ESP-IDF key-value flash partition |
+| TDM | Time-Division Multiplexing - nodes transmit in assigned time slots |
+| UART | Universal Asynchronous Receiver-Transmitter - serial console output |
+| SLIRP | User-mode TCP/IP stack - enables networking without root/TAP |
+| QEMU | Quick Emulator - runs ESP32-S3 firmware without physical hardware |
+| QMP | QEMU Machine Protocol - JSON-based control interface |
+| LFSR | Linear Feedback Shift Register - deterministic pseudo-random generator |
+| SPSC | Single Producer Single Consumer - lock-free ring buffer pattern |
 | FreeRTOS | Real-time OS used by ESP-IDF for task scheduling |
 | gcov/lcov | GCC code coverage tools for line/branch analysis |
 | libFuzzer | LLVM coverage-guided fuzzer for finding crashes |
-| ASAN | AddressSanitizer — detects buffer overflows and use-after-free |
-| UBSAN | UndefinedBehaviorSanitizer — detects undefined C behavior |
+| ASAN | AddressSanitizer - detects buffer overflows and use-after-free |
+| UBSAN | UndefinedBehaviorSanitizer - detects undefined C behavior |
 
 ## Quick Start
 
@@ -76,7 +76,7 @@ brew install lcov              # macOS
 # Fuzz testing (optional, Layer 6)
 sudo apt install clang         # Debian/Ubuntu
 
-# Mesh testing (optional, Layer 3 — requires root)
+# Mesh testing (optional, Layer 3 - requires root)
 sudo apt install socat bridge-utils iproute2
 ```
 
@@ -128,15 +128,15 @@ bash scripts/qemu-chaos-test.sh --faults all --duration 120
 
 Introduce a **comprehensive QEMU testing platform** for the ESP32-S3 CSI node firmware with nine capability layers:
 
-1. **Mock CSI generator** — compile-time synthetic CSI frame injection
-2. **QEMU runner** — automated build, run, and validation
-3. **Multi-node mesh simulation** — TDM and aggregation testing across QEMU instances
-4. **GDB remote debugging** — zero-cost breakpoint debugging without JTAG
-5. **Code coverage** — gcov/lcov integration for path analysis
-6. **Fuzz testing** — malformed input resilience for CSI parser, NVS, WASM
-7. **NVS provisioning matrix** — exhaustive config combination testing
-8. **Snapshot & replay** — sub-100ms state restore for fast iteration
-9. **Chaos testing** — fault injection for resilience validation
+1. **Mock CSI generator** - compile-time synthetic CSI frame injection
+2. **QEMU runner** - automated build, run, and validation
+3. **Multi-node mesh simulation** - TDM and aggregation testing across QEMU instances
+4. **GDB remote debugging** - zero-cost breakpoint debugging without JTAG
+5. **Code coverage** - gcov/lcov integration for path analysis
+6. **Fuzz testing** - malformed input resilience for CSI parser, NVS, WASM
+7. **NVS provisioning matrix** - exhaustive config combination testing
+8. **Snapshot & replay** - sub-100ms state restore for fast iteration
+9. **Chaos testing** - fault injection for resilience validation
 
 ---
 
@@ -179,7 +179,7 @@ Introduce a **comprehensive QEMU testing platform** for the ESP32-S3 CSI node fi
 When `CONFIG_CSI_MOCK_ENABLED=y` (Kconfig option), the build replaces `esp_wifi_set_csi_config()` / `esp_wifi_set_csi_rx_cb()` with a periodic timer that injects synthetic CSI frames:
 
 ```c
-// mock_csi.c — synthetic CSI frame generator
+// mock_csi.c - synthetic CSI frame generator
 
 #define MOCK_CSI_INTERVAL_MS   50   // 20 Hz (matches real CSI rate)
 #define MOCK_N_SUBCARRIERS     52   // HT20 mode
@@ -452,7 +452,7 @@ Run multiple QEMU instances with TAP networking to test TDM slot coordination an
 
 ```bash
 #!/bin/bash
-# scripts/qemu-mesh-test.sh — run 3 QEMU nodes + Rust aggregator
+# scripts/qemu-mesh-test.sh - run 3 QEMU nodes + Rust aggregator
 
 set -euo pipefail
 
@@ -479,7 +479,7 @@ for i in $(seq 0 $((N_NODES - 1))); do
 done
 
 # Start Rust aggregator in background
-cargo run -p wifi-densepose-hardware --bin aggregator -- \
+cargo run -p wifi-densepose-hardware --bin aggregator - \
   --listen 0.0.0.0:${AGGREGATOR_PORT} \
   --expect-nodes "$N_NODES" \
   --output build/mesh_test_results.json &
@@ -686,7 +686,7 @@ genhtml coverage_filtered.info --output-directory build/coverage_report
 ### Implementation Approach
 
 ```c
-// test/fuzz_csi_serialize.c — runs on host (not ESP32)
+// test/fuzz_csi_serialize.c - runs on host (not ESP32)
 // Compiled with: clang -fsanitize=fuzzer,address
 
 #include "csi_collector.h"
@@ -885,35 +885,35 @@ done
 ```
 firmware/esp32-csi-node/
 ├── main/
-│   ├── mock_csi.c              # NEW — synthetic CSI frame generator
-│   ├── mock_csi.h              # NEW — mock API + scenario definitions
-│   ├── Kconfig.projbuild       # MODIFIED — CONFIG_CSI_MOCK_* options
-│   ├── CMakeLists.txt          # MODIFIED — conditional mock_csi.c inclusion
+│   ├── mock_csi.c              # NEW - synthetic CSI frame generator
+│   ├── mock_csi.h              # NEW - mock API + scenario definitions
+│   ├── Kconfig.projbuild       # MODIFIED - CONFIG_CSI_MOCK_* options
+│   ├── CMakeLists.txt          # MODIFIED - conditional mock_csi.c inclusion
 │   └── ... (existing files unchanged)
 ├── test/
-│   ├── fuzz_csi_serialize.c    # NEW — libFuzzer target for serialization
-│   ├── fuzz_nvs_config.c       # NEW — libFuzzer target for NVS parsing
-│   ├── fuzz_edge_enqueue.c     # NEW — libFuzzer target for ring buffer
-│   └── corpus/                 # NEW — seed inputs for fuzz targets
-├── sdkconfig.qemu             # NEW — QEMU-specific sdkconfig overlay
-├── sdkconfig.coverage         # NEW — gcov-enabled sdkconfig overlay
+│   ├── fuzz_csi_serialize.c    # NEW - libFuzzer target for serialization
+│   ├── fuzz_nvs_config.c       # NEW - libFuzzer target for NVS parsing
+│   ├── fuzz_edge_enqueue.c     # NEW - libFuzzer target for ring buffer
+│   └── corpus/                 # NEW - seed inputs for fuzz targets
+├── sdkconfig.qemu             # NEW - QEMU-specific sdkconfig overlay
+├── sdkconfig.coverage         # NEW - gcov-enabled sdkconfig overlay
 └── ...
 
 scripts/
-├── qemu-esp32s3-test.sh       # NEW — single-node QEMU runner
-├── qemu-mesh-test.sh          # NEW — multi-node mesh runner
-├── qemu-chaos-test.sh         # NEW — chaos/fault injection runner
-├── validate_qemu_output.py    # NEW — UART log validation
-├── validate_mesh_test.py      # NEW — mesh test validation
-├── generate_nvs_matrix.py     # NEW — NVS config matrix generator
-├── inject_fault.py            # NEW — QEMU fault injection
-└── check_health.py            # NEW — post-fault health checker
+├── qemu-esp32s3-test.sh       # NEW - single-node QEMU runner
+├── qemu-mesh-test.sh          # NEW - multi-node mesh runner
+├── qemu-chaos-test.sh         # NEW - chaos/fault injection runner
+├── validate_qemu_output.py    # NEW - UART log validation
+├── validate_mesh_test.py      # NEW - mesh test validation
+├── generate_nvs_matrix.py     # NEW - NVS config matrix generator
+├── inject_fault.py            # NEW - QEMU fault injection
+└── check_health.py            # NEW - post-fault health checker
 
 .vscode/
-└── launch.json                # MODIFIED — add QEMU GDB debug config
+└── launch.json                # MODIFIED - add QEMU GDB debug config
 
 .github/workflows/
-└── firmware-qemu.yml          # NEW — CI workflow with matrix
+└── firmware-qemu.yml          # NEW - CI workflow with matrix
 ```
 
 ---
@@ -922,24 +922,24 @@ scripts/
 
 ### Benefits
 
-1. **No hardware required** — contributors validate firmware changes with QEMU alone
-2. **Automated CI** — every PR touching `firmware/` runs 14 NVS configs × 10 scenarios in parallel
-3. **10× faster iteration** — snapshot restore in <100ms vs 20s flash cycle
-4. **Security hardening** — fuzz testing catches buffer overflows, NULL derefs, and parser bugs before they reach hardware
-5. **Mesh validation** — multi-node TDM tested without 3 physical ESP32s
-6. **Coverage visibility** — lcov reports show untested edge processing paths
-7. **Resilience proof** — chaos tests verify firmware recovers from WiFi drops, OOM, and ring overflow
-8. **GDB debugging** — set breakpoints on DSP pipeline without JTAG adapter
-9. **Regression detection** — boot failures, NVS parsing errors, and FreeRTOS deadlocks caught in CI
+1. **No hardware required** - contributors validate firmware changes with QEMU alone
+2. **Automated CI** - every PR touching `firmware/` runs 14 NVS configs × 10 scenarios in parallel
+3. **10× faster iteration** - snapshot restore in <100ms vs 20s flash cycle
+4. **Security hardening** - fuzz testing catches buffer overflows, NULL derefs, and parser bugs before they reach hardware
+5. **Mesh validation** - multi-node TDM tested without 3 physical ESP32s
+6. **Coverage visibility** - lcov reports show untested edge processing paths
+7. **Resilience proof** - chaos tests verify firmware recovers from WiFi drops, OOM, and ring overflow
+8. **GDB debugging** - set breakpoints on DSP pipeline without JTAG adapter
+9. **Regression detection** - boot failures, NVS parsing errors, and FreeRTOS deadlocks caught in CI
 
 ### Limitations
 
-1. **No real WiFi/CSI** — QEMU cannot emulate the ESP32-S3 WiFi radio or CSI extraction hardware
-2. **Synthetic CSI fidelity** — mock frames approximate real CSI patterns but don't capture real-world multipath, interference, or antenna characteristics
-3. **Timing differences** — QEMU timing is not cycle-accurate; FreeRTOS tick rates may differ from hardware
-4. **No peripheral testing** — I2C display, real GPIO, and light-sleep power management cannot be tested
-5. **QEMU build requirement** — Espressif's QEMU fork must be built from source (not in Ubuntu packages)
-6. **Coverage overhead** — gcov-enabled builds are ~2× slower in QEMU
+1. **No real WiFi/CSI** - QEMU cannot emulate the ESP32-S3 WiFi radio or CSI extraction hardware
+2. **Synthetic CSI fidelity** - mock frames approximate real CSI patterns but don't capture real-world multipath, interference, or antenna characteristics
+3. **Timing differences** - QEMU timing is not cycle-accurate; FreeRTOS tick rates may differ from hardware
+4. **No peripheral testing** - I2C display, real GPIO, and light-sleep power management cannot be tested
+5. **QEMU build requirement** - Espressif's QEMU fork must be built from source (not in Ubuntu packages)
+6. **Coverage overhead** - gcov-enabled builds are ~2× slower in QEMU
 
 ### What QEMU Testing Covers vs Requires Hardware
 
@@ -971,7 +971,7 @@ scripts/
 ### 1. Host-native unit tests (no QEMU)
 Extract pure C functions (`csi_serialize_frame`, edge DSP math) and compile/test on host with CMock/Unity. Simpler but doesn't test FreeRTOS integration, NVS, or boot sequence.
 
-**Verdict**: Complementary — do both. Host unit tests for math, QEMU for integration. Fuzz targets (Layer 6) already use host-native compilation.
+**Verdict**: Complementary - do both. Host unit tests for math, QEMU for integration. Fuzz targets (Layer 6) already use host-native compilation.
 
 ### 2. Hardware-in-the-loop CI (real ESP32 on runner)
 Use a self-hosted GitHub Actions runner with a physical ESP32-S3 attached.
@@ -981,7 +981,7 @@ Use a self-hosted GitHub Actions runner with a physical ESP32-S3 attached.
 ### 3. Docker-based ESP-IDF build only (no runtime test)
 Just verify the firmware compiles in CI without running it.
 
-**Verdict**: Already possible but insufficient — compilation doesn't catch runtime bugs (stack overflow, NVS parsing errors, FreeRTOS deadlocks).
+**Verdict**: Already possible but insufficient - compilation doesn't catch runtime bugs (stack overflow, NVS parsing errors, FreeRTOS deadlocks).
 
 ### 4. Renode emulator
 Alternative to QEMU with better peripheral modeling for some platforms.
@@ -992,10 +992,10 @@ Alternative to QEMU with better peripheral modeling for some platforms.
 
 ## References
 
-- [Espressif QEMU fork](https://github.com/espressif/qemu) — official ESP32/S3/C3/H2 support
+- [Espressif QEMU fork](https://github.com/espressif/qemu) - official ESP32/S3/C3/H2 support
 - [ESP-IDF QEMU guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/api-guides/tools/qemu.html)
-- [libFuzzer documentation](https://llvm.org/docs/LibFuzzer.html) — LLVM-based coverage-guided fuzzing
-- [lcov](https://github.com/linux-test-project/lcov) — Linux test coverage visualization
+- [libFuzzer documentation](https://llvm.org/docs/LibFuzzer.html) - LLVM-based coverage-guided fuzzing
+- [lcov](https://github.com/linux-test-project/lcov) - Linux test coverage visualization
 - ADR-018: Binary CSI frame format (magic `0xC5110001`)
 - ADR-039: Edge intelligence pipeline (biquad, vitals, fall detection)
 - ADR-040: WASM programmable sensing runtime
@@ -1008,25 +1008,25 @@ Alternative to QEMU with better peripheral modeling for some platforms.
 
 ### Bugs Fixed
 
-1. **LFSR float bias** — `lfsr_float()` used divisor 32767.5 producing range [-1.0, 1.00002]; fixed to 32768.0 for exact [-1.0, +1.0)
-2. **MAC filter initialization** — `gen_mac_filter()` compared `frame_count == scenario_start_ms` (count vs timestamp); replaced with boolean flag
-3. **Scenario infinite loop** — `advance_scenario()` looped to scenario 0 when all completed; now sets `s_all_done=true` and timer callback exits early
-4. **Boot check severity** — `validate_qemu_output.py` reported no-boot as ERROR; upgraded to FATAL (nothing works without boot)
-5. **NVS boundary configs** — `boundary-max` used `vital_win=65535` which firmware silently rejects (valid: 32-256); fixed to 256
-6. **NVS boundary-min** — `vital_win=1` also invalid; fixed to 32 (firmware min)
-7. **edge-tier2-custom** — `vital_win=512` exceeded firmware max of 256; fixed to 256
-8. **power-save config** — Described as "10% duty cycle" but didn't set `power_duty=10`; fixed
-9. **wasm-signed/unsigned** — Both configs were identical; signed now includes pubkey blob, unsigned sets `wasm_verify=0`
+1. **LFSR float bias** - `lfsr_float()` used divisor 32767.5 producing range [-1.0, 1.00002]; fixed to 32768.0 for exact [-1.0, +1.0)
+2. **MAC filter initialization** - `gen_mac_filter()` compared `frame_count == scenario_start_ms` (count vs timestamp); replaced with boolean flag
+3. **Scenario infinite loop** - `advance_scenario()` looped to scenario 0 when all completed; now sets `s_all_done=true` and timer callback exits early
+4. **Boot check severity** - `validate_qemu_output.py` reported no-boot as ERROR; upgraded to FATAL (nothing works without boot)
+5. **NVS boundary configs** - `boundary-max` used `vital_win=65535` which firmware silently rejects (valid: 32-256); fixed to 256
+6. **NVS boundary-min** - `vital_win=1` also invalid; fixed to 32 (firmware min)
+7. **edge-tier2-custom** - `vital_win=512` exceeded firmware max of 256; fixed to 256
+8. **power-save config** - Described as "10% duty cycle" but didn't set `power_duty=10`; fixed
+9. **wasm-signed/unsigned** - Both configs were identical; signed now includes pubkey blob, unsigned sets `wasm_verify=0`
 
 ### Optimizations Applied
 
-1. **SLIRP networking** — QEMU runner now passes `-nic user,model=open_eth` for UDP testing
-2. **Scenario completion tracking** — Validator now checks `All N scenarios complete` log marker (check 15)
-3. **Frame rate monitoring** — Validator extracts `scenario=N frames=M` counters for rate analysis (check 16)
-4. **Watchdog tuning** — `sdkconfig.qemu` relaxes WDT to 30s / INT_WDT to 800ms for QEMU timing variance
-5. **Timer stack depth** — Increased `FREERTOS_TIMER_TASK_STACK_DEPTH=4096` to prevent overflow from math-heavy mock callback
-6. **Display disabled** — `CONFIG_DISPLAY_ENABLE=n` in QEMU overlay (no I2C hardware)
-7. **CI fuzz job** — Added `fuzz-test` job running all 3 fuzz targets for 60s each with crash artifact upload
-8. **CI NVS validation** — Added `nvs-matrix-validate` job that generates all 14 binaries and verifies sizes
-9. **CI matrix expanded** — Added `edge-tier1`, `boundary-max`, `boundary-min` to QEMU test matrix (4 → 7 configs)
-10. **QEMU cache key** — Uses `github.run_id` with restore-keys fallback to prevent stale QEMU builds
+1. **SLIRP networking** - QEMU runner now passes `-nic user,model=open_eth` for UDP testing
+2. **Scenario completion tracking** - Validator now checks `All N scenarios complete` log marker (check 15)
+3. **Frame rate monitoring** - Validator extracts `scenario=N frames=M` counters for rate analysis (check 16)
+4. **Watchdog tuning** - `sdkconfig.qemu` relaxes WDT to 30s / INT_WDT to 800ms for QEMU timing variance
+5. **Timer stack depth** - Increased `FREERTOS_TIMER_TASK_STACK_DEPTH=4096` to prevent overflow from math-heavy mock callback
+6. **Display disabled** - `CONFIG_DISPLAY_ENABLE=n` in QEMU overlay (no I2C hardware)
+7. **CI fuzz job** - Added `fuzz-test` job running all 3 fuzz targets for 60s each with crash artifact upload
+8. **CI NVS validation** - Added `nvs-matrix-validate` job that generates all 14 binaries and verifies sizes
+9. **CI matrix expanded** - Added `edge-tier1`, `boundary-max`, `boundary-min` to QEMU test matrix (4 → 7 configs)
+10. **QEMU cache key** - Uses `github.run_id` with restore-keys fallback to prevent stale QEMU builds

@@ -5,7 +5,7 @@
 | **Status** | Proposed |
 | **Date** | 2026-03-01 |
 | **Deciders** | ruv |
-| **Codename** | **ORCA** — OS-native Radio Channel Acquisition |
+| **Codename** | **ORCA** - OS-native Radio Channel Acquisition |
 | **Relates to** | ADR-013 (Feature-Level Sensing Commodity Gear), ADR-022 (Windows WiFi Enhanced Fidelity), ADR-014 (SOTA Signal Processing), ADR-018 (ESP32 Dev Implementation) |
 | **Issue** | [#56](https://github.com/ruvnet/wifi-densepose/issues/56) |
 | **Build/Test Target** | Mac Mini (M2 Pro, macOS 26.3) |
@@ -16,7 +16,7 @@
 
 ### 1.1 The Gap: macOS Is a Silent Fallback
 
-The `--source auto` path in `sensing-server` probes for ESP32 UDP, then Windows `netsh`, then falls back to simulated mode. macOS users hit the simulation path silently — there is no macOS WiFi adapter. This is the only major desktop platform without real WiFi sensing support.
+The `--source auto` path in `sensing-server` probes for ESP32 UDP, then Windows `netsh`, then falls back to simulated mode. macOS users hit the simulation path silently - there is no macOS WiFi adapter. This is the only major desktop platform without real WiFi sensing support.
 
 ### 1.2 Platform Constraints (macOS 26.3+)
 
@@ -39,7 +39,7 @@ Same principle as ADR-022 (Windows): visible APs serve as pseudo-subcarriers. A 
 | Windows `netsh` (ADR-022) | 10-30 BSSIDs | ~2 Hz | Presence, motion, coarse breathing |
 | **macOS CoreWLAN (this ADR)** | **10-30 SSIDs** | **~0.3-0.5 Hz** | **Presence, motion** |
 
-The lower scan rate vs Windows is offset by higher signal quality — CoreWLAN returns calibrated dBm (not percentage) plus noise floor, enabling proper SNR computation.
+The lower scan rate vs Windows is offset by higher signal quality - CoreWLAN returns calibrated dBm (not percentage) plus noise floor, enabling proper SNR computation.
 
 ### 1.4 Why Swift Subprocess (Not FFI)
 
@@ -50,7 +50,7 @@ The lower scan rate vs Windows is offset by higher signal quality — CoreWLAN r
 | `objc2` crate (Rust ObjC bridge) | High | CoreWLAN not in upstream `objc2-frameworks` | Requires manual class definitions | Rejected |
 | `swift-bridge` crate | High | Young ecosystem, async bridging unsupported | Requires Swift build integration in Cargo | Rejected |
 
-The `Command::new()` + parse JSON pattern is proven — it's exactly what `NetshBssidScanner` does for Windows. The subprocess boundary also isolates Apple framework dependencies from the Rust build graph.
+The `Command::new()` + parse JSON pattern is proven - it's exactly what `NetshBssidScanner` does for Windows. The subprocess boundary also isolates Apple framework dependencies from the Rust build graph.
 
 ### 1.5 SOTA: Platform-Adaptive WiFi Sensing
 
@@ -68,11 +68,11 @@ Implement a **macOS CoreWLAN sensing adapter** as a Swift helper binary + Rust a
 
 ### 2.1 Design Principles
 
-1. **Subprocess isolation** — Swift binary is a standalone tool, built and versioned independently of the Rust workspace.
-2. **Same domain types** — macOS adapter produces `Vec<BssidObservation>`, identical to the Windows path. All downstream processing reuses as-is.
-3. **SSID:channel as synthetic BSSID** — When real BSSIDs are redacted (no Location Services), `sha256(ssid + channel)[:12]` generates a stable pseudo-BSSID. Documented limitation: same-SSID same-channel APs collapse to one observation.
-4. **`#[cfg(target_os = "macos")]` gating** — macOS-specific code compiles only on macOS. Windows and Linux builds are unaffected.
-5. **Graceful degradation** — If the Swift helper is not found or fails, `--source auto` skips macOS WiFi and falls back to simulated mode with a clear warning.
+1. **Subprocess isolation** - Swift binary is a standalone tool, built and versioned independently of the Rust workspace.
+2. **Same domain types** - macOS adapter produces `Vec<BssidObservation>`, identical to the Windows path. All downstream processing reuses as-is.
+3. **SSID:channel as synthetic BSSID** - When real BSSIDs are redacted (no Location Services), `sha256(ssid + channel)[:12]` generates a stable pseudo-BSSID. Documented limitation: same-SSID same-channel APs collapse to one observation.
+4. **`#[cfg(target_os = "macos")]` gating** - macOS-specific code compiles only on macOS. Windows and Linux builds are unaffected.
+5. **Graceful degradation** - If the Swift helper is not found or fails, `--source auto` skips macOS WiFi and falls back to simulated mode with a clear warning.
 
 ---
 
@@ -229,8 +229,8 @@ The existing 8-stage `WindowsWifiPipeline` (ADR-022) operates entirely on `Bssid
 
 ### 4.3 No New Rust Dependencies
 
-- `std::process::Command` — subprocess spawning (stdlib)
-- `serde_json` — JSON parsing (already in workspace)
+- `std::process::Command` - subprocess spawning (stdlib)
+- `serde_json` - JSON parsing (already in workspace)
 - No changes to `Cargo.toml`
 
 ---
@@ -288,7 +288,7 @@ All verification on Mac Mini (M2 Pro, macOS 26.3).
 | **Slow scan rate** (~0.3 Hz) | Breathing extraction unreliable (below Nyquist) | Motion/presence still work. Breathing marked low-confidence. Future: cache + connected AP fast-poll hybrid. |
 | **Requires Swift helper in PATH** | Extra build step for source builds | `build.sh` provided. Docker image pre-bundles it. Clear error message when missing. |
 | **Location Services for BSSID** | Full BSSID requires user permission prompt | System degrades gracefully to SSID:channel pseudo-BSSID without permission. |
-| **No CSI** | Cannot match ESP32 pose estimation accuracy | Expected — this is RSSI-tier sensing (presence + motion). Same limitation as Windows. |
+| **No CSI** | Cannot match ESP32 pose estimation accuracy | Expected - this is RSSI-tier sensing (presence + motion). Same limitation as Windows. |
 
 ---
 
@@ -307,9 +307,9 @@ All verification on Mac Mini (M2 Pro, macOS 26.3).
 ## 8. References
 
 - [Apple CoreWLAN Documentation](https://developer.apple.com/documentation/corewlan)
-- [CWWiFiClient](https://developer.apple.com/documentation/corewlan/cwwificlient) — Primary WiFi interface API
-- [CWNetwork](https://developer.apple.com/documentation/corewlan/cwnetwork) — Scan result type (SSID, RSSI, channel, noise)
-- [macOS 15 airport removal](https://developer.apple.com/forums/thread/732431) — Apple Developer Forums
+- [CWWiFiClient](https://developer.apple.com/documentation/corewlan/cwwificlient) - Primary WiFi interface API
+- [CWNetwork](https://developer.apple.com/documentation/corewlan/cwnetwork) - Scan result type (SSID, RSSI, channel, noise)
+- [macOS 15 airport removal](https://developer.apple.com/forums/thread/732431) - Apple Developer Forums
 - ADR-022: Windows WiFi Enhanced Fidelity (analogous platform adapter)
 - ADR-013: Feature-Level Sensing from Commodity Gear
 - Issue [#56](https://github.com/ruvnet/wifi-densepose/issues/56): macOS support request

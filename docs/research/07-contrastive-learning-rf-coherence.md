@@ -27,7 +27,7 @@ within the RuView/wifi-densepose Rust codebase.
 ### 1.1 Motivation
 
 Traditional supervised approaches to WiFi CSI-based sensing require
-extensive labeled datasets -- a person walking through a room while
+extensive labeled datasets - a person walking through a room while
 ground-truth positions are recorded via camera or motion capture. This
 labeling burden is the single largest bottleneck in deploying WiFi sensing
 systems to new environments. Contrastive self-supervised learning offers
@@ -141,7 +141,7 @@ deployment, is often prolonged stillness).
 BYOL (Grill et al., 2020) eliminates negative pairs entirely, learning by
 predicting the output of a momentum-updated target network from an online
 network. This is attractive for RF sensing because defining "true negatives"
-in a continuously varying RF field is ambiguous -- when a person moves slowly,
+in a continuously varying RF field is ambiguous - when a person moves slowly,
 CSI frames 1 second apart are neither clearly positive nor clearly negative.
 
 **BYOL for CSI:**
@@ -227,7 +227,7 @@ link or time), and n is a negative (different person or empty room).
 
 AETHER's person re-ID embeddings capture *who* is perturbing the RF field.
 We propose extending AETHER to additionally capture *where* topological
-boundaries form -- the physical surfaces, walls, doors, and moving bodies
+boundaries form - the physical surfaces, walls, doors, and moving bodies
 that partition the RF field into coherent zones.
 
 The key insight is that a topological boundary in the RF graph manifests
@@ -431,7 +431,7 @@ boundary sharpness suggests the model cannot reliably distinguish zones.
 The `field_model.rs` module computes room eigenstructure via SVD of the
 CSI covariance matrix. The leading singular vectors represent the dominant
 modes of RF field variation. Boundaries correspond to regions where the
-dominant singular vectors change character -- where the eigenstructure
+dominant singular vectors change character - where the eigenstructure
 of one zone is linearly independent of the neighboring zone's
 eigenstructure.
 
@@ -716,12 +716,12 @@ Pre-training integrates with the existing training pipeline in
 wifi-densepose-train/
     src/
         pretrain/
-            contrastive.rs    -- SimCLR/MoCo/BYOL implementations
-            augmentations.rs  -- CSI-specific augmentations
-            curriculum.rs     -- Complexity-ordered data staging
-            cache.rs          -- Embedding cache for delta-driven updates
-        dataset.rs            -- CompressedCsiBuffer (ruvector-temporal-tensor)
-        model.rs              -- Encoder architecture with AETHER-Topo heads
+            contrastive.rs    - SimCLR/MoCo/BYOL implementations
+            augmentations.rs  - CSI-specific augmentations
+            curriculum.rs     - Complexity-ordered data staging
+            cache.rs          - Embedding cache for delta-driven updates
+        dataset.rs            - CompressedCsiBuffer (ruvector-temporal-tensor)
+        model.rs              - Encoder architecture with AETHER-Topo heads
 ```
 
 The pre-trained model is serialized to ONNX format for deployment via
@@ -793,8 +793,8 @@ especially with online hard example mining.
 
 Standard triplet training with random sampling is inefficient because
 most triplets satisfy the margin constraint trivially. OHEM selects the
-hardest triplets -- those where the positive is far and the negative
-is close -- to focus learning on the decision boundary.
+hardest triplets - those where the positive is far and the negative
+is close - to focus learning on the decision boundary.
 
 **OHEM for edge classification:**
 
@@ -802,7 +802,7 @@ For each anchor, we maintain a priority queue of candidates scored by:
 
     hardness(a, p, n) = ||f(a) - f(p)||^2 - ||f(a) - f(n)||^2
 
-The hardest valid triplets (where hardness is negative -- the triangle
+The hardest valid triplets (where hardness is negative - the triangle
 inequality is violated) provide the most gradient signal.
 
 **Semi-hard mining**: In practice, the hardest triplets can be outliers
@@ -1086,7 +1086,7 @@ based version for visualization and debugging.
 | Implement SimCLR contrastive loss | wifi-densepose-train | pretrain/contrastive.rs | core, nn |
 | Implement delta change detector | wifi-densepose-signal | ruvsense/delta.rs | coherence.rs |
 | Add embedding cache | wifi-densepose-signal | ruvsense/embed_cache.rs | coherence_gate.rs |
-| Unit tests for augmentations | wifi-densepose-train | tests/ | -- |
+| Unit tests for augmentations | wifi-densepose-train | tests/ | - |
 
 ### 8.2 Phase 2: AETHER-Topo (Weeks 5-8)
 
@@ -1106,7 +1106,7 @@ based version for visualization and debugging.
 | Edge state classifier | wifi-densepose-signal | ruvsense/edge_classify.rs | coherence.rs |
 | Learned min-cut weighting | wifi-densepose-ruvector | src/metrics.rs | edge_classify.rs |
 | Temporal state transition validator | wifi-densepose-signal | ruvsense/adversarial.rs | edge_classify.rs |
-| End-to-end tests: triplet + min-cut | wifi-densepose-ruvector | tests/ | -- |
+| End-to-end tests: triplet + min-cut | wifi-densepose-ruvector | tests/ | - |
 
 ### 8.4 Phase 4: Cross-Environment Transfer (Weeks 13-16)
 
@@ -1115,7 +1115,7 @@ based version for visualization and debugging.
 | Domain alignment contrastive loss | wifi-densepose-train | pretrain/domain_align.rs | contrastive.rs |
 | Environment fingerprinting | wifi-densepose-signal | ruvsense/cross_room.rs | ADR-027 |
 | Few-shot adaptation pipeline | wifi-densepose-train | pretrain/few_shot.rs | domain_align.rs |
-| EWC continual learning | wifi-densepose-train | pretrain/ewc.rs | -- |
+| EWC continual learning | wifi-densepose-train | pretrain/ewc.rs | - |
 | Quantized encoder for ESP32-S3 | wifi-densepose-nn | src/quantize.rs | Candle backend |
 
 ### 8.5 ADR Dependencies

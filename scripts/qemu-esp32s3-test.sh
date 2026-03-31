@@ -12,10 +12,10 @@
 #   NVS_BIN         - Path to a pre-built NVS binary to inject (optional)
 #
 # Exit codes:
-#   0  PASS    — all checks passed
-#   1  WARN    — non-critical checks failed
-#   2  FAIL    — critical checks failed
-#   3  FATAL   — build error, crash, or infrastructure failure
+#   0  PASS    - all checks passed
+#   1  WARN    - non-critical checks failed
+#   2  FAIL    - critical checks failed
+#   3  FATAL   - build error, crash, or infrastructure failure
 
 # ── Help ──────────────────────────────────────────────────────────────
 usage() {
@@ -41,10 +41,10 @@ Examples:
   QEMU_PATH=/opt/qemu/bin/qemu-system-xtensa QEMU_TIMEOUT=120 ./qemu-esp32s3-test.sh
 
 Exit codes:
-  0  PASS   — all checks passed
-  1  WARN   — non-critical checks failed
-  2  FAIL   — critical checks failed
-  3  FATAL  — build error, crash, or infrastructure failure
+  0  PASS   - all checks passed
+  1  WARN   - non-critical checks failed
+  2  FAIL   - critical checks failed
+  3  FATAL  - build error, crash, or infrastructure failure
 HELP
     exit 0
 }
@@ -194,7 +194,7 @@ fi
 echo "------- End QEMU output -------"
 echo ""
 
-# timeout returns 124 when the process is killed by timeout — that's expected
+# timeout returns 124 when the process is killed by timeout - that's expected
 if [ "$QEMU_EXIT" -eq 124 ]; then
     echo "QEMU exited via timeout (expected for firmware that loops forever)."
 elif [ "$QEMU_EXIT" -ne 0 ]; then

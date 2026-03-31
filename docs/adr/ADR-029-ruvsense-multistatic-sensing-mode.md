@@ -1,11 +1,11 @@
-# ADR-029: Project RuvSense -- Sensing-First RF Mode for Multistatic WiFi DensePose
+# ADR-029: Project RuvSense - Sensing-First RF Mode for Multistatic WiFi DensePose
 
 | Field | Value |
 |-------|-------|
 | **Status** | Proposed |
 | **Date** | 2026-03-02 |
 | **Deciders** | ruv |
-| **Codename** | **RuvSense** -- RuVector-Enhanced Sensing for Multistatic Fidelity |
+| **Codename** | **RuvSense** - RuVector-Enhanced Sensing for Multistatic Fidelity |
 | **Relates to** | ADR-012 (ESP32 Mesh), ADR-014 (SOTA Signal Processing), ADR-016 (RuVector Training), ADR-017 (RuVector Signal+MAT), ADR-018 (ESP32 Implementation), ADR-024 (AETHER Embeddings), ADR-026 (Survivor Track Lifecycle), ADR-027 (MERIDIAN Generalization) |
 
 ---
@@ -74,7 +74,7 @@ static uint32_t s_dwell_ms = 50;  // 50ms per channel
 
 At 100 Hz raw CSI rate with 50 ms dwell across 3 channels, each channel yields ~33 frames/second. The existing ADR-018 binary frame format already carries `channel_freq_mhz` at offset 8, so no wire format change is needed.
 
-> **Note (Issue #127 fix):** In promiscuous mode, CSI callbacks fire 100-500+ times/sec — far exceeding the channel dwell rate. The firmware now rate-limits UDP sends to 50 Hz and applies a 100 ms ENOMEM backoff if lwIP buffers are exhausted. This is essential for stable channel hopping under load.
+> **Note (Issue #127 fix):** In promiscuous mode, CSI callbacks fire 100-500+ times/sec - far exceeding the channel dwell rate. The firmware now rate-limits UDP sends to 50 Hz and applies a 100 ms ENOMEM backoff if lwIP buffers are exhausted. This is essential for stable channel hopping under load.
 
 **NDP frame injection:** `esp_wifi_80211_tx()` injects deterministic Null Data Packet frames (preamble-only, no payload, ~24 us airtime) at GPIO-triggered intervals. This is sensing-first: the primary RF emission purpose is CSI measurement, not data communication.
 
@@ -116,7 +116,7 @@ With N ESP32 nodes, collect N `MultiBandCsiFrame` per time slot and fuse with ge
 | 1 | Node B | A | C | D | 4 ms |
 | 2 | Node C | A | B | D | 4 ms |
 | 3 | Node D | A | B | C | 4 ms |
-| 4 | -- | Processing + fusion | | | 30 ms |
+| 4 | - | Processing + fusion | | | 30 ms |
 | **Total** | | | | | **50 ms = 20 Hz** |
 
 Synchronization: GPIO pulse from aggregator node at cycle start. Clock drift at ±10ppm over 50 ms is ~0.5 us, well within the 1 ms guard interval.
@@ -348,10 +348,10 @@ No new workspace dependencies. All ruvector crates are already in the workspace 
 - **12 independent viewpoints** from 4 commodity $10 nodes (C(4,2) × 2 links)
 - **20 Hz update rate** with Kalman-smoothed output for sub-30mm torso jitter
 - **Days-long stability** via coherence gating + SONA recalibration
-- **All five ruvector crates exercised** — consistent algorithmic foundation
-- **$73-91 total BOM** — accessible for research and production
-- **802.11bf forward-compatible** — investment protected as commercial sensing arrives
-- **Cognitum upgrade path** — same software stack, swap ESP32 for higher-bandwidth front end
+- **All five ruvector crates exercised** - consistent algorithmic foundation
+- **$73-91 total BOM** - accessible for research and production
+- **802.11bf forward-compatible** - investment protected as commercial sensing arrives
+- **Cognitum upgrade path** - same software stack, swap ESP32 for higher-bandwidth front end
 
 ### 9.2 Negative
 

@@ -7,7 +7,7 @@
 
 ## Context
 
-RuView currently senses the environment using WiFi CSI — a passive technique that analyzes how WiFi signals are disturbed by human presence and movement. While this works through walls and requires no line of sight, CSI-derived vital signs (breathing rate, heart rate) are inherently noisy because they rely on phase extraction from multipath-rich WiFi channels.
+RuView currently senses the environment using WiFi CSI - a passive technique that analyzes how WiFi signals are disturbed by human presence and movement. While this works through walls and requires no line of sight, CSI-derived vital signs (breathing rate, heart rate) are inherently noisy because they rely on phase extraction from multipath-rich WiFi channels.
 
 A complementary sensing modality exists: **60 GHz mmWave radar** modules (e.g., Seeed MR60BHA2) that use active FMCW radar at 60 GHz to measure breathing and heart rate with clinical-grade accuracy. These modules are inexpensive (~$15), run on ESP32-C6/C3, and output structured vital signs over UART.
 
@@ -28,7 +28,7 @@ Fusing WiFi CSI with mmWave radar creates a sensor system that is greater than t
 
 | Capability | WiFi CSI Alone | mmWave Alone | Fused |
 |-----------|---------------|-------------|-------|
-| Through-wall sensing | Yes (5m+) | No (LoS only, ~3m) | Yes — CSI for room-scale, mmWave for precision |
+| Through-wall sensing | Yes (5m+) | No (LoS only, ~3m) | Yes - CSI for room-scale, mmWave for precision |
 | Heart rate accuracy | ±5-10 BPM | ±1-2 BPM | ±1-2 BPM (mmWave primary, CSI cross-validates) |
 | Breathing accuracy | ±2-3 BPM | ±0.5 BPM | ±0.5 BPM |
 | Presence detection | Good (adaptive threshold) | Excellent (range-gated) | Excellent + through-wall |
@@ -44,11 +44,11 @@ The RuVector v2.0.4 stack (already integrated per ADR-016) provides the signal p
 
 | RuVector Component | Role in mmWave Fusion |
 |-------------------|----------------------|
-| `ruvector-attention` (`bvp.rs`) | Blood Volume Pulse estimation — mmWave heart rate can calibrate the WiFi CSI BVP phase extraction |
-| `ruvector-temporal-tensor` (`breathing.rs`) | Breathing rate estimation — mmWave provides ground-truth for adaptive filter tuning |
-| `ruvector-solver` (`triangulation.rs`) | Multilateration — mmWave range-gated distance + CSI amplitude = 3D position |
-| `ruvector-attn-mincut` (`spectrogram.rs`) | Time-frequency decomposition — mmWave Doppler complements CSI phase spectrogram |
-| `ruvector-mincut` (`metrics.rs`, DynamicPersonMatcher) | Multi-person association — mmWave target IDs help disambiguate CSI subcarrier clusters |
+| `ruvector-attention` (`bvp.rs`) | Blood Volume Pulse estimation - mmWave heart rate can calibrate the WiFi CSI BVP phase extraction |
+| `ruvector-temporal-tensor` (`breathing.rs`) | Breathing rate estimation - mmWave provides ground-truth for adaptive filter tuning |
+| `ruvector-solver` (`triangulation.rs`) | Multilateration - mmWave range-gated distance + CSI amplitude = 3D position |
+| `ruvector-attn-mincut` (`spectrogram.rs`) | Time-frequency decomposition - mmWave Doppler complements CSI phase spectrogram |
+| `ruvector-mincut` (`metrics.rs`, DynamicPersonMatcher) | Multi-person association - mmWave target IDs help disambiguate CSI subcarrier clusters |
 
 ### RuvSense Integration Points
 
@@ -60,7 +60,7 @@ The RuvSense multistatic sensing pipeline (ADR-029) gains new capabilities:
 | `longitudinal.rs` (Welford stats) | mmWave vitals as reference signal for CSI drift detection |
 | `intention.rs` (pre-movement) | mmWave micro-Doppler detects pre-movement 100-200ms earlier than CSI |
 | `adversarial.rs` (consistency check) | mmWave provides independent signal to detect CSI spoofing/anomalies |
-| `coherence_gate.rs` | mmWave presence as additional gate input — if mmWave says "no person", CSI coherence gate rejects |
+| `coherence_gate.rs` | mmWave presence as additional gate input - if mmWave says "no person", CSI coherence gate rejects |
 
 ### Cross-Viewpoint Fusion Integration
 
@@ -108,24 +108,24 @@ Add 60 GHz mmWave radar sensor support to the RuView firmware and sensing pipeli
 
 ### Three Deployment Modes
 
-**Mode 1: Standalone CSI (existing)** — ESP32-S3 only, WiFi CSI sensing.
+**Mode 1: Standalone CSI (existing)** - ESP32-S3 only, WiFi CSI sensing.
 
-**Mode 2: Standalone mmWave** — ESP32-C6 + MR60BHA2, precise vitals in a single room.
+**Mode 2: Standalone mmWave** - ESP32-C6 + MR60BHA2, precise vitals in a single room.
 
-**Mode 3: Fused (recommended)** — ESP32-S3 + mmWave module on UART, or two separate nodes with server-side fusion.
+**Mode 3: Fused (recommended)** - ESP32-S3 + mmWave module on UART, or two separate nodes with server-side fusion.
 
 ### Auto-Detection Protocol
 
 The firmware will auto-detect connected mmWave modules at boot:
 
-1. **UART probe** — On configured UART pins, send the MR60BHA2 identification command (`0x01 0x01 0x00 0x01 ...`) and check for valid response header
-2. **Protocol detection** — Identify the sensor family:
+1. **UART probe** - On configured UART pins, send the MR60BHA2 identification command (`0x01 0x01 0x00 0x01 ...`) and check for valid response header
+2. **Protocol detection** - Identify the sensor family:
    - Seeed MR60BHA2 (breathing + heart rate)
    - Seeed MR60FDA1 (fall detection)
    - Seeed MR24HPC1 (presence + light sleep/deep sleep)
    - HLK-LD2410 (presence + distance)
    - HLK-LD2450 (multi-target tracking)
-3. **Capability registration** — Register detected sensor capabilities in the edge config:
+3. **Capability registration** - Register detected sensor capabilities in the edge config:
 
 ```c
 typedef struct {
@@ -245,7 +245,7 @@ python provision.py --port COM7 \
 - Near-zero false positive fall detection (dual-confirm)
 - Clinical-grade vital signs when mmWave is present, with CSI as fallback
 - Self-calibrating CSI pipeline using mmWave ground truth
-- Backward compatible — existing CSI-only nodes work unchanged
+- Backward compatible - existing CSI-only nodes work unchanged
 - Low incremental cost (~$3-15 per mmWave module)
 - Auto-detection means zero configuration for supported sensors
 - RuVector attention/solver/temporal-tensor modules gain a high-quality reference signal

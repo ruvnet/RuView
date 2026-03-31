@@ -20,7 +20,7 @@ This work established that commodity WiFi routers contain sufficient spatial inf
 
 ### 1.2 Multi-Person 3D Pose Estimation (CVPR 2024)
 
-Yan et al. presented **Person-in-WiFi 3D** at CVPR 2024 ([paper](https://openaccess.thecvf.com/content/CVPR2024/papers/Yan_Person-in-WiFi_3D_End-to-End_Multi-Person_3D_Pose_Estimation_with_Wi-Fi_CVPR_2024_paper.pdf)), advancing the field from 2D to end-to-end multi-person 3D pose estimation using WiFi signals. This represents a significant leap — handling multiple subjects simultaneously in three dimensions using only wireless signals.
+Yan et al. presented **Person-in-WiFi 3D** at CVPR 2024 ([paper](https://openaccess.thecvf.com/content/CVPR2024/papers/Yan_Person-in-WiFi_3D_End-to-End_Multi-Person_3D_Pose_Estimation_with_Wi-Fi_CVPR_2024_paper.pdf)), advancing the field from 2D to end-to-end multi-person 3D pose estimation using WiFi signals. This represents a significant leap - handling multiple subjects simultaneously in three dimensions using only wireless signals.
 
 ### 1.3 Cross-Site Generalization (IEEE IoT Journal, 2024)
 
@@ -28,11 +28,11 @@ Zhou et al. published **AdaPose** (IEEE Internet of Things Journal, 2024, vol. 1
 
 ### 1.4 Lightweight Architectures (ECCV 2024)
 
-**HPE-Li** was presented at ECCV 2024 in Milan, introducing WiFi-enabled lightweight dual selective kernel convolution for human pose estimation. This work targets deployment on resource-constrained edge devices — a critical requirement for practical WiFi sensing systems.
+**HPE-Li** was presented at ECCV 2024 in Milan, introducing WiFi-enabled lightweight dual selective kernel convolution for human pose estimation. This work targets deployment on resource-constrained edge devices - a critical requirement for practical WiFi sensing systems.
 
 ### 1.5 Subcarrier-Level Analysis (2025)
 
-**CSI-Channel Spatial Decomposition** (Electronics, February 2025, [MDPI](https://www.mdpi.com/2079-9292/14/4/756)) decomposes CSI spatial structure into dual-view observations — spatial direction and channel sensitivity — demonstrating that this decomposition is sufficient for unambiguous localization and identification. This work directly informs how subcarrier-level features should be extracted from CSI data.
+**CSI-Channel Spatial Decomposition** (Electronics, February 2025, [MDPI](https://www.mdpi.com/2079-9292/14/4/756)) decomposes CSI spatial structure into dual-view observations - spatial direction and channel sensitivity - demonstrating that this decomposition is sufficient for unambiguous localization and identification. This work directly informs how subcarrier-level features should be extracted from CSI data.
 
 **Deciphering the Silent Signals** (Springer, 2025) applies explainable AI to understand which WiFi frequency components contribute most to pose estimation, providing critical insight into feature selection for signal processing pipelines.
 
@@ -190,7 +190,7 @@ WiFi-DensePose's early adoption of ML-DSA-65 positions it ahead of the deprecati
 
 ### 5.1 WiFi Evolution and Sensing Resolution
 
-#### WiFi 7 (802.11be) — Available Now
+#### WiFi 7 (802.11be) - Available Now
 - **320 MHz channels** with up to 3,984 CSI tones (vs. 56 on ESP32 today)
 - **16×16 MU-MIMO** spatial streams (vs. 2×2 on ESP32)
 - **Sub-nanosecond RTT resolution** for centimeter-level positioning
@@ -198,7 +198,7 @@ WiFi-DensePose's early adoption of ML-DSA-65 positions it ahead of the deprecati
 
 WiFi 7's 320 MHz bandwidth provides ~71x more CSI tones than current ESP32 implementations. This alone transforms sensing resolution.
 
-#### WiFi 8 (802.11bn) — Expected ~2028
+#### WiFi 8 (802.11bn) - Expected ~2028
 - Operations across **sub-7 GHz, 45 GHz, and 60 GHz** bands ([survey](https://www.sciencedirect.com/science/article/abs/pii/S1389128625005572))
 - **WLAN sensing as a core PHY/MAC capability** (not an add-on)
 - Formalized sensing frames and measurement reporting
@@ -231,7 +231,7 @@ WiFi 7's 320 MHz bandwidth provides ~71x more CSI tones than current ESP32 imple
 **Projected deployment:**
 - **2028**: Major cities deploy WiFi 7/8 infrastructure with integrated sensing. Pedestrian flow monitoring replaces camera-based surveillance in privacy-sensitive zones.
 - **2032**: Urban-scale mesh sensing networks provide real-time occupancy maps of public spaces, transit systems, and emergency shelters. Disaster response systems (like wifi-densepose-mat) operate as permanent city infrastructure.
-- **2038**: Full-city coverage enables ambient intelligence: traffic optimization, crowd management, emergency detection — all without cameras, using only the WiFi infrastructure already deployed for connectivity.
+- **2038**: Full-city coverage enables ambient intelligence: traffic optimization, crowd management, emergency detection - all without cameras, using only the WiFi infrastructure already deployed for connectivity.
 
 ### 5.4 Vector Intelligence at Scale
 
@@ -239,7 +239,7 @@ WiFi 7's 320 MHz bandwidth provides ~71x more CSI tones than current ESP32 imple
 - **2028**: HNSW indexes of 10M+ CSI fingerprints per city zone, enabling instant environment recognition and person identification across any WiFi-equipped space. RVF containers store environment-specific models that adapt in <1ms.
 - **2032**: Federated learning across city-scale HNSW indexes. Each building's local index contributes to a global model without sharing raw CSI data. Post-quantum signatures ensure tamper-evident data provenance.
 - **2038**: Continuous self-learning via SONA at city scale. The system improves autonomously from billions of daily observations. EWC++ prevents catastrophic forgetting across seasonal and environmental changes.
-- **2042**: Exascale vector indexes (~1T fingerprints) with sub-microsecond queries via quantum-classical hybrid search. WiFi sensing becomes an ambient utility like electricity — invisible, always-on, universally available.
+- **2042**: Exascale vector indexes (~1T fingerprints) with sub-microsecond queries via quantum-classical hybrid search. WiFi sensing becomes an ambient utility like electricity - invisible, always-on, universally available.
 
 ### 5.5 Privacy-Preserving Sensing Architecture
 
@@ -260,39 +260,39 @@ The convergence of these technologies creates a clear path for wifi-densepose:
 
 2. **Medium-term (2028–2032)**: WiFi 7/8 CSI (3,984+ tones) transforms sensing from coarse presence to fine-grained pose estimation. SONA adaptation makes the system self-improving. Post-quantum signatures secure the sensor mesh.
 
-3. **Long-term (2032–2046)**: WiFi sensing becomes ambient infrastructure. Medical-grade monitoring replaces wearables. City-scale vector intelligence operates autonomously. The architecture established today — RVF containers, HNSW indexes, witness chains, distributed consensus — scales directly to this future.
+3. **Long-term (2032–2046)**: WiFi sensing becomes ambient infrastructure. Medical-grade monitoring replaces wearables. City-scale vector intelligence operates autonomously. The architecture established today - RVF containers, HNSW indexes, witness chains, distributed consensus - scales directly to this future.
 
-The fundamental insight: **the software architecture for ambient WiFi sensing at scale is being built now, using technology available today.** The hardware (WiFi 7/8, faster silicon) will arrive to fill the resolution gap. The algorithms (HNSW, SONA, EWC++) are already proven. The cryptography (ML-DSA, SLH-DSA) is standardized. What matters is building the correct abstractions — and that is exactly what the RuVector integration provides.
+The fundamental insight: **the software architecture for ambient WiFi sensing at scale is being built now, using technology available today.** The hardware (WiFi 7/8, faster silicon) will arrive to fill the resolution gap. The algorithms (HNSW, SONA, EWC++) are already proven. The cryptography (ML-DSA, SLH-DSA) is standardized. What matters is building the correct abstractions - and that is exactly what the RuVector integration provides.
 
 ---
 
 ## References
 
 ### WiFi Sensing
-- [DensePose From WiFi](https://arxiv.org/abs/2301.00250) — Geng, Huang, De la Torre (CMU, 2023)
-- [Person-in-WiFi 3D](https://openaccess.thecvf.com/content/CVPR2024/papers/Yan_Person-in-WiFi_3D_End-to-End_Multi-Person_3D_Pose_Estimation_with_Wi-Fi_CVPR_2024_paper.pdf) — Yan et al. (CVPR 2024)
-- [CSI-Channel Spatial Decomposition](https://www.mdpi.com/2079-9292/14/4/756) — Electronics, Feb 2025
-- [WiFi CSI-Based Through-Wall HAR with ESP32](https://link.springer.com/chapter/10.1007/978-3-031-44137-0_4) — Springer, 2023
-- [Espressif ESP-CSI](https://github.com/espressif/esp-csi) — Official CSI tools
-- [WiFi Sensing Survey](https://dl.acm.org/doi/10.1145/3705893) — ACM Computing Surveys, 2025
-- [WiFi-Based Human Identification Survey](https://pmc.ncbi.nlm.nih.gov/articles/PMC11479185/) — PMC, 2024
+- [DensePose From WiFi](https://arxiv.org/abs/2301.00250) - Geng, Huang, De la Torre (CMU, 2023)
+- [Person-in-WiFi 3D](https://openaccess.thecvf.com/content/CVPR2024/papers/Yan_Person-in-WiFi_3D_End-to-End_Multi-Person_3D_Pose_Estimation_with_Wi-Fi_CVPR_2024_paper.pdf) - Yan et al. (CVPR 2024)
+- [CSI-Channel Spatial Decomposition](https://www.mdpi.com/2079-9292/14/4/756) - Electronics, Feb 2025
+- [WiFi CSI-Based Through-Wall HAR with ESP32](https://link.springer.com/chapter/10.1007/978-3-031-44137-0_4) - Springer, 2023
+- [Espressif ESP-CSI](https://github.com/espressif/esp-csi) - Official CSI tools
+- [WiFi Sensing Survey](https://dl.acm.org/doi/10.1145/3705893) - ACM Computing Surveys, 2025
+- [WiFi-Based Human Identification Survey](https://pmc.ncbi.nlm.nih.gov/articles/PMC11479185/) - PMC, 2024
 
 ### Vector Search & Fingerprinting
-- [WiFi CSI Fingerprinting with Vector Embedding](https://www.sciencedirect.com/science/article/abs/pii/S0957417424026691) — Rocamora & Ho (Expert Systems with Applications, 2024)
-- [HNSW Explained](https://milvus.io/blog/understand-hierarchical-navigable-small-worlds-hnsw-for-vector-search.md) — Milvus Blog
-- [WiFi Fingerprinting Survey](https://pmc.ncbi.nlm.nih.gov/articles/PMC12656469/) — PMC, 2024
+- [WiFi CSI Fingerprinting with Vector Embedding](https://www.sciencedirect.com/science/article/abs/pii/S0957417424026691) - Rocamora & Ho (Expert Systems with Applications, 2024)
+- [HNSW Explained](https://milvus.io/blog/understand-hierarchical-navigable-small-worlds-hnsw-for-vector-search.md) - Milvus Blog
+- [WiFi Fingerprinting Survey](https://pmc.ncbi.nlm.nih.gov/articles/PMC12656469/) - PMC, 2024
 
 ### Edge AI & WASM
-- [ONNX Runtime Web](https://onnxruntime.ai/docs/tutorials/web/) — Microsoft
-- [WONNX: Rust ONNX Runtime](https://github.com/webonnx/wonnx) — WebGPU-accelerated
-- [In-Browser Deep Learning on Edge Devices](https://arxiv.org/html/2309.08978v2) — arXiv, 2023
+- [ONNX Runtime Web](https://onnxruntime.ai/docs/tutorials/web/) - Microsoft
+- [WONNX: Rust ONNX Runtime](https://github.com/webonnx/wonnx) - WebGPU-accelerated
+- [In-Browser Deep Learning on Edge Devices](https://arxiv.org/html/2309.08978v2) - arXiv, 2023
 
 ### Post-Quantum Cryptography
-- [NIST PQC Standards](https://www.nist.gov/news-events/news/2024/08/nist-releases-first-3-finalized-post-quantum-encryption-standards) — FIPS 203/204/205 (August 2024)
-- [NIST IR 8547: PQC Transition](https://nvlpubs.nist.gov/nistpubs/ir/2024/NIST.IR.8547.ipd.pdf) — Transition timeline
-- [State of PQC Internet 2025](https://blog.cloudflare.com/pq-2025/) — Cloudflare
+- [NIST PQC Standards](https://www.nist.gov/news-events/news/2024/08/nist-releases-first-3-finalized-post-quantum-encryption-standards) - FIPS 203/204/205 (August 2024)
+- [NIST IR 8547: PQC Transition](https://nvlpubs.nist.gov/nistpubs/ir/2024/NIST.IR.8547.ipd.pdf) - Transition timeline
+- [State of PQC Internet 2025](https://blog.cloudflare.com/pq-2025/) - Cloudflare
 
 ### WiFi Evolution
-- [Wi-Fi 7 (802.11be)](https://en.wikipedia.org/wiki/Wi-Fi_7) — Finalized July 2025
-- [From Wi-Fi 7 to Wi-Fi 8 Survey](https://www.sciencedirect.com/science/article/abs/pii/S1389128625005572) — ScienceDirect, 2025
-- [Wi-Fi 7 320MHz Channels](https://www.netgear.com/hub/network/wifi-7-320mhz-channels/) — Netgear
+- [Wi-Fi 7 (802.11be)](https://en.wikipedia.org/wiki/Wi-Fi_7) - Finalized July 2025
+- [From Wi-Fi 7 to Wi-Fi 8 Survey](https://www.sciencedirect.com/science/article/abs/pii/S1389128625005572) - ScienceDirect, 2025
+- [Wi-Fi 7 320MHz Channels](https://www.netgear.com/hub/network/wifi-7-320mhz-channels/) - Netgear

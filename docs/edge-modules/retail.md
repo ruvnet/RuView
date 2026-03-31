@@ -1,6 +1,6 @@
-# Retail & Hospitality Modules -- WiFi-DensePose Edge Intelligence
+# Retail & Hospitality Modules - WiFi-DensePose Edge Intelligence
 
-> Understand customer behavior without cameras or consent forms. Count queues, map foot traffic, track table turnover, measure shelf engagement -- all from WiFi signals that are already there.
+> Understand customer behavior without cameras or consent forms. Count queues, map foot traffic, track table turnover, measure shelf engagement - all from WiFi signals that are already there.
 
 ## Overview
 
@@ -151,7 +151,7 @@ Subcarriers are divided evenly: with 27 subcarriers, each zone gets 3 subcarrier
 
 **What it does**: Counts people entering and exiting through a doorway or passage using directional phase gradient analysis. Maintains cumulative ingress/egress counts and reports net occupancy (in - out, clamped to zero). Emits hourly traffic summaries.
 
-**How it works**: Subcarriers are split into two groups: low-index (near entrance) and high-index (far side). A person walking through the sensing area causes an asymmetric phase velocity pattern -- the near-side group's phase changes before the far-side group for ingress, and vice versa for egress. The directional gradient (low_gradient - high_gradient) is smoothed via EMA and thresholded. Combined with motion energy and amplitude spike detection, this discriminates genuine crossings from noise.
+**How it works**: Subcarriers are split into two groups: low-index (near entrance) and high-index (far side). A person walking through the sensing area causes an asymmetric phase velocity pattern - the near-side group's phase changes before the far-side group for ingress, and vice versa for egress. The directional gradient (low_gradient - high_gradient) is smoothed via EMA and thresholded. Combined with motion energy and amplitude spike detection, this discriminates genuine crossings from noise.
 
 ```
 Ingress: positive smoothed gradient (low-side phase leads)
@@ -220,7 +220,7 @@ elif event_id == 423:  # HOURLY_TRAFFIC
 
 ### Table Turnover Tracking (`ret_table_turnover.rs`)
 
-**What it does**: Tracks the full lifecycle of a restaurant table -- from guests sitting down, through eating, to departing and cleanup. Measures seating duration and computes a rolling turnover rate (turnovers per hour). Designed for one ESP32 node per table or table group.
+**What it does**: Tracks the full lifecycle of a restaurant table - from guests sitting down, through eating, to departing and cleanup. Measures seating duration and computes a rolling turnover rate (turnovers per hour). Designed for one ESP32 node per table or table group.
 
 **How it works**: A five-state machine processes presence, motion energy, and person count:
 
@@ -320,7 +320,7 @@ The module computes the standard deviation of per-subcarrier phase differences. 
 
 | Level | Duration | Description | Event ID |
 |-------|----------|-------------|----------|
-| None | -- | No engagement (absent or walking) | -- |
+| None | - | No engagement (absent or walking) | - |
 | Browse | < 5s | Brief glance, passing interest | 440 |
 | Consider | 5-30s | Examining, reading label, comparing | 441 |
 | Deep Engage | > 30s | Extended interaction, decision-making | 442 |
@@ -473,9 +473,9 @@ POS Dashboard  Staff   Analytics
 
 Each event is a `(event_type: i32, value: f32)` pair. Multiple events per frame are packed into a single UDP packet. The sensing server deserializes and exposes them via:
 
-- `GET /api/v1/sensing/latest` -- latest raw events
-- `GET /api/v1/sensing/events?type=400-403` -- filtered by event type
-- WebSocket `/ws/events` -- real-time stream
+- `GET /api/v1/sensing/latest` - latest raw events
+- `GET /api/v1/sensing/events?type=400-403` - filtered by event type
+- WebSocket `/ws/events` - real-time stream
 
 ### Privacy Considerations
 

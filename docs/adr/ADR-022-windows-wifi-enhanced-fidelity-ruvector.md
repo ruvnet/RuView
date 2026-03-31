@@ -20,7 +20,7 @@ The current Windows WiFi mode in `wifi-densepose-sensing-server` (`:main.rs:382-
 - **~2 Hz effective sampling rate** (process spawn overhead)
 - **No spatial diversity** (single observation point)
 
-This is insufficient for any meaningful DensePose estimation. The ESP32 path provides 56 subcarriers with I/Q data at 100+ Hz, while the Windows path provides 1 scalar at 2 Hz -- a **2,800x data deficit**.
+This is insufficient for any meaningful DensePose estimation. The ESP32 path provides 56 subcarriers with I/Q data at 100+ Hz, while the Windows path provides 1 scalar at 2 Hz - a **2,800x data deficit**.
 
 ### 1.2 The Opportunity: Multi-BSSID Spatial Diversity
 
@@ -379,7 +379,7 @@ pub struct WindowsWifiConfig {
     pub enable_fingerprint: bool,
     /// Enable SONA adaptation (default: true)
     pub enable_adaptation: bool,
-    /// Breathing band (Hz) — relaxed for low sample rate
+    /// Breathing band (Hz) - relaxed for low sample rate
     pub breathing_band: (f64, f64),
     /// Motion variance threshold for presence detection
     pub motion_threshold: f64,
@@ -1310,7 +1310,7 @@ let posture = self.fingerprint.classify_embedding(&bssid_embeddings);
 
 ## Implementation Status (2026-02-28)
 
-### Phase 1: Domain Model -- COMPLETE
+### Phase 1: Domain Model - COMPLETE
 - `wifi-densepose-wifiscan` crate created with DDD bounded contexts
 - `MultiApFrame` value object with amplitudes, phases, variances, histories
 - `BssidRegistry` aggregate root with Welford running statistics (capacity 32, 30s expiry)
@@ -1318,7 +1318,7 @@ let posture = self.fingerprint.classify_embedding(&bssid_embeddings);
 - `EnhancedSensingResult` output type with motion, breathing, posture, quality
 - Hexagonal architecture: `WlanScanPort` trait for adapter abstraction
 
-### Phase 2: Signal Intelligence Pipeline -- COMPLETE
+### Phase 2: Signal Intelligence Pipeline - COMPLETE
 8-stage pure-Rust pipeline with 125 passing tests:
 
 | Stage | Module | Implementation |
@@ -1334,12 +1334,12 @@ let posture = self.fingerprint.classify_embedding(&bssid_embeddings);
 
 Performance: ~2.1M frames/sec (debug), ~12M frames/sec (release).
 
-### Phase 3: Server Integration -- IN PROGRESS
+### Phase 3: Server Integration - IN PROGRESS
 - Wiring `WindowsWifiPipeline` into `wifi-densepose-sensing-server`
 - Tier 2 `WlanApiScanner` async adapter stub (upgrade path to native WLAN API)
 - Extended `SensingUpdate` with enhanced motion, breathing, posture, quality fields
 
-### Phase 4: Tier 2 Native WLAN API -- PLANNED
+### Phase 4: Tier 2 Native WLAN API - PLANNED
 - Native `wlanapi.dll` FFI for 10-20 Hz scan rates
 - SONA adaptation layer for per-environment tuning
 - Multi-environment benchmarking

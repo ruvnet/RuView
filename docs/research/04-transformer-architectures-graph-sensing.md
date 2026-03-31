@@ -1,13 +1,13 @@
 # Transformer Architectures for RF Topological Graph Sensing
 
 **Research Document 04** | March 2026
-**Context**: RuView / wifi-densepose — 16-node ESP32 mesh, CSI coherence-weighted graphs, mincut-based boundary detection, real-time inference requirements.
+**Context**: RuView / wifi-densepose - 16-node ESP32 mesh, CSI coherence-weighted graphs, mincut-based boundary detection, real-time inference requirements.
 
 ---
 
 ## Abstract
 
-This document surveys transformer architectures applicable to RF topological graph sensing, where a mesh of 16 ESP32 nodes forms a dynamic graph with edges weighted by Channel State Information (CSI) coherence. The primary inference task is mincut prediction — identifying physical boundaries (walls, doors, human bodies) that partition the radio field. We examine graph transformers, temporal graph networks, vision transformers applied to RF spectrograms, transformer-based mincut prediction, positional encoding strategies for RF graphs, foundation model pre-training, and efficient edge deployment. The goal is to identify architectures that can replace or augment combinatorial mincut solvers with learned models capable of real-time inference on resource-constrained hardware.
+This document surveys transformer architectures applicable to RF topological graph sensing, where a mesh of 16 ESP32 nodes forms a dynamic graph with edges weighted by Channel State Information (CSI) coherence. The primary inference task is mincut prediction - identifying physical boundaries (walls, doors, human bodies) that partition the radio field. We examine graph transformers, temporal graph networks, vision transformers applied to RF spectrograms, transformer-based mincut prediction, positional encoding strategies for RF graphs, foundation model pre-training, and efficient edge deployment. The goal is to identify architectures that can replace or augment combinatorial mincut solvers with learned models capable of real-time inference on resource-constrained hardware.
 
 ---
 
@@ -28,7 +28,7 @@ This document surveys transformer architectures applicable to RF topological gra
 
 ### 1.1 The Structural Gap Between Sequences and Graphs
 
-Standard transformers operate on sequences where positional encoding captures order. Graphs have no canonical ordering — nodes are permutation-invariant, and structure is encoded in adjacency rather than position. This creates a fundamental tension: the self-attention mechanism in vanilla transformers treats all token pairs equally, ignoring the graph topology that carries critical information in RF sensing.
+Standard transformers operate on sequences where positional encoding captures order. Graphs have no canonical ordering - nodes are permutation-invariant, and structure is encoded in adjacency rather than position. This creates a fundamental tension: the self-attention mechanism in vanilla transformers treats all token pairs equally, ignoring the graph topology that carries critical information in RF sensing.
 
 For RF topological sensing, graph structure IS the signal. An edge between ESP32 nodes 3 and 7 weighted by CSI coherence of 0.92 means the radio path between them is unobstructed. A weight of 0.31 suggests an intervening boundary. The transformer must respect this structure, not flatten it away.
 
@@ -54,7 +54,7 @@ Where `b_SPD(i,j)` is a learnable scalar indexed by the shortest-path distance. 
 
 **Edge Encoding.** Edge features along the shortest path between two nodes are aggregated into the attention bias. For RF graphs, edge features include CSI amplitude, phase coherence, signal-to-noise ratio, and temporal stability. This is particularly powerful because the shortest path between two nodes often traverses intermediate links whose coherence values reveal intervening geometry.
 
-**Applicability to RF sensing.** Graphormer's all-pairs attention with structural bias is well-suited to our 16-node mesh because N=16 makes O(N^2) attention tractable (256 pairs). The spatial encoding naturally captures the radio topology — nodes separated by many low-coherence hops are likely in different rooms.
+**Applicability to RF sensing.** Graphormer's all-pairs attention with structural bias is well-suited to our 16-node mesh because N=16 makes O(N^2) attention tractable (256 pairs). The spatial encoding naturally captures the radio topology - nodes separated by many low-coherence hops are likely in different rooms.
 
 **Limitation.** Graphormer was designed for molecular property prediction with static graphs. RF graphs evolve at 10-100 Hz as people move, doors open, and multipath conditions change. The model needs temporal extension.
 
@@ -68,7 +68,7 @@ For an RF mesh with adjacency matrix W (CSI coherence weights), the normalized L
 L = I - D^(-1/2) W D^(-1/2)
 ```
 
-The eigenvectors of L with the smallest non-zero eigenvalues capture the low-frequency structure of the graph — precisely the large-scale partitions that correspond to room boundaries. The Fiedler vector (eigenvector of the second-smallest eigenvalue) directly encodes the mincut partition.
+The eigenvectors of L with the smallest non-zero eigenvalues capture the low-frequency structure of the graph - precisely the large-scale partitions that correspond to room boundaries. The Fiedler vector (eigenvector of the second-smallest eigenvalue) directly encodes the mincut partition.
 
 SAN computes attention separately over the original graph edges ("sparse attention") and all node pairs ("full attention"), then combines them. This dual mechanism lets the model simultaneously exploit local CSI patterns and global graph structure.
 
@@ -103,7 +103,7 @@ For each node, TokenGT creates a token from the node features concatenated with 
 **Token sequence for a 16-node RF mesh:**
 - 16 node tokens (each carrying node features: device ID, antenna configuration, noise floor)
 - Up to 120 edge tokens for a complete graph (each carrying CSI coherence, amplitude, phase, SNR)
-- Total: up to 136 tokens — well within standard transformer capacity
+- Total: up to 136 tokens - well within standard transformer capacity
 
 The advantage is simplicity: no custom attention mechanisms, no graph-specific modules. The disadvantage is that all structural information must be learned from the positional encodings and edge tokens rather than being architecturally enforced.
 
@@ -152,7 +152,7 @@ Where `s_i(t-)` is node i's memory before the event, `delta_t` is the time since
 s_i(t) = GRU(s_i(t-), m_i(t))
 ```
 
-This persistent memory captures the temporal context of each ESP32 node — its recent coherence history, drift patterns, and interaction frequency.
+This persistent memory captures the temporal context of each ESP32 node - its recent coherence history, drift patterns, and interaction frequency.
 
 **Embedding Module.** To compute the embedding for node i at time t, TGN aggregates information from temporal neighbors using attention:
 
@@ -162,11 +162,11 @@ z_i(t) = sum_j alpha(s_i, s_j, e_ij, delta_t_ij) * W * s_j(t_j)
 
 The attention weights depend on both node memories and the time elapsed since each neighbor's last update.
 
-**Link Predictor / Graph Classifier.** The embeddings are used for downstream tasks — in our case, predicting which edges will be cut (mincut prediction) or classifying graph topology (room occupancy).
+**Link Predictor / Graph Classifier.** The embeddings are used for downstream tasks - in our case, predicting which edges will be cut (mincut prediction) or classifying graph topology (room occupancy).
 
 **RF sensing adaptation.** TGN's event-driven architecture maps naturally to CSI measurements, which arrive as discrete edge events (node i measures coherence to node j). The persistent memory per node captures slow-changing context (room geometry, device calibration drift) while the embedding module captures fast dynamics (person movement).
 
-For 16 nodes with measurements at 100 Hz across all 120 links, TGN processes approximately 12,000 edge events per second — feasible for the architecture but requiring careful batching.
+For 16 nodes with measurements at 100 Hz across all 120 links, TGN processes approximately 12,000 edge events per second - feasible for the architecture but requiring careful batching.
 
 ### 2.3 Temporal Graph Attention (TGAT)
 
@@ -176,7 +176,7 @@ TGAT (Xu et al., ICLR 2020) introduces time-aware attention using a functional t
 Phi(t) = sqrt(1/d) * [cos(omega_1 * t), sin(omega_1 * t), ..., cos(omega_d * t), sin(omega_d * t)]
 ```
 
-This continuous-time encoding allows TGAT to handle irregular sampling — critical for RF sensing where different links may be measured at different rates due to the TDM (Time-Division Multiplexing) protocol on the ESP32 mesh.
+This continuous-time encoding allows TGAT to handle irregular sampling - critical for RF sensing where different links may be measured at different rates due to the TDM (Time-Division Multiplexing) protocol on the ESP32 mesh.
 
 The attention mechanism incorporates time explicitly:
 
@@ -246,7 +246,7 @@ Channel State Information from a single link is a time series of complex-valued 
 - X-axis: time window center
 - Y-axis: Doppler frequency
 - Value: spectral power
-- This reveals movement velocities — human walking produces 2-6 Hz Doppler, breathing 0.1-0.5 Hz
+- This reveals movement velocities - human walking produces 2-6 Hz Doppler, breathing 0.1-0.5 Hz
 
 **Cross-Link Spectrogram.** Stack spectrograms from multiple links:
 - For all 120 links in a 16-node complete graph: a 120 x 56 x T tensor
@@ -278,7 +278,7 @@ A single link's spectrogram provides limited spatial information. To capture the
 
 **Approach 1: Channel stacking.** Treat each link's spectrogram as a separate channel of a multi-channel image. With 120 links and 56 subcarriers over 128 timesteps, this creates a 120-channel 56x128 image. Patch extraction operates across all channels simultaneously.
 
-**Approach 2: Token concatenation.** Process each link's spectrogram independently through shared patch extraction and embedding, then concatenate all link tokens into a single sequence. With 112 patches per link and 120 links, this yields 13,440 tokens — too many for standard attention.
+**Approach 2: Token concatenation.** Process each link's spectrogram independently through shared patch extraction and embedding, then concatenate all link tokens into a single sequence. With 112 patches per link and 120 links, this yields 13,440 tokens - too many for standard attention.
 
 **Approach 3: Hierarchical ViT.** Two-stage processing:
 1. **Link-level ViT**: Process each link's spectrogram independently (shared weights), producing one embedding per link (120 embeddings)
@@ -291,7 +291,7 @@ This hierarchical approach is the most promising because:
 
 ### 3.4 ViT Variants for RF
 
-**DeiT (Data-efficient Image Transformers).** Uses knowledge distillation from a CNN teacher, relevant when training data is limited — a common constraint in RF sensing where labeled datasets require manual annotation of room layouts and occupancy.
+**DeiT (Data-efficient Image Transformers).** Uses knowledge distillation from a CNN teacher, relevant when training data is limited - a common constraint in RF sensing where labeled datasets require manual annotation of room layouts and occupancy.
 
 **Swin Transformer.** Hierarchical ViT with shifted windows, reducing attention complexity from O(N^2) to O(N). For large spectrograms, Swin's local attention windows align with the locality of time-frequency patterns.
 
@@ -321,7 +321,7 @@ Given a weighted graph G = (V, E, w) where V is 16 ESP32 nodes, E is up to 120 e
 cut(S, V\S) = sum_{(i,j) in E: i in S, j in V\S} w(i,j)
 ```
 
-The exact solution requires O(V^3) max-flow computation (e.g., push-relabel) or O(V * E) augmenting paths. For N=16 and E=120, exact computation takes microseconds — so why use a learned model?
+The exact solution requires O(V^3) max-flow computation (e.g., push-relabel) or O(V * E) augmenting paths. For N=16 and E=120, exact computation takes microseconds - so why use a learned model?
 
 **Reasons for learned mincut prediction:**
 1. **Temporal smoothing.** Exact mincut on noisy CSI measurements is unstable. A learned model can produce temporally smooth partitions.
@@ -370,12 +370,12 @@ We propose a MinCut Transformer architecture for RF topological sensing:
 
 **Mincut prediction head.** Two output branches:
 
-Branch 1 — **Partition assignment**:
+Branch 1 - **Partition assignment**:
 ```
 S = softmax(MLP(h_nodes))  [16 x K matrix for K-way partition]
 ```
 
-Branch 2 — **Cut edge prediction**:
+Branch 2 - **Cut edge prediction**:
 ```
 p_cut(i,j) = sigmoid(MLP([h_i || h_j || e_ij]))  [probability that edge (i,j) is cut]
 ```
@@ -501,7 +501,7 @@ Rather than absolute node positions, relative encodings capture pairwise relatio
 b_ij = mean(w_e : e in shortest_path(i, j))
 ```
 
-For RF graphs, the shortest path in the coherence graph between two distant nodes reveals the "radio corridor" connecting them — the sequence of high-coherence links that radio signals can traverse.
+For RF graphs, the shortest path in the coherence graph between two distant nodes reveals the "radio corridor" connecting them - the sequence of high-coherence links that radio signals can traverse.
 
 **Rotary Position Embedding (RoPE) for graphs.** Adapt RoPE from language models by using spectral coordinates:
 ```

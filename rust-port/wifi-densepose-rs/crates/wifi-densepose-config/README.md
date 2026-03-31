@@ -17,15 +17,15 @@ variables, TOML/YAML files, and CLI overrides into strongly-typed Rust structs. 
 
 ## Planned Features
 
-- **Multi-source loading** -- Merge configuration from `.env`, TOML files, YAML files, and
+- **Multi-source loading** - Merge configuration from `.env`, TOML files, YAML files, and
   environment variables with well-defined precedence.
-- **Typed configuration** -- Strongly-typed structs for server, signal processing, neural network,
+- **Typed configuration** - Strongly-typed structs for server, signal processing, neural network,
   hardware, and database settings.
-- **Validation** -- Schema validation with human-readable error messages on startup.
-- **Hot reload** -- Watch configuration files for changes and notify dependent services.
-- **Profile support** -- Named profiles (`development`, `production`, `testing`) with per-profile
+- **Validation** - Schema validation with human-readable error messages on startup.
+- **Hot reload** - Watch configuration files for changes and notify dependent services.
+- **Profile support** - Named profiles (`development`, `production`, `testing`) with per-profile
   overrides.
-- **Secret filtering** -- Redact sensitive values (API keys, database passwords) in logs and debug
+- **Secret filtering** - Redact sensitive values (API keys, database passwords) in logs and debug
   output.
 
 ## Quick Start

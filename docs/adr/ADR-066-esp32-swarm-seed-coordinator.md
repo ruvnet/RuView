@@ -10,13 +10,13 @@
 ADR-065 established a single ESP32-S3 node pushing happiness vectors to a Cognitum Seed at `169.254.42.1` (Pi Zero 2 W, firmware 0.7.0). The Seed is now on the same WiFi network (`RedCloverWifi`, `10.1.10.236`) as the ESP32 node (`10.1.10.168`).
 
 The Seed already exposes REST APIs for:
-- Peer discovery (`/api/v1/peers`) — 0 peers currently registered
-- Delta sync (`/api/v1/delta/pull`, `/api/v1/delta/push`) — epoch-based replication
-- Reflex rules (`/api/v1/sensor/reflex/rules`) — 3 rules (fragility alarm, drift cutoff, HD anomaly indicator)
-- Actuators (`/api/v1/sensor/actuators`) — relay + PWM outputs
-- Cognitive engine (`/api/v1/cognitive/tick`) — periodic inference loop
-- Witness chain (`/api/v1/custody/epoch`) — epoch 316, cryptographically signed
-- kNN search (`/api/v1/store/search`) — similarity queries across the full vector store
+- Peer discovery (`/api/v1/peers`) - 0 peers currently registered
+- Delta sync (`/api/v1/delta/pull`, `/api/v1/delta/push`) - epoch-based replication
+- Reflex rules (`/api/v1/sensor/reflex/rules`) - 3 rules (fragility alarm, drift cutoff, HD anomaly indicator)
+- Actuators (`/api/v1/sensor/actuators`) - relay + PWM outputs
+- Cognitive engine (`/api/v1/cognitive/tick`) - periodic inference loop
+- Witness chain (`/api/v1/custody/epoch`) - epoch 316, cryptographically signed
+- kNN search (`/api/v1/store/search`) - similarity queries across the full vector store
 
 A hotel deployment requires multiple ESP32 nodes (lobby, hallway, restaurant, rooms) coordinated as a swarm with centralized analytics on the Seed.
 
@@ -190,9 +190,9 @@ HTTP client uses `esp_http_client` (already in ESP-IDF, no extra dependencies). 
 
 Nodes find the Seed via:
 
-1. **NVS provisioned URL** (primary) — `provision.py --seed-url http://10.1.10.236`
-2. **mDNS fallback** — Seed advertises `_cognitum._tcp.local`; ESP32 resolves `cognitum.local`
-3. **Link-local fallback** — `http://169.254.42.1` when connected via USB
+1. **NVS provisioned URL** (primary) - `provision.py --seed-url http://10.1.10.236`
+2. **mDNS fallback** - Seed advertises `_cognitum._tcp.local`; ESP32 resolves `cognitum.local`
+3. **Link-local fallback** - `http://169.254.42.1` when connected via USB
 
 ### Vector ID Scheme
 
@@ -201,19 +201,19 @@ Nodes find the Seed via:
 ```
 
 Examples:
-- `1-reg` — Node 1 registration
-- `1-hb-316` — Node 1 heartbeat at epoch 316
-- `1-h-316-1742486400000` — Node 1 happiness vector at epoch 316, timestamp T
-- `2-h-316-1742486401000` — Node 2 happiness vector at same epoch
+- `1-reg` - Node 1 registration
+- `1-hb-316` - Node 1 heartbeat at epoch 316
+- `1-h-316-1742486400000` - Node 1 happiness vector at epoch 316, timestamp T
+- `2-h-316-1742486401000` - Node 2 happiness vector at same epoch
 
 ### Witness Chain Integration
 
 Every vector ingested into the Seed increments the epoch and extends the witness chain. The chain provides:
 
-- **Per-node audit trail** — filter by node_id metadata to get one node's history
-- **Tamper detection** — Ed25519 signed, hash-chained; break = detectable
-- **Regulatory compliance** — prove "sensor X reported Y at time Z" for disputes
-- **Cross-node ordering** — Seed epoch gives total order across all nodes
+- **Per-node audit trail** - filter by node_id metadata to get one node's history
+- **Tamper detection** - Ed25519 signed, hash-chained; break = detectable
+- **Regulatory compliance** - prove "sensor X reported Y at time Z" for disputes
+- **Cross-node ordering** - Seed epoch gives total order across all nodes
 
 ### Scaling Considerations
 
@@ -249,26 +249,26 @@ python provision.py --port COM8 \
 
 ### Positive
 
-- **Zero infrastructure** — no cloud, no server, no database. Seed + ESP32s + WiFi router is the entire stack
-- **Autonomous nodes** — each ESP32 runs full Tier 2 DSP independently; Seed loss degrades gracefully to local-only operation
-- **Cryptographic audit** — witness chain gives tamper-proof history for every observation across all nodes
-- **Real-time cross-zone analytics** — Seed kNN search answers "which zones are happy/stressed right now" in < 5 ms
-- **Physical actuators** — Seed's relay/PWM outputs can trigger real-world actions (lights, alarms, displays) based on swarm-wide patterns
-- **Horizontal scaling** — add ESP32 nodes by flashing firmware + running provision.py; no Seed reconfiguration needed
-- **Privacy-preserving** — no cameras, no audio, no PII; only 8-dimensional feature vectors stored
+- **Zero infrastructure** - no cloud, no server, no database. Seed + ESP32s + WiFi router is the entire stack
+- **Autonomous nodes** - each ESP32 runs full Tier 2 DSP independently; Seed loss degrades gracefully to local-only operation
+- **Cryptographic audit** - witness chain gives tamper-proof history for every observation across all nodes
+- **Real-time cross-zone analytics** - Seed kNN search answers "which zones are happy/stressed right now" in < 5 ms
+- **Physical actuators** - Seed's relay/PWM outputs can trigger real-world actions (lights, alarms, displays) based on swarm-wide patterns
+- **Horizontal scaling** - add ESP32 nodes by flashing firmware + running provision.py; no Seed reconfiguration needed
+- **Privacy-preserving** - no cameras, no audio, no PII; only 8-dimensional feature vectors stored
 
 ### Negative
 
-- **Single point of aggregation** — Seed failure loses cross-zone analytics (nodes continue autonomously)
-- **WiFi dependency** — nodes must be on the same network as the Seed; no mesh/LoRa fallback yet
-- **HTTP overhead** — REST/JSON adds ~200 bytes overhead per vector vs raw binary UDP; acceptable at 5-second intervals
-- **Pi Zero 2 W limits** — 512 MB RAM, single-core ARM; adequate for 20 nodes but not 100+
-- **No WASM OTA via Seed** — currently WASM modules are uploaded per-node; future work could use Seed as WASM distribution hub
+- **Single point of aggregation** - Seed failure loses cross-zone analytics (nodes continue autonomously)
+- **WiFi dependency** - nodes must be on the same network as the Seed; no mesh/LoRa fallback yet
+- **HTTP overhead** - REST/JSON adds ~200 bytes overhead per vector vs raw binary UDP; acceptable at 5-second intervals
+- **Pi Zero 2 W limits** - 512 MB RAM, single-core ARM; adequate for 20 nodes but not 100+
+- **No WASM OTA via Seed** - currently WASM modules are uploaded per-node; future work could use Seed as WASM distribution hub
 
 ### Future Work
 
-- **Seed-initiated WASM push** — Seed distributes WASM modules to all nodes via their OTA endpoints
-- **mDNS auto-discovery** — nodes find Seed without provisioned URL
-- **Mesh fallback** — ESP-NOW peer-to-peer when WiFi is down
-- **Multi-Seed federation** — multiple Seeds for multi-floor/multi-building deployments
-- **Seed dashboard** — web UI on the Seed showing live swarm map with per-zone happiness
+- **Seed-initiated WASM push** - Seed distributes WASM modules to all nodes via their OTA endpoints
+- **mDNS auto-discovery** - nodes find Seed without provisioned URL
+- **Mesh fallback** - ESP-NOW peer-to-peer when WiFi is down
+- **Multi-Seed federation** - multiple Seeds for multi-floor/multi-building deployments
+- **Seed dashboard** - web UI on the Seed showing live swarm map with per-zone happiness

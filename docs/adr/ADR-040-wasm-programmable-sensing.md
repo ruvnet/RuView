@@ -8,10 +8,10 @@
 
 ADR-039 implemented Tiers 0-2 of the ESP32-S3 edge intelligence pipeline:
 - **Tier 0**: Raw CSI passthrough (magic `0xC5110001`)
-- **Tier 1**: Basic DSP — phase unwrap, Welford stats, top-K, delta compression
-- **Tier 2**: Full pipeline — vitals, presence, fall detection, multi-person
+- **Tier 1**: Basic DSP - phase unwrap, Welford stats, top-K, delta compression
+- **Tier 2**: Full pipeline - vitals, presence, fall detection, multi-person
 
-The firmware uses ~820 KB of flash, leaving ~80 KB headroom in the 1 MB OTA partition. The ESP32-S3 has 8 MB PSRAM available for runtime data. New sensing algorithms (gesture recognition, signal coherence monitoring, adversarial detection) currently require a full firmware reflash — impractical for deployed sensor networks.
+The firmware uses ~820 KB of flash, leaving ~80 KB headroom in the 1 MB OTA partition. The ESP32-S3 has 8 MB PSRAM available for runtime data. New sensing algorithms (gesture recognition, signal coherence monitoring, adversarial detection) currently require a full firmware reflash - impractical for deployed sensor networks.
 
 The project already has 35+ RuVector WASM crates and 28 pre-built `.wasm` binaries, but none are integrated into the ESP32 firmware.
 
@@ -113,12 +113,12 @@ Core 1 (DSP Task)
 
 | Component | SRAM | PSRAM | Flash |
 |-----------|------|-------|-------|
-| WASM3 interpreter | ~10 KB | — | ~100 KB |
-| WASM module storage (×4) | — | 512 KB | — |
-| WASM execution stack | 8 KB | — | — |
-| Host API bindings | 2 KB | — | ~15 KB |
-| HTTP upload handler | 1 KB | — | ~8 KB |
-| RVF parser + verifier | 1 KB | — | ~6 KB |
+| WASM3 interpreter | ~10 KB | - | ~100 KB |
+| WASM module storage (×4) | - | 512 KB | - |
+| WASM execution stack | 8 KB | - | - |
+| Host API bindings | 2 KB | - | ~15 KB |
+| HTTP upload handler | 1 KB | - | ~8 KB |
+| RVF parser + verifier | 1 KB | - | ~6 KB |
 | **Total Tier 3** | **~22 KB** | **512 KB** | **~129 KB** |
 | **Running total (Tier 0-3)** | **~34 KB** | **512 KB** | **~925 KB** |
 
@@ -130,13 +130,13 @@ Core 1 (DSP Task)
 |-----|------|---------|-------------|
 | `wasm_max` | u8 | 4 | Maximum concurrent WASM modules |
 | `wasm_verify` | u8 | 1 | Require signature verification (secure-by-default) |
-| `wasm_pubkey` | blob(32) | — | Signing public key for WASM verification |
+| `wasm_pubkey` | blob(32) | - | Signing public key for WASM verification |
 
 ## Consequences
 
 ### Positive
 - Deploy new sensing algorithms to 1000+ nodes without reflashing firmware
-- 20-year extensibility horizon — new algorithms via .wasm uploads
+- 20-year extensibility horizon - new algorithms via .wasm uploads
 - Algorithms developed/tested in Rust, compiled to portable WASM
 - PSRAM utilization (previously unused 8 MB) for module storage
 - Hot-swap algorithms for A/B testing in production deployments
@@ -152,7 +152,7 @@ Core 1 (DSP Task)
 
 | Risk | Mitigation |
 |------|------------|
-| WASM3 memory management may fragment PSRAM over time | Fixed 160 KB arenas pre-allocated at boot per slot — no runtime malloc/free cycles |
+| WASM3 memory management may fragment PSRAM over time | Fixed 160 KB arenas pre-allocated at boot per slot - no runtime malloc/free cycles |
 | Complex WASM modules (>64 KB) may cause stack overflow in interpreter | `WASM_STACK_SIZE` = 8 KB, `d_m3MaxFunctionStackHeight` = 128; modules validated at load time |
 | HTTP upload endpoint requires network security | Ed25519 signature verification enabled by default (`wasm_verify=1`); disable only via NVS for lab/dev |
 | Runaway WASM module blocks DSP pipeline | Per-frame budget guard (10 ms default); module auto-stopped after 10 consecutive faults |
@@ -160,13 +160,13 @@ Core 1 (DSP Task)
 
 ## Implementation
 
-- `firmware/esp32-csi-node/components/wasm3/CMakeLists.txt` — WASM3 ESP-IDF component
-- `firmware/esp32-csi-node/main/wasm_runtime.c/h` — Runtime host with 12 API bindings + manifest
-- `firmware/esp32-csi-node/main/wasm_upload.c/h` — HTTP REST endpoints (RVF-aware)
-- `firmware/esp32-csi-node/main/rvf_parser.c/h` — RVF container parser and verifier
-- `rust-port/.../wifi-densepose-wasm-edge/` — Rust WASM crate (gesture, coherence, adversarial, rvf, occupancy, vital_trend, intrusion)
-- `rust-port/.../wifi-densepose-sensing-server/src/main.rs` — `0xC5110004` parser
-- `docs/adr/ADR-039-esp32-edge-intelligence.md` — Updated with Tier 3 reference
+- `firmware/esp32-csi-node/components/wasm3/CMakeLists.txt` - WASM3 ESP-IDF component
+- `firmware/esp32-csi-node/main/wasm_runtime.c/h` - Runtime host with 12 API bindings + manifest
+- `firmware/esp32-csi-node/main/wasm_upload.c/h` - HTTP REST endpoints (RVF-aware)
+- `firmware/esp32-csi-node/main/rvf_parser.c/h` - RVF container parser and verifier
+- `rust-port/.../wifi-densepose-wasm-edge/` - Rust WASM crate (gesture, coherence, adversarial, rvf, occupancy, vital_trend, intrusion)
+- `rust-port/.../wifi-densepose-sensing-server/src/main.rs` - `0xC5110004` parser
+- `docs/adr/ADR-039-esp32-edge-intelligence.md` - Updated with Tier 3 reference
 
 ---
 
@@ -179,7 +179,7 @@ The initial Tier 3 implementation addresses five production-readiness concerns:
 Dynamic `heap_caps_malloc` / `free` cycles on PSRAM fragment memory over days of
 continuous operation. Instead, each module slot pre-allocates a **160 KB fixed arena**
 at boot (`WASM_ARENA_SIZE`). The WASM binary and WASM3 runtime heap both live inside
-this arena. Unloading a module zeroes the arena but never frees it — the slot is
+this arena. Unloading a module zeroes the arena but never frees it - the slot is
 reused on the next `wasm_runtime_load()`.
 
 ```
@@ -321,7 +321,7 @@ maintained by Tier 1/2 DSP. Subcarriers are nodes; edge weights are
 pairwise Pearson correlation magnitudes over the Welford window. The
 algebraic connectivity (Fiedler value λ₂) of this graph's Laplacian
 approximates the mincut value. On ESP32-S3 with K=8 subcarriers, this
-is an 8×8 eigenvalue problem — solvable with power iteration in <100 μs.
+is an 8×8 eigenvalue problem - solvable with power iteration in <100 μs.
 
 ### B.5 Spiking and Sparse Optimizations
 
@@ -337,13 +337,13 @@ When the budget is tight (Δλ ≈ 0, quiet room), WASM modules should:
 ### B.6 Thermal and Power Hooks
 
 ESP32-S3 provides:
-- `temp_sensor_read()` — on-chip temperature (°C)
+- `temp_sensor_read()` - on-chip temperature (°C)
 - ADC reading of battery voltage (if wired)
 
-Thermal pressure: `T = clamp((temp_celsius - 60) / 20, 0, 1)` — ramps
+Thermal pressure: `T = clamp((temp_celsius - 60) / 20, 0, 1)` - ramps
 from 0 at 60°C to 1.0 at 80°C (thermal throttle zone).
 
-Battery pressure: `P = clamp((3.3 - battery_volts) / 0.6, 0, 1)` — ramps
+Battery pressure: `P = clamp((3.3 - battery_volts) / 0.6, 0, 1)` - ramps
 from 0 at 3.3V to 1.0 at 2.7V (brownout zone).
 
 ### B.7 Transport Strategy
@@ -394,15 +394,15 @@ board without PSRAM). WiFi connected to AP at RSSI -25 dBm, channel 5 BW20.
 
 ### Known Issues
 
-1. **Fall threshold too sensitive** — default 2.0 rad/s² produces 6.7 false positives/s in static environment. Recommend 5.0-8.0 for deployment.
-2. **No PSRAM on test board** — WASM arenas fall back to internal heap (316 KiB total). Production boards with 8 MB PSRAM will use dedicated PSRAM arenas.
-3. **WiFi-Ethernet isolation** — some consumer routers block bridging between WiFi and wired clients. Verify network path during deployment.
+1. **Fall threshold too sensitive** - default 2.0 rad/s² produces 6.7 false positives/s in static environment. Recommend 5.0-8.0 for deployment.
+2. **No PSRAM on test board** - WASM arenas fall back to internal heap (316 KiB total). Production boards with 8 MB PSRAM will use dedicated PSRAM arenas.
+3. **WiFi-Ethernet isolation** - some consumer routers block bridging between WiFi and wired clients. Verify network path during deployment.
 
 ### B.8 Implementation Plan
 
 | Step | Scope | Effort |
 |------|-------|--------|
-| 1 | Add `edge_compute_fiedler()` in `edge_processing.c` — power iteration on 8×8 Laplacian | ~50 lines C |
+| 1 | Add `edge_compute_fiedler()` in `edge_processing.c` - power iteration on 8×8 Laplacian | ~50 lines C |
 | 2 | Add budget controller struct and update formula in `wasm_runtime.c` | ~30 lines C |
 | 3 | Wire thermal/battery sensors into budget inputs | ~20 lines C |
 | 4 | Add delta-export dead-band filter in `wasm_runtime_on_frame()` | ~15 lines C |
@@ -414,10 +414,10 @@ Total: ~125 lines of C, no new files. All constants configurable via NVS.
 
 | Failure | Behavior |
 |---------|----------|
-| Δλ estimate wrong (correlation noise) | Budget oscillates — clamped by B_min/B_max |
+| Δλ estimate wrong (correlation noise) | Budget oscillates - clamped by B_min/B_max |
 | Thermal sensor absent | T defaults to 0 (no throttle) |
 | Battery ADC not wired | P defaults to 0 (always-on mode) |
-| All WASM modules budget-faulted | DSP pipeline runs Tier 2 only — graceful degradation |
+| All WASM modules budget-faulted | DSP pipeline runs Tier 2 only - graceful degradation |
 
 ---
 
@@ -457,17 +457,17 @@ Total overhead: 32 (header) + 96 (manifest) + 64 (signature) = **192 bytes**.
 
 | Offset | Size | Type | Field |
 |--------|------|------|-------|
-| 0 | 32 | char[] | `module_name` — null-terminated ASCII |
-| 32 | 2 | u16 | `required_host_api` — version (1 = current) |
-| 34 | 4 | u32 | `capabilities` — RVF_CAP_* bitmask |
-| 38 | 4 | u32 | `max_frame_us` — requested per-frame budget (0 = use default) |
-| 42 | 2 | u16 | `max_events_per_sec` — rate limit (0 = unlimited) |
-| 44 | 2 | u16 | `memory_limit_kb` — max WASM heap (0 = use default) |
-| 46 | 2 | u16 | `event_schema_version` — for receiver compatibility |
-| 48 | 32 | [u8;32] | `build_hash` — SHA-256 of WASM payload |
-| 80 | 2 | u16 | `min_subcarriers` — minimum required (0 = any) |
-| 82 | 2 | u16 | `max_subcarriers` — maximum expected (0 = any) |
-| 84 | 10 | char[] | `author` — null-padded ASCII |
+| 0 | 32 | char[] | `module_name` - null-terminated ASCII |
+| 32 | 2 | u16 | `required_host_api` - version (1 = current) |
+| 34 | 4 | u32 | `capabilities` - RVF_CAP_* bitmask |
+| 38 | 4 | u32 | `max_frame_us` - requested per-frame budget (0 = use default) |
+| 42 | 2 | u16 | `max_events_per_sec` - rate limit (0 = unlimited) |
+| 44 | 2 | u16 | `memory_limit_kb` - max WASM heap (0 = use default) |
+| 46 | 2 | u16 | `event_schema_version` - for receiver compatibility |
+| 48 | 32 | [u8;32] | `build_hash` - SHA-256 of WASM payload |
+| 80 | 2 | u16 | `min_subcarriers` - minimum required (0 = any) |
+| 82 | 2 | u16 | `max_subcarriers` - maximum expected (0 = any) |
+| 84 | 10 | char[] | `author` - null-padded ASCII |
 | 94 | 2 | [u8;2] | reserved (0) |
 
 ### C.4 Capability Bitmask
@@ -483,7 +483,7 @@ Total overhead: 32 (header) + 96 (manifest) + 64 (signature) = **192 bytes**.
 | 6 | `LOG` | `csi_log` |
 
 Modules declare which host APIs they need. Future firmware versions may
-refuse to link imports that aren't declared in capabilities — defense in
+refuse to link imports that aren't declared in capabilities - defense in
 depth against supply-chain attacks.
 
 ### C.5 On-Device Flow

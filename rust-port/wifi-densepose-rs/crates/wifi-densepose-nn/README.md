@@ -9,28 +9,28 @@ Multi-backend neural network inference for WiFi-based DensePose estimation.
 ## Overview
 
 `wifi-densepose-nn` provides the inference engine that maps processed WiFi CSI features to
-DensePose body surface predictions. It supports three backends -- ONNX Runtime (default),
-PyTorch via `tch-rs`, and Candle -- so models can run on CPU, CUDA GPU, or TensorRT depending
+DensePose body surface predictions. It supports three backends - ONNX Runtime (default),
+PyTorch via `tch-rs`, and Candle - so models can run on CPU, CUDA GPU, or TensorRT depending
 on the deployment target.
 
 The crate implements two key neural components:
 
-- **DensePose Head** -- Predicts 24 body part segmentation masks and per-part UV coordinate
+- **DensePose Head** - Predicts 24 body part segmentation masks and per-part UV coordinate
   regression.
-- **Modality Translator** -- Translates CSI feature embeddings into visual feature space,
+- **Modality Translator** - Translates CSI feature embeddings into visual feature space,
   bridging the domain gap between WiFi signals and image-based pose estimation.
 
 ## Features
 
-- **ONNX Runtime backend** (default) -- Load and run `.onnx` models with CPU or GPU execution
+- **ONNX Runtime backend** (default) - Load and run `.onnx` models with CPU or GPU execution
   providers.
-- **PyTorch backend** (`tch-backend`) -- Native PyTorch inference via libtorch FFI.
-- **Candle backend** (`candle-backend`) -- Pure-Rust inference with `candle-core` and
+- **PyTorch backend** (`tch-backend`) - Native PyTorch inference via libtorch FFI.
+- **Candle backend** (`candle-backend`) - Pure-Rust inference with `candle-core` and
   `candle-nn`.
-- **CUDA acceleration** (`cuda`) -- GPU execution for supported backends.
-- **TensorRT optimization** (`tensorrt`) -- INT8/FP16 optimized inference via ONNX Runtime.
-- **Batched inference** -- Process multiple CSI frames in a single forward pass.
-- **Model caching** -- Memory-mapped model weights via `memmap2`.
+- **CUDA acceleration** (`cuda`) - GPU execution for supported backends.
+- **TensorRT optimization** (`tensorrt`) - INT8/FP16 optimized inference via ONNX Runtime.
+- **Batched inference** - Process multiple CSI frames in a single forward pass.
+- **Model caching** - Memory-mapped model weights via `memmap2`.
 
 ### Feature flags
 
@@ -64,13 +64,13 @@ println!("Body parts: {}", output.body_parts.shape()[1]); // 24
 
 ```text
 wifi-densepose-nn/src/
-  lib.rs          -- Re-exports, constants (NUM_BODY_PARTS=24), prelude
-  densepose.rs    -- DensePoseHead, DensePoseConfig, DensePoseOutput
-  inference.rs    -- Backend trait, InferenceEngine, InferenceOptions
-  onnx.rs         -- OnnxBackend, OnnxSession (feature-gated)
-  tensor.rs       -- Tensor, TensorShape utilities
-  translator.rs   -- ModalityTranslator (CSI -> visual space)
-  error.rs        -- NnError, NnResult
+  lib.rs          - Re-exports, constants (NUM_BODY_PARTS=24), prelude
+  densepose.rs    - DensePoseHead, DensePoseConfig, DensePoseOutput
+  inference.rs    - Backend trait, InferenceEngine, InferenceOptions
+  onnx.rs         - OnnxBackend, OnnxSession (feature-gated)
+  tensor.rs       - Tensor, TensorShape utilities
+  translator.rs   - ModalityTranslator (CSI -> visual space)
+  error.rs        - NnError, NnResult
 ```
 
 ## Related Crates

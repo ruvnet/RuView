@@ -1,5 +1,5 @@
 #!/bin/bash
-# ESP32 Swarm Provisioning — ADR-065/066
+# ESP32 Swarm Provisioning - ADR-065/066
 #
 # Provisions multiple ESP32-S3 nodes for a hotel happiness sensing deployment.
 # Each node gets WiFi credentials, a unique node_id, zone name, and Seed token.

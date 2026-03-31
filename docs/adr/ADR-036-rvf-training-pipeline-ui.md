@@ -8,19 +8,19 @@ Proposed
 
 ## Context
 
-The wifi-densepose system currently operates in **signal-derived** mode — `derive_pose_from_sensing()` maps aggregate CSI features (motion power, breathing rate, variance) to keypoint positions using deterministic math. This gives whole-body presence and gross motion but cannot track individual limbs.
+The wifi-densepose system currently operates in **signal-derived** mode - `derive_pose_from_sensing()` maps aggregate CSI features (motion power, breathing rate, variance) to keypoint positions using deterministic math. This gives whole-body presence and gross motion but cannot track individual limbs.
 
 The infrastructure for **model inference** mode exists but is disconnected:
 
-1. **RVF container format** (`rvf_container.rs`, 1,102 lines) — a 64-byte-aligned binary format supporting model weights (`SEG_VEC`), metadata (`SEG_MANIFEST`), quantization (`SEG_QUANT`), LoRA profiles (`SEG_LORA`), contrastive embeddings (`SEG_EMBED`), and witness audit trails (`SEG_WITNESS`). Builder and reader are fully implemented with CRC32 integrity checks.
+1. **RVF container format** (`rvf_container.rs`, 1,102 lines) - a 64-byte-aligned binary format supporting model weights (`SEG_VEC`), metadata (`SEG_MANIFEST`), quantization (`SEG_QUANT`), LoRA profiles (`SEG_LORA`), contrastive embeddings (`SEG_EMBED`), and witness audit trails (`SEG_WITNESS`). Builder and reader are fully implemented with CRC32 integrity checks.
 
-2. **Training crate** (`wifi-densepose-train`) — AdamW optimizer, PCK@0.2/OKS metrics, LR scheduling with warmup, early stopping, CSV logging, and checkpoint export. Supports `CsiDataset` trait with planned MM-Fi (114→56 subcarrier interpolation) and Wi-Pose (30→56 zero-pad) loaders per ADR-015.
+2. **Training crate** (`wifi-densepose-train`) - AdamW optimizer, PCK@0.2/OKS metrics, LR scheduling with warmup, early stopping, CSV logging, and checkpoint export. Supports `CsiDataset` trait with planned MM-Fi (114→56 subcarrier interpolation) and Wi-Pose (30→56 zero-pad) loaders per ADR-015.
 
-3. **NN inference crate** (`wifi-densepose-nn`) — ONNX Runtime backend with CPU/GPU support, dynamic tensor shapes, thread-safe `OnnxBackend` wrapper, model info inspection, and warmup.
+3. **NN inference crate** (`wifi-densepose-nn`) - ONNX Runtime backend with CPU/GPU support, dynamic tensor shapes, thread-safe `OnnxBackend` wrapper, model info inspection, and warmup.
 
-4. **Sensing server CLI** (`--model <path>`, `--train`, `--pretrain`, `--embed`) — flags exist for model loading, training mode, and embedding extraction, but the end-to-end path from raw CSI → trained `.rvf` → live inference is not wired together.
+4. **Sensing server CLI** (`--model <path>`, `--train`, `--pretrain`, `--embed`) - flags exist for model loading, training mode, and embedding extraction, but the end-to-end path from raw CSI → trained `.rvf` → live inference is not wired together.
 
-5. **UI gaps** — No model management, training progress visualization, LoRA profile switching, or embedding inspection. The Settings panel lacks model configuration. The Live Demo has no way to load a trained model or compare signal-derived vs model-inference output side-by-side.
+5. **UI gaps** - No model management, training progress visualization, LoRA profile switching, or embedding inspection. The Settings panel lacks model configuration. The Live Demo has no way to load a trained model or compare signal-derived vs model-inference output side-by-side.
 
 ### What users need
 
@@ -97,14 +97,14 @@ On training completion:
 - `POST /api/v1/train/lora { base_model_id, dataset_ids[], profile_name, rank: 8, epochs: 20 }`.
 
 #### 3.2 Profile Switching
-- `POST /api/v1/models/lora/activate { model_id, profile_name }` — hot-swap LoRA weights without reloading base model.
+- `POST /api/v1/models/lora/activate { model_id, profile_name }` - hot-swap LoRA weights without reloading base model.
 - UI dropdown lists available profiles per loaded model.
 
 ### Phase 4: UI Integration
 
 #### 4.1 Model Management Panel (new: `ui/components/ModelPanel.js`)
 - **Model Library**: List loaded and available `.rvf` models with metadata (version, dataset, PCK score, size, created date).
-- **Model Inspector**: Show RVF segment breakdown — weight count, quantization type, LoRA profiles, embedding config, witness hash.
+- **Model Inspector**: Show RVF segment breakdown - weight count, quantization type, LoRA profiles, embedding config, witness hash.
 - **Load/Unload**: One-click model loading with progress bar.
 - **Compare**: Side-by-side signal-derived vs model-inference toggle in Live Demo.
 
@@ -152,24 +152,24 @@ When a `.rvf` model is loaded:
 ### Positive
 - Users can train a model on **their own environment** without external tools or Python dependencies.
 - LoRA profiles mean a single base model adapts to multiple rooms in minutes, not hours.
-- Training progress is visible in real-time — no black-box waiting.
+- Training progress is visible in real-time - no black-box waiting.
 - A/B comparison lets users see the quality jump from signal-derived to model-inference.
 - RVF container bundles everything (weights, metadata, LoRA, witness) in one portable file.
-- Self-supervised pretraining requires no labels — just leave ESP32s running.
-- Progressive loading means the UI is never "loading..." — signal-derived kicks in immediately.
+- Self-supervised pretraining requires no labels - just leave ESP32s running.
+- Progressive loading means the UI is never "loading..." - signal-derived kicks in immediately.
 
 ### Negative
 - Training requires significant compute: GPU recommended for supervised training (CPU possible but 10-50x slower).
-- MM-Fi and Wi-Pose datasets must be downloaded separately (10-50 GB each) — cannot be bundled.
+- MM-Fi and Wi-Pose datasets must be downloaded separately (10-50 GB each) - cannot be bundled.
 - LoRA rank must be tuned per environment; too low loses expressiveness, too high overfits.
 - ONNX Runtime adds ~50 MB to the binary size when GPU support is enabled.
-- Real-time inference at 10 FPS requires ~10ms per frame — tight budget on CPU.
+- Real-time inference at 10 FPS requires ~10ms per frame - tight budget on CPU.
 - Teacher-student labeling (camera → pose labels → CSI training) requires camera access, which may conflict with the privacy-first premise.
 
 ### Mitigations
 - Provide pre-trained base `.rvf` model downloadable from releases (trained on MM-Fi + Wi-Pose).
 - INT8 quantization (`SEG_QUANT`) reduces model size 4x and speeds inference ~2x on CPU.
-- Camera-based labeling is **optional** — self-supervised pretraining works without camera.
+- Camera-based labeling is **optional** - self-supervised pretraining works without camera.
 - Training API validates VRAM availability before starting GPU training; falls back to CPU with warning.
 
 ## Implementation Order
@@ -196,29 +196,29 @@ When a `.rvf` model is loaded:
 ## Files to Create/Modify
 
 ### New Files
-- `ui/components/ModelPanel.js` — Model library, inspector, load/unload controls
-- `ui/components/TrainingPanel.js` — Recording controls, training progress, metric charts
-- `rust-port/.../sensing-server/src/recording.rs` — CSI recording API handlers
-- `rust-port/.../sensing-server/src/training_api.rs` — Training API handlers + WS progress stream
-- `rust-port/.../sensing-server/src/model_manager.rs` — Model loading, hot-swap, 32LoRA activation
-- `data/models/` — Default model storage directory
+- `ui/components/ModelPanel.js` - Model library, inspector, load/unload controls
+- `ui/components/TrainingPanel.js` - Recording controls, training progress, metric charts
+- `rust-port/.../sensing-server/src/recording.rs` - CSI recording API handlers
+- `rust-port/.../sensing-server/src/training_api.rs` - Training API handlers + WS progress stream
+- `rust-port/.../sensing-server/src/model_manager.rs` - Model loading, hot-swap, 32LoRA activation
+- `data/models/` - Default model storage directory
 
 ### Modified Files
-- `rust-port/.../sensing-server/src/main.rs` — Wire recording, training, and model APIs
-- `rust-port/.../train/src/trainer.rs` — Add WebSocket progress callback, LoRA training mode
-- `rust-port/.../train/src/dataset.rs` — MM-Fi and Wi-Pose dataset loaders
-- `rust-port/.../nn/src/onnx.rs` — LoRA weight injection, INT8 quantization support
-- `ui/components/LiveDemoTab.js` — Model selector, LoRA dropdown, A/B spsplit view
-- `ui/components/SettingsPanel.js` — Model and training configuration sections
-- `ui/components/PoseDetectionCanvas.js` — Pose trail rendering, confidence heatmap overlay
-- `ui/services/pose.service.js` — Model-inference keypoint processing
-- `ui/index.html` — Add Training tabhee
-- `ui/style.css` — Styles for new panels 
+- `rust-port/.../sensing-server/src/main.rs` - Wire recording, training, and model APIs
+- `rust-port/.../train/src/trainer.rs` - Add WebSocket progress callback, LoRA training mode
+- `rust-port/.../train/src/dataset.rs` - MM-Fi and Wi-Pose dataset loaders
+- `rust-port/.../nn/src/onnx.rs` - LoRA weight injection, INT8 quantization support
+- `ui/components/LiveDemoTab.js` - Model selector, LoRA dropdown, A/B spsplit view
+- `ui/components/SettingsPanel.js` - Model and training configuration sections
+- `ui/components/PoseDetectionCanvas.js` - Pose trail rendering, confidence heatmap overlay
+- `ui/services/pose.service.js` - Model-inference keypoint processing
+- `ui/index.html` - Add Training tabhee
+- `ui/style.css` - Styles for new panels 
 
 ## References
 - ADR-015: MM-Fi + Wi-Pose training datasets
 - ADR-016: RuVector training pipeline integration
-- ADR-024: Project AETHER — contrastive CSI embedding model
+- ADR-024: Project AETHER - contrastive CSI embedding model
 - ADR-029: RuvSense multistatic sensing mode
 - ADR-031: RuView sensing-first RF mode (progressive loading)
 - ADR-035: Live sensing UI accuracy & data source transparency

@@ -17,13 +17,13 @@ clients.
 
 ## Planned Features
 
-- **REST endpoints** -- CRUD for scan zones, pose queries, model configuration, and health checks.
-- **WebSocket streaming** -- Real-time pose estimate broadcasts with per-client subscription filters.
-- **Authentication** -- Token-based auth middleware via `tower` layers.
-- **Rate limiting** -- Configurable per-route limits to protect hardware-constrained deployments.
-- **OpenAPI spec** -- Auto-generated documentation via `utoipa`.
-- **CORS** -- Configurable cross-origin support for browser-based dashboards.
-- **Graceful shutdown** -- Clean connection draining on SIGTERM.
+- **REST endpoints** - CRUD for scan zones, pose queries, model configuration, and health checks.
+- **WebSocket streaming** - Real-time pose estimate broadcasts with per-client subscription filters.
+- **Authentication** - Token-based auth middleware via `tower` layers.
+- **Rate limiting** - Configurable per-route limits to protect hardware-constrained deployments.
+- **OpenAPI spec** - Auto-generated documentation via `utoipa`.
+- **CORS** - Configurable cross-origin support for browser-based dashboards.
+- **Graceful shutdown** - Clean connection draining on SIGTERM.
 
 ## Quick Start
 

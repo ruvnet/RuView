@@ -1,5 +1,5 @@
 /**
- * CanvasRenderer — Renders skeleton overlay on video, CSI heatmap,
+ * CanvasRenderer - Renders skeleton overlay on video, CSI heatmap,
  * embedding space visualization, and fusion confidence bars.
  */
 

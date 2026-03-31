@@ -24,7 +24,7 @@ Estimate occupancy count from CSI signal statistics without decomposition.
 **Approach**: Eigenvalue analysis of the CSI covariance matrix across subcarriers.
 
 - Compute the 56×56 covariance matrix of CSI amplitudes over a sliding window (e.g., 50 frames / 5 seconds)
-- Count eigenvalues above a noise threshold — each significant eigenvalue corresponds to an independent scatterer (person or static object)
+- Count eigenvalues above a noise threshold - each significant eigenvalue corresponds to an independent scatterer (person or static object)
 - Subtract the static environment baseline (estimated during calibration or from the field model's SVD eigenstructure)
 - The residual significant eigenvalue count estimates person count
 
@@ -77,12 +77,12 @@ Train a dedicated multi-person model using the RVF pipeline (ADR-036).
 
 - Enables room occupancy counting (Phase 1 alone is useful)
 - Distinct pose tracking per person enables activity recognition per individual
-- Progressive approach — each phase delivers incremental value
+- Progressive approach - each phase delivers incremental value
 - Reuses existing infrastructure (field model SVD, Kalman tracker, AETHER, RVF pipeline)
 
 ### Negative
 
-- Single ESP32 node has fundamental spatial resolution limits — separating 2 people standing close together (< 0.5m) will be unreliable
+- Single ESP32 node has fundamental spatial resolution limits - separating 2 people standing close together (< 0.5m) will be unreliable
 - NMF decomposition adds ~5-10ms latency per frame
 - Person count estimation will have false positives from large moving objects (pets, fans)
 - Phase 4 neural model requires multi-person training data collection
@@ -90,7 +90,7 @@ Train a dedicated multi-person model using the RVF pipeline (ADR-036).
 ### Neutral
 
 - Multi-node multistatic mesh (ADR-029) dramatically improves multi-person separation but is a separate effort
-- UI already supports multi-person rendering — no frontend changes needed for the `persons[]` array
+- UI already supports multi-person rendering - no frontend changes needed for the `persons[]` array
 
 ## Affected Components
 
@@ -115,7 +115,7 @@ Train a dedicated multi-person model using the RVF pipeline (ADR-036).
 
 ## Alternatives Considered
 
-1. **Camera fusion**: Use a camera for person detection and WiFi for pose — rejected because the project goal is camera-free sensing.
-2. **Multiple single-person models**: Run N independent pose estimators — rejected because they would produce correlated outputs from the same CSI data.
-3. **Spatial filtering (beamforming)**: Use antenna array beamforming to isolate directions — rejected because single ESP32 has only 1 antenna; viable with multistatic mesh (ADR-029).
-4. **Skip signal-derived, go straight to neural**: Train an end-to-end multi-person model — rejected because signal-derived provides faster iteration and interpretability for the early phases.
+1. **Camera fusion**: Use a camera for person detection and WiFi for pose - rejected because the project goal is camera-free sensing.
+2. **Multiple single-person models**: Run N independent pose estimators - rejected because they would produce correlated outputs from the same CSI data.
+3. **Spatial filtering (beamforming)**: Use antenna array beamforming to isolate directions - rejected because single ESP32 has only 1 antenna; viable with multistatic mesh (ADR-029).
+4. **Skip signal-derived, go straight to neural**: Train an end-to-end multi-person model - rejected because signal-derived provides faster iteration and interpretability for the early phases.

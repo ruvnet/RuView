@@ -138,7 +138,7 @@ crates/wifi-densepose-rvf/
 ruvector-mincut = "2.0.4"           # Dynamic min-cut, O(n^1.5 log n) graph partitioning
 ruvector-attn-mincut = "2.0.4"     # Attention + mincut gating in one pass
 ruvector-temporal-tensor = "2.0.4"  # Tiered temporal compression (50-75% memory reduction)
-ruvector-solver = "2.0.4"           # NeumannSolver — O(√n) Neumann series convergence
+ruvector-solver = "2.0.4"           # NeumannSolver - O(√n) Neumann series convergence
 ruvector-attention = "2.0.4"        # ScaledDotProductAttention
 ```
 

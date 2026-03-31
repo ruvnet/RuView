@@ -12,17 +12,17 @@
 Multiple GitHub issues (#223, #238, #234, #210, #190) report firmware problems
 that fall into two categories:
 
-1. **CSI not enabled at runtime** — The committed `sdkconfig` had
+1. **CSI not enabled at runtime** - The committed `sdkconfig` had
    `# CONFIG_ESP_WIFI_CSI_ENABLED is not set` (line 1135), meaning users who
    built from source or used pre-built binaries got the runtime error:
    `E (6700) wifi:CSI not enabled in menuconfig!`
 
    Root cause: `sdkconfig.defaults.template` existed with the correct setting
    (`CONFIG_ESP_WIFI_CSI_ENABLED=y`) but ESP-IDF only reads
-   `sdkconfig.defaults` — not `.template` suffixed files. No `sdkconfig.defaults`
+   `sdkconfig.defaults` - not `.template` suffixed files. No `sdkconfig.defaults`
    file was committed.
 
-2. **Unsupported ESP32 variants** — Users attempting to use original ESP32
+2. **Unsupported ESP32 variants** - Users attempting to use original ESP32
    (D0WD) and ESP32-C3 boards. The firmware targets ESP32-S3 only
    (`CONFIG_IDF_TARGET="esp32s3"`, Xtensa architecture) and this was not
    surfaced clearly enough in documentation or build errors.
@@ -59,7 +59,7 @@ Change line 1135 from `# CONFIG_ESP_WIFI_CSI_ENABLED is not set` to
   source will get a clear compile error if CSI is somehow disabled.
 - **Positive**: Pre-built release binaries will include CSI support.
 - **Neutral**: Original ESP32 and ESP32-C3 remain unsupported. This is by
-  design — only ESP32-S3 has the CSI API surface we depend on. Future ADRs
+  design - only ESP32-S3 has the CSI API surface we depend on. Future ADRs
   may address multi-target support if demand warrants it.
 - **Negative**: None identified.
 

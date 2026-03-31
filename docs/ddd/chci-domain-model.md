@@ -7,18 +7,18 @@
 | Term | Definition |
 |------|------------|
 | **Coherent Human Channel Imaging (CHCI)** | A purpose-built RF sensing protocol that uses phase-locked sounding, multi-band fusion, and cognitive waveform adaptation to reconstruct human body surfaces and physiological motion at sub-millimeter resolution |
-| **Sounding Frame** | A deterministic OFDM transmission (NDP or custom burst) with known pilot structure, transmitted at fixed cadence for channel measurement — as opposed to passive CSI extracted from data traffic |
+| **Sounding Frame** | A deterministic OFDM transmission (NDP or custom burst) with known pilot structure, transmitted at fixed cadence for channel measurement - as opposed to passive CSI extracted from data traffic |
 | **Phase Coherence** | The property of multiple radio nodes sharing a common phase reference, enabling complex-valued channel measurements without per-node LO drift correction |
 | **Reference Clock** | A shared oscillator (TCXO + PLL) distributed to all CHCI nodes via coaxial cable, providing both 40 MHz timing reference and in-band phase reference signal |
 | **Cognitive Waveform** | A sounding waveform whose parameters (cadence, bandwidth, band selection, power, subcarrier subset) adapt in real-time based on the current scene state inferred from the body model |
-| **Diffraction Tomography** | Coherent reconstruction of body surface geometry from complex-valued channel responses across multiple node pairs and frequency bands — produces surface contours rather than volumetric opacity |
+| **Diffraction Tomography** | Coherent reconstruction of body surface geometry from complex-valued channel responses across multiple node pairs and frequency bands - produces surface contours rather than volumetric opacity |
 | **Sensing Mode** | One of six operational states (IDLE, ALERT, ACTIVE, VITAL, GESTURE, SLEEP) that determine waveform parameters and processing pipeline configuration |
 | **Micro-Burst** | A very short (4–20 μs) deterministic OFDM symbol transmitted at high cadence (1–5 kHz) for maximizing Doppler resolution without full 802.11 frame overhead |
 | **Multi-Band Fusion** | Simultaneous sounding at 2.4 GHz and 5 GHz (optionally 6 GHz), fused as projections of the same latent motion field using body model priors as constraints |
 | **Displacement Floor** | The minimum detectable surface displacement at a given range, determined by phase noise, coherent averaging depth, and antenna count: δ_min = λ/(4π) × σ_φ/√(N_ant × N_avg) |
-| **Channel Contrast** | The ratio of complex channel response with human present to the empty-room reference response — the input to diffraction tomography |
-| **Coherence Delta** | The change in phase coherence metric between consecutive observation windows — the trigger signal for cognitive waveform transitions |
-| **NDP** | Null Data PPDU — an 802.11bf-standard sounding frame containing only preamble and training fields, no data payload |
+| **Channel Contrast** | The ratio of complex channel response with human present to the empty-room reference response - the input to diffraction tomography |
+| **Coherence Delta** | The change in phase coherence metric between consecutive observation windows - the trigger signal for cognitive waveform transitions |
+| **NDP** | Null Data PPDU - an 802.11bf-standard sounding frame containing only preamble and training fields, no data payload |
 | **Sensing Availability Window (SAW)** | An 802.11bf-defined time interval during which NDP sounding exchanges are permitted between sensing initiator and responder |
 | **Body Model Prior** | Geometric constraints derived from known human body dimensions (segment lengths, joint angle limits) used to regularize cross-band fusion and tomographic reconstruction |
 | **Phase Reference Signal** | A continuous-wave tone at the operating band center frequency, distributed alongside the 40 MHz clock, enabling all nodes to measure and compensate residual phase offset |
@@ -66,23 +66,23 @@
 ```
 
 **Aggregates:**
-- `SoundingScheduler` (Aggregate Root) — Orchestrates sounding frame transmission across nodes and bands according to the current waveform configuration
+- `SoundingScheduler` (Aggregate Root) - Orchestrates sounding frame transmission across nodes and bands according to the current waveform configuration
 
 **Entities:**
-- `SoundingFrame` — A single NDP or micro-burst transmission with sequence ID, band, timestamp, and pilot structure
-- `BurstSequence` — An ordered set of micro-bursts within one observation window, used for coherent Doppler integration
-- `WaveformConfig` — The current waveform parameter set (cadence, bandwidth, band selection, power level, subcarrier mask)
+- `SoundingFrame` - A single NDP or micro-burst transmission with sequence ID, band, timestamp, and pilot structure
+- `BurstSequence` - An ordered set of micro-bursts within one observation window, used for coherent Doppler integration
+- `WaveformConfig` - The current waveform parameter set (cadence, bandwidth, band selection, power level, subcarrier mask)
 
 **Value Objects:**
-- `SoundingCadence` — Transmission rate in Hz (1–5000), constrained by regulatory duty cycle limits
-- `BandSelection` — Set of active bands {2.4 GHz, 5 GHz, 6 GHz} for current mode
-- `SubcarrierMask` — Bit vector selecting active subcarriers for focused sensing (vital mode uses optimal subset)
-- `BurstDuration` — Single burst length in microseconds (4–20 μs)
-- `DutyCycle` — Computed duty cycle percentage, must not exceed regulatory limit (ETSI: 10 ms max burst)
+- `SoundingCadence` - Transmission rate in Hz (1–5000), constrained by regulatory duty cycle limits
+- `BandSelection` - Set of active bands {2.4 GHz, 5 GHz, 6 GHz} for current mode
+- `SubcarrierMask` - Bit vector selecting active subcarriers for focused sensing (vital mode uses optimal subset)
+- `BurstDuration` - Single burst length in microseconds (4–20 μs)
+- `DutyCycle` - Computed duty cycle percentage, must not exceed regulatory limit (ETSI: 10 ms max burst)
 
 **Domain Services:**
-- `RegulatoryComplianceChecker` — Validates that any waveform configuration satisfies FCC Part 15.247 and ETSI EN 300 328 constraints before applying
-- `BandCoordinator` — Manages time-division or simultaneous multi-band sounding to avoid self-interference
+- `RegulatoryComplianceChecker` - Validates that any waveform configuration satisfies FCC Part 15.247 and ETSI EN 300 328 constraints before applying
+- `BandCoordinator` - Manages time-division or simultaneous multi-band sounding to avoid self-interference
 
 ---
 
@@ -131,20 +131,20 @@
 ```
 
 **Aggregates:**
-- `ReferenceClockModule` (Aggregate Root) — The single source of timing truth for the entire CHCI mesh
+- `ReferenceClockModule` (Aggregate Root) - The single source of timing truth for the entire CHCI mesh
 
 **Entities:**
-- `NodePhaseLock` — Per-node state tracking lock status, residual offset, and drift rate
-- `CalibrationSession` — A timed procedure that measures and records per-node phase offsets under static conditions
+- `NodePhaseLock` - Per-node state tracking lock status, residual offset, and drift rate
+- `CalibrationSession` - A timed procedure that measures and records per-node phase offsets under static conditions
 
 **Value Objects:**
-- `PhaseOffset` — Residual phase offset in degrees after clock distribution, per node per subcarrier
-- `DriftRate` — Phase drift in degrees per minute, must remain below threshold (0.05°/min for heartbeat sensing)
-- `LockStatus` — Enum {Acquiring, Locked, Drifting, Lost} indicating current synchronization state
+- `PhaseOffset` - Residual phase offset in degrees after clock distribution, per node per subcarrier
+- `DriftRate` - Phase drift in degrees per minute, must remain below threshold (0.05°/min for heartbeat sensing)
+- `LockStatus` - Enum {Acquiring, Locked, Drifting, Lost} indicating current synchronization state
 
 **Domain Services:**
-- `PhaseCalibrationService` — Runs startup and periodic calibration routines; replaces statistical LO estimation in current `phase_align.rs`
-- `DriftMonitor` — Continuous background service that detects when any node exceeds drift threshold and triggers recalibration
+- `PhaseCalibrationService` - Runs startup and periodic calibration routines; replaces statistical LO estimation in current `phase_align.rs`
+- `DriftMonitor` - Continuous background service that detects when any node exceeds drift threshold and triggers recalibration
 
 **Invariants:**
 - All nodes must achieve `Locked` status before CHCI sensing begins
@@ -207,25 +207,25 @@
 ```
 
 **Aggregates:**
-- `DiffractionTomographyEngine` (Aggregate Root) — Reconstructs 3D body surface geometry from coherent channel contrast measurements across all node pairs and frequency bands
+- `DiffractionTomographyEngine` (Aggregate Root) - Reconstructs 3D body surface geometry from coherent channel contrast measurements across all node pairs and frequency bands
 
 **Entities:**
-- `CoherentCsiFrame` — A single coherent channel measurement: complex-valued H(f) per subcarrier, with phase-lock metadata, node ID, band, sequence ID, and timestamp
-- `ReferenceChannel` — The empty-room complex channel response per link per band, used as the denominator in channel contrast computation
-- `VoxelGrid` — 3D grid of complex permittivity contrast values, the output of diffraction tomography
-- `BodySurface` — Extracted iso-surface from voxel grid, represented as triangulated mesh or point cloud
+- `CoherentCsiFrame` - A single coherent channel measurement: complex-valued H(f) per subcarrier, with phase-lock metadata, node ID, band, sequence ID, and timestamp
+- `ReferenceChannel` - The empty-room complex channel response per link per band, used as the denominator in channel contrast computation
+- `VoxelGrid` - 3D grid of complex permittivity contrast values, the output of diffraction tomography
+- `BodySurface` - Extracted iso-surface from voxel grid, represented as triangulated mesh or point cloud
 
 **Value Objects:**
-- `ChannelContrast` — Complex ratio H_measured/H_reference per subcarrier per link — the fundamental input to tomography
-- `SubcarrierResponse` — Complex-valued (amplitude + phase) channel response at a single subcarrier frequency
-- `VoxelCoordinate` — (x, y, z) position in room coordinate frame with associated complex permittivity value
-- `SurfaceNormal` — Orientation vector at each surface vertex, derived from permittivity gradient
-- `CoherenceMetric` — Complex-valued coherence score (magnitude + phase) replacing the current real-valued Z-score
+- `ChannelContrast` - Complex ratio H_measured/H_reference per subcarrier per link - the fundamental input to tomography
+- `SubcarrierResponse` - Complex-valued (amplitude + phase) channel response at a single subcarrier frequency
+- `VoxelCoordinate` - (x, y, z) position in room coordinate frame with associated complex permittivity value
+- `SurfaceNormal` - Orientation vector at each surface vertex, derived from permittivity gradient
+- `CoherenceMetric` - Complex-valued coherence score (magnitude + phase) replacing the current real-valued Z-score
 
 **Domain Services:**
-- `ChannelContrastComputer` — Divides measured channel by reference to isolate human-induced perturbation
-- `MultiBandFuser` — Aligns phase across bands using body model priors and combines into unified spectral response
-- `SurfaceExtractor` — Applies marching cubes or similar iso-surface algorithm to permittivity contrast grid
+- `ChannelContrastComputer` - Divides measured channel by reference to isolate human-induced perturbation
+- `MultiBandFuser` - Aligns phase across bands using body model priors and combines into unified spectral response
+- `SurfaceExtractor` - Applies marching cubes or similar iso-surface algorithm to permittivity contrast grid
 
 **RuVector Integration:**
 - `ruvector-attention` → Cross-band attention weights for frequency fusion (extends `CrossViewpointAttention`)
@@ -286,24 +286,24 @@
 ```
 
 **Aggregates:**
-- `SensingModeStateMachine` (Aggregate Root) — Manages transitions between six sensing modes based on coherence delta, motion classification, and body model state
+- `SensingModeStateMachine` (Aggregate Root) - Manages transitions between six sensing modes based on coherence delta, motion classification, and body model state
 
 **Entities:**
-- `SensingMode` — One of {IDLE, ALERT, ACTIVE, VITAL, GESTURE, SLEEP} with associated waveform parameter set
-- `ModeTransition` — A state change event with trigger reason, timestamp, and hysteresis counter
-- `PowerBudget` — Per-mode power allocation constraining cadence and TX power
+- `SensingMode` - One of {IDLE, ALERT, ACTIVE, VITAL, GESTURE, SLEEP} with associated waveform parameter set
+- `ModeTransition` - A state change event with trigger reason, timestamp, and hysteresis counter
+- `PowerBudget` - Per-mode power allocation constraining cadence and TX power
 
 **Value Objects:**
-- `CoherenceDelta` — Magnitude of coherence change between consecutive observation windows — the primary mode transition trigger
-- `MotionClassification` — Enum {Static, Breathing, Walking, Gesturing, Falling} derived from micro-Doppler signature
-- `ModeHysteresis` — Counter preventing rapid mode oscillation: requires N consecutive trigger events before transition (default N=3)
-- `OptimalSubcarrierSet` — The subset of subcarriers with highest SNR for vital sign extraction, computed from recent channel statistics
+- `CoherenceDelta` - Magnitude of coherence change between consecutive observation windows - the primary mode transition trigger
+- `MotionClassification` - Enum {Static, Breathing, Walking, Gesturing, Falling} derived from micro-Doppler signature
+- `ModeHysteresis` - Counter preventing rapid mode oscillation: requires N consecutive trigger events before transition (default N=3)
+- `OptimalSubcarrierSet` - The subset of subcarriers with highest SNR for vital sign extraction, computed from recent channel statistics
 
 **Domain Services:**
-- `SceneStateObserver` — Fuses body model output, coherence metrics, and motion classifier into a unified scene state descriptor
-- `ModeTransitionEvaluator` — Applies hysteresis and priority rules to determine if a mode change should occur
-- `SubcarrierSelector` — Identifies optimal subcarrier subset for vital mode using Fisher information criterion or SNR ranking
-- `PowerManager` — Computes TX power and duty cycle to stay within regulatory and battery constraints per mode
+- `SceneStateObserver` - Fuses body model output, coherence metrics, and motion classifier into a unified scene state descriptor
+- `ModeTransitionEvaluator` - Applies hysteresis and priority rules to determine if a mode change should occur
+- `SubcarrierSelector` - Identifies optimal subcarrier subset for vital mode using Fisher information criterion or SNR ranking
+- `PowerManager` - Computes TX power and duty cycle to stay within regulatory and battery constraints per mode
 
 **Invariants:**
 - IDLE mode must be entered after 30 seconds of no detection (configurable)
@@ -373,25 +373,25 @@
 ```
 
 **Aggregates:**
-- `RespiratoryAnalyzer` (Aggregate Root) — Extracts breathing rate and pattern from 0.1–0.6 Hz displacement band
+- `RespiratoryAnalyzer` (Aggregate Root) - Extracts breathing rate and pattern from 0.1–0.6 Hz displacement band
 
 **Entities:**
-- `PhaseTimeSeries` — Windowed buffer of unwrapped phase values per subcarrier per link, at sounding cadence
-- `DisplacementTimeSeries` — Converted from phase: δ(t) = λΔφ(t) / (4π), represents physical surface displacement in mm
-- `VitalSignReport` — Fused output containing breathing rate, heart rate, HRV, confidence scores, and anomaly flags
+- `PhaseTimeSeries` - Windowed buffer of unwrapped phase values per subcarrier per link, at sounding cadence
+- `DisplacementTimeSeries` - Converted from phase: δ(t) = λΔφ(t) / (4π), represents physical surface displacement in mm
+- `VitalSignReport` - Fused output containing breathing rate, heart rate, HRV, confidence scores, and anomaly flags
 
 **Value Objects:**
-- `PhaseUnwrapped` — Continuous (unwrapped) phase in radians, free from 2π ambiguity
-- `DisplacementSample` — Single displacement value in mm with timestamp and confidence
-- `BreathingRate` — BPM value (6–36 range) with confidence score
-- `HeartRate` — BPM value (48–180 range) with confidence score and HRV interval
-- `ApneaEvent` — Duration, severity, and confidence of detected breathing cessation
+- `PhaseUnwrapped` - Continuous (unwrapped) phase in radians, free from 2π ambiguity
+- `DisplacementSample` - Single displacement value in mm with timestamp and confidence
+- `BreathingRate` - BPM value (6–36 range) with confidence score
+- `HeartRate` - BPM value (48–180 range) with confidence score and HRV interval
+- `ApneaEvent` - Duration, severity, and confidence of detected breathing cessation
 
 **Domain Services:**
-- `PhaseUnwrapper` — Continuous phase unwrapping with outlier rejection; critical for displacement conversion
-- `RespiratoryHarmonicCanceller` — Removes breathing harmonics from cardiac band to isolate heartbeat signal
-- `MultilinkFuser` — Combines displacement estimates across node pairs using SNR-weighted averaging
-- `AnomalyDetector` — Flags displacement patterns inconsistent with normal physiology (fall, seizure, cardiac arrest)
+- `PhaseUnwrapper` - Continuous phase unwrapping with outlier rejection; critical for displacement conversion
+- `RespiratoryHarmonicCanceller` - Removes breathing harmonics from cardiac band to isolate heartbeat signal
+- `MultilinkFuser` - Combines displacement estimates across node pairs using SNR-weighted averaging
+- `AnomalyDetector` - Flags displacement patterns inconsistent with normal physiology (fall, seizure, cardiac arrest)
 
 **Invariants:**
 - Phase unwrapping must maintain continuity: |Δφ| < π between consecutive samples
@@ -452,18 +452,18 @@
 ```
 
 **Aggregates:**
-- `ComplianceValidator` (Aggregate Root) — Gate that must approve every waveform configuration before transmission is permitted
+- `ComplianceValidator` (Aggregate Root) - Gate that must approve every waveform configuration before transmission is permitted
 
 **Entities:**
-- `JurisdictionProfile` — Complete set of regulatory constraints for a given region (FCC, ETSI, ARIB, etc.)
-- `ComplianceRecord` — Audit trail of compliance checks with timestamps and configuration hashes
+- `JurisdictionProfile` - Complete set of regulatory constraints for a given region (FCC, ETSI, ARIB, etc.)
+- `ComplianceRecord` - Audit trail of compliance checks with timestamps and configuration hashes
 
 **Value Objects:**
-- `MaxEIRP` — Maximum effective isotropic radiated power in dBm, per band per jurisdiction
-- `MaxBurstDuration` — Maximum continuous transmission time (ETSI: 10 ms)
-- `MinIdleTime` — Minimum idle period between bursts
-- `ModulationType` — Must be digital modulation (OFDM qualifies) or spread spectrum for FCC
-- `DutyCycleLimit` — Maximum percentage of time occupied by transmissions
+- `MaxEIRP` - Maximum effective isotropic radiated power in dBm, per band per jurisdiction
+- `MaxBurstDuration` - Maximum continuous transmission time (ETSI: 10 ms)
+- `MinIdleTime` - Minimum idle period between bursts
+- `ModulationType` - Must be digital modulation (OFDM qualifies) or spread spectrum for FCC
+- `DutyCycleLimit` - Maximum percentage of time occupied by transmissions
 
 **Invariants:**
 - No transmission shall occur without a passing `ComplianceCheckPassed` event
@@ -642,7 +642,7 @@ pub struct VitalSignReport {
     breathing_bpm: Option<f64>,
     /// Breathing confidence [0.0, 1.0]
     breathing_confidence: f64,
-    /// Heart rate in BPM (None if not measurable — requires CHCI coherent mode)
+    /// Heart rate in BPM (None if not measurable - requires CHCI coherent mode)
     heart_rate_bpm: Option<f64>,
     /// Heart rate confidence [0.0, 1.0]
     heart_rate_confidence: f64,
@@ -752,7 +752,7 @@ pub enum ClockEvent {
         node_id: NodeId,
         drift_deg_per_min: f64,
     },
-    /// Phase lock lost on a node — triggers fallback to statistical correction
+    /// Phase lock lost on a node - triggers fallback to statistical correction
     ClockLockLost {
         node_id: NodeId,
         reason: LockLossReason,
@@ -845,7 +845,7 @@ pub enum MeasurementEvent {
 │  └────────────────┘    └────────────────┘    └────────────────┘       │
 │                                                                         │
 │  CHCI Signal Processing feeds directly into existing                   │
-│  RuvSense/RuVector/DensePose pipeline — coherent CSI                   │
+│  RuvSense/RuVector/DensePose pipeline - coherent CSI                   │
 │  replaces incoherent CSI as input, same output interface               │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -855,10 +855,10 @@ pub enum MeasurementEvent {
 
 | Boundary | Direction | Mechanism |
 |----------|-----------|-----------|
-| CHCI Signal Processing → RuvSense | Downstream | `CoherentCsiFrame` adapts to existing `CsiFrame` trait via `IntoLegacyCsi` adapter — existing pipeline works unmodified |
+| CHCI Signal Processing → RuvSense | Downstream | `CoherentCsiFrame` adapts to existing `CsiFrame` trait via `IntoLegacyCsi` adapter - existing pipeline works unmodified |
 | Cognitive Waveform → ADR-039 Edge Tiers | Bidirectional | Sensing modes map to edge tiers: IDLE→Tier0, ACTIVE→Tier1, VITAL→Tier2. Shared `EdgeConfig` value object |
 | Clock Synchronization → Hardware | Downstream | `ClockDriver` trait abstracts SI5351A hardware specifics; mock implementation for testing |
-| Regulatory Compliance → All TX Contexts | Upstream | Compliance Validator acts as a policy gateway — no transmission without passing check |
+| Regulatory Compliance → All TX Contexts | Upstream | Compliance Validator acts as a policy gateway - no transmission without passing check |
 
 ---
 

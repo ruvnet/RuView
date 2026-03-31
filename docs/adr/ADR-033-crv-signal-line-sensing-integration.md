@@ -1,11 +1,11 @@
-# ADR-033: CRV Signal Line Sensing Integration -- Mapping 6-Stage Coordinate Remote Viewing to WiFi-DensePose Pipeline
+# ADR-033: CRV Signal Line Sensing Integration - Mapping 6-Stage Coordinate Remote Viewing to WiFi-DensePose Pipeline
 
 | Field | Value |
 |-------|-------|
 | **Status** | Proposed |
 | **Date** | 2026-03-01 |
 | **Deciders** | ruv |
-| **Codename** | **CRV-Sense** -- Coordinate Remote Viewing Signal Line for WiFi Sensing |
+| **Codename** | **CRV-Sense** - Coordinate Remote Viewing Signal Line for WiFi Sensing |
 | **Relates to** | ADR-016 (RuVector Integration), ADR-017 (RuVector Signal+MAT), ADR-024 (AETHER Embeddings), ADR-029 (RuvSense Multistatic), ADR-030 (Persistent Field Model), ADR-031 (RuView Viewpoint Fusion), ADR-032 (Mesh Security) |
 
 ---
@@ -18,12 +18,12 @@ Coordinate Remote Viewing (CRV) is a structured 6-stage protocol that progressiv
 
 The WiFi-DensePose sensing pipeline follows a strikingly similar progressive refinement:
 
-1. Raw CSI arrives as an undifferentiated signal -- the system must first classify the gestalt character of the RF environment.
-2. Per-subcarrier amplitude/phase/frequency features are extracted -- analogous to sensory impressions.
-3. The AP mesh forms a spatial topology with node positions and link geometry -- a dimensional sketch.
-4. Coherence gating separates valid signal from noise and interference -- analytically overlaid artifacts must be detected and removed.
-5. Pose estimation queries earlier CSI features for cross-referencing -- interrogation of the accumulated evidence.
-6. Final multi-person partitioning produces the composite DensePose output -- the 3D model.
+1. Raw CSI arrives as an undifferentiated signal - the system must first classify the gestalt character of the RF environment.
+2. Per-subcarrier amplitude/phase/frequency features are extracted - analogous to sensory impressions.
+3. The AP mesh forms a spatial topology with node positions and link geometry - a dimensional sketch.
+4. Coherence gating separates valid signal from noise and interference - analytically overlaid artifacts must be detected and removed.
+5. Pose estimation queries earlier CSI features for cross-referencing - interrogation of the accumulated evidence.
+6. Final multi-person partitioning produces the composite DensePose output - the 3D model.
 
 This structural isomorphism is not accidental. Both CRV and WiFi sensing solve the same abstract problem: extract structured information from a noisy, high-dimensional signal space through progressive refinement with explicit noise separation.
 
@@ -33,15 +33,15 @@ The `ruvector-crv` crate provides the following public API:
 
 | Component | Purpose | Upstream Dependency |
 |-----------|---------|-------------------|
-| `CrvSessionManager` | Session lifecycle: create, add stage data, convergence analysis | -- |
-| `StageIEncoder` | Poincare ball hyperbolic embeddings for gestalt primitives | -- (internal hyperbolic math) |
+| `CrvSessionManager` | Session lifecycle: create, add stage data, convergence analysis | - |
+| `StageIEncoder` | Poincare ball hyperbolic embeddings for gestalt primitives | - (internal hyperbolic math) |
 | `StageIIEncoder` | Multi-head attention for sensory vectors | `ruvector-attention` |
 | `StageIIIEncoder` | GNN graph topology encoding | `ruvector-gnn` |
-| `StageIVEncoder` | SNN temporal encoding for AOL (Analytical Overlay) detection | -- (internal SNN) |
-| `StageVEngine` | Differentiable search and cross-referencing | -- (internal soft attention) |
+| `StageIVEncoder` | SNN temporal encoding for AOL (Analytical Overlay) detection | - (internal SNN) |
+| `StageVEngine` | Differentiable search and cross-referencing | - (internal soft attention) |
 | `StageVIModeler` | MinCut partitioning for composite model | `ruvector-mincut` |
-| `ConvergenceResult` | Cross-session agreement analysis | -- |
-| `CrvConfig` | Configuration (384-d default, curvature, AOL threshold, SNN params) | -- |
+| `ConvergenceResult` | Cross-session agreement analysis | - |
+| `CrvConfig` | Configuration (384-d default, curvature, AOL threshold, SNN params) | - |
 
 Key types: `GestaltType` (Manmade/Natural/Movement/Energy/Water/Land), `SensoryModality` (Texture/Color/Temperature/Sound/...), `AOLDetection` (content + anomaly score), `SignalLineProbe` (query + attention weights), `TargetPartition` (MinCut cluster + centroid).
 
@@ -63,7 +63,7 @@ The `wifi-densepose-ruvector` crate already depends on `ruvector-crv` in its `Ca
 
 ### 1.4 The Key Insight: Cross-Session Convergence = Cross-Room Identity
 
-CRV's convergence analysis compares independent sessions targeting the same coordinate to find agreement in their embeddings. In WiFi-DensePose, different AP clusters in different rooms are independent "viewers" of the same person. When a person moves from Room A to Room B, the CRV convergence mechanism can find agreement between the Room A embedding trail and the Room B initial embeddings -- establishing identity continuity without cameras.
+CRV's convergence analysis compares independent sessions targeting the same coordinate to find agreement in their embeddings. In WiFi-DensePose, different AP clusters in different rooms are independent "viewers" of the same person. When a person moves from Room A to Room B, the CRV convergence mechanism can find agreement between the Room A embedding trail and the Room B initial embeddings - establishing identity continuity without cameras.
 
 ---
 
@@ -264,7 +264,7 @@ impl MeshTopologyEncoder {
 
 ### 2.5 Stage IV: Coherence Gating as AOL Detection
 
-**CRV mapping:** Stage IV detects Analytical Overlay (AOL) -- moments when the analytical mind contaminates the raw signal with pre-existing assumptions. In WiFi sensing, the coherence gate (ADR-030/032) serves the same function: it detects when environmental interference, multipath changes, or hardware artifacts contaminate the CSI signal, and flags those frames for exclusion.
+**CRV mapping:** Stage IV detects Analytical Overlay (AOL) - moments when the analytical mind contaminates the raw signal with pre-existing assumptions. In WiFi sensing, the coherence gate (ADR-030/032) serves the same function: it detects when environmental interference, multipath changes, or hardware artifacts contaminate the CSI signal, and flags those frames for exclusion.
 
 | CRV AOL Concept | WiFi Coherence Analog |
 |-----------------|---------------------|
@@ -305,7 +305,7 @@ impl CoherenceAolDetector {
 
 ### 2.6 Stage V: Pose Interrogation via Differentiable Search
 
-**CRV mapping:** Stage V is the interrogation phase -- probing earlier stage data with specific queries to extract targeted information. In WiFi sensing, this maps to querying the accumulated CSI feature history with a pose hypothesis to find supporting or contradicting evidence.
+**CRV mapping:** Stage V is the interrogation phase - probing earlier stage data with specific queries to extract targeted information. In WiFi sensing, this maps to querying the accumulated CSI feature history with a pose hypothesis to find supporting or contradicting evidence.
 
 **WiFi domain types:**
 
@@ -334,11 +334,11 @@ impl PoseInterrogator {
 }
 ```
 
-**Integration point:** `ruvsense/field_model.rs` maintains the persistent electromagnetic field model (ADR-030). The `PoseInterrogator` wraps this with CRV Stage V semantics -- the field model's history becomes the corpus that `StageVEngine` searches over, and the pose hypothesis becomes the probe query.
+**Integration point:** `ruvsense/field_model.rs` maintains the persistent electromagnetic field model (ADR-030). The `PoseInterrogator` wraps this with CRV Stage V semantics - the field model's history becomes the corpus that `StageVEngine` searches over, and the pose hypothesis becomes the probe query.
 
 ### 2.7 Stage VI: Multi-Person Partitioning via MinCut
 
-**CRV mapping:** Stage VI produces the composite 3D model by clustering accumulated data into distinct target partitions via MinCut. In WiFi sensing, this maps to multi-person separation -- partitioning the accumulated CSI embeddings into person-specific clusters.
+**CRV mapping:** Stage VI produces the composite 3D model by clustering accumulated data into distinct target partitions via MinCut. In WiFi sensing, this maps to multi-person separation - partitioning the accumulated CSI embeddings into person-specific clusters.
 
 **WiFi domain types:**
 
@@ -458,27 +458,27 @@ impl WifiCrvSession {
 
 | File | Purpose | Upstream Dependency |
 |------|---------|-------------------|
-| `crates/wifi-densepose-ruvector/src/crv/mod.rs` | Module root, re-exports all CRV-Sense types | -- |
+| `crates/wifi-densepose-ruvector/src/crv/mod.rs` | Module root, re-exports all CRV-Sense types | - |
 | `crates/wifi-densepose-ruvector/src/crv/config.rs` | `WifiCrvConfig` extending `CrvConfig` with WiFi-specific defaults (128-d instead of 384-d to match AETHER) | `ruvector-crv` |
 | `crates/wifi-densepose-ruvector/src/crv/session.rs` | `WifiCrvSession` wrapping `CrvSessionManager` | `ruvector-crv` |
-| `crates/wifi-densepose-ruvector/src/crv/output.rs` | `WifiCrvOutput` struct with per-stage embeddings and diagnostics | -- |
+| `crates/wifi-densepose-ruvector/src/crv/output.rs` | `WifiCrvOutput` struct with per-stage embeddings and diagnostics | - |
 
 ### 3.2 Phase 2: Stage Encoders (New Files)
 
 | File | Purpose | Upstream Dependency |
 |------|---------|-------------------|
-| `crates/wifi-densepose-ruvector/src/crv/gestalt.rs` | `CsiGestaltClassifier` -- Stage I Poincare ball embedding | `ruvector-crv::StageIEncoder` |
-| `crates/wifi-densepose-ruvector/src/crv/sensory.rs` | `CsiSensoryEncoder` -- Stage II multi-head attention | `ruvector-crv::StageIIEncoder`, `ruvector-attention` |
-| `crates/wifi-densepose-ruvector/src/crv/topology.rs` | `MeshTopologyEncoder` -- Stage III GNN topology | `ruvector-crv::StageIIIEncoder`, `ruvector-gnn` |
-| `crates/wifi-densepose-ruvector/src/crv/coherence.rs` | `CoherenceAolDetector` -- Stage IV SNN temporal encoding | `ruvector-crv::StageIVEncoder` |
-| `crates/wifi-densepose-ruvector/src/crv/interrogation.rs` | `PoseInterrogator` -- Stage V differentiable search | `ruvector-crv::StageVEngine` |
-| `crates/wifi-densepose-ruvector/src/crv/partition.rs` | `PersonPartitioner` -- Stage VI MinCut partitioning | `ruvector-crv::StageVIModeler`, `ruvector-mincut` |
+| `crates/wifi-densepose-ruvector/src/crv/gestalt.rs` | `CsiGestaltClassifier` - Stage I Poincare ball embedding | `ruvector-crv::StageIEncoder` |
+| `crates/wifi-densepose-ruvector/src/crv/sensory.rs` | `CsiSensoryEncoder` - Stage II multi-head attention | `ruvector-crv::StageIIEncoder`, `ruvector-attention` |
+| `crates/wifi-densepose-ruvector/src/crv/topology.rs` | `MeshTopologyEncoder` - Stage III GNN topology | `ruvector-crv::StageIIIEncoder`, `ruvector-gnn` |
+| `crates/wifi-densepose-ruvector/src/crv/coherence.rs` | `CoherenceAolDetector` - Stage IV SNN temporal encoding | `ruvector-crv::StageIVEncoder` |
+| `crates/wifi-densepose-ruvector/src/crv/interrogation.rs` | `PoseInterrogator` - Stage V differentiable search | `ruvector-crv::StageVEngine` |
+| `crates/wifi-densepose-ruvector/src/crv/partition.rs` | `PersonPartitioner` - Stage VI MinCut partitioning | `ruvector-crv::StageVIModeler`, `ruvector-mincut` |
 
 ### 3.3 Phase 3: Cross-Session Convergence
 
 | File | Purpose | Upstream Dependency |
 |------|---------|-------------------|
-| `crates/wifi-densepose-ruvector/src/crv/convergence.rs` | `MultiViewerConvergence` -- cross-room identity matching | `ruvector-crv::CrvSessionManager` |
+| `crates/wifi-densepose-ruvector/src/crv/convergence.rs` | `MultiViewerConvergence` - cross-room identity matching | `ruvector-crv::CrvSessionManager` |
 
 ### 3.4 Phase 4: Integration with Existing Modules (Edits to Existing Files)
 
@@ -563,7 +563,7 @@ pub enum CrvSensingEvent {
 
 ### 4.2 Integration with Existing Bounded Contexts
 
-**Signal (wifi-densepose-signal):** New traits `CrvGestaltSource` and `CrvSensorySource` allow the CRV module to consume signal processing outputs without tight coupling. The signal crate does not depend on the CRV crate -- the dependency flows one direction only.
+**Signal (wifi-densepose-signal):** New traits `CrvGestaltSource` and `CrvSensorySource` allow the CRV module to consume signal processing outputs without tight coupling. The signal crate does not depend on the CRV crate - the dependency flows one direction only.
 
 **Training (wifi-densepose-train):** The `PersonPartitioner` (Stage VI) produces the same MinCut partitions as the existing `DynamicPersonMatcher`. A shared trait `PersonSeparator` allows both to be used interchangeably.
 
@@ -577,13 +577,13 @@ All seven `ruvector` crates exercised by the CRV-Sense integration:
 
 | CRV Stage | ruvector Crate | API Used | WiFi-DensePose Role |
 |-----------|---------------|----------|-------------------|
-| I (Gestalt) | -- (internal Poincare math) | `StageIEncoder::encode()` | Hyperbolic embedding of CSI gestalt taxonomy |
+| I (Gestalt) | - (internal Poincare math) | `StageIEncoder::encode()` | Hyperbolic embedding of CSI gestalt taxonomy |
 | II (Sensory) | `ruvector-attention` | `StageIIEncoder::encode()` | Multi-head attention over subcarrier features |
 | III (Dimensional) | `ruvector-gnn` | `StageIIIEncoder::encode()` | GNN encoding of AP mesh topology |
-| IV (AOL) | -- (internal SNN) | `StageIVEncoder::encode()` | SNN temporal encoding of coherence violations |
-| V (Interrogation) | -- (internal soft attention) | `StageVEngine::search()` | Differentiable search over field model history |
+| IV (AOL) | - (internal SNN) | `StageIVEncoder::encode()` | SNN temporal encoding of coherence violations |
+| V (Interrogation) | - (internal soft attention) | `StageVEngine::search()` | Differentiable search over field model history |
 | VI (Composite) | `ruvector-mincut` | `StageVIModeler::partition()` | MinCut person separation |
-| Convergence | -- (cosine similarity) | `CrvSessionManager::find_convergence()` | Cross-room identity matching |
+| Convergence | - (cosine similarity) | `CrvSessionManager::find_convergence()` | Cross-room identity matching |
 
 Additionally, the CRV module benefits from existing ruvector integrations already in the workspace:
 

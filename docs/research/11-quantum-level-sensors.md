@@ -1,6 +1,6 @@
 # Quantum-Level Sensors for RF Topological Sensing
 
-## SOTA Research Document — RF Topological Sensing Series (11/12)
+## SOTA Research Document - RF Topological Sensing Series (11/12)
 
 **Date**: 2026-03-08
 **Domain**: Quantum Sensing × RF Topology × Graph-Based Detection
@@ -58,7 +58,7 @@ ODMR Protocol:
 
 ### 2.2 Superconducting Quantum Interference Devices (SQUIDs)
 
-- **Sensitivity**: ~1 fT/√Hz (femtotesla — 1000× better than NV)
+- **Sensitivity**: ~1 fT/√Hz (femtotesla - 1000× better than NV)
 - **Operating temperature**: 4 K (liquid helium) or 77 K (high-Tc)
 - **Frequency range**: DC to ~1 GHz
 - **Detection mechanism**: Josephson junction flux quantization
@@ -188,17 +188,17 @@ For r = 2 (17.4 dB squeezing):
 
 ---
 
-## 4. Rydberg Atom RF Sensors — Deep Dive
+## 4. Rydberg Atom RF Sensors - Deep Dive
 
 ### 4.1 Broadband RF Detection via EIT
 
 Rydberg atoms provide the most promising near-term quantum RF sensor for topological
 sensing because:
 
-1. **Room temperature operation** — no cryogenics
-2. **Broadband** — single vapor cell covers MHz to THz by tuning laser wavelength
-3. **Self-calibrated** — response depends only on atomic constants
-4. **Compact** — vapor cell can be cm-scale
+1. **Room temperature operation** - no cryogenics
+2. **Broadband** - single vapor cell covers MHz to THz by tuning laser wavelength
+3. **Self-calibrated** - response depends only on atomic constants
+4. **Compact** - vapor cell can be cm-scale
 
 ```
 Rydberg Sensor Architecture:
@@ -931,4 +931,4 @@ value for graph cut optimization at scale.
 
 The long-term vision is a quantum-native sensing mesh where every node performs quantum
 measurements, edge weights encode quantum coherence between nodes, and graph algorithms
-run on quantum hardware — a true quantum radio nervous system.
+run on quantum hardware - a true quantum radio nervous system.

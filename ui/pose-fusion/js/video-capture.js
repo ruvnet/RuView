@@ -1,5 +1,5 @@
 /**
- * VideoCapture — getUserMedia webcam capture with frame extraction.
+ * VideoCapture - getUserMedia webcam capture with frame extraction.
  * Provides quality metrics (brightness, motion) for fusion confidence gating.
  */
 

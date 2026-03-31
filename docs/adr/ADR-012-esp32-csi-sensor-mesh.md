@@ -1,7 +1,7 @@
 # ADR-012: ESP32 CSI Sensor Mesh for Distributed Sensing
 
 ## Status
-Accepted — Partially Implemented (firmware + aggregator working, see ADR-018)
+Accepted - Partially Implemented (firmware + aggregator working, see ADR-018)
 
 ## Date
 2026-02-28
@@ -273,7 +273,7 @@ python scripts/provision.py --port COM7 \
   --ssid "YourWiFi" --password "secret" --target-ip 192.168.1.20
 
 # Run aggregator
-cargo run -p wifi-densepose-hardware --bin aggregator -- --bind 0.0.0.0:5005 --verbose
+cargo run -p wifi-densepose-hardware --bin aggregator - --bind 0.0.0.0:5005 --verbose
 ```
 
 **Option B: Build from source with Docker (no ESP-IDF install needed)**
@@ -295,7 +295,7 @@ python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
   0x10000 esp32-csi-node.bin
 
 # Step 4: Run aggregator
-cargo run -p wifi-densepose-hardware --bin aggregator -- --bind 0.0.0.0:5005 --verbose
+cargo run -p wifi-densepose-hardware --bin aggregator - --bind 0.0.0.0:5005 --verbose
 ```
 
 **Verified**: 20 Hz CSI streaming, 64/128/192 subcarrier frames, RSSI -47 to -88 dBm.

@@ -18,18 +18,18 @@ subcarrier interpolation APIs needed for data preprocessing and proof verificati
 
 ## Features
 
-- **MM-Fi dataset loader** -- Reads the MM-Fi multimodal dataset (NeurIPS 2023) from disk with
+- **MM-Fi dataset loader** - Reads the MM-Fi multimodal dataset (NeurIPS 2023) from disk with
   memory-mapped `.npy` files.
-- **Synthetic dataset** -- Deterministic, fixed-seed CSI generation for unit tests and proofs.
-- **Subcarrier interpolation** -- 114 -> 56 subcarrier compression via `ruvector-solver` sparse
+- **Synthetic dataset** - Deterministic, fixed-seed CSI generation for unit tests and proofs.
+- **Subcarrier interpolation** - 114 -> 56 subcarrier compression via `ruvector-solver` sparse
   interpolation with variance-based selection.
-- **Loss functions** (`tch-backend`) -- Pose estimation losses including MSE, OKS, and combined
+- **Loss functions** (`tch-backend`) - Pose estimation losses including MSE, OKS, and combined
   multi-task loss.
-- **Metrics** (`tch-backend`) -- PCKh, OKS-AP, and per-keypoint evaluation with
+- **Metrics** (`tch-backend`) - PCKh, OKS-AP, and per-keypoint evaluation with
   `ruvector-mincut`-based person matching.
-- **Training orchestrator** (`tch-backend`) -- Full training loop with learning rate scheduling,
+- **Training orchestrator** (`tch-backend`) - Full training loop with learning rate scheduling,
   gradient clipping, checkpointing, and reproducible proofs.
-- **All 5 ruvector crates** -- `ruvector-mincut`, `ruvector-attn-mincut`,
+- **All 5 ruvector crates** - `ruvector-mincut`, `ruvector-attn-mincut`,
   `ruvector-temporal-tensor`, `ruvector-solver`, and `ruvector-attention` integrated across
   dataset loading, metrics, and model attention.
 
@@ -70,16 +70,16 @@ println!("amplitude shape: {:?}", sample.amplitude.shape());
 
 ```text
 wifi-densepose-train/src/
-  lib.rs            -- Re-exports, VERSION
-  config.rs         -- TrainingConfig, hyperparameters, validation
-  dataset.rs        -- CsiDataset trait, MmFiDataset, SyntheticCsiDataset, DataLoader
-  error.rs          -- TrainError, ConfigError, DatasetError, SubcarrierError
-  subcarrier.rs     -- interpolate_subcarriers (114->56), variance-based selection
-  losses.rs         -- (tch) MSE, OKS, multi-task loss        [feature-gated]
-  metrics.rs        -- (tch) PCKh, OKS-AP, person matching     [feature-gated]
-  model.rs          -- (tch) Model definition with attention    [feature-gated]
-  proof.rs          -- (tch) Deterministic training proofs      [feature-gated]
-  trainer.rs        -- (tch) Training loop orchestrator         [feature-gated]
+  lib.rs            - Re-exports, VERSION
+  config.rs         - TrainingConfig, hyperparameters, validation
+  dataset.rs        - CsiDataset trait, MmFiDataset, SyntheticCsiDataset, DataLoader
+  error.rs          - TrainError, ConfigError, DatasetError, SubcarrierError
+  subcarrier.rs     - interpolate_subcarriers (114->56), variance-based selection
+  losses.rs         - (tch) MSE, OKS, multi-task loss        [feature-gated]
+  metrics.rs        - (tch) PCKh, OKS-AP, person matching     [feature-gated]
+  model.rs          - (tch) Model definition with attention    [feature-gated]
+  proof.rs          - (tch) Deterministic training proofs      [feature-gated]
+  trainer.rs        - (tch) Training loop orchestrator         [feature-gated]
 ```
 
 ## Related Crates

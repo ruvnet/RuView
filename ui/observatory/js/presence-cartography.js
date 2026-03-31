@@ -1,5 +1,5 @@
 /**
- * Module C — "Presence Cartography"
+ * Module C - "Presence Cartography"
  * InstancedMesh 20x4x20 voxel heatmap with person lights
  */
 import * as THREE from 'three';

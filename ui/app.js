@@ -85,7 +85,7 @@ class WiFiDensePoseApp {
         this.showBackendStatus('Connected to Rust sensing server', 'success');
       } catch (error) {
         console.warn('⚠️ Backend not available:', error.message);
-        this.showBackendStatus('Backend unavailable — start sensing-server', 'warning');
+        this.showBackendStatus('Backend unavailable - start sensing-server', 'warning');
       }
 
       // Start the sensing WebSocket service early so the dashboard and

@@ -17,9 +17,9 @@ WiFi-based dense human pose estimation faces three persistent fidelity bottlenec
 
 The core insight behind RuView is that **upgrading observability beats inventing new WiFi standards**. Rather than waiting for wider bandwidth hardware or higher carrier frequencies, RuView exploits the one fidelity lever that scales with commodity equipment deployed today: geometric viewpoint diversity.
 
-RuView -- RuVector Viewpoint-Integrated Enhancement -- is a sensing-first RF mode that rides on existing silicon (ESP32-S3), existing bands (2.4/5 GHz), and existing regulations (Part 15 unlicensed). Its principal contribution is **cross-viewpoint embedding fusion via ruvector-attention**, where per-viewpoint AETHER embeddings (ADR-024) are fused through a geometric-bias attention mechanism that learns which viewpoint combinations are informative for each body region.
+RuView - RuVector Viewpoint-Integrated Enhancement - is a sensing-first RF mode that rides on existing silicon (ESP32-S3), existing bands (2.4/5 GHz), and existing regulations (Part 15 unlicensed). Its principal contribution is **cross-viewpoint embedding fusion via ruvector-attention**, where per-viewpoint AETHER embeddings (ADR-024) are fused through a geometric-bias attention mechanism that learns which viewpoint combinations are informative for each body region.
 
-Three fidelity levers govern WiFi sensing resolution: bandwidth, carrier frequency, and viewpoints. RuView focuses on the third -- the only lever that improves all three bottlenecks simultaneously without hardware upgrades.
+Three fidelity levers govern WiFi sensing resolution: bandwidth, carrier frequency, and viewpoints. RuView focuses on the third - the only lever that improves all three bottlenecks simultaneously without hardware upgrades.
 
 ---
 
@@ -62,7 +62,7 @@ Fresnel zone radius at each band governs the sensing-sensitive region:
 
     r_n = sqrt(n * lambda * d1 * d2 / (d1 + d2))
 
-At 2.4 GHz with 3m link distance, the first Fresnel zone radius is 0.61m -- a broad sensitivity region suitable for macro-motion detection but poor for localizing specific body parts. At 5 GHz the radius shrinks to 0.42m, improving localization at the cost of coverage.
+At 2.4 GHz with 3m link distance, the first Fresnel zone radius is 0.61m - a broad sensitivity region suitable for macro-motion detection but poor for localizing specific body parts. At 5 GHz the radius shrinks to 0.42m, improving localization at the cost of coverage.
 
 RuView currently targets 2.4 GHz (ESP32-S3) and 5 GHz (Cognitum path), compensating for coarse per-link localization with viewpoint diversity.
 
@@ -90,7 +90,7 @@ and rho_bar is the mean pairwise correlation between viewpoint CSI streams. Maxi
 
     Effective_resolution ~ BW * N_viewpoints * sin(angular_spread)
 
-This means even at 20 MHz bandwidth, six well-placed viewpoints with 60-degree angular spread provide effective resolution comparable to a single 120 MHz viewpoint -- at a fraction of the hardware cost.
+This means even at 20 MHz bandwidth, six well-placed viewpoints with 60-degree angular spread provide effective resolution comparable to a single 120 MHz viewpoint - at a fraction of the hardware cost.
 
 **References:** Person-in-WiFi 3D (Yan et al., CVPR 2024); bistatic MIMO radar theory (Li and Stoica, 2007); DGSense (Zhou et al., 2025).
 
@@ -198,12 +198,12 @@ Per-viewpoint AETHER embeddings are produced by the CsiToPoseTransformer backbon
 - Input: sanitized CSI frame (56 subcarriers x 2 antennas x 2 components)
 - Backbone: cross-attention transformer producing [17 x d_model] body part features
 - Projection: linear head maps pooled features to 128-d normalized embedding
-- Training: VICReg-style contrastive loss with three terms -- invariance (same pose from different viewpoints maps nearby), variance (embeddings use full capacity), covariance (embedding dimensions are decorrelated)
+- Training: VICReg-style contrastive loss with three terms - invariance (same pose from different viewpoints maps nearby), variance (embeddings use full capacity), covariance (embedding dimensions are decorrelated)
 - Augmentation: subcarrier dropout (p=0.1), phase noise injection (sigma=0.05 rad), temporal jitter (+-2 frames)
 
 ### 5.3 RuVector Graph Memory
 
-The HNSW index (ADR-004) stores environment fingerprints as AETHER embeddings. Graph edges encode temporal adjacency (consecutive frames from the same track) and spatial adjacency (observations from the same room region). Query protocol: given a new CSI frame, compute its AETHER embedding, retrieve k nearest HNSW neighbors, and return associated pose, identity, and room region. Updates are incremental -- new observations insert into the graph without full reindexing.
+The HNSW index (ADR-004) stores environment fingerprints as AETHER embeddings. Graph edges encode temporal adjacency (consecutive frames from the same track) and spatial adjacency (observations from the same room region). Query protocol: given a new CSI frame, compute its AETHER embedding, retrieve k nearest HNSW neighbors, and return associated pose, identity, and room region. Updates are incremental - new observations insert into the graph without full reindexing.
 
 ### 5.4 Coherence-Gated Updates
 
@@ -355,29 +355,29 @@ The 6-node ESP32 + RuView configuration achieves 70-80% of camera DensePose accu
 ## 10. References
 
 ### WiFi Sensing and Pose Estimation
-- [DensePose From WiFi](https://arxiv.org/abs/2301.00250) -- Geng, Huang, De la Torre (CMU, 2023)
-- [Person-in-WiFi 3D](https://openaccess.thecvf.com/content/CVPR2024/papers/Yan_Person-in-WiFi_3D_End-to-End_Multi-Person_3D_Pose_Estimation_with_Wi-Fi_CVPR_2024_paper.pdf) -- Yan et al. (CVPR 2024)
-- [AdaPose: Cross-Site WiFi Pose Estimation](https://ieeexplore.ieee.org/document/10584280) -- Zhou et al. (IEEE IoT Journal, 2024)
-- [HPE-Li: Lightweight WiFi Pose Estimation](https://link.springer.com/chapter/10.1007/978-3-031-72904-1_6) -- ECCV 2024
-- [DGSense: Domain-Generalized Sensing](https://arxiv.org/abs/2501.12345) -- Zhou et al. (2025)
-- [X-Fi: Modality-Invariant Foundation Model](https://openreview.net/forum?id=xfi2025) -- Chen and Yang (ICLR 2025)
-- [AM-FM: First WiFi Foundation Model](https://arxiv.org/abs/2602.00001) -- (2026)
-- [PerceptAlign: Cross-Layout Pose Estimation](https://arxiv.org/abs/2603.00001) -- Chen et al. (2026)
-- [CAPC: Context-Aware Predictive Coding](https://ieeexplore.ieee.org/document/10600001) -- IEEE OJCOMS, 2024
+- [DensePose From WiFi](https://arxiv.org/abs/2301.00250) - Geng, Huang, De la Torre (CMU, 2023)
+- [Person-in-WiFi 3D](https://openaccess.thecvf.com/content/CVPR2024/papers/Yan_Person-in-WiFi_3D_End-to-End_Multi-Person_3D_Pose_Estimation_with_Wi-Fi_CVPR_2024_paper.pdf) - Yan et al. (CVPR 2024)
+- [AdaPose: Cross-Site WiFi Pose Estimation](https://ieeexplore.ieee.org/document/10584280) - Zhou et al. (IEEE IoT Journal, 2024)
+- [HPE-Li: Lightweight WiFi Pose Estimation](https://link.springer.com/chapter/10.1007/978-3-031-72904-1_6) - ECCV 2024
+- [DGSense: Domain-Generalized Sensing](https://arxiv.org/abs/2501.12345) - Zhou et al. (2025)
+- [X-Fi: Modality-Invariant Foundation Model](https://openreview.net/forum?id=xfi2025) - Chen and Yang (ICLR 2025)
+- [AM-FM: First WiFi Foundation Model](https://arxiv.org/abs/2602.00001) - (2026)
+- [PerceptAlign: Cross-Layout Pose Estimation](https://arxiv.org/abs/2603.00001) - Chen et al. (2026)
+- [CAPC: Context-Aware Predictive Coding](https://ieeexplore.ieee.org/document/10600001) - IEEE OJCOMS, 2024
 
 ### Signal Processing and Localization
-- [SpotFi: Decimeter-Level Localization](https://dl.acm.org/doi/10.1145/2785956.2787487) -- Kotaru et al. (SIGCOMM 2015)
-- [FarSense: Pushing WiFi Sensing Range](https://dl.acm.org/doi/10.1145/3300061.3345433) -- Zeng et al. (MobiCom 2019)
-- [Widar 3.0: Cross-Domain Gesture Recognition](https://dl.acm.org/doi/10.1145/3300061.3345436) -- Zheng et al. (MobiCom 2019)
-- [WiGest: WiFi-Based Gesture Recognition](https://ieeexplore.ieee.org/document/7127672) -- Abdelnasser et al. (2015)
-- [CSI-Channel Spatial Decomposition](https://www.mdpi.com/2079-9292/14/4/756) -- Electronics, Feb 2025
+- [SpotFi: Decimeter-Level Localization](https://dl.acm.org/doi/10.1145/2785956.2787487) - Kotaru et al. (SIGCOMM 2015)
+- [FarSense: Pushing WiFi Sensing Range](https://dl.acm.org/doi/10.1145/3300061.3345433) - Zeng et al. (MobiCom 2019)
+- [Widar 3.0: Cross-Domain Gesture Recognition](https://dl.acm.org/doi/10.1145/3300061.3345436) - Zheng et al. (MobiCom 2019)
+- [WiGest: WiFi-Based Gesture Recognition](https://ieeexplore.ieee.org/document/7127672) - Abdelnasser et al. (2015)
+- [CSI-Channel Spatial Decomposition](https://www.mdpi.com/2079-9292/14/4/756) - Electronics, Feb 2025
 
 ### MIMO Radar and Array Theory
-- [MIMO Radar with Widely Separated Antennas](https://ieeexplore.ieee.org/document/4350230) -- Li and Stoica (IEEE SPM, 2007)
+- [MIMO Radar with Widely Separated Antennas](https://ieeexplore.ieee.org/document/4350230) - Li and Stoica (IEEE SPM, 2007)
 
 ### Standards and Hardware
-- [IEEE 802.11bf: WLAN Sensing](https://www.ieee802.org/11/Reports/tgbf_update.htm) -- Published 2024
-- [Espressif ESP-CSI](https://github.com/espressif/esp-csi) -- Official CSI collection tools
+- [IEEE 802.11bf: WLAN Sensing](https://www.ieee802.org/11/Reports/tgbf_update.htm) - Published 2024
+- [Espressif ESP-CSI](https://github.com/espressif/esp-csi) - Official CSI collection tools
 - [ESP32-S3 Technical Reference](https://www.espressif.com/sites/default/files/documentation/esp32-s3_technical_reference_manual_en.pdf)
 
 ### Project ADRs
@@ -386,4 +386,4 @@ The 6-node ESP32 + RuView configuration achieves 70-80% of camera DensePose accu
 - ADR-014: SOTA Signal Processing Algorithms for WiFi Sensing
 - ADR-016: RuVector Training Pipeline Integration
 - ADR-017: RuVector Signal and MAT Integration
-- ADR-024: Project AETHER -- Contrastive CSI Embedding Model
+- ADR-024: Project AETHER - Contrastive CSI Embedding Model

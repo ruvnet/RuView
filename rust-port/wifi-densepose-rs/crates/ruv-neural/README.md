@@ -1,4 +1,4 @@
-# rUv Neural — Brain Topology Analysis System
+# rUv Neural - Brain Topology Analysis System
 
 > Quantum sensor integration x RuVector graph memory x Dynamic mincut coherence detection
 
@@ -32,13 +32,13 @@ analysis. It transforms neural magnetic field measurements from quantum sensors 
 magnetometers, optically pumped magnetometers) into dynamic connectivity graphs, then uses
 minimum cut algorithms to detect cognitive state transitions.
 
-This is not mind reading — it measures **how cognition organizes itself** by tracking the
+This is not mind reading - it measures **how cognition organizes itself** by tracking the
 topology of brain networks in real time.
 
 ## Hardware Parts List
 
 Below is a reference bill of materials for building a basic multi-channel neural sensing rig.
-Prices are approximate (2026). Links are for reference only — equivalent components from any
+Prices are approximate (2026). Links are for reference only - equivalent components from any
 vendor will work.
 
 ### Core: NV Diamond Magnetometer Array
@@ -86,7 +86,7 @@ vendor will work.
 |-----------|-----|-------------|------|-------|
 | Soldering Station (adjustable temp) | 1 | $25 | [AliExpress: Soldering Station](https://www.aliexpress.com/w/wholesale-soldering-station-adjustable.html) | For sensor board assembly |
 | Breadboard + Jumper Wire Kit | 1 | $8 | [AliExpress: Breadboard Kit](https://www.aliexpress.com/w/wholesale-breadboard-jumper-wire-kit.html) | Prototyping |
-| 3D Printed Sensor Mount (STL provided) | 1 | — | Print locally | Holds diamond chips in array |
+| 3D Printed Sensor Mount (STL provided) | 1 | - | Print locally | Holds diamond chips in array |
 
 **Estimated total cost:** ~$650–$900 for a 16-channel NV diamond setup, ~$500 for OPM, ~$200 for EEG.
 
@@ -110,12 +110,12 @@ vendor will work.
 
 4. **Host Software**
    - Install Rust 1.75+ and build: `cargo build --workspace --release`
-   - Run the pipeline: `cargo run -p ruv-neural-cli --release -- pipeline --channels 16 --duration 60`
+   - Run the pipeline: `cargo run -p ruv-neural-cli --release - pipeline --channels 16 --duration 60`
    - Or use individual crates as a library (see [Use as Library](#use-as-library))
 
 5. **Verification**
-   - Generate a witness bundle: `cargo run -p ruv-neural-cli -- witness --output witness.json`
-   - Verify Ed25519 signature: `cargo run -p ruv-neural-cli -- witness --verify witness.json`
+   - Generate a witness bundle: `cargo run -p ruv-neural-cli - witness --output witness.json`
+   - Verify Ed25519 signature: `cargo run -p ruv-neural-cli - witness --verify witness.json`
    - Expected output: `VERDICT: PASS` (41 capability attestations, 338 tests)
 
 ## Architecture
@@ -182,7 +182,7 @@ All crates are published on [crates.io](https://crates.io/search?q=ruv-neural):
 | [`ruv-neural-memory`](https://crates.io/crates/ruv-neural-memory) | [![crates.io](https://img.shields.io/crates/v/ruv-neural-memory.svg)](https://crates.io/crates/ruv-neural-memory) | Persistent neural state memory + HNSW | core |
 | [`ruv-neural-decoder`](https://crates.io/crates/ruv-neural-decoder) | [![crates.io](https://img.shields.io/crates/v/ruv-neural-decoder.svg)](https://crates.io/crates/ruv-neural-decoder) | Cognitive state classification + BCI | core |
 | [`ruv-neural-esp32`](https://crates.io/crates/ruv-neural-esp32) | [![crates.io](https://img.shields.io/crates/v/ruv-neural-esp32.svg)](https://crates.io/crates/ruv-neural-esp32) | ESP32 edge sensor integration | core |
-| `ruv-neural-wasm` | — | WebAssembly browser bindings | core |
+| `ruv-neural-wasm` | - | WebAssembly browser bindings | core |
 | [`ruv-neural-viz`](https://crates.io/crates/ruv-neural-viz) | [![crates.io](https://img.shields.io/crates/v/ruv-neural-viz.svg)](https://crates.io/crates/ruv-neural-viz) | Visualization and ASCII rendering | core, graph, mincut |
 | [`ruv-neural-cli`](https://crates.io/crates/ruv-neural-cli) | [![crates.io](https://img.shields.io/crates/v/ruv-neural-cli.svg)](https://crates.io/crates/ruv-neural-cli) | CLI tool (`ruv-neural` binary) | all |
 
@@ -222,9 +222,9 @@ cargo test --workspace
 ### Run CLI
 
 ```bash
-cargo run -p ruv-neural-cli -- simulate --channels 64 --duration 10
-cargo run -p ruv-neural-cli -- pipeline --channels 32 --duration 5 --dashboard
-cargo run -p ruv-neural-cli -- mincut --input brain_graph.json
+cargo run -p ruv-neural-cli - simulate --channels 64 --duration 10
+cargo run -p ruv-neural-cli - pipeline --channels 32 --duration 5 --dashboard
+cargo run -p ruv-neural-cli - mincut --input brain_graph.json
 ```
 
 ### Install from crates.io
@@ -290,13 +290,13 @@ println!("Embedding dim: {}", embedding.dimension);
 
 Each crate is independently usable. Common combinations:
 
-- **Sensor + Signal** -- Data acquisition and preprocessing only
-- **Graph + Mincut** -- Graph analysis without sensor dependency
-- **Embed + Memory** -- Embedding storage without real-time pipeline
-- **Core + WASM** -- Browser-based graph visualization
-- **ESP32 alone** -- Edge preprocessing on embedded hardware
-- **Signal + Embed** -- Feature extraction pipeline without graph construction
-- **Mincut + Viz** -- Topology analysis with ASCII dashboard output
+- **Sensor + Signal** - Data acquisition and preprocessing only
+- **Graph + Mincut** - Graph analysis without sensor dependency
+- **Embed + Memory** - Embedding storage without real-time pipeline
+- **Core + WASM** - Browser-based graph visualization
+- **ESP32 alone** - Edge preprocessing on embedded hardware
+- **Signal + Embed** - Feature extraction pipeline without graph construction
+- **Mincut + Viz** - Topology analysis with ASCII dashboard output
 
 ## Platform Support
 
@@ -322,26 +322,26 @@ cargo build -p ruv-neural-wasm --target wasm32-unknown-unknown --release
 - **Butterworth IIR filters** in second-order sections (SOS) form
 - **Welch PSD** estimation with configurable window and overlap
 - **Hilbert transform** for instantaneous phase extraction
-- **Artifact detection** -- eye blink, muscle, cardiac artifact rejection
-- **Connectivity metrics** -- PLV, coherence, imaginary coherence, AEC
+- **Artifact detection** - eye blink, muscle, cardiac artifact rejection
+- **Connectivity metrics** - PLV, coherence, imaginary coherence, AEC
 
 ### Minimum Cut Analysis (`ruv-neural-mincut`)
 
-- **Stoer-Wagner** -- Global minimum cut in O(V^3)
-- **Normalized cut** (Shi-Malik) -- Spectral bisection via the Fiedler vector
-- **Multiway cut** -- Recursive normalized cut for k-module detection
-- **Spectral cut** -- Cheeger constant and spectral bisection bounds
-- **Dynamic tracking** -- Temporal topology transition detection
-- **Coherence events** -- Network formation, dissolution, merger, split
+- **Stoer-Wagner** - Global minimum cut in O(V^3)
+- **Normalized cut** (Shi-Malik) - Spectral bisection via the Fiedler vector
+- **Multiway cut** - Recursive normalized cut for k-module detection
+- **Spectral cut** - Cheeger constant and spectral bisection bounds
+- **Dynamic tracking** - Temporal topology transition detection
+- **Coherence events** - Network formation, dissolution, merger, split
 
 ### Embeddings (`ruv-neural-embed`)
 
-- **Spectral** -- Laplacian eigenvector positional encoding
-- **Topology** -- Hand-crafted topological feature vectors
-- **Node2Vec** -- Random-walk co-occurrence embeddings
-- **Combined** -- Weighted concatenation of multiple methods
-- **Temporal** -- Sliding-window context-enriched embeddings
-- **RVF export** -- Serialization to RuVector `.rvf` format
+- **Spectral** - Laplacian eigenvector positional encoding
+- **Topology** - Hand-crafted topological feature vectors
+- **Node2Vec** - Random-walk co-occurrence embeddings
+- **Combined** - Weighted concatenation of multiple methods
+- **Temporal** - Sliding-window context-enriched embeddings
+- **RVF export** - Serialization to RuVector `.rvf` format
 
 ## RVF Format
 
@@ -367,10 +367,10 @@ and that all tests passed.
 
 ```bash
 # Generate a signed witness bundle
-cargo run -p ruv-neural-cli -- witness --output witness-bundle.json
+cargo run -p ruv-neural-cli - witness --output witness-bundle.json
 
 # Verify (any third party can do this)
-cargo run -p ruv-neural-cli -- witness --verify witness-bundle.json
+cargo run -p ruv-neural-cli - witness --verify witness-bundle.json
 ```
 
 The bundle contains:
@@ -380,7 +380,7 @@ The bundle contains:
 - **Public key** for independent verification
 - Test count and pass/fail status
 
-Tampered bundles are detected — modifying any attestation invalidates the digest and
+Tampered bundles are detected - modifying any attestation invalidates the digest and
 signature verification returns `FAIL`.
 
 ## Testing
@@ -393,7 +393,7 @@ cargo test --workspace
 cargo test -p ruv-neural-mincut
 
 # Run with logging enabled
-RUST_LOG=debug cargo test --workspace -- --nocapture
+RUST_LOG=debug cargo test --workspace - --nocapture
 
 # Run benchmarks (requires nightly or criterion)
 cargo bench -p ruv-neural-mincut

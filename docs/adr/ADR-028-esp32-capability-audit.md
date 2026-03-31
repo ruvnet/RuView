@@ -13,7 +13,7 @@
 
 ## 1. Purpose
 
-This ADR records a comprehensive, independently audited inventory of the wifi-densepose repository's ESP32 hardware capabilities, signal processing stack, neural network architectures, deployment infrastructure, and security posture. It serves as a **witness record** — a point-in-time attestation that third parties can use to verify what the codebase actually contains vs. what is claimed.
+This ADR records a comprehensive, independently audited inventory of the wifi-densepose repository's ESP32 hardware capabilities, signal processing stack, neural network architectures, deployment infrastructure, and security posture. It serves as a **witness record** - a point-in-time attestation that third parties can use to verify what the codebase actually contains vs. what is claimed.
 
 ---
 
@@ -31,7 +31,7 @@ Three parallel research agents examined the full repository simultaneously:
 
 ---
 
-## 3. ESP32 Hardware — Confirmed Capabilities
+## 3. ESP32 Hardware - Confirmed Capabilities
 
 ### 3.1 Firmware (C, ESP-IDF v5.2)
 
@@ -133,7 +133,7 @@ python scripts/provision.py --port COM7 \
 
 ---
 
-## 4. Signal Processing — Confirmed Algorithms
+## 4. Signal Processing - Confirmed Algorithms
 
 ### 4.1 SOTA Algorithms (ADR-014, wifi-densepose-signal)
 
@@ -208,7 +208,7 @@ python scripts/provision.py --port COM7 \
 
 ---
 
-## 5. Deployment Infrastructure — Confirmed
+## 5. Deployment Infrastructure - Confirmed
 
 ### 5.1 Published Artifacts
 

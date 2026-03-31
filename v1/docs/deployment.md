@@ -1058,7 +1058,7 @@ kubectl describe pod <pod-name> -n wifi-densepose
 
 ```bash
 # Test database connectivity
-kubectl run -it --rm debug --image=postgres:15-alpine --restart=Never -- \
+kubectl run -it --rm debug --image=postgres:15-alpine --restart=Never - \
   psql -h postgres -U postgres -d wifi_densepose
 
 # Check database logs
@@ -1086,7 +1086,7 @@ curl http://localhost:8080/metrics
 kubectl port-forward service/wifi-densepose-service 8000:80 -n wifi-densepose
 
 # Execute commands in pod
-kubectl exec -it deployment/wifi-densepose -n wifi-densepose -- /bin/bash
+kubectl exec -it deployment/wifi-densepose -n wifi-densepose - /bin/bash
 
 # Check service endpoints
 kubectl get endpoints -n wifi-densepose

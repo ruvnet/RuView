@@ -1,5 +1,5 @@
 /**
- * HudController — Extracted HUD update, settings dialog, and scenario UI
+ * HudController - Extracted HUD update, settings dialog, and scenario UI
  *
  * Manages all DOM-based HUD elements:
  * - Vital sign display with smooth lerp transitions and color coding
@@ -72,7 +72,7 @@ const SCENARIO_DESCRIPTIONS = {
   two_walking:       'Tracking multiple people simultaneously via CSI multiplex separation.',
   fall_event:        'Sudden posture-change detection using acceleration feature analysis.',
   sleep_monitoring:  'Monitoring breathing patterns and apnea events during sleep.',
-  intrusion_detect:  'Passive perimeter monitoring -- no cameras, pure RF sensing.',
+  intrusion_detect:  'Passive perimeter monitoring - no cameras, pure RF sensing.',
   gesture_control:   'DTW-based gesture recognition from hand/arm motion signatures.',
   crowd_occupancy:   'Estimating room occupancy count from aggregate CSI variance.',
   search_rescue:     'Through-wall survivor detection using WiFi-MAT multistatic mode.',
@@ -390,7 +390,7 @@ export class HudController {
     const targetBr = vs.breathing_rate_bpm || 0;
     const targetConf = Math.round((cls.confidence || 0) * 100);
 
-    // Smooth lerp transitions (blend 4% per frame toward target — very stable)
+    // Smooth lerp transitions (blend 4% per frame toward target - very stable)
     const lerpFactor = 0.04;
     this._lerpHr = targetHr > 0 ? lerp(this._lerpHr, targetHr, lerpFactor) : 0;
     this._lerpBr = targetBr > 0 ? lerp(this._lerpBr, targetBr, lerpFactor) : 0;

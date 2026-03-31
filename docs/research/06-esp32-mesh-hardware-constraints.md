@@ -32,9 +32,9 @@ follows:
 | Parameter              | HT20 (20 MHz)  | HT40 (40 MHz)  | HE20 (WiFi 6)  |
 |------------------------|-----------------|-----------------|-----------------|
 | Total OFDM subcarriers | 64              | 128             | 256             |
-| Null subcarriers       | 12              | 14              | —               |
-| Pilot subcarriers      | 4               | 6               | —               |
-| Data subcarriers       | 48              | 108             | —               |
+| Null subcarriers       | 12              | 14              | -               |
+| Pilot subcarriers      | 4               | 6               | -               |
+| Data subcarriers       | 48              | 108             | -               |
 | CSI reported (ESP32)   | 52 (data+pilot) | 114 (data+pilot)| N/A             |
 | CSI reported (ESP32-S3)| 52              | 114             | N/A             |
 | CSI reported (ESP32-C6)| 52              | 114             | 52 (HE mode)    |
@@ -175,7 +175,7 @@ For a 5m x 5m room, 16 nodes are placed around the perimeter at approximately
    N14                   N7
     |                     |
     |                     |
-    N13 -- N12 -- N11 -- N8
+    N13 - N12 - N11 - N8
          South Wall
 
     Node spacing: ~1.25 m along each 5m wall
@@ -557,9 +557,9 @@ complementary information.
 ```
     Channel Hopping Schedule (3-channel rotation):
 
-    Sweep 0:  Ch 1  -- all 16 TDM slots -- 48 ms
-    Sweep 1:  Ch 6  -- all 16 TDM slots -- 48 ms
-    Sweep 2:  Ch 11 -- all 16 TDM slots -- 48 ms
+    Sweep 0:  Ch 1  - all 16 TDM slots - 48 ms
+    Sweep 1:  Ch 6  - all 16 TDM slots - 48 ms
+    Sweep 2:  Ch 11 - all 16 TDM slots - 48 ms
     [repeat]
 
     Channel switch overhead: ~5 ms (wifi_set_channel)
@@ -817,17 +817,17 @@ Node configuration stored in non-volatile storage (NVS):
 
 | Key                  | Type   | Default | Description                      |
 |----------------------|--------|---------|----------------------------------|
-| `node_id`            | u8     | —       | Unique node ID (1-16)            |
+| `node_id`            | u8     | -       | Unique node ID (1-16)            |
 | `mesh_size`          | u8     | 16      | Number of nodes in mesh          |
 | `tdm_slot_ms`        | u16    | 3       | TDM slot duration (ms)           |
 | `sweep_channels`     | u8[]   | [1,6,11]| Channel hopping sequence         |
 | `tx_power_dbm`       | i8     | 8       | TX power (2-20 dBm)             |
 | `sync_interval_ms`   | u32    | 1000    | Sync beacon period               |
 | `report_interval_ms` | u32    | 100     | Result upload period             |
-| `server_ip`          | u32    | —       | Backend server IP                |
+| `server_ip`          | u32    | -       | Backend server IP                |
 | `server_port`        | u16    | 8080    | Backend server port              |
 | `coherence_alpha`    | f32    | 0.1     | EMA smoothing factor             |
-| `ota_url`            | string | —       | Firmware update endpoint         |
+| `ota_url`            | string | -       | Firmware update endpoint         |
 
 ### 7.7 Error Handling and Watchdog
 

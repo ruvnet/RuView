@@ -21,28 +21,28 @@ per ADR-022 Phase 3.
 
 ## Features
 
-- **UDP CSI ingestion** -- Receives ESP32 CSI frames on port 5005 and parses them into the internal
+- **UDP CSI ingestion** - Receives ESP32 CSI frames on port 5005 and parses them into the internal
   `CsiFrame` representation.
-- **Vital sign detection** -- Pure-Rust FFT-based breathing rate (0.1--0.5 Hz) and heart rate
+- **Vital sign detection** - Pure-Rust FFT-based breathing rate (0.1--0.5 Hz) and heart rate
   (0.67--2.0 Hz) estimation from CSI amplitude time series (ADR-021).
-- **RVF container** -- Standalone binary container format for packaging model weights, metadata, and
+- **RVF container** - Standalone binary container format for packaging model weights, metadata, and
   configuration into a single `.rvf` file with 64-byte aligned segments.
-- **RVF pipeline** -- Progressive model loading with streaming segment decoding.
-- **Graph Transformer** -- Cross-attention bottleneck between antenna-space CSI features and the
+- **RVF pipeline** - Progressive model loading with streaming segment decoding.
+- **Graph Transformer** - Cross-attention bottleneck between antenna-space CSI features and the
   COCO 17-keypoint body graph, followed by GCN message passing (ADR-023 Phase 2). Pure `std`, no ML
   dependencies.
-- **SONA adaptation** -- LoRA + EWC++ online adaptation for environment drift without catastrophic
+- **SONA adaptation** - LoRA + EWC++ online adaptation for environment drift without catastrophic
   forgetting (ADR-023 Phase 5).
-- **Contrastive CSI embeddings** -- Self-supervised SimCLR-style pretraining with InfoNCE loss,
+- **Contrastive CSI embeddings** - Self-supervised SimCLR-style pretraining with InfoNCE loss,
   projection head, fingerprint indexing, and cross-modal pose alignment (ADR-024).
-- **Sparse inference** -- Activation profiling, sparse matrix-vector multiply, INT8/FP16
+- **Sparse inference** - Activation profiling, sparse matrix-vector multiply, INT8/FP16
   quantization, and a full sparse inference engine for edge deployment (ADR-023 Phase 6).
-- **Dataset pipeline** -- Training dataset loading and batching.
-- **Multi-BSSID scanning** -- Windows `netsh` integration for BSSID discovery via
+- **Dataset pipeline** - Training dataset loading and batching.
+- **Multi-BSSID scanning** - Windows `netsh` integration for BSSID discovery via
   `wifi-densepose-wifiscan` (ADR-022).
-- **WebSocket broadcast** -- Real-time sensing updates pushed to all connected clients at
+- **WebSocket broadcast** - Real-time sensing updates pushed to all connected clients at
   `ws://localhost:8765/ws/sensing`.
-- **Static file serving** -- Hosts the sensing UI on port 8080 with CORS headers.
+- **Static file serving** - Hosts the sensing UI on port 8080 with CORS headers.
 
 ## Modules
 
@@ -68,7 +68,7 @@ cargo build -p wifi-densepose-sensing-server
 cargo run -p wifi-densepose-sensing-server
 
 # Run with custom ports
-cargo run -p wifi-densepose-sensing-server -- \
+cargo run -p wifi-densepose-sensing-server - \
     --http-port 9000 \
     --udp-port 5005 \
     --static-dir ./ui

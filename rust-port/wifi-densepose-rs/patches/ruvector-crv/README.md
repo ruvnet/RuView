@@ -54,7 +54,7 @@ accumulated session graph, separating distinct target aspects.
 ## Cross-Session Convergence
 
 Multiple sessions targeting the same coordinate can be analyzed for
-convergence — agreement between independent viewers strengthens the
+convergence - agreement between independent viewers strengthens the
 signal validity:
 
 ```rust

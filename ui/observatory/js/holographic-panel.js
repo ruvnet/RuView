@@ -1,5 +1,5 @@
 /**
- * Holographic Panel — Reusable frame with border shader, scan line, title
+ * Holographic Panel - Reusable frame with border shader, scan line, title
  */
 import * as THREE from 'three';
 

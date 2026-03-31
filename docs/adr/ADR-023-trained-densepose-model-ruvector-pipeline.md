@@ -15,7 +15,7 @@ The WiFi-DensePose system currently operates in two distinct modes:
 
 1. **WiFi CSI sensing** (working): ESP32 streams CSI frames → Rust aggregator → feature extraction → presence/motion classification. 41 tests passing, verified at ~20 Hz with real hardware.
 
-2. **Heuristic pose derivation** (working but approximate): The Rust sensing server generates 17 COCO keypoints from WiFi signal properties using hand-crafted rules (`derive_pose_from_sensing()` in `sensing-server/src/main.rs`). This is not a trained model — keypoint positions are derived from signal amplitude, phase variance, and motion metrics rather than learned from labeled data.
+2. **Heuristic pose derivation** (working but approximate): The Rust sensing server generates 17 COCO keypoints from WiFi signal properties using hand-crafted rules (`derive_pose_from_sensing()` in `sensing-server/src/main.rs`). This is not a trained model - keypoint positions are derived from signal amplitude, phase variance, and motion metrics rather than learned from labeled data.
 
 Neither mode produces **DensePose-quality** body surface estimation. The CMU "DensePose From WiFi" paper (arXiv:2301.00250) demonstrated that a neural network trained on paired WiFi CSI + camera pose data can produce dense body surface UV coordinates from WiFi alone. However, that approach requires:
 
@@ -67,8 +67,8 @@ The `vendor/ruvector/` subtree provides 90+ crates. The following are directly r
 ### RVF Container Format
 
 The RuVector Format (RVF) is a segment-based binary container format designed to package
-intelligence artifacts — embeddings, HNSW indexes, quantized weights, WASM runtimes, witness
-proofs, and metadata — into a single self-contained file. Key properties:
+intelligence artifacts - embeddings, HNSW indexes, quantized weights, WASM runtimes, witness
+proofs, and metadata - into a single self-contained file. Key properties:
 
 - **64-byte segment headers** (`SegmentHeader`, magic `0x52564653` "RVFS") with type discriminator, content hash, compression, and timestamp
 - **Progressive loading**: Layer A (entry points, <5ms) → Layer B (hot adjacency, 100ms–1s) → Layer C (full graph, seconds)
@@ -79,7 +79,7 @@ proofs, and metadata — into a single self-contained file. Key properties:
 The trained DensePose model will be packaged as an `.rvf` container, making it a single
 self-contained artifact that includes model weights, HNSW-indexed embedding tables, min-cut
 graph overlays, quantization codebooks, SONA adaptation deltas, and the WASM inference
-runtime — deployable to any host without external dependencies.
+runtime - deployable to any host without external dependencies.
 
 ## Decision
 
@@ -192,7 +192,7 @@ CSI features [B, T*tx*rx, sub]
               Visual features [B, 3, 48, 48]
 ```
 
-**RuVector enhancement**: Replace standard multi-head self-attention in the bottleneck with `ruvector-graph-transformer`. The graph structure encodes the physical antenna topology — nodes that are closer in space (adjacent ESP32 nodes in the mesh) or time (consecutive frames) have stronger edge weights. This injects domain-specific inductive bias that standard attention lacks.
+**RuVector enhancement**: Replace standard multi-head self-attention in the bottleneck with `ruvector-graph-transformer`. The graph structure encodes the physical antenna topology - nodes that are closer in space (adjacent ESP32 nodes in the mesh) or time (consecutive frames) have stronger edge weights. This injects domain-specific inductive bias that standard attention lacks.
 
 #### 2b. GNN Body Graph Reasoning
 
@@ -227,7 +227,7 @@ KeypointHead      DensePoseHead     ConfidenceHead
 heatmaps          parts + UV         quality score
 ```
 
-**RuVector enhancement**: `ruvector-gnn` replaces the flat spatial decoder with a graph neural network that operates on the human body graph. WiFi CSI is inherently noisy — GNN message passing between anatomically connected joints enforces that predicted keypoints maintain plausible body structure even when individual joint predictions are uncertain.
+**RuVector enhancement**: `ruvector-gnn` replaces the flat spatial decoder with a graph neural network that operates on the human body graph. WiFi CSI is inherently noisy - GNN message passing between anatomically connected joints enforces that predicted keypoints maintain plausible body structure even when individual joint predictions are uncertain.
 
 #### 2c. Sparse Inference for Edge Deployment
 
@@ -259,9 +259,9 @@ Trained model weights (full precision)
 
 #### 3a. Dataset Loading and Preprocessing
 
-Primary dataset: **MM-Fi** (NeurIPS 2023) — 40 subjects, 27 actions, 114 subcarriers, 3 RX antennas, 17 COCO keypoints + DensePose UV annotations.
+Primary dataset: **MM-Fi** (NeurIPS 2023) - 40 subjects, 27 actions, 114 subcarriers, 3 RX antennas, 17 COCO keypoints + DensePose UV annotations.
 
-Secondary dataset: **Wi-Pose** — 12 subjects, 12 actions, 30 subcarriers, 3×3 antenna array, 18 keypoints.
+Secondary dataset: **Wi-Pose** - 12 subjects, 12 actions, 30 subcarriers, 3×3 antenna array, 18 keypoints.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -287,7 +287,7 @@ For samples with 3D keypoints but no DensePose UV maps:
 1. Run Detectron2 DensePose R-CNN on paired RGB frames (one-time preprocessing step on GPU workstation)
 2. Generate `(part_labels [H,W], u_coords [H,W], v_coords [H,W])` pseudo-labels
 3. Cache as `.npy` alongside original data
-4. Teacher model is discarded after label generation — inference uses WiFi only
+4. Teacher model is discarded after label generation - inference uses WiFi only
 
 #### 3c. Loss Function
 
@@ -409,7 +409,7 @@ Total inference budget: **<15ms per frame** at 20 Hz on x86, **<50ms** on ESP32-
 ### Stage 6: RVF Model Container Format
 
 The trained model is packaged as a single `.rvf` file that contains everything needed for
-inference — no external weight files, no ONNX runtime, no Python dependencies.
+inference - no external weight files, no ONNX runtime, no Python dependencies.
 
 #### RVF DensePose Container Layout
 
@@ -424,7 +424,7 @@ wifi-densepose-v1.rvf (single file, ~15-30 MB)
 │  ├── Segment directory (offsets to all segments)               │
 │  └── Level-1 TLV manifest with metadata tags                  │
 ├───────────────────────────────────────────────────────────────┤
-│  SEGMENT 1: Vec (0x01) — Model Weight Embeddings              │
+│  SEGMENT 1: Vec (0x01) - Model Weight Embeddings              │
 │  ├── ModalityTranslator weights [64→128→256→3, Conv1D+ConvT]  │
 │  ├── ResNet18 backbone weights [3→64→128→256, residual blocks] │
 │  ├── KeypointHead weights [256→17, deconv layers]             │
@@ -434,17 +434,17 @@ wifi-densepose-v1.rvf (single file, ~15-30 MB)
 │  Format: flat f32 vectors, 768-dim per weight tensor          │
 │  Total: ~5M parameters → ~20MB f32, ~10MB f16, ~5MB INT8     │
 ├───────────────────────────────────────────────────────────────┤
-│  SEGMENT 2: Index (0x02) — HNSW Embedding Index               │
+│  SEGMENT 2: Index (0x02) - HNSW Embedding Index               │
 │  ├── Layer A: Entry points + coarse routing centroids          │
 │  │   (loaded first, <5ms, enables approximate search)         │
 │  ├── Layer B: Hot region adjacency for frequently             │
 │  │   accessed weight clusters (100ms load)                    │
 │  └── Layer C: Full adjacency graph for exact nearest          │
 │      neighbor lookup across all weight partitions             │
-│  Use: Fast weight lookup for sparse inference —               │
+│  Use: Fast weight lookup for sparse inference -               │
 │  only load hot neurons, skip cold neurons via HNSW routing    │
 ├───────────────────────────────────────────────────────────────┤
-│  SEGMENT 3: Overlay (0x03) — Dynamic Min-Cut Graph            │
+│  SEGMENT 3: Overlay (0x03) - Dynamic Min-Cut Graph            │
 │  ├── Subcarrier partition graph (sensitive vs insensitive)     │
 │  ├── Min-cut witnesses from ruvector-mincut                   │
 │  ├── Antenna topology graph (ESP32 mesh spatial layout)       │
@@ -453,15 +453,15 @@ wifi-densepose-v1.rvf (single file, ~15-30 MB)
 │  Dynamic updates via ruvector-mincut insert/delete_edge       │
 │  as environment changes (furniture moves, new obstacles)      │
 ├───────────────────────────────────────────────────────────────┤
-│  SEGMENT 4: Quant (0x06) — Quantization Codebooks             │
+│  SEGMENT 4: Quant (0x06) - Quantization Codebooks             │
 │  ├── INT8 codebook for backbone (4x memory reduction)         │
 │  ├── FP16 scale factors for translator + heads                │
 │  ├── Binary quantization tables for SIMD distance compute     │
 │  └── Per-layer calibration statistics (min, max, zero-point)  │
-│  Use: rvf-quant temperature-tiered quantization —             │
+│  Use: rvf-quant temperature-tiered quantization -             │
 │  hot layers stay f16, warm layers u8, cold layers binary      │
 ├───────────────────────────────────────────────────────────────┤
-│  SEGMENT 5: Witness (0x0A) — Training Proof Chain             │
+│  SEGMENT 5: Witness (0x0A) - Training Proof Chain             │
 │  ├── Deterministic training proof (seed, loss curve, hash)    │
 │  ├── Dataset provenance (MM-Fi commit hash, download URL)     │
 │  ├── Validation metrics (PCK@0.2, OKS mAP, GPS scores)       │
@@ -471,7 +471,7 @@ wifi-densepose-v1.rvf (single file, ~15-30 MB)
 │  training run. Anyone can re-run training with same seed      │
 │  and verify the weight hash matches the witness.              │
 ├───────────────────────────────────────────────────────────────┤
-│  SEGMENT 6: Meta (0x07) — Model Metadata                      │
+│  SEGMENT 6: Meta (0x07) - Model Metadata                      │
 │  ├── COCO keypoint names and skeleton connectivity            │
 │  ├── DensePose body part labels (24 parts + background)       │
 │  ├── UV coordinate range and resolution                       │
@@ -479,7 +479,7 @@ wifi-densepose-v1.rvf (single file, ~15-30 MB)
 │  ├── RuVector crate versions used during training             │
 │  └── Environment calibration profiles (named, per-room)       │
 ├───────────────────────────────────────────────────────────────┤
-│  SEGMENT 7: AggregateWeights (0x36) — SONA LoRA Deltas        │
+│  SEGMENT 7: AggregateWeights (0x36) - SONA LoRA Deltas        │
 │  ├── Per-environment LoRA adaptation matrices (A, B per layer)│
 │  ├── EWC++ Fisher information diagonal                        │
 │  ├── Optimal θ* reference parameters                          │
@@ -488,7 +488,7 @@ wifi-densepose-v1.rvf (single file, ~15-30 MB)
 │  Use: Multiple environment adaptations stored in one file.    │
 │  Server loads the matching profile or creates a new one.      │
 ├───────────────────────────────────────────────────────────────┤
-│  SEGMENT 8: Profile (0x0B) — RVDNA Domain Profile             │
+│  SEGMENT 8: Profile (0x0B) - RVDNA Domain Profile             │
 │  ├── Domain: "wifi-csi-densepose"                             │
 │  ├── Input spec: [B, T*ant, sub] CSI tensor format            │
 │  ├── Output spec: keypoints [B,17,H,W], parts [B,25,H,W],    │
@@ -496,20 +496,20 @@ wifi-densepose-v1.rvf (single file, ~15-30 MB)
 │  ├── Hardware requirements: min RAM, recommended GPU          │
 │  └── Supported data sources: esp32, wifi-rssi, simulation    │
 ├───────────────────────────────────────────────────────────────┤
-│  SEGMENT 9: Crypto (0x0C) — Signature and Keys                │
+│  SEGMENT 9: Crypto (0x0C) - Signature and Keys                │
 │  ├── Ed25519 public key for model publisher                   │
 │  ├── Signature over all segment content hashes                │
 │  └── Certificate chain (optional, for enterprise deployment)  │
 ├───────────────────────────────────────────────────────────────┤
-│  SEGMENT 10: Wasm (0x10) — Self-Bootstrapping Runtime         │
+│  SEGMENT 10: Wasm (0x10) - Self-Bootstrapping Runtime         │
 │  ├── Compiled WASM inference engine                           │
 │  │   (ruvector-sparse-inference-wasm)                         │
 │  ├── WASM microkernel for RVF segment parsing                 │
 │  └── Browser-compatible: load .rvf → run inference in-browser │
-│  Use: The .rvf file is fully self-contained — a WASM host     │
+│  Use: The .rvf file is fully self-contained - a WASM host     │
 │  can execute inference without any external dependencies.     │
 ├───────────────────────────────────────────────────────────────┤
-│  SEGMENT 11: Dashboard (0x11) — Embedded Visualization        │
+│  SEGMENT 11: Dashboard (0x11) - Embedded Visualization        │
 │  ├── Three.js-based pose visualization (HTML/JS/CSS)          │
 │  ├── Gaussian splat renderer for signal field                 │
 │  └── Served at http://localhost:8080/ when model is loaded    │
@@ -540,7 +540,7 @@ wifi-densepose-v1.rvf (single file, ~15-30 MB)
 
 **Progressive availability**: Inference begins after step 6 (~5ms) with approximate
 results. Full accuracy is reached by step 9 (~500ms). This enables instant startup
-with gradually improving quality — critical for real-time applications.
+with gradually improving quality - critical for real-time applications.
 
 #### RVF Build Pipeline
 
@@ -548,7 +548,7 @@ After training completes, the model is packaged into an `.rvf` file:
 
 ```bash
 # Build the RVF container from trained checkpoint
-cargo run -p wifi-densepose-train --bin build-rvf -- \
+cargo run -p wifi-densepose-train --bin build-rvf - \
     --checkpoint checkpoints/best-pck.pt \
     --quantize int8,fp16 \
     --hnsw-build \
@@ -558,7 +558,7 @@ cargo run -p wifi-densepose-train --bin build-rvf -- \
     --output wifi-densepose-v1.rvf
 
 # Verify the built container
-cargo run -p wifi-densepose-train --bin verify-rvf -- \
+cargo run -p wifi-densepose-train --bin verify-rvf - \
     --input wifi-densepose-v1.rvf \
     --verify-signature \
     --verify-witness \
@@ -727,13 +727,13 @@ let dashboard = container.load_dashboard()?;
 ### Positive
 
 - **Trained model produces accurate DensePose**: Moves from heuristic keypoints to learned body surface estimation backed by public dataset evaluation
-- **RuVector signal intelligence is a differentiator**: Graph transformers on antenna topology and GNN body reasoning are novel — no prior WiFi pose system uses these techniques
-- **SONA enables zero-shot deployment**: New environments don't require full retraining — LoRA adaptation with <50 gradient steps converges in seconds
+- **RuVector signal intelligence is a differentiator**: Graph transformers on antenna topology and GNN body reasoning are novel - no prior WiFi pose system uses these techniques
+- **SONA enables zero-shot deployment**: New environments don't require full retraining - LoRA adaptation with <50 gradient steps converges in seconds
 - **Sparse inference enables edge deployment**: PowerInfer-style neuron partitioning brings DensePose inference to ESP32-class hardware
-- **Graceful degradation**: Server falls back to heuristic pose when no model file is present — existing functionality is preserved
-- **Single-file deployment via RVF**: Trained model, embeddings, HNSW index, quantization codebooks, SONA adaptation profiles, WASM runtime, and dashboard UI packaged in one `.rvf` file — deploy by copying a single file
+- **Graceful degradation**: Server falls back to heuristic pose when no model file is present - existing functionality is preserved
+- **Single-file deployment via RVF**: Trained model, embeddings, HNSW index, quantization codebooks, SONA adaptation profiles, WASM runtime, and dashboard UI packaged in one `.rvf` file - deploy by copying a single file
 - **Progressive loading**: RVF Layer A loads in <5ms for instant startup; full accuracy reached in ~500ms as remaining segments load
-- **Verifiable provenance**: RVF Witness segment contains deterministic training proof with Ed25519 signature — anyone can re-run training and verify weight hash
+- **Verifiable provenance**: RVF Witness segment contains deterministic training proof with Ed25519 signature - anyone can re-run training and verify weight hash
 - **Self-bootstrapping**: RVF Wasm segment enables browser-based inference with no server-side dependencies
 - **Open evaluation**: PCK, OKS, GPS metrics on public MM-Fi dataset provide reproducible, comparable results
 
@@ -772,21 +772,21 @@ let dashboard = container.load_dashboard()?;
 
 **ruQu** ("Classical nervous system for quantum machines") provides real-time coherence
 assessment via dynamic min-cut. While primarily designed for quantum error correction
-(syndrome decoding, surface code arbitration), its core primitive — the `CoherenceGate` —
+(syndrome decoding, surface code arbitration), its core primitive - the `CoherenceGate`  - 
 is architecturally relevant to WiFi CSI processing:
 
 - **CoherenceGate** uses `ruvector-mincut` to make real-time gate/pass decisions on
   signal streams based on structural coherence thresholds. In quantum computing, this
   gates qubit syndrome streams. For WiFi CSI, the same mechanism could gate CSI
-  subcarrier streams — passing only subcarriers whose coherence (phase stability across
+  subcarrier streams - passing only subcarriers whose coherence (phase stability across
   antennas) exceeds a dynamic threshold.
 
 - **Syndrome filtering** (`filters.rs`) implements Kalman-like adaptive filters that
-  could be repurposed for CSI noise filtering — treating each subcarrier's amplitude
+  could be repurposed for CSI noise filtering - treating each subcarrier's amplitude
   drift as a "syndrome" stream.
 
 - **Min-cut gated transformer** integration (optional feature) provides coherence-optimized
-  attention with 50% FLOP reduction — directly applicable to the `ModalityTranslator`
+  attention with 50% FLOP reduction - directly applicable to the `ModalityTranslator`
   bottleneck.
 
 **Decision**: ruQu is not included in the initial pipeline (Phase 1-8) but is marked as a
@@ -800,9 +800,9 @@ The pipeline supports three data sources for training, used in combination:
 
 | Source | Subcarriers | Pose Labels | Volume | Cost | When |
 |--------|-------------|-------------|--------|------|------|
-| **MM-Fi** (public) | 114 → 56 (interpolated) | 17 COCO + DensePose UV | 40 subjects, 320K frames | Free (CC BY-NC) | Phase 1 — bootstrap |
-| **Wi-Pose** (public) | 30 → 56 (zero-padded) | 18 keypoints | 12 subjects, 166K packets | Free (research) | Phase 1 — diversity |
-| **ESP32 self-collected** | 56 (native) | Teacher-student from camera | Unlimited, environment-specific | Hardware only ($54) | Phase 4+ — fine-tuning |
+| **MM-Fi** (public) | 114 → 56 (interpolated) | 17 COCO + DensePose UV | 40 subjects, 320K frames | Free (CC BY-NC) | Phase 1 - bootstrap |
+| **Wi-Pose** (public) | 30 → 56 (zero-padded) | 18 keypoints | 12 subjects, 166K packets | Free (research) | Phase 1 - diversity |
+| **ESP32 self-collected** | 56 (native) | Teacher-student from camera | Unlimited, environment-specific | Hardware only ($54) | Phase 4+ - fine-tuning |
 
 **Recommended approach: Both public + ESP32 data.**
 

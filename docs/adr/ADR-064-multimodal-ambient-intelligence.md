@@ -1,4 +1,4 @@
-# ADR-064: Multimodal Ambient Intelligence — WiFi CSI + mmWave + Environmental Sensors
+# ADR-064: Multimodal Ambient Intelligence - WiFi CSI + mmWave + Environmental Sensors
 
 **Status:** Proposed
 **Date:** 2026-03-15
@@ -13,7 +13,7 @@ With ADR-063 we demonstrated real-time fusion of WiFi CSI (ESP32-S3, COM7) and 6
 - **WiFi CSI**: Channel 5, RSSI -41, 20+ Hz frame rate, through-wall coverage
 - **BH1750**: Ambient light 0.0-0.7 lux (room darkness level)
 
-This ADR explores the full spectrum of what becomes possible when these modalities are combined — from immediately practical applications to speculative research directions.
+This ADR explores the full spectrum of what becomes possible when these modalities are combined - from immediately practical applications to speculative research directions.
 
 ---
 
@@ -90,7 +90,7 @@ mmWave: height drop > 50cm in <1s ──┘   → CONFIRMED FALL (call 911)
 | Turning stability | CSI + mmWave | Difficulty turning = Parkinson's indicator |
 | Get-up time | mmWave (sit→stand) | Timed Up and Go (TUG) test, contactless |
 
-**Clinical value:** Gait velocity is called the "sixth vital sign" — it predicts hospitalization, cognitive decline, and mortality. Currently requires a $10,000 GAITRite mat. A $24 sensor node replaces it.
+**Clinical value:** Gait velocity is called the "sixth vital sign" - it predicts hospitalization, cognitive decline, and mortality. Currently requires a $10,000 GAITRite mat. A $24 sensor node replaces it.
 
 ### 2.2 Emotion and Stress Detection via Micro-Vitals
 
@@ -128,7 +128,7 @@ mmWave: height drop > 50cm in <1s ──┘   → CONFIRMED FALL (call 911)
 
 **CSI adds:** Cough detection (sudden phase disturbance pattern), movement reduction (malaise indicator).
 
-**Longitudinal tracking** via `ruvsense/longitudinal.rs` (Welford stats, biomechanics drift detection) — the system learns your normal breathing pattern and alerts on deviations.
+**Longitudinal tracking** via `ruvsense/longitudinal.rs` (Welford stats, biomechanics drift detection) - the system learns your normal breathing pattern and alerts on deviations.
 
 ### 2.5 Multi-Room Activity Recognition
 
@@ -166,7 +166,7 @@ Front door (CSI):  motion pattern = leaving/arriving
 
 **Feasibility:** Academic papers demonstrate ±10 mmHg accuracy in controlled settings. Far from clinical grade but useful for trending.
 
-### 3.3 RF Tomography — 3D Occupancy Imaging
+### 3.3 RF Tomography - 3D Occupancy Imaging
 
 **Method:** Multiple CSI nodes form a tomographic array. Each TX-RX pair measures signal attenuation. Inverse problem (ISTA L1 solver, already in `ruvsense/tomography.rs`) reconstructs a 3D voxel grid of where absorbers (people) are.
 
@@ -185,7 +185,7 @@ mmWave targets (precise range, cm resolution) ─────┘   → 10cm 3D o
 - CSI captures the gross arm trajectory of each sign
 - mmWave captures the finger configuration at the pause point
 - AETHER contrastive embeddings (`ADR-024`) learn to map (CSI phase sequence, mmWave Doppler) → sign label
-- No camera required — works in the dark, preserves privacy
+- No camera required - works in the dark, preserves privacy
 
 **Training data:** Record CSI + mmWave while performing signs with a camera as ground truth, then deploy camera-free.
 
@@ -222,7 +222,7 @@ mmWave targets (precise range, cm resolution) ─────┘   → 10cm 3D o
 
 **Application:** Early warning for structural degradation in bridges, tunnels, old buildings.
 
-### 3.8 Swarm Sensing — Emergent Spatial Awareness
+### 3.8 Swarm Sensing - Emergent Spatial Awareness
 
 **50+ nodes across a building:**
 
@@ -231,7 +231,7 @@ Each node runs local edge intelligence (ADR-039). The `hive-mind` consensus syst
 - **Flow detection:** Track how people move between rooms over time
 - **Anomaly detection:** "This hallway usually has 5 people/hour but had 0 today"
 - **Emergency routing:** During fire, track which exits are blocked (no movement) vs available
-- **Crowd density:** Concert/stadium safety — detect dangerous compression zones through walls
+- **Crowd density:** Concert/stadium safety - detect dangerous compression zones through walls
 
 ---
 
@@ -261,14 +261,14 @@ Based on published lucid dreaming induction research (e.g., LaBerge's MILD techn
 WiFi signals pass through plant tissue differently based on water content.
 
 - CSI amplitude through a greenhouse changes as plants absorb/release water
-- mmWave reflects off leaf surfaces — micro-displacement from growth
+- mmWave reflects off leaf surfaces - micro-displacement from growth
 - Long-term CSI drift correlates with biomass increase
 
 Academic proof-of-concept: "Sensing Plant Water Content Using WiFi Signals" (2023).
 
 ### 4.4 Pet Behavior Analysis
 
-- CSI detects pet movement patterns (different phase signature than humans — lower, faster)
+- CSI detects pet movement patterns (different phase signature than humans - lower, faster)
 - mmWave detects breathing rate (pets have higher BR than humans)
 - System learns pet's daily routine and alerts on deviations (lethargy, pacing, not eating)
 
@@ -318,10 +318,10 @@ Document these possibilities as the product roadmap for the RuView multimodal am
 
 ### Negative
 - Clinical applications (arrhythmia, blood pressure) require medical device validation
-- Privacy concerns scale with capability — need clear data retention policies
+- Privacy concerns scale with capability - need clear data retention policies
 - Some exotic applications may attract scrutiny (surveillance concerns)
 
 ### Risk Mitigation
-- All processing happens on-device (edge) — no cloud, no recordings by default
-- No cameras — signal-based sensing preserves visual privacy
-- Open source — users can audit exactly what is sensed and transmitted
+- All processing happens on-device (edge) - no cloud, no recordings by default
+- No cameras - signal-based sensing preserves visual privacy
+- Open source - users can audit exactly what is sensed and transmitted

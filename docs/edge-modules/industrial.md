@@ -1,4 +1,4 @@
-# Industrial & Specialized Modules -- WiFi-DensePose Edge Intelligence
+# Industrial & Specialized Modules - WiFi-DensePose Edge Intelligence
 
 > Worker safety and compliance monitoring using WiFi CSI signals. Works through
 > dust, smoke, shelving, and walls where cameras fail. Designed for warehouses,
@@ -131,8 +131,8 @@ impl ForkliftProximityDetector {
 | `VEHICLE_DEBOUNCE` | 4 frames | 2--10 | Higher = fewer false alarms, slower response |
 | `PROXIMITY_DEBOUNCE` | 2 frames | 1--5 | Higher = fewer false alarms, slower response |
 | `ALERT_COOLDOWN` | 40 frames (2 s) | 10--200 | Lower = more frequent warnings |
-| `DIST_CRITICAL` | amp ratio > 4.0 | -- | Very close proximity |
-| `DIST_WARNING` | amp ratio > 3.0 | -- | Close proximity |
+| `DIST_CRITICAL` | amp ratio > 4.0 | - | Very close proximity |
+| `DIST_WARNING` | amp ratio > 3.0 | - | Close proximity |
 
 #### Example Usage
 
@@ -152,9 +152,9 @@ for &(event_id, value) in events {
     match event_id {
         500 => {
             let category = match value as i32 {
-                0 => "CRITICAL -- stop forklift immediately",
-                1 => "WARNING -- reduce speed",
-                _ => "CAUTION -- be alert",
+                0 => "CRITICAL - stop forklift immediately",
+                1 => "WARNING - reduce speed",
+                _ => "CAUTION - be alert",
             };
             trigger_alarm(category);
         }
@@ -258,8 +258,8 @@ impl ConfinedSpaceMonitor {
 | 510 | `EVENT_WORKER_ENTRY` | 1.0 | Worker entered the confined space |
 | 511 | `EVENT_WORKER_EXIT` | 1.0 | Worker exited the confined space |
 | 512 | `EVENT_BREATHING_OK` | BPM (float) | Periodic breathing confirmation (~every 5 s) |
-| 513 | `EVENT_EXTRACTION_ALERT` | Seconds since last breath | No breathing for >15 s -- initiate rescue |
-| 514 | `EVENT_IMMOBILE_ALERT` | Seconds without motion | No motion for >60 s -- check on worker |
+| 513 | `EVENT_EXTRACTION_ALERT` | Seconds since last breath | No breathing for >15 s - initiate rescue |
+| 514 | `EVENT_IMMOBILE_ALERT` | Seconds without motion | No motion for >60 s - check on worker |
 
 #### State Machine
 
@@ -703,7 +703,7 @@ for &(event_id, value) in events {
 
 ### Forklift Proximity (OSHA 29 CFR 1910.178)
 
-- **Standard**: Powered Industrial Trucks -- operator must warn others.
+- **Standard**: Powered Industrial Trucks - operator must warn others.
 - **Module supports**: Automated proximity detection supplements horn/light
   warnings. Does NOT replace operator training, seat belts, or speed limits.
 - **Additional equipment required**: Physical barriers, floor markings,
@@ -715,7 +715,7 @@ for &(event_id, value) in events {
 - **Module supports**: Continuous proof-of-life monitoring (breathing and
   motion confirmation). Assists the required safety attendant.
 - **Additional equipment required**:
-  - Atmospheric monitoring (O2, H2S, CO, LEL) -- the WiFi module cannot
+  - Atmospheric monitoring (O2, H2S, CO, LEL) - the WiFi module cannot
     detect gas hazards.
   - Communication system between entrant and attendant.
   - Rescue equipment (retrieval system, harness, tripod).
@@ -788,7 +788,7 @@ for &(event_id, value) in events {
 - Sensor B inside the confined space (if safely mountable) provides
   breathing and motion monitoring.
 - If only one sensor is available, mount at the entry facing into the space.
-- WiFi signals penetrate metal walls poorly -- use multiple sensors for
+- WiFi signals penetrate metal walls poorly - use multiple sensors for
   large vessels.
 
 ### Integration with Safety PLCs

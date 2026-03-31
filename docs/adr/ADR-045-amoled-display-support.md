@@ -10,14 +10,14 @@ The ESP32-S3 board (LilyGO T-Display-S3 AMOLED) has an integrated RM67162 QSPI A
 
 ### Constraints
 
-- Binary was 947 KB in a 1 MB partition — needed 8MB flash + custom partition table
+- Binary was 947 KB in a 1 MB partition - needed 8MB flash + custom partition table
 - SPIRAM was disabled in sdkconfig despite hardware having 8MB PSRAM
-- Core 1 is pinned to DSP (edge processing) — display must use Core 0
+- Core 1 is pinned to DSP (edge processing) - display must use Core 0
 - Existing CSI pipeline must not be affected
 
 ### Available APIs
 
-Thread-safe edge APIs already exist (`edge_get_vitals()`, `edge_get_multi_person()`) — the display task only reads from these, no new synchronization needed.
+Thread-safe edge APIs already exist (`edge_get_vitals()`, `edge_get_multi_person()`) - the display task only reads from these, no new synchronization needed.
 
 ## Decision
 
@@ -43,7 +43,7 @@ Add optional AMOLED display support with the following architecture:
 ### Compile-Time Control
 
 - `CONFIG_DISPLAY_ENABLE=y` (default): compiles display code, auto-detects hardware at boot
-- `CONFIG_DISPLAY_ENABLE=n`: zero-cost — no display code compiled
+- `CONFIG_DISPLAY_ENABLE=n`: zero-cost - no display code compiled
 - `CONFIG_SPIRAM_IGNORE_NOTFOUND=y`: boots fine on boards without PSRAM
 
 ### Flash Layout
@@ -59,7 +59,7 @@ Add optional AMOLED display support with the following architecture:
 |------|------|----------|--------|
 | WiFi/LwIP | 0 | 18-23 | unchanged |
 | OTA httpd | 0 | 5 | unchanged |
-| **display_task** | **0** | **1** | **NEW — lowest priority** |
+| **display_task** | **0** | **1** | **NEW - lowest priority** |
 | edge_task (DSP) | 1 | 5 | unchanged |
 
 ### Dependencies

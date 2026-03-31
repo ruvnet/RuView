@@ -1,4 +1,4 @@
-# Signal Intelligence Modules -- WiFi-DensePose Edge Intelligence
+# Signal Intelligence Modules - WiFi-DensePose Edge Intelligence
 
 > Real-time WiFi signal analysis and enhancement running directly on the ESP32 chip. These modules clean, compress, and extract features from raw WiFi channel data so that higher-level modules (health, security, etc.) get better input.
 
@@ -66,7 +66,7 @@ All signal intelligence modules share these utilities from `vendor_common.rs`:
 
 ### Flash Attention (`sig_flash_attention.rs`)
 
-**What it does**: Focuses processing on the WiFi channels that carry the most useful information -- ignores noise. Divides 32 subcarriers into 8 groups and computes attention weights showing where signal activity is concentrated.
+**What it does**: Focuses processing on the WiFi channels that carry the most useful information - ignores noise. Divides 32 subcarriers into 8 groups and computes attention weights showing where signal activity is concentrated.
 
 **Algorithm**: Tiled attention (Q*K/sqrt(d)) over 8 subcarrier groups with softmax normalization and Shannon entropy tracking.
 
@@ -114,7 +114,7 @@ impl FlashAttention {
 
 The 8 attention weights sum to 1.0. When a person stands in a particular area of the room, the WiFi signal changes most in the subcarrier group(s) whose Fresnel zones intersect that area.
 
-- **All weights near 0.125 (= 1/8)**: Uniform attention. No localized activity -- either an empty room or whole-body motion affecting all subcarriers equally.
+- **All weights near 0.125 (= 1/8)**: Uniform attention. No localized activity - either an empty room or whole-body motion affecting all subcarriers equally.
 - **One weight near 1.0, others near 0.0**: Highly focused. Activity concentrated in one spatial zone. The `peak_group` index tells you which zone.
 - **Two adjacent groups elevated**: Activity at the boundary between two spatial zones, or a person moving between them.
 - **Entropy below 1.0**: Strong spatial focus. Good for zone-level localization.
@@ -161,7 +161,7 @@ pub enum GateDecision { Accept, PredictOnly, Reject, Recalibrate }
 |----|------|-------|---------|
 | 710 | `GATE_DECISION` | 2/1/0/-1 | Accept(2), PredictOnly(1), Reject(0), Recalibrate(-1) |
 | 711 | `COHERENCE_SCORE` | [0.0, 1.0] | Phase phasor coherence magnitude |
-| 712 | `RECALIBRATE_NEEDED` | Variance | Environment has changed significantly -- retrain baseline |
+| 712 | `RECALIBRATE_NEEDED` | Variance | Environment has changed significantly - retrain baseline |
 
 #### Configuration
 
@@ -249,7 +249,7 @@ impl TemporalCompressor {
 
 **What it does**: When WiFi hardware drops some subcarrier measurements (nulls/zeros due to deep fades, firmware glitches, or multipath nulls), this module reconstructs the missing values using mathematical optimization.
 
-**Algorithm**: Iterative Shrinkage-Thresholding Algorithm (ISTA) -- an L1-minimizing sparse recovery method.
+**Algorithm**: Iterative Shrinkage-Thresholding Algorithm (ISTA) - an L1-minimizing sparse recovery method.
 
 ```
 x_{k+1} = soft_threshold(x_k + step * A^T * (b - A*x_k), lambda)
@@ -278,7 +278,7 @@ impl SparseRecovery {
 }
 ```
 
-Note: `process_frame` modifies `amplitudes` in place -- null subcarriers are overwritten with recovered values.
+Note: `process_frame` modifies `amplitudes` in place - null subcarriers are overwritten with recovered values.
 
 #### Events
 
@@ -305,13 +305,13 @@ Note: `process_frame` modifies `amplitudes` in place -- null subcarriers are ove
 2. Recovery only triggers when dropout exceeds 10% (e.g., 4+ of 32 subcarriers are null).
 3. Below 10%, the nulls are too sparse to warrant recovery overhead.
 4. The tridiagonal correlation model exploits the fact that adjacent WiFi subcarriers are highly correlated. A null at subcarrier 15 can be estimated from subcarriers 14 and 16.
-5. Monitor `RECOVERY_ERROR` -- a rising residual suggests the correlation model is stale and the environment has changed.
+5. Monitor `RECOVERY_ERROR` - a rising residual suggests the correlation model is stale and the environment has changed.
 
 ---
 
 ### Min-Cut Person Match (`sig_mincut_person_match.rs`)
 
-**What it does**: Maintains stable identity labels for up to 4 people in the sensing area. When people move around, their WiFi signatures change position -- this module tracks which signature belongs to which person across consecutive frames.
+**What it does**: Maintains stable identity labels for up to 4 people in the sensing area. When people move around, their WiFi signatures change position - this module tracks which signature belongs to which person across consecutive frames.
 
 **Algorithm**: Inspired by `ruvector-mincut` (DynamicPersonMatcher). Each frame:
 
@@ -361,7 +361,7 @@ impl PersonMatcher {
 
 **What it does**: Detects subtle motion that traditional variance-based detectors miss. Computes how much the overall shape of the WiFi signal distribution changes between frames, even when the total power stays constant.
 
-**Algorithm**: Sliced Wasserstein distance -- a computationally efficient approximation to the full Wasserstein (earth mover's) distance.
+**Algorithm**: Sliced Wasserstein distance - a computationally efficient approximation to the full Wasserstein (earth mover's) distance.
 
 1. Generate 4 fixed random projection directions (deterministic LCG PRNG, const-computed at compile time)
 2. Project both current and previous amplitude vectors onto each direction
@@ -370,7 +370,7 @@ impl PersonMatcher {
 5. Average across all 4 projections
 6. Smooth via EMA and compare against thresholds
 
-**Subtle motion detection**: When the Wasserstein distance is elevated (distribution shape changed) but the variance is stable (total power unchanged), something moved without creating obvious disturbance -- e.g., slow hand motion, breathing, or a door slowly closing.
+**Subtle motion detection**: When the Wasserstein distance is elevated (distribution shape changed) but the variance is stable (total power unchanged), something moved without creating obvious disturbance - e.g., slow hand motion, breathing, or a door slowly closing.
 
 #### Public API
 

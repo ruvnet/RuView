@@ -1,5 +1,5 @@
 /**
- * PoseSystem -- Stateless pose keypoint generator for COCO 17-keypoint format.
+ * PoseSystem - Stateless pose keypoint generator for COCO 17-keypoint format.
  *
  * Keypoint indices:
  *   0:nose  1:left_eye  2:right_eye  3:left_ear  4:right_ear
@@ -103,7 +103,7 @@ export class PoseSystem {
     const legBack = Math.sin(wp + Math.PI) * 0.25 * sFactor;
     const kneeAmt = Math.abs(Math.sin(wp)) * 0.08;
 
-    // Natural arm pendulum -- opposite to legs, with elbow bend
+    // Natural arm pendulum - opposite to legs, with elbow bend
     const armPhase = Math.sin(wp);
     const armSwingL = -armPhase * 0.3 * sFactor;   // left arm opposite right leg
     const armSwingR = armPhase * 0.3 * sFactor;
@@ -113,10 +113,10 @@ export class PoseSystem {
     // Torso twist (shoulders rotate opposite to hips)
     const torsoTwist = Math.sin(wp) * 0.03 * sFactor;
 
-    // Vertical bob (double frequency -- peak at mid-stance)
+    // Vertical bob (double frequency - peak at mid-stance)
     const bob = Math.abs(Math.sin(wp)) * 0.025;
 
-    // Head bob -- slight lag behind body
+    // Head bob - slight lag behind body
     const headBob = Math.abs(Math.sin(wp - 0.2)) * 0.015;
     const headLean = Math.sin(wp) * 0.008;
 
@@ -148,7 +148,7 @@ export class PoseSystem {
     const y = (surfaceY || 0) + 0.2;
     const chest = bp * 0.015;
 
-    // Micro-movements -- tiny random-feeling shifts (deterministic from elapsed)
+    // Micro-movements - tiny random-feeling shifts (deterministic from elapsed)
     const microX = Math.sin(elapsed * 0.17) * 0.004;
     const microZ = Math.cos(elapsed * 0.13) * 0.003;
     const fingerTwitch = Math.sin(elapsed * 0.7) * 0.008;
@@ -180,7 +180,7 @@ export class PoseSystem {
       ];
     }
 
-    // Supine (face up) -- default
+    // Supine (face up) - default
     return [
       [px - 0.75 + microX, y + 0.08, pz + microZ],                     // 0 nose
       [px - 0.72, y + 0.1, pz - 0.02 + microZ],                        // 1 left eye
@@ -244,7 +244,7 @@ export class PoseSystem {
   // Occasional twitch/attempt to move, asymmetric breathing
 
   poseFallen(px, pz, elapsed) {
-    // Irregular twitch -- sharper, less periodic
+    // Irregular twitch - sharper, less periodic
     const twitchArm = Math.sin(elapsed * 0.3) * 0.003 +
                       Math.sin(elapsed * 1.7) * 0.008 * Math.max(0, Math.sin(elapsed * 0.15));
     const twitchLeg = Math.cos(elapsed * 0.4) * 0.005 *
@@ -290,7 +290,7 @@ export class PoseSystem {
     // Cubic ease-in for realistic acceleration
     const t = progress * progress * progress;
 
-    // Arm flailing -- sinusoidal perturbation that peaks mid-fall then diminishes
+    // Arm flailing - sinusoidal perturbation that peaks mid-fall then diminishes
     const flailIntensity = Math.sin(progress * Math.PI) * 0.15;
     const flailL = Math.sin(elapsed * 8 + progress * 5) * flailIntensity;
     const flailR = Math.cos(elapsed * 8 + progress * 5) * flailIntensity;
@@ -336,7 +336,7 @@ export class PoseSystem {
 
   _poseSquats(px, pz, et) {
     const rawPhase = (Math.sin(et * 2.5) + 1) / 2; // 0=up, 1=down
-    // Depth variation -- every other rep is shallower
+    // Depth variation - every other rep is shallower
     const repIndex = Math.floor(et * 2.5 / Math.PI);
     const depthMod = (repIndex % 2 === 0) ? 1.0 : 0.7;
     const phase = rawPhase * depthMod;
@@ -345,7 +345,7 @@ export class PoseSystem {
     const armFwd = phase * 0.4;
     // Forward lean increases with squat depth
     const forwardLean = phase * 0.08;
-    // Hip hinge -- hips push back
+    // Hip hinge - hips push back
     const hipBack = phase * 0.12;
 
     return [
@@ -375,13 +375,13 @@ export class PoseSystem {
     const rawPhase = (Math.sin(et * 3) + 1) / 2; // 0=closed, 1=open
     const phase = rawPhase;
 
-    // Full arm arc -- from sides to overhead in a smooth arc
+    // Full arm arc - from sides to overhead in a smooth arc
     const armAngle = phase * Math.PI * 0.85; // 0 to ~153 degrees
     const armX = Math.sin(armAngle) * 0.55;  // lateral spread
     const armY = Math.cos(armAngle) * 0.55;  // vertical component
 
     const legSpread = phase * 0.25;
-    // Landing impact -- brief compression at bottom of cycle
+    // Landing impact - brief compression at bottom of cycle
     const impact = Math.max(0, -Math.sin(et * 3)) * 0.03;
     const jump = Math.max(0, Math.sin(et * 3)) * 0.06;
     // Hip sway at apex
@@ -487,7 +487,7 @@ export class PoseSystem {
     const radius = 0.25 * intensity;
     const cx = Math.cos(angle) * radius;
     const cy = Math.sin(angle) * radius;
-    // Forearm rotation -- wrist traces a smaller secondary circle
+    // Forearm rotation - wrist traces a smaller secondary circle
     const forearmAngle = angle * 1.5;
     const forearmR = 0.06 * intensity;
 
@@ -511,7 +511,7 @@ export class PoseSystem {
 
   _gesturePoint(base, px, pz, gt, intensity) {
     const point = intensity;
-    // Slight arm sway -- breathing/holding still
+    // Slight arm sway - breathing/holding still
     const sway = Math.sin(gt * 1.5) * 0.01 * intensity;
     const vertSway = Math.cos(gt * 1.2) * 0.008 * intensity;
 

@@ -37,15 +37,15 @@ check:
 	@./install.sh --check-only
 
 # ─── Verification ────────────────────────────────────────────
-# Trust Kill Switch -- one-command proof replay
+# Trust Kill Switch - one-command proof replay
 verify:
 	@./verify
 
-# Verbose mode -- show detailed feature statistics and Doppler spectrum
+# Verbose mode - show detailed feature statistics and Doppler spectrum
 verify-verbose:
 	@./verify --verbose
 
-# Full audit -- verify pipeline + scan codebase for mock/random patterns
+# Full audit - verify pipeline + scan codebase for mock/random patterns
 verify-audit:
 	@./verify --verbose --audit
 
@@ -57,7 +57,7 @@ build-wasm:
 	cd rust-port/wifi-densepose-rs && wasm-pack build crates/wifi-densepose-wasm --target web --release
 
 build-wasm-mat:
-	cd rust-port/wifi-densepose-rs && wasm-pack build crates/wifi-densepose-wasm --target web --release -- --features mat
+	cd rust-port/wifi-densepose-rs && wasm-pack build crates/wifi-densepose-wasm --target web --release - --features mat
 
 test-rust:
 	cd rust-port/wifi-densepose-rs && cargo test --workspace

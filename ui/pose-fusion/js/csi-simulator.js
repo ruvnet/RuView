@@ -1,5 +1,5 @@
 /**
- * CSI Simulator — Generates realistic WiFi Channel State Information data.
+ * CSI Simulator - Generates realistic WiFi Channel State Information data.
  *
  * In live mode, connects to the sensing server via WebSocket.
  * In demo mode, generates synthetic CSI that correlates with detected motion.
@@ -83,7 +83,7 @@ export class CsiSimulator {
     if (this.mode === 'live') return;
 
     if (presence > 0.1) {
-      // Person detected in video — update CSI state directly
+      // Person detected in video - update CSI state directly
       this.personPresence = presence;
       this.personX = x;
       this.personY = y;
@@ -92,7 +92,7 @@ export class CsiSimulator {
       this._lastSeenX = x;
       this._lastSeenY = y;
     } else if (this._lastSeenTime) {
-      // Person NOT in video — CSI "through-wall" persistence
+      // Person NOT in video - CSI "through-wall" persistence
       const elapsed = (performance.now() - this._lastSeenTime) / 1000;
       // CSI can sense through walls for ~10 seconds with decaying confidence
       const decayRate = 0.15; // Lose ~15% per second

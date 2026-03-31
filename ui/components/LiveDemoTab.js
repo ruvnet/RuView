@@ -146,7 +146,7 @@ export class LiveDemoTab {
       // Create enhanced structure if it doesn't exist
       const enhancedHTML = `
         <div class="live-demo-enhanced">
-          <!-- Data source banner — prominent indicator for live vs simulated -->
+          <!-- Data source banner - prominent indicator for live vs simulated -->
           <div id="demo-source-banner" class="demo-source-banner demo-source-unknown" role="status" aria-live="polite">
             Detecting data source...
           </div>
@@ -1035,7 +1035,7 @@ export class LiveDemoTab {
       stopBtn.addEventListener('click', () => this.stopDemo());
     }
 
-    // Offline demo button — runs client-side animated demo (no server needed)
+    // Offline demo button - runs client-side animated demo (no server needed)
     const offlineDemoBtn = this.container.querySelector('#run-offline-demo');
     if (offlineDemoBtn) {
       offlineDemoBtn.addEventListener('click', () => {

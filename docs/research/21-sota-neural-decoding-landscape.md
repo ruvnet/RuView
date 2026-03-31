@@ -1,6 +1,6 @@
 # State-of-the-Art Neural Decoding Landscape (2023–2026)
 
-## SOTA Research Document — RF Topological Sensing Series (21/22)
+## SOTA Research Document - RF Topological Sensing Series (21/22)
 
 **Date**: 2026-03-09
 **Domain**: Neural Decoding × Generative AI × Brain-Computer Interfaces × Quantum Sensing
@@ -11,7 +11,7 @@
 ## 1. Introduction
 
 The field of neural decoding has undergone a phase transition between 2023 and 2026. Three
-technologies stacked together — sensors, decoders, and visualization/reconstruction systems —
+technologies stacked together - sensors, decoders, and visualization/reconstruction systems  - 
 have collectively moved "brain reading" from science fiction to engineering challenge. Yet the
 popular narrative obscures a critical distinction: current systems decode *perceived* and
 *intended* content from neural activity, not arbitrary private thoughts.
@@ -22,7 +22,7 @@ territory where topological brain modeling could open an entirely new research d
 
 ---
 
-## 2. Layer 1: Neural Sensors — The Fidelity Floor
+## 2. Layer 1: Neural Sensors - The Fidelity Floor
 
 Everything in neural decoding is bounded by sensor fidelity. No algorithm can extract
 information that the sensor never captured.
@@ -54,7 +54,7 @@ information that the sensor never captured.
 
 **Fundamental Limitation**: Requires brain surgery. Coverage area is tiny relative to the
 whole brain (~0.001% of cortical surface per array). Each implant covers one small patch.
-Network-level topology analysis requires coverage of many regions simultaneously — the exact
+Network-level topology analysis requires coverage of many regions simultaneously - the exact
 opposite of what implants provide.
 
 **Why This Matters for Mincut Architecture**: Implants give depth but not breadth. Dynamic
@@ -208,7 +208,7 @@ analysis. NV diamond arrays represent the medium-term upgrade path.
 
 ---
 
-## 3. Layer 2: Neural Decoders — AI Meets Neuroscience
+## 3. Layer 2: Neural Decoders - AI Meets Neuroscience
 
 ### 3.1 The Translation Paradigm
 
@@ -391,7 +391,7 @@ This means:
 **Implication for Topology Analysis**: The RuVector/mincut approach sidesteps the hallucination
 problem entirely. It measures *structural properties* of brain activity (network topology,
 coherence boundaries) rather than trying to generate *content* (images, text). There is no
-generative prior to hallucinate — the topology either changes or it doesn't.
+generative prior to hallucinate - the topology either changes or it doesn't.
 
 ---
 
@@ -478,7 +478,7 @@ LOW FIDELITY        EEG motor imagery              EEG connectivity (basic)
 ```
 
 The RuVector + mincut architecture occupies the **medium-fidelity, structure-focused** quadrant
-— a space that is largely unexplored in current research.
+ -  a space that is largely unexplored in current research.
 
 ### 6.3 What This Architecture Uniquely Enables
 
@@ -489,7 +489,7 @@ The RuVector + mincut architecture occupies the **medium-fidelity, structure-foc
    which correlates with cognitive state changes.
 
 3. **Longitudinal tracking**: RuVector memory enables tracking of topology evolution over
-   days, weeks, months — detecting gradual changes like neurodegeneration.
+   days, weeks, months - detecting gradual changes like neurodegeneration.
 
 4. **Content-agnostic monitoring**: The system does not need to decode what is being thought.
    It detects how the brain organizes its processing, which is clinically and scientifically
@@ -533,7 +533,7 @@ Foundation models could learn brain topology patterns from large datasets:
 - Enable cross-subject topology comparison in a shared embedding space
 
 This is where RuVector's contrastive learning (AETHER) and geometric embedding become
-particularly valuable — they provide the representational framework for topology foundation
+particularly valuable - they provide the representational framework for topology foundation
 models.
 
 ---
@@ -559,7 +559,7 @@ Used GPT-based language model to map fMRI activity to word sequences.
 **Result**: Recovered semantic meaning of stories (not verbatim words).
 
 **Significance**: First open-vocabulary language decoder from non-invasive imaging. Crucially,
-decoding failed when subjects were not cooperating — they could defeat the decoder by
+decoding failed when subjects were not cooperating - they could defeat the decoder by
 thinking about other things.
 
 ### 8.3 Takagi & Nishimoto Image Reconstruction (2023)
@@ -601,9 +601,9 @@ speed. MEG's temporal resolution enabled tracking of dynamic visual processing.
 1. **Content decoding is advancing rapidly** but remains subject-specific and perception-bound.
 2. **Non-invasive sensors are reaching sufficient fidelity** for network-level analysis.
 3. **Generative AI amplifies decoding** but introduces hallucination risks.
-4. **Topology analysis is the unexplored dimension** — no major group is doing real-time
+4. **Topology analysis is the unexplored dimension** - no major group is doing real-time
    mincut-based brain network analysis.
-5. **OPM-MEG is the enabling technology** — wearable, high-fidelity, affordable trajectory.
+5. **OPM-MEG is the enabling technology** - wearable, high-fidelity, affordable trajectory.
 
 ### 9.2 Recommended Architecture Priorities
 
@@ -627,7 +627,7 @@ speed. MEG's temporal resolution enabled tracking of dynamic visual processing.
   but these are static (one scan per subject).
 
 - **Dynamic functional connectivity (dFC)**: fMRI-based studies examine time-varying
-  connectivity, but at ~0.5 Hz temporal resolution — too slow for real-time cognitive
+  connectivity, but at ~0.5 Hz temporal resolution - too slow for real-time cognitive
   tracking.
 
 - **No one is doing real-time mincut on brain networks from MEG/OPM data.** This is
@@ -673,7 +673,7 @@ better algorithms (transformers, diffusion models), and better training data. Ye
 progress has not addressed the fundamental question of how cognition organizes itself
 topologically.
 
-The RuVector + dynamic mincut architecture positions itself in this gap — not competing with
+The RuVector + dynamic mincut architecture positions itself in this gap - not competing with
 content decoders but opening an entirely new dimension of brain observation. Combined with
 OPM quantum sensors, this becomes a "topological brain observatory" that measures the
 architecture of thought rather than its content.

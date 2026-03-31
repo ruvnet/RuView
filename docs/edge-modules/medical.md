@@ -1,10 +1,10 @@
-# Medical & Health Modules -- WiFi-DensePose Edge Intelligence
+# Medical & Health Modules - WiFi-DensePose Edge Intelligence
 
-> Contactless health monitoring using WiFi signals. No wearables, no cameras -- just an ESP32 sensor reading WiFi reflections off a person's body to detect breathing problems, heart rhythm issues, walking difficulties, and seizures.
+> Contactless health monitoring using WiFi signals. No wearables, no cameras - just an ESP32 sensor reading WiFi reflections off a person's body to detect breathing problems, heart rhythm issues, walking difficulties, and seizures.
 
 ## Important Disclaimer
 
-These modules are **research tools, not FDA-approved medical devices**. They should supplement -- not replace -- professional medical monitoring. WiFi CSI-derived vital signs are inherently noisier than clinical instruments (ECG, pulse oximetry, respiratory belts). False positives and false negatives will occur. Always validate findings against clinical-grade equipment before acting on alerts.
+These modules are **research tools, not FDA-approved medical devices**. They should supplement - not replace - professional medical monitoring. WiFi CSI-derived vital signs are inherently noisier than clinical instruments (ECG, pulse oximetry, respiratory belts). False positives and false negatives will occur. Always validate findings against clinical-grade equipment before acting on alerts.
 
 ## Overview
 
@@ -29,7 +29,7 @@ All modules:
 
 ### Sleep Apnea Detection (`med_sleep_apnea.rs`)
 
-**What it does**: Monitors breathing rate from the host CSI pipeline and detects when breathing drops below 4 BPM for more than 10 consecutive seconds, indicating an apnea episode. It tracks all episodes and computes the Apnea-Hypopnea Index (AHI) -- the number of apnea events per hour of monitored sleep time. AHI is the standard clinical metric for sleep apnea severity.
+**What it does**: Monitors breathing rate from the host CSI pipeline and detects when breathing drops below 4 BPM for more than 10 consecutive seconds, indicating an apnea episode. It tracks all episodes and computes the Apnea-Hypopnea Index (AHI) - the number of apnea events per hour of monitored sleep time. AHI is the standard clinical metric for sleep apnea severity.
 
 **Clinical basis**: Obstructive and central sleep apnea are defined by cessation of airflow for 10 seconds or more. The module uses a breathing rate threshold of 4 BPM (essentially near-zero breathing) with a 10-second onset delay to confirm cessation is sustained. AHI severity classification: < 5 normal, 5-15 mild, 15-30 moderate, > 30 severe.
 
@@ -52,10 +52,10 @@ All modules:
 | `episode_count()` | method | Total recorded apnea episodes |
 | `monitoring_seconds()` | method | Total seconds with presence active |
 | `in_apnea()` | method | Whether currently in an apnea episode |
-| `APNEA_BPM_THRESH` | const | 4.0 BPM -- below this counts as apnea |
-| `APNEA_ONSET_SECS` | const | 10 seconds -- minimum duration to declare apnea |
-| `AHI_REPORT_INTERVAL` | const | 300 seconds (5 min) -- how often AHI is recalculated |
-| `MAX_EPISODES` | const | 256 -- maximum episodes stored per session |
+| `APNEA_BPM_THRESH` | const | 4.0 BPM - below this counts as apnea |
+| `APNEA_ONSET_SECS` | const | 10 seconds - minimum duration to declare apnea |
+| `AHI_REPORT_INTERVAL` | const | 300 seconds (5 min) - how often AHI is recalculated |
+| `MAX_EPISODES` | const | 256 - maximum episodes stored per session |
 
 #### Events Emitted
 
@@ -92,8 +92,8 @@ All modules:
 | `APNEA_BPM_THRESH` | 4.0 | 0-6 BPM | Breathing rate below which apnea is suspected |
 | `APNEA_ONSET_SECS` | 10 | 10-20 s | Seconds of low breathing before apnea is declared |
 | `AHI_REPORT_INTERVAL` | 300 | 60-3600 s | How often AHI is recalculated and emitted |
-| `MAX_EPISODES` | 256 | -- | Fixed buffer size for episode history |
-| `PRESENCE_ACTIVE` | 1 | -- | Minimum presence flag value for monitoring |
+| `MAX_EPISODES` | 256 | - | Fixed buffer size for episode history |
+| `PRESENCE_ACTIVE` | 1 | - | Minimum presence flag value for monitoring |
 
 #### Example Usage
 
@@ -102,7 +102,7 @@ use wifi_densepose_wasm_edge::med_sleep_apnea::*;
 
 let mut detector = SleepApneaDetector::new();
 
-// Normal breathing -- no events
+// Normal breathing - no events
 let events = detector.process_frame(14.0, 1, 0.1);
 assert!(events.is_empty());
 
@@ -191,7 +191,7 @@ println!("AHI: {:.1}", detector.ahi());
 
 #### State Machine
 
-The cardiac module does not have a formal state machine -- it uses independent detectors with cooldown timers:
+The cardiac module does not have a formal state machine - it uses independent detectors with cooldown timers:
 
 ```
 For each frame:
@@ -226,7 +226,7 @@ use wifi_densepose_wasm_edge::med_cardiac_arrhythmia::*;
 
 let mut detector = CardiacArrhythmiaDetector::new();
 
-// Normal heart rate -- no events
+// Normal heart rate - no events
 for _ in 0..60 {
     let events = detector.process_frame(72.0, 0.0);
     assert!(events.is_empty() || events.iter().all(|&(t, _)| t == EVENT_HRV_ANOMALY));
@@ -569,7 +569,7 @@ use wifi_densepose_wasm_edge::med_seizure_detect::*;
 
 let mut detector = SeizureDetector::new();
 
-// Normal motion -- no seizure
+// Normal motion - no seizure
 for _ in 0..200 {
     let events = detector.process_frame(0.0, 0.5, 0.3, 1);
     assert!(events.is_empty());
@@ -593,7 +593,7 @@ for _ in 0..100 {
     let events = detector.process_frame(0.0, 0.05, 0.05, 1);
     for &(event_id, _) in events {
         if event_id == EVENT_POST_ICTAL {
-            println!("Post-ictal phase detected -- patient needs immediate assessment");
+            println!("Post-ictal phase detected - patient needs immediate assessment");
         }
     }
 }
@@ -609,7 +609,7 @@ for _ in 0..100 {
 
 4. **Fall vs seizure discrimination**: The module automatically distinguishes falls (brief energy spike < 10 frames) from seizures (sustained energy). If the patient is known to be a fall risk, consider running the gait analysis module in parallel for complementary monitoring.
 
-5. **Response protocol**: When `EVENT_SEIZURE_ONSET` fires, immediately notify clinical staff. The `EVENT_POST_ICTAL` event indicates the active seizure has ended and the patient is entering post-ictal state -- they need assessment but are no longer in the convulsive phase.
+5. **Response protocol**: When `EVENT_SEIZURE_ONSET` fires, immediately notify clinical staff. The `EVENT_POST_ICTAL` event indicates the active seizure has ended and the patient is entering post-ictal state - they need assessment but are no longer in the convulsive phase.
 
 ---
 
@@ -619,7 +619,7 @@ All medical modules include comprehensive unit tests covering initialization, no
 
 ```bash
 cd rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge
-cargo test --features std -- med_
+cargo test --features std - med_
 ```
 
 Expected output: **38 tests passed, 0 failed**.
@@ -640,16 +640,16 @@ Expected output: **38 tests passed, 0 failed**.
 
 | Condition | Normal Range | Module Threshold | Clinical Standard | Notes |
 |-----------|-------------|------------------|-------------------|-------|
-| Breathing rate | 12-20 BPM | -- | -- | Normal adult at rest |
+| Breathing rate | 12-20 BPM | - | - | Normal adult at rest |
 | Bradypnea | < 12 BPM | Not directly detected | < 12 BPM | Gap: covered implicitly by distress score |
 | Tachypnea | > 20 BPM | > 25 BPM | > 20 BPM | Conservative threshold for CSI noise tolerance |
 | Apnea | 0 BPM | < 4 BPM for > 10s | Cessation > 10s | 4 BPM threshold accounts for CSI noise floor |
 | Bradycardia | < 60 BPM | < 50 BPM | < 60 BPM | Lower threshold avoids false positives in athletes |
 | Tachycardia | > 100 BPM | > 100 BPM | > 100 BPM | Matches clinical standard |
-| Heart rate (normal) | 60-100 BPM | -- | 60-100 BPM | -- |
-| AHI (mild apnea) | -- | > 5 events/hr | > 5 events/hr | Matches clinical standard |
-| AHI (moderate) | -- | > 15 events/hr | > 15 events/hr | Matches clinical standard |
-| AHI (severe) | -- | > 30 events/hr | > 30 events/hr | Matches clinical standard |
+| Heart rate (normal) | 60-100 BPM | - | 60-100 BPM | - |
+| AHI (mild apnea) | - | > 5 events/hr | > 5 events/hr | Matches clinical standard |
+| AHI (moderate) | - | > 15 events/hr | > 15 events/hr | Matches clinical standard |
+| AHI (severe) | - | > 30 events/hr | > 30 events/hr | Matches clinical standard |
 | RMSSD (normal HRV) | 20-80 ms | 10-120 ms | 19-75 ms | Widened band for CSI-derived HR |
 | Gait cadence (normal) | 80-120 steps/min | 80-120 steps/min | 90-120 steps/min | Slightly wider range |
 | Gait asymmetry | 1.0 ratio | > 0.15 deviation | > 0.10 deviation | Slightly higher threshold for CSI |
@@ -673,7 +673,7 @@ Several thresholds differ from strict clinical standards. This is intentional:
 2. **False positive rates.** WiFi CSI is affected by environmental factors: moving objects (fans, pets, curtains), multipath changes (opening doors, people walking nearby), and electromagnetic interference. Expect false positive rates of 5-15% in typical home environments and 1-5% in controlled clinical settings.
 
 3. **False negative rates.** The conservative thresholds mean some borderline conditions may not trigger alerts. Specifically:
-   - Bradypnea (12-20 BPM dropping to 12-4 BPM) is not directly flagged -- only sub-4 BPM apnea is detected
+   - Bradypnea (12-20 BPM dropping to 12-4 BPM) is not directly flagged - only sub-4 BPM apnea is detected
    - Mild tachycardia (100-120 BPM) is detected, but the 10-second sustained requirement means brief episodes are missed
    - Low-amplitude seizures without strong motor components may not exceed the energy threshold
 

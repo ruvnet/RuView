@@ -73,7 +73,7 @@ This ADR covers Phase 1 (TV box as aggregator) and Phase 2 (custom WiFi firmware
 5. **New Rust compilation target** in workspace CI:
    - Add `aarch64-unknown-linux-gnu` to cross-compilation matrix
    - Binary size target: <15 MB stripped (fits easily in SD card)
-   - No GPU dependency — CPU-only inference using `candle` or ONNX Runtime for ARM
+   - No GPU dependency - CPU-only inference using `candle` or ONNX Runtime for ARM
 
 ### Phase 2: Custom WiFi Firmware for CSI Extraction (Future)
 
@@ -81,9 +81,9 @@ This ADR covers Phase 1 (TV box as aggregator) and Phase 2 (custom WiFi firmware
 
    | Chipset | Driver | CSI Support | Monitor Mode | Effort |
    |---------|--------|-------------|--------------|--------|
-   | Broadcom BCM43455 | brcmfmac | **Proven** (Nexmon CSI) | Yes | Low — patches exist |
-   | Realtek RTL8822CS | rtw88 | **Moderate** — driver is open-source, CSI hooks need adding | Yes (patched) | Medium |
-   | MediaTek MT7661 | mt76 | **Unknown** — MediaTek has released CSI tools for some chips | Yes | Medium-High |
+   | Broadcom BCM43455 | brcmfmac | **Proven** (Nexmon CSI) | Yes | Low - patches exist |
+   | Realtek RTL8822CS | rtw88 | **Moderate** - driver is open-source, CSI hooks need adding | Yes (patched) | Medium |
+   | MediaTek MT7661 | mt76 | **Unknown** - MediaTek has released CSI tools for some chips | Yes | Medium-High |
 
 2. **CSI extraction architecture** (Linux kernel driver modification):
 
@@ -174,7 +174,7 @@ Total system cost: $55-65 (3 ESP32 nodes + 1 TV box)
     Central dashboard: aggregate all rooms via REST API
 ```
 
-### Standalone Mode (Phase 2 — Custom WiFi FW)
+### Standalone Mode (Phase 2 - Custom WiFi FW)
 
 ```
 ┌──────────────────────────────────────┐
@@ -222,9 +222,9 @@ Total system cost: $55-65 (3 ESP32 nodes + 1 TV box)
 
 ### Neutral
 
-- **No changes to existing ESP32 firmware** — TV box receives the same UDP frames
-- **No changes to sensing server protocol** — Phase 2 CSI output uses same binary format
-- **Existing web UI works as-is** — Chromium kiosk mode or any browser on the LAN
+- **No changes to existing ESP32 firmware** - TV box receives the same UDP frames
+- **No changes to sensing server protocol** - Phase 2 CSI output uses same binary format
+- **Existing web UI works as-is** - Chromium kiosk mode or any browser on the LAN
 
 ## Implementation Plan
 
@@ -253,11 +253,11 @@ Total system cost: $55-65 (3 ESP32 nodes + 1 TV box)
 
 ## References
 
-- [Nexmon CSI](https://github.com/seemoo-lab/nexmon_csi) — Broadcom WiFi CSI extraction (BCM43455, BCM4339, BCM4358)
-- [Armbian](https://www.armbian.com/) — Debian/Ubuntu for ARM SBCs and TV boxes
-- [rtw88 driver](https://github.com/torvalds/linux/tree/master/drivers/net/wireless/realtek/rtw88) — Mainline Linux driver for Realtek 802.11ac chips
-- [mt76 driver](https://github.com/torvalds/linux/tree/master/drivers/net/wireless/mediatek/mt76) — Mainline Linux driver for MediaTek WiFi chips
-- [cross](https://github.com/cross-rs/cross) — Zero-setup Rust cross-compilation
-- [ADR-018: ESP32 CSI Binary Protocol](ADR-018-dev-implementation.md) — Binary frame format reused for Phase 2 CSI extraction
-- [ADR-039: Edge Intelligence](ADR-039-esp32-edge-intelligence.md) — On-device processing tiers
-- [ADR-043: Sensing Server](ADR-043-sensing-server-ui-api-completion.md) — Single-binary deployment target
+- [Nexmon CSI](https://github.com/seemoo-lab/nexmon_csi) - Broadcom WiFi CSI extraction (BCM43455, BCM4339, BCM4358)
+- [Armbian](https://www.armbian.com/) - Debian/Ubuntu for ARM SBCs and TV boxes
+- [rtw88 driver](https://github.com/torvalds/linux/tree/master/drivers/net/wireless/realtek/rtw88) - Mainline Linux driver for Realtek 802.11ac chips
+- [mt76 driver](https://github.com/torvalds/linux/tree/master/drivers/net/wireless/mediatek/mt76) - Mainline Linux driver for MediaTek WiFi chips
+- [cross](https://github.com/cross-rs/cross) - Zero-setup Rust cross-compilation
+- [ADR-018: ESP32 CSI Binary Protocol](ADR-018-dev-implementation.md) - Binary frame format reused for Phase 2 CSI extraction
+- [ADR-039: Edge Intelligence](ADR-039-esp32-edge-intelligence.md) - On-device processing tiers
+- [ADR-043: Sensing Server](ADR-043-sensing-server-ui-api-completion.md) - Single-binary deployment target

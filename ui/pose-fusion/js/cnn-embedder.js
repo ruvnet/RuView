@@ -1,5 +1,5 @@
 /**
- * CNN Embedder — RuVector Attention-powered feature extractor.
+ * CNN Embedder - RuVector Attention-powered feature extractor.
  *
  * Uses the real ruvector-attention-wasm WASM module for Multi-Head Attention
  * and Flash Attention on CSI/video data. Falls back to a JS Conv2D pipeline
@@ -75,7 +75,7 @@ export class CnnEmbedder {
    * @param {string} wasmPath - Path to the WASM package directory
    */
   async tryLoadWasm(wasmPath) {
-    // First try: RuVector Attention WASM (the real thing — browser ESM build)
+    // First try: RuVector Attention WASM (the real thing - browser ESM build)
     try {
       const attnBase = new URL('../pkg/ruvector-attention/ruvector_attention_browser.js', import.meta.url).href;
       const mod = await import(attnBase);
@@ -94,7 +94,7 @@ export class CnnEmbedder {
 
       // Log available mechanisms
       const mechs = mod.available_mechanisms();
-      console.log(`[CNN] RuVector WASM v${mod.version()} — all 6 attention mechanisms active`, mechs);
+      console.log(`[CNN] RuVector WASM v${mod.version()} - all 6 attention mechanisms active`, mechs);
       return true;
     } catch (e) {
       console.log('[CNN] RuVector Attention WASM not available:', e.message);
@@ -170,7 +170,7 @@ export class CnnEmbedder {
     const outH = sz - 2, outW = sz - 2;
     const spatial = outH * outW;
 
-    // 7. RuVector Attention (if loaded) — apply attention over spatial tokens
+    // 7. RuVector Attention (if loaded) - apply attention over spatial tokens
     if (this.useRuVector && this.rvAttention) {
       return this._extractWithAttention(convOut, spatial, 16);
     }
@@ -212,7 +212,7 @@ export class CnnEmbedder {
    * 1. Flash Attention (efficient O(n) pre-screening of spatial tokens)
    * 2. Multi-Head Attention (global spatial reasoning)
    * 3. Hyperbolic Attention (hierarchical body-part structure, Poincaré ball)
-   * 4. Linear Attention (O(n) refinement for fine detail — hands/extremities)
+   * 4. Linear Attention (O(n) refinement for fine detail - hands/extremities)
    * 5. MoE Attention (body-region specialized expert routing)
    * 6. Local-Global Attention (local detail + global context fusion)
    * → Weighted blend + batch_normalize + project + L2 normalize

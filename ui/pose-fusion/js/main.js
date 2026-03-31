@@ -1,5 +1,5 @@
 /**
- * RuView — Dual-Modal Pose Estimation Demo
+ * RuView - Dual-Modal Pose Estimation Demo
  *
  * Main orchestration: video capture → CNN embedding → CSI processing → fusion → rendering
  */
@@ -82,7 +82,7 @@ const RSSI_HISTORY_MAX = 80;
 
 // === Initialize ===
 function init() {
-  console.log(`[PoseFusion] init() v4 — CsiSimulator=${CsiSimulator.VERSION || 'OLD'}, starting...`);
+  console.log(`[PoseFusion] init() v4 - CsiSimulator=${CsiSimulator.VERSION || 'OLD'}, starting...`);
   resizeCanvases();
   console.log(`[PoseFusion] canvases: skeleton=${skeletonCanvas.width}x${skeletonCanvas.height}, csi=${csiCanvas.width}x${csiCanvas.height}, emb=${embeddingCanvas.width}x${embeddingCanvas.height}`);
   window.addEventListener('resize', resizeCanvases);
@@ -130,7 +130,7 @@ function init() {
     const backendEl = document.getElementById('cnn-backend');
     if (backendEl) {
       backendEl.textContent = ok && visualCnn.useRuVector
-        ? `RuVector WASM v${visualCnn.rvModule.version()} — 6 attention mechanisms`
+        ? `RuVector WASM v${visualCnn.rvModule.version()} - 6 attention mechanisms`
         : 'ruvector-cnn (JS fallback)';
     }
   });
@@ -361,7 +361,7 @@ function mainLoop(timestamp) {
   // One-time diagnostic
   if (!_diagDone) {
     _diagDone = true;
-    console.log(`[PoseFusion] frame 1 OK — mode=${mode}, csi.bufLen=${csiSimulator.amplitudeBuffer.length}, embPts=${embPoints?.fused?.length ?? 0}, rssi=${(csiSimulator.rssiDbm ?? -99).toFixed(1)}`);
+    console.log(`[PoseFusion] frame 1 OK - mode=${mode}, csi.bufLen=${csiSimulator.amplitudeBuffer.length}, embPts=${embPoints?.fused?.length ?? 0}, rssi=${(csiSimulator.rssiDbm ?? -99).toFixed(1)}`);
   }
 
   } catch (err) {

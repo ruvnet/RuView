@@ -190,9 +190,9 @@ pub struct SemanticVersion {
 ```
 
 **Domain Services:**
-- `ProvisioningService` — Generates Armbian SD card image with pre-configured deployment package, WiFi credentials, and systemd units
-- `HealthMonitorService` — Listens for UDP health beacons from fleet appliances, triggers alerts on thermal throttling (>80°C), unreachable (>5 min), or high memory usage (>90%)
-- `OtaUpdateService` — Downloads new binary from release URL, verifies SHA-256 checksum, performs atomic swap (`rename(new, current)`), restarts systemd service, rolls back if health beacon fails within 60s
+- `ProvisioningService` - Generates Armbian SD card image with pre-configured deployment package, WiFi credentials, and systemd units
+- `HealthMonitorService` - Listens for UDP health beacons from fleet appliances, triggers alerts on thermal throttling (>80°C), unreachable (>5 min), or high memory usage (>90%)
+- `OtaUpdateService` - Downloads new binary from release URL, verifies SHA-256 checksum, performs atomic swap (`rename(new, current)`), restarts systemd service, rolls back if health beacon fails within 60s
 
 **Invariants:**
 - Device ID (MAC address) is immutable after provisioning
@@ -289,7 +289,7 @@ pub struct BuildTarget {
 - Stripped binary must be under size limit for target
 - SHA-256 checksum is computed and included in every deployment package
 - UI assets are embedded in binary via `include_dir!` or bundled alongside
-- No native GPU dependencies — CPU-only inference (candle or ONNX Runtime)
+- No native GPU dependencies - CPU-only inference (candle or ONNX Runtime)
 
 ---
 
@@ -455,10 +455,10 @@ pub struct Esp32CompatFrame {
 ```
 
 **Domain Services:**
-- `CsiExtractionService` — Reads raw CSI from patched driver via Netlink socket (BCM43455), procfs (RTL8822CS), or UDP (MT7661)
-- `SubcarrierResamplerService` — Resamples chipset-specific subcarrier counts to match ESP32 format (e.g., 256 → 128 via decimation or interpolation)
-- `ProtocolTranslatorService` — Converts `ChipsetCsiFrame` to `Esp32CompatFrame` with ADR-018 binary encoding
-- `CalibrationService` — Compensates for chipset-specific phase offsets, antenna spacing, and gain differences relative to ESP32 CSI
+- `CsiExtractionService` - Reads raw CSI from patched driver via Netlink socket (BCM43455), procfs (RTL8822CS), or UDP (MT7661)
+- `SubcarrierResamplerService` - Resamples chipset-specific subcarrier counts to match ESP32 format (e.g., 256 → 128 via decimation or interpolation)
+- `ProtocolTranslatorService` - Converts `ChipsetCsiFrame` to `Esp32CompatFrame` with ADR-018 binary encoding
+- `CalibrationService` - Compensates for chipset-specific phase offsets, antenna spacing, and gain differences relative to ESP32 CSI
 
 **Invariants:**
 - Bridge assigns virtual `node_id` in range 200-254 (reserved for non-ESP32 sources) to avoid collision with physical ESP32 node IDs (1-199)
@@ -538,15 +538,15 @@ pub struct EspNodeConnection {
 ```
 
 **Domain Services:**
-- `DedicatedApService` — Configures `hostapd` to create a WPA2 AP on the TV box's WiFi interface, assigns DHCP range via `dnsmasq`, sets up IP forwarding
-- `NodeDiscoveryService` — Monitors UDP port 5005 for new ESP32 node IDs, registers them in the topology, alerts on node departure (no frames for >30s)
-- `FirewallService` — Configures `nftables`/`iptables` to isolate the ESP32 subnet from the upstream LAN, allowing only UDP 5005 inbound and HTTP 3000 outbound
+- `DedicatedApService` - Configures `hostapd` to create a WPA2 AP on the TV box's WiFi interface, assigns DHCP range via `dnsmasq`, sets up IP forwarding
+- `NodeDiscoveryService` - Monitors UDP port 5005 for new ESP32 node IDs, registers them in the topology, alerts on node departure (no frames for >30s)
+- `FirewallService` - Configures `nftables`/`iptables` to isolate the ESP32 subnet from the upstream LAN, allowing only UDP 5005 inbound and HTTP 3000 outbound
 
 **Invariants:**
 - Dedicated AP uses a separate WiFi interface or virtual interface (not the uplink)
 - ESP32 subnet is isolated from upstream LAN by default (firewall rules)
 - If dedicated AP is disabled, ESP32 nodes must be on the same LAN subnet as the appliance
-- Node discovery does not require mDNS or any discovery protocol — ESP32 nodes are configured with the appliance's IP via NVS provisioning (ADR-044)
+- Node discovery does not require mDNS or any discovery protocol - ESP32 nodes are configured with the appliance's IP via NVS provisioning (ADR-044)
 
 ---
 
@@ -639,10 +639,10 @@ For multi-room deployments, each appliance is self-contained (runs its own sensi
 
 ## Related
 
-- [ADR-046: Android TV Box / Armbian Deployment](../adr/ADR-046-android-tv-box-armbian-deployment.md) — Primary architectural decision
-- [ADR-012: ESP32 CSI Sensor Mesh](../adr/ADR-012-esp32-csi-sensor-mesh.md) — ESP32 mesh network design
-- [ADR-018: Dev Implementation](../adr/ADR-018-dev-implementation.md) — ESP32 binary CSI protocol
-- [ADR-039: Edge Intelligence](../adr/ADR-039-esp32-edge-intelligence.md) — On-device processing tiers
-- [ADR-044: Provisioning Tool](../adr/ADR-044-provisioning-tool-enhancements.md) — NVS provisioning for ESP32 nodes
-- [Hardware Platform Domain Model](hardware-platform-domain-model.md) — Upstream domain (ESP32 hardware)
-- [Sensing Server Domain Model](sensing-server-domain-model.md) — Upstream domain (server software)
+- [ADR-046: Android TV Box / Armbian Deployment](../adr/ADR-046-android-tv-box-armbian-deployment.md) - Primary architectural decision
+- [ADR-012: ESP32 CSI Sensor Mesh](../adr/ADR-012-esp32-csi-sensor-mesh.md) - ESP32 mesh network design
+- [ADR-018: Dev Implementation](../adr/ADR-018-dev-implementation.md) - ESP32 binary CSI protocol
+- [ADR-039: Edge Intelligence](../adr/ADR-039-esp32-edge-intelligence.md) - On-device processing tiers
+- [ADR-044: Provisioning Tool](../adr/ADR-044-provisioning-tool-enhancements.md) - NVS provisioning for ESP32 nodes
+- [Hardware Platform Domain Model](hardware-platform-domain-model.md) - Upstream domain (ESP32 hardware)
+- [Sensing Server Domain Model](sensing-server-domain-model.md) - Upstream domain (server software)

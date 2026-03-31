@@ -11,7 +11,7 @@
 
 The WiFi-DensePose UI was originally built to require the full FastAPI DensePose backend (`localhost:8000`) for all functionality. This backend depends on heavy Python packages (PyTorch ~2GB, torchvision, OpenCV, SQLAlchemy, Redis) making it impractical for lightweight sensing-only deployments where the user simply wants to visualize live WiFi signal data from ESP32 CSI or Windows RSSI collectors.
 
-A Rust port exists (`rust-port/wifi-densepose-rs`) using Axum with lighter runtime footprint (~10MB binary, ~5MB RAM), but it still requires libtorch C++ bindings and OpenBLAS for compilation—a non-trivial build.
+A Rust port exists (`rust-port/wifi-densepose-rs`) using Axum with lighter runtime footprint (~10MB binary, ~5MB RAM), but it still requires libtorch C++ bindings and OpenBLAS for compilation - a non-trivial build.
 
 Users need a way to run the UI with **only the sensing pipeline** active, without installing the full DensePose backend stack.
 
@@ -99,10 +99,10 @@ Windows WiFi RSSI ───┘         │                          │         
 ## Consequences
 
 ### Positive
-- UI works with zero heavy dependencies—only `pip install websockets` (+ numpy/scipy already installed)
+- UI works with zero heavy dependencies - only `pip install websockets` (+ numpy/scipy already installed)
 - ESP32 CSI data flows end-to-end without PyTorch, OpenCV, or database
 - Existing DensePose tabs still work when the full backend is running
-- Clean console output—no `ERR_CONNECTION_REFUSED` spam in sensing-only mode
+- Clean console output - no `ERR_CONNECTION_REFUSED` spam in sensing-only mode
 
 ### Negative
 - Two separate WebSocket endpoints: `:8765` (sensing) and `:8000/api/v1/stream/pose` (DensePose)

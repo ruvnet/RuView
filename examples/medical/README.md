@@ -1,6 +1,6 @@
 # Medical Sensing Examples
 
-Contactless vital sign monitoring using 60 GHz mmWave radar — no wearable, no camera, no physical contact.
+Contactless vital sign monitoring using 60 GHz mmWave radar - no wearable, no camera, no physical contact.
 
 ## Blood Pressure Estimator
 
@@ -28,7 +28,7 @@ From there, the estimator:
 | Component | Cost | Role |
 |-----------|------|------|
 | ESP32-C6 + Seeed MR60BHA2 | ~$15 | 60 GHz mmWave radar (HR, BR, presence) |
-| USB cable | — | Power + serial data |
+| USB cable | - | Power + serial data |
 
 That's it. Total cost: **~$15**.
 
@@ -37,7 +37,7 @@ That's it. Total cost: **~$15**.
 ```bash
 pip install pyserial numpy
 
-# Basic (uncalibrated — shows trends)
+# Basic (uncalibrated - shows trends)
 python examples/medical/bp_estimator.py --port COM4
 
 # Calibrated (take a real BP reading first, then enter it)
@@ -72,7 +72,7 @@ python examples/medical/bp_estimator.py --port COM4 \
 |-----------|----------|
 | Uncalibrated, stationary | ±15-20 mmHg (trend tracking) |
 | Calibrated, stationary | ±8-12 mmHg |
-| Moving subject | Not reliable — wait for subject to be still |
+| Moving subject | Not reliable - wait for subject to be still |
 
 Accuracy improves with:
 - Longer recording duration (60s minimum, 120s recommended)

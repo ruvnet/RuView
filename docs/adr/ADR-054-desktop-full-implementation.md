@@ -1,7 +1,7 @@
 # ADR-054: RuView Desktop Full Implementation
 
 ## Status
-**Accepted** — Implementation in progress
+**Accepted** - Implementation in progress
 
 ## Context
 
@@ -665,10 +665,10 @@ espflash = "4.0"
 
 ## 8. Rollout Plan
 
-1. **v0.3.1** — Settings fix + Discovery + Server
-2. **v0.4.0** — Flash + OTA (single node)
-3. **v0.5.0** — Batch OTA + WASM + Provision
-4. **v1.0.0** — Full E2E tested, security audited
+1. **v0.3.1** - Settings fix + Discovery + Server
+2. **v0.4.0** - Flash + OTA (single node)
+3. **v0.5.0** - Batch OTA + WASM + Provision
+4. **v1.0.0** - Full E2E tested, security audited
 
 ---
 

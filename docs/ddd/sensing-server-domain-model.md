@@ -1,6 +1,6 @@
 # Sensing Server Domain Model
 
-The Sensing Server is the single-binary deployment surface of WiFi-DensePose. It receives raw CSI frames from ESP32 nodes, processes them into sensing features, streams live data to a web UI, and provides a self-contained workflow for recording data, training models, and running inference -- all without external dependencies.
+The Sensing Server is the single-binary deployment surface of WiFi-DensePose. It receives raw CSI frames from ESP32 nodes, processes them into sensing features, streams live data to a web UI, and provides a self-contained workflow for recording data, training models, and running inference - all without external dependencies.
 
 This document defines the system using [Domain-Driven Design](https://martinfowler.com/bliki/DomainDrivenDesign.html) (DDD): bounded contexts that own their data and rules, aggregate roots that enforce invariants, value objects that carry meaning, and domain events that connect everything. The server is implemented as a single Axum binary (`wifi-densepose-sensing-server`) with all state managed through `Arc<RwLock<AppStateInner>>`.
 
@@ -38,7 +38,7 @@ All code paths shown are relative to `rust-port/wifi-densepose-rs/crates/wifi-de
 | **Progressive Loader** | A two-layer model loading strategy: Layer A loads instantly for basic inference, Layer B loads in background for full accuracy |
 | **Sensing-Only Mode** | UI mode when the DensePose backend is unavailable; suppresses DensePose tabs, shows only sensing and signal visualization |
 | **AppStateInner** | The single shared state struct holding all server state, accessed via `Arc<RwLock<AppStateInner>>` |
-| **PCK Score** | Percentage of Correct Keypoints -- the primary accuracy metric for pose estimation models |
+| **PCK Score** | Percentage of Correct Keypoints - the primary accuracy metric for pose estimation models |
 | **Contrastive Pretraining** | Self-supervised training on unlabeled CSI data that learns signal representations before supervised fine-tuning (ADR-024) |
 
 ---
@@ -192,9 +192,9 @@ pub enum DataSource {
 ```
 
 **Domain Services:**
-- `FeatureExtractionService` -- Computes temporal variance (Welford), Goertzel breathing estimation (9-band filter bank), L2 frame-to-frame motion score, SNR-based signal quality
-- `VitalSignDetectionService` -- Estimates breathing rate, heart rate, and confidence from CSI phase history
-- `DataSourceSelectionService` -- Probes UDP port 5005 for ESP32 frames; falls back through Windows RSSI then simulation
+- `FeatureExtractionService` - Computes temporal variance (Welford), Goertzel breathing estimation (9-band filter bank), L2 frame-to-frame motion score, SNR-based signal quality
+- `VitalSignDetectionService` - Estimates breathing rate, heart rate, and confidence from CSI phase history
+- `DataSourceSelectionService` - Probes UDP port 5005 for ESP32 frames; falls back through Windows RSSI then simulation
 
 **Invariants:**
 - Frame history buffer never exceeds 100 entries (oldest dropped on push)
@@ -312,9 +312,9 @@ pub struct ActivateLoraRequest {
 ```
 
 **Domain Services:**
-- `ModelScanService` -- Scans `data/models/` at startup for `.rvf` files, parses each with `RvfReader` to extract manifest metadata
-- `ModelLoadService` -- Reads model weights from an RVF container into memory, sets `model_loaded = true`
-- `LoraActivationService` -- Switches the active LoRA adapter on a loaded model without full reload
+- `ModelScanService` - Scans `data/models/` at startup for `.rvf` files, parses each with `RvfReader` to extract manifest metadata
+- `ModelLoadService` - Reads model weights from an RVF container into memory, sets `model_loaded = true`
+- `LoraActivationService` - Switches the active LoRA adapter on a loaded model without full reload
 
 **Invariants:**
 - Only one model can be loaded at a time; loading a new model implicitly unloads the previous one
@@ -426,10 +426,10 @@ pub struct StartRecordingRequest {
 ```
 
 **Domain Services:**
-- `RecordingLifecycleService` -- Creates a new `.csi.jsonl` file, generates session ID, manages start/stop transitions
-- `FrameWriterService` -- Called on each tick via `maybe_record_frame()`, appends a `RecordedFrame` JSON line to the active file
-- `AutoStopService` -- Checks elapsed time against `duration_secs` on each tick; triggers stop when exceeded
-- `RecordingScanService` -- Enumerates `data/recordings/` for `.csi.jsonl` files and reads companion `.meta.json` for session metadata
+- `RecordingLifecycleService` - Creates a new `.csi.jsonl` file, generates session ID, manages start/stop transitions
+- `FrameWriterService` - Called on each tick via `maybe_record_frame()`, appends a `RecordedFrame` JSON line to the active file
+- `AutoStopService` - Checks elapsed time against `duration_secs` on each tick; triggers stop when exceeded
+- `RecordingScanService` - Enumerates `data/recordings/` for `.csi.jsonl` files and reads companion `.meta.json` for session metadata
 
 **Invariants:**
 - Only one recording session can be active at a time; starting a new recording while one is active returns HTTP 409 Conflict
@@ -567,10 +567,10 @@ pub struct LoraTrainRequest {
 ```
 
 **Domain Services:**
-- `TrainingOrchestrationService` -- Spawns a background `tokio::task`, loads recorded frames, runs feature extraction, executes gradient descent with early stopping and warmup
-- `FeatureExtractionService` -- Computes per-subcarrier sliding-window variance, temporal gradients, Goertzel frequency-domain power across 9 bands, and 3 global scalar features (mean amplitude, std, motion score)
-- `ProgressBroadcastService` -- Sends `TrainingProgress` messages through a `broadcast::Sender` channel that WebSocket handlers subscribe to
-- `RvfExportService` -- Uses `RvfBuilder` to write the best checkpoint as a `.rvf` container to `data/models/`
+- `TrainingOrchestrationService` - Spawns a background `tokio::task`, loads recorded frames, runs feature extraction, executes gradient descent with early stopping and warmup
+- `FeatureExtractionService` - Computes per-subcarrier sliding-window variance, temporal gradients, Goertzel frequency-domain power across 9 bands, and 3 global scalar features (mean amplitude, std, motion score)
+- `ProgressBroadcastService` - Sends `TrainingProgress` messages through a `broadcast::Sender` channel that WebSocket handlers subscribe to
+- `RvfExportService` - Uses `RvfBuilder` to write the best checkpoint as a `.rvf` container to `data/models/`
 
 **Invariants:**
 - Only one training run can be active at a time; starting training while one is running returns HTTP 409 Conflict
@@ -646,17 +646,17 @@ pub enum RenderMode {
 ```
 
 **Domain Services:**
-- `WebSocketBroadcastService` -- Subscribes to `broadcast::Sender<String>`, forwards each `SensingUpdate` JSON to all connected WebSocket clients
-- `SensingServiceJS` -- Client-side JavaScript that manages WebSocket connection, tracks `dataSource` state, falls back to simulation after 5 failed reconnect attempts (~30s delay)
-- `GaussianSplatRenderer` -- Custom GLSL `ShaderMaterial` rendering point-cloud splats on a 20x20 floor grid, colored by signal intensity
-- `PoseRenderer` -- Renders skeleton, keypoints, heatmap, or dense body segmentation modes
-- `BackendDetector` -- Auto-detects whether the full DensePose backend is available; sets `sensingOnlyMode = true` if unreachable
+- `WebSocketBroadcastService` - Subscribes to `broadcast::Sender<String>`, forwards each `SensingUpdate` JSON to all connected WebSocket clients
+- `SensingServiceJS` - Client-side JavaScript that manages WebSocket connection, tracks `dataSource` state, falls back to simulation after 5 failed reconnect attempts (~30s delay)
+- `GaussianSplatRenderer` - Custom GLSL `ShaderMaterial` rendering point-cloud splats on a 20x20 floor grid, colored by signal intensity
+- `PoseRenderer` - Renders skeleton, keypoints, heatmap, or dense body segmentation modes
+- `BackendDetector` - Auto-detects whether the full DensePose backend is available; sets `sensingOnlyMode = true` if unreachable
 
 **Invariants:**
 - WebSocket sensing service is started on application init, not lazily on tab visit (ADR-043 fix)
 - Simulation fallback is delayed to 5 failed reconnect attempts (~30 seconds) to avoid premature synthetic data
 - `pose_source` field is passed through data conversion so the Estimation Mode badge displays correctly
-- Dashboard and Live Demo tabs read `sensingService.dataSource` at load time -- the service must already be connected
+- Dashboard and Live Demo tabs read `sensingService.dataSource` at load time - the service must already be connected
 
 ---
 
@@ -676,8 +676,8 @@ pub enum RenderMode {
 | `TrainingEpochComplete` | Training Pipeline | Visualization (WebSocket) | `{ epoch, total_epochs, train_loss, val_pck, lr }` |
 | `TrainingComplete` | Training Pipeline | Model Management, Visualization | `{ run_id, final_pck, model_path }` |
 | `TrainingFailed` | Training Pipeline | Visualization | `{ run_id, error_message }` |
-| `WebSocketClientConnected` | Visualization | -- | `{ endpoint, client_addr }` |
-| `WebSocketClientDisconnected` | Visualization | -- | `{ endpoint, client_addr }` |
+| `WebSocketClientConnected` | Visualization | - | `{ endpoint, client_addr }` |
+| `WebSocketClientDisconnected` | Visualization | - | `{ endpoint, client_addr }` |
 
 In the current implementation, events are realized through two mechanisms:
 1. **`broadcast::Sender<String>`** for WebSocket fan-out of sensing updates
@@ -749,7 +749,7 @@ When the DensePose backend (port 8000) is unreachable, the client-side `BackendD
 
 ### JSONL Recording Format ACL
 
-CSI frames are recorded as newline-delimited JSON (`.csi.jsonl`). The `RecordedFrame` struct defines the schema: `{timestamp, subcarriers, rssi, noise_floor, features}`. The training pipeline reads through this schema, extracting subcarrier arrays for feature computation. If the internal sensing representation changes, only the `maybe_record_frame()` serializer needs updating -- the training pipeline depends only on the `RecordedFrame` contract.
+CSI frames are recorded as newline-delimited JSON (`.csi.jsonl`). The `RecordedFrame` struct defines the schema: `{timestamp, subcarriers, rssi, noise_floor, features}`. The training pipeline reads through this schema, extracting subcarrier arrays for feature computation. If the internal sensing representation changes, only the `maybe_record_frame()` serializer needs updating - the training pipeline depends only on the `RecordedFrame` contract.
 
 ---
 
@@ -835,8 +835,8 @@ crates/wifi-densepose-sensing-server/
 
 ## Related
 
-- [ADR-019: Sensing-Only UI Mode](../adr/ADR-019-sensing-only-ui-mode.md) -- Decoupled sensing UI, Gaussian splats, Python WebSocket bridge
-- [ADR-035: Live Sensing UI Accuracy](../adr/ADR-035-live-sensing-ui-accuracy.md) -- Data transparency, Goertzel breathing estimation, signal-responsive pose
-- [ADR-043: Sensing Server UI API Completion](../adr/ADR-043-sensing-server-ui-api-completion.md) -- Model, recording, training endpoints; single-binary deployment
-- [RuvSense Domain Model](ruvsense-domain-model.md) -- Upstream signal processing domain (multistatic sensing, coherence, tracking)
-- [WiFi-Mat Domain Model](wifi-mat-domain-model.md) -- Downstream disaster response domain
+- [ADR-019: Sensing-Only UI Mode](../adr/ADR-019-sensing-only-ui-mode.md) - Decoupled sensing UI, Gaussian splats, Python WebSocket bridge
+- [ADR-035: Live Sensing UI Accuracy](../adr/ADR-035-live-sensing-ui-accuracy.md) - Data transparency, Goertzel breathing estimation, signal-responsive pose
+- [ADR-043: Sensing Server UI API Completion](../adr/ADR-043-sensing-server-ui-api-completion.md) - Model, recording, training endpoints; single-binary deployment
+- [RuvSense Domain Model](ruvsense-domain-model.md) - Upstream signal processing domain (multistatic sensing, coherence, tracking)
+- [WiFi-Mat Domain Model](wifi-mat-domain-model.md) - Downstream disaster response domain

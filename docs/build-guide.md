@@ -1,12 +1,12 @@
 # WiFi-DensePose Build and Run Guide
 
-Covers every way to build, run, and deploy the system -- from a zero-hardware verification to a full ESP32 mesh with 3D visualization.
+Covers every way to build, run, and deploy the system - from a zero-hardware verification to a full ESP32 mesh with 3D visualization.
 
 ---
 
 ## Table of Contents
 
-1. [Quick Start (Verification Only -- No Hardware)](#1-quick-start-verification-only----no-hardware)
+1. [Quick Start (Verification Only - No Hardware)](#1-quick-start-verification-only----no-hardware)
 2. [Python Pipeline (v1/)](#2-python-pipeline-v1)
 3. [Rust Pipeline (v2)](#3-rust-pipeline-v2)
 4. [Three.js Visualization](#4-threejs-visualization)
@@ -16,7 +16,7 @@ Covers every way to build, run, and deploy the system -- from a zero-hardware ve
 
 ---
 
-## 1. Quick Start (Verification Only -- No Hardware)
+## 1. Quick Start (Verification Only - No Hardware)
 
 The fastest way to confirm the signal processing pipeline is real and deterministic. Requires only Python 3.8+, numpy, and scipy. No WiFi hardware, no GPU, no Docker.
 
@@ -27,14 +27,14 @@ The fastest way to confirm the signal processing pipeline is real and determinis
 
 This runs three phases:
 
-1. **Environment checks** -- confirms Python, numpy, scipy, and proof files are present.
-2. **Proof pipeline replay** -- feeds a published reference signal through the full signal processing chain (noise filtering, Hamming windowing, amplitude normalization, FFT-based Doppler extraction, power spectral density via scipy.fft) and computes a SHA-256 hash of the output.
-3. **Production code integrity scan** -- scans `v1/src/` for `np.random.rand` / `np.random.randn` calls in production code (test helpers are excluded).
+1. **Environment checks** - confirms Python, numpy, scipy, and proof files are present.
+2. **Proof pipeline replay** - feeds a published reference signal through the full signal processing chain (noise filtering, Hamming windowing, amplitude normalization, FFT-based Doppler extraction, power spectral density via scipy.fft) and computes a SHA-256 hash of the output.
+3. **Production code integrity scan** - scans `v1/src/` for `np.random.rand` / `np.random.randn` calls in production code (test helpers are excluded).
 
 Exit codes:
-- `0` PASS -- pipeline hash matches the published expected hash
-- `1` FAIL -- hash mismatch or error
-- `2` SKIP -- no expected hash file to compare against
+- `0` PASS - pipeline hash matches the published expected hash
+- `1` FAIL - hash mismatch or error
+- `2` SKIP - no expected hash file to compare against
 
 Additional flags:
 
@@ -79,7 +79,7 @@ The Python pipeline lives under `v1/` and provides the full API server, signal p
 - Python 3.8+
 - pip
 
-### Install (verification-only -- lightweight)
+### Install (verification-only - lightweight)
 
 ```bash
 pip install -r v1/requirements-lock.txt
@@ -122,7 +122,7 @@ For development with auto-reload:
 uvicorn v1.src.api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### Run with commodity WiFi (RSSI sensing -- no custom hardware)
+### Run with commodity WiFi (RSSI sensing - no custom hardware)
 
 The commodity sensing module (`v1/src/sensing/`) extracts presence and motion features from standard Linux WiFi metrics (RSSI, noise floor, link quality) without any hardware modification. See [ADR-013](adr/ADR-013-feature-level-sensing-commodity-gear.md) for full design details.
 
@@ -132,9 +132,9 @@ Requirements:
 - No root required for basic RSSI reading via `/proc/net/wireless`
 
 The module provides:
-- `LinuxWifiCollector` -- reads real RSSI from `/proc/net/wireless` and `iw` commands
-- `RssiFeatureExtractor` -- computes rolling statistics, FFT spectral features, CUSUM change-point detection
-- `PresenceClassifier` -- rule-based presence/motion classification
+- `LinuxWifiCollector` - reads real RSSI from `/proc/net/wireless` and `iw` commands
+- `RssiFeatureExtractor` - computes rolling statistics, FFT spectral features, CUSUM change-point detection
+- `PresenceClassifier` - rule-based presence/motion classification
 
 What it can detect:
 | Capability | Single Receiver | 3+ Receivers |
@@ -219,7 +219,7 @@ Expected throughput:
 | CSI Preprocessing (4x64) | ~5.19 us | 49-66 Melem/s |
 | Phase Sanitization (4x64) | ~3.84 us | 67-85 Melem/s |
 | Feature Extraction (4x64) | ~9.03 us | 7-11 Melem/s |
-| Motion Detection | ~186 ns | -- |
+| Motion Detection | ~186 ns | - |
 | Full Pipeline | ~18.47 us | ~54,000 fps |
 
 ### Workspace crates
@@ -298,12 +298,12 @@ docker compose up
 ```
 
 This starts:
-- `wifi-densepose-dev` -- API server with `--reload`, debug logging, auth disabled (port 8000)
-- `postgres` -- PostgreSQL 15 (port 5432)
-- `redis` -- Redis 7 with AOF persistence (port 6379)
-- `prometheus` -- metrics scraping (port 9090)
-- `grafana` -- dashboards (port 3000, login: admin/admin)
-- `nginx` -- reverse proxy (ports 80, 443)
+- `wifi-densepose-dev` - API server with `--reload`, debug logging, auth disabled (port 8000)
+- `postgres` - PostgreSQL 15 (port 5432)
+- `redis` - Redis 7 with AOF persistence (port 6379)
+- `prometheus` - metrics scraping (port 9090)
+- `grafana` - dashboards (port 3000, login: admin/admin)
+- `nginx` - reverse proxy (ports 80, 443)
 
 ```bash
 # View logs
@@ -385,7 +385,7 @@ The multi-stage `Dockerfile` provides four targets:
 
 Uses ESP32-S3 boards as WiFi CSI sensor nodes. See [ADR-012](adr/ADR-012-esp32-csi-sensor-mesh.md) for the full specification.
 
-### Bill of Materials (Starter Kit -- $54)
+### Bill of Materials (Starter Kit - $54)
 
 | Item | Qty | Unit Cost | Total |
 |------|-----|-----------|-------|
@@ -461,7 +461,7 @@ Each node does on-device feature extraction (raw I/Q to amplitude + phase + spec
 
 ### Run the aggregator
 
-The aggregator collects UDP streams from all ESP32 nodes, performs feature-level fusion (not signal-level -- see ADR-012 for why), and feeds the fused data into the Rust or Python pipeline.
+The aggregator collects UDP streams from all ESP32 nodes, performs feature-level fusion (not signal-level - see ADR-012 for why), and feeds the fused data into the Rust or Python pipeline.
 
 ```bash
 # Start the aggregator and pipeline via Docker
@@ -469,7 +469,7 @@ docker compose -f docker-compose.esp32.yml up
 
 # Or run the Rust aggregator directly
 cd rust-port/wifi-densepose-rs
-cargo run --release --package wifi-densepose-hardware -- --mode esp32-aggregator --port 5000
+cargo run --release --package wifi-densepose-hardware - --mode esp32-aggregator --port 5000
 ```
 
 ### Verify with real hardware
@@ -522,7 +522,7 @@ cd rust-port/wifi-densepose-rs
 wasm-pack build crates/wifi-densepose-wasm --target web --release
 
 # Build with disaster response module included
-wasm-pack build crates/wifi-densepose-wasm --target web --release -- --features mat
+wasm-pack build crates/wifi-densepose-wasm --target web --release - --features mat
 ```
 
 The output `pkg/` directory contains `.wasm`, `.js` glue, and TypeScript definitions. Import in a web project:
@@ -584,7 +584,7 @@ docker run -d -p 8000:8000 wifi-densepose:latest
 docker stack deploy -c docker-compose.prod.yml wifi-densepose
 ```
 
-### Server (Direct -- no Docker)
+### Server (Direct - no Docker)
 
 ```bash
 # 1. Install Python dependencies
@@ -637,7 +637,7 @@ cd rust-port/wifi-densepose-rs
 cargo build
 
 # Run tests with output
-cargo test --workspace -- --nocapture
+cargo test --workspace - --nocapture
 
 # Watch mode (requires cargo-watch)
 cargo install cargo-watch
@@ -656,7 +656,7 @@ uvicorn v1.src.api.main:app --host 0.0.0.0 --port 8000 --reload
 # Terminal 2: Serve visualization
 python3 -m http.server 3000 --directory ui
 
-# Open http://localhost:3000/viz.html -- it connects to ws://localhost:8000/ws/pose
+# Open http://localhost:3000/viz.html - it connects to ws://localhost:8000/ws/pose
 ```
 
 ---
@@ -665,7 +665,7 @@ python3 -m http.server 3000 --directory ui
 
 | File | Purpose |
 |------|---------|
-| `./verify` | Trust kill switch -- one-command pipeline proof |
+| `./verify` | Trust kill switch - one-command pipeline proof |
 | `Makefile` | `make verify`, `make verify-verbose`, `make verify-audit` |
 | `v1/requirements-lock.txt` | Pinned Python deps for hash reproducibility |
 | `requirements.txt` | Full Python deps (API server, torch, etc.) |

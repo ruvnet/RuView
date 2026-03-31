@@ -1,4 +1,4 @@
-# RF Topological Sensing — Research Index
+# RF Topological Sensing - Research Index
 
 ## SOTA Research Compendium
 
@@ -13,7 +13,7 @@
 
 RF Topological Sensing treats a room as a dynamic signal graph where ESP32 nodes
 are vertices and TX-RX links are edges weighted by CSI coherence. Instead of
-estimating position, minimum cut detects where the RF field topology changes —
+estimating position, minimum cut detects where the RF field topology changes  - 
 revealing physical boundaries corresponding to objects, people, and environmental
 shifts. This creates a "radio nervous system" that is structurally aware of space.
 
@@ -99,8 +99,8 @@ shifts. This creates a "radio nervous system" that is structurally aware of spac
 - **ADR-045**: Quantum Biomedical Sensing Extension (Document 12)
 
 ## Implementation Phases
-1. **Phase 1** (4 weeks): 4-node POC — detect person in room
-2. **Phase 2** (8 weeks): 16-node room — track movement boundaries < 50 cm
-3. **Phase 3** (16 weeks): Multi-room mesh — cross-room transition detection
-4. **Phase 4** (2027-2028): Quantum-enhanced — NV diamond + ESP32 hybrid
-5. **Phase 5** (2029+): Biomedical — coherence diagnostics, ambient health
+1. **Phase 1** (4 weeks): 4-node POC - detect person in room
+2. **Phase 2** (8 weeks): 16-node room - track movement boundaries < 50 cm
+3. **Phase 3** (16 weeks): Multi-room mesh - cross-room transition detection
+4. **Phase 4** (2027-2028): Quantum-enhanced - NV diamond + ESP32 hybrid
+5. **Phase 5** (2029+): Biomedical - coherence diagnostics, ambient health

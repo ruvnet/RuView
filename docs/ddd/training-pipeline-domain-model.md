@@ -2,7 +2,7 @@
 
 The Training & ML Pipeline is the subsystem of WiFi-DensePose that turns raw public CSI datasets into a trained pose estimation model and its downstream derivatives: contrastive embeddings, domain-generalized weights, and deterministic proof bundles. It is the bridge between research data and deployable inference.
 
-This document defines the system using [Domain-Driven Design](https://martinfowler.com/bliki/DomainDrivenDesign.html) (DDD): bounded contexts that own their data and rules, aggregate roots that enforce invariants, value objects that carry meaning, and domain events that connect everything. The goal is to make the pipeline's structure match the physics and mathematics it implements -- so that anyone reading the code (or an AI agent modifying it) understands *why* each piece exists, not just *what* it does.
+This document defines the system using [Domain-Driven Design](https://martinfowler.com/bliki/DomainDrivenDesign.html) (DDD): bounded contexts that own their data and rules, aggregate roots that enforce invariants, value objects that carry meaning, and domain events that connect everything. The goal is to make the pipeline's structure match the physics and mathematics it implements - so that anyone reading the code (or an AI agent modifying it) understands *why* each piece exists, not just *what* it does.
 
 **Bounded Contexts:**
 
@@ -95,20 +95,20 @@ All code paths shown are relative to `rust-port/wifi-densepose-rs/crates/wifi-de
 ```
 
 **Aggregates:**
-- `MmFiDataset` (Aggregate Root) -- Manages the MM-Fi data lifecycle
-- `WiPoseDataset` (Aggregate Root) -- Manages the Wi-Pose data lifecycle
+- `MmFiDataset` (Aggregate Root) - Manages the MM-Fi data lifecycle
+- `WiPoseDataset` (Aggregate Root) - Manages the Wi-Pose data lifecycle
 
 **Value Objects:**
-- `CsiSample` -- Single observation with amplitude, phase, keypoints, visibility
-- `SubcarrierConfig` -- Source count, target count, interpolation method
-- `DatasetSplit` -- Train / Validation / Test subject partitioning
-- `CompressedCsiBuffer` -- Tiered temporal window backed by `TemporalTensorCompressor`
+- `CsiSample` - Single observation with amplitude, phase, keypoints, visibility
+- `SubcarrierConfig` - Source count, target count, interpolation method
+- `DatasetSplit` - Train / Validation / Test subject partitioning
+- `CompressedCsiBuffer` - Tiered temporal window backed by `TemporalTensorCompressor`
 
 **Domain Services:**
-- `SubcarrierInterpolationService` -- Resamples subcarriers via sparse least-squares or linear fallback
-- `PhaseSanitizationService` -- Applies SpotFi / MUSIC phase correction from `wifi-densepose-signal`
-- `TeacherLabelService` -- Runs Detectron2 on paired RGB frames to produce DensePose UV pseudo-labels
-- `HardwareNormalizerService` -- Z-score normalization + chipset-invariant phase sanitization
+- `SubcarrierInterpolationService` - Resamples subcarriers via sparse least-squares or linear fallback
+- `PhaseSanitizationService` - Applies SpotFi / MUSIC phase correction from `wifi-densepose-signal`
+- `TeacherLabelService` - Runs Detectron2 on paired RGB frames to produce DensePose UV pseudo-labels
+- `HardwareNormalizerService` - Z-score normalization + chipset-invariant phase sanitization
 
 **RuVector Integration:**
 - `ruvector-solver` -> `NeumannSolver` for sparse O(sqrt(n)) subcarrier interpolation (114->56)
@@ -162,22 +162,22 @@ All code paths shown are relative to `rust-port/wifi-densepose-rs/crates/wifi-de
 ```
 
 **Aggregates:**
-- `WiFiDensePoseModel` (Aggregate Root) -- The complete model graph
+- `WiFiDensePoseModel` (Aggregate Root) - The complete model graph
 
 **Entities:**
-- `ModalityTranslator` -- Attention-gated CSI fusion using min-cut
-- `CsiToPoseTransformer` -- Cross-attention + GNN backbone
-- `KeypointHead` -- Regresses 17 x (x, y, z, confidence) from body_part_features
-- `DensePoseHead` -- Predicts body part labels and UV surface coordinates
+- `ModalityTranslator` - Attention-gated CSI fusion using min-cut
+- `CsiToPoseTransformer` - Cross-attention + GNN backbone
+- `KeypointHead` - Regresses 17 x (x, y, z, confidence) from body_part_features
+- `DensePoseHead` - Predicts body part labels and UV surface coordinates
 
 **Value Objects:**
-- `ModelConfig` -- Architecture hyperparameters (d_model, n_heads, n_gnn_layers)
-- `AttentionOutput` -- Attended values + gating result from min-cut attention
-- `BodyPartFeatures` -- [17 x d_model] intermediate representation
+- `ModelConfig` - Architecture hyperparameters (d_model, n_heads, n_gnn_layers)
+- `AttentionOutput` - Attended values + gating result from min-cut attention
+- `BodyPartFeatures` - [17 x d_model] intermediate representation
 
 **Domain Services:**
-- `AttentionGatingService` -- Applies `attn_mincut` to prune irrelevant antenna paths
-- `SpatialDecodingService` -- Graph-based spatial attention among feature map locations
+- `AttentionGatingService` - Applies `attn_mincut` to prune irrelevant antenna paths
+- `SpatialDecodingService` - Graph-based spatial attention among feature map locations
 
 **RuVector Integration:**
 - `ruvector-attn-mincut` -> `attn_mincut` for antenna-path gating in ModalityTranslator
@@ -225,28 +225,28 @@ All code paths shown are relative to `rust-port/wifi-densepose-rs/crates/wifi-de
 ```
 
 **Aggregates:**
-- `TrainingRun` (Aggregate Root) -- The complete training session
+- `TrainingRun` (Aggregate Root) - The complete training session
 
 **Entities:**
-- `CheckpointManager` -- Persists and selects model snapshots
-- `ProofVerifier` -- Deterministic verification against stored hashes
+- `CheckpointManager` - Persists and selects model snapshots
+- `ProofVerifier` - Deterministic verification against stored hashes
 
 **Value Objects:**
-- `TrainingConfig` -- Epochs, batch_size, learning_rate, loss_weights, optimizer params
-- `Checkpoint` -- Epoch number, model weights SHA-256, validation PCK at that epoch
-- `LossWeights` -- Relative weights for each loss component
-- `CompositeTrainingLoss` -- Combined scalar loss with per-component breakdown
-- `OksScore` -- Per-keypoint Object Keypoint Similarity with sigma values
-- `PckScore` -- Percentage of Correct Keypoints at threshold 0.2
-- `MpjpeScore` -- Mean Per Joint Position Error in millimeters
-- `ProofResult` -- Seed, steps, loss_decreased flag, hash_matches flag
+- `TrainingConfig` - Epochs, batch_size, learning_rate, loss_weights, optimizer params
+- `Checkpoint` - Epoch number, model weights SHA-256, validation PCK at that epoch
+- `LossWeights` - Relative weights for each loss component
+- `CompositeTrainingLoss` - Combined scalar loss with per-component breakdown
+- `OksScore` - Per-keypoint Object Keypoint Similarity with sigma values
+- `PckScore` - Percentage of Correct Keypoints at threshold 0.2
+- `MpjpeScore` - Mean Per Joint Position Error in millimeters
+- `ProofResult` - Seed, steps, loss_decreased flag, hash_matches flag
 
 **Domain Services:**
-- `LossComputationService` -- Computes composite loss from model outputs and ground truth
-- `MetricEvaluationService` -- Computes PCK, OKS, MPJPE over validation set
-- `HungarianAssignmentService` -- Bipartite matching for multi-person evaluation
-- `DynamicPersonMatcherService` -- Frame-persistent assignment via `ruvector-mincut`
-- `ProofVerificationService` -- Fixed-seed training + SHA-256 verification
+- `LossComputationService` - Computes composite loss from model outputs and ground truth
+- `MetricEvaluationService` - Computes PCK, OKS, MPJPE over validation set
+- `HungarianAssignmentService` - Bipartite matching for multi-person evaluation
+- `DynamicPersonMatcherService` - Frame-persistent assignment via `ruvector-mincut`
+- `ProofVerificationService` - Fixed-seed training + SHA-256 verification
 
 **RuVector Integration:**
 - `ruvector-mincut` -> `DynamicMinCut` for O(n^1.5 log n) multi-person assignment in metrics
@@ -301,33 +301,33 @@ All code paths shown are relative to `rust-port/wifi-densepose-rs/crates/wifi-de
 ```
 
 **Aggregates:**
-- `EmbeddingIndex` (Aggregate Root) -- HNSW-indexed store of AETHER fingerprints
-- `DomainAdaptationState` (Aggregate Root) -- Tracks GRL lambda, domain classifier accuracy, factorization quality
+- `EmbeddingIndex` (Aggregate Root) - HNSW-indexed store of AETHER fingerprints
+- `DomainAdaptationState` (Aggregate Root) - Tracks GRL lambda, domain classifier accuracy, factorization quality
 
 **Entities:**
-- `ProjectionHead` -- MLP mapping body_part_features to 128-dim embedding space
-- `DomainFactorizer` -- Splits features into h_pose and h_env
-- `DomainClassifier` -- Classifies domain from h_pose (trained adversarially via GRL)
-- `GeometryEncoder` -- Fourier positional encoding + DeepSets for AP positions
-- `LoraAdapter` -- Low-rank adaptation weights for environment-specific fine-tuning
+- `ProjectionHead` - MLP mapping body_part_features to 128-dim embedding space
+- `DomainFactorizer` - Splits features into h_pose and h_env
+- `DomainClassifier` - Classifies domain from h_pose (trained adversarially via GRL)
+- `GeometryEncoder` - Fourier positional encoding + DeepSets for AP positions
+- `LoraAdapter` - Low-rank adaptation weights for environment-specific fine-tuning
 
 **Value Objects:**
-- `AetherEmbedding` -- 128-dim L2-normalized contrastive vector
-- `FingerprintType` -- ReIdentification / RoomFingerprint / PersonFingerprint
-- `DomainLabel` -- Environment identifier for adversarial training
-- `GrlSchedule` -- Lambda annealing parameters (max_lambda, warmup_epochs)
-- `GeometryInput` -- AP positions in meters relative to room origin
-- `FilmParameters` -- Gamma (scale) and beta (shift) vectors from geometry conditioning
-- `LoraConfig` -- Rank, alpha, target layers
-- `AdaptationLoss` -- ContrastiveTTT / EntropyMin / Combined
+- `AetherEmbedding` - 128-dim L2-normalized contrastive vector
+- `FingerprintType` - ReIdentification / RoomFingerprint / PersonFingerprint
+- `DomainLabel` - Environment identifier for adversarial training
+- `GrlSchedule` - Lambda annealing parameters (max_lambda, warmup_epochs)
+- `GeometryInput` - AP positions in meters relative to room origin
+- `FilmParameters` - Gamma (scale) and beta (shift) vectors from geometry conditioning
+- `LoraConfig` - Rank, alpha, target layers
+- `AdaptationLoss` - ContrastiveTTT / EntropyMin / Combined
 
 **Domain Services:**
-- `ContrastiveLossService` -- Computes InfoNCE loss with temperature scaling
-- `HardNegativeMiningService` -- HNSW k-NN search for difficult negative pairs
-- `DomainAdversarialService` -- Manages GRL annealing and domain classification
-- `GeometryConditioningService` -- Encodes AP layout and produces FiLM parameters
-- `VirtualDomainAugmentationService` -- Generates synthetic environment shifts for training diversity
-- `RapidAdaptationService` -- Produces LoRA adapter from 10-second unlabeled calibration
+- `ContrastiveLossService` - Computes InfoNCE loss with temperature scaling
+- `HardNegativeMiningService` - HNSW k-NN search for difficult negative pairs
+- `DomainAdversarialService` - Manages GRL annealing and domain classification
+- `GeometryConditioningService` - Encodes AP layout and produces FiLM parameters
+- `VirtualDomainAugmentationService` - Generates synthetic environment shifts for training diversity
+- `RapidAdaptationService` - Produces LoRA adapter from 10-second unlabeled calibration
 
 ---
 

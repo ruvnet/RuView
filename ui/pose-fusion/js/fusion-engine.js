@@ -1,5 +1,5 @@
 /**
- * FusionEngine — Attention-weighted dual-modal embedding fusion.
+ * FusionEngine - Attention-weighted dual-modal embedding fusion.
  *
  * Combines visual (camera) and CSI (WiFi) embeddings with dynamic
  * confidence gating based on signal quality.

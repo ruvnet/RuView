@@ -16,7 +16,7 @@ a mesh of 16 ESP32 WiFi nodes as a weighted graph where edges represent TX-RX
 link pairs and edge weights encode CSI (Channel State Information) coherence. When
 physical objects or people perturb the RF field, edge weights destabilize
 non-uniformly, and minimum cut algorithms reveal the topological boundary of the
-perturbation. This approach — which we term **RF topological sensing** — differs
+perturbation. This approach - which we term **RF topological sensing** - differs
 fundamentally from classical RF localization techniques (RSSI triangulation,
 fingerprinting, CSI-based positioning) in that it detects *coherence boundaries*
 rather than estimating *positions*. We develop the formal mathematical framework,
@@ -44,7 +44,7 @@ theory, and identify open research questions for this largely unexplored domain.
 
 Consider 16 ESP32 nodes deployed in a room, each capable of transmitting and
 receiving WiFi CSI frames. Every ordered TX-RX pair yields a channel measurement
-— amplitude and phase across OFDM subcarriers. In the absence of perturbation,
+ -  amplitude and phase across OFDM subcarriers. In the absence of perturbation,
 these measurements exhibit stable coherence patterns determined by room geometry,
 multipath structure, and hardware characteristics.
 
@@ -52,8 +52,8 @@ When a person enters the room, they scatter, absorb, and reflect RF energy along
 certain propagation paths. The key insight is that this perturbation is
 **spatially localized**: only links whose Fresnel zones intersect the person's
 body experience significant coherence degradation. The affected links form a
-connected subgraph whose boundary — the set of edges connecting "disturbed" and
-"undisturbed" regions of the link graph — constitutes a topological signature of
+connected subgraph whose boundary - the set of edges connecting "disturbed" and
+"undisturbed" regions of the link graph - constitutes a topological signature of
 the perturbation.
 
 We propose that **minimum cut algorithms** are the natural computational tool for
@@ -267,13 +267,13 @@ weights, this must be combined with Edmonds-Karp (BFS-based path selection) for
 O(nm^2) worst case, or Dinic's algorithm for O(n^2 * m).
 
 **RF application**: Ford-Fulkerson is useful when we want the minimum s-t cut
-between a specific pair of node groups — for example, asking "what is the weakest
+between a specific pair of node groups - for example, asking "what is the weakest
 coherence boundary separating the north wall sensors from the south wall sensors?"
 
 ### 3.3 Stoer-Wagner Algorithm for Global Minimum Cut
 
-For RF topological sensing, we typically want the **global** minimum cut — the
-weakest boundary in the entire mesh — without pre-specifying source and sink.
+For RF topological sensing, we typically want the **global** minimum cut - the
+weakest boundary in the entire mesh - without pre-specifying source and sink.
 The Stoer-Wagner algorithm (1997) computes this efficiently.
 
 **Algorithm**:
@@ -299,7 +299,7 @@ MINIMUM_CUT_PHASE(G):
 ```
 
 **Complexity**: O(nm + n^2 log n) using a Fibonacci heap, or O(nm log n) with a
-binary heap. For our n = 16, m = 120 mesh, this is trivially fast — roughly
+binary heap. For our n = 16, m = 120 mesh, this is trivially fast - roughly
 16 phases of 16 vertex additions = 256 operations.
 
 **Why Stoer-Wagner is ideal for RF sensing**:
@@ -396,9 +396,9 @@ Every pair of nodes forms a potential link, giving a complete graph K_16 with
   narrow Fresnel zones.
 - **Long links** (diagonal/cross-room): Lower SNR, sensitive to perturbations
   anywhere along the path, wide Fresnel zones.
-- **Parallel links**: Correlated sensitivity — a perturbation affecting one likely
+- **Parallel links**: Correlated sensitivity - a perturbation affecting one likely
   affects the other.
-- **Crossing links**: Complementary sensitivity — their Fresnel zone intersection
+- **Crossing links**: Complementary sensitivity - their Fresnel zone intersection
   localizes perturbations.
 
 ### 4.2 Fresnel Zone Geometry and Edge Semantics
@@ -418,7 +418,7 @@ of a short link but only partially occludes a long link. This creates a natural
 **spatial resolution** determined by the mesh geometry.
 
 **Edge semantics**: An edge (v_i, v_j) in the graph represents not just a
-communication link but a **spatial sensing region** — the Fresnel ellipsoid
+communication link but a **spatial sensing region** - the Fresnel ellipsoid
 between v_i and v_j. The edge weight w(v_i, v_j) encodes whether this sensing
 region is perturbed.
 
@@ -526,7 +526,7 @@ cut) of the graph.
 represents its position along the "weakest axis" of the graph. Nodes on opposite
 sides of a perturbation boundary receive opposite-sign values. The magnitude
 |v_2[i]| indicates how strongly node i is associated with its side of the
-partition — nodes near the boundary have small |v_2[i]|.
+partition - nodes near the boundary have small |v_2[i]|.
 
 ### 5.3 Cheeger Inequality
 
@@ -546,13 +546,13 @@ The **Cheeger inequality** bounds h(G) using λ_2:
 This is powerful for RF sensing because:
 
 1. **Lower bound (λ_2 / 2 <= h(G))**: A small Fiedler value guarantees the
-   existence of a sparse cut — i.e., a coherence boundary.
+   existence of a sparse cut - i.e., a coherence boundary.
 
 2. **Upper bound (h(G) <= sqrt(2 * λ_2))**: Spectral bisection produces a cut
    whose normalized capacity is within a sqrt(λ_2) factor of optimal.
 
 3. **Monitoring λ_2 over time**: A dropping Fiedler value signals that the
-   graph's connectivity is weakening — someone is entering the room or moving to
+   graph's connectivity is weakening - someone is entering the room or moving to
    a position that bisects the mesh.
 
 ### 5.4 Higher Eigenvectors and Multi-Way Partitioning
@@ -593,7 +593,7 @@ changes efficiently.
 Δ_λ(t) = |λ_2(t) - λ_2(t-1)| / λ_2(t-1)
 ```
 
-A spike in Δ_λ(t) indicates a topological change — a new perturbation or a
+A spike in Δ_λ(t) indicates a topological change - a new perturbation or a
 significant movement event.
 
 **Eigenvector tracking**: For smooth graph evolution, we can use eigenvalue
@@ -604,8 +604,8 @@ in λ_2 is:
 δλ_2 ≈ δw * (v_2[i] - v_2[j])^2
 ```
 
-This means edges with large (v_2[i] - v_2[j])^2 — edges that cross the Fiedler
-cut — have the most impact on algebraic connectivity. These are precisely the
+This means edges with large (v_2[i] - v_2[j])^2 - edges that cross the Fiedler
+cut - have the most impact on algebraic connectivity. These are precisely the
 boundary edges we care about.
 
 ### 5.6 Normalized Spectral Clustering (Shi-Malik)
@@ -644,7 +644,7 @@ weights (all links from the transmitting node).
 
 **Latency budget**: To support real-time applications (gesture recognition,
 intrusion detection), we need total processing time under 10 ms per update cycle.
-On a modern processor, this is generous — but motivates efficient algorithms for
+On a modern processor, this is generous - but motivates efficient algorithms for
 future scaling to larger meshes.
 
 ### 6.2 Incremental Min-Cut Algorithms
@@ -656,13 +656,13 @@ under edge updates.
 **Weight increase (edge strengthening)**:
 If an edge weight increases, the minimum cut can only increase or stay the same.
 If the modified edge does not cross the current min-cut, the cut is unchanged.
-If it does cross the cut, the new min-cut value is at least the old value — we
+If it does cross the cut, the new min-cut value is at least the old value - we
 need to verify whether the current partition is still optimal, potentially by
 running a single max-flow computation in the residual graph.
 
 **Weight decrease (edge weakening)**:
 If an edge weight decreases and it crosses the current min-cut, the cut capacity
-decreases by the weight change — no recomputation needed. If the edge is internal
+decreases by the weight change - no recomputation needed. If the edge is internal
 to one side of the cut, the cut is unchanged. However, a new lower-capacity cut
 may have emerged, requiring recomputation.
 
@@ -732,7 +732,7 @@ endpoint v_k, constraining where the min-cut can change.
 
 **Lemma**: If v_k is entirely on one side of the current min-cut (say v_k ∈ S),
 then changes to edges (v_k, v_j) where v_j ∈ S cannot affect the cut capacity.
-Only edges crossing the cut — (v_k, v_j) where v_j ∈ S̄ — matter.
+Only edges crossing the cut - (v_k, v_j) where v_j ∈ S̄ - matter.
 
 In a balanced bisection of 16 nodes, at most 8 of the 15 updated edges cross
 the cut, reducing the effective update size.
@@ -853,7 +853,7 @@ min-cut or hierarchical decomposition reveals all boundaries simultaneously.
 
 With 16 nodes, the topological resolution is limited to distinguishing regions
 separated by at least one link. Fine-grained positioning (sub-meter accuracy)
-is not achievable through topology alone — though it can be augmented with
+is not achievable through topology alone - though it can be augmented with
 classical methods.
 
 **2. Ambiguity in cut interpretation**
@@ -891,7 +891,7 @@ location (focused attention).
 ### 8.1 Optimal Node Placement for Topological Resolution
 
 **Question**: Given a room geometry and n nodes, what placement maximizes
-topological resolution — the ability to distinguish different perturbation
+topological resolution - the ability to distinguish different perturbation
 locations via distinct min-cut partitions?
 
 This is related to sensor placement optimization but with a graph-theoretic
@@ -935,7 +935,7 @@ correlation structure (nearby edges provide redundant information).
 An adversary who knows the node positions could potentially create RF
 perturbations that manipulate the min-cut to produce a desired (false) topology.
 Understanding the attack surface requires analysis of which edge weight
-modifications change the min-cut partition — the "critical edges" of the graph.
+modifications change the min-cut partition - the "critical edges" of the graph.
 
 Connection to the `adversarial.rs` module in RuvSense: physically impossible
 signal patterns (e.g., coherence dropping on a link whose Fresnel zone is
@@ -956,7 +956,7 @@ the same partition (topological aliasing).
 ### 8.6 Multi-Resolution Topological Decomposition
 
 **Question**: Can hierarchical min-cut decomposition (Gomory-Hu tree) provide
-multi-resolution sensing — coarse room segmentation at the top level, fine-grained
+multi-resolution sensing - coarse room segmentation at the top level, fine-grained
 boundary detection at lower levels?
 
 The Gomory-Hu tree naturally provides a hierarchy: the minimum weight edge in the
@@ -1005,8 +1005,8 @@ selection for detection algorithms.
 
 ## 9. Conclusion
 
-This document has established that graph-theoretic methods — particularly minimum
-cut algorithms and spectral decomposition — provide a rigorous mathematical
+This document has established that graph-theoretic methods - particularly minimum
+cut algorithms and spectral decomposition - provide a rigorous mathematical
 foundation for RF topological sensing. The key contributions are:
 
 1. **Formal framework**: Modeling the ESP32 mesh as a weighted graph G = (V, E, w)

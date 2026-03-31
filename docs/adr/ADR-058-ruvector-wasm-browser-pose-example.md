@@ -1,4 +1,4 @@
-# ADR-058: Dual-Modal WASM Browser Pose Estimation — Live Video + WiFi CSI Fusion
+# ADR-058: Dual-Modal WASM Browser Pose Estimation - Live Video + WiFi CSI Fusion
 
 - **Status**: Proposed
 - **Date**: 2026-03-12
@@ -9,17 +9,17 @@
 
 WiFi-DensePose estimates human poses from WiFi CSI (Channel State Information).
 The `ruvector-cnn` crate provides a pure Rust CNN (MobileNet-V3) with WASM bindings.
-Both modalities exist independently — what's missing is **fusing live webcam video
+Both modalities exist independently - what's missing is **fusing live webcam video
 with WiFi CSI** in a single browser demo to achieve robust pose estimation that
 works even when one modality degrades (occlusion, signal noise, poor lighting).
 
 Existing assets:
 
-1. **`wifi-densepose-wasm`** — CSI signal processing compiled to WASM
-2. **`wifi-densepose-sensing-server`** — Axum server streaming live CSI via WebSocket
-3. **`ruvector-cnn`** — Pure Rust CNN with MobileNet-V3 backbones, SIMD, contrastive learning
-4. **`ruvector-cnn-wasm`** — wasm-bindgen bindings: `WasmCnnEmbedder`, `SimdOps`, `LayerOps`, contrastive losses
-5. **`vendor/ruvector/examples/wasm-vanilla/`** — Reference vanilla JS WASM example
+1. **`wifi-densepose-wasm`** - CSI signal processing compiled to WASM
+2. **`wifi-densepose-sensing-server`** - Axum server streaming live CSI via WebSocket
+3. **`ruvector-cnn`** - Pure Rust CNN with MobileNet-V3 backbones, SIMD, contrastive learning
+4. **`ruvector-cnn-wasm`** - wasm-bindgen bindings: `WasmCnnEmbedder`, `SimdOps`, `LayerOps`, contrastive losses
+5. **`vendor/ruvector/examples/wasm-vanilla/`** - Reference vanilla JS WASM example
 
 Research shows multi-modal fusion (camera + WiFi) significantly outperforms either alone:
 - Camera fails under occlusion, poor lighting, privacy constraints
@@ -35,7 +35,7 @@ Build a **dual-modal browser demo** at `examples/wasm-browser-pose/` that:
 3. Processes **both streams** through separate CNN pipelines in `ruvector-cnn-wasm`
 4. **Fuses embeddings** with learned attention weights for combined pose estimation
 5. Renders **video overlay** with skeleton + WiFi confidence heatmap on Canvas
-6. Runs entirely in the browser — all inference client-side via WASM
+6. Runs entirely in the browser - all inference client-side via WASM
 
 ### Architecture
 
@@ -101,7 +101,7 @@ Both use the same `WasmCnnEmbedder` but with separate instances and weight sets.
 
 ```javascript
 // Attention fusion: learn which modality to trust per-dimension
-// α ∈ [0,1]^512 — attention weights (shipped as JSON, trained offline)
+// α ∈ [0,1]^512 - attention weights (shipped as JSON, trained offline)
 // visual_emb, csi_emb ∈ R^512
 
 function fuseEmbeddings(visual_emb, csi_emb, attention_weights) {
@@ -176,7 +176,7 @@ The demo supports three modes, selectable in the UI:
 | **Video Only** | ✅ | ❌ | α = 1.0 | No ESP32 available, quick demo |
 | **CSI Only** | ❌ | ✅ | α = 0.0 | Privacy mode, through-wall sensing |
 
-**Video Only mode works without any hardware** — just a webcam — making the demo
+**Video Only mode works without any hardware** - just a webcam - making the demo
 instantly accessible for anyone wanting to try it.
 
 ### File Layout
@@ -209,7 +209,7 @@ examples/wasm-browser-pose/
 
 ```bash
 #!/bin/bash
-# build.sh — builds both WASM packages into pkg/
+# build.sh - builds both WASM packages into pkg/
 
 set -e
 
@@ -228,7 +228,7 @@ echo "Build complete. Serve with: python3 -m http.server 8080"
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  WiFi-DensePose — Live Dual-Modal Pose Estimation       │
+│  WiFi-DensePose - Live Dual-Modal Pose Estimation       │
 │  [Dual Mode ▼]  [⚙ Settings]          FPS: 28  ◉ Live  │
 ├───────────────────────────┬─────────────────────────────┤
 │                           │                             │
@@ -263,7 +263,7 @@ echo "Build complete. Serve with: python3 -m http.server 8080"
 | `wifi_densepose_wasm` | `wifi-densepose-wasm` | CSI frame parsing, signal processing, feature extraction | ~200KB |
 | `ruvector_cnn_wasm` | `ruvector-cnn-wasm` | `WasmCnnEmbedder` (×2 instances), `SimdOps`, `LayerOps`, contrastive losses | ~150KB |
 
-Two `WasmCnnEmbedder` instances are created — one for video frames, one for CSI pseudo-images.
+Two `WasmCnnEmbedder` instances are created - one for video frames, one for CSI pseudo-images.
 They share the same WASM module but have independent state.
 
 ### Browser API Requirements
@@ -302,7 +302,7 @@ reducing dual-mode latency to ~max(15, 15) + 5 = ~20ms (50 FPS).
 
 The demo optionally shows real-time contrastive learning in the browser:
 
-- **InfoNCE loss** (`WasmInfoNCELoss`): Compare video vs CSI embeddings for the same pose — trains cross-modal alignment
+- **InfoNCE loss** (`WasmInfoNCELoss`): Compare video vs CSI embeddings for the same pose - trains cross-modal alignment
 - **Triplet loss** (`WasmTripletLoss`): Push apart different poses, pull together same pose across modalities
 - **SimdOps**: Accelerated dot products for real-time similarity computation
 - **Embedding space panel**: Live 2D projection shows video and CSI embeddings converging when viewing the same person
@@ -323,7 +323,7 @@ No new Rust crates are needed. The example is pure HTML/JS consuming existing WA
 
 ### Positive
 
-- **Instant demo**: Video-only mode works with just a webcam — no ESP32 needed
+- **Instant demo**: Video-only mode works with just a webcam - no ESP32 needed
 - **Multi-modal showcase**: Demonstrates camera + WiFi fusion, the core innovation of the project
 - **Graceful degradation**: Works with video-only, CSI-only, or both
 - **Through-wall capability**: CSI mode shows pose estimation where cameras cannot reach
@@ -348,16 +348,16 @@ No new Rust crates are needed. The example is pure HTML/JS consuming existing WA
 
 ## Implementation Plan
 
-1. **Phase 1 — Scaffold**: File layout, build.sh, index.html shell, mode selector UI
-2. **Phase 2 — Video pipeline**: getUserMedia → frame capture → CNN embedding → basic pose display
-3. **Phase 3 — CSI pipeline**: WebSocket client → CSI parsing → pseudo-image → CNN embedding
-4. **Phase 4 — Fusion**: Attention-weighted combination, confidence gating, mode switching
-5. **Phase 5 — Pose decoder**: Linear projection with placeholder weights → 17 keypoints
-6. **Phase 6 — Overlay renderer**: Video canvas with skeleton overlay, CSI heatmap panel
-7. **Phase 7 — Training**: Use `wifi-densepose-train` to generate real weights for both CNNs + fusion + decoder
-8. **Phase 8 — Contrastive demo**: Embedding space visualization, cross-modal similarity display
-9. **Phase 9 — Web Workers**: Move CNN inference to workers for parallel video + CSI processing
-10. **Phase 10 — Polish**: Recording, snapshots, adaptive quality, mobile optimization
+1. **Phase 1 - Scaffold**: File layout, build.sh, index.html shell, mode selector UI
+2. **Phase 2 - Video pipeline**: getUserMedia → frame capture → CNN embedding → basic pose display
+3. **Phase 3 - CSI pipeline**: WebSocket client → CSI parsing → pseudo-image → CNN embedding
+4. **Phase 4 - Fusion**: Attention-weighted combination, confidence gating, mode switching
+5. **Phase 5 - Pose decoder**: Linear projection with placeholder weights → 17 keypoints
+6. **Phase 6 - Overlay renderer**: Video canvas with skeleton overlay, CSI heatmap panel
+7. **Phase 7 - Training**: Use `wifi-densepose-train` to generate real weights for both CNNs + fusion + decoder
+8. **Phase 8 - Contrastive demo**: Embedding space visualization, cross-modal similarity display
+9. **Phase 9 - Web Workers**: Move CNN inference to workers for parallel video + CSI processing
+10. **Phase 10 - Polish**: Recording, snapshots, adaptive quality, mobile optimization
 
 ## Alternatives Considered
 
@@ -385,8 +385,8 @@ Rejected: Adds build tooling. Vanilla JS + ES modules keeps the demo self-contai
 - [ADR-018: Binary CSI Frame Format](ADR-018-binary-csi-frame-format.md)
 - [ADR-024: Contrastive CSI Embedding / AETHER](ADR-024-contrastive-csi-embedding.md)
 - [ADR-055: Integrated Sensing Server](ADR-055-integrated-sensing-server.md)
-- `vendor/ruvector/crates/ruvector-cnn/src/lib.rs` — CNN embedder implementation
-- `vendor/ruvector/crates/ruvector-cnn-wasm/src/lib.rs` — WASM bindings
-- `vendor/ruvector/examples/wasm-vanilla/index.html` — Reference vanilla JS WASM pattern
-- Person-in-WiFi: Fine-grained Person Perception using WiFi (ICCV 2019) — camera+WiFi fusion precedent
-- WiPose: Multi-Person WiFi Pose Estimation (TMC 2022) — cross-modal embedding approach
+- `vendor/ruvector/crates/ruvector-cnn/src/lib.rs` - CNN embedder implementation
+- `vendor/ruvector/crates/ruvector-cnn-wasm/src/lib.rs` - WASM bindings
+- `vendor/ruvector/examples/wasm-vanilla/index.html` - Reference vanilla JS WASM pattern
+- Person-in-WiFi: Fine-grained Person Perception using WiFi (ICCV 2019) - camera+WiFi fusion precedent
+- WiPose: Multi-Person WiFi Pose Estimation (TMC 2022) - cross-modal embedding approach

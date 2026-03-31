@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# generate-witness-bundle.sh — Create a self-contained RVF witness bundle
+# generate-witness-bundle.sh - Create a self-contained RVF witness bundle
 #
 # Produces: witness-bundle-ADR028-<commit>.tar.gz
 # Contains: witness log, ADR, proof hash, test results, firmware manifest,
@@ -42,7 +42,7 @@ mkdir -p "$BUNDLE_DIR/proof"
 cp "$REPO_ROOT/v1/data/proof/verify.py" "$BUNDLE_DIR/proof/"
 cp "$REPO_ROOT/v1/data/proof/expected_features.sha256" "$BUNDLE_DIR/proof/"
 cp "$REPO_ROOT/v1/data/proof/generate_reference_signal.py" "$BUNDLE_DIR/proof/"
-# Reference signal is large (~10 MB) — include metadata only
+# Reference signal is large (~10 MB) - include metadata only
 python3 -c "
 import json, os
 with open('$REPO_ROOT/v1/data/proof/sample_csi_data.json') as f:
@@ -53,7 +53,7 @@ meta['first_frame_keys'] = list(d['frames'][0].keys())
 meta['file_size_bytes'] = os.path.getsize('$REPO_ROOT/v1/data/proof/sample_csi_data.json')
 with open('$BUNDLE_DIR/proof/reference_signal_metadata.json', 'w') as f:
     json.dump(meta, f, indent=2)
-" 2>/dev/null && echo "  Reference signal metadata extracted." || echo "  (Python not available — metadata skipped)"
+" 2>/dev/null && echo "  Reference signal metadata extracted." || echo "  (Python not available - metadata skipped)"
 
 # ---------------------------------------------------------------
 # 3. Run Rust tests and capture output
@@ -90,7 +90,7 @@ if [ -d "$REPO_ROOT/firmware/esp32-csi-node/main" ]; then
     > "$BUNDLE_DIR/firmware-manifest/source-hashes.txt" 2>/dev/null || true
   echo "  Firmware source files hashed."
 else
-  echo "  (No firmware directory found — skipped)"
+  echo "  (No firmware directory found - skipped)"
 fi
 
 # ---------------------------------------------------------------
@@ -113,7 +113,7 @@ cat "$BUNDLE_DIR/crate-manifest/versions.txt"
 echo "[7/7] Creating VERIFY.sh..."
 cat > "$BUNDLE_DIR/VERIFY.sh" << 'VERIFY_EOF'
 #!/usr/bin/env bash
-# VERIFY.sh — Recipient verification script for WiFi-DensePose Witness Bundle
+# VERIFY.sh - Recipient verification script for WiFi-DensePose Witness Bundle
 #
 # Run this script after cloning the repository at the witnessed commit.
 # It re-runs all verification steps and compares against the bundled results.
@@ -192,7 +192,7 @@ echo "  Results: ${PASS_COUNT} passed, ${FAIL_COUNT} failed"
 if [ "$FAIL_COUNT" -eq 0 ]; then
   echo "  VERDICT: ALL CHECKS PASSED"
 else
-  echo "  VERDICT: ${FAIL_COUNT} CHECK(S) FAILED — investigate"
+  echo "  VERDICT: ${FAIL_COUNT} CHECK(S) FAILED - investigate"
 fi
 echo "================================================================"
 VERIFY_EOF

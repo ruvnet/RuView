@@ -15,13 +15,13 @@ ADR-016 integrated all five published ruvector v2.0.4 crates into the
 Two production crates that pre-date ADR-016 remain without ruvector integration
 despite having concrete, high-value integration points:
 
-1. **`wifi-densepose-signal`** — SOTA signal processing algorithms (ADR-014):
+1. **`wifi-densepose-signal`** - SOTA signal processing algorithms (ADR-014):
    conjugate multiplication, Hampel filter, Fresnel zone breathing model, CSI
    spectrogram, subcarrier sensitivity selection, Body Velocity Profile (BVP).
    These algorithms perform independent element-wise operations or brute-force
    exhaustive search without subpolynomial optimization.
 
-2. **`wifi-densepose-mat`** — Disaster detection (ADR-001): multi-AP
+2. **`wifi-densepose-mat`** - Disaster detection (ADR-001): multi-AP
    triangulation, breathing/heartbeat waveform detection, triage classification.
    Time-series data is uncompressed and localization uses closed-form geometry
    without iterative system solving.
@@ -80,7 +80,7 @@ and edges encode variance-ratio similarity (|sensitivity_i − sensitivity_j|^�
 `DynamicMinCut` finds the minimum bisection separating high-sensitivity
 (motion-responsive) from low-sensitivity (noise-dominated) subcarriers. As new
 static/motion measurements arrive, `insert_edge`/`delete_edge` incrementally
-update the partition in O(n^1.5 log n) amortized — no full re-sort needed.
+update the partition in O(n^1.5 log n) amortized - no full re-sort needed.
 
 ```rust
 use ruvector_mincut::{DynamicMinCut, MinCutBuilder};
@@ -136,7 +136,7 @@ matrix [freq_bins × time_frames]. All bins weighted equally for downstream CNN.
 
 **ruvector integration:** After STFT, treat each time frame as a sequence token
 (d = n_freq_bins, seq_len = n_time_frames). Apply `attn_mincut` to gate which
-time-frequency cells contribute to the spectrogram output — suppressing noise
+time-frequency cells contribute to the spectrogram output - suppressing noise
 frames and multipath artifacts while amplifying body-motion periods.
 
 ```rust
@@ -230,7 +230,7 @@ automatically, without requiring manual selection or a separate sensitivity step
 
 **Current approach:** Closed-form Fresnel zone radius formula assuming known
 TX-RX-body geometry. In practice, exact distances d1 (TX→body) and d2
-(body→RX) are unknown — only the TX-RX straight-line distance D is known from
+(body→RX) are unknown - only the TX-RX straight-line distance D is known from
 AP placement.
 
 **ruvector integration:** When multiple subcarriers observe different Fresnel
@@ -291,7 +291,7 @@ pub fn solve_fresnel_geometry(
 
 **Advantage:** Converts the Fresnel model from a single fixed-geometry formula
 into a data-driven geometry estimator. With 3+ observations (subcarriers at
-different frequencies), NeumannSolver converges in O(√n) iterations — critical
+different frequencies), NeumannSolver converges in O(√n) iterations - critical
 for real-time breathing detection at 100 Hz.
 
 ---
@@ -365,7 +365,7 @@ pub fn solve_triangulation(
 **Advantage:** For a disaster site with 5–20 APs, the TDoA system has N×(N-1)/2
 = 10–190 measurements but only 2 unknowns (x, y). The normal equations are 2×2
 regardless of N. NeumannSolver converges in O(1) iterations for well-conditioned
-2×2 systems — eliminating Gaussian elimination overhead.
+2×2 systems - eliminating Gaussian elimination overhead.
 
 ---
 
@@ -445,7 +445,7 @@ handle 2–4× more concurrent zones.
 **Current approach:** Heartbeat detection uses micro-Doppler spectrograms:
 sliding STFT of CSI amplitude time-series. Each zone stores a spectrogram of
 shape [n_freq_bins=128, n_time=600] (60 seconds at 10 Hz output rate):
-128 × 600 × 4 bytes = **307 KB per zone**. With 16 zones: 4.9 MB — acceptable,
+128 × 600 × 4 bytes = **307 KB per zone**. With 16 zones: 4.9 MB - acceptable,
 but heartbeat spectrograms are the most access-intensive (queried at every triage
 update).
 
@@ -533,7 +533,7 @@ ruvector-attention = { workspace = true }
 
 ADR-002's dependency strategy section specifies non-existent crates:
 ```toml
-# WRONG (ADR-002 original — these crates do not exist at crates.io)
+# WRONG (ADR-002 original - these crates do not exist at crates.io)
 ruvector-core = { version = "0.1", features = ["hnsw", "sona", "gnn"] }
 ruvector-data-framework = { version = "0.1", features = ["rvf", "witness", "crypto"] }
 ruvector-consensus = { version = "0.1", features = ["raft"] }

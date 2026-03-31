@@ -1,5 +1,5 @@
 /**
- * Module E — "Statistical Convergence Engine"
+ * Module E - "Statistical Convergence Engine"
  * RSSI waveform, person orbs, classification, fall alert, metric bars
  */
 import * as THREE from 'three';

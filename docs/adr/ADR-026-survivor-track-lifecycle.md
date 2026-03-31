@@ -3,7 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-03-01
 **Deciders:** WiFi-DensePose Core Team
-**Domain:** MAT (Mass Casualty Assessment Tool) — `wifi-densepose-mat`
+**Domain:** MAT (Mass Casualty Assessment Tool) - `wifi-densepose-mat`
 **Supersedes:** None
 **Related:** ADR-001 (WiFi-MAT disaster detection), ADR-017 (ruvector signal/MAT integration)
 
@@ -15,19 +15,19 @@ The MAT crate's `Survivor` entity has `SurvivorStatus` states
 (`Active / Rescued / Lost / Deceased / FalsePositive`) and `is_stale()` /
 `mark_lost()` methods, but these are insufficient for real operational use:
 
-1. **Manually driven state transitions** — no controller automatically fires
+1. **Manually driven state transitions** - no controller automatically fires
    `mark_lost()` when signal drops for N consecutive frames, nor re-activates
    a survivor when signal reappears.
 
-2. **Frame-local assignment only** — `DynamicPersonMatcher` (metrics.rs) solves
+2. **Frame-local assignment only** - `DynamicPersonMatcher` (metrics.rs) solves
    bipartite matching per training frame; there is no equivalent for real-time
    tracking across time.
 
-3. **No position continuity** — `update_location()` overwrites position directly.
+3. **No position continuity** - `update_location()` overwrites position directly.
    Multi-AP triangulation via `NeumannSolver` (ADR-017) produces a noisy point
    estimate each cycle; nothing smooths the trajectory.
 
-4. **No re-identification** — when `SurvivorStatus::Lost`, reappearance of the
+4. **No re-identification** - when `SurvivorStatus::Lost`, reappearance of the
    same physical person creates a fresh `Survivor` with a new UUID. Vital-sign
    history is lost and survivor count is inflated.
 
@@ -47,7 +47,7 @@ The MAT crate's `Survivor` entity has `SurvivorStatus` states
 Add a **`tracking` bounded context** within `wifi-densepose-mat` at
 `src/tracking/`, implementing three collaborating components:
 
-### 1. Kalman Filter — Constant-Velocity 3-D Model (`kalman.rs`)
+### 1. Kalman Filter - Constant-Velocity 3-D Model (`kalman.rs`)
 
 State vector `x = [px, py, pz, vx, vy, vz]` (position + velocity in metres / m·s⁻¹).
 
@@ -100,13 +100,13 @@ Per-tick algorithm:
 
 ```
 update(observations, dt_secs):
-  1. Predict   — advance Kalman state for all Active + Lost tracks
-  2. Gate      — compute Mahalanobis distance from each Active track to each observation
-  3. Associate — greedy nearest-neighbour (gated); Hungarian for N ≤ 10
-  4. Re-ID     — unmatched observations vs Lost tracks via CsiFingerprint
-  5. Birth     — still-unmatched observations → new Tentative tracks
-  6. Update    — matched tracks: Kalman update + vitals update + lifecycle.hit()
-  7. Lifecycle — unmatched tracks: lifecycle.miss(); transitions Lost→Terminated
+  1. Predict   - advance Kalman state for all Active + Lost tracks
+  2. Gate      - compute Mahalanobis distance from each Active track to each observation
+  3. Associate - greedy nearest-neighbour (gated); Hungarian for N ≤ 10
+  4. Re-ID     - unmatched observations vs Lost tracks via CsiFingerprint
+  5. Birth     - still-unmatched observations → new Tentative tracks
+  6. Update    - matched tracks: Kalman update + vitals update + lifecycle.hit()
+  7. Lifecycle - unmatched tracks: lifecycle.miss(); transitions Lost→Terminated
 ```
 
 ---
@@ -117,11 +117,11 @@ update(observations, dt_secs):
 
 ```
 tracking/
-├── mod.rs          — public API re-exports
-├── kalman.rs       — KalmanState value object
-├── fingerprint.rs  — CsiFingerprint value object
-├── lifecycle.rs    — TrackState enum, TrackLifecycle entity, TrackerConfig
-└── tracker.rs      — SurvivorTracker aggregate root
+├── mod.rs          - public API re-exports
+├── kalman.rs       - KalmanState value object
+├── fingerprint.rs  - CsiFingerprint value object
+├── lifecycle.rs    - TrackState enum, TrackLifecycle entity, TrackerConfig
+└── tracker.rs      - SurvivorTracker aggregate root
                       TrackedSurvivor entity (wraps Survivor + tracking state)
                       DetectionObservation value object
                       AssociationResult value object
@@ -170,7 +170,7 @@ tracking/
 
 ### Risk Mitigation
 
-- **Conservative re-ID**: threshold 0.35 (not 0.5) — prefer new survivor record
+- **Conservative re-ID**: threshold 0.35 (not 0.5) - prefer new survivor record
   over incorrect merge. Operators can manually merge via the API if needed.
 - **Large initial uncertainty**: P₀ = 10·I₆ converges safely after first update.
 - **`Terminated` is unrecoverable**: prevents runaway re-linking.
@@ -184,7 +184,7 @@ tracking/
 |-------------|-----------------|
 | **DeepSORT** (appearance embedding + Kalman) | Requires visual features; not applicable to WiFi CSI |
 | **Particle filter** | Better for nonlinear dynamics; overkill for slow-moving rubble survivors |
-| **Pure frame-local assignment** | Current state — insufficient; causes all described problems |
+| **Pure frame-local assignment** | Current state - insufficient; causes all described problems |
 | **IoU-based tracking** | Requires bounding boxes from camera; WiFi gives only positions |
 
 ---

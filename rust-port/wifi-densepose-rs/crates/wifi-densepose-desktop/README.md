@@ -1,12 +1,12 @@
 # RuView Desktop
 
-> **Work in Progress** — This crate is under active development. APIs and UI are subject to change.
+> **Work in Progress** - This crate is under active development. APIs and UI are subject to change.
 
 Cross-platform desktop application for managing ESP32 WiFi sensing networks. Built with **Tauri v2** (Rust backend) and **React + TypeScript** (frontend), following the [ADR-053 design system](../../docs/adr/ADR-053-ui-design-system.md).
 
 ## Overview
 
-RuView Desktop provides a unified interface for node discovery, firmware management, over-the-air updates, WASM edge module deployment, real-time sensing data visualization, and mesh network topology monitoring — all from a single native application.
+RuView Desktop provides a unified interface for node discovery, firmware management, over-the-air updates, WASM edge module deployment, real-time sensing data visualization, and mesh network topology monitoring - all from a single native application.
 
 ## Pages
 
@@ -100,8 +100,8 @@ Pre-built binaries are available on the [Releases](https://github.com/ruvnet/RuV
 | Platform | Download | Status |
 |----------|----------|--------|
 | Windows x64 | [v0.3.0-alpha](https://github.com/ruvnet/RuView/releases/tag/v0.3.0-desktop-alpha) | Debug build |
-| macOS | — | Planned |
-| Linux | — | Planned |
+| macOS | - | Planned |
+| Linux | - | Planned |
 
 ### Running the pre-built exe (Windows)
 
@@ -171,4 +171,4 @@ The installer/bundle will be in `target/release/bundle/` (`.msi` on Windows, `.d
 
 ## License
 
-MIT — see [LICENSE](../../LICENSE) for details.
+MIT - see [LICENSE](../../LICENSE) for details.

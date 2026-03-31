@@ -17,16 +17,16 @@ WiFi-DensePose captures Channel State Information (CSI) from ESP32-S3 nodes and 
 
 Implement a tiered edge processing pipeline on the ESP32-S3 that performs signal processing locally and sends compact results:
 
-### Tier 0 — Raw Passthrough (default, backward compatible)
+### Tier 0 - Raw Passthrough (default, backward compatible)
 No on-device processing. CSI frames streamed as-is (magic `0xC5110001`).
 
-### Tier 1 — Basic Signal Processing
+### Tier 1 - Basic Signal Processing
 - Phase extraction and unwrapping from I/Q pairs
 - Welford running variance per subcarrier
 - Top-K subcarrier selection by variance
 - Delta compression (XOR + RLE) for 30-50% bandwidth reduction (magic `0xC5110003`)
 
-### Tier 2 — Full Edge Intelligence
+### Tier 2 - Full Edge Intelligence
 All of Tier 1, plus:
 - Biquad IIR bandpass filters: breathing (0.1-0.5 Hz), heart rate (0.8-2.0 Hz)
 - Zero-crossing BPM estimation
@@ -115,7 +115,7 @@ All configurable via `provision.py --edge-tier 2 --pres-thresh 0.05 ...`
 ### Negative
 - Firmware complexity increases (edge_processing.c is ~750 lines)
 - ESP32-S3 RAM usage increases ~12 KB for ring buffer + filter state
-- Binary size increases from ~550 KB to ~925 KB with full WASM3 Tier 3 (10% free in 1 MB partition — see ADR-040)
+- Binary size increases from ~550 KB to ~925 KB with full WASM3 Tier 3 (10% free in 1 MB partition - see ADR-040)
 
 ### Risks
 - BPM accuracy depends on subject distance and movement; needs real-world validation
@@ -124,15 +124,15 @@ All configurable via `provision.py --edge-tier 2 --pres-thresh 0.05 ...`
 
 ## Implementation
 
-- `firmware/esp32-csi-node/main/edge_processing.c` — DSP pipeline (~750 lines)
-- `firmware/esp32-csi-node/main/edge_processing.h` — Types and API
-- `firmware/esp32-csi-node/main/ota_update.c/h` — HTTP OTA endpoint
-- `firmware/esp32-csi-node/main/power_mgmt.c/h` — Power management
-- `rust-port/.../wifi-densepose-sensing-server/src/main.rs` — Vitals parser + REST endpoint
-- `scripts/provision.py` — Edge config CLI arguments
-- `.github/workflows/firmware-ci.yml` — CI build + size gate (updated to 950 KB for Tier 3)
+- `firmware/esp32-csi-node/main/edge_processing.c` - DSP pipeline (~750 lines)
+- `firmware/esp32-csi-node/main/edge_processing.h` - Types and API
+- `firmware/esp32-csi-node/main/ota_update.c/h` - HTTP OTA endpoint
+- `firmware/esp32-csi-node/main/power_mgmt.c/h` - Power management
+- `rust-port/.../wifi-densepose-sensing-server/src/main.rs` - Vitals parser + REST endpoint
+- `scripts/provision.py` - Edge config CLI arguments
+- `.github/workflows/firmware-ci.yml` - CI build + size gate (updated to 950 KB for Tier 3)
 
-### Tier 3 — WASM Programmable Sensing (ADR-040, ADR-041)
+### Tier 3 - WASM Programmable Sensing (ADR-040, ADR-041)
 
 See [ADR-040](ADR-040-wasm-programmable-sensing.md) for hot-loadable WASM modules
 compiled from Rust, executed via WASM3 interpreter on-device. Core modules:
@@ -140,9 +140,9 @@ gesture recognition, coherence monitoring, adversarial detection.
 
 [ADR-041](ADR-041-wasm-module-collection.md) defines the curated module collection
 (37 modules across 6 categories). Phase 1 implemented modules:
-- `vital_trend.rs` — Clinical vital sign trend analysis (bradypnea, tachypnea, apnea)
-- `intrusion.rs` — State-machine intrusion detection (calibrate-monitor-arm-alert)
-- `occupancy.rs` — Spatial occupancy zone detection with per-zone variance analysis
+- `vital_trend.rs` - Clinical vital sign trend analysis (bradypnea, tachypnea, apnea)
+- `intrusion.rs` - State-machine intrusion detection (calibrate-monitor-arm-alert)
+- `occupancy.rs` - Spatial occupancy zone detection with per-zone variance analysis
 
 ## Hardware Benchmark (RuView ESP32-S3)
 
@@ -204,8 +204,8 @@ Measured on ESP32-S3 (QFN56 rev v0.2, 8 MB flash, 160 MHz, ESP-IDF v5.2).
 
 ### Findings
 
-1. **Fall detection threshold too low** — default `fall_thresh=2000` (2.0 rad/s²) triggers 6.7 false positives/s in static indoor environment. Recommend increasing to 5000-8000 for typical deployments.
-2. **No PSRAM on test board** — WASM arena falls back to internal heap. Boards with PSRAM would support larger modules.
-3. **CSI rate exceeds spec** — measured 28.5 Hz vs. expected ~20 Hz. Performance headroom is better than estimated.
-4. **WiFi-to-Ethernet isolation** — some routers block UDP between WiFi and wired clients. Recommend same-subnet verification in deployment guide.
-5. **sendto ENOMEM crash (Issue #127)** — CSI callbacks in promiscuous mode fire 100-500+ times/sec, exhausting the lwIP pbuf pool and causing a guru meditation crash. Fixed with a dual approach: 50 Hz rate limiter in `csi_collector.c` (20 ms minimum send interval) and a 100 ms ENOMEM backoff in `stream_sender.c`. Binary size with fix: 947 KB. Hardware-verified stable for 200+ CSI callbacks with zero ENOMEM errors.
+1. **Fall detection threshold too low** - default `fall_thresh=2000` (2.0 rad/s²) triggers 6.7 false positives/s in static indoor environment. Recommend increasing to 5000-8000 for typical deployments.
+2. **No PSRAM on test board** - WASM arena falls back to internal heap. Boards with PSRAM would support larger modules.
+3. **CSI rate exceeds spec** - measured 28.5 Hz vs. expected ~20 Hz. Performance headroom is better than estimated.
+4. **WiFi-to-Ethernet isolation** - some routers block UDP between WiFi and wired clients. Recommend same-subnet verification in deployment guide.
+5. **sendto ENOMEM crash (Issue #127)** - CSI callbacks in promiscuous mode fire 100-500+ times/sec, exhausting the lwIP pbuf pool and causing a guru meditation crash. Fixed with a dual approach: 50 Hz rate limiter in `csi_collector.c` (20 ms minimum send interval) and a 100 ms ENOMEM backoff in `stream_sender.c`. Binary size with fix: 947 KB. Hardware-verified stable for 200+ CSI callbacks with zero ENOMEM errors.

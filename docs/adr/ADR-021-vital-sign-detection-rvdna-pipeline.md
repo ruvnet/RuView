@@ -11,7 +11,7 @@
 
 ### The Need for Vital Sign Detection
 
-WiFi-based vital sign monitoring is a rapidly maturing field. Channel State Information (CSI) captures fine-grained multipath propagation changes caused by physiological movements -- chest displacement from respiration (1-5 mm amplitude, 0.1-0.5 Hz) and body surface displacement from cardiac activity (0.1-0.5 mm, 0.8-2.0 Hz). Our existing WiFi-DensePose project already implements motion detection, presence sensing, and body velocity profiling (BVP), but lacks a dedicated vital sign extraction pipeline.
+WiFi-based vital sign monitoring is a rapidly maturing field. Channel State Information (CSI) captures fine-grained multipath propagation changes caused by physiological movements - chest displacement from respiration (1-5 mm amplitude, 0.1-0.5 Hz) and body surface displacement from cardiac activity (0.1-0.5 mm, 0.8-2.0 Hz). Our existing WiFi-DensePose project already implements motion detection, presence sensing, and body velocity profiling (BVP), but lacks a dedicated vital sign extraction pipeline.
 
 Vital sign detection extends the project's value from occupancy sensing into health monitoring, enabling contactless respiratory rate and heart rate estimation for applications in eldercare, sleep monitoring, disaster survivor detection (ADR-001), and clinical triage.
 
@@ -21,7 +21,7 @@ The `vendor/ruvector` codebase provides a rich set of signal processing primitiv
 
 | Crate | Key Primitives | Vital Sign Relevance |
 |-------|---------------|---------------------|
-| `ruvector-temporal-tensor` | `TemporalTensorCompressor`, `TieredStore`, `TierPolicy`, tiered quantization (8/7/5/3-bit) | Stores compressed CSI temporal streams with adaptive precision -- hot (real-time vital signs) at 8-bit, warm (historical) at 5-bit, cold (archive) at 3-bit |
+| `ruvector-temporal-tensor` | `TemporalTensorCompressor`, `TieredStore`, `TierPolicy`, tiered quantization (8/7/5/3-bit) | Stores compressed CSI temporal streams with adaptive precision - hot (real-time vital signs) at 8-bit, warm (historical) at 5-bit, cold (archive) at 3-bit |
 | `ruvector-nervous-system` | `PredictiveLayer`, `OscillatoryRouter`, `GlobalWorkspace`, `DVSEvent`, `EventRingBuffer`, `ShardedEventBus`, `EpropSynapse`, `Dendrite`, `ModernHopfield` | Predictive coding suppresses static CSI components (90-99% bandwidth reduction), oscillatory routing isolates respiratory vs cardiac frequency bands, event bus handles high-throughput CSI streams |
 | `ruvector-attention` | `ScaledDotProductAttention`, Mixture of Experts (MoE), PDE attention, sparse attention | Attention-weighted subcarrier selection for vital sign sensitivity, already used in BVP extraction |
 | `ruvector-coherence` | `SpectralCoherenceScore`, `HnswHealthMonitor`, spectral gap estimation, Fiedler value | Spectral analysis of CSI time series, coherence between subcarrier pairs for breathing/heartbeat isolation |
@@ -29,8 +29,8 @@ The `vendor/ruvector` codebase provides a rich set of signal processing primitiv
 | `ruvector-core` | `VectorDB`, HNSW index, SIMD distance, quantization | Fingerprint-based pattern matching of vital sign waveform templates |
 | `sona` | `SonaEngine`, `TrajectoryBuilder`, micro-LoRA, EWC++ | Self-optimizing adaptation of vital sign extraction parameters per environment |
 | `ruvector-sparse-inference` | Sparse model execution, precision management | Efficient inference on edge devices with constrained compute |
-| `ruQu` | `FilterPipeline` (Structural/Shift/Evidence), `AdaptiveThresholds` (Welford, EMA, CUSUM-style), `DriftDetector` (step-change, variance expansion, oscillation), `QuantumFabric` (256-tile parallel processing) | **Three-filter decision pipeline** for vital sign gating -- structural filter detects signal partition/degradation, shift filter catches distribution drift in vital sign baselines, evidence filter provides anytime-valid statistical rigor. `DriftDetector` directly detects respiratory/cardiac parameter drift. `AdaptiveThresholds` self-tunes anomaly thresholds with outcome feedback (precision/recall/F1). 256-tile fabric maps to parallel subcarrier processing. |
-| DNA example (`examples/dna`) | `BiomarkerProfile`, `StreamProcessor`, `RingBuffer`, `BiomarkerReading`, z-score anomaly detection, CUSUM changepoint detection, EMA, trend analysis | Direct analog -- the biomarker streaming engine processes time-series health data with anomaly detection, which maps exactly to vital sign monitoring |
+| `ruQu` | `FilterPipeline` (Structural/Shift/Evidence), `AdaptiveThresholds` (Welford, EMA, CUSUM-style), `DriftDetector` (step-change, variance expansion, oscillation), `QuantumFabric` (256-tile parallel processing) | **Three-filter decision pipeline** for vital sign gating - structural filter detects signal partition/degradation, shift filter catches distribution drift in vital sign baselines, evidence filter provides anytime-valid statistical rigor. `DriftDetector` directly detects respiratory/cardiac parameter drift. `AdaptiveThresholds` self-tunes anomaly thresholds with outcome feedback (precision/recall/F1). 256-tile fabric maps to parallel subcarrier processing. |
+| DNA example (`examples/dna`) | `BiomarkerProfile`, `StreamProcessor`, `RingBuffer`, `BiomarkerReading`, z-score anomaly detection, CUSUM changepoint detection, EMA, trend analysis | Direct analog - the biomarker streaming engine processes time-series health data with anomaly detection, which maps exactly to vital sign monitoring |
 
 ### Current Project State
 
@@ -144,7 +144,7 @@ The vital sign module adds a **PredictiveLayer** gate from `ruvector-nervous-sys
 use ruvector_nervous_system::routing::PredictiveLayer;
 
 pub struct CsiVitalPreprocessor {
-    /// Predictive coding layer -- suppresses static CSI components.
+    /// Predictive coding layer - suppresses static CSI components.
     /// Only transmits residuals (changes) exceeding threshold.
     /// Achieves 90-99% bandwidth reduction on stable environments.
     predictive: PredictiveLayer,
@@ -699,7 +699,7 @@ Router::new()
 
 The existing SensingTab.js Gaussian splat visualization (ADR-019) is extended with:
 
-- **Breathing ring**: Already prototyped in `generate_signal_field()` as the `breath_ring` variable -- amplitude modulated by `variance` and `tick`. This is replaced with the actual breathing waveform from the vital sign extractor.
+- **Breathing ring**: Already prototyped in `generate_signal_field()` as the `breath_ring` variable - amplitude modulated by `variance` and `tick`. This is replaced with the actual breathing waveform from the vital sign extractor.
 - **Heart rate indicator**: Pulsing opacity overlay synced to estimated heart rate.
 - **Vital sign panel**: Side panel showing HR/RR values, trend sparklines, and anomaly alerts.
 
@@ -992,10 +992,10 @@ The current Windows WiFi mode (`--source wifi`) uses `netsh wlan show interfaces
 
 | Capability | Mechanism | Quality |
 |---|---|---|
-| **Presence detection** | RSSI variance over time via `DriftDetector` | Good -- ruQu detects StepChange when a person enters/leaves |
-| **Coarse breathing estimate** | RSSI temporal modulation at 0.1-0.5 Hz | Fair -- single-signal source, needs 30+ seconds of stationary RSSI |
-| **Environmental drift** | `AdaptiveThresholds` + `DriftDetector` on RSSI series | Good -- detects linear trends, step changes, oscillating interference |
-| **Signal quality gating** | ruQu `FilterPipeline` gates unreliable readings | Good -- suppresses false readings during WiFi fluctuations |
+| **Presence detection** | RSSI variance over time via `DriftDetector` | Good - ruQu detects StepChange when a person enters/leaves |
+| **Coarse breathing estimate** | RSSI temporal modulation at 0.1-0.5 Hz | Fair - single-signal source, needs 30+ seconds of stationary RSSI |
+| **Environmental drift** | `AdaptiveThresholds` + `DriftDetector` on RSSI series | Good - detects linear trends, step changes, oscillating interference |
+| **Signal quality gating** | ruQu `FilterPipeline` gates unreliable readings | Good - suppresses false readings during WiFi fluctuations |
 
 ### What Does NOT Work in Windows WiFi Mode
 

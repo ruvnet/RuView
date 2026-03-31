@@ -78,11 +78,11 @@
       "type": "object",
       "description": "WASM edge module event IDs (690-694)",
       "properties": {
-        "690_HAPPINESS_SCORE": "Composite happiness [0, 1] — emitted every frame",
-        "691_GAIT_ENERGY": "Gait speed + stride regularity composite — emitted every 4th frame",
-        "692_AFFECT_VALENCE": "Breathing calm + fluidity + posture composite — emitted every 4th frame",
-        "693_SOCIAL_ENERGY": "Group animation level — emitted every 4th frame",
-        "694_TRANSIT_DIRECTION": "1.0=entering, 0.0=exiting — emitted every 4th frame"
+        "690_HAPPINESS_SCORE": "Composite happiness [0, 1] - emitted every frame",
+        "691_GAIT_ENERGY": "Gait speed + stride regularity composite - emitted every 4th frame",
+        "692_AFFECT_VALENCE": "Breathing calm + fluidity + posture composite - emitted every 4th frame",
+        "693_SOCIAL_ENERGY": "Group animation level - emitted every 4th frame",
+        "694_TRANSIT_DIRECTION": "1.0=entering, 0.0=exiting - emitted every 4th frame"
       }
     },
     "seed_id_scheme": {

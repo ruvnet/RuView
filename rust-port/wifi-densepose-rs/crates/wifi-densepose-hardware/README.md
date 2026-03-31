@@ -10,20 +10,20 @@ Hardware interface abstractions for WiFi CSI sensors (ESP32, Intel 5300, Atheros
 
 `wifi-densepose-hardware` provides platform-agnostic parsers for WiFi CSI data from multiple
 hardware sources. All parsing operates on byte buffers with no C FFI or hardware dependencies at
-compile time, making the crate fully portable and deterministic -- the same bytes in always produce
+compile time, making the crate fully portable and deterministic - the same bytes in always produce
 the same parsed output.
 
 ## Features
 
-- **ESP32 binary parser** -- Parses ADR-018 binary CSI frames streamed over UDP from ESP32 and
+- **ESP32 binary parser** - Parses ADR-018 binary CSI frames streamed over UDP from ESP32 and
   ESP32-S3 devices.
-- **UDP aggregator** -- Receives and aggregates CSI frames from multiple ESP32 nodes (ADR-018
+- **UDP aggregator** - Receives and aggregates CSI frames from multiple ESP32 nodes (ADR-018
   Layer 2). Provided as a standalone binary.
-- **Bridge** -- Converts hardware `CsiFrame` into the `CsiData` format expected by the detection
+- **Bridge** - Converts hardware `CsiFrame` into the `CsiData` format expected by the detection
   pipeline (ADR-018 Layer 3).
-- **No mock data** -- Parsers either parse real bytes or return explicit `ParseError` values.
+- **No mock data** - Parsers either parse real bytes or return explicit `ParseError` values.
   There are no synthetic fallbacks.
-- **Pure byte-buffer parsing** -- No FFI to ESP-IDF or kernel modules. Safe to compile and test
+- **Pure byte-buffer parsing** - No FFI to ESP-IDF or kernel modules. Safe to compile and test
   on any platform.
 
 ### Feature flags
@@ -60,12 +60,12 @@ match Esp32CsiParser::parse_frame(raw_bytes) {
 
 ```text
 wifi-densepose-hardware/src/
-  lib.rs            -- Re-exports: CsiFrame, Esp32CsiParser, ParseError, CsiData
-  csi_frame.rs      -- CsiFrame, CsiMetadata, SubcarrierData, Bandwidth, AntennaConfig
-  esp32_parser.rs   -- Esp32CsiParser (ADR-018 binary protocol)
-  error.rs          -- ParseError
-  bridge.rs         -- CsiData bridge to detection pipeline
-  aggregator/       -- UDP multi-node frame aggregator (binary)
+  lib.rs            - Re-exports: CsiFrame, Esp32CsiParser, ParseError, CsiData
+  csi_frame.rs      - CsiFrame, CsiMetadata, SubcarrierData, Bandwidth, AntennaConfig
+  esp32_parser.rs   - Esp32CsiParser (ADR-018 binary protocol)
+  error.rs          - ParseError
+  bridge.rs         - CsiData bridge to detection pipeline
+  aggregator/       - UDP multi-node frame aggregator (binary)
 ```
 
 ## Related Crates

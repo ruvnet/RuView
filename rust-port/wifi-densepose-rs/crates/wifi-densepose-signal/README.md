@@ -27,11 +27,11 @@ graph and attention operations.
 
 ## Features
 
-- **CSI preprocessing** -- Noise removal, windowing, normalization via `CsiProcessor`.
-- **Phase sanitization** -- Unwrapping, outlier removal, and smoothing via `PhaseSanitizer`.
-- **Feature extraction** -- Amplitude, phase, correlation, Doppler, and PSD features.
-- **Motion detection** -- Human presence detection with confidence scoring via `MotionDetector`.
-- **ruvector integration** -- Graph min-cut (person matching), attention mechanisms (antenna and
+- **CSI preprocessing** - Noise removal, windowing, normalization via `CsiProcessor`.
+- **Phase sanitization** - Unwrapping, outlier removal, and smoothing via `PhaseSanitizer`.
+- **Feature extraction** - Amplitude, phase, correlation, Doppler, and PSD features.
+- **Motion detection** - Human presence detection with confidence scoring via `MotionDetector`.
+- **ruvector integration** - Graph min-cut (person matching), attention mechanisms (antenna and
   spatial attention), and sparse solvers (subcarrier interpolation).
 
 ## Quick Start
@@ -58,17 +58,17 @@ let processor = CsiProcessor::new(config);
 
 ```text
 wifi-densepose-signal/src/
-  lib.rs                 -- Re-exports, SignalError, prelude
-  bvp.rs                 -- Body Velocity Profile (Widar 3.0)
-  csi_processor.rs       -- Core preprocessing pipeline
-  csi_ratio.rs           -- Conjugate multiplication (SpotFi)
-  features.rs            -- Amplitude/phase/Doppler/PSD feature extraction
-  fresnel.rs             -- Fresnel zone diffraction model
-  hampel.rs              -- Hampel outlier filter
-  motion.rs              -- Motion and human presence detection
-  phase_sanitizer.rs     -- Phase unwrapping and sanitization
-  spectrogram.rs         -- Time-frequency CSI spectrograms
-  subcarrier_selection.rs -- Variance-based subcarrier selection
+  lib.rs                 - Re-exports, SignalError, prelude
+  bvp.rs                 - Body Velocity Profile (Widar 3.0)
+  csi_processor.rs       - Core preprocessing pipeline
+  csi_ratio.rs           - Conjugate multiplication (SpotFi)
+  features.rs            - Amplitude/phase/Doppler/PSD feature extraction
+  fresnel.rs             - Fresnel zone diffraction model
+  hampel.rs              - Hampel outlier filter
+  motion.rs              - Motion and human presence detection
+  phase_sanitizer.rs     - Phase unwrapping and sanitization
+  spectrogram.rs         - Time-frequency CSI spectrograms
+  subcarrier_selection.rs - Variance-based subcarrier selection
 ```
 
 ## Related Crates

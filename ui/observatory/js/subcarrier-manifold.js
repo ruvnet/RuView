@@ -1,5 +1,5 @@
 /**
- * Module A — "The Subcarrier Manifold"
+ * Module A - "The Subcarrier Manifold"
  * 3D scrolling surface: 64 subcarriers x 60 time slots
  */
 import * as THREE from 'three';

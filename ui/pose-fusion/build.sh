@@ -4,7 +4,7 @@
 #
 # Usage: ./build.sh
 #
-# Output: pkg/ruvector_cnn_wasm/ — WASM CNN embedder for browser
+# Output: pkg/ruvector_cnn_wasm/ - WASM CNN embedder for browser
 
 set -e
 

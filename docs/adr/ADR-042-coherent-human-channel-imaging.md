@@ -1,4 +1,4 @@
-# ADR-042: Coherent Human Channel Imaging (CHCI) — Beyond WiFi CSI
+# ADR-042: Coherent Human Channel Imaging (CHCI) - Beyond WiFi CSI
 
 **Status**: Proposed
 **Date**: 2026-03-03
@@ -10,7 +10,7 @@
 
 ## Context
 
-WiFi-DensePose currently relies on passive Channel State Information (CSI) extracted from standard 802.11 traffic frames. CSI is one specific way of estimating a channel response, but it is fundamentally constrained by a protocol designed for throughput and interoperability — not for sensing.
+WiFi-DensePose currently relies on passive Channel State Information (CSI) extracted from standard 802.11 traffic frames. CSI is one specific way of estimating a channel response, but it is fundamentally constrained by a protocol designed for throughput and interoperability - not for sensing.
 
 ### Fundamental Limitations of Passive WiFi CSI
 
@@ -27,7 +27,7 @@ These constraints impose a hard floor on sensing fidelity. Breathing detection (
 
 ### What We Actually Want
 
-The real objective is **coherent multipath sensing** — measuring the complex-valued impulse response of the human-occupied channel with sufficient phase stability and temporal resolution to reconstruct body surface geometry and sub-millimeter physiological motion.
+The real objective is **coherent multipath sensing** - measuring the complex-valued impulse response of the human-occupied channel with sufficient phase stability and temporal resolution to reconstruct body surface geometry and sub-millimeter physiological motion.
 
 WiFi is optimized for throughput and interoperability. DensePose is optimized for phase stability and micro-Doppler fidelity. Those goals are not aligned.
 
@@ -35,7 +35,7 @@ WiFi is optimized for throughput and interoperability. DensePose is optimized fo
 
 IEEE Std 802.11bf-2025 was published on September 26, 2025, defining WLAN Sensing as a first-class MAC/PHY capability. Key provisions:
 
-- **Null Data PPDU (NDP) sounding**: Deterministic, known waveforms with no data payload — purpose-built for channel measurement
+- **Null Data PPDU (NDP) sounding**: Deterministic, known waveforms with no data payload - purpose-built for channel measurement
 - **Sensing Measurement Setup (SMS)**: Negotiation protocol between sensing initiator and responder with unique session IDs
 - **Trigger-Based Sensing Measurement Exchange (TB SME)**: AP-coordinated sounding with Sensing Availability Windows (SAW)
 - **Multiband support**: Sub-7 GHz (2.4, 5, 6 GHz) plus 60 GHz mmWave
@@ -67,13 +67,13 @@ This proves the hardware architecture described in this ADR is feasible at the E
 | Vayyar 4D imaging | 3–81 GHz | High (4D imaging) | Room-scale | $200+ |
 | Novelda X4 UWB | 7.29/8.748 GHz | Sub-mm | 0.4–10 m | $15–50 |
 
-The gap between passive WiFi CSI (~0.87 mm) and coherent phase processing (~0.1 mm) represents a 9x improvement in displacement sensitivity — the difference between marginal and reliable heartbeat detection at ISM bands.
+The gap between passive WiFi CSI (~0.87 mm) and coherent phase processing (~0.1 mm) represents a 9x improvement in displacement sensitivity - the difference between marginal and reliable heartbeat detection at ISM bands.
 
 ---
 
 ## Decision
 
-We define **Coherent Human Channel Imaging (CHCI)** — a purpose-built coherent RF sensing protocol optimized for structural human motion, vital sign extraction, and body surface reconstruction. CHCI is not WiFi in the traditional sense. It is a sensing protocol that operates within ISM band regulatory constraints and can optionally maintain backward compatibility with 802.11bf.
+We define **Coherent Human Channel Imaging (CHCI)** - a purpose-built coherent RF sensing protocol optimized for structural human motion, vital sign extraction, and body surface reconstruction. CHCI is not WiFi in the traditional sense. It is a sensing protocol that operates within ISM band regulatory constraints and can optionally maintain backward compatibility with 802.11bf.
 
 ### Architecture Overview
 
@@ -256,7 +256,7 @@ This puts heartbeat detection (0.2–0.5 mm chest displacement) well within the 
                                           └─────────────────────┘
 ```
 
-**Key insight**: Lower frequency penetrates better (through-wall sensing, NLOS paths). Higher frequency provides finer spatial resolution. By treating each band as a projection of the same physical scene, the fusion model can achieve super-resolution beyond any single band — using body model priors (known human dimensions, joint angle constraints) to constrain the phase relationships across bands.
+**Key insight**: Lower frequency penetrates better (through-wall sensing, NLOS paths). Higher frequency provides finer spatial resolution. By treating each band as a projection of the same physical scene, the fusion model can achieve super-resolution beyond any single band - using body model priors (known human dimensions, joint angle constraints) to constrain the phase relationships across bands.
 
 **Integration with existing code**: Extends `multiband.rs` from independent per-channel fusion to coherent cross-band phase alignment. The existing `CrossViewpointAttention` mechanism in `ruvector/src/viewpoint/attention.rs` provides the attention-weighted fusion foundation.
 
@@ -345,7 +345,7 @@ Proposed CHCI (sensing-optimized):
 | Geometry | Dual-antenna diversity | Linear or L-shaped phased array |
 | Target signal | Far-field plane wave | Near-field chest wall displacement |
 
-**Virtual aperture synthesis**: With 4 nodes × 4 antennas = 16 physical elements, MIMO virtual aperture provides 16 × 16 = 256 virtual channels. Combined with MUSIC or ESPRIT algorithms, this enables sub-degree angle-of-arrival estimation — sufficient to resolve individual body segments.
+**Virtual aperture synthesis**: With 4 nodes × 4 antennas = 16 physical elements, MIMO virtual aperture provides 16 × 16 = 256 virtual channels. Combined with MUSIC or ESPRIT algorithms, this enables sub-degree angle-of-arrival estimation - sufficient to resolve individual body segments.
 
 ### 6. Cognitive Waveform Adaptation
 
@@ -401,13 +401,13 @@ Proposed CHCI (sensing-optimized):
 └───────────────────────────────────────────────────────────────┘
 ```
 
-**Power efficiency**: Cognitive adaptation reduces average power consumption by 60–80% compared to constant full-rate sounding. In IDLE mode (1 Hz, single band, low power), the system draws <10 mA from the ESP32-S3 radio — enabling battery-powered deployment.
+**Power efficiency**: Cognitive adaptation reduces average power consumption by 60–80% compared to constant full-rate sounding. In IDLE mode (1 Hz, single band, low power), the system draws <10 mA from the ESP32-S3 radio - enabling battery-powered deployment.
 
 **Integration with ADR-039**: The cognitive waveform modes map directly to ADR-039 edge processing tiers. Tier 0 (raw CSI) corresponds to IDLE/ALERT. Tier 1 (phase unwrap, stats) corresponds to ACTIVE. Tier 2 (vitals, fall detection) corresponds to VITAL/SLEEP. The cognitive engine adds the waveform adaptation feedback loop that ADR-039 lacks.
 
 ### 7. Coherent Diffraction Tomography
 
-**What changes**: Current tomography (`tomography.rs`) uses amplitude-only attenuation for voxel reconstruction. With coherent phase data from CHCI, we upgrade to diffraction tomography — resolving body surfaces rather than volumetric shadows.
+**What changes**: Current tomography (`tomography.rs`) uses amplitude-only attenuation for voxel reconstruction. With coherent phase data from CHCI, we upgrade to diffraction tomography - resolving body surfaces rather than volumetric shadows.
 
 **Mathematical foundation**:
 
@@ -426,7 +426,7 @@ Proposed (coherent diffraction tomography):
   Output: complex permittivity contrast per voxel (body surface)
 ```
 
-**Key advantage**: Diffraction tomography produces body surface geometry, not just occupancy maps. This directly feeds the DensePose UV mapping pipeline with geometric constraints — reducing the neural network's burden from "guess the surface from shadows" to "refine the surface from holographic reconstruction."
+**Key advantage**: Diffraction tomography produces body surface geometry, not just occupancy maps. This directly feeds the DensePose UV mapping pipeline with geometric constraints - reducing the neural network's burden from "guess the surface from shadows" to "refine the surface from holographic reconstruction."
 
 **Performance projection** (based on ESPARGOS results and multi-band coverage):
 
@@ -467,11 +467,11 @@ CHCI supports a **dual-mode architecture**:
 | **802.11bf NDP** | Standard-compliant NDP sounding | WiFi AP supports 802.11bf, moderate improvement over legacy |
 | **CHCI Native** | Full coherent sounding with shared clock | Purpose-deployed sensing mesh, maximum fidelity |
 
-The firmware can switch between modes at runtime. The signal processing pipeline (`signal/src/ruvsense/`) accepts CSI from any mode — the coherent processing path activates when shared-clock metadata is present in the CSI frame header.
+The firmware can switch between modes at runtime. The signal processing pipeline (`signal/src/ruvsense/`) accepts CSI from any mode - the coherent processing path activates when shared-clock metadata is present in the CSI frame header.
 
 **Question 2: Are you willing to own both transmitter and receiver hardware?**
 
-Yes. CHCI requires owning both TX and RX to achieve phase coherence. The system is deployed as a self-contained sensing mesh — not parasitic on existing WiFi infrastructure. This is the fundamental architectural trade: compatibility for control. For sensing, that is a good trade.
+Yes. CHCI requires owning both TX and RX to achieve phase coherence. The system is deployed as a self-contained sensing mesh - not parasitic on existing WiFi infrastructure. This is the fundamental architectural trade: compatibility for control. For sensing, that is a good trade.
 
 ### Hardware Bill of Materials (per CHCI node)
 
@@ -535,8 +535,8 @@ New and modified crates:
 - **Standards-compliant path**: 802.11bf NDP sounding is a published IEEE standard (September 2025), providing regulatory clarity
 - **10× cost advantage**: $4.25/node vs $50+ for nearest comparable coherent sensing platform
 - **Through-wall preservation**: Operates at 2.4/5 GHz ISM bands, maintaining the through-wall sensing advantage that mmWave systems lack
-- **Backward compatible**: Dual-mode firmware supports legacy CSI, 802.11bf NDP, and native CHCI — deployable incrementally
-- **Privacy-preserving**: No cameras, no audio — same RF-only sensing paradigm as current WiFi-DensePose
+- **Backward compatible**: Dual-mode firmware supports legacy CSI, 802.11bf NDP, and native CHCI - deployable incrementally
+- **Privacy-preserving**: No cameras, no audio - same RF-only sensing paradigm as current WiFi-DensePose
 - **Power-efficient**: Cognitive waveform adaptation reduces average power 60–80% vs constant-rate sounding
 - **Body surface reconstruction**: Coherent diffraction tomography produces geometric constraints for DensePose, reducing neural network inference burden
 - **Proven feasibility**: ESPARGOS demonstrates phase-coherent WiFi sensing at ESP32 cost point (IEEE 2024)
@@ -544,8 +544,8 @@ New and modified crates:
 ### Negative
 
 - **Custom hardware required**: Cannot parasitically sense from existing WiFi routers in CHCI Native mode (802.11bf mode can use compliant APs)
-- **PCB design needed**: Reference clock distribution requires custom PCB — not a pure firmware upgrade
-- **Calibration burden**: Coherent diffraction tomography requires empty-room reference scan — adds deployment friction
+- **PCB design needed**: Reference clock distribution requires custom PCB - not a pure firmware upgrade
+- **Calibration burden**: Coherent diffraction tomography requires empty-room reference scan - adds deployment friction
 - **Clock distribution complexity**: Coaxial cable distribution limits deployment flexibility vs fully wireless mesh
 - **Two-phase deployment**: Full CHCI requires Phases 1–6 (~24 weeks). Intermediate modes (NDP-only, Phase 1) provide incremental value.
 
@@ -566,7 +566,7 @@ New and modified crates:
 
 ### Standards
 
-1. IEEE Std 802.11bf-2025, "Standard for Information Technology — Telecommunications and Information Exchange between Systems — Local and Metropolitan Area Networks — Specific Requirements — Part 11: Wireless LAN Medium Access Control (MAC) and Physical Layer (PHY) Specifications — Amendment: Enhancements for Wireless Local Area Network (WLAN) Sensing," IEEE, September 2025.
+1. IEEE Std 802.11bf-2025, "Standard for Information Technology - Telecommunications and Information Exchange between Systems - Local and Metropolitan Area Networks - Specific Requirements - Part 11: Wireless LAN Medium Access Control (MAC) and Physical Layer (PHY) Specifications - Amendment: Enhancements for Wireless Local Area Network (WLAN) Sensing," IEEE, September 2025.
 2. ETSI EN 300 328 V2.2.2, "Wideband transmission systems; Data transmission equipment operating in the 2.4 GHz band," ETSI, July 2019.
 3. FCC 47 CFR Part 15.247, "Operation within the bands 902–928 MHz, 2400–2483.5 MHz, and 5725–5850 MHz."
 

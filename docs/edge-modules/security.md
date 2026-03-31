@@ -1,4 +1,4 @@
-# Security & Safety Modules -- WiFi-DensePose Edge Intelligence
+# Security & Safety Modules - WiFi-DensePose Edge Intelligence
 
 > Perimeter monitoring and threat detection using WiFi Channel State Information (CSI).
 > Works through walls, in complete darkness, without visible cameras.
@@ -35,7 +35,7 @@ All security modules follow these conventions:
 
 ### Intrusion Detection (`intrusion.rs`)
 
-**What it does**: Monitors a previously-empty space and triggers an alarm when someone enters. Works like a traditional motion alarm -- the environment must settle before the system arms itself.
+**What it does**: Monitors a previously-empty space and triggers an alarm when someone enters. Works like a traditional motion alarm - the environment must settle before the system arms itself.
 
 **How it works**: During calibration (200 frames), the detector learns per-subcarrier amplitude mean and variance. After calibration, it waits for the environment to be quiet (100 consecutive frames with low disturbance) before arming. Once armed, it computes a composite disturbance score from phase velocity (sudden phase jumps between frames) and amplitude deviation (amplitude departing from baseline by more than 3 sigma). If the disturbance exceeds 0.8 for 3+ consecutive frames, an alert fires.
 
@@ -70,7 +70,7 @@ Calibrating --> Monitoring --> Armed --> Alert
 | 200 | `EVENT_INTRUSION_ALERT` | Intrusion detected (disturbance score as value) |
 | 201 | `EVENT_INTRUSION_ZONE` | Zone index of highest disturbance |
 | 202 | `EVENT_INTRUSION_ARMED` | System transitioned to Armed state |
-| 203 | `EVENT_INTRUSION_DISARMED` | System disarmed (currently unused -- reserved) |
+| 203 | `EVENT_INTRUSION_DISARMED` | System disarmed (currently unused - reserved) |
 
 #### Configuration
 
@@ -93,7 +93,7 @@ Calibrating --> Monitoring --> Armed --> Alert
 1. **Phase gradient**: Mean absolute phase difference between current and previous frame within the zone's subcarrier range.
 2. **Variance ratio**: Current zone variance divided by calibrated baseline variance.
 
-A breach is flagged when phase gradient exceeds 0.6 rad/subcarrier AND variance ratio exceeds 2.5x baseline. Direction is determined by linear regression slope over an 8-frame energy history buffer -- positive slope = approaching, negative = departing.
+A breach is flagged when phase gradient exceeds 0.6 rad/subcarrier AND variance ratio exceeds 2.5x baseline. Direction is determined by linear regression slope over an 8-frame energy history buffer - positive slope = approaching, negative = departing.
 
 #### State Machine
 
@@ -267,7 +267,7 @@ for &(event_id, value) in events {
 
 ### Tailgating Detection (`sec_tailgating.rs`)
 
-**What it does**: Detects tailgating at doorways -- two or more people passing through in rapid succession. A single authorized passage produces one smooth energy peak; a tailgater following closely produces a second peak within a configurable window (default 3 seconds).
+**What it does**: Detects tailgating at doorways - two or more people passing through in rapid succession. A single authorized passage produces one smooth energy peak; a tailgater following closely produces a second peak within a configurable window (default 3 seconds).
 
 **How it works**: The detector uses temporal clustering of motion energy peaks through a 3-state machine:
 
@@ -366,7 +366,7 @@ for &(event_id, value) in events {
 
 **What it does**: Detects prolonged stationary presence in a monitored area. Distinguishes between a person passing through (normal) and someone standing still for an extended time (loitering). Default dwell threshold is 5 minutes.
 
-**How it works**: Uses a 4-state machine that tracks presence duration and motion level. Only stationary frames (motion energy below 0.5) count toward the dwell threshold -- a person actively walking through does not accumulate loitering time. The exit cooldown (30 seconds) prevents false "loitering ended" events from brief signal dropouts or occlusions.
+**How it works**: Uses a 4-state machine that tracks presence duration and motion level. Only stationary frames (motion energy below 0.5) count toward the dwell threshold - a person actively walking through does not accumulate loitering time. The exit cooldown (30 seconds) prevents false "loitering ended" events from brief signal dropouts or occlusions.
 
 #### State Machine
 
@@ -463,7 +463,7 @@ if detector.state() == LoiterState::Loitering {
 **What it does**: Detects three categories of distress-related motion:
 1. **Panic**: Erratic, high-jerk motion with rapid random direction changes (e.g., someone flailing, being attacked).
 2. **Struggle**: Elevated jerk with moderate energy and some direction changes (e.g., physical altercation, trying to break free).
-3. **Fleeing**: Sustained high energy with low entropy -- running in one direction.
+3. **Fleeing**: Sustained high energy with low entropy - running in one direction.
 
 **How it works**: Maintains a 100-frame (5-second) circular buffer of motion energy and variance values. Computes window-level statistics each frame:
 
@@ -557,7 +557,7 @@ for &(event_id, value) in events {
 ```bash
 # Run all security module tests (requires std feature)
 cd rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge
-cargo test --features std -- sec_ intrusion
+cargo test --features std - sec_ intrusion
 ```
 
 ### Test Coverage Summary
@@ -579,7 +579,7 @@ cargo test --features std -- sec_ intrusion
 
 Each ESP32-S3 with a WiFi AP link covers a single sensing path. The coverage area depends on:
 - **Distance**: 1-10 meters between ESP32 and AP (optimal: 3-5 meters for indoor).
-- **Width**: First Fresnel zone width -- approximately 0.5-1.5 meters at 5 GHz.
+- **Width**: First Fresnel zone width - approximately 0.5-1.5 meters at 5 GHz.
 - **Through-wall**: WiFi CSI penetrates drywall and wood but attenuates through concrete/metal. Signal quality degrades beyond one wall.
 
 ### Multi-Sensor Coordination

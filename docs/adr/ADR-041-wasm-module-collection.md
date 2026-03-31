@@ -1,4 +1,4 @@
-# ADR-041: WASM Module Collection -- Curated Sensing Algorithm Registry
+# ADR-041: WASM Module Collection - Curated Sensing Algorithm Registry
 
 **Status**: Accepted (Phase 1 implemented, hardware-validated on RuView ESP32-S3)
 **Date**: 2026-03-02
@@ -15,12 +15,12 @@ budget control. Three flagship modules were defined (gesture, coherence,
 adversarial) as proof of capability.
 
 A runtime without a library of modules is an empty platform. The difference
-between a product and a platform is the ecosystem -- and the ecosystem is the
+between a product and a platform is the ecosystem - and the ecosystem is the
 module collection. Three strategic dynamics make a curated collection essential:
 
 **1. Platform flywheel effect.** Each new module increases the value of every
 deployed ESP32 node. A node purchased for sleep apnea monitoring becomes a
-fall detector, an intrusion sensor, and an occupancy counter -- all via OTA
+fall detector, an intrusion sensor, and an occupancy counter - all via OTA
 WASM uploads. This multiplies the addressable market without multiplying
 hardware SKUs.
 
@@ -108,7 +108,7 @@ emits an apnea alert with duration. It also tracks apnea-hypopnea index
 | 102 | `AHI_UPDATE` | Events per hour (float) |
 
 **Estimated .wasm size**: 4 KB
-**Budget tier**: L (lightweight, < 2 ms) -- primarily threshold checks on Tier 2 vitals
+**Budget tier**: L (lightweight, < 2 ms) - primarily threshold checks on Tier 2 vitals
 **Difficulty**: Easy
 
 ---
@@ -136,7 +136,7 @@ RMSSD exceeds 3 standard deviations from baseline.
 | 113 | `HRV_ANOMALY` | RMSSD value |
 
 **Estimated .wasm size**: 8 KB
-**Budget tier**: S (standard, < 5 ms) -- requires phase history windowing
+**Budget tier**: S (standard, < 5 ms) - requires phase history windowing
 **Difficulty**: Hard
 
 ---
@@ -164,7 +164,7 @@ detection uses autocorrelation of the breathing amplitude envelope over a
 | 123 | `RESP_DISTRESS_LEVEL` | Severity 0.0--1.0 |
 
 **Estimated .wasm size**: 10 KB
-**Budget tier**: H (heavy, < 10 ms) -- autocorrelation over 60 s window
+**Budget tier**: H (heavy, < 10 ms) - autocorrelation over 60 s window
 **Difficulty**: Hard
 
 ---
@@ -194,7 +194,7 @@ biomechanics literature.
 | 134 | `FESTINATION` | Acceleration pattern flag |
 
 **Estimated .wasm size**: 12 KB
-**Budget tier**: H (heavy, < 10 ms) -- windowed periodicity analysis
+**Budget tier**: H (heavy, < 10 ms) - windowed periodicity analysis
 **Difficulty**: Hard
 
 ---
@@ -224,7 +224,7 @@ onset, and post-ictal stillness.
 | 143 | `POST_ICTAL` | Stillness duration (seconds) |
 
 **Estimated .wasm size**: 10 KB
-**Budget tier**: S (standard, < 5 ms) -- frequency analysis on motion energy
+**Budget tier**: S (standard, < 5 ms) - frequency analysis on motion energy
 **Difficulty**: Hard
 
 ---
@@ -253,7 +253,7 @@ across on_timer calls.
 | 153 | `BASELINE_ESTABLISHED` | Hours of data collected |
 
 **Estimated .wasm size**: 6 KB
-**Budget tier**: L (lightweight, < 2 ms) -- EWMA updates are O(1)
+**Budget tier**: L (lightweight, < 2 ms) - EWMA updates are O(1)
 **Difficulty**: Medium
 
 ---
@@ -325,7 +325,7 @@ Metallic objects have significantly higher RF reflectivity than biological
 tissue, creating distinctive amplitude spikes on specific subcarrier
 groups when a person carrying metal passes through the sensing field.
 The module computes a metal-presence index from the ratio of amplitude
-variance to phase variance -- pure tissue produces coupled amplitude/phase
+variance to phase variance - pure tissue produces coupled amplitude/phase
 changes, while metallic reflectors produce disproportionate amplitude
 perturbation. **Experimental: requires controlled environment calibration
 and should not be used as a sole security measure.**
@@ -469,7 +469,7 @@ presence with a configurable arrival debounce (default: 10 seconds) and
 a departure timeout (default: 5 minutes). The departure timeout ensures
 HVAC does not shut down during brief absences (bathroom break, coffee
 run). Also reports an activity level (sedentary/active) for adaptive
-comfort control -- sedentary occupants may prefer different temperature
+comfort control - sedentary occupants may prefer different temperature
 setpoints.
 
 **Host API dependencies**: `csi_get_presence`, `csi_get_motion_energy`,
@@ -683,7 +683,7 @@ components. Emits count deltas and periodic summaries.
 | 423 | `HOURLY_TRAFFIC` | Total passages in last hour |
 
 **Estimated .wasm size**: 8 KB
-**Budget tier**: S (standard, < 5 ms) -- phase gradient computation
+**Budget tier**: S (standard, < 5 ms) - phase gradient computation
 **Difficulty**: Medium
 
 ---
@@ -753,7 +753,7 @@ produce a distinctive CSI signature: high-amplitude, low-frequency
 (< 0.3 Hz) phase modulation from the large metal body moving slowly,
 combined with engine/motor vibration harmonics. When this signature
 co-occurs with a human motion signature, a proximity alert fires.
-Priority: CRITICAL -- this is a life-safety module.
+Priority: CRITICAL - this is a life-safety module.
 
 **Host API dependencies**: `csi_get_phase`, `csi_get_amplitude`,
 `csi_get_variance`, `csi_get_motion_energy`, `csi_get_presence`,
@@ -867,7 +867,7 @@ stall). Configurable for species via initialization parameters.
 earthquake P-wave early arrival, and structural stress. In a static
 environment with no human presence, CSI phase should be stable to within
 the noise floor (~0.02 rad). Structural vibration causes coherent
-phase oscillation across all subcarriers simultaneously -- unlike
+phase oscillation across all subcarriers simultaneously - unlike
 human movement which affects subcarrier groups selectively. The module
 maintains a vibration spectral density estimate and alerts on: seismic
 activity (broadband > 1 Hz), mechanical resonance (narrowband harmonics
@@ -888,7 +888,7 @@ change indicating settlement or thermal expansion).
 | 543 | `VIBRATION_SPECTRUM` | Encoded spectral peaks |
 
 **Estimated .wasm size**: 10 KB
-**Budget tier**: H (heavy, < 10 ms) -- spectral density estimation
+**Budget tier**: H (heavy, < 10 ms) - spectral density estimation
 **Difficulty**: Hard
 
 ---
@@ -896,7 +896,7 @@ change indicating settlement or thermal expansion).
 ## Category 6: Exotic & Research (Event IDs 600--699)
 
 These modules push WiFi CSI sensing into territory that sounds like science
-fiction -- but every one is grounded in published peer-reviewed research.
+fiction - but every one is grounded in published peer-reviewed research.
 WiFi signals at 2.4/5 GHz have wavelengths (12.5 cm / 6 cm) that interact
 with the human body at a resolution sufficient to detect chest wall
 displacement of 0.1 mm (breathing), wrist pulse of 0.01 mm (heartbeat),
@@ -946,7 +946,7 @@ Just WiFi signals reflecting off a sleeping body.
 | 603 | `DEEP_SLEEP_RATIO` | % of total sleep |
 
 **Estimated .wasm size**: 14 KB
-**Budget tier**: H (heavy, < 10 ms) -- multi-feature state machine
+**Budget tier**: H (heavy, < 10 ms) - multi-feature state machine
 **Difficulty**: Hard
 
 ---
@@ -1010,7 +1010,7 @@ produce measurable phase shifts of 0.1--0.5 radians. Published research
 per-letter recognition accuracy of >90% at distances up to 2 meters.
 
 This is an accessibility breakthrough: a deaf person can fingerspell
-words in the air and have them recognized by WiFi -- no camera required,
+words in the air and have them recognized by WiFi - no camera required,
 works through visual obstructions, and preserves privacy since no images
 are captured.
 
@@ -1028,7 +1028,7 @@ are captured.
 | 623 | `GESTURE_REJECTED` | Non-letter movement detected |
 
 **Estimated .wasm size**: 18 KB (includes 26 DTW templates)
-**Budget tier**: H (heavy, < 10 ms) -- DTW matching against 26 templates
+**Budget tier**: H (heavy, < 10 ms) - DTW matching against 26 templates
 **Difficulty**: Hard
 
 ---
@@ -1041,12 +1041,12 @@ arm movement), dynamics (forte/piano from motion amplitude), and basic
 gesture vocabulary (downbeat, upbeat, cutoff, fermata) from CSI phase
 patterns. The conducting pattern at 4/4 time produces a characteristic
 phase trajectory: strong downbeat, lateral second beat, higher third
-beat, rebounding fourth beat -- each with distinct subcarrier signatures.
+beat, rebounding fourth beat - each with distinct subcarrier signatures.
 
 The module outputs BPM, beat position (1-2-3-4), and dynamic level as
 events. A host application can map these to MIDI clock and CC messages
 for controlling synthesizers, lighting rigs, or interactive installations.
-This is an air instrument -- conduct an orchestra with WiFi.
+This is an air instrument - conduct an orchestra with WiFi.
 
 **Host API dependencies**: `csi_get_phase`, `csi_get_amplitude`,
 `csi_get_motion_energy`, `csi_get_phase_history`, `csi_get_variance`,
@@ -1101,7 +1101,7 @@ the next room using only WiFi reflections off leaves.
 | 643 | `WATERING_EVENT` | Rapid amplitude recovery detected |
 
 **Estimated .wasm size**: 6 KB
-**Budget tier**: L (lightweight, < 2 ms) -- only updates EWMA
+**Budget tier**: L (lightweight, < 2 ms) - only updates EWMA
 **Difficulty**: Medium
 
 ---
@@ -1165,7 +1165,7 @@ and identifies cessation. Works because the ESP32 node is physically
 mounted to the building structure, coupling rainfall vibrations into
 the RF path.
 
-This is weather sensing without any outdoor sensors -- the WiFi signal
+This is weather sensing without any outdoor sensors - the WiFi signal
 inside the building feels the rain on the roof.
 
 **Host API dependencies**: `csi_get_phase`, `csi_get_variance`,
@@ -1189,7 +1189,7 @@ inside the building feels the rain on the roof.
 ### 6.8 `wdp-exo-breathing-sync`
 
 **Description**: Detects when multiple people's breathing patterns
-synchronize -- a real phenomenon observed in meditation groups, sleeping
+synchronize - a real phenomenon observed in meditation groups, sleeping
 couples, and audience/performer interactions. When two or more people are
 in the same CSI field, their individual breathing signatures appear as
 superimposed periodic components in the phase signal. The module performs
@@ -1206,13 +1206,13 @@ people's breathing using WiFi CSI. Applications include:
 - **Couple sleep monitoring**: Detect when partners' breathing aligns
   during sleep (associated with deeper sleep quality).
 - **Crowd resonance**: Large-group breathing synchronization at concerts,
-  sports events, or religious gatherings -- a measurable indicator of
+  sports events, or religious gatherings - a measurable indicator of
   collective emotional engagement.
 - **Therapeutic monitoring**: Breathing synchronization between therapist
   and patient (rapport indicator).
 
-The social coherence metric -- a number that quantifies how in-sync a
-group of humans is breathing -- is something that was unmeasurable before
+The social coherence metric - a number that quantifies how in-sync a
+group of humans is breathing - is something that was unmeasurable before
 contactless sensing. WiFi CSI makes the invisible visible.
 
 **Host API dependencies**: `csi_get_bpm_breathing`, `csi_get_phase`,
@@ -1229,7 +1229,7 @@ contactless sensing. WiFi CSI makes the invisible visible.
 | 673 | `SYNC_LOST` | Desynchronization event |
 
 **Estimated .wasm size**: 10 KB
-**Budget tier**: S (standard, < 5 ms) -- cross-correlation of breathing components
+**Budget tier**: S (standard, < 5 ms) - cross-correlation of breathing components
 **Difficulty**: Hard
 
 ---
@@ -1557,7 +1557,7 @@ reverts changes that increase false positives.
 model influence propagation in multi-person sensing fields. Each detected
 person is a node; edge weights represent CSI cross-correlation between
 person-associated subcarrier groups. PageRank scores identify the
-"dominant mover" -- the person whose motion most affects the CSI channel.
+"dominant mover" - the person whose motion most affects the CSI channel.
 Useful for multi-person scenarios where you need to track the primary
 actor (e.g., a nurse in a patient room, a presenter in a meeting).
 
@@ -1681,7 +1681,7 @@ invariants on sensing outputs using Linear Temporal Logic (LTL). Example
 rules: "Globally(presence=0 implies no fall_alert)" prevents false fall
 alarms in empty rooms. "Finally(intrusion implies alert within 10s)"
 ensures alerts are timely. The module monitors the event stream from
-other modules and flags LTL violations -- detecting impossible event
+other modules and flags LTL violations - detecting impossible event
 combinations that indicate sensor malfunction or adversarial tampering.
 
 **Vendor source**: `midstream/temporal-neural-solver` (LTL verification)
@@ -1737,7 +1737,7 @@ to optimize the limited 4-slot runtime. The ESP32 becomes self-directing.
 
 **Description**: Adapts Midstream's AIMDS (AI Manipulation Defense System)
 pattern matcher for CSI event stream integrity. Detects adversarial
-manipulation of CSI signals designed to trigger false events -- e.g.,
+manipulation of CSI signals designed to trigger false events - e.g.,
 a replay attack that plays back recorded CSI to fake "empty room" while
 someone is present. The module compares incoming CSI statistical
 fingerprints against known attack patterns (replay, injection, jamming)
@@ -1928,7 +1928,7 @@ frame distributions. Unlike variance-based motion detection that loses
 spatial information, optimal transport preserves the geometry of how
 energy moves across subcarriers between frames. Detects subtle motions
 (hand gestures, typing) that variance-based methods miss because the
-total variance doesn't change -- only the distribution shifts.
+total variance doesn't change - only the distribution shifts.
 
 **Vendor source**: `ruvector-math` (transport/sliced_wasserstein.rs)
 
@@ -2090,7 +2090,7 @@ than Euclidean embedding for tree-structured spatial hierarchies.
 
 ### Vendor Module Implementation Priority
 
-#### Phase 2a -- Vendor Quick Wins (Q2--Q3 2026)
+#### Phase 2a - Vendor Quick Wins (Q2--Q3 2026)
 
 Modules that wrap existing, well-tested vendor algorithms with minimal
 adaptation. These deliver advanced capabilities with low implementation risk.
@@ -2104,7 +2104,7 @@ adaptation. These deliver advanced capabilities with low implementation risk.
 | `wdp-spt-micro-hnsw` | ruvector | Smallest WASM footprint (11.8 KB); enables on-device fingerprinting |
 | `wdp-tmp-pattern-sequence` | midstream | LCS/DTW are mature algorithms; high user value for routine detection |
 
-#### Phase 2b -- Vendor Advanced (Q3--Q4 2026)
+#### Phase 2b - Vendor Advanced (Q3--Q4 2026)
 
 | Module | Vendor | Rationale |
 |--------|--------|-----------|
@@ -2115,7 +2115,7 @@ adaptation. These deliver advanced capabilities with low implementation risk.
 | `wdp-spt-pagerank-influence` | sublinear | Novel approach to multi-person scene understanding |
 | `wdp-ais-behavioral-profiler` | midstream | Long-term security through learned baselines |
 
-#### Phase 3 -- Vendor Frontier (2027+)
+#### Phase 3 - Vendor Frontier (2027+)
 
 | Module | Vendor | Rationale |
 |--------|--------|-----------|
@@ -2369,7 +2369,7 @@ sha256 = "def456..."
 1. **Market multiplier**: A single $8 ESP32-S3 node becomes a multi-purpose
    sensing platform. A hospital buys one SKU and deploys sleep apnea
    detection in the ICU, fall detection in geriatrics, and queue management
-   in the ER -- all via WASM module uploads. No hardware changes, no
+   in the ER - all via WASM module uploads. No hardware changes, no
    reflashing. With vendor-integrated modules, the same node gains
    adaptive learning, autonomous planning, and quantum-inspired analysis.
 
@@ -2403,7 +2403,7 @@ sha256 = "def456..."
    point of failure in the module collection.
 
 7. **Vendor algorithm leverage**: The 24 vendor-integrated modules bring
-   algorithms that would take years to develop from scratch -- sublinear
+   algorithms that would take years to develop from scratch - sublinear
    solvers, attention mechanisms, temporal logic verification, spiking
    neural networks, quantum-inspired search. By wrapping existing
    battle-tested code behind the Host API, we convert library value
@@ -2461,7 +2461,7 @@ sha256 = "def456..."
 
 ## Implementation Priority
 
-### Phase 1 -- Ship First (Q2 2026)
+### Phase 1 - Ship First (Q2 2026)
 
 These modules deliver immediate value with low implementation risk.
 They form the "launch collection" for the WASM module marketplace.
@@ -2474,7 +2474,7 @@ They form the "launch collection" for the WASM module marketplace.
 | `wdp-ret-queue-length` | Planned | Retail deployments already in pipeline; queue analytics requested |
 | `wdp-med-vital-trend` | **Implemented** (`vital_trend.rs`) | Leverages existing vitals data; needed for clinical pilot |
 
-### Phase 2 -- Community (Q3-Q4 2026)
+### Phase 2 - Community (Q3-Q4 2026)
 
 These modules are medium-difficulty and designed for community contribution.
 Each has a well-defined scope and clear test criteria.
@@ -2490,7 +2490,7 @@ Each has a well-defined scope and clear test criteria.
 | `wdp-exo-ghost-hunter` | Community enthusiasm driver; good PR and engagement |
 | `wdp-exo-rain-detect` | Simple and delightful; demonstrates CSI versatility |
 
-### Phase 3 -- Research Frontier (2027+)
+### Phase 3 - Research Frontier (2027+)
 
 These modules push the boundaries of WiFi CSI sensing and require
 specialized expertise, larger datasets, and possibly new Host API
@@ -2646,14 +2646,14 @@ The repository provides a mock Host API for desktop testing:
 cargo test --target x86_64-unknown-linux-gnu
 
 # Run against recorded CSI data (if available)
-cargo run --example replay -- --input ../../data/recordings/test.csv
+cargo run --example replay - --input ../../data/recordings/test.csv
 ```
 
 **6. Package as RVF.**
 
 ```bash
 # Build the RVF container (requires the wasm-edge CLI tool)
-cargo run -p wifi-densepose-wasm-edge --features std -- \
+cargo run -p wifi-densepose-wasm-edge --features std - \
   rvf pack \
   --wasm target/wasm32-unknown-unknown/release/my_module.wasm \
   --manifest wdp-exo-my-module.toml \
@@ -2720,11 +2720,11 @@ Unsigned modules can still be loaded on nodes with `wasm_verify=0`
 
 - ADR-039: ESP32-S3 Edge Intelligence Pipeline
 - ADR-040: WASM Programmable Sensing (Tier 3)
-- `vendor/ruvector/` -- 76 crates: attention, min-cut, solvers, temporal
+- `vendor/ruvector/` - 76 crates: attention, min-cut, solvers, temporal
   tensor, spiking networks, HNSW, quantum circuits, coherence gating
-- `vendor/midstream/` -- 10 crates: AIMDS threat detection, DTW/LCS
+- `vendor/midstream/` - 10 crates: AIMDS threat detection, DTW/LCS
   temporal comparison, attractor dynamics, LTL verification, meta-learning
-- `vendor/sublinear-time-solver/` -- 11 crates: O(log n) solvers,
+- `vendor/sublinear-time-solver/` - 11 crates: O(log n) solvers,
   PageRank, GOAP planning, psycho-symbolic reasoning, WASM neural inference
 - Liu et al., "Monitoring Vital Signs and Postures During Sleep Using
   WiFi Signals," MobiCom 2020

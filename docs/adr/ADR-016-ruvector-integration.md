@@ -53,10 +53,10 @@ mincut.cut_edges() -> Vec<Edge>                   // edges crossing the cut
 ```
 
 `MinCutResult` contains:
-- `value: f64` — minimum cut weight
+- `value: f64` - minimum cut weight
 - `is_exact: bool`
 - `approximation_ratio: f64`
-- `partition: Option<(Vec<VertexId>, Vec<VertexId>)>` — S and T node sets
+- `partition: Option<(Vec<VertexId>, Vec<VertexId>)>` - S and T node sets
 
 #### ruvector-attn-mincut
 
@@ -285,7 +285,7 @@ important for multi-person scenarios.
 
 ### Files unchanged
 
-`config.rs`, `losses.rs`, `trainer.rs`, `proof.rs`, `error.rs` — no change needed.
+`config.rs`, `losses.rs`, `trainer.rs`, `proof.rs`, `error.rs` - no change needed.
 
 ### Feature gating
 

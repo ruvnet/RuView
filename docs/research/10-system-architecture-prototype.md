@@ -1,4 +1,4 @@
-# Research Document 10: RF Topological Sensing — System Architecture and Prototype
+# Research Document 10: RF Topological Sensing - System Architecture and Prototype
 
 **Date**: 2026-03-08
 **Status**: Draft
@@ -27,7 +27,7 @@
 RF topological sensing treats a mesh of ESP32 nodes as a "radio nervous system."
 Every transmitter-receiver pair defines a graph edge. The Channel State Information
 (CSI) measured on each edge encodes how the radio environment between those two
-nodes has been perturbed — by walls, furniture, and most importantly, by human
+nodes has been perturbed - by walls, furniture, and most importantly, by human
 bodies. When a person stands between two nodes, the CSI coherence on that link
 drops. The collection of all such drops defines a cut in the graph that traces the
 physical boundary of the person.
@@ -163,7 +163,7 @@ Time -->
 The signal crate contains the RuvSense modules that provide the mathematical
 foundation for edge weight computation.
 
-**coherence.rs** — Z-score coherence scoring with DriftProfile. This module
+**coherence.rs** - Z-score coherence scoring with DriftProfile. This module
 already computes a coherence metric between CSI frames. For RF topology, we
 use coherence as the primary edge weight: high coherence means the link is
 unobstructed, low coherence means something (a person) is in the path.
@@ -175,7 +175,7 @@ Usage in rf_topology:
   - coherence_gate::CoherenceGate decides if a measurement is reliable
 ```
 
-**phase_align.rs** — Iterative LO phase offset estimation using circular mean.
+**phase_align.rs** - Iterative LO phase offset estimation using circular mean.
 ESP32 local oscillators drift, which corrupts phase measurements. Phase
 alignment is a prerequisite for meaningful coherence computation.
 
@@ -186,7 +186,7 @@ Usage in rf_topology:
   - Runs per-edge, per-frame
 ```
 
-**multiband.rs** — Multi-band CSI frame fusion. When nodes operate on multiple
+**multiband.rs** - Multi-band CSI frame fusion. When nodes operate on multiple
 WiFi channels (via channel hopping), this module fuses the measurements into
 a single coherent view.
 
@@ -197,7 +197,7 @@ Usage in rf_topology:
   - Optional: single-channel operation is sufficient for prototype
 ```
 
-**multistatic.rs** — Attention-weighted fusion with geometric diversity. This
+**multistatic.rs** - Attention-weighted fusion with geometric diversity. This
 module already performs multi-link fusion, which is conceptually close to what
 rf_topology needs. The key difference is that multistatic.rs fuses for pose
 estimation, while rf_topology fuses for boundary detection.
@@ -208,7 +208,7 @@ Usage in rf_topology:
   - Reuse attention weights for graph edge confidence scoring
 ```
 
-**adversarial.rs** — Physically impossible signal detection. This module
+**adversarial.rs** - Physically impossible signal detection. This module
 detects when CSI measurements violate physical constraints (e.g., signal
 strength increases when a person is blocking the path). Essential for
 filtering bad edges in the graph.
@@ -224,7 +224,7 @@ Usage in rf_topology:
 The ruvector crate provides graph-based data structures and attention mechanisms
 that can be repurposed for RF topology.
 
-**viewpoint/attention.rs** — CrossViewpointAttention with GeometricBias and
+**viewpoint/attention.rs** - CrossViewpointAttention with GeometricBias and
 softmax. The attention mechanism computes importance weights across multiple
 viewpoints. In RF topology, each TX-RX pair is a "viewpoint" and the attention
 mechanism can prioritize the most informative edges.
@@ -236,7 +236,7 @@ Usage in rf_topology:
   - Softmax normalization produces valid probability distribution over edges
 ```
 
-**viewpoint/geometry.rs** — GeometricDiversityIndex and Cramer-Rao bounds.
+**viewpoint/geometry.rs** - GeometricDiversityIndex and Cramer-Rao bounds.
 This module quantifies how much geometric information a set of links provides.
 RF topology uses this to determine if the current node placement can resolve
 a boundary at a given location.
@@ -248,7 +248,7 @@ Usage in rf_topology:
   - Fisher Information matrix guides optimal node placement
 ```
 
-**viewpoint/coherence.rs** — Phase phasor coherence with hysteresis gate.
+**viewpoint/coherence.rs** - Phase phasor coherence with hysteresis gate.
 Already provides a gating mechanism for coherence measurements. RF topology
 reuses this to prevent boundary flicker from noisy measurements.
 
@@ -258,7 +258,7 @@ Usage in rf_topology:
   - Smooths boundary detection over time
 ```
 
-**viewpoint/fusion.rs** — MultistaticArray aggregate root with domain events.
+**viewpoint/fusion.rs** - MultistaticArray aggregate root with domain events.
 This is a DDD aggregate root that manages a collection of multistatic links.
 RF topology can extend this pattern for graph-level aggregate management.
 
@@ -272,7 +272,7 @@ Usage in rf_topology:
 
 The hardware crate manages ESP32 devices and the TDM protocol.
 
-**esp32/tdm.rs** — Time Division Multiplexing scheduler. Assigns transmit
+**esp32/tdm.rs** - Time Division Multiplexing scheduler. Assigns transmit
 slots to nodes, ensures collision-free CSI extraction.
 
 ```
@@ -282,7 +282,7 @@ Usage in rf_topology:
   - Cycle period = N_nodes * slot_duration
 ```
 
-**esp32/channel_hop.rs** — Channel hopping firmware control. Allows nodes to
+**esp32/channel_hop.rs** - Channel hopping firmware control. Allows nodes to
 measure CSI on multiple WiFi channels for improved spatial resolution.
 
 ```
@@ -291,7 +291,7 @@ Usage in rf_topology:
   - Feeds into multiband.rs fusion
 ```
 
-**esp32/csi_extract.rs** — Raw CSI extraction from ESP32 hardware registers.
+**esp32/csi_extract.rs** - Raw CSI extraction from ESP32 hardware registers.
 Produces CsiFrame structs that are the input to the entire pipeline.
 
 ```
@@ -369,7 +369,7 @@ shared types.
 
 ### 3.2 Key Types
 
-#### RfGraph — Aggregate Root
+#### RfGraph - Aggregate Root
 
 RfGraph is the central aggregate root. It owns the complete graph state: nodes,
 edges, weights, and metadata. All mutations go through RfGraph methods, which
@@ -393,7 +393,7 @@ Invariants enforced by RfGraph:
 - Stale edges (no update in N cycles) are pruned
 - Graph is always connected (disconnected subgraphs trigger alert)
 
-#### EdgeWeight — Value Object
+#### EdgeWeight - Value Object
 
 ```
 EdgeWeight {
@@ -411,7 +411,7 @@ EdgeWeight {
 EdgeWeight is a value object: immutable after creation. Each TDM cycle produces
 a new EdgeWeight for each edge, which replaces the previous one in RfGraph.
 
-#### CutBoundary — Value Object
+#### CutBoundary - Value Object
 
 ```
 CutBoundary {
@@ -428,7 +428,7 @@ CutBoundary {
 CutBoundary represents the output of the mincut solver. Multiple CutBoundaries
 can exist simultaneously when multiple people are detected.
 
-#### TopologyEvent — Domain Event
+#### TopologyEvent - Domain Event
 
 ```
 TopologyEvent {
@@ -607,7 +607,7 @@ Input:  RfGraph adjacency matrix with weights
 Output: CutBoundary (minimum cut edges + partitions)
 Cost:   4-node:  ~0.1ms
         16-node: ~2ms
-        64-node: ~15ms (exceeds budget -- use incremental solver)
+        64-node: ~15ms (exceeds budget - use incremental solver)
 ```
 
 For graphs larger than ~40 nodes, use incremental mincut: only recompute
@@ -630,9 +630,9 @@ Cost:   Convex hull + smoothing. <3ms for typical boundaries.
 Serialize boundary polygon to JSON, send over WebSocket, render in browser.
 
 ```
-Serialization:  serde_json::to_string(&boundary) -- <1ms
-WebSocket TX:   axum tungstenite broadcast -- <2ms local
-Browser render: Canvas 2D path drawing -- 10-16ms at 60fps
+Serialization:  serde_json::to_string(&boundary) - <1ms
+WebSocket TX:   axum tungstenite broadcast - <2ms local
+Browser render: Canvas 2D path drawing - 10-16ms at 60fps
 ```
 
 ### 4.3 Timing Diagram
@@ -953,7 +953,7 @@ fusion.
 
 A fundamentally different approach is possible: treat the entire ESP32 mesh
 as a graph where TX-RX pairs are edges and CSI coherence determines edge
-weights. A minimum cut of this graph reveals physical boundaries — the
+weights. A minimum cut of this graph reveals physical boundaries - the
 locations where radio propagation is disrupted by human bodies. This is
 "RF topological sensing."
 
@@ -1002,7 +1002,7 @@ The implementation will proceed in three phases:
 
 **Negative**:
 - Requires minimum 4 ESP32 nodes (higher hardware cost than single-link)
-- Mincut provides boundaries, not poses — pose still requires neural inference
+- Mincut provides boundaries, not poses - pose still requires neural inference
   or additional geometric reasoning
 - Stoer-Wagner complexity O(V*E + V^2 log V) limits scalability beyond ~40 nodes
   without incremental solver
@@ -1573,14 +1573,14 @@ impl AdjacencyMatrix {
 
 | Term                  | Definition                                                        |
 |-----------------------|-------------------------------------------------------------------|
-| CSI                   | Channel State Information -- per-subcarrier complex amplitude     |
-| TDM                   | Time Division Multiplexing -- collision-free TX scheduling        |
-| Mincut                | Minimum cut -- partition of graph that minimizes total edge weight |
+| CSI                   | Channel State Information - per-subcarrier complex amplitude     |
+| TDM                   | Time Division Multiplexing - collision-free TX scheduling        |
+| Mincut                | Minimum cut - partition of graph that minimizes total edge weight |
 | Stoer-Wagner          | Deterministic O(VE + V^2 log V) mincut algorithm                 |
 | Edge weight           | Coherence metric on a TX-RX link; low = obstructed               |
 | Boundary              | Spatial region where mincut edges intersect physical space        |
-| Aggregate root        | DDD pattern -- single entry point for a consistency boundary      |
-| EMA                   | Exponential Moving Average -- temporal smoothing filter           |
+| Aggregate root        | DDD pattern - single entry point for a consistency boundary      |
+| EMA                   | Exponential Moving Average - temporal smoothing filter           |
 
 ## Appendix B: Related ADRs
 

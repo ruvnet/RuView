@@ -1,8 +1,8 @@
 # RuvSense Domain Model
 
-RuvSense is the multistatic WiFi sensing subsystem of RuView. It turns raw radio signals from multiple ESP32 sensors into tracked human poses, vital signs, and spatial awareness — all without cameras.
+RuvSense is the multistatic WiFi sensing subsystem of RuView. It turns raw radio signals from multiple ESP32 sensors into tracked human poses, vital signs, and spatial awareness - all without cameras.
 
-This document defines the system using [Domain-Driven Design](https://martinfowler.com/bliki/DomainDrivenDesign.html) (DDD): bounded contexts that own their data and rules, aggregate roots that enforce invariants, value objects that carry meaning, and domain events that connect everything. The goal is to make the system's structure match the physics it models — so that anyone reading the code (or an AI agent modifying it) understands *why* each piece exists, not just *what* it does.
+This document defines the system using [Domain-Driven Design](https://martinfowler.com/bliki/DomainDrivenDesign.html) (DDD): bounded contexts that own their data and rules, aggregate roots that enforce invariants, value objects that carry meaning, and domain events that connect everything. The goal is to make the system's structure match the physics it models - so that anyone reading the code (or an AI agent modifying it) understands *why* each piece exists, not just *what* it does.
 
 **Bounded Contexts:**
 
@@ -92,9 +92,9 @@ All code paths shown are relative to `rust-port/wifi-densepose-rs/crates/wifi-de
 - `ChannelHopConfig`
 
 **Domain Services:**
-- `PhaseAlignmentService` — Corrects LO-induced phase rotation between channels
-- `MultiBandFusionService` — Merges per-channel CSI into wideband virtual frame
-- `MultistaticFusionService` — Attention-based fusion of N nodes into one frame
+- `PhaseAlignmentService` - Corrects LO-induced phase rotation between channels
+- `MultiBandFusionService` - Merges per-channel CSI into wideband virtual frame
+- `MultistaticFusionService` - Attention-based fusion of N nodes into one frame
 
 **RuVector Integration:**
 - `ruvector-solver` → Phase alignment (NeumannSolver)
@@ -140,7 +140,7 @@ All code paths shown are relative to `rust-port/wifi-densepose-rs/crates/wifi-de
 ```
 
 **Aggregates:**
-- `CoherenceState` (Aggregate Root) — Maintains reference template and gate state
+- `CoherenceState` (Aggregate Root) - Maintains reference template and gate state
 
 **Value Objects:**
 - `CoherenceScore` (0.0-1.0)
@@ -149,9 +149,9 @@ All code paths shown are relative to `rust-port/wifi-densepose-rs/crates/wifi-de
 - `DriftProfile` (Stable / Linear / StepChange)
 
 **Domain Services:**
-- `CoherenceCalculatorService` — Computes per-subcarrier z-score coherence
-- `StaticDynamicDecomposerService` — Separates environmental drift from body motion
-- `GatePolicyService` — Applies threshold-based gating rules
+- `CoherenceCalculatorService` - Computes per-subcarrier z-score coherence
+- `StaticDynamicDecomposerService` - Separates environmental drift from body motion
+- `GatePolicyService` - Applies threshold-based gating rules
 
 **RuVector Integration:**
 - `ruvector-solver` → Coherence matrix decomposition (static vs. dynamic)
@@ -205,20 +205,20 @@ All code paths shown are relative to `rust-port/wifi-densepose-rs/crates/wifi-de
 - `PoseTrack` (Aggregate Root)
 
 **Entities:**
-- `KeypointState` — Per-keypoint Kalman state (x,y,z,vx,vy,vz) with covariance
+- `KeypointState` - Per-keypoint Kalman state (x,y,z,vx,vy,vz) with covariance
 
 **Value Objects:**
-- `TrackedPose` — Immutable snapshot: 17 keypoints + confidence + track_id + lifecycle
-- `PersonCluster` — Subset of links attributed to one person
-- `AssignmentCost` — Combined Mahalanobis + embedding distance
+- `TrackedPose` - Immutable snapshot: 17 keypoints + confidence + track_id + lifecycle
+- `PersonCluster` - Subset of links attributed to one person
+- `AssignmentCost` - Combined Mahalanobis + embedding distance
 - `TrackLifecycleState` (Tentative / Active / Lost / Terminated)
 
 **Domain Services:**
-- `PersonSeparationService` — Min-cut partitioning of cross-link correlation graph
-- `TrackAssignmentService` — Bipartite matching of detections to existing tracks
-- `KalmanPredictionService` — Predict step at 28 Hz (decoupled from measurement rate)
-- `KalmanUpdateService` — Gated measurement update (subject to coherence gate)
-- `EmbeddingIdentifierService` — AETHER cosine similarity for re-ID
+- `PersonSeparationService` - Min-cut partitioning of cross-link correlation graph
+- `TrackAssignmentService` - Bipartite matching of detections to existing tracks
+- `KalmanPredictionService` - Predict step at 28 Hz (decoupled from measurement rate)
+- `KalmanUpdateService` - Gated measurement update (subject to coherence gate)
+- `EmbeddingIdentifierService` - AETHER cosine similarity for re-ID
 
 **RuVector Integration:**
 - `ruvector-mincut` → Person separation (DynamicMinCut on correlation graph)
@@ -622,13 +622,13 @@ pub trait MeshRepository {
 
 | Term | Definition |
 |------|------------|
-| **Field Normal Mode** | The room's electromagnetic eigenstructure — stable propagation baseline when unoccupied |
+| **Field Normal Mode** | The room's electromagnetic eigenstructure - stable propagation baseline when unoccupied |
 | **Body Perturbation** | Structured change to field caused by a person, after environmental drift is removed |
 | **Environmental Mode** | Principal component of baseline variation due to temperature, humidity, time-of-day |
 | **Personal Baseline** | Per-person rolling statistical profile of biophysical proxies over days/weeks |
 | **Drift Event** | Statistically significant deviation from personal baseline (>2sigma for >3 days) |
 | **Drift Report** | Traceable evidence package: z-score, direction, window, supporting embeddings |
-| **Risk Signal** | Actionable observation about biophysical change — not a diagnosis |
+| **Risk Signal** | Actionable observation about biophysical change - not a diagnosis |
 | **Intention Lead Signal** | Pre-movement dynamics (lean, weight shift) detected 200-500ms before visible motion |
 | **Occupancy Volume** | Low-resolution 3D probabilistic density field from RF tomography |
 | **Room Fingerprint** | HNSW-indexed embedding characterizing a room's electromagnetic identity |
@@ -676,16 +676,16 @@ pub trait MeshRepository {
 - `FieldNormalMode` (Aggregate Root)
 
 **Value Objects:**
-- `BodyPerturbation` — Per-link CSI residual after baseline + environmental mode removal
-- `EnvironmentalMode` — One principal component of baseline variation
-- `OccupancyVolume` — 3D voxel grid of estimated mass density
-- `CalibrationStatus` — Fresh / Stale / Expired (based on time since last empty-room)
+- `BodyPerturbation` - Per-link CSI residual after baseline + environmental mode removal
+- `EnvironmentalMode` - One principal component of baseline variation
+- `OccupancyVolume` - 3D voxel grid of estimated mass density
+- `CalibrationStatus` - Fresh / Stale / Expired (based on time since last empty-room)
 
 **Domain Services:**
-- `CalibrationService` — Detects empty-room windows, collects calibration data
-- `ModeExtractionService` — SVD computation for environmental modes
-- `PerturbationService` — Baseline subtraction + mode projection
-- `TomographyService` — Sparse L1 inversion for occupancy volume
+- `CalibrationService` - Detects empty-room windows, collects calibration data
+- `ModeExtractionService` - SVD computation for environmental modes
+- `PerturbationService` - Baseline subtraction + mode projection
+- `TomographyService` - Sparse L1 inversion for occupancy volume
 
 **RuVector Integration:**
 - `ruvector-solver` → SVD for mode extraction; L1 for tomographic inversion
@@ -735,20 +735,20 @@ pub trait MeshRepository {
 - `PersonalBaseline` (Aggregate Root)
 
 **Entities:**
-- `DailyMetricSummary` — One day's worth of compressed metric statistics per person
+- `DailyMetricSummary` - One day's worth of compressed metric statistics per person
 
 **Value Objects:**
-- `DriftReport` — Evidence package with z-score, direction, window, embeddings
-- `DriftMetric` — GaitSymmetry / StabilityIndex / BreathingRegularity / MicroTremor / ActivityLevel
-- `DriftDirection` — Increasing / Decreasing
-- `MonitoringLevel` — Physiological (Level 1) / Drift (Level 2) / RiskCorrelation (Level 3)
-- `WelfordStats` — Online mean/variance accumulator (count, mean, M2)
+- `DriftReport` - Evidence package with z-score, direction, window, embeddings
+- `DriftMetric` - GaitSymmetry / StabilityIndex / BreathingRegularity / MicroTremor / ActivityLevel
+- `DriftDirection` - Increasing / Decreasing
+- `MonitoringLevel` - Physiological (Level 1) / Drift (Level 2) / RiskCorrelation (Level 3)
+- `WelfordStats` - Online mean/variance accumulator (count, mean, M2)
 
 **Domain Services:**
-- `MetricExtractionService` — Extract biomechanical proxies from pose tracks
-- `BaselineUpdateService` — Update Welford statistics with daily observations
-- `DriftDetectionService` — Compute z-scores, identify significant deviations
-- `EvidenceAssemblyService` — Package supporting embeddings and graph constraints
+- `MetricExtractionService` - Extract biomechanical proxies from pose tracks
+- `BaselineUpdateService` - Update Welford statistics with daily observations
+- `DriftDetectionService` - Compute z-scores, identify significant deviations
+- `EvidenceAssemblyService` - Package supporting embeddings and graph constraints
 
 **RuVector Integration:**
 - `ruvector-temporal-tensor` → Compressed daily summary storage
@@ -760,7 +760,7 @@ pub trait MeshRepository {
 - Baseline requires 7+ observation days before drift detection activates
 - Drift alert requires >2sigma deviation sustained for >3 consecutive days
 - Evidence chain must include start/end embeddings bracketing the drift window
-- System never outputs diagnostic language — only metric values and deviations
+- System never outputs diagnostic language - only metric values and deviations
 - Personal baseline decay: Welford stats use full history (no windowing) for stability
 
 ---
@@ -805,19 +805,19 @@ pub trait MeshRepository {
 - `SpatialIdentityGraph` (Aggregate Root)
 
 **Entities:**
-- `RoomProfile` — HNSW-indexed electromagnetic fingerprint of a room
-- `PersonSpatialRecord` — Which rooms a person has visited, in order
+- `RoomProfile` - HNSW-indexed electromagnetic fingerprint of a room
+- `PersonSpatialRecord` - Which rooms a person has visited, in order
 
 **Value Objects:**
-- `TransitionEvent` — Person, from_room, to_room, timestamps, embedding similarity
-- `RoomFingerprint` — 128-dim AETHER embedding of the room's CSI profile
-- `SpatialContinuity` — Confidence score for cross-room identity chain
+- `TransitionEvent` - Person, from_room, to_room, timestamps, embedding similarity
+- `RoomFingerprint` - 128-dim AETHER embedding of the room's CSI profile
+- `SpatialContinuity` - Confidence score for cross-room identity chain
 
 **Domain Services:**
-- `RoomFingerprintService` — Compute and index room electromagnetic profiles
-- `TransitionDetectionService` — Detect exits (track lost near boundary) and entries (new track)
-- `CrossRoomMatchingService` — HNSW similarity between exit and entry embeddings
-- `TransitionGraphService` — Build and query the room-person-time graph
+- `RoomFingerprintService` - Compute and index room electromagnetic profiles
+- `TransitionDetectionService` - Detect exits (track lost near boundary) and entries (new track)
+- `CrossRoomMatchingService` - HNSW similarity between exit and entry embeddings
+- `TransitionGraphService` - Build and query the room-person-time graph
 
 **RuVector Integration:**
 - HNSW → Room and person fingerprint similarity search
@@ -827,7 +827,7 @@ pub trait MeshRepository {
 - Cross-room match requires >0.80 cosine similarity AND <60s temporal gap
 - Room fingerprint must be recalculated if mesh topology changes
 - Transition graph edges are immutable once created (append-only audit trail)
-- No image data stored — only 128-dim embeddings and structural events
+- No image data stored - only 128-dim embeddings and structural events
 
 ---
 
@@ -883,14 +883,14 @@ pub enum LongitudinalEvent {
         timestamp_us: u64,
     },
 
-    /// Drift detected — biophysical metric significantly changed
+    /// Drift detected - biophysical metric significantly changed
     DriftDetected {
         person_id: PersonId,
         report: DriftReport,
         timestamp_us: u64,
     },
 
-    /// Drift resolved — metric returned to baseline range
+    /// Drift resolved - metric returned to baseline range
     DriftResolved {
         person_id: PersonId,
         metric: DriftMetric,
@@ -1037,7 +1037,7 @@ pub trait SpatialIdentityRepository {
 - Personal baseline requires ≥7 observation days before drift detection activates
 - Drift alert requires >2sigma deviation sustained for ≥3 consecutive days
 - Evidence chain must include embedding pairs bracketing the drift window
-- Output must never use diagnostic language — only metric values and statistical deviations
+- Output must never use diagnostic language - only metric values and statistical deviations
 - Daily summaries stored for ≥90 days (rolling retention policy)
 - Welford statistics use full history (no windowing) for maximum stability
 
@@ -1045,7 +1045,7 @@ pub trait SpatialIdentityRepository {
 - Cross-room match requires >0.80 cosine similarity AND <60s temporal gap
 - Room fingerprint recalculated when mesh topology changes (node added/removed/moved)
 - Transition graph is append-only (immutable audit trail)
-- No image data stored — only 128-dim embeddings and structural events
+- No image data stored - only 128-dim embeddings and structural events
 - Maximum 100 rooms indexed per deployment (HNSW scaling constraint)
 
 ---
@@ -1054,7 +1054,7 @@ pub trait SpatialIdentityRepository {
 
 ### 7. Edge Intelligence Context
 
-**Responsibility:** Run signal processing and sensing algorithms directly on the ESP32-S3, without requiring a server. The node detects presence, measures breathing and heart rate, alerts on falls, and runs custom WASM modules — all locally with instant response.
+**Responsibility:** Run signal processing and sensing algorithms directly on the ESP32-S3, without requiring a server. The node detects presence, measures breathing and heart rate, alerts on falls, and runs custom WASM modules - all locally with instant response.
 
 This is the only bounded context that runs on the microcontroller rather than the aggregator. It operates independently: the server is optional for visualization, but the ESP32 handles real-time sensing on its own.
 
@@ -1107,27 +1107,27 @@ This is the only bounded context that runs on the microcontroller rather than th
 ```
 
 **Aggregates:**
-- `EdgeProcessingState` (Aggregate Root) — Holds all per-subcarrier state, filter history, and detection flags
+- `EdgeProcessingState` (Aggregate Root) - Holds all per-subcarrier state, filter history, and detection flags
 
 **Value Objects:**
-- `VitalsPacket` — 32-byte UDP packet: presence, motion, breathing BPM, heart rate BPM, confidence, fall flag, occupancy
-- `EdgeTier` — Off (0) / BasicSignal (1) / FullVitals (2) / WasmExtended (3)
-- `PresenceState` — Empty / Present / Moving
-- `BandpassOutput` — Filtered signal in breathing or heart rate band
-- `FallAlert` — Phase acceleration exceeding configurable threshold
+- `VitalsPacket` - 32-byte UDP packet: presence, motion, breathing BPM, heart rate BPM, confidence, fall flag, occupancy
+- `EdgeTier` - Off (0) / BasicSignal (1) / FullVitals (2) / WasmExtended (3)
+- `PresenceState` - Empty / Present / Moving
+- `BandpassOutput` - Filtered signal in breathing or heart rate band
+- `FallAlert` - Phase acceleration exceeding configurable threshold
 
 **Entities:**
-- `WasmModule` — A loaded WASM binary with its own memory arena (160 KB), frame budget (10 ms), and timer interval
+- `WasmModule` - A loaded WASM binary with its own memory arena (160 KB), frame budget (10 ms), and timer interval
 
 **Domain Services:**
-- `PhaseExtractionService` — Converts raw I/Q to unwrapped phase per subcarrier
-- `VarianceTrackingService` — Welford running stats for subcarrier selection
-- `TopKSelectionService` — Picks highest-variance subcarriers for downstream analysis
-- `BandpassFilterService` — Biquad IIR filters for breathing (0.1-0.5 Hz) and heart rate (0.8-2.0 Hz)
-- `PresenceDetectionService` — Adaptive threshold calibration (3-sigma over 1200-frame window)
-- `VitalSignService` — Zero-crossing BPM estimation from filtered phase signals
-- `FallDetectionService` — Phase acceleration exceeding threshold triggers alert
-- `WasmRuntimeService` — WASM3 interpreter: load, execute, and sandbox custom modules
+- `PhaseExtractionService` - Converts raw I/Q to unwrapped phase per subcarrier
+- `VarianceTrackingService` - Welford running stats for subcarrier selection
+- `TopKSelectionService` - Picks highest-variance subcarriers for downstream analysis
+- `BandpassFilterService` - Biquad IIR filters for breathing (0.1-0.5 Hz) and heart rate (0.8-2.0 Hz)
+- `PresenceDetectionService` - Adaptive threshold calibration (3-sigma over 1200-frame window)
+- `VitalSignService` - Zero-crossing BPM estimation from filtered phase signals
+- `FallDetectionService` - Phase acceleration exceeding threshold triggers alert
+- `WasmRuntimeService` - WASM3 interpreter: load, execute, and sandbox custom modules
 
 **NVS Configuration (runtime, no reflash needed):**
 
@@ -1143,10 +1143,10 @@ This is the only bounded context that runs on the microcontroller rather than th
 | `wasm_verify` | u8 | 0 | Require Ed25519 signature for uploads |
 
 **Implementation files:**
-- `firmware/esp32-csi-node/main/edge_processing.c` — DSP pipeline (~750 lines)
-- `firmware/esp32-csi-node/main/edge_processing.h` — Types and API
-- `firmware/esp32-csi-node/main/nvs_config.c` — NVS key reader (20 keys)
-- `firmware/esp32-csi-node/provision.py` — CLI provisioning tool
+- `firmware/esp32-csi-node/main/edge_processing.c` - DSP pipeline (~750 lines)
+- `firmware/esp32-csi-node/main/edge_processing.h` - Types and API
+- `firmware/esp32-csi-node/main/nvs_config.c` - NVS key reader (20 keys)
+- `firmware/esp32-csi-node/provision.py` - CLI provisioning tool
 
 **Invariants:**
 - Edge processing runs on Core 1; WiFi and CSI callbacks run on Core 0 (no contention)
@@ -1154,7 +1154,7 @@ This is the only bounded context that runs on the microcontroller rather than th
 - UDP sends are rate-limited to 50 Hz to prevent lwIP buffer exhaustion (Issue #127)
 - ENOMEM backoff suppresses sends for 100 ms if lwIP runs out of packet buffers
 - WASM modules are sandboxed: 160 KB arena, 10 ms frame budget, no direct hardware access
-- Tier changes via NVS take effect on next reboot — no hot-reconfiguration of the DSP pipeline
+- Tier changes via NVS take effect on next reboot - no hot-reconfiguration of the DSP pipeline
 - Fall detection threshold should be tuned per deployment (default 2000 causes false positives in static environments)
 
 **Domain Events:**
@@ -1195,6 +1195,6 @@ pub enum EdgeEvent {
 ```
 
 **Relationship to other contexts:**
-- Edge Intelligence → Multistatic Sensing: **Alternative** (edge runs on-device; multistatic runs on aggregator — same physics, different compute location)
+- Edge Intelligence → Multistatic Sensing: **Alternative** (edge runs on-device; multistatic runs on aggregator - same physics, different compute location)
 - Edge Intelligence → Pose Tracking: **Upstream** (edge provides presence/vitals; aggregator can skip detection if edge already confirmed occupancy)
 - Edge Intelligence → Coherence: **Simplified** (edge uses simple variance thresholds instead of full coherence gating)

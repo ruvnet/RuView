@@ -183,7 +183,7 @@ export class PoseRenderer {
     }
   }
 
-  // Keypoints only mode — large colored dots with labels, no skeleton lines
+  // Keypoints only mode - large colored dots with labels, no skeleton lines
   renderKeypointsMode(poseData, metadata) {
     const persons = poseData.persons || [];
 
@@ -206,7 +206,7 @@ export class PoseRenderer {
     }
   }
 
-  // Heatmap rendering mode — Gaussian blobs around each keypoint
+  // Heatmap rendering mode - Gaussian blobs around each keypoint
   renderHeatmapMode(poseData, metadata) {
     const persons = poseData.persons || [];
 
@@ -248,7 +248,7 @@ export class PoseRenderer {
     }
   }
 
-  // Dense pose rendering mode — body region segmentation with filled polygons
+  // Dense pose rendering mode - body region segmentation with filled polygons
   renderDenseMode(poseData, metadata) {
     const persons = poseData.persons || [];
 

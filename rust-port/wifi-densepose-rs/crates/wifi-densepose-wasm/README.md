@@ -10,7 +10,7 @@ WebAssembly bindings for running WiFi-DensePose directly in the browser.
 
 `wifi-densepose-wasm` compiles the WiFi-DensePose stack to `wasm32-unknown-unknown` and exposes a
 JavaScript API via [wasm-bindgen](https://rustwasm.github.io/wasm-bindgen/). The primary export is
-`MatDashboard` -- a fully client-side disaster response dashboard that manages scan zones, tracks
+`MatDashboard` - a fully client-side disaster response dashboard that manages scan zones, tracks
 survivors, generates triage alerts, and renders to an HTML Canvas element.
 
 The crate also provides utility functions (`init`, `getVersion`, `isMatEnabled`, `getTimestamp`) and
@@ -18,17 +18,17 @@ a logging bridge that routes Rust `log` output to the browser console.
 
 ## Features
 
-- **MatDashboard** -- Create disaster events, add rectangular and circular scan zones, subscribe to
+- **MatDashboard** - Create disaster events, add rectangular and circular scan zones, subscribe to
   survivor-detected and alert-generated callbacks, and render zone/survivor overlays on Canvas.
-- **Real-time callbacks** -- Register JavaScript closures for `onSurvivorDetected` and
+- **Real-time callbacks** - Register JavaScript closures for `onSurvivorDetected` and
   `onAlertGenerated` events, called from the Rust event loop.
-- **Canvas rendering** -- Draw zone boundaries, survivor markers (colour-coded by triage status),
+- **Canvas rendering** - Draw zone boundaries, survivor markers (colour-coded by triage status),
   and alert indicators directly to a `CanvasRenderingContext2d`.
-- **WebSocket integration** -- Connect to a sensing server for live CSI data via `web-sys` WebSocket
+- **WebSocket integration** - Connect to a sensing server for live CSI data via `web-sys` WebSocket
   bindings.
-- **Panic hook** -- `console_error_panic_hook` provides human-readable stack traces in the browser
+- **Panic hook** - `console_error_panic_hook` provides human-readable stack traces in the browser
   console on panic.
-- **Optimised WASM** -- Release profile uses `-O4` wasm-opt with mutable globals for minimal binary
+- **Optimised WASM** - Release profile uses `-O4` wasm-opt with mutable globals for minimal binary
   size.
 
 ### Feature flags

@@ -95,7 +95,7 @@ MATCHING_REPOS=$(gh repo list org --limit 100 --json name \
 # Execute task and create PRs
 echo "$MATCHING_REPOS" | while read -r repo; do
   # Clone repo
-  gh repo clone org/$repo /tmp/$repo -- --depth=1
+  gh repo clone org/$repo /tmp/$repo - --depth=1
   
   # Execute task
   cd /tmp/$repo
@@ -206,7 +206,7 @@ TS_REPOS=$(gh repo list org --limit 100 --json name | jq -r '.[].name' | \
 # Update each repository
 echo "$TS_REPOS" | while read -r repo; do
   # Clone and update
-  gh repo clone org/$repo /tmp/$repo -- --depth=1
+  gh repo clone org/$repo /tmp/$repo - --depth=1
   cd /tmp/$repo
   
   # Update dependency

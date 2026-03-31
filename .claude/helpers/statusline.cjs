@@ -96,7 +96,7 @@ function safeStat(filePath) {
   return null;
 }
 
-// Shared settings cache — read once, used by multiple functions
+// Shared settings cache - read once, used by multiple functions
 let _settingsCache = undefined;
 function getSettings() {
   if (_settingsCache !== undefined) return _settingsCache;
@@ -303,7 +303,7 @@ function getSwarmStatus() {
   return { activeAgents: 0, maxAgents: CONFIG.maxAgents, coordinationActive: false };
 }
 
-// System metrics (uses process.memoryUsage() — no shell spawn)
+// System metrics (uses process.memoryUsage() - no shell spawn)
 function getSystemMetrics() {
   const memoryMB = Math.floor(process.memoryUsage().heapUsed / 1024 / 1024);
   const learning = getLearningStats();
@@ -351,7 +351,7 @@ function getSystemMetrics() {
   return { memoryMB, contextPct, intelligencePct, subAgents };
 }
 
-// ADR status (count files only — don't read contents)
+// ADR status (count files only - don't read contents)
 function getADRStatus() {
   const complianceData = readJSON(path.join(CWD, '.claude-flow', 'metrics', 'adr-compliance.json'));
   if (complianceData) {
@@ -470,7 +470,7 @@ function getAgentDBStats() {
   return { vectorCount, dbSizeKB: Math.floor(dbSizeKB), namespaces, hasHnsw };
 }
 
-// Test stats (count files only — NO reading file contents)
+// Test stats (count files only - NO reading file contents)
 function getTestStats() {
   let testFiles = 0;
 
@@ -708,7 +708,7 @@ let _stdinData = null;
 function getStdinData() {
   if (_stdinData !== undefined && _stdinData !== null) return _stdinData;
   try {
-    // Check if stdin is a TTY (manual run) — skip reading
+    // Check if stdin is a TTY (manual run) - skip reading
     if (process.stdin.isTTY) { _stdinData = null; return null; }
     // Read stdin synchronously via fd 0
     const chunks = [];

@@ -21,18 +21,18 @@
 
 ADR-061 Layer 3 provides a basic multi-node mesh test: N identical nodes with sequential TDM slots connected via a Linux bridge. This is useful but limited:
 
-1. **All nodes are identical** — real deployments have heterogeneous roles (sensor, coordinator, gateway)
-2. **Single topology** — only fully-connected bridge; no star, line, or ring topologies
-3. **No scenario variation per node** — all nodes run the same mock CSI scenario
-4. **Manual configuration** — each test requires hand-editing env vars and arguments
-5. **No swarm-level health monitoring** — validation checks individual nodes, not collective behavior
-6. **No cross-node timing validation** — TDM slot ordering and inter-frame gaps aren't verified
+1. **All nodes are identical** - real deployments have heterogeneous roles (sensor, coordinator, gateway)
+2. **Single topology** - only fully-connected bridge; no star, line, or ring topologies
+3. **No scenario variation per node** - all nodes run the same mock CSI scenario
+4. **Manual configuration** - each test requires hand-editing env vars and arguments
+5. **No swarm-level health monitoring** - validation checks individual nodes, not collective behavior
+6. **No cross-node timing validation** - TDM slot ordering and inter-frame gaps aren't verified
 
-Real WiFi-DensePose deployments use 3-8 ESP32-S3 nodes in various topologies. A single coordinator aggregates CSI from multiple sensors. The firmware must handle TDM conflicts, missing nodes, role-based behavior differences, and network partitions — none of which ADR-061 Layer 3 tests.
+Real WiFi-DensePose deployments use 3-8 ESP32-S3 nodes in various topologies. A single coordinator aggregates CSI from multiple sensors. The firmware must handle TDM conflicts, missing nodes, role-based behavior differences, and network partitions - none of which ADR-061 Layer 3 tests.
 
 ## Decision
 
-Build a **QEMU Swarm Configurator** — a YAML-driven tool that defines multi-node test scenarios declaratively and orchestrates them under QEMU with swarm-level validation.
+Build a **QEMU Swarm Configurator** - a YAML-driven tool that defines multi-node test scenarios declaratively and orchestrates them under QEMU with swarm-level validation.
 
 ### Architecture
 
@@ -178,18 +178,18 @@ scripts/
 
 ### Benefits
 
-1. **Declarative testing** — define swarm topology in YAML, not shell scripts
-2. **Role-based nodes** — test coordinator/sensor/gateway interactions
-3. **Topology variety** — star/mesh/line/ring match real deployment patterns
-4. **Swarm-level assertions** — validate collective behavior, not just individual nodes
-5. **Preset library** — quick CI smoke tests and thorough manual validation
-6. **Reproducible** — YAML configs are version-controlled and shareable
+1. **Declarative testing** - define swarm topology in YAML, not shell scripts
+2. **Role-based nodes** - test coordinator/sensor/gateway interactions
+3. **Topology variety** - star/mesh/line/ring match real deployment patterns
+4. **Swarm-level assertions** - validate collective behavior, not just individual nodes
+5. **Preset library** - quick CI smoke tests and thorough manual validation
+6. **Reproducible** - YAML configs are version-controlled and shareable
 
 ### Limitations
 
 1. **Still requires root** for TAP bridge topologies (star, line, ring); mesh can use SLIRP
-2. **QEMU resource usage** — 6+ QEMU instances use ~2GB RAM, may slow CI runners
-3. **No real RF** — inter-node communication is IP-based, not WiFi CSI multipath
+2. **QEMU resource usage** - 6+ QEMU instances use ~2GB RAM, may slow CI runners
+3. **No real RF** - inter-node communication is IP-based, not WiFi CSI multipath
 
 ## References
 

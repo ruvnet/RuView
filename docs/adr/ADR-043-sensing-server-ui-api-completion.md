@@ -10,7 +10,7 @@
 
 ## Context
 
-The WiFi-DensePose sensing server (`wifi-densepose-sensing-server`) is a single-binary Axum server that receives ESP32 CSI frames via UDP, processes them through the RuVector signal pipeline, and serves both a web UI at `/ui/` and a REST/WebSocket API. The UI provides tabs for live sensing visualization, model management, CSI recording, and training -- all designed to operate without external dependencies.
+The WiFi-DensePose sensing server (`wifi-densepose-sensing-server`) is a single-binary Axum server that receives ESP32 CSI frames via UDP, processes them through the RuVector signal pipeline, and serves both a web UI at `/ui/` and a REST/WebSocket API. The UI provides tabs for live sensing visualization, model management, CSI recording, and training - all designed to operate without external dependencies.
 
 However, the UI's JavaScript expected several backend endpoints that were not yet implemented in the Rust server. Opening the browser console revealed persistent 404 errors for model, recording, and training API routes. Three categories of functionality were broken:
 
@@ -28,7 +28,7 @@ The Training tab calls `POST /api/v1/train/start` to launch a background trainin
 
 ### 4. Sensing Service Not Started on App Init
 
-The web UI's `sensingService` singleton (which manages the WebSocket connection to `/ws/sensing`) was only started lazily when the user navigated to the Sensing tab (`SensingTab.js:182`). However, the Dashboard and Live Demo tabs both read `sensingService.dataSource` at load time — and since the service was never started, the status permanently showed **"RECONNECTING"** with no WebSocket connection attempt and no console errors. This silent failure affected the first-load experience for every user.
+The web UI's `sensingService` singleton (which manages the WebSocket connection to `/ws/sensing`) was only started lazily when the user navigated to the Sensing tab (`SensingTab.js:182`). However, the Dashboard and Live Demo tabs both read `sensingService.dataSource` at load time - and since the service was never started, the status permanently showed **"RECONNECTING"** with no WebSocket connection attempt and no console errors. This silent failure affected the first-load experience for every user.
 
 ### 5. Mobile App Defects
 
@@ -53,8 +53,8 @@ All 14 new handler functions are implemented directly in `main.rs` as async func
 │                     Sensing Server (main.rs)                           │
 │                                                                       │
 │  Router::new()                                                        │
-│  ├── /api/v1/sensing/*       (existing — CSI streaming)               │
-│  ├── /api/v1/pose/*          (existing — pose estimation)             │
+│  ├── /api/v1/sensing/*       (existing - CSI streaming)               │
+│  ├── /api/v1/pose/*          (existing - pose estimation)             │
 │  ├── /api/v1/models          GET    list_models          (NEW)        │
 │  ├── /api/v1/models/active   GET    get_active_model     (NEW)        │
 │  ├── /api/v1/models/load     POST   load_model           (NEW)        │
@@ -69,8 +69,8 @@ All 14 new handler functions are implemented directly in `main.rs` as async func
 │  ├── /api/v1/train/status    GET    train_status         (NEW)        │
 │  ├── /api/v1/train/start     POST   train_start          (NEW)        │
 │  ├── /api/v1/train/stop      POST   train_stop           (NEW)        │
-│  ├── /ws/sensing             (existing — sensing WebSocket)           │
-│  └── /ui/*                   (existing — static file serving)         │
+│  ├── /ws/sensing             (existing - sensing WebSocket)           │
+│  └── /ui/*                   (existing - static file serving)         │
 │                                                                       │
 │  AppStateInner (new fields)                                           │
 │  ├── discovered_models: Vec<Value>                                    │
@@ -95,34 +95,34 @@ Routes are registered individually in the `http_app` Router before the static UI
 
 | Method | Path | Request Body | Response | Description |
 |--------|------|-------------|----------|-------------|
-| `GET` | `/api/v1/models` | -- | `{ models: ModelInfo[], count: usize }` | Scan `data/models/` for `.rvf` files and return manifest metadata |
-| `GET` | `/api/v1/models/{id}` | -- | `ModelInfo` | Detailed info for a single model (version, PCK score, LoRA profiles, segment count) |
-| `GET` | `/api/v1/models/active` | -- | `ActiveModelInfo \| { status: "no_model" }` | Active model with runtime stats (avg inference ms, frames processed) |
+| `GET` | `/api/v1/models` | - | `{ models: ModelInfo[], count: usize }` | Scan `data/models/` for `.rvf` files and return manifest metadata |
+| `GET` | `/api/v1/models/{id}` | - | `ModelInfo` | Detailed info for a single model (version, PCK score, LoRA profiles, segment count) |
+| `GET` | `/api/v1/models/active` | - | `ActiveModelInfo \| { status: "no_model" }` | Active model with runtime stats (avg inference ms, frames processed) |
 | `POST` | `/api/v1/models/load` | `{ model_id: string }` | `{ status: "loaded", model_id, weight_count }` | Load model weights into memory via `RvfReader`, set `model_loaded = true` |
-| `POST` | `/api/v1/models/unload` | -- | `{ status: "unloaded", model_id }` | Drop loaded weights, set `model_loaded = false` |
+| `POST` | `/api/v1/models/unload` | - | `{ status: "unloaded", model_id }` | Drop loaded weights, set `model_loaded = false` |
 | `POST` | `/api/v1/models/lora/activate` | `{ model_id, profile_name }` | `{ status: "activated", profile_name }` | Activate a LoRA adapter profile on the loaded model |
-| `GET` | `/api/v1/models/lora/profiles` | -- | `{ model_id, profiles: string[], active }` | List LoRA profiles available in the loaded model |
+| `GET` | `/api/v1/models/lora/profiles` | - | `{ model_id, profiles: string[], active }` | List LoRA profiles available in the loaded model |
 
 #### CSI Recording (`recording.rs`)
 
 | Method | Path | Request Body | Response | Description |
 |--------|------|-------------|----------|-------------|
 | `POST` | `/api/v1/recording/start` | `{ session_name, label?, duration_secs? }` | `{ status: "recording", session_id, file_path }` | Create a new `.csi.jsonl` file and begin appending frames |
-| `POST` | `/api/v1/recording/stop` | -- | `{ status: "stopped", session_id, frame_count }` | Stop the active recording, write companion `.meta.json` |
-| `GET` | `/api/v1/recording/list` | -- | `{ recordings: RecordingSession[], count }` | List all recordings by scanning `.meta.json` files |
-| `GET` | `/api/v1/recording/download/{id}` | -- | `application/x-ndjson` file | Download the raw JSONL recording file |
-| `DELETE` | `/api/v1/recording/{id}` | -- | `{ status: "deleted", deleted_files }` | Remove `.csi.jsonl` and `.meta.json` files |
+| `POST` | `/api/v1/recording/stop` | - | `{ status: "stopped", session_id, frame_count }` | Stop the active recording, write companion `.meta.json` |
+| `GET` | `/api/v1/recording/list` | - | `{ recordings: RecordingSession[], count }` | List all recordings by scanning `.meta.json` files |
+| `GET` | `/api/v1/recording/download/{id}` | - | `application/x-ndjson` file | Download the raw JSONL recording file |
+| `DELETE` | `/api/v1/recording/{id}` | - | `{ status: "deleted", deleted_files }` | Remove `.csi.jsonl` and `.meta.json` files |
 
 #### Training Pipeline (`training_api.rs`)
 
 | Method | Path | Request Body | Response | Description |
 |--------|------|-------------|----------|-------------|
 | `POST` | `/api/v1/train/start` | `TrainingConfig { epochs, batch_size, learning_rate, ... }` | `{ status: "started", run_id }` | Launch background training task against recorded CSI data |
-| `POST` | `/api/v1/train/stop` | -- | `{ status: "stopped", run_id }` | Cancel the active training run via a stop signal |
-| `GET` | `/api/v1/train/status` | -- | `TrainingStatus { phase, epoch, loss, ... }` | Current training state (idle, training, complete, failed) |
+| `POST` | `/api/v1/train/stop` | - | `{ status: "stopped", run_id }` | Cancel the active training run via a stop signal |
+| `GET` | `/api/v1/train/status` | - | `TrainingStatus { phase, epoch, loss, ... }` | Current training state (idle, training, complete, failed) |
 | `POST` | `/api/v1/train/pretrain` | `{ epochs?, learning_rate? }` | `{ status: "started", mode: "pretrain" }` | Start self-supervised contrastive pretraining (ADR-024) |
 | `POST` | `/api/v1/train/lora` | `{ profile_name, epochs?, rank? }` | `{ status: "started", mode: "lora" }` | Start LoRA fine-tuning on a loaded base model |
-| `WS` | `/ws/train/progress` | -- | Streaming `TrainingProgress` JSON | Epoch-level progress with loss, metrics, and ETA |
+| `WS` | `/ws/train/progress` | - | Streaming `TrainingProgress` JSON | Epoch-level progress with loss, metrics, and ETA |
 
 ### State Management
 
@@ -203,13 +203,13 @@ The alternative would be to run a separate Python training service and proxy req
 
 1. **Single-binary deployment**: WiFi-DensePose targets edge deployments (disaster response, building security, healthcare monitoring per ADR-034) where installing Python, pip, and PyTorch is impractical. A single Rust binary that handles sensing, recording, training, and inference is the correct architecture for field use.
 
-2. **Zero-configuration UI**: The web UI is served by the same binary that exposes the API. When a user opens `http://server:8080/`, everything works -- no additional services to start, no ports to configure, no CORS to manage.
+2. **Zero-configuration UI**: The web UI is served by the same binary that exposes the API. When a user opens `http://server:8080/`, everything works - no additional services to start, no ports to configure, no CORS to manage.
 
 3. **Data locality**: CSI frames arrive via UDP, are processed for real-time display, and can simultaneously be written to disk for training. The recording module hooks directly into the CSI processing loop via `maybe_record_frame()`, avoiding any serialization overhead or inter-process communication.
 
 ### Why fix mobile in the same change?
 
-The mobile app's WebSocket failure was caused by the same root problem -- assumptions about server port layout that did not match reality. Fixing the server API without fixing the mobile client would leave a broken user experience. The test fixes were included because the placeholder tests masked the WebSocket URL bug during development.
+The mobile app's WebSocket failure was caused by the same root problem - assumptions about server port layout that did not match reality. Fixing the server API without fixing the mobile client would leave a broken user experience. The test fixes were included because the placeholder tests masked the WebSocket URL bug during development.
 
 ---
 
@@ -218,7 +218,7 @@ The mobile app's WebSocket failure was caused by the same root problem -- assump
 ### Positive
 
 - **UI loads with zero console errors**: All model, recording, and training tabs render correctly and receive real data from the server
-- **End-to-end workflow**: Users can record CSI data, train a model, load it, and see pose estimation results -- all from the web UI without any external tools
+- **End-to-end workflow**: Users can record CSI data, train a model, load it, and see pose estimation results - all from the web UI without any external tools
 - **LoRA fine-tuning support**: Users can adapt a base model to new environments via LoRA profiles, activated through the UI
 - **Mobile app connects reliably**: The WebSocket URL builder uses same-origin port derivation, working correctly regardless of which port the server runs on
 - **25 real mobile tests**: Provide actual regression protection for utils, services, stores, components, hooks, and screens
@@ -290,7 +290,7 @@ Startup creates `data/models/` and `data/recordings/` directories and populates 
 ```bash
 # 1. Start sensing server with auto source (simulated fallback)
 cd rust-port/wifi-densepose-rs
-cargo run -p wifi-densepose-sensing-server -- --http-port 3000 --source auto
+cargo run -p wifi-densepose-sensing-server - --http-port 3000 --source auto
 
 # 2. Verify model endpoints return 200
 curl -s http://localhost:3000/api/v1/models | jq '.count'
@@ -308,7 +308,7 @@ curl -s http://localhost:3000/api/v1/train/status | jq '.phase'
 # 5. Verify LoRA endpoints return 200
 curl -s http://localhost:3000/api/v1/models/lora/profiles | jq '.'
 
-# 6. Open UI — check browser console for zero 404 errors
+# 6. Open UI - check browser console for zero 404 errors
 # Navigate to http://localhost:3000/ui/
 
 # 7. Run mobile tests
@@ -329,6 +329,6 @@ cargo test --workspace --no-default-features
 - ADR-039: ESP32-S3 Edge Intelligence Pipeline (CSI frame format and processing tiers)
 - ADR-040: WASM Programmable Sensing (Tier 3 edge compute)
 - ADR-041: WASM Module Collection (module catalog)
-- `crates/wifi-densepose-sensing-server/src/main.rs` -- all 14 new handler functions (model, recording, training)
-- `ui/app.js` -- sensing service early initialization fix
-- `ui/mobile/src/services/ws.service.ts` -- mobile WebSocket URL fix
+- `crates/wifi-densepose-sensing-server/src/main.rs` - all 14 new handler functions (model, recording, training)
+- `ui/app.js` - sensing service early initialization fix
+- `ui/mobile/src/services/ws.service.ts` - mobile WebSocket URL fix

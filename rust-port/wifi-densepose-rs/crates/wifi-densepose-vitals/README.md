@@ -16,13 +16,13 @@ resource-constrained edge deployments alongside ESP32 hardware.
 
 ## Pipeline Stages
 
-1. **Preprocessing** (`CsiVitalPreprocessor`) -- EMA-based static component suppression,
+1. **Preprocessing** (`CsiVitalPreprocessor`) - EMA-based static component suppression,
    producing per-subcarrier residuals that isolate body-induced signal variation.
-2. **Breathing extraction** (`BreathingExtractor`) -- Bandpass filtering at 0.1--0.5 Hz with
+2. **Breathing extraction** (`BreathingExtractor`) - Bandpass filtering at 0.1--0.5 Hz with
    zero-crossing analysis for respiratory rate estimation.
-3. **Heart rate extraction** (`HeartRateExtractor`) -- Bandpass filtering at 0.8--2.0 Hz with
+3. **Heart rate extraction** (`HeartRateExtractor`) - Bandpass filtering at 0.8--2.0 Hz with
    autocorrelation peak detection and inter-subcarrier phase coherence weighting.
-4. **Anomaly detection** (`VitalAnomalyDetector`) -- Z-score analysis using Welford running
+4. **Anomaly detection** (`VitalAnomalyDetector`) - Z-score analysis using Welford running
    statistics for real-time clinical alerts (apnea, tachycardia, bradycardia).
 
 Results are stored in a `VitalSignStore` with configurable retention for historical trend
@@ -80,13 +80,13 @@ if let Some(residuals) = preprocessor.process(&frame) {
 
 ```text
 wifi-densepose-vitals/src/
-  lib.rs            -- Re-exports, module declarations
-  types.rs          -- CsiFrame, VitalReading, VitalEstimate, VitalStatus
-  preprocessor.rs   -- CsiVitalPreprocessor (EMA static suppression)
-  breathing.rs      -- BreathingExtractor (0.1-0.5 Hz bandpass)
-  heartrate.rs      -- HeartRateExtractor (0.8-2.0 Hz autocorrelation)
-  anomaly.rs        -- VitalAnomalyDetector (Z-score, Welford stats)
-  store.rs          -- VitalSignStore, VitalStats (historical retention)
+  lib.rs            - Re-exports, module declarations
+  types.rs          - CsiFrame, VitalReading, VitalEstimate, VitalStatus
+  preprocessor.rs   - CsiVitalPreprocessor (EMA static suppression)
+  breathing.rs      - BreathingExtractor (0.1-0.5 Hz bandpass)
+  heartrate.rs      - HeartRateExtractor (0.8-2.0 Hz autocorrelation)
+  anomaly.rs        - VitalAnomalyDetector (Z-score, Welford stats)
+  store.rs          - VitalSignStore, VitalStats (historical retention)
 ```
 
 ## Related Crates

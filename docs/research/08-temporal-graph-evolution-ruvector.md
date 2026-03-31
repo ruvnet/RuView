@@ -30,7 +30,7 @@ WiFi-based sensing produces a rich, continuously evolving graph structure.
 Each ESP32 node is a vertex; each TX-RX link is an edge carrying time-varying
 Channel State Information (CSI). People, furniture, doors, and environmental
 conditions perturb this graph in characteristic patterns. Tracking *how* the
-graph changes over time -- not just the current snapshot -- unlocks several
+graph changes over time - not just the current snapshot - unlocks several
 capabilities that static analysis cannot provide:
 
 - **Trajectory reconstruction** from the movement of minimum-cut boundaries.
@@ -45,7 +45,7 @@ evolution tracking into the RuView codebase via RuVector's graph engine.
 
 ### 1.1 Scope Boundaries
 
-This research covers the RF sensing graph specifically -- the graph whose
+This research covers the RF sensing graph specifically - the graph whose
 vertices are ESP32 nodes and whose edges are CSI links. It does not address
 the DensePose skeleton graph (which is a separate, downstream structure).
 The two graphs interact at the fusion boundary where `MultistaticArray`
@@ -173,11 +173,11 @@ attention weight.
 
 | Framework | Time Model | Memory | Scalability | RuView Fit |
 |-----------|-----------|--------|-------------|-----------|
-| TGN | Continuous | Per-node | O(N) update | High -- maps to CoherenceState |
-| JODIE | Continuous | Per-pair | O(E) update | Medium -- TX-RX pairs |
-| CT-DGNN | Continuous | Global | O(N^2) attention | Low -- too expensive at 20 Hz |
-| DyRep | Continuous | Per-node | O(N*K) | Medium -- temporal attention useful |
-| GraphSAGE-T | Discrete | Aggregated | O(N*K*L) | High -- snapshot aggregation |
+| TGN | Continuous | Per-node | O(N) update | High - maps to CoherenceState |
+| JODIE | Continuous | Per-pair | O(E) update | Medium - TX-RX pairs |
+| CT-DGNN | Continuous | Global | O(N^2) attention | Low - too expensive at 20 Hz |
+| DyRep | Continuous | Per-node | O(N*K) | Medium - temporal attention useful |
+| GraphSAGE-T | Discrete | Aggregated | O(N*K*L) | High - snapshot aggregation |
 
 ### 2.4 Recommended Hybrid Approach
 
@@ -322,7 +322,7 @@ With delta compression (Section 7), the per-day cost drops to approximately
 ### 4.1 Pattern Taxonomy
 
 RF field graphs exhibit characteristic evolution patterns during different
-physical events. We classify these as **temporal motifs** -- recurring
+physical events. We classify these as **temporal motifs** - recurring
 subgraph evolution signatures.
 
 ```
@@ -1198,7 +1198,7 @@ analogous graph health metrics with biomechanical parallels:
 /// Integrates with existing modules via the integration points
 /// listed in Section 1.2.
 pub struct RfTemporalGraph {
-    // -- Topology (stable) --
+    // - Topology (stable) --
     /// Node identifiers.
     nodes: Vec<NodeId>,
     /// Link definitions (directed: tx -> rx).
@@ -1206,7 +1206,7 @@ pub struct RfTemporalGraph {
     /// Node positions in room coordinates.
     positions: Vec<[f32; 3]>,
 
-    // -- Live state (updated at 20 Hz) --
+    // - Live state (updated at 20 Hz) --
     /// Per-link coherence state (from coherence.rs).
     coherence_states: Vec<CoherenceState>,
     /// Per-link gate policy (from coherence_gate.rs).
@@ -1214,13 +1214,13 @@ pub struct RfTemporalGraph {
     /// Field model for eigenstructure tracking.
     field_model: FieldModel,
 
-    // -- Temporal storage --
+    // - Temporal storage --
     /// Delta-compressed graph history.
     history: DeltaGraphStore,
     /// Graph-level Welford baseline.
     graph_baseline: GraphBaseline,
 
-    // -- Analysis --
+    // - Analysis --
     /// Per-link CUSUM detectors for change-point detection.
     cusum_detectors: Vec<CusumDetector>,
     /// Temporal motif classifier.
@@ -1228,7 +1228,7 @@ pub struct RfTemporalGraph {
     /// Cut boundary trackers (one per tracked person).
     cut_trackers: Vec<CutBoundaryTracker>,
 
-    // -- Configuration --
+    // - Configuration --
     config: TemporalGraphConfig,
 }
 
@@ -1365,12 +1365,12 @@ pub struct CycleResult {
 **Goal**: Implement `DeltaGraphStore` and basic temporal queries.
 
 **Files to create**:
-- `signal/src/ruvsense/temporal_graph.rs` -- Core temporal graph types
-- `signal/src/ruvsense/temporal_store.rs` -- Delta compression engine
+- `signal/src/ruvsense/temporal_graph.rs` - Core temporal graph types
+- `signal/src/ruvsense/temporal_store.rs` - Delta compression engine
 
 **Files to modify**:
-- `signal/src/ruvsense/mod.rs` -- Register new modules
-- `signal/src/ruvsense/coherence.rs` -- Add `snapshot()` method to `CoherenceState`
+- `signal/src/ruvsense/mod.rs` - Register new modules
+- `signal/src/ruvsense/coherence.rs` - Add `snapshot()` method to `CoherenceState`
 
 **Dependencies**: None (builds on existing `WelfordStats`, `CoherenceState`).
 
@@ -1384,10 +1384,10 @@ pub struct CycleResult {
 **Goal**: Implement CUSUM detectors and event classification.
 
 **Files to create**:
-- `signal/src/ruvsense/change_point.rs` -- CUSUM and spectral detectors
+- `signal/src/ruvsense/change_point.rs` - CUSUM and spectral detectors
 
 **Files to modify**:
-- `signal/src/ruvsense/cross_room.rs` -- Accept events from detector
+- `signal/src/ruvsense/cross_room.rs` - Accept events from detector
 
 **Dependencies**: Phase 1 (temporal store for history access).
 
@@ -1401,10 +1401,10 @@ pub struct CycleResult {
 **Goal**: Implement `CutBoundaryTracker` with Kalman filtering.
 
 **Files to create**:
-- `signal/src/ruvsense/cut_trajectory.rs` -- Kalman-filtered cut tracking
+- `signal/src/ruvsense/cut_trajectory.rs` - Kalman-filtered cut tracking
 
 **Files to modify**:
-- `signal/src/ruvsense/multistatic.rs` -- Feed `PersonCluster` to tracker
+- `signal/src/ruvsense/multistatic.rs` - Feed `PersonCluster` to tracker
 
 **Dependencies**: Phase 1, `ruvector-mincut` integration.
 
@@ -1417,7 +1417,7 @@ pub struct CycleResult {
 **Goal**: Implement `GraphBaseline` with drift detection.
 
 **Files to modify**:
-- `signal/src/ruvsense/longitudinal.rs` -- Extract `WelfordStats` pattern
+- `signal/src/ruvsense/longitudinal.rs` - Extract `WelfordStats` pattern
   into shared trait, implement for graph metrics.
 
 **Dependencies**: Phase 1, Phase 2.
@@ -1432,7 +1432,7 @@ pub struct CycleResult {
 **Goal**: Extend `CrossRoomTracker` with `TemporalTransitionGraph`.
 
 **Files to modify**:
-- `signal/src/ruvsense/cross_room.rs` -- Add temporal statistics to
+- `signal/src/ruvsense/cross_room.rs` - Add temporal statistics to
   transition log, implement transition prediction.
 
 **Dependencies**: Phase 2 (event detection feeds transitions).

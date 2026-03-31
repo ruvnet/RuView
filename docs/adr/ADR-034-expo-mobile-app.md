@@ -5,7 +5,7 @@
 | **Status** | Accepted |
 | **Date** | 2026-03-02 |
 | **Deciders** | MaTriXy, rUv |
-| **Codename** | **FieldView** -- Mobile Companion for WiFi-DensePose Field Deployment |
+| **Codename** | **FieldView** - Mobile Companion for WiFi-DensePose Field Deployment |
 | **Relates to** | ADR-019 (Sensing-Only UI Mode), ADR-021 (Vital Sign Detection), ADR-026 (Survivor Track Lifecycle), ADR-029 (RuvSense Multistatic), ADR-031 (RuView Sensing-First RF), ADR-032 (Mesh Security) |
 
 ---
@@ -40,8 +40,8 @@ In all three scenarios, the mobile device does not communicate with ESP32 nodes 
 
 The desktop web UI (`ui/`) and the mobile app share no code at the component level, but they consume the same backend APIs:
 
-- **WebSocket**: `ws://host:3001/ws/sensing` -- streaming SensingFrame JSON
-- **REST**: `http://host:3000/api/v1/...` -- configuration, history, health
+- **WebSocket**: `ws://host:3001/ws/sensing` - streaming SensingFrame JSON
+- **REST**: `http://host:3000/api/v1/...` - configuration, history, health
 
 The mobile app's Three.js Gaussian splat viewer (LiveScreen) loads the same splat HTML bundle used by the desktop UI, rendered inside a WebView (native) or iframe (web).
 

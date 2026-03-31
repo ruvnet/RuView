@@ -1,5 +1,5 @@
 // =============================================================================
-// types.ts — TypeScript types matching the Rust domain model for RuView
+// types.ts - TypeScript types matching the Rust domain model for RuView
 // =============================================================================
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 /**
- * FigurePool — Manages a pool of wireframe human figures for multi-person rendering.
+ * FigurePool - Manages a pool of wireframe human figures for multi-person rendering.
  *
  * Extracted from main.js Observatory class. Owns the lifecycle of up to MAX_FIGURES
  * Three.js figure groups, each containing joints, bones, body segments, and aura.
@@ -38,7 +38,7 @@ export const BODY_SEGMENT_DEFS = [
   { joints: [0, 0], radius: 0.1, isHead: true },
 ];
 
-// Bone thickness multipliers — thicker at torso, thinner at extremities
+// Bone thickness multipliers - thicker at torso, thinner at extremities
 const BONE_TAPER = (() => {
   const tapers = new Map();
   // Torso and shoulder/hip connections are thickest
@@ -51,7 +51,7 @@ const BONE_TAPER = (() => {
   tapers.set('6-8', 1.0);    // right upper arm
   tapers.set('11-13', 1.1);  // left thigh
   tapers.set('12-14', 1.1);  // right thigh
-  // Lower limbs / extremities — thinnest
+  // Lower limbs / extremities - thinnest
   tapers.set('7-9', 0.7);    // left forearm
   tapers.set('8-10', 0.7);   // right forearm
   tapers.set('13-15', 0.8);  // left shin
@@ -64,7 +64,7 @@ const BONE_TAPER = (() => {
   return tapers;
 })();
 
-// Secondary motion delay factors per joint — extremities lag more
+// Secondary motion delay factors per joint - extremities lag more
 const SECONDARY_DELAY = [
   0.12, // 0 nose
   0.10, // 1 left eye
@@ -85,7 +85,7 @@ const SECONDARY_DELAY = [
   0.10, // 16 right ankle
 ];
 
-// Overshoot factors — extremities overshoot more for organic feel
+// Overshoot factors - extremities overshoot more for organic feel
 const OVERSHOOT = [
   0.02, // 0 nose
   0.01, // 1 left eye
@@ -183,7 +183,7 @@ export class FigurePool {
       }
     }
 
-    // Bones — tapered thickness
+    // Bones - tapered thickness
     const bones = [];
     for (const [a, b] of SKELETON_PAIRS) {
       const taperKey = `${Math.min(a, b)}-${Math.max(a, b)}`;
@@ -397,7 +397,7 @@ export class FigurePool {
       seg.mat.emissiveIntensity = 0.1 + Math.abs(breathPulse) * 0.4;
     }
 
-    // Aura — adapt shape to pose
+    // Aura - adapt shape to pose
     const hipY = (fig.joints[11].position.y + fig.joints[12].position.y) / 2;
     const cx = (fig.joints[11].position.x + fig.joints[12].position.x) / 2;
     const cz = (fig.joints[11].position.z + fig.joints[12].position.z) / 2;

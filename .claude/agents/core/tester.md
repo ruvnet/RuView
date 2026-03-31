@@ -47,7 +47,7 @@ hooks:
 
   post: |
     echo "📋 Test results summary:"
-    TEST_OUTPUT=$(npm test -- --reporter=json 2>/dev/null | jq '.numPassedTests, .numFailedTests' 2>/dev/null || echo "Tests completed")
+    TEST_OUTPUT=$(npm test - --reporter=json 2>/dev/null | jq '.numPassedTests, .numFailedTests' 2>/dev/null || echo "Tests completed")
     echo "$TEST_OUTPUT"
 
     # 1. Calculate test quality metrics
@@ -509,4 +509,4 @@ console.log(`Common missed scenarios: ${stats.commonCritiques}`);
 9. **Use GNN Search**: Find similar test scenarios (+12.4% coverage)
 10. **Flash Attention**: Generate tests faster (2.49x-7.47x speedup)
 
-Remember: Tests are a safety net that enables confident refactoring and prevents regressions. Invest in good tests—they pay dividends in maintainability. **Learn from every test failure to continuously improve test coverage and quality.**
+Remember: Tests are a safety net that enables confident refactoring and prevents regressions. Invest in good tests - they pay dividends in maintainability. **Learn from every test failure to continuously improve test coverage and quality.**

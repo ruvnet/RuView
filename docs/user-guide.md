@@ -254,7 +254,7 @@ docker run --network host ruvnet/wifi-densepose:latest --source wifi --tick-ms 5
 
 > **Community verified:** Tested on Windows 10 (10.0.26200) with Intel Wi-Fi 6 AX201 160MHz, Python 3.14, StormFiber 5 GHz network. All 7 tutorial steps passed with stable RSSI readings at -48 dBm. See [Tutorial #36](https://github.com/ruvnet/RuView/issues/36) for the full walkthrough and test results.
 
-**Vital signs from RSSI:** The sensing server now supports breathing rate estimation from RSSI variance patterns (requires stationary subject near AP) and motion classification with confidence scoring. RSSI-based vital sign detection has lower fidelity than ESP32 CSI — it is best for presence detection and coarse motion classification.
+**Vital signs from RSSI:** The sensing server now supports breathing rate estimation from RSSI variance patterns (requires stationary subject near AP) and motion classification with confidence scoring. RSSI-based vital sign detection has lower fidelity than ESP32 CSI - it is best for presence detection and coarse motion classification.
 
 ### macOS WiFi (RSSI Only)
 
@@ -394,7 +394,7 @@ curl -s http://localhost:3000/api/v1/pose/current | python -m json.tool
 
 Real-time sensing data is available via WebSocket.
 
-**URL:** `ws://localhost:3000/ws/sensing` (same port as HTTP — recommended) or `ws://localhost:3001/ws/sensing` (dedicated WS port).
+**URL:** `ws://localhost:3000/ws/sensing` (same port as HTTP - recommended) or `ws://localhost:3001/ws/sensing` (dedicated WS port).
 
 > **Note:** The `/ws/sensing` WebSocket endpoint is available on both the HTTP port (3000) and the dedicated WebSocket port (3001/8765). The web UI uses the HTTP port so only one port needs to be exposed. The dedicated WS port remains available for backward compatibility.
 
@@ -662,7 +662,7 @@ Once trained, the adaptive model runs automatically:
 - Record with clearly distinct activities (actually leave the room for "empty")
 - Record 30-60 seconds per activity (more data = better model)
 - Re-record and retrain if you move the ESP32 or rearrange the room
-- The model is environment-specific — retrain when the physical setup changes
+- The model is environment-specific - retrain when the physical setup changes
 
 ### Adaptive Classifier API
 
@@ -819,10 +819,10 @@ Pre-built binaries are available at [Releases](https://github.com/ruvnet/RuView/
 
 | Release | What It Includes | Tag |
 |---------|-----------------|-----|
-| [v0.5.0](https://github.com/ruvnet/RuView/releases/tag/v0.5.0-esp32) | **Stable (recommended)** — mmWave sensor fusion (MR60BHA2/LD2410 auto-detect), 48-byte fused vitals, all v0.4.3.1 fixes | `v0.5.0-esp32` |
+| [v0.5.0](https://github.com/ruvnet/RuView/releases/tag/v0.5.0-esp32) | **Stable (recommended)** - mmWave sensor fusion (MR60BHA2/LD2410 auto-detect), 48-byte fused vitals, all v0.4.3.1 fixes | `v0.5.0-esp32` |
 | [v0.4.3.1](https://github.com/ruvnet/RuView/releases/tag/v0.4.3.1-esp32) | Fall detection fix ([#263](https://github.com/ruvnet/RuView/issues/263)), 4MB flash ([#265](https://github.com/ruvnet/RuView/issues/265)), watchdog fix ([#266](https://github.com/ruvnet/RuView/issues/266)) | `v0.4.3.1-esp32` |
 | [v0.4.1](https://github.com/ruvnet/RuView/releases/tag/v0.4.1-esp32) | CSI build fix, compile guard, AMOLED display, edge intelligence ([ADR-057](../docs/adr/ADR-057-firmware-csi-build-guard.md)) | `v0.4.1-esp32` |
-| [v0.3.0-alpha](https://github.com/ruvnet/RuView/releases/tag/v0.3.0-alpha-esp32) | Alpha — adds on-device edge intelligence (ADR-039) | `v0.3.0-alpha-esp32` |
+| [v0.3.0-alpha](https://github.com/ruvnet/RuView/releases/tag/v0.3.0-alpha-esp32) | Alpha - adds on-device edge intelligence (ADR-039) | `v0.3.0-alpha-esp32` |
 | [v0.2.0](https://github.com/ruvnet/RuView/releases/tag/v0.2.0-esp32) | Raw CSI streaming, TDM, channel hopping, QUIC mesh | `v0.2.0-esp32` |
 
 > **Important:** Always use **v0.4.3.1 or later**. Earlier versions have false fall detection alerts (v0.4.2 and below) and CSI disabled in the build config (pre-v0.4.1).
@@ -870,7 +870,7 @@ All nodes in a mesh must share the same 256-bit mesh key for HMAC-SHA256 beacon 
 Each node in a multistatic mesh needs a unique TDM slot ID (0-based):
 
 ```bash
-# Node 0 (slot 0) — first transmitter
+# Node 0 (slot 0) - first transmitter
 python firmware/esp32-csi-node/provision.py --port COM7 --tdm-slot 0 --tdm-total 3
 
 # Node 1 (slot 1)
@@ -882,11 +882,11 @@ python firmware/esp32-csi-node/provision.py --port COM9 --tdm-slot 2 --tdm-total
 
 **Edge Intelligence (v0.3.0-alpha, [ADR-039](../docs/adr/ADR-039-esp32-edge-intelligence.md)):**
 
-The v0.3.0-alpha firmware adds on-device signal processing that runs directly on the ESP32-S3 — no host PC needed for basic presence and vital signs. Edge processing is disabled by default for full backward compatibility.
+The v0.3.0-alpha firmware adds on-device signal processing that runs directly on the ESP32-S3 - no host PC needed for basic presence and vital signs. Edge processing is disabled by default for full backward compatibility.
 
 | Tier | What It Does | Extra RAM |
 |------|-------------|-----------|
-| **0** | Disabled (default) — streams raw CSI to the aggregator | 0 KB |
+| **0** | Disabled (default) - streams raw CSI to the aggregator | 0 KB |
 | **1** | Phase unwrapping, running statistics, top-K subcarrier selection, delta compression | ~30 KB |
 | **2** | Everything in Tier 1, plus presence detection, breathing/heart rate, motion scoring, fall detection | ~33 KB |
 
@@ -958,7 +958,7 @@ This starts:
 
 ## Testing Firmware Without Hardware (QEMU)
 
-You can test the ESP32-S3 firmware on your computer without any physical hardware. The project uses **QEMU** — an emulator that pretends to be an ESP32-S3 chip, running the real firmware code inside a virtual machine on your PC.
+You can test the ESP32-S3 firmware on your computer without any physical hardware. The project uses **QEMU** - an emulator that pretends to be an ESP32-S3 chip, running the real firmware code inside a virtual machine on your PC.
 
 This is useful when:
 - You don't have an ESP32-S3 board yet
@@ -1004,7 +1004,7 @@ pip install esptool pyyaml esp-idf-nvs-partition-gen
 **For multi-node testing (optional):**
 
 ```bash
-# Linux only — needed for virtual network bridges
+# Linux only - needed for virtual network bridges
 sudo apt install socat bridge-utils iproute2
 ```
 
@@ -1041,7 +1041,7 @@ bash scripts/qemu-esp32s3-test.sh
 ```
 
 **What happens behind the scenes:**
-1. The firmware is compiled with a "mock CSI" mode — instead of reading real WiFi signals, it generates synthetic test data that mimics real people walking, falling, or breathing
+1. The firmware is compiled with a "mock CSI" mode - instead of reading real WiFi signals, it generates synthetic test data that mimics real people walking, falling, or breathing
 2. The compiled firmware is loaded into QEMU, which boots it like a real ESP32-S3
 3. The emulator's serial output (what you'd see on a USB cable) is captured
 4. A validation script checks the output for expected behavior and errors
@@ -1081,18 +1081,18 @@ The test runs 16 checks on the firmware's output. Here's what a successful run l
 
 | Code | Meaning | What to do |
 |------|---------|-----------|
-| 0 | **PASS** — everything works | Nothing, you're good! |
-| 1 | **WARN** — minor issues | Review the output; usually safe to continue |
-| 2 | **FAIL** — something broke | Check the `[FAIL]` lines for what went wrong |
-| 3 | **FATAL** — can't even start | Usually a missing tool or build failure; check error messages |
+| 0 | **PASS** - everything works | Nothing, you're good! |
+| 1 | **WARN** - minor issues | Review the output; usually safe to continue |
+| 2 | **FAIL** - something broke | Check the `[FAIL]` lines for what went wrong |
+| 3 | **FATAL** - can't even start | Usually a missing tool or build failure; check error messages |
 
 ### Testing Multiple Nodes at Once (Swarm)
 
 Real deployments use 3-8 ESP32 nodes. The **swarm configurator** lets you simulate multiple nodes on your computer, each with a different role:
 
-- **Sensor nodes** — generate WiFi signal data (like ESP32s placed around a room)
-- **Coordinator node** — collects data from all sensors and runs analysis
-- **Gateway node** — bridges data to your computer
+- **Sensor nodes** - generate WiFi signal data (like ESP32s placed around a room)
+- **Coordinator node** - collects data from all sensors and runs analysis
+- **Gateway node** - bridges data to your computer
 
 ```bash
 # Quick 2-node smoke test (15 seconds)
@@ -1220,17 +1220,17 @@ bash scripts/qemu-esp32s3-test.sh
 # 2. Multi-node swarm test (1 minute)
 python3 scripts/qemu_swarm.py --preset standard
 
-# 3. Fuzz testing — finds edge-case crashes (1-5 minutes)
+# 3. Fuzz testing - finds edge-case crashes (1-5 minutes)
 cd firmware/esp32-csi-node/test
 make all CC=clang
 make run_serialize FUZZ_DURATION=60
 make run_edge FUZZ_DURATION=60
 make run_nvs FUZZ_DURATION=60
 
-# 4. NVS configuration matrix — tests 14 config combinations
+# 4. NVS configuration matrix - tests 14 config combinations
 python3 scripts/generate_nvs_matrix.py --output-dir build/nvs_matrix
 
-# 5. Chaos testing — injects faults to test resilience (2 minutes)
+# 5. Chaos testing - injects faults to test resilience (2 minutes)
 bash scripts/qemu-chaos-test.sh
 ```
 
@@ -1278,7 +1278,7 @@ Firmware versions prior to v0.4.1 had `CONFIG_ESP_WIFI_CSI_ENABLED` disabled in 
 
 ### ESP32: No data arriving
 
-1. Verify firmware is v0.4.1+ (older versions had CSI disabled — see above)
+1. Verify firmware is v0.4.1+ (older versions had CSI disabled - see above)
 2. Verify the ESP32 is connected to the same WiFi network
 3. Check the target IP matches the sensing server machine: `python firmware/esp32-csi-node/provision.py --port COM7 --target-ip <YOUR_IP>`
 4. Verify UDP port 5005 is not blocked by firewall
@@ -1308,18 +1308,18 @@ Run the terminal as Administrator (required for `netsh wlan` access). Verified w
 The server applies a 3-stage smoothing pipeline (ADR-048). If readings are still unstable:
 - Ensure the subject is relatively still (large movements mask vital sign oscillations)
 - Train the adaptive classifier for your specific environment: `curl -X POST http://localhost:3000/api/v1/adaptive/train`
-- Check signal quality: `curl http://localhost:3000/api/v1/sensing/latest` — look for `signal_quality > 0.4`
+- Check signal quality: `curl http://localhost:3000/api/v1/sensing/latest` - look for `signal_quality > 0.4`
 
 ### Observatory shows DEMO instead of LIVE
 
 - Verify the sensing server is running: `curl http://localhost:3000/health`
 - Access Observatory via the server URL: `http://localhost:3000/ui/observatory.html` (not a file:// URL)
 - Hard refresh with Ctrl+Shift+R to clear cached settings
-- The auto-detect probes `/health` on the same origin — cross-origin won't work
+- The auto-detect probes `/health` on the same origin - cross-origin won't work
 
 ### QEMU: "qemu-system-xtensa: command not found"
 
-QEMU for ESP32-S3 must be built from Espressif's fork — it is not in standard package managers:
+QEMU for ESP32-S3 must be built from Espressif's fork - it is not in standard package managers:
 
 ```bash
 git clone https://github.com/espressif/qemu.git

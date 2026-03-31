@@ -57,10 +57,10 @@ This is already used in some wellness and telemedicine systems.
 
 Quantum radar (based on entanglement/correlations or quantum illumination) is under research:
 
-- **Quantum radar** aims to use quantum correlations to outperform classical radar in target detection at short ranges. Early designs have demonstrated proof of concept but remain limited to near-field/short distances — potential for biomedical scanning is discussed.
+- **Quantum radar** aims to use quantum correlations to outperform classical radar in target detection at short ranges. Early designs have demonstrated proof of concept but remain limited to near-field/short distances - potential for biomedical scanning is discussed.
 - **Quantum-inspired computational imaging** and quantum sensors promise enhanced sensitivity, including in foggy, low visibility or internal sensing contexts.
 
-While full quantum remote vital sign sensing (like single-photon quantum radar scanning people's heartbeat) isn't yet operational, quantum sensors — especially atomic magnetometers and NV-centre devices — offer a path toward ultrasensitive biomedical field detection.
+While full quantum remote vital sign sensing (like single-photon quantum radar scanning people's heartbeat) isn't yet operational, quantum sensors - especially atomic magnetometers and NV-centre devices - offer a path toward ultrasensitive biomedical field detection.
 
 ### 6. Quantum Biomedical Instrumentation
 
@@ -89,7 +89,7 @@ These are quantum-sensor-enabled biomedical detection advances rather than direc
 ## Key Insights & State-of-Research
 
 - **RF and radar sensing** are the dominant SOTA methods for non-contact vital sign detection outside optical imaging. These use advanced signal processing and ML to extract micro-movement signatures.
-- **Quantum sensors** are showing promise for enhanced biomedical detection at finer scales — especially magnetic and other field sensing — but practical remote vital sign sensing (people at distance) is still largely research.
+- **Quantum sensors** are showing promise for enhanced biomedical detection at finer scales - especially magnetic and other field sensing - but practical remote vital sign sensing (people at distance) is still largely research.
 - **Hybrid approaches** (RF + ML, quantum-inspired imaging) represent emerging research frontiers with potential breakthroughs in sensitivity and privacy.
 
 ---
@@ -107,4 +107,4 @@ This project's signal processing pipeline (ADR-014) implements several of the co
 | Subcarrier Selection | Channel/frequency selection in OFDM and FMCW systems |
 | Body Velocity Profile | Doppler-velocity mapping used in mmWave and through-wall radar |
 
-The algorithmic foundations are shared across modalities — what differs is the carrier frequency, bandwidth, and hardware interface.
+The algorithmic foundations are shared across modalities - what differs is the carrier frequency, bandwidth, and hardware interface.

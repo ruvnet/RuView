@@ -171,10 +171,10 @@ interpolation as a first-class operation with tests proving correctness.
 
 ## References
 
-- Yang et al., "MM-Fi: Multi-Modal Non-Intrusive 4D Human Dataset" (NeurIPS 2023) — arXiv:2305.10345
+- Yang et al., "MM-Fi: Multi-Modal Non-Intrusive 4D Human Dataset" (NeurIPS 2023) - arXiv:2305.10345
 - Geng et al., "DensePose From WiFi" (CMU, arXiv:2301.00250, 2023)
 - Yan et al., "Person-in-WiFi 3D" (CVPR 2024)
-- NjtechCVLab, "Wi-Pose Dataset" — github.com/NjtechCVLab/Wi-PoseDataset
+- NjtechCVLab, "Wi-Pose Dataset" - github.com/NjtechCVLab/Wi-PoseDataset
 - ADR-012: ESP32 CSI Sensor Mesh (hardware target)
 - ADR-013: Feature-Level Sensing on Commodity Gear
 - ADR-014: SOTA Signal Processing Algorithms

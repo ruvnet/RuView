@@ -33,10 +33,10 @@ class SensingService {
     // Connection state: disconnected | connecting | connected | reconnecting | simulated
     this._state = 'disconnected';
     // Data-source label exposed to the UI:
-    //   "live"              — real ESP32 hardware connected
-    //   "server-simulated"  — server is running but using synthetic data (no hardware)
-    //   "reconnecting"      — WebSocket disconnected, retrying
-    //   "simulated"         — client-side fallback simulation (server unreachable)
+    //   "live"              - real ESP32 hardware connected
+    //   "server-simulated"  - server is running but using synthetic data (no hardware)
+    //   "reconnecting"      - WebSocket disconnected, retrying
+    //   "simulated"         - client-side fallback simulation (server unreachable)
     this._dataSource = 'reconnecting';
     // The raw source string from the server (e.g. "esp32", "simulated", "simulate")
     this._serverSource = null;
@@ -91,9 +91,9 @@ class SensingService {
 
   /**
    * Current data source label.
-   * "live"         — frames are arriving from the real ESP32 over WebSocket
-   * "reconnecting" — WebSocket disconnected; actively retrying, no frames emitted
-   * "simulated"    — max reconnect attempts exhausted; emitting synthetic frames
+   * "live"         - frames are arriving from the real ESP32 over WebSocket
+   * "reconnecting" - WebSocket disconnected; actively retrying, no frames emitted
+   * "simulated"    - max reconnect attempts exhausted; emitting synthetic frames
    */
   get dataSource() {
     return this._dataSource;
@@ -119,7 +119,7 @@ class SensingService {
       this._reconnectAttempt = 0;
       this._stopSimulation();
       this._setState('connected');
-      // Don't assume "live" yet — wait for first frame's source field.
+      // Don't assume "live" yet - wait for first frame's source field.
       // Fetch server status to determine actual data source immediately.
       this._detectServerSource();
     };
@@ -277,7 +277,7 @@ class SensingService {
         const json = await resp.json();
         this._applyServerSource(json.source);
       } else {
-        // Can't reach status endpoint — assume live until first frame tells us
+        // Can't reach status endpoint - assume live until first frame tells us
         this._setDataSource('live');
       }
     } catch {
@@ -295,7 +295,7 @@ class SensingService {
     } else if (rawSource === 'simulated' || rawSource === 'simulate') {
       this._setDataSource('server-simulated');
     } else {
-      // Unknown source — show as server-simulated to be safe
+      // Unknown source - show as server-simulated to be safe
       this._setDataSource('server-simulated');
     }
   }
@@ -355,7 +355,7 @@ class SensingService {
   _setDataSource(source) {
     if (source === this._dataSource) return;
     this._dataSource = source;
-    // Re-use the same state-listener channel — listeners receive the
+    // Re-use the same state-listener channel - listeners receive the
     // connection state but can read dataSource via service.dataSource.
     for (const cb of this._stateListeners) {
       try { cb(this._state); } catch (e) { /* ignore */ }

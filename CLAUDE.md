@@ -1,4 +1,4 @@
-# Claude Code Configuration — WiFi-DensePose + Claude Flow V3
+# Claude Code Configuration - WiFi-DensePose + Claude Flow V3
 
 ## Project: wifi-densepose
 
@@ -11,7 +11,7 @@ Dual codebase: Python v1 (`v1/`) and Rust port (`rust-port/wifi-densepose-rs/`).
 | `wifi-densepose-signal` | SOTA signal processing + RuvSense multistatic sensing (14 modules) |
 | `wifi-densepose-nn` | Neural network inference (ONNX, PyTorch, Candle backends) |
 | `wifi-densepose-train` | Training pipeline with ruvector integration + ruview_metrics |
-| `wifi-densepose-mat` | Mass Casualty Assessment Tool — disaster survivor detection |
+| `wifi-densepose-mat` | Mass Casualty Assessment Tool - disaster survivor detection |
 | `wifi-densepose-hardware` | ESP32 aggregator, TDM protocol, channel hopping firmware |
 | `wifi-densepose-ruvector` | RuVector v2.0.4 integration + cross-viewpoint fusion (5 modules) |
 | `wifi-densepose-api` | REST API (Axum) |
@@ -60,8 +60,8 @@ All 5 ruvector crates integrated in workspace:
 43 ADRs in `docs/adr/` (ADR-001 through ADR-043). Key ones:
 - ADR-014: SOTA signal processing (Accepted)
 - ADR-015: MM-Fi + Wi-Pose training datasets (Accepted)
-- ADR-016: RuVector training pipeline integration (Accepted — complete)
-- ADR-017: RuVector signal + MAT integration (Proposed — next target)
+- ADR-016: RuVector training pipeline integration (Accepted - complete)
+- ADR-017: RuVector signal + MAT integration (Proposed - next target)
 - ADR-024: Contrastive CSI embedding / AETHER (Accepted)
 - ADR-027: Cross-environment domain generalization / MERIDIAN (Accepted)
 - ADR-028: ESP32 capability audit + witness verification (Accepted)
@@ -75,29 +75,29 @@ All 5 ruvector crates integrated in workspace:
 | Device | Port | Chip | Role | Cost |
 |--------|------|------|------|------|
 | ESP32-S3 (8MB flash) | COM7 | Xtensa dual-core | WiFi CSI sensing node | ~$9 |
-| ESP32-S3 SuperMini (4MB) | — | Xtensa dual-core | WiFi CSI (compact) | ~$6 |
+| ESP32-S3 SuperMini (4MB) | - | Xtensa dual-core | WiFi CSI (compact) | ~$6 |
 | ESP32-C6 + Seeed MR60BHA2 | COM4 | RISC-V + 60 GHz FMCW | mmWave HR/BR/presence | ~$15 |
-| HLK-LD2410 | — | 24 GHz FMCW | Presence + distance | ~$3 |
+| HLK-LD2410 | - | 24 GHz FMCW | Presence + distance | ~$3 |
 
-**Not supported:** ESP32 (original), ESP32-C3 — single-core, can't run CSI DSP pipeline.
+**Not supported:** ESP32 (original), ESP32-C3 - single-core, can't run CSI DSP pipeline.
 
 ### Build & Test Commands (this repo)
 ```bash
-# Rust — full workspace tests (1,031+ tests, ~2 min)
+# Rust - full workspace tests (1,031+ tests, ~2 min)
 cd rust-port/wifi-densepose-rs
 cargo test --workspace --no-default-features
 
-# Rust — single crate check (no GPU needed)
+# Rust - single crate check (no GPU needed)
 cargo check -p wifi-densepose-train --no-default-features
 
-# Python — deterministic proof verification (SHA-256)
+# Python - deterministic proof verification (SHA-256)
 python v1/data/proof/verify.py
 
-# Python — test suite
+# Python - test suite
 cd v1 && python -m pytest tests/ -x -q
 ```
 
-### ESP32 Firmware Build (Windows — Python subprocess required)
+### ESP32 Firmware Build (Windows - Python subprocess required)
 ```bash
 # Build 8MB firmware (real WiFi CSI mode, no mocks)
 # See CLAUDE.local.md for the full Python subprocess command
@@ -125,7 +125,7 @@ python -m serial.tools.miniterm COM7 115200
 4. Tag: `git tag v0.X.Y-esp32 && git push origin v0.X.Y-esp32`
 5. Release: `gh release create v0.X.Y-esp32 <binaries> --title "..." --notes-file ...`
 6. Verify on real hardware (COM7) before publishing
-7. **CRITICAL:** Always test with real WiFi CSI, not mock mode — mock missed the Kconfig threshold bug
+7. **CRITICAL:** Always test with real WiFi CSI, not mock mode - mock missed the Kconfig threshold bug
 
 ### Crate Publishing Order
 Crates must be published in dependency order:
@@ -150,18 +150,18 @@ Crates must be published in dependency order:
 **After any significant code change, run the full validation:**
 
 ```bash
-# 1. Rust tests — must be 1,031+ passed, 0 failed
+# 1. Rust tests - must be 1,031+ passed, 0 failed
 cd rust-port/wifi-densepose-rs
 cargo test --workspace --no-default-features
 
-# 2. Python proof — must print VERDICT: PASS
+# 2. Python proof - must print VERDICT: PASS
 cd ../..
 python v1/data/proof/verify.py
 
 # 3. Generate witness bundle (includes both above + firmware hashes)
 bash scripts/generate-witness-bundle.sh
 
-# 4. Self-verify the bundle — must be 7/7 PASS
+# 4. Self-verify the bundle - must be 7/7 PASS
 cd dist/witness-bundle-ADR028-*/
 bash VERIFY.sh
 ```
@@ -174,20 +174,20 @@ python v1/data/proof/verify.py
 ```
 
 **Witness bundle contents** (`dist/witness-bundle-ADR028-<sha>.tar.gz`):
-- `WITNESS-LOG-028.md` — 33-row attestation matrix with evidence per capability
-- `ADR-028-esp32-capability-audit.md` — Full audit findings
-- `proof/verify.py` + `expected_features.sha256` — Deterministic pipeline proof
-- `test-results/rust-workspace-tests.log` — Full cargo test output
-- `firmware-manifest/source-hashes.txt` — SHA-256 of all 7 ESP32 firmware files
-- `crate-manifest/versions.txt` — All 15 crates with versions
-- `VERIFY.sh` — One-command self-verification for recipients
+- `WITNESS-LOG-028.md` - 33-row attestation matrix with evidence per capability
+- `ADR-028-esp32-capability-audit.md` - Full audit findings
+- `proof/verify.py` + `expected_features.sha256` - Deterministic pipeline proof
+- `test-results/rust-workspace-tests.log` - Full cargo test output
+- `firmware-manifest/source-hashes.txt` - SHA-256 of all 7 ESP32 firmware files
+- `crate-manifest/versions.txt` - All 15 crates with versions
+- `VERIFY.sh` - One-command self-verification for recipients
 
 **Key proof artifacts:**
-- `v1/data/proof/verify.py` — Trust Kill Switch: feeds reference signal through production pipeline, hashes output
-- `v1/data/proof/expected_features.sha256` — Published expected hash
-- `v1/data/proof/sample_csi_data.json` — 1,000 synthetic CSI frames (seed=42)
-- `docs/WITNESS-LOG-028.md` — 11-step reproducible verification procedure
-- `docs/adr/ADR-028-esp32-capability-audit.md` — Complete audit record
+- `v1/data/proof/verify.py` - Trust Kill Switch: feeds reference signal through production pipeline, hashes output
+- `v1/data/proof/expected_features.sha256` - Published expected hash
+- `v1/data/proof/sample_csi_data.json` - 1,000 synthetic CSI frames (seed=42)
+- `docs/WITNESS-LOG-028.md` - 11-step reproducible verification procedure
+- `docs/adr/ADR-028-esp32-capability-audit.md` - Complete audit record
 
 ### Branch
 Default branch: `main`
@@ -202,24 +202,24 @@ Active feature branch: `ruvsense-full-implementation` (PR #77)
 - ALWAYS prefer editing an existing file to creating a new one
 - NEVER proactively create documentation files (*.md) or README files unless explicitly requested
 - NEVER save working files, text/mds, or tests to the root folder
-- Never continuously check status after spawning a swarm — wait for results
+- Never continuously check status after spawning a swarm - wait for results
 - ALWAYS read a file before editing it
 - NEVER commit secrets, credentials, or .env files
 
 ## File Organization
 
-- NEVER save to root folder — use the directories below
-- `docs/adr/` — Architecture Decision Records (43 ADRs)
-- `docs/ddd/` — Domain-Driven Design models
-- `rust-port/wifi-densepose-rs/crates/` — Rust workspace crates (15 crates)
-- `rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/` — RuvSense multistatic modules (14 files)
-- `rust-port/wifi-densepose-rs/crates/wifi-densepose-ruvector/src/viewpoint/` — Cross-viewpoint fusion (5 files)
-- `rust-port/wifi-densepose-rs/crates/wifi-densepose-hardware/src/esp32/` — ESP32 TDM protocol
-- `firmware/esp32-csi-node/main/` — ESP32 C firmware (channel hopping, NVS config, TDM)
-- `v1/src/` — Python source (core, hardware, services, api)
-- `v1/data/proof/` — Deterministic CSI proof bundles
-- `.claude-flow/` — Claude Flow coordination state (committed for team sharing)
-- `.claude/` — Claude Code settings, agents, memory (committed for team sharing)
+- NEVER save to root folder - use the directories below
+- `docs/adr/` - Architecture Decision Records (43 ADRs)
+- `docs/ddd/` - Domain-Driven Design models
+- `rust-port/wifi-densepose-rs/crates/` - Rust workspace crates (15 crates)
+- `rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/` - RuvSense multistatic modules (14 files)
+- `rust-port/wifi-densepose-rs/crates/wifi-densepose-ruvector/src/viewpoint/` - Cross-viewpoint fusion (5 files)
+- `rust-port/wifi-densepose-rs/crates/wifi-densepose-hardware/src/esp32/` - ESP32 TDM protocol
+- `firmware/esp32-csi-node/main/` - ESP32 C firmware (channel hopping, NVS config, TDM)
+- `v1/src/` - Python source (core, hardware, services, api)
+- `v1/data/proof/` - Deterministic CSI proof bundles
+- `.claude-flow/` - Claude Flow coordination state (committed for team sharing)
+- `.claude/` - Claude Code settings, agents, memory (committed for team sharing)
 
 ## Project Architecture
 
@@ -242,18 +242,18 @@ Active feature branch: `ruvsense-full-implementation` (PR #77)
 
 Before merging any PR, verify each item applies and is addressed:
 
-1. **Rust tests pass** — `cargo test --workspace --no-default-features` (1,031+ passed, 0 failed)
-2. **Python proof passes** — `python v1/data/proof/verify.py` (VERDICT: PASS)
-3. **README.md** — Update platform tables, crate descriptions, hardware tables, feature summaries if scope changed
-4. **CLAUDE.md** — Update crate table, ADR list, module tables, version if scope changed
-5. **CHANGELOG.md** — Add entry under `[Unreleased]` with what was added/fixed/changed
-6. **User guide** (`docs/user-guide.md`) — Update if new data sources, CLI flags, or setup steps were added
-7. **ADR index** — Update ADR count in README docs table if a new ADR was created
-8. **Witness bundle** — Regenerate if tests or proof hash changed: `bash scripts/generate-witness-bundle.sh`
-9. **Docker Hub image** — Only rebuild if Dockerfile, dependencies, or runtime behavior changed
-10. **Crate publishing** — Only needed if a crate is published to crates.io and its public API changed
-11. **`.gitignore`** — Add any new build artifacts or binaries
-12. **Security audit** — Run security review for new modules touching hardware/network boundaries
+1. **Rust tests pass** - `cargo test --workspace --no-default-features` (1,031+ passed, 0 failed)
+2. **Python proof passes** - `python v1/data/proof/verify.py` (VERDICT: PASS)
+3. **README.md** - Update platform tables, crate descriptions, hardware tables, feature summaries if scope changed
+4. **CLAUDE.md** - Update crate table, ADR list, module tables, version if scope changed
+5. **CHANGELOG.md** - Add entry under `[Unreleased]` with what was added/fixed/changed
+6. **User guide** (`docs/user-guide.md`) - Update if new data sources, CLI flags, or setup steps were added
+7. **ADR index** - Update ADR count in README docs table if a new ADR was created
+8. **Witness bundle** - Regenerate if tests or proof hash changed: `bash scripts/generate-witness-bundle.sh`
+9. **Docker Hub image** - Only rebuild if Dockerfile, dependencies, or runtime behavior changed
+10. **Crate publishing** - Only needed if a crate is published to crates.io and its public API changed
+11. **`.gitignore`** - Add any new build artifacts or binaries
+12. **Security audit** - Run security review for new modules touching hardware/network boundaries
 
 ## Build & Test
 
@@ -292,14 +292,14 @@ npm run lint
 
 - MUST initialize the swarm using CLI tools when starting complex tasks
 - MUST spawn concurrent agents using Claude Code's Task tool
-- Never use CLI tools alone for execution — Task tool agents do the actual work
+- Never use CLI tools alone for execution - Task tool agents do the actual work
 - MUST call CLI tools AND Task tool in ONE message for complex work
 
 ### 3-Tier Model Routing (ADR-026)
 
 | Tier | Handler | Latency | Cost | Use Cases |
 |------|---------|---------|------|-----------|
-| **1** | Agent Booster (WASM) | <1ms | $0 | Simple transforms (var→const, add types) — Skip LLM |
+| **1** | Agent Booster (WASM) | <1ms | $0 | Simple transforms (var→const, add types) - Skip LLM |
 | **2** | Haiku | ~500ms | $0.0002 | Simple tasks, low complexity (<30%) |
 | **3** | Sonnet/Opus | 2-5s | $0.003-0.015 | Complex reasoning, architecture, security (>30%) |
 
@@ -323,8 +323,8 @@ npx @claude-flow/cli@latest swarm init --topology hierarchical --max-agents 8 --
 
 - ALWAYS use `run_in_background: true` for all agent Task calls
 - ALWAYS put ALL agent Task calls in ONE message for parallel execution
-- After spawning, STOP — do NOT add more tool calls or check status
-- Never poll TaskOutput or check swarm status — trust agents to return
+- After spawning, STOP - do NOT add more tool calls or check status
+- Never poll TaskOutput or check swarm status - trust agents to return
 - When agent results arrive, review ALL results before proceeding
 
 ## V3 CLI Commands
@@ -388,7 +388,7 @@ npx @claude-flow/cli@latest memory retrieve --key "pattern-auth" --namespace pat
 ## Quick Setup
 
 ```bash
-claude mcp add claude-flow -- npx -y @claude-flow/cli@latest
+claude mcp add claude-flow - npx -y @claude-flow/cli@latest
 npx @claude-flow/cli@latest daemon start
 npx @claude-flow/cli@latest doctor --fix
 ```

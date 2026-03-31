@@ -1,11 +1,11 @@
-# ADR-031: Project RuView -- Sensing-First RF Mode for Multistatic Fidelity Enhancement
+# ADR-031: Project RuView - Sensing-First RF Mode for Multistatic Fidelity Enhancement
 
 | Field | Value |
 |-------|-------|
 | **Status** | Proposed |
 | **Date** | 2026-03-02 |
 | **Deciders** | ruv |
-| **Codename** | **RuView** -- RuVector Viewpoint-Integrated Enhancement |
+| **Codename** | **RuView** - RuVector Viewpoint-Integrated Enhancement |
 | **Relates to** | ADR-012 (ESP32 Mesh), ADR-014 (SOTA Signal), ADR-016 (RuVector Integration), ADR-017 (RuVector Signal+MAT), ADR-021 (Vital Signs), ADR-024 (AETHER Embeddings), ADR-027 (MERIDIAN Cross-Environment) |
 
 ---
@@ -20,7 +20,7 @@ Current WiFi DensePose operates with a single transmitter-receiver pair (or sing
 - **Depth ambiguity**: Motion along the RF propagation axis (toward/away from receiver) produces minimal phase change.
 - **Multi-person confusion**: Two people at similar range but different angles create overlapping CSI signatures.
 
-The ESP32 mesh (ADR-012) partially addresses this via feature-level fusion across 3-6 nodes, but feature-level fusion cannot learn optimal fusion weights -- it uses hand-crafted aggregation (max, mean, coherent sum).
+The ESP32 mesh (ADR-012) partially addresses this via feature-level fusion across 3-6 nodes, but feature-level fusion cannot learn optimal fusion weights - it uses hand-crafted aggregation (max, mean, coherent sum).
 
 ### 1.2 Three Fidelity Levers
 
@@ -252,10 +252,10 @@ pub enum ViewpointFusionEvent {
 
 | File | Purpose | RuVector Crate |
 |------|---------|---------------|
-| `crates/wifi-densepose-ruvector/src/viewpoint/mod.rs` | Module root, re-exports | -- |
+| `crates/wifi-densepose-ruvector/src/viewpoint/mod.rs` | Module root, re-exports | - |
 | `crates/wifi-densepose-ruvector/src/viewpoint/attention.rs` | Cross-viewpoint scaled dot-product attention with geometric bias | ruvector-attention |
 | `crates/wifi-densepose-ruvector/src/viewpoint/geometry.rs` | GeometricDiversityIndex, Cramer-Rao bound estimation | ruvector-solver |
-| `crates/wifi-densepose-ruvector/src/viewpoint/coherence.rs` | Coherence gating for environment stability | -- (pure math) |
+| `crates/wifi-densepose-ruvector/src/viewpoint/coherence.rs` | Coherence gating for environment stability | - (pure math) |
 | `crates/wifi-densepose-ruvector/src/viewpoint/fusion.rs` | MultistaticArray aggregate, orchestrates fusion pipeline | ruvector-attention + ruvector-attn-mincut |
 
 ### 4.2 Phase 2: Signal Processing Extension
@@ -268,7 +268,7 @@ pub enum ViewpointFusionEvent {
 
 | File | Purpose | RuVector Crate |
 |------|---------|---------------|
-| `crates/wifi-densepose-hardware/src/esp32/tdm.rs` | TDM sensing protocol coordinator | -- (protocol logic) |
+| `crates/wifi-densepose-hardware/src/esp32/tdm.rs` | TDM sensing protocol coordinator | - (protocol logic) |
 
 ### 4.4 Phase 4: Training and Metrics
 
@@ -325,10 +325,10 @@ pub enum ViewpointFusionEvent {
 
 ### 6.1 Positive
 
-- **Fundamental geometric improvement**: Viewpoint diversity reduces body self-occlusion and depth ambiguity -- these are physics, not model, limitations.
+- **Fundamental geometric improvement**: Viewpoint diversity reduces body self-occlusion and depth ambiguity - these are physics, not model, limitations.
 - **Uses existing silicon**: ESP32-S3, commodity WiFi, no custom RF hardware required for Silver tier.
 - **Learned fusion weights**: Embedding-level fusion (Tier 3) outperforms hand-crafted feature-level fusion (Tier 2).
-- **Composes with existing ADRs**: AETHER (per-viewpoint), MERIDIAN (cross-environment), and RuView (cross-viewpoint) are orthogonal -- they compose freely.
+- **Composes with existing ADRs**: AETHER (per-viewpoint), MERIDIAN (cross-environment), and RuView (cross-viewpoint) are orthogonal - they compose freely.
 - **IEEE 802.11bf aligned**: TDM protocol maps to 802.11bf sensing sessions, enabling future migration to standard-compliant APs.
 - **Commodity price point**: $84 for 6-node Silver-tier deployment.
 

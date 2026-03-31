@@ -6,7 +6,7 @@ Core types, traits, and error types for the rUv Neural brain topology analysis s
 
 `ruv-neural-core` is the foundation crate of the rUv Neural workspace. It defines all
 shared data types, trait interfaces, and the RVF binary file format used across the
-other eleven crates. This crate has **zero** internal dependencies -- every other
+other eleven crates. This crate has **zero** internal dependencies - every other
 ruv-neural crate depends on it.
 
 ## Features

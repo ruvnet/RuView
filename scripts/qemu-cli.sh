@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# qemu-cli.sh — Unified QEMU ESP32-S3 testing CLI (ADR-061)
+# qemu-cli.sh - Unified QEMU ESP32-S3 testing CLI (ADR-061)
 # Version: 1.0.0
 #
 # Single entry point for all QEMU testing operations.
@@ -58,7 +58,7 @@ detect_python() {
 # --- Command: help ---------------------------------------------------------
 cmd_help() {
     cat <<EOF
-${BOLD}qemu-cli.sh${RST} v${VERSION} — Unified QEMU ESP32-S3 testing CLI
+${BOLD}qemu-cli.sh${RST} v${VERSION} - Unified QEMU ESP32-S3 testing CLI
 
 ${BOLD}USAGE${RST}
     qemu-cli.sh <command> [options]
@@ -251,7 +251,7 @@ cmd_health() {
 
 # --- Command: status --------------------------------------------------------
 cmd_status() {
-    # Status should never fail — disable errexit locally
+    # Status should never fail - disable errexit locally
     set +e
     echo -e "${BOLD}=== QEMU ESP32-S3 Testing Status ===${RST}"
     echo ""
@@ -324,7 +324,7 @@ _qemu_cli_completions() {
     local cmds="install test mesh swarm snapshot chaos fuzz nvs health status help"
     local cur="${COMP_WORDS[COMP_CWORD]}"
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
+        COMPREPLY=( $(compgen -W "$cmds" - "$cur") )
     fi
 }
 complete -F _qemu_cli_completions qemu-cli.sh

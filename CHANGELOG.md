@@ -5,33 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v0.5.0-esp32] — 2026-03-15
+## [v0.5.0-esp32] - 2026-03-15
 
 ### Added
-- **60 GHz mmWave sensor fusion (ADR-063)** — Auto-detects Seeed MR60BHA2 (60 GHz, HR/BR/presence) and HLK-LD2410 (24 GHz, presence/distance) on UART at boot. Probes 115200 then 256000 baud, registers device capabilities, starts background parser.
-- **48-byte fused vitals packet** (magic `0xC5110004`) — Kalman-style fusion: mmWave 80% + CSI 20% when both available. Automatic fallback to standard 32-byte CSI-only packet.
-- **Server-side fusion bridge** (`scripts/mmwave_fusion_bridge.py`) — Reads two serial ports simultaneously for dual-sensor setups where mmWave runs on a separate ESP32.
-- **Multimodal ambient intelligence roadmap (ADR-064)** — 25+ applications from fall detection to sleep monitoring to RF tomography.
+- **60 GHz mmWave sensor fusion (ADR-063)** - Auto-detects Seeed MR60BHA2 (60 GHz, HR/BR/presence) and HLK-LD2410 (24 GHz, presence/distance) on UART at boot. Probes 115200 then 256000 baud, registers device capabilities, starts background parser.
+- **48-byte fused vitals packet** (magic `0xC5110004`) - Kalman-style fusion: mmWave 80% + CSI 20% when both available. Automatic fallback to standard 32-byte CSI-only packet.
+- **Server-side fusion bridge** (`scripts/mmwave_fusion_bridge.py`) - Reads two serial ports simultaneously for dual-sensor setups where mmWave runs on a separate ESP32.
+- **Multimodal ambient intelligence roadmap (ADR-064)** - 25+ applications from fall detection to sleep monitoring to RF tomography.
 
 ### Verified
 - Real hardware: ESP32-S3 (COM7) WiFi CSI + ESP32-C6/MR60BHA2 (COM4) 60 GHz mmWave running concurrently. HR=75 bpm, BR=25/min at 52 cm range. All 11 QEMU CI jobs green.
 
-## [v0.4.3-esp32] — 2026-03-15
+## [v0.4.3-esp32] - 2026-03-15
 
 ### Fixed
-- **Fall detection false positives (#263)** — Default threshold raised from 2.0 to 15.0 rad/s²; normal walking (2-5 rad/s²) no longer triggers alerts. Added 3-consecutive-frame debounce and 5-second cooldown between alerts. Verified on real ESP32-S3 hardware: 0 false alerts in 60s / 1,300+ live WiFi CSI frames.
-- **Kconfig default mismatch** — `CONFIG_EDGE_FALL_THRESH` Kconfig default was still 2000 (=2.0) while `nvs_config.c` fallback was updated to 15.0. Fixed Kconfig to 15000. Caught by real hardware testing — mock data did not reproduce.
-- **provision.py NVS generator API change** — `esp_idf_nvs_partition_gen` package changed its `generate()` signature; switched to subprocess-first invocation for cross-version compatibility.
-- **QEMU CI pipeline (11 jobs)** — Fixed all failures: fuzz test `esp_timer` stubs, QEMU `libgcrypt` dependency, NVS matrix generator, IDF container `pip` path, flash image padding, validation WARN handling, swarm `ip`/`cargo` missing.
+- **Fall detection false positives (#263)** - Default threshold raised from 2.0 to 15.0 rad/s²; normal walking (2-5 rad/s²) no longer triggers alerts. Added 3-consecutive-frame debounce and 5-second cooldown between alerts. Verified on real ESP32-S3 hardware: 0 false alerts in 60s / 1,300+ live WiFi CSI frames.
+- **Kconfig default mismatch** - `CONFIG_EDGE_FALL_THRESH` Kconfig default was still 2000 (=2.0) while `nvs_config.c` fallback was updated to 15.0. Fixed Kconfig to 15000. Caught by real hardware testing - mock data did not reproduce.
+- **provision.py NVS generator API change** - `esp_idf_nvs_partition_gen` package changed its `generate()` signature; switched to subprocess-first invocation for cross-version compatibility.
+- **QEMU CI pipeline (11 jobs)** - Fixed all failures: fuzz test `esp_timer` stubs, QEMU `libgcrypt` dependency, NVS matrix generator, IDF container `pip` path, flash image padding, validation WARN handling, swarm `ip`/`cargo` missing.
 
 ### Added
-- **4MB flash support (#265)** — `partitions_4mb.csv` and `sdkconfig.defaults.4mb` for ESP32-S3 boards with 4MB flash (e.g. SuperMini). Dual OTA slots, 1.856 MB each. Thanks to @sebbu for the community workaround that confirmed feasibility.
-- **`--strict` flag** for `validate_qemu_output.py` — WARNs now pass by default in CI (no real WiFi in QEMU); use `--strict` to fail on warnings.
+- **4MB flash support (#265)** - `partitions_4mb.csv` and `sdkconfig.defaults.4mb` for ESP32-S3 boards with 4MB flash (e.g. SuperMini). Dual OTA slots, 1.856 MB each. Thanks to @sebbu for the community workaround that confirmed feasibility.
+- **`--strict` flag** for `validate_qemu_output.py` - WARNs now pass by default in CI (no real WiFi in QEMU); use `--strict` to fail on warnings.
 
 ## [Unreleased]
 
 ### Added
-- **QEMU ESP32-S3 testing platform (ADR-061)** — 9-layer firmware testing without hardware
+- **QEMU ESP32-S3 testing platform (ADR-061)** - 9-layer firmware testing without hardware
   - Mock CSI generator with 10 physics-based scenarios (empty room, walking, fall, multi-person, etc.)
   - Single-node QEMU runner with 16-check UART validation
   - Multi-node TDM mesh simulation (TAP networking, 2-6 nodes)
@@ -41,14 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - NVS provisioning matrix (14 configs)
   - Snapshot-based regression testing (sub-second VM restore)
   - Chaos testing with fault injection + health monitoring
-- **QEMU Swarm Configurator (ADR-062)** — YAML-driven multi-ESP32 test orchestration
+- **QEMU Swarm Configurator (ADR-062)** - YAML-driven multi-ESP32 test orchestration
   - 4 topologies: star, mesh, line, ring
   - 3 node roles: sensor, coordinator, gateway
   - 9 swarm-level assertions (boot, crashes, TDM, frame rate, fall detection, etc.)
   - 7 presets: smoke (2n/15s), standard (3n/60s), ci-matrix, large-mesh, line-relay, ring-fault, heterogeneous
   - Health oracle with cross-node validation
-- **QEMU installer** (`install-qemu.sh`) — auto-detects OS, installs deps, builds Espressif QEMU fork
-- **Unified QEMU CLI** (`qemu-cli.sh`) — single entry point for all 11 QEMU test commands
+- **QEMU installer** (`install-qemu.sh`) - auto-detects OS, installs deps, builds Espressif QEMU fork
+- **Unified QEMU CLI** (`qemu-cli.sh`) - single entry point for all 11 QEMU test commands
 - CI: `firmware-qemu.yml` workflow with QEMU test matrix, fuzz testing, NVS validation, and swarm test jobs
 - User guide: QEMU testing and swarm configurator section with plain-language walkthrough
 
@@ -59,35 +59,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 16 bugs from ADR-062 deep review (log filename mismatch, SLIRP port collision, heap false positives, etc.)
 - All scripts: `--help` flags, prerequisite checks with install hints, standardized exit codes
 
-- **Sensing server UI API completion (ADR-043)** — 14 fully-functional REST endpoints for model management, CSI recording, and training control
+- **Sensing server UI API completion (ADR-043)** - 14 fully-functional REST endpoints for model management, CSI recording, and training control
   - Model CRUD: `GET /api/v1/models`, `GET /api/v1/models/active`, `POST /api/v1/models/load`, `POST /api/v1/models/unload`, `DELETE /api/v1/models/:id`, `GET /api/v1/models/lora/profiles`, `POST /api/v1/models/lora/activate`
   - CSI recording: `GET /api/v1/recording/list`, `POST /api/v1/recording/start`, `POST /api/v1/recording/stop`, `DELETE /api/v1/recording/:id`
   - Training control: `GET /api/v1/train/status`, `POST /api/v1/train/start`, `POST /api/v1/train/stop`
   - Recording writes CSI frames to `.jsonl` files via tokio background task
   - Model/recording directories scanned at startup, state managed via `Arc<RwLock<AppStateInner>>`
-- **ADR-044: Provisioning tool enhancements** — 5-phase plan for complete NVS coverage (7 missing keys), JSON config files, mesh presets, read-back/verify, and auto-detect
-- **25 real mobile tests** replacing `it.todo()` placeholders — 205 assertions covering components, services, stores, hooks, screens, and utils
-- **Project MERIDIAN (ADR-027)** — Cross-environment domain generalization for WiFi pose estimation (1,858 lines, 72 tests)
-  - `HardwareNormalizer` — Catmull-Rom cubic interpolation resamples any hardware CSI to canonical 56 subcarriers; z-score + phase sanitization
-  - `DomainFactorizer` + `GradientReversalLayer` — adversarial disentanglement of pose-relevant vs environment-specific features
-  - `GeometryEncoder` + `FilmLayer` — Fourier positional encoding + DeepSets + FiLM for zero-shot deployment given AP positions
-  - `VirtualDomainAugmentor` — synthetic environment diversity (room scale, wall material, scatterers, noise) for 4x training augmentation
-  - `RapidAdaptation` — 10-second unsupervised calibration via contrastive test-time training + LoRA adapters
-  - `CrossDomainEvaluator` — 6-metric evaluation protocol (MPJPE in-domain/cross-domain/few-shot/cross-hardware, domain gap ratio, adaptation speedup)
-- ADR-027: Cross-Environment Domain Generalization — 10 SOTA citations (PerceptAlign, X-Fi ICLR 2025, AM-FM, DGSense, CVPR 2024)
-- **Cross-platform RSSI adapters** — macOS CoreWLAN (`MacosCoreWlanScanner`) and Linux `iw` (`LinuxIwScanner`) Rust adapters with `#[cfg(target_os)]` gating
+- **ADR-044: Provisioning tool enhancements** - 5-phase plan for complete NVS coverage (7 missing keys), JSON config files, mesh presets, read-back/verify, and auto-detect
+- **25 real mobile tests** replacing `it.todo()` placeholders - 205 assertions covering components, services, stores, hooks, screens, and utils
+- **Project MERIDIAN (ADR-027)** - Cross-environment domain generalization for WiFi pose estimation (1,858 lines, 72 tests)
+  - `HardwareNormalizer` - Catmull-Rom cubic interpolation resamples any hardware CSI to canonical 56 subcarriers; z-score + phase sanitization
+  - `DomainFactorizer` + `GradientReversalLayer` - adversarial disentanglement of pose-relevant vs environment-specific features
+  - `GeometryEncoder` + `FilmLayer` - Fourier positional encoding + DeepSets + FiLM for zero-shot deployment given AP positions
+  - `VirtualDomainAugmentor` - synthetic environment diversity (room scale, wall material, scatterers, noise) for 4x training augmentation
+  - `RapidAdaptation` - 10-second unsupervised calibration via contrastive test-time training + LoRA adapters
+  - `CrossDomainEvaluator` - 6-metric evaluation protocol (MPJPE in-domain/cross-domain/few-shot/cross-hardware, domain gap ratio, adaptation speedup)
+- ADR-027: Cross-Environment Domain Generalization - 10 SOTA citations (PerceptAlign, X-Fi ICLR 2025, AM-FM, DGSense, CVPR 2024)
+- **Cross-platform RSSI adapters** - macOS CoreWLAN (`MacosCoreWlanScanner`) and Linux `iw` (`LinuxIwScanner`) Rust adapters with `#[cfg(target_os)]` gating
 - macOS CoreWLAN Python sensing adapter with Swift helper (`mac_wifi.swift`)
 - macOS synthetic BSSID generation (FNV-1a hash) for Sonoma 14.4+ BSSID redaction
 - Linux `iw dev <iface> scan` parser with freq-to-channel conversion and `scan dump` (no-root) mode
 - ADR-025: macOS CoreWLAN WiFi Sensing (ORCA)
 
 ### Fixed
-- **sendto ENOMEM crash (Issue #127)** — CSI callbacks in promiscuous mode exhaust lwIP pbuf pool causing guru meditation crash. Fixed with 50 Hz rate limiter in `csi_collector.c` and 100 ms ENOMEM backoff in `stream_sender.c`. Hardware-verified on ESP32-S3 (200+ callbacks, zero crashes)
-- **Provisioning script missing TDM/edge flags (Issue #130)** — Added `--tdm-slot`, `--tdm-total`, `--edge-tier`, `--pres-thresh`, `--fall-thresh`, `--vital-win`, `--vital-int`, `--subk-count` to `provision.py`
-- **WebSocket "RECONNECTING" on Dashboard/Live Demo** — `sensingService.start()` now called on app init in `app.js` so WebSocket connects immediately instead of waiting for Sensing tab visit
-- **Mobile WebSocket port** — `ws.service.ts` `buildWsUrl()` uses same-origin port instead of hardcoded port 3001
-- **Mobile Jest config** — `testPathIgnorePatterns` no longer silently ignores the entire test directory
-- Removed synthetic byte counters from Python `MacosWifiCollector` — now reports `tx_bytes=0, rx_bytes=0` instead of fake incrementing values
+- **sendto ENOMEM crash (Issue #127)** - CSI callbacks in promiscuous mode exhaust lwIP pbuf pool causing guru meditation crash. Fixed with 50 Hz rate limiter in `csi_collector.c` and 100 ms ENOMEM backoff in `stream_sender.c`. Hardware-verified on ESP32-S3 (200+ callbacks, zero crashes)
+- **Provisioning script missing TDM/edge flags (Issue #130)** - Added `--tdm-slot`, `--tdm-total`, `--edge-tier`, `--pres-thresh`, `--fall-thresh`, `--vital-win`, `--vital-int`, `--subk-count` to `provision.py`
+- **WebSocket "RECONNECTING" on Dashboard/Live Demo** - `sensingService.start()` now called on app init in `app.js` so WebSocket connects immediately instead of waiting for Sensing tab visit
+- **Mobile WebSocket port** - `ws.service.ts` `buildWsUrl()` uses same-origin port instead of hardcoded port 3001
+- **Mobile Jest config** - `testPathIgnorePatterns` no longer silently ignores the entire test directory
+- Removed synthetic byte counters from Python `MacosWifiCollector` - now reports `tx_bytes=0, rx_bytes=0` instead of fake incrementing values
 
 ---
 
@@ -95,23 +95,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Major release: AETHER contrastive embedding model, Docker Hub images, and comprehensive UI overhaul.
 
-### Added — AETHER Contrastive Embedding Model (ADR-024)
-- **Project AETHER** — self-supervised contrastive learning for WiFi CSI fingerprinting, similarity search, and anomaly detection (`9bbe956`)
+### Added - AETHER Contrastive Embedding Model (ADR-024)
+- **Project AETHER** - self-supervised contrastive learning for WiFi CSI fingerprinting, similarity search, and anomaly detection (`9bbe956`)
 - `embedding.rs` module: `ProjectionHead`, `InfoNceLoss`, `CsiAugmenter`, `FingerprintIndex`, `PoseEncoder`, `EmbeddingExtractor` (909 lines, zero external ML dependencies)
 - SimCLR-style pretraining with 5 physically-motivated augmentations (temporal jitter, subcarrier masking, Gaussian noise, phase rotation, amplitude scaling)
 - CLI flags: `--pretrain`, `--pretrain-epochs`, `--embed`, `--build-index <type>`
 - Four HNSW-compatible fingerprint index types: `env_fingerprint`, `activity_pattern`, `temporal_baseline`, `person_track`
 - Cross-modal `PoseEncoder` for WiFi-to-camera embedding alignment
 - VICReg regularization for embedding collapse prevention
-- 53K total parameters (55 KB at INT8) — fits on ESP32
+- 53K total parameters (55 KB at INT8) - fits on ESP32
 
-### Added — Docker & Deployment
+### Added - Docker & Deployment
 - Published Docker Hub images: `ruvnet/wifi-densepose:latest` (132 MB Rust) and `ruvnet/wifi-densepose:python` (569 MB) (`add9f19`)
 - Multi-stage Dockerfile for Rust sensing server with RuVector crates
 - `docker-compose.yml` orchestrating both Rust and Python services
 - RVF model export via `--export-rvf` and load via `--load-rvf` CLI flags
 
-### Added — Documentation
+### Added - Documentation
 - 33 use cases across 4 vertical tiers: Everyday, Specialized, Robotics & Industrial, Extreme (`0afd9c5`)
 - "Why WiFi Wins" comparison table (WiFi vs camera vs LIDAR vs wearable vs PIR)
 - Mermaid architecture diagrams: end-to-end pipeline, signal processing detail, deployment topology (`50f0fc9`)
@@ -122,8 +122,8 @@ Major release: AETHER contrastive embedding model, Docker Hub images, and compre
 - CSI hardware requirement notice (`528b394`)
 
 ### Fixed
-- **UI auto-detects server port from page origin** — no more hardcoded `localhost:8080`; works on any port (Docker :3000, native :8080, custom) (`3b72f35`, closes #55)
-- **Docker port mismatch** — server now binds 3000/3001 inside container as documented (`44b9c30`)
+- **UI auto-detects server port from page origin** - no more hardcoded `localhost:8080`; works on any port (Docker :3000, native :8080, custom) (`3b72f35`, closes #55)
+- **Docker port mismatch** - server now binds 3000/3001 inside container as documented (`44b9c30`)
 - Added `/ws/sensing` WebSocket route to the HTTP server so UI only needs one port
 - Fixed README API endpoint references: `/api/v1/health` → `/health`, `/api/v1/sensing` → `/api/v1/sensing/latest`
 - Multi-person tracking limit corrected: configurable default 10, no hard software cap (`e2ce250`)
@@ -134,41 +134,41 @@ Major release: AETHER contrastive embedding model, Docker Hub images, and compre
 
 Major release: complete Rust sensing server, full DensePose training pipeline, RuVector v2.0.4 integration, ESP32-S3 firmware, and 6 security hardening patches.
 
-### Added — Rust Sensing Server
+### Added - Rust Sensing Server
 - **Full DensePose-compatible REST API** served by Axum (`d956c30`)
-  - `GET /health` — server health
-  - `GET /api/v1/sensing/latest` — live CSI sensing data
-  - `GET /api/v1/vital-signs` — breathing rate (6-30 BPM) and heartbeat (40-120 BPM)
-  - `GET /api/v1/pose/current` — 17 COCO keypoints derived from WiFi signal field
-  - `GET /api/v1/info` — server build and feature info
-  - `GET /api/v1/model/info` — RVF model container metadata
-  - `ws://host/ws/sensing` — real-time WebSocket stream
+  - `GET /health` - server health
+  - `GET /api/v1/sensing/latest` - live CSI sensing data
+  - `GET /api/v1/vital-signs` - breathing rate (6-30 BPM) and heartbeat (40-120 BPM)
+  - `GET /api/v1/pose/current` - 17 COCO keypoints derived from WiFi signal field
+  - `GET /api/v1/info` - server build and feature info
+  - `GET /api/v1/model/info` - RVF model container metadata
+  - `ws://host/ws/sensing` - real-time WebSocket stream
 - Three data sources: `--source esp32` (UDP CSI), `--source windows` (netsh RSSI), `--source simulated` (deterministic reference)
 - Auto-detection: server probes ESP32 UDP and Windows WiFi, falls back to simulated
 - Three.js visualization UI with 3D body skeleton, signal heatmap, phase plot, Doppler bars, vital signs panel
 - Static UI serving via `--ui-path` flag
 - Throughput: 9,520–11,665 frames/sec (release build)
 
-### Added — ADR-021: Vital Sign Detection
+### Added - ADR-021: Vital Sign Detection
 - `VitalSignDetector` with breathing (6-30 BPM) and heartbeat (40-120 BPM) extraction from CSI fluctuations (`1192de9`)
 - FFT-based spectral analysis with configurable band-pass filters
 - Confidence scoring based on spectral peak prominence
 - REST endpoint `/api/v1/vital-signs` with real-time JSON output
 
-### Added — ADR-023: DensePose Training Pipeline (Phases 1-8)
+### Added - ADR-023: DensePose Training Pipeline (Phases 1-8)
 - `wifi-densepose-train` crate with complete 8-phase pipeline (`fc409df`, `ec98e40`, `fce1271`)
   - Phase 1: `DataPipeline` with MM-Fi and Wi-Pose dataset loaders
-  - Phase 2: `CsiToPoseTransformer` — 4-head cross-attention + 2-layer GCN on COCO skeleton
+  - Phase 2: `CsiToPoseTransformer` - 4-head cross-attention + 2-layer GCN on COCO skeleton
   - Phase 3: 6-term composite loss (MSE, bone length, symmetry, joint angle, temporal, confidence)
   - Phase 4: `DynamicPersonMatcher` via ruvector-mincut (O(n^1.5 log n) Hungarian assignment)
-  - Phase 5: `SonaAdapter` — MicroLoRA rank-4 with EWC++ memory preservation
-  - Phase 6: `SparseInference` — progressive 3-layer model loading (A: essential, B: refinement, C: full)
-  - Phase 7: `RvfContainer` — single-file model packaging with segment-based binary format
+  - Phase 5: `SonaAdapter` - MicroLoRA rank-4 with EWC++ memory preservation
+  - Phase 6: `SparseInference` - progressive 3-layer model loading (A: essential, B: refinement, C: full)
+  - Phase 7: `RvfContainer` - single-file model packaging with segment-based binary format
   - Phase 8: End-to-end training with cosine-annealing LR, early stopping, checkpoint saving
 - CLI: `--train`, `--dataset`, `--epochs`, `--save-rvf`, `--load-rvf`, `--export-rvf`
 - Benchmark: ~11,665 fps inference, 229 tests passing
 
-### Added — ADR-016: RuVector Training Integration (all 5 crates)
+### Added - ADR-016: RuVector Training Integration (all 5 crates)
 - `ruvector-mincut` → `DynamicPersonMatcher` in `metrics.rs` + subcarrier selection (`81ad09d`, `a7dd31c`)
 - `ruvector-attn-mincut` → antenna attention in `model.rs` + noise-gated spectrogram
 - `ruvector-temporal-tensor` → `CompressedCsiBuffer` in `dataset.rs` + compressed breathing/heartbeat
@@ -176,16 +176,16 @@ Major release: complete Rust sensing server, full DensePose training pipeline, R
 - `ruvector-attention` → spatial attention in `model.rs` + attention-weighted BVP
 - Vendored all 11 RuVector crates under `vendor/ruvector/` (`d803bfe`)
 
-### Added — ADR-017: RuVector Signal & MAT Integration (7 integration points)
-- `gate_spectrogram()` — attention-gated noise suppression (`18170d7`)
-- `attention_weighted_bvp()` — sensitivity-weighted velocity profiles
-- `mincut_subcarrier_partition()` — dynamic sensitive/insensitive subcarrier split
-- `solve_fresnel_geometry()` — TX-body-RX distance estimation
+### Added - ADR-017: RuVector Signal & MAT Integration (7 integration points)
+- `gate_spectrogram()` - attention-gated noise suppression (`18170d7`)
+- `attention_weighted_bvp()` - sensitivity-weighted velocity profiles
+- `mincut_subcarrier_partition()` - dynamic sensitive/insensitive subcarrier split
+- `solve_fresnel_geometry()` - TX-body-RX distance estimation
 - `CompressedBreathingBuffer` + `CompressedHeartbeatSpectrogram`
 - `BreathingDetector` + `HeartbeatDetector` (MAT crate, real FFT + micro-Doppler)
 - Feature-gated behind `cfg(feature = "ruvector")` (`ab2453e`)
 
-### Added — ADR-018: ESP32-S3 Firmware & Live CSI Pipeline
+### Added - ADR-018: ESP32-S3 Firmware & Live CSI Pipeline
 - ESP32-S3 firmware with FreeRTOS CSI extraction (`92a5182`)
 - ADR-018 binary frame format: `[0xAD, 0x18, len_hi, len_lo, payload]`
 - Rust `Esp32Aggregator` receiving UDP frames on port 5005
@@ -193,7 +193,7 @@ Major release: complete Rust sensing server, full DensePose training pipeline, R
 - NVS provisioning for WiFi credentials
 - Pre-built binary quick start documentation (`696a726`)
 
-### Added — ADR-014: SOTA Signal Processing
+### Added - ADR-014: SOTA Signal Processing
 - 6 algorithms, 83 tests (`fcb93cc`)
   - Hampel filter (median + MAD, resistant to 50% contamination)
   - Conjugate multiplication (reference-antenna ratio, cancels common-mode noise)
@@ -202,41 +202,41 @@ Major release: complete Rust sensing server, full DensePose training pipeline, R
   - Body Velocity Profile (micro-Doppler extraction, 5.7x speedup)
   - Attention-gated spectrogram (learned noise suppression)
 
-### Added — ADR-015: Public Dataset Training Strategy
+### Added - ADR-015: Public Dataset Training Strategy
 - MM-Fi and Wi-Pose dataset specifications with download links (`4babb32`, `5dc2f66`)
 - Verified dataset dimensions, sampling rates, and annotation formats
 - Cross-dataset evaluation protocol
 
-### Added — WiFi-Mat Disaster Detection Module
+### Added - WiFi-Mat Disaster Detection Module
 - Multi-AP triangulation for through-wall survivor detection (`a17b630`, `6b20ff0`)
 - Triage classification (breathing, heartbeat, motion)
 - Domain events: `survivor_detected`, `survivor_updated`, `alert_created`
 - WebSocket broadcast at `/ws/mat/stream`
 
-### Added — Infrastructure
+### Added - Infrastructure
 - Guided 7-step interactive installer with 8 hardware profiles (`8583f3e`)
 - Comprehensive build guide for Linux, macOS, Windows, Docker, ESP32 (`45f8a0d`)
 - 12 Architecture Decision Records (ADR-001 through ADR-012) (`337dd96`)
 
-### Added — UI & Visualization
+### Added - UI & Visualization
 - Sensing-only UI mode with Gaussian splat visualization (`b7e0f07`)
 - Three.js 3D body model (17 joints, 16 limbs) with signal-viz components
 - Tabs: Dashboard, Hardware, Live Demo, Sensing, Architecture, Performance, Applications
 - WebSocket client with automatic reconnection and exponential backoff
 
-### Added — Rust Signal Processing Crate
+### Added - Rust Signal Processing Crate
 - Complete Rust port of WiFi-DensePose with modular workspace (`6ed69a3`)
-  - `wifi-densepose-signal` — CSI processing, phase sanitization, feature extraction
-  - `wifi-densepose-core` — shared types and configuration
-  - `wifi-densepose-nn` — neural network inference (DensePose head, RCNN)
-  - `wifi-densepose-hardware` — ESP32 aggregator, hardware interfaces
-  - `wifi-densepose-config` — configuration management
+  - `wifi-densepose-signal` - CSI processing, phase sanitization, feature extraction
+  - `wifi-densepose-core` - shared types and configuration
+  - `wifi-densepose-nn` - neural network inference (DensePose head, RCNN)
+  - `wifi-densepose-hardware` - ESP32 aggregator, hardware interfaces
+  - `wifi-densepose-config` - configuration management
 - Comprehensive benchmarks and validation tests (`3ccb301`)
 
-### Added — Python Sensing Pipeline
-- `WindowsWifiCollector` — RSSI collection via `netsh wlan show networks`
-- `RssiFeatureExtractor` — variance, spectral bands (motion 0.5-4 Hz, breathing 0.1-0.5 Hz), change points
-- `PresenceClassifier` — rule-based 3-state classification (ABSENT / PRESENT_STILL / ACTIVE)
+### Added - Python Sensing Pipeline
+- `WindowsWifiCollector` - RSSI collection via `netsh wlan show networks`
+- `RssiFeatureExtractor` - variance, spectral bands (motion 0.5-4 Hz, breathing 0.1-0.5 Hz), change points
+- `PresenceClassifier` - rule-based 3-state classification (ABSENT / PRESENT_STILL / ACTIVE)
 - Cross-receiver agreement scoring for multi-AP confidence boosting
 - WebSocket sensing server (`ws_server.py`) broadcasting JSON at 2 Hz
 - Deterministic CSI proof bundles for reproducible verification (`v1/data/proof/`)
@@ -260,7 +260,7 @@ Major release: complete Rust sensing server, full DensePose training pipeline, R
 - Fix XSS vulnerabilities in UI components (`5db55fd`)
 - Fix command injection in statusline.cjs (`4cb01fd`)
 - Fix path traversal vulnerabilities (`896c4fc`)
-- Fix insecure WebSocket connections — enforce wss:// on non-localhost (`ac094d4`)
+- Fix insecure WebSocket connections - enforce wss:// on non-localhost (`ac094d4`)
 - Fix GitHub Actions shell injection (`ab2e7b4`)
 - Fix 10 additional vulnerabilities, remove 12 dead code instances (`7afdad0`)
 

@@ -1,5 +1,5 @@
 /**
- * Module B — "Vital Signs Oracle"
+ * Module B - "Vital Signs Oracle"
  * Breathing/HR as orbital torus rings with beat markers + trail particles
  */
 import * as THREE from 'three';
@@ -10,7 +10,7 @@ export class VitalsOracle {
     if (panelGroup) panelGroup.add(this.group);
     else scene.add(this.group);
 
-    // Outer torus — breathing (violet)
+    // Outer torus - breathing (violet)
     const breathGeo = new THREE.TorusGeometry(1.8, 0.06, 16, 64);
     this._breathMat = new THREE.MeshBasicMaterial({
       color: 0x8844ff,
@@ -23,7 +23,7 @@ export class VitalsOracle {
     this._breathRing.rotation.x = Math.PI * 0.4;
     this.group.add(this._breathRing);
 
-    // Inner torus — heart rate (crimson)
+    // Inner torus - heart rate (crimson)
     const hrGeo = new THREE.TorusGeometry(1.2, 0.04, 16, 64);
     this._hrMat = new THREE.MeshBasicMaterial({
       color: 0xff2244,

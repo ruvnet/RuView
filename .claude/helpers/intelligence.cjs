@@ -3,13 +3,13 @@
  * Intelligence Layer (ADR-050)
  *
  * Closes the intelligence loop by wiring PageRank-ranked memory into
- * the hook system. Pure CJS — no ESM imports of @claude-flow/memory.
+ * the hook system. Pure CJS - no ESM imports of @claude-flow/memory.
  *
  * Data files (all under .claude-flow/data/):
- *   auto-memory-store.json  — written by auto-memory-hook.mjs
- *   graph-state.json        — serialized graph (nodes + edges + pageRanks)
- *   ranked-context.json     — pre-computed ranked entries for fast lookup
- *   pending-insights.jsonl  — append-only edit/task log
+ *   auto-memory-store.json  - written by auto-memory-hook.mjs
+ *   graph-state.json        - serialized graph (nodes + edges + pageRanks)
+ *   ranked-context.json     - pre-computed ranked entries for fast lookup
+ *   pending-insights.jsonl  - append-only edit/task log
  */
 
 'use strict';
@@ -48,7 +48,7 @@ function ensureDataDir() {
 function readJSON(filePath) {
   try {
     if (fs.existsSync(filePath)) return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-  } catch { /* corrupt file — start fresh */ }
+  } catch { /* corrupt file - start fresh */ }
   return null;
 }
 
@@ -302,7 +302,7 @@ function parseMemoryDir(dir, entries) {
 // ── Exported functions ───────────────────────────────────────────────────────
 
 /**
- * init() — Called from session-restore. Budget: <200ms.
+ * init() - Called from session-restore. Budget: <200ms.
  * Reads auto-memory-store.json, builds graph, computes PageRank, writes caches.
  * If store is empty, bootstraps from MEMORY.md files directly.
  */
@@ -405,7 +405,7 @@ function init() {
 }
 
 /**
- * getContext(prompt) — Called from route. Budget: <15ms.
+ * getContext(prompt) - Called from route. Budget: <15ms.
  * Matches prompt to ranked entries, returns top-5 formatted context.
  */
 function getContext(prompt) {
@@ -466,7 +466,7 @@ function getContext(prompt) {
 }
 
 /**
- * recordEdit(file) — Called from post-edit. Budget: <2ms.
+ * recordEdit(file) - Called from post-edit. Budget: <2ms.
  * Appends to pending-insights.jsonl.
  */
 function recordEdit(file) {
@@ -481,7 +481,7 @@ function recordEdit(file) {
 }
 
 /**
- * feedback(success) — Called from post-task. Budget: <10ms.
+ * feedback(success) - Called from post-task. Budget: <10ms.
  * Boosts or decays confidence for last-matched patterns.
  */
 function feedback(success) {
@@ -521,7 +521,7 @@ function boostConfidence(ids, amount) {
 }
 
 /**
- * consolidate() — Called from session-end. Budget: <500ms.
+ * consolidate() - Called from session-end. Budget: <500ms.
  * Processes pending insights, rebuilds edges, recomputes PageRank.
  */
 function consolidate() {
@@ -556,7 +556,7 @@ function consolidate() {
           store.push({
             id: `insight-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             key: `frequent-edit-${path.basename(file)}`,
-            content: `File ${file} was edited ${count} times this session — likely a hot path worth monitoring.`,
+            content: `File ${file} was edited ${count} times this session - likely a hot path worth monitoring.`,
             summary: `Frequently edited: ${path.basename(file)} (${count}x)`,
             namespace: 'insights',
             type: 'procedural',
@@ -707,7 +707,7 @@ function saveSnapshot(graph, ranked) {
 }
 
 /**
- * stats() — Diagnostic report showing intelligence health and improvement.
+ * stats() - Diagnostic report showing intelligence health and improvement.
  * Can be called as: node intelligence.cjs stats [--json]
  */
 function stats(outputJson) {
@@ -894,7 +894,7 @@ function stats(outputJson) {
   }
 
   if (!delta && !trend) {
-    console.log('  No history yet — run more sessions to see deltas and trends.');
+    console.log('  No history yet - run more sessions to see deltas and trends.');
     console.log('');
   }
 

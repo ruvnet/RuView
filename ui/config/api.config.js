@@ -15,7 +15,7 @@ export const API_CONFIG = {
   // Mock server configuration (only for testing)
   MOCK_SERVER: {
     ENABLED: false,  // Set to true only for testing without backend
-    AUTO_DETECT: false,  // Disabled — sensing tab uses its own WebSocket on :8765
+    AUTO_DETECT: false,  // Disabled - sensing tab uses its own WebSocket on :8765
   },
   
   // API Endpoints
