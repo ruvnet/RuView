@@ -1,0 +1,12 @@
+{
+  "name": "ruview",
+  "version": "1.0.0",
+  "description": "WiFi DensePose - Human Tracking Through Walls Using WiFi Signals",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["wifi", "densepose", "csi", "pose-estimation"],
+  "license": "MIT"
+}
