@@ -229,3 +229,42 @@ export interface AppSettings {
   discover_interval_ms: number;
   theme: "dark" | "light";
 }
+
+// ---------------------------------------------------------------------------
+// macOS Diagnostics (only available on macOS)
+// ---------------------------------------------------------------------------
+
+export interface MacWifiInfo {
+  ssid: string | null;
+  bssid: string | null;
+  channel: number | null;
+  rssi: number | null;
+  noise: number | null;
+  tx_rate: number | null;
+  security: string | null;
+  phy_mode: string | null;
+}
+
+export interface MacWifiScanResult {
+  ssid: string;
+  bssid: string;
+  rssi: number;
+  channel: number;
+  security: string;
+}
+
+export interface MacSystemInfo {
+  os_version: string;
+  arch: string;
+  model: string | null;
+  wifi_interface: string | null;
+  wifi_power: boolean;
+  serial_drivers: string[];
+}
+
+export interface MacPermissions {
+  network_access: boolean;
+  usb_access: boolean;
+  wifi_scan: boolean;
+  location_services: boolean;
+}

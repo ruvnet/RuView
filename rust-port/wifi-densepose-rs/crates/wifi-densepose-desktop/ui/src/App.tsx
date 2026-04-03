@@ -9,6 +9,9 @@ import { EdgeModules } from "./pages/EdgeModules";
 import { Sensing } from "./pages/Sensing";
 import { MeshView } from "./pages/MeshView";
 import { Settings } from "./pages/Settings";
+import { MacOSDiagnostics } from "./pages/MacOSDiagnostics";
+
+const isMacOS = navigator.userAgent.includes("Mac");
 
 type Page =
   | "dashboard"
@@ -19,7 +22,8 @@ type Page =
   | "wasm"
   | "sensing"
   | "mesh"
-  | "settings";
+  | "settings"
+  | "macos";
 
 interface NavItem {
   id: Page;
@@ -37,6 +41,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "sensing", label: "Sensing", icon: "\u2248" },
   { id: "mesh", label: "Mesh View", icon: "\u2B2F" },
   { id: "settings", label: "Settings", icon: "\u2699" },
+  ...(isMacOS ? [{ id: "macos" as Page, label: "macOS", icon: "\uF8FF" }] : []),
 ];
 
 interface LiveStatus {
@@ -100,6 +105,7 @@ const App: React.FC = () => {
       case "sensing": return <Sensing />;
       case "mesh": return <MeshView />;
       case "settings": return <Settings />;
+      case "macos": return <MacOSDiagnostics />;
     }
   };
 
