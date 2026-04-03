@@ -56,6 +56,9 @@ typedef struct {
     uint8_t  filter_mac[6];                  /**< MAC address to filter CSI frames. */
     uint8_t  filter_mac_set;                 /**< 1 if filter_mac was loaded from NVS. */
 
+    /* Generic Utility Settings */
+    uint8_t  status_led;                     /**< 1 to enable the RGB status LED, 0 to disable. */
+
     /* ADR-066: Swarm bridge configuration */
     char     seed_url[64];                /**< Cognitum Seed base URL (empty = disabled). */
     char     seed_token[64];             /**< Seed Bearer token (from pairing). */
