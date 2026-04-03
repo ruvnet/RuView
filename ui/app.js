@@ -10,6 +10,11 @@ import { wsService } from './services/websocket.service.js';
 import { healthService } from './services/health.service.js';
 import { sensingService } from './services/sensing.service.js';
 import { backendDetector } from './utils/backend-detector.js';
+import { KeyboardShortcuts } from './utils/keyboard-shortcuts.js';
+import { PerfMonitor } from './utils/perf-monitor.js';
+import { toastManager } from './utils/toast.js';
+import { ThemeToggle } from './utils/theme-toggle.js';
+import { MobileNav } from './utils/mobile-nav.js';
 
 class WiFiDensePoseApp {
   constructor() {
@@ -30,10 +35,13 @@ class WiFiDensePoseApp {
       
       // Initialize UI components
       this.initializeComponents();
-      
+
+      // Initialize enhancements
+      this.initializeEnhancements();
+
       // Set up global event listeners
       this.setupEventListeners();
-      
+
       this.isInitialized = true;
       console.log('WiFi DensePose UI initialized successfully');
       
@@ -167,6 +175,42 @@ class WiFiDensePoseApp {
     }
   }
 
+  // Initialize enhancement modules (keyboard shortcuts, perf monitor, toast, theme)
+  initializeEnhancements() {
+    // Toast notifications
+    toastManager.init();
+
+    // Theme toggle
+    this.themeToggle = new ThemeToggle();
+    this.themeToggle.init();
+
+    // Performance monitor
+    this.perfMonitor = new PerfMonitor();
+    this.perfMonitor.init();
+
+    // Mobile navigation (hamburger menu for small screens)
+    this.mobileNav = new MobileNav();
+    this.mobileNav.init();
+
+    // Keyboard shortcuts (pass app reference for tab switching)
+    this.keyboardShortcuts = new KeyboardShortcuts(this);
+    this.keyboardShortcuts.init();
+
+    // Register PWA service worker
+    this.registerServiceWorker();
+  }
+
+  // Register service worker for offline capability
+  registerServiceWorker() {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').then(reg => {
+        console.info('Service worker registered:', reg.scope);
+      }).catch(err => {
+        console.warn('Service worker registration failed:', err);
+      });
+    }
+  }
+
   // Handle tab changes
   handleTabChange(newTab, oldTab) {
     console.log(`Tab changed from ${oldTab} to ${newTab}`);
@@ -272,45 +316,17 @@ class WiFiDensePoseApp {
     });
   }
 
-  // Show backend status notification
+  // Show backend status notification (uses enhanced toast system)
   showBackendStatus(message, type) {
-    // Create status notification if it doesn't exist
-    let statusToast = document.getElementById('backendStatusToast');
-    if (!statusToast) {
-      statusToast = document.createElement('div');
-      statusToast.id = 'backendStatusToast';
-      statusToast.className = 'backend-status-toast';
-      document.body.appendChild(statusToast);
-    }
-
-    statusToast.textContent = message;
-    statusToast.className = `backend-status-toast ${type}`;
-    statusToast.classList.add('show');
-
-    // Auto-hide success messages, keep warnings and errors longer
-    const timeout = type === 'success' ? 3000 : 8000;
-    setTimeout(() => {
-      statusToast.classList.remove('show');
-    }, timeout);
+    const toastType = type === 'success' ? 'success' : 'warning';
+    toastManager[toastType](message, {
+      duration: type === 'success' ? 3000 : 8000
+    });
   }
 
-  // Show global error message
+  // Show global error message (uses enhanced toast system)
   showGlobalError(message) {
-    // Create error toast if it doesn't exist
-    let errorToast = document.getElementById('globalErrorToast');
-    if (!errorToast) {
-      errorToast = document.createElement('div');
-      errorToast.id = 'globalErrorToast';
-      errorToast.className = 'error-toast';
-      document.body.appendChild(errorToast);
-    }
-
-    errorToast.textContent = message;
-    errorToast.classList.add('show');
-
-    setTimeout(() => {
-      errorToast.classList.remove('show');
-    }, 5000);
+    toastManager.error(message, { duration: 6000 });
   }
 
   // Clean up resources
@@ -326,9 +342,16 @@ class WiFiDensePoseApp {
 
     // Disconnect all WebSocket connections
     wsService.disconnectAll();
-    
+
     // Stop health monitoring
     healthService.dispose();
+
+    // Dispose enhancements
+    if (this.keyboardShortcuts) this.keyboardShortcuts.dispose();
+    if (this.perfMonitor) this.perfMonitor.dispose();
+    if (this.themeToggle) this.themeToggle.dispose();
+    if (this.mobileNav) this.mobileNav.dispose();
+    toastManager.dispose();
   }
 
   // Public API
