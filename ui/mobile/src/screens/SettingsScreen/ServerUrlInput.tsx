@@ -25,7 +25,7 @@ export const ServerUrlInput = ({ value, onChange, onSave }: ServerUrlInputProps)
 
     const start = Date.now();
     try {
-      await apiService.getStatus();
+      await apiService.getStatus(value.trim());
       setTestResult(`✓ ${Date.now() - start}ms`);
     } catch {
       setTestResult('✗ Failed');
