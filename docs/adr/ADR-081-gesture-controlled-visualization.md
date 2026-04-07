@@ -439,9 +439,107 @@ node scripts/train-gesture-model.js \
 **Training data per gesture:** ~20 examples × 11 gestures = 220 labeled samples.
 With augmentation (time warp, amplitude noise): ~1,000 effective samples.
 
+### Optimization: ruvector-cnn Spectrogram Gesture Classification
+
+Replace DTW template matching with a CNN operating on CSI spectrograms via the
+`ruvector-cnn` WASM package (ADR-076). This treats each gesture as an image
+classification problem on the CSI time-frequency representation.
+
+#### Why CNN Over DTW
+
+| | DTW (current, ADR-029) | CNN Spectrogram (proposed) |
+|---|---|---|
+| Input | 1D keypoint trajectories | 2D CSI spectrogram image |
+| Features | Hand-crafted (wrist velocity, elbow angle) | Learned end-to-end |
+| Robustness | Sensitive to speed variation | Warp-invariant (pooling layers) |
+| Multi-scale | Single scale | Hierarchical (dilated convolutions) |
+| Training | Template recording + DTW distance | Supervised from camera labels |
+| New gestures | Record new template | Retrain (or few-shot with embedding) |
+| Accuracy | ~85% (DTW literature) | ~95%+ (CNN on spectrograms, literature) |
+
+#### Pipeline
+
+```
+CSI [N_subcarriers, T=30] (1-second window)
+        ↓
+Spectrogram transform: STFT per subcarrier
+        → [N_sub, F_bins, T_bins] ≈ [35, 16, 15]
+        ↓
+Reshape to grayscale image: [35×16, 15] = [560, 15]
+        → Resize to [64, 64] (bilinear)
+        ↓
+ruvector-cnn CnnEmbedder (WASM-accelerated)
+        → 128-dim gesture embedding
+        ↓
+Classifier head: Linear(128 → 18 gestures) + softmax
+        → gesture_id + confidence
+```
+
+#### ruvector-cnn Integration
+
+The `@ruvector/cnn` WASM package provides:
+
+```javascript
+const { init, CnnEmbedder, InfoNCELoss } = require('@ruvector/cnn');
+await init();
+
+// Create embedder for 64x64 CSI spectrogram "images"
+const embedder = new CnnEmbedder({
+  inputSize: 64,
+  embeddingDim: 128,
+  normalize: true,
+});
+
+// Extract embedding from CSI spectrogram
+const spectrogram = csiToSpectrogram(csiWindow);  // [64, 64] Uint8Array
+const embedding = embedder.extract(spectrogram, 64, 64);
+
+// Classify gesture via nearest-neighbor to trained templates
+const gesture = classifyGesture(embedding, gestureTemplates);
+```
+
+#### Training with Contrastive + Classification
+
+Two-phase training using ruvector-cnn's built-in losses:
+
+**Phase 1: Contrastive embedding (unsupervised)**
+```javascript
+const loss = new InfoNCELoss(0.07);
+// Same gesture performed at different speeds → positive pairs
+// Different gestures → negative pairs
+// Train CnnEmbedder to cluster same-gesture spectrograms
+```
+
+**Phase 2: Gesture classification (supervised)**
+```javascript
+// Linear classifier on frozen embeddings
+// 18 gestures × 20 examples each = 360 labeled samples
+// Camera auto-labels: MediaPipe Hands detects gesture type
+```
+
+#### Dual-Path Architecture
+
+Run both CNN and DTW in parallel for maximum robustness:
+
+```
+CSI input ──┬──→ WiFlow → keypoints → DTW templates → gesture_A (conf_A)
+            │
+            └──→ Spectrogram → ruvector-cnn → embedding → classifier → gesture_B (conf_B)
+            
+Fusion: if gesture_A == gesture_B → conf = max(conf_A, conf_B) + 0.15
+        if conflict → pick higher confidence
+        if only one detects → use it at 0.8× confidence
+```
+
+This dual-path approach provides:
+- **DTW** catches gestures the CNN might miss (novel variations)
+- **CNN** provides higher accuracy for trained gesture types
+- **Fusion** reduces false positives (both must agree for high-confidence)
+
 ### Optimization: Temporal Gesture Encoding
 
-Instead of classifying single frames, encode gesture trajectories:
+Alternative lightweight path for when ruvector-cnn WASM overhead matters
+(e.g., ESP32 edge deployment):
 
 ```
 Keypoint sequence [T=30 frames, 1 second]:
