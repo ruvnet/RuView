@@ -38,6 +38,9 @@ chrono = { version = "0.4", features = ["serde"] }
 # UUID for unique identifiers
 uuid = { version = "1.6", features = ["v4", "serde"] }
 
+# Ternary Intelligence Stack
+ternlang-core = { path = "/home/eri-irfos/Desktop/Ternary Intelligence Stack (TIS)/ternlang-root/ternlang-core", version = "0.1.0" }
+
 [dev-dependencies]
 serde_json.workspace = true
 proptest.workspace = true

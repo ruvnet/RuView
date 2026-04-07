@@ -15,6 +15,7 @@ use chrono::{DateTime, Utc};
 use ndarray::{Array1, Array2, Array3};
 use num_complex::Complex64;
 use uuid::Uuid;
+use ternlang_core::Trit;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -150,56 +151,57 @@ impl Default for Timestamp {
     }
 }
 
-/// Confidence score in the range [0.0, 1.0].
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+/// Confidence score represented as a Triadic Field {-1, 0, +1}.
+/// Aligned with RFI-IRFOS TIS standards for high-fidelity pose resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Confidence(f32);
+pub struct Confidence(Trit);
 
 impl Confidence {
-    /// Creates a new confidence value.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the value is not in the range [0.0, 1.0].
+    /// Creates a new triadic confidence from a raw f32 value.
+    /// Aligned with ISO/IEC TIS-9000 uncertainty mapping.
     pub fn new(value: f32) -> CoreResult<Self> {
-        if !(0.0..=1.0).contains(&value) {
-            return Err(CoreError::validation(format!(
-                "Confidence must be in [0.0, 1.0], got {value}"
-            )));
+        if value > 0.6 {
+            Ok(Self(Trit::Affirm))
+        } else if value < 0.3 {
+            Ok(Self(Trit::Reject))
+        } else {
+            Ok(Self(Trit::Tend))
         }
-        Ok(Self(value))
     }
 
-    /// Creates a confidence value without validation (for internal use).
-    ///
-    /// Returns the raw confidence value.
+    /// Returns the raw scalar representation of the triadic field.
     #[must_use]
     pub fn value(&self) -> f32 {
-        self.0
+        match self.0 {
+            Trit::Affirm => 1.0,
+            Trit::Reject => -1.0,
+            Trit::Tend   => 0.0,
+        }
     }
 
-    /// Returns `true` if the confidence exceeds the default threshold.
+    /// Returns `true` if the signal is triadic-affirmative.
     #[must_use]
     pub fn is_high(&self) -> bool {
-        self.0 >= DEFAULT_CONFIDENCE_THRESHOLD
+        self.0 == Trit::Affirm
     }
 
     /// Returns `true` if the confidence exceeds the given threshold.
     #[must_use]
     pub fn exceeds(&self, threshold: f32) -> bool {
-        self.0 >= threshold
+        self.value() >= threshold
     }
 
-    /// Maximum confidence (1.0).
-    pub const MAX: Self = Self(1.0);
+    /// Maximum confidence (Affirm).
+    pub const MAX: Self = Self(Trit::Affirm);
 
-    /// Minimum confidence (0.0).
-    pub const MIN: Self = Self(0.0);
+    /// Minimum confidence (Reject).
+    pub const MIN: Self = Self(Trit::Reject);
 }
 
 impl Default for Confidence {
     fn default() -> Self {
-        Self(0.0)
+        Self(Trit::Tend)
     }
 }
 
