@@ -9,11 +9,13 @@
  * emit simulated frames so the UI can clearly distinguish live vs. fallback data.
  */
 
-// Derive WebSocket URL from the page origin so it works on any port.
-// The /ws/sensing endpoint is available on the same HTTP port (3000).
+// Derive the primary WebSocket URL from the page origin so it works on any port.
+// Keep the legacy Python/WebSocket server on :8765 as a quiet fallback.
 const _wsProto = (typeof window !== 'undefined' && window.location.protocol === 'https:') ? 'wss:' : 'ws:';
 const _wsHost  = (typeof window !== 'undefined' && window.location.host) ? window.location.host : 'localhost:3000';
 const SENSING_WS_URL = `${_wsProto}//${_wsHost}/ws/sensing`;
+const LEGACY_SENSING_WS_URL = `${_wsProto}//localhost:8765/ws/sensing`;
+const SENSING_WS_URLS = [...new Set([SENSING_WS_URL, LEGACY_SENSING_WS_URL])];
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000];
 const MAX_RECONNECT_ATTEMPTS = 20;
 // Number of failed attempts that must occur before simulation starts.
@@ -30,6 +32,7 @@ class SensingService {
     this._reconnectAttempt = 0;
     this._reconnectTimer = null;
     this._simTimer = null;
+    this._wsUrlIndex = 0;
     // Connection state: disconnected | connecting | connected | reconnecting | simulated
     this._state = 'disconnected';
     // Data-source label exposed to the UI:
@@ -110,9 +113,10 @@ class SensingService {
     if (this._ws && this._ws.readyState <= WebSocket.OPEN) return;
 
     this._setState('connecting');
+    const wsUrl = SENSING_WS_URLS[this._wsUrlIndex] || SENSING_WS_URL;
 
     try {
-      this._ws = new WebSocket(SENSING_WS_URL);
+      this._ws = new WebSocket(wsUrl);
     } catch (err) {
       console.warn('[Sensing] WebSocket constructor failed:', err.message);
       this._fallbackToSimulation();
@@ -120,7 +124,7 @@ class SensingService {
     }
 
     this._ws.onopen = () => {
-      console.info('[Sensing] Connected to', SENSING_WS_URL);
+      console.info('[Sensing] Connected to', wsUrl);
       this._reconnectAttempt = 0;
       this._stopSimulation();
       this._setState('connected');
@@ -146,12 +150,30 @@ class SensingService {
       console.info('[Sensing] Connection closed (code=%d)', evt.code);
       this._ws = null;
       if (evt.code !== 1000) {
+        if (this._advanceWsUrl()) return;
         this._scheduleReconnect();
       } else {
         this._setState('disconnected');
         this._setDataSource('reconnecting');
       }
     };
+  }
+
+  _advanceWsUrl() {
+    if (this._wsUrlIndex >= SENSING_WS_URLS.length - 1) return false;
+
+    this._wsUrlIndex += 1;
+    const nextUrl = SENSING_WS_URLS[this._wsUrlIndex];
+    console.info('[Sensing] Trying fallback WebSocket URL', nextUrl);
+
+    this._setState('reconnecting');
+    this._setDataSource('reconnecting');
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null;
+      this._connect();
+    }, 250);
+
+    return true;
   }
 
   _scheduleReconnect() {
@@ -295,7 +317,7 @@ class SensingService {
    */
   _applyServerSource(rawSource) {
     this._serverSource = rawSource;
-    if (rawSource === 'esp32' || rawSource === 'wifi' || rawSource === 'live') {
+    if (rawSource === 'esp32' || rawSource === 'wifi' || rawSource === 'live' || rawSource === 'macos_wifi') {
       this._setDataSource('live');
     } else if (rawSource === 'simulated' || rawSource === 'simulate') {
       this._setDataSource('server-simulated');
