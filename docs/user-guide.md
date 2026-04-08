@@ -261,15 +261,40 @@ docker run --network host ruvnet/wifi-densepose:latest --source wifi --tick-ms 5
 
 ### macOS WiFi (RSSI Only)
 
-Uses CoreWLAN via a Swift helper binary. macOS Sonoma 14.4+ redacts real BSSIDs; the adapter generates deterministic synthetic MACs so the multi-BSSID pipeline still works.
+Uses CoreWLAN via the legacy `v1` Swift helper. macOS Sonoma 14.4+ redacts real BSSIDs; the adapter generates deterministic synthetic MACs so the multi-BSSID pipeline still works.
+
+> **Current status:** the main Rust `sensing-server --source auto` path still falls back to simulation on macOS. For live host Wi-Fi sensing on macOS, use the legacy Python/WebSocket path below until the ADR-025 integration lands fully.
+
+> **Homebrew Python note:** if `pip` reports an `externally-managed-environment` error (PEP 668), create a virtual environment first instead of installing packages into the system interpreter.
 
 ```bash
-# Compile the Swift helper (once)
-swiftc -O v1/src/sensing/mac_wifi.swift -o mac_wifi
+# Create a lightweight virtual environment that can still see the
+# Homebrew-installed numpy/scipy already present on the machine.
+python3 -m venv .venv-macos-sensing --system-site-packages
+source .venv-macos-sensing/bin/activate
 
-# Run natively
-./target/release/sensing-server --source macos --http-port 3000 --ws-port 3001 --tick-ms 500
+# Install the only missing runtime dependency for the legacy server.
+python -m pip install websockets
+
+# Compile the CoreWLAN helper (once). The explicit xcrun + module-cache path
+# avoids toolchain/module-cache issues seen on recent macOS + CLT setups.
+mkdir -p /tmp/swift-module-cache
+CLANG_MODULE_CACHE_PATH=/tmp/swift-module-cache \
+  xcrun --sdk macosx swiftc -O -o v1/src/sensing/mac_wifi v1/src/sensing/mac_wifi.swift
+
+# Optional sanity check: this should print JSON lines with rssi/noise/tx_rate.
+./v1/src/sensing/mac_wifi | head -n 3
+
+# Start the live sensing WebSocket server.
+python -m v1.src.sensing.ws_server
+
+# In another terminal, serve the UI static files.
+python3 -m http.server 3000 --directory ui
 ```
+
+Open `http://localhost:3000/observatory.html`, switch **Data Source** to **Live WebSocket**, and set **WS URL** to `ws://localhost:8765/ws/sensing`.
+
+If the helper prints `{"error": "No WiFi interface found"}`, make sure the Mac is connected to Wi-Fi on `en0` and try again.
 
 See [ADR-025](adr/ADR-025-macos-corewlan-wifi-sensing.md) for details.
 
@@ -465,7 +490,9 @@ Real-time sensing data is available via WebSocket.
 
 **URL:** `ws://localhost:3000/ws/sensing` (same port as HTTP — recommended) or `ws://localhost:3001/ws/sensing` (dedicated WS port).
 
-> **Note:** The `/ws/sensing` WebSocket endpoint is available on both the HTTP port (3000) and the dedicated WebSocket port (3001/8765). The web UI uses the HTTP port so only one port needs to be exposed. The dedicated WS port remains available for backward compatibility.
+> **Legacy Python/macOS path:** when using `python -m v1.src.sensing.ws_server`, the WebSocket endpoint is `ws://localhost:8765/ws/sensing` and the UI is typically served separately on `http://localhost:3000/`.
+
+> **Note:** The main Rust server exposes `/ws/sensing` on both the HTTP port (3000) and the dedicated WebSocket port (3001/8765). The web UI prefers the HTTP port when available and falls back to the legacy `:8765` endpoint for local macOS RSSI sensing.
 
 ### Python Example
 

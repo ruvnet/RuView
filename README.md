@@ -92,6 +92,8 @@ node scripts/mincut-person-counter.js --port 5006  # Correct person counting
 > | **Research NIC** | Intel 5300 / Atheros AR9580 | ~$50-100 | Yes | Full CSI with 3x3 MIMO |
 > | **Any WiFi** | Windows, macOS, or Linux laptop | $0 | No | RSSI-only: coarse presence and motion |
 >
+> **macOS host Wi-Fi note:** live macOS RSSI sensing currently uses the legacy CoreWLAN/WebSocket path (`python -m v1.src.sensing.ws_server`). The main Rust auto-detect server still falls back to simulation on macOS. See the [User Guide macOS section](docs/user-guide.md#macos-wifi-rssi-only).
+>
 > No hardware? Verify the signal processing pipeline with the deterministic reference signal: `python v1/data/proof/verify.py`
 >
 ---
