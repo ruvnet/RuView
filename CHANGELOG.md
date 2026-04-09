@@ -27,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   saturation, hyperfine spectroscopy, or pulsed protocols become required.
 
 ### Fixed
+- **WebSocket broadcast handler now handles Lagged events gracefully and sends periodic ping keepalives to prevent dashboard disconnects** —
+  `handle_ws_client` and `handle_ws_pose_client` in `wifi-densepose-sensing-server`
+  were treating `RecvError::Lagged` as a fatal error, causing instant disconnect
+  when clients fell behind the 256-frame broadcast buffer at 10 Hz ingest.
+  Clients would reconnect, immediately lag again, and rapid-cycle every 2–4 s.
+  `Lagged` now continues (drops missed frames, logs debug) rather than breaking.
+  Added 30 s ping keepalive on the sensing handler to prevent proxy idle timeouts.
 - **Ghost skeletons in live UI with multi-node ESP32 setups** (#420, ADR-082) —
   `tracker_bridge::tracker_to_person_detections` documented itself as filtering
   to `is_alive()` tracks but in fact passed every non-Terminated track to the

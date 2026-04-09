@@ -2003,6 +2003,10 @@ async fn handle_ws_client(mut socket: WebSocket, state: SharedState) {
 
     info!("WebSocket client connected (sensing)");
 
+    // ADR-044/045: ping/pong keepalive to prevent proxy idle timeouts.
+    let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(30));
+    ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
     loop {
         tokio::select! {
             msg = rx.recv() => {
@@ -2012,13 +2016,24 @@ async fn handle_ws_client(mut socket: WebSocket, state: SharedState) {
                             break;
                         }
                     }
-                    Err(_) => break,
+                    // Lagged: client fell behind — skip missed frames, don't disconnect.
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::debug!("WS client lagged by {n} frames, skipping");
+                        continue;
+                    }
+                    Err(_) => break, // channel closed
+                }
+            }
+            _ = ping_interval.tick() => {
+                if socket.send(Message::Ping(vec![].into())).await.is_err() {
+                    break;
                 }
             }
             msg = socket.recv() => {
                 match msg {
                     Some(Ok(Message::Close(_))) | None => break,
-                    _ => {} // ignore client messages
+                    Some(Ok(Message::Pong(_))) => {} // keepalive response
+                    _ => {} // ignore other client messages
                 }
             }
         }
@@ -2134,7 +2149,12 @@ async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
                             }
                         }
                     }
-                    Err(_) => break,
+                    // Lagged: skip missed frames, don't disconnect.
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::debug!("WS pose client lagged by {n} frames, skipping");
+                        continue;
+                    }
+                    Err(_) => break, // channel closed
                 }
             }
             msg = socket.recv() => {
@@ -2149,6 +2169,7 @@ async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
                         }
                     }
                     Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Pong(_))) => {} // keepalive response
                     _ => {}
                 }
             }
