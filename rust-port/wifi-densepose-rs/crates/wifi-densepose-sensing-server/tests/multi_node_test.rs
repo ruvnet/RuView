@@ -11,20 +11,19 @@
 use std::net::UdpSocket;
 use std::time::Duration;
 
-/// Build a minimal valid ESP32 CSI frame (magic 0xC511_0001).
+/// Build a minimal valid ESP32 CSI V1 frame (magic 0xC511_0001).
 ///
-/// Format (ADR-018):
-///   [0..3]  magic: 0xC511_0001 (LE)
-///   [4]     node_id
-///   [5]     n_antennas (1)
-///   [6]     n_subcarriers (e.g., 32)
-///   [7]     reserved
-///   [8..9]  freq_mhz (2437 = channel 6)
-///   [10..13] sequence (LE u32)
-///   [14]    rssi (signed)
-///   [15]    noise_floor
-///   [16..19] reserved
-///   [20..]  I/Q pairs (n_antennas * n_subcarriers * 2 bytes)
+/// Format (ADR-018 V1, 20-byte header):
+///   [0..3]   magic: 0xC511_0001 (LE)
+///   [4]      node_id
+///   [5]      n_antennas (1)
+///   [6..7]   n_subcarriers (LE u16)
+///   [8..11]  freq_mhz (LE u32, 2437 = channel 6)
+///   [12..15] sequence (LE u32)
+///   [16]     rssi (i8)
+///   [17]     noise_floor (i8)
+///   [18..19] reserved
+///   [20..]   I/Q pairs (n_antennas * n_subcarriers * 2 bytes)
 fn build_csi_frame(node_id: u8, seq: u32, rssi: i8, n_sub: u8) -> Vec<u8> {
     let n_pairs = n_sub as usize;
     let mut buf = vec![0u8; 20 + n_pairs * 2];
@@ -35,22 +34,24 @@ fn build_csi_frame(node_id: u8, seq: u32, rssi: i8, n_sub: u8) -> Vec<u8> {
 
     buf[4] = node_id;
     buf[5] = 1; // n_antennas
-    buf[6] = n_sub;
-    buf[7] = 0;
 
-    // freq = 2437 MHz (channel 6)
-    let freq: u16 = 2437;
-    buf[8..10].copy_from_slice(&freq.to_le_bytes());
+    // n_subcarriers (u16 LE at offset 6)
+    buf[6..8].copy_from_slice(&(n_sub as u16).to_le_bytes());
 
-    // sequence
-    buf[10..14].copy_from_slice(&seq.to_le_bytes());
+    // freq = 2437 MHz (u32 LE at offset 8)
+    buf[8..12].copy_from_slice(&2437u32.to_le_bytes());
 
-    buf[14] = rssi as u8;
-    buf[15] = (-90i8) as u8; // noise floor
+    // sequence (u32 LE at offset 12)
+    buf[12..16].copy_from_slice(&seq.to_le_bytes());
+
+    // rssi (i8 at offset 16)
+    buf[16] = rssi as u8;
+    // noise floor (i8 at offset 17)
+    buf[17] = (-90i8) as u8;
+
+    // reserved (offset 18-19, already zero)
 
     // Generate I/Q pairs with node-specific patterns.
-    // Different nodes produce different amplitude patterns so the server
-    // computes different features for each.
     for i in 0..n_pairs {
         let phase = (i as f64 + node_id as f64 * 0.5) * 0.3;
         let amplitude = 20.0 + (node_id as f64) * 5.0 + (phase.sin() * 10.0);

@@ -70,10 +70,10 @@ static uint8_t  s_hop_index   = 0;
 static esp_timer_handle_t s_hop_timer = NULL;
 
 /**
- * Serialize CSI data into ADR-018 binary frame format.
+ * Serialize CSI data into ADR-018 V2 binary frame format.
  *
- * Layout:
- *   [0..3]   Magic: 0xC5110001 (LE)
+ * V2 layout (26-byte header):
+ *   [0..3]   Magic: 0xC5110003 (LE) — V2
  *   [4]      Node ID
  *   [5]      Number of antennas (rx_ctrl.rx_ant + 1 if available, else 1)
  *   [6..7]   Number of subcarriers (LE u16) = len / (2 * n_antennas)
@@ -82,7 +82,8 @@ static esp_timer_handle_t s_hop_timer = NULL;
  *   [16]     RSSI (i8)
  *   [17]     Noise floor (i8)
  *   [18..19] Reserved
- *   [20..]   I/Q data (raw bytes from ESP-IDF callback)
+ *   [20..25] Source MAC address (6 bytes, network byte order)
+ *   [26..]   I/Q data (raw bytes from ESP-IDF callback)
  */
 size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf_len)
 {
@@ -94,7 +95,7 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
     uint16_t iq_len = (uint16_t)info->len;
     uint16_t n_subcarriers = iq_len / (2 * n_antennas);
 
-    size_t frame_size = CSI_HEADER_SIZE + iq_len;
+    size_t frame_size = CSI_HEADER_SIZE_V2 + iq_len;
     if (frame_size > buf_len) {
         ESP_LOGW(TAG, "Buffer too small: need %u, have %u", (unsigned)frame_size, (unsigned)buf_len);
         return 0;
@@ -113,8 +114,8 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
         freq_mhz = 0;
     }
 
-    /* Magic (LE) */
-    uint32_t magic = CSI_MAGIC;
+    /* Magic (LE) — V2 includes source MAC */
+    uint32_t magic = CSI_MAGIC_V2;
     memcpy(&buf[0], &magic, 4);
 
     /* Node ID (from NVS runtime config, not compile-time Kconfig) */
@@ -143,8 +144,17 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
     buf[18] = 0;
     buf[19] = 0;
 
+    /* Source MAC address (6 bytes, network byte order) — V2 extension */
+    memcpy(&buf[20], info->mac, 6);
+
+    ESP_LOGD(TAG, "V2 frame: node=%u mac=%02x:%02x:%02x:%02x:%02x:%02x seq=%u",
+             g_nvs_config.node_id,
+             info->mac[0], info->mac[1], info->mac[2],
+             info->mac[3], info->mac[4], info->mac[5],
+             seq);
+
     /* I/Q data */
-    memcpy(&buf[CSI_HEADER_SIZE], info->buf, iq_len);
+    memcpy(&buf[CSI_HEADER_SIZE_V2], info->buf, iq_len);
 
     return frame_size;
 }

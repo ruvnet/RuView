@@ -35,13 +35,15 @@ This ADR answers *how* to build it — the concrete development sequence, the sp
 
 ### Binary Frame Format (implemented in `esp32_parser.rs`)
 
+#### V1 Format (magic `0xC5110001`, 20-byte header)
+
 ```
 Offset  Size  Field
 0       4     Magic: 0xC5110001 (LE)
 4       1     Node ID (0-255)
 5       1     Number of antennas
 6       2     Number of subcarriers (LE u16)
-8       4     Frequency Hz (LE u32, e.g. 2412 for 2.4 GHz ch1)
+8       4     Frequency MHz (LE u32, e.g. 2437 for ch6)
 12      4     Sequence number (LE u32)
 16      1     RSSI (i8, dBm)
 17      1     Noise floor (i8, dBm)
@@ -49,11 +51,43 @@ Offset  Size  Field
 20      N*2   I/Q pairs: (i8, i8) per subcarrier, repeated per antenna
 ```
 
-Total frame size: 20 + (n_antennas × n_subcarriers × 2) bytes.
+Total frame size: 20 + (n_antennas x n_subcarriers x 2) bytes.
 
-For 3 antennas, 56 subcarriers: 20 + 336 = 356 bytes per frame.
+#### V2 Format (magic `0xC5110003`, 26-byte header)
 
-The firmware must write frames in this exact format. The parser already validates magic, bounds-checks `n_subcarriers` (≤512), and resyncs the stream on magic search for `parse_stream()`.
+V2 extends V1 with a 6-byte source MAC address at offset 20, identifying which WiFi transmitter's frame triggered the CSI measurement. This enables per-device CSI tracking.
+
+```
+Offset  Size  Field
+0       4     Magic: 0xC5110003 (LE)
+4       1     Node ID (0-255)
+5       1     Number of antennas
+6       2     Number of subcarriers (LE u16)
+8       4     Frequency MHz (LE u32, e.g. 2437 for ch6)
+12      4     Sequence number (LE u32)
+16      1     RSSI (i8, dBm)
+17      1     Noise floor (i8, dBm)
+18      2     Reserved (zero)
+20      6     Source MAC address (network byte order)
+26      N*2   I/Q pairs: (i8, i8) per subcarrier, repeated per antenna
+```
+
+Total frame size: 26 + (n_antennas x n_subcarriers x 2) bytes.
+
+#### Backward Compatibility
+
+All parsers accept both V1 and V2 frames. V1 frames produce `source_mac = None`. During mixed-firmware rollout, nodes running old firmware send V1 and nodes running new firmware send V2 — both parse correctly.
+
+#### Magic Number Family
+
+| Magic | Format | Description |
+|-------|--------|-------------|
+| `0xC5110001` | CSI V1 | 20-byte header, no source MAC |
+| `0xC5110002` | Vitals | Edge-computed vital signs (ADR-039) |
+| `0xC5110003` | CSI V2 | 26-byte header, includes source MAC |
+| `0xC5110004` | WASM | WASM module events (ADR-040) |
+
+The firmware must write frames in the V2 format. The parser validates magic, bounds-checks `n_subcarriers` (<=256), and resyncs the stream on magic search for `parse_stream()`.
 
 ## Decision
 

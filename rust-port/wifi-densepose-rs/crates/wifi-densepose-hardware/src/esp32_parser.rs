@@ -34,11 +34,17 @@ use std::io::Cursor;
 use crate::csi_frame::{AntennaConfig, Bandwidth, CsiFrame, CsiMetadata, SubcarrierData};
 use crate::error::ParseError;
 
-/// ESP32 CSI binary frame magic number (ADR-018).
+/// ESP32 CSI binary frame magic number — V1 (ADR-018, no source MAC).
 const ESP32_CSI_MAGIC: u32 = 0xC5110001;
 
-/// ADR-018 header size in bytes (before I/Q data).
+/// ESP32 CSI binary frame magic number — V2 (ADR-018, includes 6-byte source MAC).
+const ESP32_CSI_MAGIC_V2: u32 = 0xC5110003;
+
+/// ADR-018 V1 header size in bytes (before I/Q data).
 const HEADER_SIZE: usize = 20;
+
+/// ADR-018 V2 header size in bytes (V1 + 6-byte source MAC).
+const HEADER_SIZE_V2: usize = 26;
 
 /// Maximum valid subcarrier count for ESP32 (80 MHz bandwidth).
 const MAX_SUBCARRIERS: usize = 256;
@@ -70,12 +76,22 @@ impl Esp32CsiParser {
             got: 0,
         })?;
 
-        if magic != ESP32_CSI_MAGIC {
-            return Err(ParseError::InvalidMagic {
-                expected: ESP32_CSI_MAGIC,
-                got: magic,
-            });
-        }
+        // Determine frame version from magic
+        let (header_size, is_v2) = match magic {
+            ESP32_CSI_MAGIC => (HEADER_SIZE, false),
+            ESP32_CSI_MAGIC_V2 => {
+                if data.len() < HEADER_SIZE_V2 {
+                    return Err(ParseError::InsufficientData {
+                        needed: HEADER_SIZE_V2,
+                        got: data.len(),
+                    });
+                }
+                (HEADER_SIZE_V2, true)
+            }
+            _ => {
+                return Err(ParseError::UnknownMagic { got: magic });
+            }
+        };
 
         // Node ID (offset 4, 1 byte)
         let node_id = cursor.read_u8().map_err(|_| ParseError::ByteError {
@@ -136,10 +152,19 @@ impl Esp32CsiParser {
             message: "Failed to read reserved bytes".into(),
         })?;
 
+        // Source MAC (V2 only: offset 20, 6 bytes)
+        let source_mac = if is_v2 {
+            let mut mac = [0u8; 6];
+            mac.copy_from_slice(&data[20..26]);
+            Some(mac)
+        } else {
+            None
+        };
+
         // I/Q data: n_antennas * n_subcarriers * 2 bytes
         let iq_pair_count = n_antennas as usize * n_subcarriers;
         let iq_byte_count = iq_pair_count * 2;
-        let total_frame_size = HEADER_SIZE + iq_byte_count;
+        let total_frame_size = header_size + iq_byte_count;
 
         if data.len() < total_frame_size {
             return Err(ParseError::InsufficientData {
@@ -149,7 +174,7 @@ impl Esp32CsiParser {
         }
 
         // Parse I/Q pairs — stored as [ant0_sc0_I, ant0_sc0_Q, ant0_sc1_I, ant0_sc1_Q, ..., ant1_sc0_I, ...]
-        let iq_start = HEADER_SIZE;
+        let iq_start = header_size;
         let mut subcarriers = Vec::with_capacity(iq_pair_count);
 
         let half = n_subcarriers as i16 / 2;
@@ -197,6 +222,7 @@ impl Esp32CsiParser {
                     rx_antennas: n_antennas,
                 },
                 sequence,
+                source_mac,
             },
             subcarriers,
         };
@@ -227,7 +253,7 @@ impl Esp32CsiParser {
                             data[offset + 2],
                             data[offset + 3],
                         ]);
-                        if candidate == ESP32_CSI_MAGIC {
+                        if candidate == ESP32_CSI_MAGIC || candidate == ESP32_CSI_MAGIC_V2 {
                             break;
                         }
                         offset += 1;
@@ -281,6 +307,50 @@ mod tests {
         buf
     }
 
+    /// Build a valid ADR-018 V2 ESP32 CSI frame with source MAC.
+    fn build_test_frame_v2(
+        node_id: u8,
+        n_antennas: u8,
+        subcarrier_pairs: &[(i8, i8)],
+        source_mac: [u8; 6],
+    ) -> Vec<u8> {
+        let n_subcarriers = if n_antennas == 0 {
+            subcarrier_pairs.len()
+        } else {
+            subcarrier_pairs.len() / n_antennas as usize
+        };
+
+        let mut buf = Vec::new();
+
+        // Magic V2 (offset 0)
+        buf.extend_from_slice(&ESP32_CSI_MAGIC_V2.to_le_bytes());
+        // Node ID (offset 4)
+        buf.push(node_id);
+        // Number of antennas (offset 5)
+        buf.push(n_antennas);
+        // Number of subcarriers (offset 6, LE u16)
+        buf.extend_from_slice(&(n_subcarriers as u16).to_le_bytes());
+        // Frequency MHz (offset 8, LE u32)
+        buf.extend_from_slice(&2437u32.to_le_bytes());
+        // Sequence number (offset 12, LE u32)
+        buf.extend_from_slice(&42u32.to_le_bytes());
+        // RSSI (offset 16, i8)
+        buf.push((-50i8) as u8);
+        // Noise floor (offset 17, i8)
+        buf.push((-95i8) as u8);
+        // Reserved (offset 18, 2 bytes)
+        buf.extend_from_slice(&[0u8; 2]);
+        // Source MAC (offset 20, 6 bytes)
+        buf.extend_from_slice(&source_mac);
+        // I/Q data (offset 26)
+        for (i, q) in subcarrier_pairs {
+            buf.push(*i as u8);
+            buf.push(*q as u8);
+        }
+
+        buf
+    }
+
     #[test]
     fn test_parse_valid_frame() {
         // 1 antenna, 56 subcarriers
@@ -313,7 +383,7 @@ mod tests {
         // Corrupt magic
         data[0] = 0xFF;
         let result = Esp32CsiParser::parse_frame(&data);
-        assert!(matches!(result, Err(ParseError::InvalidMagic { .. })));
+        assert!(matches!(result, Err(ParseError::UnknownMagic { .. })));
     }
 
     #[test]
@@ -381,5 +451,65 @@ mod tests {
         assert_eq!(frame.metadata.n_subcarriers, 4);
         assert_eq!(frame.subcarrier_count(), 12); // 3 antennas * 4 subcarriers
         assert_eq!(frame.metadata.antenna_config.rx_antennas, 3);
+    }
+
+    #[test]
+    fn test_parse_v2_frame() {
+        let mac = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
+        let pairs: Vec<(i8, i8)> = (0..56).map(|i| (i as i8, (i * 2 % 127) as i8)).collect();
+        let data = build_test_frame_v2(3, 1, &pairs, mac);
+
+        let (frame, consumed) = Esp32CsiParser::parse_frame(&data).unwrap();
+
+        assert_eq!(consumed, HEADER_SIZE_V2 + 56 * 2);
+        assert_eq!(frame.metadata.node_id, 3);
+        assert_eq!(frame.metadata.source_mac, Some(mac));
+        assert_eq!(frame.metadata.sequence, 42);
+        assert_eq!(frame.metadata.rssi_dbm, -50);
+        assert_eq!(frame.metadata.n_subcarriers, 56);
+        assert!(frame.is_valid());
+    }
+
+    #[test]
+    fn test_parse_v1_still_works() {
+        // Existing V1 frames must parse with source_mac = None
+        let pairs: Vec<(i8, i8)> = (0..4).map(|i| (10 + i, 20 + i)).collect();
+        let data = build_test_frame(1, 1, &pairs);
+
+        let (frame, consumed) = Esp32CsiParser::parse_frame(&data).unwrap();
+
+        assert_eq!(consumed, HEADER_SIZE + 4 * 2);
+        assert_eq!(frame.metadata.source_mac, None);
+        assert_eq!(frame.metadata.node_id, 1);
+    }
+
+    #[test]
+    fn test_parse_stream_mixed_v1_v2() {
+        let pairs: Vec<(i8, i8)> = (0..4).map(|i| (10 + i, 20 + i)).collect();
+        let mac = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66];
+        let v1_frame = build_test_frame(1, 1, &pairs);
+        let v2_frame = build_test_frame_v2(2, 1, &pairs, mac);
+
+        let mut combined = Vec::new();
+        combined.extend_from_slice(&v1_frame);
+        combined.extend_from_slice(&v2_frame);
+
+        let (frames, _) = Esp32CsiParser::parse_stream(&combined);
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0].metadata.node_id, 1);
+        assert_eq!(frames[0].metadata.source_mac, None);
+        assert_eq!(frames[1].metadata.node_id, 2);
+        assert_eq!(frames[1].metadata.source_mac, Some(mac));
+    }
+
+    #[test]
+    fn test_v2_insufficient_header() {
+        // V2 magic but only 22 bytes (need 26)
+        let mut data = vec![0u8; 22];
+        data[0..4].copy_from_slice(&ESP32_CSI_MAGIC_V2.to_le_bytes());
+        data[5] = 1; // n_antennas
+
+        let result = Esp32CsiParser::parse_frame(&data);
+        assert!(matches!(result, Err(ParseError::InsufficientData { needed: 26, .. })));
     }
 }

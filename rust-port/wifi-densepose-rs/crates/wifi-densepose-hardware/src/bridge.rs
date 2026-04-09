@@ -105,6 +105,7 @@ mod tests {
                     rx_antennas: n_antennas,
                 },
                 sequence: 42,
+                source_mac: None,
             },
             subcarriers,
         }

@@ -65,18 +65,30 @@ pub fn parse_wasm_output(buf: &[u8]) -> Option<WasmOutputPacket> {
 pub fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
     if buf.len() < 20 { return None; }
     let magic = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
-    if magic != 0xC511_0001 { return None; }
 
+    // Determine frame version and header size
+    let (header_size, source_mac) = match magic {
+        0xC511_0001 => (20usize, None),
+        0xC511_0003 => {
+            if buf.len() < 26 { return None; }
+            let mut mac = [0u8; 6];
+            mac.copy_from_slice(&buf[20..26]);
+            (26usize, Some(mac))
+        }
+        _ => return None,
+    };
+
+    // ADR-018 header fields at correct offsets
     let node_id = buf[4];
     let n_antennas = buf[5];
-    let n_subcarriers = buf[6];
-    let freq_mhz = u16::from_le_bytes([buf[8], buf[9]]);
-    let sequence = u32::from_le_bytes([buf[10], buf[11], buf[12], buf[13]]);
-    let rssi_raw = buf[14] as i8;
+    let n_subcarriers = u16::from_le_bytes([buf[6], buf[7]]);
+    let freq_mhz = u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]);
+    let sequence = u32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]);
+    let rssi_raw = buf[16] as i8;
     let rssi = if rssi_raw > 0 { rssi_raw.saturating_neg() } else { rssi_raw };
-    let noise_floor = buf[15] as i8;
+    let noise_floor = buf[17] as i8;
 
-    let iq_start = 20;
+    let iq_start = header_size;
     let n_pairs = n_antennas as usize * n_subcarriers as usize;
     let expected_len = iq_start + n_pairs * 2;
     if buf.len() < expected_len { return None; }
@@ -92,8 +104,93 @@ pub fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
 
     Some(Esp32Frame {
         magic, node_id, n_antennas, n_subcarriers, freq_mhz, sequence,
-        rssi, noise_floor, amplitudes, phases,
+        rssi, noise_floor, amplitudes, phases, source_mac,
     })
+}
+
+#[cfg(test)]
+mod parse_tests {
+    use super::*;
+
+    /// Build a V1 ADR-018 frame with correct offsets.
+    fn build_v1_frame(node_id: u8, n_sub: u16, seq: u32, rssi: i8, noise: i8) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&0xC511_0001u32.to_le_bytes()); // magic
+        buf.push(node_id);                                     // node_id
+        buf.push(1);                                           // n_antennas
+        buf.extend_from_slice(&n_sub.to_le_bytes());           // n_subcarriers (u16 LE)
+        buf.extend_from_slice(&2437u32.to_le_bytes());         // freq_mhz (u32 LE)
+        buf.extend_from_slice(&seq.to_le_bytes());             // sequence (u32 LE)
+        buf.push(rssi as u8);                                  // rssi (i8)
+        buf.push(noise as u8);                                 // noise_floor (i8)
+        buf.extend_from_slice(&[0u8; 2]);                      // reserved
+        // I/Q: n_sub pairs of (1, 2)
+        for _ in 0..n_sub {
+            buf.push(1u8); // I
+            buf.push(2u8); // Q
+        }
+        buf
+    }
+
+    /// Build a V2 ADR-018 frame with source MAC.
+    fn build_v2_frame(node_id: u8, n_sub: u16, source_mac: [u8; 6]) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&0xC511_0003u32.to_le_bytes()); // magic V2
+        buf.push(node_id);
+        buf.push(1);                                           // n_antennas
+        buf.extend_from_slice(&n_sub.to_le_bytes());
+        buf.extend_from_slice(&2437u32.to_le_bytes());
+        buf.extend_from_slice(&99u32.to_le_bytes());           // sequence
+        buf.push((-45i8) as u8);                               // rssi
+        buf.push((-90i8) as u8);                               // noise_floor
+        buf.extend_from_slice(&[0u8; 2]);                      // reserved
+        buf.extend_from_slice(&source_mac);                    // source MAC (6 bytes)
+        for _ in 0..n_sub {
+            buf.push(3u8);
+            buf.push(4u8);
+        }
+        buf
+    }
+
+    #[test]
+    fn test_v1_correct_offsets() {
+        let frame = parse_esp32_frame(&build_v1_frame(5, 56, 12345, -42, -88)).unwrap();
+        assert_eq!(frame.node_id, 5);
+        assert_eq!(frame.n_subcarriers, 56);
+        assert_eq!(frame.sequence, 12345);
+        assert_eq!(frame.rssi, -42);
+        assert_eq!(frame.noise_floor, -88);
+        assert_eq!(frame.freq_mhz, 2437);
+        assert_eq!(frame.source_mac, None);
+        assert_eq!(frame.amplitudes.len(), 56);
+    }
+
+    #[test]
+    fn test_v2_with_source_mac() {
+        let mac = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
+        let frame = parse_esp32_frame(&build_v2_frame(3, 56, mac)).unwrap();
+        assert_eq!(frame.node_id, 3);
+        assert_eq!(frame.source_mac, Some(mac));
+        assert_eq!(frame.sequence, 99);
+        assert_eq!(frame.rssi, -45);
+        assert_eq!(frame.noise_floor, -90);
+        assert_eq!(frame.amplitudes.len(), 56);
+    }
+
+    #[test]
+    fn test_v2_short_buffer_rejected() {
+        // V2 magic but only 22 bytes
+        let mut buf = vec![0u8; 22];
+        buf[0..4].copy_from_slice(&0xC511_0003u32.to_le_bytes());
+        assert!(parse_esp32_frame(&buf).is_none());
+    }
+
+    #[test]
+    fn test_unknown_magic_rejected() {
+        let mut buf = build_v1_frame(1, 4, 1, -50, -90);
+        buf[0..4].copy_from_slice(&0xDEADBEEFu32.to_le_bytes());
+        assert!(parse_esp32_frame(&buf).is_none());
+    }
 }
 
 // ── Signal field generation ─────────────────────────────────────────────────
@@ -659,10 +756,10 @@ pub fn generate_simulated_frame(tick: u64) -> Esp32Frame {
         phases.push((i as f64 * 0.2 + t * 0.5).sin() * std::f64::consts::PI);
     }
     Esp32Frame {
-        magic: 0xC511_0001, node_id: 1, n_antennas: 1, n_subcarriers: n_sub as u8,
+        magic: 0xC511_0001, node_id: 1, n_antennas: 1, n_subcarriers: n_sub as u16,
         freq_mhz: 2437, sequence: tick as u32,
         rssi: (-40.0 + 5.0 * (t * 0.2).sin()) as i8, noise_floor: -90,
-        amplitudes, phases,
+        amplitudes, phases, source_mac: None,
     }
 }
 
