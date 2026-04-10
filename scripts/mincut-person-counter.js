@@ -29,6 +29,7 @@ const dgram = require('dgram');
 const fs = require('fs');
 const readline = require('readline');
 const { parseArgs } = require('util');
+const { parseRawCsiFrame } = require('./lib/raw-csi');
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -60,10 +61,7 @@ const JSON_OUTPUT     = args.json;
 const FORWARD_PORT    = args.forward ? parseInt(args.forward, 10) : null;
 
 // ---------------------------------------------------------------------------
-// ADR-018 packet constants
-// ---------------------------------------------------------------------------
-const CSI_MAGIC    = 0xC5110001;
-const HEADER_SIZE  = 20;
+// ADR-018 raw CSI parser
 
 // ---------------------------------------------------------------------------
 // Per-node sliding window of subcarrier amplitudes
@@ -472,28 +470,16 @@ function parseIqHex(iqHex, nSubcarriers) {
 
 /** Parse binary UDP CSI packet (ADR-018 format) */
 function parseUdpPacket(buf) {
-  if (buf.length < HEADER_SIZE) return null;
-  const magic = buf.readUInt32LE(0);
-  if (magic !== CSI_MAGIC) return null;
-
-  const nodeId       = buf.readUInt8(4);
-  const nAntennas    = buf.readUInt8(5) || 1;
-  const nSubcarriers = buf.readUInt16LE(6);
-  const freqMhz      = buf.readUInt32LE(8);
-  const rssi         = buf.readInt8(16);
-
-  const iqLen = nSubcarriers * nAntennas * 2;
-  if (buf.length < HEADER_SIZE + iqLen) return null;
-
-  const amplitudes = new Float64Array(nSubcarriers);
-  for (let sc = 0; sc < nSubcarriers; sc++) {
-    const offset = HEADER_SIZE + sc * 2;
-    const I = buf.readInt8(offset);
-    const Q = buf.readInt8(offset + 1);
-    amplitudes[sc] = Math.sqrt(I * I + Q * Q);
-  }
-
-  return { nodeId, nSubcarriers, freqMhz, rssi, amplitudes, timestamp: Date.now() / 1000 };
+  const frame = parseRawCsiFrame(buf, { includePhase: false });
+  if (!frame) return null;
+  return {
+    nodeId: frame.nodeId,
+    nSubcarriers: frame.nSubcarriers,
+    freqMhz: frame.freqMhz,
+    rssi: frame.rssi,
+    amplitudes: frame.amplitudes,
+    timestamp: Date.now() / 1000,
+  };
 }
 
 // ---------------------------------------------------------------------------

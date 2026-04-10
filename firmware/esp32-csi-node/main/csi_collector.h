@@ -15,7 +15,7 @@
 #define CSI_MAGIC 0xC5110001
 
 /** ADR-018 V2 magic number (includes 6-byte source MAC). */
-#define CSI_MAGIC_V2 0xC5110003
+#define CSI_MAGIC_V2 0xC5110006
 
 /** ADR-018 V1 header size in bytes. */
 #define CSI_HEADER_SIZE 20

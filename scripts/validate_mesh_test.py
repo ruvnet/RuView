@@ -9,7 +9,7 @@ Parses the aggregator results JSON and per-node UART logs, then runs 6 checks:
   2. TDM ordering              - slot assignments are sequential 0..N-1
   3. No slot collision         - no two nodes share a TDM slot
   4. Frame count balance       - per-node frame counts within +/-10%
-  5. ADR-018 compliance        - magic 0xC5110001 present in frames
+  5. ADR-018 compliance        - raw CSI magic 0xC5110001/0xC5110006 present in frames
   6. Vitals per node           - each node produced vitals output
 
 Usage:
@@ -365,14 +365,14 @@ def validate_mesh(
         report.add("Frame count balance", Severity.WARN,
                     "No frame count data found")
 
-    # ---- Check 5: ADR-018 compliance (magic 0xC5110001) ----
-    ADR018_MAGIC = "c5110001"
+    # ---- Check 5: ADR-018 compliance (magic 0xC5110001 or 0xC5110006) ----
+    ADR018_MAGICS = ("c5110001", "c5110006")
     magic_found = False
 
     # Check aggregator results
     if results:
         results_str = json.dumps(results).lower()
-        if ADR018_MAGIC in results_str or "0xc5110001" in results_str:
+        if any(magic in results_str for magic in ADR018_MAGICS) or "0xc5110001" in results_str or "0xc5110006" in results_str:
             magic_found = True
         # Also check a dedicated field
         if results.get("adr018_magic") or results.get("magic"):
@@ -381,9 +381,9 @@ def validate_mesh(
         if "nodes" in results:
             for node_entry in results["nodes"]:
                 magic = node_entry.get("magic", "")
-                if isinstance(magic, str) and ADR018_MAGIC in magic.lower():
+                if isinstance(magic, str) and any(candidate in magic.lower() for candidate in ADR018_MAGICS):
                     magic_found = True
-                elif isinstance(magic, int) and magic == 0xC5110001:
+                elif isinstance(magic, int) and magic in (0xC5110001, 0xC5110006):
                     magic_found = True
 
     # Check logs for serialization/ADR-018 markers
@@ -392,9 +392,12 @@ def validate_mesh(
             log_text = node_logs.get(idx, "")
             adr018_pats = [
                 r"0xC5110001",
+                r"0xC5110006",
                 r"c5110001",
+                r"c5110006",
                 r"ADR-018",
                 r"magic[=: ]+0x[Cc]5110001",
+                r"magic[=: ]+0x[Cc]5110006",
             ]
             if any(re.search(p, log_text, re.IGNORECASE) for p in adr018_pats):
                 magic_found = True
@@ -402,10 +405,10 @@ def validate_mesh(
 
     if magic_found:
         report.add("ADR-018 compliance", Severity.PASS,
-                    "Magic 0xC5110001 found in frame data")
+                    "ADR-018 raw CSI magic found in frame data")
     else:
         report.add("ADR-018 compliance", Severity.WARN,
-                    "Magic 0xC5110001 not found (may require deeper frame inspection)")
+                    "ADR-018 raw CSI magic not found (may require deeper frame inspection)")
 
     # ---- Check 6: Vitals per node ----
     vitals_nodes = []

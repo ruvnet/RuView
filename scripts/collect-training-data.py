@@ -7,7 +7,7 @@ files compatible with the Rust training pipeline (MmFiDataset / CsiDataset).
 
 Supports two packet formats:
   - ADR-069 feature vectors (magic 0xC5110003, 48 bytes) — 8-dim pre-extracted
-  - ADR-018 raw CSI frames (magic 0xC5110001, variable) — full subcarrier data
+  - ADR-018 raw CSI frames (V1/V2, variable) — full subcarrier data
 
 Usage:
     # Interactive — prompts for scenario labels
@@ -55,15 +55,17 @@ log = logging.getLogger("collect-data")
 # ── Packet formats (must match firmware) ─────────────────────────────────────
 
 # ADR-018 raw CSI frame header
-MAGIC_CSI_RAW = 0xC5110001
+MAGIC_CSI_RAW_V1 = 0xC5110001
+MAGIC_CSI_RAW_V2 = 0xC5110006
 # ADR-069 feature vector packet
 MAGIC_FEATURES = 0xC5110003
 FEATURE_PKT_FMT = "<IBBHq8f"
 FEATURE_PKT_SIZE = struct.calcsize(FEATURE_PKT_FMT)  # 48 bytes
 
-# Raw CSI header: magic(4) + node_id(1) + antenna_cfg(1) + n_sub(2) + rssi(1) + noise(1) + channel(1) + reserved(1) + timestamp_ms(4)
-RAW_CSI_HDR_FMT = "<IBBHbbBxI"
-RAW_CSI_HDR_SIZE = struct.calcsize(RAW_CSI_HDR_FMT)  # 16 bytes
+RAW_CSI_HEADER_SIZE_V1 = 20
+RAW_CSI_HEADER_SIZE_V2 = 26
+RAW_CSI_MAX_ANTENNAS = 4
+RAW_CSI_MAX_SUBCARRIERS = 256
 
 
 # ── Packet parsing ───────────────────────────────────────────────────────────
@@ -73,14 +75,14 @@ def parse_packet(data: bytes) -> Optional[dict]:
     if len(data) < 4:
         return None
 
-    magic = struct.unpack_from("<I", data)[0]
+    raw_packet = _parse_raw_csi_packet(data)
+    if raw_packet is not None:
+        return raw_packet
 
+    magic = struct.unpack_from("<I", data)[0]
     if magic == MAGIC_FEATURES and len(data) >= FEATURE_PKT_SIZE:
         return _parse_feature_packet(data)
-    elif magic == MAGIC_CSI_RAW and len(data) >= RAW_CSI_HDR_SIZE:
-        return _parse_raw_csi_packet(data)
-    else:
-        return None
+    return None
 
 
 def _parse_feature_packet(data: bytes) -> Optional[dict]:
@@ -112,42 +114,73 @@ def _parse_feature_packet(data: bytes) -> Optional[dict]:
 
 
 def _parse_raw_csi_packet(data: bytes) -> Optional[dict]:
-    """Parse ADR-018 raw CSI frame with full subcarrier data."""
-    try:
-        magic, node_id, ant_cfg, n_sub, rssi, noise, channel, ts_ms = struct.unpack_from(
-            RAW_CSI_HDR_FMT, data
-        )
-    except struct.error:
+    """Parse ADR-018 raw CSI frames (V1/V2) with full subcarrier data."""
+    if len(data) < RAW_CSI_HEADER_SIZE_V1:
         return None
 
-    if magic != MAGIC_CSI_RAW:
+    magic = struct.unpack_from("<I", data)[0]
+    if magic == MAGIC_CSI_RAW_V1:
+        header_size = RAW_CSI_HEADER_SIZE_V1
+        source_mac = None
+    elif magic == MAGIC_CSI_RAW_V2:
+        if len(data) < RAW_CSI_HEADER_SIZE_V2:
+            return None
+        header_size = RAW_CSI_HEADER_SIZE_V2
+        source_mac = ":".join(f"{b:02x}" for b in data[20:26])
+    else:
         return None
 
-    # Subcarrier data follows header as int16 I/Q pairs
-    payload_offset = RAW_CSI_HDR_SIZE
-    expected_bytes = n_sub * 2 * 2  # n_sub * (I + Q) * int16
-    if len(data) < payload_offset + expected_bytes:
+    node_id = data[4]
+    n_antennas = data[5]
+    n_sub = struct.unpack_from("<H", data, 6)[0]
+    if (
+        n_antennas == 0 or n_antennas > RAW_CSI_MAX_ANTENNAS or
+        n_sub == 0 or n_sub > RAW_CSI_MAX_SUBCARRIERS
+    ):
         return None
 
-    iq_data = struct.unpack_from(f"<{n_sub * 2}h", data, payload_offset)
-    # Convert I/Q pairs to amplitude
+    freq_mhz = struct.unpack_from("<I", data, 8)[0]
+    seq = struct.unpack_from("<I", data, 12)[0]
+    rssi = struct.unpack_from("<b", data, 16)[0]
+    noise = struct.unpack_from("<b", data, 17)[0]
+
+    expected_bytes = n_sub * n_antennas * 2
+    if len(data) < header_size + expected_bytes:
+        return None
+
+    def channel_from_freq_mhz(freq: int) -> int:
+        if 2412 <= freq <= 2472:
+            return round((freq - 2412) / 5) + 1
+        if freq == 2484:
+            return 14
+        if freq >= 5005:
+            return round((freq - 5000) / 5)
+        return 0
+
+    iq_data = data[header_size:header_size + expected_bytes]
     subcarriers = []
-    for i in range(0, len(iq_data), 2):
-        real, imag = iq_data[i], iq_data[i + 1]
+    for i in range(0, n_sub * 2, 2):
+        real = struct.unpack_from("<b", iq_data, i)[0]
+        imag = struct.unpack_from("<b", iq_data, i + 1)[0]
         amplitude = (real ** 2 + imag ** 2) ** 0.5
         subcarriers.append(amplitude)
 
-    return {
+    frame = {
         "type": "raw_csi",
         "node_id": node_id,
-        "antenna_config": ant_cfg,
+        "antenna_config": n_antennas,
         "n_subcarriers": n_sub,
-        "channel": channel,
-        "timestamp": ts_ms / 1000.0,
+        "channel": channel_from_freq_mhz(freq_mhz),
+        "freq_mhz": freq_mhz,
+        "sequence": seq,
+        "timestamp": time.time(),
         "subcarriers": subcarriers,
         "rssi": float(rssi),
         "noise_floor": float(noise),
     }
+    if source_mac is not None:
+        frame["source_mac"] = source_mac
+    return frame
 
 
 # ── JSONL recording ──────────────────────────────────────────────────────────

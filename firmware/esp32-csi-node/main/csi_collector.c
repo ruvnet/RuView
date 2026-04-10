@@ -73,7 +73,7 @@ static esp_timer_handle_t s_hop_timer = NULL;
  * Serialize CSI data into ADR-018 V2 binary frame format.
  *
  * V2 layout (26-byte header):
- *   [0..3]   Magic: 0xC5110003 (LE) — V2
+ *   [0..3]   Magic: 0xC5110006 (LE) — V2
  *   [4]      Node ID
  *   [5]      Number of antennas (rx_ctrl.rx_ant + 1 if available, else 1)
  *   [6..7]   Number of subcarriers (LE u16) = len / (2 * n_antennas)

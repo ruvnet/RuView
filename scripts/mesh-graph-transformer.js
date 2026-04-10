@@ -32,6 +32,7 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 const { parseArgs } = require('util');
+const { parseRawCsiFrame } = require('./lib/raw-csi');
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -57,9 +58,7 @@ const PORT = parseInt(args.port, 10);
 const LIMIT = args.limit ? parseInt(args.limit, 10) : Infinity;
 const JSON_OUTPUT = args.json;
 
-// ADR-018 packet constants
-const CSI_MAGIC = 0xC5110001;
-const HEADER_SIZE = 20;
+// ADR-018 raw CSI parser
 
 // ---------------------------------------------------------------------------
 // IQ Parsing (shared with csi-spectrogram.js)
@@ -570,16 +569,12 @@ async function processLive() {
     let nodeId, nSubcarriers, amplitudes, rssi;
 
     // Try binary ADR-018 format
-    if (msg.length >= HEADER_SIZE && msg.readUInt32LE(0) === CSI_MAGIC) {
-      nodeId = msg.readUInt8(4);
-      rssi = msg.readInt8(5);
-      nSubcarriers = msg.readUInt16LE(6);
-      amplitudes = new Float32Array(nSubcarriers);
-      for (let sc = 0; sc < nSubcarriers; sc++) {
-        const off = HEADER_SIZE + sc * 2;
-        if (off + 2 > msg.length) break;
-        amplitudes[sc] = Math.sqrt(msg[off] ** 2 + msg[off + 1] ** 2);
-      }
+    const csiFrame = parseRawCsiFrame(msg, { includePhase: false });
+    if (csiFrame) {
+      nodeId = csiFrame.nodeId;
+      rssi = csiFrame.rssi;
+      nSubcarriers = csiFrame.nSubcarriers;
+      amplitudes = Float32Array.from(csiFrame.amplitudes);
     } else {
       // Try JSONL
       try {

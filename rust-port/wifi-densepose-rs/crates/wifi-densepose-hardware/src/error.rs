@@ -20,7 +20,7 @@ pub enum ParseError {
     },
 
     /// The frame header magic is not any recognized CSI version.
-    #[error("Unknown CSI magic: {got:#010x} (expected 0xC5110001 V1 or 0xC5110003 V2)")]
+    #[error("Unknown CSI magic: {got:#010x} (expected 0xC5110001 V1 or 0xC5110006 V2)")]
     UnknownMagic {
         got: u32,
     },

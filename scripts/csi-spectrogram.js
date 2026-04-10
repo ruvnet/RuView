@@ -27,6 +27,7 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 const { parseArgs } = require('util');
+const { parseRawCsiFrame } = require('./lib/raw-csi');
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -58,9 +59,7 @@ const LIMIT = args.limit ? parseInt(args.limit, 10) : Infinity;
 const PORT = parseInt(args.port, 10);
 const JSON_OUTPUT = args.json;
 
-// ADR-018 packet constants
-const CSI_MAGIC = 0xC5110001;
-const HEADER_SIZE = 20;
+// ADR-018 raw CSI parser
 
 // CNN input size (ruvector/cnn expects 224x224 RGB)
 const CNN_INPUT_SIZE = 224;
@@ -97,27 +96,14 @@ function parseIqHex(iqHex, nSubcarriers) {
  * @returns {{ nodeId: number, rssi: number, nSubcarriers: number, amplitudes: Float32Array } | null}
  */
 function parseBinaryFrame(buf) {
-  if (buf.length < HEADER_SIZE) return null;
-  const magic = buf.readUInt32LE(0);
-  if (magic !== CSI_MAGIC) return null;
-
-  const nodeId = buf.readUInt8(4);
-  const rssi = buf.readInt8(5);
-  const nSubcarriers = buf.readUInt16LE(6);
-  const payloadSize = buf.readUInt16LE(8);
-
-  if (buf.length < HEADER_SIZE + payloadSize) return null;
-
-  const amps = new Float32Array(nSubcarriers);
-  for (let sc = 0; sc < nSubcarriers; sc++) {
-    const off = HEADER_SIZE + sc * 2;
-    if (off + 2 > buf.length) break;
-    const iVal = buf[off];
-    const qVal = buf[off + 1];
-    amps[sc] = Math.sqrt(iVal * iVal + qVal * qVal);
-  }
-
-  return { nodeId, rssi, nSubcarriers, amplitudes: amps };
+  const frame = parseRawCsiFrame(buf, { includePhase: false });
+  if (!frame) return null;
+  return {
+    nodeId: frame.nodeId,
+    rssi: frame.rssi,
+    nSubcarriers: frame.nSubcarriers,
+    amplitudes: Float32Array.from(frame.amplitudes),
+  };
 }
 
 // ---------------------------------------------------------------------------

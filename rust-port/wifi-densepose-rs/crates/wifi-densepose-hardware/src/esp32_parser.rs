@@ -38,7 +38,7 @@ use crate::error::ParseError;
 const ESP32_CSI_MAGIC: u32 = 0xC5110001;
 
 /// ESP32 CSI binary frame magic number — V2 (ADR-018, includes 6-byte source MAC).
-const ESP32_CSI_MAGIC_V2: u32 = 0xC5110003;
+const ESP32_CSI_MAGIC_V2: u32 = 0xC5110006;
 
 /// ADR-018 V1 header size in bytes (before I/Q data).
 const HEADER_SIZE: usize = 20;

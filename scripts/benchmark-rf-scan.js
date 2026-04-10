@@ -23,6 +23,7 @@
 
 const dgram = require('dgram');
 const { parseArgs } = require('util');
+const { parseRawCsiFrame } = require('./lib/raw-csi');
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -43,8 +44,6 @@ const JSON_OUTPUT = args.json;
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-const CSI_MAGIC   = 0xC5110001;
-const HEADER_SIZE = 20;
 const NULL_THRESHOLD = 2.0;
 
 // ---------------------------------------------------------------------------
@@ -100,42 +99,10 @@ const startTime = Date.now();
 // Packet parsing
 // ---------------------------------------------------------------------------
 function parseCSIFrame(buf) {
-  if (buf.length < HEADER_SIZE) return null;
-  if (buf.readUInt32LE(0) !== CSI_MAGIC) return null;
-
-  const nodeId       = buf.readUInt8(4);
-  const nAntennas    = buf.readUInt8(5) || 1;
-  const nSubcarriers = buf.readUInt16LE(6);
-  const freqMhz      = buf.readUInt32LE(8);
-  const rssi         = buf.readInt8(16);
-
-  const iqLen = nSubcarriers * nAntennas * 2;
-  if (buf.length < HEADER_SIZE + iqLen) return null;
-
-  const amplitudes = new Float64Array(nSubcarriers);
-  const phases = new Float64Array(nSubcarriers);
-
-  for (let sc = 0; sc < nSubcarriers; sc++) {
-    const offset = HEADER_SIZE + sc * 2;
-    const I = buf.readInt8(offset);
-    const Q = buf.readInt8(offset + 1);
-    amplitudes[sc] = Math.sqrt(I * I + Q * Q);
-    phases[sc] = Math.atan2(Q, I);
-  }
-
-  let channel = 0;
-  if (freqMhz >= 2412 && freqMhz <= 2484) {
-    channel = freqMhz === 2484 ? 14 : Math.round((freqMhz - 2412) / 5) + 1;
-  } else if (freqMhz >= 5180) {
-    channel = Math.round((freqMhz - 5000) / 5);
-  }
-
-  return { nodeId, nSubcarriers, freqMhz, rssi, amplitudes, phases, channel };
+  return parseRawCsiFrame(buf);
 }
 
 function handlePacket(buf, rinfo) {
-  if (buf.length < 4 || buf.readUInt32LE(0) !== CSI_MAGIC) return;
-
   const frame = parseCSIFrame(buf);
   if (!frame) return;
 

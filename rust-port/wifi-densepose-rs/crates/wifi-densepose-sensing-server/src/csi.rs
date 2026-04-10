@@ -10,6 +10,11 @@ use crate::vital_signs::VitalSigns;
 
 // ── ESP32 UDP frame parsers ─────────────────────────────────────────────────
 
+const ESP32_CSI_MAGIC_V1: u32 = 0xC511_0001;
+const ESP32_CSI_MAGIC_V2: u32 = 0xC511_0006;
+const ESP32_MAX_ANTENNAS: u8 = 4;
+const ESP32_MAX_SUBCARRIERS: u16 = 256;
+
 /// Parse a 32-byte edge vitals packet (magic 0xC511_0002).
 pub fn parse_esp32_vitals(buf: &[u8]) -> Option<Esp32VitalsPacket> {
     if buf.len() < 32 { return None; }
@@ -68,8 +73,8 @@ pub fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
 
     // Determine frame version and header size
     let (header_size, source_mac) = match magic {
-        0xC511_0001 => (20usize, None),
-        0xC511_0003 => {
+        ESP32_CSI_MAGIC_V1 => (20usize, None),
+        ESP32_CSI_MAGIC_V2 => {
             if buf.len() < 26 { return None; }
             let mut mac = [0u8; 6];
             mac.copy_from_slice(&buf[20..26]);
@@ -82,6 +87,12 @@ pub fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
     let node_id = buf[4];
     let n_antennas = buf[5];
     let n_subcarriers = u16::from_le_bytes([buf[6], buf[7]]);
+    if n_antennas == 0 || n_antennas > ESP32_MAX_ANTENNAS {
+        return None;
+    }
+    if n_subcarriers == 0 || n_subcarriers > ESP32_MAX_SUBCARRIERS {
+        return None;
+    }
     let freq_mhz = u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]);
     let sequence = u32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]);
     let rssi_raw = buf[16] as i8;
@@ -115,7 +126,7 @@ mod parse_tests {
     /// Build a V1 ADR-018 frame with correct offsets.
     fn build_v1_frame(node_id: u8, n_sub: u16, seq: u32, rssi: i8, noise: i8) -> Vec<u8> {
         let mut buf = Vec::new();
-        buf.extend_from_slice(&0xC511_0001u32.to_le_bytes()); // magic
+        buf.extend_from_slice(&ESP32_CSI_MAGIC_V1.to_le_bytes()); // magic
         buf.push(node_id);                                     // node_id
         buf.push(1);                                           // n_antennas
         buf.extend_from_slice(&n_sub.to_le_bytes());           // n_subcarriers (u16 LE)
@@ -135,7 +146,7 @@ mod parse_tests {
     /// Build a V2 ADR-018 frame with source MAC.
     fn build_v2_frame(node_id: u8, n_sub: u16, source_mac: [u8; 6]) -> Vec<u8> {
         let mut buf = Vec::new();
-        buf.extend_from_slice(&0xC511_0003u32.to_le_bytes()); // magic V2
+        buf.extend_from_slice(&ESP32_CSI_MAGIC_V2.to_le_bytes()); // magic V2
         buf.push(node_id);
         buf.push(1);                                           // n_antennas
         buf.extend_from_slice(&n_sub.to_le_bytes());
@@ -181,7 +192,7 @@ mod parse_tests {
     fn test_v2_short_buffer_rejected() {
         // V2 magic but only 22 bytes
         let mut buf = vec![0u8; 22];
-        buf[0..4].copy_from_slice(&0xC511_0003u32.to_le_bytes());
+        buf[0..4].copy_from_slice(&ESP32_CSI_MAGIC_V2.to_le_bytes());
         assert!(parse_esp32_frame(&buf).is_none());
     }
 

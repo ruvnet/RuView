@@ -22,6 +22,7 @@ const dgram = require('dgram');
 const fs = require('fs');
 const readline = require('readline');
 const { parseArgs } = require('util');
+const { parseRawCsiFrame } = require('./lib/raw-csi');
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -43,10 +44,8 @@ const INTERVAL_MS = parseInt(args.interval, 10);
 // ---------------------------------------------------------------------------
 // ADR-018 packet constants
 // ---------------------------------------------------------------------------
-const CSI_MAGIC    = 0xC5110001;
 const VITALS_MAGIC = 0xC5110002;
 const FUSED_MAGIC  = 0xC5110004;
-const HEADER_SIZE  = 20;
 
 // ---------------------------------------------------------------------------
 // Simple FFT (radix-2 DIT)
@@ -347,20 +346,12 @@ function parseVitalsUdp(buf) {
 }
 
 function parseCsiUdp(buf) {
-  if (buf.length < HEADER_SIZE) return null;
-  const magic = buf.readUInt32LE(0);
-  if (magic !== CSI_MAGIC) return null;
-
-  const nodeId = buf.readUInt8(4);
-  const nSc = buf.readUInt16LE(6);
+  const frame = parseRawCsiFrame(buf);
+  if (!frame) return null;
 
   let phaseSum = 0, phaseSqSum = 0, count = 0;
-  for (let sc = 0; sc < nSc; sc++) {
-    const offset = HEADER_SIZE + sc * 2;
-    if (offset + 1 >= buf.length) break;
-    const I = buf.readInt8(offset);
-    const Q = buf.readInt8(offset + 1);
-    const phase = Math.atan2(Q, I);
+  for (let sc = 0; sc < frame.nSubcarriers; sc++) {
+    const phase = frame.phases[sc];
     phaseSum += phase;
     phaseSqSum += phase * phase;
     count++;
@@ -369,7 +360,11 @@ function parseCsiUdp(buf) {
   const phaseMean = count > 0 ? phaseSum / count : 0;
   const phaseVar = count > 1 ? (phaseSqSum / count - phaseMean * phaseMean) : 0;
 
-  return { timestamp: Date.now() / 1000, nodeId, phaseVar: Math.abs(phaseVar) };
+  return {
+    timestamp: Date.now() / 1000,
+    nodeId: frame.nodeId,
+    phaseVar: Math.abs(phaseVar),
+  };
 }
 
 // ---------------------------------------------------------------------------

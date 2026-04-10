@@ -21,7 +21,7 @@ def parse_csi_packet(data):
     """Parse ADR-018 V1/V2 binary CSI packet into dict.
 
     V1 (magic 0xC5110001): 20-byte header, no source MAC.
-    V2 (magic 0xC5110003): 26-byte header, 6-byte source MAC at offset 20.
+    V2 (magic 0xC5110006): 26-byte header, 6-byte source MAC at offset 20.
 
     Header layout:
         [0..3]   Magic (u32 LE)
@@ -44,7 +44,7 @@ def parse_csi_packet(data):
     if magic == 0xC5110001:
         header_size = 20
         source_mac = None
-    elif magic == 0xC5110003:
+    elif magic == 0xC5110006:
         if len(data) < 26:
             return None
         header_size = 26
