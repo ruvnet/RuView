@@ -16,6 +16,7 @@ default = ["std"]
 std = []
 serde = ["dep:serde", "ndarray/serde"]
 async = ["dep:async-trait"]
+ternlang = ["dep:ternlang-core"]
 
 [dependencies]
 # Error handling
@@ -38,8 +39,8 @@ chrono = { version = "0.4", features = ["serde"] }
 # UUID for unique identifiers
 uuid = { version = "1.6", features = ["v4", "serde"] }
 
-# Ternary Intelligence Stack
-ternlang-core = { path = "/home/eri-irfos/Desktop/Ternary Intelligence Stack (TIS)/ternlang-root/ternlang-core", version = "0.1.0" }
+# Ternary Intelligence Stack (optional — enable with feature "ternlang")
+ternlang-core = { version = "0.3", optional = true }
 
 [dev-dependencies]
 serde_json.workspace = true

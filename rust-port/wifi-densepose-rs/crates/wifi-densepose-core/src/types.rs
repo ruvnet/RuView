@@ -15,6 +15,7 @@ use chrono::{DateTime, Utc};
 use ndarray::{Array1, Array2, Array3};
 use num_complex::Complex64;
 use uuid::Uuid;
+#[cfg(feature = "ternlang")]
 use ternlang_core::Trit;
 
 #[cfg(feature = "serde")]
@@ -151,57 +152,82 @@ impl Default for Timestamp {
     }
 }
 
-/// Confidence score represented as a Triadic Field {-1, 0, +1}.
-/// Aligned with RFI-IRFOS TIS standards for high-fidelity pose resolution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Confidence score in the range [0.0, 1.0].
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Confidence(Trit);
+pub struct Confidence(f32);
 
 impl Confidence {
-    /// Creates a new triadic confidence from a raw f32 value.
-    /// Aligned with ISO/IEC TIS-9000 uncertainty mapping.
+    /// Creates a new confidence value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the value is not in the range [0.0, 1.0].
     pub fn new(value: f32) -> CoreResult<Self> {
-        if value > 0.6 {
-            Ok(Self(Trit::Affirm))
-        } else if value < 0.3 {
-            Ok(Self(Trit::Reject))
-        } else {
-            Ok(Self(Trit::Tend))
+        if !(0.0..=1.0).contains(&value) {
+            return Err(CoreError::validation(format!(
+                "Confidence must be in [0.0, 1.0], got {value}"
+            )));
         }
+        Ok(Self(value))
     }
 
-    /// Returns the raw scalar representation of the triadic field.
+    /// Creates a confidence value without validation (for internal use).
+    ///
+    /// Returns the raw confidence value.
     #[must_use]
     pub fn value(&self) -> f32 {
-        match self.0 {
-            Trit::Affirm => 1.0,
-            Trit::Reject => -1.0,
-            Trit::Tend   => 0.0,
-        }
+        self.0
     }
 
-    /// Returns `true` if the signal is triadic-affirmative.
+    /// Returns `true` if the confidence exceeds the default threshold.
     #[must_use]
     pub fn is_high(&self) -> bool {
-        self.0 == Trit::Affirm
+        self.0 >= 0.5
     }
 
     /// Returns `true` if the confidence exceeds the given threshold.
     #[must_use]
     pub fn exceeds(&self, threshold: f32) -> bool {
-        self.value() >= threshold
+        self.0 >= threshold
     }
 
-    /// Maximum confidence (Affirm).
-    pub const MAX: Self = Self(Trit::Affirm);
+    /// Maximum confidence value (1.0).
+    pub const MAX: Self = Self(1.0);
 
-    /// Minimum confidence (Reject).
-    pub const MIN: Self = Self(Trit::Reject);
+    /// Minimum confidence value (0.0).
+    pub const MIN: Self = Self(0.0);
+
+    /// Maps this confidence score to a ternary trit signal.
+    ///
+    /// Useful for integrating with ternary reasoning pipelines
+    /// (e.g. [`ternlang`](https://ternlang.com)) where decisions must
+    /// express not just high/low but an explicit "hold — gather more data"
+    /// state.
+    ///
+    /// | Range        | Trit    | Meaning                         |
+    /// |--------------|---------|----------------------------------|
+    /// | `>= 0.65`    | Affirm  | High confidence — act            |
+    /// | `0.35..0.65` | Tend    | Uncertain — defer or review      |
+    /// | `< 0.35`     | Reject  | Low confidence — discard/retry   |
+    ///
+    /// Requires the `ternlang` feature flag.
+    #[cfg(feature = "ternlang")]
+    #[must_use]
+    pub fn trit_signal(&self) -> Trit {
+        if self.0 >= 0.65 {
+            Trit::Affirm
+        } else if self.0 < 0.35 {
+            Trit::Reject
+        } else {
+            Trit::Tend
+        }
+    }
 }
 
 impl Default for Confidence {
     fn default() -> Self {
-        Self(Trit::Tend)
+        Self(0.0)
     }
 }
 
