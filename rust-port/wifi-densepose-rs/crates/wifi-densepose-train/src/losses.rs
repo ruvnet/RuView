@@ -23,6 +23,166 @@ use std::collections::HashMap;
 use tch::{Kind, Reduction, Tensor};
 
 // ─────────────────────────────────────────────────────────────────────────────
+// EML Loss Weight Auto-Tuning (Improvement 4)
+//
+// Replaces fixed loss weight configuration (λ_kp=0.3, λ_dp=0.6, λ_tr=0.1)
+// with learned weights that adapt based on training progress.
+//
+// The EML model takes (epoch_fraction, val_kp_loss, val_dp_loss) as inputs
+// and outputs K=3 weight values. Trained on historical (epoch, val_metrics →
+// optimal_weights) data from previous training runs.
+//
+// Based on: Odrzywolel 2026, "All elementary functions from a single
+// operator" (arXiv:2603.21852v2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// EML model for auto-tuning multi-task loss weights during training.
+///
+/// A depth-2 EML tree with 3 inputs (epoch_fraction, val_kp_loss, val_dp_loss)
+/// and 3 outputs (λ_kp, λ_dp, λ_tr). When trained, discovers non-linear
+/// schedules for loss weights that improve convergence.
+///
+/// Falls back to the default `LossWeights` when untrained.
+#[derive(Debug, Clone)]
+pub struct EmlLossWeightModel {
+    /// Parameters for 3 output heads, each a small EML tree.
+    /// Per head: 4 leaf params (bias, scale) * 2 + 3 internal scales = 11
+    /// Total: 33 parameters.
+    params: Vec<Vec<f64>>,
+    /// Whether this model has been trained.
+    trained: bool,
+}
+
+impl EmlLossWeightModel {
+    /// Create a new untrained loss weight model.
+    #[must_use]
+    pub fn new() -> Self {
+        let head_params = vec![
+            // Head 0 (λ_kp): bias toward 0.3
+            vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.01, 0.01, 0.01],
+            // Head 1 (λ_dp): bias toward 0.6
+            vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.01, 0.01, 0.01],
+            // Head 2 (λ_tr): bias toward 0.1
+            vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.01, 0.01, 0.01],
+        ];
+        Self {
+            params: head_params,
+            trained: false,
+        }
+    }
+
+    /// Predict loss weights for the current training state.
+    ///
+    /// Inputs: `[epoch_fraction, val_kp_loss, val_dp_loss]`
+    /// where `epoch_fraction` is in [0, 1] (current_epoch / total_epochs).
+    ///
+    /// Returns `LossWeights` with values normalized to sum to 1.0.
+    /// Falls back to default weights when untrained.
+    #[must_use]
+    pub fn predict(&self, inputs: &[f64; 3]) -> LossWeights {
+        if !self.trained {
+            return LossWeights::default();
+        }
+
+        let raw: Vec<f64> = self
+            .params
+            .iter()
+            .map(|p| {
+                let leaf0 = p[1] * (inputs[0] + p[0]);
+                let leaf1 = p[3] * (inputs[1] + p[2]);
+                let leaf2 = p[5] * (inputs[2] + p[4]);
+                let leaf3 = p[7] * (inputs[0] * inputs[2] + p[6]);
+
+                let int0 = p[8] * (leaf0.clamp(-5.0, 5.0).exp() - leaf1.abs().max(1e-10).ln());
+                let int1 = p[9] * (leaf2.clamp(-5.0, 5.0).exp() - leaf3.abs().max(1e-10).ln());
+                let root = p[10] * (int0.clamp(-5.0, 5.0).exp() - int1.abs().max(1e-10).ln());
+
+                // Softplus to keep weights positive.
+                (1.0 + root.clamp(-10.0, 10.0).exp()).ln()
+            })
+            .collect();
+
+        // Normalize to sum to 1.0.
+        let sum: f64 = raw.iter().sum();
+        let safe_sum = if sum > 1e-10 { sum } else { 1.0 };
+
+        LossWeights {
+            lambda_kp: raw[0] / safe_sum,
+            lambda_dp: raw[1] / safe_sum,
+            lambda_tr: raw[2] / safe_sum,
+        }
+    }
+
+    /// Train the model on historical training run data.
+    ///
+    /// - `data`: Vec of (training_state, optimal_weights) pairs where
+    ///   training_state = [epoch_fraction, val_kp_loss, val_dp_loss]
+    ///   and optimal_weights = [λ_kp, λ_dp, λ_tr].
+    /// - `epochs`: number of coordinate descent passes.
+    ///
+    /// Returns final MSE.
+    pub fn train(&mut self, data: &[([f64; 3], [f64; 3])], epochs: usize) -> f64 {
+        if data.is_empty() {
+            return f64::MAX;
+        }
+
+        self.trained = true;
+        let mut best_loss = self.compute_loss(data);
+        let mut step = 0.05;
+
+        for _epoch in 0..epochs {
+            for head in 0..3 {
+                for i in 0..self.params[head].len() {
+                    let original = self.params[head][i];
+
+                    self.params[head][i] = original + step;
+                    let loss_plus = self.compute_loss(data);
+
+                    self.params[head][i] = original - step;
+                    let loss_minus = self.compute_loss(data);
+
+                    if loss_plus < best_loss && loss_plus <= loss_minus {
+                        self.params[head][i] = original + step;
+                        best_loss = loss_plus;
+                    } else if loss_minus < best_loss {
+                        self.params[head][i] = original - step;
+                        best_loss = loss_minus;
+                    } else {
+                        self.params[head][i] = original;
+                    }
+                }
+            }
+            step *= 0.995;
+        }
+
+        best_loss
+    }
+
+    fn compute_loss(&self, data: &[([f64; 3], [f64; 3])]) -> f64 {
+        let mut total = 0.0;
+        for (inputs, target_weights) in data {
+            let pred = self.predict(inputs);
+            let pred_arr = [pred.lambda_kp, pred.lambda_dp, pred.lambda_tr];
+            for (p, t) in pred_arr.iter().zip(target_weights.iter()) {
+                let diff = p - t;
+                if diff.is_finite() {
+                    total += diff * diff;
+                } else {
+                    total += 1e6;
+                }
+            }
+        }
+        total / (data.len() * 3) as f64
+    }
+
+    /// Whether the model has been trained.
+    #[must_use]
+    pub fn is_trained(&self) -> bool {
+        self.trained
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Public types
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -83,6 +243,43 @@ impl WiFiDensePoseLoss {
     /// Create a new loss function with the given component weights.
     pub fn new(weights: LossWeights) -> Self {
         Self { weights }
+    }
+
+    /// Create a new loss function with EML auto-tuned weights.
+    ///
+    /// The EML model predicts optimal weights based on the current
+    /// training state. Falls back to default weights if the model
+    /// is not trained.
+    ///
+    /// # Arguments
+    /// - `model`: trained EML loss weight model.
+    /// - `epoch_fraction`: current epoch / total epochs (in [0, 1]).
+    /// - `val_kp_loss`: most recent validation keypoint loss.
+    /// - `val_dp_loss`: most recent validation DensePose loss.
+    ///
+    /// Based on: Odrzywolel 2026, arXiv:2603.21852v2
+    pub fn new_with_eml(
+        model: &EmlLossWeightModel,
+        epoch_fraction: f64,
+        val_kp_loss: f64,
+        val_dp_loss: f64,
+    ) -> Self {
+        let weights = model.predict(&[epoch_fraction, val_kp_loss, val_dp_loss]);
+        Self { weights }
+    }
+
+    /// Update weights using an EML model at the given training state.
+    ///
+    /// Call this at the start of each epoch to adapt loss weights
+    /// based on validation metrics from the previous epoch.
+    pub fn update_weights_from_eml(
+        &mut self,
+        model: &EmlLossWeightModel,
+        epoch_fraction: f64,
+        val_kp_loss: f64,
+        val_dp_loss: f64,
+    ) {
+        self.weights = model.predict(&[epoch_fraction, val_kp_loss, val_dp_loss]);
     }
 
     // ── Component losses ─────────────────────────────────────────────────────

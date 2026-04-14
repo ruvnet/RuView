@@ -3,6 +3,7 @@
 //! This module provides motion detection and human presence detection
 //! capabilities based on CSI features.
 
+use crate::eml::{EmlConfig, EmlModel};
 use crate::features::{AmplitudeFeatures, CorrelationFeatures, CsiFeatures, PhaseFeatures};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -28,14 +29,17 @@ pub struct MotionScore {
 }
 
 impl MotionScore {
-    /// Create a new motion score
+    /// Create a new motion score using hardcoded linear weights.
+    ///
+    /// This is the original scoring method. For learned non-linear
+    /// combinations, use [`MotionScore::new_with_eml`].
     pub fn new(
         variance_component: f64,
         correlation_component: f64,
         phase_component: f64,
         doppler_component: Option<f64>,
     ) -> Self {
-        // Calculate weighted total
+        // Calculate weighted total using hardcoded linear weights.
         let total = if let Some(doppler) = doppler_component {
             0.3 * variance_component
                 + 0.2 * correlation_component
@@ -52,6 +56,67 @@ impl MotionScore {
             phase_component,
             doppler_component,
         }
+    }
+
+    /// Create a new motion score using a trained EML model to learn
+    /// non-linear component interactions.
+    ///
+    /// The EML model takes 3 or 4 inputs (variance, correlation, phase,
+    /// and optionally Doppler) and outputs a single combined score.
+    /// Falls back to hardcoded weights if the model is not trained.
+    ///
+    /// Based on: Odrzywolel 2026, arXiv:2603.21852v2
+    pub fn new_with_eml(
+        variance_component: f64,
+        correlation_component: f64,
+        phase_component: f64,
+        doppler_component: Option<f64>,
+        eml_model: Option<&EmlModel>,
+    ) -> Self {
+        let total = match eml_model {
+            Some(model) if model.is_trained() => {
+                let inputs = if let Some(doppler) = doppler_component {
+                    vec![variance_component, correlation_component, phase_component, doppler]
+                } else {
+                    vec![variance_component, correlation_component, phase_component, 0.0]
+                };
+                let output = model.predict(&inputs);
+                output.first().copied().unwrap_or(0.0)
+            }
+            _ => {
+                // Fallback to hardcoded weights (backward compatible).
+                if let Some(doppler) = doppler_component {
+                    0.3 * variance_component
+                        + 0.2 * correlation_component
+                        + 0.2 * phase_component
+                        + 0.3 * doppler
+                } else {
+                    0.4 * variance_component
+                        + 0.3 * correlation_component
+                        + 0.3 * phase_component
+                }
+            }
+        };
+
+        Self {
+            total: total.clamp(0.0, 1.0),
+            variance_component,
+            correlation_component,
+            phase_component,
+            doppler_component,
+        }
+    }
+
+    /// Create a default (untrained) EML model for motion score weights.
+    ///
+    /// Depth-3 tree with 4 inputs (variance, correlation, phase, Doppler)
+    /// and 1 output (combined score). Contains ~34 trainable parameters.
+    pub fn create_eml_model() -> EmlModel {
+        EmlModel::new(EmlConfig {
+            depth: 3,
+            n_inputs: 4,
+            n_outputs: 1,
+        })
     }
 
     /// Check if motion is detected above threshold
@@ -265,6 +330,15 @@ pub struct MotionDetector {
     detection_count: usize,
     total_detections: usize,
     baseline_variance: Option<f64>,
+    /// Optional EML model for learned motion score weights (Improvement 1).
+    /// When trained, replaces hardcoded 0.3/0.2/0.2/0.3 weights with a
+    /// non-linear combination discovered from data.
+    /// Based on: Odrzywolel 2026, arXiv:2603.21852v2
+    eml_motion_model: Option<EmlModel>,
+    /// Optional EML model for continuous detection confidence (Improvement 3).
+    /// When trained, replaces binary (0/1) amplitude/phase/motion indicators
+    /// with a continuous [0,1] confidence score from learned features.
+    eml_confidence_model: Option<EmlModel>,
 }
 
 impl MotionDetector {
@@ -277,12 +351,52 @@ impl MotionDetector {
             detection_count: 0,
             total_detections: 0,
             baseline_variance: None,
+            eml_motion_model: None,
+            eml_confidence_model: None,
         }
     }
 
     /// Create with default configuration
     pub fn default_config() -> Self {
         Self::new(MotionDetectorConfig::default())
+    }
+
+    /// Attach a trained EML model for learned motion score weights.
+    ///
+    /// The model should have been trained on
+    /// `(variance, correlation, phase, doppler) -> ground_truth_motion_label`
+    /// data using `EmlModel::train()`.
+    pub fn set_eml_motion_model(&mut self, model: EmlModel) {
+        self.eml_motion_model = Some(model);
+    }
+
+    /// Attach a trained EML model for continuous detection confidence.
+    ///
+    /// The model should have been trained on
+    /// `(amplitude_mean, phase_std, motion_score) -> ground_truth_confidence`
+    /// data using `EmlModel::train()`.
+    pub fn set_eml_confidence_model(&mut self, model: EmlModel) {
+        self.eml_confidence_model = Some(model);
+    }
+
+    /// Create default (untrained) EML models for this detector.
+    ///
+    /// Returns `(motion_model, confidence_model)`.
+    ///
+    /// - Motion model: depth-3, 4 inputs, 1 output (~34 params)
+    /// - Confidence model: depth-3, 3 inputs, 1 output (~34 params)
+    pub fn create_eml_models() -> (EmlModel, EmlModel) {
+        let motion_model = EmlModel::new(EmlConfig {
+            depth: 3,
+            n_inputs: 4,
+            n_outputs: 1,
+        });
+        let confidence_model = EmlModel::new(EmlConfig {
+            depth: 3,
+            n_inputs: 3,
+            n_outputs: 1,
+        });
+        (motion_model, confidence_model)
     }
 
     /// Get configuration
@@ -307,7 +421,13 @@ impl MotionDetector {
             (d.mean_magnitude / 100.0).clamp(0.0, 1.0)
         });
 
-        let motion_score = MotionScore::new(variance_score, correlation_score, phase_score, doppler_score);
+        let motion_score = MotionScore::new_with_eml(
+            variance_score,
+            correlation_score,
+            phase_score,
+            doppler_score,
+            self.eml_motion_model.as_ref(),
+        );
 
         // Calculate temporal and spatial variance
         let temporal_variance = self.calculate_temporal_variance();
@@ -437,34 +557,50 @@ impl MotionDetector {
         }
     }
 
-    /// Calculate detection confidence from features and motion score
+    /// Calculate detection confidence from features and motion score.
+    ///
+    /// When an EML confidence model is attached and trained, this produces
+    /// a continuous [0,1] confidence score instead of the binary indicator
+    /// approach. Falls back to the original hardcoded binary indicators
+    /// when no trained model is available.
+    ///
+    /// EML improvement 3: Detection Confidence Scoring
+    /// Based on: Odrzywolel 2026, arXiv:2603.21852v2
     fn calculate_detection_confidence(&self, features: &CsiFeatures, motion_score: f64) -> f64 {
-        // Amplitude indicator
         let amplitude_mean = features.amplitude.mean.iter().sum::<f64>()
             / features.amplitude.mean.len() as f64;
+        let phase_std = features.phase.variance.iter().sum::<f64>().sqrt()
+            / features.phase.variance.len() as f64;
+
+        // If we have a trained EML confidence model, use it for continuous
+        // confidence scoring instead of binary indicators.
+        if let Some(ref model) = self.eml_confidence_model {
+            if model.is_trained() {
+                let inputs = vec![amplitude_mean, phase_std, motion_score];
+                let output = model.predict(&inputs);
+                return output.first().copied().unwrap_or(0.0).clamp(0.0, 1.0);
+            }
+        }
+
+        // Fallback: original binary indicator approach (backward compatible).
         let amplitude_indicator = if amplitude_mean > self.config.amplitude_threshold {
             1.0
         } else {
             0.0
         };
 
-        // Phase indicator
-        let phase_std = features.phase.variance.iter().sum::<f64>().sqrt()
-            / features.phase.variance.len() as f64;
         let phase_indicator = if phase_std > self.config.phase_threshold {
             1.0
         } else {
             0.0
         };
 
-        // Motion indicator
         let motion_indicator = if motion_score > self.config.motion_threshold {
             1.0
         } else {
             0.0
         };
 
-        // Weighted combination
         let confidence = self.config.amplitude_weight * amplitude_indicator
             + self.config.phase_weight * phase_indicator
             + self.config.motion_weight * motion_indicator;
@@ -814,6 +950,58 @@ mod tests {
         // With very low motion, detection should likely be false
         // (depends on thresholds, but confidence should be low)
         assert!(result.motion_score < 0.5);
+    }
+
+    #[test]
+    fn test_eml_motion_score_untrained_falls_back() {
+        // An untrained EML model should produce the same result as hardcoded weights.
+        let model = MotionScore::create_eml_model();
+        let hardcoded = MotionScore::new(0.5, 0.6, 0.4, None);
+        let eml_score = MotionScore::new_with_eml(0.5, 0.6, 0.4, None, Some(&model));
+        // Untrained model falls back to hardcoded.
+        assert!(
+            (hardcoded.total - eml_score.total).abs() < 1e-10,
+            "untrained EML should match hardcoded: {} vs {}",
+            hardcoded.total,
+            eml_score.total
+        );
+    }
+
+    #[test]
+    fn test_eml_motion_score_no_model() {
+        let hardcoded = MotionScore::new(0.5, 0.6, 0.4, Some(0.7));
+        let eml_score = MotionScore::new_with_eml(0.5, 0.6, 0.4, Some(0.7), None);
+        assert!(
+            (hardcoded.total - eml_score.total).abs() < 1e-10,
+            "None EML model should match hardcoded"
+        );
+    }
+
+    #[test]
+    fn test_eml_model_creation() {
+        let (motion_model, confidence_model) = MotionDetector::create_eml_models();
+        assert!(!motion_model.is_trained());
+        assert!(!confidence_model.is_trained());
+        assert!(motion_model.param_count() > 0);
+        assert!(confidence_model.param_count() > 0);
+    }
+
+    #[test]
+    fn test_detector_with_eml_models() {
+        let config = MotionDetectorConfig::builder()
+            .human_detection_threshold(0.5)
+            .smoothing_factor(0.5)
+            .build();
+        let mut detector = MotionDetector::new(config);
+
+        // Attach untrained models — should not change behavior.
+        let (motion_model, confidence_model) = MotionDetector::create_eml_models();
+        detector.set_eml_motion_model(motion_model);
+        detector.set_eml_confidence_model(confidence_model);
+
+        let features = create_test_features(0.8);
+        let result = detector.detect_human(&features);
+        assert!(result.confidence >= 0.0 && result.confidence <= 1.0);
     }
 
     #[test]

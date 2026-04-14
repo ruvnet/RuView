@@ -72,7 +72,7 @@ pub mod preprocessor;
 pub mod store;
 pub mod types;
 
-pub use anomaly::{AnomalyAlert, VitalAnomalyDetector};
+pub use anomaly::{AnomalyAlert, EmlThresholdModel, VitalAnomalyDetector};
 pub use breathing::BreathingExtractor;
 pub use heartrate::HeartRateExtractor;
 pub use preprocessor::CsiVitalPreprocessor;
