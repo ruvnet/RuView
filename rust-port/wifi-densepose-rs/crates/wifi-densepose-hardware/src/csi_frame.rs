@@ -57,7 +57,7 @@ impl CsiFrame {
     }
 }
 
-/// Metadata associated with a CSI frame (ADR-018 format).
+/// Metadata associated with a CSI frame (ADR-018 V1/V2 format).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CsiMetadata {
     /// Timestamp when frame was received
@@ -80,6 +80,10 @@ pub struct CsiMetadata {
     pub antenna_config: AntennaConfig,
     /// Sequence number for ordering
     pub sequence: u32,
+    /// Source MAC address of the WiFi frame that triggered CSI (V2 only).
+    /// `None` for V1 frames (magic 0xC5110001).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_mac: Option<[u8; 6]>,
 }
 
 /// WiFi channel bandwidth.
@@ -154,6 +158,7 @@ mod tests {
                 bandwidth: Bandwidth::Bw20,
                 antenna_config: AntennaConfig::default(),
                 sequence: 1,
+                source_mac: None,
             },
             subcarriers: vec![
                 SubcarrierData { i: 100, q: 0, index: -28 },

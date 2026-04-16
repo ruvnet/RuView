@@ -57,6 +57,12 @@ pub struct RecordingSession {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordedFrame {
     pub timestamp: f64,
+    /// Node ID of the ESP32 that captured this frame.
+    #[serde(default)]
+    pub node_id: u8,
+    /// Source MAC of the WiFi frame that triggered CSI (V2 frames only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_mac: Option<String>,
     pub subcarriers: Vec<f64>,
     pub rssi: f64,
     pub noise_floor: f64,
@@ -114,6 +120,8 @@ pub type AppState = Arc<RwLock<super::AppStateInner>>;
 /// If recording is not active, it returns immediately.
 pub async fn maybe_record_frame(
     state: &AppState,
+    node_id: u8,
+    source_mac: Option<[u8; 6]>,
     subcarriers: &[f64],
     rssi: f64,
     noise_floor: f64,
@@ -145,6 +153,11 @@ pub async fn maybe_record_frame(
 
     let frame = RecordedFrame {
         timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
+        node_id,
+        source_mac: source_mac.map(|m| {
+            format!("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                    m[0], m[1], m[2], m[3], m[4], m[5])
+        }),
         subcarriers: subcarriers.to_vec(),
         rssi,
         noise_floor,

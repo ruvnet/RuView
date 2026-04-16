@@ -29,6 +29,7 @@ const dgram = require('dgram');
 const fs = require('fs');
 const readline = require('readline');
 const { parseArgs } = require('util');
+const { parseRawCsiFrame } = require('./lib/raw-csi');
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -54,9 +55,6 @@ const WINDOW_FRAMES = parseInt(args.window, 10);
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-const CSI_MAGIC = 0xC5110001;
-const HEADER_SIZE = 20;
-
 const CHANNEL_FREQ = {};
 for (let ch = 1; ch <= 13; ch++) CHANNEL_FREQ[ch] = 2412 + (ch - 1) * 5;
 
@@ -302,29 +300,7 @@ function parseIqHex(iqHex, nSubcarriers) {
 }
 
 function parseCSIFrame(buf) {
-  if (buf.length < HEADER_SIZE) return null;
-  const magic = buf.readUInt32LE(0);
-  if (magic !== CSI_MAGIC) return null;
-
-  const nodeId = buf.readUInt8(4);
-  const nSubcarriers = buf.readUInt16LE(6);
-  const freqMhz = buf.readUInt32LE(8);
-
-  const amplitudes = new Float64Array(nSubcarriers);
-  for (let sc = 0; sc < nSubcarriers; sc++) {
-    const offset = HEADER_SIZE + sc * 2;
-    if (offset + 1 >= buf.length) break;
-    const I = buf.readInt8(offset);
-    const Q = buf.readInt8(offset + 1);
-    amplitudes[sc] = Math.sqrt(I * I + Q * Q);
-  }
-
-  let channel = 0;
-  if (freqMhz >= 2412 && freqMhz <= 2484) {
-    channel = freqMhz === 2484 ? 14 : Math.round((freqMhz - 2412) / 5) + 1;
-  }
-
-  return { nodeId, nSubcarriers, freqMhz, amplitudes, channel };
+  return parseRawCsiFrame(buf, { includePhase: false });
 }
 
 const nodeChannelIdx = { 1: 0, 2: 0 };
@@ -508,10 +484,6 @@ function startLive() {
   const sock = dgram.createSocket('udp4');
 
   sock.on('message', (buf) => {
-    if (buf.length < 4) return;
-    const magic = buf.readUInt32LE(0);
-    if (magic !== CSI_MAGIC) return;
-
     const frame = parseCSIFrame(buf);
     if (!frame) return;
 

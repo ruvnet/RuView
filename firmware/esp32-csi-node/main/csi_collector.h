@@ -11,14 +11,20 @@
 #include "esp_err.h"
 #include "esp_wifi_types.h"
 
-/** ADR-018 magic number. */
+/** ADR-018 V1 magic number (no source MAC). */
 #define CSI_MAGIC 0xC5110001
 
-/** ADR-018 header size in bytes. */
+/** ADR-018 V2 magic number (includes 6-byte source MAC). */
+#define CSI_MAGIC_V2 0xC5110006
+
+/** ADR-018 V1 header size in bytes. */
 #define CSI_HEADER_SIZE 20
 
-/** Maximum frame buffer size (header + 4 antennas * 256 subcarriers * 2 bytes). */
-#define CSI_MAX_FRAME_SIZE (CSI_HEADER_SIZE + 4 * 256 * 2)
+/** ADR-018 V2 header size in bytes (V1 + 6-byte source MAC). */
+#define CSI_HEADER_SIZE_V2 26
+
+/** Maximum frame buffer size (V2 header + 4 antennas * 256 subcarriers * 2 bytes). */
+#define CSI_MAX_FRAME_SIZE (CSI_HEADER_SIZE_V2 + 4 * 256 * 2)
 
 /** Maximum number of channels in the hop table (ADR-029). */
 #define CSI_HOP_CHANNELS_MAX 6

@@ -25,6 +25,7 @@ const dgram = require('dgram');
 const fs = require('fs');
 const readline = require('readline');
 const { parseArgs } = require('util');
+const { parseRawCsiFrame } = require('./lib/raw-csi');
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -54,9 +55,6 @@ const VAR_FLOOR      = parseFloat(args['var-floor']);
 const MODE           = args.mode; // 'all', 'heatmap', 'clusters', 'spectrum'
 const TARGET_NODE    = parseInt(args.node, 10);
 const WIDTH          = parseInt(args.width, 10);
-
-const CSI_MAGIC = 0xC5110001;
-const HEADER_SIZE = 20;
 
 // Color palette for person clusters (ANSI 256)
 const PERSON_COLORS = [
@@ -554,20 +552,14 @@ function parseIqHex(iqHex, nSubcarriers) {
 }
 
 function parseUdpPacket(buf) {
-  if (buf.length < HEADER_SIZE) return null;
-  const magic = buf.readUInt32LE(0);
-  if (magic !== CSI_MAGIC) return null;
-  const nodeId       = buf.readUInt8(4);
-  const nSubcarriers = buf.readUInt16LE(6);
-  const amplitudes = new Float64Array(nSubcarriers);
-  for (let sc = 0; sc < nSubcarriers; sc++) {
-    const offset = HEADER_SIZE + sc * 2;
-    if (offset + 1 >= buf.length) break;
-    const I = buf.readInt8(offset);
-    const Q = buf.readInt8(offset + 1);
-    amplitudes[sc] = Math.sqrt(I * I + Q * Q);
-  }
-  return { nodeId, nSubcarriers, amplitudes, timestamp: Date.now() };
+  const frame = parseRawCsiFrame(buf, { includePhase: false });
+  if (!frame) return null;
+  return {
+    nodeId: frame.nodeId,
+    nSubcarriers: frame.nSubcarriers,
+    amplitudes: frame.amplitudes,
+    timestamp: Date.now(),
+  };
 }
 
 // ---------------------------------------------------------------------------

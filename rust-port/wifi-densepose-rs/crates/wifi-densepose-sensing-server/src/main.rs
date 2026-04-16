@@ -53,6 +53,8 @@ use tracing::{info, warn, debug, error};
 use rvf_container::{RvfBuilder, RvfContainerInfo, RvfReader, VitalSignConfig};
 use rvf_pipeline::ProgressiveLoader;
 use vital_signs::{VitalSignDetector, VitalSigns};
+use csi::parse_esp32_frame;
+use types::Esp32Frame;
 
 // ADR-022 Phase 3: Multi-BSSID pipeline integration
 use wifi_densepose_wifiscan::{
@@ -168,22 +170,7 @@ struct Args {
 }
 
 // ── Data types ───────────────────────────────────────────────────────────────
-
-/// ADR-018 ESP32 CSI binary frame header (20 bytes)
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-struct Esp32Frame {
-    magic: u32,
-    node_id: u8,
-    n_antennas: u8,
-    n_subcarriers: u8,
-    freq_mhz: u16,
-    sequence: u32,
-    rssi: i8,
-    noise_floor: i8,
-    amplitudes: Vec<f64>,
-    phases: Vec<f64>,
-}
+// Esp32Frame is defined in types.rs (ADR-018 V1/V2)
 
 /// Sensing update broadcast to WebSocket clients
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -683,70 +670,7 @@ fn parse_wasm_output(buf: &[u8]) -> Option<WasmOutputPacket> {
     })
 }
 
-// ── ESP32 UDP frame parser ───────────────────────────────────────────────────
-
-fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
-    if buf.len() < 20 {
-        return None;
-    }
-
-    let magic = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
-    if magic != 0xC511_0001 {
-        return None;
-    }
-
-    // Frame layout (must match firmware csi_collector.c):
-    //   [0..3]   magic (u32 LE)
-    //   [4]      node_id (u8)
-    //   [5]      n_antennas (u8)
-    //   [6..7]   n_subcarriers (u16 LE)
-    //   [8..11]  freq_mhz (u32 LE)
-    //   [12..15] sequence (u32 LE)
-    //   [16]     rssi (i8)
-    //   [17]     noise_floor (i8)
-    //   [18..19] reserved
-    //   [20..]   I/Q data
-    let node_id = buf[4];
-    let n_antennas = buf[5];
-    let n_subcarriers = buf[6];
-    let freq_mhz = u16::from_le_bytes([buf[8], buf[9]]);
-    let sequence = u32::from_le_bytes([buf[10], buf[11], buf[12], buf[13]]);
-    let rssi_raw = buf[14] as i8;
-    // Fix RSSI sign: ensure it's always negative (dBm convention).
-    let rssi = if rssi_raw > 0 { rssi_raw.saturating_neg() } else { rssi_raw };
-    let noise_floor = buf[15] as i8;
-
-    let iq_start = 20;
-    let n_pairs = n_antennas as usize * n_subcarriers as usize;
-    let expected_len = iq_start + n_pairs * 2;
-
-    if buf.len() < expected_len {
-        return None;
-    }
-
-    let mut amplitudes = Vec::with_capacity(n_pairs);
-    let mut phases = Vec::with_capacity(n_pairs);
-
-    for k in 0..n_pairs {
-        let i_val = buf[iq_start + k * 2] as i8 as f64;
-        let q_val = buf[iq_start + k * 2 + 1] as i8 as f64;
-        amplitudes.push((i_val * i_val + q_val * q_val).sqrt());
-        phases.push(q_val.atan2(i_val));
-    }
-
-    Some(Esp32Frame {
-        magic,
-        node_id,
-        n_antennas,
-        n_subcarriers,
-        freq_mhz,
-        sequence,
-        rssi,
-        noise_floor,
-        amplitudes,
-        phases,
-    })
-}
+// ESP32 UDP frame parser: uses csi::parse_esp32_frame (V1+V2 support, correct ADR-018 offsets)
 
 // ── Signal field generation ──────────────────────────────────────────────────
 
@@ -1545,13 +1469,14 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
             magic: 0xC511_0001,
             node_id: 0,
             n_antennas: 1,
-            n_subcarriers: obs_count.min(255) as u8,
+            n_subcarriers: obs_count as u16,
             freq_mhz: 2437,
             sequence: seq,
             rssi: first_rssi.clamp(-128.0, 127.0) as i8,
             noise_floor: -90,
             amplitudes: multi_ap_frame.amplitudes.clone(),
             phases: multi_ap_frame.phases.clone(),
+            source_mac: None,
         };
 
         // ── Step 4b: Update frame history and extract features ───────
@@ -1712,6 +1637,7 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         noise_floor: -90,
         amplitudes: vec![signal_pct],
         phases: vec![0.0],
+        source_mac: None,
     };
 
     let mut s = state.write().await;
@@ -1856,13 +1782,14 @@ fn generate_simulated_frame(tick: u64) -> Esp32Frame {
         magic: 0xC511_0001,
         node_id: 1,
         n_antennas: 1,
-        n_subcarriers: n_sub as u8,
+        n_subcarriers: n_sub as u16,
         freq_mhz: 2437,
         sequence: tick as u32,
         rssi: (-40.0 + 5.0 * (t * 0.2).sin()) as i8,
         noise_floor: -90,
         amplitudes,
         phases,
+        source_mac: None,
     }
 }
 

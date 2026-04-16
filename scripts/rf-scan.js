@@ -18,6 +18,7 @@
 
 const dgram = require('dgram');
 const { parseArgs } = require('util');
+const { parseRawCsiFrame } = require('./lib/raw-csi');
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -41,11 +42,9 @@ const JSON_OUTPUT = args.json;
 // ---------------------------------------------------------------------------
 // ADR-018 packet constants
 // ---------------------------------------------------------------------------
-const CSI_MAGIC     = 0xC5110001;
 const VITALS_MAGIC  = 0xC5110002;
 const FEATURE_MAGIC = 0xC5110003;
 const FUSED_MAGIC   = 0xC5110004;
-const HEADER_SIZE   = 20;
 
 // Spectrum visualization characters (8 levels)
 const BARS = ['\u2581', '\u2582', '\u2583', '\u2584', '\u2585', '\u2586', '\u2587', '\u2588'];
@@ -218,39 +217,7 @@ let totalFrames = 0;
 // Packet parsing
 // ---------------------------------------------------------------------------
 function parseCSIFrame(buf) {
-  if (buf.length < HEADER_SIZE) return null;
-
-  const magic = buf.readUInt32LE(0);
-  if (magic !== CSI_MAGIC) return null;
-
-  const nodeId       = buf.readUInt8(4);
-  const nAntennas    = buf.readUInt8(5) || 1;
-  const nSubcarriers = buf.readUInt16LE(6);
-  const freqMhz      = buf.readUInt32LE(8);
-  const seq          = buf.readUInt32LE(12);
-  const rssi         = buf.readInt8(16);
-  const noiseFloor   = buf.readInt8(17);
-
-  const iqLen = nSubcarriers * nAntennas * 2;
-  if (buf.length < HEADER_SIZE + iqLen) return null;
-
-  // Extract amplitude and phase from I/Q pairs
-  const amplitudes = new Float64Array(nSubcarriers);
-  const phases = new Float64Array(nSubcarriers);
-
-  for (let sc = 0; sc < nSubcarriers; sc++) {
-    // Use first antenna for primary analysis
-    const offset = HEADER_SIZE + sc * 2;
-    const I = buf.readInt8(offset);
-    const Q = buf.readInt8(offset + 1);
-    amplitudes[sc] = Math.sqrt(I * I + Q * Q);
-    phases[sc] = Math.atan2(Q, I);
-  }
-
-  return {
-    nodeId, nAntennas, nSubcarriers, freqMhz, seq, rssi, noiseFloor,
-    amplitudes, phases,
-  };
+  return parseRawCsiFrame(buf);
 }
 
 function parseVitalsPacket(buf) {
@@ -299,12 +266,8 @@ function parseFeaturePacket(buf) {
 function handlePacket(buf, rinfo) {
   // Try CSI frame first (most common)
   if (buf.length >= 4) {
-    const magic = buf.readUInt32LE(0);
-
-    if (magic === CSI_MAGIC) {
-      const frame = parseCSIFrame(buf);
-      if (!frame) return;
-
+    const frame = parseCSIFrame(buf);
+    if (frame) {
       totalFrames++;
       let node = nodes.get(frame.nodeId);
       if (!node) {
@@ -322,6 +285,8 @@ function handlePacket(buf, rinfo) {
       node.updateAmplitudes(frame.amplitudes, frame.phases);
       return;
     }
+
+    const magic = buf.readUInt32LE(0);
 
     if (magic === VITALS_MAGIC || magic === FUSED_MAGIC) {
       const vitals = parseVitalsPacket(buf);

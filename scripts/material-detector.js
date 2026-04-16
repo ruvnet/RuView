@@ -20,6 +20,7 @@ const dgram = require('dgram');
 const fs = require('fs');
 const readline = require('readline');
 const { parseArgs } = require('util');
+const { parseRawCsiFrame } = require('./lib/raw-csi');
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -45,10 +46,7 @@ const NULL_THRESHOLD   = parseFloat(args['null-threshold']);
 const CHANGE_THRESHOLD = parseInt(args['change-threshold'], 10); // min subcarriers changed
 
 // ---------------------------------------------------------------------------
-// ADR-018 packet constants
-// ---------------------------------------------------------------------------
-const CSI_MAGIC   = 0xC5110001;
-const HEADER_SIZE = 20;
+// ADR-018 raw CSI parser
 
 // ---------------------------------------------------------------------------
 // Subcarrier null pattern tracker
@@ -292,23 +290,13 @@ function parseCsiJsonl(record) {
 }
 
 function parseCsiUdp(buf) {
-  if (buf.length < HEADER_SIZE) return null;
-  const magic = buf.readUInt32LE(0);
-  if (magic !== CSI_MAGIC) return null;
-
-  const nodeId = buf.readUInt8(4);
-  const nSc = buf.readUInt16LE(6);
-  const amplitudes = new Float64Array(nSc);
-
-  for (let sc = 0; sc < nSc; sc++) {
-    const offset = HEADER_SIZE + sc * 2;
-    if (offset + 1 >= buf.length) break;
-    const I = buf.readInt8(offset);
-    const Q = buf.readInt8(offset + 1);
-    amplitudes[sc] = Math.sqrt(I * I + Q * Q);
-  }
-
-  return { timestamp: Date.now() / 1000, nodeId, amplitudes };
+  const frame = parseRawCsiFrame(buf, { includePhase: false });
+  if (!frame) return null;
+  return {
+    timestamp: Date.now() / 1000,
+    nodeId: frame.nodeId,
+    amplitudes: frame.amplitudes,
+  };
 }
 
 // ---------------------------------------------------------------------------

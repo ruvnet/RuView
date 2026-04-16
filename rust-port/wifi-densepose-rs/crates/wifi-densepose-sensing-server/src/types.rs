@@ -57,20 +57,22 @@ pub const BR_DEAD_BAND: f64 = 0.5;
 
 // ── ESP32 Frame ─────────────────────────────────────────────────────────────
 
-/// ADR-018 ESP32 CSI binary frame header (20 bytes)
+/// ADR-018 ESP32 CSI binary frame (V1: 20-byte header, V2: 26-byte header with source MAC)
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct Esp32Frame {
     pub magic: u32,
     pub node_id: u8,
     pub n_antennas: u8,
-    pub n_subcarriers: u8,
-    pub freq_mhz: u16,
+    pub n_subcarriers: u16,
+    pub freq_mhz: u32,
     pub sequence: u32,
     pub rssi: i8,
     pub noise_floor: i8,
     pub amplitudes: Vec<f64>,
     pub phases: Vec<f64>,
+    /// Source MAC of the WiFi frame that triggered CSI (V2 only, None for V1).
+    pub source_mac: Option<[u8; 6]>,
 }
 
 // ── Sensing Update ──────────────────────────────────────────────────────────

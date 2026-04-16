@@ -30,6 +30,7 @@
 
 const dgram = require('dgram');
 const path = require('path');
+const { parseRawCsiFrame } = require('./lib/raw-csi');
 
 // ---------------------------------------------------------------------------
 // Resolve spiking-neural: try npm, then vendor
@@ -100,48 +101,19 @@ function parseArgs() {
 // ---------------------------------------------------------------------------
 // ADR-018 binary frame parser
 // ---------------------------------------------------------------------------
-const HEADER_SIZE = 20;
-
 function parseFrame(buf) {
-  if (buf.length < HEADER_SIZE) return null;
-
-  const magic = buf.readUInt32LE(0);
-  // ADR-018 magic: 0xC5110001 (raw CSI), 0xC5110002 (vitals), 0xC5110003 (features)
-  if (magic !== 0xC5110001 && magic !== 0xC5110002 && magic !== 0xC5110003) return null;
-
-  const version = buf.readUInt8(2);
-  const flags = buf.readUInt8(3);
-  const timestamp = buf.readUInt32LE(4);
-  const frequency = buf.readUInt32LE(8);
-  const rssi = buf.readInt8(12);
-  const noiseFloor = buf.readInt8(13);
-  const numSubcarriers = buf.readUInt16LE(14);
-  const nodeId = buf.readUInt16LE(16);
-  const seqNum = buf.readUInt16LE(18);
-
-  const expectedPayload = numSubcarriers * 4; // 2 bytes I + 2 bytes Q per subcarrier
-  if (buf.length < HEADER_SIZE + expectedPayload) {
-    // Fallback: try 2 bytes per subcarrier (amplitude only)
-    if (buf.length >= HEADER_SIZE + numSubcarriers * 2) {
-      const amplitudes = new Float32Array(numSubcarriers);
-      for (let i = 0; i < numSubcarriers; i++) {
-        amplitudes[i] = buf.readInt16LE(HEADER_SIZE + i * 2);
-      }
-      return { timestamp, frequency, rssi, noiseFloor, numSubcarriers, nodeId, seqNum, amplitudes };
-    }
-    return null;
-  }
-
-  // Parse I/Q and compute amplitudes
-  const amplitudes = new Float32Array(numSubcarriers);
-  for (let i = 0; i < numSubcarriers; i++) {
-    const offset = HEADER_SIZE + i * 4;
-    const real = buf.readInt16LE(offset);
-    const imag = buf.readInt16LE(offset + 2);
-    amplitudes[i] = Math.sqrt(real * real + imag * imag);
-  }
-
-  return { timestamp, frequency, rssi, noiseFloor, numSubcarriers, nodeId, seqNum, amplitudes };
+  const frame = parseRawCsiFrame(buf, { includePhase: false });
+  if (!frame) return null;
+  return {
+    timestamp: Date.now(),
+    frequency: frame.freqMhz,
+    rssi: frame.rssi,
+    noiseFloor: frame.noiseFloor,
+    numSubcarriers: frame.nSubcarriers,
+    nodeId: frame.nodeId,
+    seqNum: frame.seq,
+    amplitudes: Float32Array.from(frame.amplitudes),
+  };
 }
 
 // ---------------------------------------------------------------------------

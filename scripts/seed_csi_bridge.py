@@ -23,7 +23,7 @@ Usage:
     # Trigger store compaction
     python scripts/seed_csi_bridge.py --token TOKEN --compact
 
-The bridge also accepts legacy ADR-018 CSI frames (magic 0xC5110001/0xC5110002)
+The bridge also accepts ADR-018 CSI frames (V1/V2) plus vitals packets
 and extracts a simplified 8-dim feature vector from the raw data.
 """
 
@@ -51,9 +51,14 @@ logging.basicConfig(
 log = logging.getLogger("seed-bridge")
 
 # Packet magic numbers
-MAGIC_CSI_RAW   = 0xC5110001  # ADR-018 raw CSI frame
+MAGIC_CSI_RAW_V1 = 0xC5110001  # ADR-018 raw CSI frame (V1)
+MAGIC_CSI_RAW_V2 = 0xC5110006  # ADR-018 raw CSI frame (V2, source MAC)
 MAGIC_VITALS    = 0xC5110002  # ADR-039 vitals packet
 MAGIC_FEATURES  = 0xC5110003  # ADR-069 feature vector (new)
+RAW_CSI_HEADER_SIZE_V1 = 20
+RAW_CSI_HEADER_SIZE_V2 = 26
+RAW_CSI_MAX_ANTENNAS = 4
+RAW_CSI_MAX_SUBCARRIERS = 256
 
 # Feature vector packet: 4 + 1 + 1 + 2 + 8 + 32 = 48 bytes
 FEATURE_PKT_FMT = "<IBBHq8f"
@@ -148,20 +153,40 @@ def parse_vitals_packet(data: bytes) -> dict | None:
 
 
 def parse_raw_csi_packet(data: bytes) -> dict | None:
-    """Parse an ADR-018 raw CSI frame and extract basic features."""
-    if len(data) < 8:
+    """Parse ADR-018 raw CSI frames (V1/V2) and extract basic features."""
+    if len(data) < RAW_CSI_HEADER_SIZE_V1:
         return None
+
     magic = struct.unpack_from("<I", data)[0]
-    if magic != MAGIC_CSI_RAW:
+    if magic == MAGIC_CSI_RAW_V1:
+        header_size = RAW_CSI_HEADER_SIZE_V1
+    elif magic == MAGIC_CSI_RAW_V2:
+        if len(data) < RAW_CSI_HEADER_SIZE_V2:
+            return None
+        header_size = RAW_CSI_HEADER_SIZE_V2
+    else:
         return None
-    # Extract node_id (byte 4) and RSSI (byte 5, signed)
-    node_id = data[4] if len(data) > 4 else 0
-    rssi = struct.unpack_from("b", data, 5)[0] if len(data) > 5 else -70
+
+    node_id = data[4]
+    n_antennas = data[5]
+    n_subcarriers = struct.unpack_from("<H", data, 6)[0]
+    if (
+        n_antennas == 0 or n_antennas > RAW_CSI_MAX_ANTENNAS or
+        n_subcarriers == 0 or n_subcarriers > RAW_CSI_MAX_SUBCARRIERS
+    ):
+        return None
+
+    expected_len = header_size + n_antennas * n_subcarriers * 2
+    if len(data) < expected_len:
+        return None
+
+    rssi = struct.unpack_from("<b", data, 16)[0]
+    seq = struct.unpack_from("<I", data, 12)[0]
     # Minimal feature vector from raw CSI -- mostly placeholder
     features = [0.5, 0.5, 0.0, 0.0, 0.5, 0.5, 0.0, max(0.0, min(1.0, (rssi + 100) / 100.0))]
     return {
         "node_id": node_id,
-        "seq": 0,
+        "seq": seq,
         "timestamp_us": int(time.time() * 1_000_000),
         "features": features,
     }
@@ -185,13 +210,16 @@ def parse_packet(data: bytes) -> dict | None:
     """Try all packet formats."""
     if len(data) < 4:
         return None
+
+    raw_packet = parse_raw_csi_packet(data)
+    if raw_packet is not None:
+        return _validate_features(raw_packet)
+
     magic = struct.unpack_from("<I", data)[0]
     if magic == MAGIC_FEATURES:
         return _validate_features(parse_feature_packet(data))
     elif magic == MAGIC_VITALS:
         return _validate_features(parse_vitals_packet(data))
-    elif magic == MAGIC_CSI_RAW:
-        return _validate_features(parse_raw_csi_packet(data))
     return None
 
 

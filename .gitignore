@@ -55,6 +55,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+!scripts/lib/
+!scripts/lib/raw-csi.js
 lib64/
 parts/
 sdist/

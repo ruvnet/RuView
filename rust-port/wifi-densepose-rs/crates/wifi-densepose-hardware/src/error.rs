@@ -13,9 +13,15 @@ pub enum ParseError {
     },
 
     /// The frame header magic bytes don't match expected values.
-    #[error("Invalid magic: expected {expected:#06x}, got {got:#06x}")]
+    #[error("Invalid magic: expected {expected:#010x}, got {got:#010x}")]
     InvalidMagic {
         expected: u32,
+        got: u32,
+    },
+
+    /// The frame header magic is not any recognized CSI version.
+    #[error("Unknown CSI magic: {got:#010x} (expected 0xC5110001 V1 or 0xC5110006 V2)")]
+    UnknownMagic {
         got: u32,
     },
 

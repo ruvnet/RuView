@@ -7,6 +7,7 @@
 
 const dgram = require('dgram');
 const { parseArgs } = require('util');
+const { parseRawCsiFrame } = require('./lib/raw-csi');
 
 const { values: args } = parseArgs({
   options: {
@@ -29,20 +30,22 @@ const server = dgram.createSocket('udp4');
 
 server.on('message', (buf, rinfo) => {
   if (buf.length < 5) return;
+  const rawFrame = parseRawCsiFrame(buf, { includePhase: false });
+  if (rawFrame) {
+    if (!raw[rawFrame.nodeId]) raw[rawFrame.nodeId] = [];
+    raw[rawFrame.nodeId].push({
+      time: Date.now(),
+      amps: [...rawFrame.amplitudes],
+      rssi: rawFrame.rssi,
+      nSub: rawFrame.nSubcarriers,
+    });
+    return;
+  }
+
   const magic = buf.readUInt32LE(0);
   const nid = buf[4];
 
-  if (magic === 0xC5110001 && buf.length > 20) {
-    const iq = buf.subarray(20);
-    const nSub = Math.floor(iq.length / 2);
-    const amps = [];
-    for (let i = 0; i < nSub * 2 && i < iq.length - 1; i += 2) {
-      const I = iq.readInt8(i), Q = iq.readInt8(i + 1);
-      amps.push(Math.sqrt(I * I + Q * Q));
-    }
-    if (!raw[nid]) raw[nid] = [];
-    raw[nid].push({ time: Date.now(), amps, rssi: buf.readInt8(5), nSub });
-  } else if (magic === 0xC5110002 && buf.length >= 32) {
+  if (magic === 0xC5110002 && buf.length >= 32) {
     const br = buf.readUInt16LE(6) / 100;
     const hr = buf.readUInt32LE(8) / 10000;
     const rssi = buf.readInt8(12);
