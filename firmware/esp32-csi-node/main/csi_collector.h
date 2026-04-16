@@ -30,14 +30,24 @@
 void csi_collector_init(void);
 
 /**
- * Get the runtime node_id captured at csi_collector_init().
+ * Capture node_id BEFORE wifi_init_sta() or any other heavy init.
  *
- * This is a defensive copy of g_nvs_config.node_id taken at init time. Other
- * modules (edge_processing, wasm_runtime, display_ui) should prefer this
- * accessor over reading g_nvs_config.node_id directly, because the global
- * struct can be clobbered by memory corruption (see #232, #375, #385, #390).
+ * Must be called from app_main() immediately after nvs_config_load().
+ * WiFi driver initialization can corrupt g_nvs_config.node_id (confirmed
+ * on device 80:b5:4e:c1:be:b8, NVS=3 but post-WiFi reads as 1).
+ * This early capture shields s_node_id from that corruption window.
  *
- * @return Node ID (0-255) as loaded from NVS or Kconfig default at boot.
+ * @param node_id Value from g_nvs_config.node_id, read right after NVS load.
+ */
+void csi_collector_set_node_id(uint8_t node_id);
+
+/**
+ * Get the runtime node_id (early capture if available, otherwise init-time).
+ *
+ * Other modules (edge_processing, wasm_runtime, display_ui) should prefer
+ * this accessor over reading g_nvs_config.node_id directly.
+ *
+ * @return Node ID (0-255) as loaded from NVS at boot.
  */
 uint8_t csi_collector_get_node_id(void);
 
