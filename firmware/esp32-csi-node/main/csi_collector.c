@@ -25,13 +25,20 @@
 /* ADR-060: Access the global NVS config for MAC filter and channel override. */
 extern nvs_config_t g_nvs_config;
 
-/* Defensive fix (#232, #375, #385, #386, #390): capture node_id into a
- * module-local static BEFORE wifi_init_sta() runs, because WiFi driver init
- * can corrupt g_nvs_config.node_id (confirmed on device 80:b5:4e:c1:be:b8).
+/* Defensive fix (#232, #375, #385, #386, #390): capture NVS config fields into
+ * module-local statics BEFORE wifi_init_sta() runs, because WiFi driver init
+ * can corrupt g_nvs_config (confirmed on device 80:b5:4e:c1:be:b8).
  * main.c calls csi_collector_set_node_id() immediately after nvs_config_load(),
- * and csi_serialize_frame() uses s_node_id exclusively. */
+ * and all runtime paths use the local copies exclusively. */
 static uint8_t s_node_id = 1;
 static bool s_node_id_early_set = false;
+
+/* Defensive copy of MAC filter config — the CSI callback fires at 100-500 Hz
+ * and reads filter_mac_set + filter_mac on every invocation. If wifi_init_sta()
+ * corrupts g_nvs_config, the callback would read garbage, potentially causing
+ * LoadProhibited panics (observed: Core 0 panic after ~2400 callbacks). */
+static uint8_t s_filter_mac[6] = {0};
+static bool    s_filter_mac_set = false;
 
 /* ADR-057: Build-time guard — fail early if CSI is not enabled in sdkconfig.
  * Without this, the firmware compiles but crashes at runtime with:
@@ -165,9 +172,11 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
 {
     (void)ctx;
 
-    /* ADR-060: MAC address filtering — drop frames from non-matching sources. */
-    if (g_nvs_config.filter_mac_set) {
-        if (memcmp(info->mac, g_nvs_config.filter_mac, 6) != 0) {
+    /* ADR-060: MAC address filtering — drop frames from non-matching sources.
+     * Uses defensively-copied s_filter_mac instead of g_nvs_config (which can
+     * be corrupted by wifi_init_sta — same root cause as the node_id clobber). */
+    if (s_filter_mac_set) {
+        if (memcmp(info->mac, s_filter_mac, 6) != 0) {
             return;  /* Source MAC doesn't match filter — skip frame. */
         }
     }
@@ -228,6 +237,17 @@ void csi_collector_set_node_id(uint8_t node_id)
     s_node_id_early_set = true;
     ESP_LOGI(TAG, "Early capture node_id=%u (before WiFi init, #232/#390)",
              (unsigned)node_id);
+
+    /* Also capture MAC filter config now — same struct, same corruption risk.
+     * The CSI callback reads filter_mac_set on every invocation (100-500 Hz),
+     * so a corrupted value could cause erratic filtering or crash. */
+    s_filter_mac_set = (g_nvs_config.filter_mac_set != 0);
+    if (s_filter_mac_set) {
+        memcpy(s_filter_mac, g_nvs_config.filter_mac, 6);
+        ESP_LOGI(TAG, "Early capture filter_mac=%02x:%02x:%02x:%02x:%02x:%02x",
+                 s_filter_mac[0], s_filter_mac[1], s_filter_mac[2],
+                 s_filter_mac[3], s_filter_mac[4], s_filter_mac[5]);
+    }
 }
 
 void csi_collector_init(void)
@@ -246,6 +266,24 @@ void csi_collector_init(void)
     } else {
         ESP_LOGI(TAG, "node_id=%u verified (early capture matches g_nvs_config)",
                  (unsigned)s_node_id);
+    }
+
+    /* Canary for filter_mac: check if WiFi init corrupted the filter fields. */
+    if (s_node_id_early_set) {
+        bool mac_set_now = (g_nvs_config.filter_mac_set != 0);
+        if (mac_set_now != s_filter_mac_set) {
+            ESP_LOGW(TAG, "filter_mac_set clobber CONFIRMED: early=%d g_nvs_config=%d",
+                     (int)s_filter_mac_set, (int)mac_set_now);
+        } else if (s_filter_mac_set &&
+                   memcmp(s_filter_mac, g_nvs_config.filter_mac, 6) != 0) {
+            ESP_LOGW(TAG, "filter_mac clobber CONFIRMED: bytes differ after WiFi init");
+        }
+    } else {
+        /* No early capture — grab filter config now (may already be corrupted). */
+        s_filter_mac_set = (g_nvs_config.filter_mac_set != 0);
+        if (s_filter_mac_set) {
+            memcpy(s_filter_mac, g_nvs_config.filter_mac, 6);
+        }
     }
 
     /* ADR-060: Determine the CSI channel.
