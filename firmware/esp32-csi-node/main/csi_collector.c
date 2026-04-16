@@ -25,13 +25,13 @@
 /* ADR-060: Access the global NVS config for MAC filter and channel override. */
 extern nvs_config_t g_nvs_config;
 
-/* Defensive fix (#232, #375, #385, #386, #390): capture node_id at init-time
- * into a module-local static. Using the global g_nvs_config.node_id directly
- * at every callback is vulnerable to any memory corruption that clobbers the
- * struct (which users have reported reverting node_id to the Kconfig default
- * of 1). The local copy is set once at csi_collector_init() and then used
- * exclusively by csi_serialize_frame(). */
+/* Defensive fix (#232, #375, #385, #386, #390): capture node_id into a
+ * module-local static BEFORE wifi_init_sta() runs, because WiFi driver init
+ * can corrupt g_nvs_config.node_id (confirmed on device 80:b5:4e:c1:be:b8).
+ * main.c calls csi_collector_set_node_id() immediately after nvs_config_load(),
+ * and csi_serialize_frame() uses s_node_id exclusively. */
 static uint8_t s_node_id = 1;
+static bool s_node_id_early_set = false;
 
 /* ADR-057: Build-time guard — fail early if CSI is not enabled in sdkconfig.
  * Without this, the firmware compiles but crashes at runtime with:
@@ -222,14 +222,31 @@ static void wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type)
     (void)type;
 }
 
+void csi_collector_set_node_id(uint8_t node_id)
+{
+    s_node_id = node_id;
+    s_node_id_early_set = true;
+    ESP_LOGI(TAG, "Early capture node_id=%u (before WiFi init, #232/#390)",
+             (unsigned)node_id);
+}
+
 void csi_collector_init(void)
 {
-    /* Capture node_id into module-local static at init time. After this point
-     * csi_serialize_frame() uses s_node_id exclusively, isolating the UDP
-     * frame node_id field from any memory corruption of g_nvs_config. */
-    s_node_id = g_nvs_config.node_id;
-    ESP_LOGI(TAG, "Captured node_id=%u at init (defensive copy for #232/#375/#385/#390)",
-             (unsigned)s_node_id);
+    if (!s_node_id_early_set) {
+        /* Fallback: no early capture — use current g_nvs_config (may be clobbered). */
+        s_node_id = g_nvs_config.node_id;
+        ESP_LOGW(TAG, "Late capture node_id=%u (no early set_node_id call)",
+                 (unsigned)s_node_id);
+    } else if (g_nvs_config.node_id != s_node_id) {
+        /* Canary: early capture disagrees with current g_nvs_config — corruption
+         * happened between nvs_config_load() and here (likely wifi_init_sta). */
+        ESP_LOGW(TAG, "node_id clobber CONFIRMED: early=%u g_nvs_config=%u "
+                 "(WiFi init likely corrupted struct, using early value)",
+                 (unsigned)s_node_id, (unsigned)g_nvs_config.node_id);
+    } else {
+        ESP_LOGI(TAG, "node_id=%u verified (early capture matches g_nvs_config)",
+                 (unsigned)s_node_id);
+    }
 
     /* ADR-060: Determine the CSI channel.
      * Priority: 1) NVS override (--channel), 2) connected AP channel, 3) Kconfig default. */
@@ -290,16 +307,6 @@ void csi_collector_init(void)
 
     ESP_LOGI(TAG, "CSI collection initialized (node_id=%u, channel=%u)",
              (unsigned)s_node_id, (unsigned)csi_channel);
-
-    /* Clobber-detection canary: if g_nvs_config.node_id no longer matches the
-     * value we captured, something corrupted the struct between nvs_config_load
-     * and here. This is the historic #232/#375 symptom. */
-    if (g_nvs_config.node_id != s_node_id) {
-        ESP_LOGW(TAG, "node_id clobber detected: captured=%u but g_nvs_config=%u "
-                 "(frames will use captured value %u). Please report to #390.",
-                 (unsigned)s_node_id, (unsigned)g_nvs_config.node_id,
-                 (unsigned)s_node_id);
-    }
 }
 
 /* Accessor for other modules that need the authoritative runtime node_id. */

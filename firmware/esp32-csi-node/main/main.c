@@ -140,6 +140,11 @@ void app_main(void)
     /* Load runtime config (NVS overrides Kconfig defaults) */
     nvs_config_load(&g_nvs_config);
 
+    /* Capture node_id IMMEDIATELY — before wifi_init_sta() can corrupt
+     * g_nvs_config. See #232/#375/#390: WiFi driver init clobbers the struct
+     * on some devices, reverting node_id to the Kconfig default of 1. */
+    csi_collector_set_node_id(g_nvs_config.node_id);
+
     const esp_app_desc_t *app_desc = esp_app_get_description();
     ESP_LOGI(TAG, "ESP32-S3 CSI Node (ADR-018) — v%s — Node ID: %d",
              app_desc->version, g_nvs_config.node_id);
