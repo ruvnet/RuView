@@ -315,17 +315,26 @@ void csi_collector_init(void)
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_rx_cb(wifi_promiscuous_cb));
 
+    /* Filter promiscuous to management frames only (beacons, probes).
+     * Data frames add 100-500+ interrupts/sec which causes Core 0
+     * LoadProhibited panics in wDev_ProcessFiq → cache_ll_l1_resume_icache
+     * due to SPI flash cache contention at high interrupt rates.
+     * Management-only gives ~10-20 frames/sec — enough for CSI sensing. */
     wifi_promiscuous_filter_t filt = {
-        .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA,
+        .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT,
     };
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_filter(&filt));
 
-    ESP_LOGI(TAG, "Promiscuous mode enabled for CSI capture");
+    ESP_LOGI(TAG, "Promiscuous mode enabled (MGMT-only filter to avoid SPI cache crash)");
 
+    /* Disable HT-LTF and STBC to reduce per-frame processing overhead.
+     * LLTF alone provides 64 subcarriers (HT20) — sufficient for presence,
+     * breathing, and fall detection. HT-LTF/STBC add subcarriers but also
+     * increase interrupt handler duration, worsening the cache race. */
     wifi_csi_config_t csi_config = {
         .lltf_en = true,
-        .htltf_en = true,
-        .stbc_htltf2_en = true,
+        .htltf_en = false,
+        .stbc_htltf2_en = false,
         .ltf_merge_en = true,
         .channel_filter_en = false,
         .manu_scale = false,
