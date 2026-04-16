@@ -15,6 +15,8 @@ use chrono::{DateTime, Utc};
 use ndarray::{Array1, Array2, Array3};
 use num_complex::Complex64;
 use uuid::Uuid;
+#[cfg(feature = "ternlang")]
+use ternlang_core::Trit;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -181,7 +183,7 @@ impl Confidence {
     /// Returns `true` if the confidence exceeds the default threshold.
     #[must_use]
     pub fn is_high(&self) -> bool {
-        self.0 >= DEFAULT_CONFIDENCE_THRESHOLD
+        self.0 >= 0.5
     }
 
     /// Returns `true` if the confidence exceeds the given threshold.
@@ -190,11 +192,37 @@ impl Confidence {
         self.0 >= threshold
     }
 
-    /// Maximum confidence (1.0).
+    /// Maximum confidence value (1.0).
     pub const MAX: Self = Self(1.0);
 
-    /// Minimum confidence (0.0).
+    /// Minimum confidence value (0.0).
     pub const MIN: Self = Self(0.0);
+
+    /// Maps this confidence score to a ternary trit signal.
+    ///
+    /// Useful for integrating with ternary reasoning pipelines
+    /// (e.g. [`ternlang`](https://ternlang.com)) where decisions must
+    /// express not just high/low but an explicit "hold — gather more data"
+    /// state.
+    ///
+    /// | Range        | Trit    | Meaning                         |
+    /// |--------------|---------|----------------------------------|
+    /// | `>= 0.65`    | Affirm  | High confidence — act            |
+    /// | `0.35..0.65` | Tend    | Uncertain — defer or review      |
+    /// | `< 0.35`     | Reject  | Low confidence — discard/retry   |
+    ///
+    /// Requires the `ternlang` feature flag.
+    #[cfg(feature = "ternlang")]
+    #[must_use]
+    pub fn trit_signal(&self) -> Trit {
+        if self.0 >= 0.65 {
+            Trit::Affirm
+        } else if self.0 < 0.35 {
+            Trit::Reject
+        } else {
+            Trit::Tend
+        }
+    }
 }
 
 impl Default for Confidence {

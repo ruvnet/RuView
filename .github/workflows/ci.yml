@@ -84,9 +84,35 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
 
-    - name: Run Rust tests
+    # wifi-densepose-core, -config, and -mat have no system library dependencies
+    # and can be tested in a bare CI environment.
+    #
+    # Other workspace crates (desktop, nn, signal, hardware, wifiscan) require
+    # system libraries (Tauri/glib, libtorch, OpenBLAS, libpcap, serialport) that
+    # are not available on a stock ubuntu runner without additional setup steps.
+    #
+    # Previous config used `--workspace --no-default-features` which had two bugs:
+    #   1. Stripping --no-default-features removes the `std` feature, breaking
+    #      String/format!/etc. in crates that put std behind a feature flag.
+    #   2. Tauri (wifi-densepose-desktop) pulls in glib unconditionally regardless
+    #      of feature flags, so --workspace always fails without libglib2.0-dev.
+
+    - name: Run Rust tests — core (default features)
       working-directory: rust-port/wifi-densepose-rs
-      run: cargo test --workspace --no-default-features
+      run: cargo test -p wifi-densepose-core -p wifi-densepose-config -p wifi-densepose-mat
+
+    - name: Run Rust tests — core (no optional features)
+      working-directory: rust-port/wifi-densepose-rs
+      # Keep std enabled — it's required, not optional. Only strip truly optional features.
+      run: cargo test -p wifi-densepose-core -p wifi-densepose-config -p wifi-densepose-mat --no-default-features --features std
+
+    - name: Clippy — core crates
+      working-directory: rust-port/wifi-densepose-rs
+      run: cargo clippy -p wifi-densepose-core -p wifi-densepose-config -p wifi-densepose-mat -- -D warnings
+
+    - name: Check optional ternlang feature
+      working-directory: rust-port/wifi-densepose-rs
+      run: cargo check -p wifi-densepose-core --features ternlang
 
   # Unit and Integration Tests
   test:
