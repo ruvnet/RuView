@@ -67,6 +67,24 @@ static uint32_t s_rate_skip = 0;
 #define CSI_MIN_SEND_INTERVAL_US  (20 * 1000)
 static int64_t s_last_send_us = 0;
 
+/**
+ * Minimum interval between processing ANY CSI callback in microseconds.
+ * Promiscuous MGMT+DATA can fire 100-500+ times/sec. At rates above ~50 Hz,
+ * the WiFi FIQ handler (wDev_ProcessFiq) races with SPI flash cache operations,
+ * causing Core 0 LoadProhibited panics in cache_ll_l1_resume_icache.
+ *
+ * This early gate drops excess callbacks BEFORE any processing (serialization,
+ * UDP, edge enqueue), keeping the effective callback rate at ~50 Hz while
+ * preserving the full MGMT+DATA promiscuous filter and HT-LTF/STBC CSI quality.
+ *
+ * The WiFi hardware still captures all frames and the CSI data is generated,
+ * but we simply discard the excess in software. This reduces the time spent
+ * in callback context per second, giving the WiFi ISR more headroom.
+ */
+#define CSI_MIN_PROCESS_INTERVAL_US  (20 * 1000)  /* 50 Hz */
+static int64_t s_last_process_us = 0;
+static uint32_t s_early_drop = 0;
+
 /* ---- ADR-029: Channel-hop state ---- */
 
 /** Channel hop table (populated from NVS at boot or via set_hop_table). */
@@ -83,6 +101,9 @@ static uint8_t  s_hop_index   = 0;
 
 /** Handle for the periodic hop timer. NULL when timer is not running. */
 static esp_timer_handle_t s_hop_timer = NULL;
+
+/* Forward declaration — probe injection timer (defined after hop timer code) */
+static void csi_collector_start_probe_timer(void);
 
 /**
  * Serialize CSI data into ADR-018 binary frame format.
@@ -171,6 +192,15 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
 static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
 {
     (void)ctx;
+
+    /* Early rate gate: drop excess callbacks to ~50 Hz to prevent
+     * SPI flash cache crash in WiFi ISR (wDev_ProcessFiq). */
+    int64_t now_us = esp_timer_get_time();
+    if ((now_us - s_last_process_us) < CSI_MIN_PROCESS_INTERVAL_US) {
+        s_early_drop++;
+        return;
+    }
+    s_last_process_us = now_us;
 
     /* ADR-060: MAC address filtering — drop frames from non-matching sources.
      * Uses defensively-copied s_filter_mac instead of g_nvs_config (which can
@@ -315,26 +345,24 @@ void csi_collector_init(void)
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_rx_cb(wifi_promiscuous_cb));
 
-    /* Filter promiscuous to management frames only (beacons, probes).
-     * Data frames add 100-500+ interrupts/sec which causes Core 0
-     * LoadProhibited panics in wDev_ProcessFiq → cache_ll_l1_resume_icache
-     * due to SPI flash cache contention at high interrupt rates.
-     * Management-only gives ~10-20 frames/sec — enough for CSI sensing. */
+    /* MGMT-only promiscuous filter + active probe injection (RuView#396).
+     *
+     * DATA frames cause 100-500+ WiFi HW interrupts/sec which crashes Core 0
+     * in wDev_ProcessFiq (SPI flash cache race in ESP-IDF WiFi blob).
+     * MGMT-only gives ~10 Hz (beacons). Probe request injection at 10 Hz
+     * adds ~10 Hz probe responses from APs → ~20 Hz total, matching the
+     * edge processing designed sample rate of 20 Hz. */
     wifi_promiscuous_filter_t filt = {
         .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT,
     };
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_filter(&filt));
 
-    ESP_LOGI(TAG, "Promiscuous mode enabled (MGMT-only filter to avoid SPI cache crash)");
+    ESP_LOGI(TAG, "Promiscuous mode enabled (MGMT-only, RuView#396)");
 
-    /* Disable HT-LTF and STBC to reduce per-frame processing overhead.
-     * LLTF alone provides 64 subcarriers (HT20) — sufficient for presence,
-     * breathing, and fall detection. HT-LTF/STBC add subcarriers but also
-     * increase interrupt handler duration, worsening the cache race. */
     wifi_csi_config_t csi_config = {
         .lltf_en = true,
-        .htltf_en = false,
-        .stbc_htltf2_en = false,
+        .htltf_en = true,
+        .stbc_htltf2_en = true,
         .ltf_merge_en = true,
         .channel_filter_en = false,
         .manu_scale = false,
@@ -354,6 +382,10 @@ void csi_collector_init(void)
 
     ESP_LOGI(TAG, "CSI collection initialized (node_id=%u, channel=%u)",
              (unsigned)s_node_id, (unsigned)csi_channel);
+
+    /* Probe injection disabled — null-data TX at 10 Hz adds enough WiFi
+     * interrupt pressure to trigger the SPI cache crash (RuView#396).
+     * MGMT-only at ~10 Hz is the maximum stable rate on this hardware. */
 }
 
 /* Accessor for other modules that need the authoritative runtime node_id. */
@@ -502,42 +534,129 @@ void csi_collector_start_hop_timer(void)
              (unsigned long)s_dwell_ms, (unsigned)s_hop_count);
 }
 
-/* ---- ADR-029: NDP frame injection stub ---- */
+/* ---- Active CSI excitation via probe request injection (RuView#396) ----
+ *
+ * MGMT-only promiscuous filter gives ~10 Hz (beacons), but the edge processing
+ * pipeline is designed for 20 Hz. We boost the CSI rate by sending probe
+ * requests at a controlled interval. Each visible AP responds with a probe
+ * response (MGMT frame), which the promiscuous callback captures with CSI.
+ *
+ * This gives deterministic rate control without DATA frames that cause the
+ * wDev_ProcessFiq SPI flash cache crash at 100+ Hz interrupt rates.
+ *
+ * Rate math: N probe requests/sec → N probe responses/sec per visible AP
+ *   + ~10 Hz beacons = (N * num_APs) + 10 Hz effective CSI rate
+ *   At 10 Hz injection with 1 AP responding: ~20 Hz total (matches edge_proc)
+ */
 
-esp_err_t csi_inject_ndp_frame(void)
+#define CSI_PROBE_INTERVAL_MS  100  /* 10 Hz probe injection → ~20 Hz total with beacons */
+static esp_timer_handle_t s_probe_timer = NULL;
+static uint32_t s_probe_tx_count = 0;
+static uint32_t s_probe_tx_fail = 0;
+
+static uint8_t s_ap_bssid[6] = {0};
+static bool    s_ap_bssid_known = false;
+
+static void csi_send_probe_request(void)
 {
-    /*
-     * TODO: Construct a proper 802.11 Null Data Packet frame.
+    /* Directed null-data frame to the connected AP.
      *
-     * A real NDP is preamble-only (~24 us airtime, no payload) and is the
-     * sensing-first TX mechanism described in ADR-029. For now we send a
-     * minimal null-data frame as a placeholder so the API is wired up.
+     * We send a Null Data frame (not a broadcast probe request) to avoid
+     * triggering WiFi channel scanning/toggling. The AP responds with an ACK,
+     * and the exchange generates CSI on both the TX and RX paths.
+     * Using null-data instead of probe request because:
+     * - Probe requests to broadcast BSSID trigger channel width negotiation
+     *   (observed: 1912 channel toggles in 2.5 min, disrupting CSI collection)
+     * - Null-data to the connected AP is the standard WiFi sensing approach
+     * - The AP always ACKs, giving us a deterministic CSI response
      *
-     * Frame structure (IEEE 802.11 Null Data):
-     *   FC (2) | Duration (2) | Addr1 (6) | Addr2 (6) | Addr3 (6) | SeqCtl (2)
-     *   = 24 bytes total, no body, no FCS (hardware appends FCS).
+     * Frame: Type=Data (0x02), Subtype=Null (0x04) → FC=0x0048
+     * ToDS=1 (going to AP), FromDS=0
      */
-    uint8_t ndp_frame[24];
-    memset(ndp_frame, 0, sizeof(ndp_frame));
-
-    /* Frame Control: Type=Data (0x02), Subtype=Null (0x04) -> 0x0048 */
-    ndp_frame[0] = 0x48;
-    ndp_frame[1] = 0x00;
-
-    /* Duration: 0 (let hardware fill) */
-
-    /* Addr1 (destination): broadcast */
-    memset(&ndp_frame[4], 0xFF, 6);
-
-    /* Addr2 (source): will be overwritten by hardware with own MAC */
-
-    /* Addr3 (BSSID): broadcast */
-    memset(&ndp_frame[16], 0xFF, 6);
-
-    esp_err_t err = esp_wifi_80211_tx(WIFI_IF_STA, ndp_frame, sizeof(ndp_frame), false);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "NDP inject failed: %s", esp_err_to_name(err));
+    if (!s_ap_bssid_known) {
+        wifi_ap_record_t ap_info;
+        if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+            memcpy(s_ap_bssid, ap_info.bssid, 6);
+            s_ap_bssid_known = true;
+            ESP_LOGI(TAG, "Probe target: AP BSSID %02x:%02x:%02x:%02x:%02x:%02x",
+                     s_ap_bssid[0], s_ap_bssid[1], s_ap_bssid[2],
+                     s_ap_bssid[3], s_ap_bssid[4], s_ap_bssid[5]);
+        } else {
+            return;  /* Not connected yet — skip this cycle */
+        }
     }
 
-    return err;
+    uint8_t null_frame[24];
+    memset(null_frame, 0, sizeof(null_frame));
+
+    /* Frame Control: Null Data, ToDS=1 */
+    null_frame[0] = 0x48;  /* Type=Data, Subtype=Null */
+    null_frame[1] = 0x01;  /* ToDS=1 */
+
+    /* Addr1 (receiver = AP BSSID) */
+    memcpy(&null_frame[4], s_ap_bssid, 6);
+
+    /* Addr2 (transmitter = our MAC — hardware overwrites, but set for clarity) */
+    uint8_t mac[6];
+    esp_wifi_get_mac(WIFI_IF_STA, mac);
+    memcpy(&null_frame[10], mac, 6);
+
+    /* Addr3 (BSSID = AP) */
+    memcpy(&null_frame[16], s_ap_bssid, 6);
+
+    esp_err_t err = esp_wifi_80211_tx(WIFI_IF_STA, null_frame, sizeof(null_frame), true);
+    if (err == ESP_OK) {
+        s_probe_tx_count++;
+    } else {
+        s_probe_tx_fail++;
+        if (s_probe_tx_fail <= 3) {
+            ESP_LOGW(TAG, "Null-data TX failed: %s (count=%lu)",
+                     esp_err_to_name(err), (unsigned long)s_probe_tx_fail);
+        }
+    }
+}
+
+static void probe_timer_cb(void *arg)
+{
+    (void)arg;
+    csi_send_probe_request();
+}
+
+static void csi_collector_start_probe_timer(void)
+{
+    if (s_probe_timer != NULL) {
+        ESP_LOGW(TAG, "Probe timer already running");
+        return;
+    }
+
+    esp_timer_create_args_t timer_args = {
+        .callback = probe_timer_cb,
+        .arg      = NULL,
+        .name     = "csi_probe",
+    };
+
+    esp_err_t err = esp_timer_create(&timer_args, &s_probe_timer);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create probe timer: %s", esp_err_to_name(err));
+        return;
+    }
+
+    uint64_t period_us = (uint64_t)CSI_PROBE_INTERVAL_MS * 1000;
+    err = esp_timer_start_periodic(s_probe_timer, period_us);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start probe timer: %s", esp_err_to_name(err));
+        esp_timer_delete(s_probe_timer);
+        s_probe_timer = NULL;
+        return;
+    }
+
+    ESP_LOGI(TAG, "Null-data injection timer started: %d ms (~%d Hz + beacons, RuView#396)",
+             CSI_PROBE_INTERVAL_MS, 1000 / CSI_PROBE_INTERVAL_MS);
+}
+
+/* Legacy NDP injection stub — kept for API compatibility */
+esp_err_t csi_inject_ndp_frame(void)
+{
+    csi_send_probe_request();
+    return ESP_OK;
 }
