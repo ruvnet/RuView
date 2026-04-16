@@ -155,7 +155,7 @@ def flash_nvs(port, baud, nvs_bin):
             "--chip", "esp32s3",
             "--port", port,
             "--baud", str(baud),
-            "write-flash",
+            "write_flash",
             hex(NVS_PARTITION_OFFSET), bin_path,
         ]
         print(f"Flashing NVS partition ({len(nvs_bin)} bytes) to {port}...")
