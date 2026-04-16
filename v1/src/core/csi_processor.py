@@ -82,6 +82,8 @@ class CSIProcessor:
         # Processing state
         self.csi_history = deque(maxlen=self.max_history_size)
         self.previous_detection_confidence = 0.0
+        self.signal_quality_history = deque(maxlen=self.max_history_size)
+        self.signal_quality_threshold = config.get('signal_quality_threshold', 0.35)
 
         # Doppler cache: pre-computed mean phase per frame for O(1) append
         self._phase_cache = deque(maxlen=self.max_history_size)
@@ -132,6 +134,19 @@ class CSIProcessor:
             return csi_data
         
         try:
+            # Validate frame integrity
+            self._validate_csi_data(csi_data)
+
+            # Assess signal quality metrics
+            quality = self.assess_signal_quality(csi_data)
+            self._update_signal_quality_history(quality)
+
+            if quality['valid_ratio'] < self.signal_quality_threshold:
+                self.logger.warning(
+                    "Low CSI signal quality (ratio %.2f) detected",
+                    quality['valid_ratio']
+                )
+
             # Remove noise from the signal
             cleaned_data = self._remove_noise(csi_data)
             
@@ -140,6 +155,12 @@ class CSIProcessor:
             
             # Normalize amplitude values
             normalized_data = self._normalize_amplitude(windowed_data)
+            
+            # Attach quality metadata for downstream consumers
+            normalized_data.metadata = {
+                **normalized_data.metadata,
+                'signal_quality': quality
+            }
             
             return normalized_data
             
@@ -173,7 +194,8 @@ class CSIProcessor:
             
             # Extract Doppler and frequency features
             doppler_shift, power_spectral_density = self._extract_doppler_features(csi_data)
-            
+
+            quality = csi_data.metadata.get('signal_quality') if csi_data.metadata else None
             return CSIFeatures(
                 amplitude_mean=amplitude_mean,
                 amplitude_variance=amplitude_variance,
@@ -182,7 +204,10 @@ class CSIProcessor:
                 doppler_shift=doppler_shift,
                 power_spectral_density=power_spectral_density,
                 timestamp=datetime.now(timezone.utc),
-                metadata={'processing_params': self.config}
+                metadata={
+                    'processing_params': self.config,
+                    **({'signal_quality': quality} if quality is not None else {})
+                }
             )
             
         except Exception as e:
@@ -468,3 +493,70 @@ class CSIProcessor:
         
         self.previous_detection_confidence = smoothed_confidence
         return smoothed_confidence
+
+    def _validate_csi_data(self, csi_data: CSIData) -> None:
+        """Validate CSI frame dimensions and safety."""
+        if csi_data.amplitude.ndim != 2 or csi_data.phase.ndim != 2:
+            raise CSIProcessingError("CSI data must be 2D amplitude/phase")
+        if np.any(np.isnan(csi_data.amplitude)) or np.any(np.isnan(csi_data.phase)):
+            raise CSIProcessingError("CSI data contains NaNs")
+        if csi_data.num_subcarriers <= 0 or csi_data.num_antennas <= 0:
+            raise CSIProcessingError("Invalid CSI dimensions")
+
+    def assess_signal_quality(self, csi_data: CSIData) -> Dict[str, Any]:
+        """Compute signal quality metrics used by the pipeline."""
+        amplitude = csi_data.amplitude
+        with np.errstate(divide='ignore'):
+            amplitude_db = 20 * np.log10(np.clip(amplitude, 1e-12, None))
+
+        mean_db = float(np.nanmean(amplitude_db))
+        valid_ratio = float(np.nanmean(amplitude_db > (mean_db - 10)))
+        correlation = float(np.nanmean(np.abs(np.corrcoef(amplitude + 1e-9))))
+        temporal_stability = self._calculate_temporal_stability(amplitude)
+
+        return {
+            'snr': float(csi_data.snr),
+            'mean_db': mean_db,
+            'valid_ratio': valid_ratio,
+            'correlation': correlation,
+            'temporal_stability': temporal_stability,
+            'subcarrier_count': csi_data.num_subcarriers,
+            'antenna_count': csi_data.num_antennas
+        }
+
+    def _calculate_temporal_stability(self, amplitude: np.ndarray) -> float:
+        """Score stability relative to the previous frame."""
+        if not self.csi_history:
+            return 1.0
+        last_amplitude = self.csi_history[-1].amplitude
+        if last_amplitude.shape != amplitude.shape:
+            return 0.0
+        diff = np.linalg.norm(amplitude - last_amplitude)
+        base = np.linalg.norm(last_amplitude) + 1e-9
+        ratio = diff / base
+        return float(max(0.0, 1.0 - min(1.0, ratio)))
+
+    def _update_signal_quality_history(self, quality: Dict[str, Any]) -> None:
+        """Bookkeeping for recent signal quality summaries."""
+        self.signal_quality_history.append(quality)
+
+    def get_signal_quality_trend(self) -> Dict[str, float]:
+        """Return aggregate quality metrics over the recent horizon."""
+        if not self.signal_quality_history:
+            return {}
+
+        total = len(self.signal_quality_history)
+        summary = {
+            'avg_snr': 0.0,
+            'avg_valid_ratio': 0.0,
+            'avg_correlation': 0.0,
+            'avg_temporal_stability': 0.0
+        }
+
+        for entry in self.signal_quality_history:
+            summary['avg_snr'] += entry.get('snr', 0.0)
+            summary['avg_valid_ratio'] += entry.get('valid_ratio', 0.0)
+            summary['avg_correlation'] += entry.get('correlation', 0.0)
+            summary['avg_temporal_stability'] += entry.get('temporal_stability', 0.0)
+
+        return {key: value / total for key, value in summary.items()}
