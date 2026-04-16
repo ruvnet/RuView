@@ -31,3 +31,11 @@ CONFIG_LWIP_SO_RCVBUF=y
 
 # FreeRTOS: increase task stack for CSI processing
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# SPIRAM XIP tested but crashes with "Cache disabled but cached memory
+# region accessed" — different crash type, not solved. Disabled for now.
+# See RuView#396 for details. PSRAM heap-only mode can be enabled later.
+# CONFIG_SPIRAM is not set
+
+# Extra WiFi IRAM placement (defense-in-depth)
+CONFIG_ESP_WIFI_EXTRA_IRAM_OPT=y
