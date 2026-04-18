@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **`provision.py` esptool v5 compat** (#391) — Stale `write_flash` (underscore) syntax in the dry-run manual-flash hint now uses `write-flash` (hyphenated) for esptool >= 5.x. The primary flash command was already correct.
+- **`provision.py` silent NVS wipe** (#391) — The script replaces the entire `csi_cfg` NVS namespace on every run, so partial invocations were silently erasing WiFi credentials and causing `Retrying WiFi connection (10/10)` in the field. Now refuses to run without `--ssid`, `--password`, and `--target-ip` unless `--force-partial` is passed. `--force-partial` prints a warning listing which keys will be wiped.
+- **Firmware: defensive `node_id` capture** (#232, #375, #385, #386, #390) — Users on multi-node deployments reported `node_id` reverting to the Kconfig default (`1`) in UDP frames and in the `csi_collector` init log, despite NVS loading the correct value. The root cause (memory corruption of `g_nvs_config`) has not been definitively isolated, but the UDP frame header is now tamper-proof: `csi_collector_init()` captures `g_nvs_config.node_id` into a module-local `s_node_id` once, and `csi_serialize_frame()` plus all other consumers (`edge_processing.c`, `wasm_runtime.c`, `display_ui.c`, `swarm_bridge_init`) read it via the new `csi_collector_get_node_id()` accessor. A canary logs `WARN` if `g_nvs_config.node_id` diverges from `s_node_id` at end-of-init, helping isolate the upstream corruption path. Validated on attached ESP32-S3 (COM8): NVS `node_id=2` propagates through boot log, capture log, init log, and byte[4] of every UDP frame.
+
+### Docs
+- **CHANGELOG catch-up** (#367) — Added missing entries for v0.5.5, v0.6.0, and v0.7.0 releases.
+
+## [v0.7.0] — 2026-04-06
+
+Model release (no new firmware binary). Firmware remains at v0.6.0-esp32.
+
+### Added
+- **Camera ground-truth training pipeline (ADR-079)** — End-to-end supervised WiFlow pose training using MediaPipe + real ESP32 CSI.
+  - `scripts/collect-ground-truth.py` — MediaPipe PoseLandmarker webcam capture (17 COCO keypoints, 30fps), synchronized with CSI recording over nanosecond timestamps.
+  - `scripts/align-ground-truth.js` — Time-aligns camera keypoints with 20-frame CSI windows by binary search, confidence-weighted averaging.
+  - `scripts/train-wiflow-supervised.js` — 3-phase curriculum training (contrastive → supervised SmoothL1 → bone/temporal refinement) with 4 scale presets (lite/small/medium/full).
+  - `scripts/eval-wiflow.js` — PCK@10/20/50, MPJPE, per-joint breakdown, baseline proxy mode.
+  - `scripts/record-csi-udp.py` — Lightweight ESP32 CSI UDP recorder (no Rust build required).
+- **ruvector optimizations (O6-O10)** — Subcarrier selection (70→35, 50% reduction), attention-weighted subcarriers, Stoer-Wagner min-cut person separation, multi-SPSA gradient estimation, Mac M4 Pro training via Tailscale.
+- **Scalable WiFlow presets** — `lite` (189K params, ~19 min) through `full` (7.7M params, ~8 hrs) to match dataset size.
+- **Pre-trained WiFlow v1 model** — 92.9% PCK@20, 974 KB, 186,946 params. Published to [HuggingFace](https://huggingface.co/ruv/ruview) under `wiflow-v1/`.
+
+### Validated
+- **92.9% PCK@20** pose accuracy from a 5-minute data collection session with one $9 ESP32-S3 and one laptop webcam.
+- Training pipeline validated on real paired data: 345 samples, 19 min training, eval loss 0.082, bone constraint 0.008.
+
+## [v0.6.0-esp32] — 2026-04-03
+
+### Added
+- **Pre-trained CSI sensing weights published** — First official pre-trained models on [HuggingFace](https://huggingface.co/ruv/ruview). `model.safetensors` (48 KB), `model-q4.bin` (8 KB 4-bit), `model-q2.bin` (4 KB), `presence-head.json`, per-node LoRA adapters.
+- **17 sensing applications** — Sleep monitor, apnea detector, stress monitor, gait analyzer, RF tomography, passive radar, material classifier, through-wall detector, device fingerprint, and more. Each as a standalone `scripts/*.js`.
+- **ADRs 069-078** — 10 new architecture decisions covering Cognitum Seed integration, self-supervised pretraining, ruvllm pipeline, WiFlow architecture, channel hopping, SNN, MinCut person separation, CNN spectrograms, novel RF applications, multi-frequency mesh.
+- **Kalman tracker** (PR #341 by @taylorjdawson) — temporal smoothing of pose keypoints.
+
+### Fixed
+- Security fix merged via PR #310.
+
+### Performance
+- Presence detection: 100% accuracy on 60,630 overnight samples.
+- Inference: 0.008 ms per sample, 164K embeddings/sec.
+- Contrastive self-supervised training: 51.6% improvement over baseline.
+
+## [v0.5.5-esp32] — 2026-04-03
+
+### Added
+- **WiFlow SOTA architecture (ADR-072)** — TCN + axial attention pose decoder, 1.8M params, 881 KB at 4-bit. 17 COCO keypoints from CSI amplitude only (no phase).
+- **Multi-frequency mesh scanning (ADR-073)** — ESP32 nodes hop across channels 1/3/5/6/9/11 at 200ms dwell. Neighbor WiFi networks used as passive radar illuminators. Null subcarriers reduced from 19% to 16%.
+- **Spiking neural network (ADR-074)** — STDP online learning, adapts to new rooms in <30s with no labels, 16-160x less compute than batch training.
+- **MinCut person counting (ADR-075)** — Stoer-Wagner min-cut on subcarrier correlation graph. Fixes #348 (was always reporting 4 people).
+- **CNN spectrogram embeddings (ADR-076)** — Treat 64×20 CSI as an image, produce 128-dim environment fingerprints (0.95+ same-room similarity).
+- **Graph transformer fusion** — Multi-node CSI fusion via GATv2 attention (replaces naive averaging).
+- **Camera-free pose training pipeline** — Trains 17-keypoint model from 10 sensor signals with no camera required.
+
+### Fixed
+- **#348 person counting** — MinCut correctly counts 1-4 people (24/24 validation windows).
+
 ## [v0.5.4-esp32] — 2026-04-02
 
 ### Added

@@ -1055,6 +1055,65 @@ See [ADR-071](adr/ADR-071-ruvllm-training-pipeline.md) and the [pretraining tuto
 
 ---
 
+## Camera-Supervised Pose Training (v0.7.0)
+
+For significantly higher accuracy, use a webcam as a **temporary teacher** during training. The camera captures real 17-keypoint poses via MediaPipe, paired with simultaneous ESP32 CSI data. After training, the camera is no longer needed — the model runs on CSI only.
+
+**Result: 92.9% PCK@20** from a 5-minute collection session.
+
+### Requirements
+
+- Python 3.9+ with `mediapipe` and `opencv-python` (`pip install mediapipe opencv-python`)
+- ESP32-S3 node streaming CSI over UDP (port 5005)
+- A webcam (laptop, USB, or Mac camera via Tailscale)
+
+### Step 1: Capture Camera + CSI Simultaneously
+
+Run both scripts at the same time (in separate terminals):
+
+```bash
+# Terminal 1: Record ESP32 CSI
+python scripts/record-csi-udp.py --duration 300
+
+# Terminal 2: Capture camera keypoints
+python scripts/collect-ground-truth.py --duration 300 --preview
+```
+
+Move around naturally in front of the camera for 5 minutes. The `--preview` flag shows a live skeleton overlay.
+
+### Step 2: Align and Train
+
+```bash
+# Align camera keypoints with CSI windows
+node scripts/align-ground-truth.js \
+  --gt data/ground-truth/*.jsonl \
+  --csi data/recordings/csi-*.csi.jsonl
+
+# Train (start with lite, scale up as you collect more data)
+node scripts/train-wiflow-supervised.js \
+  --data data/paired/*.jsonl \
+  --scale lite \
+  --epochs 50
+
+# Evaluate
+node scripts/eval-wiflow.js \
+  --model models/wiflow-supervised/wiflow-v1.json \
+  --data data/paired/*.jsonl
+```
+
+### Scale Presets
+
+| Preset | Params | Training Time | Best For |
+|--------|--------|---------------|----------|
+| `--scale lite` | 189K | ~19 min | < 1,000 samples (5 min capture) |
+| `--scale small` | 474K | ~1 hr | 1K-10K samples |
+| `--scale medium` | 800K | ~2 hrs | 10K-50K samples |
+| `--scale full` | 7.7M | ~8 hrs | 50K+ samples (GPU recommended) |
+
+See [ADR-079](adr/ADR-079-camera-ground-truth-training.md) for the full design and optimization details.
+
+---
+
 ## Pre-Trained Models (No Training Required)
 
 Pre-trained models are available on HuggingFace: **https://huggingface.co/ruvnet/wifi-densepose-pretrained**

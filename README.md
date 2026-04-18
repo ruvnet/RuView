@@ -9,7 +9,7 @@
 > **Beta Software** — Under active development. APIs and firmware may change. Known limitations:
 > - ESP32-C3 and original ESP32 are not supported (single-core, insufficient for CSI DSP)
 > - Single ESP32 deployments have limited spatial resolution — use 2+ nodes or add a [Cognitum Seed](https://cognitum.one) for best results
-> - Camera-free pose accuracy is limited (2.5% PCK@20) — camera-labeled data significantly improves accuracy
+> - Camera-free pose accuracy is limited — use [camera ground-truth training](docs/adr/ADR-079-camera-ground-truth-training.md) for 92.9% PCK@20
 >
 > Contributions and bug reports welcome at [Issues](https://github.com/ruvnet/RuView/issues).
 
@@ -56,6 +56,7 @@ RuView also supports pose estimation (17 COCO keypoints via the WiFlow architect
 > | **Through-wall** | Fresnel zone geometry + multipath modeling | Up to 5m depth |
 > | **Edge intelligence** | 8-dim feature vectors + RVF store on Cognitum Seed | $140 total BOM |
 > | **Camera-free training** | 10 sensor signals, no labels needed | 84s on M4 Pro |
+> | **Camera-supervised training** | MediaPipe + ESP32 CSI → 92.9% PCK@20 | 19 min on laptop |
 > | **Multi-frequency mesh** | Channel hopping across 6 bands, neighbor APs as illuminators | 3x sensing bandwidth |
 
 ```bash
@@ -95,9 +96,52 @@ node scripts/mincut-person-counter.js --port 5006  # Correct person counting
 >
 ---
 
+### What's New in v0.7.0
+
+<details>
+<summary><strong>Camera Ground-Truth Training — 92.9% PCK@20</strong></summary>
+
+**v0.7.0 adds camera-supervised pose training** using MediaPipe + real ESP32 CSI data:
+
+| Capability | What it does | ADR |
+|-----------|-------------|-----|
+| **Camera ground-truth collection** | MediaPipe PoseLandmarker captures 17 COCO keypoints at 30fps, synced with ESP32 CSI | [ADR-079](docs/adr/ADR-079-camera-ground-truth-training.md) |
+| **ruvector subcarrier selection** | Variance-based top-K reduces input by 50% (70→35 subcarriers) | ADR-079 O6 |
+| **Stoer-Wagner min-cut** | Person-specific subcarrier cluster separation for multi-person training | ADR-079 O8 |
+| **Scalable WiFlow model** | 4 presets: lite (189K) → small (474K) → medium (800K) → full (7.7M params) | ADR-079 |
+
+```bash
+# Collect ground truth (camera + ESP32 simultaneously)
+python scripts/collect-ground-truth.py --duration 300 --preview
+python scripts/record-csi-udp.py --duration 300
+
+# Align CSI windows with camera keypoints
+node scripts/align-ground-truth.js --gt data/ground-truth/*.jsonl --csi data/recordings/*.csi.jsonl
+
+# Train WiFlow model (start lite, scale up as data grows)
+node scripts/train-wiflow-supervised.js --data data/paired/*.jsonl --scale lite
+
+# Evaluate
+node scripts/eval-wiflow.js --model models/wiflow-real/wiflow-v1.json --data data/paired/*.jsonl
+```
+
+**Result: 92.9% PCK@20** from a 5-minute data collection session with one ESP32-S3 and one webcam.
+
+| Metric | Before (proxy) | After (camera-supervised) |
+|--------|----------------|--------------------------|
+| PCK@20 | 0% | **92.9%** |
+| Eval loss | 0.700 | **0.082** |
+| Bone constraint | N/A | **0.008** |
+| Training time | N/A | **19 minutes** |
+| Model size | N/A | **974 KB** |
+
+Pre-trained model: [HuggingFace ruv/ruview/wiflow-v1](https://huggingface.co/ruv/ruview)
+
+</details>
+
 ### Pre-Trained Models (v0.6.0) — No Training Required
 
-<details open>
+<details>
 <summary><strong>Download from HuggingFace and start sensing immediately</strong></summary>
 
 Pre-trained models are available on HuggingFace:
@@ -294,7 +338,7 @@ See [ADR-069](docs/adr/ADR-069-cognitum-seed-csi-pipeline.md), [ADR-071](docs/ad
 |----------|-------------|
 | [User Guide](docs/user-guide.md) | Step-by-step guide: installation, first run, API usage, hardware setup, training |
 | [Build Guide](docs/build-guide.md) | Building from source (Rust and Python) |
-| [Architecture Decisions](docs/adr/README.md) | 62 ADRs — why each technical choice was made, organized by domain (hardware, signal processing, ML, platform, infrastructure) |
+| [Architecture Decisions](docs/adr/README.md) | 79 ADRs — why each technical choice was made, organized by domain (hardware, signal processing, ML, platform, infrastructure) |
 | [Domain Models](docs/ddd/README.md) | 7 DDD models (RuvSense, Signal Processing, Training Pipeline, Hardware Platform, Sensing Server, WiFi-Mat, CHCI) — bounded contexts, aggregates, domain events, and ubiquitous language |
 | [Desktop App](rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/README.md) | **WIP** — Tauri v2 desktop app for node management, OTA updates, WASM deployment, and mesh visualization |
 | [Medical Examples](examples/medical/README.md) | Contactless blood pressure, heart rate, breathing rate via 60 GHz mmWave radar — $15 hardware, no wearable |
@@ -1267,7 +1311,8 @@ Download a pre-built binary — no build toolchain needed:
 
 | Release | What's included | Tag |
 |---------|-----------------|-----|
-| [v0.6.0](https://github.com/ruvnet/RuView/releases/tag/v0.6.0-esp32) | **Latest** — [Pre-trained models on HuggingFace](https://huggingface.co/ruv/ruview), 17 sensing apps, 51.6% contrastive improvement, 0.008ms inference | `v0.6.0-esp32` |
+| [v0.7.0](https://github.com/ruvnet/RuView/releases/tag/v0.7.0) | **Latest** — Camera-supervised WiFlow model (92.9% PCK@20), ground-truth training pipeline, ruvector optimizations | `v0.7.0` |
+| [v0.6.0](https://github.com/ruvnet/RuView/releases/tag/v0.6.0-esp32) | [Pre-trained models on HuggingFace](https://huggingface.co/ruv/ruview), 17 sensing apps, 51.6% contrastive improvement, 0.008ms inference | `v0.6.0-esp32` |
 | [v0.5.5](https://github.com/ruvnet/RuView/releases/tag/v0.5.5-esp32) | SNN + MinCut (#348 fix) + CNN spectrogram + WiFlow + multi-freq mesh + graph transformer | `v0.5.5-esp32` |
 | [v0.5.4](https://github.com/ruvnet/RuView/releases/tag/v0.5.4-esp32) | Cognitum Seed integration ([ADR-069](docs/adr/ADR-069-cognitum-seed-csi-pipeline.md)), 8-dim feature vectors, RVF store, witness chain, security hardening | `v0.5.4-esp32` |
 | [v0.5.0](https://github.com/ruvnet/RuView/releases/tag/v0.5.0-esp32) | mmWave sensor fusion ([ADR-063](docs/adr/ADR-063-mmwave-sensor-fusion.md)), auto-detect MR60BHA2/LD2410, 48-byte fused vitals, all v0.4.3.1 fixes | `v0.5.0-esp32` |

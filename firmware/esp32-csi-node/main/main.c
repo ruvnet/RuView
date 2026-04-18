@@ -267,7 +267,7 @@ void app_main(void)
         strncpy(swarm_cfg.seed_url, g_nvs_config.seed_url, sizeof(swarm_cfg.seed_url) - 1);
         strncpy(swarm_cfg.seed_token, g_nvs_config.seed_token, sizeof(swarm_cfg.seed_token) - 1);
         strncpy(swarm_cfg.zone_name, g_nvs_config.zone_name, sizeof(swarm_cfg.zone_name) - 1);
-        swarm_ret = swarm_bridge_init(&swarm_cfg, g_nvs_config.node_id);
+        swarm_ret = swarm_bridge_init(&swarm_cfg, csi_collector_get_node_id());
         if (swarm_ret != ESP_OK) {
             ESP_LOGW(TAG, "Swarm bridge init failed: %s", esp_err_to_name(swarm_ret));
         }

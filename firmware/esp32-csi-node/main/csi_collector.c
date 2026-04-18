@@ -25,6 +25,14 @@
 /* ADR-060: Access the global NVS config for MAC filter and channel override. */
 extern nvs_config_t g_nvs_config;
 
+/* Defensive fix (#232, #375, #385, #386, #390): capture node_id at init-time
+ * into a module-local static. Using the global g_nvs_config.node_id directly
+ * at every callback is vulnerable to any memory corruption that clobbers the
+ * struct (which users have reported reverting node_id to the Kconfig default
+ * of 1). The local copy is set once at csi_collector_init() and then used
+ * exclusively by csi_serialize_frame(). */
+static uint8_t s_node_id = 1;
+
 /* ADR-057: Build-time guard — fail early if CSI is not enabled in sdkconfig.
  * Without this, the firmware compiles but crashes at runtime with:
  *   "E (xxxx) wifi:CSI not enabled in menuconfig!"
@@ -117,8 +125,9 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
     uint32_t magic = CSI_MAGIC;
     memcpy(&buf[0], &magic, 4);
 
-    /* Node ID (from NVS runtime config, not compile-time Kconfig) */
-    buf[4] = g_nvs_config.node_id;
+    /* Node ID (captured at init into s_node_id to survive memory corruption
+     * that could clobber g_nvs_config.node_id - see #232/#375/#385/#390). */
+    buf[4] = s_node_id;
 
     /* Number of antennas */
     buf[5] = n_antennas;
@@ -215,6 +224,13 @@ static void wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type)
 
 void csi_collector_init(void)
 {
+    /* Capture node_id into module-local static at init time. After this point
+     * csi_serialize_frame() uses s_node_id exclusively, isolating the UDP
+     * frame node_id field from any memory corruption of g_nvs_config. */
+    s_node_id = g_nvs_config.node_id;
+    ESP_LOGI(TAG, "Captured node_id=%u at init (defensive copy for #232/#375/#385/#390)",
+             (unsigned)s_node_id);
+
     /* ADR-060: Determine the CSI channel.
      * Priority: 1) NVS override (--channel), 2) connected AP channel, 3) Kconfig default. */
     uint8_t csi_channel = (uint8_t)CONFIG_CSI_WIFI_CHANNEL;
@@ -272,8 +288,24 @@ void csi_collector_init(void)
                  g_nvs_config.filter_mac[4], g_nvs_config.filter_mac[5]);
     }
 
-    ESP_LOGI(TAG, "CSI collection initialized (node_id=%d, channel=%u)",
-             g_nvs_config.node_id, (unsigned)csi_channel);
+    ESP_LOGI(TAG, "CSI collection initialized (node_id=%u, channel=%u)",
+             (unsigned)s_node_id, (unsigned)csi_channel);
+
+    /* Clobber-detection canary: if g_nvs_config.node_id no longer matches the
+     * value we captured, something corrupted the struct between nvs_config_load
+     * and here. This is the historic #232/#375 symptom. */
+    if (g_nvs_config.node_id != s_node_id) {
+        ESP_LOGW(TAG, "node_id clobber detected: captured=%u but g_nvs_config=%u "
+                 "(frames will use captured value %u). Please report to #390.",
+                 (unsigned)s_node_id, (unsigned)g_nvs_config.node_id,
+                 (unsigned)s_node_id);
+    }
+}
+
+/* Accessor for other modules that need the authoritative runtime node_id. */
+uint8_t csi_collector_get_node_id(void)
+{
+    return s_node_id;
 }
 
 /* ---- ADR-029: Channel hopping ---- */

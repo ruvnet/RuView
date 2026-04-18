@@ -30,6 +30,18 @@
 void csi_collector_init(void);
 
 /**
+ * Get the runtime node_id captured at csi_collector_init().
+ *
+ * This is a defensive copy of g_nvs_config.node_id taken at init time. Other
+ * modules (edge_processing, wasm_runtime, display_ui) should prefer this
+ * accessor over reading g_nvs_config.node_id directly, because the global
+ * struct can be clobbered by memory corruption (see #232, #375, #385, #390).
+ *
+ * @return Node ID (0-255) as loaded from NVS or Kconfig default at boot.
+ */
+uint8_t csi_collector_get_node_id(void);
+
+/**
  * Serialize CSI data into ADR-018 binary frame format.
  *
  * @param info   WiFi CSI info from the ESP-IDF callback.

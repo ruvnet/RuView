@@ -2,6 +2,7 @@
 WebSocket streaming API endpoints
 """
 
+import asyncio
 import json
 import logging
 from typing import Dict, List, Optional, Any
@@ -71,26 +72,55 @@ async def websocket_pose_stream(
     zone_ids: Optional[str] = Query(None, description="Comma-separated zone IDs"),
     min_confidence: float = Query(0.5, ge=0.0, le=1.0),
     max_fps: int = Query(30, ge=1, le=60),
-    token: Optional[str] = Query(None, description="Authentication token")
 ):
     """WebSocket endpoint for real-time pose data streaming."""
     client_id = None
-    
+
     try:
         # Accept WebSocket connection
         await websocket.accept()
-        
-        # Check authentication if enabled
+
+        # First-message authentication (CWE-598 fix: no JWT in URL)
         from src.config.settings import get_settings
         settings = get_settings()
-        
-        if settings.enable_authentication and not token:
-            await websocket.send_json({
-                "type": "error",
-                "message": "Authentication token required"
-            })
-            await websocket.close(code=1008)
-            return
+
+        if settings.enable_authentication:
+            try:
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+                auth_msg = json.loads(raw)
+                if auth_msg.get("type") != "auth" or not auth_msg.get("token"):
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "First message must be {\"type\": \"auth\", \"token\": \"<jwt>\"}"
+                    })
+                    await websocket.close(code=1008)
+                    return
+                # Verify the token
+                from src.middleware.auth import get_auth_middleware
+                auth_middleware = get_auth_middleware(settings)
+                try:
+                    auth_middleware.token_manager.verify_token(auth_msg["token"])
+                except Exception:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Invalid or expired authentication token"
+                    })
+                    await websocket.close(code=1008)
+                    return
+            except asyncio.TimeoutError:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Authentication timeout: no auth message received within 10 seconds"
+                })
+                await websocket.close(code=1008)
+                return
+            except (json.JSONDecodeError, Exception) as e:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Invalid authentication message format"
+                })
+                await websocket.close(code=1008)
+                return
         
         # Parse zone IDs
         zone_list = None
@@ -157,25 +187,53 @@ async def websocket_events_stream(
     websocket: WebSocket,
     event_types: Optional[str] = Query(None, description="Comma-separated event types"),
     zone_ids: Optional[str] = Query(None, description="Comma-separated zone IDs"),
-    token: Optional[str] = Query(None, description="Authentication token")
 ):
     """WebSocket endpoint for real-time event streaming."""
     client_id = None
-    
+
     try:
         await websocket.accept()
-        
-        # Check authentication if enabled
+
+        # First-message authentication (CWE-598 fix: no JWT in URL)
         from src.config.settings import get_settings
         settings = get_settings()
-        
-        if settings.enable_authentication and not token:
-            await websocket.send_json({
-                "type": "error",
-                "message": "Authentication token required"
-            })
-            await websocket.close(code=1008)
-            return
+
+        if settings.enable_authentication:
+            try:
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+                auth_msg = json.loads(raw)
+                if auth_msg.get("type") != "auth" or not auth_msg.get("token"):
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "First message must be {\"type\": \"auth\", \"token\": \"<jwt>\"}"
+                    })
+                    await websocket.close(code=1008)
+                    return
+                from src.middleware.auth import get_auth_middleware
+                auth_middleware = get_auth_middleware(settings)
+                try:
+                    auth_middleware.token_manager.verify_token(auth_msg["token"])
+                except Exception:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Invalid or expired authentication token"
+                    })
+                    await websocket.close(code=1008)
+                    return
+            except asyncio.TimeoutError:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Authentication timeout: no auth message received within 10 seconds"
+                })
+                await websocket.close(code=1008)
+                return
+            except (json.JSONDecodeError, Exception) as e:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Invalid authentication message format"
+                })
+                await websocket.close(code=1008)
+                return
         
         # Parse parameters
         event_list = None
@@ -294,7 +352,7 @@ async def get_stream_status(
         logger.error(f"Error getting stream status: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get stream status: {str(e)}"
+            detail="An internal error occurred. Please try again later."
         )
 
 
@@ -324,7 +382,7 @@ async def start_streaming(
         logger.error(f"Error starting streaming: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to start streaming: {str(e)}"
+            detail="An internal error occurred. Please try again later."
         )
 
 
@@ -349,7 +407,7 @@ async def stop_streaming(
         logger.error(f"Error stopping streaming: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to stop streaming: {str(e)}"
+            detail="An internal error occurred. Please try again later."
         )
 
 
@@ -371,7 +429,7 @@ async def get_connected_clients(
         logger.error(f"Error getting connected clients: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get connected clients: {str(e)}"
+            detail="An internal error occurred. Please try again later."
         )
 
 
@@ -403,7 +461,7 @@ async def disconnect_client(
         logger.error(f"Error disconnecting client: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to disconnect client: {str(e)}"
+            detail="An internal error occurred. Please try again later."
         )
 
 
@@ -442,7 +500,7 @@ async def broadcast_message(
         logger.error(f"Error broadcasting message: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to broadcast message: {str(e)}"
+            detail="An internal error occurred. Please try again later."
         )
 
 
@@ -461,5 +519,5 @@ async def get_streaming_metrics():
         logger.error(f"Error getting streaming metrics: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get streaming metrics: {str(e)}"
+            detail="An internal error occurred. Please try again later."
         )

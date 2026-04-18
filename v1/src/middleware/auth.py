@@ -241,13 +241,7 @@ class AuthenticationMiddleware:
         """Authenticate the request and return user info."""
         # Try to get token from Authorization header
         authorization = request.headers.get("Authorization")
-        if not authorization:
-            # For WebSocket connections, try to get token from query parameters
-            if request.url.path.startswith("/ws"):
-                token = request.query_params.get("token")
-                if token:
-                    authorization = f"Bearer {token}"
-        
+
         if not authorization:
             if self._requires_auth(request):
                 raise AuthenticationError("Missing authorization header")

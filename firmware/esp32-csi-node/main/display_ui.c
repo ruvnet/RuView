@@ -8,6 +8,7 @@
 
 #include "display_ui.h"
 #include "nvs_config.h"
+#include "csi_collector.h"  /* csi_collector_get_node_id() - defensive #390 */
 #include "sdkconfig.h"
 
 extern nvs_config_t g_nvs_config;
@@ -350,7 +351,7 @@ void display_ui_update(void)
     {
         char buf[48];
 
-        snprintf(buf, sizeof(buf), "Node: %d", g_nvs_config.node_id);
+        snprintf(buf, sizeof(buf), "Node: %u", (unsigned)csi_collector_get_node_id());
         lv_label_set_text(s_sys_node, buf);
 
         snprintf(buf, sizeof(buf), "Heap: %lu KB free",

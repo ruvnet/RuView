@@ -100,8 +100,7 @@ class WsService {
   private buildWsUrl(rawUrl: string): string {
     const parsed = new URL(rawUrl);
     const proto = parsed.protocol === 'https:' || parsed.protocol === 'wss:' ? 'wss:' : 'ws:';
-    // The /ws/sensing endpoint is served on the same HTTP port (no separate WS port needed).
-    return `${proto}//${parsed.host}/ws/sensing`;
+    return `${proto}//${parsed.host}${WS_PATH}`;
   }
 
   private handleStatusChange(status: ConnectionStatus): void {

@@ -62,6 +62,32 @@ jobs:
           bandit-report.json
           safety-report.json
 
+  # Rust Workspace Tests
+  rust-tests:
+    name: Rust Workspace Tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          rust-port/wifi-densepose-rs/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('rust-port/wifi-densepose-rs/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Run Rust tests
+      working-directory: rust-port/wifi-densepose-rs
+      run: cargo test --workspace --no-default-features
+
   # Unit and Integration Tests
   test:
     name: Tests
@@ -183,7 +209,7 @@ jobs:
   docker-build:
     name: Docker Build & Test
     runs-on: ubuntu-latest
-    needs: [code-quality, test]
+    needs: [code-quality, test, rust-tests]
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -282,7 +308,7 @@ jobs:
   notify:
     name: Notify
     runs-on: ubuntu-latest
-    needs: [code-quality, test, performance-test, docker-build, docs]
+    needs: [code-quality, test, rust-tests, performance-test, docker-build, docs]
     if: always()
     steps:
     - name: Notify Slack on success
