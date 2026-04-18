@@ -46,5 +46,8 @@ wifi-densepose-wifiscan = { version = "0.3.0", path = "../wifi-densepose-wifisca
 # Signal processing with RuvSense pose tracker (accuracy sprint)
 wifi-densepose-signal = { version = "0.3.0", path = "../wifi-densepose-signal" }
 
+# RuVector min-cut for person counting
+ruvector-mincut.workspace = true
+
 [dev-dependencies]
 tempfile = "3.10"

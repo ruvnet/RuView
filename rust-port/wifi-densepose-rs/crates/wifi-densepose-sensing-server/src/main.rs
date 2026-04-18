@@ -1658,9 +1658,9 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
 
         // Populate persons from the sensing update (Kalman-smoothed via tracker).
         let raw_persons = derive_pose_from_sensing(&update);
-        let tracked = tracker_bridge::tracker_update(
-            &mut s.pose_tracker, &mut s.last_tracker_instant, raw_persons,
-        );
+        let mut last_instant = s.last_tracker_instant.take();
+        let tracked = tracker_bridge::tracker_update(&mut s.pose_tracker, &mut last_instant, raw_persons);
+        s.last_tracker_instant = last_instant;
         if !tracked.is_empty() {
             update.persons = Some(tracked);
         }
@@ -1794,9 +1794,9 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
     };
 
     let raw_persons = derive_pose_from_sensing(&update);
-    let tracked = tracker_bridge::tracker_update(
-        &mut s.pose_tracker, &mut s.last_tracker_instant, raw_persons,
-    );
+    let mut last_instant = s.last_tracker_instant.take();
+    let tracked = tracker_bridge::tracker_update(&mut s.pose_tracker, &mut last_instant, raw_persons);
+    s.last_tracker_instant = last_instant;
     if !tracked.is_empty() {
         update.persons = Some(tracked);
     }
@@ -3600,9 +3600,10 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     };
 
                     // Feed field model calibration if active (use per-node history for ESP32).
+                    let calib_history = s.node_states.get(&node_id).map(|ns| ns.frame_history.clone());
                     if let Some(ref mut fm) = s.field_model {
-                        if let Some(ns) = s.node_states.get(&node_id) {
-                            field_bridge::maybe_feed_calibration(fm, &ns.frame_history);
+                        if let Some(ref history) = calib_history {
+                            field_bridge::maybe_feed_calibration(fm, history);
                         }
                     }
 
@@ -3685,9 +3686,9 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     };
 
                     let raw_persons = derive_pose_from_sensing(&update);
-                    let tracked = tracker_bridge::tracker_update(
-                        &mut s.pose_tracker, &mut s.last_tracker_instant, raw_persons,
-                    );
+                    let mut last_instant = s.last_tracker_instant.take();
+                    let tracked = tracker_bridge::tracker_update(&mut s.pose_tracker, &mut last_instant, raw_persons);
+                    s.last_tracker_instant = last_instant;
                     if !tracked.is_empty() {
                         update.persons = Some(tracked);
                     }
@@ -3848,9 +3849,10 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     };
 
                     // Feed field model calibration if active (use per-node history for ESP32).
+                    let calib_history = s.node_states.get(&node_id).map(|ns| ns.frame_history.clone());
                     if let Some(ref mut fm) = s.field_model {
-                        if let Some(ns) = s.node_states.get(&node_id) {
-                            field_bridge::maybe_feed_calibration(fm, &ns.frame_history);
+                        if let Some(ref history) = calib_history {
+                            field_bridge::maybe_feed_calibration(fm, history);
                         }
                     }
 
@@ -3895,9 +3897,9 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     };
 
                     let raw_persons = derive_pose_from_sensing(&update);
-                    let tracked = tracker_bridge::tracker_update(
-                        &mut s.pose_tracker, &mut s.last_tracker_instant, raw_persons,
-                    );
+                    let mut last_instant = s.last_tracker_instant.take();
+                    let tracked = tracker_bridge::tracker_update(&mut s.pose_tracker, &mut last_instant, raw_persons);
+                    s.last_tracker_instant = last_instant;
                     if !tracked.is_empty() {
                         update.persons = Some(tracked);
                     }
@@ -4031,9 +4033,9 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
 
         // Populate persons from the sensing update (Kalman-smoothed via tracker).
         let raw_persons = derive_pose_from_sensing(&update);
-        let tracked = tracker_bridge::tracker_update(
-            &mut s.pose_tracker, &mut s.last_tracker_instant, raw_persons,
-        );
+        let mut last_instant = s.last_tracker_instant.take();
+        let tracked = tracker_bridge::tracker_update(&mut s.pose_tracker, &mut last_instant, raw_persons);
+        s.last_tracker_instant = last_instant;
         if !tracked.is_empty() {
             update.persons = Some(tracked);
         }
