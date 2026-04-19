@@ -71,31 +71,95 @@ pub fn backproject_depth(
 
 /// Run depth estimation on an image.
 ///
-/// When built with `--features onnx`, uses MiDaS ONNX model.
-/// Otherwise, generates synthetic depth from image luminance (for testing).
+/// Tries MiDaS GPU server (127.0.0.1:9885) first, falls back to luminance+edges.
 pub fn estimate_depth(
     image_data: &[u8],
     width: u32,
     height: u32,
 ) -> Result<Vec<f32>> {
-    // Luminance-based pseudo-depth (works without ONNX model)
-    // Darker pixels = further away (rough approximation)
-    let mut depth_map = vec![3.0f32; (width * height) as usize];
-    for y in 0..height {
-        for x in 0..width {
-            let idx = (y * width + x) as usize;
-            let ri = idx * 3;
-            if ri + 2 < image_data.len() {
-                let r = image_data[ri] as f32;
-                let g = image_data[ri + 1] as f32;
-                let b = image_data[ri + 2] as f32;
-                let lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0;
-                // Map luminance to depth: bright=near (1m), dark=far (5m)
-                depth_map[idx] = 1.0 + (1.0 - lum) * 4.0;
-            }
+    // Try MiDaS GPU server
+    if let Ok(depth) = estimate_depth_midas_server(image_data, width, height) {
+        return Ok(depth);
+    }
+
+    // Fallback: luminance + edge-based pseudo-depth
+    let w = width as usize;
+    let h = height as usize;
+    let mut lum = vec![0.0f32; w * h];
+    for i in 0..w * h {
+        let ri = i * 3;
+        if ri + 2 < image_data.len() {
+            lum[i] = (0.299 * image_data[ri] as f32
+                    + 0.587 * image_data[ri + 1] as f32
+                    + 0.114 * image_data[ri + 2] as f32) / 255.0;
         }
     }
+    let mut edges = vec![0.0f32; w * h];
+    for y in 1..h - 1 {
+        for x in 1..w - 1 {
+            let gx = -lum[(y-1)*w+x-1] + lum[(y-1)*w+x+1]
+                   - 2.0*lum[y*w+x-1] + 2.0*lum[y*w+x+1]
+                   - lum[(y+1)*w+x-1] + lum[(y+1)*w+x+1];
+            let gy = -lum[(y-1)*w+x-1] - 2.0*lum[(y-1)*w+x] - lum[(y-1)*w+x+1]
+                   + lum[(y+1)*w+x-1] + 2.0*lum[(y+1)*w+x] + lum[(y+1)*w+x+1];
+            edges[y * w + x] = (gx * gx + gy * gy).sqrt().min(1.0);
+        }
+    }
+    let mut depth_map = vec![3.0f32; w * h];
+    for i in 0..w * h {
+        let base = 1.0 + (1.0 - lum[i]) * 3.5;
+        let edge_boost = edges[i] * 1.5;
+        depth_map[i] = (base - edge_boost).max(0.3);
+    }
     Ok(depth_map)
+}
+
+/// Call MiDaS depth server running on GPU (127.0.0.1:9885).
+fn estimate_depth_midas_server(rgb: &[u8], width: u32, height: u32) -> Result<Vec<f32>> {
+    let expected = (width * height * 3) as usize;
+    if rgb.len() < expected { anyhow::bail!("rgb too small"); }
+
+    // Send RGB as JSON array to depth server
+    let rgb_list: Vec<u8> = rgb[..expected].to_vec();
+    let body = serde_json::json!({
+        "width": width,
+        "height": height,
+        "rgb": rgb_list,
+    });
+    let body_bytes = serde_json::to_vec(&body)?;
+
+    let client = std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:9885".parse()?, std::time::Duration::from_millis(500)
+    )?;
+    client.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
+    client.set_write_timeout(Some(std::time::Duration::from_secs(2)))?;
+
+    use std::io::{Read, Write};
+    let mut stream = client;
+    let req = format!(
+        "POST /depth HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+        body_bytes.len()
+    );
+    stream.write_all(req.as_bytes())?;
+    stream.write_all(&body_bytes)?;
+
+    // Read response
+    let mut resp = Vec::new();
+    stream.read_to_end(&mut resp)?;
+
+    // Skip HTTP headers
+    let body_start = resp.windows(4).position(|w| w == b"\r\n\r\n")
+        .map(|p| p + 4).unwrap_or(0);
+    let depth_bytes = &resp[body_start..];
+
+    let n = (width * height) as usize;
+    if depth_bytes.len() < n * 4 { anyhow::bail!("depth response too small"); }
+
+    let depth: Vec<f32> = depth_bytes[..n * 4].chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect();
+
+    Ok(depth)
 }
 
 /// Capture depth cloud from camera (placeholder — real impl uses nokhwa or v4l2).

@@ -15,6 +15,7 @@ mod csi;
 mod depth;
 mod fusion;
 mod pointcloud;
+mod serial_csi;
 mod stream;
 mod training;
 

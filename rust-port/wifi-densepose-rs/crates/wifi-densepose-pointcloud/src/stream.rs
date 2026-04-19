@@ -1,9 +1,10 @@
-//! HTTP server for real-time point cloud streaming with live camera + CSI.
+//! HTTP server — live camera + ESP32 CSI + fusion → real-time point cloud.
 
 use crate::camera;
 use crate::depth;
 use crate::fusion;
 use crate::pointcloud;
+use crate::serial_csi;
 use axum::{
     extract::State,
     response::{Html, IntoResponse},
@@ -13,22 +14,36 @@ use axum::{
 use std::sync::{Arc, Mutex};
 
 struct AppState {
-    /// Cached latest point cloud (refreshed by background task)
     latest_cloud: Mutex<pointcloud::PointCloud>,
     latest_splats: Mutex<Vec<pointcloud::GaussianSplat>>,
     frame_count: Mutex<u64>,
     use_camera: bool,
+    csi_state: Option<Arc<Mutex<serial_csi::CsiState>>>,
 }
 
 pub async fn serve(host: &str, port: u16, _wifi_source: Option<&str>) -> anyhow::Result<()> {
     let has_camera = camera::camera_available();
-    let initial_cloud = if has_camera {
-        capture_live_cloud()
+
+    // CSI serial readers — only start if explicitly requested via env var
+    // (serial reader needs proper baud rate config to avoid reconnect loop)
+    let csi_state = if std::env::var("RUVIEW_CSI").is_ok() {
+        let mut csi_ports = Vec::new();
+        for p in &["/dev/ttyACM0", "/dev/ttyUSB0"] {
+            if std::path::Path::new(p).exists() { csi_ports.push(*p); }
+        }
+        if !csi_ports.is_empty() {
+            eprintln!("  CSI ports: {:?}", csi_ports);
+            Some(serial_csi::start_serial_readers(&csi_ports))
+        } else { None }
     } else {
-        let occ = fusion::demo_occupancy();
-        let wc = fusion::occupancy_to_pointcloud(&occ);
-        let dc = depth::demo_depth_cloud();
-        fusion::fuse_clouds(&[&wc, &dc], 0.05)
+        eprintln!("  CSI: disabled (set RUVIEW_CSI=1 to enable)");
+        None
+    };
+
+    let initial_cloud = if has_camera {
+        capture_live_cloud(csi_state.as_ref())
+    } else {
+        demo_cloud()
     };
     let initial_splats = pointcloud::to_gaussian_splats(&initial_cloud);
 
@@ -37,29 +52,32 @@ pub async fn serve(host: &str, port: u16, _wifi_source: Option<&str>) -> anyhow:
         latest_splats: Mutex::new(initial_splats),
         frame_count: Mutex::new(0),
         use_camera: has_camera,
+        csi_state: csi_state.clone(),
     });
 
-    // Background: capture frames every 500ms
-    if has_camera {
-        let bg = state.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                let cloud = tokio::task::spawn_blocking(capture_live_cloud).await.unwrap_or_else(|_| {
-                    let occ = fusion::demo_occupancy();
-                    let dc = depth::demo_depth_cloud();
-                    fusion::fuse_clouds(&[&fusion::occupancy_to_pointcloud(&occ), &dc], 0.05)
-                });
-                let splats = pointcloud::to_gaussian_splats(&cloud);
-                *bg.latest_cloud.lock().unwrap() = cloud;
-                *bg.latest_splats.lock().unwrap() = splats;
-                *bg.frame_count.lock().unwrap() += 1;
-            }
-        });
-        eprintln!("  Camera: LIVE (/dev/video0, 2 fps capture)");
-    } else {
-        eprintln!("  Camera: DEMO (no /dev/video0)");
-    }
+    // Background: capture + fuse every 500ms
+    let bg = state.clone();
+    let bg_csi = csi_state.clone();
+    let bg_cam = has_camera;
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let csi_clone = bg_csi.clone();
+            let cloud = if bg_cam {
+                tokio::task::spawn_blocking(move || capture_live_cloud(csi_clone.as_ref()))
+                    .await.unwrap_or_else(|_| demo_cloud())
+            } else {
+                demo_cloud()
+            };
+            let splats = pointcloud::to_gaussian_splats(&cloud);
+            *bg.latest_cloud.lock().unwrap() = cloud;
+            *bg.latest_splats.lock().unwrap() = splats;
+            *bg.frame_count.lock().unwrap() += 1;
+        }
+    });
+
+    if has_camera { eprintln!("  Camera: LIVE (/dev/video0)"); }
+    else { eprintln!("  Camera: DEMO"); }
 
     let app = Router::new()
         .route("/", get(index))
@@ -71,9 +89,8 @@ pub async fn serve(host: &str, port: u16, _wifi_source: Option<&str>) -> anyhow:
 
     let addr = format!("{host}:{port}");
     println!("╔══════════════════════════════════════════════╗");
-    println!("║  RuView Dense Point Cloud Server             ║");
+    println!("║  RuView Dense Point Cloud — ALL SENSORS      ║");
     println!("╚══════════════════════════════════════════════╝");
-    println!("  HTTP:   http://{addr}");
     println!("  Viewer: http://{addr}/");
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -81,33 +98,91 @@ pub async fn serve(host: &str, port: u16, _wifi_source: Option<&str>) -> anyhow:
     Ok(())
 }
 
-/// Capture a live frame from the camera and generate a depth point cloud.
-fn capture_live_cloud() -> pointcloud::PointCloud {
-    let config = camera::CameraConfig::default();
-    match camera::capture_frame(&config) {
-        Ok(frame) => {
-            match depth::estimate_depth(&frame.rgb, frame.width, frame.height) {
-                Ok(depth_map) => {
-                    let intrinsics = depth::CameraIntrinsics::default();
-                    depth::backproject_depth(&depth_map, &intrinsics, Some(&frame.rgb), 4) // downsample 4x
+fn capture_live_cloud(csi: Option<&Arc<Mutex<serial_csi::CsiState>>>) -> pointcloud::PointCloud {
+    // 1. Camera → depth → dense points
+    let cam_cloud = {
+        let config = camera::CameraConfig::default();
+        match camera::capture_frame(&config) {
+            Ok(frame) => {
+                match depth::estimate_depth(&frame.rgb, frame.width, frame.height) {
+                    Ok(dm) => {
+                        let intr = depth::CameraIntrinsics::default();
+                        depth::backproject_depth(&dm, &intr, Some(&frame.rgb), 2)
+                    }
+                    Err(_) => depth::demo_depth_cloud(),
                 }
-                Err(_) => depth::demo_depth_cloud(),
             }
+            Err(_) => depth::demo_depth_cloud(),
         }
-        Err(_) => depth::demo_depth_cloud(),
+    };
+
+    // 2. CSI → motion + presence → modify point cloud
+    let mut clouds: Vec<&pointcloud::PointCloud> = vec![&cam_cloud];
+
+    let csi_cloud;
+    if let Some(csi_state) = csi {
+        let (motion, distance, frames) = serial_csi::get_csi_influence(csi_state);
+        if frames > 0 {
+            // Create CSI-informed occupancy around detected presence
+            let mut occ = fusion::OccupancyVolume {
+                densities: vec![0.0; 8 * 8 * 4],
+                nx: 8, ny: 8, nz: 4,
+                bounds: [
+                    -distance as f64, -distance as f64, 0.0,
+                    distance as f64, distance as f64, 2.5,
+                ],
+                occupied_count: 0,
+            };
+
+            // Place high density where CSI indicates presence
+            let cx: usize = 4; let cy: usize = 4;
+            let radius: usize = (motion * 3.0).max(1.0) as usize;
+            for iz in 0..4 {
+                for iy in (cy.saturating_sub(radius))..=(cy + radius).min(7) {
+                    for ix in (cx.saturating_sub(radius))..=(cx + radius).min(7) {
+                        let idx = iz * 64 + iy * 8 + ix;
+                        let dx = (ix as f32 - cx as f32).abs() / radius as f32;
+                        let dy = (iy as f32 - cy as f32).abs() / radius as f32;
+                        let r2 = dx * dx + dy * dy;
+                        if r2 < 1.0 {
+                            occ.densities[idx] = (1.0 - r2 as f64) * (0.5 + motion as f64 * 0.5);
+                        }
+                    }
+                }
+            }
+            occ.occupied_count = occ.densities.iter().filter(|&&d| d > 0.3).count();
+
+            csi_cloud = fusion::occupancy_to_pointcloud(&occ);
+            clouds.push(&csi_cloud);
+        }
     }
+
+    // 3. Fuse camera + CSI
+    if clouds.len() > 1 {
+        fusion::fuse_clouds(&clouds, 0.04)
+    } else {
+        cam_cloud
+    }
+}
+
+fn demo_cloud() -> pointcloud::PointCloud {
+    let occ = fusion::demo_occupancy();
+    let wc = fusion::occupancy_to_pointcloud(&occ);
+    let dc = depth::demo_depth_cloud();
+    fusion::fuse_clouds(&[&wc, &dc], 0.05)
 }
 
 async fn api_cloud(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let cloud = state.latest_cloud.lock().unwrap();
     let (min, max) = cloud.bounds();
     let frames = *state.frame_count.lock().unwrap();
+    let csi_info = state.csi_state.as_ref().map(|c| serial_csi::get_csi_influence(c));
     Json(serde_json::json!({
         "points": cloud.points.len(),
-        "bounds_min": min,
-        "bounds_max": max,
+        "bounds_min": min, "bounds_max": max,
         "live": state.use_camera,
         "frame": frames,
+        "csi": csi_info.map(|(m,d,f)| serde_json::json!({"motion":m,"distance_m":d,"frames":f})),
         "cloud": cloud.points.iter().take(1000).collect::<Vec<_>>(),
     }))
 }
@@ -115,23 +190,28 @@ async fn api_cloud(State(state): State<Arc<AppState>>) -> Json<serde_json::Value
 async fn api_splats(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let splats = state.latest_splats.lock().unwrap();
     let frames = *state.frame_count.lock().unwrap();
+    let csi_info = state.csi_state.as_ref().map(|c| serial_csi::get_csi_influence(c));
     Json(serde_json::json!({
         "splats": &*splats,
         "count": splats.len(),
         "live": state.use_camera,
         "frame": frames,
+        "csi": csi_info.map(|(m,d,f)| serde_json::json!({"motion":m,"distance_m":d,"frames":f})),
         "timestamp": chrono::Utc::now().timestamp_millis(),
     }))
 }
 
 async fn api_status(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let frames = *state.frame_count.lock().unwrap();
+    let csi_info = state.csi_state.as_ref().map(|c| serial_csi::get_csi_influence(c));
     Json(serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
         "live": state.use_camera,
-        "frames_captured": frames,
         "camera": if state.use_camera { "/dev/video0" } else { "demo" },
+        "csi_ports": if state.csi_state.is_some() { "active" } else { "none" },
+        "csi": csi_info.map(|(m,d,f)| serde_json::json!({"motion":m,"distance_m":d,"frames":f})),
+        "frames_captured": frames,
         "fps": 2,
     }))
 }
@@ -144,25 +224,26 @@ async fn index() -> Html<String> {
     Html(r#"<!DOCTYPE html>
 <html>
 <head>
-    <title>RuView Dense Point Cloud</title>
+    <title>RuView — Camera + WiFi CSI Point Cloud</title>
     <style>
-        body { margin: 0; background: #111; color: #e8a634; font-family: monospace; }
+        body { margin: 0; background: #0a0a0a; color: #e8a634; font-family: monospace; }
         canvas { display: block; }
-        #info { position: absolute; top: 10px; left: 10px; padding: 10px; background: rgba(0,0,0,0.8); border: 1px solid #e8a634; border-radius: 4px; }
+        #info { position: absolute; top: 10px; left: 10px; padding: 12px; background: rgba(0,0,0,0.85); border: 1px solid #e8a634; border-radius: 6px; min-width: 200px; }
+        .live { color: #4f4; } .demo { color: #f44; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 </head>
 <body>
     <div id="info">
-        <h3 style="margin:0 0 5px 0">RuView Point Cloud</h3>
+        <h3 style="margin:0 0 8px 0">RuView Point Cloud</h3>
         <div id="stats">Loading...</div>
     </div>
     <script>
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x111111);
+        scene.background = new THREE.Color(0x0a0a0a);
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
-        camera.position.set(0, 0, -3);
+        camera.position.set(0, 0, -2);
         camera.lookAt(0, 0, 3);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -172,8 +253,6 @@ async fn index() -> Html<String> {
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.target.set(0, 0, 3);
-
-        scene.add(new THREE.GridHelper(10, 20, 0x333333, 0x222222));
 
         let pointsMesh = null;
         let lastFrame = -1;
@@ -185,24 +264,25 @@ async fn index() -> Html<String> {
                 if (data.splats && data.frame !== lastFrame) {
                     lastFrame = data.frame;
                     updateSplats(data.splats);
-                    const mode = data.live ? '🟢 LIVE' : '🔴 DEMO';
+                    const mode = data.live ? '<span class="live">● LIVE</span>' : '<span class="demo">● DEMO</span>';
+                    let csiInfo = '';
+                    if (data.csi) {
+                        const m = (data.csi.motion * 100).toFixed(0);
+                        csiInfo = `<br>CSI: ${data.csi.frames} frames, motion ${m}%<br>Distance: ${data.csi.distance_m.toFixed(1)}m`;
+                    }
                     document.getElementById('stats').innerHTML =
-                        `${mode}<br>Splats: ${data.count}<br>Frame: ${data.frame}`;
+                        `${mode} Camera + CSI<br>Splats: ${data.count}<br>Frame: ${data.frame}${csiInfo}`;
                 }
-            } catch(e) {
-                document.getElementById('stats').innerHTML = 'Error: ' + e.message;
-            }
+            } catch(e) {}
         }
         fetchCloud();
         setInterval(fetchCloud, 500);
 
         function updateSplats(splats) {
             if (pointsMesh) scene.remove(pointsMesh);
-
             const geometry = new THREE.BufferGeometry();
             const positions = new Float32Array(splats.length * 3);
             const colors = new Float32Array(splats.length * 3);
-
             splats.forEach((s, i) => {
                 positions[i*3] = s.center[0];
                 positions[i*3+1] = -s.center[1];
@@ -211,17 +291,11 @@ async fn index() -> Html<String> {
                 colors[i*3+1] = s.color[1];
                 colors[i*3+2] = s.color[2];
             });
-
             geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
             geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-            const material = new THREE.PointsMaterial({
-                size: 0.03,
-                vertexColors: true,
-                sizeAttenuation: true,
-            });
-
-            pointsMesh = new THREE.Points(geometry, material);
+            pointsMesh = new THREE.Points(geometry, new THREE.PointsMaterial({
+                size: 0.025, vertexColors: true, sizeAttenuation: true,
+            }));
             scene.add(pointsMesh);
         }
 
@@ -231,7 +305,6 @@ async fn index() -> Html<String> {
             renderer.render(scene, camera);
         }
         animate();
-
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
