@@ -1,0 +1,20 @@
+[package]
+name = "wifi-densepose-pointcloud"
+version = "0.1.0"
+edition = "2021"
+description = "Real-time dense point cloud from camera depth + WiFi CSI tomography"
+
+[[bin]]
+name = "ruview-pointcloud"
+path = "src/main.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+axum = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+chrono = "0.4"
+dirs = "5"
+reqwest = { version = "0.12", features = ["json"], default-features = false }

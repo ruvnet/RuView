@@ -250,3 +250,5 @@ v1/src/sensing/mac_wifi
 # Local build scripts
 firmware/esp32-csi-node/build_firmware.batdata/
 models/
+demo_pointcloud.ply
+demo_splats.json
