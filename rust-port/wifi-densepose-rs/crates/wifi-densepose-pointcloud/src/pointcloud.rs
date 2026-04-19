@@ -89,7 +89,7 @@ pub struct GaussianSplat {
 
 pub fn to_gaussian_splats(cloud: &PointCloud) -> Vec<GaussianSplat> {
     // Cluster points into voxels and create one Gaussian per cluster
-    let voxel_size = 0.1;
+    let voxel_size = 0.15;  // larger voxels = fewer splats = faster streaming
     let mut cells: std::collections::HashMap<(i32, i32, i32), Vec<&ColorPoint>> = std::collections::HashMap::new();
 
     for p in &cloud.points {
