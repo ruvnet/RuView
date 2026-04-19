@@ -12,9 +12,9 @@ set(SRCS
 
 set(REQUIRES "")
 
-# ADR-061: Mock CSI generator for QEMU testing
+# ADR-061: Mock CSI generator for QEMU testing + ADR-081 mock radio binding
 if(CONFIG_CSI_MOCK_ENABLED)
-    list(APPEND SRCS "mock_csi.c")
+    list(APPEND SRCS "mock_csi.c" "rv_radio_ops_mock.c")
 endif()
 
 # ADR-045: AMOLED display support (compile-time optional)

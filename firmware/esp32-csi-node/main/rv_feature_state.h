@@ -69,8 +69,8 @@ typedef struct __attribute__((packed)) {
     uint32_t crc32;             /**< IEEE CRC32 over bytes [0..end-4]. */
 } rv_feature_state_t;
 
-_Static_assert(sizeof(rv_feature_state_t) == 80,
-               "rv_feature_state_t must be 80 bytes on the wire");
+_Static_assert(sizeof(rv_feature_state_t) == 60,
+               "rv_feature_state_t must be 60 bytes on the wire");
 
 /**
  * Compute IEEE CRC32 over a byte buffer.

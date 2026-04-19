@@ -25,12 +25,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `csi_collector` + `esp_wifi_*`. A second binding (mock or alternate
   chipset) is the portability acceptance test for ADR-081.
 - **Firmware: `rv_feature_state_t` packet (magic `0xC5110006`)** — New
-  80-byte compact per-node sensing state in
-  `firmware/esp32-csi-node/main/rv_feature_state.h`: motion, presence,
-  respiration BPM/conf, heartbeat BPM/conf, anomaly score, env-shift
-  score, node coherence, quality flags, IEEE CRC32. Designed to replace
-  raw ADR-018 CSI as the default upstream stream (~99% bandwidth
-  reduction vs. raw at 5 Hz).
+  60-byte compact per-node sensing state (packed, verified by
+  `_Static_assert`) in `firmware/esp32-csi-node/main/rv_feature_state.h`:
+  motion, presence, respiration BPM/conf, heartbeat BPM/conf, anomaly
+  score, env-shift score, node coherence, quality flags, IEEE CRC32.
+  Replaces raw ADR-018 CSI as the default upstream stream (~99.7%
+  bandwidth reduction: 300 B/s at 5 Hz vs. ~100 KB/s raw).
+- **Firmware: mock radio ops binding for QEMU** — New
+  `firmware/esp32-csi-node/main/rv_radio_ops_mock.c`, compiled only when
+  `CONFIG_CSI_MOCK_ENABLED`. Satisfies ADR-081's portability acceptance
+  test: a second `rv_radio_ops_t` binding compiles and runs against the
+  same controller + mesh-plane code as the ESP32 binding.
+- **Firmware: feature-state emitter wired into controller fast loop** —
+  `adaptive_controller.c` now emits one 60-byte `rv_feature_state_t` per
+  fast tick (default 200 ms → 5 Hz), pulling from the latest edge vitals
+  and controller observation. This is the first end-to-end Layer 4/5
+  path for ADR-081.
+- **Firmware: `csi_collector_get_pkt_yield_per_sec()` /
+  `_get_send_fail_count()` accessors** — Expose the CSI callback rate
+  and UDP send-failure counter so the ESP32 radio ops binding can
+  populate `rv_radio_health_t.pkt_yield_per_sec` and `.send_fail_count`,
+  closing the adaptive controller's observation loop.
+- **Firmware: host-side unit test suite for ADR-081 pure logic** — New
+  `firmware/esp32-csi-node/tests/host/` (Makefile + 2 test files + shim
+  `esp_err.h`). Exercises `adaptive_controller_decide()` (9 test cases:
+  degraded gate on pkt-yield collapse + coherence loss, anomaly > motion,
+  motion → SENSE_ACTIVE, aggressive cadence, stable presence →
+  RESP_HIGH_SENS, empty-room default, hysteresis, NULL safety) and
+  `rv_feature_state_*` helpers (size assertion, IEEE CRC32 known
+  vectors, determinism, receiver-side verification). 33/33 assertions
+  pass. Benchmarks: decide() 3.2 ns/call, CRC32(56 B) 614 ns/pkt
+  (87 MB/s), full finalize() 616 ns/call. Pure function
+  `adaptive_controller_decide()` extracted to
+  `adaptive_controller_decide.c` so the firmware build and the host
+  tests share a single source-of-truth implementation.
+- **Scripts: `validate_qemu_output.py` ADR-081 checks** — Validator
+  (invoked by ADR-061 `scripts/qemu-esp32s3-test.sh` in CI) gains three
+  checks for adaptive controller boot line, mock radio ops
+  registration, and slow-loop heartbeat, so QEMU runs regression-gate
+  Layer 1/2 presence.
 - **Firmware: adaptive controller** — New
   `firmware/esp32-csi-node/main/adaptive_controller.{c,h}` implements
   the three-loop closed-loop control specified by ADR-081: fast

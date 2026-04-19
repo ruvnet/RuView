@@ -280,16 +280,21 @@ void app_main(void)
     ESP_LOGI(TAG, "Mock CSI mode: skipping swarm bridge");
 #endif
 
-    /* ADR-081 Layer 1: register the ESP32 radio ops binding now that
-     * csi_collector_init() has run. Skipped under mock CSI; a future
-     * mock binding can register itself instead. */
-#ifndef CONFIG_CSI_MOCK_ENABLED
+    /* ADR-081 Layer 1: register the active radio ops binding.
+     * - Real hardware: ESP32 binding wrapping csi_collector + esp_wifi.
+     * - QEMU / offline: mock binding wrapping mock_csi.c.
+     * Either way, the layers above (adaptive controller, mesh plane,
+     * feature extraction) address the radio through the same vtable —
+     * this is the portability acceptance test in ADR-081. */
+#ifdef CONFIG_CSI_MOCK_ENABLED
+    rv_radio_ops_mock_register();
+#else
     rv_radio_ops_esp32_register();
+#endif
     const rv_radio_ops_t *radio_ops = rv_radio_ops_get();
     if (radio_ops != NULL && radio_ops->init != NULL) {
         radio_ops->init();
     }
-#endif
 
     /* ADR-081 Layer 2: start the adaptive controller. NULL config → use
      * Kconfig defaults. Default policy is conservative: no channel

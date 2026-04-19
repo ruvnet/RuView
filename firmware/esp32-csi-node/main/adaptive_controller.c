@@ -14,7 +14,10 @@
 
 #include "adaptive_controller.h"
 #include "rv_radio_ops.h"
+#include "rv_feature_state.h"
 #include "edge_processing.h"
+#include "stream_sender.h"
+#include "csi_collector.h"
 
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -86,78 +89,10 @@ static void apply_defaults(adapt_config_t *cfg)
     cfg->min_pkt_yield     = CONFIG_ADAPTIVE_MIN_PKT_YIELD;
 }
 
-/* ---- Pure decision function (unit-testable) ---- */
-
-void adaptive_controller_decide(const adapt_config_t *cfg,
-                                adapt_state_t current,
-                                const adapt_observation_t *obs,
-                                adapt_decision_t *out)
-{
-    if (cfg == NULL || obs == NULL || out == NULL) {
-        return;
-    }
-    memset(out, 0, sizeof(*out));
-    out->new_state   = (uint8_t)current;
-    out->new_profile = RV_PROFILE_PASSIVE_LOW_RATE;
-
-    /* Degraded gate: any of pkt yield collapse, severe coherence loss → DEGRADED. */
-    if (obs->pkt_yield_per_sec < cfg->min_pkt_yield ||
-        obs->node_coherence    < 0.20f) {
-        if (current != ADAPT_STATE_DEGRADED) {
-            out->change_state = true;
-            out->new_state    = ADAPT_STATE_DEGRADED;
-        }
-        out->change_profile = (current != ADAPT_STATE_DEGRADED);
-        out->new_profile    = RV_PROFILE_PASSIVE_LOW_RATE;
-        out->suggested_vital_interval_ms = 2000;
-        return;
-    }
-
-    /* Anomaly trumps motion. */
-    if (obs->anomaly_score >= cfg->anomaly_threshold) {
-        if (current != ADAPT_STATE_ALERT) {
-            out->change_state = true;
-            out->new_state    = ADAPT_STATE_ALERT;
-        }
-        out->change_profile = true;
-        out->new_profile    = RV_PROFILE_FAST_MOTION;
-        out->suggested_vital_interval_ms = 100;
-        return;
-    }
-
-    /* Motion → SENSE_ACTIVE with FAST_MOTION profile. */
-    if (obs->motion_score >= cfg->motion_threshold) {
-        if (current != ADAPT_STATE_SENSE_ACTIVE) {
-            out->change_state = true;
-            out->new_state    = ADAPT_STATE_SENSE_ACTIVE;
-        }
-        out->change_profile = true;
-        out->new_profile    = RV_PROFILE_FAST_MOTION;
-        out->suggested_vital_interval_ms = cfg->aggressive ? 100 : 200;
-        return;
-    }
-
-    /* Stable environment with valid presence → high-sensitivity respiration mode. */
-    if (obs->presence_score >= 0.5f && obs->motion_score < 0.05f) {
-        if (current != ADAPT_STATE_SENSE_IDLE) {
-            out->change_state = true;
-            out->new_state    = ADAPT_STATE_SENSE_IDLE;
-        }
-        out->change_profile = true;
-        out->new_profile    = RV_PROFILE_RESP_HIGH_SENS;
-        out->suggested_vital_interval_ms = 1000;
-        return;
-    }
-
-    /* Default: passive low rate. */
-    if (current != ADAPT_STATE_SENSE_IDLE) {
-        out->change_state = true;
-        out->new_state    = ADAPT_STATE_SENSE_IDLE;
-    }
-    out->change_profile = (current != ADAPT_STATE_SENSE_IDLE);
-    out->new_profile    = RV_PROFILE_PASSIVE_LOW_RATE;
-    out->suggested_vital_interval_ms = cfg->aggressive ? 500 : 1000;
-}
+/* Pure decision policy lives in its own file so it can link under
+ * host unit tests without FreeRTOS. It is part of this translation
+ * unit via #include to preserve a single object at build time. */
+#include "adaptive_controller_decide.c"
 
 /* ---- Observation collection ---- */
 
@@ -237,6 +172,12 @@ static void fast_loop_cb(TimerHandle_t t)
     adapt_decision_t dec;
     adaptive_controller_decide(&s_cfg, s_state, &obs, &dec);
     apply_decision(&dec);
+
+    /* ADR-081 Layer 4/5: emit compact feature state on every fast tick
+     * (default 200 ms → 5 Hz, within the 1–10 Hz spec). Replaces raw
+     * ADR-018 CSI as the default upstream; raw remains available as a
+     * debug stream gated by the channel plan. */
+    emit_feature_state();
 }
 
 static void medium_loop_cb(TimerHandle_t t)
@@ -260,13 +201,81 @@ static void medium_loop_cb(TimerHandle_t t)
     }
 }
 
+/* ADR-081 Layer 4: emit one rv_feature_state_t packet onto the wire.
+ *
+ * Pulls from the latest observation + latest vitals + the active capture
+ * profile. Send is best-effort — stream_sender will report its own
+ * failures; we don't re-queue. At 5 Hz default cadence this is 300 B/s
+ * per node, vs. ~100 KB/s for raw ADR-018 CSI. */
+static uint16_t s_feature_state_seq = 0;
+
+static void emit_feature_state(void)
+{
+    rv_feature_state_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+
+    adapt_observation_t obs;
+    bool have_obs = false;
+    portENTER_CRITICAL(&s_obs_lock);
+    if (s_obs_valid) {
+        obs = s_last_obs;
+        have_obs = true;
+    }
+    portEXIT_CRITICAL(&s_obs_lock);
+
+    if (have_obs) {
+        pkt.motion_score    = obs.motion_score;
+        pkt.presence_score  = obs.presence_score;
+        pkt.anomaly_score   = obs.anomaly_score;
+        pkt.node_coherence  = obs.node_coherence;
+    }
+
+    /* Fill vitals from edge_processing's latest packet. */
+    edge_vitals_pkt_t v;
+    if (edge_get_vitals(&v)) {
+        pkt.respiration_bpm  = (float)v.breathing_rate / 100.0f;
+        pkt.heartbeat_bpm    = (float)v.heartrate / 10000.0f;
+        /* Confidence proxies: presence score for resp, 1.0 if heart BPM
+         * is within physiological range. */
+        pkt.respiration_conf = (v.breathing_rate > 0) ? v.presence_score : 0.0f;
+        pkt.heartbeat_conf   = (v.heartrate > 400000u && v.heartrate < 1800000u)
+                                 ? 0.8f : 0.0f;
+        if (pkt.respiration_bpm > 0.0f) pkt.quality_flags |= RV_QFLAG_RESPIRATION_VALID;
+        if (pkt.heartbeat_bpm   > 0.0f) pkt.quality_flags |= RV_QFLAG_HEARTBEAT_VALID;
+        if (pkt.presence_score >= 0.5f) pkt.quality_flags |= RV_QFLAG_PRESENCE_VALID;
+        if (v.flags & 0x02)             pkt.quality_flags |= RV_QFLAG_ANOMALY_TRIGGERED;  /* fall bit */
+    }
+
+    if (s_state == ADAPT_STATE_DEGRADED)   pkt.quality_flags |= RV_QFLAG_DEGRADED_MODE;
+    if (s_state == ADAPT_STATE_CALIBRATION) pkt.quality_flags |= RV_QFLAG_CALIBRATING;
+
+    /* Active profile, for receiver-side weighting. */
+    const rv_radio_ops_t *ops = rv_radio_ops_get();
+    uint8_t profile = RV_PROFILE_PASSIVE_LOW_RATE;
+    if (ops != NULL && ops->get_health != NULL) {
+        rv_radio_health_t h;
+        if (ops->get_health(&h) == ESP_OK) profile = h.current_profile;
+    }
+
+    rv_feature_state_finalize(&pkt,
+                              csi_collector_get_node_id(),
+                              s_feature_state_seq++,
+                              (uint64_t)esp_timer_get_time(),
+                              profile);
+
+    int sent = stream_sender_send((const uint8_t *)&pkt, sizeof(pkt));
+    if (sent < 0) {
+        ESP_LOGW(TAG, "feature_state emit failed");
+    }
+}
+
 static void slow_loop_cb(TimerHandle_t t)
 {
     (void)t;
-    /* Slow loop: publish a HEALTH message, request CALIBRATION_START on
-     * sustained drift. Both routed through swarm_bridge once the mesh
-     * plane lands. Today we log a rollover so operators see the cadence. */
-    ESP_LOGI(TAG, "slow tick (state=%u)", (unsigned)s_state);
+    /* Slow loop: log a heartbeat and (future Phase 3) publish HEALTH
+     * messages + request CALIBRATION_START on sustained drift. */
+    ESP_LOGI(TAG, "slow tick (state=%u, feature_state_seq=%u)",
+             (unsigned)s_state, (unsigned)s_feature_state_seq);
 }
 
 /* ---- Public API ---- */

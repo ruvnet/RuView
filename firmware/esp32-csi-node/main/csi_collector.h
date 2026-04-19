@@ -94,4 +94,23 @@ void csi_collector_start_hop_timer(void);
  */
 esp_err_t csi_inject_ndp_frame(void);
 
+/**
+ * Get the recent CSI callback rate (per second).
+ *
+ * Computed as a sliding 1-second window over the internal s_cb_count
+ * counter. Used by the ADR-081 radio abstraction layer to fill the
+ * pkt_yield_per_sec field of rv_radio_health_t.
+ *
+ * @return Callbacks observed in the trailing ~1 second.
+ */
+uint16_t csi_collector_get_pkt_yield_per_sec(void);
+
+/**
+ * Get the cumulative UDP send-failure counter since boot.
+ *
+ * @return Number of stream_sender_send() failures recorded by the
+ *         CSI callback path.
+ */
+uint16_t csi_collector_get_send_fail_count(void);
+
 #endif /* CSI_COLLECTOR_H */

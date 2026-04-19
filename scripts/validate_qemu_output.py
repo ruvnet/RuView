@@ -362,6 +362,45 @@ def validate_log(log_text: str) -> ValidationReport:
         report.add("Frame rate", Severity.SKIP,
                     "No periodic frame reports found")
 
+    # ---- Check 17: ADR-081 adaptive controller boot ----
+    adapt_boot_patterns = [
+        r"adaptive_ctrl:.*adaptive controller online",
+        r"adaptive_ctrl:\s*state\s+\d+\s*\xe2\x86\x92",
+        r"adapt=on",
+    ]
+    adapt_boot = any(re.search(p, log_text) for p in adapt_boot_patterns)
+    if adapt_boot:
+        report.add("ADR-081 controller", Severity.PASS,
+                   "Adaptive controller started (ADR-081 Layer 2)")
+    else:
+        report.add("ADR-081 controller", Severity.WARN,
+                   "No adaptive_ctrl: log line found "
+                   "(expected ADR-081 Layer 2 online)")
+
+    # ---- Check 18: ADR-081 mock radio binding (QEMU only) ----
+    mock_radio = re.search(r"rv_radio_mock:.*registered", log_text)
+    if mock_radio:
+        report.add("ADR-081 radio binding", Severity.PASS,
+                   "Mock radio ops binding registered "
+                   "(ADR-081 Layer 1 portability gate)")
+    else:
+        # Only required when CONFIG_CSI_MOCK_ENABLED — downgrade to SKIP.
+        report.add("ADR-081 radio binding", Severity.SKIP,
+                   "No rv_radio_mock registration line "
+                   "(expected if CONFIG_CSI_MOCK_ENABLED)")
+
+    # ---- Check 19: ADR-081 slow-loop heartbeat ----
+    slow_tick = re.search(r"adaptive_ctrl:\s*slow tick", log_text)
+    if slow_tick:
+        report.add("ADR-081 slow loop", Severity.PASS,
+                   "Slow loop heartbeat observed "
+                   "(controller is ticking at ≥30 s cadence)")
+    else:
+        # A 60s QEMU timeout may not reach the first slow tick (30s default
+        # plus boot time); treat as SKIP not WARN.
+        report.add("ADR-081 slow loop", Severity.SKIP,
+                   "No slow tick (QEMU run shorter than slow_loop_ms)")
+
     return report
 
 

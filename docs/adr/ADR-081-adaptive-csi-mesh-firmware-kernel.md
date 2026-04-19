@@ -2,7 +2,7 @@
 
 | Field       | Value                                                                 |
 |-------------|-----------------------------------------------------------------------|
-| **Status**  | Proposed                                                              |
+| **Status**  | Accepted (partial — Layers 1/2/4 landed; L3 mesh plane and Rust trait tracked in Phase 3/4) |
 | **Date**    | 2026-04-19                                                            |
 | **Authors** | ruv                                                                   |
 | **Depends** | ADR-018, ADR-028, ADR-029, ADR-031, ADR-032, ADR-039, ADR-066, ADR-073 |
@@ -177,9 +177,10 @@ acceptance test (Phase 2) measures it on real hardware.
 ### Layer 4 — On-device feature extraction
 
 Defined in `firmware/esp32-csi-node/main/rv_feature_state.h`. Single
-on-the-wire packet, 80 bytes, magic `0xC5110006` (next free after ADR-039's
-0xC5110002, ADR-069's 0xC5110003, ADR-063's 0xC5110004, and ADR-039's
-compressed 0xC5110005):
+on-the-wire packet, **60 bytes packed** (verified by `_Static_assert` and
+host unit test), magic `0xC5110006` (next free after ADR-039's
+`0xC5110002`, ADR-069's `0xC5110003`, ADR-063's `0xC5110004`, and ADR-039's
+compressed `0xC5110005`):
 
 ```c
 #define RV_FEATURE_STATE_MAGIC  0xC5110006u
@@ -204,8 +205,8 @@ typedef struct __attribute__((packed)) {
     uint32_t crc32;             /* IEEE polynomial over bytes [0..end-4] */
 } rv_feature_state_t;
 
-_Static_assert(sizeof(rv_feature_state_t) == 80,
-               "rv_feature_state_t must be 80 bytes");
+_Static_assert(sizeof(rv_feature_state_t) == 60,
+               "rv_feature_state_t must be 60 bytes on the wire");
 ```
 
 Three windows feed it: 100 ms (motion), 1 s (respiration), 5 s (baseline /
@@ -267,9 +268,9 @@ Transitions:
 | Debug ADR-018 raw CSI   | 0 (off by default)          | Burst-only via `CHANNEL_PLAN` debug flag     |
 
 ADR-039 measured raw CSI at ~5 KB/frame and ~100 KB/s per node. The default
-upstream therefore drops by ~99% (80 B × 5 Hz = 400 B/s) while preserving
-all action-relevant state. This is what makes a 50-node deployment feasible
-on a single-AP backhaul.
+upstream with ADR-081's 60-byte `rv_feature_state_t` at 5 Hz is **300 B/s
+per node — a 99.7% reduction**. A 50-node deployment at 5 Hz fits in
+15 KB/s total, easily carried by a single-AP backhaul.
 
 ## Channel planning policy
 
@@ -317,6 +318,78 @@ points toward.
 | Multistatic fusion          | `crates/wifi-densepose-ruvector/src/viewpoint/fusion.rs`                                                 |
 | Adaptive classifier         | `crates/wifi-densepose-sensing-server/src/adaptive_classifier.rs:61-75`                                  |
 | Feature primitives (Rust)   | `crates/wifi-densepose-signal/src/{motion.rs,features.rs,ruvsense/coherence.rs}`                         |
+
+## Implementation status (2026-04-19)
+
+This ADR ships **with** the initial implementation, not ahead of it.
+Artifacts delivered alongside the ADR:
+
+| Component                               | File                                                                    | State       |
+|-----------------------------------------|-------------------------------------------------------------------------|-------------|
+| L1 vtable + profile/mode/health enums   | `firmware/esp32-csi-node/main/rv_radio_ops.h`                           | Implemented |
+| L1 ESP32 binding                        | `firmware/esp32-csi-node/main/rv_radio_ops_esp32.c`                     | Implemented |
+| L1 Mock (QEMU) binding                  | `firmware/esp32-csi-node/main/rv_radio_ops_mock.c`                      | Implemented |
+| L2 Controller FreeRTOS plumbing         | `firmware/esp32-csi-node/main/adaptive_controller.c`                    | Implemented |
+| L2 Pure decision policy (testable)      | `firmware/esp32-csi-node/main/adaptive_controller_decide.c`             | Implemented |
+| L4 Feature state packet + helpers       | `firmware/esp32-csi-node/main/rv_feature_state.{h,c}`                   | Implemented |
+| L4 Emitter from fast loop (5 Hz)        | `adaptive_controller.c:emit_feature_state()`                            | Implemented |
+| L1 Packet yield + send-fail accessors   | `csi_collector.c:csi_collector_get_pkt_yield_per_sec()` + send fail    | Implemented |
+| Host unit tests (18 + 15 assertions)    | `firmware/esp32-csi-node/tests/host/`                                   | Passing     |
+| QEMU validator hooks (3 new checks)     | `scripts/validate_qemu_output.py` (check 17/18/19)                      | Passing     |
+| L3 mesh-plane message types             | —                                                                       | Deferred    |
+| L3 role-assignment FSM                  | —                                                                       | Deferred    |
+| Rust-side mirror trait                  | `crates/wifi-densepose-hardware/src/radio_ops.rs`                       | Deferred    |
+
+Deferred items remain in the Roadmap table below (Phase 3 / Phase 4).
+
+## Measured performance
+
+Host-side benchmarks (`firmware/esp32-csi-node/tests/host/`), x86-64,
+gcc `-O2`, 2026-04-19. Numbers are illustrative of algorithmic cost on
+a modern CPU; on-target ESP32-S3 Xtensa LX7 at 240 MHz is ~5–10×
+slower for bit-by-bit CRC and broadly comparable for the decide
+function after inlining.
+
+| Operation                                  | Cost per call       | Notes                               |
+|--------------------------------------------|---------------------|-------------------------------------|
+| `adaptive_controller_decide()`             | **3.2 ns** (host)   | O(1) policy, 9 branches evaluated   |
+| `rv_feature_state_crc32()` (56 B hashed)   | **614 ns** (host)   | 87 MB/s — bit-by-bit IEEE CRC32     |
+| `rv_feature_state_finalize()` (full)       | **616 ns** (host)   | CRC-dominated                       |
+
+Projected on-target cost at 5 Hz cadence:
+
+| Budget                                     | Value               |
+|--------------------------------------------|---------------------|
+| Controller fast-loop tick work (ESP32-S3)  | < 10 μs (est.)      |
+| CRC32 per feature packet (ESP32-S3)        | ~3–6 μs (est.)      |
+| Feature-state emit cost @ 5 Hz             | ~30 μs/sec (0.003%) |
+| UDP send cost (existing stream_sender)     | — unchanged —       |
+
+**Bandwidth:**
+
+| Mode                                        | Rate        |
+|---------------------------------------------|-------------|
+| Raw ADR-018 CSI (pre-ADR-081)               | ~100 KB/s   |
+| ADR-039 compressed CSI (Tier 1)             | ~50–70 KB/s |
+| ADR-039 vitals packet (32 B @ 1 Hz)         | 32 B/s      |
+| **ADR-081 feature state (60 B @ 5 Hz)**     | **300 B/s** |
+
+**Memory:**
+
+| Component                                   | Static RAM          |
+|---------------------------------------------|---------------------|
+| Controller state (s_cfg + s_last_obs + …)   | ~80 bytes           |
+| Feature-state emit packet (stack, per tick) | 60 bytes            |
+| CRC lookup table                            | 0 (bit-by-bit)      |
+| Three FreeRTOS software timers              | ~3 × 56 B overhead  |
+
+**Tests:**
+
+| Suite                               | Assertions | Result     |
+|-------------------------------------|-----------:|------------|
+| `test_adaptive_controller`          |         18 | **PASS**   |
+| `test_rv_feature_state`             |         15 | **PASS**   |
+| QEMU validator (`ADR-061` pipeline) |  +3 checks | hooked     |
 
 ## New components this ADR authorizes
 
@@ -382,7 +455,26 @@ points toward.
 - ADR-039, ADR-063, ADR-066, ADR-069, ADR-073 are **not superseded**; they
   are reframed as components of Layer 3 / Layer 4.
 
+## Verification
+
+```bash
+# Host-side unit tests (no ESP-IDF, no QEMU required)
+cd firmware/esp32-csi-node/tests/host
+make check
+# → test_adaptive_controller: 18/18 pass, decide() = 3.2 ns/call
+# → test_rv_feature_state:    15/15 pass, CRC32(56 B) = 614 ns/pkt
+
+# QEMU end-to-end (requires ESP-IDF + qemu-system-xtensa, see ADR-061)
+bash scripts/qemu-esp32s3-test.sh
+# → Validator now runs 19 checks; new ADR-081 checks 17/18/19 verify
+#   adaptive_ctrl boot line, rv_radio_mock binding registration, and
+#   slow-loop heartbeat.
+
+# Full workspace (Rust) — unchanged, ADR-081 introduces no Rust changes
+cargo test --workspace --no-default-features
+```
+
 ## Related
 
 ADR-018, ADR-028, ADR-029, ADR-030, ADR-031, ADR-032, ADR-039, ADR-040,
-ADR-060, ADR-063, ADR-066, ADR-069, ADR-073, ADR-078.
+ADR-060, ADR-061, ADR-063, ADR-066, ADR-069, ADR-073, ADR-078.

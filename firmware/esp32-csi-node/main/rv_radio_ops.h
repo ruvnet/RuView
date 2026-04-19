@@ -128,6 +128,13 @@ const rv_radio_ops_t *rv_radio_ops_get(void);
  */
 void rv_radio_ops_esp32_register(void);
 
+/**
+ * Register the mock binding (QEMU / offline) as the active radio ops.
+ *
+ * Defined in rv_radio_ops_mock.c; only built when CONFIG_CSI_MOCK_ENABLED.
+ */
+void rv_radio_ops_mock_register(void);
+
 #ifdef __cplusplus
 }
 #endif

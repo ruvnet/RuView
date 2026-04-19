@@ -142,12 +142,11 @@ static int esp32_get_health(rv_radio_health_t *out)
     }
     memset(out, 0, sizeof(*out));
 
-    /* pkt_yield and send_fail are filled by the adaptive controller from
-     * its own counters today (csi_collector keeps statics that are not yet
-     * exposed). The binding fills the fields it owns directly. */
-    out->current_channel = s_current_channel;
-    out->current_bw_mhz  = s_current_bw;
-    out->current_profile = s_current_profile;
+    out->pkt_yield_per_sec = csi_collector_get_pkt_yield_per_sec();
+    out->send_fail_count   = csi_collector_get_send_fail_count();
+    out->current_channel   = s_current_channel;
+    out->current_bw_mhz    = s_current_bw;
+    out->current_profile   = s_current_profile;
 
     wifi_ap_record_t ap = {0};
     if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {

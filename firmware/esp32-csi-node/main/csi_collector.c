@@ -308,6 +308,43 @@ uint8_t csi_collector_get_node_id(void)
     return s_node_id;
 }
 
+/* ---- ADR-081: packet yield accessor for the radio abstraction layer ---- */
+
+uint16_t csi_collector_get_pkt_yield_per_sec(void)
+{
+    /* Simple sliding window: record the callback count at ~1 s ago, return
+     * the delta. Called from adaptive_controller's fast loop (200 ms), so
+     * we update the snapshot every ~5 calls. */
+    static int64_t  s_yield_window_start_us = 0;
+    static uint32_t s_yield_window_start_cb = 0;
+    static uint16_t s_last_yield            = 0;
+
+    int64_t now = esp_timer_get_time();
+    if (s_yield_window_start_us == 0) {
+        s_yield_window_start_us = now;
+        s_yield_window_start_cb = s_cb_count;
+        return 0;
+    }
+    int64_t elapsed = now - s_yield_window_start_us;
+    if (elapsed < 1000000LL) {
+        return s_last_yield;
+    }
+    uint32_t delta = s_cb_count - s_yield_window_start_cb;
+    /* Scale back to per-second if the window ran long (shouldn't, but be safe). */
+    uint64_t per_sec = ((uint64_t)delta * 1000000ULL) / (uint64_t)elapsed;
+    if (per_sec > 0xFFFFu) per_sec = 0xFFFFu;
+    s_last_yield            = (uint16_t)per_sec;
+    s_yield_window_start_us = now;
+    s_yield_window_start_cb = s_cb_count;
+    return s_last_yield;
+}
+
+uint16_t csi_collector_get_send_fail_count(void)
+{
+    uint32_t f = s_send_fail;
+    return (f > 0xFFFFu) ? 0xFFFFu : (uint16_t)f;
+}
+
 /* ---- ADR-029: Channel hopping ---- */
 
 void csi_collector_set_hop_table(const uint8_t *channels, uint8_t hop_count, uint32_t dwell_ms)
