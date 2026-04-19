@@ -122,17 +122,23 @@ async fn index() -> Html<String> {
 
         let pointsMesh = null;
 
-        // WebSocket
-        const ws = new WebSocket(`ws://${location.host}/ws`);
-        ws.onmessage = (e) => {
-            const data = JSON.parse(e.data);
-            if (data.type === 'pointcloud' && data.splats) {
-                updateSplats(data.splats);
-                document.getElementById('stats').innerHTML =
-                    `Points: ${data.points}<br>Splats: ${data.splats.length}<br>FPS: 10`;
+        // Poll API for updates (no WebSocket needed)
+        async function fetchCloud() {
+            try {
+                const resp = await fetch('/api/splats');
+                const data = await resp.json();
+                if (data.splats) {
+                    updateSplats(data.splats);
+                    document.getElementById('stats').innerHTML =
+                        `Splats: ${data.count}<br>Timestamp: ${new Date(data.timestamp).toLocaleTimeString()}`;
+                }
+            } catch(e) {
+                document.getElementById('stats').innerHTML = 'Error: ' + e.message;
             }
-        };
-        ws.onopen = () => { document.getElementById('stats').innerHTML = 'Connected'; };
+        }
+        fetchCloud();
+        setInterval(fetchCloud, 1000); // refresh every second
+        document.getElementById('stats').innerHTML = 'Loading...';
 
         function updateSplats(splats) {
             if (pointsMesh) scene.remove(pointsMesh);
