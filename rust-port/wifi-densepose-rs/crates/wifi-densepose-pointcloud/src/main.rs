@@ -12,6 +12,7 @@
 
 mod camera;
 mod csi;
+mod csi_pipeline;
 mod depth;
 mod fusion;
 mod pointcloud;

@@ -1,10 +1,10 @@
 //! HTTP server — live camera + ESP32 CSI + fusion → real-time point cloud.
 
 use crate::camera;
+use crate::csi_pipeline;
 use crate::depth;
 use crate::fusion;
 use crate::pointcloud;
-use crate::serial_csi;
 use axum::{
     extract::State,
     response::{Html, IntoResponse},
@@ -16,32 +16,21 @@ use std::sync::{Arc, Mutex};
 struct AppState {
     latest_cloud: Mutex<pointcloud::PointCloud>,
     latest_splats: Mutex<Vec<pointcloud::GaussianSplat>>,
+    latest_pipeline: Mutex<Option<csi_pipeline::PipelineOutput>>,
     frame_count: Mutex<u64>,
     use_camera: bool,
-    csi_state: Option<Arc<Mutex<serial_csi::CsiState>>>,
+    csi_pipeline: Option<Arc<Mutex<csi_pipeline::CsiPipelineState>>>,
 }
 
 pub async fn serve(host: &str, port: u16, _wifi_source: Option<&str>) -> anyhow::Result<()> {
     let has_camera = camera::camera_available();
 
-    // CSI serial readers — only start if explicitly requested via env var
-    // (serial reader needs proper baud rate config to avoid reconnect loop)
-    let csi_state = if std::env::var("RUVIEW_CSI").is_ok() {
-        let mut csi_ports = Vec::new();
-        for p in &["/dev/ttyACM0", "/dev/ttyUSB0"] {
-            if std::path::Path::new(p).exists() { csi_ports.push(*p); }
-        }
-        if !csi_ports.is_empty() {
-            eprintln!("  CSI ports: {:?}", csi_ports);
-            Some(serial_csi::start_serial_readers(&csi_ports))
-        } else { None }
-    } else {
-        eprintln!("  CSI: disabled (set RUVIEW_CSI=1 to enable)");
-        None
-    };
+    // Start CSI pipeline — listens for UDP CSI data from ESP32 nodes
+    let csi_pipeline_state = csi_pipeline::start_pipeline("0.0.0.0:3333");
+    eprintln!("  CSI pipeline: UDP port 3333 (ADR-018 binary frames)");
 
     let initial_cloud = if has_camera {
-        capture_live_cloud(csi_state.as_ref())
+        capture_camera_cloud()
     } else {
         demo_cloud()
     };
@@ -50,24 +39,37 @@ pub async fn serve(host: &str, port: u16, _wifi_source: Option<&str>) -> anyhow:
     let state = Arc::new(AppState {
         latest_cloud: Mutex::new(initial_cloud),
         latest_splats: Mutex::new(initial_splats),
+        latest_pipeline: Mutex::new(None),
         frame_count: Mutex::new(0),
         use_camera: has_camera,
-        csi_state: csi_state.clone(),
+        csi_pipeline: Some(csi_pipeline_state.clone()),
     });
 
-    // Background: capture + fuse every 500ms
+    // Background: capture + fuse every 500ms (motion-adaptive)
     let bg = state.clone();
-    let bg_csi = csi_state.clone();
+    let bg_csi = Some(csi_pipeline_state.clone());
     let bg_cam = has_camera;
     tokio::spawn(async move {
+        let mut skip_depth = false;
         loop {
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            let csi_clone = bg_csi.clone();
-            let cloud = if bg_cam {
-                tokio::task::spawn_blocking(move || capture_live_cloud(csi_clone.as_ref()))
+            // Motion-adaptive: check CSI motion score
+            let pipeline_out = bg_csi.as_ref().map(|c| csi_pipeline::get_pipeline_output(c));
+            if let Some(ref out) = pipeline_out {
+                // Only run expensive depth when motion detected or every 5th frame
+                let frame_num = *bg.frame_count.lock().unwrap();
+                skip_depth = !out.motion_detected && frame_num % 5 != 0;
+            }
+            *bg.latest_pipeline.lock().unwrap() = pipeline_out;
+
+            let interval = if skip_depth { 1000 } else { 500 }; // slower when no motion
+            tokio::time::sleep(std::time::Duration::from_millis(interval)).await;
+
+            let cloud = if bg_cam && !skip_depth {
+                tokio::task::spawn_blocking(capture_camera_cloud)
                     .await.unwrap_or_else(|_| demo_cloud())
             } else {
-                demo_cloud()
+                // Reuse previous cloud when no motion
+                bg.latest_cloud.lock().unwrap().clone()
             };
             let splats = pointcloud::to_gaussian_splats(&cloud);
             *bg.latest_cloud.lock().unwrap() = cloud;
@@ -98,70 +100,19 @@ pub async fn serve(host: &str, port: u16, _wifi_source: Option<&str>) -> anyhow:
     Ok(())
 }
 
-fn capture_live_cloud(csi: Option<&Arc<Mutex<serial_csi::CsiState>>>) -> pointcloud::PointCloud {
-    // 1. Camera → depth → dense points
-    let cam_cloud = {
-        let config = camera::CameraConfig::default();
-        match camera::capture_frame(&config) {
-            Ok(frame) => {
-                match depth::estimate_depth(&frame.rgb, frame.width, frame.height) {
-                    Ok(dm) => {
-                        let intr = depth::CameraIntrinsics::default();
-                        depth::backproject_depth(&dm, &intr, Some(&frame.rgb), 2)
-                    }
-                    Err(_) => depth::demo_depth_cloud(),
+fn capture_camera_cloud() -> pointcloud::PointCloud {
+    let config = camera::CameraConfig::default();
+    match camera::capture_frame(&config) {
+        Ok(frame) => {
+            match depth::estimate_depth(&frame.rgb, frame.width, frame.height) {
+                Ok(dm) => {
+                    let intr = depth::CameraIntrinsics::default();
+                    depth::backproject_depth(&dm, &intr, Some(&frame.rgb), 2)
                 }
+                Err(_) => depth::demo_depth_cloud(),
             }
-            Err(_) => depth::demo_depth_cloud(),
         }
-    };
-
-    // 2. CSI → motion + presence → modify point cloud
-    let mut clouds: Vec<&pointcloud::PointCloud> = vec![&cam_cloud];
-
-    let csi_cloud;
-    if let Some(csi_state) = csi {
-        let (motion, distance, frames) = serial_csi::get_csi_influence(csi_state);
-        if frames > 0 {
-            // Create CSI-informed occupancy around detected presence
-            let mut occ = fusion::OccupancyVolume {
-                densities: vec![0.0; 8 * 8 * 4],
-                nx: 8, ny: 8, nz: 4,
-                bounds: [
-                    -distance as f64, -distance as f64, 0.0,
-                    distance as f64, distance as f64, 2.5,
-                ],
-                occupied_count: 0,
-            };
-
-            // Place high density where CSI indicates presence
-            let cx: usize = 4; let cy: usize = 4;
-            let radius: usize = (motion * 3.0).max(1.0) as usize;
-            for iz in 0..4 {
-                for iy in (cy.saturating_sub(radius))..=(cy + radius).min(7) {
-                    for ix in (cx.saturating_sub(radius))..=(cx + radius).min(7) {
-                        let idx = iz * 64 + iy * 8 + ix;
-                        let dx = (ix as f32 - cx as f32).abs() / radius as f32;
-                        let dy = (iy as f32 - cy as f32).abs() / radius as f32;
-                        let r2 = dx * dx + dy * dy;
-                        if r2 < 1.0 {
-                            occ.densities[idx] = (1.0 - r2 as f64) * (0.5 + motion as f64 * 0.5);
-                        }
-                    }
-                }
-            }
-            occ.occupied_count = occ.densities.iter().filter(|&&d| d > 0.3).count();
-
-            csi_cloud = fusion::occupancy_to_pointcloud(&occ);
-            clouds.push(&csi_cloud);
-        }
-    }
-
-    // 3. Fuse camera + CSI
-    if clouds.len() > 1 {
-        fusion::fuse_clouds(&clouds, 0.04)
-    } else {
-        cam_cloud
+        Err(_) => depth::demo_depth_cloud(),
     }
 }
 
@@ -176,13 +127,13 @@ async fn api_cloud(State(state): State<Arc<AppState>>) -> Json<serde_json::Value
     let cloud = state.latest_cloud.lock().unwrap();
     let (min, max) = cloud.bounds();
     let frames = *state.frame_count.lock().unwrap();
-    let csi_info = state.csi_state.as_ref().map(|c| serial_csi::get_csi_influence(c));
+    let pipeline = state.latest_pipeline.lock().unwrap();
     Json(serde_json::json!({
         "points": cloud.points.len(),
         "bounds_min": min, "bounds_max": max,
         "live": state.use_camera,
         "frame": frames,
-        "csi": csi_info.map(|(m,d,f)| serde_json::json!({"motion":m,"distance_m":d,"frames":f})),
+        "pipeline": &*pipeline,
         "cloud": cloud.points.iter().take(1000).collect::<Vec<_>>(),
     }))
 }
@@ -190,29 +141,28 @@ async fn api_cloud(State(state): State<Arc<AppState>>) -> Json<serde_json::Value
 async fn api_splats(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let splats = state.latest_splats.lock().unwrap();
     let frames = *state.frame_count.lock().unwrap();
-    let csi_info = state.csi_state.as_ref().map(|c| serial_csi::get_csi_influence(c));
+    let pipeline = state.latest_pipeline.lock().unwrap();
     Json(serde_json::json!({
         "splats": &*splats,
         "count": splats.len(),
         "live": state.use_camera,
         "frame": frames,
-        "csi": csi_info.map(|(m,d,f)| serde_json::json!({"motion":m,"distance_m":d,"frames":f})),
+        "pipeline": &*pipeline,
         "timestamp": chrono::Utc::now().timestamp_millis(),
     }))
 }
 
 async fn api_status(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let frames = *state.frame_count.lock().unwrap();
-    let csi_info = state.csi_state.as_ref().map(|c| serial_csi::get_csi_influence(c));
+    let pipeline = state.latest_pipeline.lock().unwrap();
     Json(serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
         "live": state.use_camera,
         "camera": if state.use_camera { "/dev/video0" } else { "demo" },
-        "csi_ports": if state.csi_state.is_some() { "active" } else { "none" },
-        "csi": csi_info.map(|(m,d,f)| serde_json::json!({"motion":m,"distance_m":d,"frames":f})),
+        "csi_pipeline": "active (UDP:3333)",
+        "pipeline": &*pipeline,
         "frames_captured": frames,
-        "fps": 2,
     }))
 }
 
