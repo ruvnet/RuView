@@ -29,7 +29,7 @@ FEATURE_STATE_SRCS := $(MAIN_DIR)/rv_feature_state.c
 # before including the .c. The decide() body itself has no ESP-IDF deps.
 # Simpler: just recompile decide() here via a small shim.
 
-TESTS := test_adaptive_controller test_rv_feature_state
+TESTS := test_adaptive_controller test_rv_feature_state test_rv_mesh
 
 all: $(TESTS)
 
@@ -39,10 +39,19 @@ test_adaptive_controller: test_adaptive_controller.c $(MAIN_DIR)/adaptive_contro
 test_rv_feature_state: test_rv_feature_state.c $(FEATURE_STATE_SRCS) $(MAIN_DIR)/rv_feature_state.h $(MAIN_DIR)/rv_radio_ops.h
 	$(CC) $(CFLAGS) test_rv_feature_state.c $(FEATURE_STATE_SRCS) -o $@ $(LDLIBS)
 
+# Mesh plane encoder/decoder: compile rv_mesh.c with RV_MESH_HOST_TEST
+# so the firmware-only send helpers (stream_sender, esp_log) are hidden.
+test_rv_mesh: test_rv_mesh.c $(MAIN_DIR)/rv_mesh.c $(MAIN_DIR)/rv_mesh.h $(FEATURE_STATE_SRCS) $(MAIN_DIR)/rv_radio_ops.h
+	$(CC) $(CFLAGS) -DRV_MESH_HOST_TEST=1 \
+	    test_rv_mesh.c $(MAIN_DIR)/rv_mesh.c $(FEATURE_STATE_SRCS) \
+	    -o $@ $(LDLIBS)
+
 check: all
 	./test_adaptive_controller
 	@echo ""
 	./test_rv_feature_state
+	@echo ""
+	./test_rv_mesh
 
 clean:
 	rm -f $(TESTS) *.o

@@ -64,6 +64,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checks for adaptive controller boot line, mock radio ops
   registration, and slow-loop heartbeat, so QEMU runs regression-gate
   Layer 1/2 presence.
+- **Firmware: ADR-081 Layer 3 mesh sensing plane** — New
+  `firmware/esp32-csi-node/main/rv_mesh.{h,c}` defines 4 node roles
+  (Anchor / Observer / Fusion relay / Coordinator), 7 on-wire message
+  types (TIME_SYNC, ROLE_ASSIGN, CHANNEL_PLAN, CALIBRATION_START,
+  FEATURE_DELTA, HEALTH, ANOMALY_ALERT), 3 authorization classes
+  (None / HMAC-SHA256-session / Ed25519-batch), `rv_node_status_t`
+  (28 B), `rv_anomaly_alert_t` (28 B), `rv_time_sync_t`,
+  `rv_role_assign_t`, `rv_channel_plan_t`, `rv_calibration_start_t`.
+  Pure-C encoder/decoder (`rv_mesh_encode()` / `rv_mesh_decode()`) with
+  16-byte envelope + payload + IEEE CRC32 trailer; convenience encoders
+  for each message type. Controller now emits `HEALTH` every slow-loop
+  tick (30 s default) and `ANOMALY_ALERT` on state transitions to ALERT
+  or DEGRADED. Host tests: `test_rv_mesh` exercises 27 assertions
+  covering roundtrip, bad magic, truncation, CRC flipping, oversize
+  payload rejection, and encode+decode throughput (1.0 μs/roundtrip
+  on host).
+- **Rust: ADR-081 Layer 1/3 mirror module** — New
+  `crates/wifi-densepose-hardware/src/radio_ops.rs` mirrors the
+  firmware-side `rv_radio_ops_t` vtable as the Rust `RadioOps` trait
+  (init, set_channel, set_mode, set_csi_enabled, set_capture_profile,
+  get_health) and provides `MockRadio` for offline testing.
+  Also mirrors the `rv_mesh.h` types (`MeshHeader`, `NodeStatus`,
+  `AnomalyAlert`, `MeshRole`, `MeshMsgType`, `AuthClass`) and ships
+  byte-identical `crc32_ieee()`, `decode_mesh()`, `decode_node_status()`,
+  `decode_anomaly_alert()`, and `encode_health()`. Exported from
+  `lib.rs`. 8 unit tests pass; `crc32_matches_firmware_vectors`
+  verifies parity with the firmware-side test vectors
+  (`0xCBF43926` for `"123456789"`, `0xD202EF8D` for single-byte zero),
+  and `mesh_constants_match_firmware` asserts `MESH_MAGIC`,
+  `MESH_VERSION`, `MESH_HEADER_SIZE`, and `MESH_MAX_PAYLOAD` match
+  `rv_mesh.h` byte-for-byte. Satisfies ADR-081's portability
+  acceptance test: signal/ruvector/train/mat crates are untouched.
 - **Firmware: adaptive controller** — New
   `firmware/esp32-csi-node/main/adaptive_controller.{c,h}` implements
   the three-loop closed-loop control specified by ADR-081: fast

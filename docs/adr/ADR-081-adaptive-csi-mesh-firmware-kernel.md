@@ -2,7 +2,7 @@
 
 | Field       | Value                                                                 |
 |-------------|-----------------------------------------------------------------------|
-| **Status**  | Accepted (partial — Layers 1/2/4 landed; L3 mesh plane and Rust trait tracked in Phase 3/4) |
+| **Status**  | Accepted — Layers 1/2/3/4/5 implemented and host-tested; mesh RX path and Ed25519 signing tracked as Phase 3.5 polish |
 | **Date**    | 2026-04-19                                                            |
 | **Authors** | ruv                                                                   |
 | **Depends** | ADR-018, ADR-028, ADR-029, ADR-031, ADR-032, ADR-039, ADR-066, ADR-073 |
@@ -331,16 +331,20 @@ Artifacts delivered alongside the ADR:
 | L1 Mock (QEMU) binding                  | `firmware/esp32-csi-node/main/rv_radio_ops_mock.c`                      | Implemented |
 | L2 Controller FreeRTOS plumbing         | `firmware/esp32-csi-node/main/adaptive_controller.c`                    | Implemented |
 | L2 Pure decision policy (testable)      | `firmware/esp32-csi-node/main/adaptive_controller_decide.c`             | Implemented |
+| L3 Mesh-plane types + encoder/decoder   | `firmware/esp32-csi-node/main/rv_mesh.{h,c}`                            | Implemented |
+| L3 HEALTH emit (slow loop, 30 s)        | `adaptive_controller.c:slow_loop_cb()`                                  | Implemented |
+| L3 ANOMALY_ALERT on state transition    | `adaptive_controller.c:apply_decision()`                                | Implemented |
+| L3 Role tracking + epoch monotonicity   | `adaptive_controller.c` (`s_role`, `s_mesh_epoch`)                      | Implemented |
 | L4 Feature state packet + helpers       | `firmware/esp32-csi-node/main/rv_feature_state.{h,c}`                   | Implemented |
 | L4 Emitter from fast loop (5 Hz)        | `adaptive_controller.c:emit_feature_state()`                            | Implemented |
 | L1 Packet yield + send-fail accessors   | `csi_collector.c:csi_collector_get_pkt_yield_per_sec()` + send fail    | Implemented |
-| Host unit tests (18 + 15 assertions)    | `firmware/esp32-csi-node/tests/host/`                                   | Passing     |
+| L5 Rust mirror trait + mesh decoder     | `crates/wifi-densepose-hardware/src/radio_ops.rs`                       | Implemented |
+| Host C unit tests (60 assertions)       | `firmware/esp32-csi-node/tests/host/`                                   | **60/60 ✓** |
+| Rust unit tests (8 assertions)          | `crates/wifi-densepose-hardware` (`radio_ops::tests`)                   | **8/8 ✓**   |
 | QEMU validator hooks (3 new checks)     | `scripts/validate_qemu_output.py` (check 17/18/19)                      | Passing     |
-| L3 mesh-plane message types             | —                                                                       | Deferred    |
-| L3 role-assignment FSM                  | —                                                                       | Deferred    |
-| Rust-side mirror trait                  | `crates/wifi-densepose-hardware/src/radio_ops.rs`                       | Deferred    |
-
-Deferred items remain in the Roadmap table below (Phase 3 / Phase 4).
+| L3 mesh RX path (receive + dispatch)    | —                                                                       | Phase 3.5   |
+| Ed25519 signing for CHANNEL_PLAN etc.   | —                                                                       | Phase 3.5   |
+| Hardware validation on COM7             | —                                                                       | Pending     |
 
 ## Measured performance
 
@@ -350,11 +354,12 @@ a modern CPU; on-target ESP32-S3 Xtensa LX7 at 240 MHz is ~5–10×
 slower for bit-by-bit CRC and broadly comparable for the decide
 function after inlining.
 
-| Operation                                  | Cost per call       | Notes                               |
-|--------------------------------------------|---------------------|-------------------------------------|
-| `adaptive_controller_decide()`             | **3.2 ns** (host)   | O(1) policy, 9 branches evaluated   |
-| `rv_feature_state_crc32()` (56 B hashed)   | **614 ns** (host)   | 87 MB/s — bit-by-bit IEEE CRC32     |
-| `rv_feature_state_finalize()` (full)       | **616 ns** (host)   | CRC-dominated                       |
+| Operation                                   | Cost per call       | Notes                               |
+|---------------------------------------------|---------------------|-------------------------------------|
+| `adaptive_controller_decide()`              | **3.2 ns** (host)   | O(1) policy, 9 branches evaluated   |
+| `rv_feature_state_crc32()` (56 B hashed)    | **612 ns** (host)   | 87 MB/s — bit-by-bit IEEE CRC32     |
+| `rv_feature_state_finalize()` (full)        | **592 ns** (host)   | CRC-dominated                       |
+| `rv_mesh_encode_health()` + `_decode()`     | **1010 ns** (host)  | Full roundtrip, hdr+payload+CRC     |
 
 Projected on-target cost at 5 Hz cadence:
 
@@ -385,11 +390,21 @@ Projected on-target cost at 5 Hz cadence:
 
 **Tests:**
 
-| Suite                               | Assertions | Result     |
-|-------------------------------------|-----------:|------------|
-| `test_adaptive_controller`          |         18 | **PASS**   |
-| `test_rv_feature_state`             |         15 | **PASS**   |
-| QEMU validator (`ADR-061` pipeline) |  +3 checks | hooked     |
+| Suite                                       | Assertions | Result     |
+|---------------------------------------------|-----------:|------------|
+| `test_adaptive_controller` (host C)         |         18 | **PASS**   |
+| `test_rv_feature_state` (host C)            |         15 | **PASS**   |
+| `test_rv_mesh` (host C)                     |         27 | **PASS**   |
+| `radio_ops::tests` (Rust)                   |          8 | **PASS**   |
+| **Total**                                   |     **68** | **68/68**  |
+| QEMU validator (`ADR-061` pipeline)         |  +3 checks | hooked     |
+
+Cross-language parity: the Rust `crc32_ieee()` is verified against the
+same known vectors used by the C test (`0xCBF43926` for `"123456789"`,
+`0xD202EF8D` for a single zero byte), and the `mesh_constants_match_firmware`
+test asserts `MESH_MAGIC`, `MESH_VERSION`, `MESH_HEADER_SIZE`, and
+`MESH_MAX_PAYLOAD` match the C header byte-for-byte. Any drift between
+the two implementations fails CI.
 
 ## New components this ADR authorizes
 
@@ -458,11 +473,19 @@ Projected on-target cost at 5 Hz cadence:
 ## Verification
 
 ```bash
-# Host-side unit tests (no ESP-IDF, no QEMU required)
+# Host-side C unit tests (no ESP-IDF, no QEMU required)
 cd firmware/esp32-csi-node/tests/host
 make check
 # → test_adaptive_controller: 18/18 pass, decide() = 3.2 ns/call
-# → test_rv_feature_state:    15/15 pass, CRC32(56 B) = 614 ns/pkt
+# → test_rv_feature_state:    15/15 pass, CRC32(56 B) = 612 ns/pkt
+# → test_rv_mesh:             27/27 pass, HEALTH roundtrip = 1.0 µs
+
+# Rust-side radio_ops trait + mesh decoder tests
+cd rust-port/wifi-densepose-rs
+cargo test -p wifi-densepose-hardware --no-default-features --lib radio_ops
+# → 8 passed; verifies MockRadio, CRC32 parity with firmware vectors,
+#   HEALTH encode/decode roundtrip, bad-magic/short/CRC rejection,
+#   and that MESH_MAGIC/VERSION/HEADER_SIZE match rv_mesh.h
 
 # QEMU end-to-end (requires ESP-IDF + qemu-system-xtensa, see ADR-061)
 bash scripts/qemu-esp32s3-test.sh
@@ -470,7 +493,7 @@ bash scripts/qemu-esp32s3-test.sh
 #   adaptive_ctrl boot line, rv_radio_mock binding registration, and
 #   slow-loop heartbeat.
 
-# Full workspace (Rust) — unchanged, ADR-081 introduces no Rust changes
+# Full workspace
 cargo test --workspace --no-default-features
 ```
 

@@ -15,6 +15,7 @@
 #include "adaptive_controller.h"
 #include "rv_radio_ops.h"
 #include "rv_feature_state.h"
+#include "rv_mesh.h"
 #include "edge_processing.h"
 #include "stream_sender.h"
 #include "csi_collector.h"
@@ -131,14 +132,57 @@ static void collect_observation(adapt_observation_t *out)
 
 /* ---- Decision application ---- */
 
+/* ADR-081 L3: epoch monotonically advances per mesh session. Seeded at
+ * init; every major state transition or role change bumps it so
+ * receivers can order events. */
+static uint32_t s_mesh_epoch = 1;
+
+/* ADR-081 L3: current node role. Updated by ROLE_ASSIGN receipt (future
+ * mesh-plane RX path) or forced by tests. Default Observer. */
+static uint8_t s_role = RV_ROLE_OBSERVER;
+
+/* 8-byte node id. Upper 7 bytes are zero by default; byte 0 is the
+ * legacy CSI node id for compatibility with the ADR-018 header. */
+static void node_id_bytes(uint8_t out[8])
+{
+    memset(out, 0, 8);
+    out[0] = csi_collector_get_node_id();
+}
+
 static void apply_decision(const adapt_decision_t *dec)
 {
     const rv_radio_ops_t *ops = rv_radio_ops_get();
+    adapt_state_t prev = s_state;
 
     if (dec->change_state) {
         ESP_LOGI(TAG, "state %u → %u",
                  (unsigned)s_state, (unsigned)dec->new_state);
         s_state = (adapt_state_t)dec->new_state;
+
+        /* ADR-081 L3: on transition to ALERT, emit ANOMALY_ALERT on the
+         * mesh plane. On any role-relevant transition, bump the epoch. */
+        if (s_state == ADAPT_STATE_ALERT && prev != ADAPT_STATE_ALERT) {
+            uint8_t nid[8];
+            node_id_bytes(nid);
+            adapt_observation_t obs;
+            float motion = 0.0f, anomaly = 0.0f;
+            portENTER_CRITICAL(&s_obs_lock);
+            if (s_obs_valid) { obs = s_last_obs; motion = obs.motion_score;
+                               anomaly = obs.anomaly_score; }
+            portEXIT_CRITICAL(&s_obs_lock);
+            uint8_t severity = (uint8_t)(anomaly * 255.0f);
+            rv_mesh_send_anomaly(s_role, s_mesh_epoch, nid,
+                                 RV_ANOMALY_COHERENCE_LOSS, severity,
+                                 anomaly, motion);
+        }
+        if (s_state == ADAPT_STATE_DEGRADED && prev != ADAPT_STATE_DEGRADED) {
+            uint8_t nid[8];
+            node_id_bytes(nid);
+            rv_mesh_send_anomaly(s_role, s_mesh_epoch, nid,
+                                 RV_ANOMALY_PKT_YIELD_COLLAPSE,
+                                 200, 1.0f, 0.0f);
+        }
+        s_mesh_epoch++;
     }
 
     if (dec->change_profile && ops != NULL && ops->set_capture_profile != NULL) {
@@ -272,10 +316,16 @@ static void emit_feature_state(void)
 static void slow_loop_cb(TimerHandle_t t)
 {
     (void)t;
-    /* Slow loop: log a heartbeat and (future Phase 3) publish HEALTH
-     * messages + request CALIBRATION_START on sustained drift. */
-    ESP_LOGI(TAG, "slow tick (state=%u, feature_state_seq=%u)",
-             (unsigned)s_state, (unsigned)s_feature_state_seq);
+    /* ADR-081 L3: publish a HEALTH mesh message every slow tick
+     * (default 30 s). The coordinator uses these to track liveness and
+     * detect sync-error drift. */
+    uint8_t nid[8];
+    node_id_bytes(nid);
+    rv_mesh_send_health(s_role, s_mesh_epoch, nid);
+
+    ESP_LOGI(TAG, "slow tick (state=%u, feature_state_seq=%u, role=%u, epoch=%u) HEALTH sent",
+             (unsigned)s_state, (unsigned)s_feature_state_seq,
+             (unsigned)s_role, (unsigned)s_mesh_epoch);
 }
 
 /* ---- Public API ---- */

@@ -7,6 +7,7 @@ set(SRCS
     # ADR-081 — adaptive CSI mesh firmware kernel
     "rv_radio_ops_esp32.c"
     "rv_feature_state.c"
+    "rv_mesh.c"
     "adaptive_controller.c"
 )
 
