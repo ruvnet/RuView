@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **ADR-081: Adaptive CSI Mesh Firmware Kernel** — New 5-layer architecture
+  (Radio Abstraction Layer / Adaptive Controller / Mesh Sensing Plane /
+  On-device Feature Extraction / Rust handoff) that reframes the existing
+  ESP32 firmware modules as components of a chipset-agnostic kernel. ADR
+  in `docs/adr/ADR-081-adaptive-csi-mesh-firmware-kernel.md`. Goal: swap
+  one radio family for another without changing the Rust signal /
+  ruvector / train / mat crates.
+- **Firmware: radio abstraction vtable (`rv_radio_ops_t`)** — New
+  `firmware/esp32-csi-node/main/rv_radio_ops.{h}` defines the
+  chipset-agnostic ops (init, set_channel, set_mode, set_csi_enabled,
+  set_capture_profile, get_health), profile enum
+  (`RV_PROFILE_PASSIVE_LOW_RATE` / `ACTIVE_PROBE` / `RESP_HIGH_SENS` /
+  `FAST_MOTION` / `CALIBRATION`), and health snapshot struct.
+  `rv_radio_ops_esp32.c` provides the ESP32 binding wrapping
+  `csi_collector` + `esp_wifi_*`. A second binding (mock or alternate
+  chipset) is the portability acceptance test for ADR-081.
+- **Firmware: `rv_feature_state_t` packet (magic `0xC5110006`)** — New
+  80-byte compact per-node sensing state in
+  `firmware/esp32-csi-node/main/rv_feature_state.h`: motion, presence,
+  respiration BPM/conf, heartbeat BPM/conf, anomaly score, env-shift
+  score, node coherence, quality flags, IEEE CRC32. Designed to replace
+  raw ADR-018 CSI as the default upstream stream (~99% bandwidth
+  reduction vs. raw at 5 Hz).
+- **Firmware: adaptive controller** — New
+  `firmware/esp32-csi-node/main/adaptive_controller.{c,h}` implements
+  the three-loop closed-loop control specified by ADR-081: fast
+  (~200 ms) for cadence and active probing, medium (~1 s) for channel
+  selection and role transitions, slow (~30 s) for baseline
+  recalibration. Pure `adaptive_controller_decide()` policy function is
+  exposed in the header for offline unit testing. Default policy is
+  conservative (`enable_channel_switch` and `enable_role_change` off);
+  Kconfig surface added under "Adaptive Controller (ADR-081)".
+
 ### Fixed
 - **`provision.py` esptool v5 compat** (#391) — Stale `write_flash` (underscore) syntax in the dry-run manual-flash hint now uses `write-flash` (hyphenated) for esptool >= 5.x. The primary flash command was already correct.
 - **`provision.py` silent NVS wipe** (#391) — The script replaces the entire `csi_cfg` NVS namespace on every run, so partial invocations were silently erasing WiFi credentials and causing `Retrying WiFi connection (10/10)` in the field. Now refuses to run without `--ssid`, `--password`, and `--target-ip` unless `--force-partial` is passed. `--force-partial` prints a warning listing which keys will be wiped.

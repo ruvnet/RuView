@@ -4,6 +4,10 @@ set(SRCS
     "wasm_runtime.c" "wasm_upload.c" "rvf_parser.c"
     "mmwave_sensor.c"
     "swarm_bridge.c"
+    # ADR-081 — adaptive CSI mesh firmware kernel
+    "rv_radio_ops_esp32.c"
+    "rv_feature_state.c"
+    "adaptive_controller.c"
 )
 
 set(REQUIRES "")
