@@ -37,6 +37,20 @@ Geospatial context stored as brain memories:
 - `spatial-change`: detected changes in satellite/OSM data
 - `spatial-weather`: current conditions + forecast
 - `spatial-season`: vegetation index, snow cover, seasonal patterns
+- `spatial-local`: hyperlocal web context from Common Crawl WET
+
+### Extended Data Sources (via ruvector WET/Common Crawl)
+| Source | Data | Use |
+|--------|------|-----|
+| Common Crawl WET | Web text near location | Local business info, reviews, events |
+| Wikidata | Structured knowledge | Building names, POI descriptions |
+| NASA FIRMS | Active fire (3-hour) | Safety alerts |
+| USGS Earthquakes | Seismic events | Safety context |
+| OpenAQ | Air quality (PM2.5) | Environmental health |
+| Overture Maps | Building footprints (Meta/MS) | Higher quality than OSM |
+
+The ruvector brain server has existing `web_ingest` + Common Crawl support.
+WET files filtered by geographic URL patterns provide hyperlocal context.
 
 ## Consequences
 ### Positive
