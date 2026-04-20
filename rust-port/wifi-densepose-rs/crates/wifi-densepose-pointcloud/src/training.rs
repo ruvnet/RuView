@@ -458,3 +458,40 @@ pub struct PreferencePair {
     pub chosen: String,
     pub rejected: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_rejects_parent_dir_traversal() {
+        assert!(sanitize_data_path("../etc/passwd").is_err());
+        assert!(sanitize_data_path("foo/../bar").is_err());
+        assert!(sanitize_data_path("/tmp/.. /evil").is_ok(), "`.. ` is not ParentDir");
+    }
+
+    #[test]
+    fn sanitize_accepts_relative_child() {
+        assert!(sanitize_data_path("data/ruview").is_ok());
+        assert!(sanitize_data_path("./foo").is_ok());
+    }
+
+    #[test]
+    fn training_session_new_rejects_traversal() {
+        // Even if the filesystem has such a path, TrainingSession should refuse.
+        let err = TrainingSession::new("../etc/passwd").err();
+        assert!(err.is_some(), "traversal path must be rejected");
+    }
+
+    #[test]
+    fn training_session_new_accepts_child_path() {
+        // Use a unique tmpdir to avoid cross-test interference.
+        let tmp = std::env::temp_dir().join(format!("ruview-train-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let sess = TrainingSession::new(tmp.to_str().unwrap())
+            .expect("TrainingSession should accept a clean tmpdir");
+        // data_dir should have been canonicalised to an absolute path.
+        assert!(sess.data_dir.is_absolute());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}

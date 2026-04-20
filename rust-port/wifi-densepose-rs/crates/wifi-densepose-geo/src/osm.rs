@@ -166,3 +166,51 @@ fn parse_roads(data: &serde_json::Value) -> Result<Vec<OsmFeature>> {
 
     Ok(roads)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_overpass_json_accepts_minimal_fixture() {
+        // Minimal fixture: three nodes forming a triangular building.
+        let j = serde_json::json!({
+            "elements": [
+                { "type": "node", "id": 1, "lat": 43.0, "lon": -79.0 },
+                { "type": "node", "id": 2, "lat": 43.0001, "lon": -79.0 },
+                { "type": "node", "id": 3, "lat": 43.0, "lon": -79.0001 },
+                {
+                    "type": "way", "id": 100,
+                    "nodes": [1, 2, 3, 1],
+                    "tags": { "building": "yes", "name": "Test Hall" }
+                }
+            ]
+        });
+        let features = parse_overpass_json(&j).expect("minimal payload should parse");
+        assert_eq!(features.len(), 1);
+        match &features[0] {
+            OsmFeature::Building { outline, name, .. } => {
+                assert_eq!(outline.len(), 4);
+                assert_eq!(name.as_deref(), Some("Test Hall"));
+            }
+            _ => panic!("expected a Building"),
+        }
+    }
+
+    #[test]
+    fn parse_overpass_json_rejects_malformed() {
+        // Missing the `elements` array entirely.
+        let j = serde_json::json!({ "version": 0.6 });
+        assert!(parse_overpass_json(&j).is_err());
+        // Not even an object.
+        let arr = serde_json::json!([1, 2, 3]);
+        assert!(parse_overpass_json(&arr).is_err());
+    }
+
+    #[tokio::test]
+    async fn fetch_buildings_rejects_oversized_radius() {
+        let center = GeoPoint { lat: 43.0, lon: -79.0, alt: 0.0 };
+        let err = fetch_buildings(&center, MAX_RADIUS_M + 1.0).await.err();
+        assert!(err.is_some(), "should reject radius > MAX_RADIUS_M");
+    }
+}

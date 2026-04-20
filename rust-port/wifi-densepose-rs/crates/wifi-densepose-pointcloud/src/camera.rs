@@ -1,5 +1,4 @@
 //! Camera capture — cross-platform frame grabber.
-#![allow(dead_code)]
 //!
 //! macOS: uses `screencapture` or `ffmpeg -f avfoundation` for camera frames
 //! Linux: uses `v4l2-ctl` or `ffmpeg -f v4l2` for camera frames
@@ -14,7 +13,6 @@ pub struct Frame {
     pub width: u32,
     pub height: u32,
     pub rgb: Vec<u8>,      // row-major [height * width * 3]
-    pub timestamp_ms: i64,
 }
 
 /// Camera source configuration.
@@ -96,7 +94,6 @@ fn capture_ffmpeg(config: &CameraConfig, tmp: &PathBuf) -> Result<Frame> {
         width: config.width,
         height: config.height,
         rgb: rgb[..expected].to_vec(),
-        timestamp_ms: chrono::Utc::now().timestamp_millis(),
     })
 }
 
@@ -170,7 +167,6 @@ fn decode_jpeg_to_rgb(path: &PathBuf, _width: u32, _height: u32) -> Result<Frame
         width: _width,
         height: _height,
         rgb: data,
-        timestamp_ms: chrono::Utc::now().timestamp_millis(),
     })
 }
 

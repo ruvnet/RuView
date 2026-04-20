@@ -1,5 +1,4 @@
 //! Multi-modal fusion: camera depth + WiFi RF tomography → unified point cloud.
-#![allow(dead_code)]
 
 use crate::pointcloud::{PointCloud, ColorPoint};
 use std::collections::HashMap;
@@ -94,36 +93,6 @@ pub fn fuse_clouds(clouds: &[&PointCloud], voxel_size: f32) -> PointCloud {
     fused
 }
 
-/// Fetch WiFi occupancy from a remote RuView/brain endpoint.
-pub async fn fetch_wifi_occupancy(url: &str) -> anyhow::Result<OccupancyVolume> {
-    let client = reqwest::Client::new();
-    let resp: serde_json::Value = client.get(url).send().await?.json().await?;
-
-    let nx = resp.get("nx").and_then(|v| v.as_u64()).unwrap_or(8) as usize;
-    let ny = resp.get("ny").and_then(|v| v.as_u64()).unwrap_or(8) as usize;
-    let nz = resp.get("nz").and_then(|v| v.as_u64()).unwrap_or(4) as usize;
-
-    let densities: Vec<f64> = resp.get("densities")
-        .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
-        .unwrap_or_else(|| vec![0.0; nx * ny * nz]);
-
-    let bounds = resp.get("bounds")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            let mut b = [0.0f64; 6];
-            for (i, v) in arr.iter().enumerate().take(6) {
-                b[i] = v.as_f64().unwrap_or(0.0);
-            }
-            b
-        })
-        .unwrap_or([0.0, 0.0, 0.0, 5.0, 5.0, 3.0]);
-
-    let occupied_count = densities.iter().filter(|&&d| d > 0.3).count();
-
-    Ok(OccupancyVolume { densities, nx, ny, nz, bounds, occupied_count })
-}
-
 /// Generate a demo occupancy volume (room with person).
 pub fn demo_occupancy() -> OccupancyVolume {
     let nx = 10;
@@ -157,5 +126,38 @@ pub fn demo_occupancy() -> OccupancyVolume {
         densities, nx, ny, nz,
         bounds: [0.0, 0.0, 0.0, 5.0, 5.0, 3.0],
         occupied_count,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cloud_with(name: &str, pts: &[(f32, f32, f32)]) -> PointCloud {
+        let mut c = PointCloud::new(name);
+        for &(x, y, z) in pts {
+            c.points.push(ColorPoint { x, y, z, r: 10, g: 20, b: 30, intensity: 0.5 });
+        }
+        c
+    }
+
+    #[test]
+    fn fuse_clouds_merges_non_overlapping() {
+        let a = cloud_with("a", &[(0.0, 0.0, 0.0)]);
+        let b = cloud_with("b", &[(5.0, 5.0, 5.0)]);
+        let fused = fuse_clouds(&[&a, &b], 0.1);
+        assert_eq!(fused.points.len(), 2, "two far-apart points should yield two voxels");
+    }
+
+    #[test]
+    fn fuse_clouds_voxel_dedup() {
+        // Points all within one voxel must collapse to a single averaged point.
+        let a = cloud_with("a", &[
+            (0.01, 0.02, 0.03),
+            (0.04, 0.01, 0.02),
+            (0.03, 0.03, 0.01),
+        ]);
+        let fused = fuse_clouds(&[&a], 0.5);
+        assert_eq!(fused.points.len(), 1, "three close points → one voxel");
     }
 }

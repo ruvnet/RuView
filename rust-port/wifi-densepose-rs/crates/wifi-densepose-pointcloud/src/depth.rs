@@ -210,6 +210,46 @@ pub fn demo_depth_cloud() -> PointCloud {
     backproject_depth(&depth, &scaled_intrinsics, None, 1)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backproject_2x2_depth_yields_four_points() {
+        // 2x2 image, depth=1m everywhere; trivial intrinsics.
+        let intr = CameraIntrinsics {
+            fx: 1.0, fy: 1.0, cx: 0.5, cy: 0.5,
+            width: 2, height: 2,
+        };
+        let depth = vec![1.0f32; 4];
+        let cloud = backproject_depth(&depth, &intr, None, 1);
+        assert_eq!(cloud.points.len(), 4, "2x2 depth → 4 backprojected points");
+        // Every point should be at z=1.0.
+        for p in &cloud.points {
+            assert!((p.z - 1.0).abs() < 1e-6, "z should be 1.0, got {}", p.z);
+        }
+        // With cx=0.5, cy=0.5 the four pixel centers backproject symmetrically
+        // about the optical axis: x in {-0.5, 0.5}, y in {-0.5, 0.5}.
+        let mut xs: Vec<f32> = cloud.points.iter().map(|p| p.x).collect();
+        xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert!((xs[0] + 0.5).abs() < 1e-6);
+        assert!((xs.last().unwrap() - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn backproject_rejects_invalid_depth() {
+        let intr = CameraIntrinsics {
+            fx: 1.0, fy: 1.0, cx: 0.5, cy: 0.5,
+            width: 2, height: 2,
+        };
+        // All pixels NaN → no points.
+        let depth = vec![f32::NAN; 4];
+        let cloud = backproject_depth(&depth, &intr, None, 1);
+        assert_eq!(cloud.points.len(), 0);
+    }
+}
+
+#[allow(dead_code)]
 fn find_midas_model() -> Result<String> {
     let paths = [
         dirs::home_dir().unwrap_or_default().join(".local/share/ruview/midas_v21_small_256.onnx"),

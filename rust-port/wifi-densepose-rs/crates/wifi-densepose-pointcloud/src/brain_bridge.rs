@@ -90,20 +90,3 @@ pub async fn sync_to_brain(pipeline: &PipelineOutput, camera_frames: u64) {
     }
 }
 
-/// Check if brain is reachable.
-pub async fn brain_available() -> bool {
-    // Must .await directly — calling `Handle::current().block_on(...)` from
-    // inside an async fn panics with "Cannot start a runtime from within a
-    // runtime" because a worker thread is already driving a runtime.
-    let Ok(client) = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()
-    else {
-        return false;
-    };
-    client
-        .get(format!("{}/health", brain_url()))
-        .send()
-        .await
-        .is_ok()
-}
