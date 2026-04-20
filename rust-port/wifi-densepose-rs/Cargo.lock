@@ -5447,6 +5447,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "178f93f84a4a72c582026a45d9b8710acf188df4a22a25434c5dbba1df6c4cac"
 
 [[package]]
+name = "ruview-geo"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
