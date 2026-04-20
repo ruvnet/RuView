@@ -18,8 +18,13 @@ services:
       #          wifi           — use host Wi-Fi RSSI/scan data (Windows netsh)
       #          simulated      — generate synthetic CSI data (no hardware required)
       - CSI_SOURCE=${CSI_SOURCE:-auto}
-    # command is passed as arguments to ENTRYPOINT (/bin/sh -c), so $CSI_SOURCE is expanded by the shell.
-    command: ["/app/sensing-server --source ${CSI_SOURCE:-auto} --tick-ms 100 --ui-path /app/ui --http-port 3000 --ws-port 3001"]
+      # MODELS_DIR controls where the server scans for .rvf model files.
+      # Mount a host directory and set this to make models visible:
+      #   volumes: ["/path/to/models:/app/models"]
+      #   MODELS_DIR=/app/models
+      - MODELS_DIR=${MODELS_DIR:-data/models}
+    # No explicit command needed — docker-entrypoint.sh uses CSI_SOURCE.
+    # Override with: command: ["--source", "esp32", "--tick-ms", "500"]
 
   python-sensing:
     build:

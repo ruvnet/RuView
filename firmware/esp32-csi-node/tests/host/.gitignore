@@ -1,0 +1,5 @@
+# Compiled host-test binaries
+test_adaptive_controller
+test_rv_feature_state
+test_rv_mesh
+*.o

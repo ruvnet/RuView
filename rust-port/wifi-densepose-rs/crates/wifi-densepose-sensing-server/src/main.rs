@@ -2797,7 +2797,7 @@ async fn delete_model(
     if safe_id.is_empty() || safe_id != id {
         return Json(serde_json::json!({ "error": "invalid model id", "success": false }));
     }
-    let path = PathBuf::from("data/models").join(format!("{}.rvf", safe_id));
+    let path = effective_models_dir().join(format!("{}.rvf", safe_id));
     if path.exists() {
         if let Err(e) = std::fs::remove_file(&path) {
             warn!("Failed to delete model file {:?}: {}", path, e);
@@ -2842,9 +2842,18 @@ async fn activate_lora_profile(
     Json(serde_json::json!({ "success": true, "profile": profile }))
 }
 
-/// Scan `data/models/` for `.rvf` files and return metadata.
+/// Return the effective models directory, respecting the `MODELS_DIR`
+/// environment variable.  Defaults to `data/models`.
+fn effective_models_dir() -> PathBuf {
+    PathBuf::from(
+        std::env::var("MODELS_DIR").unwrap_or_else(|_| "data/models".to_string()),
+    )
+}
+
+/// Scan the models directory for `.rvf` files and return metadata.
+/// Respects the `MODELS_DIR` environment variable.
 fn scan_model_files() -> Vec<serde_json::Value> {
-    let dir = PathBuf::from("data/models");
+    let dir = effective_models_dir();
     let mut models = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
@@ -2874,9 +2883,10 @@ fn scan_model_files() -> Vec<serde_json::Value> {
     models
 }
 
-/// Scan `data/models/` for `.lora.json` LoRA profile files.
+/// Scan the models directory for `.lora.json` LoRA profile files.
+/// Respects the `MODELS_DIR` environment variable.
 fn scan_lora_profiles() -> Vec<serde_json::Value> {
-    let dir = PathBuf::from("data/models");
+    let dir = effective_models_dir();
     let mut profiles = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
@@ -4604,7 +4614,8 @@ async fn main() {
     }
 
     // Ensure data directories exist for models and recordings
-    let _ = std::fs::create_dir_all("data/models");
+    let models_dir = effective_models_dir();
+    let _ = std::fs::create_dir_all(&models_dir);
     let _ = std::fs::create_dir_all("data/recordings");
 
     // Discover model and recording files on startup

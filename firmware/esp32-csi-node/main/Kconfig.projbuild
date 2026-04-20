@@ -87,6 +87,89 @@ menu "Edge Intelligence (ADR-039)"
 
 endmenu
 
+menu "Adaptive Controller (ADR-081)"
+
+    config ADAPTIVE_FAST_LOOP_MS
+        int "Fast loop period (ms)"
+        default 200
+        range 50 2000
+        help
+            Period of the fast control loop. The fast loop reads radio
+            health and edge-derived motion/presence/anomaly scores and
+            updates the active capture profile. Default 200 ms matches
+            the ADR-081 spec.
+
+    config ADAPTIVE_MEDIUM_LOOP_MS
+        int "Medium loop period (ms)"
+        default 1000
+        range 200 30000
+        help
+            Period of the medium control loop. The medium loop is where
+            channel selection and role transitions happen (when
+            enable_channel_switch / enable_role_change are on).
+
+    config ADAPTIVE_SLOW_LOOP_MS
+        int "Slow loop period (ms)"
+        default 30000
+        range 1000 300000
+        help
+            Period of the slow control loop. The slow loop publishes
+            HEALTH messages and may request CALIBRATION_START on
+            sustained drift.
+
+    config ADAPTIVE_AGGRESSIVE
+        bool "Aggressive adaptation"
+        default n
+        help
+            When enabled, the controller reacts to motion / anomaly
+            sooner and uses a tighter cadence in SENSE_ACTIVE. Default
+            off matches today's conservative behavior.
+
+    config ADAPTIVE_ENABLE_CHANNEL_SWITCH
+        bool "Allow controller to change WiFi channel"
+        default n
+        help
+            When disabled, the controller never calls set_channel() —
+            channel hopping (ADR-029) and channel override (ADR-060)
+            remain in charge. Enable only after Phase 3 follow-up
+            work has wired the channel-plan mesh message.
+
+    config ADAPTIVE_ENABLE_ROLE_CHANGE
+        bool "Allow controller to change mesh role"
+        default n
+        help
+            When disabled, the controller never advertises a different
+            role to the swarm bridge. Enable after the mesh-plane
+            ROLE_ASSIGN protocol is in place.
+
+    config ADAPTIVE_MOTION_THRESH_PERMIL
+        int "Motion threshold (per-mille)"
+        default 200
+        range 1 1000
+        help
+            Motion score above which the controller transitions to
+            SENSE_ACTIVE and selects RV_PROFILE_FAST_MOTION. Expressed
+            in per-mille (200 = 0.20).
+
+    config ADAPTIVE_ANOMALY_THRESH_PERMIL
+        int "Anomaly threshold (per-mille)"
+        default 600
+        range 1 1000
+        help
+            Anomaly score above which the controller transitions to
+            ALERT. Per-mille (600 = 0.60).
+
+    config ADAPTIVE_MIN_PKT_YIELD
+        int "Minimum packet yield before DEGRADED (pps)"
+        default 5
+        range 0 100
+        help
+            CSI callback rate (per second) below which the controller
+            falls back to DEGRADED mode and pins the radio to
+            RV_PROFILE_PASSIVE_LOW_RATE. 0 disables the degraded gate.
+
+endmenu
+
 menu "AMOLED Display (ADR-045)"
 
     config DISPLAY_ENABLE
