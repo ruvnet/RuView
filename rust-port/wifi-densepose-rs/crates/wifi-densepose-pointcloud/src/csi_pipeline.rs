@@ -71,6 +71,17 @@ pub fn parse_adr018(data: &[u8]) -> Option<CsiFrame> {
     })
 }
 
+// ─── CSI Fingerprint Database ──────────────────────────────────────────────
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct CsiFingerprint {
+    pub name: String,
+    pub mean_amplitudes: Vec<f32>,
+    pub rssi_mean: f32,
+    pub rssi_std: f32,
+    pub samples: u32,
+}
+
 // ─── CSI State — accumulates frames for WiFlow + vitals ─────────────────────
 
 #[derive(Clone, Debug)]
@@ -101,6 +112,12 @@ pub struct CsiPipelineState {
     pub total_frames: u64,
     /// Motion detection
     pub motion_detected: bool,
+    /// CSI fingerprint database for room/location identification
+    pub fingerprints: Vec<CsiFingerprint>,
+    /// Current identified location (name, confidence) — updated every 100 frames
+    pub current_location: Option<(String, f32)>,
+    /// Night mode — true when camera luminance is below threshold
+    pub is_dark: bool,
     /// WiFlow model weights (loaded once)
     wiflow_weights: Option<WiFlowModel>,
 }
@@ -127,6 +144,9 @@ impl Default for CsiPipelineState {
             occupancy_dims: (8, 8, 4),
             total_frames: 0,
             motion_detected: false,
+            fingerprints: Vec::new(),
+            current_location: None,
+            is_dark: false,
             wiflow_weights: load_wiflow_model(),
         }
     }
@@ -143,7 +163,7 @@ fn load_wiflow_model() -> Option<WiFlowModel> {
         let expanded = p.replace('~', &std::env::var("HOME").unwrap_or_default());
         if let Ok(data) = std::fs::read_to_string(&expanded) {
             if let Ok(model) = serde_json::from_str::<serde_json::Value>(&data) {
-                if let Some(weights_b64) = model.get("weightsBase64").and_then(|v| v.as_str()) {
+                if let Some(_weights_b64) = model.get("weightsBase64").and_then(|v| v.as_str()) {
                     eprintln!("  WiFlow: loaded from {expanded} ({} params)",
                         model.get("totalParams").and_then(|v| v.as_u64()).unwrap_or(0));
                     // For now, use simplified inference — full weight parsing would go here
@@ -193,6 +213,11 @@ impl CsiPipelineState {
 
         // 4. RF tomography (update occupancy grid)
         self.update_tomography();
+
+        // 5. Location fingerprint identification (every 100 frames)
+        if self.total_frames % 100 == 0 {
+            self.current_location = self.identify_location();
+        }
     }
 
     fn detect_motion(&mut self, node_id: u8) {
@@ -297,6 +322,127 @@ impl CsiPipelineState {
         }
     }
 
+    /// Record a CSI fingerprint for the current location/room.
+    /// Computes mean amplitude and RSSI statistics from the last 50 frames
+    /// across all nodes and saves as a named fingerprint.
+    pub fn record_fingerprint(&mut self, name: &str) {
+        // Collect last 50 frames from all nodes
+        let mut all_amplitudes: Vec<Vec<f32>> = Vec::new();
+        let mut rssi_values: Vec<f32> = Vec::new();
+
+        for history in self.node_frames.values() {
+            for frame in history.iter().rev().take(50) {
+                all_amplitudes.push(frame.amplitudes.clone());
+                rssi_values.push(frame.rssi as f32);
+            }
+        }
+
+        if all_amplitudes.is_empty() {
+            return;
+        }
+
+        // Compute mean amplitude per subcarrier across all collected frames
+        let n_sub = all_amplitudes.iter().map(|a| a.len()).max().unwrap_or(0);
+        if n_sub == 0 {
+            return;
+        }
+        let mut mean_amplitudes = vec![0.0f32; n_sub];
+        let mut counts = vec![0u32; n_sub];
+        for amps in &all_amplitudes {
+            for (i, &a) in amps.iter().enumerate() {
+                if i < n_sub {
+                    mean_amplitudes[i] += a;
+                    counts[i] += 1;
+                }
+            }
+        }
+        for i in 0..n_sub {
+            if counts[i] > 0 {
+                mean_amplitudes[i] /= counts[i] as f32;
+            }
+        }
+
+        // RSSI statistics
+        let rssi_mean = rssi_values.iter().sum::<f32>() / rssi_values.len() as f32;
+        let rssi_var = rssi_values.iter()
+            .map(|r| (r - rssi_mean).powi(2))
+            .sum::<f32>() / rssi_values.len() as f32;
+        let rssi_std = rssi_var.sqrt();
+
+        let fingerprint = CsiFingerprint {
+            name: name.to_string(),
+            mean_amplitudes,
+            rssi_mean,
+            rssi_std,
+            samples: all_amplitudes.len() as u32,
+        };
+
+        // Replace existing fingerprint with same name, or append
+        if let Some(existing) = self.fingerprints.iter_mut().find(|f| f.name == name) {
+            *existing = fingerprint;
+        } else {
+            self.fingerprints.push(fingerprint);
+        }
+    }
+
+    /// Compare current CSI signals against saved fingerprints using cosine
+    /// similarity. Returns (name, confidence) if the best match exceeds 0.7.
+    pub fn identify_location(&self) -> Option<(String, f32)> {
+        if self.fingerprints.is_empty() {
+            return None;
+        }
+
+        // Build current mean amplitude vector from last 50 frames
+        let mut all_amplitudes: Vec<Vec<f32>> = Vec::new();
+        for history in self.node_frames.values() {
+            for frame in history.iter().rev().take(50) {
+                all_amplitudes.push(frame.amplitudes.clone());
+            }
+        }
+        if all_amplitudes.is_empty() {
+            return None;
+        }
+
+        let n_sub = all_amplitudes.iter().map(|a| a.len()).max().unwrap_or(0);
+        if n_sub == 0 {
+            return None;
+        }
+        let mut current = vec![0.0f32; n_sub];
+        let mut counts = vec![0u32; n_sub];
+        for amps in &all_amplitudes {
+            for (i, &a) in amps.iter().enumerate() {
+                if i < n_sub {
+                    current[i] += a;
+                    counts[i] += 1;
+                }
+            }
+        }
+        for i in 0..n_sub {
+            if counts[i] > 0 {
+                current[i] /= counts[i] as f32;
+            }
+        }
+
+        // Find best matching fingerprint by cosine similarity
+        let mut best: Option<(String, f32)> = None;
+        for fp in &self.fingerprints {
+            let sim = cosine_similarity(&current, &fp.mean_amplitudes);
+            if sim > 0.7 {
+                if best.as_ref().map_or(true, |(_, s)| sim > *s) {
+                    best = Some((fp.name.clone(), sim));
+                }
+            }
+        }
+        best
+    }
+
+    /// Set the ambient light level from camera frame average luminance.
+    /// When luminance < 30 (out of 255), enables night/dark mode which
+    /// increases CSI processing frequency and skips camera depth.
+    pub fn set_light_level(&mut self, avg_luminance: f32) {
+        self.is_dark = avg_luminance < 30.0;
+    }
+
     fn update_tomography(&mut self) {
         let (nx, ny, nz) = self.occupancy_dims;
         let total = nx * ny * nz;
@@ -342,6 +488,28 @@ impl CsiPipelineState {
         for i in 0..total {
             self.occupancy[i] = self.occupancy[i] * 0.7 + new_occ[i] * 0.3;
         }
+    }
+}
+
+/// Cosine similarity between two vectors. Returns 0.0 if either has zero magnitude.
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    let len = a.len().min(b.len());
+    if len == 0 {
+        return 0.0;
+    }
+    let mut dot = 0.0f32;
+    let mut mag_a = 0.0f32;
+    let mut mag_b = 0.0f32;
+    for i in 0..len {
+        dot += a[i] * b[i];
+        mag_a += a[i] * a[i];
+        mag_b += b[i] * b[i];
+    }
+    let denom = mag_a.sqrt() * mag_b.sqrt();
+    if denom < 1e-9 {
+        0.0
+    } else {
+        dot / denom
     }
 }
 
@@ -392,6 +560,8 @@ pub fn get_pipeline_output(state: &Arc<Mutex<CsiPipelineState>>) -> PipelineOutp
         motion_detected: st.motion_detected,
         total_frames: st.total_frames,
         num_nodes: st.node_frames.len(),
+        current_location: st.current_location.clone(),
+        is_dark: st.is_dark,
     }
 }
 
@@ -404,6 +574,8 @@ pub struct PipelineOutput {
     pub motion_detected: bool,
     pub total_frames: u64,
     pub num_nodes: usize,
+    pub current_location: Option<(String, f32)>,
+    pub is_dark: bool,
 }
 
 // Serialize implementations
