@@ -4,23 +4,18 @@
 //!
 //! Usage:
 //!   ruview-pointcloud serve               # HTTP + Three.js viewer
-//!   ruview-pointcloud serve --csi 0.0.0.0:9890  # with live WiFi CSI
 //!   ruview-pointcloud capture --frames 1  # capture to PLY
 //!   ruview-pointcloud demo                # synthetic demo
 //!   ruview-pointcloud train               # calibration training
-//!   ruview-pointcloud csi-test            # send test CSI frames
+//!   ruview-pointcloud csi-test            # send test CSI frames (ADR-018 binary)
 
-#[allow(dead_code)]
 mod brain_bridge;
 mod camera;
-#[allow(dead_code)]
-mod csi;
 mod csi_pipeline;
 mod depth;
 mod fusion;
+mod parser;
 mod pointcloud;
-#[allow(dead_code)]
-mod serial_csi;
 mod stream;
 mod training;
 
@@ -38,15 +33,16 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Start real-time point cloud server
+    /// Start real-time point cloud server.
+    ///
+    /// By default the HTTP server binds to `127.0.0.1:9880` — exposing it on
+    /// `0.0.0.0` leaks live camera/CSI/vitals data to the network and must
+    /// be an explicit opt-in via `--bind 0.0.0.0:9880`.
     Serve {
-        #[arg(long, default_value = "0.0.0.0")]
-        host: String,
-        #[arg(long, default_value = "9880")]
-        port: u16,
-        /// WiFi CSI listen address (e.g., 0.0.0.0:9890)
-        #[arg(long)]
-        csi: Option<String>,
+        /// Bind address for the HTTP/viewer server. Default
+        /// `127.0.0.1:9880` (loopback only — safe by default).
+        #[arg(long, default_value = "127.0.0.1:9880")]
+        bind: String,
         /// Brain URL for storing observations
         #[arg(long)]
         brain: Option<String>,
@@ -70,12 +66,24 @@ enum Commands {
         #[arg(long)]
         brain: Option<String>,
     },
-    /// Send test CSI frames (for testing without ESP32)
+    /// Send synthetic ADR-018 binary CSI frames (for local testing without ESP32).
     CsiTest {
-        #[arg(long, default_value = "127.0.0.1:9890")]
+        #[arg(long, default_value = "127.0.0.1:3333")]
         target: String,
         #[arg(long, default_value = "100")]
         count: usize,
+    },
+    /// Record a CSI fingerprint for the current location.
+    ///
+    /// Listens on UDP 3333 for `--seconds` seconds, accumulates CSI frames,
+    /// and stores a named fingerprint that future sessions can match
+    /// against to identify the room.
+    Fingerprint {
+        /// Human-readable name for the fingerprint (e.g. "office", "lab").
+        name: String,
+        /// How long to listen before recording (default 5 s).
+        #[arg(long, default_value = "5")]
+        seconds: u64,
     },
 }
 
@@ -84,14 +92,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Serve { host, port, csi, brain } => {
-            // Start CSI receiver if configured
-            if let Some(csi_addr) = &csi {
-                let receiver = csi::CsiReceiver::new(csi_addr);
-                receiver.start()?;
-                eprintln!("  CSI receiver: {csi_addr}");
-            }
-            stream::serve(&host, port, brain.as_deref()).await?;
+        Commands::Serve { bind, brain } => {
+            stream::serve(&bind, brain.as_deref()).await?;
         }
         Commands::Capture { frames: _, output } => {
             if camera::camera_available() {
@@ -126,9 +128,25 @@ async fn main() -> Result<()> {
             train(&data_dir, brain.as_deref()).await?;
         }
         Commands::CsiTest { target, count } => {
-            println!("Sending {count} test CSI frames to {target}...");
-            csi::send_test_frames(&target, count)?;
+            println!("Sending {count} synthetic ADR-018 CSI frames to {target}...");
+            csi_pipeline::send_test_frames(&target, count)?;
             println!("Done");
+        }
+        Commands::Fingerprint { name, seconds } => {
+            println!("Recording CSI fingerprint '{name}' for {seconds} s on UDP 3333...");
+            let state = csi_pipeline::start_pipeline("0.0.0.0:3333");
+            std::thread::sleep(std::time::Duration::from_secs(seconds));
+            // record_fingerprint takes a brief lock on the shared state to
+            // read the last N frames from every node's history.
+            {
+                let mut st = state.lock().expect("pipeline state lock poisoned");
+                st.record_fingerprint(&name);
+                println!(
+                    "  Stored: {} fingerprint(s) total, {} total CSI frames received",
+                    st.fingerprints.len(),
+                    st.total_frames
+                );
+            }
         }
     }
 
