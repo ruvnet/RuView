@@ -1,5 +1,6 @@
 //! HTTP server — live camera + ESP32 CSI + fusion → real-time point cloud.
 
+use crate::brain_bridge;
 use crate::camera;
 use crate::csi_pipeline;
 use crate::depth;
@@ -59,7 +60,9 @@ pub async fn serve(host: &str, port: u16, _wifi_source: Option<&str>) -> anyhow:
                 let frame_num = *bg.frame_count.lock().unwrap();
                 skip_depth = !out.motion_detected && frame_num % 5 != 0;
             }
+            let pipeline_clone = pipeline_out.clone();
             *bg.latest_pipeline.lock().unwrap() = pipeline_out;
+            let pipeline_out = pipeline_clone;
 
             let interval = if skip_depth { 1000 } else { 500 }; // slower when no motion
             tokio::time::sleep(std::time::Duration::from_millis(interval)).await;
@@ -74,7 +77,18 @@ pub async fn serve(host: &str, port: u16, _wifi_source: Option<&str>) -> anyhow:
             let splats = pointcloud::to_gaussian_splats(&cloud);
             *bg.latest_cloud.lock().unwrap() = cloud;
             *bg.latest_splats.lock().unwrap() = splats;
-            *bg.frame_count.lock().unwrap() += 1;
+            let frame_num = {
+                let mut fc = bg.frame_count.lock().unwrap();
+                *fc += 1;
+                *fc
+            };
+
+            // Brain sync — sparse, every 120 frames (~60 seconds)
+            if frame_num % 120 == 0 {
+                if let Some(ref out) = pipeline_out {
+                    brain_bridge::sync_to_brain(out, frame_num).await;
+                }
+            }
         }
     });
 

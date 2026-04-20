@@ -10,6 +10,7 @@
 //!   ruview-pointcloud train               # calibration training
 //!   ruview-pointcloud csi-test            # send test CSI frames
 
+mod brain_bridge;
 mod camera;
 mod csi;
 mod csi_pipeline;
