@@ -1,19 +1,19 @@
 /**
  * Sensing WebSocket Service
  *
- * Manages the connection to the Python sensing WebSocket server
- * (ws://localhost:8765) and provides a callback-based API for the UI.
+ * Manages the connection to the Python backend WebSocket server
+ * (ws://localhost:8000/api/v1/stream/pose) and provides a callback-based API for the UI.
  *
  * Falls back to simulated data only after MAX_RECONNECT_ATTEMPTS exhausted.
  * While reconnecting the service stays in "reconnecting" state and does NOT
  * emit simulated frames so the UI can clearly distinguish live vs. fallback data.
  */
 
-// Derive WebSocket URL from the page origin so it works on any port.
-// The /ws/sensing endpoint is available on the same HTTP port (3000).
+// Derive WebSocket URL - connect to backend on port 8000 for local dev
+const _isLocalDev = (typeof window !== 'undefined' && window.location.port === '3000');
 const _wsProto = (typeof window !== 'undefined' && window.location.protocol === 'https:') ? 'wss:' : 'ws:';
-const _wsHost  = (typeof window !== 'undefined' && window.location.host) ? window.location.host : 'localhost:3000';
-const SENSING_WS_URL = `${_wsProto}//${_wsHost}/ws/sensing`;
+const _wsHost  = _isLocalDev ? 'localhost:8000' : window.location.host;
+const SENSING_WS_URL = `${_wsProto}//${_wsHost}/api/v1/stream/pose`;
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000];
 const MAX_RECONNECT_ATTEMPTS = 20;
 // Number of failed attempts that must occur before simulation starts.
@@ -313,20 +313,65 @@ class SensingService {
   // ---- Data handling -----------------------------------------------------
 
   _handleData(data) {
-    this._lastMessage = data;
+    // Transform backend pose_data format to sensing format for compatibility
+    let transformedData = data;
+    
+    if (data.type === 'pose_data') {
+      // Backend is sending pose data - transform to sensing format
+      transformedData = {
+        type: 'sensing_update',
+        timestamp: new Date(data.timestamp).getTime() / 1000,
+        source: 'server-simulated', // Backend is in mock mode
+        nodes: [{
+          node_id: 1,
+          rssi_dbm: -45,
+          position: [2, 0, 1.5],
+          amplitude: [],
+          subcarrier_count: 0,
+        }],
+        features: {
+          mean_rssi: -45,
+          variance: data.data?.confidence || 0.5,
+          std: Math.sqrt(data.data?.confidence || 0.5),
+          motion_band_power: data.data?.pose?.count > 0 ? 0.15 : 0.05,
+          breathing_band_power: 0.05,
+          dominant_freq_hz: 0.3,
+          change_points: data.data?.pose?.count || 0,
+          spectral_power: 0.2,
+          range: 1.5,
+          iqr: 1.0,
+          skewness: 0,
+          kurtosis: 1,
+        },
+        classification: {
+          motion_level: data.data?.pose?.count > 0 ? 'active' : 'present_still',
+          presence: data.data?.pose?.count > 0,
+          confidence: data.data?.confidence || 0.5,
+        },
+        // Store original pose data for components that need it
+        _pose_data: data.data
+      };
+    } else if (data.type === 'connection_established') {
+      // Connection confirmation - set data source to server-simulated
+      console.log('[Sensing] WebSocket connected:', data);
+      this._setDataSource('server-simulated');
+      return; // Don't emit connection message as data
+    }
+    
+    this._lastMessage = transformedData;
 
     // Track the server's source field from each frame so the UI
     // can react if the server switches between esp32 ↔ simulated at runtime.
-    if (data.source && this._state === 'connected') {
-      const raw = data.source;
+    if (transformedData.source && this._state === 'connected') {
+      const raw = transformedData.source;
       if (raw !== this._serverSource) {
         this._applyServerSource(raw);
       }
     }
 
     // Update RSSI history for sparkline
-    if (data.features && data.features.mean_rssi != null) {
-      this._rssiHistory.push(data.features.mean_rssi);
+    if (transformedData.features && transformedData.features.mean_rssi != null) {
+      this._rssiHistory.push(transformedData.features.mean_rssi);
       if (this._rssiHistory.length > this._maxHistory) {
         this._rssiHistory.shift();
       }
@@ -349,7 +394,7 @@ class SensingService {
     // Notify all listeners
     for (const cb of this._listeners) {
       try {
-        cb(data);
+        cb(transformedData);
       } catch (e) {
         console.error('[Sensing] Listener error:', e);
       }
