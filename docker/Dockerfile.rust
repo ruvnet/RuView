@@ -50,7 +50,12 @@ ENV RUST_LOG=info
 # Override at runtime:  docker run -e CSI_SOURCE=esp32 ...
 ENV CSI_SOURCE=auto
 
-ENTRYPOINT ["/bin/sh", "-c"]
-# Shell-form CMD allows $CSI_SOURCE to be substituted at container start.
-# The ENV default above (CSI_SOURCE=auto) applies when the variable is unset.
-CMD ["/app/sensing-server --source ${CSI_SOURCE} --tick-ms 100 --ui-path /app/ui --http-port 3000 --ws-port 3001"]
+ENTRYPOINT ["/app/sensing-server"]
+# Exec-form CMD allows arguments after the image name to reach the binary directly.
+# Use -e CSI_SOURCE=... to control the data source at runtime.
+# Examples:
+#   docker run ruvnet/wifi-densepose:latest                            # auto mode (default)
+#   docker run -e CSI_SOURCE=simulated ruvnet/wifi-densepose:latest  # synthetic data
+#   docker run -e CSI_SOURCE=esp32 ruvnet/wifi-densepose:latest       # real ESP32 hardware
+#   docker run ruvnet/wifi-densepose:latest --source simulated        # equivalent to above
+CMD []
