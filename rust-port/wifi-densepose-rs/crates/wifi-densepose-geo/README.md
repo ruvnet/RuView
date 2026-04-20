@@ -1,4 +1,4 @@
-# ruview-geo — Geospatial Satellite Integration
+# wifi-densepose-geo — Geospatial Satellite Integration
 
 Free satellite imagery, terrain elevation, and map data for RuView spatial sensing. No API keys required.
 
@@ -43,7 +43,7 @@ Integrates your local sensor data (camera + WiFi CSI point cloud) with geographi
 ## Usage
 
 ```rust
-use ruview_geo::{fuse, brain, temporal};
+use wifi_densepose_geo::{fuse, brain, temporal};
 
 // Build geo scene for current location
 let scene = fuse::build_scene(500.0).await?; // 500m radius

@@ -1,16 +1,36 @@
 //! OpenStreetMap data via Overpass API — buildings, roads, land use.
 
 use crate::types::{GeoBBox, GeoPoint, OsmFeature};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 const OVERPASS_URL: &str = "https://overpass-api.de/api/interpreter";
+
+/// Maximum radius (in metres) accepted by the OSM fetchers. Requests larger
+/// than this would produce Overpass queries covering hundreds of square
+/// kilometres — which hammers the public endpoint and returns unworkably
+/// large response payloads. Callers wanting wider areas must tile the queries.
+pub const MAX_RADIUS_M: f64 = 5000.0;
+
+fn check_radius(radius_m: f64) -> Result<()> {
+    if !radius_m.is_finite() || radius_m <= 0.0 {
+        return Err(anyhow!("radius_m must be positive and finite (got {radius_m})"));
+    }
+    if radius_m > MAX_RADIUS_M {
+        return Err(anyhow!(
+            "radius_m {radius_m} exceeds MAX_RADIUS_M ({MAX_RADIUS_M}); \
+             tile the query into smaller chunks"
+        ));
+    }
+    Ok(())
+}
 
 /// Fetch buildings within radius of a point.
 ///
 /// Uses an inclusive `["building"]` filter that matches all building values
 /// (residential, commercial, yes, etc.) and also queries relations for
-/// multipolygon buildings.  Default recommended radius: 500 m.
+/// multipolygon buildings.  Default recommended radius: 500 m. Max 5000 m.
 pub async fn fetch_buildings(center: &GeoPoint, radius_m: f64) -> Result<Vec<OsmFeature>> {
+    check_radius(radius_m)?;
     let bbox = GeoBBox::from_center(center, radius_m);
     let query = format!(
         r#"[out:json][timeout:25];(way["building"]({},{},{},{});relation["building"]({},{},{},{}););out body;>;out skel qt;"#,
@@ -21,8 +41,9 @@ pub async fn fetch_buildings(center: &GeoPoint, radius_m: f64) -> Result<Vec<Osm
     parse_buildings(&resp)
 }
 
-/// Fetch roads within radius.
+/// Fetch roads within radius. Max 5000 m; returns an error otherwise.
 pub async fn fetch_roads(center: &GeoPoint, radius_m: f64) -> Result<Vec<OsmFeature>> {
+    check_radius(radius_m)?;
     let bbox = GeoBBox::from_center(center, radius_m);
     let query = format!(
         r#"[out:json][timeout:10];way["highway"]({},{},{},{});out body;>;out skel qt;"#,
@@ -48,7 +69,18 @@ async fn overpass_query(query: &str) -> Result<serde_json::Value> {
     Ok(resp.json().await?)
 }
 
-fn parse_buildings(data: &serde_json::Value) -> Result<Vec<OsmFeature>> {
+/// Parse an Overpass JSON response into building features.
+///
+/// Returns an error if the response is not a JSON object or is missing the
+/// top-level `elements` array (indicative of a malformed/non-Overpass payload).
+pub fn parse_overpass_json(data: &serde_json::Value) -> Result<Vec<OsmFeature>> {
+    if !data.is_object() || data.get("elements").and_then(|e| e.as_array()).is_none() {
+        return Err(anyhow!("malformed Overpass response: missing `elements` array"));
+    }
+    parse_buildings(data)
+}
+
+pub(crate) fn parse_buildings(data: &serde_json::Value) -> Result<Vec<OsmFeature>> {
     let mut buildings = Vec::new();
     let mut nodes: std::collections::HashMap<u64, [f64; 2]> = std::collections::HashMap::new();
 

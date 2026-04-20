@@ -9,9 +9,63 @@
 //!    DPO training — "this depth estimate was correct" vs "this was wrong"
 
 use crate::fusion::OccupancyVolume;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Reject a user-supplied path that contains `..` components (path traversal
+/// attempt) and return a normalised [`PathBuf`]. We only reject `..`; other
+/// components (including relative prefixes and `~`) are accepted verbatim —
+/// the caller is responsible for tilde expansion if needed.
+pub fn sanitize_data_path(raw: &str) -> Result<PathBuf> {
+    let p = PathBuf::from(raw);
+    for comp in p.components() {
+        if matches!(comp, std::path::Component::ParentDir) {
+            return Err(anyhow!(
+                "refusing to use data dir with `..` traversal component: {raw}"
+            ));
+        }
+    }
+    Ok(p)
+}
+
+/// Ensure `child` (after joining to `base`) stays inside the canonicalised
+/// `base` directory. Returns the canonical child path on success. Used by
+/// every filesystem write site in this module to prevent path-traversal
+/// through user-supplied names.
+fn safe_join(base: &Path, child: &str) -> Result<PathBuf> {
+    // Reject absolute children and any `..` components up front.
+    let child_path = Path::new(child);
+    if child_path.is_absolute() {
+        return Err(anyhow!("child path must be relative: {child}"));
+    }
+    for comp in child_path.components() {
+        if matches!(comp, std::path::Component::ParentDir) {
+            return Err(anyhow!("child path may not contain `..`: {child}"));
+        }
+    }
+
+    let joined = base.join(child_path);
+    // Canonicalise base (must exist) and verify joined starts with it. If the
+    // joined file doesn't exist yet we canonicalise the parent.
+    let canonical_base = base.canonicalize()
+        .map_err(|e| anyhow!("data_dir not accessible {}: {e}", base.display()))?;
+    let canonical_parent = joined
+        .parent()
+        .ok_or_else(|| anyhow!("no parent for {}", joined.display()))?;
+    let canonical_parent = canonical_parent
+        .canonicalize()
+        .map_err(|e| anyhow!("parent not accessible {}: {e}", canonical_parent.display()))?;
+    if !canonical_parent.starts_with(&canonical_base) {
+        return Err(anyhow!(
+            "refusing to write outside data_dir: {}",
+            joined.display()
+        ));
+    }
+    Ok(canonical_parent.join(
+        joined.file_name().ok_or_else(|| anyhow!("no filename for {}", joined.display()))?,
+    ))
+}
 
 /// Training data sample — a snapshot of the scene.
 #[derive(Serialize, Deserialize)]
@@ -97,12 +151,24 @@ impl Default for DepthCalibration {
 }
 
 impl TrainingSession {
+    /// Create a new training session rooted at `data_dir`.
+    ///
+    /// `data_dir` must not contain `..` components — we reject path traversal
+    /// attempts from CLI/API input. The directory is created if missing and
+    /// then canonicalised so every subsequent write stays inside it.
     pub fn new(data_dir: &str) -> Result<Self> {
-        let path = PathBuf::from(data_dir);
-        std::fs::create_dir_all(&path)?;
+        let path = sanitize_data_path(data_dir)?;
+        std::fs::create_dir_all(&path)
+            .map_err(|e| anyhow!("failed to create data_dir {}: {e}", path.display()))?;
+        // Canonicalise so path-traversal checks in safe_join have a fixed root.
+        let path = path
+            .canonicalize()
+            .map_err(|e| anyhow!("cannot canonicalise data_dir {}: {e}", path.display()))?;
 
         // Load existing calibration if available
-        let cal_path = path.join("calibration.json");
+        let cal_path = safe_join(&path, "calibration.json")
+            // safe_join needs the parent to exist; for initial load that's always data_dir
+            .or_else(|_| Ok::<_, anyhow::Error>(path.join("calibration.json")))?;
         let calibration = if cal_path.exists() {
             let data = std::fs::read_to_string(&cal_path)?;
             serde_json::from_str(&data).unwrap_or_default()
@@ -257,8 +323,8 @@ impl TrainingSession {
 
         eprintln!("  Occupancy threshold={:.2} accuracy={:.1}%", cal.density_threshold, cal.accuracy * 100.0);
 
-        // Save
-        let path = self.data_dir.join("occupancy_calibration.json");
+        // Save (path-traversal safe: constant filename under canonical data_dir)
+        let path = safe_join(&self.data_dir, "occupancy_calibration.json")?;
         std::fs::write(&path, serde_json::to_string_pretty(&cal)?)?;
 
         Ok(cal)
@@ -295,8 +361,8 @@ impl TrainingSession {
             });
         }
 
-        // Save pairs
-        let path = self.data_dir.join("preference_pairs.jsonl");
+        // Save pairs (path-traversal safe: constant filename under canonical data_dir)
+        let path = safe_join(&self.data_dir, "preference_pairs.jsonl")?;
         let mut f = std::fs::File::create(&path)?;
         for pair in &pairs {
             use std::io::Write;
@@ -347,24 +413,24 @@ impl TrainingSession {
         Ok(stored)
     }
 
-    /// Save current calibration to disk.
+    /// Save current calibration to disk (path-traversal safe).
     fn save_calibration(&self) -> Result<()> {
-        let path = self.data_dir.join("calibration.json");
+        let path = safe_join(&self.data_dir, "calibration.json")?;
         std::fs::write(&path, serde_json::to_string_pretty(&self.calibration)?)?;
         Ok(())
     }
 
-    /// Save all samples to disk.
+    /// Save all samples to disk (path-traversal safe).
     pub fn save_samples(&self) -> Result<()> {
-        let path = self.data_dir.join("samples.json");
+        let path = safe_join(&self.data_dir, "samples.json")?;
         std::fs::write(&path, serde_json::to_string_pretty(&self.samples)?)?;
         eprintln!("  Saved {} samples to {}", self.samples.len(), path.display());
         Ok(())
     }
 
-    /// Load samples from disk.
+    /// Load samples from disk (path-traversal safe).
     pub fn load_samples(&mut self) -> Result<()> {
-        let path = self.data_dir.join("samples.json");
+        let path = safe_join(&self.data_dir, "samples.json")?;
         if path.exists() {
             let data = std::fs::read_to_string(&path)?;
             self.samples = serde_json::from_str(&data)?;

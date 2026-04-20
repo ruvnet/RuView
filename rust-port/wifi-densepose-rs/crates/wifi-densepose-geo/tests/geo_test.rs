@@ -1,5 +1,5 @@
-use ruview_geo::*;
-use ruview_geo::coord;
+use wifi_densepose_geo::*;
+use wifi_densepose_geo::coord;
 
 #[test]
 fn test_haversine() {
@@ -63,7 +63,7 @@ fn test_hgt_parse() {
     for h in [100i16, 110, 120, 105, 115, 125, 110, 120, 130] {
         data.extend_from_slice(&h.to_be_bytes());
     }
-    let grid = ruview_geo::terrain::parse_hgt(&data, 43.0, -79.0).unwrap();
+    let grid = wifi_densepose_geo::terrain::parse_hgt(&data, 43.0, -79.0).unwrap();
     assert_eq!(grid.heights[0], 100.0);
     assert_eq!(grid.heights[4], 115.0);
 }
@@ -71,14 +71,14 @@ fn test_hgt_parse() {
 #[test]
 fn test_registration() {
     let origin = GeoPoint { lat: 43.6532, lon: -79.3832, alt: 76.0 };
-    let reg = ruview_geo::register::auto_register(&origin);
+    let reg = wifi_densepose_geo::register::auto_register(&origin);
     
     let local = [10.0f32, 0.0, 20.0]; // 10m east, 20m forward
-    let geo = ruview_geo::register::local_to_wgs84(&reg, &local);
+    let geo = wifi_densepose_geo::register::local_to_wgs84(&reg, &local);
     assert!((geo.lat - origin.lat).abs() < 0.001);
     assert!((geo.lon - origin.lon).abs() < 0.001);
     
-    let back = ruview_geo::register::wgs84_to_local(&reg, &geo);
+    let back = wifi_densepose_geo::register::wgs84_to_local(&reg, &geo);
     assert!((back[0] - local[0]).abs() < 0.1);
     assert!((back[2] - local[2]).abs() < 0.1);
 }

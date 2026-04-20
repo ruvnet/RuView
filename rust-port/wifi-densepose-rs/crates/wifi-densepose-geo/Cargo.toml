@@ -1,5 +1,5 @@
 [package]
-name = "ruview-geo"
+name = "wifi-densepose-geo"
 version = "0.1.0"
 edition = "2021"
 description = "Geospatial satellite integration — free satellite tiles, DEM, OSM, temporal tracking"

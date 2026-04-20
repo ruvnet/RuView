@@ -150,6 +150,8 @@ pub async fn detect_tile_changes(
 }
 
 /// Post a change event to the local ruOS brain.
+///
+/// Brain URL honours `RUVIEW_BRAIN_URL` via [`crate::brain::brain_url`].
 async fn store_change_event(cache_key: &str, result: &TileChangeResult) -> Result<()> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
@@ -164,7 +166,7 @@ async fn store_change_event(cache_key: &str, result: &TileChangeResult) -> Resul
     });
 
     client
-        .post("http://127.0.0.1:9876/memories")
+        .post(format!("{}/memories", crate::brain::brain_url()))
         .json(&body)
         .send()
         .await?;

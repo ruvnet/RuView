@@ -1,4 +1,4 @@
-use ruview_geo::*;
+use wifi_densepose_geo::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

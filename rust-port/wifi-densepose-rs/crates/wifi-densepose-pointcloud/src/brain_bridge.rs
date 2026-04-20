@@ -2,11 +2,26 @@
 //!
 //! Periodically summarizes the sensor pipeline state and stores it
 //! as brain memories for the agent to reason about.
+//!
+//! The brain URL is read from the `RUVIEW_BRAIN_URL` env var on first use,
+//! defaulting to `http://127.0.0.1:9876`.
 
 use crate::csi_pipeline::PipelineOutput;
 use anyhow::Result;
+use std::sync::OnceLock;
 
-const BRAIN_URL: &str = "http://127.0.0.1:9876";
+/// Default brain URL if `RUVIEW_BRAIN_URL` is not set.
+const DEFAULT_BRAIN_URL: &str = "http://127.0.0.1:9876";
+
+fn brain_url() -> &'static str {
+    static BRAIN_URL: OnceLock<String> = OnceLock::new();
+    BRAIN_URL.get_or_init(|| {
+        let url = std::env::var("RUVIEW_BRAIN_URL")
+            .unwrap_or_else(|_| DEFAULT_BRAIN_URL.to_string());
+        eprintln!("  brain_bridge: using brain URL {url}");
+        url
+    })
+}
 
 /// Store a spatial observation in the brain.
 async fn store_memory(category: &str, content: &str) -> Result<()> {
@@ -19,7 +34,7 @@ async fn store_memory(category: &str, content: &str) -> Result<()> {
         "content": content,
     });
 
-    client.post(format!("{BRAIN_URL}/memories"))
+    client.post(format!("{}/memories", brain_url()))
         .json(&body)
         .send()
         .await?;
@@ -77,14 +92,18 @@ pub async fn sync_to_brain(pipeline: &PipelineOutput, camera_frames: u64) {
 
 /// Check if brain is reachable.
 pub async fn brain_available() -> bool {
-    reqwest::Client::builder()
+    // Must .await directly — calling `Handle::current().block_on(...)` from
+    // inside an async fn panics with "Cannot start a runtime from within a
+    // runtime" because a worker thread is already driving a runtime.
+    let Ok(client) = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()
-        .ok()
-        .and_then(|c| {
-            tokio::runtime::Handle::current().block_on(async {
-                c.get(format!("{BRAIN_URL}/health")).send().await.ok()
-            })
-        })
-        .is_some()
+    else {
+        return false;
+    };
+    client
+        .get(format!("{}/health", brain_url()))
+        .send()
+        .await
+        .is_ok()
 }

@@ -170,6 +170,10 @@ async fn train(data_dir: &str, brain_url: Option<&str>) -> Result<()> {
     println!();
 
     let expanded = data_dir.replace('~', &dirs::home_dir().unwrap_or_default().to_string_lossy());
+    // Defence-in-depth: reject path-traversal in the CLI argument before we
+    // hand it to TrainingSession (which also checks). This catches malicious
+    // CLI input early, before any I/O.
+    let _sanitised = training::sanitize_data_path(&expanded)?;
     let mut session = training::TrainingSession::new(&expanded)?;
     session.load_samples()?;
 
