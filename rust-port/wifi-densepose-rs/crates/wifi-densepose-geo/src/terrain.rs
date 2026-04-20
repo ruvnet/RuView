@@ -17,33 +17,46 @@ pub async fn fetch_elevation(point: &GeoPoint, cache: &TileCache) -> Result<Elev
         return parse_hgt(&data, lat_int as f64, lon_int as f64);
     }
 
-    // Try OpenTopography SRTM (free, no auth)
-    let url = format!(
-        "https://portal.opentopography.org/API/globaldem?demtype=SRTMGL1&south={}&north={}&west={}&east={}&outputFormat=HGT",
-        lat_int, lat_int + 1, lon_int, lon_int + 1
-    );
-
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()?;
 
-    match client.get(&url).send().await {
-        Ok(resp) if resp.status().is_success() => {
+    // Primary: NASA SRTM public mirror (no auth required for .hgt)
+    let nasa_url = format!(
+        "https://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL1.003/2000.02.11/{filename}"
+    );
+
+    if let Ok(resp) = client.get(&nasa_url).send().await {
+        if resp.status().is_success() {
             let data = resp.bytes().await?.to_vec();
             cache.put(&cache_key, &data)?;
-            parse_hgt(&data, lat_int as f64, lon_int as f64)
-        }
-        _ => {
-            // Return flat terrain as fallback
-            Ok(ElevationGrid {
-                origin_lat: lat_int as f64,
-                origin_lon: lon_int as f64,
-                cell_size_deg: 1.0 / 3600.0,
-                cols: 100, rows: 100,
-                heights: vec![0.0; 10000],
-            })
+            return parse_hgt(&data, lat_int as f64, lon_int as f64);
         }
     }
+
+    // Fallback: viewfinderpanoramas.org
+    // Files are grouped by continent zip, but individual .hgt files can be
+    // fetched directly when the server exposes them.
+    let vfp_url = format!(
+        "http://viewfinderpanoramas.org/dem1/{filename}"
+    );
+
+    if let Ok(resp) = client.get(&vfp_url).send().await {
+        if resp.status().is_success() {
+            let data = resp.bytes().await?.to_vec();
+            cache.put(&cache_key, &data)?;
+            return parse_hgt(&data, lat_int as f64, lon_int as f64);
+        }
+    }
+
+    // Final fallback: flat terrain when all downloads fail
+    Ok(ElevationGrid {
+        origin_lat: lat_int as f64,
+        origin_lon: lon_int as f64,
+        cell_size_deg: 1.0 / 3600.0,
+        cols: 100, rows: 100,
+        heights: vec![0.0; 10000],
+    })
 }
 
 /// Parse SRTM HGT binary (3601x3601 big-endian i16).

@@ -6,11 +6,16 @@ use anyhow::Result;
 const OVERPASS_URL: &str = "https://overpass-api.de/api/interpreter";
 
 /// Fetch buildings within radius of a point.
+///
+/// Uses an inclusive `["building"]` filter that matches all building values
+/// (residential, commercial, yes, etc.) and also queries relations for
+/// multipolygon buildings.  Default recommended radius: 500 m.
 pub async fn fetch_buildings(center: &GeoPoint, radius_m: f64) -> Result<Vec<OsmFeature>> {
     let bbox = GeoBBox::from_center(center, radius_m);
     let query = format!(
-        r#"[out:json][timeout:10];way["building"]({},{},{},{});out body;>;out skel qt;"#,
-        bbox.south, bbox.west, bbox.north, bbox.east
+        r#"[out:json][timeout:25];(way["building"]({},{},{},{});relation["building"]({},{},{},{}););out body;>;out skel qt;"#,
+        bbox.south, bbox.west, bbox.north, bbox.east,
+        bbox.south, bbox.west, bbox.north, bbox.east,
     );
     let resp = overpass_query(&query).await?;
     parse_buildings(&resp)
