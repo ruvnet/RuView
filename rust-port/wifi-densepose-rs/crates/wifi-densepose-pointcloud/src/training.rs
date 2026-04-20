@@ -8,7 +8,6 @@
 //! 3. **Brain integration**: store spatial observations as brain memories for
 //!    DPO training — "this depth estimate was correct" vs "this was wrong"
 
-use crate::pointcloud::PointCloud;
 use crate::fusion::OccupancyVolume;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -317,7 +316,7 @@ impl TrainingSession {
         let mut stored = 0u32;
 
         // Store calibration as brain memory
-        let cal_json = serde_json::to_string(&self.calibration)?;
+        let _cal_json = serde_json::to_string(&self.calibration)?;
         let body = serde_json::json!({
             "category": "spatial-calibration",
             "content": format!("Depth calibration: scale={:.2} offset={:.2} gamma={:.2} RMSE={:.4}m ({} samples)",

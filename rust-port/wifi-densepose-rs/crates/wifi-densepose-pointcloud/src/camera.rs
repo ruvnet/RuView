@@ -1,4 +1,5 @@
 //! Camera capture — cross-platform frame grabber.
+#![allow(dead_code)]
 //!
 //! macOS: uses `screencapture` or `ffmpeg -f avfoundation` for camera frames
 //! Linux: uses `v4l2-ctl` or `ffmpeg -f v4l2` for camera frames

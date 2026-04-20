@@ -1,4 +1,5 @@
 //! Multi-modal fusion: camera depth + WiFi RF tomography → unified point cloud.
+#![allow(dead_code)]
 
 use crate::pointcloud::{PointCloud, ColorPoint};
 use std::collections::HashMap;

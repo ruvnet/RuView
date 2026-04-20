@@ -10,13 +10,16 @@
 //!   ruview-pointcloud train               # calibration training
 //!   ruview-pointcloud csi-test            # send test CSI frames
 
+#[allow(dead_code)]
 mod brain_bridge;
 mod camera;
+#[allow(dead_code)]
 mod csi;
 mod csi_pipeline;
 mod depth;
 mod fusion;
 mod pointcloud;
+#[allow(dead_code)]
 mod serial_csi;
 mod stream;
 mod training;
@@ -90,7 +93,7 @@ async fn main() -> Result<()> {
             }
             stream::serve(&host, port, brain.as_deref()).await?;
         }
-        Commands::Capture { frames, output } => {
+        Commands::Capture { frames: _, output } => {
             if camera::camera_available() {
                 let config = camera::CameraConfig::default();
                 let frame = camera::capture_frame(&config)?;

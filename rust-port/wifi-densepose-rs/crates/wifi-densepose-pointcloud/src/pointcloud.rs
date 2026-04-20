@@ -1,4 +1,5 @@
 //! Point cloud types + PLY export + Gaussian splat conversion.
+#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 use std::io::Write;

@@ -1,4 +1,5 @@
 //! Complete CSI processing pipeline — ADR-018 parser → WiFlow pose → vitals → tomography.
+#![allow(dead_code)]
 //!
 //! Receives raw UDP frames from ESP32 nodes, extracts I/Q subcarrier data,
 //! runs the WiFlow pose model, detects motion, estimates vitals, and produces

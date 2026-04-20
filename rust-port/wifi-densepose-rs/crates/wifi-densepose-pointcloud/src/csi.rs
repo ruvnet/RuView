@@ -91,7 +91,7 @@ impl CsiReceiver {
 
         // Extract per-link attenuations for tomography
         let attenuations: Vec<f64> = links.iter().map(|l| l.attenuation).collect();
-        let n_links = attenuations.len();
+        let _n_links = attenuations.len();
 
         // Simple grid-based tomography (ISTA solver would go here)
         let nx = 8;
@@ -102,7 +102,7 @@ impl CsiReceiver {
 
         // For each link, distribute attenuation along the line between TX and RX
         // This is a simplified backprojection — real tomography uses ISTA L1 solver
-        for (i, atten) in attenuations.iter().enumerate() {
+        for (_i, atten) in attenuations.iter().enumerate() {
             // Distribute attenuation uniformly across voxels
             // (in production, use link geometry for proper ray tracing)
             let contribution = atten / total as f64;

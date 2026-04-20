@@ -3,7 +3,9 @@
 use crate::types::{GeoPoint, GeoBBox, TileCoord};
 
 const WGS84_A: f64 = 6_378_137.0;
+#[allow(dead_code)]
 const WGS84_F: f64 = 1.0 / 298.257_223_563;
+#[allow(dead_code)]
 const WGS84_E2: f64 = 2.0 * WGS84_F - WGS84_F * WGS84_F;
 
 /// Haversine distance in meters.

@@ -1,4 +1,5 @@
 //! HTTP server — live camera + ESP32 CSI + fusion → real-time point cloud.
+#![allow(dead_code)]
 
 use crate::brain_bridge;
 use crate::camera;
@@ -8,7 +9,7 @@ use crate::fusion;
 use crate::pointcloud;
 use axum::{
     extract::State,
-    response::{Html, IntoResponse},
+    response::Html,
     routing::get,
     Json, Router,
 };

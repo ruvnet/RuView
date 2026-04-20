@@ -1,4 +1,5 @@
 //! Monocular depth estimation via MiDaS ONNX + backprojection to 3D points.
+#![allow(dead_code)]
 
 use crate::pointcloud::{PointCloud, ColorPoint};
 use anyhow::Result;
@@ -163,7 +164,7 @@ fn estimate_depth_midas_server(rgb: &[u8], width: u32, height: u32) -> Result<Ve
 }
 
 /// Capture depth cloud from camera (placeholder — real impl uses nokhwa or v4l2).
-pub async fn capture_depth_cloud(frames: usize) -> Result<PointCloud> {
+pub async fn capture_depth_cloud(_frames: usize) -> Result<PointCloud> {
     eprintln!("Camera capture not available (no camera on this machine).");
     eprintln!("Use --demo for synthetic data, or run on a machine with a camera.");
     Ok(demo_depth_cloud())
@@ -171,7 +172,7 @@ pub async fn capture_depth_cloud(frames: usize) -> Result<PointCloud> {
 
 /// Generate a demo depth point cloud (synthetic room scene).
 pub fn demo_depth_cloud() -> PointCloud {
-    let mut cloud = PointCloud::new("demo_camera_depth");
+    let _cloud = PointCloud::new("demo_camera_depth");
     let intrinsics = CameraIntrinsics::default();
 
     // Simulate a depth map: room with walls at 3m, floor, and a person at 2m
