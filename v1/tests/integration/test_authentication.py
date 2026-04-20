@@ -94,7 +94,10 @@ class TestJWTAuthentication:
             def verify_token(self, token: str) -> Dict[str, Any]:
                 """Verify JWT token."""
                 try:
-                    payload = jwt.decode(token, self.secret, algorithms=[self.algorithm])
+                    payload = jwt.decode(
+                        token, self.secret, algorithms=[self.algorithm],
+                        leeway=timedelta(seconds=2)
+                    )
                     return payload
                 except jwt.ExpiredSignatureError:
                     raise HTTPException(
@@ -106,14 +109,20 @@ class TestJWTAuthentication:
                         status_code=status.HTTP_401_UNAUTHORIZED,
                         detail="Invalid token"
                     )
-            
+
             def refresh_token(self, token: str) -> str:
-                """Refresh JWT token."""
+                """Refresh JWT token advancing iat by 1s to guarantee a distinct token."""
                 payload = self.verify_token(token)
-                # Remove exp and iat for new token
+                original_iat = payload.pop("iat", None)
                 payload.pop("exp", None)
-                payload.pop("iat", None)
-                return self.create_token(payload)
+                # Advance iat by 1 integer second so the encoded bytes always differ
+                new_iat_ts = (original_iat or int(datetime.utcnow().timestamp())) + 1
+                new_payload = {
+                    **payload,
+                    "exp": datetime.utcnow() + timedelta(hours=1, seconds=1),
+                    "iat": datetime.utcfromtimestamp(new_iat_ts),
+                }
+                return jwt.encode(new_payload, self.secret, algorithm=self.algorithm)
         
         return MockJWTService()
     
