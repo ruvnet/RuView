@@ -536,6 +536,105 @@ Both UIs update in real-time via WebSocket and auto-detect the sensing server on
 
 ---
 
+## Dense Point Cloud (Camera + WiFi CSI Fusion)
+
+RuView can generate real-time 3D point clouds by fusing camera depth estimation with WiFi CSI spatial sensing. This creates a spatial model of the environment that updates in real-time.
+
+### Setup
+
+```bash
+# Build the pointcloud binary
+cd rust-port/wifi-densepose-rs
+cargo build --release -p wifi-densepose-pointcloud
+
+# Start the server (auto-detects camera + CSI)
+./target/release/ruview-pointcloud serve --port 9880
+```
+
+Open `http://localhost:9880` for the interactive Three.js 3D viewer.
+
+### Sensors
+
+| Sensor | Auto-detected | Data |
+|--------|--------------|------|
+| Camera (`/dev/video0`) | Yes (Linux UVC) | RGB frames → MiDaS depth → 3D points |
+| ESP32 CSI (UDP:3333) | Yes (if provisioned) | ADR-018 binary → occupancy + pose + vitals |
+| MiDaS depth server (port 9885) | Optional | GPU-accelerated neural depth estimation |
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `ruview-pointcloud serve --port 9880` | Start HTTP server + Three.js viewer |
+| `ruview-pointcloud demo` | Generate synthetic point cloud (no hardware needed) |
+| `ruview-pointcloud capture --output room.ply` | Capture single frame to PLY file |
+| `ruview-pointcloud cameras` | List available cameras |
+| `ruview-pointcloud train --data-dir ./data` | Depth calibration + occupancy training |
+| `ruview-pointcloud csi-test --count 100` | Send test CSI frames (no ESP32 needed) |
+
+### Pipeline Components
+
+1. **ADR-018 Parser** — Decodes ESP32 CSI binary frames from UDP, extracts I/Q subcarrier amplitudes and phases
+2. **WiFlow Pose** — 17 COCO keypoint estimation from CSI (loads `wiflow-v1.json`, 186K params)
+3. **Vital Signs** — Breathing rate from CSI phase analysis (peak counting on stable subcarrier)
+4. **Motion Detection** — CSI amplitude variance over 20 frames, triggers adaptive capture
+5. **RF Tomography** — Backprojection from per-node RSSI to 8×8×4 occupancy grid
+6. **Camera Depth** — MiDaS monocular depth (GPU) with luminance+edge fallback
+7. **Sensor Fusion** — Voxel-grid merging of camera depth + CSI occupancy
+8. **Brain Bridge** — Stores spatial observations in the ruOS brain every 60 seconds
+
+### API Endpoints
+
+| Endpoint | Method | Returns |
+|----------|--------|---------|
+| `/health` | GET | `{"status": "ok"}` |
+| `/api/status` | GET | Camera, CSI, pipeline state, vitals, motion |
+| `/api/cloud` | GET | Point cloud (up to 1000 points) + pipeline data |
+| `/api/splats` | GET | Gaussian splats for Three.js rendering |
+| `/` | GET | Interactive Three.js 3D viewer |
+
+### Training
+
+The training pipeline calibrates depth estimation and occupancy detection:
+
+```bash
+ruview-pointcloud train --data-dir ~/.local/share/ruview/training --brain http://127.0.0.1:9876
+```
+
+This captures frames, runs depth calibration (grid search over scale/offset/gamma), trains occupancy thresholds, exports DPO preference pairs, and submits results to the ruOS brain.
+
+### Output Formats
+
+- **PLY** — Standard 3D point cloud (ASCII, with RGB color)
+- **Gaussian Splats** — JSON format for Three.js rendering
+- **Brain Memories** — Spatial observations stored as `spatial-observation`, `spatial-motion`, `spatial-vitals`
+
+### Deep Room Scan
+
+Capture a high-quality 3D model of the room:
+
+```bash
+# Stop the live server first (frees the camera)
+# Then capture 20 frames and process with MiDaS
+ruview-pointcloud capture --frames 20 --output room_model.ply
+```
+
+Result: 40,000+ voxels at 5cm resolution, 12,000+ Gaussian splats.
+
+### ESP32 Provisioning for CSI
+
+To send CSI data to the pointcloud server:
+
+```bash
+python3 firmware/esp32-csi-node/provision.py \
+    --port /dev/ttyACM0 \
+    --ssid "YourWiFi" --password "YourPassword" \
+    --target-ip 192.168.1.123 --target-port 3333 \
+    --node-id 1
+```
+
+---
+
 ## Vital Sign Detection
 
 The system extracts breathing rate and heart rate from CSI signal fluctuations using FFT peak detection.

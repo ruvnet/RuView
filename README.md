@@ -96,6 +96,42 @@ node scripts/mincut-person-counter.js --port 5006  # Correct person counting
 >
 ---
 
+### Real-Time Dense Point Cloud (NEW)
+
+RuView now generates **real-time 3D point clouds** by fusing camera depth + WiFi CSI + mmWave radar. All sensors stream simultaneously into a unified spatial model.
+
+| Sensor | Data | Integration |
+|--------|------|-------------|
+| **Camera** | MiDaS monocular depth (GPU) | 640×480 → 19,200+ depth points per frame |
+| **ESP32 CSI** | ADR-018 binary frames (UDP) | RF tomography → 8×8×4 occupancy grid |
+| **WiFlow Pose** | 17 COCO keypoints from CSI | Skeleton overlay on point cloud |
+| **Vital Signs** | Breathing rate from CSI phase | Stored in ruOS brain every 60s |
+| **Motion** | CSI amplitude variance | Adaptive capture rate (skip depth when still) |
+
+**Quick start:**
+```bash
+cd rust-port/wifi-densepose-rs
+cargo build --release -p wifi-densepose-pointcloud
+./target/release/ruview-pointcloud serve --port 9880
+# Open http://localhost:9880 for live 3D viewer
+```
+
+**CLI commands:**
+```bash
+ruview-pointcloud demo                    # synthetic demo
+ruview-pointcloud serve --port 9880       # live server + Three.js viewer
+ruview-pointcloud capture --output room.ply  # capture to PLY
+ruview-pointcloud train                   # depth calibration + DPO pairs
+ruview-pointcloud cameras                 # list available cameras
+ruview-pointcloud csi-test --count 100    # send test CSI frames
+```
+
+**Performance:** 22ms pipeline, 905 req/s API, 40K voxel room model from 20 frames.
+
+**Brain integration:** Spatial observations (motion, vitals, skeleton, occupancy) sync to the ruOS brain every 60 seconds for agent reasoning.
+
+See [PR #405](https://github.com/ruvnet/RuView/pull/405) for full details.
+
 ### What's New in v0.7.0
 
 <details>
