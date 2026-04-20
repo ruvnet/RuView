@@ -1,4 +1,4 @@
-# ADR-044: Provisioning Tool Enhancements
+# ADR-050: Provisioning Tool Enhancements
 
 **Status**: Proposed
 **Date**: 2026-03-03
