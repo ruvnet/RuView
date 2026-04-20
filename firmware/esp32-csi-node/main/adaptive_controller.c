@@ -43,6 +43,9 @@ static TimerHandle_t s_fast_timer   = NULL;
 static TimerHandle_t s_medium_timer = NULL;
 static TimerHandle_t s_slow_timer   = NULL;
 
+/* Forward decl: defined below, called from fast_loop_cb. */
+static void emit_feature_state(void);
+
 /* ---- Defaults ---- */
 
 #ifndef CONFIG_ADAPTIVE_FAST_LOOP_MS
