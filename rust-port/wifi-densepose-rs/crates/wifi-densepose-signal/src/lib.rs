@@ -34,6 +34,7 @@
 pub mod bvp;
 pub mod csi_processor;
 pub mod csi_ratio;
+pub mod eml;
 pub mod features;
 pub mod fresnel;
 pub mod hampel;
@@ -41,6 +42,7 @@ pub mod hardware_norm;
 pub mod motion;
 pub mod phase_sanitizer;
 pub mod ruvsense;
+pub mod signal_quality;
 pub mod spectrogram;
 pub mod subcarrier_selection;
 
@@ -56,6 +58,8 @@ pub use features::{
 pub use motion::{
     HumanDetectionResult, MotionAnalysis, MotionDetector, MotionDetectorConfig, MotionScore,
 };
+pub use eml::{EmlConfig, EmlModel};
+pub use signal_quality::{SignalQualityInput, SignalQualityScorer};
 pub use hardware_norm::{
     AmplitudeStats, CanonicalCsiFrame, HardwareNormError, HardwareNormalizer, HardwareType,
 };
