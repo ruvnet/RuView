@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     pose_confidence_threshold: float = Field(default=0.5, description="Minimum confidence threshold")
     pose_processing_batch_size: int = Field(default=32, description="Batch size for pose processing")
     pose_max_persons: int = Field(default=10, description="Maximum persons to detect per frame")
+    pose_multi_person_mvp_energy_threshold: float = Field(
+        default=0.35,
+        description="Motion-energy threshold for MVP two-person promotion heuristic"
+    )
     
     # Streaming settings
     stream_fps: int = Field(default=30, description="Streaming frames per second")
