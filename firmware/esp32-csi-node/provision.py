@@ -155,6 +155,9 @@ def flash_nvs(port, baud, nvs_bin):
             "--chip", "esp32s3",
             "--port", port,
             "--baud", str(baud),
+            # Keep underscore form — ESP-IDF v5.4 bundles esptool 4.10.0 which only
+            # accepts "write_flash". pip's esptool >=5.x accepts both (hyphenated
+            # form preferred) but keeps underscore working. Do not "correct" this.
             "write_flash",
             hex(NVS_PARTITION_OFFSET), bin_path,
         ]

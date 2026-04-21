@@ -714,8 +714,11 @@ static void process_frame(const edge_ring_slot_t *slot)
     s_frame_count++;
     s_latest_rssi = slot->rssi;
 
-    /* Assumed CSI sample rate (~20 Hz for typical ESP32 CSI). */
-    const float sample_rate = 20.0f;
+    /* CSI sample rate. MGMT-only promiscuous filter (RuView#396, csi_collector.c)
+     * yields ~10 Hz from beacons; keep this value aligned with csi_collector's
+     * effective callback rate or estimate_bpm_zero_crossing() reports the wrong
+     * BPM (2× rate mismatch → 2× wrong breathing/HR). */
+    const float sample_rate = 10.0f;
 
     /* --- Step 1-2: Phase extraction + unwrapping per subcarrier --- */
     float phases[EDGE_MAX_SUBCARRIERS];
