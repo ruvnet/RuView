@@ -1,19 +1,32 @@
 /**
  * Sensing WebSocket Service
  *
- * Manages the connection to the Python sensing WebSocket server
- * (ws://localhost:8765) and provides a callback-based API for the UI.
+ * Manages the connection to the sensing WebSocket server and provides a
+ * callback-based API for the UI.
+ *
+ * Connection strategy:
+ *   1. Same-origin /ws/sensing (Rust server / reverse-proxy path)
+ *   2. localhost:8765/ws/sensing (legacy Python/macOS path)
  *
  * Falls back to simulated data only after MAX_RECONNECT_ATTEMPTS exhausted.
  * While reconnecting the service stays in "reconnecting" state and does NOT
  * emit simulated frames so the UI can clearly distinguish live vs. fallback data.
  */
 
-// Derive WebSocket URL from the page origin so it works on any port.
-// The /ws/sensing endpoint is available on the same HTTP port (3000).
+// Derive candidate WebSocket URLs from the current origin.
 const _wsProto = (typeof window !== 'undefined' && window.location.protocol === 'https:') ? 'wss:' : 'ws:';
 const _wsHost  = (typeof window !== 'undefined' && window.location.host) ? window.location.host : 'localhost:3000';
-const SENSING_WS_URL = `${_wsProto}//${_wsHost}/ws/sensing`;
+const _wsHostname = (typeof window !== 'undefined' && window.location.hostname) ? window.location.hostname : 'localhost';
+
+function buildSensingWsUrls() {
+  const candidates = [
+    `${_wsProto}//${_wsHost}/ws/sensing`,
+    `${_wsProto}//${_wsHostname}:8765/ws/sensing`,
+  ];
+  return [...new Set(candidates)];
+}
+
+const SENSING_WS_URLS = buildSensingWsUrls();
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000];
 const MAX_RECONNECT_ATTEMPTS = 20;
 // Number of failed attempts that must occur before simulation starts.
@@ -41,6 +54,10 @@ class SensingService {
     // The raw source string from the server (e.g. "esp32", "simulated", "simulate")
     this._serverSource = null;
     this._lastMessage = null;
+    this._wsCandidates = SENSING_WS_URLS;
+    this._candidateIndex = 0;
+    this._successfulWsUrl = null;
+    this._activeWsUrl = null;
 
     // Ring buffer of recent RSSI values for sparkline
     this._rssiHistory = [];
@@ -110,9 +127,11 @@ class SensingService {
     if (this._ws && this._ws.readyState <= WebSocket.OPEN) return;
 
     this._setState('connecting');
+    const wsUrl = this._successfulWsUrl || this._wsCandidates[this._candidateIndex] || `${_wsProto}//${_wsHost}/ws/sensing`;
+    this._activeWsUrl = wsUrl;
 
     try {
-      this._ws = new WebSocket(SENSING_WS_URL);
+      this._ws = new WebSocket(wsUrl);
     } catch (err) {
       console.warn('[Sensing] WebSocket constructor failed:', err.message);
       this._fallbackToSimulation();
@@ -120,8 +139,10 @@ class SensingService {
     }
 
     this._ws.onopen = () => {
-      console.info('[Sensing] Connected to', SENSING_WS_URL);
+      console.info('[Sensing] Connected to', this._activeWsUrl);
       this._reconnectAttempt = 0;
+      this._successfulWsUrl = this._activeWsUrl;
+      this._candidateIndex = Math.max(0, this._wsCandidates.indexOf(this._successfulWsUrl));
       this._stopSimulation();
       this._setState('connected');
       // Don't assume "live" yet — wait for first frame's source field.
@@ -146,6 +167,9 @@ class SensingService {
       console.info('[Sensing] Connection closed (code=%d)', evt.code);
       this._ws = null;
       if (evt.code !== 1000) {
+        if (!this._successfulWsUrl && this._wsCandidates.length > 1) {
+          this._candidateIndex = (this._candidateIndex + 1) % this._wsCandidates.length;
+        }
         this._scheduleReconnect();
       } else {
         this._setState('disconnected');
@@ -276,8 +300,14 @@ class SensingService {
    * hardware or simulation. Called once on WebSocket open.
    */
   async _detectServerSource() {
+    const statusUrl = this._statusUrlForActiveSocket();
+    if (!statusUrl) {
+      this._setDataSource('live');
+      return;
+    }
+
     try {
-      const resp = await fetch('/api/v1/status');
+      const resp = await fetch(statusUrl);
       if (resp.ok) {
         const json = await resp.json();
         this._applyServerSource(json.source);
@@ -287,6 +317,24 @@ class SensingService {
       }
     } catch {
       this._setDataSource('live');
+    }
+  }
+
+  _statusUrlForActiveSocket() {
+    if (!this._activeWsUrl || typeof window === 'undefined') {
+      return '/api/v1/status';
+    }
+
+    try {
+      const wsUrl = new URL(this._activeWsUrl, window.location.href);
+      if (wsUrl.port === '8765') {
+        // The legacy Python/macOS sensing path exposes only WebSocket frames.
+        return null;
+      }
+      const httpProto = wsUrl.protocol === 'wss:' ? 'https:' : 'http:';
+      return `${httpProto}//${wsUrl.host}/api/v1/status`;
+    } catch {
+      return '/api/v1/status';
     }
   }
 
