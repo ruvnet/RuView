@@ -19,6 +19,120 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Docs
 - **CHANGELOG catch-up** (#367) — Added missing entries for v0.5.5, v0.6.0, and v0.7.0 releases.
 
+## [v0.6.2-esp32] — 2026-04-20
+
+Firmware release cutting ADR-081 and the Timer Svc stack fix discovered during
+on-hardware validation. Cut from `main` at commit pointing to this entry.
+Tested on ESP32-S3 (QFN56 rev v0.2, MAC `3c:0f:02:e9:b5:f8`), 30 s continuous
+run: no crashes, 149 `rv_feature_state_t` emissions (~5 Hz), medium/slow ticks
+firing cleanly, HEALTH mesh packets sent.
+
+### Fixed
+- **Firmware: Timer Svc stack overflow on ADR-081 fast loop** — `emit_feature_state()` runs inside the FreeRTOS Timer Svc task via the fast-loop callback; it calls `stream_sender` network I/O which pushes past the ESP-IDF 2 KiB default timer stack and panics ~1 s after boot. Bumped `CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH` to 8 KiB in `sdkconfig.defaults`, `sdkconfig.defaults.template`, and `sdkconfig.defaults.4mb`. Follow-up (tracked separately): move heavy work out of the timer daemon into a dedicated worker task.
+- **Firmware: `adaptive_controller.c` implicit declaration** (#404) — `fast_loop_cb` called `emit_feature_state()` before its static definition, triggering `-Werror=implicit-function-declaration`. Added a forward declaration above the first use.
+
+### Changed
+- **CI: firmware build matrix (8MB + 4MB)** — `firmware-ci.yml` now matrix-builds both the default 8MB (`sdkconfig.defaults`) and 4MB SuperMini (`sdkconfig.defaults.4mb`) variants, uploading distinct artifacts and producing variant-named release binaries (`esp32-csi-node.bin` / `esp32-csi-node-4mb.bin`, `partition-table.bin` / `partition-table-4mb.bin`).
+
+### Added
+- **ADR-081: Adaptive CSI Mesh Firmware Kernel** — New 5-layer architecture
+  (Radio Abstraction Layer / Adaptive Controller / Mesh Sensing Plane /
+  On-device Feature Extraction / Rust handoff) that reframes the existing
+  ESP32 firmware modules as components of a chipset-agnostic kernel. ADR
+  in `docs/adr/ADR-081-adaptive-csi-mesh-firmware-kernel.md`. Goal: swap
+  one radio family for another without changing the Rust signal /
+  ruvector / train / mat crates.
+- **Firmware: radio abstraction vtable (`rv_radio_ops_t`)** — New
+  `firmware/esp32-csi-node/main/rv_radio_ops.{h}` defines the
+  chipset-agnostic ops (init, set_channel, set_mode, set_csi_enabled,
+  set_capture_profile, get_health), profile enum
+  (`RV_PROFILE_PASSIVE_LOW_RATE` / `ACTIVE_PROBE` / `RESP_HIGH_SENS` /
+  `FAST_MOTION` / `CALIBRATION`), and health snapshot struct.
+  `rv_radio_ops_esp32.c` provides the ESP32 binding wrapping
+  `csi_collector` + `esp_wifi_*`. A second binding (mock or alternate
+  chipset) is the portability acceptance test for ADR-081.
+- **Firmware: `rv_feature_state_t` packet (magic `0xC5110006`)** — New
+  60-byte compact per-node sensing state (packed, verified by
+  `_Static_assert`) in `firmware/esp32-csi-node/main/rv_feature_state.h`:
+  motion, presence, respiration BPM/conf, heartbeat BPM/conf, anomaly
+  score, env-shift score, node coherence, quality flags, IEEE CRC32.
+  Replaces raw ADR-018 CSI as the default upstream stream (~99.7%
+  bandwidth reduction: 300 B/s at 5 Hz vs. ~100 KB/s raw).
+- **Firmware: mock radio ops binding for QEMU** — New
+  `firmware/esp32-csi-node/main/rv_radio_ops_mock.c`, compiled only when
+  `CONFIG_CSI_MOCK_ENABLED`. Satisfies ADR-081's portability acceptance
+  test: a second `rv_radio_ops_t` binding compiles and runs against the
+  same controller + mesh-plane code as the ESP32 binding.
+- **Firmware: feature-state emitter wired into controller fast loop** —
+  `adaptive_controller.c` now emits one 60-byte `rv_feature_state_t` per
+  fast tick (default 200 ms → 5 Hz), pulling from the latest edge vitals
+  and controller observation. This is the first end-to-end Layer 4/5
+  path for ADR-081.
+- **Firmware: `csi_collector_get_pkt_yield_per_sec()` /
+  `_get_send_fail_count()` accessors** — Expose the CSI callback rate
+  and UDP send-failure counter so the ESP32 radio ops binding can
+  populate `rv_radio_health_t.pkt_yield_per_sec` and `.send_fail_count`,
+  closing the adaptive controller's observation loop.
+- **Firmware: host-side unit test suite for ADR-081 pure logic** — New
+  `firmware/esp32-csi-node/tests/host/` (Makefile + 2 test files + shim
+  `esp_err.h`). Exercises `adaptive_controller_decide()` (9 test cases:
+  degraded gate on pkt-yield collapse + coherence loss, anomaly > motion,
+  motion → SENSE_ACTIVE, aggressive cadence, stable presence →
+  RESP_HIGH_SENS, empty-room default, hysteresis, NULL safety) and
+  `rv_feature_state_*` helpers (size assertion, IEEE CRC32 known
+  vectors, determinism, receiver-side verification). 33/33 assertions
+  pass. Benchmarks: decide() 3.2 ns/call, CRC32(56 B) 614 ns/pkt
+  (87 MB/s), full finalize() 616 ns/call. Pure function
+  `adaptive_controller_decide()` extracted to
+  `adaptive_controller_decide.c` so the firmware build and the host
+  tests share a single source-of-truth implementation.
+- **Scripts: `validate_qemu_output.py` ADR-081 checks** — Validator
+  (invoked by ADR-061 `scripts/qemu-esp32s3-test.sh` in CI) gains three
+  checks for adaptive controller boot line, mock radio ops
+  registration, and slow-loop heartbeat, so QEMU runs regression-gate
+  Layer 1/2 presence.
+- **Firmware: ADR-081 Layer 3 mesh sensing plane** — New
+  `firmware/esp32-csi-node/main/rv_mesh.{h,c}` defines 4 node roles
+  (Anchor / Observer / Fusion relay / Coordinator), 7 on-wire message
+  types (TIME_SYNC, ROLE_ASSIGN, CHANNEL_PLAN, CALIBRATION_START,
+  FEATURE_DELTA, HEALTH, ANOMALY_ALERT), 3 authorization classes
+  (None / HMAC-SHA256-session / Ed25519-batch), `rv_node_status_t`
+  (28 B), `rv_anomaly_alert_t` (28 B), `rv_time_sync_t`,
+  `rv_role_assign_t`, `rv_channel_plan_t`, `rv_calibration_start_t`.
+  Pure-C encoder/decoder (`rv_mesh_encode()` / `rv_mesh_decode()`) with
+  16-byte envelope + payload + IEEE CRC32 trailer; convenience encoders
+  for each message type. Controller now emits `HEALTH` every slow-loop
+  tick (30 s default) and `ANOMALY_ALERT` on state transitions to ALERT
+  or DEGRADED. Host tests: `test_rv_mesh` exercises 27 assertions
+  covering roundtrip, bad magic, truncation, CRC flipping, oversize
+  payload rejection, and encode+decode throughput (1.0 μs/roundtrip
+  on host).
+- **Rust: ADR-081 Layer 1/3 mirror module** — New
+  `crates/wifi-densepose-hardware/src/radio_ops.rs` mirrors the
+  firmware-side `rv_radio_ops_t` vtable as the Rust `RadioOps` trait
+  (init, set_channel, set_mode, set_csi_enabled, set_capture_profile,
+  get_health) and provides `MockRadio` for offline testing.
+  Also mirrors the `rv_mesh.h` types (`MeshHeader`, `NodeStatus`,
+  `AnomalyAlert`, `MeshRole`, `MeshMsgType`, `AuthClass`) and ships
+  byte-identical `crc32_ieee()`, `decode_mesh()`, `decode_node_status()`,
+  `decode_anomaly_alert()`, and `encode_health()`. Exported from
+  `lib.rs`. 8 unit tests pass; `crc32_matches_firmware_vectors`
+  verifies parity with the firmware-side test vectors
+  (`0xCBF43926` for `"123456789"`, `0xD202EF8D` for single-byte zero),
+  and `mesh_constants_match_firmware` asserts `MESH_MAGIC`,
+  `MESH_VERSION`, `MESH_HEADER_SIZE`, and `MESH_MAX_PAYLOAD` match
+  `rv_mesh.h` byte-for-byte. Satisfies ADR-081's portability
+  acceptance test: signal/ruvector/train/mat crates are untouched.
+- **Firmware: adaptive controller** — New
+  `firmware/esp32-csi-node/main/adaptive_controller.{c,h}` implements
+  the three-loop closed-loop control specified by ADR-081: fast
+  (~200 ms) for cadence and active probing, medium (~1 s) for channel
+  selection and role transitions, slow (~30 s) for baseline
+  recalibration. Pure `adaptive_controller_decide()` policy function is
+  exposed in the header for offline unit testing. Default policy is
+  conservative (`enable_channel_switch` and `enable_role_change` off);
+  Kconfig surface added under "Adaptive Controller (ADR-081)".
+
 ## [v0.7.0] — 2026-04-06
 
 Model release (no new firmware binary). Firmware remains at v0.6.0-esp32.

@@ -96,6 +96,47 @@ node scripts/mincut-person-counter.js --port 5006  # Correct person counting
 >
 ---
 
+### Real-Time Dense Point Cloud (NEW)
+
+RuView now generates **real-time 3D point clouds** by fusing camera depth + WiFi CSI + mmWave radar. All sensors stream simultaneously into a unified spatial model.
+
+| Sensor | Data | Integration |
+|--------|------|-------------|
+| **Camera** | MiDaS monocular depth (GPU) | 640×480 → 19,200+ depth points per frame |
+| **ESP32 CSI** | ADR-018 binary frames (UDP) | RF tomography → 8×8×4 occupancy grid |
+| **WiFlow Pose** | 17 COCO keypoints from CSI | Skeleton overlay on point cloud |
+| **Vital Signs** | Breathing rate from CSI phase | Stored in ruOS brain every 60s |
+| **Motion** | CSI amplitude variance | Adaptive capture rate (skip depth when still) |
+
+**Quick start:**
+```bash
+cd rust-port/wifi-densepose-rs
+cargo build --release -p wifi-densepose-pointcloud
+./target/release/ruview-pointcloud serve --bind 127.0.0.1:9880
+# Open http://localhost:9880 for live 3D viewer
+```
+
+**CLI commands:**
+```bash
+ruview-pointcloud demo                            # synthetic demo
+ruview-pointcloud serve --bind 127.0.0.1:9880     # live server + Three.js viewer
+ruview-pointcloud capture --output room.ply       # capture to PLY
+ruview-pointcloud train                           # depth calibration + DPO pairs
+ruview-pointcloud cameras                         # list available cameras
+ruview-pointcloud csi-test --count 100            # send test CSI frames
+ruview-pointcloud fingerprint office --seconds 5  # record named CSI room fingerprint
+```
+
+The HTTP/viewer server defaults to **loopback (`127.0.0.1`)** — exposing live camera/CSI/vitals on `0.0.0.0` is an explicit opt-in. Brain URL defaults to `http://127.0.0.1:9876` and is overridable via `RUVIEW_BRAIN_URL` env var or the `--brain` flag on `serve`/`train`.
+
+The pose overlay currently uses an **amplitude-energy heuristic** (`heuristic_pose_from_amplitude`) rather than trained WiFlow inference — real ONNX/Candle inference is tracked as a follow-up.
+
+**Performance:** 22ms pipeline, 905 req/s API, 40K voxel room model from 20 frames.
+
+**Brain integration:** Spatial observations (motion, vitals, skeleton, occupancy) sync to the ruOS brain every 60 seconds for agent reasoning.
+
+See [PR #405](https://github.com/ruvnet/RuView/pull/405) for full details.
+
 ### What's New in v0.7.0
 
 <details>
@@ -904,6 +945,8 @@ cargo add wifi-densepose-ruvector   # RuVector v2.0.4 integration layer (ADR-017
 | [`wifi-densepose-api`](https://crates.io/crates/wifi-densepose-api) | REST + WebSocket API layer | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-api.svg)](https://crates.io/crates/wifi-densepose-api) |
 | [`wifi-densepose-config`](https://crates.io/crates/wifi-densepose-config) | Configuration management | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-config.svg)](https://crates.io/crates/wifi-densepose-config) |
 | [`wifi-densepose-db`](https://crates.io/crates/wifi-densepose-db) | Database persistence (PostgreSQL, SQLite, Redis) | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-db.svg)](https://crates.io/crates/wifi-densepose-db) |
+| `wifi-densepose-pointcloud` | Real-time dense point cloud from camera + WiFi CSI fusion (Three.js viewer, brain bridge). Workspace-only for now. | -- | — |
+| `wifi-densepose-geo` | Geospatial context (Sentinel-2 tiles, SRTM elevation, OSM, weather, night-mode). Workspace-only for now. | -- | — |
 
 All crates integrate with [RuVector v2.0.4](https://github.com/ruvnet/ruvector) — see [AI Backbone](#ai-backbone-ruvector) below.
 

@@ -25,6 +25,7 @@ axum = { workspace = true }
 tower-http = { version = "0.5", features = ["fs", "cors", "set-header"] }
 tokio = { workspace = true, features = ["full", "process"] }
 futures-util = "0.3"
+ruvector-mincut = { workspace = true }
 
 # Serialization
 serde = { workspace = true }

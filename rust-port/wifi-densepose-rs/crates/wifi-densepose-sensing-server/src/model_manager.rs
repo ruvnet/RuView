@@ -30,8 +30,19 @@ use crate::rvf_container::RvfReader;
 
 // ── Models data directory ────────────────────────────────────────────────────
 
-/// Base directory for RVF model files.
-pub const MODELS_DIR: &str = "data/models";
+/// Default base directory for RVF model files.
+///
+/// Overridden at runtime by the `MODELS_DIR` environment variable so that
+/// Docker users can point to a mounted volume without rebuilding:
+///   docker run -v /path/to/models:/app/models -e MODELS_DIR=/app/models ...
+pub const MODELS_DIR_DEFAULT: &str = "data/models";
+
+/// Return the effective models directory, respecting `MODELS_DIR` env var.
+pub fn models_dir() -> PathBuf {
+    PathBuf::from(
+        std::env::var("MODELS_DIR").unwrap_or_else(|_| MODELS_DIR_DEFAULT.to_string()),
+    )
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -110,7 +121,7 @@ pub type AppState = Arc<RwLock<super::AppStateInner>>;
 
 /// Scan the models directory and build `ModelInfo` for each `.rvf` file.
 async fn scan_models() -> Vec<ModelInfo> {
-    let dir = PathBuf::from(MODELS_DIR);
+    let dir = models_dir();
     let mut models = Vec::new();
 
     let mut entries = match tokio::fs::read_dir(&dir).await {
@@ -204,7 +215,7 @@ async fn scan_models() -> Vec<ModelInfo> {
 
 /// Load a model from disk by ID and return its `LoadedModelState`.
 fn load_model_from_disk(model_id: &str) -> Result<LoadedModelState, String> {
-    let file_path = PathBuf::from(MODELS_DIR).join(format!("{model_id}.rvf"));
+    let file_path = models_dir().join(format!("{model_id}.rvf"));
     let reader = RvfReader::from_file(&file_path)?;
 
     let manifest = reader.manifest().unwrap_or_default();

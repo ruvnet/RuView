@@ -50,7 +50,15 @@ ENV RUST_LOG=info
 # Override at runtime:  docker run -e CSI_SOURCE=esp32 ...
 ENV CSI_SOURCE=auto
 
-ENTRYPOINT ["/bin/sh", "-c"]
-# Shell-form CMD allows $CSI_SOURCE to be substituted at container start.
-# The ENV default above (CSI_SOURCE=auto) applies when the variable is unset.
-CMD ["/app/sensing-server --source ${CSI_SOURCE} --tick-ms 100 --ui-path /app/ui --http-port 3000 --ws-port 3001"]
+# MODELS_DIR controls where the server scans for .rvf model files.
+# Mount a host directory here to make models visible to the API:
+#   docker run -v /path/to/models:/app/models -e MODELS_DIR=/app/models ...
+ENV MODELS_DIR=data/models
+
+COPY docker/docker-entrypoint.sh /app/docker-entrypoint.sh
+
+# Exec-form ENTRYPOINT so Docker appends user arguments correctly.
+# Pass flags directly:  docker run <image> --source esp32 --tick-ms 500
+# Or use env vars:      docker run -e CSI_SOURCE=esp32 <image>
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD []
