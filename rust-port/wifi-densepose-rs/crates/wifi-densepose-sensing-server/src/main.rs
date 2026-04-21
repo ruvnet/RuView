@@ -27,7 +27,7 @@ use wifi_densepose_sensing_server::{graph_transformer, trainer, dataset, embeddi
 use std::collections::{HashMap, VecDeque};
 use ruvector_mincut::{DynamicMinCut, MinCutBuilder};
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path as FsPath, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -84,7 +84,7 @@ struct Args {
     udp_port: u16,
 
     /// Path to UI static files
-    #[arg(long, default_value = "../../ui")]
+    #[arg(long, default_value = DEFAULT_UI_PATH)]
     ui_path: PathBuf,
 
     /// Tick interval in milliseconds (default 100 ms = 10 fps for smooth pose animation)
@@ -166,6 +166,54 @@ struct Args {
     /// Start field model calibration on boot (empty room required)
     #[arg(long)]
     calibrate: bool,
+}
+
+const DEFAULT_UI_PATH: &str = "../../ui";
+
+fn is_valid_ui_dir(path: &FsPath) -> bool {
+    path.join("index.html").is_file()
+}
+
+fn push_ancestor_ui_candidates(candidates: &mut Vec<PathBuf>, base: &FsPath) {
+    for ancestor in base.ancestors() {
+        candidates.push(ancestor.join("ui"));
+    }
+}
+
+fn resolve_ui_path_with_context(
+    configured_path: &FsPath,
+    current_dir: Option<&FsPath>,
+    executable_path: Option<&FsPath>,
+) -> PathBuf {
+    let mut candidates = vec![configured_path.to_path_buf()];
+
+    if let Some(cwd) = current_dir {
+        candidates.push(cwd.join(configured_path));
+        push_ancestor_ui_candidates(&mut candidates, cwd);
+    }
+
+    if let Some(exe_dir) = executable_path.and_then(FsPath::parent) {
+        candidates.push(exe_dir.join(configured_path));
+        push_ancestor_ui_candidates(&mut candidates, exe_dir);
+    }
+
+    push_ancestor_ui_candidates(&mut candidates, FsPath::new(env!("CARGO_MANIFEST_DIR")));
+
+    candidates
+        .into_iter()
+        .find(|candidate| is_valid_ui_dir(candidate))
+        .and_then(|candidate| std::fs::canonicalize(&candidate).ok().or(Some(candidate)))
+        .unwrap_or_else(|| {
+            current_dir
+                .map(|cwd| cwd.join(configured_path))
+                .unwrap_or_else(|| configured_path.to_path_buf())
+        })
+}
+
+fn resolve_ui_path(configured_path: &FsPath) -> PathBuf {
+    let current_dir = std::env::current_dir().ok();
+    let executable_path = std::env::current_exe().ok();
+    resolve_ui_path_with_context(configured_path, current_dir.as_deref(), executable_path.as_deref())
 }
 
 // ── Data types ───────────────────────────────────────────────────────────────
@@ -4102,6 +4150,22 @@ async fn main() {
         .init();
 
     let args = Args::parse();
+    let ui_path = resolve_ui_path(&args.ui_path);
+
+    if ui_path != args.ui_path {
+        info!(
+            "Resolved UI path from {} to {}",
+            args.ui_path.display(),
+            ui_path.display()
+        );
+    }
+
+    if !is_valid_ui_dir(&ui_path) {
+        warn!(
+            "UI assets not found at {}. Static /ui requests will return 404; pass --ui-path /path/to/RuView/ui",
+            ui_path.display()
+        );
+    }
 
     // Handle --benchmark mode: run vital sign benchmark and exit
     if args.benchmark {
@@ -4529,7 +4593,7 @@ async fn main() {
     info!("  HTTP:      http://localhost:{}", args.http_port);
     info!("  WebSocket: ws://localhost:{}/ws/sensing", args.ws_port);
     info!("  UDP:       0.0.0.0:{} (ESP32 CSI)", args.udp_port);
-    info!("  UI path:   {}", args.ui_path.display());
+    info!("  UI path:   {}", ui_path.display());
     info!("  Source:    {}", args.source);
 
     // Auto-detect data source
@@ -4746,7 +4810,6 @@ async fn main() {
     });
 
     // HTTP server (serves UI + full DensePose-compatible REST API)
-    let ui_path = args.ui_path.clone();
     let http_app = Router::new()
         .route("/", get(info_page))
         // Health endpoints (DensePose-compatible)
@@ -4869,4 +4932,61 @@ async fn main() {
     }
 
     info!("Server shut down cleanly");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_ui_path_with_context, DEFAULT_UI_PATH};
+    use std::path::{Path as FsPath, PathBuf};
+    use tempfile::tempdir;
+
+    fn create_ui_dir(root: &FsPath) -> PathBuf {
+        let ui_dir = root.join("ui");
+        std::fs::create_dir_all(&ui_dir).unwrap();
+        std::fs::write(ui_dir.join("index.html"), "<!doctype html>").unwrap();
+        ui_dir
+    }
+
+    #[test]
+    fn resolve_ui_path_keeps_existing_configured_directory() {
+        let temp = tempdir().unwrap();
+        let ui_dir = create_ui_dir(temp.path());
+
+        let resolved = resolve_ui_path_with_context(&ui_dir, Some(temp.path()), None);
+
+        assert_eq!(resolved, std::fs::canonicalize(ui_dir).unwrap());
+    }
+
+    #[test]
+    fn resolve_ui_path_finds_repo_ui_from_current_dir_ancestors() {
+        let temp = tempdir().unwrap();
+        let ui_dir = create_ui_dir(temp.path());
+        let cwd = temp.path().join("rust-port/wifi-densepose-rs/target/release");
+        std::fs::create_dir_all(&cwd).unwrap();
+
+        let resolved = resolve_ui_path_with_context(FsPath::new(DEFAULT_UI_PATH), Some(&cwd), None);
+
+        assert_eq!(resolved, std::fs::canonicalize(ui_dir).unwrap());
+    }
+
+    #[test]
+    fn resolve_ui_path_finds_repo_ui_from_executable_ancestors() {
+        let temp = tempdir().unwrap();
+        let ui_dir = create_ui_dir(temp.path());
+        let exe_dir = temp.path().join("rust-port/wifi-densepose-rs/target/release");
+        std::fs::create_dir_all(&exe_dir).unwrap();
+        let executable_path = exe_dir.join("sensing-server");
+        std::fs::write(&executable_path, b"").unwrap();
+
+        let unrelated_cwd = temp.path().join("tmp/run");
+        std::fs::create_dir_all(&unrelated_cwd).unwrap();
+
+        let resolved = resolve_ui_path_with_context(
+            FsPath::new(DEFAULT_UI_PATH),
+            Some(&unrelated_cwd),
+            Some(&executable_path),
+        );
+
+        assert_eq!(resolved, std::fs::canonicalize(ui_dir).unwrap());
+    }
 }
