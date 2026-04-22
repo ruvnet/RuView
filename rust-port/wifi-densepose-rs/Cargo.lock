@@ -7979,6 +7979,7 @@ dependencies = [
  "chrono",
  "clap",
  "futures-util",
+ "ruvector-mincut",
  "serde",
  "serde_json",
  "tempfile",

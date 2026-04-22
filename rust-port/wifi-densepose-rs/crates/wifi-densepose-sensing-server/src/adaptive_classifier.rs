@@ -25,7 +25,8 @@ use std::path::{Path, PathBuf};
 const N_FEATURES: usize = 15;
 
 /// Default class names for backward compatibility with old saved models.
-const DEFAULT_CLASSES: &[&str] = &["absent", "present_still", "present_moving", "active"];
+pub const CLASSES: &[&str] = &["absent", "present_still", "present_moving", "active"];
+const DEFAULT_CLASSES: &[&str] = CLASSES;
 
 /// Extract extended feature vector from a JSONL frame (features + raw amplitudes).
 pub fn features_from_frame(frame: &serde_json::Value) -> [f64; N_FEATURES] {
