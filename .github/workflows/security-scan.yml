@@ -377,6 +377,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [sast, dependency-scan, container-scan, iac-scan, secret-scan, license-scan, compliance-check]
     if: always()
+    env:
+      SECURITY_SLACK_WEBHOOK_URL: ${{ secrets.SECURITY_SLACK_WEBHOOK_URL }}
     steps:
     - name: Download all artifacts
       uses: actions/download-artifact@v4
@@ -403,7 +405,7 @@ jobs:
         path: security-summary.md
 
     - name: Notify security team on critical findings
-      if: ${{ secrets.SECURITY_SLACK_WEBHOOK_URL != '' && (needs.sast.result == 'failure' || needs.dependency-scan.result == 'failure' || needs.container-scan.result == 'failure') }}
+      if: ${{ env.SECURITY_SLACK_WEBHOOK_URL != '' && (needs.sast.result == 'failure' || needs.dependency-scan.result == 'failure' || needs.container-scan.result == 'failure') }}
       uses: 8398a7/action-slack@v3
       with:
         status: failure
@@ -415,7 +417,7 @@ jobs:
           Workflow: ${{ github.workflow }}
           Please review the security scan results immediately.
       env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SECURITY_SLACK_WEBHOOK_URL }}
+        SLACK_WEBHOOK_URL: ${{ env.SECURITY_SLACK_WEBHOOK_URL }}
 
     - name: Create security issue on critical findings
       if: needs.sast.result == 'failure' || needs.dependency-scan.result == 'failure'
