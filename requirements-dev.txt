@@ -1,0 +1,13 @@
+# Development and testing dependencies
+# Install with: pip install -r requirements.txt -r requirements-dev.txt
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.10.0
+pytest-benchmark>=4.0.0
+
+# Linting and formatting
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0
