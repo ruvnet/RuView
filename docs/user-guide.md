@@ -101,6 +101,8 @@ Multi-architecture image (amd64 + arm64). Works on Intel/AMD and Apple Silicon M
 
 Example: `docker run -e CSI_SOURCE=esp32 -p 3000:3000 -p 5005:5005/udp ruvnet/wifi-densepose:latest`
 
+> **Windows Docker Desktop:** For multi-node ESP32 deployments, do not rely on `--network host` because Docker Desktop ignores it on Windows. Start with explicit UDP port mapping and provision each node with your host machine's LAN IP. If only one node still appears in the container, use the relay workaround in [Troubleshooting §9](TROUBLESHOOTING.md#9-docker-desktop-on-windows-only-shows-one-esp32-node).
+
 ### From Source (Rust)
 
 On Debian/Ubuntu-based Linux systems, install the native desktop prerequisites before the first Rust release build:
@@ -265,8 +267,8 @@ Uses `netsh wlan` to capture RSSI from nearby access points. No special hardware
 # From source (Windows only)
 ./target/release/sensing-server --source wifi --http-port 3000 --ws-port 3001 --tick-ms 500
 
-# Docker (requires --network host on Windows)
-docker run --network host ruvnet/wifi-densepose:latest --source wifi --tick-ms 500
+# Docker Desktop on Windows does not support host networking for this mode.
+# Use the native Windows binary instead.
 ```
 
 > **Community verified:** Tested on Windows 10 (10.0.26200) with Intel Wi-Fi 6 AX201 160MHz, Python 3.14, StormFiber 5 GHz network. All 7 tutorial steps passed with stable RSSI readings at -48 dBm. See [Tutorial #36](https://github.com/ruvnet/RuView/issues/36) for the full walkthrough and test results.
@@ -309,6 +311,8 @@ docker run -p 3000:3000 -p 3001:3001 -p 5005:5005/udp -e CSI_SOURCE=esp32 ruvnet
 ```
 
 The ESP32 nodes stream binary CSI frames over UDP to port 5005. See [Hardware Setup](#esp32-s3-mesh) for flashing instructions.
+
+On Docker Desktop for Windows, multi-node ESP32 setups may need the relay workaround from [Troubleshooting §9](TROUBLESHOOTING.md#9-docker-desktop-on-windows-only-shows-one-esp32-node) if only one source is visible inside the container.
 
 ### ESP32 Multistatic Mesh (Advanced)
 
