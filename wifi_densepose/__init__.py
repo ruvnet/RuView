@@ -47,8 +47,6 @@ class WiFiDensePose:
 
     def start(self):
         """Start the sensing system (blocking until ready)."""
-        import asyncio
-
         loop = _get_or_create_event_loop()
         loop.run_until_complete(self._async_start())
 
@@ -74,8 +72,6 @@ class WiFiDensePose:
 
     def stop(self):
         """Stop the sensing system."""
-        import asyncio
-
         if self._orchestrator is not None:
             loop = _get_or_create_event_loop()
             loop.run_until_complete(self._orchestrator.shutdown())
@@ -87,8 +83,6 @@ class WiFiDensePose:
         if self._orchestrator is None:
             return []
         try:
-            import asyncio
-
             loop = _get_or_create_event_loop()
             return loop.run_until_complete(self._fetch_poses())
         except Exception:
