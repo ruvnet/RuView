@@ -186,6 +186,11 @@ A high-performance Rust port with ~810x speedup over the Python pipeline for the
 
   # macOS
   brew install openblas
+
+  # Windows (via vcpkg)
+  # Install vcpkg: git clone https://github.com/microsoft/vcpkg.git
+  # Then run: vcpkg install openblas:x64-windows
+  # Or use `openblas-system` feature (default on Windows) which links against system OpenBLAS
   ```
 
 ### Build
