@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
   "productName": "RuView Desktop",
-  "version": "0.4.4",
+  "version": "0.5.0",
   "identifier": "net.ruv.ruview",
   "build": {
     "frontendDist": "ui/dist",
