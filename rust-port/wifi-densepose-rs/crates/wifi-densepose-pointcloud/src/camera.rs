@@ -1,18 +1,20 @@
 //! Camera capture — cross-platform frame grabber.
 //!
-//! macOS: uses `screencapture` or `ffmpeg -f avfoundation` for camera frames
-//! Linux: uses `v4l2-ctl` or `ffmpeg -f v4l2` for camera frames
-//! Both: capture to JPEG, decode to RGB, return raw pixel data
+//! Linux: direct V4L2 via `v4l` crate (no subprocess, no orphans)
+//! macOS: ffmpeg -f avfoundation (subprocess)
+//! Fallback: ffmpeg subprocess on all platforms
+#![allow(dead_code)]
 
 use anyhow::{bail, Result};
-use std::process::Command;
 use std::path::PathBuf;
+use std::process::Command;
 
 /// Captured frame with raw RGB data.
 pub struct Frame {
     pub width: u32,
     pub height: u32,
-    pub rgb: Vec<u8>,      // row-major [height * width * 3]
+    pub rgb: Vec<u8>,
+    pub timestamp_ms: i64,
 }
 
 /// Camera source configuration.
@@ -31,41 +33,139 @@ impl Default for CameraConfig {
 
 /// Capture a single frame from the camera.
 ///
-/// Tries multiple backends in order: ffmpeg, v4l2, imagesnap (macOS).
+/// On Linux: uses direct V4L2 (no subprocess, no orphans).
+/// On macOS: uses ffmpeg subprocess.
 pub fn capture_frame(config: &CameraConfig) -> Result<Frame> {
-    let tmp = tmp_path();
-
-    // Try ffmpeg first (cross-platform)
-    if let Ok(frame) = capture_ffmpeg(config, &tmp) {
-        return Ok(frame);
-    }
-
-    // Linux: try v4l2
+    // Linux: direct V4L2 (preferred — no subprocess)
     #[cfg(target_os = "linux")]
-    if let Ok(frame) = capture_v4l2(config, &tmp) {
+    {
+        match capture_v4l2_direct(config) {
+            Ok(frame) => return Ok(frame),
+            Err(e) => eprintln!("[camera] V4L2 direct failed: {e}, falling back to ffmpeg"),
+        }
+    }
+
+    // Fallback: ffmpeg subprocess (with timeout to prevent orphans)
+    let tmp = tmp_path();
+    if let Ok(frame) = capture_ffmpeg_safe(config, &tmp) {
         return Ok(frame);
     }
 
-    // macOS: try screencapture (camera mode)
+    // macOS: screencapture
     #[cfg(target_os = "macos")]
     if let Ok(frame) = capture_macos(config, &tmp) {
         return Ok(frame);
     }
 
-    bail!("No camera backend available. Install ffmpeg or run on a machine with a camera.")
+    bail!("No camera backend available")
 }
 
-/// Capture via ffmpeg (works on Linux + macOS).
-fn capture_ffmpeg(config: &CameraConfig, tmp: &PathBuf) -> Result<Frame> {
-    let input = if cfg!(target_os = "macos") {
-        format!("{}:none", config.device_index) // avfoundation: video:audio
+// ============================================================
+// Linux: Direct V4L2 capture (no subprocess, no orphans)
+// ============================================================
+
+#[cfg(target_os = "linux")]
+fn capture_v4l2_direct(config: &CameraConfig) -> Result<Frame> {
+    use v4l::buffer::Type;
+    use v4l::io::mmap::Stream;
+    use v4l::io::traits::CaptureStream;
+    use v4l::video::Capture;
+    use v4l::{Device, FourCC};
+
+    let device_path = format!("/dev/video{}", config.device_index);
+    if !std::path::Path::new(&device_path).exists() {
+        bail!("no camera at {device_path}");
+    }
+
+    let dev = Device::with_path(&device_path)?;
+
+    // Try MJPG first (most webcams support it), fall back to YUYV
+    let mut fmt = dev.format()?;
+    fmt.width = config.width;
+    fmt.height = config.height;
+    fmt.fourcc = FourCC::new(b"MJPG");
+    let use_mjpg = dev.set_format(&fmt).is_ok();
+
+    if !use_mjpg {
+        fmt.fourcc = FourCC::new(b"YUYV");
+        dev.set_format(&fmt)?;
+    }
+
+    let fmt = dev.format()?;
+    let actual_w = fmt.width;
+    let actual_h = fmt.height;
+
+    // Stream one frame via mmap
+    let mut stream = Stream::with_buffers(&dev, Type::VideoCapture, 2)?;
+    let (buf, _meta) = stream.next()?;
+
+    let rgb = if use_mjpg {
+        decode_mjpeg_to_rgb(buf, actual_w, actual_h)?
     } else {
-        format!("/dev/video{}", config.device_index) // v4l2
+        yuyv_to_rgb(buf, actual_w, actual_h)
     };
 
+    // Stream is dropped here — device released cleanly, no orphan process
+
+    Ok(Frame {
+        width: actual_w,
+        height: actual_h,
+        rgb,
+        timestamp_ms: chrono::Utc::now().timestamp_millis(),
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn decode_mjpeg_to_rgb(data: &[u8], _w: u32, _h: u32) -> Result<Vec<u8>> {
+    // Use a minimal JPEG decoder
+    let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(data));
+    let pixels = decoder.decode()?;
+    let info = decoder.info().ok_or_else(|| anyhow::anyhow!("no JPEG info"))?;
+
+    if info.pixel_format == jpeg_decoder::PixelFormat::RGB24 {
+        Ok(pixels)
+    } else if info.pixel_format == jpeg_decoder::PixelFormat::L8 {
+        // Grayscale → RGB
+        Ok(pixels.iter().flat_map(|&g| [g, g, g]).collect())
+    } else {
+        bail!("unsupported JPEG pixel format: {:?}", info.pixel_format)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn yuyv_to_rgb(data: &[u8], w: u32, h: u32) -> Vec<u8> {
+    let pixel_count = (w * h) as usize;
+    let mut rgb = Vec::with_capacity(pixel_count * 3);
+
+    for chunk in data.chunks(4) {
+        if chunk.len() < 4 { break; }
+        let (y0, u, y1, v) = (chunk[0] as f32, chunk[1] as f32, chunk[2] as f32, chunk[3] as f32);
+
+        for y in [y0, y1] {
+            let r = (y + 1.402 * (v - 128.0)).clamp(0.0, 255.0) as u8;
+            let g = (y - 0.344136 * (u - 128.0) - 0.714136 * (v - 128.0)).clamp(0.0, 255.0) as u8;
+            let b = (y + 1.772 * (u - 128.0)).clamp(0.0, 255.0) as u8;
+            rgb.extend_from_slice(&[r, g, b]);
+        }
+    }
+    rgb.truncate(pixel_count * 3);
+    rgb
+}
+
+// ============================================================
+// Fallback: ffmpeg subprocess (with timeout + cleanup)
+// ============================================================
+
+fn capture_ffmpeg_safe(config: &CameraConfig, tmp: &PathBuf) -> Result<Frame> {
+    let input = if cfg!(target_os = "macos") {
+        format!("{}:none", config.device_index)
+    } else {
+        format!("/dev/video{}", config.device_index)
+    };
     let format = if cfg!(target_os = "macos") { "avfoundation" } else { "v4l2" };
 
-    let status = Command::new("ffmpeg")
+    // Spawn with timeout to prevent orphans
+    let mut child = Command::new("ffmpeg")
         .args([
             "-y", "-f", format,
             "-video_size", &format!("{}x{}", config.width, config.height),
@@ -76,59 +176,54 @@ fn capture_ffmpeg(config: &CameraConfig, tmp: &PathBuf) -> Result<Frame> {
             "-pix_fmt", "rgb24",
             tmp.to_str().unwrap_or("/tmp/ruview-frame.raw"),
         ])
-        .output()?;
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
 
-    if !status.status.success() {
-        bail!("ffmpeg capture failed: {}", String::from_utf8_lossy(&status.stderr));
+    // Wait with 10-second timeout
+    let timeout = std::time::Duration::from_secs(10);
+    let start = std::time::Instant::now();
+
+    loop {
+        match child.try_wait()? {
+            Some(status) => {
+                if !status.success() {
+                    bail!("ffmpeg capture failed (exit {})", status.code().unwrap_or(-1));
+                }
+                break;
+            }
+            None => {
+                if start.elapsed() > timeout {
+                    // Kill the stuck process — this is the orphan prevention
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    bail!("ffmpeg capture timed out after 10s — killed");
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
     }
 
     let rgb = std::fs::read(tmp)?;
     let expected = (config.width * config.height * 3) as usize;
+    let _ = std::fs::remove_file(tmp);
+
     if rgb.len() < expected {
         bail!("frame too small: {} bytes, expected {}", rgb.len(), expected);
     }
-
-    let _ = std::fs::remove_file(tmp);
 
     Ok(Frame {
         width: config.width,
         height: config.height,
         rgb: rgb[..expected].to_vec(),
+        timestamp_ms: chrono::Utc::now().timestamp_millis(),
     })
 }
 
-/// Linux: capture via v4l2-ctl.
-#[cfg(target_os = "linux")]
-fn capture_v4l2(config: &CameraConfig, tmp: &PathBuf) -> Result<Frame> {
-    let device = format!("/dev/video{}", config.device_index);
-    if !std::path::Path::new(&device).exists() {
-        bail!("no camera at {device}");
-    }
-
-    // Use v4l2-ctl to grab a frame
-    let status = Command::new("v4l2-ctl")
-        .args([
-            "--device", &device,
-            "--set-fmt-video", &format!("width={},height={},pixelformat=MJPG", config.width, config.height),
-            "--stream-mmap", "--stream-count=1",
-            "--stream-to", tmp.to_str().unwrap_or("/tmp/frame.mjpg"),
-        ])
-        .output()?;
-
-    if !status.status.success() {
-        bail!("v4l2-ctl failed");
-    }
-
-    // Decode MJPEG to RGB
-    decode_jpeg_to_rgb(tmp, config.width, config.height)
-}
-
-/// macOS: capture via screencapture or swift.
+/// macOS: capture via swift/screencapture.
 #[cfg(target_os = "macos")]
 fn capture_macos(config: &CameraConfig, tmp: &PathBuf) -> Result<Frame> {
     let jpg_path = tmp.with_extension("jpg");
-
-    // Try swift-based capture (requires camera permission)
     let swift = format!(
         r#"import AVFoundation; import AppKit
 let sem = DispatchSemaphore(value: 0)
@@ -147,34 +242,25 @@ o.capturePhoto(with: AVCapturePhotoSettings(), delegate: dl)
 Thread.sleep(forTimeInterval: 3)"#,
         path = jpg_path.display()
     );
-
     let _ = Command::new("swift").args(["-e", &swift]).output();
-
     if jpg_path.exists() {
-        return decode_jpeg_to_rgb(&jpg_path, config.width, config.height);
+        let data = std::fs::read(&jpg_path)?;
+        let _ = std::fs::remove_file(&jpg_path);
+        return Ok(Frame {
+            width: config.width,
+            height: config.height,
+            rgb: data,
+            timestamp_ms: chrono::Utc::now().timestamp_millis(),
+        });
     }
-
     bail!("macOS camera capture requires GUI session with camera permission")
-}
-
-fn decode_jpeg_to_rgb(path: &PathBuf, _width: u32, _height: u32) -> Result<Frame> {
-    let data = std::fs::read(path)?;
-    let _ = std::fs::remove_file(path);
-
-    // Simple JPEG decode — use the image crate if available, otherwise raw
-    // For now, return the raw data and let the caller handle format
-    Ok(Frame {
-        width: _width,
-        height: _height,
-        rgb: data,
-    })
 }
 
 fn tmp_path() -> PathBuf {
     std::env::temp_dir().join(format!("ruview-frame-{}.raw", std::process::id()))
 }
 
-/// Check if a camera is available on this system.
+/// Check if a camera is available.
 pub fn camera_available() -> bool {
     if cfg!(target_os = "macos") {
         Command::new("system_profiler")
@@ -190,7 +276,6 @@ pub fn camera_available() -> bool {
 /// List available cameras.
 pub fn list_cameras() -> Vec<String> {
     let mut cameras = Vec::new();
-
     if cfg!(target_os = "macos") {
         if let Ok(output) = Command::new("system_profiler").args(["SPCameraDataType"]).output() {
             let text = String::from_utf8_lossy(&output.stdout);
