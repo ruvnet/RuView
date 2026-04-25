@@ -50,7 +50,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Signal processing
 ndarray = { version = "0.15", features = ["serde"] }
-ndarray-linalg = { version = "0.16", features = ["openblas-static"] }
+ndarray-linalg = { version = "0.16", default-features = false, features = ["openblas-static"] }
+
+# Windows: use system OpenBLAS via vcpkg or manual install (openblas-static not supported on Windows)
+[target.'cfg(windows)'.dependencies]
+ndarray-linalg = { version = "0.16", default-features = false, features = ["openblas-system"] }
 rustfft = "6.1"
 num-complex = "0.4"
 num-traits = "0.2"
