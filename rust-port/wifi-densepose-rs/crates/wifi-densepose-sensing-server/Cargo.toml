@@ -44,8 +44,11 @@ clap = { workspace = true }
 # Multi-BSSID WiFi scanning pipeline (ADR-022 Phase 3)
 wifi-densepose-wifiscan = { version = "0.3.0", path = "../wifi-densepose-wifiscan" }
 
-# Signal processing with RuvSense pose tracker (accuracy sprint)
-wifi-densepose-signal = { version = "0.3.0", path = "../wifi-densepose-signal" }
+# Signal processing with RuvSense pose tracker (accuracy sprint).
+# default-features = false drops the optional ndarray-linalg/BLAS chain so that
+# `--no-default-features` at the workspace root can produce a Windows-friendly
+# build without vcpkg/openblas (issue #366, #415).
+wifi-densepose-signal = { version = "0.3.0", path = "../wifi-densepose-signal", default-features = false }
 
 [dev-dependencies]
 tempfile = "3.10"

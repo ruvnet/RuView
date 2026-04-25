@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Rust workspace build with `--no-default-features` on Windows** (#366, #415) —
+  `wifi-densepose-mat`, `wifi-densepose-sensing-server`, and `wifi-densepose-train`
+  all depended on `wifi-densepose-signal` with default features enabled, which
+  pulled `ndarray-linalg` → `openblas-src` → vcpkg/system-BLAS through the entire
+  workspace. `--no-default-features` at the workspace root then could not opt out
+  of BLAS, breaking `cargo build` / `cargo test` on Windows without vcpkg. All
+  three consumers now declare `wifi-densepose-signal = { ..., default-features = false }`,
+  so `cargo test --workspace --no-default-features` builds cleanly without
+  vcpkg/openblas. Validated: 1,538 tests pass, 0 fail, 8 ignored.
+- **`signal` test `test_estimate_occupancy_noise_only` failed without `eigenvalue`** —
+  The test unwrapped the `NotCalibrated` stub returned when the BLAS-backed
+  `estimate_occupancy` is compiled out. Gated with `#[cfg(feature = "eigenvalue")]`
+  so it only runs when the real implementation is available.
+
 ## [v0.6.2-esp32] — 2026-04-20
 
 Firmware release cutting ADR-081 and the Timer Svc stack fix discovered during

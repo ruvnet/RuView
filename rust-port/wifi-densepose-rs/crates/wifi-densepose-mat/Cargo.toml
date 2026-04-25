@@ -25,7 +25,7 @@ serde = ["dep:serde", "chrono/serde", "geo/use-serde"]
 [dependencies]
 # Workspace dependencies
 wifi-densepose-core = { version = "0.3.0", path = "../wifi-densepose-core" }
-wifi-densepose-signal = { version = "0.3.0", path = "../wifi-densepose-signal" }
+wifi-densepose-signal = { version = "0.3.0", path = "../wifi-densepose-signal", default-features = false }
 wifi-densepose-nn = { version = "0.3.0", path = "../wifi-densepose-nn" }
 ruvector-solver = { workspace = true, optional = true }
 ruvector-temporal-tensor = { workspace = true, optional = true }

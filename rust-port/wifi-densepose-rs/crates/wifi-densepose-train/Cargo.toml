@@ -27,7 +27,7 @@ cuda = ["tch-backend"]
 
 [dependencies]
 # Internal crates
-wifi-densepose-signal = { version = "0.3.0", path = "../wifi-densepose-signal" }
+wifi-densepose-signal = { version = "0.3.0", path = "../wifi-densepose-signal", default-features = false }
 wifi-densepose-nn = { version = "0.3.0", path = "../wifi-densepose-nn" }
 
 # Core
