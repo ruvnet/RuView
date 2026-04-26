@@ -29,9 +29,14 @@
 
 pub mod frame;
 pub mod scene;
+pub mod source;
 
 pub use frame::{MagFrame, MAG_FRAME_MAGIC, MAG_FRAME_VERSION};
 pub use scene::{CurrentLoop, DipoleSource, EddyCurrent, FerrousObject, Scene};
+pub use source::{
+    current_loop_field, dipole_field, ferrous_field, scene_field_at, scene_field_at_sensors,
+    R_MIN_M,
+};
 
 /// Top-level simulator error type.
 #[derive(Debug, thiserror::Error)]
