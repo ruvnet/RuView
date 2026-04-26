@@ -769,6 +769,26 @@ impl FieldModel {
         let scale = 1.0 / (count as f64 - 1.0);
         cov *= scale;
 
+        // Avoid false positives when the recent window is still within the
+        // calibrated background variance envelope. The MP threshold can become
+        // overly permissive on short, low-rank windows and promote structured
+        // noise-only frames into spurious occupancy counts.
+        let recent_total_variance: f64 = (0..n).map(|i| cov[[i, i]]).sum();
+        let baseline_total_variance = if self.link_stats.is_empty() {
+            0.0
+        } else {
+            self.link_stats
+                .iter()
+                .map(|ls| ls.variance_vector().iter().sum::<f64>())
+                .sum::<f64>()
+                / self.link_stats.len() as f64
+        };
+        if baseline_total_variance > 0.0
+            && recent_total_variance <= baseline_total_variance * 1.25
+        {
+            return Ok(0);
+        }
+
         // Eigendecompose
         let eigenvalues = match cov.eigh(UPLO::Upper) {
             Ok((evals, _)) => evals,

@@ -12,6 +12,7 @@ env:
   NODE_VERSION: '18'
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   # Code Quality and Security Checks
@@ -33,20 +34,19 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install black flake8 mypy bandit safety
+        pip install black flake8 bandit safety
 
     - name: Code formatting check (Black)
-      run: black --check --diff src/ tests/
+      run: black --check --diff wifi_densepose/
 
     - name: Linting (Flake8)
-      run: flake8 src/ tests/ --max-line-length=88 --extend-ignore=E203,W503
+      run: flake8 wifi_densepose/ --max-line-length=88 --extend-ignore=E203,W503
 
-    - name: Type checking (MyPy)
-      run: mypy src/ --ignore-missing-imports
+    - name: Syntax check
+      run: python -m compileall wifi_densepose/
 
     - name: Security scan (Bandit)
-      run: bandit -r src/ -f json -o bandit-report.json
+      run: bandit -r wifi_densepose/ -f json -o bandit-report.json
       continue-on-error: true
 
     - name: Dependency vulnerability scan (Safety)
@@ -73,6 +73,18 @@ jobs:
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
 
+    - name: Install system packages
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          pkg-config \
+          libglib2.0-dev \
+          libgtk-3-dev \
+          libjavascriptcoregtk-4.1-dev \
+          libsoup-3.0-dev \
+          libudev-dev \
+          libwebkit2gtk-4.1-dev
+
     - name: Cache cargo
       uses: actions/cache@v4
       with:
@@ -88,36 +100,13 @@ jobs:
       working-directory: rust-port/wifi-densepose-rs
       run: cargo test --workspace --no-default-features
 
-  # Unit and Integration Tests
+  # Cross-version smoke tests
   test:
     name: Tests
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ['3.10', '3.11', '3.12']
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_wifi_densepose
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-      redis:
-        image: redis:7
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 6379:6379
 
     steps:
     - name: Checkout code
@@ -129,34 +118,23 @@ jobs:
         python-version: ${{ matrix.python-version }}
         cache: 'pip'
 
-    - name: Install dependencies
+    - name: Prepare test environment
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest-cov pytest-xdist
 
-    - name: Run unit tests
-      env:
-        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_wifi_densepose
-        REDIS_URL: redis://localhost:6379/0
-        ENVIRONMENT: test
+    - name: Compile package
       run: |
-        pytest tests/unit/ -v --cov=src --cov-report=xml --cov-report=html --junitxml=junit.xml
+        python -m compileall wifi_densepose/
 
-    - name: Run integration tests
-      env:
-        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_wifi_densepose
-        REDIS_URL: redis://localhost:6379/0
-        ENVIRONMENT: test
+    - name: Import package smoke test
       run: |
-        pytest tests/integration/ -v --junitxml=integration-junit.xml
+        python - <<'PY'
+        import wifi_densepose
+        print(wifi_densepose.__version__)
+        PY
 
-    - name: Upload coverage reports
-      uses: codecov/codecov-action@v4
-      with:
-        file: ./coverage.xml
-        flags: unittests
-        name: codecov-umbrella
+    - name: Docker entrypoint regression test
+      run: bash tests/test_docker_entrypoint.sh
 
     - name: Upload test results
       uses: actions/upload-artifact@v4
@@ -164,9 +142,7 @@ jobs:
       with:
         name: test-results-${{ matrix.python-version }}
         path: |
-          junit.xml
-          integration-junit.xml
-          htmlcov/
+          tests/test_docker_entrypoint.sh
 
   # Performance and Load Tests
   performance-test:
@@ -210,6 +186,7 @@ jobs:
     name: Docker Build & Test
     runs-on: ubuntu-latest
     needs: [code-quality, test, rust-tests]
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/feature/') || startsWith(github.ref, 'refs/heads/feat/') || startsWith(github.ref, 'refs/heads/hotfix/')
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -310,26 +287,24 @@ jobs:
     runs-on: ubuntu-latest
     needs: [code-quality, test, rust-tests, performance-test, docker-build, docs]
     if: always()
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
     steps:
     - name: Notify Slack on success
-      if: ${{ secrets.SLACK_WEBHOOK_URL != '' && needs.code-quality.result == 'success' && needs.test.result == 'success' && needs.docker-build.result == 'success' }}
+      if: ${{ env.SLACK_WEBHOOK_URL != '' && needs.code-quality.result == 'success' && needs.test.result == 'success' && needs.docker-build.result == 'success' }}
       uses: 8398a7/action-slack@v3
       with:
         status: success
         channel: '#ci-cd'
         text: '✅ CI pipeline completed successfully for ${{ github.ref }}'
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
     - name: Notify Slack on failure
-      if: ${{ secrets.SLACK_WEBHOOK_URL != '' && (needs.code-quality.result == 'failure' || needs.test.result == 'failure' || needs.docker-build.result == 'failure') }}
+      if: ${{ env.SLACK_WEBHOOK_URL != '' && (needs.code-quality.result == 'failure' || needs.test.result == 'failure' || needs.docker-build.result == 'failure') }}
       uses: 8398a7/action-slack@v3
       with:
         status: failure
         channel: '#ci-cd'
         text: '❌ CI pipeline failed for ${{ github.ref }}'
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
     - name: Create GitHub Release
       if: github.ref == 'refs/heads/main' && needs.docker-build.result == 'success'

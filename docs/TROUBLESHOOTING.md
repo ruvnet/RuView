@@ -109,3 +109,29 @@ ssh thyhack@100.90.238.87
 **Symptom:** Plugging into the right USB-C port (when facing the board with USB-C toward you) shows no serial device on the host.
 
 **Fix:** Use the left USB-C port. On most ESP32-S3-DevKitC boards, the left port is the USB-to-UART bridge (CP2102/CH340) used for flashing and serial monitor. The right port is the native USB (USB-JTAG) which requires different drivers and isn't used by the RuView firmware.
+
+---
+
+## 9. Docker Desktop on Windows only shows one ESP32 node
+
+**Symptom:** Multiple ESP32 nodes are sending UDP to the RuView container, but only one node appears in `/api/v1/sensing/latest` or `/api/v1/spatial/nodes`.
+
+**How to confirm:** Listen on the Windows host with a plain UDP socket and verify packets arrive from all node IPs there, while the container only sees one source.
+
+**Root cause:** This is a Docker Desktop for Windows networking limitation. `--network host` is Linux-only, and Windows Docker NAT can collapse or drop multi-source UDP traffic headed to a single container port.
+
+**What works:**
+- **Linux:** Use `--network host` if you want to avoid NAT entirely.
+- **Windows + direct port mapping:** Start the container with explicit UDP port mapping and provision each ESP32 with the host machine's LAN IP, not `127.0.0.1`.
+- **Windows + relay workaround:** If Docker Desktop still only exposes one source inside the container, run a host-side UDP relay that listens on `host:5005`, forwards to `localhost:5006`, and start the container with `-p 5006:5005/udp`.
+
+**Windows relay pattern:**
+
+```powershell
+# Container: internal server still binds UDP 5005
+docker run -p 3000:3000 -p 3001:3001 -p 5006:5005/udp `
+  -e CSI_SOURCE=esp32 `
+  ruvnet/wifi-densepose:latest
+```
+
+Provision every ESP32 with `--target-ip <your-LAN-IP>` so packets first reach the Windows host. The relay then forwards all packets through one socket to `localhost:5006`, which Docker passes through reliably to the container's internal UDP port `5005`.
