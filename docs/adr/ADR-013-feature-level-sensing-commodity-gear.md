@@ -1,7 +1,7 @@
 # ADR-013: Feature-Level Sensing on Commodity Gear (Option 3)
 
 ## Status
-Accepted — Implemented (36/36 unit tests pass, see `v1/src/sensing/` and `v1/tests/unit/test_sensing.py`)
+Accepted — Implemented (36/36 unit tests pass, see `archive/v1/src/sensing/` and `archive/v1/tests/unit/test_sensing.py`)
 
 ## Date
 2026-02-28
@@ -323,7 +323,7 @@ class PresenceClassifier:
 ### Proof Bundle for Commodity Sensing
 
 ```
-v1/data/proof/commodity/
+archive/v1/data/proof/commodity/
 ├── rssi_capture_30sec.json         # 30 seconds of RSSI from 3 receivers
 ├── rssi_capture_meta.json          # Hardware: Intel AX200, Router: TP-Link AX1800
 ├── scenario.txt                    # "Person walks through room at t=10s, sits at t=20s"
@@ -375,7 +375,7 @@ class CommodityBackend(SensingBackend):
 
 ### Implementation Status
 
-The full commodity sensing pipeline is implemented in `v1/src/sensing/`:
+The full commodity sensing pipeline is implemented in `archive/v1/src/sensing/`:
 
 | Module | File | Description |
 |--------|------|-------------|
@@ -384,7 +384,7 @@ The full commodity sensing pipeline is implemented in `v1/src/sensing/`:
 | Classifier | `classifier.py` | `PresenceClassifier` with ABSENT/PRESENT_STILL/ACTIVE levels, confidence scoring |
 | Backend | `backend.py` | `CommodityBackend` wiring collector → extractor → classifier, reports PRESENCE + MOTION capabilities |
 
-**Test coverage**: 36 tests in `v1/tests/unit/test_sensing.py` — all passing:
+**Test coverage**: 36 tests in `archive/v1/tests/unit/test_sensing.py` — all passing:
 - `TestRingBuffer` (4), `TestSimulatedCollector` (5), `TestFeatureExtractor` (8), `TestCusum` (4), `TestPresenceClassifier` (7), `TestCommodityBackend` (6), `TestBandPower` (2)
 
 **Dependencies**: `numpy`, `scipy` (for FFT and spectral analysis)

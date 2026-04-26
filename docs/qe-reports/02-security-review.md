@@ -35,20 +35,20 @@ This security review examined all security-sensitive code across the wifi-densep
 **Severity:** HIGH
 **OWASP:** A07:2021 -- Identification and Authentication Failures
 **Files:**
-- `v1/src/api/routers/stream.py:74` (WebSocket `token` query parameter)
-- `v1/src/middleware/auth.py:243` (fallback to `request.query_params.get("token")`)
-- `v1/src/api/middleware/auth.py:173` (`request.query_params.get("token")`)
+- `archive/v1/src/api/routers/stream.py:74` (WebSocket `token` query parameter)
+- `archive/v1/src/middleware/auth.py:243` (fallback to `request.query_params.get("token")`)
+- `archive/v1/src/api/middleware/auth.py:173` (`request.query_params.get("token")`)
 
 **Description:**
 JWT tokens are accepted via URL query parameters for WebSocket connections. URL parameters are logged in web server access logs, browser history, proxy logs, and HTTP Referer headers. This creates multiple credential leakage vectors.
 
 ```python
-# v1/src/api/routers/stream.py:74
+# archive/v1/src/api/routers/stream.py:74
 token: Optional[str] = Query(None, description="Authentication token")
 ```
 
 ```python
-# v1/src/middleware/auth.py:243
+# archive/v1/src/middleware/auth.py:243
 if request.url.path.startswith("/ws"):
     token = request.query_params.get("token")
 ```
@@ -66,13 +66,13 @@ if request.url.path.startswith("/ws"):
 
 **Severity:** HIGH
 **OWASP:** A05:2021 -- Security Misconfiguration
-**File:** `v1/src/middleware/rate_limit.py:200-206`
+**File:** `archive/v1/src/middleware/rate_limit.py:200-206`
 
 **Description:**
 The `_get_client_ip` method trusts the `X-Forwarded-For` header without any validation. An attacker can spoof this header to bypass IP-based rate limiting entirely by rotating forged IP addresses on each request.
 
 ```python
-# v1/src/middleware/rate_limit.py:200-206
+# archive/v1/src/middleware/rate_limit.py:200-206
 def _get_client_ip(self, request: Request) -> str:
     forwarded_for = request.headers.get("X-Forwarded-For")
     if forwarded_for:
@@ -99,17 +99,17 @@ def _get_client_ip(self, request: Request) -> str:
 **Severity:** HIGH
 **OWASP:** A09:2021 -- Security Logging and Monitoring Failures
 **Files:**
-- `v1/src/api/routers/pose.py:140-141` -- `detail=f"Pose estimation failed: {str(e)}"`
-- `v1/src/api/routers/pose.py:176-177` -- `detail=f"Pose analysis failed: {str(e)}"`
-- `v1/src/api/routers/stream.py:297` -- `detail=f"Failed to get stream status: {str(e)}"`
-- All exception handlers in `v1/src/api/routers/stream.py` (lines 326, 351, 404, 442, 463)
-- `v1/src/middleware/error_handler.py:101-104` -- traceback in development mode
+- `archive/v1/src/api/routers/pose.py:140-141` -- `detail=f"Pose estimation failed: {str(e)}"`
+- `archive/v1/src/api/routers/pose.py:176-177` -- `detail=f"Pose analysis failed: {str(e)}"`
+- `archive/v1/src/api/routers/stream.py:297` -- `detail=f"Failed to get stream status: {str(e)}"`
+- All exception handlers in `archive/v1/src/api/routers/stream.py` (lines 326, 351, 404, 442, 463)
+- `archive/v1/src/middleware/error_handler.py:101-104` -- traceback in development mode
 
 **Description:**
 Multiple API endpoints directly interpolate Python exception messages into HTTP error responses. While the global error handler in `error_handler.py` correctly suppresses details in production, the per-endpoint `HTTPException` handlers bypass this and always expose `str(e)` regardless of environment.
 
 ```python
-# v1/src/api/routers/pose.py:140-141
+# archive/v1/src/api/routers/pose.py:140-141
 raise HTTPException(
     status_code=500,
     detail=f"Pose estimation failed: {str(e)}"
@@ -130,14 +130,14 @@ raise HTTPException(
 **Severity:** MEDIUM
 **OWASP:** A05:2021 -- Security Misconfiguration
 **Files:**
-- `v1/src/config/settings.py:33-34` -- defaults: `cors_origins=["*"]`, `cors_allow_credentials=True`
-- `v1/src/middleware/cors.py:255-256` -- development config combines `allow_origins=["*"]` + `allow_credentials=True`
+- `archive/v1/src/config/settings.py:33-34` -- defaults: `cors_origins=["*"]`, `cors_allow_credentials=True`
+- `archive/v1/src/middleware/cors.py:255-256` -- development config combines `allow_origins=["*"]` + `allow_credentials=True`
 
 **Description:**
 The default settings allow CORS from all origins (`*`) with credentials (`allow_credentials=True`). Per the CORS specification, `Access-Control-Allow-Origin: *` cannot be used with `Access-Control-Allow-Credentials: true`. However, the `CORSMiddleware` implementation echoes the requesting origin header verbatim, effectively granting credentialed access from any origin.
 
 ```python
-# v1/src/middleware/cors.py:255-256 (development_config)
+# archive/v1/src/middleware/cors.py:255-256 (development_config)
 "allow_origins": ["*"],
 "allow_credentials": True,
 ```
@@ -158,8 +158,8 @@ The `validate_cors_config` function at line 354 correctly flags this combination
 **Severity:** MEDIUM
 **OWASP:** A04:2021 -- Insecure Design
 **Files:**
-- `v1/src/api/routers/stream.py:127-128` -- `message = await websocket.receive_text()` with no size limit
-- `v1/src/api/websocket/connection_manager.py` -- no `max_size` configuration
+- `archive/v1/src/api/routers/stream.py:127-128` -- `message = await websocket.receive_text()` with no size limit
+- `archive/v1/src/api/websocket/connection_manager.py` -- no `max_size` configuration
 
 **Description:**
 WebSocket endpoints accept incoming messages of arbitrary size. The `receive_text()` call at `stream.py:127` has no size limit, allowing a client to send extremely large messages that consume server memory.
@@ -179,7 +179,7 @@ Additionally, the `ConnectionManager` does not enforce a maximum number of conne
 
 **Severity:** MEDIUM
 **OWASP:** A07:2021 -- Identification and Authentication Failures
-**File:** `v1/src/api/middleware/auth.py:246-252`
+**File:** `archive/v1/src/api/middleware/auth.py:246-252`
 
 **Description:**
 The `TokenBlacklist` class clears all blacklisted tokens every hour, regardless of their actual expiry time. This means:
@@ -187,7 +187,7 @@ The `TokenBlacklist` class clears all blacklisted tokens every hour, regardless 
 2. Tokens revoked just before a clear cycle have nearly zero effective blacklist time.
 
 ```python
-# v1/src/api/middleware/auth.py:246-252
+# archive/v1/src/api/middleware/auth.py:246-252
 def _cleanup_if_needed(self):
     now = datetime.utcnow()
     if (now - self._last_cleanup).total_seconds() > self._cleanup_interval:
@@ -306,8 +306,8 @@ if (s_cfg.seed_token[0] != '\0') {
 **Severity:** MEDIUM
 **OWASP:** A04:2021 -- Insecure Design
 **Files:**
-- `v1/src/api/middleware/rate_limit.py:28-29` -- `self.request_counts = defaultdict(lambda: deque())`
-- `v1/src/middleware/rate_limit.py:132` -- `self._sliding_windows: Dict[str, SlidingWindowCounter] = {}`
+- `archive/v1/src/api/middleware/rate_limit.py:28-29` -- `self.request_counts = defaultdict(lambda: deque())`
+- `archive/v1/src/middleware/rate_limit.py:132` -- `self._sliding_windows: Dict[str, SlidingWindowCounter] = {}`
 
 **Description:**
 Both rate limiter implementations store per-client sliding window data in unbounded in-memory dictionaries. An attacker sending requests from many spoofed IPs (see HIGH-002) can create millions of entries, each containing a `deque` of timestamps. The cleanup tasks run only periodically (every 5 minutes or on-demand) and cannot keep pace with a high-rate attack.
@@ -349,8 +349,8 @@ While marked with a comment indicating it should be changed, this file is checke
 **Severity:** LOW
 **OWASP:** A01:2021 -- Broken Access Control
 **Files:**
-- `v1/src/middleware/auth.py:298-299` -- `response.headers["X-User"] = user_info["username"]` and `response.headers["X-User-Roles"] = ",".join(user_info["roles"])`
-- `v1/src/api/middleware/auth.py:111` -- `response.headers["X-User-ID"] = request.state.user.get("id", "")`
+- `archive/v1/src/middleware/auth.py:298-299` -- `response.headers["X-User"] = user_info["username"]` and `response.headers["X-User-Roles"] = ",".join(user_info["roles"])`
+- `archive/v1/src/api/middleware/auth.py:111` -- `response.headers["X-User-ID"] = request.state.user.get("id", "")`
 
 **Description:**
 Authenticated user information (username, roles, user ID) is included in HTTP response headers. These headers are visible to any intermediary (CDN, reverse proxy, browser extensions) and in browser developer tools.
@@ -380,7 +380,7 @@ Replace all instances of `datetime.utcnow()` with `datetime.now(datetime.timezon
 
 **Severity:** LOW
 **OWASP:** A02:2021 -- Cryptographic Failures
-**File:** `v1/src/config/settings.py:30` -- `jwt_algorithm: str = Field(default="HS256")`
+**File:** `archive/v1/src/config/settings.py:30` -- `jwt_algorithm: str = Field(default="HS256")`
 
 **Description:**
 The default JWT algorithm is HS256 (HMAC-SHA256), a symmetric algorithm. This means the same secret is used for both signing and verification, requiring the secret to be distributed to every service that needs to verify tokens. For multi-service architectures, asymmetric algorithms (RS256, ES256) are preferred.
@@ -398,7 +398,7 @@ Additionally, the `jwt_algorithm` setting is not validated against a safe algori
 
 **Severity:** LOW
 **OWASP:** A07:2021 -- Identification and Authentication Failures
-**File:** `v1/src/middleware/auth.py:115` -- `create_user()` method
+**File:** `archive/v1/src/middleware/auth.py:115` -- `create_user()` method
 
 **Description:**
 The `create_user()` method accepts any password without minimum length, complexity, or entropy requirements. Test credentials in `v1/test_auth_rate_limit.py:21-23` demonstrate weak passwords ("admin123", "user123").
@@ -460,7 +460,7 @@ This is a positive finding reflecting good security practices.
 | `paramiko>=3.0.0` | LOW -- SSH library. Ensure latest minor version for CVE patches. |
 | `fastapi>=0.95.0` | LOW -- Version floor is old. Pin to latest stable for security patches. |
 
-**Recommendation:** Run `pip audit` or `safety check` against the locked dependency file (`v1/requirements-lock.txt`) to identify known CVEs.
+**Recommendation:** Run `pip audit` or `safety check` against the locked dependency file (`archive/v1/requirements-lock.txt`) to identify known CVEs.
 
 ### Rust Dependencies (`Cargo.toml`)
 
@@ -484,11 +484,11 @@ The following areas demonstrate security-conscious design:
 
 3. **RVF build hash validation** (`firmware/esp32-csi-node/main/rvf_parser.c:126-137`): SHA-256 hash of the WASM payload is verified against the manifest before loading, preventing tampered module execution.
 
-4. **Password hashing with bcrypt** (`v1/src/middleware/auth.py:21`): Proper use of `passlib` with `bcrypt` scheme.
+4. **Password hashing with bcrypt** (`archive/v1/src/middleware/auth.py:21`): Proper use of `passlib` with `bcrypt` scheme.
 
-5. **Protected user fields** (`v1/src/middleware/auth.py:139`): `update_user()` prevents modification of `username`, `created_at`, and `hashed_password`.
+5. **Protected user fields** (`archive/v1/src/middleware/auth.py:139`): `update_user()` prevents modification of `username`, `created_at`, and `hashed_password`.
 
-6. **Production error suppression** (`v1/src/middleware/error_handler.py:214-218`): The centralized error handler correctly suppresses internal details in production mode.
+6. **Production error suppression** (`archive/v1/src/middleware/error_handler.py:214-218`): The centralized error handler correctly suppresses internal details in production mode.
 
 7. **No hardcoded secrets in source** (verified via entropy-based search across entire repository): No API keys, passwords, or tokens found in source files (the test script placeholder at `test_auth_rate_limit.py:26` is marked as requiring replacement).
 
@@ -502,20 +502,20 @@ The following areas demonstrate security-conscious design:
 
 ## Files Examined
 
-### Python (v1/src/)
-- `v1/src/middleware/auth.py` (457 lines) -- JWT auth, user management, middleware
-- `v1/src/middleware/rate_limit.py` (465 lines) -- Rate limiting with sliding window
-- `v1/src/middleware/cors.py` (375 lines) -- CORS middleware and validation
-- `v1/src/middleware/error_handler.py` (505 lines) -- Error handling middleware
-- `v1/src/api/middleware/auth.py` (303 lines) -- API-layer JWT auth
-- `v1/src/api/middleware/rate_limit.py` (326 lines) -- API-layer rate limiting
-- `v1/src/api/websocket/connection_manager.py` (461 lines) -- WebSocket manager
-- `v1/src/api/websocket/pose_stream.py` (384 lines) -- Pose streaming handler
-- `v1/src/api/routers/pose.py` (420 lines) -- Pose API endpoints
-- `v1/src/api/routers/stream.py` (465 lines) -- Streaming API endpoints
-- `v1/src/config/settings.py` (436 lines) -- Application settings
-- `v1/src/sensing/rssi_collector.py` (partial) -- Subprocess usage review
-- `v1/src/tasks/backup.py` (partial) -- Subprocess command construction
+### Python (archive/v1/src/)
+- `archive/v1/src/middleware/auth.py` (457 lines) -- JWT auth, user management, middleware
+- `archive/v1/src/middleware/rate_limit.py` (465 lines) -- Rate limiting with sliding window
+- `archive/v1/src/middleware/cors.py` (375 lines) -- CORS middleware and validation
+- `archive/v1/src/middleware/error_handler.py` (505 lines) -- Error handling middleware
+- `archive/v1/src/api/middleware/auth.py` (303 lines) -- API-layer JWT auth
+- `archive/v1/src/api/middleware/rate_limit.py` (326 lines) -- API-layer rate limiting
+- `archive/v1/src/api/websocket/connection_manager.py` (461 lines) -- WebSocket manager
+- `archive/v1/src/api/websocket/pose_stream.py` (384 lines) -- Pose streaming handler
+- `archive/v1/src/api/routers/pose.py` (420 lines) -- Pose API endpoints
+- `archive/v1/src/api/routers/stream.py` (465 lines) -- Streaming API endpoints
+- `archive/v1/src/config/settings.py` (436 lines) -- Application settings
+- `archive/v1/src/sensing/rssi_collector.py` (partial) -- Subprocess usage review
+- `archive/v1/src/tasks/backup.py` (partial) -- Subprocess command construction
 - `v1/test_auth_rate_limit.py` (partial) -- Test credentials review
 
 ### Rust (v2/)

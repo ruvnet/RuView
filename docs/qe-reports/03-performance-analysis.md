@@ -352,16 +352,16 @@ pub fn run(&self, csi_input: &Tensor) -> NnResult<DensePoseOutput> {
 
 | File | Lines | Role |
 |------|-------|------|
-| `v1/src/core/csi_processor.py` | 467 | CSI processing pipeline |
-| `v1/src/services/pose_service.py` | 200+ | Pose estimation service |
-| `v1/src/api/websocket/connection_manager.py` | 461 | WebSocket management |
-| `v1/src/sensing/feature_extractor.py` | 150+ | RSSI feature extraction |
+| `archive/v1/src/core/csi_processor.py` | 467 | CSI processing pipeline |
+| `archive/v1/src/services/pose_service.py` | 200+ | Pose estimation service |
+| `archive/v1/src/api/websocket/connection_manager.py` | 461 | WebSocket management |
+| `archive/v1/src/sensing/feature_extractor.py` | 150+ | RSSI feature extraction |
 
 ---
 
 ### FINDING PERF-PY01: Doppler Feature Extraction -- list() Conversion of deque [CRITICAL]
 
-**File**: `v1/src/core/csi_processor.py`  
+**File**: `archive/v1/src/core/csi_processor.py`  
 **Lines**: 412-414
 
 ```python
@@ -391,7 +391,7 @@ class CircularBuffer:
 
 ### FINDING PERF-PY02: CSI Preprocessing Creates 3 New CSIData Objects per Frame [HIGH]
 
-**File**: `v1/src/core/csi_processor.py`  
+**File**: `archive/v1/src/core/csi_processor.py`  
 **Lines**: 118-377
 
 The preprocessing pipeline creates a new CSIData object at each step:
@@ -417,7 +417,7 @@ Each CSIData construction copies metadata via `{**csi_data.metadata, 'key': True
 
 ### FINDING PERF-PY03: Correlation Matrix -- Full np.corrcoef on Every Frame [MEDIUM]
 
-**File**: `v1/src/core/csi_processor.py`  
+**File**: `archive/v1/src/core/csi_processor.py`  
 **Lines**: 391-395
 
 ```python
@@ -436,7 +436,7 @@ def _extract_correlation_features(self, csi_data: CSIData) -> np.ndarray:
 
 ### FINDING PERF-PY04: WebSocket Broadcast -- Sequential Send to All Clients [MEDIUM]
 
-**File**: `v1/src/api/websocket/connection_manager.py`  
+**File**: `archive/v1/src/api/websocket/connection_manager.py`  
 **Lines**: 230-264
 
 ```python
@@ -461,7 +461,7 @@ results = await asyncio.gather(*tasks, return_exceptions=True)
 
 ### FINDING PERF-PY05: get_recent_history -- Copies Entire History [LOW]
 
-**File**: `v1/src/core/csi_processor.py`  
+**File**: `archive/v1/src/core/csi_processor.py`  
 **Lines**: 284-297
 
 ```python

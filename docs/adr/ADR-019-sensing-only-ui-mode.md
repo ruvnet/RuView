@@ -34,7 +34,7 @@ Implement a **sensing-only UI mode** that:
    - Breathing ring modulation when breathing-band power detected
    - Side panel with RSSI sparkline, feature meters, and classification badge
 
-4. **Python WebSocket bridge** (`v1/src/sensing/ws_server.py`) that:
+4. **Python WebSocket bridge** (`archive/v1/src/sensing/ws_server.py`) that:
    - Auto-detects ESP32 UDP CSI stream on port 5005 (ADR-018 binary frames)
    - Falls back to `WindowsWifiCollector` → `SimulatedCollector`
    - Runs `RssiFeatureExtractor` → `PresenceClassifier` pipeline
@@ -80,7 +80,7 @@ Windows WiFi RSSI ───┘         │                          │         
 ### Created
 | File | Purpose |
 |------|---------|
-| `v1/src/sensing/ws_server.py` | Python asyncio WebSocket server with auto-detect collectors |
+| `archive/v1/src/sensing/ws_server.py` | Python asyncio WebSocket server with auto-detect collectors |
 | `ui/components/SensingTab.js` | Sensing tab UI with Three.js integration |
 | `ui/components/gaussian-splats.js` | Custom GLSL Gaussian splat renderer |
 | `ui/services/sensing.service.js` | WebSocket client with reconnect + simulation fallback |

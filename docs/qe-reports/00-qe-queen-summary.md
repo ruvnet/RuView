@@ -38,7 +38,7 @@ The project implements WiFi-based human pose estimation using Channel State Info
 | Architecture Decision Records | Strong | 79 ADRs documented in `docs/adr/` |
 | CI/CD pipelines | Strong | 8 GitHub Actions workflows (CI, CD, security scan, firmware CI, QEMU, desktop release, verify pipeline, submodules) |
 | Security scanning | Strong | Dedicated `security-scan.yml` with Bandit, Semgrep, Safety; runs daily on schedule |
-| Deterministic verification | Strong | SHA-256 proof pipeline (`v1/data/proof/verify.py`) with witness bundles (ADR-028) |
+| Deterministic verification | Strong | SHA-256 proof pipeline (`archive/v1/data/proof/verify.py`) with witness bundles (ADR-028) |
 | Code formatting | Moderate | Black/Flake8 enforced for Python in CI; no `rustfmt.toml` found for Rust |
 | Type checking | Moderate | MyPy configured in CI for Python; Rust has native type safety |
 | Dependency management | Strong | Workspace-level Cargo.toml with pinned versions; `requirements.txt` for Python |

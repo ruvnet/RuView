@@ -10,16 +10,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY v1/requirements-lock.txt /app/requirements.txt
+COPY archive/v1/requirements-lock.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir websockets uvicorn fastapi
 
 # Copy application code
-COPY v1/ /app/v1/
+COPY archive/v1/ /app/v1/
 COPY ui/ /app/ui/
 
 # Copy sensing modules
-COPY v1/src/sensing/ /app/v1/src/sensing/
+COPY archive/v1/src/sensing/ /app/v1/src/sensing/
 
 EXPOSE 8765
 EXPOSE 8080

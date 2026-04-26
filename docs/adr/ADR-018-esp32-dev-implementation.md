@@ -22,8 +22,8 @@ This ADR answers *how* to build it — the concrete development sequence, the sp
 | Frame types | `wifi-densepose-hardware/src/csi_frame.rs` | Complete — `CsiFrame`, `CsiMetadata`, `SubcarrierData`, `to_amplitude_phase()` |
 | Parse error types | `wifi-densepose-hardware/src/error.rs` | Complete — `ParseError` enum with 6 variants |
 | Signal processing pipeline | `wifi-densepose-signal` crate | Complete — Hampel, Fresnel, BVP, Doppler, spectrogram |
-| CSI extractor (Python) | `v1/src/hardware/csi_extractor.py` | Stub — `_read_raw_data()` raises `NotImplementedError` |
-| Router interface (Python) | `v1/src/hardware/router_interface.py` | Stub — `_parse_csi_response()` raises `RouterConnectionError` |
+| CSI extractor (Python) | `archive/v1/src/hardware/csi_extractor.py` | Stub — `_read_raw_data()` raises `NotImplementedError` |
+| Router interface (Python) | `archive/v1/src/hardware/router_interface.py` | Stub — `_parse_csi_response()` raises `RouterConnectionError` |
 
 **Not yet implemented:**
 
@@ -211,10 +211,10 @@ The bridge test: parse a known binary frame, convert to `CsiData`, assert `ampli
 
 ### Layer 4 — Python `_read_raw_data()` Real Implementation
 
-Replace the `NotImplementedError` stub in `v1/src/hardware/csi_extractor.py` with a UDP socket reader. This allows the Python pipeline to receive real CSI from the aggregator while the Rust pipeline is being integrated.
+Replace the `NotImplementedError` stub in `archive/v1/src/hardware/csi_extractor.py` with a UDP socket reader. This allows the Python pipeline to receive real CSI from the aggregator while the Rust pipeline is being integrated.
 
 ```python
-# v1/src/hardware/csi_extractor.py
+# archive/v1/src/hardware/csi_extractor.py
 # Replace _read_raw_data() stub:
 
 import socket as _socket

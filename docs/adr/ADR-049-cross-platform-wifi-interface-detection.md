@@ -108,7 +108,7 @@ Remove duplicated platform-detection logic from `ws_server.py` and `install.sh`.
 
 ## Implementation Notes
 
-1. Add `create_collector()` and `BaseCollector.is_available()` to `v1/src/sensing/rssi_collector.py`
+1. Add `create_collector()` and `BaseCollector.is_available()` to `archive/v1/src/sensing/rssi_collector.py`
 2. Refactor `ws_server.py` `_init_collector()` to call `create_collector()`
 3. Update `install.sh` `detect_wifi_hardware()` to use shared detection logic
 4. Add unit tests for each platform path (mock `/proc/net/wireless` presence/absence)

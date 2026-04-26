@@ -29,7 +29,7 @@ This runs three phases:
 
 1. **Environment checks** -- confirms Python, numpy, scipy, and proof files are present.
 2. **Proof pipeline replay** -- feeds a published reference signal through the full signal processing chain (noise filtering, Hamming windowing, amplitude normalization, FFT-based Doppler extraction, power spectral density via scipy.fft) and computes a SHA-256 hash of the output.
-3. **Production code integrity scan** -- scans `v1/src/` for `np.random.rand` / `np.random.randn` calls in production code (test helpers are excluded).
+3. **Production code integrity scan** -- scans `archive/v1/src/` for `np.random.rand` / `np.random.randn` calls in production code (test helpers are excluded).
 
 Exit codes:
 - `0` PASS -- pipeline hash matches the published expected hash
@@ -51,7 +51,7 @@ make verify-audit
 If the expected hash file is missing, regenerate it:
 
 ```bash
-python3 v1/data/proof/verify.py --generate-hash
+python3 archive/v1/data/proof/verify.py --generate-hash
 ```
 
 ### Minimal dependencies for verification only
@@ -63,7 +63,7 @@ pip install numpy==1.26.4 scipy==1.14.1
 Or install the pinned set that guarantees hash reproducibility:
 
 ```bash
-pip install -r v1/requirements-lock.txt
+pip install -r archive/v1/requirements-lock.txt
 ```
 
 The lock file pins: `numpy==1.26.4`, `scipy==1.14.1`, `pydantic==2.10.4`, `pydantic-settings==2.7.1`.
@@ -82,7 +82,7 @@ The Python pipeline lives under `v1/` and provides the full API server, signal p
 ### Install (verification-only -- lightweight)
 
 ```bash
-pip install -r v1/requirements-lock.txt
+pip install -r archive/v1/requirements-lock.txt
 ```
 
 This installs only the four packages needed for deterministic pipeline verification.
@@ -98,7 +98,7 @@ This pulls in FastAPI, uvicorn, torch, OpenCV, SQLAlchemy, Redis client, and all
 ### Verify the pipeline
 
 ```bash
-python3 v1/data/proof/verify.py
+python3 archive/v1/data/proof/verify.py
 ```
 
 Same as `./verify` but calls the Python script directly, skipping the bash wrapper's codebase scan phase.
@@ -124,7 +124,7 @@ uvicorn v1.src.api.main:app --host 0.0.0.0 --port 8000 --reload
 
 ### Run with commodity WiFi (RSSI sensing -- no custom hardware)
 
-The commodity sensing module (`v1/src/sensing/`) extracts presence and motion features from standard Linux WiFi metrics (RSSI, noise floor, link quality) without any hardware modification. See [ADR-013](adr/ADR-013-feature-level-sensing-commodity-gear.md) for full design details.
+The commodity sensing module (`archive/v1/src/sensing/`) extracts presence and motion features from standard Linux WiFi metrics (RSSI, noise floor, link quality) without any hardware modification. See [ADR-013](adr/ADR-013-feature-level-sensing-commodity-gear.md) for full design details.
 
 Requirements:
 - Any Linux machine with a WiFi interface (laptop, Raspberry Pi, etc.)
@@ -667,13 +667,13 @@ python3 -m http.server 3000 --directory ui
 |------|---------|
 | `./verify` | Trust kill switch -- one-command pipeline proof |
 | `Makefile` | `make verify`, `make verify-verbose`, `make verify-audit` |
-| `v1/requirements-lock.txt` | Pinned Python deps for hash reproducibility |
+| `archive/v1/requirements-lock.txt` | Pinned Python deps for hash reproducibility |
 | `requirements.txt` | Full Python deps (API server, torch, etc.) |
-| `v1/data/proof/verify.py` | Python verification script |
-| `v1/data/proof/sample_csi_data.json` | Deterministic reference signal |
-| `v1/data/proof/expected_features.sha256` | Published expected hash |
-| `v1/src/api/main.py` | FastAPI application entry point |
-| `v1/src/sensing/` | Commodity WiFi sensing module (RSSI) |
+| `archive/v1/data/proof/verify.py` | Python verification script |
+| `archive/v1/data/proof/sample_csi_data.json` | Deterministic reference signal |
+| `archive/v1/data/proof/expected_features.sha256` | Published expected hash |
+| `archive/v1/src/api/main.py` | FastAPI application entry point |
+| `archive/v1/src/sensing/` | Commodity WiFi sensing module (RSSI) |
 | `v2/Cargo.toml` | Rust workspace root |
 | `ui/viz.html` | Three.js 3D visualization |
 | `Dockerfile` | Multi-stage Docker build (dev/prod/test/security) |

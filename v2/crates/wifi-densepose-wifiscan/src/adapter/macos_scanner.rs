@@ -36,7 +36,7 @@ use crate::error::WifiScanError;
 
 /// Synchronous WiFi scanner that shells out to the `mac_wifi` Swift helper.
 ///
-/// The helper binary must be compiled from `v1/src/sensing/mac_wifi.swift` and
+/// The helper binary must be compiled from `archive/v1/src/sensing/mac_wifi.swift` and
 /// placed on `$PATH` or at a known location. The scanner invokes it with a
 /// `--scan-once` flag (single-shot mode) and parses the JSON output.
 ///

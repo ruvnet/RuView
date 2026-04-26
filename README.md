@@ -92,7 +92,7 @@ node scripts/mincut-person-counter.js --port 5006  # Correct person counting
 > | **Research NIC** | Intel 5300 / Atheros AR9580 | ~$50-100 | Yes | Full CSI with 3x3 MIMO |
 > | **Any WiFi** | Windows, macOS, or Linux laptop | $0 | No | RSSI-only: coarse presence and motion |
 >
-> No hardware? Verify the signal processing pipeline with the deterministic reference signal: `python v1/data/proof/verify.py`
+> No hardware? Verify the signal processing pipeline with the deterministic reference signal: `python archive/v1/data/proof/verify.py`
 >
 ---
 
@@ -1171,7 +1171,7 @@ Bundle verify:  7/7 checks PASS
 cd v2 && cargo test --workspace --no-default-features
 
 # Run the deterministic proof
-python v1/data/proof/verify.py
+python archive/v1/data/proof/verify.py
 
 # Generate + verify the witness bundle
 bash scripts/generate-witness-bundle.sh
@@ -2164,7 +2164,7 @@ cargo test -p wifi-densepose-sensing-server
 ./target/release/sensing-server --benchmark
 
 # Python tests
-python -m pytest v1/tests/ -v
+python -m pytest archive/v1/tests/ -v
 
 # Pipeline verification (no hardware needed)
 ./verify

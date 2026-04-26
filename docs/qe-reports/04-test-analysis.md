@@ -14,7 +14,7 @@ The wifi-densepose project contains **3,353 total test functions** across three 
 | Stack | Test Functions | Files | Frameworks |
 |-------|---------------|-------|------------|
 | Rust (inline + integration) | 2,658 | 292 source files + 16 integration test files | `#[test]`, Rust built-in |
-| Python (v1/tests/) | 491 | 30 test files | pytest, pytest-asyncio |
+| Python (archive/v1/tests/) | 491 | 30 test files | pytest, pytest-asyncio |
 | Mobile (ui/mobile) | 204 | 25 test files | Jest, React Testing Library |
 | **Total** | **3,353** | **363** | |
 
@@ -26,7 +26,7 @@ The wifi-densepose project contains **3,353 total test functions** across three 
 
 ---
 
-## 1. Python Test Suite Analysis (v1/tests/)
+## 1. Python Test Suite Analysis (archive/v1/tests/)
 
 ### 1.1 Test Distribution
 
@@ -229,7 +229,7 @@ All 14 tests use `MockPoseModel` with `asyncio.sleep()` simulating inference tim
 
 ### 1.10 Test Infrastructure Quality
 
-**Fixtures (`v1/tests/fixtures/csi_data.py`):**
+**Fixtures (`archive/v1/tests/fixtures/csi_data.py`):**
 
 Well-designed `CSIDataGenerator` class (487 lines) with:
 - Multiple scenario generators (empty room, single person, multi-person)
@@ -238,7 +238,7 @@ Well-designed `CSIDataGenerator` class (487 lines) with:
 - Time series generation
 - Validation utilities (`validate_csi_sample`)
 
-**Mocks (`v1/tests/mocks/hardware_mocks.py`):**
+**Mocks (`archive/v1/tests/mocks/hardware_mocks.py`):**
 
 Comprehensive mock infrastructure (716 lines) including:
 - `MockWiFiRouter` with realistic CSI streaming
@@ -448,9 +448,9 @@ This is the best-tested service in the mobile suite.
 
 **High maintenance cost files:**
 
-1. `v1/tests/mocks/hardware_mocks.py` (716 lines) -- Complex mock infrastructure that must evolve with the production code. Any hardware interface change requires updating this file.
+1. `archive/v1/tests/mocks/hardware_mocks.py` (716 lines) -- Complex mock infrastructure that must evolve with the production code. Any hardware interface change requires updating this file.
 
-2. `v1/tests/fixtures/csi_data.py` (487 lines) -- Rich data generation but duplicates some logic from the production `SimulatedCollector`.
+2. `archive/v1/tests/fixtures/csi_data.py` (487 lines) -- Rich data generation but duplicates some logic from the production `SimulatedCollector`.
 
 3. The 5 CSI extractor test files collectively contain ~3,000 lines of test code for a single module. Merging to one file would reduce this to ~600 lines.
 
@@ -468,8 +468,8 @@ This is the best-tested service in the mobile suite.
 
 | File | Why It's Good |
 |------|---------------|
-| `v1/tests/unit/test_sensing.py` | 45 tests with mathematical rigor, known-signal validation, domain-specific edge cases, cross-receiver agreement, band isolation. No mocks for core logic. |
-| `v1/tests/unit/test_esp32_binary_parser.py` | Real UDP socket testing, struct-level binary validation, ADR-018 compliance. Tests actual I/Q to amplitude/phase math. |
+| `archive/v1/tests/unit/test_sensing.py` | 45 tests with mathematical rigor, known-signal validation, domain-specific edge cases, cross-receiver agreement, band isolation. No mocks for core logic. |
+| `archive/v1/tests/unit/test_esp32_binary_parser.py` | Real UDP socket testing, struct-level binary validation, ADR-018 compliance. Tests actual I/Q to amplitude/phase math. |
 | `v2/.../tests/validation_test.rs` | Physics-based validation (Doppler, phase unwrapping, spectral analysis). Tests prove algorithm correctness, not just non-failure. |
 | `v2/.../tests/test_losses.rs` | Deterministic data, feature-gated, tests mathematical properties (zero loss for identical inputs, non-zero for mismatched). |
 | `ui/mobile/.../utils/ringBuffer.test.ts` | Comprehensive boundary testing (NaN, Infinity, 0, negative, overflow). Tests copy semantics. |
@@ -478,10 +478,10 @@ This is the best-tested service in the mobile suite.
 
 | File | Issues |
 |------|--------|
-| `v1/tests/performance/test_inference_speed.py` | Tests `asyncio.sleep()` accuracy, not model performance. `MockPoseModel` simulates inference with sleep. |
-| `v1/tests/e2e/test_healthcare_scenario.py` | Not a real E2E test -- defines its own mock classes. Test names contain stale "should_fail_initially" text. |
-| `v1/tests/unit/test_csi_processor_tdd.py` | 14/25 tests mock the SUT's own private methods. Tests verify mock calls, not behavior. |
-| `v1/tests/unit/test_phase_sanitizer_tdd.py` | 12/31 tests mock internal methods. Same anti-pattern as csi_processor_tdd. |
+| `archive/v1/tests/performance/test_inference_speed.py` | Tests `asyncio.sleep()` accuracy, not model performance. `MockPoseModel` simulates inference with sleep. |
+| `archive/v1/tests/e2e/test_healthcare_scenario.py` | Not a real E2E test -- defines its own mock classes. Test names contain stale "should_fail_initially" text. |
+| `archive/v1/tests/unit/test_csi_processor_tdd.py` | 14/25 tests mock the SUT's own private methods. Tests verify mock calls, not behavior. |
+| `archive/v1/tests/unit/test_phase_sanitizer_tdd.py` | 12/31 tests mock internal methods. Same anti-pattern as csi_processor_tdd. |
 | `ui/mobile/.../components/GaugeArc.test.tsx` | All 4 tests are `expect(toJSON()).not.toBeNull()` -- smoke tests with no behavioral verification. |
 
 ---

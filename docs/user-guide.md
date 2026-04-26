@@ -279,7 +279,7 @@ Uses CoreWLAN via a Swift helper binary. macOS Sonoma 14.4+ redacts real BSSIDs;
 
 ```bash
 # Compile the Swift helper (once)
-swiftc -O v1/src/sensing/mac_wifi.swift -o mac_wifi
+swiftc -O archive/v1/src/sensing/mac_wifi.swift -o mac_wifi
 
 # Run natively
 ./target/release/sensing-server --source macos --http-port 3000 --ws-port 3001 --tick-ms 500

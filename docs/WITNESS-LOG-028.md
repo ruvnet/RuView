@@ -133,7 +133,7 @@ cargo test -p wifi-densepose-train --no-default-features
 ### Step 9: Verify Python Proof System
 
 ```bash
-python v1/data/proof/verify.py
+python archive/v1/data/proof/verify.py
 ```
 
 **Expected:** PASS (hash `8c0680d7...` matches `expected_features.sha256`).

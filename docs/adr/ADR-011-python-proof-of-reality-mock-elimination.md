@@ -20,31 +20,31 @@ The following code paths produce fake data **in the default configuration** or a
 
 | File | Line | Issue | Impact |
 |------|------|-------|--------|
-| `v1/src/core/csi_processor.py` | 390 | `doppler_shift = np.random.rand(10)  # Placeholder` | **Real feature extractor returns random Doppler** - kills credibility of entire feature pipeline |
-| `v1/src/hardware/csi_extractor.py` | 83-84 | `amplitude = np.random.rand(...)` in CSI extraction fallback | Random data silently substituted when parsing fails |
-| `v1/src/hardware/csi_extractor.py` | 129-135 | `_parse_atheros()` returns `np.random.rand()` with comment "placeholder implementation" | Named as if it parses real data, actually random |
-| `v1/src/hardware/router_interface.py` | 211-212 | `np.random.rand(3, 56)` in fallback path | Silent random fallback |
-| `v1/src/services/pose_service.py` | 431 | `mock_csi = np.random.randn(64, 56, 3)  # Mock CSI data` | Mock CSI in production code path |
-| `v1/src/services/pose_service.py` | 293-356 | `_generate_mock_poses()` with `random.randint` throughout | Entire mock pose generator in service layer |
-| `v1/src/services/pose_service.py` | 489-607 | Multiple `random.randint` for occupancy, historical data | Fake statistics that look real in API responses |
-| `v1/src/api/dependencies.py` | 82, 408 | "return a mock user for development" | Auth bypass in default path |
+| `archive/v1/src/core/csi_processor.py` | 390 | `doppler_shift = np.random.rand(10)  # Placeholder` | **Real feature extractor returns random Doppler** - kills credibility of entire feature pipeline |
+| `archive/v1/src/hardware/csi_extractor.py` | 83-84 | `amplitude = np.random.rand(...)` in CSI extraction fallback | Random data silently substituted when parsing fails |
+| `archive/v1/src/hardware/csi_extractor.py` | 129-135 | `_parse_atheros()` returns `np.random.rand()` with comment "placeholder implementation" | Named as if it parses real data, actually random |
+| `archive/v1/src/hardware/router_interface.py` | 211-212 | `np.random.rand(3, 56)` in fallback path | Silent random fallback |
+| `archive/v1/src/services/pose_service.py` | 431 | `mock_csi = np.random.randn(64, 56, 3)  # Mock CSI data` | Mock CSI in production code path |
+| `archive/v1/src/services/pose_service.py` | 293-356 | `_generate_mock_poses()` with `random.randint` throughout | Entire mock pose generator in service layer |
+| `archive/v1/src/services/pose_service.py` | 489-607 | Multiple `random.randint` for occupancy, historical data | Fake statistics that look real in API responses |
+| `archive/v1/src/api/dependencies.py` | 82, 408 | "return a mock user for development" | Auth bypass in default path |
 
 #### Moderate Severity (mock gated behind flags but confusing)
 
 | File | Line | Issue |
 |------|------|-------|
-| `v1/src/config/settings.py` | 144-145 | `mock_hardware=False`, `mock_pose_data=False` defaults - correct, but mock infrastructure exists |
-| `v1/src/core/router_interface.py` | 27-300 | 270+ lines of mock data generation infrastructure in production code |
-| `v1/src/services/pose_service.py` | 84-88 | Silent conditional: `if not self.settings.mock_pose_data` with no logging of real-mode |
-| `v1/src/services/hardware_service.py` | 72-375 | Interleaved mock/real paths throughout |
+| `archive/v1/src/config/settings.py` | 144-145 | `mock_hardware=False`, `mock_pose_data=False` defaults - correct, but mock infrastructure exists |
+| `archive/v1/src/core/router_interface.py` | 27-300 | 270+ lines of mock data generation infrastructure in production code |
+| `archive/v1/src/services/pose_service.py` | 84-88 | Silent conditional: `if not self.settings.mock_pose_data` with no logging of real-mode |
+| `archive/v1/src/services/hardware_service.py` | 72-375 | Interleaved mock/real paths throughout |
 
 #### Low Severity (placeholders/TODOs)
 
 | File | Line | Issue |
 |------|------|-------|
-| `v1/src/core/router_interface.py` | 198 | "Collect real CSI data from router (placeholder implementation)" |
-| `v1/src/api/routers/health.py` | 170-171 | `uptime_seconds = 0.0  # TODO` |
-| `v1/src/services/pose_service.py` | 739 | `"uptime_seconds": 0.0  # TODO` |
+| `archive/v1/src/core/router_interface.py` | 198 | "Collect real CSI data from router (placeholder implementation)" |
+| `archive/v1/src/api/routers/health.py` | 170-171 | `uptime_seconds = 0.0  # TODO` |
+| `archive/v1/src/services/pose_service.py` | 739 | `"uptime_seconds": 0.0  # TODO` |
 
 ### Root Cause Analysis
 
@@ -119,7 +119,7 @@ def _parse_atheros(self, raw_data: bytes) -> CSIData:
 **All mock code moves to a dedicated module. Default execution NEVER touches mock paths.**
 
 ```
-v1/src/
+archive/v1/src/
 ├── core/
 │   ├── csi_processor.py        # Real processing only
 │   └── router_interface.py     # Real hardware interface only
@@ -157,7 +157,7 @@ if MOCK_MODE:
 A small real CSI capture file + one-command verification pipeline:
 
 ```
-v1/data/proof/
+archive/v1/data/proof/
 ├── README.md                      # How to verify
 ├── sample_csi_capture.bin         # Real CSI data (1 second, ~50 KB)
 ├── sample_csi_capture_meta.json   # Capture metadata (hardware, env)
@@ -172,7 +172,7 @@ v1/data/proof/
 """Verify WiFi-DensePose pipeline produces deterministic output from real CSI data.
 
 Usage:
-    python v1/data/proof/verify.py
+    python archive/v1/data/proof/verify.py
 
 Expected output:
     PASS: Pipeline output matches expected hash
@@ -265,13 +265,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Pinned requirements (not a reference to missing file)
-COPY v1/requirements-lock.txt ./requirements.txt
+COPY archive/v1/requirements-lock.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY v1/ ./v1/
+COPY archive/v1/ ./v1/
 
 # Proof of reality: verify pipeline on build
-RUN cd v1 && python data/proof/verify.py
+RUN cd archive/v1 && python data/proof/verify.py
 
 EXPOSE 8000
 # Default: REAL mode (mock requires explicit opt-in)
@@ -281,7 +281,7 @@ CMD ["uvicorn", "v1.src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 **Key change**: `RUN python data/proof/verify.py` **during build** means the Docker image cannot be created unless the pipeline produces correct output from real CSI data.
 
-**Requirements lockfile** (`v1/requirements-lock.txt`):
+**Requirements lockfile** (`archive/v1/requirements-lock.txt`):
 ```
 # Core (required)
 fastapi==0.115.6
@@ -307,9 +307,9 @@ name: Verify Signal Pipeline
 
 on:
   push:
-    paths: ['v1/src/**', 'v1/data/proof/**']
+    paths: ['archive/v1/src/**', 'archive/v1/data/proof/**']
   pull_request:
-    paths: ['v1/src/**']
+    paths: ['archive/v1/src/**']
 
 jobs:
   verify:
@@ -322,11 +322,11 @@ jobs:
       - name: Install minimal deps
         run: pip install numpy scipy pydantic pydantic-settings
       - name: Verify pipeline determinism
-        run: python v1/data/proof/verify.py
+        run: python archive/v1/data/proof/verify.py
       - name: Verify no random in production paths
         run: |
           # Fail if np.random appears in production code (not in testing/)
-          ! grep -r "np\.random\.\(rand\|randn\|randint\)" v1/src/ \
+          ! grep -r "np\.random\.\(rand\|randn\|randint\)" archive/v1/src/ \
             --include="*.py" \
             --exclude-dir=testing \
             || (echo "FAIL: np.random found in production code" && exit 1)
@@ -336,23 +336,23 @@ jobs:
 
 | File | Action | Description |
 |------|--------|-------------|
-| `v1/src/core/csi_processor.py:390` | **Replace** | Real Doppler extraction from temporal CSI history |
-| `v1/src/hardware/csi_extractor.py:83-84` | **Replace** | Hard error with descriptive message when parsing fails |
-| `v1/src/hardware/csi_extractor.py:129-135` | **Replace** | Real Atheros CSI parser or hard error with hardware instructions |
-| `v1/src/hardware/router_interface.py:198-212` | **Replace** | Hard error for unimplemented hardware, or real `iwconfig` + CSI tool integration |
-| `v1/src/services/pose_service.py:293-356` | **Move** | Move `_generate_mock_poses()` to `v1/src/testing/mock_pose_generator.py` |
-| `v1/src/services/pose_service.py:430-431` | **Remove** | Remove mock CSI generation from production path |
-| `v1/src/services/pose_service.py:489-607` | **Replace** | Real statistics from database, or explicit "no data" response |
-| `v1/src/core/router_interface.py:60-300` | **Move** | Move mock generator to `v1/src/testing/mock_csi_generator.py` |
-| `v1/src/api/dependencies.py:82,408` | **Replace** | Real auth check or explicit dev-mode bypass with logging |
-| `v1/data/proof/` | **Create** | Proof bundle (sample capture + expected hash + verify script) |
-| `v1/requirements-lock.txt` | **Create** | Pinned minimal dependencies |
+| `archive/v1/src/core/csi_processor.py:390` | **Replace** | Real Doppler extraction from temporal CSI history |
+| `archive/v1/src/hardware/csi_extractor.py:83-84` | **Replace** | Hard error with descriptive message when parsing fails |
+| `archive/v1/src/hardware/csi_extractor.py:129-135` | **Replace** | Real Atheros CSI parser or hard error with hardware instructions |
+| `archive/v1/src/hardware/router_interface.py:198-212` | **Replace** | Hard error for unimplemented hardware, or real `iwconfig` + CSI tool integration |
+| `archive/v1/src/services/pose_service.py:293-356` | **Move** | Move `_generate_mock_poses()` to `archive/v1/src/testing/mock_pose_generator.py` |
+| `archive/v1/src/services/pose_service.py:430-431` | **Remove** | Remove mock CSI generation from production path |
+| `archive/v1/src/services/pose_service.py:489-607` | **Replace** | Real statistics from database, or explicit "no data" response |
+| `archive/v1/src/core/router_interface.py:60-300` | **Move** | Move mock generator to `archive/v1/src/testing/mock_csi_generator.py` |
+| `archive/v1/src/api/dependencies.py:82,408` | **Replace** | Real auth check or explicit dev-mode bypass with logging |
+| `archive/v1/data/proof/` | **Create** | Proof bundle (sample capture + expected hash + verify script) |
+| `archive/v1/requirements-lock.txt` | **Create** | Pinned minimal dependencies |
 | `.github/workflows/verify-pipeline.yml` | **Create** | CI verification |
 
 ### Hardware Documentation
 
 ```
-v1/docs/hardware-setup.md (to be created)
+archive/v1/docs/hardware-setup.md (to be created)
 
 # Supported Hardware Matrix
 
@@ -368,17 +368,17 @@ v1/docs/hardware-setup.md (to be created)
 2. Capture 10 seconds of empty-room baseline
 3. Have one person walk through at normal pace
 4. Capture 10 seconds during walk-through
-5. Run calibration: `python v1/scripts/calibrate.py --baseline empty.dat --activity walk.dat`
+5. Run calibration: `python archive/v1/scripts/calibrate.py --baseline empty.dat --activity walk.dat`
 ```
 
 ## Consequences
 
 ### Positive
-- **"Clone, build, verify" in one command**: `docker build . && docker run --rm wifi-densepose python v1/data/proof/verify.py` produces a deterministic PASS
+- **"Clone, build, verify" in one command**: `docker build . && docker run --rm wifi-densepose python archive/v1/data/proof/verify.py` produces a deterministic PASS
 - **No silent fakes**: Random data never appears in production output
 - **CI enforcement**: PRs that introduce `np.random` in production paths fail automatically
 - **Credibility anchor**: SHA-256 verified output from real CSI capture is unchallengeable proof
-- **Clear mock boundary**: Mock code exists only in `v1/src/testing/`, never imported by production modules
+- **Clear mock boundary**: Mock code exists only in `archive/v1/src/testing/`, never imported by production modules
 
 ### Negative
 - **Requires real CSI capture**: Someone must capture and commit a real CSI sample (one-time effort)
@@ -390,7 +390,7 @@ v1/docs/hardware-setup.md (to be created)
 
 A stranger can:
 1. `git clone` the repository
-2. Run ONE command (`docker build .` or `python v1/data/proof/verify.py`)
+2. Run ONE command (`docker build .` or `python archive/v1/data/proof/verify.py`)
 3. See `PASS: Pipeline output matches expected hash` with a specific SHA-256
 4. Confirm no `np.random` in any non-test file via CI badge
 

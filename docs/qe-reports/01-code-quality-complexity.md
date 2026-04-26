@@ -368,7 +368,7 @@ or macro-based approach would reduce this to a fraction of the code.
 | wifi-densepose-wifiscan | 75/100 | EASY | Platform-specific but well-abstracted |
 | wifi-densepose-sensing-server | 32/100 | VERY DIFFICULT | God object, coupled state, async |
 | wifi-densepose-wasm-edge | 55/100 | MODERATE | Repetitive but self-contained |
-| v1/src (Python) | 70/100 | MODERATE | Good DI, some tight coupling |
+| archive/v1/src (Python) | 70/100 | MODERATE | Good DI, some tight coupling |
 | firmware (C) | 40/100 | DIFFICULT | Hardware deps, global state |
 | ui/mobile (TypeScript) | 72/100 | MODERATE | Component isolation is good |
 

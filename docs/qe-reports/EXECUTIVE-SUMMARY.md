@@ -25,9 +25,9 @@
 
 | # | Issue | File(s) | Impact |
 |---|-------|---------|--------|
-| 1 | **Rate limiter bypass** -- trusts `X-Forwarded-For` without validation | `v1/src/middleware/rate_limit.py:200-206` | Any client can bypass rate limits via header spoofing |
-| 2 | **Exception details leaked** in HTTP responses regardless of environment | `v1/src/api/routers/pose.py:140`, `stream.py:297`, +5 others | Stack traces visible to attackers |
-| 3 | **WebSocket JWT in URL** -- tokens visible in logs, browser history, proxies | `v1/src/api/routers/stream.py:74`, `v1/src/middleware/auth.py:243` | Token exposure (CWE-598) |
+| 1 | **Rate limiter bypass** -- trusts `X-Forwarded-For` without validation | `archive/v1/src/middleware/rate_limit.py:200-206` | Any client can bypass rate limits via header spoofing |
+| 2 | **Exception details leaked** in HTTP responses regardless of environment | `archive/v1/src/api/routers/pose.py:140`, `stream.py:297`, +5 others | Stack traces visible to attackers |
+| 3 | **WebSocket JWT in URL** -- tokens visible in logs, browser history, proxies | `archive/v1/src/api/routers/stream.py:74`, `archive/v1/src/middleware/auth.py:243` | Token exposure (CWE-598) |
 | 4 | **Rust tests not in CI** -- 2,618 tests in largest codebase never run in pipeline | No `cargo test` in any GitHub Actions workflow | Regressions ship undetected |
 | 5 | **WebSocket path mismatch** -- mobile app sends to wrong endpoint | `ui/mobile/src/services/ws.service.ts:104` vs `constants/websocket.ts:1` | Mobile WebSocket connections fail silently |
 
@@ -39,16 +39,16 @@
 | 7 | **O(L*V) tomography voxel scan** per frame | `ruvsense/tomography.rs:345-383` | ~10ms wasted per frame; use DDA ray march for 5-10x speedup |
 | 8 | **Sequential neural inference** -- defeats GPU batching | `wifi-densepose-nn inference.rs:334-336` | 2-4x latency penalty |
 | 9 | **720 `.unwrap()` calls** in Rust production code | Across entire Rust workspace | Each is a potential panic in real-time/safety-critical paths |
-| 10 | **Python Doppler: 112KB alloc per frame** at 20Hz | `v1/src/core/csi_processor.py:412-414` | Converts deque -> list -> numpy every frame |
+| 10 | **Python Doppler: 112KB alloc per frame** at 20Hz | `archive/v1/src/core/csi_processor.py:412-414` | Converts deque -> list -> numpy every frame |
 
 ## P2 -- Fix This Quarter (Coverage + Safety)
 
 | # | Issue | File(s) | Impact |
 |---|-------|---------|--------|
-| 11 | **11/12 Python modules untested** -- only CSI extraction has unit tests | `v1/src/services/`, `middleware/`, `database/`, `tasks/` | 12,280 LOC with zero unit tests |
+| 11 | **11/12 Python modules untested** -- only CSI extraction has unit tests | `archive/v1/src/services/`, `middleware/`, `database/`, `tasks/` | 12,280 LOC with zero unit tests |
 | 12 | **Firmware at 19% coverage** -- WASM runtime, OTA, swarm bridge untested | `firmware/esp32-csi-node/main/wasm_runtime.c` (867 LOC) | Security-critical code with no tests |
 | 13 | **MAT simulation fallback** -- disaster tool auto-falls back to simulated data | `ui/mobile/src/screens/MATScreen/index.tsx` | Risk of operators monitoring fake data during real incidents |
-| 14 | **Token blacklist never consulted** during auth | `v1/src/api/middleware/auth.py:246-252` | Revoked tokens remain valid |
+| 14 | **Token blacklist never consulted** during auth | `archive/v1/src/api/middleware/auth.py:246-252` | Revoked tokens remain valid |
 | 15 | **50ms frame budget never benchmarked** -- no latency CI gate | No benchmark harness exists | Real-time requirement is aspirational, not verified |
 
 ## P3 -- Technical Debt

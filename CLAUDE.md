@@ -91,10 +91,10 @@ cargo test --workspace --no-default-features
 cargo check -p wifi-densepose-train --no-default-features
 
 # Python — deterministic proof verification (SHA-256)
-python v1/data/proof/verify.py
+python archive/v1/data/proof/verify.py
 
 # Python — test suite
-cd v1 && python -m pytest tests/ -x -q
+cd archive/v1 && python -m pytest tests/ -x -q
 ```
 
 ### ESP32 Firmware Build (Windows — Python subprocess required)
@@ -156,7 +156,7 @@ cargo test --workspace --no-default-features
 
 # 2. Python proof — must print VERDICT: PASS
 cd ..
-python v1/data/proof/verify.py
+python archive/v1/data/proof/verify.py
 
 # 3. Generate witness bundle (includes both above + firmware hashes)
 bash scripts/generate-witness-bundle.sh
@@ -169,8 +169,8 @@ bash VERIFY.sh
 **If the Python proof hash changes** (e.g., numpy/scipy version update):
 ```bash
 # Regenerate the expected hash, then verify it passes
-python v1/data/proof/verify.py --generate-hash
-python v1/data/proof/verify.py
+python archive/v1/data/proof/verify.py --generate-hash
+python archive/v1/data/proof/verify.py
 ```
 
 **Witness bundle contents** (`dist/witness-bundle-ADR028-<sha>.tar.gz`):
@@ -183,9 +183,9 @@ python v1/data/proof/verify.py
 - `VERIFY.sh` — One-command self-verification for recipients
 
 **Key proof artifacts:**
-- `v1/data/proof/verify.py` — Trust Kill Switch: feeds reference signal through production pipeline, hashes output
-- `v1/data/proof/expected_features.sha256` — Published expected hash
-- `v1/data/proof/sample_csi_data.json` — 1,000 synthetic CSI frames (seed=42)
+- `archive/v1/data/proof/verify.py` — Trust Kill Switch: feeds reference signal through production pipeline, hashes output
+- `archive/v1/data/proof/expected_features.sha256` — Published expected hash
+- `archive/v1/data/proof/sample_csi_data.json` — 1,000 synthetic CSI frames (seed=42)
 - `docs/WITNESS-LOG-028.md` — 11-step reproducible verification procedure
 - `docs/adr/ADR-028-esp32-capability-audit.md` — Complete audit record
 
@@ -216,8 +216,8 @@ Active feature branch: `ruvsense-full-implementation` (PR #77)
 - `v2/crates/wifi-densepose-ruvector/src/viewpoint/` — Cross-viewpoint fusion (5 files)
 - `v2/crates/wifi-densepose-hardware/src/esp32/` — ESP32 TDM protocol
 - `firmware/esp32-csi-node/main/` — ESP32 C firmware (channel hopping, NVS config, TDM)
-- `v1/src/` — Python source (core, hardware, services, api)
-- `v1/data/proof/` — Deterministic CSI proof bundles
+- `archive/v1/src/` — Python source (core, hardware, services, api)
+- `archive/v1/data/proof/` — Deterministic CSI proof bundles
 - `.claude-flow/` — Claude Flow coordination state (committed for team sharing)
 - `.claude/` — Claude Code settings, agents, memory (committed for team sharing)
 
@@ -243,7 +243,7 @@ Active feature branch: `ruvsense-full-implementation` (PR #77)
 Before merging any PR, verify each item applies and is addressed:
 
 1. **Rust tests pass** — `cargo test --workspace --no-default-features` (1,031+ passed, 0 failed)
-2. **Python proof passes** — `python v1/data/proof/verify.py` (VERDICT: PASS)
+2. **Python proof passes** — `python archive/v1/data/proof/verify.py` (VERDICT: PASS)
 3. **README.md** — Update platform tables, crate descriptions, hardware tables, feature summaries if scope changed
 4. **CLAUDE.md** — Update crate table, ADR list, module tables, version if scope changed
 5. **CHANGELOG.md** — Add entry under `[Unreleased]` with what was added/fixed/changed

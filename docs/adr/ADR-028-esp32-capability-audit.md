@@ -232,10 +232,10 @@ python scripts/provision.py --port COM7 \
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| Reference signal | `v1/data/proof/sample_csi_data.json` | 1,000 synthetic CSI frames, seed=42 |
-| Generator | `v1/data/proof/generate_reference_signal.py` | Deterministic multipath model |
-| Verifier | `v1/data/proof/verify.py` | SHA-256 hash comparison |
-| Expected hash | `v1/data/proof/expected_features.sha256` | `0b82bd45...` |
+| Reference signal | `archive/v1/data/proof/sample_csi_data.json` | 1,000 synthetic CSI frames, seed=42 |
+| Generator | `archive/v1/data/proof/generate_reference_signal.py` | Deterministic multipath model |
+| Verifier | `archive/v1/data/proof/verify.py` | SHA-256 hash comparison |
+| Expected hash | `archive/v1/data/proof/expected_features.sha256` | `0b82bd45...` |
 
 **Audit-time result:** PASS. Hash regenerated with numpy 2.4.2 + scipy 1.17.1. Pipeline hash: `8c0680d7d285739ea9597715e84959d9c356c87ee3ad35b5f1e69a4ca41151c6`.
 

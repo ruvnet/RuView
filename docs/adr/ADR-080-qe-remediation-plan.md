@@ -17,19 +17,19 @@ Address the 15 prioritized issues from the QE analysis in three waves: P0 (immed
 
 ### 1. Rate Limiter Bypass (Security HIGH)
 
-- **Location:** `v1/src/middleware/rate_limit.py:200-206`
+- **Location:** `archive/v1/src/middleware/rate_limit.py:200-206`
 - **Problem:** Trusts `X-Forwarded-For` without validation. Any client bypasses rate limits via header spoofing.
 - **Fix:** Validate forwarded headers against trusted proxy list, or use connection IP directly.
 
 ### 2. Exception Details Leaked in Responses (Security HIGH)
 
-- **Location:** `v1/src/api/routers/pose.py:140`, `stream.py:297`, +5 endpoints
+- **Location:** `archive/v1/src/api/routers/pose.py:140`, `stream.py:297`, +5 endpoints
 - **Problem:** Stack traces visible regardless of environment.
 - **Fix:** Wrap with generic error responses in production; log details server-side only.
 
 ### 3. WebSocket JWT in URL (Security HIGH, CWE-598)
 
-- **Location:** `v1/src/api/routers/stream.py:74`, `v1/src/middleware/auth.py:243`
+- **Location:** `archive/v1/src/api/routers/stream.py:74`, `archive/v1/src/middleware/auth.py:243`
 - **Problem:** Tokens in query strings visible in logs/proxies/browser history.
 - **Fix:** Use WebSocket subprotocol or first-message auth pattern.
 

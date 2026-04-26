@@ -40,8 +40,8 @@ Use the `wifi-densepose-nn` crate with `default-features = ["onnx"]` only. This 
 
 | Component | Rust Crate | Replaces Python |
 |-----------|-----------|-----------------|
-| CSI processing | `wifi-densepose-signal::csi_processor` | `v1/src/sensing/feature_extractor.py` |
-| Motion detection | `wifi-densepose-signal::motion` | `v1/src/sensing/classifier.py` |
+| CSI processing | `wifi-densepose-signal::csi_processor` | `archive/v1/src/sensing/feature_extractor.py` |
+| Motion detection | `wifi-densepose-signal::motion` | `archive/v1/src/sensing/classifier.py` |
 | BVP extraction | `wifi-densepose-signal::bvp` | N/A (new capability) |
 | Fresnel geometry | `wifi-densepose-signal::fresnel` | N/A (new capability) |
 | Subcarrier selection | `wifi-densepose-signal::subcarrier_selection` | N/A (new capability) |

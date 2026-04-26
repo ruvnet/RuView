@@ -287,22 +287,22 @@
 | 1 | `firmware/main/wasm_runtime.c` | Firmware | 867 | **Critical** | 0.98 | WASM execution on embedded device, untested attack surface |
 | 2 | `firmware/main/ota_update.c` | Firmware | 266 | **Critical** | 0.97 | OTA firmware update -- integrity/authentication critical |
 | 3 | `firmware/main/swarm_bridge.c` | Firmware | 327 | **Critical** | 0.96 | Multi-node mesh networking, untested protocol |
-| 4 | `v1/src/services/pose_service.py` | Python | 855 | **Critical** | 0.95 | Core production path, highest complexity, no unit tests |
-| 5 | `v1/src/middleware/auth.py` | Python | 456 | **Critical** | 0.94 | Authentication -- security-critical, no unit tests |
-| 6 | `v1/src/api/websocket/connection_manager.py` | Python | 460 | **Critical** | 0.93 | WebSocket lifecycle, connection state, no tests |
+| 4 | `archive/v1/src/services/pose_service.py` | Python | 855 | **Critical** | 0.95 | Core production path, highest complexity, no unit tests |
+| 5 | `archive/v1/src/middleware/auth.py` | Python | 456 | **Critical** | 0.94 | Authentication -- security-critical, no unit tests |
+| 6 | `archive/v1/src/api/websocket/connection_manager.py` | Python | 460 | **Critical** | 0.93 | WebSocket lifecycle, connection state, no tests |
 | 7 | `firmware/main/mmwave_sensor.c` | Firmware | 571 | **Critical** | 0.92 | 60GHz FMCW sensor driver, hardware-critical |
 | 8 | `firmware/main/wasm_upload.c` | Firmware | 432 | **Critical** | 0.91 | OTA WASM upload, code injection risk |
-| 9 | `v1/src/services/orchestrator.py` | Python | 394 | **Critical** | 0.90 | Service lifecycle management, no tests |
-| 10 | `v1/src/database/connection.py` | Python | 639 | **Critical** | 0.89 | DB + Redis connection management, pooling |
-| 11 | `v1/src/middleware/error_handler.py` | Python | 504 | **High** | 0.87 | Global error handler, affects all requests |
-| 12 | `v1/src/tasks/monitoring.py` | Python | 771 | **High** | 0.86 | System monitoring, DB queries, async tasks |
-| 13 | `v1/src/services/hardware_service.py` | Python | 481 | **High** | 0.85 | Hardware abstraction, device management |
-| 14 | `v1/src/middleware/rate_limit.py` | Python | 464 | **High** | 0.84 | Rate limiting -- DoS protection |
-| 15 | `v1/src/services/health_check.py` | Python | 464 | **High** | 0.83 | Health monitoring, dependency checks |
-| 16 | `v1/src/tasks/backup.py` | Python | 609 | **High** | 0.82 | Data backup operations |
-| 17 | `v1/src/tasks/cleanup.py` | Python | 597 | **High** | 0.81 | Data retention, cleanup logic |
+| 9 | `archive/v1/src/services/orchestrator.py` | Python | 394 | **Critical** | 0.90 | Service lifecycle management, no tests |
+| 10 | `archive/v1/src/database/connection.py` | Python | 639 | **Critical** | 0.89 | DB + Redis connection management, pooling |
+| 11 | `archive/v1/src/middleware/error_handler.py` | Python | 504 | **High** | 0.87 | Global error handler, affects all requests |
+| 12 | `archive/v1/src/tasks/monitoring.py` | Python | 771 | **High** | 0.86 | System monitoring, DB queries, async tasks |
+| 13 | `archive/v1/src/services/hardware_service.py` | Python | 481 | **High** | 0.85 | Hardware abstraction, device management |
+| 14 | `archive/v1/src/middleware/rate_limit.py` | Python | 464 | **High** | 0.84 | Rate limiting -- DoS protection |
+| 15 | `archive/v1/src/services/health_check.py` | Python | 464 | **High** | 0.83 | Health monitoring, dependency checks |
+| 16 | `archive/v1/src/tasks/backup.py` | Python | 609 | **High** | 0.82 | Data backup operations |
+| 17 | `archive/v1/src/tasks/cleanup.py` | Python | 597 | **High** | 0.81 | Data retention, cleanup logic |
 | 18 | `firmware/main/rvf_parser.c` | Firmware | 239 | **High** | 0.80 | Binary format parsing -- buffer overflow risk |
-| 19 | `v1/src/api/routers/pose.py` | Python | 419 | **High** | 0.79 | Pose API endpoint handlers |
+| 19 | `archive/v1/src/api/routers/pose.py` | Python | 419 | **High** | 0.79 | Pose API endpoint handlers |
 | 20 | `mobile/hooks/useWebViewBridge.ts` | Mobile | 30 | **High** | 0.78 | Native-WebView IPC bridge |
 
 ---

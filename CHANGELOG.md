@@ -520,7 +520,7 @@ Major release: complete Rust sensing server, full DensePose training pipeline, R
 - `PresenceClassifier` — rule-based 3-state classification (ABSENT / PRESENT_STILL / ACTIVE)
 - Cross-receiver agreement scoring for multi-AP confidence boosting
 - WebSocket sensing server (`ws_server.py`) broadcasting JSON at 2 Hz
-- Deterministic CSI proof bundles for reproducible verification (`v1/data/proof/`)
+- Deterministic CSI proof bundles for reproducible verification (`archive/v1/data/proof/`)
 - Commodity sensing unit tests (`b391638`)
 
 ### Changed
@@ -528,7 +528,7 @@ Major release: complete Rust sensing server, full DensePose training pipeline, R
 
 ### Fixed
 - Review fixes for end-to-end training pipeline (`45f0304`)
-- Dockerfile paths updated from `src/` to `v1/src/` (`7872987`)
+- Dockerfile paths updated from `src/` to `archive/v1/src/` (`7872987`)
 - IoT profile installer instructions updated for aggregator CLI (`f460097`)
 - `process.env` reference removed from browser ES module (`e320bc9`)
 

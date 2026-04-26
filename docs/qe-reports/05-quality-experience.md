@@ -31,18 +31,18 @@ The WiFi-DensePose system demonstrates strong architectural foundations with a w
 ### Key Findings
 
 **Strengths:**
-- Comprehensive error handling middleware with structured error responses, request IDs, and environment-aware detail levels (`v1/src/middleware/error_handler.py`)
+- Comprehensive error handling middleware with structured error responses, request IDs, and environment-aware detail levels (`archive/v1/src/middleware/error_handler.py`)
 - Robust WebSocket reconnection with exponential backoff and automatic simulation fallback in the mobile app (`ui/mobile/src/services/ws.service.ts`)
-- Well-designed health check architecture with component-level status, readiness probes, and liveness endpoints (`v1/src/api/routers/health.py`)
-- Strong input validation on API models with Pydantic, including range constraints and clear field descriptions (`v1/src/api/routers/pose.py`)
+- Well-designed health check architecture with component-level status, readiness probes, and liveness endpoints (`archive/v1/src/api/routers/health.py`)
+- Strong input validation on API models with Pydantic, including range constraints and clear field descriptions (`archive/v1/src/api/routers/pose.py`)
 - Persistent settings with AsyncStorage in the mobile app, surviving app restarts (`ui/mobile/src/stores/settingsStore.ts`)
 - Server URL validation with test-before-save workflow in mobile settings (`ui/mobile/src/screens/SettingsScreen/ServerUrlInput.tsx`)
 
 **Critical Issues:**
-- API documentation is disabled in production (`docs_url=None`, `redoc_url=None` when `is_production=True`), leaving production API consumers without discoverability (in `v1/src/api/main.py` line 146-148)
-- No user-facing progress indicator during calibration -- the calibration endpoint returns an estimated duration but there is no polling endpoint progress beyond percentage (`v1/src/api/routers/pose.py` lines 320-361)
-- Rate limit responses lack a human-readable `Retry-After` message body; the client receives a bare `"Rate limit exceeded"` string with retry information only in HTTP headers (`v1/src/middleware/rate_limit.py` line 323)
-- CLI `status` command uses emoji/Unicode characters that break in terminals without UTF-8 support (`v1/src/commands/status.py` lines 360-474)
+- API documentation is disabled in production (`docs_url=None`, `redoc_url=None` when `is_production=True`), leaving production API consumers without discoverability (in `archive/v1/src/api/main.py` line 146-148)
+- No user-facing progress indicator during calibration -- the calibration endpoint returns an estimated duration but there is no polling endpoint progress beyond percentage (`archive/v1/src/api/routers/pose.py` lines 320-361)
+- Rate limit responses lack a human-readable `Retry-After` message body; the client receives a bare `"Rate limit exceeded"` string with retry information only in HTTP headers (`archive/v1/src/middleware/rate_limit.py` line 323)
+- CLI `status` command uses emoji/Unicode characters that break in terminals without UTF-8 support (`archive/v1/src/commands/status.py` lines 360-474)
 - Mobile app `MainTabs.tsx` passes an inline arrow function as the `component` prop to `Tab.Screen` (line 130), causing unnecessary re-renders on every parent render cycle
 
 **Top 3 Recommendations:**
@@ -166,7 +166,7 @@ WS   /api/v1/stream/events - Event stream
 
 ### 4.2 Error Handling (Score: 85/100)
 
-The `ErrorHandler` class in `v1/src/middleware/error_handler.py` is well-designed:
+The `ErrorHandler` class in `archive/v1/src/middleware/error_handler.py` is well-designed:
 
 **Strengths:**
 - Structured error responses with consistent format: `{ "error": { "code": "...", "message": "...", "timestamp": "...", "request_id": "..." } }`
@@ -401,7 +401,7 @@ The `ServerUrlInput` component in the Settings screen provides:
 
 **Strengths:**
 - Rust workspace has 1,031+ tests with a single command: `cargo test --workspace --no-default-features`
-- Deterministic proof verification via `python v1/data/proof/verify.py` with SHA-256 hash checking
+- Deterministic proof verification via `python archive/v1/data/proof/verify.py` with SHA-256 hash checking
 - Mobile app has comprehensive test coverage with tests for components, hooks, screens, services, stores, and utilities
 - Witness bundle verification with `VERIFY.sh` providing 7/7 pass/fail attestation
 
@@ -706,20 +706,20 @@ The `provision.py` script in `firmware/esp32-csi-node/` handles WiFi credential 
 This Quality Experience analysis was performed by examining source code across all touchpoints of the WiFi-DensePose system. Files analyzed include:
 
 **API Layer (9 files):**
-- `v1/src/api/main.py` -- FastAPI application setup, middleware configuration, exception handlers
-- `v1/src/api/routers/health.py` -- Health check endpoints
-- `v1/src/api/routers/pose.py` -- Pose estimation endpoints
-- `v1/src/api/routers/stream.py` -- WebSocket streaming endpoints
-- `v1/src/api/websocket/connection_manager.py` -- WebSocket connection lifecycle
-- `v1/src/api/dependencies.py` -- Dependency injection, authentication, authorization
-- `v1/src/middleware/error_handler.py` -- Error handling middleware
-- `v1/src/middleware/rate_limit.py` -- Rate limiting middleware
+- `archive/v1/src/api/main.py` -- FastAPI application setup, middleware configuration, exception handlers
+- `archive/v1/src/api/routers/health.py` -- Health check endpoints
+- `archive/v1/src/api/routers/pose.py` -- Pose estimation endpoints
+- `archive/v1/src/api/routers/stream.py` -- WebSocket streaming endpoints
+- `archive/v1/src/api/websocket/connection_manager.py` -- WebSocket connection lifecycle
+- `archive/v1/src/api/dependencies.py` -- Dependency injection, authentication, authorization
+- `archive/v1/src/middleware/error_handler.py` -- Error handling middleware
+- `archive/v1/src/middleware/rate_limit.py` -- Rate limiting middleware
 
 **CLI Layer (4 files):**
-- `v1/src/cli.py` -- Click CLI entry point
-- `v1/src/commands/start.py` -- Server start command
-- `v1/src/commands/stop.py` -- Server stop command
-- `v1/src/commands/status.py` -- Server status command
+- `archive/v1/src/cli.py` -- Click CLI entry point
+- `archive/v1/src/commands/start.py` -- Server start command
+- `archive/v1/src/commands/stop.py` -- Server stop command
+- `archive/v1/src/commands/status.py` -- Server status command
 
 **Mobile Layer (15 files):**
 - `ui/mobile/src/screens/LiveScreen/index.tsx` -- Live visualization screen

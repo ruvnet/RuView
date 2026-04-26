@@ -75,7 +75,7 @@ The wifi-densepose project is an ambitious WiFi-based human pose estimation syst
 **Test Ideas:**
 | # | Priority | Test Idea | Automation |
 |---|----------|-----------|------------|
-| S-08 | P0 | Run `python v1/data/proof/verify.py` in CI on every PR that touches `v1/src/core/` or `v1/src/hardware/` to catch proof-breaking changes | CI |
+| S-08 | P0 | Run `python archive/v1/data/proof/verify.py` in CI on every PR that touches `archive/v1/src/core/` or `archive/v1/src/hardware/` to catch proof-breaking changes | CI |
 | S-09 | P2 | Pin numpy/scipy versions in requirements.txt and confirm `verify.py --generate-hash` produces the same hash across Python 3.10, 3.11, and 3.12 | Integration |
 
 ---
@@ -222,7 +222,7 @@ The Rust `Esp32CsiParser::parse_frame` takes raw bytes and returns structured `C
 
 #### D3: Proof Data Integrity
 
-**Finding:** The proof-of-reality system (`v1/data/proof/verify.py`) is a deterministic pipeline verification tool. It feeds 1,000 synthetic CSI frames through the production CSI processor, hashes the output with SHA-256, and compares against a published hash. This is a strong engineering practice.
+**Finding:** The proof-of-reality system (`archive/v1/data/proof/verify.py`) is a deterministic pipeline verification tool. It feeds 1,000 synthetic CSI frames through the production CSI processor, hashes the output with SHA-256, and compares against a published hash. This is a strong engineering practice.
 
 **Risk: LOW**
 - The proof only exercises the Python v1 pipeline. The Rust port has no equivalent proof-of-reality check.
@@ -448,7 +448,7 @@ The ESP32-S3 is the primary sensing node. The mmWave sensors are auxiliary.
 **Test Ideas:**
 | # | Priority | Test Idea | Automation |
 |---|----------|-----------|------------|
-| O-06 | P0 | Run the complete developer setup workflow from a clean Ubuntu 22.04 VM: clone, install deps, `cargo test --workspace --no-default-features`, `python v1/data/proof/verify.py` -- measure total setup time and document any manual steps | Human Exploration |
+| O-06 | P0 | Run the complete developer setup workflow from a clean Ubuntu 22.04 VM: clone, install deps, `cargo test --workspace --no-default-features`, `python archive/v1/data/proof/verify.py` -- measure total setup time and document any manual steps | Human Exploration |
 | O-07 | P1 | Simulate a MAT scan with 5 survivors at varying signal strengths (strong, weak, borderline) and confirm the triage classification matches expected START protocol categories | Integration |
 
 #### O4: Extreme Use
