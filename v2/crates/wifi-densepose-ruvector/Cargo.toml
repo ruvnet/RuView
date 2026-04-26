@@ -34,3 +34,7 @@ criterion = { workspace = true }
 [[bench]]
 name = "crv_bench"
 harness = false
+
+[[bench]]
+name = "sketch_bench"
+harness = false
