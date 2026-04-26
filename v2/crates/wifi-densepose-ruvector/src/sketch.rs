@@ -67,6 +67,22 @@ pub enum SketchError {
         /// Dimension on the incoming sketch.
         query: u16,
     },
+
+    /// Embedding dimension exceeds `u16::MAX` (65,535).
+    ///
+    /// Returned by [`Sketch::try_from_embedding`] to surface what
+    /// `from_embedding`'s `debug_assert!` would have hidden in release
+    /// builds — silently truncating the dimension count would otherwise
+    /// let two different-length embeddings compare as if they were the
+    /// same length. See ADR-084 §"Versioning" and the security-review
+    /// finding L2 on PR #435 for context.
+    #[error("embedding dimension {got} exceeds u16::MAX ({max})")]
+    EmbeddingDimOverflow {
+        /// Actual length of the input embedding.
+        got: usize,
+        /// Maximum supported dimension (`u16::MAX`).
+        max: usize,
+    },
 }
 
 /// A 1-bit binary sketch of a dense embedding vector.
@@ -105,15 +121,37 @@ impl Sketch {
     /// (e.g., a re-trained AETHER head). Two sketches with different
     /// `sketch_version`s are not comparable.
     pub fn from_embedding(embedding: &[f32], sketch_version: u16) -> Self {
-        debug_assert!(
-            embedding.len() <= u16::MAX as usize,
-            "embedding dimension exceeds u16::MAX"
-        );
+        // L2 hardening (PR #435 security review): in release builds the
+        // previous `debug_assert!` was compiled out, allowing silent
+        // u16-truncation when `embedding.len() > u16::MAX`. Saturate to
+        // u16::MAX rather than truncate so two over-long embeddings
+        // compare as same-dimensional rather than as accidentally-short.
+        // Callers that need a hard error should use `try_from_embedding`.
+        let embedding_dim = embedding.len().min(u16::MAX as usize) as u16;
         Self {
             inner: BinaryQuantized::quantize(embedding),
-            embedding_dim: embedding.len() as u16,
+            embedding_dim,
             sketch_version,
         }
+    }
+
+    /// Fallible constructor that rejects embeddings longer than
+    /// `u16::MAX` (65,535) instead of saturating, raising
+    /// [`SketchError::EmbeddingDimOverflow`]. Use this when an
+    /// over-long input should fail loudly rather than silently
+    /// produce a sketch that disagrees with its source on
+    /// `embedding_dim`.
+    pub fn try_from_embedding(
+        embedding: &[f32],
+        sketch_version: u16,
+    ) -> Result<Self, SketchError> {
+        if embedding.len() > u16::MAX as usize {
+            return Err(SketchError::EmbeddingDimOverflow {
+                got: embedding.len(),
+                max: u16::MAX as usize,
+            });
+        }
+        Ok(Self::from_embedding(embedding, sketch_version))
     }
 
     /// Hamming distance to another sketch in `[0, embedding_dim]`.
@@ -484,6 +522,32 @@ mod tests {
         let query = Sketch::from_embedding(&[0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5], 1);
         let novelty = bank.novelty(&query).unwrap();
         assert!((novelty - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn try_from_embedding_rejects_over_long_input() {
+        // L2 security-review finding (PR #435): the infallible
+        // `from_embedding` saturates to u16::MAX; the fallible
+        // `try_from_embedding` must surface the overflow so callers can
+        // detect the misuse. We can't actually allocate a 65,536-f32
+        // vector in unit tests cheaply (that's 256 KiB, fine), but we
+        // can fabricate a `Vec` with `len() > u16::MAX` and check the
+        // error path.
+        let too_long: Vec<f32> = vec![0.5; (u16::MAX as usize) + 1];
+        let err = Sketch::try_from_embedding(&too_long, 1).unwrap_err();
+        match err {
+            SketchError::EmbeddingDimOverflow { got, max } => {
+                assert_eq!(got, (u16::MAX as usize) + 1);
+                assert_eq!(max, u16::MAX as usize);
+            }
+            _ => panic!("expected EmbeddingDimOverflow, got {err:?}"),
+        }
+
+        // The infallible path should *saturate* to u16::MAX rather
+        // than panic in release. Verify the saturation is observable
+        // on `embedding_dim()`.
+        let s = Sketch::from_embedding(&too_long, 1);
+        assert_eq!(s.embedding_dim(), u16::MAX);
     }
 
     #[test]
