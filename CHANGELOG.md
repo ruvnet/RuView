@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`nvsim` crate — deterministic NV-diamond magnetometer pipeline simulator** (ADR-089) —
+  New standalone leaf crate at `v2/crates/nvsim` modeling a forward-only
+  magnetic sensing path: scene → source synthesis (Biot–Savart, dipole,
+  current loop, ferrous induced moment) → material attenuation
+  (Air/Drywall/Brick/Concrete/Reinforced/SteelSheet) → NV ensemble
+  (4 〈111〉 axes, ODMR linear-readout proxy, shot-noise floor per
+  Wolf 2015 / Barry 2020) → 16-bit ADC + lock-in demodulation →
+  fixed-layout `MagFrame` records → SHA-256 witness. Six-pass build
+  per `docs/research/quantum-sensing/15-nvsim-implementation-plan.md`.
+  50 tests, ~4.5 M samples/s on x86_64 (4500× the Cortex-A53 1 kHz
+  acceptance gate), pinned reference witness
+  `cc8de9b01b0ff5bd97a6c17848a3f156c174ea7589d0888164a441584ec593b4`
+  for byte-equivalence regression. WASM-ready by construction
+  (zero `std::time/fs/env/process/thread`); builds cleanly for
+  `wasm32-unknown-unknown`. ADR-090 (Proposed, conditional) tracks the
+  optional Lindblad/Hamiltonian extension if AC magnetometry, MW power
+  saturation, hyperfine spectroscopy, or pulsed protocols become required.
+
 ### Fixed
 - **Ghost skeletons in live UI with multi-node ESP32 setups** (#420, ADR-082) —
   `tracker_bridge::tracker_to_person_detections` documented itself as filtering

@@ -22,6 +22,7 @@ Dual codebase: Python v1 (`v1/`) and Rust port (`v2/`).
 | `wifi-densepose-sensing-server` | Lightweight Axum server for WiFi sensing UI |
 | `wifi-densepose-wifiscan` | Multi-BSSID WiFi scanning (ADR-022) |
 | `wifi-densepose-vitals` | ESP32 CSI-grade vital sign extraction (ADR-021) |
+| `nvsim` | Deterministic NV-diamond magnetometer pipeline simulator (ADR-089) — standalone leaf, WASM-ready |
 
 ### RuvSense Modules (`signal/src/ruvsense/`)
 | Module | Purpose |
