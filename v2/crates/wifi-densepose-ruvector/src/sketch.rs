@@ -360,9 +360,13 @@ impl SketchBank {
             let d = sk.distance_unchecked(query);
             if heap.len() < k {
                 heap.push(Reverse((d, *id)));
-            } else {
-                // Safe: heap has exactly k > 0 elements, just checked.
-                let worst = heap.peek().expect("heap len == k > 0").0 .0;
+            } else if let Some(&Reverse((worst, _))) = heap.peek() {
+                // L1 hardening (PR #435 review): structural `if let` rather
+                // than `.expect("heap len == k > 0")`. The branch is
+                // mathematically unreachable when `heap.len() >= k > 0`,
+                // but a defensive pattern makes the impossibility a type
+                // property rather than a runtime invariant. Same hot-path
+                // cost (one bounds check); zero panic risk.
                 if d < worst {
                     heap.pop();
                     heap.push(Reverse((d, *id)));

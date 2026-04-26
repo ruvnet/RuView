@@ -506,6 +506,14 @@ impl EmbeddingHistory {
         if self.sketches.is_empty() {
             return Some(1.0);
         }
+        // L3 hardening (PR #435 security review): a 0-dim history would
+        // produce `min_d as f32 / 0.0 = NaN`, silently poisoning every
+        // downstream gate. `with_sketch(0, ...)` is constructible today;
+        // treating "no comparison possible" as "maximally novel" is the
+        // fail-loud behaviour every consumer of this score expects.
+        if self.embedding_dim == 0 {
+            return Some(1.0);
+        }
         let q = wifi_densepose_ruvector::Sketch::from_embedding(query, sv);
         let min_d = self
             .sketches
@@ -933,6 +941,22 @@ mod tests {
         })
         .unwrap();
         assert_eq!(h.novelty(&q), Some(0.0));
+    }
+
+    #[test]
+    fn test_novelty_zero_dim_history_returns_one_not_nan() {
+        // L3 security-review finding (PR #435): a 0-dim sketch history is
+        // constructible via `with_sketch(0, ...)`. Without the guard,
+        // `novelty` would produce NaN (min_d / 0). This pins down the
+        // documented fail-loud behaviour: 0-dim → max-novelty 1.0.
+        let h = EmbeddingHistory::with_sketch(0, 100, 1);
+        let q: Vec<f32> = vec![]; // 0-dim query is the only valid one here
+        let result = h.novelty(&q);
+        assert_eq!(result, Some(1.0), "0-dim history → max novelty, never NaN");
+        assert!(
+            !result.unwrap().is_nan(),
+            "novelty must never be NaN — 0-dim is fail-loud, not silent"
+        );
     }
 
     #[test]
