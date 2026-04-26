@@ -1,0 +1,26 @@
+[package]
+name = "nvsim"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Deterministic NV-diamond magnetometer pipeline simulator (source -> propagation -> NV ensemble -> ADC + lockin demod)"
+repository.workspace = true
+keywords = ["nv-diamond", "magnetometer", "simulator", "physics", "biot-savart"]
+categories = ["science", "simulation"]
+readme = "README.md"
+
+# `nvsim` is a standalone leaf crate. It deliberately has NO internal RuView
+# dependencies — see `docs/research/quantum-sensing/15-nvsim-implementation-plan.md`
+# §1.1 for the rationale. RuView integration (frame format alignment with
+# `wifi-densepose-core::FrameKind`, ruvector trace compression, etc.) is
+# tracked as Optional Integrations in a follow-up section of the README and
+# lands behind feature flags after the core simulator is shipping.
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"
