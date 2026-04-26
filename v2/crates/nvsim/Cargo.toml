@@ -10,6 +10,16 @@ keywords = ["nv-diamond", "magnetometer", "simulator", "physics", "biot-savart"]
 categories = ["science", "simulation"]
 readme = "README.md"
 
+[package.metadata.wasm-pack.profile.release]
+# Skip wasm-opt locally — older wasm-opt versions reject bulk-memory ops
+# rustc emits at 1.92. CI runs wasm-opt with a current binaryen.
+wasm-opt = false
+
+[lib]
+# `cdylib` for wasm-bindgen's wasm32 build, `rlib` so other workspace
+# crates and benchmarks can keep linking against nvsim natively.
+crate-type = ["cdylib", "rlib"]
+
 # `nvsim` is a standalone leaf crate. It deliberately has NO internal RuView
 # dependencies — see `docs/research/quantum-sensing/15-nvsim-implementation-plan.md`
 # §1.1 for the rationale. RuView integration (frame format alignment with
@@ -24,14 +34,26 @@ tracing = { workspace = true }
 
 # Pass 4: deterministic ChaCha20 PRNG for shot-noise sampling. Same
 # `(scene, seed)` produces byte-identical outputs across runs and machines —
-# the determinism commitment in plan §5.
-rand = "0.8"
-rand_chacha = "0.3"
+# the determinism commitment in plan §5. Default features off to drop the
+# `getrandom` OS-entropy path; nvsim seeds from a caller-supplied u64 so
+# OS entropy is never needed (this is also what makes nvsim WASM-ready).
+rand = { version = "0.8", default-features = false }
+rand_chacha = { version = "0.3", default-features = false }
 
 # Pass 5: SHA-256 over concatenated MagFrame bytes is the simulator's
 # content-addressable witness. Same scene + seed → same digest, the
 # foundation of Pass 6's proof bundle.
 sha2 = { workspace = true }
+
+# ADR-092: optional wasm-bindgen surface for in-browser dashboard.
+# Enable with `--features wasm` and target wasm32-unknown-unknown.
+wasm-bindgen = { version = "0.2", optional = true }
+serde-wasm-bindgen = { version = "0.6", optional = true }
+js-sys = { version = "0.3", optional = true }
+
+[features]
+default = []
+wasm = ["dep:wasm-bindgen", "dep:serde-wasm-bindgen", "dep:js-sys"]
 
 [dev-dependencies]
 approx = "0.5"

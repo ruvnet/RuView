@@ -48,6 +48,9 @@ pub mod scene;
 pub mod sensor;
 pub mod source;
 
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+pub mod wasm;
+
 pub use proof::Proof;
 
 pub use digitiser::{

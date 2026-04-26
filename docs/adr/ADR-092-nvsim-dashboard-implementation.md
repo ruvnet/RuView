@@ -810,6 +810,94 @@ WASM/WS swap painless and what enables the third-party `@ruvnet/nvsim-client` pa
 
 ---
 
+## 14a. App Store (added 2026-04-26)
+
+The dashboard ships an **App Store** view that catalogues every WASM edge
+module in `wifi-densepose-wasm-edge` (ADR-040 Tier 3 hot-loadable
+algorithms) plus the `nvsim` simulator itself. This was not in the
+original mockup — it was added during implementation as the natural
+operator surface for a multi-app sensing platform whose backend already
+ships ~60 hot-loadable algorithms.
+
+### 14a.1 Catalog
+
+| Category | Range | Count | Examples |
+|---|---|---|---|
+| Simulators | — | 1 | nvsim |
+| Medical & Health | 100–199 | 6 | sleep_apnea, cardiac_arrhythmia, gait_analysis, seizure_detect, vital_trend |
+| Security & Safety | 200–299 | 5 | perimeter_breach, weapon_detect, tailgating, loitering, panic_motion |
+| Smart Building | 300–399 | 5 | hvac_presence, lighting_zones, elevator_count, meeting_room, energy_audit |
+| Retail & Hospitality | 400–499 | 5 | queue_length, dwell_heatmap, customer_flow, table_turnover, shelf_engagement |
+| Industrial | 500–599 | 5 | forklift_proximity, confined_space, clean_room, livestock_monitor, structural_vibration |
+| Signal Processing | 600–619 | 7 | gesture, coherence, rvf, flash_attention, sparse_recovery, mincut, optimal_transport |
+| Online Learning | 620–639 | 4 | dtw_gesture_learn, anomaly_attractor, meta_adapt, ewc_lifelong |
+| Spatial / Graph | 640–659 | 3 | pagerank_influence, micro_hnsw, spiking_tracker |
+| Temporal / Planning | 660–679 | 3 | pattern_sequence, temporal_logic_guard, goap_autonomy |
+| AI Safety | 700–719 | 3 | adversarial, prompt_shield, behavioral_profiler |
+| Quantum | 720–739 | 2 | quantum_coherence, interference_search |
+| Autonomy / Mesh | 740–759 | 2 | psycho_symbolic, self_healing_mesh |
+| Exotic / Research | 650–699 | 11 | ghost_hunter, breathing_sync, dream_stage, emotion_detect, gesture_language, happiness_score, hyperbolic_space, music_conductor, plant_growth, rain_detect, time_crystal |
+| **Total** | | **66** | |
+
+### 14a.2 Per-app metadata
+
+Each entry in `dashboard/src/store/apps.ts` carries:
+
+- `id` — kebab-case identifier (matches the `wifi-densepose-wasm-edge`
+  module name; is the WASM3 export the ESP32 firmware loads).
+- `name` — human-readable label.
+- `category` — short-code for filter chips and event-ID range.
+- `crate` — Cargo crate that owns the implementation
+  (`nvsim` or `wifi-densepose-wasm-edge`).
+- `summary` — single-line description shown on the card.
+- `events` — emitted i32 event IDs from the `event_types` mod.
+- `budget` — compute tier (`S` < 5 ms, `M` < 15 ms, `L` < 50 ms).
+- `status` — maturity (`available` / `beta` / `research`).
+- `adr` — back-reference to the ADR that introduced or governs the app.
+- `tags` — fuzzy-search tokens.
+
+### 14a.3 UI behavior
+
+- **Card grid** — auto-fill at 280 px per card; theme-aware palette.
+- **Search** — fuzzy match across `id`, `name`, `summary`, and `tags`.
+- **Category chips** — single-select filter (sticky under the search).
+- **Status chips** — secondary filter on maturity.
+- **Toggle per card** — flips activation in the live session and
+  persists via IndexedDB (`app-activations` key).
+- **Active indicator** — emerald border on cards whose toggle is on.
+
+### 14a.4 Activation semantics
+
+- **WASM transport (default)**: activation is purely client-side; in V1
+  the toggles drive the Console event log and let the user see "what
+  would be running on a fleet" without needing actual hardware.
+- **WS transport (deferred to V2)**: activation flips an
+  `app.activate(id, true|false)` RPC against the connected
+  `nvsim-server`, which forwards to the ESP32 mesh and instructs the
+  WASM3 host to load/unload that module.
+
+### 14a.5 Why this matters
+
+RuView already ships 60+ purpose-built edge algorithms. Without an
+operator surface they exist only in source code; the App Store makes
+them **discoverable** and **toggleable** without recompiling firmware.
+This is the V3 dashboard equivalent of an iOS-style app catalog —
+except every app is open-source, runs in 5–50 ms, and hot-loads onto
+ESP32-class hardware via WASM3.
+
+### 14a.6 Adding a new app
+
+1. Implement the algorithm in `wifi-densepose-wasm-edge/src/<id>.rs`.
+2. Add `pub mod <id>;` to `lib.rs`.
+3. Add an entry to `APPS` in `dashboard/src/store/apps.ts`.
+4. Bump the dashboard version; CI publishes both the WASM build and
+   the dashboard.
+
+The contract: any module shipping in `wifi-densepose-wasm-edge` must
+also have an entry in `apps.ts` (lint check planned for V2).
+
+---
+
 ## 15. Cross-references
 
 - **ADR-089** — `nvsim` simulator (the backend this dashboard fronts)
