@@ -203,6 +203,11 @@ pub struct PerNodeFeatureInfo {
     pub rssi_dbm: f64,
     pub last_seen_ms: u64,
     pub frame_rate_hz: f64,
+    /// ADR-084 Pass 3 cluster-Pi novelty score in `[0.0, 1.0]`.
+    /// `0.0` = exact-match-in-bank, `1.0` = no overlap with recent
+    /// per-node frame history. `None` until first `update_novelty()`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub novelty_score: Option<f32>,
     pub stale: bool,
 }
 

@@ -476,6 +476,13 @@ struct PerNodeFeatureInfo {
     last_seen_ms: u64,
     frame_rate_hz: f64,
     stale: bool,
+    /// ADR-084 Pass 3 cluster-Pi novelty score in `[0.0, 1.0]`.
+    /// `0.0` = exact-match-in-bank, `1.0` = no overlap with recent
+    /// per-node frame history. `None` until the first
+    /// `update_novelty()` call. Consumers (model-wake gate, anomaly
+    /// emit, UI heatmap) read this to decide whether to escalate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    novelty_score: Option<f32>,
 }
 
 /// Shared application state
