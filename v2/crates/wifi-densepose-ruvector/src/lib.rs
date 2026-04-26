@@ -30,4 +30,7 @@
 pub mod crv;
 pub mod mat;
 pub mod signal;
+pub mod sketch;
 pub mod viewpoint;
+
+pub use sketch::{Sketch, SketchBank, SketchError};

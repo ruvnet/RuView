@@ -15,6 +15,7 @@ default = []
 crv = ["dep:ruvector-crv", "dep:ruvector-gnn", "dep:serde", "dep:serde_json"]
 
 [dependencies]
+ruvector-core = { workspace = true }
 ruvector-mincut = { workspace = true }
 ruvector-attn-mincut = { workspace = true }
 ruvector-temporal-tensor = { workspace = true }

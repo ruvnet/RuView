@@ -1,0 +1,472 @@
+//! RaBitQ-style binary sketch — cheap similarity sensor for CSI/pose embeddings.
+//!
+//! Implements **Pass 1** of [ADR-084](../../../../../docs/adr/ADR-084-rabitq-similarity-sensor.md):
+//! a thin RuView-flavored API over `ruvector_core::quantization::BinaryQuantized`.
+//!
+//! # Why a sketch
+//!
+//! Every "have I seen something like this before?" comparison in the RuView
+//! pipeline (AETHER re-ID, room fingerprinting, mincut prefilter, novelty
+//! detection, mesh-exchange compression, privacy event log) shares the same
+//! shape: dense float embedding → similarity score → top-K candidates.
+//! The full-precision compare is expensive — `O(d)` float operations per pair,
+//! cache-unfriendly because every dimension is a 4-byte load.
+//!
+//! A 1-bit sketch (one bit per embedding dimension, packed into bytes) collapses
+//! the compare to a hardware-accelerated POPCNT/NEON-vcnt over ~32× less
+//! memory. The published *RaBitQ* algorithm (Gao & Long, SIGMOD 2024) wraps
+//! this with a randomized rotation for theoretical error bounds; we ship the
+//! pure sign-quantization variant first and add the rotation later if
+//! benchmark-measured top-K coverage drops below the ADR-084 acceptance
+//! threshold of 90%.
+//!
+//! # Acceptance criteria (ADR-084 §"Acceptance test")
+//!
+//! - Sketch compare cost reduction: **8×–30×** vs full-float compare.
+//! - Top-K coverage: **≥ 90%** agreement with full-float top-K.
+//! - End-to-end accuracy regression: **< 1 percentage point**.
+//!
+//! Pass 1 establishes the API and the unit-test foundation. Pass 2+ wires it
+//! into specific pipeline sites and measures the criteria there.
+//!
+//! # Use sites (ADR-084)
+//!
+//! 1. AETHER re-ID hot-cache filter (`signal::ruvsense::pose_tracker`)
+//! 2. Cluster-Pi novelty sensor (`sensing-server` `SketchBank`)
+//! 3. Mesh-exchange compression (ADR-066 swarm bridge)
+//! 4. Privacy-preserving event log (cluster Pi)
+//! 5. Mincut prefilter (`ruvector::signal::subcarrier`)
+//!
+//! All sites take a `&Sketch` instead of an `&[f32]`; the bridge to dense
+//! embeddings is `Sketch::from_embedding`.
+
+use ruvector_core::quantization::{BinaryQuantized, QuantizedVector};
+
+/// Errors raised by the sketch API.
+#[derive(Debug, thiserror::Error)]
+pub enum SketchError {
+    /// The sketch's `sketch_version` does not match the `SketchBank`'s.
+    /// This guards against silently comparing sketches produced by different
+    /// embedding-model generations.
+    #[error("sketch_version mismatch: bank={bank}, query={query}")]
+    SketchVersionMismatch {
+        /// Version stored in the bank.
+        bank: u16,
+        /// Version on the incoming sketch.
+        query: u16,
+    },
+
+    /// The sketch's embedding dimension does not match the bank's.
+    /// Two sketches of different dimensions cannot be compared.
+    #[error("embedding_dim mismatch: bank={bank}, query={query}")]
+    EmbeddingDimMismatch {
+        /// Dimension stored in the bank.
+        bank: u16,
+        /// Dimension on the incoming sketch.
+        query: u16,
+    },
+}
+
+/// A 1-bit binary sketch of a dense embedding vector.
+///
+/// 32× smaller than the source `[f32]` and compared via SIMD-accelerated
+/// hamming distance (NEON `vcnt` on aarch64, POPCNT on x86_64). Use as a
+/// cheap pre-filter before full-precision comparison.
+///
+/// # Versioning
+///
+/// `sketch_version` distinguishes sketches produced by different embedding
+/// generations. Bumping the embedding model invalidates all stored sketches;
+/// the `SketchBank` rejects mismatched versions at compare time so callers
+/// never silently compare incompatible sketches.
+///
+/// `embedding_dim` is the source vector's length (not the byte-packed size);
+/// kept as a check that two sketches are actually comparable.
+#[derive(Debug, Clone)]
+pub struct Sketch {
+    /// 1-bit-per-dimension packed bytes.
+    inner: BinaryQuantized,
+    /// Source-embedding dimension (e.g., 128 for AETHER).
+    embedding_dim: u16,
+    /// Schema version of the producing embedding model.
+    sketch_version: u16,
+}
+
+impl Sketch {
+    /// Construct a sketch from a dense f32 embedding.
+    ///
+    /// Each dimension contributes one bit: `1` if the value is `> 0.0`,
+    /// `0` otherwise. This is the standard sign-quantization step.
+    ///
+    /// `sketch_version` must be supplied by the caller and bumped whenever
+    /// the embedding model that produced the input changes meaningfully
+    /// (e.g., a re-trained AETHER head). Two sketches with different
+    /// `sketch_version`s are not comparable.
+    pub fn from_embedding(embedding: &[f32], sketch_version: u16) -> Self {
+        debug_assert!(
+            embedding.len() <= u16::MAX as usize,
+            "embedding dimension exceeds u16::MAX"
+        );
+        Self {
+            inner: BinaryQuantized::quantize(embedding),
+            embedding_dim: embedding.len() as u16,
+            sketch_version,
+        }
+    }
+
+    /// Hamming distance to another sketch in `[0, embedding_dim]`.
+    ///
+    /// Returns `None` if the two sketches have different `embedding_dim` or
+    /// `sketch_version` — comparing them would be semantically meaningless.
+    /// Use [`Sketch::distance_unchecked`] when the caller has already
+    /// validated the sketches come from the same producer.
+    pub fn distance(&self, other: &Self) -> Result<u32, SketchError> {
+        if self.embedding_dim != other.embedding_dim {
+            return Err(SketchError::EmbeddingDimMismatch {
+                bank: self.embedding_dim,
+                query: other.embedding_dim,
+            });
+        }
+        if self.sketch_version != other.sketch_version {
+            return Err(SketchError::SketchVersionMismatch {
+                bank: self.sketch_version,
+                query: other.sketch_version,
+            });
+        }
+        Ok(self.inner.distance(&other.inner) as u32)
+    }
+
+    /// Hamming distance without compatibility checks.
+    ///
+    /// Faster than [`Sketch::distance`] (no version/dim check) but the
+    /// caller is responsible for guaranteeing both sketches come from the
+    /// same embedding model and dimension. Use only on sketches retrieved
+    /// from the same `SketchBank`.
+    #[inline]
+    pub fn distance_unchecked(&self, other: &Self) -> u32 {
+        self.inner.distance(&other.inner) as u32
+    }
+
+    /// Source-embedding dimension (number of dimensions in the original
+    /// `[f32]`, not the packed byte length).
+    #[inline]
+    pub fn embedding_dim(&self) -> u16 {
+        self.embedding_dim
+    }
+
+    /// Schema version of the producing embedding model.
+    #[inline]
+    pub fn sketch_version(&self) -> u16 {
+        self.sketch_version
+    }
+
+    /// Borrow the inner ruvector-core `BinaryQuantized` for advanced use
+    /// (e.g., serialisation through ruvector's existing infrastructure).
+    /// Most callers should use [`Sketch::distance`] or [`SketchBank`].
+    #[inline]
+    pub fn as_inner(&self) -> &BinaryQuantized {
+        &self.inner
+    }
+}
+
+/// A bank of sketches with stable IDs, queried for top-K nearest neighbours
+/// by hamming distance.
+///
+/// Used at every "have I seen this before" site in the pipeline. The bank
+/// enforces `sketch_version` and `embedding_dim` consistency at insertion
+/// time, so `topk` queries never need to re-check.
+///
+/// # Invariants
+///
+/// - All sketches in a bank share the same `embedding_dim` and `sketch_version`.
+/// - Bank IDs (`u32`) are caller-assigned and stable across `topk` calls;
+///   the bank does not renumber on insertion or removal.
+#[derive(Debug, Clone)]
+pub struct SketchBank {
+    /// (id, sketch) pairs in insertion order.
+    entries: Vec<(u32, Sketch)>,
+    /// Locked at first insertion; all subsequent inserts must match.
+    embedding_dim: Option<u16>,
+    /// Locked at first insertion; all subsequent inserts must match.
+    sketch_version: Option<u16>,
+}
+
+impl SketchBank {
+    /// Create an empty bank. Dimension and version are locked at the first
+    /// `insert` call.
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            embedding_dim: None,
+            sketch_version: None,
+        }
+    }
+
+    /// Create a bank with a pre-locked `embedding_dim` and `sketch_version`.
+    /// Use when the bank's expected schema is known at construction.
+    pub fn with_schema(embedding_dim: u16, sketch_version: u16) -> Self {
+        Self {
+            entries: Vec::new(),
+            embedding_dim: Some(embedding_dim),
+            sketch_version: Some(sketch_version),
+        }
+    }
+
+    /// Number of sketches in the bank.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// True iff the bank has no sketches.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Locked embedding dimension, or `None` if the bank is empty and
+    /// no schema was pre-supplied.
+    #[inline]
+    pub fn embedding_dim(&self) -> Option<u16> {
+        self.embedding_dim
+    }
+
+    /// Locked sketch version, or `None` if the bank is empty and
+    /// no schema was pre-supplied.
+    #[inline]
+    pub fn sketch_version(&self) -> Option<u16> {
+        self.sketch_version
+    }
+
+    /// Insert a sketch with caller-assigned ID. Locks the bank's schema on
+    /// first insertion; rejects subsequent inserts that mismatch.
+    pub fn insert(&mut self, id: u32, sketch: Sketch) -> Result<(), SketchError> {
+        match self.embedding_dim {
+            None => self.embedding_dim = Some(sketch.embedding_dim),
+            Some(d) if d != sketch.embedding_dim => {
+                return Err(SketchError::EmbeddingDimMismatch {
+                    bank: d,
+                    query: sketch.embedding_dim,
+                });
+            }
+            _ => {}
+        }
+        match self.sketch_version {
+            None => self.sketch_version = Some(sketch.sketch_version),
+            Some(v) if v != sketch.sketch_version => {
+                return Err(SketchError::SketchVersionMismatch {
+                    bank: v,
+                    query: sketch.sketch_version,
+                });
+            }
+            _ => {}
+        }
+        self.entries.push((id, sketch));
+        Ok(())
+    }
+
+    /// Top-K nearest neighbours by hamming distance, ascending.
+    ///
+    /// Returns up to `k` `(id, distance)` pairs sorted by distance. If the
+    /// bank has fewer than `k` entries, returns all of them. If `k == 0`,
+    /// returns empty.
+    ///
+    /// Returns `Err` if the query's `embedding_dim` or `sketch_version`
+    /// disagrees with the bank's locked schema. (Cannot return `Err` if the
+    /// bank is empty *and* no schema was pre-supplied — there's nothing to
+    /// disagree with.)
+    pub fn topk(&self, query: &Sketch, k: usize) -> Result<Vec<(u32, u32)>, SketchError> {
+        if k == 0 || self.entries.is_empty() {
+            return Ok(Vec::new());
+        }
+        if let Some(d) = self.embedding_dim {
+            if d != query.embedding_dim {
+                return Err(SketchError::EmbeddingDimMismatch {
+                    bank: d,
+                    query: query.embedding_dim,
+                });
+            }
+        }
+        if let Some(v) = self.sketch_version {
+            if v != query.sketch_version {
+                return Err(SketchError::SketchVersionMismatch {
+                    bank: v,
+                    query: query.sketch_version,
+                });
+            }
+        }
+        // O(n log k) using a partial sort; for small k (typical k = 8 to 64)
+        // and bank sizes up to a few thousand sketches, the simple sort-all
+        // approach is faster in practice (cache-friendly) and easier to audit.
+        // Switch to a max-heap if profiling shows this becomes a hot spot.
+        let mut scored: Vec<(u32, u32)> = self
+            .entries
+            .iter()
+            .map(|(id, sk)| (*id, sk.distance_unchecked(query)))
+            .collect();
+        scored.sort_by_key(|&(_, d)| d);
+        scored.truncate(k);
+        Ok(scored)
+    }
+
+    /// Compute the novelty score of a query against the bank in `[0.0, 1.0]`.
+    ///
+    /// Defined as `min_distance / embedding_dim`, so 0.0 means "exact bit
+    /// match exists in the bank" and 1.0 means "every bit differs from the
+    /// nearest stored sketch." Returns 1.0 (max novelty) on an empty bank.
+    /// Returns `Err` on schema mismatch.
+    pub fn novelty(&self, query: &Sketch) -> Result<f32, SketchError> {
+        if self.entries.is_empty() {
+            return Ok(1.0);
+        }
+        let topk = self.topk(query, 1)?;
+        let min_distance = topk.first().map(|&(_, d)| d).unwrap_or(u32::MAX);
+        Ok(min_distance as f32 / query.embedding_dim as f32)
+    }
+}
+
+impl Default for SketchBank {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_embedding_packs_one_bit_per_dim() {
+        let v = vec![0.5, -0.5, 0.5, -0.5, 0.5, -0.5, 0.5, -0.5];
+        let s = Sketch::from_embedding(&v, 1);
+        assert_eq!(s.embedding_dim(), 8);
+        assert_eq!(s.sketch_version(), 1);
+        // Distance to self is 0
+        assert_eq!(s.distance_unchecked(&s), 0);
+    }
+
+    #[test]
+    fn distance_is_hamming_count() {
+        let a = Sketch::from_embedding(&[0.5, 0.5, 0.5, 0.5], 1);
+        let b = Sketch::from_embedding(&[-0.5, -0.5, -0.5, -0.5], 1);
+        // All 4 dims flipped sign → 4 bit differences.
+        assert_eq!(a.distance(&b).unwrap(), 4);
+    }
+
+    #[test]
+    fn distance_rejects_mismatched_dims() {
+        let a = Sketch::from_embedding(&[0.5, 0.5], 1);
+        let b = Sketch::from_embedding(&[0.5, 0.5, 0.5, 0.5], 1);
+        let err = a.distance(&b).unwrap_err();
+        assert!(matches!(err, SketchError::EmbeddingDimMismatch { .. }));
+    }
+
+    #[test]
+    fn distance_rejects_mismatched_versions() {
+        let a = Sketch::from_embedding(&[0.5, 0.5, 0.5, 0.5], 1);
+        let b = Sketch::from_embedding(&[0.5, 0.5, 0.5, 0.5], 2);
+        let err = a.distance(&b).unwrap_err();
+        assert!(matches!(err, SketchError::SketchVersionMismatch { .. }));
+    }
+
+    #[test]
+    fn bank_topk_returns_sorted_by_distance() {
+        let mut bank = SketchBank::new();
+        // id 10: identical
+        bank.insert(10, Sketch::from_embedding(&[0.5, 0.5, 0.5, 0.5], 1)).unwrap();
+        // id 20: 1 bit different (last dim flipped)
+        bank.insert(20, Sketch::from_embedding(&[0.5, 0.5, 0.5, -0.5], 1)).unwrap();
+        // id 30: 2 bits different
+        bank.insert(30, Sketch::from_embedding(&[-0.5, 0.5, -0.5, 0.5], 1)).unwrap();
+
+        let query = Sketch::from_embedding(&[0.5, 0.5, 0.5, 0.5], 1);
+        let topk = bank.topk(&query, 3).unwrap();
+
+        assert_eq!(topk.len(), 3);
+        assert_eq!(topk[0].0, 10); // 0 distance
+        assert_eq!(topk[1].0, 20); // 1 distance
+        assert_eq!(topk[2].0, 30); // 2 distance
+        assert!(topk[0].1 <= topk[1].1);
+        assert!(topk[1].1 <= topk[2].1);
+    }
+
+    #[test]
+    fn bank_topk_zero_returns_empty() {
+        let mut bank = SketchBank::new();
+        bank.insert(1, Sketch::from_embedding(&[0.5, 0.5], 1)).unwrap();
+        let q = Sketch::from_embedding(&[0.5, 0.5], 1);
+        assert_eq!(bank.topk(&q, 0).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn bank_topk_more_than_size_returns_all() {
+        let mut bank = SketchBank::new();
+        bank.insert(1, Sketch::from_embedding(&[0.5, 0.5], 1)).unwrap();
+        bank.insert(2, Sketch::from_embedding(&[-0.5, 0.5], 1)).unwrap();
+        let q = Sketch::from_embedding(&[0.5, 0.5], 1);
+        assert_eq!(bank.topk(&q, 100).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn bank_locks_schema_on_first_insert() {
+        let mut bank = SketchBank::new();
+        bank.insert(1, Sketch::from_embedding(&[0.5, 0.5, 0.5, 0.5], 1)).unwrap();
+        // Different version → reject
+        let err = bank
+            .insert(2, Sketch::from_embedding(&[0.5, 0.5, 0.5, 0.5], 2))
+            .unwrap_err();
+        assert!(matches!(err, SketchError::SketchVersionMismatch { .. }));
+        // Different dim → reject
+        let err = bank
+            .insert(3, Sketch::from_embedding(&[0.5, 0.5], 1))
+            .unwrap_err();
+        assert!(matches!(err, SketchError::EmbeddingDimMismatch { .. }));
+    }
+
+    #[test]
+    fn bank_with_schema_rejects_first_mismatching_insert() {
+        let mut bank = SketchBank::with_schema(4, 7);
+        let err = bank
+            .insert(1, Sketch::from_embedding(&[0.5, 0.5], 7))
+            .unwrap_err();
+        assert!(matches!(err, SketchError::EmbeddingDimMismatch { .. }));
+    }
+
+    #[test]
+    fn novelty_zero_for_exact_match_one_for_empty() {
+        let bank_empty = SketchBank::new();
+        let q = Sketch::from_embedding(&[0.5, 0.5, 0.5, 0.5], 1);
+        assert_eq!(bank_empty.novelty(&q).unwrap(), 1.0);
+
+        let mut bank = SketchBank::new();
+        bank.insert(1, q.clone()).unwrap();
+        assert_eq!(bank.novelty(&q).unwrap(), 0.0);
+    }
+
+    #[test]
+    fn novelty_is_proportional_to_min_distance() {
+        let mut bank = SketchBank::new();
+        // Bank has one sketch with all 8 dims positive.
+        bank.insert(1, Sketch::from_embedding(&[0.5; 8], 1)).unwrap();
+        // Query flips half the dims → 4 bit difference / 8 dims = 0.5.
+        let query = Sketch::from_embedding(&[0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, -0.5], 1);
+        let novelty = bank.novelty(&query).unwrap();
+        assert!((novelty - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn topk_rejects_query_with_wrong_schema() {
+        let mut bank = SketchBank::with_schema(4, 1);
+        bank.insert(1, Sketch::from_embedding(&[0.5, 0.5, 0.5, 0.5], 1)).unwrap();
+        let bad_dim = Sketch::from_embedding(&[0.5, 0.5], 1);
+        assert!(matches!(
+            bank.topk(&bad_dim, 1).unwrap_err(),
+            SketchError::EmbeddingDimMismatch { .. }
+        ));
+        let bad_ver = Sketch::from_embedding(&[0.5, 0.5, 0.5, 0.5], 99);
+        assert!(matches!(
+            bank.topk(&bad_ver, 1).unwrap_err(),
+            SketchError::SketchVersionMismatch { .. }
+        ));
+    }
+}
