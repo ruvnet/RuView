@@ -3892,6 +3892,8 @@ name = "nvsim"
 version = "0.3.0"
 dependencies = [
  "approx 0.5.1",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

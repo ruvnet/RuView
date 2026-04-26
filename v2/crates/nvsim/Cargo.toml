@@ -22,5 +22,11 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
+# Pass 4: deterministic ChaCha20 PRNG for shot-noise sampling. Same
+# `(scene, seed)` produces byte-identical outputs across runs and machines —
+# the determinism commitment in plan §5.
+rand = "0.8"
+rand_chacha = "0.3"
+
 [dev-dependencies]
 approx = "0.5"
