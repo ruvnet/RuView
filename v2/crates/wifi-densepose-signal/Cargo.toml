@@ -55,3 +55,7 @@ proptest.workspace = true
 [[bench]]
 name = "signal_bench"
 harness = false
+
+[[bench]]
+name = "aether_prefilter_bench"
+harness = false
