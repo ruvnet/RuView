@@ -27,13 +27,20 @@
 
 #![warn(missing_docs)]
 
+pub mod digitiser;
 pub mod frame;
+pub mod pipeline;
 pub mod propagation;
 pub mod scene;
 pub mod sensor;
 pub mod source;
 
+pub use digitiser::{
+    adc_dequantise, adc_quantise, DigitiserConfig, Lockin, LowPass, ADC_BITS, ADC_FULL_SCALE_T,
+    ADC_LSB_T,
+};
 pub use frame::{MagFrame, MAG_FRAME_MAGIC, MAG_FRAME_VERSION};
+pub use pipeline::{Pipeline, PipelineConfig};
 pub use propagation::{
     attenuate, material_is_heavy, material_loss_db_per_m, LosSegment, Material, Propagator,
 };

@@ -28,5 +28,10 @@ tracing = { workspace = true }
 rand = "0.8"
 rand_chacha = "0.3"
 
+# Pass 5: SHA-256 over concatenated MagFrame bytes is the simulator's
+# content-addressable witness. Same scene + seed → same digest, the
+# foundation of Pass 6's proof bundle.
+sha2 = { workspace = true }
+
 [dev-dependencies]
 approx = "0.5"
