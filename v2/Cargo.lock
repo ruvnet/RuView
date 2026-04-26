@@ -8389,6 +8389,7 @@ dependencies = [
  "ruvector-temporal-tensor",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 1.0.69",
 ]
 

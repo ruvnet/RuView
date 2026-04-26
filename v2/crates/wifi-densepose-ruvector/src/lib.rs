@@ -28,11 +28,13 @@
 
 #[cfg(feature = "crv")]
 pub mod crv;
+pub mod event_log;
 pub mod mat;
 pub mod signal;
 pub mod sketch;
 pub mod viewpoint;
 
+pub use event_log::{NoveltyEvent, PrivacyEventLog};
 pub use sketch::{
     Sketch, SketchBank, SketchError, WireSketch, WireSketchError,
     WIRE_SKETCH_FORMAT_VERSION, WIRE_SKETCH_MAGIC, WIRE_SKETCH_MAX_BYTES,

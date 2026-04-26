@@ -332,8 +332,16 @@ impl NodeState {
             Some(h) => h,
             None => return,
         };
-        // Truncate or zero-pad to the canonical dim. f64 → f32 is a
-        // direct cast; CSI amplitudes are well within f32 range.
+        // Truncate or zero-pad to the canonical dim.
+        //
+        // L4 hardening (PR #435 security review): the `as f32` cast
+        // accepts adversarial f64 inputs without panic. `f64::INFINITY`
+        // becomes `f32::INFINITY` (sign-quantizes to bit=1; novelty
+        // degrades but no crash). `f64::NAN` propagates as `f32::NAN`
+        // (sign-quantizes to bit=0 since `NaN > 0.0` is false). CSI
+        // amplitudes from healthy ESP32 firmware are well within f32
+        // finite range — adversarial input degrades novelty quality
+        // but never causes the gate to panic.
         let mut feature: Vec<f32> = amplitudes
             .iter()
             .take(NOVELTY_VECTOR_DIM)
