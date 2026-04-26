@@ -487,6 +487,35 @@ impl EmbeddingHistory {
         refined
     }
 
+    /// ADR-084 Pass 3: novelty score for a query against the bank in [0.0, 1.0].
+    ///
+    /// Defined as `min_hamming_distance / embedding_dim` over the stored
+    /// sketches, so 0.0 means "exact bit-match exists in the bank" and
+    /// 1.0 means "every bit differs from the nearest stored sketch."
+    /// Returns 1.0 (max novelty) on an empty bank.
+    ///
+    /// This is the primitive the cluster-Pi novelty sensor wraps: a
+    /// per-node bank of recent feature vectors, with each new frame
+    /// scored for novelty before being inserted. Downstream gates
+    /// (model-wake, anomaly-emit, escalation) consume the score.
+    ///
+    /// Returns `None` if sketches are not enabled
+    /// (use `EmbeddingHistory::with_sketch` to enable).
+    pub fn novelty(&self, query: &[f32]) -> Option<f32> {
+        let sv = self.sketch_version?;
+        if self.sketches.is_empty() {
+            return Some(1.0);
+        }
+        let q = wifi_densepose_ruvector::Sketch::from_embedding(query, sv);
+        let min_d = self
+            .sketches
+            .iter()
+            .map(|sk| sk.distance_unchecked(&q))
+            .min()
+            .unwrap_or(u32::MAX);
+        Some(min_d as f32 / self.embedding_dim as f32)
+    }
+
     /// Number of entries stored.
     pub fn len(&self) -> usize {
         self.entries.len()
@@ -871,6 +900,75 @@ mod tests {
                 "ADR-084 acceptance failed at k={k}: prefilter coverage {coverage:.3} < 0.90"
             );
         }
+    }
+
+    #[test]
+    fn test_novelty_returns_none_without_sketches() {
+        // EmbeddingHistory::new disables sketches; novelty must be None
+        // so callers can fall back to a slower path or skip the gate.
+        let mut h = EmbeddingHistory::new(8, 100);
+        h.push(EmbeddingEntry {
+            person_id: 1,
+            day_us: 0,
+            embedding: lcg_embedding(8, 1),
+        })
+        .unwrap();
+        let q = lcg_embedding(8, 99);
+        assert_eq!(h.novelty(&q), None);
+    }
+
+    #[test]
+    fn test_novelty_zero_for_exact_match_one_for_empty_bank() {
+        // Empty bank → maximum novelty (1.0).
+        let h = EmbeddingHistory::with_sketch(8, 100, 1);
+        let q = lcg_embedding(8, 1);
+        assert_eq!(h.novelty(&q), Some(1.0));
+
+        // Bank containing the query → minimum novelty (0.0).
+        let mut h = EmbeddingHistory::with_sketch(8, 100, 1);
+        h.push(EmbeddingEntry {
+            person_id: 1,
+            day_us: 0,
+            embedding: q.clone(),
+        })
+        .unwrap();
+        assert_eq!(h.novelty(&q), Some(0.0));
+    }
+
+    #[test]
+    fn test_novelty_decreases_as_bank_grows_around_query() {
+        // Insert progressively-closer-to-query embeddings; novelty must
+        // monotonically decrease (or stay flat). Guards against an
+        // accidentally-reversed comparator producing the wrong gradient.
+        const DIM: usize = 64;
+        let mut h = EmbeddingHistory::with_sketch(DIM, 100, 1);
+        let target = lcg_embedding(DIM, 0xDEAD_BEEF);
+
+        // Push several embeddings unrelated to the target first.
+        for s in 1..10u32 {
+            h.push(EmbeddingEntry {
+                person_id: s as u64,
+                day_us: s as u64,
+                embedding: lcg_embedding(DIM, s),
+            })
+            .unwrap();
+        }
+        let novelty_far = h.novelty(&target).unwrap();
+
+        // Push the target itself — novelty must drop to 0.
+        h.push(EmbeddingEntry {
+            person_id: 99,
+            day_us: 99,
+            embedding: target.clone(),
+        })
+        .unwrap();
+        let novelty_near = h.novelty(&target).unwrap();
+
+        assert!(
+            novelty_near <= novelty_far,
+            "novelty must not increase when adding a closer match: {novelty_far} → {novelty_near}"
+        );
+        assert_eq!(novelty_near, 0.0, "exact match should yield novelty 0");
     }
 
     #[test]
