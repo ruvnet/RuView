@@ -207,6 +207,197 @@ impl Sketch {
     pub fn as_inner(&self) -> &BinaryQuantized {
         &self.inner
     }
+
+    /// Borrow the packed sketch bytes (1 bit per source-embedding
+    /// dimension, ceil-divided into bytes). Used by [`WireSketch`] to
+    /// produce a wire-format payload without re-quantizing. Length is
+    /// `(embedding_dim + 7) / 8` bytes.
+    #[inline]
+    pub fn packed_bytes(&self) -> &[u8] {
+        &self.inner.bits
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR-084 Pass 4 — wire-format primitive (cluster-channel-agnostic)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Magic bytes for ADR-084 sketch wire frames. Receivers reject any
+/// payload that doesn't start with these four bytes — the same shape
+/// of magic-prefix check ADR-018's CSI binary frame uses (e.g.
+/// `0xC5110001`). Picked to be distinct from any existing RuView magic.
+pub const WIRE_SKETCH_MAGIC: u32 = 0xC511_0084;
+
+/// On-the-wire schema version. Bump on any field reordering or addition.
+/// `Sketch::sketch_version` (the *embedding model* version) is a
+/// separate concept and travels in the payload.
+pub const WIRE_SKETCH_FORMAT_VERSION: u16 = 1;
+
+/// Maximum wire-payload size the deserializer will accept. Guards
+/// against a malicious sender claiming `embedding_dim = u16::MAX`
+/// (would imply 8 KiB of packed bits) and exhausting receiver memory.
+/// 8 KiB matches the largest reasonable production embedding (post-
+/// rotation 65,535-d sign-quantized) plus a few bytes of header.
+pub const WIRE_SKETCH_MAX_BYTES: usize = 9 * 1024;
+
+/// Errors raised by [`WireSketch::deserialize`].
+#[derive(Debug, thiserror::Error)]
+pub enum WireSketchError {
+    /// Payload shorter than the fixed header (12 bytes).
+    #[error("wire payload too short: got {got} bytes, header needs {needed}")]
+    TooShort {
+        /// Bytes received.
+        got: usize,
+        /// Minimum bytes required (12).
+        needed: usize,
+    },
+    /// Payload larger than [`WIRE_SKETCH_MAX_BYTES`].
+    #[error("wire payload exceeds max ({got} > {max})")]
+    TooLarge {
+        /// Bytes received.
+        got: usize,
+        /// Maximum bytes accepted.
+        max: usize,
+    },
+    /// Magic bytes do not match [`WIRE_SKETCH_MAGIC`].
+    #[error("wire magic mismatch: got 0x{got:08X}, expected 0x{expected:08X}")]
+    MagicMismatch {
+        /// Magic value received.
+        got: u32,
+        /// Magic value expected.
+        expected: u32,
+    },
+    /// Format version is newer than the receiver knows how to parse.
+    #[error("wire format_version {got} > supported {max}")]
+    UnsupportedVersion {
+        /// Version received.
+        got: u16,
+        /// Highest version this build understands.
+        max: u16,
+    },
+    /// `embedding_dim` and the byte payload disagree on size.
+    #[error("payload byte count mismatch: header dim={dim} → expected {expected_bytes}, got {got_bytes}")]
+    PayloadSizeMismatch {
+        /// Embedding dimension in the header.
+        dim: u16,
+        /// Bytes the header implies.
+        expected_bytes: usize,
+        /// Bytes actually present.
+        got_bytes: usize,
+    },
+}
+
+/// Serialize / deserialize a `Sketch` plus its novelty score for
+/// transmission over any channel — cluster↔cluster mesh, sensor→Pi UDP,
+/// gateway→cloud QUIC, etc.
+///
+/// # Wire layout (little-endian, packed)
+///
+/// | Offset | Field              | Width | Notes                                      |
+/// |--------|--------------------|-------|--------------------------------------------|
+/// | 0      | `magic`            | u32   | [`WIRE_SKETCH_MAGIC`]                      |
+/// | 4      | `format_version`   | u16   | [`WIRE_SKETCH_FORMAT_VERSION`]             |
+/// | 6      | `sketch_version`   | u16   | embedding-model schema version             |
+/// | 8      | `embedding_dim`    | u16   | source-embedding dimensions                |
+/// | 10     | `novelty_q15`      | u16   | novelty in `[0,1]` × 32_767 (saturated)    |
+/// | 12     | `bits[]`           | var   | `(embedding_dim + 7) / 8` bytes            |
+///
+/// Header is exactly **12 bytes**; payload is `ceil(embedding_dim/8)`
+/// bytes. Total for a 128-d AETHER sketch is 12 + 16 = **28 bytes**.
+///
+/// # Why the receiver is paranoid
+///
+/// All deserialization paths validate magic, format_version,
+/// embedding_dim → payload-bytes consistency, and total size before
+/// touching `BinaryQuantized`. A malformed UDP packet from a
+/// non-RuView sender will produce a typed `WireSketchError`, never a
+/// panic. Caps via [`WIRE_SKETCH_MAX_BYTES`] guard against memory-
+/// exhaustion attacks.
+pub struct WireSketch;
+
+impl WireSketch {
+    /// Header size (magic + format_version + sketch_version + dim + novelty).
+    pub const HEADER_BYTES: usize = 12;
+
+    /// Encode a sketch + novelty score for transmission. `novelty` is
+    /// clamped to `[0.0, 1.0]` and quantized to a `u16` (q15 fixed-
+    /// point) so the wire payload is fixed-size. Encoding never
+    /// allocates more than `Self::HEADER_BYTES + sketch.packed_bytes().len()`.
+    pub fn serialize(sketch: &Sketch, novelty: f32) -> Vec<u8> {
+        let bits = sketch.packed_bytes();
+        let total = Self::HEADER_BYTES + bits.len();
+        let mut out = Vec::with_capacity(total);
+        out.extend_from_slice(&WIRE_SKETCH_MAGIC.to_le_bytes());
+        out.extend_from_slice(&WIRE_SKETCH_FORMAT_VERSION.to_le_bytes());
+        out.extend_from_slice(&sketch.sketch_version.to_le_bytes());
+        out.extend_from_slice(&sketch.embedding_dim.to_le_bytes());
+        let nov_q15: u16 = (novelty.clamp(0.0, 1.0) * 32_767.0).round() as u16;
+        out.extend_from_slice(&nov_q15.to_le_bytes());
+        out.extend_from_slice(bits);
+        out
+    }
+
+    /// Decode a sketch + novelty score from an untrusted byte buffer.
+    /// Returns the parsed `(Sketch, novelty)` tuple, or a typed error.
+    pub fn deserialize(buf: &[u8]) -> Result<(Sketch, f32), WireSketchError> {
+        // Length floor: must contain at least the header.
+        if buf.len() < Self::HEADER_BYTES {
+            return Err(WireSketchError::TooShort {
+                got: buf.len(),
+                needed: Self::HEADER_BYTES,
+            });
+        }
+        // Length ceiling: defend against memory-exhaustion attacks via
+        // claimed-but-impossible large dims.
+        if buf.len() > WIRE_SKETCH_MAX_BYTES {
+            return Err(WireSketchError::TooLarge {
+                got: buf.len(),
+                max: WIRE_SKETCH_MAX_BYTES,
+            });
+        }
+
+        let magic = u32::from_le_bytes(buf[0..4].try_into().expect("4-byte slice"));
+        if magic != WIRE_SKETCH_MAGIC {
+            return Err(WireSketchError::MagicMismatch {
+                got: magic,
+                expected: WIRE_SKETCH_MAGIC,
+            });
+        }
+
+        let format_version = u16::from_le_bytes(buf[4..6].try_into().expect("2-byte slice"));
+        if format_version > WIRE_SKETCH_FORMAT_VERSION {
+            return Err(WireSketchError::UnsupportedVersion {
+                got: format_version,
+                max: WIRE_SKETCH_FORMAT_VERSION,
+            });
+        }
+
+        let sketch_version = u16::from_le_bytes(buf[6..8].try_into().expect("2-byte slice"));
+        let embedding_dim = u16::from_le_bytes(buf[8..10].try_into().expect("2-byte slice"));
+        let nov_q15 = u16::from_le_bytes(buf[10..12].try_into().expect("2-byte slice"));
+
+        let expected_bits = ((embedding_dim as usize) + 7) / 8;
+        let got_bits = buf.len() - Self::HEADER_BYTES;
+        if expected_bits != got_bits {
+            return Err(WireSketchError::PayloadSizeMismatch {
+                dim: embedding_dim,
+                expected_bytes: expected_bits,
+                got_bytes: got_bits,
+            });
+        }
+
+        let bits = buf[Self::HEADER_BYTES..].to_vec();
+        let sketch = Sketch {
+            inner: BinaryQuantized {
+                bits,
+                dimensions: embedding_dim as usize,
+            },
+            embedding_dim,
+            sketch_version,
+        };
+        let novelty = (nov_q15 as f32) / 32_767.0;
+        Ok((sketch, novelty))
+    }
 }
 
 /// A bank of sketches with stable IDs, queried for top-K nearest neighbours
@@ -552,6 +743,87 @@ mod tests {
         // on `embedding_dim()`.
         let s = Sketch::from_embedding(&too_long, 1);
         assert_eq!(s.embedding_dim(), u16::MAX);
+    }
+
+    // ─── ADR-084 Pass 4 wire-format tests ────────────────────────────────────
+
+    #[test]
+    fn wire_serialize_round_trip() {
+        let v = vec![0.5_f32, -0.5, 0.5, -0.5, 0.5, -0.5, 0.5, -0.5];
+        let sketch = Sketch::from_embedding(&v, 7);
+        let bytes = WireSketch::serialize(&sketch, 0.42);
+
+        // Header (12) + 1 byte (8 dims / 8) = 13 bytes total.
+        assert_eq!(bytes.len(), WireSketch::HEADER_BYTES + 1);
+
+        let (decoded, novelty) = WireSketch::deserialize(&bytes).expect("round-trip");
+        assert_eq!(decoded.embedding_dim(), 8);
+        assert_eq!(decoded.sketch_version(), 7);
+        assert_eq!(decoded.distance_unchecked(&sketch), 0);
+        // q15 quantization round-trips with bounded error.
+        assert!((novelty - 0.42).abs() < 1.0 / 32_767.0 * 2.0);
+    }
+
+    #[test]
+    fn wire_rejects_short_buffer() {
+        let err = WireSketch::deserialize(&[0u8; 5]).unwrap_err();
+        match err {
+            WireSketchError::TooShort { got: 5, needed } => {
+                assert_eq!(needed, WireSketch::HEADER_BYTES);
+            }
+            _ => panic!("expected TooShort, got {err:?}"),
+        }
+    }
+
+    #[test]
+    fn wire_rejects_oversized_buffer() {
+        let big = vec![0u8; WIRE_SKETCH_MAX_BYTES + 1];
+        let err = WireSketch::deserialize(&big).unwrap_err();
+        assert!(matches!(err, WireSketchError::TooLarge { .. }));
+    }
+
+    #[test]
+    fn wire_rejects_bad_magic() {
+        let mut bytes = WireSketch::serialize(&Sketch::from_embedding(&[0.5; 16], 1), 0.0);
+        bytes[0..4].copy_from_slice(&0xDEAD_BEEF_u32.to_le_bytes());
+        let err = WireSketch::deserialize(&bytes).unwrap_err();
+        assert!(matches!(err, WireSketchError::MagicMismatch { .. }));
+    }
+
+    #[test]
+    fn wire_rejects_unsupported_format_version() {
+        let mut bytes = WireSketch::serialize(&Sketch::from_embedding(&[0.5; 16], 1), 0.0);
+        // Bump format_version to 99 — beyond what this build supports.
+        bytes[4..6].copy_from_slice(&99_u16.to_le_bytes());
+        let err = WireSketch::deserialize(&bytes).unwrap_err();
+        assert!(matches!(err, WireSketchError::UnsupportedVersion { got: 99, .. }));
+    }
+
+    #[test]
+    fn wire_rejects_payload_size_mismatch() {
+        // Build a valid 16-d sketch (2 bytes), then claim dim=24 in the
+        // header (would need 3 bytes). Payload-size check must fire.
+        let mut bytes = WireSketch::serialize(&Sketch::from_embedding(&[0.5; 16], 1), 0.0);
+        bytes[8..10].copy_from_slice(&24_u16.to_le_bytes());
+        let err = WireSketch::deserialize(&bytes).unwrap_err();
+        match err {
+            WireSketchError::PayloadSizeMismatch {
+                dim: 24,
+                expected_bytes: 3,
+                got_bytes: 2,
+            } => {}
+            _ => panic!("expected PayloadSizeMismatch, got {err:?}"),
+        }
+    }
+
+    #[test]
+    fn wire_envelope_size_for_aether_128d() {
+        // Documented size sanity: a 128-d AETHER sketch should fit in
+        // 12-byte header + 16-byte payload = 28 bytes total.
+        let v: Vec<f32> = (0..128).map(|i| (i as f32).sin()).collect();
+        let sketch = Sketch::from_embedding(&v, 1);
+        let bytes = WireSketch::serialize(&sketch, 0.5);
+        assert_eq!(bytes.len(), 28, "AETHER 128-d must wire to exactly 28 bytes");
     }
 
     #[test]

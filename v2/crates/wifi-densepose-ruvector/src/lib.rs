@@ -33,4 +33,7 @@ pub mod signal;
 pub mod sketch;
 pub mod viewpoint;
 
-pub use sketch::{Sketch, SketchBank, SketchError};
+pub use sketch::{
+    Sketch, SketchBank, SketchError, WireSketch, WireSketchError,
+    WIRE_SKETCH_FORMAT_VERSION, WIRE_SKETCH_MAGIC, WIRE_SKETCH_MAX_BYTES,
+};
