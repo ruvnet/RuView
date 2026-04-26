@@ -1,5 +1,17 @@
 //! NV-diamond magnetometer pipeline simulator — deterministic, no hidden mocks.
 //!
+//! # WebAssembly compatibility
+//!
+//! `nvsim` is **WASM-ready by construction**: zero `std::time`, `std::fs`,
+//! `std::env`, `std::process`, `std::thread`, `Mutex`, or `RwLock` in the
+//! crate's source. The shot-noise PRNG seeds from a caller-supplied `u64`
+//! (no OS entropy), serialisation is via `serde_json`, hashing is via
+//! `sha2` — all dependencies work on `wasm32-unknown-unknown`. To ship
+//! `nvsim` to a browser or Cloudflare Worker, build with
+//! `cargo build -p nvsim --target wasm32-unknown-unknown --no-default-features`
+//! (the `wasm32` target needs `rustup target add wasm32-unknown-unknown`
+//! once on the developer machine).
+//!
 //! `nvsim` is a standalone leaf crate. It models a forward-only magnetic
 //! sensing path — scene → source synthesis → material attenuation → NV
 //! ensemble → digitiser → binary frames + SHA-256 witness — using explicit
@@ -30,10 +42,13 @@
 pub mod digitiser;
 pub mod frame;
 pub mod pipeline;
+pub mod proof;
 pub mod propagation;
 pub mod scene;
 pub mod sensor;
 pub mod source;
+
+pub use proof::Proof;
 
 pub use digitiser::{
     adc_dequantise, adc_quantise, DigitiserConfig, Lockin, LowPass, ADC_BITS, ADC_FULL_SCALE_T,

@@ -206,6 +206,26 @@ If your use case needs any of the above, `nvsim` is the wrong starting
 point. If your use case is *forward simulation of a deterministic NV
 magnetometer pipeline you can run in CI*, it is the right one.
 
+## WebAssembly
+
+`nvsim` is **WASM-ready by construction**. Zero `std::time` / `std::fs` /
+`std::env` / `std::process` / `std::thread` / `Mutex` / `RwLock` calls in
+the crate's source — every dependency in the tree (`serde`, `thiserror`,
+`tracing`, `rand`, `rand_chacha`, `sha2`, `ndarray`) compiles cleanly to
+`wasm32-unknown-unknown`. The shot-noise PRNG is seeded from a
+caller-supplied `u64` so no OS-entropy bridge is needed.
+
+```bash
+rustup target add wasm32-unknown-unknown   # one-time, on the dev machine
+cargo build -p nvsim --target wasm32-unknown-unknown --no-default-features
+```
+
+Why it matters: cluster-Pi inference, browser-side sensor demos, and
+Cloudflare-Worker / Deno-deploy edge workloads can all run the
+deterministic pipeline. A 28-byte `MagFrame` shape and a 32-byte SHA-256
+witness make it straightforward to ship simulator output across any
+HTTP / WebSocket / IPC channel.
+
 ## License
 
 MIT OR Apache-2.0 (matches workspace default).

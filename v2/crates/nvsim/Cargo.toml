@@ -35,3 +35,8 @@ sha2 = { workspace = true }
 
 [dev-dependencies]
 approx = "0.5"
+criterion = { workspace = true }
+
+[[bench]]
+name = "pipeline_throughput"
+harness = false
