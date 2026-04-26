@@ -63,7 +63,7 @@ pub use multistatic::FusedSensingFrame;
 pub use phase_align::{PhaseAligner, PhaseAlignError};
 pub use pose_tracker::{
     CompressedPoseHistory, KeypointState, PoseTrack, SkeletonConstraints,
-    TemporalKeypointAttention, TrackLifecycleState,
+    TemporalKeypointAttention, TrackLifecycleState, TrackerConfig,
 };
 
 /// Number of keypoints in a full-body pose skeleton (COCO-17).

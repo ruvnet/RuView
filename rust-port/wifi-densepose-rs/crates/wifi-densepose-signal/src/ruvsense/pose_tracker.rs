@@ -492,6 +492,22 @@ impl PoseTracker {
             .collect()
     }
 
+    /// Tracks the UI is meant to render: Tentative + Active.
+    ///
+    /// Excludes `Lost` (re-ID candidates that haven't been observed for
+    /// `loss_misses` ticks) and `Terminated`. Use this at any boundary that
+    /// emits "currently visible" pose state — for example, the WebSocket
+    /// stream sent to the live UI. See ADR-082.
+    pub fn confirmed_tracks(&self) -> Vec<&PoseTrack> {
+        self.tracks
+            .iter()
+            .filter(|t| matches!(
+                t.lifecycle,
+                TrackLifecycleState::Tentative | TrackLifecycleState::Active
+            ))
+            .collect()
+    }
+
     /// Return all tracks including terminated ones.
     pub fn all_tracks(&self) -> &[PoseTrack] {
         &self.tracks

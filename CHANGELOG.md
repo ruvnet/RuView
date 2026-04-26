@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Ghost skeletons in live UI with multi-node ESP32 setups** (#420, ADR-082) —
+  `tracker_bridge::tracker_to_person_detections` documented itself as filtering
+  to `is_alive()` tracks but in fact passed every non-Terminated track to the
+  WebSocket stream. `Lost` tracks — kept inside `reid_window` for
+  re-identification but not currently observed — were rendering as phantom
+  skeletons, accumulating to 22-24 with 3 nodes × 10 Hz CSI while
+  `estimated_persons` correctly reported 1. Added
+  `PoseTracker::confirmed_tracks()` (Tentative + Active only) and rewired the
+  bridge to use it. Lost tracks remain in the tracker for re-ID; they just
+  no longer ship to the UI. Regression test:
+  `test_lost_tracks_excluded_from_bridge_output`.
 - **Rust workspace build with `--no-default-features` on Windows** (#366, #415) —
   `wifi-densepose-mat`, `wifi-densepose-sensing-server`, and `wifi-densepose-train`
   all depended on `wifi-densepose-signal` with default features enabled, which

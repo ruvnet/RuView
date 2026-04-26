@@ -92,12 +92,15 @@ fn detections_to_tracker_keypoints(persons: &[PersonDetection]) -> Vec<[[f32; 3]
         .collect()
 }
 
-/// Convert active PoseTracker tracks back into server-side PersonDetection values.
+/// Convert confirmed PoseTracker tracks back into server-side PersonDetection values.
 ///
-/// Only tracks whose lifecycle `is_alive()` are included.
+/// Returns only tracks the UI is meant to render right now (Tentative + Active).
+/// `Lost` tracks — kept around inside `reid_window` for re-identification but
+/// not currently observed — are excluded so they don't ship to the WebSocket
+/// stream as ghost skeletons. See ADR-082 and #420.
 pub fn tracker_to_person_detections(tracker: &PoseTracker) -> Vec<PersonDetection> {
     tracker
-        .active_tracks()
+        .confirmed_tracks()
         .into_iter()
         .map(|track| {
             let id = track.id.0 as u32;
@@ -405,5 +408,75 @@ mod tests {
         // All three updates should return the same track ID
         assert_eq!(id1, id2, "Track ID should be stable across updates");
         assert_eq!(id2, id3, "Track ID should be stable across updates");
+    }
+
+    /// Regression test for #420 (ADR-082): tracks that have transitioned to
+    /// `Lost` must NOT appear in `tracker_update`'s returned PersonDetection
+    /// vector, even though they remain in the tracker for re-identification.
+    #[test]
+    fn test_lost_tracks_excluded_from_bridge_output() {
+        use wifi_densepose_signal::ruvsense::{TrackerConfig, TrackLifecycleState};
+
+        // Tight config so the test doesn't have to spin for hundreds of ticks.
+        let cfg = TrackerConfig {
+            loss_misses: 3,
+            reid_window: 100, // intentionally large — we want Lost, not Terminated
+            ..TrackerConfig::default()
+        };
+        let mut tracker = PoseTracker::with_config(cfg);
+        let mut last_instant: Option<Instant> = None;
+
+        let person = make_person(
+            0,
+            vec![
+                make_keypoint("nose", 1.0, 2.0, 0.0),
+                make_keypoint("left_shoulder", 0.8, 2.5, 0.0),
+                make_keypoint("right_shoulder", 1.2, 2.5, 0.0),
+                make_keypoint("left_hip", 0.9, 3.5, 0.0),
+                make_keypoint("right_hip", 1.1, 3.5, 0.0),
+            ],
+        );
+
+        // Drive the track to Active (≥2 consecutive hits).
+        let r1 = tracker_update(&mut tracker, &mut last_instant, vec![person.clone()]);
+        let r2 = tracker_update(&mut tracker, &mut last_instant, vec![person.clone()]);
+        assert_eq!(r1.len(), 1);
+        assert_eq!(r2.len(), 1);
+
+        // Submit empty detections enough times to push the track into Lost.
+        // Each empty call increments time_since_update via predict_all().
+        for _ in 0..6 {
+            let _ = tracker_update(&mut tracker, &mut last_instant, vec![]);
+        }
+
+        // Pre-condition: a track exists internally and is in Lost state.
+        let has_lost = tracker
+            .all_tracks()
+            .iter()
+            .any(|t| t.lifecycle == TrackLifecycleState::Lost);
+        assert!(
+            has_lost,
+            "Test setup invariant violated: expected the track to be Lost \
+             after {} empty updates with loss_misses=3",
+            6
+        );
+
+        // The fix: `tracker_update` must NOT return any phantom detections
+        // for the Lost track when there are no current detections.
+        let after_lost = tracker_update(&mut tracker, &mut last_instant, vec![]);
+        assert_eq!(
+            after_lost.len(),
+            0,
+            "Lost tracks must not appear in bridge output (ADR-082, #420). \
+             Got {} phantom detection(s).",
+            after_lost.len()
+        );
+
+        // Sanity: the Lost track is still tracked internally (for re-ID), it
+        // just shouldn't ship to the UI.
+        assert!(
+            tracker.all_tracks().iter().any(|t| t.lifecycle == TrackLifecycleState::Lost),
+            "Lost track must remain in tracker for re-identification window"
+        );
     }
 }
