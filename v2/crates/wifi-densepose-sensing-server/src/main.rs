@@ -485,6 +485,61 @@ struct PerNodeFeatureInfo {
     novelty_score: Option<f32>,
 }
 
+/// Build a per-node feature snapshot for the WebSocket envelope.
+///
+/// ADR-084 Pass 3.6 — exposes `last_novelty_score` from each
+/// `NodeState` to the WebSocket consumer. Returns `None` when the
+/// node map is empty (no live ESP32 frames have been ingested yet),
+/// so the existing `node_features: None` semantics on cold-start are
+/// preserved.
+///
+/// Stale flag uses 5-second threshold matching `ESP32_OFFLINE_TIMEOUT`.
+fn build_node_features(
+    node_states: &std::collections::HashMap<u8, NodeState>,
+    now: std::time::Instant,
+) -> Option<Vec<PerNodeFeatureInfo>> {
+    if node_states.is_empty() {
+        return None;
+    }
+    let entries: Vec<PerNodeFeatureInfo> = node_states
+        .iter()
+        .map(|(&node_id, ns)| {
+            let last_seen_ms = ns
+                .last_frame_time
+                .map(|t| now.saturating_duration_since(t).as_millis() as u64)
+                .unwrap_or(u64::MAX);
+            let stale = ns
+                .last_frame_time
+                .map(|t| now.saturating_duration_since(t) > ESP32_OFFLINE_TIMEOUT)
+                .unwrap_or(true);
+            let features = ns.latest_features.clone().unwrap_or(FeatureInfo {
+                mean_rssi: 0.0,
+                variance: 0.0,
+                motion_band_power: 0.0,
+                breathing_band_power: 0.0,
+                dominant_freq_hz: 0.0,
+                change_points: 0,
+                spectral_power: 0.0,
+            });
+            PerNodeFeatureInfo {
+                node_id,
+                features,
+                classification: ClassificationInfo {
+                    motion_level: ns.current_motion_level.clone(),
+                    presence: !matches!(ns.current_motion_level.as_str(), "absent"),
+                    confidence: ns.smoothed_person_score.clamp(0.0, 1.0),
+                },
+                rssi_dbm: ns.rssi_history.back().copied().unwrap_or(0.0),
+                last_seen_ms,
+                frame_rate_hz: 0.0, // Computed elsewhere; not yet plumbed here.
+                stale,
+                novelty_score: ns.last_novelty_score,
+            }
+        })
+        .collect();
+    Some(entries)
+}
+
 /// Shared application state
 struct AppStateInner {
     latest_update: Option<SensingUpdate>,
@@ -3756,7 +3811,12 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         model_status: None,
                         persons: None,
                         estimated_persons: if total_persons > 0 { Some(total_persons) } else { None },
-                        node_features: None,
+                        // ADR-084 Pass 3.6: surface per-node novelty_score
+                        // (and the rest of the per-node feature snapshot)
+                        // on the WebSocket envelope so cluster-Pi consumers
+                        // can implement model-wake gating without round-
+                        // tripping back to the server.
+                        node_features: build_node_features(&s.node_states, now),
                     };
 
                     let raw_persons = derive_pose_from_sensing(&update);
@@ -3975,7 +4035,12 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         model_status: None,
                         persons: None,
                         estimated_persons: if total_persons > 0 { Some(total_persons) } else { None },
-                        node_features: None,
+                        // ADR-084 Pass 3.6: surface per-node novelty_score
+                        // (and the rest of the per-node feature snapshot)
+                        // on the WebSocket envelope so cluster-Pi consumers
+                        // can implement model-wake gating without round-
+                        // tripping back to the server.
+                        node_features: build_node_features(&s.node_states, now),
                     };
 
                     let raw_persons = derive_pose_from_sensing(&update);
