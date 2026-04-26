@@ -79,13 +79,13 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          rust-port/wifi-densepose-rs/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('rust-port/wifi-densepose-rs/Cargo.lock') }}
+          v2/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('v2/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-cargo-
 
     - name: Run Rust tests
-      working-directory: rust-port/wifi-densepose-rs
+      working-directory: v2
       run: cargo test --workspace --no-default-features
 
   # Unit and Integration Tests

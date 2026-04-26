@@ -14,7 +14,7 @@ This document defines the system using [Domain-Driven Design](https://martinfowl
 | 4 | [Training Pipeline](#4-training-pipeline-context) | Background training runs, progress streaming, contrastive pretraining | [ADR-043](../adr/ADR-043-sensing-server-ui-api-completion.md) | `sensing-server/src/training_api.rs` |
 | 5 | [Visualization](#5-visualization-context) | WebSocket streaming to web UI, Gaussian splat rendering, data transparency | [ADR-019](../adr/ADR-019-sensing-only-ui-mode.md), [ADR-035](../adr/ADR-035-live-sensing-ui-accuracy.md) | `ui/` |
 
-All code paths shown are relative to `rust-port/wifi-densepose-rs/crates/wifi-densepose-` unless otherwise noted.
+All code paths shown are relative to `v2/crates/wifi-densepose-` unless otherwise noted.
 
 ---
 

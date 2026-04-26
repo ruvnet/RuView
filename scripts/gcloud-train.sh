@@ -263,7 +263,7 @@ export LIBTORCH=\$(python3 -c "import torch; print(torch.__path__[0] + '/lib')")
 export LD_LIBRARY_PATH="\${LIBTORCH}:\${LD_LIBRARY_PATH:-}"
 
 # Build the training binary with tch-backend
-cd ~/wifi-densepose/rust-port/wifi-densepose-rs
+cd ~/wifi-densepose/v2
 echo "Building with LIBTORCH=\$LIBTORCH ..."
 cargo build --release --features tch-backend --bin train 2>&1 | tail -5
 
@@ -325,7 +325,7 @@ set -euo pipefail
 source \$HOME/.cargo/env
 export LIBTORCH=\$(python3 -c \"import torch; print(torch.__path__[0] + '/lib')\")
 export LD_LIBRARY_PATH=\"\${LIBTORCH}:\${LD_LIBRARY_PATH:-}\"
-cd ~/wifi-densepose/rust-port/wifi-densepose-rs
+cd ~/wifi-densepose/v2
 
 # Set auto-shutdown timer (safety net)
 sudo shutdown -P +$((MAX_HOURS * 60)) &
@@ -408,7 +408,7 @@ mkdir -p "$LOCAL_RESULTS"
 
 # Package results on the VM
 gcloud compute ssh "$INSTANCE_NAME" --zone="$ZONE" --command="
-cd ~/wifi-densepose/rust-port/wifi-densepose-rs
+cd ~/wifi-densepose/v2
 tar czf ~/training-artifacts.tar.gz \
     checkpoints/ \
     logs/ \

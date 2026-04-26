@@ -481,7 +481,7 @@ std::fs::write("my-gesture-v2.rvf", &rvf_mut)?;
 From the crate directory:
 
 ```bash
-cd rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge
+cd v2/crates/wifi-densepose-wasm-edge
 cargo test --features std -- gesture coherence adversarial intrusion occupancy vital_trend rvf
 ```
 

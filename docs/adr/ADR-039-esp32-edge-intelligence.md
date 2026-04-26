@@ -128,7 +128,7 @@ All configurable via `provision.py --edge-tier 2 --pres-thresh 0.05 ...`
 - `firmware/esp32-csi-node/main/edge_processing.h` — Types and API
 - `firmware/esp32-csi-node/main/ota_update.c/h` — HTTP OTA endpoint
 - `firmware/esp32-csi-node/main/power_mgmt.c/h` — Power management
-- `rust-port/.../wifi-densepose-sensing-server/src/main.rs` — Vitals parser + REST endpoint
+- `v2/.../wifi-densepose-sensing-server/src/main.rs` — Vitals parser + REST endpoint
 - `scripts/provision.py` — Edge config CLI arguments
 - `.github/workflows/firmware-ci.yml` — CI build + size gate (updated to 950 KB for Tier 3)
 

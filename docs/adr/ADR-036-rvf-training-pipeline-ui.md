@@ -198,16 +198,16 @@ When a `.rvf` model is loaded:
 ### New Files
 - `ui/components/ModelPanel.js` — Model library, inspector, load/unload controls
 - `ui/components/TrainingPanel.js` — Recording controls, training progress, metric charts
-- `rust-port/.../sensing-server/src/recording.rs` — CSI recording API handlers
-- `rust-port/.../sensing-server/src/training_api.rs` — Training API handlers + WS progress stream
-- `rust-port/.../sensing-server/src/model_manager.rs` — Model loading, hot-swap, 32LoRA activation
+- `v2/.../sensing-server/src/recording.rs` — CSI recording API handlers
+- `v2/.../sensing-server/src/training_api.rs` — Training API handlers + WS progress stream
+- `v2/.../sensing-server/src/model_manager.rs` — Model loading, hot-swap, 32LoRA activation
 - `data/models/` — Default model storage directory
 
 ### Modified Files
-- `rust-port/.../sensing-server/src/main.rs` — Wire recording, training, and model APIs
-- `rust-port/.../train/src/trainer.rs` — Add WebSocket progress callback, LoRA training mode
-- `rust-port/.../train/src/dataset.rs` — MM-Fi and Wi-Pose dataset loaders
-- `rust-port/.../nn/src/onnx.rs` — LoRA weight injection, INT8 quantization support
+- `v2/.../sensing-server/src/main.rs` — Wire recording, training, and model APIs
+- `v2/.../train/src/trainer.rs` — Add WebSocket progress callback, LoRA training mode
+- `v2/.../train/src/dataset.rs` — MM-Fi and Wi-Pose dataset loaders
+- `v2/.../nn/src/onnx.rs` — LoRA weight injection, INT8 quantization support
 - `ui/components/LiveDemoTab.js` — Model selector, LoRA dropdown, A/B spsplit view
 - `ui/components/SettingsPanel.js` — Model and training configuration sections
 - `ui/components/PoseDetectionCanvas.js` — Pose trail rendering, confidence heatmap overlay

@@ -618,7 +618,7 @@ for _ in 0..100 {
 All medical modules include comprehensive unit tests covering initialization, normal operation, clinical scenario detection, edge cases, and cooldown behavior.
 
 ```bash
-cd rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge
+cd v2/crates/wifi-densepose-wasm-edge
 cargo test --features std -- med_
 ```
 

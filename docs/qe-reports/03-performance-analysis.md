@@ -40,7 +40,7 @@ The WiFi-DensePose codebase is a real-time sensing system targeting 20 Hz output
 
 ### FINDING PERF-R01: Tomography Weight Matrix -- O(L * nx * ny * nz) per Link [CRITICAL]
 
-**File**: `rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/tomography.rs`  
+**File**: `v2/crates/wifi-densepose-signal/src/ruvsense/tomography.rs`  
 **Lines**: 345-383 (`compute_link_weights`)
 
 The `compute_link_weights` function iterates over every voxel in the grid for every link to compute Fresnel-zone intersection weights:
@@ -76,7 +76,7 @@ for iz in 0..config.nz {
 
 ### FINDING PERF-R02: Multistatic Fusion -- sin()/cos() per Subcarrier per Node [HIGH]
 
-**File**: `rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/multistatic.rs`  
+**File**: `v2/crates/wifi-densepose-signal/src/ruvsense/multistatic.rs`  
 **Lines**: 287-298 (`attention_weighted_fusion`)
 
 ```rust
@@ -105,7 +105,7 @@ for (n, (&amp, &ph)) in amplitudes.iter().zip(phases.iter()).enumerate() {
 
 ### FINDING PERF-R03: Pose Tracker find_track -- Linear Search [MEDIUM]
 
-**File**: `rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/pose_tracker.rs`  
+**File**: `v2/crates/wifi-densepose-signal/src/ruvsense/pose_tracker.rs`  
 **Lines**: 546-553
 
 ```rust
@@ -124,7 +124,7 @@ pub fn find_track(&self, id: TrackId) -> Option<&PoseTrack> {
 
 ### FINDING PERF-R04: Multistatic FusedSensingFrame -- Deep Clone of node_frames [HIGH]
 
-**File**: `rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/multistatic.rs`  
+**File**: `v2/crates/wifi-densepose-signal/src/ruvsense/multistatic.rs`  
 **Line**: 222
 
 ```rust
@@ -150,7 +150,7 @@ Ok(FusedSensingFrame {
 
 ### FINDING PERF-R05: Coherence Score -- Efficient but exp() in Hot Loop [LOW]
 
-**File**: `rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/coherence.rs`  
+**File**: `v2/crates/wifi-densepose-signal/src/ruvsense/coherence.rs`  
 **Lines**: 224-252 (`coherence_score`)
 
 ```rust
@@ -174,7 +174,7 @@ for i in 0..n {
 
 ### FINDING PERF-R06: Gesture DTW -- O(N * M) per Template [MEDIUM]
 
-**File**: `rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/gesture.rs`  
+**File**: `v2/crates/wifi-densepose-signal/src/ruvsense/gesture.rs`  
 **Lines**: 288-328 (`dtw_distance`)
 
 The DTW implementation uses the Sakoe-Chiba band constraint (good), but allocates two full Vec<f64> per call:
@@ -199,7 +199,7 @@ With T templates and band_width=5, complexity is O(T * N * band_width * feature_
 
 ### FINDING PERF-R07: Field Model Covariance -- O(S^2) Memory [MEDIUM]
 
-**File**: `rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/field_model.rs`  
+**File**: `v2/crates/wifi-densepose-signal/src/ruvsense/field_model.rs`  
 **Line**: 330 (`covariance_sum: Option<Array2<f64>>`)
 
 The full covariance matrix for SVD is S x S where S = number of subcarriers. With S=56, this is 56 * 56 * 8 = 25 KB -- reasonable. But the diagonal_fallback (lines 338-383) creates unnecessary intermediate allocations.
@@ -212,7 +212,7 @@ The full covariance matrix for SVD is S x S where S = number of subcarriers. Wit
 
 ### FINDING PERF-R08: Multiband Duplicate Frequency Check -- O(N^2) [LOW]
 
-**File**: `rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/multiband.rs`  
+**File**: `v2/crates/wifi-densepose-signal/src/ruvsense/multiband.rs`  
 **Lines**: 126-135
 
 ```rust
@@ -235,7 +235,7 @@ for i in 0..self.frequencies.len() {
 
 ### FINDING PERF-R09: Adversarial Detector -- Potential O(L^2) Consistency Check [MEDIUM]
 
-**File**: `rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/adversarial.rs`  
+**File**: `v2/crates/wifi-densepose-signal/src/ruvsense/adversarial.rs`  
 **Lines**: 147+
 
 The multi-link consistency check compares energy ratios across all links. With L=12 links, the pairwise comparison (if implemented) would be O(L^2) = 144. Combined with the four independent checks (consistency, field model, temporal, energy), this runs on every frame.
@@ -259,7 +259,7 @@ The multi-link consistency check compares energy ratios across all links. With L
 
 ### FINDING PERF-NN01: Serial Batch Inference [CRITICAL]
 
-**File**: `rust-port/wifi-densepose-rs/crates/wifi-densepose-nn/src/inference.rs`  
+**File**: `v2/crates/wifi-densepose-nn/src/inference.rs`  
 **Lines**: 334-336
 
 ```rust
@@ -283,7 +283,7 @@ pub fn infer_batch(&self, inputs: &[Tensor]) -> NnResult<Vec<Tensor>> {
 
 ### FINDING PERF-NN02: Async Stats Update Spawns Tokio Task per Inference [HIGH]
 
-**File**: `rust-port/wifi-densepose-rs/crates/wifi-densepose-nn/src/inference.rs`  
+**File**: `v2/crates/wifi-densepose-nn/src/inference.rs`  
 **Lines**: 311-315
 
 ```rust
@@ -307,7 +307,7 @@ tokio::spawn(async move {
 
 ### FINDING PERF-NN03: Tensor Clone in run_single [MEDIUM]
 
-**File**: `rust-port/wifi-densepose-rs/crates/wifi-densepose-nn/src/inference.rs`  
+**File**: `v2/crates/wifi-densepose-nn/src/inference.rs`  
 **Lines**: 122
 
 ```rust
@@ -326,7 +326,7 @@ fn run_single(&self, input: &Tensor) -> NnResult<Tensor> {
 
 ### FINDING PERF-NN04: WiFiDensePosePipeline -- Two Sequential Inferences [MEDIUM]
 
-**File**: `rust-port/wifi-densepose-rs/crates/wifi-densepose-nn/src/inference.rs`  
+**File**: `v2/crates/wifi-densepose-nn/src/inference.rs`  
 **Lines**: 389-413
 
 ```rust
@@ -634,7 +634,7 @@ uint32_t next = (s_ring.head + 1) & (EDGE_RING_SLOTS - 1);
 
 ### FINDING PERF-XC01: Missing Parallelism in Multistatic Pipeline [HIGH]
 
-**File**: `rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/mod.rs`  
+**File**: `v2/crates/wifi-densepose-signal/src/ruvsense/mod.rs`  
 **Lines**: 183-232
 
 The `RuvSensePipeline` orchestrator processes stages sequentially. The multiband fusion and phase alignment stages for each node are independent and could run in parallel using Rayon:
@@ -756,26 +756,26 @@ The following patterns were checked and found to be well-implemented:
 ## Appendix A: File Paths Analyzed
 
 ### Rust Signal Processing
-- `/workspaces/ruview/rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/mod.rs`
-- `/workspaces/ruview/rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/tomography.rs`
-- `/workspaces/ruview/rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/multistatic.rs`
-- `/workspaces/ruview/rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/pose_tracker.rs`
-- `/workspaces/ruview/rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/field_model.rs`
-- `/workspaces/ruview/rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/gesture.rs`
-- `/workspaces/ruview/rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/coherence.rs`
-- `/workspaces/ruview/rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/coherence_gate.rs`
-- `/workspaces/ruview/rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/multiband.rs`
-- `/workspaces/ruview/rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/phase_align.rs`
-- `/workspaces/ruview/rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/adversarial.rs`
-- `/workspaces/ruview/rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/intention.rs`
-- `/workspaces/ruview/rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/longitudinal.rs`
-- `/workspaces/ruview/rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/cross_room.rs`
-- `/workspaces/ruview/rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/temporal_gesture.rs`
-- `/workspaces/ruview/rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/attractor_drift.rs`
+- `/workspaces/ruview/v2/crates/wifi-densepose-signal/src/ruvsense/mod.rs`
+- `/workspaces/ruview/v2/crates/wifi-densepose-signal/src/ruvsense/tomography.rs`
+- `/workspaces/ruview/v2/crates/wifi-densepose-signal/src/ruvsense/multistatic.rs`
+- `/workspaces/ruview/v2/crates/wifi-densepose-signal/src/ruvsense/pose_tracker.rs`
+- `/workspaces/ruview/v2/crates/wifi-densepose-signal/src/ruvsense/field_model.rs`
+- `/workspaces/ruview/v2/crates/wifi-densepose-signal/src/ruvsense/gesture.rs`
+- `/workspaces/ruview/v2/crates/wifi-densepose-signal/src/ruvsense/coherence.rs`
+- `/workspaces/ruview/v2/crates/wifi-densepose-signal/src/ruvsense/coherence_gate.rs`
+- `/workspaces/ruview/v2/crates/wifi-densepose-signal/src/ruvsense/multiband.rs`
+- `/workspaces/ruview/v2/crates/wifi-densepose-signal/src/ruvsense/phase_align.rs`
+- `/workspaces/ruview/v2/crates/wifi-densepose-signal/src/ruvsense/adversarial.rs`
+- `/workspaces/ruview/v2/crates/wifi-densepose-signal/src/ruvsense/intention.rs`
+- `/workspaces/ruview/v2/crates/wifi-densepose-signal/src/ruvsense/longitudinal.rs`
+- `/workspaces/ruview/v2/crates/wifi-densepose-signal/src/ruvsense/cross_room.rs`
+- `/workspaces/ruview/v2/crates/wifi-densepose-signal/src/ruvsense/temporal_gesture.rs`
+- `/workspaces/ruview/v2/crates/wifi-densepose-signal/src/ruvsense/attractor_drift.rs`
 
 ### Rust Neural Network
-- `/workspaces/ruview/rust-port/wifi-densepose-rs/crates/wifi-densepose-nn/src/inference.rs`
-- `/workspaces/ruview/rust-port/wifi-densepose-rs/crates/wifi-densepose-nn/src/tensor.rs`
+- `/workspaces/ruview/v2/crates/wifi-densepose-nn/src/inference.rs`
+- `/workspaces/ruview/v2/crates/wifi-densepose-nn/src/tensor.rs`
 
 ### Python Pipeline
 - `/workspaces/ruview/v1/src/core/csi_processor.py`

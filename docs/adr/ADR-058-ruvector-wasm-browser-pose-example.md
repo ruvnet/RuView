@@ -214,7 +214,7 @@ examples/wasm-browser-pose/
 set -e
 
 # Build wifi-densepose-wasm (CSI processing)
-wasm-pack build ../../rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm \
+wasm-pack build ../../v2/crates/wifi-densepose-wasm \
   --target web --out-dir "$(pwd)/pkg/wifi_densepose_wasm" --no-typescript
 
 # Build ruvector-cnn-wasm (CNN inference for both video and CSI)

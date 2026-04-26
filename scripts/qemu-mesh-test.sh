@@ -82,7 +82,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 FIRMWARE_DIR="$PROJECT_ROOT/firmware/esp32-csi-node"
 BUILD_DIR="$FIRMWARE_DIR/build"
-RUST_DIR="$PROJECT_ROOT/rust-port/wifi-densepose-rs"
+RUST_DIR="$PROJECT_ROOT/v2"
 PROVISION_SCRIPT="$FIRMWARE_DIR/provision.py"
 VALIDATE_SCRIPT="$SCRIPT_DIR/validate_mesh_test.py"
 

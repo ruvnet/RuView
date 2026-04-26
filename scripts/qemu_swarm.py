@@ -46,7 +46,7 @@ except ImportError:
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 FIRMWARE_DIR = PROJECT_ROOT / "firmware" / "esp32-csi-node"
-RUST_DIR = PROJECT_ROOT / "rust-port" / "wifi-densepose-rs"
+RUST_DIR = PROJECT_ROOT / "v2" / "wifi-densepose-rs"
 PROVISION_SCRIPT = FIRMWARE_DIR / "provision.py"
 PRESETS_DIR = SCRIPT_DIR / "swarm_presets"
 

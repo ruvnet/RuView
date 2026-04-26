@@ -337,7 +337,7 @@ Usage in rf_topology:
 ### 3.1 Module Location
 
 ```
-rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/
+v2/crates/wifi-densepose-signal/src/ruvsense/
   rf_topology.rs          <-- New module (primary)
   rf_topology/
     graph.rs              <-- RfGraph aggregate root
@@ -351,7 +351,7 @@ rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/
 Alternatively, rf_topology could be a standalone crate:
 
 ```
-rust-port/wifi-densepose-rs/crates/wifi-densepose-topology/
+v2/crates/wifi-densepose-topology/
   src/
     lib.rs
     graph.rs

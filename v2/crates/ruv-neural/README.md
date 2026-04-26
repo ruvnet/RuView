@@ -214,7 +214,7 @@ All crates are published on [crates.io](https://crates.io/search?q=ruv-neural):
 ### Build
 
 ```bash
-cd rust-port/wifi-densepose-rs/crates/ruv-neural
+cd v2/crates/ruv-neural
 cargo build --workspace
 cargo test --workspace
 ```

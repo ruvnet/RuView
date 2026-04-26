@@ -699,28 +699,28 @@ let dashboard = container.load_dashboard()?;
 
 | File | Purpose |
 |------|---------|
-| `rust-port/.../wifi-densepose-train/src/dataset_mmfi.rs` | MM-Fi dataset loader with subcarrier resampling |
-| `rust-port/.../wifi-densepose-train/src/dataset_wipose.rs` | Wi-Pose dataset loader |
-| `rust-port/.../wifi-densepose-train/src/graph_transformer.rs` | Graph transformer integration |
-| `rust-port/.../wifi-densepose-train/src/body_gnn.rs` | GNN body graph reasoning |
-| `rust-port/.../wifi-densepose-train/src/adaptation.rs` | SONA LoRA + EWC++ adaptation |
-| `rust-port/.../wifi-densepose-train/src/trainer.rs` | Training loop with multi-term loss |
+| `v2/.../wifi-densepose-train/src/dataset_mmfi.rs` | MM-Fi dataset loader with subcarrier resampling |
+| `v2/.../wifi-densepose-train/src/dataset_wipose.rs` | Wi-Pose dataset loader |
+| `v2/.../wifi-densepose-train/src/graph_transformer.rs` | Graph transformer integration |
+| `v2/.../wifi-densepose-train/src/body_gnn.rs` | GNN body graph reasoning |
+| `v2/.../wifi-densepose-train/src/adaptation.rs` | SONA LoRA + EWC++ adaptation |
+| `v2/.../wifi-densepose-train/src/trainer.rs` | Training loop with multi-term loss |
 | `scripts/generate_densepose_labels.py` | Teacher-student UV label generation |
 | `scripts/benchmark_inference.py` | Inference latency benchmarking |
-| `rust-port/.../wifi-densepose-train/src/rvf_builder.rs` | RVF container build pipeline |
-| `rust-port/.../wifi-densepose-train/src/bin/build_rvf.rs` | CLI binary for building `.rvf` containers |
-| `rust-port/.../wifi-densepose-train/src/bin/verify_rvf.rs` | CLI binary for verifying `.rvf` containers |
+| `v2/.../wifi-densepose-train/src/rvf_builder.rs` | RVF container build pipeline |
+| `v2/.../wifi-densepose-train/src/bin/build_rvf.rs` | CLI binary for building `.rvf` containers |
+| `v2/.../wifi-densepose-train/src/bin/verify_rvf.rs` | CLI binary for verifying `.rvf` containers |
 
 ### Modified Files
 
 | File | Change |
 |------|--------|
-| `rust-port/.../wifi-densepose-train/Cargo.toml` | Add ruvector-gnn, graph-transformer, sona, sparse-inference, math, rvf-types, rvf-wire, rvf-manifest, rvf-index, rvf-quant, rvf-crypto, rvf-runtime deps |
-| `rust-port/.../wifi-densepose-train/src/model.rs` | Integrate graph transformer + GNN layers |
-| `rust-port/.../wifi-densepose-train/src/losses.rs` | Add optimal transport + GNN edge consistency loss terms |
-| `rust-port/.../wifi-densepose-train/src/config.rs` | Add training hyperparameters for new components |
-| `rust-port/.../sensing-server/Cargo.toml` | Add rvf-runtime, rvf-types, rvf-index, rvf-quant deps |
-| `rust-port/.../sensing-server/src/main.rs` | Add `--model` flag, load `.rvf` container, progressive startup, serve embedded dashboard |
+| `v2/.../wifi-densepose-train/Cargo.toml` | Add ruvector-gnn, graph-transformer, sona, sparse-inference, math, rvf-types, rvf-wire, rvf-manifest, rvf-index, rvf-quant, rvf-crypto, rvf-runtime deps |
+| `v2/.../wifi-densepose-train/src/model.rs` | Integrate graph transformer + GNN layers |
+| `v2/.../wifi-densepose-train/src/losses.rs` | Add optimal transport + GNN edge consistency loss terms |
+| `v2/.../wifi-densepose-train/src/config.rs` | Add training hyperparameters for new components |
+| `v2/.../sensing-server/Cargo.toml` | Add rvf-runtime, rvf-types, rvf-index, rvf-quant deps |
+| `v2/.../sensing-server/src/main.rs` | Add `--model` flag, load `.rvf` container, progressive startup, serve embedded dashboard |
 
 ## Consequences
 

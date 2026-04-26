@@ -371,7 +371,7 @@ ESP32 SRAM budget: 520 KB. Model at INT8: 53-60 KB = 10-12% of SRAM. Ample margi
 
 ### 2.6 Concrete Module Additions
 
-All new/modified files in `rust-port/wifi-densepose-rs/crates/wifi-densepose-sensing-server/src/`:
+All new/modified files in `v2/crates/wifi-densepose-sensing-server/src/`:
 
 #### 2.6.1 `embedding.rs` (NEW, ~450 lines)
 

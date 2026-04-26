@@ -13,7 +13,7 @@ This document defines the system using [Domain-Driven Design](https://martinfowl
 | 3 | [Training Orchestration](#3-training-orchestration-context) | Run the training loop, compute composite loss, checkpoint, and verify deterministic proofs | [ADR-015](../adr/ADR-015-public-dataset-training-strategy.md), [ADR-016](../adr/ADR-016-ruvector-integration.md) | `train/src/trainer.rs`, `train/src/losses.rs`, `train/src/metrics.rs`, `train/src/proof.rs` |
 | 4 | [Embedding & Transfer](#4-embedding--transfer-context) | Produce AETHER contrastive embeddings, MERIDIAN domain-generalized features, and LoRA adapters | [ADR-024](../adr/ADR-024-contrastive-csi-embedding-model.md), [ADR-027](../adr/ADR-027-cross-environment-domain-generalization.md) | `train/src/embedding.rs`, `train/src/domain.rs`, `train/src/sona.rs` |
 
-All code paths shown are relative to `rust-port/wifi-densepose-rs/crates/wifi-densepose-` unless otherwise noted.
+All code paths shown are relative to `v2/crates/wifi-densepose-` unless otherwise noted.
 
 ---
 

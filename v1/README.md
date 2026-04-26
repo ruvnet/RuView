@@ -51,4 +51,4 @@ pytest tests/
 
 ## Note
 
-This is the legacy Python implementation. For the new Rust implementation with improved performance, see `/rust-port/wifi-densepose-rs/`.
+This is the legacy Python implementation. For the new Rust implementation with improved performance, see `/v2/`.

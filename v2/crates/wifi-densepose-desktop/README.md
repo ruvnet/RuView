@@ -110,7 +110,7 @@ The current release is a **debug build** that loads the frontend from a local Vi
 ```bash
 # 1. Clone the repo (or download just the ui/ folder)
 git clone https://github.com/ruvnet/RuView.git
-cd RuView/rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/ui
+cd RuView/v2/crates/wifi-densepose-desktop/ui
 
 # 2. Install frontend dependencies
 npm install

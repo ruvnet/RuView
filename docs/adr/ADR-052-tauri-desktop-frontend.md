@@ -52,7 +52,7 @@ Build a Tauri v2 desktop application as a new crate in the Rust workspace. The f
 Add a new crate to the workspace:
 
 ```
-rust-port/wifi-densepose-rs/
+v2/
   Cargo.toml                          # Add "crates/wifi-densepose-desktop" to members
   crates/
     wifi-densepose-desktop/           # NEW — Tauri app crate
@@ -621,11 +621,11 @@ chrono = { version = "0.4", features = ["serde"] }
 ```bash
 # Prerequisites
 cargo install tauri-cli@^2
-cd rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/frontend
+cd v2/crates/wifi-densepose-desktop/frontend
 npm install
 
 # Development (hot-reload frontend + Rust rebuild)
-cd rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop
+cd v2/crates/wifi-densepose-desktop
 cargo tauri dev
 
 # Production build
@@ -805,6 +805,6 @@ Total estimated effort: ~11 weeks for a single developer.
 - ADR-051: Sensing Server Decomposition
 - `firmware/esp32-csi-node/` — ESP32 firmware source
 - `firmware/esp32-csi-node/provision.py` — Current provisioning script
-- `rust-port/wifi-densepose-rs/crates/wifi-densepose-sensing-server/` — Sensing server
-- `rust-port/wifi-densepose-rs/crates/wifi-densepose-hardware/` — Hardware crate
+- `v2/crates/wifi-densepose-sensing-server/` — Sensing server
+- `v2/crates/wifi-densepose-hardware/` — Hardware crate
 - `ui/` — Existing web UI

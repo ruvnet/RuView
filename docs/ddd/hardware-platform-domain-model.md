@@ -14,7 +14,7 @@ This document defines the system using [Domain-Driven Design](https://martinfowl
 | 4 | [Aggregation](#4-aggregation-context) | Server-side CSI frame reception, timestamp alignment, multi-node feature fusion | [ADR-012](../adr/ADR-012-esp32-csi-sensor-mesh.md) | `crates/wifi-densepose-hardware/src/esp32/` |
 | 5 | [Provisioning](#5-provisioning-context) | NVS configuration, firmware lifecycle, fleet management, deployment presets | [ADR-044](../adr/ADR-044-provisioning-tool-enhancements.md) | `firmware/esp32-csi-node/provision.py` |
 
-All firmware paths are relative to the repository root. Rust crate paths are relative to `rust-port/wifi-densepose-rs/`.
+All firmware paths are relative to the repository root. Rust crate paths are relative to `v2/`.
 
 ---
 

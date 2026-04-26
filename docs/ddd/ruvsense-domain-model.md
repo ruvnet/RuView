@@ -16,7 +16,7 @@ This document defines the system using [Domain-Driven Design](https://martinfowl
 | 6 | [Spatial Identity](#6-spatial-identity-context) | Cross-room tracking via environment fingerprints | [ADR-030](../adr/ADR-030-ruvsense-persistent-field-model.md) | `signal/src/ruvsense/cross_room.rs` |
 | 7 | [Edge Intelligence](#7-edge-intelligence-context) | On-device sensing (no server needed) | [ADR-039](../adr/ADR-039-esp32-edge-intelligence.md), [ADR-040](../adr/ADR-040-wasm-programmable-sensing.md) | `firmware/esp32-csi-node/main/edge_processing.c` |
 
-All code paths shown are relative to `rust-port/wifi-densepose-rs/crates/wifi-densepose-` unless otherwise noted.
+All code paths shown are relative to `v2/crates/wifi-densepose-` unless otherwise noted.
 
 ---
 

@@ -159,7 +159,7 @@ The happiness scoring algorithm also exists as a WASM module for on-device execu
 
 ```bash
 # Build the happiness scorer WASM
-cd rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge
+cd v2/crates/wifi-densepose-wasm-edge
 cargo build --bin ghost_hunter --target wasm32-unknown-unknown --release --no-default-features
 
 # Output: target/wasm32-unknown-unknown/release/ghost_hunter.wasm (5.7 KB)
@@ -201,6 +201,6 @@ This system is designed to be privacy-preserving by construction:
 
 - [ADR-065](../../docs/adr/ADR-065-happiness-scoring-seed-bridge.md) — Happiness scoring pipeline architecture
 - [ADR-066](../../docs/adr/ADR-066-esp32-swarm-seed-coordinator.md) — ESP32 swarm with Seed coordinator
-- [exo_happiness_score.rs](../../rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_happiness_score.rs) — WASM edge module (Rust)
+- [exo_happiness_score.rs](../../v2/crates/wifi-densepose-wasm-edge/src/exo_happiness_score.rs) — WASM edge module (Rust)
 - [swarm_bridge.c](../../firmware/esp32-csi-node/main/swarm_bridge.c) — ESP32 firmware swarm bridge
 - [ruview_live.py](../ruview_live.py) — RuView Live dashboard with `--mode happiness`

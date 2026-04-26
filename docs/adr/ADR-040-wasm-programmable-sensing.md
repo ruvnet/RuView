@@ -164,8 +164,8 @@ Core 1 (DSP Task)
 - `firmware/esp32-csi-node/main/wasm_runtime.c/h` — Runtime host with 12 API bindings + manifest
 - `firmware/esp32-csi-node/main/wasm_upload.c/h` — HTTP REST endpoints (RVF-aware)
 - `firmware/esp32-csi-node/main/rvf_parser.c/h` — RVF container parser and verifier
-- `rust-port/.../wifi-densepose-wasm-edge/` — Rust WASM crate (gesture, coherence, adversarial, rvf, occupancy, vital_trend, intrusion)
-- `rust-port/.../wifi-densepose-sensing-server/src/main.rs` — `0xC5110004` parser
+- `v2/.../wifi-densepose-wasm-edge/` — Rust WASM crate (gesture, coherence, adversarial, rvf, occupancy, vital_trend, intrusion)
+- `v2/.../wifi-densepose-sensing-server/src/main.rs` — `0xC5110004` parser
 - `docs/adr/ADR-039-esp32-edge-intelligence.md` — Updated with Tier 3 reference
 
 ---

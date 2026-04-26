@@ -592,7 +592,7 @@ impl FrameBuilder {
 ### 3.3 Module Structure
 
 ```
-rust-port/wifi-densepose-rs/crates/wifi-densepose-wifiscan/
+v2/crates/wifi-densepose-wifiscan/
 ├── Cargo.toml
 └── src/
     ├── lib.rs                    # Public API, re-exports

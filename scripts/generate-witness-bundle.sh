@@ -60,7 +60,7 @@ with open('$BUNDLE_DIR/proof/reference_signal_metadata.json', 'w') as f:
 # ---------------------------------------------------------------
 echo "[3/7] Running Rust test suite..."
 mkdir -p "$BUNDLE_DIR/test-results"
-cd "$REPO_ROOT/rust-port/wifi-densepose-rs"
+cd "$REPO_ROOT/v2"
 cargo test --workspace --no-default-features 2>&1 | tee "$BUNDLE_DIR/test-results/rust-workspace-tests.log" | tail -5
 # Extract summary
 grep "^test result" "$BUNDLE_DIR/test-results/rust-workspace-tests.log" | \
@@ -98,7 +98,7 @@ fi
 # ---------------------------------------------------------------
 echo "[6/7] Generating crate manifest..."
 mkdir -p "$BUNDLE_DIR/crate-manifest"
-for crate_dir in "$REPO_ROOT/rust-port/wifi-densepose-rs/crates/"*/; do
+for crate_dir in "$REPO_ROOT/v2/crates/"*/; do
   crate_name="$(basename "$crate_dir")"
   if [ -f "$crate_dir/Cargo.toml" ]; then
     version=$(grep '^version' "$crate_dir/Cargo.toml" | head -1 | sed 's/.*"\(.*\)".*/\1/')

@@ -510,7 +510,7 @@ impl CompressedHeartbeatSpectrogram {
 
 ## Dependency Changes Required
 
-Add to `rust-port/wifi-densepose-rs/Cargo.toml` workspace (already present from ADR-016):
+Add to `v2/Cargo.toml` workspace (already present from ADR-016):
 ```toml
 ruvector-mincut = "2.0.4"          # already present
 ruvector-attn-mincut = "2.0.4"    # already present

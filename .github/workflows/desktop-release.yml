@@ -40,18 +40,18 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install frontend dependencies
-        working-directory: rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/ui
+        working-directory: v2/crates/wifi-densepose-desktop/ui
         run: npm ci
 
       - name: Build frontend
-        working-directory: rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/ui
+        working-directory: v2/crates/wifi-densepose-desktop/ui
         run: npm run build
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2.0.0"
 
       - name: Build Tauri app
-        working-directory: rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop
+        working-directory: v2/crates/wifi-densepose-desktop
         run: cargo tauri build --target ${{ matrix.target }}
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -68,14 +68,14 @@ jobs:
 
       - name: Package macOS app
         run: |
-          cd rust-port/wifi-densepose-rs/target/${{ matrix.target }}/release/bundle/macos
+          cd v2/target/${{ matrix.target }}/release/bundle/macos
           zip -r "RuView-Desktop-${{ github.event.inputs.version || '0.4.0' }}-macos-${{ steps.arch.outputs.arch }}.zip" "RuView Desktop.app"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: ruview-macos-${{ steps.arch.outputs.arch }}
-          path: rust-port/wifi-densepose-rs/target/${{ matrix.target }}/release/bundle/macos/*.zip
+          path: v2/target/${{ matrix.target }}/release/bundle/macos/*.zip
 
   build-windows:
     name: Build Windows
@@ -93,18 +93,18 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install frontend dependencies
-        working-directory: rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/ui
+        working-directory: v2/crates/wifi-densepose-desktop/ui
         run: npm ci
 
       - name: Build frontend
-        working-directory: rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/ui
+        working-directory: v2/crates/wifi-densepose-desktop/ui
         run: npm run build
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2.0.0"
 
       - name: Build Tauri app
-        working-directory: rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop
+        working-directory: v2/crates/wifi-densepose-desktop
         run: cargo tauri build
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -114,13 +114,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ruview-windows-msi
-          path: rust-port/wifi-densepose-rs/target/release/bundle/msi/*.msi
+          path: v2/target/release/bundle/msi/*.msi
 
       - name: Upload Windows NSIS artifact
         uses: actions/upload-artifact@v4
         with:
           name: ruview-windows-nsis
-          path: rust-port/wifi-densepose-rs/target/release/bundle/nsis/*.exe
+          path: v2/target/release/bundle/nsis/*.exe
 
   create-release:
     name: Create Release

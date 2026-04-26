@@ -125,7 +125,7 @@ Open http://localhost:3000/ui/index.html
 
 ### With local Rust binary
 ```bash
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo build -p wifi-densepose-sensing-server --no-default-features
 
 # Run with simulated data

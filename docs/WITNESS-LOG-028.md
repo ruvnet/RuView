@@ -35,7 +35,7 @@ git checkout 96b01008
 ### Step 2: Rust Workspace — Full Test Suite
 
 ```bash
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo test --workspace --no-default-features
 ```
 
@@ -89,7 +89,7 @@ ls firmware/esp32-csi-node/build/*.bin 2>/dev/null || echo "App binary in build/
 ### Step 6: Verify ADR-018 Binary Frame Parser
 
 ```bash
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo test -p wifi-densepose-hardware --no-default-features
 ```
 

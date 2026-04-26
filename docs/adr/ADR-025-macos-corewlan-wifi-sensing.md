@@ -107,7 +107,7 @@ Implement a **macOS CoreWLAN sensing adapter** as a Swift helper binary + Rust a
 
 ### 3.2 Swift Helper Binary
 
-**File:** `rust-port/wifi-densepose-rs/tools/macos-wifi-scan/main.swift`
+**File:** `v2/tools/macos-wifi-scan/main.swift`
 
 ```swift
 // Modes:

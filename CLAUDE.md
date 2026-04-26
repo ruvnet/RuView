@@ -3,7 +3,7 @@
 ## Project: wifi-densepose
 
 WiFi-based human pose estimation using Channel State Information (CSI).
-Dual codebase: Python v1 (`v1/`) and Rust port (`rust-port/wifi-densepose-rs/`).
+Dual codebase: Python v1 (`v1/`) and Rust port (`v2/`).
 ### Key Rust Crates
 | Crate | Description |
 |-------|-------------|
@@ -84,7 +84,7 @@ All 5 ruvector crates integrated in workspace:
 ### Build & Test Commands (this repo)
 ```bash
 # Rust — full workspace tests (1,031+ tests, ~2 min)
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo test --workspace --no-default-features
 
 # Rust — single crate check (no GPU needed)
@@ -151,11 +151,11 @@ Crates must be published in dependency order:
 
 ```bash
 # 1. Rust tests — must be 1,031+ passed, 0 failed
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo test --workspace --no-default-features
 
 # 2. Python proof — must print VERDICT: PASS
-cd ../..
+cd ..
 python v1/data/proof/verify.py
 
 # 3. Generate witness bundle (includes both above + firmware hashes)
@@ -211,10 +211,10 @@ Active feature branch: `ruvsense-full-implementation` (PR #77)
 - NEVER save to root folder — use the directories below
 - `docs/adr/` — Architecture Decision Records (43 ADRs)
 - `docs/ddd/` — Domain-Driven Design models
-- `rust-port/wifi-densepose-rs/crates/` — Rust workspace crates (15 crates)
-- `rust-port/wifi-densepose-rs/crates/wifi-densepose-signal/src/ruvsense/` — RuvSense multistatic modules (14 files)
-- `rust-port/wifi-densepose-rs/crates/wifi-densepose-ruvector/src/viewpoint/` — Cross-viewpoint fusion (5 files)
-- `rust-port/wifi-densepose-rs/crates/wifi-densepose-hardware/src/esp32/` — ESP32 TDM protocol
+- `v2/crates/` — Rust workspace crates (15 crates)
+- `v2/crates/wifi-densepose-signal/src/ruvsense/` — RuvSense multistatic modules (14 files)
+- `v2/crates/wifi-densepose-ruvector/src/viewpoint/` — Cross-viewpoint fusion (5 files)
+- `v2/crates/wifi-densepose-hardware/src/esp32/` — ESP32 TDM protocol
 - `firmware/esp32-csi-node/main/` — ESP32 C firmware (channel hopping, NVS config, TDM)
 - `v1/src/` — Python source (core, hardware, services, api)
 - `v1/data/proof/` — Deterministic CSI proof bundles

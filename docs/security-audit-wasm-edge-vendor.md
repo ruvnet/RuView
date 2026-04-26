@@ -2,7 +2,7 @@
 
 **Date**: 2026-03-03
 **Auditor**: Security Auditor Agent (Claude Opus 4.6)
-**Scope**: All 29 `.rs` files in `rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/`
+**Scope**: All 29 `.rs` files in `v2/crates/wifi-densepose-wasm-edge/src/`
 **Crate version**: 0.3.0
 **Target**: `wasm32-unknown-unknown` (ESP32-S3 WASM3 interpreter)
 

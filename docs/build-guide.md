@@ -191,7 +191,7 @@ A high-performance Rust port with ~810x speedup over the Python pipeline for the
 ### Build
 
 ```bash
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo build --release
 ```
 
@@ -200,7 +200,7 @@ Release profile is configured with LTO, single codegen unit, and `-O3` for maxim
 ### Test
 
 ```bash
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo test --workspace
 ```
 
@@ -209,7 +209,7 @@ Runs 107 tests across all workspace crates.
 ### Benchmark
 
 ```bash
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo bench --package wifi-densepose-signal
 ```
 
@@ -468,7 +468,7 @@ The aggregator collects UDP streams from all ESP32 nodes, performs feature-level
 docker compose -f docker-compose.esp32.yml up
 
 # Or run the Rust aggregator directly
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo run --release --package wifi-densepose-hardware -- --mode esp32-aggregator --port 5000
 ```
 
@@ -516,7 +516,7 @@ rustup target add wasm32-unknown-unknown
 Build:
 
 ```bash
-cd rust-port/wifi-densepose-rs
+cd v2
 
 # Build WASM package (outputs to pkg/)
 wasm-pack build crates/wifi-densepose-wasm --target web --release
@@ -601,7 +601,7 @@ uvicorn v1.src.api.main:app \
   --workers 4
 
 # Or run the Rust API server
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo run --release --package wifi-densepose-api
 ```
 
@@ -631,7 +631,7 @@ pytest --cov=wifi_densepose --cov-report=html
 Rust:
 
 ```bash
-cd rust-port/wifi-densepose-rs
+cd v2
 
 # Build in debug mode (faster compilation)
 cargo build
@@ -674,7 +674,7 @@ python3 -m http.server 3000 --directory ui
 | `v1/data/proof/expected_features.sha256` | Published expected hash |
 | `v1/src/api/main.py` | FastAPI application entry point |
 | `v1/src/sensing/` | Commodity WiFi sensing module (RSSI) |
-| `rust-port/wifi-densepose-rs/Cargo.toml` | Rust workspace root |
+| `v2/Cargo.toml` | Rust workspace root |
 | `ui/viz.html` | Three.js 3D visualization |
 | `Dockerfile` | Multi-stage Docker build (dev/prod/test/security) |
 | `docker-compose.yml` | Development stack (Postgres, Redis, Prometheus, Grafana) |

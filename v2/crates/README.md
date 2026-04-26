@@ -213,7 +213,7 @@ cargo run -p wifi-densepose-train --features tch-backend --bin verify-training
 ```bash
 # Clone the repository
 git clone https://github.com/ruvnet/wifi-densepose.git
-cd wifi-densepose/rust-port/wifi-densepose-rs
+cd wifi-densepose/v2
 
 # Check workspace (no GPU dependencies)
 cargo check --workspace --no-default-features

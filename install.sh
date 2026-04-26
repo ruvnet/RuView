@@ -25,7 +25,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUST_DIR="${SCRIPT_DIR}/rust-port/wifi-densepose-rs"
+RUST_DIR="${SCRIPT_DIR}/v2"
 
 # ─── Colors ───────────────────────────────────────────────────────────
 if [ -t 1 ]; then
@@ -955,7 +955,7 @@ post_install() {
             ;;
         rust)
             echo "    # Run benchmarks:"
-            echo "    cd rust-port/wifi-densepose-rs"
+            echo "    cd v2"
             echo "    cargo bench --package wifi-densepose-signal"
             echo ""
             echo "    # Start Rust API server:"
@@ -963,7 +963,7 @@ post_install() {
             ;;
         browser)
             echo "    # WASM package is at:"
-            echo "    # rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm/pkg/"
+            echo "    # v2/crates/wifi-densepose-wasm/pkg/"
             echo ""
             echo "    # Open the 3D visualization:"
             echo "    python3 -m http.server 3000 --directory ui"
@@ -999,17 +999,17 @@ post_install() {
             echo "    # WiFi-Mat disaster response module built."
             echo ""
             echo "    # Run WiFi-Mat tests:"
-            echo "    cd rust-port/wifi-densepose-rs"
+            echo "    cd v2"
             echo "    cargo test --package wifi-densepose-mat"
             echo ""
             echo "    # Field deployment WASM package at:"
-            echo "    # rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm/pkg/"
+            echo "    # v2/crates/wifi-densepose-wasm/pkg/"
             ;;
         full)
             echo "    # Verification:  ./verify"
             echo "    # Python API:    uvicorn v1.src.api.main:app --host 0.0.0.0 --port 8000"
-            echo "    # Rust API:      cd rust-port/wifi-densepose-rs && cargo run --release --package wifi-densepose-api"
-            echo "    # Benchmarks:    cd rust-port/wifi-densepose-rs && cargo bench"
+            echo "    # Rust API:      cd v2 && cargo run --release --package wifi-densepose-api"
+            echo "    # Benchmarks:    cd v2 && cargo bench"
             echo "    # Visualization: python3 -m http.server 3000 --directory ui"
             echo "    # Docker:        docker compose up"
             ;;

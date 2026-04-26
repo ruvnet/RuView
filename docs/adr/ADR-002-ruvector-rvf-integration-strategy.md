@@ -216,4 +216,4 @@ full = ["mincut-matching", "attn-mincut", "temporal-compress", "solver-interpola
 - [Elastic Weight Consolidation](https://arxiv.org/abs/1612.00796)
 - [Raft Consensus](https://raft.github.io/raft.pdf)
 - [ML-DSA (FIPS 204)](https://csrc.nist.gov/pubs/fips/204/final)
-- [WiFi-DensePose Rust ADR-001: Workspace Structure](../rust-port/wifi-densepose-rs/docs/adr/ADR-001-workspace-structure.md)
+- [WiFi-DensePose Rust ADR-001: Workspace Structure](../v2/docs/adr/ADR-001-workspace-structure.md)

@@ -481,7 +481,7 @@ make check
 # → test_rv_mesh:             27/27 pass, HEALTH roundtrip = 1.0 µs
 
 # Rust-side radio_ops trait + mesh decoder tests
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo test -p wifi-densepose-hardware --no-default-features --lib radio_ops
 # → 8 passed; verifies MockRadio, CRC32 parity with firmware vectors,
 #   HEALTH encode/decode roundtrip, bad-magic/short/CRC rejection,

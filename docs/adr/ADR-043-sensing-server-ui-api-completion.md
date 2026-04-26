@@ -289,7 +289,7 @@ Startup creates `data/models/` and `data/recordings/` directories and populates 
 
 ```bash
 # 1. Start sensing server with auto source (simulated fallback)
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo run -p wifi-densepose-sensing-server -- --http-port 3000 --source auto
 
 # 2. Verify model endpoints return 200
@@ -312,11 +312,11 @@ curl -s http://localhost:3000/api/v1/models/lora/profiles | jq '.'
 # Navigate to http://localhost:3000/ui/
 
 # 7. Run mobile tests
-cd ../../ui/mobile
+cd ../ui/mobile
 npx jest --no-coverage
 
 # 8. Run Rust workspace tests (must pass, 1031+ tests)
-cd ../../rust-port/wifi-densepose-rs
+cd ../../v2
 cargo test --workspace --no-default-features
 ```
 

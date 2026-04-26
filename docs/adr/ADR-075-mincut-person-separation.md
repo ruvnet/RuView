@@ -191,5 +191,5 @@ Also does not give per-person subcarrier assignments.
 
 - Stoer, M. & Wagner, F. (1997). "A Simple Min-Cut Algorithm." JACM 44(4).
 - `vendor/ruvector/crates/ruvector-mincut/src/algorithm/mod.rs` — DynamicMinCut API
-- `rust-port/.../sig_mincut_person_match.rs` — current (broken) WASM edge matcher
+- `v2/.../sig_mincut_person_match.rs` — current (broken) WASM edge matcher
 - `scripts/rf-scan.js` — CSI packet parsing and subcarrier classification

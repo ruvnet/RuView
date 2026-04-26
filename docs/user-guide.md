@@ -119,7 +119,7 @@ This prepares the native GTK/WebKit dependencies used by the desktop/Tauri crate
 
 ```bash
 git clone https://github.com/ruvnet/RuView.git
-cd RuView/rust-port/wifi-densepose-rs
+cd RuView/v2
 
 # Build
 cargo build --release
@@ -558,7 +558,7 @@ RuView can generate real-time 3D point clouds by fusing camera depth estimation 
 
 ```bash
 # Build the pointcloud binary
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo build --release -p wifi-densepose-pointcloud
 
 # Start the server (auto-detects camera + CSI). Loopback-only by default.

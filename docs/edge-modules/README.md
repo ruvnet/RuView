@@ -6,7 +6,7 @@
 
 ```bash
 # Build all modules for ESP32
-cd rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge
+cd v2/crates/wifi-densepose-wasm-edge
 cargo build --target wasm32-unknown-unknown --release
 
 # Run all 632 tests
@@ -144,4 +144,4 @@ Every module talks to the ESP32 through 12 functions:
 - [ADR-039](../adr/ADR-039-esp32-edge-intelligence.md) — Edge processing tiers
 - [ADR-040](../adr/ADR-040-wasm-programmable-sensing.md) — WASM runtime design
 - [ADR-041](../adr/ADR-041-wasm-module-collection.md) — Full module specification
-- [Source code](../../rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/)
+- [Source code](../../v2/crates/wifi-densepose-wasm-edge/src/)

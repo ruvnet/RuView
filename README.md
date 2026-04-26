@@ -110,7 +110,7 @@ RuView now generates **real-time 3D point clouds** by fusing camera depth + WiFi
 
 **Quick start:**
 ```bash
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo build --release -p wifi-densepose-pointcloud
 ./target/release/ruview-pointcloud serve --bind 127.0.0.1:9880
 # Open http://localhost:9880 for live 3D viewer
@@ -381,7 +381,7 @@ See [ADR-069](docs/adr/ADR-069-cognitum-seed-csi-pipeline.md), [ADR-071](docs/ad
 | [Build Guide](docs/build-guide.md) | Building from source (Rust and Python) |
 | [Architecture Decisions](docs/adr/README.md) | 79 ADRs — why each technical choice was made, organized by domain (hardware, signal processing, ML, platform, infrastructure) |
 | [Domain Models](docs/ddd/README.md) | 7 DDD models (RuvSense, Signal Processing, Training Pipeline, Hardware Platform, Sensing Server, WiFi-Mat, CHCI) — bounded contexts, aggregates, domain events, and ubiquitous language |
-| [Desktop App](rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/README.md) | **WIP** — Tauri v2 desktop app for node management, OTA updates, WASM deployment, and mesh visualization |
+| [Desktop App](v2/crates/wifi-densepose-desktop/README.md) | **WIP** — Tauri v2 desktop app for node management, OTA updates, WASM deployment, and mesh visualization |
 | [Medical Examples](examples/medical/README.md) | Contactless blood pressure, heart rate, breathing rate via 60 GHz mmWave radar — $15 hardware, no wearable |
 
 ---
@@ -581,24 +581,24 @@ Small programs that run directly on the ESP32 sensor — no internet needed, no 
 | ⚛️ | [**Quantum-Inspired**](docs/edge-modules/autonomous.md) | Uses quantum-inspired math to map room-wide signal coherence and search for optimal sensor configurations |
 | 🤖 | [**Autonomous & Exotic**](docs/edge-modules/autonomous.md) | Self-managing sensor mesh — auto-heals dropped nodes, plans its own actions, and explores experimental signal representations |
 
-All implemented modules are `no_std` Rust, share a [common utility library](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/vendor_common.rs), and talk to the host through a 12-function API. Full documentation: [**Edge Modules Guide**](docs/edge-modules/README.md). See the [complete implemented module list](#edge-module-list) below.
+All implemented modules are `no_std` Rust, share a [common utility library](v2/crates/wifi-densepose-wasm-edge/src/vendor_common.rs), and talk to the host through a 12-function API. Full documentation: [**Edge Modules Guide**](docs/edge-modules/README.md). See the [complete implemented module list](#edge-module-list) below.
 
 <details id="edge-module-list">
 <summary><strong>🧩 Edge Intelligence — <a href="docs/edge-modules/README.md">All 65 Modules Implemented</a></strong> (ADR-041 complete)</summary>
 
-All 60 modules are implemented, tested (609 tests passing), and ready to deploy. They compile to `wasm32-unknown-unknown`, run on ESP32-S3 via WASM3, and share a [common utility library](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/vendor_common.rs). Source: [`crates/wifi-densepose-wasm-edge/src/`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/)
+All 60 modules are implemented, tested (609 tests passing), and ready to deploy. They compile to `wasm32-unknown-unknown`, run on ESP32-S3 via WASM3, and share a [common utility library](v2/crates/wifi-densepose-wasm-edge/src/vendor_common.rs). Source: [`crates/wifi-densepose-wasm-edge/src/`](v2/crates/wifi-densepose-wasm-edge/src/)
 
 **Core modules** (ADR-040 flagship + early implementations):
 
 | Module | File | What It Does |
 |--------|------|-------------|
-| Gesture Classifier | [`gesture.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/gesture.rs) | DTW template matching for hand gestures |
-| Coherence Filter | [`coherence.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/coherence.rs) | Phase coherence gating for signal quality |
-| Adversarial Detector | [`adversarial.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/adversarial.rs) | Detects physically impossible signal patterns |
-| Intrusion Detector | [`intrusion.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/intrusion.rs) | Human vs non-human motion classification |
-| Occupancy Counter | [`occupancy.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/occupancy.rs) | Zone-level person counting |
-| Vital Trend | [`vital_trend.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/vital_trend.rs) | Long-term breathing and heart rate trending |
-| RVF Parser | [`rvf.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/rvf.rs) | RVF container format parsing |
+| Gesture Classifier | [`gesture.rs`](v2/crates/wifi-densepose-wasm-edge/src/gesture.rs) | DTW template matching for hand gestures |
+| Coherence Filter | [`coherence.rs`](v2/crates/wifi-densepose-wasm-edge/src/coherence.rs) | Phase coherence gating for signal quality |
+| Adversarial Detector | [`adversarial.rs`](v2/crates/wifi-densepose-wasm-edge/src/adversarial.rs) | Detects physically impossible signal patterns |
+| Intrusion Detector | [`intrusion.rs`](v2/crates/wifi-densepose-wasm-edge/src/intrusion.rs) | Human vs non-human motion classification |
+| Occupancy Counter | [`occupancy.rs`](v2/crates/wifi-densepose-wasm-edge/src/occupancy.rs) | Zone-level person counting |
+| Vital Trend | [`vital_trend.rs`](v2/crates/wifi-densepose-wasm-edge/src/vital_trend.rs) | Long-term breathing and heart rate trending |
+| RVF Parser | [`rvf.rs`](v2/crates/wifi-densepose-wasm-edge/src/rvf.rs) | RVF container format parsing |
 
 **Vendor-integrated modules** (24 modules, ADR-041 Category 7):
 
@@ -606,128 +606,128 @@ All 60 modules are implemented, tested (609 tests passing), and ready to deploy.
 
 | Module | File | What It Does | Budget |
 |--------|------|-------------|--------|
-| Flash Attention | [`sig_flash_attention.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sig_flash_attention.rs) | Tiled attention over 8 subcarrier groups — finds spatial focus regions and entropy | S (<5ms) |
-| Coherence Gate | [`sig_coherence_gate.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sig_coherence_gate.rs) | Z-score phasor gating with hysteresis: Accept / PredictOnly / Reject / Recalibrate | L (<2ms) |
-| Temporal Compress | [`sig_temporal_compress.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sig_temporal_compress.rs) | 3-tier adaptive quantization (8-bit hot / 5-bit warm / 3-bit cold) | L (<2ms) |
-| Sparse Recovery | [`sig_sparse_recovery.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sig_sparse_recovery.rs) | ISTA L1 reconstruction for dropped subcarriers | H (<10ms) |
-| Person Match | [`sig_mincut_person_match.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sig_mincut_person_match.rs) | Hungarian-lite bipartite assignment for multi-person tracking | S (<5ms) |
-| Optimal Transport | [`sig_optimal_transport.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sig_optimal_transport.rs) | Sliced Wasserstein-1 distance with 4 projections | L (<2ms) |
+| Flash Attention | [`sig_flash_attention.rs`](v2/crates/wifi-densepose-wasm-edge/src/sig_flash_attention.rs) | Tiled attention over 8 subcarrier groups — finds spatial focus regions and entropy | S (<5ms) |
+| Coherence Gate | [`sig_coherence_gate.rs`](v2/crates/wifi-densepose-wasm-edge/src/sig_coherence_gate.rs) | Z-score phasor gating with hysteresis: Accept / PredictOnly / Reject / Recalibrate | L (<2ms) |
+| Temporal Compress | [`sig_temporal_compress.rs`](v2/crates/wifi-densepose-wasm-edge/src/sig_temporal_compress.rs) | 3-tier adaptive quantization (8-bit hot / 5-bit warm / 3-bit cold) | L (<2ms) |
+| Sparse Recovery | [`sig_sparse_recovery.rs`](v2/crates/wifi-densepose-wasm-edge/src/sig_sparse_recovery.rs) | ISTA L1 reconstruction for dropped subcarriers | H (<10ms) |
+| Person Match | [`sig_mincut_person_match.rs`](v2/crates/wifi-densepose-wasm-edge/src/sig_mincut_person_match.rs) | Hungarian-lite bipartite assignment for multi-person tracking | S (<5ms) |
+| Optimal Transport | [`sig_optimal_transport.rs`](v2/crates/wifi-densepose-wasm-edge/src/sig_optimal_transport.rs) | Sliced Wasserstein-1 distance with 4 projections | L (<2ms) |
 
 **🧠 Adaptive Learning** — On-device learning without cloud connectivity
 
 | Module | File | What It Does | Budget |
 |--------|------|-------------|--------|
-| DTW Gesture Learn | [`lrn_dtw_gesture_learn.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/lrn_dtw_gesture_learn.rs) | User-teachable gesture recognition — 3-rehearsal protocol, 16 templates | S (<5ms) |
-| Anomaly Attractor | [`lrn_anomaly_attractor.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/lrn_anomaly_attractor.rs) | 4D dynamical system attractor classification with Lyapunov exponents | H (<10ms) |
-| Meta Adapt | [`lrn_meta_adapt.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/lrn_meta_adapt.rs) | Hill-climbing self-optimization with safety rollback | L (<2ms) |
-| EWC Lifelong | [`lrn_ewc_lifelong.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/lrn_ewc_lifelong.rs) | Elastic Weight Consolidation — remembers past tasks while learning new ones | S (<5ms) |
+| DTW Gesture Learn | [`lrn_dtw_gesture_learn.rs`](v2/crates/wifi-densepose-wasm-edge/src/lrn_dtw_gesture_learn.rs) | User-teachable gesture recognition — 3-rehearsal protocol, 16 templates | S (<5ms) |
+| Anomaly Attractor | [`lrn_anomaly_attractor.rs`](v2/crates/wifi-densepose-wasm-edge/src/lrn_anomaly_attractor.rs) | 4D dynamical system attractor classification with Lyapunov exponents | H (<10ms) |
+| Meta Adapt | [`lrn_meta_adapt.rs`](v2/crates/wifi-densepose-wasm-edge/src/lrn_meta_adapt.rs) | Hill-climbing self-optimization with safety rollback | L (<2ms) |
+| EWC Lifelong | [`lrn_ewc_lifelong.rs`](v2/crates/wifi-densepose-wasm-edge/src/lrn_ewc_lifelong.rs) | Elastic Weight Consolidation — remembers past tasks while learning new ones | S (<5ms) |
 
 **🗺️ Spatial Reasoning** — Location, proximity, and influence mapping
 
 | Module | File | What It Does | Budget |
 |--------|------|-------------|--------|
-| PageRank Influence | [`spt_pagerank_influence.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/spt_pagerank_influence.rs) | 4x4 cross-correlation graph with power iteration PageRank | L (<2ms) |
-| Micro HNSW | [`spt_micro_hnsw.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/spt_micro_hnsw.rs) | 64-vector navigable small-world graph for nearest-neighbor search | S (<5ms) |
-| Spiking Tracker | [`spt_spiking_tracker.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/spt_spiking_tracker.rs) | 32 LIF neurons + 4 output zone neurons with STDP learning | S (<5ms) |
+| PageRank Influence | [`spt_pagerank_influence.rs`](v2/crates/wifi-densepose-wasm-edge/src/spt_pagerank_influence.rs) | 4x4 cross-correlation graph with power iteration PageRank | L (<2ms) |
+| Micro HNSW | [`spt_micro_hnsw.rs`](v2/crates/wifi-densepose-wasm-edge/src/spt_micro_hnsw.rs) | 64-vector navigable small-world graph for nearest-neighbor search | S (<5ms) |
+| Spiking Tracker | [`spt_spiking_tracker.rs`](v2/crates/wifi-densepose-wasm-edge/src/spt_spiking_tracker.rs) | 32 LIF neurons + 4 output zone neurons with STDP learning | S (<5ms) |
 
 **⏱️ Temporal Analysis** — Activity patterns, logic verification, autonomous planning
 
 | Module | File | What It Does | Budget |
 |--------|------|-------------|--------|
-| Pattern Sequence | [`tmp_pattern_sequence.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/tmp_pattern_sequence.rs) | Activity routine detection and deviation alerts | S (<5ms) |
-| Temporal Logic Guard | [`tmp_temporal_logic_guard.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/tmp_temporal_logic_guard.rs) | LTL formula verification on CSI event streams | S (<5ms) |
-| GOAP Autonomy | [`tmp_goap_autonomy.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/tmp_goap_autonomy.rs) | Goal-Oriented Action Planning for autonomous module management | S (<5ms) |
+| Pattern Sequence | [`tmp_pattern_sequence.rs`](v2/crates/wifi-densepose-wasm-edge/src/tmp_pattern_sequence.rs) | Activity routine detection and deviation alerts | S (<5ms) |
+| Temporal Logic Guard | [`tmp_temporal_logic_guard.rs`](v2/crates/wifi-densepose-wasm-edge/src/tmp_temporal_logic_guard.rs) | LTL formula verification on CSI event streams | S (<5ms) |
+| GOAP Autonomy | [`tmp_goap_autonomy.rs`](v2/crates/wifi-densepose-wasm-edge/src/tmp_goap_autonomy.rs) | Goal-Oriented Action Planning for autonomous module management | S (<5ms) |
 
 **🛡️ AI Security** — Tamper detection and behavioral anomaly profiling
 
 | Module | File | What It Does | Budget |
 |--------|------|-------------|--------|
-| Prompt Shield | [`ais_prompt_shield.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ais_prompt_shield.rs) | FNV-1a replay detection, injection detection (10x amplitude), jamming (SNR) | L (<2ms) |
-| Behavioral Profiler | [`ais_behavioral_profiler.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ais_behavioral_profiler.rs) | 6D behavioral profile with Mahalanobis anomaly scoring | S (<5ms) |
+| Prompt Shield | [`ais_prompt_shield.rs`](v2/crates/wifi-densepose-wasm-edge/src/ais_prompt_shield.rs) | FNV-1a replay detection, injection detection (10x amplitude), jamming (SNR) | L (<2ms) |
+| Behavioral Profiler | [`ais_behavioral_profiler.rs`](v2/crates/wifi-densepose-wasm-edge/src/ais_behavioral_profiler.rs) | 6D behavioral profile with Mahalanobis anomaly scoring | S (<5ms) |
 
 **⚛️ Quantum-Inspired** — Quantum computing metaphors applied to CSI analysis
 
 | Module | File | What It Does | Budget |
 |--------|------|-------------|--------|
-| Quantum Coherence | [`qnt_quantum_coherence.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/qnt_quantum_coherence.rs) | Bloch sphere mapping, Von Neumann entropy, decoherence detection | S (<5ms) |
-| Interference Search | [`qnt_interference_search.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/qnt_interference_search.rs) | 16 room-state hypotheses with Grover-inspired oracle + diffusion | S (<5ms) |
+| Quantum Coherence | [`qnt_quantum_coherence.rs`](v2/crates/wifi-densepose-wasm-edge/src/qnt_quantum_coherence.rs) | Bloch sphere mapping, Von Neumann entropy, decoherence detection | S (<5ms) |
+| Interference Search | [`qnt_interference_search.rs`](v2/crates/wifi-densepose-wasm-edge/src/qnt_interference_search.rs) | 16 room-state hypotheses with Grover-inspired oracle + diffusion | S (<5ms) |
 
 **🤖 Autonomous Systems** — Self-governing and self-healing behaviors
 
 | Module | File | What It Does | Budget |
 |--------|------|-------------|--------|
-| Psycho-Symbolic | [`aut_psycho_symbolic.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/aut_psycho_symbolic.rs) | 16-rule forward-chaining knowledge base with contradiction detection | S (<5ms) |
-| Self-Healing Mesh | [`aut_self_healing_mesh.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/aut_self_healing_mesh.rs) | 8-node mesh with health tracking, degradation/recovery, coverage healing | S (<5ms) |
+| Psycho-Symbolic | [`aut_psycho_symbolic.rs`](v2/crates/wifi-densepose-wasm-edge/src/aut_psycho_symbolic.rs) | 16-rule forward-chaining knowledge base with contradiction detection | S (<5ms) |
+| Self-Healing Mesh | [`aut_self_healing_mesh.rs`](v2/crates/wifi-densepose-wasm-edge/src/aut_self_healing_mesh.rs) | 8-node mesh with health tracking, degradation/recovery, coverage healing | S (<5ms) |
 
 **🔮 Exotic (Vendor)** — Novel mathematical models for CSI interpretation
 
 | Module | File | What It Does | Budget |
 |--------|------|-------------|--------|
-| Time Crystal | [`exo_time_crystal.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_time_crystal.rs) | Autocorrelation subharmonic detection in 256-frame history | S (<5ms) |
-| Hyperbolic Space | [`exo_hyperbolic_space.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_hyperbolic_space.rs) | Poincare ball embedding with 32 reference locations, hyperbolic distance | S (<5ms) |
+| Time Crystal | [`exo_time_crystal.rs`](v2/crates/wifi-densepose-wasm-edge/src/exo_time_crystal.rs) | Autocorrelation subharmonic detection in 256-frame history | S (<5ms) |
+| Hyperbolic Space | [`exo_hyperbolic_space.rs`](v2/crates/wifi-densepose-wasm-edge/src/exo_hyperbolic_space.rs) | Poincare ball embedding with 32 reference locations, hyperbolic distance | S (<5ms) |
 
 **🏥 Medical & Health** (Category 1) — Contactless health monitoring
 
 | Module | File | What It Does | Budget |
 |--------|------|-------------|--------|
-| Sleep Apnea | [`med_sleep_apnea.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/med_sleep_apnea.rs) | Detects breathing pauses during sleep | S (<5ms) |
-| Cardiac Arrhythmia | [`med_cardiac_arrhythmia.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/med_cardiac_arrhythmia.rs) | Monitors heart rate for irregular rhythms | S (<5ms) |
-| Respiratory Distress | [`med_respiratory_distress.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/med_respiratory_distress.rs) | Alerts on abnormal breathing patterns | S (<5ms) |
-| Gait Analysis | [`med_gait_analysis.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/med_gait_analysis.rs) | Tracks walking patterns and detects changes | S (<5ms) |
-| Seizure Detection | [`med_seizure_detect.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/med_seizure_detect.rs) | 6-state machine for tonic-clonic seizure recognition | S (<5ms) |
+| Sleep Apnea | [`med_sleep_apnea.rs`](v2/crates/wifi-densepose-wasm-edge/src/med_sleep_apnea.rs) | Detects breathing pauses during sleep | S (<5ms) |
+| Cardiac Arrhythmia | [`med_cardiac_arrhythmia.rs`](v2/crates/wifi-densepose-wasm-edge/src/med_cardiac_arrhythmia.rs) | Monitors heart rate for irregular rhythms | S (<5ms) |
+| Respiratory Distress | [`med_respiratory_distress.rs`](v2/crates/wifi-densepose-wasm-edge/src/med_respiratory_distress.rs) | Alerts on abnormal breathing patterns | S (<5ms) |
+| Gait Analysis | [`med_gait_analysis.rs`](v2/crates/wifi-densepose-wasm-edge/src/med_gait_analysis.rs) | Tracks walking patterns and detects changes | S (<5ms) |
+| Seizure Detection | [`med_seizure_detect.rs`](v2/crates/wifi-densepose-wasm-edge/src/med_seizure_detect.rs) | 6-state machine for tonic-clonic seizure recognition | S (<5ms) |
 
 **🔐 Security & Safety** (Category 2) — Perimeter and threat detection
 
 | Module | File | What It Does | Budget |
 |--------|------|-------------|--------|
-| Perimeter Breach | [`sec_perimeter_breach.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sec_perimeter_breach.rs) | Detects boundary crossings with approach/departure | S (<5ms) |
-| Weapon Detection | [`sec_weapon_detect.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sec_weapon_detect.rs) | Metal anomaly detection via CSI amplitude shifts | S (<5ms) |
-| Tailgating | [`sec_tailgating.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sec_tailgating.rs) | Detects unauthorized follow-through at access points | S (<5ms) |
-| Loitering | [`sec_loitering.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sec_loitering.rs) | Alerts when someone lingers too long in a zone | S (<5ms) |
-| Panic Motion | [`sec_panic_motion.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/sec_panic_motion.rs) | Detects fleeing, struggling, or panic movement | S (<5ms) |
+| Perimeter Breach | [`sec_perimeter_breach.rs`](v2/crates/wifi-densepose-wasm-edge/src/sec_perimeter_breach.rs) | Detects boundary crossings with approach/departure | S (<5ms) |
+| Weapon Detection | [`sec_weapon_detect.rs`](v2/crates/wifi-densepose-wasm-edge/src/sec_weapon_detect.rs) | Metal anomaly detection via CSI amplitude shifts | S (<5ms) |
+| Tailgating | [`sec_tailgating.rs`](v2/crates/wifi-densepose-wasm-edge/src/sec_tailgating.rs) | Detects unauthorized follow-through at access points | S (<5ms) |
+| Loitering | [`sec_loitering.rs`](v2/crates/wifi-densepose-wasm-edge/src/sec_loitering.rs) | Alerts when someone lingers too long in a zone | S (<5ms) |
+| Panic Motion | [`sec_panic_motion.rs`](v2/crates/wifi-densepose-wasm-edge/src/sec_panic_motion.rs) | Detects fleeing, struggling, or panic movement | S (<5ms) |
 
 **🏢 Smart Building** (Category 3) — Automation and energy efficiency
 
 | Module | File | What It Does | Budget |
 |--------|------|-------------|--------|
-| HVAC Presence | [`bld_hvac_presence.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/bld_hvac_presence.rs) | Occupancy-driven HVAC control with departure countdown | S (<5ms) |
-| Lighting Zones | [`bld_lighting_zones.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/bld_lighting_zones.rs) | Auto-dim/off lighting based on zone activity | S (<5ms) |
-| Elevator Count | [`bld_elevator_count.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/bld_elevator_count.rs) | Counts people entering/leaving with overload warning | S (<5ms) |
-| Meeting Room | [`bld_meeting_room.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/bld_meeting_room.rs) | Tracks meeting lifecycle: start, headcount, end, availability | S (<5ms) |
-| Energy Audit | [`bld_energy_audit.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/bld_energy_audit.rs) | Tracks after-hours usage and room utilization rates | S (<5ms) |
+| HVAC Presence | [`bld_hvac_presence.rs`](v2/crates/wifi-densepose-wasm-edge/src/bld_hvac_presence.rs) | Occupancy-driven HVAC control with departure countdown | S (<5ms) |
+| Lighting Zones | [`bld_lighting_zones.rs`](v2/crates/wifi-densepose-wasm-edge/src/bld_lighting_zones.rs) | Auto-dim/off lighting based on zone activity | S (<5ms) |
+| Elevator Count | [`bld_elevator_count.rs`](v2/crates/wifi-densepose-wasm-edge/src/bld_elevator_count.rs) | Counts people entering/leaving with overload warning | S (<5ms) |
+| Meeting Room | [`bld_meeting_room.rs`](v2/crates/wifi-densepose-wasm-edge/src/bld_meeting_room.rs) | Tracks meeting lifecycle: start, headcount, end, availability | S (<5ms) |
+| Energy Audit | [`bld_energy_audit.rs`](v2/crates/wifi-densepose-wasm-edge/src/bld_energy_audit.rs) | Tracks after-hours usage and room utilization rates | S (<5ms) |
 
 **🛒 Retail & Hospitality** (Category 4) — Customer insights without cameras
 
 | Module | File | What It Does | Budget |
 |--------|------|-------------|--------|
-| Queue Length | [`ret_queue_length.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ret_queue_length.rs) | Estimates queue size and wait times | S (<5ms) |
-| Dwell Heatmap | [`ret_dwell_heatmap.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ret_dwell_heatmap.rs) | Shows where people spend time (hot/cold zones) | S (<5ms) |
-| Customer Flow | [`ret_customer_flow.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ret_customer_flow.rs) | Counts ins/outs and tracks net occupancy | S (<5ms) |
-| Table Turnover | [`ret_table_turnover.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ret_table_turnover.rs) | Restaurant table lifecycle: seated, dining, vacated | S (<5ms) |
-| Shelf Engagement | [`ret_shelf_engagement.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ret_shelf_engagement.rs) | Detects browsing, considering, and reaching for products | S (<5ms) |
+| Queue Length | [`ret_queue_length.rs`](v2/crates/wifi-densepose-wasm-edge/src/ret_queue_length.rs) | Estimates queue size and wait times | S (<5ms) |
+| Dwell Heatmap | [`ret_dwell_heatmap.rs`](v2/crates/wifi-densepose-wasm-edge/src/ret_dwell_heatmap.rs) | Shows where people spend time (hot/cold zones) | S (<5ms) |
+| Customer Flow | [`ret_customer_flow.rs`](v2/crates/wifi-densepose-wasm-edge/src/ret_customer_flow.rs) | Counts ins/outs and tracks net occupancy | S (<5ms) |
+| Table Turnover | [`ret_table_turnover.rs`](v2/crates/wifi-densepose-wasm-edge/src/ret_table_turnover.rs) | Restaurant table lifecycle: seated, dining, vacated | S (<5ms) |
+| Shelf Engagement | [`ret_shelf_engagement.rs`](v2/crates/wifi-densepose-wasm-edge/src/ret_shelf_engagement.rs) | Detects browsing, considering, and reaching for products | S (<5ms) |
 
 **🏭 Industrial & Specialized** (Category 5) — Safety and compliance
 
 | Module | File | What It Does | Budget |
 |--------|------|-------------|--------|
-| Forklift Proximity | [`ind_forklift_proximity.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ind_forklift_proximity.rs) | Warns when people get too close to vehicles | S (<5ms) |
-| Confined Space | [`ind_confined_space.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ind_confined_space.rs) | OSHA-compliant worker monitoring with extraction alerts | S (<5ms) |
-| Clean Room | [`ind_clean_room.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ind_clean_room.rs) | Occupancy limits and turbulent motion detection | S (<5ms) |
-| Livestock Monitor | [`ind_livestock_monitor.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ind_livestock_monitor.rs) | Animal presence, stillness, and escape alerts | S (<5ms) |
-| Structural Vibration | [`ind_structural_vibration.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/ind_structural_vibration.rs) | Seismic events, mechanical resonance, structural drift | S (<5ms) |
+| Forklift Proximity | [`ind_forklift_proximity.rs`](v2/crates/wifi-densepose-wasm-edge/src/ind_forklift_proximity.rs) | Warns when people get too close to vehicles | S (<5ms) |
+| Confined Space | [`ind_confined_space.rs`](v2/crates/wifi-densepose-wasm-edge/src/ind_confined_space.rs) | OSHA-compliant worker monitoring with extraction alerts | S (<5ms) |
+| Clean Room | [`ind_clean_room.rs`](v2/crates/wifi-densepose-wasm-edge/src/ind_clean_room.rs) | Occupancy limits and turbulent motion detection | S (<5ms) |
+| Livestock Monitor | [`ind_livestock_monitor.rs`](v2/crates/wifi-densepose-wasm-edge/src/ind_livestock_monitor.rs) | Animal presence, stillness, and escape alerts | S (<5ms) |
+| Structural Vibration | [`ind_structural_vibration.rs`](v2/crates/wifi-densepose-wasm-edge/src/ind_structural_vibration.rs) | Seismic events, mechanical resonance, structural drift | S (<5ms) |
 
 **🔮 Exotic & Research** (Category 6) — Experimental sensing applications
 
 | Module | File | What It Does | Budget |
 |--------|------|-------------|--------|
-| Dream Stage | [`exo_dream_stage.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_dream_stage.rs) | Contactless sleep stage classification (wake/light/deep/REM) | S (<5ms) |
-| Emotion Detection | [`exo_emotion_detect.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_emotion_detect.rs) | Arousal, stress, and calm detection from micro-movements | S (<5ms) |
-| Gesture Language | [`exo_gesture_language.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_gesture_language.rs) | Sign language letter recognition via WiFi | S (<5ms) |
-| Music Conductor | [`exo_music_conductor.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_music_conductor.rs) | Tempo and dynamic tracking from conducting gestures | S (<5ms) |
-| Plant Growth | [`exo_plant_growth.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_plant_growth.rs) | Monitors plant growth, circadian rhythms, wilt detection | S (<5ms) |
-| Ghost Hunter | [`exo_ghost_hunter.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_ghost_hunter.rs) | Environmental anomaly classification (draft/insect/wind/unknown) | S (<5ms) |
-| Rain Detection | [`exo_rain_detect.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_rain_detect.rs) | Detects rain onset, intensity, and cessation via signal scatter | S (<5ms) |
-| Breathing Sync | [`exo_breathing_sync.rs`](rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/exo_breathing_sync.rs) | Detects synchronized breathing between multiple people | S (<5ms) |
+| Dream Stage | [`exo_dream_stage.rs`](v2/crates/wifi-densepose-wasm-edge/src/exo_dream_stage.rs) | Contactless sleep stage classification (wake/light/deep/REM) | S (<5ms) |
+| Emotion Detection | [`exo_emotion_detect.rs`](v2/crates/wifi-densepose-wasm-edge/src/exo_emotion_detect.rs) | Arousal, stress, and calm detection from micro-movements | S (<5ms) |
+| Gesture Language | [`exo_gesture_language.rs`](v2/crates/wifi-densepose-wasm-edge/src/exo_gesture_language.rs) | Sign language letter recognition via WiFi | S (<5ms) |
+| Music Conductor | [`exo_music_conductor.rs`](v2/crates/wifi-densepose-wasm-edge/src/exo_music_conductor.rs) | Tempo and dynamic tracking from conducting gestures | S (<5ms) |
+| Plant Growth | [`exo_plant_growth.rs`](v2/crates/wifi-densepose-wasm-edge/src/exo_plant_growth.rs) | Monitors plant growth, circadian rhythms, wilt detection | S (<5ms) |
+| Ghost Hunter | [`exo_ghost_hunter.rs`](v2/crates/wifi-densepose-wasm-edge/src/exo_ghost_hunter.rs) | Environmental anomaly classification (draft/insect/wind/unknown) | S (<5ms) |
+| Rain Detection | [`exo_rain_detect.rs`](v2/crates/wifi-densepose-wasm-edge/src/exo_rain_detect.rs) | Detects rain onset, intensity, and cessation via signal scatter | S (<5ms) |
+| Breathing Sync | [`exo_breathing_sync.rs`](v2/crates/wifi-densepose-wasm-edge/src/exo_breathing_sync.rs) | Detects synchronized breathing between multiple people | S (<5ms) |
 
 </details>
 
@@ -855,7 +855,7 @@ git clone https://github.com/ruvnet/RuView.git
 cd RuView
 
 # Rust (primary — 810x faster)
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo build --release
 cargo test --workspace
 
@@ -950,7 +950,7 @@ cargo add wifi-densepose-ruvector   # RuVector v2.0.4 integration layer (ADR-017
 
 All crates integrate with [RuVector v2.0.4](https://github.com/ruvnet/ruvector) — see [AI Backbone](#ai-backbone-ruvector) below.
 
-**[rUv Neural](rust-port/wifi-densepose-rs/crates/ruv-neural/)** — A separate 12-crate workspace for brain network topology analysis, neural decoding, and medical sensing. See [rUv Neural](#ruv-neural) in Models & Training.
+**[rUv Neural](v2/crates/ruv-neural/)** — A separate 12-crate workspace for brain network topology analysis, neural decoding, and medical sensing. See [rUv Neural](#ruv-neural) in Models & Training.
 
 </details>
 
@@ -1050,7 +1050,7 @@ The neural pipeline uses a graph transformer with cross-attention to map CSI fea
 | [RVF Model Container](#rvf-model-container) | Binary packaging with Ed25519 signing, progressive 3-layer loading, SIMD quantization | [ADR-023](docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md) |
 | [Training & Fine-Tuning](#training--fine-tuning) | 8-phase pure Rust pipeline (7,832 lines), MM-Fi/Wi-Pose pre-training, 6-term composite loss, SONA LoRA | [ADR-023](docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md) |
 | [RuVector Crates](#ruvector-crates) | 11 vendored Rust crates from [ruvector](https://github.com/ruvnet/ruvector): attention, min-cut, solver, GNN, HNSW, temporal compression, sparse inference | [GitHub](https://github.com/ruvnet/ruvector) · [Source](vendor/ruvector/) |
-| [rUv Neural](#ruv-neural) | 12-crate brain topology analysis ecosystem: neural decoding, quantum sensor integration, cognitive state classification, BCI output | [README](rust-port/wifi-densepose-rs/crates/ruv-neural/README.md) |
+| [rUv Neural](#ruv-neural) | 12-crate brain topology analysis ecosystem: neural decoding, quantum sensor integration, cognitive state classification, BCI output | [README](v2/crates/ruv-neural/README.md) |
 | [AI Backbone (RuVector)](#ai-backbone-ruvector) | 5 AI capabilities replacing hand-tuned thresholds: attention, graph min-cut, sparse solvers, tiered compression | [crates.io](https://crates.io/crates/wifi-densepose-ruvector) |
 | [Self-Learning WiFi AI (ADR-024)](#self-learning-wifi-ai-adr-024) | Contrastive self-supervised learning, room fingerprinting, anomaly detection, 55 KB model | [ADR-024](docs/adr/ADR-024-contrastive-csi-embedding-model.md) |
 | [Cross-Environment Generalization (ADR-027)](docs/adr/ADR-027-cross-environment-domain-generalization.md) | Domain-adversarial training, geometry-conditioned inference, hardware normalization, zero-shot deployment | [ADR-027](docs/adr/ADR-027-cross-environment-domain-generalization.md) |
@@ -1168,7 +1168,7 @@ Bundle verify:  7/7 checks PASS
 **Verify it yourself** (no hardware needed):
 ```bash
 # Run all tests
-cd rust-port/wifi-densepose-rs && cargo test --workspace --no-default-features
+cd v2 && cargo test --workspace --no-default-features
 
 # Run the deterministic proof
 python v1/data/proof/verify.py
@@ -1484,7 +1484,7 @@ See [firmware/esp32-csi-node/README.md](firmware/esp32-csi-node/README.md), [ADR
 | WASM Support | No | Yes |
 
 ```bash
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo build --release
 cargo test --workspace
 cargo bench --package wifi-densepose-signal
@@ -1781,7 +1781,7 @@ The full RuVector ecosystem includes 90+ crates. See [github.com/ruvnet/ruvector
 <details>
 <summary><a id="ruv-neural"></a><strong>🧠 rUv Neural</strong> — Brain topology analysis ecosystem for neural decoding and medical sensing</summary>
 
-[**rUv Neural**](rust-port/wifi-densepose-rs/crates/ruv-neural/README.md) is a 12-crate Rust ecosystem that extends RuView's signal processing into brain network topology analysis. It transforms neural magnetic field measurements from quantum sensors (NV diamond magnetometers, optically pumped magnetometers) into dynamic connectivity graphs, using minimum cut algorithms to detect cognitive state transitions in real time. The ecosystem includes crates for signal processing (`ruv-neural-signal`), graph construction (`ruv-neural-graph`), HNSW-indexed pattern memory (`ruv-neural-memory`), graph embeddings (`ruv-neural-embed`), cognitive state decoding (`ruv-neural-decoder`), and ESP32/WASM edge targets. Medical and research applications include early neurological disease detection via topology signatures, brain-computer interfaces, clinical neurofeedback, and non-invasive biomedical sensing -- bridging RuView's RF sensing architecture with the emerging field of quantum biomedical diagnostics.
+[**rUv Neural**](v2/crates/ruv-neural/README.md) is a 12-crate Rust ecosystem that extends RuView's signal processing into brain network topology analysis. It transforms neural magnetic field measurements from quantum sensors (NV diamond magnetometers, optically pumped magnetometers) into dynamic connectivity graphs, using minimum cut algorithms to detect cognitive state transitions in real time. The ecosystem includes crates for signal processing (`ruv-neural-signal`), graph construction (`ruv-neural-graph`), HNSW-indexed pattern memory (`ruv-neural-memory`), graph embeddings (`ruv-neural-embed`), cognitive state decoding (`ruv-neural-decoder`), and ESP32/WASM edge targets. Medical and research applications include early neurological disease detection via topology signatures, brain-computer interfaces, clinical neurofeedback, and non-invasive biomedical sensing -- bridging RuView's RF sensing architecture with the emerging field of quantum biomedical diagnostics.
 
 </details>
 
@@ -2154,7 +2154,7 @@ wifi-densepose tasks list               # List background tasks
 
 ```bash
 # Rust tests (primary — 542+ tests)
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo test --workspace
 
 # Sensing server tests (229 tests)
@@ -2258,7 +2258,7 @@ git clone https://github.com/ruvnet/RuView.git
 cd RuView
 
 # Rust development
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo build --release
 cargo test --workspace
 

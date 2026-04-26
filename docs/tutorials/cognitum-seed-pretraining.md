@@ -909,7 +909,7 @@ For users with the Rust toolchain, the `wifi-densepose-train` crate
 provides the full training pipeline with RuVector integration:
 
 ```bash
-cd rust-port/wifi-densepose-rs
+cd v2
 cargo run -p wifi-densepose-train -- \
   --data pretrain-vectors.rvf \
   --epochs 50 \

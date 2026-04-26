@@ -34,7 +34,7 @@ The `vendor/ruvector` codebase provides a rich set of signal processing primitiv
 
 ### Current Project State
 
-The Rust port (`rust-port/wifi-densepose-rs/`) already contains:
+The Rust port (`v2/`) already contains:
 
 - **`wifi-densepose-signal`**: CSI processing, BVP extraction, phase sanitization, Hampel filter, spectrogram generation, Fresnel geometry, motion detection, subcarrier selection
 - **`wifi-densepose-sensing-server`**: Axum server receiving ESP32 CSI frames (UDP 5005), WebSocket broadcasting sensing updates, signal field generation, with three data source modes:
@@ -108,7 +108,7 @@ ESP32 CSI (UDP:5005) ──▶│  ┌──────────────
 ### Module Structure
 
 ```
-rust-port/wifi-densepose-rs/crates/wifi-densepose-vitals/
+v2/crates/wifi-densepose-vitals/
 ├── Cargo.toml
 └── src/
     ├── lib.rs                 # Public API and re-exports

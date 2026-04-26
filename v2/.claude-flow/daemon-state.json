@@ -1,46 +1,51 @@
 {
   "running": true,
-  "startedAt": "2026-03-10T00:49:11.921Z",
+  "startedAt": "2026-02-28T14:10:51.128Z",
   "workers": {
     "map": {
-      "runCount": 0,
-      "successCount": 0,
+      "runCount": 5,
+      "successCount": 5,
       "failureCount": 0,
-      "averageDurationMs": 0,
-      "isRunning": false,
-      "nextRun": "2026-03-10T00:49:11.921Z"
+      "averageDurationMs": 1.6,
+      "lastRun": "2026-02-28T14:40:51.152Z",
+      "nextRun": "2026-02-28T14:40:51.149Z",
+      "isRunning": false
     },
     "audit": {
-      "runCount": 0,
+      "runCount": 3,
       "successCount": 0,
-      "failureCount": 0,
+      "failureCount": 3,
       "averageDurationMs": 0,
-      "isRunning": false,
-      "nextRun": "2026-03-10T00:51:11.921Z"
+      "lastRun": "2026-02-28T14:32:51.145Z",
+      "nextRun": "2026-02-28T14:42:51.146Z",
+      "isRunning": false
     },
     "optimize": {
-      "runCount": 0,
+      "runCount": 2,
       "successCount": 0,
-      "failureCount": 0,
+      "failureCount": 2,
       "averageDurationMs": 0,
-      "isRunning": false,
-      "nextRun": "2026-03-10T00:53:11.921Z"
+      "lastRun": "2026-02-28T14:39:51.146Z",
+      "nextRun": "2026-02-28T14:54:51.146Z",
+      "isRunning": false
     },
     "consolidate": {
-      "runCount": 0,
-      "successCount": 0,
+      "runCount": 2,
+      "successCount": 2,
       "failureCount": 0,
-      "averageDurationMs": 0,
-      "isRunning": false,
-      "nextRun": "2026-03-10T00:55:11.921Z"
+      "averageDurationMs": 1,
+      "lastRun": "2026-02-28T14:17:51.145Z",
+      "nextRun": "2026-02-28T14:46:51.133Z",
+      "isRunning": false
     },
     "testgaps": {
-      "runCount": 0,
+      "runCount": 1,
       "successCount": 0,
-      "failureCount": 0,
+      "failureCount": 1,
       "averageDurationMs": 0,
-      "isRunning": false,
-      "nextRun": "2026-03-10T00:57:11.921Z"
+      "lastRun": "2026-02-28T14:23:51.138Z",
+      "nextRun": "2026-02-28T14:43:51.138Z",
+      "isRunning": false
     },
     "predict": {
       "runCount": 0,
@@ -59,8 +64,8 @@
   },
   "config": {
     "autoStart": false,
-    "logDir": "/Users/cohen/GitHub/ruvnet/RuView/rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/ui/.claude-flow/logs",
-    "stateFile": "/Users/cohen/GitHub/ruvnet/RuView/rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/ui/.claude-flow/daemon-state.json",
+    "logDir": "/home/user/wifi-densepose/v2/.claude-flow/logs",
+    "stateFile": "/home/user/wifi-densepose/v2/.claude-flow/daemon-state.json",
     "maxConcurrent": 2,
     "workerTimeoutMs": 300000,
     "resourceThresholds": {
@@ -126,5 +131,5 @@
       }
     ]
   },
-  "savedAt": "2026-03-10T00:49:11.921Z"
+  "savedAt": "2026-02-28T14:40:51.152Z"
 }

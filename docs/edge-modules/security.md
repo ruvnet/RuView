@@ -556,7 +556,7 @@ for &(event_id, value) in events {
 
 ```bash
 # Run all security module tests (requires std feature)
-cd rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge
+cd v2/crates/wifi-densepose-wasm-edge
 cargo test --features std -- sec_ intrusion
 ```
 

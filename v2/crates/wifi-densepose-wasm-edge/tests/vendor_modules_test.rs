@@ -4,7 +4,7 @@
 //! for each module.  At least 3 tests per module = 72+ tests total.
 //!
 //! Run with:
-//!   cd rust-port/wifi-densepose-rs
+//!   cd v2
 //!   cargo test -p wifi-densepose-wasm-edge --features std -- --nocapture
 
 // ============================================================================

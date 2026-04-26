@@ -3,7 +3,7 @@
 **Project:** wifi-densepose (ruview)
 **Date:** 2026-04-05
 **Analyst:** QE Test Architect (V3)
-**Scope:** All test suites across Python (v1), Rust (rust-port), and Mobile (ui/mobile)
+**Scope:** All test suites across Python (v1), Rust (v2), and Mobile (ui/mobile)
 
 ---
 
@@ -470,8 +470,8 @@ This is the best-tested service in the mobile suite.
 |------|---------------|
 | `v1/tests/unit/test_sensing.py` | 45 tests with mathematical rigor, known-signal validation, domain-specific edge cases, cross-receiver agreement, band isolation. No mocks for core logic. |
 | `v1/tests/unit/test_esp32_binary_parser.py` | Real UDP socket testing, struct-level binary validation, ADR-018 compliance. Tests actual I/Q to amplitude/phase math. |
-| `rust-port/.../tests/validation_test.rs` | Physics-based validation (Doppler, phase unwrapping, spectral analysis). Tests prove algorithm correctness, not just non-failure. |
-| `rust-port/.../tests/test_losses.rs` | Deterministic data, feature-gated, tests mathematical properties (zero loss for identical inputs, non-zero for mismatched). |
+| `v2/.../tests/validation_test.rs` | Physics-based validation (Doppler, phase unwrapping, spectral analysis). Tests prove algorithm correctness, not just non-failure. |
+| `v2/.../tests/test_losses.rs` | Deterministic data, feature-gated, tests mathematical properties (zero loss for identical inputs, non-zero for mismatched). |
 | `ui/mobile/.../utils/ringBuffer.test.ts` | Comprehensive boundary testing (NaN, Infinity, 0, negative, overflow). Tests copy semantics. |
 
 ### 5.2 Worst Test Files (Needs Improvement)

@@ -413,9 +413,9 @@ The `create_user()` method accepts any password without minimum length, complexi
 ### INFORMATIONAL-001: Rust API, DB, and Config Crates Are Stubs
 
 **Files:**
-- `rust-port/wifi-densepose-rs/crates/wifi-densepose-api/src/lib.rs` -- `//! WiFi-DensePose REST API (stub)`
-- `rust-port/wifi-densepose-rs/crates/wifi-densepose-db/src/lib.rs` -- `//! WiFi-DensePose database layer (stub)`
-- `rust-port/wifi-densepose-rs/crates/wifi-densepose-config/src/lib.rs` -- `//! WiFi-DensePose configuration (stub)`
+- `v2/crates/wifi-densepose-api/src/lib.rs` -- `//! WiFi-DensePose REST API (stub)`
+- `v2/crates/wifi-densepose-db/src/lib.rs` -- `//! WiFi-DensePose database layer (stub)`
+- `v2/crates/wifi-densepose-config/src/lib.rs` -- `//! WiFi-DensePose configuration (stub)`
 
 **Description:**
 The Rust API, database, and configuration crates contain only single-line stub comments. No security review of Rust API endpoints, database queries, or configuration handling was possible because no implementation exists. The `wifi-densepose-sensing-server` crate contains the actual Rust server implementation.
@@ -426,7 +426,7 @@ The Rust API, database, and configuration crates contain only single-line stub c
 
 ### INFORMATIONAL-002: Rust `unsafe` Blocks in WASM Edge Crate
 
-**Files:** `rust-port/wifi-densepose-rs/crates/wifi-densepose-wasm-edge/src/*.rs` (multiple files)
+**Files:** `v2/crates/wifi-densepose-wasm-edge/src/*.rs` (multiple files)
 
 **Description:**
 The `wifi-densepose-wasm-edge` crate contains approximately 40 `unsafe` blocks, primarily for:
@@ -518,7 +518,7 @@ The following areas demonstrate security-conscious design:
 - `v1/src/tasks/backup.py` (partial) -- Subprocess command construction
 - `v1/test_auth_rate_limit.py` (partial) -- Test credentials review
 
-### Rust (rust-port/wifi-densepose-rs/)
+### Rust (v2/)
 - `crates/wifi-densepose-api/src/lib.rs` (1 line -- stub)
 - `crates/wifi-densepose-db/src/lib.rs` (1 line -- stub)
 - `crates/wifi-densepose-config/src/lib.rs` (1 line -- stub)

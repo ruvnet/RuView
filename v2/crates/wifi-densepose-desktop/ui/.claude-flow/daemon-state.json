@@ -1,6 +1,6 @@
 {
   "running": true,
-  "startedAt": "2026-03-09T23:56:03.574Z",
+  "startedAt": "2026-03-10T00:49:11.921Z",
   "workers": {
     "map": {
       "runCount": 0,
@@ -8,7 +8,7 @@
       "failureCount": 0,
       "averageDurationMs": 0,
       "isRunning": false,
-      "nextRun": "2026-03-09T23:56:03.574Z"
+      "nextRun": "2026-03-10T00:49:11.921Z"
     },
     "audit": {
       "runCount": 0,
@@ -16,7 +16,7 @@
       "failureCount": 0,
       "averageDurationMs": 0,
       "isRunning": false,
-      "nextRun": "2026-03-09T23:58:03.574Z"
+      "nextRun": "2026-03-10T00:51:11.921Z"
     },
     "optimize": {
       "runCount": 0,
@@ -24,7 +24,7 @@
       "failureCount": 0,
       "averageDurationMs": 0,
       "isRunning": false,
-      "nextRun": "2026-03-10T00:00:03.574Z"
+      "nextRun": "2026-03-10T00:53:11.921Z"
     },
     "consolidate": {
       "runCount": 0,
@@ -32,7 +32,7 @@
       "failureCount": 0,
       "averageDurationMs": 0,
       "isRunning": false,
-      "nextRun": "2026-03-10T00:02:03.574Z"
+      "nextRun": "2026-03-10T00:55:11.921Z"
     },
     "testgaps": {
       "runCount": 0,
@@ -40,7 +40,7 @@
       "failureCount": 0,
       "averageDurationMs": 0,
       "isRunning": false,
-      "nextRun": "2026-03-10T00:04:03.574Z"
+      "nextRun": "2026-03-10T00:57:11.921Z"
     },
     "predict": {
       "runCount": 0,
@@ -59,8 +59,8 @@
   },
   "config": {
     "autoStart": false,
-    "logDir": "/Users/cohen/GitHub/ruvnet/RuView/rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/.claude-flow/logs",
-    "stateFile": "/Users/cohen/GitHub/ruvnet/RuView/rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/.claude-flow/daemon-state.json",
+    "logDir": "/Users/cohen/GitHub/ruvnet/RuView/v2/crates/wifi-densepose-desktop/ui/.claude-flow/logs",
+    "stateFile": "/Users/cohen/GitHub/ruvnet/RuView/v2/crates/wifi-densepose-desktop/ui/.claude-flow/daemon-state.json",
     "maxConcurrent": 2,
     "workerTimeoutMs": 300000,
     "resourceThresholds": {
@@ -126,5 +126,5 @@
       }
     ]
   },
-  "savedAt": "2026-03-09T23:56:03.574Z"
+  "savedAt": "2026-03-10T00:49:11.921Z"
 }

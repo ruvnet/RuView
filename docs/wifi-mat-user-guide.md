@@ -92,7 +92,7 @@ sudo apt-get install -y build-essential pkg-config libssl-dev
 ```bash
 # Clone the repository
 git clone https://github.com/ruvnet/wifi-densepose.git
-cd wifi-densepose/rust-port/wifi-densepose-rs
+cd wifi-densepose/v2
 
 # Build the wifi-mat crate
 cargo build --release --package wifi-densepose-mat
