@@ -28,10 +28,14 @@
 #![warn(missing_docs)]
 
 pub mod frame;
+pub mod propagation;
 pub mod scene;
 pub mod source;
 
 pub use frame::{MagFrame, MAG_FRAME_MAGIC, MAG_FRAME_VERSION};
+pub use propagation::{
+    attenuate, material_is_heavy, material_loss_db_per_m, LosSegment, Material, Propagator,
+};
 pub use scene::{CurrentLoop, DipoleSource, EddyCurrent, FerrousObject, Scene};
 pub use source::{
     current_loop_field, dipole_field, ferrous_field, scene_field_at, scene_field_at_sensors,
