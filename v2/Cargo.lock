@@ -8434,6 +8434,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "wifi-densepose-core",
+ "wifi-densepose-ruvector",
 ]
 
 [[package]]

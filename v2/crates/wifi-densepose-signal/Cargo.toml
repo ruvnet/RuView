@@ -45,6 +45,8 @@ midstreamer-attractor = { workspace = true }
 
 # Internal
 wifi-densepose-core = { version = "0.3.0", path = "../wifi-densepose-core" }
+# ADR-084 Pass 2: sketch-prefilter for the EmbeddingHistory search loop.
+wifi-densepose-ruvector = { version = "0.3.0", path = "../wifi-densepose-ruvector", default-features = false }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
