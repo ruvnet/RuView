@@ -24,7 +24,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: wasm32-unknown-unknown }
 
-      - run: cargo install wasm-pack --locked --version 0.13.x || true
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Build nvsim WASM
         working-directory: v2
