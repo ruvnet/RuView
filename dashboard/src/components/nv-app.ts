@@ -18,6 +18,7 @@ import './nv-debug-hud';
 import './nv-settings-drawer';
 import './nv-onboarding';
 import './nv-ghost-murmur';
+import './nv-help';
 
 export type View = 'scene' | 'apps' | 'inspector' | 'witness' | 'ghost-murmur';
 
@@ -120,6 +121,7 @@ export class NvApp extends LitElement {
       <nv-debug-hud></nv-debug-hud>
       <nv-settings-drawer></nv-settings-drawer>
       <nv-onboarding></nv-onboarding>
+      <nv-help></nv-help>
     `;
   }
 }

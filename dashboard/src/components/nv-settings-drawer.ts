@@ -111,6 +111,15 @@ export class NvSettingsDrawer extends LitElement {
 
   private close(): void { this.open = false; this.removeAttribute('open'); }
 
+  private async resetPrefs(): Promise<void> {
+    if (!confirm('Reset all preferences and IndexedDB state? Reloads the page.')) return;
+    try {
+      const dbs = await indexedDB.databases?.();
+      if (dbs) for (const d of dbs) if (d.name) indexedDB.deleteDatabase(d.name);
+    } catch { /* noop */ }
+    location.reload();
+  }
+
   override render() {
     return html`
       <div class="scrim" @click=${() => this.close()}></div>
@@ -122,29 +131,38 @@ export class NvSettingsDrawer extends LitElement {
         <div class="group">
           <h4>Appearance</h4>
           <div class="row">
-            <div><div class="lbl">Theme</div></div>
+            <div>
+              <div class="lbl">Theme</div>
+              <div class="desc">Dark is the default; light has higher contrast for daylight work.</div>
+            </div>
             <div class="seg">
-              <button class=${theme.value === 'dark' ? 'on' : ''} @click=${() => theme.value = 'dark'}>dark</button>
-              <button class=${theme.value === 'light' ? 'on' : ''} @click=${() => theme.value = 'light'}>light</button>
+              <button class=${theme.value === 'dark' ? 'on' : ''}
+                @click=${() => theme.value = 'dark'}>dark</button>
+              <button class=${theme.value === 'light' ? 'on' : ''}
+                @click=${() => theme.value = 'light'}>light</button>
             </div>
           </div>
           <div class="row">
             <div>
               <div class="lbl">Density</div>
-              <div class="desc">Affects panel padding and font scale.</div>
+              <div class="desc">Affects panel padding and font scale (15 / 14 / 13 px). Choose what your eyes prefer.</div>
             </div>
             <div class="seg">
-              <button class=${density.value === 'comfy' ? 'on' : ''} @click=${() => density.value = 'comfy'}>comfy</button>
-              <button class=${density.value === 'default' ? 'on' : ''} @click=${() => density.value = 'default'}>default</button>
-              <button class=${density.value === 'compact' ? 'on' : ''} @click=${() => density.value = 'compact'}>compact</button>
+              <button class=${density.value === 'comfy' ? 'on' : ''}
+                @click=${() => density.value = 'comfy'}>comfy</button>
+              <button class=${density.value === 'default' ? 'on' : ''}
+                @click=${() => density.value = 'default'}>default</button>
+              <button class=${density.value === 'compact' ? 'on' : ''}
+                @click=${() => density.value = 'compact'}>compact</button>
             </div>
           </div>
           <div class="row">
             <div>
               <div class="lbl">Reduce motion</div>
-              <div class="desc">Disable rotating crystal & field-line animation.</div>
+              <div class="desc">Stops the rotating diamond, animated field lines, and chart easing. Auto-on if your system has the prefers-reduced-motion preference set.</div>
             </div>
             <span class="toggle ${motionReduced.value ? 'on' : ''}"
+              role="switch" aria-checked=${motionReduced.value}
               @click=${() => motionReduced.value = !motionReduced.value}></span>
           </div>
         </div>
@@ -152,9 +170,12 @@ export class NvSettingsDrawer extends LitElement {
         <div class="group">
           <h4>Pipeline</h4>
           <div class="row">
-            <div><div class="lbl">Auto-rerun on edit</div>
-            <div class="desc">Restart pipeline when scene/config changes.</div></div>
+            <div>
+              <div class="lbl">Auto-rerun on edit</div>
+              <div class="desc">When you change a Tunables slider or load a new scene, push the change to the worker without a manual restart.</div>
+            </div>
             <span class="toggle ${autoUpdate.value ? 'on' : ''}"
+              role="switch" aria-checked=${autoUpdate.value}
               @click=${() => autoUpdate.value = !autoUpdate.value}></span>
           </div>
         </div>
@@ -162,18 +183,77 @@ export class NvSettingsDrawer extends LitElement {
         <div class="group">
           <h4>Transport</h4>
           <div class="row">
-            <div><div class="lbl">Mode</div></div>
+            <div>
+              <div class="lbl">Mode</div>
+              <div class="desc">WASM runs nvsim in your browser (default, no server). WS connects to a host-supplied nvsim-server (REST + binary WebSocket); see ADR-092 §6.2.</div>
+            </div>
             <div class="seg">
-              <button class=${transport.value === 'wasm' ? 'on' : ''} @click=${() => transport.value = 'wasm'}>WASM</button>
-              <button class=${transport.value === 'ws' ? 'on' : ''} @click=${() => transport.value = 'ws'}>WS</button>
+              <button class=${transport.value === 'wasm' ? 'on' : ''}
+                @click=${() => transport.value = 'wasm'}>WASM</button>
+              <button class=${transport.value === 'ws' ? 'on' : ''}
+                @click=${() => transport.value = 'ws'}>WS</button>
             </div>
           </div>
           ${transport.value === 'ws' ? html`
             <div class="row">
-              <div><div class="lbl">WS URL</div></div>
+              <div>
+                <div class="lbl">WS URL</div>
+                <div class="desc">Where your nvsim-server is listening. The server defaults to 127.0.0.1:7878.</div>
+              </div>
               <input type="text" placeholder="ws://localhost:7878" .value=${wsUrl.value}
                 @input=${(e: Event) => wsUrl.value = (e.target as HTMLInputElement).value} />
             </div>` : ''}
+        </div>
+
+        <div class="group">
+          <h4>Help</h4>
+          <div class="row">
+            <div>
+              <div class="lbl">Open help center</div>
+              <div class="desc">Quickstart, glossary, FAQ, and shortcuts. Press <kbd style="font-family:var(--mono);font-size:10.5px;padding:1px 4px;background:var(--bg-3);border:1px solid var(--line);border-radius:3px;">?</kbd> any time.</div>
+            </div>
+            <button class="seg"
+              @click=${() => { this.close(); window.dispatchEvent(new CustomEvent('nv-show-help')); }}
+              style="padding:6px 12px;cursor:pointer;background:var(--bg-3);border:1px solid var(--line);border-radius:6px;color:var(--ink);">
+              Open
+            </button>
+          </div>
+          <div class="row">
+            <div>
+              <div class="lbl">Replay welcome tour</div>
+              <div class="desc">Re-show the 6-step first-run walkthrough.</div>
+            </div>
+            <button class="seg"
+              @click=${() => { this.close(); window.dispatchEvent(new CustomEvent('nv-show-tour')); }}
+              style="padding:6px 12px;cursor:pointer;background:var(--bg-3);border:1px solid var(--line);border-radius:6px;color:var(--ink);">
+              Replay
+            </button>
+          </div>
+          <div class="row">
+            <div>
+              <div class="lbl">Reset all preferences</div>
+              <div class="desc">Wipe theme, density, motion, scene drag positions, REPL history, and the onboarding-seen flag.</div>
+            </div>
+            <button class="seg"
+              @click=${() => this.resetPrefs()}
+              style="padding:6px 12px;cursor:pointer;background:var(--bg-3);border:1px solid oklch(0.65 0.22 25 / 0.4);border-radius:6px;color:var(--bad);">
+              Reset
+            </button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h4>About</h4>
+          <div class="row" style="border-bottom:0;">
+            <div>
+              <div class="lbl">nvsim · v0.3.0</div>
+              <div class="desc">Open-source NV-diamond simulator. Apache-2.0 OR MIT.<br>
+                <a style="color:var(--accent-2); text-decoration:underline dotted; cursor:pointer;"
+                  @click=${() => { this.close(); window.dispatchEvent(new CustomEvent('nv-show-help', { detail: { section: 'about' } })); }}>
+                  More info →
+                </a></div>
+            </div>
+          </div>
         </div>
       </div>
     `;

@@ -237,8 +237,17 @@ export class NvInspector extends LitElement {
 
     const b = lastB.value;
     const bnT = [b[0] * 1e9, b[1] * 1e9, b[2] * 1e9];
+    const hasData = traceX.value.length > 0;
 
     return html`
+      ${!hasData ? html`
+        <div class="card" style="text-align:center; padding:18px;">
+          <div style="font-size:13px; color:var(--ink-2); line-height:1.55;">
+            No frames yet. Press <b>▶ Run</b> in the topbar (or hit <code style="font-family:var(--mono);background:var(--bg-3);padding:1px 5px;border-radius:4px;color:var(--accent);">Space</code>)
+            to start the live B-vector trace.
+          </div>
+        </div>
+      ` : ''}
       <div class=${this.expanded ? 'grid-2' : ''}>
         <div class="card">
           <div class="card-h">
@@ -286,6 +295,13 @@ export class NvInspector extends LitElement {
       hex = arr.slice(0, 60).join(' ');
     }
     return html`
+      ${!f ? html`
+        <div class="card" style="text-align:center; padding:18px;">
+          <div style="font-size:13px; color:var(--ink-2); line-height:1.55;">
+            No MagFrame to display yet. Start the pipeline (<b>▶ Run</b>) to populate.
+          </div>
+        </div>
+      ` : ''}
       <div class=${this.expanded ? 'grid-2' : ''}>
       <div class="card">
         <div class="card-h">

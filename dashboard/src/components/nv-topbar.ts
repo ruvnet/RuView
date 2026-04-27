@@ -117,7 +117,12 @@ export class NvTopbar extends LitElement {
         @click=${this.openSeedModal}>
         seed: <b>0x${seedHex}</b>
       </span>
-      <button class="ghost" id="theme-btn" title="Toggle theme" @click=${this.toggleTheme}>
+      <button class="ghost" id="help-btn" title="Help (press ? any time)" aria-label="Open help"
+        @click=${() => window.dispatchEvent(new CustomEvent('nv-show-help'))}>
+        ?
+      </button>
+      <button class="ghost" id="theme-btn" title="Toggle theme" aria-label="Toggle theme"
+        @click=${this.toggleTheme}>
         ${theme.value === 'dark' ? '☼' : '☾'}
       </button>
       <button id="reset-btn" @click=${this.reset}>↺ Reset</button>
