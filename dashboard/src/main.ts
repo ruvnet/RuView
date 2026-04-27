@@ -9,7 +9,9 @@ import {
   pushLog, expectedWitness, framesEmitted, fps, lastB, bMag,
   pushTrace, pushStripBar, lastFrame, sceneJson, witnessHex,
   replHistory, scenePositions, type SceneItemPos,
+  activeAppIds, pushAppEvent,
 } from './store/appStore';
+import { APP_RUNTIMES, type AppRuntimeContext } from './store/appRuntimes';
 import { kvGet, kvSet } from './store/persistence';
 
 function applyTheme(t: string): void {
@@ -59,6 +61,11 @@ function applyMotion(reduced: boolean): void {
     }
   });
 
+  // Per-app runtime scratch state + history buffer.
+  const appState: Record<string, Record<string, number>> = {};
+  const bMagHistory: number[] = [];
+  const runtimeStartTs = performance.now();
+
   client.onFrames((batch) => {
     if (batch.frames.length === 0) return;
     const last = batch.frames[batch.frames.length - 1];
@@ -67,11 +74,44 @@ function applyMotion(reduced: boolean): void {
     const by = last.bPt[1] * 1e-12;
     const bz = last.bPt[2] * 1e-12;
     lastB.value = [bx, by, bz];
-    bMag.value = Math.sqrt(bx * bx + by * by + bz * bz);
-    // For trace display we use nT scale.
+    const bmagT = Math.sqrt(bx * bx + by * by + bz * bz);
+    bMag.value = bmagT;
     pushTrace([bx * 1e9, by * 1e9, bz * 1e9]);
     const amp = Math.min(1, Math.abs(bz * 1e9) / 5 + 0.3);
     pushStripBar(amp);
+
+    bMagHistory.push(bmagT);
+    while (bMagHistory.length > 256) bMagHistory.shift();
+
+    // Dispatch the frame to every active simulated app runtime.
+    const activeIds = activeAppIds.value;
+    if (activeIds.size === 0) return;
+    const elapsedS = (performance.now() - runtimeStartTs) / 1000;
+    for (const id of activeIds) {
+      const fn = APP_RUNTIMES[id];
+      if (!fn) continue; // mesh-only apps — toggle persists, no in-browser runtime
+      if (!appState[id]) appState[id] = {};
+      const ctx: AppRuntimeContext = {
+        frame: last,
+        bMagT: bmagT,
+        bRecoveredT: [bx, by, bz],
+        bHistory: bMagHistory,
+        elapsedS,
+        state: appState[id],
+      };
+      try {
+        const result = fn(ctx);
+        if (!result) continue;
+        const evs = Array.isArray(result) ? result : [result];
+        for (const ev of evs) {
+          pushAppEvent(ev);
+          pushLog('info',
+            `<span class="k">[${ev.appId}]</span> <span class="s">${ev.eventName}</span> <span class="n">(${ev.eventId})</span>${ev.detail ? ' · ' + ev.detail : ''}`);
+        }
+      } catch (e) {
+        pushLog('warn', `[${id}] runtime error: ${(e as Error).message}`);
+      }
+    }
   });
 
   try {

@@ -68,6 +68,27 @@ export function pushReplHistory(cmd: string): void {
 export interface SceneItemPos { id: string; x: number; y: number }
 export const scenePositions = signal<SceneItemPos[]>([]);
 
+/** App-runtime emitted events. See appRuntimes.ts. */
+import type { AppEvent } from './appRuntimes';
+export const appEvents = signal<AppEvent[]>([]);
+export const appEventCounts = signal<Record<string, number>>({});
+
+export function pushAppEvent(ev: AppEvent): void {
+  const next = appEvents.value.slice();
+  next.push(ev);
+  while (next.length > 200) next.shift();
+  appEvents.value = next;
+
+  const c = { ...appEventCounts.value };
+  c[ev.appId] = (c[ev.appId] ?? 0) + 1;
+  appEventCounts.value = c;
+}
+
+/** Active app activations — driven by the App Store toggles. Mirrored
+ * from `apps.ts` but exposed as a signal here so `main.ts` can dispatch
+ * frames to active runtimes without importing the App Store component. */
+export const activeAppIds = signal<Set<string>>(new Set());
+
 export const transportLabel = computed<string>(() =>
   transport.value === 'wasm' ? 'wasm' : 'ws',
 );

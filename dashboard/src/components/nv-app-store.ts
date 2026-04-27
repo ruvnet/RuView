@@ -18,7 +18,8 @@ import {
   type AppCategory, type AppManifest, type AppActivation,
 } from '../store/apps';
 import { kvGet, kvSet } from '../store/persistence';
-import { pushLog } from '../store/appStore';
+import { pushLog, activeAppIds, appEvents, appEventCounts } from '../store/appStore';
+import { hasRuntime } from '../store/appRuntimes';
 
 const activations = signal<AppActivation[]>(defaultActivations());
 const query = signal<string>('');
@@ -31,9 +32,13 @@ const statusFilter = signal<'all' | 'available' | 'beta' | 'research'>('all');
 })();
 
 effect(() => {
-  // Persist activations on change (post-load).
+  // Persist activations on change (post-load) AND mirror into the
+  // active-set signal that main.ts watches to drive runtime dispatch.
   const v = activations.value;
   if (v.length > 0) void kvSet('app-activations', v);
+  const set = new Set<string>();
+  for (const a of v) if (a.active) set.add(a.id);
+  activeAppIds.value = set;
 });
 
 @customElement('nv-app-store')
@@ -142,6 +147,53 @@ export class NvAppStore extends LitElement {
     .badge.status-beta { color: var(--warn); border-color: oklch(0.7 0.18 35 / 0.4); }
     .badge.status-research { color: var(--accent-3); border-color: oklch(0.72 0.18 330 / 0.4); }
     .badge.budget { color: var(--accent-2); border-color: oklch(0.78 0.12 195 / 0.3); }
+    .badge.rt-running { color: var(--ok); border-color: oklch(0.78 0.14 145 / 0.5); background: oklch(0.78 0.14 145 / 0.08); }
+    .badge.rt-simulated { color: var(--accent); border-color: oklch(0.78 0.14 70 / 0.5); background: oklch(0.78 0.14 70 / 0.08); }
+    .badge.rt-mesh-only { color: var(--ink-3); border-color: var(--line); }
+    .events-feed {
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px;
+      margin-bottom: 18px;
+    }
+    .events-feed h3 {
+      margin: 0 0 8px;
+      font-size: 13px; font-weight: 600;
+      color: var(--ink);
+    }
+    .events-feed .lead {
+      font-size: 12px; color: var(--ink-3);
+      margin: 0 0 10px;
+      line-height: 1.5;
+    }
+    .events-feed .lines {
+      display: flex; flex-direction: column; gap: 4px;
+      max-height: 160px; overflow-y: auto;
+    }
+    .ev-line {
+      display: grid;
+      grid-template-columns: 60px 90px 1fr;
+      gap: 10px;
+      padding: 4px 6px;
+      border-radius: 4px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink-2);
+    }
+    .ev-line:hover { background: var(--bg-3); }
+    .ev-line .ts { color: var(--ink-4); font-size: 10.5px; }
+    .ev-line .id { color: var(--accent); font-size: 10.5px; }
+    .ev-line .body { color: var(--ink); }
+    .ev-empty {
+      font-size: 12px; color: var(--ink-3);
+      padding: 8px 0;
+    }
+    .card-events-count {
+      font-size: 10.5px;
+      color: var(--accent-4);
+      font-family: var(--mono);
+    }
     .card-foot {
       display: flex; align-items: center; gap: 8px;
       padding-top: 8px; margin-top: 4px;
@@ -178,7 +230,11 @@ export class NvAppStore extends LitElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
-    effect(() => { activations.value; query.value; activeCat.value; statusFilter.value; this.renderTick++; });
+    effect(() => {
+      activations.value; query.value; activeCat.value; statusFilter.value;
+      appEvents.value; appEventCounts.value;
+      this.renderTick++;
+    });
   }
 
   private isActive(id: string): boolean {
@@ -186,9 +242,18 @@ export class NvAppStore extends LitElement {
   }
 
   private toggle(app: AppManifest): void {
+    const wasActive = this.isActive(app.id);
     const next = activations.value.map((a) => a.id === app.id ? { ...a, active: !a.active, lastActivatedAt: Date.now() } : a);
     activations.value = next;
-    pushLog(this.isActive(app.id) ? 'ok' : 'info', `app <span class="k">${app.id}</span> deactivated`);
+    if (!wasActive) {
+      const r = app.runtime ?? 'mesh-only';
+      const note = r === 'simulated' ? ' · live runtime engaged'
+        : r === 'mesh-only' ? ' · queued (needs ESP32 mesh)'
+        : '';
+      pushLog('ok', `app <span class="k">${app.id}</span> activated${note}`);
+    } else {
+      pushLog('info', `app <span class="k">${app.id}</span> deactivated`);
+    }
   }
 
   private filtered(): AppManifest[] {
@@ -247,15 +312,64 @@ export class NvAppStore extends LitElement {
         <span class="chip ${statusFilter.value === 'research' ? 'on' : ''}" @click=${() => statusFilter.value = 'research'}>research</span>
       </div>
 
+      ${this.renderEventsFeed()}
+
       ${list.length === 0
         ? html`<div class="empty">No apps match the current filters.</div>`
         : html`<div class="grid">${list.map((app) => this.card(app))}</div>`}
     `;
   }
 
+  private renderEventsFeed() {
+    const evs = appEvents.value.slice(-12).reverse();
+    const activeSimCount = activations.value.filter((a) => a.active && hasRuntime(a.id)).length;
+    return html`
+      <div class="events-feed">
+        <h3>Live runtime feed
+          ${activeSimCount > 0
+            ? html`<span class="card-events-count" style="margin-left: 8px;">${activeSimCount} simulated app${activeSimCount === 1 ? '' : 's'} active</span>`
+            : ''}
+        </h3>
+        <p class="lead">
+          Apps with the <span class="badge rt-simulated" style="font-size:9.5px; padding:0 4px;">simulated</span>
+          runtime emit real i32 event IDs against nvsim's live frame stream below.
+          Apps with <span class="badge rt-mesh-only" style="font-size:9.5px; padding:0 4px;">mesh-only</span>
+          need an ESP32-S3 + WS transport (deferred to V2). The
+          <span class="badge rt-running" style="font-size:9.5px; padding:0 4px;">running</span>
+          badge marks <code>nvsim</code> itself, which is always running.
+        </p>
+        ${evs.length === 0
+          ? html`<div class="ev-empty">No events yet. Toggle a card with the <i>simulated</i> badge and press <b>▶ Run</b>.</div>`
+          : html`<div class="lines">${evs.map((ev) => {
+              const dt = new Date(ev.ts);
+              const ts = `${String(dt.getSeconds()).padStart(2, '0')}.${String(dt.getMilliseconds()).padStart(3, '0')}`;
+              return html`
+                <div class="ev-line">
+                  <span class="ts">${ts}</span>
+                  <span class="id">${ev.appId}</span>
+                  <span class="body"><b style="color:var(--accent-2);">${ev.eventName}</b><span style="color:var(--ink-3);"> · ${ev.eventId}</span> ${ev.detail ? `· ${ev.detail}` : ''}</span>
+                </div>
+              `;
+            })}</div>`}
+      </div>
+    `;
+  }
+
   private card(app: AppManifest) {
     const active = this.isActive(app.id);
     const cat = CATEGORIES[app.category];
+    const runtime = app.runtime ?? 'mesh-only';
+    const evCount = appEventCounts.value[app.id] ?? 0;
+    const runtimeLabel: Record<string, string> = {
+      'running': 'running',
+      'simulated': 'simulated',
+      'mesh-only': 'needs mesh',
+    };
+    const runtimeTip: Record<string, string> = {
+      'running': 'This app is genuinely running in your browser right now.',
+      'simulated': 'A pared-down version of this algorithm runs against nvsim\'s magnetic frame stream as a proxy for its native CSI input. Toggle on, then press ▶ Run to see real event IDs in the feed.',
+      'mesh-only': 'This algorithm needs CSI subcarrier data from an ESP32-S3 mesh. The toggle persists; activation is pushed via WS transport (V2).',
+    };
     return html`
       <div class="card ${active ? 'active' : ''}" data-app-id=${app.id}>
         <div class="card-h">
@@ -266,12 +380,14 @@ export class NvAppStore extends LitElement {
         <div class="meta">
           <span class="badge cat">${cat.label}</span>
           <span class="badge status-${app.status}">${app.status}</span>
+          <span class="badge rt-${runtime}" title=${runtimeTip[runtime]}>${runtimeLabel[runtime]}</span>
           ${app.budget ? html`<span class="badge budget">budget ${app.budget}</span>` : ''}
           ${app.adr ? html`<span class="badge">${app.adr}</span>` : ''}
           ${app.events?.length ? html`<span class="badge">events ${app.events.join('·')}</span>` : ''}
         </div>
         <div class="card-foot">
           <span class="events">${app.crate}</span>
+          ${evCount > 0 ? html`<span class="card-events-count">⚡ ${evCount} ev</span>` : ''}
           <span class="toggle ${active ? 'on' : ''}" role="switch"
             aria-checked=${active}
             data-app-toggle=${app.id}

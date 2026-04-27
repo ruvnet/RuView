@@ -42,6 +42,19 @@ export type AppCategory =
   | 'aut'
   | 'exo';
 
+/** What actually happens when a card's toggle is on.
+ * - `running` — the algorithm is genuinely running in the browser right now
+ *   (e.g. `nvsim` itself, which is the simulator the dashboard fronts).
+ * - `simulated` — a pared-down version of the algorithm runs against nvsim's
+ *   live magnetic frame stream as a *proxy* for its native CSI input.
+ *   Emits real i32 event IDs into the console feed; output is illustrative,
+ *   not engineering-grade. Listed apps' Rust source is real, builds for
+ *   wasm32-unknown-unknown, and passes its native unit tests.
+ * - `mesh-only` — algorithm needs CSI subcarrier data from a real ESP32-S3
+ *   mesh (or a future CSI simulator). Toggling persists the selection so
+ *   the WS transport can push activation when connected. */
+export type AppRuntime = 'running' | 'simulated' | 'mesh-only';
+
 export interface AppManifest {
   /** Stable kebab-case id; matches the wasm-edge module name (e.g. `med_sleep_apnea`). */
   id: string;
@@ -67,6 +80,8 @@ export interface AppManifest {
   status: 'available' | 'beta' | 'research';
   /** ADR back-reference. */
   adr?: string;
+  /** What actually happens when active — see AppRuntime docs. */
+  runtime?: AppRuntime;
 }
 
 export const APPS: AppManifest[] = [
@@ -83,6 +98,7 @@ export const APPS: AppManifest[] = [
     status: 'available',
     tags: ['quantum', 'magnetometer', 'simulator', 'witness', 'wasm'],
     adr: 'ADR-089',
+    runtime: 'running',
   },
 
   // ── Core sensing primitives (ADR-014/040 flagship modules) ───────────────
@@ -97,6 +113,7 @@ export const APPS: AppManifest[] = [
     status: 'available',
     tags: ['hci', 'csi', 'classifier', 'dtw'],
     adr: 'ADR-014',
+    runtime: 'mesh-only',
   },
   {
     id: 'coherence',
@@ -109,6 +126,7 @@ export const APPS: AppManifest[] = [
     status: 'available',
     tags: ['gate', 'csi', 'coherence', 'drift'],
     adr: 'ADR-029',
+    runtime: 'simulated',
   },
   {
     id: 'adversarial',
@@ -122,6 +140,7 @@ export const APPS: AppManifest[] = [
     status: 'available',
     tags: ['security', 'csi', 'spoofing', 'mesh'],
     adr: 'ADR-032',
+    runtime: 'simulated',
   },
   {
     id: 'rvf',
@@ -144,6 +163,7 @@ export const APPS: AppManifest[] = [
     budget: 'S',
     status: 'available',
     tags: ['csi', 'building', 'presence'],
+    runtime: 'simulated',
   },
   {
     id: 'vital_trend',
@@ -156,6 +176,7 @@ export const APPS: AppManifest[] = [
     status: 'available',
     tags: ['medical', 'vitals', 'csi'],
     adr: 'ADR-021',
+    runtime: 'simulated',
   },
   {
     id: 'intrusion',
@@ -167,6 +188,7 @@ export const APPS: AppManifest[] = [
     budget: 'S',
     status: 'available',
     tags: ['security', 'zone', 'csi'],
+    runtime: 'simulated',
   },
 
   // ── Medical & Health (100-series) ────────────────────────────────────────
@@ -241,7 +263,7 @@ export const APPS: AppManifest[] = [
   { id: 'aut_self_healing_mesh', name: 'Self-healing mesh', category: 'aut', crate: 'wifi-densepose-wasm-edge', summary: 'Mesh-topology repair with per-node health gossip.', budget: 'M', status: 'beta', tags: ['mesh', 'health'] },
 
   // ── Exotic / Research (650-series) ───────────────────────────────────────
-  { id: 'exo_ghost_hunter', name: 'Ghost hunter (anomaly)', category: 'exo', crate: 'wifi-densepose-wasm-edge', summary: 'Empty-room CSI anomaly detector — impulsive/periodic/drift/random + hidden-presence sub-detector.', events: [650, 651, 652, 653], budget: 'S', status: 'available', tags: ['anomaly', 'paranormal', 'csi'], adr: 'ADR-041' },
+  { id: 'exo_ghost_hunter', name: 'Ghost hunter (anomaly)', category: 'exo', crate: 'wifi-densepose-wasm-edge', summary: 'Empty-room CSI anomaly detector — impulsive/periodic/drift/random + hidden-presence sub-detector.', events: [650, 651, 652, 653], budget: 'S', status: 'available', tags: ['anomaly', 'paranormal', 'csi'], adr: 'ADR-041', runtime: 'simulated' },
   { id: 'exo_breathing_sync', name: 'Breathing sync', category: 'exo', crate: 'wifi-densepose-wasm-edge', summary: 'Multi-person breathing synchrony analytics.', budget: 'M', status: 'beta', tags: ['breathing', 'sync'] },
   { id: 'exo_dream_stage', name: 'Dream-stage classifier', category: 'exo', crate: 'wifi-densepose-wasm-edge', summary: 'NREM/REM stage classification from breathing + micro-motion.', budget: 'M', status: 'research', tags: ['sleep', 'rem'] },
   { id: 'exo_emotion_detect', name: 'Emotion detector', category: 'exo', crate: 'wifi-densepose-wasm-edge', summary: 'Coarse arousal/valence from breathing + heart-rate variability.', budget: 'M', status: 'research', tags: ['affect'] },
