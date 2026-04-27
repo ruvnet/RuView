@@ -43,7 +43,9 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-nvsim-
 
       - name: Install wasm-pack
-        run: cargo install wasm-pack --locked --version 0.13.x || true
+        run: |
+          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+          which wasm-pack
 
       - name: Build nvsim WASM
         working-directory: v2
