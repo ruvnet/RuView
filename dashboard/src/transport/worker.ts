@@ -23,6 +23,15 @@ type WasmPipelineStatic = WasmPipelineCtor & {
   frameBytes(): number;
 };
 
+interface TransientResult {
+  bRecoveredT: Float64Array;
+  bMagT: number;
+  noiseFloorPtSqrtHz: number;
+  sigmaPt: Float64Array;
+  nFrames: number;
+  witnessHex: string;
+}
+
 interface NvsimPkg {
   default: (input?: unknown) => Promise<unknown>;
   WasmPipeline: WasmPipelineStatic;
@@ -30,6 +39,7 @@ interface NvsimPkg {
   expectedReferenceWitnessHex: () => string;
   hexWitness: (b: Uint8Array) => string;
   referenceWitness: () => Uint8Array;
+  runTransient: (sceneJson: string, configJson: string, seed: number, nSamples: number) => TransientResult;
 }
 
 let _WasmPipeline!: WasmPipelineStatic;
@@ -37,6 +47,7 @@ let referenceSceneJson!: () => string;
 let expectedReferenceWitnessHex!: () => string;
 let hexWitness!: (b: Uint8Array) => string;
 let referenceWitness!: () => Uint8Array;
+let runTransient!: (sceneJson: string, configJson: string, seed: number, nSamples: number) => TransientResult;
 
 async function loadPkg(base: string): Promise<void> {
   // `base` is the dashboard's BASE_URL injected by Vite, prefixed with the
@@ -51,6 +62,7 @@ async function loadPkg(base: string): Promise<void> {
   expectedReferenceWitnessHex = pkg.expectedReferenceWitnessHex;
   hexWitness = pkg.hexWitness;
   referenceWitness = pkg.referenceWitness;
+  runTransient = pkg.runTransient;
 }
 
 let pipeline: WasmPipelineApi | null = null;
@@ -233,6 +245,24 @@ ws.addEventListener('message', async (ev: MessageEvent): Promise<void> => {
           },
           [actualBuf],
         );
+        break;
+      }
+      case 'runTransient': {
+        const sceneJson = m.scene as string;
+        const configJson = m.config as string;
+        const seed = (m.seed as number) ?? 0;
+        const samples = (m.samples as number) ?? 64;
+        const r = runTransient(sceneJson, configJson, seed, samples);
+        post({
+          type: 'transient',
+          id: m.id,
+          bRecoveredT: Array.from(r.bRecoveredT),
+          bMagT: r.bMagT,
+          noiseFloorPtSqrtHz: r.noiseFloorPtSqrtHz,
+          sigmaPt: Array.from(r.sigmaPt),
+          nFrames: r.nFrames,
+          witnessHex: r.witnessHex,
+        });
         break;
       }
       case 'buildId': {

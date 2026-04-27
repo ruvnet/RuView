@@ -7,12 +7,16 @@ export interface PipelineConfigJson {
   digitiser?: {
     f_s_hz: number;
     f_mod_hz: number;
-    lp_cutoff_hz: number;
+    lp_cutoff_hz?: number;
   };
   sensor?: {
-    n_centers: number;
-    contrast: number;
-    t2_star_s: number;
+    gamma_fwhm_hz?: number;
+    t1_s?: number;
+    t2_s?: number;
+    t2_star_s?: number;
+    contrast?: number;
+    n_spins?: number;
+    n_centers?: number;
     shot_noise_disabled?: boolean;
   };
   dt_s?: number | null;
@@ -63,6 +67,17 @@ export type NvsimEvent =
 
 export interface RunOpts { frames?: number }
 
+/** One-shot pipeline run for "what would the sensor recover at this scene?"
+ * use cases. Doesn't disturb the running pipeline. */
+export interface TransientRunResult {
+  bRecoveredT: [number, number, number];
+  bMagT: number;
+  noiseFloorPtSqrtHz: number;
+  sigmaPt: [number, number, number];
+  nFrames: number;
+  witnessHex: string;
+}
+
 export interface NvsimClient {
   loadScene(scene: SceneJson): Promise<void>;
   setConfig(cfg: PipelineConfigJson): Promise<void>;
@@ -78,6 +93,7 @@ export interface NvsimClient {
   generateWitness(samples: number): Promise<Uint8Array>;
   verifyWitness(expected: Uint8Array): Promise<{ ok: true } | { ok: false; actual: Uint8Array }>;
   exportProofBundle(): Promise<Blob>;
+  runTransient(scene: SceneJson, config: PipelineConfigJson, seed: bigint, samples: number): Promise<TransientRunResult>;
 
   buildId(): Promise<string>;
   close(): Promise<void>;

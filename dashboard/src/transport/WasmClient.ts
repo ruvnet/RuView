@@ -8,6 +8,7 @@ import {
   type RunOpts,
   type MagFrameBatch,
   type NvsimEvent,
+  type TransientRunResult,
   parseFrameBatch,
 } from './NvsimClient';
 
@@ -151,6 +152,36 @@ export class WasmClient implements NvsimClient {
     );
     if (r.ok) return { ok: true };
     return { ok: false, actual: new Uint8Array(r.actual) };
+  }
+
+  async runTransient(
+    scene: SceneJson,
+    config: PipelineConfigJson,
+    seed: bigint,
+    samples: number,
+  ): Promise<TransientRunResult> {
+    const r = await this.rpc<{
+      bRecoveredT: number[];
+      bMagT: number;
+      noiseFloorPtSqrtHz: number;
+      sigmaPt: number[];
+      nFrames: number;
+      witnessHex: string;
+    }>({
+      type: 'runTransient',
+      scene: JSON.stringify(scene),
+      config: JSON.stringify(config),
+      seed: Number(seed & 0xFFFFFFFFn),
+      samples,
+    });
+    return {
+      bRecoveredT: [r.bRecoveredT[0], r.bRecoveredT[1], r.bRecoveredT[2]],
+      bMagT: r.bMagT,
+      noiseFloorPtSqrtHz: r.noiseFloorPtSqrtHz,
+      sigmaPt: [r.sigmaPt[0], r.sigmaPt[1], r.sigmaPt[2]],
+      nFrames: r.nFrames,
+      witnessHex: r.witnessHex,
+    };
   }
 
   async exportProofBundle(): Promise<Blob> {

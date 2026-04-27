@@ -158,3 +158,78 @@ pub fn reference_witness() -> Result<js_sys::Uint8Array, JsValue> {
     arr.copy_from(&bytes);
     Ok(arr)
 }
+
+/// One-shot pipeline run that doesn't disturb the dashboard's main
+/// pipeline. Used by the Ghost Murmur interactive demo (and any other
+/// "run-against-this-scene-please" flow) to ask: given a scene + config,
+/// what does the NV sensor recover at the origin?
+///
+/// Returns a JS object:
+/// ```js
+/// {
+///   bRecoveredT: [number, number, number],   // recovered B (Tesla)
+///   bMagT:        number,                    // |B| (Tesla)
+///   noiseFloorPtSqrtHz: number,              // δB pT/√Hz from this config
+///   sigmaPt:      [number, number, number],  // per-axis 1σ noise estimate (pT)
+///   nFrames:      number,                    // samples actually run
+///   witnessHex:   string                     // SHA-256 witness for this run
+/// }
+/// ```
+#[wasm_bindgen(js_name = runTransient)]
+pub fn run_transient(
+    scene_json: &str,
+    config_json: &str,
+    seed: f64,
+    n_samples: usize,
+) -> Result<JsValue, JsValue> {
+    let scene: crate::scene::Scene =
+        serde_json::from_str(scene_json).map_err(|e| js_err(format!("scene parse: {e}")))?;
+    let config: crate::pipeline::PipelineConfig = serde_json::from_str(config_json)
+        .map_err(|e| js_err(format!("config parse: {e}")))?;
+    let pipeline = crate::pipeline::Pipeline::new(scene, config, seed as u64);
+    let (frames, witness) = pipeline.run_with_witness(n_samples);
+
+    // Average the recovered b_pt / sigma over the run for a stable point estimate.
+    let mut sum_b = [0.0_f64; 3];
+    let mut sum_s = [0.0_f64; 3];
+    let mut sum_nf = 0.0_f64;
+    let n = frames.len().max(1) as f64;
+    for f in &frames {
+        for k in 0..3 {
+            sum_b[k] += f.b_pt[k] as f64;
+            sum_s[k] += f.sigma_pt[k] as f64;
+        }
+        sum_nf += f.noise_floor_pt_sqrt_hz as f64;
+    }
+    let avg_b_pt = [sum_b[0] / n, sum_b[1] / n, sum_b[2] / n];
+    let avg_s_pt = [sum_s[0] / n, sum_s[1] / n, sum_s[2] / n];
+    let avg_nf = sum_nf / n;
+    let b_t = [
+        avg_b_pt[0] * 1.0e-12,
+        avg_b_pt[1] * 1.0e-12,
+        avg_b_pt[2] * 1.0e-12,
+    ];
+    let bmag_t = (b_t[0] * b_t[0] + b_t[1] * b_t[1] + b_t[2] * b_t[2]).sqrt();
+
+    let obj = js_sys::Object::new();
+    let b_arr = js_sys::Float64Array::new_with_length(3);
+    b_arr.copy_from(&b_t);
+    let s_arr = js_sys::Float64Array::new_with_length(3);
+    s_arr.copy_from(&avg_s_pt);
+    js_sys::Reflect::set(&obj, &JsValue::from_str("bRecoveredT"), &b_arr)?;
+    js_sys::Reflect::set(&obj, &JsValue::from_str("bMagT"), &JsValue::from_f64(bmag_t))?;
+    js_sys::Reflect::set(
+        &obj,
+        &JsValue::from_str("noiseFloorPtSqrtHz"),
+        &JsValue::from_f64(avg_nf),
+    )?;
+    js_sys::Reflect::set(&obj, &JsValue::from_str("sigmaPt"), &s_arr)?;
+    js_sys::Reflect::set(
+        &obj,
+        &JsValue::from_str("nFrames"),
+        &JsValue::from_f64(frames.len() as f64),
+    )?;
+    let witness_hex = crate::proof::Proof::hex(&witness);
+    js_sys::Reflect::set(&obj, &JsValue::from_str("witnessHex"), &JsValue::from_str(&witness_hex))?;
+    Ok(obj.into())
+}
