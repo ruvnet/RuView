@@ -330,9 +330,36 @@ impl<B: Backend> InferenceEngine<B> {
         Ok(result)
     }
 
-    /// Run batched inference
+    /// Run batched inference.
+    ///
+    /// Stacks all inputs along a new batch dimension, runs a single
+    /// backend call, then splits the output back into individual tensors.
+    /// Falls back to sequential inference if stack/split fails.
     pub fn infer_batch(&self, inputs: &[Tensor]) -> NnResult<Vec<Tensor>> {
-        inputs.iter().map(|input| self.infer(input)).collect()
+        if inputs.is_empty() {
+            return Ok(Vec::new());
+        }
+        if inputs.len() == 1 {
+            return Ok(vec![self.infer(&inputs[0])?]);
+        }
+        // Try batched path: stack -> single call -> split
+        match Tensor::stack(inputs) {
+            Ok(batched_input) => {
+                let n = inputs.len();
+                let batched_output = self.backend.run_single(&batched_input)?;
+                match batched_output.split(n) {
+                    Ok(outputs) => Ok(outputs),
+                    Err(_) => {
+                        // Fallback: sequential
+                        inputs.iter().map(|input| self.infer(input)).collect()
+                    }
+                }
+            }
+            Err(_) => {
+                // Fallback: sequential if shapes are incompatible
+                inputs.iter().map(|input| self.infer(input)).collect()
+            }
+        }
     }
 
     /// Get inference statistics

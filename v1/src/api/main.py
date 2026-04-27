@@ -17,7 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.config.settings import get_settings
 from src.config.domains import get_domain_config
-from src.api.routers import pose, stream, health
+from src.api.routers import pose, stream, health, auth
 from src.api.middleware.auth import AuthMiddleware
 from src.api.middleware.rate_limit import RateLimitMiddleware
 from src.api.dependencies import get_pose_service, get_stream_service, get_hardware_service
@@ -261,6 +261,12 @@ app.include_router(
     stream.router,
     prefix=f"{settings.api_prefix}/stream",
     tags=["Streaming"]
+)
+
+app.include_router(
+    auth.router,
+    prefix=f"{settings.api_prefix}",
+    tags=["Authentication"]
 )
 
 

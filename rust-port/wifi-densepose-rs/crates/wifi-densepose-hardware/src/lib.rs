@@ -41,7 +41,20 @@ pub mod aggregator;
 mod bridge;
 pub mod esp32;
 
+// ADR-081: Rust mirror of the firmware radio abstraction layer (L1) and
+// mesh sensing plane (L3). Lets host tests, simulators, and future
+// coordinator-node Rust code drive the controller stack without
+// touching any downstream signal/ruvector/train/mat crate.
+pub mod radio_ops;
+
 pub use csi_frame::{CsiFrame, CsiMetadata, SubcarrierData, Bandwidth, AntennaConfig};
 pub use error::ParseError;
 pub use esp32_parser::Esp32CsiParser;
 pub use bridge::CsiData;
+pub use radio_ops::{
+    RadioOps, RadioMode, CaptureProfile, RadioHealth, RadioError, MockRadio,
+    MeshRole, MeshMsgType, AuthClass, MeshHeader, NodeStatus, AnomalyAlert,
+    MeshError, MESH_MAGIC, MESH_VERSION, MESH_HEADER_SIZE, MESH_MAX_PAYLOAD,
+    crc32_ieee, decode_mesh, decode_node_status, decode_anomaly_alert,
+    encode_health,
+};

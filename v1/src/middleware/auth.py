@@ -56,6 +56,10 @@ class TokenManager:
         """Verify and decode JWT token."""
         try:
             payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
+            # Check token blacklist (logout invalidation)
+            from src.api.middleware.auth import token_blacklist
+            if token_blacklist.is_blacklisted(token):
+                raise AuthenticationError("Token has been revoked")
             return payload
         except JWTError as e:
             logger.warning(f"JWT verification failed: {e}")
@@ -237,13 +241,7 @@ class AuthenticationMiddleware:
         """Authenticate the request and return user info."""
         # Try to get token from Authorization header
         authorization = request.headers.get("Authorization")
-        if not authorization:
-            # For WebSocket connections, try to get token from query parameters
-            if request.url.path.startswith("/ws"):
-                token = request.query_params.get("token")
-                if token:
-                    authorization = f"Bearer {token}"
-        
+
         if not authorization:
             if self._requires_auth(request):
                 raise AuthenticationError("Missing authorization header")

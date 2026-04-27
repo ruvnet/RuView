@@ -9,8 +9,13 @@ Usage:
     python provision.py --port COM7 --ssid "MyWiFi" --password "secret" --target-ip 192.168.1.20
 
 Requirements:
-    pip install esptool nvs-partition-gen
+    pip install 'esptool>=5.0' nvs-partition-gen
     (or use the nvs_partition_gen.py bundled with ESP-IDF)
+
+WARNING -- FULL-REPLACE SEMANTICS (issue #391):
+    Every invocation REPLACES the entire `csi_cfg` NVS namespace on the device.
+    Any key you don't pass on the CLI is erased. Always include WiFi credentials
+    (--ssid, --password, --target-ip) unless you pass --force-partial.
 """
 
 import argparse
@@ -150,7 +155,7 @@ def flash_nvs(port, baud, nvs_bin):
             "--chip", "esp32s3",
             "--port", port,
             "--baud", str(baud),
-            "write_flash",
+            "write-flash",
             hex(NVS_PARTITION_OFFSET), bin_path,
         ]
         print(f"Flashing NVS partition ({len(nvs_bin)} bytes) to {port}...")
@@ -199,6 +204,10 @@ def main():
     parser.add_argument("--swarm-hb", type=int, help="Swarm heartbeat interval in seconds (default 30)")
     parser.add_argument("--swarm-ingest", type=int, help="Swarm vector ingest interval in seconds (default 5)")
     parser.add_argument("--dry-run", action="store_true", help="Generate NVS binary but don't flash")
+    parser.add_argument("--force-partial", action="store_true",
+                        help="Allow partial config without WiFi credentials. "
+                        "WARNING: flashing REPLACES the entire csi_cfg NVS namespace - "
+                        "any key not passed on the CLI will be erased (issue #391).")
 
     args = parser.parse_args()
 
@@ -214,6 +223,34 @@ def main():
     ])
     if not has_value:
         parser.error("At least one config value must be specified")
+
+    # Bug 2 (#391): Prevent silent wipe of WiFi credentials on partial invocations.
+    # Flashing the generated NVS binary to offset 0x9000 REPLACES the entire
+    # csi_cfg namespace — there is no merge with existing NVS. Require the full
+    # WiFi trio unless the user explicitly opts in with --force-partial.
+    wifi_trio_missing = [
+        name for name, val in [
+            ("--ssid", args.ssid),
+            ("--password", args.password),
+            ("--target-ip", args.target_ip),
+        ] if val is None or val == ""
+    ]
+    if wifi_trio_missing and not args.force_partial:
+        parser.error(
+            f"Missing required WiFi credentials: {', '.join(wifi_trio_missing)}.\n"
+            f"\n"
+            f"  provision.py REPLACES the entire csi_cfg NVS namespace on each run.\n"
+            f"  Any key not passed on the CLI will be erased -- including WiFi creds.\n"
+            f"\n"
+            f"  Either pass all of --ssid, --password, --target-ip,\n"
+            f"  or add --force-partial to acknowledge that other NVS keys will be wiped."
+        )
+    if args.force_partial and wifi_trio_missing:
+        print("WARNING: --force-partial is set. The following NVS keys will be WIPED "
+              "(not present in this invocation):", file=sys.stderr)
+        for k in wifi_trio_missing:
+            print(f"  - {k.lstrip('-')}", file=sys.stderr)
+        print("  Plus any other csi_cfg keys not passed on the CLI.\n", file=sys.stderr)
 
     # Validate TDM: if one is given, both should be
     if (args.tdm_slot is not None) != (args.tdm_total is not None):
@@ -298,7 +335,7 @@ def main():
             f.write(nvs_bin)
         print(f"NVS binary saved to {out} ({len(nvs_bin)} bytes)")
         print(f"Flash manually: python -m esptool --chip esp32s3 --port {args.port} "
-              f"write_flash 0x9000 {out}")
+              f"write-flash 0x9000 {out}")
         return
 
     flash_nvs(args.port, args.baud, nvs_bin)

@@ -4,13 +4,18 @@ set(SRCS
     "wasm_runtime.c" "wasm_upload.c" "rvf_parser.c"
     "mmwave_sensor.c"
     "swarm_bridge.c"
+    # ADR-081 — adaptive CSI mesh firmware kernel
+    "rv_radio_ops_esp32.c"
+    "rv_feature_state.c"
+    "rv_mesh.c"
+    "adaptive_controller.c"
 )
 
 set(REQUIRES "")
 
-# ADR-061: Mock CSI generator for QEMU testing
+# ADR-061: Mock CSI generator for QEMU testing + ADR-081 mock radio binding
 if(CONFIG_CSI_MOCK_ENABLED)
-    list(APPEND SRCS "mock_csi.c")
+    list(APPEND SRCS "mock_csi.c" "rv_radio_ops_mock.c")
 endif()
 
 # ADR-045: AMOLED display support (compile-time optional)

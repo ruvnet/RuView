@@ -189,7 +189,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 self.settings.secret_key,
                 algorithms=[self.settings.jwt_algorithm]
             )
-            
+
+            # Check token blacklist (logout invalidation)
+            if token_blacklist.is_blacklisted(token):
+                raise ValueError("Token has been revoked")
+
             # Extract user information
             user_id = payload.get("sub")
             if not user_id:

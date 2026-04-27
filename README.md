@@ -9,7 +9,7 @@
 > **Beta Software** — Under active development. APIs and firmware may change. Known limitations:
 > - ESP32-C3 and original ESP32 are not supported (single-core, insufficient for CSI DSP)
 > - Single ESP32 deployments have limited spatial resolution — use 2+ nodes or add a [Cognitum Seed](https://cognitum.one) for best results
-> - Camera-free pose accuracy is limited (2.5% PCK@20) — camera-labeled data significantly improves accuracy
+> - Camera-free pose accuracy is limited — use [camera ground-truth training](docs/adr/ADR-079-camera-ground-truth-training.md) for 92.9% PCK@20
 >
 > Contributions and bug reports welcome at [Issues](https://github.com/ruvnet/RuView/issues).
 
@@ -56,6 +56,7 @@ RuView also supports pose estimation (17 COCO keypoints via the WiFlow architect
 > | **Through-wall** | Fresnel zone geometry + multipath modeling | Up to 5m depth |
 > | **Edge intelligence** | 8-dim feature vectors + RVF store on Cognitum Seed | $140 total BOM |
 > | **Camera-free training** | 10 sensor signals, no labels needed | 84s on M4 Pro |
+> | **Camera-supervised training** | MediaPipe + ESP32 CSI → 92.9% PCK@20 | 19 min on laptop |
 > | **Multi-frequency mesh** | Channel hopping across 6 bands, neighbor APs as illuminators | 3x sensing bandwidth |
 
 ```bash
@@ -95,9 +96,93 @@ node scripts/mincut-person-counter.js --port 5006  # Correct person counting
 >
 ---
 
+### Real-Time Dense Point Cloud (NEW)
+
+RuView now generates **real-time 3D point clouds** by fusing camera depth + WiFi CSI + mmWave radar. All sensors stream simultaneously into a unified spatial model.
+
+| Sensor | Data | Integration |
+|--------|------|-------------|
+| **Camera** | MiDaS monocular depth (GPU) | 640×480 → 19,200+ depth points per frame |
+| **ESP32 CSI** | ADR-018 binary frames (UDP) | RF tomography → 8×8×4 occupancy grid |
+| **WiFlow Pose** | 17 COCO keypoints from CSI | Skeleton overlay on point cloud |
+| **Vital Signs** | Breathing rate from CSI phase | Stored in ruOS brain every 60s |
+| **Motion** | CSI amplitude variance | Adaptive capture rate (skip depth when still) |
+
+**Quick start:**
+```bash
+cd rust-port/wifi-densepose-rs
+cargo build --release -p wifi-densepose-pointcloud
+./target/release/ruview-pointcloud serve --bind 127.0.0.1:9880
+# Open http://localhost:9880 for live 3D viewer
+```
+
+**CLI commands:**
+```bash
+ruview-pointcloud demo                            # synthetic demo
+ruview-pointcloud serve --bind 127.0.0.1:9880     # live server + Three.js viewer
+ruview-pointcloud capture --output room.ply       # capture to PLY
+ruview-pointcloud train                           # depth calibration + DPO pairs
+ruview-pointcloud cameras                         # list available cameras
+ruview-pointcloud csi-test --count 100            # send test CSI frames
+ruview-pointcloud fingerprint office --seconds 5  # record named CSI room fingerprint
+```
+
+The HTTP/viewer server defaults to **loopback (`127.0.0.1`)** — exposing live camera/CSI/vitals on `0.0.0.0` is an explicit opt-in. Brain URL defaults to `http://127.0.0.1:9876` and is overridable via `RUVIEW_BRAIN_URL` env var or the `--brain` flag on `serve`/`train`.
+
+The pose overlay currently uses an **amplitude-energy heuristic** (`heuristic_pose_from_amplitude`) rather than trained WiFlow inference — real ONNX/Candle inference is tracked as a follow-up.
+
+**Performance:** 22ms pipeline, 905 req/s API, 40K voxel room model from 20 frames.
+
+**Brain integration:** Spatial observations (motion, vitals, skeleton, occupancy) sync to the ruOS brain every 60 seconds for agent reasoning.
+
+See [PR #405](https://github.com/ruvnet/RuView/pull/405) for full details.
+
+### What's New in v0.7.0
+
+<details>
+<summary><strong>Camera Ground-Truth Training — 92.9% PCK@20</strong></summary>
+
+**v0.7.0 adds camera-supervised pose training** using MediaPipe + real ESP32 CSI data:
+
+| Capability | What it does | ADR |
+|-----------|-------------|-----|
+| **Camera ground-truth collection** | MediaPipe PoseLandmarker captures 17 COCO keypoints at 30fps, synced with ESP32 CSI | [ADR-079](docs/adr/ADR-079-camera-ground-truth-training.md) |
+| **ruvector subcarrier selection** | Variance-based top-K reduces input by 50% (70→35 subcarriers) | ADR-079 O6 |
+| **Stoer-Wagner min-cut** | Person-specific subcarrier cluster separation for multi-person training | ADR-079 O8 |
+| **Scalable WiFlow model** | 4 presets: lite (189K) → small (474K) → medium (800K) → full (7.7M params) | ADR-079 |
+
+```bash
+# Collect ground truth (camera + ESP32 simultaneously)
+python scripts/collect-ground-truth.py --duration 300 --preview
+python scripts/record-csi-udp.py --duration 300
+
+# Align CSI windows with camera keypoints
+node scripts/align-ground-truth.js --gt data/ground-truth/*.jsonl --csi data/recordings/*.csi.jsonl
+
+# Train WiFlow model (start lite, scale up as data grows)
+node scripts/train-wiflow-supervised.js --data data/paired/*.jsonl --scale lite
+
+# Evaluate
+node scripts/eval-wiflow.js --model models/wiflow-real/wiflow-v1.json --data data/paired/*.jsonl
+```
+
+**Result: 92.9% PCK@20** from a 5-minute data collection session with one ESP32-S3 and one webcam.
+
+| Metric | Before (proxy) | After (camera-supervised) |
+|--------|----------------|--------------------------|
+| PCK@20 | 0% | **92.9%** |
+| Eval loss | 0.700 | **0.082** |
+| Bone constraint | N/A | **0.008** |
+| Training time | N/A | **19 minutes** |
+| Model size | N/A | **974 KB** |
+
+Pre-trained model: [HuggingFace ruv/ruview/wiflow-v1](https://huggingface.co/ruv/ruview)
+
+</details>
+
 ### Pre-Trained Models (v0.6.0) — No Training Required
 
-<details open>
+<details>
 <summary><strong>Download from HuggingFace and start sensing immediately</strong></summary>
 
 Pre-trained models are available on HuggingFace:
@@ -294,7 +379,7 @@ See [ADR-069](docs/adr/ADR-069-cognitum-seed-csi-pipeline.md), [ADR-071](docs/ad
 |----------|-------------|
 | [User Guide](docs/user-guide.md) | Step-by-step guide: installation, first run, API usage, hardware setup, training |
 | [Build Guide](docs/build-guide.md) | Building from source (Rust and Python) |
-| [Architecture Decisions](docs/adr/README.md) | 62 ADRs — why each technical choice was made, organized by domain (hardware, signal processing, ML, platform, infrastructure) |
+| [Architecture Decisions](docs/adr/README.md) | 79 ADRs — why each technical choice was made, organized by domain (hardware, signal processing, ML, platform, infrastructure) |
 | [Domain Models](docs/ddd/README.md) | 7 DDD models (RuvSense, Signal Processing, Training Pipeline, Hardware Platform, Sensing Server, WiFi-Mat, CHCI) — bounded contexts, aggregates, domain events, and ubiquitous language |
 | [Desktop App](rust-port/wifi-densepose-rs/crates/wifi-densepose-desktop/README.md) | **WIP** — Tauri v2 desktop app for node management, OTA updates, WASM deployment, and mesh visualization |
 | [Medical Examples](examples/medical/README.md) | Contactless blood pressure, heart rate, breathing rate via 60 GHz mmWave radar — $15 hardware, no wearable |
@@ -860,6 +945,8 @@ cargo add wifi-densepose-ruvector   # RuVector v2.0.4 integration layer (ADR-017
 | [`wifi-densepose-api`](https://crates.io/crates/wifi-densepose-api) | REST + WebSocket API layer | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-api.svg)](https://crates.io/crates/wifi-densepose-api) |
 | [`wifi-densepose-config`](https://crates.io/crates/wifi-densepose-config) | Configuration management | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-config.svg)](https://crates.io/crates/wifi-densepose-config) |
 | [`wifi-densepose-db`](https://crates.io/crates/wifi-densepose-db) | Database persistence (PostgreSQL, SQLite, Redis) | -- | [![crates.io](https://img.shields.io/crates/v/wifi-densepose-db.svg)](https://crates.io/crates/wifi-densepose-db) |
+| `wifi-densepose-pointcloud` | Real-time dense point cloud from camera + WiFi CSI fusion (Three.js viewer, brain bridge). Workspace-only for now. | -- | — |
+| `wifi-densepose-geo` | Geospatial context (Sentinel-2 tiles, SRTM elevation, OSM, weather, night-mode). Workspace-only for now. | -- | — |
 
 All crates integrate with [RuVector v2.0.4](https://github.com/ruvnet/ruvector) — see [AI Backbone](#ai-backbone-ruvector) below.
 
@@ -1267,7 +1354,8 @@ Download a pre-built binary — no build toolchain needed:
 
 | Release | What's included | Tag |
 |---------|-----------------|-----|
-| [v0.6.0](https://github.com/ruvnet/RuView/releases/tag/v0.6.0-esp32) | **Latest** — [Pre-trained models on HuggingFace](https://huggingface.co/ruv/ruview), 17 sensing apps, 51.6% contrastive improvement, 0.008ms inference | `v0.6.0-esp32` |
+| [v0.7.0](https://github.com/ruvnet/RuView/releases/tag/v0.7.0) | **Latest** — Camera-supervised WiFlow model (92.9% PCK@20), ground-truth training pipeline, ruvector optimizations | `v0.7.0` |
+| [v0.6.0](https://github.com/ruvnet/RuView/releases/tag/v0.6.0-esp32) | [Pre-trained models on HuggingFace](https://huggingface.co/ruv/ruview), 17 sensing apps, 51.6% contrastive improvement, 0.008ms inference | `v0.6.0-esp32` |
 | [v0.5.5](https://github.com/ruvnet/RuView/releases/tag/v0.5.5-esp32) | SNN + MinCut (#348 fix) + CNN spectrogram + WiFlow + multi-freq mesh + graph transformer | `v0.5.5-esp32` |
 | [v0.5.4](https://github.com/ruvnet/RuView/releases/tag/v0.5.4-esp32) | Cognitum Seed integration ([ADR-069](docs/adr/ADR-069-cognitum-seed-csi-pipeline.md)), 8-dim feature vectors, RVF store, witness chain, security hardening | `v0.5.4-esp32` |
 | [v0.5.0](https://github.com/ruvnet/RuView/releases/tag/v0.5.0-esp32) | mmWave sensor fusion ([ADR-063](docs/adr/ADR-063-mmwave-sensor-fusion.md)), auto-detect MR60BHA2/LD2410, 48-byte fused vitals, all v0.4.3.1 fixes | `v0.5.0-esp32` |

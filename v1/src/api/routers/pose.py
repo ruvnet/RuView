@@ -137,7 +137,7 @@ async def get_current_pose_estimation(
         logger.error(f"Error in pose estimation: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Pose estimation failed: {str(e)}"
+            detail="An internal error occurred. Please try again later."
         )
 
 
@@ -174,7 +174,7 @@ async def analyze_pose_data(
         logger.error(f"Error in pose analysis: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Pose analysis failed: {str(e)}"
+            detail="An internal error occurred. Please try again later."
         )
 
 
@@ -208,7 +208,7 @@ async def get_zone_occupancy(
         logger.error(f"Error getting zone occupancy: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get zone occupancy: {str(e)}"
+            detail="An internal error occurred. Please try again later."
         )
 
 
@@ -232,7 +232,7 @@ async def get_zones_summary(
         logger.error(f"Error getting zones summary: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get zones summary: {str(e)}"
+            detail="An internal error occurred. Please try again later."
         )
 
 
@@ -285,7 +285,7 @@ async def get_historical_data(
         logger.error(f"Error getting historical data: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get historical data: {str(e)}"
+            detail="An internal error occurred. Please try again later."
         )
 
 
@@ -313,7 +313,7 @@ async def get_detected_activities(
         logger.error(f"Error getting activities: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get activities: {str(e)}"
+            detail="An internal error occurred. Please try again later."
         )
 
 
@@ -357,7 +357,7 @@ async def calibrate_pose_system(
         logger.error(f"Error starting calibration: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to start calibration: {str(e)}"
+            detail="An internal error occurred. Please try again later."
         )
 
 
@@ -383,7 +383,7 @@ async def get_calibration_status(
         logger.error(f"Error getting calibration status: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get calibration status: {str(e)}"
+            detail="An internal error occurred. Please try again later."
         )
 
 
@@ -416,5 +416,5 @@ async def get_pose_statistics(
         logger.error(f"Error getting statistics: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get statistics: {str(e)}"
+            detail="An internal error occurred. Please try again later."
         )

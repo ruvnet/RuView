@@ -62,6 +62,8 @@ describe('useMatStore', () => {
       survivors: [],
       alerts: [],
       selectedEventId: null,
+      dataSource: 'simulated',
+      simulationAcknowledged: false,
     });
   });
 
@@ -193,6 +195,34 @@ describe('useMatStore', () => {
       useMatStore.getState().setSelectedEvent('evt-1');
       useMatStore.getState().setSelectedEvent(null);
       expect(useMatStore.getState().selectedEventId).toBeNull();
+    });
+  });
+
+  describe('dataSource', () => {
+    it('defaults to simulated', () => {
+      expect(useMatStore.getState().dataSource).toBe('simulated');
+    });
+
+    it('can be set to real', () => {
+      useMatStore.getState().setDataSource('real');
+      expect(useMatStore.getState().dataSource).toBe('real');
+    });
+
+    it('can be set back to simulated', () => {
+      useMatStore.getState().setDataSource('real');
+      useMatStore.getState().setDataSource('simulated');
+      expect(useMatStore.getState().dataSource).toBe('simulated');
+    });
+  });
+
+  describe('simulationAcknowledged', () => {
+    it('defaults to false', () => {
+      expect(useMatStore.getState().simulationAcknowledged).toBe(false);
+    });
+
+    it('can be acknowledged', () => {
+      useMatStore.getState().acknowledgeSimulation();
+      expect(useMatStore.getState().simulationAcknowledged).toBe(true);
     });
   });
 });

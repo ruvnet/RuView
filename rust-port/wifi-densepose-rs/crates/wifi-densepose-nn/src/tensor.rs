@@ -304,6 +304,74 @@ impl Tensor {
         }
     }
 
+    /// Stack multiple tensors along a new batch dimension (dim 0).
+    ///
+    /// All tensors must have the same shape. The result has one extra
+    /// leading dimension equal to `tensors.len()`.
+    pub fn stack(tensors: &[Tensor]) -> NnResult<Tensor> {
+        if tensors.is_empty() {
+            return Err(NnError::tensor_op("Cannot stack zero tensors"));
+        }
+        let first_shape = tensors[0].shape();
+        for (i, t) in tensors.iter().enumerate().skip(1) {
+            if t.shape() != first_shape {
+                return Err(NnError::tensor_op(&format!(
+                    "Shape mismatch at index {i}: expected {first_shape}, got {}",
+                    t.shape()
+                )));
+            }
+        }
+        let mut all_data: Vec<f32> = Vec::with_capacity(tensors.len() * first_shape.numel());
+        for t in tensors {
+            let data = t.to_vec()?;
+            all_data.extend_from_slice(&data);
+        }
+        let mut new_dims = vec![tensors.len()];
+        new_dims.extend_from_slice(first_shape.dims());
+        let arr = ndarray::ArrayD::from_shape_vec(
+            ndarray::IxDyn(&new_dims),
+            all_data,
+        )
+        .map_err(|e| NnError::tensor_op(&format!("Stack reshape failed: {e}")))?;
+        Ok(Tensor::FloatND(arr))
+    }
+
+    /// Split a tensor along dim 0 into `n` sub-tensors.
+    ///
+    /// The first dimension must be evenly divisible by `n`.
+    pub fn split(self, n: usize) -> NnResult<Vec<Tensor>> {
+        if n == 0 {
+            return Err(NnError::tensor_op("Cannot split into 0 pieces"));
+        }
+        let shape = self.shape();
+        let batch = shape.dim(0).ok_or_else(|| NnError::tensor_op("Tensor has no dimensions"))?;
+        if batch % n != 0 {
+            return Err(NnError::tensor_op(&format!(
+                "Batch dim {batch} not divisible by {n}"
+            )));
+        }
+        let chunk_size = batch / n;
+        let data = self.to_vec()?;
+        let elem_per_sample = shape.numel() / batch;
+        let sub_dims: Vec<usize> = {
+            let mut d = shape.dims().to_vec();
+            d[0] = chunk_size;
+            d
+        };
+        let mut result = Vec::with_capacity(n);
+        for i in 0..n {
+            let start = i * chunk_size * elem_per_sample;
+            let end = start + chunk_size * elem_per_sample;
+            let arr = ndarray::ArrayD::from_shape_vec(
+                ndarray::IxDyn(&sub_dims),
+                data[start..end].to_vec(),
+            )
+            .map_err(|e| NnError::tensor_op(&format!("Split reshape failed: {e}")))?;
+            result.push(Tensor::FloatND(arr));
+        }
+        Ok(result)
+    }
+
     /// Compute standard deviation
     pub fn std(&self) -> NnResult<f32> {
         match self {

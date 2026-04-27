@@ -1,6 +1,7 @@
 """CSI data processor for WiFi-DensePose system using TDD approach."""
 
 import asyncio
+import itertools
 import logging
 import numpy as np
 from datetime import datetime, timezone
@@ -293,7 +294,8 @@ class CSIProcessor:
         if count >= len(self.csi_history):
             return list(self.csi_history)
         else:
-            return list(self.csi_history)[-count:]
+            start = len(self.csi_history) - count
+            return list(itertools.islice(self.csi_history, start, len(self.csi_history)))
     
     def get_processing_statistics(self) -> Dict[str, Any]:
         """Get processing statistics.
@@ -410,8 +412,9 @@ class CSIProcessor:
             # Use cached mean-phase values (pre-computed in add_to_history)
             # Only take the last doppler_window frames for bounded cost
             window = min(len(self._phase_cache), self._doppler_window)
-            cache_list = list(self._phase_cache)
-            phase_matrix = np.array(cache_list[-window:])
+            start = len(self._phase_cache) - window
+            cache_list = list(itertools.islice(self._phase_cache, start, len(self._phase_cache)))
+            phase_matrix = np.array(cache_list)
 
             # Temporal phase differences between consecutive frames
             phase_diffs = np.diff(phase_matrix, axis=0)

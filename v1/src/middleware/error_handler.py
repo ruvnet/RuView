@@ -202,11 +202,10 @@ class ErrorHandler:
             )
         
         # Determine error details
-        details = {
-            "exception_type": type(exc).__name__,
-        }
-        
+        details = {}
+
         if self.include_traceback:
+            details["exception_type"] = type(exc).__name__
             details["traceback"] = traceback.format_exception(
                 type(exc), exc, exc.__traceback__
             )

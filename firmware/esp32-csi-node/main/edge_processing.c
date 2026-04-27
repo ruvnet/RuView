@@ -19,6 +19,7 @@
 
 #include "edge_processing.h"
 #include "nvs_config.h"
+#include "csi_collector.h"  /* csi_collector_get_node_id() - defensive #390 */
 #include "mmwave_sensor.h"
 
 /* Runtime config — declared in main.c, loaded from NVS at boot. */
@@ -441,7 +442,7 @@ static void send_compressed_frame(const uint8_t *iq_data, uint16_t iq_len,
     uint32_t magic = EDGE_COMPRESSED_MAGIC;
     memcpy(&pkt[0], &magic, 4);
 
-    pkt[4] = g_nvs_config.node_id;
+    pkt[4] = csi_collector_get_node_id();  /* #390: defensive copy */
     pkt[5] = channel;
     memcpy(&pkt[6], &iq_len, 2);
     memcpy(&pkt[8], &comp_len, 2);
@@ -557,7 +558,7 @@ static void send_vitals_packet(void)
     memset(&pkt, 0, sizeof(pkt));
 
     pkt.magic = EDGE_VITALS_MAGIC;
-    pkt.node_id = g_nvs_config.node_id;
+    pkt.node_id = csi_collector_get_node_id();  /* #390: defensive copy */
 
     pkt.flags = 0;
     if (s_presence_detected) pkt.flags |= 0x01;
@@ -647,7 +648,7 @@ static void send_feature_vector(void)
     memset(&pkt, 0, sizeof(pkt));
 
     pkt.magic = EDGE_FEATURE_MAGIC;
-    pkt.node_id = g_nvs_config.node_id;
+    pkt.node_id = csi_collector_get_node_id();  /* #390: defensive copy */
     pkt.reserved = 0;
     pkt.seq = s_feature_seq++;
     pkt.timestamp_us = esp_timer_get_time();

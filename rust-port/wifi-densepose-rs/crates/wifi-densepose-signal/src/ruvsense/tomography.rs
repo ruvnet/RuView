@@ -339,9 +339,16 @@ impl RfTomographer {
 
 /// Compute the intersection weights of a link with the voxel grid.
 ///
-/// Uses a simplified approach: for each voxel, computes the minimum
-/// distance from the voxel center to the link ray. Voxels within
-/// one Fresnel zone receive weight proportional to closeness.
+/// Uses a DDA (Digital Differential Analyzer) ray-marching algorithm:
+/// 1. March along the ray from TX to RX, advancing to the nearest
+///    axis-aligned voxel boundary at each step.
+/// 2. At each ray voxel, expand by the Fresnel radius to check
+///    neighboring voxels.
+/// 3. Use a visited bitvector to avoid duplicate entries.
+/// 4. Weight = `1.0 - dist / fresnel_radius` (same as before).
+///
+/// This is O(ray_length / voxel_size) instead of O(nx*ny*nz),
+/// a significant speedup for large grids.
 fn compute_link_weights(link: &LinkGeometry, config: &TomographyConfig) -> Vec<(usize, f64)> {
     let vx = (config.bounds[3] - config.bounds[0]) / config.nx as f64;
     let vy = (config.bounds[4] - config.bounds[1]) / config.ny as f64;
@@ -356,25 +363,74 @@ fn compute_link_weights(link: &LinkGeometry, config: &TomographyConfig) -> Vec<(
     let dy = link.rx.y - link.tx.y;
     let dz = link.rx.z - link.tx.z;
 
+    let n_voxels = config.nx * config.ny * config.nz;
+    let mut visited = vec![false; n_voxels];
     let mut weights = Vec::new();
 
-    for iz in 0..config.nz {
-        for iy in 0..config.ny {
-            for ix in 0..config.nx {
-                let cx = config.bounds[0] + (ix as f64 + 0.5) * vx;
-                let cy = config.bounds[1] + (iy as f64 + 0.5) * vy;
-                let cz = config.bounds[2] + (iz as f64 + 0.5) * vz;
+    // Fresnel expansion radius in voxel units.
+    let expand_x = (fresnel_radius / vx).ceil() as isize;
+    let expand_y = (fresnel_radius / vy).ceil() as isize;
+    let expand_z = (fresnel_radius / vz).ceil() as isize;
 
-                // Point-to-line distance
-                let dist = point_to_segment_distance(
-                    cx, cy, cz, link.tx.x, link.tx.y, link.tx.z, dx, dy, dz, link_dist,
-                );
+    // DDA initialization: start at TX position in voxel coordinates.
+    let start_vx = (link.tx.x - config.bounds[0]) / vx;
+    let start_vy = (link.tx.y - config.bounds[1]) / vy;
+    let start_vz = (link.tx.z - config.bounds[2]) / vz;
 
-                if dist < fresnel_radius {
-                    // Weight decays with distance from link ray
-                    let w = 1.0 - dist / fresnel_radius;
-                    let idx = iz * config.ny * config.nx + iy * config.nx + ix;
-                    weights.push((idx, w));
+    let end_vx = (link.rx.x - config.bounds[0]) / vx;
+    let end_vy = (link.rx.y - config.bounds[1]) / vy;
+    let end_vz = (link.rx.z - config.bounds[2]) / vz;
+
+    let ray_dx = end_vx - start_vx;
+    let ray_dy = end_vy - start_vy;
+    let ray_dz = end_vz - start_vz;
+
+    // Number of DDA steps: traverse the maximum voxel span.
+    let steps = (ray_dx.abs().max(ray_dy.abs()).max(ray_dz.abs()).ceil() as usize).max(1);
+    let inv_steps = 1.0 / steps as f64;
+
+    for step in 0..=steps {
+        let t = step as f64 * inv_steps;
+        let rx = start_vx + t * ray_dx;
+        let ry = start_vy + t * ray_dy;
+        let rz = start_vz + t * ray_dz;
+
+        let base_ix = rx.floor() as isize;
+        let base_iy = ry.floor() as isize;
+        let base_iz = rz.floor() as isize;
+
+        // Expand by Fresnel radius to check neighboring voxels.
+        for diz in -expand_z..=expand_z {
+            let iz = base_iz + diz;
+            if iz < 0 || iz >= config.nz as isize { continue; }
+            for diy in -expand_y..=expand_y {
+                let iy = base_iy + diy;
+                if iy < 0 || iy >= config.ny as isize { continue; }
+                for dix in -expand_x..=expand_x {
+                    let ix = base_ix + dix;
+                    if ix < 0 || ix >= config.nx as isize { continue; }
+
+                    let idx = iz as usize * config.ny * config.nx
+                        + iy as usize * config.nx
+                        + ix as usize;
+
+                    if visited[idx] { continue; }
+
+                    let cx = config.bounds[0] + (ix as f64 + 0.5) * vx;
+                    let cy = config.bounds[1] + (iy as f64 + 0.5) * vy;
+                    let cz = config.bounds[2] + (iz as f64 + 0.5) * vz;
+
+                    let dist = point_to_segment_distance(
+                        cx, cy, cz,
+                        link.tx.x, link.tx.y, link.tx.z,
+                        dx, dy, dz, link_dist,
+                    );
+
+                    if dist < fresnel_radius {
+                        let w = 1.0 - dist / fresnel_radius;
+                        weights.push((idx, w));
+                    }
+                    visited[idx] = true;
                 }
             }
         }

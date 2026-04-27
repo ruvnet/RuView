@@ -5,7 +5,7 @@ Rate limiting middleware for WiFi-DensePose API
 import asyncio
 import logging
 import time
-from typing import Dict, Any, Optional, Callable, Tuple
+from typing import Dict, Any, Optional, Callable, Set, Tuple
 from datetime import datetime, timedelta
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -128,6 +128,11 @@ class RateLimiter:
         self.authenticated_limit = settings.rate_limit_authenticated_requests
         self.window_size = settings.rate_limit_window
         
+        # Trusted proxy IPs — only trust X-Forwarded-For/X-Real-IP from these
+        self.trusted_proxies: Set[str] = set(
+            getattr(settings, "trusted_proxies", [])
+        )
+
         # Storage for rate limit data
         self._sliding_windows: Dict[str, SlidingWindowCounter] = {}
         self._token_buckets: Dict[str, TokenBucket] = {}
@@ -196,18 +201,25 @@ class RateLimiter:
         return f"ip:{client_ip}"
     
     def _get_client_ip(self, request: Request) -> str:
-        """Get client IP address."""
-        # Check for forwarded headers
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            return forwarded_for.split(",")[0].strip()
-        
-        real_ip = request.headers.get("X-Real-IP")
-        if real_ip:
-            return real_ip
-        
-        # Fall back to direct connection
-        return request.client.host if request.client else "unknown"
+        """Get client IP address.
+
+        Only trusts X-Forwarded-For / X-Real-IP when the direct connection
+        originates from a known trusted proxy.  This prevents clients from
+        spoofing forwarded headers to bypass rate limiting.
+        """
+        connection_ip = request.client.host if request.client else "unknown"
+
+        # Only honour forwarded headers from trusted proxies
+        if connection_ip in self.trusted_proxies:
+            forwarded_for = request.headers.get("X-Forwarded-For")
+            if forwarded_for:
+                return forwarded_for.split(",")[0].strip()
+
+            real_ip = request.headers.get("X-Real-IP")
+            if real_ip:
+                return real_ip
+
+        return connection_ip
     
     def _get_rate_limit(self, request: Request) -> int:
         """Get rate limit for request."""

@@ -6,7 +6,7 @@ echo "Host: $(hostname) | $(sysctl -n hw.ncpu 2>/dev/null || nproc) cores | $(sy
 echo ""
 
 REPO_DIR="${HOME}/Projects/wifi-densepose"
-WINDOWS_HOST="100.102.238.73"  # Tailscale IP of Windows machine
+WINDOWS_HOST="${WINDOWS_HOST:-}"  # Set via env: export WINDOWS_HOST=<tailscale-ip>
 
 # Step 1: Clone or update repo
 echo "[1/7] Setting up repository..."

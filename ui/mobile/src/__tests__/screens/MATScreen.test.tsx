@@ -76,4 +76,31 @@ describe('MATScreen', () => {
     // Simulated status maps to 'simulated' banner -> "SIMULATED DATA"
     expect(getByText('SIMULATED DATA')).toBeTruthy();
   });
+
+  it('shows simulation warning overlay when simulated and not acknowledged', () => {
+    // Reset store to ensure overlay is shown
+    const { useMatStore } = require('@/stores/matStore');
+    useMatStore.setState({ dataSource: 'simulated', simulationAcknowledged: false });
+
+    const { MATScreen } = require('@/screens/MATScreen');
+    const { getByText } = render(
+      <ThemeProvider>
+        <MATScreen />
+      </ThemeProvider>,
+    );
+    expect(getByText('I UNDERSTAND')).toBeTruthy();
+  });
+
+  it('hides overlay after acknowledgment', () => {
+    const { useMatStore } = require('@/stores/matStore');
+    useMatStore.setState({ dataSource: 'simulated', simulationAcknowledged: true });
+
+    const { MATScreen } = require('@/screens/MATScreen');
+    const { queryByText } = render(
+      <ThemeProvider>
+        <MATScreen />
+      </ThemeProvider>,
+    );
+    expect(queryByText('I UNDERSTAND')).toBeNull();
+  });
 });

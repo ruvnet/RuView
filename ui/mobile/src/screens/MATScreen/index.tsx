@@ -10,6 +10,8 @@ import { type ConnectionStatus } from '@/types/sensing';
 import { Alert, type Survivor } from '@/types/mat';
 import { AlertList } from './AlertList';
 import { MatWebView } from './MatWebView';
+import { SimulationBanner } from './SimulationBanner';
+import { SimulationWarningOverlay } from './SimulationWarningOverlay';
 import { SurvivorCounter } from './SurvivorCounter';
 import { useMatBridge } from './useMatBridge';
 
@@ -47,6 +49,15 @@ export const MATScreen = () => {
   const upsertSurvivor = useMatStore((state) => state.upsertSurvivor);
   const addAlert = useMatStore((state) => state.addAlert);
   const upsertEvent = useMatStore((state) => state.upsertEvent);
+  const dataSource = useMatStore((state) => state.dataSource);
+  const simulationAcknowledged = useMatStore((state) => state.simulationAcknowledged);
+  const setDataSource = useMatStore((state) => state.setDataSource);
+  const acknowledgeSimulation = useMatStore((state) => state.acknowledgeSimulation);
+
+  // Sync dataSource from connection status
+  useEffect(() => {
+    setDataSource(connectionStatus === 'connected' ? 'real' : 'simulated');
+  }, [connectionStatus, setDataSource]);
 
   const { webViewRef, ready, onMessage, sendFrameUpdate, postEvent } = useMatBridge({
     onSurvivorDetected: (survivor) => {
@@ -113,8 +124,13 @@ export const MATScreen = () => {
   const { height } = useWindowDimensions();
   const webHeight = Math.max(240, Math.floor(height * 0.5));
 
+  const showOverlay = dataSource === 'simulated' && !simulationAcknowledged;
+  const showBanner = dataSource === 'simulated' && simulationAcknowledged;
+
   return (
     <ThemedView style={{ flex: 1, backgroundColor: colors.bg, padding: spacing.md }}>
+      <SimulationWarningOverlay visible={showOverlay} onAcknowledge={acknowledgeSimulation} />
+      <SimulationBanner visible={showBanner} />
       <ConnectionBanner status={resolveBannerState(connectionStatus)} />
       <View style={{ marginTop: 20 }}>
         <SurvivorCounter survivors={survivors} />
