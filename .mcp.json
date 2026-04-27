@@ -17,6 +17,15 @@
         "CLAUDE_FLOW_MEMORY_BACKEND": "hybrid"
       },
       "autoStart": false
+    },
+    "agentic-qe": {
+      "command": "aqe-mcp",
+      "args": [],
+      "env": {
+        "AQE_LEARNING_ENABLED": "true",
+        "AQE_WORKERS_ENABLED": "true",
+        "NODE_ENV": "production"
+      }
     }
   }
 }

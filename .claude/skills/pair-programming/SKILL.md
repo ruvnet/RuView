@@ -1,6 +1,6 @@
 ---
-name: Pair Programming
-description: AI-assisted pair programming with multiple modes (driver/navigator/switch), real-time verification, quality monitoring, and comprehensive testing. Supports TDD, debugging, refactoring, and learning sessions. Features automatic role switching, continuous code review, security scanning, and performance optimization with truth-score verification.
+name: "pair-programming"
+description: "Provides AI navigator for pair programming sessions with real-time code review, TDD guidance, and quality monitoring. Use when pair programming with AI assistance, practicing TDD with a navigator, debugging collaboratively, or refactoring with real-time verification."
 ---
 
 # Pair Programming

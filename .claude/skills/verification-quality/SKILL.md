@@ -1,6 +1,6 @@
 ---
-name: "Verification & Quality Assurance"
-description: "Comprehensive truth scoring, code quality verification, and automatic rollback system with 0.95 accuracy threshold for ensuring high-quality agent outputs and codebase reliability."
+name: "verification-quality"
+description: "Verifies agent outputs against expected results and validates code changes pass quality checks before merge. Use when verifying agent outputs are correct, validating code changes before merge, or configuring automatic rollback for failed quality checks."
 version: "2.0.0"
 category: "quality-assurance"
 tags: ["verification", "truth-scoring", "quality", "rollback", "metrics", "ci-cd"]
@@ -640,6 +640,20 @@ Verification commands return standard exit codes:
 6. **Export Metrics**: Track quality metrics in your monitoring system
 7. **Review Rollbacks**: Understand why changes were rejected
 8. **Train Agents**: Use verification feedback to improve agent performance
+
+## Skill Composition
+
+- **Before verification** → Run `/qe-test-generation` and `/qe-coverage-analysis` first
+- **If verification fails** → Use `/test-failure-investigator` for root cause analysis
+- **Ship decision** → Feed into `/qe-quality-assessment` for final assessment
+
+## Gotchas
+
+- Verification is the HIGHEST-VALUE skill category (Anthropic: "worth having an engineer spend a week making verification skills excellent")
+- "Success is silent, only failures are verbose" — swallow passing test output, surface only errors to avoid context window flooding
+- Agent completion claims are unreliable — always include programmatic assertions on state, not just "looks right"
+- Have Claude record a video of its output so you can see exactly what it tested (Playwright trace, screenshot evidence)
+- Hardcoded values are the #1 completion theater pattern — grep for literals that should be dynamic
 
 ### Additional Resources
 
