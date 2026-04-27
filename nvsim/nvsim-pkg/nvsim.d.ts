@@ -71,6 +71,26 @@ export function referenceSceneJson(): string;
  */
 export function referenceWitness(): Uint8Array;
 
+/**
+ * One-shot pipeline run that doesn't disturb the dashboard's main
+ * pipeline. Used by the Ghost Murmur interactive demo (and any other
+ * "run-against-this-scene-please" flow) to ask: given a scene + config,
+ * what does the NV sensor recover at the origin?
+ *
+ * Returns a JS object:
+ * ```js
+ * {
+ *   bRecoveredT: [number, number, number],   // recovered B (Tesla)
+ *   bMagT:        number,                    // |B| (Tesla)
+ *   noiseFloorPtSqrtHz: number,              // δB pT/√Hz from this config
+ *   sigmaPt:      [number, number, number],  // per-axis 1σ noise estimate (pT)
+ *   nFrames:      number,                    // samples actually run
+ *   witnessHex:   string                     // SHA-256 witness for this run
+ * }
+ * ```
+ */
+export function runTransient(scene_json: string, config_json: string, seed: number, n_samples: number): any;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
@@ -80,6 +100,7 @@ export interface InitOutput {
     readonly hexWitness: (a: number, b: number, c: number) => void;
     readonly referenceSceneJson: (a: number) => void;
     readonly referenceWitness: (a: number) => void;
+    readonly runTransient: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly wasmpipeline_buildVersion: (a: number) => void;
     readonly wasmpipeline_frameBytes: () => number;
     readonly wasmpipeline_frameMagic: () => number;

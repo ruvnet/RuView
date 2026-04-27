@@ -230,11 +230,58 @@ export function referenceWitness() {
     }
 }
 
+/**
+ * One-shot pipeline run that doesn't disturb the dashboard's main
+ * pipeline. Used by the Ghost Murmur interactive demo (and any other
+ * "run-against-this-scene-please" flow) to ask: given a scene + config,
+ * what does the NV sensor recover at the origin?
+ *
+ * Returns a JS object:
+ * ```js
+ * {
+ *   bRecoveredT: [number, number, number],   // recovered B (Tesla)
+ *   bMagT:        number,                    // |B| (Tesla)
+ *   noiseFloorPtSqrtHz: number,              // δB pT/√Hz from this config
+ *   sigmaPt:      [number, number, number],  // per-axis 1σ noise estimate (pT)
+ *   nFrames:      number,                    // samples actually run
+ *   witnessHex:   string                     // SHA-256 witness for this run
+ * }
+ * ```
+ * @param {string} scene_json
+ * @param {string} config_json
+ * @param {number} seed
+ * @param {number} n_samples
+ * @returns {any}
+ */
+export function runTransient(scene_json, config_json, seed, n_samples) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passStringToWasm0(scene_json, wasm.__wbindgen_export3, wasm.__wbindgen_export4);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(config_json, wasm.__wbindgen_export3, wasm.__wbindgen_export4);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.runTransient(retptr, ptr0, len0, ptr1, len1, seed, n_samples);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        if (r2) {
+            throw takeObject(r1);
+        }
+        return takeObject(r0);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
         __wbg___wbindgen_throw_6ddd609b62940d55: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
+        },
+        __wbg_length_550d8a396009cd38: function(arg0) {
+            const ret = getObject(arg0).length;
+            return ret;
         },
         __wbg_length_ea16607d7b61445b: function(arg0) {
             const ret = getObject(arg0).length;
@@ -247,6 +294,13 @@ function __wbg_get_imports() {
         __wbg_new_with_length_825018a1616e9e55: function(arg0) {
             const ret = new Uint8Array(arg0 >>> 0);
             return addHeapObject(ret);
+        },
+        __wbg_new_with_length_eae667475c36c4e4: function(arg0) {
+            const ret = new Float64Array(arg0 >>> 0);
+            return addHeapObject(ret);
+        },
+        __wbg_set_636d1e3e4286e068: function(arg0, arg1, arg2) {
+            getObject(arg0).set(getArrayF64FromWasm0(arg1, arg2));
         },
         __wbg_set_7eaa4f96924fd6b3: function() { return handleError(function (arg0, arg1, arg2) {
             const ret = Reflect.set(getObject(arg0), getObject(arg1), getObject(arg2));
@@ -294,6 +348,11 @@ function dropObject(idx) {
     heap_next = idx;
 }
 
+function getArrayF64FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getFloat64ArrayMemory0().subarray(ptr / 8, ptr / 8 + len);
+}
+
 function getArrayU8FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
@@ -305,6 +364,14 @@ function getDataViewMemory0() {
         cachedDataViewMemory0 = new DataView(wasm.memory.buffer);
     }
     return cachedDataViewMemory0;
+}
+
+let cachedFloat64ArrayMemory0 = null;
+function getFloat64ArrayMemory0() {
+    if (cachedFloat64ArrayMemory0 === null || cachedFloat64ArrayMemory0.byteLength === 0) {
+        cachedFloat64ArrayMemory0 = new Float64Array(wasm.memory.buffer);
+    }
+    return cachedFloat64ArrayMemory0;
 }
 
 function getStringFromWasm0(ptr, len) {
@@ -419,6 +486,7 @@ function __wbg_finalize_init(instance, module) {
     wasm = instance.exports;
     wasmModule = module;
     cachedDataViewMemory0 = null;
+    cachedFloat64ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     return wasm;
 }

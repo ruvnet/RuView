@@ -6,6 +6,7 @@ export const expectedReferenceWitnessHex: (a: number) => void;
 export const hexWitness: (a: number, b: number, c: number) => void;
 export const referenceSceneJson: (a: number) => void;
 export const referenceWitness: (a: number) => void;
+export const runTransient: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
 export const wasmpipeline_buildVersion: (a: number) => void;
 export const wasmpipeline_frameBytes: () => number;
 export const wasmpipeline_frameMagic: () => number;
