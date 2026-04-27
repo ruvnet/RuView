@@ -1,0 +1,32 @@
+{
+  "name": "nvsim",
+  "type": "module",
+  "collaborators": [
+    "rUv <ruv@ruv.net>",
+    "WiFi-DensePose Contributors"
+  ],
+  "description": "Deterministic NV-diamond magnetometer pipeline simulator (source -> propagation -> NV ensemble -> ADC + lockin demod)",
+  "version": "0.3.0",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/wifi-densepose"
+  },
+  "files": [
+    "nvsim_bg.wasm",
+    "nvsim.js",
+    "nvsim.d.ts"
+  ],
+  "main": "nvsim.js",
+  "types": "nvsim.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ],
+  "keywords": [
+    "nv-diamond",
+    "magnetometer",
+    "simulator",
+    "physics",
+    "biot-savart"
+  ]
+}
