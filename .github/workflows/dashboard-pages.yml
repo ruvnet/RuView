@@ -1,0 +1,85 @@
+name: nvsim Dashboard → GitHub Pages
+
+# Deploys the nvsim Vite/Lit dashboard to gh-pages/nvsim/ — preserving
+# the existing observatory/, pose-fusion/, and root index.html demos
+# already published from gh-pages. ADR-092 §9.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'v2/crates/nvsim/**'
+      - 'dashboard/**'
+      - '.github/workflows/dashboard-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dashboard-pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Install Rust + wasm32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            v2/target
+          key: ${{ runner.os }}-cargo-nvsim-${{ hashFiles('v2/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-nvsim-
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked --version 0.13.x || true
+
+      - name: Build nvsim WASM
+        working-directory: v2
+        run: |
+          wasm-pack build crates/nvsim \
+            --target web \
+            --out-dir ../../dashboard/public/nvsim-pkg \
+            --release \
+            -- --no-default-features --features wasm
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dashboard deps
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Build dashboard
+        working-directory: dashboard
+        env:
+          NVSIM_BASE: /RuView/nvsim/
+        run: npm run build
+
+      - name: Deploy to gh-pages/nvsim/
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dashboard/dist
+          destination_dir: nvsim
+          # CRITICAL: preserves observatory/, pose-fusion/, root index.html
+          # and any other RuView demos already on gh-pages.
+          keep_files: true
+          commit_message: 'deploy(nvsim): ${{ github.sha }}'
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'

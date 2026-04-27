@@ -16,6 +16,7 @@ import './nv-modal';
 import './nv-palette';
 import './nv-debug-hud';
 import './nv-settings-drawer';
+import './nv-onboarding';
 
 export type View = 'scene' | 'apps' | 'settings';
 
@@ -87,6 +88,7 @@ export class NvApp extends LitElement {
       <nv-palette></nv-palette>
       <nv-debug-hud></nv-debug-hud>
       <nv-settings-drawer></nv-settings-drawer>
+      <nv-onboarding></nv-onboarding>
     `;
   }
 }

@@ -1,0 +1,28 @@
+[package]
+name = "nvsim-server"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Axum REST + WebSocket server fronting the nvsim NV-diamond pipeline simulator (ADR-092 §6.2)."
+repository.workspace = true
+keywords = ["nvsim", "axum", "websocket", "magnetometer", "simulator"]
+categories = ["science", "web-programming", "simulation"]
+
+[[bin]]
+name = "nvsim-server"
+path = "src/main.rs"
+
+[dependencies]
+nvsim = { path = "../nvsim" }
+axum = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+futures-util = "0.3"
+clap = { version = "4.5", features = ["derive"] }
+thiserror = { workspace = true }
