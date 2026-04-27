@@ -25,6 +25,18 @@ std = ["sha2/std"]
 # Include the default combined pipeline (gesture+coherence+adversarial) entry points.
 # Disable this when building standalone module binaries (ghost_hunter, etc.)
 default-pipeline = []
+# Build the standalone-bin Ghost Hunter target. Required because that binary
+# defines its own on_init / on_frame / on_timer entry points which would
+# collide with the lib's `default-pipeline` exports. Build with:
+#   cargo build -p wifi-densepose-wasm-edge --bin ghost_hunter \
+#     --target wasm32-unknown-unknown --release \
+#     --no-default-features --features standalone-bin
+standalone-bin = []
+
+[[bin]]
+name = "ghost_hunter"
+path = "src/bin/ghost_hunter.rs"
+required-features = ["standalone-bin"]
 
 [profile.release]
 opt-level = "s"        # Optimize for size
