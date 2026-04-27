@@ -127,7 +127,7 @@ export class NvConsole extends LitElement {
     const c = getClient();
     switch (cmd) {
       case 'help':
-        pushLog('info', 'commands: help · scene.list · sensor.config · run · pause · seed · proof.verify · clear · theme · status');
+        pushLog('info', 'commands: help · scene.list · sensor.config · run · pause · reset · seed · proof.verify · proof.export · clear · theme · status');
         break;
       case 'scene.list':
         pushLog('info', 'scene rebar-walkby-01:');
@@ -170,6 +170,21 @@ export class NvConsole extends LitElement {
           if (r.ok) { witnessVerified.value = 'ok'; witnessHex.value = exp; pushLog('ok', `witness ${exp.slice(0, 16)}… matches · determinism gate ✓`); }
           else { witnessVerified.value = 'fail'; pushLog('err', 'WITNESS MISMATCH'); }
         } catch (e) { pushLog('err', `verify failed: ${(e as Error).message}`); }
+        break;
+      }
+      case 'proof.export': {
+        if (!c) break;
+        pushLog('dbg', 'building proof bundle…');
+        try {
+          const blob = await c.exportProofBundle();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `nvsim-proof-${Date.now()}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+          pushLog('ok', `proof bundle exported · ${blob.size} bytes`);
+        } catch (e) { pushLog('err', `export failed: ${(e as Error).message}`); }
         break;
       }
       case 'clear':

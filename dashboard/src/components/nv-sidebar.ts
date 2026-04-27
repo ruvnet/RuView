@@ -2,7 +2,34 @@
 import { LitElement, html, css } from 'lit';
 import { customElement } from 'lit/decorators.js';
 import { effect } from '@preact/signals-core';
-import { fs, fmod, dtMs, noiseEnabled, running } from '../store/appStore';
+import { fs, fmod, dtMs, noiseEnabled, running, getClient, pushLog } from '../store/appStore';
+
+let configPushTimer: number | null = null;
+function pushConfigDebounced(): void {
+  if (configPushTimer !== null) window.clearTimeout(configPushTimer);
+  configPushTimer = window.setTimeout(async () => {
+    const c = getClient();
+    if (!c) return;
+    try {
+      await c.setConfig({
+        digitiser: { f_s_hz: fs.value, f_mod_hz: fmod.value },
+        sensor: {
+          gamma_fwhm_hz: 1.0e6,
+          t1_s: 5.0e-3,
+          t2_s: 1.0e-6,
+          t2_star_s: 200e-9,
+          contrast: 0.03,
+          n_spins: 1.0e12,
+          shot_noise_disabled: !noiseEnabled.value,
+        },
+        dt_s: dtMs.value * 1e-3,
+      });
+      pushLog('dbg', `config pushed · fs=${fs.value} f_mod=${fmod.value} dt=${dtMs.value.toFixed(1)}ms noise=${noiseEnabled.value ? 'on' : 'off'}`);
+    } catch (e) {
+      pushLog('warn', `config push failed: ${(e as Error).message}`);
+    }
+  }, 300);
+}
 
 @customElement('nv-sidebar')
 export class NvSidebar extends LitElement {
@@ -122,22 +149,22 @@ export class NvSidebar extends LitElement {
         <div class="slider-row">
           <div class="top"><span class="lbl">Sample rate</span><span class="val">${(fs.value / 1000).toFixed(1)} kHz</span></div>
           <input type="range" min="1000" max="100000" .value=${String(fs.value)}
-            @input=${(e: Event) => fs.value = +(e.target as HTMLInputElement).value} />
+            @input=${(e: Event) => { fs.value = +(e.target as HTMLInputElement).value; pushConfigDebounced(); }} />
         </div>
         <div class="slider-row">
           <div class="top"><span class="lbl">Lockin f_mod</span><span class="val">${(fmod.value / 1000).toFixed(3)} kHz</span></div>
           <input type="range" min="100" max="5000" .value=${String(fmod.value)}
-            @input=${(e: Event) => fmod.value = +(e.target as HTMLInputElement).value} />
+            @input=${(e: Event) => { fmod.value = +(e.target as HTMLInputElement).value; pushConfigDebounced(); }} />
         </div>
         <div class="slider-row">
           <div class="top"><span class="lbl">Integration t</span><span class="val">${dtMs.value.toFixed(1)} ms</span></div>
           <input type="range" min="0.1" max="10" step="0.1" .value=${String(dtMs.value)}
-            @input=${(e: Event) => dtMs.value = +(e.target as HTMLInputElement).value} />
+            @input=${(e: Event) => { dtMs.value = +(e.target as HTMLInputElement).value; pushConfigDebounced(); }} />
         </div>
         <div class="slider-row">
           <div class="top"><span class="lbl">Shot noise</span><span class="val">${noiseEnabled.value ? 'ON' : 'OFF'}</span></div>
           <input type="range" min="0" max="1" .value=${noiseEnabled.value ? '1' : '0'}
-            @input=${(e: Event) => noiseEnabled.value = (e.target as HTMLInputElement).value === '1'} />
+            @input=${(e: Event) => { noiseEnabled.value = (e.target as HTMLInputElement).value === '1'; pushConfigDebounced(); }} />
         </div>
       </div>
 

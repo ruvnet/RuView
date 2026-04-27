@@ -2,12 +2,14 @@
 import { LitElement, html, css, svg } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { effect } from '@preact/signals-core';
-import { lastB, bMag, fps, snr, motionReduced } from '../store/appStore';
+import { lastB, bMag, fps, snr, motionReduced, running, getClient, speed, pushLog, lastFrame } from '../store/appStore';
 
 interface SceneItem { id: string; x: number; y: number; color: string; name: string; }
 
 @customElement('nv-scene')
 export class NvScene extends LitElement {
+  @state() private zoom = 1.0;
+  @state() private layerVisible = { source: true, field: true, label: true };
   @state() private items: SceneItem[] = [
     { id: 'rebar', x: 740, y: 240, color: 'oklch(0.72 0.18 330)', name: 'rebar.steel' },
     { id: 'heart', x: 220, y: 180, color: 'oklch(0.78 0.14 195)', name: 'heart_proxy' },
@@ -73,13 +75,116 @@ export class NvScene extends LitElement {
       font-family: var(--mono); font-size: 11px; fill: var(--ink-2);
       pointer-events: none;
     }
+    .scene-toolbar {
+      position: absolute; top: 14px; left: 14px;
+      display: flex; gap: 6px; z-index: 5;
+      background: rgba(13,17,23,0.85);
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 4px;
+    }
+    [data-theme="light"] .scene-toolbar { background: rgba(255,255,255,0.85); }
+    .scene-toolbar button {
+      width: 28px; height: 28px;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      color: var(--ink-2);
+      cursor: pointer;
+      display: grid; place-items: center;
+      font-size: 13px;
+    }
+    .scene-toolbar button:hover { color: var(--ink); background: var(--bg-2); }
+    .scene-toolbar button.on { background: var(--bg-3); color: var(--accent); border-color: var(--line-2); }
+
+    .sim-controls {
+      position: absolute; bottom: 14px; right: 14px;
+      display: flex; gap: 6px; align-items: center;
+      background: rgba(13,17,23,0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--line-2);
+      border-radius: 999px;
+      padding: 6px 10px;
+      z-index: 5;
+    }
+    [data-theme="light"] .sim-controls { background: rgba(255,255,255,0.92); }
+    .sim-controls .play {
+      width: 32px; height: 32px;
+      background: var(--accent);
+      border: none;
+      border-radius: 50%;
+      color: #1a0f00;
+      cursor: pointer;
+      display: grid; place-items: center;
+      font-size: 13px;
+    }
+    .sim-controls .play:hover { filter: brightness(1.08); }
+    .sim-controls .step {
+      width: 26px; height: 26px;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--ink-2);
+      border: 1px solid var(--line);
+      cursor: pointer;
+      font-size: 11px;
+    }
+    .sim-controls .step:hover { color: var(--ink); border-color: var(--line-2); }
+    .sim-controls .speed {
+      font-family: var(--mono); font-size: 11px;
+      color: var(--ink-2);
+      padding: 0 6px;
+      min-width: 36px;
+      text-align: center;
+      cursor: pointer;
+    }
   `;
 
   override connectedCallback(): void {
     super.connectedCallback();
-    effect(() => { lastB.value; bMag.value; fps.value; snr.value; motionReduced.value; this.requestUpdate(); });
+    effect(() => {
+      lastB.value; bMag.value; fps.value; snr.value; motionReduced.value;
+      running.value; speed.value; lastFrame.value;
+      this.requestUpdate();
+    });
+    // Compute SNR from the last frame: |B_pT| / max(σ_pT[k]) per ADR-093 P1.4.
+    effect(() => {
+      const f = lastFrame.value;
+      if (!f) return;
+      const bmag = Math.sqrt(f.bPt[0] ** 2 + f.bPt[1] ** 2 + f.bPt[2] ** 2);
+      const sigmaMax = Math.max(Math.abs(f.sigmaPt[0]), Math.abs(f.sigmaPt[1]), Math.abs(f.sigmaPt[2]), 0.001);
+      const snrVal = bmag / sigmaMax;
+      if (Number.isFinite(snrVal)) snr.value = snrVal;
+    });
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
+  }
+
+  private async toggleRun(): Promise<void> {
+    const c = getClient(); if (!c) return;
+    if (running.value) { await c.pause(); running.value = false; }
+    else { await c.run(); running.value = true; }
+  }
+  private async stepFwd(): Promise<void> {
+    const c = getClient(); if (!c) return;
+    await c.step('fwd', 10);
+    pushLog('dbg', 'sim step → +1 frame');
+  }
+  private async stepBack(): Promise<void> {
+    const c = getClient(); if (!c) return;
+    await c.step('back', 10);
+    pushLog('dbg', 'sim step ← -1 frame');
+  }
+  private cycleSpeed(): void {
+    const speeds = [0.25, 0.5, 1.0, 2.0, 4.0];
+    const idx = speeds.indexOf(speed.value);
+    speed.value = speeds[(idx + 1) % speeds.length];
+  }
+  private zoomIn(): void { this.zoom = Math.min(2.5, this.zoom * 1.2); }
+  private zoomOut(): void { this.zoom = Math.max(0.5, this.zoom / 1.2); }
+  private fitView(): void { this.zoom = 1.0; }
+  private toggleLayer(k: 'source' | 'field' | 'label'): void {
+    this.layerVisible = { ...this.layerVisible, [k]: !this.layerVisible[k] };
   }
 
   override disconnectedCallback(): void {
@@ -127,9 +232,15 @@ export class NvScene extends LitElement {
     const bMagNT = bMag.value * 1e9;
     const animClass = motionReduced.value ? '' : 'anim';
 
+    const vbW = 1000 / this.zoom;
+    const vbH = 600 / this.zoom;
+    const vbX = (1000 - vbW) / 2;
+    const vbY = (600 - vbH) / 2;
+
     return html`
       <div class="grid"></div>
-      <svg viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid meet" id="scene-svg">
+      <svg viewBox="${vbX.toFixed(1)} ${vbY.toFixed(1)} ${vbW.toFixed(1)} ${vbH.toFixed(1)}"
+        preserveAspectRatio="xMidYMid meet" id="scene-svg">
         <defs>
           <radialGradient id="g-sensor" cx="50%" cy="50%" r="50%">
             <stop offset="0" stop-color="oklch(0.78 0.14 70)" stop-opacity="0.4"/>
@@ -139,14 +250,14 @@ export class NvScene extends LitElement {
         </defs>
 
         <!-- Field lines from each source to sensor -->
-        ${this.items.map((it) => svg`
+        ${this.layerVisible.field ? this.items.map((it) => svg`
           <line class="field-line ${animClass}" x1=${it.x} y1=${it.y}
             x2="500" y2="320"
             stroke=${it.color} stroke-width="1" stroke-opacity="0.5"/>
-        `)}
+        `) : ''}
 
         <!-- Source primitives -->
-        ${this.items.map((it) => svg`
+        ${this.layerVisible.source ? this.items.map((it) => svg`
           <g class=${`draggable ${this.dragging === it.id ? 'dragging' : ''} ${this.selected === it.id ? 'selected' : ''}`}
              data-id=${it.id} data-source-id=${it.id}
              transform=${`translate(${it.x.toFixed(0)},${it.y.toFixed(0)})`}
@@ -154,9 +265,9 @@ export class NvScene extends LitElement {
             <ellipse cx="0" cy="0" rx="32" ry="22" fill=${it.color} fill-opacity="0.18"
               stroke=${it.color} stroke-width="1.2"/>
             <circle cx="0" cy="0" r="4" fill=${it.color}/>
-            <text class="label" x="0" y="40" text-anchor="middle">${it.name}</text>
+            ${this.layerVisible.label ? svg`<text class="label" x="0" y="40" text-anchor="middle">${it.name}</text>` : ''}
           </g>
-        `)}
+        `) : ''}
 
         <!-- Sensor (NV diamond) at center -->
         <g id="sensor-g" class="draggable" data-id="sensor" transform="translate(500, 320)">
@@ -174,6 +285,27 @@ export class NvScene extends LitElement {
           </text>
         </g>
       </svg>
+
+      <div class="scene-toolbar" id="scene-toolbar">
+        <button id="zoom-in-btn" title="Zoom in" @click=${this.zoomIn}>+</button>
+        <button id="zoom-out-btn" title="Zoom out" @click=${this.zoomOut}>−</button>
+        <button id="fit-btn" title="Fit to view" @click=${this.fitView}>⊡</button>
+        <button id="layer-source-btn" class=${this.layerVisible.source ? 'on' : ''}
+          title="Sources" @click=${() => this.toggleLayer('source')}>●</button>
+        <button id="layer-field-btn" class=${this.layerVisible.field ? 'on' : ''}
+          title="Field lines" @click=${() => this.toggleLayer('field')}>≈</button>
+        <button id="layer-label-btn" class=${this.layerVisible.label ? 'on' : ''}
+          title="Labels" @click=${() => this.toggleLayer('label')}>T</button>
+      </div>
+
+      <div class="sim-controls" id="sim-controls">
+        <button class="step" id="step-back-btn" title="Step back" @click=${this.stepBack}>⏮</button>
+        <button class="play" id="play-btn" title="Play / pause" @click=${this.toggleRun}>
+          ${running.value ? '❚❚' : '▶'}
+        </button>
+        <button class="step" id="step-fwd-btn" title="Step forward" @click=${this.stepFwd}>⏭</button>
+        <span class="speed" id="speed-val" title="Cycle speed" @click=${this.cycleSpeed}>${speed.value}×</span>
+      </div>
 
       <div class="scene-readout">
         <div class="stat-card">

@@ -26,7 +26,8 @@ function applyMotion(reduced: boolean): void {
   // Restore persisted prefs
   const t = (await kvGet<'dark' | 'light'>('theme')) ?? 'dark';
   const d = (await kvGet<'comfy' | 'default' | 'compact'>('density')) ?? 'default';
-  const m = (await kvGet<boolean>('motionReduced')) ?? false;
+  const sysMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  const m = (await kvGet<boolean>('motionReduced')) ?? sysMotion;
   theme.value = t; applyTheme(t);
   density.value = d; applyDensity(d);
   motionReduced.value = m; applyMotion(m);

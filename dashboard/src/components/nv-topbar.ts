@@ -4,8 +4,10 @@ import { customElement } from 'lit/decorators.js';
 import { effect } from '@preact/signals-core';
 import {
   fps, transportLabel, seed, theme, sceneName,
-  running, getClient,
+  running, getClient, pushLog,
 } from '../store/appStore';
+import { openModal } from './nv-modal';
+import { toast } from './nv-toast';
 
 @customElement('nv-topbar')
 export class NvTopbar extends LitElement {
@@ -31,8 +33,11 @@ export class NvTopbar extends LitElement {
     }
     .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 6px var(--ok); animation: pulse 2s infinite; }
     .pill.wasm .dot { background: var(--accent-2); box-shadow: 0 0 6px var(--accent-2); }
-    .pill.seed { color: var(--ink-3); }
+    .pill.seed { color: var(--ink-3); cursor: pointer; }
+    .pill.seed:hover { border-color: var(--line-2); }
     .pill.seed b { color: var(--accent); font-weight: 600; }
+    .pill.wasm { cursor: pointer; }
+    .pill.wasm:hover { border-color: var(--line-2); }
     button {
       display: inline-flex; align-items: center; gap: 6px;
       padding: 6px 12px;
@@ -65,6 +70,31 @@ export class NvTopbar extends LitElement {
   private toggleTheme(): void {
     theme.value = theme.value === 'dark' ? 'light' : 'dark';
   }
+  private async openSeedModal(): Promise<void> {
+    const cur = `0x${seed.value.toString(16).toUpperCase().padStart(8, '0')}`;
+    openModal({
+      title: 'Set seed',
+      body: `<p>Set the 32-bit hex seed for the shot-noise PRNG. Same <code>(scene, config, seed)</code> → byte-identical witness.</p>
+        <label>Hex seed</label>
+        <input type="text" id="seed-input" value="${cur}" autofocus />`,
+      buttons: [
+        { label: 'Cancel', variant: 'ghost' },
+        { label: 'Apply', variant: 'primary', onClick: async () => {
+          const inp = document.querySelector('nv-modal')?.shadowRoot?.querySelector<HTMLInputElement>('#seed-input');
+          if (!inp) return;
+          const raw = inp.value.trim().replace(/^0x/i, '');
+          const v = BigInt('0x' + raw);
+          seed.value = v;
+          await getClient()?.setSeed(v);
+          pushLog('ok', `seed → 0x${v.toString(16).toUpperCase()}`);
+          toast(`Seed → 0x${v.toString(16).toUpperCase().slice(0, 8)}`, '⟳');
+        } },
+      ],
+    });
+  }
+  private openTransportSettings(): void {
+    window.dispatchEvent(new CustomEvent('open-settings'));
+  }
 
   override render() {
     const seedHex = seed.value.toString(16).toUpperCase().padStart(8, '0');
@@ -79,8 +109,14 @@ export class NvTopbar extends LitElement {
         <span class="dot"></span>
         <span id="fps-val">${fps.value > 0 ? (fps.value / 1000).toFixed(2) + ' kHz' : 'idle'}</span>
       </span>
-      <span class="pill wasm" id="transport-pill"><span class="dot"></span>${transportLabel.value}</span>
-      <span class="pill seed" id="seed-pill">seed: <b>0x${seedHex}</b></span>
+      <span class="pill wasm" id="transport-pill" title="Transport settings"
+        @click=${this.openTransportSettings}>
+        <span class="dot"></span>${transportLabel.value}
+      </span>
+      <span class="pill seed" id="seed-pill" title="Set seed"
+        @click=${this.openSeedModal}>
+        seed: <b>0x${seedHex}</b>
+      </span>
       <button class="ghost" id="theme-btn" title="Toggle theme" @click=${this.toggleTheme}>
         ${theme.value === 'dark' ? '☼' : '☾'}
       </button>
