@@ -102,7 +102,11 @@ export class NvApp extends LitElement {
             ? html`<nv-app-store></nv-app-store>`
             : this.view === 'ghost-murmur'
               ? html`<nv-ghost-murmur></nv-ghost-murmur>`
-              : html`<nv-scene></nv-scene>`}
+              : this.view === 'inspector'
+                ? html`<nv-inspector expanded .pinTab=${'signal'}></nv-inspector>`
+                : this.view === 'witness'
+                  ? html`<nv-inspector expanded .pinTab=${'witness'}></nv-inspector>`
+                  : html`<nv-scene></nv-scene>`}
         </main>
         <nv-inspector
           .pinTab=${this.view === 'inspector' ? 'signal'
