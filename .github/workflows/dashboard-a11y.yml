@@ -1,0 +1,45 @@
+name: Dashboard a11y + cross-browser
+
+# Runs axe-core a11y assertions on the built dashboard across
+# Chromium, Firefox, and WebKit. Closes ADR-092 §11.5 (axe-core)
+# and §11.8 (cross-browser).
+
+on:
+  push:
+    branches: [main]
+    paths: ['dashboard/**', 'v2/crates/nvsim/**']
+  pull_request:
+    paths: ['dashboard/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  a11y:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: wasm32-unknown-unknown }
+
+      - run: cargo install wasm-pack --locked --version 0.13.x || true
+
+      - name: Build nvsim WASM
+        working-directory: v2
+        run: |
+          wasm-pack build crates/nvsim --target web \
+            --out-dir ../../dashboard/public/nvsim-pkg \
+            --release -- --no-default-features --features wasm
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm, cache-dependency-path: dashboard/package-lock.json }
+
+      - working-directory: dashboard
+        run: |
+          npm ci
+          npm install --save-dev @playwright/test @axe-core/playwright
+          npx playwright install --with-deps
+          npm run build
+          npx playwright test

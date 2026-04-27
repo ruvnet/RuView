@@ -1,0 +1,69 @@
+name: nvsim-server → ghcr.io
+
+# Builds and publishes the nvsim-server Docker image to ghcr.io on:
+# - push to main affecting nvsim-server or nvsim
+# - tag push matching nvsim-server-v*
+# - manual workflow_dispatch
+#
+# ADR-092 §6.2 + §9.4.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'v2/crates/nvsim-server/**'
+      - 'v2/crates/nvsim/**'
+      - '.github/workflows/nvsim-server-docker.yml'
+    tags: ['nvsim-server-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/ruvnet/nvsim-server
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build + push
+        uses: docker/build-push-action@v5
+        with:
+          context: v2
+          file: v2/crates/nvsim-server/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+      - name: Smoke-test the image
+        run: |
+          docker pull ghcr.io/ruvnet/nvsim-server:sha-${GITHUB_SHA::7} || \
+            docker pull ghcr.io/ruvnet/nvsim-server:latest
+          docker run --rm -d --name nvsim-test -p 7878:7878 \
+            ghcr.io/ruvnet/nvsim-server:latest
+          sleep 4
+          curl -fsS http://localhost:7878/api/health
+          docker stop nvsim-test
