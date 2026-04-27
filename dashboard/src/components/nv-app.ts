@@ -17,8 +17,9 @@ import './nv-palette';
 import './nv-debug-hud';
 import './nv-settings-drawer';
 import './nv-onboarding';
+import './nv-ghost-murmur';
 
-export type View = 'scene' | 'apps' | 'settings';
+export type View = 'scene' | 'apps' | 'inspector' | 'witness' | 'ghost-murmur';
 
 @customElement('nv-app')
 export class NvApp extends LitElement {
@@ -78,9 +79,16 @@ export class NvApp extends LitElement {
         <nv-topbar></nv-topbar>
         <nv-sidebar></nv-sidebar>
         <div class="main">
-          ${this.view === 'apps' ? html`<nv-app-store></nv-app-store>` : html`<nv-scene></nv-scene>`}
+          ${this.view === 'apps'
+            ? html`<nv-app-store></nv-app-store>`
+            : this.view === 'ghost-murmur'
+              ? html`<nv-ghost-murmur></nv-ghost-murmur>`
+              : html`<nv-scene></nv-scene>`}
         </div>
-        <nv-inspector></nv-inspector>
+        <nv-inspector
+          .pinTab=${this.view === 'inspector' ? 'signal'
+            : this.view === 'witness' ? 'witness' : null}>
+        </nv-inspector>
         <nv-console></nv-console>
       </div>
       <nv-toast></nv-toast>

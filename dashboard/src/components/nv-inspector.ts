@@ -1,6 +1,6 @@
 /* Inspector — tabbed: Signal / Frame / Witness. */
-import { LitElement, html, css, svg } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
+import { LitElement, html, css, svg, type PropertyValues } from 'lit';
+import { customElement, state, property } from 'lit/decorators.js';
 import { effect } from '@preact/signals-core';
 import {
   traceX, traceY, traceZ, stripBars, lastFrame,
@@ -13,6 +13,8 @@ type Tab = 'signal' | 'frame' | 'witness';
 @customElement('nv-inspector')
 export class NvInspector extends LitElement {
   @state() private tab: Tab = 'signal';
+  /** When set by the parent, force the tab and pulse-highlight it. */
+  @property({ attribute: false }) pinTab: Tab | null = null;
 
   static styles = css`
     :host {
@@ -121,6 +123,16 @@ export class NvInspector extends LitElement {
       lastB.value; bMag.value;
       this.requestUpdate();
     });
+  }
+
+  override willUpdate(changed: PropertyValues): void {
+    // Apply parent-driven tab pin during willUpdate so the new tab value
+    // participates in this same render pass — avoids the "update after
+    // update completed" Lit warning that would fire if we did this in
+    // updated().
+    if (changed.has('pinTab') && this.pinTab && this.tab !== this.pinTab) {
+      this.tab = this.pinTab;
+    }
   }
 
   private async verify(): Promise<void> {
