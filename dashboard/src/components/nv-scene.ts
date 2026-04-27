@@ -165,7 +165,41 @@ export class NvScene extends LitElement {
     });
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
+    window.addEventListener('keydown', this.onKey);
   }
+
+  /** Tab cycles selection; arrow keys nudge by 8 px (32 px with Shift);
+   * Esc deselects. ADR-093 P2.6. */
+  private onKey = (e: KeyboardEvent): void => {
+    const target = e.target as HTMLElement | null;
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+    if (!this.selected) {
+      if (e.key === 'Tab' && document.activeElement === document.body) {
+        e.preventDefault();
+        this.selected = this.items[0]?.id ?? null;
+      }
+      return;
+    }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      const step = e.shiftKey ? 32 : 8;
+      const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+      const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+      this.items = this.items.map((it) =>
+        it.id === this.selected
+          ? { ...it, x: Math.max(20, Math.min(980, it.x + dx)), y: Math.max(20, Math.min(580, it.y + dy)) }
+          : it,
+      );
+      scenePositions.value = this.items.map(({ id, x, y }) => ({ id, x, y }));
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      const idx = this.items.findIndex((it) => it.id === this.selected);
+      const next = (idx + (e.shiftKey ? -1 : 1) + this.items.length) % this.items.length;
+      this.selected = this.items[next].id;
+    } else if (e.key === 'Escape') {
+      this.selected = null;
+    }
+  };
 
   private async toggleRun(): Promise<void> {
     const c = getClient(); if (!c) return;
@@ -198,6 +232,7 @@ export class NvScene extends LitElement {
     super.disconnectedCallback();
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
+    window.removeEventListener('keydown', this.onKey);
   }
 
   private onDown = (id: string, e: PointerEvent): void => {

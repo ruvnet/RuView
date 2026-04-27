@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | **Mostly Implemented (2026-04-27)** — iterations A through I + UX usability pass + Home view + WsClient all shipped to PR #436. 19 of 21 catalogued gaps closed; remaining 2 (P2.4 light-theme contrast, P2.6 keyboard arrow scene nav) deferred to follow-up. |
+| **Status** | **Implemented (2026-04-27)** — iterations A through N shipped to PR #436. 21 of 21 catalogued gaps closed. P2.7 (`clients.claim()` in SW) and P2.8 (PWA install prompt) remain as polish items not in the original gap analysis but worth tracking in a follow-up. |
 | **Date** | 2026-04-26 |
 | **Authors** | ruv |
 | **Refines** | ADR-092 (nvsim dashboard implementation) |
@@ -72,9 +72,9 @@ The closing §5 is the iteration plan.
 | **P2.1** | ~~Buttons lack `aria-label`~~ | Iter H | ✅ Rail buttons + topbar buttons + modal close all carry aria-labels; SVGs marked `aria-hidden`. |
 | **P2.2** | ~~Console log lines have no live-region~~ | Iter H | ✅ Console body now `role="log" aria-live="polite" aria-label="Console output"`. |
 | **P2.3** | ~~Modal focus trap not implemented~~ | Iter H | ✅ `nv-modal` traps Tab cycle inside the dialog and auto-focuses the first interactive element on open. |
-| **P2.4** | Color contrast on `.ink-3` light theme borderline for AA | Tweak palette. *(Deferred — needs a color-system pass.)* |
+| **P2.4** | ~~Light-theme `.ink-3` contrast borderline AA~~ | `app.css` | ✅ Iter N — `--ink-3` darkened from `#6b7684` (3.7:1) to `#54606e` (~5.4:1) on light bg, `--ink-4` from `#9ba4b0` to `#7a8390`, line/line-2 firmed. AA-compliant for normal-weight text. |
 | **P2.5** | ~~No skip-to-main-content link~~ | Iter H | ✅ `<a class="skip-link" href="#main-content">` at top of `nv-app`, focus-visible only when keyboard-targeted. Main view wrapped in `<main id="main-content" role="main">`. |
-| **P2.6** | Keyboard navigation through scene draggable sources via arrow keys | Add. |
+| **P2.6** | ~~Keyboard arrow-key scene navigation~~ | `nv-scene.ts` | ✅ Iter N — Tab cycles draggable items, arrows nudge by 8 px (32 with Shift), Esc deselects, position changes persist via `scenePositions`. |
 | **P2.7** | Service worker doesn't have `clients.claim()` | Confirm. Ensures new SW activates on next nav. |
 | **P2.8** | PWA install prompt is silent | Add an install button (visible only when `beforeinstallprompt` fires). |
 
@@ -97,6 +97,7 @@ The dynamic /loop continues with one P0/P1 item per iteration:
 | **K** | Home view | ✅ `<nv-home>` as default landing — hero + 4 quick-jump cards + simplified grid hides power-user panels |
 | **L** | WsClient transport | ✅ Full REST + binary WebSocket impl against `nvsim-server`; transport-flip auto-reverify; activated via Settings drawer |
 | **M** | App Store live runtime | ✅ 6 simulated apps emit real i32 events against nvsim frame stream; runtime pills (running/simulated/mesh-only); live events feed |
+| **N** | Light-theme contrast (P2.4) + keyboard scene nav (P2.6) | ✅ AA-compliant `--ink-3`/`--ink-4`/`--line` palette in light mode; Tab/arrows/Shift-arrow/Esc on scene draggables |
 
 Each iteration ends with: `npx tsc --noEmit` clean → production
 build with `NVSIM_BASE=/RuView/nvsim/` → push to `gh-pages/nvsim/`

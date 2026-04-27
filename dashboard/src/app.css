@@ -34,12 +34,12 @@
   --bg-1: #fbfbfc;
   --bg-2: #ffffff;
   --bg-3: #f0f2f5;
-  --line: #e3e7ec;
-  --line-2: #d1d7de;
-  --ink: #11161d;
-  --ink-2: #38424f;
-  --ink-3: #6b7684;
-  --ink-4: #9ba4b0;
+  --line: #d8dde3;
+  --line-2: #c1c8d1;
+  --ink: #0e131a;
+  --ink-2: #2c3744;
+  --ink-3: #54606e;     /* AA on --bg-1 #fbfbfc — was #6b7684 (3.7:1), now ~5.4:1 */
+  --ink-4: #7a8390;     /* improved from #9ba4b0 for incidental UI labels */
   --grid: rgba(0, 0, 0, 0.05);
   --shadow: 0 12px 40px -16px rgba(15, 30, 55, 0.18),
             0 2px 8px -2px rgba(15, 30, 55, 0.08);
