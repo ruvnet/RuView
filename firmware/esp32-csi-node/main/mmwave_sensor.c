@@ -109,7 +109,7 @@ static void mr60_process_frame(uint16_t type, const uint8_t *data, uint16_t len)
 
     switch (type) {
     case MR60_TYPE_BREATHING:
-        if (len >= 4) {
+        if (len >= sizeof(float)) {
             /* Breathing rate as float32 (little-endian in payload). */
             float br;
             memcpy(&br, data, sizeof(float));
@@ -120,7 +120,7 @@ static void mr60_process_frame(uint16_t type, const uint8_t *data, uint16_t len)
         break;
 
     case MR60_TYPE_HEARTRATE:
-        if (len >= 4) {
+        if (len >= sizeof(float)) {
             float hr;
             memcpy(&hr, data, sizeof(float));
             if (hr >= 0.0f && hr <= 250.0f) {
@@ -130,13 +130,13 @@ static void mr60_process_frame(uint16_t type, const uint8_t *data, uint16_t len)
         break;
 
     case MR60_TYPE_DISTANCE:
-        if (len >= 8) {
+        if (len >= sizeof(uint32_t) + sizeof(float)) {
             /* Bytes 0-3: range flag (uint32 LE). 0 = no valid distance. */
             uint32_t range_flag;
             memcpy(&range_flag, data, sizeof(uint32_t));
-            if (range_flag != 0 && len >= 8) {
+            if (range_flag != 0) {
                 float dist;
-                memcpy(&dist, &data[4], sizeof(float));
+                memcpy(&dist, &data[sizeof(uint32_t)], sizeof(float));
                 s_state.distance_cm = dist;
             }
         }
