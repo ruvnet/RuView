@@ -91,7 +91,37 @@ export class NvModal extends LitElement {
     this.mTitle = r.title; this.mBody = r.body;
     this.buttons = r.buttons ?? [{ label: 'Close', variant: 'primary' }];
     this.open = true; this.setAttribute('open', '');
+    // a11y: focus the first interactive element inside the modal so keyboard
+    // users land in the dialog rather than behind it. Light focus trap via
+    // the keydown handler below catches Tab cycling.
+    requestAnimationFrame(() => {
+      const root = this.shadowRoot;
+      if (!root) return;
+      const first = root.querySelector<HTMLElement>('input, select, textarea, button:not(.close)');
+      first?.focus();
+    });
   };
+
+  override updated(): void {
+    if (!this.open) return;
+    const root = this.shadowRoot;
+    if (!root) return;
+    // Trap Tab inside the modal while open.
+    const trap = (e: KeyboardEvent): void => {
+      if (e.key !== 'Tab') return;
+      const focusables = Array.from(
+        root.querySelectorAll<HTMLElement>('input, select, textarea, button, [href]'),
+      ).filter((el) => !el.hasAttribute('disabled'));
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = (root.activeElement as HTMLElement | null) ?? null;
+      if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+    };
+    root.removeEventListener('keydown', trap as EventListener);
+    root.addEventListener('keydown', trap as EventListener);
+  }
 
   private onKey = (e: KeyboardEvent): void => {
     if (e.key === 'Escape' && this.open) this.close();

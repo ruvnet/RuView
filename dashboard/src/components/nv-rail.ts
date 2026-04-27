@@ -61,36 +61,49 @@ export class NvRail extends LitElement {
 
   override render() {
     return html`
-      <div class="logo">NV</div>
-      <button class="btn ${this.view === 'scene' ? 'active' : ''}" data-id="scene-btn" title="Scene"
+      <div class="logo" aria-hidden="true">NV</div>
+      <nav role="navigation" aria-label="Primary"
+        style="display:flex; flex-direction:column; align-items:center; gap:4px; flex:1;">
+      <button class="btn ${this.view === 'scene' ? 'active' : ''}"
+        data-id="scene-btn" title="Scene" aria-label="Scene"
+        aria-current=${this.view === 'scene' ? 'page' : 'false'}
         @click=${() => this.navigate('scene')}>
-        <svg viewBox="0 0 24 24"><path d="M12 2L3 7l9 5 9-5-9-5zm0 13l-9-5v6l9 5 9-5v-6l-9 5z"/></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2L3 7l9 5 9-5-9-5zm0 13l-9-5v6l9 5 9-5v-6l-9 5z"/></svg>
       </button>
-      <button class="btn ${this.view === 'apps' ? 'active' : ''}" data-id="apps-btn" title="App Store"
+      <button class="btn ${this.view === 'apps' ? 'active' : ''}"
+        data-id="apps-btn" title="App Store" aria-label="App Store"
+        aria-current=${this.view === 'apps' ? 'page' : 'false'}
         @click=${() => this.navigate('apps')}>
-        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
       </button>
-      <button class="btn ${this.view === 'inspector' ? 'active' : ''}" data-id="inspector-btn" title="Inspector"
+      <button class="btn ${this.view === 'inspector' ? 'active' : ''}"
+        data-id="inspector-btn" title="Inspector" aria-label="Inspector"
+        aria-current=${this.view === 'inspector' ? 'page' : 'false'}
         @click=${() => this.navigate('inspector')}>
-        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.6" y2="16.6"/></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.6" y2="16.6"/></svg>
       </button>
-      <button class="btn ${this.view === 'witness' ? 'active' : ''}" data-id="witness-btn" title="Witness"
+      <button class="btn ${this.view === 'witness' ? 'active' : ''}"
+        data-id="witness-btn" title="Witness" aria-label="Witness"
+        aria-current=${this.view === 'witness' ? 'page' : 'false'}
         @click=${() => this.navigate('witness')}>
-        <svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9 9 4.03 9 9z"/></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12l2 2 4-4M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9 9 4.03 9 9z"/></svg>
       </button>
       <button class="btn ghost ${this.view === 'ghost-murmur' ? 'active' : ''}"
         data-id="ghost-murmur-btn" title="Ghost Murmur — research spec"
+        aria-label="Ghost Murmur research"
+        aria-current=${this.view === 'ghost-murmur' ? 'page' : 'false'}
         @click=${() => this.navigate('ghost-murmur')}>
-        <svg viewBox="0 0 24 24">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M9 2C5.7 2 3 4.7 3 8v12l3-2 3 2 3-2 3 2 3-2 3 2V8c0-3.3-2.7-6-6-6H9z"/>
           <circle cx="9" cy="10" r="1.2" fill="currentColor"/>
           <circle cx="15" cy="10" r="1.2" fill="currentColor"/>
         </svg>
       </button>
+      </nav>
       <div class="spacer"></div>
-      <button class="btn" data-id="settings-btn" title="Settings"
+      <button class="btn" data-id="settings-btn" title="Settings" aria-label="Settings"
         @click=${() => this.dispatchEvent(new CustomEvent('open-settings', { bubbles: true, composed: true }))}>
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06A1.65 1.65 0 0015 19.4a1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09A1.65 1.65 0 0015 4.6a1.65 1.65 0 001.82-.33l.06.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06A1.65 1.65 0 0015 19.4a1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09A1.65 1.65 0 0015 4.6a1.65 1.65 0 001.82-.33l.06.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
       </button>
     `;
   }

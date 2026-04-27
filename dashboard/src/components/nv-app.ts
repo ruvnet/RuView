@@ -32,6 +32,21 @@ export class NvApp extends LitElement {
       width: 100vw;
       background: var(--bg-0);
     }
+    .skip-link {
+      position: absolute;
+      top: -40px;
+      left: 8px;
+      padding: 6px 12px;
+      background: var(--accent);
+      color: #1a0f00;
+      border-radius: 6px;
+      font-size: 12.5px;
+      font-weight: 600;
+      text-decoration: none;
+      z-index: 1000;
+      transition: top 0.15s;
+    }
+    .skip-link:focus { top: 8px; }
     .app {
       display: grid;
       grid-template-columns: 56px 280px 1fr 340px;
@@ -74,17 +89,21 @@ export class NvApp extends LitElement {
 
   override render() {
     return html`
+      <a class="skip-link" href="#main-content"
+        @click=${(e: Event) => { e.preventDefault(); const sr = this.shadowRoot; sr?.querySelector<HTMLElement>('.main')?.focus(); }}>
+        Skip to main content
+      </a>
       <div class="app">
         <nv-rail .view=${this.view} @navigate=${(e: CustomEvent<View>) => (this.view = e.detail)}></nv-rail>
         <nv-topbar></nv-topbar>
         <nv-sidebar></nv-sidebar>
-        <div class="main">
+        <main class="main" id="main-content" tabindex="-1" role="main" aria-label="Main view">
           ${this.view === 'apps'
             ? html`<nv-app-store></nv-app-store>`
             : this.view === 'ghost-murmur'
               ? html`<nv-ghost-murmur></nv-ghost-murmur>`
               : html`<nv-scene></nv-scene>`}
-        </div>
+        </main>
         <nv-inspector
           .pinTab=${this.view === 'inspector' ? 'signal'
             : this.view === 'witness' ? 'witness' : null}>

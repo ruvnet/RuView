@@ -2,7 +2,7 @@
 import { LitElement, html, css, svg } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { effect } from '@preact/signals-core';
-import { lastB, bMag, fps, snr, motionReduced, running, getClient, speed, pushLog, lastFrame } from '../store/appStore';
+import { lastB, bMag, fps, snr, motionReduced, running, getClient, speed, pushLog, lastFrame, scenePositions } from '../store/appStore';
 
 interface SceneItem { id: string; x: number; y: number; color: string; name: string; }
 
@@ -142,6 +142,13 @@ export class NvScene extends LitElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
+    // Restore drag positions if any are persisted.
+    if (scenePositions.value.length > 0) {
+      this.items = this.items.map((it) => {
+        const saved = scenePositions.value.find((p) => p.id === it.id);
+        return saved ? { ...it, x: saved.x, y: saved.y } : it;
+      });
+    }
     effect(() => {
       lastB.value; bMag.value; fps.value; snr.value; motionReduced.value;
       running.value; speed.value; lastFrame.value;
@@ -217,7 +224,13 @@ export class NvScene extends LitElement {
     );
   };
 
-  private onPointerUp = (): void => { this.dragging = null; };
+  private onPointerUp = (): void => {
+    if (this.dragging) {
+      // Persist all positions on drop.
+      scenePositions.value = this.items.map(({ id, x, y }) => ({ id, x, y }));
+    }
+    this.dragging = null;
+  };
 
   private toSvg(e: PointerEvent, svgEl: SVGSVGElement): { x: number; y: number } {
     const r = svgEl.getBoundingClientRect();

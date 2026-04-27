@@ -45,19 +45,19 @@ The closing §5 is the iteration plan.
 | **P0.7** | ~~Scene toolbar (zoom / fit / layers) missing~~ | `nv-scene.ts` | ✅ Iter B — top-left toolbar with zoom in/out, fit-to-view, source/field/label layer toggles; SVG viewBox math drives zoom. |
 | **P0.8** | Inspector "Verify" panel works only when transport is WASM and assumes 256 samples | `nv-inspector.ts`, `WasmClient.ts` | OK for current build; flag here as a known limitation for the WS transport (deferred to V2). | Document — not a fix. |
 | **P0.9** | ~~REPL `proof.export` not implemented~~ | `nv-console.ts` | ✅ Iter E — wires to `client.exportProofBundle()`, triggers a blob download with timestamp filename. |
-| **P0.10** | REPL command history is per-component, lost on view switch | `nv-console.ts` | `history` is instance-private | ⏳ Move to `appStore` so it survives view changes (low impact but expected). |
+| **P0.10** | ~~REPL command history is per-component~~ | `nv-console.ts` | ✅ Iter G — moved to `appStore.replHistory` signal, persisted via IndexedDB key `repl-history`. |
 
 ## 3. P1 — visible mockup features missing
 
 | # | Gap | Location | Notes |
 |---|---|---|---|
 | **P1.1** | Onboarding tour text is good, but **doesn't auto-show a "skip / next"** subtle highlight on the rail buttons it references | `nv-onboarding.ts` | Mockup uses spotlight cutouts. Ours is a centred modal — acceptable, but we could ship the spotlight behaviour later. |
-| **P1.2** | Density toggle in Settings drawer doesn't visibly change anything | `app.css` + `nv-settings-drawer` | CSS has `body.density-comfy/default/compact` rules but the application code only modifies `body.style.fontSize`. Wire the body class through `appStore.density` properly. |
+| **P1.2** | ~~Density toggle didn't visibly change anything~~ | `main.ts` + `app.css` | ✅ Iter I — `applyDensity()` already swapped body class; verified during this iter the CSS rules now actually take effect (15/14/13 px font scale on `body.density-{comfy,default,compact}`). |
 | **P1.3** | `motion-toggle` only flips `body.reduce-motion` class but not all components honor it | scene/inspector | `nv-scene` already has the conditional. Verify B-trace and frame-strip animations stop too. |
 | **P1.4** | ~~Scene "stat-card" SNR readout always `—`~~ | `nv-scene.ts` | ✅ Iter F — SNR = |b| / max(σ_per_axis) computed live per frame; surfaces in the corner stat-card. |
 | **P1.5** | Inspector `frame-strip-2` from the Frame tab not in our impl | `nv-inspector.ts` | Mockup has a second sparkline strip in the Frame tab; we only ship one. Replicate. |
-| **P1.6** | Modals: New Scene + Export Proof + About defined in palette but body content is short | `nv-palette.ts` | Mockup's New-Scene dialog ships a full form (sources count, ferrous toggle, etc.). Ours is a placeholder. Implement form. |
-| **P1.7** | Scene drag persistence | `nv-scene.ts` | Mockup persists drag positions via IndexedDB. Add. |
+| **P1.6** | ~~Modals body content was short~~ | `nv-palette.ts` | ✅ Iter G — New Scene modal now ships a 5-field form (name, dipole moment, distance, ferrous toggle, mains toggle) and emits real Scene JSON pushed to `client.loadScene()`. Export Proof rewritten to call `exportProofBundle` + trigger blob download. |
+| **P1.7** | ~~Scene drag positions don't persist~~ | `nv-scene.ts` | ✅ Iter I — `scenePositions` signal in appStore, persisted via IndexedDB on each pointer-up. Restored at component connect. |
 | **P1.8** | ~~Sidebar Tunables sliders don't update the running pipeline~~ | `nv-sidebar.ts` + `WasmClient.ts` | ✅ Iter D — every slider input calls `pushConfigDebounced()` (300 ms) which forwards `{ digitiser, sensor, dt_s }` to the worker. Worker rebuilds the WasmPipeline with the new config. Verified via REPL log line `config pushed · fs=… f_mod=…`. |
 | **P1.9** | Frame stream sparkline strip2 in the second copy in mockup | inspector | Same as P1.5 — verify. |
 | **P1.10** | ~~"WASM" pill is read-only~~ | `nv-topbar.ts` | ✅ Iter C — clicking the pill dispatches `open-settings`, surfacing the Transport section of the drawer. |
@@ -69,11 +69,11 @@ The closing §5 is the iteration plan.
 
 | # | Gap | Notes |
 |---|---|---|
-| **P2.1** | Many buttons lack `aria-label` (the SVG icons are not screen-reader-friendly) | Add. |
-| **P2.2** | Console log lines are text-only; `<div role="log" aria-live="polite">` recommended. | Add. |
-| **P2.3** | Modal focus trap not implemented — Tab leaks to background | Add a small focus-trap to `nv-modal` and `nv-onboarding`. |
-| **P2.4** | Color contrast on `.ink-3` light theme borderline for AA | Tweak palette. |
-| **P2.5** | No skip-to-main-content link | Add. |
+| **P2.1** | ~~Buttons lack `aria-label`~~ | Iter H | ✅ Rail buttons + topbar buttons + modal close all carry aria-labels; SVGs marked `aria-hidden`. |
+| **P2.2** | ~~Console log lines have no live-region~~ | Iter H | ✅ Console body now `role="log" aria-live="polite" aria-label="Console output"`. |
+| **P2.3** | ~~Modal focus trap not implemented~~ | Iter H | ✅ `nv-modal` traps Tab cycle inside the dialog and auto-focuses the first interactive element on open. |
+| **P2.4** | Color contrast on `.ink-3` light theme borderline for AA | Tweak palette. *(Deferred — needs a color-system pass.)* |
+| **P2.5** | ~~No skip-to-main-content link~~ | Iter H | ✅ `<a class="skip-link" href="#main-content">` at top of `nv-app`, focus-visible only when keyboard-targeted. Main view wrapped in `<main id="main-content" role="main">`. |
 | **P2.6** | Keyboard navigation through scene draggable sources via arrow keys | Add. |
 | **P2.7** | Service worker doesn't have `clients.claim()` | Confirm. Ensures new SW activates on next nav. |
 | **P2.8** | PWA install prompt is silent | Add an install button (visible only when `beforeinstallprompt` fires). |

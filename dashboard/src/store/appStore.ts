@@ -55,6 +55,19 @@ export const sceneJson = signal<string>('');
 export const consolePaused = signal<boolean>(false);
 export const consoleFilter = signal<'all' | 'info' | 'warn' | 'err' | 'dbg' | 'ok'>('all');
 
+/** REPL command history, persisted via persistence.ts (kvSet 'repl-history'). */
+export const replHistory = signal<string[]>([]);
+export function pushReplHistory(cmd: string): void {
+  const next = replHistory.value.slice();
+  next.push(cmd);
+  while (next.length > 200) next.shift();
+  replHistory.value = next;
+}
+
+/** Scene drag positions, persisted via persistence.ts (kvSet 'scene-positions'). */
+export interface SceneItemPos { id: string; x: number; y: number }
+export const scenePositions = signal<SceneItemPos[]>([]);
+
 export const transportLabel = computed<string>(() =>
   transport.value === 'wasm' ? 'wasm' : 'ws',
 );

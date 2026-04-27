@@ -8,6 +8,7 @@ import {
   setClient, transport, theme, density, motionReduced,
   pushLog, expectedWitness, framesEmitted, fps, lastB, bMag,
   pushTrace, pushStripBar, lastFrame, sceneJson, witnessHex,
+  replHistory, scenePositions, type SceneItemPos,
 } from './store/appStore';
 import { kvGet, kvSet } from './store/persistence';
 
@@ -36,6 +37,14 @@ function applyMotion(reduced: boolean): void {
   effect(() => { applyTheme(theme.value); kvSet('theme', theme.value); });
   effect(() => { applyDensity(density.value); kvSet('density', density.value); });
   effect(() => { applyMotion(motionReduced.value); kvSet('motionReduced', motionReduced.value); });
+
+  // REPL history + scene drag positions persistence (P0.10, P1.7)
+  const histSaved = await kvGet<string[]>('repl-history');
+  if (histSaved && Array.isArray(histSaved)) replHistory.value = histSaved;
+  effect(() => { void kvSet('repl-history', replHistory.value); });
+  const positionsSaved = await kvGet<SceneItemPos[]>('scene-positions');
+  if (positionsSaved && Array.isArray(positionsSaved)) scenePositions.value = positionsSaved;
+  effect(() => { void kvSet('scene-positions', scenePositions.value); });
 
   // Boot WASM client
   const client = new WasmClient();

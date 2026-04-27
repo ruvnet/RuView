@@ -5,13 +5,12 @@ import { effect } from '@preact/signals-core';
 import {
   consoleLines, consoleFilter, consolePaused, pushLog,
   getClient, seed, theme, expectedWitness, witnessHex, witnessVerified,
-  running,
+  running, replHistory, pushReplHistory,
 } from '../store/appStore';
 
 @customElement('nv-console')
 export class NvConsole extends LitElement {
   @query('#console-input') private inputEl!: HTMLInputElement;
-  private history: string[] = [];
   private hIdx = -1;
 
   static styles = css`
@@ -121,7 +120,8 @@ export class NvConsole extends LitElement {
     line = line.trim();
     if (!line) return;
     pushLog('info', `<span style="color:var(--accent);">nvsim&gt;</span> ${line}`);
-    this.history.push(line); this.hIdx = this.history.length;
+    pushReplHistory(line);
+    this.hIdx = replHistory.value.length;
     const [cmd, ...args] = line.split(/\s+/);
     const arg = args.join(' ');
     const c = getClient();
@@ -207,15 +207,17 @@ export class NvConsole extends LitElement {
   private onKey = (e: KeyboardEvent): void => {
     if (e.key === 'Enter') { void this.exec(this.inputEl.value); this.inputEl.value = ''; }
     else if (e.key === 'ArrowUp') {
-      if (this.history.length) {
+      const h = replHistory.value;
+      if (h.length) {
         this.hIdx = Math.max(0, this.hIdx - 1);
-        this.inputEl.value = this.history[this.hIdx] ?? '';
+        this.inputEl.value = h[this.hIdx] ?? '';
         e.preventDefault();
       }
     } else if (e.key === 'ArrowDown') {
-      if (this.history.length) {
-        this.hIdx = Math.min(this.history.length, this.hIdx + 1);
-        this.inputEl.value = this.history[this.hIdx] ?? '';
+      const h = replHistory.value;
+      if (h.length) {
+        this.hIdx = Math.min(h.length, this.hIdx + 1);
+        this.inputEl.value = h[this.hIdx] ?? '';
         e.preventDefault();
       }
     }
@@ -241,7 +243,7 @@ export class NvConsole extends LitElement {
           </button>
         </div>
       </div>
-      <div class="body">
+      <div class="body" role="log" aria-live="polite" aria-label="Console output">
         ${visible.map((l) => {
           const ts = new Date(l.ts);
           const tsStr = `${String(ts.getSeconds()).padStart(2, '0')}.${String(ts.getMilliseconds()).padStart(3, '0')}`;
