@@ -9,26 +9,35 @@ export class NvSettingsDrawer extends LitElement {
   @state() private open = false;
 
   static styles = css`
+    /* The host covers the viewport without transforming itself. Only the
+     * inner .panel is transformed; otherwise the host's transform would
+     * create a containing block for the fixed-position scrim, clipping
+     * it to the panel's 420 px width and breaking outside-to-dismiss. */
     :host {
-      position: fixed; top: 0; right: 0; bottom: 0;
+      position: fixed; inset: 0;
+      z-index: 51;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    :host([open]) { pointer-events: auto; opacity: 1; }
+    .scrim {
+      position: absolute; inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(2px);
+    }
+    .panel {
+      position: absolute;
+      top: 0; right: 0; bottom: 0;
       width: 420px; max-width: 100vw;
       background: var(--bg-1);
       border-left: 1px solid var(--line);
-      z-index: 51;
       transform: translateX(100%);
       transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
       display: flex; flex-direction: column;
-      box-shadow: -20px 0 60px -20px rgba(0,0,0,0.5);
+      box-shadow: -20px 0 60px -20px rgba(0, 0, 0, 0.5);
     }
-    :host([open]) { transform: translateX(0); }
-    .scrim {
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,0.5);
-      z-index: 50;
-      opacity: 0; pointer-events: none;
-      transition: opacity 0.2s;
-    }
-    :host([open]) .scrim { opacity: 1; pointer-events: auto; }
+    :host([open]) .panel { transform: translateX(0); }
     .h {
       padding: 14px 16px;
       border-bottom: 1px solid var(--line);
@@ -123,6 +132,7 @@ export class NvSettingsDrawer extends LitElement {
   override render() {
     return html`
       <div class="scrim" @click=${() => this.close()}></div>
+      <div class="panel" role="dialog" aria-modal="true" aria-label="Settings">
       <div class="h">
         <div class="ttl">Settings</div>
         <button class="close" @click=${() => this.close()}>×</button>
@@ -255,6 +265,7 @@ export class NvSettingsDrawer extends LitElement {
             </div>
           </div>
         </div>
+      </div>
       </div>
     `;
   }
