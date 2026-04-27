@@ -117,6 +117,11 @@ export class NvTopbar extends LitElement {
         @click=${this.openSeedModal}>
         seed: <b>0x${seedHex}</b>
       </span>
+      <button class="ghost" id="tour-btn" title="Replay the 10-step welcome tour"
+        aria-label="Replay welcome tour"
+        @click=${() => window.dispatchEvent(new CustomEvent('nv-show-tour'))}>
+        ★ Tour
+      </button>
       <button class="ghost" id="help-btn" title="Help (press ? any time)" aria-label="Open help"
         @click=${() => window.dispatchEvent(new CustomEvent('nv-show-help'))}>
         ?

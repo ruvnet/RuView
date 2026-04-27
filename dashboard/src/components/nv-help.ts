@@ -290,13 +290,16 @@ export class NvHelp extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     window.addEventListener('nv-show-help', this.show as EventListener);
+    window.addEventListener('nv-show-help-close', this.closeListener);
     window.addEventListener('keydown', this.onKey);
   }
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     window.removeEventListener('nv-show-help', this.show as EventListener);
+    window.removeEventListener('nv-show-help-close', this.closeListener);
     window.removeEventListener('keydown', this.onKey);
   }
+  private closeListener = (): void => this.close();
 
   private show = (e: Event): void => {
     const detail = (e as CustomEvent).detail as { section?: Section } | undefined;
@@ -331,6 +334,11 @@ export class NvHelp extends LitElement {
     return html`
       <h2>Quickstart</h2>
       <p class="lead">Seven taps to get from "I just opened the dashboard" to "I'm running my own scene with verified determinism."</p>
+      <button
+        style="display:inline-flex; align-items:center; gap:8px; padding:10px 16px; margin-bottom:14px; background:var(--accent); color:#1a0f00; border:none; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; font-family:inherit;"
+        @click=${() => { window.dispatchEvent(new CustomEvent('nv-show-help-close')); window.dispatchEvent(new CustomEvent('nv-show-tour')); }}>
+        ★ Take the interactive 10-step tour
+      </button>
       ${QUICKSTART.map((s) => html`
         <div class="step">
           <div class="num">${s.step}</div>
