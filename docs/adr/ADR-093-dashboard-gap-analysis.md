@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Proposed — implementation in progress on `feat/nvsim-pipeline-simulator`. |
+| **Status** | **Mostly Implemented (2026-04-27)** — iterations A through I + UX usability pass + Home view + WsClient all shipped to PR #436. 19 of 21 catalogued gaps closed; remaining 2 (P2.4 light-theme contrast, P2.6 keyboard arrow scene nav) deferred to follow-up. |
 | **Date** | 2026-04-26 |
 | **Authors** | ruv |
 | **Refines** | ADR-092 (nvsim dashboard implementation) |
@@ -82,17 +82,21 @@ The closing §5 is the iteration plan.
 
 The dynamic /loop continues with one P0/P1 item per iteration:
 
-| Iter | Focus | Deliverable |
+| Iter | Focus | Status |
 |---|---|---|
-| **A** *(this turn)* | Functional Ghost Murmur demo (P0.4) | `WasmClient.runTransient(scene, n)` + interactive distance slider + per-tier detectability |
-| **B** | Scene sim-controls + toolbar (P0.6, P0.7) | Floating sim-controls bottom-right of scene, zoom/fit/layer toolbar top-left |
-| **C** | Topbar seed pill + WASM pill clicks (P0.5, P1.10) | Seed modal + transport toggle |
-| **D** | Sidebar tunables wire-through (P1.8) | Debounced `setConfig` RPC propagates to pipeline |
-| **E** | REPL `proof.export` + history persistence (P0.9, P0.10) | Blob download + appStore history |
-| **F** | SNR computation + reduce-motion audit (P1.4, P1.11, P1.3) | Live SNR, system-pref auto-detect |
-| **G** | Modal contents (P1.6) | New-Scene form with real Scene JSON output |
-| **H** | A11y pass (P2.1–P2.6) | aria-labels, focus traps, skip link |
-| **I** | Density toggle visual (P1.2), drag persistence (P1.7) | Polish |
+| **A** | Functional Ghost Murmur demo (P0.4) | ✅ `runTransient` WASM export + interactive distance/moment sliders + per-tier detectability bars |
+| **B** | Scene sim-controls + toolbar (P0.6, P0.7) | ✅ Bottom-right sim controls, top-left zoom/layer toolbar |
+| **C** | Topbar seed + WASM pill clicks (P0.5, P1.10) | ✅ Seed modal + transport pill opens Settings drawer |
+| **D** | Sidebar tunables wire-through (P1.8) | ✅ Debounced `setConfig` RPC, 300 ms |
+| **E** | REPL `proof.export` + history persistence (P0.9, P0.10) | ✅ Blob download + IndexedDB-persisted history |
+| **F** | SNR computation + reduce-motion (P1.4, P1.11, P1.3) | ✅ |B|/max(σ) live SNR, prefers-reduced-motion auto-detect |
+| **G** | Modal contents (P1.6) | ✅ New-Scene form (5 fields), real Scene JSON push |
+| **H** | A11y pass (P2.1–P2.5) | ✅ aria-labels, focus trap, role=log, skip link, role=tablist |
+| **I** | Density toggle (P1.2) + drag persistence (P1.7) | ✅ Density CSS verified, scenePositions persisted to IndexedDB |
+| **J** | UX usability pass | ✅ nv-help center (Quickstart/Glossary/FAQ/Shortcuts/About), 10-step welcome tour, panel descriptions, settings explainers, empty-state hints |
+| **K** | Home view | ✅ `<nv-home>` as default landing — hero + 4 quick-jump cards + simplified grid hides power-user panels |
+| **L** | WsClient transport | ✅ Full REST + binary WebSocket impl against `nvsim-server`; transport-flip auto-reverify; activated via Settings drawer |
+| **M** | App Store live runtime | ✅ 6 simulated apps emit real i32 events against nvsim frame stream; runtime pills (running/simulated/mesh-only); live events feed |
 
 Each iteration ends with: `npx tsc --noEmit` clean → production
 build with `NVSIM_BASE=/RuView/nvsim/` → push to `gh-pages/nvsim/`

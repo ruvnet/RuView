@@ -4,8 +4,11 @@ import './components/nv-app';
 import { effect } from '@preact/signals-core';
 
 import { WasmClient } from './transport/WasmClient';
+import { WsClient } from './transport/WsClient';
+import type { NvsimClient, MagFrameBatch } from './transport/NvsimClient';
 import {
-  setClient, transport, theme, density, motionReduced,
+  setClient, transport, wsUrl, connected, transportError,
+  theme, density, motionReduced,
   pushLog, expectedWitness, framesEmitted, fps, lastB, bMag,
   pushTrace, pushStripBar, lastFrame, sceneJson, witnessHex,
   replHistory, scenePositions, type SceneItemPos,
@@ -48,48 +51,41 @@ function applyMotion(reduced: boolean): void {
   if (positionsSaved && Array.isArray(positionsSaved)) scenePositions.value = positionsSaved;
   effect(() => { void kvSet('scene-positions', scenePositions.value); });
 
-  // Boot WASM client
-  const client = new WasmClient();
-  setClient(client);
+  // Restore WS URL preference + transport mode
+  const savedWsUrl = (await kvGet<string>('wsUrl')) ?? '';
+  if (savedWsUrl) wsUrl.value = savedWsUrl;
+  const savedTransport = (await kvGet<'wasm' | 'ws'>('transport')) ?? 'wasm';
+  transport.value = savedTransport;
+  effect(() => { void kvSet('wsUrl', wsUrl.value); });
+  effect(() => { void kvSet('transport', transport.value); });
 
-  pushLog('info', 'nvsim — booting WASM runtime');
-  client.onEvent((ev) => {
-    if (ev.type === 'log') pushLog(ev.level, ev.msg);
-    if (ev.type === 'fps') fps.value = ev.value;
-    if (ev.type === 'state') {
-      framesEmitted.value = BigInt(ev.framesEmitted);
-    }
-  });
-
-  // Per-app runtime scratch state + history buffer.
+  // Per-app runtime scratch state + history buffer (defined first so the
+  // onFrames callback can close over them).
   const appState: Record<string, Record<string, number>> = {};
   const bMagHistory: number[] = [];
   const runtimeStartTs = performance.now();
 
-  client.onFrames((batch) => {
+  const onFrames = (batch: MagFrameBatch): void => {
     if (batch.frames.length === 0) return;
     const last = batch.frames[batch.frames.length - 1];
     lastFrame.value = last;
-    const bx = last.bPt[0] * 1e-12; // pT → T
+    const bx = last.bPt[0] * 1e-12;
     const by = last.bPt[1] * 1e-12;
     const bz = last.bPt[2] * 1e-12;
     lastB.value = [bx, by, bz];
     const bmagT = Math.sqrt(bx * bx + by * by + bz * bz);
     bMag.value = bmagT;
     pushTrace([bx * 1e9, by * 1e9, bz * 1e9]);
-    const amp = Math.min(1, Math.abs(bz * 1e9) / 5 + 0.3);
-    pushStripBar(amp);
-
+    pushStripBar(Math.min(1, Math.abs(bz * 1e9) / 5 + 0.3));
     bMagHistory.push(bmagT);
     while (bMagHistory.length > 256) bMagHistory.shift();
 
-    // Dispatch the frame to every active simulated app runtime.
     const activeIds = activeAppIds.value;
     if (activeIds.size === 0) return;
     const elapsedS = (performance.now() - runtimeStartTs) / 1000;
     for (const id of activeIds) {
       const fn = APP_RUNTIMES[id];
-      if (!fn) continue; // mesh-only apps — toggle persists, no in-browser runtime
+      if (!fn) continue;
       if (!appState[id]) appState[id] = {};
       const ctx: AppRuntimeContext = {
         frame: last,
@@ -112,40 +108,93 @@ function applyMotion(reduced: boolean): void {
         pushLog('warn', `[${id}] runtime error: ${(e as Error).message}`);
       }
     }
+  };
+
+  // Boot transport (WASM by default, WS if user previously selected it)
+  let activeClient: NvsimClient | null = null;
+  async function bootTransport(): Promise<void> {
+    try {
+      if (activeClient) await activeClient.close();
+      const want = transport.value;
+      if (want === 'ws' && wsUrl.value.trim()) {
+        const c = new WsClient(wsUrl.value.trim());
+        const info = await c.boot();
+        activeClient = c;
+        connected.value = true;
+        transportError.value = null;
+        expectedWitness.value = info.expectedWitnessHex;
+        wireClient(c);
+        pushLog('ok', `transport WS · ${wsUrl.value} · nvsim@${info.buildVersion}`);
+      } else {
+        if (want === 'ws') {
+          pushLog('warn', 'WS transport selected but no URL set — falling back to WASM');
+        }
+        const c = new WasmClient();
+        const info = await c.boot();
+        activeClient = c;
+        connected.value = true;
+        transportError.value = null;
+        expectedWitness.value = info.expectedWitnessHex;
+        wireClient(c);
+        pushLog('ok', `transport WASM · nvsim@${info.buildVersion} · magic=0x${info.frameMagic.toString(16).toUpperCase()}`);
+      }
+      setClient(activeClient);
+    } catch (e) {
+      const msg = (e as Error).message;
+      transportError.value = msg;
+      connected.value = false;
+      pushLog('err', `transport boot failed: ${msg}`);
+    }
+  }
+  function wireClient(c: NvsimClient): void {
+    c.onEvent((ev) => {
+      if (ev.type === 'log') pushLog(ev.level, ev.msg);
+      if (ev.type === 'fps') fps.value = ev.value;
+      if (ev.type === 'state') framesEmitted.value = BigInt(ev.framesEmitted);
+    });
+    c.onFrames(onFrames);
+  }
+
+  // React to transport-mode flips: tear down + re-boot.
+  let bootInProgress = false;
+  effect(() => {
+    transport.value; wsUrl.value;
+    if (bootInProgress) return;
+    bootInProgress = true;
+    void bootTransport().finally(() => { bootInProgress = false; });
   });
 
-  try {
-    const info = await client.boot();
-    expectedWitness.value = info.expectedWitnessHex;
-    pushLog('ok', `WASM module ready · nvsim@${info.buildVersion} · magic=0x${info.frameMagic.toString(16).toUpperCase()}`);
-    pushLog('info', `expected witness · ${info.expectedWitnessHex.slice(0, 16)}…`);
+  pushLog('info', 'nvsim — booting transport');
 
-    // Load reference scene by default.
-    sceneJson.value = '(reference scene)';
-    transport.value = 'wasm';
-  } catch (e) {
-    pushLog('err', `boot failed: ${(e as Error).message}`);
-  }
-
-  // Auto-verify witness once at boot — proves WASM determinism contract.
-  try {
+  // Initial boot — handled by the effect() above.
+  // Auto-verify witness whenever a fresh transport boot completes.
+  let verifiedFor: string | null = null;
+  effect(() => {
     const exp = expectedWitness.value;
-    if (exp) {
-      const expBytes = new Uint8Array(32);
-      for (let i = 0; i < 32; i++) expBytes[i] = parseInt(exp.slice(i * 2, i * 2 + 2), 16);
-      const r = await client.verifyWitness(expBytes);
-      if (r.ok) {
-        witnessHex.value = exp;
-        pushLog('ok', `witness verified · determinism gate ✓`);
-      } else {
-        const actual = Array.from(r.actual)
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join('');
-        witnessHex.value = actual;
-        pushLog('err', `WITNESS MISMATCH · expected ${exp.slice(0, 16)}… got ${actual.slice(0, 16)}…`);
+    const isConn = connected.value;
+    if (!exp || !isConn) return;
+    if (verifiedFor === exp) return;
+    verifiedFor = exp;
+    void (async () => {
+      const c = activeClient;
+      if (!c) return;
+      try {
+        const expBytes = new Uint8Array(32);
+        for (let i = 0; i < 32; i++) expBytes[i] = parseInt(exp.slice(i * 2, i * 2 + 2), 16);
+        const r = await c.verifyWitness(expBytes);
+        if (r.ok) {
+          witnessHex.value = exp;
+          pushLog('ok', `witness verified · determinism gate ✓ · transport=${transport.value}`);
+        } else {
+          const actual = Array.from(r.actual).map((b) => b.toString(16).padStart(2, '0')).join('');
+          witnessHex.value = actual;
+          pushLog('err', `WITNESS MISMATCH · expected ${exp.slice(0, 16)}… got ${actual.slice(0, 16)}…`);
+        }
+      } catch (e) {
+        pushLog('warn', `witness verify skipped: ${(e as Error).message}`);
       }
-    }
-  } catch (e) {
-    pushLog('warn', `witness verify skipped: ${(e as Error).message}`);
-  }
+    })();
+  });
+
+  sceneJson.value = '(reference scene)';
 })();
