@@ -60,6 +60,18 @@ export class NvApp extends LitElement {
       height: 100vh;
       width: 100vw;
     }
+    /* Home view simplifies: hides sidebar / inspector / console so the
+       hero gets the full screen. Power-user panels stay one rail click away. */
+    .app.simple {
+      grid-template-columns: 56px 1fr;
+      grid-template-rows: 48px 1fr;
+      grid-template-areas:
+        'rail topbar'
+        'rail main';
+    }
+    .app.simple nv-sidebar,
+    .app.simple nv-inspector,
+    .app.simple nv-console { display: none; }
     nv-rail { grid-area: rail; }
     nv-topbar { grid-area: topbar; }
     nv-sidebar { grid-area: sidebar; }
@@ -90,12 +102,13 @@ export class NvApp extends LitElement {
   `;
 
   override render() {
+    const isSimple = this.view === 'home';
     return html`
       <a class="skip-link" href="#main-content"
         @click=${(e: Event) => { e.preventDefault(); const sr = this.shadowRoot; sr?.querySelector<HTMLElement>('.main')?.focus(); }}>
         Skip to main content
       </a>
-      <div class="app">
+      <div class="app ${isSimple ? 'simple' : ''}">
         <nv-rail .view=${this.view} @navigate=${(e: CustomEvent<View>) => (this.view = e.detail)}></nv-rail>
         <nv-topbar></nv-topbar>
         <nv-sidebar></nv-sidebar>
