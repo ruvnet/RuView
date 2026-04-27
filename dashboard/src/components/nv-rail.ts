@@ -64,6 +64,12 @@ export class NvRail extends LitElement {
       <div class="logo" aria-hidden="true">NV</div>
       <nav role="navigation" aria-label="Primary"
         style="display:flex; flex-direction:column; align-items:center; gap:4px; flex:1;">
+      <button class="btn ${this.view === 'home' ? 'active' : ''}"
+        data-id="home-btn" title="Home" aria-label="Home"
+        aria-current=${this.view === 'home' ? 'page' : 'false'}
+        @click=${() => this.navigate('home')}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12L12 4l9 8M5 10v10h14V10"/></svg>
+      </button>
       <button class="btn ${this.view === 'scene' ? 'active' : ''}"
         data-id="scene-btn" title="Scene" aria-label="Scene"
         aria-current=${this.view === 'scene' ? 'page' : 'false'}

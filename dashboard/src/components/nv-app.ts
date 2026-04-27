@@ -19,12 +19,13 @@ import './nv-settings-drawer';
 import './nv-onboarding';
 import './nv-ghost-murmur';
 import './nv-help';
+import './nv-home';
 
-export type View = 'scene' | 'apps' | 'inspector' | 'witness' | 'ghost-murmur';
+export type View = 'home' | 'scene' | 'apps' | 'inspector' | 'witness' | 'ghost-murmur';
 
 @customElement('nv-app')
 export class NvApp extends LitElement {
-  @state() private view: View = 'scene';
+  @state() private view: View = 'home';
 
   static styles = css`
     :host {
@@ -99,15 +100,17 @@ export class NvApp extends LitElement {
         <nv-topbar></nv-topbar>
         <nv-sidebar></nv-sidebar>
         <main class="main" id="main-content" tabindex="-1" role="main" aria-label="Main view">
-          ${this.view === 'apps'
-            ? html`<nv-app-store></nv-app-store>`
-            : this.view === 'ghost-murmur'
-              ? html`<nv-ghost-murmur></nv-ghost-murmur>`
-              : this.view === 'inspector'
-                ? html`<nv-inspector expanded .pinTab=${'signal'}></nv-inspector>`
-                : this.view === 'witness'
-                  ? html`<nv-inspector expanded .pinTab=${'witness'}></nv-inspector>`
-                  : html`<nv-scene></nv-scene>`}
+          ${this.view === 'home'
+            ? html`<nv-home></nv-home>`
+            : this.view === 'apps'
+              ? html`<nv-app-store></nv-app-store>`
+              : this.view === 'ghost-murmur'
+                ? html`<nv-ghost-murmur></nv-ghost-murmur>`
+                : this.view === 'inspector'
+                  ? html`<nv-inspector expanded .pinTab=${'signal'}></nv-inspector>`
+                  : this.view === 'witness'
+                    ? html`<nv-inspector expanded .pinTab=${'witness'}></nv-inspector>`
+                    : html`<nv-scene></nv-scene>`}
         </main>
         <nv-inspector
           .pinTab=${this.view === 'inspector' ? 'signal'
