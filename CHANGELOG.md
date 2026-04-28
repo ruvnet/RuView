@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **3D stick figure visualization for spatial dashboard** (`ui/spatial.html`) —
+  Renders COCO-17 keypoint skeletons from `/api/v1/spatial/clusters` body cluster
+  centroids using Three.js. Three pose variants: standing (green), sitting (yellow),
+  lying (blue). Persistent figure map with position lerp (factor 0.1), smooth
+  posture-transition keypoint blending (~1s), breathing-rate Y-scale animation,
+  activity-based sway (still=0.01m, moderate=0.03m, active=0.08m), and opacity
+  fadeout for disappearing bodies. Falls back to polling `/api/v1/spatial/clusters`
+  every 2s when WebSocket is unavailable. Depends on body tracking endpoints
+  provided by the body tracking PR (#487).
 - **`nvsim` crate — deterministic NV-diamond magnetometer pipeline simulator** (ADR-089) —
   New standalone leaf crate at `v2/crates/nvsim` modeling a forward-only
   magnetic sensing path: scene → source synthesis (Biot–Savart, dipole,
