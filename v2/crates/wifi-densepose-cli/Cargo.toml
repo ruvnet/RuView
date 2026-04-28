@@ -28,7 +28,7 @@ clap = { version = "4.4", features = ["derive", "env", "cargo"] }
 
 # Output formatting
 colored = "2.1"
-tabled = { version = "0.15", features = ["ansi"] }
+tabled = { version = "0.20", features = ["ansi"] }
 indicatif = "0.17"
 console = "0.15"
 
