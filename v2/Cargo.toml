@@ -58,7 +58,7 @@ num-complex = "0.4"
 num-traits = "0.2"
 
 # Neural network
-tch = "0.14"
+tch = "0.24"
 ort = { version = "2.0.0-rc.11" }
 candle-core = "0.4"
 candle-nn = "0.4"
