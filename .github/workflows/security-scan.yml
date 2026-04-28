@@ -177,7 +177,7 @@ jobs:
         category: trivy
 
     - name: Run Grype vulnerability scanner
-      uses: anchore/scan-action@v3
+      uses: anchore/scan-action@v7
       id: grype-scan
       with:
         image: 'wifi-densepose:scan'
