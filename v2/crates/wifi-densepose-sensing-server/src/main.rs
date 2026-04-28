@@ -169,7 +169,7 @@ struct Args {
     #[arg(long)]
     calibrate: bool,
 
-    /// Directory holding ESP32 firmware binaries for pull-based OTA (ADR-094).
+    /// Directory holding ESP32 firmware binaries for pull-based OTA (ADR-095).
     /// On startup, the newest `.bin` file in this directory is registered
     /// as the current firmware. Operators upload new versions via
     /// `POST /api/v1/firmware/upload`.
@@ -651,7 +651,7 @@ struct AppStateInner {
     multistatic_fuser: MultistaticFuser,
     /// SVD-based room field model for eigenvalue person counting (None until calibration).
     field_model: Option<FieldModel>,
-    // ── Firmware registry (pull-based OTA, ADR-094) ──────────────────────
+    // ── Firmware registry (pull-based OTA, ADR-095) ──────────────────────
     /// In-memory registry of the currently-blessed ESP32 firmware binary.
     /// Nodes poll `GET /api/v1/firmware/latest` to learn the current version
     /// and download it via `GET /api/v1/firmware/download`. Operators upload
@@ -3462,7 +3462,7 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
     }
 }
 
-// ── Firmware Registry Endpoints (pull-based OTA, ADR-094) ────────────────────
+// ── Firmware Registry Endpoints (pull-based OTA, ADR-095) ────────────────────
 
 /// Scan a firmware directory and return the newest .bin file by mtime.
 /// Returns `Ok(None)` if the directory exists but contains no .bin files.
@@ -5046,7 +5046,7 @@ async fn main() {
         } else {
             None
         },
-        // Firmware registry (pull-based OTA, ADR-094) — seeded from disk below.
+        // Firmware registry (pull-based OTA, ADR-095) — seeded from disk below.
         firmware_registry: Arc::new(tokio::sync::RwLock::new(FirmwareRegistry::new())),
         firmware_dir: args.firmware_dir.clone(),
     }));
@@ -5173,7 +5173,7 @@ async fn main() {
         .route("/api/v1/calibration/start", post(calibration_start))
         .route("/api/v1/calibration/stop", post(calibration_stop))
         .route("/api/v1/calibration/status", get(calibration_status))
-        // Firmware registry / pull-based OTA (ADR-094)
+        // Firmware registry / pull-based OTA (ADR-095)
         .route("/api/v1/firmware/latest", get(firmware_latest_endpoint))
         .route("/api/v1/firmware/download", get(firmware_download_endpoint))
         .route("/api/v1/firmware/upload", post(firmware_upload_endpoint))

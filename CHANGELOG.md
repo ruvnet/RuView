@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Pull-based OTA firmware updates** (ADR-094) —
+- **Pull-based OTA firmware updates** (ADR-095) —
   ESP32 sensing nodes now poll `GET /api/v1/firmware/latest` on a configurable
   interval (default 5 min) and self-upgrade when the server advertises a newer
   version. SHA-256 integrity is verified before writing the OTA partition; the
@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tests). New server endpoints: `GET /api/v1/firmware/latest`,
   `GET /api/v1/firmware/download`, `POST /api/v1/firmware/upload`.
   Operators stage firmware via upload; nodes fetch updates without any
-  push-side connectivity to individual node IPs. See `docs/adr/ADR-094-pull-based-ota.md`.
+  push-side connectivity to individual node IPs. See `docs/adr/ADR-095-pull-based-ota.md`.
 
 - **`nvsim` crate — deterministic NV-diamond magnetometer pipeline simulator** (ADR-089) —
   New standalone leaf crate at `v2/crates/nvsim` modeling a forward-only

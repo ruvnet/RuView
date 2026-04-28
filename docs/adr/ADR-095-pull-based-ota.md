@@ -1,4 +1,4 @@
-# ADR-094: Pull-based OTA Firmware Update
+# ADR-095: Pull-based OTA Firmware Update
 
 ## Status
 
