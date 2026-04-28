@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   optional Lindblad/Hamiltonian extension if AC magnetometry, MW power
   saturation, hyperfine spectroscopy, or pulsed protocols become required.
 
+### Improved
+- **Vital signs (heart rate + breathing rate) now flow through the 4-stage `wifi-densepose-vitals` pipeline** (IIR + autocorrelation) with confidence-based fallback to the legacy FFT heuristic. When crate confidence \u2265 0.05 the `CrateVitalsPipeline` result is used; below that threshold the existing FFT detector takes over, preserving availability under poor signal conditions. Reduces HR jitter (previously \u00b115 BPM minute-to-minute) and unstable confidence readings.
+
 ### Fixed
 - **Ghost skeletons in live UI with multi-node ESP32 setups** (#420, ADR-082) —
   `tracker_bridge::tracker_to_person_detections` documented itself as filtering

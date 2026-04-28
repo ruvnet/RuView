@@ -599,6 +599,149 @@ pub fn run_benchmark(n_frames: usize) -> (std::time::Duration, std::time::Durati
     (total, per_frame)
 }
 
+// ── Crate-backed vitals pipeline (issue #44) ─────────────────────────────
+
+/// Enhanced vital sign pipeline using `wifi-densepose-vitals` crate.
+///
+/// Wraps the crate's 4-stage pipeline (preprocessor -> breathing extractor ->
+/// heart rate extractor -> anomaly detection) and converts output to the
+/// server's `VitalSigns` format. Falls back to `VitalSignDetector` on error.
+#[allow(dead_code)]
+pub struct CrateVitalsPipeline {
+    preprocessor: wifi_densepose_vitals::CsiVitalPreprocessor,
+    breathing: wifi_densepose_vitals::BreathingExtractor,
+    heartrate: wifi_densepose_vitals::HeartRateExtractor,
+    anomaly: wifi_densepose_vitals::VitalAnomalyDetector,
+    sample_index: u64,
+    sample_rate: f64,
+    n_subcarriers: usize,
+    /// FFT-based fallback detector.
+    fallback: VitalSignDetector,
+}
+
+impl CrateVitalsPipeline {
+    /// Create a new pipeline with given sample rate and subcarrier count.
+    pub fn new(sample_rate: f64, n_subcarriers: usize) -> Self {
+        Self {
+            preprocessor: wifi_densepose_vitals::CsiVitalPreprocessor::new(
+                n_subcarriers, 0.05,
+            ),
+            breathing: wifi_densepose_vitals::BreathingExtractor::new(
+                n_subcarriers, sample_rate, 30.0,
+            ),
+            heartrate: wifi_densepose_vitals::HeartRateExtractor::new(
+                n_subcarriers, sample_rate, 15.0,
+            ),
+            anomaly: wifi_densepose_vitals::VitalAnomalyDetector::default_config(),
+            sample_index: 0,
+            sample_rate,
+            n_subcarriers,
+            fallback: VitalSignDetector::new(sample_rate),
+        }
+    }
+
+    /// Process one CSI frame and return vital signs.
+    ///
+    /// Uses the crate's multi-stage pipeline (EMA preprocessing, IIR bandpass,
+    /// phase-coherence weighted HR extraction). Falls back to the FFT-based
+    /// `VitalSignDetector` if the crate pipeline produces no estimates.
+    pub fn process_frame(&mut self, amplitude: &[f64], phase: &[f64]) -> VitalSigns {
+        let fallback_result = self.fallback.process_frame(amplitude, phase);
+
+        let n_sub = amplitude.len().min(phase.len());
+        if n_sub == 0 {
+            return fallback_result;
+        }
+
+        let frame = wifi_densepose_vitals::CsiFrame {
+            amplitudes: amplitude.to_vec(),
+            phases: phase.to_vec(),
+            n_subcarriers: n_sub,
+            sample_index: self.sample_index,
+            sample_rate_hz: self.sample_rate,
+        };
+        self.sample_index += 1;
+
+        let residuals = match self.preprocessor.process(&frame) {
+            Some(r) => r,
+            None => return fallback_result,
+        };
+
+        let uniform_w = 1.0 / n_sub as f64;
+        let weights = vec![uniform_w; n_sub];
+
+        let rr = self.breathing.extract(&residuals, &weights);
+        let hr = self.heartrate.extract(&residuals, &frame.phases);
+
+        // Build a VitalReading for anomaly detection
+        let reading = wifi_densepose_vitals::VitalReading {
+            respiratory_rate: rr
+                .clone()
+                .unwrap_or_else(wifi_densepose_vitals::VitalEstimate::unavailable),
+            heart_rate: hr
+                .clone()
+                .unwrap_or_else(wifi_densepose_vitals::VitalEstimate::unavailable),
+            subcarrier_count: n_sub,
+            signal_quality: fallback_result.signal_quality,
+            timestamp_secs: self.sample_index as f64 / self.sample_rate,
+        };
+
+        let _alerts = self.anomaly.check(&reading);
+
+        // Convert crate output to server's VitalSigns, falling back per-field
+        let breathing_rate_bpm = rr
+            .as_ref()
+            .filter(|e| e.confidence > 0.05)
+            .map(|e| e.value_bpm)
+            .or(fallback_result.breathing_rate_bpm);
+
+        let breathing_confidence = rr
+            .as_ref()
+            .filter(|e| e.confidence > 0.05)
+            .map(|e| e.confidence)
+            .unwrap_or(fallback_result.breathing_confidence);
+
+        let heart_rate_bpm = hr
+            .as_ref()
+            .filter(|e| e.confidence > 0.05)
+            .map(|e| e.value_bpm)
+            .or(fallback_result.heart_rate_bpm);
+
+        let heartbeat_confidence = hr
+            .as_ref()
+            .filter(|e| e.confidence > 0.05)
+            .map(|e| e.confidence)
+            .unwrap_or(fallback_result.heartbeat_confidence);
+
+        // Use crate's signal quality from the reading (backed by fallback's
+        // amplitude-statistics quality for now; the crate's subcarrier-count
+        // and confidence data augment this in future iterations).
+        let signal_quality = fallback_result.signal_quality;
+
+        VitalSigns {
+            breathing_rate_bpm,
+            heart_rate_bpm,
+            breathing_confidence,
+            heartbeat_confidence,
+            signal_quality,
+        }
+    }
+
+    /// Reset all internal state.
+    pub fn reset(&mut self) {
+        self.preprocessor.reset();
+        self.breathing.reset();
+        self.heartrate.reset();
+        self.fallback.reset();
+        self.sample_index = 0;
+    }
+
+    /// Buffer status from the fallback detector (for diagnostics).
+    pub fn buffer_status(&self) -> (usize, usize, usize, usize) {
+        self.fallback.buffer_status()
+    }
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

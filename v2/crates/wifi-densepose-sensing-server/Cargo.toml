@@ -50,5 +50,8 @@ wifi-densepose-wifiscan = { version = "0.3.0", path = "../wifi-densepose-wifisca
 # build without vcpkg/openblas (issue #366, #415).
 wifi-densepose-signal = { version = "0.3.0", path = "../wifi-densepose-signal", default-features = false }
 
+# 4-stage vital signs pipeline (IIR + autocorrelation) — issue #44 / ADR-045.
+wifi-densepose-vitals = { version = "0.3.0", path = "../wifi-densepose-vitals" }
+
 [dev-dependencies]
 tempfile = "3.10"
