@@ -23,3 +23,36 @@ updates:
     labels:
       - dependencies
       - mobile
+
+  # Desktop UI npm deps. Direct vite devDep currently has a HIGH advisory
+  # (dev-server-only path traversal); track future bumps automatically.
+  - package-ecosystem: npm
+    directory: /v2/crates/wifi-densepose-desktop/ui
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - desktop
+
+  # Python deps used by v1/ and the FastAPI service. requirements.txt is
+  # only loosely pinned; let Dependabot surface upstream CVE bumps.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - python
+
+  # Rust workspace (15+ crates). cargo audit is not currently wired into
+  # any workflow, so Dependabot is the primary automated bump path.
+  - package-ecosystem: cargo
+    directory: /v2
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - rust
