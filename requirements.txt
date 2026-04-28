@@ -7,7 +7,7 @@ torchvision>=0.13.0
 # API dependencies
 fastapi>=0.95.0
 uvicorn>=0.20.0
-websockets>=10.4
+websockets>=15.0.1
 pydantic>=1.10.0
 python-jose[cryptography]>=3.3.0
 python-multipart>=0.0.6
