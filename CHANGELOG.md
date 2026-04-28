@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   saturation, hyperfine spectroscopy, or pulsed protocols become required.
 
 ### Fixed
+- Fixed: CI Black/flake8/mypy/bandit/semgrep checks pointed at the old `src/` and `tests/` paths. Updated to `archive/v1/src/` and `archive/v1/tests/` to match the v1 → archive/v1 reorganization. Restores green CI on main and all open PRs.
 - **Ghost skeletons in live UI with multi-node ESP32 setups** (#420, ADR-082) —
   `tracker_bridge::tracker_to_person_detections` documented itself as filtering
   to `is_alive()` tracks but in fact passed every non-Terminated track to the
