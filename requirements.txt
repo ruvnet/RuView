@@ -26,7 +26,7 @@ click>=8.0.0
 alembic>=1.10.0
 
 # Hardware interface dependencies
-asyncio-mqtt>=0.11.0
+asyncio-mqtt>=0.16.2
 aiohttp>=3.8.0
 paramiko>=3.0.0
 
