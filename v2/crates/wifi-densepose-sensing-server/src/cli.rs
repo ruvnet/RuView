@@ -102,4 +102,8 @@ pub struct Args {
     /// Start field model calibration on boot (empty room required)
     #[arg(long)]
     pub calibrate: bool,
+
+    /// MQTT broker URL for Home Assistant integration (e.g. mqtt://broker.local:1883)
+    #[arg(long, env = "SENSING_MQTT_URL")]
+    pub mqtt_url: Option<String>,
 }

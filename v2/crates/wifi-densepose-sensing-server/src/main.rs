@@ -12,7 +12,9 @@
 mod adaptive_classifier;
 pub mod cli;
 pub mod csi;
+mod event_stream;
 mod field_bridge;
+mod mqtt_bridge;
 mod multistatic_bridge;
 pub mod pose;
 mod rvf_container;
@@ -166,6 +168,10 @@ struct Args {
     /// Start field model calibration on boot (empty room required)
     #[arg(long)]
     calibrate: bool,
+
+    /// MQTT broker URL for Home Assistant integration (e.g. mqtt://broker.local:1883)
+    #[arg(long, env = "SENSING_MQTT_URL")]
+    mqtt_url: Option<String>,
 }
 
 // ── Data types ───────────────────────────────────────────────────────────────
