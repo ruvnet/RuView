@@ -50,5 +50,8 @@ wifi-densepose-wifiscan = { version = "0.3.0", path = "../wifi-densepose-wifisca
 # build without vcpkg/openblas (issue #366, #415).
 wifi-densepose-signal = { version = "0.3.0", path = "../wifi-densepose-signal", default-features = false }
 
+# MQTT bridge for Home Assistant integration
+rumqttc = { workspace = true }
+
 [dev-dependencies]
 tempfile = "3.10"

@@ -4857,6 +4857,19 @@ async fn main() {
         }
     }
 
+    // MQTT bridge for Home Assistant (opt-in via --mqtt-url / SENSING_MQTT_URL)
+    let event_bus = Arc::new(event_stream::EventBus::new());
+    if let Some(ref mqtt_url) = args.mqtt_url {
+        let mqtt_config = mqtt_bridge::MqttConfig {
+            broker_url: mqtt_url.clone(),
+            ..Default::default()
+        };
+        mqtt_bridge::start_mqtt_bridge(mqtt_config, event_bus.clone());
+        info!("MQTT bridge enabled → {mqtt_url}");
+    } else {
+        info!("MQTT bridge disabled (no --mqtt-url / SENSING_MQTT_URL set)");
+    }
+
     // ADR-050: Parse bind address once, use for all listeners
     let bind_ip: std::net::IpAddr = args.bind_addr.parse()
         .expect("Invalid --bind-addr (use 127.0.0.1 or 0.0.0.0)");
