@@ -5,7 +5,7 @@
 pytest>=7.0.0
 pytest-asyncio>=0.21.0
 pytest-mock>=3.10.0
-pytest-benchmark>=4.0.0
+pytest-benchmark>=5.2.3
 
 # Linting and formatting
 black>=23.0.0
