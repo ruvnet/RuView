@@ -34,7 +34,7 @@ jobs:
             --out-dir ../../dashboard/public/nvsim-pkg \
             --release -- --no-default-features --features wasm
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with: { node-version: 20, cache: npm, cache-dependency-path: dashboard/package-lock.json }
 
       - working-directory: dashboard
