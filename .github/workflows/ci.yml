@@ -152,7 +152,7 @@ jobs:
         pytest tests/integration/ -v --junitxml=integration-junit.xml
 
     - name: Upload coverage reports
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v6
       with:
         file: ./coverage.xml
         flags: unittests
