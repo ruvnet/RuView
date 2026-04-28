@@ -16,7 +16,7 @@
     "@react-navigation/bottom-tabs": "^7.15.3",
     "@react-navigation/native": "^7.1.31",
     "@types/three": "^0.183.1",
-    "axios": "^1.13.6",
+    "axios": "^1.15.2",
     "expo": "~55.0.4",
     "expo-status-bar": "~55.0.4",
     "react": "19.2.0",
