@@ -13,7 +13,7 @@
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
-    "@react-navigation/bottom-tabs": "^7.15.3",
+    "@react-navigation/bottom-tabs": "^7.15.10",
     "@react-navigation/native": "^7.1.31",
     "@types/three": "^0.183.1",
     "axios": "^1.13.6",
