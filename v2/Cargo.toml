@@ -41,7 +41,7 @@ categories = ["science", "computer-vision", "wasm"]
 
 [workspace.dependencies]
 # Core utilities
-thiserror = "1.0"
+thiserror = "2.0"
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
