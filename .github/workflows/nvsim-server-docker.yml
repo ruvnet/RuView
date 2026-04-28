@@ -47,7 +47,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build + push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: v2
           file: v2/crates/nvsim-server/Dockerfile
