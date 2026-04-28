@@ -32,7 +32,7 @@
     "react-native-wifi-reborn": "^4.13.6",
     "three": "^0.183.2",
     "victory-native": "^41.20.2",
-    "zustand": "^5.0.11"
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@testing-library/jest-native": "^5.4.3",
