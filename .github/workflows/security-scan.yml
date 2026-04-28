@@ -42,7 +42,7 @@ jobs:
 
     - name: Run Bandit security scan
       run: |
-        bandit -r src/ -f sarif -o bandit-results.sarif
+        bandit -r archive/v1/src/ -f sarif -o bandit-results.sarif
       continue-on-error: true
 
     - name: Upload Bandit results to GitHub Security
@@ -66,7 +66,7 @@ jobs:
         
     - name: Generate Semgrep SARIF
       run: |
-        semgrep --config=p/security-audit --config=p/secrets --config=p/python --sarif --output=semgrep.sarif src/
+        semgrep --config=p/security-audit --config=p/secrets --config=p/python --sarif --output=semgrep.sarif archive/v1/src/
       continue-on-error: true
 
     - name: Upload Semgrep results to GitHub Security
@@ -356,7 +356,7 @@ jobs:
     - name: Check for security headers in code
       run: |
         # Check for security-related configurations
-        grep -r "X-Frame-Options\|X-Content-Type-Options\|X-XSS-Protection\|Content-Security-Policy" src/ || echo "⚠️ Consider adding security headers"
+        grep -r "X-Frame-Options\|X-Content-Type-Options\|X-XSS-Protection\|Content-Security-Policy" archive/v1/src/ || echo "⚠️ Consider adding security headers"
 
     - name: Validate Kubernetes security contexts
       run: |

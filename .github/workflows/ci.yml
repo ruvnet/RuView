@@ -37,16 +37,16 @@ jobs:
         pip install black flake8 mypy bandit safety
 
     - name: Code formatting check (Black)
-      run: black --check --diff src/ tests/
+      run: black --check --diff archive/v1/src/ archive/v1/tests/
 
     - name: Linting (Flake8)
-      run: flake8 src/ tests/ --max-line-length=88 --extend-ignore=E203,W503
+      run: flake8 archive/v1/src/ archive/v1/tests/ --max-line-length=88 --extend-ignore=E203,W503
 
     - name: Type checking (MyPy)
-      run: mypy src/ --ignore-missing-imports
+      run: mypy archive/v1/src/ --ignore-missing-imports
 
     - name: Security scan (Bandit)
-      run: bandit -r src/ -f json -o bandit-report.json
+      run: bandit -r archive/v1/src/ -f json -o bandit-report.json
       continue-on-error: true
 
     - name: Dependency vulnerability scan (Safety)
