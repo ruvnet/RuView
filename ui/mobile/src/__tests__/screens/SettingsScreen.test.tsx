@@ -1,6 +1,7 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { ThemeProvider } from '@/theme/ThemeContext';
+import { apiService } from '@/services/api.service';
 import { useSettingsStore } from '@/stores/settingsStore';
 
 jest.mock('@/services/ws.service', () => ({
@@ -23,6 +24,7 @@ jest.mock('@/services/api.service', () => ({
 
 describe('SettingsScreen', () => {
   beforeEach(() => {
+    jest.clearAllMocks();
     useSettingsStore.setState({
       serverUrl: 'http://localhost:3000',
       rssiScanEnabled: false,
@@ -81,5 +83,26 @@ describe('SettingsScreen', () => {
     );
     expect(screen.getByText('ABOUT')).toBeTruthy();
     expect(screen.getByText('WiFi-DensePose Mobile v1.0.0')).toBeTruthy();
+  });
+
+  it('tests the current draft URL before it is saved', async () => {
+    const { SettingsScreen } = require('@/screens/SettingsScreen');
+    (apiService.getStatus as jest.Mock).mockResolvedValue({ ok: true });
+
+    render(
+      <ThemeProvider>
+        <SettingsScreen />
+      </ThemeProvider>,
+    );
+
+    fireEvent.changeText(
+      screen.getByPlaceholderText('http://192.168.1.100:8080'),
+      'http://10.0.0.42:9090',
+    );
+    fireEvent.press(screen.getByText('Test Connection'));
+
+    await waitFor(() => {
+      expect(apiService.getStatus).toHaveBeenCalledWith('http://10.0.0.42:9090');
+    });
   });
 });
