@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # Keep all third-party GitHub Actions on verified, pinned commit SHAs.
+  # Pairs with the SHA pinning in security-scan.yml and ci.yml so that
+  # future bumps stay automated and reviewable rather than drifting back
+  # to mutable @master / @main refs. See issue #442.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+
+  # Mobile app npm deps. Includes the @xmldom/xmldom, node-forge, and
+  # picomatch advisories from #442 plus axios and any future surface.
+  - package-ecosystem: npm
+    directory: /ui/mobile
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - mobile
