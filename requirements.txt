@@ -27,7 +27,7 @@ alembic>=1.10.0
 
 # Hardware interface dependencies
 asyncio-mqtt>=0.11.0
-aiohttp>=3.8.0
+aiohttp>=3.13.5
 paramiko>=3.0.0
 
 # Data processing dependencies
