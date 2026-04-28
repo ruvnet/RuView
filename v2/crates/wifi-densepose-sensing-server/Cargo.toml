@@ -50,5 +50,9 @@ wifi-densepose-wifiscan = { version = "0.3.0", path = "../wifi-densepose-wifisca
 # build without vcpkg/openblas (issue #366, #415).
 wifi-densepose-signal = { version = "0.3.0", path = "../wifi-densepose-signal", default-features = false }
 
+# SHA-256 for firmware registry integrity verification (pull-based OTA, ADR-094)
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
 [dev-dependencies]
 tempfile = "3.10"
