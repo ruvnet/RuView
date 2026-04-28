@@ -111,7 +111,7 @@ jobs:
       continue-on-error: true
 
     - name: Run Snyk vulnerability scan
-      uses: snyk/actions/python@master
+      uses: snyk/actions/python@9adf32b1121593767fc3c057af55b55db032dc04 # v1.0.0
       env:
         SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
       with:
@@ -163,7 +163,7 @@ jobs:
         cache-to: type=gha,mode=max
 
     - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
       with:
         image-ref: 'wifi-densepose:scan'
         format: 'sarif'
@@ -221,7 +221,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Run Checkov IaC scan
-      uses: bridgecrewio/checkov-action@master
+      uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
       with:
         directory: .
         framework: kubernetes,dockerfile,terraform,ansible
@@ -238,7 +238,7 @@ jobs:
         category: checkov
 
     - name: Run Terrascan IaC scan
-      uses: tenable/terrascan-action@main
+      uses: tenable/terrascan-action@3a6e87da8e244513bd77b631e624552643f794c6 # v1.4.1
       with:
         iac_type: 'k8s'
         iac_version: 'v1'
@@ -247,7 +247,7 @@ jobs:
         sarif_upload: true
 
     - name: Run KICS IaC scan
-      uses: checkmarx/kics-github-action@master
+      uses: checkmarx/kics-github-action@05aa5eb70eede1355220f4ca5238d96b397e30a6 # v2.1.20
       with:
         path: '.'
         output_path: kics-results
@@ -277,7 +277,7 @@ jobs:
         fetch-depth: 0
 
     - name: Run TruffleHog secret scan
-      uses: trufflesecurity/trufflehog@main
+      uses: trufflesecurity/trufflehog@17456f8c7d042d8c82c9a8ca9e937231f9f42e26 # v3.95.2
       with:
         path: ./
         base: main
