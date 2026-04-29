@@ -1,0 +1,67 @@
+name: Point Cloud Viewer → GitHub Pages
+
+# Publishes the live 3D point cloud viewer to gh-pages/pointcloud/.
+# The viewer defaults to a synthetic in-browser demo; users can append
+# ?backend=<url> or ?backend=auto to point it at a real ruview-pointcloud
+# server (CORS-permitting host required). See ADR-094.
+#
+# Uses keep_files: true to preserve the existing observatory/, pose-fusion/,
+# nvsim/, and root index.html demos already on gh-pages.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'v2/crates/wifi-densepose-pointcloud/src/viewer.html'
+      - '.github/workflows/pointcloud-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pointcloud-pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Stage viewer for Pages
+        run: |
+          mkdir -p _site/pointcloud
+          cp v2/crates/wifi-densepose-pointcloud/src/viewer.html _site/pointcloud/index.html
+          # Drop a tiny README so direct browsers of the directory get context.
+          cat > _site/pointcloud/README.md <<'EOF'
+          # RuView — Live 3D Point Cloud Viewer
+
+          Hosted at: https://ruvnet.github.io/RuView/pointcloud/
+
+          ## Modes
+
+          - Default — synthetic in-browser demo (no backend, no network calls).
+          - `?backend=auto` — fetch from `/api/splats` on the same origin
+            (only works when the viewer is served by `ruview-pointcloud serve`).
+          - `?backend=<url>` — fetch from `<url>/api/splats` on a CORS-permitting
+            host (e.g. `?backend=https://my-ruview.example.com`).
+          - `?live=1` — require a live backend; show an offline message instead
+            of falling back to the synthetic demo.
+
+          See ADR-094 for the deployment design.
+          EOF
+
+      - name: Deploy to gh-pages/pointcloud/
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_site/pointcloud
+          destination_dir: pointcloud
+          # CRITICAL: preserves observatory/, pose-fusion/, nvsim/, and root
+          # index.html already on gh-pages.
+          keep_files: true
+          commit_message: 'deploy(pointcloud): ${{ github.sha }}'
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'

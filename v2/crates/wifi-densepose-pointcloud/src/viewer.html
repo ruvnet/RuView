@@ -104,10 +104,139 @@
             scene.add(skeletonGroup);
         }
 
+        // ----- Transport configuration -----
+        // ?backend=<url>   → fetch splats from <url>/api/splats (CORS-permitting host)
+        // ?backend=auto    → try /api/splats, fall back to synthetic demo on failure (default)
+        // ?backend=demo    → always render synthetic demo (no network)
+        // ?live=1          → require live; show error instead of demo fallback
+        var urlParams = new URLSearchParams(window.location.search);
+        var backendArg = urlParams.get("backend") || "auto";
+        var requireLive = urlParams.get("live") === "1";
+        var transportMode = "demo"; // resolved at first fetch: "live" | "remote" | "demo"
+        var demoStartMs = Date.now();
+        var demoFrameNum = 0;
+
+        function buildSplatsUrl() {
+            if (backendArg === "demo") return null;
+            if (backendArg === "auto") return "/api/splats";
+            // User-supplied URL — strip trailing slash and append /api/splats.
+            var base = backendArg.replace(/\/+$/, "");
+            return base + "/api/splats";
+        }
+
+        function syntheticFrame() {
+            // Deterministic synthetic point cloud: floor grid, two walls, and
+            // a standing figure that breathes/sways. Resembles the live API
+            // payload so the same render path drives both modes.
+            var t = (Date.now() - demoStartMs) / 1000.0;
+            var sway = Math.sin(t * 0.8) * 0.05;
+            var breath = Math.sin(t * 1.2) * 0.015;
+            var splats = [];
+
+            // Floor — 12x12 grid at y=-1
+            var gx, gz;
+            for (gx = -6; gx <= 6; gx++) {
+                for (gz = 0; gz <= 12; gz++) {
+                    splats.push({
+                        center: [gx * 0.4, -1.0, gz * 0.4],
+                        color: [0.15, 0.18, 0.22],
+                        opacity: 1.0,
+                        scale: [0.05, 0.05, 0.05]
+                    });
+                }
+            }
+            // Back wall + side walls — sparse vertical strips
+            var wy, wx;
+            for (wy = -1; wy <= 2; wy++) {
+                for (wx = -6; wx <= 6; wx += 2) {
+                    splats.push({
+                        center: [wx * 0.4, wy * 0.5, 4.8],
+                        color: [0.12, 0.20, 0.28],
+                        opacity: 1.0,
+                        scale: [0.05, 0.05, 0.05]
+                    });
+                }
+                splats.push({ center: [-2.4, wy * 0.5, 0.5 + (wy + 1) * 0.8], color: [0.12, 0.20, 0.28], opacity: 1.0, scale: [0.05, 0.05, 0.05] });
+                splats.push({ center: [ 2.4, wy * 0.5, 0.5 + (wy + 1) * 0.8], color: [0.12, 0.20, 0.28], opacity: 1.0, scale: [0.05, 0.05, 0.05] });
+            }
+            // Standing figure — 60 points in a vertical cylinder
+            var i, theta, r, py;
+            for (i = 0; i < 60; i++) {
+                theta = (i / 60) * Math.PI * 2;
+                py = -0.6 + (i / 60) * 1.6;
+                r = 0.18 + breath * (py > 0 ? 1 : 0);
+                splats.push({
+                    center: [sway + Math.cos(theta) * r, py, 2.3 + Math.sin(theta) * r],
+                    color: [0.91, 0.65, 0.20],
+                    opacity: 1.0,
+                    scale: [0.04, 0.04, 0.04]
+                });
+            }
+
+            // 17 COCO keypoints in normalized [0,1] image coords (matches live shape)
+            var headY = 0.18;
+            var keypoints = [
+                [0.50 + sway * 0.05, headY, 0.95],          // 0  nose
+                [0.52 + sway * 0.05, headY - 0.01, 0.92],   // 1  leftEye
+                [0.48 + sway * 0.05, headY - 0.01, 0.92],   // 2  rightEye
+                [0.54 + sway * 0.05, headY,        0.85],   // 3  leftEar
+                [0.46 + sway * 0.05, headY,        0.85],   // 4  rightEar
+                [0.60 + sway * 0.04, 0.32, 0.93],           // 5  leftShoulder
+                [0.40 + sway * 0.04, 0.32, 0.93],           // 6  rightShoulder
+                [0.65 + sway * 0.03, 0.46, 0.90],           // 7  leftElbow
+                [0.35 + sway * 0.03, 0.46, 0.90],           // 8  rightElbow
+                [0.68, 0.60 + Math.sin(t * 1.4) * 0.02, 0.86], // 9  leftWrist
+                [0.32, 0.60 - Math.sin(t * 1.4) * 0.02, 0.86], // 10 rightWrist
+                [0.57, 0.58, 0.94],                         // 11 leftHip
+                [0.43, 0.58, 0.94],                         // 12 rightHip
+                [0.58, 0.74, 0.90],                         // 13 leftKnee
+                [0.42, 0.74, 0.90],                         // 14 rightKnee
+                [0.59, 0.92, 0.88],                         // 15 leftAnkle
+                [0.41, 0.92, 0.88]                          // 16 rightAnkle
+            ];
+
+            demoFrameNum += 1;
+            return {
+                splats: splats,
+                count: splats.length,
+                frame: demoFrameNum,
+                live: false,
+                pipeline: {
+                    skeleton: { keypoints: keypoints, confidence: 0.86 },
+                    vitals: {
+                        breathing_rate: 14 + Math.round(Math.sin(t * 0.05) * 2),
+                        motion_score: 0.18 + Math.abs(sway) * 2
+                    }
+                }
+            };
+        }
+
         async function fetchCloud() {
+            // Demo-only mode: never hit the network.
+            if (backendArg === "demo") {
+                transportMode = "demo";
+                handleData(syntheticFrame());
+                return;
+            }
             try {
-                var resp = await fetch("/api/splats");
+                var resp = await fetch(buildSplatsUrl(), { cache: "no-store" });
+                if (!resp.ok) throw new Error("HTTP " + resp.status);
                 var data = await resp.json();
+                transportMode = (backendArg === "auto") ? "live" : "remote";
+                handleData(data);
+            } catch (err) {
+                if (requireLive) {
+                    document.getElementById("stats").innerHTML =
+                        '<span class="demo">&#9679; OFFLINE</span><br>Live backend required (?live=1) but unreachable.<br><span class="label">' + (err && err.message ? err.message : err) + '</span>';
+                    return;
+                }
+                transportMode = "demo";
+                handleData(syntheticFrame());
+            }
+        }
+
+        function handleData(data) {
+            try {
                 if (data.splats && data.frame !== lastFrame) {
                     // Compute CSI frame rate
                     var now = Date.now();
@@ -127,11 +256,16 @@
                         clearSkeleton();
                     }
 
-                    // Build info panel
-                    var mode = data.live
-                        ? '<span class="live">&#9679; LIVE</span>'
-                        : '<span class="demo">&#9679; DEMO</span>';
-                    var html = mode + " Camera + CSI<br>"
+                    // Build info panel — badge reflects active transport
+                    var mode;
+                    if (transportMode === "live") {
+                        mode = '<span class="live">&#9679; LIVE</span> Local Backend';
+                    } else if (transportMode === "remote") {
+                        mode = '<span class="live">&#9679; REMOTE</span> ' + backendArg;
+                    } else {
+                        mode = '<span class="demo">&#9679; DEMO</span> Synthetic';
+                    }
+                    var html = mode + "<br>"
                         + "Splats: " + data.count + "<br>"
                         + "Frame: " + data.frame;
 
