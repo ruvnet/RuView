@@ -37,6 +37,10 @@ MSYS_NO_PATHCONV=1 docker run --rm \
 
 ### 2. Flash
 
+Find your serial port (`COM7` on Windows, `/dev/ttyACM0` on Linux/WSL):
+
+> **Dual USB-C boards:** Use the **UART port**, not the OTG port. Using the wrong port results in `No serial data received` during flashing.
+
 ```bash
 python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
   write_flash --flash_mode dio --flash_size 8MB \
@@ -46,6 +50,8 @@ python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
 ```
 
 ### 3. Provision WiFi credentials (no reflash needed)
+
+> **WSL2 users:** WSL2's NAT networking does not receive UDP packets sent to the Windows host IP. Enable mirrored networking first: add `networkingMode=mirrored` under `[wsl2]` in `%USERPROFILE%\.wslconfig`, run `wsl --shutdown`, then reopen WSL. Requires Windows 11 22H2+.
 
 ```bash
 python scripts/provision.py --port COM7 \

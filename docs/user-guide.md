@@ -304,7 +304,7 @@ Real Channel State Information at 20 Hz with 56-192 subcarriers. Required for po
 # From source
 ./target/release/sensing-server --source esp32 --udp-port 5005 --http-port 3000 --ws-port 3001
 
-# Docker (use CSI_SOURCE environment variable)
+# Docker (pre-built image uses CSI_SOURCE env var, not a CLI flag)
 docker run -p 3000:3000 -p 3001:3001 -p 5005:5005/udp -e CSI_SOURCE=esp32 ruvnet/wifi-densepose:latest
 ```
 
@@ -1014,6 +1014,8 @@ Pre-built binaries are available at [Releases](https://github.com/ruvnet/RuView/
 
 > **Important:** Always use **v0.4.3.1 or later**. Earlier versions have false fall detection alerts (v0.4.2 and below) and CSI disabled in the build config (pre-v0.4.1).
 
+> **Note:** If your board has two USB-C ports, use the **UART port** (not the OTG port) for flashing and serial monitoring. Using the wrong port results in `No serial data received`.
+
 ```bash
 # Flash an ESP32-S3 with 8MB flash (most boards)
 python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
@@ -1105,11 +1107,13 @@ Binary size: 990 KB (8MB flash, 52% free) or 773 KB (4MB flash). v0.5.0 adds mmW
 
 **Start the aggregator:**
 
+> **WSL2 users:** WSL2's default NAT networking does not receive UDP packets sent to the Windows host IP. Enable mirrored networking so WSL shares the host network stack: add `networkingMode=mirrored` under `[wsl2]` in `%USERPROFILE%\.wslconfig`, then run `wsl --shutdown` and reopen WSL. Requires Windows 11 22H2+.
+
 ```bash
 # From source
 ./target/release/sensing-server --source esp32 --udp-port 5005 --http-port 3000 --ws-port 3001
 
-# Docker (use CSI_SOURCE environment variable)
+# Docker (pre-built image uses CSI_SOURCE env var, not a CLI flag)
 docker run -p 3000:3000 -p 3001:3001 -p 5005:5005/udp -e CSI_SOURCE=esp32 ruvnet/wifi-densepose:latest
 ```
 
@@ -1691,6 +1695,7 @@ Firmware versions prior to v0.4.1 had `CONFIG_ESP_WIFI_CSI_ENABLED` disabled in 
 3. Check the target IP matches the sensing server machine: `python firmware/esp32-csi-node/provision.py --port COM7 --target-ip <YOUR_IP>`
 4. Verify UDP port 5005 is not blocked by firewall
 5. Test with: `nc -lu 5005` (Linux) or similar UDP listener
+6. **WSL2:** UDP to the Windows host IP does not reach WSL by default. Enable mirrored networking (see [ESP32-S3 Mesh](#esp32-s3-mesh) setup notes above).
 
 ### Build: Rust compilation errors
 
