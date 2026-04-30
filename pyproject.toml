@@ -282,7 +282,7 @@ addopts = [
     "--cov-branch",
     "-v",
 ]
-testpaths = ["tests"]
+testpaths = ["tests", "scripts"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*", "Describe*", "When*"]
 python_functions = ["test_*", "it_*", "should_*"]

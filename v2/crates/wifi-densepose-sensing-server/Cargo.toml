@@ -45,10 +45,10 @@ clap = { workspace = true }
 wifi-densepose-wifiscan = { version = "0.3.0", path = "../wifi-densepose-wifiscan" }
 
 # Signal processing with RuvSense pose tracker (accuracy sprint).
-# default-features = false drops the optional ndarray-linalg/BLAS chain so that
-# `--no-default-features` at the workspace root can produce a Windows-friendly
-# build without vcpkg/openblas (issue #366, #415).
-wifi-densepose-signal = { version = "0.3.0", path = "../wifi-densepose-signal", default-features = false }
+# eigenvalue feature enabled on Linux where OpenBLAS is available (/usr/lib/libopenblas.so).
+# default-features = false kept so that `--no-default-features` workspace builds
+# (Windows/CI without vcpkg/openblas) still compile — see issue #366, #415.
+wifi-densepose-signal = { version = "0.3.0", path = "../wifi-densepose-signal", default-features = false, features = ["eigenvalue"] }
 
 [dev-dependencies]
 tempfile = "3.10"

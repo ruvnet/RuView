@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WiFi DensePose — Live 2D View</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      background: #050510;
+      color: #88bbdd;
+      font-family: 'Courier New', monospace;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+    }
+    h1 {
+      font-size: 13px;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: #446688;
+    }
+    #canvas-wrap {
+      position: relative;
+      border: 1px solid #112233;
+    }
+    canvas { display: block; }
+    #overlay {
+      position: absolute;
+      top: 8px; left: 8px;
+      font-size: 11px;
+      line-height: 1.8;
+      color: #aaddff;
+      text-shadow: 0 0 6px #0066ff;
+      pointer-events: none;
+    }
+    #stats {
+      display: flex;
+      gap: 32px;
+      font-size: 11px;
+      color: #446688;
+    }
+    #stats span { color: #88ccff; }
+    #legend {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 10px;
+      color: #334455;
+    }
+    #legend canvas { border: none; }
+    #status { font-size: 10px; color: #223344; }
+  </style>
+</head>
+<body>
+  <h1>WiFi DensePose — Top-Down RF View</h1>
+
+  <div id="canvas-wrap">
+    <canvas id="heatmap" width="400" height="400"></canvas>
+    <div id="overlay">
+      <div>PERSONS: <span id="ov-count">—</span></div>
+      <div>MOTION: <span id="ov-motion">—</span></div>
+      <div>CONFIDENCE: <span id="ov-conf">—</span></div>
+    </div>
+  </div>
+
+  <div id="stats">
+    <div>NODES: <span id="st-nodes">—</span></div>
+    <div>BREATHING: <span id="st-br">—</span> bpm</div>
+    <div>CALIBRATION: <span id="st-cal">—</span></div>
+  </div>
+
+  <div id="legend">
+    <span>low</span>
+    <canvas id="legend-canvas" width="120" height="10"></canvas>
+    <span>high RF energy</span>
+  </div>
+
+  <div id="status">fetching...</div>
+
+  <script>
+    const canvas = document.getElementById('heatmap');
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+
+    // Draw legend gradient
+    const lc = document.getElementById('legend-canvas');
+    const lx = lc.getContext('2d');
+    const lg = lx.createLinearGradient(0, 0, 120, 0);
+    lg.addColorStop(0,   '#050520');
+    lg.addColorStop(0.3, '#002266');
+    lg.addColorStop(0.6, '#0044cc');
+    lg.addColorStop(0.85,'#00aaff');
+    lg.addColorStop(1,   '#ffffff');
+    lx.fillStyle = lg;
+    lx.fillRect(0, 0, 120, 10);
+
+    function rfColor(v) {
+      // deep blue → cyan → white
+      const t = Math.max(0, Math.min(1, v));
+      if (t < 0.3) {
+        const s = t / 0.3;
+        return [Math.round(5 + s * 0), Math.round(5 + s * 30), Math.round(16 + s * 120)];
+      } else if (t < 0.6) {
+        const s = (t - 0.3) / 0.3;
+        return [Math.round(0 + s * 0), Math.round(34 + s * 136), Math.round(136 + s * 64)];
+      } else if (t < 0.85) {
+        const s = (t - 0.6) / 0.25;
+        return [Math.round(0 + s * 0), Math.round(170 + s * 55), Math.round(200 + s * 55)];
+      } else {
+        const s = (t - 0.85) / 0.15;
+        return [Math.round(0 + s * 255), Math.round(225 + s * 30), Math.round(255)];
+      }
+    }
+
+    // ESP32 node positions (normalized to 0-1 in the 1.5m x 1.5m sensing area)
+    // Node 1 at (0,0), Node 2 at (1.5,0) → normalized to room width
+    const NODE_POSITIONS = [
+      { id: 1, nx: 0.0,  ny: 0.5 },
+      { id: 2, nx: 1.0,  ny: 0.5 },
+    ];
+
+    function drawFrame(data) {
+      const sf = data.signal_field || {};
+      const grid = sf.grid_size || [20, 1, 20];
+      const vals = sf.values || [];
+      const GW = grid[0], GH = grid[2];
+      const cellW = W / GW, cellH = H / GH;
+
+      // Draw heatmap cells
+      const imgData = ctx.createImageData(W, H);
+      const px = imgData.data;
+
+      for (let gz = 0; gz < GH; gz++) {
+        for (let gx = 0; gx < GW; gx++) {
+          const idx = gz * GW + gx;
+          const v = vals[idx] || 0;
+          const [r, g, b] = rfColor(v);
+
+          const x0 = Math.floor(gx * cellW);
+          const x1 = Math.floor((gx + 1) * cellW);
+          const y0 = Math.floor(gz * cellH);
+          const y1 = Math.floor((gz + 1) * cellH);
+
+          for (let py = y0; py < y1; py++) {
+            for (let ppx = x0; ppx < x1; ppx++) {
+              const i = (py * W + ppx) * 4;
+              px[i]   = r;
+              px[i+1] = g;
+              px[i+2] = b;
+              px[i+3] = 255;
+            }
+          }
+        }
+      }
+      ctx.putImageData(imgData, 0, 0);
+
+      // Draw room border
+      ctx.strokeStyle = '#112233';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(0, 0, W, H);
+
+      // Draw grid lines (subtle)
+      ctx.strokeStyle = 'rgba(17,34,51,0.4)';
+      ctx.lineWidth = 0.5;
+      for (let i = 1; i < GW; i++) {
+        ctx.beginPath(); ctx.moveTo(i * cellW, 0); ctx.lineTo(i * cellW, H); ctx.stroke();
+      }
+      for (let i = 1; i < GH; i++) {
+        ctx.beginPath(); ctx.moveTo(0, i * cellH); ctx.lineTo(W, i * cellH); ctx.stroke();
+      }
+
+      // Find hotspots and draw person blobs
+      // Build a smoothed list of high-energy spots
+      const spots = [];
+      for (let gz = 0; gz < GH; gz++) {
+        for (let gx = 0; gx < GW; gx++) {
+          const v = vals[gz * GW + gx] || 0;
+          if (v > 0.5) spots.push({ gx, gz, v });
+        }
+      }
+      spots.sort((a, b) => b.v - a.v);
+
+      // Cluster into person blobs (greedy, 3-cell radius)
+      const blobs = [];
+      const used = new Set();
+      for (const s of spots) {
+        const key = `${s.gx},${s.gz}`;
+        if (used.has(key)) continue;
+        const blob = { gx: s.gx, gz: s.gz, v: s.v, count: 1 };
+        for (const s2 of spots) {
+          const k2 = `${s2.gx},${s2.gz}`;
+          if (!used.has(k2) && Math.hypot(s2.gx - s.gx, s2.gz - s.gz) <= 3) {
+            used.add(k2);
+            blob.gx = (blob.gx * blob.count + s2.gx) / (blob.count + 1);
+            blob.gz = (blob.gz * blob.count + s2.gz) / (blob.count + 1);
+            blob.count++;
+          }
+        }
+        blobs.push(blob);
+        if (blobs.length >= (data.estimated_persons || 1)) break;
+      }
+
+      // Draw person blobs
+      const nPersons = data.estimated_persons || 0;
+      blobs.slice(0, nPersons).forEach((blob, i) => {
+        const cx = (blob.gx + 0.5) * cellW;
+        const cy = (blob.gz + 0.5) * cellH;
+
+        // Glow
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, cellW * 3.5);
+        grad.addColorStop(0,   'rgba(0,200,255,0.35)');
+        grad.addColorStop(0.5, 'rgba(0,100,200,0.15)');
+        grad.addColorStop(1,   'rgba(0,0,100,0)');
+        ctx.beginPath();
+        ctx.arc(cx, cy, cellW * 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Center dot
+        ctx.beginPath();
+        ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#00eeff';
+        ctx.fill();
+
+        // Simple stick figure (scaled to cell size)
+        const s = cellH * 2.5;
+        ctx.strokeStyle = 'rgba(0,220,255,0.85)';
+        ctx.lineWidth = 1.5;
+        ctx.lineCap = 'round';
+
+        // head
+        ctx.beginPath();
+        ctx.arc(cx, cy - s * 0.45, s * 0.14, 0, Math.PI * 2);
+        ctx.stroke();
+        // body
+        ctx.beginPath(); ctx.moveTo(cx, cy - s * 0.31); ctx.lineTo(cx, cy + s * 0.1); ctx.stroke();
+        // arms
+        ctx.beginPath(); ctx.moveTo(cx - s * 0.22, cy - s * 0.1); ctx.lineTo(cx + s * 0.22, cy - s * 0.1); ctx.stroke();
+        // legs
+        ctx.beginPath(); ctx.moveTo(cx, cy + s * 0.1); ctx.lineTo(cx - s * 0.15, cy + s * 0.45); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx, cy + s * 0.1); ctx.lineTo(cx + s * 0.15, cy + s * 0.45); ctx.stroke();
+
+        // label
+        ctx.fillStyle = '#aaddff';
+        ctx.font = '10px Courier New';
+        ctx.fillText(`P${i + 1}`, cx + 8, cy - s * 0.45);
+      });
+
+      // Draw node positions
+      NODE_POSITIONS.forEach(n => {
+        const nx = n.nx * W;
+        const ny = n.ny * H;
+        ctx.beginPath();
+        ctx.arc(nx, ny, 6, 0, Math.PI * 2);
+        ctx.strokeStyle = '#ffaa00';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = '#ffaa00';
+        ctx.font = '9px Courier New';
+        ctx.fillText(`N${n.id}`, nx + 8, ny + 3);
+      });
+
+      // Update overlay
+      document.getElementById('ov-count').textContent = nPersons;
+      document.getElementById('ov-motion').textContent = (data.classification || {}).motion_level || '—';
+      const conf = ((data.classification || {}).confidence || 0);
+      document.getElementById('ov-conf').textContent = (conf * 100).toFixed(0) + '%';
+
+      // Update stats
+      const nodes = (data.node_features || []).filter(n => !n.stale);
+      document.getElementById('st-nodes').textContent = nodes.length;
+      const br = ((data.vital_signs || {}).breathing_rate_bpm || 0).toFixed(1);
+      document.getElementById('st-br').textContent = br;
+    }
+
+    async function fetchAndDraw() {
+      try {
+        const [senseRes, calRes] = await Promise.all([
+          fetch('/api/v1/sensing/latest'),
+          fetch('/api/v1/calibration/status'),
+        ]);
+        const data = await senseRes.json();
+        const cal = await calRes.json();
+
+        drawFrame(data);
+
+        const calStatus = cal.status || 'none';
+        const calEl = document.getElementById('st-cal');
+        calEl.textContent = calStatus.toUpperCase();
+        calEl.style.color = calStatus === 'Fresh' ? '#00ff88' : calStatus === 'Collecting' ? '#ffaa00' : '#446688';
+
+        document.getElementById('status').textContent =
+          `tick ${data.tick || '?'} · ${new Date().toLocaleTimeString()}`;
+      } catch (e) {
+        document.getElementById('status').textContent = 'error: ' + e.message;
+      }
+    }
+
+    fetchAndDraw();
+    setInterval(fetchAndDraw, 400);
+  </script>
+</body>
+</html>

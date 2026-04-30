@@ -20,10 +20,11 @@ const ENERGY_THRESH_2: f64 = 12.0;
 const ENERGY_THRESH_3: f64 = 25.0;
 
 /// Create a FieldModelConfig for single-link mode (one ESP32 node = one link).
-/// This avoids the DimensionMismatch error when feeding single-frame observations.
+/// n_subcarriers=64 matches the raw ESP32 CSI frame amplitude vector length.
 pub fn single_link_config() -> FieldModelConfig {
     FieldModelConfig {
         n_links: 1,
+        n_subcarriers: 64,
         ..FieldModelConfig::default()
     }
 }
@@ -83,10 +84,10 @@ pub fn occupancy_or_fallback(
 
 /// Feed the latest frame to the FieldModel during calibration collection.
 ///
-/// Only acts when the model status is `Collecting`. Wraps the latest frame
-/// as a single-link observation (n_links=1) and feeds it.
+/// Acts when status is `Uncalibrated` or `Collecting` — the first feed call
+/// transitions `Uncalibrated` → `Collecting` inside `feed_calibration` itself.
 pub fn maybe_feed_calibration(field: &mut FieldModel, frame_history: &VecDeque<Vec<f64>>) {
-    if field.status() != CalibrationStatus::Collecting {
+    if !matches!(field.status(), CalibrationStatus::Uncalibrated | CalibrationStatus::Collecting) {
         return;
     }
     if let Some(latest) = frame_history.back() {
@@ -129,6 +130,119 @@ pub fn parse_node_positions(input: &str) -> Vec<[f32; 3]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
+    use wifi_densepose_signal::ruvsense::field_model::{FieldModel, FieldModelConfig};
+
+    // ── calibration guard fix (issue #496) ───────────────────────────────────
+
+    /// Before the fix, `maybe_feed_calibration` bailed when status==Uncalibrated.
+    /// A freshly created FieldModel starts Uncalibrated, so frame_count stayed 0.
+    #[test]
+    fn test_maybe_feed_calibration_starts_from_uncalibrated() {
+        let mut fm = FieldModel::new(single_link_config()).unwrap();
+        assert_eq!(fm.status(), CalibrationStatus::Uncalibrated);
+
+        let frame = vec![1.0f64; 64];
+        let mut history: VecDeque<Vec<f64>> = VecDeque::new();
+        history.push_back(frame);
+
+        maybe_feed_calibration(&mut fm, &history);
+
+        assert_eq!(fm.status(), CalibrationStatus::Collecting,
+            "status must transition Uncalibrated→Collecting on first feed");
+        assert_eq!(fm.calibration_frame_count(), 1,
+            "frame_count must be 1 after one feed");
+    }
+
+    /// Feeding multiple frames increments the counter correctly.
+    #[test]
+    fn test_maybe_feed_calibration_accumulates_frames() {
+        let mut fm = FieldModel::new(single_link_config()).unwrap();
+        let mut history: VecDeque<Vec<f64>> = VecDeque::new();
+
+        for i in 0..10u32 {
+            let frame: Vec<f64> = (0..64).map(|j| (i * 64 + j) as f64).collect();
+            history.push_back(frame);
+            maybe_feed_calibration(&mut fm, &history);
+        }
+
+        assert_eq!(fm.calibration_frame_count(), 10);
+    }
+
+    /// `maybe_feed_calibration` must NOT run when status is Fresh (calibrated).
+    #[test]
+    fn test_maybe_feed_calibration_skips_when_fresh() {
+        // Build a model that can finalize after just 5 frames.
+        let cfg = FieldModelConfig {
+            n_links: 1,
+            n_subcarriers: 64,
+            min_calibration_frames: 5,
+            ..FieldModelConfig::default()
+        };
+        let mut fm = FieldModel::new(cfg).unwrap();
+
+        // Feed 5 frames directly to reach Collecting state.
+        for _ in 0..5 {
+            fm.feed_calibration(&[vec![0.5f64; 64]]).unwrap();
+        }
+        fm.finalize_calibration(1_000_000, 0xDEAD).unwrap();
+        assert_eq!(fm.status(), CalibrationStatus::Fresh);
+
+        let count_before = fm.calibration_frame_count();
+
+        // Now call maybe_feed_calibration — it must be a no-op when Fresh.
+        let mut history: VecDeque<Vec<f64>> = VecDeque::new();
+        history.push_back(vec![1.0f64; 64]);
+        maybe_feed_calibration(&mut fm, &history);
+
+        assert_eq!(fm.calibration_frame_count(), count_before,
+            "maybe_feed_calibration must not increment frame_count when status is Fresh");
+    }
+
+    // ── subcarrier count fix (issue #496) ────────────────────────────────────
+
+    /// single_link_config must use 64 subcarriers to match ESP32 CSI frame size.
+    /// Before the fix it used the default (56), causing DimensionMismatch on every feed.
+    #[test]
+    fn test_single_link_config_has_64_subcarriers() {
+        let cfg = single_link_config();
+        assert_eq!(cfg.n_subcarriers, 64,
+            "n_subcarriers must be 64 to match ESP32 CSI amplitude vector length");
+        assert_eq!(cfg.n_links, 1);
+    }
+
+    /// Feeding a 64-element frame must succeed (no DimensionMismatch).
+    #[test]
+    fn test_feed_64_subcarrier_frame_succeeds() {
+        let mut fm = FieldModel::new(single_link_config()).unwrap();
+        let frame = vec![0.5f64; 64];
+        let mut history = VecDeque::new();
+        history.push_back(frame);
+
+        maybe_feed_calibration(&mut fm, &history);
+
+        assert_eq!(fm.calibration_frame_count(), 1,
+            "a 64-subcarrier frame must be accepted without DimensionMismatch");
+    }
+
+    /// Feeding a 56-element frame (old default) must NOT increment frame_count.
+    #[test]
+    fn test_feed_56_subcarrier_frame_rejected() {
+        let mut fm = FieldModel::new(single_link_config()).unwrap();
+        // Status starts Uncalibrated — force it to Collecting first with a good frame
+        let good_frame = vec![0.5f64; 64];
+        let mut history = VecDeque::new();
+        history.push_back(good_frame);
+        maybe_feed_calibration(&mut fm, &history);
+        assert_eq!(fm.calibration_frame_count(), 1);
+
+        // Now push a short (56-elem) frame — must be silently dropped, not crash
+        history.clear();
+        history.push_back(vec![0.5f64; 56]);
+        maybe_feed_calibration(&mut fm, &history);
+        assert_eq!(fm.calibration_frame_count(), 1,
+            "56-subcarrier frame must be rejected — count must not increase");
+    }
 
     #[test]
     fn test_parse_node_positions() {
