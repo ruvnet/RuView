@@ -109,3 +109,75 @@ ssh thyhack@100.90.238.87
 **Symptom:** Plugging into the right USB-C port (when facing the board with USB-C toward you) shows no serial device on the host.
 
 **Fix:** Use the left USB-C port. On most ESP32-S3-DevKitC boards, the left port is the USB-to-UART bridge (CP2102/CH340) used for flashing and serial monitor. The right port is the native USB (USB-JTAG) which requires different drivers and isn't used by the RuView firmware.
+
+---
+
+## 9. Docker Desktop on Windows drops UDP from multiple ESP32 nodes
+
+**Symptom:** Two or more ESP32 nodes are flashed, provisioned, and visibly transmit on the network — `tcpdump`/Wireshark on the Windows host shows datagrams from every node — but inside the Docker container only one source IP arrives. `/api/v1/sensing/latest` shows a single node and the live UI freezes or only tracks one body. Reported in #374 (4-node bench) and reproduced in #386 (6-node demo, RuView v0.7.0).
+
+**Root cause:** Docker Desktop on Windows runs the engine inside a WSL2 / Hyper-V VM. Inbound UDP from the host LAN is forwarded through `vpnkit` / `vEthernet` and the multi-source-IP datagrams are demultiplexed onto a single virtual socket. The first source-IP "wins"; subsequent unique sources are silently dropped at the VM boundary. This is a Docker Desktop limitation, not a sensing-server bug — `host.docker.internal` and `--network host` do not help (host networking is not implemented for the Linux engine on Windows).
+
+**Fix:** Run the bundled UDP relay on the host so every forwarded datagram arrives from the same loopback source IP, which Docker passes through unchanged.
+
+```powershell
+# 1. Start the relay (PowerShell or any terminal)
+python scripts/udp-relay.py --listen-port 5005 --forward-port 5006
+
+# 2. Edit docker/docker-compose.yml — change the ESP32 UDP mapping from
+#       - "5005:5005/udp"
+#    to
+#       - "5006:5005/udp"
+
+# 3. Bring the stack up
+docker compose -f docker/docker-compose.yml up
+```
+
+ESP32 nodes still target the host on `--target-ip <host>:5005` — no firmware re-provisioning is needed. The relay is `scripts/udp-relay.py` (stdlib only, no extra deps). Verify with `--verbose` that each node's source IP appears at least once before forwarding stabilises on a single ephemeral relay port.
+
+**Prevention:** Linux and macOS hosts are unaffected; the relay only needs to run on Docker Desktop for Windows. If Docker Desktop ships per-source UDP forwarding (tracked at [docker/for-win#1144](https://github.com/docker/for-win/issues/1144) and related), this workaround can be retired.
+
+**Prior art:** PR #413 (`txhno`) proposed a docs-only writeup of the same workaround; this entry supersedes it.
+
+---
+
+## 10. `404` on the visualization page when running sensing-server
+
+**Symptom:** `sensing-server` starts cleanly, logs `HTTP server listening on http://localhost:3000`, but loading `http://localhost:3000/` (or `/ui/index.html`) returns `404 Not Found`. Reported in #188.
+
+**Root cause:** The default `--ui-path ../../ui` is resolved relative to the binary's *current working directory*, not the binary location. When the binary is launched from anywhere other than `crates/wifi-densepose-sensing-server/`, the relative path doesn't reach the UI assets and Axum's static file handler returns 404.
+
+**Fix:** Pass an absolute UI path, run the binary from the crate directory, or use the Docker image (which bundles the UI under `/app/ui`).
+
+```bash
+# Option A — absolute path (recommended for production)
+sensing-server --source esp32 --udp-port 5005 --http-port 3000 \
+  --ws-port 3001 --ui-path /absolute/path/to/ui
+
+# Option B — run from the crate dir (works for local dev / cargo run)
+cd v2/crates/wifi-densepose-sensing-server
+cargo run -- --source esp32
+
+# Option C — Docker (no path config needed)
+docker compose -f docker/docker-compose.yml up sensing-server
+```
+
+**Prevention:** Track future work in #188 to fall back to a path resolved relative to the executable when the cwd-relative path doesn't exist, so the binary works regardless of where it's launched.
+
+---
+
+## 11. Boot loop on `--edge-tier 1` or `--edge-tier 2`
+
+**Symptom:** ESP32-S3 boots normally with `--edge-tier 0`, but flashing the same firmware with `--edge-tier 1` or `2` produces a boot loop. Serial output reaches `cpu_start` and `heap_init`, then resets repeatedly. Reported in #438 against firmware `v0.4.3.1-esp32-3-g66e2fa083-dir`.
+
+**Root cause:** Edge tiers 1 and 2 enable the on-device DSP pipeline on Core 1. In the affected build, the `edge_dsp` task ran a tight per-frame loop without yielding, so the FreeRTOS task watchdog tripped on Core 1 and panicked. Tier 0 is passthrough only and doesn't activate the pipeline, so the watchdog never fires there.
+
+**Fix:** Flash the [v0.4.3.1-esp32](https://github.com/ruvnet/RuView/releases/tag/v0.4.3.1-esp32) release or later — the DSP task yield fixes have shipped on `main` since the build in the report.
+
+```bash
+# Verify what version you're on (look for "App version" in serial output on boot)
+python -m serial.tools.miniterm COM7 115200
+# Expect: "App version: v0.4.3.1-esp32" or higher
+```
+
+If the boot loop persists on a release build, capture a full serial trace including the watchdog backtrace and reopen #438 with the new build hash.

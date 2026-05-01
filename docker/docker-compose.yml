@@ -9,7 +9,18 @@ services:
     ports:
       - "3000:3000"   # REST API
       - "3001:3001"   # WebSocket
-      - "5005:5005/udp"  # ESP32 UDP
+      # ESP32 UDP. On Linux/macOS this works with multiple ESP32 nodes out of
+      # the box. On Docker Desktop for Windows, multi-source UDP is collapsed
+      # to one source IP at the WSL/Hyper-V boundary, so all-but-one node's
+      # frames are silently dropped (issue #374, #386).
+      #
+      # Windows workaround: change this to "5006:5005/udp" and run the host
+      # relay so every datagram arrives from the same loopback source:
+      #
+      #   python scripts/udp-relay.py --listen-port 5005 --forward-port 5006
+      #
+      # See docs/TROUBLESHOOTING.md §9 for details.
+      - "5005:5005/udp"
     environment:
       - RUST_LOG=info
       # CSI_SOURCE controls the data source for the sensing server.
