@@ -12,43 +12,15 @@
  */
 
 #include "csi_collector.h"
-#include "nvs_config.h"
 #include "stream_sender.h"
 #include "edge_processing.h"
+#include "nvs_config.h"
 
 #include <string.h>
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_timer.h"
 #include "sdkconfig.h"
-
-/* ADR-060: Access the global NVS config for MAC filter and channel override. */
-extern nvs_config_t g_nvs_config;
-
-/* Defensive fix (#232, #375, #385, #386, #390): capture NVS config fields into
- * module-local statics BEFORE wifi_init_sta() runs, because WiFi driver init
- * can corrupt g_nvs_config (confirmed on device 80:b5:4e:c1:be:b8).
- * main.c calls csi_collector_set_node_id() immediately after nvs_config_load(),
- * and all runtime paths use the local copies exclusively. */
-static uint8_t s_node_id = 1;
-static bool s_node_id_early_set = false;
-
-/* Defensive copy of MAC filter config — the CSI callback fires at 100-500 Hz
- * and reads filter_mac_set + filter_mac on every invocation. If wifi_init_sta()
- * corrupts g_nvs_config, the callback would read garbage, potentially causing
- * LoadProhibited panics (observed: Core 0 panic after ~2400 callbacks). */
-static uint8_t s_filter_mac[6] = {0};
-static bool    s_filter_mac_set = false;
-
-/* ADR-057: Build-time guard — fail early if CSI is not enabled in sdkconfig.
- * Without this, the firmware compiles but crashes at runtime with:
- *   "E (xxxx) wifi:CSI not enabled in menuconfig!"
- * which is confusing for users flashing pre-built binaries. */
-#ifndef CONFIG_ESP_WIFI_CSI_ENABLED
-#error "CONFIG_ESP_WIFI_CSI_ENABLED must be set in sdkconfig. " \
-       "Run: idf.py menuconfig -> Component config -> Wi-Fi -> Enable WiFi CSI, " \
-       "or copy sdkconfig.defaults.template to sdkconfig.defaults before building."
-#endif
 
 static const char *TAG = "csi_collector";
 
@@ -66,24 +38,6 @@ static uint32_t s_rate_skip = 0;
  */
 #define CSI_MIN_SEND_INTERVAL_US  (20 * 1000)
 static int64_t s_last_send_us = 0;
-
-/**
- * Minimum interval between processing ANY CSI callback in microseconds.
- * Promiscuous MGMT+DATA can fire 100-500+ times/sec. At rates above ~50 Hz,
- * the WiFi FIQ handler (wDev_ProcessFiq) races with SPI flash cache operations,
- * causing Core 0 LoadProhibited panics in cache_ll_l1_resume_icache.
- *
- * This early gate drops excess callbacks BEFORE any processing (serialization,
- * UDP, edge enqueue), keeping the effective callback rate at ~50 Hz while
- * preserving the full MGMT+DATA promiscuous filter and HT-LTF/STBC CSI quality.
- *
- * The WiFi hardware still captures all frames and the CSI data is generated,
- * but we simply discard the excess in software. This reduces the time spent
- * in callback context per second, giving the WiFi ISR more headroom.
- */
-#define CSI_MIN_PROCESS_INTERVAL_US  (20 * 1000)  /* 50 Hz */
-static int64_t s_last_process_us = 0;
-static uint32_t s_early_drop = 0;
 
 /* ---- ADR-029: Channel-hop state ---- */
 
@@ -150,9 +104,8 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
     uint32_t magic = CSI_MAGIC;
     memcpy(&buf[0], &magic, 4);
 
-    /* Node ID (captured at init into s_node_id to survive memory corruption
-     * that could clobber g_nvs_config.node_id - see #232/#375/#385/#390). */
-    buf[4] = s_node_id;
+    /* Node ID (from NVS config) */
+    buf[4] = g_nvs_config.node_id;
 
     /* Number of antennas */
     buf[5] = n_antennas;
@@ -189,25 +142,6 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
 static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
 {
     (void)ctx;
-
-    /* Early rate gate: drop excess callbacks to ~50 Hz to prevent
-     * SPI flash cache crash in WiFi ISR (wDev_ProcessFiq). */
-    int64_t now_us = esp_timer_get_time();
-    if ((now_us - s_last_process_us) < CSI_MIN_PROCESS_INTERVAL_US) {
-        s_early_drop++;
-        return;
-    }
-    s_last_process_us = now_us;
-
-    /* ADR-060: MAC address filtering — drop frames from non-matching sources.
-     * Uses defensively-copied s_filter_mac instead of g_nvs_config (which can
-     * be corrupted by wifi_init_sta — same root cause as the node_id clobber). */
-    if (s_filter_mac_set) {
-        if (memcmp(info->mac, s_filter_mac, 6) != 0) {
-            return;  /* Source MAC doesn't match filter — skip frame. */
-        }
-    }
-
     s_cb_count++;
 
     if (s_cb_count <= 3 || (s_cb_count % 100) == 0) {
@@ -258,103 +192,20 @@ static void wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type)
     (void)type;
 }
 
-void csi_collector_set_node_id(uint8_t node_id)
-{
-    s_node_id = node_id;
-    s_node_id_early_set = true;
-    ESP_LOGI(TAG, "Early capture node_id=%u (before WiFi init, #232/#390)",
-             (unsigned)node_id);
-
-    /* Also capture MAC filter config now — same struct, same corruption risk.
-     * The CSI callback reads filter_mac_set on every invocation (100-500 Hz),
-     * so a corrupted value could cause erratic filtering or crash. */
-    s_filter_mac_set = (g_nvs_config.filter_mac_set != 0);
-    if (s_filter_mac_set) {
-        memcpy(s_filter_mac, g_nvs_config.filter_mac, 6);
-        ESP_LOGI(TAG, "Early capture filter_mac=%02x:%02x:%02x:%02x:%02x:%02x",
-                 s_filter_mac[0], s_filter_mac[1], s_filter_mac[2],
-                 s_filter_mac[3], s_filter_mac[4], s_filter_mac[5]);
-    }
-}
-
 void csi_collector_init(void)
 {
-    if (!s_node_id_early_set) {
-        /* Fallback: no early capture — use current g_nvs_config (may be clobbered). */
-        s_node_id = g_nvs_config.node_id;
-        ESP_LOGW(TAG, "Late capture node_id=%u (no early set_node_id call)",
-                 (unsigned)s_node_id);
-    } else if (g_nvs_config.node_id != s_node_id) {
-        /* Canary: early capture disagrees with current g_nvs_config — corruption
-         * happened between nvs_config_load() and here (likely wifi_init_sta). */
-        ESP_LOGW(TAG, "node_id clobber CONFIRMED: early=%u g_nvs_config=%u "
-                 "(WiFi init likely corrupted struct, using early value)",
-                 (unsigned)s_node_id, (unsigned)g_nvs_config.node_id);
-    } else {
-        ESP_LOGI(TAG, "node_id=%u verified (early capture matches g_nvs_config)",
-                 (unsigned)s_node_id);
-    }
-
-    /* Canary for filter_mac: check if WiFi init corrupted the filter fields. */
-    if (s_node_id_early_set) {
-        bool mac_set_now = (g_nvs_config.filter_mac_set != 0);
-        if (mac_set_now != s_filter_mac_set) {
-            ESP_LOGW(TAG, "filter_mac_set clobber CONFIRMED: early=%d g_nvs_config=%d",
-                     (int)s_filter_mac_set, (int)mac_set_now);
-        } else if (s_filter_mac_set &&
-                   memcmp(s_filter_mac, g_nvs_config.filter_mac, 6) != 0) {
-            ESP_LOGW(TAG, "filter_mac clobber CONFIRMED: bytes differ after WiFi init");
-        }
-    } else {
-        /* No early capture — grab filter config now (may already be corrupted). */
-        s_filter_mac_set = (g_nvs_config.filter_mac_set != 0);
-        if (s_filter_mac_set) {
-            memcpy(s_filter_mac, g_nvs_config.filter_mac, 6);
-        }
-    }
-
-    /* ADR-060: Determine the CSI channel.
-     * Priority: 1) NVS override (--channel), 2) connected AP channel, 3) Kconfig default. */
-    uint8_t csi_channel = (uint8_t)CONFIG_CSI_WIFI_CHANNEL;
-
-    if (g_nvs_config.csi_channel > 0) {
-        /* Explicit NVS override via provision.py --channel */
-        csi_channel = g_nvs_config.csi_channel;
-        ESP_LOGI(TAG, "Using NVS channel override: %u", (unsigned)csi_channel);
-    } else {
-        /* Auto-detect from connected AP */
-        wifi_ap_record_t ap_info;
-        if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK && ap_info.primary > 0) {
-            csi_channel = ap_info.primary;
-            ESP_LOGI(TAG, "Auto-detected AP channel: %u", (unsigned)csi_channel);
-        } else {
-            ESP_LOGW(TAG, "Could not detect AP channel, using Kconfig default: %u",
-                     (unsigned)csi_channel);
-        }
-    }
-
-    /* Update the hop table's first channel to match. */
-    s_hop_channels[0] = csi_channel;
-
     /* Enable promiscuous mode — required for reliable CSI callbacks.
      * Without this, CSI only fires on frames destined to this station,
      * which may be very infrequent on a quiet network. */
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_rx_cb(wifi_promiscuous_cb));
 
-    /* MGMT-only promiscuous filter + active probe injection (RuView#396).
-     *
-     * DATA frames cause 100-500+ WiFi HW interrupts/sec which crashes Core 0
-     * in wDev_ProcessFiq (SPI flash cache race in ESP-IDF WiFi blob).
-     * MGMT-only gives ~10 Hz (beacons). Probe request injection at 10 Hz
-     * adds ~10 Hz probe responses from APs → ~20 Hz total, matching the
-     * edge processing designed sample rate of 20 Hz. */
     wifi_promiscuous_filter_t filt = {
-        .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT,
+        .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA,
     };
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_filter(&filt));
 
-    ESP_LOGI(TAG, "Promiscuous mode enabled (MGMT-only, RuView#396)");
+    ESP_LOGI(TAG, "Promiscuous mode enabled for CSI capture");
 
     wifi_csi_config_t csi_config = {
         .lltf_en = true,
@@ -370,58 +221,8 @@ void csi_collector_init(void)
     ESP_ERROR_CHECK(esp_wifi_set_csi_rx_cb(wifi_csi_callback, NULL));
     ESP_ERROR_CHECK(esp_wifi_set_csi(true));
 
-    if (g_nvs_config.filter_mac_set) {
-        ESP_LOGI(TAG, "MAC filter active: %02x:%02x:%02x:%02x:%02x:%02x",
-                 g_nvs_config.filter_mac[0], g_nvs_config.filter_mac[1],
-                 g_nvs_config.filter_mac[2], g_nvs_config.filter_mac[3],
-                 g_nvs_config.filter_mac[4], g_nvs_config.filter_mac[5]);
-    }
-
-    ESP_LOGI(TAG, "CSI collection initialized (node_id=%u, channel=%u)",
-             (unsigned)s_node_id, (unsigned)csi_channel);
-}
-
-/* Accessor for other modules that need the authoritative runtime node_id. */
-uint8_t csi_collector_get_node_id(void)
-{
-    return s_node_id;
-}
-
-/* ---- ADR-081: packet yield accessor for the radio abstraction layer ---- */
-
-uint16_t csi_collector_get_pkt_yield_per_sec(void)
-{
-    /* Simple sliding window: record the callback count at ~1 s ago, return
-     * the delta. Called from adaptive_controller's fast loop (200 ms), so
-     * we update the snapshot every ~5 calls. */
-    static int64_t  s_yield_window_start_us = 0;
-    static uint32_t s_yield_window_start_cb = 0;
-    static uint16_t s_last_yield            = 0;
-
-    int64_t now = esp_timer_get_time();
-    if (s_yield_window_start_us == 0) {
-        s_yield_window_start_us = now;
-        s_yield_window_start_cb = s_cb_count;
-        return 0;
-    }
-    int64_t elapsed = now - s_yield_window_start_us;
-    if (elapsed < 1000000LL) {
-        return s_last_yield;
-    }
-    uint32_t delta = s_cb_count - s_yield_window_start_cb;
-    /* Scale back to per-second if the window ran long (shouldn't, but be safe). */
-    uint64_t per_sec = ((uint64_t)delta * 1000000ULL) / (uint64_t)elapsed;
-    if (per_sec > 0xFFFFu) per_sec = 0xFFFFu;
-    s_last_yield            = (uint16_t)per_sec;
-    s_yield_window_start_us = now;
-    s_yield_window_start_cb = s_cb_count;
-    return s_last_yield;
-}
-
-uint16_t csi_collector_get_send_fail_count(void)
-{
-    uint32_t f = s_send_fail;
-    return (f > 0xFFFFu) ? 0xFFFFu : (uint16_t)f;
+    ESP_LOGI(TAG, "CSI collection initialized (node_id=%d, channel=%d)",
+             g_nvs_config.node_id, CONFIG_CSI_WIFI_CHANNEL);
 }
 
 /* ---- ADR-029: Channel hopping ---- */

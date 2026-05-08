@@ -73,4 +73,7 @@ typedef struct {
  */
 void nvs_config_load(nvs_config_t *cfg);
 
+/** Global config instance (defined in main.c, loaded at startup). */
+extern nvs_config_t g_nvs_config;
+
 #endif /* NVS_CONFIG_H */

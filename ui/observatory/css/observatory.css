@@ -107,10 +107,15 @@ body {
 }
 .dot--demo { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
 .dot--live { background: var(--green-glow); box-shadow: 0 0 6px var(--green-glow); animation: pulse-dot 2s infinite; }
+.dot--reconnecting { background: var(--blue-signal); box-shadow: 0 0 6px var(--blue-signal); animation: pulse-reconnect 0.8s infinite; }
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
+}
+@keyframes pulse-reconnect {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
 }
 
 #scenario-area {

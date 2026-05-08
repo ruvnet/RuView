@@ -143,7 +143,7 @@ def generate_nvs_binary(csv_content, size):
                 os.unlink(p)
 
 
-def flash_nvs(port, baud, nvs_bin):
+def flash_nvs(port, baud, nvs_bin, chip="esp32s3"):
     """Flash the NVS partition binary to the ESP32."""
     with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
         f.write(nvs_bin)
@@ -152,7 +152,7 @@ def flash_nvs(port, baud, nvs_bin):
     try:
         cmd = [
             sys.executable, "-m", "esptool",
-            "--chip", "esp32s3",
+            "--chip", chip,
             "--port", port,
             "--baud", str(baud),
             # Keep underscore form — ESP-IDF v5.4 bundles esptool 4.10.0 which only
@@ -161,7 +161,7 @@ def flash_nvs(port, baud, nvs_bin):
             "write_flash",
             hex(NVS_PARTITION_OFFSET), bin_path,
         ]
-        print(f"Flashing NVS partition ({len(nvs_bin)} bytes) to {port}...")
+        print(f"Flashing NVS partition ({len(nvs_bin)} bytes) to {port} ({chip})...")
         subprocess.check_call(cmd)
         print("NVS provisioning complete!")
     finally:
@@ -175,6 +175,8 @@ def main():
     )
     parser.add_argument("--port", required=True, help="Serial port (e.g. COM7, /dev/ttyUSB0)")
     parser.add_argument("--baud", type=int, default=460800, help="Flash baud rate (default: 460800)")
+    parser.add_argument("--chip", choices=["esp32s3", "esp32c6"], default="esp32s3",
+                        help="ESP32 chip type (default: esp32s3)")
     parser.add_argument("--ssid", help="WiFi SSID")
     parser.add_argument("--password", help="WiFi password")
     parser.add_argument("--target-ip", help="Aggregator host IP (e.g. 192.168.1.20)")
@@ -261,6 +263,7 @@ def main():
     if args.tdm_slot is not None and args.tdm_slot >= args.tdm_total:
         parser.error(f"--tdm-slot ({args.tdm_slot}) must be less than --tdm-total ({args.tdm_total})")
 
+<<<<<<< HEAD
     # ADR-060: Validate channel and MAC filter
     if args.channel is not None:
         if not ((1 <= args.channel <= 14) or (36 <= args.channel <= 177)):
@@ -277,7 +280,7 @@ def main():
         except ValueError:
             parser.error(f"--filter-mac contains invalid hex bytes: '{args.filter_mac}'")
 
-    print("Building NVS configuration:")
+    print(f"Building NVS configuration for {args.chip}:")
     if args.ssid:
         print(f"  WiFi SSID:     {args.ssid}")
     if args.password is not None:
@@ -337,11 +340,11 @@ def main():
         with open(out, "wb") as f:
             f.write(nvs_bin)
         print(f"NVS binary saved to {out} ({len(nvs_bin)} bytes)")
-        print(f"Flash manually: python -m esptool --chip esp32s3 --port {args.port} "
-              f"write-flash 0x9000 {out}")
+        print(f"Flash manually: python -m esptool --chip {args.chip} --port {args.port} "
+              f"write_flash 0x9000 {out}")
         return
 
-    flash_nvs(args.port, args.baud, nvs_bin)
+    flash_nvs(args.port, args.baud, nvs_bin, args.chip)
 
 
 if __name__ == "__main__":

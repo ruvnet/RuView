@@ -177,8 +177,8 @@ struct Esp32Frame {
     magic: u32,
     node_id: u8,
     n_antennas: u8,
-    n_subcarriers: u8,
-    freq_mhz: u16,
+    n_subcarriers: u16,  // ADR-018: u16 at bytes [6..7]
+    freq_mhz: u32,       // ADR-018: u32 at bytes [8..11]
     sequence: u32,
     rssi: i8,
     noise_floor: i8,
@@ -290,6 +290,14 @@ struct PersonDetection {
     keypoints: Vec<PoseKeypoint>,
     bbox: BoundingBox,
     zone: String,
+    /// Pose type for Observatory skeleton visualization ('standing', 'walking', 'sitting', etc.)
+    pose: String,
+    /// 3D world position [x, y, z] for Observatory
+    position: [f64; 3],
+    /// Motion intensity score (0-100+) for animation
+    motion_score: f64,
+    /// Facing direction in radians for skeleton rotation
+    facing: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -824,13 +832,12 @@ fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
     //   [20..]   I/Q data
     let node_id = buf[4];
     let n_antennas = buf[5];
-    let n_subcarriers = buf[6];
-    let freq_mhz = u16::from_le_bytes([buf[8], buf[9]]);
-    let sequence = u32::from_le_bytes([buf[10], buf[11], buf[12], buf[13]]);
-    let rssi_raw = buf[14] as i8;
-    // Fix RSSI sign: ensure it's always negative (dBm convention).
-    let rssi = if rssi_raw > 0 { rssi_raw.saturating_neg() } else { rssi_raw };
-    let noise_floor = buf[15] as i8;
+    // ADR-018 20-byte header: n_subcarriers is u16 at [6..7], freq is u32 at [8..11]
+    let n_subcarriers = u16::from_le_bytes([buf[6], buf[7]]);
+    let freq_mhz = u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]);
+    let sequence = u32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]);
+    let rssi = buf[16] as i8;
+    let noise_floor = buf[17] as i8;
 
     let iq_start = 20;
     let n_pairs = n_antennas as usize * n_subcarriers as usize;
@@ -1277,9 +1284,9 @@ fn raw_classify(score: f64) -> String {
 }
 
 /// Debounce frames required before state transition (at ~10 FPS = ~0.4s).
-const DEBOUNCE_FRAMES: u32 = 4;
+const DEBOUNCE_FRAMES: u32 = 2;  // Faster state transitions
 /// EMA alpha for motion smoothing (~1s time constant at 10 FPS).
-const MOTION_EMA_ALPHA: f64 = 0.15;
+const MOTION_EMA_ALPHA: f64 = 0.25;  // More responsive to motion changes
 /// EMA alpha for slow-adapting baseline (~30s time constant at 10 FPS).
 const BASELINE_EMA_ALPHA: f64 = 0.003;
 /// Number of warm-up frames before baseline subtraction kicks in.
@@ -1661,7 +1668,7 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
             magic: 0xC511_0001,
             node_id: 0,
             n_antennas: 1,
-            n_subcarriers: obs_count.min(255) as u8,
+            n_subcarriers: obs_count.min(65535) as u16,
             freq_mhz: 2437,
             sequence: seq,
             rssi: first_rssi.clamp(-128.0, 127.0) as i8,
@@ -1728,9 +1735,9 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
 
         let feat_variance = features.variance;
 
-        // Multi-person estimation with temporal smoothing (EMA α=0.10).
+        // Multi-person estimation with asymmetric smoothing (faster decay when leaving).
         let raw_score = compute_person_score(&features);
-        s.smoothed_person_score = s.smoothed_person_score * 0.90 + raw_score * 0.10;
+        s.smoothed_person_score = smooth_person_score(s.smoothed_person_score, raw_score);
         let est_persons = if classification.presence {
             let count = s.person_count();
             s.prev_person_count = count;
@@ -1867,9 +1874,9 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
 
     let feat_variance = features.variance;
 
-    // Multi-person estimation with temporal smoothing (EMA α=0.10).
+    // Multi-person estimation with asymmetric smoothing (faster decay when leaving).
     let raw_score = compute_person_score(&features);
-    s.smoothed_person_score = s.smoothed_person_score * 0.90 + raw_score * 0.10;
+    s.smoothed_person_score = smooth_person_score(s.smoothed_person_score, raw_score);
     let est_persons = if classification.presence {
         let count = s.person_count();
         s.prev_person_count = count;
@@ -1976,7 +1983,7 @@ fn generate_simulated_frame(tick: u64) -> Esp32Frame {
         magic: 0xC511_0001,
         node_id: 1,
         n_antennas: 1,
-        n_subcarriers: n_sub as u8,
+        n_subcarriers: n_sub as u16,
         freq_mhz: 2437,
         sequence: tick as u32,
         rssi: (-40.0 + 5.0 * (t * 0.2).sin()) as i8,
@@ -2094,6 +2101,10 @@ async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
                                             bbox: BoundingBox { x: 260.0, y: 150.0, width: 120.0, height: 220.0 },
                                             keypoints,
                                             zone: "zone_1".into(),
+                                            pose: "standing".to_string(),
+                                            position: [0.0, 0.0, 0.0],
+                                            motion_score: sensing.features.motion_band_power.min(100.0),
+                                            facing: 0.0,
                                         }]
                                     }).unwrap_or_else(|| {
                                         // Prefer tracked persons from broadcast if available
@@ -2435,6 +2446,15 @@ fn score_to_person_count(smoothed_score: f64, prev_count: usize) -> usize {
     }
 }
 
+/// Asymmetric EMA for person score: faster decay when someone leaves, moderate rise.
+///
+/// When raw_score < current (activity dropping = someone left), use α=0.35 for faster response.
+/// When raw_score > current (activity rising = someone entered), use α=0.20 for balanced responsiveness.
+fn smooth_person_score(current: f64, raw: f64) -> f64 {
+    let alpha = if raw < current { 0.35 } else { 0.20 };
+    current * (1.0 - alpha) + raw * alpha
+}
+
 /// Generate a single person's skeleton with per-person spatial offset and phase stagger.
 ///
 /// `person_idx`: 0-based index of this person.
@@ -2601,6 +2621,37 @@ fn derive_single_person_pose(
     let max_x = xs.iter().cloned().fold(f64::MIN, f64::max) + 10.0;
     let max_y = ys.iter().cloned().fold(f64::MIN, f64::max) + 10.0;
 
+    // Derive pose type from motion level and posture
+    let pose_type = if let Some(ref posture) = update.posture {
+        match posture.as_str() {
+            "lying" | "fallen" => "lying",
+            "sitting" => "sitting",
+            _ if is_walking => "walking",
+            _ => "standing",
+        }
+    } else if is_walking {
+        "walking"
+    } else {
+        "standing"
+    };
+
+    // Convert 2D pixel position to 3D world coordinates for Observatory
+    // Observatory uses: X = left/right, Y = up (always 0 for ground), Z = forward/back
+    // Map pixel X (0-640) to world X (-5 to 5), pixel Y to world Z
+    let world_x = (base_x - 320.0) / 64.0; // Center at 0, scale to ~±5 meters
+    let world_z = (base_y - 240.0) / 48.0; // Map Y to Z depth
+
+    // Per-person spatial offset in world coordinates
+    let half_w = (total_persons as f64 - 1.0) / 2.0;
+    let person_world_x = world_x + (person_idx as f64 - half_w) * 1.5; // 1.5m spacing
+
+    // Facing direction based on motion (walking direction)
+    let facing = if is_walking {
+        stride_x.signum() * 0.3 // Face movement direction
+    } else {
+        0.0
+    };
+
     PersonDetection {
         id: (person_idx + 1) as u32,
         confidence: cls.confidence * conf_decay,
@@ -2612,6 +2663,10 @@ fn derive_single_person_pose(
             height: (max_y - min_y).max(160.0),
         },
         zone: format!("zone_{}", person_idx + 1),
+        pose: pose_type.to_string(),
+        position: [person_world_x, 0.0, world_z],
+        motion_score: motion_score * 100.0, // Scale to 0-100 range
+        facing,
     }
 }
 
@@ -3979,12 +4034,13 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         match fused {
                             Some(ref f) => {
                                 let score = multistatic_bridge::compute_person_score_from_amplitudes(&f.fused_amplitude);
-                                s.smoothed_person_score = s.smoothed_person_score * 0.90 + score * 0.10;
+                                // Asymmetric smoothing: faster decay when leaving.
+                                s.smoothed_person_score = smooth_person_score(s.smoothed_person_score, score);
                                 let count = s.person_count();
                                 s.prev_person_count = count;
-                                count.max(1)
+                                count
                             }
-                            None => fallback_count.unwrap_or(0).max(1),
+                            None => fallback_count.unwrap_or(0),
                         }
                     } else {
                         s.prev_person_count = 0;
@@ -4126,9 +4182,9 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
         let frame_amplitudes = frame.amplitudes.clone();
         let frame_n_sub = frame.n_subcarriers;
 
-        // Multi-person estimation with temporal smoothing (EMA α=0.10).
+        // Multi-person estimation with asymmetric smoothing (faster decay when leaving).
         let raw_score = compute_person_score(&features);
-        s.smoothed_person_score = s.smoothed_person_score * 0.90 + raw_score * 0.10;
+        s.smoothed_person_score = smooth_person_score(s.smoothed_person_score, raw_score);
         let est_persons = if classification.presence {
             let count = s.person_count();
             s.prev_person_count = count;

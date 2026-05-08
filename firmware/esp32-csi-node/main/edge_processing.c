@@ -18,14 +18,9 @@
  */
 
 #include "edge_processing.h"
-#include "nvs_config.h"
-#include "csi_collector.h"  /* csi_collector_get_node_id() - defensive #390 */
-#include "mmwave_sensor.h"
-
-/* Runtime config — declared in main.c, loaded from NVS at boot. */
-extern nvs_config_t g_nvs_config;
 #include "wasm_runtime.h"
 #include "stream_sender.h"
+#include "nvs_config.h"
 
 #include <math.h>
 #include <string.h>
@@ -42,20 +37,12 @@ static const char *TAG = "edge_proc";
  * ====================================================================== */
 
 static edge_ring_buf_t s_ring;
-static uint32_t s_ring_drops;  /* Frames dropped due to full ring buffer. */
-
-/* Scratch buffers for BPM estimation — moved from stack to static to avoid
- * stack overflow.  process_frame + update_multi_person_vitals combined used
- * ~6.5-7.5 KB of the 8 KB task stack.  These save ~4 KB of stack. */
-static float s_scratch_br[EDGE_PHASE_HISTORY_LEN];
-static float s_scratch_hr[EDGE_PHASE_HISTORY_LEN];
 
 static inline bool ring_push(const uint8_t *iq, uint16_t len,
                              int8_t rssi, uint8_t channel)
 {
     uint32_t next = (s_ring.head + 1) % EDGE_RING_SLOTS;
     if (next == s_ring.tail) {
-        s_ring_drops++;
         return false;  /* Full — drop frame. */
     }
 
@@ -258,10 +245,6 @@ static uint32_t s_frame_count;
 /** Previous phase velocity for fall detection (acceleration). */
 static float s_prev_phase_velocity;
 
-/** Fall detection debounce state (issue #263). */
-static uint8_t  s_fall_consec_count;   /**< Consecutive frames above threshold. */
-static int64_t  s_fall_last_alert_us;  /**< Timestamp of last fall alert (debounce). */
-
 /** Adaptive calibration state. */
 static bool     s_calibrated;
 static float    s_calib_sum;
@@ -276,9 +259,6 @@ static int64_t s_last_vitals_send_us;
 static uint8_t s_prev_iq[EDGE_MAX_IQ_BYTES];
 static uint16_t s_prev_iq_len;
 static bool s_has_prev_iq;
-
-/** ADR-069: Feature vector sequence counter. */
-static uint16_t s_feature_seq;
 
 /** Multi-person vitals state. */
 static edge_person_vitals_t s_persons[EDGE_MAX_PERSONS];
@@ -414,10 +394,10 @@ static uint16_t delta_compress(const uint8_t *curr, uint16_t len,
 }
 
 /**
- * Send a compressed CSI frame (magic 0xC5110005, reassigned from 0xC5110003 for ADR-069).
+ * Send a compressed CSI frame (magic 0xC5110003).
  *
  * Header:
- *   [0..3]   Magic 0xC5110005 (LE)
+ *   [0..3]   Magic 0xC5110003 (LE)
  *   [4]      Node ID
  *   [5]      Channel
  *   [6..7]   Original I/Q length (LE u16)
@@ -442,7 +422,7 @@ static void send_compressed_frame(const uint8_t *iq_data, uint16_t iq_len,
     uint32_t magic = EDGE_COMPRESSED_MAGIC;
     memcpy(&pkt[0], &magic, 4);
 
-    pkt[4] = csi_collector_get_node_id();  /* #390: defensive copy */
+    pkt[4] = g_nvs_config.node_id;
     pkt[5] = channel;
     memcpy(&pkt[6], &iq_len, 2);
     memcpy(&pkt[8], &comp_len, 2);
@@ -523,18 +503,20 @@ static void update_multi_person_vitals(const uint8_t *iq_data, uint16_t n_sc,
 
         /* Estimate BPM when we have enough history. */
         if (pv->history_len >= 64) {
-            /* Build contiguous buffer (reuse static scratch to save ~2 KB stack). */
+            /* Build contiguous buffer for zero-crossing. */
+            float br_buf[EDGE_PHASE_HISTORY_LEN];
+            float hr_buf[EDGE_PHASE_HISTORY_LEN];
             uint16_t buf_len = pv->history_len;
 
             for (uint16_t i = 0; i < buf_len; i++) {
                 uint16_t ri = (pv->history_idx + EDGE_PHASE_HISTORY_LEN
                                - buf_len + i) % EDGE_PHASE_HISTORY_LEN;
-                s_scratch_br[i] = s_person_br_filt[p][ri];
-                s_scratch_hr[i] = s_person_hr_filt[p][ri];
+                br_buf[i] = s_person_br_filt[p][ri];
+                hr_buf[i] = s_person_hr_filt[p][ri];
             }
 
-            float br = estimate_bpm_zero_crossing(s_scratch_br, buf_len, sample_rate);
-            float hr = estimate_bpm_zero_crossing(s_scratch_hr, buf_len, sample_rate);
+            float br = estimate_bpm_zero_crossing(br_buf, buf_len, sample_rate);
+            float hr = estimate_bpm_zero_crossing(hr_buf, buf_len, sample_rate);
 
             /* Sanity clamp. */
             if (br >= 6.0f && br <= 40.0f) pv->breathing_bpm = br;
@@ -558,7 +540,7 @@ static void send_vitals_packet(void)
     memset(&pkt, 0, sizeof(pkt));
 
     pkt.magic = EDGE_VITALS_MAGIC;
-    pkt.node_id = csi_collector_get_node_id();  /* #390: defensive copy */
+    pkt.node_id = g_nvs_config.node_id;
 
     pkt.flags = 0;
     if (s_presence_detected) pkt.flags |= 0x01;
@@ -584,121 +566,7 @@ static void send_vitals_packet(void)
     s_latest_pkt = pkt;
     s_pkt_valid = true;
 
-    /* ADR-063: If mmWave is active, send fused 48-byte packet instead. */
-    mmwave_state_t mw;
-    if (mmwave_sensor_get_state(&mw) && mw.detected) {
-        edge_fused_vitals_pkt_t fpkt;
-        memset(&fpkt, 0, sizeof(fpkt));
-
-        fpkt.magic = EDGE_FUSED_MAGIC;
-        fpkt.node_id = pkt.node_id;
-        fpkt.flags = pkt.flags;
-        if (mw.person_present) fpkt.flags |= 0x08;  /* Bit3 = mmwave_present */
-        fpkt.rssi = pkt.rssi;
-        fpkt.n_persons = pkt.n_persons;
-        fpkt.mmwave_type = (uint8_t)mw.type;
-        fpkt.motion_energy = pkt.motion_energy;
-        fpkt.presence_score = pkt.presence_score;
-        fpkt.timestamp_ms = pkt.timestamp_ms;
-
-        /* Kalman-style fusion: prefer mmWave when available, CSI as fallback. */
-        if (mw.heart_rate_bpm > 0.0f && s_heartrate_bpm > 0.0f) {
-            /* Weighted average: mmWave 80%, CSI 20% (mmWave is more accurate). */
-            float fused_hr = mw.heart_rate_bpm * 0.8f + s_heartrate_bpm * 0.2f;
-            fpkt.heartrate = (uint32_t)(fused_hr * 10000.0f);
-            fpkt.fusion_confidence = 90;
-        } else if (mw.heart_rate_bpm > 0.0f) {
-            fpkt.heartrate = (uint32_t)(mw.heart_rate_bpm * 10000.0f);
-            fpkt.fusion_confidence = 85;
-        } else {
-            fpkt.heartrate = pkt.heartrate;
-            fpkt.fusion_confidence = 50;
-        }
-
-        if (mw.breathing_rate > 0.0f && s_breathing_bpm > 0.0f) {
-            float fused_br = mw.breathing_rate * 0.8f + s_breathing_bpm * 0.2f;
-            fpkt.breathing_rate = (uint16_t)(fused_br * 100.0f);
-        } else if (mw.breathing_rate > 0.0f) {
-            fpkt.breathing_rate = (uint16_t)(mw.breathing_rate * 100.0f);
-        } else {
-            fpkt.breathing_rate = pkt.breathing_rate;
-        }
-
-        /* Raw mmWave values for server-side analysis. */
-        fpkt.mmwave_hr_bpm = mw.heart_rate_bpm;
-        fpkt.mmwave_br_bpm = mw.breathing_rate;
-        fpkt.mmwave_distance = mw.distance_cm;
-        fpkt.mmwave_targets = mw.target_count;
-        fpkt.mmwave_confidence = (mw.frame_count > 10) ? 80 : 40;
-
-        stream_sender_send((const uint8_t *)&fpkt, sizeof(fpkt));
-    } else {
-        /* No mmWave — send standard 32-byte packet. */
-        stream_sender_send((const uint8_t *)&pkt, sizeof(pkt));
-    }
-}
-
-/* ======================================================================
- * ADR-069: Feature Vector Packet (48 bytes, sent at 1 Hz alongside vitals)
- * ====================================================================== */
-
-static void send_feature_vector(void)
-{
-    edge_feature_pkt_t pkt;
-    memset(&pkt, 0, sizeof(pkt));
-
-    pkt.magic = EDGE_FEATURE_MAGIC;
-    pkt.node_id = csi_collector_get_node_id();  /* #390: defensive copy */
-    pkt.reserved = 0;
-    pkt.seq = s_feature_seq++;
-    pkt.timestamp_us = esp_timer_get_time();
-
-    /* Dim 0: Presence score (0.0-1.0, normalized from raw score) */
-    float p = s_presence_score;
-    pkt.features[0] = p > 10.0f ? 1.0f : (p < 0.0f ? 0.0f : p / 10.0f);
-
-    /* Dim 1: Motion energy (normalized, 0-1 range) */
-    float m = s_motion_energy;
-    pkt.features[1] = m > 10.0f ? 1.0f : (m < 0.0f ? 0.0f : m / 10.0f);
-
-    /* Dim 2: Breathing rate (BPM / 30, 0-1 range) */
-    pkt.features[2] = s_breathing_bpm > 0.0f
-        ? (s_breathing_bpm / 30.0f > 1.0f ? 1.0f : s_breathing_bpm / 30.0f)
-        : 0.0f;
-
-    /* Dim 3: Heart rate (BPM / 120, 0-1 range) */
-    pkt.features[3] = s_heartrate_bpm > 0.0f
-        ? (s_heartrate_bpm / 120.0f > 1.0f ? 1.0f : s_heartrate_bpm / 120.0f)
-        : 0.0f;
-
-    /* Dim 4: Phase variance mean (top-K subcarriers) */
-    float var_mean = 0.0f;
-    if (s_top_k_count > 0) {
-        float var_sum = 0.0f;
-        uint8_t k = s_top_k_count < EDGE_TOP_K ? s_top_k_count : EDGE_TOP_K;
-        for (uint8_t i = 0; i < k; i++) {
-            var_sum += (float)welford_variance(&s_subcarrier_var[s_top_k[i]]);
-        }
-        var_mean = var_sum / (float)k;
-    }
-    pkt.features[4] = var_mean > 1.0f ? 1.0f : (var_mean < 0.0f ? 0.0f : var_mean);
-
-    /* Dim 5: Person count (n_persons / 4, 0-1 range) */
-    uint8_t n_active = 0;
-    for (uint8_t i = 0; i < EDGE_MAX_PERSONS; i++) {
-        if (s_persons[i].active) n_active++;
-    }
-    pkt.features[5] = (float)n_active / 4.0f;
-    if (pkt.features[5] > 1.0f) pkt.features[5] = 1.0f;
-
-    /* Dim 6: Fall risk (0.0 or 1.0 based on recent detection) */
-    pkt.features[6] = s_fall_detected ? 1.0f : 0.0f;
-
-    /* Dim 7: RSSI normalized ((rssi + 100) / 100, 0-1 range) */
-    pkt.features[7] = ((float)s_latest_rssi + 100.0f) / 100.0f;
-    if (pkt.features[7] > 1.0f) pkt.features[7] = 1.0f;
-    if (pkt.features[7] < 0.0f) pkt.features[7] = 0.0f;
-
+    /* Send over UDP. */
     stream_sender_send((const uint8_t *)&pkt, sizeof(pkt));
 }
 
@@ -714,11 +582,8 @@ static void process_frame(const edge_ring_slot_t *slot)
     s_frame_count++;
     s_latest_rssi = slot->rssi;
 
-    /* CSI sample rate. MGMT-only promiscuous filter (RuView#396, csi_collector.c)
-     * yields ~10 Hz from beacons; keep this value aligned with csi_collector's
-     * effective callback rate or estimate_bpm_zero_crossing() reports the wrong
-     * BPM (2× rate mismatch → 2× wrong breathing/HR). */
-    const float sample_rate = 10.0f;
+    /* Assumed CSI sample rate (~20 Hz for typical ESP32 CSI). */
+    const float sample_rate = 20.0f;
 
     /* --- Step 1-2: Phase extraction + unwrapping per subcarrier --- */
     float phases[EDGE_MAX_SUBCARRIERS];
@@ -765,18 +630,20 @@ static void process_frame(const edge_ring_slot_t *slot)
 
     /* --- Step 7: BPM estimation (zero-crossing) --- */
     if (s_history_len >= 64) {
-        /* Build contiguous buffers from ring (using static scratch to save stack). */
+        /* Build contiguous buffers from ring. */
+        float br_buf[EDGE_PHASE_HISTORY_LEN];
+        float hr_buf[EDGE_PHASE_HISTORY_LEN];
         uint16_t buf_len = s_history_len;
 
         for (uint16_t i = 0; i < buf_len; i++) {
             uint16_t ri = (s_history_idx + EDGE_PHASE_HISTORY_LEN
                            - buf_len + i) % EDGE_PHASE_HISTORY_LEN;
-            s_scratch_br[i] = s_breathing_filtered[ri];
-            s_scratch_hr[i] = s_heartrate_filtered[ri];
+            br_buf[i] = s_breathing_filtered[ri];
+            hr_buf[i] = s_heartrate_filtered[ri];
         }
 
-        float br_bpm = estimate_bpm_zero_crossing(s_scratch_br, buf_len, sample_rate);
-        float hr_bpm = estimate_bpm_zero_crossing(s_scratch_hr, buf_len, sample_rate);
+        float br_bpm = estimate_bpm_zero_crossing(br_buf, buf_len, sample_rate);
+        float hr_bpm = estimate_bpm_zero_crossing(hr_buf, buf_len, sample_rate);
 
         /* Sanity clamp: breathing 6-40 BPM, heart rate 40-180 BPM. */
         if (br_bpm >= 6.0f && br_bpm <= 40.0f) s_breathing_bpm = br_bpm;
@@ -815,7 +682,7 @@ static void process_frame(const edge_ring_slot_t *slot)
     }
     s_presence_detected = (s_presence_score > threshold);
 
-    /* --- Step 10: Fall detection (phase acceleration + debounce, issue #263) --- */
+    /* --- Step 10: Fall detection (phase acceleration) --- */
     if (s_history_len >= 3) {
         uint16_t i0 = (s_history_idx + EDGE_PHASE_HISTORY_LEN - 1) % EDGE_PHASE_HISTORY_LEN;
         uint16_t i1 = (s_history_idx + EDGE_PHASE_HISTORY_LEN - 2) % EDGE_PHASE_HISTORY_LEN;
@@ -823,26 +690,10 @@ static void process_frame(const edge_ring_slot_t *slot)
         float accel = fabsf(velocity - s_prev_phase_velocity);
         s_prev_phase_velocity = velocity;
 
-        if (accel > s_cfg.fall_thresh) {
-            s_fall_consec_count++;
-        } else {
-            s_fall_consec_count = 0;
-        }
-
-        /* Require EDGE_FALL_CONSEC_MIN consecutive frames above threshold,
-         * plus a cooldown period to prevent alert storms. */
-        int64_t now_us = esp_timer_get_time();
-        int64_t cooldown_us = (int64_t)EDGE_FALL_COOLDOWN_MS * 1000;
-        if (s_fall_consec_count >= EDGE_FALL_CONSEC_MIN
-            && (now_us - s_fall_last_alert_us) >= cooldown_us)
-        {
-            s_fall_detected = true;
-            s_fall_last_alert_us = now_us;
-            s_fall_consec_count = 0;
-            ESP_LOGW(TAG, "Fall detected! accel=%.4f > thresh=%.4f (consec=%u)",
-                     accel, s_cfg.fall_thresh, EDGE_FALL_CONSEC_MIN);
-        } else if (s_fall_consec_count == 0) {
-            s_fall_detected = false;
+        s_fall_detected = (accel > s_cfg.fall_thresh);
+        if (s_fall_detected) {
+            ESP_LOGW(TAG, "Fall detected! accel=%.4f > thresh=%.4f",
+                     accel, s_cfg.fall_thresh);
         }
     }
 
@@ -859,18 +710,16 @@ static void process_frame(const edge_ring_slot_t *slot)
     int64_t interval_us = (int64_t)s_cfg.vital_interval_ms * 1000;
     if ((now_us - s_last_vitals_send_us) >= interval_us) {
         send_vitals_packet();
-        send_feature_vector();  /* ADR-069: 48-byte feature vector at same 1 Hz cadence. */
         s_last_vitals_send_us = now_us;
 
         if ((s_frame_count % 200) == 0) {
             ESP_LOGI(TAG, "Vitals: br=%.1f hr=%.1f motion=%.4f pres=%s "
-                     "fall=%s persons=%u frames=%lu drops=%lu",
+                     "fall=%s persons=%u frames=%lu",
                      s_breathing_bpm, s_heartrate_bpm, s_motion_energy,
                      s_presence_detected ? "YES" : "no",
                      s_fall_detected ? "YES" : "no",
                      (unsigned)s_latest_pkt.n_persons,
-                     (unsigned long)s_frame_count,
-                     (unsigned long)s_ring_drops);
+                     (unsigned long)s_frame_count);
         }
     }
 
@@ -908,31 +757,12 @@ static void edge_task(void *arg)
 
     edge_ring_slot_t slot;
 
-    /* Maximum frames to process before a longer yield.  On busy LANs
-     * (corporate networks, many APs), the ring buffer fills continuously.
-     * Without a batch limit the task processes frames back-to-back with
-     * only 1-tick yields, which on high frame rates can still starve
-     * IDLE1 enough to trip the 5-second task watchdog.  See #266, #321. */
-
     while (1) {
-        uint8_t processed = 0;
-
-        while (processed < EDGE_BATCH_LIMIT && ring_pop(&slot)) {
+        if (ring_pop(&slot)) {
             process_frame(&slot);
-            processed++;
-            /* 1-tick yield between frames within a batch. */
-            vTaskDelay(1);
-        }
-
-        if (processed > 0) {
-            /* Post-batch yield: ~20 ms so IDLE1 can run and feed the
-             * Core 1 watchdog even under sustained load.  Uses pdMS_TO_TICKS
-             * for tick-rate independence (minimum 1 tick). */
-            { TickType_t d = pdMS_TO_TICKS(20); vTaskDelay(d > 0 ? d : 1); }
         } else {
-            /* No frames available — sleep one full tick.
-             * NOTE: pdMS_TO_TICKS(5) == 0 at 100 Hz, which would busy-spin. */
-            vTaskDelay(1);
+            /* No frames available — yield briefly. */
+            vTaskDelay(pdMS_TO_TICKS(1));
         }
     }
 }
@@ -1013,8 +843,6 @@ esp_err_t edge_processing_init(const edge_config_t *cfg)
     s_latest_rssi = 0;
     s_frame_count = 0;
     s_prev_phase_velocity = 0.0f;
-    s_fall_consec_count = 0;
-    s_fall_last_alert_us = 0;
     s_last_vitals_send_us = 0;
     s_has_prev_iq = false;
     s_prev_iq_len = 0;

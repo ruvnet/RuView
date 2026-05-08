@@ -12,15 +12,12 @@
 
 #include "sdkconfig.h"
 #include "wasm_runtime.h"
-#include "nvs_config.h"
-#include "csi_collector.h"  /* csi_collector_get_node_id() - defensive #390 */
-
-extern nvs_config_t g_nvs_config;
 
 #if defined(CONFIG_WASM_ENABLE) && defined(WASM3_AVAILABLE)
 
 #include "rvf_parser.h"
 #include "stream_sender.h"
+#include "nvs_config.h"
 
 #include <string.h>
 #include <math.h>
@@ -384,7 +381,7 @@ static void send_wasm_output(uint8_t slot_id)
     memset(&pkt, 0, sizeof(pkt));
 
     pkt.magic = WASM_OUTPUT_MAGIC;
-    pkt.node_id = csi_collector_get_node_id();  /* #390: defensive copy */
+    pkt.node_id = g_nvs_config.node_id;
     pkt.module_id = slot_id;
     pkt.event_count = n_filtered;
 

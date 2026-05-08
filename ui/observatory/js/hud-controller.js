@@ -362,7 +362,9 @@ export class HudController {
   updateSourceBadge(dataSource, ws) {
     const dot = document.querySelector('#data-source-badge .dot');
     const label = document.getElementById('data-source-label');
-    if (dataSource === 'ws' && ws?.readyState === WebSocket.OPEN) {
+    if (dataSource === 'reconnecting') {
+      dot.className = 'dot dot--reconnecting'; label.textContent = 'RECONNECTING';
+    } else if (dataSource === 'ws' && ws?.readyState === WebSocket.OPEN) {
       dot.className = 'dot dot--live'; label.textContent = 'LIVE';
     } else {
       dot.className = 'dot dot--demo'; label.textContent = 'DEMO';
@@ -421,8 +423,9 @@ export class HudController {
     this._setText('var-value', (feat.variance || 0).toFixed(2));
     this._setText('motion-value', (feat.motion_band_power || 0).toFixed(3));
 
-    // Mini person-count dots
-    const personCount = data.estimated_persons || 0;
+    // Mini person-count dots (server returns 0-3, clamp to valid range)
+    const rawCount = data.estimated_persons;
+    const personCount = (typeof rawCount === 'number' && rawCount >= 0 && rawCount <= 8) ? rawCount : 0;
     this._updatePersonDots(personCount);
 
     const presEl = document.getElementById('presence-indicator');

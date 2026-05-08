@@ -130,6 +130,10 @@ class Observatory {
     // WebSocket for live data — always try auto-detect on startup
     this._ws = null;
     this._liveData = null;
+    this._wsUrl = null;           // Store URL for reconnection
+    this._wsReconnectAttempts = 0;
+    this._wsMaxReconnectAttempts = 5;
+    this._wsReconnectTimer = null;
     this._autoDetectLive();
 
     // Input
@@ -474,24 +478,72 @@ class Observatory {
 
   _connectWS(url) {
     this._disconnectWS();
+    this._wsUrl = url;  // Store for reconnection
     try {
       this._ws = new WebSocket(url);
       this._ws.onopen = () => {
         console.log('[Observatory] WebSocket connected');
+        this._wsReconnectAttempts = 0;  // Reset on successful connection
         this._hud.updateSourceBadge('ws', this._ws);
       };
-      this._ws.onmessage = (evt) => { try { this._liveData = JSON.parse(evt.data); } catch {} };
+      this._ws.onmessage = (evt) => {
+        try {
+          const msg = JSON.parse(evt.data);
+          // Only use SensingUpdate messages (have timestamp + features + classification).
+          // Ignore edge_vitals, wasm_event, and other message types.
+          if (msg.type === 'edge_vitals' || msg.type === 'wasm_event' || msg.type === 'pose_data') {
+            return; // Skip non-SensingUpdate messages
+          }
+          // SensingUpdate should have timestamp, features, and classification
+          if (msg.timestamp && msg.features && msg.classification) {
+            this._liveData = msg;
+          }
+        } catch {}
+      };
       this._ws.onclose = () => {
-        console.log('[Observatory] WebSocket closed, falling back to demo');
         this._ws = null;
-        this.settings.dataSource = 'demo';
-        this._hud.updateSourceBadge('demo', null);
+        this._scheduleReconnect();
       };
       this._ws.onerror = () => {};
     } catch {}
   }
 
+  _scheduleReconnect() {
+    if (this._wsReconnectTimer) {
+      clearTimeout(this._wsReconnectTimer);
+    }
+
+    this._wsReconnectAttempts++;
+
+    if (this._wsReconnectAttempts > this._wsMaxReconnectAttempts) {
+      console.log('[Observatory] Max reconnect attempts reached, falling back to demo');
+      this.settings.dataSource = 'demo';
+      this._hud.updateSourceBadge('demo', null);
+      return;
+    }
+
+    // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+    const delay = Math.min(1000 * Math.pow(2, this._wsReconnectAttempts - 1), 16000);
+    console.log(`[Observatory] WebSocket closed, reconnecting in ${delay/1000}s (attempt ${this._wsReconnectAttempts}/${this._wsMaxReconnectAttempts})`);
+
+    // Show reconnecting status in the HUD
+    this._hud.updateSourceBadge('reconnecting', null);
+
+    this._wsReconnectTimer = setTimeout(() => {
+      if (this._wsUrl) {
+        console.log('[Observatory] Attempting to reconnect...');
+        this._connectWS(this._wsUrl);
+      }
+    }, delay);
+  }
+
   _disconnectWS() {
+    // Clear any pending reconnect timer
+    if (this._wsReconnectTimer) {
+      clearTimeout(this._wsReconnectTimer);
+      this._wsReconnectTimer = null;
+    }
+    this._wsReconnectAttempts = 0;
     if (this._ws) { this._ws.close(); this._ws = null; }
     this._liveData = null;
   }
