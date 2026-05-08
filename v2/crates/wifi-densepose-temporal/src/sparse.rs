@@ -1,5 +1,5 @@
 use ruvllm_sparse_attention::{
-    AttentionBackend, SparseAttentionConfig, SubquadraticSparseAttention, Tensor3,
+    AttentionBackend, KvCache, SparseAttentionConfig, SubquadraticSparseAttention, Tensor3,
 };
 
 use crate::{TemporalError, TemporalHeadConfig};
@@ -56,6 +56,50 @@ impl SparseGqaHead {
             // GQA / MQA — kv_heads < q_heads, group share factor = q/kv.
             Ok(self.attn.forward_gqa(q, k, v)?)
         }
+    }
+
+    /// Streaming decode for re-ID and online classification (ADR-096 §3.2).
+    ///
+    /// Given one new token's q/k/v, append (k, v) to `cache` and return
+    /// the attention output for that one position against the full
+    /// accumulated history. Cost is O(log T) per step against a cache
+    /// of capacity T — the structural advantage over dense MHA's O(N²)
+    /// recompute that ADR-096 specifically calls out as the
+    /// dense-MHA-cannot-follow path.
+    ///
+    /// Cache lifetime is owned by the caller. Per ADR-096 §8.5 the
+    /// natural place is one cache per `PoseTrack` (re-ID) or one cache
+    /// per active session (online classification). When the track is
+    /// dropped, drop the cache.
+    pub fn step(
+        &self,
+        q_new: &Tensor3,
+        k_new: &Tensor3,
+        v_new: &Tensor3,
+        cache: &mut KvCache,
+    ) -> Result<Tensor3, TemporalError> {
+        if q_new.seq != 1 || k_new.seq != 1 || v_new.seq != 1 {
+            return Err(TemporalError::InvalidConfig(
+                "step() requires single-token q/k/v (seq == 1 each)",
+            ));
+        }
+        // Append must succeed before decode_step sees the cache; if
+        // the cache fills, the caller is responsible for eviction or
+        // resetting per ADR-096 §3.2 (H2O heavy-hitter eviction is
+        // available upstream but kept opt-in).
+        cache.try_append(k_new, v_new)?;
+        Ok(self.attn.decode_step(q_new, cache)?)
+    }
+
+    /// Construct a KvCache sized for this head's shape. Convenience
+    /// so callers don't need to import the upstream crate directly.
+    pub fn make_cache(&self, capacity: usize) -> KvCache {
+        KvCache::new(
+            capacity,
+            self.cfg.kv_heads,
+            self.cfg.head_dim,
+            self.cfg.block_size,
+        )
     }
 }
 

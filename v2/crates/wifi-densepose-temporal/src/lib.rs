@@ -22,9 +22,9 @@ pub use weights::{
     WEIGHT_BLOB_VERSION,
 };
 
-// Re-export the upstream Tensor3 so callers don't need a direct
-// `ruvllm_sparse_attention` dep.
-pub use ruvllm_sparse_attention::Tensor3;
+// Re-export the upstream Tensor3 + KvCache so callers don't need a
+// direct `ruvllm_sparse_attention` dep.
+pub use ruvllm_sparse_attention::{KvCache, Tensor3};
 
 /// Thin facade so callers can pick a backend by name.
 ///
@@ -59,6 +59,35 @@ impl AetherTemporalHead {
     ) -> Result<Tensor3, TemporalError> {
         match self {
             AetherTemporalHead::SparseGqa(h) => h.forward(q, k, v),
+            AetherTemporalHead::Dense => Err(TemporalError::DenseBackendNotImplemented),
+        }
+    }
+
+    /// Streaming decode (ADR-096 §3.2). Caller owns the `cache`; the
+    /// natural lifetime is per-tracked-person (one cache per
+    /// `PoseTrack`, dropped when the track evicts).
+    ///
+    /// Returns the attention output for the single new token. Caller
+    /// is responsible for downstream pooling / classifier head.
+    pub fn step(
+        &self,
+        q_new: &Tensor3,
+        k_new: &Tensor3,
+        v_new: &Tensor3,
+        cache: &mut KvCache,
+    ) -> Result<Tensor3, TemporalError> {
+        match self {
+            AetherTemporalHead::SparseGqa(h) => h.step(q_new, k_new, v_new, cache),
+            AetherTemporalHead::Dense => Err(TemporalError::DenseBackendNotImplemented),
+        }
+    }
+
+    /// Allocate a `KvCache` sized correctly for this head. Convenience
+    /// wrapper so AETHER's `pose_tracker.rs` doesn't need to import
+    /// the upstream crate.
+    pub fn make_cache(&self, capacity: usize) -> Result<KvCache, TemporalError> {
+        match self {
+            AetherTemporalHead::SparseGqa(h) => Ok(h.make_cache(capacity)),
             AetherTemporalHead::Dense => Err(TemporalError::DenseBackendNotImplemented),
         }
     }
