@@ -8,11 +8,13 @@ use crate::fusion;
 use crate::pointcloud;
 use axum::{
     extract::State,
+    http::{HeaderValue, Method},
     response::Html,
     routing::get,
     Json, Router,
 };
 use std::sync::{Arc, Mutex};
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 struct AppState {
     latest_cloud: Mutex<pointcloud::PointCloud>,
@@ -108,12 +110,36 @@ pub async fn serve(bind: &str, _brain: Option<&str>) -> anyhow::Result<()> {
     if has_camera { eprintln!("  Camera: LIVE (/dev/video0)"); }
     else { eprintln!("  Camera: DEMO"); }
 
+    // CORS — allow the hosted GitHub Pages viewer to fetch /api/splats from a
+    // locally-running instance of this server. Modern browsers treat
+    // 127.0.0.1/localhost as a "potentially trustworthy" origin so the HTTPS
+    // page can reach a plain-HTTP loopback backend without mixed-content
+    // blocking. Origins permitted:
+    //   - https://ruvnet.github.io (the published RuView Pages demo)
+    //   - http://localhost:* / http://127.0.0.1:* (developer running the
+    //     viewer.html bundled with this binary)
+    // Anything else is denied, so this is not a "wildcard" CORS.
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _req| {
+            let s = match origin.to_str() {
+                Ok(v) => v,
+                Err(_) => return false,
+            };
+            s == "https://ruvnet.github.io"
+                || s.starts_with("http://localhost")
+                || s.starts_with("http://127.0.0.1")
+                || s == "null" // file:// origins
+        }))
+        .allow_methods([Method::GET, Method::OPTIONS])
+        .allow_headers([axum::http::header::CONTENT_TYPE]);
+
     let app = Router::new()
         .route("/", get(index))
         .route("/api/cloud", get(api_cloud))
         .route("/api/splats", get(api_splats))
         .route("/api/status", get(api_status))
         .route("/health", get(api_health))
+        .layer(cors)
         .with_state(state);
 
     println!("╔══════════════════════════════════════════════╗");
