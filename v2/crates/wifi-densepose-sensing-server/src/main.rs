@@ -83,8 +83,8 @@ struct Args {
     #[arg(long, default_value = "5005")]
     udp_port: u16,
 
-    /// Path to UI static files
-    #[arg(long, default_value = "../../ui")]
+    /// Path to UI static files (repo `ui/`; from `v2/` use `../ui` or rely on auto-detect)
+    #[arg(long, default_value = "../ui")]
     ui_path: PathBuf,
 
     /// Tick interval in milliseconds (default 100 ms = 10 fps for smooth pose animation)
@@ -4223,6 +4223,25 @@ async fn broadcast_tick_task(state: SharedState, tick_ms: u64) {
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
+/// If `--ui-path` points nowhere (wrong cwd), try common repo layouts relative to cwd.
+fn coalesce_ui_path(initial: std::path::PathBuf) -> std::path::PathBuf {
+    if initial.is_dir() {
+        return initial;
+    }
+    for rel in &["../ui", "./ui", "../../ui"] {
+        let p = std::path::PathBuf::from(rel);
+        if p.is_dir() {
+            warn!(
+                "UI path {} not found; using {} (set --ui-path explicitly if wrong)",
+                initial.display(),
+                p.display()
+            );
+            return p;
+        }
+    }
+    initial
+}
+
 #[tokio::main]
 async fn main() {
     // Initialize tracing
@@ -4233,7 +4252,8 @@ async fn main() {
         )
         .init();
 
-    let args = Args::parse();
+    let mut args = Args::parse();
+    args.ui_path = coalesce_ui_path(args.ui_path);
 
     // Handle --benchmark mode: run vital sign benchmark and exit
     if args.benchmark {

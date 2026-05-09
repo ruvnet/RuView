@@ -19,8 +19,8 @@ pub struct Args {
     #[arg(long, default_value = "5005")]
     pub udp_port: u16,
 
-    /// Path to UI static files
-    #[arg(long, default_value = "../../ui")]
+    /// Path to UI static files (from `v2/` cwd use `../ui`)
+    #[arg(long, default_value = "../ui")]
     pub ui_path: PathBuf,
 
     /// Tick interval in milliseconds (default 100 ms = 10 fps for smooth pose animation)
