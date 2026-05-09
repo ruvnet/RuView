@@ -1,11 +1,11 @@
 /**
  * @file main.c
- * @brief ESP32-S3 Hello World — Full Capability Discovery
+ * @brief ESP32 Hello World — Full Capability Discovery
  *
- * Boots up, prints "Hello World!", then probes and reports every major
- * hardware/software capability of the ESP32-S3: chip info, flash, PSRAM,
- * WiFi (including CSI), Bluetooth, GPIOs, peripherals, FreeRTOS stats,
- * and power management features.  No WiFi connection required.
+ * Boots up, prints "Hello World!", then probes chip info, flash, PSRAM,
+ * WiFi (including CSI where enabled), 802.15.4/BLE on C6, GPIOs,
+ * peripherals, FreeRTOS stats, and power management.  No WiFi connection
+ * required.  Supports ESP32-S3 and ESP32-C6 (set IDF target accordingly).
  */
 
 #include <stdio.h>
@@ -18,7 +18,6 @@
 #include "esp_chip_info.h"
 #include "esp_flash.h"
 #include "esp_mac.h"
-#include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_timer.h"
@@ -33,7 +32,24 @@
 #include "driver/temperature_sensor.h"
 #include "sdkconfig.h"
 
-static const char *TAG = "hello";
+/*
+ * Peripheral counts: ESP-IDF v6+ dropped some SOC_* macros; values below
+ * match each target's HAL (esp_hal_* *_ll.h) where applicable.
+ */
+#if CONFIG_IDF_TARGET_ESP32S3
+#define PROBE_I2S_CTRL_NUM   2
+#define PROBE_RMT_CHAN_NUM   8
+#define PROBE_MCPWM_GROUPS   2
+#define PROBE_PCNT_UNITS     4
+#define PROBE_TOUCH_CHAN_NUM ((int)(SOC_TOUCH_MAX_CHAN_ID - SOC_TOUCH_MIN_CHAN_ID + 1))
+#elif CONFIG_IDF_TARGET_ESP32C6
+#define PROBE_I2S_CTRL_NUM   1
+#define PROBE_RMT_CHAN_NUM   4
+#define PROBE_MCPWM_GROUPS   1
+#define PROBE_PCNT_UNITS     4
+#else
+#error "hello-world: add PROBE_* peripheral counts for this IDF target in main.c"
+#endif
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
@@ -46,6 +62,7 @@ static const char *chip_model_str(esp_chip_model_t model)
         case CHIP_ESP32C3: return "ESP32-C3";
         case CHIP_ESP32H2: return "ESP32-H2";
         case CHIP_ESP32C2: return "ESP32-C2";
+        case CHIP_ESP32C6: return "ESP32-C6";
         default:           return "Unknown";
     }
 }
@@ -168,7 +185,11 @@ static void probe_wifi_capabilities(void)
     ESP_ERROR_CHECK(esp_wifi_start());
 
     /* Protocol capabilities */
+#if CONFIG_IDF_TARGET_ESP32C6
+    printf("  Protocols:      802.11 b/g/n/ax (Wi-Fi 6, 2.4 GHz)\n");
+#else
     printf("  Protocols:      802.11 b/g/n\n");
+#endif
 
     /* CSI (Channel State Information) */
 #ifdef CONFIG_ESP_WIFI_CSI_ENABLED
@@ -246,7 +267,7 @@ static void probe_bluetooth(void)
     esp_chip_info(&info);
 
     if (info.features & CHIP_FEATURE_BLE) {
-        printf("  BLE:            Supported (Bluetooth 5.0 LE)\n");
+        printf("  BLE:            Supported (Bluetooth LE)\n");
         printf("    - GATT Server/Client\n");
         printf("    - Advertising & Scanning\n");
         printf("    - Mesh Networking\n");
@@ -256,10 +277,16 @@ static void probe_bluetooth(void)
         printf("  BLE:            Not supported on this chip\n");
     }
 
+#if CONFIG_IDF_TARGET_ESP32C6
+    if (info.features & CHIP_FEATURE_IEEE802154) {
+        printf("  802.15.4:       Supported (Thread / Zigbee style MAC)\n");
+    }
+#endif
+
     if (info.features & CHIP_FEATURE_BT) {
         printf("  BT Classic:     Supported (A2DP, SPP, HFP)\n");
     } else {
-        printf("  BT Classic:     Not available (ESP32-S3 is BLE-only)\n");
+        printf("  BT Classic:     Not available (BLE-only on this chip)\n");
     }
 }
 
@@ -269,24 +296,52 @@ static void probe_peripherals(void)
 
     printf("  GPIOs:          %d total\n", SOC_GPIO_PIN_COUNT);
     printf("  ADC:\n");
+#if CONFIG_IDF_TARGET_ESP32C6
+    printf("    - SAR ADC:    %d channels (12-bit, one controller)\n",
+           (int)SOC_ADC_CHANNEL_NUM(0));
+#else
     printf("    - ADC1:       %d channels (12-bit SAR)\n", SOC_ADC_CHANNEL_NUM(0));
     printf("    - ADC2:       %d channels (shared with WiFi)\n", SOC_ADC_CHANNEL_NUM(1));
-    printf("  DAC:            Not available on ESP32-S3\n");
-    printf("  Touch Sensors:  %d channels (capacitive)\n", SOC_TOUCH_SENSOR_NUM);
-    printf("  SPI:            %d controllers (SPI2/SPI3 for user)\n", SOC_SPI_PERIPH_NUM);
-    printf("  I2C:            %d controllers\n", SOC_I2C_NUM);
-    printf("  I2S:            %d controllers (audio/PDM/TDM)\n", SOC_I2S_NUM);
-    printf("  UART:           %d controllers\n", SOC_UART_NUM);
+#endif
+    printf("  DAC:            Not available on this chip\n");
+#if CONFIG_IDF_TARGET_ESP32S3
+    printf("  Touch Sensors:  %d channels (capacitive)\n", PROBE_TOUCH_CHAN_NUM);
+#elif CONFIG_IDF_TARGET_ESP32C6
+    printf("  Touch Sensors:  Not available (no capacitive touch on ESP32-C6)\n");
+#endif
+    printf("  SPI:            %d controllers\n", SOC_SPI_PERIPH_NUM);
+#if CONFIG_IDF_TARGET_ESP32S3
+    printf("                  (SPI2/SPI3 typical for user apps)\n");
+#endif
+    printf("  I2C:            %d controllers\n", (int)SOC_I2C_NUM);
+    printf("  I2S:            %d controller(s) (audio/PDM/TDM)\n", PROBE_I2S_CTRL_NUM);
+    printf("  UART:           %d controllers\n", (int)SOC_UART_NUM);
+#if CONFIG_IDF_TARGET_ESP32S3
     printf("  USB:            USB-OTG 1.1 (Host & Device)\n");
     printf("  USB-Serial:     Built-in USB-JTAG/Serial (this console)\n");
+#elif CONFIG_IDF_TARGET_ESP32C6
+    printf("  USB:            No native USB-OTG (use SPI/USB bridge or off-chip PHY)\n");
+    printf("  USB-Serial:     Built-in USB Serial/JTAG (this console)\n");
+#endif
+#if CONFIG_IDF_TARGET_ESP32S3
     printf("  TWAI (CAN):     1 controller (CAN 2.0B compatible)\n");
-    printf("  RMT:            %d channels (IR/WS2812/NeoPixel)\n", SOC_RMT_TX_CANDIDATES_PER_GROUP + SOC_RMT_RX_CANDIDATES_PER_GROUP);
+#elif CONFIG_IDF_TARGET_ESP32C6
+    printf("  TWAI (CAN):     %d controller(s) (CAN 2.0B compatible)\n",
+           (int)SOC_TWAI_CONTROLLER_NUM);
+#endif
+    printf("  RMT:            %d channels (IR/WS2812/NeoPixel)\n", PROBE_RMT_CHAN_NUM);
     printf("  LEDC (PWM):     %d channels\n", SOC_LEDC_CHANNEL_NUM);
-    printf("  MCPWM:          %d groups (motor control)\n", SOC_MCPWM_GROUPS);
-    printf("  PCNT:           %d units (pulse counter / encoder)\n", SOC_PCNT_UNITS_PER_GROUP);
+    printf("  MCPWM:          %d group(s) (motor control)\n", PROBE_MCPWM_GROUPS);
+    printf("  PCNT:           %d units (pulse counter / encoder)\n", PROBE_PCNT_UNITS);
+#if CONFIG_IDF_TARGET_ESP32S3
     printf("  LCD:            Parallel 8/16-bit + SPI + I2C interfaces\n");
     printf("  Camera:         DVP 8/16-bit parallel interface\n");
     printf("  SDMMC:          SD/MMC host controller (1-bit / 4-bit)\n");
+#elif CONFIG_IDF_TARGET_ESP32C6
+    printf("  PARLIO:         Parallel TX/RX (e.g. LED matrix / custom buses)\n");
+    printf("  Camera:         SPI / external bridge (no native DVP)\n");
+    printf("  SDIO:           SDIO slave peripheral (see TRM for capabilities)\n");
+#endif
 }
 
 static void probe_security(void)
@@ -309,17 +364,29 @@ static void probe_power(void)
 {
     print_separator("POWER MANAGEMENT");
 
+#if CONFIG_IDF_TARGET_ESP32C6
+    printf("  Clock Modes:\n");
+    printf("    - 160 MHz     (max CPU on ESP32-C6)\n");
+    printf("    - 120 MHz     (balanced)\n");
+    printf("    - 80 MHz      (low power)\n");
+#else
     printf("  Clock Modes:\n");
     printf("    - 240 MHz     (max performance)\n");
     printf("    - 160 MHz     (balanced)\n");
     printf("    - 80 MHz      (low power)\n");
+#endif
     printf("  Sleep Modes:\n");
     printf("    - Modem Sleep  (WiFi off, CPU active)\n");
     printf("    - Light Sleep  (CPU paused, fast wake)\n");
     printf("    - Deep Sleep   (RTC only, ~10 uA)\n");
     printf("    - Hibernation  (RTC timer only, ~5 uA)\n");
+#if CONFIG_IDF_TARGET_ESP32C6
+    printf("  Wake Sources:   GPIO, LP timer, UART, etc.\n");
+    printf("  LP domain:      LP core / LP peripherals (see TRM)\n");
+#else
     printf("  Wake Sources:   GPIO, timer, touch, ULP, UART\n");
-    printf("  ULP Coprocessor: RISC-V + FSM (runs in deep sleep)\n");
+    printf("  ULP Coprocessor: FSM (runs in deep sleep)\n");
+#endif
 }
 
 static void probe_temperature(void)
@@ -389,6 +456,9 @@ static void probe_csi_details(void)
 
 void app_main(void)
 {
+    esp_chip_info_t chip;
+    esp_chip_info(&chip);
+
     /* NVS required for WiFi */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -401,7 +471,7 @@ void app_main(void)
     printf("\n");
     printf("  ╭─────────────────────────────────────────────────╮\n");
     printf("  │                                                 │\n");
-    printf("  │       HELLO WORLD from ESP32-S3!                │\n");
+    printf("  │       HELLO WORLD from %-24s       │\n", chip_model_str(chip.model));
     printf("  │                                                 │\n");
     printf("  │   WiFi-DensePose Capability Discovery v1.0      │\n");
     printf("  │                                                 │\n");
@@ -422,8 +492,9 @@ void app_main(void)
     probe_csi_details();
 
     print_separator("DONE — ALL CAPABILITIES REPORTED");
-    printf("\n  This ESP32-S3 is ready for WiFi-DensePose!\n");
-    printf("  Flash the full firmware (esp32-csi-node) to begin CSI sensing.\n\n");
+    printf("\n  This %s is ready for WiFi-DensePose experiments.\n",
+           chip_model_str(chip.model));
+    printf("  For production CSI on S3, flash esp32-csi-node; C6 path may differ.\n\n");
 
     /* Keep alive — blink a status message every 10 seconds */
     int tick = 0;

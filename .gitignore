@@ -13,6 +13,9 @@ firmware/esp32-csi-node/managed_components/
 firmware/esp32-csi-node/dependencies.lock
 firmware/esp32-csi-node/sdkconfig.defaults.bak
 
+# ESP-IDF set-target backup (local only)
+firmware/esp32-hello-world/sdkconfig.old
+
 # Claude Flow swarm runtime state
 .swarm/
 

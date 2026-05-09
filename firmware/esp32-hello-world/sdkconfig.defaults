@@ -1,5 +1,5 @@
-# ESP32-S3 Hello World — SDK Configuration
-CONFIG_IDF_TARGET="esp32s3"
+# ESP32 Hello World — SDK Configuration (default: ESP32-C6)
+CONFIG_IDF_TARGET="esp32c6"
 
 # Flash: 4MB (this chip has Embedded Flash 4MB)
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
