@@ -2,8 +2,9 @@
  * @file edge_processing.c
  * @brief ADR-039 Edge Intelligence — dual-core CSI processing pipeline.
  *
- * Core 0 (WiFi task): Pushes raw CSI frames into lock-free SPSC ring buffer.
- * Core 1 (DSP task):  Pops frames, runs signal processing pipeline:
+ * Core 0 (WiFi path): Pushes raw CSI frames into lock-free SPSC ring buffer.
+ * Second core when present (DSP task): pops frames, runs signal processing pipeline.
+ * On unicore targets (e.g. ESP32-C6), the DSP task is pinned to core 0.
  *   1. Phase extraction from I/Q pairs
  *   2. Phase unwrapping (continuous phase)
  *   3. Welford variance tracking per subcarrier
@@ -1050,7 +1051,9 @@ esp_err_t edge_processing_init(const edge_config_t *cfg)
         return ESP_OK;
     }
 
-    /* Start DSP task on Core 1. */
+    /* Pin DSP off WiFi's preferred core when SMP; else core 0 only (ESP32-C6). */
+    const BaseType_t dsp_core = (portNUM_PROCESSORS > 1) ? (BaseType_t)1 : (BaseType_t)0;
+
     BaseType_t ret = xTaskCreatePinnedToCore(
         edge_task,
         "edge_dsp",
@@ -1058,14 +1061,14 @@ esp_err_t edge_processing_init(const edge_config_t *cfg)
         NULL,
         5,          /* Priority 5 — above idle, below WiFi. */
         NULL,
-        1           /* Pin to Core 1. */
-    );
+        dsp_core);
 
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create edge DSP task");
         return ESP_ERR_NO_MEM;
     }
 
-    ESP_LOGI(TAG, "Edge DSP task created on Core 1 (stack=8192, priority=5)");
+    ESP_LOGI(TAG, "Edge DSP task created on core %d (stack=8192, priority=5)",
+             (int)dsp_core);
     return ESP_OK;
 }
