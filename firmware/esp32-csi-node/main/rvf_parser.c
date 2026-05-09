@@ -10,7 +10,7 @@
 
 #include <string.h>
 #include "esp_log.h"
-#include "mbedtls/sha256.h"
+#include "psa/crypto.h"
 
 static const char *TAG = "rvf";
 
@@ -125,9 +125,13 @@ esp_err_t rvf_parse(const uint8_t *data, uint32_t data_len, rvf_parsed_t *out)
 
     /* ---- Verify build hash (SHA-256 of WASM payload) ---- */
     uint8_t computed_hash[32];
-    int ret = mbedtls_sha256(wasm_data, hdr->wasm_len, computed_hash, 0);
-    if (ret != 0) {
-        ESP_LOGE(TAG, "SHA-256 computation failed: %d", ret);
+    size_t hash_len = 0;
+    psa_status_t psa_st = psa_hash_compute(PSA_ALG_SHA_256, wasm_data,
+                                            hdr->wasm_len, computed_hash,
+                                            sizeof(computed_hash), &hash_len);
+    if (psa_st != PSA_SUCCESS || hash_len != 32) {
+        ESP_LOGE(TAG, "SHA-256 computation failed: psa=%d len=%u",
+                 (int)psa_st, (unsigned)hash_len);
         return ESP_FAIL;
     }
 
@@ -186,8 +190,7 @@ esp_err_t rvf_verify_signature(const rvf_parsed_t *parsed, const uint8_t *data,
     /*
      * Ed25519 verification.
      *
-     * ESP-IDF v5.2 mbedtls does NOT include Ed25519 (Curve25519 is
-     * for ECDH/X25519 only).  We use a SHA-256-HMAC integrity check:
+     * Legacy mbedtls Ed25519 is optional.  We use a SHA-256 keyed digest:
      *
      *   expected = SHA-256(pubkey || signed_region)
      *
@@ -196,35 +199,34 @@ esp_err_t rvf_verify_signature(const rvf_parsed_t *parsed, const uint8_t *data,
      * pubkey produces a different expected hash, so unauthorized
      * publishers cannot forge a valid signature.
      *
-     * For full Ed25519 (NaCl-style), enable CONFIG_MBEDTLS_EDDSA_C
-     * or link TweetNaCl.  The RVF builder should match this scheme.
+     * For full Ed25519, enable CONFIG_MBEDTLS_EDDSA_C or equivalent.
+     * The RVF builder should match this scheme.
      */
     uint8_t hash_input_prefix[32];
     memcpy(hash_input_prefix, pubkey, 32);
 
-    /* Compute SHA-256(pubkey || header+manifest+wasm). */
-    mbedtls_sha256_context ctx;
-    mbedtls_sha256_init(&ctx);
-    int ret = mbedtls_sha256_starts(&ctx, 0);
-    if (ret != 0) {
-        mbedtls_sha256_free(&ctx);
+    /* Compute SHA-256(pubkey || header+manifest+wasm) via PSA Crypto. */
+    psa_hash_operation_t op = PSA_HASH_OPERATION_INIT;
+    psa_status_t st = psa_hash_setup(&op, PSA_ALG_SHA_256);
+    if (st != PSA_SUCCESS) {
         return ESP_FAIL;
     }
-    ret = mbedtls_sha256_update(&ctx, hash_input_prefix, 32);
-    if (ret != 0) {
-        mbedtls_sha256_free(&ctx);
+    st = psa_hash_update(&op, hash_input_prefix, 32);
+    if (st != PSA_SUCCESS) {
+        (void)psa_hash_abort(&op);
         return ESP_FAIL;
     }
-    ret = mbedtls_sha256_update(&ctx, data, signed_len);
-    if (ret != 0) {
-        mbedtls_sha256_free(&ctx);
+    st = psa_hash_update(&op, data, signed_len);
+    if (st != PSA_SUCCESS) {
+        (void)psa_hash_abort(&op);
         return ESP_FAIL;
     }
 
     uint8_t expected[32];
-    ret = mbedtls_sha256_finish(&ctx, expected);
-    mbedtls_sha256_free(&ctx);
-    if (ret != 0) {
+    size_t out_len = 0;
+    st = psa_hash_finish(&op, expected, sizeof(expected), &out_len);
+    if (st != PSA_SUCCESS || out_len != 32) {
+        (void)psa_hash_abort(&op);
         return ESP_FAIL;
     }
 
