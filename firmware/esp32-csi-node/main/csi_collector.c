@@ -356,6 +356,30 @@ void csi_collector_init(void)
 
     ESP_LOGI(TAG, "Promiscuous mode enabled (MGMT-only, RuView#396)");
 
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+    /* Wi-Fi 6 targets (e.g. ESP32-C6): wifi_csi_config_t is wifi_csi_acquire_config_t
+     * (bitfields), not the legacy 802.11n bool layout used on ESP32-S3. */
+    wifi_csi_config_t csi_config;
+    memset(&csi_config, 0, sizeof(csi_config));
+    csi_config.enable = 1U;
+    csi_config.acquire_csi_legacy = 1U;
+    csi_config.acquire_csi_ht20 = 1U;
+    csi_config.acquire_csi_ht40 = 1U;
+    csi_config.acquire_csi_su = 1U;
+    csi_config.acquire_csi_mu = 1U;
+    csi_config.acquire_csi_dcm = 1U;
+    csi_config.acquire_csi_beamformed = 1U;
+#if CONFIG_SOC_WIFI_MAC_VERSION_NUM >= 3
+    csi_config.acquire_csi_force_lltf = 1U;
+    csi_config.acquire_csi_vht = 1U;
+    csi_config.acquire_csi_he_stbc_mode = ESP_CSI_ACQUIRE_STBC_SAMPLE_HELTFS;
+    csi_config.val_scale_cfg = 0U;
+#else
+    csi_config.acquire_csi_he_stbc = ESP_CSI_ACQUIRE_STBC_SAMPLE_HELTFS;
+    csi_config.val_scale_cfg = 0U;
+#endif
+    csi_config.dump_ack_en = 0U;
+#else
     wifi_csi_config_t csi_config = {
         .lltf_en = true,
         .htltf_en = true,
@@ -365,6 +389,7 @@ void csi_collector_init(void)
         .manu_scale = false,
         .shift = false,
     };
+#endif
 
     ESP_ERROR_CHECK(esp_wifi_set_csi_config(&csi_config));
     ESP_ERROR_CHECK(esp_wifi_set_csi_rx_cb(wifi_csi_callback, NULL));
