@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-ESP32-S3 CSI Node Provisioning Script
+ESP32 CSI node provisioning (ESP32-S3, ESP32-C6, other targets).
 
 Writes WiFi credentials and aggregator target to the ESP32's NVS partition
 so users can configure a pre-built firmware binary without recompiling.
 
 Usage:
     python provision.py --port COM7 --ssid "MyWiFi" --password "secret" --target-ip 192.168.1.20
+    python provision.py --port /dev/ttyUSB0 --chip esp32c6 --ssid "..." \\
+        --password "..." --target-ip 192.168.1.20
 
 Requirements:
     pip install 'esptool>=5.0' nvs-partition-gen
@@ -143,7 +145,7 @@ def generate_nvs_binary(csv_content, size):
                 os.unlink(p)
 
 
-def flash_nvs(port, baud, nvs_bin):
+def flash_nvs(port, baud, nvs_bin, chip):
     """Flash the NVS partition binary to the ESP32."""
     with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
         f.write(nvs_bin)
@@ -152,16 +154,13 @@ def flash_nvs(port, baud, nvs_bin):
     try:
         cmd = [
             sys.executable, "-m", "esptool",
-            "--chip", "esp32s3",
+            "--chip", chip,
             "--port", port,
             "--baud", str(baud),
-            # Keep underscore form — ESP-IDF v5.4 bundles esptool 4.10.0 which only
-            # accepts "write_flash". pip's esptool >=5.x accepts both (hyphenated
-            # form preferred) but keeps underscore working. Do not "correct" this.
-            "write_flash",
+            "write-flash",
             hex(NVS_PARTITION_OFFSET), bin_path,
         ]
-        print(f"Flashing NVS partition ({len(nvs_bin)} bytes) to {port}...")
+        print(f"Flashing NVS partition ({len(nvs_bin)} bytes) to {port} (chip={chip})...")
         subprocess.check_call(cmd)
         print("NVS provisioning complete!")
     finally:
@@ -170,10 +169,20 @@ def flash_nvs(port, baud, nvs_bin):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Provision ESP32-S3 CSI Node with WiFi and aggregator settings",
-        epilog="Example: python provision.py --port COM7 --ssid MyWiFi --password secret --target-ip 192.168.1.20",
+        description="Provision CSI node NVS (WiFi + aggregator); works on S3, C6, etc.",
+        epilog=(
+            "Example: python provision.py --port COM7 --ssid MyWiFi --password secret "
+            "--target-ip 192.168.1.20\n"
+            "ESP32-C6: same, or pass --chip esp32c6 if auto-detect fails "
+            "(default chip is auto for esptool v5+)."
+        ),
     )
     parser.add_argument("--port", required=True, help="Serial port (e.g. COM7, /dev/ttyUSB0)")
+    parser.add_argument(
+        "--chip",
+        default="auto",
+        help="esptool target: auto (default), esp32s3, esp32c6, ... (must match connected chip)",
+    )
     parser.add_argument("--baud", type=int, default=460800, help="Flash baud rate (default: 460800)")
     parser.add_argument("--ssid", help="WiFi SSID")
     parser.add_argument("--password", help="WiFi password")
@@ -337,11 +346,11 @@ def main():
         with open(out, "wb") as f:
             f.write(nvs_bin)
         print(f"NVS binary saved to {out} ({len(nvs_bin)} bytes)")
-        print(f"Flash manually: python -m esptool --chip esp32s3 --port {args.port} "
+        print(f"Flash manually: python -m esptool --chip {args.chip} --port {args.port} "
               f"write-flash 0x9000 {out}")
         return
 
-    flash_nvs(args.port, args.baud, nvs_bin)
+    flash_nvs(args.port, args.baud, nvs_bin, args.chip)
 
 
 if __name__ == "__main__":
