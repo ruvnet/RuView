@@ -168,14 +168,14 @@ The training process works like this:
 1. **Collect** raw CSI frames from ESP32-S3 nodes placed in a room
 2. **Extract** 8-dimensional feature vectors from sliding windows of CSI data
 3. **Contrast** -- the model learns that features from nearby time windows should produce similar embeddings, while features from different scenarios should produce different embeddings
-4. **Fine-tune** task heads using weak labels from environmental sensors (PIR motion, temperature, pressure) on the Cognitum Seed companion device
+4. **Fine-tune** task heads — *planned:* weak labels from environmental sensors (PIR motion, temperature, pressure) on the Cognitum Seed companion device. **This environmental-sensor ground-truth path is not yet implemented** (no PIR/BME280 ingestion in the training pipeline today); current task-head supervision uses the proxy/camera labels described elsewhere.
 
 ### Data provenance
 
 - **Source:** Live CSI from 2x ESP32-S3 nodes (802.11n, HT40, 114 subcarriers)
 - **Volume:** ~360,000 CSI frames (~3,600 feature vectors) per collection run
 - **Environment:** Residential room, ~4x5 meters
-- **Ground truth:** Environmental sensors on Cognitum Seed (PIR, BME280, light)
+- **Ground truth:** *Planned* — environmental sensors on the Cognitum Seed (PIR, BME280, light). Not yet wired into training; treat the PIR/BME280 references in this card as the intended design, not a current capability.
 - **Attestation:** Every collection run produces a cryptographic witness chain (`collection-witness.json`) that proves data provenance and integrity
 
 ### Witness chain
@@ -208,7 +208,7 @@ Add a second ESP32-S3 to enable cross-node signal fusion for better accuracy and
 | USB-C cables (x3) | Power + data | ~$9 |
 | **Total** | | **~$27** |
 
-The Cognitum Seed runs the ONNX models on-device, orchestrates the ESP32 nodes over USB serial, and provides environmental ground truth via its onboard PIR and BME280 sensors.
+The Cognitum Seed runs the ONNX models on-device and orchestrates the ESP32 nodes over USB serial. (Using its onboard PIR/BME280 sensors as training ground truth is planned but not yet implemented — see "Data provenance" above.)
 
 ---
 

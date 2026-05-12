@@ -458,3 +458,52 @@ fn dataloader_empty_dataset_zero_batches() {
         "iterator over empty dataset must yield 0 items"
     );
 }
+
+// ---------------------------------------------------------------------------
+// CsiSample::signal_features — the wifi-densepose-signal wiring
+// ---------------------------------------------------------------------------
+
+/// `signal_features()` must return a vector of exactly `FEATURE_LEN`, all
+/// finite, for a real (synthetic) sample.
+#[test]
+fn signal_features_have_correct_length_and_are_finite() {
+    use wifi_densepose_train::signal_features::FEATURE_LEN;
+
+    let ds = SyntheticCsiDataset::new(8, default_cfg());
+    let sample = ds.get(0).expect("sample 0 must exist");
+    let feats = sample.signal_features();
+    assert_eq!(
+        feats.len(),
+        FEATURE_LEN,
+        "signal_features() must return FEATURE_LEN ({FEATURE_LEN}) values"
+    );
+    assert!(
+        feats.iter().all(|v| v.is_finite()),
+        "all signal features must be finite, got {feats:?}"
+    );
+}
+
+/// `signal_features()` is deterministic for a given (deterministic) sample.
+#[test]
+fn signal_features_are_deterministic() {
+    let ds = SyntheticCsiDataset::new(8, default_cfg());
+    let a = ds.get(0).expect("sample 0").signal_features();
+    let b = ds.get(0).expect("sample 0").signal_features();
+    assert_eq!(
+        a, b,
+        "signal_features() must be deterministic for the same sample"
+    );
+}
+
+/// `extract_signal_features` returns the zero vector for a zero-sized window
+/// rather than panicking.
+#[test]
+fn signal_features_zero_window_is_zero_vector() {
+    use ndarray::Array4;
+    use wifi_densepose_train::signal_features::{extract_signal_features, FEATURE_LEN};
+
+    let empty = Array4::<f32>::zeros((0, 0, 0, 0));
+    let feats = extract_signal_features(&empty, &empty);
+    assert_eq!(feats.len(), FEATURE_LEN);
+    assert!(feats.iter().all(|&v| v == 0.0));
+}

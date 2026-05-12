@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`wifi-densepose-train`: `signal_features` module — wires `wifi-densepose-signal` into the training pipeline.** `wifi-densepose-signal` was previously a phantom dependency of `wifi-densepose-train` (listed in `Cargo.toml`, never imported). New `wifi_densepose_train::signal_features::extract_signal_features` (and `CsiSample::signal_features()`) run a windowed CSI observation's centre frame through `wifi_densepose_signal::features::FeatureExtractor`, producing a fixed-length (`FEATURE_LEN = 12`) amplitude/phase/PSD feature vector — the hook for a future vitals / multi-task supervision head (breathing- and heart-rate-band power are read off the PSD summary). The vector is produced on demand and not yet fed back into the loss. Surfaced by the 2026-05-11 training-pipeline audit (findings #1 "vitals features absent from training" and #2 "`wifi-densepose-signal` ghost dep").
+
+### Fixed
+- **HuggingFace `MODEL_CARD.md`: marked the PIR/BME280 environmental-sensor ground-truth path as planned, not implemented** (training-pipeline audit finding #3) — the card presented PIR/BME280 weak-label fine-tuning as a current capability; there is no env-sensor ingestion in the training pipeline today.
+- **README: corrected the camera-supervised pose-accuracy claim** (audit finding #5; see PR #535) — "92.9% PCK@20" → the ADR-079 target (35%+; proxy baseline 35.3%), noting P7/P8/P9 are pending.
+
+### Added
 - **`nvsim` crate — deterministic NV-diamond magnetometer pipeline simulator** (ADR-089) —
   New standalone leaf crate at `v2/crates/nvsim` modeling a forward-only
   magnetic sensing path: scene → source synthesis (Biot–Savart, dipole,

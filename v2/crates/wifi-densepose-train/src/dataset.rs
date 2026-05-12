@@ -92,6 +92,23 @@ pub struct CsiSample {
     pub frame_id: u64,
 }
 
+impl CsiSample {
+    /// Derive the compact signal-processing feature vector for this sample
+    /// via [`crate::signal_features::extract_signal_features`] (see that
+    /// function for the layout, and [`crate::signal_features::FEATURE_LEN`]
+    /// for its length).
+    ///
+    /// Computed on demand from [`Self::amplitude`]/[`Self::phase`] — not
+    /// cached on the struct. This is the hook for folding the SOTA
+    /// signal-processing crate's amplitude/phase/PSD features (and, in a
+    /// later iteration, vitals-band power) into training; the raw vector is
+    /// returned here and is not yet fed back into the loss.
+    #[must_use]
+    pub fn signal_features(&self) -> Array1<f32> {
+        crate::signal_features::extract_signal_features(&self.amplitude, &self.phase)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // CsiDataset trait
 // ---------------------------------------------------------------------------
