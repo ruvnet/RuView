@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Home Assistant MQTT bridge** — opt-in publisher for body-tracking, zone, and vital-sign events. Set `MQTT_URL` (or pass `--mqtt-url`) to enable. Publishes presence, posture, activity, vitals alerts, lying-still alerts, and node online/offline events to `ruview/events/{type}` topics. Includes Home Assistant MQTT discovery configs for person-count and activity sensors. Zero impact on existing deployments when not configured. See `docs/integrations/home-assistant.md`.
+- **`event_stream` module** — async broadcast event bus (`EventBus`) and state-change tracker (`StateTracker`) for detecting presence, posture, activity, vitals, and node lifecycle transitions.
 - **`nvsim` crate — deterministic NV-diamond magnetometer pipeline simulator** (ADR-089) —
   New standalone leaf crate at `v2/crates/nvsim` modeling a forward-only
   magnetic sensing path: scene → source synthesis (Biot–Savart, dipole,

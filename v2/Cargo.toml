@@ -73,6 +73,9 @@ hyper = { version = "1.1", features = ["full"] }
 sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "sqlite", "uuid", "chrono", "json"] }
 redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
 
+# MQTT
+rumqttc = "0.24"
+
 # Configuration
 config = "0.14"
 dotenvy = "0.15"

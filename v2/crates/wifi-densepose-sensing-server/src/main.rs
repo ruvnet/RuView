@@ -12,7 +12,9 @@
 mod adaptive_classifier;
 pub mod cli;
 pub mod csi;
+mod event_stream;
 mod field_bridge;
+mod mqtt_bridge;
 mod multistatic_bridge;
 pub mod pose;
 mod rvf_container;
@@ -166,6 +168,10 @@ struct Args {
     /// Start field model calibration on boot (empty room required)
     #[arg(long)]
     calibrate: bool,
+
+    /// MQTT broker URL for Home Assistant integration (e.g. mqtt://broker.local:1883)
+    #[arg(long, env = "SENSING_MQTT_URL")]
+    mqtt_url: Option<String>,
 }
 
 // ── Data types ───────────────────────────────────────────────────────────────
@@ -4855,6 +4861,19 @@ async fn main() {
         _ => {
             tokio::spawn(simulated_data_task(state.clone(), args.tick_ms));
         }
+    }
+
+    // MQTT bridge for Home Assistant (opt-in via --mqtt-url / SENSING_MQTT_URL)
+    let event_bus = Arc::new(event_stream::EventBus::new());
+    if let Some(ref mqtt_url) = args.mqtt_url {
+        let mqtt_config = mqtt_bridge::MqttConfig {
+            broker_url: mqtt_url.clone(),
+            ..Default::default()
+        };
+        mqtt_bridge::start_mqtt_bridge(mqtt_config, event_bus.clone());
+        info!("MQTT bridge enabled → {mqtt_url}");
+    } else {
+        info!("MQTT bridge disabled (no --mqtt-url / SENSING_MQTT_URL set)");
     }
 
     // ADR-050: Parse bind address once, use for all listeners
