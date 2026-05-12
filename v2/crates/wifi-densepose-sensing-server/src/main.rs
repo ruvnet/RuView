@@ -20,9 +20,11 @@ mod rvf_pipeline;
 mod tracker_bridge;
 pub mod types;
 mod vital_signs;
+mod firmware_registry;
 
 // Training pipeline modules (exposed via lib.rs)
 use wifi_densepose_sensing_server::{graph_transformer, trainer, dataset, embedding};
+use firmware_registry::{FirmwareRegistry, sha256_bytes};
 
 use std::collections::{HashMap, VecDeque};
 use ruvector_mincut::{DynamicMinCut, MinCutBuilder};
@@ -166,6 +168,13 @@ struct Args {
     /// Start field model calibration on boot (empty room required)
     #[arg(long)]
     calibrate: bool,
+
+    /// Directory holding ESP32 firmware binaries for pull-based OTA (ADR-095).
+    /// On startup, the newest `.bin` file in this directory is registered
+    /// as the current firmware. Operators upload new versions via
+    /// `POST /api/v1/firmware/upload`.
+    #[arg(long, default_value = "/app/data/firmware", env = "FIRMWARE_DIR")]
+    firmware_dir: PathBuf,
 }
 
 // ── Data types ───────────────────────────────────────────────────────────────
@@ -642,6 +651,16 @@ struct AppStateInner {
     multistatic_fuser: MultistaticFuser,
     /// SVD-based room field model for eigenvalue person counting (None until calibration).
     field_model: Option<FieldModel>,
+    // ── Firmware registry (pull-based OTA, ADR-095) ──────────────────────
+    /// In-memory registry of the currently-blessed ESP32 firmware binary.
+    /// Nodes poll `GET /api/v1/firmware/latest` to learn the current version
+    /// and download it via `GET /api/v1/firmware/download`. Operators upload
+    /// new binaries via `POST /api/v1/firmware/upload`.
+    firmware_registry: Arc<tokio::sync::RwLock<FirmwareRegistry>>,
+    /// Directory where firmware binaries live on disk. Default:
+    /// `/app/data/firmware` inside the Docker container (volume-mounted
+    /// from a configurable host path via FIRMWARE_DIR env var).
+    firmware_dir: PathBuf,
 }
 
 /// If no ESP32 frame arrives within this duration, source reverts to offline.
@@ -3443,6 +3462,192 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
     }
 }
 
+// ── Firmware Registry Endpoints (pull-based OTA, ADR-095) ────────────────────
+
+/// Scan a firmware directory and return the newest .bin file by mtime.
+/// Returns `Ok(None)` if the directory exists but contains no .bin files.
+async fn scan_firmware_dir(dir: &std::path::Path) -> Result<Option<PathBuf>, String> {
+    if !dir.exists() {
+        return Ok(None);
+    }
+    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
+    let mut entries = tokio::fs::read_dir(dir)
+        .await
+        .map_err(|e| format!("read_dir({}): {}", dir.display(), e))?;
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|e| format!("next_entry: {e}"))?
+    {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("bin") {
+            continue;
+        }
+        let meta = match tokio::fs::metadata(&path).await {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let mtime = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+        match &newest {
+            None => newest = Some((mtime, path)),
+            Some((prev_mtime, _)) if mtime > *prev_mtime => newest = Some((mtime, path)),
+            _ => {}
+        }
+    }
+    Ok(newest.map(|(_, p)| p))
+}
+
+/// GET /api/v1/firmware/latest — query whether a firmware update is available.
+async fn firmware_latest_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let reg_arc = { state.read().await.firmware_registry.clone() };
+    let reg = reg_arc.read().await;
+    match reg.current() {
+        Some(meta) => Json(serde_json::json!({
+            "available": true,
+            "version": meta.version,
+            "sha256": meta.sha256,
+            "size": meta.size_bytes,
+            "compile_time": meta.compile_time,
+            "download_url": "/api/v1/firmware/download",
+        })),
+        None => Json(serde_json::json!({
+            "available": false,
+            "message": "No firmware registered. Upload via POST /api/v1/firmware/upload.",
+        })),
+    }
+}
+
+/// GET /api/v1/firmware/download — stream the current firmware binary.
+async fn firmware_download_endpoint(
+    State(state): State<SharedState>,
+) -> Result<axum::response::Response, axum::http::StatusCode> {
+    let reg_arc = { state.read().await.firmware_registry.clone() };
+    let reg = reg_arc.read().await;
+    let meta = match reg.current() {
+        Some(m) => m.clone(),
+        None => return Err(axum::http::StatusCode::NOT_FOUND),
+    };
+    drop(reg);
+
+    let bytes = match tokio::fs::read(&meta.file_path).await {
+        Ok(b) => b,
+        Err(e) => {
+            error!("firmware_download: read {}: {}", meta.file_path.display(), e);
+            return Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    let response = axum::response::Response::builder()
+        .status(axum::http::StatusCode::OK)
+        .header("Content-Type", "application/octet-stream")
+        .header("Content-Length", bytes.len().to_string())
+        .header(
+            "Content-Disposition",
+            format!("attachment; filename=\"esp32-csi-node-{}.bin\"", meta.version),
+        )
+        .header("X-Firmware-Version", meta.version.clone())
+        .header("X-Firmware-Sha256", meta.sha256.clone())
+        .body(axum::body::Body::from(bytes))
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(response)
+}
+
+/// POST /api/v1/firmware/upload — operator uploads a new firmware binary.
+///
+/// Accepts `application/octet-stream` body. Query params:
+///   `?version=<string>`  required — the semver-ish version to register.
+///   `?sha256=<hex>`      optional — if provided, must match the computed SHA-256.
+///
+/// Writes the binary to `<firmware_dir>/esp32-csi-node-<version>.bin` and
+/// registers it as the current firmware.
+#[derive(Debug, serde::Deserialize)]
+struct FirmwareUploadQuery {
+    version: String,
+    sha256: Option<String>,
+}
+
+async fn firmware_upload_endpoint(
+    State(state): State<SharedState>,
+    axum::extract::Query(query): axum::extract::Query<FirmwareUploadQuery>,
+    body: axum::body::Bytes,
+) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
+    if body.len() < 256 * 1024 {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            format!("firmware too small ({} bytes)", body.len()),
+        ));
+    }
+    if body.len() > 2 * 1024 * 1024 {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            format!("firmware too large ({} bytes)", body.len()),
+        ));
+    }
+
+    let computed_sha = sha256_bytes(&body);
+    if let Some(expected) = query.sha256.as_ref() {
+        if !expected.eq_ignore_ascii_case(&computed_sha) {
+            return Err((
+                axum::http::StatusCode::BAD_REQUEST,
+                format!(
+                    "sha256 mismatch: client={} server={}",
+                    expected, computed_sha
+                ),
+            ));
+        }
+    }
+
+    let fw_dir = { state.read().await.firmware_dir.clone() };
+    if let Err(e) = tokio::fs::create_dir_all(&fw_dir).await {
+        error!("firmware_upload: create_dir_all({}): {}", fw_dir.display(), e);
+        return Err((
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("mkdir failed: {e}"),
+        ));
+    }
+
+    // Sanitize version for filesystem use.
+    let safe_version: String = query
+        .version
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
+        .collect();
+    let filename = format!("esp32-csi-node-{}.bin", safe_version);
+    let dest = fw_dir.join(&filename);
+
+    if let Err(e) = tokio::fs::write(&dest, &body).await {
+        error!("firmware_upload: write {}: {}", dest.display(), e);
+        return Err((
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("write failed: {e}"),
+        ));
+    }
+
+    // Re-register from disk so size and sha256 come from a single source of truth.
+    let reg_arc = { state.read().await.firmware_registry.clone() };
+    let mut reg = reg_arc.write().await;
+    match reg.set_current(&dest) {
+        Ok(meta) => {
+            info!(
+                "Firmware uploaded: version={} sha256={} size={} path={}",
+                meta.version, meta.sha256, meta.size_bytes, dest.display()
+            );
+            Ok(Json(serde_json::json!({
+                "status": "ok",
+                "version": meta.version,
+                "sha256": meta.sha256,
+                "size": meta.size_bytes,
+                "path": meta.file_path,
+            })))
+        }
+        Err(e) => Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            format!("registry set_current failed: {e}"),
+        )),
+    }
+}
+
 /// Generate a simple timestamp string (epoch seconds) for recording IDs.
 fn chrono_timestamp() -> u64 {
     std::time::SystemTime::now()
@@ -4841,7 +5046,34 @@ async fn main() {
         } else {
             None
         },
+        // Firmware registry (pull-based OTA, ADR-095) — seeded from disk below.
+        firmware_registry: Arc::new(tokio::sync::RwLock::new(FirmwareRegistry::new())),
+        firmware_dir: args.firmware_dir.clone(),
     }));
+
+    // Scan firmware_dir for a current binary and seed the registry. Non-fatal
+    // on failure — the server still runs if no firmware is staged.
+    {
+        let state_ref = state.clone();
+        let fw_dir = args.firmware_dir.clone();
+        tokio::spawn(async move {
+            match scan_firmware_dir(&fw_dir).await {
+                Ok(Some(path)) => {
+                    let reg_arc = { state_ref.read().await.firmware_registry.clone() };
+                    let mut reg = reg_arc.write().await;
+                    match reg.set_current(&path) {
+                        Ok(meta) => info!(
+                            "Firmware registry: loaded {} (sha256={}…, {} bytes) from {}",
+                            meta.version, &meta.sha256[..16], meta.size_bytes, path.display()
+                        ),
+                        Err(e) => warn!("Firmware registry: failed to load {}: {}", path.display(), e),
+                    }
+                }
+                Ok(None) => info!("Firmware registry: no firmware found in {}", fw_dir.display()),
+                Err(e) => warn!("Firmware registry: scan failed for {}: {}", fw_dir.display(), e),
+            }
+        });
+    }
 
     // Start background tasks based on source
     match source {
@@ -4941,6 +5173,10 @@ async fn main() {
         .route("/api/v1/calibration/start", post(calibration_start))
         .route("/api/v1/calibration/stop", post(calibration_stop))
         .route("/api/v1/calibration/status", get(calibration_status))
+        // Firmware registry / pull-based OTA (ADR-095)
+        .route("/api/v1/firmware/latest", get(firmware_latest_endpoint))
+        .route("/api/v1/firmware/download", get(firmware_download_endpoint))
+        .route("/api/v1/firmware/upload", post(firmware_upload_endpoint))
         // Static UI files
         .nest_service("/ui", ServeDir::new(&ui_path))
         .layer(SetResponseHeaderLayer::overriding(
