@@ -19,6 +19,7 @@
 #include "edge_processing.h"
 #include "stream_sender.h"
 #include "csi_collector.h"
+#include "temporal_task.h"  /* ADR-095 / #513: on-device temporal head */
 
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -314,6 +315,18 @@ static void emit_feature_state(void)
     if (sent < 0) {
         ESP_LOGW(TAG, "feature_state emit failed");
     }
+
+    /* ADR-095 / #513: feed the same 9 feature floats into the on-device
+     * temporal head if it is enabled. Non-blocking — drops are logged
+     * by temporal_task itself, never by us. With CONFIG_CSI_TEMPORAL_HEAD_ENABLED
+     * off, this resolves to a single ESP_ERR_NOT_SUPPORTED return. */
+    const float feat[9] = {
+        pkt.motion_score, pkt.presence_score,
+        pkt.respiration_bpm, pkt.respiration_conf,
+        pkt.heartbeat_bpm, pkt.heartbeat_conf,
+        pkt.anomaly_score, pkt.env_shift_score, pkt.node_coherence,
+    };
+    (void)temporal_task_push_frame(feat, 9);
 }
 
 static void slow_loop_cb(TimerHandle_t t)

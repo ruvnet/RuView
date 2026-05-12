@@ -24,6 +24,11 @@ required-features = ["tch-backend"]
 default = []
 tch-backend = ["tch"]
 cuda = ["tch-backend"]
+# ADR-096 sparse-GQA temporal head. Pulls wifi-densepose-temporal in
+# alongside tch — the new path is additive, doesn't touch the existing
+# model.rs code paths, and stays opt-in until the §5 validation gate
+# clears.
+aether-sparse-temporal = ["tch-backend", "dep:wifi-densepose-temporal"]
 
 [dependencies]
 # Internal crates
@@ -53,6 +58,10 @@ ruvector-attn-mincut = { workspace = true }
 ruvector-temporal-tensor = { workspace = true }
 ruvector-solver = { workspace = true }
 ruvector-attention = { workspace = true }
+
+# AETHER temporal head (ADR-096). Optional + tch-gated — only meaningful
+# alongside the existing tch-bound model graph.
+wifi-densepose-temporal = { workspace = true, optional = true }
 
 # Data loading
 ndarray-npy.workspace = true

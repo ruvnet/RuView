@@ -21,6 +21,7 @@
 
 #include "csi_collector.h"
 #include "stream_sender.h"
+#include "temporal_task.h"  /* ADR-095 / #513 */
 #include "nvs_config.h"
 #include "edge_processing.h"
 #include "ota_update.h"
@@ -309,6 +310,22 @@ void app_main(void)
         ESP_LOGW(TAG, "Adaptive controller init failed: %s",
                  esp_err_to_name(adapt_ret));
     }
+
+    /* ADR-095 / #513: spin up the on-device temporal head. Returns
+     * ESP_ERR_NOT_SUPPORTED when CONFIG_CSI_TEMPORAL_HEAD_ENABLED is
+     * off — that is the default and not an error. The fast loop
+     * pushes feature frames; the task runs classify at a slower
+     * cadence and emits 0xC5110007 packets. */
+#ifdef CONFIG_CSI_TEMPORAL_HEAD_ENABLED
+    esp_err_t tmp_ret = temporal_task_start(
+        (uint32_t)CONFIG_TEMPORAL_INPUT_DIM,
+        (uint32_t)CONFIG_TEMPORAL_WINDOW_LEN,
+        (uint32_t)CONFIG_TEMPORAL_N_CLASSES);
+    if (tmp_ret != ESP_OK) {
+        ESP_LOGW(TAG, "temporal task init failed: %s",
+                 esp_err_to_name(tmp_ret));
+    }
+#endif
 
     /* Initialize power management. */
     power_mgmt_init(g_nvs_config.power_duty);

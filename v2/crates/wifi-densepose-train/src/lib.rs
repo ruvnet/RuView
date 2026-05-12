@@ -69,6 +69,13 @@ pub mod proof;
 #[cfg(feature = "tch-backend")]
 pub mod trainer;
 
+// ADR-096 AETHER temporal head — additive integration. Pulled in via
+// the `aether-sparse-temporal` feature, which itself requires
+// `tch-backend`. Kept under its own cfg so the existing build with
+// just `tch-backend` is byte-equivalent to before.
+#[cfg(feature = "aether-sparse-temporal")]
+pub mod temporal_aether;
+
 // Convenient re-exports at the crate root.
 pub use config::TrainingConfig;
 pub use dataset::{CsiDataset, CsiSample, DataLoader, MmFiDataset, SyntheticCsiDataset, SyntheticConfig};

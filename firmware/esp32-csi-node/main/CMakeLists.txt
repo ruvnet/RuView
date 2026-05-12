@@ -9,9 +9,18 @@ set(SRCS
     "rv_feature_state.c"
     "rv_mesh.c"
     "adaptive_controller.c"
+    # ADR-095 / #513 — on-device temporal head (no-op shims when CONFIG_CSI_TEMPORAL_HEAD_ENABLED off)
+    "temporal_task.c"
 )
 
 set(REQUIRES "")
+
+# ADR-095: link the Rust ruv_temporal staticlib only when the feature is on,
+# so the default firmware build doesn't depend on the (currently blocked)
+# esp Rust toolchain.
+if(CONFIG_CSI_TEMPORAL_HEAD_ENABLED)
+    list(APPEND REQUIRES ruv_temporal)
+endif()
 
 # ADR-061: Mock CSI generator for QEMU testing + ADR-081 mock radio binding
 if(CONFIG_CSI_MOCK_ENABLED)

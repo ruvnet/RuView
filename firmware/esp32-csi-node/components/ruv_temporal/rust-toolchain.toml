@@ -1,0 +1,6 @@
+# Pin to the esp toolchain so casual `cargo build` (without +esp) lands
+# on the xtensa-capable rustc/cargo. Per ADR-095, espup must be
+# installed on every developer machine and CI runner.
+
+[toolchain]
+channel = "esp"

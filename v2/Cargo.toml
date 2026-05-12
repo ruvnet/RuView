@@ -16,6 +16,7 @@ members = [
     "crates/wifi-densepose-wifiscan",
     "crates/wifi-densepose-vitals",
     "crates/wifi-densepose-ruvector",
+    "crates/wifi-densepose-temporal",
     "crates/wifi-densepose-desktop",
     "crates/wifi-densepose-pointcloud",
     "crates/wifi-densepose-geo",
@@ -131,6 +132,11 @@ ruvector-attention = "2.0.4"
 ruvector-crv = "0.1.1"
 ruvector-gnn = { version = "2.0.5", default-features = false }
 
+# ruvllm sparse attention (path-vendored per ADR-095/096)
+# Default-features=false keeps the kernel no_std-clean so the same workspace
+# version is consumable by the upcoming ESP-IDF Rust component (ADR-095).
+ruvllm_sparse_attention = { path = "../vendor/ruvector/crates/ruvllm_sparse_attention", default-features = false, features = ["fp16"] }
+
 
 # Internal crates
 wifi-densepose-core = { version = "0.3.0", path = "crates/wifi-densepose-core" }
@@ -143,6 +149,7 @@ wifi-densepose-hardware = { version = "0.3.0", path = "crates/wifi-densepose-har
 wifi-densepose-wasm = { version = "0.3.0", path = "crates/wifi-densepose-wasm" }
 wifi-densepose-mat = { version = "0.3.0", path = "crates/wifi-densepose-mat" }
 wifi-densepose-ruvector = { version = "0.3.0", path = "crates/wifi-densepose-ruvector" }
+wifi-densepose-temporal = { version = "0.1.0", path = "crates/wifi-densepose-temporal" }
 
 [profile.release]
 lto = true

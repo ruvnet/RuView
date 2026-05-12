@@ -323,3 +323,56 @@ menu "Mock CSI (QEMU Testing)"
         depends on CSI_MOCK_ENABLED
         default n
 endmenu
+
+menu "On-device temporal head (ADR-095, #513)"
+
+    config CSI_TEMPORAL_HEAD_ENABLED
+        bool "Enable on-device temporal-head classification"
+        default n
+        help
+            Compiles the ruv_temporal FreeRTOS task that runs a learned
+            transformer-style temporal head over the rv_feature_state
+            stream. Backed by the Rust ruvllm_sparse_attention staticlib
+            in components/ruv_temporal/. Default off — the Rust component
+            requires the esp Rust toolchain (see component README) and
+            adds ~376 KB to the firmware image. Off-board (8 MB) only
+            until the binary delta is measured on real hardware.
+
+    config TEMPORAL_INPUT_DIM
+        int "Input feature dimension"
+        depends on CSI_TEMPORAL_HEAD_ENABLED
+        default 16
+        range 1 256
+        help
+            Per-frame feature dimension fed into the temporal head.
+            16 matches a small projection of rv_feature_state_t; bump
+            after the host-side training crate fixes the model schema.
+
+    config TEMPORAL_WINDOW_LEN
+        int "Rolling window length (frames)"
+        depends on CSI_TEMPORAL_HEAD_ENABLED
+        default 256
+        range 32 1024
+        help
+            Number of feature frames the temporal head reasons over.
+            256 frames at the controller's 5 Hz fast-loop rate is ~50 s.
+
+    config TEMPORAL_N_CLASSES
+        int "Number of output classes"
+        depends on CSI_TEMPORAL_HEAD_ENABLED
+        default 4
+        range 2 16
+        help
+            Number of classification logits the model produces. Must be
+            ≤ TEMPORAL_MAX_LOGITS in temporal_task.c (16).
+
+    config TEMPORAL_CLASSIFY_PERIOD_MS
+        int "Classification cadence (ms)"
+        depends on CSI_TEMPORAL_HEAD_ENABLED
+        default 1000
+        range 100 60000
+        help
+            How often the temporal task runs ruv_temporal_classify and
+            emits a 0xC5110007 packet. Default 1 s.
+
+endmenu

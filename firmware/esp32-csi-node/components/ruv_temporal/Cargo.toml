@@ -1,0 +1,35 @@
+[package]
+name = "ruv_temporal"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "ESP32-S3 on-device temporal head for WiFi-DensePose (ADR-095, #513)"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+name = "ruv_temporal"
+
+# Don't get pulled into the v2 workspace — this crate cross-compiles to
+# xtensa-esp32s3-none-elf, the workspace targets host x86_64.
+[workspace]
+
+[dependencies]
+ruvllm_sparse_attention = { path = "../../../../vendor/ruvector/crates/ruvllm_sparse_attention", default-features = false, features = ["fp16"] }
+
+# Minimal no_std + alloc plumbing. esp-alloc supplies a GlobalAlloc that
+# punches through to ESP-IDF's heap_caps_malloc; critical-section provides
+# the lock primitive linked_list_allocator wants on no_std targets.
+esp-alloc = "0.8"
+critical-section = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 1
+panic = "abort"

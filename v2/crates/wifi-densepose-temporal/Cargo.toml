@@ -1,0 +1,27 @@
+[package]
+name = "wifi-densepose-temporal"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "AETHER temporal head for WiFi-DensePose — sparse-GQA attention over CSI feature windows (ADR-096)"
+repository = "https://github.com/ruvnet/RuView"
+
+[dependencies]
+ruvllm_sparse_attention = { workspace = true }
+thiserror = "1"
+
+[dev-dependencies]
+approx = "0.5"
+
+[features]
+default = []
+# Enable FP16 KV cache path (mirrors the firmware-side ADR-095 build).
+fp16 = []
+
+[[example]]
+name = "init_random_blob"
+path = "examples/init_random_blob.rs"
+
+[[example]]
+name = "bench_speedup"
+path = "examples/bench_speedup.rs"
