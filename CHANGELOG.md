@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Body tracking platform with persistent IDs and zones** (ADR-094) —
+  New `body_tracker` module in `v2/crates/wifi-densepose-sensing-server` providing
+  `BodyTracker` with greedy nearest-neighbor association + Kalman filtering for
+  stable body IDs across sensing ticks. Supports configurable axis-aligned 3D zones
+  with transition events on zone membership changes. REST endpoints:
+  `GET /api/v1/tracking/bodies`, `GET/POST /api/v1/tracking/zones`,
+  `DELETE /api/v1/tracking/zones/{name}`. 5 unit tests covering track creation,
+  ID persistence, timeout decay, zone containment, and zone transitions.
+  Implements the body-tracking vision referenced by upstream ADR-081 under
+  fork-side ADR-094 (renumbered to avoid collision with the firmware-kernel ADR-081).
+
 - **`nvsim` crate — deterministic NV-diamond magnetometer pipeline simulator** (ADR-089) —
   New standalone leaf crate at `v2/crates/nvsim` modeling a forward-only
   magnetic sensing path: scene → source synthesis (Biot–Savart, dipole,

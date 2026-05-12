@@ -10,6 +10,7 @@
 #![allow(dead_code)]
 
 mod adaptive_classifier;
+mod body_tracker;
 pub mod cli;
 pub mod csi;
 mod field_bridge;
@@ -642,6 +643,8 @@ struct AppStateInner {
     multistatic_fuser: MultistaticFuser,
     /// SVD-based room field model for eigenvalue person counting (None until calibration).
     field_model: Option<FieldModel>,
+    /// Persistent body tracker with Kalman-filtered positions (ADR-094).
+    pub(crate) body_tracker: body_tracker::BodyTracker,
 }
 
 /// If no ESP32 frame arrives within this duration, source reverts to offline.
@@ -4841,6 +4844,7 @@ async fn main() {
         } else {
             None
         },
+        body_tracker: body_tracker::BodyTracker::new(),
     }));
 
     // Start background tasks based on source
@@ -4941,6 +4945,11 @@ async fn main() {
         .route("/api/v1/calibration/start", post(calibration_start))
         .route("/api/v1/calibration/stop", post(calibration_stop))
         .route("/api/v1/calibration/status", get(calibration_status))
+        // Body tracking (ADR-094)
+        .route("/api/v1/tracking/bodies", get(tracking_bodies))
+        .route("/api/v1/tracking/zones", get(tracking_zones_get))
+        .route("/api/v1/tracking/zones", post(tracking_zones_add))
+        .route("/api/v1/tracking/zones/{name}", delete(tracking_zones_delete))
         // Static UI files
         .nest_service("/ui", ServeDir::new(&ui_path))
         .layer(SetResponseHeaderLayer::overriding(
@@ -5001,6 +5010,42 @@ async fn main() {
     }
 
     info!("Server shut down cleanly");
+}
+
+// ── Body tracking endpoints (ADR-094) ────────────────────────────────────────
+
+async fn tracking_bodies(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    let bodies = s.body_tracker.get_bodies();
+    let count = bodies.len();
+    Json(serde_json::json!({
+        "bodies": bodies,
+        "count": count,
+    }))
+}
+
+async fn tracking_zones_get(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    let zones = s.body_tracker.get_zones();
+    Json(serde_json::json!({ "zones": zones }))
+}
+
+async fn tracking_zones_add(
+    State(state): State<SharedState>,
+    Json(zone): Json<body_tracker::Zone>,
+) -> Json<serde_json::Value> {
+    let mut s = state.write().await;
+    s.body_tracker.add_zone(zone.clone());
+    Json(serde_json::json!({ "status": "ok", "zone": zone }))
+}
+
+async fn tracking_zones_delete(
+    State(state): State<SharedState>,
+    Path(name): Path<String>,
+) -> Json<serde_json::Value> {
+    let mut s = state.write().await;
+    s.body_tracker.remove_zone(&name);
+    Json(serde_json::json!({ "status": "ok", "removed": name }))
 }
 
 #[cfg(test)]
