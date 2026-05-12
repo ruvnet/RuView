@@ -85,6 +85,11 @@ criterion.workspace = true
 proptest.workspace = true
 tempfile = "3.10"
 approx = "0.5"
+# Used by tests/test_real_loader.rs to write .npy fixtures that exercise the
+# real MmFiDataset disk-loading path (the deterministic proof uses the
+# in-memory SyntheticCsiDataset, which bypasses .npy parsing).
+ndarray.workspace = true
+ndarray-npy.workspace = true
 
 [[bench]]
 name = "training_bench"
