@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **README: corrected the camera-supervised pose-accuracy claim.** The README stated
+  "92.9% PCK@20" for camera-supervised training; that figure does not appear in
+  ADR-079 and is ~2.6× the ADR's own success target (>35% PCK@20). ADR-079 phases
+  P7 (data collection), P8 (training + evaluation on real paired data) and P9
+  (cross-room LoRA) are still `Pending`, so no measured camera-supervised PCK@20 has
+  been published. README now states the proxy-supervised baseline (≈2.5%) and the
+  ADR-079 target (35%+), and notes the eval phases are pending. Surfaced by the
+  PowerPlatePulse training-pipeline audit (2026-05-11); 6 remaining audit findings
+  tracked in the PR.
+
 ### Added
 - **`nvsim` crate — deterministic NV-diamond magnetometer pipeline simulator** (ADR-089) —
   New standalone leaf crate at `v2/crates/nvsim` modeling a forward-only

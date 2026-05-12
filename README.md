@@ -9,7 +9,7 @@
 > **Beta Software** — Under active development. APIs and firmware may change. Known limitations:
 > - ESP32-C3 and original ESP32 are not supported (single-core, insufficient for CSI DSP)
 > - Single ESP32 deployments have limited spatial resolution — use 2+ nodes or add a [Cognitum Seed](https://cognitum.one) for best results
-> - Camera-free pose accuracy is limited — use [camera ground-truth training](docs/adr/ADR-079-camera-ground-truth-training.md) for 92.9% PCK@20
+> - Camera-free pose accuracy is limited (PCK@20 ≈ 2.5% with proxy labels) — [camera ground-truth training](docs/adr/ADR-079-camera-ground-truth-training.md) targets **35%+ PCK@20**; the pipeline is implemented, but the data-collection and evaluation phases (ADR-079 P7–P9) are still pending, so no measured camera-supervised PCK@20 has been published yet
 >
 > Contributions and bug reports welcome at [Issues](https://github.com/ruvnet/RuView/issues).
 
@@ -56,7 +56,7 @@ RuView also supports pose estimation (17 COCO keypoints via the WiFlow architect
 > | 🧱 **Through-wall** | Fresnel zone geometry + multipath modeling | Up to 5m depth |
 > | 🧠 **Edge intelligence** | 8-dim feature vectors + RVF store on Cognitum Seed | $140 total BOM |
 > | 🎯 **Camera-free training** | 10 sensor signals, no labels needed | 84s on M4 Pro |
-> | 📷 **Camera-supervised training** | MediaPipe + ESP32 CSI → 92.9% PCK@20 | 19 min on laptop |
+> | 📷 **Camera-supervised training** | MediaPipe + ESP32 CSI → **35%+ PCK@20 target** (ADR-079; eval phases pending) | ~19 min on laptop (pipeline) |
 > | 📡 **Multi-frequency mesh** | Channel hopping across 6 bands, neighbor APs as illuminators | 3x sensing bandwidth |
 > | 🌐 **3D point cloud** *(optional fusion)* | Camera depth (MiDaS) + WiFi CSI + mmWave radar → unified spatial model | 22 ms pipeline · 19K+ points/frame |
 
