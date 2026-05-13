@@ -30,7 +30,7 @@ clap = { version = "4.4", features = ["derive", "env", "cargo"] }
 colored = "2.1"
 tabled = { version = "0.15", features = ["ansi"] }
 indicatif = "0.17"
-console = "0.15"
+console = "0.16"
 
 # Async runtime
 tokio = { version = "1.35", features = ["full"] }
