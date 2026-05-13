@@ -26,6 +26,22 @@ quirks (nexmon_csi cross-compile is a known dead end; see step 3).
 > prediction (16× chance baseline), continuous fleet/drift/anomaly
 > monitoring, and a 12-category time-series corpus.
 
+> **About the name "rvcsi" in this tutorial.** When this tutorial was
+> first written, the cluster's per-Pi capture services were named with
+> an `rvcsi` prefix (`cog-rvcsi-stream`, `cog-rvcsi-correlator`) as
+> branding only — the actual code was Python and didn't depend on the
+> upstream [`ruvnet/rvcsi`](https://github.com/ruvnet/rvcsi) Rust
+> runtime. **As of 2026-05-13**, the v0-appliance project has accepted
+> [ADR-207](https://github.com/ruvnet/v0-appliance/blob/main/docs/adr/ADR-207-rvcsi-library-integration.md)
+> (rvCSI library integration — Option D) and shipped a Rust binary
+> `cog-rvcsi-pi` built on rvcsi-runtime 0.3 that replaces the three
+> Python services. The cutover is per-Pi, operator-driven, with
+> one-command rollback (`scripts/rvcsi-pi/install-rvcsi-pi.sh` and
+> `uninstall-rvcsi-pi.sh`). A given cluster may be running either
+> stack while migration is in progress; the schema and operator
+> surface are unchanged across the cutover. See ADR-207's
+> Implementation log for the current state.
+
 ---
 
 ## Table of Contents
@@ -192,6 +208,19 @@ subcommand, which compares per-host expected services against live
 `systemctl is-active` results. A flat-service check would falsely flag
 cluster-3 and v0 as degraded (they have neither Hailo nor the correlator
 — that's by design).
+
+> **rvcsi cutover (ADR-207 Option D, 2026-05-13).** The three services
+> `cog-csi-emitter`, `cog-csi-adapter`, and `cog-rvcsi-stream` are
+> being consolidated into one Rust binary `cog-rvcsi-pi` built on
+> [rvcsi-runtime](https://crates.io/crates/rvcsi-runtime). The new
+> binary holds the same per-Pi role and the same expected-service
+> count from the operator's view (`fleet-status` already understands
+> both layouts). Deploy with
+> `bash scripts/rvcsi-pi/install-rvcsi-pi.sh <pi-host>`; revert with
+> `scripts/rvcsi-pi/uninstall-rvcsi-pi.sh`. The cutover is per-Pi,
+> not flag-day — mixed Python/Rust clusters are supported. The Hailo
+> encoder + correlator stay Python in this phase; their Rust ports
+> are tracked as follow-on ADRs.
 
 All unit files + the install script are in the
 [detailed gist](https://gist.github.com/ruvnet/88e7b053c41cb4f4af7a7ec4af873017) — section "Per-node systemd units".
