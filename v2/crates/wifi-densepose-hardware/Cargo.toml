@@ -32,7 +32,7 @@ byteorder = "1.5"
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 # Error handling
-thiserror = "1.0"
+thiserror = "2.0"
 # Logging
 tracing = "0.1"
 # Serialization
