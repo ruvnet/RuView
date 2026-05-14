@@ -29,6 +29,99 @@ use ruvector_mincut::{DynamicMinCut, MinCutBuilder};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::{Mutex, OnceLock};
+
+/// Per-node adaptive baseline for `motion_energy` / `presence_score`.
+///
+/// FW reports raw values that are non-zero even in an empty room because of
+/// ambient RF noise. We compute an EWMA mean+variance over recent samples and
+/// flag presence/motion only when the current value is well above that
+/// background (z-score > 2). When the room is quiet long enough the baseline
+/// drifts up to the noise floor, so steady-state presence drops to false.
+struct BaselineTracker {
+    motion_mean: f32,
+    motion_var: f32,
+    presence_mean: f32,
+    presence_var: f32,
+    samples: u32,
+    /// Rolling smoothed motion (low-pass).
+    motion_smooth: f32,
+    /// Hysteresis: count of consecutive frames over threshold for presence on,
+    /// or under threshold for presence off.
+    on_count: u32,
+    off_count: u32,
+    presence_state: bool,
+}
+
+impl BaselineTracker {
+    fn new() -> Self {
+        Self {
+            motion_mean: 0.0, motion_var: 0.01,
+            presence_mean: 0.0, presence_var: 0.01,
+            samples: 0,
+            motion_smooth: 0.0,
+            on_count: 0,
+            off_count: 0,
+            presence_state: false,
+        }
+    }
+
+    /// Returns (is_present, motion_norm 0..1, presence_norm 0..1).
+    ///
+    /// FW saturates `motion_score` at 1.0, so we use the derivative of
+    /// `presence_score`. Empty room: deltas are mostly <0.01 with occasional
+    /// noise. Human motion: produces frequent spikes of 0.05-1.0.
+    ///
+    /// Algorithm:
+    ///   1. Compute |delta_i| = |presence_i - presence_{i-1}|
+    ///   2. Slide a 30-frame (~3 sec @ 10pps) window of "is_spike" bits
+    ///      where spike = delta > SPIKE_THRESHOLD
+    ///   3. If ≥ MIN_SPIKES spikes in window → presence ON
+    ///   4. If 0 spikes in window → presence OFF
+    fn update(&mut self, _motion: f32, presence: f32) -> (bool, f32, f32) {
+        self.samples += 1;
+
+        let raw_delta = (presence - self.presence_mean).abs();
+        self.presence_mean = presence;
+
+        const SPIKE_THRESHOLD: f32 = 0.05;
+        const MIN_SPIKES_ON: u32 = 3;
+        const WINDOW: u32 = 30;
+
+        if raw_delta > SPIKE_THRESHOLD {
+            self.on_count = self.on_count.saturating_add(1);
+            self.off_count = 0;
+        } else {
+            self.off_count = self.off_count.saturating_add(1);
+        }
+
+        // Lightweight rolling: every WINDOW frames, halve on_count so old
+        // spikes decay (cheap approximation of a sliding window).
+        if self.samples % WINDOW == 0 {
+            self.on_count /= 2;
+        }
+
+        if self.on_count >= MIN_SPIKES_ON {
+            self.presence_state = true;
+        } else if self.off_count >= WINDOW {
+            self.presence_state = false;
+        }
+
+        // Use smoothed delta as motion_norm for the UI's intensity bar.
+        let alpha = 0.3;
+        self.motion_smooth = (1.0 - alpha) * self.motion_smooth + alpha * raw_delta;
+        let motion_norm = (self.motion_smooth * 5.0).clamp(0.0, 1.0);
+        let presence_norm = if self.presence_state { motion_norm.max(0.3) } else { 0.0 };
+        (self.presence_state, motion_norm, presence_norm)
+    }
+}
+
+static BASELINE: OnceLock<Mutex<std::collections::HashMap<u8, BaselineTracker>>> = OnceLock::new();
+
+fn baseline_init() -> &'static Mutex<std::collections::HashMap<u8, BaselineTracker>> {
+    BASELINE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
 use std::time::Duration;
 
 use axum::{
@@ -712,6 +805,45 @@ struct Esp32VitalsPacket {
     timestamp_ms: u32,
 }
 
+/// Parse a 60-byte ADR-081 feature_state packet (magic 0xC511_0006).
+/// Converts into the local Esp32VitalsPacket so the existing vitals
+/// pipeline handles real ESP32 nodes uniformly.
+fn parse_rv_feature_state(buf: &[u8]) -> Option<Esp32VitalsPacket> {
+    if buf.len() < 60 { return None; }
+    let magic = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+    if magic != 0xC511_0006 { return None; }
+
+    let node_id = buf[4];
+    let ts_us = u64::from_le_bytes([
+        buf[8], buf[9], buf[10], buf[11], buf[12], buf[13], buf[14], buf[15],
+    ]);
+    let motion_score    = f32::from_le_bytes([buf[16], buf[17], buf[18], buf[19]]);
+    let presence_score  = f32::from_le_bytes([buf[20], buf[21], buf[22], buf[23]]);
+    let respiration_bpm = f32::from_le_bytes([buf[24], buf[25], buf[26], buf[27]]);
+    let heartbeat_bpm   = f32::from_le_bytes([buf[32], buf[33], buf[34], buf[35]]);
+    let quality_flags   = u16::from_le_bytes([buf[52], buf[53]]);
+
+    let presence_valid = (quality_flags & (1 << 0)) != 0;
+    let presence = presence_valid && presence_score > 0.5;
+    let fall_detected = (quality_flags & (1 << 3)) != 0;
+    let motion = motion_score > 0.05;
+    let n_persons = if presence { 1 } else { 0 };
+
+    Some(Esp32VitalsPacket {
+        node_id,
+        presence,
+        fall_detected,
+        motion,
+        breathing_rate_bpm: respiration_bpm as f64,
+        heartrate_bpm: heartbeat_bpm as f64,
+        rssi: -50,
+        n_persons,
+        motion_energy: motion_score,
+        presence_score,
+        timestamp_ms: (ts_us / 1000) as u32,
+    })
+}
+
 /// Parse a 32-byte edge vitals packet (magic 0xC511_0002).
 fn parse_esp32_vitals(buf: &[u8]) -> Option<Esp32VitalsPacket> {
     if buf.len() < 32 {
@@ -796,6 +928,92 @@ fn parse_wasm_output(buf: &[u8]) -> Option<WasmOutputPacket> {
         node_id,
         module_id,
         events,
+    })
+}
+
+// ── FW5.47 CSI_LEAN text packet parser ───────────────────────────────────────
+//
+// FW5.47 (esp32s3_csi_capture) emits compact CSV-style UDP packets:
+//   CSI_LEAN,role,src_mac,dst_mac,rssi,noise,channel,ts,seq,n_subc,profile,"[a1 a2 a3 ...]"
+//
+// The bracketed array contains `n_subc` uint8 amplitude bins (already
+// magnitude-summarised on-device). We convert into Esp32Frame with
+// amplitudes filled (phases = 0) so the existing DSP pipeline can consume it.
+fn parse_csi_lean(buf: &[u8]) -> Option<Esp32Frame> {
+    // Cheap prefix check before doing UTF-8 decode.
+    if buf.len() < 10 || &buf[0..9] != b"CSI_LEAN," {
+        return None;
+    }
+    let text = std::str::from_utf8(buf).ok()?;
+
+    // Find amplitude array between the first '[' and ']'.
+    let lb = text.find('[')?;
+    let rb = text[lb..].find(']')?;
+    let arr = &text[lb + 1..lb + rb];
+
+    // Header part is comma-separated, up to the '"[' chunk.
+    // Fields (1-indexed):
+    //   1: role(int), 2: src_mac, 3: dst_mac, 4: rssi(int), 5: noise(int),
+    //   6: channel(int), 7: ts(int), 8: seq(uint), 9: n_subc(uint),
+    //   10: profile_name, 11+: array (handled separately).
+    let head: Vec<&str> = text[..lb].split(',').collect();
+    if head.len() < 10 { return None; }
+
+    let _role       = head[1].trim().parse::<u8>().unwrap_or(1);
+    let src_mac     = head[2].trim();
+    let _dst_mac    = head[3];
+    let rssi: i8    = head[4].trim().parse().unwrap_or(-60);
+    let noise: i8   = head[5].trim().parse().unwrap_or(-95);
+    let channel: u16 = head[6].trim().parse().unwrap_or(0);
+    let sequence: u32 = head[8].trim().parse().unwrap_or(0);
+    let n_subc: u32 = head[9].trim().parse().unwrap_or(64);
+
+    let mut amplitudes: Vec<f64> = arr
+        .split_whitespace()
+        .filter_map(|t| t.parse::<u32>().ok())
+        .map(|v| v as f64)
+        .collect();
+
+    if amplitudes.is_empty() { return None; }
+    // Guard length to what header claims, padding zeros if short.
+    if amplitudes.len() < n_subc as usize {
+        amplitudes.resize(n_subc as usize, 0.0);
+    } else if amplitudes.len() > n_subc as usize {
+        amplitudes.truncate(n_subc as usize);
+    }
+    let phases: Vec<f64> = vec![0.0; amplitudes.len()];
+
+    // Derive node_id from source MAC last octet (unique per board).
+    // Hard-mapped for the known room sensors so labels match physical units.
+    let node_id: u8 = match src_mac.to_ascii_lowercase().as_str() {
+        "1c:db:d4:49:eb:88" => 1, // room01
+        "e8:f6:0a:83:89:44" => 2, // room02
+        _ => {
+            // Fallback: parse last MAC octet from "xx:xx:xx:xx:xx:NN"
+            src_mac.rsplit(':').next()
+                .and_then(|h| u8::from_str_radix(h, 16).ok())
+                .unwrap_or(1)
+        }
+    };
+
+    // Channel → freq_mhz approximation (2.4 GHz band).
+    let freq_mhz = if channel >= 1 && channel <= 14 {
+        2407u16 + 5 * channel
+    } else {
+        2412u16
+    };
+
+    Some(Esp32Frame {
+        magic: 0xC511_0001,
+        node_id,
+        n_antennas: 1,
+        n_subcarriers: amplitudes.len() as u8,
+        freq_mhz,
+        sequence,
+        rssi: if rssi > 0 { -rssi } else { rssi },
+        noise_floor: noise,
+        amplitudes,
+        phases,
     })
 }
 
@@ -3652,8 +3870,29 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
     loop {
         match socket.recv_from(&mut buf).await {
             Ok((len, src)) => {
-                // ADR-039: Try edge vitals packet first (magic 0xC511_0002).
-                if let Some(vitals) = parse_esp32_vitals(&buf[..len]) {
+                // ADR-081 feature_state packet (magic 0xC511_0006) — preferred upstream
+                // payload from the firmware. Convert to Esp32VitalsPacket so the rest of
+                // the pipeline (rendering, sensing_update broadcast) handles it uniformly.
+                let maybe_vitals = parse_rv_feature_state(&buf[..len])
+                    .or_else(|| parse_esp32_vitals(&buf[..len]));
+                if let Some(mut vitals) = maybe_vitals {
+                    // Adaptive baseline: FW emits raw motion_score / presence_score
+                    // that can be non-zero even in an empty room because of RF
+                    // background noise (router beacons, neighbor APs, etc).
+                    // Run a per-node EWMA baseline and threshold via z-score so
+                    // `vitals.presence` reflects actual change vs ambient noise
+                    // rather than absolute level.
+                    {
+                        let mut g = baseline_init().lock().unwrap();
+                        let tr = g.entry(vitals.node_id).or_insert_with(BaselineTracker::new);
+                        let (is_present, motion_norm, presence_norm) =
+                            tr.update(vitals.motion_energy, vitals.presence_score);
+                        vitals.presence = is_present;
+                        vitals.motion = motion_norm > 0.3;
+                        vitals.motion_energy = motion_norm;
+                        vitals.presence_score = presence_norm;
+                        if !is_present { vitals.n_persons = 0; }
+                    }
                     debug!("ESP32 vitals from {src}: node={} br={:.1} hr={:.1} pres={}",
                            vitals.node_id, vitals.breathing_rate_bpm,
                            vitals.heartrate_bpm, vitals.presence);
@@ -3856,7 +4095,10 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     continue;
                 }
 
-                if let Some(frame) = parse_esp32_frame(&buf[..len]) {
+                // FW5.47 CSI_LEAN text packet, or FW5.47-style raw 0xC5110001 binary.
+                let maybe_frame = parse_csi_lean(&buf[..len])
+                    .or_else(|| parse_esp32_frame(&buf[..len]));
+                if let Some(frame) = maybe_frame {
                     debug!("ESP32 frame from {src}: node={}, subs={}, seq={}",
                            frame.node_id, frame.n_subcarriers, frame.sequence);
 
@@ -4664,7 +4906,8 @@ async fn main() {
     info!("  UI path:   {}", args.ui_path.display());
     info!("  Source:    {}", args.source);
 
-    // Auto-detect data source
+    // Auto-detect data source (simulation path removed — production deployments
+    // must never fall back to synthetic data; ESP32 or WiFi only).
     let source = match args.source.as_str() {
         "auto" => {
             info!("Auto-detecting data source...");
@@ -4675,9 +4918,13 @@ async fn main() {
                 info!("  Windows WiFi detected");
                 "wifi"
             } else {
-                info!("  No hardware detected, using simulation");
-                "simulate"
+                error!("No real data source detected (ESP32 UDP / WiFi). Simulation is disabled in production builds — exiting.");
+                std::process::exit(2);
             }
+        }
+        "simulate" | "simulated" => {
+            error!("--source simulate is disabled in this build. Use 'esp32' or 'wifi'.");
+            std::process::exit(2);
         }
         other => other,
     };
@@ -4852,8 +5099,9 @@ async fn main() {
         "wifi" => {
             tokio::spawn(windows_wifi_task(state.clone(), args.tick_ms));
         }
-        _ => {
-            tokio::spawn(simulated_data_task(state.clone(), args.tick_ms));
+        other => {
+            error!("Unsupported --source '{}'. Allowed: esp32, wifi, auto.", other);
+            std::process::exit(2);
         }
     }
 

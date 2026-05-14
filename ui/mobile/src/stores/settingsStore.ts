@@ -18,7 +18,9 @@ export interface SettingsState {
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
-      serverUrl: 'http://localhost:3000',
+      // Defaults to the Mac's Tailscale IP so the phone can reach the
+      // sensing-server from any network. Override in Settings if needed.
+      serverUrl: 'http://100.123.189.10:8080',
       rssiScanEnabled: false,
       theme: 'system',
       alertSoundEnabled: true,

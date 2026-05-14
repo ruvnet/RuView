@@ -1,7 +1,5 @@
-import { SIMULATION_TICK_INTERVAL_MS } from '@/constants/simulation';
-import { MAX_RECONNECT_ATTEMPTS, RECONNECT_DELAYS, WS_PATH } from '@/constants/websocket';
+import { MAX_RECONNECT_ATTEMPTS, RECONNECT_DELAYS, WS_PATH, WS_PORT } from '@/constants/websocket';
 import { usePoseStore } from '@/stores/poseStore';
-import { generateSimulatedData } from '@/services/simulation.service';
 import type { ConnectionStatus, SensingFrame } from '@/types/sensing';
 
 type FrameListener = (frame: SensingFrame) => void;
@@ -11,7 +9,6 @@ class WsService {
   private listeners = new Set<FrameListener>();
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private simulationTimer: ReturnType<typeof setInterval> | null = null;
   private targetUrl = '';
   private active = false;
   private status: ConnectionStatus = 'disconnected';
@@ -22,8 +19,9 @@ class WsService {
     this.reconnectAttempt = 0;
 
     if (!url) {
-      this.handleStatusChange('simulated');
-      this.startSimulation();
+      // No server URL configured — stay disconnected. Production builds
+      // never fall back to synthetic data.
+      this.handleStatusChange('disconnected');
       return;
     }
 
@@ -40,7 +38,6 @@ class WsService {
 
       socket.onopen = () => {
         this.reconnectAttempt = 0;
-        this.stopSimulation();
         this.handleStatusChange('connected');
       };
 
@@ -78,7 +75,6 @@ class WsService {
   disconnect(): void {
     this.active = false;
     this.clearReconnectTimer();
-    this.stopSimulation();
     if (this.ws) {
       this.ws.close(1000, 'client disconnect');
       this.ws = null;
@@ -100,7 +96,9 @@ class WsService {
   private buildWsUrl(rawUrl: string): string {
     const parsed = new URL(rawUrl);
     const proto = parsed.protocol === 'https:' || parsed.protocol === 'wss:' ? 'wss:' : 'ws:';
-    return `${proto}//${parsed.host}${WS_PATH}`;
+    // RuView sensing-server runs WS on a separate port (WS_PORT, default 8765),
+    // independent of the HTTP API port. Build the WS URL with that port.
+    return `${proto}//${parsed.hostname}:${WS_PORT}${WS_PATH}`;
   }
 
   private handleStatusChange(status: ConnectionStatus): void {
@@ -118,8 +116,8 @@ class WsService {
     }
 
     if (this.reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
-      this.handleStatusChange('simulated');
-      this.startSimulation();
+      // Give up — stay disconnected. No synthetic fallback.
+      this.handleStatusChange('disconnected');
       return;
     }
 
@@ -130,27 +128,6 @@ class WsService {
       this.reconnectTimer = null;
       this.connect(this.targetUrl);
     }, delay);
-    this.startSimulation();
-  }
-
-  private startSimulation(): void {
-    if (this.simulationTimer) {
-      return;
-    }
-    this.simulationTimer = setInterval(() => {
-      this.handleStatusChange('simulated');
-      const frame = generateSimulatedData();
-      this.listeners.forEach((listener) => {
-        listener(frame);
-      });
-    }, SIMULATION_TICK_INTERVAL_MS);
-  }
-
-  private stopSimulation(): void {
-    if (this.simulationTimer) {
-      clearInterval(this.simulationTimer);
-      this.simulationTimer = null;
-    }
   }
 
   private clearReconnectTimer(): void {

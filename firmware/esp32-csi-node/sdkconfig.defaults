@@ -34,3 +34,14 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
 # Extra WiFi IRAM placement (defense-in-depth for RuView#396 SPI cache race)
 CONFIG_ESP_WIFI_EXTRA_IRAM_OPT=y
+
+# ----- Local overrides for room01/room02 deployment -----
+# EDGE_TIER kept at project default (=2, full vitals pipeline).
+# Mac aggregator IP
+CONFIG_CSI_TARGET_IP="192.168.1.21"
+CONFIG_CSI_TARGET_PORT=5006
+# Disable AMOLED display (no display on room sensors, init panics on missing
+# TCA9554 expander → Tmr Svc stack overflow).
+CONFIG_DISPLAY_ENABLE=n
+# Increase Tmr Svc stack to fit adaptive_controller tick (default 2048 overflows).
+CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=8192

@@ -124,8 +124,11 @@ export const MATScreen = () => {
   const { height } = useWindowDimensions();
   const webHeight = Math.max(240, Math.floor(height * 0.5));
 
-  const showOverlay = dataSource === 'simulated' && !simulationAcknowledged;
-  const showBanner = dataSource === 'simulated' && simulationAcknowledged;
+  // Simulation overlay/banner removed — UI shows only real signals from the
+  // sensing-server. The `dataSource === 'simulated'` branch is never reached
+  // in production builds (server refuses --source simulate).
+  const showOverlay = false;
+  const showBanner = false;
 
   return (
     <ThemedView style={{ flex: 1, backgroundColor: colors.bg, padding: spacing.md }}>

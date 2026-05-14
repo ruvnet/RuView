@@ -10,6 +10,62 @@ use crate::vital_signs::VitalSigns;
 
 // ── ESP32 UDP frame parsers ─────────────────────────────────────────────────
 
+/// Parse a 60-byte ADR-081 feature_state packet (magic 0xC511_0006).
+///
+/// Converts the on-wire rv_feature_state_t into an Esp32VitalsPacket so the
+/// existing vitals processing pipeline can consume it directly. Mapping:
+///   motion_score      → motion_energy (and motion flag if > 0.05)
+///   presence_score    → presence_score + presence (flag) if > 0.5
+///   respiration_bpm   → breathing_rate_bpm
+///   heartbeat_bpm     → heartrate_bpm
+///   quality_flags     → presence/fall/motion bits
+pub fn parse_rv_feature_state(buf: &[u8]) -> Option<Esp32VitalsPacket> {
+    if buf.len() < 60 { return None; }
+    let magic = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+    if magic != 0xC511_0006 { return None; }
+
+    let node_id = buf[4];
+    let _mode = buf[5];
+    let _seq = u16::from_le_bytes([buf[6], buf[7]]);
+    let ts_us = u64::from_le_bytes([
+        buf[8], buf[9], buf[10], buf[11], buf[12], buf[13], buf[14], buf[15],
+    ]);
+    let motion_score      = f32::from_le_bytes([buf[16], buf[17], buf[18], buf[19]]);
+    let presence_score    = f32::from_le_bytes([buf[20], buf[21], buf[22], buf[23]]);
+    let respiration_bpm   = f32::from_le_bytes([buf[24], buf[25], buf[26], buf[27]]);
+    let _respiration_conf = f32::from_le_bytes([buf[28], buf[29], buf[30], buf[31]]);
+    let heartbeat_bpm     = f32::from_le_bytes([buf[32], buf[33], buf[34], buf[35]]);
+    let _heartbeat_conf   = f32::from_le_bytes([buf[36], buf[37], buf[38], buf[39]]);
+    let _anomaly_score    = f32::from_le_bytes([buf[40], buf[41], buf[42], buf[43]]);
+    let _env_shift_score  = f32::from_le_bytes([buf[44], buf[45], buf[46], buf[47]]);
+    let _node_coherence   = f32::from_le_bytes([buf[48], buf[49], buf[50], buf[51]]);
+    let quality_flags     = u16::from_le_bytes([buf[52], buf[53]]);
+
+    // Bit 0 of quality_flags = presence valid
+    let presence_valid = (quality_flags & (1 << 0)) != 0;
+    let presence = presence_valid && presence_score > 0.5;
+    // Bit 3 = anomaly triggered → treat as fall (approximation)
+    let fall_detected = (quality_flags & (1 << 3)) != 0;
+    let motion = motion_score > 0.05;
+
+    // Single-node feature_state doesn't tell us number of persons; surface 1 when present.
+    let n_persons = if presence { 1 } else { 0 };
+
+    Some(Esp32VitalsPacket {
+        node_id,
+        presence,
+        fall_detected,
+        motion,
+        breathing_rate_bpm: respiration_bpm as f64,
+        heartrate_bpm: heartbeat_bpm as f64,
+        rssi: -50, // not carried; approximation so UI shows a value
+        n_persons,
+        motion_energy: motion_score,
+        presence_score,
+        timestamp_ms: (ts_us / 1000) as u32,
+    })
+}
+
 /// Parse a 32-byte edge vitals packet (magic 0xC511_0002).
 pub fn parse_esp32_vitals(buf: &[u8]) -> Option<Esp32VitalsPacket> {
     if buf.len() < 32 { return None; }

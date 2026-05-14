@@ -125,7 +125,16 @@ static esp_err_t ota_upload_handler(httpd_req_t *req)
     }
 
     esp_ota_handle_t ota_handle;
-    esp_err_t err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
+    /* Issue #556: use OTA_SIZE_UNKNOWN (full partition erase) instead of
+     * OTA_WITH_SEQUENTIAL_WRITES. When the new image is smaller than the
+     * one previously written to the target slot, sequential writes leave
+     * the tail of the old code in place. The image header SHA covers
+     * only the declared image span, but residual code at stale offsets
+     * can still be reached via IRAM jump tables / .literal pools on some
+     * v5.2 ABIs and crash the new app on first boot, which then looks
+     * like "OTA didn't take". Full erase up-front avoids this entirely
+     * at the cost of one extra ~1.5 s erase before write starts. */
+    esp_err_t err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &ota_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(err));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
@@ -207,6 +216,13 @@ static esp_err_t ota_start_server(httpd_handle_t *out_handle)
     config.max_uri_handlers = 12;  /* Extra slots for WASM endpoints (ADR-040). */
     /* Increase receive timeout for large uploads. */
     config.recv_wait_timeout = 30;
+    /* Issue #556: httpd default stack is 4096 B, which overflows during
+     * esp_ota_end()'s image-verify (SHA256 streaming + mmap segment walk
+     * eats ~3 KB on top of the request handler frame). Empirically observed
+     * "***ERROR*** A stack overflow in task httpd has been detected"
+     * immediately after esp_image: segment dumps when OTA reaches verify.
+     * 8 KB gives a clean margin without hurting the typical idle case. */
+    config.stack_size = 8192;
 
     httpd_handle_t server = NULL;
     esp_err_t err = httpd_start(&server, &config);

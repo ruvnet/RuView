@@ -37,9 +37,15 @@ export function useNodes(options: UseNodesOptions = {}): UseNodesReturn {
 
     try {
       const discovered = await invoke<Node[]>("discover_nodes", {
-        timeoutMs: 5000,
+        timeoutMs: 8000,
       });
-      setNodes(discovered);
+      // Discovery is flaky on busy LANs — overall timeout races with the
+      // per-request reqwest timeouts and sometimes returns 0 even when
+      // sensors are reachable. Keep the last good list rather than
+      // flashing to "no nodes".
+      if (discovered.length > 0) {
+        setNodes(discovered);
+      }
     } catch (err) {
       const message =
         err instanceof Error ? err.message : String(err);

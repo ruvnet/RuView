@@ -36,9 +36,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     setScanError(null);
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      const found = await invoke<DiscoveredNode[]>("discover_nodes", { timeoutMs: 3000 });
-      setNodes(found);
-      if (found.length === 0) {
+      const found = await invoke<DiscoveredNode[]>("discover_nodes", { timeoutMs: 8000 });
+      // Keep last good list when scan returns empty (discovery is flaky
+      // on busy LANs — see useNodes.ts for context).
+      if (found.length > 0) {
+        setNodes(found);
+        setScanError(null);
+      } else if (nodes.length === 0) {
         setScanError("No nodes found. Ensure ESP32 devices are powered on and connected to the network.");
       }
     } catch (err) {

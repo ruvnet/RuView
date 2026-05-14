@@ -303,7 +303,7 @@ export const Sensing: React.FC = () => {
   const [stopping, setStopping] = useState(false);
 
   // Data source selection
-  const [dataSource, setDataSource] = useState<DataSource>("simulate");
+  const [dataSource, setDataSource] = useState<DataSource>("esp32");
 
   // Log viewer state
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
@@ -557,7 +557,6 @@ export const Sensing: React.FC = () => {
                   opacity: isRunning ? 0.6 : 1,
                 }}
               >
-                <option value="simulate">Simulate</option>
                 <option value="esp32">ESP32 (Real)</option>
                 <option value="wifi">WiFi (RSSI)</option>
                 <option value="auto">Auto Detect</option>

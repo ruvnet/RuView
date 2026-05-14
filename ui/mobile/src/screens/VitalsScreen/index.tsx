@@ -60,7 +60,7 @@ export default function VitalsScreen() {
       <ConnectionBanner status={bannerStatus} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.headerRow}>{isSimulated ? <ModeBadge mode="SIM" /> : null}</View>
+        <View style={styles.headerRow}>{/* SIM badge removed: production shows only real signals. */}</View>
 
         <View style={styles.gaugesRow}>
           <View style={styles.gaugeCard}>

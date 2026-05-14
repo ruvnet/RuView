@@ -351,25 +351,15 @@ void csi_collector_init(void)
         ESP_LOGI(TAG, "WiFi modem sleep disabled (WIFI_PS_NONE) for CSI capture");
     }
 
-    /* Enable promiscuous mode — required for reliable CSI callbacks.
-     * Without this, CSI only fires on frames destined to this station,
-     * which may be very infrequent on a quiet network. */
-    ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
-    ESP_ERROR_CHECK(esp_wifi_set_promiscuous_rx_cb(wifi_promiscuous_cb));
-
-    /* MGMT-only promiscuous filter + active probe injection (RuView#396).
-     *
-     * DATA frames cause 100-500+ WiFi HW interrupts/sec which crashes Core 0
-     * in wDev_ProcessFiq (SPI flash cache race in ESP-IDF WiFi blob).
-     * MGMT-only gives ~10 Hz (beacons). Probe request injection at 10 Hz
-     * adds ~10 Hz probe responses from APs → ~20 Hz total, matching the
-     * edge processing designed sample rate of 20 Hz. */
-    wifi_promiscuous_filter_t filt = {
-        .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT,
-    };
-    ESP_ERROR_CHECK(esp_wifi_set_promiscuous_filter(&filt));
-
-    ESP_LOGI(TAG, "Promiscuous mode enabled (MGMT-only, RuView#396)");
+    /* DO NOT enable promiscuous mode on these ESP32-S3 boards. Empirically,
+     * setting esp_wifi_set_promiscuous(true) while STA is connected suppresses
+     * the CSI RX callback entirely on this hardware revision — adaptive_ctrl
+     * reports yield=0pps forever. FW5.47 (esp32s3_csi_capture) works on the
+     * same boards using plain STA-mode CSI (no promiscuous), so we mirror
+     * that approach here. CSI fires for every frame the STA actually
+     * receives (beacons + unicast → ~10-20 Hz, same as edge_processing
+     * expects). */
+    ESP_LOGI(TAG, "Promiscuous mode SKIPPED (CSI via STA-only, broken otherwise on this board)");
 
     wifi_csi_config_t csi_config = {
         .lltf_en = true,

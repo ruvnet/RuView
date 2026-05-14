@@ -9,7 +9,7 @@ services:
     ports:
       - "3000:3000"   # REST API
       - "3001:3001"   # WebSocket
-      - "5005:5005/udp"  # ESP32 UDP
+      - "5006:5005/udp"  # ESP32 UDP (host 5006 -> container 5005; sensors point to .21:5006)
     environment:
       - RUST_LOG=info
       # CSI_SOURCE controls the data source for the sensing server.

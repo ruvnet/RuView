@@ -5,11 +5,11 @@ import type { ServerConfig, ServerStatus } from "../types";
 const DEFAULT_CONFIG: ServerConfig = {
   http_port: 8080,
   ws_port: 8765,
-  udp_port: 5005,
+  udp_port: 5006,
   static_dir: null,
   model_dir: null,
   log_level: "info",
-  source: "simulate",
+  source: "esp32",
 };
 
 interface UseServerOptions {
