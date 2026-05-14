@@ -15,9 +15,14 @@ firmware/esp32-csi-node/sdkconfig.defaults.bak
 
 # Claude Flow swarm runtime state
 .swarm/
+.claude-flow/
+.gstack/
 
 # CSI recordings (local training data, machine-specific)
+data/recordings/
 rust-port/wifi-densepose-rs/data/recordings/
+*.csi.jsonl
+*.csi.meta.json
 
 # NVS partition images and CSVs (contain WiFi credentials)
 nvs.bin

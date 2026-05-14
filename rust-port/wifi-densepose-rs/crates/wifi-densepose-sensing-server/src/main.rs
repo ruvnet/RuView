@@ -34,9 +34,12 @@ use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Path,
+        Request,
         State,
     },
-    response::{Html, IntoResponse, Json},
+    http::StatusCode,
+    middleware::{from_fn, Next},
+    response::{Html, IntoResponse, Json, Response},
     routing::{delete, get, post},
     Router,
 };
@@ -577,6 +580,74 @@ impl AppStateInner {
 const FRAME_HISTORY_CAPACITY: usize = 100;
 
 type SharedState = Arc<RwLock<AppStateInner>>;
+
+const ADMIN_TOKEN_ENV: &str = "WIFI_DENSEPOSE_ADMIN_TOKEN";
+
+fn admin_error(status: StatusCode, message: &str) -> (StatusCode, Json<serde_json::Value>) {
+    (status, Json(serde_json::json!({ "success": false, "error": message })))
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+async fn require_admin_token(
+    req: Request,
+    next: Next,
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    let expected = std::env::var(ADMIN_TOKEN_ENV)
+        .ok()
+        .filter(|token| token.len() >= 32)
+        .ok_or_else(|| {
+            admin_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "admin token is not configured; set WIFI_DENSEPOSE_ADMIN_TOKEN to at least 32 characters",
+            )
+        })?;
+
+    let provided = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .or_else(|| {
+            req.headers()
+                .get("x-admin-token")
+                .and_then(|value| value.to_str().ok())
+        })
+        .ok_or_else(|| {
+            admin_error(
+                StatusCode::UNAUTHORIZED,
+                "admin token required; use Authorization: Bearer <token>",
+            )
+        })?;
+
+    if !constant_time_eq(provided.as_bytes(), expected.as_bytes()) {
+        return Err(admin_error(StatusCode::FORBIDDEN, "invalid admin token"));
+    }
+
+    Ok(next.run(req).await)
+}
+
+fn sanitize_recording_id(id: &str) -> Option<String> {
+    let valid = !id.is_empty()
+        && id.len() <= 64
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+    if valid {
+        Some(id.to_string())
+    } else {
+        None
+    }
+}
 
 // ── ESP32 Edge Vitals Packet (ADR-039, magic 0xC511_0002) ────────────────────
 
@@ -2921,12 +2992,21 @@ async fn start_recording(
             "recording_id": s.recording_current_id,
         }));
     }
-    let id = body.get("id")
+    let requested_id = body.get("id")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .unwrap_or_else(|| {
             format!("rec_{}", chrono_timestamp())
         });
+    let id = match sanitize_recording_id(&requested_id) {
+        Some(id) => id,
+        None => {
+            return Json(serde_json::json!({
+                "error": "invalid recording id; use 1-64 ASCII letters, numbers, '_' or '-'",
+                "success": false,
+            }));
+        }
+    };
 
     // Create the recording file
     let rec_path = PathBuf::from("data/recordings").join(format!("{}.jsonl", id));
@@ -3048,12 +3128,13 @@ async fn delete_recording(
     State(state): State<SharedState>,
     Path(id): Path<String>,
 ) -> Json<serde_json::Value> {
-    // ADR-050: Sanitize path to prevent directory traversal
-    let safe_id = std::path::Path::new(&id)
-        .file_name()
-        .and_then(|f| f.to_str())
-        .unwrap_or("");
-    if safe_id.is_empty() || safe_id != id {
+    let safe_id = match sanitize_recording_id(&id) {
+        Some(id) => id,
+        None => {
+            return Json(serde_json::json!({ "error": "invalid recording id", "success": false }));
+        }
+    };
+    if safe_id.is_empty() {
         return Json(serde_json::json!({ "error": "invalid recording id", "success": false }));
     }
     let path = PathBuf::from("data/recordings").join(format!("{}.jsonl", safe_id));
@@ -4752,7 +4833,7 @@ async fn main() {
         .route("/api/v1/model/layers", get(model_layers))
         .route("/api/v1/model/segments", get(model_segments))
         .route("/api/v1/model/sona/profiles", get(sona_profiles))
-        .route("/api/v1/model/sona/activate", post(sona_activate))
+        .route("/api/v1/model/sona/activate", post(sona_activate).layer(from_fn(require_admin_token)))
         // Pose endpoints (WiFi-derived)
         .route("/api/v1/pose/current", get(pose_current))
         .route("/api/v1/pose/stats", get(pose_stats))
@@ -4765,27 +4846,27 @@ async fn main() {
         // Model management endpoints (UI compatibility)
         .route("/api/v1/models", get(list_models))
         .route("/api/v1/models/active", get(get_active_model))
-        .route("/api/v1/models/load", post(load_model))
-        .route("/api/v1/models/unload", post(unload_model))
-        .route("/api/v1/models/{id}", delete(delete_model))
+        .route("/api/v1/models/load", post(load_model).layer(from_fn(require_admin_token)))
+        .route("/api/v1/models/unload", post(unload_model).layer(from_fn(require_admin_token)))
+        .route("/api/v1/models/{id}", delete(delete_model).layer(from_fn(require_admin_token)))
         .route("/api/v1/models/lora/profiles", get(list_lora_profiles))
-        .route("/api/v1/models/lora/activate", post(activate_lora_profile))
+        .route("/api/v1/models/lora/activate", post(activate_lora_profile).layer(from_fn(require_admin_token)))
         // Recording endpoints
         .route("/api/v1/recording/list", get(list_recordings))
-        .route("/api/v1/recording/start", post(start_recording))
-        .route("/api/v1/recording/stop", post(stop_recording))
-        .route("/api/v1/recording/{id}", delete(delete_recording))
+        .route("/api/v1/recording/start", post(start_recording).layer(from_fn(require_admin_token)))
+        .route("/api/v1/recording/stop", post(stop_recording).layer(from_fn(require_admin_token)))
+        .route("/api/v1/recording/{id}", delete(delete_recording).layer(from_fn(require_admin_token)))
         // Training endpoints
         .route("/api/v1/train/status", get(train_status))
-        .route("/api/v1/train/start", post(train_start))
-        .route("/api/v1/train/stop", post(train_stop))
+        .route("/api/v1/train/start", post(train_start).layer(from_fn(require_admin_token)))
+        .route("/api/v1/train/stop", post(train_stop).layer(from_fn(require_admin_token)))
         // Adaptive classifier endpoints
-        .route("/api/v1/adaptive/train", post(adaptive_train))
+        .route("/api/v1/adaptive/train", post(adaptive_train).layer(from_fn(require_admin_token)))
         .route("/api/v1/adaptive/status", get(adaptive_status))
-        .route("/api/v1/adaptive/unload", post(adaptive_unload))
+        .route("/api/v1/adaptive/unload", post(adaptive_unload).layer(from_fn(require_admin_token)))
         // Field model calibration (eigenvalue-based person counting)
-        .route("/api/v1/calibration/start", post(calibration_start))
-        .route("/api/v1/calibration/stop", post(calibration_stop))
+        .route("/api/v1/calibration/start", post(calibration_start).layer(from_fn(require_admin_token)))
+        .route("/api/v1/calibration/stop", post(calibration_stop).layer(from_fn(require_admin_token)))
         .route("/api/v1/calibration/status", get(calibration_status))
         // Static UI files
         .nest_service("/ui", ServeDir::new(&ui_path))

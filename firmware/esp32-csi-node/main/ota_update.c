@@ -33,19 +33,19 @@ static const char *TAG = "ota_update";
 /** Maximum PSK length (hex-encoded SHA-256). */
 #define OTA_PSK_MAX_LEN   65
 
-/** Cached PSK loaded from NVS at init time. Empty = auth disabled. */
+/** Cached PSK loaded from NVS at init time. Empty = management API disabled. */
 static char s_ota_psk[OTA_PSK_MAX_LEN] = {0};
 
 /**
  * ADR-050: Verify the Authorization header contains the correct PSK.
- * Returns true if auth is disabled (no PSK provisioned) or if the
- * Bearer token matches the stored PSK.
+ * Returns false when no PSK is provisioned. OTA and WASM management are
+ * powerful enough to replace device behavior, so they must fail closed.
  */
-static bool ota_check_auth(httpd_req_t *req)
+bool ota_check_auth(httpd_req_t *req)
 {
     if (s_ota_psk[0] == '\0') {
-        /* No PSK provisioned — auth disabled (permissive for dev). */
-        return true;
+        ESP_LOGW(TAG, "Management request rejected: OTA PSK is not provisioned");
+        return false;
     }
 
     char auth_header[128] = {0};
@@ -77,6 +77,12 @@ static bool ota_check_auth(httpd_req_t *req)
  */
 static esp_err_t ota_status_handler(httpd_req_t *req)
 {
+    if (!ota_check_auth(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN,
+                            "Management PSK required. Use: Authorization: Bearer <psk>");
+        return ESP_FAIL;
+    }
+
     const esp_app_desc_t *app = esp_app_get_description();
     const esp_partition_t *running = esp_ota_get_running_partition();
     const esp_partition_t *update = esp_ota_get_next_update_partition(NULL);
@@ -250,11 +256,11 @@ esp_err_t ota_update_init(void)
         if (nvs_get_str(nvs, OTA_NVS_KEY, s_ota_psk, &len) == ESP_OK) {
             ESP_LOGI(TAG, "OTA PSK loaded from NVS (%d chars) — authentication enabled", (int)len - 1);
         } else {
-            ESP_LOGW(TAG, "No OTA PSK in NVS — OTA authentication DISABLED (provision with nvs_set)");
+            ESP_LOGW(TAG, "No OTA PSK in NVS — OTA/WASM management DISABLED");
         }
         nvs_close(nvs);
     } else {
-        ESP_LOGW(TAG, "NVS namespace '%s' not found — OTA authentication DISABLED", OTA_NVS_NAMESPACE);
+        ESP_LOGW(TAG, "NVS namespace '%s' not found — OTA/WASM management DISABLED", OTA_NVS_NAMESPACE);
     }
 
     return ota_start_server(NULL);

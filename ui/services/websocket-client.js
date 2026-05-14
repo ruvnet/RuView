@@ -1,9 +1,9 @@
 // WebSocket Client for Three.js Visualization - WiFi DensePose
-// Connects to ws://localhost:8000/ws/pose and manages real-time data flow
+// Connects to ws://localhost:8000/api/v1/stream/pose and manages real-time data flow
 
 export class WebSocketClient {
   constructor(options = {}) {
-    this.url = options.url || 'ws://localhost:8000/ws/pose';
+    this.url = options.url || 'ws://localhost:8000/api/v1/stream/pose';
     this.ws = null;
     this.state = 'disconnected'; // disconnected, connecting, connected, error
     this.isRealData = false;

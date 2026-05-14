@@ -9,7 +9,20 @@
 #ifndef OTA_UPDATE_H
 #define OTA_UPDATE_H
 
+#include <stdbool.h>
 #include "esp_err.h"
+#include "esp_http_server.h"
+
+/**
+ * Verify that an HTTP request carries the configured OTA/WASM management PSK.
+ *
+ * This is fail-closed: if no PSK is provisioned, management endpoints are
+ * unavailable until the device is provisioned with ota_psk in NVS.
+ *
+ * @param req  HTTP request.
+ * @return true when Authorization: Bearer <psk> matches the provisioned PSK.
+ */
+bool ota_check_auth(httpd_req_t *req);
 
 /**
  * Initialize the OTA update HTTP server.

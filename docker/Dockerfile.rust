@@ -23,7 +23,8 @@ FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && adduser --system --group --home /app appuser
 
 WORKDIR /app
 
@@ -50,7 +51,8 @@ ENV RUST_LOG=info
 # Override at runtime:  docker run -e CSI_SOURCE=esp32 ...
 ENV CSI_SOURCE=auto
 
-ENTRYPOINT ["/bin/sh", "-c"]
-# Shell-form CMD allows $CSI_SOURCE to be substituted at container start.
-# The ENV default above (CSI_SOURCE=auto) applies when the variable is unset.
-CMD ["/app/sensing-server --source ${CSI_SOURCE} --tick-ms 100 --ui-path /app/ui --http-port 3000 --ws-port 3001"]
+RUN chown -R appuser:appuser /app
+USER appuser
+
+ENTRYPOINT ["/app/sensing-server"]
+CMD ["--source", "auto", "--tick-ms", "100", "--ui-path", "/app/ui", "--http-port", "3000", "--ws-port", "3001"]

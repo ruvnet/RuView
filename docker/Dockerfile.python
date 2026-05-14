@@ -7,7 +7,8 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && adduser --system --group --home /app appuser
 
 # Install Python dependencies
 COPY v1/requirements-lock.txt /app/requirements.txt
@@ -30,5 +31,8 @@ ENV PYTHONUNBUFFERED=1
 #Make the runtime faster
 
 ENV PYTHONDONTWRITEBYTECODE=1
+
+RUN chown -R appuser:appuser /app
+USER appuser
 
 CMD ["python", "-m", "v1.src.sensing.ws_server"]

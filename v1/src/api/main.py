@@ -98,7 +98,12 @@ async def start_background_tasks(app: FastAPI):
         pose_service = app.state.pose_service
         await pose_service.start()
         logger.info("Pose service started")
-        
+
+        # Start stream service
+        stream_service = app.state.stream_service
+        await stream_service.start()
+        logger.info("Stream service started")
+
         # Start pose streaming if enabled
         if settings.enable_real_time_processing:
             pose_stream_handler = app.state.pose_stream_handler
