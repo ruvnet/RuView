@@ -263,7 +263,6 @@ def main():
     if args.tdm_slot is not None and args.tdm_slot >= args.tdm_total:
         parser.error(f"--tdm-slot ({args.tdm_slot}) must be less than --tdm-total ({args.tdm_total})")
 
-<<<<<<< HEAD
     # ADR-060: Validate channel and MAC filter
     if args.channel is not None:
         if not ((1 <= args.channel <= 14) or (36 <= args.channel <= 177)):

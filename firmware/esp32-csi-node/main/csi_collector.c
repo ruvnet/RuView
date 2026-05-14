@@ -17,6 +17,7 @@
 #include "nvs_config.h"
 
 #include <string.h>
+#include <stdbool.h>
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_timer.h"
@@ -104,8 +105,9 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
     uint32_t magic = CSI_MAGIC;
     memcpy(&buf[0], &magic, 4);
 
-    /* Node ID (from NVS config) */
-    buf[4] = g_nvs_config.node_id;
+    /* Node ID (cached at boot via csi_collector_set_node_id to survive
+     * WiFi-init g_nvs_config corruption — issues #232/#390). */
+    buf[4] = csi_collector_get_node_id();
 
     /* Number of antennas */
     buf[5] = n_antennas;
@@ -223,6 +225,62 @@ void csi_collector_init(void)
 
     ESP_LOGI(TAG, "CSI collection initialized (node_id=%d, channel=%d)",
              g_nvs_config.node_id, CONFIG_CSI_WIFI_CHANNEL);
+}
+
+/* ---- Accessors required by main.c / adaptive_controller.c / rv_radio_ops_esp32.c.
+ *      Karthik's refactor removed the original implementations from this
+ *      file while leaving the call sites and the public declarations in
+ *      csi_collector.h untouched, which broke the link step. These minimal
+ *      shims keep the public ABI working without resurrecting the full
+ *      early-capture state machine (issues #232/#390): instead they read
+ *      g_nvs_config.node_id, with set_node_id retaining a private cache
+ *      so the value latched at boot survives WiFi-init clobbering. */
+
+static uint8_t s_node_id_cached     = 0;
+static bool    s_node_id_cached_set = false;
+
+void csi_collector_set_node_id(uint8_t node_id)
+{
+    s_node_id_cached     = node_id;
+    s_node_id_cached_set = true;
+    ESP_LOGI(TAG, "Early capture node_id=%u", (unsigned)node_id);
+}
+
+uint8_t csi_collector_get_node_id(void)
+{
+    return s_node_id_cached_set ? s_node_id_cached : g_nvs_config.node_id;
+}
+
+uint16_t csi_collector_get_pkt_yield_per_sec(void)
+{
+    /* 1-second sliding window over the WiFi CSI callback counter. */
+    static int64_t  s_yield_window_start_us = 0;
+    static uint32_t s_yield_window_start_cb = 0;
+    static uint16_t s_last_yield            = 0;
+
+    int64_t now = esp_timer_get_time();
+    if (s_yield_window_start_us == 0) {
+        s_yield_window_start_us = now;
+        s_yield_window_start_cb = s_cb_count;
+        return 0;
+    }
+    int64_t elapsed = now - s_yield_window_start_us;
+    if (elapsed < 1000000LL) {
+        return s_last_yield;
+    }
+    uint32_t delta   = s_cb_count - s_yield_window_start_cb;
+    uint64_t per_sec = ((uint64_t)delta * 1000000ULL) / (uint64_t)elapsed;
+    if (per_sec > 0xFFFFu) per_sec = 0xFFFFu;
+    s_last_yield            = (uint16_t)per_sec;
+    s_yield_window_start_us = now;
+    s_yield_window_start_cb = s_cb_count;
+    return s_last_yield;
+}
+
+uint16_t csi_collector_get_send_fail_count(void)
+{
+    uint32_t f = s_send_fail;
+    return (f > 0xFFFFu) ? 0xFFFFu : (uint16_t)f;
 }
 
 /* ---- ADR-029: Channel hopping ---- */
