@@ -882,7 +882,12 @@ static void process_frame(const edge_ring_slot_t *slot)
         float var  = (sum2 / (float)EDGE_BROAD_HISTORY_LEN) - mean * mean;
         if (var < 0.0f) var = 0.0f;
 
-        float energy = var / 3.0f;
+        /* Divisor sized for sensor deployment with 1-3 m line-of-sight to
+         * the activity zone. At that range multipath averages out and
+         * broadband variance is small (~0.1-2.0 empty, ~1-10 walking).
+         * Lower divisor = higher sensitivity but more saturation if a
+         * sensor is moved close to the body (≤50 cm). */
+        float energy = var / 5.0f;
         if (energy > 1.0f) energy = 1.0f;
         s_motion_energy = energy;
     }

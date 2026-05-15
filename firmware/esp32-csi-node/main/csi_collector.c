@@ -64,7 +64,10 @@ static uint32_t s_rate_skip = 0;
  * We cap the send rate to avoid exhausting lwIP packet buffers (ENOMEM).
  * Default: 20 ms = 50 Hz max send rate.
  */
-#define CSI_MIN_SEND_INTERVAL_US  (20 * 1000)
+/* Send rate cap reduced from 20 ms to 4 ms (250 Hz) so the host calibration
+ * UI can show every available frame. The real ceiling is whatever rate the
+ * WiFi CSI callback actually fires at (usually 5-50 Hz on a quiet LAN). */
+#define CSI_MIN_SEND_INTERVAL_US  (4 * 1000)
 static int64_t s_last_send_us = 0;
 
 /**

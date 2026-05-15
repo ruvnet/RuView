@@ -37,12 +37,13 @@ pub async fn discover_nodes(
 ) -> Result<Vec<DiscoveredNode>, String> {
     let timeout_duration = Duration::from_millis(timeout_ms.unwrap_or(3000));
 
-    // Run mDNS, UDP, and HTTP sweep discovery concurrently
-    let (mdns_nodes, udp_nodes, http_nodes) = tokio::join!(
-        discover_via_mdns(timeout_duration),
-        discover_via_udp(timeout_duration),
-        discover_via_http_sweep(timeout_duration),
-    );
+    // Current RuView FW doesn't advertise mDNS `_ruview._udp.local.` and
+    // doesn't respond to UDP broadcast beacons, so those two paths return
+    // nothing on every poll and just burn CPU/network. HTTP sweep alone
+    // suffices for our deployment.
+    let http_nodes = discover_via_http_sweep(timeout_duration).await;
+    let mdns_nodes: Result<Vec<DiscoveredNode>, String> = Ok(Vec::new());
+    let udp_nodes: Result<Vec<DiscoveredNode>, String> = Ok(Vec::new());
 
     // Merge results, deduplicating by MAC address (or IP for HTTP-only nodes)
     let mut registry = NodeRegistry::new();
@@ -261,6 +262,9 @@ async fn discover_via_http_sweep(timeout_duration: Duration) -> Result<Vec<Disco
     tracing::info!("HTTP sweep on {}.{}.{}.0/24 (self={})", base.0, base.1, base.2, host_ip);
 
     // 2. Build HTTP client with per-request timeout
+    // Per-request timeout — generous enough for ESP32 HTTP server to respond
+    // even under WiFi contention. With join_all of all 254 probes in parallel,
+    // total elapsed = max(per_req_timeout, slowest_response) ≈ 1.5 s.
     let per_req_timeout = std::cmp::min(timeout_duration, Duration::from_millis(1500));
     let client = match reqwest::Client::builder()
         .timeout(per_req_timeout)
@@ -275,7 +279,11 @@ async fn discover_via_http_sweep(timeout_duration: Duration) -> Result<Vec<Disco
 
     // 3. Probe all hosts in parallel (capped by spawning futures)
     let mut tasks: Vec<tokio::task::JoinHandle<Option<DiscoveredNode>>> = Vec::new();
-    for h in 1u8..=254u8 {
+    // Scan only the low end of /24 (2..=60) — typical home/office DHCP pool
+    // for IoT devices. Sweeping all 254 hosts every 10 s causes UI lag on
+    // tokio runtime saturation. Operators with sensors at higher offsets
+    // should expand this range.
+    for h in 2u8..=60u8 {
         if h == octets[3] {
             continue; // skip self
         }

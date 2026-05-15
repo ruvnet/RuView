@@ -68,7 +68,14 @@ const NetworkDiscovery: React.FC<NetworkDiscoveryProps> = ({ onNavigate }) => {
       const found = await invoke<DiscoveredNode[]>("discover_nodes", {
         timeoutMs: scanDuration,
       });
-      setNodes(found);
+      // Merge with existing — flaky LAN scans sometimes miss a node that
+      // was found a moment ago. Add new entries, refresh ones we see again,
+      // keep previously-found ones (incl. manual-added).
+      setNodes((prev) => {
+        const byIp = new Map(prev.map((n) => [n.ip, n]));
+        for (const n of found) byIp.set(n.ip, n);
+        return Array.from(byIp.values());
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

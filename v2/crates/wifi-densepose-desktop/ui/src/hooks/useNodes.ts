@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Node } from "../types";
 
 interface UseNodesOptions {
-  /** Auto-poll interval in milliseconds. Set to 0 to disable. Default: 10000 */
+  /** Auto-poll interval in milliseconds. Set to 0 to disable. Default: 30000 */
   pollInterval?: number;
   /** Whether to start scanning on mount. Default: false */
   autoScan?: boolean;
@@ -23,7 +23,7 @@ interface UseNodesReturn {
 }
 
 export function useNodes(options: UseNodesOptions = {}): UseNodesReturn {
-  const { pollInterval = 10_000, autoScan = false } = options;
+  const { pollInterval = 30_000, autoScan = false } = options;
 
   const [nodes, setNodes] = useState<Node[]>([]);
   const [isScanning, setIsScanning] = useState(false);

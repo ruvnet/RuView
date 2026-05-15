@@ -122,6 +122,61 @@ fn baseline_init() -> &'static Mutex<std::collections::HashMap<u8, BaselineTrack
     BASELINE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
+/// Per-node rolling RSSI window for presence detection.
+/// On the deployed TP-Link AP, empirically the standard deviation of frame
+/// RSSI over a ~5 s window separates empty/sitting/walking far more cleanly
+/// than CSI variance metrics: empty ≈ 0.35, sitting still ≈ 0.60, walking
+/// ≈ 1.0+. A human body in the channel acts as a moving absorber/reflector
+/// → RSSI flickers; an empty room has only RF background noise → flat RSSI.
+static RSSI_HIST: OnceLock<Mutex<std::collections::HashMap<u8, std::collections::VecDeque<i8>>>> = OnceLock::new();
+
+fn rssi_hist_init() -> &'static Mutex<std::collections::HashMap<u8, std::collections::VecDeque<i8>>> {
+    RSSI_HIST.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Push a new RSSI sample and return rolling mean absolute delta over the
+/// last `window` samples. Returns 0.0 until we have at least `window` samples.
+/// MAD-Δ is more robust than std-dev for integer-quantised RSSI: a single
+/// 1-dB step in a quiet window inflates std but contributes minimally to
+/// the running mean of |Δ|.
+fn rssi_delta_push(node_id: u8, rssi: i8, window: usize) -> f64 {
+    let mut map = rssi_hist_init().lock().unwrap();
+    let q = map.entry(node_id).or_insert_with(std::collections::VecDeque::new);
+    q.push_back(rssi);
+    while q.len() > window { q.pop_front(); }
+    if q.len() < window { return 0.0; }
+    let mut sum = 0.0;
+    let mut n = 0.0;
+    let vals: Vec<i8> = q.iter().copied().collect();
+    for i in 1..vals.len() {
+        sum += (vals[i] as f64 - vals[i-1] as f64).abs();
+        n += 1.0;
+    }
+    if n == 0.0 { 0.0 } else { sum / n }
+}
+
+/// Override (motion_level, presence) from rolling RSSI MAD-Δ.
+/// Returns None until window has filled.
+fn rssi_presence_override(node_id: u8, rssi: i8) -> Option<(String, bool, f64)> {
+    let d = rssi_delta_push(node_id, rssi, 120);  // ~10 sec @ 12 Hz
+    if d == 0.0 { return None; }
+    // Empirical thresholds for the room01/room02 TP-Link deployment.
+    // Empty room: mean |Δrssi| stays near 0 because RSSI sits at one int8 value
+    // for many frames. Human in channel: 0.3-0.7. Walking: 0.7+.
+    let (level, presence) = if d < 0.20 {
+        ("absent", false)
+    } else if d < 0.55 {
+        ("present_still", true)
+    } else if d < 1.10 {
+        ("present_moving", true)
+    } else {
+        ("active", true)
+    };
+    // TEMP: surface the raw d via confidence so we can tune thresholds.
+    let conf = d;
+    Some((level.to_string(), presence, conf))
+}
+
 use std::time::Duration;
 
 use axum::{
@@ -824,7 +879,9 @@ fn parse_rv_feature_state(buf: &[u8]) -> Option<Esp32VitalsPacket> {
     let quality_flags   = u16::from_le_bytes([buf[52], buf[53]]);
 
     let presence_valid = (quality_flags & (1 << 0)) != 0;
-    let presence = presence_valid && presence_score > 0.5;
+    // Threshold lowered from 0.5 to 0.15 for low-SNR multi-meter deployments
+    // where FW's broadband-variance motion rarely saturates above 0.5.
+    let presence = presence_valid && presence_score > 0.15;
     let fall_detected = (quality_flags & (1 << 3)) != 0;
     let motion = motion_score > 0.05;
     let n_persons = if presence { 1 } else { 0 };
@@ -1899,6 +1956,17 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
             extract_features_from_frame(&frame, &s_write_pre.frame_history, sample_rate_hz);
         smooth_and_classify(&mut s_write_pre, &mut classification, raw_motion);
         adaptive_override(&s_write_pre, &features, &mut classification);
+        // RSSI-std presence override: motion_band / variance fail to separate
+        // empty vs occupied in this deployment (multipath spreads more in an
+        // empty room). RSSI std reliably differentiates because the body
+        // physically blocks/reflects WiFi between the sensor and the AP.
+        if let Some((level, presence, conf)) =
+            rssi_presence_override(frame.node_id, frame.rssi)
+        {
+            classification.motion_level = level;
+            classification.presence = presence;
+            classification.confidence = conf;
+        }
         drop(s_write_pre);
 
         // ── Step 5: Build enhanced fields from pipeline result ───────
@@ -3882,6 +3950,12 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     // Run a per-node EWMA baseline and threshold via z-score so
                     // `vitals.presence` reflects actual change vs ambient noise
                     // rather than absolute level.
+                    // Host-side adaptive baseline on top of FW's broadband
+                    // motion_energy. FW saturates above its /3.0f divisor
+                    // when ambient RF activity is higher than the agent's
+                    // calibration room, so a fixed threshold doesn't work.
+                    // The baseline tracker learns the per-node steady-state
+                    // value and fires presence only on z-score excursions.
                     {
                         let mut g = baseline_init().lock().unwrap();
                         let tr = g.entry(vitals.node_id).or_insert_with(BaselineTracker::new);
@@ -4101,6 +4175,28 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                 if let Some(frame) = maybe_frame {
                     debug!("ESP32 frame from {src}: node={}, subs={}, seq={}",
                            frame.node_id, frame.n_subcarriers, frame.sequence);
+
+                    // Broadcast raw spectrum on WS for the calibration UI —
+                    // every frame, no smoothing. Allows the operator to see
+                    // per-subcarrier amplitude in real time and find the
+                    // optimal sensor placement.
+                    {
+                        let s_read = state.read().await;
+                        if s_read.tx.receiver_count() > 0 {
+                            if let Ok(json) = serde_json::to_string(&serde_json::json!({
+                                "type": "raw_csi",
+                                "node_id": frame.node_id,
+                                "rssi": frame.rssi,
+                                "noise_floor": frame.noise_floor,
+                                "n_subcarriers": frame.n_subcarriers,
+                                "sequence": frame.sequence,
+                                "amplitudes": frame.amplitudes,
+                                "ts": chrono::Utc::now().timestamp_millis(),
+                            })) {
+                                let _ = s_read.tx.send(json);
+                            }
+                        }
+                    }
 
                     let mut s = state.write().await;
                     s.source = "esp32".to_string();

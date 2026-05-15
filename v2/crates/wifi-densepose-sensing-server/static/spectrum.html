@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>RuView — Live Signal</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; padding:18px; font-family:-apple-system,Inter,system-ui,sans-serif;
+         background:#0d1117; color:#e6edf3; }
+  h1 { font-size:16px; font-weight:600; margin:0 0 4px; }
+  .sub { font-size:11px; color:#888; margin:0 0 16px; }
+  .panel { background:#161b22; border:1px solid #30363d; border-radius:8px;
+          padding:14px 16px; margin-bottom:12px; }
+  .panel h2 { margin:0 0 10px; font-size:13px; font-weight:600; color:#7ce38b; }
+  .row { display:flex; justify-content:space-between; align-items:center;
+         gap:12px; margin:6px 0; font-size:12px; }
+  .row .name { color:#aaa; flex-shrink:0; width:160px; }
+  .row .bar { flex:1; height:14px; background:#21262d; border-radius:3px; overflow:hidden; }
+  .row .fill { height:100%; transition:width 100ms linear; }
+  .row .val { width:90px; text-align:right; font-family:JetBrains Mono,monospace; font-size:12px; }
+  .row .peak { width:70px; color:#888; text-align:right; font-family:JetBrains Mono,monospace; font-size:11px; }
+  .fill.var { background:linear-gradient(90deg,#1f6feb,#388bfd); }
+  .fill.mot { background:linear-gradient(90deg,#238636,#3fb950); }
+  .fill.spc { background:linear-gradient(90deg,#a371f7,#bc8cff); }
+  .fill.bre { background:linear-gradient(90deg,#d29922,#f0883e); }
+  .fill.rssi { background:linear-gradient(90deg,#6e7681,#8b949e); }
+  .status { padding:6px 10px; background:#1c2128; border-radius:4px; font-size:12px;
+            font-family:JetBrains Mono,monospace; color:#7ce38b; margin-bottom:14px; display:inline-block; }
+  .status.dis { color:#f85149; }
+  button { background:#21262d; color:#e6edf3; border:1px solid #30363d; border-radius:6px;
+           padding:4px 10px; font-size:11px; cursor:pointer; margin-left:8px; }
+  .class { font-family:JetBrains Mono,monospace; font-size:14px;
+           padding:4px 10px; border-radius:4px; display:inline-block; }
+  .class.absent { background:#21262d; color:#888; }
+  .class.present_still { background:#1c3a55; color:#7cb6ff; }
+  .class.present_moving { background:#3a5520; color:#90d36b; }
+  .class.active { background:#552020; color:#ff7a7a; }
+  canvas { display:block; width:100%; height:70px; background:#0a0e13; border-radius:4px; margin-top:8px; }
+</style>
+</head>
+<body>
+<h1>RuView Live Signal — Calibration Console</h1>
+<p class="sub">All features the host DSP computes from raw CSI in real time. Move sensors and yourself, watch which ones react.</p>
+<div>
+  <span id="status" class="status dis">disconnected</span>
+  <button onclick="resetPeaks()">Reset peaks</button>
+</div>
+
+<div class="panel">
+  <h2>Combined classification</h2>
+  <div class="row"><span class="name">motion_level</span><span id="motion-level" class="class absent">absent</span><span class="val" id="cls-conf">conf 0.00</span></div>
+  <div class="row"><span class="name">presence</span><span class="val" id="presence">false</span><span class="val" id="persons">0 persons</span></div>
+</div>
+
+<div class="panel">
+  <h2>Host-computed features (from raw CSI)</h2>
+  <div class="row"><span class="name">variance</span><div class="bar"><div class="fill var" id="b-var" style="width:0"></div></div><span class="val" id="v-var">0.00</span><span class="peak" id="p-var">↑0</span></div>
+  <div class="row"><span class="name">motion_band_power</span><div class="bar"><div class="fill mot" id="b-mbp" style="width:0"></div></div><span class="val" id="v-mbp">0.00</span><span class="peak" id="p-mbp">↑0</span></div>
+  <div class="row"><span class="name">spectral_power</span><div class="bar"><div class="fill spc" id="b-spc" style="width:0"></div></div><span class="val" id="v-spc">0.00</span><span class="peak" id="p-spc">↑0</span></div>
+  <div class="row"><span class="name">breathing_band_power</span><div class="bar"><div class="fill bre" id="b-bre" style="width:0"></div></div><span class="val" id="v-bre">0.00</span><span class="peak" id="p-bre">↑0</span></div>
+  <div class="row"><span class="name">mean_rssi (dBm)</span><div class="bar"><div class="fill rssi" id="b-rssi" style="width:0"></div></div><span class="val" id="v-rssi">--</span></div>
+  <div class="row"><span class="name">dominant_freq (Hz)</span><span class="val" id="v-freq">--</span><span class="val" id="v-bpm">-- BPM</span></div>
+  <div class="row"><span class="name">change_points</span><span class="val" id="v-cp">0</span></div>
+</div>
+
+<div class="panel">
+  <h2>Per-node FW signals (feature_state @ 10 Hz)</h2>
+  <div id="nodes"></div>
+</div>
+
+<div class="panel">
+  <h2>Variance trace (last 60 sec)</h2>
+  <canvas id="trace"></canvas>
+</div>
+
+<script>
+const peaks = { var:0, mbp:0, spc:0, bre:0 };
+const nodePeaks = {};   // per-node motion peak
+const trace = [];       // [{t, var, mbp}]
+const TRACE_MAX = 600;  // ~30 sec at 20 Hz
+let lastTs = Date.now();
+
+function resetPeaks() {
+  peaks.var = peaks.mbp = peaks.spc = peaks.bre = 0;
+  for (const k in nodePeaks) nodePeaks[k] = 0;
+  trace.length = 0;
+  document.getElementById('p-var').textContent = '↑0';
+  document.getElementById('p-mbp').textContent = '↑0';
+  document.getElementById('p-spc').textContent = '↑0';
+  document.getElementById('p-bre').textContent = '↑0';
+}
+
+function fmt(x) { return (x === undefined || x === null) ? '--' : (typeof x === 'number' ? x.toFixed(2) : String(x)); }
+
+function ensureNode(id) {
+  let el = document.getElementById('n-'+id);
+  if (el) return;
+  el = document.createElement('div');
+  el.id = 'n-'+id;
+  el.innerHTML = `<div class="row"><span class="name">Node ${id} motion</span><div class="bar"><div class="fill mot" id="nm-${id}" style="width:0"></div></div><span class="val" id="nmv-${id}">0.00</span><span class="peak" id="nmp-${id}">↑0</span></div>
+                  <div class="row"><span class="name">Node ${id} rssi</span><div class="bar"><div class="fill rssi" id="nr-${id}" style="width:0"></div></div><span class="val" id="nrv-${id}">--</span></div>`;
+  document.getElementById('nodes').appendChild(el);
+  nodePeaks[id] = 0;
+}
+
+function updateCombined(d) {
+  const cl = d.classification || {};
+  const f = d.features || {};
+  const vs = d.vital_signs || {};
+  const ml = cl.motion_level || 'absent';
+  const elClass = document.getElementById('motion-level');
+  elClass.textContent = ml;
+  elClass.className = 'class ' + ml;
+  document.getElementById('cls-conf').textContent = 'conf ' + (cl.confidence || 0).toFixed(2);
+  document.getElementById('presence').textContent = cl.presence ? 'TRUE' : 'false';
+  document.getElementById('persons').textContent = (d.estimated_persons || 0) + ' persons';
+
+  const updMetric = (key, id, scale) => {
+    const v = f[key] || 0;
+    const pct = Math.min(1, v / scale) * 100;
+    document.getElementById('b-'+id).style.width = pct.toFixed(0)+'%';
+    document.getElementById('v-'+id).textContent = v.toFixed(3);
+    peaks[id] = Math.max(peaks[id], v);
+    document.getElementById('p-'+id).textContent = '↑'+peaks[id].toFixed(3);
+  };
+  updMetric('variance', 'var', 50);
+  updMetric('motion_band_power', 'mbp', 30);
+  updMetric('spectral_power', 'spc', 500);
+  updMetric('breathing_band_power', 'bre', 100);
+  const rssi = f.mean_rssi || 0;
+  document.getElementById('b-rssi').style.width = Math.max(0, Math.min(1, (rssi + 90) / 60)) * 100 + '%';
+  document.getElementById('v-rssi').textContent = rssi.toFixed(0) + ' dBm';
+  document.getElementById('v-freq').textContent = (f.dominant_freq_hz || 0).toFixed(2) + ' Hz';
+  document.getElementById('v-bpm').textContent = ((f.dominant_freq_hz || 0) * 60).toFixed(0) + ' BPM';
+  document.getElementById('v-cp').textContent = String(f.change_points || 0);
+
+  // trace
+  trace.push({ t: Date.now(), v: f.variance || 0, m: f.motion_band_power || 0 });
+  while (trace.length > TRACE_MAX) trace.shift();
+}
+
+function updateEdgeVitals(d) {
+  ensureNode(d.node_id);
+  const m = d.motion_energy || 0;
+  document.getElementById('nm-'+d.node_id).style.width = Math.min(1, m) * 100 + '%';
+  document.getElementById('nmv-'+d.node_id).textContent = m.toFixed(3);
+  if (m > nodePeaks[d.node_id]) nodePeaks[d.node_id] = m;
+  document.getElementById('nmp-'+d.node_id).textContent = '↑'+nodePeaks[d.node_id].toFixed(3);
+  const r = d.rssi || -60;
+  document.getElementById('nr-'+d.node_id).style.width = Math.max(0, Math.min(1, (r + 90) / 60)) * 100 + '%';
+  document.getElementById('nrv-'+d.node_id).textContent = r.toFixed(0) + ' dBm';
+}
+
+function drawTrace() {
+  const cv = document.getElementById('trace');
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#0a0e13'; ctx.fillRect(0, 0, w, h);
+  if (trace.length < 2) return;
+  const maxV = Math.max(1, Math.max(...trace.map(p => p.v)));
+  const maxM = Math.max(1, Math.max(...trace.map(p => p.m)));
+  ctx.strokeStyle = '#388bfd'; ctx.lineWidth = 1.5; ctx.beginPath();
+  for (let i = 0; i < trace.length; i++) {
+    const x = (i / (trace.length - 1)) * w;
+    const y = h - (trace[i].v / maxV) * (h - 4);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.strokeStyle = '#3fb950'; ctx.beginPath();
+  for (let i = 0; i < trace.length; i++) {
+    const x = (i / (trace.length - 1)) * w;
+    const y = h - (trace[i].m / maxM) * (h - 4);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.fillStyle = '#666'; ctx.font = '10px monospace';
+  ctx.fillText('variance', 4, 12);
+  ctx.fillStyle = '#3fb950';
+  ctx.fillText('motion_band_power', 70, 12);
+}
+
+function tick() { drawTrace(); requestAnimationFrame(tick); }
+tick();
+
+function connect() {
+  const ws = new WebSocket('ws://' + location.hostname + ':8765/ws/sensing');
+  ws.onopen = () => { document.getElementById('status').textContent='connected'; document.getElementById('status').className='status'; };
+  ws.onclose = () => { document.getElementById('status').textContent='disconnected — reconnecting'; document.getElementById('status').className='status dis'; setTimeout(connect, 2000); };
+  ws.onmessage = (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.type === 'sensing_update') updateCombined(d);
+      else if (d.type === 'edge_vitals') updateEdgeVitals(d);
+    } catch (_) {}
+  };
+}
+connect();
+</script>
+</body></html>
