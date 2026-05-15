@@ -95,6 +95,21 @@ struct Args {
     #[arg(long, default_value = "127.0.0.1", env = "SENSING_BIND_ADDR")]
     bind_addr: String,
 
+    /// Additional hostname (with or without `:PORT`) to permit in the `Host`
+    /// header — defends loopback-bound deployments against DNS rebinding.
+    /// Loopback names (`localhost`, `127.0.0.1`, `[::1]`) are always permitted
+    /// implicitly. Pass multiple times to add several entries. Comma-separated
+    /// values are also accepted via the `SENSING_ALLOWED_HOSTS` env var.
+    #[arg(long = "allowed-host", value_name = "HOST")]
+    allowed_hosts: Vec<String>,
+
+    /// Disable Host-header validation entirely. Use only when the server sits
+    /// behind a reverse proxy that already canonicalises `Host` (e.g. nginx
+    /// `proxy_set_header Host`) — bare deployments stay vulnerable to DNS
+    /// rebinding without it.
+    #[arg(long)]
+    disable_host_validation: bool,
+
     /// Data source: auto, wifi, esp32, simulate
     #[arg(long, default_value = "auto")]
     source: String,
@@ -4969,11 +4984,39 @@ async fn main() {
         );
     }
 
+    // DNS-rebinding defense: validate the `Host` header against an allowlist
+    // before any handler runs. Default is loopback-only (`localhost`,
+    // `127.0.0.1`, `[::1]`, each with or without a port). Operators extend
+    // the set via `--allowed-host` flags or the `SENSING_ALLOWED_HOSTS` env
+    // var; `--disable-host-validation` opts out entirely for reverse-proxy
+    // setups that already canonicalise `Host`.
+    let host_allowlist = if args.disable_host_validation {
+        warn!(
+            "Host-header validation DISABLED — server is reachable via any Host. \
+             Only use this behind a reverse proxy that pins Host."
+        );
+        wifi_densepose_sensing_server::host_validation::HostAllowlist::disabled()
+    } else {
+        let allowlist =
+            wifi_densepose_sensing_server::host_validation::HostAllowlist::from_cli_and_env(
+                args.allowed_hosts.iter().cloned(),
+            );
+        info!(
+            "Host-header validation ON ({} entries; loopback names always included)",
+            allowlist.entries_for_test().len()
+        );
+        allowlist
+    };
+
     // WebSocket server on dedicated port (8765)
     let ws_state = state.clone();
     let ws_app = Router::new()
         .route("/ws/sensing", get(ws_sensing_handler))
         .route("/health", get(health))
+        .layer(axum::middleware::from_fn_with_state(
+            host_allowlist.clone(),
+            wifi_densepose_sensing_server::host_validation::require_allowed_host,
+        ))
         .with_state(ws_state);
 
     let ws_addr = SocketAddr::from((bind_ip, args.ws_port));
@@ -5065,6 +5108,14 @@ async fn main() {
         .layer(axum::middleware::from_fn_with_state(
             bearer_auth_state.clone(),
             wifi_densepose_sensing_server::bearer_auth::require_bearer,
+        ))
+        // DNS-rebinding defense: applied last so it runs first on the request
+        // path (axum layers run outermost-in). Rejects requests whose `Host`
+        // header is not in the allowlist before any handler — including
+        // `/health` and `/ws/*` — observes the body.
+        .layer(axum::middleware::from_fn_with_state(
+            host_allowlist.clone(),
+            wifi_densepose_sensing_server::host_validation::require_allowed_host,
         ))
         .with_state(state.clone());
 
