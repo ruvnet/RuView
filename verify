@@ -19,9 +19,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROOF_DIR="${SCRIPT_DIR}/v1/data/proof"
+PROOF_DIR="${SCRIPT_DIR}/archive/v1/data/proof"
 VERIFY_PY="${PROOF_DIR}/verify.py"
-V1_SRC="${SCRIPT_DIR}/v1/src"
+V1_SRC="${SCRIPT_DIR}/archive/v1/src"
 
 # Colors (disabled if not a terminal)
 if [ -t 1 ]; then
@@ -136,7 +136,7 @@ echo ""
 echo -e "${CYAN}[PHASE 3] PRODUCTION CODE INTEGRITY SCAN${RESET}"
 echo ""
 echo "  Scanning ${V1_SRC} for np.random.rand / np.random.randn calls..."
-echo "  (Excluding v1/src/testing/ -- test helpers are allowed to use random.)"
+echo "  (Excluding archive/v1/src/testing/ -- test helpers are allowed to use random.)"
 echo ""
 
 MOCK_FINDINGS=0
@@ -204,7 +204,7 @@ elif [ $PIPELINE_EXIT -eq 2 ]; then
     echo -e "  ${YELLOW}${BOLD}RESULT: SKIP${RESET}"
     echo ""
     echo "  No expected hash file to compare against."
-    echo "  Run: python v1/data/proof/verify.py --generate-hash"
+    echo "  Run: python archive/v1/data/proof/verify.py --generate-hash"
     echo ""
     echo -e "${BOLD}======================================================================${RESET}"
     exit 2
