@@ -11,6 +11,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 
 from fastapi import Request, Response, HTTPException, status
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
 from src.config.settings import Settings
@@ -299,15 +300,16 @@ class RateLimiter:
         }
 
 
-class RateLimitMiddleware:
+class RateLimitMiddleware(BaseHTTPMiddleware):
     """Rate limiting middleware for FastAPI."""
-    
-    def __init__(self, settings: Settings):
+
+    def __init__(self, app, settings: Settings):
+        super().__init__(app)
         self.settings = settings
         self.rate_limiter = RateLimiter(settings)
         self.enabled = settings.enable_rate_limiting
-    
-    async def __call__(self, request: Request, call_next: Callable) -> Response:
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Process request through rate limiting middleware."""
         if not self.enabled:
             return await call_next(request)
