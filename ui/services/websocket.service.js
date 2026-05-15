@@ -136,9 +136,22 @@ export class WebSocketService {
 
   // Set up WebSocket event handlers
   setupEventHandlers(url, ws, handlers) {
-    const connection = this.connections.get(url);
+    const getConnection = (eventName) => {
+      const connection = this.connections.get(url);
+      if (!connection) {
+        this.logger.warn(`Ignoring WebSocket ${eventName} for unregistered connection`, {
+          url,
+          readyState: ws.readyState
+        });
+        return null;
+      }
+      return connection;
+    };
 
     ws.onopen = (event) => {
+      const connection = getConnection('open');
+      if (!connection) return;
+
       const connectionTime = Date.now() - connection.connectionStartTime;
       this.logger.info(`WebSocket connected successfully`, { url, connectionTime });
       
@@ -158,6 +171,9 @@ export class WebSocketService {
     };
 
     ws.onmessage = (event) => {
+      const connection = getConnection('message');
+      if (!connection) return;
+
       connection.lastActivity = Date.now();
       connection.messageCount++;
       
@@ -188,6 +204,9 @@ export class WebSocketService {
     };
 
     ws.onerror = (event) => {
+      const connection = getConnection('error');
+      if (!connection) return;
+
       connection.errorCount++;
       this.logger.error(`WebSocket error occurred`, { 
         url, 
@@ -208,6 +227,9 @@ export class WebSocketService {
     };
 
     ws.onclose = (event) => {
+      const connection = getConnection('close');
+      if (!connection) return;
+
       const { code, reason, wasClean } = event;
       this.logger.info(`WebSocket closed`, { url, code, reason, wasClean });
       

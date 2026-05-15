@@ -3,6 +3,7 @@
 import { API_CONFIG, buildApiUrl, buildWsUrl } from '../config/api.config.js';
 import { apiService } from '../services/api.service.js';
 import { wsService } from '../services/websocket.service.js';
+import { buildSensingWsUrl } from '../services/sensing.service.js';
 import { poseService } from '../services/pose.service.js';
 import { healthService } from '../services/health.service.js';
 import { TabManager } from '../components/TabManager.js';
@@ -230,6 +231,17 @@ testRunner.test('buildWsUrl constructs WebSocket URLs', 'apiConfig', () => {
   testRunner.assert(url.startsWith('ws://') || url.startsWith('wss://'), 'URL should be WebSocket protocol');
   testRunner.assert(url.includes('/api/v1/stream/pose'), 'URL should contain endpoint');
   testRunner.assert(url.includes('token=test-token'), 'URL should contain token parameter');
+});
+
+testRunner.test('buildSensingWsUrl maps Docker UI port to sensing WebSocket port', 'apiConfig', () => {
+  const url = buildSensingWsUrl({
+    protocol: 'http:',
+    host: '192.168.28.147:3000',
+    hostname: '192.168.28.147',
+    port: '3000',
+  });
+
+  testRunner.assertEqual(url, 'ws://192.168.28.147:3001/ws/sensing');
 });
 
 // API Service Tests
