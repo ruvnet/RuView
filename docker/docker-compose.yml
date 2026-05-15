@@ -6,10 +6,11 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.rust
     image: ruvnet/wifi-densepose:latest
+    container_name: ruview-sensing-server
     ports:
-      - "3000:3000"   # REST API
-      - "3001:3001"   # WebSocket
-      - "5005:5005/udp"  # ESP32 UDP
+      - "3000:3000"      # REST API + UI
+      - "3001:3001"      # WebSocket  (/ws/sensing, /ws/introspection)
+      - "5005:5005/udp"  # ESP32 CSI / fused-vitals (magic 0xC511000{2,4})
     environment:
       - RUST_LOG=info
       # CSI_SOURCE controls the data source for the sensing server.
@@ -22,17 +23,37 @@ services:
       # Mount a host directory and set this to make models visible:
       #   volumes: ["/path/to/models:/app/models"]
       #   MODELS_DIR=/app/models
-      - MODELS_DIR=${MODELS_DIR:-data/models}
+      - MODELS_DIR=${MODELS_DIR:-/app/models}
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+    restart: unless-stopped
     # No explicit command needed — docker-entrypoint.sh uses CSI_SOURCE.
     # Override with: command: ["--source", "esp32", "--tick-ms", "500"]
 
-  python-sensing:
+  # ── Home Assistant MQTT bridge (option B) ────────────────────────────────
+  # Subscribes to sensing-server's WebSocket, translates SensingUpdate JSON
+  # into MQTT topics under ${MQTT_PREFIX}/, and publishes HA MQTT Discovery
+  # configs so entities show up automatically. Source in ./bridge/.
+  mqtt-bridge:
     build:
-      context: ..
-      dockerfile: docker/Dockerfile.python
-    image: ruvnet/wifi-densepose:python
-    ports:
-      - "8765:8765"   # WebSocket
-      - "8080:8080"   # UI
+      context: ./bridge
+      dockerfile: Dockerfile
+    image: ruvnet/ruview-mqtt-bridge:latest
+    container_name: ruview-mqtt-bridge
+    depends_on:
+      - sensing-server
     environment:
-      - PYTHONUNBUFFERED=1
+      # Inside the compose network we can reach the sensing-server by name.
+      - RUVIEW_WS=ws://sensing-server:3001/ws/sensing
+      # Point at your Home Assistant MQTT broker (e.g. the Mosquitto add-on).
+      - MQTT_HOST=${MQTT_HOST:-homeassistant.local}
+      - MQTT_PORT=${MQTT_PORT:-1883}
+      - MQTT_USER=${MQTT_USER:-}
+      - MQTT_PASS=${MQTT_PASS:-}
+      - MQTT_PREFIX=${MQTT_PREFIX:-ruview}
+      - HA_DISCOVERY_PREFIX=${HA_DISCOVERY_PREFIX:-homeassistant}
+      - DEVICE_NAME=${DEVICE_NAME:-RuView Sensing}
+      - DEVICE_ID=${DEVICE_ID:-ruview}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    restart: unless-stopped
