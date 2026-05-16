@@ -281,7 +281,7 @@ def main():
     if args.ssid:
         print(f"  WiFi SSID:     {args.ssid}")
     if args.password is not None:
-        print(f"  WiFi Password: {'*' * len(args.password)}")
+        print(f"  WiFi Password: {'(set)' if args.password else '(empty)'}")
     if args.target_ip:
         print(f"  Target IP:     {args.target_ip}")
     if args.target_port:

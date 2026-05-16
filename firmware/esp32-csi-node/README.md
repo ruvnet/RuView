@@ -37,18 +37,22 @@ MSYS_NO_PATHCONV=1 docker run --rm \
 
 ### 2. Flash
 
+Offsets must match `partitions_display.csv` (8 MB) or `partitions_4mb.csv` (4 MB):
+`bootloader=0x0`, `partition-table=0x8000`, `otadata=0xf000`, `app (ota_0)=0x20000`.
+
 ```bash
 python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
   write_flash --flash_mode dio --flash_size 8MB \
-  0x0 firmware/esp32-csi-node/build/bootloader/bootloader.bin \
-  0x8000 firmware/esp32-csi-node/build/partition_table/partition-table.bin \
-  0x10000 firmware/esp32-csi-node/build/esp32-csi-node.bin
+  0x0     firmware/esp32-csi-node/build/bootloader/bootloader.bin \
+  0x8000  firmware/esp32-csi-node/build/partition_table/partition-table.bin \
+  0xf000  firmware/esp32-csi-node/build/ota_data_initial.bin \
+  0x20000 firmware/esp32-csi-node/build/esp32-csi-node.bin
 ```
 
 ### 3. Provision WiFi credentials (no reflash needed)
 
 ```bash
-python scripts/provision.py --port COM7 \
+python firmware/esp32-csi-node/provision.py --port COM7 \
   --ssid "YourSSID" --password "YourPass" --target-ip 192.168.1.20
 ```
 
@@ -254,9 +258,10 @@ Find your serial port: `COM7` on Windows, `/dev/ttyUSB0` on Linux, `/dev/cu.SLAB
 ```bash
 python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
   write_flash --flash_mode dio --flash_size 8MB \
-  0x0 firmware/esp32-csi-node/build/bootloader/bootloader.bin \
-  0x8000 firmware/esp32-csi-node/build/partition_table/partition-table.bin \
-  0x10000 firmware/esp32-csi-node/build/esp32-csi-node.bin
+  0x0     firmware/esp32-csi-node/build/bootloader/bootloader.bin \
+  0x8000  firmware/esp32-csi-node/build/partition_table/partition-table.bin \
+  0xf000  firmware/esp32-csi-node/build/ota_data_initial.bin \
+  0x20000 firmware/esp32-csi-node/build/esp32-csi-node.bin
 ```
 
 ### Serial Monitor
@@ -285,7 +290,7 @@ All settings can be changed at runtime via Non-Volatile Storage (NVS) without re
 The easiest way to write NVS settings:
 
 ```bash
-python scripts/provision.py --port COM7 \
+python firmware/esp32-csi-node/provision.py --port COM7 \
   --ssid "MyWiFi" \
   --password "MyPassword" \
   --target-ip 192.168.1.20

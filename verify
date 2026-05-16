@@ -19,9 +19,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROOF_DIR="${SCRIPT_DIR}/v1/data/proof"
+PROOF_DIR="${SCRIPT_DIR}/archive/v1/data/proof"
 VERIFY_PY="${PROOF_DIR}/verify.py"
-V1_SRC="${SCRIPT_DIR}/v1/src"
+V1_SRC="${SCRIPT_DIR}/archive/v1/src"
 
 # Colors (disabled if not a terminal)
 if [ -t 1 ]; then
