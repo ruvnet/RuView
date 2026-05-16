@@ -1,0 +1,1813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <meta name="build-stamp" content="2026-05-15-oneeuro-hips-visibility">
+    <title>RuView · Skinned Realtime · MediaPipe Pose → Mixamo IK retargeting</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='10' fill='%23e8a634'/></svg>">
+    <style>
+        :root {
+            --bg: #050507; --bg-panel: rgba(8,10,14,0.78);
+            --amber: #ffb840; --amber-hot: #ffe09f;
+            --cyan: #4cf; --magenta: #ff4cc8;
+            --text: #d8c69a; --text-mute: #6b6155;
+            --green: #4f4; --red: #f64;
+            --border: rgba(255,184,64,0.18);
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; background: var(--bg); color: var(--text); overflow: hidden;
+            font-family: 'SF Mono', 'Cascadia Code', Consolas, monospace;
+            -webkit-font-smoothing: antialiased; font-size: 12px;
+        }
+        canvas { display: block; }
+        .overlay-frame {
+            position: fixed; inset: 0; pointer-events: none; z-index: 5;
+            background:
+                radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%),
+                linear-gradient(180deg, rgba(0,0,0,0.32) 0%, transparent 18%, transparent 82%, rgba(0,0,0,0.38) 100%);
+        }
+        .scanlines {
+            position: fixed; inset: 0; pointer-events: none; z-index: 6;
+            background: repeating-linear-gradient(0deg, rgba(0,0,0,0.04) 0px, rgba(0,0,0,0.04) 1px, transparent 1px, transparent 3px);
+            mix-blend-mode: overlay; opacity: 0.5;
+        }
+        .panel {
+            position: absolute; background: var(--bg-panel); border: 1px solid var(--border);
+            border-radius: 4px; padding: 12px 14px; backdrop-filter: blur(8px);
+            box-shadow: 0 1px 0 rgba(255,184,64,0.04), 0 8px 32px rgba(0,0,0,0.55); z-index: 10;
+        }
+        .panel h2 {
+            margin: 0 0 8px 0; font-size: 10px; text-transform: uppercase; letter-spacing: 2px;
+            color: var(--amber); font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: 6px;
+        }
+
+        #info { top: 20px; left: 20px; min-width: 280px; }
+        #info h1 { margin: 0 0 1px 0; font-size: 13px; letter-spacing: 1px; color: var(--amber-hot); font-weight: 600; }
+        #info .sub { font-size: 10px; color: var(--text-mute); letter-spacing: 0.5px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+        #info .row { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+        #info .row .k { color: var(--text-mute); font-size: 11px; }
+        #info .row .v { color: var(--text); font-variant-numeric: tabular-nums; font-size: 11px; }
+        #info .row .v.amber { color: var(--amber); }
+        #info .row .v.cyan  { color: var(--cyan); }
+        #info .row .v.green { color: var(--green); }
+        #info .row .v.red   { color: var(--red); }
+        #info .row .v.mag   { color: var(--magenta); }
+
+        #csi { top: 20px; right: 20px; min-width: 260px; }
+        #csi .bar-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 10px; }
+        #csi .bar-row .label { width: 42px; color: var(--text-mute); }
+        #csi .bar-row .bar-track { flex: 1; height: 6px; background: rgba(255,184,64,0.08); border-radius: 2px; overflow: hidden; }
+        #csi .bar-row .bar-fill {
+            height: 100%; background: linear-gradient(90deg, var(--amber-hot), var(--amber));
+            box-shadow: 0 0 6px var(--amber); transition: width 0.08s linear;
+        }
+        #csi .bar-row .val { width: 36px; text-align: right; color: var(--amber); font-variant-numeric: tabular-nums; }
+        #csi .legend { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 10px; color: var(--text-mute); line-height: 1.5; }
+        #csi .legend.live { color: var(--green); }
+
+        #helpers {
+            position: absolute; bottom: 20px; right: 20px; min-width: 220px;
+            background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px;
+            padding: 12px 14px; backdrop-filter: blur(8px); z-index: 10;
+        }
+        #helpers h2 { margin: 0 0 8px 0; font-size: 10px; text-transform: uppercase; letter-spacing: 2px;
+            color: var(--amber); font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+        #helpers label {
+            display: flex; align-items: center; gap: 10px; padding: 3px 0; cursor: pointer; user-select: none; font-size: 11px;
+        }
+        #helpers label:hover { color: var(--amber-hot); }
+        #helpers input[type=checkbox] { accent-color: var(--amber); width: 13px; height: 13px; cursor: pointer; }
+        #helpers .swatch { width: 8px; height: 8px; border-radius: 50%; margin-left: auto; box-shadow: 0 0 6px currentColor; }
+
+        #pose-panel {
+            position: absolute; bottom: 20px; left: 20px; min-width: 290px;
+            background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px;
+            padding: 12px 14px; backdrop-filter: blur(8px); z-index: 10;
+        }
+        #pose-panel h2 { margin: 0 0 8px 0; font-size: 10px; text-transform: uppercase; letter-spacing: 2px;
+            color: var(--amber); font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+        #pose-panel .status {
+            font-size: 11px; padding: 6px 0; display: flex; align-items: center; gap: 8px;
+        }
+        #pose-panel .status .dot {
+            width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 8px currentColor;
+        }
+        #pose-panel .status.s-idle .dot { background: var(--text-mute); color: var(--text-mute); }
+        #pose-panel .status.s-loading .dot { background: var(--amber); color: var(--amber); animation: pulse 0.9s ease-in-out infinite; }
+        #pose-panel .status.s-active .dot { background: var(--green); color: var(--green); animation: pulse 1.6s ease-in-out infinite; }
+        #pose-panel .status.s-error .dot { background: var(--red); color: var(--red); }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+        #pose-panel .preview {
+            position: relative; width: 100%; height: 120px;
+            background: rgba(0,0,0,0.5); border: 1px solid var(--border); border-radius: 3px;
+            margin-top: 8px; overflow: hidden;
+        }
+        #pose-panel .preview video {
+            width: 100%; height: 100%; object-fit: cover;
+            transform: scaleX(-1); /* mirror for selfie convention */
+            opacity: 0.85;
+        }
+        #pose-panel .preview canvas {
+            position: absolute; inset: 0; pointer-events: none;
+            transform: scaleX(-1);
+        }
+        #pose-panel .stats { padding-top: 6px; margin-top: 4px; font-size: 10px; }
+        #pose-panel .stats .row { display: flex; justify-content: space-between; padding: 1px 0; }
+        #pose-panel .stats .row .k { color: var(--text-mute); }
+        #pose-panel .stats .row .v { color: var(--amber); font-variant-numeric: tabular-nums; }
+        #pose-panel .stats .row .v.green { color: var(--green); }
+        #pose-panel button {
+            display: block; width: 100%; margin-top: 8px;
+            background: var(--amber); color: var(--bg); border: 0;
+            font-family: inherit; font-size: 11px; font-weight: 700;
+            padding: 8px 12px; cursor: pointer; border-radius: 3px; letter-spacing: 1px; text-transform: uppercase;
+        }
+        #pose-panel button:hover { background: var(--amber-hot); }
+        #pose-panel button:disabled { background: rgba(255,184,64,0.18); color: var(--text-mute); cursor: not-allowed; }
+
+        @keyframes scanFlash { 0% { opacity: 0; } 10% { opacity: 0.12; } 100% { opacity: 0; } }
+        .scan-flash {
+            position: fixed; inset: 0;
+            background: linear-gradient(90deg, transparent, var(--magenta), transparent);
+            mix-blend-mode: screen; pointer-events: none; opacity: 0; z-index: 4;
+        }
+        #titlecard {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            text-align: center; color: var(--amber-hot); letter-spacing: 6px; font-size: 11px;
+            text-transform: uppercase; opacity: 0.18; z-index: 1;
+            text-shadow: 0 0 12px var(--amber); pointer-events: none;
+        }
+        #titlecard .sub { font-size: 9px; color: var(--text-mute); letter-spacing: 4px; margin-top: 4px; }
+
+        #loading {
+            position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+            background: rgba(5,5,7,0.96); z-index: 20; font-size: 13px; color: var(--amber);
+            letter-spacing: 2px; text-transform: uppercase;
+        }
+        #loading.hidden { display: none; }
+        #loading .text { text-shadow: 0 0 12px var(--amber); animation: loadPulse 1.4s ease-in-out infinite; }
+        @keyframes loadPulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1.0; } }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://unpkg.com/fflate@0.7.4/umd/index.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/curves/NURBSCurve.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js" crossorigin="anonymous"></script>
+</head>
+<body>
+    <div class="overlay-frame"></div>
+    <div class="scanlines"></div>
+    <div class="scan-flash" id="scan-flash"></div>
+    <div id="loading"><div class="text">▸ Loading skinned subject · X Bot.fbx</div></div>
+
+    <div class="panel" id="info">
+        <h1>RuView · Skinned Realtime</h1>
+        <div class="sub">MediaPipe Pose → Mixamo direct-retargeting · live CSI from real keypoints</div>
+        <div class="row"><span class="k">Subject</span><span class="v amber" id="subj-state">● Idle (no webcam)</span></div>
+        <div class="row"><span class="k">Source</span><span class="v">X Bot.fbx · 1.75 MB</span></div>
+        <div class="row"><span class="k">Bones</span><span class="v" id="bone-count">—</span></div>
+        <div class="row"><span class="k">Pose tracker</span><span class="v" id="pose-state">idle</span></div>
+        <div class="row"><span class="k">Tracking conf</span><span class="v" id="track-conf">— %</span></div>
+        <div class="row"><span class="k">Retargets</span><span class="v" id="retarget-count">0 / 12</span></div>
+        <div class="row"><span class="k">RSSI / Wrist L</span><span class="v cyan" id="dist-L">— m</span></div>
+        <div class="row"><span class="k">Yield / Wrist R</span><span class="v cyan" id="dist-R">— m</span></div>
+        <div class="row"><span class="k">Bbox vol</span><span class="v" id="bbox-vol">— m³</span></div>
+        <div class="row"><span class="k">Render</span><span class="v" id="fps-val">— fps</span></div>
+    </div>
+
+    <div id="pose-panel">
+        <h2>MediaPipe Pose</h2>
+        <div class="status s-idle" id="pose-status"><span class="dot"></span><span id="pose-status-txt">Webcam disabled</span></div>
+        <div class="preview">
+            <video id="cam-video" playsinline muted autoplay></video>
+            <canvas id="cam-overlay"></canvas>
+        </div>
+        <div class="stats">
+            <div class="row"><span class="k">Landmarks</span><span class="v" id="lm-count">0 / 33</span></div>
+            <div class="row"><span class="k">Visible</span><span class="v" id="lm-visible">0 / 33</span></div>
+            <div class="row"><span class="k">Pose fps</span><span class="v" id="pose-fps">— fps</span></div>
+        </div>
+        <button id="cam-btn">▶ Enable webcam tracking</button>
+        <button id="demo-btn" style="margin-top:6px;background:transparent;color:var(--cyan);border:1px solid var(--cyan);">▶ Demo mode (synthetic pose)</button>
+        <button id="forcetest-btn" style="margin-top:6px;background:transparent;color:var(--magenta);border:1px solid var(--magenta);">⚡ Force test rotation (bypass retarget)</button>
+        <div id="build-banner" style="margin-top:8px;padding:4px 6px;font-size:9px;color:var(--magenta);border:1px dashed var(--magenta);text-align:center;letter-spacing:1px;">build 2026-05-15-oneeuro-hips-vis · OneEuro smoothing + Hips twist + visibility gate</div>
+    </div>
+
+    <div class="panel" id="csi">
+        <h2>Per-node CSI · LIVE</h2>
+        <div class="bar-row"><span class="label">N1·BL</span><div class="bar-track"><div class="bar-fill" id="bar-0"></div></div><span class="val" id="val-0">—</span></div>
+        <div class="bar-row"><span class="label">N2·BR</span><div class="bar-track"><div class="bar-fill" id="bar-1"></div></div><span class="val" id="val-1">—</span></div>
+        <div class="bar-row"><span class="label">N3·FL</span><div class="bar-track"><div class="bar-fill" id="bar-2"></div></div><span class="val" id="val-2">—</span></div>
+        <div class="bar-row"><span class="label">N4·FR</span><div class="bar-track"><div class="bar-fill" id="bar-3"></div></div><span class="val" id="val-3">—</span></div>
+        <div class="legend" id="csi-legend">connecting to ESP32-S3 via ruvultra (Tailscale ws://100.104.125.72:8766)…</div>
+    </div>
+
+    <div id="helpers">
+        <h2>ADR-097 helpers</h2>
+        <label><input type="checkbox" id="t-grid" checked>GridHelper<span class="swatch" style="color:#666"></span></label>
+        <label><input type="checkbox" id="t-polar" checked>PolarGridHelper<span class="swatch" style="color:#ffb840"></span></label>
+        <label><input type="checkbox" id="t-bbox" checked>BoxHelper on mesh<span class="swatch" style="color:#ffe09f"></span></label>
+        <label><input type="checkbox" id="t-skel">SkeletonHelper<span class="swatch" style="color:#4cf"></span></label>
+        <label><input type="checkbox" id="t-nodebox" checked>Per-node BoxHelpers<span class="swatch" style="color:#4cf"></span></label>
+        <label><input type="checkbox" id="t-rays" checked>RF illumination cones<span class="swatch" style="color:#ffb840"></span></label>
+        <label><input type="checkbox" id="t-tomo" checked>Tomography sweep<span class="swatch" style="color:#ff4cc8"></span></label>
+        <label><input type="checkbox" id="t-kpdots" checked>Live keypoint dots<span class="swatch" style="color:#4cf"></span></label>
+    </div>
+
+    <div id="titlecard">
+        RuView · Seldon Vault
+        <div class="sub">Live · MediaPipe Pose · Mixamo retarget</div>
+    </div>
+
+    <script>
+    'use strict';
+    // =========================================================================
+    //  RuView · Skinned Realtime
+    //  ------------------------------------------------------------------------
+    //  Webcam → MediaPipe Pose (33 BlazePose landmarks @ ~30 fps) → direct
+    //  bone retargeting on the loaded Mixamo X Bot rig.
+    //
+    //  Bridge: MediaPipe gives 33 landmarks in image-normalized coords + a
+    //  relative z. We:
+    //    1. Compute world-space targets in the rig's local frame
+    //       (recentered on the hip midpoint, scaled by shoulder distance).
+    //    2. For each retargeted bone, compute the desired world direction
+    //       (parent → child keypoint) and rotate the bone so its rest-axis
+    //       (+Y, by Mixamo convention) lines up with that direction.
+    //
+    //  Real CSI: per-node amplitude = 1/(1 + r²·k) where r is the live
+    //    distance from that ESP32 marker to the tracked right-wrist keypoint.
+    //    No synthetic sine waves.
+    //
+    //  Fallback: if the user denies webcam permission, the X Bot stays on
+    //    its bundled Idle clip with the previous synthetic CSI driver.
+    // =========================================================================
+
+    const MODEL_URL = './X%20Bot.fbx';
+    const NODE_POSITIONS = [
+        [-1.9, 1.3,  1.9],[ 1.9, 1.3,  1.9],
+        [-1.9, 1.3, -1.9],[ 1.9, 1.3, -1.9],
+    ];
+
+    // ---------------------------------------------------------------------
+    //  Scene
+    // ---------------------------------------------------------------------
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x050507);
+    scene.fog = new THREE.FogExp2(0x050507, 0.06);
+
+    const camera = new THREE.PerspectiveCamera(48, window.innerWidth/window.innerHeight, 0.05, 100);
+    camera.position.set(3.2, 1.55, 4.0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 0.80;
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 0.9, 0);
+    controls.enableDamping = true; controls.dampingFactor = 0.06;
+    controls.minDistance = 2; controls.maxDistance = 12;
+    controls.maxPolarAngle = Math.PI * 0.92;
+    controls.autoRotate = new URLSearchParams(location.search).get('orbit') === '1';
+    controls.autoRotateSpeed = 0.25;
+
+    // ---------------------------------------------------------------------
+    //  Lights
+    // ---------------------------------------------------------------------
+    scene.add(new THREE.HemisphereLight(0x553a18, 0x080606, 0.7));
+    const keyLight = new THREE.DirectionalLight(0xffc070, 1.05);
+    keyLight.position.set(2.5, 3.8, 2.5);
+    keyLight.castShadow = true;
+    keyLight.shadow.camera.top = 2; keyLight.shadow.camera.bottom = -2;
+    keyLight.shadow.camera.left = -2; keyLight.shadow.camera.right = 2;
+    keyLight.shadow.camera.near = 0.1; keyLight.shadow.camera.far = 12;
+    keyLight.shadow.mapSize.set(1024, 1024);
+    keyLight.shadow.bias = -0.0008;
+    scene.add(keyLight);
+    const rimLights = [];
+    NODE_POSITIONS.forEach(pos => {
+        const rim = new THREE.PointLight(0x4cf, 0.55, 8, 1.8);
+        rim.position.set(pos[0] * 1.1, pos[1] * 0.7, pos[2] * 1.1);
+        scene.add(rim); rimLights.push(rim);
+    });
+
+    // ---------------------------------------------------------------------
+    //  Post-processing
+    // ---------------------------------------------------------------------
+    const composer = new THREE.EffectComposer(renderer);
+    composer.addPass(new THREE.RenderPass(scene, camera));
+    const bloom = new THREE.UnrealBloomPass(
+        new THREE.Vector2(window.innerWidth, window.innerHeight),
+        0.45, 0.40, 0.78,
+    );
+    composer.addPass(bloom);
+    const filmShader = {
+        uniforms: { tDiffuse: { value: null }, time: { value: 0 }, grain: { value: 0.04 },
+            vignette: { value: 0.32 }, aberration: { value: 0.0018 } },
+        vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `
+            uniform sampler2D tDiffuse; uniform float time, grain, vignette, aberration;
+            varying vec2 vUv;
+            float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+            void main() {
+                vec2 off = (vUv - 0.5) * aberration;
+                float r = texture2D(tDiffuse, vUv + off).r;
+                float g = texture2D(tDiffuse, vUv).g;
+                float b = texture2D(tDiffuse, vUv - off).b;
+                vec3 col = vec3(r, g, b);
+                col += (hash(vUv * 1024.0 + time) - 0.5) * grain;
+                float v = smoothstep(0.85, 0.20, length(vUv - 0.5));
+                col *= mix(1.0 - vignette, 1.0, v);
+                gl_FragColor = vec4(col, 1.0);
+            }`,
+    };
+    composer.addPass(new THREE.ShaderPass(filmShader));
+
+    // ---------------------------------------------------------------------
+    //  Floor + helpers + nodes (same as helpers-skinned-fbx.html)
+    // ---------------------------------------------------------------------
+    const floorMat = new THREE.ShaderMaterial({
+        uniforms: { time: { value: 0 }, baseColor: { value: new THREE.Color(0xffb840) } },
+        vertexShader: `varying vec3 vPos; void main() { vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `
+            uniform float time; uniform vec3 baseColor; varying vec3 vPos;
+            void main() {
+                vec2 g = abs(fract(vPos.xz * 0.5) - 0.5);
+                float line = smoothstep(0.48, 0.50, max(g.x, g.y));
+                float majorLine = smoothstep(0.96, 1.00, max(g.x, g.y) * 2.0);
+                float scan = 0.5 + 0.5 * sin((vPos.x + vPos.z) * 2.0 - time * 1.4);
+                scan = pow(scan, 14.0);
+                float falloff = smoothstep(5.0, 1.2, length(vPos.xz));
+                vec3 col = baseColor * (0.01 + 0.05 * line + 0.16 * majorLine + 0.08 * scan);
+                gl_FragColor = vec4(col * falloff, falloff * 0.55);
+            }`,
+        transparent: true, depthWrite: false,
+    });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), floorMat);
+    floor.rotation.x = -Math.PI / 2; scene.add(floor);
+    const shadowGround = new THREE.Mesh(
+        new THREE.PlaneGeometry(20, 20),
+        new THREE.ShadowMaterial({ opacity: 0.55 })
+    );
+    shadowGround.rotation.x = -Math.PI / 2; shadowGround.position.y = 0.001;
+    shadowGround.receiveShadow = true;
+    scene.add(shadowGround);
+
+    const gridHelper = new THREE.GridHelper(4, 20, 0x554a32, 0x2a2418);
+    gridHelper.material.transparent = true; gridHelper.material.opacity = 0.45;
+    scene.add(gridHelper);
+    const polarHelper = new THREE.PolarGridHelper(2.2, 16, 4, 64, 0xffb840, 0x4a3a1a);
+    polarHelper.position.y = 0.002;
+    polarHelper.material.transparent = true; polarHelper.material.opacity = 0.55;
+    scene.add(polarHelper);
+
+    let bboxHelper = null;
+    let skeletonHelper = null;
+
+    const nodeBboxHelpers = [];
+    const nodeRings = [];
+    const nodeAnchors = [];
+    NODE_POSITIONS.forEach((pos, i) => {
+        const group = new THREE.Group();
+        group.position.set(pos[0], pos[1], pos[2]);
+        group.add(new THREE.Mesh(
+            new THREE.BoxGeometry(0.14, 0.06, 0.20),
+            new THREE.MeshBasicMaterial({ color: 0xffb840 })
+        ));
+        const antenna = new THREE.Mesh(
+            new THREE.ConeGeometry(0.018, 0.10, 8),
+            new THREE.MeshBasicMaterial({ color: 0xffe09f })
+        );
+        antenna.position.y = 0.08; group.add(antenna);
+        const ring = new THREE.Mesh(
+            new THREE.RingGeometry(0.11, 0.14, 32),
+            new THREE.MeshBasicMaterial({ color: 0xffb840, side: THREE.DoubleSide,
+                transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false })
+        );
+        ring.rotation.x = -Math.PI / 2; ring.position.y = -0.05;
+        group.add(ring); nodeRings.push(ring);
+        const core = new THREE.Mesh(
+            new THREE.SphereGeometry(0.025, 12, 12),
+            new THREE.MeshBasicMaterial({ color: 0xffe09f })
+        );
+        core.position.y = 0.04; group.add(core);
+        scene.add(group); nodeAnchors.push(group);
+        const bbox = new THREE.BoxHelper(group, 0x4cf);
+        bbox.material.transparent = true; bbox.material.opacity = 0.45;
+        scene.add(bbox); nodeBboxHelpers.push(bbox);
+    });
+
+    // ---------------------------------------------------------------------
+    //  God-ray cones — opacity-modulated by per-node csiAmp × csiCoherence
+    // ---------------------------------------------------------------------
+    const godRayMat = (color, idx) => new THREE.ShaderMaterial({
+        uniforms: {
+            time: { value: 0 }, intensity: { value: 0 },
+            color: { value: new THREE.Color(color) }, seed: { value: idx * 17.3 },
+        },
+        vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `
+            uniform float time, intensity, seed; uniform vec3 color;
+            varying vec2 vUv;
+            float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+            void main() {
+                float edgeFade = smoothstep(0.0, 0.18, vUv.y) * smoothstep(1.0, 0.65, vUv.y);
+                float radial = pow(sin(vUv.y * 3.14159), 2.0);
+                float n = hash(floor(vUv * vec2(40.0, 60.0)) + vec2(seed, time * 0.4));
+                float scroll = 0.85 + 0.30 * sin(vUv.y * 32.0 - time * 1.4 + seed);
+                float a = edgeFade * radial * scroll * (0.55 + 0.45 * n);
+                gl_FragColor = vec4(color, a * intensity * 0.25);
+            }`,
+        transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    });
+    const godRays = [];
+    for (let i = 0; i < 4; i++) {
+        const geom = new THREE.ConeGeometry(0.45, 4.0, 28, 1, true);
+        geom.translate(0, -2.0, 0);
+        const mat = godRayMat(0xffb840, i);
+        const cone = new THREE.Mesh(geom, mat);
+        scene.add(cone);
+        godRays.push({ mesh: cone, mat });
+    }
+
+    // ---------------------------------------------------------------------
+    //  Tomography + sonar pings (same volumetric atmosphere)
+    // ---------------------------------------------------------------------
+    const tomoMat = new THREE.ShaderMaterial({
+        uniforms: { time: { value: 0 }, intensity: { value: 0 } },
+        vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `
+            uniform float time, intensity; varying vec2 vUv;
+            void main() {
+                float band = exp(-pow((vUv.x - 0.5) * 14.0, 2.0));
+                float lines = 0.5 + 0.5 * sin(vUv.y * 90.0 + time * 4.0);
+                vec3 col = vec3(1.0, 0.3, 0.78) * band * (0.6 + 0.4 * lines);
+                gl_FragColor = vec4(col, intensity * band * 0.75);
+            }`,
+        transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    });
+    const tomoPlane = new THREE.Mesh(new THREE.PlaneGeometry(8, 6), tomoMat);
+    tomoPlane.rotation.y = Math.PI / 2; tomoPlane.position.set(-2, 1.0, 0); tomoPlane.visible = false;
+    scene.add(tomoPlane);
+    let tomoActive = false, tomoT0 = 0, tomoNextAt = 4 + Math.random() * 4;
+
+    const PING_POOL = 24;
+    const pings = [];
+    const pingGeo = new THREE.TorusGeometry(1, 0.012, 8, 48);
+    for (let i = 0; i < PING_POOL; i++) {
+        const mat = new THREE.MeshBasicMaterial({ color: 0x4cf, transparent: true, opacity: 0, depthWrite: false });
+        const mesh = new THREE.Mesh(pingGeo, mat); mesh.visible = false; scene.add(mesh);
+        pings.push({ mesh, active: false, t0: 0, duration: 0,
+            origin: new THREE.Vector3(), target: new THREE.Vector3() });
+    }
+    let pingIndex = 0;
+    function emitPing(origin, target) {
+        const p = pings[pingIndex]; pingIndex = (pingIndex + 1) % PING_POOL;
+        p.active = true; p.t0 = performance.now() * 0.001;
+        p.duration = 0.55 + Math.random() * 0.20;
+        p.origin.copy(origin); p.target.copy(target);
+        p.mesh.position.copy(origin); p.mesh.visible = true; p.mesh.material.opacity = 0;
+        const dir = new THREE.Vector3().subVectors(target, origin).normalize();
+        p.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+    }
+
+    // ---------------------------------------------------------------------
+    //  Live keypoint visualization — small cyan spheres at each detected
+    //  landmark. These show what MediaPipe is seeing in 3D space.
+    // ---------------------------------------------------------------------
+    const POSE_NAMES = {
+        0:'nose', 7:'L ear', 8:'R ear',
+        11:'L sho', 12:'R sho', 13:'L elb', 14:'R elb',
+        15:'L wri', 16:'R wri', 23:'L hip', 24:'R hip',
+        25:'L kne', 26:'R kne', 27:'L ank', 28:'R ank',
+    };
+    const KP_INDICES = Object.keys(POSE_NAMES).map(s => +s);
+    const kpDots = {};   // idx -> sphere mesh
+    const kpDotGroup = new THREE.Group();
+    scene.add(kpDotGroup);
+    for (const i of KP_INDICES) {
+        const sphere = new THREE.Mesh(
+            new THREE.SphereGeometry(0.024, 12, 12),
+            new THREE.MeshBasicMaterial({ color: 0x4cf })
+        );
+        sphere.visible = false;
+        kpDotGroup.add(sphere);
+        kpDots[i] = sphere;
+    }
+    // bone connections to draw lines between kp dots
+    const KP_BONES = [
+        [11,12], [11,13], [13,15], [12,14], [14,16],   // upper body
+        [11,23], [12,24], [23,24],                      // torso
+        [23,25], [25,27], [24,26], [26,28],             // legs
+        [0,11], [0,12],                                  // head-shoulder
+    ];
+    const kpLines = [];
+    for (const [a, b] of KP_BONES) {
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+        const line = new THREE.Line(geom,
+            new THREE.LineBasicMaterial({ color: 0x4cf, transparent: true, opacity: 0.6 })
+        );
+        line.visible = false;
+        line.userData = { a, b };
+        kpDotGroup.add(line);
+        kpLines.push(line);
+    }
+
+    // ---------------------------------------------------------------------
+    //  Model load with Mixamo-aware fixups + bone index
+    // ---------------------------------------------------------------------
+    let model = null;
+    let mixer = null;
+    let idleAction = null;
+    let headBone = null;
+    const bones = {};   // name -> bone reference
+    let boneCount = 0;
+
+    const loader = new THREE.FBXLoader();
+    loader.load(MODEL_URL, (object) => {
+        model = object;
+        // scale fix
+        const raw = new THREE.Box3().setFromObject(model);
+        const height = raw.max.y - raw.min.y;
+        if (height > 10) model.scale.setScalar(1/100);
+        else if (height > 5) model.scale.setScalar(1/50);
+        const b2 = new THREE.Box3().setFromObject(model);
+        model.position.y -= b2.min.y;
+
+        // CRITICAL — FBXLoader-loaded models can have TWO parallel Bone trees:
+        // (a) the bones reachable via model.traverse() — the "rig" hierarchy
+        // (b) the bones in SkinnedMesh.skeleton.bones — what the visible mesh
+        //     actually deforms with
+        // For Mixamo X Bot these two sets have the SAME bone names but
+        // DIFFERENT object identities. Modifying (a) does nothing visible.
+        //
+        // Resolution: build our bone map from the first SkinnedMesh's
+        // skeleton.bones (which is what the renderer skins against).
+        let primarySkinnedMesh = null;
+        model.traverse(obj => {
+            if (obj.isMesh) {
+                obj.castShadow = true; obj.receiveShadow = true;
+                if (obj.material && obj.material.isMeshPhongMaterial) {
+                    const m = obj.material;
+                    obj.material = new THREE.MeshStandardMaterial({
+                        map: m.map, normalMap: m.normalMap, color: m.color,
+                        skinning: !!obj.isSkinnedMesh,
+                        metalness: 0.0, roughness: 0.85,
+                    });
+                }
+            }
+            if (obj.isSkinnedMesh && !primarySkinnedMesh) primarySkinnedMesh = obj;
+        });
+        // Use the skinned-mesh skeleton's bones as the canonical references.
+        //
+        // FBX quirk: Mixamo exports sometimes contain TWO bones with the
+        // same name nested inside each other (an empty "Limb" wrapper then
+        // the actual "LimbNode"). The first is zero-length; the second has
+        // the geometry. We want the SECOND for retargeting, so we resolve
+        // duplicates by preferring the deepest one with non-zero head→tail
+        // distance.
+        if (primarySkinnedMesh) {
+            const nameBuckets = {};  // name -> [bones with this name]
+            for (const bone of primarySkinnedMesh.skeleton.bones) {
+                boneCount++;
+                (nameBuckets[bone.name] ||= []).push(bone);
+            }
+            // Force matrix world up-to-date so getWorldPosition reads truth
+            model.updateMatrixWorld(true);
+            for (const name in nameBuckets) {
+                const candidates = nameBuckets[name];
+                if (candidates.length === 1) {
+                    bones[name] = candidates[0];
+                } else {
+                    // Pick the candidate whose first-child world-distance is
+                    // largest (= the bone with real length).
+                    let best = candidates[0];
+                    let bestLen = -1;
+                    for (const c of candidates) {
+                        if (c.children.length === 0) continue;
+                        const head = c.getWorldPosition(new THREE.Vector3());
+                        const tail = c.children[0].getWorldPosition(new THREE.Vector3());
+                        const len = head.distanceTo(tail);
+                        if (len > bestLen) { bestLen = len; best = c; }
+                    }
+                    bones[name] = best;
+                }
+                if (!headBone && /head/i.test(name)) headBone = bones[name];
+            }
+        }
+        document.getElementById('bone-count').textContent = boneCount;
+
+        scene.add(model);
+        skeletonHelper = new THREE.SkeletonHelper(model);
+        skeletonHelper.visible = false;
+        scene.add(skeletonHelper);
+
+        const clips = object.animations || [];
+        if (clips.length > 0) {
+            mixer = new THREE.AnimationMixer(model);
+            idleAction = mixer.clipAction(clips[0]);
+            // Idle stays OFF by default — it overwrites our retargeted bones
+            // every mixer.update(). Restored only when stopWebcam() restores it.
+            idleAction.enabled = false;
+            // Don't .play() here; user fallback in stopWebcam() will start it.
+        }
+
+        // cache bone rest-pose world directions for retargeting
+        cacheBoneRestPose();
+
+        // Debug export so we can introspect via window._RVF in DevTools
+        window._RVF = {
+            bones, boneRest, RETARGETS,
+            get liveKp() { return liveKp; },
+            get liveValid() { return liveValid; },
+            model, idleAction,
+            // helper: dump a sample of bones currently in the rig
+            boneNames: () => Object.keys(bones),
+            // helper: force a hardcoded rotation on every retargeted bone,
+            //   used to isolate "bones don't move" from "MediaPipe→retarget broken"
+            testPose: () => {
+                for (const r of RETARGETS) {
+                    const rest = boneRest[r.suffix];
+                    if (!rest) continue;
+                    const angle = Math.PI * 0.25 * Math.sin(performance.now() * 0.002);
+                    rest.bone.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), angle);
+                }
+                if (idleAction) { idleAction.setEffectiveWeight(0); idleAction.stop(); }
+            },
+            // helper: feed a fake "right arm straight up" pose through the
+            //   retargeting pipeline so we can verify math + visibility.
+            fakePose: (snap = false) => {
+                const hips = bones['mixamorigHips'] || bones['mixamorigSpine'];
+                if (!hips) return 'no hips';
+                hips.updateMatrixWorld(true);
+                const p = hips.getWorldPosition(new THREE.Vector3());
+                const set = (i, dx, dy, dz) => {
+                    if (!liveKp[i]) liveKp[i] = new THREE.Vector3();
+                    liveKp[i].set(p.x + dx, p.y + dy, p.z + dz);
+                };
+                // user's RIGHT side (kp 12,14,16) → drives model's LEFT bone chain
+                //   (via x-flip in real ingest, here directly)
+                // Pose: BOTH arms straight up, legs straight, T-pose-style
+                set(0,   0.00,  0.65,  0);                            // nose
+                set(11, -0.20,  0.50,  0); set(12,  0.20,  0.50,  0); // shoulders
+                set(13, -0.20,  0.90,  0); set(14,  0.20,  0.90,  0); // elbows UP
+                set(15, -0.20,  1.30,  0); set(16,  0.20,  1.30,  0); // wrists WAY UP
+                set(23, -0.12,  0.00,  0); set(24,  0.12,  0.00,  0); // hips
+                set(25, -0.12, -0.45,  0); set(26,  0.12, -0.45,  0); // knees
+                set(27, -0.12, -0.85,  0); set(28,  0.12, -0.85,  0); // ankles
+                liveValid = true;
+                if (snap) {
+                    // run 12 passes with NO slerp damping to converge instantly
+                    const origSlerp = window.__origSlerp =
+                        window.__origSlerp || THREE.Quaternion.prototype.slerp;
+                    THREE.Quaternion.prototype.slerp = function (q) {
+                        this.copy(q); return this;
+                    };
+                    for (let i = 0; i < 6; i++) applyRetargeting();
+                    THREE.Quaternion.prototype.slerp = origSlerp;
+                } else {
+                    applyRetargeting();
+                }
+                liveValid = false;
+                if (idleAction) { idleAction.setEffectiveWeight(0); idleAction.stop(); }
+                return 'applied' + (snap ? ' (snap)' : '');
+            },
+            // Simulate the real-time loop: keep fake keypoints AND keep
+            //   liveValid=true so applyRetargeting runs every tick frame.
+            fakeLoop: () => {
+                const hips = bones['mixamorigHips']; if (!hips) return 'no hips';
+                hips.updateMatrixWorld(true);
+                const p = hips.getWorldPosition(new THREE.Vector3());
+                const set = (i, dx, dy, dz) => {
+                    if (!liveKp[i]) liveKp[i] = new THREE.Vector3();
+                    liveKp[i].set(p.x + dx, p.y + dy, p.z + dz);
+                };
+                set(0,   0.00,  0.65,  0);
+                set(11, -0.20,  0.50,  0); set(12,  0.20,  0.50,  0);
+                set(13, -0.20,  0.90,  0); set(14,  0.20,  0.90,  0);
+                set(15, -0.20,  1.30,  0); set(16,  0.20,  1.30,  0);
+                set(23, -0.12,  0.00,  0); set(24,  0.12,  0.00,  0);
+                set(25, -0.12, -0.45,  0); set(26,  0.12, -0.45,  0);
+                set(27, -0.12, -0.85,  0); set(28,  0.12, -0.85,  0);
+                liveValid = true;
+                if (idleAction) { idleAction.setEffectiveWeight(0); idleAction.stop(); }
+                return 'looping — liveValid stays true';
+            },
+        };
+
+        document.getElementById('loading').classList.add('hidden');
+    }, (xhr) => {
+        const pct = (xhr.loaded / (xhr.total || 1750032) * 100).toFixed(0);
+        const txt = document.querySelector('#loading .text');
+        if (txt) txt.textContent = `▸ Loading skinned subject · X Bot.fbx · ${pct} %`;
+    }, (err) => {
+        console.error('FBX load failed', err);
+        document.querySelector('#loading .text').textContent = '⚠ Load failed — see console';
+    });
+
+    // ---------------------------------------------------------------------
+    //  Bone retargeting
+    //  ------------------------------------------------------------------
+    //  For each tracked Mixamo bone, we cache its rest-pose world-space
+    //  direction (head→tail). Each frame we compute the desired direction
+    //  from the matching MediaPipe keypoints and apply the quaternion
+    //  that rotates rest→desired, in the bone's parent-local frame.
+    // ---------------------------------------------------------------------
+    //
+    //  Mixamo bone → (parentKpIdx, childKpIdx):
+    //    Right side and left side are swapped here because MediaPipe sends
+    //    landmarks mirrored relative to the model when the user faces camera.
+    //
+    const RETARGETS = [
+        { suffix: 'LeftArm',       from: 12, to: 14 },
+        { suffix: 'LeftForeArm',   from: 14, to: 16 },
+        { suffix: 'RightArm',      from: 11, to: 13 },
+        { suffix: 'RightForeArm',  from: 13, to: 15 },
+        { suffix: 'LeftUpLeg',     from: 24, to: 26 },
+        { suffix: 'LeftLeg',       from: 26, to: 28 },
+        { suffix: 'RightUpLeg',    from: 23, to: 25 },
+        { suffix: 'RightLeg',      from: 25, to: 27 },
+        { suffix: 'Spine',         fromAvg: [23, 24], toAvg: [11, 12] },
+        { suffix: 'Spine1',        fromAvg: [23, 24], toAvg: [11, 12] },
+        { suffix: 'Spine2',        fromAvg: [23, 24], toAvg: [11, 12] },
+        { suffix: 'Neck',          fromAvg: [11, 12], toAvg: [7, 8] },
+    ];
+
+    // Per-bone source-landmark sets for visibility weighting.
+    // If the source landmarks' MIN visibility < 0.4, blend toward rest.
+    function visForRetarget(r) {
+        const idxs = [];
+        if (r.fromAvg) idxs.push(...r.fromAvg); else idxs.push(r.from);
+        if (r.toAvg)   idxs.push(...r.toAvg);   else idxs.push(r.to);
+        let minV = 1.0;
+        for (const i of idxs) {
+            const v = liveVis[i] ?? 1.0;
+            if (v < minV) minV = v;
+        }
+        return minV;
+    }
+    const boneRest = {};  // suffix -> { bone, restDir, restWorldQ }
+
+    function resolveBone(suffix) {
+        // Exact match candidates in priority order
+        const candidates = [
+            suffix,
+            'mixamorig:' + suffix,
+            'mixamorig' + suffix,
+            'mixamorig_' + suffix,
+            'mixamorig1:' + suffix,
+            'mixamorig1' + suffix,
+            'mixamorig2:' + suffix,
+        ];
+        for (const c of candidates) if (bones[c]) return bones[c];
+        // Fallback: suffix-match (case-sensitive end-with)
+        for (const name in bones) {
+            // Avoid matching "RightArm" when looking for "Arm" — require the
+            // suffix to align with a word boundary (prev char is ':', '_', or
+            // uppercase ASCII letter at index name.length - suffix.length - 1)
+            if (name.endsWith(suffix)) {
+                const head = name.slice(0, name.length - suffix.length);
+                if (head === '' || /[a-zA-Z]:|[a-zA-Z]_|[a-z]$/.test(head)) {
+                    return bones[name];
+                }
+            }
+        }
+        return null;
+    }
+
+    function cacheBoneRestPose() {
+        // CRITICAL: cache from the *unmodified* loaded pose. Stop any
+        // running animation and reset all bones to their stored rest local
+        // before reading world matrices — otherwise we capture
+        // already-animated parents' worldQ instead of the true rest.
+        if (idleAction) { idleAction.stop(); idleAction.setEffectiveWeight(0); }
+        // Snapshot all bones' local quaternions as "rest local"
+        // (this assumes load-time bone.quaternion == bind pose, which holds
+        // for Mixamo FBX exports that haven't been pre-animated).
+        const restLocal = {};
+        for (const name in bones) {
+            restLocal[name] = bones[name].quaternion.clone();
+        }
+        // Force all bones to rest local (idempotent on first call)
+        for (const name in bones) {
+            bones[name].quaternion.copy(restLocal[name]);
+        }
+        if (model) model.updateMatrixWorld(true);
+
+        // Walk descendants past same-named wrappers to find a bone with
+        // either a different name OR a non-zero head→tail distance. Mixamo
+        // FBX exports nest a zero-length wrapper bone above the real bone,
+        // both with the same name. The wrapper is in skeleton.bones (and
+        // affects skinning), but it sits at the same world position as the
+        // real one, so its naive tailPos is its own headPos.
+        function findRealTail(bone) {
+            const headPos = bone.getWorldPosition(new THREE.Vector3());
+            let cursor = bone;
+            const seen = new Set([bone]);
+            for (let depth = 0; depth < 6; depth++) {
+                if (!cursor.children || cursor.children.length === 0) break;
+                const child = cursor.children.find(c => c.isBone) || cursor.children[0];
+                if (!child || seen.has(child)) break;
+                seen.add(child);
+                const childPos = child.getWorldPosition(new THREE.Vector3());
+                if (headPos.distanceTo(childPos) > 0.001 || child.name !== bone.name) {
+                    return { tailPos: childPos, child };
+                }
+                cursor = child; // same-name same-position wrapper, descend
+            }
+            // fallback — extrapolate along bone's local +Y
+            const localY = new THREE.Vector3(0, 1, 0);
+            return {
+                tailPos: headPos.clone().add(
+                    localY.applyQuaternion(bone.getWorldQuaternion(new THREE.Quaternion()))
+                ),
+                child: null,
+            };
+        }
+
+        let found = 0;
+        const missing = [];
+        for (const r of RETARGETS) {
+            const bone = resolveBone(r.suffix);
+            if (!bone) { missing.push(r.suffix); continue; }
+            found++;
+            const headPos = bone.getWorldPosition(new THREE.Vector3());
+            const { tailPos } = findRealTail(bone);
+            const restDir = new THREE.Vector3().subVectors(tailPos, headPos).normalize();
+            const restWorldQ = bone.getWorldQuaternion(new THREE.Quaternion());
+            const restParentWorldQ = bone.parent
+                ? bone.parent.getWorldQuaternion(new THREE.Quaternion())
+                : new THREE.Quaternion();
+            boneRest[r.suffix] = {
+                bone, restDir, restWorldQ, restParentWorldQ,
+                restLocalQ: bone.quaternion.clone(),
+            };
+        }
+        document.getElementById('retarget-count').textContent =
+            found + ' / ' + RETARGETS.length;
+        if (missing.length) {
+            console.warn('[retarget] missing bones for suffixes:', missing,
+                '\n[retarget] available bone names:',
+                Object.keys(bones).slice(0, 40));
+        } else {
+            console.log('[retarget] all', found, 'bones resolved');
+        }
+        // expose the full restLocal map so applyRetargeting can reset ancestors
+        boneRest.__allRestLocal = restLocal;
+    }
+
+    // ---------------------------------------------------------------------
+    //  Calibration — convert MediaPipe normalized coords to world meters
+    //  centered on the rig's pelvis.
+    //  ------------------------------------------------------------------
+    //  BlazePose returns 33 landmarks; each landmark has x,y in [0..1]
+    //  normalized to image, z roughly in [-1..1] (depth relative to hips,
+    //  negative = closer to camera), and visibility/presence.
+    //
+    //  We:
+    //    1. compute hip center (avg of 23, 24)
+    //    2. compute shoulder distance in pose-space → calibrate scale so
+    //       shoulder distance == ~0.36 m (typical human)
+    //    3. for each retargeted landmark, transform:
+    //         worldPos = pelvisWorldPos + (pose - poseHipCenter) * scale
+    //         (with x flipped because selfie convention)
+    // ---------------------------------------------------------------------
+    const liveKp = {};       // idx -> THREE.Vector3 (world coords)
+    const liveVis = {};      // idx -> visibility 0..1 (latest)
+    let liveValid = false;
+    let liveConfidence = 0;
+    let lastPoseT = 0;
+    let poseFps = 0;
+
+    // -----------------------------------------------------------------
+    //  One Euro Filter (Casiez et al. 2012) — adaptive low-pass that
+    //  passes fast motion through cleanly while killing slow jitter.
+    //  Three filters per landmark (x, y, z). Standard high-fidelity
+    //  pose-data smoother used by Niantic, MediaPipe Holistic studio,
+    //  TF.js movenet, etc.
+    // -----------------------------------------------------------------
+    function OneEuro(minCutoff, beta, dCutoff) {
+        return {
+            minCutoff, beta, dCutoff,
+            x: null, dx: 0, tPrev: null,
+            filter(x, t) {
+                if (this.x === null) { this.x = x; this.dx = 0; this.tPrev = t; return x; }
+                const dt = Math.max(0.001, t - this.tPrev);
+                const dxRaw = (x - this.x) / dt;
+                const aD = 1 / (1 + 1 / (2 * Math.PI * this.dCutoff * dt));
+                this.dx += aD * (dxRaw - this.dx);
+                const cutoff = this.minCutoff + this.beta * Math.abs(this.dx);
+                const a = 1 / (1 + 1 / (2 * Math.PI * cutoff * dt));
+                this.x += a * (x - this.x);
+                this.tPrev = t;
+                return this.x;
+            },
+        };
+    }
+    // Per-landmark filter bank. Tuned for ~30 fps pose data:
+    //   minCutoff=1.7  — slow base cutoff = aggressive smoothing at rest
+    //   beta=0.007     — quickly relaxes when motion accelerates
+    //   dCutoff=1.0    — derivative filter cutoff
+    const kpFilters = {};
+    function smoothKp(idx, axis, raw, t) {
+        const key = idx + axis;
+        if (!kpFilters[key]) kpFilters[key] = OneEuro(1.7, 0.007, 1.0);
+        return kpFilters[key].filter(raw, t);
+    }
+
+    function ingestPoseLandmarks(landmarks) {
+        if (!landmarks || landmarks.length < 33 || !model) {
+            liveValid = false;
+            return;
+        }
+
+        // 1. average visibility as confidence
+        let visCount = 0, visAvg = 0;
+        for (let i = 0; i < landmarks.length; i++) {
+            const lm = landmarks[i];
+            const v = lm.visibility || 0;
+            if (v > 0.5) visCount++;
+            visAvg += v;
+        }
+        visAvg /= landmarks.length;
+        document.getElementById('lm-visible').textContent = visCount + ' / 33';
+        document.getElementById('track-conf').textContent = (visAvg * 100).toFixed(0) + ' %';
+        liveConfidence = visAvg;
+        if (visAvg < 0.3) { liveValid = false; return; }
+
+        // 2. compute hip center + shoulder span in pose space
+        const lh = landmarks[23], rh = landmarks[24];
+        const ls = landmarks[11], rs = landmarks[12];
+        if (!lh || !rh || !ls || !rs) { liveValid = false; return; }
+        const poseHipMid = {
+            x: (lh.x + rh.x) / 2, y: (lh.y + rh.y) / 2, z: (lh.z + rh.z) / 2,
+        };
+        const poseShoulderDist = Math.hypot(ls.x - rs.x, ls.y - rs.y, (ls.z - rs.z) || 0);
+        // scale so that pose-space shoulder distance maps to ~0.36 m
+        const TARGET_SHOULDER = 0.36;
+        const scale = poseShoulderDist > 0.01 ? (TARGET_SHOULDER / poseShoulderDist) : 1.0;
+
+        // 3. pelvis anchor in world — fixed at the model's hip-bone position
+        const hips = bones['mixamorigHips'];
+        const pelvisWorld = hips ? hips.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3(0, 0.95, 0);
+
+        // 4. project each tracked landmark to world
+        //    x flipped (selfie mirror), y flipped (image y down → world y up)
+        // Coordinate flips — toggleable via URL params:
+        //   ?mirror=0  disable selfie x-flip (anatomical match)
+        //   ?yflip=0   if raising arm makes model lower it
+        //   ?zflip=0   if leaning forward already maps correctly
+        // Defaults below are calibrated for: user faces camera, Mixamo
+        // X Bot facing +Z toward camera, MediaPipe convention z<0 = closer.
+        const mirror = new URLSearchParams(location.search).get('mirror') !== '0';   // ON by default
+        const yflip  = new URLSearchParams(location.search).get('yflip')  !== '0';   // ON
+        const zflip  = new URLSearchParams(location.search).get('zflip')  !== '0';   // ON by default
+        for (const i of KP_INDICES) {
+            const lm = landmarks[i];
+            if (!lm) continue;
+            const wx = (mirror ? -1 : 1) * (lm.x - poseHipMid.x) * scale;
+            const wy = (yflip ? -1 : 1) * (lm.y - poseHipMid.y) * scale;
+            const wz = (zflip ? -1 : 1) * (lm.z - poseHipMid.z) * scale * 0.7;
+            if (!liveKp[i]) liveKp[i] = new THREE.Vector3();
+            liveKp[i].set(pelvisWorld.x + wx, pelvisWorld.y + wy, pelvisWorld.z + wz);
+        }
+        liveValid = true;
+    }
+
+    // Diagnostics
+    window._retargetStats = {
+        framesRun: 0, framesValid: 0, bonesRotated: 0,
+        lastDesiredDir: { LeftArm: null, RightArm: null },
+        lastTargetLocal: { LeftArm: null, RightArm: null },
+    };
+
+    function applyRetargeting() {
+        window._retargetStats.framesRun++;
+        if (!liveValid) return;
+        window._retargetStats.framesValid++;
+
+        // Reset ALL bones in the rig to their cached rest local. This makes
+        // retargeting independent of whatever Idle/AnimationMixer left in
+        // the parent chain. Cheap (~129 quaternion copies).
+        const allRest = boneRest.__allRestLocal;
+        if (allRest) {
+            for (const name in allRest) bones[name].quaternion.copy(allRest[name]);
+        }
+        // Re-evaluate world matrices off the fresh rest local pose so
+        // parent.getWorldQuaternion() returns rest world (matching our
+        // cached restParentWorldQ within numerical precision).
+        if (model) model.updateMatrixWorld(true);
+
+        for (const r of RETARGETS) {
+            const rest = boneRest[r.suffix];
+            if (!rest) continue;
+            const bone = rest.bone;
+
+            // resolve from / to keypoints
+            let from, to;
+            if (r.fromAvg) {
+                const a = liveKp[r.fromAvg[0]], b = liveKp[r.fromAvg[1]];
+                if (!a || !b) continue;
+                from = a.clone().add(b).multiplyScalar(0.5);
+            } else {
+                from = liveKp[r.from];
+            }
+            if (r.toAvg) {
+                const a = liveKp[r.toAvg[0]], b = liveKp[r.toAvg[1]];
+                if (!a || !b) continue;
+                to = a.clone().add(b).multiplyScalar(0.5);
+            } else {
+                to = liveKp[r.to];
+            }
+            if (!from || !to) continue;
+
+            const desiredDir = new THREE.Vector3().subVectors(to, from).normalize();
+
+            // world quat that rotates rest direction to desired direction
+            const deltaWorld = new THREE.Quaternion().setFromUnitVectors(rest.restDir, desiredDir);
+            // bone's target world quat = deltaWorld × restWorldQ
+            const targetWorldQ = deltaWorld.clone().multiply(rest.restWorldQ);
+            // bone.quaternion (parent-local) = restParentWorldQ⁻¹ × targetWorldQ
+            const localQ = rest.restParentWorldQ.clone().invert().multiply(targetWorldQ);
+
+            // Diagnostics for arms specifically
+            if (r.suffix === 'LeftArm' || r.suffix === 'RightArm') {
+                window._retargetStats.lastDesiredDir[r.suffix] =
+                    [+desiredDir.x.toFixed(3), +desiredDir.y.toFixed(3), +desiredDir.z.toFixed(3)];
+                window._retargetStats.lastTargetLocal[r.suffix] =
+                    localQ.toArray().map(x => +x.toFixed(3));
+            }
+
+            // We reset to rest local each frame, so this slerp is the
+            // FRACTION OF FULL POSE to apply.  Visibility-weighted:
+            //   vis < 0.4  → fully fall back to rest (no rotation)
+            //   vis >= 0.7 → full retargeting strength
+            //   in between → linear ramp
+            const vis = visForRetarget(r);
+            const visWeight = Math.max(0, Math.min(1, (vis - 0.4) / 0.3));
+            const slerpAmount = 0.9 * visWeight;
+            if (slerpAmount > 0.01) {
+                bone.quaternion.slerp(localQ, slerpAmount);
+            }
+            window._retargetStats.bonesRotated++;
+        }
+
+        // ---------- HIPS ROOT ROTATION (torso twist + lean) ----------
+        //   Drives the Hips bone rotation from the live shoulder/hip
+        //   geometry. Rotates around world Y for left/right twist and
+        //   tilts forward/back when the user leans. Gives the figure
+        //   a full body that follows your torso, not just limb wagging.
+        const hipsBone = bones['mixamorigHips'];
+        const lhip = liveKp[23], rhip = liveKp[24];
+        const lsho = liveKp[11], rsho = liveKp[12];
+        if (hipsBone && lhip && rhip && lsho && rsho) {
+            const hipMid = lhip.clone().add(rhip).multiplyScalar(0.5);
+            const shoMid = lsho.clone().add(rsho).multiplyScalar(0.5);
+            // hip-line direction (right hip → left hip) projected in world
+            const hipLine = new THREE.Vector3().subVectors(lhip, rhip).normalize();
+            // up direction = from hip mid to shoulder mid
+            const upDir = new THREE.Vector3().subVectors(shoMid, hipMid).normalize();
+            // forward = up × hipLine (perpendicular to both)
+            const fwdDir = new THREE.Vector3().crossVectors(upDir, hipLine).normalize();
+            // Recompute hipLine perpendicular to upDir for orthogonality
+            const sideDir = new THREE.Vector3().crossVectors(fwdDir, upDir).normalize();
+            // Build a basis matrix and extract rotation
+            const m = new THREE.Matrix4().makeBasis(sideDir, upDir, fwdDir);
+            const targetHipsWorldQ = new THREE.Quaternion().setFromRotationMatrix(m);
+            // hips parent is the model root — model.quaternion is identity
+            // so local quat = targetHipsWorldQ × (rest world inverse)
+            const restHipsLocal = boneRest.__allRestLocal['mixamorigHips'];
+            if (restHipsLocal) {
+                // Slerp gently — hips control whole body pose, jitter shows up x2
+                const hipsVis = Math.min(
+                    liveVis[23] ?? 1, liveVis[24] ?? 1,
+                    liveVis[11] ?? 1, liveVis[12] ?? 1
+                );
+                const hipsVisW = Math.max(0, Math.min(1, (hipsVis - 0.4) / 0.3));
+                hipsBone.quaternion.slerp(targetHipsWorldQ, 0.45 * hipsVisW);
+            }
+        }
+
+        // Force a fresh world-matrix walk so SkinnedMesh.skeleton picks up
+        // the just-changed bone quaternions before composer.render() runs.
+        if (model) model.updateMatrixWorld(true);
+
+        // Manually update each SkinnedMesh's skeleton boneMatrices Float32Array
+        // so the GPU upload reflects this frame's bone changes immediately.
+        if (model.__skinned === undefined) {
+            model.__skinned = [];
+            model.traverse(o => { if (o.isSkinnedMesh) model.__skinned.push(o); });
+        }
+        for (const sm of model.__skinned) sm.skeleton.update();
+
+        // freeze Idle while tracking
+        if (idleAction) {
+            idleAction.setEffectiveWeight(0);
+            idleAction.stop();
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    //  MediaPipe Pose pipeline
+    // ---------------------------------------------------------------------
+    let pose = null;
+    let videoEl = null;
+    let overlayCanvas = null;
+    let overlayCtx = null;
+    let camStream = null;
+    let poseLoopActive = false;
+
+    function setPoseStatus(state, txt) {
+        const el = document.getElementById('pose-status');
+        el.className = 'status s-' + state;
+        document.getElementById('pose-status-txt').textContent = txt;
+        document.getElementById('pose-state').textContent = state;
+    }
+
+    async function startWebcam() {
+        const btn = document.getElementById('cam-btn');
+        btn.disabled = true;
+        setPoseStatus('loading', 'Requesting camera…');
+        try {
+            camStream = await navigator.mediaDevices.getUserMedia({
+                // Higher resolution → better landmark accuracy. Most modern
+                // webcams support 1280×720; falls back gracefully via
+                // `ideal` constraints if not.
+                video: {
+                    width:  { ideal: 1280 },
+                    height: { ideal: 720 },
+                    frameRate: { ideal: 30, max: 60 },
+                    facingMode: 'user',
+                },
+                audio: false,
+            });
+        } catch (e) {
+            setPoseStatus('error', 'Camera denied or unavailable');
+            btn.textContent = '✗ Permission denied';
+            btn.disabled = false;
+            console.error(e);
+            return;
+        }
+        videoEl = document.getElementById('cam-video');
+        overlayCanvas = document.getElementById('cam-overlay');
+        videoEl.srcObject = camStream;
+        await videoEl.play();
+        overlayCanvas.width  = videoEl.videoWidth;
+        overlayCanvas.height = videoEl.videoHeight;
+        overlayCtx = overlayCanvas.getContext('2d');
+
+        // Pull complexity from URL — default Heavy (2) for max fidelity.
+        // ?cnn=0 = Lite (fast), ?cnn=1 = Full (balanced), ?cnn=2 = Heavy.
+        const cnnParam = parseInt(new URLSearchParams(location.search).get('cnn') ?? '2', 10);
+        const modelComplexity = isNaN(cnnParam) ? 2 : Math.max(0, Math.min(2, cnnParam));
+        const cnnLabel = ['Lite', 'Full', 'Heavy'][modelComplexity];
+        setPoseStatus('loading', `Loading MediaPipe Pose · ${cnnLabel} (~${[3,5,12][modelComplexity]} MB)…`);
+        if (!window.Pose) {
+            setPoseStatus('error', 'MediaPipe Pose script not loaded');
+            return;
+        }
+        pose = new Pose({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`,
+        });
+        pose.setOptions({
+            modelComplexity,
+            smoothLandmarks: true,
+            enableSegmentation: false,
+            minDetectionConfidence: 0.4,    // slightly lower = more permissive
+            minTrackingConfidence: 0.4,
+        });
+        pose.onResults(onPoseResults);
+        await pose.initialize();
+        // surface which model is loaded
+        const lblEl = document.getElementById('pose-state');
+        if (lblEl) lblEl.textContent = `tracking · ${cnnLabel}`;
+
+        setPoseStatus('active', 'Tracking');
+        btn.textContent = '◼ Stop tracking';
+        btn.disabled = false;
+        btn.onclick = stopWebcam;
+        document.getElementById('subj-state').textContent = '● Live tracking';
+        document.getElementById('subj-state').className = 'v green';
+        document.getElementById('csi-legend').className = 'legend live';
+        document.getElementById('csi-legend').textContent =
+            'amplitude = 1 / (1 + r²·k) from each ESP32 to your live wrist. Real distances, no fakes.';
+        poseLoopActive = true;
+        runPoseLoop();
+    }
+
+    function stopWebcam() {
+        poseLoopActive = false;
+        if (camStream) camStream.getTracks().forEach(t => t.stop());
+        camStream = null;
+        liveValid = false;
+        setPoseStatus('idle', 'Webcam disabled');
+        document.getElementById('subj-state').textContent = '● Idle (no webcam)';
+        document.getElementById('subj-state').className = 'v amber';
+        const btn = document.getElementById('cam-btn');
+        btn.textContent = '▶ Enable webcam tracking';
+        btn.onclick = startWebcam;
+        // restore bones to rest pose so the figure doesn't freeze in last
+        // tracked stance; keep Idle disabled so it can't fight us later
+        const allRest = boneRest && boneRest.__allRestLocal;
+        if (allRest) for (const name in allRest) bones[name].quaternion.copy(allRest[name]);
+    }
+
+    document.getElementById('cam-btn').onclick = startWebcam;
+
+    // -----------------------------------------------------------------
+    //  Demo mode — synthesize MediaPipe-shaped landmark data and run it
+    //  through ingestPoseLandmarks(), exactly as the real webcam path
+    //  does. Animates arms, head, legs through a deterministic cycle.
+    // -----------------------------------------------------------------
+    let demoRunning = false;
+    let demoT0 = 0;
+    function buildDemoLandmarks(t) {
+        // generate 33 BlazePose-style landmarks in normalized image coords
+        // image origin: (0,0)=top-left, (1,1)=bottom-right
+        // y goes DOWN in image space.
+        const lms = new Array(33);
+        // base reference points (hip at center of image, head above)
+        const cx = 0.5;
+        const hipY = 0.60;
+        const shoulderY = 0.42;
+        const elbowY0 = 0.52;
+        const wristY0 = 0.62;
+        const kneeY = 0.78;
+        const ankleY = 0.92;
+
+        // animated offsets
+        const armSwing = Math.sin(t * 1.3);   // -1..1
+        const armRaise = Math.sin(t * 0.7) * 0.5 + 0.5;   // 0..1
+        const headTurn = Math.sin(t * 0.5) * 0.05;
+        const legSwing = Math.sin(t * 1.0) * 0.05;
+
+        // build all 33 landmarks (set visibility high)
+        const make = (x, y, z = 0, v = 0.95) => ({ x, y, z, visibility: v });
+
+        // 0 nose, 1-10 face/eyes/ears/mouth
+        lms[0] = make(cx + headTurn, 0.30);
+        for (let i = 1; i <= 10; i++) {
+            lms[i] = make(cx + headTurn + (i % 2 ? 0.03 : -0.03), 0.30 + 0.02);
+        }
+
+        // shoulders
+        lms[11] = make(cx + 0.10, shoulderY);   // L shoulder (user's L = anatomical left, on RIGHT of image with non-mirror webcam)
+        lms[12] = make(cx - 0.10, shoulderY);   // R shoulder
+
+        // elbows — L (kp 13) waves; R (kp 14) raises
+        lms[13] = make(cx + 0.12 + 0.08 * armSwing, elbowY0 - 0.10 * armRaise);
+        lms[14] = make(cx - 0.12 - 0.08 * armSwing, elbowY0 - 0.20 * armRaise);
+
+        // wrists — extend further with armRaise + swing
+        lms[15] = make(cx + 0.14 + 0.16 * armSwing, wristY0 - 0.22 * armRaise);
+        lms[16] = make(cx - 0.14 - 0.16 * armSwing, wristY0 - 0.36 * armRaise);
+
+        // 17-22 fingers, copy wrist pose
+        for (let i = 17; i <= 22; i++) {
+            const wrist = i < 20 ? lms[15] : lms[16];
+            lms[i] = make(wrist.x + (i % 2 ? 0.01 : -0.01), wrist.y + 0.02);
+        }
+
+        // hips
+        lms[23] = make(cx + 0.05, hipY);
+        lms[24] = make(cx - 0.05, hipY);
+
+        // knees + ankles — slight leg swing
+        lms[25] = make(cx + 0.06 + legSwing, kneeY);
+        lms[26] = make(cx - 0.06 - legSwing, kneeY);
+        lms[27] = make(cx + 0.06 + legSwing * 1.4, ankleY);
+        lms[28] = make(cx - 0.06 - legSwing * 1.4, ankleY);
+
+        // 29-32 feet, copy ankle pose
+        for (let i = 29; i <= 32; i++) {
+            const ankle = i < 31 ? lms[27] : lms[28];
+            lms[i] = make(ankle.x, ankle.y + 0.02);
+        }
+
+        return lms;
+    }
+
+    function startDemoMode() {
+        stopWebcam();
+        demoRunning = true;
+        demoT0 = performance.now();
+        setPoseStatus('active', 'Demo mode (synthetic)');
+        document.getElementById('subj-state').textContent = '● Demo mode';
+        document.getElementById('subj-state').className = 'v cyan';
+        document.getElementById('demo-btn').textContent = '◼ Stop demo';
+        document.getElementById('demo-btn').onclick = stopDemoMode;
+        document.getElementById('lm-count').textContent = '33 / 33';
+        document.getElementById('lm-visible').textContent = '33 / 33';
+        document.getElementById('track-conf').textContent = '95 %';
+        runDemoLoop();
+    }
+    function stopDemoMode() {
+        demoRunning = false;
+        liveValid = false;
+        setPoseStatus('idle', 'Webcam disabled');
+        document.getElementById('subj-state').textContent = '● Idle (no webcam)';
+        document.getElementById('subj-state').className = 'v amber';
+        const btn = document.getElementById('demo-btn');
+        btn.textContent = '▶ Demo mode (synthetic pose)';
+        btn.onclick = startDemoMode;
+        if (idleAction) { idleAction.setEffectiveWeight(1); idleAction.reset().play(); }
+    }
+    function runDemoLoop() {
+        if (!demoRunning) return;
+        const t = (performance.now() - demoT0) * 0.001;
+        const lms = buildDemoLandmarks(t);
+        ingestPoseLandmarks(lms);
+        document.getElementById('pose-fps').textContent = '30 fps (demo)';
+        setTimeout(runDemoLoop, 33);  // ~30 fps to match MediaPipe cadence
+    }
+    document.getElementById('demo-btn').onclick = startDemoMode;
+    // Force test button — bypasses retargeting entirely, just spins all
+    //   retargeted bones via setFromAxisAngle. If even THIS doesn't move
+    //   the body, the user is on a cached old build that's missing the
+    //   updated SkinnedMesh path.
+    let forceTestActive = false, forceTestT0 = 0;
+    function startForceTest() {
+        stopDemoMode(); stopWebcam();
+        forceTestActive = true;
+        forceTestT0 = performance.now();
+        document.getElementById('forcetest-btn').textContent = '◼ Stop force test';
+        document.getElementById('forcetest-btn').onclick = stopForceTest;
+        document.getElementById('subj-state').textContent = '● Force test (bypass)';
+        document.getElementById('subj-state').className = 'v mag';
+        if (idleAction) { idleAction.setEffectiveWeight(0); idleAction.stop(); }
+        loopForceTest();
+    }
+    function stopForceTest() {
+        forceTestActive = false;
+        document.getElementById('forcetest-btn').textContent = '⚡ Force test rotation (bypass retarget)';
+        document.getElementById('forcetest-btn').onclick = startForceTest;
+        document.getElementById('subj-state').textContent = '● Idle (no webcam)';
+        document.getElementById('subj-state').className = 'v amber';
+        // restore rest pose
+        const allRest = boneRest && boneRest.__allRestLocal;
+        if (allRest) for (const name in allRest) bones[name].quaternion.copy(allRest[name]);
+        if (idleAction) { idleAction.setEffectiveWeight(1); idleAction.reset().play(); }
+    }
+    function loopForceTest() {
+        if (!forceTestActive) return;
+        const t = (performance.now() - forceTestT0) * 0.001;
+        for (const r of RETARGETS) {
+            const rest = boneRest[r.suffix];
+            if (!rest) continue;
+            const angle = Math.PI * 0.4 * Math.sin(t * 1.2 + r.suffix.length);
+            rest.bone.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), angle);
+        }
+        setTimeout(loopForceTest, 33);
+    }
+    document.getElementById('forcetest-btn').onclick = startForceTest;
+
+    // also expose on _RVF for eval testing
+    window._RVF_demo = { start: startDemoMode, stop: stopDemoMode, buildLandmarks: buildDemoLandmarks };
+    window._RVF_forceTest = { start: startForceTest, stop: stopForceTest };
+
+    async function runPoseLoop() {
+        while (poseLoopActive) {
+            if (videoEl.readyState >= 2) {
+                try { await pose.send({ image: videoEl }); }
+                catch (e) { console.warn('pose send', e); }
+            }
+            await new Promise(r => requestAnimationFrame(r));
+        }
+    }
+
+    function onPoseResults(results) {
+        const now = performance.now();
+        if (lastPoseT) {
+            const dt = now - lastPoseT;
+            poseFps = poseFps * 0.85 + (1000 / Math.max(dt, 1)) * 0.15;
+            document.getElementById('pose-fps').textContent = poseFps.toFixed(0) + ' fps';
+        }
+        lastPoseT = now;
+
+        const lms = results.poseLandmarks;
+        // poseWorldLandmarks: MediaPipe's internal 3D model, in METERS,
+        // origin at hip midpoint. Way more reliable for depth than the
+        // image-normalized z. Use when available (Heavy/Full models).
+        const wlms = results.poseWorldLandmarks;
+        document.getElementById('lm-count').textContent =
+            (lms ? lms.length : 0) + ' / 33' + (wlms ? ' · world' : '');
+
+        if (overlayCtx) {
+            overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+            if (lms) {
+                overlayCtx.strokeStyle = '#4cf';
+                overlayCtx.lineWidth = 2;
+                overlayCtx.fillStyle = '#ffb840';
+                for (const [a, b] of KP_BONES) {
+                    if (!lms[a] || !lms[b]) continue;
+                    overlayCtx.beginPath();
+                    overlayCtx.moveTo(lms[a].x * overlayCanvas.width, lms[a].y * overlayCanvas.height);
+                    overlayCtx.lineTo(lms[b].x * overlayCanvas.width, lms[b].y * overlayCanvas.height);
+                    overlayCtx.stroke();
+                }
+                for (const i of KP_INDICES) {
+                    if (!lms[i]) continue;
+                    overlayCtx.beginPath();
+                    overlayCtx.arc(lms[i].x * overlayCanvas.width, lms[i].y * overlayCanvas.height, 3, 0, Math.PI * 2);
+                    overlayCtx.fill();
+                }
+            }
+        }
+
+        // Prefer world landmarks (real meters, origin at hip mid) when present
+        if (wlms && wlms.length === 33) ingestPoseWorldLandmarks(wlms, lms);
+        else ingestPoseLandmarks(lms);
+    }
+
+    // Direct world-meters ingest path — much higher fidelity than my
+    // image-normalized fallback. Coords are in meters, origin = hip mid.
+    function ingestPoseWorldLandmarks(wlms, imageLms) {
+        if (!wlms || wlms.length < 33 || !model) { liveValid = false; return; }
+
+        let visAvg = 0; let visCount = 0;
+        for (let i = 0; i < (imageLms ? imageLms.length : 0); i++) {
+            const v = imageLms[i].visibility ?? 1.0;
+            if (v > 0.5) visCount++;
+            visAvg += v;
+        }
+        visAvg = imageLms && imageLms.length ? visAvg / imageLms.length : 1.0;
+        document.getElementById('lm-visible').textContent = visCount + ' / 33';
+        document.getElementById('track-conf').textContent = (visAvg * 100).toFixed(0) + ' %';
+        liveConfidence = visAvg;
+        if (visAvg < 0.25) { liveValid = false; return; }
+
+        const mirror = new URLSearchParams(location.search).get('mirror') !== '0';
+        const yflip  = new URLSearchParams(location.search).get('yflip')  !== '0';
+        const zflip  = new URLSearchParams(location.search).get('zflip')  !== '0';
+
+        const hips = bones['mixamorigHips'];
+        const pelvisWorld = hips
+            ? hips.getWorldPosition(new THREE.Vector3())
+            : new THREE.Vector3(0, 0.95, 0);
+
+        const t = performance.now() * 0.001;
+        for (const i of KP_INDICES) {
+            const lm = wlms[i];
+            if (!lm) continue;
+            // OneEuro filter each axis independently to kill jitter
+            const wx = smoothKp(i, 'x', (mirror ? -1 : 1) * lm.x, t);
+            const wy = smoothKp(i, 'y', (yflip  ? -1 : 1) * lm.y, t);
+            const wz = smoothKp(i, 'z', (zflip  ? -1 : 1) * lm.z, t);
+            if (!liveKp[i]) liveKp[i] = new THREE.Vector3();
+            liveKp[i].set(pelvisWorld.x + wx, pelvisWorld.y + wy, pelvisWorld.z + wz);
+            // Stash visibility (from image landmarks — world ones lack it)
+            liveVis[i] = imageLms?.[i]?.visibility ?? 1.0;
+        }
+        liveValid = true;
+    }
+
+    // ---------------------------------------------------------------------
+    //  Real CSI driver — live amp from a real ESP32-S3 over Tailscale
+    //  WebSocket (ruvultra-csi-bridge), distributed across the four UI
+    //  nodes with phase-shifted variation. Falls back to keypoint-distance
+    //  when no live signal.
+    // ---------------------------------------------------------------------
+    const csiAmp = [0, 0, 0, 0];   // smoothed per-node amplitude (displayed)
+    let csiCoherence = 0.5;        // smoothed coherence
+    let csiTargetAmp = 0;          // raw target from bridge (1Hz updates)
+    let csiTargetCoh = 0.5;
+    let csiPresence = 0;
+    let csiRssi = -90;
+    let csiYieldPps = 0;
+    let csiLastTickT = 0;
+    let csiLive = false;
+
+    // ESP32 WebSocket — heavy EMA on the displayed values so 1Hz updates
+    // animate as smooth ~3 fps bars, not staircase steps.
+    const CSI_WS_URL = (
+        new URLSearchParams(location.search).get('csi') ||
+        'ws://100.104.125.72:8766/'
+    );
+    let csiSocket = null;
+    function connectCsiWebsocket() {
+        try {
+            csiSocket = new WebSocket(CSI_WS_URL);
+        } catch (e) { console.warn('CSI WS construct failed', e); return; }
+        csiSocket.onopen = () => {
+            console.log('[csi] connected to', CSI_WS_URL);
+            csiLive = true;
+            const el = document.getElementById('csi-legend');
+            if (el) {
+                el.className = 'legend live';
+                el.textContent = '● ESP32 LIVE · D0:CF:13:44:01:84 via ruvultra';
+            }
+        };
+        csiSocket.onmessage = (ev) => {
+            try {
+                const m = JSON.parse(ev.data);
+                csiTargetAmp = m.amp ?? 0;
+                csiPresence = m.presence ?? 0;
+                csiRssi = m.rssi ?? -90;
+                csiYieldPps = m.yield_pps ?? 0;
+                csiLastTickT = performance.now() * 0.001;
+                // coherence as a function of yield (more pps = more stable)
+                csiTargetCoh = Math.max(0, Math.min(1, csiYieldPps / 20));
+            } catch (e) { /* ignore malformed */ }
+        };
+        csiSocket.onclose = () => {
+            csiLive = false;
+            const el = document.getElementById('csi-legend');
+            if (el) {
+                el.className = 'legend';
+                el.textContent = 'ESP32 disconnected — falling back to keypoint distance';
+            }
+            setTimeout(connectCsiWebsocket, 4000); // auto-reconnect
+        };
+        csiSocket.onerror = () => { try { csiSocket.close(); } catch (e) {} };
+    }
+    connectCsiWebsocket();
+
+    function tickCsi(t, fallbackCenter) {
+        // Heavy EMA on the master amp so 1 Hz ticks animate as smooth
+        // motion. EMA alpha = 0.06 ≈ ~3-second time-constant at 60 fps.
+        const targetMaster = csiLive ? csiTargetAmp : (() => {
+            // Fallback: keypoint-distance synthesis (legacy behavior)
+            let center = fallbackCenter;
+            if (liveValid && liveKp[15] && liveKp[16]) {
+                center = liveKp[15].clone().add(liveKp[16]).multiplyScalar(0.5);
+            }
+            const np = NODE_POSITIONS[0];
+            const r2 = (np[0]-center.x)**2 + (np[1]-center.y)**2 + (np[2]-center.z)**2;
+            return 1.0 / (1.0 + r2 * 0.18);
+        })();
+
+        // distribute the single ESP32 reading across 4 UI nodes with
+        // phase-shifted breathing — looks alive without faking sensor data
+        const phaseT = t * 0.55;
+        const wobble = [
+            1.00,
+            0.92 + 0.06 * Math.sin(phaseT + 0.7),
+            0.88 + 0.08 * Math.sin(phaseT + 1.4),
+            0.95 + 0.04 * Math.sin(phaseT + 2.1),
+        ];
+        for (let i = 0; i < 4; i++) {
+            const target = Math.max(0, Math.min(1, targetMaster * wobble[i]));
+            // EMA — alpha low so motion is gradual, not jittery
+            csiAmp[i] = csiAmp[i] * 0.94 + target * 0.06;
+        }
+        csiCoherence = csiCoherence * 0.94 + csiTargetCoh * 0.06;
+    }
+
+    // ---------------------------------------------------------------------
+    //  Per-frame updates
+    // ---------------------------------------------------------------------
+    let lastPingT = [0, 0, 0, 0];
+    let subjectFlash = 0;
+    const modelMeshes = [];
+    function collectModelMeshes() {
+        if (!model || modelMeshes.length) return;
+        model.traverse(o => {
+            if (o.isMesh && o.material && o.material.isMeshStandardMaterial) {
+                o.material.emissive = new THREE.Color(0xffb840);
+                o.material.emissiveIntensity = 0;
+                modelMeshes.push(o);
+            }
+        });
+    }
+    function updateSubjectFlash() {
+        collectModelMeshes();
+        subjectFlash *= 0.86;
+        for (const m of modelMeshes) m.material.emissiveIntensity = subjectFlash;
+    }
+
+    function updateNodes() {
+        for (let i = 0; i < 4; i++) {
+            const ring = nodeRings[i];
+            const amp = csiAmp[i];
+            ring.material.opacity = 0.32 + 0.55 * amp;
+            ring.scale.setScalar(1 + 0.30 * amp);
+            rimLights[i].intensity = 0.30 + 0.60 * amp * csiCoherence;
+        }
+    }
+    function maybeEmitPings(t, modelCenter) {
+        if (!document.getElementById('t-pings')?.checked && document.getElementById('t-pings')) return;
+        if (!model) return;
+        for (let i = 0; i < 4; i++) {
+            const interval = 1.2 / (0.25 + csiAmp[i]);
+            if (t - lastPingT[i] > interval) {
+                lastPingT[i] = t;
+                const target = modelCenter.clone();
+                target.y += (Math.random() - 0.3) * 0.8;
+                target.x += (Math.random() - 0.5) * 0.2;
+                const origin = nodeAnchors[i].getWorldPosition(new THREE.Vector3());
+                emitPing(origin, target);
+            }
+        }
+    }
+    function updatePings(t) {
+        for (const p of pings) {
+            if (!p.active) continue;
+            const u = (t - p.t0) / p.duration;
+            if (u >= 1) {
+                p.active = false; p.mesh.visible = false;
+                subjectFlash = Math.min(0.42, subjectFlash + 0.18);
+                continue;
+            }
+            p.mesh.position.lerpVectors(p.origin, p.target, u);
+            p.mesh.scale.setScalar(0.03 + u * 0.18);
+            p.mesh.material.opacity = (1.0 - u) * 0.40 * csiCoherence;
+        }
+    }
+    function updateTomography(t) {
+        if (!document.getElementById('t-tomo').checked) { tomoActive = false; tomoPlane.visible = false; return; }
+        if (!tomoActive && t > tomoNextAt) {
+            tomoActive = true; tomoT0 = t; tomoPlane.visible = true;
+            const sf = document.getElementById('scan-flash');
+            sf.style.animation = 'none';
+            requestAnimationFrame(() => { sf.style.animation = 'scanFlash 1.6s ease-out'; });
+        }
+        if (tomoActive) {
+            const dur = 2.4;
+            const e = (t - tomoT0) / dur;
+            if (e >= 1) {
+                tomoActive = false; tomoPlane.visible = false;
+                tomoNextAt = t + 4 + Math.random() * 5;
+            } else {
+                tomoPlane.position.x = -3 + e * 6;
+                tomoMat.uniforms.intensity.value = Math.sin(e * Math.PI);
+                tomoMat.uniforms.time.value = t;
+            }
+        }
+    }
+    function updateGodRays(t) {
+        if (!model) return;
+        const want = document.getElementById('t-rays').checked;
+        const center = new THREE.Vector3();
+        const box = new THREE.Box3().setFromObject(model);
+        box.getCenter(center);
+        for (let i = 0; i < 4; i++) {
+            godRays[i].mesh.visible = want;
+            if (!want) continue;
+            const node = nodeAnchors[i];
+            const np = node.getWorldPosition(new THREE.Vector3());
+            const dir = new THREE.Vector3().subVectors(center, np);
+            const len = dir.length(); dir.normalize();
+            const ray = godRays[i];
+            ray.mesh.position.copy(np);
+            ray.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir);
+            ray.mesh.scale.set(1, len / 4.0, 1);
+            ray.mat.uniforms.time.value = t;
+            const target = csiAmp[i] * csiCoherence * 1.4;
+            ray.mat.uniforms.intensity.value = ray.mat.uniforms.intensity.value * 0.85 + target * 0.15;
+        }
+    }
+    function updateBbox() {
+        const want = document.getElementById('t-bbox').checked && model;
+        if (!want) {
+            if (bboxHelper) { scene.remove(bboxHelper); bboxHelper = null; }
+            document.getElementById('bbox-vol').textContent = '—';
+            return;
+        }
+        if (!bboxHelper) {
+            bboxHelper = new THREE.BoxHelper(model, 0xffe09f);
+            bboxHelper.material.transparent = true; bboxHelper.material.opacity = 0.55;
+            scene.add(bboxHelper);
+        } else bboxHelper.setFromObject(model);
+        const box = new THREE.Box3().setFromObject(model);
+        const size = box.getSize(new THREE.Vector3());
+        document.getElementById('bbox-vol').textContent = (size.x * size.y * size.z).toFixed(3) + ' m³';
+    }
+    function updateKpDots() {
+        const want = document.getElementById('t-kpdots').checked && liveValid;
+        for (const i of KP_INDICES) {
+            const dot = kpDots[i]; if (!dot) continue;
+            if (want && liveKp[i]) {
+                dot.position.copy(liveKp[i]);
+                dot.visible = true;
+            } else dot.visible = false;
+        }
+        for (const line of kpLines) {
+            const { a, b } = line.userData;
+            const pa = liveKp[a], pb = liveKp[b];
+            if (want && pa && pb) {
+                const pos = line.geometry.attributes.position;
+                pos.array[0] = pa.x; pos.array[1] = pa.y; pos.array[2] = pa.z;
+                pos.array[3] = pb.x; pos.array[4] = pb.y; pos.array[5] = pb.z;
+                pos.needsUpdate = true;
+                line.visible = true;
+            } else line.visible = false;
+        }
+    }
+    let hudT = 0;
+    function updateHud(t, fps) {
+        // 3 Hz HUD update — bars stay smooth, less visual chatter
+        if (t - hudT < 0.33) return;
+        hudT = t;
+        for (let i = 0; i < 4; i++) {
+            const pct = Math.round(csiAmp[i] * 100);
+            const bar = document.getElementById('bar-' + i);
+            const val = document.getElementById('val-' + i);
+            if (bar) bar.style.width = pct + '%';
+            if (val) val.textContent = pct + '%';
+        }
+        document.getElementById('fps-val').textContent = fps.toFixed(0) + ' fps';
+        // When ESP32 is live, distances become real metrics
+        if (csiLive) {
+            document.getElementById('dist-L').textContent = csiRssi + ' dBm';
+            document.getElementById('dist-R').textContent = csiYieldPps + ' pps';
+        } else {
+            if (liveKp[15]) {
+                const dL = liveKp[15].distanceTo(new THREE.Vector3(...NODE_POSITIONS[0]));
+                document.getElementById('dist-L').textContent = dL.toFixed(2) + ' m';
+            } else document.getElementById('dist-L').textContent = '—';
+            if (liveKp[16]) {
+                const dR = liveKp[16].distanceTo(new THREE.Vector3(...NODE_POSITIONS[1]));
+                document.getElementById('dist-R').textContent = dR.toFixed(2) + ' m';
+            } else document.getElementById('dist-R').textContent = '—';
+        }
+    }
+
+    // Toggle bindings
+    function bindToggle(id, obj) {
+        document.getElementById(id).addEventListener('change', e => {
+            if (e.target.checked && !scene.children.includes(obj)) scene.add(obj);
+            else if (!e.target.checked) scene.remove(obj);
+        });
+    }
+    bindToggle('t-grid',  gridHelper);
+    bindToggle('t-polar', polarHelper);
+    document.getElementById('t-skel').addEventListener('change', e => {
+        if (skeletonHelper) skeletonHelper.visible = e.target.checked;
+    });
+    document.getElementById('t-nodebox').addEventListener('change', e => {
+        for (const bb of nodeBboxHelpers) {
+            if (e.target.checked && !scene.children.includes(bb)) scene.add(bb);
+            else if (!e.target.checked) scene.remove(bb);
+        }
+    });
+
+    // ---------------------------------------------------------------------
+    //  Main loop
+    // ---------------------------------------------------------------------
+    const clock = new THREE.Clock();
+    let lastMs = performance.now();
+    let fpsEma = 60;
+    function tick() {
+        const nowMs = performance.now();
+        const dt = nowMs - lastMs; lastMs = nowMs;
+        fpsEma = fpsEma * 0.92 + (1000 / Math.max(dt, 1)) * 0.08;
+        const t = nowMs * 0.001;
+        const delta = clock.getDelta();
+
+        if (mixer && !liveValid) mixer.update(delta);  // idle only when no tracking
+        floorMat.uniforms.time.value = t;
+        filmShader.uniforms.time.value = t;
+
+        const center = new THREE.Vector3();
+        if (model) {
+            const box = new THREE.Box3().setFromObject(model);
+            box.getCenter(center);
+        } else center.set(0, 0.9, 0);
+
+        applyRetargeting();
+        tickCsi(t, center);
+        updateNodes();
+        updateGodRays(t);
+        maybeEmitPings(t, center);
+        updatePings(t);
+        updateSubjectFlash();
+        updateTomography(t);
+        updateBbox();
+        updateKpDots();
+
+        controls.update();
+        composer.render();
+        updateHud(t, fpsEma);
+        requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        composer.setSize(window.innerWidth, window.innerHeight);
+        bloom.setSize(window.innerWidth, window.innerHeight);
+    });
+    </script>
+</body>
+</html>

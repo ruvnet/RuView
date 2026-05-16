@@ -1,0 +1,8 @@
+# Mixamo FBX downloads — too large + license boundary. Get your own from
+# mixamo.com (FBX Binary + T-Pose / Without Skin), drop alongside the HTML.
+*.fbx
+
+# Diagnostic / debug screenshots from session
+_diag-*.png
+_demo-mode-shot*.png
+_PROOF-*.png

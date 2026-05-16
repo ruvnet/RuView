@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RuView · Skinned (FBX) · Mixamo X Bot in the ADR-097 helpers scene</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='10' fill='%23e8a634'/></svg>">
+    <style>
+        :root {
+            --bg: #050507; --bg-panel: rgba(8,10,14,0.78);
+            --amber: #ffb840; --amber-hot: #ffe09f;
+            --cyan: #4cf; --magenta: #ff4cc8;
+            --text: #d8c69a; --text-mute: #6b6155;
+            --border: rgba(255,184,64,0.18);
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; background: var(--bg); color: var(--text); overflow: hidden;
+            font-family: 'SF Mono', 'Cascadia Code', Consolas, monospace;
+            -webkit-font-smoothing: antialiased; font-size: 12px;
+        }
+        canvas { display: block; }
+        .overlay-frame {
+            position: fixed; inset: 0; pointer-events: none; z-index: 5;
+            background:
+                radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%),
+                linear-gradient(180deg, rgba(0,0,0,0.32) 0%, transparent 18%, transparent 82%, rgba(0,0,0,0.38) 100%);
+        }
+        .scanlines {
+            position: fixed; inset: 0; pointer-events: none; z-index: 6;
+            background: repeating-linear-gradient(0deg, rgba(0,0,0,0.04) 0px, rgba(0,0,0,0.04) 1px, transparent 1px, transparent 3px);
+            mix-blend-mode: overlay; opacity: 0.5;
+        }
+        .panel {
+            position: absolute; background: var(--bg-panel); border: 1px solid var(--border);
+            border-radius: 4px; padding: 12px 14px; backdrop-filter: blur(8px);
+            box-shadow: 0 1px 0 rgba(255,184,64,0.04), 0 8px 32px rgba(0,0,0,0.55); z-index: 10;
+        }
+        .panel h2 {
+            margin: 0 0 8px 0; font-size: 10px; text-transform: uppercase; letter-spacing: 2px;
+            color: var(--amber); font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: 6px;
+        }
+        #info { top: 20px; left: 20px; min-width: 280px; }
+        #info h1 { margin: 0 0 1px 0; font-size: 13px; letter-spacing: 1px; color: var(--amber-hot); font-weight: 600; }
+        #info .sub { font-size: 10px; color: var(--text-mute); letter-spacing: 0.5px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+        #info .row { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+        #info .row .k { color: var(--text-mute); font-size: 11px; }
+        #info .row .v { color: var(--text); font-variant-numeric: tabular-nums; font-size: 11px; }
+        #info .row .v.amber { color: var(--amber); }
+        #info .row .v.cyan  { color: var(--cyan); }
+        #info .row .v.mag   { color: var(--magenta); }
+
+        #anim {
+            position: absolute; bottom: 20px; left: 20px; min-width: 280px;
+            background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px;
+            padding: 12px 14px; backdrop-filter: blur(8px); z-index: 10;
+        }
+        #anim h2 { margin: 0 0 8px 0; font-size: 10px; text-transform: uppercase; letter-spacing: 2px;
+            color: var(--amber); font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+        #anim .row { padding: 6px 0; font-size: 10px; }
+        #anim .row .label { color: var(--text-mute); margin-right: 8px; }
+        #anim button {
+            background: rgba(255,184,64,0.06); border: 1px solid rgba(255,184,64,0.18);
+            color: var(--text); font-family: inherit; font-size: 10px; padding: 4px 8px;
+            margin: 2px 4px 2px 0; cursor: pointer; border-radius: 3px; letter-spacing: 0.5px;
+        }
+        #anim button:hover { background: rgba(255,184,64,0.14); color: var(--amber-hot); }
+        #anim button.active { background: var(--amber); color: var(--bg); border-color: var(--amber); font-weight: 600; }
+        #anim .slider-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 10px; margin-top: 6px; border-top: 1px solid rgba(255,184,64,0.08); padding-top: 8px; }
+        #anim .slider-row .label { width: 90px; }
+        #anim .slider-row input[type=range] { flex: 1; accent-color: var(--amber); }
+        #anim .slider-row .val { width: 38px; text-align: right; color: var(--amber); font-variant-numeric: tabular-nums; }
+        #anim .empty-hint {
+            font-size: 10px; color: var(--text-mute); line-height: 1.5; margin-top: 4px;
+            padding: 8px; background: rgba(255,184,64,0.04); border-radius: 3px;
+            border-left: 2px solid var(--amber);
+        }
+        #anim .empty-hint a { color: var(--amber); text-decoration: none; }
+        #anim .empty-hint a:hover { color: var(--amber-hot); text-decoration: underline; }
+
+        #helpers {
+            position: absolute; bottom: 20px; right: 20px; min-width: 220px;
+            background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px;
+            padding: 12px 14px; backdrop-filter: blur(8px); z-index: 10;
+        }
+        #helpers h2 { margin: 0 0 8px 0; font-size: 10px; text-transform: uppercase; letter-spacing: 2px;
+            color: var(--amber); font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+        #helpers label {
+            display: flex; align-items: center; gap: 10px; padding: 3px 0; cursor: pointer; user-select: none; font-size: 11px;
+        }
+        #helpers label:hover { color: var(--amber-hot); }
+        #helpers input[type=checkbox] { accent-color: var(--amber); width: 13px; height: 13px; cursor: pointer; }
+        #helpers .swatch { width: 8px; height: 8px; border-radius: 50%; margin-left: auto; box-shadow: 0 0 6px currentColor; }
+
+        #csi { top: 20px; right: 20px; min-width: 260px; }
+        #csi .bar-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 10px; }
+        #csi .bar-row .label { width: 42px; color: var(--text-mute); }
+        #csi .bar-row .bar-track { flex: 1; height: 6px; background: rgba(255,184,64,0.08); border-radius: 2px; overflow: hidden; }
+        #csi .bar-row .bar-fill {
+            height: 100%; background: linear-gradient(90deg, var(--amber-hot), var(--amber));
+            box-shadow: 0 0 6px var(--amber); transition: width 0.08s linear;
+        }
+        #csi .bar-row .val { width: 36px; text-align: right; color: var(--amber); font-variant-numeric: tabular-nums; }
+
+        #loading {
+            position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+            background: rgba(5,5,7,0.96); z-index: 20; font-size: 13px; color: var(--amber);
+            letter-spacing: 2px; text-transform: uppercase;
+        }
+        #loading.hidden { display: none; }
+        #loading .text { text-shadow: 0 0 12px var(--amber); animation: loadPulse 1.4s ease-in-out infinite; }
+        @keyframes loadPulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1.0; } }
+
+        @keyframes scanFlash { 0% { opacity: 0; } 10% { opacity: 0.12; } 100% { opacity: 0; } }
+        .scan-flash {
+            position: fixed; inset: 0;
+            background: linear-gradient(90deg, transparent, var(--magenta), transparent);
+            mix-blend-mode: screen; pointer-events: none; opacity: 0; z-index: 4;
+        }
+
+        #titlecard {
+            position: absolute; bottom: 76px; left: 50%; transform: translateX(-50%);
+            text-align: center; color: var(--amber-hot); letter-spacing: 6px; font-size: 11px;
+            text-transform: uppercase; opacity: 0.35; z-index: 10;
+            text-shadow: 0 0 12px var(--amber); pointer-events: none;
+        }
+        #titlecard .sub { font-size: 9px; color: var(--text-mute); letter-spacing: 4px; margin-top: 4px; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://unpkg.com/fflate@0.7.4/umd/index.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/curves/NURBSCurve.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FBXLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+</head>
+<body>
+    <div class="overlay-frame"></div>
+    <div class="scanlines"></div>
+    <div class="scan-flash" id="scan-flash"></div>
+    <div id="loading"><div class="text">▸ Loading skinned subject · X Bot.fbx</div></div>
+
+    <div class="panel" id="info">
+        <h1>RuView · Skinned (FBX)</h1>
+        <div class="sub">ADR-097 · Mixamo X Bot · loaded via FBXLoader</div>
+        <div class="row"><span class="k">Subject</span><span class="v amber">● Tracked</span></div>
+        <div class="row"><span class="k">Source</span><span class="v" id="src-name">X Bot.fbx</span></div>
+        <div class="row"><span class="k">Format</span><span class="v">FBX 7700 · 1.75 MB</span></div>
+        <div class="row"><span class="k">Bones</span><span class="v" id="bone-count">—</span></div>
+        <div class="row"><span class="k">Animation</span><span class="v amber" id="anim-name">—</span></div>
+        <div class="row"><span class="k">Mesh nodes</span><span class="v cyan">4 · multistatic</span></div>
+        <div class="row"><span class="k">Coherence</span><span class="v" id="coh-val">— %</span></div>
+        <div class="row"><span class="k">Heart rate</span><span class="v amber" id="hr-val">— bpm</span></div>
+        <div class="row"><span class="k">Bbox vol</span><span class="v" id="bbox-vol">— m³</span></div>
+        <div class="row"><span class="k">Render</span><span class="v" id="fps-val">— fps</span></div>
+    </div>
+
+    <div id="anim">
+        <h2>AnimationMixer</h2>
+        <div class="row">
+            <span class="label">clips</span>
+            <span id="clip-buttons"></span>
+        </div>
+        <div class="slider-row">
+            <span class="label">time scale</span>
+            <input type="range" id="time-scale" min="0.1" max="2" step="0.05" value="1.0">
+            <span class="val" id="time-scale-val">1.00</span>
+        </div>
+        <div class="empty-hint" id="empty-hint" style="display:none;">
+            <strong>No animations in this FBX.</strong><br>
+            Mixamo's "T-Pose / Without Skin" export rigs the model but has no clips.
+            Re-download with <em>"Original Pose"</em> + an animation selected
+            (e.g. <a href="https://www.mixamo.com/#/?page=1&query=walking&type=Motion%2CMotionPack" target="_blank" rel="noopener">Walking</a>) to get a clip, or drop another FBX with anim and reload.
+        </div>
+    </div>
+
+    <div class="panel" id="csi">
+        <h2>Per-node CSI</h2>
+        <div class="bar-row"><span class="label">N1·BL</span><div class="bar-track"><div class="bar-fill" id="bar-0"></div></div><span class="val" id="val-0">—</span></div>
+        <div class="bar-row"><span class="label">N2·BR</span><div class="bar-track"><div class="bar-fill" id="bar-1"></div></div><span class="val" id="val-1">—</span></div>
+        <div class="bar-row"><span class="label">N3·FL</span><div class="bar-track"><div class="bar-fill" id="bar-2"></div></div><span class="val" id="val-2">—</span></div>
+        <div class="bar-row"><span class="label">N4·FR</span><div class="bar-track"><div class="bar-fill" id="bar-3"></div></div><span class="val" id="val-3">—</span></div>
+    </div>
+
+    <div id="helpers">
+        <h2>ADR-097 helpers</h2>
+        <label><input type="checkbox" id="t-grid" checked>GridHelper<span class="swatch" style="color:#666"></span></label>
+        <label><input type="checkbox" id="t-polar" checked>PolarGridHelper<span class="swatch" style="color:#ffb840"></span></label>
+        <label><input type="checkbox" id="t-bbox" checked>BoxHelper on mesh<span class="swatch" style="color:#ffe09f"></span></label>
+        <label><input type="checkbox" id="t-skel">SkeletonHelper<span class="swatch" style="color:#4cf"></span></label>
+        <label><input type="checkbox" id="t-nodebox" checked>Per-node BoxHelpers<span class="swatch" style="color:#4cf"></span></label>
+        <label><input type="checkbox" id="t-pings" checked>Sonar pings<span class="swatch" style="color:#4cf"></span></label>
+        <label><input type="checkbox" id="t-tomo" checked>Tomography sweep<span class="swatch" style="color:#ff4cc8"></span></label>
+        <label><input type="checkbox" id="t-rays" checked>RF illumination cones<span class="swatch" style="color:#ffb840"></span></label>
+    </div>
+
+    <div id="titlecard">
+        RuView · Seldon Vault
+        <div class="sub">FBXLoader · Mixamo · ADR-097</div>
+    </div>
+
+    <script>
+        // =====================================================================
+        //  RuView · Skinned (FBX) · Mixamo X Bot loaded via FBXLoader
+        //  --------------------------------------------------------------------
+        //  Sibling of helpers-skinned.html that loads a local .fbx file
+        //  rather than the canonical GLB. Same cinematic atmosphere
+        //  (UnrealBloomPass, sonar pings, tomography sweep, pseudo-CSI),
+        //  same ADR-097 helpers wrapping the rigged mesh.
+        //
+        //  Mixamo FBX caveats handled here:
+        //    1. Mixamo exports in cm (100 = 1 m). We auto-detect by the
+        //       loaded model's bbox height and rescale to ~1.7 m human size.
+        //    2. PhongMaterial → StandardMaterial swap for cleaner shading
+        //       under our amber key + cyan rim lights.
+        //    3. Bone name probing for the head (Mixamo: "mixamorigHead",
+        //       legacy: "Bip01_Head", or any bone with /head/i match).
+        //    4. Graceful no-animations case — many Mixamo exports are
+        //       rig-only.
+        // =====================================================================
+
+        const MODEL_URL = './X%20Bot.fbx';
+
+        const NODE_POSITIONS = [
+            [-1.9, 1.3,  1.9],[ 1.9, 1.3,  1.9],
+            [-1.9, 1.3, -1.9],[ 1.9, 1.3, -1.9],
+        ];
+
+        // ---------------------------------------------------------------------
+        //  Scene / camera / renderer
+        // ---------------------------------------------------------------------
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050507);
+        scene.fog = new THREE.FogExp2(0x050507, 0.06);
+
+        const camera = new THREE.PerspectiveCamera(48, window.innerWidth/window.innerHeight, 0.05, 100);
+        camera.position.set(3.2, 1.55, 4.0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+        renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 0.80;
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 0.9, 0);
+        controls.enableDamping = true; controls.dampingFactor = 0.06;
+        controls.minDistance = 2; controls.maxDistance = 12;
+        controls.maxPolarAngle = Math.PI * 0.92;
+        controls.autoRotate = new URLSearchParams(location.search).get('orbit') === '1';
+        controls.autoRotateSpeed = 0.25;
+
+        // ---------------------------------------------------------------------
+        //  Lights — amber key + cyan rim from each ESP32 direction
+        // ---------------------------------------------------------------------
+        scene.add(new THREE.HemisphereLight(0x553a18, 0x080606, 0.7));
+
+        const keyLight = new THREE.DirectionalLight(0xffc070, 1.05);
+        keyLight.position.set(2.5, 3.8, 2.5);
+        keyLight.castShadow = true;
+        keyLight.shadow.camera.top = 2; keyLight.shadow.camera.bottom = -2;
+        keyLight.shadow.camera.left = -2; keyLight.shadow.camera.right = 2;
+        keyLight.shadow.camera.near = 0.1; keyLight.shadow.camera.far = 12;
+        keyLight.shadow.mapSize.set(1024, 1024);
+        keyLight.shadow.bias = -0.0008;
+        scene.add(keyLight);
+
+        const rimLights = [];
+        NODE_POSITIONS.forEach(pos => {
+            const rim = new THREE.PointLight(0x4cf, 0.55, 8, 1.8);
+            rim.position.set(pos[0] * 1.1, pos[1] * 0.7, pos[2] * 1.1);
+            scene.add(rim); rimLights.push(rim);
+        });
+
+        // ---------------------------------------------------------------------
+        //  Post-processing
+        // ---------------------------------------------------------------------
+        const composer = new THREE.EffectComposer(renderer);
+        composer.addPass(new THREE.RenderPass(scene, camera));
+        const bloom = new THREE.UnrealBloomPass(
+            new THREE.Vector2(window.innerWidth, window.innerHeight),
+            0.45, 0.40, 0.78,
+        );
+        composer.addPass(bloom);
+        const filmShader = {
+            uniforms: { tDiffuse: { value: null }, time: { value: 0 }, grain: { value: 0.04 },
+                vignette: { value: 0.32 }, aberration: { value: 0.0018 } },
+            vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+            fragmentShader: `
+                uniform sampler2D tDiffuse; uniform float time, grain, vignette, aberration;
+                varying vec2 vUv;
+                float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+                void main() {
+                    vec2 off = (vUv - 0.5) * aberration;
+                    float r = texture2D(tDiffuse, vUv + off).r;
+                    float g = texture2D(tDiffuse, vUv).g;
+                    float b = texture2D(tDiffuse, vUv - off).b;
+                    vec3 col = vec3(r, g, b);
+                    col += (hash(vUv * 1024.0 + time) - 0.5) * grain;
+                    float v = smoothstep(0.85, 0.20, length(vUv - 0.5));
+                    col *= mix(1.0 - vignette, 1.0, v);
+                    gl_FragColor = vec4(col, 1.0);
+                }`,
+        };
+        const filmPass = new THREE.ShaderPass(filmShader);
+        composer.addPass(filmPass);
+
+        // ---------------------------------------------------------------------
+        //  Floor (same procedural shader as cinematic / skinned-glb)
+        // ---------------------------------------------------------------------
+        const floorMat = new THREE.ShaderMaterial({
+            uniforms: { time: { value: 0 }, baseColor: { value: new THREE.Color(0xffb840) } },
+            vertexShader: `varying vec3 vPos; void main() { vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+            fragmentShader: `
+                uniform float time; uniform vec3 baseColor; varying vec3 vPos;
+                void main() {
+                    vec2 g = abs(fract(vPos.xz * 0.5) - 0.5);
+                    float line = smoothstep(0.48, 0.50, max(g.x, g.y));
+                    float majorLine = smoothstep(0.96, 1.00, max(g.x, g.y) * 2.0);
+                    float scan = 0.5 + 0.5 * sin((vPos.x + vPos.z) * 2.0 - time * 1.4);
+                    scan = pow(scan, 14.0);
+                    float falloff = smoothstep(5.0, 1.2, length(vPos.xz));
+                    vec3 col = baseColor * (0.01 + 0.05 * line + 0.16 * majorLine + 0.08 * scan);
+                    gl_FragColor = vec4(col * falloff, falloff * 0.55);
+                }`,
+            transparent: true, depthWrite: false,
+        });
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        scene.add(floor);
+
+        const shadowGround = new THREE.Mesh(
+            new THREE.PlaneGeometry(20, 20),
+            new THREE.ShadowMaterial({ opacity: 0.55 })
+        );
+        shadowGround.rotation.x = -Math.PI / 2;
+        shadowGround.position.y = 0.001;
+        shadowGround.receiveShadow = true;
+        scene.add(shadowGround);
+
+        // ---------------------------------------------------------------------
+        //  ADR-097 helpers + sensor nodes (same as helpers-skinned.html)
+        // ---------------------------------------------------------------------
+        const gridHelper = new THREE.GridHelper(4, 20, 0x554a32, 0x2a2418);
+        gridHelper.material.transparent = true; gridHelper.material.opacity = 0.45;
+        scene.add(gridHelper);
+
+        const polarHelper = new THREE.PolarGridHelper(2.2, 16, 4, 64, 0xffb840, 0x4a3a1a);
+        polarHelper.position.y = 0.002;
+        polarHelper.material.transparent = true; polarHelper.material.opacity = 0.55;
+        scene.add(polarHelper);
+
+        let bboxHelper = null;
+        let skeletonHelper = null;
+
+        const nodeBboxHelpers = [];
+        const nodeRings = [];
+        const nodeAnchors = [];
+        NODE_POSITIONS.forEach((pos, i) => {
+            const group = new THREE.Group();
+            group.position.set(pos[0], pos[1], pos[2]);
+
+            group.add(new THREE.Mesh(
+                new THREE.BoxGeometry(0.14, 0.06, 0.20),
+                new THREE.MeshBasicMaterial({ color: 0xffb840 })
+            ));
+            const antenna = new THREE.Mesh(
+                new THREE.ConeGeometry(0.018, 0.10, 8),
+                new THREE.MeshBasicMaterial({ color: 0xffe09f })
+            );
+            antenna.position.y = 0.08; group.add(antenna);
+
+            const ring = new THREE.Mesh(
+                new THREE.RingGeometry(0.11, 0.14, 32),
+                new THREE.MeshBasicMaterial({ color: 0xffb840, side: THREE.DoubleSide,
+                    transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false })
+            );
+            ring.rotation.x = -Math.PI / 2; ring.position.y = -0.05;
+            group.add(ring); nodeRings.push(ring);
+
+            const core = new THREE.Mesh(
+                new THREE.SphereGeometry(0.025, 12, 12),
+                new THREE.MeshBasicMaterial({ color: 0xffe09f })
+            );
+            core.position.y = 0.04; group.add(core);
+
+            scene.add(group); nodeAnchors.push(group);
+
+            const bbox = new THREE.BoxHelper(group, 0x4cf);
+            bbox.material.transparent = true; bbox.material.opacity = 0.45;
+            scene.add(bbox); nodeBboxHelpers.push(bbox);
+        });
+
+        // ---------------------------------------------------------------------
+        //  God-ray cones — one per node, pointed at the subject. Visualizes
+        //  "the four ESP32s are jointly illuminating the body with RF". Each
+        //  cone has a volumetric-feeling gradient shader and is opacity-
+        //  modulated by that node's csiAmp × csiCoherence (so when a node's
+        //  signal degrades, its ray dims).
+        // ---------------------------------------------------------------------
+        const godRayMat = (color, idx) => new THREE.ShaderMaterial({
+            uniforms: {
+                time:      { value: 0 },
+                intensity: { value: 0.0 },
+                color:     { value: new THREE.Color(color) },
+                seed:      { value: idx * 17.3 },
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                varying float vY;
+                void main() {
+                    vUv = uv;
+                    vY = position.y;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+            fragmentShader: `
+                uniform float time, intensity, seed;
+                uniform vec3 color;
+                varying vec2 vUv;
+                varying float vY;
+                float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+                void main() {
+                    // along the cone (uv.y goes 0=tip → 1=base), fade out at the base
+                    float edgeFade = smoothstep(0.0, 0.18, vUv.y) * smoothstep(1.0, 0.65, vUv.y);
+                    // soft radial falloff (cone-edge transparency)
+                    float radial = sin(vUv.y * 3.14159);
+                    radial = pow(radial, 2.0);
+                    // volumetric noise (slow scrolling)
+                    float n = hash(floor(vUv * vec2(40.0, 60.0)) + vec2(seed, time * 0.4));
+                    float scroll = 0.85 + 0.30 * sin(vUv.y * 32.0 - time * 1.4 + seed);
+                    float a = edgeFade * radial * scroll * (0.55 + 0.45 * n);
+                    gl_FragColor = vec4(color, a * intensity * 0.25);
+                }`,
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+        });
+        const godRays = [];
+        for (let i = 0; i < 4; i++) {
+            // cone with apex at node, expanding toward the subject
+            // height 4 m (more than enough to reach subject), radius 0.45 m at base
+            const geom = new THREE.ConeGeometry(0.45, 4.0, 28, 1, true);
+            // ConeGeometry tip is at +Y, base at -Y — rotate so tip is along -Y
+            // (we'll later orient each cone so its tip touches the node).
+            geom.translate(0, -2.0, 0); // shift so apex is at origin
+            const mat = godRayMat(0xffb840, i);
+            const cone = new THREE.Mesh(geom, mat);
+            scene.add(cone);
+            godRays.push({ mesh: cone, mat });
+        }
+        function updateGodRays(t) {
+            if (!model) return;
+            const want = document.getElementById('t-rays').checked;
+            const center = new THREE.Vector3();
+            const box = new THREE.Box3().setFromObject(model);
+            box.getCenter(center);
+            for (let i = 0; i < 4; i++) {
+                godRays[i].mesh.visible = want;
+                if (!want) continue;
+                const node = nodeAnchors[i];
+                const np = node.getWorldPosition(new THREE.Vector3());
+                const dir = new THREE.Vector3().subVectors(center, np);
+                const len = dir.length();
+                dir.normalize();
+                const ray = godRays[i];
+                ray.mesh.position.copy(np);
+                // align cone's -Y axis (apex direction after the geometry shift)
+                // to point along `dir`
+                ray.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir);
+                // stretch cone length to actual distance, keep base width reasonable
+                ray.mesh.scale.set(1, len / 4.0, 1);
+                ray.mat.uniforms.time.value = t;
+                // intensity follows that node's CSI amplitude * global coherence
+                const target = csiAmp[i] * csiCoherence * 1.4;
+                ray.mat.uniforms.intensity.value =
+                    ray.mat.uniforms.intensity.value * 0.85 + target * 0.15;
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        //  FBX load with Mixamo-aware fixups
+        // ---------------------------------------------------------------------
+        let model = null;
+        let mixer = null;
+        let headBone = null;
+        let boneCount = 0;
+        const clipActions = {};   // by clip name
+        let currentClip = null;
+
+        const loader = new THREE.FBXLoader();
+        loader.load(MODEL_URL, (object) => {
+            model = object;
+
+            // 1. Scale fix — Mixamo defaults to cm; detect by bbox height and
+            //    rescale so the rig reads as ~1.7 m human size.
+            const raw = new THREE.Box3().setFromObject(model);
+            const height = raw.max.y - raw.min.y;
+            if (height > 10) {
+                model.scale.setScalar(1 / 100);   // cm → m
+            } else if (height > 5) {
+                model.scale.setScalar(1 / 50);    // catch in-between rigs
+            }
+            // recenter on origin at floor
+            const b2 = new THREE.Box3().setFromObject(model);
+            model.position.y -= b2.min.y;
+
+            // 2. Material upgrade + shadow casting + head/bone scan
+            model.traverse((obj) => {
+                if (obj.isMesh) {
+                    obj.castShadow = true;
+                    obj.receiveShadow = true;
+                    // Phong → Standard for cleaner shading under our PBR lights.
+                    // Keep diffuse map + skinning intact.
+                    if (obj.material && obj.material.isMeshPhongMaterial) {
+                        const m = obj.material;
+                        const upgraded = new THREE.MeshStandardMaterial({
+                            map: m.map, normalMap: m.normalMap, color: m.color,
+                            skinning: !!obj.isSkinnedMesh,
+                            metalness: 0.0, roughness: 0.85,
+                        });
+                        obj.material = upgraded;
+                    }
+                }
+                if (obj.isBone) {
+                    boneCount++;
+                    if (!headBone && /head/i.test(obj.name)) headBone = obj;
+                }
+            });
+            document.getElementById('bone-count').textContent = boneCount;
+
+            scene.add(model);
+
+            skeletonHelper = new THREE.SkeletonHelper(model);
+            skeletonHelper.visible = false;
+            scene.add(skeletonHelper);
+
+            // 3. Animations — Mixamo exports one clip per FBX (sometimes none)
+            const clips = object.animations || [];
+            if (clips.length === 0) {
+                document.getElementById('anim-name').textContent = 'none (rig-only)';
+                document.getElementById('empty-hint').style.display = 'block';
+            } else {
+                mixer = new THREE.AnimationMixer(model);
+                const btnHost = document.getElementById('clip-buttons');
+                for (const clip of clips) {
+                    const action = mixer.clipAction(clip);
+                    clipActions[clip.name] = action;
+                    const btn = document.createElement('button');
+                    btn.textContent = clip.name || 'clip-' + Object.keys(clipActions).length;
+                    btn.addEventListener('click', () => playClip(clip.name));
+                    btnHost.appendChild(btn);
+                }
+                playClip(clips[0].name);
+            }
+
+            // 4. Face point cloud
+            if (headBone) buildFacePointCloud();
+
+            document.getElementById('loading').classList.add('hidden');
+        }, (xhr) => {
+            const total = xhr.total || 1750032;
+            const pct = (xhr.loaded / total * 100).toFixed(0);
+            const txt = document.querySelector('#loading .text');
+            if (txt) txt.textContent = `▸ Loading skinned subject · X Bot.fbx · ${pct} %`;
+        }, (err) => {
+            console.error('FBX load failed', err);
+            const txt = document.querySelector('#loading .text');
+            if (txt) txt.textContent = '⚠ Load failed — see console';
+        });
+
+        function playClip(name) {
+            for (const k in clipActions) {
+                const a = clipActions[k];
+                if (k === name) {
+                    a.reset(); a.play(); currentClip = name;
+                    document.getElementById('anim-name').textContent = name;
+                    for (const btn of document.querySelectorAll('#anim button[data-base], #anim button')) {
+                        if (btn.dataset.base !== undefined || !btn.textContent) continue;
+                        btn.classList.toggle('active', btn.textContent === name);
+                    }
+                } else a.stop();
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        //  Face point cloud — anchored to head bone, same shimmer shader
+        // ---------------------------------------------------------------------
+        const FACE_POINTS = 220; // fewer points so each dot is visible as a tracked landmark
+        const facePositions = new Float32Array(FACE_POINTS * 3);
+        const faceOffsets   = new Float32Array(FACE_POINTS * 3);
+        const facePhases    = new Float32Array(FACE_POINTS);
+        let facePoints = null;
+        function buildFacePointCloud() {
+            // Front-hemisphere only — points scattered on the +Z half of an
+            // ellipsoid so the cloud reads as a FACE projection forward from
+            // the head bone, not a halo wrapping the skull. Local coords:
+            //   +Z = forward (face direction), +Y = up, +X = right.
+            for (let i = 0; i < FACE_POINTS; i++) {
+                // theta in [0, 2π) around the local Z axis, phi in [0, π/2]
+                // (front hemisphere only — no points behind the head)
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(1 - Math.random() * 0.95); // dense near face front
+                const sinPhi = Math.sin(phi), cosPhi = Math.cos(phi);
+                // ellipsoid radii (taller than wide, slightly squashed F-B)
+                const rx = 0.085, ry = 0.108, rz = 0.075;
+                // local coords with +Z = face forward
+                faceOffsets[i*3+0] = rx * sinPhi * Math.cos(theta);
+                faceOffsets[i*3+1] = ry * sinPhi * Math.sin(theta) * 1.05; // taller
+                faceOffsets[i*3+2] = rz * cosPhi;                          // forward
+                facePhases[i] = Math.random() * Math.PI * 2;
+            }
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.BufferAttribute(facePositions, 3));
+            geom.setAttribute('aPhase',   new THREE.BufferAttribute(facePhases, 1));
+            const mat = new THREE.ShaderMaterial({
+                uniforms: { time: { value: 0 } },
+                vertexShader: `
+                    attribute float aPhase; uniform float time;
+                    varying float vAlpha;
+                    void main() {
+                        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                        // Slow per-point shimmer + occasional "scan-lit" spike
+                        // so the cloud reads as discrete tracked landmarks
+                        // rather than a fluffy halo.
+                        float shimmer = 0.5 + 0.5 * sin(time * 3.0 + aPhase);
+                        float spark = step(0.95, fract(sin(aPhase * 17.0 + time * 0.5) * 43.0));
+                        vAlpha = 0.10 + 0.25 * shimmer + 0.55 * spark;
+                        gl_Position = projectionMatrix * mv;
+                        // 6× smaller — tracked dots, not a cloud
+                        gl_PointSize = (1.0 + shimmer * 0.6 + spark * 1.5) * (32.0 / -mv.z);
+                    }`,
+                fragmentShader: `
+                    varying float vAlpha;
+                    void main() {
+                        vec2 c = gl_PointCoord - 0.5;
+                        float d = length(c);
+                        if (d > 0.5) discard;
+                        float falloff = smoothstep(0.5, 0.0, d);
+                        vec3 col = vec3(0.40, 0.78, 1.00);
+                        gl_FragColor = vec4(col, vAlpha * falloff);
+                    }`,
+                transparent: true, depthWrite: false,
+            });
+            facePoints = new THREE.Points(geom, mat);
+            scene.add(facePoints);
+        }
+
+        // ---------------------------------------------------------------------
+        //  Pings + tomography + CSI driver — copied wholesale from skinned-glb
+        // ---------------------------------------------------------------------
+        const PING_POOL = 24;
+        const pings = [];
+        const pingGeo = new THREE.TorusGeometry(1, 0.012, 8, 48);
+        for (let i = 0; i < PING_POOL; i++) {
+            const mat = new THREE.MeshBasicMaterial({ color: 0x4cf, transparent: true, opacity: 0, depthWrite: false });
+            const mesh = new THREE.Mesh(pingGeo, mat); mesh.visible = false; scene.add(mesh);
+            pings.push({ mesh, active: false, t0: 0, duration: 0,
+                origin: new THREE.Vector3(), target: new THREE.Vector3() });
+        }
+        let pingIndex = 0;
+        function emitPing(origin, target) {
+            const p = pings[pingIndex]; pingIndex = (pingIndex + 1) % PING_POOL;
+            p.active = true; p.t0 = performance.now() * 0.001;
+            p.duration = 0.55 + Math.random() * 0.20;
+            p.origin.copy(origin); p.target.copy(target);
+            p.mesh.position.copy(origin); p.mesh.visible = true; p.mesh.material.opacity = 0;
+            const dir = new THREE.Vector3().subVectors(target, origin).normalize();
+            p.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+        }
+
+        const tomoMat = new THREE.ShaderMaterial({
+            uniforms: { time: { value: 0 }, intensity: { value: 0 } },
+            vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+            fragmentShader: `
+                uniform float time, intensity; varying vec2 vUv;
+                void main() {
+                    float band = exp(-pow((vUv.x - 0.5) * 14.0, 2.0));
+                    float lines = 0.5 + 0.5 * sin(vUv.y * 90.0 + time * 4.0);
+                    vec3 col = vec3(1.0, 0.3, 0.78) * band * (0.6 + 0.4 * lines);
+                    gl_FragColor = vec4(col, intensity * band * 0.75);
+                }`,
+            transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+        });
+        const tomoPlane = new THREE.Mesh(new THREE.PlaneGeometry(8, 6), tomoMat);
+        tomoPlane.rotation.y = Math.PI / 2;
+        tomoPlane.position.set(-2, 1.0, 0); tomoPlane.visible = false;
+        scene.add(tomoPlane);
+        let tomoActive = false, tomoT0 = 0, tomoNextAt = 4 + Math.random() * 4;
+
+        const csiAmp = [0, 0, 0, 0];
+        let csiCoherence = 0.5;
+        const csiNoise = [0, 0, 0, 0];
+        function tickCsi(t, targetWorld) {
+            for (let i = 0; i < 4; i++) csiNoise[i] = csiNoise[i] * 0.92 + (Math.random() - 0.5) * 0.08;
+            let mean = 0; const amps = [];
+            for (let i = 0; i < 4; i++) {
+                const np = NODE_POSITIONS[i];
+                const dx = np[0] - targetWorld.x, dy = np[1] - targetWorld.y, dz = np[2] - targetWorld.z;
+                const r2 = dx*dx + dy*dy + dz*dz;
+                const fall = 1.0 / (1.0 + r2 * 0.18);
+                const breath = Math.sin(t * 0.27 * Math.PI * 2) * 0.10;
+                const heart = Math.sin(t * 1.18 * Math.PI * 2) * 0.04;
+                const walk = Math.sin(t * 1.9 + i * 0.5) * 0.12;
+                const a = Math.max(0, Math.min(1, fall + breath + heart + walk + csiNoise[i] * 0.30));
+                amps.push(a);
+                csiAmp[i] = csiAmp[i] * 0.7 + a * 0.3;
+                mean += a;
+            }
+            mean /= 4;
+            let v = 0; for (let i = 0; i < 4; i++) v += (amps[i] - mean) ** 2;
+            v = Math.sqrt(v / 4);
+            csiCoherence = csiCoherence * 0.85 + Math.max(0, Math.min(1, 1.0 - v * 2.5)) * 0.15;
+        }
+
+        let lastPingT = [0, 0, 0, 0];
+        // Subject hit-flash: when a sonar ping lands, briefly raise the
+        // emissive on every mesh in the model. Decays each frame.
+        let subjectFlash = 0;
+        const modelMeshes = [];
+        function collectModelMeshes() {
+            if (!model || modelMeshes.length) return;
+            model.traverse(o => {
+                if (o.isMesh && o.material && o.material.isMeshStandardMaterial) {
+                    o.material.emissive = new THREE.Color(0xffb840);
+                    o.material.emissiveIntensity = 0;
+                    modelMeshes.push(o);
+                }
+            });
+        }
+        function updateSubjectFlash() {
+            collectModelMeshes();
+            subjectFlash *= 0.86;
+            for (const m of modelMeshes) {
+                m.material.emissiveIntensity = subjectFlash;
+            }
+        }
+
+        // Subtle root motion — even with a stationary Idle clip, give the
+        // figure a gentle drift + look-around so it doesn't feel pinned.
+        function updateRootMotion(t) {
+            if (!model) return;
+            model.position.x = Math.sin(t * 0.18) * 0.06;
+            model.position.z = Math.cos(t * 0.13) * 0.05;
+            model.rotation.y = Math.sin(t * 0.11) * 0.18;
+        }
+
+        function updateNodes() {
+            for (let i = 0; i < 4; i++) {
+                const ring = nodeRings[i];
+                const amp = csiAmp[i];
+                ring.material.opacity = 0.32 + 0.55 * amp;
+                ring.scale.setScalar(1 + 0.30 * amp);
+                rimLights[i].intensity = 0.30 + 0.60 * amp * csiCoherence;
+            }
+        }
+        function maybeEmitPings(t, modelCenter) {
+            if (!document.getElementById('t-pings').checked || !model) return;
+            for (let i = 0; i < 4; i++) {
+                const interval = 1.2 / (0.25 + csiAmp[i]);
+                if (t - lastPingT[i] > interval) {
+                    lastPingT[i] = t;
+                    const target = modelCenter.clone();
+                    target.y += (Math.random() - 0.3) * 0.8;
+                    target.x += (Math.random() - 0.5) * 0.2;
+                    const origin = nodeAnchors[i].getWorldPosition(new THREE.Vector3());
+                    emitPing(origin, target);
+                }
+            }
+        }
+        function updatePings(t) {
+            for (const p of pings) {
+                if (!p.active) continue;
+                const u = (t - p.t0) / p.duration;
+                if (u >= 1) {
+                    p.active = false; p.mesh.visible = false;
+                    // ping landed — flash the subject (drives emissiveIntensity)
+                    subjectFlash = Math.min(0.42, subjectFlash + 0.18);
+                    continue;
+                }
+                p.mesh.position.lerpVectors(p.origin, p.target, u);
+                p.mesh.scale.setScalar(0.03 + u * 0.18);
+                p.mesh.material.opacity = (1.0 - u) * 0.40 * csiCoherence;
+            }
+        }
+        function updateTomography(t) {
+            if (!document.getElementById('t-tomo').checked) { tomoActive = false; tomoPlane.visible = false; return; }
+            if (!tomoActive && t > tomoNextAt) {
+                tomoActive = true; tomoT0 = t; tomoPlane.visible = true;
+                const sf = document.getElementById('scan-flash');
+                sf.style.animation = 'none';
+                requestAnimationFrame(() => { sf.style.animation = 'scanFlash 1.6s ease-out'; });
+            }
+            if (tomoActive) {
+                const dur = 2.4;
+                const e = (t - tomoT0) / dur;
+                if (e >= 1) {
+                    tomoActive = false; tomoPlane.visible = false;
+                    tomoNextAt = t + 4 + Math.random() * 5;
+                } else {
+                    tomoPlane.position.x = -3 + e * 6;
+                    tomoMat.uniforms.intensity.value = Math.sin(e * Math.PI);
+                    tomoMat.uniforms.time.value = t;
+                }
+            }
+        }
+        function updateBbox() {
+            const want = document.getElementById('t-bbox').checked && model;
+            if (!want) {
+                if (bboxHelper) { scene.remove(bboxHelper); bboxHelper = null; }
+                document.getElementById('bbox-vol').textContent = '—';
+                return;
+            }
+            if (!bboxHelper) {
+                bboxHelper = new THREE.BoxHelper(model, 0xffe09f);
+                bboxHelper.material.transparent = true; bboxHelper.material.opacity = 0.55;
+                scene.add(bboxHelper);
+            } else bboxHelper.setFromObject(model);
+            const box = new THREE.Box3().setFromObject(model);
+            const size = box.getSize(new THREE.Vector3());
+            document.getElementById('bbox-vol').textContent = (size.x * size.y * size.z).toFixed(3) + ' m³';
+        }
+        const tmpHeadPos  = new THREE.Vector3();
+        const tmpHeadQuat = new THREE.Quaternion();
+        const tmpHeadScl  = new THREE.Vector3();
+        const tmpOffset   = new THREE.Vector3();
+        function updateFaceCloud(t) {
+            if (!facePoints || !headBone) return;
+            // Decompose the head bone's world matrix so we can apply its
+            // orientation (face direction) to each local offset. This way
+            // the cloud rotates with the head — turn left/right and the
+            // face points stay in front of the face.
+            headBone.updateMatrixWorld(true);
+            headBone.matrixWorld.decompose(tmpHeadPos, tmpHeadQuat, tmpHeadScl);
+            // Mixamo head bone forward is along +Y in some rigs (head looks up the
+            // bone chain) — project the cloud along the model's actual forward
+            // vector, which for Mixamo X Bot facing camera is world +Z.
+            // Use the model's root rotation as the source of "forward".
+            const forward = new THREE.Vector3(0, 0, 1);
+            if (model) forward.applyQuaternion(model.getWorldQuaternion(new THREE.Quaternion()));
+            const up    = new THREE.Vector3(0, 1, 0);
+            const right = new THREE.Vector3().crossVectors(up, forward).normalize();
+            const facingUp = up.clone();
+            // anchor the cloud just in front of the head
+            const anchor = tmpHeadPos.clone().addScaledVector(forward, 0.04);
+            anchor.y += 0.04; // nudge up so cloud sits over the face, not the chin
+            const pos = facePoints.geometry.attributes.position;
+            for (let i = 0; i < FACE_POINTS; i++) {
+                const ox = faceOffsets[i*3+0];
+                const oy = faceOffsets[i*3+1];
+                const oz = faceOffsets[i*3+2];
+                // map local (ox, oy, oz) into world via (right, up, forward)
+                tmpOffset.copy(right).multiplyScalar(ox)
+                         .addScaledVector(facingUp, oy)
+                         .addScaledVector(forward, oz);
+                pos.array[i*3+0] = anchor.x + tmpOffset.x;
+                pos.array[i*3+1] = anchor.y + tmpOffset.y;
+                pos.array[i*3+2] = anchor.z + tmpOffset.z;
+            }
+            pos.needsUpdate = true;
+            facePoints.material.uniforms.time.value = t;
+        }
+
+        let hudT = 0;
+        function updateHud(t, fps) {
+            if (t - hudT < 0.1) return;
+            hudT = t;
+            for (let i = 0; i < 4; i++) {
+                const pct = Math.round(csiAmp[i] * 100);
+                document.getElementById('bar-' + i).style.width = pct + '%';
+                document.getElementById('val-' + i).textContent = pct + '%';
+            }
+            document.getElementById('coh-val').textContent = (csiCoherence * 100).toFixed(0) + ' %';
+            document.getElementById('hr-val').textContent = (68 + Math.sin(t * 0.3) * 4).toFixed(0) + ' bpm';
+            document.getElementById('fps-val').textContent = fps.toFixed(0) + ' fps';
+        }
+
+        // UI wiring
+        document.getElementById('time-scale').addEventListener('input', (e) => {
+            const ts = parseFloat(e.target.value);
+            document.getElementById('time-scale-val').textContent = ts.toFixed(2);
+            if (mixer) mixer.timeScale = ts;
+        });
+        function bindToggle(id, obj) {
+            document.getElementById(id).addEventListener('change', e => {
+                if (e.target.checked && !scene.children.includes(obj)) scene.add(obj);
+                else if (!e.target.checked) scene.remove(obj);
+            });
+        }
+        bindToggle('t-grid',  gridHelper);
+        bindToggle('t-polar', polarHelper);
+        document.getElementById('t-skel').addEventListener('change', e => {
+            if (skeletonHelper) skeletonHelper.visible = e.target.checked;
+        });
+        document.getElementById('t-nodebox').addEventListener('change', e => {
+            for (const bb of nodeBboxHelpers) {
+                if (e.target.checked && !scene.children.includes(bb)) scene.add(bb);
+                else if (!e.target.checked) scene.remove(bb);
+            }
+        });
+
+        // ---------------------------------------------------------------------
+        //  Main loop
+        // ---------------------------------------------------------------------
+        const clock = new THREE.Clock();
+        let lastMs = performance.now();
+        let fpsEma = 60;
+        function tick() {
+            const nowMs = performance.now();
+            const dt = nowMs - lastMs;
+            lastMs = nowMs;
+            fpsEma = fpsEma * 0.92 + (1000 / Math.max(dt, 1)) * 0.08;
+            const t = nowMs * 0.001;
+            const delta = clock.getDelta();
+
+            if (mixer) mixer.update(delta);
+            floorMat.uniforms.time.value = t;
+            filmShader.uniforms.time.value = t;
+
+            const center = new THREE.Vector3();
+            if (model) {
+                const box = new THREE.Box3().setFromObject(model);
+                box.getCenter(center);
+            } else center.set(0, 0.9, 0);
+
+            tickCsi(t, center);
+            updateRootMotion(t);
+            updateNodes();
+            updateGodRays(t);
+            maybeEmitPings(t, center);
+            updatePings(t);
+            updateSubjectFlash();
+            updateTomography(t);
+            updateBbox();
+            updateFaceCloud(t);
+
+            controls.update();
+            composer.render();
+            updateHud(t, fpsEma);
+            requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+            bloom.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

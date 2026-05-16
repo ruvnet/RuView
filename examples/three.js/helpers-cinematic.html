@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RuView · Cinematic · ADR-097 helpers + pseudo-CSI visualization</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='10' fill='%23e8a634'/></svg>">
+    <style>
+        :root {
+            --bg: #050507;
+            --bg-panel: rgba(8, 10, 14, 0.78);
+            --amber: #ffb840;
+            --amber-hot: #ffe09f;
+            --cyan: #4cf;
+            --cyan-hot: #b8ecff;
+            --magenta: #ff4cc8;
+            --text: #d8c69a;
+            --text-mute: #6b6155;
+            --border: rgba(255, 184, 64, 0.18);
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'SF Mono', 'Cascadia Code', Consolas, monospace;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+            font-size: 12px;
+        }
+        canvas { display: block; }
+
+        /* Hollywood-style frame overlay */
+        .overlay-frame {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 5;
+            background:
+                radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%),
+                linear-gradient(180deg, rgba(0,0,0,0.32) 0%, transparent 18%, transparent 82%, rgba(0,0,0,0.38) 100%);
+        }
+        .scanlines {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 6;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(0, 0, 0, 0.04) 0px,
+                rgba(0, 0, 0, 0.04) 1px,
+                transparent 1px,
+                transparent 3px
+            );
+            mix-blend-mode: overlay;
+            opacity: 0.5;
+        }
+
+        /* HUD panels */
+        .panel {
+            position: absolute;
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 12px 14px;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 1px 0 rgba(255, 184, 64, 0.04), 0 8px 32px rgba(0,0,0,0.55);
+            z-index: 10;
+        }
+        .panel h2 {
+            margin: 0 0 8px 0;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--amber);
+            font-weight: 600;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 6px;
+        }
+
+        #info { top: 20px; left: 20px; min-width: 280px; }
+        #info h1 { margin: 0 0 1px 0; font-size: 13px; letter-spacing: 1px; color: var(--amber-hot); font-weight: 600; }
+        #info .sub { font-size: 10px; color: var(--text-mute); letter-spacing: 0.5px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+        #info .row { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+        #info .row .k { color: var(--text-mute); font-size: 11px; }
+        #info .row .v { color: var(--text); font-variant-numeric: tabular-nums; font-size: 11px; }
+        #info .row .v.amber { color: var(--amber); }
+        #info .row .v.cyan  { color: var(--cyan); }
+        #info .row .v.mag   { color: var(--magenta); }
+
+        #controls { bottom: 20px; left: 20px; min-width: 220px; }
+        #controls label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 4px 0;
+            cursor: pointer;
+            user-select: none;
+            font-size: 11px;
+        }
+        #controls label:hover { color: var(--amber-hot); }
+        #controls input[type=checkbox] { accent-color: var(--amber); width: 13px; height: 13px; cursor: pointer; }
+        #controls .swatch { width: 8px; height: 8px; border-radius: 50%; margin-left: auto; box-shadow: 0 0 8px currentColor; }
+
+        #csi { top: 20px; right: 20px; min-width: 280px; }
+        #csi .bar-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 10px; }
+        #csi .bar-row .label { width: 38px; color: var(--text-mute); }
+        #csi .bar-row .bar-track {
+            flex: 1; height: 6px; background: rgba(255, 184, 64, 0.08);
+            border-radius: 2px; overflow: hidden; position: relative;
+        }
+        #csi .bar-row .bar-fill {
+            height: 100%; background: linear-gradient(90deg, var(--amber-hot), var(--amber));
+            box-shadow: 0 0 8px var(--amber); transition: width 0.08s linear;
+        }
+        #csi .bar-row .val { width: 36px; text-align: right; color: var(--amber); font-variant-numeric: tabular-nums; }
+        #csi .legend { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 10px; color: var(--text-mute); line-height: 1.5; }
+
+        #adr-badge {
+            position: absolute; bottom: 20px; right: 20px; padding: 8px 12px;
+            background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px;
+            font-size: 10px; color: var(--text-mute); z-index: 10; backdrop-filter: blur(8px);
+            letter-spacing: 0.5px;
+        }
+        #adr-badge a { color: var(--amber); text-decoration: none; }
+        #adr-badge a:hover { color: var(--amber-hot); }
+
+        /* Tomography scan flash overlay */
+        @keyframes scanFlash {
+            0% { opacity: 0; }
+            10% { opacity: 0.12; }
+            100% { opacity: 0; }
+        }
+        .scan-flash {
+            position: fixed; inset: 0;
+            background: linear-gradient(90deg, transparent, var(--magenta), transparent);
+            mix-blend-mode: screen;
+            pointer-events: none;
+            opacity: 0;
+            z-index: 4;
+        }
+
+        /* Vignette text — title card */
+        #titlecard {
+            position: absolute; bottom: 70px; left: 50%; transform: translateX(-50%);
+            text-align: center; color: var(--amber-hot); letter-spacing: 6px; font-size: 11px;
+            text-transform: uppercase; opacity: 0.4; z-index: 10;
+            text-shadow: 0 0 12px var(--amber);
+        }
+        #titlecard .sub { font-size: 9px; color: var(--text-mute); letter-spacing: 4px; margin-top: 4px; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+</head>
+<body>
+    <div class="overlay-frame"></div>
+    <div class="scanlines"></div>
+    <div class="scan-flash" id="scan-flash"></div>
+
+    <div class="panel" id="info">
+        <h1>RuView · Cinematic</h1>
+        <div class="sub">ADR-097 · pseudo-CSI visualization layer</div>
+        <div class="row"><span class="k">Subject</span><span class="v amber">● Tracked</span></div>
+        <div class="row"><span class="k">Pose</span><span class="v" id="pose-state">walking</span></div>
+        <div class="row"><span class="k">Heart rate</span><span class="v amber" id="hr-val">— bpm</span></div>
+        <div class="row"><span class="k">Breathing</span><span class="v amber" id="br-val">— bpm</span></div>
+        <div class="row"><span class="k">Mesh nodes</span><span class="v cyan">4 · multistatic</span></div>
+        <div class="row"><span class="k">Coherence</span><span class="v" id="coh-val">— %</span></div>
+        <div class="row"><span class="k">Tomography</span><span class="v mag" id="tomo-val">idle</span></div>
+        <div class="row"><span class="k">Bbox vol</span><span class="v" id="bbox-vol">— m³</span></div>
+        <div class="row"><span class="k">Render</span><span class="v" id="fps-val">— fps</span></div>
+    </div>
+
+    <div class="panel" id="controls">
+        <h2>Helpers · ADR-097</h2>
+        <label><input type="checkbox" id="t-grid" checked>GridHelper<span class="swatch" style="color:#666;background:#666"></span></label>
+        <label><input type="checkbox" id="t-polar" checked>PolarGridHelper<span class="swatch" style="color:#ffb840;background:#ffb840"></span></label>
+        <label><input type="checkbox" id="t-bbox" checked>BoxHelper<span class="swatch" style="color:#ffb840;background:#ffe09f"></span></label>
+        <label><input type="checkbox" id="t-axes">AxesHelper<span class="swatch" style="color:#4cf;background:linear-gradient(45deg,#f44,#4f4,#4cf)"></span></label>
+        <label><input type="checkbox" id="t-nodebox" checked>Per-node BoxHelpers<span class="swatch" style="color:#4cf;background:#4cf"></span></label>
+        <label><input type="checkbox" id="t-pings" checked>Sonar pings<span class="swatch" style="color:#4cf;background:#4cf"></span></label>
+        <label><input type="checkbox" id="t-tomo" checked>Tomography sweep<span class="swatch" style="color:#ff4cc8;background:#ff4cc8"></span></label>
+    </div>
+
+    <div class="panel" id="csi">
+        <h2>Per-node CSI · synthetic</h2>
+        <div class="bar-row"><span class="label">N1·BL</span><div class="bar-track"><div class="bar-fill" id="bar-0" style="width:0"></div></div><span class="val" id="val-0">—</span></div>
+        <div class="bar-row"><span class="label">N2·BR</span><div class="bar-track"><div class="bar-fill" id="bar-1" style="width:0"></div></div><span class="val" id="val-1">—</span></div>
+        <div class="bar-row"><span class="label">N3·FL</span><div class="bar-track"><div class="bar-fill" id="bar-2" style="width:0"></div></div><span class="val" id="val-2">—</span></div>
+        <div class="bar-row"><span class="label">N4·FR</span><div class="bar-track"><div class="bar-fill" id="bar-3" style="width:0"></div></div><span class="val" id="val-3">—</span></div>
+        <div class="legend">CSI amplitude derived from distance-to-keypoint + Doppler + thermal noise. Drives bone glow, ping coherence, tomography trigger threshold.</div>
+    </div>
+
+    <div id="titlecard">
+        RuView · Seldon Vault
+        <div class="sub">multistatic wifi pose · ADR-097</div>
+    </div>
+
+    <div id="adr-badge">
+        ADR-097 · <a href="https://threejs.org/examples/#webgl_helpers" target="_blank" rel="noopener">three.js helpers</a> · cinematic
+    </div>
+
+    <script>
+        // =====================================================================
+        //  RuView · Cinematic · ADR-097 helpers + pseudo-CSI visualization
+        //  --------------------------------------------------------------------
+        //  Layers on top of helpers-demo.html. Same coordinate system, same
+        //  helpers from ADR-097, but with:
+        //    * UnrealBloomPass post-processing
+        //    * Pseudo-CSI driver (per-node amplitude / coherence / doppler)
+        //    * Sonar pings emitted from each ESP32 toward keypoints
+        //    * Tomography scan-wave (CT-scan style magenta plane sweep)
+        //    * Shader-driven bone energy flow modulated by coherence
+        //    * Ambient drift particles + procedural floor grid + scan lines
+        //    * Cinematic orbit camera with breathing z-zoom
+        //
+        //  Notes:
+        //  - All "CSI" values are SYNTHETIC. The demo is calibrated to *feel*
+        //    like the real signal path but doesn't run actual WiFi DSP.
+        //  - The four helpers from ADR-097 (Grid/Polar/Box/Axes) are still
+        //    the centerpiece — everything else is decoration that explains
+        //    what those helpers are wrapping.
+        // =====================================================================
+
+        const COCO_BONES = [
+            [0,1],[0,2],[1,3],[2,4],
+            [5,6],[5,11],[6,12],[11,12],
+            [5,7],[7,9],[6,8],[8,10],
+            [11,13],[13,15],[12,14],[14,16],
+        ];
+        const SKELETON_BASE = [
+            [ 0.00,  0.65,  0.00],[-0.04,  0.68,  0.04],[ 0.04,  0.68,  0.04],
+            [-0.08,  0.64,  0.00],[ 0.08,  0.64,  0.00],[-0.18,  0.45,  0.00],
+            [ 0.18,  0.45,  0.00],[-0.22,  0.20,  0.00],[ 0.22,  0.20,  0.00],
+            [-0.26, -0.05,  0.00],[ 0.26, -0.05,  0.00],[-0.10,  0.00,  0.00],
+            [ 0.10,  0.00,  0.00],[-0.12, -0.40,  0.00],[ 0.12, -0.40,  0.00],
+            [-0.12, -0.80,  0.00],[ 0.12, -0.80,  0.00],
+        ];
+        const NODE_POSITIONS = [
+            [-1.9, 1.3,  1.9],[ 1.9, 1.3,  1.9],
+            [-1.9, 1.3, -1.9],[ 1.9, 1.3, -1.9],
+        ];
+        const NODE_LABELS = ['back-left', 'back-right', 'front-left', 'front-right'];
+
+        // ---------------------------------------------------------------------
+        //  Scene / camera / renderer
+        // ---------------------------------------------------------------------
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050507);
+        scene.fog = new THREE.FogExp2(0x050507, 0.06);
+
+        const camera = new THREE.PerspectiveCamera(58, window.innerWidth/window.innerHeight, 0.05, 100);
+        camera.position.set(4.4, 1.8, 5.4);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+        renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 0.78;
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 0, 0);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.06;
+        controls.minDistance = 2;
+        controls.maxDistance = 12;
+        controls.maxPolarAngle = Math.PI * 0.92;
+        // Auto-rotate disabled by default — re-enable via URL ?orbit=1 for the promo loop
+        controls.autoRotate = new URLSearchParams(location.search).get('orbit') === '1';
+        controls.autoRotateSpeed = 0.25;
+
+        // ---------------------------------------------------------------------
+        //  Post-processing — UnrealBloomPass for the cinematic glow
+        // ---------------------------------------------------------------------
+        const composer = new THREE.EffectComposer(renderer);
+        composer.addPass(new THREE.RenderPass(scene, camera));
+        const bloom = new THREE.UnrealBloomPass(
+            new THREE.Vector2(window.innerWidth, window.innerHeight),
+            0.30,  // strength
+            0.40,  // radius
+            0.90,  // threshold — only the brightest cores bloom
+        );
+        composer.addPass(bloom);
+
+        //  Subtle film-grain + vignette pass
+        const filmShader = {
+            uniforms: {
+                tDiffuse: { value: null },
+                time:     { value: 0 },
+                grain:    { value: 0.04 },
+                vignette: { value: 0.35 },
+                aberration:{ value: 0.0018 },
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+            `,
+            fragmentShader: `
+                uniform sampler2D tDiffuse;
+                uniform float time;
+                uniform float grain;
+                uniform float vignette;
+                uniform float aberration;
+                varying vec2 vUv;
+                float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+                void main() {
+                    vec2 off = (vUv - 0.5) * aberration;
+                    float r = texture2D(tDiffuse, vUv + off).r;
+                    float g = texture2D(tDiffuse, vUv).g;
+                    float b = texture2D(tDiffuse, vUv - off).b;
+                    vec3 col = vec3(r, g, b);
+                    // grain
+                    float n = hash(vUv * 1024.0 + time) - 0.5;
+                    col += n * grain;
+                    // vignette
+                    float v = smoothstep(0.85, 0.20, length(vUv - 0.5));
+                    col *= mix(1.0 - vignette, 1.0, v);
+                    gl_FragColor = vec4(col, 1.0);
+                }
+            `,
+        };
+        const filmPass = new THREE.ShaderPass(filmShader);
+        composer.addPass(filmPass);
+
+        // ---------------------------------------------------------------------
+        //  Procedural cyber floor — large quad with scan-line shader
+        // ---------------------------------------------------------------------
+        const floorGeo = new THREE.PlaneGeometry(20, 20, 1, 1);
+        const floorMat = new THREE.ShaderMaterial({
+            uniforms: { time: { value: 0 }, baseColor: { value: new THREE.Color(0xffb840) } },
+            vertexShader: `
+                varying vec2 vUv;
+                varying vec3 vPos;
+                void main() {
+                    vUv = uv;
+                    vPos = position;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform float time;
+                uniform vec3 baseColor;
+                varying vec2 vUv;
+                varying vec3 vPos;
+                void main() {
+                    vec2 g = abs(fract(vPos.xz * 0.5) - 0.5);
+                    float line = smoothstep(0.48, 0.50, max(g.x, g.y));
+                    float majorLine = smoothstep(0.96, 1.00, max(g.x, g.y) * 2.0);
+                    float scan = 0.5 + 0.5 * sin((vPos.x + vPos.z) * 2.0 - time * 1.4);
+                    scan = pow(scan, 14.0);
+                    float r = length(vPos.xz);
+                    float falloff = smoothstep(5.0, 1.2, r);
+                    vec3 col = baseColor * (0.01 + 0.05 * line + 0.16 * majorLine + 0.08 * scan);
+                    col *= falloff;
+                    gl_FragColor = vec4(col, falloff * 0.55);
+                }
+            `,
+            transparent: true,
+            depthWrite: false,
+        });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.y = -1.502;
+        scene.add(floor);
+
+        // ---------------------------------------------------------------------
+        //  ADR-097 helpers
+        // ---------------------------------------------------------------------
+        const gridHelper = new THREE.GridHelper(4, 20, 0x554a32, 0x2a2418);
+        gridHelper.position.y = -1.5;
+        gridHelper.material.transparent = true;
+        gridHelper.material.opacity = 0.45;
+        scene.add(gridHelper);
+
+        const polarHelper = new THREE.PolarGridHelper(2.2, 16, 4, 64, 0xffb840, 0x4a3a1a);
+        polarHelper.position.y = -1.499;
+        polarHelper.material.transparent = true;
+        polarHelper.material.opacity = 0.55;
+        scene.add(polarHelper);
+
+        const axesHelper = new THREE.AxesHelper(0.5);
+        axesHelper.position.y = -1.49;
+        // off by default in cinematic mode
+        document.getElementById('t-axes').checked = false;
+
+        let bboxHelper = null;
+
+        // ---------------------------------------------------------------------
+        //  Skeleton — joint spheres + shader-driven bones
+        // ---------------------------------------------------------------------
+        const skeletonGroup = new THREE.Group();
+        scene.add(skeletonGroup);
+
+        const jointGeo = new THREE.SphereGeometry(0.026, 16, 16);
+        const jointMat = new THREE.MeshBasicMaterial({ color: 0xc89048 });
+        const joints = [];
+        const jointGlows = []; // unused but kept for animation parity
+        for (let i = 0; i < 17; i++) {
+            const sphere = new THREE.Mesh(jointGeo, jointMat.clone());
+            sphere.position.fromArray(SKELETON_BASE[i]);
+            sphere.userData.flash = 0;
+            sphere.userData.idx = i;
+            skeletonGroup.add(sphere);
+            joints.push(sphere);
+            jointGlows.push(sphere); // alias so animation code that scales glow scales the sphere itself
+        }
+
+        // Bones — energy-flow shader along each segment
+        const boneVS = `
+            attribute float along;
+            varying float vAlong;
+            void main() {
+                vAlong = along;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+        const boneFS = `
+            uniform float time;
+            uniform float coherence;
+            uniform vec3  colorA;
+            uniform vec3  colorB;
+            varying float vAlong;
+            void main() {
+                float flow = fract(vAlong * 1.0 - time * 0.6);
+                float pulse = smoothstep(0.0, 0.2, flow) * smoothstep(0.6, 0.2, flow);
+                vec3 col = mix(colorA, colorB, flow);
+                col += vec3(0.3) * pulse * (0.3 + coherence * 0.5);
+                gl_FragColor = vec4(col, 0.9);
+            }
+        `;
+        const boneUniforms = {
+            time:      { value: 0 },
+            coherence: { value: 0.5 },
+            colorA:    { value: new THREE.Color(0xffb840) },
+            colorB:    { value: new THREE.Color(0xffe09f) },
+        };
+        const bones = [];
+        for (const [a, b] of COCO_BONES) {
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+            geom.setAttribute('along',    new THREE.BufferAttribute(new Float32Array([0, 1]), 1));
+            const mat = new THREE.ShaderMaterial({
+                uniforms: boneUniforms,
+                vertexShader: boneVS,
+                fragmentShader: boneFS,
+                transparent: true,
+                depthWrite: false,
+            });
+            const line = new THREE.Line(geom, mat);
+            line.userData = { a, b };
+            skeletonGroup.add(line);
+            bones.push(line);
+        }
+
+        // ---------------------------------------------------------------------
+        //  Face point cloud — depth-shimmer shader
+        // ---------------------------------------------------------------------
+        const FACE_POINTS = 600;
+        const facePositions = new Float32Array(FACE_POINTS * 3);
+        const faceOffsets   = new Float32Array(FACE_POINTS * 3);
+        const facePhases    = new Float32Array(FACE_POINTS);
+        for (let i = 0; i < FACE_POINTS; i++) {
+            const u = Math.random() * Math.PI * 2;
+            const v = (Math.random() - 0.5) * Math.PI * 0.95;
+            const cu = Math.cos(u), su = Math.sin(u);
+            const cv = Math.cos(v), sv = Math.sin(v);
+            // weighted toward front (more density on face)
+            const frontBoost = Math.max(0, su) * 0.25;
+            const rx = 0.085 + frontBoost * 0.01;
+            const ry = 0.108;
+            const rz = 0.072 + frontBoost * 0.02;
+            faceOffsets[i*3+0] = rx * cv * cu;
+            faceOffsets[i*3+1] = ry * sv;
+            faceOffsets[i*3+2] = rz * cv * su;
+            facePhases[i] = Math.random() * Math.PI * 2;
+        }
+        const faceGeom = new THREE.BufferGeometry();
+        faceGeom.setAttribute('position', new THREE.BufferAttribute(facePositions, 3));
+        faceGeom.setAttribute('aPhase',   new THREE.BufferAttribute(facePhases, 1));
+        const faceMat = new THREE.ShaderMaterial({
+            uniforms: { time: { value: 0 } },
+            vertexShader: `
+                attribute float aPhase;
+                varying float vDepth;
+                varying float vAlpha;
+                uniform float time;
+                void main() {
+                    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                    vDepth = -mv.z;
+                    float shimmer = 0.5 + 0.5 * sin(time * 3.0 + aPhase);
+                    vAlpha = 0.18 + 0.30 * shimmer;
+                    gl_Position = projectionMatrix * mv;
+                    gl_PointSize = (1.4 + shimmer * 1.0) * (200.0 / -mv.z);
+                }
+            `,
+            fragmentShader: `
+                varying float vDepth;
+                varying float vAlpha;
+                void main() {
+                    vec2 c = gl_PointCoord - 0.5;
+                    float d = length(c);
+                    if (d > 0.5) discard;
+                    float falloff = smoothstep(0.5, 0.0, d);
+                    vec3 col = mix(vec3(0.18, 0.52, 0.72), vec3(0.55, 0.62, 0.72), smoothstep(2.5, 4.5, vDepth));
+                    gl_FragColor = vec4(col * (1.0 + falloff * 0.3), vAlpha * falloff);
+                }
+            `,
+            transparent: true,
+            depthWrite: false,
+        });
+        const facePoints = new THREE.Points(faceGeom, faceMat);
+        skeletonGroup.add(facePoints);
+
+        // ---------------------------------------------------------------------
+        //  Multistatic sensor nodes
+        // ---------------------------------------------------------------------
+        const nodeGroup = new THREE.Group();
+        scene.add(nodeGroup);
+        const nodeBboxHelpers = [];
+        const nodeRings = [];
+        const nodeAnchors = [];
+
+        const nodeBodyGeo = new THREE.BoxGeometry(0.14, 0.06, 0.20);
+        const nodeBodyMat = new THREE.MeshBasicMaterial({ color: 0xffb840 });
+        const antennaGeo = new THREE.ConeGeometry(0.018, 0.10, 8);
+        const antennaMat = new THREE.MeshBasicMaterial({ color: 0xffe09f });
+
+        NODE_POSITIONS.forEach((pos, i) => {
+            const group = new THREE.Group();
+            group.position.set(pos[0], pos[1], pos[2]);
+
+            const body = new THREE.Mesh(nodeBodyGeo, nodeBodyMat);
+            group.add(body);
+            const antenna = new THREE.Mesh(antennaGeo, antennaMat);
+            antenna.position.y = 0.08;
+            group.add(antenna);
+
+            // pulsing ring + light
+            const ringGeo = new THREE.RingGeometry(0.11, 0.14, 32);
+            const ringMat = new THREE.MeshBasicMaterial({
+                color: 0xffb840, side: THREE.DoubleSide, transparent: true,
+                opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false,
+            });
+            const ring = new THREE.Mesh(ringGeo, ringMat);
+            ring.rotation.x = -Math.PI / 2;
+            ring.position.y = -0.05;
+            ring.userData.phase = i * 0.7;
+            group.add(ring);
+            nodeRings.push(ring);
+
+            // small bright core (for bloom)
+            const coreGeo = new THREE.SphereGeometry(0.025, 12, 12);
+            const coreMat = new THREE.MeshBasicMaterial({ color: 0xffe09f });
+            const core = new THREE.Mesh(coreGeo, coreMat);
+            core.position.y = 0.04;
+            group.add(core);
+
+            nodeGroup.add(group);
+            nodeAnchors.push(group);
+
+            const bbox = new THREE.BoxHelper(group, 0x4cf);
+            bbox.material.transparent = true;
+            bbox.material.opacity = 0.45;
+            scene.add(bbox);
+            nodeBboxHelpers.push(bbox);
+        });
+
+        // ---------------------------------------------------------------------
+        //  Sonar pings — pool of reusable expanding torus rings
+        // ---------------------------------------------------------------------
+        const PING_POOL = 24;
+        const pings = [];
+        const pingGeo = new THREE.TorusGeometry(1, 0.012, 8, 48);
+        for (let i = 0; i < PING_POOL; i++) {
+            const mat = new THREE.MeshBasicMaterial({
+                color: 0x4cf,
+                transparent: true,
+                opacity: 0,
+                depthWrite: false,
+            });
+            const mesh = new THREE.Mesh(pingGeo, mat);
+            mesh.visible = false;
+            scene.add(mesh);
+            pings.push({
+                mesh, active: false, t0: 0, duration: 0,
+                origin: new THREE.Vector3(),
+                target: new THREE.Vector3(),
+                fromNode: 0,
+            });
+        }
+        let pingIndex = 0;
+        function emitPing(originVec, targetVec, fromNode) {
+            const p = pings[pingIndex];
+            pingIndex = (pingIndex + 1) % PING_POOL;
+            p.active = true;
+            p.t0 = performance.now() * 0.001;
+            p.duration = 0.55 + Math.random() * 0.20;
+            p.origin.copy(originVec);
+            p.target.copy(targetVec);
+            p.fromNode = fromNode;
+            p.mesh.position.copy(originVec);
+            p.mesh.visible = true;
+            p.mesh.material.opacity = 0.0;
+            // orient toward target
+            const dir = new THREE.Vector3().subVectors(targetVec, originVec).normalize();
+            p.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+        }
+
+        // ---------------------------------------------------------------------
+        //  Tomography scan-wave — magenta plane sweeps along X
+        // ---------------------------------------------------------------------
+        const tomoGeo = new THREE.PlaneGeometry(8, 6);
+        const tomoMat = new THREE.ShaderMaterial({
+            uniforms: {
+                time: { value: 0 },
+                progress: { value: 0 },
+                intensity: { value: 0 },
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+            `,
+            fragmentShader: `
+                uniform float time;
+                uniform float intensity;
+                varying vec2 vUv;
+                void main() {
+                    float band = exp(-pow((vUv.x - 0.5) * 14.0, 2.0));
+                    float lines = 0.5 + 0.5 * sin(vUv.y * 90.0 + time * 4.0);
+                    vec3 col = vec3(1.0, 0.3, 0.78) * band * (0.6 + 0.4 * lines);
+                    gl_FragColor = vec4(col, intensity * band * 0.75);
+                }
+            `,
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+        });
+        const tomoPlane = new THREE.Mesh(tomoGeo, tomoMat);
+        tomoPlane.rotation.y = Math.PI / 2;
+        tomoPlane.position.set(-2, 0, 0);
+        tomoPlane.visible = false;
+        scene.add(tomoPlane);
+        let tomoActive = false;
+        let tomoT0 = 0;
+        let tomoNextAt = 4 + Math.random() * 4;
+
+        // ---------------------------------------------------------------------
+        //  Ambient drift particles — atmospheric dust motes
+        // ---------------------------------------------------------------------
+        const DUST_N = 800;
+        const dustPos = new Float32Array(DUST_N * 3);
+        const dustVel = new Float32Array(DUST_N * 3);
+        for (let i = 0; i < DUST_N; i++) {
+            dustPos[i*3+0] = (Math.random() - 0.5) * 10;
+            dustPos[i*3+1] = (Math.random() * 4) - 1.3;
+            dustPos[i*3+2] = (Math.random() - 0.5) * 10;
+            dustVel[i*3+0] = (Math.random() - 0.5) * 0.04;
+            dustVel[i*3+1] = (Math.random() - 0.2) * 0.02;
+            dustVel[i*3+2] = (Math.random() - 0.5) * 0.04;
+        }
+        const dustGeo = new THREE.BufferGeometry();
+        dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+        const dustMat = new THREE.PointsMaterial({
+            color: 0xffd070,
+            size: 0.03,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity: 0.45,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        });
+        const dust = new THREE.Points(dustGeo, dustMat);
+        scene.add(dust);
+
+        // ---------------------------------------------------------------------
+        //  Pseudo-CSI driver — synthetic per-node amplitude/coherence/doppler
+        // ---------------------------------------------------------------------
+        //  Real RuView CSI: 64 subcarriers × N antennas × M nodes, fused into
+        //  a scalar "amplitude" per (node, target). Here we synthesize a
+        //  plausible scalar:
+        //    amp_n = 1 / (1 + r²/k) + sin(walk_phase)*Doppler + N(0, σ)
+        //  where r = distance from node to person, k = path-loss constant.
+        //
+        //  Coherence: how aligned the four amplitudes are. High coherence =
+        //  the system is confident a person is in this location.
+        // ---------------------------------------------------------------------
+        const csiAmp = [0, 0, 0, 0];
+        let csiCoherence = 0.5;
+        let csiDoppler = 0;
+        const csiNoise = [0, 0, 0, 0];
+
+        function tickCsi(t, hipWorld) {
+            const HR = 1.18; // ~71 bpm
+            const BR = 0.27; // ~16 bpm
+            // simple smoothed noise
+            for (let i = 0; i < 4; i++) {
+                csiNoise[i] = csiNoise[i] * 0.92 + (Math.random() - 0.5) * 0.08;
+            }
+            let mean = 0;
+            const amps = [];
+            for (let i = 0; i < 4; i++) {
+                const np = NODE_POSITIONS[i];
+                const dx = np[0] - hipWorld.x;
+                const dy = np[1] - hipWorld.y;
+                const dz = np[2] - hipWorld.z;
+                const r2 = dx*dx + dy*dy + dz*dz;
+                const fall = 1.0 / (1.0 + r2 * 0.18);
+                const breath = Math.sin(t * BR * Math.PI * 2) * 0.10;
+                const heart = Math.sin(t * HR * Math.PI * 2) * 0.04;
+                const walk = Math.sin(t * 1.9 + i * 0.5) * 0.12;
+                const a = Math.max(0, Math.min(1, fall + breath + heart + walk + csiNoise[i] * 0.30));
+                amps.push(a);
+                csiAmp[i] = csiAmp[i] * 0.7 + a * 0.3;
+                mean += a;
+            }
+            mean /= 4;
+            // coherence: 1 - normalized stdev (lower variance = higher coherence)
+            let v = 0;
+            for (let i = 0; i < 4; i++) v += (amps[i] - mean) * (amps[i] - mean);
+            v = Math.sqrt(v / 4);
+            csiCoherence = csiCoherence * 0.85 + Math.max(0, Math.min(1, 1.0 - v * 2.5)) * 0.15;
+            csiDoppler = Math.abs(Math.sin(t * 1.9)) * (0.4 + csiCoherence * 0.6);
+        }
+
+        // ---------------------------------------------------------------------
+        //  Pose animation — natural walk + breathing + idle sway
+        // ---------------------------------------------------------------------
+        let lastJointPos = new Float32Array(17 * 3);
+        for (let i = 0; i < 17; i++) {
+            lastJointPos[i*3+0] = SKELETON_BASE[i][0];
+            lastJointPos[i*3+1] = SKELETON_BASE[i][1];
+            lastJointPos[i*3+2] = SKELETON_BASE[i][2];
+        }
+        function applyPose(t) {
+            const swayX = Math.sin(t * 0.32) * 0.06;
+            const swayZ = Math.cos(t * 0.27) * 0.05;
+            const breathe = Math.sin(t * 1.6) * 0.013;
+            const walk = t * 2.0;
+            skeletonGroup.position.set(swayX, 0, swayZ);
+            skeletonGroup.rotation.y = Math.sin(t * 0.20) * 0.20;
+            for (let i = 0; i < 17; i++) {
+                const base = SKELETON_BASE[i];
+                let dx = 0, dy = 0, dz = 0;
+                if (i === 0 || i === 1 || i === 2) dy = breathe * 0.5;
+                if (i === 5 || i === 6) dy = breathe;
+                if (i === 7)  { dz =  Math.sin(walk) * 0.10; dy += Math.cos(walk) * 0.04; }
+                if (i === 9)  { dz =  Math.sin(walk) * 0.20; dy += Math.cos(walk) * 0.07; }
+                if (i === 8)  { dz = -Math.sin(walk) * 0.10; dy += Math.cos(walk) * 0.04; }
+                if (i === 10) { dz = -Math.sin(walk) * 0.20; dy += Math.cos(walk) * 0.07; }
+                if (i === 13) dz = -Math.sin(walk) * 0.09;
+                if (i === 15) { dz = -Math.sin(walk) * 0.16; dy = Math.max(0, Math.cos(walk)) * 0.05; }
+                if (i === 14) dz =  Math.sin(walk) * 0.09;
+                if (i === 16) { dz =  Math.sin(walk) * 0.16; dy = Math.max(0, -Math.cos(walk)) * 0.05; }
+                joints[i].position.set(base[0] + dx, base[1] + dy, base[2] + dz);
+                // joint flash decay — drives subtle scale + color shift on the joint sphere itself
+                joints[i].userData.flash *= 0.92;
+                const f = joints[i].userData.flash;
+                joints[i].scale.setScalar(1 + f * 0.6);
+                joints[i].material.color.setRGB(
+                    0.78 + f * 0.2,
+                    0.56 + f * 0.3,
+                    0.28 + f * 0.4,
+                );
+                lastJointPos[i*3+0] = joints[i].position.x;
+                lastJointPos[i*3+1] = joints[i].position.y;
+                lastJointPos[i*3+2] = joints[i].position.z;
+            }
+            // bone vertices
+            for (const line of bones) {
+                const { a, b } = line.userData;
+                const pa = joints[a].position;
+                const pb = joints[b].position;
+                const pos = line.geometry.attributes.position;
+                pos.array[0] = pa.x; pos.array[1] = pa.y; pos.array[2] = pa.z;
+                pos.array[3] = pb.x; pos.array[4] = pb.y; pos.array[5] = pb.z;
+                pos.needsUpdate = true;
+            }
+            // face cloud attached to nose
+            const nose = joints[0].position;
+            const headTurn = Math.sin(t * 0.55) * 0.40;
+            const cosH = Math.cos(headTurn), sinH = Math.sin(headTurn);
+            const fp = faceGeom.attributes.position;
+            for (let i = 0; i < FACE_POINTS; i++) {
+                const ox = faceOffsets[i*3+0];
+                const oy = faceOffsets[i*3+1];
+                const oz = faceOffsets[i*3+2];
+                fp.array[i*3+0] = nose.x + cosH * ox + sinH * oz;
+                fp.array[i*3+1] = nose.y + oy;
+                fp.array[i*3+2] = nose.z - sinH * ox + cosH * oz;
+            }
+            fp.needsUpdate = true;
+        }
+
+        // ---------------------------------------------------------------------
+        //  Per-frame: nodes, pings, tomography, dust, bbox
+        // ---------------------------------------------------------------------
+        const tmpVec = new THREE.Vector3();
+        let lastPingT = [0, 0, 0, 0];
+        function updateNodes(t) {
+            nodeAnchors.forEach((node, i) => {
+                const ring = nodeRings[i];
+                const phase = (t * 1.5 + ring.userData.phase) % (Math.PI * 2);
+                const amp = csiAmp[i];
+                ring.material.opacity = 0.32 + 0.55 * amp;
+                ring.scale.setScalar(1 + 0.30 * amp);
+            });
+        }
+        function maybeEmitPings(t) {
+            if (!document.getElementById('t-pings').checked) return;
+            // each node emits a ping every (interval) seconds — clamped so cores don't stack
+            for (let i = 0; i < 4; i++) {
+                const interval = 1.2 / (0.25 + csiAmp[i]);
+                if (t - lastPingT[i] > interval) {
+                    lastPingT[i] = t;
+                    // pick a random keypoint as target, biased toward torso
+                    const targetIdx = [0, 5, 6, 11, 12][Math.floor(Math.random() * 5)];
+                    const target = joints[targetIdx].getWorldPosition(new THREE.Vector3());
+                    const origin = nodeAnchors[i].getWorldPosition(new THREE.Vector3());
+                    emitPing(origin, target, i);
+                }
+            }
+        }
+        function updatePings(t) {
+            for (const p of pings) {
+                if (!p.active) continue;
+                const elapsed = t - p.t0;
+                if (elapsed > p.duration) {
+                    p.active = false;
+                    p.mesh.visible = false;
+                    continue;
+                }
+                const u = elapsed / p.duration;
+                p.mesh.position.lerpVectors(p.origin, p.target, u);
+                const scale = 0.03 + u * 0.18;
+                p.mesh.scale.setScalar(scale);
+                p.mesh.material.opacity = (1.0 - u) * 0.40 * csiCoherence;
+                // flash joint on arrival
+                if (u > 0.95 && !p.mesh.userData.hit) {
+                    p.mesh.userData.hit = true;
+                    // find nearest joint and flash it
+                    let nearest = 0;
+                    let nearestD = Infinity;
+                    for (let i = 0; i < 17; i++) {
+                        joints[i].getWorldPosition(tmpVec);
+                        const d = tmpVec.distanceToSquared(p.target);
+                        if (d < nearestD) { nearestD = d; nearest = i; }
+                    }
+                    joints[nearest].userData.flash = Math.min(1, joints[nearest].userData.flash + 0.7);
+                }
+                if (u < 0.05) p.mesh.userData.hit = false;
+            }
+        }
+        function updateTomography(t) {
+            if (!document.getElementById('t-tomo').checked) {
+                tomoActive = false; tomoPlane.visible = false;
+                document.getElementById('tomo-val').textContent = 'disabled';
+                return;
+            }
+            if (!tomoActive && t > tomoNextAt) {
+                tomoActive = true;
+                tomoT0 = t;
+                tomoPlane.visible = true;
+                document.getElementById('scan-flash').style.animation = 'none';
+                requestAnimationFrame(() => {
+                    document.getElementById('scan-flash').style.animation = 'scanFlash 1.6s ease-out';
+                });
+            }
+            if (tomoActive) {
+                const dur = 2.4;
+                const e = (t - tomoT0) / dur;
+                if (e >= 1) {
+                    tomoActive = false; tomoPlane.visible = false;
+                    tomoNextAt = t + 4 + Math.random() * 5;
+                    document.getElementById('tomo-val').textContent = 'idle';
+                } else {
+                    tomoPlane.position.x = -3 + e * 6;
+                    tomoMat.uniforms.intensity.value = Math.sin(e * Math.PI);
+                    tomoMat.uniforms.time.value = t;
+                    document.getElementById('tomo-val').textContent = 'scanning ' + (e * 100).toFixed(0) + '%';
+                }
+            }
+        }
+        function updateDust(t) {
+            const pos = dustGeo.attributes.position;
+            for (let i = 0; i < DUST_N; i++) {
+                pos.array[i*3+0] += dustVel[i*3+0] * 0.02;
+                pos.array[i*3+1] += dustVel[i*3+1] * 0.02;
+                pos.array[i*3+2] += dustVel[i*3+2] * 0.02;
+                // wrap
+                if (pos.array[i*3+0] >  5) pos.array[i*3+0] = -5;
+                if (pos.array[i*3+0] < -5) pos.array[i*3+0] =  5;
+                if (pos.array[i*3+1] >  3) pos.array[i*3+1] = -1.3;
+                if (pos.array[i*3+1] < -1.4) pos.array[i*3+1] = 2.8;
+                if (pos.array[i*3+2] >  5) pos.array[i*3+2] = -5;
+                if (pos.array[i*3+2] < -5) pos.array[i*3+2] =  5;
+            }
+            pos.needsUpdate = true;
+        }
+        function updateBbox() {
+            const want = document.getElementById('t-bbox').checked;
+            if (!want) {
+                if (bboxHelper) { scene.remove(bboxHelper); bboxHelper = null; }
+                return;
+            }
+            skeletonGroup.updateMatrixWorld(true);
+            if (!bboxHelper) {
+                bboxHelper = new THREE.BoxHelper(skeletonGroup, 0xffe09f);
+                bboxHelper.material.transparent = true;
+                bboxHelper.material.opacity = 0.55;
+                scene.add(bboxHelper);
+            } else bboxHelper.setFromObject(skeletonGroup);
+            const box = new THREE.Box3().setFromObject(skeletonGroup);
+            const size = box.getSize(new THREE.Vector3());
+            document.getElementById('bbox-vol').textContent =
+                (size.x * size.y * size.z).toFixed(3) + ' m³';
+        }
+
+        // ---------------------------------------------------------------------
+        //  HUD updates (throttled to ~10 Hz)
+        // ---------------------------------------------------------------------
+        let hudT = 0;
+        function updateHud(t, fps) {
+            if (t - hudT < 0.1) return;
+            hudT = t;
+            for (let i = 0; i < 4; i++) {
+                const pct = Math.round(csiAmp[i] * 100);
+                document.getElementById('bar-' + i).style.width = pct + '%';
+                document.getElementById('val-' + i).textContent = pct + '%';
+            }
+            document.getElementById('coh-val').textContent = (csiCoherence * 100).toFixed(0) + ' %';
+            document.getElementById('hr-val').textContent = (68 + Math.sin(t * 0.3) * 4).toFixed(0) + ' bpm';
+            document.getElementById('br-val').textContent = (15 + Math.sin(t * 0.18) * 2).toFixed(0) + ' bpm';
+            document.getElementById('fps-val').textContent = fps.toFixed(0) + ' fps';
+        }
+
+        // ---------------------------------------------------------------------
+        //  Cinematic camera — slow orbit (autoRotate) + breathing zoom
+        // ---------------------------------------------------------------------
+        let cameraBaseDist = camera.position.length();
+        function updateCamera(t) {
+            // breathe in/out subtly
+            const targetDist = cameraBaseDist + Math.sin(t * 0.18) * 0.45;
+            const dir = camera.position.clone().sub(controls.target).normalize();
+            const cur = camera.position.distanceTo(controls.target);
+            const next = cur * 0.985 + targetDist * 0.015;
+            camera.position.copy(controls.target).add(dir.multiplyScalar(next));
+        }
+
+        // ---------------------------------------------------------------------
+        //  Toggle bindings
+        // ---------------------------------------------------------------------
+        function bindToggle(id, obj) {
+            document.getElementById(id).addEventListener('change', e => {
+                if (e.target.checked && !scene.children.includes(obj)) scene.add(obj);
+                else if (!e.target.checked) scene.remove(obj);
+            });
+        }
+        bindToggle('t-grid',  gridHelper);
+        bindToggle('t-polar', polarHelper);
+        bindToggle('t-axes',  axesHelper);
+        document.getElementById('t-nodebox').addEventListener('change', e => {
+            for (const bb of nodeBboxHelpers) {
+                if (e.target.checked && !scene.children.includes(bb)) scene.add(bb);
+                else if (!e.target.checked) scene.remove(bb);
+            }
+        });
+
+        // ---------------------------------------------------------------------
+        //  Main loop
+        // ---------------------------------------------------------------------
+        let lastFrameMs = performance.now();
+        let fpsEma = 60;
+        function tick() {
+            const nowMs = performance.now();
+            const dt = nowMs - lastFrameMs;
+            lastFrameMs = nowMs;
+            fpsEma = fpsEma * 0.92 + (1000 / Math.max(dt, 1)) * 0.08;
+            const t = nowMs * 0.001;
+
+            applyPose(t);
+
+            const hipWorld = new THREE.Vector3();
+            joints[11].getWorldPosition(hipWorld);
+            tickCsi(t, hipWorld);
+
+            // bone shader uniforms
+            boneUniforms.time.value = t;
+            boneUniforms.coherence.value = csiCoherence;
+
+            // face/floor shader uniforms
+            faceMat.uniforms.time.value = t;
+            floorMat.uniforms.time.value = t;
+
+            // film pass time
+            filmShader.uniforms.time.value = t;
+
+            updateNodes(t);
+            maybeEmitPings(t);
+            updatePings(t);
+            updateTomography(t);
+            updateDust(t);
+            updateBbox();
+            updateCamera(t);
+
+            controls.update();
+            composer.render();
+
+            updateHud(t, fpsEma);
+            requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+
+        // ---------------------------------------------------------------------
+        //  Resize
+        // ---------------------------------------------------------------------
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+            bloom.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
