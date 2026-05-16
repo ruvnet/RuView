@@ -229,7 +229,11 @@ function handleSensingUpdate(d) {
     else for (let i = 0; i < amps.length; i++) if (amps[i] > ent.peak[i]) ent.peak[i] = amps[i];
 
     const meanA = amps.reduce((s, x) => s + x, 0) / amps.length;
-    ent.rssiHist.push({ t: now, v: n.rssi_dbm });
+    // Only push valid (non-zero) RSSI samples so the trace doesn't
+    // jump between real dBm values and the "0 = no data" sentinel.
+    if (n.rssi_dbm && n.rssi_dbm !== 0) {
+      ent.rssiHist.push({ t: now, v: n.rssi_dbm });
+    }
     ent.meanAmpHist.push({ t: now, v: meanA });
     const cutoff = now - TRACE_SEC;
     while (ent.rssiHist.length && ent.rssiHist[0].t < cutoff) ent.rssiHist.shift();
@@ -237,18 +241,34 @@ function handleSensingUpdate(d) {
     if (ent.rssiHist.length > TRACE_MAX_PTS) ent.rssiHist.splice(0, ent.rssiHist.length - TRACE_MAX_PTS);
     if (ent.meanAmpHist.length > TRACE_MAX_PTS) ent.meanAmpHist.splice(0, ent.meanAmpHist.length - TRACE_MAX_PTS);
 
-    // per-node fps (EMA)
-    const dt = now - (ent.lastFrameWall / 1000);
-    if (dt > 0 && dt < 5) {
-      const inst = 1 / dt;
-      ent.fps = ent.fps ? ent.fps * 0.9 + inst * 0.1 : inst;
+    // per-node fps: count frames in the last second, refresh once a sec
+    // (instantaneous 1/dt was wildly noisy because multiple WS paths
+    // emit duplicate per-node updates back-to-back).
+    ent.fpsCounter = (ent.fpsCounter || 0) + 1;
+    const nowMs = performance.now();
+    if (!ent.fpsWindowStart) ent.fpsWindowStart = nowMs;
+    if (nowMs - ent.fpsWindowStart >= 1000) {
+      ent.fps = ent.fpsCounter * 1000 / (nowMs - ent.fpsWindowStart);
+      ent.fpsCounter = 0;
+      ent.fpsWindowStart = nowMs;
     }
-    ent.lastFrameWall = performance.now();
+    ent.lastFrameWall = nowMs;
     ent.frames++;
     ent.lastTs = ts;
 
     document.getElementById(`n${id}-sub`).textContent = amps.length;
-    document.getElementById(`n${id}-rssi`).textContent = n.rssi_dbm.toFixed(1);
+    // n.rssi_dbm comes from sensing_update.nodes[]; it can be 0 on
+    // early ticks (history not yet populated). Coerce to "--" so the
+    // operator doesn't think the AP is dead.
+    const rssiVal = (n.rssi_dbm && Number.isFinite(n.rssi_dbm) && n.rssi_dbm !== 0)
+      ? n.rssi_dbm.toFixed(1)
+      : '--';
+    document.getElementById(`n${id}-rssi`).textContent = rssiVal;
+    // Push to RSSI trace history if non-zero (so the chart shows the
+    // real ladder of dBm steps, not a fake "0 → -54" jump on boot).
+    if (n.rssi_dbm && n.rssi_dbm !== 0) {
+      // (handled by ent.rssiHist push below)
+    }
     document.getElementById(`n${id}-meanA`).textContent = meanA.toFixed(1);
     document.getElementById(`n${id}-peakA`).textContent = Math.max(...ent.peak).toFixed(1);
     document.getElementById(`n${id}-fps`).textContent = ent.fps.toFixed(1);
