@@ -268,6 +268,29 @@ fn amp_presence_override(node_id: u8, amplitudes: &[f64]) -> Option<(String, boo
     amp_classify_from_latest()
 }
 
+/// Classify a single node's recent state — used both inside the global
+/// fusion and from `build_node_features` so the UI can show per-node
+/// labels. No hysteresis is applied here; that's a global property.
+fn amp_node_level(cv: f64, mean_short: f64, baseline: Option<f64>) -> (&'static str, bool) {
+    if cv >= 0.30 {
+        ("active", true)
+    } else if cv >= 0.15 {
+        ("present_moving", true)
+    } else if matches!(baseline, Some(b) if b > 0.0 && (mean_short / b) < 0.75) {
+        ("present_still", true)
+    } else {
+        ("absent", false)
+    }
+}
+
+/// Per-node snapshot exposed to `build_node_features`.
+fn amp_node_snapshot(node_id: u8) -> Option<(String, bool, f64)> {
+    let latest = amp_latest_init().lock().unwrap();
+    let (cv, mean_short, baseline) = latest.get(&node_id).copied()?;
+    let (lvl, pres) = amp_node_level(cv, mean_short, baseline);
+    Some((lvl.to_string(), pres, cv))
+}
+
 /// Read-only classifier: returns `(level, presence, confidence)` based on
 /// whatever `amp_presence_override` has stashed for the active nodes.
 /// Returns None until at least one node has reported.
@@ -864,14 +887,25 @@ fn build_node_features(
                 change_points: 0,
                 spectral_power: 0.0,
             });
-            PerNodeFeatureInfo {
-                node_id,
-                features,
-                classification: ClassificationInfo {
+            // ADR-101: prefer the raw-amplitude classifier per node when
+            // available. Falls back to legacy current_motion_level for
+            // older paths that haven't reported amplitudes yet.
+            let classification = match amp_node_snapshot(node_id) {
+                Some((level, presence, conf)) => ClassificationInfo {
+                    motion_level: level,
+                    presence,
+                    confidence: conf,
+                },
+                None => ClassificationInfo {
                     motion_level: ns.current_motion_level.clone(),
                     presence: !matches!(ns.current_motion_level.as_str(), "absent"),
                     confidence: ns.smoothed_person_score.clamp(0.0, 1.0),
                 },
+            };
+            PerNodeFeatureInfo {
+                node_id,
+                features,
+                classification,
                 rssi_dbm: ns.rssi_history.back().copied().unwrap_or(0.0),
                 last_seen_ms,
                 frame_rate_hz: 0.0, // Computed elsewhere; not yet plumbed here.

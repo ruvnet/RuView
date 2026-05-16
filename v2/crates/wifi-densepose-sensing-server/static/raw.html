@@ -22,6 +22,11 @@
              font-family:JetBrains Mono,monospace; display:flex; gap:14px; align-items:baseline; }
   .node h2 .stat { color:#888; font-weight:normal; font-size:11px; }
   .node h2 .stat b { color:#e6edf3; font-weight:600; }
+  .badge { font-family:JetBrains Mono,monospace; font-size:11px; padding:2px 8px; border-radius:3px; }
+  .badge.absent        { background:#21262d; color:#888; }
+  .badge.present_still { background:#1c3a55; color:#7cb6ff; }
+  .badge.present_moving{ background:#3a5520; color:#90d36b; }
+  .badge.active        { background:#552020; color:#ff7a7a; }
   .row { display:grid; grid-template-columns: 1fr 360px; gap:10px; }
   @media (max-width: 900px) { .row { grid-template-columns: 1fr; } }
   canvas { display:block; width:100%; background:#0a0e13; border-radius:3px; }
@@ -40,6 +45,8 @@
   <span id="status" class="pill dis">disconnected</span>
   <span class="pill" id="rate">0 fps</span>
   <span class="pill" id="lastTs">last: --</span>
+  <span class="badge absent" id="globalBadge" style="font-size:13px;padding:4px 12px;">absent</span>
+  <span class="pill" id="globalCV">CV 0%</span>
   <div class="controls">
     <label>peak-hold <input type="checkbox" id="peakHold" checked></label>
     <label>log-y <input type="checkbox" id="logY"></label>
@@ -90,6 +97,8 @@ function ensureNodeBlock(nodeId) {
   wrap.innerHTML = `
     <h2>
       Node ${nodeId}
+      <span class="badge absent" id="n${nodeId}-badge">absent</span>
+      <span class="stat">CV <b id="n${nodeId}-cv">0%</b></span>
       <span class="stat">subc <b id="n${nodeId}-sub">0</b></span>
       <span class="stat">rssi <b id="n${nodeId}-rssi">--</b> dBm</span>
       <span class="stat">mean A <b id="n${nodeId}-meanA">0</b></span>
@@ -246,6 +255,29 @@ function handleSensingUpdate(d) {
   }
 
   document.getElementById('lastTs').textContent = 'last: ' + new Date(ts * 1000).toLocaleTimeString();
+
+  // Global classification badge (ADR-101 fused).
+  const gcl = d.classification || {};
+  const glvl = gcl.motion_level || 'absent';
+  const gb = document.getElementById('globalBadge');
+  if (gb) { gb.textContent = glvl; gb.className = 'badge ' + glvl; gb.style.fontSize = '13px'; gb.style.padding = '4px 12px'; }
+  const gcv = document.getElementById('globalCV');
+  if (gcv) gcv.textContent = 'CV ' + ((gcl.confidence || 0) * 100).toFixed(1) + '%';
+
+  // Per-node level badge from node_features[i].classification (ADR-101).
+  const nf = d.node_features || [];
+  for (const f of nf) {
+    const id = f.node_id;
+    const cls = f.classification || {};
+    const lvl = cls.motion_level || 'absent';
+    const badge = document.getElementById(`n${id}-badge`);
+    if (badge) {
+      badge.textContent = lvl;
+      badge.className = 'badge ' + lvl;
+    }
+    const cvEl = document.getElementById(`n${id}-cv`);
+    if (cvEl) cvEl.textContent = ((cls.confidence || 0) * 100).toFixed(1) + '%';
+  }
   frameCount++;
 }
 
