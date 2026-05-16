@@ -298,7 +298,7 @@ async def consume(stop: asyncio.Event, client: mqtt.Client) -> None:
                     except json.JSONDecodeError:
                         LOG.debug("non-JSON frame: %r", raw[:80])
                         continue
-                    if update.get("type") and update["type"] != "sensing":
+                    if update.get("type") and update["type"] != "sensing_update":
                         continue
 
                     state = translate(update)
