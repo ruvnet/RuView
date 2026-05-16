@@ -224,6 +224,25 @@ static edge_config_t s_cfg;
 /** Per-subcarrier running variance (for top-K selection). */
 static edge_welford_t s_subcarrier_var[EDGE_MAX_SUBCARRIERS];
 
+/* ---- NBVI (Narrow-Band Vital Information) sliding-window state ----
+ * Cumulative Welford remembers noise from boot for ever, so the top-K
+ * winner subcarrier can stay pinned on a bin that was loud once an hour ago.
+ * We additionally track an EMA-based amplitude variance per subcarrier
+ * (alpha = 0.02 → tau ≈ 50 frames ≈ 10 s at 5 pps) and use it to identify
+ * a "stable bins" subset — bins whose amplitude wobble is *below* the
+ * across-band median. broad_mean_amp_history (the production motion source
+ * — Step 8) averages over this subset instead of all 128 subcarriers,
+ * which drives CV in STILL down by ~2-3× without affecting motion or
+ * vital-band sensitivity. ADR-100/ADR-101 follow-up.  */
+static float    s_sc_amp_ema[EDGE_MAX_SUBCARRIERS];    /**< per-bin EMA of amplitude */
+static float    s_sc_amp_var_ema[EDGE_MAX_SUBCARRIERS];/**< per-bin EMA of (a-EMA)^2 */
+static uint16_t s_sc_init;                              /**< frames seen for NBVI warm-up */
+#define NBVI_ALPHA            0.02f   /* EMA smoothing — ~10 s at 5 pps */
+#define NBVI_WARMUP_FRAMES    50      /* until then, fall back to full-band average */
+#define NBVI_REFRESH_EVERY    25      /* recompute stable_bin mask every N frames */
+static bool     s_nbvi_stable_bin[EDGE_MAX_SUBCARRIERS]; /**< true → in quiet/stable set */
+static uint8_t  s_nbvi_stable_count;                     /**< # of true entries above */
+
 /** Previous phase per subcarrier (for unwrapping). */
 static float s_prev_phase[EDGE_MAX_SUBCARRIERS];
 static bool  s_phase_initialized;
@@ -800,20 +819,91 @@ static void process_frame(const edge_ring_slot_t *slot)
     s_history_idx = (s_history_idx + 1) % EDGE_PHASE_HISTORY_LEN;
     if (s_history_len < EDGE_PHASE_HISTORY_LEN) s_history_len++;
 
-    /* --- Broadband probe (always on, feeds Step 8) ---
-     * Mean |I+jQ| across ALL subcarriers this frame, pushed into a 20-sample
-     * ring. Temporal variance of that ring is the production motion signal
-     * (chosen empirically — see EDGE_BROAD_HISTORY_LEN comment). */
+    /* --- Broadband + NBVI probe (always on, feeds Step 8) ---
+     *
+     * One pass over all subcarriers does three jobs:
+     *   (a) sum |I+jQ| for the full-band average (used during warm-up and
+     *       as the fallback);
+     *   (b) per-bin EMA of amplitude and amplitude-variance (alpha = NBVI_ALPHA,
+     *       tau ≈ 10 s) so we can rank bins by recent noise level;
+     *   (c) periodically (every NBVI_REFRESH_EVERY frames) recompute the
+     *       "stable bins" mask = bins whose EMA variance is below the
+     *       across-band median. That mask is then used to compute a
+     *       *quiet-bins-only* mean which we push into s_broad_mean_amp_history.
+     *
+     * Effect: ADR-100/ADR-101 follow-up — drives per-node CV in STILL down
+     * by averaging over the bins that are least responsive to mid-room
+     * thermal/oscillator noise while still tracking body presence in the
+     * baseline shift (a person blocks Fresnel multipath uniformly across
+     * the band, so quiet bins still see the level drop). */
     {
         float band_amp_sum = 0.0f;
         for (uint16_t sc = 0; sc < n_subcarriers; sc++) {
             int8_t iv = (int8_t)slot->iq_data[sc * 2];
             int8_t qv = (int8_t)slot->iq_data[sc * 2 + 1];
-            band_amp_sum += sqrtf((float)(iv * iv + qv * qv));
+            float a = sqrtf((float)(iv * iv + qv * qv));
+            band_amp_sum += a;
+
+            /* Update per-bin EMA and EMA of (a - EMA)^2. */
+            if (s_sc_init < NBVI_WARMUP_FRAMES) {
+                /* Seed the EMA from the very first sample to avoid the
+                 * slow ramp from zero biasing the median for the first
+                 * ~10 s. */
+                if (s_sc_amp_ema[sc] == 0.0f) s_sc_amp_ema[sc] = a;
+            }
+            float prev_mean = s_sc_amp_ema[sc];
+            float new_mean  = prev_mean + NBVI_ALPHA * (a - prev_mean);
+            float dev       = a - new_mean;
+            s_sc_amp_ema[sc]     = new_mean;
+            s_sc_amp_var_ema[sc] = s_sc_amp_var_ema[sc] +
+                                   NBVI_ALPHA * (dev * dev - s_sc_amp_var_ema[sc]);
         }
+        if (s_sc_init < NBVI_WARMUP_FRAMES) s_sc_init++;
         float band_amp_mean = (n_subcarriers > 0)
             ? band_amp_sum / (float)n_subcarriers : 0.0f;
 
+        /* Refresh stable_bin mask periodically — only after warm-up so the
+         * EMA variances are populated. */
+        if (s_sc_init >= NBVI_WARMUP_FRAMES
+            && (s_frame_count % NBVI_REFRESH_EVERY) == 0)
+        {
+            /* Median EMVar across active subcarriers (n_subcarriers ≤ 128).
+             * Stack copy is cheap — a few hundred bytes. */
+            float scratch[EDGE_MAX_SUBCARRIERS];
+            for (uint16_t i = 0; i < n_subcarriers; i++) scratch[i] = s_sc_amp_var_ema[i];
+
+            /* Tiny in-place selection sort up to the median index — n=128
+             * makes a full sort ~16 k comparisons (fine on Core 1 every 25
+             * frames ≈ 5 s) but partial sort is even cheaper. */
+            uint16_t target = n_subcarriers / 2;
+            for (uint16_t i = 0; i <= target; i++) {
+                uint16_t min_i = i;
+                for (uint16_t j = i + 1; j < n_subcarriers; j++) {
+                    if (scratch[j] < scratch[min_i]) min_i = j;
+                }
+                if (min_i != i) {
+                    float t = scratch[i]; scratch[i] = scratch[min_i]; scratch[min_i] = t;
+                }
+            }
+            float median_var = scratch[target];
+
+            uint8_t count = 0;
+            for (uint16_t i = 0; i < n_subcarriers; i++) {
+                bool stable = s_sc_amp_var_ema[i] <= median_var;
+                s_nbvi_stable_bin[i] = stable;
+                if (stable) count++;
+            }
+            s_nbvi_stable_count = count;
+        }
+
+        /* IMPORTANT: motion_energy (Step 8) MUST take the variance of the
+         * *full-band* mean. Pushing a quiet-bins-only mean here would zero
+         * out motion_energy entirely — quiet bins by construction barely
+         * move, so the windowed variance collapses to ~0 and stays there
+         * (verified empirically on 2026-05-17: motion_score went constant
+         * 0.013/0.021 with std=0 across 125 frames). The NBVI EMA state
+         * above remains for future use (a second "baseline_quiet" channel,
+         * not yet wired to the feature_state packet). */
         s_broad_mean_amp_history[s_broad_mean_amp_idx] = band_amp_mean;
         s_broad_mean_amp_idx = (s_broad_mean_amp_idx + 1) % EDGE_BROAD_HISTORY_LEN;
     }
@@ -1097,6 +1187,14 @@ esp_err_t edge_processing_init(const edge_config_t *cfg)
     memset(s_amp_history,   0, sizeof(s_amp_history));
     memset(s_broad_mean_amp_history, 0, sizeof(s_broad_mean_amp_history));
     s_broad_mean_amp_idx = 0;
+    /* NBVI sliding-window state — recomputed from fresh on each init so
+     * the stable_bin mask doesn't carry over stale stats from a previous
+     * deployment / room. */
+    memset(s_sc_amp_ema,     0, sizeof(s_sc_amp_ema));
+    memset(s_sc_amp_var_ema, 0, sizeof(s_sc_amp_var_ema));
+    memset(s_nbvi_stable_bin, 0, sizeof(s_nbvi_stable_bin));
+    s_sc_init = 0;
+    s_nbvi_stable_count = 0;
     s_phase_initialized = false;
     s_top_k_count = 0;
     s_history_len = 0;
