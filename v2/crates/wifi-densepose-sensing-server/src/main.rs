@@ -4400,14 +4400,24 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     }
 
                     // Build nodes array with all active nodes.
+                    // ADR-101 follow-up: feature_state packets carry no
+                    // raw CSI of their own, but the raw-CSI path has
+                    // been pushing amplitudes into ns.frame_history.
+                    // Hand the most recent vector out so raw.html bars
+                    // don't go blank between rare raw-CSI packets
+                    // (current FW emits ~80 % feature_state, ~20 % raw).
                     let active_nodes: Vec<NodeInfo> = s.node_states.iter()
                         .filter(|(_, n)| n.last_frame_time.map_or(false, |t| now.duration_since(t).as_secs() < 10))
-                        .map(|(&id, n)| NodeInfo {
-                            node_id: id,
-                            rssi_dbm: n.rssi_history.back().copied().unwrap_or(0.0),
-                            position: [2.0, 0.0, 1.5],
-                            amplitude: vec![],
-                            subcarrier_count: 0,
+                        .map(|(&id, n)| {
+                            let last_amps = n.frame_history.back().cloned().unwrap_or_default();
+                            let sub_count = last_amps.len();
+                            NodeInfo {
+                                node_id: id,
+                                rssi_dbm: n.rssi_history.back().copied().unwrap_or(0.0),
+                                position: [2.0, 0.0, 1.5],
+                                amplitude: last_amps,
+                                subcarrier_count: sub_count,
+                            }
                         })
                         .collect();
 
