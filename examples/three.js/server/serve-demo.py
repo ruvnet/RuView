@@ -6,16 +6,16 @@ connections (HTML + 9 script tags + FBX), the first eats the worker, the
 rest time out with net::ERR_EMPTY_RESPONSE. ThreadingHTTPServer fixes it.
 
 Usage:
-    cd <repo root>
-    python examples/three.js/serve-demo.py
-    open http://localhost:8765/examples/three.js/helpers-skinned-fbx.html
+    python examples/three.js/server/serve-demo.py
+    open http://localhost:8765/examples/three.js/demos/05-skinned-realtime.html
 """
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 import os, sys
 
 PORT = int(os.environ.get("PORT", 8765))
-# always serve from the repo root regardless of where the script is launched
-os.chdir(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+# Always serve from the repo root regardless of where the script is launched.
+# This file lives at examples/three.js/server/serve-demo.py — three levels deep.
+os.chdir(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 class NoCacheHandler(SimpleHTTPRequestHandler):
     def end_headers(self):
@@ -27,9 +27,19 @@ class NoCacheHandler(SimpleHTTPRequestHandler):
         self.send_header("Expires", "0")
         super().end_headers()
 
+DEMOS = [
+    "01-helpers.html",
+    "02-cinematic.html",
+    "03-skinned.html",
+    "04-skinned-fbx.html",
+    "05-skinned-realtime.html",
+]
+
 with ThreadingHTTPServer(("127.0.0.1", PORT), NoCacheHandler) as srv:
     print(f"serving {os.getcwd()} on http://127.0.0.1:{PORT}/")
-    print(f"demo:   http://127.0.0.1:{PORT}/examples/three.js/helpers-skinned-fbx.html")
+    print("demos:")
+    for d in DEMOS:
+        print(f"  http://127.0.0.1:{PORT}/examples/three.js/demos/{d}")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
