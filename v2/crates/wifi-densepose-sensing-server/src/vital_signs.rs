@@ -139,13 +139,15 @@ impl VitalSignDetector {
         // Cardiac-induced body surface displacement is < 0.5 mm, producing
         // tiny phase changes. Cross-subcarrier phase variance captures this
         // more sensitively than amplitude alone.
+        //
+        // Phases come from atan2() and are wrapped to (-pi, pi]. Linear mean
+        // and variance on wrapped values is wrong: two phases close across
+        // the +/-pi discontinuity (e.g. pi-eps and -pi+eps) are physically
+        // ~2*eps rad apart but produce arithmetic variance ~pi^2. Use the
+        // standard circular variance (1 - mean resultant length), which is
+        // stable across the wrap.
         let phase_var = if phase.len() > 1 {
-            let mean_phase: f64 = phase.iter().sum::<f64>() / phase.len() as f64;
-            phase
-                .iter()
-                .map(|p| (p - mean_phase).powi(2))
-                .sum::<f64>()
-                / phase.len() as f64
+            phase_circular_variance(phase)
         } else {
             // Fallback: use amplitude high-pass residual when phase is unavailable
             let half = amplitude.len() / 2;
@@ -367,6 +369,25 @@ impl VitalSignDetector {
 /// Constructs a bandpass by subtracting two lowpass filters (LPF_high - LPF_low)
 /// with a Hamming window. This is a zero-external-dependency implementation
 /// suitable for the buffer sizes we encounter (up to ~600 samples).
+/// Circular variance of wrapped phase samples in radians.
+///
+/// Returns `1 - R` where `R` is the mean resultant length of the unit-circle
+/// representation of the input. `0.0` means all samples point in the same
+/// direction; `1.0` means they are uniformly spread. Stable across the +/-pi
+/// discontinuity of `atan2`-derived phases. Returns `0.0` for inputs shorter
+/// than 2 samples.
+pub(crate) fn phase_circular_variance(phase: &[f64]) -> f64 {
+    if phase.len() < 2 {
+        return 0.0;
+    }
+    let (sin_sum, cos_sum) = phase
+        .iter()
+        .fold((0.0_f64, 0.0_f64), |(s, c), &p| (s + p.sin(), c + p.cos()));
+    let n = phase.len() as f64;
+    let r = (sin_sum * sin_sum + cos_sum * cos_sum).sqrt() / n;
+    (1.0 - r).clamp(0.0, 1.0)
+}
+
 pub fn bandpass_filter(data: &[f64], low_hz: f64, high_hz: f64, sample_rate: f64) -> Vec<f64> {
     if data.len() < 3 || sample_rate < f64::EPSILON {
         return data.to_vec();
@@ -604,6 +625,89 @@ pub fn run_benchmark(n_frames: usize) -> (std::time::Duration, std::time::Durati
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression test for the linear-vs-circular phase variance bug.
+    ///
+    /// Two CSI subcarriers whose phases land just either side of the +/-pi
+    /// wrap are physically ~2*eps rad apart, but the previous code computed
+    /// arithmetic mean + arithmetic variance on the wrapped values, treating
+    /// them as ~2*pi apart and producing variance ~pi^2 ~= 9.87. The corrected
+    /// circular variance returns ~1e-6 for the same input.
+    #[test]
+    fn test_phase_variance_handles_wraparound() {
+        // Two phases ~0.002 rad apart, straddling the +/-pi discontinuity.
+        let phases = [PI - 0.001, -PI + 0.001];
+
+        let v = phase_circular_variance(&phases);
+        assert!(
+            v < 0.01,
+            "circular variance of nearly-identical wrapped phases must be tiny, got {v}"
+        );
+
+        // For reference, the *old* (buggy) linear formula on the same input
+        // produced ~9.87. Document that gap here so the assertion above
+        // explicitly fails on any regression to the linear computation.
+        let mean_linear: f64 = phases.iter().sum::<f64>() / phases.len() as f64;
+        let v_linear_buggy: f64 = phases
+            .iter()
+            .map(|p| (p - mean_linear).powi(2))
+            .sum::<f64>()
+            / phases.len() as f64;
+        assert!(
+            v_linear_buggy > 9.0,
+            "sanity: linear formula on wrapped input should be ~pi^2, got {v_linear_buggy}"
+        );
+    }
+
+    /// End-to-end: `process_frame` must not blow up `heartbeat_buffer` when
+    /// the input phases happen to straddle the +/-pi wrap. Anyone can run this
+    /// against `main` (with the inline linear-formula bug) and observe the
+    /// stored value of ~9.86; with the fix it is ~1e-6.
+    #[test]
+    fn test_process_frame_handles_wrapped_phases() {
+        let mut detector = VitalSignDetector::new(20.0);
+        let amp = vec![1.0_f64; 8];
+        // 8 subcarriers, all physically ~aligned at ~+/-pi, alternating sign.
+        let phase = vec![
+            PI - 0.001, -PI + 0.001, PI - 0.001, -PI + 0.001,
+            PI - 0.001, -PI + 0.001, PI - 0.001, -PI + 0.001,
+        ];
+
+        detector.process_frame(&amp, &phase);
+
+        let stored = *detector
+            .heartbeat_buffer
+            .back()
+            .expect("process_frame should push exactly one phase_var");
+
+        assert!(
+            stored < 0.1,
+            "phase_var pushed into heartbeat_buffer should be near 0 for \
+             physically-aligned wrapped phases, got {stored}. The linear \
+             (buggy) formula produces ~pi^2 = 9.87 here; the circular \
+             (fixed) formula produces ~1e-6."
+        );
+    }
+
+    /// Diametrically opposite phases must yield maximum circular variance.
+    #[test]
+    fn test_phase_variance_opposite_phases() {
+        let v = phase_circular_variance(&[0.0, PI]);
+        assert!(
+            v > 0.99,
+            "two opposite phases must give circular variance near 1.0, got {v}"
+        );
+    }
+
+    /// Identical phases must yield zero circular variance, even far from zero.
+    #[test]
+    fn test_phase_variance_identical_phases() {
+        let v = phase_circular_variance(&[2.5, 2.5, 2.5, 2.5]);
+        assert!(
+            v < 1e-9,
+            "identical phases must give circular variance ~0, got {v}"
+        );
+    }
 
     #[test]
     fn test_fft_magnitude_dc() {
