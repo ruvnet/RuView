@@ -155,8 +155,203 @@ fn rssi_delta_push(node_id: u8, rssi: i8, window: usize) -> f64 {
     if n == 0.0 { 0.0 } else { sum / n }
 }
 
+// ── ADR-101: Raw-amplitude presence/motion classifier ──────────────────
+//
+// After ADR-100 the gain-locked baseline lets us cleanly separate the
+// EMPTY / STILL / WALK states by two cheap statistics computed over the
+// last second of broadband mean amplitude per node:
+//
+//   * CV (coeff. of variation) — proxy for motion: still → 3-5 %,
+//     walking → 12-30 %.
+//   * mean_A vs. learned baseline — proxy for still presence: a body in
+//     the AP→sensor path lowers the direct-component amplitude by 25-40 %.
+//
+// Baseline = 95th-percentile of the last ~30 s of mean_A (assumption: at
+// least one window during the past 30 s was empty/quiet). That avoids
+// hand-tuning the absolute amplitude scale per node — node 1 runs near 37,
+// node 2 near 9 in the operator's deployment; baselines adapt independently.
+
+/// Window length for short-term mean/CV (target ~4.5 s at 20 fps).
+/// Long enough to bridge step pauses while walking.
+const AMP_SHORT_WIN: usize = 90;
+/// Window length for long-term baseline (target ~60 s at 20 fps).
+const AMP_LONG_WIN:  usize = 1200;
+/// Hysteresis hold time (in successful classifier calls) for a motion
+/// state to keep itself active after CV drops below threshold. At ~40
+/// classifier ticks/sec (both nodes combined) this gives ≈ 3 s of hold.
+const AMP_MOTION_HOLD_TICKS: u32 = 120;
+
+struct AmpState {
+    short: VecDeque<f64>,
+    long:  VecDeque<f64>,
+}
+
+static AMP_HIST: OnceLock<Mutex<std::collections::HashMap<u8, AmpState>>> = OnceLock::new();
+
+fn amp_hist_init() -> &'static Mutex<std::collections::HashMap<u8, AmpState>> {
+    AMP_HIST.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Latest (cv, mean_short, baseline_or_None) per node, for cross-node fusion.
+static AMP_LATEST: OnceLock<Mutex<std::collections::HashMap<u8, (f64, f64, Option<f64>)>>> = OnceLock::new();
+
+fn amp_latest_init() -> &'static Mutex<std::collections::HashMap<u8, (f64, f64, Option<f64>)>> {
+    AMP_LATEST.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Sticky-state holdover counters so a brief CV dip (step pause) doesn't
+/// flip "moving" to "absent". When CV crosses a motion threshold the
+/// counter is reset to `AMP_MOTION_HOLD_TICKS`; it decrements per call
+/// and the level is upgraded back up until it expires.
+static AMP_HOLD: OnceLock<Mutex<(String, u32)>> = OnceLock::new();
+
+fn amp_hold_init() -> &'static Mutex<(String, u32)> {
+    AMP_HOLD.get_or_init(|| Mutex::new(("absent".to_string(), 0)))
+}
+
+/// Classify motion/presence for one node from the raw amplitude vector.
+///
+/// Returns `(motion_level, presence, confidence)` where confidence is the
+/// raw CV value (so the UI can show it during tuning). Returns `None` for
+/// the first ~1.5 s while the short window fills.
+fn amp_presence_override(node_id: u8, amplitudes: &[f64]) -> Option<(String, bool, f64)> {
+    if amplitudes.is_empty() {
+        return None;
+    }
+    // Skip guard tones (CSI HT20 typically has amp[0] = 0 for DC, plus
+    // edge nulls).
+    let valid: Vec<f64> = amplitudes.iter().copied().filter(|&v| v > 0.0).collect();
+    if valid.is_empty() {
+        return None;
+    }
+    let broadband_mean: f64 = valid.iter().sum::<f64>() / valid.len() as f64;
+
+    let mut map = amp_hist_init().lock().unwrap();
+    let st = map.entry(node_id).or_insert_with(|| AmpState {
+        short: VecDeque::with_capacity(AMP_SHORT_WIN),
+        long:  VecDeque::with_capacity(AMP_LONG_WIN),
+    });
+    st.short.push_back(broadband_mean);
+    while st.short.len() > AMP_SHORT_WIN { st.short.pop_front(); }
+    st.long.push_back(broadband_mean);
+    while st.long.len()  > AMP_LONG_WIN  { st.long.pop_front(); }
+
+    if st.short.len() < AMP_SHORT_WIN {
+        return None;
+    }
+
+    // Short-window mean + CV.
+    let n = st.short.len() as f64;
+    let sum: f64 = st.short.iter().sum();
+    let mean_short = sum / n;
+    let var: f64 = st.short.iter().map(|x| (x - mean_short).powi(2)).sum::<f64>() / n;
+    let cv = if mean_short > 0.0 { var.sqrt() / mean_short } else { 0.0 };
+
+    // Baseline = 95th percentile of long window once we have ≥ 5 s of data.
+    // A body in the channel attenuates amplitude, so the baseline (=
+    // empty-room amplitude) sits at the upper end of recent history.
+    let baseline = if st.long.len() >= AMP_SHORT_WIN * 3 {
+        let mut sorted: Vec<f64> = st.long.iter().copied().collect();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let idx = ((sorted.len() as f64) * 0.95) as usize;
+        Some(sorted[idx.min(sorted.len() - 1)])
+    } else {
+        None
+    };
+
+    // Stash this node's contribution for cross-node fusion.
+    {
+        let mut latest = amp_latest_init().lock().unwrap();
+        latest.insert(node_id, (cv, mean_short, baseline));
+    }
+
+    amp_classify_from_latest()
+}
+
+/// Read-only classifier: returns `(level, presence, confidence)` based on
+/// whatever `amp_presence_override` has stashed for the active nodes.
+/// Returns None until at least one node has reported.
+///
+/// Used by SensingUpdate-producing paths that don't carry raw amplitudes
+/// (feature_state / vitals packets). Lets those paths inherit the same
+/// classification that the raw-CSI path already computed, instead of
+/// emitting a stale or different label.
+fn amp_classify_from_latest() -> Option<(String, bool, f64)> {
+    // ── Cross-node fusion ────────────────────────────────────────────
+    //
+    // We use MAX CV across nodes for the motion gate (any node sees
+    // movement → trust it; body modulates only the line-of-sight
+    // path it crosses, the other node may stay clean). To compensate
+    // for one node's natural noise, the moving threshold is raised
+    // empirically. Baseline drop still flags "present_still" when both
+    // nodes are quiet.
+    //
+    // ADR-101 thresholds (per-node MAX, deployment-tuned for low-AGC
+    // ESP32-S3 with the operator's TP-Link geometry):
+    //   max_cv >= 30 %     → active
+    //   max_cv >= 15 %     → present_moving
+    //   any baseline drop  → present_still
+    //   otherwise          → absent
+    //
+    // Sticky hold (AMP_MOTION_HOLD_TICKS calls ≈ 3 s) prevents flicker
+    // when CV briefly dips below threshold (e.g. step pause).
+    let snapshot: Vec<(f64, f64, Option<f64>)> = {
+        let latest = amp_latest_init().lock().unwrap();
+        latest.values().copied().collect()
+    };
+    if snapshot.is_empty() {
+        return None;
+    }
+    let max_cv = snapshot.iter().map(|(c, _, _)| *c).fold(0.0_f64, f64::max);
+    let any_baseline_drop = snapshot.iter().any(|(_, m, b)| {
+        matches!(b, Some(bv) if *bv > 0.0 && (*m / *bv) < 0.75)
+    });
+
+    let candidate = if max_cv >= 0.30 {
+        "active"
+    } else if max_cv >= 0.15 {
+        "present_moving"
+    } else if any_baseline_drop {
+        "present_still"
+    } else {
+        "absent"
+    };
+
+    // Sticky hysteresis on motion states: once "moving"/"active", keep
+    // that label until the hold timer expires.
+    let level: String;
+    let presence: bool;
+    {
+        let mut hold = amp_hold_init().lock().unwrap();
+        let candidate_is_motion = matches!(candidate, "present_moving" | "active");
+        if candidate_is_motion {
+            // Refresh hold to full.
+            hold.0 = candidate.to_string();
+            hold.1 = AMP_MOTION_HOLD_TICKS;
+            level = candidate.to_string();
+        } else if hold.1 > 0 && matches!(hold.0.as_str(), "present_moving" | "active") {
+            // Within hold window — keep prior motion label even though
+            // current tick says quiet.
+            hold.1 -= 1;
+            level = hold.0.clone();
+        } else {
+            // No motion + no hold → either present_still (baseline drop)
+            // or absent.
+            hold.0 = candidate.to_string();
+            hold.1 = 0;
+            level = candidate.to_string();
+        }
+        presence = !matches!(level.as_str(), "absent");
+    }
+
+    // Confidence carries max CV — strongest motion signal across the
+    // swarm — so the UI can surface live noise during tuning.
+    Some((level, presence, max_cv))
+}
+
 /// Override (motion_level, presence) from rolling RSSI MAD-Δ.
 /// Returns None until window has filled.
+#[allow(dead_code)]  // superseded by amp_presence_override (ADR-101); kept for reference
 fn rssi_presence_override(node_id: u8, rssi: i8) -> Option<(String, bool, f64)> {
     let d = rssi_delta_push(node_id, rssi, 120);  // ~10 sec @ 12 Hz
     if d == 0.0 { return None; }
@@ -1956,12 +2151,13 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
             extract_features_from_frame(&frame, &s_write_pre.frame_history, sample_rate_hz);
         smooth_and_classify(&mut s_write_pre, &mut classification, raw_motion);
         adaptive_override(&s_write_pre, &features, &mut classification);
-        // RSSI-std presence override: motion_band / variance fail to separate
-        // empty vs occupied in this deployment (multipath spreads more in an
-        // empty room). RSSI std reliably differentiates because the body
-        // physically blocks/reflects WiFi between the sensor and the AP.
+        // ADR-101: raw-amplitude presence/motion override. Supersedes the
+        // RSSI MAD-Δ classifier from ADR-099 (left in the source for
+        // reference, see #[allow(dead_code)]). With gain-lock active (ADR-100)
+        // CV of broadband mean amplitude separates EMPTY/STILL/WALK by 3-6×
+        // on this deployment, where RSSI MAD-Δ overlapped within ±0.03.
         if let Some((level, presence, conf)) =
-            rssi_presence_override(frame.node_id, frame.rssi)
+            amp_presence_override(frame.node_id, &frame.amplitudes)
         {
             classification.motion_level = level;
             classification.presence = presence;
@@ -4093,6 +4289,14 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                             * (1.0 + 0.15 * (n_active as f64 - 1.0))).clamp(0.0, 1.0);
                     }
 
+                    // ADR-101: inherit the raw-amplitude classifier from the
+                    // CSI path (this feature_state path doesn't carry amps).
+                    if let Some((level, presence, conf)) = amp_classify_from_latest() {
+                        classification.motion_level = level;
+                        classification.presence = presence;
+                        classification.confidence = conf;
+                    }
+
                     let signal_field = generate_signal_field(
                         fused_features.mean_rssi, motion_score, vitals.breathing_rate_bpm / 60.0,
                         (vitals.presence_score as f64).min(1.0), &[],
@@ -4260,6 +4464,20 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         classification.motion_level = label.to_string();
                         classification.presence = label != "absent";
                         classification.confidence = (conf * 0.7 + classification.confidence * 0.3).clamp(0.0, 1.0);
+                    }
+
+                    // ADR-101: amp classifier wins over the legacy adaptive model.
+                    let amps_now = ns.frame_history.back().cloned().unwrap_or_default();
+                    if !amps_now.is_empty() {
+                        if let Some((level, presence, conf)) = amp_presence_override(node_id, &amps_now) {
+                            classification.motion_level = level;
+                            classification.presence = presence;
+                            classification.confidence = conf;
+                        }
+                    } else if let Some((level, presence, conf)) = amp_classify_from_latest() {
+                        classification.motion_level = level;
+                        classification.presence = presence;
+                        classification.confidence = conf;
                     }
 
                     ns.rssi_history.push_back(features.mean_rssi);
