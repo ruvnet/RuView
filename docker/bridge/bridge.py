@@ -24,7 +24,7 @@ from typing import Any
 
 import paho.mqtt.client as mqtt
 import websockets
-from websockets.exceptions import ConnectionClosed, InvalidStatusCode
+from websockets.exceptions import ConnectionClosed, WebSocketException
 
 # ---------------------------------------------------------------------------
 # Config
@@ -319,7 +319,7 @@ async def consume(stop: asyncio.Event, client: mqtt.Client) -> None:
                             "confidence": state["confidence"],
                         }))
                         LOG.warning("FALL event published (tick=%s)", state["tick"])
-        except (ConnectionClosed, InvalidStatusCode, OSError) as exc:
+        except (ConnectionClosed, WebSocketException, OSError) as exc:
             LOG.warning("WS error: %s — retrying in %.1fs", exc, backoff)
             try:
                 await asyncio.wait_for(stop.wait(), timeout=backoff)
