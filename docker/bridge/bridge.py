@@ -134,7 +134,6 @@ def discovery_messages() -> list[tuple[str, str]]:
         "state_topic": STATE_TOPIC,
         "value_template": "{{ value_json.heart_rate_bpm | round(0) }}",
         "unit_of_measurement": "bpm",
-        "device_class": "frequency",
         "icon": "mdi:heart-pulse",
         "state_class": "measurement",
     }))
