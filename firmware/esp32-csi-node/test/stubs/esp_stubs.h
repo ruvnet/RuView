@@ -153,6 +153,13 @@ typedef struct {
     uint8_t primary;
 } wifi_ap_record_t;
 
+typedef enum {
+    WIFI_PS_NONE = 0,
+    WIFI_PS_MIN_MODEM = 1,
+    WIFI_PS_MAX_MODEM = 2,
+} wifi_ps_type_t;
+
+static inline esp_err_t esp_wifi_set_ps(wifi_ps_type_t type) { (void)type; return ESP_OK; }
 static inline esp_err_t esp_wifi_set_promiscuous(bool en) { (void)en; return ESP_OK; }
 static inline esp_err_t esp_wifi_set_promiscuous_rx_cb(void *cb) { (void)cb; return ESP_OK; }
 static inline esp_err_t esp_wifi_set_promiscuous_filter(wifi_promiscuous_filter_t *f) { (void)f; return ESP_OK; }
