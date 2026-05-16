@@ -5570,6 +5570,18 @@ async fn main() {
         .route("/api/v1/calibration/status", get(calibration_status))
         // Static UI files
         .nest_service("/ui", ServeDir::new(&ui_path))
+        // ADR-100/ADR-101 operator pages (raw.html, mobile.html, calibrate.html,
+        // spectrum.html). Lives in `crates/wifi-densepose-sensing-server/static/`
+        // — same crate as the server so it ships with cargo install. Previously
+        // these were exposed via a separate `python -m http.server :8091`; now
+        // they're served on the main HTTP port so the operator only has to
+        // remember one URL per device (http://<mac>:8080/static/mobile.html).
+        .nest_service(
+            "/static",
+            ServeDir::new(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("static"),
+            ),
+        )
         .layer(SetResponseHeaderLayer::overriding(
             axum::http::header::CACHE_CONTROL,
             HeaderValue::from_static("no-cache, no-store, must-revalidate"),
