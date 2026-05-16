@@ -17,6 +17,7 @@
 #include "edge_processing.h"
 
 #include <string.h>
+#include <stdlib.h>
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_timer.h"
@@ -51,6 +52,100 @@ static bool    s_filter_mac_set = false;
 #endif
 
 static const char *TAG = "csi_collector";
+
+/* ──────────────────────────────────────────────────────────────────
+ * ADR-100: Gain Lock (AGC + FFT scale).
+ *
+ * ESP32 WiFi PHY applies automatic gain control per packet, which
+ * manifests as a 20-30 % slow drift in CSI amplitude even with a
+ * completely static room — masking the real modulation caused by
+ * body motion. Ported from Francesco Pace's ESPectre (GPLv3,
+ * https://github.com/francescopace/espectre).
+ *
+ * The first ~300 packets after boot are sampled. We take the median
+ * AGC + FFT gain values and freeze them with two undocumented PHY
+ * routines from the IDF blob. If the median AGC is below the safe
+ * threshold (sensor sits very close to the AP), we *don't* lock —
+ * forcing a low gain causes the RX path to freeze.
+ * Supported targets: ESP32-S3 / C3 / C6. Older parts skip silently.
+ * ──────────────────────────────────────────────────────────────── */
+#if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6
+#define RV_GAIN_LOCK_SUPPORTED 1
+/* Overlay struct on wifi_csi_info_t.rx_ctrl exposing the hidden agc/fft fields. */
+typedef struct {
+    unsigned : 32; unsigned : 32; unsigned : 32;
+    unsigned : 32; unsigned : 32; unsigned : 16;
+    signed   fft_gain : 8;
+    unsigned agc_gain : 8;
+    unsigned : 32; unsigned : 32;
+    unsigned : 32; unsigned : 32; unsigned : 32;
+    unsigned : 32;
+} rv_phy_rx_ctrl_t;
+extern void phy_fft_scale_force(bool force_en, int8_t force_value);
+extern void phy_force_rx_gain(int force_en, int force_value);
+#define RV_GAIN_CAL_PACKETS  300u
+#define RV_GAIN_MIN_SAFE_AGC 30u     /* < 30 → forcing freezes RX. */
+static uint8_t  s_agc_samples[RV_GAIN_CAL_PACKETS];
+static int8_t   s_fft_samples[RV_GAIN_CAL_PACKETS];
+static uint16_t s_gain_pkt_count = 0;
+static bool     s_gain_locked = false;
+static bool     s_gain_skipped_strong = false;
+static uint8_t  s_gain_agc_value = 0;
+static int8_t   s_gain_fft_value = 0;
+
+static int rv_cmp_u8(const void *a, const void *b) {
+    return (int)*(const uint8_t *)a - (int)*(const uint8_t *)b;
+}
+static int rv_cmp_i8(const void *a, const void *b) {
+    return (int)*(const int8_t *)a - (int)*(const int8_t *)b;
+}
+
+static void rv_gain_lock_process(const wifi_csi_info_t *info)
+{
+    if (s_gain_locked || info == NULL) return;
+    const rv_phy_rx_ctrl_t *phy = (const rv_phy_rx_ctrl_t *)info;
+
+    if (s_gain_pkt_count < RV_GAIN_CAL_PACKETS) {
+        s_agc_samples[s_gain_pkt_count] = phy->agc_gain;
+        s_fft_samples[s_gain_pkt_count] = phy->fft_gain;
+        s_gain_pkt_count++;
+        if (s_gain_pkt_count == RV_GAIN_CAL_PACKETS / 4 ||
+            s_gain_pkt_count == RV_GAIN_CAL_PACKETS / 2 ||
+            s_gain_pkt_count == (3u * RV_GAIN_CAL_PACKETS) / 4u) {
+            ESP_LOGI(TAG, "gain-lock cal %u%% (%u/%u, AGC=%u FFT=%d)",
+                     (unsigned)((s_gain_pkt_count * 100u) / RV_GAIN_CAL_PACKETS),
+                     (unsigned)s_gain_pkt_count, (unsigned)RV_GAIN_CAL_PACKETS,
+                     (unsigned)phy->agc_gain, (int)phy->fft_gain);
+        }
+        return;
+    }
+
+    /* Reached the calibration target — compute medians, lock or skip. */
+    qsort(s_agc_samples, RV_GAIN_CAL_PACKETS, sizeof(uint8_t), rv_cmp_u8);
+    qsort(s_fft_samples, RV_GAIN_CAL_PACKETS, sizeof(int8_t),  rv_cmp_i8);
+    s_gain_agc_value = s_agc_samples[RV_GAIN_CAL_PACKETS / 2];
+    s_gain_fft_value = s_fft_samples[RV_GAIN_CAL_PACKETS / 2];
+
+    if (s_gain_agc_value < RV_GAIN_MIN_SAFE_AGC) {
+        s_gain_skipped_strong = true;
+        ESP_LOGW(TAG,
+            "gain-lock SKIPPED: AGC median=%u < %u (signal too strong, "
+            "forcing would freeze RX). Move sensor 2-3 m from AP.",
+            (unsigned)s_gain_agc_value, (unsigned)RV_GAIN_MIN_SAFE_AGC);
+    } else {
+        phy_fft_scale_force(true, s_gain_fft_value);
+        phy_force_rx_gain(1, (int)s_gain_agc_value);
+        ESP_LOGI(TAG,
+            "gain-lock APPLIED: AGC=%u FFT=%d (median of %u packets) — "
+            "baseline drift should now collapse.",
+            (unsigned)s_gain_agc_value, (int)s_gain_fft_value,
+            (unsigned)RV_GAIN_CAL_PACKETS);
+    }
+    s_gain_locked = true;
+}
+#else
+static inline void rv_gain_lock_process(const wifi_csi_info_t *info) { (void)info; }
+#endif
 
 static uint32_t s_sequence = 0;
 static uint32_t s_cb_count = 0;
@@ -210,6 +305,11 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
             return;  /* Source MAC doesn't match filter — skip frame. */
         }
     }
+
+    /* ADR-100: feed the gain-lock calibrator. No-op once locked / on
+     * unsupported targets. Runs before the heavy work so calibration
+     * happens during the first ~6 s after boot regardless of host traffic. */
+    rv_gain_lock_process(info);
 
     s_cb_count++;
 

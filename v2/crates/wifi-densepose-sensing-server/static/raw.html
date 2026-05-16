@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>RuView — Raw Signals</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; padding:14px; font-family:-apple-system,Inter,system-ui,sans-serif;
+         background:#0a0e13; color:#e6edf3; font-size:12px; }
+  h1 { font-size:15px; font-weight:600; margin:0 0 2px; }
+  .sub { font-size:11px; color:#888; margin:0 0 12px; }
+  .topbar { display:flex; gap:14px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
+  .pill { padding:4px 10px; border-radius:4px; font-family:JetBrains Mono,monospace; font-size:11px;
+          background:#1c2128; }
+  .pill.dis { background:#3a1418; color:#ff6a6a; }
+  .pill.ok  { background:#0e2a1a; color:#7ce38b; }
+  button { background:#21262d; color:#e6edf3; border:1px solid #30363d; border-radius:4px;
+           padding:4px 10px; font-size:11px; cursor:pointer; }
+  .node { background:#161b22; border:1px solid #30363d; border-radius:6px;
+          padding:10px 12px; margin-bottom:10px; }
+  .node h2 { margin:0 0 6px; font-size:12px; font-weight:600; color:#7cb6ff;
+             font-family:JetBrains Mono,monospace; display:flex; gap:14px; align-items:baseline; }
+  .node h2 .stat { color:#888; font-weight:normal; font-size:11px; }
+  .node h2 .stat b { color:#e6edf3; font-weight:600; }
+  .row { display:grid; grid-template-columns: 1fr 360px; gap:10px; }
+  @media (max-width: 900px) { .row { grid-template-columns: 1fr; } }
+  canvas { display:block; width:100%; background:#0a0e13; border-radius:3px; }
+  canvas.bars   { height: 130px; }
+  canvas.trace  { height: 130px; }
+  .lbl { color:#666; font-size:10px; font-family:JetBrains Mono,monospace; margin:2px 0 0; }
+  .controls { display:flex; gap:8px; margin-left:auto; }
+  .controls label { font-size:11px; color:#aaa; }
+</style>
+</head>
+<body>
+<h1>RuView — Raw CSI signals</h1>
+<p class="sub">Per-node subcarrier amplitudes + RSSI/broadband traces. No DSP, no classification. Stream straight from the sensor.</p>
+
+<div class="topbar">
+  <span id="status" class="pill dis">disconnected</span>
+  <span class="pill" id="rate">0 fps</span>
+  <span class="pill" id="lastTs">last: --</span>
+  <div class="controls">
+    <label>peak-hold <input type="checkbox" id="peakHold" checked></label>
+    <label>log-y <input type="checkbox" id="logY"></label>
+    <button onclick="resetState()">reset</button>
+  </div>
+</div>
+
+<div id="nodes"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────
+const TRACE_SEC = 30;             // seconds of history per node
+const TRACE_MAX_PTS = 1200;       // safety cap
+const state = new Map();          // node_id -> { amp, peak, rssiHist[], meanAmpHist[], lastTs, frames }
+let frameCount = 0;
+let lastRateTs = performance.now();
+let rateFps = 0;
+let logY = false;
+let peakHold = true;
+
+function resetState() {
+  state.clear();
+  document.getElementById('nodes').innerHTML = '';
+  frameCount = 0;
+}
+
+document.getElementById('peakHold').addEventListener('change', e => { peakHold = e.target.checked; });
+document.getElementById('logY').addEventListener('change', e => { logY = e.target.checked; });
+
+// ── Per-node block factory ─────────────────────────────────────────
+function ensureNodeBlock(nodeId) {
+  if (state.has(nodeId)) return state.get(nodeId);
+  const ent = {
+    amp: [],
+    peak: [],
+    rssiHist: [],          // { t, v }
+    meanAmpHist: [],
+    lastTs: 0,
+    frames: 0,
+    lastFrameWall: performance.now(),
+    fps: 0,
+  };
+  state.set(nodeId, ent);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'node';
+  wrap.id = 'node-' + nodeId;
+  wrap.innerHTML = `
+    <h2>
+      Node ${nodeId}
+      <span class="stat">subc <b id="n${nodeId}-sub">0</b></span>
+      <span class="stat">rssi <b id="n${nodeId}-rssi">--</b> dBm</span>
+      <span class="stat">mean A <b id="n${nodeId}-meanA">0</b></span>
+      <span class="stat">peak A <b id="n${nodeId}-peakA">0</b></span>
+      <span class="stat">node fps <b id="n${nodeId}-fps">0</b></span>
+    </h2>
+    <div class="row">
+      <div>
+        <canvas class="bars" id="n${nodeId}-bars"></canvas>
+        <p class="lbl">subcarrier amplitude bars (left → low freq, right → high freq)</p>
+      </div>
+      <div>
+        <canvas class="trace" id="n${nodeId}-trace"></canvas>
+        <p class="lbl"><span style="color:#8b949e">RSSI</span> &nbsp; <span style="color:#3fb950">broadband mean amplitude</span> &nbsp; (last ${TRACE_SEC}s)</p>
+      </div>
+    </div>`;
+  document.getElementById('nodes').appendChild(wrap);
+  return ent;
+}
+
+// ── Drawing ────────────────────────────────────────────────────────
+function drawBars(canvas, amps, peaks) {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0a0e13'; ctx.fillRect(0, 0, w, h);
+  if (!amps.length) return;
+
+  // Determine scale
+  let maxV = peakHold && peaks.length
+    ? Math.max(...peaks)
+    : Math.max(...amps);
+  if (!isFinite(maxV) || maxV <= 0) maxV = 1;
+
+  const n = amps.length;
+  const bw = w / n;
+  const margin = 4;
+
+  // Bars
+  for (let i = 0; i < n; i++) {
+    let v = amps[i];
+    let pv = peaks[i] || 0;
+    if (logY) {
+      v = v > 0 ? Math.log10(v + 1) : 0;
+      pv = pv > 0 ? Math.log10(pv + 1) : 0;
+    }
+    const scaleMax = logY ? Math.log10(maxV + 1) : maxV;
+    const bh = Math.max(1, (v / scaleMax) * (h - margin));
+    const ph = Math.max(1, (pv / scaleMax) * (h - margin));
+    const x = i * bw;
+    // peak (faint)
+    if (peakHold && pv > 0) {
+      ctx.fillStyle = '#1f3a5a';
+      ctx.fillRect(x, h - ph, Math.max(1, bw - 1), 1.5);
+    }
+    // bar (active)
+    const hue = 200 + (i / n) * 100;
+    ctx.fillStyle = `hsl(${hue}, 70%, 55%)`;
+    ctx.fillRect(x, h - bh, Math.max(1, bw - 1), bh);
+  }
+
+  // Y-axis label
+  ctx.fillStyle = '#555'; ctx.font = '9px monospace';
+  ctx.fillText('max=' + maxV.toFixed(0), 4, 10);
+  ctx.fillText('n=' + n, w - 40, 10);
+}
+
+function drawTrace(canvas, rssiHist, meanAmpHist) {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0a0e13'; ctx.fillRect(0, 0, w, h);
+
+  const now = performance.now() / 1000;
+  const t0 = now - TRACE_SEC;
+
+  const drawSeries = (arr, color, getRange) => {
+    if (arr.length < 2) return;
+    const visible = arr.filter(p => p.t >= t0);
+    if (visible.length < 2) return;
+    const { min, max } = getRange(visible);
+    const span = (max - min) || 1;
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
+    for (let i = 0; i < visible.length; i++) {
+      const p = visible[i];
+      const x = ((p.t - t0) / TRACE_SEC) * w;
+      const y = h - ((p.v - min) / span) * (h - 8) - 4;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    // y-range text
+    ctx.fillStyle = color; ctx.font = '9px monospace';
+    return { min, max };
+  };
+
+  const rssiR = drawSeries(rssiHist, '#8b949e', arr => {
+    const vals = arr.map(p => p.v);
+    return { min: Math.min(...vals), max: Math.max(...vals) };
+  });
+  const ampR = drawSeries(meanAmpHist, '#3fb950', arr => {
+    const vals = arr.map(p => p.v);
+    return { min: 0, max: Math.max(...vals) };
+  });
+
+  // labels
+  ctx.font = '9px monospace';
+  if (rssiR) { ctx.fillStyle = '#8b949e'; ctx.fillText(`rssi ${rssiR.min.toFixed(0)}…${rssiR.max.toFixed(0)} dBm`, 4, 10); }
+  if (ampR)  { ctx.fillStyle = '#3fb950'; ctx.fillText(`A ${ampR.min.toFixed(0)}…${ampR.max.toFixed(0)}`, 4, 22); }
+
+  // grid line at now
+  ctx.strokeStyle = '#1c2128'; ctx.beginPath();
+  ctx.moveTo(w - 1, 0); ctx.lineTo(w - 1, h); ctx.stroke();
+}
+
+// ── Frame ingestion ────────────────────────────────────────────────
+function handleSensingUpdate(d) {
+  const nodes = d.nodes || [];
+  const ts = d.timestamp || (Date.now() / 1000);
+  const now = performance.now() / 1000;
+  for (const n of nodes) {
+    const id = n.node_id;
+    const amps = n.amplitude || [];
+    if (!amps.length) continue;
+    const ent = ensureNodeBlock(id);
+    ent.amp = amps;
+    // peak-hold update
+    if (ent.peak.length !== amps.length) ent.peak = amps.slice();
+    else for (let i = 0; i < amps.length; i++) if (amps[i] > ent.peak[i]) ent.peak[i] = amps[i];
+
+    const meanA = amps.reduce((s, x) => s + x, 0) / amps.length;
+    ent.rssiHist.push({ t: now, v: n.rssi_dbm });
+    ent.meanAmpHist.push({ t: now, v: meanA });
+    const cutoff = now - TRACE_SEC;
+    while (ent.rssiHist.length && ent.rssiHist[0].t < cutoff) ent.rssiHist.shift();
+    while (ent.meanAmpHist.length && ent.meanAmpHist[0].t < cutoff) ent.meanAmpHist.shift();
+    if (ent.rssiHist.length > TRACE_MAX_PTS) ent.rssiHist.splice(0, ent.rssiHist.length - TRACE_MAX_PTS);
+    if (ent.meanAmpHist.length > TRACE_MAX_PTS) ent.meanAmpHist.splice(0, ent.meanAmpHist.length - TRACE_MAX_PTS);
+
+    // per-node fps (EMA)
+    const dt = now - (ent.lastFrameWall / 1000);
+    if (dt > 0 && dt < 5) {
+      const inst = 1 / dt;
+      ent.fps = ent.fps ? ent.fps * 0.9 + inst * 0.1 : inst;
+    }
+    ent.lastFrameWall = performance.now();
+    ent.frames++;
+    ent.lastTs = ts;
+
+    document.getElementById(`n${id}-sub`).textContent = amps.length;
+    document.getElementById(`n${id}-rssi`).textContent = n.rssi_dbm.toFixed(1);
+    document.getElementById(`n${id}-meanA`).textContent = meanA.toFixed(1);
+    document.getElementById(`n${id}-peakA`).textContent = Math.max(...ent.peak).toFixed(1);
+    document.getElementById(`n${id}-fps`).textContent = ent.fps.toFixed(1);
+  }
+
+  document.getElementById('lastTs').textContent = 'last: ' + new Date(ts * 1000).toLocaleTimeString();
+  frameCount++;
+}
+
+function renderTick() {
+  for (const [id, ent] of state) {
+    const bars  = document.getElementById('n' + id + '-bars');
+    const trace = document.getElementById('n' + id + '-trace');
+    if (bars)  drawBars(bars,  ent.amp, ent.peak);
+    if (trace) drawTrace(trace, ent.rssiHist, ent.meanAmpHist);
+  }
+  // fps pill
+  const now = performance.now();
+  if (now - lastRateTs > 500) {
+    rateFps = (frameCount * 1000) / (now - lastRateTs);
+    document.getElementById('rate').textContent = rateFps.toFixed(1) + ' fps total';
+    frameCount = 0;
+    lastRateTs = now;
+  }
+  requestAnimationFrame(renderTick);
+}
+requestAnimationFrame(renderTick);
+
+// ── WS ─────────────────────────────────────────────────────────────
+function connect() {
+  const ws = new WebSocket('ws://' + location.hostname + ':8765/ws/sensing');
+  ws.onopen = () => {
+    const p = document.getElementById('status');
+    p.textContent = 'connected'; p.className = 'pill ok';
+  };
+  ws.onclose = () => {
+    const p = document.getElementById('status');
+    p.textContent = 'disconnected — reconnecting'; p.className = 'pill dis';
+    setTimeout(connect, 1500);
+  };
+  ws.onmessage = (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.type === 'sensing_update') handleSensingUpdate(d);
+    } catch (_) {}
+  };
+}
+connect();
+</script>
+</body></html>
