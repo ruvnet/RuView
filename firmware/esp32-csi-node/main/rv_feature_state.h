@@ -65,7 +65,11 @@ typedef struct __attribute__((packed)) {
     float    env_shift_score;   /**< 0..1, baseline drift. */
     float    node_coherence;    /**< 0..1, multi-link agreement. */
     uint16_t quality_flags;     /**< RV_QFLAG_* bitmap. */
-    uint16_t reserved;
+    int8_t   rssi_dbm;          /**< Median RSSI over the emit window (i8, dBm). 0 = not measured.
+                                     ADR-100 D3: previously the same byte was `reserved` — but downstream
+                                     UI/classifier needs RSSI per node and the legacy raw-CSI parse path
+                                     (0xC5110001) is no longer hot on this FW. Server reads buf[54] as i8. */
+    uint8_t  reserved;          /**< Padding/aux byte; keep zero until next protocol bump. */
     uint32_t crc32;             /**< IEEE CRC32 over bytes [0..end-4]. */
 } rv_feature_state_t;
 

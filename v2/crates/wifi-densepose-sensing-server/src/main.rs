@@ -1106,6 +1106,11 @@ fn parse_rv_feature_state(buf: &[u8]) -> Option<Esp32VitalsPacket> {
     let respiration_bpm = f32::from_le_bytes([buf[24], buf[25], buf[26], buf[27]]);
     let heartbeat_bpm   = f32::from_le_bytes([buf[32], buf[33], buf[34], buf[35]]);
     let quality_flags   = u16::from_le_bytes([buf[52], buf[53]]);
+    // ADR-100 D3: FW now ships median RSSI in byte 54 (was `reserved`). Zero
+    // means "not yet measured" — keep the historical -50 fallback in that
+    // case so the UI doesn't show a misleading 0 dBm.
+    let rssi_byte = buf[54] as i8;
+    let rssi: i8 = if rssi_byte == 0 { -50 } else { rssi_byte };
 
     let presence_valid = (quality_flags & (1 << 0)) != 0;
     // Threshold lowered from 0.5 to 0.15 for low-SNR multi-meter deployments
@@ -1122,7 +1127,7 @@ fn parse_rv_feature_state(buf: &[u8]) -> Option<Esp32VitalsPacket> {
         motion,
         breathing_rate_bpm: respiration_bpm as f64,
         heartrate_bpm: heartbeat_bpm as f64,
-        rssi: -50,
+        rssi,
         n_persons,
         motion_energy: motion_score,
         presence_score,
@@ -1326,15 +1331,21 @@ fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
     //   [17]     noise_floor (i8)
     //   [18..19] reserved
     //   [20..]   I/Q data
+    //
+    // ADR-100 D3 fix: previous code read every field after `n_antennas`
+    // from offsets shifted by 2 bytes (n_subcarriers as u8 instead of u16,
+    // sequence at 10..14, rssi at 14, noise_floor at 15). That made the
+    // RSSI byte a slice of mid-sequence number — random — and the
+    // saturating_neg() workaround hid this by always producing a negative
+    // value. Now matches FW byte-for-byte. The csi.rs duplicate of this
+    // function had the same bug and is fixed in the same change.
     let node_id = buf[4];
     let n_antennas = buf[5];
-    let n_subcarriers = buf[6];
+    let n_subcarriers = u16::from_le_bytes([buf[6], buf[7]]) as u8;
     let freq_mhz = u16::from_le_bytes([buf[8], buf[9]]);
-    let sequence = u32::from_le_bytes([buf[10], buf[11], buf[12], buf[13]]);
-    let rssi_raw = buf[14] as i8;
-    // Fix RSSI sign: ensure it's always negative (dBm convention).
-    let rssi = if rssi_raw > 0 { rssi_raw.saturating_neg() } else { rssi_raw };
-    let noise_floor = buf[15] as i8;
+    let sequence = u32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]);
+    let rssi = buf[16] as i8;          // already signed in [-128..127]
+    let noise_floor = buf[17] as i8;
 
     let iq_start = 20;
     let n_pairs = n_antennas as usize * n_subcarriers as usize;
