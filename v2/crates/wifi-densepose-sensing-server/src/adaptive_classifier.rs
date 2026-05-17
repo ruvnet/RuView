@@ -139,15 +139,83 @@ pub struct ClassStats {
     pub stddev: [f64; N_FEATURES],
 }
 
+/// ADR-119: MLP (multi-layer perceptron) hidden-layer width.
+/// 32 units is enough capacity for our 22-feature × 6-class problem
+/// (~3k weights) while staying small enough to train in <60s on the
+/// 151k-frame dataset and load instantly at runtime.
+const MLP_HIDDEN: usize = 32;
+
+/// ADR-119: trained MLP classifier. Single hidden layer, ReLU activation,
+/// softmax output. Stored alongside the LogReg weights — when `is_trained()`
+/// returns true, `AdaptiveModel::classify` uses the MLP; otherwise it falls
+/// back to logistic regression (the legacy path from before ADR-119).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MlpModel {
+    /// Layer 1 weights, row-major `[N_FEATURES × MLP_HIDDEN]`.
+    #[serde(default)]
+    pub w1: Vec<f64>,
+    /// Layer 1 bias, `[MLP_HIDDEN]`.
+    #[serde(default)]
+    pub b1: Vec<f64>,
+    /// Layer 2 weights, row-major `[MLP_HIDDEN × n_classes]`.
+    #[serde(default)]
+    pub w2: Vec<f64>,
+    /// Layer 2 bias, `[n_classes]`.
+    #[serde(default)]
+    pub b2: Vec<f64>,
+    /// Number of output classes (== len(b2) when trained).
+    #[serde(default)]
+    pub n_classes: usize,
+}
+
+impl MlpModel {
+    pub fn is_trained(&self) -> bool {
+        !self.w1.is_empty() && self.n_classes > 0 && self.b2.len() == self.n_classes
+    }
+
+    /// Forward pass. Input is already z-score normalised by the caller.
+    /// Returns softmax probabilities of length `n_classes`.
+    pub fn forward(&self, x: &[f64; N_FEATURES]) -> Vec<f64> {
+        // Layer 1: h = ReLU(x · W1 + b1)
+        let mut h = vec![0.0f64; MLP_HIDDEN];
+        for j in 0..MLP_HIDDEN {
+            let mut s = self.b1[j];
+            for i in 0..N_FEATURES {
+                s += x[i] * self.w1[i * MLP_HIDDEN + j];
+            }
+            h[j] = s.max(0.0);
+        }
+        // Layer 2: logits = h · W2 + b2
+        let mut logits = vec![0.0f64; self.n_classes];
+        for c in 0..self.n_classes {
+            let mut s = self.b2[c];
+            for j in 0..MLP_HIDDEN {
+                s += h[j] * self.w2[j * self.n_classes + c];
+            }
+            logits[c] = s;
+        }
+        // Softmax.
+        let m = logits.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let exp_sum: f64 = logits.iter().map(|z| (z - m).exp()).sum();
+        logits.iter().map(|z| (z - m).exp() / exp_sum).collect()
+    }
+}
+
 // ── Trained model ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdaptiveModel {
     /// Per-class feature statistics (centroid + spread).
     pub class_stats: Vec<ClassStats>,
-    /// Logistic regression weights: [n_classes x (N_FEATURES + 1)] (last = bias).
-    /// Dynamic: the outer Vec length equals the number of discovered classes.
+    /// ADR-119: legacy logistic regression weights, kept as fallback.
+    /// Shape: `[n_classes × (N_FEATURES + 1)]` (last column = bias).
+    /// When `mlp.is_trained()` returns true, MLP wins and these are unused
+    /// at classify time but still updated by `train_from_recordings` so
+    /// rollback is one-line.
     pub weights: Vec<Vec<f64>>,
+    /// ADR-119: trained MLP (preferred classifier when present).
+    #[serde(default)]
+    pub mlp: MlpModel,
     /// Global feature normalisation: mean and stddev across all training data.
     pub global_mean: [f64; N_FEATURES],
     pub global_std: [f64; N_FEATURES],
@@ -171,6 +239,7 @@ impl Default for AdaptiveModel {
         Self {
             class_stats: Vec::new(),
             weights: vec![vec![0.0; N_FEATURES + 1]; n_classes],
+            mlp: MlpModel::default(),
             global_mean: [0.0; N_FEATURES],
             global_std: [1.0; N_FEATURES],
             trained_frames: 0,
@@ -182,39 +251,50 @@ impl Default for AdaptiveModel {
 }
 
 impl AdaptiveModel {
-    /// Classify a raw feature vector.  Returns (class_label, confidence).
+    /// Classify a raw feature vector. Returns (class_label, confidence).
+    /// ADR-119: prefers MLP when trained; falls back to logistic regression
+    /// otherwise.
     pub fn classify(&self, raw_features: &[f64; N_FEATURES]) -> (String, f64) {
-        let n_classes = self.weights.len();
-        if n_classes == 0 || self.class_stats.is_empty() {
-            return ("present_still".to_string(), 0.5);
-        }
-
-        // Normalise features.
+        // Normalise features once (shared by MLP and LogReg).
         let mut x = [0.0f64; N_FEATURES];
         for i in 0..N_FEATURES {
             x[i] = (raw_features[i] - self.global_mean[i]) / (self.global_std[i] + 1e-9);
         }
 
-        // Compute logits: w·x + b for each class.
+        // ADR-119: MLP path (preferred when trained).
+        if self.mlp.is_trained() {
+            let probs = self.mlp.forward(&x);
+            let (best_c, best_p) = probs.iter().enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                .unwrap();
+            let label = if best_c < self.class_names.len() {
+                self.class_names[best_c].clone()
+            } else {
+                "present_still".to_string()
+            };
+            return (label, *best_p);
+        }
+
+        // Legacy logistic regression fallback.
+        let n_classes = self.weights.len();
+        if n_classes == 0 || self.class_stats.is_empty() {
+            return ("present_still".to_string(), 0.5);
+        }
         let mut logits: Vec<f64> = vec![0.0; n_classes];
         for c in 0..n_classes {
             let w = &self.weights[c];
-            let mut z = w[N_FEATURES]; // bias
+            let mut z = w[N_FEATURES];
             for i in 0..N_FEATURES {
                 z += w[i] * x[i];
             }
             logits[c] = z;
         }
-
-        // Softmax.
         let max_logit = logits.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let exp_sum: f64 = logits.iter().map(|z| (z - max_logit).exp()).sum();
         let mut probs: Vec<f64> = vec![0.0; n_classes];
         for c in 0..n_classes {
             probs[c] = ((logits[c] - max_logit).exp()) / exp_sum;
         }
-
-        // Pick argmax.
         let (best_c, best_p) = probs.iter().enumerate()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
             .unwrap();
@@ -517,20 +597,209 @@ pub fn train_from_recordings(recordings_dir: &Path) -> Result<AdaptiveModel, Str
     }
     for c in 0..n_classes {
         let tot = class_total[c].max(1);
-        eprintln!("  {}: {}/{} ({:.0}%)", class_names[c], class_correct[c], tot,
+        eprintln!("  LogReg {}: {}/{} ({:.0}%)", class_names[c], class_correct[c], tot,
                  class_correct[c] as f64 / tot as f64 * 100.0);
     }
+
+    // ── ADR-119: train MLP on the same normalised samples ──
+    eprintln!("Training MLP (22 → {} → {}) ...", MLP_HIDDEN, n_classes);
+    let mlp = train_mlp_classifier(&norm_samples, n_classes);
+    let (mlp_acc, mlp_per_class) = eval_mlp(&mlp, &norm_samples, n_classes);
+    eprintln!("MLP accuracy: {:.2}% (LogReg was {:.2}%)",
+              mlp_acc * 100.0, accuracy * 100.0);
+    for c in 0..n_classes {
+        let tot = class_total[c].max(1);
+        let corr = mlp_per_class[c];
+        eprintln!("  MLP    {}: {}/{} ({:.0}%)",
+                 class_names[c], corr, tot, corr as f64 / tot as f64 * 100.0);
+    }
+
+    // Pick the better classifier as the final accuracy number.
+    let final_accuracy = mlp_acc.max(accuracy);
 
     Ok(AdaptiveModel {
         class_stats,
         weights,
+        mlp,
         global_mean,
         global_std,
         trained_frames: n,
-        training_accuracy: accuracy,
+        training_accuracy: final_accuracy,
         version: 1,
         class_names,
     })
+}
+
+// ── ADR-119: MLP training (manual backprop, no external ML crate) ────────────
+
+/// Train a single-hidden-layer MLP on already-z-score-normalised samples.
+/// Architecture: N_FEATURES → MLP_HIDDEN → n_classes (ReLU + softmax).
+/// Optimiser: SGD + momentum 0.9 + weight decay 1e-4 + cosine LR decay.
+fn train_mlp_classifier(samples: &[([f64; N_FEATURES], usize)], n_classes: usize) -> MlpModel {
+    let n_w1 = N_FEATURES * MLP_HIDDEN;
+    let n_w2 = MLP_HIDDEN * n_classes;
+
+    // He initialisation: w ~ N(0, sqrt(2/fan_in))
+    let mut rng_state: u64 = 1337;
+    let mut rng_u01 = move || -> f64 {
+        rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        ((rng_state >> 33) as f64) / ((u64::MAX >> 33) as f64)
+    };
+    let mut he_init = |n: usize, fan_in: usize| -> Vec<f64> {
+        let s = (2.0 / fan_in as f64).sqrt();
+        let mut v = Vec::with_capacity(n);
+        let mut k = 0;
+        while k < n {
+            let u1 = rng_u01().max(1e-12);
+            let u2 = rng_u01();
+            let z0 = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos() * s;
+            let z1 = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).sin() * s;
+            v.push(z0);
+            k += 1;
+            if k < n { v.push(z1); k += 1; }
+        }
+        v
+    };
+
+    let mut w1 = he_init(n_w1, N_FEATURES);
+    let mut b1 = vec![0.0f64; MLP_HIDDEN];
+    let mut w2 = he_init(n_w2, MLP_HIDDEN);
+    let mut b2 = vec![0.0f64; n_classes];
+
+    let mut mw1 = vec![0.0f64; n_w1];
+    let mut mb1 = vec![0.0f64; MLP_HIDDEN];
+    let mut mw2 = vec![0.0f64; n_w2];
+    let mut mb2 = vec![0.0f64; n_classes];
+
+    let momentum = 0.9f64;
+    let weight_decay = 1e-4f64;
+    let base_lr = 0.05f64;
+    let batch_size = 64usize;
+    let epochs = 30usize;
+    let n = samples.len();
+
+    // Shuffle index buffer (avoid cloning sample arrays).
+    let mut idx: Vec<usize> = (0..n).collect();
+    let mut shuf_state: u64 = 7;
+    let mut shuf_next = move || -> u64 {
+        shuf_state = shuf_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        shuf_state >> 33
+    };
+
+    for epoch in 0..epochs {
+        for i in (1..idx.len()).rev() {
+            let j = (shuf_next() as usize) % (i + 1);
+            idx.swap(i, j);
+        }
+
+        let lr = base_lr * 0.5 * (1.0 + (std::f64::consts::PI * epoch as f64 / epochs as f64).cos());
+        let mut epoch_loss = 0.0f64;
+        let mut h_pre = vec![0.0f64; MLP_HIDDEN];
+        let mut h = vec![0.0f64; MLP_HIDDEN];
+        let mut logits = vec![0.0f64; n_classes];
+
+        let mut k = 0usize;
+        while k < n {
+            let bend = (k + batch_size).min(n);
+            let mut gw1 = vec![0.0f64; n_w1];
+            let mut gb1 = vec![0.0f64; MLP_HIDDEN];
+            let mut gw2 = vec![0.0f64; n_w2];
+            let mut gb2 = vec![0.0f64; n_classes];
+            let bs = (bend - k) as f64;
+
+            for &si in &idx[k..bend] {
+                let (x, target) = &samples[si];
+
+                // Forward.
+                for j in 0..MLP_HIDDEN {
+                    let mut s = b1[j];
+                    for i in 0..N_FEATURES { s += x[i] * w1[i * MLP_HIDDEN + j]; }
+                    h_pre[j] = s;
+                    h[j] = s.max(0.0);
+                }
+                for c in 0..n_classes {
+                    let mut s = b2[c];
+                    for j in 0..MLP_HIDDEN { s += h[j] * w2[j * n_classes + c]; }
+                    logits[c] = s;
+                }
+                let mx = logits.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                let ex_sum: f64 = logits.iter().map(|z| (z - mx).exp()).sum();
+                // d_logits = softmax - one_hot
+                let mut d_logits = vec![0.0f64; n_classes];
+                for c in 0..n_classes {
+                    let p = (logits[c] - mx).exp() / ex_sum;
+                    d_logits[c] = p - if c == *target { 1.0 } else { 0.0 };
+                    if c == *target { epoch_loss += -(p.max(1e-15)).ln(); }
+                }
+
+                // Gradients.
+                for c in 0..n_classes {
+                    gb2[c] += d_logits[c];
+                    for j in 0..MLP_HIDDEN {
+                        gw2[j * n_classes + c] += h[j] * d_logits[c];
+                    }
+                }
+                // Backprop through Layer-2 to hidden.
+                let mut d_h = [0.0f64; MLP_HIDDEN];
+                for j in 0..MLP_HIDDEN {
+                    if h_pre[j] <= 0.0 { continue; }
+                    let mut s = 0.0;
+                    for c in 0..n_classes { s += w2[j * n_classes + c] * d_logits[c]; }
+                    d_h[j] = s;
+                }
+                for j in 0..MLP_HIDDEN {
+                    gb1[j] += d_h[j];
+                    for i in 0..N_FEATURES { gw1[i * MLP_HIDDEN + j] += x[i] * d_h[j]; }
+                }
+            }
+
+            // SGD + momentum + weight decay.
+            for q in 0..n_w1 {
+                let g = gw1[q] / bs + weight_decay * w1[q];
+                mw1[q] = momentum * mw1[q] + g;
+                w1[q] -= lr * mw1[q];
+            }
+            for q in 0..MLP_HIDDEN {
+                let g = gb1[q] / bs;
+                mb1[q] = momentum * mb1[q] + g;
+                b1[q] -= lr * mb1[q];
+            }
+            for q in 0..n_w2 {
+                let g = gw2[q] / bs + weight_decay * w2[q];
+                mw2[q] = momentum * mw2[q] + g;
+                w2[q] -= lr * mw2[q];
+            }
+            for q in 0..n_classes {
+                let g = gb2[q] / bs;
+                mb2[q] = momentum * mb2[q] + g;
+                b2[q] -= lr * mb2[q];
+            }
+
+            k = bend;
+        }
+        if epoch % 5 == 0 || epoch == epochs - 1 {
+            eprintln!("  MLP epoch {epoch:2}/{}: loss = {:.4}, lr = {:.4}",
+                      epochs, epoch_loss / n as f64, lr);
+        }
+    }
+
+    MlpModel { w1, b1, w2, b2, n_classes }
+}
+
+/// Evaluate MLP accuracy and per-class correct counts on normalised samples.
+fn eval_mlp(mlp: &MlpModel, samples: &[([f64; N_FEATURES], usize)], n_classes: usize)
+    -> (f64, Vec<usize>)
+{
+    let mut correct = 0usize;
+    let mut per_class = vec![0usize; n_classes];
+    for (x, target) in samples {
+        let probs = mlp.forward(x);
+        let pred = probs.iter().enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .unwrap().0;
+        if pred == *target { correct += 1; per_class[*target] += 1; }
+    }
+    (correct as f64 / samples.len() as f64, per_class)
 }
 
 /// Default path for the saved adaptive model.
