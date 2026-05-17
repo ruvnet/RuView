@@ -21,6 +21,8 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_timer.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 #include "sdkconfig.h"
 
 /* ADR-060: Access the global NVS config for MAC filter and channel override. */
@@ -83,6 +85,51 @@ typedef struct {
 } rv_phy_rx_ctrl_t;
 extern void phy_fft_scale_force(bool force_en, int8_t force_value);
 extern void phy_force_rx_gain(int force_en, int force_value);
+
+/* ── ADR-108: NVS persistence of gain-lock values ────────────────
+ * After the first successful gain-lock, save AGC/FFT medians into NVS
+ * (namespace "csi_cfg", keys "gl_agc"/"gl_fft"). On subsequent boots
+ * the FW loads them and immediately forces the gain — reboot → CSI
+ * ready in ~0.5 s instead of ~3 s waiting for 300 calibration packets.
+ *
+ * Stored values are tied to: this sensor location + this AP MAC +
+ * this channel + this antenna orientation. If any of those change,
+ * the saved values may be wrong — but harmless: the WiFi PHY will
+ * just receive slightly off-optimal CSI until the operator triggers
+ * a re-calibration (today: clear NVS, reboot; future: dedicated REST).
+ */
+#define RV_GAIN_NVS_NS      "csi_cfg"
+#define RV_GAIN_NVS_K_AGC   "gl_agc"
+#define RV_GAIN_NVS_K_FFT   "gl_fft"
+
+static esp_err_t rv_gain_load_from_nvs(uint8_t *agc_out, int8_t *fft_out)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(RV_GAIN_NVS_NS, NVS_READONLY, &h);
+    if (err != ESP_OK) return err;
+    uint8_t agc = 0;
+    int8_t  fft = 0;
+    err = nvs_get_u8(h, RV_GAIN_NVS_K_AGC, &agc);
+    if (err == ESP_OK) err = nvs_get_i8(h, RV_GAIN_NVS_K_FFT, &fft);
+    nvs_close(h);
+    if (err == ESP_OK) { *agc_out = agc; *fft_out = fft; }
+    return err;
+}
+
+static void rv_gain_save_to_nvs(uint8_t agc, int8_t fft)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(RV_GAIN_NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        ESP_LOGW("csi_collector", "gain-lock NVS save: nvs_open failed: %s",
+                 esp_err_to_name(err));
+        return;
+    }
+    nvs_set_u8(h, RV_GAIN_NVS_K_AGC, agc);
+    nvs_set_i8(h, RV_GAIN_NVS_K_FFT, fft);
+    nvs_commit(h);
+    nvs_close(h);
+}
 #define RV_GAIN_CAL_PACKETS  300u
 #define RV_GAIN_MIN_SAFE_AGC 30u     /* < 30 → forcing freezes RX. */
 static uint8_t  s_agc_samples[RV_GAIN_CAL_PACKETS];
@@ -103,6 +150,28 @@ static int rv_cmp_i8(const void *a, const void *b) {
 static void rv_gain_lock_process(const wifi_csi_info_t *info)
 {
     if (s_gain_locked || info == NULL) return;
+
+    /* ADR-108: short-circuit calibration if previous values are in NVS. */
+    static bool s_nvs_checked = false;
+    if (!s_nvs_checked) {
+        s_nvs_checked = true;
+        uint8_t agc = 0; int8_t fft = 0;
+        if (rv_gain_load_from_nvs(&agc, &fft) == ESP_OK &&
+            agc >= RV_GAIN_MIN_SAFE_AGC)
+        {
+            phy_fft_scale_force(true, fft);
+            phy_force_rx_gain(1, (int)agc);
+            s_gain_agc_value = agc;
+            s_gain_fft_value = fft;
+            s_gain_locked = true;
+            ESP_LOGI("csi_collector",
+                "gain-lock RESTORED from NVS: AGC=%u FFT=%d "
+                "(0-packet calibration; clear NVS to recalibrate)",
+                (unsigned)agc, (int)fft);
+            return;
+        }
+    }
+
     const rv_phy_rx_ctrl_t *phy = (const rv_phy_rx_ctrl_t *)info;
 
     if (s_gain_pkt_count < RV_GAIN_CAL_PACKETS) {
@@ -140,6 +209,10 @@ static void rv_gain_lock_process(const wifi_csi_info_t *info)
             "baseline drift should now collapse.",
             (unsigned)s_gain_agc_value, (int)s_gain_fft_value,
             (unsigned)RV_GAIN_CAL_PACKETS);
+        /* ADR-108: persist for next boot — short-circuit calibration. */
+        rv_gain_save_to_nvs(s_gain_agc_value, s_gain_fft_value);
+        ESP_LOGI(TAG, "gain-lock PERSISTED to NVS (%s/%s, %s)",
+                 RV_GAIN_NVS_NS, RV_GAIN_NVS_K_AGC, RV_GAIN_NVS_K_FFT);
     }
     s_gain_locked = true;
 }
