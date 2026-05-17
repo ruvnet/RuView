@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **Stub crates `wifi-densepose-api`, `wifi-densepose-db`, `wifi-densepose-config`** (closes #578).
+  Each was a single-line doc-comment placeholder with an empty `[dependencies]`
+  section and zero references from any source file or `Cargo.toml`. The names
+  were reserved early for an envisioned REST/database/config split that never
+  materialised; the functionality they would provide is covered today by
+  `wifi-densepose-sensing-server` (Axum REST/WS), per-crate config + CLI args,
+  and the project's real-time-only (no-persistent-state) posture. Removing them
+  from the workspace prevents `cargo` from listing dead crates and shipping
+  empty published artifacts. If any of these names is needed in the future,
+  they can be reintroduced with a real implementation.
+
 ### Added
 - **Real-time CSI introspection / low-latency tap on `wifi-densepose-sensing-server` (ADR-099).**
   New `wifi_densepose_sensing_server::introspection` module wires

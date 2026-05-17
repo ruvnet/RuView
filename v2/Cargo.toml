@@ -4,9 +4,16 @@ members = [
     "crates/wifi-densepose-core",
     "crates/wifi-densepose-signal",
     "crates/wifi-densepose-nn",
-    "crates/wifi-densepose-api",
-    "crates/wifi-densepose-db",
-    "crates/wifi-densepose-config",
+    # wifi-densepose-api / -db / -config: removed in #578.
+    # The crate names were reserved early for an envisioned REST/database/config
+    # split, but no implementation followed and no code referenced them. The
+    # functionality they would provide is covered today by:
+    #   - REST/WS: `wifi-densepose-sensing-server` (Axum)
+    #   - Config:  per-crate config + CLI args in `wifi-densepose-sensing-server`
+    #             and `wifi-densepose-desktop`
+    #   - DB:      no persistent state; system is real-time
+    # If we ever need any of these as a published surface, they can be
+    # reintroduced with a real implementation.
     "crates/wifi-densepose-hardware",
     "crates/wifi-densepose-wasm",
     "crates/wifi-densepose-cli",

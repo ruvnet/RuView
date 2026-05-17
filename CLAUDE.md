@@ -14,9 +14,6 @@ Dual codebase: Python v1 (`v1/`) and Rust port (`v2/`).
 | `wifi-densepose-mat` | Mass Casualty Assessment Tool — disaster survivor detection |
 | `wifi-densepose-hardware` | ESP32 aggregator, TDM protocol, channel hopping firmware |
 | `wifi-densepose-ruvector` | RuVector v2.0.4 integration + cross-viewpoint fusion (5 modules) |
-| `wifi-densepose-api` | REST API (Axum) |
-| `wifi-densepose-db` | Database layer (Postgres, SQLite, Redis) |
-| `wifi-densepose-config` | Configuration management |
 | `wifi-densepose-wasm` | WebAssembly bindings for browser deployment |
 | `wifi-densepose-cli` | CLI tool (`wifi-densepose` binary) |
 | `wifi-densepose-sensing-server` | Lightweight Axum server for WiFi sensing UI |
@@ -135,17 +132,14 @@ Crates must be published in dependency order:
 2. `wifi-densepose-vitals` (no internal deps)
 3. `wifi-densepose-wifiscan` (no internal deps)
 4. `wifi-densepose-hardware` (no internal deps)
-5. `wifi-densepose-config` (no internal deps)
-6. `wifi-densepose-db` (no internal deps)
-7. `wifi-densepose-signal` (depends on core)
-8. `wifi-densepose-nn` (no internal deps, workspace only)
-9. `wifi-densepose-ruvector` (no internal deps, workspace only)
-10. `wifi-densepose-train` (depends on signal, nn)
-11. `wifi-densepose-mat` (depends on core, signal, nn)
-12. `wifi-densepose-api` (no internal deps)
-13. `wifi-densepose-wasm` (depends on mat)
-14. `wifi-densepose-sensing-server` (depends on wifiscan)
-15. `wifi-densepose-cli` (depends on mat)
+5. `wifi-densepose-signal` (depends on core)
+6. `wifi-densepose-nn` (no internal deps, workspace only)
+7. `wifi-densepose-ruvector` (no internal deps, workspace only)
+8. `wifi-densepose-train` (depends on signal, nn)
+9. `wifi-densepose-mat` (depends on core, signal, nn)
+10. `wifi-densepose-wasm` (depends on mat)
+11. `wifi-densepose-sensing-server` (depends on wifiscan)
+12. `wifi-densepose-cli` (depends on mat)
 
 ### Validation & Witness Verification (ADR-028)
 

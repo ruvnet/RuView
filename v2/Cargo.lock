@@ -921,7 +921,7 @@ checksum = "d64e8af5551369d19cf50138de61f1c42074ab970f74e99be916646777f8fc87"
 dependencies = [
  "encode_unicode",
  "libc",
- "unicode-width 0.2.2",
+ "unicode-width",
  "windows-sys 0.61.2",
 ]
 
@@ -8354,10 +8354,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
 
 [[package]]
-name = "wifi-densepose-api"
-version = "0.3.0"
-
-[[package]]
 name = "wifi-densepose-cli"
 version = "0.3.0"
 dependencies = [
@@ -8383,10 +8379,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wifi-densepose-config"
-version = "0.3.0"
-
-[[package]]
 name = "wifi-densepose-core"
 version = "0.3.0"
 dependencies = [
@@ -8401,10 +8393,6 @@ dependencies = [
  "thiserror 2.0.18",
  "uuid",
 ]
-
-[[package]]
-name = "wifi-densepose-db"
-version = "0.3.0"
 
 [[package]]
 name = "wifi-densepose-desktop"
