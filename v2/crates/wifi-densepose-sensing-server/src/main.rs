@@ -2740,12 +2740,22 @@ fn adaptive_override(state: &AppStateInner, features: &FeatureInfo, classificati
 /// Live UX target: user can read the badge without it changing
 /// mid-read, while a genuine activity switch still propagates within
 /// ~3-4 seconds.
-const ADAPTIVE_SMOOTH_WIN: usize = 30;
-const ADAPTIVE_CONFIRM_TICKS: u32 = 5;
+const ADAPTIVE_SMOOTH_WIN: usize = 15;
+const ADAPTIVE_CONFIRM_TICKS: u32 = 2;
 
 static ADAPTIVE_LABEL_HISTORY: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
 /// (committed_label, candidate_label, candidate_consecutive_count)
 static ADAPTIVE_COMMITTED: OnceLock<Mutex<(String, String, u32)>> = OnceLock::new();
+
+/// ADR-120 follow-up #3: keep the LAST 30 RAW labels pushed into the
+/// smoother. Exposed via `/api/v1/adaptive/debug` so the operator can
+/// see what the model thinks vs what the UI shows after smoothing —
+/// distinguishes "smoother is too sticky" from "model is overfit and
+/// keeps outputting this class".
+static ADAPTIVE_RAW_LOG: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
+fn adaptive_raw_log_init() -> &'static Mutex<VecDeque<String>> {
+    ADAPTIVE_RAW_LOG.get_or_init(|| Mutex::new(VecDeque::with_capacity(30)))
+}
 
 fn adaptive_label_history_init() -> &'static Mutex<VecDeque<String>> {
     ADAPTIVE_LABEL_HISTORY.get_or_init(|| Mutex::new(VecDeque::with_capacity(ADAPTIVE_SMOOTH_WIN)))
@@ -2773,6 +2783,12 @@ pub fn finalize_motion_label(classification: &mut ClassificationInfo) {
 /// committed one must persist for ADAPTIVE_CONFIRM_TICKS consecutive
 /// mode-results before becoming the new committed.
 fn adaptive_label_smooth(raw_label: &str) -> String {
+    // ADR-120 follow-up #3: log raw input for /api/v1/adaptive/debug.
+    {
+        let mut raw = adaptive_raw_log_init().lock().unwrap();
+        raw.push_back(raw_label.to_string());
+        while raw.len() > 30 { raw.pop_front(); }
+    }
     // Layer 1 — majority vote.
     let mode = {
         let mut buf = adaptive_label_history_init().lock().unwrap();
@@ -5023,6 +5039,34 @@ async fn adaptive_status(State(state): State<SharedState>) -> Json<serde_json::V
             "message": "No adaptive model. POST /api/v1/adaptive/train to train one.",
         })),
     }
+}
+
+/// ADR-120 follow-up #3: GET /api/v1/adaptive/debug — return the raw
+/// model labels from the last 30 ticks alongside the smoothed/committed
+/// state. Lets the operator distinguish "smoother is sticky" from
+/// "model keeps outputting the same class".
+async fn adaptive_debug() -> Json<serde_json::Value> {
+    let raw: Vec<String> = adaptive_raw_log_init().lock().unwrap().iter().cloned().collect();
+    let smoothing_buf: Vec<String> = adaptive_label_history_init().lock().unwrap().iter().cloned().collect();
+    let (committed, candidate, candidate_count) = {
+        let st = adaptive_committed_init().lock().unwrap();
+        (st.0.clone(), st.1.clone(), st.2)
+    };
+    // Count distribution in raw buffer.
+    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for v in &raw { *counts.entry(v.clone()).or_insert(0) += 1; }
+    let mut dist: Vec<(String, usize)> = counts.into_iter().collect();
+    dist.sort_by(|a, b| b.1.cmp(&a.1));
+    Json(serde_json::json!({
+        "smoothing_window_ticks": ADAPTIVE_SMOOTH_WIN,
+        "confirm_ticks": ADAPTIVE_CONFIRM_TICKS,
+        "raw_last_30": raw,
+        "raw_distribution": dist.iter().map(|(k, v)| serde_json::json!({"label": k, "count": v})).collect::<Vec<_>>(),
+        "smoothing_buffer": smoothing_buf,
+        "committed_label": committed,
+        "candidate_label": candidate,
+        "candidate_count": candidate_count,
+    }))
 }
 
 /// POST /api/v1/adaptive/unload — unload the adaptive model (revert to thresholds).
@@ -7603,6 +7647,7 @@ async fn main() {
         // Adaptive classifier endpoints
         .route("/api/v1/adaptive/train", post(adaptive_train))
         .route("/api/v1/adaptive/status", get(adaptive_status))
+        .route("/api/v1/adaptive/debug", get(adaptive_debug))
         .route("/api/v1/adaptive/unload", post(adaptive_unload))
         // Field model calibration (eigenvalue-based person counting)
         .route("/api/v1/calibration/start", post(calibration_start))
