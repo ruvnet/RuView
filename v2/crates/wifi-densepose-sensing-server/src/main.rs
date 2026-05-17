@@ -1645,6 +1645,12 @@ struct AppStateInner {
     /// Each entry is the full subcarrier amplitude vector for one frame.
     /// Capacity: FRAME_HISTORY_CAPACITY frames.
     frame_history: VecDeque<Vec<f64>>,
+    /// ADR-120: rolling buffer of the last WINDOW_FRAMES (=20) feature
+    /// vectors from `features_from_runtime`. Used at classify time to
+    /// feed the WindowedMlp inside the adaptive model. Pushed each tick
+    /// before the broadcast emit. Cold start: classify_window falls back
+    /// to frame-level until the buffer fills.
+    feature_window: VecDeque<[f64; adaptive_classifier::N_FEATURES_PUB]>,
     tick: u64,
     source: String,
     /// Instant of the last ESP32 UDP frame received (for offline detection).
@@ -2659,8 +2665,13 @@ fn current_per_node_amps() -> Vec<(u8, Vec<f64>)> {
 }
 
 /// If an adaptive model is loaded, override the classification with the
-/// model's prediction. Uses the 22-feature multi-node vector (ADR-118)
-/// for higher accuracy than the legacy 15-feature single-node vector.
+/// model's prediction. ADR-120: prefers temporal-window classifier when
+/// the rolling feature buffer is full (20 frames). Falls through to
+/// frame-level (ADR-119 MLP) at cold start.
+///
+/// Read-only over `state` — the per-tick push into `feature_window` happens
+/// at the tick site where `&mut AppStateInner` is already held (see the
+/// broadcast tick task in `run_*_pipeline`).
 fn adaptive_override(state: &AppStateInner, features: &FeatureInfo, classification: &mut ClassificationInfo) {
     if let Some(ref model) = state.adaptive_model {
         let per_node_owned = current_per_node_amps();
@@ -2678,11 +2689,60 @@ fn adaptive_override(state: &AppStateInner, features: &FeatureInfo, classificati
             }),
             &per_node_refs,
         );
-        let (label, conf) = model.classify(&feat_arr);
+
+        // ADR-120: if rolling window has at least the current frame + 19 prior,
+        // use the temporal classifier. Otherwise fall back to frame-level.
+        let (label, conf) = if state.feature_window.len() + 1 >= adaptive_classifier::WINDOW_FRAMES {
+            // Flatten the last (WINDOW_FRAMES - 1) historic vectors + current
+            // frame into a single 440-d row-major vector, oldest first.
+            let wf = adaptive_classifier::WINDOW_FRAMES;
+            let nf = adaptive_classifier::N_FEATURES_PUB;
+            let mut flat = vec![0.0f64; wf * nf];
+            // History fills the first (WINDOW_FRAMES - 1) frames.
+            let hist_take = wf - 1;
+            let skip = state.feature_window.len().saturating_sub(hist_take);
+            for (frame_i, fv) in state.feature_window.iter().skip(skip).enumerate() {
+                let base = frame_i * nf;
+                for i in 0..nf { flat[base + i] = fv[i]; }
+            }
+            // Last slot = current frame.
+            let last_base = (wf - 1) * nf;
+            for i in 0..nf { flat[last_base + i] = feat_arr[i]; }
+            model.classify_window(&flat)
+        } else {
+            model.classify(&feat_arr)
+        };
+
         classification.motion_level = label.to_string();
         classification.presence = label != "absent";
         // Blend model confidence with existing smoothed confidence.
         classification.confidence = (conf * 0.7 + classification.confidence * 0.3).clamp(0.0, 1.0);
+    }
+}
+
+/// ADR-120: push the current frame's feature vector into the rolling
+/// window buffer, evicting the oldest entry when at capacity. Called
+/// once per tick from the broadcast tick task where `&mut AppStateInner`
+/// is already held.
+fn push_feature_window(state: &mut AppStateInner, features: &FeatureInfo) {
+    let per_node_owned = current_per_node_amps();
+    let per_node_refs: Vec<(u8, &[f64])> = per_node_owned.iter()
+        .map(|(n, a)| (*n, a.as_slice())).collect();
+    let feat_arr = adaptive_classifier::features_from_runtime(
+        &serde_json::json!({
+            "variance": features.variance,
+            "motion_band_power": features.motion_band_power,
+            "breathing_band_power": features.breathing_band_power,
+            "spectral_power": features.spectral_power,
+            "dominant_freq_hz": features.dominant_freq_hz,
+            "change_points": features.change_points,
+            "mean_rssi": features.mean_rssi,
+        }),
+        &per_node_refs,
+    );
+    state.feature_window.push_back(feat_arr);
+    while state.feature_window.len() > adaptive_classifier::WINDOW_FRAMES {
+        state.feature_window.pop_front();
     }
 }
 
@@ -2966,6 +3026,9 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
         let (features, mut classification, breathing_rate_hz, sub_variances, raw_motion) =
             extract_features_from_frame(&frame, &s_write_pre.frame_history, sample_rate_hz);
         smooth_and_classify(&mut s_write_pre, &mut classification, raw_motion);
+        // ADR-120: push current frame's features before classify so the
+        // windowed model has temporal context.
+        push_feature_window(&mut s_write_pre, &features);
         adaptive_override(&s_write_pre, &features, &mut classification);
         // ADR-101: raw-amplitude presence/motion override. Supersedes the
         // RSSI MAD-Δ classifier from ADR-099 (left in the source for
@@ -3154,6 +3217,9 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
     let (features, mut classification, breathing_rate_hz, sub_variances, raw_motion) =
         extract_features_from_frame(&frame, &s.frame_history, sample_rate_hz);
     smooth_and_classify(&mut s, &mut classification, raw_motion);
+    // ADR-120: push the current frame's feature vector before classifying,
+    // so the windowed model can use up to WINDOW_FRAMES of history.
+    push_feature_window(&mut s, &features);
     adaptive_override(&s, &features, &mut classification);
 
     s.source = format!("wifi:{ssid}");
@@ -6439,6 +6505,8 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
         let (features, mut classification, breathing_rate_hz, sub_variances, raw_motion) =
             extract_features_from_frame(&frame, &s.frame_history, sample_rate_hz);
         smooth_and_classify(&mut s, &mut classification, raw_motion);
+    // ADR-120: push current frame features into the rolling window first.
+    push_feature_window(&mut s, &features);
     adaptive_override(&s, &features, &mut classification);
 
         s.rssi_history.push_back(features.mean_rssi);
@@ -7153,6 +7221,7 @@ async fn main() {
         latest_update: None,
         rssi_history: VecDeque::new(),
         frame_history: VecDeque::new(),
+        feature_window: VecDeque::with_capacity(adaptive_classifier::WINDOW_FRAMES),
         tick: 0,
         source: source.into(),
         last_esp32_frame: None,

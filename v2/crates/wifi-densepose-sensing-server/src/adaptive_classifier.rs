@@ -45,6 +45,10 @@ const N_PER_NODE_FEATURES: usize = 3;
 const MAX_NODES: usize = 6;
 const N_FEATURES: usize = N_GLOBAL_FEATURES + MAX_NODES * N_PER_NODE_FEATURES;
 
+/// ADR-120: exported feature count so external crates (e.g. the main
+/// crate's AppStateInner) can size their rolling buffers correctly.
+pub const N_FEATURES_PUB: usize = N_FEATURES;
+
 /// Default class names for backward compatibility with old saved models.
 const DEFAULT_CLASSES: &[&str] = &["absent", "present_still", "present_moving", "active"];
 
@@ -145,6 +149,21 @@ pub struct ClassStats {
 /// 151k-frame dataset and load instantly at runtime.
 const MLP_HIDDEN: usize = 32;
 
+/// ADR-120: temporal window size (number of consecutive frames stacked
+/// into the windowed-MLP input). At the broadcast tick rate (~10 fps),
+/// 20 frames = 2 seconds of context — enough to capture walking step
+/// cadence (2 Hz), sit-stand transition cycles (0.5 Hz), and breathing
+/// modulation. Chosen to match WiFlow's training-time window so amplitude
+/// history buffers can be reused.
+pub const WINDOW_FRAMES: usize = 20;
+
+/// ADR-120: windowed-MLP input dimensionality = WINDOW_FRAMES × N_FEATURES.
+const WINDOWED_INPUT: usize = WINDOW_FRAMES * N_FEATURES;
+
+/// ADR-120: windowed-MLP hidden width. Larger than MLP_HIDDEN because
+/// input is 20× wider (440 vs 22). 64 keeps params under 30k.
+const WINDOWED_HIDDEN: usize = 64;
+
 /// ADR-119: trained MLP classifier. Single hidden layer, ReLU activation,
 /// softmax output. Stored alongside the LogReg weights — when `is_trained()`
 /// returns true, `AdaptiveModel::classify` uses the MLP; otherwise it falls
@@ -201,6 +220,66 @@ impl MlpModel {
     }
 }
 
+/// ADR-120: Windowed MLP — same architecture as MlpModel but takes a
+/// 20-frame × 22-feature stack (440-d input) instead of a single frame.
+/// Captures temporal patterns (walking step cadence, sit-stand cycles,
+/// breathing modulation) that frame-level classifiers miss.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WindowedMlpModel {
+    /// Layer 1 weights, row-major `[WINDOWED_INPUT × WINDOWED_HIDDEN]`.
+    #[serde(default)]
+    pub w1: Vec<f64>,
+    /// Layer 1 bias, `[WINDOWED_HIDDEN]`.
+    #[serde(default)]
+    pub b1: Vec<f64>,
+    /// Layer 2 weights, row-major `[WINDOWED_HIDDEN × n_classes]`.
+    #[serde(default)]
+    pub w2: Vec<f64>,
+    /// Layer 2 bias, `[n_classes]`.
+    #[serde(default)]
+    pub b2: Vec<f64>,
+    /// Number of output classes (== len(b2) when trained).
+    #[serde(default)]
+    pub n_classes: usize,
+}
+
+impl WindowedMlpModel {
+    pub fn is_trained(&self) -> bool {
+        !self.w1.is_empty()
+            && self.n_classes > 0
+            && self.b2.len() == self.n_classes
+            && self.w1.len() == WINDOWED_INPUT * WINDOWED_HIDDEN
+    }
+
+    /// Forward pass. `window` is `WINDOW_FRAMES × N_FEATURES` flat,
+    /// row-major (oldest-frame-first), already z-score normalised.
+    /// Returns softmax probabilities of length `n_classes`.
+    pub fn forward(&self, window: &[f64]) -> Vec<f64> {
+        debug_assert_eq!(window.len(), WINDOWED_INPUT);
+        // Layer 1: h = ReLU(window · W1 + b1)
+        let mut h = vec![0.0f64; WINDOWED_HIDDEN];
+        for j in 0..WINDOWED_HIDDEN {
+            let mut s = self.b1[j];
+            for i in 0..WINDOWED_INPUT {
+                s += window[i] * self.w1[i * WINDOWED_HIDDEN + j];
+            }
+            h[j] = s.max(0.0);
+        }
+        // Layer 2: logits = h · W2 + b2
+        let mut logits = vec![0.0f64; self.n_classes];
+        for c in 0..self.n_classes {
+            let mut s = self.b2[c];
+            for j in 0..WINDOWED_HIDDEN {
+                s += h[j] * self.w2[j * self.n_classes + c];
+            }
+            logits[c] = s;
+        }
+        let m = logits.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let exp_sum: f64 = logits.iter().map(|z| (z - m).exp()).sum();
+        logits.iter().map(|z| (z - m).exp() / exp_sum).collect()
+    }
+}
+
 // ── Trained model ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,9 +292,15 @@ pub struct AdaptiveModel {
     /// at classify time but still updated by `train_from_recordings` so
     /// rollback is one-line.
     pub weights: Vec<Vec<f64>>,
-    /// ADR-119: trained MLP (preferred classifier when present).
+    /// ADR-119: trained MLP (frame-level fallback, used when WindowedMlp
+    /// has no data yet — e.g. cold start before 20 frames accumulated).
     #[serde(default)]
     pub mlp: MlpModel,
+    /// ADR-120: trained Windowed MLP (preferred classifier when trained
+    /// AND a 20-frame window of fresh features is available at classify
+    /// time). Captures temporal patterns the frame-level MLP can't see.
+    #[serde(default)]
+    pub windowed_mlp: WindowedMlpModel,
     /// Global feature normalisation: mean and stddev across all training data.
     pub global_mean: [f64; N_FEATURES],
     pub global_std: [f64; N_FEATURES],
@@ -240,6 +325,7 @@ impl Default for AdaptiveModel {
             class_stats: Vec::new(),
             weights: vec![vec![0.0; N_FEATURES + 1]; n_classes],
             mlp: MlpModel::default(),
+            windowed_mlp: WindowedMlpModel::default(),
             global_mean: [0.0; N_FEATURES],
             global_std: [1.0; N_FEATURES],
             trained_frames: 0,
@@ -251,9 +337,45 @@ impl Default for AdaptiveModel {
 }
 
 impl AdaptiveModel {
+    /// ADR-120: classify using a temporal window of recent frames.
+    /// `window` is `WINDOW_FRAMES × N_FEATURES` flat row-major (oldest first),
+    /// in raw (un-normalised) units — this fn applies z-score normalisation
+    /// internally using the model's `global_mean`/`global_std`.
+    /// Falls back to frame-level `classify()` on the most recent frame when
+    /// the windowed MLP isn't trained.
+    pub fn classify_window(&self, window: &[f64]) -> (String, f64) {
+        if self.windowed_mlp.is_trained() && window.len() == WINDOWED_INPUT {
+            let mut norm = vec![0.0f64; WINDOWED_INPUT];
+            for f in 0..WINDOW_FRAMES {
+                for i in 0..N_FEATURES {
+                    let idx = f * N_FEATURES + i;
+                    norm[idx] = (window[idx] - self.global_mean[i]) / (self.global_std[i] + 1e-9);
+                }
+            }
+            let probs = self.windowed_mlp.forward(&norm);
+            let (best_c, best_p) = probs.iter().enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+                .unwrap();
+            let label = if best_c < self.class_names.len() {
+                self.class_names[best_c].clone()
+            } else {
+                "present_still".to_string()
+            };
+            return (label, *best_p);
+        }
+        // Cold-start fallback: most recent frame via frame-level classifier.
+        let mut last_frame = [0.0f64; N_FEATURES];
+        if window.len() >= N_FEATURES {
+            let off = window.len() - N_FEATURES;
+            last_frame.copy_from_slice(&window[off..off + N_FEATURES]);
+        }
+        self.classify(&last_frame)
+    }
+
     /// Classify a raw feature vector. Returns (class_label, confidence).
     /// ADR-119: prefers MLP when trained; falls back to logistic regression
-    /// otherwise.
+    /// otherwise. ADR-120: temporal-context API is `classify_window` —
+    /// prefer it when callers have a recent feature buffer.
     pub fn classify(&self, raw_features: &[f64; N_FEATURES]) -> (String, f64) {
         // Normalise features once (shared by MLP and LogReg).
         let mut x = [0.0f64; N_FEATURES];
@@ -324,6 +446,7 @@ impl AdaptiveModel {
 // ── Training ─────────────────────────────────────────────────────────────────
 
 /// A labeled training sample.
+#[derive(Clone)]
 struct Sample {
     features: [f64; N_FEATURES],
     class_idx: usize,
@@ -412,13 +535,18 @@ pub fn train_from_recordings(recordings_dir: &Path) -> Result<AdaptiveModel, Str
     }
 
     // Second pass: load recordings with the discovered class indices.
+    // ADR-120: keep recordings grouped so windowed-MLP training can slide
+    // a temporal window WITHIN each recording (not across recording
+    // boundaries — would mix classes).
     let mut samples: Vec<Sample> = Vec::new();
+    let mut recording_groups: Vec<Vec<Sample>> = Vec::new();
     for (path, fname, class_name) in &file_classes {
         let class_idx = class_map[class_name];
         let loaded = load_recording(path, class_idx);
         eprintln!("  Loaded {}: {} frames → class '{}'",
                  fname, loaded.len(), class_name);
-        samples.extend(loaded);
+        samples.extend(loaded.clone());
+        recording_groups.push(loaded);
     }
 
     if samples.is_empty() {
@@ -614,13 +742,57 @@ pub fn train_from_recordings(recordings_dir: &Path) -> Result<AdaptiveModel, Str
                  class_names[c], corr, tot, corr as f64 / tot as f64 * 100.0);
     }
 
-    // Pick the better classifier as the final accuracy number.
-    let final_accuracy = mlp_acc.max(accuracy);
+    // ── ADR-120: Windowed MLP training ──
+    // Build temporal-window samples within each recording (no cross-recording
+    // mixing). Slide window of WINDOW_FRAMES with stride to balance class
+    // count vs sample count.
+    eprintln!("Building temporal windows ({} frames × {} features → {} dims)...",
+              WINDOW_FRAMES, N_FEATURES, WINDOWED_INPUT);
+    let window_stride = 5usize; // 4× overlap; ~28k windows total on 151k frames
+    let mut win_samples: Vec<(Vec<f64>, usize)> = Vec::new();
+    for group in &recording_groups {
+        if group.len() < WINDOW_FRAMES { continue; }
+        let class_idx = group[0].class_idx;
+        let mut start = 0usize;
+        while start + WINDOW_FRAMES <= group.len() {
+            let mut flat: Vec<f64> = Vec::with_capacity(WINDOWED_INPUT);
+            for f in 0..WINDOW_FRAMES {
+                let frame = &group[start + f];
+                for i in 0..N_FEATURES {
+                    let z = (frame.features[i] - global_mean[i]) / (global_std[i] + 1e-9);
+                    flat.push(z);
+                }
+            }
+            win_samples.push((flat, class_idx));
+            start += window_stride;
+        }
+    }
+    eprintln!("Total windowed samples: {}", win_samples.len());
+
+    // Count per-class windowed samples.
+    let mut win_class_total = vec![0usize; n_classes];
+    for (_, c) in &win_samples { win_class_total[*c] += 1; }
+
+    eprintln!("Training Windowed MLP ({} → {} → {}) ...", WINDOWED_INPUT, WINDOWED_HIDDEN, n_classes);
+    let windowed_mlp = train_windowed_mlp_classifier(&win_samples, n_classes);
+    let (win_acc, win_per_class) = eval_windowed_mlp(&windowed_mlp, &win_samples, n_classes);
+    eprintln!("Windowed MLP accuracy: {:.2}% (frame-level MLP was {:.2}%)",
+              win_acc * 100.0, mlp_acc * 100.0);
+    for c in 0..n_classes {
+        let tot = win_class_total[c].max(1);
+        let corr = win_per_class[c];
+        eprintln!("  W-MLP  {}: {}/{} ({:.0}%)",
+                 class_names[c], corr, tot, corr as f64 / tot as f64 * 100.0);
+    }
+
+    // Pick the best classifier as final accuracy number.
+    let final_accuracy = win_acc.max(mlp_acc).max(accuracy);
 
     Ok(AdaptiveModel {
         class_stats,
         weights,
         mlp,
+        windowed_mlp,
         global_mean,
         global_std,
         trained_frames: n,
@@ -790,6 +962,179 @@ fn train_mlp_classifier(samples: &[([f64; N_FEATURES], usize)], n_classes: usize
 fn eval_mlp(mlp: &MlpModel, samples: &[([f64; N_FEATURES], usize)], n_classes: usize)
     -> (f64, Vec<usize>)
 {
+    let mut correct = 0usize;
+    let mut per_class = vec![0usize; n_classes];
+    for (x, target) in samples {
+        let probs = mlp.forward(x);
+        let pred = probs.iter().enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .unwrap().0;
+        if pred == *target { correct += 1; per_class[*target] += 1; }
+    }
+    (correct as f64 / samples.len() as f64, per_class)
+}
+
+// ── ADR-120: Windowed MLP training ──────────────────────────────────────────
+
+/// Train a windowed MLP on temporal-window samples.
+/// Each sample is a 440-d flat vector (20 frames × 22 features) labeled
+/// with a class index. Architecture: 440 → 64 ReLU → n_classes softmax.
+/// Same SGD + momentum + cosine-decay recipe as MLP, fewer epochs because
+/// each window is a richer training signal than a single frame.
+fn train_windowed_mlp_classifier(
+    samples: &[(Vec<f64>, usize)],
+    n_classes: usize,
+) -> WindowedMlpModel {
+    let n_w1 = WINDOWED_INPUT * WINDOWED_HIDDEN;
+    let n_w2 = WINDOWED_HIDDEN * n_classes;
+
+    let mut rng_state: u64 = 24601;
+    let mut rng_u01 = move || -> f64 {
+        rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        ((rng_state >> 33) as f64) / ((u64::MAX >> 33) as f64)
+    };
+    let mut he_init = |n: usize, fan_in: usize| -> Vec<f64> {
+        let s = (2.0 / fan_in as f64).sqrt();
+        let mut v = Vec::with_capacity(n);
+        let mut k = 0;
+        while k < n {
+            let u1 = rng_u01().max(1e-12);
+            let u2 = rng_u01();
+            let z0 = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos() * s;
+            let z1 = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).sin() * s;
+            v.push(z0); k += 1;
+            if k < n { v.push(z1); k += 1; }
+        }
+        v
+    };
+
+    let mut w1 = he_init(n_w1, WINDOWED_INPUT);
+    let mut b1 = vec![0.0f64; WINDOWED_HIDDEN];
+    let mut w2 = he_init(n_w2, WINDOWED_HIDDEN);
+    let mut b2 = vec![0.0f64; n_classes];
+
+    let mut mw1 = vec![0.0f64; n_w1];
+    let mut mb1 = vec![0.0f64; WINDOWED_HIDDEN];
+    let mut mw2 = vec![0.0f64; n_w2];
+    let mut mb2 = vec![0.0f64; n_classes];
+
+    let momentum = 0.9f64;
+    let weight_decay = 1e-4f64;
+    let base_lr = 0.03f64; // smaller LR for larger network (vs MLP's 0.05)
+    let batch_size = 32usize;
+    let epochs = 25usize;
+    let n = samples.len();
+
+    let mut idx: Vec<usize> = (0..n).collect();
+    let mut shuf_state: u64 = 11;
+    let mut shuf_next = move || -> u64 {
+        shuf_state = shuf_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        shuf_state >> 33
+    };
+
+    let mut h_pre = vec![0.0f64; WINDOWED_HIDDEN];
+    let mut h = vec![0.0f64; WINDOWED_HIDDEN];
+    let mut logits = vec![0.0f64; n_classes];
+
+    for epoch in 0..epochs {
+        for i in (1..idx.len()).rev() {
+            let j = (shuf_next() as usize) % (i + 1);
+            idx.swap(i, j);
+        }
+        let lr = base_lr * 0.5 * (1.0 + (std::f64::consts::PI * epoch as f64 / epochs as f64).cos());
+        let mut epoch_loss = 0.0f64;
+
+        let mut k = 0usize;
+        while k < n {
+            let bend = (k + batch_size).min(n);
+            let mut gw1 = vec![0.0f64; n_w1];
+            let mut gb1 = vec![0.0f64; WINDOWED_HIDDEN];
+            let mut gw2 = vec![0.0f64; n_w2];
+            let mut gb2 = vec![0.0f64; n_classes];
+            let bs = (bend - k) as f64;
+
+            for &si in &idx[k..bend] {
+                let (x, target) = &samples[si];
+                debug_assert_eq!(x.len(), WINDOWED_INPUT);
+
+                // Forward.
+                for j in 0..WINDOWED_HIDDEN {
+                    let mut s = b1[j];
+                    for i in 0..WINDOWED_INPUT { s += x[i] * w1[i * WINDOWED_HIDDEN + j]; }
+                    h_pre[j] = s;
+                    h[j] = s.max(0.0);
+                }
+                for c in 0..n_classes {
+                    let mut s = b2[c];
+                    for j in 0..WINDOWED_HIDDEN { s += h[j] * w2[j * n_classes + c]; }
+                    logits[c] = s;
+                }
+                let mx = logits.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                let ex_sum: f64 = logits.iter().map(|z| (z - mx).exp()).sum();
+                let mut d_logits = vec![0.0f64; n_classes];
+                for c in 0..n_classes {
+                    let p = (logits[c] - mx).exp() / ex_sum;
+                    d_logits[c] = p - if c == *target { 1.0 } else { 0.0 };
+                    if c == *target { epoch_loss += -(p.max(1e-15)).ln(); }
+                }
+
+                for c in 0..n_classes {
+                    gb2[c] += d_logits[c];
+                    for j in 0..WINDOWED_HIDDEN {
+                        gw2[j * n_classes + c] += h[j] * d_logits[c];
+                    }
+                }
+                let mut d_h = vec![0.0f64; WINDOWED_HIDDEN];
+                for j in 0..WINDOWED_HIDDEN {
+                    if h_pre[j] <= 0.0 { continue; }
+                    let mut s = 0.0;
+                    for c in 0..n_classes { s += w2[j * n_classes + c] * d_logits[c]; }
+                    d_h[j] = s;
+                }
+                for j in 0..WINDOWED_HIDDEN {
+                    gb1[j] += d_h[j];
+                    for i in 0..WINDOWED_INPUT { gw1[i * WINDOWED_HIDDEN + j] += x[i] * d_h[j]; }
+                }
+            }
+
+            for q in 0..n_w1 {
+                let g = gw1[q] / bs + weight_decay * w1[q];
+                mw1[q] = momentum * mw1[q] + g;
+                w1[q] -= lr * mw1[q];
+            }
+            for q in 0..WINDOWED_HIDDEN {
+                let g = gb1[q] / bs;
+                mb1[q] = momentum * mb1[q] + g;
+                b1[q] -= lr * mb1[q];
+            }
+            for q in 0..n_w2 {
+                let g = gw2[q] / bs + weight_decay * w2[q];
+                mw2[q] = momentum * mw2[q] + g;
+                w2[q] -= lr * mw2[q];
+            }
+            for q in 0..n_classes {
+                let g = gb2[q] / bs;
+                mb2[q] = momentum * mb2[q] + g;
+                b2[q] -= lr * mb2[q];
+            }
+
+            k = bend;
+        }
+        if epoch % 3 == 0 || epoch == epochs - 1 {
+            eprintln!("  W-MLP epoch {epoch:2}/{}: loss = {:.4}, lr = {:.4}",
+                      epochs, epoch_loss / n as f64, lr);
+        }
+    }
+
+    WindowedMlpModel { w1, b1, w2, b2, n_classes }
+}
+
+/// Evaluate Windowed MLP accuracy + per-class correct counts.
+fn eval_windowed_mlp(
+    mlp: &WindowedMlpModel,
+    samples: &[(Vec<f64>, usize)],
+    n_classes: usize,
+) -> (f64, Vec<usize>) {
     let mut correct = 0usize;
     let mut per_class = vec![0usize; n_classes];
     for (x, target) in samples {
