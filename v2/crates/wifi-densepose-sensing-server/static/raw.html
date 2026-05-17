@@ -54,6 +54,18 @@
     <button onclick="resetState()">reset</button>
     <button id="calibrateBtn" onclick="startCalibrate()" title="Step out of the room, click, wait 90 s">calibrate empty</button>
     <span class="pill" id="calibStatus" style="display:none"></span>
+    <!-- ADR-107: visible progress bar shown while baseline capture runs. -->
+    <div id="calibProgress" style="display:none; position:relative; width:140px; height:14px;
+                                   border:1px solid #30363d; border-radius:7px; overflow:hidden;
+                                   background:#0a0e13;">
+      <div id="calibProgressFill" style="position:absolute; left:0; top:0; bottom:0; width:0%;
+                                          background:linear-gradient(90deg,#1f6feb,#3fb950);
+                                          transition: width 0.4s linear;"></div>
+      <span id="calibProgressLabel" style="position:absolute; inset:0; display:flex;
+                                            align-items:center; justify-content:center;
+                                            font-size:10px; font-family:JetBrains Mono,monospace;
+                                            color:#e6edf3; text-shadow:0 0 2px #000;"></span>
+    </div>
   </div>
 </div>
 
@@ -401,24 +413,49 @@ function renderTick() {
 }
 requestAnimationFrame(renderTick);
 
-// ── ADR-107: baseline calibrate button + polling ──────────────────
+// ── ADR-107: baseline calibrate button + progress bar ─────────────
 let calibPollTimer = null;
+const CALIB_DURATION_SEC = 90;
+
+function setCalibProgress(pct, label) {
+  const bar = document.getElementById('calibProgress');
+  const fill = document.getElementById('calibProgressFill');
+  const txt = document.getElementById('calibProgressLabel');
+  if (!bar || !fill || !txt) return;
+  bar.style.display = pct < 0 ? 'none' : 'inline-block';
+  fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+  txt.textContent = label || '';
+}
+
 async function startCalibrate() {
-  if (!confirm('Step OUT of the room now. Calibration will record for 90 s.\nClick OK when you are out.')) return;
+  if (!confirm(`Step OUT of the room now. Calibration will record for ${CALIB_DURATION_SEC} s.\nClick OK when you are out.`)) return;
   const btn = document.getElementById('calibrateBtn');
   const stat = document.getElementById('calibStatus');
   btn.disabled = true; btn.textContent = 'recording…';
-  stat.style.display = 'inline-block'; stat.textContent = 'starting…';
+  // Hide the text-pill while the progress bar is the primary indicator;
+  // it reappears only on terminal status messages (error / complete).
+  stat.style.display = 'none';
+  setCalibProgress(0, 'starting…');
   try {
     const res = await fetch('/api/v1/baseline/calibrate', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ duration_sec: 90, trim_sec: 15, clean_window_sec: 30 }),
+      body: JSON.stringify({ duration_sec: CALIB_DURATION_SEC, trim_sec: 15, clean_window_sec: 30 }),
     });
     const j = await res.json();
-    if (!j.started) { stat.textContent = j.reason || 'failed to start'; btn.disabled = false; btn.textContent = 'calibrate empty'; return; }
+    if (!j.started) {
+      setCalibProgress(-1, '');
+      stat.style.display = 'inline-block';
+      stat.textContent = j.reason || 'failed to start';
+      btn.disabled = false; btn.textContent = 'calibrate empty';
+      return;
+    }
   } catch (e) {
-    stat.textContent = 'network error'; btn.disabled = false; btn.textContent = 'calibrate empty'; return;
+    setCalibProgress(-1, '');
+    stat.style.display = 'inline-block';
+    stat.textContent = 'network error';
+    btn.disabled = false; btn.textContent = 'calibrate empty';
+    return;
   }
   if (calibPollTimer) clearInterval(calibPollTimer);
   let elapsed = 0;
@@ -427,11 +464,22 @@ async function startCalibrate() {
     try {
       const r = await fetch('/api/v1/baseline'); const j = await r.json();
       const s = j.calibration_status || 'idle';
-      stat.textContent = s.startsWith('running') ? `recording… ${elapsed}/90 s` : s;
-      if (!s.startsWith('running')) {
+      if (s.startsWith('running')) {
+        const pct = Math.min(99, (elapsed / CALIB_DURATION_SEC) * 100);
+        setCalibProgress(pct, `${elapsed}/${CALIB_DURATION_SEC} s`);
+      } else {
         clearInterval(calibPollTimer); calibPollTimer = null;
         btn.disabled = false; btn.textContent = 'calibrate empty';
-        if (s === 'complete') stat.textContent = 'baseline updated ✓';
+        if (s === 'complete') {
+          setCalibProgress(100, 'done');
+          stat.style.display = 'inline-block';
+          stat.textContent = 'baseline updated ✓';
+          setTimeout(() => setCalibProgress(-1, ''), 3000);
+        } else {
+          setCalibProgress(-1, '');
+          stat.style.display = 'inline-block';
+          stat.textContent = s;
+        }
       }
     } catch (e) {}
   }, 2000);
