@@ -21,6 +21,7 @@ WiFi DensePose turns commodity WiFi signals into real-time human pose estimation
    - [Windows WiFi (RSSI Only)](#windows-wifi-rssi-only)
    - [ESP32-S3 (Full CSI)](#esp32-s3-full-csi)
    - [ESP32 Multistatic Mesh (Advanced)](#esp32-multistatic-mesh-advanced)
+   - [Connect Mesh Data to the Dashboard and Observatory](#connect-mesh-data-to-the-dashboard-and-observatory)
    - [Cognitum Seed Integration (ADR-069)](#cognitum-seed-integration-adr-069)
 5. [REST API Reference](#rest-api-reference)
 6. [WebSocket Streaming](#websocket-streaming)
@@ -330,6 +331,46 @@ The mesh uses a **Time-Division Multiplexing (TDM)** protocol so nodes take turn
 | Attention-weighted fusion | Cross-viewpoint attention with geometric diversity bias |
 
 See [ADR-029](adr/ADR-029-ruvsense-multistatic-sensing-mode.md) and [ADR-032](adr/ADR-032-multistatic-mesh-security-hardening.md) for the full design.
+
+### Connect Mesh Data to the Dashboard and Observatory
+
+If a standalone `aggregator` command prints live packets, the ESP32 fleet is already reaching that host. To visualize the same data, stop the standalone aggregator and run `sensing-server` on that same host and UDP port. The sensing server is the aggregator used by the REST API, WebSocket stream, dashboard, and Observatory.
+
+```bash
+# From a source build
+cd v2
+cargo run -p wifi-densepose-sensing-server -- \
+  --source esp32 \
+  --udp-port 5005 \
+  --http-port 3000 \
+  --ws-port 3001 \
+  --ui-path ../../ui
+
+# Docker
+docker run --rm \
+  -e CSI_SOURCE=esp32 \
+  -p 3000:3000 \
+  -p 3001:3001 \
+  -p 5005:5005/udp \
+  ruvnet/wifi-densepose:latest
+```
+
+Open the UI from the sensing server, not from a local file:
+
+| View | URL |
+|------|-----|
+| Dashboard | `http://localhost:3000/ui/index.html` |
+| Observatory | `http://localhost:3000/ui/observatory.html` |
+
+Use these checks before debugging the browser:
+
+```bash
+curl http://localhost:3000/health
+curl http://localhost:3000/api/v1/nodes
+curl http://localhost:3000/api/v1/sensing/latest
+```
+
+If the ESP32 nodes are provisioned with `--target-ip <AGGREGATOR_HOST>`, that IP must be the machine running `sensing-server`. Only one process can receive UDP `:5005` at a time, so leave the standalone hardware `aggregator` off while the dashboard or Observatory is live.
 
 ### Cognitum Seed Integration (ADR-069)
 
@@ -1744,6 +1785,8 @@ The server applies a 3-stage smoothing pipeline (ADR-048). If readings are still
 
 - Verify the sensing server is running: `curl http://localhost:3000/health`
 - Access Observatory via the server URL: `http://localhost:3000/ui/observatory.html` (not a file:// URL)
+- If a standalone `aggregator` command is already listening on UDP `:5005`, stop it and run `sensing-server --source esp32 --udp-port 5005` instead; the Observatory reads the server WebSocket, not the standalone aggregator output
+- Verify the ESP32 nodes are provisioned to the IP address of the machine running `sensing-server`
 - Hard refresh with Ctrl+Shift+R to clear cached settings
 - The auto-detect probes `/health` on the same origin — cross-origin won't work
 
