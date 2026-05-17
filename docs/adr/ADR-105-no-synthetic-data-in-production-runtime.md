@@ -167,9 +167,6 @@ classification        absent / present_still / present_moving / active per ADR-1
   on empty pose data; the richer Docker UI still tries to render a
   skeleton from `pose_current` even when the array is empty. Need
   a small UI patch: hide the pose canvas when `model_loaded == false`.
-* **Real signal_field** via multistatic fusion — when ≥ 2 nodes are
-  active, `MultistaticFuser` can produce a physically meaningful
-  spatial map. ADR-104 will cover wiring it through.
 
 ## Closed
 
@@ -178,6 +175,12 @@ classification        absent / present_still / present_moving / active per ADR-1
   alongside the legacy `contributing_bssids` / `bssid_count`
   counts. Consumers can gate on `n_aps_used >= 2` before trusting a
   multi-AP enhancement. (commit 598a4b2f)
+* **Real signal_field via multistatic fusion** — shipped in ADR-112.
+  When ≥ 2 ESP32 nodes are active, `MultistaticFuser` output drives
+  a coverage × activity 20×20 heatmap (isotropic Gaussian per node
+  position, gated by `cv²(fused_amplitude) × cross_node_coherence`).
+  Single-sensor / fusion-fail paths still return ADR-105's zero
+  grid. Map is honestly framed as coverage, not target position.
 
 ## References
 

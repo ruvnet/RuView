@@ -37,12 +37,24 @@ Last sweep: **2026-05-17**, branch `feat/ota-rssi-mobile`, head `eec3ca6c`.
 - [x] **ADR-107** `POST /api/v1/baseline/calibrate` + UI button
 - [x] **ADR-107** Auto-recalibrate on long-quiet periods (30 min default)
 - [x] **ADR-107** `GET /api/v1/baseline` (status + cooldown)
+- [x] **ADR-107** Progress bar in raw.html calibrate button
+      (commit 432753e1)
+- [x] **ADR-112** Multi-AP `signal_field` via `MultistaticFuser` —
+      coverage × activity heatmap, non-zero only with ≥2 nodes +
+      positions; preserves ADR-105 zero-grid otherwise (commit c8ac60f6)
+- [x] **ADR-105** Hide pose canvas in Docker SPA when
+      `model_loaded == false` + "no trained model" overlay
+      (commit 2dcb30a6)
 
 ### Firmware (`firmware/esp32-csi-node`)
 
 - [x] **ADR-100** Gain-lock (300-packet median, MIN_SAFE_AGC=30 safety)
 - [x] **ADR-106** Sensor µs timestamp in CSI trailer (`rx_ctrl.timestamp`)
 - [x] **ADR-108** NVS persistence of gain-lock — reboot ready in ~0.5 s
+- [x] **ADR-109** `POST /ota/recalibrate` — clear gain-lock NVS via REST,
+      no USB needed (commit f92807cd)
+- [x] **ADR-109** Track AP MAC in `gl_ap_mac` NVS — auto-invalidate
+      stale gain-lock on AP swap (commit f92807cd)
 - [x] (parallel agent) RSSI carry-through via feature_state header fix
 - [x] (parallel agent) OTA: `OTA_SIZE_UNKNOWN`, httpd stack_size=8192,
       reset-reason log — all three FW prerequisites for working OTA
@@ -68,60 +80,51 @@ Last sweep: **2026-05-17**, branch `feat/ota-rssi-mobile`, head `eec3ca6c`.
 
 ### High value, low effort
 
-- [ ] **`POST /ota/recalibrate`** — clear gain-lock NVS via REST,
-      no USB needed. ~30 min FW + OTA. (ADR-108 open)
-- [ ] **Track AP MAC in NVS alongside gain-lock** — auto-invalidate
-      stale values on AP swap. ~1 h FW + OTA. (ADR-108 open)
 - [ ] **Tailscale-target in NVS** — sensor stream keeps working when
       Mac roams networks. ~30 min provision + reflash. (ADR-100 open)
+      Deferred — Mac is stable on TP-Link, low ROI this session.
 
 ### High value, medium effort
 
-- [ ] **HA via MQTT** — sensor as HA entity (`binary_sensor.motion`).
-      Wide ecosystem reach. ~1 day.
 - [ ] **2 000-packet fixed-replay test suite** — regression protection
       over classifier + NBVI. Pace's pattern (1 000 idle + 1 000 motion).
       ~1 day.
-- [ ] **Multi-AP `signal_field` via `MultistaticFuser`** — replaces
-      zero-filled grid (ADR-105 D6) with physically real spatial map.
-      ~2-3 h.
 - [ ] **Phase-domain drift** — phase delta vs baseline phase, picks up
       sub-mm chest-wall motion for vital signs. Requires phase baseline
       in `baseline.json`. ~1 h script + ~30 min server. (ADR-104 open)
-- [ ] **Hide pose canvas in Docker SPA when `model_loaded == false`**
-      — stop the upstream UI from rendering empty skeletons.
-      ~15 min UI patch. (ADR-105 open)
 
-### Bigger, lower urgency
+### Bigger, lower urgency (still active)
 
-- [ ] **ESPHome native component** — tighter HA than MQTT bridge. 2-3 days.
-- [ ] **Web Serial calibration game** — playful threshold tuning. 1 day.
-- [ ] **Boot-time NBVI freeze in FW** — only if FP issues in real homes.
-      Trade-off: doesn't adapt to channel changes. 2 h. (ADR-102 open)
-- [ ] **Per-channel NVS cache for gain-lock** — needed only if channel
-      hopping (ADR-029) is reactivated. 1 h. (ADR-108 open)
-- [ ] **DensePose model train + load** — unlock 17-keypoint pose;
-      needs dataset (MM-Fi or Wi-Pose) + training run. 1-3 days.
-- [ ] **AETHER contrastive pretrain on live data** — code path exists
-      via `--pretrain`. Self-supervised, no labels. 2-3 h to set up +
-      hours of training time.
-- [ ] **MERIDIAN domain generalization** — code present (parent
-      project), not loaded. Cross-room transfer. 1 day to integrate.
-- [ ] **Channel hopping (ADR-029)** — scaffold in FW, deactivated.
-      Frequency diversity for anomaly detection. 2-3 h.
-- [ ] **Multi-antenna support (`n_antennas` > 1)** — currently hard-
-      coded to 1 in `csi_collector.c`. ESP32-S3 typically single-
-      antenna so low value unless we ship on C6/MIMO. 1 h.
-- [ ] **Multiple baseline profiles** (day/night/season). 2 h.
-- [ ] **Progress bar in calibrate button** instead of text pill. 15 min.
+- [ ] **Multiple baseline profiles** (day/night/season). 2 h. — ADR-113
+      target this session.
 
 ### One-time hygiene
 
-- [ ] **README.md** is 542 lines — review for current relevance, trim.
-- [ ] **CLAUDE.md** is 407 lines — same.
 - [ ] **Re-record `data/baseline.json`** via the new UI calibrate button
       so `per_subcarrier_mean` field is populated and ADR-104 drift
       channel activates. ~2 min operator time.
+
+### Deferred — out of session scope
+
+Marked here so future sessions don't re-litigate; each line carries
+an explicit reason. Bring them back only if scope changes.
+
+- **HA via MQTT** — new integration. Excluded by current session brief
+  (no new integrations on current hardware).
+- **ESPHome native component** — same reason as HA/MQTT.
+- **Web Serial calibration game** — explicitly excluded.
+- **Boot-time NBVI freeze in FW** — explicitly excluded.
+- **Per-channel NVS cache for gain-lock** — explicitly excluded; only
+  matters if channel hopping is reactivated, which is also excluded.
+- **DensePose model train + load** — explicitly excluded.
+- **AETHER contrastive pretrain on live data** — explicitly excluded.
+- **MERIDIAN domain generalization** — explicitly excluded.
+- **Channel hopping (ADR-029)** — explicitly excluded.
+- **Multi-antenna support (`n_antennas` > 1)** — explicitly excluded.
+- **README.md trim (542 lines)** — explicitly excluded.
+- **CLAUDE.md trim (407 lines)** — explicitly excluded.
+- **Tailscale-target in NVS** — Mac stable on TP-Link this session,
+  low ROI. Not blocking.
 
 ---
 
