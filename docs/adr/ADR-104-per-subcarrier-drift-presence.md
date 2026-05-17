@@ -136,13 +136,20 @@ conditions where a previously-clean subcarrier picks up interference.
 
 ## Open Items
 
-* **Phase-domain drift** — currently amplitude-only. Phase delta vs
-  baseline phase would catch even subtler movement (chest-wall sub-mm
-  motion during breathing). Requires phase baseline in `baseline.json`,
-  which the recording script doesn't yet save. ~1 h script + ~30 min
-  server.
+(none — see Closed below)
 
 ## Closed
+
+* **Phase-domain drift** — `scripts/record-baseline.py` and the
+  in-process `capture_baseline_to_disk` now emit per-subcarrier
+  `per_subcarrier_phase_mean` + `per_subcarrier_phase_var` (circular
+  mean + variance) when the WS stream carries phases (ADR-106). The
+  server loads them into `PHASE_BASELINE_PER_SUB`, `phase_drift_update`
+  computes a per-tick circular-distance score over subcarriers whose
+  baseline variance is below `PHASE_BASELINE_VAR_MAX = 0.30`. Score
+  surfaces in `PerNodeFeatureInfo.phase_drift_score` (skip-if-none).
+  Falls back gracefully — legacy baselines without phase fields keep
+  amplitude-only behaviour.
 
 * **Per-subcarrier baseline AGE check** — `baseline_staleness_watch`
   background task warns when on-disk baseline is older than

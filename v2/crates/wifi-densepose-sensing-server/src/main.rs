@@ -1065,6 +1065,21 @@ struct Args {
     #[arg(long, default_value = "3600")]
     baseline_stale_warn_cooldown_sec: f64,
 
+    /// ADR-113: baseline profile selector.
+    ///   * `single` (default): load `RUVIEW_BASELINE_FILE` or
+    ///     `data/baseline.json`. Backwards-compatible behaviour.
+    ///   * `auto`: pick `data/baseline.day.json` or
+    ///     `data/baseline.night.json` based on local hour
+    ///     (day = 07:00–20:59, night = 21:00–06:59). Hot-reloads on
+    ///     transitions. Falls back to single-baseline on either file
+    ///     missing.
+    ///   * `day` / `night`: force one of the profile files; no
+    ///     auto-switching.
+    /// The "single" path is unchanged so existing deployments don't
+    /// need to migrate.
+    #[arg(long, default_value = "single")]
+    baseline_profile: String,
+
     /// Path to UI static files
     #[arg(long, default_value = "../../ui")]
     ui_path: PathBuf,
@@ -5417,6 +5432,82 @@ async fn auto_recalibrate_task(
     }
 }
 
+/// ADR-113: which profile baseline file is currently loaded, so the
+/// hot-reload watch can decide whether the new profile differs.
+static CURRENT_BASELINE_PROFILE: OnceLock<Mutex<String>> = OnceLock::new();
+fn current_baseline_profile_init() -> &'static Mutex<String> {
+    CURRENT_BASELINE_PROFILE.get_or_init(|| Mutex::new(String::new()))
+}
+
+/// ADR-113: map the active profile selector to (profile_tag, file_path).
+/// `auto` follows local hour; `day` / `night` are forced; `single` is
+/// the backwards-compatible legacy path (RUVIEW_BASELINE_FILE env or
+/// `data/baseline.json`).
+///
+/// Day window is 07:00–20:59 local. Returns the legacy single file
+/// when a profile file is requested but missing — better to keep the
+/// last good baseline than to wipe the override on a misconfigured
+/// deployment.
+fn resolve_baseline_profile(selector: &str) -> (String, String) {
+    let single_path =
+        std::env::var("RUVIEW_BASELINE_FILE").unwrap_or_else(|_| "data/baseline.json".into());
+    match selector {
+        "single" | "" => ("single".to_string(), single_path),
+        "day"    => baseline_profile_file_or_fallback("day", "data/baseline.day.json", &single_path),
+        "night"  => baseline_profile_file_or_fallback("night", "data/baseline.night.json", &single_path),
+        "auto"   => {
+            // Local hour (chrono::Local) drives the day/night choice.
+            use chrono::Timelike;
+            let hour = chrono::Local::now().hour();
+            let tag = if (7..=20).contains(&hour) { "day" } else { "night" };
+            let path = format!("data/baseline.{tag}.json");
+            baseline_profile_file_or_fallback(tag, &path, &single_path)
+        }
+        other => {
+            warn!("baseline-profile: unknown selector '{other}', falling back to 'single'");
+            ("single".to_string(), single_path)
+        }
+    }
+}
+
+fn baseline_profile_file_or_fallback(tag: &str, path: &str, fallback: &str)
+    -> (String, String)
+{
+    if std::path::Path::new(path).exists() {
+        (tag.to_string(), path.to_string())
+    } else {
+        warn!("baseline-profile {tag}: file {path} not found, falling back to {fallback}");
+        ("single".to_string(), fallback.to_string())
+    }
+}
+
+/// ADR-113: background watch — re-resolves the active profile every
+/// 5 min and reloads the baseline file if the profile tag changed.
+/// No-op when the selector is `single` (legacy path) or a forced
+/// `day`/`night` (no time-based switching). Hot-reload only fires
+/// on `auto`.
+async fn baseline_profile_watch(selector: String) {
+    if selector != "auto" {
+        info!("Baseline profile watch disabled (--baseline-profile {selector})");
+        return;
+    }
+    info!("Baseline profile watch enabled: auto-switch day/night every 5 min based on local time");
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(300));
+    // Skip the first immediate tick — startup already loaded the right profile.
+    tick.tick().await;
+    loop {
+        tick.tick().await;
+        let (tag, path) = resolve_baseline_profile(&selector);
+        let mut cur = current_baseline_profile_init().lock().unwrap();
+        if *cur == tag { continue; }
+        let prev = cur.clone();
+        *cur = tag.clone();
+        drop(cur);
+        info!("baseline-profile: switching {prev} → {tag} (reloading {path})");
+        load_baseline_file(&path);
+    }
+}
+
 /// ADR-104: background watch — when the per-subcarrier drift channel is
 /// consistently above the presence threshold AND the on-disk baseline is
 /// older than `stale_age_sec`, log a warning suggesting recalibration.
@@ -6781,12 +6872,19 @@ async fn main() {
 
     info!("Data source: {source}");
 
-    // ADR-103: load persistent empty-room baseline if present so the
-    // classifier has a meaningful baseline from the first frame
-    // instead of waiting ~60 s for the rolling p95 to warm up.
-    load_baseline_file(
-        &std::env::var("RUVIEW_BASELINE_FILE").unwrap_or_else(|_| "data/baseline.json".into())
-    );
+    // ADR-103 + ADR-113: load persistent empty-room baseline if present
+    // so the classifier has a meaningful baseline from the first frame
+    // instead of waiting ~60 s for the rolling p95 to warm up. With
+    // `--baseline-profile auto|day|night`, picks the right per-time-of-day
+    // file (data/baseline.day.json / data/baseline.night.json); default
+    // `single` keeps the legacy `data/baseline.json` path.
+    let (initial_profile, initial_path) = resolve_baseline_profile(&args.baseline_profile);
+    info!("baseline-profile: starting in '{initial_profile}' mode → {initial_path}");
+    {
+        let mut cur = current_baseline_profile_init().lock().unwrap();
+        *cur = initial_profile;
+    }
+    load_baseline_file(&initial_path);
 
     // Shared state
     // Vital sign sample rate derives from tick interval (e.g. 500ms tick => 2 Hz)
@@ -6998,6 +7096,8 @@ async fn main() {
                 args.baseline_stale_age_sec,
                 args.baseline_stale_warn_cooldown_sec,
             ));
+            // ADR-113: auto-switch day/night baseline files.
+            tokio::spawn(baseline_profile_watch(args.baseline_profile.clone()));
             tokio::spawn(broadcast_tick_task(state.clone(), args.tick_ms));
         }
         "wifi" => {
