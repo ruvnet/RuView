@@ -1515,6 +1515,36 @@ export class LiveDemoTab {
     } catch (error) {
       this.logger.warn('Could not fetch models', { error: error.message });
     }
+    // ADR-116: surface WiFlow-v1 in the Model Control dropdown when the
+    // server reports `pose_estimation: true` via /api/v1/info. WiFlow is
+    // loaded outside the RVF model registry path (--wiflow-model flag),
+    // so listModels() above doesn't return it. This adds a virtual entry
+    // marked as already active.
+    try {
+      const r = await fetch('/api/v1/info');
+      if (r.ok) {
+        const info = await r.json();
+        if (info?.features?.pose_estimation) {
+          if (!this.modelState.models.some(m => m.id === 'wiflow-v1')) {
+            this.modelState.models.unshift({
+              id: 'wiflow-v1',
+              name: 'WiFlow-v1 (lite, 186K params, --wiflow-model)',
+            });
+          }
+          this.modelState.activeModelId = 'wiflow-v1';
+          this.modelState.activeModelInfo = {
+            model_id: 'wiflow-v1',
+            name: 'WiFlow-v1',
+            version: 'lite',
+            pck_score: 0.929, // from model card; eval-set, not this deployment
+          };
+          this.populateModelSelector();
+          this.updateModelUI();
+        }
+      }
+    } catch (e) {
+      this.logger.warn('ADR-116 info probe failed', { error: e.message });
+    }
   }
 
   populateModelSelector() {
