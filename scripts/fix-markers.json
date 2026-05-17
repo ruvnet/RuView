@@ -110,6 +110,67 @@
       "require": ["VERIFY.sh", "witness-bundle"],
       "rationale": "scripts/generate-witness-bundle.sh produces the self-contained, recipient-verifiable witness bundle (witness log + proof + test results + firmware hashes + VERIFY.sh). Part of the ADR-028 attestation chain.",
       "ref": "docs/WITNESS-LOG-028.md"
+    },
+    {
+      "id": "RuView#559",
+      "title": "./verify wrapper points at archive/v1/ paths (post-v1-archive layout)",
+      "files": ["verify"],
+      "require": ["${SCRIPT_DIR}/archive/v1/data/proof", "${SCRIPT_DIR}/archive/v1/src"],
+      "rationale": "After v1 moved to archive/v1, the ./verify wrapper still pointed at the removed v1/ paths and failed before reaching verify.py on a fresh clone. Reverting to the un-prefixed paths reintroduces the FAIL-before-pipeline regression that #559 reported.",
+      "ref": "https://github.com/ruvnet/RuView/issues/559"
+    },
+    {
+      "id": "RuView#561",
+      "title": "ESP32 CSI firmware README documents the correct flash offsets (app at 0x20000, ota_data at 0xf000)",
+      "files": ["firmware/esp32-csi-node/README.md"],
+      "require": [
+        "0x20000 firmware/esp32-csi-node/build/esp32-csi-node.bin",
+        "0xf000  firmware/esp32-csi-node/build/ota_data_initial.bin",
+        "firmware/esp32-csi-node/provision.py"
+      ],
+      "forbid": [
+        "/0x10000 firmware\\/esp32-csi-node\\/build\\/esp32-csi-node\\.bin/",
+        "/python scripts\\/provision\\.py/"
+      ],
+      "rationale": "Partition tables (partitions_display.csv, partitions_4mb.csv) put ota_0 at 0x20000. The README previously said 0x10000 and pointed at scripts/provision.py (an older copy). Reverting causes first-time users to misflash and miss WiFi provisioning.",
+      "ref": "https://github.com/ruvnet/RuView/issues/561"
+    },
+    {
+      "id": "RuView#588-SEC020",
+      "title": "provision.py prints a fixed (set)/(empty) marker, not a length-leaking asterisk run",
+      "files": ["scripts/provision.py", "firmware/esp32-csi-node/provision.py"],
+      "require": ["(set)' if args.password else '(empty)"],
+      "forbid": ["/'\\*' \\* len\\(args\\.password\\)/"],
+      "rationale": "Both provision.py scripts previously printed '*' * len(args.password), masking the value but leaking the password length. Flagged as SEC020 by Repobility. Fix replaces with a fixed (set)/(empty) marker.",
+      "ref": "https://github.com/ruvnet/RuView/issues/588"
+    },
+    {
+      "id": "RuView#593",
+      "title": "vital_signs.rs uses circular variance for wrapped atan2 phase values",
+      "files": ["v2/crates/wifi-densepose-sensing-server/src/vital_signs.rs"],
+      "require": [
+        "phase_circular_variance",
+        "standard circular variance (1 - mean resultant length)",
+        "test_phase_variance_handles_wraparound"
+      ],
+      "rationale": "Phases come from atan2 and are wrapped to (-pi, pi]. The original linear mean/variance treated two phases straddling +/-pi (physically ~0 rad apart) as ~2*pi apart, producing variance ~pi^2 instead of ~1e-6 and feeding that noise straight into the heart-rate FFT buffer. Caused jumpy vitals in #519 and +/-15 BPM jitter in #485.",
+      "ref": "https://github.com/ruvnet/RuView/issues/593"
+    },
+    {
+      "id": "RuView#590-fuzz-stub",
+      "title": "Fuzz host stubs declare WIFI_PS_NONE / wifi_ps_type_t / esp_wifi_set_ps()",
+      "files": ["firmware/esp32-csi-node/test/stubs/esp_stubs.h"],
+      "require": ["wifi_ps_type_t", "WIFI_PS_NONE", "esp_wifi_set_ps"],
+      "rationale": "csi_collector.c:346 calls esp_wifi_set_ps(WIFI_PS_NONE) per the RuView#521 fix. The host-native fuzz target compiles csi_collector.c against test/stubs/esp_stubs.h; missing these symbols red-greens the Fuzz Testing (ADR-061 Layer 6) job. Was red on main for ~5 weeks before PR #590.",
+      "ref": "https://github.com/ruvnet/RuView/pull/590"
+    },
+    {
+      "id": "RuView#590-swarm-test",
+      "title": "QEMU swarm test passes --force-partial to provision.py for per-node overlays",
+      "files": ["scripts/qemu_swarm.py"],
+      "require": ["--force-partial"],
+      "rationale": "The per-node TDM/channel overlay intentionally omits WiFi creds (those live in the base flash image). Without --force-partial the issue #391 wifi-trio guard in provision.py rejects the call and breaks the Swarm Test (ADR-062) job. Was red on main for ~5 weeks before PR #590.",
+      "ref": "https://github.com/ruvnet/RuView/pull/590"
     }
   ]
 }
