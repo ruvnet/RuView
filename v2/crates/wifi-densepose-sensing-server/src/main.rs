@@ -925,9 +925,33 @@ struct NodeInfo {
     node_id: u8,
     rssi_dbm: f64,
     position: [f64; 3],
+    /// Per-subcarrier amplitude = sqrt(I² + Q²) — primary CSI signal.
     amplitude: Vec<f64>,
+    /// Per-subcarrier phase in radians = atan2(Q, I). ADR-106: now
+    /// exposed alongside amplitude so downstream consumers (vital-
+    /// signs FFT on phase, pose estimation, ML training) have the
+    /// full complex CSI. Empty when the carrying packet was a
+    /// feature_state (no raw CSI).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    phases: Vec<f64>,
     subcarrier_count: usize,
+    /// Number of receive antennas reported by the WiFi driver
+    /// (ESP32-S3 typically 1). 0 when the source packet didn't carry it.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    n_antennas: u8,
+    /// Receiver noise floor in dBm. 0 means "not reported".
+    #[serde(default, skip_serializing_if = "is_zero_i8")]
+    noise_floor_dbm: i8,
+    /// Per-frame µs timestamp from the receiving sensor. Lets the
+    /// server / model align frames across nodes when computing FFTs
+    /// or cross-correlations. 0 means "not available".
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    timestamp_us: u64,
 }
+
+fn is_zero_u8(v: &u8) -> bool { *v == 0 }
+fn is_zero_i8(v: &i8) -> bool { *v == 0 }
+fn is_zero_u64(v: &u64) -> bool { *v == 0 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct FeatureInfo {
@@ -1007,6 +1031,16 @@ struct NodeState {
     edge_vitals: Option<Esp32VitalsPacket>,
     /// Latest extracted features for cross-node fusion.
     latest_features: Option<FeatureInfo>,
+    /// ADR-106: latest per-subcarrier phases (radians, atan2(Q,I)) and
+    /// noise floor + sensor µs timestamp from the most recent raw CSI
+    /// frame. Surfaced in `NodeInfo` so downstream consumers
+    /// (vital-signs FFT on phase, future ML model) get the full
+    /// complex CSI without re-routing through `frame_history` which
+    /// is amplitude-only.
+    latest_phases: Option<Vec<f64>>,
+    latest_noise_floor: i8,
+    latest_timestamp_us: u64,
+    latest_n_antennas: u8,
     // ── RuVector Phase 2: Temporal smoothing & coherence gating ──
     /// Previous frame's smoothed keypoint positions for EMA temporal smoothing.
     prev_keypoints: Option<Vec<[f64; 3]>>,
@@ -1069,6 +1103,10 @@ impl NodeState {
             last_frame_time: None,
             edge_vitals: None,
             latest_features: None,
+            latest_phases: None,
+            latest_noise_floor: 0,
+            latest_timestamp_us: 0,
+            latest_n_antennas: 0,
             prev_keypoints: None,
             motion_energy_history: VecDeque::with_capacity(COHERENCE_WINDOW),
             coherence_score: 1.0, // assume stable initially
@@ -2528,8 +2566,12 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
                 node_id: 0,
                 rssi_dbm: first_rssi,
                 position: [0.0, 0.0, 0.0],
-                amplitude: multi_ap_frame.amplitudes,
+                amplitude: multi_ap_frame.amplitudes.clone(),
+                phases: multi_ap_frame.phases.clone(),
                 subcarrier_count: obs_count,
+                n_antennas: 1,
+                noise_floor_dbm: 0,
+                timestamp_us: 0,
             }],
             features,
             classification,
@@ -2668,7 +2710,11 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
             rssi_dbm,
             position: [0.0, 0.0, 0.0],
             amplitude: vec![signal_pct],
+            phases: Vec::new(),
             subcarrier_count: 1,
+            n_antennas: 0,
+            noise_floor_dbm: 0,
+            timestamp_us: 0,
         }],
         features,
         classification,
@@ -4567,7 +4613,11 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                             rssi_dbm: n.rssi_history.back().copied().unwrap_or(0.0),
                             position: [2.0, 0.0, 1.5],
                             amplitude: vec![],
+                            phases: vec![],
                             subcarrier_count: 0,
+                            n_antennas: 0,
+                            noise_floor_dbm: 0,
+                            timestamp_us: 0,
                         })
                         .collect();
 
@@ -4752,6 +4802,16 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         ns.frame_history.pop_front();
                     }
 
+                    // ADR-106: stash latest raw-CSI metadata (phase,
+                    // noise floor, sensor µs timestamp, antenna count)
+                    // so build_node_features can surface the full
+                    // complex signal in NodeInfo.
+                    if !frame.phases.is_empty() {
+                        ns.latest_phases = Some(frame.phases.clone());
+                    }
+                    ns.latest_noise_floor = frame.noise_floor;
+                    ns.latest_n_antennas = frame.n_antennas;
+
                     let sample_rate_hz = 1000.0 / 500.0_f64;
                     let (features, mut classification, breathing_rate_hz, sub_variances, raw_motion) =
                         extract_features_from_frame(&frame, &ns.frame_history, sample_rate_hz);
@@ -4871,14 +4931,25 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     // Build nodes array with all active nodes.
                     let active_nodes: Vec<NodeInfo> = s.node_states.iter()
                         .filter(|(_, n)| n.last_frame_time.map_or(false, |t| now.duration_since(t).as_secs() < 10))
-                        .map(|(&id, n)| NodeInfo {
-                            node_id: id,
-                            rssi_dbm: n.rssi_history.back().copied().unwrap_or(0.0),
-                            position: [2.0, 0.0, 1.5],
-                            amplitude: n.frame_history.back()
+                        .map(|(&id, n)| {
+                            let amps: Vec<f64> = n.frame_history.back()
                                 .map(|a| a.iter().take(56).cloned().collect())
-                                .unwrap_or_default(),
-                            subcarrier_count: n.frame_history.back().map_or(0, |a| a.len()),
+                                .unwrap_or_default();
+                            let phases: Vec<f64> = n.latest_phases.as_ref()
+                                .map(|p| p.iter().take(56).cloned().collect())
+                                .unwrap_or_default();
+                            let sub_count = amps.len();
+                            NodeInfo {
+                                node_id: id,
+                                rssi_dbm: n.rssi_history.back().copied().unwrap_or(0.0),
+                                position: [2.0, 0.0, 1.5],
+                                amplitude: amps,
+                                phases,
+                                subcarrier_count: sub_count,
+                                n_antennas: n.latest_n_antennas,
+                                noise_floor_dbm: n.latest_noise_floor,
+                                timestamp_us: n.latest_timestamp_us,
+                            }
                         })
                         .collect();
 
@@ -5018,7 +5089,11 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
                 rssi_dbm: features.mean_rssi,
                 position: [2.0, 0.0, 1.5],
                 amplitude: frame_amplitudes,
+                phases: Vec::new(),
                 subcarrier_count: frame_n_sub as usize,
+                n_antennas: 0,
+                noise_floor_dbm: 0,
+                timestamp_us: 0,
             }],
             features: features.clone(),
             classification,
