@@ -2720,6 +2720,19 @@ fn adaptive_override(state: &AppStateInner, features: &FeatureInfo, classificati
     }
 }
 
+/// ADR-120: classes that ONLY the adaptive W-MLP model can produce.
+/// The rule-based amp_presence_override / amp_classify_from_latest paths
+/// know only {absent, present_still, present_moving, active}; if the
+/// adaptive model has just emitted `waving` or `transition`, we must NOT
+/// overwrite it with the rule-based output. Hybrid priority: rule-based
+/// wins for the 4 baseline classes (it's battle-tested at F1 > 96%);
+/// adaptive wins exclusively when emitting a class outside that set.
+const ADAPTIVE_EXCLUSIVE_CLASSES: &[&str] = &["waving", "transition"];
+
+fn adaptive_owns_class(label: &str) -> bool {
+    ADAPTIVE_EXCLUSIVE_CLASSES.iter().any(|&c| c == label)
+}
+
 /// ADR-120: push the current frame's feature vector into the rolling
 /// window buffer, evicting the oldest entry when at capacity. Called
 /// once per tick from the broadcast tick task where `&mut AppStateInner`
@@ -3035,12 +3048,16 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
         // reference, see #[allow(dead_code)]). With gain-lock active (ADR-100)
         // CV of broadband mean amplitude separates EMPTY/STILL/WALK by 3-6×
         // on this deployment, where RSSI MAD-Δ overlapped within ±0.03.
-        if let Some((level, presence, conf)) =
-            amp_presence_override(frame.node_id, &frame.amplitudes)
-        {
-            classification.motion_level = level;
-            classification.presence = presence;
-            classification.confidence = conf;
+        // ADR-120: skip the rule-based override when the adaptive model
+        // has emitted a class only it can produce (waving / transition).
+        if !adaptive_owns_class(&classification.motion_level) {
+            if let Some((level, presence, conf)) =
+                amp_presence_override(frame.node_id, &frame.amplitudes)
+            {
+                classification.motion_level = level;
+                classification.presence = presence;
+                classification.confidence = conf;
+            }
         }
         // ADR-104 phase-domain: update phase drift score for this node
         // alongside the amplitude classifier. No-op if no phase baseline.
@@ -6045,10 +6062,14 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
 
                     // ADR-101: inherit the raw-amplitude classifier from the
                     // CSI path (this feature_state path doesn't carry amps).
-                    if let Some((level, presence, conf)) = amp_classify_from_latest() {
-                        classification.motion_level = level;
-                        classification.presence = presence;
-                        classification.confidence = conf;
+                    // ADR-120: skip when adaptive model produced a class only
+                    // it knows (waving / transition).
+                    if !adaptive_owns_class(&classification.motion_level) {
+                        if let Some((level, presence, conf)) = amp_classify_from_latest() {
+                            classification.motion_level = level;
+                            classification.presence = presence;
+                            classification.confidence = conf;
+                        }
                     }
 
                     // ADR-112: prefer multistatic-derived signal_field
@@ -6282,18 +6303,24 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         classification.confidence = (conf * 0.7 + classification.confidence * 0.3).clamp(0.0, 1.0);
                     }
 
-                    // ADR-101: amp classifier wins over the legacy adaptive model.
+                    // ADR-101: amp classifier wins over the legacy adaptive
+                    // model for absent/still/moving/active. ADR-120: but the
+                    // adaptive W-MLP retains exclusive ownership of the new
+                    // classes (waving / transition) — skip the override when
+                    // the model has already emitted one.
                     let amps_now = ns.frame_history.back().cloned().unwrap_or_default();
-                    if !amps_now.is_empty() {
-                        if let Some((level, presence, conf)) = amp_presence_override(node_id, &amps_now) {
+                    if !adaptive_owns_class(&classification.motion_level) {
+                        if !amps_now.is_empty() {
+                            if let Some((level, presence, conf)) = amp_presence_override(node_id, &amps_now) {
+                                classification.motion_level = level;
+                                classification.presence = presence;
+                                classification.confidence = conf;
+                            }
+                        } else if let Some((level, presence, conf)) = amp_classify_from_latest() {
                             classification.motion_level = level;
                             classification.presence = presence;
                             classification.confidence = conf;
                         }
-                    } else if let Some((level, presence, conf)) = amp_classify_from_latest() {
-                        classification.motion_level = level;
-                        classification.presence = presence;
-                        classification.confidence = conf;
                     }
                     // ADR-104 phase-domain: update phase drift if a
                     // phase baseline is loaded and the latest frame
