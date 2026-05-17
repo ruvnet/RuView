@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`archive/v1/src/services/pose_service.py:223` calls the right method on `PhaseSanitizer`** (closes #612). The call was `self.phase_sanitizer.sanitize(phase_data)`, but `PhaseSanitizer`'s full-pipeline entry point is named `sanitize_phase()` (`unwrap_phase` + `remove_outliers` + `smooth_phase` chained, see `archive/v1/src/core/phase_sanitizer.py:266`). The shorter `sanitize` name doesn't exist on the class, so any path that reached this branch raised `AttributeError` and crashed the pose service mid-frame.
 - **`adaptive_classifier.rs:94` no longer panics on NaN feature values** (closes #611).
   `sorted.sort_by(|a, b| a.partial_cmp(b).unwrap())` returned `None` and panicked
   whenever a single `NaN` reached the classifier from real ESP32 hardware (silent
