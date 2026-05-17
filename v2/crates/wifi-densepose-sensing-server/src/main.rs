@@ -2713,14 +2713,13 @@ fn adaptive_override(state: &AppStateInner, features: &FeatureInfo, classificati
             model.classify(&feat_arr)
         };
 
-        // ADR-120 follow-up: majority-vote smoothing across ~700 ms of
-        // history. Stops the per-tick flicker that made the live label
-        // unreadable. Hybrid priority downstream re-checks via
-        // adaptive_owns_class on the smoothed label, so waving/transition
-        // ownership is preserved.
-        let smoothed = adaptive_label_smooth(&label);
-        classification.motion_level = smoothed.clone();
-        classification.presence = smoothed != "absent";
+        // ADR-120 follow-up #2: emit raw model label here. Smoothing is
+        // applied centrally at end-of-tick via finalize_motion_label so
+        // it covers BOTH the adaptive path AND the rule-based override
+        // paths (amp_presence_override / amp_classify_from_latest) which
+        // previously wrote raw values directly to motion_level.
+        classification.motion_level = label.to_string();
+        classification.presence = label != "absent";
         // Blend model confidence with existing smoothed confidence.
         classification.confidence = (conf * 0.7 + classification.confidence * 0.3).clamp(0.0, 1.0);
     }
@@ -2754,6 +2753,19 @@ fn adaptive_label_history_init() -> &'static Mutex<VecDeque<String>> {
 
 fn adaptive_committed_init() -> &'static Mutex<(String, String, u32)> {
     ADAPTIVE_COMMITTED.get_or_init(|| Mutex::new((String::new(), String::new(), 0)))
+}
+
+/// ADR-120 follow-up #2: smooth WHATEVER label the cascade of overrides
+/// produced, regardless of source (adaptive model OR amp_presence_override
+/// OR amp_classify_from_latest). The earlier adaptive_label_smooth ONLY
+/// covered the adaptive output — anything else (the 4 baseline classes)
+/// passed through raw, so the live label kept flipping on every tick.
+/// This is the final chokepoint called from each tick handler after all
+/// overrides have run.
+pub fn finalize_motion_label(classification: &mut ClassificationInfo) {
+    let smoothed = adaptive_label_smooth(&classification.motion_level);
+    classification.presence = smoothed != "absent";
+    classification.motion_level = smoothed;
 }
 
 /// Push `raw_label` into Layer 1 (rolling history) and compute its mode.
@@ -3150,6 +3162,11 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
         // ADR-104 phase-domain: update phase drift score for this node
         // alongside the amplitude classifier. No-op if no phase baseline.
         phase_drift_update(frame.node_id, &frame.phases);
+
+        // ADR-120 follow-up #2: final smoothing pass over the post-
+        // override classification. Catches flicker from BOTH adaptive
+        // and rule-based paths.
+        finalize_motion_label(&mut classification);
         drop(s_write_pre);
 
         // ── Step 5: Build enhanced fields from pipeline result ───────
@@ -6160,6 +6177,10 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         }
                     }
 
+                    // ADR-120 follow-up #2: final smoothing pass — uniformly
+                    // damps flicker from both adaptive and rule-based outputs.
+                    finalize_motion_label(&mut classification);
+
                     // ADR-112: prefer multistatic-derived signal_field
                     // when ≥ 2 ESP32 nodes are active; falls back to
                     // ADR-105's zero grid on single-sensor / fusion-fail.
@@ -6416,6 +6437,12 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     if let Some(ph) = ns.latest_phases.as_ref() {
                         phase_drift_update(node_id, ph);
                     }
+
+                    // ADR-120 follow-up #2: final smoothing pass on the
+                    // per-node loop's classification. Same shared smoother
+                    // state as the other two tick sites — single source
+                    // of truth for the displayed label.
+                    finalize_motion_label(&mut classification);
 
                     ns.rssi_history.push_back(features.mean_rssi);
                     if ns.rssi_history.len() > 60 {
