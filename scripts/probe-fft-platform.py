@@ -48,7 +48,7 @@ window = scipy.signal.windows.hamming(56)
 # Quantization decimals — kept in sync with
 # archive/v1/data/proof/verify.py:HASH_QUANTIZATION_DECIMALS so this probe
 # verifies the production hash, not just the FFT outputs.
-HASH_QUANTIZATION_DECIMALS = 9
+HASH_QUANTIZATION_DECIMALS = 6
 
 
 def pack_floats(arrays, quantize):
