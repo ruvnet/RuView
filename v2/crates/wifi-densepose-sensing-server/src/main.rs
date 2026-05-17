@@ -400,6 +400,14 @@ fn amp_node_snapshot(node_id: u8) -> Option<(String, bool, f64)> {
     Some((lvl.to_string(), pres, cv))
 }
 
+/// Per-node (mean_short, baseline_or_None) for diagnostics. Lets the UI
+/// surface "baseline learned" vs "current" so the operator can see why
+/// `present_still` is/isn't firing.
+pub(crate) fn amp_node_diag(node_id: u8) -> Option<(f64, Option<f64>)> {
+    let latest = amp_latest_init().lock().unwrap();
+    latest.get(&node_id).map(|(_, mean_short, baseline)| (*mean_short, *baseline))
+}
+
 /// Read-only classifier: returns `(level, presence, confidence)` based on
 /// whatever `amp_presence_override` has stashed for the active nodes.
 /// Returns None until at least one node has reported.
@@ -4400,24 +4408,22 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     }
 
                     // Build nodes array with all active nodes.
-                    // ADR-101 follow-up: feature_state packets carry no
-                    // raw CSI of their own, but the raw-CSI path has
-                    // been pushing amplitudes into ns.frame_history.
-                    // Hand the most recent vector out so raw.html bars
-                    // don't go blank between rare raw-CSI packets
-                    // (current FW emits ~80 % feature_state, ~20 % raw).
+                    // ADR-101 revisit: previous attempt fed the last raw-
+                    // CSI amplitude vector through feature_state updates
+                    // so the UI bars wouldn't go blank. The operator
+                    // reported this made the bars *misleading* — they
+                    // visually refresh on every tick but actually repeat
+                    // the same stale vector until the next true raw-CSI
+                    // packet arrives. Reverted to vec![] so raw.html
+                    // only redraws bars when fresh amplitudes appear.
                     let active_nodes: Vec<NodeInfo> = s.node_states.iter()
                         .filter(|(_, n)| n.last_frame_time.map_or(false, |t| now.duration_since(t).as_secs() < 10))
-                        .map(|(&id, n)| {
-                            let last_amps = n.frame_history.back().cloned().unwrap_or_default();
-                            let sub_count = last_amps.len();
-                            NodeInfo {
-                                node_id: id,
-                                rssi_dbm: n.rssi_history.back().copied().unwrap_or(0.0),
-                                position: [2.0, 0.0, 1.5],
-                                amplitude: last_amps,
-                                subcarrier_count: sub_count,
-                            }
+                        .map(|(&id, n)| NodeInfo {
+                            node_id: id,
+                            rssi_dbm: n.rssi_history.back().copied().unwrap_or(0.0),
+                            position: [2.0, 0.0, 1.5],
+                            amplitude: vec![],
+                            subcarrier_count: 0,
                         })
                         .collect();
 

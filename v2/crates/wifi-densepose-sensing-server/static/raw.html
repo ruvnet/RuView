@@ -221,6 +221,9 @@ function handleSensingUpdate(d) {
   for (const n of nodes) {
     const id = n.node_id;
     const amps = n.amplitude || [];
+    // Skip empty-amp ticks (feature_state path doesn't carry raw CSI).
+    // Bars/traces only refresh on real raw-CSI frames so what you see
+    // is always a live snapshot, not a repeated stale vector.
     if (!amps.length) continue;
     const ent = ensureNodeBlock(id);
     ent.amp = amps;
