@@ -23,6 +23,7 @@ full-broadband mean / median / p95 to data/baseline.json.
 import argparse
 import asyncio
 import json
+import math
 import statistics
 import sys
 import time
@@ -42,8 +43,31 @@ def full_broadband_mean(amps):
     return (sum(valid) / len(valid)) if valid else 0.0
 
 
+def circular_mean_var(phases):
+    """ADR-104 phase-domain: circular mean (radians) and circular variance
+    (1 - |R|, in [0, 1]) over a list of unwrapped/atan2 phase samples.
+
+    Variance close to 0 = phases tightly clustered (stable subcarrier,
+    suitable for baseline-comparison). Close to 1 = phases scattered
+    (subcarrier is noisy; baseline reference unreliable).
+    """
+    n = len(phases)
+    if n == 0:
+        return (0.0, 1.0)
+    sx = sum(math.sin(p) for p in phases) / n
+    cx = sum(math.cos(p) for p in phases) / n
+    r = math.sqrt(sx * sx + cx * cx)
+    mean = math.atan2(sx, cx)
+    var = 1.0 - r
+    return (mean, var)
+
+
 async def record(server: str, duration: float, port: int):
-    by_node: dict[int, list[tuple[float, list[float], float]]] = {}
+    # Per-node frame log: (t_sec, amps, phases, rssi).
+    # ADR-104 phase-domain: phases captured alongside amplitudes when the
+    # WS payload carries `phases` (ADR-106 full complex CSI). Missing or
+    # empty phase vectors → trim_and_clean writes only amplitude baseline.
+    by_node: dict[int, list[tuple[float, list[float], list[float], float]]] = {}
     url = f"ws://{server}:{port}/ws/sensing"
     start = time.time()
     print(f"connecting to {url} — recording {duration:.0f}s …", flush=True)
@@ -57,14 +81,23 @@ async def record(server: str, duration: float, port: int):
                 a = n.get("amplitude") or []
                 if not a:
                     continue
-                by_node.setdefault(n["node_id"], []).append((t, a, n.get("rssi_dbm", 0.0)))
+                ph = n.get("phases") or []
+                by_node.setdefault(n["node_id"], []).append(
+                    (t, a, ph, n.get("rssi_dbm", 0.0))
+                )
             if time.time() - start >= duration:
                 break
     return by_node
 
 
 def trim_and_clean(frames, trim_head_sec=15.0, trim_tail_sec=15.0, clean_window_sec=30.0):
-    """Trim head/tail transients, then scan for the cleanest sub-window."""
+    """Trim head/tail transients, then scan for the cleanest sub-window.
+
+    `frames` is a list of (t_sec, amps, phases, rssi). `phases` may be an
+    empty list when the server hasn't been upgraded to emit them — in
+    that case the resulting baseline omits the phase-domain fields and
+    the server falls back to amplitude-only drift (ADR-104 baseline mode).
+    """
     if not frames:
         return None
     t0 = frames[0][0]
@@ -104,18 +137,39 @@ def trim_and_clean(frames, trim_head_sec=15.0, trim_tail_sec=15.0, clean_window_
 
     # ── Compute per-node stats on the clean window ───────────────
     full_means = [full_broadband_mean(a) for _, a, _ in chunk]
-    rssis = [r for _, _, r in chunk if r != 0]
+    rssis = [r for _, _, _, r in chunk if r != 0]
     sorted_full = sorted(full_means)
 
     # Per-subcarrier mean across the clean window (for diagnostic + future
     # subcarrier-level comparison if the server gets that capability).
-    n_sub = min(len(a) for _, a, _ in chunk)
+    n_sub = min(len(a) for _, a, _, _ in chunk)
     per_sub_means = []
     for k in range(n_sub):
-        vs = [a[k] for _, a, _ in chunk if k < len(a) and a[k] > 0]
+        vs = [a[k] for _, a, _, _ in chunk if k < len(a) and a[k] > 0]
         per_sub_means.append(statistics.mean(vs) if vs else 0.0)
 
-    return {
+    # ADR-104 phase-domain: per-subcarrier circular mean + variance of the
+    # captured phase samples. Only included if the WS stream carried
+    # phases — server tolerates either schema.
+    have_phases = any(ph for _, _, ph, _ in chunk)
+    per_sub_phase_means: list[float] = []
+    per_sub_phase_vars: list[float] = []
+    if have_phases:
+        n_phase_sub = min(
+            (len(ph) for _, _, ph, _ in chunk if ph),
+            default=0,
+        )
+        for k in range(n_phase_sub):
+            samples = [ph[k] for _, _, ph, _ in chunk if k < len(ph)]
+            if not samples:
+                per_sub_phase_means.append(0.0)
+                per_sub_phase_vars.append(1.0)
+                continue
+            mean, var = circular_mean_var(samples)
+            per_sub_phase_means.append(mean)
+            per_sub_phase_vars.append(var)
+
+    result = {
         # Persistent fields the server reads:
         "full_broadband_mean": statistics.mean(full_means),
         "full_broadband_p50":  sorted_full[len(sorted_full)//2],
@@ -132,6 +186,12 @@ def trim_and_clean(frames, trim_head_sec=15.0, trim_tail_sec=15.0, clean_window_
         # subcarrier-level comparison without re-recording):
         "per_subcarrier_mean": [round(v, 3) for v in per_sub_means],
     }
+    if per_sub_phase_means:
+        # Rounding: 4 decimals on mean phase (radian), 3 on variance
+        # — phase variance is in [0,1] so 3 decimals is plenty.
+        result["per_subcarrier_phase_mean"] = [round(v, 4) for v in per_sub_phase_means]
+        result["per_subcarrier_phase_var"] = [round(v, 3) for v in per_sub_phase_vars]
+    return result
 
 
 def main():
