@@ -4,16 +4,21 @@
 Runs the same scipy.fft.fft / scipy.signal calls that verify.py hashes
 (csi_processor.py:426, :438, :349) on a deterministic synthetic input,
 without dragging in src.app / pydantic Settings. Used to empirically
-locate the source of platform divergence in issue #560.
+locate the source of platform divergence in issue #560 — and now also to
+verify the quantize-before-hash fix shipped in archive/v1/data/proof/verify.py.
 
 Usage:  python3 scripts/probe-fft-platform.py
 Output: single JSON object on stdout. Run on each platform and diff.
 
-If two machines print the same `first8_doppler_bytes_hex` and the same
-`first4_psd_floats` but different `sha256`, the divergence is in later
-FFT bins (SIMD reordering). If even the first values differ, it's a
-true ULP-level divergence at every bin (Apple Silicon NEON vs x86_64
-AVX, or different scipy pocketfft builds).
+The output now contains TWO hashes:
+- `sha256_raw`       — hash of unrounded little-endian f64 bytes (legacy)
+- `sha256_quantized` — hash after np.round(.., 9) (matches verify.py
+                       behaviour after the issue-#560 fix; should be
+                       IDENTICAL across Intel AVX, ARM NEON, and any
+                       scipy pocketfft build)
+
+If `sha256_raw` differs across machines but `sha256_quantized` matches,
+the quantize-before-hash fix is doing its job.
 """
 import hashlib
 import json
@@ -40,12 +45,26 @@ doppler = np.abs(scipy.fft.fft(mean_phase_diff, n=64)) ** 2
 psd = np.abs(scipy.fft.fft(amp.flatten(), n=128)) ** 2
 window = scipy.signal.windows.hamming(56)
 
-# Pack the same way verify.py:features_to_bytes does (little-endian f64)
-parts = []
-for arr in (doppler, psd, window):
-    flat = np.asarray(arr, dtype=np.float64).ravel()
-    parts.append(struct.pack(f"<{len(flat)}d", *flat))
-blob = b"".join(parts)
+# Quantization decimals — kept in sync with
+# archive/v1/data/proof/verify.py:HASH_QUANTIZATION_DECIMALS so this probe
+# verifies the production hash, not just the FFT outputs.
+HASH_QUANTIZATION_DECIMALS = 9
+
+
+def pack_floats(arrays, quantize):
+    """Pack arrays as little-endian f64, optionally rounding first."""
+    parts = []
+    for arr in arrays:
+        flat = np.asarray(arr, dtype=np.float64).ravel()
+        if quantize:
+            flat = np.round(flat, HASH_QUANTIZATION_DECIMALS)
+        parts.append(struct.pack(f"<{len(flat)}d", *flat))
+    return b"".join(parts)
+
+
+arrays = (doppler, psd, window)
+blob_raw = pack_floats(arrays, quantize=False)
+blob_quantized = pack_floats(arrays, quantize=True)
 
 try:
     blas_info = np.show_config(mode="dicts")
@@ -57,8 +76,10 @@ print(json.dumps({
     "python": sys.version.split()[0],
     "numpy": np.__version__,
     "scipy": __import__("scipy").__version__,
-    "blob_len": len(blob),
-    "sha256": hashlib.sha256(blob).hexdigest(),
+    "blob_len": len(blob_raw),
+    "sha256_raw": hashlib.sha256(blob_raw).hexdigest(),
+    "sha256_quantized": hashlib.sha256(blob_quantized).hexdigest(),
+    "quantization_decimals": HASH_QUANTIZATION_DECIMALS,
     "first8_doppler_bytes_hex": doppler[:8].tobytes().hex(),
     "first4_psd_floats": psd[:4].tolist(),
     "blas_backend": blas_info if isinstance(blas_info, dict) else str(blas_info),

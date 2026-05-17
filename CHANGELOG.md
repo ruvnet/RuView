@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`archive/v1/data/proof/verify.py` quantizes features before SHA-256** so the
+  trust-anchor hash is cross-platform stable (issue #560). The pipeline output
+  diverges at ULP precision across SIMD backends — Intel AVX2/AVX-512 vs Apple
+  Silicon NEON reorder vectorised FP operations differently in scipy.fft's
+  pocketfft kernels, so two "correct" platforms produce values that differ in
+  the ~14th decimal. `features_to_bytes()` now `np.round(.., 9)`s each array
+  before packing as little-endian f64, collapsing the cross-platform divergence
+  to a single canonical hash. The 9-decimal precision is ~5 orders of magnitude
+  above worst-case SIMD ULP drift (~1e-14 at value magnitudes of 1-100) and
+  many orders of magnitude below any meaningful signal change. Regenerating
+  `expected_features.sha256` on a canonical CI platform is required as part
+  of merging this fix.
+- `scripts/probe-fft-platform.py` now emits both `sha256_raw` (unrounded,
+  legacy) and `sha256_quantized` (the new platform-invariant hash) so the fix
+  can be verified across machines by running the probe on each and confirming
+  `sha256_quantized` matches.
+
 ### Removed
 - **Stub crates `wifi-densepose-api`, `wifi-densepose-db`, `wifi-densepose-config`** (closes #578).
   Each was a single-line doc-comment placeholder with an empty `[dependencies]`

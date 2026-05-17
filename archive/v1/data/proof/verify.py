@@ -164,18 +164,37 @@ def frame_to_csi_data(frame, signal_meta):
     )
 
 
+# Quantization precision for cross-platform hash stability (issue #560).
+#
+# The bytes packed below feed SHA-256. Without quantization, the hash diverges
+# across SIMD backends (Intel AVX2/AVX-512 vs Apple Silicon NEON) because
+# scipy.fft's pocketfft kernels reorder vectorized FP operations differently
+# per build. IEEE 754 guarantees per-operation determinism, not associativity
+# under reordering — so two correct platforms produce values that differ at
+# ULP precision (~1e-14 at our value magnitudes of ~1-100).
+#
+# 1e-9 is safely above worst-case SIMD divergence (~5 orders of magnitude
+# headroom over observed ULP-scale drift in the probe-fft-platform.py
+# measurements) and far below any meaningful signal change (CSI phase
+# precision is ~1e-3 rad; PSD bins differ by orders of magnitude). Round to
+# this precision, then hash.
+HASH_QUANTIZATION_DECIMALS = 9
+
+
 def features_to_bytes(features):
     """Convert CSIFeatures to a deterministic byte representation.
 
-    We serialize each numpy array to bytes in a canonical order
-    using little-endian float64 representation. This ensures the
-    hash is platform-independent for IEEE 754 compliant systems.
+    Each feature array is quantized to ``HASH_QUANTIZATION_DECIMALS`` decimal
+    places before being packed as little-endian float64. The quantization is
+    what makes the resulting SHA-256 hash actually platform-independent — the
+    raw float values diverge at ULP precision across scipy.fft SIMD backends
+    (issue #560), even though all platforms compute the "correct" answer.
 
     Args:
         features: CSIFeatures instance.
 
     Returns:
-        bytes: Canonical byte representation.
+        bytes: Canonical, quantized byte representation.
     """
     parts = []
 
@@ -189,6 +208,10 @@ def features_to_bytes(features):
         features.power_spectral_density,
     ]:
         flat = np.asarray(array, dtype=np.float64).ravel()
+        # Quantize before packing so SIMD-level FP reordering across
+        # Intel AVX vs Apple Silicon NEON pocketfft kernels does not
+        # leak into the SHA-256 input.
+        flat = np.round(flat, HASH_QUANTIZATION_DECIMALS)
         # Pack as little-endian double (8 bytes each)
         parts.append(struct.pack(f"<{len(flat)}d", *flat))
 

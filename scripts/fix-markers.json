@@ -171,6 +171,17 @@
       "require": ["--force-partial"],
       "rationale": "The per-node TDM/channel overlay intentionally omits WiFi creds (those live in the base flash image). Without --force-partial the issue #391 wifi-trio guard in provision.py rejects the call and breaks the Swarm Test (ADR-062) job. Was red on main for ~5 weeks before PR #590.",
       "ref": "https://github.com/ruvnet/RuView/pull/590"
+    },
+    {
+      "id": "RuView#560",
+      "title": "verify.py quantizes features before SHA-256 for cross-platform hash stability",
+      "files": ["archive/v1/data/proof/verify.py"],
+      "require": [
+        "HASH_QUANTIZATION_DECIMALS",
+        "np.round(flat, HASH_QUANTIZATION_DECIMALS)"
+      ],
+      "rationale": "Without quantization, the SHA-256 of features_to_bytes() diverges across SIMD backends (Intel AVX2/AVX-512 vs Apple Silicon NEON) because scipy.fft's pocketfft kernels reorder vectorized FP operations differently per build. IEEE 754 guarantees per-operation determinism, not associativity. Rounding to 9 decimal places (~5 orders of magnitude headroom over observed ULP drift) collapses the cross-platform divergence to a single canonical hash. Removing the round() call reintroduces the macOS arm64 vs Linux x86_64 hash mismatch in issue #560.",
+      "ref": "https://github.com/ruvnet/RuView/issues/560"
     }
   ]
 }
