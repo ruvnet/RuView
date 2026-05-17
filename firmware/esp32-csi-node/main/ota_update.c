@@ -97,6 +97,60 @@ static esp_err_t ota_status_handler(httpd_req_t *req)
 }
 
 /**
+ * POST /ota/recalibrate — clear cached gain-lock NVS keys and reboot.
+ *
+ * ADR-109: lets the operator force a full gain-lock re-calibration from
+ * the server without a USB connection. Erases csi_cfg/gl_agc, gl_fft, and
+ * gl_ap_mac (ADR-111), then calls esp_restart(). Next boot finds no NVS
+ * cache and runs the 300-packet calibration as if it were a fresh device.
+ */
+static esp_err_t ota_recalibrate_handler(httpd_req_t *req)
+{
+    if (!ota_check_auth(req)) {
+        ESP_LOGW(TAG, "/ota/recalibrate rejected: authentication failed");
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN,
+                            "Authentication required. Use: Authorization: Bearer <psk>");
+        return ESP_FAIL;
+    }
+
+    nvs_handle_t h;
+    esp_err_t err = nvs_open("csi_cfg", NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "/ota/recalibrate: nvs_open(csi_cfg) failed: %s",
+                 esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                            "NVS open failed");
+        return ESP_FAIL;
+    }
+
+    /* Erase all three keys defensively — ignore individual ESP_ERR_NVS_NOT_FOUND
+     * (key already absent on a never-calibrated device). */
+    (void)nvs_erase_key(h, "gl_agc");
+    (void)nvs_erase_key(h, "gl_fft");
+    (void)nvs_erase_key(h, "gl_ap_mac");
+    err = nvs_commit(h);
+    nvs_close(h);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "/ota/recalibrate: nvs_commit failed: %s",
+                 esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                            "NVS commit failed");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "/ota/recalibrate: gain-lock NVS cleared; rebooting in 1s");
+
+    const char *resp =
+        "{\"status\":\"ok\",\"message\":\"gain-lock NVS cleared; rebooting\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, strlen(resp));
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    esp_restart();
+    return ESP_OK; /* unreachable */
+}
+
+/**
  * POST /ota — receive and flash firmware binary.
  */
 static esp_err_t ota_upload_handler(httpd_req_t *req)
@@ -249,9 +303,19 @@ static esp_err_t ota_start_server(httpd_handle_t *out_handle)
     };
     httpd_register_uri_handler(server, &upload_uri);
 
+    /* ADR-109: REST trigger for full gain-lock re-calibration. */
+    httpd_uri_t recalibrate_uri = {
+        .uri      = "/ota/recalibrate",
+        .method   = HTTP_POST,
+        .handler  = ota_recalibrate_handler,
+        .user_ctx = NULL,
+    };
+    httpd_register_uri_handler(server, &recalibrate_uri);
+
     ESP_LOGI(TAG, "OTA HTTP server started on port %d", OTA_PORT);
-    ESP_LOGI(TAG, "  GET  /ota/status — firmware version info");
-    ESP_LOGI(TAG, "  POST /ota        — upload new firmware binary");
+    ESP_LOGI(TAG, "  GET  /ota/status       — firmware version info");
+    ESP_LOGI(TAG, "  POST /ota              — upload new firmware binary");
+    ESP_LOGI(TAG, "  POST /ota/recalibrate  — clear gain-lock NVS + reboot");
 
     if (out_handle) *out_handle = server;
     return ESP_OK;

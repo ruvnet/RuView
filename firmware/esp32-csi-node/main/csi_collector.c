@@ -101,8 +101,15 @@ extern void phy_force_rx_gain(int force_en, int force_value);
 #define RV_GAIN_NVS_NS      "csi_cfg"
 #define RV_GAIN_NVS_K_AGC   "gl_agc"
 #define RV_GAIN_NVS_K_FFT   "gl_fft"
+/* ADR-111: BSSID of the AP that gain-lock was calibrated against.
+ * 6-byte blob. On boot, if the currently-connected AP MAC differs from
+ * the saved value, the cached AGC/FFT are ignored and a full calibration
+ * runs (gain-lock is tied to a specific AP path; swapping APs invalidates
+ * it). The new MAC is written alongside AGC/FFT after re-calibration. */
+#define RV_GAIN_NVS_K_AP_MAC "gl_ap_mac"
 
-static esp_err_t rv_gain_load_from_nvs(uint8_t *agc_out, int8_t *fft_out)
+static esp_err_t rv_gain_load_from_nvs(uint8_t *agc_out, int8_t *fft_out,
+                                        uint8_t mac_out[6])
 {
     nvs_handle_t h;
     esp_err_t err = nvs_open(RV_GAIN_NVS_NS, NVS_READONLY, &h);
@@ -111,12 +118,22 @@ static esp_err_t rv_gain_load_from_nvs(uint8_t *agc_out, int8_t *fft_out)
     int8_t  fft = 0;
     err = nvs_get_u8(h, RV_GAIN_NVS_K_AGC, &agc);
     if (err == ESP_OK) err = nvs_get_i8(h, RV_GAIN_NVS_K_FFT, &fft);
+    /* AP MAC is optional — older NVS blobs predate ADR-111 and have only
+     * AGC+FFT. Treat a missing MAC as a wildcard match so a one-time
+     * upgrade doesn't force every node to do a full re-cal. */
+    if (err == ESP_OK && mac_out != NULL) {
+        size_t want = 6;
+        esp_err_t mac_err = nvs_get_blob(h, RV_GAIN_NVS_K_AP_MAC, mac_out, &want);
+        if (mac_err != ESP_OK || want != 6) {
+            memset(mac_out, 0, 6);
+        }
+    }
     nvs_close(h);
     if (err == ESP_OK) { *agc_out = agc; *fft_out = fft; }
     return err;
 }
 
-static void rv_gain_save_to_nvs(uint8_t agc, int8_t fft)
+static void rv_gain_save_to_nvs(uint8_t agc, int8_t fft, const uint8_t mac[6])
 {
     nvs_handle_t h;
     esp_err_t err = nvs_open(RV_GAIN_NVS_NS, NVS_READWRITE, &h);
@@ -127,6 +144,9 @@ static void rv_gain_save_to_nvs(uint8_t agc, int8_t fft)
     }
     nvs_set_u8(h, RV_GAIN_NVS_K_AGC, agc);
     nvs_set_i8(h, RV_GAIN_NVS_K_FFT, fft);
+    if (mac != NULL) {
+        nvs_set_blob(h, RV_GAIN_NVS_K_AP_MAC, mac, 6);
+    }
     nvs_commit(h);
     nvs_close(h);
 }
@@ -151,24 +171,53 @@ static void rv_gain_lock_process(const wifi_csi_info_t *info)
 {
     if (s_gain_locked || info == NULL) return;
 
-    /* ADR-108: short-circuit calibration if previous values are in NVS. */
+    /* ADR-108: short-circuit calibration if previous values are in NVS.
+     * ADR-111: also compare the saved BSSID with the currently-connected
+     * AP. If they differ, the cached gain is invalid (different AP path
+     * → different multipath, different optimal AGC) — discard it and run
+     * a full calibration against the new AP. */
     static bool s_nvs_checked = false;
     if (!s_nvs_checked) {
         s_nvs_checked = true;
-        uint8_t agc = 0; int8_t fft = 0;
-        if (rv_gain_load_from_nvs(&agc, &fft) == ESP_OK &&
+        uint8_t agc = 0; int8_t fft = 0; uint8_t saved_mac[6] = {0};
+        if (rv_gain_load_from_nvs(&agc, &fft, saved_mac) == ESP_OK &&
             agc >= RV_GAIN_MIN_SAFE_AGC)
         {
-            phy_fft_scale_force(true, fft);
-            phy_force_rx_gain(1, (int)agc);
-            s_gain_agc_value = agc;
-            s_gain_fft_value = fft;
-            s_gain_locked = true;
-            ESP_LOGI("csi_collector",
-                "gain-lock RESTORED from NVS: AGC=%u FFT=%d "
-                "(0-packet calibration; clear NVS to recalibrate)",
-                (unsigned)agc, (int)fft);
-            return;
+            /* Read the current AP MAC. If we can't (not connected yet)
+             * the gain-lock callback should not be firing at all — but
+             * be defensive and skip the cache if AP info is unavailable. */
+            wifi_ap_record_t ap;
+            bool ap_ok = (esp_wifi_sta_get_ap_info(&ap) == ESP_OK);
+            bool wildcard = true;
+            for (int i = 0; i < 6; i++) {
+                if (saved_mac[i] != 0) { wildcard = false; break; }
+            }
+            if (ap_ok && (wildcard ||
+                          memcmp(saved_mac, ap.bssid, 6) == 0))
+            {
+                phy_fft_scale_force(true, fft);
+                phy_force_rx_gain(1, (int)agc);
+                s_gain_agc_value = agc;
+                s_gain_fft_value = fft;
+                s_gain_locked = true;
+                ESP_LOGI("csi_collector",
+                    "gain-lock RESTORED from NVS: AGC=%u FFT=%d "
+                    "AP=%02x:%02x:%02x:%02x:%02x:%02x%s",
+                    (unsigned)agc, (int)fft,
+                    ap.bssid[0], ap.bssid[1], ap.bssid[2],
+                    ap.bssid[3], ap.bssid[4], ap.bssid[5],
+                    wildcard ? " (legacy NVS, no MAC stored)" : "");
+                return;
+            }
+            if (ap_ok) {
+                ESP_LOGW("csi_collector",
+                    "gain-lock NVS MISS: saved AP=%02x:%02x:%02x:%02x:%02x:%02x "
+                    "→ current=%02x:%02x:%02x:%02x:%02x:%02x. Re-calibrating.",
+                    saved_mac[0], saved_mac[1], saved_mac[2],
+                    saved_mac[3], saved_mac[4], saved_mac[5],
+                    ap.bssid[0], ap.bssid[1], ap.bssid[2],
+                    ap.bssid[3], ap.bssid[4], ap.bssid[5]);
+            }
         }
     }
 
@@ -209,10 +258,21 @@ static void rv_gain_lock_process(const wifi_csi_info_t *info)
             "baseline drift should now collapse.",
             (unsigned)s_gain_agc_value, (int)s_gain_fft_value,
             (unsigned)RV_GAIN_CAL_PACKETS);
-        /* ADR-108: persist for next boot — short-circuit calibration. */
-        rv_gain_save_to_nvs(s_gain_agc_value, s_gain_fft_value);
-        ESP_LOGI(TAG, "gain-lock PERSISTED to NVS (%s/%s, %s)",
-                 RV_GAIN_NVS_NS, RV_GAIN_NVS_K_AGC, RV_GAIN_NVS_K_FFT);
+        /* ADR-108: persist for next boot — short-circuit calibration.
+         * ADR-111: also persist the AP BSSID this calibration ran against
+         * so the boot-time short-circuit can detect AP swaps and discard
+         * stale gain values. */
+        uint8_t cur_mac[6] = {0};
+        wifi_ap_record_t ap;
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+            memcpy(cur_mac, ap.bssid, 6);
+        }
+        rv_gain_save_to_nvs(s_gain_agc_value, s_gain_fft_value, cur_mac);
+        ESP_LOGI(TAG,
+                 "gain-lock PERSISTED to NVS (AGC=%u FFT=%d AP=%02x:%02x:%02x:%02x:%02x:%02x)",
+                 (unsigned)s_gain_agc_value, (int)s_gain_fft_value,
+                 cur_mac[0], cur_mac[1], cur_mac[2],
+                 cur_mac[3], cur_mac[4], cur_mac[5]);
     }
     s_gain_locked = true;
 }
