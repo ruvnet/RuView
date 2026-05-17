@@ -57,7 +57,7 @@ jobs:
           "
 
       - name: Run pipeline verification
-        working-directory: v1
+        working-directory: archive/v1
         run: |
           echo "=== Running pipeline verification ==="
           python data/proof/verify.py
@@ -65,7 +65,7 @@ jobs:
           echo "Pipeline verification PASSED."
 
       - name: Run verification twice to confirm determinism
-        working-directory: v1
+        working-directory: archive/v1
         run: |
           echo "=== Second run for determinism confirmation ==="
           python data/proof/verify.py
