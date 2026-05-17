@@ -69,6 +69,15 @@ each with explicit reason) listed at the bottom.
       (`csi_cfg/target_ip` + `target_port`) without USB; recovered
       both nodes after Mac IP move TP-Link → .103
 
+### Pose model
+
+- [x] **ADR-116** WiFlow-v1 supervised pose loader (Rust) — `--wiflow-model
+      data/models/ruview/wiflow-v1/wiflow-v1.json` flips
+      `pose_estimation: true`; per-tick TCN forward yields 17 COCO
+      keypoints on `/api/v1/pose/current` and WS `pose_data`. Output
+      quality requires per-deployment fine-tune (LoRA adapters or
+      re-train, see Pack E).
+
 ### Tests / fixtures
 
 - [x] **ADR-114** `tests/fixtures/replay_idle.jsonl` +

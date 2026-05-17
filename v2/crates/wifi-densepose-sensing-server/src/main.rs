@@ -24,6 +24,9 @@ mod vital_signs;
 // Training pipeline modules (exposed via lib.rs)
 use wifi_densepose_sensing_server::{graph_transformer, trainer, dataset, embedding};
 
+// ADR-116: WiFlow-v1 supervised pose inference.
+use wifi_densepose_sensing_server::wiflow_v1::{self, WiflowModel};
+
 use std::collections::{HashMap, VecDeque};
 use ruvector_mincut::{DynamicMinCut, MinCutBuilder};
 use std::net::SocketAddr;
@@ -1163,7 +1166,20 @@ struct Args {
     /// Start field model calibration on boot (empty room required)
     #[arg(long)]
     calibrate: bool,
+
+    /// ADR-116: Load WiFlow-v1 supervised pose model JSON
+    /// (`v2/data/models/ruview/wiflow-v1/wiflow-v1.json`). When loaded,
+    /// `pose_estimation` flips to true and `/api/v1/pose/*` returns
+    /// real 17-keypoint COCO skeletons instead of empty arrays.
+    /// Independent from `--model` (RVF container) and `--load-rvf`.
+    #[arg(long, value_name = "PATH")]
+    wiflow_model: Option<PathBuf>,
 }
+
+/// ADR-116: globally-shared WiFlow-v1 model. Loaded once at startup if
+/// `--wiflow-model` was passed; consumed by `run_wiflow_inference()` on
+/// every tick. None ⇒ pose endpoints stay gated per ADR-105.
+static WIFLOW_MODEL: OnceLock<Option<WiflowModel>> = OnceLock::new();
 
 // ── Data types ───────────────────────────────────────────────────────────────
 
@@ -3047,7 +3063,7 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
             signal_quality_score: sig_quality_score,
             quality_verdict: verdict_str,
             bssid_count: bssid_n,
-            pose_keypoints: None,
+            pose_keypoints: run_wiflow_inference(),
             model_status: None,
             persons: None,
             estimated_persons: if est_persons > 0 { Some(est_persons) } else { None },
@@ -3191,7 +3207,7 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         signal_quality_score: None,
         quality_verdict: None,
         bssid_count: None,
-        pose_keypoints: None,
+        pose_keypoints: run_wiflow_inference(),
         model_status: None,
         persons: None,
         estimated_persons: if est_persons > 0 { Some(est_persons) } else { None },
@@ -4142,12 +4158,40 @@ async fn api_info(State(state): State<SharedState>) -> Json<serde_json::Value> {
 
 async fn pose_current(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
-    // ADR-105: only return persons when a trained pose model is loaded.
-    // Without a model we used to synthesise placeholder 17-keypoint
-    // skeletons from `derive_pose_from_sensing` so the UI looked alive;
-    // that's a lie about capability. Empty array now if no model.
+    // ADR-105 / ADR-116: when a trained pose model is loaded, prefer the
+    // WiFlow-v1 keypoints stamped onto the latest SensingUpdate
+    // (`pose_keypoints` Vec<[x,y,z,conf]>). Falls back to the tracker's
+    // `persons` only if no fresh model output is present. Without a model
+    // the endpoint stays empty per ADR-105 ("no synthetic data in
+    // production runtime").
     let persons = if s.model_loaded {
-        s.latest_update.as_ref().and_then(|u| u.persons.clone()).unwrap_or_default()
+        let from_model = s.latest_update.as_ref()
+            .and_then(|u| u.pose_keypoints.as_ref())
+            .filter(|kps| kps.len() == 17)
+            .map(|kps| {
+                let kp_names = [
+                    "nose","left_eye","right_eye","left_ear","right_ear",
+                    "left_shoulder","right_shoulder","left_elbow","right_elbow",
+                    "left_wrist","right_wrist","left_hip","right_hip",
+                    "left_knee","right_knee","left_ankle","right_ankle",
+                ];
+                let keypoints: Vec<PoseKeypoint> = kps.iter().enumerate()
+                    .map(|(i, kp)| PoseKeypoint {
+                        name: kp_names.get(i).unwrap_or(&"unknown").to_string(),
+                        x: kp[0], y: kp[1], z: kp[2], confidence: kp[3],
+                    })
+                    .collect();
+                vec![PersonDetection {
+                    id: 1,
+                    confidence: s.latest_update.as_ref()
+                        .map(|u| u.classification.confidence).unwrap_or(0.0),
+                    bbox: BoundingBox { x: 260.0, y: 150.0, width: 120.0, height: 220.0 },
+                    keypoints,
+                    zone: "zone_1".into(),
+                }]
+            });
+        from_model.unwrap_or_else(||
+            s.latest_update.as_ref().and_then(|u| u.persons.clone()).unwrap_or_default())
     } else {
         Vec::new()
     };
@@ -5133,6 +5177,46 @@ async fn csi_keepalive_task(pps: u32) {
     }
 }
 
+/// ADR-116: run one WiFlow-v1 forward pass over the best-available node's
+/// most recent 20 amplitude frames. Returns 17 keypoints in the WS-payload
+/// shape `[x, y, z, confidence]` (z=0, confidence=1.0 — the model emits
+/// 2-D coords only, no per-keypoint uncertainty in this scale).
+///
+/// Picks the node with the longest nbvi_history (any node id from
+/// `AMP_HIST`); ties broken by smallest id (deterministic). Returns
+/// `None` when:
+///   * `--wiflow-model` was not passed at startup (`WIFLOW_MODEL = None`)
+///   * no node has accumulated ≥ 20 frames yet (cold start)
+///   * `build_input_from_history` rejects (all-zero subcarriers)
+fn run_wiflow_inference() -> Option<Vec<[f64; 4]>> {
+    let model = WIFLOW_MODEL.get().and_then(|m| m.as_ref())?;
+    // Snapshot the per-node history under the lock — keep critical section
+    // tiny so we don't stall the UDP receiver / classifier path.
+    let history = {
+        let map = amp_hist_init().lock().unwrap();
+        let mut best: Option<(u8, std::collections::VecDeque<Vec<f64>>)> = None;
+        for (nid, st) in map.iter() {
+            let len = st.nbvi_history.len();
+            if len < 20 { continue; }
+            match &best {
+                None => best = Some((*nid, st.nbvi_history.clone())),
+                Some((bid, bh)) => {
+                    if len > bh.len() || (len == bh.len() && *nid < *bid) {
+                        best = Some((*nid, st.nbvi_history.clone()));
+                    }
+                }
+            }
+        }
+        best?.1
+    };
+    let input = wiflow_v1::build_input_from_history(&history)?;
+    let kp = model.forward(&input);
+    let out: Vec<[f64; 4]> = kp.iter()
+        .map(|(x, y)| [*x as f64, *y as f64, 0.0f64, 1.0f64])
+        .collect();
+    Some(out)
+}
+
 /// ADR-107: capture an empty-room baseline from the live WS stream
 /// and persist it to disk. Mirrors what `scripts/record-baseline.py`
 /// does, but runs in-process so the REST endpoint and the auto-
@@ -5872,7 +5956,7 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         signal_quality_score: None,
                         quality_verdict: None,
                         bssid_count: None,
-                        pose_keypoints: None,
+                        pose_keypoints: run_wiflow_inference(),
                         model_status: None,
                         persons: None,
                         estimated_persons: if total_persons > 0 { Some(total_persons) } else { None },
@@ -6210,7 +6294,7 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         signal_quality_score: None,
                         quality_verdict: None,
                         bssid_count: None,
-                        pose_keypoints: None,
+                        pose_keypoints: run_wiflow_inference(),
                         model_status: None,
                         persons: None,
                         estimated_persons: if total_persons > 0 { Some(total_persons) } else { None },
@@ -6346,7 +6430,7 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
             signal_quality_score: None,
             quality_verdict: None,
             bssid_count: None,
-            pose_keypoints: None,
+            pose_keypoints: run_wiflow_inference(),
             model_status: if s.model_loaded {
                 Some(serde_json::json!({
                     "loaded": true,
@@ -6934,10 +7018,31 @@ async fn main() {
         None
     };
 
+    // ADR-116: Load WiFlow-v1 supervised pose model if --wiflow-model was passed.
+    let wiflow_loaded = match args.wiflow_model.as_ref() {
+        Some(path) => match WiflowModel::load_from_json(path) {
+            Ok(m) => {
+                info!("ADR-116 wiflow-v1 loaded from {} (lite scale, 186946 params)",
+                      path.display());
+                let _ = WIFLOW_MODEL.set(Some(m));
+                true
+            }
+            Err(e) => {
+                error!("ADR-116 wiflow-v1 load failed from {}: {}", path.display(), e);
+                let _ = WIFLOW_MODEL.set(None);
+                false
+            }
+        },
+        None => {
+            let _ = WIFLOW_MODEL.set(None);
+            false
+        }
+    };
+
     // Load trained model via --model (uses progressive loading if --progressive set)
     let model_path = args.model.as_ref().or(args.load_rvf.as_ref());
     let mut progressive_loader: Option<ProgressiveLoader> = None;
-    let mut model_loaded = false;
+    let mut model_loaded = wiflow_loaded;
     if let Some(mp) = model_path {
         if args.progressive || args.model.is_some() {
             info!("Loading trained model (progressive) from {}", mp.display());

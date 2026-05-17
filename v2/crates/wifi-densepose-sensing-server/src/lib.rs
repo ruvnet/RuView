@@ -19,3 +19,5 @@ pub mod sona;
 pub mod sparse_inference;
 #[allow(dead_code)]
 pub mod embedding;
+/// ADR-116: WiFlow-v1 supervised pose model loader + Rust forward pass.
+pub mod wiflow_v1;
