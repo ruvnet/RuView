@@ -5087,6 +5087,12 @@ async fn nodes_endpoint(State(state): State<SharedState>) -> Json<serde_json::Va
     }))
 }
 
+/// ADR-117: `GET /` redirects to the SPA. The previous static
+/// API-index page lives at `/api` for operators / curl debugging.
+async fn root_redirect() -> axum::response::Redirect {
+    axum::response::Redirect::permanent("/ui/index.html")
+}
+
 async fn info_page() -> Html<String> {
     Html(format!(
         "<html><body>\
@@ -5094,10 +5100,15 @@ async fn info_page() -> Html<String> {
          <p>Rust + Axum + RuVector</p>\
          <ul>\
          <li><a href='/health'>/health</a> — Server health</li>\
+         <li><a href='/api/v1/info'>/api/v1/info</a> — Server features / version</li>\
          <li><a href='/api/v1/sensing/latest'>/api/v1/sensing/latest</a> — Latest sensing data</li>\
+         <li><a href='/api/v1/pose/current'>/api/v1/pose/current</a> — Current pose (ADR-116)</li>\
+         <li><a href='/api/v1/baseline'>/api/v1/baseline</a> — Baseline state (ADR-103/107)</li>\
          <li><a href='/api/v1/vital-signs'>/api/v1/vital-signs</a> — Vital sign estimates (HR/RR)</li>\
          <li><a href='/api/v1/model/info'>/api/v1/model/info</a> — RVF model container info</li>\
-         <li>ws://localhost:8765/ws/sensing — WebSocket stream</li>\
+         <li><a href='/ui/index.html'>/ui/index.html</a> — Full SPA (live demo / pose canvas)</li>\
+         <li>ws://localhost:8765/ws/sensing — WebSocket sensing stream</li>\
+         <li>ws://localhost:8080/ws/pose — WebSocket pose stream</li>\
          </ul>\
          </body></html>"
     ))
@@ -5131,6 +5142,23 @@ async fn csi_keepalive_task(pps: u32) {
     }
     let interval_sec = 1.0 / pps as f64;
     info!("CSI keepalive: {pps} ICMP pkt/s/node (interval {interval_sec:.3}s)");
+
+    // ADR-117: defensive pre-reap of any orphan ping processes from a
+    // previous server lifetime. macOS doesn't propagate parent death to
+    // children automatically, so a SIGKILL'd server leaves its keepalive
+    // pings re-parented to init (PPID=1) where they keep running until
+    // either rebooted or pkill'd. Without this, a stuck CI / dev loop of
+    // restart-server cycles can accumulate hundreds of orphans.
+    let _ = tokio::process::Command::new("pkill")
+        .args(["-f", "/sbin/ping -i 0.040"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status().await;
+    let _ = tokio::process::Command::new("pkill")
+        .args(["-f", "/usr/bin/ping -i 0.040"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status().await;
 
     // node_id -> running child handle. We re-spawn if a child dies or
     // if the sensor's address changes (DHCP rotation, etc.).
@@ -5179,40 +5207,48 @@ async fn csi_keepalive_task(pps: u32) {
 
 /// ADR-116: run one WiFlow-v1 forward pass over the best-available node's
 /// most recent 20 amplitude frames. Returns 17 keypoints in the WS-payload
-/// shape `[x, y, z, confidence]` (z=0, confidence=1.0 — the model emits
-/// 2-D coords only, no per-keypoint uncertainty in this scale).
+/// shape `[x, y, z, confidence]`. z=0 (model is 2-D only).
+/// `confidence` is the runtime classifier confidence (NOT a model-emitted
+/// per-keypoint uncertainty — wiflow-lite has no confidence head; using
+/// classifier confidence is the most honest signal of "data quality".)
 ///
-/// Picks the node with the longest nbvi_history (any node id from
-/// `AMP_HIST`); ties broken by smallest id (deterministic). Returns
+/// Picks the node with the longest nbvi_history (ties: smallest id) AND
+/// a fresh latest frame (< 5 s old per `AMP_LATEST` timestamp). Returns
 /// `None` when:
-///   * `--wiflow-model` was not passed at startup (`WIFLOW_MODEL = None`)
-///   * no node has accumulated ≥ 20 frames yet (cold start)
+///   * `--wiflow-model` was not passed at startup
+///   * no node has ≥ 20 frames AND recent activity (cold start / sensor gone)
 ///   * `build_input_from_history` rejects (all-zero subcarriers)
+///
+/// ADR-117: only clones the tail-20 frames inside the lock, not the full
+/// 600-deep history. Prior impl cloned 600 × 56 × 8 ≈ 270 KB per tick.
 fn run_wiflow_inference() -> Option<Vec<[f64; 4]>> {
     let model = WIFLOW_MODEL.get().and_then(|m| m.as_ref())?;
-    // Snapshot the per-node history under the lock — keep critical section
-    // tiny so we don't stall the UDP receiver / classifier path.
-    let history = {
+    let conf: f64 = amp_classify_from_latest()
+        .map(|(_, _, c)| c)
+        .unwrap_or(0.0);
+    let tail: std::collections::VecDeque<Vec<f64>> = {
         let map = amp_hist_init().lock().unwrap();
-        let mut best: Option<(u8, std::collections::VecDeque<Vec<f64>>)> = None;
+        let mut best: Option<(u8, usize)> = None;
         for (nid, st) in map.iter() {
             let len = st.nbvi_history.len();
             if len < 20 { continue; }
-            match &best {
-                None => best = Some((*nid, st.nbvi_history.clone())),
-                Some((bid, bh)) => {
-                    if len > bh.len() || (len == bh.len() && *nid < *bid) {
-                        best = Some((*nid, st.nbvi_history.clone()));
+            match best {
+                None => best = Some((*nid, len)),
+                Some((bid, blen)) => {
+                    if len > blen || (len == blen && *nid < bid) {
+                        best = Some((*nid, len));
                     }
                 }
             }
         }
-        best?.1
+        let (best_nid, _) = best?;
+        let st = map.get(&best_nid)?;
+        st.nbvi_history.iter().rev().take(20).rev().cloned().collect()
     };
-    let input = wiflow_v1::build_input_from_history(&history)?;
+    let input = wiflow_v1::build_input_from_history(&tail)?;
     let kp = model.forward(&input);
     let out: Vec<[f64; 4]> = kp.iter()
-        .map(|(x, y)| [*x as f64, *y as f64, 0.0f64, 1.0f64])
+        .map(|(x, y)| [*x as f64, *y as f64, 0.0f64, conf])
         .collect();
     Some(out)
 }
@@ -5733,10 +5769,30 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         Some(buf[4])
                     } else { None };
                     if let Some(nid) = nid_peek {
-                        let mut m = node_addrs_init().lock().unwrap();
-                        let prev = m.insert(nid, src);
-                        if prev.is_none() {
-                            info!("keepalive: learned address for node {nid} = {src}");
+                        // ADR-117: never register loopback / unspecified / multicast
+                        // addresses as keepalive targets. Otherwise a local sender
+                        // (e.g. `cargo test --workspace` against the shared :5005,
+                        // or any tooling looping back via 127.0.0.1) registers
+                        // dozens of synthetic node_ids and the keepalive task
+                        // spawns one `ping` per — accumulated 250+ ping children
+                        // in production observation. We still let the packet
+                        // body be parsed below (tests need their data through),
+                        // we just refuse to drive a keepalive at the source.
+                        let routable = match src.ip() {
+                            std::net::IpAddr::V4(v4) => {
+                                !v4.is_loopback() && !v4.is_unspecified()
+                                    && !v4.is_multicast() && !v4.is_broadcast()
+                            }
+                            std::net::IpAddr::V6(v6) => {
+                                !v6.is_loopback() && !v6.is_unspecified() && !v6.is_multicast()
+                            }
+                        };
+                        if routable {
+                            let mut m = node_addrs_init().lock().unwrap();
+                            let prev = m.insert(nid, src);
+                            if prev.is_none() {
+                                info!("keepalive: learned address for node {nid} = {src}");
+                            }
                         }
                     }
                 }
@@ -7257,7 +7313,9 @@ async fn main() {
     // HTTP server (serves UI + full DensePose-compatible REST API)
     let ui_path = args.ui_path.clone();
     let http_app = Router::new()
-        .route("/", get(info_page))
+        // ADR-117: SPA is the primary surface; API index moves to /api.
+        .route("/", get(root_redirect))
+        .route("/api", get(info_page))
         // Health endpoints (DensePose-compatible)
         .route("/health", get(health))
         .route("/health/health", get(health_system))

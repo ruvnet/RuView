@@ -122,9 +122,30 @@ fn test_different_nodes_produce_different_frames() {
 /// Send multiple frames from different nodes to a UDP port.
 /// This test verifies the packet format is accepted by a real server
 /// if one is running, but doesn't fail if no server is available.
+///
+/// ADR-117: previously this test sent to `127.0.0.1:5005` unconditionally,
+/// hitting any live server on the same port. With `node_ids = [1,2,3,5,7]`
+/// × 10 frames + 5 vitals it injected 55 spurious node_ids into the
+/// server's NODE_ADDRS — the keepalive task then spawned one `ping` child
+/// process per unique nid, accumulating 250+ ping zombies in production.
+/// Mitigation is two-layered: server now filters loopback at the UDP
+/// receiver, AND this test refuses to fire if anything is already bound
+/// to 127.0.0.1:5005.
 #[test]
 fn test_multi_node_udp_send() {
-    // Try to bind to a random port and send to localhost:5005
+    // ADR-117 guard: if some other process is bound to 127.0.0.1:5005 (most
+    // commonly a live sensing-server during dev), skip the send so we don't
+    // pollute that process's state. The bind probe is the cheapest signal —
+    // if we can bind even briefly, nobody owns the port; if not, abort.
+    match UdpSocket::bind("127.0.0.1:5005") {
+        Ok(probe) => drop(probe),
+        Err(_) => {
+            eprintln!("test_multi_node_udp_send: 127.0.0.1:5005 already in use — skipping (ADR-117)");
+            return;
+        }
+    };
+
+    // Try to bind to a random port and send to localhost:5005.
     // This is a smoke test — it verifies frames can be sent without panic.
     let sock = UdpSocket::bind("0.0.0.0:0").expect("bind");
     sock.set_write_timeout(Some(Duration::from_millis(100))).ok();

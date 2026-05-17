@@ -141,7 +141,7 @@ reboot ~25 s; first ping-driven CSI batch ~5 s).
   `csi_cfg/target_ip_lkg` snapshot updated on every successful
   keepalive-driven UDP send would let the sensor self-revert after
   N silent seconds. ~1 h FW.
-* **Track AP MAC alongside target** — ADR-108 / ADR-111 already
+* **Track AP MAC alongside target** — ADR-108 / ADR-109 already
   invalidate gain-lock on AP change; same pattern could
   auto-invalidate target on subnet change (sensor sees its DHCP
   lease is on a different /24 than `target_ip` → blank target,
@@ -153,7 +153,7 @@ reboot ~25 s; first ping-driven CSI batch ~5 s).
 ## References
 
 * ADR-050 — OTA PSK auth that gates this endpoint
-* ADR-100 — TP-Link WISP deployment that triggered the Mac-IP move
+* ADR-110 — TP-Link WISP deployment that triggered the Mac-IP move
 * ADR-108 — FW NVS persistence patterns (same namespace, same approach)
 * ADR-109 — `/ota/recalibrate` precedent (same handler shape, same
   reboot semantics)

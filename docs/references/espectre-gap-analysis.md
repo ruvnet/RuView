@@ -144,24 +144,32 @@ ESPHome component, an MQTT bridge, or a custom HA integration.
 | No synthetic data in production runtime | ADR-105 (`9aa027e9`, `30244d27`) |
 | OTA flash via WiFi (8032 port) | `ota-pipeline.md` (`274984d3`) |
 
-### ⏳ Still open, by impact
+### ⏳ Still open / deferred, by impact
 
-| # | Item | Net benefit | Estimate |
-|---|---|---|---|
-| 1 | **HA via MQTT** | sensor as HA entity, ecosystem reach | 1 day |
-| 2 | **Fixed-replay test suite (2 000 packets)** | regression protection over the classifier + NBVI | 1 day |
-| 3 | **Per-sub delta sparkline in `raw.html`** | operator sees off-axis drift channel firing in real time | 30 min |
-| 4 | **`POST /ota/recalibrate` (clear NVS gain-lock)** | reset gain-lock without USB after AP swap or relocation | 30 min FW + flash |
-| 5 | **Track AP MAC in NVS alongside AGC/FFT** | auto-invalidate stale gain-lock on AP change | 1 h FW + flash |
-| 6 | **Multi-AP signal_field via `MultistaticFuser`** | physically real spatial map (today zero-filled per ADR-105 D6) | 2-3 h |
-| 7 | **Per-subcarrier baseline AGE check** | flag for re-calibration when channel slowly drifts | 1 h |
-| 8 | **Phase-domain drift (vs amplitude-only today)** | sub-mm chest-wall motion detection for vitals | 1 h script + 30 min server |
-| 9 | **Tailscale-target in NVS** | sensor stream keeps working when Mac roams networks | 30 min provision + reflash |
-| 10 | **ESPHome native component (instead of MQTT bridge)** | tighter HA integration than #1 | 2-3 days |
-| 11 | **Web Serial calibration game** | playful threshold tuning | 1 day |
-| 12 | **Boot-time NBVI freeze in FW** | trade-off vs adaptive: don't adopt unless we see FP issues in real homes | 2 h |
-| 13 | **Per-channel NVS cache for gain-lock** | only needed if channel hopping (ADR-029) re-activated | 1 h |
-| 14 | **DensePose model train + load** | unlock pose estimation; depends on MM-Fi / Wi-Pose dataset access | 1-3 days |
+**Updated 2026-05-17** — Most of the original "still open" items shipped
+during this session. The list below is now only items that are **out
+of session scope** (HA / ESPHome / Web Serial / channel hopping per
+operator constraints), or items that need operator action (camera-side
+training capture).
+
+| # | Item | Net benefit | Estimate | Status |
+|---|---|---|---|---|
+| 1 | **HA via MQTT** | sensor as HA entity, ecosystem reach | 1 day | Deferred (operator said: no new integrations) |
+| 2 | ~~Fixed-replay test suite (2 000 packets)~~ | regression protection over the classifier + NBVI | ✓ **Done** — ADR-114 (`96225e27`); F1 = 1.000 on 1000 idle + 1000 motion fixtures |
+| 3 | ~~Per-sub delta sparkline in `raw.html`~~ | operator sees off-axis drift channel firing in real time | ✓ **Done** — ADR-104 (`eec3ca6c`) drift sparkline + ADR-107 D6 progress bar (`432753e1`) |
+| 4 | ~~`POST /ota/recalibrate` (clear NVS gain-lock)~~ | reset gain-lock without USB after AP swap or relocation | ✓ **Done** — ADR-109 (`f92807cd`) |
+| 5 | ~~Track AP MAC in NVS alongside AGC/FFT~~ | auto-invalidate stale gain-lock on AP change | ✓ **Done** — folded into ADR-109 (`gl_ap_mac` key, same commit) |
+| 6 | ~~Multi-AP signal_field via `MultistaticFuser`~~ | physically real spatial map | ✓ **Done** — ADR-112 (`c8ac60f6`); 320/400 cells non-zero on two live sensors |
+| 7 | ~~Per-subcarrier baseline AGE check~~ | flag for re-calibration when channel slowly drifts | ✓ **Done** — ADR-104 staleness watch (`eec3ca6c`) — warns when baseline > 14400 s AND drift > 0.15 for ≥3 ticks |
+| 8 | ~~Phase-domain drift (vs amplitude-only today)~~ | sub-mm chest-wall motion detection for vitals | ✓ **Done** — ADR-104 phase channel (`47dafab4`); requires empty-room re-record to activate (`per_subcarrier_phase_mean` not in current `baseline.json` v1 schema) |
+| 9 | **Tailscale-target in NVS** | sensor stream keeps working when Mac roams networks | 30 min provision + reflash | Deferred (Mac stable on TP-Link, low ROI). **Alternative shipped: ADR-115 `/ota/set-target`** lets operator repoint via REST without USB/Tailscale. |
+| 10 | **ESPHome native component (instead of MQTT bridge)** | tighter HA integration than #1 | 2-3 days | Deferred (operator said: no new integrations) |
+| 11 | **Web Serial calibration game** | playful threshold tuning | 1 day | Deferred (operator said: no new integrations) |
+| 12 | **Boot-time NBVI freeze in FW** | trade-off vs adaptive: don't adopt unless FP issues in real homes | 2 h | Deferred (server-side rolling NBVI working; no observed FP problem) |
+| 13 | **Per-channel NVS cache for gain-lock** | only needed if channel hopping (ADR-029) re-activated | 1 h | Deferred (channel hopping not active) |
+| 14 | **DensePose model train + load** | unlock pose estimation | 1-3 days | **Mostly done** — model loader shipped in **ADR-116** (`7cdd8f69`) with `ruv/ruview/wiflow-v1`. Output requires per-deployment fine-tune (camera-supervised capture) — operator-side work, scoped as Pack B / Pack E. |
+| 15 | **`/ota/set-target` REST** *(new this session)* | repoint CSI aggregator without USB after Mac-IP / router change | — | ✓ **Done** — ADR-115 (`7d3e0c2d`) |
+| 16 | **Process-hygiene + audit follow-ups** *(new this session)* | UDP loopback filter, ping pre-reap, `/` redirect, wiflow zero-pad, lock-clone optim, sensing-tab container, test-isolation guard, ADR/CHECKLIST consistency | — | ✓ **Done** — ADR-117 (this PR) |
 
 ## References
 

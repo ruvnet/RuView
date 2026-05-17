@@ -5,9 +5,15 @@ at the end of every session. Pair with
 [`docs/references/espectre-gap-analysis.md`](docs/references/espectre-gap-analysis.md)
 for the technical detail behind each line.
 
-Last sweep: **2026-05-17**, branch `feat/ota-rssi-mobile`, head `c827cde6`.
-Status: 43 Done / 0 Open in-scope. Deferred items (out of session scope,
+Last sweep: **2026-05-17**, branch `feat/ota-rssi-mobile`, head `0ec1e4b0`.
+Status: 47 Done / 0 Open in-scope. Deferred items (out of session scope,
 each with explicit reason) listed at the bottom.
+
+This count includes the ADR-100..114 carry-in from the prior agent + this
+session's ADR-115 (FW set-target REST), ADR-116 (WiFlow-v1 Rust loader),
+ADR-116 cosmetic (UI dropdown), and ADR-117 (process hygiene + audit
+follow-ups). ADR-111 is intentionally absent (folded into ADR-109 during
+the AP-MAC tracking work).
 
 ---
 
@@ -77,6 +83,13 @@ each with explicit reason) listed at the bottom.
       keypoints on `/api/v1/pose/current` and WS `pose_data`. Output
       quality requires per-deployment fine-tune (LoRA adapters or
       re-train, see Pack E).
+- [x] **ADR-117** Process hygiene + audit follow-ups — UDP loopback
+      filter prevents `cargo test` cross-talk from spawning ping
+      zombies (250→2 children); keepalive pre-reaps orphans at startup;
+      `/` redirects to SPA; wiflow zero-pad replaces silent
+      subcarrier-0 duplication; keypoint confidence stamped from
+      runtime classifier; sensing tab container restored; multi-node
+      test guards external :5005; docs/typo/range sweep.
 
 ### Tests / fixtures
 
@@ -99,7 +112,7 @@ each with explicit reason) listed at the bottom.
 
 ### Documentation
 
-- [x] **ADR-100..108** all written, each ≤ 200 lines
+- [x] **ADR-100..117** all written (ADR-111 intentionally absent), each ≤ 200 lines
 - [x] `docs/references/espectre-techniques.md` — Pace technique catalogue
 - [x] `docs/references/espectre-gap-analysis.md` — section-by-section gap
 - [x] Documentation actualization sweep — every Open Items section
@@ -165,7 +178,7 @@ an explicit reason. Bring them back only if scope changes.
 
 | Doc | Purpose |
 |---|---|
-| [`docs/adr/`](docs/adr) | All ADRs 001-108; 100-108 are this session |
+| [`docs/adr/`](docs/adr) | All ADRs 001-117 (111 absent); 100-117 are this session |
 | [`docs/references/espectre-techniques.md`](docs/references/espectre-techniques.md) | Pace technique catalogue + RuView adoption |
 | [`docs/references/espectre-gap-analysis.md`](docs/references/espectre-gap-analysis.md) | Section-by-section gap with priority table |
 | [`docs/references/ota-pipeline.md`](docs/references/ota-pipeline.md) | OTA recipe — port 8032, three FW prereqs |

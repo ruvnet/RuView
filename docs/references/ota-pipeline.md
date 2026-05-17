@@ -319,6 +319,44 @@ scripts/ota-deploy.sh --build
 # (auto-discover, parallel POST, verify, exit code)
 ```
 
+## Operator REST endpoints on the running FW (port 8032)
+
+After the first OTA the FW exposes three control endpoints. They share
+the same Bearer-PSK auth as `/ota` (open when `security/ota_psk` NVS
+key is unset, gated when set). All accept plain HTTP — no JSON
+dependency on the FW side.
+
+| Method | Path | Body | Purpose | ADR |
+|---|---|---|---|---|
+| `GET`  | `/ota/status`      | — | Version, date, running/next partition, max image size | ADR-045 |
+| `POST` | `/ota`             | image bin | Upload + flash (auth-gated) | ADR-045 |
+| `POST` | `/ota/recalibrate` | — | Clear `csi_cfg/gl_agc` + `gl_fft` + `gl_ap_mac`, reboot — forces fresh gain-lock at next boot | ADR-109 |
+| `POST` | `/ota/set-target`  | `IPv4:PORT` plain text | Write `csi_cfg/target_ip` + `target_port` to NVS, reboot — repoints the CSI aggregator after Mac IP move / router swap without USB | ADR-115 |
+
+Examples (operator side, no USB):
+
+```bash
+# After moving Mac to a new LAN / changing routers:
+curl -s -X POST -d '192.168.0.103:5005' http://192.168.0.100:8032/ota/set-target
+curl -s -X POST -d '192.168.0.103:5005' http://192.168.0.101:8032/ota/set-target
+# Each returns {"status":"ok","target_ip":"...","target_port":...,"message":"rebooting"}
+
+# After AP swap that changed the indoor path geometry:
+curl -X POST http://192.168.0.100:8032/ota/recalibrate
+# Sensor reboots, re-runs the 300-packet gain-lock sampler (~3–12s).
+
+# Sanity probe:
+curl http://192.168.0.100:8032/ota/status
+```
+
+With auth provisioned (`security/ota_psk` in NVS):
+
+```bash
+curl -X POST -H "Authorization: Bearer $RUVIEW_OTA_PSK" \
+     -d '192.168.0.103:5005' \
+     http://192.168.0.100:8032/ota/set-target
+```
+
 ---
 
 **Bottom line:** OTA is not "send a file via curl", it's an

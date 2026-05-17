@@ -411,24 +411,31 @@ pub fn build_input_from_history(
     if score.is_empty() || !score[0].1.is_finite() { return None; }
 
     // Pick top-INPUT_DIM (35) by lowest NBVI. If fewer than 35 are finite,
-    // pad with whichever finite ones we have and zero the rest — model still
-    // runs, it just has dead channels.
-    let mut picks: Vec<usize> = score.iter()
+    // pad the remaining channels with zeros (not subcarrier-0 duplicated —
+    // the original implementation pushed `0` into `picks` which silently
+    // duplicated channel 0 across all dead slots, fed the network 35x the
+    // same data, and made the saturation worse).
+    let mut picks: Vec<Option<usize>> = score.iter()
         .filter(|(_, s)| s.is_finite())
         .take(INPUT_DIM)
-        .map(|(k, _)| *k)
+        .map(|(k, _)| Some(*k))
         .collect();
     if picks.is_empty() { return None; }
-    while picks.len() < INPUT_DIM { picks.push(0); } // pad with subcarrier 0
+    while picks.len() < INPUT_DIM { picks.push(None); } // ← zero-pad, not dup
 
     // Raw amplitudes pass-through. Training script (`scripts/train-wiflow-
     // supervised.js::loadJsonl`) feeds raw values; the two TCN BatchNorm
     // layers normalise per-channel per-window at inference time so absolute
     // scale (5–50 ESP32 amplitude range) is handled by the network itself.
     let mut out = vec![0.0f32; INPUT_DIM * TIME_STEPS];
-    for (ci, k) in picks.iter().enumerate() {
-        for (t, f) in recent.iter().enumerate() {
-            out[ci * TIME_STEPS + t] = f.get(*k).copied().unwrap_or(0.0) as f32;
+    for (ci, pick) in picks.iter().enumerate() {
+        match pick {
+            Some(k) => {
+                for (t, f) in recent.iter().enumerate() {
+                    out[ci * TIME_STEPS + t] = f.get(*k).copied().unwrap_or(0.0) as f32;
+                }
+            }
+            None => { /* zero-padded channel, already 0.0 from vec init */ }
         }
     }
     Some(out)
