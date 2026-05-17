@@ -17,6 +17,7 @@
 #include "esp_app_desc.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "nvs_config.h"  /* NVS_CFG_IP_MAX */
 
 static const char *TAG = "ota_update";
 
@@ -144,6 +145,126 @@ static esp_err_t ota_recalibrate_handler(httpd_req_t *req)
         "{\"status\":\"ok\",\"message\":\"gain-lock NVS cleared; rebooting\"}";
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, resp, strlen(resp));
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    esp_restart();
+    return ESP_OK; /* unreachable */
+}
+
+/**
+ * POST /ota/set-target — write csi_cfg/target_ip + target_port to NVS, reboot.
+ *
+ * ADR-115: lets the operator point sensors at a new aggregator (Mac IP
+ * change, network move) without USB. Body is plain text "IP:PORT" with
+ * trailing newline tolerated, e.g. "192.168.0.103:5005". IP validated
+ * by inet_pton-like check (4 dot-separated octets 0–255); port 1–65535.
+ *
+ * Persists into the same `csi_cfg` namespace that `nvs_config.c` reads
+ * at boot — next reboot picks up the new target.
+ */
+static bool parse_ip_port(const char *s, char *ip_out, size_t ip_cap, uint16_t *port_out)
+{
+    /* Tolerate trailing whitespace/CR/LF. */
+    size_t n = strlen(s);
+    while (n > 0 && (s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == ' ' || s[n - 1] == '\t')) {
+        n--;
+    }
+    const char *colon = NULL;
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] == ':') { colon = &s[i]; break; }
+    }
+    if (!colon) return false;
+    size_t ip_len = (size_t)(colon - s);
+    if (ip_len == 0 || ip_len >= ip_cap) return false;
+    memcpy(ip_out, s, ip_len);
+    ip_out[ip_len] = '\0';
+    /* Validate 4 octets 0–255. */
+    int oct_count = 0, val = -1;
+    for (size_t i = 0; i <= ip_len; i++) {
+        char c = ip_out[i];
+        if (c == '.' || c == '\0') {
+            if (val < 0 || val > 255) return false;
+            oct_count++;
+            val = -1;
+        } else if (c >= '0' && c <= '9') {
+            val = (val < 0 ? 0 : val) * 10 + (c - '0');
+        } else {
+            return false;
+        }
+    }
+    if (oct_count != 4) return false;
+    /* Parse port. */
+    long port = 0;
+    const char *p = colon + 1;
+    size_t plen = n - ip_len - 1;
+    if (plen == 0 || plen > 5) return false;
+    for (size_t i = 0; i < plen; i++) {
+        if (p[i] < '0' || p[i] > '9') return false;
+        port = port * 10 + (p[i] - '0');
+    }
+    if (port < 1 || port > 65535) return false;
+    *port_out = (uint16_t)port;
+    return true;
+}
+
+static esp_err_t ota_set_target_handler(httpd_req_t *req)
+{
+    if (!ota_check_auth(req)) {
+        ESP_LOGW(TAG, "/ota/set-target rejected: authentication failed");
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN,
+                            "Authentication required. Use: Authorization: Bearer <psk>");
+        return ESP_FAIL;
+    }
+
+    /* Body is short: "IPv4:port" + optional CRLF. 32 bytes is plenty. */
+    char body[40] = {0};
+    int total = 0;
+    while (total < (int)sizeof(body) - 1) {
+        int r = httpd_req_recv(req, body + total, sizeof(body) - 1 - total);
+        if (r <= 0) {
+            if (r == HTTPD_SOCK_ERR_TIMEOUT) continue;
+            break;
+        }
+        total += r;
+    }
+    body[total < 0 ? 0 : total] = '\0';
+
+    char ip[NVS_CFG_IP_MAX] = {0};
+    uint16_t port = 0;
+    if (!parse_ip_port(body, ip, sizeof(ip), &port)) {
+        ESP_LOGW(TAG, "/ota/set-target rejected: invalid body '%s'", body);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                            "Body must be 'IPv4:PORT', e.g. '192.168.0.103:5005'");
+        return ESP_FAIL;
+    }
+
+    nvs_handle_t h;
+    esp_err_t err = nvs_open("csi_cfg", NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "/ota/set-target: nvs_open(csi_cfg) failed: %s",
+                 esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "NVS open failed");
+        return ESP_FAIL;
+    }
+    err = nvs_set_str(h, "target_ip", ip);
+    if (err == ESP_OK) err = nvs_set_u16(h, "target_port", port);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "/ota/set-target: NVS write failed: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "NVS write failed");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "/ota/set-target: csi_cfg/target_ip=%s target_port=%u; rebooting in 1s",
+             ip, (unsigned)port);
+
+    char resp[120];
+    int rlen = snprintf(resp, sizeof(resp),
+        "{\"status\":\"ok\",\"target_ip\":\"%s\",\"target_port\":%u,\"message\":\"rebooting\"}",
+        ip, (unsigned)port);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, rlen);
 
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_restart();
@@ -312,10 +433,20 @@ static esp_err_t ota_start_server(httpd_handle_t *out_handle)
     };
     httpd_register_uri_handler(server, &recalibrate_uri);
 
+    /* ADR-115: REST endpoint to change CSI aggregator target without USB. */
+    httpd_uri_t set_target_uri = {
+        .uri      = "/ota/set-target",
+        .method   = HTTP_POST,
+        .handler  = ota_set_target_handler,
+        .user_ctx = NULL,
+    };
+    httpd_register_uri_handler(server, &set_target_uri);
+
     ESP_LOGI(TAG, "OTA HTTP server started on port %d", OTA_PORT);
     ESP_LOGI(TAG, "  GET  /ota/status       — firmware version info");
     ESP_LOGI(TAG, "  POST /ota              — upload new firmware binary");
     ESP_LOGI(TAG, "  POST /ota/recalibrate  — clear gain-lock NVS + reboot");
+    ESP_LOGI(TAG, "  POST /ota/set-target   — set CSI target IP:port in NVS + reboot");
 
     if (out_handle) *out_handle = server;
     return ESP_OK;

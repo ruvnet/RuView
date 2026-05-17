@@ -65,6 +65,9 @@ each with explicit reason) listed at the bottom.
       no USB needed (commit f92807cd)
 - [x] **ADR-109** Track AP MAC in `gl_ap_mac` NVS — auto-invalidate
       stale gain-lock on AP swap (commit f92807cd)
+- [x] **ADR-115** `POST /ota/set-target` — repoint CSI aggregator
+      (`csi_cfg/target_ip` + `target_port`) without USB; recovered
+      both nodes after Mac IP move TP-Link → .103
 
 ### Tests / fixtures
 
