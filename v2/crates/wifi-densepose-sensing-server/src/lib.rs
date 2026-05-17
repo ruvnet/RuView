@@ -10,6 +10,7 @@
 pub mod bearer_auth;
 pub mod host_validation;
 pub mod introspection;
+pub mod path_safety;
 pub mod vital_signs;
 pub mod rvf_container;
 pub mod rvf_pipeline;

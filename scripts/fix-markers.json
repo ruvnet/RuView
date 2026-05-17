@@ -173,6 +173,22 @@
       "ref": "https://github.com/ruvnet/RuView/pull/590"
     },
     {
+      "id": "RuView#615",
+      "title": "path_safety::safe_id gates user-controlled IDs at filesystem boundaries",
+      "files": [
+        "v2/crates/wifi-densepose-sensing-server/src/path_safety.rs",
+        "v2/crates/wifi-densepose-sensing-server/src/recording.rs",
+        "v2/crates/wifi-densepose-sensing-server/src/model_manager.rs",
+        "v2/crates/wifi-densepose-sensing-server/src/training_api.rs"
+      ],
+      "require": [
+        "path_safety::safe_id",
+        "pub fn safe_id"
+      ],
+      "rationale": "Five endpoints used to embed user-controlled identifiers (session_name, model_id, dataset_id, recording id) into format!() paths with no sanitization, allowing classic '../../etc/passwd' reads, writes, and deletes on the server filesystem. The safe_id helper enforces [A-Za-z0-9._-] only (no leading '.', max 64 chars) and must run before any user input reaches a format!() that builds a path. Removing the helper or skipping it at any of these call sites reintroduces the #615 attack surface.",
+      "ref": "https://github.com/ruvnet/RuView/issues/615"
+    },
+    {
       "id": "RuView#560",
       "title": "verify.py quantizes features before SHA-256 for cross-platform hash stability",
       "files": ["archive/v1/data/proof/verify.py"],

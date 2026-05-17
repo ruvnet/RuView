@@ -239,7 +239,18 @@ async fn load_recording_frames(dataset_ids: &[String]) -> Vec<RecordedFrame> {
     let recordings_dir = PathBuf::from(RECORDINGS_DIR);
 
     for id in dataset_ids {
-        let file_path = recordings_dir.join(format!("{id}.csi.jsonl"));
+        // Path-traversal guard (#615). Reject any dataset_id that contains
+        // '/', '..', null bytes, or anything outside [A-Za-z0-9._-] BEFORE
+        // building the format!() path. Otherwise an attacker could read any
+        // file the server process can access via `dataset_ids: ["../../etc/passwd"]`.
+        let safe = match crate::path_safety::safe_id(id) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("Skipping invalid dataset_id {id:?}: {e}");
+                continue;
+            }
+        };
+        let file_path = recordings_dir.join(format!("{safe}.csi.jsonl"));
         let data = match tokio::fs::read_to_string(&file_path).await {
             Ok(d) => d,
             Err(e) => {

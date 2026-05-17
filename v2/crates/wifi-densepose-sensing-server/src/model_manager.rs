@@ -215,6 +215,11 @@ async fn scan_models() -> Vec<ModelInfo> {
 
 /// Load a model from disk by ID and return its `LoadedModelState`.
 fn load_model_from_disk(model_id: &str) -> Result<LoadedModelState, String> {
+    // Path-traversal guard (#615). Reject any model_id that contains '/',
+    // '..', null bytes, or anything outside [A-Za-z0-9._-]. The reject
+    // happens before format!() so the path can never escape models_dir().
+    let model_id = crate::path_safety::safe_id(model_id)
+        .map_err(|e| format!("Invalid model_id: {e}"))?;
     let file_path = models_dir().join(format!("{model_id}.rvf"));
     let reader = RvfReader::from_file(&file_path)?;
 

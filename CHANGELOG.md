@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Path-traversal vulnerabilities patched in five sensing-server endpoints** (closes #615 — critical). New `wifi_densepose_sensing_server::path_safety::safe_id()` enforces `[A-Za-z0-9._-]` only (no leading `.`, max 64 chars) before any user-controlled identifier reaches a `format!()` building a filesystem path. Applied at:
+  - `POST /api/v1/recording/start` (`recording.rs` — `session_name`)
+  - `GET /api/v1/recording/download/:id` (`recording.rs` — `id`)
+  - `DELETE /api/v1/recording/delete/:id` (`recording.rs` — `id`)
+  - `POST /api/v1/models/load` (`model_manager.rs` — `model_id`)
+  - `training_api.rs` `load_recording_frames` (`dataset_id`s)
+
+  Pre-fix, unauthenticated callers could read `../../etc/passwd`-style paths, write arbitrary JSONL files, load attacker-controlled `.rvf` model files, or delete arbitrary files the server process could touch. 9 unit tests in `path_safety::tests` exercise the rejection envelope (empty, too-long, path separators, parent-dir traversal, null byte, whitespace/specials, non-ASCII).
+
 ### Fixed
 - **Proof replay (`archive/v1/data/proof/verify.py`) is now cross-platform deterministic** (closes #560). Three changes together: (1) `features_to_bytes()` now `np.round(.., HASH_QUANTIZATION_DECIMALS=6)`s each feature array before packing as little-endian f64, collapsing ULP-level drift from scipy.fft pocketfft SIMD reordering; (2) the `Verify Pipeline Determinism` workflow pins `OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, `MKL_NUM_THREADS=1`, `VECLIB_MAXIMUM_THREADS=1`, `NUMEXPR_NUM_THREADS=1` — multi-threaded BLAS reductions were a deeper source of non-determinism than SIMD reordering, and 6-decimal quantization alone wasn't enough across Azure VM microarchitectures; (3) `expected_features.sha256` regenerated under the new conditions. CI now passes the determinism check (same hash across consecutive runs on canonical Linux x86_64 CI runner: `667eb054c44ac510342665bf9c93d608868a8ead948ae8774b2796ebce6f8fe7`). `scripts/probe-fft-platform.py` updated to mirror `HASH_QUANTIZATION_DECIMALS=6` for cross-machine spot-checks.
 - **`archive/v1/src/services/pose_service.py:223` calls the right method on `PhaseSanitizer`** (closes #612). The call was `self.phase_sanitizer.sanitize(phase_data)`, but `PhaseSanitizer`'s full-pipeline entry point is named `sanitize_phase()` (`unwrap_phase` + `remove_outliers` + `smooth_phase` chained, see `archive/v1/src/core/phase_sanitizer.py:266`). The shorter `sanitize` name doesn't exist on the class, so any path that reached this branch raised `AttributeError` and crashed the pose service mid-frame.

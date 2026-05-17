@@ -274,9 +274,22 @@ async fn start_recording(
         }));
     }
 
+    // Validate session_name BEFORE embedding it in a path. The legacy
+    // `replace(' ', "_")` only normalised whitespace, not path traversal
+    // (#615). Reject any session_name containing path separators or
+    // parent-directory references.
+    let safe_name = match crate::path_safety::safe_id(&body.session_name) {
+        Ok(n) => n,
+        Err(e) => {
+            return Json(serde_json::json!({
+                "status": "error",
+                "message": format!("Invalid session_name: {e}"),
+            }));
+        }
+    };
     let session_id = format!(
         "{}-{}",
-        body.session_name.replace(' ', "_"),
+        safe_name,
         chrono::Utc::now().format("%Y%m%d_%H%M%S")
     );
     let file_name = format!("{session_id}.csi.jsonl");
@@ -346,6 +359,23 @@ async fn download_recording(
     State(_state): State<AppState>,
     AxumPath(id): AxumPath<String>,
 ) -> impl IntoResponse {
+    // Path-traversal guard (#615). Reject any id that contains '/', '..',
+    // null bytes, or anything outside [A-Za-z0-9._-] BEFORE building the
+    // path. Otherwise GET /api/v1/recording/download/../../.env leaks
+    // arbitrary files the server process can read.
+    let id = match crate::path_safety::safe_id(&id) {
+        Ok(s) => s.to_string(),
+        Err(e) => {
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("Invalid recording id: {e}"),
+                })),
+            )
+                .into_response();
+        }
+    };
     let dir = PathBuf::from(RECORDINGS_DIR);
     // Find the JSONL file matching the ID.
     let file_path = dir.join(format!("{id}.csi.jsonl"));
@@ -390,6 +420,19 @@ async fn delete_recording(
     State(_state): State<AppState>,
     AxumPath(id): AxumPath<String>,
 ) -> Json<serde_json::Value> {
+    // Path-traversal guard (#615). Reject any id that contains '/', '..',
+    // null bytes, or anything outside [A-Za-z0-9._-] BEFORE building the
+    // paths. Otherwise DELETE /api/v1/recording/delete/../../config/database
+    // can remove arbitrary files the server process can write.
+    let id = match crate::path_safety::safe_id(&id) {
+        Ok(s) => s.to_string(),
+        Err(e) => {
+            return Json(serde_json::json!({
+                "status": "error",
+                "message": format!("Invalid recording id: {e}"),
+            }));
+        }
+    };
     let dir = PathBuf::from(RECORDINGS_DIR);
     let jsonl_path = dir.join(format!("{id}.csi.jsonl"));
     let meta_path = dir.join(format!("{id}.csi.meta.json"));
