@@ -10,6 +10,68 @@ use crate::vital_signs::VitalSigns;
 
 // ── ESP32 UDP frame parsers ─────────────────────────────────────────────────
 
+/// Parse a 60-byte ADR-081 feature_state packet (magic 0xC511_0006).
+///
+/// Converts the on-wire rv_feature_state_t into an Esp32VitalsPacket so the
+/// existing vitals processing pipeline can consume it directly. Mapping:
+///   motion_score      → motion_energy (and motion flag if > 0.05)
+///   presence_score    → presence_score + presence (flag) if > 0.5
+///   respiration_bpm   → breathing_rate_bpm
+///   heartbeat_bpm     → heartrate_bpm
+///   quality_flags     → presence/fall/motion bits
+pub fn parse_rv_feature_state(buf: &[u8]) -> Option<Esp32VitalsPacket> {
+    if buf.len() < 60 { return None; }
+    let magic = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+    if magic != 0xC511_0006 { return None; }
+
+    let node_id = buf[4];
+    let _mode = buf[5];
+    let _seq = u16::from_le_bytes([buf[6], buf[7]]);
+    let ts_us = u64::from_le_bytes([
+        buf[8], buf[9], buf[10], buf[11], buf[12], buf[13], buf[14], buf[15],
+    ]);
+    let motion_score      = f32::from_le_bytes([buf[16], buf[17], buf[18], buf[19]]);
+    let presence_score    = f32::from_le_bytes([buf[20], buf[21], buf[22], buf[23]]);
+    let respiration_bpm   = f32::from_le_bytes([buf[24], buf[25], buf[26], buf[27]]);
+    let _respiration_conf = f32::from_le_bytes([buf[28], buf[29], buf[30], buf[31]]);
+    let heartbeat_bpm     = f32::from_le_bytes([buf[32], buf[33], buf[34], buf[35]]);
+    let _heartbeat_conf   = f32::from_le_bytes([buf[36], buf[37], buf[38], buf[39]]);
+    let _anomaly_score    = f32::from_le_bytes([buf[40], buf[41], buf[42], buf[43]]);
+    let _env_shift_score  = f32::from_le_bytes([buf[44], buf[45], buf[46], buf[47]]);
+    let _node_coherence   = f32::from_le_bytes([buf[48], buf[49], buf[50], buf[51]]);
+    let quality_flags     = u16::from_le_bytes([buf[52], buf[53]]);
+    // ADR-100 D3: FW ships median RSSI in byte 54 (was `reserved`); 0 means
+    // "not yet measured" → keep the historical -50 fallback so the UI's
+    // RSSI trace isn't pinned at a misleading 0 dBm. Stays in sync with
+    // the duplicate parser in main.rs (must remain identical).
+    let rssi_byte = buf[54] as i8;
+    let rssi: i8 = if rssi_byte == 0 { -50 } else { rssi_byte };
+
+    // Bit 0 of quality_flags = presence valid
+    let presence_valid = (quality_flags & (1 << 0)) != 0;
+    let presence = presence_valid && presence_score > 0.5;
+    // Bit 3 = anomaly triggered → treat as fall (approximation)
+    let fall_detected = (quality_flags & (1 << 3)) != 0;
+    let motion = motion_score > 0.05;
+
+    // Single-node feature_state doesn't tell us number of persons; surface 1 when present.
+    let n_persons = if presence { 1 } else { 0 };
+
+    Some(Esp32VitalsPacket {
+        node_id,
+        presence,
+        fall_detected,
+        motion,
+        breathing_rate_bpm: respiration_bpm as f64,
+        heartrate_bpm: heartbeat_bpm as f64,
+        rssi,
+        n_persons,
+        motion_energy: motion_score,
+        presence_score,
+        timestamp_ms: (ts_us / 1000) as u32,
+    })
+}
+
 /// Parse a 32-byte edge vitals packet (magic 0xC511_0002).
 pub fn parse_esp32_vitals(buf: &[u8]) -> Option<Esp32VitalsPacket> {
     if buf.len() < 32 { return None; }
@@ -67,14 +129,32 @@ pub fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
     let magic = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
     if magic != 0xC511_0001 { return None; }
 
-    let node_id = buf[4];
-    let n_antennas = buf[5];
-    let n_subcarriers = buf[6];
-    let freq_mhz = u16::from_le_bytes([buf[8], buf[9]]);
-    let sequence = u32::from_le_bytes([buf[10], buf[11], buf[12], buf[13]]);
-    let rssi_raw = buf[14] as i8;
-    let rssi = if rssi_raw > 0 { rssi_raw.saturating_neg() } else { rssi_raw };
-    let noise_floor = buf[15] as i8;
+    // On-wire layout — must stay in lockstep with
+    // firmware/esp32-csi-node/main/csi_collector.c::serialize_csi_frame().
+    // ADR-100 D3 fix: the previous version of this parser had every field
+    // after `n_antennas` shifted by 2 bytes (n_subcarriers read as u8,
+    // freq_mhz/sequence misaligned, rssi read from buf[14] instead of
+    // buf[16]). That made `mean_rssi` random noise (a byte taken from
+    // mid-sequence) which the saturating_neg() workaround then forced
+    // negative — hiding the bug from cursory log inspection while keeping
+    // RSSI traces useless. Layout below matches the FW byte-for-byte.
+    //   [0..4]   magic        (u32 LE)
+    //   [4]      node_id      (u8)
+    //   [5]      n_antennas   (u8)
+    //   [6..8]   n_subcarriers(u16 LE)
+    //   [8..12]  freq_mhz     (u32 LE)
+    //   [12..16] sequence     (u32 LE)
+    //   [16]     rssi         (i8)
+    //   [17]     noise_floor  (i8)
+    //   [18..20] reserved
+    //   [20..]   I/Q payload
+    let node_id       = buf[4];
+    let n_antennas    = buf[5];
+    let n_subcarriers = u16::from_le_bytes([buf[6], buf[7]]) as u8;
+    let freq_mhz      = u16::from_le_bytes([buf[8], buf[9]]);   // upper bytes always 0 in practice
+    let sequence      = u32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]);
+    let rssi          = buf[16] as i8;                          // already in [-128..127]
+    let noise_floor   = buf[17] as i8;
 
     let iq_start = 20;
     let n_pairs = n_antennas as usize * n_subcarriers as usize;
@@ -401,9 +481,16 @@ pub fn smooth_and_classify_node(ns: &mut NodeState, raw: &mut ClassificationInfo
     raw.confidence = (0.4 + sm * 0.6).clamp(0.0, 1.0);
 }
 
+/// ADR-118: legacy single-node override variant kept for API compatibility.
+/// New callers should query per-node amps from AMP_HIST and pass the full
+/// `&[(u8, &[f64])]` slice. This variant degrades to "node 1 only" which
+/// produces a feature vector with 5 zero-padded node slots — usable for
+/// emergency fallback but the trained model expects the full multi-node
+/// vector.
 pub fn adaptive_override(state: &AppStateInner, features: &FeatureInfo, classification: &mut ClassificationInfo) {
     if let Some(ref model) = state.adaptive_model {
-        let amps = state.frame_history.back().map(|v| v.as_slice()).unwrap_or(&[]);
+        let amps_owned: Vec<f64> = state.frame_history.back().cloned().unwrap_or_default();
+        let per_node_refs: Vec<(u8, &[f64])> = vec![(1u8, amps_owned.as_slice())];
         let feat_arr = adaptive_classifier::features_from_runtime(
             &serde_json::json!({
                 "variance": features.variance,
@@ -414,7 +501,7 @@ pub fn adaptive_override(state: &AppStateInner, features: &FeatureInfo, classifi
                 "change_points": features.change_points,
                 "mean_rssi": features.mean_rssi,
             }),
-            amps,
+            &per_node_refs,
         );
         let (label, conf) = model.classify(&feat_arr);
         classification.motion_level = label.to_string();
@@ -672,4 +759,64 @@ pub fn chrono_timestamp() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test for ADR-100 D3: parse_esp32_frame must extract
+    /// fields from the exact offsets the firmware writes in
+    /// csi_collector.c::serialize_csi_frame(). A previous version
+    /// shifted every field after `n_antennas` by 2 bytes, making RSSI
+    /// random noise. This test builds a synthetic frame with distinctive
+    /// values for every header field and asserts the parser recovers
+    /// each one.
+    #[test]
+    fn parse_esp32_frame_header_offsets_match_firmware() {
+        let n_sub: u16 = 64;
+        let freq_mhz: u32 = 2462;       // channel 11
+        let sequence: u32 = 0x1122_3344;
+        let rssi: i8 = -57;
+        let noise_floor: i8 = -95;
+        let n_pairs = 1 * n_sub as usize;
+        let mut buf = vec![0u8; 20 + n_pairs * 2];
+
+        buf[0..4].copy_from_slice(&0xC511_0001u32.to_le_bytes());
+        buf[4] = 7;                                                // node_id
+        buf[5] = 1;                                                // n_antennas
+        buf[6..8].copy_from_slice(&n_sub.to_le_bytes());           // u16
+        buf[8..12].copy_from_slice(&freq_mhz.to_le_bytes());       // u32
+        buf[12..16].copy_from_slice(&sequence.to_le_bytes());      // u32
+        buf[16] = rssi as u8;
+        buf[17] = noise_floor as u8;
+        // [18..20] reserved zeros
+        // I/Q: leave zeros — parser still needs them present
+
+        let f = parse_esp32_frame(&buf).expect("frame parses");
+        assert_eq!(f.node_id, 7);
+        assert_eq!(f.n_antennas, 1);
+        assert_eq!(f.n_subcarriers as u16, n_sub);
+        assert_eq!(f.freq_mhz, freq_mhz as u16); // parser narrows to u16 (upper bytes always 0 in WiFi)
+        assert_eq!(f.sequence, sequence);
+        assert_eq!(f.rssi, -57, "rssi must come from byte 16, not 14");
+        assert_eq!(f.noise_floor, -95, "noise_floor must come from byte 17, not 15");
+        assert_eq!(f.amplitudes.len(), n_pairs);
+    }
+
+    /// Boundary case: minimum-size frame (20 B header, zero I/Q pairs)
+    /// must not panic and must still expose RSSI correctly.
+    #[test]
+    fn parse_esp32_frame_min_size_rssi_only() {
+        let mut buf = vec![0u8; 20];
+        buf[0..4].copy_from_slice(&0xC511_0001u32.to_le_bytes());
+        buf[5] = 0;                          // 0 antennas → 0 IQ pairs
+        buf[6..8].copy_from_slice(&0u16.to_le_bytes());
+        buf[16] = (-71i8) as u8;
+        buf[17] = (-92i8) as u8;
+        let f = parse_esp32_frame(&buf).expect("min frame parses");
+        assert_eq!(f.rssi, -71);
+        assert_eq!(f.noise_floor, -92);
+        assert!(f.amplitudes.is_empty());
+    }
 }

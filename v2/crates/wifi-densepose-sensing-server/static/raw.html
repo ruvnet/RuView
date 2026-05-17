@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>RuView — Raw Signals</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; padding:14px; font-family:-apple-system,Inter,system-ui,sans-serif;
+         background:#0a0e13; color:#e6edf3; font-size:12px; }
+  h1 { font-size:15px; font-weight:600; margin:0 0 2px; }
+  .sub { font-size:11px; color:#888; margin:0 0 12px; }
+  .topbar { display:flex; gap:14px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
+  .pill { padding:4px 10px; border-radius:4px; font-family:JetBrains Mono,monospace; font-size:11px;
+          background:#1c2128; }
+  .pill.dis { background:#3a1418; color:#ff6a6a; }
+  .pill.ok  { background:#0e2a1a; color:#7ce38b; }
+  button { background:#21262d; color:#e6edf3; border:1px solid #30363d; border-radius:4px;
+           padding:4px 10px; font-size:11px; cursor:pointer; }
+  .node { background:#161b22; border:1px solid #30363d; border-radius:6px;
+          padding:10px 12px; margin-bottom:10px; }
+  .node h2 { margin:0 0 6px; font-size:12px; font-weight:600; color:#7cb6ff;
+             font-family:JetBrains Mono,monospace; display:flex; gap:14px; align-items:baseline; }
+  .node h2 .stat { color:#888; font-weight:normal; font-size:11px; }
+  .node h2 .stat b { color:#e6edf3; font-weight:600; }
+  .badge { font-family:JetBrains Mono,monospace; font-size:11px; padding:2px 8px; border-radius:3px; }
+  .badge.absent        { background:#21262d; color:#888; }
+  .badge.present_still { background:#1c3a55; color:#7cb6ff; }
+  .badge.present_moving{ background:#3a5520; color:#90d36b; }
+  .badge.active        { background:#552020; color:#ff7a7a; }
+  .row { display:grid; grid-template-columns: 1fr 360px; gap:10px; }
+  @media (max-width: 900px) { .row { grid-template-columns: 1fr; } }
+  canvas { display:block; width:100%; background:#0a0e13; border-radius:3px; }
+  canvas.bars   { height: 130px; }
+  canvas.trace  { height: 130px; }
+  canvas.spark  { height: 48px; margin-top: 6px; }
+  .lbl { color:#666; font-size:10px; font-family:JetBrains Mono,monospace; margin:2px 0 0; }
+  .controls { display:flex; gap:8px; margin-left:auto; }
+  .controls label { font-size:11px; color:#aaa; }
+</style>
+</head>
+<body>
+<h1>RuView — Raw CSI signals</h1>
+<p class="sub">Per-node subcarrier amplitudes + RSSI/broadband traces. No DSP, no classification. Stream straight from the sensor.</p>
+
+<div class="topbar">
+  <span id="status" class="pill dis">disconnected</span>
+  <span class="pill" id="rate">0 fps</span>
+  <span class="pill" id="lastTs">last: --</span>
+  <span class="badge absent" id="globalBadge" style="font-size:13px;padding:4px 12px;">absent</span>
+  <span class="pill" id="globalCV">CV 0%</span>
+  <div class="controls">
+    <label>peak-hold <input type="checkbox" id="peakHold" checked></label>
+    <label>log-y <input type="checkbox" id="logY"></label>
+    <button onclick="resetState()">reset</button>
+    <button id="calibrateBtn" onclick="startCalibrate()" title="Step out of the room, click, wait 90 s">calibrate empty</button>
+    <span class="pill" id="calibStatus" style="display:none"></span>
+    <!-- ADR-107: visible progress bar shown while baseline capture runs. -->
+    <div id="calibProgress" style="display:none; position:relative; width:140px; height:14px;
+                                   border:1px solid #30363d; border-radius:7px; overflow:hidden;
+                                   background:#0a0e13;">
+      <div id="calibProgressFill" style="position:absolute; left:0; top:0; bottom:0; width:0%;
+                                          background:linear-gradient(90deg,#1f6feb,#3fb950);
+                                          transition: width 0.4s linear;"></div>
+      <span id="calibProgressLabel" style="position:absolute; inset:0; display:flex;
+                                            align-items:center; justify-content:center;
+                                            font-size:10px; font-family:JetBrains Mono,monospace;
+                                            color:#e6edf3; text-shadow:0 0 2px #000;"></span>
+    </div>
+  </div>
+</div>
+
+<div id="nodes"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────
+const TRACE_SEC = 30;             // seconds of history per node
+const TRACE_MAX_PTS = 1200;       // safety cap
+const state = new Map();          // node_id -> { amp, peak, rssiHist[], meanAmpHist[], lastTs, frames }
+let frameCount = 0;
+let lastRateTs = performance.now();
+let rateFps = 0;
+let logY = false;
+let peakHold = true;
+
+function resetState() {
+  state.clear();
+  document.getElementById('nodes').innerHTML = '';
+  frameCount = 0;
+}
+
+document.getElementById('peakHold').addEventListener('change', e => { peakHold = e.target.checked; });
+document.getElementById('logY').addEventListener('change', e => { logY = e.target.checked; });
+
+// ── Per-node block factory ─────────────────────────────────────────
+function ensureNodeBlock(nodeId) {
+  if (state.has(nodeId)) return state.get(nodeId);
+  const ent = {
+    amp: [],
+    peak: [],
+    rssiHist: [],          // { t, v }
+    meanAmpHist: [],
+    driftHist: [],         // { t, v } — ADR-104 per-sub drift score
+    lastTs: 0,
+    frames: 0,
+    lastFrameWall: performance.now(),
+    fps: 0,
+  };
+  state.set(nodeId, ent);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'node';
+  wrap.id = 'node-' + nodeId;
+  wrap.innerHTML = `
+    <h2>
+      Node ${nodeId}
+      <span class="badge absent" id="n${nodeId}-badge">absent</span>
+      <span class="stat">CV <b id="n${nodeId}-cv">0%</b></span>
+      <span class="stat">subc <b id="n${nodeId}-sub">0</b></span>
+      <span class="stat">rssi <b id="n${nodeId}-rssi">--</b> dBm</span>
+      <span class="stat">mean A <b id="n${nodeId}-meanA">0</b></span>
+      <span class="stat">peak A <b id="n${nodeId}-peakA">0</b></span>
+      <span class="stat">drift <b id="n${nodeId}-drift">--</b></span>
+      <span class="stat">node fps <b id="n${nodeId}-fps">0</b></span>
+    </h2>
+    <div class="row">
+      <div>
+        <canvas class="bars" id="n${nodeId}-bars"></canvas>
+        <p class="lbl">subcarrier amplitude bars (left → low freq, right → high freq)</p>
+      </div>
+      <div>
+        <canvas class="trace" id="n${nodeId}-trace"></canvas>
+        <p class="lbl"><span style="color:#8b949e">RSSI</span> &nbsp; <span style="color:#3fb950">broadband mean amplitude</span> &nbsp; (last ${TRACE_SEC}s)</p>
+        <canvas class="spark" id="n${nodeId}-driftSpark"></canvas>
+        <p class="lbl"><span style="color:#d29922">per-sub drift</span> — off-axis presence channel (ADR-104); dashed line = presence threshold 0.10</p>
+      </div>
+    </div>`;
+  document.getElementById('nodes').appendChild(wrap);
+  return ent;
+}
+
+// ── Drawing ────────────────────────────────────────────────────────
+function drawBars(canvas, amps, peaks) {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0a0e13'; ctx.fillRect(0, 0, w, h);
+  if (!amps.length) return;
+
+  // Determine scale
+  let maxV = peakHold && peaks.length
+    ? Math.max(...peaks)
+    : Math.max(...amps);
+  if (!isFinite(maxV) || maxV <= 0) maxV = 1;
+
+  const n = amps.length;
+  const bw = w / n;
+  const margin = 4;
+
+  // Bars
+  for (let i = 0; i < n; i++) {
+    let v = amps[i];
+    let pv = peaks[i] || 0;
+    if (logY) {
+      v = v > 0 ? Math.log10(v + 1) : 0;
+      pv = pv > 0 ? Math.log10(pv + 1) : 0;
+    }
+    const scaleMax = logY ? Math.log10(maxV + 1) : maxV;
+    const bh = Math.max(1, (v / scaleMax) * (h - margin));
+    const ph = Math.max(1, (pv / scaleMax) * (h - margin));
+    const x = i * bw;
+    // peak (faint)
+    if (peakHold && pv > 0) {
+      ctx.fillStyle = '#1f3a5a';
+      ctx.fillRect(x, h - ph, Math.max(1, bw - 1), 1.5);
+    }
+    // bar (active)
+    const hue = 200 + (i / n) * 100;
+    ctx.fillStyle = `hsl(${hue}, 70%, 55%)`;
+    ctx.fillRect(x, h - bh, Math.max(1, bw - 1), bh);
+  }
+
+  // Y-axis label
+  ctx.fillStyle = '#555'; ctx.font = '9px monospace';
+  ctx.fillText('max=' + maxV.toFixed(0), 4, 10);
+  ctx.fillText('n=' + n, w - 40, 10);
+}
+
+function drawTrace(canvas, rssiHist, meanAmpHist) {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0a0e13'; ctx.fillRect(0, 0, w, h);
+
+  const now = performance.now() / 1000;
+  const t0 = now - TRACE_SEC;
+
+  const drawSeries = (arr, color, getRange) => {
+    if (arr.length < 2) return;
+    const visible = arr.filter(p => p.t >= t0);
+    if (visible.length < 2) return;
+    const { min, max } = getRange(visible);
+    const span = (max - min) || 1;
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
+    for (let i = 0; i < visible.length; i++) {
+      const p = visible[i];
+      const x = ((p.t - t0) / TRACE_SEC) * w;
+      const y = h - ((p.v - min) / span) * (h - 8) - 4;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    // y-range text
+    ctx.fillStyle = color; ctx.font = '9px monospace';
+    return { min, max };
+  };
+
+  const rssiR = drawSeries(rssiHist, '#8b949e', arr => {
+    const vals = arr.map(p => p.v);
+    return { min: Math.min(...vals), max: Math.max(...vals) };
+  });
+  const ampR = drawSeries(meanAmpHist, '#3fb950', arr => {
+    const vals = arr.map(p => p.v);
+    return { min: 0, max: Math.max(...vals) };
+  });
+
+  // labels
+  ctx.font = '9px monospace';
+  if (rssiR) { ctx.fillStyle = '#8b949e'; ctx.fillText(`rssi ${rssiR.min.toFixed(0)}…${rssiR.max.toFixed(0)} dBm`, 4, 10); }
+  if (ampR)  { ctx.fillStyle = '#3fb950'; ctx.fillText(`A ${ampR.min.toFixed(0)}…${ampR.max.toFixed(0)}`, 4, 22); }
+
+  // grid line at now
+  ctx.strokeStyle = '#1c2128'; ctx.beginPath();
+  ctx.moveTo(w - 1, 0); ctx.lineTo(w - 1, h); ctx.stroke();
+}
+
+// ADR-104: per-sub drift sparkline. Fixed Y range [0, 0.30] so the
+// presence threshold (0.10, dashed) and warning threshold (0.15) are
+// directly readable across nodes — re-scaling per node would make it
+// impossible to tell "Node 0 fired" from "Node 1 fired" at a glance.
+const DRIFT_PRESENCE_THRESH = 0.10;
+const DRIFT_WARN_THRESH = 0.15;
+const DRIFT_MAX = 0.30;
+
+function drawDriftSpark(canvas, hist) {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0a0e13'; ctx.fillRect(0, 0, w, h);
+
+  const now = performance.now() / 1000;
+  const t0 = now - TRACE_SEC;
+  const yOf = v => h - (Math.min(v, DRIFT_MAX) / DRIFT_MAX) * (h - 4) - 2;
+
+  // Threshold lines.
+  ctx.setLineDash([3, 3]);
+  ctx.strokeStyle = '#5a4a1a'; ctx.lineWidth = 1; ctx.beginPath();
+  ctx.moveTo(0, yOf(DRIFT_PRESENCE_THRESH)); ctx.lineTo(w, yOf(DRIFT_PRESENCE_THRESH));
+  ctx.stroke();
+  ctx.strokeStyle = '#7a3030'; ctx.beginPath();
+  ctx.moveTo(0, yOf(DRIFT_WARN_THRESH)); ctx.lineTo(w, yOf(DRIFT_WARN_THRESH));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  const visible = hist.filter(p => p.t >= t0);
+  if (visible.length >= 2) {
+    ctx.strokeStyle = '#d29922'; ctx.lineWidth = 1.5; ctx.beginPath();
+    for (let i = 0; i < visible.length; i++) {
+      const p = visible[i];
+      const x = ((p.t - t0) / TRACE_SEC) * w;
+      const y = yOf(p.v);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  // Axis text.
+  ctx.fillStyle = '#666'; ctx.font = '9px monospace';
+  ctx.fillText('0', 2, h - 2);
+  ctx.fillText(DRIFT_MAX.toFixed(2), 2, 10);
+}
+
+// ── Frame ingestion ────────────────────────────────────────────────
+function handleSensingUpdate(d) {
+  const nodes = d.nodes || [];
+  const ts = d.timestamp || (Date.now() / 1000);
+  const now = performance.now() / 1000;
+  for (const n of nodes) {
+    const id = n.node_id;
+    const amps = n.amplitude || [];
+    // Skip empty-amp ticks (feature_state path doesn't carry raw CSI).
+    // Bars/traces only refresh on real raw-CSI frames so what you see
+    // is always a live snapshot, not a repeated stale vector.
+    if (!amps.length) continue;
+    const ent = ensureNodeBlock(id);
+    ent.amp = amps;
+    // peak-hold update
+    if (ent.peak.length !== amps.length) ent.peak = amps.slice();
+    else for (let i = 0; i < amps.length; i++) if (amps[i] > ent.peak[i]) ent.peak[i] = amps[i];
+
+    const meanA = amps.reduce((s, x) => s + x, 0) / amps.length;
+    // Only push valid (non-zero) RSSI samples so the trace doesn't
+    // jump between real dBm values and the "0 = no data" sentinel.
+    if (n.rssi_dbm && n.rssi_dbm !== 0) {
+      ent.rssiHist.push({ t: now, v: n.rssi_dbm });
+    }
+    ent.meanAmpHist.push({ t: now, v: meanA });
+    const cutoff = now - TRACE_SEC;
+    while (ent.rssiHist.length && ent.rssiHist[0].t < cutoff) ent.rssiHist.shift();
+    while (ent.meanAmpHist.length && ent.meanAmpHist[0].t < cutoff) ent.meanAmpHist.shift();
+    if (ent.rssiHist.length > TRACE_MAX_PTS) ent.rssiHist.splice(0, ent.rssiHist.length - TRACE_MAX_PTS);
+    if (ent.meanAmpHist.length > TRACE_MAX_PTS) ent.meanAmpHist.splice(0, ent.meanAmpHist.length - TRACE_MAX_PTS);
+
+    // per-node fps: count frames in the last second, refresh once a sec
+    // (instantaneous 1/dt was wildly noisy because multiple WS paths
+    // emit duplicate per-node updates back-to-back).
+    ent.fpsCounter = (ent.fpsCounter || 0) + 1;
+    const nowMs = performance.now();
+    if (!ent.fpsWindowStart) ent.fpsWindowStart = nowMs;
+    if (nowMs - ent.fpsWindowStart >= 1000) {
+      ent.fps = ent.fpsCounter * 1000 / (nowMs - ent.fpsWindowStart);
+      ent.fpsCounter = 0;
+      ent.fpsWindowStart = nowMs;
+    }
+    ent.lastFrameWall = nowMs;
+    ent.frames++;
+    ent.lastTs = ts;
+
+    document.getElementById(`n${id}-sub`).textContent = amps.length;
+    // n.rssi_dbm comes from sensing_update.nodes[]; it can be 0 on
+    // early ticks (history not yet populated). Coerce to "--" so the
+    // operator doesn't think the AP is dead.
+    const rssiVal = (n.rssi_dbm && Number.isFinite(n.rssi_dbm) && n.rssi_dbm !== 0)
+      ? n.rssi_dbm.toFixed(1)
+      : '--';
+    document.getElementById(`n${id}-rssi`).textContent = rssiVal;
+    // Push to RSSI trace history if non-zero (so the chart shows the
+    // real ladder of dBm steps, not a fake "0 → -54" jump on boot).
+    if (n.rssi_dbm && n.rssi_dbm !== 0) {
+      // (handled by ent.rssiHist push below)
+    }
+    document.getElementById(`n${id}-meanA`).textContent = meanA.toFixed(1);
+    document.getElementById(`n${id}-peakA`).textContent = Math.max(...ent.peak).toFixed(1);
+    document.getElementById(`n${id}-fps`).textContent = ent.fps.toFixed(1);
+  }
+
+  document.getElementById('lastTs').textContent = 'last: ' + new Date(ts * 1000).toLocaleTimeString();
+
+  // Global classification badge (ADR-101 fused).
+  const gcl = d.classification || {};
+  const glvl = gcl.motion_level || 'absent';
+  const gb = document.getElementById('globalBadge');
+  if (gb) { gb.textContent = glvl; gb.className = 'badge ' + glvl; gb.style.fontSize = '13px'; gb.style.padding = '4px 12px'; }
+  const gcv = document.getElementById('globalCV');
+  if (gcv) gcv.textContent = 'CV ' + ((gcl.confidence || 0) * 100).toFixed(1) + '%';
+
+  // Per-node level badge from node_features[i].classification (ADR-101).
+  const nfNow = performance.now() / 1000;
+  const nf = d.node_features || [];
+  for (const f of nf) {
+    const id = f.node_id;
+    const cls = f.classification || {};
+    const lvl = cls.motion_level || 'absent';
+    const badge = document.getElementById(`n${id}-badge`);
+    if (badge) {
+      badge.textContent = lvl;
+      badge.className = 'badge ' + lvl;
+    }
+    const cvEl = document.getElementById(`n${id}-cv`);
+    if (cvEl) cvEl.textContent = ((cls.confidence || 0) * 100).toFixed(1) + '%';
+
+    // ADR-104 per-sub drift score (off-axis presence). May be absent
+    // when no per-sub baseline is loaded for this node — show '--'
+    // instead of '0.000' so the operator can tell the channel is
+    // unknown vs. known and stable.
+    const driftEl = document.getElementById(`n${id}-drift`);
+    const driftLive = state.get(id);
+    if (typeof f.drift_score === 'number' && Number.isFinite(f.drift_score)) {
+      if (driftEl) driftEl.textContent = f.drift_score.toFixed(3);
+      if (driftLive) {
+        driftLive.driftHist.push({ t: nfNow, v: f.drift_score });
+        const cutoff = nfNow - TRACE_SEC;
+        while (driftLive.driftHist.length && driftLive.driftHist[0].t < cutoff) {
+          driftLive.driftHist.shift();
+        }
+        if (driftLive.driftHist.length > TRACE_MAX_PTS) {
+          driftLive.driftHist.splice(0, driftLive.driftHist.length - TRACE_MAX_PTS);
+        }
+      }
+    } else if (driftEl) {
+      driftEl.textContent = '--';
+    }
+  }
+  frameCount++;
+}
+
+function renderTick() {
+  for (const [id, ent] of state) {
+    const bars  = document.getElementById('n' + id + '-bars');
+    const trace = document.getElementById('n' + id + '-trace');
+    const spark = document.getElementById('n' + id + '-driftSpark');
+    if (bars)  drawBars(bars,  ent.amp, ent.peak);
+    if (trace) drawTrace(trace, ent.rssiHist, ent.meanAmpHist);
+    if (spark) drawDriftSpark(spark, ent.driftHist);
+  }
+  // fps pill
+  const now = performance.now();
+  if (now - lastRateTs > 500) {
+    rateFps = (frameCount * 1000) / (now - lastRateTs);
+    document.getElementById('rate').textContent = rateFps.toFixed(1) + ' fps total';
+    frameCount = 0;
+    lastRateTs = now;
+  }
+  requestAnimationFrame(renderTick);
+}
+requestAnimationFrame(renderTick);
+
+// ── ADR-107: baseline calibrate button + progress bar ─────────────
+let calibPollTimer = null;
+const CALIB_DURATION_SEC = 90;
+
+function setCalibProgress(pct, label) {
+  const bar = document.getElementById('calibProgress');
+  const fill = document.getElementById('calibProgressFill');
+  const txt = document.getElementById('calibProgressLabel');
+  if (!bar || !fill || !txt) return;
+  bar.style.display = pct < 0 ? 'none' : 'inline-block';
+  fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+  txt.textContent = label || '';
+}
+
+async function startCalibrate() {
+  if (!confirm(`Step OUT of the room now. Calibration will record for ${CALIB_DURATION_SEC} s.\nClick OK when you are out.`)) return;
+  const btn = document.getElementById('calibrateBtn');
+  const stat = document.getElementById('calibStatus');
+  btn.disabled = true; btn.textContent = 'recording…';
+  // Hide the text-pill while the progress bar is the primary indicator;
+  // it reappears only on terminal status messages (error / complete).
+  stat.style.display = 'none';
+  setCalibProgress(0, 'starting…');
+  try {
+    const res = await fetch('/api/v1/baseline/calibrate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ duration_sec: CALIB_DURATION_SEC, trim_sec: 15, clean_window_sec: 30 }),
+    });
+    const j = await res.json();
+    if (!j.started) {
+      setCalibProgress(-1, '');
+      stat.style.display = 'inline-block';
+      stat.textContent = j.reason || 'failed to start';
+      btn.disabled = false; btn.textContent = 'calibrate empty';
+      return;
+    }
+  } catch (e) {
+    setCalibProgress(-1, '');
+    stat.style.display = 'inline-block';
+    stat.textContent = 'network error';
+    btn.disabled = false; btn.textContent = 'calibrate empty';
+    return;
+  }
+  if (calibPollTimer) clearInterval(calibPollTimer);
+  let elapsed = 0;
+  calibPollTimer = setInterval(async () => {
+    elapsed += 2;
+    try {
+      const r = await fetch('/api/v1/baseline'); const j = await r.json();
+      const s = j.calibration_status || 'idle';
+      if (s.startsWith('running')) {
+        const pct = Math.min(99, (elapsed / CALIB_DURATION_SEC) * 100);
+        setCalibProgress(pct, `${elapsed}/${CALIB_DURATION_SEC} s`);
+      } else {
+        clearInterval(calibPollTimer); calibPollTimer = null;
+        btn.disabled = false; btn.textContent = 'calibrate empty';
+        if (s === 'complete') {
+          setCalibProgress(100, 'done');
+          stat.style.display = 'inline-block';
+          stat.textContent = 'baseline updated ✓';
+          setTimeout(() => setCalibProgress(-1, ''), 3000);
+        } else {
+          setCalibProgress(-1, '');
+          stat.style.display = 'inline-block';
+          stat.textContent = s;
+        }
+      }
+    } catch (e) {}
+  }, 2000);
+}
+
+// ── WS ─────────────────────────────────────────────────────────────
+function connect() {
+  const ws = new WebSocket('ws://' + location.hostname + ':8765/ws/sensing');
+  ws.onopen = () => {
+    const p = document.getElementById('status');
+    p.textContent = 'connected'; p.className = 'pill ok';
+  };
+  ws.onclose = () => {
+    const p = document.getElementById('status');
+    p.textContent = 'disconnected — reconnecting'; p.className = 'pill dis';
+    setTimeout(connect, 1500);
+  };
+  ws.onmessage = (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.type === 'sensing_update') handleSensingUpdate(d);
+    } catch (_) {}
+  };
+}
+connect();
+</script>
+</body></html>

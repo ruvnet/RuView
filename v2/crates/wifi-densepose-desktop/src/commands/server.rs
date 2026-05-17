@@ -101,16 +101,46 @@ pub async fn start_server(
     if let Some(port) = config.udp_port {
         cmd.args(["--udp-port", &port.to_string()]);
     }
-    if let Some(ref bind_addr) = config.bind_address {
-        cmd.args(["--bind", bind_addr]);
-    }
+    // Bind address: default to 0.0.0.0 so LAN-connected ESP32 nodes can reach us.
+    let bind_addr = config
+        .bind_address
+        .as_deref()
+        .unwrap_or("0.0.0.0");
+    cmd.args(["--bind-addr", bind_addr]);
+    // Pass log level via RUST_LOG env (sensing-server reads tracing_subscriber env).
     if let Some(ref log_level) = config.log_level {
-        cmd.args(["--log-level", log_level]);
+        cmd.env("RUST_LOG", log_level);
     }
 
-    // Set data source (default to "simulate" if not specified for demo mode)
-    let source = config.source.as_deref().unwrap_or("simulate");
+    // Set data source (default to "esp32" for real CSI ingest; UI may override)
+    let source = config.source.as_deref().unwrap_or("esp32");
     cmd.args(["--source", source]);
+
+    // Auto-load bundled vital-signs RVF model if present next to the binary.
+    // Searches: <exe_dir>/wifi-densepose-v1.rvf, then <resource_dir>/wifi-densepose-v1.rvf.
+    let mut model_path: Option<std::path::PathBuf> = None;
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join("wifi-densepose-v1.rvf");
+            if candidate.exists() {
+                model_path = Some(candidate);
+            }
+        }
+    }
+    if model_path.is_none() {
+        if let Ok(resource_dir) = app.path().resource_dir() {
+            let candidate = resource_dir.join("wifi-densepose-v1.rvf");
+            if candidate.exists() {
+                model_path = Some(candidate);
+            }
+        }
+    }
+    if let Some(p) = model_path {
+        tracing::info!("Auto-loading vital-signs RVF model: {}", p.display());
+        cmd.args(["--load-rvf", &p.to_string_lossy()]);
+    } else {
+        tracing::warn!("No wifi-densepose-v1.rvf found next to binary or in resources; vital signs disabled");
+    }
 
     // Redirect stdout/stderr to pipes for monitoring
     cmd.stdout(Stdio::piped());

@@ -26,8 +26,8 @@ export const useMatStore = create<MatState>((set) => ({
   survivors: [],
   alerts: [],
   selectedEventId: null,
-  dataSource: 'simulated',
-  simulationAcknowledged: false,
+  dataSource: 'real',
+  simulationAcknowledged: true,
 
   upsertEvent: (event) => {
     set((state) => {

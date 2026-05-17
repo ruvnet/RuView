@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Node } from "../types";
 
 interface UseNodesOptions {
-  /** Auto-poll interval in milliseconds. Set to 0 to disable. Default: 10000 */
+  /** Auto-poll interval in milliseconds. Set to 0 to disable. Default: 30000 */
   pollInterval?: number;
   /** Whether to start scanning on mount. Default: false */
   autoScan?: boolean;
@@ -23,7 +23,7 @@ interface UseNodesReturn {
 }
 
 export function useNodes(options: UseNodesOptions = {}): UseNodesReturn {
-  const { pollInterval = 10_000, autoScan = false } = options;
+  const { pollInterval = 30_000, autoScan = false } = options;
 
   const [nodes, setNodes] = useState<Node[]>([]);
   const [isScanning, setIsScanning] = useState(false);
@@ -37,9 +37,15 @@ export function useNodes(options: UseNodesOptions = {}): UseNodesReturn {
 
     try {
       const discovered = await invoke<Node[]>("discover_nodes", {
-        timeoutMs: 5000,
+        timeoutMs: 8000,
       });
-      setNodes(discovered);
+      // Discovery is flaky on busy LANs — overall timeout races with the
+      // per-request reqwest timeouts and sometimes returns 0 even when
+      // sensors are reachable. Keep the last good list rather than
+      // flashing to "no nodes".
+      if (discovered.length > 0) {
+        setNodes(discovered);
+      }
     } catch (err) {
       const message =
         err instanceof Error ? err.message : String(err);

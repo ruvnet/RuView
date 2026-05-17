@@ -17,6 +17,7 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "esp_app_desc.h"
+#include "esp_ota_ops.h"        /* esp_ota_get_running_partition — issue #556 boot diag */
 #include "sdkconfig.h"
 
 #include "csi_collector.h"
@@ -127,8 +128,39 @@ static void wifi_init_sta(void)
     }
 }
 
+/* Issue #556 OTA debug: log how we got here. After an OTA upload the new
+ * image should boot with reset_reason=ESP_RST_SW from esp_restart() and
+ * run from the partition esp_ota_set_boot_partition() picked. If we see
+ * ESP_RST_PANIC / ESP_RST_TASK_WDT / ESP_RST_INT_WDT from the OTA-flashed
+ * slot, the new image crashed in early boot — that's the failure mode the
+ * "/ota/status still shows old time" symptom is masking. */
+static const char *reset_reason_str(esp_reset_reason_t r)
+{
+    switch (r) {
+    case ESP_RST_POWERON:  return "POWERON";
+    case ESP_RST_EXT:      return "EXT";
+    case ESP_RST_SW:       return "SW";
+    case ESP_RST_PANIC:    return "PANIC";
+    case ESP_RST_INT_WDT:  return "INT_WDT";
+    case ESP_RST_TASK_WDT: return "TASK_WDT";
+    case ESP_RST_WDT:      return "WDT";
+    case ESP_RST_DEEPSLEEP:return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT: return "BROWNOUT";
+    case ESP_RST_SDIO:     return "SDIO";
+    default:               return "UNKNOWN";
+    }
+}
+
 void app_main(void)
 {
+    /* Boot diagnostic — must run before anything that could panic, so even
+     * a one-line UART log tells us how the chip got here. */
+    esp_reset_reason_t rr = esp_reset_reason();
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    ESP_LOGI(TAG, "boot: reset_reason=%s running_partition=%s",
+             reset_reason_str(rr),
+             running ? running->label : "?");
+
     /* Initialize NVS */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {

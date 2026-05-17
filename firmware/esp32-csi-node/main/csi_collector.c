@@ -17,9 +17,12 @@
 #include "edge_processing.h"
 
 #include <string.h>
+#include <stdlib.h>
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_timer.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 #include "sdkconfig.h"
 
 /* ADR-060: Access the global NVS config for MAC filter and channel override. */
@@ -52,6 +55,231 @@ static bool    s_filter_mac_set = false;
 
 static const char *TAG = "csi_collector";
 
+/* ──────────────────────────────────────────────────────────────────
+ * ADR-100: Gain Lock (AGC + FFT scale).
+ *
+ * ESP32 WiFi PHY applies automatic gain control per packet, which
+ * manifests as a 20-30 % slow drift in CSI amplitude even with a
+ * completely static room — masking the real modulation caused by
+ * body motion. Ported from Francesco Pace's ESPectre (GPLv3,
+ * https://github.com/francescopace/espectre).
+ *
+ * The first ~300 packets after boot are sampled. We take the median
+ * AGC + FFT gain values and freeze them with two undocumented PHY
+ * routines from the IDF blob. If the median AGC is below the safe
+ * threshold (sensor sits very close to the AP), we *don't* lock —
+ * forcing a low gain causes the RX path to freeze.
+ * Supported targets: ESP32-S3 / C3 / C6. Older parts skip silently.
+ * ──────────────────────────────────────────────────────────────── */
+#if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6
+#define RV_GAIN_LOCK_SUPPORTED 1
+/* Overlay struct on wifi_csi_info_t.rx_ctrl exposing the hidden agc/fft fields. */
+typedef struct {
+    unsigned : 32; unsigned : 32; unsigned : 32;
+    unsigned : 32; unsigned : 32; unsigned : 16;
+    signed   fft_gain : 8;
+    unsigned agc_gain : 8;
+    unsigned : 32; unsigned : 32;
+    unsigned : 32; unsigned : 32; unsigned : 32;
+    unsigned : 32;
+} rv_phy_rx_ctrl_t;
+extern void phy_fft_scale_force(bool force_en, int8_t force_value);
+extern void phy_force_rx_gain(int force_en, int force_value);
+
+/* ── ADR-108: NVS persistence of gain-lock values ────────────────
+ * After the first successful gain-lock, save AGC/FFT medians into NVS
+ * (namespace "csi_cfg", keys "gl_agc"/"gl_fft"). On subsequent boots
+ * the FW loads them and immediately forces the gain — reboot → CSI
+ * ready in ~0.5 s instead of ~3 s waiting for 300 calibration packets.
+ *
+ * Stored values are tied to: this sensor location + this AP MAC +
+ * this channel + this antenna orientation. If any of those change,
+ * the saved values may be wrong — but harmless: the WiFi PHY will
+ * just receive slightly off-optimal CSI until the operator triggers
+ * a re-calibration (today: clear NVS, reboot; future: dedicated REST).
+ */
+#define RV_GAIN_NVS_NS      "csi_cfg"
+#define RV_GAIN_NVS_K_AGC   "gl_agc"
+#define RV_GAIN_NVS_K_FFT   "gl_fft"
+/* ADR-111: BSSID of the AP that gain-lock was calibrated against.
+ * 6-byte blob. On boot, if the currently-connected AP MAC differs from
+ * the saved value, the cached AGC/FFT are ignored and a full calibration
+ * runs (gain-lock is tied to a specific AP path; swapping APs invalidates
+ * it). The new MAC is written alongside AGC/FFT after re-calibration. */
+#define RV_GAIN_NVS_K_AP_MAC "gl_ap_mac"
+
+static esp_err_t rv_gain_load_from_nvs(uint8_t *agc_out, int8_t *fft_out,
+                                        uint8_t mac_out[6])
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(RV_GAIN_NVS_NS, NVS_READONLY, &h);
+    if (err != ESP_OK) return err;
+    uint8_t agc = 0;
+    int8_t  fft = 0;
+    err = nvs_get_u8(h, RV_GAIN_NVS_K_AGC, &agc);
+    if (err == ESP_OK) err = nvs_get_i8(h, RV_GAIN_NVS_K_FFT, &fft);
+    /* AP MAC is optional — older NVS blobs predate ADR-111 and have only
+     * AGC+FFT. Treat a missing MAC as a wildcard match so a one-time
+     * upgrade doesn't force every node to do a full re-cal. */
+    if (err == ESP_OK && mac_out != NULL) {
+        size_t want = 6;
+        esp_err_t mac_err = nvs_get_blob(h, RV_GAIN_NVS_K_AP_MAC, mac_out, &want);
+        if (mac_err != ESP_OK || want != 6) {
+            memset(mac_out, 0, 6);
+        }
+    }
+    nvs_close(h);
+    if (err == ESP_OK) { *agc_out = agc; *fft_out = fft; }
+    return err;
+}
+
+static void rv_gain_save_to_nvs(uint8_t agc, int8_t fft, const uint8_t mac[6])
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(RV_GAIN_NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        ESP_LOGW("csi_collector", "gain-lock NVS save: nvs_open failed: %s",
+                 esp_err_to_name(err));
+        return;
+    }
+    nvs_set_u8(h, RV_GAIN_NVS_K_AGC, agc);
+    nvs_set_i8(h, RV_GAIN_NVS_K_FFT, fft);
+    if (mac != NULL) {
+        nvs_set_blob(h, RV_GAIN_NVS_K_AP_MAC, mac, 6);
+    }
+    nvs_commit(h);
+    nvs_close(h);
+}
+#define RV_GAIN_CAL_PACKETS  300u
+#define RV_GAIN_MIN_SAFE_AGC 30u     /* < 30 → forcing freezes RX. */
+static uint8_t  s_agc_samples[RV_GAIN_CAL_PACKETS];
+static int8_t   s_fft_samples[RV_GAIN_CAL_PACKETS];
+static uint16_t s_gain_pkt_count = 0;
+static bool     s_gain_locked = false;
+static bool     s_gain_skipped_strong = false;
+static uint8_t  s_gain_agc_value = 0;
+static int8_t   s_gain_fft_value = 0;
+
+static int rv_cmp_u8(const void *a, const void *b) {
+    return (int)*(const uint8_t *)a - (int)*(const uint8_t *)b;
+}
+static int rv_cmp_i8(const void *a, const void *b) {
+    return (int)*(const int8_t *)a - (int)*(const int8_t *)b;
+}
+
+static void rv_gain_lock_process(const wifi_csi_info_t *info)
+{
+    if (s_gain_locked || info == NULL) return;
+
+    /* ADR-108: short-circuit calibration if previous values are in NVS.
+     * ADR-111: also compare the saved BSSID with the currently-connected
+     * AP. If they differ, the cached gain is invalid (different AP path
+     * → different multipath, different optimal AGC) — discard it and run
+     * a full calibration against the new AP. */
+    static bool s_nvs_checked = false;
+    if (!s_nvs_checked) {
+        s_nvs_checked = true;
+        uint8_t agc = 0; int8_t fft = 0; uint8_t saved_mac[6] = {0};
+        if (rv_gain_load_from_nvs(&agc, &fft, saved_mac) == ESP_OK &&
+            agc >= RV_GAIN_MIN_SAFE_AGC)
+        {
+            /* Read the current AP MAC. If we can't (not connected yet)
+             * the gain-lock callback should not be firing at all — but
+             * be defensive and skip the cache if AP info is unavailable. */
+            wifi_ap_record_t ap;
+            bool ap_ok = (esp_wifi_sta_get_ap_info(&ap) == ESP_OK);
+            bool wildcard = true;
+            for (int i = 0; i < 6; i++) {
+                if (saved_mac[i] != 0) { wildcard = false; break; }
+            }
+            if (ap_ok && (wildcard ||
+                          memcmp(saved_mac, ap.bssid, 6) == 0))
+            {
+                phy_fft_scale_force(true, fft);
+                phy_force_rx_gain(1, (int)agc);
+                s_gain_agc_value = agc;
+                s_gain_fft_value = fft;
+                s_gain_locked = true;
+                ESP_LOGI("csi_collector",
+                    "gain-lock RESTORED from NVS: AGC=%u FFT=%d "
+                    "AP=%02x:%02x:%02x:%02x:%02x:%02x%s",
+                    (unsigned)agc, (int)fft,
+                    ap.bssid[0], ap.bssid[1], ap.bssid[2],
+                    ap.bssid[3], ap.bssid[4], ap.bssid[5],
+                    wildcard ? " (legacy NVS, no MAC stored)" : "");
+                return;
+            }
+            if (ap_ok) {
+                ESP_LOGW("csi_collector",
+                    "gain-lock NVS MISS: saved AP=%02x:%02x:%02x:%02x:%02x:%02x "
+                    "→ current=%02x:%02x:%02x:%02x:%02x:%02x. Re-calibrating.",
+                    saved_mac[0], saved_mac[1], saved_mac[2],
+                    saved_mac[3], saved_mac[4], saved_mac[5],
+                    ap.bssid[0], ap.bssid[1], ap.bssid[2],
+                    ap.bssid[3], ap.bssid[4], ap.bssid[5]);
+            }
+        }
+    }
+
+    const rv_phy_rx_ctrl_t *phy = (const rv_phy_rx_ctrl_t *)info;
+
+    if (s_gain_pkt_count < RV_GAIN_CAL_PACKETS) {
+        s_agc_samples[s_gain_pkt_count] = phy->agc_gain;
+        s_fft_samples[s_gain_pkt_count] = phy->fft_gain;
+        s_gain_pkt_count++;
+        if (s_gain_pkt_count == RV_GAIN_CAL_PACKETS / 4 ||
+            s_gain_pkt_count == RV_GAIN_CAL_PACKETS / 2 ||
+            s_gain_pkt_count == (3u * RV_GAIN_CAL_PACKETS) / 4u) {
+            ESP_LOGI(TAG, "gain-lock cal %u%% (%u/%u, AGC=%u FFT=%d)",
+                     (unsigned)((s_gain_pkt_count * 100u) / RV_GAIN_CAL_PACKETS),
+                     (unsigned)s_gain_pkt_count, (unsigned)RV_GAIN_CAL_PACKETS,
+                     (unsigned)phy->agc_gain, (int)phy->fft_gain);
+        }
+        return;
+    }
+
+    /* Reached the calibration target — compute medians, lock or skip. */
+    qsort(s_agc_samples, RV_GAIN_CAL_PACKETS, sizeof(uint8_t), rv_cmp_u8);
+    qsort(s_fft_samples, RV_GAIN_CAL_PACKETS, sizeof(int8_t),  rv_cmp_i8);
+    s_gain_agc_value = s_agc_samples[RV_GAIN_CAL_PACKETS / 2];
+    s_gain_fft_value = s_fft_samples[RV_GAIN_CAL_PACKETS / 2];
+
+    if (s_gain_agc_value < RV_GAIN_MIN_SAFE_AGC) {
+        s_gain_skipped_strong = true;
+        ESP_LOGW(TAG,
+            "gain-lock SKIPPED: AGC median=%u < %u (signal too strong, "
+            "forcing would freeze RX). Move sensor 2-3 m from AP.",
+            (unsigned)s_gain_agc_value, (unsigned)RV_GAIN_MIN_SAFE_AGC);
+    } else {
+        phy_fft_scale_force(true, s_gain_fft_value);
+        phy_force_rx_gain(1, (int)s_gain_agc_value);
+        ESP_LOGI(TAG,
+            "gain-lock APPLIED: AGC=%u FFT=%d (median of %u packets) — "
+            "baseline drift should now collapse.",
+            (unsigned)s_gain_agc_value, (int)s_gain_fft_value,
+            (unsigned)RV_GAIN_CAL_PACKETS);
+        /* ADR-108: persist for next boot — short-circuit calibration.
+         * ADR-111: also persist the AP BSSID this calibration ran against
+         * so the boot-time short-circuit can detect AP swaps and discard
+         * stale gain values. */
+        uint8_t cur_mac[6] = {0};
+        wifi_ap_record_t ap;
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+            memcpy(cur_mac, ap.bssid, 6);
+        }
+        rv_gain_save_to_nvs(s_gain_agc_value, s_gain_fft_value, cur_mac);
+        ESP_LOGI(TAG,
+                 "gain-lock PERSISTED to NVS (AGC=%u FFT=%d AP=%02x:%02x:%02x:%02x:%02x:%02x)",
+                 (unsigned)s_gain_agc_value, (int)s_gain_fft_value,
+                 cur_mac[0], cur_mac[1], cur_mac[2],
+                 cur_mac[3], cur_mac[4], cur_mac[5]);
+    }
+    s_gain_locked = true;
+}
+#else
+static inline void rv_gain_lock_process(const wifi_csi_info_t *info) { (void)info; }
+#endif
+
 static uint32_t s_sequence = 0;
 static uint32_t s_cb_count = 0;
 static uint32_t s_send_ok = 0;
@@ -64,7 +292,10 @@ static uint32_t s_rate_skip = 0;
  * We cap the send rate to avoid exhausting lwIP packet buffers (ENOMEM).
  * Default: 20 ms = 50 Hz max send rate.
  */
-#define CSI_MIN_SEND_INTERVAL_US  (20 * 1000)
+/* Send rate cap reduced from 20 ms to 4 ms (250 Hz) so the host calibration
+ * UI can show every available frame. The real ceiling is whatever rate the
+ * WiFi CSI callback actually fires at (usually 5-50 Hz on a quiet LAN). */
+#define CSI_MIN_SEND_INTERVAL_US  (4 * 1000)
 static int64_t s_last_send_us = 0;
 
 /**
@@ -116,6 +347,10 @@ static esp_timer_handle_t s_hop_timer = NULL;
  *   [17]     Noise floor (i8)
  *   [18..19] Reserved
  *   [20..]   I/Q data (raw bytes from ESP-IDF callback)
+ *   [20+iq_len .. 20+iq_len+3]  ADR-106: sensor timestamp_us (u32 LE)
+ *                               from info->rx_ctrl.timestamp. Trailing
+ *                               4 bytes — server parses opportunistically;
+ *                               old server tolerant of extra bytes.
  */
 size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf_len)
 {
@@ -127,7 +362,7 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
     uint16_t iq_len = (uint16_t)info->len;
     uint16_t n_subcarriers = iq_len / (2 * n_antennas);
 
-    size_t frame_size = CSI_HEADER_SIZE + iq_len;
+    size_t frame_size = CSI_HEADER_SIZE + iq_len + 4 /* ADR-106 trailing timestamp_us */;
     if (frame_size > buf_len) {
         ESP_LOGW(TAG, "Buffer too small: need %u, have %u", (unsigned)frame_size, (unsigned)buf_len);
         return 0;
@@ -180,6 +415,13 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
     /* I/Q data */
     memcpy(&buf[CSI_HEADER_SIZE], info->buf, iq_len);
 
+    /* ADR-106: trailing sensor µs timestamp from rx_ctrl.timestamp.
+     * This is monotonic µs since FW boot (per ESP-IDF docs) and lets
+     * the host align frames across nodes within ~µs once the boot
+     * offsets are learned. Old server ignores trailing bytes. */
+    uint32_t ts_us = info->rx_ctrl.timestamp;
+    memcpy(&buf[CSI_HEADER_SIZE + iq_len], &ts_us, 4);
+
     return frame_size;
 }
 
@@ -207,6 +449,11 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
             return;  /* Source MAC doesn't match filter — skip frame. */
         }
     }
+
+    /* ADR-100: feed the gain-lock calibrator. No-op once locked / on
+     * unsupported targets. Runs before the heavy work so calibration
+     * happens during the first ~6 s after boot regardless of host traffic. */
+    rv_gain_lock_process(info);
 
     s_cb_count++;
 
@@ -351,25 +598,15 @@ void csi_collector_init(void)
         ESP_LOGI(TAG, "WiFi modem sleep disabled (WIFI_PS_NONE) for CSI capture");
     }
 
-    /* Enable promiscuous mode — required for reliable CSI callbacks.
-     * Without this, CSI only fires on frames destined to this station,
-     * which may be very infrequent on a quiet network. */
-    ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
-    ESP_ERROR_CHECK(esp_wifi_set_promiscuous_rx_cb(wifi_promiscuous_cb));
-
-    /* MGMT-only promiscuous filter + active probe injection (RuView#396).
-     *
-     * DATA frames cause 100-500+ WiFi HW interrupts/sec which crashes Core 0
-     * in wDev_ProcessFiq (SPI flash cache race in ESP-IDF WiFi blob).
-     * MGMT-only gives ~10 Hz (beacons). Probe request injection at 10 Hz
-     * adds ~10 Hz probe responses from APs → ~20 Hz total, matching the
-     * edge processing designed sample rate of 20 Hz. */
-    wifi_promiscuous_filter_t filt = {
-        .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT,
-    };
-    ESP_ERROR_CHECK(esp_wifi_set_promiscuous_filter(&filt));
-
-    ESP_LOGI(TAG, "Promiscuous mode enabled (MGMT-only, RuView#396)");
+    /* DO NOT enable promiscuous mode on these ESP32-S3 boards. Empirically,
+     * setting esp_wifi_set_promiscuous(true) while STA is connected suppresses
+     * the CSI RX callback entirely on this hardware revision — adaptive_ctrl
+     * reports yield=0pps forever. FW5.47 (esp32s3_csi_capture) works on the
+     * same boards using plain STA-mode CSI (no promiscuous), so we mirror
+     * that approach here. CSI fires for every frame the STA actually
+     * receives (beacons + unicast → ~10-20 Hz, same as edge_processing
+     * expects). */
+    ESP_LOGI(TAG, "Promiscuous mode SKIPPED (CSI via STA-only, broken otherwise on this board)");
 
     wifi_csi_config_t csi_config = {
         .lltf_en = true,

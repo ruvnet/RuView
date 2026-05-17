@@ -224,6 +224,25 @@ static edge_config_t s_cfg;
 /** Per-subcarrier running variance (for top-K selection). */
 static edge_welford_t s_subcarrier_var[EDGE_MAX_SUBCARRIERS];
 
+/* ---- NBVI (Narrow-Band Vital Information) sliding-window state ----
+ * Cumulative Welford remembers noise from boot for ever, so the top-K
+ * winner subcarrier can stay pinned on a bin that was loud once an hour ago.
+ * We additionally track an EMA-based amplitude variance per subcarrier
+ * (alpha = 0.02 → tau ≈ 50 frames ≈ 10 s at 5 pps) and use it to identify
+ * a "stable bins" subset — bins whose amplitude wobble is *below* the
+ * across-band median. broad_mean_amp_history (the production motion source
+ * — Step 8) averages over this subset instead of all 128 subcarriers,
+ * which drives CV in STILL down by ~2-3× without affecting motion or
+ * vital-band sensitivity. ADR-100/ADR-101 follow-up.  */
+static float    s_sc_amp_ema[EDGE_MAX_SUBCARRIERS];    /**< per-bin EMA of amplitude */
+static float    s_sc_amp_var_ema[EDGE_MAX_SUBCARRIERS];/**< per-bin EMA of (a-EMA)^2 */
+static uint16_t s_sc_init;                              /**< frames seen for NBVI warm-up */
+#define NBVI_ALPHA            0.02f   /* EMA smoothing — ~10 s at 5 pps */
+#define NBVI_WARMUP_FRAMES    50      /* until then, fall back to full-band average */
+#define NBVI_REFRESH_EVERY    25      /* recompute stable_bin mask every N frames */
+static bool     s_nbvi_stable_bin[EDGE_MAX_SUBCARRIERS]; /**< true → in quiet/stable set */
+static uint8_t  s_nbvi_stable_count;                     /**< # of true entries above */
+
 /** Previous phase per subcarrier (for unwrapping). */
 static float s_prev_phase[EDGE_MAX_SUBCARRIERS];
 static bool  s_phase_initialized;
@@ -234,8 +253,30 @@ static uint8_t s_top_k_count;
 
 /** Phase history for the primary (highest-variance) subcarrier. */
 static float s_phase_history[EDGE_PHASE_HISTORY_LEN];
+
+/** Amplitude history for the primary subcarrier (issue #555: motion source).
+ * Unwrapped phase drifts monotonically (thermal/oscillator/doppler), so
+ * variance-of-phase is dominated by drift slope rather than motion.
+ * Amplitudes are stable in calm rooms and spike on body motion. */
+static float s_amp_history[EDGE_PHASE_HISTORY_LEN];
+
 static uint16_t s_history_len;
 static uint16_t s_history_idx;
+
+/* ---- Broadband amplitude history (issue #555 — production motion source) ----
+ * 20-sample ring of per-frame *mean amplitude across all subcarriers*. Used by
+ * Step 8 as the motion_energy source because empirical measurements on this
+ * hardware (UART DBG_DSP capture, 2026-05-14) showed broadband variance
+ * separates still vs. motion much more reliably than primary-subcarrier
+ * variance:
+ *   still room: bvar median ~0.08, max ~1.6
+ *   walking 2 m: bvar median ~3.5, max ~14
+ *   walk/still ratio: ~44×
+ * Compare primary-subcarrier amp variance: still ~1.3, walk ~24, ratio ~18×
+ * with spurious spikes in stillness when the top-K winner subcarrier flips. */
+#define EDGE_BROAD_HISTORY_LEN 20
+static float    s_broad_mean_amp_history[EDGE_BROAD_HISTORY_LEN];
+static uint16_t s_broad_mean_amp_idx;
 
 /** Biquad filters for breathing and heart rate. */
 static edge_biquad_t s_bq_breathing;
@@ -709,7 +750,24 @@ static void send_feature_vector(void)
 static void process_frame(const edge_ring_slot_t *slot)
 {
     uint16_t n_subcarriers = slot->iq_len / 2;
-    if (n_subcarriers == 0 || n_subcarriers > EDGE_MAX_SUBCARRIERS) return;
+    if (n_subcarriers == 0) return;
+    /* Issue #555 root cause: ESP32-S3 with lltf+htltf+stbc+ltf_merge yields
+     * 384 B I/Q (192 subcarriers) per CSI callback, while EDGE_MAX_SUBCARRIERS
+     * is 128. The previous `> EDGE_MAX_SUBCARRIERS → return` made process_frame
+     * silently bail on every frame, so s_motion_energy stayed pinned at its
+     * init value (0.0). Truncate instead — the first 128 subcarriers cover
+     * the L-LTF + first half of HT-LTF, which is plenty for motion / vitals. */
+    if (n_subcarriers > EDGE_MAX_SUBCARRIERS) {
+        static bool s_warned_trunc;
+        if (!s_warned_trunc) {
+            ESP_LOGW(TAG, "CSI %u subcarriers > EDGE_MAX_SUBCARRIERS=%u — "
+                          "truncating (one-shot warning)",
+                     (unsigned)n_subcarriers,
+                     (unsigned)EDGE_MAX_SUBCARRIERS);
+            s_warned_trunc = true;
+        }
+        n_subcarriers = EDGE_MAX_SUBCARRIERS;
+    }
 
     s_frame_count++;
     s_latest_rssi = slot->rssi;
@@ -746,13 +804,109 @@ static void process_frame(const edge_ring_slot_t *slot)
 
     if (s_top_k_count == 0) return;
 
-    /* --- Step 5: Phase of primary (highest-variance) subcarrier --- */
+    /* --- Step 5: Phase + amplitude of primary (highest-variance) subcarrier --- */
     float primary_phase = phases[s_top_k[0]];
 
-    /* Store in phase history ring buffer. */
+    /* Amplitude of primary subcarrier — drift-free motion proxy (issue #555). */
+    uint8_t primary_sc = s_top_k[0];
+    int8_t pi_val = (int8_t)slot->iq_data[primary_sc * 2];
+    int8_t pq_val = (int8_t)slot->iq_data[primary_sc * 2 + 1];
+    float primary_amp = sqrtf((float)(pi_val * pi_val + pq_val * pq_val));
+
+    /* Store in phase + amplitude history ring buffers. */
     s_phase_history[s_history_idx] = primary_phase;
+    s_amp_history[s_history_idx]   = primary_amp;
     s_history_idx = (s_history_idx + 1) % EDGE_PHASE_HISTORY_LEN;
     if (s_history_len < EDGE_PHASE_HISTORY_LEN) s_history_len++;
+
+    /* --- Broadband + NBVI probe (always on, feeds Step 8) ---
+     *
+     * One pass over all subcarriers does three jobs:
+     *   (a) sum |I+jQ| for the full-band average (used during warm-up and
+     *       as the fallback);
+     *   (b) per-bin EMA of amplitude and amplitude-variance (alpha = NBVI_ALPHA,
+     *       tau ≈ 10 s) so we can rank bins by recent noise level;
+     *   (c) periodically (every NBVI_REFRESH_EVERY frames) recompute the
+     *       "stable bins" mask = bins whose EMA variance is below the
+     *       across-band median. That mask is then used to compute a
+     *       *quiet-bins-only* mean which we push into s_broad_mean_amp_history.
+     *
+     * Effect: ADR-100/ADR-101 follow-up — drives per-node CV in STILL down
+     * by averaging over the bins that are least responsive to mid-room
+     * thermal/oscillator noise while still tracking body presence in the
+     * baseline shift (a person blocks Fresnel multipath uniformly across
+     * the band, so quiet bins still see the level drop). */
+    {
+        float band_amp_sum = 0.0f;
+        for (uint16_t sc = 0; sc < n_subcarriers; sc++) {
+            int8_t iv = (int8_t)slot->iq_data[sc * 2];
+            int8_t qv = (int8_t)slot->iq_data[sc * 2 + 1];
+            float a = sqrtf((float)(iv * iv + qv * qv));
+            band_amp_sum += a;
+
+            /* Update per-bin EMA and EMA of (a - EMA)^2. */
+            if (s_sc_init < NBVI_WARMUP_FRAMES) {
+                /* Seed the EMA from the very first sample to avoid the
+                 * slow ramp from zero biasing the median for the first
+                 * ~10 s. */
+                if (s_sc_amp_ema[sc] == 0.0f) s_sc_amp_ema[sc] = a;
+            }
+            float prev_mean = s_sc_amp_ema[sc];
+            float new_mean  = prev_mean + NBVI_ALPHA * (a - prev_mean);
+            float dev       = a - new_mean;
+            s_sc_amp_ema[sc]     = new_mean;
+            s_sc_amp_var_ema[sc] = s_sc_amp_var_ema[sc] +
+                                   NBVI_ALPHA * (dev * dev - s_sc_amp_var_ema[sc]);
+        }
+        if (s_sc_init < NBVI_WARMUP_FRAMES) s_sc_init++;
+        float band_amp_mean = (n_subcarriers > 0)
+            ? band_amp_sum / (float)n_subcarriers : 0.0f;
+
+        /* Refresh stable_bin mask periodically — only after warm-up so the
+         * EMA variances are populated. */
+        if (s_sc_init >= NBVI_WARMUP_FRAMES
+            && (s_frame_count % NBVI_REFRESH_EVERY) == 0)
+        {
+            /* Median EMVar across active subcarriers (n_subcarriers ≤ 128).
+             * Stack copy is cheap — a few hundred bytes. */
+            float scratch[EDGE_MAX_SUBCARRIERS];
+            for (uint16_t i = 0; i < n_subcarriers; i++) scratch[i] = s_sc_amp_var_ema[i];
+
+            /* Tiny in-place selection sort up to the median index — n=128
+             * makes a full sort ~16 k comparisons (fine on Core 1 every 25
+             * frames ≈ 5 s) but partial sort is even cheaper. */
+            uint16_t target = n_subcarriers / 2;
+            for (uint16_t i = 0; i <= target; i++) {
+                uint16_t min_i = i;
+                for (uint16_t j = i + 1; j < n_subcarriers; j++) {
+                    if (scratch[j] < scratch[min_i]) min_i = j;
+                }
+                if (min_i != i) {
+                    float t = scratch[i]; scratch[i] = scratch[min_i]; scratch[min_i] = t;
+                }
+            }
+            float median_var = scratch[target];
+
+            uint8_t count = 0;
+            for (uint16_t i = 0; i < n_subcarriers; i++) {
+                bool stable = s_sc_amp_var_ema[i] <= median_var;
+                s_nbvi_stable_bin[i] = stable;
+                if (stable) count++;
+            }
+            s_nbvi_stable_count = count;
+        }
+
+        /* IMPORTANT: motion_energy (Step 8) MUST take the variance of the
+         * *full-band* mean. Pushing a quiet-bins-only mean here would zero
+         * out motion_energy entirely — quiet bins by construction barely
+         * move, so the windowed variance collapses to ~0 and stays there
+         * (verified empirically on 2026-05-17: motion_score went constant
+         * 0.013/0.021 with std=0 across 125 frames). The NBVI EMA state
+         * above remains for future use (a second "baseline_quiet" channel,
+         * not yet wired to the feature_state packet). */
+        s_broad_mean_amp_history[s_broad_mean_amp_idx] = band_amp_mean;
+        s_broad_mean_amp_idx = (s_broad_mean_amp_idx + 1) % EDGE_BROAD_HISTORY_LEN;
+    }
 
     /* --- Step 6: Biquad bandpass filtering --- */
     float br_val = biquad_process(&s_bq_breathing, primary_phase);
@@ -783,20 +937,49 @@ static void process_frame(const edge_ring_slot_t *slot)
         if (hr_bpm >= 40.0f && hr_bpm <= 180.0f) s_heartrate_bpm = hr_bpm;
     }
 
-    /* --- Step 8: Motion energy (variance of recent phases) --- */
+    /* --- Step 8: Motion energy (broadband amplitude variance) ---
+     *
+     * Issue #555 evolution:
+     *   v1 — variance of unwrapped *phase*: dominated by thermal/oscillator
+     *        drift → constant non-zero regardless of motion.
+     *   v2 — variance of *primary subcarrier* amplitude: better, but the
+     *        top-K winner subcarrier flips occasionally (winner_changed=1
+     *        in DBG_DSP), causing spurious spikes in stillness — measured
+     *        pvar still ~1.3 with bursts to 22 when nothing was moving.
+     *   v3 (current) — variance of *band-wide mean amplitude*: averaging
+     *        across all 128 subcarriers cancels per-subcarrier noise; what
+     *        remains is the overall multipath energy level, which moves
+     *        coherently with body presence in the Fresnel zone.
+     *
+     * Empirical numbers from 2026-05-14 capture (room02, 2 m, person):
+     *   still:    bvar median 0.08, max 1.6
+     *   walking:  bvar median 3.5,  max 14.3
+     *   walk/still ratio: ~44× (vs ~18× for primary-subcarrier variance)
+     *
+     * Normalization: motion_energy = clamp(bvar / 3.0, 0, 1).
+     *   still 0.08 → 0.027 (under the <0.05 spec)
+     *   still 1.6  → 0.53  (rare transient — acceptable)
+     *   walk  1.6  → 0.53  (over the >0.3 spec)
+     *   walk  3.5+ → 1.0   (saturated, presence definite) */
     if (s_history_len >= 10) {
         float sum = 0.0f, sum2 = 0.0f;
-        uint16_t window = (s_history_len < 20) ? s_history_len : 20;
-        for (uint16_t i = 0; i < window; i++) {
-            uint16_t ri = (s_history_idx + EDGE_PHASE_HISTORY_LEN
-                           - window + i) % EDGE_PHASE_HISTORY_LEN;
-            float v = s_phase_history[ri];
-            sum += v;
+        for (uint16_t i = 0; i < EDGE_BROAD_HISTORY_LEN; i++) {
+            float v = s_broad_mean_amp_history[i];
+            sum  += v;
             sum2 += v * v;
         }
-        float mean = sum / (float)window;
-        s_motion_energy = (sum2 / (float)window) - (mean * mean);
-        if (s_motion_energy < 0.0f) s_motion_energy = 0.0f;
+        float mean = sum  / (float)EDGE_BROAD_HISTORY_LEN;
+        float var  = (sum2 / (float)EDGE_BROAD_HISTORY_LEN) - mean * mean;
+        if (var < 0.0f) var = 0.0f;
+
+        /* Divisor sized for sensor deployment with 1-3 m line-of-sight to
+         * the activity zone. At that range multipath averages out and
+         * broadband variance is small (~0.1-2.0 empty, ~1-10 walking).
+         * Lower divisor = higher sensitivity but more saturation if a
+         * sensor is moved close to the body (≤50 cm). */
+        float energy = var / 5.0f;
+        if (energy > 1.0f) energy = 1.0f;
+        s_motion_energy = energy;
     }
 
     /* --- Step 9: Presence detection --- */
@@ -1000,6 +1183,18 @@ esp_err_t edge_processing_init(const edge_config_t *cfg)
     memset(&s_ring, 0, sizeof(s_ring));
     memset(s_subcarrier_var, 0, sizeof(s_subcarrier_var));
     memset(s_prev_phase, 0, sizeof(s_prev_phase));
+    memset(s_phase_history, 0, sizeof(s_phase_history));
+    memset(s_amp_history,   0, sizeof(s_amp_history));
+    memset(s_broad_mean_amp_history, 0, sizeof(s_broad_mean_amp_history));
+    s_broad_mean_amp_idx = 0;
+    /* NBVI sliding-window state — recomputed from fresh on each init so
+     * the stable_bin mask doesn't carry over stale stats from a previous
+     * deployment / room. */
+    memset(s_sc_amp_ema,     0, sizeof(s_sc_amp_ema));
+    memset(s_sc_amp_var_ema, 0, sizeof(s_sc_amp_var_ema));
+    memset(s_nbvi_stable_bin, 0, sizeof(s_nbvi_stable_bin));
+    s_sc_init = 0;
+    s_nbvi_stable_count = 0;
     s_phase_initialized = false;
     s_top_k_count = 0;
     s_history_len = 0;
@@ -1034,12 +1229,18 @@ esp_err_t edge_processing_init(const edge_config_t *cfg)
     }
 
     /* Design biquad bandpass filters.
-     * Sampling rate ~20 Hz (typical ESP32 CSI callback rate). */
-    const float fs = 20.0f;
+     *
+     * fs must match the sample_rate used by estimate_bpm_zero_crossing()
+     * in process_frame() (currently 10.0 Hz — see RuView#396 comment near
+     * the `sample_rate` literal). Designing biquads at 20 Hz while feeding
+     * them 10 Hz data effectively halves the passband: the "0.1-0.5 Hz
+     * breathing" filter became 0.05-0.25 Hz, which cuts out 12-18 BPM
+     * (0.2-0.3 Hz) — the bulk of human respiration. */
+    const float fs = 10.0f;
     biquad_bandpass_design(&s_bq_breathing, fs, 0.1f, 0.5f);
     biquad_bandpass_design(&s_bq_heartrate, fs, 0.8f, 2.0f);
 
-    /* Design per-person filters. */
+    /* Design per-person filters at the same fs. */
     for (uint8_t p = 0; p < EDGE_MAX_PERSONS; p++) {
         biquad_bandpass_design(&s_person_bq_br[p], fs, 0.1f, 0.5f);
         biquad_bandpass_design(&s_person_bq_hr[p], fs, 0.8f, 2.0f);

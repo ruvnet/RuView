@@ -1,4 +1,4 @@
-use std::net::{SocketAddr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::time::Duration;
 
 use mdns_sd::{ServiceDaemon, ServiceEvent};
@@ -37,13 +37,15 @@ pub async fn discover_nodes(
 ) -> Result<Vec<DiscoveredNode>, String> {
     let timeout_duration = Duration::from_millis(timeout_ms.unwrap_or(3000));
 
-    // Run mDNS and UDP discovery concurrently
-    let (mdns_nodes, udp_nodes) = tokio::join!(
-        discover_via_mdns(timeout_duration),
-        discover_via_udp(timeout_duration),
-    );
+    // Current RuView FW doesn't advertise mDNS `_ruview._udp.local.` and
+    // doesn't respond to UDP broadcast beacons, so those two paths return
+    // nothing on every poll and just burn CPU/network. HTTP sweep alone
+    // suffices for our deployment.
+    let http_nodes = discover_via_http_sweep(timeout_duration).await;
+    let mdns_nodes: Result<Vec<DiscoveredNode>, String> = Ok(Vec::new());
+    let udp_nodes: Result<Vec<DiscoveredNode>, String> = Ok(Vec::new());
 
-    // Merge results, deduplicating by MAC address
+    // Merge results, deduplicating by MAC address (or IP for HTTP-only nodes)
     let mut registry = NodeRegistry::new();
 
     for node in mdns_nodes.unwrap_or_default() {
@@ -58,7 +60,23 @@ pub async fn discover_nodes(
         }
     }
 
+    let http_vec = http_nodes.unwrap_or_default();
+    let _ = std::fs::OpenOptions::new().create(true).append(true)
+        .open("/tmp/ruview-discovery.log")
+        .map(|mut f| { use std::io::Write; let _ = writeln!(f, "[discover] http_vec.len()={}", http_vec.len()); });
+    for node in http_vec {
+        // HTTP sweep returns nodes without MAC — key by IP-derived pseudo-MAC
+        let key = node.mac.clone().unwrap_or_else(|| format!("ip:{}", node.ip));
+        let _ = std::fs::OpenOptions::new().create(true).append(true)
+            .open("/tmp/ruview-discovery.log")
+            .map(|mut f| { use std::io::Write; let _ = writeln!(f, "[discover] upsert key={} ip={}", key, node.ip); });
+        registry.upsert(MacAddress::new(&key), node);
+    }
+
     let nodes: Vec<DiscoveredNode> = registry.all().into_iter().cloned().collect();
+    let _ = std::fs::OpenOptions::new().create(true).append(true)
+        .open("/tmp/ruview-discovery.log")
+        .map(|mut f| { use std::io::Write; let _ = writeln!(f, "[discover] returning {} nodes", nodes.len()); });
 
     // Update global state
     {
@@ -219,6 +237,155 @@ async fn discover_via_udp(timeout_duration: Duration) -> Result<Vec<DiscoveredNo
 
 /// Parse a UDP beacon response into a DiscoveredNode.
 /// Format: RUVIEW_BEACON|<mac>|<node_id>|<version>|<chip>|<role>|<tdm_slot>|<tdm_total>
+/// Discover nodes via HTTP probe of `/ota/status` on port 8032 across local /24 subnet.
+///
+/// Strategy:
+/// 1. Detect host IPv4 by opening a non-routable UDP socket "connect" to 8.8.8.8.
+/// 2. For each host address in the /24 (1..=254, excluding self), send
+///    `GET http://X.X.X.X:8032/ota/status` with a short per-request timeout.
+/// 3. If the response is JSON containing `version` + `running_partition`,
+///    treat the device as a RuView CSI node and build a `DiscoveredNode`.
+///
+/// MAC is left as `None` (sensors don't expose it on /ota/status); UI manual
+/// add or a future FW field could fill it in.
+async fn discover_via_http_sweep(timeout_duration: Duration) -> Result<Vec<DiscoveredNode>, String> {
+    // 1. Detect host IPv4
+    let host_ip = match detect_host_ipv4() {
+        Some(ip) => ip,
+        None => {
+            tracing::warn!("HTTP sweep: could not determine host IPv4");
+            return Ok(Vec::new());
+        }
+    };
+    let octets = host_ip.octets();
+    let base = (octets[0], octets[1], octets[2]);
+    tracing::info!("HTTP sweep on {}.{}.{}.0/24 (self={})", base.0, base.1, base.2, host_ip);
+
+    // 2. Build HTTP client with per-request timeout
+    // Per-request timeout — generous enough for ESP32 HTTP server to respond
+    // even under WiFi contention. With join_all of all 254 probes in parallel,
+    // total elapsed = max(per_req_timeout, slowest_response) ≈ 1.5 s.
+    let per_req_timeout = std::cmp::min(timeout_duration, Duration::from_millis(1500));
+    let client = match reqwest::Client::builder()
+        .timeout(per_req_timeout)
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("HTTP sweep: client build failed: {}", e);
+            return Ok(Vec::new());
+        }
+    };
+
+    // 3. Probe all hosts in parallel (capped by spawning futures)
+    let mut tasks: Vec<tokio::task::JoinHandle<Option<DiscoveredNode>>> = Vec::new();
+    // Scan only the low end of /24 (2..=60) — typical home/office DHCP pool
+    // for IoT devices. Sweeping all 254 hosts every 10 s causes UI lag on
+    // tokio runtime saturation. Operators with sensors at higher offsets
+    // should expand this range.
+    for h in 2u8..=60u8 {
+        if h == octets[3] {
+            continue; // skip self
+        }
+        let ip = format!("{}.{}.{}.{}", base.0, base.1, base.2, h);
+        let client = client.clone();
+        tasks.push(tokio::spawn(async move {
+            // Probe FW5.47 /status first, then RuView /ota/status fallback.
+            let url1 = format!("http://{}:8032/status", ip);
+            let body: String = match client.get(&url1).send().await {
+                Ok(r) if r.status().is_success() => match r.text().await {
+                    Ok(t) => t,
+                    Err(_) => return None,
+                },
+                _ => {
+                    let url2 = format!("http://{}:8032/ota/status", ip);
+                    match client.get(&url2).send().await {
+                        Ok(r) if r.status().is_success() => match r.text().await {
+                            Ok(t) => t,
+                            Err(_) => return None,
+                        },
+                        _ => return None,
+                    }
+                }
+            };
+            let _ = std::fs::OpenOptions::new().create(true).append(true)
+                .open("/tmp/ruview-discovery.log")
+                .map(|mut f| { use std::io::Write; let _ = writeln!(f, "[probe] {} OK len={}", ip, body.len()); });
+            let v: serde_json::Value = match serde_json::from_str(&body) {
+                Ok(v) => v,
+                Err(e) => {
+                    let _ = std::fs::OpenOptions::new().create(true).append(true)
+                        .open("/tmp/ruview-discovery.log")
+                        .map(|mut f| { use std::io::Write; let _ = writeln!(f, "[probe] {} json err: {}", ip, e); });
+                    return None;
+                }
+            };
+            // Both FW5.47 (`version`,`fw`,`node`) and RuView (`version`,`running_partition`).
+            let version = v.get("version").and_then(|x| x.as_str()).map(String::from)
+                .or_else(|| v.get("version").and_then(|x| Some(x.to_string())))
+                .unwrap_or_else(|| "unknown".to_string());
+            let mac = v.get("node").and_then(|x| x.as_str()).map(String::from);
+            Some(DiscoveredNode {
+                ip,
+                mac,
+                hostname: None,
+                node_id: 0,
+                firmware_version: Some(version),
+                health: HealthStatus::Online,
+                last_seen: chrono::Utc::now().to_rfc3339(),
+                chip: Chip::Esp32s3,
+                mesh_role: MeshRole::Node,
+                discovery_method: DiscoveryMethod::HttpSweep,
+                tdm_slot: None,
+                tdm_total: None,
+                edge_tier: None,
+                uptime_secs: None,
+                capabilities: Some(NodeCapabilities {
+                    wasm: false,
+                    ota: true,
+                    csi: true,
+                }),
+                friendly_name: None,
+                notes: None,
+            })
+        }));
+    }
+
+    // 4. Wait with overall budget
+    // Wait for ALL tasks to settle in parallel, bounded by the overall budget.
+    // Previously used a sequential `for task in tasks { select! }` which awaited
+    // tasks in IP order — a non-responding 192.168.1.1 blocked discovery of
+    // 192.168.1.17/19 even though those completed in ~50 ms.
+    let join_all_fut = futures::future::join_all(tasks);
+    let results = match tokio::time::timeout(timeout_duration, join_all_fut).await {
+        Ok(rs) => rs,
+        Err(_) => {
+            tracing::info!("HTTP sweep timeout — partial results lost");
+            Vec::new()
+        }
+    };
+    let mut found = Vec::new();
+    for r in results {
+        if let Ok(Some(node)) = r {
+            tracing::info!("HTTP sweep found {} fw={:?}", node.ip, node.firmware_version);
+            found.push(node);
+        }
+    }
+    Ok(found)
+}
+
+/// Determine the primary IPv4 of this host by "connecting" a UDP socket
+/// to a non-routable target (no packets sent) and reading local_addr.
+fn detect_host_ipv4() -> Option<Ipv4Addr> {
+    let sock = UdpSocket::bind("0.0.0.0:0").ok()?;
+    sock.connect("8.8.8.8:80").ok()?;
+    let local = sock.local_addr().ok()?;
+    match local.ip() {
+        IpAddr::V4(v4) if !v4.is_loopback() => Some(v4),
+        _ => None,
+    }
+}
+
 fn parse_beacon_response(data: &[u8], addr: SocketAddr) -> Option<DiscoveredNode> {
     let text = std::str::from_utf8(data).ok()?;
     let parts: Vec<&str> = text.split('|').collect();

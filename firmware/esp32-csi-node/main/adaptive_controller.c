@@ -275,6 +275,11 @@ static void emit_feature_state(void)
         pkt.presence_score  = obs.presence_score;
         pkt.anomaly_score   = obs.anomaly_score;
         pkt.node_coherence  = obs.node_coherence;
+        /* ADR-100 D3: ship median RSSI through feature_state so the server
+         * UI's RSSI trace has something other than the -50 fallback. The
+         * value comes from radio_ops::get_health() which medians rx_ctrl.rssi
+         * across the recent capture window. 0 means "not measured yet". */
+        pkt.rssi_dbm        = obs.rssi_median_dbm;
     }
 
     /* Fill vitals from edge_processing's latest packet. */
