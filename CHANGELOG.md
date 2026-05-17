@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`adaptive_classifier.rs:94` no longer panics on NaN feature values** (closes #611).
+  `sorted.sort_by(|a, b| a.partial_cmp(b).unwrap())` returned `None` and panicked
+  whenever a single `NaN` reached the classifier from real ESP32 hardware (silent
+  DSP div-by-zero, empty buffer). One bad frame killed the entire sensing-server
+  process. Swapped for `unwrap_or(Ordering::Equal)`, matching the pattern the
+  same file already used at lines 149-150 and 155. Per-frame hot path; this was
+  a real production crash vector.
 - **`ui/utils/pose-renderer.js` no longer divides by zero** when two render frames land in the same `performance.now()` tick (issue #519 Bug 2). `deltaTime` is now `Math.max(currentTime - lastFrameTime, 1)` before the `1000 / deltaTime` division, capping displayed FPS at 1000 — far above any real render rate, but finite so the EMA `averageFps = averageFps * 0.9 + fps * 0.1` no longer poisons itself to `Infinity` on a single zero-dt tick.
 
 ### Removed
