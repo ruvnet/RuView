@@ -2713,11 +2713,54 @@ fn adaptive_override(state: &AppStateInner, features: &FeatureInfo, classificati
             model.classify(&feat_arr)
         };
 
-        classification.motion_level = label.to_string();
-        classification.presence = label != "absent";
+        // ADR-120 follow-up: majority-vote smoothing across ~700 ms of
+        // history. Stops the per-tick flicker that made the live label
+        // unreadable. Hybrid priority downstream re-checks via
+        // adaptive_owns_class on the smoothed label, so waving/transition
+        // ownership is preserved.
+        let smoothed = adaptive_label_smooth(&label);
+        classification.motion_level = smoothed.clone();
+        classification.presence = smoothed != "absent";
         // Blend model confidence with existing smoothed confidence.
         classification.confidence = (conf * 0.7 + classification.confidence * 0.3).clamp(0.0, 1.0);
     }
+}
+
+/// ADR-120 follow-up: majority-vote smoothing buffer for the adaptive
+/// classifier output. At the broadcast tick rate (~10 Hz) the model emits
+/// a fresh decision every ~100 ms, and adjacent decisions can disagree
+/// even when reality is stable (UI flicker). We keep the last 7 ticks
+/// (~700 ms) and display the mode. Snappy enough for live UX, stable
+/// enough that the user can read the label without it changing mid-read.
+const ADAPTIVE_SMOOTH_WIN: usize = 7;
+
+static ADAPTIVE_LABEL_HISTORY: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
+
+fn adaptive_label_history_init() -> &'static Mutex<VecDeque<String>> {
+    ADAPTIVE_LABEL_HISTORY.get_or_init(|| Mutex::new(VecDeque::with_capacity(ADAPTIVE_SMOOTH_WIN)))
+}
+
+/// Push `label` into the rolling history and return the mode (most-
+/// frequent value) over the current window. Ties broken by keeping the
+/// previous committed label (sticky behaviour).
+fn adaptive_label_smooth(label: &str) -> String {
+    let mut buf = adaptive_label_history_init().lock().unwrap();
+    buf.push_back(label.to_string());
+    while buf.len() > ADAPTIVE_SMOOTH_WIN { buf.pop_front(); }
+    // Mode.
+    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for v in buf.iter() {
+        *counts.entry(v.as_str()).or_insert(0) += 1;
+    }
+    // Prefer the same label as previous committed (sticky tie-break).
+    let prev = buf.front().map(|s| s.as_str()).unwrap_or(label);
+    let mut best = (label, 0usize);
+    for (k, v) in &counts {
+        if *v > best.1 || (*v == best.1 && *k == prev) {
+            best = (*k, *v);
+        }
+    }
+    best.0.to_string()
 }
 
 /// ADR-120: classes that ONLY the adaptive W-MLP model can produce.
