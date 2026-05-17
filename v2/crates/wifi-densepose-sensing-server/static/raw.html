@@ -51,6 +51,8 @@
     <label>peak-hold <input type="checkbox" id="peakHold" checked></label>
     <label>log-y <input type="checkbox" id="logY"></label>
     <button onclick="resetState()">reset</button>
+    <button id="calibrateBtn" onclick="startCalibrate()" title="Step out of the room, click, wait 90 s">calibrate empty</button>
+    <span class="pill" id="calibStatus" style="display:none"></span>
   </div>
 </div>
 
@@ -322,6 +324,42 @@ function renderTick() {
   requestAnimationFrame(renderTick);
 }
 requestAnimationFrame(renderTick);
+
+// ── ADR-107: baseline calibrate button + polling ──────────────────
+let calibPollTimer = null;
+async function startCalibrate() {
+  if (!confirm('Step OUT of the room now. Calibration will record for 90 s.\nClick OK when you are out.')) return;
+  const btn = document.getElementById('calibrateBtn');
+  const stat = document.getElementById('calibStatus');
+  btn.disabled = true; btn.textContent = 'recording…';
+  stat.style.display = 'inline-block'; stat.textContent = 'starting…';
+  try {
+    const res = await fetch('/api/v1/baseline/calibrate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ duration_sec: 90, trim_sec: 15, clean_window_sec: 30 }),
+    });
+    const j = await res.json();
+    if (!j.started) { stat.textContent = j.reason || 'failed to start'; btn.disabled = false; btn.textContent = 'calibrate empty'; return; }
+  } catch (e) {
+    stat.textContent = 'network error'; btn.disabled = false; btn.textContent = 'calibrate empty'; return;
+  }
+  if (calibPollTimer) clearInterval(calibPollTimer);
+  let elapsed = 0;
+  calibPollTimer = setInterval(async () => {
+    elapsed += 2;
+    try {
+      const r = await fetch('/api/v1/baseline'); const j = await r.json();
+      const s = j.calibration_status || 'idle';
+      stat.textContent = s.startsWith('running') ? `recording… ${elapsed}/90 s` : s;
+      if (!s.startsWith('running')) {
+        clearInterval(calibPollTimer); calibPollTimer = null;
+        btn.disabled = false; btn.textContent = 'calibrate empty';
+        if (s === 'complete') stat.textContent = 'baseline updated ✓';
+      }
+    } catch (e) {}
+  }, 2000);
+}
 
 // ── WS ─────────────────────────────────────────────────────────────
 function connect() {
