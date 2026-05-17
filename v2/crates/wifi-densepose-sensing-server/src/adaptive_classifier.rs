@@ -21,94 +21,112 @@ use std::path::{Path, PathBuf};
 
 // ── Feature vector ───────────────────────────────────────────────────────────
 
-/// Extended feature vector: 7 server features + 8 subcarrier-derived features = 15.
-const N_FEATURES: usize = 15;
+/// ADR-118: feature vector redesigned for multi-node use + multicollinearity
+/// reduction. Audit on 7-class training set showed:
+///   * 17-21 multicollinear pairs (|r|>0.85) — energy features and amplitude
+///     scalars were highly redundant.
+///   * `amp_min` constant 0.0 across all frames (null subcarrier of HT20),
+///     making `amp_range = amp_max - 0` fully redundant with `amp_max`.
+///   * On 6-node data F-stat 10× higher than 2-node, but classifier accuracy
+///     barely budged (40→44%) because the prior 15-feature pipeline used only
+///     `nodes.first()` — 5 of 6 sensors carried zero weight.
+///
+/// New 22-feature layout:
+///   [0..4]  global signal features:
+///       variance, mean_rssi, dominant_freq_hz, change_points
+///   [4..22] per-node features (6 nodes × 3 features each):
+///       per node id N∈{1..6}, base = 4 + (N-1)*3:
+///       base+0: amp_std       — motion / multipath spread
+///       base+1: amp_skew      — distribution asymmetry (where strong scatterers are)
+///       base+2: amp_entropy   — spectral diversity (normalised)
+///   Total: 22 features.
+const N_GLOBAL_FEATURES: usize = 4;
+const N_PER_NODE_FEATURES: usize = 3;
+const MAX_NODES: usize = 6;
+const N_FEATURES: usize = N_GLOBAL_FEATURES + MAX_NODES * N_PER_NODE_FEATURES;
 
 /// Default class names for backward compatibility with old saved models.
 const DEFAULT_CLASSES: &[&str] = &["absent", "present_still", "present_moving", "active"];
 
-/// Extract extended feature vector from a JSONL frame (features + raw amplitudes).
+/// Extract extended feature vector from a JSONL frame (features + per-node amplitudes).
+/// Missing-node features are zero-padded; z-score normalisation later treats
+/// them consistently.
 pub fn features_from_frame(frame: &serde_json::Value) -> [f64; N_FEATURES] {
     let feat = frame.get("features").cloned().unwrap_or(serde_json::Value::Null);
-    let nodes = frame.get("nodes").and_then(|n| n.as_array());
-    let amps: Vec<f64> = nodes
-        .and_then(|ns| ns.first())
-        .and_then(|n| n.get("amplitude"))
-        .and_then(|a| a.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
-        .unwrap_or_default();
+    let mut out = [0.0f64; N_FEATURES];
 
-    // Server-computed features (0-6).
-    let variance = feat.get("variance").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let mbp = feat.get("motion_band_power").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let bbp = feat.get("breathing_band_power").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let sp = feat.get("spectral_power").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let df = feat.get("dominant_freq_hz").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let cp = feat.get("change_points").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let rssi = feat.get("mean_rssi").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    // ── Global signal features (0..4) ──
+    out[0] = feat.get("variance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    out[1] = feat.get("mean_rssi").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    out[2] = feat.get("dominant_freq_hz").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    out[3] = feat.get("change_points").and_then(|v| v.as_f64()).unwrap_or(0.0);
 
-    // Subcarrier-derived features (7-14).
-    let (amp_mean, amp_std, amp_skew, amp_kurt, amp_iqr, amp_entropy, amp_max, amp_range) =
-        subcarrier_stats(&amps);
-
-    [
-        variance, mbp, bbp, sp, df, cp, rssi,
-        amp_mean, amp_std, amp_skew, amp_kurt, amp_iqr, amp_entropy, amp_max, amp_range,
-    ]
+    // ── Per-node features (4..22) ──
+    if let Some(nodes) = frame.get("nodes").and_then(|n| n.as_array()) {
+        for node_obj in nodes {
+            let nid = node_obj.get("node_id").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            if nid == 0 || nid > MAX_NODES { continue; }
+            let amps: Vec<f64> = node_obj.get("amplitude")
+                .or_else(|| node_obj.get("amplitudes"))
+                .and_then(|a| a.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
+                .unwrap_or_default();
+            let (std_a, skew_a, entropy_a) = per_node_stats(&amps);
+            let base = N_GLOBAL_FEATURES + (nid - 1) * N_PER_NODE_FEATURES;
+            out[base] = std_a;
+            out[base + 1] = skew_a;
+            out[base + 2] = entropy_a;
+        }
+    }
+    out
 }
 
-/// Also keep a simpler version for runtime (no JSONL, just FeatureInfo + amps).
-pub fn features_from_runtime(feat: &serde_json::Value, amps: &[f64]) -> [f64; N_FEATURES] {
-    let variance = feat.get("variance").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let mbp = feat.get("motion_band_power").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let bbp = feat.get("breathing_band_power").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let sp = feat.get("spectral_power").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let df = feat.get("dominant_freq_hz").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let cp = feat.get("change_points").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let rssi = feat.get("mean_rssi").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let (amp_mean, amp_std, amp_skew, amp_kurt, amp_iqr, amp_entropy, amp_max, amp_range) =
-        subcarrier_stats(amps);
-    [
-        variance, mbp, bbp, sp, df, cp, rssi,
-        amp_mean, amp_std, amp_skew, amp_kurt, amp_iqr, amp_entropy, amp_max, amp_range,
-    ]
+/// Runtime variant: callers pass the already-aggregated feature struct and a
+/// slice of (node_id, &amplitudes) pairs. Compatible with the broadcast tick
+/// task which has access to all live nodes simultaneously.
+pub fn features_from_runtime(
+    feat: &serde_json::Value,
+    per_node_amps: &[(u8, &[f64])],
+) -> [f64; N_FEATURES] {
+    let mut out = [0.0f64; N_FEATURES];
+
+    out[0] = feat.get("variance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    out[1] = feat.get("mean_rssi").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    out[2] = feat.get("dominant_freq_hz").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    out[3] = feat.get("change_points").and_then(|v| v.as_f64()).unwrap_or(0.0);
+
+    for (nid, amps) in per_node_amps {
+        let nid = *nid as usize;
+        if nid == 0 || nid > MAX_NODES { continue; }
+        let (std_a, skew_a, entropy_a) = per_node_stats(amps);
+        let base = N_GLOBAL_FEATURES + (nid - 1) * N_PER_NODE_FEATURES;
+        out[base] = std_a;
+        out[base + 1] = skew_a;
+        out[base + 2] = entropy_a;
+    }
+    out
 }
 
-/// Compute statistical features from raw subcarrier amplitudes.
-fn subcarrier_stats(amps: &[f64]) -> (f64, f64, f64, f64, f64, f64, f64, f64) {
+/// Compute the 3 per-node statistics used in the new feature vector:
+/// std (motion / multipath spread), skew (distribution asymmetry),
+/// entropy (spectral diversity, normalised to [0, 1]).
+fn per_node_stats(amps: &[f64]) -> (f64, f64, f64) {
     if amps.is_empty() {
-        return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        return (0.0, 0.0, 0.0);
     }
     let n = amps.len() as f64;
     let mean = amps.iter().sum::<f64>() / n;
     let var = amps.iter().map(|a| (a - mean).powi(2)).sum::<f64>() / n;
     let std = var.sqrt().max(1e-9);
-
-    // Skewness (asymmetry).
     let skew = amps.iter().map(|a| ((a - mean) / std).powi(3)).sum::<f64>() / n;
-    // Kurtosis (peakedness).
-    let kurt = amps.iter().map(|a| ((a - mean) / std).powi(4)).sum::<f64>() / n - 3.0;
-
-    // IQR (inter-quartile range).
-    let mut sorted = amps.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let q1 = sorted[sorted.len() / 4];
-    let q3 = sorted[3 * sorted.len() / 4];
-    let iqr = q3 - q1;
-
-    // Spectral entropy (normalised).
     let total_power: f64 = amps.iter().map(|a| a * a).sum::<f64>().max(1e-9);
     let entropy: f64 = amps.iter()
         .map(|a| {
             let p = (a * a) / total_power;
             if p > 1e-12 { -p * p.ln() } else { 0.0 }
         })
-        .sum::<f64>() / n.ln().max(1e-9); // normalise to [0,1]
-
-    let max_val = sorted.last().copied().unwrap_or(0.0);
-    let range = max_val - sorted.first().copied().unwrap_or(0.0);
-
-    (mean, std, skew, kurt, iqr, entropy, max_val, range)
+        .sum::<f64>() / n.ln().max(1e-9);
+    (std, skew, entropy)
 }
 
 // ── Per-class statistics ─────────────────────────────────────────────────────

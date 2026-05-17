@@ -481,9 +481,16 @@ pub fn smooth_and_classify_node(ns: &mut NodeState, raw: &mut ClassificationInfo
     raw.confidence = (0.4 + sm * 0.6).clamp(0.0, 1.0);
 }
 
+/// ADR-118: legacy single-node override variant kept for API compatibility.
+/// New callers should query per-node amps from AMP_HIST and pass the full
+/// `&[(u8, &[f64])]` slice. This variant degrades to "node 1 only" which
+/// produces a feature vector with 5 zero-padded node slots — usable for
+/// emergency fallback but the trained model expects the full multi-node
+/// vector.
 pub fn adaptive_override(state: &AppStateInner, features: &FeatureInfo, classification: &mut ClassificationInfo) {
     if let Some(ref model) = state.adaptive_model {
-        let amps = state.frame_history.back().map(|v| v.as_slice()).unwrap_or(&[]);
+        let amps_owned: Vec<f64> = state.frame_history.back().cloned().unwrap_or_default();
+        let per_node_refs: Vec<(u8, &[f64])> = vec![(1u8, amps_owned.as_slice())];
         let feat_arr = adaptive_classifier::features_from_runtime(
             &serde_json::json!({
                 "variance": features.variance,
@@ -494,7 +501,7 @@ pub fn adaptive_override(state: &AppStateInner, features: &FeatureInfo, classifi
                 "change_points": features.change_points,
                 "mean_rssi": features.mean_rssi,
             }),
-            amps,
+            &per_node_refs,
         );
         let (label, conf) = model.classify(&feat_arr);
         classification.motion_level = label.to_string();

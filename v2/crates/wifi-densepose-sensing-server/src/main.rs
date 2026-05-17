@@ -2645,14 +2645,27 @@ fn smooth_and_classify_node(ns: &mut NodeState, raw: &mut ClassificationInfo, ra
     raw.confidence = (0.4 + sm * 0.6).clamp(0.0, 1.0);
 }
 
+/// ADR-118: collect the latest amplitude vector per node from `AMP_HIST`.
+/// The adaptive classifier's new 22-feature pipeline reads 3 features per
+/// node × 6 nodes; calling code at the override sites no longer has access
+/// to a single global "amps" vector — it needs the per-node breakdown.
+fn current_per_node_amps() -> Vec<(u8, Vec<f64>)> {
+    let map = amp_hist_init().lock().unwrap();
+    map.iter()
+        .filter_map(|(nid, st)| {
+            st.nbvi_history.back().cloned().map(|amps| (*nid, amps))
+        })
+        .collect()
+}
+
 /// If an adaptive model is loaded, override the classification with the
-/// model's prediction.  Uses the full 15-feature vector for higher accuracy.
+/// model's prediction. Uses the 22-feature multi-node vector (ADR-118)
+/// for higher accuracy than the legacy 15-feature single-node vector.
 fn adaptive_override(state: &AppStateInner, features: &FeatureInfo, classification: &mut ClassificationInfo) {
     if let Some(ref model) = state.adaptive_model {
-        // Get current frame amplitudes from the latest history entry.
-        let amps = state.frame_history.back()
-            .map(|v| v.as_slice())
-            .unwrap_or(&[]);
+        let per_node_owned = current_per_node_amps();
+        let per_node_refs: Vec<(u8, &[f64])> = per_node_owned.iter()
+            .map(|(n, a)| (*n, a.as_slice())).collect();
         let feat_arr = adaptive_classifier::features_from_runtime(
             &serde_json::json!({
                 "variance": features.variance,
@@ -2663,7 +2676,7 @@ fn adaptive_override(state: &AppStateInner, features: &FeatureInfo, classificati
                 "change_points": features.change_points,
                 "mean_rssi": features.mean_rssi,
             }),
-            amps,
+            &per_node_refs,
         );
         let (label, conf) = model.classify(&feat_arr);
         classification.motion_level = label.to_string();
@@ -6179,10 +6192,12 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     smooth_and_classify_node(ns, &mut classification, raw_motion);
 
                     // Adaptive override using cloned model (safe, no raw pointers).
+                    // ADR-118: full multi-node feature vector — pull all 6
+                    // nodes' latest amps from AMP_HIST, not just this node's.
                     if let Some(ref model) = adaptive_model_clone {
-                        let amps = ns.frame_history.back()
-                            .map(|v| v.as_slice())
-                            .unwrap_or(&[]);
+                        let per_node_owned = current_per_node_amps();
+                        let per_node_refs: Vec<(u8, &[f64])> = per_node_owned.iter()
+                            .map(|(n, a)| (*n, a.as_slice())).collect();
                         let feat_arr = adaptive_classifier::features_from_runtime(
                             &serde_json::json!({
                                 "variance": features.variance,
@@ -6193,7 +6208,7 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                                 "change_points": features.change_points,
                                 "mean_rssi": features.mean_rssi,
                             }),
-                            amps,
+                            &per_node_refs,
                         );
                         let (label, conf) = model.classify(&feat_arr);
                         classification.motion_level = label.to_string();
