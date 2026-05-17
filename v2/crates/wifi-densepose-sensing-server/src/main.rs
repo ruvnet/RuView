@@ -2716,10 +2716,15 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
         drop(s_write_pre);
 
         // ── Step 5: Build enhanced fields from pipeline result ───────
+        // ADR-105: n_aps_used is a uniform u8 indicator across both
+        // enhanced_motion and enhanced_breathing so downstream consumers
+        // can decide whether to trust a multi-AP enhancement that, on a
+        // single sensor, may have run with only 1 contributing AP.
         let enhanced_motion = Some(serde_json::json!({
             "score": enhanced.motion.score,
             "level": format!("{:?}", enhanced.motion.level),
             "contributing_bssids": enhanced.motion.contributing_bssids,
+            "n_aps_used": enhanced.motion.contributing_bssids.min(u8::MAX as usize) as u8,
         }));
 
         let enhanced_breathing = enhanced.breathing.as_ref().map(|b| {
@@ -2727,6 +2732,7 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
                 "rate_bpm": b.rate_bpm,
                 "confidence": b.confidence,
                 "bssid_count": b.bssid_count,
+                "n_aps_used": b.bssid_count.min(u8::MAX as usize) as u8,
             })
         });
 
