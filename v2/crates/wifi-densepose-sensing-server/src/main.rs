@@ -964,6 +964,20 @@ struct Args {
     #[arg(long, default_value = "3600")]
     auto_recalibrate_min_age_sec: f64,
 
+    /// ADR-104: warn when the on-disk baseline is older than this many
+    /// seconds AND the per-subcarrier drift channel has been firing while
+    /// the classifier reports `absent`. Default 14400 = 4 h. Set to 0 to
+    /// disable the watcher. Independent from --auto-recalibrate-*: that
+    /// path needs a quiet room, this one flags channels that *can't* get
+    /// quiet (operator working in the room while the AP physically moved).
+    #[arg(long, default_value = "14400")]
+    baseline_stale_age_sec: f64,
+
+    /// ADR-104: cool-down (seconds) between baseline-stale warnings.
+    /// Default 3600 = at most once per hour.
+    #[arg(long, default_value = "3600")]
+    baseline_stale_warn_cooldown_sec: f64,
+
     /// Path to UI static files
     #[arg(long, default_value = "../../ui")]
     ui_path: PathBuf,
@@ -1406,6 +1420,13 @@ struct PerNodeFeatureInfo {
     /// emit, UI heatmap) read this to decide whether to escalate.
     #[serde(skip_serializing_if = "Option::is_none")]
     novelty_score: Option<f32>,
+    /// ADR-104 per-subcarrier drift score = mean |Δ amp / baseline|
+    /// over subcarriers with baseline > 1.0. `None` if no per-sub
+    /// baseline is loaded for this node (legacy v1 baseline.json or no
+    /// `per_subcarrier_mean` field). Operators read this in raw.html
+    /// to see the off-axis presence channel firing in real time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    drift_score: Option<f64>,
 }
 
 /// Build a per-node feature snapshot for the WebSocket envelope.
@@ -1459,6 +1480,13 @@ fn build_node_features(
                     confidence: ns.smoothed_person_score.clamp(0.0, 1.0),
                 },
             };
+            // ADR-104: surface the per-subcarrier drift score for this
+            // node (None if no per-sub baseline is loaded — distinguishes
+            // "channel unknown" from "channel known and stable at 0.0").
+            let drift_score = {
+                let m = amp_drift_init().lock().unwrap();
+                m.get(&node_id).copied()
+            };
             PerNodeFeatureInfo {
                 node_id,
                 features,
@@ -1468,6 +1496,7 @@ fn build_node_features(
                 frame_rate_hz: 0.0, // Computed elsewhere; not yet plumbed here.
                 stale,
                 novelty_score: ns.last_novelty_score,
+                drift_score,
             }
         })
         .collect();
@@ -5069,6 +5098,117 @@ async fn auto_recalibrate_task(
     }
 }
 
+/// ADR-104: background watch — when the per-subcarrier drift channel is
+/// consistently above the presence threshold AND the on-disk baseline is
+/// older than `stale_age_sec`, log a warning suggesting recalibration.
+/// Independent from `auto_recalibrate_task`: that one needs a quiet room
+/// (no person), this one fires when the operator is *in* the room but
+/// the channel itself has shifted (AP moved, furniture, etc.) so a real
+/// stillness window won't be reached and silent re-cal can't help.
+///
+/// Rate-limited to one warning per `warn_cooldown_sec` to avoid log spam.
+async fn baseline_staleness_watch(
+    state: SharedState,
+    stale_age_sec: f64,
+    warn_cooldown_sec: f64,
+) {
+    use std::time::{Duration, Instant};
+
+    if stale_age_sec <= 0.0 {
+        info!("Baseline staleness watch disabled (--baseline-stale-age 0)");
+        return;
+    }
+
+    // Drift must exceed this fraction of subcarriers (1.5× the presence
+    // trigger) for the streak to count. Empirical: at the presence-trigger
+    // level (0.10) we can be misclassifying real motion; at 1.5× the
+    // signal is unambiguously channel-level drift.
+    let drift_warn_thresh = AMP_DRIFT_PRESENCE_THRESH * 1.5;
+
+    // How many consecutive 5-min ticks of `quiet+drift-high` are needed
+    // before we warn. 3 → 15 minutes of persistent symptom.
+    const REQUIRED_STREAK: u32 = 3;
+
+    info!(
+        "Baseline staleness watch enabled: warn when baseline age > {:.0}s AND per-sub drift > {:.2} for ≥{} consecutive ticks (cooldown {:.0}s)",
+        stale_age_sec, drift_warn_thresh, REQUIRED_STREAK, warn_cooldown_sec
+    );
+
+    let mut tick = tokio::time::interval(Duration::from_secs(300)); // 5 min
+    let mut streak: u32 = 0;
+    let mut last_warn: Option<Instant> = None;
+
+    loop {
+        tick.tick().await;
+
+        // Skip if no baseline ever loaded (BASELINE_LAST_WRITTEN == UNIX_EPOCH).
+        let age_sec = {
+            let t = baseline_last_written_init().lock().unwrap();
+            match t.elapsed() {
+                Ok(d) => d.as_secs_f64(),
+                Err(_) => continue,
+            }
+        };
+        // No persistent baseline yet — staleness doesn't apply.
+        let have_baseline = !amp_baseline_per_sub_init().lock().unwrap().is_empty();
+        if !have_baseline {
+            streak = 0;
+            continue;
+        }
+
+        let drift = amp_drift_max();
+
+        // We can't tell stale-channel from real-presence on drift alone.
+        // If classifier currently reports presence, this tick is inconclusive
+        // (presence naturally drives drift up). Don't reset streak so a
+        // transient walk-through doesn't erase prior evidence, but also
+        // don't increment it.
+        let presence_now = {
+            let s = state.read().await;
+            s.latest_update
+                .as_ref()
+                .map(|u| u.classification.presence)
+                .unwrap_or(false)
+        };
+
+        if presence_now {
+            // Inconclusive tick — don't touch streak.
+            continue;
+        }
+
+        // Room is reported empty AND drift is high → suspect stale baseline.
+        if age_sec > stale_age_sec && drift > drift_warn_thresh {
+            streak = streak.saturating_add(1);
+        } else {
+            streak = 0;
+        }
+
+        if streak < REQUIRED_STREAK {
+            continue;
+        }
+
+        let cooldown_ok = match last_warn {
+            None => true,
+            Some(t) => t.elapsed().as_secs_f64() >= warn_cooldown_sec,
+        };
+        if !cooldown_ok {
+            continue;
+        }
+
+        warn!(
+            "baseline-stale: per-sub drift {:.3} (>{:.2}) for {}× 5-min ticks while room reports `absent` and baseline is {:.1} h old — recommend recalibration (POST /api/v1/baseline/calibrate or `python scripts/record-baseline.py`)",
+            drift,
+            drift_warn_thresh,
+            streak,
+            age_sec / 3600.0,
+        );
+        last_warn = Some(Instant::now());
+        // Don't reset streak; if conditions persist, the cooldown alone
+        // throttles further warnings, and we want to keep counting so an
+        // operator who clears one warning still gets re-warned eventually.
+    }
+}
+
 async fn udp_receiver_task(state: SharedState, udp_port: u16) {
     let addr = format!("0.0.0.0:{udp_port}");
     let socket = match UdpSocket::bind(&addr).await {
@@ -6470,6 +6610,14 @@ async fn main() {
                 args.auto_recalibrate_quiet_sec,
                 args.auto_recalibrate_min_age_sec,
                 90.0, // capture window
+            ));
+            // ADR-104: warn when baseline is stale AND drift channel is
+            // firing in `absent` periods (channel-level shift the auto
+            // path can't fix because room never goes quiet).
+            tokio::spawn(baseline_staleness_watch(
+                state.clone(),
+                args.baseline_stale_age_sec,
+                args.baseline_stale_warn_cooldown_sec,
             ));
             tokio::spawn(broadcast_tick_task(state.clone(), args.tick_ms));
         }

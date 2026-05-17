@@ -32,6 +32,7 @@
   canvas { display:block; width:100%; background:#0a0e13; border-radius:3px; }
   canvas.bars   { height: 130px; }
   canvas.trace  { height: 130px; }
+  canvas.spark  { height: 48px; margin-top: 6px; }
   .lbl { color:#666; font-size:10px; font-family:JetBrains Mono,monospace; margin:2px 0 0; }
   .controls { display:flex; gap:8px; margin-left:auto; }
   .controls label { font-size:11px; color:#aaa; }
@@ -86,6 +87,7 @@ function ensureNodeBlock(nodeId) {
     peak: [],
     rssiHist: [],          // { t, v }
     meanAmpHist: [],
+    driftHist: [],         // { t, v } — ADR-104 per-sub drift score
     lastTs: 0,
     frames: 0,
     lastFrameWall: performance.now(),
@@ -105,6 +107,7 @@ function ensureNodeBlock(nodeId) {
       <span class="stat">rssi <b id="n${nodeId}-rssi">--</b> dBm</span>
       <span class="stat">mean A <b id="n${nodeId}-meanA">0</b></span>
       <span class="stat">peak A <b id="n${nodeId}-peakA">0</b></span>
+      <span class="stat">drift <b id="n${nodeId}-drift">--</b></span>
       <span class="stat">node fps <b id="n${nodeId}-fps">0</b></span>
     </h2>
     <div class="row">
@@ -115,6 +118,8 @@ function ensureNodeBlock(nodeId) {
       <div>
         <canvas class="trace" id="n${nodeId}-trace"></canvas>
         <p class="lbl"><span style="color:#8b949e">RSSI</span> &nbsp; <span style="color:#3fb950">broadband mean amplitude</span> &nbsp; (last ${TRACE_SEC}s)</p>
+        <canvas class="spark" id="n${nodeId}-driftSpark"></canvas>
+        <p class="lbl"><span style="color:#d29922">per-sub drift</span> — off-axis presence channel (ADR-104); dashed line = presence threshold 0.10</p>
       </div>
     </div>`;
   document.getElementById('nodes').appendChild(wrap);
@@ -215,6 +220,52 @@ function drawTrace(canvas, rssiHist, meanAmpHist) {
   ctx.moveTo(w - 1, 0); ctx.lineTo(w - 1, h); ctx.stroke();
 }
 
+// ADR-104: per-sub drift sparkline. Fixed Y range [0, 0.30] so the
+// presence threshold (0.10, dashed) and warning threshold (0.15) are
+// directly readable across nodes — re-scaling per node would make it
+// impossible to tell "Node 0 fired" from "Node 1 fired" at a glance.
+const DRIFT_PRESENCE_THRESH = 0.10;
+const DRIFT_WARN_THRESH = 0.15;
+const DRIFT_MAX = 0.30;
+
+function drawDriftSpark(canvas, hist) {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0a0e13'; ctx.fillRect(0, 0, w, h);
+
+  const now = performance.now() / 1000;
+  const t0 = now - TRACE_SEC;
+  const yOf = v => h - (Math.min(v, DRIFT_MAX) / DRIFT_MAX) * (h - 4) - 2;
+
+  // Threshold lines.
+  ctx.setLineDash([3, 3]);
+  ctx.strokeStyle = '#5a4a1a'; ctx.lineWidth = 1; ctx.beginPath();
+  ctx.moveTo(0, yOf(DRIFT_PRESENCE_THRESH)); ctx.lineTo(w, yOf(DRIFT_PRESENCE_THRESH));
+  ctx.stroke();
+  ctx.strokeStyle = '#7a3030'; ctx.beginPath();
+  ctx.moveTo(0, yOf(DRIFT_WARN_THRESH)); ctx.lineTo(w, yOf(DRIFT_WARN_THRESH));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  const visible = hist.filter(p => p.t >= t0);
+  if (visible.length >= 2) {
+    ctx.strokeStyle = '#d29922'; ctx.lineWidth = 1.5; ctx.beginPath();
+    for (let i = 0; i < visible.length; i++) {
+      const p = visible[i];
+      const x = ((p.t - t0) / TRACE_SEC) * w;
+      const y = yOf(p.v);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  // Axis text.
+  ctx.fillStyle = '#666'; ctx.font = '9px monospace';
+  ctx.fillText('0', 2, h - 2);
+  ctx.fillText(DRIFT_MAX.toFixed(2), 2, 10);
+}
+
 // ── Frame ingestion ────────────────────────────────────────────────
 function handleSensingUpdate(d) {
   const nodes = d.nodes || [];
@@ -290,6 +341,7 @@ function handleSensingUpdate(d) {
   if (gcv) gcv.textContent = 'CV ' + ((gcl.confidence || 0) * 100).toFixed(1) + '%';
 
   // Per-node level badge from node_features[i].classification (ADR-101).
+  const nfNow = performance.now() / 1000;
   const nf = d.node_features || [];
   for (const f of nf) {
     const id = f.node_id;
@@ -302,6 +354,28 @@ function handleSensingUpdate(d) {
     }
     const cvEl = document.getElementById(`n${id}-cv`);
     if (cvEl) cvEl.textContent = ((cls.confidence || 0) * 100).toFixed(1) + '%';
+
+    // ADR-104 per-sub drift score (off-axis presence). May be absent
+    // when no per-sub baseline is loaded for this node — show '--'
+    // instead of '0.000' so the operator can tell the channel is
+    // unknown vs. known and stable.
+    const driftEl = document.getElementById(`n${id}-drift`);
+    const driftLive = state.get(id);
+    if (typeof f.drift_score === 'number' && Number.isFinite(f.drift_score)) {
+      if (driftEl) driftEl.textContent = f.drift_score.toFixed(3);
+      if (driftLive) {
+        driftLive.driftHist.push({ t: nfNow, v: f.drift_score });
+        const cutoff = nfNow - TRACE_SEC;
+        while (driftLive.driftHist.length && driftLive.driftHist[0].t < cutoff) {
+          driftLive.driftHist.shift();
+        }
+        if (driftLive.driftHist.length > TRACE_MAX_PTS) {
+          driftLive.driftHist.splice(0, driftLive.driftHist.length - TRACE_MAX_PTS);
+        }
+      }
+    } else if (driftEl) {
+      driftEl.textContent = '--';
+    }
   }
   frameCount++;
 }
@@ -310,8 +384,10 @@ function renderTick() {
   for (const [id, ent] of state) {
     const bars  = document.getElementById('n' + id + '-bars');
     const trace = document.getElementById('n' + id + '-trace');
+    const spark = document.getElementById('n' + id + '-driftSpark');
     if (bars)  drawBars(bars,  ent.amp, ent.peak);
     if (trace) drawTrace(trace, ent.rssiHist, ent.meanAmpHist);
+    if (spark) drawDriftSpark(spark, ent.driftHist);
   }
   // fps pill
   const now = performance.now();
