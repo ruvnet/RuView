@@ -51,6 +51,17 @@ export class PoseDetectionCanvas {
     this.showTrail = false;
     this.maxTrailLength = 10;
 
+    // ADR-105 / ADR-113: model-load gating. The canvas refuses to draw
+    // skeletons until /api/v1/pose/stats reports model_loaded === true,
+    // so an empty/zero-confidence keypoint stream from a model-less
+    // server doesn't paint a misleading "phantom" pose.
+    //
+    // null = "haven't asked yet" (treated as not-loaded for rendering).
+    this.modelLoaded = null;
+    this.modelStatusUrl = options.modelStatusUrl || '/api/v1/pose/stats';
+    this.modelStatusPollMs = options.modelStatusPollMs || 30000;
+    this.modelStatusTimer = null;
+
     // Initialize component
     this.initializeComponent();
   }
@@ -79,7 +90,77 @@ export class PoseDetectionCanvas {
     // Set up pose service subscription
     this.setupPoseServiceSubscription();
 
+    // ADR-105: poll model_loaded so we can hide the canvas when no
+    // trained pose model is on the server.
+    this.checkModelStatus();
+    this.modelStatusTimer = setInterval(
+      () => this.checkModelStatus(),
+      this.modelStatusPollMs
+    );
+
     this.logger.info('PoseDetectionCanvas component initialized successfully');
+  }
+
+  /**
+   * Fetch `/api/v1/pose/stats` and update `this.modelLoaded`. On the
+   * leading-edge transitions (null → false, true → false) we hide the
+   * pose canvas and overlay a "No model loaded" notice so the operator
+   * isn't fooled by an empty skeleton renderer.
+   */
+  async checkModelStatus() {
+    try {
+      const resp = await fetch(this.modelStatusUrl, { cache: 'no-store' });
+      if (!resp.ok) {
+        // Server reachable but not surfacing pose stats — be safe.
+        this.setModelLoaded(false, 'pose-stats endpoint error');
+        return;
+      }
+      const json = await resp.json();
+      const loaded = json && json.model_loaded === true;
+      this.setModelLoaded(loaded, null);
+    } catch (e) {
+      // Network blip — don't flip-flop the UI on a transient failure.
+      this.logger.debug('model-status poll failed', { err: e.message });
+    }
+  }
+
+  setModelLoaded(loaded, errOrNull) {
+    if (this.modelLoaded === loaded) return;
+    this.modelLoaded = loaded;
+    this.logger.info('model-loaded state changed', { loaded, note: errOrNull });
+    this.updateCanvasVisibility();
+  }
+
+  updateCanvasVisibility() {
+    if (!this.canvas) return;
+    const wrap = this.canvas.parentElement; // .pose-canvas-container
+    const overlayId = `model-overlay-${this.containerId}`;
+    let overlay = document.getElementById(overlayId);
+    if (this.modelLoaded === true) {
+      this.canvas.style.visibility = 'visible';
+      if (overlay) overlay.style.display = 'none';
+      return;
+    }
+    // No model — hide the canvas and show a clear notice.
+    this.canvas.style.visibility = 'hidden';
+    if (!overlay && wrap) {
+      overlay = document.createElement('div');
+      overlay.id = overlayId;
+      overlay.className = 'pose-model-missing';
+      overlay.style.cssText =
+        'position:absolute;inset:0;display:flex;align-items:center;' +
+        'justify-content:center;color:#888;font-family:JetBrains Mono,monospace;' +
+        'font-size:13px;text-align:center;padding:20px;background:#0d1117;';
+      overlay.innerHTML =
+        'No trained pose model loaded.<br>' +
+        '<span style="color:#555;font-size:11px;">' +
+        'Pose rendering disabled — sensing channels still active in ' +
+        'the Sensing / Hardware tabs (ADR-105).</span>';
+      wrap.style.position = 'relative';
+      wrap.appendChild(overlay);
+    } else if (overlay) {
+      overlay.style.display = 'flex';
+    }
   }
 
   createDOMStructure() {
@@ -514,6 +595,13 @@ export class PoseDetectionCanvas {
 
   renderPoseData(poseData) {
     if (!this.renderer || !this.state.isActive) {
+      return;
+    }
+    // ADR-105: refuse to paint anything when the server has no trained
+    // pose model — empty/zero-confidence keypoints would otherwise show
+    // up as a misleading skeleton. The overlay from
+    // updateCanvasVisibility() already tells the operator why.
+    if (this.modelLoaded !== true) {
       return;
     }
 
@@ -1534,6 +1622,12 @@ export class PoseDetectionCanvas {
       // Unsubscribe from pose service
       this.unsubscribeFunctions.forEach(unsubscribe => unsubscribe());
       this.unsubscribeFunctions = [];
+
+      // ADR-105: stop the model-status poll.
+      if (this.modelStatusTimer) {
+        clearInterval(this.modelStatusTimer);
+        this.modelStatusTimer = null;
+      }
 
       // Clean up resize observer
       if (this.resizeObserver) {
