@@ -58,6 +58,17 @@ jobs:
 
       - name: Run pipeline verification
         working-directory: archive/v1
+        env:
+          # Pin thread count for scipy.fft / BLAS — multi-threaded reduction
+          # order is otherwise non-deterministic across CI runs (issue #560
+          # follow-up: 9- and 6-decimal quantization were not enough because
+          # the divergence is from threading order, not SIMD reordering).
+          # Single-threaded keeps the proof reproducible at a ~2-3x slowdown.
+          OMP_NUM_THREADS: "1"
+          OPENBLAS_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          VECLIB_MAXIMUM_THREADS: "1"
+          NUMEXPR_NUM_THREADS: "1"
         run: |
           echo "=== Running pipeline verification ==="
           python data/proof/verify.py
@@ -66,6 +77,12 @@ jobs:
 
       - name: Run verification twice to confirm determinism
         working-directory: archive/v1
+        env:
+          OMP_NUM_THREADS: "1"
+          OPENBLAS_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          VECLIB_MAXIMUM_THREADS: "1"
+          NUMEXPR_NUM_THREADS: "1"
         run: |
           echo "=== Second run for determinism confirmation ==="
           python data/proof/verify.py
