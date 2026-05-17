@@ -1,4 +1,4 @@
-# ADR-099 — TP-Link WISP Deployment + RSSI-Δ Presence Detector
+# ADR-110 — TP-Link WISP Deployment + RSSI-Δ Presence Detector
 
 **Status**: Accepted
 **Date**: 2026-05-15
@@ -123,7 +123,7 @@ operator capture those next two states.
 v2/crates/wifi-densepose-sensing-server/src/main.rs   # RSSI MAD-Δ + override
 v2/crates/wifi-densepose-sensing-server/static/spectrum.html  # live console
 v2/crates/wifi-densepose-sensing-server/static/calibrate.html # peak-tracker view
-docs/adr/ADR-099-tplink-wisp-deployment-and-rssi-presence.md  # this ADR
+docs/adr/ADR-110-tplink-wisp-deployment-and-rssi-presence.md  # this ADR
 ```
 
 ## Verified Acceptance

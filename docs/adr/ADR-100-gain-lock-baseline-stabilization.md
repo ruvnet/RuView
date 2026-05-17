@@ -7,7 +7,7 @@
 
 ## Context
 
-After ADR-099 deployed the TP-Link WISP AP and the operator captured three
+After ADR-110 deployed the TP-Link WISP AP and the operator captured three
 controlled one-minute windows (empty / sit / walk), the RSSI MAD-Δ
 classifier failed to separate the three states — measured `d` values
 overlapped within ±0.03 of 0.49 while in-state spread was ±0.10. We
@@ -59,9 +59,9 @@ that it short-circuits.
 
 Tagged as ADR-100 in the source comment for traceability.
 
-### D2 — Use the existing `raw.html` console (ADR-099, D2 reuse) as the verification UI
+### D2 — Use the existing `raw.html` console (ADR-110, D2 reuse) as the verification UI
 
-The console added in ADR-099 already streams `nodes[].amplitude` from
+The console added in ADR-110 already streams `nodes[].amplitude` from
 the existing WebSocket. No server-side change was needed. The HTML
 displays a per-node bar histogram of all 56 active subcarriers plus
 broadband mean amplitude and RSSI traces over the last 30 s. This is
@@ -75,7 +75,7 @@ A controlled three-state capture made on 2026-05-17 with both sensors
 positioned so that the line `TP-Link AP → sensor` passes through the
 operator (lying on the bed) confirmed both decisions. The summary
 table appears under *Verified Acceptance* below. Earlier captures
-(ADR-099) failed to separate states partly because the sensors were
+(ADR-110) failed to separate states partly because the sensors were
 placed off-axis from the AP-to-body line; with that geometry the body
 never physically obstructs the CSI channel.
 
@@ -114,7 +114,7 @@ Observations:
   ladder 2.71 → 3.70 → 12.50 % is a second independent feature.
 * **Node 2 separates STILL+EMPTY from WALK** by CV (5 → 30 %). Its
   geometry doesn't pick up a still body, only motion.
-* **Compare to ADR-099** where empty/sit/walk differed by ±0.02 inside
+* **Compare to ADR-110** where empty/sit/walk differed by ±0.02 inside
   ±0.10 noise — we now have inter-state separation ratios of **×3.4 on
   node 1 and ×5.9 on node 2**. The signal is no longer dominated by
   baseline drift.
@@ -123,7 +123,7 @@ Observations:
 
 ```
 firmware/esp32-csi-node/main/csi_collector.c       # gain-lock module + hook
-v2/crates/wifi-densepose-sensing-server/static/raw.html   # already from ADR-099
+v2/crates/wifi-densepose-sensing-server/static/raw.html   # already from ADR-110
 docs/adr/ADR-100-gain-lock-baseline-stabilization.md      # this ADR
 ```
 
@@ -145,8 +145,8 @@ docs/adr/ADR-100-gain-lock-baseline-stabilization.md      # this ADR
 
 * ADR-039 — Edge intelligence pipeline (host DSP path).
 * ADR-098 — Earlier ESP32-S3 deployment fixes.
-* ADR-099 — TP-Link WISP deployment + first RSSI-Δ attempt (this ADR
-  supersedes the threshold table in ADR-099, D3 — the RSSI MAD-Δ
+* ADR-110 — TP-Link WISP deployment + first RSSI-Δ attempt (this ADR
+  supersedes the threshold table in ADR-110, D3 — the RSSI MAD-Δ
   detector is left in place but no longer the primary signal).
 * Francesco Pace, *How I Turned My Wi-Fi Into a Motion Sensor — Part 2*,
   Dec 2025 — source of the gain-lock recipe.

@@ -11,7 +11,7 @@
 After ADR-100 the AGC drift is gone and the broadband baseline is clean.
 Before this ADR the live `classification.motion_level` was being driven
 by the legacy DSP (variance + motion_band_power thresholds) plus an
-RSSI MAD-Δ override from ADR-099. Both failed on the operator's
+RSSI MAD-Δ override from ADR-110. Both failed on the operator's
 deployment: variance overlaps empty/sit/walk within noise, and RSSI
 MAD-Δ overlaps within ±0.03 of 0.49 across all three states. The
 operator could lie still in the path between AP and sensor and the
@@ -123,7 +123,7 @@ v2/crates/wifi-densepose-sensing-server/static/raw.html  # per-node badges
 
 Cross-state separation ratio = 3.4× on node 1 broadband mean, 5.9×
 on node 2 CV, compared to ±0.02 inside ±0.10 noise with the old
-RSSI MAD-Δ classifier from ADR-099.
+RSSI MAD-Δ classifier from ADR-110.
 
 ## Open Items
 
@@ -138,7 +138,7 @@ RSSI MAD-Δ classifier from ADR-099.
 
 ## References
 
-* ADR-099 — first RSSI MAD-Δ attempt (superseded for `motion_level` /
+* ADR-110 — first RSSI MAD-Δ attempt (superseded for `motion_level` /
   `presence` / `confidence`; helper kept as `#[allow(dead_code)]`).
 * ADR-100 — gain lock that makes this classifier possible.
 * ADR-102 — NBVI subcarrier selection that drives the CV computation.
