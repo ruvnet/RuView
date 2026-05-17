@@ -139,13 +139,22 @@ impl VitalSignDetector {
         // Cardiac-induced body surface displacement is < 0.5 mm, producing
         // tiny phase changes. Cross-subcarrier phase variance captures this
         // more sensitively than amplitude alone.
+        // Phase values from atan2(i_val, q_val) are wrapped to (-pi, pi].
+        // Linear variance treats values near +π and -π as ~2π apart when they
+        // are physically ~0 rad apart. Use circular variance (1 - R̄, where R̄ is
+        // the mean resultant length) which correctly handles wrapped data.
+        // See issue #593 for background.
         let phase_var = if phase.len() > 1 {
-            let mean_phase: f64 = phase.iter().sum::<f64>() / phase.len() as f64;
-            phase
+            let (sin_sum, cos_sum): (f64, f64) = phase
                 .iter()
-                .map(|p| (p - mean_phase).powi(2))
-                .sum::<f64>()
-                / phase.len() as f64
+                .fold((0.0, 0.0), |(s, c), &p| (s + p.sin(), c + p.cos()));
+            let n = phase.len() as f64;
+            let mean_rsin = sin_sum / n;
+            let mean_rcos = cos_sum / n;
+            // Circular variance = 1 - R̄, where R̄ = sqrt(mean_rsin² + mean_rcos²).
+            // Values: 0 = perfectly concentrated, 1 = uniform around the circle.
+            let r_bar = (mean_rsin * mean_rsin + mean_rcos * mean_rcos).sqrt();
+            1.0 - r_bar
         } else {
             // Fallback: use amplitude high-pass residual when phase is unavailable
             let half = amplitude.len() / 2;
