@@ -312,7 +312,60 @@ fn nbvi_select_top_k(history: &VecDeque<Vec<f64>>, k: usize) -> Vec<usize> {
         })
         .collect();
     scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-    scored.into_iter().take(k).map(|(k,_)| k).collect()
+
+    // ── ESPectre Step 3: FP-rate validation ─────────────────────────
+    //
+    // Don't take the raw top-K from NBVI ranking blindly. The K with
+    // the lowest false-positive rate over the quiet window is the
+    // winner. "FP" = times the broadband-mean CV computed from that
+    // candidate subset crosses the moving threshold even though the
+    // window we're evaluating was the quietest available. Smallest K
+    // with FP=0 is preferred (more headroom for averaging) over a
+    // bigger K that adds noisier subcarriers.
+    //
+    // Candidate sizes K ∈ {6, 8, 10, 12, 16, 20} clamped to scored.len().
+    if scored.len() <= k {
+        return scored.into_iter().map(|(k,_)| k).collect();
+    }
+    let ranked_indices: Vec<usize> = scored.iter().map(|(k,_)| *k).collect();
+    let candidates: [usize; 6] = [6, 8, 10, 12, 16, 20];
+    let fp_thresh = 0.10_f64;  // matches ADR-101 D1 "present_moving" gate
+
+    let mut best_k = k;
+    let mut best_fp = usize::MAX;
+    let mut best_total_nbvi = f64::INFINITY;
+    for &cand_k in &candidates {
+        if cand_k > ranked_indices.len() { continue; }
+        let sel: &[usize] = &ranked_indices[..cand_k];
+        // Compute per-frame broadband-mean across this subset.
+        let bb: Vec<f64> = quiet_slice.iter().map(|f| {
+            let mut s = 0.0; let mut c = 0;
+            for &i in sel { if i < f.len() && f[i] > 0.0 { s += f[i]; c += 1; } }
+            if c == 0 { 0.0 } else { s / c as f64 }
+        }).collect();
+        // Rolling CV over a sliding sub-window of ~30 samples
+        // (1/3 of AMP_SHORT_WIN). Count frames where rolling CV
+        // exceeds the moving gate — those would be false positives.
+        let sub_win = (AMP_SHORT_WIN / 3).max(8);
+        let mut fp = 0usize;
+        for w_start in (0..bb.len().saturating_sub(sub_win)).step_by(sub_win / 2) {
+            let w = &bb[w_start..w_start + sub_win];
+            let mu: f64 = w.iter().sum::<f64>() / w.len() as f64;
+            if mu <= 0.0 { continue; }
+            let var: f64 = w.iter().map(|x| (x - mu).powi(2)).sum::<f64>() / w.len() as f64;
+            let cv = var.sqrt() / mu;
+            if cv > fp_thresh { fp += 1; }
+        }
+        // Sum of NBVI scores for this subset — tie-breaker.
+        let total_nbvi: f64 = scored.iter().take(cand_k).map(|(_, n)| *n).sum();
+        // Pick lowest FP; on ties, smaller total NBVI.
+        if fp < best_fp || (fp == best_fp && total_nbvi < best_total_nbvi) {
+            best_fp = fp;
+            best_total_nbvi = total_nbvi;
+            best_k = cand_k;
+        }
+    }
+    ranked_indices.into_iter().take(best_k).collect()
 }
 
 static AMP_HIST: OnceLock<Mutex<std::collections::HashMap<u8, AmpState>>> = OnceLock::new();
@@ -348,6 +401,38 @@ static AMP_BASELINE_OVERRIDE: OnceLock<Mutex<std::collections::HashMap<u8, f64>>
 fn amp_baseline_override_init() -> &'static Mutex<std::collections::HashMap<u8, f64>> {
     AMP_BASELINE_OVERRIDE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
+
+/// ADR-104: per-node per-subcarrier empty-room baseline vector,
+/// loaded from baseline.json `per_subcarrier_mean`. Used by the
+/// classifier as a second presence channel: even when broadband
+/// barely moves, comparing the current amp vector elementwise to
+/// this baseline catches off-axis bodies that only modulate a
+/// handful of subcarriers.
+static AMP_BASELINE_PER_SUB: OnceLock<Mutex<std::collections::HashMap<u8, Vec<f64>>>> = OnceLock::new();
+fn amp_baseline_per_sub_init() -> &'static Mutex<std::collections::HashMap<u8, Vec<f64>>> {
+    AMP_BASELINE_PER_SUB.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// ADR-104: per-node "spectral drift" score = mean |Δ amp / baseline|
+/// across subcarriers, computed against AMP_BASELINE_PER_SUB. Updated
+/// every classifier tick; read by amp_node_level / amp_classify_from_latest
+/// as a second `present_still` trigger.
+static AMP_DRIFT: OnceLock<Mutex<std::collections::HashMap<u8, f64>>> = OnceLock::new();
+fn amp_drift_init() -> &'static Mutex<std::collections::HashMap<u8, f64>> {
+    AMP_DRIFT.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+fn amp_drift_for_node(node_id: u8) -> f64 {
+    let m = amp_drift_init().lock().unwrap();
+    m.get(&node_id).copied().unwrap_or(0.0)
+}
+fn amp_drift_max() -> f64 {
+    let m = amp_drift_init().lock().unwrap();
+    m.values().copied().fold(0.0_f64, f64::max)
+}
+/// ADR-104: spectral-drift threshold — fraction (e.g. 0.10 = 10 %)
+/// that average per-subcarrier deviation must exceed to flag presence.
+/// Empirical; matches the broadband ratio trigger (drop ≥ 25 %, drift ≥ 10 %).
+const AMP_DRIFT_PRESENCE_THRESH: f64 = 0.10;
 
 /// ADR-107: timestamp of the most recent baseline load/write. Auto
 /// recalibrator uses this to enforce a cool-down between writes; the
@@ -409,6 +494,17 @@ fn load_baseline_file(path: &str) {
             .unwrap_or(0.0);
         if cv_pct > 0.0 {
             loaded_cv.push((id, cv_pct / 100.0));
+        }
+
+        // ADR-104: per-subcarrier baseline vector for off-axis
+        // presence detection. Optional; only present if the
+        // recording script wrote `per_subcarrier_mean`.
+        if let Some(arr) = node.get("per_subcarrier_mean").and_then(|v| v.as_array()) {
+            let vec: Vec<f64> = arr.iter().filter_map(|v| v.as_f64()).collect();
+            if vec.len() >= 16 {
+                let mut o = amp_baseline_per_sub_init().lock().unwrap();
+                o.insert(id, vec);
+            }
         }
     }
     if loaded.is_empty() {
@@ -553,6 +649,49 @@ fn amp_presence_override(node_id: u8, amplitudes: &[f64]) -> Option<(String, boo
         mean_short
     };
 
+    // ── ADR-104: per-subcarrier delta as off-axis presence channel ──
+    //
+    // If a per-subcarrier baseline vector is loaded for this node,
+    // compare current per-subcarrier mean (over the NBVI history's
+    // last AMP_SHORT_WIN frames) against it. Sum of |delta / baseline|
+    // for subcarriers with baseline > 1.0 → "spectral drift score".
+    // High drift = body modulated the channel even if broadband mean
+    // didn't change much (i.e. operator is in the room but off-axis).
+    //
+    // Stashed as a side-channel into AMP_LATEST_DRIFT; the per-node
+    // classifier reads it as a third trigger for `present_still`.
+    let drift = {
+        let per_sub_map = amp_baseline_per_sub_init().lock().unwrap();
+        match per_sub_map.get(&node_id) {
+            Some(base_vec) if st.nbvi_history.len() >= AMP_SHORT_WIN => {
+                // Per-sub mean from recent frames.
+                let recent: Vec<&Vec<f64>> = st.nbvi_history.iter()
+                    .rev().take(AMP_SHORT_WIN).collect();
+                let n_sub = base_vec.len().min(recent.first().map_or(0, |v| v.len()));
+                if n_sub < 8 { 0.0 } else {
+                    let mut score = 0.0;
+                    let mut cnt = 0;
+                    for k in 0..n_sub {
+                        let b = base_vec[k];
+                        if b <= 1.0 { continue; }
+                        let mut sum = 0.0; let mut c = 0;
+                        for f in &recent { if k < f.len() && f[k] > 0.0 { sum += f[k]; c += 1; } }
+                        if c == 0 { continue; }
+                        let cur = sum / c as f64;
+                        score += (cur - b).abs() / b;
+                        cnt += 1;
+                    }
+                    if cnt == 0 { 0.0 } else { score / cnt as f64 }
+                }
+            }
+            _ => 0.0,
+        }
+    };
+    {
+        let mut d = amp_drift_init().lock().unwrap();
+        d.insert(node_id, drift);
+    }
+
     // Stash this node's contribution for cross-node fusion.
     {
         let mut latest = amp_latest_init().lock().unwrap();
@@ -566,28 +705,31 @@ fn amp_presence_override(node_id: u8, amplitudes: &[f64]) -> Option<(String, boo
 /// fusion and from `build_node_features` so the UI can show per-node
 /// labels. No hysteresis is applied here; that's a global property.
 fn amp_node_level(cv: f64, mean_short: f64, baseline: Option<f64>) -> (&'static str, bool) {
-    // ADR-102 + Pace's Problem #3: thresholds are *universal* —
-    // applied to the **normalized** motion score (cv / baseline_cv),
-    // where baseline_cv is the empty-room CV measured during the
-    // last calibration (loaded from data/baseline.json). One
+    // ADR-102 + Pace's Problem #3: thresholds are *universal* — applied
+    // to the **normalized** motion score (cv / baseline_cv). One
     // threshold set works in any room.
     let bcv = amp_baseline_cv_for_node();
     let norm_cv = if bcv > 0.0 { cv / bcv } else { cv };
-
-    // Universal gates (computed at α-multiples of room-quiet CV):
-    //   3× baseline_cv → present_moving
-    //   6× baseline_cv → active
-    // Empirically: baseline=4 % → moving≈12 %, active≈24 % — matches
-    // the deployment-tuned values we had hard-coded.
     if norm_cv >= 6.0 {
-        ("active", true)
-    } else if norm_cv >= 3.0 {
-        ("present_moving", true)
-    } else if matches!(baseline, Some(b) if b > 0.0 && (mean_short / b) < 0.75) {
-        ("present_still", true)
-    } else {
-        ("absent", false)
+        return ("active", true);
     }
+    if norm_cv >= 3.0 {
+        return ("present_moving", true);
+    }
+    // ADR-101 broadband-drop trigger.
+    if matches!(baseline, Some(b) if b > 0.0 && (mean_short / b) < 0.75) {
+        return ("present_still", true);
+    }
+    // ADR-104: off-axis presence — per-subcarrier drift channel.
+    // Triggers when body is in the room but off the AP→sensor line,
+    // so broadband mean barely shifts.
+    // (Caller doesn't pass per-node id here; we read MAX drift via
+    // amp_drift_max(). Per-node decisions inside snapshot read their
+    // own value separately.)
+    if amp_drift_max() >= AMP_DRIFT_PRESENCE_THRESH {
+        return ("present_still", true);
+    }
+    ("absent", false)
 }
 
 /// Average baseline CV across nodes that have a calibration loaded.
@@ -609,7 +751,24 @@ fn amp_baseline_cv_init() -> &'static Mutex<std::collections::HashMap<u8, f64>> 
 fn amp_node_snapshot(node_id: u8) -> Option<(String, bool, f64)> {
     let latest = amp_latest_init().lock().unwrap();
     let (cv, mean_short, baseline) = latest.get(&node_id).copied()?;
-    let (lvl, pres) = amp_node_level(cv, mean_short, baseline);
+    // amp_node_level uses amp_drift_max() (cross-node) for the drift
+    // trigger. For per-node display we want this node's own drift,
+    // so override after the base classify.
+    let (lvl0, pres0) = amp_node_level(cv, mean_short, baseline);
+    let my_drift = amp_drift_for_node(node_id);
+    let (lvl, pres) =
+        if matches!(lvl0, "active" | "present_moving") {
+            (lvl0, pres0)
+        } else if my_drift >= AMP_DRIFT_PRESENCE_THRESH {
+            // ADR-104: this specific node sees per-subcarrier drift
+            // (body in its line-of-sight to the AP), regardless of what
+            // the cross-node MAX-drift heuristic said.
+            ("present_still", true)
+        } else if matches!(baseline, Some(b) if b > 0.0 && (mean_short / b) < 0.75) {
+            ("present_still", true)
+        } else {
+            ("absent", false)
+        };
     Some((lvl.to_string(), pres, cv))
 }
 
@@ -666,11 +825,14 @@ fn amp_classify_from_latest() -> Option<(String, bool, f64)> {
     let bcv = amp_baseline_cv_for_node();
     let norm_max_cv = if bcv > 0.0 { max_cv / bcv } else { max_cv };
     let (gate_active, gate_moving) = if bcv > 0.0 { (6.0, 3.0) } else { (0.22, 0.10) };
+    // ADR-104: cross-node spectral drift triggers `present_still`
+    // even when broadband drop didn't fire — off-axis body presence.
+    let any_drift = amp_drift_max() >= AMP_DRIFT_PRESENCE_THRESH;
     let candidate = if norm_max_cv >= gate_active {
         "active"
     } else if norm_max_cv >= gate_moving {
         "present_moving"
-    } else if any_baseline_drop {
+    } else if any_baseline_drop || any_drift {
         "present_still"
     } else {
         "absent"
