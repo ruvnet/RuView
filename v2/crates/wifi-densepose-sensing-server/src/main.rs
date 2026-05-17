@@ -2015,6 +2015,91 @@ fn generate_signal_field(
 
 }
 
+/// ADR-112: physically-grounded signal_field for multi-node deployments.
+///
+/// When `MultistaticFuser` succeeds with ≥ 2 contributing nodes, render a
+/// 20×20 spatial heatmap by overlaying isotropic Gaussian "influence"
+/// kernels at each node's configured position, scaled by the global
+/// post-fusion activity (CV² of fused amplitude × cross-node coherence).
+///
+/// **What this map honestly shows**: regions of overlap between the
+/// physical coverage zones of active sensors, modulated by how much
+/// post-fusion CSI activity those sensors collectively see. Bright cells
+/// = multiple sensors close by AND seeing modulation.
+///
+/// **What this map does NOT claim**: the position of a person. We do
+/// not have phase-coherent ranging on commodity ESP32s (no UWB, no two-
+/// way ranging), so any "location" rendered would be guessing. The map
+/// is a *coverage × activity* visualization, deliberately not a
+/// *target localization*.
+///
+/// On `< 2` active nodes or fusion failure, returns the same zero grid
+/// `generate_signal_field` produces — preserving ADR-105's honesty
+/// contract.
+fn signal_field_from_multistatic(
+    fuser: &wifi_densepose_signal::ruvsense::multistatic::MultistaticFuser,
+    node_states: &std::collections::HashMap<u8, NodeState>,
+) -> SignalField {
+    let grid = 20usize;
+    let zero = || SignalField { grid_size: [grid, 1, grid], values: vec![0.0; grid * grid] };
+
+    let (fused_opt, _) = multistatic_bridge::fuse_or_fallback(fuser, node_states);
+    let fused = match fused_opt {
+        Some(f) if f.active_nodes >= 2 && !f.node_positions.is_empty() => f,
+        _ => return zero(),
+    };
+
+    // Global activity proxy: CV² of fused amplitude × cross-node coherence.
+    // Both factors are in [0, 1]; their product gates the field on the
+    // simultaneous presence of CSI modulation AND inter-node agreement.
+    let amp = &fused.fused_amplitude;
+    if amp.is_empty() { return zero(); }
+    let mean = amp.iter().map(|&v| v as f64).sum::<f64>() / amp.len() as f64;
+    let var: f64 = amp.iter().map(|&v| {
+        let d = v as f64 - mean; d * d
+    }).sum::<f64>() / amp.len() as f64;
+    let cv2 = if mean.abs() > 1e-6 {
+        (var / (mean * mean)).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let coherence = (fused.cross_node_coherence as f64).clamp(0.0, 1.0);
+    let global_activity = cv2 * coherence;
+    if global_activity < 1e-3 {
+        return zero();
+    }
+
+    // Render in metric room coords. ROOM_EXTENT_M = half-width of the
+    // square room footprint the grid spans; SIGMA_M sets the kernel
+    // radius (Pace's ESPectre uses a similar σ ≈ room/4 heuristic).
+    // The grid spans [-ROOM_EXTENT_M, +ROOM_EXTENT_M] on both axes.
+    const ROOM_EXTENT_M: f64 = 3.0;
+    const SIGMA_M: f64 = ROOM_EXTENT_M / 4.0;
+    let two_sigma2 = 2.0 * SIGMA_M * SIGMA_M;
+    let cell_m = (2.0 * ROOM_EXTENT_M) / grid as f64;
+
+    let mut values = vec![0.0_f64; grid * grid];
+    for gy in 0..grid {
+        let py = -ROOM_EXTENT_M + (gy as f64 + 0.5) * cell_m;
+        for gx in 0..grid {
+            let px = -ROOM_EXTENT_M + (gx as f64 + 0.5) * cell_m;
+            let mut sum = 0.0_f64;
+            for n in &fused.node_positions {
+                // Project the 3D node position to the (x, z) floor plane
+                // (y = height, irrelevant for a 2D footprint view).
+                let nx = n[0] as f64;
+                let nz = n[2] as f64;
+                let dx = px - nx;
+                let dy = py - nz;
+                let d2 = dx * dx + dy * dy;
+                sum += global_activity * (-d2 / two_sigma2).exp();
+            }
+            values[gy * grid + gx] = sum.clamp(0.0, 1.0);
+        }
+    }
+    SignalField { grid_size: [grid, 1, grid], values }
+}
+
 // ── Feature extraction from ESP32 frame ──────────────────────────────────────
 
 /// Estimate breathing rate in Hz from the amplitude time series stored in `frame_history`.
@@ -5480,10 +5565,23 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         classification.confidence = conf;
                     }
 
-                    let signal_field = generate_signal_field(
-                        fused_features.mean_rssi, motion_score, vitals.breathing_rate_bpm / 60.0,
-                        (vitals.presence_score as f64).min(1.0), &[],
-                    );
+                    // ADR-112: prefer multistatic-derived signal_field
+                    // when ≥ 2 ESP32 nodes are active; falls back to
+                    // ADR-105's zero grid on single-sensor / fusion-fail.
+                    let signal_field = {
+                        let multi = signal_field_from_multistatic(
+                            &s.multistatic_fuser, &s.node_states,
+                        );
+                        if multi.values.iter().any(|&v| v > 0.0) {
+                            multi
+                        } else {
+                            generate_signal_field(
+                                fused_features.mean_rssi, motion_score,
+                                vitals.breathing_rate_bpm / 60.0,
+                                (vitals.presence_score as f64).min(1.0), &[],
+                            )
+                        }
+                    };
 
                     let mut update = SensingUpdate {
                         msg_type: "sensing_update".to_string(),
@@ -5817,10 +5915,21 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                         nodes: active_nodes,
                         features: fused_features.clone(),
                         classification,
-                        signal_field: generate_signal_field(
-                            fused_features.mean_rssi, motion_score, breathing_rate_hz,
-                            fused_features.variance.min(1.0), &sub_variances,
-                        ),
+                        // ADR-112: prefer multistatic spatial map when
+                        // ≥ 2 ESP32 nodes active; else zero grid.
+                        signal_field: {
+                            let multi = signal_field_from_multistatic(
+                                &s.multistatic_fuser, &s.node_states,
+                            );
+                            if multi.values.iter().any(|&v| v > 0.0) {
+                                multi
+                            } else {
+                                generate_signal_field(
+                                    fused_features.mean_rssi, motion_score, breathing_rate_hz,
+                                    fused_features.variance.min(1.0), &sub_variances,
+                                )
+                            }
+                        },
                         vital_signs: Some(vitals),
                         enhanced_motion: None,
                         enhanced_breathing: None,
