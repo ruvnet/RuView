@@ -167,18 +167,25 @@ def frame_to_csi_data(frame, signal_meta):
 # Quantization precision for cross-platform hash stability (issue #560).
 #
 # The bytes packed below feed SHA-256. Without quantization, the hash diverges
-# across SIMD backends (Intel AVX2/AVX-512 vs Apple Silicon NEON) because
-# scipy.fft's pocketfft kernels reorder vectorized FP operations differently
-# per build. IEEE 754 guarantees per-operation determinism, not associativity
-# under reordering — so two correct platforms produce values that differ at
-# ULP precision (~1e-14 at our value magnitudes of ~1-100).
+# across SIMD backends (Intel AVX2/AVX-512 vs ARM NEON vs different x86 micro-
+# architectures in the same CI pool) because scipy.fft's pocketfft kernels
+# reorder vectorized FP operations differently per build. IEEE 754 guarantees
+# per-operation determinism, not associativity under reordering.
 #
-# 1e-9 is safely above worst-case SIMD divergence (~5 orders of magnitude
-# headroom over observed ULP-scale drift in the probe-fft-platform.py
-# measurements) and far below any meaningful signal change (CSI phase
-# precision is ~1e-3 rad; PSD bins differ by orders of magnitude). Round to
-# this precision, then hash.
-HASH_QUANTIZATION_DECIMALS = 9
+# Empirically: 9 decimals was NOT enough to collapse the divergence — two
+# back-to-back Ubuntu 24.04 / Python 3.11 / scipy 1.17 CI runs landed on
+# different Azure VM microarchitectures (likely Skylake vs Cascade Lake)
+# and produced two different SHA-256s even after np.round(.., 9). The DSP
+# pipeline (preprocess → biquad bandpass → FFT → PSD → variance accumulation)
+# amplifies the ~1e-14 raw FFT divergence by several orders of magnitude
+# downstream — the actual drift at features_to_bytes() input can reach 1e-7
+# or worse.
+#
+# 6 decimals (parts per million) gives ~6 orders of magnitude headroom over
+# observed pipeline-amplified ULP drift and is still far below any meaningful
+# signal change (CSI phase precision is ~1e-3 rad; PSD bins differ by orders
+# of magnitude). Round to this precision, then hash.
+HASH_QUANTIZATION_DECIMALS = 6
 
 
 def features_to_bytes(features):
