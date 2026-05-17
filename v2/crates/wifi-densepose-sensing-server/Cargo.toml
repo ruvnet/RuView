@@ -50,6 +50,12 @@ wifi-densepose-wifiscan = { version = "0.3.0", path = "../wifi-densepose-wifisca
 # build without vcpkg/openblas (issue #366, #415).
 wifi-densepose-signal = { version = "0.3.0", path = "../wifi-densepose-signal", default-features = false }
 
+# midstream — real-time introspection / low-latency tap (ADR-099 D1).
+# Two crates only, on purpose: scheduler / neural-solver / strange-loop are
+# explicitly out of scope of ADR-099 (D5).
+midstreamer-temporal-compare = "0.2"   # DTW / LCS / Edit-Distance pattern matching
+midstreamer-attractor        = "0.2"   # Lyapunov + regime classification
+
 [dev-dependencies]
 tempfile = "3.10"
 # `tower::ServiceExt::oneshot` for in-process Router tests (bearer_auth).

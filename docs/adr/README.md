@@ -108,6 +108,7 @@ Statuses: **Proposed** (under discussion), **Accepted** (approved and/or impleme
 | [ADR-095](ADR-095-rvcsi-edge-rf-sensing-platform.md) | rvCSI — Edge RF Sensing Runtime Platform | Proposed |
 | [ADR-096](ADR-096-rvcsi-ffi-crate-layout.md) | rvCSI — Crate Topology, the napi-c Shim, and the napi-rs Node Surface | Proposed |
 | [ADR-097](ADR-097-adopt-rvcsi-as-ruview-csi-runtime.md) | Adopt rvCSI as RuView's primary CSI runtime (phased adoption) | Proposed |
+| [ADR-099](ADR-099-midstream-introspection-tap.md) | Adopt midstream as RuView's real-time introspection + low-latency tap | Proposed |
 
 ---
 

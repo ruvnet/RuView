@@ -8,6 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Real-time CSI introspection / low-latency tap on `wifi-densepose-sensing-server` (ADR-099).**
+  New `wifi_densepose_sensing_server::introspection` module wires
+  [midstream](https://github.com/ruvnet/midstream)'s `temporal-attractor` (Lyapunov +
+  regime classification) and `temporal-compare` (DTW pattern matching) as a
+  **parallel tap** alongside RuView's existing event pipeline — no replacement,
+  no behaviour change to the existing `/ws/sensing` fan-out or `wifi-densepose-signal`
+  DSP. Two new endpoints (off by default, enabled via `--introspection`):
+  - `GET /ws/introspection` — newline-delimited JSON snapshots streamed at the CSI
+    frame rate. Each snapshot carries `frame_count`, `regime` (Idle / Periodic /
+    Transient / Chaotic / Unknown), `lyapunov_exponent`, `attractor_dim`,
+    `attractor_confidence`, `regime_changed` (boolean — flips on the first frame
+    after a regime transition), and `top_k_similarity[]` (highest-scoring
+    signature matches against a per-deployment library).
+  - `GET /api/v1/introspection/snapshot` — single-shot JSON snapshot, auth-gated
+    when `RUVIEW_API_TOKEN` is set.
+  Per-frame `update()` budget measured at **0.041 ms p99** on the I5 bench
+  (~24× under ADR-099 D4's 1 ms target). Shape-match latency on a 1-D
+  mean-amplitude L1 stand-in: **5 frames** (3.20× ratio vs the 16-frame event-path
+  floor). ADR-099 D8 honestly amended — the aspirational 10× bar is contingent on
+  ADR-208 Phase 2 multi-dim NPU embeddings; this release ships the tap off-by-default
+  while the foundation lands. 8 lib tests + 5 latency/regression tests (`tests/introspection_latency.rs`,
+  including a 200-frame noise warm-up → 10-frame motion-ramp signature benchmark).
 - **Opt-in bearer-token auth on `wifi-densepose-sensing-server`'s `/api/v1/*` HTTP surface (closes #443).**
   New `wifi_densepose_sensing_server::bearer_auth` module: when the
   `RUVIEW_API_TOKEN` env var is set, every request whose path begins with

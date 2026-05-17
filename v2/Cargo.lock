@@ -3412,7 +3412,20 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab86df06cf1705ca37692b4fc0027868f92e5170a7ebb1d706302f04b6044f70"
 dependencies = [
- "midstreamer-temporal-compare",
+ "midstreamer-temporal-compare 0.1.0",
+ "nalgebra",
+ "ndarray 0.16.1",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "midstreamer-attractor"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bebe548a4e74b80ecb8dd058e352a91fed9e5685c49c5d3fa5062520c660c6c9"
+dependencies = [
+ "midstreamer-temporal-compare 0.2.1",
  "nalgebra",
  "ndarray 0.16.1",
  "serde",
@@ -3456,6 +3469,18 @@ name = "midstreamer-temporal-compare"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1f935ba86c1632a3b5bc5e1cb56a308d4c5d2ec87c84db551c65f3e1001a642"
+dependencies = [
+ "dashmap",
+ "lru",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "midstreamer-temporal-compare"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b87063b1eb79672a76f88377799152d8e149328e9a19455345851a264bdced20"
 dependencies = [
  "dashmap",
  "lru",
@@ -8520,6 +8545,8 @@ dependencies = [
  "chrono",
  "clap",
  "futures-util",
+ "midstreamer-attractor 0.2.1",
+ "midstreamer-temporal-compare 0.2.1",
  "ruvector-mincut",
  "serde",
  "serde_json",
@@ -8539,8 +8566,8 @@ version = "0.3.0"
 dependencies = [
  "chrono",
  "criterion",
- "midstreamer-attractor",
- "midstreamer-temporal-compare",
+ "midstreamer-attractor 0.1.0",
+ "midstreamer-temporal-compare 0.1.0",
  "ndarray 0.15.6",
  "ndarray-linalg",
  "num-complex",
