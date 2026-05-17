@@ -69,30 +69,12 @@ Four-step pipeline at boot:
 | 3 | **Rank + validate** | Sort by NBVI ascending. Run the motion detector on each candidate config, measure false-positive rate, take the config with the lowest FP. |
 | 4 | **Pick winners** | Top-K by lowest NBVI (typically K = 12 for HT20). |
 
-Memory: O(N) running with on-the-fly mean/variance updates ⇒ ≈ 256 B
-for 64 subcarriers. Time: O(N · L) per recompute, milliseconds on a
-$10 device.
+Memory: O(N) running with on-the-fly mean/variance, ≈ 256 B for 64
+subcarriers. Time: O(N · L) per recompute, ms on a $10 device.
 
-**RuView status — PARTIALLY DONE.** ADR-102 (commit `2f12a223`).
-Server-side port in `amp_presence_override` /
-`nbvi_select_top_k`. What we have:
-
-- ✅ NBVI formula with α = 0.5
-- ✅ Top-12 selection
-- ✅ Dead-zone gate (`NBVI_DEAD_GATE_PCT = 0.25`)
-- ✅ Recompute throttled (`NBVI_REFRESH_TICKS = 200` ≈ every 5 s)
-
-What we **do not** have:
-
-- ❌ **Step 1 quiet-window finder** — we use the *whole* history
-  buffer. If the buffer captures someone moving, ranking is biased.
-  Pace's percentile-window detector should be added.
-- ❌ **Step 3 FP-rate validation** — we accept the raw NBVI ranking
-  without testing it on the calibration data.
-- ❌ **Boot calibration sequence** (FW-side, 7 s post gain-lock).
-  Ours is server-side rolling, which means selection drifts forever
-  rather than locking after boot. Trade-off: adapts to room
-  rearrangement, but never "settles".
+**RuView status — DONE (Steps 1, 2, 4).** ADR-102 (commits
+`2f12a223` + `f4119924`). Server-side, see ADR-102 for detail.
+Missing: ❌ Step 3 FP-rate validation, ❌ FW-side boot freeze.
 
 Empirically on the operator's deployment NBVI alone gave a 1.5-2× CV
 reduction:
@@ -118,9 +100,11 @@ Reference 0.25 is what a quiet room typically measures during NBVI
 calibration. Apply the scale to the live motion score, so the user-
 facing threshold (`= 1.0`) is universal across rooms.
 
-**RuView status — NOT DONE.** Our `amp_node_level` uses fixed
-thresholds tuned to one deployment (CV 10 % moving, CV 22 % active,
-mean/baseline < 0.75 still). Other deployments will need re-tuning.
+**RuView status — DONE.** ADR-103 D3 (commit `2f4b2d53`).
+`amp_node_level` and `amp_classify_from_latest` divide live CV by
+`baseline_cv` loaded from `data/baseline.json` and gate at universal
+`3×` (moving) / `6×` (active). Falls back to absolute gates
+`0.10 / 0.22` when no calibration loaded — backwards compatible.
 
 ## 4. Two-phase boot calibration
 
@@ -142,9 +126,12 @@ After NBVI calibration, ESPectre writes the AGC/FFT lock values, the
 chosen subcarrier set, the baseline variance, and the threshold into
 NVS so reboots don't need re-calibration.
 
-**RuView status — NOT DONE.** Each server restart triggers a fresh
-60-second baseline learn. NBVI also re-ranks from scratch on restart.
-Open item: persist `AMP_LATEST.baseline` to disk + load at startup.
+**RuView status — DONE for baseline; PARTIAL for the rest.** ADR-103
+(commits `f4119924`, `2f4b2d53`). `data/baseline.json` persists per-
+node full-broadband mean/p95/CV + per-subcarrier means, loaded at
+server boot via `load_baseline_file`. Gain lock + NBVI selection
+still happen fresh on each FW boot / server boot respectively (open
+items 4 + 5 below).
 
 ## 6. Interactive Web Serial game (`espectre.dev/game`)
 
@@ -176,37 +163,36 @@ for the amplitude classifier or NBVI.
 
 | Item | Pace / ESPectre | RuView |
 |---|---|---|
-| Gain lock | FW, 300 pkt median, AGC+FFT, AGC<30 skip | ✅ Same, in `csi_collector.c` |
-| NBVI formula | α·σ/μ² + (1-α)·σ/μ, α=0.5, top-12 | ✅ Same, server-side |
-| Dead-zone gate | 25th percentile of mean | ✅ `NBVI_DEAD_GATE_PCT=0.25` |
-| Quiet-window finder | Percentile-window in calibration buffer | ❌ Use full window verbatim |
-| FP-rate validation of NBVI pick | Yes | ❌ Take raw ranking |
-| Boot-time NBVI freeze | FW, ~7 s post-lock | ❌ Server-side rolling |
-| Baseline variance normalization | `scale = 0.25 / σ²` | ❌ Fixed thresholds per deployment |
-| NVS persistence of calibration | Yes | ❌ Fresh learn each restart |
-| Universal threshold | One value across rooms | ❌ Re-tune per deployment |
-| Calibration UI | Web Serial game | ❌ Read-only raw.html |
-| HA integration | ESPHome native | ❌ None |
-| Test suite | 500+ tests, 90 % coverage | ❌ ~2 parser tests only |
-| Phase / amplitude | Amplitude only (TPR avoidance) | ✅ Same |
-| Subcarrier count | 64 (HT20) | 56 (ESP32-S3 reports 56 non-guard) |
+| Gain lock | FW, 300 pkt median, AGC+FFT, AGC<30 skip | ✅ ADR-100 |
+| NBVI formula α=0.5, top-12, dead-zone gate | ✅ | ✅ ADR-102 |
+| Quiet-window finder (Step 1) | ✅ | ✅ ADR-102 v2 |
+| FP-rate validation (Step 3) | ✅ | ❌ raw ranking |
+| Boot-time NBVI freeze | FW, ~7 s post-lock | ❌ server-side rolling |
+| Baseline variance normalization (universal threshold) | ✅ | ✅ ADR-103 D3 |
+| Persisted baseline to disk | NVS | ✅ ADR-103 D1 (`data/baseline.json`) |
+| NVS persistence of FW calibration | ✅ | ❌ fresh each FW boot |
+| Calibration UI | Web Serial game | ❌ read-only `raw.html` |
+| HA / ESPHome integration | ✅ | ❌ none |
+| Test suite | 500+ tests, 90 % cov | ❌ 2 parser tests |
+| Phase / amplitude | amplitude only | ✅ same |
 
 ## Open items, ranked by expected impact on RuView
 
-1. **Quiet-window finder for NBVI Step 1** — if the operator restarts
-   the server while the room is occupied, current NBVI biases its
-   ranking toward subcarriers stable on the *occupied* state. Bug:
-   present_still then under-triggers. ~1 h.
-2. **Persist `AMP_LATEST.baseline` to disk** — eliminates the
-   "step outside for 60 s" ritual after every restart. ~30 min.
-3. **Baseline variance normalization** — would let us ship one
-   threshold set for any deployment. ~1 h.
-4. **FP-rate validation of NBVI pick** — would catch the case where
-   the top-12 ranked subcarriers happen to overlap with a noise
-   source. ~1 h.
-5. **Boot-time NBVI freeze** — if we want fully reproducible
-   behaviour. Trade-off: doesn't adapt to room changes. ~2 h.
-6. **HA / ESPHome integration** — depends on whether RuView wants
-   to be a HA sensor or stay standalone. ~1 day.
-7. **Web Serial calibration UI** — nice-to-have, lower priority than
-   the algorithmic items. ~1 day.
+1. **REST `POST /api/v1/baseline/calibrate`** — drives the recording
+   script from a button in `raw.html` instead of CLI. ~30 min.
+2. **FP-rate validation of NBVI pick** — defense against the top-12
+   accidentally overlapping a noise source. ~1 h.
+3. **Per-subcarrier baseline comparison (ADR-104 draft)** — uses the
+   already-saved `per_subcarrier_mean` in `baseline.json` for L2
+   distance instead of broadband mean ratio. Better off-axis
+   presence sensing. ~1 h.
+4. **Auto-recalibrate on long quiet periods** — if classifier sees
+   `absent` with low variance for 30 min, refresh baseline in
+   background. Eliminates manual script step entirely. ~1 h.
+5. **FW-side NBVI boot-freeze + NVS persistence** — full
+   reproducibility, sub-second post-boot ready. Trade-off: doesn't
+   adapt to room changes. ~2 h.
+6. **HA / ESPHome integration** — sensor as HA entity. ~1 day.
+7. **Test suite vs fixed 2 000-packet replay** — regression
+   protection for the classifier + NBVI. ~1 day.
+8. **Web Serial calibration game** — nice-to-have. ~1 day.
