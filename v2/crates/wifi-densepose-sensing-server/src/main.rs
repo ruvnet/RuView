@@ -3457,18 +3457,16 @@ fn derive_single_person_pose(
     }
 }
 
-fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
-    let cls = &update.classification;
-    if !cls.presence {
-        return vec![];
-    }
-
-    // Use estimated_persons if set by the tick loop; otherwise default to 1.
-    let person_count = update.estimated_persons.unwrap_or(1).max(1);
-
-    (0..person_count)
-        .map(|idx| derive_single_person_pose(update, idx, person_count))
-        .collect()
+fn derive_pose_from_sensing(_update: &SensingUpdate) -> Vec<PersonDetection> {
+    // ADR-105: heuristic 17-keypoint synthesis disabled. It produced a
+    // believable-looking skeleton whose joint positions were geometric
+    // placeholders, not real pose estimation — confidence stayed at 0.0
+    // and the body never moved with the operator. Operator asked for
+    // boots-on-the-ground honesty: only return persons when a trained
+    // DensePose model is actually loaded and populates `update.persons`.
+    // All call sites still compile but get an empty vector when there
+    // is no model.
+    Vec::new()
 }
 
 // ── RuVector Phase 2: Temporal EMA smoothing for keypoints ──────────────────
@@ -3624,6 +3622,10 @@ async fn health_metrics(State(state): State<SharedState>) -> Json<serde_json::Va
 
 async fn api_info(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
+    // ADR-105: features must reflect real capability — no DensePose model
+    // loaded ⇒ pose_estimation is `false`. Operator asked for honesty over
+    // marketing.
+    let pose_loaded = s.model_loaded;
     Json(serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
         "environment": "production",
@@ -3631,7 +3633,7 @@ async fn api_info(State(state): State<SharedState>) -> Json<serde_json::Value> {
         "source": s.effective_source(),
         "features": {
             "wifi_sensing": true,
-            "pose_estimation": true,
+            "pose_estimation": pose_loaded,
             "signal_processing": true,
             "ruvector": true,
             "streaming": true,
@@ -3641,39 +3643,46 @@ async fn api_info(State(state): State<SharedState>) -> Json<serde_json::Value> {
 
 async fn pose_current(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
-    let persons = match &s.latest_update {
-        Some(update) => update.persons.clone().unwrap_or_else(|| derive_pose_from_sensing(update)),
-        None => vec![],
+    // ADR-105: only return persons when a trained pose model is loaded.
+    // Without a model we used to synthesise placeholder 17-keypoint
+    // skeletons from `derive_pose_from_sensing` so the UI looked alive;
+    // that's a lie about capability. Empty array now if no model.
+    let persons = if s.model_loaded {
+        s.latest_update.as_ref().and_then(|u| u.persons.clone()).unwrap_or_default()
+    } else {
+        Vec::new()
     };
     Json(serde_json::json!({
         "timestamp": chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
         "persons": persons,
         "total_persons": persons.len(),
         "source": s.effective_source(),
+        "model_loaded": s.model_loaded,
     }))
 }
 
 async fn pose_stats(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
+    // ADR-105: drop the hard-coded `average_confidence: 0.87`. Report
+    // only counters that come from real frame ingest.
     Json(serde_json::json!({
         "total_detections": s.total_detections,
-        "average_confidence": 0.87,
         "frames_processed": s.tick,
         "source": s.effective_source(),
+        "model_loaded": s.model_loaded,
     }))
 }
 
 async fn pose_zones_summary(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
+    // ADR-105: drop synthetic "zone_2/3/4 clear" entries — the operator
+    // never configured any zones. Report only what we actually know.
     let presence = s.latest_update.as_ref()
         .map(|u| u.classification.presence).unwrap_or(false);
     Json(serde_json::json!({
-        "zones": {
-            "zone_1": { "person_count": if presence { 1 } else { 0 }, "status": "monitored" },
-            "zone_2": { "person_count": 0, "status": "clear" },
-            "zone_3": { "person_count": 0, "status": "clear" },
-            "zone_4": { "person_count": 0, "status": "clear" },
-        }
+        "presence": presence,
+        "zones_configured": 0,
+        "zones": {},
     }))
 }
 
