@@ -4909,6 +4909,18 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     }
                     ns.latest_noise_floor = frame.noise_floor;
                     ns.latest_n_antennas = frame.n_antennas;
+                    // ADR-106 follow-up: server-side receive timestamp
+                    // in µs since UNIX epoch. Not as precise as
+                    // sensor-side `info->rx_ctrl.timestamp` would be,
+                    // but good enough for cross-node alignment within
+                    // ~1 ms (Mac monotonic + LAN jitter). Sensor-side
+                    // timestamp deferred to a future FW change that
+                    // extends the 0xC511_0001 header — see ADR-106
+                    // Open Items.
+                    ns.latest_timestamp_us = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_micros() as u64)
+                        .unwrap_or(0);
 
                     let sample_rate_hz = 1000.0 / 500.0_f64;
                     let (features, mut classification, breathing_rate_hz, sub_variances, raw_motion) =
