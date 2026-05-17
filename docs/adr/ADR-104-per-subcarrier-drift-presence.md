@@ -136,20 +136,30 @@ conditions where a previously-clean subcarrier picks up interference.
 
 ## Open Items
 
-* **Per-subcarrier baseline AGE check** — the per-sub vector reflects
-  the channel at calibration time. As the channel slowly drifts (other
-  WiFi clients on the AP, temperature, etc.) the per-sub baseline ages
-  faster than the broadband-mean baseline. Need: if `last_written_sec_ago`
-  > N hours AND drift consistently > threshold → flag for
-  re-calibration. Defer to a future ADR-109.
-* **Per-subcarrier delta in UI** — `raw.html` only shows broadband
-  bars + global classification. A small "drift" sparkline per node
-  would let the operator see the off-axis channel firing. ~30 min.
 * **Phase-domain drift** — currently amplitude-only. Phase delta vs
   baseline phase would catch even subtler movement (chest-wall sub-mm
   motion during breathing). Requires phase baseline in `baseline.json`,
   which the recording script doesn't yet save. ~1 h script + ~30 min
   server.
+
+## Closed
+
+* **Per-subcarrier baseline AGE check** — `baseline_staleness_watch`
+  background task warns when on-disk baseline is older than
+  `--baseline-stale-age-sec` (default 4 h) AND per-sub drift exceeds
+  1.5× presence threshold for ≥3 consecutive 5-min ticks while the
+  classifier reports `absent`. Rate-limited via
+  `--baseline-stale-warn-cooldown-sec` (default 1 h). Independent
+  from `auto_recalibrate_task`: that path needs a quiet room; this
+  one fires when the operator is *in* the room while the channel
+  itself has shifted. (commit eec3ca6c)
+* **Per-subcarrier delta in UI** — `raw.html` now shows a per-node
+  drift sparkline below the RSSI/broadband trace, fixed Y range
+  [0, 0.30] with dashed presence (0.10) and warning (0.15)
+  thresholds. Numeric "drift" stat pill in the per-node header.
+  Backed by a new `drift_score: Option<f64>` field on
+  `PerNodeFeatureInfo` (skip-if-none — distinguishes "no per-sub
+  baseline loaded" from "loaded and stable at 0.0"). (commit eec3ca6c)
 
 ## References
 

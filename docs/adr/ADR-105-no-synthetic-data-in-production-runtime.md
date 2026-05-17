@@ -170,9 +170,14 @@ classification        absent / present_still / present_moving / active per ADR-1
 * **Real signal_field** via multistatic fusion — when ≥ 2 nodes are
   active, `MultistaticFuser` can produce a physically meaningful
   spatial map. ADR-104 will cover wiring it through.
-* **Honest `enhanced_*` fields** — when the multi-AP pipeline runs
-  on a single sensor it still emits scores. Should add a
-  `n_aps_used` field so consumers know whether to trust them.
+
+## Closed
+
+* **Honest `enhanced_*` fields** — both `enhanced_motion` and
+  `enhanced_breathing` now carry a uniform `n_aps_used: u8` field
+  alongside the legacy `contributing_bssids` / `bssid_count`
+  counts. Consumers can gate on `n_aps_used >= 2` before trusting a
+  multi-AP enhancement. (commit 598a4b2f)
 
 ## References
 

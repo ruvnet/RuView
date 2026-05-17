@@ -5,7 +5,7 @@ at the end of every session. Pair with
 [`docs/references/espectre-gap-analysis.md`](docs/references/espectre-gap-analysis.md)
 for the technical detail behind each line.
 
-Last sweep: **2026-05-17**, branch `feat/ota-rssi-mobile`, head `e4204595`.
+Last sweep: **2026-05-17**, branch `feat/ota-rssi-mobile`, head `eec3ca6c`.
 
 ---
 
@@ -22,8 +22,15 @@ Last sweep: **2026-05-17**, branch `feat/ota-rssi-mobile`, head `e4204595`.
 - [x] **ADR-103** Universal threshold via baseline-CV normalization
 - [x] **ADR-104** Per-subcarrier drift channel (off-axis presence)
 - [x] **ADR-104** NBVI Step 3 FP-rate validation (K ∈ {6,8,10,12,16,20})
+- [x] **ADR-104** Per-sub drift exposed in WS `node_features[].drift_score`
+      + raw.html sparkline per node (commit eec3ca6c)
+- [x] **ADR-104** Baseline staleness watch — warn when on-disk baseline
+      > 4 h old AND drift consistently fires during `absent` periods
+      (commit eec3ca6c)
 - [x] **ADR-105** Drop all synthetic data from runtime
   ([signal_field, pose_keypoints, persons, fake confidence — all gated)
+- [x] **ADR-105** `n_aps_used: u8` uniform field on `enhanced_motion` +
+      `enhanced_breathing` (commit 598a4b2f)
 - [x] **ADR-106** Full complex CSI in WS (`amplitude` + `phases` + meta)
 - [x] **ADR-106** Built-in CSI keepalive (managed `ping` per sensor)
 - [x] **ADR-106** Server-side µs `timestamp_us`
@@ -61,18 +68,12 @@ Last sweep: **2026-05-17**, branch `feat/ota-rssi-mobile`, head `e4204595`.
 
 ### High value, low effort
 
-- [ ] **Per-sub delta sparkline in `raw.html`** — operator sees off-axis
-      drift channel firing in real time. ~30 min. (ADR-104 open)
 - [ ] **`POST /ota/recalibrate`** — clear gain-lock NVS via REST,
       no USB needed. ~30 min FW + OTA. (ADR-108 open)
 - [ ] **Track AP MAC in NVS alongside gain-lock** — auto-invalidate
       stale values on AP swap. ~1 h FW + OTA. (ADR-108 open)
-- [ ] **Per-subcarrier baseline AGE check** — flag for re-calibration
-      when channel slowly drifts. ~1 h. (ADR-104 open)
 - [ ] **Tailscale-target in NVS** — sensor stream keeps working when
       Mac roams networks. ~30 min provision + reflash. (ADR-100 open)
-- [ ] **`n_aps_used` field in `enhanced_*`** — let consumers know
-      when multi-AP pipeline ran on a single sensor. ~30 min. (ADR-105 open)
 
 ### High value, medium effort
 
