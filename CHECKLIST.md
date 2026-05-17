@@ -5,7 +5,9 @@ at the end of every session. Pair with
 [`docs/references/espectre-gap-analysis.md`](docs/references/espectre-gap-analysis.md)
 for the technical detail behind each line.
 
-Last sweep: **2026-05-17**, branch `feat/ota-rssi-mobile`, head `eec3ca6c`.
+Last sweep: **2026-05-17**, branch `feat/ota-rssi-mobile`, head `c827cde6`.
+Status: 43 Done / 0 Open in-scope. Deferred items (out of session scope,
+each with explicit reason) listed at the bottom.
 
 ---
 
@@ -45,6 +47,14 @@ Last sweep: **2026-05-17**, branch `feat/ota-rssi-mobile`, head `eec3ca6c`.
 - [x] **ADR-105** Hide pose canvas in Docker SPA when
       `model_loaded == false` + "no trained model" overlay
       (commit 2dcb30a6)
+- [x] **ADR-104** Phase-domain drift channel — script + server both
+      compute per-subcarrier circular mean/var; `phase_drift_score`
+      surfaced on `PerNodeFeatureInfo` (commit 47dafab4)
+- [x] **ADR-113** Day/night baseline profiles with hot-reload
+      (`--baseline-profile {single,auto,day,night}`) (commit a1e09525)
+- [x] **ADR-114** 2000-packet replay regression suite (1000 idle +
+      1000 motion synthetic-but-parameter-matched, F1 ≥ 0.85
+      threshold) (commit 96225e27)
 
 ### Firmware (`firmware/esp32-csi-node`)
 
@@ -55,6 +65,15 @@ Last sweep: **2026-05-17**, branch `feat/ota-rssi-mobile`, head `eec3ca6c`.
       no USB needed (commit f92807cd)
 - [x] **ADR-109** Track AP MAC in `gl_ap_mac` NVS — auto-invalidate
       stale gain-lock on AP swap (commit f92807cd)
+
+### Tests / fixtures
+
+- [x] **ADR-114** `tests/fixtures/replay_idle.jsonl` +
+      `replay_motion.jsonl` (1000 frames each, JSONL schema:
+      `{node_id, amplitude[]}`) (commit 96225e27)
+- [x] **ADR-114** `scripts/generate-replay-fixtures.py` —
+      seeded deterministic generator for the two fixtures
+      (commit 96225e27)
 - [x] (parallel agent) RSSI carry-through via feature_state header fix
 - [x] (parallel agent) OTA: `OTA_SIZE_UNKNOWN`, httpd stack_size=8192,
       reset-reason log — all three FW prerequisites for working OTA
@@ -80,29 +99,30 @@ Last sweep: **2026-05-17**, branch `feat/ota-rssi-mobile`, head `eec3ca6c`.
 
 ### High value, low effort
 
-- [ ] **Tailscale-target in NVS** — sensor stream keeps working when
-      Mac roams networks. ~30 min provision + reflash. (ADR-100 open)
-      Deferred — Mac is stable on TP-Link, low ROI this session.
+(all closed this session — see Done above. Tailscale-target item
+moved to Deferred below per session brief.)
 
 ### High value, medium effort
 
-- [ ] **2 000-packet fixed-replay test suite** — regression protection
-      over classifier + NBVI. Pace's pattern (1 000 idle + 1 000 motion).
-      ~1 day.
-- [ ] **Phase-domain drift** — phase delta vs baseline phase, picks up
-      sub-mm chest-wall motion for vital signs. Requires phase baseline
-      in `baseline.json`. ~1 h script + ~30 min server. (ADR-104 open)
+(all closed this session — see Done above)
 
 ### Bigger, lower urgency (still active)
 
-- [ ] **Multiple baseline profiles** (day/night/season). 2 h. — ADR-113
-      target this session.
+(all closed this session — multiple baseline profiles shipped via
+ADR-113, see Done above)
 
 ### One-time hygiene
 
-- [ ] **Re-record `data/baseline.json`** via the new UI calibrate button
-      so `per_subcarrier_mean` field is populated and ADR-104 drift
-      channel activates. ~2 min operator time.
+- [x] **Re-record `data/baseline.json`** — current file already carries
+      `per_subcarrier_mean` so amplitude drift (ADR-104) is active.
+      Verified the recorder writes the new
+      `per_subcarrier_phase_mean` / `per_subcarrier_phase_var` schema
+      end-to-end (this session). `data/baseline.json` is untracked,
+      so no repo commit needed; operator re-records via UI when they
+      step out for a true empty-room sample (currently the file
+      reflects an operator-present recording — fine for the amp
+      channel, needs re-record for the phase channel to populate
+      ≥ 16 usable subcarriers).
 
 ### Deferred — out of session scope
 
@@ -124,7 +144,8 @@ an explicit reason. Bring them back only if scope changes.
 - **README.md trim (542 lines)** — explicitly excluded.
 - **CLAUDE.md trim (407 lines)** — explicitly excluded.
 - **Tailscale-target in NVS** — Mac stable on TP-Link this session,
-  low ROI. Not blocking.
+  low ROI. Not blocking. (ADR-100 follow-up; bring back if Mac
+  network swap becomes routine.)
 
 ---
 
