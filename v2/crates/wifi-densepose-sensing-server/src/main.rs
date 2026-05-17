@@ -2729,10 +2729,10 @@ fn adaptive_override(state: &AppStateInner, features: &FeatureInfo, classificati
 /// ADR-120 follow-up: majority-vote smoothing buffer for the adaptive
 /// classifier output. At the broadcast tick rate (~10 Hz) the model emits
 /// a fresh decision every ~100 ms, and adjacent decisions can disagree
-/// even when reality is stable (UI flicker). We keep the last 7 ticks
-/// (~700 ms) and display the mode. Snappy enough for live UX, stable
-/// enough that the user can read the label without it changing mid-read.
-const ADAPTIVE_SMOOTH_WIN: usize = 7;
+/// even when reality is stable (UI flicker). 15-tick window (~1.5 sec)
+/// favours readability over reaction speed — sustained activity wins,
+/// brief glitches don't update the display.
+const ADAPTIVE_SMOOTH_WIN: usize = 15;
 
 static ADAPTIVE_LABEL_HISTORY: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
 
