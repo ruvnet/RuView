@@ -176,7 +176,7 @@ for the amplitude classifier or NBVI.
 | Test suite | 500+ tests, 90 % cov | ❌ 2 parser tests |
 | Phase / amplitude | amplitude only | ✅ same |
 
-## Open items, ranked by expected impact on RuView
+## Open items (full gap-by-section: [`espectre-gap-analysis.md`](espectre-gap-analysis.md))
 
 1. **REST `POST /api/v1/baseline/calibrate`** — drives the recording
    script from a button in `raw.html` instead of CLI. ~30 min.
