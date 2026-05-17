@@ -2726,41 +2726,86 @@ fn adaptive_override(state: &AppStateInner, features: &FeatureInfo, classificati
     }
 }
 
-/// ADR-120 follow-up: majority-vote smoothing buffer for the adaptive
-/// classifier output. At the broadcast tick rate (~10 Hz) the model emits
-/// a fresh decision every ~100 ms, and adjacent decisions can disagree
-/// even when reality is stable (UI flicker). 15-tick window (~1.5 sec)
-/// favours readability over reaction speed — sustained activity wins,
-/// brief glitches don't update the display.
-const ADAPTIVE_SMOOTH_WIN: usize = 15;
+/// ADR-120 follow-up: two-layer smoothing on the adaptive classifier
+/// output to stop UI flicker.
+///
+/// Layer 1 — majority-vote over the last `ADAPTIVE_SMOOTH_WIN` ticks
+/// (3 sec @ 10 Hz). Brief glitches lose to sustained signal.
+///
+/// Layer 2 — candidate confirmation: even when the layer-1 mode flips,
+/// the committed display label only updates after the new mode has
+/// persisted for `ADAPTIVE_CONFIRM_TICKS` consecutive ticks. Prevents
+/// rapid bouncing between two near-tied classes.
+///
+/// Combined effective dwell time: ≥3 sec before any visible label change.
+/// Live UX target: user can read the badge without it changing
+/// mid-read, while a genuine activity switch still propagates within
+/// ~3-4 seconds.
+const ADAPTIVE_SMOOTH_WIN: usize = 30;
+const ADAPTIVE_CONFIRM_TICKS: u32 = 5;
 
 static ADAPTIVE_LABEL_HISTORY: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
+/// (committed_label, candidate_label, candidate_consecutive_count)
+static ADAPTIVE_COMMITTED: OnceLock<Mutex<(String, String, u32)>> = OnceLock::new();
 
 fn adaptive_label_history_init() -> &'static Mutex<VecDeque<String>> {
     ADAPTIVE_LABEL_HISTORY.get_or_init(|| Mutex::new(VecDeque::with_capacity(ADAPTIVE_SMOOTH_WIN)))
 }
 
-/// Push `label` into the rolling history and return the mode (most-
-/// frequent value) over the current window. Ties broken by keeping the
-/// previous committed label (sticky behaviour).
-fn adaptive_label_smooth(label: &str) -> String {
-    let mut buf = adaptive_label_history_init().lock().unwrap();
-    buf.push_back(label.to_string());
-    while buf.len() > ADAPTIVE_SMOOTH_WIN { buf.pop_front(); }
-    // Mode.
-    let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-    for v in buf.iter() {
-        *counts.entry(v.as_str()).or_insert(0) += 1;
-    }
-    // Prefer the same label as previous committed (sticky tie-break).
-    let prev = buf.front().map(|s| s.as_str()).unwrap_or(label);
-    let mut best = (label, 0usize);
-    for (k, v) in &counts {
-        if *v > best.1 || (*v == best.1 && *k == prev) {
-            best = (*k, *v);
+fn adaptive_committed_init() -> &'static Mutex<(String, String, u32)> {
+    ADAPTIVE_COMMITTED.get_or_init(|| Mutex::new((String::new(), String::new(), 0)))
+}
+
+/// Push `raw_label` into Layer 1 (rolling history) and compute its mode.
+/// Then run Layer 2 (candidate confirmation): a label different from the
+/// committed one must persist for ADAPTIVE_CONFIRM_TICKS consecutive
+/// mode-results before becoming the new committed.
+fn adaptive_label_smooth(raw_label: &str) -> String {
+    // Layer 1 — majority vote.
+    let mode = {
+        let mut buf = adaptive_label_history_init().lock().unwrap();
+        buf.push_back(raw_label.to_string());
+        while buf.len() > ADAPTIVE_SMOOTH_WIN { buf.pop_front(); }
+        let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for v in buf.iter() {
+            *counts.entry(v.as_str()).or_insert(0) += 1;
         }
+        let mut best = (raw_label.to_string(), 0usize);
+        for (k, v) in &counts {
+            if *v > best.1 {
+                best = ((*k).to_string(), *v);
+            }
+        }
+        best.0
+    };
+
+    // Layer 2 — candidate confirmation.
+    let mut st = adaptive_committed_init().lock().unwrap();
+    if st.0.is_empty() {
+        // Cold start: commit immediately on first non-empty mode.
+        st.0 = mode.clone();
+        st.1 = mode.clone();
+        st.2 = 0;
+        return mode;
     }
-    best.0.to_string()
+    if mode == st.0 {
+        // Mode agrees with the committed label — reset candidate.
+        st.1 = mode;
+        st.2 = 0;
+    } else if mode == st.1 {
+        // Same candidate as before — increment streak.
+        st.2 += 1;
+        if st.2 >= ADAPTIVE_CONFIRM_TICKS {
+            // Confirmed; promote candidate.
+            st.0 = st.1.clone();
+            st.2 = 0;
+        }
+    } else {
+        // New candidate.
+        st.1 = mode;
+        st.2 = 1;
+    }
+    st.0.clone()
 }
 
 /// ADR-120: classes that ONLY the adaptive W-MLP model can produce.
