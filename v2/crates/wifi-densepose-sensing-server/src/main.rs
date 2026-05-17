@@ -1710,86 +1710,23 @@ fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
 /// subcarriers with the highest variance produce peaks at the corresponding directions.
 fn generate_signal_field(
     _mean_rssi: f64,
-    motion_score: f64,
-    breathing_rate_hz: f64,
-    signal_quality: f64,
-    subcarrier_variances: &[f64],
+    _motion_score: f64,
+    _breathing_rate_hz: f64,
+    _signal_quality: f64,
+    _subcarrier_variances: &[f64],
 ) -> SignalField {
+    // ADR-105: this used to paint a 20×20 "room heatmap" by mapping each
+    // subcarrier index `k` to an angle `2π·k/N` and dropping a Gaussian
+    // hotspot at radius proportional to its variance — visually rich, but
+    // **physically meaningless**. A single sensor has no directional
+    // information, so the resulting hotspots have no correspondence to
+    // where anything actually is in the room. Operator requested
+    // boots-on-the-ground honesty: return a zero-filled grid. UI will
+    // render blank, which is the truthful state until a real
+    // multistatic localizer is wired in.
     let grid = 20usize;
-    let mut values = vec![0.0f64; grid * grid];
-    let center = (grid as f64 - 1.0) / 2.0;
+    return SignalField { grid_size: [grid, 1, grid], values: vec![0.0; grid * grid] };
 
-    // Normalise subcarrier variances to [0, 1].
-    let max_var = subcarrier_variances.iter().cloned().fold(0.0f64, f64::max);
-    let norm_factor = if max_var > 1e-9 { max_var } else { 1.0 };
-
-    // For each cell, accumulate contributions from all subcarriers.
-    // Each subcarrier k is assigned an angular direction proportional to its index
-    // so that different subcarriers illuminate different regions of the room.
-    let n_sub = subcarrier_variances.len().max(1);
-    for (k, &var) in subcarrier_variances.iter().enumerate() {
-        let weight = (var / norm_factor) * motion_score;
-        if weight < 1e-6 {
-            continue;
-        }
-        // Map subcarrier index to an angle across the full 2π sweep.
-        let angle = (k as f64 / n_sub as f64) * 2.0 * std::f64::consts::PI;
-        // Place the hotspot at a distance proportional to the weight, capped at 40% of
-        // the grid radius so it stays within the room model.
-        let radius = center * 0.8 * weight.sqrt();
-        let hx = center + radius * angle.cos();
-        let hz = center + radius * angle.sin();
-
-        for z in 0..grid {
-            for x in 0..grid {
-                let dx = x as f64 - hx;
-                let dz = z as f64 - hz;
-                let dist2 = dx * dx + dz * dz;
-                // Gaussian blob centred on the hotspot; spread scales with weight.
-                let spread = (0.5 + weight * 2.0).max(0.5);
-                values[z * grid + x] += weight * (-dist2 / (2.0 * spread * spread)).exp();
-            }
-        }
-    }
-
-    // Base radial attenuation from the router assumed at grid centre.
-    for z in 0..grid {
-        for x in 0..grid {
-            let dx = x as f64 - center;
-            let dz = z as f64 - center;
-            let dist = (dx * dx + dz * dz).sqrt();
-            let base = signal_quality * (-dist * 0.12).exp();
-            values[z * grid + x] += base * 0.3;
-        }
-    }
-
-    // Breathing ring: if a breathing rate was estimated add a faint annular highlight
-    // at a radius corresponding to typical chest-wall displacement range.
-    if breathing_rate_hz > 0.05 {
-        let ring_r = center * 0.55;
-        let ring_width = 1.8f64;
-        for z in 0..grid {
-            for x in 0..grid {
-                let dx = x as f64 - center;
-                let dz = z as f64 - center;
-                let dist = (dx * dx + dz * dz).sqrt();
-                let ring_val = 0.08 * (-(dist - ring_r).powi(2) / (2.0 * ring_width * ring_width)).exp();
-                values[z * grid + x] += ring_val;
-            }
-        }
-    }
-
-    // Clamp and normalise to [0, 1].
-    let field_max = values.iter().cloned().fold(0.0f64, f64::max);
-    let scale = if field_max > 1e-9 { 1.0 / field_max } else { 1.0 };
-    for v in &mut values {
-        *v = (*v * scale).clamp(0.0, 1.0);
-    }
-
-    SignalField {
-        grid_size: [grid, 1, grid],
-        values,
-    }
 }
 
 // ── Feature extraction from ESP32 frame ──────────────────────────────────────
