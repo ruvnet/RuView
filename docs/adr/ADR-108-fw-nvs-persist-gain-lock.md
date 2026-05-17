@@ -152,16 +152,17 @@ I (4980) csi_collector: gain-lock PERSISTED to NVS (csi_cfg/gl_agc, gl_fft)
 
 ## Open Items
 
-* **REST endpoint to clear gain-lock NVS** — today the operator has
-  to USB-erase the namespace. A FW-side `POST /ota/recalibrate` that
-  clears the two keys + `esp_restart()` would close that loop.
-  ~30 min FW + flash.
-* **Track AP MAC alongside AGC/FFT** — `csi_cfg/gl_ap_mac`. On boot,
-  if current AP MAC ≠ saved → ignore the cached values and re-calibrate.
-  Fully automatic invalidation. ~1 h FW.
 * **Per-channel cache** — `csi_cfg/gl_<chan>_agc`. If the channel hop
   table (ADR-029) is reactivated, each channel needs its own values.
-  ~1 h FW.
+  ~1 h FW. Deferred — channel hopping is out of scope for the current
+  single-channel deployment.
+
+## Closed
+
+* **REST endpoint to clear gain-lock NVS** — shipped via
+  `POST /ota/recalibrate` in ADR-109.
+* **Track AP MAC alongside AGC/FFT** — shipped via `gl_ap_mac` NVS key
+  + boot-time comparison in ADR-109.
 
 ## References
 
