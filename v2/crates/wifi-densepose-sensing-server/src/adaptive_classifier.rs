@@ -91,7 +91,11 @@ fn subcarrier_stats(amps: &[f64]) -> (f64, f64, f64, f64, f64, f64, f64, f64) {
 
     // IQR (inter-quartile range).
     let mut sorted = amps.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    // partial_cmp returns None on NaN — fall back to Equal so a single NaN
+    // frame from real ESP32 hardware (silent DSP div-by-zero, empty buffer)
+    // can't panic the whole sensing server (#611). The same file already
+    // uses unwrap_or(Equal) at lines 149-150 and 155; this was an oversight.
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let q1 = sorted[sorted.len() / 4];
     let q3 = sorted[3 * sorted.len() / 4];
     let iqr = q3 - q1;

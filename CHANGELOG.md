@@ -8,22 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- **`archive/v1/data/proof/verify.py` quantizes features before SHA-256** so the
-  trust-anchor hash is cross-platform stable (issue #560). The pipeline output
-  diverges at ULP precision across SIMD backends — Intel AVX2/AVX-512 vs Apple
-  Silicon NEON reorder vectorised FP operations differently in scipy.fft's
-  pocketfft kernels, so two "correct" platforms produce values that differ in
-  the ~14th decimal. `features_to_bytes()` now `np.round(.., 9)`s each array
-  before packing as little-endian f64, collapsing the cross-platform divergence
-  to a single canonical hash. The 9-decimal precision is ~5 orders of magnitude
-  above worst-case SIMD ULP drift (~1e-14 at value magnitudes of 1-100) and
-  many orders of magnitude below any meaningful signal change. Regenerating
-  `expected_features.sha256` on a canonical CI platform is required as part
-  of merging this fix.
-- `scripts/probe-fft-platform.py` now emits both `sha256_raw` (unrounded,
-  legacy) and `sha256_quantized` (the new platform-invariant hash) so the fix
-  can be verified across machines by running the probe on each and confirming
-  `sha256_quantized` matches.
+- **Proof replay (`archive/v1/data/proof/verify.py`) is now cross-platform deterministic** (closes #560). Three changes together: (1) `features_to_bytes()` now `np.round(.., HASH_QUANTIZATION_DECIMALS=6)`s each feature array before packing as little-endian f64, collapsing ULP-level drift from scipy.fft pocketfft SIMD reordering; (2) the `Verify Pipeline Determinism` workflow pins `OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, `MKL_NUM_THREADS=1`, `VECLIB_MAXIMUM_THREADS=1`, `NUMEXPR_NUM_THREADS=1` — multi-threaded BLAS reductions were a deeper source of non-determinism than SIMD reordering, and 6-decimal quantization alone wasn't enough across Azure VM microarchitectures; (3) `expected_features.sha256` regenerated under the new conditions. CI now passes the determinism check (same hash across consecutive runs on canonical Linux x86_64 CI runner: `667eb054c44ac510342665bf9c93d608868a8ead948ae8774b2796ebce6f8fe7`). `scripts/probe-fft-platform.py` updated to mirror `HASH_QUANTIZATION_DECIMALS=6` for cross-machine spot-checks.
+- **`archive/v1/src/services/pose_service.py:223` calls the right method on `PhaseSanitizer`** (closes #612). The call was `self.phase_sanitizer.sanitize(phase_data)`, but `PhaseSanitizer`'s full-pipeline entry point is named `sanitize_phase()` (`unwrap_phase` + `remove_outliers` + `smooth_phase` chained, see `archive/v1/src/core/phase_sanitizer.py:266`). The shorter `sanitize` name doesn't exist on the class, so any path that reached this branch raised `AttributeError` and crashed the pose service mid-frame.
+- **`adaptive_classifier.rs:94` no longer panics on NaN feature values** (closes #611).
+  `sorted.sort_by(|a, b| a.partial_cmp(b).unwrap())` returned `None` and panicked
+  whenever a single `NaN` reached the classifier from real ESP32 hardware (silent
+  DSP div-by-zero, empty buffer). One bad frame killed the entire sensing-server
+  process. Swapped for `unwrap_or(Ordering::Equal)`, matching the pattern the
+  same file already used at lines 149-150 and 155. Per-frame hot path; this was
+  a real production crash vector.
+- **`ui/utils/pose-renderer.js` no longer divides by zero** when two render frames land in the same `performance.now()` tick (issue #519 Bug 2). `deltaTime` is now `Math.max(currentTime - lastFrameTime, 1)` before the `1000 / deltaTime` division, capping displayed FPS at 1000 — far above any real render rate, but finite so the EMA `averageFps = averageFps * 0.9 + fps * 0.1` no longer poisons itself to `Infinity` on a single zero-dt tick.
 
 ### Removed
 - **Stub crates `wifi-densepose-api`, `wifi-densepose-db`, `wifi-densepose-config`** (closes #578).

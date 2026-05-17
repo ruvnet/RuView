@@ -651,14 +651,18 @@ export class PoseRenderer {
     this.performanceMetrics.frameCount++;
 
     if (this.performanceMetrics.lastFrameTime > 0) {
-      const deltaTime = currentTime - this.performanceMetrics.lastFrameTime;
+      // Clamp to a minimum dt so consecutive frames within the same
+      // performance.now() tick don't yield Infinity (issue #519 Bug 2).
+      // 1 ms floor caps the displayed FPS at 1000 — far above any real
+      // render rate, but finite so the EMA stays well-defined.
+      const deltaTime = Math.max(currentTime - this.performanceMetrics.lastFrameTime, 1);
       const fps = 1000 / deltaTime;
-      
+
       // Update average FPS using exponential moving average
       if (this.performanceMetrics.averageFps === 0) {
         this.performanceMetrics.averageFps = fps;
       } else {
-        this.performanceMetrics.averageFps = 
+        this.performanceMetrics.averageFps =
           (this.performanceMetrics.averageFps * 0.9) + (fps * 0.1);
       }
     }

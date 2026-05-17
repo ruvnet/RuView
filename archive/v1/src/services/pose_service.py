@@ -220,7 +220,11 @@ class PoseService:
                 # Apply phase sanitization if we have phase data
                 if hasattr(detection_result.features, 'phase_difference'):
                     phase_data = detection_result.features.phase_difference
-                    sanitized_phase = self.phase_sanitizer.sanitize(phase_data)
+                    # PhaseSanitizer's full-pipeline method is sanitize_phase,
+                    # not sanitize (issue #612). The shorter name was an
+                    # AttributeError waiting to fire on any code path that
+                    # reaches this branch.
+                    sanitized_phase = self.phase_sanitizer.sanitize_phase(phase_data)
                     # Combine amplitude and phase data
                     return np.concatenate([amplitude_data, sanitized_phase])
                 
