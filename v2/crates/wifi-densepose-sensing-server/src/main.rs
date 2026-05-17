@@ -903,6 +903,10 @@ struct Esp32Frame {
     noise_floor: i8,
     amplitudes: Vec<f64>,
     phases: Vec<f64>,
+    /// ADR-106 trailing field — sensor µs timestamp from
+    /// `info->rx_ctrl.timestamp`. Monotonic µs since FW boot.
+    /// `None` for old FW that doesn't carry it.
+    sensor_timestamp_us: Option<u32>,
 }
 
 /// Sensing update broadcast to WebSocket clients
@@ -1696,6 +1700,7 @@ fn parse_csi_lean(buf: &[u8]) -> Option<Esp32Frame> {
         noise_floor: noise,
         amplitudes,
         phases,
+        sensor_timestamp_us: None,
     })
 }
 
@@ -1767,6 +1772,15 @@ fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
         noise_floor,
         amplitudes,
         phases,
+        // ADR-106: trailing 4-byte sensor µs timestamp from new FW.
+        // Old FW: buf has exactly `iq_start + iq_len` bytes ⇒ Option::None.
+        // New FW: 4 more bytes after I/Q ⇒ parse as u32 LE.
+        sensor_timestamp_us: if buf.len() >= expected_len + 4 {
+            Some(u32::from_le_bytes([
+                buf[expected_len], buf[expected_len + 1],
+                buf[expected_len + 2], buf[expected_len + 3],
+            ]))
+        } else { None },
     })
 }
 
@@ -2511,6 +2525,7 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
             noise_floor: -90,
             amplitudes: multi_ap_frame.amplitudes.clone(),
             phases: multi_ap_frame.phases.clone(),
+            sensor_timestamp_us: None,
         };
 
         // ── Step 4b: Update frame history and extract features ───────
@@ -2689,6 +2704,7 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         noise_floor: -90,
         amplitudes: vec![signal_pct],
         phases: vec![0.0],
+        sensor_timestamp_us: None,
     };
 
     let mut s = state.write().await;
@@ -2846,6 +2862,7 @@ fn generate_simulated_frame(tick: u64) -> Esp32Frame {
         noise_floor: -90,
         amplitudes,
         phases,
+        sensor_timestamp_us: None,
     }
 }
 
@@ -5247,18 +5264,19 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     }
                     ns.latest_noise_floor = frame.noise_floor;
                     ns.latest_n_antennas = frame.n_antennas;
-                    // ADR-106 follow-up: server-side receive timestamp
-                    // in µs since UNIX epoch. Not as precise as
-                    // sensor-side `info->rx_ctrl.timestamp` would be,
-                    // but good enough for cross-node alignment within
-                    // ~1 ms (Mac monotonic + LAN jitter). Sensor-side
-                    // timestamp deferred to a future FW change that
-                    // extends the 0xC511_0001 header — see ADR-106
-                    // Open Items.
-                    ns.latest_timestamp_us = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_micros() as u64)
-                        .unwrap_or(0);
+                    // ADR-106: prefer sensor's `rx_ctrl.timestamp`
+                    // (monotonic µs since FW boot) when the new-FW
+                    // trailing 4 bytes are present. Falls back to
+                    // server SystemTime (UNIX µs) if old FW or peek
+                    // failed. Two distinct reference frames; the
+                    // serialized value is whichever was set.
+                    ns.latest_timestamp_us = match frame.sensor_timestamp_us {
+                        Some(ts) => ts as u64,                       // sensor monotonic µs
+                        None => std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_micros() as u64)
+                            .unwrap_or(0),
+                    };
 
                     let sample_rate_hz = 1000.0 / 500.0_f64;
                     let (features, mut classification, breathing_rate_hz, sub_variances, raw_motion) =

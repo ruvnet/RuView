@@ -214,6 +214,10 @@ static esp_timer_handle_t s_hop_timer = NULL;
  *   [17]     Noise floor (i8)
  *   [18..19] Reserved
  *   [20..]   I/Q data (raw bytes from ESP-IDF callback)
+ *   [20+iq_len .. 20+iq_len+3]  ADR-106: sensor timestamp_us (u32 LE)
+ *                               from info->rx_ctrl.timestamp. Trailing
+ *                               4 bytes — server parses opportunistically;
+ *                               old server tolerant of extra bytes.
  */
 size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf_len)
 {
@@ -225,7 +229,7 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
     uint16_t iq_len = (uint16_t)info->len;
     uint16_t n_subcarriers = iq_len / (2 * n_antennas);
 
-    size_t frame_size = CSI_HEADER_SIZE + iq_len;
+    size_t frame_size = CSI_HEADER_SIZE + iq_len + 4 /* ADR-106 trailing timestamp_us */;
     if (frame_size > buf_len) {
         ESP_LOGW(TAG, "Buffer too small: need %u, have %u", (unsigned)frame_size, (unsigned)buf_len);
         return 0;
@@ -277,6 +281,13 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
 
     /* I/Q data */
     memcpy(&buf[CSI_HEADER_SIZE], info->buf, iq_len);
+
+    /* ADR-106: trailing sensor µs timestamp from rx_ctrl.timestamp.
+     * This is monotonic µs since FW boot (per ESP-IDF docs) and lets
+     * the host align frames across nodes within ~µs once the boot
+     * offsets are learned. Old server ignores trailing bytes. */
+    uint32_t ts_us = info->rx_ctrl.timestamp;
+    memcpy(&buf[CSI_HEADER_SIZE + iq_len], &ts_us, 4);
 
     return frame_size;
 }
