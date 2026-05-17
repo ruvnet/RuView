@@ -371,6 +371,7 @@ fn load_baseline_file(path: &str) {
         None => { warn!("baseline: no .nodes object in {path}"); return; }
     };
     let mut loaded: Vec<(u8, f64)> = Vec::new();
+    let mut loaded_cv: Vec<(u8, f64)> = Vec::new();
     for (k, node) in nodes {
         let id: u8 = match k.parse() { Ok(i) => i, Err(_) => continue };
         // ADR-103 v2 schema (preferred): full_broadband_p95 / full_broadband_mean
@@ -384,16 +385,35 @@ fn load_baseline_file(path: &str) {
             .into_iter().flatten().find(|v| *v > 0.0);
         let Some(b) = baseline else { continue };
         loaded.push((id, b));
+
+        // ADR-103 v2: per-node baseline CV for universal threshold
+        // normalization (Pace's Problem #3). Accept either schema field.
+        let cv_pct = node.get("full_broadband_cv_pct")
+            .or_else(|| node.get("cv_pct"))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        if cv_pct > 0.0 {
+            loaded_cv.push((id, cv_pct / 100.0));
+        }
     }
     if loaded.is_empty() {
         warn!("baseline: {path} parsed but no usable per-node entries");
         return;
     }
-    let mut o = amp_baseline_override_init().lock().unwrap();
-    for (id, b) in &loaded { o.insert(*id, *b); }
+    {
+        let mut o = amp_baseline_override_init().lock().unwrap();
+        for (id, b) in &loaded { o.insert(*id, *b); }
+    }
+    {
+        let mut o = amp_baseline_cv_init().lock().unwrap();
+        for (id, cv) in &loaded_cv { o.insert(*id, *cv); }
+    }
     let summary: Vec<String> = loaded.iter().map(|(id, b)| format!("node{id}={b:.2}")).collect();
-    info!("baseline: loaded {} node overrides from {} ({})",
-          loaded.len(), path, summary.join(", "));
+    let cv_summary: Vec<String> = loaded_cv.iter()
+        .map(|(id, cv)| format!("node{id}_cv={:.2}%", cv * 100.0)).collect();
+    info!("baseline: loaded {} node overrides from {} ({}; {})",
+          loaded.len(), path, summary.join(", "),
+          if cv_summary.is_empty() { "no CV normalization".to_string() } else { cv_summary.join(", ") });
 }
 
 /// Classify motion/presence for one node from the raw amplitude vector.
@@ -525,19 +545,43 @@ fn amp_presence_override(node_id: u8, amplitudes: &[f64]) -> Option<(String, boo
 /// fusion and from `build_node_features` so the UI can show per-node
 /// labels. No hysteresis is applied here; that's a global property.
 fn amp_node_level(cv: f64, mean_short: f64, baseline: Option<f64>) -> (&'static str, bool) {
-    // ADR-102: NBVI subcarrier selection drops baseline CV from ~5-7 %
-    // down to ~3-4 % in a quiet room. Thresholds tightened proportionally
-    // (was 30/15, now 22/10) so subtle motion gets flagged without
-    // raising the false-positive rate.
-    if cv >= 0.22 {
+    // ADR-102 + Pace's Problem #3: thresholds are *universal* —
+    // applied to the **normalized** motion score (cv / baseline_cv),
+    // where baseline_cv is the empty-room CV measured during the
+    // last calibration (loaded from data/baseline.json). One
+    // threshold set works in any room.
+    let bcv = amp_baseline_cv_for_node();
+    let norm_cv = if bcv > 0.0 { cv / bcv } else { cv };
+
+    // Universal gates (computed at α-multiples of room-quiet CV):
+    //   3× baseline_cv → present_moving
+    //   6× baseline_cv → active
+    // Empirically: baseline=4 % → moving≈12 %, active≈24 % — matches
+    // the deployment-tuned values we had hard-coded.
+    if norm_cv >= 6.0 {
         ("active", true)
-    } else if cv >= 0.10 {
+    } else if norm_cv >= 3.0 {
         ("present_moving", true)
     } else if matches!(baseline, Some(b) if b > 0.0 && (mean_short / b) < 0.75) {
         ("present_still", true)
     } else {
         ("absent", false)
     }
+}
+
+/// Average baseline CV across nodes that have a calibration loaded.
+/// Returns 0.0 if no calibration is loaded — caller falls back to raw CV.
+fn amp_baseline_cv_for_node() -> f64 {
+    let cvs = amp_baseline_cv_init().lock().unwrap();
+    if cvs.is_empty() { return 0.0; }
+    cvs.values().sum::<f64>() / cvs.len() as f64
+}
+
+/// Per-node baseline CV (decimal, not %) loaded from data/baseline.json.
+/// Used to normalize the runtime CV so threshold comparison is universal.
+static AMP_BASELINE_CV: OnceLock<Mutex<std::collections::HashMap<u8, f64>>> = OnceLock::new();
+fn amp_baseline_cv_init() -> &'static Mutex<std::collections::HashMap<u8, f64>> {
+    AMP_BASELINE_CV.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
 /// Per-node snapshot exposed to `build_node_features`.
@@ -595,9 +639,15 @@ fn amp_classify_from_latest() -> Option<(String, bool, f64)> {
         matches!(b, Some(bv) if *bv > 0.0 && (*m / *bv) < 0.75)
     });
 
-    let candidate = if max_cv >= 0.22 {
+    // ADR-103 v2: normalize max_cv by loaded baseline CV (Pace's
+    // Problem #3 universal threshold). Falls back to absolute gates
+    // when no calibration is loaded — keeps backwards compatibility.
+    let bcv = amp_baseline_cv_for_node();
+    let norm_max_cv = if bcv > 0.0 { max_cv / bcv } else { max_cv };
+    let (gate_active, gate_moving) = if bcv > 0.0 { (6.0, 3.0) } else { (0.22, 0.10) };
+    let candidate = if norm_max_cv >= gate_active {
         "active"
-    } else if max_cv >= 0.10 {
+    } else if norm_max_cv >= gate_moving {
         "present_moving"
     } else if any_baseline_drop {
         "present_still"
