@@ -12,12 +12,13 @@ missing** breakdown, structured exactly along the sections of Pace's
 | Formula `α·σ/μ² + (1-α)·σ/μ`, α = 0.5 | ✅ ADR-102 |
 | Step 1: quiet-window finder | ✅ ADR-102 v2 |
 | Step 2: 25 %-percentile dead-zone gate | ✅ ADR-102 |
-| **Step 3: rank + validate (run motion detector on the calibration buffer, pick K with lowest FP rate)** | ❌ raw ranking accepted |
+| **Step 3: rank + validate** | ✅ ADR-104 D4 (commit `6212b17e`) — K ∈ {6,8,10,12,16,20} sweep, smallest-FP wins, ties by smallest total-NBVI |
 | Step 4: pick top-K (K=12) | ✅ ADR-102 |
 | Amplitude only (no phase) | ✅ same |
 
-Step 3 absence means a noisy WiFi neighbour with energy concentrated
-on our top-12 subcarriers would still get picked. Defence: validate.
+All four NBVI steps shipped. If a noisy neighbour energy-overlaps the
+top-K, the validator counts FPs over the quiet window and a tighter
+(or different) K wins.
 
 ## Problem #2: Gain Lock (AGC + FFT)
 
@@ -43,12 +44,14 @@ PHASE 2 (7 s)  rank subcarriers with gain locked → save top-K to NVS
 | Phase | Status in RuView |
 |---|---|
 | Phase 1 in FW | ✅ ADR-100 (`csi_collector.c::rv_gain_lock_process`) |
-| **Phase 2 in FW after Phase 1** | ❌ NBVI lives in the server as a rolling refresh, not a boot-time freeze |
-| **NVS save of both lock + selection** | ❌ each FW boot re-calibrates gain; NBVI re-ranks every server boot |
+| **Phase 2 in FW after Phase 1** | ⏳ NBVI intentionally in server as rolling refresh (adapts to slow channel drift). Not planned in FW. |
+| **NVS save of gain-lock** | ✅ ADR-108 (commit `3779bb76`) — `csi_cfg/gl_agc` + `gl_fft` |
+| **NVS save of NBVI selection** | ⏳ NBVI lives server-side, doesn't apply |
 
-Doing Phase 2 in FW would mean reboot → ready in 0.5 s instead of
-~10 s. Trade-off: doesn't adapt to room changes without explicit
-re-calibration.
+After ADR-108 the FW boots → CSI ready in ~0.5 s (NVS restore) instead
+of ~10 s (full 300-packet calibration). Adapting to room changes
+without recalibration is now a "clear NVS keys" operation — open item
+ADR-108 #1 will surface that as a REST endpoint.
 
 ## Persisted calibration (NVS on the sensor)
 
@@ -65,13 +68,14 @@ second:
 | Item | Status in RuView |
 |---|---|
 | WiFi creds + collector IP in NVS | ✅ `csi_cfg` namespace |
-| **Gain lock NVS persistence** | ❌ recomputed on every FW boot |
-| **NBVI selection NVS persistence** | ❌ recomputed on every server boot |
-| **Baseline NVS persistence** | partial — server persists to disk (ADR-103), not on the sensor |
-| **Threshold NVS persistence** | ❌ universal threshold loaded from `data/baseline.json` server-side |
+| **Gain lock NVS persistence** | ✅ ADR-108 (`csi_cfg/gl_agc` + `gl_fft`) |
+| **NBVI selection NVS persistence** | ⏳ server-side rolling, intentional |
+| **Baseline NVS persistence** | ✅ on host disk via ADR-103 (`data/baseline.json`); not on sensor — server is required |
+| **Threshold NVS persistence** | ✅ derives from baseline_cv loaded by ADR-103 |
 
 If we ever ship to operators who don't run the Rust server (pure FW
-+ HA), all of these become required.
++ HA), the server-side bits (NBVI / baseline / threshold) would have
+to migrate to the sensor's NVS. Not on the current roadmap.
 
 ## The Game (Web Serial calibration UI)
 
@@ -123,26 +127,54 @@ ESPHome component, an MQTT bridge, or a custom HA integration.
 * Fall detection
 * Person vs. pet classification
 
-## Priority for RuView, ranked by expected impact
+## Priority for RuView — current state
+
+### ✅ Done in this session
+
+| Item | Where |
+|---|---|
+| NVS persistence of gain-lock | ADR-108 (`3779bb76`) |
+| FP-rate validation of NBVI (Step 3) | ADR-104 D4 (`6212b17e`) |
+| `POST /api/v1/baseline/calibrate` + UI button | ADR-107 (`0f373467`, `45c1464c`) |
+| Auto-recalibrate on long-quiet periods | ADR-107 (`0f373467`) |
+| Per-subcarrier baseline comparison | ADR-104 (`6212b17e`) |
+| Full complex CSI in WS (amp+phase+meta) | ADR-106 (`4daa2c9b`) |
+| Sensor µs timestamp from FW | ADR-106 (`b787f40a`) |
+| Managed-ping CSI keepalive (no ручной ping) | ADR-106 (`8489efe9`) |
+| No synthetic data in production runtime | ADR-105 (`9aa027e9`, `30244d27`) |
+| OTA flash via WiFi (8032 port) | `ota-pipeline.md` (`274984d3`) |
+
+### ⏳ Still open, by impact
 
 | # | Item | Net benefit | Estimate |
 |---|---|---|---|
-| 1 | NVS persistence + boot-time NBVI freeze in FW | reboot → ready in 0.5 s instead of ~10 s; survives server outage | 3-4 h |
-| 2 | FP-rate validation of NBVI Step 3 | defence against noise-source subcarrier overlap | 1 h |
-| 3 | `POST /api/v1/baseline/calibrate` + button in `raw.html` | calibrate from browser instead of CLI script | 30 min |
-| 4 | Auto-recalibrate on long-quiet periods | drops the manual step entirely | 1-2 h |
-| 5 | HA via MQTT (lighter than full ESPHome rewrite) | sensor as HA entity | 1 day |
-| 6 | Fixed-replay test suite (2 000 packets) | regression protection | 1 day |
-| 7 | Per-subcarrier baseline comparison (ADR-104 draft) | off-axis presence detection | 1 h |
-| 8 | Web Serial calibration game | nice-to-have | 1 day |
-| 9 | ESPHome native component (instead of MQTT bridge) | tighter HA integration | 2-3 days |
+| 1 | **HA via MQTT** | sensor as HA entity, ecosystem reach | 1 day |
+| 2 | **Fixed-replay test suite (2 000 packets)** | regression protection over the classifier + NBVI | 1 day |
+| 3 | **Per-sub delta sparkline in `raw.html`** | operator sees off-axis drift channel firing in real time | 30 min |
+| 4 | **`POST /ota/recalibrate` (clear NVS gain-lock)** | reset gain-lock without USB after AP swap or relocation | 30 min FW + flash |
+| 5 | **Track AP MAC in NVS alongside AGC/FFT** | auto-invalidate stale gain-lock on AP change | 1 h FW + flash |
+| 6 | **Multi-AP signal_field via `MultistaticFuser`** | physically real spatial map (today zero-filled per ADR-105 D6) | 2-3 h |
+| 7 | **Per-subcarrier baseline AGE check** | flag for re-calibration when channel slowly drifts | 1 h |
+| 8 | **Phase-domain drift (vs amplitude-only today)** | sub-mm chest-wall motion detection for vitals | 1 h script + 30 min server |
+| 9 | **Tailscale-target in NVS** | sensor stream keeps working when Mac roams networks | 30 min provision + reflash |
+| 10 | **ESPHome native component (instead of MQTT bridge)** | tighter HA integration than #1 | 2-3 days |
+| 11 | **Web Serial calibration game** | playful threshold tuning | 1 day |
+| 12 | **Boot-time NBVI freeze in FW** | trade-off vs adaptive: don't adopt unless we see FP issues in real homes | 2 h |
+| 13 | **Per-channel NVS cache for gain-lock** | only needed if channel hopping (ADR-029) re-activated | 1 h |
+| 14 | **DensePose model train + load** | unlock pose estimation; depends on MM-Fi / Wi-Pose dataset access | 1-3 days |
 
 ## References
 
 * [`espectre-techniques.md`](espectre-techniques.md) — technique catalogue
+* [`ota-pipeline.md`](ota-pipeline.md) — WiFi-OTA recipe (port 8032)
 * [ADR-100](../adr/ADR-100-gain-lock-baseline-stabilization.md) — gain lock
 * [ADR-101](../adr/ADR-101-raw-amplitude-classifier.md) — classifier
 * [ADR-102](../adr/ADR-102-nbvi-subcarrier-selection.md) — NBVI
 * [ADR-103](../adr/ADR-103-persistent-baseline.md) — baseline persistence
+* [ADR-104](../adr/ADR-104-per-subcarrier-drift-presence.md) — per-sub drift + NBVI FP-validation
+* [ADR-105](../adr/ADR-105-no-synthetic-data-in-production-runtime.md) — no synthetic data
+* [ADR-106](../adr/ADR-106-full-complex-csi-keepalive.md) — full complex CSI + keepalive
+* [ADR-107](../adr/ADR-107-auto-recalibrate-and-rest-baseline.md) — REST + auto-recalibrate
+* [ADR-108](../adr/ADR-108-fw-nvs-persist-gain-lock.md) — FW NVS persist gain-lock
 * Pace, *How I Turned My Wi-Fi Into a Motion Sensor — Part 2*, Dec 2025
 * `francescopace/espectre` on GitHub (GPLv3)

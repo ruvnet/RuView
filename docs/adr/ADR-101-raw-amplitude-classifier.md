@@ -127,12 +127,14 @@ RSSI MAD-Δ classifier from ADR-099.
 
 ## Open Items
 
-* ADR-104 will add per-node baseline-drop detection on per-subcarrier
-  L2 distance — currently the CV signal saturates above ~30 % so we
-  lose granularity on heavy movement.
-* `present_still` requires the body to actually attenuate the path.
-  Off-axis sit doesn't trigger. Future: bring in per-subcarrier delta
-  for off-path presence sensing.
+* ✅ **Per-subcarrier baseline-drop** — closed in ADR-104 (per-sub
+  drift channel with 10 % gate, triggers `present_still` even when
+  broadband doesn't move).
+* ✅ **Off-axis sit doesn't trigger** — closed in ADR-104 (drift
+  channel catches off-line-of-sight body presence).
+* ⏳ **CV saturates above ~30 %** — still open. Heavy-motion granularity
+  (run vs jog vs jump) lost above the `active` gate. Would need a
+  log-CV or rank-based metric to extend the dynamic range.
 
 ## References
 

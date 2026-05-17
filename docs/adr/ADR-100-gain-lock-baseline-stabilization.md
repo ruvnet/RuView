@@ -129,25 +129,17 @@ docs/adr/ADR-100-gain-lock-baseline-stabilization.md      # this ADR
 
 ## Open Items
 
-* **NBVI subcarrier selection** is the next ESPectre technique to
-  port. With gain-lock alone we see 0–44 subcarriers below CV 5 % per
-  state — NBVI would automatically select the top-K stable ones at
-  boot and let the DSP compute motion variance only on those.
-  Expected to lift the SNR another factor of 2–3×.
-* **Server-side RSSI parsing** is currently broken for the new frame
-  shape: `mean_rssi` returns 0 in the WS payload even though the
-  raw CSI frame carries a valid int8. Cosmetic; doesn't affect amplitude.
-* **NVS target_ip is hardcoded** to one of Mac's two possible IPs
-  (192.168.0.103 on TP-Link side). When the operator switches Mac WiFi
-  the CSI stream stops. Long-term fix: provision sensors to send to
-  the Mac's Tailscale IP, which is stable across networks. Optional
-  short-term: a static DHCP lease on TP-Link admin so 192.168.0.103
-  is reserved for the Mac.
-* **Calibration latency on an idle channel.** If no host traffic
-  exists when the sensor boots, gain-lock collects samples at the
-  beacon-only rate (~0.3 fps) and takes ~17 min to converge. In
-  practice the host always sends something. If not — `ping -i 0.1
-  192.168.0.10x` for 30 s right after boot is enough.
+* ✅ **NBVI subcarrier selection** — closed in ADR-102 (server-side
+  port with quiet-window finder).
+* ✅ **Server-side RSSI parsing** — fixed by parallel agent in commit
+  `3393c1e8` (parse_esp32_frame offset realignment + carrying RSSI
+  through feature_state packets).
+* ✅ **Calibration latency on an idle channel** — closed in ADR-106
+  by the built-in managed-`ping` keepalive (drives sensor RX at
+  25 pkt/s/node out of the box).
+* ⏳ **NVS target_ip is hardcoded** — still open. Tailscale-target
+  option not implemented; sensors still send to the Mac's TP-Link-
+  side IP (192.168.0.103). Mac roaming still breaks the CSI stream.
 
 ## References
 

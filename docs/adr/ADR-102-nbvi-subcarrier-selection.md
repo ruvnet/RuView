@@ -113,11 +113,9 @@ sitting near a sensor now trigger.
 
 ## Open Items
 
-* **ADR-102 Step 3 (FP-rate validation)** — Pace's full pipeline
-  validates each candidate top-K by running the motion detector on
-  the calibration buffer and picking the K with the lowest FP rate.
-  We take the raw ranking without validation. Could add later for
-  defense against NBVI accidentally selecting noise-source overlap.
+* ✅ **Step 3 FP-rate validation** — closed in ADR-104 D4 (commit
+  `6212b17e`). K ∈ {6,8,10,12,16,20} sweep, smallest-FP wins; ties
+  broken by smallest total-NBVI score.
 * **Persist NBVI selection** — `AMP_BASELINE_OVERRIDE` (ADR-103)
   persists baseline scalar but not the chosen subcarrier indices.
   After server restart NBVI re-ranks from scratch; in deployments

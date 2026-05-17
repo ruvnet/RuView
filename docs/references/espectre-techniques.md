@@ -1,13 +1,9 @@
 # ESPectre (Francesco Pace) — Technique Reference
 
-Source: *How I Turned My Wi-Fi Into a Motion Sensor — Part 2*
-(Dec 2025), Medium / [francescopace/espectre](https://github.com/francescopace/espectre)
-on GitHub, GPLv3.
-
-Captures the three core techniques and the support tooling Pace
-shipped. RuView has adopted some, partially adopted others, and not
-adopted the rest. This doc is a living checklist — update when items
-move.
+Source: Pace's *Part 2* (Dec 2025) +
+[francescopace/espectre](https://github.com/francescopace/espectre)
+(GPLv3). Living checklist of techniques + RuView adoption status;
+update when items move.
 
 ## 1. Gain Lock (AGC + FFT scale)
 
@@ -72,9 +68,11 @@ Four-step pipeline at boot:
 Memory: O(N) running with on-the-fly mean/variance, ≈ 256 B for 64
 subcarriers. Time: O(N · L) per recompute, ms on a $10 device.
 
-**RuView status — DONE (Steps 1, 2, 4).** ADR-102 (commits
-`2f12a223` + `f4119924`). Server-side, see ADR-102 for detail.
-Missing: ❌ Step 3 FP-rate validation, ❌ FW-side boot freeze.
+**RuView status — DONE (all 4 NBVI steps).** Server-side: ADR-102
+(`2f12a223`, `f4119924`) covers Steps 1+2+4; ADR-104 D4 (`6212b17e`)
+closes Step 3 (K ∈ {6,8,10,12,16,20} sweep, smallest-FP wins). FW-
+side boot freeze remains intentionally absent — server-side rolling
+refresh adapts to slow channel drift (ADR-102 D6).
 
 Empirically on the operator's deployment NBVI alone gave a 1.5-2× CV
 reduction:
@@ -126,12 +124,15 @@ After NBVI calibration, ESPectre writes the AGC/FFT lock values, the
 chosen subcarrier set, the baseline variance, and the threshold into
 NVS so reboots don't need re-calibration.
 
-**RuView status — DONE for baseline; PARTIAL for the rest.** ADR-103
-(commits `f4119924`, `2f4b2d53`). `data/baseline.json` persists per-
-node full-broadband mean/p95/CV + per-subcarrier means, loaded at
-server boot via `load_baseline_file`. Gain lock + NBVI selection
-still happen fresh on each FW boot / server boot respectively (open
-items 4 + 5 below).
+**RuView status — DONE.** Two-layer persistence:
+* **Server side (ADR-103, commits `f4119924`, `2f4b2d53`)**:
+  `data/baseline.json` keeps per-node full-broadband mean/p95/CV +
+  per-subcarrier means, loaded on server boot via `load_baseline_file`.
+* **FW side (ADR-108, commit `3779bb76`)**: gain-lock AGC + FFT
+  saved to NVS namespace `csi_cfg` keys `gl_agc`/`gl_fft` after the
+  first calibration; subsequent boots restore instantly (skip the
+  300-packet sampler). NBVI selection is **intentionally** server-
+  side rolling, not persisted — design choice, not a gap.
 
 ## 6. Interactive Web Serial game (`espectre.dev/game`)
 

@@ -164,17 +164,12 @@ Universal-threshold gates `3.0 / 6.0` map to the same absolute
 
 ## Open Items
 
-* **REST endpoint POST /api/v1/baseline/calibrate** — would let the
-  operator press a button in `raw.html` instead of running the
-  Python script. ~30 min.
-* **Per-subcarrier baseline comparison** — `per_subcarrier_mean` is
-  saved but not yet consumed; future ADR-104 can use L2 distance
-  per-subcarrier instead of broadband mean ratio for off-axis
-  presence detection.
-* **Auto-recalibrate on long quiet periods** — if the classifier sees
-  `absent` for 30 minutes with low variance, it could opportunistically
-  update the baseline. Would eliminate the manual script step
-  entirely. ~1 h.
+* ✅ **REST endpoint POST /api/v1/baseline/calibrate** — closed in
+  ADR-107 D3 + UI button D6.
+* ✅ **Per-subcarrier baseline comparison** — closed in ADR-104
+  (per-sub drift channel consumes `per_subcarrier_mean`).
+* ✅ **Auto-recalibrate on long quiet periods** — closed in ADR-107 D5
+  (30-min quiet + 1-h cooldown defaults).
 
 ## References
 

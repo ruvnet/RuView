@@ -133,10 +133,11 @@ which is more sensitive to chest-wall micrometric motion.
 
 ## Out of scope / open
 
-* **FW-side µs timestamp** — `info->rx_ctrl.timestamp` (u32, µs) is
-  in `wifi_pkt_rx_ctrl_t` per ESP-IDF docs. Not yet propagated through
-  the 0xC511_0001 binary header (reserved bytes 18..19 are available
-  but unused). Future ADR-107 will reshape the header to include it.
+* ✅ **FW-side µs timestamp** — closed in commit `b787f40a`. FW now
+  appends `info->rx_ctrl.timestamp` (u32 LE) as 4 trailing bytes
+  after I/Q data; server parses opportunistically (None for older
+  FW). NodeInfo.timestamp_us now carries sensor monotonic µs when
+  available, falls back to server SystemTime otherwise.
 * **Per-frame antenna selection** when ESP32-S3 reports >1 antenna —
   current FW hard-codes `n_antennas=1` in `csi_collector.c`. Single-
   antenna deployments are unaffected.
