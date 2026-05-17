@@ -207,8 +207,15 @@ const NBVI_REFRESH_TICKS: u32   = 200;
 const NBVI_DEAD_GATE_PCT: f64   = 0.25;
 
 struct AmpState {
+    /// Rolling short window of NBVI-subset broadband mean (used for CV).
     short: VecDeque<f64>,
+    /// Rolling long window of NBVI-subset broadband mean (fallback baseline
+    /// via p95 when no persistent override is loaded).
     long:  VecDeque<f64>,
+    /// Rolling short window of FULL broadband mean across all non-zero
+    /// subcarriers. Used for the persistent-baseline drop comparison —
+    /// stable across NBVI re-selection between server restarts (ADR-103).
+    short_full: VecDeque<f64>,
     /// Rolling buffer of full per-subcarrier amplitude vectors.
     nbvi_history: VecDeque<Vec<f64>>,
     /// Indices of currently-selected best subcarriers (sorted by NBVI
@@ -220,21 +227,64 @@ struct AmpState {
 
 /// Compute the top-K NBVI subcarrier indices over the provided history.
 /// Returns empty if the history is too short to give a stable ranking.
+///
+/// ADR-102 v2: ESPectre's Step 1 quiet-window finder is now active. We
+/// slide a fixed window across `history`, score each window by its
+/// broadband-mean coefficient of variation, and rank subcarriers using
+/// only the calmest window. This makes the selection robust to brief
+/// motion that happens during the calibration buffer (someone walks by
+/// during boot, dog enters room) — the noisy windows are ignored.
 fn nbvi_select_top_k(history: &VecDeque<Vec<f64>>, k: usize) -> Vec<usize> {
     if history.len() < AMP_SHORT_WIN { return Vec::new(); }
     let n_sub = history.front().map(|v| v.len()).unwrap_or(0);
     if n_sub == 0 { return Vec::new(); }
 
-    // Per-subcarrier mean and std over the buffered frames.
-    let n = history.len() as f64;
+    // ── ESPectre Step 1: pick the quietest sub-window ────────────────
+    //
+    // Slide AMP_SHORT_WIN-sized window across history with stride
+    // AMP_SHORT_WIN/3 (overlapping). For each window, compute the CV
+    // of its broadband mean. Lowest-CV window wins. If history is small,
+    // use the whole thing.
+    let window_size = AMP_SHORT_WIN;
+    let stride = (window_size / 3).max(1);
+    let frames: Vec<&Vec<f64>> = history.iter().collect();
+    let total = frames.len();
+
+    let quiet_slice: &[&Vec<f64>] = if total <= window_size {
+        &frames[..]
+    } else {
+        let mut best_start = 0usize;
+        let mut best_cv = f64::INFINITY;
+        let mut start = 0usize;
+        while start + window_size <= total {
+            let window = &frames[start..start + window_size];
+            // Per-frame broadband mean (any valid subcarrier).
+            let bb: Vec<f64> = window.iter().map(|f| {
+                let mut s = 0.0; let mut c = 0;
+                for &v in f.iter() { if v > 0.0 { s += v; c += 1; } }
+                if c == 0 { 0.0 } else { s / c as f64 }
+            }).collect();
+            let mu: f64 = bb.iter().sum::<f64>() / bb.len() as f64;
+            if mu > 0.0 {
+                let var: f64 = bb.iter().map(|x| (x - mu).powi(2)).sum::<f64>() / bb.len() as f64;
+                let cv = var.sqrt() / mu;
+                if cv < best_cv { best_cv = cv; best_start = start; }
+            }
+            start += stride;
+        }
+        &frames[best_start..best_start + window_size]
+    };
+
+    // Per-subcarrier mean and std over the quietest window only.
+    let n = quiet_slice.len() as f64;
     let mut means = vec![0.0_f64; n_sub];
     let mut sums  = vec![0.0_f64; n_sub];
-    for frame in history {
+    for frame in quiet_slice.iter() {
         for k in 0..n_sub.min(frame.len()) { sums[k] += frame[k]; }
     }
     for k in 0..n_sub { means[k] = sums[k] / n; }
     let mut stds = vec![0.0_f64; n_sub];
-    for frame in history {
+    for frame in quiet_slice.iter() {
         for k in 0..n_sub.min(frame.len()) {
             let d = frame[k] - means[k];
             stds[k] += d * d;
@@ -288,6 +338,64 @@ fn amp_hold_init() -> &'static Mutex<(String, u32)> {
     AMP_HOLD.get_or_init(|| Mutex::new(("absent".to_string(), 0)))
 }
 
+/// ADR-103: persistent baseline override (per-node mean_amp value).
+/// When set, `amp_presence_override` uses this instead of the rolling
+/// 95th-percentile from AMP_HIST.long. Loaded from `data/baseline.json`
+/// at startup so a fresh server boot doesn't require the "step out for
+/// 60 s" calibration ritual. Empty map = fall back to rolling p95.
+static AMP_BASELINE_OVERRIDE: OnceLock<Mutex<std::collections::HashMap<u8, f64>>> = OnceLock::new();
+
+fn amp_baseline_override_init() -> &'static Mutex<std::collections::HashMap<u8, f64>> {
+    AMP_BASELINE_OVERRIDE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Load persistent baseline from JSON file. Tolerant: missing file or
+/// parse errors are non-fatal (server falls back to rolling p95).
+fn load_baseline_file(path: &str) {
+    let s = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(_) => {
+            info!("baseline: no file at {path} — using rolling p95 (60-s warmup)");
+            return;
+        }
+    };
+    let v: serde_json::Value = match serde_json::from_str(&s) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("baseline: parse error at {path}: {e}");
+            return;
+        }
+    };
+    let nodes = match v.get("nodes").and_then(|n| n.as_object()) {
+        Some(n) => n,
+        None => { warn!("baseline: no .nodes object in {path}"); return; }
+    };
+    let mut loaded: Vec<(u8, f64)> = Vec::new();
+    for (k, node) in nodes {
+        let id: u8 = match k.parse() { Ok(i) => i, Err(_) => continue };
+        // ADR-103 v2 schema (preferred): full_broadband_p95 / full_broadband_mean
+        // — stable across NBVI re-selection between restarts. Falls back to
+        // legacy NBVI-subset p95/mean if a v1 baseline.json was loaded.
+        let full_p95  = node.get("full_broadband_p95").and_then(|v| v.as_f64());
+        let full_mean = node.get("full_broadband_mean").and_then(|v| v.as_f64());
+        let nbvi_p95  = node.get("p95_amp").and_then(|v| v.as_f64());
+        let nbvi_mean = node.get("mean_amp").and_then(|v| v.as_f64());
+        let baseline = [full_p95, full_mean, nbvi_p95, nbvi_mean]
+            .into_iter().flatten().find(|v| *v > 0.0);
+        let Some(b) = baseline else { continue };
+        loaded.push((id, b));
+    }
+    if loaded.is_empty() {
+        warn!("baseline: {path} parsed but no usable per-node entries");
+        return;
+    }
+    let mut o = amp_baseline_override_init().lock().unwrap();
+    for (id, b) in &loaded { o.insert(*id, *b); }
+    let summary: Vec<String> = loaded.iter().map(|(id, b)| format!("node{id}={b:.2}")).collect();
+    info!("baseline: loaded {} node overrides from {} ({})",
+          loaded.len(), path, summary.join(", "));
+}
+
 /// Classify motion/presence for one node from the raw amplitude vector.
 ///
 /// Returns `(motion_level, presence, confidence)` where confidence is the
@@ -301,10 +409,23 @@ fn amp_presence_override(node_id: u8, amplitudes: &[f64]) -> Option<(String, boo
     let st = map.entry(node_id).or_insert_with(|| AmpState {
         short: VecDeque::with_capacity(AMP_SHORT_WIN),
         long:  VecDeque::with_capacity(AMP_LONG_WIN),
+        short_full: VecDeque::with_capacity(AMP_SHORT_WIN),
         nbvi_history: VecDeque::with_capacity(NBVI_HISTORY_LEN),
         nbvi_selected: Vec::new(),
         nbvi_ticks: 0,
     });
+
+    // ADR-103 v2: compute FULL broadband mean (all non-zero subcarriers)
+    // for the persistent baseline drop check. Stable across NBVI
+    // re-selection between server restarts. NBVI subset is still used
+    // for CV (motion sensitivity).
+    let full_mean: f64 = {
+        let mut s = 0.0; let mut c = 0;
+        for &v in amplitudes.iter() { if v > 0.0 { s += v; c += 1; } }
+        if c == 0 { 0.0 } else { s / c as f64 }
+    };
+    st.short_full.push_back(full_mean);
+    while st.short_full.len() > AMP_SHORT_WIN { st.short_full.pop_front(); }
 
     // Push current frame into NBVI history for ranking.
     st.nbvi_history.push_back(amplitudes.to_vec());
@@ -352,22 +473,49 @@ fn amp_presence_override(node_id: u8, amplitudes: &[f64]) -> Option<(String, boo
     let var: f64 = st.short.iter().map(|x| (x - mean_short).powi(2)).sum::<f64>() / n;
     let cv = if mean_short > 0.0 { var.sqrt() / mean_short } else { 0.0 };
 
-    // Baseline = 95th percentile of long window once we have ≥ 5 s of data.
-    // A body in the channel attenuates amplitude, so the baseline (=
-    // empty-room amplitude) sits at the upper end of recent history.
-    let baseline = if st.long.len() >= AMP_SHORT_WIN * 3 {
-        let mut sorted: Vec<f64> = st.long.iter().copied().collect();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let idx = ((sorted.len() as f64) * 0.95) as usize;
-        Some(sorted[idx.min(sorted.len() - 1)])
+    // Baseline:
+    //   1. Persistent override (ADR-103) loaded from data/baseline.json
+    //      at boot. Represents the FULL-broadband mean of the empty
+    //      room. Stable across NBVI re-selection between restarts.
+    //   2. Fall back to the rolling 95th percentile of the long FULL
+    //      window when no override is present.
+    //
+    // A body in the channel attenuates amplitude, so the baseline
+    // (= empty-room amplitude) sits at the upper end of recent history.
+    let baseline = {
+        let ovr = amp_baseline_override_init().lock().unwrap();
+        if let Some(&fixed) = ovr.get(&node_id) {
+            Some(fixed)
+        } else if st.long.len() >= AMP_SHORT_WIN * 3 {
+            // Rolling fallback uses NBVI-subset (long) for backwards
+            // compatibility with the legacy non-baseline mode.
+            let mut sorted: Vec<f64> = st.long.iter().copied().collect();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let idx = ((sorted.len() as f64) * 0.95) as usize;
+            Some(sorted[idx.min(sorted.len() - 1)])
+        } else {
+            None
+        }
+    };
+
+    // mean_for_baseline_check: when override is loaded → use FULL
+    // broadband (stable across NBVI changes). Otherwise use NBVI subset
+    // (matches the legacy rolling baseline). Same source on both sides
+    // of the comparison.
+    let use_full = {
+        let ovr = amp_baseline_override_init().lock().unwrap();
+        ovr.contains_key(&node_id)
+    };
+    let mean_for_baseline = if use_full && !st.short_full.is_empty() {
+        st.short_full.iter().sum::<f64>() / st.short_full.len() as f64
     } else {
-        None
+        mean_short
     };
 
     // Stash this node's contribution for cross-node fusion.
     {
         let mut latest = amp_latest_init().lock().unwrap();
-        latest.insert(node_id, (cv, mean_short, baseline));
+        latest.insert(node_id, (cv, mean_for_baseline, baseline));
     }
 
     amp_classify_from_latest()
@@ -5414,6 +5562,13 @@ async fn main() {
     };
 
     info!("Data source: {source}");
+
+    // ADR-103: load persistent empty-room baseline if present so the
+    // classifier has a meaningful baseline from the first frame
+    // instead of waiting ~60 s for the rolling p95 to warm up.
+    load_baseline_file(
+        &std::env::var("RUVIEW_BASELINE_FILE").unwrap_or_else(|_| "data/baseline.json".into())
+    );
 
     // Shared state
     // Vital sign sample rate derives from tick interval (e.g. 500ms tick => 2 Hz)
