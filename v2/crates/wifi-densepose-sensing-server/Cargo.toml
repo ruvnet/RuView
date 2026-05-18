@@ -56,6 +56,10 @@ wifi-densepose-signal = { version = "0.3.0", path = "../wifi-densepose-signal", 
 midstreamer-temporal-compare = "0.2"   # DTW / LCS / Edit-Distance pattern matching
 midstreamer-attractor        = "0.2"   # Lyapunov + regime classification
 
+# ADR-121: HLK-LD2402 24 GHz mmWave radar over UART (auxiliary vitals/
+# range modality). Optional — server runs fine without the module attached.
+serialport.workspace = true
+
 [dev-dependencies]
 tempfile = "3.10"
 # `tower::ServiceExt::oneshot` for in-process Router tests (bearer_auth).

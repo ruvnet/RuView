@@ -21,3 +21,5 @@ pub mod sparse_inference;
 pub mod embedding;
 /// ADR-116: WiFlow-v1 supervised pose model loader + Rust forward pass.
 pub mod wiflow_v1;
+/// ADR-121: HLK-LD2402 24 GHz mmWave radar reader (auxiliary modality).
+pub mod mmwave;

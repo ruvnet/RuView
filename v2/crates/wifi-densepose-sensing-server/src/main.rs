@@ -1174,6 +1174,20 @@ struct Args {
     /// Independent from `--model` (RVF container) and `--load-rvf`.
     #[arg(long, value_name = "PATH")]
     wiflow_model: Option<PathBuf>,
+
+    /// ADR-121: Path to HLK-LD2402 24 GHz mmWave radar UART (via
+    /// CP2102 USB bridge). Example: `/dev/cu.usbserial-1140` (macOS)
+    /// or `/dev/ttyUSB0` (Linux). When set, the server reads
+    /// `distance:<cm>` lines at 6 Hz and surfaces them on the
+    /// `mmwave` field of every SensingUpdate plus the
+    /// `/api/v1/mmwave/latest` REST endpoint. Missing port = no
+    /// mmWave, server still runs.
+    #[arg(long, value_name = "PATH")]
+    mmwave_port: Option<String>,
+
+    /// ADR-121: HLK-LD2402 baud rate. Factory default is 115200 8N1.
+    #[arg(long, default_value = "115200")]
+    mmwave_baud: u32,
 }
 
 /// ADR-116: globally-shared WiFlow-v1 model. Loaded once at startup if
@@ -5069,6 +5083,23 @@ async fn adaptive_debug() -> Json<serde_json::Value> {
     }))
 }
 
+/// ADR-121: GET /api/v1/mmwave/latest — latest HLK-LD2402 reading or
+/// `{ available: false }` when the reader thread isn't running OR the
+/// most recent reading is stale (>2 seconds old).
+async fn mmwave_latest() -> Json<serde_json::Value> {
+    use wifi_densepose_sensing_server::mmwave;
+    match mmwave::current(std::time::Duration::from_secs(2)) {
+        Some(r) => Json(serde_json::json!({
+            "available": true,
+            "distance_cm": r.distance_cm,
+            "age_ms": r.at.elapsed().as_millis() as u64,
+        })),
+        None => Json(serde_json::json!({
+            "available": false,
+        })),
+    }
+}
+
 /// POST /api/v1/adaptive/unload — unload the adaptive model (revert to thresholds).
 async fn adaptive_unload(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let mut s = state.write().await;
@@ -7364,6 +7395,11 @@ async fn main() {
         }
     };
 
+    // ADR-121: spawn the HLK-LD2402 mmWave reader thread when --mmwave-port is set.
+    if let Some(port) = args.mmwave_port.clone() {
+        wifi_densepose_sensing_server::mmwave::spawn_reader(port, args.mmwave_baud);
+    }
+
     // Load trained model via --model (uses progressive loading if --progressive set)
     let model_path = args.model.as_ref().or(args.load_rvf.as_ref());
     let mut progressive_loader: Option<ProgressiveLoader> = None;
@@ -7648,6 +7684,7 @@ async fn main() {
         .route("/api/v1/adaptive/train", post(adaptive_train))
         .route("/api/v1/adaptive/status", get(adaptive_status))
         .route("/api/v1/adaptive/debug", get(adaptive_debug))
+        .route("/api/v1/mmwave/latest", get(mmwave_latest))
         .route("/api/v1/adaptive/unload", post(adaptive_unload))
         // Field model calibration (eigenvalue-based person counting)
         .route("/api/v1/calibration/start", post(calibration_start))

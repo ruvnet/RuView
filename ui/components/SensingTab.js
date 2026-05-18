@@ -105,6 +105,19 @@ export class SensingTab {
             </div>
           </div>
 
+          <!-- ADR-121: mmWave radar (HLK-LD2402) — auxiliary range modality -->
+          <div class="sensing-card" id="mmwaveCard" style="display:none;">
+            <div class="sensing-card-title">mmWave Radar (24 GHz)</div>
+            <div class="sensing-classification">
+              <div class="sensing-class-label" id="mmwaveLabel" style="background:rgba(33,150,243,0.15);color:rgb(33,150,243);">— cm</div>
+              <div class="sensing-confidence">
+                <label>Age</label>
+                <div class="sensing-bar"><div class="sensing-bar-fill confidence" id="mmwaveAgeBar" style="background:rgb(33,150,243);"></div></div>
+                <span class="sensing-meter-val" id="mmwaveAge">— ms</span>
+              </div>
+            </div>
+          </div>
+
           <!-- Setup info -->
           <div class="sensing-card">
             <div class="sensing-card-title">About This Data</div>
@@ -267,6 +280,35 @@ export class SensingTab {
 
     const confPct = ((c.confidence || 0) * 100).toFixed(0);
     this._setBar('barConfidence', c.confidence, 1.0, 'valConfidence', confPct + '%');
+
+    // ADR-121: poll mmWave radar in parallel with the WS-driven update.
+    // Kick once per visible update; skip if already in flight.
+    if (!this._mmwaveBusy) {
+      this._mmwaveBusy = true;
+      fetch('/api/v1/mmwave/latest')
+        .then(r => r.json())
+        .then(j => {
+          const card = this.container.querySelector('#mmwaveCard');
+          if (!card) { this._mmwaveBusy = false; return; }
+          if (j && j.available) {
+            card.style.display = '';
+            const lbl = this.container.querySelector('#mmwaveLabel');
+            if (lbl) lbl.textContent = j.distance_cm + ' cm';
+            const age = this.container.querySelector('#mmwaveAge');
+            if (age) age.textContent = (j.age_ms || 0) + ' ms';
+            const bar = this.container.querySelector('#mmwaveAgeBar');
+            if (bar) {
+              // Age 0..2000 ms → 100..0% width (fresher = fuller bar).
+              const pct = Math.max(0, 100 - (j.age_ms || 0) / 20);
+              bar.style.width = pct + '%';
+            }
+          } else {
+            card.style.display = 'none';
+          }
+        })
+        .catch(() => { /* server down or no port — silently hide */ })
+        .finally(() => { this._mmwaveBusy = false; });
+    }
 
     // Details
     this._setText('valDomFreq', (f.dominant_freq_hz || 0).toFixed(3) + ' Hz');
