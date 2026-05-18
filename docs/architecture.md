@@ -30,5 +30,5 @@ Neural Network: processed signals → 17 body keypoints + vital signs + room mod
 Output: real-time pose, breathing, heart rate, room fingerprint, drift alerts
 ```
 
-No training cameras required — the [Self-Learning system (ADR-024)](docs/adr/ADR-024-contrastive-csi-embedding-model.md) bootstraps from raw WiFi data alone. [MERIDIAN (ADR-027)](docs/adr/ADR-027-cross-environment-domain-generalization.md) ensures the model works in any room, not just the one it trained in.
+No training cameras required — the [Self-Learning system (ADR-024)](adr/ADR-024-contrastive-csi-embedding-model.md) bootstraps from raw WiFi data alone. [MERIDIAN (ADR-027)](adr/ADR-027-cross-environment-domain-generalization.md) ensures the model works in any room, not just the one it trained in.
 
