@@ -63,7 +63,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Signal processing
-ndarray = { version = "0.15", features = ["serde"] }
+ndarray = { version = "0.17", features = ["serde"] }
 ndarray-linalg = { version = "0.18", features = ["openblas-static"] }
 rustfft = "6.1"
 num-complex = "0.4"
@@ -105,7 +105,7 @@ pcap = "1.1"
 petgraph = "0.6"
 
 # Data loading
-ndarray-npy = "0.8"
+ndarray-npy = "0.10"
 walkdir = "2.4"
 
 # Hashing (for proof)
