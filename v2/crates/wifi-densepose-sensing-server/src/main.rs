@@ -4331,7 +4331,18 @@ async fn broadcast_tick_task(state: SharedState, tick_ms: u64) {
             if s.tx.receiver_count() > 0 {
                 // Re-broadcast the latest sensing_update so pose WS clients
                 // always get data even when ESP32 pauses between frames.
-                if let Ok(json) = serde_json::to_string(update) {
+                //
+                // Issue #618: overwrite `source` with `effective_source()`
+                // before each broadcast so a stale latest_update (frozen
+                // payload from a now-offline ESP32) is emitted with
+                // `source: "esp32:offline"` instead of `source: "esp32"`.
+                // The REST `/health` endpoint already does this; before
+                // this fix the WS path was the only consumer that didn't,
+                // so the UI's "LIVE — ESP32 HARDWARE Connected" banner
+                // stayed green long after the hardware went away.
+                let mut tagged = update.clone();
+                tagged.source = s.effective_source();
+                if let Ok(json) = serde_json::to_string(&tagged) {
                     let _ = s.tx.send(json);
                 }
             }
