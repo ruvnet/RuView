@@ -38,14 +38,24 @@ static char s_ota_psk[OTA_PSK_MAX_LEN] = {0};
 
 /**
  * ADR-050: Verify the Authorization header contains the correct PSK.
- * Returns true if auth is disabled (no PSK provisioned) or if the
- * Bearer token matches the stored PSK.
+ * Returns true only when a PSK is provisioned AND the Bearer token
+ * matches it. An unprovisioned node refuses all OTA requests
+ * (fail-closed, see RuView#596 audit). The OTA server still starts so
+ * the operator can `provision.py --ota-psk <hex>` over USB-CDC without
+ * a reflash, but the upload endpoint will reject every request until
+ * the PSK is set.
  */
 static bool ota_check_auth(httpd_req_t *req)
 {
     if (s_ota_psk[0] == '\0') {
-        /* No PSK provisioned — auth disabled (permissive for dev). */
-        return true;
+        /* No PSK provisioned — fail closed. Previously this returned
+         * true ("permissive for dev"), which let any host on the WiFi
+         * push attacker-controlled firmware to a freshly-flashed node.
+         * Plain HTTP transport + no Secure Boot V2 + no signed-image
+         * verification meant a single LAN call could brick or back-
+         * door a node. Reject until provisioned. */
+        ESP_LOGW(TAG, "OTA rejected: no PSK in NVS (run provision.py --ota-psk <hex>)");
+        return false;
     }
 
     char auth_header[128] = {0};
@@ -250,11 +260,13 @@ esp_err_t ota_update_init(void)
         if (nvs_get_str(nvs, OTA_NVS_KEY, s_ota_psk, &len) == ESP_OK) {
             ESP_LOGI(TAG, "OTA PSK loaded from NVS (%d chars) — authentication enabled", (int)len - 1);
         } else {
-            ESP_LOGW(TAG, "No OTA PSK in NVS — OTA authentication DISABLED (provision with nvs_set)");
+            ESP_LOGW(TAG, "No OTA PSK in NVS — OTA upload endpoint will REJECT all requests until "
+                          "provisioned (provision.py --ota-psk <hex>). Fail-closed per RuView#596.");
         }
         nvs_close(nvs);
     } else {
-        ESP_LOGW(TAG, "NVS namespace '%s' not found — OTA authentication DISABLED", OTA_NVS_NAMESPACE);
+        ESP_LOGW(TAG, "NVS namespace '%s' not found — OTA upload endpoint will REJECT all "
+                      "requests until provisioned. Fail-closed per RuView#596.", OTA_NVS_NAMESPACE);
     }
 
     return ota_start_server(NULL);

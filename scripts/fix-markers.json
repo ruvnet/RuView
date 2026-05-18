@@ -189,6 +189,21 @@
       "ref": "https://github.com/ruvnet/RuView/issues/615"
     },
     {
+      "id": "RuView#596-ota-fail-closed",
+      "title": "ESP32 OTA upload fails closed when no PSK is provisioned",
+      "files": ["firmware/esp32-csi-node/main/ota_update.c"],
+      "require": [
+        "fail-closed, see RuView#596 audit",
+        "OTA rejected: no PSK in NVS"
+      ],
+      "forbid": [
+        "/auth disabled \\(permissive for dev\\)/",
+        "/No PSK provisioned \\u2014 auth disabled/"
+      ],
+      "rationale": "ota_check_auth previously returned true when s_ota_psk[0] == '\\0', so any host on the WiFi could push attacker-controlled firmware to a freshly-flashed node over plain HTTP on port 8032 — no Secure Boot V2, no signed-image verification, single LAN call could brick or backdoor a node. Flagged in the deep-review of PR #596. Fail-closed means the OTA server still starts (so operators can provision a PSK via USB-CDC without reflashing) but the upload endpoint refuses every request until provision.py --ota-psk <hex> writes the NVS key. Reverting this lets the rogue-LAN attack reopen.",
+      "ref": "https://github.com/ruvnet/RuView/pull/596#pullrequestreview"
+    },
+    {
       "id": "RuView#560",
       "title": "verify.py quantizes features before SHA-256 for cross-platform hash stability",
       "files": ["archive/v1/data/proof/verify.py"],

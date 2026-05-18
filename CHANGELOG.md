@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- **ESP32 OTA upload now fails closed when no PSK is provisioned** (#596 audit finding — critical, **breaking change for unprovisioned nodes**). `ota_check_auth()` previously returned `true` when `s_ota_psk[0] == '\0'`, so a freshly-flashed node would accept attacker-controlled firmware over plain HTTP on port 8032 from any host on the WiFi. No Secure Boot V2, no signed-image verification — a single LAN call could brick or backdoor a node. The fix rejects every OTA upload until a PSK is written to NVS (the OTA HTTP server still starts so operators can run `provision.py --ota-psk <hex>` over USB-CDC without reflashing). **Operators affected**: any deployment that relied on the unauthenticated OTA endpoint working out of the box now needs to provision a PSK before subsequent OTA pushes will succeed. Boot-time `ESP_LOGW` makes the new posture visible.
 - **Path-traversal vulnerabilities patched in five sensing-server endpoints** (closes #615 — critical). New `wifi_densepose_sensing_server::path_safety::safe_id()` enforces `[A-Za-z0-9._-]` only (no leading `.`, max 64 chars) before any user-controlled identifier reaches a `format!()` building a filesystem path. Applied at:
   - `POST /api/v1/recording/start` (`recording.rs` — `session_name`)
   - `GET /api/v1/recording/download/:id` (`recording.rs` — `id`)
