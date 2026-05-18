@@ -38,6 +38,7 @@
 #endif
 
 #include "led_indicator.h"
+#include "led_strip.h"
 #include "esp_timer.h"
 
 static const char *TAG = "main";
