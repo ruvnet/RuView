@@ -48,16 +48,22 @@
   <span class="pill" id="lastTs">last: --</span>
   <span class="badge absent" id="globalBadge" style="font-size:13px;padding:4px 12px;">absent</span>
   <span class="pill" id="globalCV">CV 0%</span>
-  <!-- ADR-021: WiFi-CSI vital signs — breathing + heart rate (computed server-side). -->
+  <!-- ADR-021: WiFi-CSI vital signs — breathing + heart rate (computed server-side).
+       Norm tags: adult-at-rest reference ranges shown next to the live value so
+       the operator can tell healthy vs. anomalous at a glance. -->
   <span class="pill" id="brPill"
         style="background:rgba(63,185,80,0.18); color:rgb(63,185,80); border:1px solid rgb(63,185,80);"
-        title="WiFi-CSI breathing rate from bandpass 0.1-0.5 Hz on broadband amplitude (ADR-021)">
-    🫁 <b id="brBpm">— BPM</b> <span id="brConf" style="opacity:0.7;font-size:11px">·</span>
+        title="WiFi-CSI breathing rate (bandpass 0.1-0.5 Hz, ADR-021). Adult-at-rest norm: 12-20 BPM. Below 12 = bradypnea, above 20 = tachypnea.">
+    🫁 <b id="brBpm">— BPM</b>
+    <span style="opacity:0.55;font-size:11px">норма 12–20</span>
+    <span id="brConf" style="opacity:0.7;font-size:11px">·</span>
   </span>
   <span class="pill" id="hrPill"
         style="background:rgba(248,81,73,0.18); color:rgb(248,81,73); border:1px solid rgb(248,81,73);"
-        title="WiFi-CSI heart rate from bandpass 0.8-2.0 Hz on broadband amplitude (ADR-021)">
-    💓 <b id="hrBpm">— BPM</b> <span id="hrConf" style="opacity:0.7;font-size:11px">·</span>
+        title="WiFi-CSI heart rate (bandpass 0.8-2.0 Hz, ADR-021). Adult-at-rest norm: 60-100 BPM. Below 60 = bradycardia, above 100 = tachycardia.">
+    💓 <b id="hrBpm">— BPM</b>
+    <span style="opacity:0.55;font-size:11px">норма 60–100</span>
+    <span id="hrConf" style="opacity:0.7;font-size:11px">·</span>
   </span>
   <!-- ADR-121: HLK-LD2402 24 GHz mmWave radar pill — hidden until first reading. -->
   <span class="pill" id="mmwavePill" style="display:none; background:rgba(33,150,243,0.18);
@@ -379,21 +385,36 @@ function handleSensingUpdate(d) {
   const hrConf = document.getElementById('hrConf');
   const brPill = document.getElementById('brPill');
   const hrPill = document.getElementById('hrPill');
+  // Adult-at-rest norms (resting). Out-of-norm values get a warning tint
+  // so the operator immediately sees brady/tachy without reading numbers.
+  // Tooltip on the pill carries the brady/tachy terminology.
+  const BR_MIN = 12, BR_MAX = 20;   // breaths per minute
+  const HR_MIN = 60, HR_MAX = 100;  // heartbeats per minute
   if (vs && typeof vs.breathing_rate_bpm === 'number' && Number.isFinite(vs.breathing_rate_bpm) && vs.breathing_rate_bpm > 0) {
-    if (brBpm)  brBpm.textContent  = vs.breathing_rate_bpm.toFixed(1) + ' BPM';
+    const v = vs.breathing_rate_bpm;
+    const out = v < BR_MIN || v > BR_MAX;
+    if (brBpm) {
+      brBpm.textContent = v.toFixed(1) + ' BPM';
+      brBpm.style.color = out ? '#f0a020' : '';
+    }
     if (brConf) brConf.textContent = '· ' + ((vs.breathing_confidence || 0) * 100).toFixed(0) + '%';
     if (brPill) brPill.style.opacity = (vs.breathing_confidence || 0) < 0.2 ? '0.5' : '1.0';
   } else {
-    if (brBpm)  brBpm.textContent  = '— BPM';
+    if (brBpm)  { brBpm.textContent = '— BPM'; brBpm.style.color = ''; }
     if (brConf) brConf.textContent = '·';
     if (brPill) brPill.style.opacity = '0.5';
   }
   if (vs && typeof vs.heart_rate_bpm === 'number' && Number.isFinite(vs.heart_rate_bpm) && vs.heart_rate_bpm > 0) {
-    if (hrBpm)  hrBpm.textContent  = vs.heart_rate_bpm.toFixed(0) + ' BPM';
+    const v = vs.heart_rate_bpm;
+    const out = v < HR_MIN || v > HR_MAX;
+    if (hrBpm) {
+      hrBpm.textContent = v.toFixed(0) + ' BPM';
+      hrBpm.style.color = out ? '#f0a020' : '';
+    }
     if (hrConf) hrConf.textContent = '· ' + ((vs.heartbeat_confidence || 0) * 100).toFixed(0) + '%';
     if (hrPill) hrPill.style.opacity = (vs.heartbeat_confidence || 0) < 0.2 ? '0.5' : '1.0';
   } else {
-    if (hrBpm)  hrBpm.textContent  = '— BPM';
+    if (hrBpm)  { hrBpm.textContent = '— BPM'; hrBpm.style.color = ''; }
     if (hrConf) hrConf.textContent = '·';
     if (hrPill) hrPill.style.opacity = '0.5';
   }
