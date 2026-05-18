@@ -37,6 +37,39 @@ NVS_PARTITION_OFFSET = 0x9000
 NVS_PARTITION_SIZE = 0x6000  # 24 KiB
 
 
+CONFIG_VALUE_CHECKS = [
+    ("ssid", bool),
+    ("password", lambda value: value is not None),
+    ("target_ip", bool),
+    ("target_port", lambda value: value is not None),
+    ("node_id", lambda value: value is not None),
+    ("tdm_slot", lambda value: value is not None),
+    ("tdm_total", lambda value: value is not None),
+    ("edge_tier", lambda value: value is not None),
+    ("pres_thresh", lambda value: value is not None),
+    ("fall_thresh", lambda value: value is not None),
+    ("vital_win", lambda value: value is not None),
+    ("vital_int", lambda value: value is not None),
+    ("subk_count", lambda value: value is not None),
+    ("channel", lambda value: value is not None),
+    ("filter_mac", lambda value: value is not None),
+    ("hop_channels", lambda value: value is not None),
+    ("seed_url", lambda value: value is not None),
+    ("seed_token", lambda value: value is not None),
+    ("zone", lambda value: value is not None),
+    ("swarm_hb", lambda value: value is not None),
+    ("swarm_ingest", lambda value: value is not None),
+]
+
+
+def has_config_value(args):
+    """Return True when args include at least one NVS-writing config value."""
+    return any(
+        check(getattr(args, name, None))
+        for name, check in CONFIG_VALUE_CHECKS
+    )
+
+
 def build_nvs_csv(args):
     """Build an NVS CSV string for the csi_cfg namespace."""
     buf = io.StringIO()
@@ -223,17 +256,7 @@ def main():
 
     args = parser.parse_args()
 
-    has_value = any([
-        args.ssid, args.password is not None, args.target_ip,
-        args.target_port, args.node_id is not None,
-        args.tdm_slot is not None, args.tdm_total is not None,
-        args.edge_tier is not None, args.pres_thresh is not None,
-        args.fall_thresh is not None, args.vital_win is not None,
-        args.vital_int is not None, args.subk_count is not None,
-        args.channel is not None, args.filter_mac is not None,
-        args.seed_url is not None, args.zone is not None,
-    ])
-    if not has_value:
+    if not has_config_value(args):
         parser.error("At least one config value must be specified")
 
     # Bug 2 (#391): Prevent silent wipe of WiFi credentials on partial invocations.
