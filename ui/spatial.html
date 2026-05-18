@@ -1,0 +1,1276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RuView Spatial View</title>
+<script>if (window.self === window.top) { window.location.replace('shell.html#spatial'); }</script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #050508;
+  --surface: rgba(10, 10, 15, 0.85);
+  --border: rgba(0, 204, 255, 0.2);
+  --green: #00ff88;
+  --cyan: #00ccff;
+  --red: #ff3333;
+  --yellow: #ffcc00;
+  --text: #e0e0e0;
+  --text-dim: #888;
+  --font-ui: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Berkeley Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+
+#canvas3d {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 0;
+}
+
+/* ── Overlay panels ───────────────────────────────────────────────── */
+
+.overlay {
+  position: fixed;
+  z-index: 10;
+  background: var(--surface);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  pointer-events: auto;
+  user-select: none;
+}
+
+/* ── Info panel (bottom-left) ─────────────────────────────────────── */
+
+#infoPanel {
+  bottom: 16px;
+  left: 16px;
+  min-width: 260px;
+  max-width: 300px;
+  font-size: 0.8rem;
+}
+
+#infoPanel h3 {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--cyan);
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.info-row:last-child { border-bottom: none; }
+
+.info-label {
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+  font-size: 0.75rem;
+}
+
+.info-value {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text);
+  text-align: right;
+}
+
+.info-value.status-ready { color: var(--green); }
+.info-value.status-calib { color: var(--yellow); }
+.info-value.status-wait  { color: var(--red); }
+
+.info-separator {
+  height: 1px;
+  background: rgba(255,255,255,0.06);
+  margin: 8px 0;
+}
+
+/* ── Controls panel (top-right) ───────────────────────────────────── */
+
+#controlsPanel {
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ctrl-btn {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 6px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  text-align: left;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.ctrl-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+.ctrl-btn.active { border-color: var(--green); color: var(--green); background: rgba(0,255,136,0.06); }
+
+/* ── Title (top-left) ─────────────────────────────────────────────── */
+
+#titlePanel {
+  top: 16px;
+  left: 16px;
+}
+
+#titlePanel .title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--green);
+  font-family: var(--font-mono);
+  letter-spacing: -0.02em;
+}
+
+#titlePanel .subtitle {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+/* ── FPS counter (top-center) ─────────────────────────────────────── */
+
+#fpsCounter {
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+/* ── Legend (bottom-right) ────────────────────────────────────────── */
+
+#legend {
+  bottom: 16px;
+  right: 16px;
+  font-size: 0.7rem;
+}
+
+#legend h4 {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  color: var(--text-dim);
+}
+
+.legend-swatch {
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+/* ── Connection status banner ─────────────────────────────────────── */
+
+#connectionBanner {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 20;
+  text-align: center;
+  padding: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  background: rgba(255,51,51,0.15);
+  color: var(--red);
+  border-bottom: 1px solid rgba(255,51,51,0.3);
+  display: none;
+}
+
+.beta-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  color: #ffcc00;
+  background: rgba(255, 204, 0, 0.15);
+  border: 1px solid rgba(255, 204, 0, 0.35);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  vertical-align: super;
+  letter-spacing: 0.5px;
+  cursor: help;
+}
+.warning-note {
+  font-size: 11px;
+  color: #ff9999;
+  background: rgba(255, 68, 68, 0.1);
+  border: 1px solid rgba(255, 68, 68, 0.3);
+  border-radius: 4px;
+  padding: 4px 8px;
+  margin-top: 6px;
+}
+</style>
+</head>
+<body>
+
+<canvas id="canvas3d"></canvas>
+
+<div id="connectionBanner">Waiting for spatial pipeline...</div>
+
+<div id="titlePanel" class="overlay">
+  <div class="title">RuView Spatial<span class="beta-tag" title="Preview — voxel clustering is a single-blob demo, see ADR-044">β</span></div>
+  <div class="subtitle">RF Tomography Visualization</div>
+  <div class="subtitle" style="max-width:280px;line-height:1.3;margin-top:4px">RF tomography preview. Voxel clustering is a single-blob demo — multi-body resolution pending ADR-044.</div>
+</div>
+
+<div id="fpsCounter" class="overlay">-- FPS</div>
+
+<div id="controlsPanel" class="overlay">
+  <button class="ctrl-btn active" data-toggle="voxels">Voxels</button>
+  <button class="ctrl-btn active" data-toggle="nodes">Nodes</button>
+  <button class="ctrl-btn active" data-toggle="links">Links</button>
+  <button class="ctrl-btn active" data-toggle="labels">Labels</button>
+  <button class="ctrl-btn active" data-toggle="presence">Presence</button>
+  <button class="ctrl-btn" data-action="resetView">Reset View</button>
+  <button class="ctrl-btn" data-action="fullscreen">Fullscreen</button>
+</div>
+
+<div id="infoPanel" class="overlay">
+  <h3>Spatial Status</h3>
+  <div class="info-row"><span class="info-label">Status</span><span class="info-value" id="valStatus">--</span></div>
+  <div class="info-row"><span class="info-label">Active Nodes</span><span class="info-value" id="valNodes">--</span></div>
+  <div class="info-row"><span class="info-label">Links</span><span class="info-value" id="valLinks">--</span></div>
+  <div class="info-row"><span class="info-label">Reconstructions</span><span class="info-value" id="valRecon">--</span></div>
+  <div class="info-row"><span class="info-label">Resolution</span><span class="info-value" id="valRes">--</span></div>
+  <div class="info-row"><span class="info-label">Residual</span><span class="info-value" id="valResidual">--</span></div>
+  <div class="info-separator"></div>
+  <div class="info-row"><span class="info-label">Presence (coarse)<span class="beta-tag" title="Not a validated body count — see ADR-044">β</span></span><span class="info-value" id="valPersons">0</span></div>
+  <div class="info-row"><span class="info-label">Breathing<span class="beta-tag" title="Single-node demo. Multi-node fusion pending.">β</span></span><span class="info-value" id="valBreath">--</span></div>
+  <div class="info-row"><span class="info-label">Heart Rate<span class="beta-tag" title="Single-node demo. Multi-node fusion pending.">β</span></span><span class="info-value" id="valHR">--</span></div>
+  <div class="warning-note">⚠ Tomography is currently a single-cluster blob (ADR-044)</div>
+</div>
+
+<div id="legend" class="overlay">
+  <h4>Voxel Density</h4>
+  <div class="legend-item"><span class="legend-swatch" style="background:#00ff88;opacity:0.4"></span>Low (0.01-0.3)</div>
+  <div class="legend-item"><span class="legend-swatch" style="background:#ffcc00;opacity:0.55"></span>Medium (0.3-0.6)</div>
+  <div class="legend-item"><span class="legend-swatch" style="background:#ff3333;opacity:0.7"></span>High (0.6-1.0)</div>
+  <div class="legend-item" style="margin-top:6px"><span class="legend-swatch" style="background:#00ccff;border-radius:50%"></span>Sensor Node</div>
+  <div class="legend-item" style="margin-top:6px"><span class="legend-swatch" style="background:#00ff88;opacity:0.8;border-radius:6px"></span>Standing</div>
+  <div class="legend-item"><span class="legend-swatch" style="background:#ffcc00;opacity:0.8;border-radius:6px"></span>Sitting</div>
+  <div class="legend-item"><span class="legend-swatch" style="background:#4488ff;opacity:0.8;border-radius:6px"></span>Lying</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ── State ────────────────────────────────────────────────────────────
+
+const state = {
+  bounds: [0, 0, 0, 6, 6, 3],
+  gridSize: [8, 8, 4],
+  nodes: [],
+  voxels: [],
+  status: null,
+  sensing: null,
+  vitals: null,
+  clusters: [],
+  visibility: { voxels: true, nodes: true, links: true, labels: true, presence: true },
+  wsConnected: false,
+  apiAvailable: false,
+};
+
+// ── Three.js setup ───────────────────────────────────────────────────
+
+const canvas = document.getElementById('canvas3d');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(0x050508, 1);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x050508, 0.04);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(8, 6, 5);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 2;
+controls.maxDistance = 30;
+controls.target.set(3, 1.5, 3);
+controls.update();
+
+// ── Lighting ─────────────────────────────────────────────────────────
+
+scene.add(new THREE.AmbientLight(0x222233, 0.6));
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.3);
+dirLight.position.set(5, 10, 5);
+scene.add(dirLight);
+
+// ── Groups ───────────────────────────────────────────────────────────
+
+const roomGroup = new THREE.Group();
+const nodeGroup = new THREE.Group();
+const linkGroup = new THREE.Group();
+const labelGroup = new THREE.Group();
+const voxelGroup = new THREE.Group();
+const presenceGroup = new THREE.Group();
+
+scene.add(roomGroup, nodeGroup, linkGroup, labelGroup, voxelGroup, presenceGroup);
+
+// ── Coordinate mapping ───────────────────────────────────────────────
+// API bounds: [x0, y0, z0, x1, y1, z1] where Z is height (0-3m ceiling)
+// Three.js: Y-up. So API(x,y,z) -> Three.js(x, z, y)
+function apiToWorld(ax, ay, az) { return new THREE.Vector3(ax, az, ay); }
+
+// ── Room wireframe + floor grid ──────────────────────────────────────
+
+function buildRoom() {
+  roomGroup.clear();
+  const [x0, y0, z0, x1, y1, z1] = state.bounds;
+  const sx = x1 - x0, sy = y1 - y0, sz = z1 - z0;
+
+  // Wireframe box — BoxGeometry(width=X, height=Z_up, depth=Y)
+  const boxGeo = new THREE.BoxGeometry(sx, sz, sy);
+  const boxEdges = new THREE.EdgesGeometry(boxGeo);
+  const boxLine = new THREE.LineSegments(boxEdges, new THREE.LineBasicMaterial({
+    color: 0x00ccff, transparent: true, opacity: 0.25
+  }));
+  boxLine.position.copy(apiToWorld(x0 + sx / 2, y0 + sy / 2, z0 + sz / 2));
+  roomGroup.add(boxLine);
+
+  // Floor grid at z=0 (ground plane) -> Three.js Y=0
+  const gridSpacing = 0.5;
+  const gridMat = new THREE.LineBasicMaterial({ color: 0x00ccff, transparent: true, opacity: 0.08 });
+  const gridPts = [];
+  for (let gx = x0; gx <= x1 + 0.001; gx += gridSpacing) {
+    gridPts.push(apiToWorld(gx, y0, z0), apiToWorld(gx, y1, z0));
+  }
+  for (let gy = y0; gy <= y1 + 0.001; gy += gridSpacing) {
+    gridPts.push(apiToWorld(x0, gy, z0), apiToWorld(x1, gy, z0));
+  }
+  const gridGeo = new THREE.BufferGeometry().setFromPoints(gridPts);
+  roomGroup.add(new THREE.LineSegments(gridGeo, gridMat));
+
+  // Axis lines at origin corner
+  const axisLen = 1.0;
+  const origin = apiToWorld(x0, y0, z0);
+  const axes = [
+    { end: apiToWorld(x0 + axisLen, y0, z0), color: 0xff4444, label: 'X' },
+    { end: apiToWorld(x0, y0 + axisLen, z0), color: 0x44ff44, label: 'Y' },
+    { end: apiToWorld(x0, y0, z0 + axisLen), color: 0x4488ff, label: 'Z (up)' },
+  ];
+  axes.forEach(a => {
+    const geo = new THREE.BufferGeometry().setFromPoints([origin, a.end]);
+    roomGroup.add(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: a.color, opacity: 0.7, transparent: true })));
+  });
+
+  // Scale labels using sprites
+  const createTextSprite = (text, position, color = '#888888', size = 0.22) => {
+    const cvs = document.createElement('canvas');
+    cvs.width = 128; cvs.height = 48;
+    const ctx = cvs.getContext('2d');
+    ctx.font = 'bold 28px monospace';
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 64, 24);
+    const tex = new THREE.CanvasTexture(cvs);
+    tex.minFilter = THREE.LinearFilter;
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.position.copy(position);
+    sprite.scale.set(size * 3, size * 1.1, 1);
+    return sprite;
+  };
+
+  // X axis labels (red, along floor front edge)
+  for (let v = Math.ceil(x0); v <= x1; v++) {
+    roomGroup.add(createTextSprite(v + 'm', apiToWorld(v, y0 - 0.3, z0 - 0.15), '#ff6666'));
+  }
+  // Y axis labels (green, along floor left edge)
+  for (let v = Math.ceil(y0); v <= y1; v++) {
+    roomGroup.add(createTextSprite(v + 'm', apiToWorld(x0 - 0.4, v, z0 - 0.15), '#66ff66'));
+  }
+  // Z axis labels (blue, height along left-front vertical edge)
+  for (let v = Math.ceil(z0); v <= z1; v++) {
+    roomGroup.add(createTextSprite(v + 'm', apiToWorld(x0 - 0.4, y0 - 0.3, v), '#6688ff'));
+  }
+
+  // Axis name labels
+  const off = axisLen + 0.25;
+  roomGroup.add(createTextSprite('X', apiToWorld(x0 + off, y0, z0), '#ff4444', 0.3));
+  roomGroup.add(createTextSprite('Y', apiToWorld(x0, y0 + off, z0), '#44ff44', 0.3));
+  roomGroup.add(createTextSprite('Z', apiToWorld(x0, y0, z0 + off), '#4488ff', 0.3));
+}
+
+// ── Node markers ─────────────────────────────────────────────────────
+
+const nodeSphereGeo = new THREE.SphereGeometry(0.15, 16, 12);
+const nodeMatOnline = new THREE.MeshStandardMaterial({
+  color: 0x00ccff, emissive: 0x00ccff, emissiveIntensity: 0.6, transparent: true, opacity: 0.9
+});
+const nodeMatOffline = new THREE.MeshStandardMaterial({
+  color: 0x444444, emissive: 0x222222, emissiveIntensity: 0.1, transparent: true, opacity: 0.5
+});
+
+function createNodeLabel(text) {
+  const cvs = document.createElement('canvas');
+  cvs.width = 192; cvs.height = 48;
+  const ctx = cvs.getContext('2d');
+  ctx.font = 'bold 26px monospace';
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 96, 24);
+  const tex = new THREE.CanvasTexture(cvs);
+  tex.minFilter = THREE.LinearFilter;
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, opacity: 0.8 });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(0.8, 0.2, 1);
+  return sprite;
+}
+
+function rebuildNodes() {
+  // Dispose old
+  nodeGroup.children.forEach(c => {
+    if (c.geometry && !c.geometry._shared) c.geometry.dispose();
+    if (c.material && c.material.map) c.material.map.dispose();
+    if (c.material) c.material.dispose();
+    if (c.userData.light) {
+      scene.remove(c.userData.light);
+      c.userData.light.dispose();
+    }
+  });
+  nodeGroup.clear();
+  labelGroup.children.forEach(c => {
+    if (c.material && c.material.map) c.material.map.dispose();
+    if (c.material) c.material.dispose();
+  });
+  labelGroup.clear();
+
+  state.nodes.forEach(n => {
+    const [px, py, pz] = n.position;
+    const online = n.confidence > 0.1;
+    const mesh = new THREE.Mesh(nodeSphereGeo, online ? nodeMatOnline.clone() : nodeMatOffline.clone());
+    mesh.position.copy(apiToWorld(px, py, pz));
+    mesh.userData.nodeId = n.node_id;
+    mesh.userData.online = online;
+    mesh.userData.pulsePhase = Math.random() * Math.PI * 2;
+
+    // Point light
+    if (online) {
+      const light = new THREE.PointLight(0x00ccff, 0.3, 3);
+      light.position.copy(mesh.position);
+      scene.add(light);
+      mesh.userData.light = light;
+    }
+
+    nodeGroup.add(mesh);
+
+    // Label
+    const label = createNodeLabel('Node ' + n.node_id);
+    label.position.copy(apiToWorld(px, py, pz + 0.35));
+    labelGroup.add(label);
+  });
+}
+
+// ── Signal links ─────────────────────────────────────────────────────
+
+function rebuildLinks() {
+  linkGroup.children.forEach(c => {
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) c.material.dispose();
+  });
+  linkGroup.clear();
+
+  const lineMat = new THREE.LineBasicMaterial({ color: 0x00ff88, transparent: true, opacity: 0.12 });
+  const lineMatGray = new THREE.LineBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.06 });
+
+  for (let i = 0; i < state.nodes.length; i++) {
+    for (let j = i + 1; j < state.nodes.length; j++) {
+      const a = state.nodes[i], b = state.nodes[j];
+      const bothOnline = a.confidence > 0.1 && b.confidence > 0.1;
+      const pts = [
+        apiToWorld(a.position[0], a.position[1], a.position[2]),
+        apiToWorld(b.position[0], b.position[1], b.position[2]),
+      ];
+      const geo = new THREE.BufferGeometry().setFromPoints(pts);
+      linkGroup.add(new THREE.Line(geo, bothOnline ? lineMat.clone() : lineMatGray.clone()));
+    }
+  }
+}
+
+// ── Voxel heatmap ────────────────────────────────────────────────────
+
+let instancedVoxelMesh = null;
+const voxelDummy = new THREE.Object3D();
+
+function densityToColor(d) {
+  if (d <= 0.0) return null;
+  if (d <= 0.3) return { r: 0, g: 1, b: 0.533, hex: 0x00ff88 }; // green
+  if (d <= 0.6) return { r: 1, g: 0.8, b: 0, hex: 0xffcc00 };   // yellow
+  return { r: 1, g: 0.2, b: 0.2, hex: 0xff3333 };                // red
+}
+
+function rebuildVoxels() {
+  if (instancedVoxelMesh) {
+    voxelGroup.remove(instancedVoxelMesh);
+    instancedVoxelMesh.geometry.dispose();
+    instancedVoxelMesh.material.dispose();
+    instancedVoxelMesh = null;
+  }
+
+  const occupied = state.voxels.filter(v => v.density > 0.005);
+  if (occupied.length === 0) return;
+
+  const [x0, y0, z0, x1, y1, z1] = state.bounds;
+  const [gx, gy, gz] = state.gridSize;
+  const vw = (x1 - x0) / gx;
+  const vh = (y1 - y0) / gy;
+  const vd = (z1 - z0) / gz;
+
+  const geo = new THREE.BoxGeometry(vw * 0.92, vd * 0.92, vh * 0.92);
+  const mat = new THREE.MeshBasicMaterial({
+    transparent: true,
+    vertexColors: false,
+    depthWrite: false,
+    side: THREE.FrontSide,
+  });
+
+  instancedVoxelMesh = new THREE.InstancedMesh(geo, mat, occupied.length);
+  instancedVoxelMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+  // Per-instance color
+  const colorAttr = new THREE.InstancedBufferAttribute(new Float32Array(occupied.length * 3), 3);
+  instancedVoxelMesh.instanceColor = colorAttr;
+
+  occupied.forEach((v, i) => {
+    const [cx, cy, cz] = v.center;
+    voxelDummy.position.copy(apiToWorld(cx, cy, cz));
+    voxelDummy.updateMatrix();
+    instancedVoxelMesh.setMatrixAt(i, voxelDummy.matrix);
+
+    const c = densityToColor(v.density);
+    if (c) {
+      colorAttr.setXYZ(i, c.r, c.g, c.b);
+    }
+
+    // Use custom shader for per-instance opacity via uniform workaround:
+    // Since InstancedMesh doesn't support per-instance opacity natively,
+    // we encode opacity into alpha of the material and use a single pass.
+    // For simplicity, set material opacity to average and rely on color intensity.
+  });
+
+  // Set material opacity to a mid-range; color intensity conveys density
+  const avgDensity = occupied.reduce((s, v) => s + v.density, 0) / occupied.length;
+  mat.opacity = 0.1 + avgDensity * 0.5;
+
+  instancedVoxelMesh.instanceMatrix.needsUpdate = true;
+  instancedVoxelMesh.instanceColor.needsUpdate = true;
+  instancedVoxelMesh.renderOrder = -1;
+  voxelGroup.add(instancedVoxelMesh);
+}
+
+// For < 50 voxels, use individual meshes with per-voxel opacity
+function rebuildVoxelsIndividual() {
+  voxelGroup.children.forEach(c => {
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) c.material.dispose();
+  });
+  voxelGroup.clear();
+
+  const [x0, y0, z0, x1, y1, z1] = state.bounds;
+  const [gx, gy, gz] = state.gridSize;
+  const vw = (x1 - x0) / gx;
+  const vh = (y1 - y0) / gy;
+  const vd = (z1 - z0) / gz;
+
+  const boxGeo = new THREE.BoxGeometry(vw * 0.92, vd * 0.92, vh * 0.92);
+
+  state.voxels.forEach(v => {
+    if (v.density <= 0.005) return;
+    const c = densityToColor(v.density);
+    if (!c) return;
+
+    const mat = new THREE.MeshBasicMaterial({
+      color: c.hex,
+      transparent: true,
+      opacity: 0.1 + v.density * 0.6,
+      depthWrite: false,
+      side: THREE.FrontSide,
+    });
+    const mesh = new THREE.Mesh(boxGeo, mat);
+    mesh.position.copy(apiToWorld(v.center[0], v.center[1], v.center[2]));
+    mesh.renderOrder = -1;
+    voxelGroup.add(mesh);
+  });
+}
+
+function updateVoxels() {
+  if (state.voxels.length > 50) {
+    rebuildVoxels();
+  } else {
+    rebuildVoxelsIndividual();
+  }
+}
+
+// ── Stick figure rendering ──────────────────────────────────────────
+
+const STANDING_KEYPOINTS = [
+  [0, 1.7, 0],      // 0: nose
+  [-0.03, 1.72, 0], // 1: left_eye
+  [0.03, 1.72, 0],  // 2: right_eye
+  [-0.08, 1.68, 0], // 3: left_ear
+  [0.08, 1.68, 0],  // 4: right_ear
+  [-0.2, 1.4, 0],   // 5: left_shoulder
+  [0.2, 1.4, 0],    // 6: right_shoulder
+  [-0.35, 1.1, 0],  // 7: left_elbow
+  [0.35, 1.1, 0],   // 8: right_elbow
+  [-0.35, 0.8, 0],  // 9: left_wrist
+  [0.35, 0.8, 0],   // 10: right_wrist
+  [-0.15, 0.85, 0], // 11: left_hip
+  [0.15, 0.85, 0],  // 12: right_hip
+  [-0.15, 0.45, 0], // 13: left_knee
+  [0.15, 0.45, 0],  // 14: right_knee
+  [-0.15, 0.0, 0],  // 15: left_ankle
+  [0.15, 0.0, 0],   // 16: right_ankle
+];
+
+const BONES = [
+  [0, 1], [0, 2], [1, 3], [2, 4],
+  [0, 5], [0, 6],
+  [5, 6],
+  [5, 7], [7, 9],
+  [6, 8], [8, 10],
+  [5, 11], [6, 12],
+  [11, 12],
+  [11, 13], [13, 15],
+  [12, 14], [14, 16],
+];
+
+function getKeypoints(poseHint, heightScale) {
+  let kps = STANDING_KEYPOINTS.map(k => [k[0] * heightScale, k[1] * heightScale, k[2] * heightScale]);
+  if (poseHint === 'sitting') {
+    kps = STANDING_KEYPOINTS.map(k => [k[0] * heightScale, k[1] * heightScale * 0.6, k[2] * heightScale]);
+    kps[11] = [-0.15 * heightScale, 0.5 * heightScale, 0];
+    kps[12] = [0.15 * heightScale, 0.5 * heightScale, 0];
+    kps[13] = [-0.15 * heightScale, 0.35 * heightScale, 0.2 * heightScale];
+    kps[14] = [0.15 * heightScale, 0.35 * heightScale, 0.2 * heightScale];
+    kps[15] = [-0.15 * heightScale, 0.35 * heightScale, 0.35 * heightScale];
+    kps[16] = [0.15 * heightScale, 0.35 * heightScale, 0.35 * heightScale];
+  } else if (poseHint === 'lying') {
+    // Rotate 90 degrees: height -> depth, figure horizontal
+    kps = STANDING_KEYPOINTS.map(k => [k[0] * heightScale, 0.15 * heightScale, k[1] * heightScale]);
+  }
+  return kps;
+}
+
+function createBodyLabel(text, color) {
+  const cvs = document.createElement('canvas');
+  cvs.width = 192; cvs.height = 48;
+  const ctx = cvs.getContext('2d');
+  ctx.font = 'bold 22px monospace';
+  ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 96, 24);
+  const tex = new THREE.CanvasTexture(cvs);
+  tex.minFilter = THREE.LinearFilter;
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(0.7, 0.18, 1);
+  return sprite;
+}
+
+function poseColor(poseHint) {
+  return poseHint === 'standing' ? 0x00ff88 :
+         poseHint === 'sitting' ? 0xffcc00 : 0x4488ff;
+}
+
+function createStickFigure(cluster) {
+  const group = new THREE.Group();
+
+  const zExtent = cluster.bbox_max[2] - cluster.bbox_min[2];
+  const heightScale = Math.max(zExtent, 0.5) / 1.7;
+
+  const keypoints = getKeypoints(cluster.pose_hint, heightScale);
+
+  const color = poseColor(cluster.pose_hint);
+
+  // Bones as line segments (positioned at local origin)
+  const points = [];
+  BONES.forEach(([a, b]) => {
+    const ka = keypoints[a], kb = keypoints[b];
+    points.push(
+      new THREE.Vector3(ka[0], ka[2], ka[1]),
+      new THREE.Vector3(kb[0], kb[2], kb[1])
+    );
+  });
+  const geo = new THREE.BufferGeometry().setFromPoints(points);
+  const mat = new THREE.LineBasicMaterial({ color, linewidth: 2, transparent: true, opacity: 0.8 });
+  const bones = new THREE.LineSegments(geo, mat);
+  group.add(bones);
+
+  // Joint spheres
+  const jointGeo = new THREE.SphereGeometry(0.04, 8, 6);
+  const jointMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 });
+  keypoints.forEach(kp => {
+    const joint = new THREE.Mesh(jointGeo, jointMat.clone());
+    joint.position.set(kp[0], kp[2], kp[1]);
+    group.add(joint);
+  });
+
+  // Head sphere (larger)
+  const headGeo = new THREE.SphereGeometry(0.1, 12, 8);
+  const headMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7 });
+  const head = new THREE.Mesh(headGeo, headMat);
+  head.position.set(keypoints[0][0], keypoints[0][2], keypoints[0][1]);
+  group.add(head);
+
+  // Label
+  const label = createBodyLabel(`body_${cluster.id + 1}`, color);
+  label.position.set(0, keypoints[0][2] + 0.25, 0);
+  group.add(label);
+
+  // Store references for in-place updates
+  group.userData.bonesLine = bones;
+  group.userData.headMesh = head;
+  group.userData.labelSprite = label;
+
+  group.userData.phase = Math.random() * Math.PI * 2;
+  group.userData.zExtent = zExtent;
+  return group;
+}
+
+// Rebuild bone/joint geometry in-place for pose transitions
+function rebuildFigureGeometry(fig) {
+  const group = fig.group;
+  const keypoints = fig.currentKeypoints;
+  const color = poseColor(fig.targetPose);
+
+  // Update bones
+  const bonesLine = group.userData.bonesLine;
+  const bonePoints = [];
+  BONES.forEach(([a, b]) => {
+    const ka = keypoints[a], kb = keypoints[b];
+    bonePoints.push(
+      new THREE.Vector3(ka[0], ka[2], ka[1]),
+      new THREE.Vector3(kb[0], kb[2], kb[1])
+    );
+  });
+  bonesLine.geometry.dispose();
+  bonesLine.geometry = new THREE.BufferGeometry().setFromPoints(bonePoints);
+  bonesLine.material.color.setHex(color);
+
+  // Update joints (children indices 1..17 are joints, 18 is head, 19 is label)
+  let jointIdx = 0;
+  group.children.forEach(child => {
+    if (child === bonesLine || child === group.userData.headMesh || child === group.userData.labelSprite) return;
+    if (child.isMesh && child.geometry.type === 'SphereGeometry' && child !== group.userData.headMesh) {
+      if (jointIdx < keypoints.length) {
+        const kp = keypoints[jointIdx];
+        child.position.set(kp[0], kp[2], kp[1]);
+        child.material.color.setHex(color);
+        jointIdx++;
+      }
+    }
+  });
+
+  // Update head
+  const head = group.userData.headMesh;
+  head.position.set(keypoints[0][0], keypoints[0][2], keypoints[0][1]);
+  head.material.color.setHex(color);
+
+  // Update label position
+  const label = group.userData.labelSprite;
+  label.position.set(0, keypoints[0][2] + 0.25, 0);
+}
+
+// ── Persistent figure state ────────────────────────────────────────
+
+const activeFigures = new Map();
+
+class FigureState {
+  constructor(cluster) {
+    this.id = cluster.id;
+    this.group = createStickFigure(cluster);
+    this.targetCentroid = [...cluster.centroid];
+    this.currentCentroid = [...cluster.centroid];
+    this.targetPose = cluster.pose_hint;
+    this.prevPose = cluster.pose_hint;
+    this.poseBlend = 1.0;
+    this.phase = this.group.userData.phase;
+    this.quality = 1.0;
+    this.zExtent = cluster.bbox_max[2] - cluster.bbox_min[2];
+    this.heightScale = Math.max(this.zExtent, 0.5) / 1.7;
+
+    // Keypoint state for smooth transitions
+    this.currentKeypoints = getKeypoints(cluster.pose_hint, this.heightScale);
+    this.targetKeypoints = this.currentKeypoints.map(k => [...k]);
+    this.prevKeypoints = this.currentKeypoints.map(k => [...k]);
+
+    // Position the group at the centroid
+    const baseZ = cluster.centroid[2] - this.zExtent / 2;
+    this.group.position.copy(apiToWorld(cluster.centroid[0], cluster.centroid[1], baseZ));
+
+    presenceGroup.add(this.group);
+  }
+
+  update(cluster) {
+    this.targetCentroid = [...cluster.centroid];
+    this.zExtent = cluster.bbox_max[2] - cluster.bbox_min[2];
+    this.heightScale = Math.max(this.zExtent, 0.5) / 1.7;
+
+    if (cluster.pose_hint !== this.targetPose) {
+      this.prevPose = this.targetPose;
+      this.prevKeypoints = this.currentKeypoints.map(k => [...k]);
+      this.targetPose = cluster.pose_hint;
+      this.poseBlend = 0;
+    }
+    this.targetKeypoints = getKeypoints(this.targetPose, this.heightScale);
+    this.quality = 1.0;
+  }
+
+  remove() {
+    presenceGroup.remove(this.group);
+    this.group.traverse(child => {
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) {
+        if (child.material.map) child.material.map.dispose();
+        child.material.dispose();
+      }
+    });
+  }
+}
+
+function updateStickFigures() {
+  const seenIds = new Set();
+
+  const clustersToProcess = state.clusters.length > 0 ? state.clusters : [];
+
+  // Fallback: single figure from voxel centroid when no clusters
+  if (clustersToProcess.length === 0 && state.voxels.length > 0 && state.sensing?.estimated_persons > 0) {
+    let sx = 0, sy = 0, sz = 0;
+    state.voxels.forEach(v => { sx += v.center[0]; sy += v.center[1]; sz += v.center[2]; });
+    const n = state.voxels.length;
+    clustersToProcess.push({
+      id: 0,
+      centroid: [sx / n, sy / n, sz / n],
+      bbox_min: [sx / n - 0.3, sy / n - 0.3, 0],
+      bbox_max: [sx / n + 0.3, sy / n + 0.3, 1.7],
+      pose_hint: 'standing',
+    });
+  }
+
+  for (const cluster of clustersToProcess) {
+    seenIds.add(cluster.id);
+    if (activeFigures.has(cluster.id)) {
+      activeFigures.get(cluster.id).update(cluster);
+    } else {
+      activeFigures.set(cluster.id, new FigureState(cluster));
+    }
+  }
+
+  // Fade out missing figures
+  for (const [id, fig] of activeFigures) {
+    if (!seenIds.has(id)) {
+      fig.quality -= 0.05;
+      if (fig.quality <= 0) {
+        fig.remove();
+        activeFigures.delete(id);
+      }
+    }
+  }
+}
+
+// ── Build initial room ───────────────────────────────────────────────
+
+buildRoom();
+
+// ── Data fetching ────────────────────────────────────────────────────
+
+const API_BASE = '';
+const banner = document.getElementById('connectionBanner');
+
+async function fetchJSON(url) {
+  try {
+    const r = await fetch(API_BASE + url);
+    if (!r.ok) throw new Error(r.status);
+    return await r.json();
+  } catch {
+    return null;
+  }
+}
+
+async function pollVolume() {
+  const data = await fetchJSON('/api/v1/spatial/volume');
+  if (data) {
+    state.apiAvailable = true;
+    banner.style.display = 'none';
+    if (data.grid_size) state.gridSize = data.grid_size;
+    if (data.bounds) state.bounds = data.bounds;
+    state.voxels = data.occupied_voxels || [];
+    updateVoxels();
+    updateInfoPanel(data);
+  } else if (!state.wsConnected) {
+    state.apiAvailable = false;
+    banner.style.display = 'block';
+  }
+}
+
+async function pollStatus() {
+  const data = await fetchJSON('/api/v1/spatial/status');
+  if (data) {
+    state.status = data;
+    updateStatusInfo();
+  }
+}
+
+async function pollNodes() {
+  const data = await fetchJSON('/api/v1/spatial/nodes');
+  if (data && data.nodes) {
+    state.nodes = data.nodes;
+    rebuildNodes();
+    rebuildLinks();
+  }
+}
+
+async function pollVitals() {
+  const data = await fetchJSON('/api/v1/vital-signs');
+  if (data) {
+    state.vitals = data;
+    updateVitalsInfo();
+  }
+}
+
+async function pollSensing() {
+  const data = await fetchJSON('/api/v1/sensing/latest');
+  if (data) {
+    state.sensing = data;
+    updateSensingInfo();
+  }
+}
+
+async function pollClusters() {
+  const data = await fetchJSON('/api/v1/spatial/clusters');
+  if (data && data.clusters) {
+    state.clusters = data.clusters;
+    updateStickFigures();
+  }
+}
+
+// ── WebSocket ────────────────────────────────────────────────────────
+
+let ws = null;
+let wsRetryTimer = null;
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = `${proto}//${location.host}/ws/sensing`;
+
+  try {
+    ws = new WebSocket(url);
+  } catch { return; }
+
+  ws.onopen = () => {
+    state.wsConnected = true;
+    banner.style.display = 'none';
+  };
+
+  ws.onmessage = (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === 'spatial_update' && msg.data) {
+        const d = msg.data;
+        if (d.grid_size) state.gridSize = d.grid_size;
+        if (d.bounds) state.bounds = d.bounds;
+        if (d.occupied_voxels) {
+          state.voxels = d.occupied_voxels;
+          updateVoxels();
+        }
+        if (d.clusters) {
+          state.clusters = d.clusters;
+          updateStickFigures();
+        }
+        updateInfoPanel(d);
+      }
+      if (msg.type === 'sensing' && msg.data) {
+        state.sensing = msg.data;
+        updateSensingInfo();
+      }
+    } catch { /* ignore parse errors */ }
+  };
+
+  ws.onclose = () => {
+    state.wsConnected = false;
+    if (!state.apiAvailable) banner.style.display = 'block';
+    wsRetryTimer = setTimeout(connectWS, 5000);
+  };
+
+  ws.onerror = () => { ws.close(); };
+}
+
+connectWS();
+
+// Poll fallbacks
+setInterval(pollVolume, 2000);
+setInterval(pollStatus, 5000);
+setInterval(pollNodes, 10000);
+setInterval(pollVitals, 5000);
+setInterval(pollSensing, 5000);
+setInterval(pollClusters, 2000);
+
+// Initial fetch
+pollVolume();
+pollStatus();
+pollNodes();
+pollVitals();
+pollSensing();
+pollClusters();
+
+// ── UI updates ───────────────────────────────────────────────────────
+
+function updateInfoPanel(volData) {
+  if (volData) {
+    const gs = volData.grid_size || state.gridSize;
+    document.getElementById('valRes').textContent = `${gs[0]}x${gs[1]}x${gs[2]}`;
+    document.getElementById('valRecon').textContent = volData.reconstruction_count ?? '--';
+    document.getElementById('valResidual').textContent = volData.residual != null ? volData.residual.toFixed(4) : '--';
+  }
+}
+
+function updateStatusInfo() {
+  const s = state.status;
+  if (!s) return;
+
+  const el = document.getElementById('valStatus');
+  if (s.tomographer_ready) {
+    el.textContent = 'Ready';
+    el.className = 'info-value status-ready';
+  } else if (s.calibration_frames > 0) {
+    const pct = Math.min(100, Math.round((s.calibration_frames / 5000) * 100));
+    el.textContent = `Calibrating (${pct}%)`;
+    el.className = 'info-value status-calib';
+  } else {
+    el.textContent = 'Waiting for nodes...';
+    el.className = 'info-value status-wait';
+  }
+
+  document.getElementById('valNodes').textContent = `${s.active_nodes || 0}/${s.node_count || 0}`;
+  document.getElementById('valLinks').textContent = s.link_count ?? '--';
+}
+
+function updateVitalsInfo() {
+  const v = state.vitals;
+  if (!v) return;
+  document.getElementById('valBreath').textContent = v.breathing_rate_bpm != null ? v.breathing_rate_bpm.toFixed(1) + ' BPM' : '--';
+  document.getElementById('valHR').textContent = v.heart_rate_bpm != null ? v.heart_rate_bpm.toFixed(1) + ' BPM' : '--';
+}
+
+function updateSensingInfo() {
+  const s = state.sensing;
+  if (!s) return;
+  const persons = s.estimated_persons ?? (s.classification?.presence ? 1 : 0);
+  if (state.clusters.length > 0) {
+    const poses = state.clusters.map(c => c.pose_hint).join(', ');
+    document.getElementById('valPersons').textContent = `${state.clusters.length} (${poses})`;
+  } else {
+    document.getElementById('valPersons').textContent = persons;
+  }
+}
+
+// ── Toggle controls ──────────────────────────────────────────────────
+
+document.querySelectorAll('.ctrl-btn[data-toggle]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const key = btn.dataset.toggle;
+    state.visibility[key] = !state.visibility[key];
+    btn.classList.toggle('active', state.visibility[key]);
+    applyVisibility();
+  });
+});
+
+document.querySelectorAll('.ctrl-btn[data-action]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.action === 'resetView') {
+      camera.position.set(8, 6, 5);
+      controls.target.set(3, 1.5, 3);
+      controls.update();
+    } else if (btn.dataset.action === 'fullscreen') {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen();
+      }
+    }
+  });
+});
+
+function applyVisibility() {
+  voxelGroup.visible = state.visibility.voxels;
+  nodeGroup.visible = state.visibility.nodes;
+  linkGroup.visible = state.visibility.links;
+  labelGroup.visible = state.visibility.labels;
+  presenceGroup.visible = state.visibility.presence;
+}
+
+// ── FPS counter ──────────────────────────────────────────────────────
+
+let frameCount = 0;
+let lastFpsTime = performance.now();
+const fpsEl = document.getElementById('fpsCounter');
+
+function updateFPS() {
+  frameCount++;
+  const now = performance.now();
+  if (now - lastFpsTime >= 1000) {
+    const fps = Math.round(frameCount * 1000 / (now - lastFpsTime));
+    fpsEl.textContent = fps + ' FPS';
+    frameCount = 0;
+    lastFpsTime = now;
+  }
+}
+
+// ── Animation loop ───────────────────────────────────────────────────
+
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+  const dt = clock.getDelta();
+
+  controls.update();
+
+  // Node pulse animation
+  nodeGroup.children.forEach(mesh => {
+    if (mesh.userData.online) {
+      const phase = mesh.userData.pulsePhase || 0;
+      const s = 1.0 + 0.15 * Math.sin(t * 3.0 + phase);
+      mesh.scale.setScalar(s);
+    }
+  });
+
+  // Stick figure animation: position lerp, breathing, activity motion, pose transitions
+  for (const [id, fig] of activeFigures) {
+    // Position lerp
+    for (let i = 0; i < 3; i++) {
+      fig.currentCentroid[i] += (fig.targetCentroid[i] - fig.currentCentroid[i]) * 0.1;
+    }
+
+    // Pose blend (lerp keypoints over ~1s at 30fps)
+    if (fig.poseBlend < 1.0) {
+      fig.poseBlend = Math.min(1.0, fig.poseBlend + 0.03);
+      const b = fig.poseBlend;
+      for (let k = 0; k < fig.currentKeypoints.length; k++) {
+        for (let d = 0; d < 3; d++) {
+          fig.currentKeypoints[k][d] = fig.prevKeypoints[k][d] * (1 - b) + fig.targetKeypoints[k][d] * b;
+        }
+      }
+      rebuildFigureGeometry(fig);
+    } else {
+      // Snap to target keypoints if not already there
+      let needsUpdate = false;
+      for (let k = 0; k < fig.currentKeypoints.length; k++) {
+        for (let d = 0; d < 3; d++) {
+          if (fig.currentKeypoints[k][d] !== fig.targetKeypoints[k][d]) {
+            fig.currentKeypoints[k][d] = fig.targetKeypoints[k][d];
+            needsUpdate = true;
+          }
+        }
+      }
+      if (needsUpdate) rebuildFigureGeometry(fig);
+    }
+
+    // Breathing
+    const brBpm = state.vitals?.breathing_rate_bpm || 15;
+    const breathScale = 1.0 + 0.02 * Math.sin(t * (brBpm / 60) * Math.PI * 2 + fig.phase);
+
+    // Activity-based motion
+    const activity = state.sensing?.classification?.motion_level || 'absent';
+    let activityOscX = 0, activityOscZ = 0;
+    if (activity === 'moderate' || activity === 'present_gentle') {
+      activityOscX = 0.03 * Math.sin(t * 1.0 + fig.phase);
+      activityOscZ = 0.02 * Math.cos(t * 0.7 + fig.phase);
+    } else if (activity === 'active') {
+      activityOscX = 0.08 * Math.sin(t * 2.0 + fig.phase);
+      activityOscZ = 0.05 * Math.cos(t * 1.4 + fig.phase);
+    } else {
+      // Idle sway
+      activityOscX = 0.01 * Math.sin(t * 0.5 + fig.phase);
+    }
+
+    const cx = fig.currentCentroid[0] + activityOscX;
+    const cy = fig.currentCentroid[1] + activityOscZ;
+    const cz = fig.currentCentroid[2];
+    const baseZ = cz - fig.zExtent / 2;
+
+    fig.group.position.copy(apiToWorld(cx, cy, baseZ));
+    fig.group.scale.set(1, breathScale, 1);
+
+    // Idle sway rotation
+    fig.group.rotation.y = Math.sin(t * 0.5 + fig.phase) * 0.05;
+
+    // Opacity fade for disappearing figures
+    if (fig.quality < 1.0) {
+      fig.group.traverse(child => {
+        if (child.material) child.material.opacity = Math.max(0, fig.quality);
+      });
+    }
+  }
+
+  renderer.render(scene, camera);
+  updateFPS();
+}
+
+animate();
+
+// ── Resize ───────────────────────────────────────────────────────────
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
