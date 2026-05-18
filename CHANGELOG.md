@@ -29,6 +29,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   process. Swapped for `unwrap_or(Ordering::Equal)`, matching the pattern the
   same file already used at lines 149-150 and 155. Per-frame hot path; this was
   a real production crash vector.
+- **Completed the #611 NaN-panic audit across the sensing-server crate** (follow-up
+  to #613). The original audit grepped for the literal `partial_cmp(b).unwrap()`
+  and missed seven additional production sites that use comparator variants
+  (`partial_cmp(b.1).unwrap()`, `partial_cmp(&variances[b]).unwrap()`). All share
+  the same crash class — a single `NaN` in CSI-derived state panics the whole
+  sensing-server. Fixed:
+  - `adaptive_classifier.rs:205` — `AdaptiveModel::classify()` argmax over softmax
+    probs. **Same per-frame hot path as #611**; NaN flows through normalise →
+    logits → softmax and still reaches this site even after the #613 IQR fix.
+  - `adaptive_classifier.rs:480, 500` — training-loop argmax in `train()`
+    (training/per-class accuracy reporting).
+  - `main.rs:2446, 2449` and `csi.rs:602, 605` — variance-based source/sink
+    selection in `count_persons_mincut`. The outer `unwrap_or((0, &0))` only
+    catches an empty iterator; it cannot rescue a comparator panic.
+
+  Remaining `partial_cmp(...).unwrap()` sites in the workspace are all inside
+  `#[cfg(test)]` / `#[test]` blocks (`spectrogram.rs:269`, `depth.rs:234`,
+  `connectivity.rs:477`, `vital_signs.rs:737`) where inputs are controlled.
 - **`ui/utils/pose-renderer.js` no longer divides by zero** when two render frames land in the same `performance.now()` tick (issue #519 Bug 2). `deltaTime` is now `Math.max(currentTime - lastFrameTime, 1)` before the `1000 / deltaTime` division, capping displayed FPS at 1000 — far above any real render rate, but finite so the EMA `averageFps = averageFps * 0.9 + fps * 0.1` no longer poisons itself to `Infinity` on a single zero-dt tick.
 
 ### Removed

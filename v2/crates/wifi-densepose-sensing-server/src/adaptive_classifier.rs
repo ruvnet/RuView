@@ -200,9 +200,11 @@ impl AdaptiveModel {
             probs[c] = ((logits[c] - max_logit).exp()) / exp_sum;
         }
 
-        // Pick argmax.
+        // Pick argmax. Same NaN-panic class as #611: if any raw_feature is NaN
+        // it propagates through normalize → logits → softmax, then partial_cmp
+        // returns None and unwrap() panics the sensing server on every frame.
         let (best_c, best_p) = probs.iter().enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap();
         let label = if best_c < self.class_names.len() {
             self.class_names[best_c].clone()
@@ -477,7 +479,7 @@ pub fn train_from_recordings(recordings_dir: &Path) -> Result<AdaptiveModel, Str
             }
         }
         let pred = logits.iter().enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap().0;
         if pred == *target { correct += 1; }
     }
@@ -497,7 +499,7 @@ pub fn train_from_recordings(recordings_dir: &Path) -> Result<AdaptiveModel, Str
             }
         }
         let pred = logits.iter().enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap().0;
         if pred == *target { class_correct[*target] += 1; }
     }

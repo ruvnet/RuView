@@ -598,11 +598,13 @@ pub fn estimate_persons_from_correlation(frame_history: &VecDeque<Vec<f64>>) -> 
         }
     }
 
+    // partial_cmp returns None on NaN; the outer unwrap_or only catches an
+    // empty iterator, not a comparator panic. Same NaN-panic class as #611.
     let (max_var_idx, _) = active.iter().enumerate()
-        .max_by(|(_, &a), (_, &b)| variances[a].partial_cmp(&variances[b]).unwrap())
+        .max_by(|(_, &a), (_, &b)| variances[a].partial_cmp(&variances[b]).unwrap_or(std::cmp::Ordering::Equal))
         .unwrap_or((0, &0));
     let (min_var_idx, _) = active.iter().enumerate()
-        .min_by(|(_, &a), (_, &b)| variances[a].partial_cmp(&variances[b]).unwrap())
+        .min_by(|(_, &a), (_, &b)| variances[a].partial_cmp(&variances[b]).unwrap_or(std::cmp::Ordering::Equal))
         .unwrap_or((0, &0));
     if max_var_idx == min_var_idx { return 1; }
 
