@@ -20,6 +20,11 @@ name = "verify-training"
 path = "src/bin/verify_training.rs"
 required-features = ["tch-backend"]
 
+[[bin]]
+name = "pretrain-mae"
+path = "src/bin/pretrain_mae.rs"
+required-features = ["tch-backend"]
+
 [features]
 default = []
 tch-backend = ["tch"]

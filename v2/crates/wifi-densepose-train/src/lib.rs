@@ -44,6 +44,7 @@
 #![warn(missing_docs)]
 
 pub mod config;
+pub mod csi_mae;
 pub mod dataset;
 pub mod domain;
 pub mod error;
@@ -80,6 +81,7 @@ pub use error::TrainResult as TrainResultAlias;
 pub use subcarrier::{compute_interp_weights, interpolate_subcarriers, select_subcarriers_by_variance};
 
 // MERIDIAN (ADR-027) re-exports.
+pub use csi_mae::{mask_csi_window, reassemble_tokens, MaeConfig, MaskStrategy, MaskedCsi, TokenLayout};
 pub use domain::{
     AdversarialSchedule, DomainClassifier, DomainFactorizer, GradientReversalLayer,
 };

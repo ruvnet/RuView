@@ -60,7 +60,58 @@ Five concurrent lines of research have converged on the domain generalization pr
 
 ## 2. Decision
 
+### 2.0 — 2026-Q2 Re-scope: MERIDIAN-MAE foundation pre-training (primary path)
+
+> **Status of this subsection:** Active. Supersedes the *training strategy* of §2.1–§2.6 (the dual-path / domain-adversarial / geometry-conditioned *architecture* is retained — it becomes the **fine-tune-stage head** on top of a pre-trained encoder, not a from-scratch network).
+> **Driver:** `docs/research/sota/2026-Q2-agentic-ai-and-edge-for-ruview.md` (§B1) and the 2025→2026 evidence below.
+
+**What changed.** The 2026 WiFi-sensing literature converged on a single result: **masked-autoencoder (MAE) pre-training on large, heterogeneous CSI pools beats supervised baselines on cross-domain tasks, and the bottleneck is data breadth, not model capacity.**
+
+- *Scale What Counts, Mask What Matters* (arXiv:2511.18792): pre-trains/evaluates across **14 datasets, >1.3 M CSI samples, 4 device types, 2.4/5/6 GHz**; **log-linear** cross-domain gains with pre-training data (+2.2 % to +15.7 % over supervised), **marginal** gains from bigger models.
+- **CIG-MAE** (arXiv:2512.04723): dual-stream MAE reconstructing **both amplitude and phase**, with information-guided masking — phase reconstruction is now SOTA-competitive (historically the hard part).
+- **AM-FM** (2026; arXiv:2602.11200, already cited in §1.2): ~9.2 M samples, ~20 device types — the data-breadth thesis at scale.
+- *A Tutorial-cum-Survey on SSL for Wi-Fi Sensing* (arXiv:2506.12052) and ACM TOSN (10.1145/3715130): MAE is the consistently strongest SSL choice for CSI.
+
+**Revised decision.** The primary MERIDIAN program is now a **three-stage** pipeline:
+
+1. **Pre-train** a CIG-MAE-style **dual-stream (amplitude + phase) masked autoencoder** on every CSI source RuView can reach — own recordings (`data/recordings/`, overnight captures), MM-Fi + Wi-Pose (ADR-015), public CSI corpora, and the multi-band virtual-subcarrier streams from `ruvsense/multiband.rs`. Thesis: *data breadth > pose-net capacity*.
+2. **Fine-tune** the existing MERIDIAN heads — the 17-keypoint / DensePose-UV regression heads, the AETHER contrastive embedding (ADR-024), and the domain-adversarial / geometry-conditioned layers of §2.1–§2.6 — on top of the **frozen-then-unfrozen** pre-trained encoder. The §2.x machinery is now *regularisation on a good representation* rather than the load-bearing structure.
+3. **Adapt** per room with **source-free unsupervised domain adaptation** (MU-SHOT-Fi, arXiv:2605.01369; Wi-SFDAGR) wired behind `ruvsense/coherence_gate.rs::Recalibrate` — a bounded MicroLoRA-delta + EWC++ pass on the head, triggered by the coherence z-score, logged via the witness chain. (Tracked separately; see the companion ADR referenced in the survey's Part C #2.)
+
+**Why this is better than from-scratch (§2.1 as the primary path).** A model trained from scratch on one or two single-environment datasets *cannot* see enough multipath/hardware diversity to learn an environment-agnostic representation — that's the layout-overfitting / multipath-memorisation failure in §1.1. A pre-trained encoder front-loads that diversity, so the SISO-multistatic ESP32 input (§B3) has to carry far less, and the per-room work shrinks to adaptation (stage 3), not retraining.
+
+**Token convention (implementation).** A CSI window `[T, tx, rx, sub]` → a sequence of `N = T·tx·rx` tokens, each a `sub`-dim *channel snapshot* — the same `[B, T·tx·rx, sub]` layout `model.rs::ModalityTranslator` already consumes. Amplitude and phase share the token grid, so one mask drives both streams.
+
+**Implementation status & plan.**
+
+- ✅ **Iteration 1**: `wifi-densepose-train::csi_mae` — `MaeConfig` (+`validate`), `MaskStrategy`, `TokenLayout`, deterministic `mask_csi_window` / `reassemble_tokens` (pure Rust, dependency-free PRNG, unit tests, builds & tests under `cargo test --no-default-features`); the re-scoped ADR (this section).
+- ✅ **Iteration 2a**: information-guided masking — `MaskStrategy::InfoGuided` now masks high-information tokens (token "information" = variance of amplitude + variance of phase), weighted-without-replacement via Efraimidis–Spirakis, deterministic in seed; replaces the iter-1 Random fallback. +3 tests.
+- ✅ **Iteration 2b** (CI-verified): `csi_mae::model` behind `tch-backend` — `CsiMae` (dual-stream amp+phase per-token embed → fuse → residual-MLP encoder over visible tokens → flatten-to-latent bottleneck → learned per-position query + broadcast latent → residual-MLP decoder → `dec_amp_head`/`dec_ph_head` → `index_select` the masked positions); `CsiMae::reconstruction_loss` (MSE amp + `phase_w`·MSE phase); `MaeBatch::from_windows` (partition from window 0, reused across the batch — `n_tokens` is fixed); `pretrain_step`; `src/bin/pretrain_mae.rs` (synthetic-data driver, `required-features = ["tch-backend"]`); a gated "loss halves when overfitting one batch" smoke test. v0 limits noted in the module docs: fixed `n_tokens`, batch-shared masking, MSE on unwrapped phase. The dev box that wrote this had no LibTorch, so the tch path is verified by CI (`tch-backend` feature), not locally.
+- ◻ **Iteration 3+**: pool & ingest heterogeneous CSI (own recordings + MM-Fi + Wi-Pose + multi-band virtual sub-carriers); real pre-train run (GPU — `scripts/gcloud-train.sh` / the cognitum project); per-sample masking + self-attention transformer blocks (lift the v0 limits); fine-tune the §2.x heads on top of the pre-trained encoder; cross-domain eval (§4.6 protocol); ship the encoder as an RVF segment (§4.7).
+- ⏸ **Out of scope here**: the per-room SFDA adaptation (stage 3) — its own ADR.
+
+#### Iteration 3 plan — heterogeneous-CSI ingest, GPU pre-train, fine-tune handoff
+
+The remaining prototype work (the parts that can't run on the dev box):
+
+1. **Heterogeneous-CSI ingest.** A `csi_mae`-adjacent loader that pools every reachable CSI source into a uniform `[T, tx, rx, sub]` window stream, normalising sub-carrier count to 56 (via `wifi-densepose-train::subcarrier::interpolate_subcarriers`) and amplitude scale per-frame:
+   - own captures: `data/recordings/*.csi.jsonl`, overnight recordings;
+   - `MmFiDataset` (ADR-015, NeurIPS-2023 MM-Fi, 114 sub-carriers → interpolate);
+   - Wi-Pose (ADR-015);
+   - multi-band virtual sub-carriers from `ruvsense/multiband.rs` (3 channels × 56 → 168) — treated as extra tokens, not extra streams;
+   - public CSI corpora as available.
+   Implemented as a `CsiDataset` impl (e.g. `PooledCsiDataset`) that round-robins / weights sources; `pretrain-mae` gains a `--datasets <spec>` flag selecting it instead of `SyntheticCsiDataset`. *Thesis (arXiv:2511.18792): breadth of this pool — devices, bands, rooms — is what buys cross-domain generalisation; the model stays small.*
+2. **GPU pre-train run.** `scripts/pretrain-mae-gcloud.sh` (added this iteration — a thin mirror of `scripts/gcloud-train.sh`): provisions a GCloud VM in `cognitum-20260110`, builds `wifi-densepose-train` with `--features tch-backend,cuda`, runs `pretrain-mae`, downloads the `.ot` variable store, tears the VM down. Currently drives `SyntheticCsiDataset` (the smoke path); the `--data-dir`/`--datasets` plumbing for the real corpus is the one TODO in that script. *Not run as part of this prototype.*
+3. **Lift the v0 model limits.** Per-sample masking (gather/scatter so each window in a batch can have its own mask), self-attention transformer blocks in the encoder/decoder (replacing the residual MLPs and the flatten-to-latent bottleneck — this also removes the fixed-`n_tokens` constraint), a circular phase-reconstruction loss.
+4. **Fine-tune handoff.** Load the pre-trained `CsiMae` encoder weights into the `model::WiFiDensePoseModel` front-end (the `ModalityTranslator` slot), freeze for a warm-up, then unfreeze; train the 17-keypoint / DensePose-UV heads, the AETHER contrastive embedding (ADR-024), and the §2.1–§2.6 domain-adversarial / geometry-conditioned layers *as regularisers on top of the pre-trained representation*. A `train` sub-command flag (`--init-encoder <mae.ot>`) wires this.
+5. **Cross-domain eval.** Run §4.6's protocol (leave-one-room-out / leave-one-device-out) on the fine-tuned model vs. the from-scratch baseline; the win condition is the +2.2 %…+15.7 % cross-domain band that 2511.18792 reports for MAE pre-training.
+6. **Ship the encoder** as an RVF segment (§4.7) so deployments load a pre-trained backbone and only carry the small task head + per-room adapter (stage 3 / the SFDA ADR).
+
+The remainder of this ADR (§2.1 onward) describes the **fine-tune-stage architecture** — read it as "the head and regularisers that sit on top of the §2.0 pre-trained encoder", not as a from-scratch design.
+
 ### 2.1 Architecture: Environment-Disentangled Dual-Path Transformer
+
+> *(Now the fine-tune-stage head — see §2.0.)*
 
 MERIDIAN adds a domain generalization layer between the CSI encoder and the pose/embedding heads. The core insight is explicit factorization: decompose the latent representation into a **pose-relevant** component (invariant across environments) and an **environment** component (captures room geometry, hardware, layout):
 
@@ -546,3 +597,12 @@ ADR-011  Proof-of-Reality    ──→ ⏳ Independent (Python v1 issue, high pr
 8. Ramesh, S. et al. (2025). "LatentCSI: High-resolution efficient image generation from WiFi CSI using a pretrained latent diffusion model." arXiv:2506.10605. https://arxiv.org/abs/2506.10605
 9. Ganin, Y. et al. (2016). "Domain-Adversarial Training of Neural Networks." JMLR 17(59):1-35. https://jmlr.org/papers/v17/15-239.html
 10. Perez, E. et al. (2018). "FiLM: Visual Reasoning with a General Conditioning Layer." AAAI 2018. arXiv:1709.07871. https://arxiv.org/abs/1709.07871
+
+**2026-Q2 re-scope (§2.0) — masked-autoencoder foundation pre-training:**
+
+11. "Scale What Counts, Mask What Matters: Evaluating Foundation Models for Zero-Shot Cross-Domain Wi-Fi Sensing." arXiv:2511.18792. https://arxiv.org/html/2511.18792 — 14 datasets / >1.3 M CSI samples; data-breadth > model-capacity.
+12. "CIG-MAE: Cross-Modal Information-Guided Masked Autoencoder for Self-Supervised WiFi Sensing." arXiv:2512.04723. https://arxiv.org/html/2512.04723v1 — dual-stream amplitude+phase MAE, information-guided masking.
+13. "MU-SHOT-Fi: Self-Supervised Multi-User Wi-Fi Sensing with Source-free Unsupervised Domain Adaptation." arXiv:2605.01369. https://arxiv.org/html/2605.01369 — per-room SFDA (MERIDIAN stage 3).
+14. "A Tutorial-cum-Survey on Self-Supervised Learning for Wi-Fi Sensing: Trends, Challenges, and Outlook." arXiv:2506.12052. https://arxiv.org/html/2506.12052
+15. "Evaluating Self-Supervised Learning for WiFi CSI-Based Human Activity Recognition." ACM Trans. Sensor Networks. https://dl.acm.org/doi/10.1145/3715130
+16. RuView 2026-Q2 SOTA survey — `docs/research/sota/2026-Q2-agentic-ai-and-edge-for-ruview.md` (§B1, Part C #1).

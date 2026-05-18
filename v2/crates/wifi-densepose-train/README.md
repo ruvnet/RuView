@@ -82,6 +82,24 @@ wifi-densepose-train/src/
   trainer.rs        -- (tch) Training loop orchestrator         [feature-gated]
 ```
 
+## MERIDIAN-MAE — masked-autoencoder pre-training (ADR-027 §2.0)
+
+The `csi_mae` module implements a CIG-MAE-style **dual-stream (amplitude + phase)** masked
+autoencoder for cross-domain CSI pre-training. The thesis (2026-Q2 SOTA survey, arXiv:2511.18792):
+cross-room generalisation is a *data-breadth* problem — pre-train one CSI encoder on heterogeneous
+capture, attach a small task head — not a bigger-pose-net problem.
+
+* Pure-Rust (always built): `MaeConfig`, `MaskStrategy` (`Random` / `InfoGuided` — the latter
+  variance-weights token selection so high-information tokens are masked), `TokenLayout`,
+  `mask_csi_window`, `reassemble_tokens`. Dependency-free deterministic masking.
+* `csi_mae::model` (feature `tch-backend`): `CsiMae` (encoder over visible tokens → latent →
+  decoder reconstructs masked amplitude+phase), `reconstruction_loss`, `MaeBatch`, `pretrain_step`.
+* Driver: `cargo run -p wifi-densepose-train --features tch-backend --bin pretrain-mae -- --epochs 5`
+  (synthetic data). GPU run: `bash scripts/pretrain-mae-gcloud.sh` (prototype wiring stub).
+
+See `docs/adr/ADR-027-cross-environment-domain-generalization.md` §2.0 for the full plan
+(heterogeneous-CSI ingest, GPU pre-train, fine-tune handoff, cross-domain eval).
+
 ## Related Crates
 
 | Crate | Role |
