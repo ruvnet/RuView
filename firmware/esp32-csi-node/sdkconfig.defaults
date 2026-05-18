@@ -34,3 +34,11 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
 # Extra WiFi IRAM placement (defense-in-depth for RuView#396 SPI cache race)
 CONFIG_ESP_WIFI_EXTRA_IRAM_OPT=y
+
+# ADR-081: adaptive_controller runs emit_feature_state + stream_sender
+# network I/O inside Timer Svc callbacks, exceeding the 2 KiB default.
+# Without this, the device bootloops with
+# "***ERROR*** A stack overflow in task Tmr Svc has been detected."
+# Was present in sdkconfig.defaults.template but missing here — fixed
+# in the v0.6.5-esp32 release.
+CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=8192

@@ -251,9 +251,16 @@ static esp_err_t ota_start_server(httpd_handle_t *out_handle)
     return ESP_OK;
 }
 
-esp_err_t ota_update_init(void)
+/**
+ * Load the OTA PSK from NVS into the module-local s_ota_psk cache and log
+ * the resulting posture. Called by both ota_update_init() and
+ * ota_update_init_ex() so the per-boot diagnostic prints no matter which
+ * entry point main.c uses — historically only ota_update_init() loaded the
+ * PSK, which left ota_update_init_ex() with an empty s_ota_psk and an
+ * invisible fail-closed posture (RuView#596 follow-up).
+ */
+static void ota_load_psk_from_nvs(void)
 {
-    /* ADR-050: Load OTA PSK from NVS if provisioned. */
     nvs_handle_t nvs;
     if (nvs_open(OTA_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
         size_t len = sizeof(s_ota_psk);
@@ -268,11 +275,21 @@ esp_err_t ota_update_init(void)
         ESP_LOGW(TAG, "NVS namespace '%s' not found — OTA upload endpoint will REJECT all "
                       "requests until provisioned. Fail-closed per RuView#596.", OTA_NVS_NAMESPACE);
     }
+}
 
+esp_err_t ota_update_init(void)
+{
+    /* ADR-050: Load OTA PSK from NVS if provisioned. */
+    ota_load_psk_from_nvs();
     return ota_start_server(NULL);
 }
 
 esp_err_t ota_update_init_ex(void **out_server)
 {
+    /* ADR-050: Load OTA PSK from NVS if provisioned. main.c uses this
+     * variant (not ota_update_init), so without this call s_ota_psk
+     * stayed empty forever and the fail-closed posture was invisible
+     * in serial logs. */
+    ota_load_psk_from_nvs();
     return ota_start_server((httpd_handle_t *)out_server);
 }
