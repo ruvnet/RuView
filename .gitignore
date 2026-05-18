@@ -266,3 +266,4 @@ v2/crates/rvcsi-node/npm/
 v2/data/recordings/
 v2/data/adaptive_model.json
 v2/data/baseline.json
+.claude/launch.json

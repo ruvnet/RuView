@@ -48,6 +48,17 @@
   <span class="pill" id="lastTs">last: --</span>
   <span class="badge absent" id="globalBadge" style="font-size:13px;padding:4px 12px;">absent</span>
   <span class="pill" id="globalCV">CV 0%</span>
+  <!-- ADR-021: WiFi-CSI vital signs — breathing + heart rate (computed server-side). -->
+  <span class="pill" id="brPill"
+        style="background:rgba(63,185,80,0.18); color:rgb(63,185,80); border:1px solid rgb(63,185,80);"
+        title="WiFi-CSI breathing rate from bandpass 0.1-0.5 Hz on broadband amplitude (ADR-021)">
+    🫁 <b id="brBpm">— BPM</b> <span id="brConf" style="opacity:0.7;font-size:11px">·</span>
+  </span>
+  <span class="pill" id="hrPill"
+        style="background:rgba(248,81,73,0.18); color:rgb(248,81,73); border:1px solid rgb(248,81,73);"
+        title="WiFi-CSI heart rate from bandpass 0.8-2.0 Hz on broadband amplitude (ADR-021)">
+    💓 <b id="hrBpm">— BPM</b> <span id="hrConf" style="opacity:0.7;font-size:11px">·</span>
+  </span>
   <!-- ADR-121: HLK-LD2402 24 GHz mmWave radar pill — hidden until first reading. -->
   <span class="pill" id="mmwavePill" style="display:none; background:rgba(33,150,243,0.18);
                                               color:rgb(33,150,243); border:1px solid rgb(33,150,243);"
@@ -357,6 +368,35 @@ function handleSensingUpdate(d) {
   if (gb) { gb.textContent = glvl; gb.className = 'badge ' + glvl; gb.style.fontSize = '13px'; gb.style.padding = '4px 12px'; }
   const gcv = document.getElementById('globalCV');
   if (gcv) gcv.textContent = 'CV ' + ((gcl.confidence || 0) * 100).toFixed(1) + '%';
+
+  // ADR-021 — WiFi-CSI vital signs (breathing + heart rate).
+  // `vital_signs` is embedded in SensingUpdate; values may be null
+  // when the detector hasn't accumulated enough history yet (~10s).
+  const vs = d.vital_signs || {};
+  const brBpm  = document.getElementById('brBpm');
+  const brConf = document.getElementById('brConf');
+  const hrBpm  = document.getElementById('hrBpm');
+  const hrConf = document.getElementById('hrConf');
+  const brPill = document.getElementById('brPill');
+  const hrPill = document.getElementById('hrPill');
+  if (vs && typeof vs.breathing_rate_bpm === 'number' && Number.isFinite(vs.breathing_rate_bpm) && vs.breathing_rate_bpm > 0) {
+    if (brBpm)  brBpm.textContent  = vs.breathing_rate_bpm.toFixed(1) + ' BPM';
+    if (brConf) brConf.textContent = '· ' + ((vs.breathing_confidence || 0) * 100).toFixed(0) + '%';
+    if (brPill) brPill.style.opacity = (vs.breathing_confidence || 0) < 0.2 ? '0.5' : '1.0';
+  } else {
+    if (brBpm)  brBpm.textContent  = '— BPM';
+    if (brConf) brConf.textContent = '·';
+    if (brPill) brPill.style.opacity = '0.5';
+  }
+  if (vs && typeof vs.heart_rate_bpm === 'number' && Number.isFinite(vs.heart_rate_bpm) && vs.heart_rate_bpm > 0) {
+    if (hrBpm)  hrBpm.textContent  = vs.heart_rate_bpm.toFixed(0) + ' BPM';
+    if (hrConf) hrConf.textContent = '· ' + ((vs.heartbeat_confidence || 0) * 100).toFixed(0) + '%';
+    if (hrPill) hrPill.style.opacity = (vs.heartbeat_confidence || 0) < 0.2 ? '0.5' : '1.0';
+  } else {
+    if (hrBpm)  hrBpm.textContent  = '— BPM';
+    if (hrConf) hrConf.textContent = '·';
+    if (hrPill) hrPill.style.opacity = '0.5';
+  }
 
   // Per-node level badge from node_features[i].classification (ADR-101).
   const nfNow = performance.now() / 1000;
