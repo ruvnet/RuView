@@ -48,22 +48,25 @@
   <span class="pill" id="lastTs">last: --</span>
   <span class="badge absent" id="globalBadge" style="font-size:13px;padding:4px 12px;">absent</span>
   <span class="pill" id="globalCV">CV 0%</span>
-  <!-- ADR-021: WiFi-CSI vital signs — breathing + heart rate (computed server-side).
-       Norm tags: adult-at-rest reference ranges shown next to the live value so
-       the operator can tell healthy vs. anomalous at a glance. -->
+  <!-- ADR-021 + ADR-121: dual-source vital signs.
+       Each pill shows WiFi-CSI (📶) and mmWave (📡) side-by-side so
+       the operator can spot disagreement between modalities. Norms
+       are adult-at-rest ranges. -->
   <span class="pill" id="brPill"
         style="background:rgba(63,185,80,0.18); color:rgb(63,185,80); border:1px solid rgb(63,185,80);"
-        title="WiFi-CSI breathing rate (bandpass 0.1-0.5 Hz, ADR-021). Adult-at-rest norm: 12-20 BPM. Below 12 = bradypnea, above 20 = tachypnea.">
-    🫁 <b id="brBpm">— BPM</b>
-    <span style="opacity:0.55;font-size:11px">норма 12–20</span>
-    <span id="brConf" style="opacity:0.7;font-size:11px">·</span>
+        title="Breathing rate, two sources: 📶 = WiFi-CSI bandpass 0.1-0.5 Hz (ADR-021). 📡 = HLK-LD2402 mmWave distance bandpass (ADR-121). Adult-at-rest norm: 12-20 BPM. Below 12 = bradypnea, above 20 = tachypnea.">
+    🫁 <span style="opacity:0.6;font-size:11px">📶</span><b id="brBpm">— BPM</b><span id="brConf" style="opacity:0.7;font-size:11px">·</span>
+    <span style="opacity:0.4">|</span>
+    <span style="opacity:0.6;font-size:11px">📡</span><b id="brBpmMm">— BPM</b><span id="brConfMm" style="opacity:0.7;font-size:11px">·</span>
+    <span style="opacity:0.55;font-size:11px;margin-left:6px">норма 12–20</span>
   </span>
   <span class="pill" id="hrPill"
         style="background:rgba(248,81,73,0.18); color:rgb(248,81,73); border:1px solid rgb(248,81,73);"
-        title="WiFi-CSI heart rate (bandpass 0.8-2.0 Hz, ADR-021). Adult-at-rest norm: 60-100 BPM. Below 60 = bradycardia, above 100 = tachycardia.">
-    💓 <b id="hrBpm">— BPM</b>
-    <span style="opacity:0.55;font-size:11px">норма 60–100</span>
-    <span id="hrConf" style="opacity:0.7;font-size:11px">·</span>
+        title="Heart rate, two sources: 📶 = WiFi-CSI bandpass 0.8-2.0 Hz (ADR-021). 📡 = HLK-LD2402 mmWave (cm precision and 6 Hz cadence put heartbeat below the noise floor — value shown for transparency, expect low confidence). Adult-at-rest norm: 60-100 BPM.">
+    💓 <span style="opacity:0.6;font-size:11px">📶</span><b id="hrBpm">— BPM</b><span id="hrConf" style="opacity:0.7;font-size:11px">·</span>
+    <span style="opacity:0.4">|</span>
+    <span style="opacity:0.6;font-size:11px">📡</span><b id="hrBpmMm">— BPM</b><span id="hrConfMm" style="opacity:0.7;font-size:11px">·</span>
+    <span style="opacity:0.55;font-size:11px;margin-left:6px">норма 60–100</span>
   </span>
   <!-- ADR-121: HLK-LD2402 24 GHz mmWave radar pill — hidden until first reading. -->
   <span class="pill" id="mmwavePill" style="display:none; background:rgba(33,150,243,0.18);
@@ -600,5 +603,57 @@ async function pollMmwave() {
 }
 pollMmwave();
 setInterval(pollMmwave, 200);
+
+// ── ADR-121 follow-up: poll mmWave-derived vital signs @ 1 Hz ────────
+// Slower than the distance poll (5 Hz) — BPM only meaningfully updates
+// once per breath cycle, and the FFT runs on a 30-s buffer so faster
+// polling just wastes cycles.
+const brBpmMm   = document.getElementById('brBpmMm');
+const brConfMm  = document.getElementById('brConfMm');
+const hrBpmMm   = document.getElementById('hrBpmMm');
+const hrConfMm  = document.getElementById('hrConfMm');
+let mmVitalsBusy = false;
+async function pollMmwaveVitals() {
+  if (mmVitalsBusy) return; mmVitalsBusy = true;
+  try {
+    const r = await fetch('/api/v1/mmwave/vitals', { cache: 'no-store' });
+    if (!r.ok) throw new Error('http ' + r.status);
+    const j = await r.json();
+    const vs = (j && j.available) ? (j.vital_signs || {}) : {};
+    const BR_MIN = 12, BR_MAX = 20, HR_MIN = 60, HR_MAX = 100;
+    if (typeof vs.breathing_rate_bpm === 'number' && Number.isFinite(vs.breathing_rate_bpm) && vs.breathing_rate_bpm > 0) {
+      const v = vs.breathing_rate_bpm;
+      const out = v < BR_MIN || v > BR_MAX;
+      brBpmMm.textContent = ' ' + v.toFixed(1) + ' BPM ';
+      brBpmMm.style.color = out ? '#f0a020' : '';
+      brConfMm.textContent = '· ' + ((vs.breathing_confidence || 0) * 100).toFixed(0) + '%';
+    } else {
+      brBpmMm.textContent = ' — BPM ';
+      brBpmMm.style.color = '';
+      // Buffer-fill hint: at 6 Hz × 30 s = 180 samples needed.
+      const fill = j && j.buffer_status ? j.buffer_status.breathing_samples : 0;
+      const cap  = j && j.buffer_status ? j.buffer_status.breathing_capacity : 180;
+      brConfMm.textContent = cap > 0 ? '· ' + fill + '/' + cap : '·';
+    }
+    if (typeof vs.heart_rate_bpm === 'number' && Number.isFinite(vs.heart_rate_bpm) && vs.heart_rate_bpm > 0) {
+      const v = vs.heart_rate_bpm;
+      const out = v < HR_MIN || v > HR_MAX;
+      hrBpmMm.textContent = ' ' + v.toFixed(0) + ' BPM ';
+      hrBpmMm.style.color = out ? '#f0a020' : '';
+      hrConfMm.textContent = '· ' + ((vs.heartbeat_confidence || 0) * 100).toFixed(0) + '%';
+    } else {
+      // mmWave at 6 Hz / cm precision can't resolve heartbeat —
+      // expect this to stay "n/a" in practice.
+      hrBpmMm.textContent = ' n/a ';
+      hrBpmMm.style.color = '';
+      hrConfMm.textContent = '·';
+    }
+  } catch (_) {
+    brBpmMm.textContent = ' — BPM '; brConfMm.textContent = '·';
+    hrBpmMm.textContent = ' n/a ';   hrConfMm.textContent = '·';
+  } finally { mmVitalsBusy = false; }
+}
+pollMmwaveVitals();
+setInterval(pollMmwaveVitals, 1000);
 </script>
 </body></html>

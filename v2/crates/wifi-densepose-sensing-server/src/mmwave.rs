@@ -18,6 +18,13 @@ use std::io::Read;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use crate::vital_signs::{VitalSignDetector, VitalSigns};
+
+/// HLK-LD2402 Normal-Mode cadence: factory firmware emits ~6 distance
+/// lines/sec. We pick 6.0 Hz as the detector's nominal sample_rate so
+/// the breathing band (0.1–0.5 Hz) sits comfortably inside Nyquist.
+const MMWAVE_SAMPLE_RATE_HZ: f64 = 6.0;
+
 /// Latest mmWave reading + when it landed.
 #[derive(Debug, Clone, Copy)]
 pub struct MmwaveReading {
@@ -26,9 +33,19 @@ pub struct MmwaveReading {
 }
 
 static LATEST: OnceLock<Mutex<Option<MmwaveReading>>> = OnceLock::new();
+static VITALS: OnceLock<Mutex<Option<VitalSigns>>> = OnceLock::new();
+static DETECTOR: OnceLock<Mutex<VitalSignDetector>> = OnceLock::new();
 
 fn latest() -> &'static Mutex<Option<MmwaveReading>> {
     LATEST.get_or_init(|| Mutex::new(None))
+}
+
+fn vitals_slot() -> &'static Mutex<Option<VitalSigns>> {
+    VITALS.get_or_init(|| Mutex::new(None))
+}
+
+fn detector_slot() -> &'static Mutex<VitalSignDetector> {
+    DETECTOR.get_or_init(|| Mutex::new(VitalSignDetector::new(MMWAVE_SAMPLE_RATE_HZ)))
 }
 
 /// Returns the most recent reading if it landed within `staleness`.
@@ -36,6 +53,28 @@ pub fn current(staleness: Duration) -> Option<MmwaveReading> {
     let g = latest().lock().unwrap();
     let r = (*g)?;
     if r.at.elapsed() <= staleness { Some(r) } else { None }
+}
+
+/// Returns the latest mmWave-derived VitalSigns. Breathing is
+/// computed from a 30-s buffer of distance samples (chest movement
+/// modulates range by 5–10 mm — visible as flicker between adjacent
+/// cm bins). Heart rate at 6 Hz / cm precision is essentially below
+/// the noise floor; we surface it but expect very low confidence.
+///
+/// Returns `None` if no recent mmWave reading exists within
+/// `staleness` (so the UI can show "—" when the radar is unplugged).
+pub fn current_vitals(staleness: Duration) -> Option<VitalSigns> {
+    // Gate on data freshness: if no recent distance reading, vitals
+    // are stale — return None rather than the last cached estimate.
+    current(staleness)?;
+    vitals_slot().lock().unwrap().clone()
+}
+
+/// Buffer fill stats for UI ("12/180 samples").
+pub fn buffer_status() -> (usize, usize) {
+    let det = detector_slot().lock().unwrap();
+    let (br_samples, br_cap, _hr_samples, _hr_cap) = det.buffer_status();
+    (br_samples, br_cap)
 }
 
 /// Spawn the blocking serial reader thread. Returns immediately.
@@ -84,6 +123,19 @@ fn run(port: String, baud: u32) {
                     distance_cm: cm,
                     at: Instant::now(),
                 });
+                // Feed the same value into a VitalSignDetector tuned for
+                // mmWave's 6 Hz cadence so we can publish a
+                // breathing-rate estimate from chest-induced cm
+                // flicker. Phase is empty (radar gives no phase here)
+                // — extract_heartbeat falls back to amplitude residual
+                // which is mostly noise at cm precision, but we
+                // surface it anyway for transparency.
+                let cm_f = cm as f64;
+                let vs = detector_slot()
+                    .lock()
+                    .unwrap()
+                    .process_frame(&[cm_f], &[]);
+                *vitals_slot().lock().unwrap() = Some(vs);
             } else if !line.is_empty() {
                 tracing::trace!("mmwave non-distance line: {line:?}");
             }

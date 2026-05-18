@@ -5100,6 +5100,36 @@ async fn mmwave_latest() -> Json<serde_json::Value> {
     }
 }
 
+/// ADR-121 follow-up: GET /api/v1/mmwave/vitals — breathing + (best-
+/// effort) heart-rate computed from the mmWave distance time-series.
+/// Returns `{ available: false }` if no recent reading or if the
+/// detector buffer is still warming up.
+///
+/// Same shape as `/api/v1/vital-signs` so the UI can render both
+/// sources with a single code path.
+async fn mmwave_vitals() -> Json<serde_json::Value> {
+    use wifi_densepose_sensing_server::mmwave;
+    let stale = std::time::Duration::from_secs(2);
+    match mmwave::current_vitals(stale) {
+        Some(vs) => {
+            let (br_samples, br_cap) = mmwave::buffer_status();
+            Json(serde_json::json!({
+                "available": true,
+                "source": "mmwave:hlk-ld2402",
+                "vital_signs": vs,
+                "buffer_status": {
+                    "breathing_samples": br_samples,
+                    "breathing_capacity": br_cap,
+                },
+            }))
+        }
+        None => Json(serde_json::json!({
+            "available": false,
+            "source": "mmwave:offline",
+        })),
+    }
+}
+
 /// POST /api/v1/adaptive/unload — unload the adaptive model (revert to thresholds).
 async fn adaptive_unload(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let mut s = state.write().await;
@@ -7685,6 +7715,7 @@ async fn main() {
         .route("/api/v1/adaptive/status", get(adaptive_status))
         .route("/api/v1/adaptive/debug", get(adaptive_debug))
         .route("/api/v1/mmwave/latest", get(mmwave_latest))
+        .route("/api/v1/mmwave/vitals", get(mmwave_vitals))
         .route("/api/v1/adaptive/unload", post(adaptive_unload))
         // Field model calibration (eigenvalue-based person counting)
         .route("/api/v1/calibration/start", post(calibration_start))
