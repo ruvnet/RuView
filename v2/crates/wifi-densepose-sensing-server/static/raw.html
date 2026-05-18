@@ -62,7 +62,7 @@
   </span>
   <span class="pill" id="hrPill"
         style="background:rgba(248,81,73,0.18); color:rgb(248,81,73); border:1px solid rgb(248,81,73);"
-        title="Heart rate, two sources: 📶 = WiFi-CSI bandpass 0.8-2.0 Hz (ADR-021). 📡 = HLK-LD2402 mmWave (cm precision and 6 Hz cadence put heartbeat below the noise floor — value shown for transparency, expect low confidence). Adult-at-rest norm: 60-100 BPM.">
+        title="Heart rate, two sources: 📶 = WiFi-CSI bandpass 0.8-2.0 Hz (ADR-021). 📡 = HLK-LD2402 mmWave Engineering Mode — bandpass on the micromotion-gate energy time-series at the target's range bin (ADR-122). Adult-at-rest norm: 60-100 BPM.">
     💓 <span style="opacity:0.6;font-size:11px">📶</span><b id="hrBpm">— BPM</b><span id="hrConf" style="opacity:0.7;font-size:11px">·</span>
     <span style="opacity:0.4">|</span>
     <span style="opacity:0.6;font-size:11px">📡</span><b id="hrBpmMm">— BPM</b><span id="hrConfMm" style="opacity:0.7;font-size:11px">·</span>
@@ -642,15 +642,17 @@ async function pollMmwaveVitals() {
       hrBpmMm.style.color = out ? '#f0a020' : '';
       hrConfMm.textContent = '· ' + ((vs.heartbeat_confidence || 0) * 100).toFixed(0) + '%';
     } else {
-      // mmWave at 6 Hz / cm precision can't resolve heartbeat —
-      // expect this to stay "n/a" in practice.
-      hrBpmMm.textContent = ' n/a ';
+      // ADR-122: heart rate becomes available after ~30 s buffer fill,
+      // when the radar is in Engineering Mode (per-gate energies). If
+      // the module fell back to Normal Mode (ASCII distance) HR will
+      // stay missing.
+      hrBpmMm.textContent = ' — BPM ';
       hrBpmMm.style.color = '';
       hrConfMm.textContent = '·';
     }
   } catch (_) {
     brBpmMm.textContent = ' — BPM '; brConfMm.textContent = '·';
-    hrBpmMm.textContent = ' n/a ';   hrConfMm.textContent = '·';
+    hrBpmMm.textContent = ' — BPM '; hrConfMm.textContent = '·';
   } finally { mmVitalsBusy = false; }
 }
 pollMmwaveVitals();
