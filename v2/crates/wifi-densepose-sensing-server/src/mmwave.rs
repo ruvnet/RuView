@@ -95,9 +95,18 @@ const GATE_HISTORY_LEN: usize = 180;
 const PRESENCE_MICRO_THRESHOLD: u32 = 20_000;
 
 /// Latest mmWave reading + when it landed.
+///
+/// `near_field` is set when the gate-0 motion energy dominates the
+/// mid-range gates (operator is closer than ~70 cm). In that regime
+/// the radar's internal distance algorithm returns nonsense
+/// (typically 1.5–2 m), because gate-0 micromotion is in the
+/// antenna's dead zone and the algorithm falls back to a sidelobe
+/// pick. We surface the flag so the UI can render "<70 cm" instead
+/// of the bogus number.
 #[derive(Debug, Clone, Copy)]
 pub struct MmwaveReading {
     pub distance_cm: u32,
+    pub near_field: bool,
     pub at: Instant,
 }
 
@@ -437,6 +446,29 @@ fn parse_engineering_payload(payload: &[u8]) {
             .unwrap_or(1)
     };
 
+    // Near-field detection: motion[0] is in the antenna's near-zone.
+    // When the operator is closer than ~70 cm, two telltale things
+    // happen in the gate snapshot:
+    //
+    //   1. motion[0] dominates gates 1..14 (the body is at 0–70 cm
+    //      so the strongest reflector is in the first bin).
+    //   2. micro[0] is ~0 because the antenna's near-zone phase
+    //      pattern can't resolve sub-cm chest movement.
+    //
+    // We require *both* conditions, then debounce across 6 frames
+    // (≈1 s @ 6 Hz) so a single jitter doesn't toggle the flag — the
+    // gate energies are noisy and motion[0] swings 5k–30k frame to
+    // frame when the operator is breathing right against the module.
+    let peak_motion_mid = motion[1..GATE_COUNT.saturating_sub(1)]
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(0);
+    let near_field_now = motion[0] > 5_000
+        && motion[0] >= peak_motion_mid
+        && micro[0] < 3_000;
+    let near_field = update_near_field_state(near_field_now);
+
     let now = Instant::now();
     *gates_slot().lock().unwrap() = Some(GateSnapshot {
         motion,
@@ -446,6 +478,7 @@ fn parse_engineering_payload(payload: &[u8]) {
     });
     *latest().lock().unwrap() = Some(MmwaveReading {
         distance_cm,
+        near_field,
         at: now,
     });
 
@@ -630,10 +663,33 @@ fn fft_inplace(re: &mut [f64], im: &mut [f64]) {
     }
 }
 
+/// Sliding-window debounce for the near-field flag. Tracks how many
+/// of the last 6 frames met the raw condition; toggles to true once
+/// ≥4/6 agree, falls back to false once ≤1/6 do. This prevents UI
+/// flicker when motion[0] briefly dips during a breath cycle.
+fn update_near_field_state(near_now: bool) -> bool {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    // Bit 0..6 = last 6 frames (1 = near), bit 7 = current debounced state.
+    static STATE: AtomicU32 = AtomicU32::new(0);
+    let mut s = STATE.load(Ordering::Relaxed);
+    let history = ((s & 0x3F) << 1) & 0x3F | (near_now as u32);
+    let mut latched = (s >> 7) & 1 == 1;
+    let count = history.count_ones();
+    if !latched && count >= 4 {
+        latched = true;
+    } else if latched && count <= 1 {
+        latched = false;
+    }
+    s = history | ((latched as u32) << 7);
+    STATE.store(s, Ordering::Relaxed);
+    latched
+}
+
 fn ingest_distance(cm: u32) {
     let now = Instant::now();
     *latest().lock().unwrap() = Some(MmwaveReading {
         distance_cm: cm,
+        near_field: false, // ASCII fallback has no gate info
         at: now,
     });
     // Breathing-only update on ASCII fallback (no per-gate data).

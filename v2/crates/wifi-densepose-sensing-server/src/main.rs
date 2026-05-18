@@ -5092,6 +5092,7 @@ async fn mmwave_latest() -> Json<serde_json::Value> {
         Some(r) => Json(serde_json::json!({
             "available": true,
             "distance_cm": r.distance_cm,
+            "near_field": r.near_field,
             "age_ms": r.at.elapsed().as_millis() as u64,
         })),
         None => Json(serde_json::json!({

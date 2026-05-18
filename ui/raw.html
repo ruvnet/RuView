@@ -589,7 +589,18 @@ async function pollMmwave() {
     const j = await r.json();
     if (j && j.available) {
       mmwavePill.style.display = '';
-      mmwaveDist.textContent = j.distance_cm + ' cm';
+      // ADR-122 hardware quirk: at <70 cm the radar's gate-0 micro is
+      // dead and its distance algorithm returns a sidelobe pick
+      // (~1.5–2 m). The server flags this as `near_field`; we
+      // override the display so the operator doesn't read the bogus
+      // 161 cm reading as truth.
+      if (j.near_field) {
+        mmwaveDist.textContent = '<70 cm';
+        mmwavePill.title = 'Цель в ближней зоне антенны (<70 cm). Радар тебя видит, но точная дистанция и пульс/дыхание ненадёжны на таком расстоянии. Отодвинься на 0.7–2 м для рабочего диапазона.';
+      } else {
+        mmwaveDist.textContent = j.distance_cm + ' cm';
+        mmwavePill.title = 'HLK-LD2402 24 GHz radar — distance to closest target';
+      }
       const age = Math.round(j.age_ms || 0);
       mmwaveAge.textContent = '· ' + age + ' ms';
       // Fade pill if stale (>1.5 s) before server hides at 2 s.
