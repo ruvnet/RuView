@@ -3882,7 +3882,14 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     let mut update = SensingUpdate {
                         msg_type: "sensing_update".to_string(),
                         timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
-                        source: "esp32".to_string(),
+                        // ADR-fix: route through effective_source() so the WS payload
+                        // reports "esp32:offline" once ESP32_OFFLINE_TIMEOUT elapses
+                        // since the last UDP frame. Without this, the WS stream keeps
+                        // emitting "esp32" with cached values when the node disconnects,
+                        // and the UI shows "LIVE — ESP32 HARDWARE" indefinitely.
+                        // (REST `/health` already used effective_source(); this aligns
+                        // the WS path with that behaviour. See issue #618.)
+                        source: s.effective_source(),
                         tick,
                         nodes: active_nodes,
                         features: fused_features.clone(),
@@ -4133,7 +4140,8 @@ async fn udp_receiver_task(state: SharedState, udp_port: u16) {
                     let mut update = SensingUpdate {
                         msg_type: "sensing_update".to_string(),
                         timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
-                        source: "esp32".to_string(),
+                        // See companion edit above and issue #618 — same rationale.
+                        source: s.effective_source(),
                         tick,
                         nodes: active_nodes,
                         features: fused_features.clone(),

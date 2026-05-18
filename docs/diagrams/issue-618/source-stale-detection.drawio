@@ -1,0 +1,87 @@
+<mxfile host="Electron" agent="WiFi-DensePose Issue #618 Diagram" version="22.0.0" type="device">
+  <diagram name="Before — bug" id="diagram-before">
+    <mxGraphModel dx="1400" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="700" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title-before" value="BEFORE — Issue #618 (WS broadcast hardcodes source=&quot;esp32&quot;)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;fontStyle=1;fontColor=#B22222;" vertex="1" parent="1">
+          <mxGeometry x="50" y="20" width="1000" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="esp32-before" value="ESP32-S3&#10;(powered OFF&#10;or WiFi lost)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;strokeWidth=2;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="60" y="280" width="140" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="udp-x" value="NO UDP frames &#10;arriving for ≥ 5 s" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;fontColor=#B22222;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="220" y="290" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="udp-arrow-before" style="endArrow=classic;html=1;rounded=0;strokeColor=#B22222;strokeWidth=2;dashed=1;dashPattern=8 4;" edge="1" parent="1" source="esp32-before" target="server-loop-before">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="server-loop-before" value="sensing-server&#10;broadcast loop (100ms tick)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;strokeWidth=2;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="410" y="180" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ws-build-before" value="let update = SensingUpdate {&#10;  source: &quot;esp32&quot;.to_string(),&#10;  tick,  /* incrementing */&#10;  nodes: &lt;last cached frame&gt;,&#10;  features: &lt;same frozen values&gt;,&#10;  ...&#10;}" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;strokeWidth=2;fontFamily=Courier New;fontSize=11;align=left;" vertex="1" parent="1">
+          <mxGeometry x="410" y="280" width="260" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="rest-correct-before" value="REST /health endpoint&#10;✅ source: &quot;esp32:offline&quot;&#10;(uses effective_source())" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;strokeWidth=2;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="410" y="430" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ws-arrow-before" style="endArrow=classic;html=1;rounded=0;strokeColor=#D79B00;strokeWidth=2;" edge="1" parent="1" source="ws-build-before" target="ui-before">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ws-label-before" value="WebSocket&#10;/ws/sensing" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="700" y="305" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="ui-before" value="Browser UI&#10;&#10;🟢 LIVE — ESP32 HARDWARE&#10;❌ Connected (LYING)&#10;&#10;source=&quot;esp32&quot;&#10;values frozen but&#10;UI cannot tell" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;strokeWidth=2;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="830" y="240" width="220" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="problem-box" value="❌ Silent failure&#10;Fall-detection / vital-monitoring users see &quot;present, breathing normal&quot;&#10;even if ESP32 has been off for hours." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;strokeWidth=2;fontSize=12;fontStyle=2;align=center;" vertex="1" parent="1">
+          <mxGeometry x="280" y="550" width="600" height="80" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="After — fix" id="diagram-after">
+    <mxGraphModel dx="1400" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="700" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title-after" value="AFTER — Fix (source: s.effective_source())" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;fontStyle=1;fontColor=#2E7D32;" vertex="1" parent="1">
+          <mxGeometry x="50" y="20" width="1000" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="esp32-after" value="ESP32-S3&#10;(powered OFF&#10;or WiFi lost)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;strokeWidth=2;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="60" y="280" width="140" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="udp-x-after" value="NO UDP frames&#10;arriving for ≥ 5 s" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;fontColor=#B22222;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="220" y="290" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="udp-arrow-after" style="endArrow=classic;html=1;rounded=0;strokeColor=#B22222;strokeWidth=2;dashed=1;dashPattern=8 4;" edge="1" parent="1" source="esp32-after" target="server-loop-after">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="server-loop-after" value="sensing-server&#10;broadcast loop (100ms tick)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;strokeWidth=2;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="410" y="180" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ws-build-after" value="let update = SensingUpdate {&#10;  source: s.effective_source(),  // ✅&#10;  tick,&#10;  nodes: ...,&#10;  features: ...,&#10;  ...&#10;}" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;strokeWidth=2;fontFamily=Courier New;fontSize=11;align=left;" vertex="1" parent="1">
+          <mxGeometry x="410" y="280" width="260" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="effective-after" value="effective_source() {&#10;  if source == &quot;esp32&quot;&#10;    &amp;&amp; last_esp32_frame.elapsed()&#10;       &gt; ESP32_OFFLINE_TIMEOUT (5s)&#10;  {&#10;    return &quot;esp32:offline&quot;;&#10;  }&#10;  source.clone()&#10;}" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;strokeWidth=2;fontFamily=Courier New;fontSize=10;align=left;" vertex="1" parent="1">
+          <mxGeometry x="410" y="430" width="260" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="effective-arrow" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#82B366;dashed=1;" edge="1" parent="1" source="ws-build-after" target="effective-after">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ws-arrow-after" style="endArrow=classic;html=1;rounded=0;strokeColor=#82B366;strokeWidth=2;" edge="1" parent="1" source="ws-build-after" target="ui-after">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ws-label-after" value="WebSocket&#10;/ws/sensing" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="700" y="305" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="ui-after" value="Browser UI&#10;&#10;🟡 ESP32 OFFLINE&#10;✅ source=&quot;esp32:offline&quot;&#10;&#10;UI shows degraded&#10;state, operator notified" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;strokeWidth=2;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="830" y="240" width="220" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="fix-box" value="✅ Aligned with existing REST /health behaviour&#10;Both WS and REST now report &quot;esp32:offline&quot; after 5 s — single source of truth." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;strokeWidth=2;fontSize=12;fontStyle=2;align=center;" vertex="1" parent="1">
+          <mxGeometry x="280" y="610" width="600" height="60" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
