@@ -48,6 +48,12 @@
   <span class="pill" id="lastTs">last: --</span>
   <span class="badge absent" id="globalBadge" style="font-size:13px;padding:4px 12px;">absent</span>
   <span class="pill" id="globalCV">CV 0%</span>
+  <!-- ADR-121: HLK-LD2402 24 GHz mmWave radar pill — hidden until first reading. -->
+  <span class="pill" id="mmwavePill" style="display:none; background:rgba(33,150,243,0.18);
+                                              color:rgb(33,150,243); border:1px solid rgb(33,150,243);"
+        title="HLK-LD2402 24 GHz radar — distance to closest target">
+    📡 mmWave <b id="mmwaveDist">— cm</b> <span id="mmwaveAge" style="opacity:0.7;font-size:11px">·</span>
+  </span>
   <div class="controls">
     <label>peak-hold <input type="checkbox" id="peakHold" checked></label>
     <label>log-y <input type="checkbox" id="logY"></label>
@@ -505,5 +511,33 @@ function connect() {
   };
 }
 connect();
+
+// ── ADR-121: poll HLK-LD2402 mmWave radar @ 5 Hz ─────────────────────
+const mmwavePill = document.getElementById('mmwavePill');
+const mmwaveDist = document.getElementById('mmwaveDist');
+const mmwaveAge  = document.getElementById('mmwaveAge');
+let mmwaveBusy = false;
+async function pollMmwave() {
+  if (mmwaveBusy) return; mmwaveBusy = true;
+  try {
+    const r = await fetch('/api/v1/mmwave/latest', { cache: 'no-store' });
+    if (!r.ok) throw new Error('http ' + r.status);
+    const j = await r.json();
+    if (j && j.available) {
+      mmwavePill.style.display = '';
+      mmwaveDist.textContent = j.distance_cm + ' cm';
+      const age = Math.round(j.age_ms || 0);
+      mmwaveAge.textContent = '· ' + age + ' ms';
+      // Fade pill if stale (>1.5 s) before server hides at 2 s.
+      mmwavePill.style.opacity = age > 1500 ? '0.5' : '1.0';
+    } else {
+      mmwavePill.style.display = 'none';
+    }
+  } catch (_) {
+    mmwavePill.style.display = 'none';
+  } finally { mmwaveBusy = false; }
+}
+pollMmwave();
+setInterval(pollMmwave, 200);
 </script>
 </body></html>
