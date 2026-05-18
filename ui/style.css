@@ -2033,6 +2033,22 @@ canvas {
   color: var(--color-error);
 }
 
+/* ADR-117 follow-up: extended class vocabulary from adaptive_classifier. */
+.sensing-class-label.present_moving {
+  background: rgba(var(--color-warning-rgb), 0.15);
+  color: var(--color-warning);
+}
+
+.sensing-class-label.waving {
+  background: rgba(155, 89, 182, 0.15);   /* purple — gestures, body still */
+  color: rgb(155, 89, 182);
+}
+
+.sensing-class-label.transition {
+  background: rgba(230, 126, 34, 0.18);   /* orange — discrete event */
+  color: rgb(230, 126, 34);
+}
+
 .sensing-confidence {
   display: grid;
   grid-template-columns: 70px 1fr 40px;

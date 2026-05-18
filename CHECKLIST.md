@@ -5,15 +5,39 @@ at the end of every session. Pair with
 [`docs/references/espectre-gap-analysis.md`](docs/references/espectre-gap-analysis.md)
 for the technical detail behind each line.
 
-Last sweep: **2026-05-17**, branch `feat/ota-rssi-mobile`, head `0ec1e4b0`.
-Status: 47 Done / 0 Open in-scope. Deferred items (out of session scope,
+Last sweep: **2026-05-18**, branch `feat/ota-rssi-mobile`, head `12e1cf9d`.
+Status: 50 Done / 0 Open in-scope. Deferred items (out of session scope,
 each with explicit reason) listed at the bottom.
 
-This count includes the ADR-100..114 carry-in from the prior agent + this
-session's ADR-115 (FW set-target REST), ADR-116 (WiFlow-v1 Rust loader),
-ADR-116 cosmetic (UI dropdown), and ADR-117 (process hygiene + audit
-follow-ups). ADR-111 is intentionally absent (folded into ADR-109 during
-the AP-MAC tracking work).
+This count includes the ADR-100..114 carry-in from the prior agent +
+this session's:
+* **ADR-115** — FW `/ota/set-target` REST endpoint
+* **ADR-116** — WiFlow-v1 supervised pose loader in Rust + UI dropdown
+* **ADR-117** — process hygiene (ping zombies, loopback filter, audit sweep)
+* **ADR-118** — feature decorrelation + multi-node 22-feature extractor
+* **ADR-119** — frame-level MLP classifier (22→32→6) replacing LogReg fallback
+* **ADR-120** — windowed temporal classifier (W-MLP, 440→64→6) +
+  hybrid priority (rule-based owns 4 base classes, W-MLP owns
+  waving/transition) + two-layer label smoothing +
+  `/api/v1/adaptive/debug` diagnostic endpoint
+
+ADR-111 is intentionally absent (folded into ADR-109 during the AP-MAC
+tracking work).
+
+Adaptive classifier accuracy trajectory across the session:
+```
+2-node 15-feat LogReg     40.4%   baseline
+6-node 15-feat LogReg     44.4%   +4.0  (more sensors)
+6-node 22-feat LogReg     49.58%  +5.2  (ADR-118 feature engineering)
+6-node 22-feat MLP        53.53%  +3.95 (ADR-119 non-linear)
+6-node 22-feat W-MLP      90.40%  +36.87 (ADR-120 temporal context)
+                          ─────
+total                     +50.0  pts vs baseline
+```
+W-MLP 90.40% is training-set accuracy; live `transition` class is
+over-represented (model overfit to ambiguous training frames).
+Held-out test set + cleaner per-class re-records are the recommended
+next step.
 
 ---
 
@@ -91,6 +115,30 @@ the AP-MAC tracking work).
       runtime classifier; sensing tab container restored; multi-node
       test guards external :5005; docs/typo/range sweep.
 
+### Adaptive Classifier (data pipeline + model)
+
+- [x] **ADR-118** Feature decorrelation + multi-node extractor —
+      audit on 6-node 151k-frame set found 21 multicollinear pairs +
+      1 dead feature (`amp_min` constant 0); refactored to 22 features
+      (4 global + 6 nodes × 3) with proper z-score normalisation.
+      Accuracy 44.4% → 49.58% (commit `e86f6506`).
+- [x] **ADR-119** Frame-level MLP (22→32→6 ReLU+softmax) replaces
+      LogReg fallback — manual backprop, no external ML crate,
+      ~3k weights, trains in seconds. Accuracy 49.58% → 53.53%
+      (+3.95 pts, concentrated on motion classes — exactly where
+      non-linear combinations matter; commit `94330708`).
+- [x] **ADR-120** Windowed temporal classifier (W-MLP, 440→64→6) —
+      stacks 20 frames × 22 features for temporal pattern recognition.
+      Captures walking cadence (~2 Hz), sit-stand cycles (~0.5 Hz),
+      gesture rhythm (1-2 Hz). Accuracy 53.53% → 90.40% training
+      (+36.87 pts; held-out generalisation TBD). Hybrid priority:
+      rule-based owns 4 base classes (ESPectre F1>96%), W-MLP owns
+      `waving`/`transition` exclusively. Two-layer label smoothing
+      (15-tick mode + 2-tick confirm) stops UI flicker.
+      `/api/v1/adaptive/debug` exposes raw model labels for
+      operator diagnostics (commits `da4c123d`, `442c03da`, `3e12686a`,
+      `c3f00f3a`, `77d404d6`, `2956414b`, `12e1cf9d`).
+
 ### Tests / fixtures
 
 - [x] **ADR-114** `tests/fixtures/replay_idle.jsonl` +
@@ -112,7 +160,7 @@ the AP-MAC tracking work).
 
 ### Documentation
 
-- [x] **ADR-100..117** all written (ADR-111 intentionally absent), each ≤ 200 lines
+- [x] **ADR-100..120** all written (ADR-111 intentionally absent), each ≤ 200 lines
 - [x] `docs/references/espectre-techniques.md` — Pace technique catalogue
 - [x] `docs/references/espectre-gap-analysis.md` — section-by-section gap
 - [x] Documentation actualization sweep — every Open Items section
@@ -178,7 +226,7 @@ an explicit reason. Bring them back only if scope changes.
 
 | Doc | Purpose |
 |---|---|
-| [`docs/adr/`](docs/adr) | All ADRs 001-117 (111 absent); 100-117 are this session |
+| [`docs/adr/`](docs/adr) | All ADRs 001-120 (111 absent); 100-120 are this session |
 | [`docs/references/espectre-techniques.md`](docs/references/espectre-techniques.md) | Pace technique catalogue + RuView adoption |
 | [`docs/references/espectre-gap-analysis.md`](docs/references/espectre-gap-analysis.md) | Section-by-section gap with priority table |
 | [`docs/references/ota-pipeline.md`](docs/references/ota-pipeline.md) | OTA recipe — port 8032, three FW prereqs |
