@@ -121,23 +121,15 @@ false`.
 
 ### D7 — Honest about output quality
 
-The loaded model produces **17 keypoints**, but the **numerical values
-are saturated** (most x/y near 0 or 1) — sigmoid extremes meaning the
-network has no learned response to our specific deployment's CSI
-distribution. This is expected: the model was trained on a different
-ESP32 setup, different room, different person, with camera ground truth
-we don't have here. **The integration is correct; the model needs
-deployment-specific fine-tune to produce useful keypoints.**
+The loaded model emits 17 keypoints, but values saturate near 0/1
+(sigmoid extremes) — the network was trained on a different ESP32
+deployment and has no learned response to ours. Integration is correct;
+production-grade output needs deployment-specific fine-tune.
 
-Two paths to usable output, left as follow-ups (Pack E):
-
-1. **Apply `node-1.json` / `node-2.json` LoRA adapters** (ADR-117 candidate)
-   — they're shipped alongside `wiflow-v1.json` in the same HuggingFace
-   repo, rank=8, alpha=16, target the encoder + task heads. Loader stub +
-   forward fold ~2 h.
-2. **Re-train via `scripts/train-wiflow-supervised.js` with new ground-
-   truth capture** (~30 min capture + 19 min training per the model card).
-   Operator-side work.
+Follow-ups (Pack E): apply `node-1`/`node-2` LoRA adapters from the
+same HuggingFace repo (~2h), or re-train via
+`scripts/train-wiflow-supervised.js` against fresh camera ground-truth
+(~30 min capture + 19 min training).
 
 ## Files Touched
 
@@ -159,28 +151,12 @@ Binary size delta: 3.0 MB → 3.1 MB.
 
 ## Verified Acceptance
 
-Live test on the operator's TP-Link deployment (.103, both nodes
-192.168.0.100/.101):
-
-```
-$ ./target/release/sensing-server --source esp32 --csi-keepalive-pps 25 \
-    --wiflow-model data/models/ruview/wiflow-v1/wiflow-v1.json
-  ...
-  ADR-116 wiflow-v1 loaded from data/models/ruview/wiflow-v1/wiflow-v1.json
-                                              (lite scale, 186946 params)
-  keepalive: learned address for node 2 = 192.168.0.100:63940
-  keepalive: learned address for node 1 = 192.168.0.101:63844
-
-$ curl :8080/api/v1/info  → "pose_estimation": true
-$ curl :8080/api/v1/pose/stats  → "model_loaded": true, frames_processed: 2699
-$ curl :8080/api/v1/pose/current
-  { persons: [{id: 1, keypoints: [17 × {name, x, y, z, confidence}], ...}],
-    total_persons: 1, model_loaded: true }
-```
-
-End-to-end: model on disk → loader → forward pass → 17 keypoints → REST &
-WS payload. UI's pose canvas (un-gated by ADR-105 D4) now draws what the
-model emits.
+Live on the operator's TP-Link deployment (Mac .103, nodes .100/.101):
+sensing-server log shows `ADR-116 wiflow-v1 loaded ... (lite scale,
+186946 params)` + `keepalive: learned address for node 2/1`; `curl
+/api/v1/info` returns `"pose_estimation": true`; `curl /api/v1/pose/current`
+returns 17 named COCO keypoints under one `persons[0]`. End-to-end:
+model on disk → loader → forward pass → 17 keypoints → REST + WS payload.
 
 ## Cargo tests
 
@@ -194,23 +170,14 @@ model emits.
 
 ## Open Items
 
-* **Pack E.1 — LoRA adapter loader.** `node-1.json` / `node-2.json` rank-8
-  adapters from the same HF repo, ~21 KB each. The trainer encodes them
-  in the same custom format as `wiflow-v1.json` (different `format` tag),
-  so the loader plumbing is small. ~2 h.
-* **Pack E.2 — Camera-supervised retraining for this room.** Run
-  `scripts/collect-ground-truth.py` against this Mac's webcam +
-  TP-Link/.100/.101 CSI for 5 min, then `scripts/train-wiflow-
-  supervised.js --scale lite`. Should drop sigmoid saturation and produce
-  spatially-coherent keypoints. ~1 h operator + 19 min train.
-* **Inference rate-limiting.** Currently runs every tick (10 fps). If
-  multiple WS clients connect, each tick computes once and the result is
-  reused — fine. If model size grows to small/medium scale (~200K/800K
-  params), should cache the result per tick instead of computing per-client.
-* **Per-node pose tracks.** Right now a single virtual person is emitted;
-  the broadcaster places it in `zone_1` with a fixed bbox. If/when LoRA
-  adapters disambiguate per-node viewpoints, fan out to one
-  `PersonDetection` per node (left/right of the room).
+* **Pack E.1 — LoRA adapter loader.** Apply `node-1`/`node-2` rank-8
+  adapters from the same HF repo (~2 h).
+* **Pack E.2 — Camera-supervised retrain for this room.**
+  `scripts/collect-ground-truth.py` + `scripts/train-wiflow-supervised.js
+  --scale lite` — should drop sigmoid saturation (~1 h + 19 min train).
+* **Inference rate-limit / per-node pose tracks** — currently single
+  virtual person emitted with fixed `zone_1` bbox; future LoRA-per-node
+  could fan out to one `PersonDetection` per sensor viewpoint.
 
 ## References
 

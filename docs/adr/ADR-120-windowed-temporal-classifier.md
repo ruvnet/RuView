@@ -176,27 +176,18 @@ docs/adr/ADR-120-windowed-temporal-classifier.md  (this)
 
 ## Out of Scope / Follow-ups
 
-* **Held-out test set** — must record fresh data and evaluate the saved
-  model cold. Critical to confirm 90% is not training-set memorisation.
-* **TCN replacing stacked-MLP** — true 1D convolutions over time would
-  use weights more efficiently (~5k vs 28k) and generalise better.
-  Stack-MLP works but is parameter-heavy. Worth a follow-up if data
-  scales 10×.
-* **Sliding output smoothing** — `classify_window` emits one decision
-  per tick (~10 Hz). Adjacent windows are 19/20 identical, so adjacent
-  predictions should agree. They mostly do (98%+) but flicker at class
-  boundaries — could apply a 3-tick majority filter.
-* **`sitting` vs `standing` split** — both currently merge into
-  `present_still`. The W-MLP gets them both right at 100% as a combined
-  class. Splitting them would test whether temporal RF signatures
-  differ between sitting (chair anchor) and standing (free body).
-* **Class imbalance** — `present_still` has 2× the windows of other
-  classes (sitting + standing both contribute). Acceptable since it's
-  the "neutral" class, but oversampling minority classes might lift
-  accuracy 1-2 pts further.
-* **Smaller window size experiments** — 20 frames = 2 sec at ~10 Hz.
-  Could try 10 frames (1 sec, faster reaction) or 30 (3 sec, more
-  context). 20 was a reasonable first guess.
+* **Held-out test set** — record fresh data, evaluate cold to confirm
+  90% isn't memorisation.
+* **TCN instead of stacked-MLP** — 1D conv over time would use weights
+  more efficiently (~5k vs 28k). Worth pursuing if dataset scales 10×.
+* **Output smoothing** — shipped via two-layer mode+confirm filter on the
+  adaptive output, see ADR-120 follow-up commits.
+* **Split `sitting`/`standing`** — currently merged into `present_still`;
+  separating them would test whether the temporal RF signatures differ.
+* **Class imbalance** — `present_still` has 2× windows; oversampling
+  minority classes might lift accuracy 1-2 pts.
+* **Window size experiments** — 20 frames is a reasonable first guess;
+  10 (faster) or 30 (more context) untested.
 
 ## References
 

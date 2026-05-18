@@ -10,70 +10,32 @@
 
 ## Context
 
-A deep audit pass (4 parallel auditors covering sensors, server, UI, docs)
-surfaced two operational fires and a stack of correctness/honesty issues
-that had accumulated across ADR-100..116. This ADR collects the immediate
-fixes.
+A 4-auditor pass (sensors, server, UI, docs) over ADR-100..116
+surfaced two operational fires and a stack of correctness/honesty
+issues. This ADR collects the immediate fixes.
 
-### Fire 1 — Runaway ping zombies
-
-Live `ps` showed **250+ `/sbin/ping -i 0.040` processes** on the Mac, most
-parented to PID 1 (orphans from prior server lifetimes) and **8 fresh
-pings to `127.0.0.1` parented to the current server**.
-
-Root cause: a `cargo test --workspace` run sent UDP packets to
-`127.0.0.1:5005` from `tests/multi_node_test.rs::test_multi_node_udp_send`
-while the production server was bound to `0.0.0.0:5005`. The integration
-test injects 55 synthetic frames with `node_ids = [1, 2, 3, 5, 7]`. Each
-distinct `node_id` byte in a CSI magic packet triggered a fresh entry in
-`NODE_ADDRS`, and the keepalive task spawned exactly one `ping` child
-per entry. Combined with macOS not propagating parent death to children
-(killed servers leave ping orphans), the count accumulated rapidly.
-
-### Fire 2 — Per-node feature divergence on node 2
-
-Node 2 (192.168.0.100) showed `dominant_freq_hz: 0.05` vs node 1 (.101)
-`6.30` — a 126× split in the same room. Pointed to stale gain-lock on
-node 2 from a different AP/orientation. Cleared via
-`POST /ota/recalibrate` (ADR-109) — sensor re-runs the 300-packet
-calibration sampler at next boot.
-
-### Correctness issues (server auditor)
-
-* `run_wiflow_inference` hardcoded keypoint `confidence: 1.0` — lied about
-  data quality. Real signal: the runtime classifier's `confidence`.
-* `wiflow_v1.rs` zero-pad path duplicated subcarrier index 0 instead of
-  zero-padding when < 35 finite subcarriers — comment said "zero the
-  rest", code did the opposite.
-* `nbvi_history.clone()` cloned the entire 600-deep VecDeque (≈270 KB) on
-  every inference, while only the last 20 frames are used.
-* `run_wiflow_inference` picked the node with longest history regardless
-  of recency — stale data from a dead sensor would keep producing pose.
-
-### UI issues (UI auditor)
-
-* `/` served a static API-index HTML page; users typing `localhost:8080`
-  never reached the SPA at `/ui/index.html`.
-* `<section id="sensing">` was empty; `app.js::SensingTab.mount` queried
-  `#sensing-container` and rendered into nothing — the Sensing tab was
-  permanently blank.
-* `LiveDemoTab.fetchModels` unconditionally overwrote `activeModelId =
-  'wiflow-v1'` whenever `/api/v1/info` reported `pose_estimation: true`,
-  even when the operator had just loaded an RVF model. Dropdown silently
-  flipped back to WiFlow on every refresh.
-
-### Docs issues (docs auditor)
-
-* `CHECKLIST.md` header: `head c827cde6`, count `43 Done` — stale
-  by 4 commits and 2 ADRs.
-* `ADR-115 References` cited "ADR-100 — TP-Link WISP" (it's ADR-110)
-  and "ADR-108 / ADR-111" (ADR-111 doesn't exist — folded into ADR-109).
-* `espectre-gap-analysis.md::Still open` table listed 8 items as open
-  that had already shipped (ADR-104, ADR-109, ADR-112, ADR-114).
-* `ota-pipeline.md` documented OTA flashing but never mentioned
-  `/ota/set-target` (ADR-115) or `/ota/recalibrate` (ADR-109) — operator
-  hitting the "Mac moved networks" scenario wouldn't find the recovery
-  path.
+* **Fire 1 — Ping zombies.** `ps` showed 250+ `/sbin/ping -i 0.040`
+  processes — orphans from prior server lifetimes + 8 fresh pings to
+  `127.0.0.1` parented to the current server. Root cause:
+  `cargo test --workspace` sent UDP frames to `127.0.0.1:5005` from
+  `tests/multi_node_test.rs` with `node_ids = [1,2,3,5,7]` — each
+  unique nid registered in `NODE_ADDRS`, keepalive spawned one `ping`
+  child per nid, macOS doesn't propagate parent death.
+* **Fire 2 — Node 2 feature divergence.** `dominant_freq_hz` 0.05 (n2)
+  vs 6.30 (n1), same room, 126×. Stale gain-lock from prior AP geometry.
+  Fixed via `POST /ota/recalibrate` (ADR-109).
+* **Correctness:** hardcoded keypoint `confidence: 1.0`, `wiflow_v1.rs`
+  zero-pad path duplicated subcarrier 0, `nbvi_history.clone()` copied
+  full 600-deep deque per tick, `run_wiflow_inference` ignored node
+  staleness.
+* **UI:** `/` served static API index (SPA was at `/ui/index.html`),
+  `<section id="sensing">` was empty (no `sensing-container` div),
+  `LiveDemoTab.fetchModels` overrode the operator's RVF selection on
+  every poll.
+* **Docs:** `CHECKLIST.md` header stale by 4 commits / 2 ADRs;
+  `ADR-115` cited wrong sister ADRs ("ADR-100" → ADR-110, "ADR-111" → ADR-109);
+  `espectre-gap-analysis.md` listed 8 shipped items as open;
+  `ota-pipeline.md` never documented the post-flash REST endpoints.
 
 ## Decisions
 
@@ -212,25 +174,17 @@ $ curl http://localhost:8080/api/v1/pose/current | jq '.persons[0].keypoints[0]'
 
 ## Out of Scope (intentional non-fixes)
 
-* **Health endpoint fake constants** (cpu:2.5, mem:1.8, disk:15.0) —
-  flagged by the auditor as critical. Replacing with `sysinfo` crate
-  would add a dependency for low-value telemetry; the orchestrator
-  readiness probe today is only used by Docker compose, not Kubernetes
-  liveness. Deferred. Real fix: `/health/ready` only reports
-  `model_loaded` + `node_count > 0`.
-* **`derive_pose_from_sensing` call-site cleanup** — function returns
-  `Vec::new()` since ADR-105; removing the 5 call sites is a no-op
-  refactor with no behaviour change. Skipped to keep diff focused.
-* **`tracker_bridge:10` unused imports warning** — module is integrated
-  via `tracker_bridge::tracker_update` (4 callers), the import list
-  just has dead names. Cosmetic. `cargo fix` deferred.
+* **Health endpoint fake constants** (cpu/mem/disk hardcoded) — adding
+  `sysinfo` crate just for orchestrator telemetry is heavy. Deferred.
+* **`derive_pose_from_sensing` call-site cleanup** — already returns
+  `Vec::new()` (ADR-105); removing 5 call sites is no-op refactor.
+* **`tracker_bridge:10` unused-imports warning** — module is integrated
+  via `tracker_update` (4 callers); import list has dead names. Cosmetic.
 * **CLI training flags** (`--train`, `--dataset`, `--epochs`,
   `--checkpoint-dir`, `--pretrain*`) — silent no-ops; training is via
-  REST. Removing the flags would break any operator script that passes
-  them harmlessly. Deferred to a separate flag-audit pass.
-* **OTA PSK provisioning** — operator workflow change, not a code
-  change. Note added to ADR-115 open items. Operator can set
-  `security/ota_psk` via USB provision.py whenever convenient.
+  REST. Removing flags would break operator scripts. Deferred audit.
+* **OTA PSK provisioning** — workflow change, not a code change.
+  Logged in ADR-115 open items.
 
 ## References
 
