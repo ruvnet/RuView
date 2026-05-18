@@ -96,6 +96,9 @@ void nvs_config_load(nvs_config_t *cfg)
     cfg->filter_mac_set = 0;
     memset(cfg->filter_mac, 0, 6);
 
+    /* Indicator defaults */
+    cfg->status_led = 1;
+
     /* Try to override from NVS */
     nvs_handle_t handle;
     esp_err_t err = nvs_open("csi_cfg", NVS_READONLY, &handle);
@@ -320,6 +323,13 @@ void nvs_config_load(nvs_config_t *cfg)
     }
     if (nvs_get_u16(handle, "swarm_ingest", &cfg->swarm_ingest_sec) != ESP_OK) {
         cfg->swarm_ingest_sec = 5;
+    }
+
+    /* Indicator LED override */
+    uint8_t status_led_val;
+    if (nvs_get_u8(handle, "status_led", &status_led_val) == ESP_OK) {
+        cfg->status_led = status_led_val ? 1 : 0;
+        ESP_LOGI(TAG, "NVS override: status_led=%u", (unsigned)cfg->status_led);
     }
 
     /* Validate tdm_slot_index < tdm_node_count */
