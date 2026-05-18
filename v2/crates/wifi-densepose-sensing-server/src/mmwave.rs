@@ -80,6 +80,20 @@ const FRAME_TYPE_ENGINEERING: u8 = 0x01;
 /// heartbeat band (0.8–2.0 Hz) to resolve cleanly.
 const GATE_HISTORY_LEN: usize = 180;
 
+/// Presence threshold on the target gate's *micromotion* energy. The
+/// micro-channel responds to small chest-wall displacement; when no
+/// body is in the radar's main beam this stays in the 1k–5k clutter
+/// range. When a torso is on-axis it climbs above 30k. We use 20k as
+/// a conservative gate — below this we refuse to publish HR (and
+/// flag breathing as low-confidence) so the operator doesn't read a
+/// random FFT peak as a vital sign.
+///
+/// Empirically observed on this exact module:
+///   * empty room    : peak_micro_mid  ~1k–3k
+///   * person nearby : peak_micro_mid  ~10k–20k
+///   * person in beam: peak_micro_mid  ~40k–80k
+const PRESENCE_MICRO_THRESHOLD: u32 = 20_000;
+
 /// Latest mmWave reading + when it landed.
 #[derive(Debug, Clone, Copy)]
 pub struct MmwaveReading {
@@ -163,6 +177,20 @@ pub fn buffer_status() -> (usize, usize) {
     let det = br_detector().lock().unwrap();
     let (br_samples, br_cap, _hr_samples, _hr_cap) = det.buffer_status();
     (br_samples, br_cap)
+}
+
+/// True if the latest gate snapshot has enough on-axis micromotion
+/// energy to plausibly be a body — i.e. vitals are meaningful right
+/// now, not a noise hallucination.
+pub fn current_presence(staleness: Duration) -> Option<bool> {
+    let snap = current_gates(staleness)?;
+    let peak_micro_mid = snap.micro[1..GATE_COUNT.saturating_sub(1)]
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(0);
+    let target_micro = snap.micro.get(snap.target_gate).copied().unwrap_or(0);
+    Some(peak_micro_mid >= PRESENCE_MICRO_THRESHOLD || target_micro >= PRESENCE_MICRO_THRESHOLD)
 }
 
 /// Spawn the blocking serial reader thread. Returns immediately.
@@ -439,14 +467,38 @@ fn parse_engineering_payload(payload: &[u8]) {
         }
     }
 
+    // Presence gate: peak micromotion in mid-range gates. If nobody
+    // is in the beam this is dominated by clutter at ~1–5k. We refuse
+    // to publish vitals below the threshold so the operator stops
+    // seeing a confident-looking HR number from pure noise.
+    let peak_micro_mid = micro[1..GATE_COUNT.saturating_sub(1)]
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(0);
+    let target_micro = micro.get(target_gate).copied().unwrap_or(0);
+    let present = peak_micro_mid >= PRESENCE_MICRO_THRESHOLD
+        || target_micro >= PRESENCE_MICRO_THRESHOLD;
+
     // ── breathing: distance time-series via existing detector ──────
     let cm_f = distance_cm as f64;
     let mut vs = br_detector().lock().unwrap().process_frame(&[cm_f], &[]);
 
-    // ── heart rate: per-gate micromotion FFT in HR band ────────────
-    let (hr_bpm, hr_conf) = compute_heart_rate(target_gate);
-    vs.heart_rate_bpm = hr_bpm;
-    vs.heartbeat_confidence = hr_conf;
+    if !present {
+        // Keep the breathing detector's buffer warm so we don't lose
+        // 30 s of warm-up the moment a target reappears, but null the
+        // *output* so the UI shows "—" instead of a confident-looking
+        // hallucination of vitals.
+        vs.breathing_rate_bpm = None;
+        vs.breathing_confidence = 0.0;
+        vs.heart_rate_bpm = None;
+        vs.heartbeat_confidence = 0.0;
+    } else {
+        // ── heart rate: per-gate micromotion FFT in HR band ────────
+        let (hr_bpm, hr_conf) = compute_heart_rate(target_gate);
+        vs.heart_rate_bpm = hr_bpm;
+        vs.heartbeat_confidence = hr_conf;
+    }
 
     *vitals_slot().lock().unwrap() = Some(vs);
 }

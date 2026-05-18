@@ -5100,6 +5100,30 @@ async fn mmwave_latest() -> Json<serde_json::Value> {
     }
 }
 
+/// ADR-122 diagnostic: GET /api/v1/mmwave/gates — current per-gate
+/// energies + target-gate selection. Lets the operator see whether
+/// the radar is actually picking up a body or just background noise.
+async fn mmwave_gates() -> Json<serde_json::Value> {
+    use wifi_densepose_sensing_server::mmwave;
+    let stale = std::time::Duration::from_secs(2);
+    match mmwave::current_gates(stale) {
+        Some(snap) => {
+            let peak_motion_mid = snap.motion[1..14].iter().copied().max().unwrap_or(0);
+            let peak_micro_mid = snap.micro[1..14].iter().copied().max().unwrap_or(0);
+            Json(serde_json::json!({
+                "available": true,
+                "motion": snap.motion,
+                "micro": snap.micro,
+                "target_gate": snap.target_gate,
+                "peak_motion_mid": peak_motion_mid,
+                "peak_micro_mid": peak_micro_mid,
+                "age_ms": snap.at.elapsed().as_millis() as u64,
+            }))
+        }
+        None => Json(serde_json::json!({"available": false})),
+    }
+}
+
 /// ADR-121 follow-up: GET /api/v1/mmwave/vitals — breathing + (best-
 /// effort) heart-rate computed from the mmWave distance time-series.
 /// Returns `{ available: false }` if no recent reading or if the
@@ -5113,9 +5137,11 @@ async fn mmwave_vitals() -> Json<serde_json::Value> {
     match mmwave::current_vitals(stale) {
         Some(vs) => {
             let (br_samples, br_cap) = mmwave::buffer_status();
+            let presence = mmwave::current_presence(stale).unwrap_or(false);
             Json(serde_json::json!({
                 "available": true,
                 "source": "mmwave:hlk-ld2402",
+                "presence": presence,
                 "vital_signs": vs,
                 "buffer_status": {
                     "breathing_samples": br_samples,
@@ -7716,6 +7742,7 @@ async fn main() {
         .route("/api/v1/adaptive/debug", get(adaptive_debug))
         .route("/api/v1/mmwave/latest", get(mmwave_latest))
         .route("/api/v1/mmwave/vitals", get(mmwave_vitals))
+        .route("/api/v1/mmwave/gates", get(mmwave_gates))
         .route("/api/v1/adaptive/unload", post(adaptive_unload))
         // Field model calibration (eigenvalue-based person counting)
         .route("/api/v1/calibration/start", post(calibration_start))

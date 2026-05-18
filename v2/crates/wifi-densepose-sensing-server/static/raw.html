@@ -630,10 +630,17 @@ async function pollMmwaveVitals() {
     } else {
       brBpmMm.textContent = ' — BPM ';
       brBpmMm.style.color = '';
-      // Buffer-fill hint: at 6 Hz × 30 s = 180 samples needed.
-      const fill = j && j.buffer_status ? j.buffer_status.breathing_samples : 0;
-      const cap  = j && j.buffer_status ? j.buffer_status.breathing_capacity : 180;
-      brConfMm.textContent = cap > 0 ? '· ' + fill + '/' + cap : '·';
+      // Three reasons to show "—":
+      //   1. no presence (radar sees no body in beam)   → "нет цели"
+      //   2. buffer warming up (first 30 s)             → "NN/180"
+      //   3. presence ok but FFT failed (rare)          → "·"
+      if (j && j.available && j.presence === false) {
+        brConfMm.textContent = '· нет цели';
+      } else {
+        const fill = j && j.buffer_status ? j.buffer_status.breathing_samples : 0;
+        const cap  = j && j.buffer_status ? j.buffer_status.breathing_capacity : 180;
+        brConfMm.textContent = cap > 0 && fill < cap ? '· ' + fill + '/' + cap : '·';
+      }
     }
     if (typeof vs.heart_rate_bpm === 'number' && Number.isFinite(vs.heart_rate_bpm) && vs.heart_rate_bpm > 0) {
       const v = vs.heart_rate_bpm;
@@ -642,13 +649,17 @@ async function pollMmwaveVitals() {
       hrBpmMm.style.color = out ? '#f0a020' : '';
       hrConfMm.textContent = '· ' + ((vs.heartbeat_confidence || 0) * 100).toFixed(0) + '%';
     } else {
-      // ADR-122: heart rate becomes available after ~30 s buffer fill,
-      // when the radar is in Engineering Mode (per-gate energies). If
-      // the module fell back to Normal Mode (ASCII distance) HR will
-      // stay missing.
+      // ADR-122: HR only published when presence-gate passes (target
+      // micromotion energy above clutter threshold). Show *why* the
+      // value is missing so the operator can tell "warming up" from
+      // "nobody in beam" from "module fell back to Normal Mode".
       hrBpmMm.textContent = ' — BPM ';
       hrBpmMm.style.color = '';
-      hrConfMm.textContent = '·';
+      if (j && j.available && j.presence === false) {
+        hrConfMm.textContent = '· нет цели';
+      } else {
+        hrConfMm.textContent = '·';
+      }
     }
   } catch (_) {
     brBpmMm.textContent = ' — BPM '; brConfMm.textContent = '·';
