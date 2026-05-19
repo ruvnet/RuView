@@ -28,6 +28,12 @@ members = [
     "crates/wifi-densepose-geo",
     "crates/nvsim",
     "crates/nvsim-server",
+    # ADR-100/ADR-101: Cognitum Cog packaging — first Cog from this repo.
+    # Ships the wifi-densepose pose-estimation model as a signed binary +
+    # JSONL manifest installable by the Cognitum V0 appliance (cognitum-v0,
+    # cognitum-cluster-*, ruvultra). The companion appliance-side crate
+    # lives in cognitum-one/v0-appliance as `cognitum-pose-estimation`.
+    "crates/cog-pose-estimation",
     # rvCSI — edge RF sensing runtime (ADR-095 platform, ADR-096 FFI/crate layout):
     # lives in its own repo (https://github.com/ruvnet/rvcsi), vendored here as
     # `vendor/rvcsi` and published to crates.io as `rvcsi-*` 0.3.x. Depend on the

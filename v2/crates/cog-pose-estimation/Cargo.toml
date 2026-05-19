@@ -1,0 +1,44 @@
+[package]
+name = "cog-pose-estimation"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Cognitum Cog: 17-keypoint pose estimation from WiFi CSI. See ADR-100 (packaging) + ADR-101 (this Cog)."
+publish = false
+
+[[bin]]
+name = "cog-pose-estimation"
+path = "src/main.rs"
+
+[lib]
+name = "cog_pose_estimation"
+path = "src/lib.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time"] }
+sha2 = "0.10"
+hex = "0.4"
+# Sensing-server subscriber over HTTP — kept minimal; no full reqwest dep
+ureq = { version = "2", default-features = false, features = ["tls"] }
+# wifi-densepose-train re-exports the model types we need; depend by path
+# inside the workspace.
+wifi-densepose-train = { path = "../wifi-densepose-train", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+default = []
+# Stub features for the future Hailo HEF runtime path. The actual Hailo
+# integration lives in the companion v0-appliance crate `cognitum-hailo`;
+# this crate keeps a feature flag so the binary can compile without the
+# Hailo SDK in CI.
+hailo = []
