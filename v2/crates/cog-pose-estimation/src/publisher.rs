@@ -15,12 +15,16 @@ pub struct Event<'a> {
 }
 
 impl<'a> Event<'a> {
-    pub fn health_ok(cog_id: &'a str) -> Self {
+    pub fn health_ok(cog_id: &'a str, backend: &str, output_confidence: f32) -> Self {
         Self {
             ts: now_secs(),
             level: "info",
             event: "health.ok",
-            fields: serde_json::json!({ "cog": cog_id }),
+            fields: serde_json::json!({
+                "cog": cog_id,
+                "backend": backend,
+                "synthetic_output_confidence": output_confidence,
+            }),
         }
     }
 

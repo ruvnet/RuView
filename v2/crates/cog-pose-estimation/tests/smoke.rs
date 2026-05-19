@@ -33,6 +33,31 @@ fn engine_rejects_wrong_shape_input() {
 }
 
 #[test]
+fn real_weights_load_when_available() {
+    use cog_pose_estimation::inference::InferenceEngine;
+    let weights = std::path::Path::new("cog/artifacts/pose_v1.safetensors");
+    if !weights.exists() {
+        // Skip when running outside the repo (e.g. on a fresh appliance install).
+        eprintln!("(skipping — cog/artifacts/pose_v1.safetensors not present in cwd)");
+        return;
+    }
+    let engine = InferenceEngine::with_weights(Some(weights)).expect("load real weights");
+    assert!(
+        engine.backend().starts_with("candle-"),
+        "expected real Candle backend, got {}",
+        engine.backend()
+    );
+    let out = engine
+        .infer(&SyntheticInput::default().as_window())
+        .expect("infer");
+    assert!(out.is_finite());
+    // Real model emits the published validation PCK@50 as its self-reported
+    // confidence — stub returns 0.0. This is the key assertion that proves
+    // the cog isn't silently falling back to the stub.
+    assert!(out.confidence > 0.0, "real model should emit non-zero confidence");
+}
+
+#[test]
 fn manifest_roundtrips() {
     let spec = ManifestSpec::embedded("pose-estimation", "0.0.1");
     let s = serde_json::to_string(&spec).unwrap();

@@ -28,6 +28,12 @@ sha2 = "0.10"
 hex = "0.4"
 # Sensing-server subscriber over HTTP — kept minimal; no full reqwest dep
 ureq = { version = "2", default-features = false, features = ["tls"] }
+# Inference backend — Candle, CPU by default. The `cuda` feature gate
+# below pulls in CUDA support on hosts that have it. Pinned to 0.9 to
+# match the training script that produced pose_v1.safetensors.
+candle-core = { version = "0.9", default-features = false }
+candle-nn = { version = "0.9", default-features = false }
+safetensors = "0.4"
 # wifi-densepose-train re-exports the model types we need; depend by path
 # inside the workspace.
 wifi-densepose-train = { path = "../wifi-densepose-train", default-features = false }
@@ -37,7 +43,11 @@ tempfile = "3"
 
 [features]
 default = []
-# Stub features for the future Hailo HEF runtime path. The actual Hailo
+# Use CUDA for inference on hosts with a CUDA-capable GPU. Off by
+# default so CI on plain Linux/Windows boxes still builds; flip on for
+# the GPU-dev path on ruvultra.
+cuda = ["candle-core/cuda", "candle-nn/cuda"]
+# Stub for the future Hailo HEF runtime path. The actual Hailo
 # integration lives in the companion v0-appliance crate `cognitum-hailo`;
 # this crate keeps a feature flag so the binary can compile without the
 # Hailo SDK in CI.

@@ -92,7 +92,11 @@ fn cmd_health() -> Result<(), Box<dyn std::error::Error>> {
     let synthetic = SyntheticInput::default();
     let out = engine.infer(&synthetic.as_window())?;
     if out.is_finite() {
-        emit_event(&Event::health_ok(COG_ID));
+        emit_event(&Event::health_ok(
+            COG_ID,
+            engine.backend(),
+            out.confidence,
+        ));
         Ok(())
     } else {
         Err("inference produced non-finite output".into())
