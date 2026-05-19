@@ -1,0 +1,70 @@
+name: three.js demos → GitHub Pages
+
+# Publishes the ADR-097 three.js demos under gh-pages/three.js/.
+# Uses keep_files: true so the existing observatory/, pose-fusion/,
+# pointcloud/, nvsim/, and root index.html demos are preserved.
+#
+# Demos 04 and 05 require a Mixamo "X Bot.fbx" placed in assets/.
+# That file is intentionally gitignored (license boundary), so this
+# workflow does NOT ship it. Demos 01-03 work standalone; the index
+# page documents the FBX requirement honestly.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'examples/three.js/**'
+      - '.github/workflows/threejs-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: threejs-pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Stage demos for Pages
+        run: |
+          mkdir -p _site/three.js
+          # Copy everything except the local Python server (CI doesn't need it)
+          # and any stray scratch screenshots.
+          cp -r examples/three.js/demos      _site/three.js/demos
+          cp -r examples/three.js/screenshots _site/three.js/screenshots
+          cp    examples/three.js/README.md   _site/three.js/README.md
+          # An index.html that lists the 5 demos with the FBX caveat.
+          cp examples/three.js/index.html _site/three.js/index.html
+          # Mixamo FBX is gitignored — assets dir won't exist in CI.
+          # Drop an empty placeholder so the relative path 'assets/' resolves
+          # to a directory listing (404 on missing file) instead of an opaque
+          # network error. Browsers showing the 404 path makes the failure
+          # visible to anyone trying demos 04/05 without their own FBX.
+          mkdir -p _site/three.js/assets
+          cat > _site/three.js/assets/README.txt <<'EOF'
+          The Mixamo "X Bot.fbx" required by demos 04-skinned-fbx.html and
+          05-skinned-realtime.html is intentionally not redistributed here.
+
+          Download your own from https://mixamo.com (FBX Binary, T-Pose,
+          Without Skin) and place it here as "X Bot.fbx" if you want to
+          run those demos locally. See examples/three.js/README.md in the
+          repo for context.
+          EOF
+          echo "Staged contents:"
+          ls -R _site/three.js/ | head -30
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: _site
+          # Critical: preserve observatory/, pose-fusion/, pointcloud/, nvsim/
+          # and the root index.html already on gh-pages.
+          keep_files: true
+          commit_message: 'three.js demos: ${{ github.event.head_commit.message }}'

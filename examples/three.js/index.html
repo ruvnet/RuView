@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>RuView · three.js demos · ADR-097 sensing-helpers scene</title>
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --bg2: #111627;
+    --card: #171d30;
+    --card-h: #1e2540;
+    --border: #252d45;
+    --t1: #e0e4f0;
+    --t2: #8890a8;
+    --cyan: #4ecdc4;
+    --green: #6bcb77;
+    --amber: #d4a574;
+    --r: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--t1);
+    line-height: 1.5;
+    padding: 24px 16px 64px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 22px; color: #fff; }
+  h1 span { color: var(--cyan); }
+  .lede { color: var(--t2); margin: 8px 0 24px; font-size: 14px; max-width: 70ch; }
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    margin-left: 8px;
+    vertical-align: middle;
+    border: 1px solid var(--border);
+    background: var(--bg2);
+    color: var(--t2);
+  }
+  .pill.ok    { color: var(--green); border-color: #2d4a35; background: rgba(107, 203, 119, 0.08); }
+  .pill.warn  { color: var(--amber); border-color: #4a3d2d; background: rgba(212, 165, 116, 0.08); }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 16px;
+    text-decoration: none;
+    color: inherit;
+    transition: background 0.12s, border-color 0.12s, transform 0.12s;
+  }
+  .card:hover {
+    background: var(--card-h);
+    border-color: var(--cyan);
+    transform: translateY(-1px);
+  }
+  .card h2 { font-size: 15px; color: #fff; margin-bottom: 6px; }
+  .card .sub { color: var(--t2); font-size: 13px; }
+  .card img {
+    margin-top: 10px;
+    width: 100%;
+    aspect-ratio: 16/9;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: #000;
+  }
+  .note {
+    margin-top: 28px;
+    padding: 14px 16px;
+    background: rgba(212, 165, 116, 0.06);
+    border-left: 3px solid var(--amber);
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--t1);
+  }
+  .note b { color: var(--amber); }
+  code {
+    font-family: 'Cascadia Code', Consolas, monospace;
+    background: var(--bg2);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--cyan);
+    font-size: 12px;
+  }
+  a { color: var(--cyan); }
+  .foot {
+    color: var(--t2);
+    font-size: 12px;
+    margin-top: 32px;
+    text-align: center;
+  }
+  .foot a { color: var(--cyan); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>RuView · <span>three.js demos</span></h1>
+<p class="lede">
+  Five progressively richer browser demos of the <a href="https://github.com/ruvnet/RuView/blob/main/docs/adr/ADR-097-adopt-rvcsi-as-ruview-csi-runtime.md">ADR-097</a>
+  sensing-helpers scene, ending with a live MediaPipe-Pose → Mixamo X Bot retargeting pipeline driven
+  by a real ESP32 CSI feed.
+</p>
+
+<div class="grid">
+
+  <a class="card" href="demos/01-helpers.html">
+    <h2>01 · Helpers <span class="pill ok">standalone</span></h2>
+    <div class="sub">Plain ADR-097 helpers in the point-cloud viewer. No external assets.</div>
+    <img src="screenshots/01-helpers.png" alt="01 screenshot">
+  </a>
+
+  <a class="card" href="demos/02-cinematic.html">
+    <h2>02 · Cinematic <span class="pill ok">standalone</span></h2>
+    <div class="sub">Cinematic camera + pseudo-CSI visualization on top of #01.</div>
+    <img src="screenshots/02-cinematic.png" alt="02 screenshot">
+  </a>
+
+  <a class="card" href="demos/03-skinned.html">
+    <h2>03 · Skinned (GLTF) <span class="pill ok">standalone</span></h2>
+    <div class="sub">GLTF skinned mesh + additive animation blending in the ADR-097 scene.</div>
+    <img src="screenshots/03-skinned.png" alt="03 screenshot">
+  </a>
+
+  <a class="card" href="demos/04-skinned-fbx.html">
+    <h2>04 · Skinned FBX <span class="pill warn">needs FBX</span></h2>
+    <div class="sub">Mixamo X Bot via FBXLoader. Requires a local <code>assets/X Bot.fbx</code>.</div>
+    <img src="screenshots/04-skinned-fbx.png" alt="04 screenshot">
+  </a>
+
+  <a class="card" href="demos/05-skinned-realtime.html">
+    <h2>05 · Realtime (Pose + CSI) <span class="pill warn">needs FBX</span></h2>
+    <div class="sub">Webcam → MediaPipe Pose Heavy → Mixamo IK retarget, live ESP32 CSI overlay.</div>
+    <img src="screenshots/05-skinned-realtime.png" alt="05 screenshot">
+  </a>
+
+</div>
+
+<div class="note">
+  <b>Demos 04 and 05 need a Mixamo asset.</b> The Mixamo
+  <code>X Bot.fbx</code> file is intentionally <em>not</em> redistributed in
+  this deployment — it's licensed for end-users to download from
+  <a href="https://mixamo.com" target="_blank" rel="noopener">mixamo.com</a> directly.
+  To run these locally: clone the repo, download <code>X Bot.fbx</code>
+  (FBX Binary, T-Pose, Without Skin) into
+  <code>examples/three.js/assets/</code>, then run
+  <code>python examples/three.js/server/serve-demo.py</code>.
+</div>
+
+<div class="foot">
+  Source: <a href="https://github.com/ruvnet/RuView/tree/main/examples/three.js">github.com/ruvnet/RuView/tree/main/examples/three.js</a>
+  &nbsp;·&nbsp; ADR-097 · three.js r128
+</div>
+
+</div>
+</body>
+</html>
