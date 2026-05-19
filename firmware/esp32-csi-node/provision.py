@@ -35,6 +35,10 @@ import tempfile
 # 0x6000 (24576) bytes.
 NVS_PARTITION_OFFSET = 0x9000
 NVS_PARTITION_SIZE = 0x6000  # 24 KiB
+NVS_U8_MAX = 0xFF
+NVS_U16_MAX = 0xFFFF
+NVS_U32_MAX = 0xFFFFFFFF
+NVS_HOP_CHANNELS_MAX = 6
 
 
 CONFIG_VALUE_CHECKS = [
@@ -62,12 +66,75 @@ CONFIG_VALUE_CHECKS = [
 ]
 
 
+NVS_INT_RANGE_CHECKS = [
+    ("target_port", "--target-port", 1, NVS_U16_MAX),
+    ("node_id", "--node-id", 0, NVS_U8_MAX),
+    ("tdm_slot", "--tdm-slot", 0, NVS_U8_MAX),
+    ("tdm_total", "--tdm-total", 1, NVS_U8_MAX),
+    ("pres_thresh", "--pres-thresh", 0, NVS_U16_MAX),
+    ("fall_thresh", "--fall-thresh", 0, NVS_U16_MAX),
+    ("vital_win", "--vital-win", 32, 256),
+    ("vital_int", "--vital-int", 100, NVS_U16_MAX),
+    ("subk_count", "--subk-count", 1, 32),
+    ("swarm_hb", "--swarm-hb", 1, NVS_U16_MAX),
+    ("swarm_ingest", "--swarm-ingest", 1, NVS_U16_MAX),
+]
+
+
 def has_config_value(args):
     """Return True when args include at least one NVS-writing config value."""
     return any(
         check(getattr(args, name, None))
         for name, check in CONFIG_VALUE_CHECKS
     )
+
+
+def is_valid_wifi_channel(channel):
+    """Return True for 2.4 GHz or 5 GHz WiFi channel numbers accepted by firmware."""
+    return (1 <= channel <= 14) or (36 <= channel <= 177)
+
+
+def parse_hop_channels(value):
+    """Parse a comma-separated hop channel list into integers."""
+    return [int(channel.strip()) for channel in value.split(",")]
+
+
+def validate_int_range(args, parser, attr, flag, minimum, maximum):
+    value = getattr(args, attr, None)
+    if value is None:
+        return
+    if value < minimum or value > maximum:
+        parser.error(f"{flag} must be in range {minimum}-{maximum}, got {value}")
+
+
+def validate_config_ranges(args, parser):
+    """Fail fast before generating an NVS image with values firmware cannot load."""
+    for attr, flag, minimum, maximum in NVS_INT_RANGE_CHECKS:
+        validate_int_range(args, parser, attr, flag, minimum, maximum)
+
+    if args.channel is not None and not is_valid_wifi_channel(args.channel):
+        parser.error(f"--channel must be 1-14 (2.4GHz) or 36-177 (5GHz), got {args.channel}")
+
+    if args.hop_channels is None:
+        return
+
+    try:
+        channels = parse_hop_channels(args.hop_channels)
+    except ValueError:
+        parser.error(f"--hop-channels must be comma-separated integers, got '{args.hop_channels}'")
+
+    if not channels:
+        parser.error("--hop-channels must include at least one channel")
+    if len(channels) > NVS_HOP_CHANNELS_MAX:
+        parser.error(
+            f"--hop-channels supports at most {NVS_HOP_CHANNELS_MAX} channels, got {len(channels)}"
+        )
+    for channel in channels:
+        if not is_valid_wifi_channel(channel):
+            parser.error(
+                f"--hop-channels entries must be 1-14 (2.4GHz) or 36-177 (5GHz), got {channel}"
+            )
+    validate_int_range(args, parser, "hop_dwell", "--hop-dwell", 10, NVS_U32_MAX)
 
 
 def build_nvs_csv(args):
@@ -113,7 +180,7 @@ def build_nvs_csv(args):
         writer.writerow(["filter_mac", "data", "hex2bin", mac_bytes.hex()])
     # ADR-073: Multi-frequency channel hopping
     if args.hop_channels is not None:
-        channels = [int(c.strip()) for c in args.hop_channels.split(",")]
+        channels = parse_hop_channels(args.hop_channels)
         writer.writerow(["hop_count", "data", "u8", str(len(channels))])
         # Store as NVS blob (firmware reads "chan_list" as uint8 blob)
         chan_bytes = bytes(channels)
@@ -287,16 +354,15 @@ def main():
             print(f"  - {k.lstrip('-')}", file=sys.stderr)
         print("  Plus any other csi_cfg keys not passed on the CLI.\n", file=sys.stderr)
 
+    validate_config_ranges(args, parser)
+
     # Validate TDM: if one is given, both should be
     if (args.tdm_slot is not None) != (args.tdm_total is not None):
         parser.error("--tdm-slot and --tdm-total must be specified together")
     if args.tdm_slot is not None and args.tdm_slot >= args.tdm_total:
         parser.error(f"--tdm-slot ({args.tdm_slot}) must be less than --tdm-total ({args.tdm_total})")
 
-    # ADR-060: Validate channel and MAC filter
-    if args.channel is not None:
-        if not ((1 <= args.channel <= 14) or (36 <= args.channel <= 177)):
-            parser.error(f"--channel must be 1-14 (2.4GHz) or 36-177 (5GHz), got {args.channel}")
+    # ADR-060: Validate MAC filter
     if args.filter_mac is not None:
         parts = args.filter_mac.split(":")
         if len(parts) != 6:
