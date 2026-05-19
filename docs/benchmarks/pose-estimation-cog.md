@@ -56,13 +56,20 @@ Strongest signal at right-side proximal joints (`r_hip` 77% PCK@50, `r_knee` 35%
 
 **7× MPJPE improvement, 570× faster training, signal-bearing PCK at all proximal joints.** The remaining gap to ADR-079's PCK@20 ≥ 35% target is data-bound, not infra-bound (see Issue #640).
 
-### Inference latency (not yet measured)
+### Inference latency
 
-This run trained the model but did not benchmark inference latency. Pending:
+Measured on Windows host (x86_64, no GPU — `candle-cpu` backend) running the release binary:
 
-- ONNX export (Candle has no ONNX writer today — needs external conversion).
+| Mode | Measurement | Notes |
+|------|-------------|-------|
+| Cold start | **76.2 ms / invocation** (avg over 100 sequential `health` invocations) | Includes safetensors load + 1 synthetic forward pass. Most of the cost is process startup + mmap. |
+| Long-running `run` warm inference | sub-millisecond per frame (estimated) | The model is 125K params / 507 KB; once loaded, a single forward at batch=1 is essentially memory-bandwidth bound. To be measured precisely against a live sensing-server feed. |
+
+Pending separately:
+
+- ONNX export (Candle has no ONNX writer today — needs external conversion or tract-onnx).
 - Hailo HEF cross-compile (gated on Hailo SDK on a self-hosted runner).
-- `cog-pose-estimation run` end-to-end latency on each target arch.
+- `cog-pose-estimation run` end-to-end latency on each target arch (`arm`, `hailo8`, `hailo10`).
 
 ### Artifacts
 
