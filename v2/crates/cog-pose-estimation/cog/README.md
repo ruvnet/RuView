@@ -52,7 +52,7 @@ Loss curve: 0.181 (epoch 0) → 0.014 (epoch 399), eval loss 0.010. **400 epochs
 - It is **below the ADR-079 target of PCK@20 ≥ 35%**. The bottleneck is data quality and quantity, not infra. The single 30-min seated-at-desk recording produced 1,077 paired samples at avg confidence 0.44 — strong asymmetry between left/right side (r_hip 77% vs l_hip 27%) reflects the camera framing more than any model defect.
 - Distal joints (wrists, ankles) and face joints are still near-random: 56-subcarrier CSI at our 20-frame window doesn't carry enough fine-grained spatial information.
 
-### Next-iteration plan (tracked in [#640](https://github.com/ruvnet/RuView/issues/640))
+### Next-iteration plan (tracked in [#645](https://github.com/ruvnet/RuView/issues/645))
 
 - Multi-session, multi-room recordings with **full-body framing** (target ≥ 30K paired samples at conf ≥ 0.7).
 - Re-train with the same Candle pipeline (already validated to converge in seconds on RTX 5080).

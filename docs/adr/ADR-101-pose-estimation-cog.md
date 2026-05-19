@@ -66,8 +66,8 @@ ESP32 / rvcsi  ─►  collect-ground-truth.py + sensing-server recording
 | Pose head | 2-layer MLP `(128 → 256 → 34)` | 34 = 17 × (x, y) |
 | Output | `[B, 17, 2]` keypoints in `[0, 1]` image-normalised coords | confidence is implicit in keypoint variance over time; ADR-079 P9 will add explicit per-joint confidence |
 | Loss | Confidence-weighted SmoothL1 (frame-level) + bone-length regulariser + temporal smoothness | per ADR-079 Phase 3 refinement |
-| Init | Encoder = HF presence weights (frozen for 50 epochs, then jointly fine-tuned) | unblocks the sigmoid-saturation failure mode observed in #640 |
-| Training | `v2/crates/wifi-densepose-train` with libtorch backend on RTX 5080 | replaces the pure-JS SPSA trainer that produced 0% PCK in #640 |
+| Init | Encoder = HF presence weights (frozen for 50 epochs, then jointly fine-tuned) | unblocks the sigmoid-saturation failure mode observed in #645 |
+| Training | `v2/crates/wifi-densepose-train` with libtorch backend on RTX 5080 | replaces the pure-JS SPSA trainer that produced 0% PCK in #645 |
 
 ### Repo layout
 
@@ -131,11 +131,11 @@ Honours ADR-100's per-Cog CLI contract:
 3. **Optimised:** the Hailo-targeted ONNX graph passes through Hailo Dataflow Compiler without quantisation-aware-training warnings.
 4. **Published:** signed binary at `gs://cognitum-apps/cogs/<arch>/cog-pose-estimation-<arch>`; manifest valid against the JSON schema in ADR-100; appliance installer can pull and run it.
 
-PCK@20 is intentionally **not** an acceptance gate of this ADR. Achieving the ADR-079 ≥35% target is a separate, data-bound milestone tracked in #640. This ADR ships the **vehicle**, not the model accuracy.
+PCK@20 is intentionally **not** an acceptance gate of this ADR. Achieving the ADR-079 ≥35% target is a separate, data-bound milestone tracked in #645. This ADR ships the **vehicle**, not the model accuracy.
 
 ### First measured run — v0.0.1 (2026-05-19)
 
-A Candle-on-CUDA training run on `ruvultra`'s RTX 5080 against the same 1,077-sample paired session that produced the 0%/0% baseline in #640 yielded:
+A Candle-on-CUDA training run on `ruvultra`'s RTX 5080 against the same 1,077-sample paired session that produced the 0%/0% baseline in #645 yielded:
 
 - **PCK@20 = 3.0%**, **PCK@50 = 18.5%**, **MPJPE = 0.093** (normalized).
 - 400 epochs in **2.1 s** wall time (~5 ms/epoch, full-batch).
@@ -155,7 +155,7 @@ This confirms the pipeline trains end-to-end and produces a signal-bearing model
 ### Negative
 
 - Adds a hard dependency on the Hailo Dataflow Compiler, which lives behind a self-hosted runner — Hailo-targeted PRs land more slowly.
-- The first published binary will have low PCK (data + training time gap, #640) — UX needs to surface this clearly so end users do not interpret bad keypoints as a bug.
+- The first published binary will have low PCK (data + training time gap, #645) — UX needs to surface this clearly so end users do not interpret bad keypoints as a bug.
 
 ### Risks
 
@@ -167,7 +167,7 @@ This confirms the pipeline trains end-to-end and produces a signal-bearing model
 1. Land this ADR + ADR-100 on `main` of RuView.
 2. Land companion ADR-225 + crate on `main` of v0-appliance.
 3. First release `cog-pose-estimation@0.0.1` ships **only** to `ruvultra` and `cognitum-v0`. Not pushed to the cluster Pis yet.
-4. After P7→P9 data work (#640) brings PCK above a usable threshold, rebuild + re-publish; only then enable cluster rollout via `cognitum-cog-gateway`'s OTA channel.
+4. After P7→P9 data work (#645) brings PCK above a usable threshold, rebuild + re-publish; only then enable cluster rollout via `cognitum-cog-gateway`'s OTA channel.
 
 ## v0.0.1 shipping status — 2026-05-19
 
@@ -196,7 +196,7 @@ PRs `#642` (scaffold + arm release + ONNX + live install) and `#643` (x86_64 rel
 Open follow-ups carried forward from this ADR's "Acceptance gates" section:
 
 - **Hailo HEF cross-compile** — `pose_v1.onnx` is ready; still gated on Hailo Dataflow Compiler + self-hosted runner provisioning. Tracked separately.
-- **PCK@20 ≥ 35%** — explicitly not an acceptance gate of this ADR, but the limiting factor on practical usefulness. Tracked in [#640](https://github.com/ruvnet/RuView/issues/640): needs ~30× more paired samples + multi-room camera framing. Today's seated-desk session is the demonstrated bottleneck.
+- **PCK@20 ≥ 35%** — explicitly not an acceptance gate of this ADR, but the limiting factor on practical usefulness. Tracked in [#645](https://github.com/ruvnet/RuView/issues/645): needs ~30× more paired samples + multi-room camera framing. Today's seated-desk session is the demonstrated bottleneck.
 
 ## See also
 
@@ -204,5 +204,5 @@ Open follow-ups carried forward from this ADR's "Acceptance gates" section:
 - ADR-100: Cog packaging specification (the format we're shipping in).
 - v0-appliance ADR-225: cognitum-pose-estimation crate (the appliance-side runtime).
 - v0-appliance ADR-220: cog management surface (where this cog appears in the dashboard).
-- Issue #640: PCK gap (current 3% / 18.5% → ≥35% target).
+- Issue #645: PCK gap (current 3% / 18.5% → ≥35% target).
 - `docs/benchmarks/pose-estimation-cog.md`: full benchmark log, all measured numbers.

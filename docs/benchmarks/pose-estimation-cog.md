@@ -51,10 +51,10 @@ Strongest signal at right-side proximal joints (`r_hip` 77% PCK@50, `r_knee` 35%
 
 | Run | Backend | Train time | PCK@20 | PCK@50 | MPJPE |
 |-----|---------|-----------:|-------:|-------:|------:|
-| pre-2026-05-19 | pure-JS SPSA, lite TCN (#640) | ~20 min | 0.0% | 0.0% | 0.66 |
+| pre-2026-05-19 | pure-JS SPSA, lite TCN (#645) | ~20 min | 0.0% | 0.0% | 0.66 |
 | **v0.0.1** (this run) | **candle-cuda, Conv1d TCN** | **2.1 s** | **3.0%** | **18.5%** | **0.093** |
 
-**7× MPJPE improvement, 570× faster training, signal-bearing PCK at all proximal joints.** The remaining gap to ADR-079's PCK@20 ≥ 35% target is data-bound, not infra-bound (see Issue #640).
+**7× MPJPE improvement, 570× faster training, signal-bearing PCK at all proximal joints.** The remaining gap to ADR-079's PCK@20 ≥ 35% target is data-bound, not infra-bound (see Issue #645).
 
 ### Inference latency
 
