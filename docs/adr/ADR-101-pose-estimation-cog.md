@@ -1,6 +1,6 @@
 # ADR-101: Pose Estimation Cog (WiFi-DensePose side)
 
-- **Status:** Accepted
+- **Status:** Accepted — **v0.0.1 shipped 2026-05-19** (merged in PRs #642 + #643, signed binaries on GCS, live install on cognitum-v0)
 - **Date:** 2026-05-19
 - **Deciders:** ruv
 - **Companion ADR (v0-appliance side):** v0-appliance ADR-225 (cognitum-pose-estimation crate)
@@ -169,10 +169,40 @@ This confirms the pipeline trains end-to-end and produces a signal-bearing model
 3. First release `cog-pose-estimation@0.0.1` ships **only** to `ruvultra` and `cognitum-v0`. Not pushed to the cluster Pis yet.
 4. After P7→P9 data work (#640) brings PCK above a usable threshold, rebuild + re-publish; only then enable cluster rollout via `cognitum-cog-gateway`'s OTA channel.
 
+## v0.0.1 shipping status — 2026-05-19
+
+PRs `#642` (scaffold + arm release + ONNX + live install) and `#643` (x86_64 release) landed on `main`. Acceptance gates from ADR-100 met as follows:
+
+| Gate | Status |
+|------|--------|
+| Cog binary exists per arch | ✅ arm (`3,741,976 B`) + x86_64 (`4,548,856 B`) on GCS |
+| Manifest matches schema | ✅ `cog/artifacts/manifests/{arm,x86_64}/manifest.json` |
+| Binary sha256 + Ed25519 signature | ✅ both signed with `COGNITUM_OWNER_SIGNING_KEY`, round-trip verified |
+| Public-readable GCS | ✅ anonymous HTTP GET works, SHA matches |
+| Live install on a real appliance | ✅ `/var/lib/cognitum/apps/pose-estimation/` on `cognitum-v0` (Pi 5), same layout as `anomaly-detect` |
+| Runtime contract (`version \| manifest \| health \| run`) | ✅ all four return correct output; `run` emits `pose.frame` events |
+| Real weights loaded (not stub) | ✅ `cargo test` asserts `backend.starts_with("candle-")` + non-zero confidence |
+| ONNX artifact (for downstream HEF) | ✅ `pose_v1.onnx` (12 KB), parity vs torch = 8.94e-8 |
+
+| Metric | Value |
+|--------|-------|
+| Training time (RTX 5080 / Candle CUDA) | 2.1 s for 400 epochs |
+| PCK@20 / PCK@50 / MPJPE (1,077-sample seated-desk session) | 3.0% / 18.5% / 0.093 |
+| Cold-start: Windows x86_64 | 76 ms |
+| Cold-start: ruvultra x86_64 | **5.4 ms** |
+| Cold-start: Pi 5 aarch64 | **8.4 ms** |
+| Tests | 5/5 pass |
+
+Open follow-ups carried forward from this ADR's "Acceptance gates" section:
+
+- **Hailo HEF cross-compile** — `pose_v1.onnx` is ready; still gated on Hailo Dataflow Compiler + self-hosted runner provisioning. Tracked separately.
+- **PCK@20 ≥ 35%** — explicitly not an acceptance gate of this ADR, but the limiting factor on practical usefulness. Tracked in [#640](https://github.com/ruvnet/RuView/issues/640): needs ~30× more paired samples + multi-room camera framing. Today's seated-desk session is the demonstrated bottleneck.
+
 ## See also
 
 - ADR-079: Camera-supervised pose training pipeline (the model we're shipping).
 - ADR-100: Cog packaging specification (the format we're shipping in).
 - v0-appliance ADR-225: cognitum-pose-estimation crate (the appliance-side runtime).
 - v0-appliance ADR-220: cog management surface (where this cog appears in the dashboard).
-- Issue #640: PCK gap (current 0% → ≥35% target).
+- Issue #640: PCK gap (current 3% / 18.5% → ≥35% target).
+- `docs/benchmarks/pose-estimation-cog.md`: full benchmark log, all measured numbers.

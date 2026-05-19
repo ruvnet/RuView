@@ -1,6 +1,6 @@
 # ADR-100: Cognitum Cog Packaging Specification
 
-- **Status:** Accepted (formalises existing convention)
+- **Status:** Accepted (formalises existing convention) — **first conforming cog shipped 2026-05-19** (`cog-pose-estimation@0.0.1`, see ADR-101)
 - **Date:** 2026-05-19
 - **Deciders:** ruv
 
@@ -152,8 +152,8 @@ stdout JSON line format (one event per line):
 
 ## Migration
 
-1. Land this ADR.
-2. Land ADR-101 (`cog-pose-estimation` — first Cog built to this spec).
+1. ✅ Land this ADR.
+2. ✅ Land ADR-101 (`cog-pose-estimation` — first Cog built to this spec). Shipped in PR #642 + #643 on 2026-05-19; signed `arm` and `x86_64` binaries live at `gs://cognitum-apps/cogs/{arm,x86_64}/`; install verified on cognitum-v0.
 3. After two clean releases of `cog-pose-estimation`, re-publish the existing cogs (`anomaly-detect`, `presence`, etc.) with `binary_sha256` + `binary_signature`. Track in a follow-up issue.
 4. Flip `cognitum-cog-gateway` from "verify when present" to "require signature" — separate ADR, separate review.
 
