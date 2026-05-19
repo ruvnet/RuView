@@ -56,6 +56,15 @@ wifi-densepose-signal = { version = "0.3.0", path = "../wifi-densepose-signal", 
 midstreamer-temporal-compare = "0.2"   # DTW / LCS / Edit-Distance pattern matching
 midstreamer-attractor        = "0.2"   # Lyapunov + regime classification
 
+# ADR-102: Edge Module Registry — fetch the canonical Cognitum cog catalog
+# at `https://storage.googleapis.com/cognitum-apps/app-registry.json`,
+# cache with TTL, surface via /api/v1/edge/registry. ureq is the smallest
+# blocking HTTP client we can use without dragging a tokio HTTP stack in;
+# rustls is enabled implicitly via the `tls` default feature.
+ureq      = { version = "2", default-features = false, features = ["tls", "json"] }
+sha2      = "0.10"
+thiserror = "1"
+
 [dev-dependencies]
 tempfile = "3.10"
 # `tower::ServiceExt::oneshot` for in-process Router tests (bearer_auth).

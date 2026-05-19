@@ -148,6 +148,178 @@ huggingface-cli download ruvnet/wifi-densepose-pretrained --local-dir models/wif
 The separate **17-keypoint pose-estimation model** is not in this release — pipeline is implemented but keypoint weights are still pending. Tracked in [#509](https://github.com/ruvnet/RuView/issues/509); see [ADR-079](docs/adr/ADR-079-camera-supervised-pose-finetune.md) phases P7–P9.
 
 
+## 🧩 Edge Module Catalog
+
+<details>
+<summary><b>🧩 105 edge modules ready to install on a Cognitum appliance</b> &mdash; live catalog from <code>app-registry.json</code> v2.1.0 (updated 2026-05-13). Browse + install at <a href="https://seed.cognitum.one/store">seed.cognitum.one/store</a> or your local appliance <code>http://&lt;appliance&gt;:9000/cogs</code>.</summary>
+
+Each module is a small signed binary (~400 KB) that runs alongside the WiFi-DensePose sensing stack on a Cognitum-V0 appliance. The catalog updates over the air &mdash; your appliance fetches it via <code>GET /api/v1/edge/registry</code> ([ADR-102](docs/adr/ADR-102-edge-module-registry.md)) and verifies each binary against an Ed25519 signature ([ADR-100](docs/adr/ADR-100-cog-packaging-specification.md)) before install.
+
+### 🫀 Health &mdash; <sub>14 modules</sub>
+
+| ID | What it does | Size | Difficulty |
+|----|--------------|-----:|:----------:|
+| `air-quality-index` | Track indoor air quality with CO2 and particle sensors | 8 KB | Easy |
+| `baby-cry` | Sustained mid-band energy detector for nursery / infant monitoring. Audio-only, no camera. | 451 KB | Easy |
+| `breathing-sync` | Detects when two people breathe in sync | 10 KB | Hard |
+| `cardiac-arrhythmia` | Spots irregular heartbeats and abnormal heart rhythms | 8 KB | Hard |
+| `cough-detect` | Acoustic transient + spectral cough detector with 30s cluster aggregation. Early-warning signal for respiratory illness. | 451 KB | Easy |
+| `dream-stage` | Tracks your sleep stages — light, deep, and dreaming | 14 KB | Hard |
+| `fall-detect` | Two-stage impact + stillness fall detector over ambient feature stream (ESP32 motion / mic). Optional ruview-mode for CSI-based pose reinforcement. | 402 KB | Easy |
+| `gait-analysis` | Detects walking problems and scores fall risk | 12 KB | Hard |
+| `health-monitor` | Contactless heart rate, breathing, sleep, and fall alerts | 30 KB | Med |
+| `respiratory-distress` | Alerts when breathing becomes labored or dangerously fast | 10 KB | Hard |
+| `seizure-detect` | Recognizes seizures and sends immediate alerts | 10 KB | Hard |
+| `sleep-apnea` | Detects when someone stops breathing during sleep | 4 KB | Easy |
+| `snore-monitor` | Periodic low-band energy tracker for sleep-quality / apnea-risk trending. Companion to sleep-apnea cog. | 451 KB | Easy |
+| `vital-trend` | Tracks breathing and heart rate trends over weeks | 6 KB | Med |
+
+### 🔒 Security &mdash; <sub>14 modules</sub>
+
+| ID | What it does | Size | Difficulty |
+|----|--------------|-----:|:----------:|
+| `audit-logger` | Record every action for compliance — tamper-proof log | 8 KB | Easy |
+| `behavioral-profiler` | Learns normal behavior and flags anything unusual | 12 KB | Hard |
+| `fleet-auth` | Manage device certificates and access across all seeds | 12 KB | Med |
+| `glass-break` | Two-phase bang + shatter acoustic detector. Distinguishes glass break from ordinary impulse noise. | 451 KB | Easy |
+| `gunshot-detect` | Saturating peak + exponential decay acoustic detector with optional ruview CSI motion-drop reinforcement. | 451 KB | Easy |
+| `intrusion` | Alerts when an unauthorized person enters a room | 6 KB | Med |
+| `intrusion-detect-ml` | Detect network attacks using machine learning | 14 KB | Hard |
+| `loitering` | Alerts when someone lingers too long in one spot | 3 KB | Easy |
+| `network-firewall` | Block unauthorized network access per cog | 6 KB | Easy |
+| `panic-motion` | Detects sudden panicked or erratic movement | 6 KB | Med |
+| `perimeter-breach` | Guards multiple zones and shows entry direction | 10 KB | Med |
+| `prompt-shield` | Blocks signal replay and injection attacks on the seed | 10 KB | Med |
+| `tailgating` | Catches when someone sneaks in behind a badge holder | 6 KB | Med |
+| `weapon-detect` | Detects concealed metal objects on a person | 8 KB | Hard |
+
+### 🏢 Building &mdash; <sub>11 modules</sub>
+
+| ID | What it does | Size | Difficulty |
+|----|--------------|-----:|:----------:|
+| `beehive-monitor` | Acoustic hive state classifier. Detects healthy / chaotic / queenless / swarming / robbing via hum-band energy + chaos + piping autocorr. | 451 KB | Easy |
+| `elevator-count` | Counts how many people are in an elevator | 8 KB | Med |
+| `energy-audit` | Learns your schedule and cuts wasted energy | 6 KB | Med |
+| `frost-warning` | Predicts frost 6 hours ahead via temperature trend + dewpoint-depression gate. Field/orchard agriculture. | 451 KB | Easy |
+| `hvac-presence` | Turns heating and cooling on when you arrive | 3 KB | Easy |
+| `lighting-zones` | Turns lights on and off as people move between rooms | 4 KB | Easy |
+| `meeting-room` | Shows if a meeting room is free or occupied | 5 KB | Easy |
+| `occupancy-zones` | Counts people in each room through walls | 8 KB | Med |
+| `predictive-maintenance` | Vibration harmonic analyzer for rotating equipment. Tracks F1 / 2×F1 / high-order / sideband energy to score degradation severity. | 451 KB | Easy |
+| `smoke-fire` | Multi-signal smoke and fire detector. Fuses acoustic crackle, thermal drift proxy, and optional ruview CSI plume signature. Not a UL-listed replacement for code-required smoke alarms. | 451 KB | Easy |
+| `water-leak` | Persistent low-amplitude hiss + periodic drip acoustic detector with multi-minute persistence gate. Two-stage likely → confirmed. | 451 KB | Easy |
+
+### 🛍️ Retail &mdash; <sub>7 modules</sub>
+
+| ID | What it does | Size | Difficulty |
+|----|--------------|-----:|:----------:|
+| `customer-flow` | Counts foot traffic in and out of each entrance | 8 KB | Med |
+| `dwell-heatmap` | Shows where customers spend the most time | 6 KB | Med |
+| `package-detect` | Sustained CSI-shift detector for porch / loading bay package arrivals and departures. Requires ESP32 CSI ruview input. | 451 KB | Easy |
+| `parking-occupancy` | Per-zone parking occupancy via ESP32 CSI subcarrier-amplitude shift. Tracks utilization and churn-per-hour. Requires ruview. | 451 KB | Easy |
+| `queue-length` | Estimates line length and wait time | 6 KB | Med |
+| `shelf-engagement` | Detects when customers interact with products | 6 KB | Med |
+| `table-turnover` | Tracks which restaurant tables are free or occupied | 4 KB | Easy |
+
+### 🏭 Industrial &mdash; <sub>7 modules</sub>
+
+| ID | What it does | Size | Difficulty |
+|----|--------------|-----:|:----------:|
+| `clean-room` | Enforces max headcount in controlled environments | 4 KB | Easy |
+| `confined-space` | Monitors workers in tight spaces for safety | 5 KB | Med |
+| `forklift-proximity` | Warns if a forklift gets too close to workers | 10 KB | Hard |
+| `livestock-monitor` | Monitors animals for distress, escape, or illness | 6 KB | Med |
+| `ppe-compliance` | Cog-composition layer: alerts when ruview-densepose detects presence in a restricted zone without an accompanying PPE-camera-cog confirmation vector. | 387 KB | Easy |
+| `slip-fall-zone` | Pre-fall risk detector. Fires when motion-variance drop, splash audio, and optional cautious-gait CSI all signal elevated slip risk. | 451 KB | Easy |
+| `structural-vibration` | Detects dangerous vibrations in buildings or machines | 8 KB | Hard |
+
+### 🔬 Research &mdash; <sub>12 modules</sub>
+
+| ID | What it does | Size | Difficulty |
+|----|--------------|-----:|:----------:|
+| `emotion-detect` | Reads stress and calm from body language and breathing | 10 KB | Hard |
+| `energy-harvester` | Optimize solar and battery for off-grid seed deployment | 6 KB | Med |
+| `gesture-language` | Recognizes sign language gestures in real time | 12 KB | Hard |
+| `ghost-hunter` | Finds unexplained environmental anomalies — for fun | 10 KB | Hard |
+| `happiness-score` | Estimates well-being from movement and mood signals | 8 KB | Med |
+| `hyperbolic-space` | Maps data into curved space for tree-like structures | 12 KB | Hard |
+| `music-conductor` | Reads a conductor's gestures for tempo and dynamics | 12 KB | Hard |
+| `plant-growth` | Tracks plant growth rate and day/night cycles | 8 KB | Med |
+| `rain-detect` | Detects when rain starts, stops, and how heavy it is | 6 KB | Med |
+| `ruview-densepose` | Full body pose tracking from WiFi — no cameras needed | 50 KB | Hard |
+| `sound-classifier` | Identify sounds like glass break, alarm, or baby cry | 16 KB | Hard |
+| `time-crystal` | Experiments with repeating time-pattern symmetry | 12 KB | Hard |
+
+### 🤖 Ai &mdash; <sub>15 modules</sub>
+
+| ID | What it does | Size | Difficulty |
+|----|--------------|-----:|:----------:|
+| `anomaly-attractor` | Learns what's normal and catches anything weird | 10 KB | Hard |
+| `cognitive-pipeline` | FastGRNN anomaly gate + SmolLM2 sparse-LLM inference for on-device Pi Zero 2W cognitive events | 320 KB | Hard |
+| `dtw-gesture-learn` | Teach custom hand gestures by showing examples | 14 KB | Med |
+| `ewc-lifelong` | Learns new things without forgetting old lessons | 8 KB | Hard |
+| `federated-learning` | Train AI across seeds without sharing raw data | 18 KB | Hard |
+| `goap-autonomy` | Plans and executes goals on its own | 14 KB | Hard |
+| `meta-adapt` | Automatically tunes itself for best performance | 10 KB | Hard |
+| `micro-hnsw` | Fast on-device fingerprinting and classification | 12 KB | Med |
+| `neural-trader` | Spot market patterns and trends from live data | 20 KB | Hard |
+| `pagerank-influence` | Finds the most influential person in a group | 12 KB | Med |
+| `pattern-sequence` | Detects daily routines and repeated habits | 10 KB | Med |
+| `rag-local` | Search your documents using AI — runs on the seed | 14 KB | Med |
+| `spiking-tracker` | Brain-inspired tracker that runs on tiny hardware | 16 KB | Hard |
+| `temporal-logic` | Enforces safety rules on live event streams | 12 KB | Hard |
+| `time-series-forecast` | Predict sensor trends using historical patterns | 12 KB | Med |
+
+### 🐝 Swarm &mdash; <sub>11 modules</sub>
+
+| ID | What it does | Size | Difficulty |
+|----|--------------|-----:|:----------:|
+| `swarm-backup-restore` | Auto-backup data to other seeds — one-click restore | 8 KB | Easy |
+| `swarm-cluster-monitor` | Live dashboard of every seed's health and status | 6 KB | Easy |
+| `swarm-consensus` | Seeds vote before making critical changes together | 16 KB | Hard |
+| `swarm-delta-sync` | Auto-sync data between seeds — only sends changes | 8 KB | Med |
+| `swarm-deploy` | Install or remove cogs on all seeds at once | 10 KB | Med |
+| `swarm-distributed-store` | Spread data across seeds and search them all at once | 14 KB | Hard |
+| `swarm-edge-orchestrator` | Manage all ESP32 sensor nodes from one place | 14 KB | Hard |
+| `swarm-load-balancer` | Spread queries across seeds so no single one overloads | 10 KB | Med |
+| `swarm-mesh-manager` | Find, connect, and monitor all seeds on your network | 12 KB | Easy |
+| `swarm-mqtt-bridge` | Share events between seeds over MQTT messaging | 6 KB | Easy |
+| `swarm-witness-federation` | Share tamper-proof audit trails across seeds | 12 KB | Hard |
+
+### 📡 Signal &mdash; <sub>6 modules</sub>
+
+| ID | What it does | Size | Difficulty |
+|----|--------------|-----:|:----------:|
+| `coherence-gate` | Filters out noisy signals and keeps clean ones | 8 KB | Med |
+| `flash-attention` | Focuses sensing on specific areas for better accuracy | 12 KB | Med |
+| `optimal-transport` | Measures motion using shape-aware signal comparison | 12 KB | Hard |
+| `person-matching` | Tells apart multiple people in the same room | 18 KB | Hard |
+| `sparse-recovery` | Recovers missing signal data from partial readings | 16 KB | Hard |
+| `temporal-compress` | Shrinks old data to save memory without losing meaning | 14 KB | Med |
+
+### 🌐 Network &mdash; <sub>1 modules</sub>
+
+| ID | What it does | Size | Difficulty |
+|----|--------------|-----:|:----------:|
+| `tailscale` | Reach the seed from anywhere via a private WireGuard mesh (Tailscale). Userspace mode — no root. | 700 KB | Med |
+
+### 🛠️ Developer &mdash; <sub>7 modules</sub>
+
+| ID | What it does | Size | Difficulty |
+|----|--------------|-----:|:----------:|
+| `adversarial` | Detects tampered or spoofed sensor signals | 4 KB | Easy |
+| `coherence` | Monitors signal quality across multiple channels | 4 KB | Easy |
+| `gesture` | Core gesture recognition building block for cogs | 6 KB | Med |
+| `interference-search` | Searches many possibilities at once for fast answers | 14 KB | Hard |
+| `psycho-symbolic` | Reasons over knowledge graphs with multiple styles | 16 KB | Hard |
+| `quantum-coherence` | Quantum-inspired model for advanced signal states | 16 KB | Hard |
+| `self-healing-mesh` | Keeps sensor mesh running even when nodes drop out | 14 KB | Hard |
+
+> ℹ️ Build your own cog: see [ADR-100](docs/adr/ADR-100-cog-packaging-specification.md) for the packaging spec. The first cog this repo ships into the catalog lives in [v2/crates/cog-pose-estimation/](v2/crates/cog-pose-estimation/) (17-keypoint WiFi pose, [ADR-101](docs/adr/ADR-101-pose-estimation-cog.md)).
+
+</details>
+
+
 ## 🔬 How It Works
 
 WiFi routers flood every room with radio waves. When a person moves — or even breathes — those waves scatter differently. WiFi DensePose reads that scattering pattern and reconstructs what happened:
