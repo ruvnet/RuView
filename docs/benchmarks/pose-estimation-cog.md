@@ -65,9 +65,21 @@ Measured on Windows host (x86_64, no GPU — `candle-cpu` backend) running the r
 | Cold start | **76.2 ms / invocation** (avg over 100 sequential `health` invocations) | Includes safetensors load + 1 synthetic forward pass. Most of the cost is process startup + mmap. |
 | Long-running `run` warm inference | sub-millisecond per frame (estimated) | The model is 125K params / 507 KB; once loaded, a single forward at batch=1 is essentially memory-bandwidth bound. To be measured precisely against a live sensing-server feed. |
 
+### ONNX export
+
+`pose_v1.onnx` is produced from `pose_v1.safetensors` by `scripts/export-onnx.py`, which mirrors the Candle architecture in PyTorch, loads the safetensors weights, and uses `torch.onnx.export` with opset 18 + dynamic batch axis. Verified end-to-end:
+
+| Check | Result |
+|-------|--------|
+| `onnx.checker.check_model` | ✅ ok |
+| Parity vs torch reference | **max \|torch − onnx\| = 8.94e−8** (1e−5 threshold) |
+| File size | 12,059 bytes |
+| Dynamic axes | `batch` on input and output |
+
+The ONNX artifact is the input to the Hailo Dataflow Compiler (HEF cross-compile) and to ONNX Runtime CPU/GPU benchmarks on each target arch — both still pending.
+
 Pending separately:
 
-- ONNX export (Candle has no ONNX writer today — needs external conversion or tract-onnx).
 - Hailo HEF cross-compile (gated on Hailo SDK on a self-hosted runner).
 - `cog-pose-estimation run` end-to-end latency on each target arch (`arm`, `hailo8`, `hailo10`).
 
