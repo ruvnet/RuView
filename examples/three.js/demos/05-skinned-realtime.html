@@ -721,8 +721,56 @@
         const txt = document.querySelector('#loading .text');
         if (txt) txt.textContent = `▸ Loading skinned subject · X Bot.fbx · ${pct} %`;
     }, (err) => {
-        console.error('FBX load failed', err);
-        document.querySelector('#loading .text').textContent = '⚠ Load failed — see console';
+        // Graceful degradation when X Bot.fbx 404s on gh-pages (license
+        // boundary — not redistributed). Local runs with the FBX present
+        // hit the success branch above and never see this banner.
+        console.warn('FBX load failed — showing fallback banner', err);
+        const loading = document.getElementById('loading');
+        if (loading) {
+            loading.innerHTML = `
+                <div style="
+                    max-width: 580px; padding: 20px 22px;
+                    background: rgba(20, 24, 38, 0.92);
+                    border: 1px solid rgba(78, 205, 196, 0.4);
+                    border-radius: 10px;
+                    color: #e0e4f0; font-family: 'Segoe UI', system-ui, sans-serif;
+                    line-height: 1.5; font-size: 14px;
+                    box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+                ">
+                    <div style="font-size:16px; color:#4ecdc4; font-weight:600; margin-bottom:6px;">
+                        🦴 Mixamo asset not bundled in this deployment
+                    </div>
+                    <div style="color:#c8cee0; margin-bottom:12px;">
+                        This realtime pose demo retargets webcam + MediaPipe onto
+                        <code style="color:#4ecdc4; background:rgba(78,205,196,0.08); padding:1px 6px; border-radius:3px;">X Bot.fbx</code>,
+                        which Mixamo licenses for direct download by end users and is intentionally not
+                        redistributed here. The ADR-097 helpers scene is still rendering behind this card.
+                    </div>
+                    <div style="color:#8890a8; font-size:13px; margin-bottom:14px;">
+                        To run locally: clone the repo, get
+                        <code style="color:#4ecdc4;">X Bot.fbx</code> (FBX Binary · T-Pose · Without Skin)
+                        from <a href="https://mixamo.com" target="_blank" rel="noopener" style="color:#4ecdc4;">mixamo.com</a>,
+                        drop it in <code style="color:#4ecdc4;">examples/three.js/assets/</code>, then
+                        <code style="color:#4ecdc4;">python examples/three.js/server/serve-demo.py</code>.
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <a href="https://github.com/ruvnet/RuView/tree/main/examples/three.js" target="_blank" rel="noopener"
+                           style="padding:6px 12px; background:rgba(78,205,196,0.12); border:1px solid rgba(78,205,196,0.4); border-radius:6px; color:#4ecdc4; text-decoration:none; font-size:13px;">
+                            📂 Source on GitHub
+                        </a>
+                        <a href="https://mixamo.com" target="_blank" rel="noopener"
+                           style="padding:6px 12px; background:rgba(212,165,116,0.12); border:1px solid rgba(212,165,116,0.4); border-radius:6px; color:#d4a574; text-decoration:none; font-size:13px;">
+                            🦴 Get X Bot from Mixamo
+                        </a>
+                        <a href="../" style="padding:6px 12px; background:rgba(136,144,168,0.12); border:1px solid rgba(136,144,168,0.3); border-radius:6px; color:#8890a8; text-decoration:none; font-size:13px;">
+                            ← Back to demo gallery
+                        </a>
+                    </div>
+                </div>
+            `;
+            loading.style.pointerEvents = 'auto';
+            loading.style.cursor = 'default';
+        }
     });
 
     // ---------------------------------------------------------------------

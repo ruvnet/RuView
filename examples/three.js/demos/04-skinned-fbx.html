@@ -572,9 +572,59 @@
             const txt = document.querySelector('#loading .text');
             if (txt) txt.textContent = `▸ Loading skinned subject · X Bot.fbx · ${pct} %`;
         }, (err) => {
-            console.error('FBX load failed', err);
-            const txt = document.querySelector('#loading .text');
-            if (txt) txt.textContent = '⚠ Load failed — see console';
+            // Graceful degradation: when the FBX 404s on gh-pages (Mixamo
+            // X Bot.fbx is gitignored — license boundary, not redistributed)
+            // we hide the spinner and show a friendly banner explaining how
+            // to run this demo locally with your own Mixamo download.
+            // Local development with assets/X Bot.fbx present hits the
+            // success branch above and never sees this UI.
+            console.warn('FBX load failed — showing fallback banner', err);
+            const loading = document.getElementById('loading');
+            if (loading) {
+                loading.innerHTML = `
+                    <div style="
+                        max-width: 540px; padding: 20px 22px;
+                        background: rgba(20, 24, 38, 0.92);
+                        border: 1px solid rgba(78, 205, 196, 0.4);
+                        border-radius: 10px;
+                        color: #e0e4f0; font-family: 'Segoe UI', system-ui, sans-serif;
+                        line-height: 1.5; font-size: 14px;
+                        box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+                    ">
+                        <div style="font-size:16px; color:#4ecdc4; font-weight:600; margin-bottom:6px;">
+                            🦴 Mixamo asset not bundled in this deployment
+                        </div>
+                        <div style="color:#c8cee0; margin-bottom:12px;">
+                            This demo loads <code style="color:#4ecdc4; background:rgba(78,205,196,0.08); padding:1px 6px; border-radius:3px;">X Bot.fbx</code>
+                            from Mixamo, which is intentionally not redistributed here (license boundary).
+                            The ADR-097 helpers scene (grid / axes / per-node CSI boxes) is rendering behind this card —
+                            click outside to interact with it.
+                        </div>
+                        <div style="color:#8890a8; font-size:13px; margin-bottom:14px;">
+                            To run this demo with the character, clone the repo, download
+                            <code style="color:#4ecdc4;">X Bot.fbx</code> (FBX Binary · T-Pose · Without Skin)
+                            from <a href="https://mixamo.com" target="_blank" rel="noopener" style="color:#4ecdc4;">mixamo.com</a>
+                            into <code style="color:#4ecdc4;">examples/three.js/assets/</code>, then run
+                            <code style="color:#4ecdc4;">python examples/three.js/server/serve-demo.py</code>.
+                        </div>
+                        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                            <a href="https://github.com/ruvnet/RuView/tree/main/examples/three.js" target="_blank" rel="noopener"
+                               style="padding:6px 12px; background:rgba(78,205,196,0.12); border:1px solid rgba(78,205,196,0.4); border-radius:6px; color:#4ecdc4; text-decoration:none; font-size:13px;">
+                                📂 Source on GitHub
+                            </a>
+                            <a href="https://mixamo.com" target="_blank" rel="noopener"
+                               style="padding:6px 12px; background:rgba(212,165,116,0.12); border:1px solid rgba(212,165,116,0.4); border-radius:6px; color:#d4a574; text-decoration:none; font-size:13px;">
+                                🦴 Get X Bot from Mixamo
+                            </a>
+                            <a href="../" style="padding:6px 12px; background:rgba(136,144,168,0.12); border:1px solid rgba(136,144,168,0.3); border-radius:6px; color:#8890a8; text-decoration:none; font-size:13px;">
+                                ← Back to demo gallery
+                            </a>
+                        </div>
+                    </div>
+                `;
+                loading.style.pointerEvents = 'auto';
+                loading.style.cursor = 'default';
+            }
         });
 
         function playClip(name) {
