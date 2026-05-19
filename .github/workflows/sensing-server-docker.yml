@@ -50,6 +50,12 @@ jobs:
         with:
           submodules: recursive
 
+      # QEMU is required so the amd64 GitHub runner can cross-build the
+      # linux/arm64 layer below (Dockerfile.rust is arch-agnostic — no `--target`
+      # flag — so buildx + QEMU is all that's needed; arm64 builds are emulated
+      # by the runner, not built on a separate arm64 host).
+      - uses: docker/setup-qemu-action@v3
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
@@ -90,7 +96,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64
+          # README badge advertises `amd64 + arm64`, and #547 promised multi-arch
+          # as part of the docker publish refresh; arm64 was never actually wired
+          # in, so Apple Silicon Macs hit `no matching manifest for linux/arm64/v8`
+          # on `docker pull ruvnet/wifi-densepose:latest` (#136, #625). Build both.
+          platforms: linux/amd64,linux/arm64
 
       # ---------------------------------------------------------------------
       # Smoke-test the freshly-pushed image:
