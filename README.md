@@ -32,7 +32,7 @@ Built on [RuVector](https://github.com/ruvnet/ruvector/) and [Cognitum Seed](htt
 
 The system learns each environment locally using spiking neural networks that adapt in under 30 seconds, with multi-frequency mesh scanning across 6 WiFi channels that uses your neighbors' routers as free radar illuminators. Every measurement is cryptographically attested via an Ed25519 witness chain.
 
-RuView also supports pose estimation (17 COCO keypoints via the WiFlow architecture), trained entirely without cameras using 10 sensor signals — a technique pioneered from the original *DensePose From WiFi* research at Carnegie Mellon University.
+RuView **ships the full training pipeline for camera-free 17-keypoint pose estimation (WiFlow + AETHER + MERIDIAN heads)** — based on the original *DensePose From WiFi* research at Carnegie Mellon University. **What ships today is the inference and training infrastructure; pretrained pose weights are not yet released** (tracked in [#509](https://github.com/ruvnet/RuView/issues/509)). With no `.rvf` model loaded, the sensing server drives the on-screen skeleton from signal-based heuristics (amplitude variance, motion-band power), not learned keypoint inference. Camera-supervised fine-tune targets **35%+ PCK@20** ([ADR-079](docs/adr/ADR-079-camera-supervised-pose-finetune.md)) — pipeline implemented, P7–P9 (data collection + training + eval) are `Pending`.
 
 ### Built for low-power edge applications
 
@@ -47,18 +47,23 @@ RuView also supports pose estimation (17 COCO keypoints via the WiFlow architect
 [![crates.io](https://img.shields.io/crates/v/wifi-densepose-ruvector.svg)](https://crates.io/crates/wifi-densepose-ruvector)
 
  
-> | What | How | Speed |
-> |------|-----|-------|
-> | 🦴 **Pose estimation** | CSI subcarrier amplitude/phase → 17 COCO keypoints | 171K emb/s (M4 Pro) |
-> | 🫁 **Breathing detection** | Bandpass 0.1-0.5 Hz → zero-crossing BPM | 6-30 BPM |
-> | 💓 **Heart rate** | Bandpass 0.8-2.0 Hz → zero-crossing BPM | 40-120 BPM |
-> | 👤 **Presence sensing** | Trained model + PIR fusion — 100% accuracy | 0.012 ms latency |
-> | 🧱 **Through-wall** | Fresnel zone geometry + multipath modeling | Up to 5m depth |
-> | 🧠 **Edge intelligence** | 8-dim feature vectors + RVF store on Cognitum Seed | $140 total BOM |
-> | 🎯 **Camera-free training** | 10 sensor signals, no labels needed | 84s on M4 Pro |
-> | 📷 **Camera-supervised training** | MediaPipe + ESP32 CSI → **35%+ PCK@20 target** (ADR-079; eval phases pending) | ~19 min on laptop (pipeline) |
-> | 📡 **Multi-frequency mesh** | Channel hopping across 6 bands, neighbor APs as illuminators | 3x sensing bandwidth |
-> | 🌐 **3D point cloud** *(optional fusion)* | Camera depth (MiDaS) + WiFi CSI + mmWave radar → unified spatial model | 22 ms pipeline · 19K+ points/frame |
+> | What | Status | How | Speed |
+> |------|--------|-----|-------|
+> | 🫁 **Breathing rate** | ✅ Works today | Bandpass 0.1-0.5 Hz → zero-crossing BPM, circular variance on wrapped phase ([#593](https://github.com/ruvnet/RuView/issues/593)) | 6-30 BPM |
+> | 💓 **Heart rate** | ✅ Works today | Bandpass 0.8-2.0 Hz → zero-crossing BPM | 40-120 BPM (needs good SNR) |
+> | 👤 **Presence indicator** | ⚠️ Heuristic, not learned | Phase variance vs adaptive threshold (60 s ambient calibration). False-positives under strong RF interference. | < 1 ms latency |
+> | 🚶 **Motion / activity** | ✅ Works today | Motion-band power + phase acceleration | Real-time |
+> | 🤸 **Fall detection** | ✅ Works today | Phase acceleration > threshold + 3-frame debounce + 5 s cooldown ([#263](https://github.com/ruvnet/RuView/issues/263)) | < 200 ms |
+> | 🧮 **Multi-person slot count** | ⚠️ Heuristic, not learned | Subcarrier diversity divided by 2 (capped). **Not** a learned counter — see [firmware README](firmware/esp32-csi-node/README.md#tier-2--full-pipeline-stable) "Tier 2 caveats". Adaptive normalisation fix in [#491](https://github.com/ruvnet/RuView/pull/491). | Real-time |
+> | 🦴 **17-keypoint pose estimation** | 🔬 Pipeline only, no shipped weights | Training infrastructure complete (WiFlow + AETHER + MERIDIAN heads); pretrained `.rvf` not yet released. Fallback heuristic in the meantime. Tracked in [#509](https://github.com/ruvnet/RuView/issues/509). | Pending data collection |
+> | 🧱 **Through-wall sensing** | ✅ Works today | Fresnel zone geometry + multipath modeling | Up to ~5m signal-dependent |
+> | 🧠 **Edge intelligence** | ✅ Works today | Optional Cognitum Seed for persistent vector store + kNN + witness chain | $140 total BOM |
+> | 🎯 **Camera-free pre-training** | ✅ Pipeline works | MM-Fi + Wi-Pose datasets through `wifi-densepose-train`. Released weights pending [#509](https://github.com/ruvnet/RuView/issues/509). | 84 s/epoch on M4 Pro |
+> | 📷 **Camera-supervised fine-tune** | 🔬 Pipeline only | MediaPipe + ESP32 CSI paired training, [ADR-079](docs/adr/ADR-079-camera-supervised-pose-finetune.md). Target **35%+ PCK@20**. P7–P9 (data + train + eval) `Pending`. | ~19 min/epoch on laptop |
+> | 📡 **Multi-frequency mesh** | ✅ Works today | Channel hopping across 6 bands, TDM slot scheduling (ADR-029) | 3x sensing bandwidth |
+> | 🌐 **3D point cloud fusion** | 🔬 Reference impl | Camera depth (MiDaS) + WiFi CSI + mmWave radar → unified spatial model. Requires camera. | 22 ms pipeline · 19K+ points/frame |
+>
+> Legend: ✅ shipped + tested on hardware · ⚠️ ships and runs, but is a heuristic/threshold (not a learned classifier) — accuracy depends on calibration · 🔬 implementation + tests in repo, weights/data/eval pending
 
 ```bash
 # Option 1: Docker (simulated data, no hardware needed)
@@ -88,10 +93,10 @@ node scripts/mincut-person-counter.js --port 5006  # Correct person counting
 >
 > | Option | Hardware | Cost | Full CSI | Capabilities |
 > |--------|----------|------|----------|-------------|
-> | **ESP32 + Cognitum Seed** (recommended) | ESP32-S3 + [Cognitum Seed](https://cognitum.one) | ~$140 | Yes | Pose, breathing, heartbeat, motion, presence + persistent vector store, kNN search, witness chain, MCP proxy |
-> | **ESP32 Mesh** | 3-6x ESP32-S3 + WiFi router | ~$54 | Yes | Pose, breathing, heartbeat, motion, presence |
+> | **ESP32 + Cognitum Seed** (recommended) | ESP32-S3 + [Cognitum Seed](https://cognitum.one) | ~$140 | Yes | Presence indicator, motion, breathing rate, heart rate, fall detection, slot-count multi-person heuristic + persistent vector store, kNN search, witness chain, MCP proxy. (Pose pending weights — see [#509](https://github.com/ruvnet/RuView/issues/509).) |
+> | **ESP32 Mesh** | 3-6x ESP32-S3 + WiFi router | ~$54 | Yes | Same capabilities as above without the persistent-memory features |
 > | **Research NIC** | Intel 5300 / Atheros AR9580 | ~$50-100 | Yes | Full CSI with 3x3 MIMO |
-> | **Any WiFi** | Windows, macOS, or Linux laptop | $0 | No | RSSI-only: coarse presence and motion |
+> | **Any WiFi** | Windows, macOS, or Linux laptop | $0 | No | RSSI-only: coarse presence and motion (see [tutorial #36](https://github.com/ruvnet/RuView/issues/36)) |
 >
 > No hardware? Verify the signal processing pipeline with the deterministic reference signal: `python archive/v1/data/proof/verify.py`
 >
