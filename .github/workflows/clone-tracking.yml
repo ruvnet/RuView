@@ -1,0 +1,149 @@
+name: GitHub Clone Tracking → data/clone-data.rvf
+
+# Persists rolling 14-day clone-traffic snapshots to data/clone-data.rvf in
+# the ruvector JSONL RVF format. GitHub's /traffic/clones endpoint only
+# retains the last 14 days server-side, so without this scheduled scrape
+# the data is gone forever the moment it falls outside the window.
+#
+# Format: JSONL RVF
+#   - line 1 is a `metadata` segment that initializes the file
+#   - each subsequent run appends one `clone_snapshot` segment carrying the
+#     14-day rollup PLUS per-day breakdown
+#   - file is idempotent: per-day entries are keyed by `timestamp` so a
+#     downstream reader can dedupe across overlapping snapshot windows
+#
+# Schedule: every 14 days (1st + 15th of each month, ~14-day cadence in
+# practice). Workflow can also be dispatched manually for backfill or test.
+
+on:
+  schedule:
+    # 01:23 UTC on the 1st and 15th of every month — close to 14-day cadence
+    # without cron's "every 14 days" monthly-reset weirdness. Picking :23
+    # avoids the cron herd on :00.
+    - cron: '23 1 1,15 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clone-tracking
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch /traffic/clones + /traffic/views from GitHub
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p data
+          gh api repos/${{ github.repository }}/traffic/clones > /tmp/clones.json
+          gh api repos/${{ github.repository }}/traffic/views > /tmp/views.json
+          echo "--- clones rollup ---"
+          jq '{count, uniques, days: (.clones | length)}' /tmp/clones.json
+          echo "--- views rollup ---"
+          jq '{count, uniques, days: (.views | length)}' /tmp/views.json
+
+      - name: Append snapshot to data/clone-data.rvf
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+          RVF="data/clone-data.rvf"
+          FETCHED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Initialize the file with a metadata segment on first run.
+          if [ ! -f "$RVF" ]; then
+            echo "Initializing $RVF with metadata segment"
+            jq -n --arg repo "$REPO" --arg ts "$FETCHED_AT" '{
+              type: "metadata",
+              name: "ruview-clone-traffic-history",
+              version: "1.0.0",
+              schema: "ruvector.rvf.jsonl/v1",
+              format: "github-traffic-snapshots",
+              repo: $repo,
+              source: "GitHub Traffic API /repos/{repo}/traffic/{clones,views}",
+              policy: "GitHub retains only 14 days server-side; this file is the long-term record.",
+              segments: ["metadata", "clone_snapshot", "view_snapshot"],
+              created_at: $ts,
+              custom: {
+                cadence: "twice monthly (1st and 15th, ~14-day intervals)",
+                idempotency_key: "timestamp (per-day records de-duplicate across overlapping snapshot windows)"
+              }
+            }' >> "$RVF"
+          fi
+
+          # Append the clone snapshot.
+          jq --arg ts "$FETCHED_AT" '{
+            type: "clone_snapshot",
+            fetched_at: $ts,
+            window_count: .count,
+            window_uniques: .uniques,
+            per_day: .clones
+          }' /tmp/clones.json >> "$RVF"
+
+          # Append the views snapshot (free with the same auth).
+          jq --arg ts "$FETCHED_AT" '{
+            type: "view_snapshot",
+            fetched_at: $ts,
+            window_count: .count,
+            window_uniques: .uniques,
+            per_day: .views
+          }' /tmp/views.json >> "$RVF"
+
+          echo "--- RVF tail (last 4 lines) ---"
+          tail -4 "$RVF" | jq -c '{type, fetched_at, window_count, window_uniques}' || true
+          echo "--- file size ---"
+          wc -l "$RVF"
+
+      - name: Compute aggregates for the commit summary
+        id: agg
+        run: |
+          # Count distinct per-day entries across all snapshots so we can
+          # show "cumulative observed clones" in the commit message.
+          python3 - <<'PY'
+          import json, os
+          path = "data/clone-data.rvf"
+          per_day_clones = {}
+          per_day_views = {}
+          with open(path, encoding="utf-8") as f:
+              for line in f:
+                  if not line.strip():
+                      continue
+                  d = json.loads(line)
+                  if d.get("type") == "clone_snapshot":
+                      for entry in d.get("per_day", []):
+                          per_day_clones[entry["timestamp"]] = entry
+                  elif d.get("type") == "view_snapshot":
+                      for entry in d.get("per_day", []):
+                          per_day_views[entry["timestamp"]] = entry
+
+          tot_clones = sum(e.get("count", 0) for e in per_day_clones.values())
+          tot_uniq_clones = sum(e.get("uniques", 0) for e in per_day_clones.values())
+          tot_views = sum(e.get("count", 0) for e in per_day_views.values())
+          tot_uniq_views = sum(e.get("uniques", 0) for e in per_day_views.values())
+          print(f"clone days observed: {len(per_day_clones)}  total clones: {tot_clones:,}  total unique cloners: {tot_uniq_clones:,}")
+          print(f"view  days observed: {len(per_day_views)}  total views:  {tot_views:,}  total unique viewers:  {tot_uniq_views:,}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"clones={tot_clones}\n")
+              out.write(f"clone_days={len(per_day_clones)}\n")
+              out.write(f"views={tot_views}\n")
+              out.write(f"view_days={len(per_day_views)}\n")
+          PY
+
+      - name: Commit + push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet data/clone-data.rvf; then
+            echo "no changes to commit"
+            exit 0
+          fi
+          git add data/clone-data.rvf
+          git commit -m "chore(traffic): clone snapshot — ${{ steps.agg.outputs.clone_days }} days observed → ${{ steps.agg.outputs.clones }} clones, ${{ steps.agg.outputs.view_days }} view-days → ${{ steps.agg.outputs.views }} views"
+          git push
