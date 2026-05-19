@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RuView · ADR-097 · three.js helpers in the point cloud viewer</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='10' fill='%23e8a634'/></svg>">
+    <style>
+        :root {
+            --bg: #0a0a0a;
+            --bg-panel: rgba(0, 0, 0, 0.88);
+            --amber: #e8a634;
+            --amber-dim: #4a3a1a;
+            --amber-hot: #ffc04d;
+            --grid-major: #444444;
+            --grid-minor: #222222;
+            --green: #4f4;
+            --blue: #4cf;
+            --text-mute: #888;
+            --border: #2a2a2a;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--amber);
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', Consolas, monospace;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+        canvas { display: block; }
+
+        /* Top-left HUD */
+        #info {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            padding: 14px 16px;
+            background: var(--bg-panel);
+            border: 1px solid var(--amber);
+            border-radius: 8px;
+            min-width: 280px;
+            max-width: 340px;
+            font-size: 12px;
+            line-height: 1.55;
+            z-index: 10;
+            backdrop-filter: blur(6px);
+            box-shadow: 0 4px 24px rgba(232, 166, 52, 0.08);
+        }
+        #info h1 { margin: 0 0 2px 0; font-size: 14px; letter-spacing: 0.5px; }
+        #info .sub { font-size: 11px; color: var(--text-mute); margin-bottom: 10px; }
+        #info .row { display: flex; justify-content: space-between; gap: 12px; margin: 2px 0; }
+        #info .row .k { color: var(--text-mute); }
+        #info .row .v { color: var(--amber); font-variant-numeric: tabular-nums; }
+        #info .row .v.live { color: var(--green); }
+
+        /* Bottom-left helper toggle panel */
+        #controls {
+            position: absolute;
+            bottom: 16px;
+            left: 16px;
+            padding: 12px 14px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 12px;
+            z-index: 10;
+            backdrop-filter: blur(6px);
+            min-width: 220px;
+        }
+        #controls h2 {
+            margin: 0 0 8px 0;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            color: var(--text-mute);
+            font-weight: 600;
+        }
+        #controls label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 0;
+            cursor: pointer;
+            user-select: none;
+        }
+        #controls label:hover { color: var(--amber-hot); }
+        #controls input[type=checkbox] {
+            accent-color: var(--amber);
+            width: 14px;
+            height: 14px;
+            cursor: pointer;
+        }
+        #controls .helper-swatch {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+            margin-left: auto;
+        }
+
+        /* Bottom-right ADR badge */
+        #adr-badge {
+            position: absolute;
+            bottom: 16px;
+            right: 16px;
+            padding: 8px 12px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 11px;
+            color: var(--text-mute);
+            z-index: 10;
+            backdrop-filter: blur(6px);
+        }
+        #adr-badge a { color: var(--amber); text-decoration: none; }
+        #adr-badge a:hover { color: var(--amber-hot); }
+
+        /* Top-right legend */
+        #legend {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            padding: 12px 14px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 11px;
+            z-index: 10;
+            backdrop-filter: blur(6px);
+            min-width: 200px;
+        }
+        #legend h2 {
+            margin: 0 0 8px 0;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            color: var(--text-mute);
+            font-weight: 600;
+        }
+        #legend .item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 3px 0;
+        }
+        #legend .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        #legend .label { font-size: 11px; line-height: 1.3; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+    <div id="info">
+        <h1>RuView · Helpers Demo</h1>
+        <div class="sub">ADR-097 · three.js helpers for the point cloud viewer</div>
+        <div class="row"><span class="k">Scene</span><span class="v live">● SYNTHETIC</span></div>
+        <div class="row"><span class="k">Skeleton</span><span class="v">17 kpts · COCO</span></div>
+        <div class="row"><span class="k">Point cloud</span><span class="v" id="pc-count">— pts</span></div>
+        <div class="row"><span class="k">Sensor nodes</span><span class="v">4 · multistatic</span></div>
+        <div class="row"><span class="k">Frame rate</span><span class="v" id="fps">— fps</span></div>
+        <div class="row"><span class="k">Bbox volume</span><span class="v" id="bbox-vol">— m³</span></div>
+    </div>
+
+    <div id="controls">
+        <h2>Helpers</h2>
+        <label><input type="checkbox" id="t-grid" checked>GridHelper<span class="helper-swatch" style="background:#444"></span></label>
+        <label><input type="checkbox" id="t-polar" checked>PolarGridHelper<span class="helper-swatch" style="background:#4a3a1a"></span></label>
+        <label><input type="checkbox" id="t-bbox" checked>BoxHelper<span class="helper-swatch" style="background:#e8a634"></span></label>
+        <label><input type="checkbox" id="t-axes" checked>AxesHelper<span class="helper-swatch" style="background:linear-gradient(90deg,#f44,#4f4,#4cf)"></span></label>
+        <label><input type="checkbox" id="t-nodebox" checked>Per-node BoxHelpers<span class="helper-swatch" style="background:#4cf"></span></label>
+    </div>
+
+    <div id="legend">
+        <h2>Scene</h2>
+        <div class="item"><span class="dot" style="background:#ffff00"></span><span class="label">COCO-17 keypoints (yellow)</span></div>
+        <div class="item"><span class="dot" style="background:#ffffff"></span><span class="label">Bones (white lines)</span></div>
+        <div class="item"><span class="dot" style="background:#4cf"></span><span class="label">Face point cloud (cyan→white)</span></div>
+        <div class="item"><span class="dot" style="background:#e8a634"></span><span class="label">ESP32 sensor nodes</span></div>
+    </div>
+
+    <div id="adr-badge">
+        ADR-097 · <a href="https://threejs.org/examples/#webgl_helpers" target="_blank" rel="noopener">three.js helpers</a>
+    </div>
+
+    <script>
+        // =====================================================================
+        //  RuView · ADR-097 · three.js helpers demo
+        //  --------------------------------------------------------------------
+        //  Self-contained, no backend. Demonstrates how `GridHelper`,
+        //  `PolarGridHelper`, `BoxHelper`, and `AxesHelper` slot into the
+        //  RuView point cloud viewer (`v2/crates/wifi-densepose-pointcloud
+        //  /src/viewer.html`). Open this file in a browser — no build step.
+        //
+        //  The scene contains:
+        //    1. A synthetic walking, breathing 17-keypoint skeleton.
+        //    2. A face-shaped point cloud attached to the skeleton head.
+        //    3. Four multistatic sensor-node markers arranged around the room.
+        //    4. All four ADR-097 helpers, toggleable from the bottom-left panel.
+        //
+        //  Coordinate frame matches the production viewer:
+        //    +X = right, +Y = up, +Z = away from camera.
+        //    Floor at y = -1.5, person hip at y = 0, head reaches ~ y = 0.7.
+        // =====================================================================
+
+        const COCO_BONES = [
+            // head
+            [0, 1], [0, 2], [1, 3], [2, 4],
+            // torso
+            [5, 6], [5, 11], [6, 12], [11, 12],
+            // left arm
+            [5, 7], [7, 9],
+            // right arm
+            [6, 8], [8, 10],
+            // left leg
+            [11, 13], [13, 15],
+            // right leg
+            [12, 14], [14, 16],
+        ];
+
+        // Static "T-pose" skeleton in local frame, animated each frame.
+        // 17 keypoints in COCO order. Units: meters.
+        const SKELETON_BASE = {
+            0:  [ 0.00,  0.65,  0.00], // nose
+            1:  [-0.04,  0.68,  0.04], // L eye
+            2:  [ 0.04,  0.68,  0.04], // R eye
+            3:  [-0.08,  0.64,  0.00], // L ear
+            4:  [ 0.08,  0.64,  0.00], // R ear
+            5:  [-0.18,  0.45,  0.00], // L shoulder
+            6:  [ 0.18,  0.45,  0.00], // R shoulder
+            7:  [-0.22,  0.20,  0.00], // L elbow
+            8:  [ 0.22,  0.20,  0.00], // R elbow
+            9:  [-0.26, -0.05,  0.00], // L wrist
+            10: [ 0.26, -0.05,  0.00], // R wrist
+            11: [-0.10,  0.00,  0.00], // L hip
+            12: [ 0.10,  0.00,  0.00], // R hip
+            13: [-0.12, -0.40,  0.00], // L knee
+            14: [ 0.12, -0.40,  0.00], // R knee
+            15: [-0.12, -0.80,  0.00], // L ankle
+            16: [ 0.12, -0.80,  0.00], // R ankle
+        };
+
+        // ---------------------------------------------------------------------
+        //  Scene + camera + renderer
+        // ---------------------------------------------------------------------
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0a0a);
+        scene.fog = new THREE.Fog(0x0a0a0a, 6, 14);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.05, 100);
+        camera.position.set(3.0, 1.4, 4.2);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 0, 0);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.minDistance = 1.5;
+        controls.maxDistance = 12;
+        controls.maxPolarAngle = Math.PI * 0.92;
+
+        // ---------------------------------------------------------------------
+        //  ADR-097 helpers — wired to checkbox toggles
+        // ---------------------------------------------------------------------
+        //  GridHelper — Cartesian floor reference. Establishes "down" and
+        //  scale: 4 m × 4 m floor, 20 divisions = 0.2 m grid spacing.
+        const gridHelper = new THREE.GridHelper(4, 20, 0x444444, 0x222222);
+        gridHelper.position.y = -1.5;
+        scene.add(gridHelper);
+
+        //  PolarGridHelper — multistatic geometry reference. 16 radial
+        //  divisions (angular bins) × 4 concentric circles, centered on
+        //  the fusion target. Matches the bin count in
+        //  signal/src/ruvsense/multistatic.rs:attention_weight().
+        const polarHelper = new THREE.PolarGridHelper(2.2, 16, 4, 64, 0x4a3a1a, 0x2a1f10);
+        polarHelper.position.y = -1.499; // a hair above grid to avoid z-fight
+        scene.add(polarHelper);
+
+        //  AxesHelper — XYZ tripod at origin. Red = X, green = Y, blue = Z.
+        const axesHelper = new THREE.AxesHelper(0.5);
+        axesHelper.position.set(0, -1.49, 0);
+        scene.add(axesHelper);
+
+        //  BoxHelper — per-person bounding volume. Refreshed each frame
+        //  after the skeleton is updated. Color = RuView amber.
+        let bboxHelper = null;
+
+        // ---------------------------------------------------------------------
+        //  Skeleton — joint spheres + bone lines, animated
+        // ---------------------------------------------------------------------
+        const skeletonGroup = new THREE.Group();
+        scene.add(skeletonGroup);
+
+        const jointGeo = new THREE.SphereGeometry(0.025, 12, 12);
+        const jointMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+        const joints = [];
+        for (let i = 0; i < 17; i++) {
+            const sphere = new THREE.Mesh(jointGeo, jointMat);
+            const p = SKELETON_BASE[i];
+            sphere.position.set(p[0], p[1], p[2]);
+            sphere.userData.baseY = p[1];
+            sphere.userData.baseX = p[0];
+            sphere.userData.idx = i;
+            skeletonGroup.add(sphere);
+            joints.push(sphere);
+        }
+
+        const boneMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 });
+        const bones = [];
+        for (const [a, b] of COCO_BONES) {
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+            const line = new THREE.Line(geom, boneMat);
+            line.userData = { a, b };
+            skeletonGroup.add(line);
+            bones.push(line);
+        }
+
+        // ---------------------------------------------------------------------
+        //  Face point cloud — synthetic ellipsoid attached to head keypoint
+        // ---------------------------------------------------------------------
+        const FACE_POINTS = 600;
+        const facePositions = new Float32Array(FACE_POINTS * 3);
+        const faceColors    = new Float32Array(FACE_POINTS * 3);
+        const faceOffsets   = new Float32Array(FACE_POINTS * 3); // canonical face shape, relative to nose
+
+        for (let i = 0; i < FACE_POINTS; i++) {
+            // Sample points roughly on a face-shaped ellipsoid (taller than wide).
+            const u = Math.random() * Math.PI * 2;
+            const v = (Math.random() - 0.5) * Math.PI;
+            const cu = Math.cos(u), su = Math.sin(u);
+            const cv = Math.cos(v), sv = Math.sin(v);
+            // ellipsoid radii (head-like proportions)
+            const rx = 0.085, ry = 0.105, rz = 0.075;
+            faceOffsets[i * 3 + 0] = rx * cv * cu;
+            faceOffsets[i * 3 + 1] = ry * sv;
+            faceOffsets[i * 3 + 2] = rz * cv * su;
+            // depth-encoded color: cyan at back, near-white at front (toward +Z = away from camera)
+            const depthT = (sv + 1) * 0.5;
+            faceColors[i * 3 + 0] = 0.30 + 0.70 * depthT; // R
+            faceColors[i * 3 + 1] = 0.80 + 0.20 * depthT; // G
+            faceColors[i * 3 + 2] = 1.00;                 // B
+        }
+        const faceGeom = new THREE.BufferGeometry();
+        faceGeom.setAttribute('position', new THREE.BufferAttribute(facePositions, 3));
+        faceGeom.setAttribute('color',    new THREE.BufferAttribute(faceColors, 3));
+        const faceMat = new THREE.PointsMaterial({
+            size: 0.012,
+            vertexColors: true,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity: 0.9,
+        });
+        const facePoints = new THREE.Points(faceGeom, faceMat);
+        skeletonGroup.add(facePoints);
+        document.getElementById('pc-count').textContent = FACE_POINTS + ' pts';
+
+        // ---------------------------------------------------------------------
+        //  Multistatic sensor nodes — 4 ESP32 markers around the room
+        // ---------------------------------------------------------------------
+        const nodeGroup = new THREE.Group();
+        scene.add(nodeGroup);
+
+        const NODE_POSITIONS = [
+            [-1.9,  1.3,  1.9],   // back-left high
+            [ 1.9,  1.3,  1.9],   // back-right high
+            [-1.9,  1.3, -1.9],   // front-left high
+            [ 1.9,  1.3, -1.9],   // front-right high
+        ];
+        const nodeBboxHelpers = [];
+        const nodeGeo = new THREE.BoxGeometry(0.12, 0.06, 0.18);
+        const nodeMat = new THREE.MeshBasicMaterial({ color: 0xe8a634 });
+        const nodeAntennaGeo = new THREE.ConeGeometry(0.018, 0.08, 8);
+        const nodeAntennaMat = new THREE.MeshBasicMaterial({ color: 0xffc04d });
+
+        NODE_POSITIONS.forEach((pos, i) => {
+            const group = new THREE.Group();
+            group.position.set(pos[0], pos[1], pos[2]);
+
+            const body = new THREE.Mesh(nodeGeo, nodeMat);
+            group.add(body);
+
+            // little antenna sticking up
+            const antenna = new THREE.Mesh(nodeAntennaGeo, nodeAntennaMat);
+            antenna.position.y = 0.07;
+            group.add(antenna);
+
+            // pulsing emissive ring (visualizes RX activity)
+            const ringGeo = new THREE.RingGeometry(0.10, 0.13, 32);
+            const ringMat = new THREE.MeshBasicMaterial({ color: 0xe8a634, side: THREE.DoubleSide, transparent: true, opacity: 0.4 });
+            const ring = new THREE.Mesh(ringGeo, ringMat);
+            ring.rotation.x = -Math.PI / 2;
+            ring.position.y = -0.04;
+            ring.userData.phase = i * 0.5;
+            group.add(ring);
+            group.userData.ring = ring;
+
+            // sight-line from node to scene origin (visualizes multistatic geometry)
+            const sightGeo = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, 0, 0),
+                new THREE.Vector3(-pos[0], -pos[1], -pos[2]),
+            ]);
+            const sightMat = new THREE.LineDashedMaterial({
+                color: 0xe8a634, transparent: true, opacity: 0.18,
+                dashSize: 0.1, gapSize: 0.06,
+            });
+            const sightLine = new THREE.Line(sightGeo, sightMat);
+            sightLine.computeLineDistances();
+            group.add(sightLine);
+
+            nodeGroup.add(group);
+
+            // ADR-097 §3.3 — per-node BoxHelper. Demonstrates that helpers
+            // compose naturally: one box per detected object.
+            const bbox = new THREE.BoxHelper(group, 0x4cf);
+            scene.add(bbox);
+            nodeBboxHelpers.push(bbox);
+        });
+
+        // ---------------------------------------------------------------------
+        //  Animation — synthetic motion model
+        // ---------------------------------------------------------------------
+        let frameStart = performance.now();
+        let frameCount = 0;
+        let fpsAvg = 0;
+
+        function applyPose(t) {
+            // Body sway (slow), breathing (chest expansion), arm/leg swing (walking).
+            const swayX = Math.sin(t * 0.35) * 0.05;
+            const swayZ = Math.cos(t * 0.27) * 0.04;
+            const breathe = Math.sin(t * 1.4) * 0.012;   // chest in/out
+            const walkPhase = t * 1.9;                    // walk cycle
+
+            skeletonGroup.position.set(swayX, 0, swayZ);
+            skeletonGroup.rotation.y = Math.sin(t * 0.22) * 0.18;
+
+            for (let i = 0; i < 17; i++) {
+                const base = SKELETON_BASE[i];
+                let dx = 0, dy = 0, dz = 0;
+
+                // breathing — shoulders + nose rise a little
+                if (i === 0 || i === 1 || i === 2) dy = breathe * 0.6;
+                if (i === 5 || i === 6) dy = breathe;
+
+                // arm swing (opposite of legs)
+                if (i === 7) { dz =  Math.sin(walkPhase) * 0.10; dy += Math.cos(walkPhase) * 0.04; }
+                if (i === 9) { dz =  Math.sin(walkPhase) * 0.18; dy += Math.cos(walkPhase) * 0.06; }
+                if (i === 8) { dz = -Math.sin(walkPhase) * 0.10; dy += Math.cos(walkPhase) * 0.04; }
+                if (i === 10){ dz = -Math.sin(walkPhase) * 0.18; dy += Math.cos(walkPhase) * 0.06; }
+
+                // leg swing
+                if (i === 13){ dz = -Math.sin(walkPhase) * 0.08; }
+                if (i === 15){ dz = -Math.sin(walkPhase) * 0.15; dy = Math.max(0, Math.cos(walkPhase)) * 0.04; }
+                if (i === 14){ dz =  Math.sin(walkPhase) * 0.08; }
+                if (i === 16){ dz =  Math.sin(walkPhase) * 0.15; dy = Math.max(0, -Math.cos(walkPhase)) * 0.04; }
+
+                joints[i].position.set(base[0] + dx, base[1] + dy, base[2] + dz);
+            }
+
+            // update bone line vertices from current joint positions
+            for (const line of bones) {
+                const { a, b } = line.userData;
+                const pa = joints[a].position;
+                const pb = joints[b].position;
+                const pos = line.geometry.attributes.position;
+                pos.array[0] = pa.x; pos.array[1] = pa.y; pos.array[2] = pa.z;
+                pos.array[3] = pb.x; pos.array[4] = pb.y; pos.array[5] = pb.z;
+                pos.needsUpdate = true;
+            }
+
+            // attach face point cloud to the nose keypoint (kpt 0)
+            const nose = joints[0].position;
+            const positions = faceGeom.attributes.position;
+            const headTurn = Math.sin(t * 0.6) * 0.35; // y-axis nod
+            const cosH = Math.cos(headTurn), sinH = Math.sin(headTurn);
+            for (let i = 0; i < FACE_POINTS; i++) {
+                const ox = faceOffsets[i * 3 + 0];
+                const oy = faceOffsets[i * 3 + 1];
+                const oz = faceOffsets[i * 3 + 2];
+                // rotate offset around Y axis by headTurn
+                const rx = cosH * ox + sinH * oz;
+                const rz = -sinH * ox + cosH * oz;
+                positions.array[i * 3 + 0] = nose.x + rx;
+                positions.array[i * 3 + 1] = nose.y + oy;
+                positions.array[i * 3 + 2] = nose.z + rz;
+            }
+            positions.needsUpdate = true;
+        }
+
+        function updateNodes(t) {
+            nodeGroup.children.forEach((node, i) => {
+                const ring = node.userData.ring;
+                const phase = (t * 1.8 + ring.userData.phase) % (Math.PI * 2);
+                ring.material.opacity = 0.18 + 0.42 * Math.max(0, Math.cos(phase));
+                ring.scale.setScalar(1 + 0.18 * Math.max(0, Math.cos(phase)));
+            });
+        }
+
+        function updateBboxHelper() {
+            const want = document.getElementById('t-bbox').checked;
+            if (!want) {
+                if (bboxHelper) { scene.remove(bboxHelper); bboxHelper = null; }
+                return;
+            }
+            skeletonGroup.updateMatrixWorld(true);
+            if (!bboxHelper) {
+                bboxHelper = new THREE.BoxHelper(skeletonGroup, 0xe8a634);
+                scene.add(bboxHelper);
+            } else {
+                bboxHelper.setFromObject(skeletonGroup);
+            }
+            // compute volume for the HUD
+            const box = new THREE.Box3().setFromObject(skeletonGroup);
+            const size = box.getSize(new THREE.Vector3());
+            document.getElementById('bbox-vol').textContent =
+                (size.x * size.y * size.z).toFixed(3) + ' m³';
+        }
+
+        function tick() {
+            const now = performance.now();
+            const t = now * 0.001;
+            const dt = now - frameStart;
+            frameStart = now;
+            frameCount++;
+            if (frameCount % 30 === 0) {
+                fpsAvg = 1000 / dt;
+                document.getElementById('fps').textContent = fpsAvg.toFixed(0) + ' fps';
+            }
+
+            applyPose(t);
+            updateNodes(t);
+            updateBboxHelper();
+
+            controls.update();
+            renderer.render(scene, camera);
+            requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+
+        // ---------------------------------------------------------------------
+        //  Controls wiring — checkbox toggles attach/detach helpers from scene
+        // ---------------------------------------------------------------------
+        function bindToggle(id, obj) {
+            const el = document.getElementById(id);
+            el.addEventListener('change', () => {
+                if (el.checked) {
+                    if (!scene.children.includes(obj)) scene.add(obj);
+                } else {
+                    scene.remove(obj);
+                }
+            });
+        }
+        bindToggle('t-grid',  gridHelper);
+        bindToggle('t-polar', polarHelper);
+        bindToggle('t-axes',  axesHelper);
+
+        // per-node bbox toggle (group of 4)
+        document.getElementById('t-nodebox').addEventListener('change', (e) => {
+            for (const bb of nodeBboxHelpers) {
+                if (e.target.checked) {
+                    if (!scene.children.includes(bb)) scene.add(bb);
+                } else {
+                    scene.remove(bb);
+                }
+            }
+        });
+
+        // ---------------------------------------------------------------------
+        //  Resize
+        // ---------------------------------------------------------------------
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

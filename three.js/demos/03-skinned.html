@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RuView · Skinned · ADR-097 + GLTF skinned mesh + additive animation blending</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='10' fill='%23e8a634'/></svg>">
+    <style>
+        :root {
+            --bg: #050507;
+            --bg-panel: rgba(8, 10, 14, 0.78);
+            --amber: #ffb840;
+            --amber-hot: #ffe09f;
+            --cyan: #4cf;
+            --magenta: #ff4cc8;
+            --text: #d8c69a;
+            --text-mute: #6b6155;
+            --border: rgba(255, 184, 64, 0.18);
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; background: var(--bg); color: var(--text); overflow: hidden;
+            font-family: 'SF Mono', 'Cascadia Code', Consolas, monospace;
+            -webkit-font-smoothing: antialiased; font-size: 12px;
+        }
+        canvas { display: block; }
+
+        .overlay-frame {
+            position: fixed; inset: 0; pointer-events: none; z-index: 5;
+            background:
+                radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%),
+                linear-gradient(180deg, rgba(0,0,0,0.32) 0%, transparent 18%, transparent 82%, rgba(0,0,0,0.38) 100%);
+        }
+        .scanlines {
+            position: fixed; inset: 0; pointer-events: none; z-index: 6;
+            background: repeating-linear-gradient(0deg, rgba(0,0,0,0.04) 0px, rgba(0,0,0,0.04) 1px, transparent 1px, transparent 3px);
+            mix-blend-mode: overlay; opacity: 0.5;
+        }
+        .panel {
+            position: absolute; background: var(--bg-panel); border: 1px solid var(--border);
+            border-radius: 4px; padding: 12px 14px; backdrop-filter: blur(8px);
+            box-shadow: 0 1px 0 rgba(255, 184, 64, 0.04), 0 8px 32px rgba(0,0,0,0.55); z-index: 10;
+        }
+        .panel h2 {
+            margin: 0 0 8px 0; font-size: 10px; text-transform: uppercase; letter-spacing: 2px;
+            color: var(--amber); font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: 6px;
+        }
+
+        #info { top: 20px; left: 20px; min-width: 280px; }
+        #info h1 { margin: 0 0 1px 0; font-size: 13px; letter-spacing: 1px; color: var(--amber-hot); font-weight: 600; }
+        #info .sub { font-size: 10px; color: var(--text-mute); letter-spacing: 0.5px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+        #info .row { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+        #info .row .k { color: var(--text-mute); font-size: 11px; }
+        #info .row .v { color: var(--text); font-variant-numeric: tabular-nums; font-size: 11px; }
+        #info .row .v.amber { color: var(--amber); }
+        #info .row .v.cyan  { color: var(--cyan); }
+        #info .row .v.mag   { color: var(--magenta); }
+
+        #anim {
+            position: absolute; bottom: 20px; left: 20px; min-width: 280px;
+            background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px;
+            padding: 12px 14px; backdrop-filter: blur(8px); z-index: 10;
+        }
+        #anim h2 { margin: 0 0 8px 0; font-size: 10px; text-transform: uppercase; letter-spacing: 2px;
+            color: var(--amber); font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+        #anim .group { padding: 6px 0; border-bottom: 1px solid rgba(255,184,64,0.08); }
+        #anim .group:last-child { border-bottom: none; }
+        #anim .group-label { font-size: 10px; color: var(--text-mute); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+        #anim button {
+            background: rgba(255,184,64,0.06); border: 1px solid rgba(255,184,64,0.18);
+            color: var(--text); font-family: inherit; font-size: 10px; padding: 4px 8px;
+            margin: 2px 4px 2px 0; cursor: pointer; border-radius: 3px; letter-spacing: 0.5px;
+        }
+        #anim button:hover { background: rgba(255,184,64,0.14); color: var(--amber-hot); }
+        #anim button.active { background: var(--amber); color: var(--bg); border-color: var(--amber); font-weight: 600; }
+        #anim .slider-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 10px; }
+        #anim .slider-row .label { width: 90px; color: var(--text-mute); }
+        #anim .slider-row input[type=range] { flex: 1; accent-color: var(--amber); }
+        #anim .slider-row .val { width: 38px; text-align: right; color: var(--amber); font-variant-numeric: tabular-nums; }
+
+        #csi { top: 20px; right: 20px; min-width: 260px; }
+        #csi .bar-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 10px; }
+        #csi .bar-row .label { width: 42px; color: var(--text-mute); }
+        #csi .bar-row .bar-track { flex: 1; height: 6px; background: rgba(255,184,64,0.08); border-radius: 2px; overflow: hidden; }
+        #csi .bar-row .bar-fill {
+            height: 100%; background: linear-gradient(90deg, var(--amber-hot), var(--amber));
+            box-shadow: 0 0 6px var(--amber); transition: width 0.08s linear;
+        }
+        #csi .bar-row .val { width: 36px; text-align: right; color: var(--amber); font-variant-numeric: tabular-nums; }
+
+        #helpers {
+            position: absolute; bottom: 20px; right: 20px; min-width: 220px;
+            background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px;
+            padding: 12px 14px; backdrop-filter: blur(8px); z-index: 10;
+        }
+        #helpers h2 { margin: 0 0 8px 0; font-size: 10px; text-transform: uppercase; letter-spacing: 2px;
+            color: var(--amber); font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+        #helpers label {
+            display: flex; align-items: center; gap: 10px; padding: 3px 0; cursor: pointer; user-select: none; font-size: 11px;
+        }
+        #helpers label:hover { color: var(--amber-hot); }
+        #helpers input[type=checkbox] { accent-color: var(--amber); width: 13px; height: 13px; cursor: pointer; }
+        #helpers .swatch { width: 8px; height: 8px; border-radius: 50%; margin-left: auto; box-shadow: 0 0 6px currentColor; }
+
+        #loading {
+            position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+            background: rgba(5, 5, 7, 0.96); z-index: 20; font-size: 13px; color: var(--amber);
+            letter-spacing: 2px; text-transform: uppercase;
+        }
+        #loading.hidden { display: none; }
+        #loading .text {
+            text-shadow: 0 0 12px var(--amber);
+            animation: loadPulse 1.4s ease-in-out infinite;
+        }
+        @keyframes loadPulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1.0; } }
+
+        @keyframes scanFlash {
+            0% { opacity: 0; } 10% { opacity: 0.12; } 100% { opacity: 0; }
+        }
+        .scan-flash {
+            position: fixed; inset: 0;
+            background: linear-gradient(90deg, transparent, var(--magenta), transparent);
+            mix-blend-mode: screen; pointer-events: none; opacity: 0; z-index: 4;
+        }
+
+        #titlecard {
+            position: absolute; bottom: 76px; left: 50%; transform: translateX(-50%);
+            text-align: center; color: var(--amber-hot); letter-spacing: 6px; font-size: 11px;
+            text-transform: uppercase; opacity: 0.35; z-index: 10;
+            text-shadow: 0 0 12px var(--amber); pointer-events: none;
+        }
+        #titlecard .sub { font-size: 9px; color: var(--text-mute); letter-spacing: 4px; margin-top: 4px; }
+
+        #adr-badge {
+            position: absolute; top: 50%; right: 20px; transform: translateY(-50%);
+            padding: 6px 10px; background: var(--bg-panel); border: 1px solid var(--border);
+            border-radius: 4px; font-size: 9px; color: var(--text-mute); z-index: 10;
+            backdrop-filter: blur(8px); letter-spacing: 0.5px; max-width: 70px; text-align: center; line-height: 1.5;
+        }
+        #adr-badge a { color: var(--amber); text-decoration: none; display: block; }
+        #adr-badge a:hover { color: var(--amber-hot); }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+</head>
+<body>
+    <div class="overlay-frame"></div>
+    <div class="scanlines"></div>
+    <div class="scan-flash" id="scan-flash"></div>
+
+    <div id="loading"><div class="text">▸ Loading skinned subject · Xbot.glb · 2.9 MB</div></div>
+
+    <div class="panel" id="info">
+        <h1>RuView · Skinned</h1>
+        <div class="sub">ADR-097 · GLTF skinned mesh · additive animation blending</div>
+        <div class="row"><span class="k">Subject</span><span class="v amber">● Tracked</span></div>
+        <div class="row"><span class="k">Model</span><span class="v">Xbot.glb · 14k tris</span></div>
+        <div class="row"><span class="k">Base anim</span><span class="v amber" id="base-name">walk</span></div>
+        <div class="row"><span class="k">Additive</span><span class="v mag" id="add-name">headShake · 0.40</span></div>
+        <div class="row"><span class="k">Mesh nodes</span><span class="v cyan">4 · multistatic</span></div>
+        <div class="row"><span class="k">Coherence</span><span class="v" id="coh-val">— %</span></div>
+        <div class="row"><span class="k">Heart rate</span><span class="v amber" id="hr-val">— bpm</span></div>
+        <div class="row"><span class="k">Bbox vol</span><span class="v" id="bbox-vol">— m³</span></div>
+        <div class="row"><span class="k">Render</span><span class="v" id="fps-val">— fps</span></div>
+    </div>
+
+    <div id="anim">
+        <h2>AnimationMixer</h2>
+        <div class="group">
+            <div class="group-label">Base · loops</div>
+            <button data-base="idle">idle</button>
+            <button data-base="walk" class="active">walk</button>
+            <button data-base="run">run</button>
+        </div>
+        <div class="group">
+            <div class="group-label">Additive · layered</div>
+            <button data-add="agree">agree</button>
+            <button data-add="headShake" class="active">headShake</button>
+            <button data-add="sad_pose">sad</button>
+            <button data-add="sneak_pose">sneak</button>
+        </div>
+        <div class="group">
+            <div class="slider-row">
+                <span class="label">add weight</span>
+                <input type="range" id="add-weight" min="0" max="1" step="0.01" value="0.40">
+                <span class="val" id="add-weight-val">0.40</span>
+            </div>
+            <div class="slider-row">
+                <span class="label">time scale</span>
+                <input type="range" id="time-scale" min="0.1" max="2" step="0.05" value="1.0">
+                <span class="val" id="time-scale-val">1.00</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel" id="csi">
+        <h2>Per-node CSI</h2>
+        <div class="bar-row"><span class="label">N1·BL</span><div class="bar-track"><div class="bar-fill" id="bar-0" style="width:0"></div></div><span class="val" id="val-0">—</span></div>
+        <div class="bar-row"><span class="label">N2·BR</span><div class="bar-track"><div class="bar-fill" id="bar-1" style="width:0"></div></div><span class="val" id="val-1">—</span></div>
+        <div class="bar-row"><span class="label">N3·FL</span><div class="bar-track"><div class="bar-fill" id="bar-2" style="width:0"></div></div><span class="val" id="val-2">—</span></div>
+        <div class="bar-row"><span class="label">N4·FR</span><div class="bar-track"><div class="bar-fill" id="bar-3" style="width:0"></div></div><span class="val" id="val-3">—</span></div>
+    </div>
+
+    <div id="helpers">
+        <h2>ADR-097 helpers</h2>
+        <label><input type="checkbox" id="t-grid" checked>GridHelper<span class="swatch" style="color:#666"></span></label>
+        <label><input type="checkbox" id="t-polar" checked>PolarGridHelper<span class="swatch" style="color:#ffb840"></span></label>
+        <label><input type="checkbox" id="t-bbox" checked>BoxHelper on mesh<span class="swatch" style="color:#ffe09f"></span></label>
+        <label><input type="checkbox" id="t-skel">SkeletonHelper<span class="swatch" style="color:#4cf"></span></label>
+        <label><input type="checkbox" id="t-nodebox" checked>Per-node BoxHelpers<span class="swatch" style="color:#4cf"></span></label>
+        <label><input type="checkbox" id="t-pings" checked>Sonar pings<span class="swatch" style="color:#4cf"></span></label>
+        <label><input type="checkbox" id="t-tomo" checked>Tomography sweep<span class="swatch" style="color:#ff4cc8"></span></label>
+    </div>
+
+    <div id="titlecard">
+        RuView · Seldon Vault
+        <div class="sub">skinned · ADR-097 · CCDIKSolver next</div>
+    </div>
+
+    <div id="adr-badge">
+        <a href="https://threejs.org/examples/#webgl_animation_skinning_additive_blending" target="_blank" rel="noopener">additive blend</a>
+        <a href="https://threejs.org/examples/#webgl_animation_skinning_ik" target="_blank" rel="noopener" style="margin-top:4px;">skinning IK</a>
+    </div>
+
+    <script>
+        // =====================================================================
+        //  RuView · Skinned · ADR-097 + GLTF skinned mesh + additive animation
+        //  --------------------------------------------------------------------
+        //  Replaces the procedural sphere-skeleton of helpers-cinematic.html
+        //  with a real rigged + skinned humanoid loaded from Xbot.glb. Plays
+        //  a base loop (walk / run / idle) and layers an additive pose on
+        //  top (headShake / agree / sneak / sad) — mirrors the upstream
+        //  three.js webgl_animation_skinning_additive_blending example.
+        //
+        //  All ADR-097 helpers still wrap the loaded mesh — BoxHelper picks
+        //  up the live AABB of the SkinnedMesh, the polar grid sits under
+        //  the rig, and per-node BoxHelpers wrap the four ESP32 markers.
+        //
+        //  Production path (next): swap canned GLTF animations for live
+        //  COCO-17 keypoint output → CCDIKSolver targets on hands/feet/head.
+        //  Reference: three.js webgl_animation_skinning_ik example.
+        // =====================================================================
+
+        const MODEL_URL = 'https://threejs.org/examples/models/gltf/Xbot.glb';
+
+        const NODE_POSITIONS = [
+            [-1.9, 1.3,  1.9],[ 1.9, 1.3,  1.9],
+            [-1.9, 1.3, -1.9],[ 1.9, 1.3, -1.9],
+        ];
+
+        // ---------------------------------------------------------------------
+        //  Scene
+        // ---------------------------------------------------------------------
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050507);
+        scene.fog = new THREE.FogExp2(0x050507, 0.06);
+
+        const camera = new THREE.PerspectiveCamera(48, window.innerWidth/window.innerHeight, 0.05, 100);
+        camera.position.set(3.2, 1.55, 4.0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+        renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 0.80;
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 0.9, 0);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.06;
+        controls.minDistance = 2; controls.maxDistance = 12;
+        controls.maxPolarAngle = Math.PI * 0.92;
+        controls.autoRotate = new URLSearchParams(location.search).get('orbit') === '1';
+        controls.autoRotateSpeed = 0.25;
+
+        // ---------------------------------------------------------------------
+        //  Lights — the GLTF uses PBR materials so we actually need lighting
+        //  here (unlike the all-emissive cinematic.html). Tuned to keep the
+        //  amber/cyan mood: amber hemi + amber key + cyan rim lights from
+        //  each node direction (visualizes "the nodes illuminate the subject").
+        // ---------------------------------------------------------------------
+        const hemiLight = new THREE.HemisphereLight(0x553a18, 0x080606, 0.7);
+        hemiLight.position.set(0, 4, 0);
+        scene.add(hemiLight);
+
+        const keyLight = new THREE.DirectionalLight(0xffc070, 0.95);
+        keyLight.position.set(2.5, 3.8, 2.5);
+        keyLight.castShadow = true;
+        keyLight.shadow.camera.top = 2; keyLight.shadow.camera.bottom = -2;
+        keyLight.shadow.camera.left = -2; keyLight.shadow.camera.right = 2;
+        keyLight.shadow.camera.near = 0.1; keyLight.shadow.camera.far = 12;
+        keyLight.shadow.mapSize.set(1024, 1024);
+        keyLight.shadow.bias = -0.0008;
+        scene.add(keyLight);
+
+        // cyan rim lights, one per ESP32 node — keeps the "sensed by the mesh" mood
+        const rimLights = [];
+        NODE_POSITIONS.forEach(pos => {
+            const rim = new THREE.PointLight(0x4cf, 0.55, 8, 1.8);
+            rim.position.set(pos[0] * 1.1, pos[1] * 0.7, pos[2] * 1.1);
+            scene.add(rim);
+            rimLights.push(rim);
+        });
+
+        // ---------------------------------------------------------------------
+        //  Post-processing — same composer as cinematic.html
+        // ---------------------------------------------------------------------
+        const composer = new THREE.EffectComposer(renderer);
+        composer.addPass(new THREE.RenderPass(scene, camera));
+        const bloom = new THREE.UnrealBloomPass(
+            new THREE.Vector2(window.innerWidth, window.innerHeight),
+            0.45, 0.40, 0.78,
+        );
+        composer.addPass(bloom);
+
+        const filmShader = {
+            uniforms: {
+                tDiffuse: { value: null },
+                time: { value: 0 }, grain: { value: 0.04 },
+                vignette: { value: 0.32 }, aberration: { value: 0.0018 },
+            },
+            vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+            fragmentShader: `
+                uniform sampler2D tDiffuse; uniform float time, grain, vignette, aberration;
+                varying vec2 vUv;
+                float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+                void main() {
+                    vec2 off = (vUv - 0.5) * aberration;
+                    float r = texture2D(tDiffuse, vUv + off).r;
+                    float g = texture2D(tDiffuse, vUv).g;
+                    float b = texture2D(tDiffuse, vUv - off).b;
+                    vec3 col = vec3(r, g, b);
+                    col += (hash(vUv * 1024.0 + time) - 0.5) * grain;
+                    float v = smoothstep(0.85, 0.20, length(vUv - 0.5));
+                    col *= mix(1.0 - vignette, 1.0, v);
+                    gl_FragColor = vec4(col, 1.0);
+                }`,
+        };
+        const filmPass = new THREE.ShaderPass(filmShader);
+        composer.addPass(filmPass);
+
+        // ---------------------------------------------------------------------
+        //  Floor — same procedural cyber grid (toned down for skinned scene)
+        // ---------------------------------------------------------------------
+        const floorMat = new THREE.ShaderMaterial({
+            uniforms: { time: { value: 0 }, baseColor: { value: new THREE.Color(0xffb840) } },
+            vertexShader: `varying vec3 vPos; void main() { vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+            fragmentShader: `
+                uniform float time; uniform vec3 baseColor; varying vec3 vPos;
+                void main() {
+                    vec2 g = abs(fract(vPos.xz * 0.5) - 0.5);
+                    float line = smoothstep(0.48, 0.50, max(g.x, g.y));
+                    float majorLine = smoothstep(0.96, 1.00, max(g.x, g.y) * 2.0);
+                    float scan = 0.5 + 0.5 * sin((vPos.x + vPos.z) * 2.0 - time * 1.4);
+                    scan = pow(scan, 14.0);
+                    float falloff = smoothstep(5.0, 1.2, length(vPos.xz));
+                    vec3 col = baseColor * (0.01 + 0.05 * line + 0.16 * majorLine + 0.08 * scan);
+                    gl_FragColor = vec4(col * falloff, falloff * 0.55);
+                }`,
+            transparent: true, depthWrite: false,
+        });
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.y = 0;
+        scene.add(floor);
+
+        // shadow-receiving ground (invisible, just catches the shadow)
+        const shadowGround = new THREE.Mesh(
+            new THREE.PlaneGeometry(20, 20),
+            new THREE.ShadowMaterial({ opacity: 0.55 })
+        );
+        shadowGround.rotation.x = -Math.PI / 2;
+        shadowGround.position.y = 0.001;
+        shadowGround.receiveShadow = true;
+        scene.add(shadowGround);
+
+        // ---------------------------------------------------------------------
+        //  ADR-097 helpers
+        // ---------------------------------------------------------------------
+        const gridHelper = new THREE.GridHelper(4, 20, 0x554a32, 0x2a2418);
+        gridHelper.material.transparent = true; gridHelper.material.opacity = 0.45;
+        scene.add(gridHelper);
+
+        const polarHelper = new THREE.PolarGridHelper(2.2, 16, 4, 64, 0xffb840, 0x4a3a1a);
+        polarHelper.position.y = 0.002;
+        polarHelper.material.transparent = true; polarHelper.material.opacity = 0.55;
+        scene.add(polarHelper);
+
+        let bboxHelper = null;
+        let skeletonHelper = null;
+
+        // ---------------------------------------------------------------------
+        //  Multistatic sensor nodes — same as cinematic
+        // ---------------------------------------------------------------------
+        const nodeGroup = new THREE.Group();
+        scene.add(nodeGroup);
+        const nodeBboxHelpers = [];
+        const nodeRings = [];
+        const nodeAnchors = [];
+        const nodeBodyGeo = new THREE.BoxGeometry(0.14, 0.06, 0.20);
+        const nodeBodyMat = new THREE.MeshBasicMaterial({ color: 0xffb840 });
+        const antennaGeo = new THREE.ConeGeometry(0.018, 0.10, 8);
+        const antennaMat = new THREE.MeshBasicMaterial({ color: 0xffe09f });
+
+        NODE_POSITIONS.forEach((pos, i) => {
+            const group = new THREE.Group();
+            group.position.set(pos[0], pos[1], pos[2]);
+
+            const body = new THREE.Mesh(nodeBodyGeo, nodeBodyMat);
+            group.add(body);
+            const antenna = new THREE.Mesh(antennaGeo, antennaMat);
+            antenna.position.y = 0.08; group.add(antenna);
+
+            const ring = new THREE.Mesh(
+                new THREE.RingGeometry(0.11, 0.14, 32),
+                new THREE.MeshBasicMaterial({ color: 0xffb840, side: THREE.DoubleSide, transparent: true,
+                    opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false })
+            );
+            ring.rotation.x = -Math.PI / 2; ring.position.y = -0.05;
+            ring.userData.phase = i * 0.7;
+            group.add(ring); nodeRings.push(ring);
+
+            const core = new THREE.Mesh(
+                new THREE.SphereGeometry(0.025, 12, 12),
+                new THREE.MeshBasicMaterial({ color: 0xffe09f })
+            );
+            core.position.y = 0.04; group.add(core);
+
+            nodeGroup.add(group); nodeAnchors.push(group);
+
+            const bbox = new THREE.BoxHelper(group, 0x4cf);
+            bbox.material.transparent = true; bbox.material.opacity = 0.45;
+            scene.add(bbox); nodeBboxHelpers.push(bbox);
+        });
+
+        // ---------------------------------------------------------------------
+        //  GLTF — load the rigged Xbot model
+        // ---------------------------------------------------------------------
+        let model = null;
+        let mixer = null;
+        let headBone = null;
+        const baseActions = {};      // idle / walk / run
+        const additiveActions = {};  // sneak_pose / sad_pose / agree / headShake
+        let currentBase = 'walk';
+        let currentAddName = 'headShake';
+        let addWeight = 0.40;
+
+        const loader = new THREE.GLTFLoader();
+        loader.load(MODEL_URL, (gltf) => {
+            model = gltf.scene;
+            model.position.y = 0;
+            model.traverse(obj => {
+                if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; }
+                if (obj.isBone && /head/i.test(obj.name) && !headBone) headBone = obj;
+            });
+            scene.add(model);
+
+            skeletonHelper = new THREE.SkeletonHelper(model);
+            skeletonHelper.visible = false;
+            scene.add(skeletonHelper);
+
+            mixer = new THREE.AnimationMixer(model);
+            const baseNames = new Set(['idle', 'walk', 'run']);
+            const additiveNames = new Set(['sneak_pose', 'sad_pose', 'agree', 'headShake']);
+
+            for (let i = 0; i < gltf.animations.length; i++) {
+                let clip = gltf.animations[i];
+                const name = clip.name;
+                if (baseNames.has(name)) {
+                    const action = mixer.clipAction(clip);
+                    action.enabled = true;
+                    action.setEffectiveTimeScale(1);
+                    action.setEffectiveWeight(name === currentBase ? 1 : 0);
+                    action.play();
+                    baseActions[name] = action;
+                } else if (additiveNames.has(name)) {
+                    THREE.AnimationUtils.makeClipAdditive(clip);
+                    if (name.endsWith('_pose')) {
+                        clip = THREE.AnimationUtils.subclip(clip, name, 2, 3, 30);
+                    }
+                    const action = mixer.clipAction(clip);
+                    action.enabled = true;
+                    action.setEffectiveTimeScale(1);
+                    action.setEffectiveWeight(name === currentAddName ? addWeight : 0);
+                    action.play();
+                    additiveActions[name] = action;
+                }
+            }
+
+            // build the face point cloud anchored to head bone
+            buildFacePointCloud();
+
+            document.getElementById('loading').classList.add('hidden');
+        }, (xhr) => {
+            const pct = xhr.loaded / (xhr.total || 2930032) * 100;
+            const txt = document.querySelector('#loading .text');
+            if (txt) txt.textContent = `▸ Loading skinned subject · Xbot.glb · ${pct.toFixed(0)} %`;
+        }, (err) => {
+            console.error('GLTF load failed', err);
+            document.querySelector('#loading .text').textContent = '⚠ Load failed — see console';
+        });
+
+        function setBase(name) {
+            if (!baseActions[name]) return;
+            for (const k in baseActions) {
+                const a = baseActions[k];
+                const target = (k === name) ? 1 : 0;
+                a.crossFadeTo ? null : null; // (no-op — using simple weight crossfade)
+                a.setEffectiveWeight(target);
+            }
+            currentBase = name;
+            document.getElementById('base-name').textContent = name;
+            for (const btn of document.querySelectorAll('#anim [data-base]')) {
+                btn.classList.toggle('active', btn.dataset.base === name);
+            }
+        }
+        function setAdditive(name) {
+            for (const k in additiveActions) {
+                additiveActions[k].setEffectiveWeight(k === name ? addWeight : 0);
+            }
+            currentAddName = name;
+            document.getElementById('add-name').textContent = name + ' · ' + addWeight.toFixed(2);
+            for (const btn of document.querySelectorAll('#anim [data-add]')) {
+                btn.classList.toggle('active', btn.dataset.add === name);
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        //  Face point cloud — anchored to head bone via getWorldPosition each frame
+        // ---------------------------------------------------------------------
+        const FACE_POINTS = 480;
+        const facePositions = new Float32Array(FACE_POINTS * 3);
+        const faceOffsets   = new Float32Array(FACE_POINTS * 3);
+        const facePhases    = new Float32Array(FACE_POINTS);
+        let facePoints = null;
+        function buildFacePointCloud() {
+            for (let i = 0; i < FACE_POINTS; i++) {
+                const u = Math.random() * Math.PI * 2;
+                const v = (Math.random() - 0.5) * Math.PI * 0.95;
+                const cu = Math.cos(u), su = Math.sin(u);
+                const cv = Math.cos(v), sv = Math.sin(v);
+                faceOffsets[i*3+0] = 0.085 * cv * cu;
+                faceOffsets[i*3+1] = 0.108 * sv;
+                faceOffsets[i*3+2] = 0.072 * cv * su;
+                facePhases[i] = Math.random() * Math.PI * 2;
+            }
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.BufferAttribute(facePositions, 3));
+            geom.setAttribute('aPhase',   new THREE.BufferAttribute(facePhases, 1));
+            const mat = new THREE.ShaderMaterial({
+                uniforms: { time: { value: 0 } },
+                vertexShader: `
+                    attribute float aPhase; uniform float time;
+                    varying float vAlpha;
+                    void main() {
+                        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                        float shimmer = 0.5 + 0.5 * sin(time * 3.0 + aPhase);
+                        vAlpha = 0.18 + 0.30 * shimmer;
+                        gl_Position = projectionMatrix * mv;
+                        gl_PointSize = (1.6 + shimmer * 1.0) * (200.0 / -mv.z);
+                    }`,
+                fragmentShader: `
+                    varying float vAlpha;
+                    void main() {
+                        vec2 c = gl_PointCoord - 0.5;
+                        float d = length(c);
+                        if (d > 0.5) discard;
+                        float falloff = smoothstep(0.5, 0.0, d);
+                        vec3 col = mix(vec3(0.18, 0.52, 0.72), vec3(0.55, 0.62, 0.72), 0.5);
+                        gl_FragColor = vec4(col * (1.0 + falloff * 0.3), vAlpha * falloff);
+                    }`,
+                transparent: true, depthWrite: false,
+            });
+            facePoints = new THREE.Points(geom, mat);
+            scene.add(facePoints);
+        }
+
+        // ---------------------------------------------------------------------
+        //  Sonar pings + tomography sweep — same as cinematic.html
+        // ---------------------------------------------------------------------
+        const PING_POOL = 24;
+        const pings = [];
+        const pingGeo = new THREE.TorusGeometry(1, 0.012, 8, 48);
+        for (let i = 0; i < PING_POOL; i++) {
+            const mat = new THREE.MeshBasicMaterial({ color: 0x4cf, transparent: true, opacity: 0, depthWrite: false });
+            const mesh = new THREE.Mesh(pingGeo, mat);
+            mesh.visible = false; scene.add(mesh);
+            pings.push({ mesh, active: false, t0: 0, duration: 0,
+                origin: new THREE.Vector3(), target: new THREE.Vector3() });
+        }
+        let pingIndex = 0;
+        function emitPing(origin, target) {
+            const p = pings[pingIndex]; pingIndex = (pingIndex + 1) % PING_POOL;
+            p.active = true; p.t0 = performance.now() * 0.001;
+            p.duration = 0.55 + Math.random() * 0.20;
+            p.origin.copy(origin); p.target.copy(target);
+            p.mesh.position.copy(origin); p.mesh.visible = true;
+            p.mesh.material.opacity = 0;
+            const dir = new THREE.Vector3().subVectors(target, origin).normalize();
+            p.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+        }
+
+        const tomoMat = new THREE.ShaderMaterial({
+            uniforms: { time: { value: 0 }, intensity: { value: 0 } },
+            vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+            fragmentShader: `
+                uniform float time, intensity; varying vec2 vUv;
+                void main() {
+                    float band = exp(-pow((vUv.x - 0.5) * 14.0, 2.0));
+                    float lines = 0.5 + 0.5 * sin(vUv.y * 90.0 + time * 4.0);
+                    vec3 col = vec3(1.0, 0.3, 0.78) * band * (0.6 + 0.4 * lines);
+                    gl_FragColor = vec4(col, intensity * band * 0.75);
+                }`,
+            transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+        });
+        const tomoPlane = new THREE.Mesh(new THREE.PlaneGeometry(8, 6), tomoMat);
+        tomoPlane.rotation.y = Math.PI / 2;
+        tomoPlane.position.set(-2, 1.0, 0);
+        tomoPlane.visible = false;
+        scene.add(tomoPlane);
+        let tomoActive = false, tomoT0 = 0, tomoNextAt = 4 + Math.random() * 4;
+
+        // ---------------------------------------------------------------------
+        //  Pseudo-CSI driver — same as cinematic
+        // ---------------------------------------------------------------------
+        const csiAmp = [0, 0, 0, 0];
+        let csiCoherence = 0.5;
+        const csiNoise = [0, 0, 0, 0];
+
+        function tickCsi(t, targetWorld) {
+            for (let i = 0; i < 4; i++) csiNoise[i] = csiNoise[i] * 0.92 + (Math.random() - 0.5) * 0.08;
+            let mean = 0; const amps = [];
+            for (let i = 0; i < 4; i++) {
+                const np = NODE_POSITIONS[i];
+                const dx = np[0] - targetWorld.x, dy = np[1] - targetWorld.y, dz = np[2] - targetWorld.z;
+                const r2 = dx*dx + dy*dy + dz*dz;
+                const fall = 1.0 / (1.0 + r2 * 0.18);
+                const breath = Math.sin(t * 0.27 * Math.PI * 2) * 0.10;
+                const heart = Math.sin(t * 1.18 * Math.PI * 2) * 0.04;
+                const walk = Math.sin(t * 1.9 + i * 0.5) * 0.12;
+                const a = Math.max(0, Math.min(1, fall + breath + heart + walk + csiNoise[i] * 0.30));
+                amps.push(a);
+                csiAmp[i] = csiAmp[i] * 0.7 + a * 0.3;
+                mean += a;
+            }
+            mean /= 4;
+            let v = 0; for (let i = 0; i < 4; i++) v += (amps[i] - mean) ** 2;
+            v = Math.sqrt(v / 4);
+            csiCoherence = csiCoherence * 0.85 + Math.max(0, Math.min(1, 1.0 - v * 2.5)) * 0.15;
+        }
+
+        // ---------------------------------------------------------------------
+        //  Per-frame updates
+        // ---------------------------------------------------------------------
+        const tmpVec = new THREE.Vector3();
+        let lastPingT = [0, 0, 0, 0];
+
+        function updateNodes() {
+            for (let i = 0; i < 4; i++) {
+                const ring = nodeRings[i];
+                const amp = csiAmp[i];
+                ring.material.opacity = 0.32 + 0.55 * amp;
+                ring.scale.setScalar(1 + 0.30 * amp);
+                rimLights[i].intensity = 0.30 + 0.60 * amp * csiCoherence;
+            }
+        }
+        function maybeEmitPings(t, modelCenter) {
+            if (!document.getElementById('t-pings').checked || !model) return;
+            for (let i = 0; i < 4; i++) {
+                const interval = 1.2 / (0.25 + csiAmp[i]);
+                if (t - lastPingT[i] > interval) {
+                    lastPingT[i] = t;
+                    const target = modelCenter.clone();
+                    target.y += (Math.random() - 0.3) * 0.8;
+                    target.x += (Math.random() - 0.5) * 0.2;
+                    const origin = nodeAnchors[i].getWorldPosition(new THREE.Vector3());
+                    emitPing(origin, target);
+                }
+            }
+        }
+        function updatePings(t) {
+            for (const p of pings) {
+                if (!p.active) continue;
+                const u = (t - p.t0) / p.duration;
+                if (u >= 1) { p.active = false; p.mesh.visible = false; continue; }
+                p.mesh.position.lerpVectors(p.origin, p.target, u);
+                p.mesh.scale.setScalar(0.03 + u * 0.18);
+                p.mesh.material.opacity = (1.0 - u) * 0.40 * csiCoherence;
+            }
+        }
+        function updateTomography(t) {
+            if (!document.getElementById('t-tomo').checked) { tomoActive = false; tomoPlane.visible = false; return; }
+            if (!tomoActive && t > tomoNextAt) {
+                tomoActive = true; tomoT0 = t; tomoPlane.visible = true;
+                const sf = document.getElementById('scan-flash');
+                sf.style.animation = 'none';
+                requestAnimationFrame(() => { sf.style.animation = 'scanFlash 1.6s ease-out'; });
+            }
+            if (tomoActive) {
+                const dur = 2.4;
+                const e = (t - tomoT0) / dur;
+                if (e >= 1) {
+                    tomoActive = false; tomoPlane.visible = false;
+                    tomoNextAt = t + 4 + Math.random() * 5;
+                } else {
+                    tomoPlane.position.x = -3 + e * 6;
+                    tomoMat.uniforms.intensity.value = Math.sin(e * Math.PI);
+                    tomoMat.uniforms.time.value = t;
+                }
+            }
+        }
+        function updateBbox() {
+            const want = document.getElementById('t-bbox').checked && model;
+            if (!want) {
+                if (bboxHelper) { scene.remove(bboxHelper); bboxHelper = null; }
+                document.getElementById('bbox-vol').textContent = '—';
+                return;
+            }
+            if (!bboxHelper) {
+                bboxHelper = new THREE.BoxHelper(model, 0xffe09f);
+                bboxHelper.material.transparent = true; bboxHelper.material.opacity = 0.55;
+                scene.add(bboxHelper);
+            } else bboxHelper.setFromObject(model);
+            const box = new THREE.Box3().setFromObject(model);
+            const size = box.getSize(new THREE.Vector3());
+            document.getElementById('bbox-vol').textContent = (size.x * size.y * size.z).toFixed(3) + ' m³';
+        }
+        function updateFaceCloud(t) {
+            if (!facePoints || !headBone) return;
+            const headWorld = new THREE.Vector3();
+            headBone.getWorldPosition(headWorld);
+            const pos = facePoints.geometry.attributes.position;
+            for (let i = 0; i < FACE_POINTS; i++) {
+                pos.array[i*3+0] = headWorld.x + faceOffsets[i*3+0];
+                pos.array[i*3+1] = headWorld.y + faceOffsets[i*3+1] + 0.06;
+                pos.array[i*3+2] = headWorld.z + faceOffsets[i*3+2];
+            }
+            pos.needsUpdate = true;
+            facePoints.material.uniforms.time.value = t;
+        }
+        let hudT = 0;
+        function updateHud(t, fps) {
+            if (t - hudT < 0.1) return;
+            hudT = t;
+            for (let i = 0; i < 4; i++) {
+                const pct = Math.round(csiAmp[i] * 100);
+                document.getElementById('bar-' + i).style.width = pct + '%';
+                document.getElementById('val-' + i).textContent = pct + '%';
+            }
+            document.getElementById('coh-val').textContent = (csiCoherence * 100).toFixed(0) + ' %';
+            document.getElementById('hr-val').textContent = (68 + Math.sin(t * 0.3) * 4).toFixed(0) + ' bpm';
+            document.getElementById('fps-val').textContent = fps.toFixed(0) + ' fps';
+        }
+
+        // ---------------------------------------------------------------------
+        //  UI wiring
+        // ---------------------------------------------------------------------
+        for (const btn of document.querySelectorAll('#anim [data-base]')) {
+            btn.addEventListener('click', () => setBase(btn.dataset.base));
+        }
+        for (const btn of document.querySelectorAll('#anim [data-add]')) {
+            btn.addEventListener('click', () => setAdditive(btn.dataset.add));
+        }
+        document.getElementById('add-weight').addEventListener('input', (e) => {
+            addWeight = parseFloat(e.target.value);
+            document.getElementById('add-weight-val').textContent = addWeight.toFixed(2);
+            if (additiveActions[currentAddName]) additiveActions[currentAddName].setEffectiveWeight(addWeight);
+            document.getElementById('add-name').textContent = currentAddName + ' · ' + addWeight.toFixed(2);
+        });
+        document.getElementById('time-scale').addEventListener('input', (e) => {
+            const ts = parseFloat(e.target.value);
+            document.getElementById('time-scale-val').textContent = ts.toFixed(2);
+            if (mixer) mixer.timeScale = ts;
+        });
+        function bindToggle(id, obj) {
+            document.getElementById(id).addEventListener('change', e => {
+                if (e.target.checked && !scene.children.includes(obj)) scene.add(obj);
+                else if (!e.target.checked) scene.remove(obj);
+            });
+        }
+        bindToggle('t-grid',  gridHelper);
+        bindToggle('t-polar', polarHelper);
+        document.getElementById('t-skel').addEventListener('change', e => {
+            if (skeletonHelper) skeletonHelper.visible = e.target.checked;
+        });
+        document.getElementById('t-nodebox').addEventListener('change', e => {
+            for (const bb of nodeBboxHelpers) {
+                if (e.target.checked && !scene.children.includes(bb)) scene.add(bb);
+                else if (!e.target.checked) scene.remove(bb);
+            }
+        });
+
+        // ---------------------------------------------------------------------
+        //  Main loop
+        // ---------------------------------------------------------------------
+        const clock = new THREE.Clock();
+        let lastMs = performance.now();
+        let fpsEma = 60;
+        function tick() {
+            const nowMs = performance.now();
+            const dt = nowMs - lastMs;
+            lastMs = nowMs;
+            fpsEma = fpsEma * 0.92 + (1000 / Math.max(dt, 1)) * 0.08;
+            const t = nowMs * 0.001;
+            const delta = clock.getDelta();
+
+            if (mixer) mixer.update(delta);
+            floorMat.uniforms.time.value = t;
+            filmShader.uniforms.time.value = t;
+
+            // get model center for CSI / ping targeting
+            const center = new THREE.Vector3();
+            if (model) {
+                const box = new THREE.Box3().setFromObject(model);
+                box.getCenter(center);
+            } else center.set(0, 0.9, 0);
+
+            tickCsi(t, center);
+            updateNodes();
+            maybeEmitPings(t, center);
+            updatePings(t);
+            updateTomography(t);
+            updateBbox();
+            updateFaceCloud(t);
+
+            controls.update();
+            composer.render();
+
+            updateHud(t, fpsEma);
+            requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+            bloom.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
