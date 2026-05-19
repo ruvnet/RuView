@@ -78,10 +78,36 @@ Measured on Windows host (x86_64, no GPU — `candle-cpu` backend) running the r
 
 The ONNX artifact is the input to the Hailo Dataflow Compiler (HEF cross-compile) and to ONNX Runtime CPU/GPU benchmarks on each target arch — both still pending.
 
+### Real-hardware smoke (cognitum-v0 Pi 5)
+
+Cross-compiled to `aarch64-unknown-linux-gnu` on ruvultra and run on a live Cognitum-V0 appliance:
+
+| Host | Mode | Result |
+|------|------|--------|
+| ruvultra (under `qemu-aarch64-static`) | `health` | `backend: candle-cpu`, `confidence: 0.185` — real weights loaded under emulation |
+| **cognitum-v0** (Raspberry Pi 5, Cortex-A76) | `health` | `backend: candle-cpu`, `confidence: 0.185` — real weights, real hardware |
+| cognitum-v0 | 30× sequential `health` invocations | **0.251 s total → 8.4 ms / invocation** (cold) |
+
+8.4 ms cold-start on real Pi 5 hardware vs 76 ms on the x86_64 Windows host. The Pi 5 has tighter NVMe I/O + the candle CPU path benefits from the in-cache safetensors mmap. Long-running `run` warm inference will still be sub-millisecond.
+
+### Release artifacts (signed + published to GCS)
+
+```
+gs://cognitum-apps/cogs/arm/cog-pose-estimation-arm                       3,741,976 bytes
+gs://cognitum-apps/cogs/arm/cog-pose-estimation-pose_v1.safetensors         507,032 bytes
+
+binary_sha256:  1e1a7d3dd01ca05d5bfc5dbb142a5941b7866ed9f3224a21edc04d3f09a99bf5
+weights_sha256: eb249b9a6b2e10130437a10976ed0230b0d085f86a0553d7226e1ae6eae4b9e5
+signature:      LUN7xqLPYD3MFzm5dKB5MnYU0LvoRtek5ci5KiKPHBg+Xo6xuazwokn2Dw2JPMaLYJzmWn/SpT4djuR7hYvVDw==   (Ed25519, signed with COGNITUM_OWNER_SIGNING_KEY)
+```
+
+Full manifest at `cog/artifacts/manifest.json`. Verified via public anonymous GET against `https://storage.googleapis.com/cognitum-apps/cogs/arm/cog-pose-estimation-arm` — downloaded SHA matches the locally-computed SHA.
+
 Pending separately:
 
-- Hailo HEF cross-compile (gated on Hailo SDK on a self-hosted runner).
-- `cog-pose-estimation run` end-to-end latency on each target arch (`arm`, `hailo8`, `hailo10`).
+- Hailo HEF cross-compile (gated on Hailo SDK on a self-hosted runner) — uses `pose_v1.onnx` as input.
+- `cog-pose-estimation run` long-run latency under a live sensing-server feed.
+- x86_64 release upload (today's release is arm-only).
 
 ### Artifacts
 

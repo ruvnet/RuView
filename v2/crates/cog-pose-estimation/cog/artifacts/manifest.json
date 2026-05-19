@@ -1,0 +1,25 @@
+{
+  "id": "pose-estimation",
+  "version": "0.0.1",
+  "binary_url": "https://storage.googleapis.com/cognitum-apps/cogs/arm/cog-pose-estimation-arm",
+  "binary_bytes": 3741976,
+  "binary_sha256": "1e1a7d3dd01ca05d5bfc5dbb142a5941b7866ed9f3224a21edc04d3f09a99bf5",
+  "binary_signature": "LUN7xqLPYD3MFzm5dKB5MnYU0LvoRtek5ci5KiKPHBg+Xo6xuazwokn2Dw2JPMaLYJzmWn/SpT4djuR7hYvVDw==",
+  "weights_url": "https://storage.googleapis.com/cognitum-apps/cogs/arm/cog-pose-estimation-pose_v1.safetensors",
+  "weights_bytes": 507032,
+  "weights_sha256": "eb249b9a6b2e10130437a10976ed0230b0d085f86a0553d7226e1ae6eae4b9e5",
+  "arch": "arm",
+  "target_triple": "aarch64-unknown-linux-gnu",
+  "installed_at": 0,
+  "status": "installed",
+  "signed_by": "COGNITUM_OWNER_SIGNING_KEY",
+  "sig_algo": "Ed25519",
+  "build_metadata": {
+    "rust": "1.95.0",
+    "candle": "0.9 cpu",
+    "cog_pose_version": "0.3.0",
+    "training_pck20": 3.0,
+    "training_pck50": 18.5,
+    "training_mpjpe_normalized": 0.0931
+  }
+}
