@@ -131,7 +131,25 @@ Pending separately:
 
 - Hailo HEF cross-compile (gated on Hailo SDK on a self-hosted runner) — uses `pose_v1.onnx` as input.
 - Appliance-native sensing-source integration (`config.sensing_url` should point at the cog-gateway's CSI tap on `:9000`, not the dev-loopback `:3000`).
-- x86_64 release upload (today's release is arm-only).
+### x86_64 release (2026-05-19)
+
+Built on ruvultra (native, no cross-compile):
+
+```
+gs://cognitum-apps/cogs/x86_64/cog-pose-estimation-x86_64                4,548,856 bytes
+sha256:    a434739a24415b34e1aff50e5e1c3c32e568db96af473bbb3e5ecc9b95fe71fa
+signature: pNNuxhgM18PztN8BSZdfw5oAShG2pV3na5T/q2QdlJWX/5FJgo4QTiUCbcTAxI2Uiva8VURSOlRzMU3xoQPqCQ==
+```
+
+Manifest at `cog/artifacts/manifests/x86_64/manifest.json`. Re-uses the same `pose_v1.safetensors` weights as the arm release (architecture is arch-independent).
+
+**Cold-start: 5.4 ms / invocation** on ruvultra (30× sequential `health` in 0.162 s) — faster than the Pi 5's 8.4 ms (faster NVMe + wider CPU), slower than the Windows 76 ms (less mature Windows release toolchain).
+
+| Host | arch | rust | binary | cold-start |
+|------|------|------|--------|------------|
+| Windows (ruvzen) | x86_64 | 1.95.0 | (built locally, not published) | 76.2 ms |
+| ruvultra (Ubuntu) | x86_64 | 1.89.0 | 4,548,856 B (GCS x86_64) | **5.4 ms** |
+| cognitum-v0 (Pi 5) | aarch64 | (cross-built) | 3,741,976 B (GCS arm) | 8.4 ms |
 
 ### Artifacts
 

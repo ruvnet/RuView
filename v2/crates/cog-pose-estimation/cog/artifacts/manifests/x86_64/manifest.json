@@ -1,0 +1,28 @@
+{
+  "id": "pose-estimation",
+  "version": "0.0.1",
+  "binary_url": "https://storage.googleapis.com/cognitum-apps/cogs/x86_64/cog-pose-estimation-x86_64",
+  "binary_bytes": 4548856,
+  "binary_sha256": "a434739a24415b34e1aff50e5e1c3c32e568db96af473bbb3e5ecc9b95fe71fa",
+  "binary_signature": "pNNuxhgM18PztN8BSZdfw5oAShG2pV3na5T/q2QdlJWX/5FJgo4QTiUCbcTAxI2Uiva8VURSOlRzMU3xoQPqCQ==",
+  "weights_url": "https://storage.googleapis.com/cognitum-apps/cogs/arm/cog-pose-estimation-pose_v1.safetensors",
+  "weights_bytes": 507032,
+  "weights_sha256": "eb249b9a6b2e10130437a10976ed0230b0d085f86a0553d7226e1ae6eae4b9e5",
+  "arch": "x86_64",
+  "target_triple": "x86_64-unknown-linux-gnu",
+  "installed_at": 0,
+  "status": "installed",
+  "signed_by": "COGNITUM_OWNER_SIGNING_KEY",
+  "sig_algo": "Ed25519",
+  "build_metadata": {
+    "rust": "1.89.0",
+    "candle": "0.9 cpu",
+    "cog_pose_version": "0.3.0",
+    "host": "ruvultra (RTX 5080)",
+    "training_pck20": 3.0,
+    "training_pck50": 18.5,
+    "training_mpjpe_normalized": 0.0931,
+    "cold_start_ms_avg": 5.4,
+    "bench_invocations": 30
+  }
+}
