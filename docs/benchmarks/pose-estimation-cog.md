@@ -103,10 +103,34 @@ signature:      LUN7xqLPYD3MFzm5dKB5MnYU0LvoRtek5ci5KiKPHBg+Xo6xuazwokn2Dw2JPMaL
 
 Full manifest at `cog/artifacts/manifest.json`. Verified via public anonymous GET against `https://storage.googleapis.com/cognitum-apps/cogs/arm/cog-pose-estimation-arm` — downloaded SHA matches the locally-computed SHA.
 
+### Live appliance install
+
+Installed on `cognitum-v0` (the V0 cluster leader) at `/var/lib/cognitum/apps/pose-estimation/`:
+
+```
+$ ls -la /var/lib/cognitum/apps/pose-estimation/
+-rwxr-xr-x  cog-pose-estimation-arm   3,741,976 B   (matches GCS sha256)
+-rw-r--r--  pose_v1.safetensors         507,032 B
+-rw-r--r--  manifest.json                   989 B
+-rw-r--r--  config.json                     187 B
+-rw-r--r--  output.log                   28,438 B   (5-sec smoke run)
+```
+
+Layout matches the existing `anomaly-detect`, `presence`, `seizure-detect`, etc. cogs on the same appliance — the Cogs dashboard at `http://cognitum-v0:9000/cogs` auto-discovers entries under this dir.
+
+`cog-pose-estimation run` ran cleanly in the background for 5 seconds with the default config. It correctly:
+
+- Emitted a `run.started` event with the configured `sensing_url`, `model_path`, and `poll_ms`.
+- Started its 40 ms poll loop.
+- **Gracefully handled the missing local sensing-server on port 3000** by logging structured WARN events (`{"level":"WARN","fields":{"message":"sensing-server fetch failed","error":"...Connection refused..."}}`) without crashing, leaking, or producing NaN output.
+- Exited cleanly on SIGTERM.
+
+0 `pose.frame` events fired during the smoke run — expected, since `127.0.0.1:3000` isn't serving CSI on the appliance. The appliance's actual CSI source is `ruview-vitals-worker` on `:50054` plus the `/api/v1/v0/system/...` endpoints behind the appliance's bearer auth on `:9000`. Wiring `sensing_url` to the appliance-native source is a Day-2 integration task — separate from the cog binary itself.
+
 Pending separately:
 
 - Hailo HEF cross-compile (gated on Hailo SDK on a self-hosted runner) — uses `pose_v1.onnx` as input.
-- `cog-pose-estimation run` long-run latency under a live sensing-server feed.
+- Appliance-native sensing-source integration (`config.sensing_url` should point at the cog-gateway's CSI tap on `:9000`, not the dev-loopback `:3000`).
 - x86_64 release upload (today's release is arm-only).
 
 ### Artifacts
