@@ -133,6 +133,17 @@ Honours ADR-100's per-Cog CLI contract:
 
 PCK@20 is intentionally **not** an acceptance gate of this ADR. Achieving the ADR-079 ≥35% target is a separate, data-bound milestone tracked in #640. This ADR ships the **vehicle**, not the model accuracy.
 
+### First measured run — v0.0.1 (2026-05-19)
+
+A Candle-on-CUDA training run on `ruvultra`'s RTX 5080 against the same 1,077-sample paired session that produced the 0%/0% baseline in #640 yielded:
+
+- **PCK@20 = 3.0%**, **PCK@50 = 18.5%**, **MPJPE = 0.093** (normalized).
+- 400 epochs in **2.1 s** wall time (~5 ms/epoch, full-batch).
+- Loss reduction 13× (0.181 → 0.014, eval 0.010).
+- Strongest signal at `r_hip` (PCK@50 = 76.9%), `r_knee` (35.2%), `l_elbow` (26.4%).
+
+This confirms the pipeline trains end-to-end and produces a signal-bearing model. The remaining gap to PCK@20 ≥ 35% is data-bound (1,077 samples is ≪ the ADR-079 target of ~30K). See `docs/benchmarks/pose-estimation-cog.md` for the full result dump.
+
 ## Consequences
 
 ### Positive
