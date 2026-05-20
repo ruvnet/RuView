@@ -204,7 +204,7 @@ jobs:
         # kubectl scale rs -n wifi-densepose -l app=wifi-densepose,version!=green --replicas=0
 
     - name: Upload deployment artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v7
       with:
         name: production-deployment-${{ github.run_number }}
         path: |

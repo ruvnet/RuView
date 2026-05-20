@@ -67,7 +67,7 @@ jobs:
 
     - name: Upload security reports
       continue-on-error: true
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       if: always()
       with:
         name: security-reports
@@ -206,7 +206,7 @@ jobs:
 
     - name: Upload test results
       continue-on-error: true
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       if: always()
       with:
         name: test-results-${{ matrix.python-version }}
@@ -247,7 +247,7 @@ jobs:
         locust -f tests/performance/locustfile.py --headless --users 50 --spawn-rate 5 --run-time 60s --host http://localhost:8000
 
     - name: Upload performance results
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: performance-results
         path: locust_report.html

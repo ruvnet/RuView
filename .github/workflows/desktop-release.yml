@@ -72,7 +72,7 @@ jobs:
           zip -r "RuView-Desktop-${{ github.event.inputs.version || '0.4.0' }}-macos-${{ steps.arch.outputs.arch }}.zip" "RuView Desktop.app"
 
       - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ruview-macos-${{ steps.arch.outputs.arch }}
           path: v2/target/${{ matrix.target }}/release/bundle/macos/*.zip
@@ -111,13 +111,13 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Upload Windows MSI artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ruview-windows-msi
           path: v2/target/release/bundle/msi/*.msi
 
       - name: Upload Windows NSIS artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ruview-windows-nsis
           path: v2/target/release/bundle/nsis/*.exe
