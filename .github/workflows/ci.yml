@@ -272,7 +272,7 @@ jobs:
 
     - name: Set up Docker Buildx
       continue-on-error: true
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@v4
 
     - name: Log in to Container Registry
       continue-on-error: true
