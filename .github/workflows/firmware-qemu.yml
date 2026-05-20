@@ -73,7 +73,7 @@ jobs:
           echo "QEMU binary size: $(file_size /opt/qemu-esp32/bin/qemu-system-xtensa) bytes"
 
       - name: Upload QEMU artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: qemu-esp32
           path: /opt/qemu-esp32/
@@ -201,7 +201,7 @@ jobs:
 
       - name: Upload test logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: qemu-logs-${{ matrix.nvs_config }}
           path: |
@@ -249,7 +249,7 @@ jobs:
 
       - name: Upload fuzz artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-crashes
           path: |
@@ -362,7 +362,7 @@ jobs:
 
       - name: Upload swarm results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: swarm-results
           path: |
