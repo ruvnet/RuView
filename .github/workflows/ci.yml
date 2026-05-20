@@ -27,7 +27,7 @@ jobs:
     steps:
     - name: Checkout code
       continue-on-error: true
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -81,7 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     # `wifi-densepose-desktop` is a Tauri v2 app — `glib-sys`, `gtk-sys`,
     # `webkit2gtk-sys`, etc. need the Linux dev libraries via pkg-config or the
@@ -162,7 +162,7 @@ jobs:
     steps:
     - name: Checkout code
       continue-on-error: true
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Python ${{ matrix.python-version }}
       continue-on-error: true
@@ -223,7 +223,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Python
       uses: actions/setup-python@v6
@@ -268,7 +268,7 @@ jobs:
     steps:
     - name: Checkout code
       continue-on-error: true
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Docker Buildx
       continue-on-error: true
@@ -338,7 +338,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Python
       uses: actions/setup-python@v6

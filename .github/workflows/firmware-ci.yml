@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref_type == 'tag'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Check firmware version.txt == tag
         run: |
           # Tag form: vX.Y.Z-esp32  →  expect version.txt to contain X.Y.Z
@@ -60,7 +60,7 @@ jobs:
             artifact_pt: partition-table-4mb.bin
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Build firmware (${{ matrix.variant }})
         working-directory: firmware/esp32-csi-node

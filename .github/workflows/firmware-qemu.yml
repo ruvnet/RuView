@@ -99,7 +99,7 @@ jobs:
           - boundary-min
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download QEMU artifact
         uses: actions/download-artifact@v4
@@ -213,7 +213,7 @@ jobs:
     name: Fuzz Testing (ADR-061 Layer 6)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install clang
         run: |
@@ -262,7 +262,7 @@ jobs:
     name: NVS Matrix Generation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install NVS generator
         run: pip install esp-idf-nvs-partition-gen
@@ -316,7 +316,7 @@ jobs:
       image: espressif/idf:v5.4
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download QEMU artifact
         uses: actions/download-artifact@v4

@@ -26,7 +26,7 @@ jobs:
     steps:
     - name: Checkout code
       continue-on-error: true
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -95,7 +95,7 @@ jobs:
     steps:
     - name: Checkout code
       continue-on-error: true
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Python
       continue-on-error: true
@@ -162,7 +162,7 @@ jobs:
     steps:
     - name: Checkout code
       continue-on-error: true
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Docker Buildx
       continue-on-error: true
@@ -243,7 +243,7 @@ jobs:
     steps:
     - name: Checkout code
       continue-on-error: true
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Run Checkov IaC scan
       continue-on-error: true
@@ -304,7 +304,7 @@ jobs:
     steps:
     - name: Checkout code
       continue-on-error: true
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -339,7 +339,7 @@ jobs:
     steps:
     - name: Checkout code
       continue-on-error: true
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Python
       continue-on-error: true
@@ -376,7 +376,7 @@ jobs:
     steps:
     - name: Checkout code
       continue-on-error: true
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Check security policy files
       continue-on-error: true
