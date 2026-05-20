@@ -275,7 +275,7 @@ jobs:
         done
 
     - name: Update deployment status
-      uses: actions/github-script@v6
+      uses: actions/github-script@v9
       with:
         script: |
           const deployEnv = '${{ needs.pre-deployment.outputs.deploy_env }}';
@@ -326,7 +326,7 @@ jobs:
 
     - name: Create deployment issue on failure
       if: needs.deploy-production.result == 'failure'
-      uses: actions/github-script@v6
+      uses: actions/github-script@v9
       with:
         script: |
           github.rest.issues.create({
