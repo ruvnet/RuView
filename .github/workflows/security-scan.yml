@@ -247,7 +247,7 @@ jobs:
 
     - name: Run Checkov IaC scan
       continue-on-error: true
-      uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
+      uses: bridgecrewio/checkov-action@4048c972aae68d0b983a48bb3479aab2d877b898 # v12.3102.0
       with:
         directory: .
         framework: kubernetes,dockerfile,terraform,ansible
