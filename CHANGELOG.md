@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **CLI calibration commands accept merged-LTF CSI frames (192 subcarriers, refs #1000).**
+  ESP32-S3 firmware enables L-LTF + HT-LTF + STBC HT-LTF, so HT frames carry 192
+  complex values. `parse_csi_packet` passed them through whole, and every frame
+  failed the HT20 tier geometry check, so `calibrate`/`enroll`/`room-watch` could
+  never record a baseline on those nodes. The parser now slices the HT-LTF segment
+  `[64..128)`. Contributed by @schaferjart (#1002), who validated it on a bare
+  ESP32-S3-N16R8.
+
 - **ESP32-C5 release candidate (hardware qualification pending).** Add a
   headless IDF 6.0.2 C5 build and checksum-verified operator variant, use the
   C5 ROM's `0x2000` bootloader address, and check image chip IDs and generated
