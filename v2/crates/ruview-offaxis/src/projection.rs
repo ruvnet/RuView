@@ -85,11 +85,17 @@ impl Screen {
         let vr = (pb - pa)
             .normalize()
             .ok_or(OffAxisError::DegenerateScreen)?;
-        let vu = (pc - pa)
+        let vu_raw = (pc - pa)
             .normalize()
             .ok_or(OffAxisError::DegenerateScreen)?;
         let vn = vr
-            .cross(vu)
+            .cross(vu_raw)
+            .normalize()
+            .ok_or(OffAxisError::DegenerateScreen)?;
+        // Orthonormalize vu: guarantees that {vr, vu, vn} forms an exact
+        // right-handed orthonormal basis (zero shear / pure rotation matrix).
+        let vu = vn
+            .cross(vr)
             .normalize()
             .ok_or(OffAxisError::DegenerateScreen)?;
         Ok(Self {
@@ -445,5 +451,34 @@ mod tests {
             off_axis(&screen, ok_eye, f64::INFINITY, f64::INFINITY).unwrap_err(),
             OffAxisError::InvalidClipPlanes
         );
+    }
+
+    #[test]
+    fn screen_basis_is_strictly_orthonormal_under_skewed_corners() {
+        // pa, pb, pc where pc is intentionally slightly skewed (85 degrees instead of 90 degrees)
+        let pa = Vec3::new(0.0, 0.0, 0.0);
+        let pb = Vec3::new(1.0, 0.0, 0.0);
+        let pc = Vec3::new(0.1, 0.9, 0.0);
+        let screen = Screen::new(pa, pb, pc).unwrap();
+
+        let vr = screen.vr();
+        let vu = screen.vu();
+        let vn = screen.vn();
+
+        // Check unit lengths
+        assert_close(vr.dot(vr), 1.0, EPS, "vr length");
+        assert_close(vu.dot(vu), 1.0, EPS, "vu length");
+        assert_close(vn.dot(vn), 1.0, EPS, "vn length");
+
+        // Check pairwise orthogonality
+        assert_close(vr.dot(vu), 0.0, EPS, "vr . vu");
+        assert_close(vr.dot(vn), 0.0, EPS, "vr . vn");
+        assert_close(vu.dot(vn), 0.0, EPS, "vu . vn");
+
+        // Check right-handed orientation: vr x vu == vn
+        let cross = vr.cross(vu);
+        assert_close(cross.x, vn.x, EPS, "cross.x");
+        assert_close(cross.y, vn.y, EPS, "cross.y");
+        assert_close(cross.z, vn.z, EPS, "cross.z");
     }
 }
