@@ -68,5 +68,8 @@
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
+  },
+  "overrides": {
+    "fast-uri": "4.1.2"
   }
 }
