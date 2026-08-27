@@ -123,6 +123,7 @@ export class RoomBuilderTab {
           </div>
           <div class="rb-actions">
             <button class="rb-btn" id="rbSave">Save</button>
+            <button class="rb-btn secondary" id="rbReload" title="Discard unsaved changes and reload the last saved config">Reload from Saved</button>
           </div>
           <p class="rb-hint">
             Drag a node on the canvas to reposition it (X/Y only — set height
@@ -163,6 +164,10 @@ export class RoomBuilderTab {
     });
     this.container.querySelector('#rbSave').addEventListener('click', () => {
       this._save();
+    });
+    this.container.querySelector('#rbReload').addEventListener('click', async () => {
+      await this._load();
+      toastManager.info('Reloaded from the last saved config — unsaved changes discarded.');
     });
 
     const canvas = this.container.querySelector('#rbCanvas');
