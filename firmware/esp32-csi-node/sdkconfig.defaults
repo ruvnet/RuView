@@ -49,9 +49,11 @@ CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=64
 # radio's TX airtime saturating under CSI promiscuous RX, and bigger
 # buffers cap out at the 100 ms backoff window regardless of size
 # (verified at WIFI_DYNAMIC_TX=128 + PBUF_POOL=32 — identical count).
-# The proper fix is rate-limiting adaptive_controller.c's emit cadence
-# from ~50 ms to the intended 1 Hz, which is a code refactor tracked
-# in a separate follow-up issue.
+# The proper fix was rate-limiting adaptive_controller.c's emit cadence to
+# the intended 1 Hz. That has since landed: fast_loop_cb() emits once per
+# FEATURE_STATE_PERIOD_MS by dividing the configured fast-loop period,
+# rather than on every tick. The buffer bumps above are still worth
+# keeping for the csi_collector.sendto path they genuinely fixed.
 
 # FreeRTOS: increase task stack for CSI processing
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
