@@ -8968,14 +8968,14 @@ async fn main() {
         .route("/api/v1/models/active", get(get_active_model))
         .route("/api/v1/models/load", post(load_model))
         .route("/api/v1/models/unload", post(unload_model))
-        .route("/api/v1/models/{id}", delete(delete_model))
+        .route("/api/v1/models/:id", delete(delete_model))
         .route("/api/v1/models/lora/profiles", get(list_lora_profiles))
         .route("/api/v1/models/lora/activate", post(activate_lora_profile))
         // Recording endpoints
         .route("/api/v1/recording/list", get(list_recordings))
         .route("/api/v1/recording/start", post(start_recording))
         .route("/api/v1/recording/stop", post(stop_recording))
-        .route("/api/v1/recording/{id}", delete(delete_recording))
+        .route("/api/v1/recording/:id", delete(delete_recording))
         // Training endpoints (ADR-186 TRAIN-RECONNECT): the real in-server
         // trainer + `/ws/train/progress` stream. Merged while the router is
         // still `Router<SharedState>` (before `.with_state`) so these routes
