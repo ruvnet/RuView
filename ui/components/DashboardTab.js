@@ -382,9 +382,13 @@ export class DashboardTab {
       detectionCount.textContent = this.formatNumber(stats.total_detections);
     }
 
-    // Update accuracy if available
-    if (this.statsElements.accuracy && stats.average_confidence !== undefined) {
-      this.statsElements.accuracy.textContent = `${(stats.average_confidence * 100).toFixed(1)}%`;
+    // Update accuracy if available. `average_confidence` is null when nothing
+    // is currently detected — render an em dash rather than "0.0%", which
+    // would read as a real measurement of zero confidence.
+    if (this.statsElements.accuracy) {
+      const conf = stats.average_confidence;
+      this.statsElements.accuracy.textContent =
+        (conf === null || conf === undefined) ? '—' : `${(conf * 100).toFixed(1)}%`;
     }
   }
 

@@ -5242,9 +5242,28 @@ async fn pose_physics_metrics(State(state): State<SharedState>) -> impl IntoResp
 
 async fn pose_stats(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
+
+    // Average the confidence of the persons currently detected, taken from the
+    // same source `/api/v1/pose/current` reports, and `null` when nothing is
+    // detected. This previously returned a hardcoded `0.87` regardless of
+    // state — so the dashboard displayed "87.0% confidence" on a server that
+    // had processed zero frames and made zero detections.
+    let persons = match &s.latest_update {
+        Some(update) => update
+            .persons
+            .clone()
+            .unwrap_or_else(|| derive_pose_from_sensing(update)),
+        None => vec![],
+    };
+    let average_confidence: Option<f64> = if persons.is_empty() {
+        None
+    } else {
+        Some(persons.iter().map(|p| p.confidence).sum::<f64>() / persons.len() as f64)
+    };
+
     Json(serde_json::json!({
         "total_detections": s.total_detections,
-        "average_confidence": 0.87,
+        "average_confidence": average_confidence,
         "frames_processed": s.tick,
         "source": s.effective_source(),
     }))
