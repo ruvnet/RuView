@@ -52,6 +52,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "hono": "^4.12.25",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.25.2"
   },
