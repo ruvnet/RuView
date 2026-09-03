@@ -191,6 +191,15 @@ menu "Adaptive Controller (ADR-081)"
             falls back to DEGRADED mode and pins the radio to
             RV_PROFILE_PASSIVE_LOW_RATE. 0 disables the degraded gate.
 
+    config ADAPTIVE_DEGRADED_RECOVERY_TICKS
+        int "Consecutive healthy ticks to exit DEGRADED"
+        default 15
+        range 1 240
+        help
+            Number of consecutive healthy adaptive ticks required before the
+            controller transitions out of DEGRADED back to SENSE_IDLE. Higher
+            values add hysteresis against flapping.
+
 endmenu
 
 menu "AMOLED Display (ADR-045)"

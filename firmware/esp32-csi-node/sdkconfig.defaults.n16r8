@@ -1,0 +1,71 @@
+# ESP32-S3 N16R8 (WROOM-1, 16MB Flash, 8MB Octal PSRAM) — RuView#1401
+#
+# The pre-built release binaries at release_bins/ were built without PSRAM
+# configuration, causing boards with Octal PSRAM (like the AITRIP ESP32-S3
+# N16R8) to enter DEGRADED state immediately with 0 pps CSI yield.
+#
+# This overlay adds the correct SPIRAM settings for N16R8 modules.
+# These boards have no display (no QSPI contention), so DATA-frame CSI
+# capture is safe and restores full yield.
+#
+# Build:
+#   cp sdkconfig.defaults.n16r8 sdkconfig.defaults
+#   idf.py set-target esp32s3
+#   idf.py build
+#
+# Flash:
+#   idf.py -p /dev/ttyACM0 flash
+#   # or manual:
+#   esptool.py --chip esp32s3 -p /dev/ttyACM0 --flash_mode dio --flash_size 16MB \
+#     write_flash 0x0 build/bootloader/bootloader.bin \
+#     0x8000 build/partition_table/partition-table.bin \
+#     0xd000 build/ota_data_initial.bin \
+#     0x20000 build/esp32-csi-node.bin
+#
+# Restore default overlay:
+#   git checkout sdkconfig.defaults
+
+# ---- Target ----
+CONFIG_IDF_TARGET="esp32s3"
+
+# ---- Flash: 16MB Quad SPI ----
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+
+# ---- PSRAM: 8MB Octal (critical for N16R8 — missing from release_bins) ----
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+# Place .bss and malloc in PSRAM where possible — frees internal SRAM for
+# WiFi/CSI buffers and FreeRTOS stacks.
+CONFIG_SPIRAM_USE_CAPS_ALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+
+# ---- Partition table: 8MB OTA layout (uses <8MB, compatible with 16MB flash) ----
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_display.csv"
+
+# ---- Compiler ----
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# ---- WiFi + CSI ----
+CONFIG_ESP_WIFI_CSI_ENABLED=y
+CONFIG_ESP_WIFI_EXTRA_IRAM_OPT=y
+
+# LWIP / WiFi buffer pools (same as base sdkconfig.defaults)
+CONFIG_LWIP_SO_RCVBUF=y
+CONFIG_LWIP_UDP_RECVMBOX_SIZE=32
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=64
+
+# ---- FreeRTOS ----
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=8192
+
+# ---- Logging ----
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# ---- Display: disabled (N16R8 modules have no AMOLED panel) ----
+# CONFIG_DISPLAY_ENABLE is not set

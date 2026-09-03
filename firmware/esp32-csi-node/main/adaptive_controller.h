@@ -77,6 +77,10 @@ typedef struct {
     float    motion_threshold;    /**< 0..1, enter SENSE_ACTIVE above this. */
     float    anomaly_threshold;   /**< 0..1, enter ALERT above this. */
     uint16_t min_pkt_yield;       /**< pps below this → DEGRADED. */
+    uint16_t degraded_recovery_ticks; /**< Consecutive ticks with yield above
+                                           min_pkt_yield required to exit
+                                           DEGRADED. Default 15 (~3 s at 200 ms
+                                           fast loop). Prevents flapping. */
 } adapt_config_t;
 
 /**
@@ -112,11 +116,21 @@ void adaptive_controller_force_state(adapt_state_t st);
  * Pure-function policy: given an observation + current state + config,
  * compute the decision. Exposed in the header so it can be unit-tested
  * offline (no FreeRTOS / ESP-IDF dependency in the body).
+ *
+ * @param cfg     Controller config.
+ * @param current Current state.
+ * @param obs     Latest observation snapshot.
+ * @param out     Output decision buffer.
+ * @param degraded_recovery_counter  In/out counter tracking consecutive
+ *                healthy ticks while in DEGRADED. Caller initializes to 0
+ *                and preserves across calls. Reset to 0 whenever the board
+ *                re-enters DEGRADED or yield drops below threshold.
  */
 void adaptive_controller_decide(const adapt_config_t *cfg,
                                 adapt_state_t current,
                                 const adapt_observation_t *obs,
-                                adapt_decision_t *out);
+                                adapt_decision_t *out,
+                                uint16_t *degraded_recovery_counter);
 
 #ifdef __cplusplus
 }

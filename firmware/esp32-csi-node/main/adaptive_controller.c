@@ -38,6 +38,7 @@ static adapt_state_t       s_state = ADAPT_STATE_BOOT;
 static adapt_observation_t s_last_obs;
 static bool                s_obs_valid = false;
 static portMUX_TYPE        s_obs_lock = portMUX_INITIALIZER_UNLOCKED;
+static uint16_t            s_degraded_recovery_counter = 0;
 
 static TimerHandle_t s_fast_timer   = NULL;
 static TimerHandle_t s_medium_timer = NULL;
@@ -91,6 +92,11 @@ static void apply_defaults(adapt_config_t *cfg)
     cfg->motion_threshold  = (float)CONFIG_ADAPTIVE_MOTION_THRESH_PERMIL  / 1000.0f;
     cfg->anomaly_threshold = (float)CONFIG_ADAPTIVE_ANOMALY_THRESH_PERMIL / 1000.0f;
     cfg->min_pkt_yield     = CONFIG_ADAPTIVE_MIN_PKT_YIELD;
+#ifdef CONFIG_ADAPTIVE_DEGRADED_RECOVERY_TICKS
+    cfg->degraded_recovery_ticks = CONFIG_ADAPTIVE_DEGRADED_RECOVERY_TICKS;
+#else
+    cfg->degraded_recovery_ticks = 15;  /* ~3 s at 200 ms fast loop. */
+#endif
 }
 
 /* Pure decision policy lives in its own file so it can link under
@@ -162,6 +168,15 @@ static void apply_decision(const adapt_decision_t *dec)
                  (unsigned)s_state, (unsigned)dec->new_state);
         s_state = (adapt_state_t)dec->new_state;
 
+        /* RuView#1401: log DEGRADED recovery explicitly so operators can
+         * confirm the recovery path is working. */
+        if (prev == ADAPT_STATE_DEGRADED && s_state != ADAPT_STATE_DEGRADED) {
+            ESP_LOGI(TAG, "DEGRADED recovery complete → state %u "
+                     "(yield recovered above threshold for %u ticks)",
+                     (unsigned)s_state,
+                     (unsigned)s_cfg.degraded_recovery_ticks);
+        }
+
         /* ADR-081 L3: on transition to ALERT, emit ANOMALY_ALERT on the
          * mesh plane. On any role-relevant transition, bump the epoch. */
         if (s_state == ADAPT_STATE_ALERT && prev != ADAPT_STATE_ALERT) {
@@ -217,7 +232,8 @@ static void fast_loop_cb(TimerHandle_t t)
     portEXIT_CRITICAL(&s_obs_lock);
 
     adapt_decision_t dec;
-    adaptive_controller_decide(&s_cfg, s_state, &obs, &dec);
+    adaptive_controller_decide(&s_cfg, s_state, &obs, &dec,
+                               &s_degraded_recovery_counter);
     apply_decision(&dec);
 
     /* ADR-081 Layer 4/5: emit compact feature state at 1 Hz (the spec's
