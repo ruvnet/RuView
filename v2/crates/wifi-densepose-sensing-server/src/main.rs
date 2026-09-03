@@ -27,6 +27,7 @@ mod qualcomm_csi;
 mod realtek_csi;
 mod realtek_radar;
 mod path_safety;
+mod links;
 pub mod pose;
 pub mod pose_physics;
 mod rvf_container;
@@ -2198,6 +2199,7 @@ struct AppStateInner {
     room_debounced_level: String,
     room_debounce_candidate: String,
     room_debounce_since: Option<std::time::Instant>,
+    link_table: links::LinkTable,
     // ── Accuracy sprint: Kalman tracker, multistatic fusion, eigenvalue counting ──
     /// Global Kalman-based pose tracker for stable person IDs and smoothed keypoints.
     pose_tracker: PoseTracker,
@@ -3258,6 +3260,7 @@ impl AppStateInner {
             room_debounced_level: "absent".to_string(),
             room_debounce_candidate: "absent".to_string(),
             room_debounce_since: None,
+            link_table: links::LinkTable::new(),
             pose_tracker: PoseTracker::new(),
             last_tracker_instant: None,
             multistatic_fuser: MultistaticFuser::new(),
@@ -11337,6 +11340,168 @@ async fn mesh_endpoint(State(state): State<SharedState>) -> Json<serde_json::Val
     }))
 }
 
+
+///
+/// MEASURED 2026-09-01: a node's radio produces CSI for ~24 transmitters, the
+/// node forwards ~20 of them, and `/api/v1/links` renders 3. The difference is
+/// `LinkTable::metrics`, a `filter_map` that drops any link without a motion
+/// value — silently, with no error, counter or log. Every existing endpoint
+/// therefore agreed the other transmitters did not exist.
+///
+/// This reports the table's actual contents so illuminator selection is made
+/// from data rather than inference. It also surfaces `MAX_LINKS` headroom: the
+/// admission check drops new links silently once full, which would be the same
+/// class of invisible failure one layer up.
+async fn links_inventory_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    let now = std::time::Instant::now();
+    let inv = s.link_table.inventory(now);
+
+    let visible = inv.iter().filter(|r| r.visible).count();
+    let mut by_reason: std::collections::BTreeMap<&'static str, usize> =
+        std::collections::BTreeMap::new();
+    for r in &inv {
+        *by_reason.entry(r.reason).or_insert(0) += 1;
+    }
+    // Distinct transmitters across every receiver — the illuminator roster,
+    // as opposed to the link count, which counts each (rx, tx) pair.
+    let distinct_tx: std::collections::BTreeSet<[u8; 6]> =
+        inv.iter().map(|r| r.id.tx_mac).collect();
+
+    let rows: Vec<serde_json::Value> = inv
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "rx_node": r.id.rx_node,
+                "tx_mac": format!(
+                    "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                    r.id.tx_mac[0], r.id.tx_mac[1], r.id.tx_mac[2],
+                    r.id.tx_mac[3], r.id.tx_mac[4], r.id.tx_mac[5]
+                ),
+                // The locally-administered bit separates a virtual BSSID (an AP
+                // advertising several SSIDs) from a burned-in device address.
+                // Cheap, and it is the difference between "an access point" and
+                // "somebody's phone" without any vendor lookup.
+                "locally_administered": (r.id.tx_mac[0] & 0x02) != 0,
+                "frames": r.frames,
+                "rssi_dbm": r.rssi,
+                "history_len": r.history_len,
+                "widths": r.widths.iter()
+                    .map(|(w, c)| serde_json::json!({"subcarriers": w, "frames": c}))
+                    .collect::<Vec<_>>(),
+                "modal_width": r.modal_width,
+                "frames_at_modal": r.frames_at_modal,
+                "visible_in_links": r.visible,
+                "reason": r.reason,
+                "age_ms": r.age_ms,
+                "baseline_samples": r.baseline_samples,
+                "fps": r.fps,
+                "window_span_s": r.window_span_s,
+                "grid": r.grid,
+                "sparser_skipped": r.sparser_skipped,
+                "interval_s": r.interval_s,
+                "stale_after_s": r.stale_after_s,
+                "gap_resets": r.gap_resets,
+            })
+        })
+        .collect();
+
+    Json(serde_json::json!({
+        "links_total": inv.len(),
+        "links_visible": visible,
+        "links_hidden": inv.len() - visible,
+        "distinct_transmitters": distinct_tx.len(),
+        "max_links": links::MAX_LINKS,
+        "headroom": links::MAX_LINKS.saturating_sub(inv.len()),
+        "hidden_by_reason": by_reason,
+        "links": rows,
+        "note": "everything the link table holds; /api/v1/links shows only rows \
+                 with a computable motion metric"
+    }))
+}
+
+
+async fn links_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+
+    // Attribute each link's transmitter. A node that reports its own MAC in
+    // its sync packet (proto v2+) is known outright; the old hearing-set
+    // inference is kept only as a fallback for a node still on older
+    // firmware, since it cannot work once boards are more than a room apart.
+    let metrics = s.link_table.metrics();
+    let (receivers, heard_by) = links::hearing_index(&metrics);
+
+    let rows: Vec<serde_json::Value> = metrics
+        .iter()
+        .map(|m| {
+            // No node-MAC registry on this path, so attribution rests on
+            // the hearing-set heuristic, which `links` restricts to the
+            // case where nothing has reported a MAC yet.
+            let tx_node =
+                links::infer_transmitting_node(&m.id.tx_mac, &receivers, &heard_by);
+            serde_json::json!({
+                "rx_node": m.id.rx_node,
+                "tx_mac": format!(
+                    "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                    m.id.tx_mac[0], m.id.tx_mac[1], m.id.tx_mac[2],
+                    m.id.tx_mac[3], m.id.tx_mac[4], m.id.tx_mac[5]
+                ),
+                // Inferred, never measured — see `infer_node` above.
+                "tx_node_inferred": tx_node,
+                "kind": if tx_node.is_some() { "node" } else { "infrastructure" },
+                "label": m.id.label(),
+                "frames": m.frames,
+                "rssi_dbm": m.rssi,
+                // Reported per frame by the chip. ESP-IDF exposes no AGC gain
+                // field, so this is the only observable that can betray a gain
+                // step -- without it a drop in amplitude is ambiguous between
+                // attenuation and the receiver down-rating itself.
+                "noise_floor_dbm": m.noise,
+                "snr_db": m.rssi - m.noise,
+                "raw_motion": m.raw_motion,
+                "motion": m.motion,
+                // Both metrics above are statistics over a fixed 64-frame
+                // window, so they mean nothing without the window they were
+                // taken over. A link whose delivery collapses while its peers
+                // surge produces a large apparent `motion` from transport
+                // contention alone — that pattern accounted for 56% of
+                // above-threshold bins on the 2026-08-28 overnight baseline,
+                // including the night's largest excursions, with the room
+                // empty. Report the window so a consumer can reject the
+                // comparison instead of believing it.
+                "window_span_s": m.window_span_s,
+                "fps": m.fps,
+            })
+        })
+        .collect();
+
+    // The link-line estimate, computed and reported *alongside* the live
+    // position rather than replacing it. It has never been scored against
+    // ground truth, so promoting it to the dot on the strength of it being
+    // newer would be exactly the overclaim this repository forbids. Reporting
+    // both here lets a labelled walk record them together and settle it with
+    // numbers.
+
+    Json(serde_json::json!({
+        "links": rows,
+        "count": rows.len(),
+        // A v1-only fleet carries no transmitter address, so the table stays
+        // empty. Say so explicitly rather than letting an empty list read as
+        // "no motion anywhere".
+        "wire_v2_active": !rows.is_empty(),
+    }))
+}
+
+/// Build link-line observations from the current link table and solve for a
+/// position. `null` whenever the geometry or the data cannot support one — a
+/// missing node position, an unconfigured AP, too few usable links, or a
+/// baseline that has not converged.
+///
+/// Only links whose *both* endpoints have known coordinates can contribute. A
+/// link to an unidentified transmitter (a neighbour's router, a phone) is real
+/// signal but its geometry is unknown, so including it would inject an
+/// arbitrary line into the solve.
+
 async fn nodes_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
     let now = std::time::Instant::now();
@@ -13308,6 +13473,35 @@ async fn udp_receiver_task(
                         observed_at,
                     );
 
+
+                    // ---- Per-link accumulation, BEFORE the per-node gate ----
+                    //
+                    // MEASURED 2026-09-01: the gate below is keyed by NODE and
+                    // locks onto the densest grid that node has seen, which the
+                    // associated AP sets at 256-bin HE. Because it `continue`s,
+                    // every 64-bin HT frame -- essentially every OTHER
+                    // transmitter in the building -- was discarded before it
+                    // could become a link. A node's radio produced CSI for 24
+                    // transmitters and the server admitted 10, all our own.
+                    //
+                    // A link is (receiver, transmitter), so grid consistency is
+                    // a per-LINK property, not a per-node one, and `LinkTable`
+                    // enforces it there. Running this first leaves a frame the
+                    // node-level feature path cannot use still available to the
+                    // link path, which can. The gate itself is unchanged.
+                    if let Some(tx) = frame.source_mac {
+                        let now = std::time::Instant::now();
+                        s.link_table.observe(
+                            frame.node_id,
+                            tx,
+                            &frame.amplitudes,
+                            frame.rssi,
+                            frame.noise_floor,
+                            now,
+                        );
+                        s.link_table.expire(now);
+                    }
+
                     // ── ADR-110 / issue #1005: per-node subcarrier-grid gate ──
                     // ESP32-C6 nodes interleave HE-SU 256-bin frames (~84%)
                     // with HT 64-bin frames on the same socket. HT-LTF and
@@ -15128,6 +15322,7 @@ async fn main() {
     let state: SharedState = Arc::new(RwLock::new(AppStateInner {
         latest_update: None,
         source_fusion: source_fusion::FusionState::from_env(),
+        link_table: links::LinkTable::new(),
         rssi_history: VecDeque::new(),
         frame_history: VecDeque::new(),
         tick: 0,
@@ -15599,6 +15794,8 @@ async fn main() {
         .route("/api/v1/rf/vendors/:vendor/events", post(ingest_vendor_events))
         // Per-node health endpoint
         .route("/api/v1/nodes", get(nodes_endpoint))
+        .route("/api/v1/links", get(links_endpoint))
+        .route("/api/v1/links/inventory", get(links_inventory_endpoint))
         // ADR-110 iter 29 — per-node mesh sync state for HTTP clients.
         .route("/api/v1/nodes/:id/sync", get(node_sync_endpoint))
         .route("/api/v1/mesh", get(mesh_endpoint))
