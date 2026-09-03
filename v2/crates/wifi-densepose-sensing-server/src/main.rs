@@ -61,7 +61,7 @@ use wifi_densepose_sensing_server::provenance::SourceState;
 
 use ruvector_mincut::{DynamicMinCut, MinCutBuilder};
 use rand::{rngs::OsRng, RngCore};
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -2100,6 +2100,62 @@ pub(crate) struct Wall {
 
 /// Room geometry (a simple rectangle) plus sensor node placements, as
 /// defined via the Room Builder UI (`POST /api/v1/config/room`).
+/// A transmitter the fleet can hear, and what is known about where it is.
+///
+/// Deliberately separates "where" from "how sure", because for illumination
+/// those are different questions and conflating them is what makes a solver
+/// trust a guess as much as a tape measure. Four states are expressible:
+///
+/// - **surveyed** — `position` set, `uncertainty_m` zero or absent. Your own
+///   access points, the Powerwall gateway, anything you can walk to.
+/// - **approximate** — `position` set with a large `uncertainty_m`. A
+///   neighbour's router: you know which house, not which room.
+/// - **unknown** — `position` is `None`. Still useful: cross-receiver
+///   correlation learns which region a receiver group covers WITHOUT ever
+///   needing the transmitter's coordinates. Only the geometric/ellipsoid path
+///   requires a position.
+/// - **excluded** — `exclude` set, for a transmitter known to move. A mobile
+///   emitter is worse than none, because the association it teaches is only
+///   true while it stands still.
+///
+/// On why `uncertainty_m` is worth carrying rather than rounding away: an
+/// emitter's positional error matters in proportion to its DISTANCE. Fifteen
+/// metres of doubt about a router 60 m away is roughly 14 degrees of bearing,
+/// and error along the line of sight matters far less than error across it. A
+/// consumer can weight by `uncertainty_m / distance`; it cannot recover that
+/// from a bare coordinate.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct Emitter {
+    /// Lower-case colon-separated MAC, matching `/api/v1/links` `tx_mac`.
+    pub mac: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Room coordinates, same frame as `nodes`. `None` means "position not
+    /// known", which is a first-class state here, not a missing field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f32; 3]>,
+    /// Which storey, when that is meaningful. A neighbour's house has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floor: Option<i32>,
+    /// Radius of doubt around `position`, metres. Absent or zero means
+    /// surveyed. Meaningless without a `position`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uncertainty_m: Option<f32>,
+    /// Admission state. Defaults to `pending`: a newly discovered transmitter
+    /// is NEVER trusted as a fixed illuminator just because it was heard.
+    ///
+    /// - `pending`  — seen, not yet judged. Usable for learned/fingerprint
+    ///   work, never as a fixed geometric focus.
+    /// - `approved` — observed stationary long enough to be trusted as a focus.
+    ///   Promotion is a decision, informed by measured stability, not an
+    ///   automatic consequence of being loud.
+    /// - `excluded` — known to move, or otherwise unwanted. A mobile emitter is
+    ///   worse than none: the association it teaches is only true while it
+    ///   stands still.
+    #[serde(default = "emitter_status_default")]
+    pub status: String,
+}
+
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct RoomConfig {
     pub width_m: f32,
@@ -2141,11 +2197,96 @@ pub(crate) struct RoomConfig {
     /// actually on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ap_floor: Option<i32>,
+    /// Transmitters the fleet can hear, and what is known about each.
+    #[serde(default)]
+    pub emitters: Vec<Emitter>,
 }
 
 /// Load persisted room config from `<data_dir>/room_config.json`.
 /// Falls back to [`RoomConfig::default`] (empty room, no nodes) if the file
 /// is absent or malformed.
+/// Approved emitters that carry a position, keyed by MAC.
+///
+/// `pending` entries are deliberately excluded. Pending means "heard, not yet
+/// judged stationary", and a transmitter that moves teaches an association that
+/// is only true while it stands still — worse than having no illuminator at
+/// all. Promotion to `approved` is a decision, not a consequence of being loud.
+/// MACs marked `excluded`: known to move, or otherwise unwanted.
+///
+/// Enforced by refusing them at ingestion, so an excluded emitter leaves the
+/// link table, the fusion index and every consumer at once — and frees its
+/// slot. Without this, `excluded` only meant "not approved", which is
+/// indistinguishable from `pending` and quietly does nothing.
+pub(crate) fn excluded_emitter_macs(config: &RoomConfig) -> HashSet<[u8; 6]> {
+    config
+        .emitters
+        .iter()
+        .filter(|e| e.status == "excluded")
+        .filter_map(|e| parse_mac_str(&e.mac.to_ascii_lowercase()))
+        .collect()
+}
+
+pub(crate) fn approved_emitter_positions(
+    config: &RoomConfig,
+) -> HashMap<[u8; 6], [f32; 3]> {
+    let mut out = HashMap::new();
+    for e in &config.emitters {
+        if !EMITTER_FOCUS_STATUSES.contains(&e.status.as_str()) {
+            continue;
+        }
+        if let (Some(mac), Some(pos)) = (parse_mac_str(&e.mac.to_ascii_lowercase()), e.position) {
+            out.insert(mac, pos);
+        }
+    }
+    out
+}
+
+/// Newly discovered transmitters start unapproved. Being audible is not
+/// evidence of being stationary, and only a stationary emitter can serve as a
+/// fixed focus.
+pub(crate) fn emitter_status_default() -> String {
+    "pending".to_string()
+}
+
+/// The admission states an emitter may hold, in triage order.
+///
+/// Status answers "do I trust this thing to stay put"; `uncertainty_m` answers
+/// "how well do I know where it is". They are orthogonal everywhere except at
+/// the ends of the scale, which is why `surveyed` exists as its own state
+/// rather than being inferred from a zero uncertainty: it is the difference
+/// between "I measured this" and "I left the box empty".
+///
+/// - `excluded` — it moves. Refused at ingestion; leaves every consumer.
+/// - `pending`  — heard, shortlisted, not yet judged. Feeds position-free
+///   pattern-matching work but is never a geometric focus.
+/// - `approved` — trusted as fixed, position ESTIMATED. Needs a position and a
+///   non-zero `uncertainty_m`: a neighbour's router does not move, but you only
+///   know which house.
+/// - `surveyed` — trusted as fixed, position MEASURED. Needs a position and no
+///   uncertainty. Your own access point, a gateway you can put a tape on.
+pub(crate) const EMITTER_STATUSES: [&str; 4] =
+    ["excluded", "pending", "approved", "surveyed"];
+
+/// Statuses whose position may be used as a solver focus.
+pub(crate) const EMITTER_FOCUS_STATUSES: [&str; 2] = ["approved", "surveyed"];
+
+/// Parse `aa:bb:cc:dd:ee:ff` into six octets. `None` for anything else.
+pub(crate) fn parse_mac_str(s: &str) -> Option<[u8; 6]> {
+    let mut out = [0u8; 6];
+    let mut parts = s.split(':');
+    for slot in out.iter_mut() {
+        let p = parts.next()?;
+        if p.len() != 2 {
+            return None;
+        }
+        *slot = u8::from_str_radix(p, 16).ok()?;
+    }
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(out)
+}
+
 pub(crate) fn load_room_config(data_dir: &std::path::Path) -> RoomConfig {
     let path = data_dir.join("room_config.json");
     match std::fs::read_to_string(&path) {
@@ -2167,6 +2308,222 @@ pub(crate) fn save_room_config(data_dir: &std::path::Path, config: &RoomConfig) 
 }
 
 #[cfg(test)]
+
+    fn base() -> RoomConfig {
+        RoomConfig {
+            width_m: 13.4,
+            depth_m: 10.4,
+            nodes: Vec::new(),
+            ap_position: None,
+            ap_floor: None,
+            floors: Vec::new(),
+            walls: Vec::new(),
+            emitters: Vec::new(),
+        }
+    }
+
+    // ── Emitters ─────────────────────────────────────────────────────────
+
+    fn emitter(mac: &str) -> Emitter {
+        Emitter { mac: mac.into(), label: None, position: None,
+                  floor: None, uncertainty_m: None,
+                  status: emitter_status_default() }
+    }
+
+    #[test]
+    fn an_emitter_with_no_position_is_valid() {
+        // "I have no idea where this is" is a first-class state: cross-receiver
+        // correlation never needs the transmitter's coordinates, only the
+        // geometric path does.
+        let mut c = base();
+        c.emitters = vec![emitter("02:00:00:00:00:01")];
+        assert!(validate_room_config(&c).is_ok());
+    }
+
+    #[test]
+    fn a_malformed_emitter_mac_is_rejected() {
+        let mut c = base();
+        for bad in ["02:00:00:00:00", "0200:00:00:00:01", "zz:00:00:00:00:01",
+                    "02:00:00:00:00:01:ff", "002:00:00:00:0:01"] {
+            c.emitters = vec![emitter(bad)];
+            assert!(validate_room_config(&c).is_err(), "accepted `{bad}`");
+        }
+        c.emitters = vec![emitter("02:00:00:00:00:01")];
+        assert!(validate_room_config(&c).is_ok());
+    }
+
+    /// Two rows for one transmitter would let a later save silently win and
+    /// move an illuminator without anyone seeing it.
+    #[test]
+    fn duplicate_emitter_macs_are_rejected() {
+        let mut c = base();
+        c.emitters = vec![emitter("02:00:00:00:00:01"), emitter("02:00:00:00:00:01")];
+        assert!(validate_room_config(&c).unwrap_err().contains("duplicate emitter"));
+    }
+
+    /// Uncertainty describes a position. Left behind after the position was
+    /// cleared it describes nothing, so it is refused rather than carried.
+    #[test]
+    fn uncertainty_without_a_position_is_rejected() {
+        let mut c = base();
+        let mut e = emitter("02:00:00:00:00:01");
+        e.uncertainty_m = Some(15.0);
+        c.emitters = vec![e];
+        assert!(validate_room_config(&c).unwrap_err().contains("no position"));
+    }
+
+    /// The neighbour case: a position you only know to within a house.
+    #[test]
+    fn an_approximate_position_round_trips_with_its_uncertainty() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = base();
+        let mut neighbour_ap = emitter("02:00:00:00:00:02");
+        neighbour_ap.label = Some("neighbour AP".into());
+        neighbour_ap.position = Some([-30.0, 12.0, 3.0]);
+        neighbour_ap.uncertainty_m = Some(15.0);
+        let mut gateway = emitter("02:00:00:00:00:03");
+        gateway.label = Some("utility gateway".into());
+        gateway.position = Some([6.0, 5.0, -2.5]);
+        gateway.uncertainty_m = Some(0.5);
+        c.emitters = vec![neighbour_ap, gateway];
+        assert!(validate_room_config(&c).is_ok());
+
+        save_room_config(dir.path(), &c);
+        let loaded = load_room_config(dir.path());
+        assert_eq!(loaded.emitters.len(), 2);
+        assert_eq!(loaded.emitters[0].uncertainty_m, Some(15.0));
+        assert_eq!(loaded.emitters[1].position, Some([6.0, 5.0, -2.5]),
+                   "a basement emitter keeps its negative z");
+    }
+
+    #[test]
+    fn a_config_without_emitters_is_still_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("room_config.json"),
+            r#"{"width_m":13.4,"depth_m":10.4,"nodes":[]}"#).unwrap();
+        let loaded = load_room_config(dir.path());
+        assert!(loaded.emitters.is_empty());
+        assert!(validate_room_config(&loaded).is_ok());
+    }
+
+    #[test]
+    fn mac_parsing_accepts_exactly_six_octets() {
+        assert_eq!(parse_mac_str("02:00:00:00:00:03"),
+                   Some([0x02, 0x00, 0x00, 0x00, 0x00, 0x03]));
+        assert!(parse_mac_str("02:00:00:00:00").is_none());
+        assert!(parse_mac_str("").is_none());
+    }
+
+
+    /// A newly heard transmitter must never arrive pre-trusted. Being loud is
+    /// not evidence of standing still.
+    #[test]
+    fn a_new_emitter_defaults_to_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("room_config.json"),
+            r#"{"width_m":13.4,"depth_m":10.4,"nodes":[],
+                "emitters":[{"mac":"02:00:00:00:00:01"}]}"#).unwrap();
+        let loaded = load_room_config(dir.path());
+        assert_eq!(loaded.emitters[0].status, "pending",
+                   "an emitter with no status must not be trusted");
+        assert!(validate_room_config(&loaded).is_ok());
+    }
+
+    /// Approval asserts "this does not move", which is a claim about a PLACE.
+    /// Approving something unlocated would put an unpositioned focus into the
+    /// geometric path.
+    #[test]
+    fn approving_an_emitter_requires_a_position() {
+        let mut c = base();
+        let mut e = emitter("02:00:00:00:00:01");
+        e.status = "approved".into();
+        c.emitters = vec![e.clone()];
+        assert!(validate_room_config(&c).unwrap_err().contains("no position"));
+
+        e.position = Some([2.0, 3.0, 1.0]);
+        e.uncertainty_m = Some(2.0);   // approved == estimated, so it needs one
+        c.emitters = vec![e];
+        assert!(validate_room_config(&c).is_ok());
+    }
+
+    #[test]
+    fn an_unknown_emitter_status_is_rejected() {
+        let mut c = base();
+        let mut e = emitter("02:00:00:00:00:01");
+        e.status = "trusted".into();
+        c.emitters = vec![e];
+        assert!(validate_room_config(&c).unwrap_err().contains("unknown status"));
+    }
+
+    /// Excluding a mobile emitter must not require knowing where it is - the
+    /// whole point is that it has no stable position.
+    #[test]
+    fn excluding_an_emitter_needs_no_position() {
+        let mut c = base();
+        let mut e = emitter("02:00:00:00:00:01");
+        e.status = "excluded".into();
+        c.emitters = vec![e];
+        assert!(validate_room_config(&c).is_ok());
+    }
+
+
+
+    /// Only APPROVED emitters become solver foci. `pending` means "heard, not
+    /// yet judged stationary", and a transmitter that moves teaches an
+    /// association only true while it stands still.
+    #[test]
+    fn only_approved_emitters_become_foci() {
+        let mut c = base();
+        let mut pending = emitter("02:00:00:00:0e:01");
+        pending.position = Some([3.0, 4.0, 2.4]);           // positioned but unjudged
+        let mut approved = emitter("02:00:00:00:00:03");
+        approved.position = Some([0.0, 7.92, -1.22]);
+        approved.uncertainty_m = Some(1.5);
+        approved.status = "approved".into();
+        let mut excluded = emitter("02:00:00:00:0e:02");
+        excluded.position = Some([1.0, 1.0, 1.0]);
+        excluded.status = "excluded".into();
+        c.emitters = vec![pending, approved, excluded];
+
+        let foci = approved_emitter_positions(&c);
+        assert_eq!(foci.len(), 1, "only the approved emitter is a focus");
+        let gateway_mac = parse_mac_str("02:00:00:00:00:03").unwrap();
+        assert_eq!(foci.get(&gateway_mac), Some(&[0.0f32, 7.92, -1.22]),
+                   "a basement emitter keeps its negative z as a focus");
+    }
+
+    /// An approved emitter with no position cannot be a focus. Validation
+    /// forbids that combination, but the table must not depend on it.
+    #[test]
+    fn an_approved_emitter_without_a_position_is_not_a_focus() {
+        let mut c = base();
+        let mut e = emitter("02:00:00:00:0e:03");
+        e.status = "approved".into();          // deliberately no position
+        c.emitters = vec![e];
+        assert!(approved_emitter_positions(&c).is_empty());
+    }
+
+
+    /// `excluded` must actually exclude. Before this it only meant "not
+    /// approved", which is indistinguishable from `pending` and did nothing.
+    #[test]
+    fn excluded_emitters_are_collected_for_refusal() {
+        let mut c = base();
+        let mut moving = emitter("aa:bb:cc:dd:ee:ff");
+        moving.status = "excluded".into();
+        let mut fixed = emitter("02:00:00:00:00:03");
+        fixed.position = Some([0.0, 7.92, -1.22]);
+        fixed.uncertainty_m = Some(1.5);
+        fixed.status = "approved".into();
+        c.emitters = vec![moving, fixed, emitter("02:00:00:00:0e:01")];
+
+        let ex = excluded_emitter_macs(&c);
+        assert_eq!(ex.len(), 1, "only the excluded one");
+        assert!(ex.contains(&parse_mac_str("aa:bb:cc:dd:ee:ff").unwrap()));
+        // and the other two are untouched by exclusion
+        assert!(!ex.contains(&parse_mac_str("02:00:00:00:00:03").unwrap()));
+        assert!(!ex.contains(&parse_mac_str("02:00:00:00:0e:01").unwrap()));
+    }
 mod room_config_tests {
     use super::*;
 
@@ -2177,6 +2534,7 @@ mod room_config_tests {
             nodes: Vec::new(),
             ap_position: None,
             ap_floor: None,
+            emitters: Vec::new(),
             floors: Vec::new(),
             walls: Vec::new(),
         }
@@ -2375,6 +2733,7 @@ mod room_config_tests {
             ],
             ap_position: Some([2.5, -1.0, 2.2]),
             ap_floor: None,
+            emitters: Vec::new(),
         floors: Vec::new(),
         walls: Vec::new(),
         };
@@ -2398,6 +2757,7 @@ mod room_config_tests {
             ],
             ap_position: None,
             ap_floor: None,
+            emitters: Vec::new(),
         floors: Vec::new(),
         walls: Vec::new(),
         }
@@ -2634,6 +2994,9 @@ struct AppStateInner {
     room_debounced_level: String,
     room_debounce_candidate: String,
     room_debounce_since: Option<std::time::Instant>,
+    /// MACs of emitters marked `excluded`, refreshed when the room config
+    /// changes. Held as a set so the ingestion check is a hash lookup.
+    excluded_emitters: HashSet<[u8; 6]>,
     link_table: links::LinkTable,
     // ── Accuracy sprint: Kalman tracker, multistatic fusion, eigenvalue counting ──
     /// Global Kalman-based pose tracker for stable person IDs and smoothed keypoints.
@@ -3695,6 +4058,7 @@ impl AppStateInner {
             room_debounced_level: "absent".to_string(),
             room_debounce_candidate: "absent".to_string(),
             room_debounce_since: None,
+            excluded_emitters: HashSet::new(),
             link_table: links::LinkTable::new(),
             pose_tracker: PoseTracker::new(),
             last_tracker_instant: None,
@@ -13925,6 +14289,14 @@ async fn udp_receiver_task(
                     // node-level feature path cannot use still available to the
                     // link path, which can. The gate itself is unchanged.
                     if let Some(tx) = frame.source_mac {
+                        // An emitter marked as moving is refused HERE rather than
+                        // filtered downstream, so it leaves the link table and
+                        // every consumer at once and stops occupying a slot.
+                        // Filtering later would keep teaching an association that
+                        // is only true while the transmitter stands still.
+                        if s.excluded_emitters.contains(&tx) {
+                            continue;
+                        }
                         let now = std::time::Instant::now();
                         s.link_table.observe(
                             frame.node_id,
@@ -15839,6 +16211,7 @@ async fn main() {
         room_debounced_level: "absent".to_string(),
         room_debounce_candidate: "absent".to_string(),
         room_debounce_since: None,
+        excluded_emitters: HashSet::new(),
         // Accuracy sprint
         pose_tracker: PoseTracker::new(),
         last_tracker_instant: None,
@@ -15948,6 +16321,22 @@ async fn main() {
         )
         .expect("default pose physics configuration is valid"),
     }));
+
+    // Seed the ingestion-time exclusion set from the persisted config.
+    //
+    // Without this, exclusions would apply only after someone re-saved the room
+    // config in the current process: a restart would silently start admitting
+    // every emitter the operator had already judged as moving, and nothing
+    // would report that it had happened.
+    {
+        let mut s = state.write().await;
+        let saved = load_room_config(&s.data_dir);
+        let excluded = excluded_emitter_macs(&saved);
+        if !excluded.is_empty() {
+            info!("refusing {} excluded emitter(s) at ingestion", excluded.len());
+        }
+        s.excluded_emitters = excluded;
+    }
 
     // Start background tasks from the resolved plan (issue #1004).
     //
@@ -17016,6 +17405,7 @@ async fn config_get_room(State(state): State<SharedState>) -> Json<serde_json::V
         "floors": saved.floors,
         "walls": saved.walls,
         "ap_floor": saved.ap_floor,
+        "emitters": saved.emitters,
     }))
 }
 
@@ -17140,6 +17530,83 @@ pub(crate) fn validate_room_config(config: &RoomConfig) -> Result<(), String> {
         }
     }
 
+    // A MAC may appear once. A duplicate is two different judgements about
+    // the same transmitter, and nothing downstream can choose between them.
+    let mut seen_macs = std::collections::HashSet::new();
+    for (i, e) in config.emitters.iter().enumerate() {
+        let mac = e.mac.to_ascii_lowercase();
+        if parse_mac_str(&mac).is_none() {
+            return Err(format!(
+                "emitter {i} has a malformed MAC `{}`; expected aa:bb:cc:dd:ee:ff",
+                e.mac
+            ));
+        }
+        // Two entries for one transmitter would let a later save silently win
+        // and quietly move an illuminator, which is exactly the class of
+        // invisible change this config exists to prevent.
+        if !seen_macs.insert(mac) {
+            return Err(format!("duplicate emitter MAC `{}`", e.mac));
+        }
+        if let Some([x, y, z]) = e.position {
+            if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+                return Err(format!("emitter {i} has a non-finite coordinate"));
+            }
+        }
+        if let Some(u) = e.uncertainty_m {
+            if !u.is_finite() || u < 0.0 {
+                return Err(format!("emitter {i} uncertainty_m must be zero or positive"));
+            }
+            // An uncertainty with nothing to be uncertain about is a sign the
+            // position was cleared and the doubt left behind. Reject it rather
+            // than carry a number that describes nothing.
+            if e.position.is_none() {
+                return Err(format!(
+                    "emitter {i} has uncertainty_m but no position; \
+                     an unknown position is expressed by omitting position entirely"
+                ));
+            }
+        }
+        if !EMITTER_STATUSES.contains(&e.status.as_str()) {
+            return Err(format!(
+                "emitter {i} has unknown status `{}`; expected one of {:?}",
+                e.status, EMITTER_STATUSES
+            ));
+        }
+        // Approval asserts "this thing does not move", which is a claim about a
+        // place. Approving an emitter whose position is unknown would put an
+        // unlocated focus into the geometric path.
+        if EMITTER_FOCUS_STATUSES.contains(&e.status.as_str()) && e.position.is_none() {
+            return Err(format!(
+                "emitter {i} is `{}` but has no position; that status means it is                  trusted as a fixed focus, which requires one",
+                e.status
+            ));
+        }
+        // `surveyed` claims the position was measured. Carrying a radius of
+        // doubt alongside that claim means one of the two is wrong, and a
+        // solver has no way to tell which — so the pair is refused rather than
+        // silently preferring one.
+        if e.status == "surveyed" && e.uncertainty_m.is_some_and(|u| u > 0.0) {
+            return Err(format!(
+                "emitter {i} is surveyed but carries uncertainty_m {}; a measured                  position has no radius of doubt — use `approved` for an estimate",
+                e.uncertainty_m.unwrap_or(0.0)
+            ));
+        }
+        // Conversely an approved (estimated) position without a stated doubt is
+        // indistinguishable from a surveyed one, and would be trusted as if
+        // measured.
+        if e.status == "approved" && !e.uncertainty_m.is_some_and(|u| u > 0.0) {
+            return Err(format!(
+                "emitter {i} is approved but states no uncertainty_m; an estimated                  position needs one — use `surveyed` if you measured it"
+            ));
+        }
+        if !config.floors.is_empty() {
+            if let Some(lvl) = e.floor {
+                if !levels.contains(&lvl) {
+                    return Err(format!("emitter {i} is on undefined floor {lvl}"));
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -17152,6 +17619,11 @@ async fn config_set_room(
     }
 
     let mut s = state.write().await;
+    // Refresh the ingestion-time exclusion set from the config just
+    // accepted. Without this the set stays empty and the check at
+    // ingestion is dead code -- excluded would once again mean nothing
+    // more than "not approved".
+    s.excluded_emitters = excluded_emitter_macs(&config);
     s.node_positions_config.clear();
     let max_id = config.nodes.iter().map(|n| n.id).max().unwrap_or(0);
     let mut positions = vec![[0.0f32, 0.0, 0.0]; max_id as usize + 1];
