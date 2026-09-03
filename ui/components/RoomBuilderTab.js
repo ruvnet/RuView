@@ -45,10 +45,18 @@ export class RoomBuilderTab {
     // node with the wall below it -- which is the whole point of stacking
     // storeys on a shared origin.
     this._activeFloor = 1;
-    // 'select' drags nodes and the AP; 'wall' draws segments.
+    // 'select' drags nodes and the AP; 'wall' draws segments; 'footprint'
+    // clicks out the building's outline vertex by vertex.
     this._mode = 'select';
     this._wallStart = null;
     this._wallPreview = null;
+    // The outline being traced right now, as {x, y} in room coordinates. It
+    // is not part of `config` until closed: a half-traced ring is not a shape,
+    // and the server rejects one with fewer than three vertices.
+    this._ringDraft = null;
+    // Where the pointer is, so the segment about to be committed is visible
+    // before the click that commits it.
+    this._ringHover = null;
     this._loaded = false;
     // Live tracked-position overlay, fed by sensingService (/ws/sensing).
     // `_liveDot` is only ever set from a "bistatic_velocity", "doppler_centroid",
@@ -312,6 +320,48 @@ export class RoomBuilderTab {
             <div id="rbWallList"></div>
           </div>
           <div class="rb-card">
+            <div class="rb-card-title">Building Outline</div>
+            <p class="rb-hint" style="margin-top:0;">
+              The width and depth above are a <strong>bounding box</strong>. Trace the
+              storey's real outline here and the position search stops scoring cells
+              that are not part of the house — the notch of an L-shaped plan is the
+              garden, not a place a person can stand. Leave it empty and the whole
+              box is searched, exactly as before.
+            </p>
+            <p class="rb-hint" style="margin-top:0;">
+              A wing <strong>west or north</strong> of the north-west corner has
+              <strong>negative</strong> coordinates. That is expected: the origin is
+              pinned to the block your nodes were measured against, so it never moves
+              under them. The canvas widens to show whatever you trace.
+            </p>
+            <div class="rb-actions" style="margin-top:10px;">
+              <button class="rb-btn secondary" id="rbFootprintMode">Trace Outline</button>
+              <button class="rb-btn secondary" id="rbCloseRing" style="display:none;">Close Outline</button>
+              <button class="rb-btn secondary" id="rbUndoPoint" style="display:none;">Undo Point</button>
+            </div>
+            <div class="rb-wall-entry" style="grid-template-columns:1fr 1fr auto;">
+              <label><span>Corner &middot; east &rarr;</span><input type="number" id="rbRingX" step="0.5" placeholder="—" title="Distance east of the north-west corner. Negative for a wing west of it."></label>
+              <label><span>Corner &middot; south &darr;</span><input type="number" id="rbRingY" step="0.5" placeholder="—" title="Distance south of the north-west corner. Negative for a wing north of it."></label>
+              <button class="rb-btn secondary" id="rbAddCorner">Add Corner</button>
+            </div>
+            <p class="rb-hint" style="margin:4px 2px 8px;">
+              Type a corner when clicking cannot reach it or is not precise enough.
+              A wing <strong>west</strong> of the north-west corner has a
+              <strong>negative</strong> east value — a 12&nbsp;ft wing runs
+              <strong>&minus;12&nbsp;&rarr;&nbsp;0</strong>, not 0&nbsp;&rarr;&nbsp;12.
+              Clicking can only reach about 2.6&nbsp;ft west of the corner, so anything
+              further out has to be typed.
+            </p>
+            <p class="rb-hint" id="rbFootprintHint" style="margin-bottom:6px;">
+              <strong>Walk the perimeter</strong>, clicking each corner in turn, then Close
+              Outline. You do not cut a notch out — you route around it: a rectangle is
+              4 clicks, an L-shaped plan is 6. Several outlines may share a storey — a
+              wing or a detached garage is its own shape, and a person is indoors if
+              they are inside any of them.
+            </p>
+            <div id="rbFootprintList"></div>
+          </div>
+          <div class="rb-card">
             <div class="rb-card-title">Access Point</div>
             <p class="rb-hint" style="margin-top:0;">
               Optional — needed for Doppler-based position geometry. One AP,
@@ -478,9 +528,14 @@ export class RoomBuilderTab {
     this.container.querySelector('#rbWallMode').addEventListener('click', (e) => {
       this._mode = this._mode === 'wall' ? 'select' : 'wall';
       // Abandon a half-drawn segment rather than leaving it to commit on the
-      // next unrelated click.
+      // next unrelated click. The same goes for a half-traced outline: the
+      // two drawing modes are exclusive, so entering one must not leave the
+      // other's unfinished shape armed.
       this._wallStart = null;
       this._wallPreview = null;
+      this._ringDraft = null;
+      this._ringHover = null;
+      this._renderFootprintControls();
       e.target.textContent = this._mode === 'wall' ? 'Done Drawing' : 'Draw Walls';
       const canvas = this.container.querySelector('#rbCanvas');
       if (canvas) canvas.style.cursor = this._mode === 'wall' ? 'crosshair' : 'default';
@@ -490,6 +545,57 @@ export class RoomBuilderTab {
           ? 'Drag on the canvas to draw a wall on the selected storey. Dragging no longer moves nodes.'
           : 'In wall mode, drag on the canvas to draw a segment on the selected storey. Other storeys stay visible, faintly, so you can line one up with the floor below.';
       }
+      this._render();
+    });
+    this.container.querySelector('#rbFootprintMode').addEventListener('click', () => {
+      if (this._mode === 'footprint') {
+        // Leaving the mode abandons a half-traced ring rather than leaving it
+        // to be closed by some later, unrelated click.
+        this._ringDraft = null;
+        this._ringHover = null;
+        this._mode = 'select';
+      } else {
+        this._mode = 'footprint';
+        this._ringDraft = [];
+        // A wall being dragged out would otherwise commit on the next mouseup.
+        this._wallStart = null;
+        this._wallPreview = null;
+      }
+      this._renderFootprintControls();
+      this._render();
+    });
+    this.container.querySelector('#rbCloseRing').addEventListener('click', () => {
+      this._closeRing();
+    });
+    this.container.querySelector('#rbAddCorner').addEventListener('click', () => {
+      const num = (id) => parseFloat(this.container.querySelector(`#${id}`).value);
+      const [dx, dy] = [num('rbRingX'), num('rbRingY')];
+      if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+        toastManager.error('Fill in both corner coordinates before adding.');
+        return;
+      }
+      // Typing a corner IS tracing, so switch into the mode rather than
+      // silently dropping the point because a button was not pressed first.
+      if (this._mode !== 'footprint') {
+        this._mode = 'footprint';
+        this._wallStart = null;
+        this._wallPreview = null;
+      }
+      if (!Array.isArray(this._ringDraft)) this._ringDraft = [];
+      const r = (v) => Math.round(v * 10000) / 10000;
+      this._ringDraft.push({ x: r(this._fromDisplay(dx)), y: r(this._fromDisplay(dy)) });
+      // Clear rather than chain: unlike a wall, whose next segment starts
+      // where the last ended, the next corner of an outline shares no
+      // coordinate with the previous one, so leaving the numbers in place
+      // would only stage a duplicate point.
+      this.container.querySelector('#rbRingX').value = '';
+      this.container.querySelector('#rbRingY').value = '';
+      this._renderFootprintControls();
+      this._render();
+    });
+    this.container.querySelector('#rbUndoPoint').addEventListener('click', () => {
+      if (this._ringDraft && this._ringDraft.length) this._ringDraft.pop();
+      this._renderFootprintControls();
       this._render();
     });
     this.container.querySelector('#rbRemoveAp').addEventListener('click', () => {
@@ -619,6 +725,7 @@ export class RoomBuilderTab {
           ap_position: Array.isArray(data.ap_position) ? data.ap_position : null,
           floors: Array.isArray(data.floors) ? data.floors : [],
           walls: Array.isArray(data.walls) ? data.walls : [],
+          footprint: Array.isArray(data.footprint) ? data.footprint : [],
         };
       }
     } catch (e) {
@@ -637,6 +744,7 @@ export class RoomBuilderTab {
   _renderStoreyPanels() {
     this._renderFloorControls();
     this._renderWallList();
+    this._renderFootprintControls();
   }
 
   _refreshUnitDisplay() {
@@ -868,28 +976,64 @@ export class RoomBuilderTab {
 
   // ---- Canvas -----------------------------------------------------------------
 
-  /** Room-space (x,y) meters -> canvas pixel coordinates. */
-  _toPixel(x, y) {
-    const scale = Math.min(
-      (CANVAS_W - 2 * MARGIN) / this.config.width_m,
-      (CANVAS_H - 2 * MARGIN) / this.config.depth_m
-    );
-    return { px: MARGIN + x * scale, py: MARGIN + y * scale, scale };
+  /** The extent the canvas must show, in room coordinates.
+   *
+   * Deliberately not just `0..width_m x 0..depth_m`. The origin is pinned to
+   * the north-west corner of the building's MAIN BLOCK, because that is what
+   * every node position was measured against — so a wing to the west or north
+   * of it has negative coordinates. A viewport that always started at (0, 0)
+   * would render that wing off the canvas entirely: invisible, undraggable,
+   * and impossible to trace an outline around.
+   *
+   * The room rectangle is always included even when a footprint extends past
+   * it, so the box the nodes were placed in never scrolls out of view.
+   */
+  _view() {
+    let minX = 0;
+    let minY = 0;
+    let maxX = this.config.width_m;
+    let maxY = this.config.depth_m;
+    const consider = (x, y) => {
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    };
+    (this.config.footprint || []).forEach((ring) => {
+      (ring.points || []).forEach((p) => consider(p[0], p[1]));
+    });
+    (this._ringDraft || []).forEach((p) => consider(p.x, p.y));
+
+    const spanX = maxX - minX;
+    const spanY = maxY - minY;
+    // A zero or non-finite span would make every coordinate NaN and blank the
+    // canvas. Fall back to a scale of 1 px/m, which draws something wrong
+    // rather than nothing at all.
+    const scale =
+      spanX > 0 && spanY > 0
+        ? Math.min((CANVAS_W - 2 * MARGIN) / spanX, (CANVAS_H - 2 * MARGIN) / spanY)
+        : 1;
+    return { minX, minY, maxX, maxY, scale };
   }
 
-  /** Canvas pixel coordinates -> room-space (x,y) meters. Clamped to the room
-   * by default (sensor nodes always live inside it); pass `clamp: false` for
-   * the AP marker, which is legitimately often outside the room. */
+  /** Room-space (x,y) meters -> canvas pixel coordinates. */
+  _toPixel(x, y) {
+    const { minX, minY, scale } = this._view();
+    return { px: MARGIN + (x - minX) * scale, py: MARGIN + (y - minY) * scale, scale };
+  }
+
+  /** Canvas pixel coordinates -> room-space (x,y) meters. Clamped to the
+   * visible extent by default (sensor nodes always live inside the building);
+   * pass `clamp: false` for the AP marker, which is legitimately often outside
+   * it, and for footprint and wall vertices, which trace its boundary. */
   _toRoom(px, py, { clamp = true } = {}) {
-    const scale = Math.min(
-      (CANVAS_W - 2 * MARGIN) / this.config.width_m,
-      (CANVAS_H - 2 * MARGIN) / this.config.depth_m
-    );
-    let x = (px - MARGIN) / scale;
-    let y = (py - MARGIN) / scale;
+    const { minX, minY, maxX, maxY, scale } = this._view();
+    let x = minX + (px - MARGIN) / scale;
+    let y = minY + (py - MARGIN) / scale;
     if (clamp) {
-      x = Math.min(this.config.width_m, Math.max(0, x));
-      y = Math.min(this.config.depth_m, Math.max(0, y));
+      x = Math.min(maxX, Math.max(minX, x));
+      y = Math.min(maxY, Math.max(minY, y));
     }
     return { x, y };
   }
@@ -906,6 +1050,27 @@ export class RoomBuilderTab {
   _onCanvasDown(e) {
     const pos = this._canvasPos(e);
 
+    if (this._mode === 'footprint') {
+      // Not clamped: the outline traces the building's boundary, and a wing
+      // west of the origin is legitimately at negative x.
+      const room = this._toRoom(pos.x, pos.y, { clamp: false });
+      if (!this._ringDraft) this._ringDraft = [];
+      const pt = { x: Math.round(room.x * 100) / 100, y: Math.round(room.y * 100) / 100 };
+      // Clicking the first vertex again is the usual way to close a polygon,
+      // so honour it rather than adding a duplicate point on top of it.
+      const first = this._ringDraft[0];
+      if (first && this._ringDraft.length >= 3) {
+        const { scale } = this._view();
+        if (Math.hypot((pt.x - first.x) * scale, (pt.y - first.y) * scale) <= WALL_HIT_PX) {
+          this._closeRing();
+          return;
+        }
+      }
+      this._ringDraft.push(pt);
+      this._renderFootprintControls();
+      this._render();
+      return;
+    }
     if (this._mode === 'wall') {
       // Walls are not clamped to the room rectangle. width_m/depth_m describe
       // the sensed area, and an exterior wall is legitimately on or slightly
@@ -931,6 +1096,13 @@ export class RoomBuilderTab {
   }
 
   _onCanvasMove(e) {
+    if (this._mode === 'footprint') {
+      if (!this._ringDraft || !this._ringDraft.length) return;
+      const pos = this._canvasPos(e);
+      this._ringHover = { x: pos.x, y: pos.y };
+      this._render();
+      return;
+    }
     if (this._mode === 'wall' && this._wallStart) {
       const pos = this._canvasPos(e);
       this._wallPreview = { x: pos.x, y: pos.y };
@@ -1124,6 +1296,117 @@ export class RoomBuilderTab {
     this._render();
   }
 
+  // ---- Footprint --------------------------------------------------------------
+
+  /** Commit the traced outline to the active storey.
+   *
+   * Refuses anything under three vertices. Two points are a line and one is a
+   * dot; neither encloses anything, and the server's point-in-polygon test
+   * reports every cell OUTSIDE such a ring — so saving one would mask the
+   * whole search grid away and stop position output with no error anywhere.
+   * The server rejects it too; failing here means the user finds out while
+   * they are still looking at the shape.
+   */
+  _closeRing() {
+    const draft = this._ringDraft || [];
+    if (draft.length < 3) {
+      toastManager.error('An outline needs at least three corners before it can be closed.');
+      return;
+    }
+    if (!Array.isArray(this.config.footprint)) this.config.footprint = [];
+    this.config.footprint.push({
+      level: this._activeFloor,
+      points: draft.map((p) => [p.x, p.y]),
+    });
+    // Stay in the mode: a house with a wing needs a second outline, and
+    // dropping out after every ring would make that needlessly fiddly.
+    this._ringDraft = [];
+    this._ringHover = null;
+    this._renderFootprintControls();
+    this._render();
+  }
+
+  /** Button labels and the per-storey outline list. */
+  _renderFootprintControls() {
+    const tracing = this._mode === 'footprint';
+    const draft = this._ringDraft || [];
+    const modeBtn = this.container.querySelector('#rbFootprintMode');
+    if (modeBtn) modeBtn.textContent = tracing ? 'Done Tracing' : 'Trace Outline';
+    const closeBtn = this.container.querySelector('#rbCloseRing');
+    if (closeBtn) {
+      closeBtn.style.display = tracing ? '' : 'none';
+      closeBtn.disabled = draft.length < 3;
+    }
+    const undoBtn = this.container.querySelector('#rbUndoPoint');
+    if (undoBtn) {
+      undoBtn.style.display = tracing ? '' : 'none';
+      undoBtn.disabled = draft.length === 0;
+    }
+    const canvas = this.container.querySelector('#rbCanvas');
+    if (canvas && tracing) canvas.style.cursor = 'crosshair';
+    else if (canvas && this._mode === 'select') canvas.style.cursor = 'default';
+
+    const hint = this.container.querySelector('#rbFootprintHint');
+    if (hint) {
+      hint.textContent = tracing
+        ? `Tracing on ${this._floorName(this._activeFloor)} — ${draft.length} corner(s) placed. `
+          + 'Click the first corner again, or Close Outline, to finish.'
+        : 'Click each corner in turn, then Close Outline. Several outlines may share '
+          + 'a storey — a wing or a detached garage is its own shape, and a person is '
+          + 'indoors if they are inside any of them.';
+    }
+    this._renderFootprintList();
+  }
+
+  _floorName(level) {
+    const f = this._floors().find((x) => x.level === level);
+    return (f && f.name) || `Floor ${level}`;
+  }
+
+  _renderFootprintList() {
+    const host = this.container.querySelector('#rbFootprintList');
+    if (!host) return;
+    const rings = this.config.footprint || [];
+    const draft = this._ringDraft || [];
+
+    // The corners placed so far, with their numbers. A traced shape that is
+    // 12 ft off reads as obviously wrong here long before it does on a canvas
+    // where the whole plan simply rescales to fit whatever was drawn.
+    const u = this._unitLabel();
+    const draftHtml = draft.length
+      ? `<p class="rb-hint" style="margin:6px 2px 2px;">Corners so far (${u}):</p>
+         <p class="rb-hint" style="margin:0 2px 6px; color:#ffd166;">`
+        + draft
+          .map((p, i) => `${i + 1}: ${this._toDisplay(p.x).toFixed(1)}, ${this._toDisplay(p.y).toFixed(1)}`)
+          .join(' &nbsp;·&nbsp; ')
+        + '</p>'
+      : '';
+
+    if (!rings.length) {
+      host.innerHTML = draftHtml
+        + '<p class="rb-hint" style="margin:6px 2px 0;">No outline saved yet — until one '
+        + 'is closed, the whole width &times; depth box counts as building.</p>';
+      return;
+    }
+    host.innerHTML = draftHtml + rings
+      .map((ring, idx) => {
+        const active = ring.level === this._activeFloor;
+        const pts = (ring.points || []).length;
+        return `<div class="rb-wall-entry" style="grid-template-columns:1fr auto; opacity:${active ? 1 : 0.55};">
+            <span style="font-size:12px;">${this._floorName(ring.level)} — ${pts} corner(s)${active ? '' : ' (other storey)'}</span>
+            <button class="rb-btn secondary rb-ring-remove" data-index="${idx}">Remove</button>
+          </div>`;
+      })
+      .join('');
+    host.querySelectorAll('.rb-ring-remove').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.config.footprint.splice(Number(btn.dataset.index), 1);
+        this._renderFootprintControls();
+        this._render();
+      });
+    });
+  }
+
   /** Add a storey above the highest one. */
   _addFloor() {
     const floors = this._floors();
@@ -1164,15 +1447,21 @@ export class RoomBuilderTab {
     const doomed = floors[floors.length - 1].level;
     const nodes = this.config.nodes.filter((n) => this._floorOf(n) === doomed).length;
     const walls = (this.config.walls || []).filter((w) => w.level === doomed).length;
-    if (nodes || walls) {
+    const rings = (this.config.footprint || []).filter((r) => r.level === doomed).length;
+    if (nodes || walls || rings) {
       const ok = window.confirm(
-        `Remove floor ${doomed}? This also deletes ${nodes} node(s) and ${walls} wall(s) on it.`
+        `Remove floor ${doomed}? This also deletes ${nodes} node(s), ${walls} wall(s) `
+        + `and ${rings} outline(s) on it.`
       );
       if (!ok) return;
     }
     this.config.floors = floors.filter((f) => f.level !== doomed);
     this.config.nodes = this.config.nodes.filter((n) => this._floorOf(n) !== doomed);
     this.config.walls = (this.config.walls || []).filter((w) => w.level !== doomed);
+    // An outline left behind on a deleted storey makes the server reject every
+    // subsequent save with "footprint N is on undefined floor" — an error
+    // naming a storey the user can no longer see.
+    this.config.footprint = (this.config.footprint || []).filter((r) => r.level !== doomed);
     if (this.config.floors.length <= 1) this.config.floors = [];
     this._activeFloor = 1;
     this._renderFloorControls();
@@ -1211,6 +1500,65 @@ export class RoomBuilderTab {
       ctx.moveTo(topLeft.px, py);
       ctx.lineTo(bottomRight.px, py);
       ctx.stroke();
+    }
+
+    // Building outline. Drawn first, filled, so it reads as ground the rest of
+    // the plan stands on. The active storey's outline is solid; other storeys
+    // show as a faint line, because lining a wing up with the floor below it
+    // is exactly what a shared origin is for.
+    (this.config.footprint || []).forEach((ring) => {
+      const pts = ring.points || [];
+      if (pts.length < 3) return;
+      const active = ring.level === this._activeFloor;
+      ctx.beginPath();
+      pts.forEach((p, i) => {
+        const { px, py } = this._toPixel(p[0], p[1]);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.closePath();
+      ctx.fillStyle = active ? 'rgba(50,184,198,0.10)' : 'rgba(50,184,198,0.04)';
+      ctx.fill();
+      ctx.strokeStyle = active ? 'rgba(50,184,198,0.85)' : 'rgba(50,184,198,0.22)';
+      ctx.lineWidth = active ? 2 : 1;
+      ctx.stroke();
+    });
+
+    // The outline being traced right now: committed segments solid, the one
+    // that would follow the next click dashed back to the pointer.
+    if (this._ringDraft && this._ringDraft.length) {
+      const draft = this._ringDraft;
+      ctx.strokeStyle = '#ffd166';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      draft.forEach((p, i) => {
+        const { px, py } = this._toPixel(p.x, p.y);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.stroke();
+
+      if (this._ringHover) {
+        const last = this._toPixel(draft[draft.length - 1].x, draft[draft.length - 1].y);
+        const first = this._toPixel(draft[0].x, draft[0].y);
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(last.px, last.py);
+        ctx.lineTo(this._ringHover.x, this._ringHover.y);
+        // Show the closing edge too, so the shape being committed is the shape
+        // on screen rather than one the user has to imagine.
+        if (draft.length >= 2) ctx.lineTo(first.px, first.py);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      draft.forEach((p, i) => {
+        const { px, py } = this._toPixel(p.x, p.y);
+        ctx.beginPath();
+        ctx.arc(px, py, i === 0 ? 5 : 3, 0, Math.PI * 2);
+        ctx.fillStyle = i === 0 ? '#ffd166' : '#e6e9ef';
+        ctx.fill();
+      });
     }
 
     // Walls. Drawn before nodes so a node marker is never hidden behind one.
