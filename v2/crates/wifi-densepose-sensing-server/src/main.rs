@@ -2200,6 +2200,19 @@ struct AppStateInner {
     room_debounce_candidate: String,
     room_debounce_since: Option<std::time::Instant>,
     link_table: links::LinkTable,
+    /// WiFi STA MAC of each node, as reported by the node itself in its sync
+    /// packet (proto v2+).
+    ///
+    /// Replaces a hearing-set heuristic that inferred "a MAC heard by every
+    /// receiver except one belongs to that one". That signature only exists
+    /// while every node hears every other. MEASURED with nine nodes placed
+    /// through a house: it attributed 0 of 32 links and reported every peer
+    /// link as infrastructure, because a node three rooms away is missing from
+    /// far more than one hearing set.
+    ///
+    /// Keyed MAC -> node, so attribution is a lookup on the transmitter address
+    /// the CSI frame already carries rather than an inference about it.
+    node_macs: HashMap<[u8; 6], u8>,
     // ── Accuracy sprint: Kalman tracker, multistatic fusion, eigenvalue counting ──
     /// Global Kalman-based pose tracker for stable person IDs and smoothed keypoints.
     pose_tracker: PoseTracker,
@@ -3261,6 +3274,7 @@ impl AppStateInner {
             room_debounce_candidate: "absent".to_string(),
             room_debounce_since: None,
             link_table: links::LinkTable::new(),
+            node_macs: HashMap::new(),
             pose_tracker: PoseTracker::new(),
             last_tracker_instant: None,
             multistatic_fuser: MultistaticFuser::new(),
@@ -11434,11 +11448,15 @@ async fn links_endpoint(State(state): State<SharedState>) -> Json<serde_json::Va
     let rows: Vec<serde_json::Value> = metrics
         .iter()
         .map(|m| {
-            // No node-MAC registry on this path, so attribution rests on
-            // the hearing-set heuristic, which `links` restricts to the
-            // case where nothing has reported a MAC yet.
-            let tx_node =
-                links::infer_transmitting_node(&m.id.tx_mac, &receivers, &heard_by);
+            // Attribution by address when the transmitter is a node that has
+            // reported its own MAC. The hearing-set heuristic remains only for
+            // a fleet where nothing has reported one yet -- pre-v2 firmware --
+            // which is the sole case where a guess beats nothing.
+            let tx_node = if !s.node_macs.is_empty() {
+                s.node_macs.get(&m.id.tx_mac).copied()
+            } else {
+                links::infer_transmitting_node(&m.id.tx_mac, &receivers, &heard_by)
+            };
             serde_json::json!({
                 "rx_node": m.id.rx_node,
                 "tx_mac": format!(
@@ -13370,6 +13388,12 @@ async fn udp_receiver_task(
                                        sync.local_minus_epoch_us());
                                 let mut s = state.write().await;
                                 let node_id = sync.node_id;
+                                // A node reporting its own address is ground
+                                // truth; record it so link attribution is a
+                                // lookup rather than a guess.
+                                if let Some(mac) = sync.node_mac {
+                                    s.node_macs.insert(mac, node_id);
+                                }
                                 let ns = s.node_states.entry(node_id)
                                     .or_insert_with(NodeState::new);
                                 ns.apply_sync_packet(sync, std::time::Instant::now());
@@ -15323,6 +15347,7 @@ async fn main() {
         latest_update: None,
         source_fusion: source_fusion::FusionState::from_env(),
         link_table: links::LinkTable::new(),
+        node_macs: HashMap::new(),
         rssi_history: VecDeque::new(),
         frame_history: VecDeque::new(),
         tick: 0,
