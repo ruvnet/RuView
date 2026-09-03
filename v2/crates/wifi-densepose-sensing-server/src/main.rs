@@ -9,6 +9,7 @@
 //! Replaces both ws_server.py and the Python HTTP server.
 #![allow(dead_code)]
 
+mod fusion;
 mod adaptive_classifier;
 mod rssi_motion;
 pub mod cli;
@@ -2188,6 +2189,7 @@ struct AppStateInner {
     // ── Per-node state (issue #249) ─────────────────────────────────────
     /// Per-node sensing state for multi-node deployments.
     /// Keyed by `node_id` from the ESP32 frame header.
+    fusion_index: fusion::FusionIndex,
     node_states: HashMap<u8, NodeState>,
     /// Debounced room-level classification state — see
     /// `debounce_room_classification`. `fuse_room` is a fresh, memoryless
@@ -3254,6 +3256,7 @@ impl AppStateInner {
             training_state: training_api::TrainingState::default(),
             training_progress_tx: broadcast::channel::<String>(256).0,
             adaptive_model: None,
+            fusion_index: fusion::FusionIndex::new(),
             node_states: HashMap::new(),
             room_debounced_level: "absent".to_string(),
             room_debounce_candidate: "absent".to_string(),
@@ -11337,6 +11340,115 @@ async fn mesh_endpoint(State(state): State<SharedState>) -> Json<serde_json::Val
     }))
 }
 
+
+/// ADR-345: per-link CSI perturbation, one row per (receiver, transmitter).
+///
+/// The link table was previously reachable only through a 30-second log line,
+/// which is the wrong medium for something whose whole value is watching it
+/// respond while you walk around the room.
+///
+/// `motion` is baseline-subtracted and is the quantity a localiser should
+/// consume; `raw_motion` is reported alongside it because a link whose baseline
+/// has not settled shows a large raw value and a near-zero motion, and without
+/// both numbers that reads as a dead link rather than a warming one.
+///
+/// `kind` distinguishes a link from the access point (an uncontrolled
+/// transmitter, wherever the router happens to be) from a node-to-node link
+/// between two boards whose positions are known — the distinction that makes
+/// node-to-node links worth ~3x the angular spread.
+/// Cross-node pairing statistics — how often independent nodes captured the
+/// same transmission, keyed on `(tx_mac, rx_seq)`.
+///
+/// `paired_fraction` is the number that decides whether fusion is viable.
+/// Every node can look perfectly healthy — full frame rate, good RSSI, all
+/// links present — while no two of them ever hold the same packet, which is
+/// what the per-node CSI rate gate did before it was aligned to mesh time.
+///
+/// `by_receivers[n]` is transmissions captured by exactly n nodes, and
+/// `pairs` is the upper triangle of the node-by-node matrix: which specific
+/// pairs are fusable, not just how many.
+async fn fusion_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    let st = s.fusion_index.stats();
+
+    let mut pairs = Vec::new();
+    for a in 0..fusion::MAX_NODES {
+        for b in (a + 1)..fusion::MAX_NODES {
+            if st.pairs[a][b] > 0 {
+                pairs.push(serde_json::json!({
+                    "a": a, "b": b, "common": st.pairs[a][b]
+                }));
+            }
+        }
+    }
+
+    let by: Vec<serde_json::Value> = st
+        .by_receivers
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter(|(_, v)| **v > 0)
+        .map(|(n, v)| serde_json::json!({ "receivers": n, "transmissions": v }))
+        .collect();
+
+    Json(serde_json::json!({
+        "observations": st.observations,
+        "transmissions": st.transmissions,
+        "paired": st.paired(),
+        "paired_fraction": st.paired_fraction(),
+        "by_receivers": by,
+        "pairs": pairs,
+        "snapshots": st.snapshots,
+        "retain_full": st.retain_full,
+        "open_keys": s.fusion_index.open_len(),
+        "overflow": st.overflow,
+        "note": "wire v3 frames only; v1/v2 carry no rx_seq and are excluded"
+    }))
+}
+
+/// snapshots are evicted from a ring, not queued for delivery.
+async fn fusion_snapshots_endpoint(
+    State(state): State<SharedState>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Json<serde_json::Value> {
+    const DEFAULT_LIMIT: usize = 20;
+    const MAX_LIMIT: usize = 200;
+    let limit = q
+        .get("limit")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_LIMIT)
+        .clamp(1, MAX_LIMIT);
+
+    let s = state.read().await;
+    let rows: Vec<serde_json::Value> = s
+        .fusion_index
+        .recent_snapshots(limit)
+        .iter()
+        .map(|snap| {
+            serde_json::json!({
+                "seq": snap.seq,
+                "tx_mac": format!(
+                    "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                    snap.tx[0], snap.tx[1], snap.tx[2], snap.tx[3], snap.tx[4], snap.tx[5]
+                ),
+                "rx_seq": snap.rx_seq,
+                "receivers": snap.obs.iter().map(|(id, amps)| serde_json::json!({
+                    "node_id": id,
+                    "n_subcarriers": amps.len(),
+                    "amplitudes": amps,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+
+    Json(serde_json::json!({
+        "count": rows.len(),
+        "snapshots": rows,
+        "note": "one transmission as several receivers measured it; amplitudes are \
+                 raw per-subcarrier magnitudes, no baseline subtracted"
+    }))
+}
+
 async fn nodes_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
     let now = std::time::Instant::now();
@@ -13308,6 +13420,40 @@ async fn udp_receiver_task(
                         observed_at,
                     );
 
+
+                    // ---- Cross-node pairing, BEFORE the per-node grid gate ----
+                    //
+                    // Pairing is keyed on transmission identity, not on time, so
+                    // it must see frames the per-node feature path discards. The
+                    // gate below locks each node to the densest grid it has seen
+                    // and `continue`s on anything sparser, which is most of the
+                    // building's traffic; running this first keeps those frames
+                    // available to the fusion path, which can use them.
+                    if let Some(tx) = frame.source_mac {
+                        // Wire v3 only. A v1 or v2 frame carries no transmission
+                        // identity, and keying it on a placeholder would pair
+                        // every older node's frames with every other node's --
+                        // exactly the state a partial OTA passes through. So this
+                        // cannot be an `unwrap_or(0)`.
+                        if let Some(rx_seq) = frame.rx_seq {
+                            let now = std::time::Instant::now();
+                            // Retain the amplitude vector alongside the pairing so
+                            // a finalised transmission can be compared ACROSS the
+                            // receivers that captured it rather than only counted.
+                            // Best-effort: when the retention budget is full the
+                            // pairing statistics are unaffected and only the
+                            // vectors are skipped.
+                            s.fusion_index.observe_with_csi(
+                                frame.node_id,
+                                tx,
+                                rx_seq,
+                                now,
+                                Some(&frame.amplitudes),
+                            );
+                            s.fusion_index.expire(now);
+                        }
+                    }
+
                     // ── ADR-110 / issue #1005: per-node subcarrier-grid gate ──
                     // ESP32-C6 nodes interleave HE-SU 256-bin frames (~84%)
                     // with HT 64-bin frames on the same socket. HT-LTF and
@@ -15128,6 +15274,7 @@ async fn main() {
     let state: SharedState = Arc::new(RwLock::new(AppStateInner {
         latest_update: None,
         source_fusion: source_fusion::FusionState::from_env(),
+        fusion_index: fusion::FusionIndex::new(),
         rssi_history: VecDeque::new(),
         frame_history: VecDeque::new(),
         tick: 0,
@@ -15599,6 +15746,8 @@ async fn main() {
         .route("/api/v1/rf/vendors/:vendor/events", post(ingest_vendor_events))
         // Per-node health endpoint
         .route("/api/v1/nodes", get(nodes_endpoint))
+        .route("/api/v1/fusion", get(fusion_endpoint))
+        .route("/api/v1/fusion/snapshots", get(fusion_snapshots_endpoint))
         // ADR-110 iter 29 — per-node mesh sync state for HTTP clients.
         .route("/api/v1/nodes/:id/sync", get(node_sync_endpoint))
         .route("/api/v1/mesh", get(mesh_endpoint))
