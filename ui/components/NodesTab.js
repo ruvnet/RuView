@@ -44,6 +44,19 @@ const FIELDS = [
   { key: 'dwell_ms', label: 'Dwell ms', type: 'int' },
 ];
 
+// Die temperature, coloured against the firmware's own thermal thresholds
+// (warn 65, throttle 72) so the cell means the same thing the node does. A
+// node reporting no reading shows a dash rather than 0, because 0 C and
+// "sensor never installed" are different states and conflating them would
+// hide exactly the failure worth seeing.
+function tempCell(h) {
+  if (!h || h.die_c === null || h.die_c === undefined) {
+    return '<span class="dim">--</span>';
+  }
+  const c = h.die_c;
+  return '<span class="' + (c >= 65 ? 'warn' : 'ok') + '">' + c + '</span>';
+}
+
 function dash(v) {
   return (v === null || v === undefined || v === '') ? '—' : v;
 }
@@ -52,6 +65,10 @@ export class NodesTab {
   constructor(containerElement) {
     this.container = containerElement;
     this.nodes = [];
+    // Filled from /api/v1/mesh and the per-node firmware proxy so the list can
+    // show die temperature and firmware version without a Manage click.
+    this.health = {};
+    this.firmware = {};
     this.detail = null;
     this.selected = null;
     this.timer = null;
@@ -86,6 +103,8 @@ export class NodesTab {
       const data = await r.json();
       this.nodes = (data.nodes || []).slice().sort((a, b) => a.node_id - b.node_id);
       this.error = null;
+      await this.refreshHealth();
+      this.refreshFirmware();
     } catch (e) {
       // Report the failure rather than leaving stale rows that still look live.
       this.error = e.message;
@@ -102,6 +121,47 @@ export class NodesTab {
     } catch (e) {
       return { ok: false, status: 0, body: { error: e.message } };
     }
+  }
+
+  // Die temperature comes from the mesh sync packet, which the server already
+  // collects for every node -- one request for the whole fleet, no per-node
+  // fan-out and no credentials in the browser.
+  async refreshHealth() {
+    try {
+      const r = await fetch('/api/v1/mesh');
+      if (!r.ok) { return; }
+      const d = await r.json();
+      const out = {};
+      Object.keys(d.nodes || {}).forEach((k) => {
+        out[Number(k)] = (d.nodes[k] || {}).health || {};
+      });
+      this.health = out;
+    } catch (e) {
+      // Keep the previous values; a missing temperature is not worth blanking
+      // the table over.
+    }
+  }
+
+  // Firmware version has no fleet-wide endpoint, so it is one request per node
+  // through the server's proxy. Deliberately NOT awaited by refresh(): the
+  // table paints from data it already has and versions fill in as they land,
+  // so one slow or unreachable node cannot delay the rows that are fine.
+  // Cached across refreshes, so a node that answered once keeps showing its
+  // version while briefly unreachable.
+  refreshFirmware() {
+    this.nodes.forEach((n) => {
+      const id = n.node_id;
+      fetch('/api/v1/nodes/' + id + '/firmware')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          const v = d && (d.version || (d.firmware && d.firmware.version));
+          if (v && this.firmware[id] !== v) {
+            this.firmware[id] = v;
+            this.renderTable();
+          }
+        })
+        .catch(() => {});
+    });
   }
 
   async loadDetail(id) {
@@ -198,14 +258,17 @@ export class NodesTab {
       + '<td>' + dash(n.ip) + '</td>'
       + '<td class="' + (n.status === 'active' ? 'ok' : 'warn') + '">' + n.status + '</td>'
       + '<td>' + dash(n.rssi_dbm) + '</td>'
+      + '<td>' + tempCell(this.health[n.node_id]) + '</td>'
+      + '<td>' + dash(this.firmware[n.node_id]) + '</td>'
       + '<td>' + dash(n.last_seen_ms) + ' ms</td>'
       + '<td><button class="nodes-manage" data-id="' + n.node_id + '">Manage</button></td>'
       + '</tr>').join('');
     el.innerHTML = ''
       + '<table class="nodes-table"><thead><tr>'
       + '<th>Node</th><th>Address</th><th>Status</th><th>RSSI</th>'
+      + '<th>Die C</th><th>Firmware</th>'
       + '<th>Last seen</th><th></th></tr></thead><tbody>'
-      + (rows || '<tr><td colspan="6">No nodes reporting.</td></tr>')
+      + (rows || '<tr><td colspan="8">No nodes reporting.</td></tr>')
       + '</tbody></table>';
     const self = this;
     el.querySelectorAll('.nodes-manage').forEach((b) => {
