@@ -131,7 +131,12 @@ class Observatory {
     // WebSocket for live data — always try auto-detect on startup
     this._ws = null;
     this._liveData = null;
-    this._autoDetectLive();
+    // Deferred to after the first rendered frames. Scene construction and
+    // shader compilation block the main thread for seconds under software
+    // WebGL (a VM with no GPU), and the probe's abort timeout below is
+    // wall-clock: issued from here it expires mid-response and the server
+    // is misreported as absent, dropping the UI into demo mode.
+    requestAnimationFrame(() => requestAnimationFrame(() => this._autoDetectLive()));
 
     // Input
     this._initKeyboard();
@@ -453,7 +458,7 @@ class Observatory {
         return;
       }
       const base = unique[i];
-      fetch(`${base}/health`, { signal: AbortSignal.timeout(1500) })
+      fetch(`${base}/health`, { signal: AbortSignal.timeout(10000) })
         .then(r => r.ok ? r.json() : Promise.reject())
         .then(data => {
           if (data && data.status === 'ok') {
