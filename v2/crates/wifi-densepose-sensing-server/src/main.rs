@@ -17368,7 +17368,13 @@ async fn config_get_room(State(state): State<SharedState>) -> Json<serde_json::V
     let nodes: Vec<RoomNode> = s
         .node_positions_config
         .iter()
-        .map(|(&id, p)| {
+        .enumerate()
+        .map(|(idx, p)| {
+            // #1791 made node_positions_config a POSITIONAL Vec rather than a
+            // map keyed by node_id, so identity here is the list index. Kept
+            // consistent with that convention deliberately: the Room Builder
+            // must describe the same binding the fusion path actually uses.
+            let id = idx as u8;
             let saved_node = saved.nodes.iter().find(|n| n.id == id);
             let label = saved_node.and_then(|n| n.label.clone());
             // Storey is carried on the persisted config, not on the live
@@ -17624,13 +17630,12 @@ async fn config_set_room(
     // ingestion is dead code -- excluded would once again mean nothing
     // more than "not approved".
     s.excluded_emitters = excluded_emitter_macs(&config);
-    s.node_positions_config.clear();
     let max_id = config.nodes.iter().map(|n| n.id).max().unwrap_or(0);
     let mut positions = vec![[0.0f32, 0.0, 0.0]; max_id as usize + 1];
     for n in &config.nodes {
-        s.node_positions_config.insert(n.id, [n.x, n.y, n.z]);
         positions[n.id as usize] = [n.x, n.y, n.z];
     }
+    s.node_positions_config = positions.clone();
     s.multistatic_fuser.set_node_positions(positions);
     let data_dir = s.data_dir.clone();
     drop(s);
