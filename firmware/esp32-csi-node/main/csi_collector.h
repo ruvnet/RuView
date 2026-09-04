@@ -11,14 +11,28 @@
 #include "esp_err.h"
 #include "esp_wifi_types.h"
 
-/** ADR-018 magic number. */
+/** ADR-018 wire v1 magic — 20-byte header, no transmitter identity. */
 #define CSI_MAGIC 0xC5110001
 
-/** ADR-018 header size in bytes. */
+/**
+ * Wire v3 magic — v1 header plus the transmitter MAC and its 802.11 sequence
+ * number, so a sink can tell which frames from different receivers describe
+ * the SAME transmission.
+ *
+ * 0xC5110002..0xC5110009 are already taken by the vitals, feature and other
+ * edge packets, so this claims the next free value rather than an adjacent
+ * one. Do not assume adjacency when adding more.
+ */
+#define CSI_MAGIC_V3 0xC511000A
+
+/** ADR-018 wire v1 header size in bytes. */
 #define CSI_HEADER_SIZE 20
 
+/** Wire v3 header size: v1 plus tx MAC (6) at [20..25] and rx_seq (2) at [26..27]. */
+#define CSI_HEADER_SIZE_V3 28
+
 /** Maximum frame buffer size (header + 4 antennas * 256 subcarriers * 2 bytes). */
-#define CSI_MAX_FRAME_SIZE (CSI_HEADER_SIZE + 4 * 256 * 2)
+#define CSI_MAX_FRAME_SIZE (CSI_HEADER_SIZE_V3 + 4 * 256 * 2)
 
 /** Maximum number of channels in the hop table (ADR-029). */
 #define CSI_HOP_CHANNELS_MAX 6
