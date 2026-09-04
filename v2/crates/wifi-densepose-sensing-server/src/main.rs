@@ -812,6 +812,13 @@ struct BoundingBox {
 /// sign detector so that data from different nodes is never mixed.
 struct NodeState {
     pub(crate) frame_history: VecDeque<Vec<f64>>,
+    /// Sanitized per-frame phase, in lockstep with `frame_history` (same
+    /// length, same eviction — pushed together at the one real ESP32
+    /// ingestion site). "Sanitized" means `sanitize_phase_linear_detrend`
+    /// has already removed the dominant packet-timing-offset trend across
+    /// subcarrier index; this is NOT raw `atan2` output. See
+    /// `build_csi_temporal_complex`/`node_doppler_sample` for what it feeds.
+    pub(crate) phase_history: VecDeque<Vec<f64>>,
     smoothed_person_score: f64,
     pub(crate) prev_person_count: usize,
     smoothed_motion: f64,
@@ -1137,6 +1144,7 @@ impl NodeState {
     pub(crate) fn new() -> Self {
         Self {
             frame_history: VecDeque::new(),
+            phase_history: VecDeque::new(),
             smoothed_person_score: 0.0,
             prev_person_count: 0,
             smoothed_motion: 0.0,
@@ -6236,6 +6244,333 @@ async fn model_info(State(state): State<SharedState>) -> Json<serde_json::Value>
     }
 }
 
+/// Chosen to fit within `FRAME_HISTORY_CAPACITY` (100 frames) with room for
+/// at least one hop, not derived from any particular Doppler-resolution
+/// target — UNTUNED, revisit once live BVP output has been inspected.
+const BVP_WINDOW_SIZE: usize = 64;
+/// STFT hop for Doppler/BVP extraction — see `BVP_WINDOW_SIZE`.
+const BVP_HOP_SIZE: usize = 32;
+/// Minimum CSI frames of per-node history required before attempting Doppler
+/// extraction (one window plus one hop, so `extract_bvp` has at least 2 time
+/// frames to work with rather than rejecting for insufficient samples).
+const MIN_BVP_SAMPLES: usize = BVP_WINDOW_SIZE + BVP_HOP_SIZE;
+/// How many BVP velocity bins on either side of zero count as "static" (DC
+/// leakage / non-moving), when summing a node's "moving energy" fraction.
+///
+/// BUG FOUND LIVE (2026-08-27): this was originally a fixed
+/// `BVP_ZERO_VELOCITY_DEADBAND_MPS = 0.05` m/s deadband. With the default
+/// `BvpConfig` (`max_velocity: 2.0`, `n_velocity_bins: 64`), the bin spacing
+/// is `2.0 * 2.0 / 64 = 0.0625` m/s — *wider* than that deadband. So the
+/// fixed threshold excluded only the single exact-zero bin; every other bin,
+/// including the immediate ±1 neighbors that a Hann-windowed STFT always
+/// leaks real DC/static energy into, counted as "moving". Live logs showed
+/// `total_weight` pinned near its theoretical max (~2.0 for 2 nodes) almost
+/// constantly, including while covering a sensor with a hand — a saturated,
+/// non-differentiating metric, not real motion. Excluding a *bin count*
+/// (derived from each call's actual `bvp.velocity_resolution`) instead of a
+/// fixed m/s threshold keeps this correct regardless of `BvpConfig` changes.
+const BVP_ZERO_VELOCITY_DEADBAND_BINS: usize = 2;
+
+/// Removes the dominant linear-vs-subcarrier-index phase trend from one raw
+/// CSI phase vector (`atan2(Q, I)` per subcarrier) — the packet-detection /
+/// timing-offset (STO) artifact that dominates raw commodity-WiFi CSI phase
+/// on a receiver with no shared clock reference to the transmitter.
+///
+/// The standard fix (Widar3/IndoTrack-style CSI sanitization) is conjugate
+/// multiplication between two antennas on the *same* receiver — their common
+/// CFO/SFO cancels in the ratio. RuView's ESP32 nodes are single-antenna, so
+/// that trick isn't available; per-frame linear-detrend across the
+/// subcarrier axis is the single-antenna fallback, removing the largest
+/// component of packet-to-packet timing jitter. It does **not** remove drift
+/// over *time* between frames (slow CFO drift from the node's free-running
+/// oscillator relative to the AP's) — that's a distinct, unaddressed noise
+/// source. `node_doppler_sample`'s `mean_radial_velocity` is therefore
+/// `CLAIMED`, not `MEASURED` (`CLAUDE.md`), until validated against real
+/// motion with a known direction.
+fn sanitize_phase_linear_detrend(raw_phase: &[f64]) -> Vec<f64> {
+    if raw_phase.len() < 2 {
+        return raw_phase.to_vec();
+    }
+    // Unwrap across subcarrier index: atan2's output is wrapped to
+    // (-pi, pi], but true propagation + STO phase can accumulate more than
+    // one full turn across the subcarrier axis.
+    let mut unwrapped = Vec::with_capacity(raw_phase.len());
+    unwrapped.push(raw_phase[0]);
+    for i in 1..raw_phase.len() {
+        let mut delta = raw_phase[i] - raw_phase[i - 1];
+        while delta > std::f64::consts::PI {
+            delta -= 2.0 * std::f64::consts::PI;
+        }
+        while delta < -std::f64::consts::PI {
+            delta += 2.0 * std::f64::consts::PI;
+        }
+        unwrapped.push(unwrapped[i - 1] + delta);
+    }
+
+    // Ordinary least squares: unwrapped[k] ≈ a*k + b. Closed form (2
+    // unknowns) — no linalg dependency needed.
+    let n = unwrapped.len() as f64;
+    let sum_k: f64 = (0..unwrapped.len()).map(|k| k as f64).sum();
+    let sum_y: f64 = unwrapped.iter().sum();
+    let sum_kk: f64 = (0..unwrapped.len()).map(|k| (k * k) as f64).sum();
+    let sum_ky: f64 = unwrapped.iter().enumerate().map(|(k, &y)| k as f64 * y).sum();
+    let denom = n * sum_kk - sum_k * sum_k;
+    let (a, b) = if denom.abs() > 1e-12 {
+        let a = (n * sum_ky - sum_k * sum_y) / denom;
+        let b = (sum_y - a * sum_k) / n;
+        (a, b)
+    } else {
+        (0.0, sum_y / n)
+    };
+
+    unwrapped
+        .iter()
+        .enumerate()
+        .map(|(k, &y)| y - (a * k as f64 + b))
+        .collect()
+}
+
+fn build_csi_temporal_complex(
+    amp_history: &std::collections::VecDeque<Vec<f64>>,
+    phase_history: &std::collections::VecDeque<Vec<f64>>,
+    n_samples: usize,
+) -> Option<ndarray::Array2<num_complex::Complex64>> {
+    if amp_history.len() < n_samples || phase_history.len() != amp_history.len() {
+        return None;
+    }
+    let skip = amp_history.len() - n_samples;
+    let n_sc = amp_history.back()?.len();
+    if n_sc == 0 || phase_history.back()?.len() != n_sc {
+        return None;
+    }
+    let mut data = Vec::with_capacity(n_samples * n_sc);
+    for (amp_frame, phase_frame) in amp_history.iter().skip(skip).zip(phase_history.iter().skip(skip)) {
+        if amp_frame.len() != n_sc || phase_frame.len() != n_sc {
+            return None;
+        }
+        for (&a, &p) in amp_frame.iter().zip(phase_frame.iter()) {
+            data.push(num_complex::Complex64::new(a * p.cos(), a * p.sin()));
+        }
+    }
+    ndarray::Array2::from_shape_vec((n_samples, n_sc), data).ok()
+}
+
+/// A node's most recent Body Velocity Profile time-frame, reduced to the two
+/// scalars the two Doppler-based position tiers need — both derived from a
+/// single [`wifi_densepose_signal::bvp::extract_bvp_signed`] call.
+struct NodeDopplerSample {
+    /// Raw moving-energy magnitude summed over bins outside the near-zero-
+    /// velocity deadband — same role as the original `node_doppler_weight`
+    /// (see its history below). Feeds [`doppler_weighted_centroid`].
+    moving_energy: f64,
+    /// Signed, energy-weighted mean velocity (m/s) over the same non-
+    /// deadband bins. This is the actual bistatic radial-velocity
+    /// measurement `solve_bistatic_velocity` needs; a magnitude alone
+    /// (`moving_energy`) carries no directional information (see the closed
+    /// 2026-08-28 Doppler-weighting investigation in memory for why that's a
+    /// dead end for position). Only meaningful because this is built from
+    /// `extract_bvp_signed` on genuinely complex CSI, not `extract_bvp`'s
+    /// amplitude-only, direction-collapsed spectrum.
+    mean_radial_velocity: f64,
+}
+
+/// Raw moving-energy magnitude + signed mean radial velocity from a node's
+/// most recent Body Velocity Profile time-frame — the energy summed over
+/// bins outside the near-zero-velocity deadband, i.e. how much of this
+/// node's link energy right now is genuinely Doppler-shifted (moving) rather
+/// than static multipath, and which direction (toward/away along this link)
+/// that motion is signed. Returns `None` when there isn't enough sanitized
+/// phase+amplitude history yet ([`MIN_BVP_SAMPLES`]) or BVP extraction
+/// otherwise fails (never panics on a bad/edge-case frame — falls through to
+/// the caller's next tier instead).
+///
+/// Carrier frequency is hardcoded to 2.4 GHz: RuView's ESP32 nodes sense
+/// 2.4 GHz WiFi traffic (`BvpConfig::default()`'s own 5 GHz assumption would
+/// be wrong here and silently mis-scale every velocity bin).
+fn node_doppler_sample(n: &NodeState) -> Option<NodeDopplerSample> {
+    let temporal = build_csi_temporal_complex(&n.frame_history, &n.phase_history, MIN_BVP_SAMPLES)?;
+    let sample_rate = n.csi_fps_ema.max(1.0);
+    let config = wifi_densepose_signal::bvp::BvpConfig {
+        window_size: BVP_WINDOW_SIZE,
+        hop_size: BVP_HOP_SIZE,
+        carrier_frequency: 2.4e9,
+        ..wifi_densepose_signal::bvp::BvpConfig::default()
+    };
+    let bvp = wifi_densepose_signal::bvp::extract_bvp_signed(&temporal, sample_rate, &config).ok()?;
+    if bvp.n_time == 0 {
+        return None;
+    }
+    let last_col = bvp.data.column(bvp.n_time - 1);
+    // Index of the bin closest to v=0 (robust to even/odd n_velocity_bins and
+    // float rounding, unlike comparing velocity magnitudes against a fixed
+    // m/s threshold — see BVP_ZERO_VELOCITY_DEADBAND_BINS's doc comment).
+    let zero_idx = bvp
+        .velocity_bins
+        .iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| a.abs().partial_cmp(&b.abs()).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    let mut moving = 0.0_f64;
+    let mut total = 0.0_f64;
+    let mut signed_velocity_sum = 0.0_f64;
+    for (i, &energy) in last_col.iter().enumerate() {
+        total += energy;
+        if i.abs_diff(zero_idx) > BVP_ZERO_VELOCITY_DEADBAND_BINS {
+            moving += energy;
+            signed_velocity_sum += energy * bvp.velocity_bins[i];
+        }
+    }
+    if total < 1e-9 {
+        return None;
+    }
+    // Raw moving-energy magnitude, NOT normalized to this node's own total
+    // energy. Was `moving / total` (a [0,1] ratio) — changed live
+    // (2026-08-28) after confirmed evidence the ratio doesn't spatially
+    // differentiate at all: covering each of 3 sensors by hand individually,
+    // and moving the whole body, produced zero change in the resulting
+    // centroid position, even though the ratio itself responds to motion in
+    // general. Hypothesis: normalizing to each node's own total energy
+    // throws away real magnitude differences a closer node should show
+    // (more absolute Doppler energy from a stronger, shorter-path
+    // reflection) — raw magnitude preserves that. Live-validated as a dead
+    // end for *position* (no scalar can carry direction) but kept as-is: it
+    // still feeds `doppler_weighted_centroid`, a real fallback tier.
+    let moving_energy = moving.max(0.0);
+    let mean_radial_velocity = if moving > 1e-9 {
+        signed_velocity_sum / moving
+    } else {
+        0.0
+    };
+    Some(NodeDopplerSample {
+        moving_energy,
+        mean_radial_velocity,
+    })
+}
+
+
+#[cfg(test)]
+mod bvp_zero_velocity_deadband_tests {
+    //! The zero-velocity deadband must be expressed in BINS, not m/s.
+    //!
+    //! BUG FOUND LIVE 2026-08-27. The deadband was a fixed
+    //! `BVP_ZERO_VELOCITY_DEADBAND_MPS = 0.05` m/s. With the default
+    //! `BvpConfig` the bin spacing is `max_velocity * 2 / n_velocity_bins`
+    //! `= 2.0 * 2 / 64 = 0.0625` m/s -- **wider than the deadband itself**.
+    //! A threshold narrower than one bin can only ever exclude the single
+    //! exact-zero bin, so the immediate neighbours, into which a Hann-windowed
+    //! STFT always leaks real DC/static energy, were counted as motion by
+    //! construction.
+    //!
+    //! The visible symptom was a saturated metric: moving energy pinned near
+    //! its theoretical maximum constantly, including while a sensor was
+    //! covered by hand. A saturated metric looks like a working one on a
+    //! dashboard, which is why this needs a test rather than an eyeball.
+    use super::*;
+    use std::time::Instant;
+
+    const N_SUBCARRIERS: usize = 8;
+
+    /// Two fixtures that differ ONLY in rate.
+    ///
+    /// Both modulate amplitude by the same depth and phase by the same
+    /// excursion; one does it slowly (a drifting static scene) and one
+    /// quickly (a person moving). Holding the energy equal and varying only
+    /// the velocity is the whole point: it is exactly the discrimination the
+    /// deadband is supposed to provide, so a deadband that cannot separate
+    /// these is not doing its job.
+    ///
+    /// A perfectly constant signal would NOT work here. It leaves nothing
+    /// after DC removal and so passes whether the deadband is correct or not.
+    /// Real static scenes drift, a Hann-windowed STFT leaks that drift into
+    /// the bins immediately either side of zero, and those are precisely the
+    /// bins a sub-bin-width deadband fails to exclude.
+    fn node_modulated_at(freq_hz: f64) -> NodeState {
+        let mut n = NodeState::new();
+        n.csi_fps_ema = 44.0;
+        n.last_frame_time = Some(Instant::now());
+        let dt = 1.0 / n.csi_fps_ema;
+        for i in 0..MIN_BVP_SAMPLES {
+            let t = i as f64 * dt;
+            let w = 2.0 * std::f64::consts::PI * freq_hz * t;
+            n.frame_history.push_back(vec![10.0 + 3.0 * w.sin(); N_SUBCARRIERS]);
+            n.phase_history.push_back(vec![0.6 * w.cos(); N_SUBCARRIERS]);
+        }
+        n
+    }
+
+    /// A drifting but stationary scene: same modulation depth, ~20 s period.
+    fn static_node() -> NodeState {
+        node_modulated_at(0.05)
+    }
+
+    /// A person moving: same modulation depth, ~2 Hz.
+    fn moving_node() -> NodeState {
+        node_modulated_at(2.0)
+    }
+
+    /// The deadband must be at least one bin wide, or it excludes nothing.
+    ///
+    /// This is the arithmetic the original bug got wrong, stated directly: a
+    /// deadband of 0.05 m/s against 0.0625 m/s bins is narrower than a single
+    /// bin. Expressed in bins the comparison cannot drift when `BvpConfig`
+    /// changes.
+    #[test]
+    fn deadband_is_expressed_in_bins_and_spans_more_than_one() {
+        let cfg = wifi_densepose_signal::bvp::BvpConfig::default();
+        let bin_width = cfg.max_velocity * 2.0 / cfg.n_velocity_bins as f64;
+        let old_fixed_threshold_mps = 0.05;
+        assert!(
+            old_fixed_threshold_mps < bin_width,
+            "the original bug: a {old_fixed_threshold_mps} m/s deadband is              narrower than the {bin_width} m/s bin spacing, so it could only              ever exclude the exact-zero bin"
+        );
+        assert!(
+            BVP_ZERO_VELOCITY_DEADBAND_BINS >= 1,
+            "a deadband of zero bins excludes nothing"
+        );
+    }
+
+    /// A static scene must not report saturated moving energy. This is the
+    /// regression that the m/s deadband failed.
+    ///
+    /// MEASURED with these fixtures, static (0.05 Hz) against moving (2 Hz):
+    ///
+    ///   deadband = 0 bins (reproduces the m/s bug):  19.13 / 310.89 = 6.2%
+    ///   deadband = 2 bins (correct):                  0.56 / 122.59 = 0.45%
+    ///
+    /// The 2% bound below therefore sits between the two: the correct
+    /// implementation clears it by more than 4x, and the broken one misses it
+    /// by 3x. It is not a tuned constant -- a first attempt used 50% and
+    /// passed in BOTH configurations, which is a test that proves nothing.
+    #[test]
+    fn a_static_node_reports_far_less_moving_energy_than_a_moving_one() {
+        let still = node_doppler_sample(&static_node());
+        let moving = node_doppler_sample(&moving_node());
+
+        let moving = moving.expect("a moving node yields a sample");
+        match still {
+            None => {}
+            Some(s) => assert!(
+                s.moving_energy < moving.moving_energy * 0.02,
+                "a drifting static scene reported {} moving energy against {}                  for a genuinely moving one. The deadband is not excluding the                  DC leakage in the bins either side of zero -- is it expressed                  in bins, or in m/s?",
+                s.moving_energy,
+                moving.moving_energy
+            ),
+        }
+    }
+
+
+    #[test]
+    fn insufficient_history_yields_no_sample() {
+        let mut n = NodeState::new();
+        n.csi_fps_ema = 44.0;
+        n.last_frame_time = Some(Instant::now());
+        n.frame_history.push_back(vec![1.0; N_SUBCARRIERS]);
+        n.phase_history.push_back(vec![0.0; N_SUBCARRIERS]);
+        assert!(node_doppler_sample(&n).is_none());
+    }
+}
+
 async fn model_layers(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
     match &s.progressive_loader {
@@ -6464,6 +6799,16 @@ async fn nodes_endpoint(State(state): State<SharedState>) -> Json<serde_json::Va
                 "status": status,
                 "last_seen_ms": elapsed_ms,
                 "rssi_dbm": rssi,
+                // Signed-Doppler diagnostics, per node. Reported so the
+                // moving-energy figure can be inspected directly rather than
+                // only inferred from something built on top of it. This is a
+                // DIAGNOSTIC, not a position estimate -- see
+                // node_doppler_sample for why the magnitude alone carries no
+                // directional information.
+                "doppler": node_doppler_sample(ns).map(|d| serde_json::json!({
+                    "moving_energy": d.moving_energy,
+                    "mean_radial_velocity_mps": d.mean_radial_velocity,
+                })),
                 "motion_level": &ns.current_motion_level,
                 "person_count": ns.prev_person_count,
                 "person_count_valid": ns.edge_vitals
@@ -7169,6 +7514,15 @@ async fn udp_receiver_task(
                     ns.frame_history.push_back(frame.amplitudes.clone());
                     if ns.frame_history.len() > FRAME_HISTORY_CAPACITY {
                         ns.frame_history.pop_front();
+                    }
+
+                    // Pushed in lockstep with frame_history -- same length, same
+                    // eviction -- so build_csi_temporal_complex can zip the two by
+                    // index. See node_doppler_sample.
+                    ns.phase_history
+                        .push_back(sanitize_phase_linear_detrend(&frame.phases));
+                    if ns.phase_history.len() > FRAME_HISTORY_CAPACITY {
+                        ns.phase_history.pop_front();
                     }
 
                     let sample_rate_hz = 1000.0 / 500.0_f64;
