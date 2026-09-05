@@ -10320,6 +10320,9 @@ mod sync_snapshot_helper_tests {
             local_us: 28_798_450,
             epoch_us: 27_634_885,
             sequence: 20,
+            // proto v1 fixture: the v2 bytes are reserved-zero.
+            node_mac: None,
+            health: Default::default(),
         }
     }
 
