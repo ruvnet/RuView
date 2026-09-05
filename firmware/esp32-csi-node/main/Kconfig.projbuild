@@ -274,6 +274,31 @@ menu "AMOLED Display (ADR-045)"
 
 endmenu
 
+menu "Camera Node (XIAO ESP32S3 Sense)"
+
+    config CAMERA_ENABLE
+        bool "Enable onboard camera + HTTP snapshot/MJPEG server"
+        default n
+        depends on IDF_TARGET_ESP32S3
+        help
+            Initialize the onboard camera (Seeed XIAO ESP32S3 Sense pin map,
+            OV3660) after WiFi is up and serve GET /snap (single JPEG) and
+            GET /stream (~5 fps MJPEG) over HTTP. Requires octal SPIRAM
+            (CONFIG_SPIRAM + CONFIG_SPIRAM_MODE_OCT) for framebuffers.
+            Camera init failure degrades gracefully — CSI streaming is
+            unaffected.
+
+    config CAMERA_HTTP_PORT
+        int "Camera HTTP server port"
+        default 8081
+        range 1024 65535
+        depends on CAMERA_ENABLE
+        help
+            TCP port for the camera HTTP server. Must not collide with the
+            OTA/WASM-upload server on 8032.
+
+endmenu
+
 menu "WASM Programmable Sensing (ADR-040)"
 
     config WASM_ENABLE

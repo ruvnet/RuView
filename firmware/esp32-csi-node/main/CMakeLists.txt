@@ -63,6 +63,12 @@ if(CONFIG_WASM_ENABLE)
     list(APPEND REQUIRES wasm3)
 endif()
 
+# XIAO ESP32S3 Sense camera + HTTP snapshot/MJPEG server (compile-time optional)
+if(CONFIG_CAMERA_ENABLE)
+    list(APPEND SRCS "camera_node.c")
+    list(APPEND REQUIRES espressif__esp32-camera)
+endif()
+
 idf_component_register(
     SRCS ${SRCS}
     INCLUDE_DIRS "."

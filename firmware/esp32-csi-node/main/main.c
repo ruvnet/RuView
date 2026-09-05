@@ -39,6 +39,9 @@
 #include "c6_lp_core.h"            /* ADR-110: LP-core hibernation (no-op on S3) */
 #include "c6_sync_espnow.h"        /* ADR-110 D1 workaround: ESP-NOW sync */
 #include "c6_softap_he.h"          /* ADR-110 B1/B2: HE/TWT soft-AP (no-op when disabled) */
+#ifdef CONFIG_CAMERA_ENABLE
+#include "camera_node.h"           /* XIAO S3 Sense camera + HTTP server */
+#endif
 #ifdef CONFIG_CSI_MOCK_ENABLED
 #include "mock_csi.h"
 #endif
@@ -511,6 +514,15 @@ void app_main(void)
 #else
     esp_err_t ota_ret = ESP_ERR_NOT_SUPPORTED;
     ESP_LOGI(TAG, "Mock CSI mode: skipping OTA server (no network)");
+#endif
+
+    /* Camera node (XIAO ESP32S3 Sense): init AFTER WiFi/network is up.
+     * Failure is non-fatal by design — camera_node_start() logs and returns,
+     * CSI streaming continues unaffected. */
+#if defined(CONFIG_CAMERA_ENABLE) && !defined(CONFIG_CSI_MOCK_SKIP_WIFI_CONNECT)
+    if (camera_node_start() != ESP_OK) {
+        ESP_LOGW(TAG, "camera disabled (init failed) — CSI streaming unaffected");
+    }
 #endif
 
     /* ADR-040: Initialize WASM programmable sensing runtime. */
