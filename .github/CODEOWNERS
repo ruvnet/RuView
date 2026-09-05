@@ -1,0 +1,16 @@
+# Evidence policy and its enforcement path require explicit repository-owner
+# review. Branch protection must require Code Owner approval for this to bind.
+/.github/CODEOWNERS @ruvnet
+/evidence/policies/ @ruvnet
+/.github/workflows/model-release-gate.yml @ruvnet
+/v2/crates/wifi-densepose-train/ @ruvnet
+/v2/Cargo.toml @ruvnet
+/v2/Cargo.lock @ruvnet
+/v2/rust-toolchain.toml @ruvnet
+/v2/.cargo/ @ruvnet
+/.cargo/ @ruvnet
+/README.md @ruvnet
+/benchmarks/ @ruvnet
+/docs/benchmarks/ @ruvnet
+/docs/releases/ @ruvnet
+/docs/huggingface/ @ruvnet

@@ -1,6 +1,6 @@
 # ADR-304: Evidence engine — MLflow for physical sensing
 
-- **Status**: Accepted — initial implementation planned (ADR-300 phase 1)
+- **Status**: Accepted — ADR-328 claim receipt edge implemented; signed ledger planned
 - **Date**: 2026-08-11
 - **Deciders**: ruv
 - **Tags**: evidence, provenance, ledger, accuracy, drift, benchmark, honesty, substrate
@@ -51,6 +51,14 @@ that unifies them per deployment context:
 
 Build an **evidence engine**: a per-`(room, device, subject)` append-only
 accuracy ledger that every model automatically writes to.
+
+ADR-328 now supplies the first enforceable edge of this decision: a strict
+claim manifest, a separately versioned policy, fail-closed production/safety
+rules, and a content-addressed JSON receipt. It deliberately does **not** claim
+to be the append-only signed ledger described below. Until the ledger and
+ADR-319 witness anchoring land, the receipt carries artifact digests and CI
+decisions, production cannot exceed `metadata_attested`, and the committed
+policy denies production entirely. It cannot authorize a production claim.
 
 ### 1. The evidence record
 
@@ -104,6 +112,10 @@ accuracy ledger that every model automatically writes to.
 
 ## Validation
 
+- ADR-328 gate: simulator evidence cannot release a production claim; held-out
+  environment overlap, insufficient samples, missing thresholds, and a failed
+  confidence bound each produce a deterministic denial receipt. CI evaluates
+  every manifest in `evidence/claims/` against the repository-owned policy.
 - `cargo test` on the evidence-engine crate — append-only invariant (no
   in-place mutation; corrections are new records); per-context aggregation math
   against fixtures; evidence-level is set by provenance and cannot be upgraded;
