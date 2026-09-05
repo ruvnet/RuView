@@ -45,10 +45,11 @@ FUZZ_JOBS     ?= 1
 
 .PHONY: all clean run_serialize run_edge run_nvs run_all test_adr110 run_adr110 \
         test_vitals run_vitals test_mmwave_detect run_mmwave_detect host_tests \
-        test_thermal run_thermal
+        test_thermal run_thermal test_edge_grid run_edge_grid
 
 all: fuzz_serialize fuzz_edge fuzz_nvs test_adr110 test_vitals test_mmwave_detect \
-     test_thermal
+     test_thermal \
+     test_edge_grid
 
 # --- ADR-110 encoding unit tests ---
 # Host-side, no libFuzzer needed — plain C99 deterministic table tests
@@ -93,8 +94,24 @@ test_thermal: test_thermal_hysteresis.c $(MAIN_DIR)/thermal.h
 run_thermal: test_thermal
 	./test_thermal
 
-host_tests: run_adr110 run_vitals run_mmwave_detect run_thermal
-	@echo "Host tests passed (ADR-110 + vitals #998/#996 + mmwave detect #1135 + thermal)"
+# --- Edge subcarrier grid (HE20 truncation regression) ---
+# Host-side. Pins EDGE_MAX_SUBCARRIERS against ../main/edge_processing.h so the
+# test and the firmware cannot disagree about how wide a CSI frame may be.
+#
+# Built TWICE on purpose. The constant is target-conditional -- 256 on HE-capable
+# parts (C6/C5), 128 pre-HE (S3) -- so a single compilation can only ever prove
+# one branch. The HE build is the regression that failed before the fix; the
+# pre-HE build guards against fixing C6 by spending .bss on every S3.
+test_edge_grid: test_edge_subcarrier_grid.c $(MAIN_DIR)/edge_processing.h
+	cc -std=c99 -Wall -Wextra -Istubs_he -Istubs -I$(MAIN_DIR) -DEXPECT_HE=1 -o test_edge_grid_he $<
+	cc -std=c99 -Wall -Wextra -Istubs -I$(MAIN_DIR) -o test_edge_grid_pre_he $<
+
+run_edge_grid: test_edge_grid
+	./test_edge_grid_he
+	./test_edge_grid_pre_he
+
+host_tests: run_adr110 run_vitals run_mmwave_detect run_thermal run_edge_grid
+	@echo "Host tests passed (ADR-110 + vitals #998/#996 + mmwave detect #1135 + thermal + edge grid)"
 
 # --- Serialize fuzzer ---
 # Tests csi_serialize_frame() with random wifi_csi_info_t inputs.

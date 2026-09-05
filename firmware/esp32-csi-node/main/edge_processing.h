@@ -23,6 +23,11 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
+/* Required for CONFIG_SOC_WIFI_HE_SUPPORT, which EDGE_MAX_SUBCARRIERS below
+ * switches on. Without it the macro is undefined, and C evaluates an undefined
+ * identifier in #if as 0 — silently selecting the pre-HE size on an HE part
+ * with no warning. */
+#include "sdkconfig.h"
 
 /* ---- Magic numbers ---- */
 #define EDGE_VITALS_MAGIC     0xC5110002  /**< Vitals packet magic. */
@@ -42,8 +47,8 @@
  * HE-capable AP delivers HE20 frames with 256 bins (iq_len = 512 bytes).
  *
  * `process_frame()` guards with `n_subcarriers > EDGE_MAX_SUBCARRIERS -> return`,
- * so on C6 every frame was rejected and the whole edge pipeline â€” vitals,
- * presence, fall detection, per-slot counting â€” silently did nothing. The Edge
+ * so on C6 every frame was rejected and the whole edge pipeline — vitals,
+ * presence, fall detection, per-slot counting — silently did nothing. The Edge
  * DSP task started, logged its banner, and never processed a frame. Confirmed
  * on hardware: no edge_proc log past init and no vitals packet ever reaching
  * the sink.
