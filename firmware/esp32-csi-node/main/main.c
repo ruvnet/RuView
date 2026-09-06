@@ -24,6 +24,7 @@
 #include "thermal.h"
 #include "stream_sender.h"
 #include "nvs_config.h"
+#include "config_api.h"
 #include "edge_processing.h"
 #include "ota_update.h"
 #include "power_mgmt.h"
@@ -136,6 +137,10 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        /* Proof that a pending config trial produced a usable network. */
+        config_trial_notify_connected();
+        /* Same evidence starts the soak that confirms firmware on trial. */
+        ota_rollback_notify_connected();
     }
 }
 
@@ -285,8 +290,31 @@ static led_strip_handle_t s_viz_led;
 static void led_gamma_40hz_cb(void *arg)
 {
     static bool on = false;
+    static uint8_t last_mode = 0xFF;
+
+    /* Read live rather than latching at boot, so turning the LED down from
+     * config_push.py takes effect immediately -- the point of the knob is
+     * being able to darken a bedroom without waiting for a reboot. */
+    uint8_t mode = g_nvs_config.led_mode;
+    uint8_t bright = g_nvs_config.led_brightness;
+    if (bright > 100) bright = 100;
+
+    if (mode == LED_MODE_OFF) {
+        /* Blank once on the transition, then leave the RMT idle instead of
+         * clocking out zeros eighty times a second for the node's lifetime. */
+        if (last_mode != LED_MODE_OFF) {
+            led_strip_set_pixel(s_viz_led, 0, 0, 0, 0);
+            led_strip_refresh(s_viz_led);
+            last_mode = mode;
+        }
+        return;
+    }
+    last_mode = mode;
+
     on = !on;
-    if (on) {
+    /* STEADY keeps the motion colour but drops the square wave: same
+     * information, no 40 Hz strobe. */
+    if (on || mode == LED_MODE_STEADY) {
         edge_vitals_pkt_t v;
         float m = edge_get_vitals(&v) ? v.motion_energy : 0.0f;
         float norm = m / LED_MOTION_FULLSCALE;
@@ -294,7 +322,10 @@ static void led_gamma_40hz_cb(void *arg)
         if (norm > 1.0f) norm = 1.0f;
         int idx = (int)(norm * 59.0f + 0.5f);
         const uint8_t *c = VIRIDIS_LUT[idx];
-        led_strip_set_pixel(s_viz_led, 0, c[0], c[1], c[2]); /* R,G,B (driver maps to GRB) */
+        led_strip_set_pixel(s_viz_led, 0,                    /* R,G,B (driver maps to GRB) */
+                            (uint32_t)c[0] * bright / 100,
+                            (uint32_t)c[1] * bright / 100,
+                            (uint32_t)c[2] * bright / 100);
     } else {
         led_strip_set_pixel(s_viz_led, 0, 0, 0, 0);          /* off phase */
     }
@@ -313,6 +344,13 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     /* Load runtime config (NVS overrides Kconfig defaults) */
+    /* Before loading config: if the last change is still on trial this arms
+     * the revert timer, so settings that cannot associate undo themselves. */
+    config_trial_boot_check();
+
+    /* And report whether the bootloader just reverted a failed firmware image. */
+    ota_rollback_boot_check();
+
     nvs_config_load(&g_nvs_config);
 
     /* Capture node_id IMMEDIATELY — before wifi_init_sta() can corrupt

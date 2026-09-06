@@ -1,6 +1,7 @@
 set(SRCS
     "main.c" "csi_collector.c"
     "thermal.c" "stream_sender.c" "nvs_config.c"
+    "main.c" "csi_collector.c" "config_api.c" "stream_sender.c" "nvs_config.c"
     "edge_processing.c" "ota_update.c" "power_mgmt.c"
     "wasm_runtime.c" "wasm_upload.c" "rvf_parser.c"
     "mmwave_sensor.c"
@@ -22,6 +23,7 @@ set(SRCS
 
 # ESP-IDF v6+: headers must resolve via explicit REQUIRES (no implicit deps).
 set(REQUIRES
+    json
     esp_wifi
     esp_netif
     esp_event
