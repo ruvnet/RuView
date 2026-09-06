@@ -1669,6 +1669,12 @@ pub(crate) fn save_runtime_config(data_dir: &std::path::Path, config: &RuntimeCo
 /// Shared application state
 struct AppStateInner {
     latest_update: Option<SensingUpdate>,
+    /// When `latest_update` was last broadcast to WS clients (by whichever
+    /// task actually sent it - the ESP32 receive loop or the periodic
+    /// keepalive). Lets the keepalive skip re-sending data that was just
+    /// freshly broadcast a moment ago, instead of firing on its own
+    /// independent timer regardless of what the primary path just did.
+    last_broadcast_at: Option<std::time::Instant>,
     rssi_history: VecDeque<f64>,
     /// Circular buffer of recent CSI amplitude vectors for temporal analysis.
     /// Each entry is the full subcarrier amplitude vector for one frame.
@@ -2293,6 +2299,7 @@ impl AppStateInner {
     pub(crate) fn minimal() -> Self {
         AppStateInner {
             latest_update: None,
+            last_broadcast_at: None,
             rssi_history: VecDeque::new(),
             frame_history: VecDeque::new(),
             tick: 0,
@@ -8696,6 +8703,7 @@ async fn udp_receiver_task(
     bind_ip: std::net::IpAddr,
     udp_port: u16,
     allowlist: std::sync::Arc<wifi_densepose_sensing_server::udp_bind::UdpSourceAllowlist>,
+    tick_ms: u64,
 ) {
     let addr = format!("{bind_ip}:{udp_port}");
     let socket = match UdpSocket::bind(&addr).await {
@@ -8710,6 +8718,19 @@ async fn udp_receiver_task(
     };
 
     let mut buf = vec![0u8; wifi_densepose_hardware::rtl8720f::RTL8720F_RADAR_MAX_FRAME_LEN];
+    // ESP32 CSI frames arrive at ~48-50 FPS per node (raw hardware rate),
+    // far faster than the intended UI/broadcast cadence. Without gating,
+    // every incoming CSI frame triggered a full WS broadcast — clients saw
+    // sensing_update at raw CSI rate instead of `--tick-ms`, and every
+    // broadcast re-serializes the full snapshot (amplitude arrays, 400-
+    // point signal field, tracked persons) on the hot receive path. Per-
+    // node state (frame_history, smoothing/classification) still updates
+    // on every frame below — only the WS broadcast itself is rate-limited.
+    // The timestamp lives on shared state (AppStateInner::last_broadcast_at)
+    // rather than a task-local var so broadcast_tick_task's independent
+    // keepalive timer can see it too and skip re-sending data this task
+    // just freshly broadcast a moment ago.
+    let min_broadcast_interval = Duration::from_millis(tick_ms.max(1));
     loop {
         match socket.recv_from(&mut buf).await {
             Ok((len, src)) => {
@@ -9075,8 +9096,13 @@ async fn udp_receiver_task(
                     attach_field_positions(&mut update);
                     assess_legacy_image_pose(&mut s, &update);
 
-                    if let Ok(json) = serde_json::to_string(&update) {
-                        let _ = s.tx.send(json);
+                    if s.last_broadcast_at
+                        .map_or(true, |t| now.duration_since(t) >= min_broadcast_interval)
+                    {
+                        if let Ok(json) = serde_json::to_string(&update) {
+                            let _ = s.tx.send(json);
+                        }
+                        s.last_broadcast_at = Some(now);
                     }
                     observe_sensing_update(s.latest_update.as_ref(), &update);
                     s.latest_update = Some(update);
@@ -9589,8 +9615,13 @@ async fn udp_receiver_task(
                     attach_field_positions(&mut update);
                     assess_legacy_image_pose(&mut s, &update);
 
-                    if let Ok(json) = serde_json::to_string(&update) {
-                        let _ = s.tx.send(json);
+                    if s.last_broadcast_at
+                        .map_or(true, |t| now.duration_since(t) >= min_broadcast_interval)
+                    {
+                        if let Ok(json) = serde_json::to_string(&update) {
+                            let _ = s.tx.send(json);
+                        }
+                        s.last_broadcast_at = Some(now);
                     }
 
                     // ── ADR-262 P3: emit a signed RuField FieldEvent ────────
@@ -9869,8 +9900,17 @@ async fn broadcast_tick_task(state: SharedState, tick_ms: u64) {
     loop {
         interval.tick().await;
         let s = state.read().await;
+        // The ESP32 receive loop broadcasts its own throttled updates on
+        // this same tick_ms cadence, independently timed from this task.
+        // Without this check the two fired out of phase, doubling the
+        // effective broadcast rate in a regular, periodic pattern (visible
+        // in the UI as the signal-field heatmap flashing on a beat). Only
+        // step in as a keepalive when nothing has gone out this tick already.
+        let already_fresh = s
+            .last_broadcast_at
+            .is_some_and(|t| t.elapsed() < Duration::from_millis(tick_ms));
         if let Some(ref update) = s.latest_update {
-            if s.tx.receiver_count() > 0 {
+            if s.tx.receiver_count() > 0 && !already_fresh {
                 // Re-broadcast the latest sensing_update so pose WS clients
                 // always get data even when ESP32 pauses between frames.
                 //
@@ -11126,6 +11166,7 @@ async fn main() {
     let mut node_positions_config: Vec<[f32; 3]> = Vec::new();
     let state: SharedState = Arc::new(RwLock::new(AppStateInner {
         latest_update: None,
+        last_broadcast_at: None,
         rssi_history: VecDeque::new(),
         frame_history: VecDeque::new(),
         tick: 0,
@@ -11321,6 +11362,7 @@ async fn main() {
             udp_bind_ip,
             args.udp_port,
             udp_allowlist,
+            args.tick_ms,
         ));
         tokio::spawn(broadcast_tick_task(state.clone(), args.tick_ms));
     }
