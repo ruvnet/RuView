@@ -318,6 +318,29 @@ struct Esp32Frame {
     /// while the node had a valid IEEE 802.15.4 mesh-time solution.
     adr018_flags: wifi_densepose_hardware::Adr018Flags,
     amplitudes: Vec<f64>,
+    /// 802.11 sequence control of the overheard frame — wire v3
+    /// (`CSI_MAGIC_V3`) only; `None` from v1/v2 firmware.
+    ///
+    /// This is the join key for cross-node fusion. `sequence` above is a
+    /// counter private to each node, so two nodes that captured the same
+    /// packet report unrelated values and nothing links them. `rx_seq` is
+    /// assigned by the transmitter, so every receiver of one transmission
+    /// reports the same number: `(source_mac, rx_seq)` names that
+    /// transmission fleet-wide with no coordination between receivers.
+    ///
+    /// Carries the raw 16-bit field. The low 4 bits are the fragment number;
+    /// mask to 12 bits (`>> 4`) for sequence-only semantics.
+    rx_seq: Option<u16>,
+    /// Transmitter (addr2) of the frame this CSI was sampled from — wire v2
+    /// (`CSI_MAGIC_V2`) only; `None` from v1 firmware.
+    ///
+    /// Without this the server cannot tell which link a frame describes. A
+    /// node in promiscuous MGMT+DATA mode with no `filter_mac` captures the
+    /// AP, its peer nodes, and unrelated household traffic into one
+    /// unlabelled sequence — measured 2026-08-28 at roughly 75% non-AP on a
+    /// normal home channel. Interleaving links with different geometry
+    /// corrupts any temporal statistic built from `frame_history`.
+    source_mac: Option<[u8; 6]>,
     phases: Vec<f64>,
 }
 
@@ -2826,15 +2849,56 @@ mod issue_928_magic_collision_tests {
 
 // ── ESP32 UDP frame parser ───────────────────────────────────────────────────
 
+/// Wire v1 CSI frame magic — 20-byte header, no transmitter identity.
+const CSI_MAGIC_V1: u32 = 0xC511_0001;
+/// Wire v2 CSI frame magic — v1 header plus a 6-byte transmitter MAC.
+///
+/// `0xC511_0002`..`0xC511_0007` were already taken by the vitals, feature and
+/// other edge packets (see `issue_928_magic_collision_tests` for why that
+/// matters), so v2 claims the next free value rather than an adjacent one.
+const CSI_MAGIC_V2: u32 = 0xC511_0008;
+/// Wire v3 CSI frame magic — v2 plus the 802.11 `rx_seq` at bytes 26..27.
+///
+/// `0xC511_0009` is the per-slot vitals packet, so v3 takes the next free
+/// value. See `issue_928_magic_collision_tests` for why adjacency is not
+/// assumed.
+const CSI_MAGIC_V3: u32 = 0xC511_000A;
+/// v1 header length; also the I/Q offset for a v1 frame.
+const CSI_HEADER_V1: usize = 20;
+/// v2 header length: v1 plus `source_mac` at bytes 20..25.
+const CSI_HEADER_V2: usize = 26;
+/// v3 header length: v2 plus `rx_seq` (u16 LE) at bytes 26..27.
+const CSI_HEADER_V3: usize = 28;
+
 fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
-    if buf.len() < 20 {
+    if buf.len() < CSI_HEADER_V1 {
         return None;
     }
 
     let magic = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
-    if magic != 0xC511_0001 {
-        return None;
-    }
+    // Both versions are accepted so a mixed fleet keeps working: a node
+    // running older firmware simply reports no transmitter identity.
+    let (iq_start, source_mac, rx_seq) = match magic {
+        CSI_MAGIC_V1 => (CSI_HEADER_V1, None, None),
+        CSI_MAGIC_V2 => {
+            if buf.len() < CSI_HEADER_V2 {
+                return None;
+            }
+            let mut mac = [0u8; 6];
+            mac.copy_from_slice(&buf[20..26]);
+            (CSI_HEADER_V2, Some(mac), None)
+        }
+        CSI_MAGIC_V3 => {
+            if buf.len() < CSI_HEADER_V3 {
+                return None;
+            }
+            let mut mac = [0u8; 6];
+            mac.copy_from_slice(&buf[20..26]);
+            let seq = u16::from_le_bytes([buf[26], buf[27]]);
+            (CSI_HEADER_V3, Some(mac), Some(seq))
+        }
+        _ => return None,
+    };
 
     // Frame layout (must match firmware csi_collector.c):
     //   [0..3]   magic (u32 LE)
@@ -2869,7 +2933,6 @@ fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
     let ppdu_type = wifi_densepose_hardware::PpduType::from_byte(buf[18]);
     let adr018_flags = wifi_densepose_hardware::Adr018Flags::from_byte(buf[19]);
 
-    let iq_start = 20;
     let n_pairs = n_antennas as usize * n_subcarriers as usize;
     let expected_len = iq_start + n_pairs * 2;
 
@@ -2898,9 +2961,85 @@ fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
         noise_floor,
         ppdu_type,
         adr018_flags,
+        source_mac,
+        rx_seq,
         amplitudes,
         phases,
     })
+}
+
+#[cfg(test)]
+mod csi_wire_v2_v3_tests {
+    //! The v2 and v3 match arms must be REACHABLE.
+    //!
+    //! `parse_esp32_frame` dispatches on the magic with
+    //! `match magic { CSI_MAGIC_V1 => .., CSI_MAGIC_V2 => .., CSI_MAGIC_V3 => .. }`.
+    //! Those are constant patterns only while the constants are in scope. If
+    //! `CSI_MAGIC_V1` is ever removed or renamed, the arm silently degrades
+    //! into an irrefutable BINDING that matches every value, the v2 and v3 arms
+    //! become dead code, and `source_mac` is `None` for every frame -- so every
+    //! per-transmitter consumer sees an empty world. rustc reports this as an
+    //! `unreachable_pattern` warning, not an error, and a release build prints
+    //! no warnings at all.
+    //!
+    //! These tests fail loudly in that case.
+    use super::*;
+
+    fn build(magic: u32, header: usize, n_subcarriers: u16) -> Vec<u8> {
+        let mut buf = vec![0u8; header + n_subcarriers as usize * 2];
+        buf[0..4].copy_from_slice(&magic.to_le_bytes());
+        buf[4] = 7; // node_id
+        buf[5] = 1; // n_antennas
+        buf[6..8].copy_from_slice(&n_subcarriers.to_le_bytes());
+        buf[8..12].copy_from_slice(&5180u32.to_le_bytes());
+        buf[12..16].copy_from_slice(&42u32.to_le_bytes());
+        buf[16] = (-40i8) as u8; // rssi
+        buf[17] = (-90i8) as u8; // noise_floor
+        buf[18] = 0; // ppdu_type
+        buf[19] = 0x10;
+        if header >= CSI_HEADER_V2 {
+            buf[20..26].copy_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
+        }
+        if header >= CSI_HEADER_V3 {
+            buf[26..28].copy_from_slice(&0x1234u16.to_le_bytes());
+        }
+        buf
+    }
+
+    #[test]
+    fn v1_frame_carries_no_transmitter_identity() {
+        let f = parse_esp32_frame(&build(CSI_MAGIC_V1, CSI_HEADER_V1, 64)).unwrap();
+        assert_eq!(f.source_mac, None);
+        assert_eq!(f.n_subcarriers, 64);
+    }
+
+    #[test]
+    fn v2_frame_yields_the_transmitter_mac() {
+        let f = parse_esp32_frame(&build(CSI_MAGIC_V2, CSI_HEADER_V2, 64)).unwrap();
+        assert_eq!(
+            f.source_mac,
+            Some([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]),
+            "v2 arm unreachable -- is CSI_MAGIC_V1 still a constant in scope?"
+        );
+    }
+
+    #[test]
+    fn v3_frame_yields_mac_and_rx_seq() {
+        let f = parse_esp32_frame(&build(CSI_MAGIC_V3, CSI_HEADER_V3, 64)).unwrap();
+        assert_eq!(f.source_mac, Some([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]));
+        assert_eq!(
+            f.rx_seq,
+            Some(0x1234),
+            "v3 arm unreachable -- is CSI_MAGIC_V1 still a constant in scope?"
+        );
+    }
+
+    #[test]
+    fn an_unknown_magic_is_still_rejected() {
+        // The catch-all must stay reachable too: if the V1 arm degrades into a
+        // binding, this returns Some and the server accepts arbitrary traffic.
+        assert!(parse_esp32_frame(&build(0xDEAD_BEEF, CSI_HEADER_V1, 64)).is_none());
+    }
 }
 
 #[cfg(test)]
@@ -3888,7 +4027,9 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
             adr018_flags: wifi_densepose_hardware::Adr018Flags::default(),
             amplitudes: multi_ap_frame.amplitudes.clone(),
             phases: multi_ap_frame.phases.clone(),
-        };
+                    source_mac: None,
+            rx_seq: None,
+};
 
         // ── Step 4b: Update frame history and extract features ───────
         let mut s_write_pre = state.write().await;
@@ -4077,7 +4218,9 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         adr018_flags: wifi_densepose_hardware::Adr018Flags::default(),
         amplitudes: vec![signal_pct],
         phases: vec![0.0],
-    };
+            source_mac: None,
+        rx_seq: None,
+};
 
     let mut s = state.write().await;
     // Update frame history before extracting features.
@@ -4453,6 +4596,8 @@ fn generate_simulated_frame(tick: u64) -> Esp32Frame {
         adr018_flags: wifi_densepose_hardware::Adr018Flags::default(),
         amplitudes,
         phases,
+        source_mac: None,
+        rx_seq: None,
     }
 }
 
