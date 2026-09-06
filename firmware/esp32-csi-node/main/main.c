@@ -107,13 +107,27 @@ static void wifi_reconnect_cb(void *arg)
     esp_wifi_connect();
 }
 
+/* DIAGNOSTIC BUILD ONLY: when set, the node deliberately holds NO association,
+ * so the reconnect machinery below must stand down. Without this guard the
+ * disconnect handler immediately reconnects and the sniffer experiment
+ * measures ordinary associated behaviour while appearing to work. */
+static volatile bool s_sniffer_mode = false;
+
 static void event_handler(void *arg, esp_event_base_t event_base,
                           int32_t event_id, void *event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        if (s_sniffer_mode) {
+            return;
+        }
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t *disc = (wifi_event_sta_disconnected_t *)event_data;
+        if (s_sniffer_mode) {
+            ESP_LOGW(TAG, "SNIFFER: disconnected (reason=%d) — staying unassociated",
+                     disc->reason);
+            return;
+        }
         ESP_LOGW(TAG, "WiFi disconnected, reason=%d rssi=%d", disc->reason, disc->rssi);
         s_retry_num++;
         /* Release the boot wait once, so a node that comes up while the AP is
@@ -301,6 +315,71 @@ static void led_gamma_40hz_cb(void *arg)
     led_strip_refresh(s_viz_led);
 }
 #endif /* CONFIG_LED_GAMMA_VIZ */
+
+/* ---- DIAGNOSTIC: one-shot survey of every AP this node can actually hear ----
+ *
+ * OFF BY DEFAULT. Build with -DRUVIEW_DIAG_SCAN to enable. A scan takes the
+ * radio off its operating channel, so it is a CSI outage and a chance to drop
+ * the association — never ship it to the fleet.
+ */
+#ifdef RUVIEW_DIAG_SCAN
+/*
+ *
+ * Answers a question no server-side metric can: what does THIS radio, behind
+ * THIS PCB trace antenna, at THIS mounting position, actually receive? A scan
+ * from a laptop or from an access point answers for a different antenna in a
+ * different place with a different LNA — measured 2026-08-31, a Powerwall
+ * gateway read -54 dBm at a U7 Pro XG while being entirely absent from every
+ * node's link table, and no amount of server-side inference could separate
+ * "out of range" from "received but discarded".
+ *
+ * ONE-SHOT, and deliberately so: esp_wifi_scan_start takes the radio off its
+ * operating channel, so every scan is a CSI outage and a chance to drop the
+ * association. Run it once, log it, never again. Do not put this on a timer.
+ */
+static wifi_ap_record_t s_diag_scan_recs[40];   /* static: too large for stack */
+
+static void diag_survey_visible_aps(void)
+{
+    wifi_scan_config_t cfg = {
+        .ssid = NULL,
+        .bssid = NULL,
+        .channel = 0,              /* every channel, not just ours */
+        .show_hidden = true,
+        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+        .scan_time = { .active = { .min = 120, .max = 300 } },
+    };
+
+    ESP_LOGW(TAG, "DIAG-SCAN: starting survey — CSI pauses for a few seconds");
+    esp_err_t err = esp_wifi_scan_start(&cfg, true /* block until done */);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "DIAG-SCAN: failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    uint16_t found = 0;
+    esp_wifi_scan_get_ap_num(&found);
+    uint16_t want = (found > 40u) ? 40u : found;
+    if (want == 0) {
+        ESP_LOGW(TAG, "DIAG-SCAN: 0 APs visible — that is itself the answer");
+        return;
+    }
+    esp_wifi_scan_get_ap_records(&want, s_diag_scan_recs);
+
+    ESP_LOGW(TAG, "DIAG-SCAN: %u of %u AP(s) visible to node %u",
+             (unsigned)want, (unsigned)found, (unsigned)g_nvs_config.node_id);
+    for (uint16_t i = 0; i < want; i++) {
+        const wifi_ap_record_t *r = &s_diag_scan_recs[i];
+        ESP_LOGW(TAG,
+                 "DIAG-SCAN %02u ch=%2u rssi=%4d %02x:%02x:%02x:%02x:%02x:%02x \"%s\"",
+                 (unsigned)i, (unsigned)r->primary, (int)r->rssi,
+                 r->bssid[0], r->bssid[1], r->bssid[2],
+                 r->bssid[3], r->bssid[4], r->bssid[5],
+                 (const char *)r->ssid);
+    }
+    ESP_LOGW(TAG, "DIAG-SCAN: complete — CSI resumes");
+}
+#endif /* RUVIEW_DIAG_SCAN */
 
 void app_main(void)
 {
@@ -644,6 +723,27 @@ void app_main(void)
              (adapt_ret == ESP_OK) ? "on" : "off");
 
     /* Main loop — keep alive, and supervise the uplink. */
+    /* DIAGNOSTIC BUILD ONLY — see diag_survey_visible_aps(). Delayed so the
+     * association and the first CSI frames settle first, otherwise the scan
+     * competes with connection setup and the RSSI figures are not
+     * representative of steady state. */
+#ifdef RUVIEW_DIAG_SCAN
+    vTaskDelay(pdMS_TO_TICKS(10000));
+    diag_survey_visible_aps();
+#endif
+
+    /* The sniffer experiment ran on 2026-08-31 and ANSWERED ITS QUESTION: going
+     * unassociated changed nothing. Foreign transmitters already produce CSI
+     * while fully associated (the 1st floor AP at n=391, -68 dBm; TEG's radio
+     * at -90), so there is no BSSID receive filter to escape. The node now
+     * stays associated deliberately — the SEND census is meaningless without an
+     * uplink, and that census is what localises where those frames are lost.
+     * `s_sniffer_mode` is retained, unused, so the experiment is one line to
+     * re-run rather than a rebuild. */
+
+    /* Main loop — keep alive, and supervise the uplink. */
+
+    /* Main loop — keep alive */
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10000));
 #ifdef CONFIG_UPLINK_WATCHDOG

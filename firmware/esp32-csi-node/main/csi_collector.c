@@ -280,9 +280,114 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
 /**
  * WiFi CSI callback — invoked by ESP-IDF when CSI data is available.
  */
+/* ---- DIAGNOSTIC: census of every transmitter the CSI engine produces for ----
+ *
+ * OFF BY DEFAULT. Build with -DRUVIEW_DIAG_CENSUS to enable. It logs heavily
+ * over serial and is only meaningful on a board you are watching, so it must
+ * never reach the fleet through an OTA.
+ */
+#ifdef RUVIEW_DIAG_CENSUS
+/*
+ *
+ * Recorded at the TOP of the callback, before filter_mac and before the rate
+ * gate, so it reports what the radio actually generated CSI for rather than
+ * what survived our own filtering. That distinction is the entire question:
+ * measured 2026-08-31, an access point at -62 dBm on the same channel yielded
+ * zero frames while the associated AP at -68 dBm yielded everything, which
+ * points at the 802.11 BSSID receive filter rather than at signal strength.
+ *
+ * A per-frame log would be ~40 lines/second and would not fit the serial link,
+ * so this aggregates into a small table and dumps it periodically.
+ */
+#define DIAG_CENSUS_MAX 24
+struct diag_census_entry {
+    uint8_t  mac[6];
+    uint32_t count;
+    int8_t   last_rssi;
+    uint16_t last_len;    /* info->len: CSI payload bytes. 0 => empty
+                           * amplitudes => LinkTable::observe drops it. */
+    uint16_t min_len;
+};
+struct diag_census {
+    struct diag_census_entry e[DIAG_CENSUS_MAX];
+    uint8_t  used;
+    uint32_t seen;
+    uint32_t over;      /* distinct MACs beyond the table */
+};
+
+/* Three censuses at three stages of the SAME callback, so the survival of each
+ * transmitter can be read straight off:
+ *
+ *   RX   — what the radio's CSI engine actually produced (before every filter)
+ *   GATE — what survived the 20 ms mesh-aligned bucket gate
+ *   SEND — what was actually put on the wire to the server
+ *
+ * MEASURED 2026-08-31: foreign transmitters DO appear at RX while associated
+ * (the 1st floor AP at n=391, -68 dBm), yet never reach the server's link
+ * table. These three tables localise that loss to a specific stage instead of
+ * leaving it to inference, which has been wrong repeatedly on this question.
+ */
+static struct diag_census s_cen_rx;
+static struct diag_census s_cen_gate;
+static struct diag_census s_cen_send;
+
+static void diag_census_record(struct diag_census *c, const uint8_t *mac,
+                               int8_t rssi, uint16_t len)
+{
+    c->seen++;
+    for (uint8_t i = 0; i < c->used; i++) {
+        if (memcmp(c->e[i].mac, mac, 6) == 0) {
+            c->e[i].count++;
+            c->e[i].last_rssi = rssi;
+            c->e[i].last_len = len;
+            if (len < c->e[i].min_len) c->e[i].min_len = len;
+            return;
+        }
+    }
+    if (c->used >= DIAG_CENSUS_MAX) { c->over++; return; }
+    memcpy(c->e[c->used].mac, mac, 6);
+    c->e[c->used].count = 1;
+    c->e[c->used].last_rssi = rssi;
+    c->e[c->used].last_len = len;
+    c->e[c->used].min_len = len;
+    c->used++;
+}
+
+static void diag_census_dump_one(const char *label, const struct diag_census *c)
+{
+    ESP_LOGW(TAG, "CENSUS-%s: %u frames, %u MAC(s), %u over table",
+             label, (unsigned)c->seen, (unsigned)c->used, (unsigned)c->over);
+    for (uint8_t i = 0; i < c->used; i++) {
+        ESP_LOGW(TAG, "CENSUS-%s %02x:%02x:%02x:%02x:%02x:%02x n=%-6u rssi=%-4d len=%u min=%u",
+                 label,
+                 c->e[i].mac[0], c->e[i].mac[1], c->e[i].mac[2],
+                 c->e[i].mac[3], c->e[i].mac[4], c->e[i].mac[5],
+                 (unsigned)c->e[i].count, (int)c->e[i].last_rssi,
+                 (unsigned)c->e[i].last_len, (unsigned)c->e[i].min_len);
+    }
+}
+
+static void diag_census_dump(void)
+{
+    diag_census_dump_one("RX  ", &s_cen_rx);
+    diag_census_dump_one("GATE", &s_cen_gate);
+    diag_census_dump_one("SEND", &s_cen_send);
+}
+#else
+#define diag_census_record(c, mac, rssi, len) ((void)0)
+#define diag_census_dump()                    ((void)0)
+static struct { uint32_t seen; } s_cen_rx;   /* seen stays readable when off */
+#endif
+
 static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
 {
     (void)ctx;
+
+    /* DIAGNOSTIC BUILD ONLY — before every filter, including our own. */
+    diag_census_record(&s_cen_rx, info->mac, (int8_t)info->rx_ctrl.rssi, (uint16_t)info->len);
+    if ((s_cen_rx.seen % 1000u) == 0u) {
+        diag_census_dump();
+    }
 
     /* Early rate gate: drop excess callbacks to ~50 Hz to prevent
      * SPI flash cache crash in WiFi ISR (wDev_ProcessFiq). */
@@ -301,6 +406,9 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
             return;  /* Source MAC doesn't match filter — skip frame. */
         }
     }
+
+    /* DIAGNOSTIC BUILD ONLY -- survived the rate gate. */
+    diag_census_record(&s_cen_gate, info->mac, (int8_t)info->rx_ctrl.rssi, (uint16_t)info->len);
 
     s_cb_count++;
 
@@ -323,6 +431,8 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
             if (ret > 0) {
                 s_send_ok++;
                 s_last_send_us = now;
+                /* DIAGNOSTIC BUILD ONLY — actually on the wire to the server. */
+                diag_census_record(&s_cen_send, info->mac, (int8_t)info->rx_ctrl.rssi, (uint16_t)info->len);
             } else {
                 s_send_fail++;
                 if (s_send_fail <= 5) {
