@@ -13451,6 +13451,7 @@ dependencies = [
  "p256",
  "proptest",
  "rand 0.8.5",
+ "reqwest 0.12.28",
  "rumqttc-v4-next",
  "ruvector-mincut",
  "ruview-auth",
