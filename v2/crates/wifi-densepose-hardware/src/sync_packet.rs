@@ -15,11 +15,14 @@
 //! [6]      flags: bit 0 = is_leader
 //!                 bit 1 = is_valid (fresh sync within VALID_WINDOW_MS)
 //!                 bit 2 = smoothed_used (EMA filter active)
-//! [7]      reserved
+//! [7]      minimum free heap / 2048 (0 = unreported)
 //! [8..15]  local esp_timer_get_time() (u64)
 //! [16..23] mesh-aligned epoch = local + smoothed offset (u64)
 //! [24..27] high-water CSI sequence (u32) — pairing key against ADR-018 frames
-//! [28..31] reserved
+//! [28]     reset reason (esp_reset_reason_t)
+//! [29]     thermal state: 0 ok, 1 warn, 2 throttled, 3 critical
+//! [30]     die temperature, signed whole degrees C (0 = unreported)
+//! [31]     WiFi transmit ceiling, whole dBm (0 = unreported)
 //! ```
 //!
 //! Recover the per-board offset for a given sync packet as
@@ -35,8 +38,12 @@ use crate::error::ParseError;
 pub const SYNC_PACKET_MAGIC: u32 = 0xC511_A110;
 /// Total wire size of a v0.6.9+ sync packet.
 pub const SYNC_PACKET_SIZE: usize = 32;
+/// Wire size once the node's own MAC is appended (proto v2).
+pub const SYNC_PACKET_SIZE_V2: usize = 38;
 /// Wire protocol version currently emitted by firmware.
-pub const SYNC_PACKET_PROTO_VER: u8 = 0x01;
+pub const SYNC_PACKET_PROTO_VER: u8 = 0x02;
+/// Protocol version that first carried `node_mac`.
+pub const SYNC_PACKET_PROTO_VER_MAC: u8 = 0x02;
 
 /// Decoded ADR-110 §A0.12 sync packet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,6 +59,78 @@ pub struct SyncPacket {
     /// aggregator pairs (`node_id`, `sequence`) across the two UDP streams
     /// to apply the recovered offset back to in-flight CSI frames.
     pub sequence: u32,
+    /// The node's own WiFi STA MAC — proto v2 and later, `None` before.
+    ///
+    /// Without this the server had to GUESS which node transmitted a frame,
+    /// using the one signature available: a MAC heard by every receiver
+    /// except one is probably that one's. That holds only when every node
+    /// hears every other, which is true of boards piled on a desk and false
+    /// of boards spread through a house -- exactly the deployment it exists
+    /// for. MEASURED 2026-08-31: with nine nodes placed in real positions the
+    /// heuristic identified 0 of 32 links, and every peer link was
+    /// misreported as infrastructure.
+    ///
+    /// A node knows its own MAC for free. Telling the server directly turns
+    /// an inference that degrades with distance into a fact that does not.
+    pub node_mac: Option<[u8; 6]>,
+    /// Node health, carried in bytes that were reserved-zero.
+    ///
+    /// These nodes live on walls with no console, so a serial log reaches
+    /// nobody. The sync packet already leaves every node at ~2 Hz on a
+    /// priority path and is already stored per node, so health rides along
+    /// for free. Zeros from an older node are indistinguishable from "not
+    /// reported", which is why every field is an `Option`.
+    pub health: NodeHealth,
+}
+
+/// Per-node health sampled at sync-emission time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct NodeHealth {
+    /// `esp_reset_reason()` from the node's last boot. The single most useful
+    /// byte here: a node that reboots tells you almost nothing, but one that
+    /// reboots with `Brownout` tells you its supply sagged, which on shared
+    /// outlets is a wiring fault rather than a firmware one.
+    pub reset_reason: u8,
+    /// 0 ok, 1 warn, 2 throttled, 3 critical.
+    pub thermal_state: u8,
+    /// Die temperature, whole degrees C. `None` when unreported.
+    pub die_c: Option<i8>,
+    /// Current WiFi transmit ceiling in whole dBm.
+    ///
+    /// Read this before diagnosing a weak link. A thermally throttled node's
+    /// RSSI falls at *both* ends, which looks exactly like an obstruction;
+    /// only the transmit power distinguishes a hot node from a wall.
+    pub tx_dbm: Option<u8>,
+    /// Minimum free heap since boot, KiB. A slow leak and an overheat look
+    /// identical after ten days unless this has been walking downward.
+    pub min_heap_kib: Option<u32>,
+}
+
+impl NodeHealth {
+    /// Human-readable reset cause, from `esp_reset_reason_t`.
+    #[must_use]
+    pub fn reset_reason_name(&self) -> &'static str {
+        match self.reset_reason {
+            0 => "unknown",
+            1 => "power-on",
+            3 => "software",
+            4 => "panic",
+            5 => "interrupt watchdog",
+            6 => "task watchdog",
+            7 => "other watchdog",
+            8 => "deep-sleep wake",
+            9 => "brownout",
+            10 => "sdio",
+            _ => "other",
+        }
+    }
+
+    /// True when the last restart was not a clean one — panic, watchdog or
+    /// brownout. These are the ones worth surfacing without being asked.
+    #[must_use]
+    pub fn rebooted_badly(&self) -> bool {
+        matches!(self.reset_reason, 4 | 5 | 6 | 7 | 9)
+    }
 }
 
 /// Flag bits packed into byte 6 of the sync packet.
@@ -98,11 +177,35 @@ impl SyncPacket {
         let node_id = buf[4];
         let proto_ver = buf[5];
         let flags = SyncPacketFlags::from_byte(buf[6]);
-        // buf[7] reserved
+        let min_heap = buf[7];
         let local_us = u64::from_le_bytes(buf[8..16].try_into().unwrap());
         let epoch_us = u64::from_le_bytes(buf[16..24].try_into().unwrap());
         let sequence = u32::from_le_bytes(buf[24..28].try_into().unwrap());
-        // buf[28..32] reserved
+        // Length AND version must both agree before trusting the tail: a
+        // padded v1 datagram would otherwise yield six bytes of whatever the
+        // sender's stack left there, and a plausible-looking wrong MAC is
+        // worse than no MAC at all.
+        let node_mac = if proto_ver >= SYNC_PACKET_PROTO_VER_MAC
+            && buf.len() >= SYNC_PACKET_SIZE_V2
+        {
+            let mut m = [0u8; 6];
+            m.copy_from_slice(&buf[32..38]);
+            // All-zero is what an uninitialised buffer looks like, and is not
+            // a valid station address.
+            if m == [0u8; 6] { None } else { Some(m) }
+        } else {
+            None
+        };
+        let health = NodeHealth {
+            reset_reason: buf[28],
+            thermal_state: buf[29],
+            // 0 is "unreported" rather than 0 C: the firmware sends 0 when the
+            // sensor has not produced a reading, and a node genuinely at 0 C
+            // is not a case this fleet needs to distinguish.
+            die_c: if buf[30] == 0 { None } else { Some(buf[30] as i8) },
+            tx_dbm: if buf[31] == 0 { None } else { Some(buf[31]) },
+            min_heap_kib: if min_heap == 0 { None } else { Some(u32::from(min_heap) * 2) },
+        };
         Ok(Self {
             node_id,
             proto_ver,
@@ -110,6 +213,8 @@ impl SyncPacket {
             local_us,
             epoch_us,
             sequence,
+            node_mac,
+            health,
         })
     }
 
@@ -189,11 +294,14 @@ impl SyncPacket {
         out[4] = self.node_id;
         out[5] = self.proto_ver;
         out[6] = self.flags.to_byte();
-        // out[7] reserved zero
+        out[7] = self.health.min_heap_kib.map_or(0, |k| (k / 2).min(255) as u8);
         out[8..16].copy_from_slice(&self.local_us.to_le_bytes());
         out[16..24].copy_from_slice(&self.epoch_us.to_le_bytes());
         out[24..28].copy_from_slice(&self.sequence.to_le_bytes());
-        // out[28..32] reserved zero
+        out[28] = self.health.reset_reason;
+        out[29] = self.health.thermal_state;
+        out[30] = self.health.die_c.unwrap_or(0) as u8;
+        out[31] = self.health.tx_dbm.unwrap_or(0);
         out
     }
 }
@@ -212,6 +320,8 @@ mod tests {
             local_us: 28_798_450,
             epoch_us: 27_634_885,
             sequence: 20,
+            node_mac: None,
+            health: NodeHealth::default(),
         };
         let wire = pkt.to_bytes();
         let decoded = SyncPacket::from_bytes(&wire).unwrap();
@@ -231,6 +341,8 @@ mod tests {
             local_us: 28_864_932,
             epoch_us: 28_864_939,
             sequence: 20,
+            node_mac: None,
+            health: NodeHealth::default(),
         };
         let wire = pkt.to_bytes();
         let decoded = SyncPacket::from_bytes(&wire).unwrap();
@@ -241,11 +353,57 @@ mod tests {
         assert!(!decoded.flags.smoothed_used);
     }
 
+    /// A v2 packet carries the node's own MAC, which is what lets the server
+    /// attribute a peer link instead of guessing the transmitter.
+    #[test]
+    fn v2_packet_carries_the_node_mac() {
+        let mac = [0x9c, 0xcc, 0x01, 0x40, 0x18, 0xb8];
+        let mut wire = SyncPacket {
+            node_id: 0, proto_ver: SYNC_PACKET_PROTO_VER_MAC,
+            flags: SyncPacketFlags::default(),
+            local_us: 1, epoch_us: 1, sequence: 7, node_mac: None,
+            health: NodeHealth::default(),
+        }.to_bytes().to_vec();
+        wire.extend_from_slice(&mac);
+        let got = SyncPacket::from_bytes(&wire).expect("v2 parses");
+        assert_eq!(got.node_mac, Some(mac));
+    }
+
+    /// A v1 node emits 32 bytes. If a datagram is padded — by a stack, a
+    /// buffer reused between sends, anything — the tail is not a MAC, and a
+    /// plausible-looking wrong MAC would mis-attribute every link that node
+    /// transmits. Version must agree as well as length.
+    #[test]
+    fn padded_v1_packet_yields_no_mac() {
+        let mut wire = SyncPacket {
+            node_id: 3, proto_ver: 0x01, flags: SyncPacketFlags::default(),
+            local_us: 1, epoch_us: 1, sequence: 7, node_mac: None,
+            health: NodeHealth::default(),
+        }.to_bytes().to_vec();
+        wire.extend_from_slice(&[0xde, 0xad, 0xbe, 0xef, 0x01, 0x02]);
+        let got = SyncPacket::from_bytes(&wire).expect("v1 still parses");
+        assert_eq!(got.node_mac, None, "v1 must not report a MAC from padding");
+    }
+
+    /// An all-zero tail is what an uninitialised buffer looks like, and is not
+    /// a valid station address.
+    #[test]
+    fn all_zero_mac_is_treated_as_absent() {
+        let mut wire = SyncPacket {
+            node_id: 4, proto_ver: SYNC_PACKET_PROTO_VER_MAC,
+            flags: SyncPacketFlags::default(),
+            local_us: 1, epoch_us: 1, sequence: 7, node_mac: None,
+            health: NodeHealth::default(),
+        }.to_bytes().to_vec();
+        wire.extend_from_slice(&[0u8; 6]);
+        assert_eq!(SyncPacket::from_bytes(&wire).unwrap().node_mac, None);
+    }
+
     #[test]
     fn magic_mismatch_is_typed_error() {
         let mut wire = SyncPacket {
             node_id: 1, proto_ver: 1, flags: SyncPacketFlags::default(),
-            local_us: 0, epoch_us: 0, sequence: 0,
+            local_us: 0, epoch_us: 0, sequence: 0, node_mac: None, health: NodeHealth::default(),
         }.to_bytes();
         wire[0] = 0x01;  // corrupt magic low byte
         let err = SyncPacket::from_bytes(&wire).unwrap_err();
@@ -277,7 +435,7 @@ mod tests {
                     let flags = SyncPacketFlags { is_leader, is_valid, smoothed_used };
                     let pkt = SyncPacket {
                         node_id: 1, proto_ver: 1, flags,
-                        local_us: 1234, epoch_us: 5678, sequence: 99,
+                        local_us: 1234, epoch_us: 5678, sequence: 99, node_mac: None, health: NodeHealth::default(),
                     };
                     let wire = pkt.to_bytes();
                     let decoded = SyncPacket::from_bytes(&wire).unwrap();
@@ -302,7 +460,7 @@ mod tests {
         let pkt = SyncPacket {
             node_id: 9, proto_ver: 1,
             flags: SyncPacketFlags { is_leader: false, is_valid: true, smoothed_used: true },
-            local_us: 28_798_450, epoch_us: 27_634_885, sequence: 20,
+            local_us: 28_798_450, epoch_us: 27_634_885, sequence: 20, node_mac: None, health: NodeHealth::default(),
         };
         assert_eq!(pkt.apply_to_local(pkt.local_us), pkt.epoch_us);
     }
@@ -315,7 +473,7 @@ mod tests {
         let pkt = SyncPacket {
             node_id: 9, proto_ver: 1,
             flags: SyncPacketFlags { is_leader: false, is_valid: true, smoothed_used: true },
-            local_us: 28_798_450, epoch_us: 27_634_885, sequence: 20,
+            local_us: 28_798_450, epoch_us: 27_634_885, sequence: 20, node_mac: None, health: NodeHealth::default(),
         };
         // Frame arrives 100 ms after the sync packet on the follower's local clock.
         let local_at_frame = pkt.local_us + 100_000;
@@ -333,7 +491,7 @@ mod tests {
         let pkt = SyncPacket {
             node_id: 12, proto_ver: 1,
             flags: SyncPacketFlags { is_leader: true, is_valid: true, smoothed_used: false },
-            local_us: 28_864_932, epoch_us: 28_864_939, sequence: 20,
+            local_us: 28_864_932, epoch_us: 28_864_939, sequence: 20, node_mac: None, health: NodeHealth::default(),
         };
         let frame_local = 30_000_000u64;
         let mesh = pkt.apply_to_local(frame_local);
@@ -349,7 +507,7 @@ mod tests {
         let pkt = SyncPacket {
             node_id: 9, proto_ver: 1,
             flags: SyncPacketFlags { is_leader: false, is_valid: true, smoothed_used: true },
-            local_us: 28_798_450, epoch_us: 27_634_885, sequence: 20,
+            local_us: 28_798_450, epoch_us: 27_634_885, sequence: 20, node_mac: None, health: NodeHealth::default(),
         };
         assert_eq!(pkt.mesh_aligned_us_for_sequence(20, 20.0), pkt.epoch_us);
     }
@@ -361,7 +519,7 @@ mod tests {
         let pkt = SyncPacket {
             node_id: 9, proto_ver: 1,
             flags: SyncPacketFlags { is_leader: false, is_valid: true, smoothed_used: true },
-            local_us: 28_798_450, epoch_us: 27_634_885, sequence: 20,
+            local_us: 28_798_450, epoch_us: 27_634_885, sequence: 20, node_mac: None, health: NodeHealth::default(),
         };
         // 20 frames at 20 fps = 1 000 000 µs
         let mesh = pkt.mesh_aligned_us_for_sequence(40, 20.0);
@@ -376,7 +534,7 @@ mod tests {
         let pkt = SyncPacket {
             node_id: 9, proto_ver: 1,
             flags: SyncPacketFlags { is_leader: false, is_valid: true, smoothed_used: true },
-            local_us: 10_000, epoch_us: 10_000, sequence: u32::MAX,
+            local_us: 10_000, epoch_us: 10_000, sequence: u32::MAX, node_mac: None, health: NodeHealth::default(),
         };
         // Next sequence after u32::MAX is 0 (wrap). Δframes = 1, not -2^32.
         let mesh = pkt.mesh_aligned_us_for_sequence(0, 20.0);
@@ -400,6 +558,8 @@ mod tests {
             local_us: 28_798_450,
             epoch_us: 27_634_885,
             sequence: 20,
+            node_mac: None,
+            health: NodeHealth::default(),
         };
         let wire = pkt.to_bytes();
         assert_eq!(wire.len(), SYNC_PACKET_SIZE);
@@ -420,7 +580,7 @@ mod tests {
     fn wire_size_constant_is_correct() {
         let pkt = SyncPacket {
             node_id: 0, proto_ver: 1, flags: SyncPacketFlags::default(),
-            local_us: 0, epoch_us: 0, sequence: 0,
+            local_us: 0, epoch_us: 0, sequence: 0, node_mac: None, health: NodeHealth::default(),
         };
         assert_eq!(pkt.to_bytes().len(), SYNC_PACKET_SIZE);
         assert_eq!(SYNC_PACKET_SIZE, 32);
