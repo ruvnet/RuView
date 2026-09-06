@@ -382,6 +382,9 @@ static uint8_t  s_presence_below_count;  /**< Consecutive frames below low thres
 static bool     s_fall_detected;
 static int8_t   s_latest_rssi;
 static uint32_t s_frame_count;
+/* Frames rejected by the subcarrier-grid guard in process_frame(). See the
+ * comment at that return. Monotonic since boot; the sink differences it. */
+static uint32_t s_frame_rejected;
 
 /** Previous phase velocity for fall detection (acceleration). */
 static float s_prev_phase_velocity;
@@ -1062,7 +1065,21 @@ static void send_feature_vector(void)
 static void process_frame(const edge_ring_slot_t *slot)
 {
     uint16_t n_subcarriers = slot->iq_len / 2;
-    if (n_subcarriers == 0 || n_subcarriers > EDGE_MAX_SUBCARRIERS) return;
+    if (n_subcarriers == 0 || n_subcarriers > EDGE_MAX_SUBCARRIERS) {
+        /* Counted, not silent.
+         *
+         * This return is where the HE20 truncation bug lived: EDGE_MAX_SUBCARRIERS
+         * was 128 while a C6 delivers 256 bins, so every frame took this branch
+         * and the entire edge pipeline did nothing while the DSP task logged a
+         * healthy banner. Nothing anywhere recorded that it was happening.
+         *
+         * A frame arriving wider than the configured grid is a configuration
+         * error, not traffic to discard quietly, so it gets a counter that
+         * leaves the node in the sync packet. `rejected > 0 && processed == 0`
+         * names that failure exactly, from the server, with no cable. */
+        s_frame_rejected++;
+        return;
+    }
 
     s_frame_count++;
     s_latest_rssi = slot->rssi;
@@ -1389,6 +1406,16 @@ void edge_get_variances(float *out_variances, uint16_t n_subcarriers)
     }
 }
 
+uint32_t edge_processing_get_frames_processed(void)
+{
+    return s_frame_count;
+}
+
+uint32_t edge_processing_get_frames_rejected(void)
+{
+    return s_frame_rejected;
+}
+
 esp_err_t edge_processing_init(const edge_config_t *cfg)
 {
     if (cfg == NULL) {
@@ -1421,6 +1448,7 @@ esp_err_t edge_processing_init(const edge_config_t *cfg)
     s_fall_detected = false;
     s_latest_rssi = 0;
     s_frame_count = 0;
+    s_frame_rejected = 0;
     s_sample_rate_hz = EDGE_CONFIGURED_SAMPLE_RATE_HZ;
     s_filter_design_fs = EDGE_CONFIGURED_SAMPLE_RATE_HZ;
     s_rate_window_start_us = 0;

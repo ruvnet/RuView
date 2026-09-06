@@ -100,7 +100,9 @@ pub use rtl8720f::{
     RTL8720F_RADAR_HEADER_LEN, RTL8720F_RADAR_MAGIC, RTL8720F_RADAR_VERSION,
 };
 pub use sync_packet::{
-    SyncPacket, SyncPacketFlags, SYNC_PACKET_MAGIC, SYNC_PACKET_PROTO_VER, SYNC_PACKET_SIZE,
+    NodeHealth,
+    EdgeCounters, SyncPacket, SyncPacketFlags, SYNC_PACKET_MAGIC, SYNC_PACKET_PROTO_VER,
+    SYNC_PACKET_SIZE,
 };
 pub use vendor_rf::{
     ProviderAvailability, ProviderDescriptor, RfCapability, VendorEventError, VendorId,
