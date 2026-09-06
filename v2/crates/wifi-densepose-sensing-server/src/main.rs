@@ -9,6 +9,7 @@
 //! Replaces both ws_server.py and the Python HTTP server.
 #![allow(dead_code)]
 
+mod phase_diag;
 mod adaptive_classifier;
 pub mod cli;
 pub mod csi;
@@ -98,6 +99,21 @@ struct Args {
     /// HTTP port for UI and REST API
     #[arg(long, default_value = "8080")]
     http_port: u16,
+
+    /// Write phase-channel diagnostics (CSV) to this directory. Records the
+    /// common-mode phase and STO slope of every raw CSI frame *before*
+    /// sanitization, plus bounded raw-I/Q capture windows, to determine
+    /// whether single-antenna ESP32 phase can carry Doppler at all. Off by
+    /// default; adds no work to the signal path when unset. Output is
+    /// CSI-derived — never commit it (`CLAUDE.md`).
+    #[arg(long, value_name = "DIR")]
+    phase_diagnostics: Option<PathBuf>,
+    /// Record every frame to the raw phase-diagnostics sink instead of the
+    /// default duty-cycled bursts (1.4 min in every 10). Needed for a
+    /// deliberate-motion test, which the duty cycle would mostly miss. Costs
+    /// ~275 MB/hour at 3 nodes — use it for a bounded, attended experiment.
+    #[arg(long, requires = "phase_diagnostics")]
+    phase_diagnostics_continuous: bool,
 
     /// WebSocket port for sensing stream
     #[arg(long, default_value = "8765")]
@@ -2825,6 +2841,14 @@ mod issue_928_magic_collision_tests {
 }
 
 // ── ESP32 UDP frame parser ───────────────────────────────────────────────────
+
+static PHASE_DIAG: std::sync::OnceLock<Option<std::sync::Arc<phase_diag::PhaseDiagnostics>>> =
+    std::sync::OnceLock::new();
+
+/// Borrow the diagnostic sink, if one was configured.
+fn phase_diagnostics() -> Option<&'static std::sync::Arc<phase_diag::PhaseDiagnostics>> {
+    PHASE_DIAG.get().and_then(|o| o.as_ref())
+}
 
 fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
     if buf.len() < 20 {
@@ -8526,6 +8550,31 @@ async fn mesh_endpoint(State(state): State<SharedState>) -> Json<serde_json::Val
     }))
 }
 
+/// `GET /api/v1/diag/mark/:label` -- stamp a labelled instant into the phase
+/// diagnostics stream.
+///
+/// Ground truth recalled after the fact is soft. The only high-provenance
+/// label of an overnight run is the one reported AS IT HAPPENS; matching a
+/// detection to a remembered time is post-hoc fitting, because during an
+/// active stretch the detector bumps every ~1.5 min and any estimate "matches"
+/// something.
+///
+/// Returns the recording-relative timestamp so a client can show what it
+/// captured, and reports plainly when diagnostics are not enabled rather than
+/// silently accepting a mark that goes nowhere.
+async fn diag_mark(axum::extract::Path(label): axum::extract::Path<String>) -> Json<serde_json::Value> {
+    match phase_diagnostics() {
+        Some(d) => {
+            let t_s = d.mark(&label);
+            Json(serde_json::json!({ "ok": true, "t_s": t_s, "label": label }))
+        }
+        None => Json(serde_json::json!({
+            "ok": false,
+            "error": "phase diagnostics not enabled; start with --phase-diagnostics <DIR>"
+        })),
+    }
+}
+
 async fn nodes_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
     let now = std::time::Instant::now();
@@ -11472,6 +11521,7 @@ async fn main() {
         .route("/api/v1/rf/vendors/:vendor/events", post(ingest_vendor_events))
         // Per-node health endpoint
         .route("/api/v1/nodes", get(nodes_endpoint))
+        .route("/api/v1/diag/mark/:label", get(diag_mark))
         // ADR-110 iter 29 — per-node mesh sync state for HTTP clients.
         .route("/api/v1/nodes/:id/sync", get(node_sync_endpoint))
         .route("/api/v1/mesh", get(mesh_endpoint))
