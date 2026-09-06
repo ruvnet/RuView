@@ -9,6 +9,7 @@
 //! Replaces both ws_server.py and the Python HTTP server.
 #![allow(dead_code)]
 
+mod rti;
 mod adaptive_classifier;
 pub mod cli;
 pub mod csi;
