@@ -334,6 +334,9 @@ mod tests {
                 local_us: 10_000_000,
                 epoch_us: mesh_epoch_us,
                 sequence: sync_sequence,
+                // proto v1 fixture: the v2 bytes are reserved-zero.
+                node_mac: None,
+                health: Default::default(),
             },
             Instant::now(),
         );

@@ -21,6 +21,7 @@ mod mediatek_csi;
 mod qualcomm_csi;
 mod realtek_radar;
 mod path_safety;
+mod links;
 pub mod pose;
 pub mod pose_physics;
 mod rvf_container;
@@ -318,6 +319,29 @@ struct Esp32Frame {
     /// while the node had a valid IEEE 802.15.4 mesh-time solution.
     adr018_flags: wifi_densepose_hardware::Adr018Flags,
     amplitudes: Vec<f64>,
+    /// 802.11 sequence control of the overheard frame — wire v3
+    /// (`CSI_MAGIC_V3`) only; `None` from v1/v2 firmware.
+    ///
+    /// This is the join key for cross-node fusion. `sequence` above is a
+    /// counter private to each node, so two nodes that captured the same
+    /// packet report unrelated values and nothing links them. `rx_seq` is
+    /// assigned by the transmitter, so every receiver of one transmission
+    /// reports the same number: `(source_mac, rx_seq)` names that
+    /// transmission fleet-wide with no coordination between receivers.
+    ///
+    /// Carries the raw 16-bit field. The low 4 bits are the fragment number;
+    /// mask to 12 bits (`>> 4`) for sequence-only semantics.
+    rx_seq: Option<u16>,
+    /// Transmitter (addr2) of the frame this CSI was sampled from — wire v2
+    /// (`CSI_MAGIC_V2`) only; `None` from v1 firmware.
+    ///
+    /// Without this the server cannot tell which link a frame describes. A
+    /// node in promiscuous MGMT+DATA mode with no `filter_mac` captures the
+    /// AP, its peer nodes, and unrelated household traffic into one
+    /// unlabelled sequence — measured 2026-08-28 at roughly 75% non-AP on a
+    /// normal home channel. Interleaving links with different geometry
+    /// corrupts any temporal statistic built from `frame_history`.
+    source_mac: Option<[u8; 6]>,
     phases: Vec<f64>,
 }
 
@@ -1789,6 +1813,20 @@ struct AppStateInner {
     room_debounced_level: String,
     room_debounce_candidate: String,
     room_debounce_since: Option<std::time::Instant>,
+    link_table: links::LinkTable,
+    /// WiFi STA MAC of each node, as reported by the node itself in its sync
+    /// packet (proto v2+).
+    ///
+    /// Replaces a hearing-set heuristic that inferred "a MAC heard by every
+    /// receiver except one belongs to that one". That signature only exists
+    /// while every node hears every other. MEASURED with nine nodes placed
+    /// through a house: it attributed 0 of 32 links and reported every peer
+    /// link as infrastructure, because a node three rooms away is missing from
+    /// far more than one hearing set.
+    ///
+    /// Keyed MAC -> node, so attribution is a lookup on the transmitter address
+    /// the CSI frame already carries rather than an inference about it.
+    node_macs: HashMap<[u8; 6], u8>,
     // ── Accuracy sprint: Kalman tracker, multistatic fusion, eigenvalue counting ──
     /// Global Kalman-based pose tracker for stable person IDs and smoothed keypoints.
     pose_tracker: PoseTracker,
@@ -2347,6 +2385,8 @@ impl AppStateInner {
             room_debounced_level: "absent".to_string(),
             room_debounce_candidate: "absent".to_string(),
             room_debounce_since: None,
+            link_table: links::LinkTable::new(),
+            node_macs: HashMap::new(),
             pose_tracker: PoseTracker::new(),
             last_tracker_instant: None,
             multistatic_fuser: MultistaticFuser::new(),
@@ -2826,15 +2866,56 @@ mod issue_928_magic_collision_tests {
 
 // ── ESP32 UDP frame parser ───────────────────────────────────────────────────
 
+/// Wire v1 CSI frame magic — 20-byte header, no transmitter identity.
+const CSI_MAGIC_V1: u32 = 0xC511_0001;
+/// Wire v2 CSI frame magic — v1 header plus a 6-byte transmitter MAC.
+///
+/// `0xC511_0002`..`0xC511_0007` were already taken by the vitals, feature and
+/// other edge packets (see `issue_928_magic_collision_tests` for why that
+/// matters), so v2 claims the next free value rather than an adjacent one.
+const CSI_MAGIC_V2: u32 = 0xC511_0008;
+/// Wire v3 CSI frame magic — v2 plus the 802.11 `rx_seq` at bytes 26..27.
+///
+/// `0xC511_0009` is the per-slot vitals packet, so v3 takes the next free
+/// value. See `issue_928_magic_collision_tests` for why adjacency is not
+/// assumed.
+const CSI_MAGIC_V3: u32 = 0xC511_000A;
+/// v1 header length; also the I/Q offset for a v1 frame.
+const CSI_HEADER_V1: usize = 20;
+/// v2 header length: v1 plus `source_mac` at bytes 20..25.
+const CSI_HEADER_V2: usize = 26;
+/// v3 header length: v2 plus `rx_seq` (u16 LE) at bytes 26..27.
+const CSI_HEADER_V3: usize = 28;
+
 fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
-    if buf.len() < 20 {
+    if buf.len() < CSI_HEADER_V1 {
         return None;
     }
 
     let magic = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
-    if magic != 0xC511_0001 {
-        return None;
-    }
+    // Both versions are accepted so a mixed fleet keeps working: a node
+    // running older firmware simply reports no transmitter identity.
+    let (iq_start, source_mac, rx_seq) = match magic {
+        CSI_MAGIC_V1 => (CSI_HEADER_V1, None, None),
+        CSI_MAGIC_V2 => {
+            if buf.len() < CSI_HEADER_V2 {
+                return None;
+            }
+            let mut mac = [0u8; 6];
+            mac.copy_from_slice(&buf[20..26]);
+            (CSI_HEADER_V2, Some(mac), None)
+        }
+        CSI_MAGIC_V3 => {
+            if buf.len() < CSI_HEADER_V3 {
+                return None;
+            }
+            let mut mac = [0u8; 6];
+            mac.copy_from_slice(&buf[20..26]);
+            let seq = u16::from_le_bytes([buf[26], buf[27]]);
+            (CSI_HEADER_V3, Some(mac), Some(seq))
+        }
+        _ => return None,
+    };
 
     // Frame layout (must match firmware csi_collector.c):
     //   [0..3]   magic (u32 LE)
@@ -2869,7 +2950,6 @@ fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
     let ppdu_type = wifi_densepose_hardware::PpduType::from_byte(buf[18]);
     let adr018_flags = wifi_densepose_hardware::Adr018Flags::from_byte(buf[19]);
 
-    let iq_start = 20;
     let n_pairs = n_antennas as usize * n_subcarriers as usize;
     let expected_len = iq_start + n_pairs * 2;
 
@@ -2898,9 +2978,85 @@ fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
         noise_floor,
         ppdu_type,
         adr018_flags,
+        source_mac,
+        rx_seq,
         amplitudes,
         phases,
     })
+}
+
+#[cfg(test)]
+mod csi_wire_v2_v3_tests {
+    //! The v2 and v3 match arms must be REACHABLE.
+    //!
+    //! `parse_esp32_frame` dispatches on the magic with
+    //! `match magic { CSI_MAGIC_V1 => .., CSI_MAGIC_V2 => .., CSI_MAGIC_V3 => .. }`.
+    //! Those are constant patterns only while the constants are in scope. If
+    //! `CSI_MAGIC_V1` is ever removed or renamed, the arm silently degrades
+    //! into an irrefutable BINDING that matches every value, the v2 and v3 arms
+    //! become dead code, and `source_mac` is `None` for every frame -- so every
+    //! per-transmitter consumer sees an empty world. rustc reports this as an
+    //! `unreachable_pattern` warning, not an error, and a release build prints
+    //! no warnings at all.
+    //!
+    //! These tests fail loudly in that case.
+    use super::*;
+
+    fn build(magic: u32, header: usize, n_subcarriers: u16) -> Vec<u8> {
+        let mut buf = vec![0u8; header + n_subcarriers as usize * 2];
+        buf[0..4].copy_from_slice(&magic.to_le_bytes());
+        buf[4] = 7; // node_id
+        buf[5] = 1; // n_antennas
+        buf[6..8].copy_from_slice(&n_subcarriers.to_le_bytes());
+        buf[8..12].copy_from_slice(&5180u32.to_le_bytes());
+        buf[12..16].copy_from_slice(&42u32.to_le_bytes());
+        buf[16] = (-40i8) as u8; // rssi
+        buf[17] = (-90i8) as u8; // noise_floor
+        buf[18] = 0; // ppdu_type
+        buf[19] = 0x10;
+        if header >= CSI_HEADER_V2 {
+            buf[20..26].copy_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
+        }
+        if header >= CSI_HEADER_V3 {
+            buf[26..28].copy_from_slice(&0x1234u16.to_le_bytes());
+        }
+        buf
+    }
+
+    #[test]
+    fn v1_frame_carries_no_transmitter_identity() {
+        let f = parse_esp32_frame(&build(CSI_MAGIC_V1, CSI_HEADER_V1, 64)).unwrap();
+        assert_eq!(f.source_mac, None);
+        assert_eq!(f.n_subcarriers, 64);
+    }
+
+    #[test]
+    fn v2_frame_yields_the_transmitter_mac() {
+        let f = parse_esp32_frame(&build(CSI_MAGIC_V2, CSI_HEADER_V2, 64)).unwrap();
+        assert_eq!(
+            f.source_mac,
+            Some([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]),
+            "v2 arm unreachable -- is CSI_MAGIC_V1 still a constant in scope?"
+        );
+    }
+
+    #[test]
+    fn v3_frame_yields_mac_and_rx_seq() {
+        let f = parse_esp32_frame(&build(CSI_MAGIC_V3, CSI_HEADER_V3, 64)).unwrap();
+        assert_eq!(f.source_mac, Some([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]));
+        assert_eq!(
+            f.rx_seq,
+            Some(0x1234),
+            "v3 arm unreachable -- is CSI_MAGIC_V1 still a constant in scope?"
+        );
+    }
+
+    #[test]
+    fn an_unknown_magic_is_still_rejected() {
+        // The catch-all must stay reachable too: if the V1 arm degrades into a
+        // binding, this returns Some and the server accepts arbitrary traffic.
+        assert!(parse_esp32_frame(&build(0xDEAD_BEEF, CSI_HEADER_V1, 64)).is_none());
+    }
 }
 
 #[cfg(test)]
@@ -3888,7 +4044,9 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
             adr018_flags: wifi_densepose_hardware::Adr018Flags::default(),
             amplitudes: multi_ap_frame.amplitudes.clone(),
             phases: multi_ap_frame.phases.clone(),
-        };
+                    source_mac: None,
+            rx_seq: None,
+};
 
         // ── Step 4b: Update frame history and extract features ───────
         let mut s_write_pre = state.write().await;
@@ -4077,7 +4235,9 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         adr018_flags: wifi_densepose_hardware::Adr018Flags::default(),
         amplitudes: vec![signal_pct],
         phases: vec![0.0],
-    };
+            source_mac: None,
+        rx_seq: None,
+};
 
     let mut s = state.write().await;
     // Update frame history before extracting features.
@@ -4453,6 +4613,8 @@ fn generate_simulated_frame(tick: u64) -> Esp32Frame {
         adr018_flags: wifi_densepose_hardware::Adr018Flags::default(),
         amplitudes,
         phases,
+        source_mac: None,
+        rx_seq: None,
     }
 }
 
@@ -8526,6 +8688,172 @@ async fn mesh_endpoint(State(state): State<SharedState>) -> Json<serde_json::Val
     }))
 }
 
+
+///
+/// MEASURED 2026-09-01: a node's radio produces CSI for ~24 transmitters, the
+/// node forwards ~20 of them, and `/api/v1/links` renders 3. The difference is
+/// `LinkTable::metrics`, a `filter_map` that drops any link without a motion
+/// value — silently, with no error, counter or log. Every existing endpoint
+/// therefore agreed the other transmitters did not exist.
+///
+/// This reports the table's actual contents so illuminator selection is made
+/// from data rather than inference. It also surfaces `MAX_LINKS` headroom: the
+/// admission check drops new links silently once full, which would be the same
+/// class of invisible failure one layer up.
+async fn links_inventory_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    let now = std::time::Instant::now();
+    let inv = s.link_table.inventory(now);
+
+    let visible = inv.iter().filter(|r| r.visible).count();
+    let mut by_reason: std::collections::BTreeMap<&'static str, usize> =
+        std::collections::BTreeMap::new();
+    for r in &inv {
+        *by_reason.entry(r.reason).or_insert(0) += 1;
+    }
+    // Distinct transmitters across every receiver — the illuminator roster,
+    // as opposed to the link count, which counts each (rx, tx) pair.
+    let distinct_tx: std::collections::BTreeSet<[u8; 6]> =
+        inv.iter().map(|r| r.id.tx_mac).collect();
+
+    let rows: Vec<serde_json::Value> = inv
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "rx_node": r.id.rx_node,
+                "tx_mac": format!(
+                    "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                    r.id.tx_mac[0], r.id.tx_mac[1], r.id.tx_mac[2],
+                    r.id.tx_mac[3], r.id.tx_mac[4], r.id.tx_mac[5]
+                ),
+                // The locally-administered bit separates a virtual BSSID (an AP
+                // advertising several SSIDs) from a burned-in device address.
+                // Cheap, and it is the difference between "an access point" and
+                // "somebody's phone" without any vendor lookup.
+                "locally_administered": (r.id.tx_mac[0] & 0x02) != 0,
+                "frames": r.frames,
+                "rssi_dbm": r.rssi,
+                "history_len": r.history_len,
+                "widths": r.widths.iter()
+                    .map(|(w, c)| serde_json::json!({"subcarriers": w, "frames": c}))
+                    .collect::<Vec<_>>(),
+                "modal_width": r.modal_width,
+                "frames_at_modal": r.frames_at_modal,
+                "visible_in_links": r.visible,
+                "reason": r.reason,
+                "age_ms": r.age_ms,
+                "baseline_samples": r.baseline_samples,
+                "fps": r.fps,
+                "window_span_s": r.window_span_s,
+                "grid": r.grid,
+                "sparser_skipped": r.sparser_skipped,
+                "interval_s": r.interval_s,
+                "stale_after_s": r.stale_after_s,
+                "gap_resets": r.gap_resets,
+            })
+        })
+        .collect();
+
+    Json(serde_json::json!({
+        "links_total": inv.len(),
+        "links_visible": visible,
+        "links_hidden": inv.len() - visible,
+        "distinct_transmitters": distinct_tx.len(),
+        "max_links": links::MAX_LINKS,
+        "headroom": links::MAX_LINKS.saturating_sub(inv.len()),
+        "hidden_by_reason": by_reason,
+        "links": rows,
+        "note": "everything the link table holds; /api/v1/links shows only rows \
+                 with a computable motion metric"
+    }))
+}
+
+
+async fn links_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+
+    // Attribute each link's transmitter. A node that reports its own MAC in
+    // its sync packet (proto v2+) is known outright; the old hearing-set
+    // inference is kept only as a fallback for a node still on older
+    // firmware, since it cannot work once boards are more than a room apart.
+    let metrics = s.link_table.metrics();
+    let (receivers, heard_by) = links::hearing_index(&metrics);
+
+    let rows: Vec<serde_json::Value> = metrics
+        .iter()
+        .map(|m| {
+            // Attribution by address when the transmitter is a node that has
+            // reported its own MAC. The hearing-set heuristic remains only for
+            // a fleet where nothing has reported one yet -- pre-v2 firmware --
+            // which is the sole case where a guess beats nothing.
+            let tx_node = if !s.node_macs.is_empty() {
+                s.node_macs.get(&m.id.tx_mac).copied()
+            } else {
+                links::infer_transmitting_node(&m.id.tx_mac, &receivers, &heard_by)
+            };
+            serde_json::json!({
+                "rx_node": m.id.rx_node,
+                "tx_mac": format!(
+                    "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                    m.id.tx_mac[0], m.id.tx_mac[1], m.id.tx_mac[2],
+                    m.id.tx_mac[3], m.id.tx_mac[4], m.id.tx_mac[5]
+                ),
+                // Inferred, never measured — see `infer_node` above.
+                "tx_node_inferred": tx_node,
+                "kind": if tx_node.is_some() { "node" } else { "infrastructure" },
+                "label": m.id.label(),
+                "frames": m.frames,
+                "rssi_dbm": m.rssi,
+                // Reported per frame by the chip. ESP-IDF exposes no AGC gain
+                // field, so this is the only observable that can betray a gain
+                // step -- without it a drop in amplitude is ambiguous between
+                // attenuation and the receiver down-rating itself.
+                "noise_floor_dbm": m.noise,
+                "snr_db": m.rssi - m.noise,
+                "raw_motion": m.raw_motion,
+                "motion": m.motion,
+                // Both metrics above are statistics over a fixed 64-frame
+                // window, so they mean nothing without the window they were
+                // taken over. A link whose delivery collapses while its peers
+                // surge produces a large apparent `motion` from transport
+                // contention alone — that pattern accounted for 56% of
+                // above-threshold bins on the 2026-08-28 overnight baseline,
+                // including the night's largest excursions, with the room
+                // empty. Report the window so a consumer can reject the
+                // comparison instead of believing it.
+                "window_span_s": m.window_span_s,
+                "fps": m.fps,
+            })
+        })
+        .collect();
+
+    // The link-line estimate, computed and reported *alongside* the live
+    // position rather than replacing it. It has never been scored against
+    // ground truth, so promoting it to the dot on the strength of it being
+    // newer would be exactly the overclaim this repository forbids. Reporting
+    // both here lets a labelled walk record them together and settle it with
+    // numbers.
+
+    Json(serde_json::json!({
+        "links": rows,
+        "count": rows.len(),
+        // A v1-only fleet carries no transmitter address, so the table stays
+        // empty. Say so explicitly rather than letting an empty list read as
+        // "no motion anywhere".
+        "wire_v2_active": !rows.is_empty(),
+    }))
+}
+
+/// Build link-line observations from the current link table and solve for a
+/// position. `null` whenever the geometry or the data cannot support one — a
+/// missing node position, an unconfigured AP, too few usable links, or a
+/// baseline that has not converged.
+///
+/// Only links whose *both* endpoints have known coordinates can contribute. A
+/// link to an unidentified transmitter (a neighbour's router, a phone) is real
+/// signal but its geometry is unknown, so including it would inject an
+/// arbitrary line into the solve.
+
 async fn nodes_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
     let now = std::time::Instant::now();
@@ -9101,6 +9429,12 @@ async fn udp_receiver_task(
                                        sync.local_minus_epoch_us());
                                 let mut s = state.write().await;
                                 let node_id = sync.node_id;
+                                // A node reporting its own address is ground
+                                // truth; record it so link attribution is a
+                                // lookup rather than a guess.
+                                if let Some(mac) = sync.node_mac {
+                                    s.node_macs.insert(mac, node_id);
+                                }
                                 let ns = s.node_states.entry(node_id)
                                     .or_insert_with(NodeState::new);
                                 ns.apply_sync_packet(sync, std::time::Instant::now());
@@ -9203,6 +9537,35 @@ async fn udp_receiver_task(
                         &frame.amplitudes,
                         observed_at,
                     );
+
+
+                    // ---- Per-link accumulation, BEFORE the per-node gate ----
+                    //
+                    // MEASURED 2026-09-01: the gate below is keyed by NODE and
+                    // locks onto the densest grid that node has seen, which the
+                    // associated AP sets at 256-bin HE. Because it `continue`s,
+                    // every 64-bin HT frame -- essentially every OTHER
+                    // transmitter in the building -- was discarded before it
+                    // could become a link. A node's radio produced CSI for 24
+                    // transmitters and the server admitted 10, all our own.
+                    //
+                    // A link is (receiver, transmitter), so grid consistency is
+                    // a per-LINK property, not a per-node one, and `LinkTable`
+                    // enforces it there. Running this first leaves a frame the
+                    // node-level feature path cannot use still available to the
+                    // link path, which can. The gate itself is unchanged.
+                    if let Some(tx) = frame.source_mac {
+                        let now = std::time::Instant::now();
+                        s.link_table.observe(
+                            frame.node_id,
+                            tx,
+                            &frame.amplitudes,
+                            frame.rssi,
+                            frame.noise_floor,
+                            now,
+                        );
+                        s.link_table.expire(now);
+                    }
 
                     // ── ADR-110 / issue #1005: per-node subcarrier-grid gate ──
                     // ESP32-C6 nodes interleave HE-SU 256-bin frames (~84%)
@@ -11126,6 +11489,8 @@ async fn main() {
     let mut node_positions_config: Vec<[f32; 3]> = Vec::new();
     let state: SharedState = Arc::new(RwLock::new(AppStateInner {
         latest_update: None,
+        link_table: links::LinkTable::new(),
+        node_macs: HashMap::new(),
         rssi_history: VecDeque::new(),
         frame_history: VecDeque::new(),
         tick: 0,
@@ -11472,6 +11837,8 @@ async fn main() {
         .route("/api/v1/rf/vendors/:vendor/events", post(ingest_vendor_events))
         // Per-node health endpoint
         .route("/api/v1/nodes", get(nodes_endpoint))
+        .route("/api/v1/links", get(links_endpoint))
+        .route("/api/v1/links/inventory", get(links_inventory_endpoint))
         // ADR-110 iter 29 — per-node mesh sync state for HTTP clients.
         .route("/api/v1/nodes/:id/sync", get(node_sync_endpoint))
         .route("/api/v1/mesh", get(mesh_endpoint))
@@ -11864,6 +12231,9 @@ mod sync_snapshot_helper_tests {
             local_us: 28_798_450,
             epoch_us: 27_634_885,
             sequence: 20,
+            // proto v1 fixture: the v2 bytes are reserved-zero.
+            node_mac: None,
+            health: Default::default(),
         }
     }
 
