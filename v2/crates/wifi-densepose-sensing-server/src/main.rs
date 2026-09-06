@@ -486,6 +486,18 @@ struct NodeSyncSnapshot {
     /// How many CSI frames have contributed to `csi_fps_ema`. Clients can
     /// treat <5 as "not yet trustworthy" and fall back to 20 Hz.
     csi_fps_samples: u32,
+    /// Node health carried in the sync packet's formerly-reserved bytes.
+    /// These boards live on walls with no console, so this is the only path
+    /// by which a reboot cause or a thermal trip ever reaches an operator.
+    health: wifi_densepose_hardware::NodeHealth,
+    /// Human-readable form of `health.reset_reason`, so a dashboard does not
+    /// have to carry its own copy of the esp_reset_reason_t table. Owned
+    /// rather than borrowed because the snapshot is `Deserialize` and a
+    /// `&'static str` cannot round-trip through JSON.
+    reset_reason: String,
+    /// True when the last restart was a panic, watchdog or brownout —
+    /// the cases worth surfacing without being asked for.
+    rebooted_badly: bool,
     /// ADR-110 iter 34 — milliseconds since the host last received a sync
     /// packet from this node. Lets UI dashboards render sync-age decay
     /// (badge fades after 5 s, drops off after the 9 s mesh_aligned_us
@@ -1195,6 +1207,9 @@ impl NodeState {
             sequence: sync.sequence,
             csi_fps_ema: self.effective_sample_rate_hz(),
             csi_fps_samples: self.csi_fps_samples,
+            health: sync.health,
+            reset_reason: sync.health.reset_reason_name().to_string(),
+            rebooted_badly: sync.health.rebooted_badly(),
             staleness_ms: self.latest_sync_at.map(|t| t.elapsed().as_millis() as u64),
         })
     }
@@ -11780,6 +11795,9 @@ mod node_sync_snapshot_serialization_tests {
             sequence: 20,
             csi_fps_ema: 10.0,
             csi_fps_samples: 47,
+            health: wifi_densepose_hardware::NodeHealth::default(),
+            reset_reason: "unknown".to_string(),
+            rebooted_badly: false,
             staleness_ms: Some(120),
         }
     }
@@ -11854,7 +11872,7 @@ mod sync_snapshot_helper_tests {
     //! router or constructing a full AppStateInner.
 
     use super::*;
-    use wifi_densepose_hardware::{SyncPacket, SyncPacketFlags};
+    use wifi_densepose_hardware::{NodeHealth, SyncPacket, SyncPacketFlags};
 
     fn populated_sync(node_id: u8) -> SyncPacket {
         SyncPacket {
@@ -11864,6 +11882,9 @@ mod sync_snapshot_helper_tests {
             local_us: 28_798_450,
             epoch_us: 27_634_885,
             sequence: 20,
+            // proto v1 fixture: the v2 bytes are reserved-zero.
+            node_mac: None,
+            health: Default::default(),
         }
     }
 
@@ -12025,6 +12046,9 @@ mod sync_snapshot_helper_tests {
             NodeSyncSnapshot {
                 offset_us: 0, is_leader, is_valid: true, smoothed: true,
                 sequence: 0, csi_fps_ema: 10.0, csi_fps_samples: 10,
+                health: wifi_densepose_hardware::NodeHealth::default(),
+                reset_reason: "unknown".to_string(),
+                rebooted_badly: false,
                 staleness_ms: Some(0),
             }
         }
