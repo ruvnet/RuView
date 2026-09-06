@@ -1666,6 +1666,153 @@ pub(crate) fn save_runtime_config(data_dir: &std::path::Path, config: &RuntimeCo
     }
 }
 
+/// A single sensor node's position in room space, as placed via the Room
+/// Builder UI. `id` must match the node's provisioned `--node-id` on the
+/// physical board — it is not implied by array position, so nodes can be
+/// added/removed/reordered in the UI without breaking the id-to-position
+/// mapping (the same mapping issue #228/#249 was about).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct RoomNode {
+    pub id: u8,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+/// Room geometry (a simple rectangle) plus sensor node placements, as
+/// defined via the Room Builder UI (`POST /api/v1/config/room`).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct RoomConfig {
+    pub width_m: f32,
+    pub depth_m: f32,
+    pub nodes: Vec<RoomNode>,
+}
+
+/// Load persisted room config from `<data_dir>/room_config.json`.
+/// Falls back to [`RoomConfig::default`] (empty room, no nodes) if the file
+/// is absent or malformed.
+pub(crate) fn load_room_config(data_dir: &std::path::Path) -> RoomConfig {
+    let path = data_dir.join("room_config.json");
+    match std::fs::read_to_string(&path) {
+        Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
+        Err(_) => RoomConfig::default(),
+    }
+}
+
+/// Persist room config to `<data_dir>/room_config.json`.
+pub(crate) fn save_room_config(data_dir: &std::path::Path, config: &RoomConfig) {
+    let path = data_dir.join("room_config.json");
+    if let Ok(json) = serde_json::to_string_pretty(config) {
+        if let Err(e) = std::fs::write(&path, json) {
+            warn!("Failed to save room config to {}: {e}", path.display());
+        } else {
+            info!("Room config saved to {}", path.display());
+        }
+    }
+}
+
+#[cfg(test)]
+mod room_config_tests {
+    use super::*;
+
+    #[test]
+    fn load_missing_file_returns_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = load_room_config(dir.path());
+        assert_eq!(cfg.width_m, 0.0);
+        assert_eq!(cfg.depth_m, 0.0);
+        assert!(cfg.nodes.is_empty());
+    }
+
+    #[test]
+    fn load_malformed_file_falls_back_to_default() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("room_config.json"), "{ not valid json").unwrap();
+        let cfg = load_room_config(dir.path());
+        assert_eq!(cfg.width_m, 0.0);
+        assert!(cfg.nodes.is_empty());
+    }
+
+    #[test]
+    fn save_then_load_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let saved = RoomConfig {
+            width_m: 5.0,
+            depth_m: 4.0,
+            nodes: vec![
+                RoomNode { id: 0, x: 0.0, y: 0.0, z: 0.4, label: Some("front-right".into()) },
+                RoomNode { id: 1, x: 3.66, y: 0.0, z: 0.4, label: None },
+            ],
+        };
+        save_room_config(dir.path(), &saved);
+        let loaded = load_room_config(dir.path());
+        assert_eq!(loaded.width_m, 5.0);
+        assert_eq!(loaded.depth_m, 4.0);
+        assert_eq!(loaded.nodes.len(), 2);
+        assert_eq!(loaded.nodes[0].id, 0);
+        assert_eq!(loaded.nodes[0].label.as_deref(), Some("front-right"));
+        assert_eq!(loaded.nodes[1].label, None);
+    }
+
+    fn valid_config() -> RoomConfig {
+        RoomConfig {
+            width_m: 5.0,
+            depth_m: 4.0,
+            nodes: vec![
+                RoomNode { id: 0, x: 0.0, y: 0.0, z: 0.4, label: None },
+                RoomNode { id: 1, x: 3.66, y: 0.0, z: 0.4, label: None },
+            ],
+        }
+    }
+
+    #[test]
+    fn validate_accepts_a_sane_config() {
+        assert!(validate_room_config(&valid_config()).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_non_positive_width() {
+        let mut cfg = valid_config();
+        cfg.width_m = 0.0;
+        assert!(validate_room_config(&cfg).is_err());
+        cfg.width_m = -1.0;
+        assert!(validate_room_config(&cfg).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_non_finite_depth() {
+        let mut cfg = valid_config();
+        cfg.depth_m = f32::NAN;
+        assert!(validate_room_config(&cfg).is_err());
+        cfg.depth_m = f32::INFINITY;
+        assert!(validate_room_config(&cfg).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_duplicate_node_ids() {
+        let mut cfg = valid_config();
+        cfg.nodes[1].id = 0; // collide with nodes[0]
+        let err = validate_room_config(&cfg).unwrap_err();
+        assert!(err.contains("duplicate"), "unexpected error message: {err}");
+    }
+
+    #[test]
+    fn validate_rejects_non_finite_node_coordinate() {
+        let mut cfg = valid_config();
+        cfg.nodes[0].x = f32::NAN;
+        assert!(validate_room_config(&cfg).is_err());
+    }
+
+    #[test]
+    fn validate_allows_empty_node_list() {
+        let mut cfg = valid_config();
+        cfg.nodes.clear();
+        assert!(validate_room_config(&cfg).is_ok());
+    }
+}
+
 /// Shared application state
 struct AppStateInner {
     latest_update: Option<SensingUpdate>,
@@ -12194,6 +12341,103 @@ async fn config_set_dedup_factor(
     Json(serde_json::json!({
         "status": "ok",
         "dedup_factor": clamped,
+    }))
+}
+
+/// `GET /api/v1/config/room` — read the current room geometry + node
+/// positions. Reflects live in-memory state (`node_positions_config`), not
+/// just whatever was last saved to disk, so a fresh page load in the Room
+/// Builder UI shows what the server is actually using right now.
+async fn config_get_room(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    let saved = load_room_config(&s.data_dir);
+    let nodes: Vec<RoomNode> = s
+        .node_positions_config
+        .iter()
+        .enumerate()
+        .map(|(idx, p)| {
+            // #1791 made node_positions_config a POSITIONAL Vec rather than a
+            // map keyed by node_id, so identity here is the list index. Kept
+            // consistent with that convention deliberately: the Room Builder
+            // must describe the same binding the fusion path actually uses,
+            // or the UI would show positions the server is not applying.
+            let id = idx as u8;
+            let label = saved
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
+                .and_then(|n| n.label.clone());
+            RoomNode {
+                id,
+                x: p[0],
+                y: p[1],
+                z: p[2],
+                label,
+            }
+        })
+        .collect();
+    Json(serde_json::json!({
+        "width_m": saved.width_m,
+        "depth_m": saved.depth_m,
+        "nodes": nodes,
+    }))
+}
+
+/// `POST /api/v1/config/room` — set room geometry + node positions from the
+/// Room Builder UI. Takes effect immediately (updates `node_positions_config`
+/// and the live `MultistaticFuser`, no restart needed) and persists to
+/// `<data_dir>/room_config.json` so it's picked up on the next launch too.
+///
+/// Body: a full `RoomConfig` (`{ "width_m", "depth_m", "nodes": [...] }`).
+/// Validate a `RoomConfig` submitted via `POST /api/v1/config/room`. Pure
+/// and side-effect-free so it's directly unit-testable without standing up
+/// a full `SharedState`/axum test harness.
+pub(crate) fn validate_room_config(config: &RoomConfig) -> Result<(), String> {
+    if !config.width_m.is_finite() || config.width_m <= 0.0 {
+        return Err("width_m must be a positive, finite number".to_string());
+    }
+    if !config.depth_m.is_finite() || config.depth_m <= 0.0 {
+        return Err("depth_m must be a positive, finite number".to_string());
+    }
+    let mut seen = std::collections::HashSet::new();
+    for n in &config.nodes {
+        if !seen.insert(n.id) {
+            return Err(format!("duplicate node id {}", n.id));
+        }
+        if !n.x.is_finite() || !n.y.is_finite() || !n.z.is_finite() {
+            return Err(format!("node {} has a non-finite coordinate", n.id));
+        }
+    }
+    Ok(())
+}
+
+async fn config_set_room(
+    State(state): State<SharedState>,
+    Json(config): Json<RoomConfig>,
+) -> Json<serde_json::Value> {
+    if let Err(e) = validate_room_config(&config) {
+        return Json(serde_json::json!({"error": e}));
+    }
+
+    let mut s = state.write().await;
+    // Indexed by node id so a sparse or non-contiguous set of ids still lands
+    // each node at the right slot; gaps stay at the origin rather than
+    // shifting every later node, which is what a plain push would do.
+    let max_id = config.nodes.iter().map(|n| n.id).max().unwrap_or(0);
+    let mut positions = vec![[0.0f32, 0.0, 0.0]; max_id as usize + 1];
+    for n in &config.nodes {
+        positions[n.id as usize] = [n.x, n.y, n.z];
+    }
+    s.node_positions_config = positions.clone();
+    s.multistatic_fuser.set_node_positions(positions);
+    let data_dir = s.data_dir.clone();
+    drop(s);
+    save_room_config(&data_dir, &config);
+    Json(serde_json::json!({
+        "status": "ok",
+        "width_m": config.width_m,
+        "depth_m": config.depth_m,
+        "nodes": config.nodes,
     }))
 }
 
