@@ -384,8 +384,8 @@ pip install -e .
 
 # Or via pip
 pip install wifi-densepose
-pip install wifi-densepose[gpu]   # GPU acceleration
-pip install wifi-densepose[all]   # All optional deps
+pip install 'wifi-densepose[gpu]'   # GPU acceleration
+pip install 'wifi-densepose[all]'   # All optional deps
 ```
 
 </details>

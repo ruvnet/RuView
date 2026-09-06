@@ -50,7 +50,7 @@ WiFi Routers → CSI Data → Signal Processing → Neural Network → Pose Esti
 pip install wifi-densepose
 
 # Install with optional dependencies
-pip install wifi-densepose[gpu,monitoring,deployment]
+pip install 'wifi-densepose[gpu,monitoring,deployment]'
 
 # Verify installation
 wifi-densepose --version
