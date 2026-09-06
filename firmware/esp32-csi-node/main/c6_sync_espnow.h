@@ -65,4 +65,6 @@ uint32_t c6_sync_espnow_rx_magic_match(void);
 
 #ifdef __cplusplus
 }
+uint32_t c6_sync_espnow_period_ms(void);
+
 #endif
