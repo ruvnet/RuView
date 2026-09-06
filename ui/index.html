@@ -37,6 +37,40 @@
             <button class="nav-tab" data-tab="applications" role="tab" aria-selected="false" aria-controls="applications">Applications</button>
             <button class="nav-tab" data-tab="sensing" role="tab" aria-selected="false" aria-controls="sensing">Sensing</button>
             <button class="nav-tab" data-tab="training" role="tab" aria-selected="false" aria-controls="training">Training</button>
+            <div class="nav-menu" id="toolsMenu">
+              <button class="nav-tab nav-menu-btn" id="toolsBtn" aria-haspopup="true"
+                      aria-expanded="false" aria-controls="toolsList">Tools &#9662;</button>
+              <div class="nav-menu-list" id="toolsList" role="menu" aria-labelledby="toolsBtn" hidden>
+                <span class="nav-menu-head">Field tests</span>
+                <a href="walk.html"   role="menuitem">Walk Test Runner<em>timed walk with ground-truth marks</em></a>
+                <a href="survey.html" role="menuitem">Tile Survey Runner<em>stand-on-each-tile fingerprinting</em></a>
+                <a href="mark.html"   role="menuitem">Room Marker<em>tag the current moment from a phone</em></a>
+                <span class="nav-menu-head">Diagnostics</span>
+                <a href="mesh.html"   role="menuitem">Mesh Matrix<em>who hears whom, and how well</em></a>
+                <a href="mesh3d.html" role="menuitem">RF Distance Map<em>link geometry, coordinate-free</em></a>
+                <a href="viz.html"    role="menuitem">3D Visualization<em>legacy pose view</em></a>
+                <a href="illuminators.html" role="menuitem">Illuminators<em>which transmitters light each node</em></a>
+                <a href="tapper.html" role="menuitem">Tapper<em>tap-to-timestamp ground truth</em></a>
+                <span class="nav-menu-head">Views</span>
+                <a href="world3d.html" role="menuitem">World 3D<em>rooms, nodes and links in space</em></a>
+                <a href="observatory.html" role="menuitem">Observatory<em>live signal observatory</em></a>
+                <a href="pose-fusion.html" role="menuitem">Pose Fusion<em>multi-node fused pose</em></a>
+              </div>
+            </div>
+        </nav>
+
+        <!-- Dashboard Tab -->
+        <section id="dashboard" class="tab-content active" role="tabpanel" aria-labelledby="dashboard">
+            <div class="hero-section">
+                <h2 data-i18n="dashboard.title">Revolutionary WiFi-Based Human Pose Detection</h2>
+                <p class="hero-description">
+                    AI can track your full-body movement through walls using just WiFi signals. 
+                    Researchers at Carnegie Mellon have trained a neural network to turn basic WiFi 
+                    signals into detailed wireframe models of human bodies.
+                </p>
+                
+                <!-- Error container -->
+                <div class="error-container" style="display: none;"></div>
             <a href="pose-fusion.html" class="nav-tab" style="text-decoration:none">Pose Fusion</a>
             <a href="observatory.html" class="nav-tab" style="text-decoration:none">Observatory</a>
         </nav>
@@ -516,6 +550,34 @@
     <div id="globalErrorToast" class="error-toast"></div>
 
     <!-- Load application scripts as modules -->
-    <script type="module" src="app.js"></script>
+    <script type="module" src="app.js">  (function () {
+    var wrap = document.getElementById('toolsMenu');
+    if (!wrap) return;
+    var btn = document.getElementById('toolsBtn');
+    var list = document.getElementById('toolsList');
+    function close() {
+      list.hidden = true;
+      btn.setAttribute('aria-expanded', 'false');
+      wrap.classList.remove('open');
+    }
+    function open() {
+      list.hidden = false;
+      btn.setAttribute('aria-expanded', 'true');
+      wrap.classList.add('open');
+    }
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      list.hidden ? open() : close();
+    });
+    // Clicking anywhere else closes it, including on touch where there is no
+    // pointer to move away.
+    document.addEventListener('click', function (e) {
+      if (!wrap.contains(e.target)) close();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') close();
+    });
+  })();
+</script>
 </body>
 </html>
