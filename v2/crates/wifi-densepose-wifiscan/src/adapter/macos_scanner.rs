@@ -24,8 +24,8 @@
 //!
 //! macOS only. Gated behind `#[cfg(target_os = "macos")]` at the module level.
 
-use std::process::Command;
-use std::time::Instant;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::domain::bssid::{BandType, BssidId, BssidObservation, RadioType};
 use crate::error::WifiScanError;
@@ -64,17 +64,43 @@ impl MacosCoreWlanScanner {
 
     /// Run the Swift helper and parse the output synchronously.
     ///
-    /// Returns one [`BssidObservation`] per BSSID seen in the scan.
+    /// Returns one [`BssidObservation`] for the connected link.
+    /// Helpers that fail to exit within five seconds are killed and reaped.
     pub fn scan_sync(&self) -> Result<Vec<BssidObservation>, WifiScanError> {
-        let output = Command::new(&self.helper_path)
+        let mut child = Command::new(&self.helper_path)
             .arg("--scan-once")
-            .output()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|e| {
                 WifiScanError::ProcessError(format!(
                     "failed to run mac_wifi helper ({}): {e}",
                     self.helper_path
                 ))
             })?;
+
+        // Older helpers ignore --scan-once and stream forever. Bound the
+        // wait so an outdated installation cannot hang capture or auto-detect.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                status => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(WifiScanError::ProcessError(match status {
+                        Err(e) => format!("failed to wait for mac_wifi: {e}"),
+                        _ => "mac_wifi --scan-once timed out; rebuild the Swift helper".into(),
+                    }));
+                }
+            }
+        }
+        let output = child.wait_with_output().map_err(|e| {
+            WifiScanError::ProcessError(format!("failed to read mac_wifi output: {e}"))
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -160,7 +186,8 @@ fn parse_json_line(line: &str, timestamp: Instant) -> Option<BssidObservation> {
 /// Resolve a BSSID string to a [`BssidId`].
 ///
 /// If the MAC is all-zeros (macOS redaction), generate a synthetic
-/// locally-administered MAC from `SHA-256(ssid:channel)`.
+/// locally-administered MAC from the SSID and channel. Abstain when the
+/// real BSSID is unavailable and the SSID is blank.
 fn resolve_bssid(bssid_str: &str, ssid: &str, channel: u8) -> Option<BssidId> {
     // Try parsing the real BSSID first.
     if let Ok(id) = BssidId::parse(bssid_str) {
@@ -170,7 +197,13 @@ fn resolve_bssid(bssid_str: &str, ssid: &str, channel: u8) -> Option<BssidId> {
         }
     }
 
-    // Generate synthetic BSSID: SHA-256(ssid:channel), take first 6 bytes,
+    // Without either identity, unrelated networks on the same channel would
+    // collapse to one synthetic BSSID. Do not emit an observation in that case.
+    if ssid.trim().is_empty() {
+        return None;
+    }
+
+    // Generate synthetic BSSID from SSID and channel, take first 6 bytes,
     // set locally-administered + unicast bits (byte 0: bit 1 set, bit 0 clear).
     Some(synthetic_bssid(ssid, channel))
 }
@@ -277,6 +310,32 @@ mod tests {
 "#;
 
     #[test]
+    fn helper_process_errors_are_reported() {
+        assert!(matches!(
+            MacosCoreWlanScanner::with_path("/usr/bin/false").scan_sync(),
+            Err(WifiScanError::ScanFailed { .. })
+        ));
+        assert!(matches!(
+            MacosCoreWlanScanner::with_path("/dev/null/mac_wifi").scan_sync(),
+            Err(WifiScanError::ProcessError(_))
+        ));
+    }
+
+    #[test]
+    fn legacy_helper_is_timed_out() {
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::temp_dir().join(format!("mac-wifi-timeout-{}", std::process::id()));
+        // exec preserves the helper PID, so killing it cannot orphan sleep.
+        std::fs::write(&path, "#!/bin/sh\nexec /bin/sleep 30\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let start = Instant::now();
+        let result = MacosCoreWlanScanner::with_path(path.to_string_lossy()).scan_sync();
+        std::fs::remove_file(path).unwrap();
+        assert!(matches!(result, Err(WifiScanError::ProcessError(ref e)) if e.contains("timed out")));
+        assert!(start.elapsed() < Duration::from_secs(15));
+    }
+
+    #[test]
     fn parse_valid_output() {
         let obs = parse_macos_scan_output(SAMPLE_OUTPUT).unwrap();
         assert_eq!(obs.len(), 3);
@@ -302,6 +361,29 @@ mod tests {
         assert_eq!(obs[2].bssid.0[0] & 0x02, 0x02);
         // Should have unicast bit (multicast cleared).
         assert_eq!(obs[2].bssid.0[0] & 0x01, 0x00);
+    }
+
+    #[test]
+    fn unavailable_bssid_without_ssid_abstains() {
+        for bssid in ["00:00:00:00:00:00", "", "invalid"] {
+            for ssid in ["", "   "] {
+                let output = format!(
+                    r#"{{"ssid":"{ssid}","bssid":"{bssid}","rssi":-65,"noise":-88,"channel":36}}"#
+                );
+                assert!(parse_macos_scan_output(&output).unwrap().is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn real_bssid_without_ssid_is_preserved() {
+        let output = r#"{"ssid":"","bssid":"aa:bb:cc:dd:ee:ff","rssi":-65,"noise":-88,"channel":36}"#;
+        let obs = parse_macos_scan_output(output).unwrap();
+        assert_eq!(obs.len(), 1);
+        assert_eq!(obs[0].bssid.to_string(), "aa:bb:cc:dd:ee:ff");
+        assert!(obs[0].ssid.is_empty());
+        assert_eq!(obs[0].rssi_dbm, -65.0);
+        assert_eq!(obs[0].channel, 36);
     }
 
     #[test]

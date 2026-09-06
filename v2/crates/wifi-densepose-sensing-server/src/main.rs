@@ -82,6 +82,7 @@ use rvf_pipeline::ProgressiveLoader;
 use vital_signs::{VitalSignDetector, VitalSigns};
 
 // ADR-022 Phase 3: Multi-BSSID pipeline integration
+#[cfg(not(target_os = "macos"))]
 use wifi_densepose_wifiscan::parse_netsh_output as parse_netsh_bssid_output;
 use wifi_densepose_wifiscan::{BssidRegistry, WindowsWifiPipeline};
 
@@ -3208,6 +3209,7 @@ fn trimmed_mean(buf: &VecDeque<f64>) -> f64 {
 // ── Windows WiFi RSSI collector ──────────────────────────────────────────────
 
 /// Parse `netsh wlan show interfaces` output for RSSI and signal quality
+#[cfg(not(target_os = "macos"))]
 fn parse_netsh_interfaces_output(output: &str) -> Option<(f64, f64, String)> {
     let mut rssi = None;
     let mut signal = None;
@@ -3240,7 +3242,7 @@ fn parse_netsh_interfaces_output(output: &str) -> Option<(f64, f64, String)> {
     }
 }
 
-async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
+async fn wifi_task(state: SharedState, tick_ms: u64) {
     let mut interval = tokio::time::interval(Duration::from_millis(tick_ms));
     let mut seq: u32 = 0;
 
@@ -3249,7 +3251,8 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
     let mut pipeline = WindowsWifiPipeline::new();
 
     info!(
-        "Windows WiFi multi-BSSID pipeline active (tick={}ms, max_bssids=32)",
+        "WiFi RSSI pipeline active (platform={}, tick={}ms, max_bssids=32)",
+        std::env::consts::OS,
         tick_ms
     );
 
@@ -3258,8 +3261,16 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
         seq += 1;
 
         // ── Step 1: Run multi-BSSID scan via spawn_blocking ──────────
-        // NetshBssidScanner is not Send, so we run `netsh` and parse
-        // the output inside a blocking closure.
+        // Keep platform subprocess calls off the async runtime workers.
+        #[cfg(target_os = "macos")]
+        let bssid_scan_result = tokio::task::spawn_blocking(|| {
+            wifi_densepose_wifiscan::adapter::MacosCoreWlanScanner::new()
+                .scan_sync()
+                .map_err(|e| e.to_string())
+        })
+        .await;
+
+        #[cfg(not(target_os = "macos"))]
         let bssid_scan_result = tokio::task::spawn_blocking(|| {
             let output = std::process::Command::new("netsh")
                 .args(["wlan", "show", "networks", "mode=bssid"])
@@ -3284,12 +3295,14 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
         let observations = match bssid_scan_result {
             Ok(Ok(obs)) if !obs.is_empty() => obs,
             Ok(Ok(_empty)) => {
-                debug!("Multi-BSSID scan returned 0 observations, falling back");
+                debug!("WiFi scan returned 0 observations");
+                #[cfg(not(target_os = "macos"))]
                 windows_wifi_fallback_tick(&state, seq).await;
                 continue;
             }
             Ok(Err(e)) => {
-                warn!("Multi-BSSID scan error: {e}, falling back");
+                warn!("WiFi scan error: {e}");
+                #[cfg(not(target_os = "macos"))]
                 windows_wifi_fallback_tick(&state, seq).await;
                 continue;
             }
@@ -3486,6 +3499,7 @@ async fn windows_wifi_task(state: SharedState, tick_ms: u64) {
 /// Fallback: single-RSSI collection via `netsh wlan show interfaces`.
 ///
 /// Used when the multi-BSSID scan fails or returns 0 observations.
+#[cfg(not(target_os = "macos"))]
 async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
     let output = match tokio::process::Command::new("netsh")
         .args(["wlan", "show", "interfaces"])
@@ -3637,8 +3651,21 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
     s.latest_update = Some(update);
 }
 
-/// Probe if Windows WiFi is connected
-async fn probe_windows_wifi() -> bool {
+/// Probe the platform WiFi source using the same helper as capture.
+#[cfg(target_os = "macos")]
+async fn probe_wifi() -> bool {
+    matches!(
+        tokio::task::spawn_blocking(|| {
+            wifi_densepose_wifiscan::adapter::MacosCoreWlanScanner::new().scan_sync()
+        })
+        .await,
+        Ok(Ok(observations)) if !observations.is_empty()
+    )
+}
+
+/// Probe if Windows WiFi is connected.
+#[cfg(not(target_os = "macos"))]
+async fn probe_wifi() -> bool {
     match tokio::process::Command::new("netsh")
         .args(["wlan", "show", "interfaces"])
         .output()
@@ -3700,7 +3727,7 @@ struct SourcePlan {
     bind_udp: bool,
     /// Run the simulated-data generator (serves poses until a real frame arrives).
     run_simulator: bool,
-    /// Run the Windows WiFi capture task.
+    /// Run the platform WiFi capture task.
     run_wifi: bool,
 }
 
@@ -9332,11 +9359,11 @@ async fn main() {
     let plan = if normalized == "auto" {
         info!("Auto-detecting data source (UDP :{} bound either way)...", args.udp_port);
         let esp32 = probe_esp32(args.udp_port).await;
-        let wifi = if esp32 { false } else { probe_windows_wifi().await };
+        let wifi = if esp32 { false } else { probe_wifi().await };
         if esp32 {
             info!("  ESP32 CSI detected on UDP :{}", args.udp_port);
         } else if wifi {
-            info!("  Windows WiFi detected");
+            info!("  WiFi detected ({})", std::env::consts::OS);
         } else {
             warn!(
                 "No real CSI source at boot — serving SIMULATED data (tagged as \
@@ -9785,7 +9812,7 @@ async fn main() {
         tokio::spawn(broadcast_tick_task(state.clone(), args.tick_ms));
     }
     if plan.run_wifi {
-        tokio::spawn(windows_wifi_task(state.clone(), args.tick_ms));
+        tokio::spawn(wifi_task(state.clone(), args.tick_ms));
     }
     if plan.run_simulator {
         tokio::spawn(simulated_data_task(state.clone(), args.tick_ms));
