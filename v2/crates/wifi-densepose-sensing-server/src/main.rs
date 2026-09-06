@@ -9,6 +9,7 @@
 //! Replaces both ws_server.py and the Python HTTP server.
 #![allow(dead_code)]
 
+mod phase_diag;
 mod adaptive_classifier;
 pub mod cli;
 pub mod csi;
@@ -98,6 +99,21 @@ struct Args {
     /// HTTP port for UI and REST API
     #[arg(long, default_value = "8080")]
     http_port: u16,
+
+    /// Write phase-channel diagnostics (CSV) to this directory. Records the
+    /// common-mode phase and STO slope of every raw CSI frame *before*
+    /// sanitization, plus bounded raw-I/Q capture windows, to determine
+    /// whether single-antenna ESP32 phase can carry Doppler at all. Off by
+    /// default; adds no work to the signal path when unset. Output is
+    /// CSI-derived — never commit it (`CLAUDE.md`).
+    #[arg(long, value_name = "DIR")]
+    phase_diagnostics: Option<PathBuf>,
+    /// Record every frame to the raw phase-diagnostics sink instead of the
+    /// default duty-cycled bursts (1.4 min in every 10). Needed for a
+    /// deliberate-motion test, which the duty cycle would mostly miss. Costs
+    /// ~275 MB/hour at 3 nodes — use it for a bounded, attended experiment.
+    #[arg(long, requires = "phase_diagnostics")]
+    phase_diagnostics_continuous: bool,
 
     /// WebSocket port for sensing stream
     #[arg(long, default_value = "8765")]
@@ -2825,6 +2841,14 @@ mod issue_928_magic_collision_tests {
 }
 
 // ── ESP32 UDP frame parser ───────────────────────────────────────────────────
+
+static PHASE_DIAG: std::sync::OnceLock<Option<std::sync::Arc<phase_diag::PhaseDiagnostics>>> =
+    std::sync::OnceLock::new();
+
+/// Borrow the diagnostic sink, if one was configured.
+fn phase_diagnostics() -> Option<&'static std::sync::Arc<phase_diag::PhaseDiagnostics>> {
+    PHASE_DIAG.get().and_then(|o| o.as_ref())
+}
 
 fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
     if buf.len() < 20 {
