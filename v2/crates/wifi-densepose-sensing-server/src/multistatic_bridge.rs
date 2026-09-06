@@ -46,9 +46,12 @@ static NORMALIZER: LazyLock<HardwareNormalizer> = LazyLock::new(HardwareNormaliz
 /// `last_frame_time`.
 pub fn node_frame_from_state(node_id: u8, ns: &NodeState) -> Option<MultiBandCsiFrame> {
     let last_time = ns.last_frame_time.as_ref()?;
-    let timestamp_us = ns
-        .mesh_aligned_us_for_latest_csi_frame()
-        .unwrap_or_else(|| host_arrival_timestamp_us(last_time));
+    // Host-arrival time only. Preferring each node's mesh-synced clock
+    // regressed badly when a node's ESP-NOW sync was unconverged or
+    // mid-re-election: timestamps flipped between corrected mesh time and raw
+    // boot-relative time, producing multi-hour spreads that blew the fuser's
+    // cross-node guard interval.
+    let timestamp_us = host_arrival_timestamp_us(last_time);
     node_frame_from_state_at(node_id, ns, timestamp_us)
 }
 
@@ -340,16 +343,40 @@ mod tests {
         ns.observe_accepted_csi_frame(frame_sequence, true, host_arrival);
     }
 
+    /// A single frame is timestamped by host arrival even when the node
+    /// reported a mesh time.
+    ///
+    /// This pins the opposite of what this test asserted before. A lone frame
+    /// offers nothing to validate its mesh timestamp against, and an
+    /// unconverged or mid-re-election node returns a mesh time that is briefly
+    /// wrong rather than absent -- so preferring it produced multi-hour spreads
+    /// that blew the fuser's cross-node guard interval.
+    ///
+    /// The cohort path (`node_frames_from_states`) still prefers mesh time,
+    /// because there it CAN be validated: the spread across the cohort is
+    /// checked against the guard interval first, and host arrival is the
+    /// fallback. See `mesh_time_allows_fusion_despite_udp_arrival_skew`.
     #[test]
-    fn mesh_timestamp_replaces_skewed_host_arrival_time() {
+    fn single_frame_is_timestamped_by_host_arrival_not_mesh_clock() {
         let mut history = VecDeque::new();
         history.push_back(vec![10.0, 20.0, 30.0]);
         let host_arrival = Instant::now();
         let mut ns = make_node_state(history, None, 0);
         mark_mesh_timed_frame(&mut ns, 1, 100, 101, 1_000_000, host_arrival);
 
-        let frame = node_frame_from_state(1, &ns).expect("mesh-timed frame");
-        assert_eq!(frame.timestamp_us, 1_050_000);
+        let frame = node_frame_from_state(1, &ns).expect("frame");
+        assert_ne!(
+            frame.timestamp_us, 1_050_000,
+            "must not adopt the node's unvalidated mesh timestamp"
+        );
+        assert_eq!(
+            frame.timestamp_us,
+            host_arrival
+                .checked_duration_since(*EPOCH)
+                .unwrap_or_default()
+                .as_micros() as u64,
+            "must be the host arrival instant"
+        );
     }
 
     #[test]
