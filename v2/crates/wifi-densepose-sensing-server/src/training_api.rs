@@ -230,6 +230,15 @@ pub struct TrainingStatus {
     pub patience_remaining: u32,
     pub eta_secs: Option<u64>,
     pub phase: String,
+    /// What data this run actually trained on: `"none"` (not yet determined),
+    /// `"recordings"` (the requested `dataset_ids` loaded successfully),
+    /// `"live_buffer"` (no `dataset_ids` were requested), or
+    /// `"live_buffer_fallback"` (recordings were requested but none loaded,
+    /// so the run silently substituted the live `frame_history` buffer).
+    /// The dashboard must surface `live_buffer_fallback` loudly — a run in
+    /// this state does NOT reflect the recordings the operator selected.
+    #[serde(default)]
+    pub data_source: String,
 }
 
 impl Default for TrainingStatus {
@@ -247,6 +256,7 @@ impl Default for TrainingStatus {
             patience_remaining: 0,
             eta_secs: None,
             phase: "idle".to_string(),
+            data_source: "none".to_string(),
         }
     }
 }
@@ -1041,9 +1051,29 @@ async fn run_training_job(
     }
 
     let mut frames = load_recording_frames(&dataset_ids).await;
-    if frames.is_empty() {
-        info!("No recordings found for dataset_ids; falling back to live frame_history");
+
+    // Determine what this run is actually training on, honestly. A run that
+    // requested specific recordings but silently trained on the live buffer
+    // instead (e.g. a stale/mistyped dataset_id, a deleted file) must not look
+    // identical to a real recordings-backed run in the status the dashboard reads.
+    let data_source = if !frames.is_empty() {
+        "recordings".to_string()
+    } else if !dataset_ids.is_empty() {
+        warn!(
+            "Requested {} recording(s) ({:?}) but none loaded; falling back to the live \
+             frame_history buffer. This run will NOT reflect the selected recordings.",
+            dataset_ids.len(),
+            dataset_ids
+        );
         frames = frames_from_history(&history_snapshot);
+        "live_buffer_fallback".to_string()
+    } else {
+        frames = frames_from_history(&history_snapshot);
+        "live_buffer".to_string()
+    };
+    {
+        let mut st = status.lock().unwrap();
+        st.data_source = data_source.clone();
     }
 
     if frames.len() < 10 {
@@ -1324,6 +1354,7 @@ async fn run_training_job(
                 patience_remaining,
                 eta_secs: Some(eta_secs),
                 phase: phase.to_string(),
+                data_source: data_source.clone(),
             };
         }
 
@@ -2394,6 +2425,80 @@ mod tests {
             frames.is_empty(),
             "path-traversal dataset_id must yield no frames"
         );
+    }
+
+    /// Regression guard: requesting recordings that don't resolve to any real
+    /// data must NOT look like a normal recordings-backed run. Before this fix,
+    /// `run_training_job` silently swapped in the live `frame_history` buffer
+    /// and the resulting status was indistinguishable from a real recordings
+    /// run — the operator had no way to tell their selection was ignored.
+    #[tokio::test]
+    async fn training_job_flags_live_buffer_fallback_when_recordings_missing() {
+        let history = synthetic_history(40, 56);
+        let (tx, _rx) = broadcast::channel::<String>(1024);
+        let status = Arc::new(Mutex::new(TrainingStatus::default()));
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        let config = TrainingConfig {
+            epochs: 2,
+            batch_size: 8,
+            warmup_epochs: 1,
+            early_stopping_patience: 10,
+            ..Default::default()
+        };
+
+        // dataset_ids that resolve to nothing on disk — this must be reported,
+        // not silently substituted.
+        let rvf = run_training_job(
+            status.clone(),
+            cancel,
+            tx,
+            config,
+            vec!["nonexistent-recording-id".to_string()],
+            history,
+            "supervised",
+        )
+        .await;
+        let _ = std::fs::remove_file(rvf.expect("fallback run still trains and exports"));
+
+        assert_eq!(
+            status.lock().unwrap().data_source,
+            "live_buffer_fallback",
+            "a run that requested missing recordings must be flagged as a live-buffer fallback"
+        );
+    }
+
+    /// A run that never requested any recordings (e.g. a quick live-buffer
+    /// sanity check) is a different, honest case and must not be confused with
+    /// the fallback above.
+    #[tokio::test]
+    async fn training_job_reports_live_buffer_when_no_recordings_requested() {
+        let history = synthetic_history(40, 56);
+        let (tx, _rx) = broadcast::channel::<String>(1024);
+        let status = Arc::new(Mutex::new(TrainingStatus::default()));
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        let config = TrainingConfig {
+            epochs: 2,
+            batch_size: 8,
+            warmup_epochs: 1,
+            early_stopping_patience: 10,
+            ..Default::default()
+        };
+
+        let rvf = run_training_job(
+            status.clone(),
+            cancel,
+            tx,
+            config,
+            Vec::new(),
+            history,
+            "supervised",
+        )
+        .await;
+        let _ = std::fs::remove_file(rvf.expect("run still trains and exports"));
+
+        assert_eq!(status.lock().unwrap().data_source, "live_buffer");
     }
 
     /// Exported model ids must be unique per call — a second-resolution
