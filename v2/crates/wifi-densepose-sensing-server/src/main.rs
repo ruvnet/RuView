@@ -10942,6 +10942,38 @@ async fn node_address(state: &SharedState, id: u8) -> Option<std::net::IpAddr> {
     state.read().await.node_states.get(&id).and_then(|ns| ns.last_src_ip)
 }
 
+/// Record where a node's packets came from, refusing sources that cannot be a
+/// node.
+///
+/// MEASURED 2026-09-09: five of nine nodes had their address replaced by
+/// 172.18.0.1 -- the sink container's own bridge gateway -- at some point
+/// during a 13 h uptime. Every management proxy for those nodes (config,
+/// firmware, and the on-node log) then failed, and nothing said why: the
+/// address had been correct at startup and rotted silently. A restart restored
+/// all nine, which is the tell that this is learned state going bad rather
+/// than a routing problem.
+///
+/// A CSI node sits on the LAN and reaches the sink through a published port.
+/// It can never legitimately appear to originate from the container's own
+/// gateway, so a bridge-range source is Docker's address, not a node's.
+/// Docker's default pool is 172.16.0.0/12.
+///
+/// The guard only refuses to OVERWRITE a known address, so a fleet genuinely
+/// deployed on that range still learns its nodes on first contact.
+fn record_node_src_ip(current: &mut Option<std::net::IpAddr>, observed: std::net::IpAddr) {
+    if observed.is_loopback() || observed.is_unspecified() {
+        return;
+    }
+    if let std::net::IpAddr::V4(v4) = observed {
+        let o = v4.octets();
+        let docker_pool = o[0] == 172 && (16..=31).contains(&o[1]);
+        if docker_pool && current.is_some_and(|c| c != observed) {
+            return;
+        }
+    }
+    *current = Some(observed);
+}
+
 /// Forward one request to a node and return its reply verbatim.
 ///
 /// The node's own status code and body are passed through rather than
@@ -12620,7 +12652,7 @@ async fn udp_receiver_task(
                     // ── Per-node state for edge vitals (issue #249) ──────
                     let node_id = vitals.node_id;
                     let ns = s.node_states.entry(node_id).or_insert_with(NodeState::new);
-                    ns.last_src_ip = Some(src.ip());
+                    record_node_src_ip(&mut ns.last_src_ip, src.ip());
                     let first_sensing_frame = ns.last_frame_time.is_none();
                     ns.last_frame_time = Some(std::time::Instant::now());
                     if first_sensing_frame && telemetry::curated_events_enabled() {
@@ -12889,7 +12921,7 @@ async fn udp_receiver_task(
                                 let src_ip = src.ip();
                                 let ns = s.node_states.entry(node_id)
                                     .or_insert_with(NodeState::new);
-                                ns.last_src_ip = Some(src_ip);
+                                record_node_src_ip(&mut ns.last_src_ip, src_ip);
                                 ns.apply_sync_packet(sync, std::time::Instant::now());
                                 continue;
                             }
@@ -13061,7 +13093,7 @@ async fn udp_receiver_task(
                     let adaptive_model_clone = s.adaptive_model.clone();
 
                     let ns = s.node_states.entry(node_id).or_insert_with(NodeState::new);
-                    ns.last_src_ip = Some(src.ip());
+                    record_node_src_ip(&mut ns.last_src_ip, src.ip());
                     // ADR-110 iter 19 — feed the per-node fps EMA from real
                     // CSI arrivals. The helper sets `last_frame_time` as a
                     // side effect, so the previous bare assignment is gone.
@@ -16204,6 +16236,62 @@ mod model_load_diagnostic_tests {
         let msg = diagnose_model_load_error(Path::new("weird.dat"), &data, "x");
         assert!(msg.contains("RVF binary container"), "{msg}");
         assert!(msg.contains("wifi-densepose-train"), "{msg}");
+    }
+}
+
+#[cfg(test)]
+mod node_src_ip_tests {
+    use super::record_node_src_ip;
+    use std::net::IpAddr;
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    // The exact failure seen on 2026-09-09: a node learned correctly at
+    // startup, then had its address replaced by the sink container's own
+    // bridge gateway. Every management call for that node failed afterwards,
+    // with nothing to say why, until the sink was restarted.
+    #[test]
+    fn gateway_does_not_clobber_a_learned_node_address() {
+        let mut addr = None;
+        record_node_src_ip(&mut addr, ip("192.168.1.112"));
+        assert_eq!(addr, Some(ip("192.168.1.112")));
+
+        record_node_src_ip(&mut addr, ip("172.18.0.1"));
+        assert_eq!(
+            addr,
+            Some(ip("192.168.1.112")),
+            "a bridge-range source must never overwrite a real node address"
+        );
+    }
+
+    // The guard refuses to REPLACE, never to learn, so a fleet genuinely
+    // deployed on that range is not made unreachable by it.
+    #[test]
+    fn a_node_on_the_bridge_range_is_still_learned_from_nothing() {
+        let mut addr = None;
+        record_node_src_ip(&mut addr, ip("172.18.0.5"));
+        assert_eq!(addr, Some(ip("172.18.0.5")));
+    }
+
+    #[test]
+    fn a_real_address_still_replaces_a_stale_one() {
+        let mut addr = Some(ip("192.168.1.112"));
+        record_node_src_ip(&mut addr, ip("192.168.1.150"));
+        assert_eq!(
+            addr,
+            Some(ip("192.168.1.150")),
+            "a node that moves on the LAN must still be followed"
+        );
+    }
+
+    #[test]
+    fn loopback_and_unspecified_are_never_recorded() {
+        let mut addr = Some(ip("192.168.1.112"));
+        record_node_src_ip(&mut addr, ip("127.0.0.1"));
+        record_node_src_ip(&mut addr, ip("0.0.0.0"));
+        assert_eq!(addr, Some(ip("192.168.1.112")));
     }
 }
 
