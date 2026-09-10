@@ -43,6 +43,9 @@ const { values: args } = parseArgs({
     'min-camera-frames': { type: 'string', default: '3' },
     'min-confidence':    { type: 'string', default: '0.5' },
     'clock-offset-ms':   { type: 'string', default: '0' },
+    'session-id':        { type: 'string' },
+    'room-id':           { type: 'string' },
+    'subject-id':        { type: 'string' },
     help:                { type: 'boolean', short: 'h', default: false },
   },
   strict: true,
@@ -63,6 +66,9 @@ Options:
   --min-camera-frames <n>   Minimum camera frames per window (default: 3)
   --min-confidence <f>      Minimum average confidence threshold (default: 0.5)
   --clock-offset-ms <ms>    Manual clock offset: added to camera timestamps (default: 0)
+  --session-id <id>         Stable capture-session label (default: CSI filename)
+  --room-id <id>            Optional room label for grouped validation
+  --subject-id <id>         Optional pseudonymous subject label
   --help, -h                Show this help
 `);
   process.exit(args.help ? 0 : 1);
@@ -184,15 +190,16 @@ function loadGroundTruth(filePath) {
   const raw = loadJsonl(filePath);
   const frames = [];
   for (const r of raw) {
-    // Skip non-detection frames (empty keypoints []) — they must not dilute window
-    // confidence; confidence stats are over actual detections only (#1007 Bug 2).
-    if (r.ts_ns == null || !r.keypoints || r.keypoints.length === 0) continue;
+    if (r.ts_ns == null || !Array.isArray(r.keypoints)) continue;
+    const nPersons = r.n_persons ?? (r.keypoints.length > 0 ? 1 : 0);
+    const hasKeypoints = r.keypoints.length > 0;
+    if ((nPersons > 0) !== hasKeypoints) continue;
     frames.push({
       tsMs: cameraTsToMs(r.ts_ns),
       keypoints: r.keypoints,
       confidence: r.confidence ?? 0,
       nVisible: r.n_visible ?? 0,
-      nPersons: r.n_persons ?? 1,
+      nPersons,
     });
   }
   // Sort by timestamp
@@ -272,7 +279,19 @@ function loadCsi(filePath) {
   // Bug 3 (#1007): keep only frames at the session's MODAL subcarrier count so windows
   // are homogeneous; never silently zero-pad/truncate the off-format frames the ESP32
   // emits (HT20/HT40/fragments). extractCsiMatrix then sees uniform-width frames.
-  return { rawCsi: filterToModalSubcarriers(rawCsi), features };
+  return { rawCsi: filterEachNodeToModalSubcarriers(rawCsi), features };
+}
+
+function filterEachNodeToModalSubcarriers(frames) {
+  const byNode = new Map();
+  for (const frame of frames) {
+    const key = frame.nodeId ?? 0;
+    if (!byNode.has(key)) byNode.set(key, []);
+    byNode.get(key).push(frame);
+  }
+  return Array.from(byNode.values())
+    .flatMap(filterToModalSubcarriers)
+    .sort((a, b) => a.tsMs - b.tsMs || (a.nodeId ?? 0) - (b.nodeId ?? 0));
 }
 
 /**
@@ -306,6 +325,19 @@ function groupIntoWindows(frames, windowSize) {
     windows.push(frames.slice(i, i + windowSize));
   }
   return windows;
+}
+
+/** Group independently per node so a temporal tensor never crosses links. */
+function groupEachNodeIntoWindows(frames, windowSize) {
+  const byNode = new Map();
+  for (const frame of frames) {
+    const key = frame.nodeId ?? 0;
+    if (!byNode.has(key)) byNode.set(key, []);
+    byNode.get(key).push(frame);
+  }
+  return Array.from(byNode.entries())
+    .sort(([a], [b]) => a - b)
+    .flatMap(([, nodeFrames]) => groupIntoWindows(nodeFrames, windowSize));
 }
 
 // ---------------------------------------------------------------------------
@@ -367,8 +399,7 @@ function averageKeypoints(cameraFrames) {
 
 /**
  * Extract CSI amplitude matrix from raw_csi window.
- * Fill is frame-major (matrix[f*nSc + s]), so shape is [windowFrames, subcarriers]
- * (#1007 Bug 4 — was mislabeled [subcarriers, windowFrames], transposing consumers).
+ * WiFlow consumes channel-major tensors, so shape is [subcarriers, windowFrames].
  */
 function extractCsiMatrix(window) {
   const nFrames = window.length;
@@ -380,21 +411,20 @@ function extractCsiMatrix(window) {
     if (frame.amplitude && frame.amplitude.length > 0) {
       // Already-extracted amplitudes from sensing_update — copy directly.
       const n = Math.min(nSc, frame.amplitude.length);
-      for (let s = 0; s < n; s++) matrix[f * nSc + s] = frame.amplitude[s];
+      for (let s = 0; s < n; s++) matrix[s * nFrames + f] = frame.amplitude[s];
     } else if (frame.iqHex) {
       const iq = parseIqHex(frame.iqHex);
       const amp = extractAmplitude(iq, nSc);
-      matrix.set(amp, f * nSc);
+      for (let s = 0; s < nSc; s++) matrix[s * nFrames + f] = amp[s];
     }
   }
 
-  return { data: Array.from(matrix), shape: [nFrames, nSc] };
+  return { data: Array.from(matrix), shape: [nSc, nFrames] };
 }
 
 /**
  * Extract feature matrix from feature-type window.
- * Fill is frame-major (matrix[f*dim + d]), so shape is [windowFrames, featureDim]
- * (#1007 Bug 4 — was mislabeled [featureDim, windowFrames]).
+ * WiFlow consumes channel-major tensors, so shape is [featureDim, windowFrames].
  */
 function extractFeatureMatrix(window) {
   const nFrames = window.length;
@@ -404,11 +434,11 @@ function extractFeatureMatrix(window) {
   for (let f = 0; f < nFrames; f++) {
     const feats = window[f].features || new Array(dim).fill(0);
     for (let d = 0; d < dim; d++) {
-      matrix[f * dim + d] = feats[d] || 0;
+      matrix[d * nFrames + f] = feats[d] || 0;
     }
   }
 
-  return { data: Array.from(matrix), shape: [nFrames, dim] };
+  return { data: Array.from(matrix), shape: [dim, nFrames] };
 }
 
 // ---------------------------------------------------------------------------
@@ -473,7 +503,7 @@ function align() {
   console.log();
 
   // Group CSI into windows
-  const windows = groupIntoWindows(csiSource, WINDOW_FRAMES);
+  const windows = groupEachNodeIntoWindows(csiSource, WINDOW_FRAMES);
   console.log(`Grouped into ${windows.length} CSI windows`);
 
   // Align
@@ -495,12 +525,24 @@ function align() {
 
     if (matched.length < MIN_CAMERA_FRAMES) continue;
 
-    // Check average confidence
-    const avgConf = matched.reduce((s, f) => s + (f.confidence || 0), 0) / matched.length;
-    if (avgConf < MIN_CONFIDENCE) continue;
+    // An explicit run of camera frames with n_persons=0 is a presence/count
+    // negative, not missing data. Pose confidence remains zero; the current
+    // pose-only trainer excludes these until a presence head consumes them.
+    const hasNegative = matched.some(f => f.nPersons === 0 && f.keypoints.length === 0);
+    const hasDetection = matched.some(f => f.nPersons > 0 && f.keypoints.length > 0);
+    if (hasNegative && hasDetection) continue;
+    const explicitNegative = hasNegative && !hasDetection;
+    const detections = matched.filter(f => f.keypoints.length > 0);
+    if (!explicitNegative && detections.length < MIN_CAMERA_FRAMES) continue;
 
-    // Average keypoints weighted by confidence
-    const { keypoints, avgConfidence } = averageKeypoints(matched);
+    const avgConf = explicitNegative
+      ? 0
+      : detections.reduce((s, f) => s + (f.confidence || 0), 0) / detections.length;
+    if (!explicitNegative && avgConf < MIN_CONFIDENCE) continue;
+
+    const { keypoints, avgConfidence } = explicitNegative
+      ? { keypoints: new Array(NUM_KEYPOINTS).fill(null).map(() => [0, 0]), avgConfidence: 0 }
+      : averageKeypoints(detections);
 
     // Extract CSI matrix
     const csiMatrix = useRawCsi
@@ -529,6 +571,11 @@ function align() {
     paired.push({
       csi: csiMatrix.data,
       csi_shape: csiMatrix.shape,
+      node_id: window[0].nodeId ?? 0,
+      session_id: args['session-id'] || path.basename(csiPath, '.csi.jsonl'),
+      room_id: args['room-id'] || null,
+      subject_id: args['subject-id'] || null,
+      presence: modeVal > 0,
       kp: keypoints,
       conf: Math.round(avgConfidence * 1000) / 1000,
       n_camera_frames: matched.length,
