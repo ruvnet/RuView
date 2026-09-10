@@ -137,6 +137,10 @@ static inline uint8_t edge_evidence_person_count(bool presence, uint8_t active_c
 #define EDGE_CALIB_FRAMES     1200  /**< Frames for adaptive calibration (~60s at 20 Hz). */
 #define EDGE_CALIB_SIGMA_MULT 3.0f  /**< Threshold = mean + 3*sigma of ambient. */
 
+#define EDGE_FLOOR_LEAK   1.000002f
+/* Presence threshold as a multiple of the tracked floor. */
+#define EDGE_FLOOR_MULT   4.0f
+
 /* ---- Fall detection ---- */
 #define EDGE_FALL_COOLDOWN_MS 5000  /**< Minimum ms between fall alerts (debounce). */
 #define EDGE_FALL_CONSEC_MIN  3     /**< Consecutive frames above threshold to trigger. */

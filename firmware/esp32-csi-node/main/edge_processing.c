@@ -392,6 +392,7 @@ static int64_t  s_fall_last_alert_us;  /**< Timestamp of last fall alert (deboun
 
 /** Adaptive calibration state. */
 static bool     s_calibrated;
+static float    s_floor;
 static float    s_calib_sum;
 static float    s_calib_sum_sq;
 static uint32_t s_calib_count;
@@ -533,33 +534,65 @@ static bool presence_flag_update(bool prev, float score, float threshold,
     return true;  /* Still within the hold window — keep asserting. */
 }
 
-/* ======================================================================
- * Adaptive Presence Calibration
- * ====================================================================== */
-
+/* Continuously track the quiet floor instead of calibrating once at boot.
+ *
+ * The old scheme averaged the first EDGE_CALIB_FRAMES frames and latched the
+ * result for the lifetime of the boot. That cannot be made to work: the node
+ * is calibrating in the seconds right after a human walked over and plugged it
+ * in, so the window is contaminated by construction -- and nobody can leave a
+ * room fast enough to fix it. Whatever the room looked like during that one
+ * minute became "normal" permanently, and a node commissioned during a busy
+ * afternoon stayed desensitised for weeks.
+ *
+ * A leaky minimum needs no clean room and no cooperation. It drops instantly
+ * to any new low, so it finds the quiet by itself whenever quiet next happens
+ * -- minutes after a bad start, not never. It rises only slowly, so a genuine
+ * change in the room (furniture moved, a fan installed) is eventually adopted
+ * while a person standing still for a while is not mistaken for the new floor.
+ *
+ * Measured support for the shape: on this fleet the room's true floor is about
+ * 14x below where the animals sit and the settling period after human activity
+ * runs a couple of hours. A tracker that only ever descends to real quiet, and
+ * climbs at well under a percent a minute, resolves that; an average over one
+ * arbitrary minute cannot.
+ */
 static void calibration_update(float motion)
 {
-    if (s_calibrated) return;
-
-    s_calib_sum += motion;
-    s_calib_sum_sq += motion * motion;
-    s_calib_count++;
-
-    if (s_calib_count >= EDGE_CALIB_FRAMES) {
-        float mean = s_calib_sum / (float)s_calib_count;
-        float var = (s_calib_sum_sq / (float)s_calib_count) - (mean * mean);
-        float sigma = (var > 0.0f) ? sqrtf(var) : 0.001f;
-
-        s_adaptive_threshold = mean + EDGE_CALIB_SIGMA_MULT * sigma;
-        if (s_adaptive_threshold < 0.01f) {
-            s_adaptive_threshold = 0.01f;
+    /* Warm-up: seed from the first frames so the floor starts somewhere
+     * plausible rather than at whatever the very first sample happened to be. */
+    if (!s_calibrated) {
+        s_calib_sum += motion;
+        s_calib_count++;
+        if (s_calib_count >= EDGE_CALIB_FRAMES) {
+            s_floor = s_calib_sum / (float)s_calib_count;
+            s_calibrated = true;
+            ESP_LOGI(TAG, "floor seeded at %.4f from %lu frames; tracking "
+                          "continuously from here (no clean-room assumption)",
+                     s_floor, (unsigned long)s_calib_count);
         }
+        return;
+    }
 
-        s_calibrated = true;
-        ESP_LOGI(TAG, "Adaptive calibration complete: mean=%.4f sigma=%.4f "
-                 "threshold=%.4f (from %lu frames)",
-                 mean, sigma, s_adaptive_threshold,
-                 (unsigned long)s_calib_count);
+    /* Descend immediately to any new low; climb slowly otherwise. */
+    if (motion < s_floor) {
+        s_floor = motion;
+    } else {
+        s_floor *= EDGE_FLOOR_LEAK;
+    }
+    if (s_floor < 1e-5f) {
+        s_floor = 1e-5f;
+    }
+
+    s_adaptive_threshold = s_floor * EDGE_FLOOR_MULT;
+    if (s_adaptive_threshold < 0.01f) {
+        s_adaptive_threshold = 0.01f;
+    }
+
+    /* Report occasionally: a floor that never descends means the room is never
+     * quiet, which is a siting problem rather than a firmware one. */
+    static uint32_t s_floor_log;
+    if ((++s_floor_log % 2000) == 0) {
+        ESP_LOGI(TAG, "floor %.4f threshold %.4f", s_floor, s_adaptive_threshold);
     }
 }
 
