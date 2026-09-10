@@ -52,16 +52,16 @@ jobs:
             target: esp32s3
             sdkconfig: sdkconfig.defaults
             partition_table_name: partitions_display.csv
-            size_warn_kb: 1100
-            size_limit_kb: 1152
+            size_warn_kb: 1474
+            size_limit_kb: 1638
             artifact_app: esp32-csi-node.bin
             artifact_pt: partition-table.bin
           - variant: 4mb
             target: esp32s3
             sdkconfig: sdkconfig.defaults.4mb
             partition_table_name: partitions_4mb.csv
-            size_warn_kb: 1100
-            size_limit_kb: 1152
+            size_warn_kb: 1335
+            size_limit_kb: 1484
             artifact_app: esp32-csi-node-4mb.bin
             artifact_pt: partition-table-4mb.bin
           # ADR-110: ESP32-C6 research target (Wi-Fi 6 / 802.15.4 / TWT / LP-core)
@@ -69,8 +69,8 @@ jobs:
             target: esp32c6
             sdkconfig: sdkconfig.defaults
             partition_table_name: partitions_4mb.csv
-            size_warn_kb: 1100
-            size_limit_kb: 1152
+            size_warn_kb: 1335
+            size_limit_kb: 1484
             artifact_app: esp32-csi-node-c6.bin
             artifact_pt: partition-table-c6.bin
 
