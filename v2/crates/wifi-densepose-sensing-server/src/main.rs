@@ -1234,6 +1234,16 @@ impl NodeState {
         self.mesh_aligned_us_for_csi_frame(self.latest_csi_sequence?)
     }
 
+    /// Record an edge-vitals observation as node liveness without granting it
+    /// raw-CSI authority. Edge DSP output can keep the node online for status
+    /// and UI publication, but only [`Self::observe_accepted_csi_frame`] may
+    /// refresh `latest_accepted_csi_at` for calibration and CSI health.
+    fn observe_edge_vitals_frame(&mut self, now: std::time::Instant) -> bool {
+        let first_sensing_frame = self.last_frame_time.is_none();
+        self.last_frame_time = Some(now);
+        first_sensing_frame
+    }
+
     /// ADR-110 iter 18 — update the per-node observed-fps EMA from a fresh
     /// CSI frame arrival. Call once per accepted CSI frame from
     /// `udp_receiver_task`. Uses `last_frame_time` as the previous-frame
@@ -6869,8 +6879,15 @@ mod bootstrap_vital_publication_tests {
     fn edge_vitals_liveness_cannot_authorize_raw_csi_calibration() {
         let now = std::time::Instant::now();
         let mut node = NodeState::new();
-        node.last_frame_time = Some(now);
+        assert!(node.observe_edge_vitals_frame(now));
+        assert_eq!(node.last_frame_time, Some(now));
+        assert_eq!(node.latest_accepted_csi_at, None);
         assert!(!calibration_source_has_fresh_csi(&node, now));
+
+        assert!(!node.observe_edge_vitals_frame(
+            now + std::time::Duration::from_millis(50)
+        ));
+        assert_eq!(node.latest_accepted_csi_at, None);
 
         node.observe_accepted_csi_frame(9, false, now);
         assert!(calibration_source_has_fresh_csi(&node, now));
@@ -8948,8 +8965,8 @@ async fn udp_receiver_task(
                     // ── Per-node state for edge vitals (issue #249) ──────
                     let node_id = vitals.node_id;
                     let ns = s.node_states.entry(node_id).or_insert_with(NodeState::new);
-                    let first_sensing_frame = ns.last_frame_time.is_none();
-                    ns.last_frame_time = Some(std::time::Instant::now());
+                    let first_sensing_frame =
+                        ns.observe_edge_vitals_frame(std::time::Instant::now());
                     if first_sensing_frame && telemetry::curated_events_enabled() {
                         info!(name: semconv::EVENT_RUVIEW_NODE_ONLINE, { "ruview.node.id" = node_id }, "node {node_id} online (edge vitals)");
                     }
