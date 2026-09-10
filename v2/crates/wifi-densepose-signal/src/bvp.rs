@@ -170,6 +170,122 @@ pub fn extract_bvp(
     })
 }
 
+/// Extract a *signed* Body Velocity Profile from temporal complex CSI data
+/// (amplitude and phase combined), preserving Doppler-shift direction.
+///
+/// [`extract_bvp`] takes a real-valued (amplitude-only) input and keeps only
+/// `.norm()` of the FFT output, then explicitly folds `doppler_freq.abs()`
+/// into the velocity bins. That's not a tunable shortcut — a real-valued
+/// signal's FFT magnitude is mathematically always symmetric about zero
+/// frequency (`|X(-f)| == |X(f)|` for real `x`), so no amount of
+/// post-processing on that path can recover direction. This function
+/// instead takes genuinely complex CSI (`amplitude * e^{jθ}`) and keeps the
+/// full complex spectrum, so positive and negative Doppler frequencies land
+/// in distinct, independently-valued velocity bins.
+///
+/// Complex CSI phase from a single-antenna commodity WiFi receiver is not
+/// usable raw — CFO/SFO/packet-detection timing offsets dominate it. Callers
+/// must sanitize phase (e.g. per-frame linear-detrend across subcarrier
+/// index) before building `csi_temporal`; this function does no sanitization
+/// itself and will faithfully report garbage direction from garbage phase.
+///
+/// `csi_temporal`: (num_samples × num_subcarriers) complex CSI matrix.
+pub fn extract_bvp_signed(
+    csi_temporal: &Array2<Complex64>,
+    sample_rate: f64,
+    config: &BvpConfig,
+) -> Result<BodyVelocityProfile, BvpError> {
+    let (n_samples, n_sc) = csi_temporal.dim();
+
+    if n_samples < config.window_size {
+        return Err(BvpError::InsufficientSamples {
+            needed: config.window_size,
+            got: n_samples,
+        });
+    }
+    if n_sc == 0 {
+        return Err(BvpError::NoSubcarriers);
+    }
+    if config.hop_size == 0 || config.window_size == 0 {
+        return Err(BvpError::InvalidConfig(
+            "window_size and hop_size must be > 0".into(),
+        ));
+    }
+
+    let wavelength = 2.998e8 / config.carrier_frequency;
+    let n_frames = (n_samples - config.window_size) / config.hop_size + 1;
+    // Full complex spectrum — unlike extract_bvp's one-sided
+    // `window_size / 2 + 1`, every bin here is independently meaningful
+    // because the input is complex, not real.
+    let n_fft_bins = config.window_size;
+
+    let window: Vec<f64> = if config.window_size == 1 {
+        vec![1.0]
+    } else {
+        (0..config.window_size)
+            .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f64 / (config.window_size - 1) as f64).cos()))
+            .collect()
+    };
+
+    let mut planner = FftPlanner::new();
+    let fft = planner.plan_fft_forward(config.window_size);
+
+    let mut aggregated: Array2<Complex64> = Array2::zeros((n_fft_bins, n_frames));
+
+    for sc in 0..n_sc {
+        let col: Vec<Complex64> = csi_temporal.column(sc).to_vec();
+        let mean: Complex64 =
+            col.iter().fold(Complex64::new(0.0, 0.0), |acc, &x| acc + x) / col.len() as f64;
+
+        for frame in 0..n_frames {
+            let start = frame * config.hop_size;
+            let mut buffer: Vec<Complex64> = col[start..start + config.window_size]
+                .iter()
+                .zip(window.iter())
+                .map(|(&s, &w)| (s - mean) * w)
+                .collect();
+
+            fft.process(&mut buffer);
+
+            for bin in 0..n_fft_bins {
+                aggregated[[bin, frame]] += buffer[bin];
+            }
+        }
+    }
+    aggregated.mapv_inplace(|c| c / n_sc as f64);
+
+    let freq_resolution = sample_rate / config.window_size as f64;
+    let velocity_resolution = config.max_velocity * 2.0 / config.n_velocity_bins as f64;
+
+    let velocity_bins: Vec<f64> = (0..config.n_velocity_bins)
+        .map(|i| -config.max_velocity + i as f64 * velocity_resolution)
+        .collect();
+
+    let mut bvp = Array2::zeros((config.n_velocity_bins, n_frames));
+
+    for (v_idx, &velocity) in velocity_bins.iter().enumerate() {
+        let doppler_freq = 2.0 * velocity / wavelength;
+        // Standard FFT bin convention for a signed frequency on a complex
+        // transform: bins 0..window_size/2 are non-negative frequencies,
+        // window_size/2..window_size are negative frequencies (wrapped) —
+        // `rem_euclid` performs that wrap for a negative `doppler_freq`.
+        let raw_bin = (doppler_freq / freq_resolution).round() as i64;
+        let fft_bin = raw_bin.rem_euclid(config.window_size as i64) as usize;
+
+        for frame in 0..n_frames {
+            bvp[[v_idx, frame]] = aggregated[[fft_bin, frame]].norm();
+        }
+    }
+
+    Ok(BodyVelocityProfile {
+        data: bvp,
+        velocity_bins,
+        n_time: n_frames,
+        time_resolution: config.hop_size as f64 / sample_rate,
+        velocity_resolution,
+    })
+}
+
 /// Errors from BVP extraction.
 #[derive(Debug, thiserror::Error)]
 pub enum BvpError {
@@ -401,5 +517,103 @@ mod tests {
 
         let bvp = extract_bvp(&csi, 100.0, &config).unwrap();
         assert!((bvp.time_resolution - 0.32).abs() < 1e-6); // 32/100
+    }
+
+    #[test]
+    fn extract_bvp_signed_dimensions() {
+        let n_samples = 500;
+        let n_sc = 6;
+        let csi = Array2::from_shape_fn((n_samples, n_sc), |(t, _)| {
+            Complex64::new((t as f64 * 0.1).cos(), (t as f64 * 0.1).sin())
+        });
+        let config = BvpConfig {
+            window_size: 128,
+            hop_size: 32,
+            n_velocity_bins: 64,
+            ..Default::default()
+        };
+        let bvp = extract_bvp_signed(&csi, 100.0, &config).unwrap();
+        assert_eq!(bvp.data.dim().0, 64);
+        assert_eq!(bvp.n_time, (500 - 128) / 32 + 1);
+        assert_eq!(bvp.velocity_bins.len(), 64);
+    }
+
+    #[test]
+    fn extract_bvp_signed_insufficient_samples() {
+        let csi = Array2::from_elem((10, 5), Complex64::new(1.0, 0.0));
+        let config = BvpConfig {
+            window_size: 128,
+            ..Default::default()
+        };
+        assert!(matches!(
+            extract_bvp_signed(&csi, 100.0, &config),
+            Err(BvpError::InsufficientSamples { .. })
+        ));
+    }
+
+    #[test]
+    fn extract_bvp_signed_preserves_doppler_direction() {
+        // A complex tone rotating at a single positive Doppler frequency is
+        // a synthetic stand-in for a target moving toward the receiver at a
+        // known radial velocity. Unlike `extract_bvp` (real-valued input,
+        // magnitude-folded output — see its own doc comment for why that's
+        // structurally symmetric), this must land energy at the CORRECT
+        // SIGNED velocity bin, not split evenly between +v and -v.
+        let config = BvpConfig {
+            window_size: 128,
+            hop_size: 32,
+            n_velocity_bins: 64,
+            max_velocity: 2.0,
+            carrier_frequency: 2.4e9,
+            ..Default::default()
+        };
+        let wavelength = 2.998e8 / config.carrier_frequency;
+        let target_velocity = 1.0_f64;
+        let doppler_freq = 2.0 * target_velocity / wavelength;
+        let sample_rate = 100.0_f64;
+        let n_samples = 500;
+        let n_sc = 6;
+
+        let csi = Array2::from_shape_fn((n_samples, n_sc), |(t, _)| {
+            let phase = 2.0 * PI * doppler_freq * t as f64 / sample_rate;
+            Complex64::new(phase.cos(), phase.sin())
+        });
+
+        let bvp = extract_bvp_signed(&csi, sample_rate, &config).unwrap();
+        let last_col = bvp.data.column(bvp.n_time - 1);
+
+        let (peak_idx, &peak_energy) = last_col
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .unwrap();
+        let peak_velocity = bvp.velocity_bins[peak_idx];
+
+        assert!(
+            (peak_velocity - target_velocity).abs() < bvp.velocity_resolution * 2.0,
+            "peak should land near the true signed velocity {target_velocity}, \
+             got {peak_velocity} (bin {peak_idx})"
+        );
+
+        let mirror_idx = bvp
+            .velocity_bins
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| {
+                (**a - (-target_velocity))
+                    .abs()
+                    .partial_cmp(&(**b - (-target_velocity)).abs())
+                    .unwrap()
+            })
+            .map(|(i, _)| i)
+            .unwrap();
+        let mirror_energy = last_col[mirror_idx];
+
+        assert!(
+            peak_energy > mirror_energy * 5.0,
+            "signed BVP must not split energy evenly between +v and -v \
+             (peak={peak_energy} at {peak_velocity}, mirror={mirror_energy} at {})",
+            bvp.velocity_bins[mirror_idx]
+        );
     }
 }
