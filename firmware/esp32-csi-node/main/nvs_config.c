@@ -192,6 +192,19 @@ void nvs_config_load(nvs_config_t *cfg)
         }
     }
 
+    uint16_t beacon_ms_val;
+    if (nvs_get_u16(handle, "beacon_ms", &beacon_ms_val) == ESP_OK) {
+        if (beacon_ms_val == 0 || (beacon_ms_val >= 20 && beacon_ms_val <= 2000)) {
+            cfg->beacon_period_ms = beacon_ms_val;
+            ESP_LOGI(TAG, "NVS override: beacon_period_ms=%u%s",
+                     (unsigned)cfg->beacon_period_ms,
+                     cfg->beacon_period_ms == 0 ? " (derive from fleet size)" : "");
+        } else {
+            ESP_LOGW(TAG, "NVS beacon_ms=%u out of range [20,2000], ignored",
+                     (unsigned)beacon_ms_val);
+        }
+    }
+
     /* ADR-039: Edge intelligence overrides. */
     uint8_t edge_tier_val;
     if (nvs_get_u8(handle, "edge_tier", &edge_tier_val) == ESP_OK) {
