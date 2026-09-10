@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Walk Test Runner</title>
+<!--
+  Ground-truth walk for the link-line position estimator (ADR-345 / rti.rs).
+
+  Supersedes the per-sensor approach protocol, which was built for a different
+  hypothesis and had a flaw worth remembering: it asked the walker to stand
+  still while the instrument measured temporal variance of amplitude. A
+  motionless person contributes nothing to that statistic, so the protocol made
+  the target invisible to the very metric it was testing. Every dwell here is
+  MOVE IN PLACE for exactly that reason.
+
+  Positions are given as two tape pulls from the window wall (the wall carrying
+  nodes 0 and 1), so no coordinate origin ever has to be found on the floor.
+
+  Two independent records are produced, because losing ground truth means
+  re-walking the whole thing:
+    1. /api/v1/diag/mark/<label> on every transition — lands in the server's
+       phase_markers CSV, aligned to unix time via data/walktest/clock_offset.json.
+    2. An in-page event log with wall-clock timestamps, saveable as JSON.
+-->
+<style>
+  :root {
+    --bg: #0d1117; --fg: #e6edf3; --dim: #8b949e; --line: #30363d;
+    --go: #2ea043; --hold: #d29922; --done: #388bfd; --out: #db6d28;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg);
+         font: 15px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  h1 { font-size: 17px; margin: 0 0 4px; }
+  .sub { color: var(--dim); font-size: 12px; margin-bottom: 14px; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 14px;
+          margin-bottom: 12px; }
+  .big { font-size: 26px; font-weight: 700; margin: 6px 0; }
+  .huge { font-size: 52px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .go { color: var(--go); } .hold { color: var(--hold); }
+  .done { color: var(--done); } .outside { color: var(--out); }
+  .tape { font-size: 20px; margin: 10px 0; }
+  .tape b { font-size: 26px; }
+  button { font: inherit; padding: 12px 18px; border-radius: 7px; cursor: pointer;
+           border: 1px solid var(--line); background: #21262d; color: var(--fg);
+           margin: 4px 6px 4px 0; }
+  button.primary { background: var(--go); border-color: var(--go); color: #fff; font-weight: 700; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  td, th { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--dim); font-weight: 400; }
+  tr.current td { background: rgba(46,160,67,0.16); }
+  tr.finished td { opacity: 0.45; }
+  #log { max-height: 190px; overflow: auto; font-size: 11px; color: var(--dim);
+         white-space: pre-wrap; }
+  .note { color: var(--dim); font-size: 12px; margin-top: 8px; }
+  .warn { color: var(--hold); }
+</style>
+</head>
+<body>
+
+<h1>Walk Test — link-line position ground truth</h1>
+<div class="sub">
+  All distances measured from the <b>window wall</b> (nodes 0 and 1).
+  &ldquo;Along&rdquo; = slide along that wall starting at node&nbsp;0.
+  &ldquo;Out&rdquo; = straight out from the wall.
+</div>
+
+<div class="card">
+  <div id="phase" class="big">Ready</div>
+  <div id="countdown" class="huge">&mdash;</div>
+  <div id="tape" class="tape"></div>
+  <div id="instruction" class="note"></div>
+</div>
+
+<div class="card">
+  <button id="start" class="primary">Start walk</button>
+  <button id="skip" disabled>Skip to next</button>
+  <button id="abort" disabled>Abort</button>
+  <button id="save" disabled>Save ground truth JSON</button>
+  <div class="note">
+    Keep this page open and visible the whole run &mdash; the countdown pauses if the
+    browser suspends a hidden tab, and a paused countdown silently corrupts the
+    timing of every dwell after it.
+  </div>
+</div>
+
+<div class="card">
+  <table id="plan"><thead><tr>
+    <th>#</th><th>mark</th><th>along wall</th><th>out</th><th>region</th>
+  </tr></thead><tbody></tbody></table>
+</div>
+
+<div class="card">
+  <div class="sub" style="margin:0 0 6px">Event log</div>
+  <div id="log"></div>
+</div>
+
+<script>
+// ---- Protocol ------------------------------------------------------------
+
+// Dwell long enough for the link metric to fill its window several times over:
+// links.rs keeps 64 frames (~1.3-1.8 s at the sustained rate), so 40 s is
+// roughly 25 independent windows per point. Short dwells would hand the
+// analysis a variance estimate too noisy to separate positions with.
+var DWELL_S = 40;
+// Time to walk to the next mark and settle. Deliberately labelled and recorded
+// rather than trimmed away: the transit is the noisiest part of the run and the
+// analysis must be able to exclude it.
+var TRANSIT_S = 20;
+// A quiet reference between points, so drift in the per-link baseline over the
+// run is measurable instead of assumed absent.
+var SETTLE_S = 10;
+
+// Marks, in the order walked. `along` is inches along the window wall from
+// node 0 (negative = away from node 1); `out` is inches from that wall.
+// Computed against the measured room (176 in E-W on the north side, 160 in
+// N-S) with clearance from every wall. The south side's 188 in comes from a
+// 12 x 41 in alcove on the west wall, which only adds space and constrains
+// nothing here.
+var MARKS = [
+  { id: 'P1', along:  50, out:  60, region: 'inside - 5 ft off north' },
+  { id: 'P2', along:  51, out:  36, region: 'inside - 3 ft off north' },
+  { id: 'P3', along:  48, out: 120, region: 'inside - 10 ft off north' },
+  { id: 'P4', along: -24, out:  82, region: 'OUTSIDE triangle, west flank' },
+  { id: 'P5', along: 116, out:  99, region: 'OUTSIDE triangle, east flank' }
+];
+
+// Walk the set twice. One pass cannot distinguish a real position response
+// from a slow drift that happened to coincide with it; a second pass in the
+// same order lets the analysis check that each mark reproduces.
+var PASSES = 2;
+
+function inches(n) {
+  var neg = n < 0, a = Math.abs(n), f = Math.floor(a / 12), i = a - 12 * f;
+  return (neg ? '← ' : '') + f + "' " + i + '"';
+}
+
+// ---- State ---------------------------------------------------------------
+
+var steps = [];
+for (var p = 0; p < PASSES; p++) {
+  for (var m = 0; m < MARKS.length; m++) {
+    steps.push({ kind: 'transit', mark: MARKS[m], pass: p + 1, secs: TRANSIT_S });
+    steps.push({ kind: 'settle',  mark: MARKS[m], pass: p + 1, secs: SETTLE_S });
+    steps.push({ kind: 'dwell',   mark: MARKS[m], pass: p + 1, secs: DWELL_S });
+  }
+}
+
+var idx = -1, timer = null, remaining = 0, events = [], running = false;
+
+// ---- Recording -----------------------------------------------------------
+
+function mark(label) {
+  var at = Date.now();
+  events.push({ t_unix_ms: at, label: label });
+  logLine(new Date(at).toISOString().substr(11, 8) + '  ' + label);
+  // Best-effort: the in-page log above is the primary record, so a failed
+  // request must not interrupt the walk.
+  fetch('/api/v1/diag/mark/' + encodeURIComponent(label), { cache: 'no-store' })
+    .catch(function () { logLine('   (server mark failed, in-page log still good)'); });
+}
+
+function logLine(s) {
+  var el = document.getElementById('log');
+  el.textContent += s + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+
+// ---- Run loop ------------------------------------------------------------
+
+function render() {
+  var phase = document.getElementById('phase');
+  var cd = document.getElementById('countdown');
+  var tape = document.getElementById('tape');
+  var ins = document.getElementById('instruction');
+
+  if (idx < 0 || idx >= steps.length) {
+    phase.textContent = running ? 'Ready' : 'Walk complete';
+    phase.className = 'big done';
+    cd.textContent = '—';
+    tape.textContent = '';
+    ins.textContent = idx >= steps.length
+      ? 'Save the ground truth JSON, then tell Claude you are back.'
+      : '';
+    return;
+  }
+
+  var s = steps[idx];
+  cd.textContent = remaining;
+  var outside = s.mark.region.indexOf('OUTSIDE') === 0;
+
+  tape.innerHTML = 'Mark <b>' + s.mark.id + '</b> &mdash; along wall <b>' +
+    inches(s.mark.along) + '</b>, out <b>' + inches(s.mark.out) + '</b>' +
+    (outside ? ' <span class="outside">(outside triangle)</span>' : '');
+
+  if (s.kind === 'transit') {
+    phase.textContent = 'WALK to ' + s.mark.id + '  (pass ' + s.pass + ')';
+    phase.className = 'big hold';
+    ins.textContent = 'Move to the mark. This interval is recorded as transit and excluded from the analysis.';
+  } else if (s.kind === 'settle') {
+    phase.textContent = 'STAND STILL at ' + s.mark.id;
+    phase.className = 'big hold';
+    ins.textContent = 'Stand on the mark without moving. This is the quiet reference for this point.';
+  } else {
+    phase.textContent = 'MOVE IN PLACE at ' + s.mark.id;
+    phase.className = 'big go';
+    ins.innerHTML = 'Stay on the mark, but <b>keep moving</b> — shift weight, ' +
+      'swing your arms, step in place. <span class="warn">Standing still here ' +
+      'records nothing: the metric is variance over time.</span>';
+  }
+  paintPlan();
+}
+
+function paintPlan() {
+  var body = document.querySelector('#plan tbody');
+  body.innerHTML = '';
+  var cur = idx >= 0 && idx < steps.length ? steps[idx].mark.id : null;
+  var curPass = idx >= 0 && idx < steps.length ? steps[idx].pass : null;
+  for (var p = 1; p <= PASSES; p++) {
+    for (var i = 0; i < MARKS.length; i++) {
+      var m = MARKS[i], tr = document.createElement('tr');
+      if (m.id === cur && p === curPass) tr.className = 'current';
+      else if (curPass !== null && (p < curPass || (p === curPass && i < MARKS.indexOf(markById(cur))))) {
+        tr.className = 'finished';
+      }
+      tr.innerHTML = '<td>' + p + '.' + (i + 1) + '</td><td>' + m.id + '</td><td>' +
+        inches(m.along) + '</td><td>' + inches(m.out) + '</td><td>' + m.region + '</td>';
+      body.appendChild(tr);
+    }
+  }
+}
+
+function markById(id) {
+  for (var i = 0; i < MARKS.length; i++) if (MARKS[i].id === id) return MARKS[i];
+  return MARKS[0];
+}
+
+function tick() {
+  remaining--;
+  if (remaining <= 0) { next(); } else { render(); }
+}
+
+function next() {
+  idx++;
+  if (idx >= steps.length) {
+    stopTimer();
+    running = false;
+    mark('walk-end');
+    document.getElementById('save').disabled = false;
+    document.getElementById('skip').disabled = true;
+    document.getElementById('abort').disabled = true;
+    render();
+    return;
+  }
+  var s = steps[idx];
+  remaining = s.secs;
+  mark(s.kind + ':' + s.mark.id + ':pass' + s.pass +
+       ':along' + s.mark.along + ':out' + s.mark.out);
+  render();
+}
+
+function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }
+
+document.getElementById('start').onclick = function () {
+  if (running) return;
+  running = true;
+  events = [];
+  document.getElementById('start').disabled = true;
+  document.getElementById('skip').disabled = false;
+  document.getElementById('abort').disabled = false;
+  document.getElementById('save').disabled = true;
+  mark('walk-start');
+  idx = -1;
+  next();
+  stopTimer();
+  timer = setInterval(tick, 1000);
+};
+
+document.getElementById('skip').onclick = function () { if (running) next(); };
+
+document.getElementById('abort').onclick = function () {
+  stopTimer();
+  running = false;
+  mark('walk-abort');
+  document.getElementById('start').disabled = false;
+  document.getElementById('skip').disabled = true;
+  document.getElementById('abort').disabled = true;
+  document.getElementById('save').disabled = false;
+  idx = steps.length;
+  render();
+};
+
+document.getElementById('save').onclick = function () {
+  var blob = new Blob([JSON.stringify({
+    protocol: 'link-line ground truth walk',
+    reference_wall: 'window wall carrying nodes 0 and 1',
+    units: 'inches; along = from node 0 along the wall, negative = away from node 1',
+    dwell_s: DWELL_S, transit_s: TRANSIT_S, settle_s: SETTLE_S, passes: PASSES,
+    marks: MARKS,
+    events: events
+  }, null, 2)], { type: 'application/json' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'walk-truth-' + Date.now() + '.json';
+  a.click();
+};
+
+paintPlan();
+render();
+</script>
+</body>
+</html>
