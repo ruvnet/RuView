@@ -23,6 +23,10 @@ path = "src/main.rs"
 # Web framework
 axum = { workspace = true }
 tower-http = { version = "0.6", features = ["fs", "cors", "set-header"] }
+# Node management: the server proxies config and firmware requests to nodes so
+# the OTA pre-shared key stays server-side and never reaches a browser.
+# Same version and feature set as the other crates in this workspace.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { workspace = true, features = ["full", "process"] }
 futures-util = "0.3"
 ruvector-mincut = { workspace = true }

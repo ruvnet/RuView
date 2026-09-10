@@ -96,6 +96,16 @@ use wifi_densepose_signal::ruvsense::pose_tracker::PoseTracker;
 #[derive(Parser, Debug)]
 #[command(name = "sensing-server", about = "WiFi-DensePose sensing server")]
 struct Args {
+    /// Path to a file holding the fleet's OTA pre-shared key.
+    ///
+    /// Read once at startup and held in memory; never logged, never returned
+    /// by any endpoint, and never sent to a browser. The management UI talks
+    /// to this server, and this server talks to the nodes -- a PSK delivered
+    /// to a web page would be a PSK published. Without it, node management
+    /// endpoints fail closed and only read-only fleet views work.
+    #[arg(long)]
+    ota_psk_file: Option<PathBuf>,
+
     /// HTTP port for UI and REST API
     #[arg(long, default_value = "8080")]
     http_port: u16,
@@ -921,6 +931,15 @@ struct BoundingBox {
 /// Each ESP32 node gets its own frame history, smoothing buffers, and vital
 /// sign detector so that data from different nodes is never mixed.
 struct NodeState {
+    /// Source address of the most recent datagram from this node.
+    ///
+    /// Nothing else knows where a node lives. Nodes are configured with the
+    /// server's address and push to it, so the reverse mapping exists only in
+    /// the packets they send; without recording it, managing a node means
+    /// scanning the subnet for its HTTP port and asking each responder who it
+    /// is. Observed rather than configured, so it follows a node across DHCP
+    /// leases with no intervention.
+    pub(crate) last_src_ip: Option<std::net::IpAddr>,
     pub(crate) frame_history: VecDeque<Vec<f64>>,
     smoothed_person_score: f64,
     pub(crate) prev_person_count: usize,
@@ -1320,6 +1339,7 @@ impl NodeState {
 
     pub(crate) fn new() -> Self {
         Self {
+            last_src_ip: None,
             frame_history: VecDeque::new(),
             smoothed_person_score: 0.0,
             prev_person_count: 0,
@@ -8630,6 +8650,149 @@ async fn mesh_endpoint(State(state): State<SharedState>) -> Json<serde_json::Val
     }))
 }
 
+
+// ── Node management proxy ────────────────────────────────────────────────
+//
+// The browser must never hold the fleet's OTA pre-shared key: a secret
+// delivered to a web page is a secret published to anything that can read the
+// page or its traffic. So the UI talks to this server and this server talks to
+// the nodes, holding the key in memory and never returning it.
+//
+// See ADR-351: this relocates fleet authentication from the firmware's PSK
+// check to this server's web port, which is currently unauthenticated. That is
+// a known and accepted risk, not an oversight.
+
+/// Node HTTP port (firmware `OTA_PORT`, ota_update.c).
+const NODE_MGMT_PORT: u16 = 8032;
+
+/// Fleet OTA PSK, read once from `--ota-psk-file`. `None` means node
+/// management fails closed while read-only fleet views keep working.
+static NODE_PSK: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+fn node_http() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            // Nodes are slow to answer under a weak link -- a node at -84 dBm
+            // took over 20 s to serve a small JSON body. A short timeout here
+            // reports a healthy node as broken.
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap_or_default()
+    })
+}
+
+/// Resolve a node id to the address it last sent from.
+async fn node_address(state: &SharedState, id: u8) -> Option<std::net::IpAddr> {
+    state.read().await.node_states.get(&id).and_then(|ns| ns.last_src_ip)
+}
+
+/// Record where a node's packets came from, refusing sources that cannot be a
+/// node.
+///
+/// MEASURED 2026-09-09: five of nine nodes had their address replaced by
+/// 172.18.0.1 -- the sink container's own bridge gateway -- at some point
+/// during a 13 h uptime. Every management proxy for those nodes (config,
+/// firmware, and the on-node log) then failed, and nothing said why: the
+/// address had been correct at startup and rotted silently. A restart restored
+/// all nine, which is the tell that this is learned state going bad rather
+/// than a routing problem.
+///
+/// A CSI node sits on the LAN and reaches the sink through a published port.
+/// It can never legitimately appear to originate from the container's own
+/// gateway, so a bridge-range source is Docker's address, not a node's.
+/// Docker's default pool is 172.16.0.0/12.
+///
+/// The guard only refuses to OVERWRITE a known address, so a fleet genuinely
+/// deployed on that range still learns its nodes on first contact.
+fn record_node_src_ip(current: &mut Option<std::net::IpAddr>, observed: std::net::IpAddr) {
+    if observed.is_loopback() || observed.is_unspecified() {
+        return;
+    }
+    if let std::net::IpAddr::V4(v4) = observed {
+        let o = v4.octets();
+        let docker_pool = o[0] == 172 && (16..=31).contains(&o[1]);
+        if docker_pool && current.is_some_and(|c| c != observed) {
+            return;
+        }
+    }
+    *current = Some(observed);
+}
+
+/// Forward one request to a node and return its reply verbatim.
+///
+/// The node's own status code and body are passed through rather than
+/// reinterpreted: when a node rejects a parameter it explains why, and
+/// rewriting that into a generic error would throw away the useful part.
+async fn node_proxy(
+    state: &SharedState,
+    id: u8,
+    path: &str,
+    body: Option<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let Some(psk) = NODE_PSK.get().and_then(|p| p.clone()) else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "node management disabled: server started without --ota-psk-file"
+            })),
+        );
+    };
+    let Some(ip) = node_address(state, id).await else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "error": format!("node {id} has not been heard from, so its address is unknown")
+            })),
+        );
+    };
+
+    let url = format!("http://{ip}:{NODE_MGMT_PORT}{path}");
+    let req = match &body {
+        Some(b) => node_http().post(&url).header("Content-Type", "application/json").body(b.clone()),
+        None => node_http().get(&url),
+    };
+
+    match req.bearer_auth(psk).send().await {
+        Ok(resp) => {
+            let code = StatusCode::from_u16(resp.status().as_u16())
+                .unwrap_or(StatusCode::BAD_GATEWAY);
+            let text = resp.text().await.unwrap_or_default();
+            let value = serde_json::from_str::<serde_json::Value>(&text)
+                .unwrap_or_else(|_| serde_json::json!({ "message": text }));
+            (code, Json(value))
+        }
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({
+                "error": format!("node {id} at {ip} did not answer: {e}")
+            })),
+        ),
+    }
+}
+
+async fn node_config_get(
+    State(state): State<SharedState>,
+    Path(id): Path<u8>,
+) -> impl IntoResponse {
+    node_proxy(&state, id, "/config", None).await
+}
+
+async fn node_config_post(
+    State(state): State<SharedState>,
+    Path(id): Path<u8>,
+    body: String,
+) -> impl IntoResponse {
+    node_proxy(&state, id, "/config", Some(body)).await
+}
+
+async fn node_firmware_get(
+    State(state): State<SharedState>,
+    Path(id): Path<u8>,
+) -> impl IntoResponse {
+    node_proxy(&state, id, "/ota/status", None).await
+}
+
 async fn nodes_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
     let now = std::time::Instant::now();
@@ -8664,6 +8827,7 @@ async fn nodes_endpoint(State(state): State<SharedState>) -> Json<serde_json::Va
             serde_json::json!({
                 "node_id": id,
                 "status": status,
+                "ip": ns.last_src_ip.map(|ip| ip.to_string()),
                 "last_seen_ms": elapsed_ms,
                 "csi_status": csi_status,
                 "csi_last_seen_ms": csi_elapsed_ms,
@@ -8948,6 +9112,7 @@ async fn udp_receiver_task(
                     // ── Per-node state for edge vitals (issue #249) ──────
                     let node_id = vitals.node_id;
                     let ns = s.node_states.entry(node_id).or_insert_with(NodeState::new);
+                    record_node_src_ip(&mut ns.last_src_ip, src.ip());
                     let first_sensing_frame = ns.last_frame_time.is_none();
                     ns.last_frame_time = Some(std::time::Instant::now());
                     if first_sensing_frame && telemetry::curated_events_enabled() {
@@ -9235,8 +9400,10 @@ async fn udp_receiver_task(
                                        sync.local_minus_epoch_us());
                                 let mut s = state.write().await;
                                 let node_id = sync.node_id;
+                                let src_ip = src.ip();
                                 let ns = s.node_states.entry(node_id)
                                     .or_insert_with(NodeState::new);
+                                record_node_src_ip(&mut ns.last_src_ip, src_ip);
                                 ns.apply_sync_packet(sync, std::time::Instant::now());
                                 continue;
                             }
@@ -9408,6 +9575,7 @@ async fn udp_receiver_task(
                     let adaptive_model_clone = s.adaptive_model.clone();
 
                     let ns = s.node_states.entry(node_id).or_insert_with(NodeState::new);
+                    record_node_src_ip(&mut ns.last_src_ip, src.ip());
                     // ADR-110 iter 19 — feed the per-node fps EMA from real
                     // CSI arrivals. The helper sets `last_frame_time` as a
                     // side effect, so the previous bare assignment is gone.
@@ -10977,6 +11145,33 @@ async fn main() {
     info!("  UI path:   {}", args.ui_path.display());
     info!("  Source:    {}", args.source);
 
+    // Fleet OTA key for node management. Read once, held in memory, never
+    // logged and never returned by any endpoint -- the UI reaches nodes only
+    // through this server, so a browser never needs it. Absent means node
+    // management fails closed; read-only fleet views are unaffected.
+    let node_psk = args.ota_psk_file.as_ref().and_then(|path| {
+        match std::fs::read_to_string(path) {
+            Ok(text) => {
+                let key = text.trim().to_string();
+                if key.is_empty() {
+                    warn!("--ota-psk-file {} is empty; node management disabled", path.display());
+                    None
+                } else {
+                    info!("node management enabled ({} byte key loaded)", key.len());
+                    Some(key)
+                }
+            }
+            Err(e) => {
+                warn!("could not read --ota-psk-file {}: {e}; node management disabled",
+                      path.display());
+                None
+            }
+        }
+    });
+    if node_psk.is_none() && args.ota_psk_file.is_none() {
+        info!("node management disabled (no --ota-psk-file); fleet views remain available");
+    }
+    let _ = NODE_PSK.set(node_psk);
     // Resolve the data source into a concrete task plan (issue #1004).
     //
     // Issue #937 (prior fix): `auto` must never serve fake CSI *tagged as
@@ -11622,6 +11817,9 @@ async fn main() {
         .route("/api/v1/rf/vendors/:vendor/events", post(ingest_vendor_events))
         // Per-node health endpoint
         .route("/api/v1/nodes", get(nodes_endpoint))
+        // Node management (ADR-351). The PSK stays server-side.
+        .route("/api/v1/nodes/:id/config", get(node_config_get).post(node_config_post))
+        .route("/api/v1/nodes/:id/firmware", get(node_firmware_get))
         // ADR-110 iter 29 — per-node mesh sync state for HTTP clients.
         .route("/api/v1/nodes/:id/sync", get(node_sync_endpoint))
         .route("/api/v1/mesh", get(mesh_endpoint))
@@ -12616,6 +12814,62 @@ mod model_load_diagnostic_tests {
         let msg = diagnose_model_load_error(Path::new("weird.dat"), &data, "x");
         assert!(msg.contains("RVF binary container"), "{msg}");
         assert!(msg.contains("wifi-densepose-train"), "{msg}");
+    }
+}
+
+#[cfg(test)]
+mod node_src_ip_tests {
+    use super::record_node_src_ip;
+    use std::net::IpAddr;
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    // The exact failure seen on 2026-09-09: a node learned correctly at
+    // startup, then had its address replaced by the sink container's own
+    // bridge gateway. Every management call for that node failed afterwards,
+    // with nothing to say why, until the sink was restarted.
+    #[test]
+    fn gateway_does_not_clobber_a_learned_node_address() {
+        let mut addr = None;
+        record_node_src_ip(&mut addr, ip("192.168.1.112"));
+        assert_eq!(addr, Some(ip("192.168.1.112")));
+
+        record_node_src_ip(&mut addr, ip("172.18.0.1"));
+        assert_eq!(
+            addr,
+            Some(ip("192.168.1.112")),
+            "a bridge-range source must never overwrite a real node address"
+        );
+    }
+
+    // The guard refuses to REPLACE, never to learn, so a fleet genuinely
+    // deployed on that range is not made unreachable by it.
+    #[test]
+    fn a_node_on_the_bridge_range_is_still_learned_from_nothing() {
+        let mut addr = None;
+        record_node_src_ip(&mut addr, ip("172.18.0.5"));
+        assert_eq!(addr, Some(ip("172.18.0.5")));
+    }
+
+    #[test]
+    fn a_real_address_still_replaces_a_stale_one() {
+        let mut addr = Some(ip("192.168.1.112"));
+        record_node_src_ip(&mut addr, ip("192.168.1.150"));
+        assert_eq!(
+            addr,
+            Some(ip("192.168.1.150")),
+            "a node that moves on the LAN must still be followed"
+        );
+    }
+
+    #[test]
+    fn loopback_and_unspecified_are_never_recorded() {
+        let mut addr = Some(ip("192.168.1.112"));
+        record_node_src_ip(&mut addr, ip("127.0.0.1"));
+        record_node_src_ip(&mut addr, ip("0.0.0.0"));
+        assert_eq!(addr, Some(ip("192.168.1.112")));
     }
 }
 
