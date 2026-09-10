@@ -21,6 +21,7 @@ mod mediatek_csi;
 mod qualcomm_csi;
 mod realtek_radar;
 mod path_safety;
+mod links;
 pub mod pose;
 pub mod pose_physics;
 mod rvf_container;
@@ -50,7 +51,7 @@ use wifi_densepose_sensing_server::provenance::SourceState;
 
 use ruvector_mincut::{DynamicMinCut, MinCutBuilder};
 use rand::{rngs::OsRng, RngCore};
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -319,6 +320,29 @@ struct Esp32Frame {
     /// while the node had a valid IEEE 802.15.4 mesh-time solution.
     adr018_flags: wifi_densepose_hardware::Adr018Flags,
     amplitudes: Vec<f64>,
+    /// 802.11 sequence control of the overheard frame — wire v3
+    /// (`CSI_MAGIC_V3`) only; `None` from v1/v2 firmware.
+    ///
+    /// This is the join key for cross-node fusion. `sequence` above is a
+    /// counter private to each node, so two nodes that captured the same
+    /// packet report unrelated values and nothing links them. `rx_seq` is
+    /// assigned by the transmitter, so every receiver of one transmission
+    /// reports the same number: `(source_mac, rx_seq)` names that
+    /// transmission fleet-wide with no coordination between receivers.
+    ///
+    /// Carries the raw 16-bit field. The low 4 bits are the fragment number;
+    /// mask to 12 bits (`>> 4`) for sequence-only semantics.
+    rx_seq: Option<u16>,
+    /// Transmitter (addr2) of the frame this CSI was sampled from — wire v2
+    /// (`CSI_MAGIC_V2`) only; `None` from v1 firmware.
+    ///
+    /// Without this the server cannot tell which link a frame describes. A
+    /// node in promiscuous MGMT+DATA mode with no `filter_mac` captures the
+    /// AP, its peer nodes, and unrelated household traffic into one
+    /// unlabelled sequence — measured 2026-08-28 at roughly 75% non-AP on a
+    /// normal home channel. Interleaving links with different geometry
+    /// corrupts any temporal statistic built from `frame_history`.
+    source_mac: Option<[u8; 6]>,
     phases: Vec<f64>,
 }
 
@@ -1744,6 +1768,801 @@ pub(crate) fn save_runtime_config(data_dir: &std::path::Path, config: &RuntimeCo
     }
 }
 
+/// A single sensor node's position in room space, as placed via the Room
+/// Builder UI. `id` must match the node's provisioned `--node-id` on the
+/// physical board — it is not implied by array position, so nodes can be
+/// added/removed/reordered in the UI without breaking the id-to-position
+/// mapping (the same mapping issue #228/#249 was about).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct RoomNode {
+    pub id: u8,
+    pub x: f32,
+    pub y: f32,
+    /// Height above the FIRST floor's surface, not above this node's own
+    /// floor. A node on the second storey at 1.2 m sits at z = elevation of
+    /// that floor + 1.2, so z stays a single global axis and distances between
+    /// nodes on different floors are just Euclidean.
+    pub z: f32,
+    /// Which storey this node is on. `None` means the first floor, so configs
+    /// written before floors existed keep working unchanged.
+    ///
+    /// Redundant with `z` for geometry, and deliberately so: it is what the
+    /// Room Builder groups by and what walls are associated with. Deriving it
+    /// from `z` would guess wrong for a node mounted high on a stairwell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floor: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+/// One storey of the building.
+///
+/// `level` is the storey number, 1 for the ground floor. `elevation_m` is the
+/// height of that storey's *floor surface* above the origin, so level 1 is
+/// 0.0 by definition and level 2 is roughly first-floor ceiling plus joist
+/// depth.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct Floor {
+    pub level: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub elevation_m: f32,
+    /// Ceiling height above this storey's own floor surface (not above the
+    /// origin), because that is the number a person reads off a tape measure.
+    pub ceiling_m: f32,
+    /// Thickness of the structure between this storey's ceiling and the next
+    /// storey's floor surface: joists, subfloor, and any service void.
+    ///
+    /// Recorded so `elevation_m` can be DERIVED rather than measured. Nobody
+    /// can put a tape measure on the height of a second floor above a first
+    /// floor, but everyone can measure a ceiling and look up a joist depth.
+    /// Without it, siting a node meant arithmetic like "8 ft + 16 in + 20 in"
+    /// at every measurement, and arithmetic done nine times is arithmetic done
+    /// wrong at least once.
+    #[serde(default)]
+    pub subfloor_m: f32,
+}
+
+/// An interior or exterior wall segment, in plan view.
+///
+/// Walls are 2D segments plus a height rather than 3D solids: for RF purposes
+/// what matters is whether the straight line between two nodes crosses one,
+/// and a segment answers that with a cheap intersection test. Modelling
+/// thickness or openings would add cost to every link evaluation for accuracy
+/// the rest of the pipeline cannot yet use.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct Wall {
+    /// Storey this wall belongs to. A wall only obstructs links whose
+    /// endpoints are on that storey; a floor slab is a different thing and is
+    /// implied by two nodes having different `floor` values.
+    pub level: i32,
+    pub x1: f32,
+    pub y1: f32,
+    pub x2: f32,
+    pub y2: f32,
+    /// Height above this storey's floor. Defaults to full height when absent —
+    /// a half-wall or a pony wall is the exception, not the rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height_m: Option<f32>,
+    /// Free text: "exterior", "interior", "glass", "brick". Not interpreted
+    /// yet. Recorded now because it is knowledge the person drawing the plan
+    /// has and will not have later, and attenuation per material is the
+    /// obvious next use of this data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+/// Room geometry (a simple rectangle) plus sensor node placements, as
+/// defined via the Room Builder UI (`POST /api/v1/config/room`).
+/// A transmitter the fleet can hear, and what is known about where it is.
+///
+/// Deliberately separates "where" from "how sure", because for illumination
+/// those are different questions and conflating them is what makes a solver
+/// trust a guess as much as a tape measure. Four states are expressible:
+///
+/// - **surveyed** — `position` set, `uncertainty_m` zero or absent. Your own
+///   access points, the Powerwall gateway, anything you can walk to.
+/// - **approximate** — `position` set with a large `uncertainty_m`. A
+///   neighbour's router: you know which house, not which room.
+/// - **unknown** — `position` is `None`. Still useful: cross-receiver
+///   correlation learns which region a receiver group covers WITHOUT ever
+///   needing the transmitter's coordinates. Only the geometric/ellipsoid path
+///   requires a position.
+/// - **excluded** — `exclude` set, for a transmitter known to move. A mobile
+///   emitter is worse than none, because the association it teaches is only
+///   true while it stands still.
+///
+/// On why `uncertainty_m` is worth carrying rather than rounding away: an
+/// emitter's positional error matters in proportion to its DISTANCE. Fifteen
+/// metres of doubt about a router 60 m away is roughly 14 degrees of bearing,
+/// and error along the line of sight matters far less than error across it. A
+/// consumer can weight by `uncertainty_m / distance`; it cannot recover that
+/// from a bare coordinate.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct Emitter {
+    /// Lower-case colon-separated MAC, matching `/api/v1/links` `tx_mac`.
+    pub mac: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Room coordinates, same frame as `nodes`. `None` means "position not
+    /// known", which is a first-class state here, not a missing field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f32; 3]>,
+    /// Which storey, when that is meaningful. A neighbour's house has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floor: Option<i32>,
+    /// Radius of doubt around `position`, metres. Absent or zero means
+    /// surveyed. Meaningless without a `position`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uncertainty_m: Option<f32>,
+    /// Admission state. Defaults to `pending`: a newly discovered transmitter
+    /// is NEVER trusted as a fixed illuminator just because it was heard.
+    ///
+    /// - `pending`  — seen, not yet judged. Usable for learned/fingerprint
+    ///   work, never as a fixed geometric focus.
+    /// - `approved` — observed stationary long enough to be trusted as a focus.
+    ///   Promotion is a decision, informed by measured stability, not an
+    ///   automatic consequence of being loud.
+    /// - `excluded` — known to move, or otherwise unwanted. A mobile emitter is
+    ///   worse than none: the association it teaches is only true while it
+    ///   stands still.
+    #[serde(default = "emitter_status_default")]
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct RoomConfig {
+    pub width_m: f32,
+    pub depth_m: f32,
+    pub nodes: Vec<RoomNode>,
+    /// The WiFi access point's position, same room-space meters/NW-origin
+    /// convention as `nodes`. Optional — `None` means not yet configured, not
+    /// "AP is at the origin". Needed for bistatic Doppler-geometry position
+    /// estimation (a link's Doppler shift decomposes into a 2D velocity
+    /// constraint only once both endpoints — AP and node — are known; see
+    /// `doppler_weighted_centroid`'s doc comment for why raw per-node Doppler
+    /// magnitude alone isn't full geometric triangulation). Deliberately a
+    /// single point, not a list: real position estimation needs one known,
+    /// fixed link endpoint per node, and supporting multiple candidate APs
+    /// would require knowing which AP each CSI frame's traffic actually came
+    /// from, which isn't tracked anywhere today. A house with more rooms is
+    /// future scope; this stays "one room, one AP, up to a few nodes."
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ap_position: Option<[f32; 3]>,
+    /// Storeys, ascending. Empty means a single implicit ground floor, which
+    /// is how every config written before this field existed behaves.
+    ///
+    /// ORIGIN: (0, 0, 0) is the north-west corner of the FIRST floor, at floor
+    /// level. x runs east, y runs south, z runs up. Every storey shares that
+    /// origin — the second floor is not re-zeroed — so a node's coordinates
+    /// mean the same thing regardless of which storey it is on, and a
+    /// through-floor distance is just Euclidean.
+    #[serde(default)]
+    pub floors: Vec<Floor>,
+    /// Wall segments in plan view, tagged by storey.
+    #[serde(default)]
+    pub walls: Vec<Wall>,
+    /// Which storey the access point is on. `None` means the first floor.
+    ///
+    /// `ap_position` already carries an absolute z, so this is not needed for
+    /// geometry. It exists so the Room Builder can show the AP's height the
+    /// way it was measured -- above its own floor -- rather than as a total
+    /// from the ground floor, and so the AP appears on the storey it is
+    /// actually on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ap_floor: Option<i32>,
+    /// Transmitters the fleet can hear, and what is known about each.
+    #[serde(default)]
+    pub emitters: Vec<Emitter>,
+}
+
+/// Load persisted room config from `<data_dir>/room_config.json`.
+/// Falls back to [`RoomConfig::default`] (empty room, no nodes) if the file
+/// is absent or malformed.
+/// Approved emitters that carry a position, keyed by MAC.
+///
+/// `pending` entries are deliberately excluded. Pending means "heard, not yet
+/// judged stationary", and a transmitter that moves teaches an association that
+/// is only true while it stands still — worse than having no illuminator at
+/// all. Promotion to `approved` is a decision, not a consequence of being loud.
+/// MACs marked `excluded`: known to move, or otherwise unwanted.
+///
+/// Enforced by refusing them at ingestion, so an excluded emitter leaves the
+/// link table, the fusion index and every consumer at once — and frees its
+/// slot. Without this, `excluded` only meant "not approved", which is
+/// indistinguishable from `pending` and quietly does nothing.
+pub(crate) fn excluded_emitter_macs(config: &RoomConfig) -> HashSet<[u8; 6]> {
+    config
+        .emitters
+        .iter()
+        .filter(|e| e.status == "excluded")
+        .filter_map(|e| parse_mac_str(&e.mac.to_ascii_lowercase()))
+        .collect()
+}
+
+pub(crate) fn approved_emitter_positions(
+    config: &RoomConfig,
+) -> HashMap<[u8; 6], [f32; 3]> {
+    let mut out = HashMap::new();
+    for e in &config.emitters {
+        if !EMITTER_FOCUS_STATUSES.contains(&e.status.as_str()) {
+            continue;
+        }
+        if let (Some(mac), Some(pos)) = (parse_mac_str(&e.mac.to_ascii_lowercase()), e.position) {
+            out.insert(mac, pos);
+        }
+    }
+    out
+}
+
+/// Newly discovered transmitters start unapproved. Being audible is not
+/// evidence of being stationary, and only a stationary emitter can serve as a
+/// fixed focus.
+pub(crate) fn emitter_status_default() -> String {
+    "pending".to_string()
+}
+
+/// The admission states an emitter may hold, in triage order.
+///
+/// Status answers "do I trust this thing to stay put"; `uncertainty_m` answers
+/// "how well do I know where it is". They are orthogonal everywhere except at
+/// the ends of the scale, which is why `surveyed` exists as its own state
+/// rather than being inferred from a zero uncertainty: it is the difference
+/// between "I measured this" and "I left the box empty".
+///
+/// - `excluded` — it moves. Refused at ingestion; leaves every consumer.
+/// - `pending`  — heard, shortlisted, not yet judged. Feeds position-free
+///   pattern-matching work but is never a geometric focus.
+/// - `approved` — trusted as fixed, position ESTIMATED. Needs a position and a
+///   non-zero `uncertainty_m`: a neighbour's router does not move, but you only
+///   know which house.
+/// - `surveyed` — trusted as fixed, position MEASURED. Needs a position and no
+///   uncertainty. Your own access point, a gateway you can put a tape on.
+pub(crate) const EMITTER_STATUSES: [&str; 4] =
+    ["excluded", "pending", "approved", "surveyed"];
+
+/// Statuses whose position may be used as a solver focus.
+pub(crate) const EMITTER_FOCUS_STATUSES: [&str; 2] = ["approved", "surveyed"];
+
+/// Parse `aa:bb:cc:dd:ee:ff` into six octets. `None` for anything else.
+pub(crate) fn parse_mac_str(s: &str) -> Option<[u8; 6]> {
+    let mut out = [0u8; 6];
+    let mut parts = s.split(':');
+    for slot in out.iter_mut() {
+        let p = parts.next()?;
+        if p.len() != 2 {
+            return None;
+        }
+        *slot = u8::from_str_radix(p, 16).ok()?;
+    }
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(out)
+}
+
+pub(crate) fn load_room_config(data_dir: &std::path::Path) -> RoomConfig {
+    let path = data_dir.join("room_config.json");
+    match std::fs::read_to_string(&path) {
+        Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
+        Err(_) => RoomConfig::default(),
+    }
+}
+
+/// Persist room config to `<data_dir>/room_config.json`.
+pub(crate) fn save_room_config(data_dir: &std::path::Path, config: &RoomConfig) {
+    let path = data_dir.join("room_config.json");
+    if let Ok(json) = serde_json::to_string_pretty(config) {
+        if let Err(e) = std::fs::write(&path, json) {
+            warn!("Failed to save room config to {}: {e}", path.display());
+        } else {
+            info!("Room config saved to {}", path.display());
+        }
+    }
+}
+
+#[cfg(test)]
+
+    fn base() -> RoomConfig {
+        RoomConfig {
+            width_m: 13.4,
+            depth_m: 10.4,
+            nodes: Vec::new(),
+            ap_position: None,
+            ap_floor: None,
+            floors: Vec::new(),
+            walls: Vec::new(),
+            emitters: Vec::new(),
+        }
+    }
+
+    // ── Emitters ─────────────────────────────────────────────────────────
+
+    fn emitter(mac: &str) -> Emitter {
+        Emitter { mac: mac.into(), label: None, position: None,
+                  floor: None, uncertainty_m: None,
+                  status: emitter_status_default() }
+    }
+
+    #[test]
+    fn an_emitter_with_no_position_is_valid() {
+        // "I have no idea where this is" is a first-class state: cross-receiver
+        // correlation never needs the transmitter's coordinates, only the
+        // geometric path does.
+        let mut c = base();
+        c.emitters = vec![emitter("02:00:00:00:00:01")];
+        assert!(validate_room_config(&c).is_ok());
+    }
+
+    #[test]
+    fn a_malformed_emitter_mac_is_rejected() {
+        let mut c = base();
+        for bad in ["02:00:00:00:00", "0200:00:00:00:01", "zz:00:00:00:00:01",
+                    "02:00:00:00:00:01:ff", "002:00:00:00:0:01"] {
+            c.emitters = vec![emitter(bad)];
+            assert!(validate_room_config(&c).is_err(), "accepted `{bad}`");
+        }
+        c.emitters = vec![emitter("02:00:00:00:00:01")];
+        assert!(validate_room_config(&c).is_ok());
+    }
+
+    /// Two rows for one transmitter would let a later save silently win and
+    /// move an illuminator without anyone seeing it.
+    #[test]
+    fn duplicate_emitter_macs_are_rejected() {
+        let mut c = base();
+        c.emitters = vec![emitter("02:00:00:00:00:01"), emitter("02:00:00:00:00:01")];
+        assert!(validate_room_config(&c).unwrap_err().contains("duplicate emitter"));
+    }
+
+    /// Uncertainty describes a position. Left behind after the position was
+    /// cleared it describes nothing, so it is refused rather than carried.
+    #[test]
+    fn uncertainty_without_a_position_is_rejected() {
+        let mut c = base();
+        let mut e = emitter("02:00:00:00:00:01");
+        e.uncertainty_m = Some(15.0);
+        c.emitters = vec![e];
+        assert!(validate_room_config(&c).unwrap_err().contains("no position"));
+    }
+
+    /// The neighbour case: a position you only know to within a house.
+    #[test]
+    fn an_approximate_position_round_trips_with_its_uncertainty() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = base();
+        let mut neighbour_ap = emitter("02:00:00:00:00:02");
+        neighbour_ap.label = Some("neighbour AP".into());
+        neighbour_ap.position = Some([-30.0, 12.0, 3.0]);
+        neighbour_ap.uncertainty_m = Some(15.0);
+        let mut gateway = emitter("02:00:00:00:00:03");
+        gateway.label = Some("utility gateway".into());
+        gateway.position = Some([6.0, 5.0, -2.5]);
+        gateway.uncertainty_m = Some(0.5);
+        c.emitters = vec![neighbour_ap, gateway];
+        assert!(validate_room_config(&c).is_ok());
+
+        save_room_config(dir.path(), &c);
+        let loaded = load_room_config(dir.path());
+        assert_eq!(loaded.emitters.len(), 2);
+        assert_eq!(loaded.emitters[0].uncertainty_m, Some(15.0));
+        assert_eq!(loaded.emitters[1].position, Some([6.0, 5.0, -2.5]),
+                   "a basement emitter keeps its negative z");
+    }
+
+    #[test]
+    fn a_config_without_emitters_is_still_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("room_config.json"),
+            r#"{"width_m":13.4,"depth_m":10.4,"nodes":[]}"#).unwrap();
+        let loaded = load_room_config(dir.path());
+        assert!(loaded.emitters.is_empty());
+        assert!(validate_room_config(&loaded).is_ok());
+    }
+
+    #[test]
+    fn mac_parsing_accepts_exactly_six_octets() {
+        assert_eq!(parse_mac_str("02:00:00:00:00:03"),
+                   Some([0x02, 0x00, 0x00, 0x00, 0x00, 0x03]));
+        assert!(parse_mac_str("02:00:00:00:00").is_none());
+        assert!(parse_mac_str("").is_none());
+    }
+
+
+    /// A newly heard transmitter must never arrive pre-trusted. Being loud is
+    /// not evidence of standing still.
+    #[test]
+    fn a_new_emitter_defaults_to_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("room_config.json"),
+            r#"{"width_m":13.4,"depth_m":10.4,"nodes":[],
+                "emitters":[{"mac":"02:00:00:00:00:01"}]}"#).unwrap();
+        let loaded = load_room_config(dir.path());
+        assert_eq!(loaded.emitters[0].status, "pending",
+                   "an emitter with no status must not be trusted");
+        assert!(validate_room_config(&loaded).is_ok());
+    }
+
+    /// Approval asserts "this does not move", which is a claim about a PLACE.
+    /// Approving something unlocated would put an unpositioned focus into the
+    /// geometric path.
+    #[test]
+    fn approving_an_emitter_requires_a_position() {
+        let mut c = base();
+        let mut e = emitter("02:00:00:00:00:01");
+        e.status = "approved".into();
+        c.emitters = vec![e.clone()];
+        assert!(validate_room_config(&c).unwrap_err().contains("no position"));
+
+        e.position = Some([2.0, 3.0, 1.0]);
+        e.uncertainty_m = Some(2.0);   // approved == estimated, so it needs one
+        c.emitters = vec![e];
+        assert!(validate_room_config(&c).is_ok());
+    }
+
+    #[test]
+    fn an_unknown_emitter_status_is_rejected() {
+        let mut c = base();
+        let mut e = emitter("02:00:00:00:00:01");
+        e.status = "trusted".into();
+        c.emitters = vec![e];
+        assert!(validate_room_config(&c).unwrap_err().contains("unknown status"));
+    }
+
+    /// Excluding a mobile emitter must not require knowing where it is - the
+    /// whole point is that it has no stable position.
+    #[test]
+    fn excluding_an_emitter_needs_no_position() {
+        let mut c = base();
+        let mut e = emitter("02:00:00:00:00:01");
+        e.status = "excluded".into();
+        c.emitters = vec![e];
+        assert!(validate_room_config(&c).is_ok());
+    }
+
+
+
+    /// Only APPROVED emitters become solver foci. `pending` means "heard, not
+    /// yet judged stationary", and a transmitter that moves teaches an
+    /// association only true while it stands still.
+    #[test]
+    fn only_approved_emitters_become_foci() {
+        let mut c = base();
+        let mut pending = emitter("64:16:66:c7:8c:51");
+        pending.position = Some([3.0, 4.0, 2.4]);           // positioned but unjudged
+        let mut approved = emitter("02:00:00:00:00:03");
+        approved.position = Some([0.0, 7.92, -1.22]);
+        approved.uncertainty_m = Some(1.5);
+        approved.status = "approved".into();
+        let mut excluded = emitter("18:b4:30:b4:be:b7");
+        excluded.position = Some([1.0, 1.0, 1.0]);
+        excluded.status = "excluded".into();
+        c.emitters = vec![pending, approved, excluded];
+
+        let foci = approved_emitter_positions(&c);
+        assert_eq!(foci.len(), 1, "only the approved emitter is a focus");
+        let gateway_mac = parse_mac_str("02:00:00:00:00:03").unwrap();
+        assert_eq!(foci.get(&gateway_mac), Some(&[0.0f32, 7.92, -1.22]),
+                   "a basement emitter keeps its negative z as a focus");
+    }
+
+    /// An approved emitter with no position cannot be a focus. Validation
+    /// forbids that combination, but the table must not depend on it.
+    #[test]
+    fn an_approved_emitter_without_a_position_is_not_a_focus() {
+        let mut c = base();
+        let mut e = emitter("64:16:66:cb:36:db");
+        e.status = "approved".into();          // deliberately no position
+        c.emitters = vec![e];
+        assert!(approved_emitter_positions(&c).is_empty());
+    }
+
+
+    /// `excluded` must actually exclude. Before this it only meant "not
+    /// approved", which is indistinguishable from `pending` and did nothing.
+    #[test]
+    fn excluded_emitters_are_collected_for_refusal() {
+        let mut c = base();
+        let mut moving = emitter("aa:bb:cc:dd:ee:ff");
+        moving.status = "excluded".into();
+        let mut fixed = emitter("02:00:00:00:00:03");
+        fixed.position = Some([0.0, 7.92, -1.22]);
+        fixed.uncertainty_m = Some(1.5);
+        fixed.status = "approved".into();
+        c.emitters = vec![moving, fixed, emitter("64:16:66:c7:8c:51")];
+
+        let ex = excluded_emitter_macs(&c);
+        assert_eq!(ex.len(), 1, "only the excluded one");
+        assert!(ex.contains(&parse_mac_str("aa:bb:cc:dd:ee:ff").unwrap()));
+        // and the other two are untouched by exclusion
+        assert!(!ex.contains(&parse_mac_str("02:00:00:00:00:03").unwrap()));
+        assert!(!ex.contains(&parse_mac_str("64:16:66:c7:8c:51").unwrap()));
+    }
+mod room_config_tests {
+    use super::*;
+
+    fn base() -> RoomConfig {
+        RoomConfig {
+            width_m: 13.4,
+            depth_m: 10.4,
+            nodes: Vec::new(),
+            ap_position: None,
+            ap_floor: None,
+            emitters: Vec::new(),
+            floors: Vec::new(),
+            walls: Vec::new(),
+        }
+    }
+
+    fn floor(level: i32, elevation_m: f32) -> Floor {
+        Floor { level, name: None, elevation_m, ceiling_m: 2.7, subfloor_m: 0.3 }
+    }
+
+    /// The whole coordinate system hangs off this. If floor 1 is allowed to
+    /// float, every node coordinate in the building is silently offset and
+    /// nothing downstream can detect it.
+    #[test]
+    fn first_floor_must_sit_at_the_origin() {
+        let mut c = base();
+        c.floors = vec![floor(1, 0.3)];
+        let err = validate_room_config(&c).unwrap_err();
+        assert!(err.contains("floor 1"), "{err}");
+
+        c.floors = vec![floor(1, 0.0)];
+        assert!(validate_room_config(&c).is_ok());
+    }
+
+    /// A second storey below the first is a typo every time, and it would
+    /// invert every through-floor distance without erroring anywhere.
+    #[test]
+    fn storeys_must_ascend() {
+        let mut c = base();
+        c.floors = vec![floor(1, 0.0), floor(2, -2.9)];
+        let err = validate_room_config(&c).unwrap_err();
+        assert!(err.contains("floor 2"), "{err}");
+
+        c.floors = vec![floor(1, 0.0), floor(2, 2.9)];
+        assert!(validate_room_config(&c).is_ok());
+    }
+
+    #[test]
+    fn duplicate_floor_levels_are_rejected() {
+        let mut c = base();
+        c.floors = vec![floor(1, 0.0), floor(1, 2.9)];
+        assert!(validate_room_config(&c).unwrap_err().contains("duplicate floor"));
+    }
+
+    #[test]
+    fn a_node_cannot_live_on_a_storey_that_does_not_exist() {
+        let mut c = base();
+        c.floors = vec![floor(1, 0.0)];
+        c.nodes = vec![RoomNode {
+            id: 3, x: 1.0, y: 1.0, z: 3.5, floor: Some(2), label: None,
+        }];
+        assert!(validate_room_config(&c).unwrap_err().contains("undefined floor"));
+    }
+
+    /// Configs written before floors existed must keep loading and validating
+    /// unchanged — the fleet's own room_config.json is one of them.
+    #[test]
+    fn pre_floors_configs_remain_valid() {
+        let mut c = base();
+        c.nodes = vec![RoomNode {
+            id: 0, x: 1.2, y: 0.0, z: 0.56, floor: None, label: Some("front right".into()),
+        }];
+        assert!(c.floors.is_empty());
+        assert!(validate_room_config(&c).is_ok(), "no floors declared is still a valid room");
+    }
+
+    /// Zero-length walls make any segment-intersection test degenerate rather
+    /// than merely wrong, so they are rejected at the door.
+    #[test]
+    fn negative_subfloor_is_rejected() {
+        let mut c = base();
+        let mut f = floor(2, 3.0);
+        f.subfloor_m = -0.1;
+        c.floors = vec![floor(1, 0.0), f];
+        assert!(validate_room_config(&c).unwrap_err().contains("subfloor_m"));
+    }
+
+    /// A flat slab between storeys is legitimate (a concrete floor), so zero
+    /// must be allowed even though negative is not.
+    #[test]
+    fn zero_subfloor_is_allowed() {
+        let mut c = base();
+        let mut f = floor(2, 3.0);
+        f.subfloor_m = 0.0;
+        c.floors = vec![floor(1, 0.0), f];
+        assert!(validate_room_config(&c).is_ok());
+    }
+
+    #[test]
+    fn ap_cannot_be_on_an_undeclared_floor() {
+        let mut c = base();
+        c.floors = vec![floor(1, 0.0)];
+        c.ap_position = Some([2.0, 2.0, 2.2]);
+        c.ap_floor = Some(3);
+        assert!(validate_room_config(&c).unwrap_err().contains("ap_floor"));
+        c.ap_floor = Some(1);
+        assert!(validate_room_config(&c).is_ok());
+    }
+
+    /// Elevations are derived in the UI from ceiling + subfloor, so the
+    /// arithmetic that produces them has to survive a round trip intact --
+    /// otherwise every height on the upper storey silently shifts.
+    #[test]
+    fn ceiling_and_subfloor_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = base();
+        let mut f1 = floor(1, 0.0);
+        f1.ceiling_m = 2.44;   // 8 ft
+        f1.subfloor_m = 0.41;  // 16 in
+        let mut f2 = floor(2, 2.85);
+        f2.ceiling_m = 2.44;
+        f2.subfloor_m = 0.0;
+        c.floors = vec![f1, f2];
+        save_room_config(dir.path(), &c);
+        let loaded = load_room_config(dir.path());
+        assert!((loaded.floors[0].ceiling_m - 2.44).abs() < 1e-6);
+        assert!((loaded.floors[0].subfloor_m - 0.41).abs() < 1e-6);
+        // floor 2 sits at floor 1's ceiling plus its structure
+        let derived = loaded.floors[0].ceiling_m + loaded.floors[0].subfloor_m;
+        assert!((loaded.floors[1].elevation_m - derived).abs() < 1e-6,
+                "elevation must equal ceiling + subfloor of the storey below");
+    }
+
+    #[test]
+    fn zero_length_walls_are_rejected() {
+        let mut c = base();
+        c.walls = vec![Wall {
+            level: 1, x1: 2.0, y1: 2.0, x2: 2.0, y2: 2.0,
+            height_m: None, kind: None,
+        }];
+        assert!(validate_room_config(&c).unwrap_err().contains("zero length"));
+    }
+
+    #[test]
+    fn walls_round_trip_with_their_storey_and_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = base();
+        c.floors = vec![floor(1, 0.0), floor(2, 2.9)];
+        c.walls = vec![
+            Wall { level: 1, x1: 0.0, y1: 0.0, x2: 5.0, y2: 0.0,
+                   height_m: None, kind: Some("exterior".into()) },
+            Wall { level: 2, x1: 0.0, y1: 3.0, x2: 4.0, y2: 3.0,
+                   height_m: Some(1.1), kind: Some("pony".into()) },
+        ];
+        save_room_config(dir.path(), &c);
+        let loaded = load_room_config(dir.path());
+        assert_eq!(loaded.walls.len(), 2);
+        assert_eq!(loaded.walls[1].level, 2, "storey survives the round trip");
+        assert_eq!(loaded.walls[1].height_m, Some(1.1));
+        assert_eq!(loaded.walls[0].kind.as_deref(), Some("exterior"));
+        assert_eq!(loaded.floors[1].elevation_m, 2.9);
+    }
+
+    #[test]
+    fn node_storey_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = base();
+        c.floors = vec![floor(1, 0.0), floor(2, 2.9)];
+        c.nodes = vec![RoomNode {
+            id: 7, x: 2.0, y: 3.0, z: 4.1, floor: Some(2), label: Some("landing".into()),
+        }];
+        save_room_config(dir.path(), &c);
+        let loaded = load_room_config(dir.path());
+        assert_eq!(loaded.nodes[0].floor, Some(2));
+        // z stays a single global axis: a second-floor node is above the
+        // storey's own elevation, not re-zeroed to it.
+        assert!(loaded.nodes[0].z > loaded.floors[1].elevation_m);
+    }
+
+    #[test]
+    fn load_missing_file_returns_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = load_room_config(dir.path());
+        assert_eq!(cfg.width_m, 0.0);
+        assert_eq!(cfg.depth_m, 0.0);
+        assert!(cfg.nodes.is_empty());
+    }
+
+    #[test]
+    fn load_malformed_file_falls_back_to_default() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("room_config.json"), "{ not valid json").unwrap();
+        let cfg = load_room_config(dir.path());
+        assert_eq!(cfg.width_m, 0.0);
+        assert!(cfg.nodes.is_empty());
+    }
+
+    #[test]
+    fn save_then_load_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let saved = RoomConfig {
+            width_m: 5.0,
+            depth_m: 4.0,
+            nodes: vec![
+                RoomNode { id: 0, x: 0.0, y: 0.0, z: 0.4, floor: None, label: Some("front-right".into()) },
+                RoomNode { id: 1, x: 3.66, y: 0.0, z: 0.4, floor: None, label: None },
+            ],
+            ap_position: Some([2.5, -1.0, 2.2]),
+            ap_floor: None,
+            emitters: Vec::new(),
+        floors: Vec::new(),
+        walls: Vec::new(),
+        };
+        save_room_config(dir.path(), &saved);
+        let loaded = load_room_config(dir.path());
+        assert_eq!(loaded.width_m, 5.0);
+        assert_eq!(loaded.depth_m, 4.0);
+        assert_eq!(loaded.nodes.len(), 2);
+        assert_eq!(loaded.nodes[0].id, 0);
+        assert_eq!(loaded.nodes[0].label.as_deref(), Some("front-right"));
+        assert_eq!(loaded.nodes[1].label, None);
+    }
+
+    fn valid_config() -> RoomConfig {
+        RoomConfig {
+            width_m: 5.0,
+            depth_m: 4.0,
+            nodes: vec![
+                RoomNode { id: 0, x: 0.0, y: 0.0, z: 0.4, floor: None, label: None },
+                RoomNode { id: 1, x: 3.66, y: 0.0, z: 0.4, floor: None, label: None },
+            ],
+            ap_position: None,
+            ap_floor: None,
+            emitters: Vec::new(),
+        floors: Vec::new(),
+        walls: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn validate_accepts_a_sane_config() {
+        assert!(validate_room_config(&valid_config()).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_non_positive_width() {
+        let mut cfg = valid_config();
+        cfg.width_m = 0.0;
+        assert!(validate_room_config(&cfg).is_err());
+        cfg.width_m = -1.0;
+        assert!(validate_room_config(&cfg).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_non_finite_depth() {
+        let mut cfg = valid_config();
+        cfg.depth_m = f32::NAN;
+        assert!(validate_room_config(&cfg).is_err());
+        cfg.depth_m = f32::INFINITY;
+        assert!(validate_room_config(&cfg).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_duplicate_node_ids() {
+        let mut cfg = valid_config();
+        cfg.nodes[1].id = 0; // collide with nodes[0]
+        let err = validate_room_config(&cfg).unwrap_err();
+        assert!(err.contains("duplicate"), "unexpected error message: {err}");
+    }
+
+    #[test]
+    fn validate_rejects_non_finite_node_coordinate() {
+        let mut cfg = valid_config();
+        cfg.nodes[0].x = f32::NAN;
+        assert!(validate_room_config(&cfg).is_err());
+    }
+
+    #[test]
+    fn validate_allows_empty_node_list() {
+        let mut cfg = valid_config();
+        cfg.nodes.clear();
+        assert!(validate_room_config(&cfg).is_ok());
+    }
+}
+
 /// Shared application state
 struct AppStateInner {
     latest_update: Option<SensingUpdate>,
@@ -1867,6 +2686,10 @@ struct AppStateInner {
     room_debounced_level: String,
     room_debounce_candidate: String,
     room_debounce_since: Option<std::time::Instant>,
+    /// MACs of emitters marked `excluded`, refreshed when the room config
+    /// changes. Held as a set so the ingestion check is a hash lookup.
+    excluded_emitters: HashSet<[u8; 6]>,
+    link_table: links::LinkTable,
     // ── Accuracy sprint: Kalman tracker, multistatic fusion, eigenvalue counting ──
     /// Global Kalman-based pose tracker for stable person IDs and smoothed keypoints.
     pose_tracker: PoseTracker,
@@ -2425,6 +3248,8 @@ impl AppStateInner {
             room_debounced_level: "absent".to_string(),
             room_debounce_candidate: "absent".to_string(),
             room_debounce_since: None,
+            excluded_emitters: HashSet::new(),
+            link_table: links::LinkTable::new(),
             pose_tracker: PoseTracker::new(),
             last_tracker_instant: None,
             multistatic_fuser: MultistaticFuser::new(),
@@ -2904,15 +3729,56 @@ mod issue_928_magic_collision_tests {
 
 // ── ESP32 UDP frame parser ───────────────────────────────────────────────────
 
+/// Wire v1 CSI frame magic — 20-byte header, no transmitter identity.
+const CSI_MAGIC_V1: u32 = 0xC511_0001;
+/// Wire v2 CSI frame magic — v1 header plus a 6-byte transmitter MAC.
+///
+/// `0xC511_0002`..`0xC511_0007` were already taken by the vitals, feature and
+/// other edge packets (see `issue_928_magic_collision_tests` for why that
+/// matters), so v2 claims the next free value rather than an adjacent one.
+const CSI_MAGIC_V2: u32 = 0xC511_0008;
+/// Wire v3 CSI frame magic — v2 plus the 802.11 `rx_seq` at bytes 26..27.
+///
+/// `0xC511_0009` is the per-slot vitals packet, so v3 takes the next free
+/// value. See `issue_928_magic_collision_tests` for why adjacency is not
+/// assumed.
+const CSI_MAGIC_V3: u32 = 0xC511_000A;
+/// v1 header length; also the I/Q offset for a v1 frame.
+const CSI_HEADER_V1: usize = 20;
+/// v2 header length: v1 plus `source_mac` at bytes 20..25.
+const CSI_HEADER_V2: usize = 26;
+/// v3 header length: v2 plus `rx_seq` (u16 LE) at bytes 26..27.
+const CSI_HEADER_V3: usize = 28;
+
 fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
-    if buf.len() < 20 {
+    if buf.len() < CSI_HEADER_V1 {
         return None;
     }
 
     let magic = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
-    if magic != 0xC511_0001 {
-        return None;
-    }
+    // Both versions are accepted so a mixed fleet keeps working: a node
+    // running older firmware simply reports no transmitter identity.
+    let (iq_start, source_mac, rx_seq) = match magic {
+        CSI_MAGIC_V1 => (CSI_HEADER_V1, None, None),
+        CSI_MAGIC_V2 => {
+            if buf.len() < CSI_HEADER_V2 {
+                return None;
+            }
+            let mut mac = [0u8; 6];
+            mac.copy_from_slice(&buf[20..26]);
+            (CSI_HEADER_V2, Some(mac), None)
+        }
+        CSI_MAGIC_V3 => {
+            if buf.len() < CSI_HEADER_V3 {
+                return None;
+            }
+            let mut mac = [0u8; 6];
+            mac.copy_from_slice(&buf[20..26]);
+            let seq = u16::from_le_bytes([buf[26], buf[27]]);
+            (CSI_HEADER_V3, Some(mac), Some(seq))
+        }
+        _ => return None,
+    };
 
     // Frame layout (must match firmware csi_collector.c):
     //   [0..3]   magic (u32 LE)
@@ -2947,7 +3813,6 @@ fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
     let ppdu_type = wifi_densepose_hardware::PpduType::from_byte(buf[18]);
     let adr018_flags = wifi_densepose_hardware::Adr018Flags::from_byte(buf[19]);
 
-    let iq_start = 20;
     let n_pairs = n_antennas as usize * n_subcarriers as usize;
     let expected_len = iq_start + n_pairs * 2;
 
@@ -2976,9 +3841,85 @@ fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
         noise_floor,
         ppdu_type,
         adr018_flags,
+        source_mac,
+        rx_seq,
         amplitudes,
         phases,
     })
+}
+
+#[cfg(test)]
+mod csi_wire_v2_v3_tests {
+    //! The v2 and v3 match arms must be REACHABLE.
+    //!
+    //! `parse_esp32_frame` dispatches on the magic with
+    //! `match magic { CSI_MAGIC_V1 => .., CSI_MAGIC_V2 => .., CSI_MAGIC_V3 => .. }`.
+    //! Those are constant patterns only while the constants are in scope. If
+    //! `CSI_MAGIC_V1` is ever removed or renamed, the arm silently degrades
+    //! into an irrefutable BINDING that matches every value, the v2 and v3 arms
+    //! become dead code, and `source_mac` is `None` for every frame -- so every
+    //! per-transmitter consumer sees an empty world. rustc reports this as an
+    //! `unreachable_pattern` warning, not an error, and a release build prints
+    //! no warnings at all.
+    //!
+    //! These tests fail loudly in that case.
+    use super::*;
+
+    fn build(magic: u32, header: usize, n_subcarriers: u16) -> Vec<u8> {
+        let mut buf = vec![0u8; header + n_subcarriers as usize * 2];
+        buf[0..4].copy_from_slice(&magic.to_le_bytes());
+        buf[4] = 7; // node_id
+        buf[5] = 1; // n_antennas
+        buf[6..8].copy_from_slice(&n_subcarriers.to_le_bytes());
+        buf[8..12].copy_from_slice(&5180u32.to_le_bytes());
+        buf[12..16].copy_from_slice(&42u32.to_le_bytes());
+        buf[16] = (-40i8) as u8; // rssi
+        buf[17] = (-90i8) as u8; // noise_floor
+        buf[18] = 0; // ppdu_type
+        buf[19] = 0x10;
+        if header >= CSI_HEADER_V2 {
+            buf[20..26].copy_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
+        }
+        if header >= CSI_HEADER_V3 {
+            buf[26..28].copy_from_slice(&0x1234u16.to_le_bytes());
+        }
+        buf
+    }
+
+    #[test]
+    fn v1_frame_carries_no_transmitter_identity() {
+        let f = parse_esp32_frame(&build(CSI_MAGIC_V1, CSI_HEADER_V1, 64)).unwrap();
+        assert_eq!(f.source_mac, None);
+        assert_eq!(f.n_subcarriers, 64);
+    }
+
+    #[test]
+    fn v2_frame_yields_the_transmitter_mac() {
+        let f = parse_esp32_frame(&build(CSI_MAGIC_V2, CSI_HEADER_V2, 64)).unwrap();
+        assert_eq!(
+            f.source_mac,
+            Some([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]),
+            "v2 arm unreachable -- is CSI_MAGIC_V1 still a constant in scope?"
+        );
+    }
+
+    #[test]
+    fn v3_frame_yields_mac_and_rx_seq() {
+        let f = parse_esp32_frame(&build(CSI_MAGIC_V3, CSI_HEADER_V3, 64)).unwrap();
+        assert_eq!(f.source_mac, Some([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]));
+        assert_eq!(
+            f.rx_seq,
+            Some(0x1234),
+            "v3 arm unreachable -- is CSI_MAGIC_V1 still a constant in scope?"
+        );
+    }
+
+    #[test]
+    fn an_unknown_magic_is_still_rejected() {
+        // The catch-all must stay reachable too: if the V1 arm degrades into a
+        // binding, this returns Some and the server accepts arbitrary traffic.
+        assert!(parse_esp32_frame(&build(0xDEAD_BEEF, CSI_HEADER_V1, 64)).is_none());
+    }
 }
 
 #[cfg(test)]
@@ -3978,7 +4919,9 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
             adr018_flags: wifi_densepose_hardware::Adr018Flags::default(),
             amplitudes: multi_ap_frame.amplitudes.clone(),
             phases: multi_ap_frame.phases.clone(),
-        };
+                    source_mac: None,
+            rx_seq: None,
+};
 
         // ── Step 4b: Update frame history and extract features ───────
         let mut s_write_pre = state.write().await;
@@ -4168,7 +5111,9 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         adr018_flags: wifi_densepose_hardware::Adr018Flags::default(),
         amplitudes: vec![signal_pct],
         phases: vec![0.0],
-    };
+            source_mac: None,
+        rx_seq: None,
+};
 
     let mut s = state.write().await;
     // Update frame history before extracting features.
@@ -4557,6 +5502,8 @@ fn generate_simulated_frame(tick: u64) -> Esp32Frame {
         adr018_flags: wifi_densepose_hardware::Adr018Flags::default(),
         amplitudes,
         phases,
+        source_mac: None,
+        rx_seq: None,
     }
 }
 
@@ -8630,6 +9577,168 @@ async fn mesh_endpoint(State(state): State<SharedState>) -> Json<serde_json::Val
     }))
 }
 
+
+///
+/// MEASURED 2026-09-01: a node's radio produces CSI for ~24 transmitters, the
+/// node forwards ~20 of them, and `/api/v1/links` renders 3. The difference is
+/// `LinkTable::metrics`, a `filter_map` that drops any link without a motion
+/// value — silently, with no error, counter or log. Every existing endpoint
+/// therefore agreed the other transmitters did not exist.
+///
+/// This reports the table's actual contents so illuminator selection is made
+/// from data rather than inference. It also surfaces `MAX_LINKS` headroom: the
+/// admission check drops new links silently once full, which would be the same
+/// class of invisible failure one layer up.
+async fn links_inventory_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    let now = std::time::Instant::now();
+    let inv = s.link_table.inventory(now);
+
+    let visible = inv.iter().filter(|r| r.visible).count();
+    let mut by_reason: std::collections::BTreeMap<&'static str, usize> =
+        std::collections::BTreeMap::new();
+    for r in &inv {
+        *by_reason.entry(r.reason).or_insert(0) += 1;
+    }
+    // Distinct transmitters across every receiver — the illuminator roster,
+    // as opposed to the link count, which counts each (rx, tx) pair.
+    let distinct_tx: std::collections::BTreeSet<[u8; 6]> =
+        inv.iter().map(|r| r.id.tx_mac).collect();
+
+    let rows: Vec<serde_json::Value> = inv
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "rx_node": r.id.rx_node,
+                "tx_mac": format!(
+                    "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                    r.id.tx_mac[0], r.id.tx_mac[1], r.id.tx_mac[2],
+                    r.id.tx_mac[3], r.id.tx_mac[4], r.id.tx_mac[5]
+                ),
+                // The locally-administered bit separates a virtual BSSID (an AP
+                // advertising several SSIDs) from a burned-in device address.
+                // Cheap, and it is the difference between "an access point" and
+                // "somebody's phone" without any vendor lookup.
+                "locally_administered": (r.id.tx_mac[0] & 0x02) != 0,
+                "frames": r.frames,
+                "rssi_dbm": r.rssi,
+                "history_len": r.history_len,
+                "widths": r.widths.iter()
+                    .map(|(w, c)| serde_json::json!({"subcarriers": w, "frames": c}))
+                    .collect::<Vec<_>>(),
+                "modal_width": r.modal_width,
+                "frames_at_modal": r.frames_at_modal,
+                "visible_in_links": r.visible,
+                "reason": r.reason,
+                "age_ms": r.age_ms,
+                "baseline_samples": r.baseline_samples,
+                "fps": r.fps,
+                "window_span_s": r.window_span_s,
+                "grid": r.grid,
+                "sparser_skipped": r.sparser_skipped,
+                "interval_s": r.interval_s,
+                "stale_after_s": r.stale_after_s,
+                "gap_resets": r.gap_resets,
+            })
+        })
+        .collect();
+
+    Json(serde_json::json!({
+        "links_total": inv.len(),
+        "links_visible": visible,
+        "links_hidden": inv.len() - visible,
+        "distinct_transmitters": distinct_tx.len(),
+        "max_links": links::MAX_LINKS,
+        "headroom": links::MAX_LINKS.saturating_sub(inv.len()),
+        "hidden_by_reason": by_reason,
+        "links": rows,
+        "note": "everything the link table holds; /api/v1/links shows only rows \
+                 with a computable motion metric"
+    }))
+}
+
+
+async fn links_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+
+    // Attribute each link's transmitter. A node that reports its own MAC in
+    // its sync packet (proto v2+) is known outright; the old hearing-set
+    // inference is kept only as a fallback for a node still on older
+    // firmware, since it cannot work once boards are more than a room apart.
+    let metrics = s.link_table.metrics();
+    let (receivers, heard_by) = links::hearing_index(&metrics);
+
+    let rows: Vec<serde_json::Value> = metrics
+        .iter()
+        .map(|m| {
+            // No node-MAC registry on this path, so attribution rests on
+            // the hearing-set heuristic, which `links` restricts to the
+            // case where nothing has reported a MAC yet.
+            let tx_node =
+                links::infer_transmitting_node(&m.id.tx_mac, &receivers, &heard_by);
+            serde_json::json!({
+                "rx_node": m.id.rx_node,
+                "tx_mac": format!(
+                    "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                    m.id.tx_mac[0], m.id.tx_mac[1], m.id.tx_mac[2],
+                    m.id.tx_mac[3], m.id.tx_mac[4], m.id.tx_mac[5]
+                ),
+                // Inferred, never measured — see `infer_node` above.
+                "tx_node_inferred": tx_node,
+                "kind": if tx_node.is_some() { "node" } else { "infrastructure" },
+                "label": m.id.label(),
+                "frames": m.frames,
+                "rssi_dbm": m.rssi,
+                // Reported per frame by the chip. ESP-IDF exposes no AGC gain
+                // field, so this is the only observable that can betray a gain
+                // step -- without it a drop in amplitude is ambiguous between
+                // attenuation and the receiver down-rating itself.
+                "noise_floor_dbm": m.noise,
+                "snr_db": m.rssi - m.noise,
+                "raw_motion": m.raw_motion,
+                "motion": m.motion,
+                // Both metrics above are statistics over a fixed 64-frame
+                // window, so they mean nothing without the window they were
+                // taken over. A link whose delivery collapses while its peers
+                // surge produces a large apparent `motion` from transport
+                // contention alone — that pattern accounted for 56% of
+                // above-threshold bins on the 2026-08-28 overnight baseline,
+                // including the night's largest excursions, with the room
+                // empty. Report the window so a consumer can reject the
+                // comparison instead of believing it.
+                "window_span_s": m.window_span_s,
+                "fps": m.fps,
+            })
+        })
+        .collect();
+
+    // The link-line estimate, computed and reported *alongside* the live
+    // position rather than replacing it. It has never been scored against
+    // ground truth, so promoting it to the dot on the strength of it being
+    // newer would be exactly the overclaim this repository forbids. Reporting
+    // both here lets a labelled walk record them together and settle it with
+    // numbers.
+
+    Json(serde_json::json!({
+        "links": rows,
+        "count": rows.len(),
+        // A v1-only fleet carries no transmitter address, so the table stays
+        // empty. Say so explicitly rather than letting an empty list read as
+        // "no motion anywhere".
+        "wire_v2_active": !rows.is_empty(),
+    }))
+}
+
+/// Build link-line observations from the current link table and solve for a
+/// position. `null` whenever the geometry or the data cannot support one — a
+/// missing node position, an unconfigured AP, too few usable links, or a
+/// baseline that has not converged.
+///
+/// Only links whose *both* endpoints have known coordinates can contribute. A
+/// link to an unidentified transmitter (a neighbour's router, a phone) is real
+/// signal but its geometry is unknown, so including it would inject an
+/// arbitrary line into the solve.
+
 async fn nodes_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
     let now = std::time::Instant::now();
@@ -9337,6 +10446,43 @@ async fn udp_receiver_task(
                         &frame.amplitudes,
                         observed_at,
                     );
+
+
+                    // ---- Per-link accumulation, BEFORE the per-node gate ----
+                    //
+                    // MEASURED 2026-09-01: the gate below is keyed by NODE and
+                    // locks onto the densest grid that node has seen, which the
+                    // associated AP sets at 256-bin HE. Because it `continue`s,
+                    // every 64-bin HT frame -- essentially every OTHER
+                    // transmitter in the building -- was discarded before it
+                    // could become a link. A node's radio produced CSI for 24
+                    // transmitters and the server admitted 10, all our own.
+                    //
+                    // A link is (receiver, transmitter), so grid consistency is
+                    // a per-LINK property, not a per-node one, and `LinkTable`
+                    // enforces it there. Running this first leaves a frame the
+                    // node-level feature path cannot use still available to the
+                    // link path, which can. The gate itself is unchanged.
+                    if let Some(tx) = frame.source_mac {
+                        // An emitter marked as moving is refused HERE rather than
+                        // filtered downstream, so it leaves the link table and
+                        // every consumer at once and stops occupying a slot.
+                        // Filtering later would keep teaching an association that
+                        // is only true while the transmitter stands still.
+                        if s.excluded_emitters.contains(&tx) {
+                            continue;
+                        }
+                        let now = std::time::Instant::now();
+                        s.link_table.observe(
+                            frame.node_id,
+                            tx,
+                            &frame.amplitudes,
+                            frame.rssi,
+                            frame.noise_floor,
+                            now,
+                        );
+                        s.link_table.expire(now);
+                    }
 
                     // ── ADR-110 / issue #1005: per-node subcarrier-grid gate ──
                     // ESP32-C6 nodes interleave HE-SU 256-bin frames (~84%)
@@ -11260,6 +12406,7 @@ async fn main() {
     let mut node_positions_config: HashMap<u8, [f32; 3]> = HashMap::new();
     let state: SharedState = Arc::new(RwLock::new(AppStateInner {
         latest_update: None,
+        link_table: links::LinkTable::new(),
         rssi_history: VecDeque::new(),
         frame_history: VecDeque::new(),
         tick: 0,
@@ -11326,6 +12473,7 @@ async fn main() {
         room_debounced_level: "absent".to_string(),
         room_debounce_candidate: "absent".to_string(),
         room_debounce_since: None,
+        excluded_emitters: HashSet::new(),
         // Accuracy sprint
         pose_tracker: PoseTracker::new(),
         last_tracker_instant: None,
@@ -11421,6 +12569,22 @@ async fn main() {
         )
         .expect("default pose physics configuration is valid"),
     }));
+
+    // Seed the ingestion-time exclusion set from the persisted config.
+    //
+    // Without this, exclusions would apply only after someone re-saved the room
+    // config in the current process: a restart would silently start admitting
+    // every emitter the operator had already judged as moving, and nothing
+    // would report that it had happened.
+    {
+        let mut s = state.write().await;
+        let saved = load_room_config(&s.data_dir);
+        let excluded = excluded_emitter_macs(&saved);
+        if !excluded.is_empty() {
+            info!("refusing {} excluded emitter(s) at ingestion", excluded.len());
+        }
+        s.excluded_emitters = excluded;
+    }
 
     // Start background tasks from the resolved plan (issue #1004).
     //
@@ -11622,6 +12786,8 @@ async fn main() {
         .route("/api/v1/rf/vendors/:vendor/events", post(ingest_vendor_events))
         // Per-node health endpoint
         .route("/api/v1/nodes", get(nodes_endpoint))
+        .route("/api/v1/links", get(links_endpoint))
+        .route("/api/v1/links/inventory", get(links_inventory_endpoint))
         // ADR-110 iter 29 — per-node mesh sync state for HTTP clients.
         .route("/api/v1/nodes/:id/sync", get(node_sync_endpoint))
         .route("/api/v1/mesh", get(mesh_endpoint))
@@ -12345,6 +13511,296 @@ async fn config_set_dedup_factor(
     Json(serde_json::json!({
         "status": "ok",
         "dedup_factor": clamped,
+    }))
+}
+
+/// `GET /api/v1/config/room` — read the current room geometry + node
+/// positions. Reflects live in-memory state (`node_positions_config`), not
+/// just whatever was last saved to disk, so a fresh page load in the Room
+/// Builder UI shows what the server is actually using right now.
+async fn config_get_room(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    let saved = load_room_config(&s.data_dir);
+    let nodes: Vec<RoomNode> = s
+        .node_positions_config
+        .iter()
+        .enumerate()
+        .map(|(idx, p)| {
+            // #1791 made node_positions_config a POSITIONAL Vec rather than a
+            // map keyed by node_id, so identity here is the list index. Kept
+            // consistent with that convention deliberately: the Room Builder
+            // must describe the same binding the fusion path actually uses.
+            let id = idx as u8;
+            let saved_node = saved.nodes.iter().find(|n| n.id == id);
+            let label = saved_node.and_then(|n| n.label.clone());
+            // Storey is carried on the persisted config, not on the live
+            // position map, so it has to be looked up rather than derived --
+            // deriving it from z would guess wrong for a node mounted high on
+            // a stairwell.
+            let floor = saved_node.and_then(|n| n.floor);
+            RoomNode {
+                id,
+                x: p[0],
+                y: p[1],
+                z: p[2],
+                floor,
+                label,
+            }
+        })
+        .collect();
+    Json(serde_json::json!({
+        "width_m": saved.width_m,
+        "depth_m": saved.depth_m,
+        "nodes": nodes,
+        // Storeys, walls, and the AP's position and storey are pure geometry
+        // with no live counterpart in memory, so they are served straight from
+        // the persisted config.
+        //
+        // These were being saved correctly and never served, which looked
+        // exactly like "the setting will not stick": the round trip lost them
+        // on the way OUT, so the editor reopened with its defaults and an AP
+        // height was then shown as if measured from the ground floor.
+        //
+        // Any field added to RoomConfig has to be added here too -- this list
+        // is hand-maintained and will not complain when it falls behind.
+        "ap_position": saved.ap_position,
+        "floors": saved.floors,
+        "walls": saved.walls,
+        "ap_floor": saved.ap_floor,
+        "emitters": saved.emitters,
+    }))
+}
+
+/// `POST /api/v1/config/room` — set room geometry + node positions from the
+/// Room Builder UI. Takes effect immediately (updates `node_positions_config`
+/// and the live `MultistaticFuser`, no restart needed) and persists to
+/// `<data_dir>/room_config.json` so it's picked up on the next launch too.
+///
+/// Body: a full `RoomConfig` (`{ "width_m", "depth_m", "nodes": [...] }`).
+/// Validate a `RoomConfig` submitted via `POST /api/v1/config/room`. Pure
+/// and side-effect-free so it's directly unit-testable without standing up
+/// a full `SharedState`/axum test harness.
+pub(crate) fn validate_room_config(config: &RoomConfig) -> Result<(), String> {
+    if !config.width_m.is_finite() || config.width_m <= 0.0 {
+        return Err("width_m must be a positive, finite number".to_string());
+    }
+    if !config.depth_m.is_finite() || config.depth_m <= 0.0 {
+        return Err("depth_m must be a positive, finite number".to_string());
+    }
+    let mut seen = std::collections::HashSet::new();
+    for n in &config.nodes {
+        if !seen.insert(n.id) {
+            return Err(format!("duplicate node id {}", n.id));
+        }
+        if !n.x.is_finite() || !n.y.is_finite() || !n.z.is_finite() {
+            return Err(format!("node {} has a non-finite coordinate", n.id));
+        }
+    }
+    if let Some([x, y, z]) = config.ap_position {
+        if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+            return Err("ap_position has a non-finite coordinate".to_string());
+        }
+        // Deliberately no room-bounds check here (unlike nothing else checks
+        // node bounds either, but worth stating): a real AP is very often
+        // physically outside the sensed room (another floor, a hallway
+        // closet), and that's fine — ap_position only needs to be a real,
+        // finite point in the same coordinate frame, not inside width_m/depth_m.
+    }
+
+    // ── Storeys ──────────────────────────────────────────────────────────
+    let mut levels = std::collections::HashSet::new();
+    for f in &config.floors {
+        if !levels.insert(f.level) {
+            return Err(format!("duplicate floor level {}", f.level));
+        }
+        if !f.elevation_m.is_finite() || !f.ceiling_m.is_finite() {
+            return Err(format!("floor {} has a non-finite height", f.level));
+        }
+        if f.ceiling_m <= 0.0 {
+            return Err(format!("floor {} ceiling_m must be positive", f.level));
+        }
+        if !f.subfloor_m.is_finite() || f.subfloor_m < 0.0 {
+            return Err(format!(
+                "floor {} subfloor_m must be zero or positive",
+                f.level
+            ));
+        }
+        // Level 1 defines the origin, so it cannot float. Catching this here
+        // stops a plan whose every coordinate is silently offset.
+        if f.level == 1 && f.elevation_m != 0.0 {
+            return Err(
+                "floor 1 must have elevation_m = 0: the origin is the \
+                 north-west corner of the first floor, at floor level"
+                    .to_string(),
+            );
+        }
+    }
+    // Ascending storeys must ascend. A second floor below a first is a typo
+    // every time, and it would silently invert every through-floor distance.
+    let mut sorted: Vec<&Floor> = config.floors.iter().collect();
+    sorted.sort_by_key(|f| f.level);
+    for w in sorted.windows(2) {
+        if w[1].elevation_m <= w[0].elevation_m {
+            return Err(format!(
+                "floor {} is at or below floor {} ({} m vs {} m)",
+                w[1].level, w[0].level, w[1].elevation_m, w[0].elevation_m
+            ));
+        }
+    }
+
+    // A node may only sit on a storey that exists — but only once storeys are
+    // being used at all, so pre-floors configs stay valid.
+    if !config.floors.is_empty() {
+        for n in &config.nodes {
+            let lvl = n.floor.unwrap_or(1);
+            if !levels.contains(&lvl) {
+                return Err(format!("node {} is on undefined floor {}", n.id, lvl));
+            }
+        }
+    }
+
+    if !config.floors.is_empty() {
+        if let Some(lvl) = config.ap_floor {
+            if !levels.contains(&lvl) {
+                return Err(format!("ap_floor {lvl} is not a declared floor"));
+            }
+        }
+    }
+
+    // ── Walls ────────────────────────────────────────────────────────────
+    for (i, wall) in config.walls.iter().enumerate() {
+        if ![wall.x1, wall.y1, wall.x2, wall.y2]
+            .iter()
+            .all(|v| v.is_finite())
+        {
+            return Err(format!("wall {i} has a non-finite endpoint"));
+        }
+        // A zero-length wall is not a wall. It would also make any
+        // segment-intersection test degenerate rather than merely wrong.
+        let dx = wall.x2 - wall.x1;
+        let dy = wall.y2 - wall.y1;
+        if (dx * dx + dy * dy).sqrt() < 1e-3 {
+            return Err(format!("wall {i} has zero length"));
+        }
+        if let Some(h) = wall.height_m {
+            if !h.is_finite() || h <= 0.0 {
+                return Err(format!("wall {i} height_m must be positive"));
+            }
+        }
+        if !config.floors.is_empty() && !levels.contains(&wall.level) {
+            return Err(format!("wall {i} is on undefined floor {}", wall.level));
+        }
+    }
+
+    // A MAC may appear once. A duplicate is two different judgements about
+    // the same transmitter, and nothing downstream can choose between them.
+    let mut seen_macs = std::collections::HashSet::new();
+    for (i, e) in config.emitters.iter().enumerate() {
+        let mac = e.mac.to_ascii_lowercase();
+        if parse_mac_str(&mac).is_none() {
+            return Err(format!(
+                "emitter {i} has a malformed MAC `{}`; expected aa:bb:cc:dd:ee:ff",
+                e.mac
+            ));
+        }
+        // Two entries for one transmitter would let a later save silently win
+        // and quietly move an illuminator, which is exactly the class of
+        // invisible change this config exists to prevent.
+        if !seen_macs.insert(mac) {
+            return Err(format!("duplicate emitter MAC `{}`", e.mac));
+        }
+        if let Some([x, y, z]) = e.position {
+            if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+                return Err(format!("emitter {i} has a non-finite coordinate"));
+            }
+        }
+        if let Some(u) = e.uncertainty_m {
+            if !u.is_finite() || u < 0.0 {
+                return Err(format!("emitter {i} uncertainty_m must be zero or positive"));
+            }
+            // An uncertainty with nothing to be uncertain about is a sign the
+            // position was cleared and the doubt left behind. Reject it rather
+            // than carry a number that describes nothing.
+            if e.position.is_none() {
+                return Err(format!(
+                    "emitter {i} has uncertainty_m but no position; \
+                     an unknown position is expressed by omitting position entirely"
+                ));
+            }
+        }
+        if !EMITTER_STATUSES.contains(&e.status.as_str()) {
+            return Err(format!(
+                "emitter {i} has unknown status `{}`; expected one of {:?}",
+                e.status, EMITTER_STATUSES
+            ));
+        }
+        // Approval asserts "this thing does not move", which is a claim about a
+        // place. Approving an emitter whose position is unknown would put an
+        // unlocated focus into the geometric path.
+        if EMITTER_FOCUS_STATUSES.contains(&e.status.as_str()) && e.position.is_none() {
+            return Err(format!(
+                "emitter {i} is `{}` but has no position; that status means it is                  trusted as a fixed focus, which requires one",
+                e.status
+            ));
+        }
+        // `surveyed` claims the position was measured. Carrying a radius of
+        // doubt alongside that claim means one of the two is wrong, and a
+        // solver has no way to tell which — so the pair is refused rather than
+        // silently preferring one.
+        if e.status == "surveyed" && e.uncertainty_m.is_some_and(|u| u > 0.0) {
+            return Err(format!(
+                "emitter {i} is surveyed but carries uncertainty_m {}; a measured                  position has no radius of doubt — use `approved` for an estimate",
+                e.uncertainty_m.unwrap_or(0.0)
+            ));
+        }
+        // Conversely an approved (estimated) position without a stated doubt is
+        // indistinguishable from a surveyed one, and would be trusted as if
+        // measured.
+        if e.status == "approved" && !e.uncertainty_m.is_some_and(|u| u > 0.0) {
+            return Err(format!(
+                "emitter {i} is approved but states no uncertainty_m; an estimated                  position needs one — use `surveyed` if you measured it"
+            ));
+        }
+        if !config.floors.is_empty() {
+            if let Some(lvl) = e.floor {
+                if !levels.contains(&lvl) {
+                    return Err(format!("emitter {i} is on undefined floor {lvl}"));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn config_set_room(
+    State(state): State<SharedState>,
+    Json(config): Json<RoomConfig>,
+) -> Json<serde_json::Value> {
+    if let Err(e) = validate_room_config(&config) {
+        return Json(serde_json::json!({"error": e}));
+    }
+
+    let mut s = state.write().await;
+    // Refresh the ingestion-time exclusion set from the config just
+    // accepted. Without this the set stays empty and the check at
+    // ingestion is dead code -- excluded would once again mean nothing
+    // more than "not approved".
+    s.excluded_emitters = excluded_emitter_macs(&config);
+    let max_id = config.nodes.iter().map(|n| n.id).max().unwrap_or(0);
+    let mut positions = vec![[0.0f32, 0.0, 0.0]; max_id as usize + 1];
+    for n in &config.nodes {
+        positions[n.id as usize] = [n.x, n.y, n.z];
+    }
+    s.node_positions_config = positions.clone();
+    s.multistatic_fuser.set_node_positions(positions);
+    let data_dir = s.data_dir.clone();
+    drop(s);
+    save_room_config(&data_dir, &config);
+    Json(serde_json::json!({
+        "status": "ok",
+        "width_m": config.width_m,
+        "depth_m": config.depth_m,
+        "nodes": config.nodes,
     }))
 }
 
