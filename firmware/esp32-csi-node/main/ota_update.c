@@ -9,6 +9,7 @@
  */
 
 #include "ota_update.h"
+#include "config_api.h"
 
 #include <string.h>
 #include "esp_log.h"
@@ -17,6 +18,8 @@
 #include "esp_app_desc.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "esp_system.h"
+#include "esp_timer.h"
 
 static const char *TAG = "ota_update";
 
@@ -79,24 +82,168 @@ static bool ota_check_auth(httpd_req_t *req)
     return result == 0;
 }
 
+bool ota_auth_check(httpd_req_t *req)
+{
+    return ota_check_auth(req);
+}
+
 /**
  * GET /ota/status — return firmware version and partition info.
  */
+
+/* ------------------------------------------------- rollback lifecycle --- */
+/*
+ * With CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE a freshly-OTA'd image boots as
+ * ESP_OTA_IMG_PENDING_VERIFY. If it reboots without calling
+ * esp_ota_mark_app_valid_cancel_rollback() the bootloader reverts to the
+ * previous partition and marks the new one ESP_OTA_IMG_INVALID.
+ *
+ * WHEN to confirm is the whole design. Confirming in app_main() would make
+ * rollback decorative -- any image that starts would qualify. The failure that
+ * actually costs someone a ladder and a USB cable is a node that cannot be
+ * REACHED, and unreachable means no WiFi. So the criterion is: obtained an IP,
+ * and then stayed up for a soak period. The soak also catches an image that
+ * associates and then crashes, which confirming on IP alone would miss.
+ *
+ * Deliberately conservative: a reboot for any other reason inside the soak
+ * window rolls back a good image. That errs toward a node that works over a
+ * node that is new, which is the right way to be wrong.
+ */
+
+#define ROLLBACK_SOAK_US (60 * 1000000ULL)
+#define OTA_STATE_NS     "ota_state"
+
+static bool s_pending_verify = false;
+static esp_timer_handle_t s_soak_timer = NULL;
+/* Sized for the worst case the compiler can prove: label, a 32-char
+ * version, the state phrase and the longest reset-reason string. */
+static char s_rollback_reason[160] = {0};
+
+static const char *reset_reason_str(esp_reset_reason_t r)
+{
+    switch (r) {
+        case ESP_RST_POWERON:  return "power-on";
+        case ESP_RST_SW:       return "software";
+        case ESP_RST_PANIC:    return "panic";
+        case ESP_RST_INT_WDT:  return "interrupt-watchdog";
+        case ESP_RST_TASK_WDT: return "task-watchdog";
+        case ESP_RST_WDT:      return "watchdog";
+        case ESP_RST_BROWNOUT: return "brownout";
+        case ESP_RST_DEEPSLEEP:return "deep-sleep";
+        case ESP_RST_EXT:      return "external";
+        default:               return "unknown";
+    }
+}
+
+static void rollback_store_reason(const char *reason)
+{
+    nvs_handle_t h;
+    if (nvs_open(OTA_STATE_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    if (reason && reason[0]) nvs_set_str(h, "rb_reason", reason);
+    else                     nvs_erase_key(h, "rb_reason");
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+void ota_rollback_boot_check(void)
+{
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t st;
+
+    if (running && esp_ota_get_state_partition(running, &st) == ESP_OK &&
+        st == ESP_OTA_IMG_PENDING_VERIFY) {
+        s_pending_verify = true;
+        ESP_LOGW(TAG, "new image on trial (%s): must reach the network and "
+                      "survive %llu s or the bootloader reverts",
+                 running->label, ROLLBACK_SOAK_US / 1000000ULL);
+    }
+
+    /* Did the bootloader already revert something? The failed image is the
+     * OTHER slot, left marked INVALID or ABORTED. Reporting this is the point:
+     * a node that silently reappears on its old firmware looks identical to
+     * one whose update never arrived. */
+    const esp_partition_t *other = esp_ota_get_next_update_partition(NULL);
+    if (other && esp_ota_get_state_partition(other, &st) == ESP_OK &&
+        (st == ESP_OTA_IMG_INVALID || st == ESP_OTA_IMG_ABORTED)) {
+        esp_app_desc_t bad;
+        const char *ver = (esp_ota_get_partition_description(other, &bad) == ESP_OK)
+                          ? bad.version : "unknown";
+        snprintf(s_rollback_reason, sizeof(s_rollback_reason),
+                 "%.16s image %.32s %s; recovered via %s",
+                 other->label, ver,
+                 st == ESP_OTA_IMG_INVALID ? "failed verification" : "was aborted",
+                 reset_reason_str(esp_reset_reason()));
+        ESP_LOGE(TAG, "FIRMWARE ROLLBACK: %s", s_rollback_reason);
+        rollback_store_reason(s_rollback_reason);
+    } else {
+        /* Nothing pending: surface any reason banked by an earlier boot so the
+         * server still learns about it if it polled late. */
+        nvs_handle_t h;
+        if (nvs_open(OTA_STATE_NS, NVS_READONLY, &h) == ESP_OK) {
+            size_t len = sizeof(s_rollback_reason);
+            if (nvs_get_str(h, "rb_reason", s_rollback_reason, &len) != ESP_OK) {
+                s_rollback_reason[0] = '\0';
+            }
+            nvs_close(h);
+        }
+    }
+}
+
+static void rollback_confirm(void *arg)
+{
+    (void)arg;
+    if (!s_pending_verify) return;
+    if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
+        s_pending_verify = false;
+        ESP_LOGI(TAG, "new image CONFIRMED: networked and stable, rollback cancelled");
+        /* The previous failure, if any, is now history. */
+        s_rollback_reason[0] = '\0';
+        rollback_store_reason(NULL);
+    } else {
+        ESP_LOGE(TAG, "could not mark the image valid; it will roll back on reboot");
+    }
+}
+
+void ota_rollback_notify_connected(void)
+{
+    if (!s_pending_verify || s_soak_timer) return;
+    const esp_timer_create_args_t a = {
+        .callback = rollback_confirm,
+        .name = "ota_soak",
+    };
+    if (esp_timer_create(&a, &s_soak_timer) == ESP_OK) {
+        esp_timer_start_once(s_soak_timer, ROLLBACK_SOAK_US);
+        ESP_LOGI(TAG, "image on trial reached the network; confirming in %llu s",
+                 ROLLBACK_SOAK_US / 1000000ULL);
+    } else {
+        /* Without a soak we cannot confirm, and an unconfirmed image reverts.
+         * Confirm now: a working node on new firmware beats a pointless
+         * rollback caused by our own resource failure. */
+        ESP_LOGW(TAG, "no timer for the soak; confirming immediately");
+        rollback_confirm(NULL);
+    }
+}
+
 static esp_err_t ota_status_handler(httpd_req_t *req)
 {
     const esp_app_desc_t *app = esp_app_get_description();
     const esp_partition_t *running = esp_ota_get_running_partition();
     const esp_partition_t *update = esp_ota_get_next_update_partition(NULL);
 
-    char response[512];
+    char response[1024];
     int len = snprintf(response, sizeof(response),
         "{\"version\":\"%s\",\"date\":\"%s\",\"time\":\"%s\","
         "\"running_partition\":\"%s\",\"next_partition\":\"%s\","
-        "\"max_size\":%lu}",
+        "\"max_size\":%lu,\"pending_verify\":%s,"
+        "\"last_rollback\":%s%s%s}",
         app->version, app->date, app->time,
         running ? running->label : "unknown",
         update ? update->label : "none",
-        (unsigned long)(update ? update->size : 0));
+        (unsigned long)(update ? update->size : 0),
+        s_pending_verify ? "true" : "false",
+        s_rollback_reason[0] ? "\"" : "null",
+        s_rollback_reason[0] ? s_rollback_reason : "",
+        s_rollback_reason[0] ? "\"" : "");
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, response, len);
@@ -214,7 +361,12 @@ static esp_err_t ota_start_server(httpd_handle_t *out_handle)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = OTA_PORT;
-    config.max_uri_handlers = 12;  /* Extra slots for WASM endpoints (ADR-040). */
+    config.max_uri_handlers = 14;  /* WASM endpoints (ADR-040) + /config. */
+    /* 12 KB, not the 4 KB default: the upload handler runs esp_ota_end() ->
+     * esp_image_verify() on THIS task's stack, which overflows at the end of
+     * an upload -- the transfer completes, validation panics, and the node
+     * reboots into the old image. Reported upstream as PR #1594. */
+    config.stack_size = 12288;
     /* Increase receive timeout for large uploads. */
     config.recv_wait_timeout = 30;
 
@@ -242,6 +394,12 @@ static esp_err_t ota_start_server(httpd_handle_t *out_handle)
         .user_ctx = NULL,
     };
     httpd_register_uri_handler(server, &upload_uri);
+
+    /* Remote configuration shares this server so it inherits the OTA PSK,
+     * the port, and the same fail-closed auth path (config_api.c). */
+    if (config_api_register(server) != ESP_OK) {
+        ESP_LOGW(TAG, "remote config endpoints unavailable");
+    }
 
     ESP_LOGI(TAG, "OTA HTTP server started on port %d", OTA_PORT);
     ESP_LOGI(TAG, "  GET  /ota/status — firmware version info");
