@@ -16,6 +16,7 @@
 
 #include "sdkconfig.h"
 #include "c6_sync_espnow.h"
+#include "nvs_config.h"
 #include "esp_log.h"
 #include "esp_now.h"
 #include "esp_wifi.h"
@@ -26,11 +27,75 @@
 #include "freertos/timers.h"
 #include <string.h>
 
+/* Same pattern as csi_collector.c / edge_processing.c — the provisioned
+ * config is a single global that each translation unit declares for itself. */
+extern nvs_config_t g_nvs_config;
+
+
 static const char *TAG = "c6_espnow";
 
 #define BEACON_MAGIC      0x53454E50u   /* 'SENP' little-endian */
 #define BEACON_PROTO_VER  0x01
-#define BEACON_PERIOD_MS  100
+/* Beacon period.
+ *
+ * These beacons started life as time sync only, where 100 ms is ample. They
+ * now double as the sensing carrier for node<->node links (ADR-345), which
+ * changes what the period has to satisfy: not bandwidth, but how many frames
+ * per second actually reach each receiver's motion window.
+ *
+ * Sizing this against the receiver's gate is the whole game, and an earlier
+ * revision got it wrong in an instructive way. `CSI_MIN_PROCESS_INTERVAL_US`
+ * caps a node at 50 Hz *in total, across every transmitter it hears* — so the
+ * period was set to 20 ms to "match the ceiling". But each node hears N-1
+ * peers plus the AP, not one transmitter. With three nodes that offered
+ * 2 x 50 + AP ~= 110 frames/sec into a 50 frames/sec pipe.
+ *
+ * Measured 2026-08-28: 60-90% of every peer beacon was discarded, per-link
+ * delivery collapsed to 4-20 fps, and which frames survived was essentially
+ * random. The 64-frame motion window then spanned up to 13 seconds on the
+ * weakest links, which is what made them look noisy. Five times the airtime
+ * bought less usable data. The same change also wedged a node's ESP-NOW
+ * transmit queue (see the in-flight guard in send_beacon below).
+ *
+ * Correct sizing keeps the *total* under the gate:
+ *
+ *     (N - 1) * (1000 / period) + ap_rate  <=  50
+ *
+ * At three nodes with the AP contributing ~10-15 fps that wants period >= 57
+ * ms; 80 ms leaves margin and still delivers ~12.5 fps per link, so the
+ * 64-frame window spans ~5 s and a 35 s dwell yields ~7 independent samples.
+ *
+ * This does NOT generalise: 13 nodes hear 12 peers, and the same inequality
+ * demands ~340 ms. So the period is no longer a compile-time constant — it is
+ * the fixed beacon period. Deriving it from the provisioned fleet size is a
+ * separate change.
+ *
+ * Doppler is not a consideration. An earlier justification for 20 ms was
+ * Nyquist for 1-20 Hz motion, but the phase measurement that needed it was
+ * shown to be unusable on this silicon and the amplitude pipeline that
+ * replaced it needs frames per window, not bandwidth. */
+#define BEACON_PERIOD_MS  80
+
+
+static uint32_t s_beacon_period_ms = BEACON_PERIOD_MS;
+
+
+/* Beacons allowed outstanding before send_beacon skips a tick.
+ *
+ * esp_now_send() is asynchronous: it queues to the WiFi task and completes via
+ * on_send(). Queueing faster than the radio drains it returns
+ * ESP_ERR_ESPNOW_NO_MEM, and the previous code counted that failure and
+ * immediately tried again, which is how a node ended up transmitting nothing
+ * for hours while still receiving normally. Skipping a beacon is free; wedging
+ * the queue is not. */
+#define ESPNOW_MAX_INFLIGHT 2
+
+/* No send completion for this long with sends outstanding means the callback
+ * has stopped arriving and the counter can never drain on its own. */
+#define ESPNOW_STALL_US (1000 * 1000)
+
+/* Consecutive esp_now_send() failures before re-adding the broadcast peer. */
+#define ESPNOW_FAIL_BEFORE_RECOVERY 20
 #define VALID_WINDOW_MS   3000
 
 typedef struct __attribute__((packed)) {
@@ -52,6 +117,14 @@ static TimerHandle_t s_beacon_timer = NULL;
 
 static uint32_t s_tx_count = 0;
 static uint32_t s_tx_fail  = 0;
+/* Sends queued but not yet completed by on_send(). Written from the timer task
+ * and the WiFi task; the C6 is single-core and both only ever add or subtract
+ * one, so `volatile` is sufficient here and avoids pulling in atomics. */
+static volatile int32_t s_inflight  = 0;
+static uint32_t s_tx_skipped        = 0;
+static uint32_t s_consec_fail       = 0;
+static uint32_t s_recoveries        = 0;
+static int64_t  s_last_send_cb_us   = 0;
 static uint32_t s_rx_count = 0;
 static uint32_t s_rx_magic_match = 0;
 
@@ -77,22 +150,76 @@ static uint64_t mac6_to_u64(const uint8_t mac[6])
            ((uint64_t)mac[4] <<  8) |  (uint64_t)mac[5];
 }
 
+/* Re-add the broadcast peer and clear the send bookkeeping.
+ *
+ * Deliberately not a full esp_now_deinit()/init(): that would tear down the
+ * receive path too, and every observed failure has been transmit-side while
+ * receive kept working. Start with the smallest thing that could restore
+ * sending. */
+static void espnow_recover(const char *why)
+{
+    esp_now_peer_info_t peer = {0};
+    memcpy(peer.peer_addr, s_broadcast_mac, 6);
+    peer.channel = 0;
+    peer.ifidx   = WIFI_IF_STA;
+    peer.encrypt = false;
+
+    esp_now_del_peer(s_broadcast_mac);
+    esp_err_t r = esp_now_add_peer(&peer);
+    s_recoveries++;
+    s_consec_fail = 0;
+    s_inflight    = 0;
+    s_last_send_cb_us = esp_timer_get_time();
+    ESP_LOGW(TAG, "espnow recovery #%lu (%s): re-add broadcast peer -> %s",
+             (unsigned long)s_recoveries, why, esp_err_to_name(r));
+}
+
 static void send_beacon(void)
 {
+    int64_t now_us = esp_timer_get_time();
+
+    /* A send that never completes would pin s_inflight above the limit
+     * forever and silence this node permanently — which is exactly the
+     * failure seen on 2026-08-28, where a node kept receiving beacons and
+     * streaming CSI while transmitting nothing at all. Treat a stalled
+     * callback as a wedge rather than waiting for it. */
+    if (s_inflight > 0 && (now_us - s_last_send_cb_us) > ESPNOW_STALL_US) {
+        espnow_recover("send callback stalled");
+    }
+
+    if (s_inflight >= ESPNOW_MAX_INFLIGHT) {
+        s_tx_skipped++;
+        return;  /* queue is backed up; a dropped beacon costs one sample */
+    }
+
     espnow_beacon_t b = {
         .magic           = BEACON_MAGIC,
         .proto_ver       = BEACON_PROTO_VER,
         .leader_flag     = s_is_leader ? 1 : 0,
         ._reserved       = 0,
-        .leader_epoch_us = (uint64_t)esp_timer_get_time(),
+        .leader_epoch_us = (uint64_t)now_us,
     };
     esp_err_t r = esp_now_send(s_broadcast_mac, (uint8_t *)&b, sizeof(b));
     s_tx_count++;
-    if (r != ESP_OK) s_tx_fail++;
-    /* Diag log every 50 beacons. */
+    if (r == ESP_OK) {
+        s_inflight++;
+        s_consec_fail = 0;
+    } else {
+        s_tx_fail++;
+        s_consec_fail++;
+        if (s_consec_fail >= ESPNOW_FAIL_BEFORE_RECOVERY) {
+            espnow_recover(esp_err_to_name(r));
+        }
+    }
+
+    /* Diag log every 50 beacons. skipped/recov are the two counters that
+     * distinguish a healthy mesh from one quietly failing to transmit. */
     if ((s_tx_count % 50) == 1) {
-        ESP_LOGI(TAG, "tx#%lu (fail=%lu) rx#%lu (match=%lu) leader=%d offset_us=%lld smoothed=%lld",
+        ESP_LOGI(TAG, "tx#%lu (fail=%lu skip=%lu recov=%lu inflight=%d) "
+                      "rx#%lu (match=%lu) leader=%d offset_us=%lld smoothed=%lld",
                  (unsigned long)s_tx_count, (unsigned long)s_tx_fail,
+                 (unsigned long)s_tx_skipped, (unsigned long)s_recoveries,
+                 (int)s_inflight,
                  (unsigned long)s_rx_count, (unsigned long)s_rx_magic_match,
                  (int)s_is_leader, (long long)s_offset_us,
                  (long long)s_offset_us_smoothed);
@@ -161,12 +288,16 @@ static void on_recv(const uint8_t *src_mac, const uint8_t *data, int len)
 static void on_send(const esp_now_send_info_t *tx_info, esp_now_send_status_t status)
 {
     (void)tx_info;
+    if (s_inflight > 0) s_inflight--;
+    s_last_send_cb_us = esp_timer_get_time();
     if (status != ESP_NOW_SEND_SUCCESS) s_tx_fail++;
 }
 #else
 static void on_send(const uint8_t *mac, esp_now_send_status_t status)
 {
     (void)mac;
+    if (s_inflight > 0) s_inflight--;
+    s_last_send_cb_us = esp_timer_get_time();
     if (status != ESP_NOW_SEND_SUCCESS) s_tx_fail++;
 }
 #endif
@@ -217,9 +348,15 @@ esp_err_t c6_sync_espnow_init(void)
     s_is_leader    = true;
     s_leader_id    = s_local_id;
     s_last_seen_us = (uint64_t)esp_timer_get_time();
+    s_last_send_cb_us = esp_timer_get_time();
+
+    /* Resolve the cadence before the timer exists — it cannot be changed
+     * afterwards without re-creating the timer, and getting it wrong is the
+     * failure mode this whole derivation exists to prevent. */
+    s_beacon_period_ms = BEACON_PERIOD_MS;
 
     s_beacon_timer = xTimerCreate("c6_espnow_beacon",
-                                  pdMS_TO_TICKS(BEACON_PERIOD_MS),
+                                  pdMS_TO_TICKS(s_beacon_period_ms),
                                   pdTRUE, NULL, beacon_timer_cb);
     if (s_beacon_timer == NULL) {
         ESP_LOGE(TAG, "xTimerCreate failed");
@@ -228,7 +365,7 @@ esp_err_t c6_sync_espnow_init(void)
     xTimerStart(s_beacon_timer, 0);
 
     ESP_LOGI(TAG, "init done: local_id=%012llx leader=yes(candidate) period=%ums",
-             (unsigned long long)s_local_id, (unsigned)BEACON_PERIOD_MS);
+             (unsigned long long)s_local_id, (unsigned)s_beacon_period_ms);
     return ESP_OK;
 }
 
