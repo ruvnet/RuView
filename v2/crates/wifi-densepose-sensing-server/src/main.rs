@@ -383,6 +383,20 @@ struct CalibrationGridBinding {
     evidence: Option<CalibrationGridEvidence>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct CalibrationModelReceipt {
+    schema: &'static str,
+    boot_epoch: String,
+    session_id: String,
+    model_id: String,
+    binding_digest: String,
+    source_node_ids: Vec<u8>,
+    frame_count: u64,
+    variance_explained: f64,
+    baseline_eigenvalue_count: usize,
+    completed_at_unix_ms: u64,
+}
+
 /// Sensing update broadcast to WebSocket clients
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SensingUpdate {
@@ -1898,8 +1912,16 @@ struct AppStateInner {
     bootstrap_baseline_active: bool,
     /// Server generated identity for the current explicit calibration model.
     calibration_model_id: Option<String>,
-    /// Nodes that actually contributed frames to the current calibration.
+    /// Process and current explicit room-calibration identities.
+    calibration_boot_epoch: String,
+    calibration_session_id: Option<String>,
+    calibration_binding_digest: Option<String>,
+    /// Exact sorted node set authorized by the current room binding.
     calibration_source_node_ids: std::collections::BTreeSet<u8>,
+    /// Authorized nodes that actually contributed raw CSI to this session.
+    calibration_observed_source_node_ids: std::collections::BTreeSet<u8>,
+    /// Immutable evidence created when the active model is finalized.
+    calibration_model_receipt: Option<CalibrationModelReceipt>,
     /// Immutable source and CSI symbol grid selected from recent header-only
     /// evidence for the current field model.
     calibration_grid_binding: Option<CalibrationGridBinding>,
@@ -2063,9 +2085,11 @@ impl AppStateInner {
         amplitudes: &[f64],
         observed_at: std::time::Instant,
     ) -> bool {
-        let binding_matches = self.calibration_grid_binding.is_some_and(|binding| {
-            binding.source_node_id == node_id && binding.grid == grid
-        });
+        // The field model remains single-link, but every radio in the room
+        // binding may contribute bounded observations on the frozen grid.
+        let binding_matches = self
+            .calibration_grid_binding
+            .is_some_and(|binding| binding.grid == grid);
         if !binding_matches
             || !calibration_source_accepts(&self.calibration_source_node_ids, node_id)
             || self.calibration_sequence_fault_node_ids.contains(&node_id)
@@ -2119,7 +2143,7 @@ impl AppStateInner {
             }
         });
         if accepted {
-            self.calibration_source_node_ids.insert(node_id);
+            self.calibration_observed_source_node_ids.insert(node_id);
             self.calibration_last_sequences.insert(node_id, sequence);
             if let Some(node) = self.node_states.get_mut(&node_id) {
                 node.push_field_model_frame(sequence, amplitudes, observed_at);
@@ -2441,7 +2465,12 @@ impl AppStateInner {
             bootstrap_baseline: None,
             bootstrap_baseline_active: false,
             calibration_model_id: None,
+            calibration_boot_epoch: opaque_calibration_id("cal-boot"),
+            calibration_session_id: None,
+            calibration_binding_digest: None,
             calibration_source_node_ids: std::collections::BTreeSet::new(),
+            calibration_observed_source_node_ids: std::collections::BTreeSet::new(),
+            calibration_model_receipt: None,
             calibration_grid_binding: None,
             calibration_last_sequences: HashMap::new(),
             calibration_reordered_packets: HashMap::new(),
@@ -6793,11 +6822,28 @@ fn edge_vitals_message_for_publication(
     })
 }
 
-fn opaque_calibration_model_id() -> String {
+fn opaque_calibration_id(prefix: &str) -> String {
     let mut bytes = [0_u8; 16];
     OsRng.fill_bytes(&mut bytes);
     let suffix: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
-    format!("cal-model-{suffix}")
+    format!("{prefix}-{suffix}")
+}
+
+fn opaque_calibration_model_id() -> String {
+    opaque_calibration_id("cal-model")
+}
+
+fn valid_binding_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn valid_source_node_ids(source_node_ids: &[u8]) -> bool {
+    !source_node_ids.is_empty()
+        && source_node_ids.len() <= 16
+        && source_node_ids.windows(2).all(|pair| pair[0] < pair[1])
 }
 
 fn calibration_source_accepts(
@@ -6820,6 +6866,24 @@ mod bootstrap_vital_publication_tests {
         CsiGridKey {
             n_subcarriers: 64,
             ppdu_type: 0,
+        }
+    }
+
+    fn test_binding_request(source_node_ids: Vec<u8>) -> CalibrationBindingRequest {
+        CalibrationBindingRequest {
+            binding_digest: "a".repeat(64),
+            source_node_ids,
+        }
+    }
+
+    fn bind_test_identity(state: &mut AppStateInner) -> CalibrationIdentityRequest {
+        state.calibration_session_id = Some("cal-session-11111111111111111111111111111111".into());
+        state.calibration_binding_digest = Some("a".repeat(64));
+        CalibrationIdentityRequest {
+            boot_epoch: state.calibration_boot_epoch.clone(),
+            session_id: state.calibration_session_id.clone(),
+            binding_digest: state.calibration_binding_digest.clone(),
+            source_node_ids: Some(state.calibration_source_node_ids.iter().copied().collect()),
         }
     }
 
@@ -6923,6 +6987,7 @@ mod bootstrap_vital_publication_tests {
             Query(CalibrationStartQuery {
                 source_node_id: Some(5),
             }),
+            Json(test_binding_request(vec![5])),
         )
         .await;
         assert_eq!(unavailable["success"], false);
@@ -6952,9 +7017,16 @@ mod bootstrap_vital_publication_tests {
             Query(CalibrationStartQuery {
                 source_node_id: Some(5),
             }),
+            Json(test_binding_request(vec![5])),
         )
         .await;
         assert_eq!(started["success"], true);
+        assert_eq!(started["status"], "uncalibrated");
+        assert_eq!(started["frame_count"], 0);
+        assert_eq!(started["binding_digest"], "a".repeat(64));
+        assert!(started["boot_epoch"].as_str().is_some_and(|value| value.starts_with("cal-boot-") && value.len() == 41));
+        assert!(started["session_id"].as_str().is_some_and(|value| value.starts_with("cal-session-") && value.len() == 44));
+        assert!(started["model_id"].as_str().is_some_and(|value| value.starts_with("cal-model-") && value.len() == 42));
         assert_eq!(started["source_node_ids"], serde_json::json!([5]));
         assert_eq!(started["source_grid"]["n_subcarriers"], 64);
         assert_eq!(started["source_grid"]["ppdu_type"], 0);
@@ -6966,6 +7038,48 @@ mod bootstrap_vital_publication_tests {
             state.calibration_grid_binding.map(|binding| binding.grid),
             Some(test_grid())
         );
+    }
+
+    #[tokio::test]
+    async fn calibration_status_emits_bound_identity_and_exact_contributions() {
+        let mut inner = AppStateInner::minimal();
+        inner.field_model = Some(FieldModel::new(field_bridge::single_link_config()).expect("field model"));
+        inner.calibration_model_id = Some("cal-model-22222222222222222222222222222222".into());
+        inner.calibration_source_node_ids.extend([5, 7]);
+        inner.calibration_observed_source_node_ids.insert(5);
+        let request = bind_test_identity(&mut inner);
+        let expected_boot_epoch = request.boot_epoch.clone();
+        let state = Arc::new(RwLock::new(inner));
+
+        let Json(status) = calibration_status(State(state)).await;
+        assert_eq!(status["active"], true);
+        assert_eq!(status["binding_mode"], "bound");
+        assert_eq!(status["legacy"], false);
+        assert_eq!(status["boot_epoch"], expected_boot_epoch);
+        assert_eq!(status["session_id"], request.session_id.unwrap());
+        assert_eq!(status["binding_digest"], "a".repeat(64));
+        assert_eq!(status["source_node_ids"], serde_json::json!([5, 7]));
+        assert_eq!(status["observed_source_node_ids"], serde_json::json!([5]));
+        assert_eq!(status["missing_source_node_ids"], serde_json::json!([7]));
+        assert!(status["model_receipt"].is_null());
+    }
+
+    #[tokio::test]
+    async fn calibration_status_emits_idle_process_identity() {
+        let inner = AppStateInner::minimal();
+        let boot_epoch = inner.calibration_boot_epoch.clone();
+        let state = Arc::new(RwLock::new(inner));
+
+        let Json(status) = calibration_status(State(state)).await;
+        assert_eq!(status["active"], false);
+        assert_eq!(status["status"], "none");
+        assert_eq!(status["binding_mode"], "none");
+        assert_eq!(status["legacy"], false);
+        assert_eq!(status["boot_epoch"], boot_epoch);
+        assert!(status["session_id"].is_null());
+        assert_eq!(status["source_node_ids"], serde_json::json!([]));
+        assert_eq!(status["observed_source_node_ids"], serde_json::json!([]));
+        assert_eq!(status["missing_source_node_ids"], serde_json::json!([]));
     }
 
     #[test]
@@ -7146,6 +7260,7 @@ mod bootstrap_vital_publication_tests {
         inner.calibration_reordered_packets.insert(5, 3);
         inner.calibration_max_reorder_depth.insert(5, 3);
         inner.calibration_sequence_fault_node_ids.insert(5);
+        let request = bind_test_identity(&mut inner);
         let state = Arc::new(RwLock::new(inner));
 
         let Json(status) = calibration_status(State(state.clone())).await;
@@ -7155,7 +7270,7 @@ mod bootstrap_vital_publication_tests {
         assert_eq!(status["max_reorder_depth_by_node"]["5"], 3);
         assert_eq!(status["sequence_fault_node_ids"], serde_json::json!([5]));
 
-        let Json(stopped) = calibration_stop(State(state)).await;
+        let Json(stopped) = calibration_stop(State(state), Json(request)).await;
         assert_eq!(stopped["success"], false);
         assert_eq!(
             stopped["error_code"],
@@ -7175,9 +7290,11 @@ mod bootstrap_vital_publication_tests {
         );
         inner.calibration_model_id = Some("cal-model-test".to_string());
         inner.calibration_source_node_ids.insert(5);
+        inner.calibration_observed_source_node_ids.insert(5);
+        let request = bind_test_identity(&mut inner);
         let state = Arc::new(RwLock::new(inner));
 
-        let Json(missing) = calibration_stop(State(state.clone())).await;
+        let Json(missing) = calibration_stop(State(state.clone()), Json(request.clone())).await;
         assert_eq!(missing["success"], false);
         assert_eq!(missing["error_code"], "calibration_grid_identity_missing");
 
@@ -7190,7 +7307,7 @@ mod bootstrap_vital_publication_tests {
             });
             state.node_states.insert(5, NodeState::new());
         }
-        let Json(stale) = calibration_stop(State(state)).await;
+        let Json(stale) = calibration_stop(State(state), Json(request)).await;
         assert_eq!(stale["success"], false);
         assert_eq!(stale["error_code"], "calibration_grid_stale");
     }
@@ -7335,6 +7452,39 @@ struct CalibrationStartQuery {
     source_node_id: Option<u8>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct CalibrationBindingRequest {
+    binding_digest: String,
+    source_node_ids: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CalibrationIdentityRequest {
+    boot_epoch: String,
+    session_id: Option<String>,
+    binding_digest: Option<String>,
+    source_node_ids: Option<Vec<u8>>,
+}
+
+fn calibration_identity_matches(s: &AppStateInner, request: &CalibrationIdentityRequest) -> bool {
+    request.boot_epoch == s.calibration_boot_epoch
+        && request.session_id.as_ref() == s.calibration_session_id.as_ref()
+        && request.binding_digest.as_ref() == s.calibration_binding_digest.as_ref()
+        && request.source_node_ids.as_ref().is_some_and(|ids| {
+            ids.iter().copied().collect::<std::collections::BTreeSet<_>>()
+                == s.calibration_source_node_ids
+                && valid_source_node_ids(ids)
+        })
+}
+
+fn calibration_identity_error() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "success": false,
+        "error_code": "calibration_identity_mismatch",
+        "error": "The calibration request does not match the active boot, session, room binding, and node set.",
+    }))
+}
+
 #[derive(Debug, Default, Deserialize)]
 struct BootstrapRefineQuery {
     #[serde(default)]
@@ -7345,10 +7495,23 @@ struct BootstrapRefineQuery {
 async fn calibration_start(
     State(state): State<SharedState>,
     Query(query): Query<CalibrationStartQuery>,
+    Json(request): Json<CalibrationBindingRequest>,
 ) -> Json<serde_json::Value> {
     let mut s = state.write().await;
+    if !valid_binding_digest(&request.binding_digest)
+        || !valid_source_node_ids(&request.source_node_ids)
+    {
+        return Json(serde_json::json!({
+            "success": false,
+            "error_code": "calibration_binding_invalid",
+            "error": "Calibration requires a lowercase SHA-256 room binding and 1 to 16 sorted unique node IDs.",
+        }));
+    }
     let now = std::time::Instant::now();
-    let selected_binding = if let Some(source_node_id) = query.source_node_id {
+    let explicit_source = query
+        .source_node_id
+        .filter(|node_id| request.source_node_ids.binary_search(node_id).is_ok());
+    let selected_binding = if let Some(source_node_id) = explicit_source {
         let Some(node) = s.node_states.get(&source_node_id) else {
             return Json(serde_json::json!({
                 "success": false,
@@ -7376,10 +7539,11 @@ async fn calibration_start(
             evidence: Some(evidence),
         }
     } else {
-        let eligible: Vec<CalibrationGridBinding> = s
-            .node_states
+        let eligible: Vec<CalibrationGridBinding> = request
+            .source_node_ids
             .iter()
-            .filter_map(|(&source_node_id, node)| {
+            .filter_map(|&source_node_id| {
+                let node = s.node_states.get(&source_node_id)?;
                 node.select_calibration_grid(now).map(|(grid, evidence)| {
                     CalibrationGridBinding {
                         source_node_id,
@@ -7389,11 +7553,11 @@ async fn calibration_start(
                 })
             })
             .collect();
-        let [binding] = eligible.as_slice() else {
+        let Some(binding) = eligible.first() else {
             return Json(serde_json::json!({
                 "success": false,
                 "error_code": "calibration_source_required",
-                "error": "Choose exactly one eligible ESP32 source for room calibration.",
+                "error": "None of the bound ESP32 nodes has an eligible raw CSI grid for room calibration.",
                 "eligible_sources": eligible.iter().map(|binding| serde_json::json!({
                     "source_node_id": binding.source_node_id,
                     "grid": binding.grid,
@@ -7432,15 +7596,24 @@ async fn calibration_start(
         Ok(fm) => {
             s.field_model = Some(fm);
             s.calibration_model_id = Some(opaque_calibration_model_id());
+            s.calibration_session_id = Some(opaque_calibration_id("cal-session"));
+            s.calibration_binding_digest = Some(request.binding_digest);
             s.calibration_source_node_ids.clear();
+            s.calibration_observed_source_node_ids.clear();
+            s.calibration_model_receipt = None;
             s.clear_field_model_binding();
             s.clear_calibration_sequence_state();
             s.calibration_source_node_ids
-                .insert(selected_binding.source_node_id);
+                .extend(request.source_node_ids.iter().copied());
             s.calibration_grid_binding = Some(selected_binding);
             Json(serde_json::json!({
                 "success": true,
                 "message": "Calibration started — keep room empty while frames accumulate.",
+                "status": "uncalibrated",
+                "frame_count": 0,
+                "boot_epoch": s.calibration_boot_epoch,
+                "session_id": s.calibration_session_id,
+                "binding_digest": s.calibration_binding_digest,
                 "model_id": s.calibration_model_id,
                 "source_node_ids": s.calibration_source_node_ids,
                 "source_grid": selected_binding.grid,
@@ -7452,8 +7625,14 @@ async fn calibration_start(
     }
 }
 
-async fn calibration_stop(State(state): State<SharedState>) -> Json<serde_json::Value> {
+async fn calibration_stop(
+    State(state): State<SharedState>,
+    Json(request): Json<CalibrationIdentityRequest>,
+) -> Json<serde_json::Value> {
     let mut s = state.write().await;
+    if !calibration_identity_matches(&s, &request) {
+        return calibration_identity_error();
+    }
     let model_id = s.calibration_model_id.clone();
     let source_node_ids: Vec<u8> = s.calibration_source_node_ids.iter().copied().collect();
     let source_grid = s.calibration_grid_binding.map(|binding| binding.grid);
@@ -7481,9 +7660,20 @@ async fn calibration_stop(State(state): State<SharedState>) -> Json<serde_json::
             "source_node_ids": source_node_ids,
         }));
     };
-    if source_node_ids.as_slice() != [binding.source_node_id]
-        || !s.calibration_grid_is_fresh(binding, std::time::Instant::now())
-    {
+    let missing_source_node_ids: Vec<u8> = s
+        .calibration_source_node_ids
+        .difference(&s.calibration_observed_source_node_ids)
+        .copied()
+        .collect();
+    if !missing_source_node_ids.is_empty() {
+        return Json(serde_json::json!({
+            "success": false,
+            "error_code": "calibration_source_nodes_missing",
+            "error": "Every node in the room binding must contribute raw CSI before calibration can be finalized.",
+            "missing_source_node_ids": missing_source_node_ids,
+        }));
+    }
+    if !s.calibration_grid_is_fresh(binding, std::time::Instant::now()) {
         let latest_seen_ms = s
             .node_states
             .get(&binding.source_node_id)
@@ -7543,6 +7733,19 @@ async fn calibration_stop(State(state): State<SharedState>) -> Json<serde_json::
                 let variance_explained = modes.variance_explained;
                 let holdout_window_size = modes.baseline_runtime_window_size;
                 let final_frame_count = fm.calibration_frame_count();
+                let receipt = CalibrationModelReceipt {
+                    schema: field_bridge::CALIBRATION_MODEL_RECEIPT_SCHEMA,
+                    boot_epoch: s.calibration_boot_epoch.clone(),
+                    session_id: s.calibration_session_id.clone().expect("validated identity"),
+                    model_id: model_id.clone().expect("bound calibration model identity"),
+                    binding_digest: s.calibration_binding_digest.clone().expect("validated binding"),
+                    source_node_ids: source_node_ids.clone(),
+                    frame_count: final_frame_count,
+                    variance_explained,
+                    baseline_eigenvalue_count: baseline,
+                    completed_at_unix_ms: chrono::Utc::now().timestamp_millis().max(0) as u64,
+                };
+                s.calibration_model_receipt = Some(receipt.clone());
                 s.begin_field_model_holdout(binding);
                 info!("Field model calibrated: baseline_eigenvalues={baseline}, variance_explained={variance_explained:.2}");
                 Json(serde_json::json!({
@@ -7557,6 +7760,7 @@ async fn calibration_stop(State(state): State<SharedState>) -> Json<serde_json::
                     "source_grid": source_grid,
                     "reordered_packets_by_node": reordered_packets_by_node,
                     "max_reorder_depth_by_node": max_reorder_depth_by_node,
+                    "model_receipt": receipt,
                 }))
             }
             // ADR-080 #2: finalize error chain stays server-side only.
@@ -7575,8 +7779,9 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
     let now = std::time::Instant::now();
     let observed_at_unix_ms = chrono::Utc::now().timestamp_millis().max(0) as u64;
     let effective_status = s.field_model_status_at(observed_at_unix_ms);
-    let active = s.field_model_active_at(observed_at_unix_ms);
     let bootstrap_active = s.bootstrap_baseline_active_at(observed_at_unix_ms);
+    let bound = s.calibration_session_id.is_some();
+    let active = bootstrap_active || bound;
     let bootstrap_background_match = s.bootstrap_background_match(observed_at_unix_ms);
     let runtime_reference = s.field_model.as_ref().and_then(|model| {
         model.modes().map(|modes| serde_json::json!({
@@ -7604,6 +7809,7 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
         || "none".to_string(),
         |status| format!("{status:?}").to_lowercase(),
     );
+    let status = if active { status } else { "none".to_string() };
     let grid_binding = s.calibration_grid_binding.map(|binding| {
         let node = s.node_states.get(&binding.source_node_id);
         let latest_seen_ms = node
@@ -7621,7 +7827,7 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
             { "active" } else { "stale" },
         })
     });
-    Json(serde_json::json!({
+    let mut response = serde_json::json!({
         "active": active,
         "status": status,
         "frame_count": frame_count,
@@ -7639,7 +7845,7 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
         "max_reorder_depth_by_node": s.calibration_max_reorder_depth,
         "sequence_fault_node_ids": s.calibration_sequence_fault_node_ids,
         "runtime_reference": runtime_reference,
-        "binding_mode": if bootstrap_active { "bootstrap_only" } else if active { "runtime" } else { "none" },
+        "binding_mode": if bootstrap_active { "bootstrap_only" } else if bound { "bound" } else { "none" },
         "bootstrap_baseline": s.bootstrap_baseline.as_ref().map(|metadata| serde_json::json!({
             "stored": true,
             "active": bootstrap_active,
@@ -7671,7 +7877,17 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
             "calibrated_evidence_authorized": false,
             "numeric_vitals_authorized": false,
         })),
-    }))
+    });
+    response["boot_epoch"] = serde_json::json!(s.calibration_boot_epoch);
+    response["session_id"] = serde_json::json!(if bound { s.calibration_session_id.clone() } else { None });
+    response["binding_digest"] = serde_json::json!(if bound { s.calibration_binding_digest.clone() } else { None });
+    response["legacy"] = serde_json::json!(false);
+    response["model_id"] = serde_json::json!(if bound { s.calibration_model_id.clone() } else { None });
+    response["model_receipt"] = serde_json::json!(if bound { s.calibration_model_receipt.clone() } else { None });
+    response["source_node_ids"] = serde_json::json!(if bound { s.calibration_source_node_ids.iter().copied().collect::<Vec<_>>() } else { Vec::new() });
+    response["observed_source_node_ids"] = serde_json::json!(if bound { s.calibration_observed_source_node_ids.iter().copied().collect::<Vec<_>>() } else { Vec::new() });
+    response["missing_source_node_ids"] = serde_json::json!(if bound { s.calibration_source_node_ids.difference(&s.calibration_observed_source_node_ids).copied().collect::<Vec<_>>() } else { Vec::new() });
+    Json(response)
 }
 
 /// Validate a completed empty room model against twelve fresh server observed
@@ -7679,9 +7895,13 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
 /// scores, labels, raw CSI, or a replacement model.
 async fn calibration_promote_bootstrap(
     State(state): State<SharedState>,
+    Json(request): Json<CalibrationIdentityRequest>,
 ) -> Json<serde_json::Value> {
     let (expected_model_id, expected_binding, holdout_window_size) = {
         let s = state.read().await;
+        if !calibration_identity_matches(&s, &request) {
+            return calibration_identity_error();
+        }
         let observed_at_unix_ms = chrono::Utc::now().timestamp_millis().max(0) as u64;
         if s.bootstrap_baseline_active || !s.explicit_calibration_fresh_at(observed_at_unix_ms) {
             return Json(serde_json::json!({
@@ -7892,14 +8112,10 @@ async fn calibration_promote_bootstrap(
             "error": "A stable installation identity is required to store a local startup baseline.",
         }));
     };
-    let source_node_ids: Vec<u8> = s.calibration_source_node_ids.iter().copied().collect();
-    if source_node_ids.len() != 1 {
-        return Json(serde_json::json!({
-            "success": false,
-            "error_code": "calibration_source_nodes_missing",
-            "error": "The single-link startup baseline must contain exactly one contributing ESP32 node.",
-        }));
-    }
+    // Persist the frozen model source only: this remains a deliberately
+    // single-link negative startup prior, while the room receipt retains the
+    // complete multi-node contribution identity.
+    let source_node_ids = vec![expected_binding.source_node_id];
     let Some(field_model) = s.field_model.as_ref() else {
         return Json(serde_json::json!({
             "success": false,
@@ -8182,8 +8398,14 @@ async fn calibration_refine_bootstrap(
 
 /// Cancel only an unfinished capture. Completed model deletion remains on the
 /// administrator scoped reset route.
-async fn calibration_cancel(State(state): State<SharedState>) -> Json<serde_json::Value> {
+async fn calibration_cancel(
+    State(state): State<SharedState>,
+    Json(request): Json<CalibrationIdentityRequest>,
+) -> Json<serde_json::Value> {
     let mut s = state.write().await;
+    if !calibration_identity_matches(&s, &request) {
+        return calibration_identity_error();
+    }
     let cancellable = s.field_model.as_ref().is_some_and(|model| {
         matches!(
             model.status(),
@@ -8197,9 +8419,14 @@ async fn calibration_cancel(State(state): State<SharedState>) -> Json<serde_json
             "error": "Only an unfinished empty room capture can be cancelled.",
         }));
     }
+    let cancelled_session_id = s.calibration_session_id.clone();
     s.field_model = None;
     s.calibration_model_id = None;
+    s.calibration_session_id = None;
+    s.calibration_binding_digest = None;
     s.calibration_source_node_ids.clear();
+    s.calibration_observed_source_node_ids.clear();
+    s.calibration_model_receipt = None;
     s.clear_field_model_binding();
     s.clear_calibration_sequence_state();
     if let Some(installation_id) = s.installation_id.clone() {
@@ -8232,14 +8459,31 @@ async fn calibration_cancel(State(state): State<SharedState>) -> Json<serde_json
         "success": true,
         "message": "Unfinished empty room capture cancelled.",
         "status": if s.bootstrap_baseline_active { "bootstrap" } else { "none" },
+        "frame_count": 0,
+        "boot_epoch": s.calibration_boot_epoch,
+        "cancelled_session_id": cancelled_session_id,
     }))
 }
 
-async fn calibration_reset(State(state): State<SharedState>) -> Json<serde_json::Value> {
+async fn calibration_reset(
+    State(state): State<SharedState>,
+    Json(request): Json<CalibrationIdentityRequest>,
+) -> Json<serde_json::Value> {
     let mut s = state.write().await;
+    let boot_only = request.boot_epoch == s.calibration_boot_epoch
+        && request.session_id.is_none()
+        && request.binding_digest.is_none()
+        && request.source_node_ids.is_none();
+    if !boot_only && !calibration_identity_matches(&s, &request) {
+        return calibration_identity_error();
+    }
     s.field_model = None;
     s.calibration_model_id = None;
+    s.calibration_session_id = None;
+    s.calibration_binding_digest = None;
     s.calibration_source_node_ids.clear();
+    s.calibration_observed_source_node_ids.clear();
+    s.calibration_model_receipt = None;
     s.clear_field_model_binding();
     s.clear_calibration_sequence_state();
     s.bootstrap_baseline_active = false;
@@ -11390,10 +11634,15 @@ async fn main() {
         bootstrap_baseline: bootstrap_metadata.clone(),
         bootstrap_baseline_active,
         calibration_model_id: None,
+        calibration_boot_epoch: opaque_calibration_id("cal-boot"),
+        calibration_session_id: None,
+        calibration_binding_digest: None,
         calibration_source_node_ids: bootstrap_metadata
             .as_ref()
             .map(|metadata| metadata.source_node_ids.iter().copied().collect())
             .unwrap_or_default(),
+        calibration_observed_source_node_ids: std::collections::BTreeSet::new(),
+        calibration_model_receipt: None,
         calibration_grid_binding: bootstrap_metadata.as_ref().and_then(|metadata| {
             let [source_node_id] = metadata.source_node_ids.as_slice() else {
                 return None;
