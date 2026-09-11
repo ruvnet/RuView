@@ -7734,7 +7734,7 @@ async fn calibration_stop(
                 let holdout_window_size = modes.baseline_runtime_window_size;
                 let final_frame_count = fm.calibration_frame_count();
                 let receipt = CalibrationModelReceipt {
-                    schema: "ruview.calibration.field-model-receipt.v1",
+                    schema: field_bridge::CALIBRATION_MODEL_RECEIPT_SCHEMA,
                     boot_epoch: s.calibration_boot_epoch.clone(),
                     session_id: s.calibration_session_id.clone().expect("validated identity"),
                     model_id: model_id.clone().expect("bound calibration model identity"),

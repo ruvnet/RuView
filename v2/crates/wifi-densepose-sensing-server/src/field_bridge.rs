@@ -15,6 +15,10 @@ use wifi_densepose_signal::ruvsense::field_model::{
 
 use super::score_to_person_count;
 
+/// Versioned schema for the immutable receipt emitted after field-model calibration.
+pub const CALIBRATION_MODEL_RECEIPT_SCHEMA: &str =
+    "ruview.calibration.field-model-receipt.v1";
+
 /// Length-only canonicalizer for calibration frames (issue #1170 pattern,
 /// shared with `multistatic_bridge`). Raw ESP32 amplitudes arrive at the
 /// hardware's native width (HT20 ≈ 64, HT40 ≈ 128/192); the FieldModel is
