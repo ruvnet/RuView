@@ -47,6 +47,7 @@ fn sample_snapshot() -> SensingSnapshot {
         demoted: false,
         identity_bound: false,
         node_id: "esp32_room_01".into(),
+        synthetic: false,
     }
 }
 
@@ -66,6 +67,30 @@ fn gate_is_fusable_verified_receipt() {
     assert!(ev.provenance.signature_hex.is_some(), "must be signed");
     assert!(verify_event(&ev).is_ok(), "signature must verify");
     assert!(is_fusable(&ev), "verified receipt ⇒ fusable (§11 invariant)");
+}
+
+/// Regression guard: `synthetic` must be a straight pass-through of the
+/// caller's `SensingSnapshot.synthetic`, never hardcoded. Before this fix the
+/// bridge always stamped `synthetic: false`, so a simulated/demo-source
+/// snapshot produced an event indistinguishable from real hardware — a
+/// dishonest claim this crate's own docs (§0 / §6) exist to prevent.
+#[test]
+fn gate_synthetic_flag_passes_through_honestly() {
+    let mut snap = sample_snapshot();
+
+    snap.synthetic = true;
+    let ev = snapshot_to_field_event(&snap, &signer());
+    assert!(
+        ev.provenance.synthetic,
+        "a snapshot marked synthetic must produce a synthetic-marked event"
+    );
+
+    snap.synthetic = false;
+    let ev = snapshot_to_field_event(&snap, &signer());
+    assert!(
+        !ev.provenance.synthetic,
+        "a snapshot marked non-synthetic must produce a non-synthetic-marked event"
+    );
 }
 
 #[test]

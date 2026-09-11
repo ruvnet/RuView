@@ -59,6 +59,7 @@
 //!     demoted: false,
 //!     identity_bound: false,
 //!     node_id: "esp32_room_01".into(),
+//!     synthetic: false,
 //! };
 //!
 //! let signer = Signer::from_seed(b"adr-262-bridge-seed-32-bytes-ok!");

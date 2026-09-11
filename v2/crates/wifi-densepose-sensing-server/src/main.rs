@@ -5689,7 +5689,7 @@ fn derive_single_person_pose(
 /// / AETHER concern, ADR-262 §8 Q4). This is conservative for egress — it only
 /// ever *lowers* a Derived cycle from P5 to P4, both of which are already held
 /// edge-local, so it cannot leak.
-fn emit_rufield_event(s: &AppStateInner, update: &SensingUpdate, node_id: u8) {
+fn emit_rufield_event(s: &AppStateInner, update: &SensingUpdate, node_id: u8, synthetic: bool) {
     // No-presence ⇒ no phantom event.
     if !update.classification.presence {
         return;
@@ -5708,9 +5708,10 @@ fn emit_rufield_event(s: &AppStateInner, update: &SensingUpdate, node_id: u8) {
             .unwrap_or(0)
     };
 
+    let node_prefix = if synthetic { "simulated_node" } else { "esp32_node" };
     let snap = rufield_surface::build_snapshot(
         timestamp_ns,
-        format!("esp32_node_{node_id}"),
+        format!("{node_prefix}_{node_id}"),
         rufield_surface::SensingFeatures {
             mean_rssi: update.features.mean_rssi,
             variance: update.features.variance,
@@ -5732,6 +5733,7 @@ fn emit_rufield_event(s: &AppStateInner, update: &SensingUpdate, node_id: u8) {
         rufield_surface::ruview_class_from_bfld(effective_class),
         s.engine_bridge.demoted(),
         false, // identity_bound — see fn-doc (conservative, cannot leak).
+        synthetic,
     );
 
     // `field_surface` is its own Arc<RwLock<_>>; `try_write` is non-blocking and
@@ -9736,7 +9738,7 @@ async fn udp_receiver_task(
                     // whose mapped privacy class clears the §10 network egress
                     // gate are surfaced (P1/P2); a `Derived → P4/P5` cycle is
                     // held edge-local. `presence == false` ⇒ no phantom event.
-                    emit_rufield_event(&s, &update, node_id);
+                    emit_rufield_event(&s, &update, node_id, false);
 
                     observe_sensing_update(s.latest_update.as_ref(), &update);
                     s.latest_update = Some(update);
@@ -9840,6 +9842,10 @@ fn observe_sensing_update(prev: Option<&SensingUpdate>, update: &SensingUpdate) 
 
 // ── Simulated data task ──────────────────────────────────────────────────────
 
+/// Node id the simulated demo source publishes under (`NodeInfo.node_id` and
+/// the mirrored `node_states` entry both use this — see `simulated_data_task`).
+const SIMULATED_NODE_ID: u8 = 1;
+
 async fn simulated_data_task(state: SharedState, tick_ms: u64) {
     let mut interval = tokio::time::interval(Duration::from_millis(tick_ms));
     info!("Simulated data source active (tick={}ms)", tick_ms);
@@ -9869,6 +9875,27 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
         s.frame_history.push_back(frame.amplitudes.clone());
         if s.frame_history.len() > FRAME_HISTORY_CAPACITY {
             s.frame_history.pop_front();
+        }
+
+        // Mirror this frame into `node_states` under a synthetic node id
+        // (matching the `NodeInfo.node_id` this task publishes below). Without
+        // this, `node_states` stays empty forever under `--source simulated`:
+        // it is otherwise populated only by the real ESP32 UDP ingestion path,
+        // so the governed trust engine (`engine_bridge.observe_cycle`, driven
+        // by `node_states`) never produces an `effective_class`, and
+        // `emit_rufield_event` — gated on exactly that — silently never fires.
+        // `/api/field` / `/ws/field` would report zero events forever under
+        // the project's own documented "no hardware, Docker demo" quick start.
+        {
+            let ns = s
+                .node_states
+                .entry(SIMULATED_NODE_ID)
+                .or_insert_with(NodeState::new);
+            ns.frame_history.push_back(frame.amplitudes.clone());
+            if ns.frame_history.len() > FRAME_HISTORY_CAPACITY {
+                ns.frame_history.pop_front();
+            }
+            ns.last_frame_time = Some(std::time::Instant::now());
         }
 
         let sample_rate_hz = 1000.0 / tick_ms as f64;
@@ -9922,7 +9949,7 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
             source: "simulated".to_string(),
             tick,
             nodes: vec![NodeInfo {
-                node_id: 1,
+                node_id: SIMULATED_NODE_ID,
                 rssi_dbm: features.mean_rssi,
                 position: [2.0, 0.0, 1.5],
                 amplitude: frame_amplitudes,
@@ -9987,6 +10014,21 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
         if update.classification.presence {
             s.total_detections += 1;
         }
+
+        // Governed trust cycle + signed RuField emission (ADR-135..146 /
+        // ADR-262 P3), mirroring the real ESP32 UDP path so the simulated
+        // demo source can honestly exercise the same governance + `/api/field`
+        // surface instead of always reporting zero events.
+        {
+            let sref: &mut AppStateInner = &mut s;
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            sref.engine_bridge.observe_cycle(&sref.node_states, now_ms);
+        }
+        emit_rufield_event(&s, &update, SIMULATED_NODE_ID, true);
+
         if let Ok(json) = serde_json::to_string(&update) {
             let _ = s.tx.send(json);
         }
