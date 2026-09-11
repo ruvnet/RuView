@@ -1,0 +1,24 @@
+[package]
+name = "macos-rssi-bridge"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Mac WiFi card → ESP32-format CSI UDP bridge for RuView's sensing-server"
+
+[[bin]]
+name = "macos-rssi-bridge"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+ctrlc = "3"
+tiny_http = "0.12"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+
+# Detach from any ancestor workspace.
+[workspace]

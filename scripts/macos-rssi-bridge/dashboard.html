@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>RuView — RSSI tomography</title>
+  <style>
+    :root {
+      --bg: #0a0c12;
+      --panel: #11141d;
+      --line: #1d2233;
+      --fg: #e7eaf3;
+      --muted: #8892a8;
+      --accent: #45e3d6;
+      --warn: #ffb454;
+      --hot: #ff5c5c;
+      --b24: #ff7a59;
+      --b5:  #59a5ff;
+      --b6:  #7be084;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    }
+    html, body { background: var(--bg); color: var(--fg); margin: 0; padding: 0; height: 100%; }
+    body { display: flex; flex-direction: column; height: 100vh; }
+    header {
+      padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line);
+      display: flex; align-items: center; gap: 16px;
+    }
+    header h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+    header .stat { font-size: 13px; color: var(--fg); }
+    header .stat b { color: var(--accent); font-weight: 500; }
+    header .pill {
+      padding: 2px 8px; border-radius: 4px; background: var(--line); font-size: 11px;
+      letter-spacing: 0.04em; text-transform: uppercase;
+    }
+    header .pill.live { color: var(--accent); }
+    header .pill.stale { color: var(--warn); }
+    header .pill.dead { color: var(--hot); }
+    main {
+      flex: 1; display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr auto;
+      gap: 1px;
+      background: var(--line);
+      min-height: 0;
+    }
+    section {
+      background: var(--panel); padding: 12px; display: flex; flex-direction: column; min-height: 0;
+    }
+    section h2 {
+      margin: 0 0 8px 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--muted);
+    }
+    .canvas-wrap { flex: 1; position: relative; min-height: 0; }
+    canvas { width: 100%; height: 100%; display: block; }
+    .full-row { grid-column: 1 / -1; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+    th { text-align: left; color: var(--muted); font-weight: 500; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+    td { padding: 3px 8px; border-bottom: 1px solid #15182280; }
+    .var-bar {
+      display: inline-block; height: 6px; background: var(--accent); border-radius: 2px;
+      vertical-align: middle; margin-right: 6px; min-width: 1px;
+    }
+    .band-24 { color: var(--b24); }
+    .band-5  { color: var(--b5); }
+    .band-6  { color: var(--b6); }
+    .ap-table-wrap { overflow-y: auto; flex: 1; min-height: 0; }
+    .legend { font-size: 11px; color: var(--muted); margin-top: 6px; }
+    .legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 8px; vertical-align: middle; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>RuView · RSSI tomography</h1>
+  <span id="status" class="pill dead">offline</span>
+  <span class="stat">APs <b id="ap-count">0</b></span>
+  <span class="stat">strongest <b id="strongest">-</b> dBm</span>
+  <span class="stat">total motion <b id="total-var">0.0</b></span>
+  <span class="stat">seq <b id="seq">0</b></span>
+  <span style="flex:1"></span>
+  <span class="stat" style="color:var(--muted);font-size:11px">
+    laptop = center · APs auto-placed by RSSI distance + BSSID-hash bearing · drag laptop in tomography panel
+  </span>
+</header>
+
+<main>
+  <section>
+    <h2>Top-down RF tomography (multistatic Fresnel-zone fusion)</h2>
+    <div class="canvas-wrap"><canvas id="tomo"></canvas></div>
+    <div class="legend">
+      heatmap = sum of Gaussian perturbation strips along each AP↔laptop link, weighted by per-AP RSSI variance.
+      where a body crosses a link's first Fresnel zone, that strip lights up; intersections localize.
+    </div>
+  </section>
+
+  <section>
+    <h2>Per-AP polar radar (motion by direction)</h2>
+    <div class="canvas-wrap"><canvas id="polar"></canvas></div>
+    <div class="legend">
+      sector length ∝ recent RSSI variance · color = band
+      <span class="swatch" style="background:var(--b24)"></span>2.4 GHz
+      <span class="swatch" style="background:var(--b5)"></span>5 GHz
+      <span class="swatch" style="background:var(--b6)"></span>6 GHz
+    </div>
+  </section>
+
+  <section class="full-row" style="height: 38vh; display: grid; grid-template-columns: 2fr 3fr; gap: 12px;">
+    <div style="display: flex; flex-direction: column; min-height: 0;">
+      <h2>Total motion · last 60 s</h2>
+      <div class="canvas-wrap"><canvas id="timeline"></canvas></div>
+    </div>
+    <div style="display: flex; flex-direction: column; min-height: 0;">
+      <h2>APs (sorted by RSSI)</h2>
+      <div class="ap-table-wrap">
+        <table>
+          <thead><tr>
+            <th>id</th><th>ch</th><th>band</th>
+            <th style="text-align:right">rssi</th>
+            <th style="text-align:right">noise</th>
+            <th>variance</th>
+            <th style="text-align:right">age</th>
+          </tr></thead>
+          <tbody id="ap-rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+//  RuView RSSI tomography dashboard
+//
+//  Polls macos-rssi-bridge's /aps endpoint at ~5 Hz, places APs around the
+//  laptop using a deterministic-by-id bearing and an RSSI-derived radius,
+//  then sums Gaussian perturbation strips along each AP↔laptop link weighted
+//  by per-AP variance to produce a real-time multistatic heatmap.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const API = "/aps";
+const POLL_HZ = 5;
+const TIMELINE_SECS = 60;
+
+const $ = (id) => document.getElementById(id);
+const tomo  = $("tomo"),  tctx = tomo.getContext("2d");
+const polar = $("polar"), pctx = polar.getContext("2d");
+const tline = $("timeline"), lctx = tline.getContext("2d");
+
+let laptop = { fx: 0.5, fy: 0.5 };  // fractional position in canvas
+let timeline = [];                   // [{t, total_var}]
+let dragging = false;
+
+// Stable per-id angle so the AP doesn't jump around between polls.
+function hashAngle(id) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return ((h >>> 0) / 0x100000000) * Math.PI * 2;
+}
+
+function rssiToRadius(rssi, maxR) {
+  // -30 dBm → close, -100 dBm → max radius. Linear in dB.
+  const t = Math.max(0, Math.min(1, (-rssi - 30) / 70));
+  return 20 + t * (maxR - 20);
+}
+
+function bandClass(band) {
+  if (band.startsWith("2")) return "band-24";
+  if (band.startsWith("5")) return "band-5";
+  if (band.startsWith("6")) return "band-6";
+  return "";
+}
+function bandColor(band) {
+  if (band.startsWith("2")) return "#ff7a59";
+  if (band.startsWith("5")) return "#59a5ff";
+  if (band.startsWith("6")) return "#7be084";
+  return "#888";
+}
+
+// Viridis-ish palette: t∈[0,1] → rgb. Pre-sampled, lerped at runtime.
+const PALETTE = [
+  [13, 8, 35], [50, 12, 88], [82, 18, 122], [114, 32, 130],
+  [148, 53, 130], [180, 82, 122], [210, 113, 105], [233, 152, 84],
+  [247, 197, 70], [252, 245, 92],
+];
+function colormap(t) {
+  t = Math.max(0, Math.min(0.999, t));
+  const i = t * (PALETTE.length - 1);
+  const a = PALETTE[Math.floor(i)], b = PALETTE[Math.ceil(i)];
+  const f = i - Math.floor(i);
+  return [
+    a[0] + (b[0] - a[0]) * f,
+    a[1] + (b[1] - a[1]) * f,
+    a[2] + (b[2] - a[2]) * f,
+  ];
+}
+
+// ─── Tomography render ──────────────────────────────────────────────────────
+function renderTomography(snap) {
+  const dpr = window.devicePixelRatio || 1;
+  const W = tomo.clientWidth | 0, H = tomo.clientHeight | 0;
+  if (tomo.width !== W * dpr) { tomo.width = W * dpr; tomo.height = H * dpr; }
+  tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  tctx.clearRect(0, 0, W, H);
+
+  // background grid
+  tctx.strokeStyle = "#1d2233";
+  tctx.lineWidth = 1;
+  for (let i = 0; i < 12; i++) {
+    const r = i * 24;
+    tctx.beginPath();
+    tctx.arc(W * laptop.fx, H * laptop.fy, r, 0, Math.PI * 2);
+    tctx.stroke();
+  }
+
+  // place APs
+  const cx = W * laptop.fx, cy = H * laptop.fy;
+  const maxR = Math.min(W, H) * 0.45;
+  const aps = (snap?.aps ?? []).map(ap => ({
+    ...ap,
+    angle: hashAngle(ap.id),
+    radius: rssiToRadius(ap.rssi_dbm, maxR),
+  })).map(ap => ({
+    ...ap,
+    x: cx + Math.cos(ap.angle) * ap.radius,
+    y: cy + Math.sin(ap.angle) * ap.radius,
+  }));
+
+  // Heatmap: low-res grid, sum gaussian strips along each laptop↔AP link.
+  const gw = Math.max(20, Math.floor(W / 6));
+  const gh = Math.max(15, Math.floor(H / 6));
+  const grid = new Float32Array(gw * gh);
+  const sigma = Math.max(W, H) * 0.022;
+  const inv2s2 = 1 / (2 * sigma * sigma);
+  let maxVar = 0.001;
+  for (const ap of aps) maxVar = Math.max(maxVar, ap.variance);
+
+  for (const ap of aps) {
+    const w = ap.variance / maxVar;
+    if (w < 0.05) continue;
+    const dx = ap.x - cx, dy = ap.y - cy;
+    const len = Math.hypot(dx, dy);
+    if (len < 1) continue;
+    const ux = dx / len, uy = dy / len;
+    const samples = Math.max(8, Math.floor(len / 4));
+    for (let s = 0; s < samples; s++) {
+      const t = s / (samples - 1);
+      // Stronger weight near the midpoint (Fresnel zone is widest there).
+      const fresnel = 1 - Math.abs(t - 0.5) * 2;
+      const px = cx + ux * len * t;
+      const py = cy + uy * len * t;
+      const wt = w * (0.4 + 0.6 * fresnel);
+
+      // Splat a gaussian into the grid around (px, py).
+      const gxC = px / W * gw, gyC = py / H * gh;
+      const gxS = Math.max(0, Math.floor(gxC - 4));
+      const gxE = Math.min(gw, Math.ceil(gxC + 4));
+      const gyS = Math.max(0, Math.floor(gyC - 4));
+      const gyE = Math.min(gh, Math.ceil(gyC + 4));
+      for (let gy = gyS; gy < gyE; gy++) {
+        for (let gx = gxS; gx < gxE; gx++) {
+          const cx2 = (gx + 0.5) * W / gw;
+          const cy2 = (gy + 0.5) * H / gh;
+          const r2 = (cx2 - px) ** 2 + (cy2 - py) ** 2;
+          grid[gy * gw + gx] += wt * Math.exp(-r2 * inv2s2);
+        }
+      }
+    }
+  }
+
+  // Normalize & paint
+  let gMax = 0;
+  for (const v of grid) if (v > gMax) gMax = v;
+  if (gMax > 0) {
+    const img = tctx.createImageData(gw, gh);
+    for (let i = 0; i < grid.length; i++) {
+      const t = grid[i] / gMax;
+      const [r, g, b] = colormap(t);
+      const j = i * 4;
+      img.data[j]   = r;
+      img.data[j+1] = g;
+      img.data[j+2] = b;
+      img.data[j+3] = Math.floor(t * 220);
+    }
+    // Upscale via offscreen canvas
+    const off = document.createElement("canvas");
+    off.width = gw; off.height = gh;
+    off.getContext("2d").putImageData(img, 0, 0);
+    tctx.imageSmoothingEnabled = true;
+    tctx.imageSmoothingQuality = "high";
+    tctx.globalCompositeOperation = "lighter";
+    tctx.drawImage(off, 0, 0, W, H);
+    tctx.globalCompositeOperation = "source-over";
+  }
+
+  // AP markers + link lines (faint)
+  for (const ap of aps) {
+    tctx.strokeStyle = "#2a3148";
+    tctx.lineWidth = 1;
+    tctx.beginPath();
+    tctx.moveTo(cx, cy);
+    tctx.lineTo(ap.x, ap.y);
+    tctx.stroke();
+
+    tctx.fillStyle = bandColor(ap.band);
+    const r = 3 + Math.min(7, ap.variance * 0.4);
+    tctx.beginPath();
+    tctx.arc(ap.x, ap.y, r, 0, Math.PI * 2);
+    tctx.fill();
+  }
+
+  // laptop marker
+  tctx.fillStyle = "#45e3d6";
+  tctx.beginPath();
+  tctx.arc(cx, cy, 6, 0, Math.PI * 2);
+  tctx.fill();
+  tctx.strokeStyle = "#0a0c12";
+  tctx.lineWidth = 2;
+  tctx.stroke();
+  tctx.fillStyle = "#8892a8";
+  tctx.font = "11px -apple-system, system-ui, sans-serif";
+  tctx.fillText("laptop", cx + 9, cy - 7);
+}
+
+// ─── Polar radar ────────────────────────────────────────────────────────────
+function renderPolar(snap) {
+  const dpr = window.devicePixelRatio || 1;
+  const W = polar.clientWidth | 0, H = polar.clientHeight | 0;
+  if (polar.width !== W * dpr) { polar.width = W * dpr; polar.height = H * dpr; }
+  pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  pctx.clearRect(0, 0, W, H);
+  const cx = W / 2, cy = H / 2;
+  const R = Math.min(W, H) * 0.45;
+
+  pctx.strokeStyle = "#1d2233";
+  for (let i = 1; i <= 4; i++) {
+    pctx.beginPath();
+    pctx.arc(cx, cy, R * i / 4, 0, Math.PI * 2);
+    pctx.stroke();
+  }
+  pctx.beginPath();
+  pctx.moveTo(cx, cy - R); pctx.lineTo(cx, cy + R);
+  pctx.moveTo(cx - R, cy); pctx.lineTo(cx + R, cy);
+  pctx.stroke();
+
+  const aps = snap?.aps ?? [];
+  if (!aps.length) return;
+  let maxVar = 0;
+  for (const ap of aps) if (ap.variance > maxVar) maxVar = ap.variance;
+  if (maxVar < 0.01) maxVar = 0.01;
+
+  for (const ap of aps) {
+    const a = hashAngle(ap.id);
+    const len = (ap.variance / maxVar) * R;
+    const wedge = 0.12;
+    pctx.fillStyle = bandColor(ap.band) + "cc";
+    pctx.beginPath();
+    pctx.moveTo(cx, cy);
+    pctx.arc(cx, cy, len, a - wedge, a + wedge);
+    pctx.closePath();
+    pctx.fill();
+  }
+
+  pctx.fillStyle = "#45e3d6";
+  pctx.beginPath();
+  pctx.arc(cx, cy, 4, 0, Math.PI * 2);
+  pctx.fill();
+}
+
+// ─── Motion timeline ────────────────────────────────────────────────────────
+function renderTimeline() {
+  const dpr = window.devicePixelRatio || 1;
+  const W = tline.clientWidth | 0, H = tline.clientHeight | 0;
+  if (tline.width !== W * dpr) { tline.width = W * dpr; tline.height = H * dpr; }
+  lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  lctx.clearRect(0, 0, W, H);
+  if (timeline.length < 2) return;
+
+  const now = timeline[timeline.length - 1].t;
+  const t0 = now - TIMELINE_SECS;
+  const visible = timeline.filter(p => p.t >= t0);
+  const max = Math.max(0.01, ...visible.map(p => p.total_var));
+
+  // baseline grid
+  lctx.strokeStyle = "#1d2233";
+  for (let i = 0; i < 4; i++) {
+    const y = H * (1 - i / 4);
+    lctx.beginPath();
+    lctx.moveTo(0, y); lctx.lineTo(W, y);
+    lctx.stroke();
+  }
+
+  // area
+  lctx.beginPath();
+  lctx.moveTo(0, H);
+  for (const p of visible) {
+    const x = ((p.t - t0) / TIMELINE_SECS) * W;
+    const y = H - (p.total_var / max) * H * 0.92 - 4;
+    lctx.lineTo(x, y);
+  }
+  lctx.lineTo(W, H);
+  lctx.closePath();
+  const grad = lctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, "#45e3d680");
+  grad.addColorStop(1, "#45e3d600");
+  lctx.fillStyle = grad;
+  lctx.fill();
+
+  lctx.strokeStyle = "#45e3d6";
+  lctx.lineWidth = 1.5;
+  lctx.beginPath();
+  for (let i = 0; i < visible.length; i++) {
+    const p = visible[i];
+    const x = ((p.t - t0) / TIMELINE_SECS) * W;
+    const y = H - (p.total_var / max) * H * 0.92 - 4;
+    if (i === 0) lctx.moveTo(x, y); else lctx.lineTo(x, y);
+  }
+  lctx.stroke();
+
+  lctx.fillStyle = "#8892a8";
+  lctx.font = "10px -apple-system, system-ui, sans-serif";
+  lctx.fillText(`max ≈ ${max.toFixed(1)}`, 4, 12);
+}
+
+// ─── AP table ───────────────────────────────────────────────────────────────
+function renderTable(snap) {
+  const tbody = $("ap-rows");
+  const aps = snap?.aps ?? [];
+  const maxVar = Math.max(0.001, ...aps.map(a => a.variance));
+  tbody.innerHTML = aps.map(ap => `
+    <tr>
+      <td title="${ap.id}">${ap.id.length > 22 ? ap.id.slice(0, 22) + "…" : ap.id}</td>
+      <td>${ap.channel}</td>
+      <td class="${bandClass(ap.band)}">${ap.band}</td>
+      <td style="text-align:right">${ap.rssi_dbm.toFixed(0)}</td>
+      <td style="text-align:right">${ap.noise_dbm ? ap.noise_dbm.toFixed(0) : "—"}</td>
+      <td><span class="var-bar" style="width:${(ap.variance / maxVar * 80).toFixed(1)}px"></span>${ap.variance.toFixed(1)}</td>
+      <td style="text-align:right;color:${ap.age_ms < 3000 ? "var(--accent)" : "var(--warn)"}">${(ap.age_ms / 1000).toFixed(1)}s</td>
+    </tr>
+  `).join("");
+}
+
+// ─── Drag laptop in tomography canvas ───────────────────────────────────────
+tomo.addEventListener("mousedown", e => {
+  const r = tomo.getBoundingClientRect();
+  laptop.fx = (e.clientX - r.left) / r.width;
+  laptop.fy = (e.clientY - r.top) / r.height;
+  dragging = true;
+});
+window.addEventListener("mouseup", () => dragging = false);
+window.addEventListener("mousemove", e => {
+  if (!dragging) return;
+  const r = tomo.getBoundingClientRect();
+  laptop.fx = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+  laptop.fy = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
+});
+
+// ─── Poll loop ──────────────────────────────────────────────────────────────
+let lastSeq = -1;
+let lastSeqAt = 0;
+async function poll() {
+  try {
+    const r = await fetch(API, { cache: "no-store" });
+    const snap = await r.json();
+    const now = performance.now();
+    if (snap.seq !== lastSeq) { lastSeq = snap.seq; lastSeqAt = now; }
+    const stale = now - lastSeqAt;
+    const status = $("status");
+    if (stale > 8000)      { status.textContent = "offline"; status.className = "pill dead"; }
+    else if (stale > 3000) { status.textContent = "stale";   status.className = "pill stale"; }
+    else                   { status.textContent = "live";    status.className = "pill live"; }
+
+    $("ap-count").textContent = snap.aps.length;
+    $("strongest").textContent = snap.strongest_rssi_dbm?.toFixed(0) ?? "-";
+    $("seq").textContent = snap.seq ?? 0;
+    const totalVar = (snap.aps ?? []).reduce((s, a) => s + a.variance, 0);
+    $("total-var").textContent = totalVar.toFixed(1);
+
+    timeline.push({ t: snap.ts, total_var: totalVar });
+    if (timeline.length > 600) timeline.shift();
+
+    renderTomography(snap);
+    renderPolar(snap);
+    renderTimeline();
+    renderTable(snap);
+  } catch (e) {
+    const status = $("status");
+    status.textContent = "no bridge"; status.className = "pill dead";
+  }
+}
+poll();
+setInterval(poll, 1000 / POLL_HZ);
+</script>
+</body>
+</html>
