@@ -5,12 +5,12 @@ torch>=1.12.0
 torchvision>=0.13.0
 
 # API dependencies
-fastapi>=0.95.0
+fastapi>=0.115.0
 uvicorn>=0.20.0
 websockets>=15.0.1
 pydantic>=1.10.0
 python-jose[cryptography]>=3.3.0
-python-multipart>=0.0.6
+python-multipart>=0.0.20
 passlib[bcrypt]>=1.7.4
 httpx>=0.24.0
 pydantic-settings>=2.0.0
