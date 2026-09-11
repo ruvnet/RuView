@@ -53,6 +53,7 @@ export class ConnectionStatus {
 
     if (state === 'connected' || state === 'streaming') {
       const label = source === 'live' ? 'Live' :
+                    source === 'rssi-only' ? 'Live RSSI' :
                     source === 'server-simulated' ? 'Simulated' :
                     'Connected';
       this.setStatus('connected', label);
