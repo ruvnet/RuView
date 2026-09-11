@@ -92,14 +92,11 @@ jobs:
           idf.py set-target ${{ matrix.target }}
           idf.py build
 
-      - name: Build and run host-side ADR-110 unit tests
+      - name: Build and run host-side firmware unit tests
         if: matrix.variant == 'c6-4mb'
         working-directory: firmware/esp32-csi-node/test
         run: |
-          make test_adr110
-          ./test_adr110
-          make test_c6_antenna
-          ./test_c6_antenna
+          make host_tests
 
       - name: Verify binary size budget
         working-directory: firmware/esp32-csi-node

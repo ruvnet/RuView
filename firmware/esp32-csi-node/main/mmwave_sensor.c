@@ -504,8 +504,34 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
     return ESP_OK;
 
 #else
+    /* Default probe pins must never collide with the UART0 console. On the
+     * ESP32-C6 the console is TX=GPIO16 / RX=GPIO17, so the legacy 17/18 pair
+     * routed UART1 TX onto the console RX line and silently killed serial
+     * input (USB onboarding, monitor commands) even when no sensor was found,
+     * because uart_driver_delete() does not undo the GPIO matrix routing. */
+#if defined(CONFIG_IDF_TARGET_ESP32C6)
+    if (uart_tx_pin < 0) uart_tx_pin = 4;
+    if (uart_rx_pin < 0) uart_rx_pin = 5;
+#else
     if (uart_tx_pin < 0) uart_tx_pin = 17;
     if (uart_rx_pin < 0) uart_rx_pin = 18;
+#endif
+#if defined(CONFIG_ESP_CONSOLE_UART_CUSTOM)
+    const int console_tx = CONFIG_ESP_CONSOLE_UART_TX_GPIO;
+    const int console_rx = CONFIG_ESP_CONSOLE_UART_RX_GPIO;
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
+    const int console_tx = 16, console_rx = 17;   /* U0TXD / U0RXD IOMUX pins */
+#elif defined(CONFIG_IDF_TARGET_ESP32S3)
+    const int console_tx = 43, console_rx = 44;
+#else
+    const int console_tx = 1, console_rx = 3;
+#endif
+    if (uart_tx_pin == console_tx || uart_tx_pin == console_rx ||
+        uart_rx_pin == console_tx || uart_rx_pin == console_rx) {
+        ESP_LOGW(TAG, "mmWave probe pins (TX=%d, RX=%d) overlap the console UART (TX=%d, RX=%d); skipping probe",
+                 uart_tx_pin, uart_rx_pin, console_tx, console_rx);
+        return ESP_ERR_INVALID_ARG;
+    }
 
     /* Install UART driver at MR60 baud (will be changed during probe). */
     uart_config_t uart_config = {

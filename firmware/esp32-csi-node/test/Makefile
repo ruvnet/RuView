@@ -55,10 +55,10 @@ FUZZ_JOBS     ?= 1
 .PHONY: all clean run_serialize run_edge run_nvs run_all test_adr110 run_adr110 \
         test_vitals run_vitals test_mmwave_detect run_mmwave_detect host_tests \
         test_thermal run_thermal test_csi_sanitize run_csi_sanitize \
-        test_c6_antenna run_c6_antenna
+        test_c6_antenna run_c6_antenna test_serial_onboarding run_serial_onboarding
 
 all: fuzz_serialize fuzz_edge fuzz_nvs test_adr110 test_vitals test_mmwave_detect \
-     test_thermal test_csi_sanitize test_c6_antenna
+     test_thermal test_csi_sanitize test_c6_antenna test_serial_onboarding
 
 # --- XIAO ESP32-C6 RF switch selection ---
 # Host-side truth table for the GPIO14 antenna selector. GPIO3 is always driven
@@ -122,9 +122,19 @@ test_thermal: test_thermal_hysteresis.c $(MAIN_DIR)/thermal.h
 run_thermal: test_thermal
 	./test_thermal
 
+# --- Native Mac USB onboarding protocol ---
+# Tests the production parser and secret validation without ESP-IDF. This pins
+# nonce shape, IPv4 and node bounds, base64 handling, and control-byte denial.
+test_serial_onboarding: test_serial_onboarding_protocol.c $(MAIN_DIR)/serial_onboarding_protocol.c $(MAIN_DIR)/serial_onboarding_protocol.h
+	cc -std=c11 -Wall -Wextra -Werror -pedantic -I$(MAIN_DIR) -o $@ \
+		test_serial_onboarding_protocol.c $(MAIN_DIR)/serial_onboarding_protocol.c
+
+run_serial_onboarding: test_serial_onboarding
+	./test_serial_onboarding
+
 host_tests: run_adr110 run_vitals run_mmwave_detect run_thermal run_csi_sanitize \
-            run_c6_antenna
-	@echo "Host tests passed (ADR-110 + CSI sanitation + vitals + mmwave + thermal + C6 antenna)"
+            run_c6_antenna run_serial_onboarding
+	@echo "Host tests passed (ADR-110 + CSI sanitation + vitals + mmwave + thermal + C6 antenna + USB onboarding)"
 
 # --- Serialize fuzzer ---
 # Tests csi_serialize_frame() with random wifi_csi_info_t inputs.
@@ -161,5 +171,5 @@ run_all: run_serialize run_edge run_nvs
 
 clean:
 	rm -f fuzz_serialize fuzz_edge fuzz_nvs test_adr110 test_vitals test_mmwave_detect \
-		test_thermal test_csi_sanitize test_c6_antenna
+		test_thermal test_csi_sanitize test_c6_antenna test_serial_onboarding
 	rm -rf corpus_serialize/ corpus_edge/ corpus_nvs/

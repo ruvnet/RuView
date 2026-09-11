@@ -19,6 +19,25 @@ This firmware captures WiFi Channel State Information (CSI) from an ESP32-S3 (pr
 > | **Fall detection** | Phase acceleration threshold | Configurable sensitivity |
 > | **Programmable sensing** | WASM modules loaded over HTTP | Hot-swap, no reflash |
 
+## Firmware 0.8.12: guided Mac onboarding
+
+Firmware 0.8.12 adds the protocol used by the RuView macOS Add
+Sensor workflow. A directly attached S3 or C6 can identify itself through a
+nonce bound USB serial receipt, preserve its current WiFi settings, accept an
+unused node ID and private LAN server address, then reboot. The Mac app does
+not report success until the sensing server observes that node as fresh.
+
+This is not a firmware flashing API. A board on 0.8.8 or earlier must receive a
+matching chip build through the documented backup and flash process once. The
+USB protocol rejects public target addresses and invalid identifiers. New WiFi
+credentials are bounded, committed only in NVS, and never included in the
+receipt or diagnostic output. See
+[ADR 348](../../docs/adr/ADR-348-native-macos-usb-node-onboarding.md).
+
+On ESP32 C6, the default optional mmWave UART uses GPIO 4 and GPIO 5. Firmware
+refuses any mmWave configuration that overlaps the active console pins. This
+prevents a sensor probe from taking over UART0 RX and disabling Mac onboarding.
+
 ## Firmware 0.8.8 in plain language
 
 Release 0.8.8 makes the sensing stream more internally consistent and easier

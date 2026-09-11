@@ -25,6 +25,7 @@
 #include "thermal.h"
 #include "stream_sender.h"
 #include "nvs_config.h"
+#include "serial_onboarding.h"
 #include "edge_processing.h"
 #include "ota_update.h"
 #include "power_mgmt.h"
@@ -341,6 +342,14 @@ void app_main(void)
      * ownership of GPIO3 and GPIO14 because the default implementation is a
      * no-op unless CONFIG_C6_XIAO_ANTENNA_SELECT is enabled. */
     ESP_ERROR_CHECK(c6_xiao_antenna_apply());
+    /* The native Mac onboarding bridge must remain available even when WiFi
+     * credentials or the aggregator address are wrong. Start it before any
+     * blocking network initialization. The protocol is physical-USB-only,
+     * nonce-bound, bounded, and never prints credentials. */
+    esp_err_t onboarding_ret = serial_onboarding_start(&g_nvs_config);
+    if (onboarding_ret != ESP_OK) {
+        ESP_LOGW(TAG, "USB onboarding unavailable: %s", esp_err_to_name(onboarding_ret));
+    }
 
     /* Onboard WS2812. C6 wires the LED to GPIO 8; S3 to GPIO 38 (DevKitC-1 v1.0)
      * or GPIO 48 (DevKitC-1 v1.1 / N16R8 — see #962). On S3 we drive 48 (the

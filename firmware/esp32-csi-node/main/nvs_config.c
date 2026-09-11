@@ -109,7 +109,7 @@ void nvs_config_load(nvs_config_t *cfg)
     len = sizeof(buf);
     if (nvs_get_str(handle, "ssid", buf, &len) == ESP_OK && len > 1) {
         strlcpy(cfg->wifi_ssid, buf, sizeof(cfg->wifi_ssid));
-        ESP_LOGI(TAG, "NVS override: ssid=%s", cfg->wifi_ssid);
+        ESP_LOGI(TAG, "NVS override: ssid=<configured>");
     }
 
     /* WiFi password */
