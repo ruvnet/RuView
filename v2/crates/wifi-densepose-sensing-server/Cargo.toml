@@ -20,6 +20,10 @@ name = "sensing-server"
 path = "src/main.rs"
 
 [dependencies]
+# ADR-302 OOD gate — attaches KNOWN/DEGRADED/UNKNOWN to live inferences.
+ruview-ood = { path = "../ruview-ood" }
+# ADR-301 calibration certificates the OOD gate is checked against.
+wifi-densepose-calibration = { path = "../wifi-densepose-calibration" }
 # Web framework
 axum = { workspace = true }
 tower-http = { version = "0.6", features = ["fs", "cors", "set-header"] }

@@ -17,6 +17,7 @@ mod field_bridge;
 mod field_localize;
 mod model_format;
 mod multistatic_bridge;
+mod ood_gate;
 mod mediatek_csi;
 mod qualcomm_csi;
 mod realtek_radar;
@@ -176,6 +177,28 @@ struct Args {
     /// rebinding without it.
     #[arg(long)]
     disable_host_validation: bool,
+
+    /// ADR-302 OOD gate (`ood_gate`): path to a signed ADR-301 calibration
+    /// certificate (produced offline by `wifi-densepose calibrate`/
+    /// `train-room`). When set, every live cycle is gated KNOWN/DEGRADED/
+    /// UNKNOWN against it and the result is published as `domain_state` on
+    /// `/ws/sensing`. Requires WDP_CALIBRATION_KEY_ID / WDP_CALIBRATION_KEY_SECRET
+    /// in the environment. A certificate that fails to load or verify aborts
+    /// startup (fail closed) — see `ood_gate::load`. Omitted by default: the
+    /// gate is fully opt-in and does not change existing behavior.
+    #[arg(long)]
+    calibration_certificate: Option<String>,
+
+    /// Space identity the loaded calibration certificate must attest
+    /// (ADR-306). Only meaningful with `--calibration-certificate`.
+    #[arg(long, default_value = "default")]
+    calibration_space_id: String,
+
+    /// Device identity the loaded calibration certificate must attest
+    /// (ADR-305) — must equal the certificate's signed `sensor_id`. Only
+    /// meaningful with `--calibration-certificate`.
+    #[arg(long, default_value = "sensing-server")]
+    calibration_device_id: String,
 
     /// MQTT publisher (HA auto-discovery) + privacy-mode flags (ADR-115).
     /// Flattened so `--mqtt*` reach the binary's parser and the publisher
@@ -440,6 +463,12 @@ struct SensingUpdate {
     /// fresh node backs the room rather than a frozen online value.
     #[serde(skip_serializing_if = "Option::is_none")]
     room_inference: Option<RoomInference>,
+    /// ADR-302 OOD gate verdict for this cycle (`ood_gate::evaluate`).
+    /// `None` when `--calibration-certificate` was not set — the gate is
+    /// opt-in and this field's absence, not a `null`/`"Unknown"` payload, is
+    /// how a consumer tells "gating is off" from "gating ran".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    domain_state: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1940,6 +1969,11 @@ struct AppStateInner {
     /// Canonical ADR-323 engine and latest additive publication. Existing
     /// image-space renderer poses are never silently inserted here.
     pose_physics: pose_physics::PosePhysicsRuntime,
+    /// ADR-302 OOD gate (`ood_gate`), loaded and verified once at startup.
+    /// `None` unless `--calibration-certificate` was given — the gate is
+    /// opt-in and every live cycle skips it (no `domain_state` published)
+    /// when absent.
+    ood_gate: Option<Arc<ood_gate::OodGateState>>,
 }
 
 #[cfg(test)]
@@ -2457,6 +2491,7 @@ impl AppStateInner {
                 wifi_densepose_physics::PhysicsConfig::default(),
             )
             .expect("default pose physics configuration is valid"),
+            ood_gate: None,
         }
     }
 }
@@ -4099,6 +4134,7 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
             },
             node_features: None,
             room_inference: None,
+            domain_state: None,
         };
 
         // Populate persons from the sensing update (Kalman-smoothed via tracker).
@@ -4264,6 +4300,7 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         },
         node_features: None,
         room_inference: None,
+        domain_state: None,
     };
 
     let raw_persons = derive_pose_from_sensing(&update);
@@ -9161,6 +9198,30 @@ async fn udp_receiver_task(
                         let _ = s.tx.send(json);
                     }
 
+                    // ADR-302 OOD gate: run when a certificate is loaded. No
+                    // independent live signal-quality scalar exists at this
+                    // ingest path (ADR-137 coherence isn't computed here) —
+                    // fixed at 1.0 (best case, documented gap, same pattern
+                    // as the fourth ADR-302 input's `uncertainty_available:
+                    // false`) rather than reusing an unrelated confidence
+                    // value that would misrepresent what "signal quality" means.
+                    let domain_state = s.ood_gate.as_ref().map(|gate| {
+                        let live_fp = ood_gate::live_fingerprint_from_stats(
+                            fused_features.mean_rssi,
+                            fused_features.variance,
+                            fused_features.motion_band_power,
+                        );
+                        ood_gate::evaluate(
+                            gate,
+                            &live_fp,
+                            1.0,
+                            false,
+                            true,
+                            classification.confidence as f32,
+                            ood_gate::now_unix_s(),
+                        )
+                    });
+
                     let mut update = SensingUpdate {
                         msg_type: "sensing_update".to_string(),
                         timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
@@ -9192,6 +9253,7 @@ async fn udp_receiver_task(
                         // tripping back to the server.
                         node_features: build_node_features(&s.node_states, now),
                         room_inference: Some(room_inference),
+                        domain_state,
                     };
 
                     let raw_persons = derive_pose_from_sensing(&update);
@@ -9664,6 +9726,27 @@ async fn udp_receiver_task(
                         total_persons,
                     );
 
+                    // ADR-302 OOD gate — see the sibling call site above for
+                    // why signal quality is fixed at 1.0 (documented gap, no
+                    // independent live quality scalar at this ingest path).
+                    let room_classification = classification_from_room(&room_inference);
+                    let domain_state = s.ood_gate.as_ref().map(|gate| {
+                        let live_fp = ood_gate::live_fingerprint_from_stats(
+                            fused_features.mean_rssi,
+                            fused_features.variance,
+                            fused_features.motion_band_power,
+                        );
+                        ood_gate::evaluate(
+                            gate,
+                            &live_fp,
+                            1.0,
+                            false,
+                            true,
+                            room_classification.confidence as f32,
+                            ood_gate::now_unix_s(),
+                        )
+                    });
+
                     let mut update = SensingUpdate {
                         msg_type: "sensing_update".to_string(),
                         timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
@@ -9706,6 +9789,7 @@ async fn udp_receiver_task(
                         // tripping back to the server.
                         node_features: build_node_features(&s.node_states, now),
                         room_inference: Some(room_inference),
+                        domain_state,
                     };
 
                     let raw_persons = derive_pose_from_sensing(&update);
@@ -9916,6 +10000,28 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
             0
         };
 
+        // ADR-302 OOD gate — real cert verification + real drift math even
+        // in simulated mode, so this path is honestly live-verifiable
+        // without hardware (only the CSI *source* is simulated; the gate's
+        // decision over it is not). Same documented signal-quality gap as
+        // the ESP32 ingest sites (no independent live quality scalar here).
+        let domain_state = s.ood_gate.as_ref().map(|gate| {
+            let live_fp = ood_gate::live_fingerprint_from_stats(
+                features.mean_rssi,
+                features.variance,
+                features.motion_band_power,
+            );
+            ood_gate::evaluate(
+                gate,
+                &live_fp,
+                1.0,
+                false,
+                true,
+                classification.confidence as f32,
+                ood_gate::now_unix_s(),
+            )
+        });
+
         let mut update = SensingUpdate {
             msg_type: "sensing_update".to_string(),
             timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
@@ -9966,6 +10072,7 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
             },
             node_features: None,
             room_inference: None,
+            domain_state,
         };
 
         // Populate persons from the sensing update (Kalman-smoothed via tracker).
@@ -11253,6 +11360,31 @@ async fn main() {
     let field_surface: rufield_surface::FieldState =
         Arc::new(RwLock::new(rufield_surface::FieldSurface::from_env()));
 
+    // ADR-302 OOD gate: opt-in, fails closed. `--calibration-certificate`
+    // unset ⇒ `None`, every cycle publishes no `domain_state` — behavior is
+    // unchanged from before this gate existed. Set ⇒ the certificate MUST
+    // load and verify or the server refuses to start gated at all (an
+    // operator who asked for gating and got a silently-ungated server would
+    // be worse than a clear startup failure).
+    let ood_gate: Option<std::sync::Arc<ood_gate::OodGateState>> = match &args.calibration_certificate {
+        Some(path) => {
+            match ood_gate::load(path, &args.calibration_space_id, &args.calibration_device_id) {
+                Ok(state) => {
+                    info!(
+                        "ADR-302 OOD gate: loaded and verified {path} (space={}, device={})",
+                        args.calibration_space_id, args.calibration_device_id
+                    );
+                    Some(std::sync::Arc::new(state))
+                }
+                Err(e) => {
+                    eprintln!("wifi-densepose-sensing-server: --calibration-certificate: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        None => None,
+    };
+
     // Populated inside the `multistatic_fuser` field initializer below, then
     // threaded into `engine_bridge` so both fusion paths honor the same
     // WDP_TDM_SLOTS/WDP_GUARD_INTERVAL_US-derived guard (#1049/#1057).
@@ -11420,6 +11552,7 @@ async fn main() {
             wifi_densepose_physics::PhysicsConfig::default(),
         )
         .expect("default pose physics configuration is valid"),
+        ood_gate: ood_gate.clone(),
     }));
 
     // Start background tasks from the resolved plan (issue #1004).
@@ -12715,6 +12848,7 @@ mod observatory_persons_field_position_tests {
             persons: None,
             estimated_persons: Some(1),
             node_features: None,
+            domain_state: None,
             room_inference: None,
         }
     }
