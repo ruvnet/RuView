@@ -215,14 +215,23 @@ def probe_esp32_udp(port: int = ESP32_UDP_PORT, timeout: float = 2.0) -> bool:
     """Return True if an ESP32 is actively streaming on the UDP port."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.settimeout(timeout)
     try:
         sock.bind(("0.0.0.0", port))
-        data, _ = sock.recvfrom(256)
-        if len(data) >= 20:
-            magic = struct.unpack_from('<I', data, 0)[0]
-            return magic == 0xC5110001
-        return False
+        # Keep reading until the deadline instead of judging the first datagram.
+        # An esp32-csi-node interleaves several frame types on this port (CSI
+        # 0xC5110001, sync 0xC5110002, feature 0xC5110006), so the first packet
+        # to arrive is frequently *not* the CSI frame. Returning False on it
+        # made a live, streaming node look absent and silently demoted the
+        # server to the commodity-RSSI collector.
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            sock.settimeout(remaining)
+            data, _ = sock.recvfrom(2048)
+            if len(data) >= 20 and struct.unpack_from('<I', data, 0)[0] == 0xC5110001:
+                return True
     except (socket.timeout, OSError):
         return False
     finally:
