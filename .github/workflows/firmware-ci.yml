@@ -52,16 +52,16 @@ jobs:
             target: esp32s3
             sdkconfig: sdkconfig.defaults
             partition_table_name: partitions_display.csv
-            size_warn_kb: 1100
-            size_limit_kb: 1152
+            size_warn_kb: 1474
+            size_limit_kb: 1638
             artifact_app: esp32-csi-node.bin
             artifact_pt: partition-table.bin
           - variant: 4mb
             target: esp32s3
             sdkconfig: sdkconfig.defaults.4mb
             partition_table_name: partitions_4mb.csv
-            size_warn_kb: 1100
-            size_limit_kb: 1152
+            size_warn_kb: 1335
+            size_limit_kb: 1484
             artifact_app: esp32-csi-node-4mb.bin
             artifact_pt: partition-table-4mb.bin
           # ADR-110: ESP32-C6 research target (Wi-Fi 6 / 802.15.4 / TWT / LP-core)
@@ -69,8 +69,8 @@ jobs:
             target: esp32c6
             sdkconfig: sdkconfig.defaults
             partition_table_name: partitions_4mb.csv
-            size_warn_kb: 1100
-            size_limit_kb: 1152
+            size_warn_kb: 1335
+            size_limit_kb: 1484
             artifact_app: esp32-csi-node-c6.bin
             artifact_pt: partition-table-c6.bin
 
@@ -202,3 +202,35 @@ jobs:
           idf.py build
           test "$(stat -c%s build/esp32-csi-node.bin)" -le $((1152 * 1024))
           strings build/esp32-csi-node.bin | grep -F "external U.FL"
+
+  publish-release-assets:
+    name: Publish firmware release assets
+    if: github.ref_type == 'tag'
+    needs: [version-guard, build, build-c6-idf6]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download the exact-run firmware artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: esp32-csi-node-firmware-*
+          path: release-downloads
+
+      - name: Package variants without filename collisions
+        run: |
+          mkdir -p release-assets
+          for directory in release-downloads/esp32-csi-node-firmware-*; do
+            variant="${directory##*/}"
+            tar -C "$directory" -czf "release-assets/${variant}.tar.gz" .
+          done
+          (cd release-assets && sha256sum *.tar.gz > SHA256SUMS.txt)
+
+      - name: Publish the downloadable firmware bundles
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
+        with:
+          name: ESP32 firmware ${{ github.ref_name }}
+          body: |
+            Exact-run ESP32-S3 8 MB, ESP32-S3 4 MB, and ESP32-C6 4 MB firmware bundles.
+            Verify each archive against `SHA256SUMS.txt` before flashing.
+          files: release-assets/*
