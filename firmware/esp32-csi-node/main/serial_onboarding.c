@@ -162,16 +162,9 @@ static void serial_onboarding_task(void *argument)
     (void)argument;
     const int original_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
     if (original_flags >= 0) (void)fcntl(STDIN_FILENO, F_SETFL, original_flags | O_NONBLOCK);
-    /* ESP-IDF secondary consoles mirror output but deliberately do not forward
-     * input to STDIN. Native S3/C6 USB Serial/JTAG therefore needs a bounded
-     * direct VFS reader while UART-console boards continue to use STDIN. */
-    const int usb_fd = open("/dev/secondary", O_RDONLY | O_NONBLOCK);
     char primary_line[ONBOARDING_LINE_MAX];
-    char usb_line[ONBOARDING_LINE_MAX];
     size_t primary_length = 0;
-    size_t usb_length = 0;
     bool primary_overflow = false;
-    bool usb_overflow = false;
     for (;;) {
         uint8_t input[64];
         const ssize_t count = read(STDIN_FILENO, input, sizeof(input));
@@ -181,12 +174,6 @@ static void serial_onboarding_task(void *argument)
         else if (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
             ESP_LOGW(TAG, "serial input unavailable: errno=%d", errno);
             vTaskDelay(pdMS_TO_TICKS(500));
-        }
-        if (usb_fd >= 0) {
-            const ssize_t usb_count = read(usb_fd, input, sizeof(input));
-            if (usb_count > 0) {
-                consume_bytes(input, usb_count, usb_line, &usb_length, &usb_overflow);
-            }
         }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
