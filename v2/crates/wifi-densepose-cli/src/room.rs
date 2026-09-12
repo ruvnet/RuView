@@ -1079,6 +1079,17 @@ pub struct RoomWatchArgs {
     /// Seconds to run (0 = until Ctrl-C).
     #[arg(long, default_value_t = 0)]
     pub seconds: u32,
+    /// Drift compensation time constant in seconds (0 = off).
+    ///
+    /// The per-node mean amplitude drifts with the environment far more than a
+    /// person shifts it: measured live, the window mean sat 2-7 amplitude units
+    /// away from the reference its bank was trained against, while the trained
+    /// presence threshold was as small as 0.047 units. With this set, each
+    /// node's window mean is re-anchored to the empty mean its bank was trained
+    /// with, using a slow exponential moving average of the live mean, so the
+    /// slow drift is removed and a person entering (a step) still stands out.
+    #[arg(long, default_value_t = 0.0)]
+    pub drift_adapt_s: f32,
     /// Print the per-node inputs and decisions behind every fused readout:
     /// window features, the bank's presence thresholds, the mean distance that
     /// drove the presence decision, and the anomaly score behind a veto.
@@ -1173,6 +1184,8 @@ async fn room_watch_multi(args: RoomWatchArgs) -> Result<()> {
 
     let mut buf = vec![0u8; RECV_BUF];
     let mut wins: BTreeMap<u8, VecDeque<f32>> = BTreeMap::new();
+    // Slow per-node mean tracker used by --drift-adapt-s.
+    let mut ema_by_node: BTreeMap<u8, f32> = BTreeMap::new();
     let start = Instant::now();
     let mut last_print = Instant::now();
 
@@ -1199,7 +1212,7 @@ async fn room_watch_multi(args: RoomWatchArgs) -> Result<()> {
             }
         }
         if last_print.elapsed() >= Duration::from_secs(1) {
-            let per_node: BTreeMap<u8, Features> = wins
+            let mut per_node: BTreeMap<u8, Features> = wins
                 .iter()
                 .filter(|(_, w)| w.len() >= 32)
                 .map(|(id, w)| {
@@ -1207,12 +1220,34 @@ async fn room_watch_multi(args: RoomWatchArgs) -> Result<()> {
                     (*id, Features::from_series(&series, args.fs_hz))
                 })
                 .collect();
+
+            if args.drift_adapt_s > 0.0 {
+                // One update per printed window (about 1 Hz).
+                let alpha = (1.0 / args.drift_adapt_s).clamp(1e-4, 1.0);
+                for (id, f) in per_node.iter_mut() {
+                    let Some(reference) = mix
+                        .node_mixture(*id)
+                        .and_then(|e| e.bank().presence.as_ref())
+                        .map(|p| p.empty_mean)
+                    else {
+                        continue;
+                    };
+                    let raw = f.mean;
+                    let ema = ema_by_node.entry(*id).or_insert(raw);
+                    f.mean = reference + (raw - *ema);
+                    *ema += alpha * (raw - *ema);
+                }
+            }
             if !per_node.is_empty() {
                 if args.diagnostics {
                     for (id, f) in per_node.iter() {
                         let frames = wins.get(id).map(|w| w.len()).unwrap_or(0);
+                        let ema = ema_by_node
+                            .get(id)
+                            .map(|e| format!(" ema={e:.3}"))
+                            .unwrap_or_default();
                         println!(
-                            "[diag] node {id} frames={frames} mean={:.3} var={:.3} motion={:.3} breath={:.3}/{:.3} heart={:.3}/{:.3}",
+                            "[diag] node {id} frames={frames} mean={:.3}{ema} var={:.3} motion={:.3} breath={:.3}/{:.3} heart={:.3}/{:.3}",
                             f.mean, f.variance, f.motion,
                             f.breathing_score, f.breathing_hz,
                             f.heart_score, f.heart_hz
