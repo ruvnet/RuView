@@ -4586,7 +4586,8 @@ async fn handle_ws_client(mut socket: WebSocket, state: SharedState) {
             msg = rx.recv() => {
                 match msg {
                     Ok(json) => {
-                        if socket.send(Message::Text(json)).await.is_err() {
+                        if let Err(e) = socket.send(Message::Text(json)).await {
+                            info!("sensing WS: send failed ({e}); closing");
                             break;
                         }
                     }
@@ -4595,19 +4596,41 @@ async fn handle_ws_client(mut socket: WebSocket, state: SharedState) {
                         tracing::debug!("WS client lagged by {n} frames, skipping");
                         continue;
                     }
-                    Err(_) => break, // channel closed
+                    Err(e) => {
+                        info!("sensing WS: broadcast channel closed ({e}); closing");
+                        break;
+                    }
                 }
             }
             _ = ping_interval.tick() => {
-                if socket.send(Message::Ping(vec![])).await.is_err() {
+                if let Err(e) = socket.send(Message::Ping(vec![])).await {
+                    info!("sensing WS: ping failed ({e}); closing");
                     break;
                 }
             }
             msg = socket.recv() => {
                 match msg {
-                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Close(c))) => {
+                        info!("sensing WS: client sent close {c:?}");
+                        break;
+                    }
+                    None => {
+                        info!("sensing WS: client stream ended");
+                        break;
+                    }
                     Some(Ok(Message::Pong(_))) => {} // keepalive response
-                    _ => {} // ignore other client messages
+                    Some(Ok(Message::Ping(p))) => {
+                        // Answer a client ping so a browser-side keepalive cannot
+                        // tear the stream down silently.
+                        let _ = socket.send(Message::Pong(p)).await;
+                    }
+                    Some(Ok(other)) => {
+                        tracing::debug!("sensing WS: ignoring client message {other:?}");
+                    }
+                    Some(Err(e)) => {
+                        info!("sensing WS: client error ({e}); closing");
+                        break;
+                    }
                 }
             }
         }
