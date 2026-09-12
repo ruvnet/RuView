@@ -450,22 +450,30 @@ function mainLoop(timestamp) {
   const hrEl = document.getElementById('hr-value');
   const vitalsNoteEl = document.getElementById('vitals-note');
   if (respEl || hrEl) {
+    // The gate opens on a minority of frames, so the panel shows the most recent
+    // published value with its age rather than flickering to "abstained" between
+    // publications. Past VITALS_MAX_AGE_S the value is no longer current and says so.
+    const VITALS_MAX_AGE_S = 20;
     const vs = csiSimulator.vitalSigns;
+    const at = csiSimulator.vitalSignsAt;
+    const ageS = at ? Math.round((Date.now() - at) / 1000) : null;
+    const fresh = vs && ageS !== null && ageS <= VITALS_MAX_AGE_S;
     const fmt = (v, unit, digits) =>
       (typeof v === 'number' && isFinite(v)) ? `${v.toFixed(digits)} ${unit}` : null;
-    const resp = vs ? fmt(vs.breathing_rate_bpm, 'rpm', 1) : null;
-    const hr = vs ? fmt(vs.heart_rate_bpm, 'bpm', 0) : null;
+    const suffix = fresh ? ` (${ageS}s)` : '';
+    const resp = fresh ? fmt(vs.breathing_rate_bpm, 'rpm', 1) : null;
+    const hr = fresh ? fmt(vs.heart_rate_bpm, 'bpm', 0) : null;
     if (respEl) {
-      respEl.textContent = resp || 'abstained';
+      respEl.textContent = resp ? resp + suffix : 'abstained';
       respEl.style.color = resp ? 'var(--cyan)' : 'rgba(150,150,150,0.7)';
     }
     if (hrEl) {
-      hrEl.textContent = hr || 'abstained';
+      hrEl.textContent = hr ? hr + suffix : 'abstained';
       hrEl.style.color = hr ? 'var(--cyan)' : 'rgba(150,150,150,0.7)';
     }
     if (vitalsNoteEl) {
-      vitalsNoteEl.textContent = (resp || hr)
-        ? 'published by the sensing server'
+      vitalsNoteEl.textContent = fresh
+        ? `published; age shown — the gate reopens when confidence clears the threshold`
         : (csiSimulator.vitalsReason || 'needs a fresh calibration and exactly one occupant');
     }
   }

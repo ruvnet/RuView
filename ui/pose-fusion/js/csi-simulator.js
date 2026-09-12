@@ -54,6 +54,7 @@ export class CsiSimulator {
     // gate abstains) and the gate's own explanation, fetched from
     // /api/v1/vital-signs so the page can say *why* there are no numbers.
     this.vitalSigns = null;
+    this.vitalSignsAt = null;
     this.vitalsAuthority = null;
     this.vitalsReason = null;
 
@@ -86,6 +87,7 @@ export class CsiSimulator {
           this.serverPresence = null;
           this.serverPersons = 0;
           this.vitalSigns = null;
+          this.vitalSignsAt = null;
           // Retry before giving up: a server restart must not leave this page
           // showing SYNTHETIC until someone reloads it.
           scheduleReconnect(this, () => { void this.connectLive(this._liveUrl); }, () => {
@@ -441,7 +443,14 @@ export class CsiSimulator {
       }
       if (typeof cls.motion_level === 'string') this.serverPresence = cls.motion_level;
       this.serverPersons = typeof msg.estimated_persons === 'number' ? msg.estimated_persons : 0;
-      this.vitalSigns = msg.vital_signs || null;
+      // Keep the last published value: the gate only opens on a minority of frames
+      // (~9.5% MEASURED), so clearing on every message would hide numbers the
+      // server is publishing. The age is carried alongside so the display can say
+      // how old it is.
+      if (msg.vital_signs) {
+        this.vitalSigns = msg.vital_signs;
+        this.vitalSignsAt = Date.now();
+      }
     }
   }
 
