@@ -6046,6 +6046,11 @@ async fn health_ready(State(state): State<SharedState>) -> Json<serde_json::Valu
             "last_witness": s.engine_bridge.last_trust_witness().map(witness_hex),
             "effective_class": s.engine_bridge.effective_class().map(|c| format!("{c:?}")),
             "demoted": s.engine_bridge.demoted(),
+            // ADR-141 review finding 1c: a demoted cycle loses its per-node raw
+            // amplitude/phase proxies on the live publish. Name the trigger so a
+            // consumer is not left inferring 'broken CSI' from empty arrays.
+            "demotion_reason": s.engine_bridge.demotion_reason(),
+            "demotion_count": s.engine_bridge.demotion_count(),
             "recalibration_recommended": s.engine_bridge.recalibration_recommended(),
             "engine_error_count": s.engine_bridge.engine_error_count(),
             "raw_outputs_suppressed": s.engine_bridge.suppress_raw_outputs(),
