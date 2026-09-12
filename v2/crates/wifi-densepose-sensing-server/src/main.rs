@@ -611,6 +611,27 @@ fn debounce_room_classification(state: &mut AppStateInner, raw: &RoomInference) 
 /// the fused room aggregate (its entities go stale/unavailable rather than
 /// holding a frozen online value). Mirrors the 10 s active-node filter used to
 /// assemble the nodes array.
+/// A node's vitals are only considered for publication while its newest frame
+/// is younger than this.
+const VITALS_MAX_AGE_MS: u64 = 5_000;
+
+/// How far apart two nodes' heart-rate estimates may be and still count as
+/// corroborating each other. MEASURED spread on this array when the estimates
+/// were wrong: 88.6 vs 61.6 bpm.
+const HR_AGREEMENT_TOLERANCE_BPM: f64 = 8.0;
+
+/// Same for breathing rate. MEASURED agreement on this array: 8.4 vs 11.1 bpm.
+const BREATHING_AGREEMENT_TOLERANCE_BPM: f64 = 3.0;
+
+/// Minimum number of concurring reporters. One reporter has nothing to contradict
+/// it; two or more must agree.
+const MIN_AGREEING_NODES: usize = 2;
+
+/// Silence from the bound calibration source, in seconds, after which a
+/// collecting calibration is reported as stalled. At the 10-25 Hz these nodes
+/// deliver on their bound grid, five seconds of nothing means the grid is gone.
+const CALIBRATION_STALL_SECS: f64 = 5.0;
+
 const NODE_STALE_AFTER_MS: u64 = 10_000;
 
 /// Build a node's *own* [`NodeInference`] from its smoothed per-node state
@@ -951,6 +972,9 @@ struct NodeState {
     /// Arrival time of the newest grid-admitted raw CSI frame. Edge-vitals
     /// packets intentionally do not refresh this clock.
     latest_accepted_csi_at: Option<std::time::Instant>,
+    /// Previous accepted-frame arrival time, the anchor for the accepted-rate
+    /// EMA. Separate from `last_frame_time`, which every arrival re-anchors.
+    latest_accepted_csi_at_prev: Option<std::time::Instant>,
     /// Sequence number of the newest CSI frame admitted to `frame_history`.
     /// Kept alongside the history so multistatic fusion can timestamp the
     /// exact sample it consumes, rather than the host's UDP arrival time.
@@ -963,6 +987,20 @@ struct NodeState {
     csi_fps_ema: f64,
     /// Number of inter-frame deltas observed (need ≥5 before trusting EMA).
     csi_fps_samples: u32,
+    /// EMA of the frame rate the DSP paths actually *consume* — i.e. frames
+    /// that passed the ADR-110 subcarrier-grid gate. `csi_fps_ema` above counts
+    /// every arrival, including grid-rejected frames, so on a node that
+    /// interleaves HT-192 and HE-306 grids it overstates the detector's clock by
+    /// the reject ratio. MEASURED on a three-node ESP32-S3 array: arrivals
+    /// 38-47 Hz vs a 192-grid rate of ~20 Hz, which tripped
+    /// `VitalSignDetector::reconfigure_sample_rate`'s 20% hysteresis repeatedly
+    /// and wiped the breathing/heartbeat buffers every 15-30 s, so two of three
+    /// nodes never accumulated a spectrum. Vitals needs the consumed clock.
+    accepted_csi_fps_ema: f64,
+    /// Inter-frame deltas behind `accepted_csi_fps_ema` (need ≥5 to trust it).
+    accepted_csi_fps_samples: u32,
+    /// Last time the fixed-rate vitals resampler produced a sample for this node.
+    last_vitals_tick: Option<std::time::Instant>,
     /// Latest extracted features for cross-node fusion.
     latest_features: Option<FeatureInfo>,
     // ── RuVector Phase 2: Temporal smoothing & coherence gating ──
@@ -1037,6 +1075,16 @@ const CALIBRATION_GRID_MAX_GAP_S: f64 = 5.0;
 /// magnitude (issue #1180). We reject sub-5 ms deltas as burst artifacts and
 /// cap accepted estimates to the firmware's 50 fps physical ceiling.
 pub(crate) const MAX_PLAUSIBLE_CSI_DT_SEC: f64 = 1.0;
+/// Output rate of the vitals resampler. The detector's breathing band is
+/// 0.1-0.5 Hz and its heartbeat band 0.8-2.0 Hz, so 10 Hz output is comfortably
+/// above the Nyquist the heartbeat peak needs while staying cheap enough to run
+/// per node indefinitely.
+const VITALS_RESAMPLE_HZ: f64 = 10.0;
+
+/// Period of the vitals resampler: one detector sample per period, holding the
+/// newest accepted frame (zero-order hold).
+const VITALS_RESAMPLE_PERIOD: std::time::Duration = std::time::Duration::from_millis(100);
+
 pub(crate) const MAX_PHYSICAL_CSI_FPS: f64 = 50.0;
 
 /// Smoothing factor for the inter-frame delta EMA. 1/32 at ~40 fps is roughly
@@ -1171,6 +1219,32 @@ impl NodeState {
 
     fn effective_sample_rate_hz(&self) -> f64 {
         self.measured_sample_rate_hz().unwrap_or(20.0)
+    }
+
+    /// True when the fixed-rate vitals resampler is due for another sample.
+    /// The newest accepted frame is held until then (zero-order hold), which
+    /// gives the detector a uniform clock even though arrivals are grid-gated
+    /// and irregular.
+    fn vitals_tick_due(&mut self, now: std::time::Instant) -> bool {
+        match self.last_vitals_tick {
+            Some(previous) if now.duration_since(previous) < VITALS_RESAMPLE_PERIOD => false,
+            _ => {
+                self.last_vitals_tick = Some(now);
+                true
+            }
+        }
+    }
+
+    /// Consumed-frame rate: how fast frames actually reach the DSP/vitals
+    /// paths. Falls back to the arrival rate until its own EMA has warmed, so a
+    /// node whose stream never got gated still reports something sane.
+    fn effective_accepted_sample_rate_hz(&self) -> f64 {
+        (self.accepted_csi_fps_samples >= 5 && self.accepted_csi_fps_ema.is_finite())
+            .then(|| {
+                self.accepted_csi_fps_ema
+                    .clamp(1.0, MAX_PHYSICAL_CSI_FPS)
+            })
+            .unwrap_or_else(|| self.effective_sample_rate_hz())
     }
 
     /// ADR-110 §A0.12 timestamp recovery: given a CSI frame's node-local
@@ -1315,6 +1389,17 @@ impl NodeState {
         self.latest_accepted_csi_at = Some(now);
         self.latest_csi_sequence = Some(sequence);
         self.latest_csi_sync_valid = sync_valid;
+        // Second EMA over accepted frames only: this is the clock the vitals
+        // detector is sampled at (see `accepted_csi_fps_ema`).
+        if let Some(previous) = self.latest_accepted_csi_at_prev {
+            let dt = now.duration_since(previous).as_secs_f64();
+            if let Some(new_ema) = update_csi_fps_ema(self.accepted_csi_fps_ema, dt) {
+                self.accepted_csi_fps_ema = new_ema;
+                self.accepted_csi_fps_samples =
+                    self.accepted_csi_fps_samples.saturating_add(1);
+            }
+        }
+        self.latest_accepted_csi_at_prev = Some(now);
         self.observe_csi_frame_arrival(now)
     }
 
@@ -1336,17 +1421,21 @@ impl NodeState {
             hr_buffer: VecDeque::with_capacity(8),
             br_buffer: VecDeque::with_capacity(8),
             rssi_history: VecDeque::new(),
-            vital_detector: VitalSignDetector::new(20.0),
+            vital_detector: VitalSignDetector::new(VITALS_RESAMPLE_HZ),
             latest_vitals: VitalSigns::default(),
             last_frame_time: None,
             edge_vitals: None,
             latest_sync: None,
             latest_sync_at: None,
             latest_accepted_csi_at: None,
+            latest_accepted_csi_at_prev: None,
             latest_csi_sequence: None,
             latest_csi_sync_valid: false,
             csi_fps_ema: 20.0,
             csi_fps_samples: 0,
+            accepted_csi_fps_ema: 20.0,
+            accepted_csi_fps_samples: 0,
+            last_vitals_tick: None,
             latest_features: None,
             prev_keypoints: None,
             motion_energy_history: VecDeque::with_capacity(COHERENCE_WINDOW),
@@ -5876,6 +5965,219 @@ fn assess_legacy_image_pose(state: &mut AppStateInner, update: &SensingUpdate) {
     }
 }
 
+/// Per-metric best evidence across the fresh nodes.
+///
+/// `s.latest_vitals` used to be assigned by every node in turn, so the published
+/// vitals were the *last writer's* rather than the best available. MEASURED with
+/// the empty-room calibration in place: node 1 reported `heartbeat_confidence`
+/// 0.533 and node 3 reported 0.423 against a 0.55 publication threshold, so which
+/// node delivered the last frame decided whether any vitals were published at all.
+///
+/// Breathing and heart rate are each taken from the node with the strongest
+/// evidence for that metric, restricted to nodes whose newest frame is fresh.
+/// Returns `None` when no fresh node reports either metric, so the caller can
+/// keep the frame-local value.
+fn best_vitals_across_nodes(nodes: &HashMap<u8, NodeState>) -> Option<VitalSigns> {
+    let now = std::time::Instant::now();
+    let max_age = Duration::from_millis(VITALS_MAX_AGE_MS);
+
+    let mut breathing_reports: Vec<(f64, f64)> = Vec::new(); // (confidence, rate)
+    let mut heartbeat_reports: Vec<(f64, f64)> = Vec::new();
+    let mut signal_quality = 0.0f64;
+
+    for node in nodes.values() {
+        let fresh = node
+            .last_frame_time
+            .is_some_and(|seen| now.saturating_duration_since(seen) < max_age);
+        if !fresh {
+            continue;
+        }
+        let vitals = &node.latest_vitals;
+        if let Some(rate) = vitals.breathing_rate_bpm {
+            breathing_reports.push((vitals.breathing_confidence, rate));
+        }
+        if let Some(rate) = vitals.heart_rate_bpm {
+            heartbeat_reports.push((vitals.heartbeat_confidence, rate));
+        }
+        signal_quality = signal_quality.max(vitals.signal_quality);
+    }
+
+    let breathing = corroborate(breathing_reports, BREATHING_AGREEMENT_TOLERANCE_BPM);
+    let heartbeat = corroborate(heartbeat_reports, HR_AGREEMENT_TOLERANCE_BPM);
+
+    if breathing.is_none() && heartbeat.is_none() {
+        return None;
+    }
+    Some(VitalSigns {
+        breathing_rate_bpm: breathing.map(|(_, rate)| rate),
+        heart_rate_bpm: heartbeat.map(|(_, rate)| rate),
+        breathing_confidence: breathing.map_or(0.0, |(confidence, _)| confidence),
+        heartbeat_confidence: heartbeat.map_or(0.0, |(confidence, _)| confidence),
+        signal_quality,
+    })
+}
+
+/// Reduce per-node reports for one metric to a corroborated estimate.
+///
+/// Returns `(confidence, rate)` of the strongest reporter inside the largest
+/// agreeing group, or `None` when the reporters contradict each other. A single
+/// reporter is returned as-is: there is nothing to contradict it.
+fn corroborate(mut reports: Vec<(f64, f64)>, tolerance_bpm: f64) -> Option<(f64, f64)> {
+    if reports.is_empty() {
+        return None;
+    }
+    if reports.len() < MIN_AGREEING_NODES {
+        return reports.pop();
+    }
+    // Largest group of reports that agree with one another, then the strongest
+    // member of it. Deterministic: ties broken by the higher confidence, then by
+    // the lower rate, so the result never depends on iteration order.
+    let mut best: Option<Vec<(f64, f64)>> = None;
+    for anchor in &reports {
+        let group: Vec<(f64, f64)> = reports
+            .iter()
+            .copied()
+            .filter(|(_, rate)| (rate - anchor.1).abs() <= tolerance_bpm)
+            .collect();
+        let better = match &best {
+            None => true,
+            Some(current) => {
+                group.len() > current.len()
+                    || (group.len() == current.len()
+                        && group
+                            .iter()
+                            .copied()
+                            .fold(f64::NEG_INFINITY, |m, (c, _)| m.max(c))
+                            > current
+                                .iter()
+                                .copied()
+                                .fold(f64::NEG_INFINITY, |m, (c, _)| m.max(c)))
+            }
+        };
+        if better {
+            best = Some(group);
+        }
+    }
+    let group = best?;
+    if group.len() < MIN_AGREEING_NODES {
+        return None;
+    }
+    group
+        .into_iter()
+        .max_by(|a, b| {
+            a.0.total_cmp(&b.0)
+                .then_with(|| b.1.total_cmp(&a.1))
+        })
+}
+
+#[cfg(test)]
+mod best_vitals_tests {
+    use super::*;
+
+    fn node_with(vitals: VitalSigns, age_ms: u64) -> NodeState {
+        let mut node = NodeState::new();
+        node.last_frame_time =
+            Some(std::time::Instant::now() - Duration::from_millis(age_ms));
+        node.latest_vitals = vitals;
+        node
+    }
+
+    fn vitals(br: Option<f64>, br_c: f64, hr: Option<f64>, hr_c: f64, q: f64) -> VitalSigns {
+        VitalSigns {
+            breathing_rate_bpm: br,
+            heart_rate_bpm: hr,
+            breathing_confidence: br_c,
+            heartbeat_confidence: hr_c,
+            signal_quality: q,
+        }
+    }
+
+    /// Two nodes that agree: each metric comes from the stronger reporter.
+    #[test]
+    fn takes_the_strongest_evidence_per_metric_when_nodes_agree() {
+        let mut nodes: HashMap<u8, NodeState> = HashMap::new();
+        nodes.insert(1, node_with(vitals(Some(18.71), 0.378, Some(70.33), 0.533, 0.432), 0));
+        nodes.insert(3, node_with(vitals(Some(17.45), 0.239, Some(72.00), 0.423, 0.500), 0));
+
+        let best = best_vitals_across_nodes(&nodes).expect("both nodes are fresh");
+        assert_eq!(best.breathing_rate_bpm, Some(18.71), "breathing from the stronger node");
+        assert_eq!(best.heart_rate_bpm, Some(70.33), "heart rate from the stronger node");
+        assert!((best.breathing_confidence - 0.378).abs() < 1e-9);
+        assert!((best.heartbeat_confidence - 0.533).abs() < 1e-9);
+        assert!(
+            (best.signal_quality - 0.500).abs() < 1e-9,
+            "signal quality is the best available regardless of which node wins a metric"
+        );
+    }
+
+    /// The MEASURED contradiction on this array: two fresh nodes reporting stable
+    /// heart rates 27 bpm apart. A sharp spectral peak is not proof of a cardiac
+    /// peak, so the contradicted metric must not be published — while breathing,
+    /// whose reporters agree, still is.
+    #[test]
+    fn suppresses_a_metric_the_nodes_contradict() {
+        let mut nodes: HashMap<u8, NodeState> = HashMap::new();
+        nodes.insert(1, node_with(vitals(Some(8.4), 0.416, Some(88.6), 0.738, 0.443), 0));
+        nodes.insert(3, node_with(vitals(Some(11.1), 0.300, Some(61.6), 0.577, 0.500), 0));
+
+        let best = best_vitals_across_nodes(&nodes).expect("both nodes are fresh");
+        assert_eq!(
+            best.heart_rate_bpm, None,
+            "88.6 vs 61.6 bpm is a contradiction, whatever the peak confidence says"
+        );
+        assert_eq!(best.heartbeat_confidence, 0.0);
+        assert_eq!(best.breathing_rate_bpm, Some(8.4), "2.7 bpm apart is agreement");
+        assert!((best.breathing_confidence - 0.416).abs() < 1e-9);
+    }
+
+    /// A lone strong outlier does not outvote reporters that agree with each other.
+    #[test]
+    fn a_lone_outlier_does_not_win() {
+        let picked = corroborate(vec![(0.95, 150.0), (0.30, 60.0), (0.25, 61.0)], 8.0)
+            .expect("two reporters agree");
+        assert_eq!(picked.1, 60.0);
+        assert!((picked.0 - 0.30).abs() < 1e-9);
+    }
+
+    /// With a single reporter there is nothing to contradict it.
+    #[test]
+    fn a_single_reporter_publishes() {
+        assert_eq!(corroborate(vec![(0.2, 70.0)], 8.0), Some((0.2, 70.0)));
+        assert_eq!(corroborate(Vec::new(), 8.0), None);
+    }
+
+    #[test]
+    fn ignores_stale_nodes_and_reports_none_without_evidence() {
+        let mut nodes: HashMap<u8, NodeState> = HashMap::new();
+        nodes.insert(
+            2,
+            node_with(vitals(Some(12.0), 0.9, Some(60.0), 0.9, 0.9), VITALS_MAX_AGE_MS + 1_000),
+        );
+        assert!(
+            best_vitals_across_nodes(&nodes).is_none(),
+            "a stale node must not publish, however confident it was"
+        );
+
+        nodes.insert(4, node_with(VitalSigns::default(), 0));
+        assert!(
+            best_vitals_across_nodes(&nodes).is_none(),
+            "a fresh node with no estimate is not evidence"
+        );
+    }
+
+    /// A fresh node with only one metric still publishes that metric.
+    #[test]
+    fn publishes_a_single_metric_when_that_is_all_there_is() {
+        let mut nodes: HashMap<u8, NodeState> = HashMap::new();
+        nodes.insert(5, node_with(vitals(None, 0.0, Some(64.0), 0.61, 0.45), 0));
+        let best = best_vitals_across_nodes(&nodes).expect("one metric is enough");
+        assert_eq!(best.heart_rate_bpm, Some(64.0));
+        assert_eq!(best.breathing_rate_bpm, None);
+        assert_eq!(best.breathing_confidence, 0.0);
+        assert!((best.heartbeat_confidence - 0.61).abs() < 1e-9);
+    }
+}
+
 fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
     let cls = &update.classification;
     if !cls.presence {
@@ -7604,6 +7906,26 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
         || "none".to_string(),
         |status| format!("{status:?}").to_lowercase(),
     );
+    // A collection bound to a grid the node stopped emitting makes no progress
+    // and burns the whole window silently: MEASURED, 3 frames in 105 s against
+    // `min_frames: 1000` / `min_duration_s: 600`. The grid is chosen from a 20 s
+    // evidence window, and these nodes interleave 192- and 306-bin frames, so the
+    // binding can be correct when taken and wrong seconds later.
+    let stall_seconds: Option<f64> = s.calibration_grid_binding.and_then(|binding| {
+        s.node_states
+            .get(&binding.source_node_id)
+            .and_then(|node| node.field_model_latest_seen)
+            .map(|seen| now.saturating_duration_since(seen).as_secs_f64())
+    });
+    let stalled = active && stall_seconds.is_some_and(|age| age > CALIBRATION_STALL_SECS);
+    // Kept out of the `json!` body below, which is already at the macro's
+    // recursion limit.
+    let stall_hint: Option<&str> = stalled.then_some(
+        "bound calibration grid is not arriving — the node moved to a different subcarrier \
+         grid. reset and start again, preferring the eligible source with the highest measured \
+         rate_hz.",
+    );
+
     let grid_binding = s.calibration_grid_binding.map(|binding| {
         let node = s.node_states.get(&binding.source_node_id);
         let latest_seen_ms = node
@@ -7621,6 +7943,48 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
             { "active" } else { "stale" },
         })
     });
+    // Extracted from the response below: the default macro recursion limit is
+    // reached by this response's nesting, so the deepest branch lives here.
+    let bootstrap_baseline_json = s
+        .bootstrap_baseline
+        .as_ref()
+        .map(|metadata| {
+            serde_json::json!({
+                "stored": true,
+                "active": bootstrap_active,
+                "authority": metadata.authority,
+                "source_node_ids": metadata.source_node_ids,
+                "source_grid": metadata.source_grid,
+                "source_model_id": metadata.source_model_id,
+                "created_at_unix_ms": metadata.created_at_unix_ms,
+                "expires_at_unix_ms": metadata.expires_at_unix_ms,
+                "content_sha256": metadata.content_sha256,
+                "background_match": bootstrap_background_match.map(|result| serde_json::json!({
+                    "state": if result.matches_empty { "matched" } else { "changed" },
+                    "matches_empty": result.matches_empty,
+                    "score": result.score,
+                    "normalized_residual_z": result.normalized_residual_z,
+                    "maturity": result.maturity,
+                    "reliable": result.reliable,
+                    "residual_energy": result.residual_energy,
+                    "residual_energy_threshold": result.residual_energy_threshold,
+                    "window_size": result.window_size,
+                    "reference_window_count": result.reference_window_count,
+                })),
+                "calibrated_evidence_authorized": false,
+                "numeric_vitals_authorized": false,
+            })
+        })
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "stored": false,
+                "active": false,
+                "authority": "none",
+                "calibrated_evidence_authorized": false,
+                "numeric_vitals_authorized": false,
+            })
+        });
+
     Json(serde_json::json!({
         "active": active,
         "status": status,
@@ -7632,6 +7996,12 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
         "model_id": s.calibration_model_id,
         "source_node_ids": s.calibration_source_node_ids,
         "grid_binding": grid_binding,
+        // Explicit stall verdict: `true` means the bound source is not feeding the
+        // collection, so finishing this run is impossible and it should be reset
+        // and started again on the highest-rate eligible source.
+        "stalled": stalled,
+        "stall_seconds": stall_seconds,
+        "stall_hint": stall_hint,
         "last_sequence_by_node": s.calibration_last_sequences,
         "sequence_policy": "forward_only_with_bounded_udp_reorder_drop_v1",
         "reorder_window_sequences": CALIBRATION_SEQUENCE_REORDER_WINDOW,
@@ -7640,37 +8010,7 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
         "sequence_fault_node_ids": s.calibration_sequence_fault_node_ids,
         "runtime_reference": runtime_reference,
         "binding_mode": if bootstrap_active { "bootstrap_only" } else if active { "runtime" } else { "none" },
-        "bootstrap_baseline": s.bootstrap_baseline.as_ref().map(|metadata| serde_json::json!({
-            "stored": true,
-            "active": bootstrap_active,
-            "authority": metadata.authority,
-            "source_node_ids": metadata.source_node_ids,
-            "source_grid": metadata.source_grid,
-            "source_model_id": metadata.source_model_id,
-            "created_at_unix_ms": metadata.created_at_unix_ms,
-            "expires_at_unix_ms": metadata.expires_at_unix_ms,
-            "content_sha256": metadata.content_sha256,
-            "background_match": bootstrap_background_match.map(|result| serde_json::json!({
-                "state": if result.matches_empty { "matched" } else { "changed" },
-                "matches_empty": result.matches_empty,
-                "score": result.score,
-                "normalized_residual_z": result.normalized_residual_z,
-                "maturity": result.maturity,
-                "reliable": result.reliable,
-                "residual_energy": result.residual_energy,
-                "residual_energy_threshold": result.residual_energy_threshold,
-                "window_size": result.window_size,
-                "reference_window_count": result.reference_window_count,
-            })),
-            "calibrated_evidence_authorized": false,
-            "numeric_vitals_authorized": false,
-        })).unwrap_or_else(|| serde_json::json!({
-            "stored": false,
-            "active": false,
-            "authority": "none",
-            "calibrated_evidence_authorized": false,
-            "numeric_vitals_authorized": false,
-        })),
+        "bootstrap_baseline": bootstrap_baseline_json,
     }))
 }
 
@@ -8293,7 +8633,48 @@ async fn vital_signs_endpoint(State(state): State<SharedState>) -> Json<serde_js
         explicit_calibration_fresh,
         person_count,
     );
-    let (br_len, br_cap, hb_len, hb_cap) = s.vital_detector.buffer_status();
+    // The live ESP32 path feeds the *per-node* detectors (`NodeState::vital_detector`)
+    // and mirrors only the smoothed result into `s.latest_vitals`; the global
+    // `s.vital_detector` is fed by the simulator paths alone. Reporting the global
+    // buffer therefore always read 0/0 on real hardware — MEASURED: three live
+    // ESP32-S3 nodes, ~44 published frames/s, `breathing_samples: 0` and
+    // `heartbeat_samples: 0` for an entire session — even while per-node
+    // detectors were consuming every frame. Report the cohort the live path
+    // actually uses, with a per-node breakdown so one stalled node cannot be
+    // averaged away by a healthy peer.
+    let mut per_node_buffers: Vec<serde_json::Value> = Vec::new();
+    let (mut br_len, mut br_cap, mut hb_len, mut hb_cap) = (0usize, 0usize, 0usize, 0usize);
+    let mut node_ids: Vec<u8> = s.node_states.keys().copied().collect();
+    node_ids.sort_unstable();
+    for node_id in node_ids {
+        let Some(node) = s.node_states.get(&node_id) else {
+            continue;
+        };
+        let (nbr, nbr_cap, nhb, nhb_cap) = node.vital_detector.buffer_status();
+        per_node_buffers.push(serde_json::json!({
+            "node_id": node_id,
+            "breathing_samples": nbr,
+            "breathing_capacity": nbr_cap,
+            "heartbeat_samples": nhb,
+            "heartbeat_capacity": nhb_cap,
+            "csi_fps_ema": node.csi_fps_ema,
+        }));
+        br_len = br_len.max(nbr);
+        br_cap = br_cap.max(nbr_cap);
+        hb_len = hb_len.max(nhb);
+        hb_cap = hb_cap.max(nhb_cap);
+    }
+    let buffer_status_source = if per_node_buffers.is_empty() {
+        // No node has ever delivered a frame (simulator, or nothing connected yet).
+        let (gbr, gbr_cap, ghb, ghb_cap) = s.vital_detector.buffer_status();
+        br_len = gbr;
+        br_cap = gbr_cap;
+        hb_len = ghb;
+        hb_cap = ghb_cap;
+        "global"
+    } else {
+        "per_node_max"
+    };
     Json(serde_json::json!({
         "vital_signs": {
             "breathing_rate_bpm": published.as_ref().and_then(|value| value.breathing_rate_bpm),
@@ -8305,14 +8686,95 @@ async fn vital_signs_endpoint(State(state): State<SharedState>) -> Json<serde_js
         "authority": if published.is_some() { "explicit_calibration" } else { "abstained" },
         "abstention_reason": if published.is_some() { serde_json::Value::Null } else { serde_json::json!("fresh explicit calibration with exactly one occupant and qualified evidence required") },
         "buffer_status": {
+            // Which detector cohort these counts describe. `per_node_max` is the
+            // live-ESP32 case: the highest fill across the active nodes, i.e. the
+            // node most ready to produce an estimate.
+            "source": buffer_status_source,
             "breathing_samples": br_len,
             "breathing_capacity": br_cap,
             "heartbeat_samples": hb_len,
             "heartbeat_capacity": hb_cap,
+            "nodes": per_node_buffers,
         },
         "source": s.effective_source(),
         "tick": s.tick,
     }))
+}
+
+/// GET /api/v1/vital-signs/diagnostics — development readout of the **raw,
+/// pre-gate** vitals estimates.
+///
+/// ADR-021/ADR-293 forbid publishing CSI-derived vitals as a measurement without
+/// a fresh explicit calibration, a single occupant, qualified confidence, and —
+/// for any accuracy claim — a reference series. This route does not weaken that:
+/// it is **disabled unless `RUVIEW_VITALS_DIAGNOSTICS=1`** (404 otherwise), it
+/// labels every value `UNVALIDATED`, and it exists so the sleep-monitoring work
+/// can see whether the estimator is producing a plausible trace *before* a
+/// ground-truth rig is wired up. Nothing here is a claim about accuracy.
+async fn vital_signs_diagnostics_endpoint(
+    State(state): State<SharedState>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+
+    if !vitals_diagnostics_enabled() {
+        return (
+            axum::http::StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "error_code": "diagnostics_disabled",
+                "error": "Set RUVIEW_VITALS_DIAGNOSTICS=1 to enable the raw vitals diagnostic surface.",
+            })),
+        )
+            .into_response();
+    }
+
+    let s = state.read().await;
+    let observed_at_unix_ms = chrono::Utc::now().timestamp_millis().max(0) as u64;
+    let mut nodes: Vec<serde_json::Value> = Vec::new();
+    let mut node_ids: Vec<u8> = s.node_states.keys().copied().collect();
+    node_ids.sort_unstable();
+    for node_id in node_ids {
+        let Some(node) = s.node_states.get(&node_id) else {
+            continue;
+        };
+        let (br_len, br_cap, hb_len, hb_cap) = node.vital_detector.buffer_status();
+        let v = &node.latest_vitals;
+        nodes.push(serde_json::json!({
+            "node_id": node_id,
+            "csi_fps_ema": node.csi_fps_ema,
+            "accepted_sample_rate_hz": node.effective_accepted_sample_rate_hz(),
+            "breathing_samples": br_len,
+            "breathing_capacity": br_cap,
+            "heartbeat_samples": hb_len,
+            "heartbeat_capacity": hb_cap,
+            "breathing_rate_bpm": v.breathing_rate_bpm,
+            "breathing_confidence": v.breathing_confidence,
+            "heart_rate_bpm": v.heart_rate_bpm,
+            "heartbeat_confidence": v.heartbeat_confidence,
+            "signal_quality": v.signal_quality,
+            "smoothed_breathing_rate_bpm": node.smoothed_br,
+            "smoothed_heart_rate_bpm": node.smoothed_hr,
+        }));
+    }
+    Json(serde_json::json!({
+        "authority": "diagnostic_only",
+        "evidence": "UNVALIDATED — raw CSI-derived estimates taken before the ADR-021/ADR-293 publication gate; not a measurement claim",
+        "enabled_by": VITALS_DIAGNOSTICS_ENV,
+        "person_count": s.person_count_at(observed_at_unix_ms),
+        "explicit_calibration_fresh": s.explicit_calibration_fresh_at(observed_at_unix_ms),
+        "gate": "vitals_for_publication requires fresh explicit calibration + exactly one occupant + qualified confidence",
+        "nodes": nodes,
+    }))
+    .into_response()
+}
+
+/// Env flag that enables [`vital_signs_diagnostics_endpoint`]. Off by default.
+const VITALS_DIAGNOSTICS_ENV: &str = "RUVIEW_VITALS_DIAGNOSTICS";
+
+fn vitals_diagnostics_enabled() -> bool {
+    matches!(
+        std::env::var(VITALS_DIAGNOSTICS_ENV).as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE")
+    )
 }
 
 /// Query params for `GET /api/v1/edge/registry`.
@@ -9475,23 +9937,40 @@ async fn udp_receiver_task(
                         ns.rssi_history.pop_front();
                     }
 
-                    if ns.csi_fps_samples >= 5
-                        && ns.vital_detector.reconfigure_sample_rate(sample_rate_hz)
-                    {
-                        // Never smooth estimates computed against two clocks.
-                        ns.smoothed_hr = 0.0;
-                        ns.smoothed_br = 0.0;
-                        ns.smoothed_hr_conf = 0.0;
-                        ns.smoothed_br_conf = 0.0;
-                        ns.hr_buffer.clear();
-                        ns.br_buffer.clear();
-                    }
+                    // Resample to a fixed vitals clock. The accepted-frame
+                    // stream is grid-gated, so its rate genuinely moves between
+                    // ~7 Hz and ~21 Hz over seconds; feeding frames one by one
+                    // makes the detector chase that rate, and every retune clears
+                    // the breathing/heartbeat history the spectrum needs
+                    // (MEASURED fill sequences: 441 -> 20 -> 130, 345 -> 14).
+                    // One held sample per fixed period gives the FFT a uniform
+                    // clock, so `signal_quality`'s fill factor can reach its 0.40
+                    // gate instead of collapsing with every wipe.
+                    // Downstream publication consumes `vitals` on every frame,
+                    // so carry the most recent 10 Hz estimate forward on frames
+                    // that did not produce a new detector sample.
+                    let mut vitals = ns.latest_vitals.clone();
+                    let vitals_now = std::time::Instant::now();
+                    if ns.vitals_tick_due(vitals_now) {
+                        if ns
+                            .vital_detector
+                            .reconfigure_sample_rate(VITALS_RESAMPLE_HZ)
+                        {
+                            // Never smooth estimates computed against two clocks.
+                            ns.smoothed_hr = 0.0;
+                            ns.smoothed_br = 0.0;
+                            ns.smoothed_hr_conf = 0.0;
+                            ns.smoothed_br_conf = 0.0;
+                            ns.hr_buffer.clear();
+                            ns.br_buffer.clear();
+                        }
 
-                    let raw_vitals = ns
-                        .vital_detector
-                        .process_frame(&frame.amplitudes, &frame.phases);
-                    let vitals = smooth_vitals_node(ns, &raw_vitals);
-                    ns.latest_vitals = vitals.clone();
+                        let raw_vitals = ns
+                            .vital_detector
+                            .process_frame(&frame.amplitudes, &frame.phases);
+                        vitals = smooth_vitals_node(ns, &raw_vitals);
+                        ns.latest_vitals = vitals.clone();
+                    }
 
                     // DynamicMinCut person estimation from subcarrier correlation.
                     let corr_persons = estimate_persons_from_correlation(&ns.frame_history);
@@ -9520,7 +9999,10 @@ async fn udp_receiver_task(
                     if s.rssi_history.len() > 60 {
                         s.rssi_history.pop_front();
                     }
-                    s.latest_vitals = vitals.clone();
+                    // Publish the best per-metric evidence among fresh nodes; fall
+                    // back to this frame's own estimate when no node qualifies.
+                    s.latest_vitals = best_vitals_across_nodes(&s.node_states)
+                        .unwrap_or_else(|| vitals.clone());
 
                     // Cross-node fusion: combine features from all active nodes.
                     let fused_features = fuse_multi_node_features(&features, &s.node_states);
@@ -11628,6 +12110,11 @@ async fn main() {
         .route("/api/v1/mesh/metrics", get(mesh_metrics_endpoint))
         // Vital sign endpoints
         .route("/api/v1/vital-signs", get(vital_signs_endpoint))
+        // Opt-in development readout (404 unless RUVIEW_VITALS_DIAGNOSTICS=1).
+        .route(
+            "/api/v1/vital-signs/diagnostics",
+            get(vital_signs_diagnostics_endpoint),
+        )
         .route("/api/v1/edge-vitals", get(edge_vitals_endpoint))
         // ADR-102: Edge Module Registry — surfaces the canonical Cognitum cog
         // catalog (`https://storage.googleapis.com/cognitum-apps/app-registry.json`)
@@ -12059,6 +12546,42 @@ mod sync_snapshot_helper_tests {
     }
 
     #[test]
+    /// The vitals detector consumes one sample per *accepted* frame. On a node
+    /// that interleaves 192/306-bin grids the arrival rate (which counts the
+    /// 306-bin rejects too) is roughly double the consumed rate, and the wrong
+    /// clock tripped `reconfigure_sample_rate`'s 20% hysteresis often enough to
+    /// wipe the breathing/heartbeat buffers every 15-30 s. MEASURED on a
+    /// three-node ESP32-S3 array: 38-47 Hz arrivals against a ~20 Hz
+    /// 192-grid rate; two of three nodes never accumulated a spectrum.
+    #[test]
+    fn accepted_rate_ignores_grid_rejected_arrivals() {
+        use std::time::Instant;
+
+        let mut node = NodeState::new();
+        let t0 = Instant::now();
+        // One accepted frame every 50 ms (20 Hz) with four rejected arrivals
+        // per accepted frame (arrivals therefore read ~100 Hz, clamped to the
+        // physical 50 Hz ceiling).
+        for i in 0..40u32 {
+            let base = t0 + Duration::from_millis(50 * i as u64);
+            for k in 1..=4u32 {
+                node.observe_csi_frame_arrival(base + Duration::from_millis(10 * k as u64));
+            }
+            node.observe_accepted_csi_frame(i, false, base);
+        }
+
+        let accepted = node.effective_accepted_sample_rate_hz();
+        let arrivals = node.effective_sample_rate_hz();
+        assert!(
+            (accepted - 20.0).abs() < 1.0,
+            "accepted rate must be the consumed clock, got {accepted}"
+        );
+        assert!(
+            arrivals > accepted * 1.3,
+            "the arrival EMA should still overstate the consumed rate: arrivals {arrivals} vs accepted {accepted}"
+        );
+    }
+
     fn observe_csi_frame_arrival_recovers_rate_through_udp_bursts() {
         // Issue #1180. A node genuinely producing 40 fps whose frames reach
         // the socket in pairs: two arrivals ~40 us apart, then the rest of a
