@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "architecture": "ADR-346 zero-credential social control plane",
+  "defaultDeny": true,
+  "auditLog": true,
+  "requireApprovalForDangerous": true,
+  "toolTimeoutMs": 5000,
+  "maxToolCallsPerTurn": 100,
+  "maxQueuedToolCalls": 16,
+  "maxRequestBytes": 262144,
+  "readOnlyTools": [
+    "social_doctor",
+    "social_platforms",
+    "social_research_baseline",
+    "social_direction_policy",
+    "social_direction_check",
+    "social_action_plan",
+    "social_metrics_normalize",
+    "social_flywheel_evaluate",
+    "social_autopilot_run",
+    "social_audit_verify"
+  ],
+  "cliOnlyTools": []
+}

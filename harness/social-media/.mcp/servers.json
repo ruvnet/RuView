@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "ruv-social": {
+      "command": "ruv-social",
+      "args": [
+        "mcp",
+        "start"
+      ]
+    }
+  }
+}

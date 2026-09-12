@@ -1,0 +1,7 @@
+project_id        = "replace-with-dedicated-project"
+region            = "us-central1"
+container_image   = "us-central1-docker.pkg.dev/replace-with-project/social/ruv-social@sha256:replace-with-64-hex-digest"
+image_evidence_digest = "sha256:replace-with-64-hex-digest"
+minimum_instances = 0
+maximum_instances = 3
+enable_heartbeat  = false

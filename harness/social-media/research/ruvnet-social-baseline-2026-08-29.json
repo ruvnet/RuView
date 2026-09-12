@@ -1,0 +1,418 @@
+{
+  "schema": "ruvnet.social.baseline.v1",
+  "snapshot_date": "2026-08-29",
+  "research_mode": "PUBLIC_UNAUTHENTICATED_READ_ONLY",
+  "claim_labels": {
+    "MEASURED": "Observed on a public page or public search index during this research. A measurement is a dated snapshot, not a promise that the value remains current.",
+    "CLAIMED": "Published by the account, organization, or an associated official site but not independently reproduced.",
+    "UNVERIFIED": "Ownership, current value, or current activity could not be established from public evidence."
+  },
+  "inputs": [
+    {
+      "kind": "PUBLIC_PROFILE",
+      "url": "https://github.com/ruvnet",
+      "purpose": "Canonical ruvnet identity, outbound identity links, follower count, repository count, and repository activity"
+    },
+    {
+      "kind": "PUBLIC_PROFILE",
+      "url": "https://gist.github.com/ruvnet",
+      "purpose": "Public gist count and dated publishing activity"
+    },
+    {
+      "kind": "PUBLIC_PROFILE",
+      "url": "https://ca.linkedin.com/in/reuvencohen",
+      "purpose": "Personal LinkedIn identity, public follower count, and visible publishing themes"
+    },
+    {
+      "kind": "VERIFIED_IDENTITY_DIRECTORY",
+      "url": "https://gravatar.com/ruvnet",
+      "purpose": "Corroboration of the GitHub, LinkedIn, and X identity link chain"
+    },
+    {
+      "kind": "PUBLIC_PROFILE",
+      "url": "https://x.com/ruv",
+      "purpose": "X identity target. Direct public retrieval was restricted, so only indexed metadata was recorded"
+    },
+    {
+      "kind": "PUBLIC_PROFILE",
+      "url": "https://www.instagram.com/ruv/",
+      "purpose": "Instagram target observed in historical association research. This source does not establish current ownership, activity, metrics, or write authority"
+    },
+    {
+      "kind": "OFFICIAL_SITE",
+      "url": "https://agentics.org/",
+      "purpose": "Organization level community claims. These claims are not assigned to the personal rUv identity"
+    },
+    {
+      "kind": "PUBLIC_ORGANIZATION_PROFILE",
+      "url": "https://www.linkedin.com/company/agentics-org",
+      "purpose": "Agentics Foundation identity and public LinkedIn metric"
+    },
+    {
+      "kind": "PUBLIC_ORGANIZATION_PROFILE",
+      "url": "https://www.linkedin.com/company/cognitum-one",
+      "purpose": "Cognitum One identity and public LinkedIn metric"
+    }
+  ],
+  "outputs": [
+    "harness/social-media/research/ruvnet-social-baseline-2026-08-29.json",
+    "harness/social-media/research/ruvnet-social-baseline-2026-08-29.md",
+    "docs/adr/ADR-345-ruvnet-social-identity-and-evidence-baseline.md"
+  ],
+  "assumptions": [
+    "Public counters are volatile and may be rounded by a platform.",
+    "A linked profile supports attribution but does not establish current administrator control or write authority.",
+    "Search index metadata can lag the live platform.",
+    "Audience counters across platforms overlap and must not be summed as unique people.",
+    "Agentics Foundation and Cognitum One are adjacent identities with separate governance unless an authorized owner explicitly maps them."
+  ],
+  "identity_root": {
+    "display_name": "rUv",
+    "github_handle": "ruvnet",
+    "confidence": "HIGH",
+    "basis": "The public GitHub profile links ruv.io and X, while the verified Gravatar profile links GitHub, LinkedIn, and X."
+  },
+  "surfaces": [
+    {
+      "platform": "GitHub",
+      "account": "ruvnet",
+      "identity_scope": "ruvnet",
+      "canonical_url": "https://github.com/ruvnet",
+      "identity_status": "STRONGLY_ATTRIBUTABLE",
+      "identity_confidence": "HIGH",
+      "evidence_label": "MEASURED",
+      "measurement_mode": "DIRECT_PUBLIC_PAGE",
+      "measurement_date": "2026-08-29",
+      "public_metrics": {
+        "followers": {
+          "value": 11200,
+          "display": "11.2K",
+          "precision": "ROUNDED"
+        },
+        "following": 53,
+        "repositories": 210
+      },
+      "project_metrics": [
+        {
+          "repository": "RuView",
+          "stars": 91822,
+          "forks": 12185,
+          "last_public_update_observed": "2026-08-27"
+        },
+        {
+          "repository": "ruflo",
+          "stars": 69550,
+          "forks": 8312,
+          "last_public_update_observed": "2026-08-27"
+        },
+        {
+          "repository": "RuVector",
+          "stars": 4459,
+          "forks": 590,
+          "last_public_update_observed": "2026-08-27"
+        },
+        {
+          "repository": "metaharness",
+          "stars": 616,
+          "forks": 74,
+          "last_public_update_observed": "2026-08-27"
+        }
+      ],
+      "recent_public_themes": [
+        "RF spatial sensing",
+        "Agent orchestration",
+        "Vector memory",
+        "Evidence gated metaharness work"
+      ],
+      "write_authority": "NOT_ESTABLISHED"
+    },
+    {
+      "platform": "GitHub Gists",
+      "account": "ruvnet",
+      "identity_scope": "ruvnet",
+      "canonical_url": "https://gist.github.com/ruvnet",
+      "identity_status": "STRONGLY_ATTRIBUTABLE",
+      "identity_confidence": "HIGH",
+      "evidence_label": "MEASURED",
+      "measurement_mode": "DIRECT_PUBLIC_PAGE",
+      "measurement_date": "2026-08-29",
+      "public_metrics": {
+        "gists": 480,
+        "starred_gists": 13,
+        "followers": {
+          "value": 11200,
+          "display": "11.2K",
+          "precision": "ROUNDED"
+        }
+      },
+      "latest_public_item_observed": {
+        "title": "RuV-SOTA0-Scheduler.md",
+        "created_on": "2026-08-27"
+      },
+      "recent_public_themes": [
+        "Frontier research review",
+        "Architecture integration maps",
+        "Architecture decisions",
+        "Evidence gated optimization"
+      ],
+      "write_authority": "NOT_ESTABLISHED"
+    },
+    {
+      "platform": "LinkedIn",
+      "account": "reuvencohen",
+      "identity_scope": "ruv_personal",
+      "display_name": "rUv Cohen",
+      "canonical_url": "https://ca.linkedin.com/in/reuvencohen",
+      "identity_status": "STRONGLY_ATTRIBUTABLE",
+      "identity_confidence": "HIGH",
+      "evidence_label": "MEASURED",
+      "measurement_mode": "PUBLIC_PROFILE_AND_INDEXED_PUBLIC_POSTS",
+      "measurement_date": "2026-08-29",
+      "public_metrics": {
+        "followers": {
+          "value": 62000,
+          "display": "62K",
+          "precision": "ROUNDED"
+        },
+        "connections": {
+          "display": "500 plus",
+          "precision": "PLATFORM_LOWER_BOUND"
+        }
+      },
+      "activity_observation": "The public activity surface showed multiple posts published within the preceding 24 hours at the time of observation.",
+      "recent_public_themes": [
+        "RuView calibration",
+        "WorldGraph",
+        "Ruflo",
+        "Building in public",
+        "Privacy and sensing"
+      ],
+      "write_authority": "NOT_ESTABLISHED"
+    },
+    {
+      "platform": "X",
+      "account": "rUv",
+      "identity_scope": "ruv_personal",
+      "canonical_url": "https://x.com/ruv",
+      "identity_status": "STRONGLY_ATTRIBUTABLE",
+      "identity_confidence": "HIGH",
+      "evidence_label": "MEASURED",
+      "measurement_mode": "INDEXED_PUBLIC_METADATA",
+      "measurement_date": null,
+      "observed_during_research_on": "2026-08-29",
+      "source_freshness": "The indexed snapshot was approximately two months old.",
+      "public_metrics": {
+        "followers": {
+          "value": 54000,
+          "display": "54K",
+          "precision": "ROUNDED_STALE_INDEX"
+        },
+        "following": 112
+      },
+      "recent_public_themes": [],
+      "activity_observation": "Current posts and engagement were not publicly retrievable during this research.",
+      "write_authority": "NOT_ESTABLISHED"
+    },
+    {
+      "platform": "Instagram",
+      "account": "ruv",
+      "identity_scope": "ruv_personal",
+      "canonical_url": "https://www.instagram.com/ruv/",
+      "identity_status": "HISTORICAL_ASSOCIATION_UNVERIFIED_FOR_CURRENT_CONTROL",
+      "identity_confidence": "LOW",
+      "evidence_label": "UNVERIFIED",
+      "measurement_mode": "PUBLIC_ASSOCIATION_ONLY",
+      "measurement_date": null,
+      "public_metrics": null,
+      "recent_public_themes": [],
+      "activity_observation": "Current metrics and recent content were not publicly retrievable during this research.",
+      "write_authority": "NOT_ESTABLISHED"
+    },
+    {
+      "platform": "Discord",
+      "account": "Agentics Foundation community",
+      "identity_scope": "agentics",
+      "canonical_url": null,
+      "identity_status": "ADJACENT_COMMUNITY_SURFACE",
+      "identity_confidence": "HIGH",
+      "evidence_label": "CLAIMED",
+      "measurement_mode": "OFFICIAL_SITE_CLAIM",
+      "measurement_date": null,
+      "observed_during_research_on": "2026-08-29",
+      "source_url": "https://agentics.org/",
+      "public_metrics": {
+        "members": {
+          "value": 3000,
+          "display": "3K plus",
+          "precision": "CLAIMED_LOWER_BOUND"
+        }
+      },
+      "activity_observation": "Channel contents were not inspected and no current content claim is recorded.",
+      "write_authority": "NOT_ESTABLISHED",
+      "secret_handling": "No invite token or join URL is stored in this baseline."
+    },
+    {
+      "platform": "WhatsApp",
+      "account": "Historical Agentics community groups",
+      "identity_scope": "agentics",
+      "canonical_url": null,
+      "identity_status": "ADJACENT_LEGACY_COMMUNITY_SURFACE",
+      "identity_confidence": "HIGH_HISTORICAL",
+      "evidence_label": "UNVERIFIED",
+      "measurement_mode": "DATED_PUBLIC_STATEMENTS",
+      "measurement_date": null,
+      "historical_claims": [
+        {
+          "members": 1100,
+          "display": "1,100 active users",
+          "context": "A public migration statement approximately one year before this snapshot",
+          "evidence_label": "UNVERIFIED",
+          "source_limitation": "No exact source URL was retained, so this value is excluded from machine metrics and publication evidence"
+        },
+        {
+          "members": 1200,
+          "display": "1,200 users",
+          "context": "A July 2025 public community statement",
+          "evidence_label": "UNVERIFIED",
+          "source_limitation": "No exact source URL was retained, so this value is excluded from machine metrics and publication evidence"
+        }
+      ],
+      "public_metrics": null,
+      "activity_observation": "Public statements described migration toward Discord because of capacity, spam, and moderation limits. Current membership and activity are unverified.",
+      "write_authority": "NOT_ESTABLISHED",
+      "secret_handling": "No invite token, group identifier, or join URL is stored in this baseline."
+    },
+    {
+      "platform": "Reddit",
+      "account": null,
+      "identity_scope": "unresolved",
+      "canonical_url": null,
+      "identity_status": "NO_STRONGLY_ATTRIBUTABLE_PERSONAL_ACCOUNT_FOUND",
+      "identity_confidence": "LOW",
+      "evidence_label": "UNVERIFIED",
+      "measurement_mode": "PUBLIC_SEARCH",
+      "measurement_date": "2026-08-29",
+      "public_metrics": null,
+      "activity_observation": "Third party discussion exists, but no personal rUv or ruvnet account was verified.",
+      "adjacent_claim": {
+        "claim": "Agentics Foundation claims 130K plus Reddit followers without identifying a specific owned subreddit in the reviewed public evidence.",
+        "evidence_label": "CLAIMED",
+        "source_url": "https://agentics.org/",
+        "observed_during_research_on": "2026-08-29",
+        "ownership_status": "UNVERIFIED"
+      },
+      "write_authority": "NOT_ESTABLISHED"
+    },
+    {
+      "platform": "Facebook",
+      "account": null,
+      "identity_scope": "unresolved",
+      "canonical_url": null,
+      "identity_status": "NO_STRONGLY_ATTRIBUTABLE_ACCOUNT_FOUND",
+      "identity_confidence": "LOW",
+      "evidence_label": "UNVERIFIED",
+      "measurement_mode": "PUBLIC_SEARCH",
+      "measurement_date": "2026-08-29",
+      "public_metrics": null,
+      "activity_observation": "No reliable current profile or page was established. A third party RuView coin listing is not treated as official.",
+      "write_authority": "NOT_ESTABLISHED"
+    },
+    {
+      "platform": "Threads",
+      "account": null,
+      "identity_scope": "unresolved",
+      "canonical_url": null,
+      "identity_status": "NO_STRONGLY_ATTRIBUTABLE_ACCOUNT_FOUND",
+      "identity_confidence": "LOW",
+      "evidence_label": "UNVERIFIED",
+      "measurement_mode": "PUBLIC_SEARCH",
+      "measurement_date": "2026-08-29",
+      "public_metrics": null,
+      "activity_observation": "No reliable current account was established. Instagram handle ownership is not accepted as proof of Threads ownership.",
+      "write_authority": "NOT_ESTABLISHED"
+    }
+  ],
+  "adjacent_identities": [
+    {
+      "name": "Agentics Foundation",
+      "surface": "LinkedIn organization",
+      "url": "https://www.linkedin.com/company/agentics-org",
+      "evidence_label": "MEASURED",
+      "measurement_date": "2026-08-29",
+      "public_metrics": {
+        "followers": 6974
+      },
+      "governance": "SEPARATE_FROM_PERSONAL_RUV_AND_RUVNET"
+    },
+    {
+      "name": "Cognitum One",
+      "surface": "LinkedIn organization",
+      "url": "https://www.linkedin.com/company/cognitum-one",
+      "evidence_label": "MEASURED",
+      "measurement_date": "2026-08-29",
+      "public_metrics": {
+        "followers": 388
+      },
+      "governance": "SEPARATE_FROM_PERSONAL_RUV_AND_RUVNET"
+    }
+  ],
+  "decision": {
+    "verified_identity_surfaces_for_read_only_monitoring": [
+      "GitHub",
+      "GitHub Gists",
+      "LinkedIn",
+      "X"
+    ],
+    "historical_observation_surfaces": [
+      "Instagram"
+    ],
+    "community_surfaces_requiring_separate_owner_mapping": [
+      "Discord",
+      "WhatsApp",
+      "Reddit"
+    ],
+    "unresolved_surfaces": [
+      "Facebook",
+      "Threads"
+    ],
+    "write_policy": "No surface has write authority from public research alone. Exact account identifiers, administrator control, credential scope, platform policy, and human approval must be verified before any write connector is enabled."
+  },
+  "risks": [
+    {
+      "risk": "Unsupported quantitative claims can be amplified across platforms.",
+      "severity": "HIGH",
+      "control": "Require claim label, source, measurement date, reproducer where possible, and named human approval before publication."
+    },
+    {
+      "risk": "Personal, ruvnet, Agentics Foundation, and Cognitum One identities can be conflated.",
+      "severity": "HIGH",
+      "control": "Maintain separate tenant, credential, policy, and approval records for every identity."
+    },
+    {
+      "risk": "Public metrics drift or are rounded.",
+      "severity": "MEDIUM",
+      "control": "Store dated snapshots and never use an old value as a current claim."
+    },
+    {
+      "risk": "Third party Facebook, Reddit, or token related properties can be mistaken for official properties.",
+      "severity": "HIGH",
+      "control": "Fail closed until the owner supplies the exact platform identifier and proves administrator control."
+    },
+    {
+      "risk": "Community join credentials or invite tokens can leak through research artifacts.",
+      "severity": "HIGH",
+      "control": "Store no invite token, group identifier, or join URL in source control."
+    }
+  ],
+  "acceptance_test": {
+    "result_expected": "PASS",
+    "checks": [
+      "The JSON parses without error.",
+      "A fresh unauthenticated browser reproduces the GitHub, Gists, LinkedIn, and X identity link chain, allowing for counter drift and index lag.",
+      "Every metric is labeled MEASURED or CLAIMED and has a date or explicit freshness limitation.",
+      "Facebook, Threads, Reddit, Discord, and WhatsApp retain NOT_ESTABLISHED write authority.",
+      "Agentics Foundation and Cognitum One remain separate identities.",
+      "No live Discord or WhatsApp invite token, group identifier, or join URL is present."
+    ]
+  }
+}

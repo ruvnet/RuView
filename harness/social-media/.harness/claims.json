@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "claims": [
+    {
+      "id": "zero-credential-control-plane",
+      "evidence": "REPOSITORY",
+      "claim": "Phase 1 tools accept no credential material and perform no authenticated platform request."
+    },
+    {
+      "id": "read-only-mcp",
+      "evidence": "POLICY",
+      "claim": "Every MCP tool is read only and no MCP tool can connect, publish, message, moderate, spend, deploy, approve, or promote."
+    },
+    {
+      "id": "no-browser-policy-laundering",
+      "evidence": "POLICY",
+      "claim": "Each platform operation is API_ALLOWED, ATTENDED_MANUAL, or DENY, and unavailable API capability never falls back to computer use."
+    },
+    {
+      "id": "proposal-only-optimization",
+      "evidence": "REPOSITORY",
+      "claim": "Optimization evaluation and the bounded autopilot can only reject or queue digest bound candidates for independent verification; review eligibility, execution, promotion, and self mutation remain unauthorized."
+    }
+  ]
+}
