@@ -1396,7 +1396,7 @@ impl NodeState {
             debounce_candidate: "absent".to_string(),
             baseline_motion: 0.0,
             baseline_frames: 0,
-            motion_noise_floor: 0.0,
+            motion_noise_floor: MOTION_NOISE_FLOOR_PRIOR,
             smoothed_hr: 0.0,
             smoothed_br: 0.0,
             smoothed_hr_conf: 0.0,
@@ -2285,6 +2285,35 @@ impl AppStateInner {
     /// "esp32:offline" so the UI can distinguish active vs stale connections.
     /// Person count: eigenvalue-based if field model is calibrated, else heuristic.
     /// Uses global frame_history if populated, otherwise the freshest per-node history.
+    /// Conformance of the current window against the *runtime* calibration's
+    /// empty-room reference.
+    ///
+    /// `field_bridge::bootstrap_background_match` tests a live window's residual
+    /// energy against the reference the calibration stored; it is named for the
+    /// bootstrap prior because that was its only caller. MEASURED: with a chair
+    /// brought into the room after calibration, `person_count_at` alternated 0/1 and
+    /// the dwell-filtered value reported an occupant in an empty room. The same check
+    /// now also gates the runtime path, with the same negative-only authority.
+    fn runtime_background_match(
+        &self,
+        observed_at_unix_ms: u64,
+    ) -> Option<field_bridge::BootstrapBackgroundMatch> {
+        if self.bootstrap_baseline_active {
+            return None;
+        }
+        let field = self.field_model.as_ref()?;
+        let binding = self.calibration_grid_binding?;
+        let node = self.node_states.get(&binding.source_node_id)?;
+        if node.field_model_history.is_empty() {
+            return None;
+        }
+        field_bridge::bootstrap_background_match(
+            field,
+            &node.field_model_history,
+            observed_at_unix_ms.saturating_mul(1_000),
+        )
+    }
+
     /// Report occupancy through a dwell filter.
     ///
     /// `person_count_at` is a per-call estimate of a slowly changing quantity, so
@@ -2514,7 +2543,7 @@ impl AppStateInner {
             debounce_candidate: "absent".to_string(),
             baseline_motion: 0.0,
             baseline_frames: 0,
-            motion_noise_floor: 0.0,
+            motion_noise_floor: MOTION_NOISE_FLOOR_PRIOR,
             stable_occupancy: 0,
             occupancy_candidate: 0,
             occupancy_candidate_since: None,
@@ -3694,6 +3723,12 @@ const ACTIVE_THRESHOLD: f64 = 0.25;
 /// is younger than this.
 const VITALS_MAX_AGE_MS: u64 = 5_000;
 
+/// Starting value for the learned quiet-room jitter. MEASURED on this array the
+/// per-node floor settles at 0.032-0.036, and starting from zero collapses the
+/// presence threshold to its fixed floor, which the room's own rectified noise
+/// clears — an empty room reported `present_still` 12 s after a restart.
+const MOTION_NOISE_FLOOR_PRIOR: f64 = 0.03;
+
 /// How long an occupancy change must persist before it is reported. MEASURED with
 /// a person sitting still: the eigenvalue estimate flipped between 0 and 1 every
 /// few seconds, which made vitals publication intermittent and the presence
@@ -3760,9 +3795,12 @@ fn smooth_and_classify(state: &mut AppStateInner, raw: &mut ClassificationInfo, 
     // baseline tracks ~0.45, and the residual ~= 0.135 cleared
     // `raw_classify`'s 0.12 "present_moving" threshold — so an empty room
     // reported presence indefinitely and the pose path drew a skeleton.
-    let margin =
-        (state.motion_noise_floor * PRESENCE_NOISE_SIGMA).max(PRESENCE_MOTION_MARGIN);
-    let adjusted = (raw_motion - state.baseline_motion - margin).max(0.0);
+    // Subtract only the baseline. The noise floor is applied once, inside
+    // `raw_classify_scaled`, which scales the presence threshold by it — applying a
+    // margin here as well meant a walking person had to clear baseline + margin +
+    // scaled threshold to be seen, and MEASURED over 21 minutes of a person walking
+    // in the room, `motion_level` never left `absent` (414 of 414 samples).
+    let adjusted = (raw_motion - state.baseline_motion).max(0.0);
 
     // 3. EMA smooth the adjusted score.
     state.smoothed_motion =
@@ -3770,7 +3808,12 @@ fn smooth_and_classify(state: &mut AppStateInner, raw: &mut ClassificationInfo, 
     let sm = state.smoothed_motion;
 
     // 4. Classify from smoothed score, with thresholds scaled to the floor.
-    let candidate = raw_classify_scaled(sm, state.motion_noise_floor);
+    let mut candidate = raw_classify_scaled(sm, state.motion_noise_floor);
+    // During warm-up the baseline is not yet a valid quiet reference, so a `present`
+    // verdict would be a claim about noise.
+    if state.baseline_frames < BASELINE_WARMUP {
+        candidate = "absent".to_string();
+    }
 
     // 5. Hysteresis debounce: require N consecutive frames agreeing on a new state.
     if candidate == state.current_motion_level {
@@ -3833,15 +3876,19 @@ fn smooth_and_classify_node(ns: &mut NodeState, raw: &mut ClassificationInfo, ra
     ns.motion_noise_floor = ns.motion_noise_floor * (1.0 - baseline_alpha)
         + (raw_motion - ns.baseline_motion).abs() * baseline_alpha;
 
-    // Same correction as `smooth_and_classify`: keep none of the quiet-room
-    // floor in the score, and require a margin over the measured jitter.
-    let margin = (ns.motion_noise_floor * PRESENCE_NOISE_SIGMA).max(PRESENCE_MOTION_MARGIN);
-    let adjusted = (raw_motion - ns.baseline_motion - margin).max(0.0);
+    // Same correction as `smooth_and_classify`: subtract the baseline here and let
+    // the noise-scaled thresholds do the rest, once.
+    let adjusted = (raw_motion - ns.baseline_motion).max(0.0);
 
     ns.smoothed_motion = ns.smoothed_motion * (1.0 - motion_alpha) + adjusted * motion_alpha;
     let sm = ns.smoothed_motion;
 
-    let candidate = raw_classify_scaled(sm, ns.motion_noise_floor);
+    let mut candidate = raw_classify_scaled(sm, ns.motion_noise_floor);
+    // Same rule as `smooth_and_classify`: no presence claim until this node has a
+    // learned quiet baseline and jitter.
+    if ns.baseline_frames < warmup_frames_needed {
+        candidate = "absent".to_string();
+    }
 
     if candidate == ns.current_motion_level {
         ns.debounce_counter = 0;
@@ -8977,6 +9024,18 @@ async fn vital_signs_diagnostics_endpoint(
         "person_count": s.person_count_at(observed_at_unix_ms),
         "explicit_calibration_fresh": s.explicit_calibration_fresh_at(observed_at_unix_ms),
         "gate": "vitals_for_publication requires fresh explicit calibration + exactly one occupant + qualified confidence",
+        "runtime_background": s.runtime_background_match(observed_at_unix_ms).map(|m| {
+            serde_json::json!({
+                "matches_empty": m.matches_empty,
+                "reliable": m.reliable,
+                "maturity": m.maturity,
+                "residual_energy": m.residual_energy,
+                "residual_energy_threshold": m.residual_energy_threshold,
+                "normalized_residual_z": m.normalized_residual_z,
+                "window_size": m.window_size,
+                "reference_window_count": m.reference_window_count,
+            })
+        }),
         "reporters": {
             "breathing": breathing_reporters,
             "heartbeat": heartbeat_reporters,
@@ -10281,9 +10340,19 @@ async fn udp_receiver_task(
                     let calibrated_occupancy = if s
                         .explicit_calibration_fresh_at(observed_at_unix_ms)
                     {
-                        let raw_count = s.person_count_at(observed_at_unix_ms);
-                        let occupancy_now = std::time::Instant::now();
-                        Some(s.observe_occupancy(raw_count, occupancy_now))
+                        match s.runtime_background_match(observed_at_unix_ms) {
+                            // Negative-only authority, exactly as the bootstrap prior
+                            // is used: a window that conforms to the calibration's
+                            // empty-room reference is empty, whatever the eigenvalue
+                            // count reads. This is what stops an empty room from
+                            // publishing vitals because a chair moved.
+                            Some(matched) if matched.matches_empty => Some(0),
+                            _ => {
+                                let raw_count = s.person_count_at(observed_at_unix_ms);
+                                let occupancy_now = std::time::Instant::now();
+                                Some(s.observe_occupancy(raw_count, occupancy_now))
+                            }
+                        }
                     } else {
                         None
                     };
@@ -12042,7 +12111,7 @@ async fn main() {
         occupancy_candidate_since: None,
         baseline_motion: 0.0,
         baseline_frames: 0,
-        motion_noise_floor: 0.0,
+        motion_noise_floor: MOTION_NOISE_FLOOR_PRIOR,
         smoothed_hr: 0.0,
         smoothed_br: 0.0,
         smoothed_hr_conf: 0.0,
