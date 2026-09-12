@@ -7,6 +7,7 @@
 
 use anyhow::{bail, Result};
 use clap::Args;
+use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::UdpSocket;
 use wifi_densepose_calibration::{
@@ -44,6 +45,72 @@ fn frame_scalar(frame: &CsiFrame) -> f32 {
         return 0.0;
     }
     (a.sum() / a.len() as f64) as f32
+}
+
+/// Diagnostic only: summarize per-subcarrier amplitude z-scores.
+/// This does NOT affect enrollment acceptance.
+fn z_distribution(
+    frame: &CsiFrame,
+    baseline: &BaselineCalibration,
+) -> Option<(f32, f32, f32, f32, f32)> {
+    let expected = baseline.subcarriers.len();
+    let n_sc = frame.num_subcarriers();
+
+    if expected == 0 || n_sc == 0 {
+        return None;
+    }
+
+    let take = expected.min(n_sc);
+    let mut z: Vec<f32> = Vec::with_capacity(take);
+
+    for k in 0..take {
+        let amp = frame.data[[0, k]].norm() as f32;
+        let b = &baseline.subcarriers[k];
+
+        if !amp.is_finite()
+            || !b.amp_mean.is_finite()
+            || !b.amp_variance.is_finite()
+        {
+            continue;
+        }
+
+        let std = b.amp_variance.sqrt().max(1e-6);
+        z.push(((amp - b.amp_mean) / std).abs());
+    }
+
+    if z.is_empty() {
+        return None;
+    }
+
+    z.sort_by(|a, b| {
+        a.partial_cmp(b)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    fn percentile(sorted: &[f32], p: f32) -> f32 {
+        if sorted.is_empty() {
+            return 0.0;
+        }
+
+        let pos = p * (sorted.len() - 1) as f32;
+        let lo = pos.floor() as usize;
+        let hi = pos.ceil() as usize;
+
+        if lo == hi {
+            sorted[lo]
+        } else {
+            let w = pos - lo as f32;
+            sorted[lo] * (1.0 - w) + sorted[hi] * w
+        }
+    }
+
+    let mean = z.iter().sum::<f32>() / z.len() as f32;
+    let median = percentile(&z, 0.50);
+    let p75 = percentile(&z, 0.75);
+    let p90 = percentile(&z, 0.90);
+    let max = *z.last().unwrap_or(&0.0);
+
+    Some((mean, median, p75, p90, max))
 }
 
 fn load_baseline(path: &str) -> Result<BaselineCalibration> {
@@ -94,6 +161,57 @@ pub struct EnrollArgs {
     /// Max attempts per anchor before moving on.
     #[arg(long, default_value_t = 2)]
     pub attempts: u32,
+
+    /// Only accept CSI frames from this ESP32 node ID.
+    #[arg(long, conflicts_with = "all_nodes")]
+    pub node_id: Option<u8>,
+
+    /// Enroll all discovered/configured ESP32 nodes in one shared capture.
+    #[arg(long, conflicts_with = "node_id")]
+    pub all_nodes: bool,
+
+    /// Directory containing baseline-node<N>.bin files for --all-nodes.
+    #[arg(long, default_value = "./baselines")]
+    pub baseline_dir: String,
+
+    /// Output directory for enrollment-node<N>.json files in --all-nodes mode.
+    #[arg(long, default_value = "./enrollments")]
+    pub output_dir: String,
+
+    /// Countdown seconds before each anchor capture starts. Raise this when the
+    /// operator needs time to move into position between anchors.
+    #[arg(long, default_value_t = 3)]
+    pub lead_in_s: u32,
+
+    /// Presence test threshold as a relative mean-amplitude shift versus this
+    /// session's own `empty` capture (0.0075 = 0.75%). `0` disables the shift
+    /// test and falls back to the legacy per-subcarrier `presence_z` gate.
+    #[arg(long, default_value_t = 0.0)]
+    pub min_mean_shift: f32,
+
+    /// Gate override: minimum mean z-score for "a person is present".
+    #[arg(long, default_value_t = 1.5)]
+    pub min_presence_z: f32,
+
+    /// Gate override: maximum mean z-score accepted for the `empty` anchor.
+    #[arg(long, default_value_t = 1.0)]
+    pub empty_max_z: f32,
+
+    /// Gate override: maximum motion rate accepted for a "still" anchor.
+    #[arg(long, default_value_t = 0.6)]
+    pub max_still_motion: f32,
+
+    /// Gate override: minimum motion rate required for the `move` anchor.
+    #[arg(long, default_value_t = 0.3)]
+    pub min_move_motion: f32,
+
+    /// In `--all-nodes` mode, how many nodes must see the mean-amplitude shift
+    /// before the anchor counts as "a person is present" for every node. A
+    /// person is a property of the room, not of one node: a node whose link is
+    /// dominated by a strong direct path (live data: node 1 shifted only
+    /// 0.0-2.4% while nodes 2/3 shifted up to 13.7%) must not veto the anchor.
+    #[arg(long, default_value_t = 1)]
+    pub presence_votes: u32,
 }
 
 /// Capture one anchor: returns (accepted feature?, anchor verdict, reason).
@@ -105,9 +223,12 @@ async fn capture_anchor(
     tier: &str,
     fs_hz: f32,
     room_id: &str,
+    node_id: Option<u8>,
+    lead_in_s: u32,
+    reference_mean: Option<f32>,
 ) -> Result<(Option<AnchorFeature>, Anchor, Option<String>)> {
     eprintln!("\n[enroll] {} — {}", label.as_str(), label.prompt());
-    for c in (1..=3).rev() {
+    for c in (1..=lead_in_s.max(1)).rev() {
         eprintln!("[enroll]   starting in {c}…");
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
@@ -115,6 +236,17 @@ async fn capture_anchor(
 
     let mut recorder = AnchorRecorder::new(label);
     let mut series: Vec<f32> = Vec::new();
+    let mut normalized_z_sum = 0.0f64;
+    let mut normalized_z_frames = 0u32;
+    // ADR-135 geometry guard: a frame may only be compared against a baseline
+    // that was built from the SAME subcarrier count. A 192-bin baseline must
+    // never consume 64/128-bin frames (and vice versa): mixing counts compares
+    // different physical bins and inflates presence_z. This is the root cause
+    // from the roomB session - calibration ran with esp32_ht40_192 while enroll
+    // ran with --tier ht40, which admitted 128-bin frames against 192-bin
+    // baselines. The baseline's stored subcarrier count is authoritative.
+    let expected_sc = baseline.subcarriers.len();
+    let mut geometry_skipped = 0u32;
     let mut buf = vec![0u8; RECV_BUF];
     let deadline = Instant::now() + Duration::from_secs(label.duration_s() as u64);
 
@@ -122,43 +254,624 @@ async fn capture_anchor(
         let timeout = Duration::from_millis(500);
         if let Ok(Ok(n)) = tokio::time::timeout(timeout, socket.recv(&mut buf)).await {
             if let Some(frame) = parse_csi_packet(&buf[..n], tier) {
+                if let Some(node_id) = node_id {
+                    let expected = format!("esp32-node{}", node_id);
+                    if frame.metadata.device_id.to_string() != expected {
+                        continue;
+                    }
+                }
+                if frame.num_subcarriers() != expected_sc {
+                    geometry_skipped += 1;
+                    if geometry_skipped <= 3 {
+                        eprintln!(
+                            "[enroll]   WARN skipping {}-subcarrier frame; baseline expects {expected_sc} \
+                             (run `enroll --tier` matching the `calibrate --tier` that built the baseline, \
+                             e.g. esp32_ht40_192)",
+                            frame.num_subcarriers()
+                        );
+                    }
+                    continue;
+                }
                 recorder.record_frame(baseline, &frame);
+
+                if let Some((mean_z, median_z, p75_z, p90_z, max_z)) =
+                    z_distribution(&frame, baseline)
+                {
+                    normalized_z_sum += median_z as f64;
+                    normalized_z_frames += 1;
+
+                    if normalized_z_frames == 1 {
+                        eprintln!(
+                            "[enroll] diagnostic z: mean={:.2} median={:.2} p75={:.2} p90={:.2} max={:.2}",
+                            mean_z, median_z, p75_z, p90_z, max_z
+                        );
+                    }
+                }
+
                 series.push(frame_scalar(&frame));
             }
         }
     }
 
-    let (anchor, reason) = recorder.finalize(gate, now_unix());
-    let feature = if anchor.quality.accepted {
-        Some(AnchorFeature::from_series(room_id, label, &series, fs_hz))
+    if geometry_skipped > 0 {
+        eprintln!(
+            "[enroll]   note: skipped {geometry_skipped} frame(s) whose subcarrier count != baseline ({expected_sc})",
+        );
+    }
+
+    let normalized_z = if normalized_z_frames == 0 {
+        0.0
     } else {
-        None
+        (normalized_z_sum / normalized_z_frames as f64) as f32
     };
-    Ok((feature, anchor, reason))
+
+    eprintln!(
+        "[enroll]   diagnostic: normalized_presence_z={:.2} frames={}",
+        normalized_z, normalized_z_frames
+    );
+
+    let feature_all = AnchorFeature::from_series(room_id, label, &series, fs_hz);
+    let mean_shift_rel = reference_mean.and_then(|reference| {
+        if gate.min_mean_shift > 0.0 && reference.abs() > f32::EPSILON {
+            Some((feature_all.features.mean - reference) / reference)
+        } else {
+            None
+        }
+    });
+    if let Some(shift) = mean_shift_rel {
+        eprintln!("[enroll]   presence shift: {:+.2}% vs the empty capture", 100.0 * shift);
+    }
+    let (anchor, reason) = recorder.finalize(gate, now_unix(), mean_shift_rel);
+    eprintln!(
+        "[enroll]   features: mean={:.4} variance={:.6} motion={:.6} breathing_score={:.3} breathing_hz={:.3} heart_score={:.3} heart_hz={:.3} frames={}",
+        feature_all.features.mean,
+        feature_all.features.variance,
+        feature_all.features.motion,
+        feature_all.features.breathing_score,
+        feature_all.features.breathing_hz,
+        feature_all.features.heart_score,
+        feature_all.features.heart_hz,
+        series.len(),
+    );
+
+    // The caller decides; keeping the feature lets the room-level consensus in
+    // `--all-nodes` mode re-evaluate a node that a per-node gate rejected.
+    Ok((Some(feature_all), anchor, reason))
+}
+
+
+/// State accumulated for one node during a single anchor capture.
+struct NodeAnchorCapture {
+    recorder: AnchorRecorder,
+    series: Vec<f32>,
+    normalized_z_sum: f64,
+    normalized_z_frames: u32,
+    printed_diagnostic: bool,
+    /// Frames skipped because their subcarrier count did not match the node baseline.
+    skipped_geometry: u32,
+}
+
+/// Load every baseline-node<N>.bin from a directory.
+fn load_node_baselines(dir: &str) -> Result<HashMap<u8, BaselineCalibration>> {
+    let mut entries: Vec<(u8, std::path::PathBuf)> = Vec::new();
+
+    for entry in std::fs::read_dir(dir)
+        .map_err(|e| anyhow::anyhow!("cannot read baseline directory {dir}: {e}"))?
+    {
+        let entry = entry
+            .map_err(|e| anyhow::anyhow!("cannot read baseline directory entry: {e}"))?;
+        let path = entry.path();
+
+        let Some(name) = path.file_name().and_then(|x| x.to_str()) else {
+            continue;
+        };
+
+        let Some(rest) = name.strip_prefix("baseline-node") else {
+            continue;
+        };
+
+        let Some(id_text) = rest.strip_suffix(".bin") else {
+            continue;
+        };
+
+        let Ok(node_id) = id_text.parse::<u8>() else {
+            continue;
+        };
+
+        entries.push((node_id, path));
+    }
+
+    entries.sort_by_key(|(node_id, _)| *node_id);
+
+    if entries.is_empty() {
+        bail!(
+            "no baseline-node<N>.bin files found in {dir} — run \
+             `calibrate --all-nodes` first"
+        );
+    }
+
+    let mut baselines = HashMap::new();
+
+    for (node_id, path) in entries {
+        let path_str = path.to_string_lossy();
+        let baseline = load_baseline(&path_str)?;
+        eprintln!(
+            "[enroll] loaded node {} baseline={} subcarriers={}",
+            node_id,
+            &baseline.calibration_uuid().to_string()[..8],
+            baseline.subcarriers.len()
+        );
+        baselines.insert(node_id, baseline);
+    }
+
+    Ok(baselines)
+}
+
+fn packet_node_id(frame: &CsiFrame) -> Option<u8> {
+    frame
+        .metadata
+        .device_id
+        .to_string()
+        .strip_prefix("esp32-node")
+        .and_then(|s| s.parse::<u8>().ok())
+}
+
+/// Capture one anchor for all configured nodes simultaneously.
+async fn capture_anchor_all_nodes(
+    socket: &UdpSocket,
+    baselines: &HashMap<u8, BaselineCalibration>,
+    gate: &AnchorQualityGate,
+    label: AnchorLabel,
+    tier: &str,
+    fs_hz: f32,
+    room_id: &str,
+    lead_in_s: u32,
+    references: &HashMap<u8, f32>,
+) -> Result<HashMap<u8, (Option<AnchorFeature>, Anchor, Option<String>)>> {
+    eprintln!("\n[enroll] {} — {}", label.as_str(), label.prompt());
+
+    for c in (1..=lead_in_s.max(1)).rev() {
+        eprintln!("[enroll]   starting in {c}…");
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
+    eprintln!("[enroll]   capturing {} s for {} node(s)…",
+        label.duration_s(),
+        baselines.len()
+    );
+
+    let mut states: HashMap<u8, NodeAnchorCapture> = HashMap::new();
+
+    for (&node_id, _) in baselines {
+        states.insert(
+            node_id,
+            NodeAnchorCapture {
+                recorder: AnchorRecorder::new(label),
+                series: Vec::new(),
+                normalized_z_sum: 0.0,
+                normalized_z_frames: 0,
+                printed_diagnostic: false,
+                skipped_geometry: 0,
+            },
+        );
+    }
+
+    let mut buf = vec![0u8; RECV_BUF];
+    let deadline = Instant::now() + Duration::from_secs(label.duration_s() as u64);
+
+    while Instant::now() < deadline {
+        let timeout = Duration::from_millis(500);
+
+        if let Ok(Ok(n)) = tokio::time::timeout(timeout, socket.recv(&mut buf)).await {
+            let Some(frame) = parse_csi_packet(&buf[..n], tier) else {
+                continue;
+            };
+
+            let Some(node_id) = packet_node_id(&frame) else {
+                continue;
+            };
+
+            let Some(baseline) = baselines.get(&node_id) else {
+                continue;
+            };
+
+            let Some(state) = states.get_mut(&node_id) else {
+                continue;
+            };
+
+            if frame.num_subcarriers() != baseline.subcarriers.len() {
+                state.skipped_geometry += 1;
+                if state.skipped_geometry <= 3 {
+                    eprintln!(
+                        "[enroll] node {} WARN skipping {}-subcarrier frame; baseline expects {} \
+                         (run `enroll --tier` matching the `calibrate --tier` that built the baseline)",
+                        node_id,
+                        frame.num_subcarriers(),
+                        baseline.subcarriers.len()
+                    );
+                }
+                continue;
+            }
+
+            state.recorder.record_frame(baseline, &frame);
+
+            if let Some((mean_z, median_z, p75_z, p90_z, max_z)) =
+                z_distribution(&frame, baseline)
+            {
+                state.normalized_z_sum += median_z as f64;
+                state.normalized_z_frames += 1;
+
+                if !state.printed_diagnostic {
+                    eprintln!(
+                        "[enroll] node {} diagnostic z: mean={:.2} median={:.2} p75={:.2} p90={:.2} max={:.2}",
+                        node_id,
+                        mean_z,
+                        median_z,
+                        p75_z,
+                        p90_z,
+                        max_z
+                    );
+                    state.printed_diagnostic = true;
+                }
+            }
+
+            state.series.push(frame_scalar(&frame));
+        }
+    }
+
+    let mut results = HashMap::new();
+
+    let node_ids: Vec<u8> = states.keys().copied().collect();
+
+    for node_id in node_ids {
+        let mut state = states
+            .remove(&node_id)
+            .expect("node state exists");
+
+        let feature_all =
+            AnchorFeature::from_series(room_id, label, &state.series, fs_hz);
+        let mean_shift_rel = references.get(&node_id).and_then(|reference| {
+            if gate.min_mean_shift > 0.0 && reference.abs() > f32::EPSILON {
+                Some((feature_all.features.mean - reference) / reference)
+            } else {
+                None
+            }
+        });
+        if let Some(shift) = mean_shift_rel {
+            eprintln!("[enroll] node {} presence shift: {:+.2}% vs the empty capture", node_id, 100.0 * shift);
+        }
+        let (anchor, reason) = state.recorder.finalize(gate, now_unix(), mean_shift_rel);
+
+        if state.skipped_geometry > 0 {
+            eprintln!(
+                "[enroll] node {} note: skipped {} frame(s) whose subcarrier count != baseline",
+                node_id,
+                state.skipped_geometry
+            );
+        }
+
+        let normalized_z = if state.normalized_z_frames == 0 {
+            0.0
+        } else {
+            (state.normalized_z_sum / state.normalized_z_frames as f64) as f32
+        };
+
+        eprintln!(
+            "[enroll] node {} diagnostic: normalized_presence_z={:.2} frames={}",
+            node_id,
+            normalized_z,
+            state.normalized_z_frames
+        );
+
+        eprintln!(
+            "[enroll] node {} features: mean={:.4} variance={:.6} motion={:.6} breathing_score={:.3} breathing_hz={:.3} heart_score={:.3} heart_hz={:.3} frames={}",
+            node_id,
+            feature_all.features.mean,
+            feature_all.features.variance,
+            feature_all.features.motion,
+            feature_all.features.breathing_score,
+            feature_all.features.breathing_hz,
+            feature_all.features.heart_score,
+            feature_all.features.heart_hz,
+            state.series.len(),
+        );
+
+        results.insert(node_id, (Some(feature_all), anchor, reason));
+    }
+
+    Ok(results)
+}
+
+async fn enroll_all_nodes(args: EnrollArgs) -> Result<()> {
+    let baselines = load_node_baselines(&args.baseline_dir)?;
+
+    std::fs::create_dir_all(&args.output_dir).map_err(|e| {
+        anyhow::anyhow!("cannot create output directory {}: {e}", args.output_dir)
+    })?;
+
+    let gate = AnchorQualityGate {
+        min_presence_z: args.min_presence_z,
+        empty_max_z: args.empty_max_z,
+        max_still_motion: args.max_still_motion,
+        min_move_motion: args.min_move_motion,
+        min_mean_shift: args.min_mean_shift,
+        ..AnchorQualityGate::default()
+    };
+    let mut sessions: HashMap<u8, EnrollmentSession> = HashMap::new();
+    let mut features: HashMap<u8, Vec<AnchorFeature>> = HashMap::new();
+
+    for (&node_id, baseline) in &baselines {
+        let baseline_id = baseline.calibration_uuid().to_string();
+
+        sessions.insert(
+            node_id,
+            EnrollmentSession::new(&args.room_id, &baseline_id, now_unix()),
+        );
+        features.insert(node_id, Vec::new());
+    }
+
+    // Session reference for the mean-shift presence test, per node: the mean
+    // amplitude of that node's accepted `empty` capture.
+    let mut references: HashMap<u8, f32> = HashMap::new();
+
+    for label in AnchorLabel::SEQUENCE {
+        // Per-anchor acceptance map. A node that accepted THIS label must not be
+        // re-captured for it, but every node must still be evaluated for the
+        // next label. Declaring this outside the label loop marked nodes as
+        // permanently "accepted", so once `empty` passed, anchors 2..N skipped
+        // every node and the run recorded only 1/8 anchors.
+        let mut accepted: HashMap<u8, bool> =
+            baselines.keys().map(|&id| (id, false)).collect();
+        let mut label_complete = false;
+
+        for attempt in 1..=args.attempts {
+            let mut results = capture_anchor_all_nodes(
+                &bind_socket(&args).await?,
+                &baselines,
+                &gate,
+                label,
+                &args.tier,
+                args.fs_hz,
+                &args.room_id,
+                args.lead_in_s,
+                &references,
+            )
+            .await?;
+
+            // Room-level presence consensus (see --presence-votes): if enough
+            // nodes see the shift, the anchor is presence-valid for all of them.
+            if gate.min_mean_shift > 0.0 && args.presence_votes > 0 {
+                let mut votes = 0u32;
+                for (&node_id, value) in results.iter() {
+                    let (feat, _, _) = value;
+                    let (Some(feat), Some(reference)) = (feat.as_ref(), references.get(&node_id))
+                    else {
+                        continue;
+                    };
+                    if reference.abs() > f32::EPSILON {
+                        let shift = (feat.features.mean - reference) / reference;
+                        if shift.abs() >= gate.min_mean_shift {
+                            votes += 1;
+                        }
+                    }
+                }
+                if votes >= args.presence_votes {
+                    for value in results.values_mut() {
+                        let (_, anchor, reason) = value;
+                        let (quality, why) = gate.evaluate(
+                            label,
+                            anchor.quality.presence_z,
+                            anchor.quality.motion_rate,
+                            anchor.quality.frames,
+                            Some(1.0),
+                        );
+                        anchor.quality = quality;
+                        *reason = why;
+                    }
+                }
+            }
+
+            label_complete = true;
+
+            let node_ids: Vec<u8> = baselines.keys().copied().collect();
+
+            for node_id in node_ids {
+                if *accepted.get(&node_id).unwrap_or(&false) {
+                    continue;
+                }
+
+                let (feat, anchor, reason) = results
+                    .remove(&node_id)
+                    .expect("every configured node has a capture result");
+
+                if anchor.quality.accepted {
+                    eprintln!(
+                        "[enroll] node {} ✓ accepted {} (presence_z={:.2} motion={:.0}% frames={})",
+                        node_id,
+                        label.as_str(),
+                        anchor.quality.presence_z,
+                        anchor.quality.motion_rate * 100.0,
+                        anchor.quality.frames
+                    );
+
+                    if let Some(f) = feat {
+                        if label == AnchorLabel::Empty {
+                            references.insert(node_id, f.features.mean);
+                        }
+                        features.get_mut(&node_id).unwrap().push(f);
+                    }
+
+                    sessions
+                        .get_mut(&node_id)
+                        .unwrap()
+                        .apply(EnrollmentEvent::AnchorAccepted { anchor });
+
+                    accepted.insert(node_id, true);
+                } else {
+                    label_complete = false;
+
+                    let why = reason.unwrap_or_default();
+
+                    eprintln!(
+                        "[enroll] node {} ✗ rejected {}: {why}",
+                        node_id,
+                        label.as_str()
+                    );
+
+                    sessions
+                        .get_mut(&node_id)
+                        .unwrap()
+                        .apply(EnrollmentEvent::AnchorRejected {
+                            label,
+                            reason: why,
+                            at: now_unix(),
+                        });
+                }
+            }
+
+            if label_complete {
+                break;
+            }
+
+            if attempt < args.attempts {
+                eprintln!(
+                    "[enroll] some nodes rejected '{}'; repeating the same pose ({}/{})…",
+                    label.as_str(),
+                    attempt + 1,
+                    args.attempts
+                );
+            }
+        }
+
+        if !label_complete {
+            eprintln!(
+                "[enroll] '{}' not accepted by every node; continuing",
+                label.as_str()
+            );
+        }
+    }
+
+    for (&node_id, baseline) in &baselines {
+        let session = sessions.remove(&node_id).unwrap();
+        let anchors = features.remove(&node_id).unwrap();
+
+        let mut session = session;
+
+        if session.is_complete() {
+            session.apply(EnrollmentEvent::Completed { at: now_unix() });
+        }
+
+        let baseline_id = baseline.calibration_uuid().to_string();
+
+        let data = EnrollmentData {
+            room_id: args.room_id.clone(),
+            baseline_id,
+            fs_hz: args.fs_hz,
+            anchors,
+            session,
+        };
+
+        let output = format!(
+            "{}/enrollment-node{}.json",
+            args.output_dir.trim_end_matches('/'),
+            node_id
+        );
+
+        std::fs::write(
+            &output,
+            serde_json::to_string_pretty(&data)
+                .map_err(|e| anyhow::anyhow!("serialize: {e}"))?,
+        )
+        .map_err(|e| anyhow::anyhow!("cannot write {output}: {e}"))?;
+
+        let (got, total) = data.session.progress();
+
+        eprintln!(
+            "[enroll] node {} done: {}/{} anchors accepted → {}",
+            node_id,
+            got,
+            total,
+            output
+        );
+    }
+
+    Ok(())
+}
+
+async fn bind_socket(args: &EnrollArgs) -> Result<UdpSocket> {
+    let addr = format!("{}:{}", args.bind, args.udp_port);
+
+    UdpSocket::bind(&addr)
+        .await
+        .map_err(|e| anyhow::anyhow!("cannot bind {addr}: {e}"))
 }
 
 /// Execute `enroll`.
+/// Execute `enroll`.
 pub async fn enroll(args: EnrollArgs) -> Result<()> {
+    if args.all_nodes {
+        enroll_all_nodes(args).await
+    } else {
+        enroll_single_node(args).await
+    }
+}
+
+async fn enroll_single_node(args: EnrollArgs) -> Result<()> {
     let baseline = load_baseline(&args.baseline)?;
     let baseline_id = baseline.calibration_uuid().to_string();
-    let gate = AnchorQualityGate::default();
+    let gate = AnchorQualityGate {
+        min_presence_z: args.min_presence_z,
+        empty_max_z: args.empty_max_z,
+        max_still_motion: args.max_still_motion,
+        min_move_motion: args.min_move_motion,
+        min_mean_shift: args.min_mean_shift,
+        ..AnchorQualityGate::default()
+    };
 
     let addr = format!("{}:{}", args.bind, args.udp_port);
     let socket = UdpSocket::bind(&addr)
         .await
         .map_err(|e| anyhow::anyhow!("cannot bind {addr}: {e}"))?;
-    eprintln!("[enroll] room='{}' baseline={} on udp://{addr}", args.room_id, &baseline_id[..8]);
+
+    eprintln!(
+        "[enroll] room='{}' baseline={} on udp://{addr}",
+        args.room_id,
+        &baseline_id[..8]
+    );
+
+    match args.node_id {
+        Some(id) => eprintln!("[enroll] filtering CSI to node_id={id}"),
+        None => eprintln!("[enroll] WARN: accepting CSI from all node IDs"),
+    }
+
     eprintln!("[enroll] follow each prompt; bad captures are re-prompted.");
 
-    let mut session = EnrollmentSession::new(&args.room_id, &baseline_id, now_unix());
+    let mut session =
+        EnrollmentSession::new(&args.room_id, &baseline_id, now_unix());
+
     let mut features: Vec<AnchorFeature> = Vec::new();
+    // Session reference for the mean-shift presence test: the `empty` anchor's
+    // own capture mean for this node.
+    let mut reference_mean: Option<f32> = None;
 
     for label in AnchorLabel::SEQUENCE {
         let mut accepted = false;
+
         for attempt in 1..=args.attempts {
-            let (feat, anchor, reason) =
-                capture_anchor(&socket, &baseline, &gate, label, &args.tier, args.fs_hz, &args.room_id)
-                    .await?;
+            let (feat, anchor, reason) = capture_anchor(
+                &socket,
+                &baseline,
+                &gate,
+                label,
+                &args.tier,
+                args.fs_hz,
+                &args.room_id,
+                args.node_id,
+                args.lead_in_s,
+                reference_mean,
+            )
+            .await?;
+
             if anchor.quality.accepted {
                 eprintln!(
                     "[enroll]   ✓ accepted (presence_z={:.2} motion={:.0}% frames={})",
@@ -166,34 +879,52 @@ pub async fn enroll(args: EnrollArgs) -> Result<()> {
                     anchor.quality.motion_rate * 100.0,
                     anchor.quality.frames
                 );
+
                 if let Some(f) = feat {
+                    if label == AnchorLabel::Empty {
+                        reference_mean = Some(f.features.mean);
+                    }
                     features.push(f);
                 }
+
                 session.apply(EnrollmentEvent::AnchorAccepted { anchor });
                 accepted = true;
                 break;
             } else {
                 let why = reason.unwrap_or_default();
+
                 eprintln!("[enroll]   ✗ rejected: {why}");
+
                 session.apply(EnrollmentEvent::AnchorRejected {
                     label,
                     reason: why,
                     at: now_unix(),
                 });
+
                 if attempt < args.attempts {
-                    eprintln!("[enroll]   retrying ({}/{})…", attempt + 1, args.attempts);
+                    eprintln!(
+                        "[enroll]   retrying ({}/{})…",
+                        attempt + 1,
+                        args.attempts
+                    );
                 }
             }
         }
+
         if !accepted {
-            eprintln!("[enroll]   moving on without '{}'", label.as_str());
+            eprintln!(
+                "[enroll]   moving on without '{}'",
+                label.as_str()
+            );
         }
     }
 
     if session.is_complete() {
         session.apply(EnrollmentEvent::Completed { at: now_unix() });
     }
+
     let (got, total) = session.progress();
+
     let data = EnrollmentData {
         room_id: args.room_id.clone(),
         baseline_id,
@@ -201,17 +932,22 @@ pub async fn enroll(args: EnrollArgs) -> Result<()> {
         anchors: features,
         session,
     };
+
     std::fs::write(
         &args.output,
-        serde_json::to_string_pretty(&data).map_err(|e| anyhow::anyhow!("serialize: {e}"))?,
+        serde_json::to_string_pretty(&data)
+            .map_err(|e| anyhow::anyhow!("serialize: {e}"))?,
     )
     .map_err(|e| anyhow::anyhow!("cannot write {}: {e}", args.output))?;
+
     eprintln!(
         "\n[enroll] done: {got}/{total} anchors accepted → {} (next: `train-room`)",
         args.output
     );
+
     Ok(())
 }
+
 
 // ---------------------------------------------------------------------------
 // train-room

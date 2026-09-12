@@ -27,10 +27,12 @@
 //! This parser mirrors `parse_esp32_frame` in
 //! `wifi-densepose-sensing-server/src/csi.rs` (same magic, same layout).
 
+
 use anyhow::{bail, Result};
 use clap::Args;
 use ndarray::Array2;
 use num_complex::Complex64;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 use wifi_densepose_core::types::{
@@ -63,9 +65,23 @@ pub struct CalibrateArgs {
     #[arg(long, default_value_t = 30)]
     pub duration_s: u32,
 
-    /// Output path for the binary baseline file (ADR-135 §2.4 format).
+    /// Only accept CSI frames from this ESP32 node ID.
+    /// If omitted, frames from all nodes on the UDP socket are accepted.
+    #[arg(long, conflicts_with = "all_nodes")]
+    pub node_id: Option<u8>,
+
+    /// Calibrate every discovered ESP32 node during the same capture window.
+    /// One independent baseline is written per node.
+    #[arg(long, conflicts_with = "node_id")]
+    pub all_nodes: bool,
+
+    /// Output path for the binary baseline file (single-node mode).
     #[arg(long, default_value = "./baseline.bin")]
     pub output: String,
+
+    /// Output directory for per-node baselines in --all-nodes mode.
+    #[arg(long, default_value = "./baselines")]
+    pub output_dir: String,
 
     /// PHY tier matching the ESP32 configuration.
     /// Valid: ht20 / ht40 / he20 / he40.
@@ -108,6 +124,14 @@ const ABORT_WINDOW_INTERVALS: u32 = 20;
 pub async fn execute(args: CalibrateArgs) -> Result<()> {
     validate_args(&args)?;
 
+    if args.all_nodes {
+        execute_all_nodes(args).await
+    } else {
+        execute_single_node(args).await
+    }
+}
+
+async fn execute_single_node(args: CalibrateArgs) -> Result<()> {
     let mut config = tier_config(&args.tier);
     if args.min_frames > 0 {
         config.min_frames = args.min_frames;
@@ -117,9 +141,10 @@ pub async fn execute(args: CalibrateArgs) -> Result<()> {
             args.min_frames, tier_config(&args.tier).min_frames, args.tier
         );
     }
-    let target_frames = config.min_frames as usize;
 
+    let target_frames = config.min_frames as usize;
     let addr = format!("{}:{}", args.bind, args.udp_port);
+
     let socket = UdpSocket::bind(&addr).await
         .map_err(|e| anyhow::anyhow!("cannot bind UDP socket on {addr}: {e}"))?;
 
@@ -145,17 +170,30 @@ pub async fn execute(args: CalibrateArgs) -> Result<()> {
 
         let n = match recv {
             Ok(Ok(n)) => n,
-            Ok(Err(e)) => { eprintln!("[calibrate] recv error: {e}"); continue; }
-            Err(_) => continue, // timeout — recheck deadline
+            Ok(Err(e)) => {
+                eprintln!("[calibrate] recv error: {e}");
+                continue;
+            }
+            Err(_) => continue,
         };
 
         let Some(csi_frame) = parse_csi_packet(&buf[..n], &args.tier) else {
             continue;
         };
 
-        let score: CalibrationDeviationScore = match recorder.record(&csi_frame) {
+        if let Some(node_id) = args.node_id {
+            let expected = format!("esp32-node{}", node_id);
+            if csi_frame.metadata.device_id.to_string() != expected {
+                continue;
+            }
+        }
+
+        let score = match recorder.record(&csi_frame) {
             Ok(s) => s,
-            Err(e) => { eprintln!("[calibrate] WARN frame skipped: {e}"); continue; }
+            Err(e) => {
+                eprintln!("[calibrate] WARN frame skipped: {e}");
+                continue;
+            }
         };
 
         let frames = recorder.frames_recorded() as usize;
@@ -163,13 +201,17 @@ pub async fn execute(args: CalibrateArgs) -> Result<()> {
         if args.banner_every > 0 && (frames as u32) % args.banner_every == 0 {
             print_banner(frames, target_frames, &score);
 
-            if args.abort_z_threshold > 0.0 && score.amplitude_z_median > args.abort_z_threshold {
+            if args.abort_z_threshold > 0.0
+                && score.amplitude_z_median > args.abort_z_threshold
+            {
                 high_z_count += 1;
                 if high_z_count >= ABORT_WINDOW_INTERVALS {
                     bail!(
                         "aborted: amplitude_z_median={:.2} exceeded threshold={:.2} for {} \
                          consecutive banner intervals — ensure the room is empty and retry",
-                        score.amplitude_z_median, args.abort_z_threshold, high_z_count
+                        score.amplitude_z_median,
+                        args.abort_z_threshold,
+                        high_z_count
                     );
                 }
             } else {
@@ -183,6 +225,207 @@ pub async fn execute(args: CalibrateArgs) -> Result<()> {
     }
 
     finalise_and_save(recorder, &args.output)
+}
+
+async fn execute_all_nodes(args: CalibrateArgs) -> Result<()> {
+    let addr = format!("{}:{}", args.bind, args.udp_port);
+    let socket = UdpSocket::bind(&addr).await
+        .map_err(|e| anyhow::anyhow!("cannot bind UDP socket on {addr}: {e}"))?;
+
+    std::fs::create_dir_all(&args.output_dir).map_err(|e| {
+        anyhow::anyhow!("cannot create output directory {}: {e}", args.output_dir)
+    })?;
+
+    let base_config = tier_config(&args.tier);
+    let target_frames = if args.min_frames > 0 {
+        args.min_frames as usize
+    } else {
+        base_config.min_frames as usize
+    };
+
+    if args.min_frames > 0 {
+        eprintln!(
+            "[calibrate] WARN: --min-frames={} overrides ADR-135 tier default ({} for {}). \
+             This relaxes the phase-concentration guarantee; do not use in production.",
+            args.min_frames, base_config.min_frames, args.tier
+        );
+    }
+
+    eprintln!("[calibrate] listening on udp://{addr}");
+    eprintln!(
+        "[calibrate] ALL-NODES mode: one {} s capture window, tier={}, target={} valid frames per node",
+        args.duration_s, args.tier, target_frames
+    );
+    eprintln!("[calibrate] leave the room empty and still");
+
+    struct NodeState {
+        recorder: CalibrationRecorder,
+        high_z_count: u32,
+        last_reported_frames: usize,
+    }
+
+    let mut nodes: HashMap<u8, NodeState> = HashMap::new();
+    let mut buf = vec![0u8; RECV_BUF];
+    let deadline = Instant::now() + Duration::from_secs(args.duration_s as u64);
+
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+
+        let timeout = remaining.min(Duration::from_millis(500));
+        let recv = tokio::time::timeout(timeout, socket.recv(&mut buf)).await;
+
+        let n = match recv {
+            Ok(Ok(n)) => n,
+            Ok(Err(e)) => {
+                eprintln!("[calibrate] recv error: {e}");
+                continue;
+            }
+            Err(_) => continue,
+        };
+
+        let Some(csi_frame) = parse_csi_packet(&buf[..n], &args.tier) else {
+            continue;
+        };
+
+        let node_id = csi_frame
+            .metadata
+            .device_id
+            .to_string()
+            .strip_prefix("esp32-node")
+            .and_then(|s| s.parse::<u8>().ok());
+
+        let Some(node_id) = node_id else {
+            continue;
+        };
+
+        if !nodes.contains_key(&node_id) {
+            let mut cfg = tier_config(&args.tier);
+            if args.min_frames > 0 {
+                cfg.min_frames = args.min_frames;
+            }
+
+            eprintln!(
+                "[calibrate] discovered node {} → starting independent recorder",
+                node_id
+            );
+
+            nodes.insert(
+                node_id,
+                NodeState {
+                    recorder: CalibrationRecorder::new(cfg),
+                    high_z_count: 0,
+                    last_reported_frames: 0,
+                },
+            );
+        }
+
+        let state = nodes.get_mut(&node_id).expect("node inserted above");
+
+        let score = match state.recorder.record(&csi_frame) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "[calibrate] node {} WARN frame skipped: {e}",
+                    node_id
+                );
+                continue;
+            }
+        };
+
+        let frames = state.recorder.frames_recorded() as usize;
+
+        if args.banner_every > 0
+            && (frames as u32) % args.banner_every == 0
+            && frames != state.last_reported_frames
+        {
+            state.last_reported_frames = frames;
+
+            eprintln!(
+                "[calibrate] node {}: {}/{} frames | z_med={:.2} z_max={:.2} | motion={}",
+                node_id,
+                frames,
+                target_frames,
+                score.amplitude_z_median,
+                score.amplitude_z_max,
+                if score.motion_flagged { "YES" } else { "no" }
+            );
+
+            if args.abort_z_threshold > 0.0
+                && score.amplitude_z_median > args.abort_z_threshold
+            {
+                state.high_z_count += 1;
+
+                if state.high_z_count >= ABORT_WINDOW_INTERVALS {
+                    bail!(
+                        "node {} aborted: amplitude_z_median={:.2} exceeded threshold={:.2} \
+                         for {} consecutive banner intervals — ensure the room is empty and retry",
+                        node_id,
+                        score.amplitude_z_median,
+                        args.abort_z_threshold,
+                        state.high_z_count
+                    );
+                }
+            } else {
+                state.high_z_count = 0;
+            }
+        }
+    }
+
+    if nodes.is_empty() {
+        bail!("--all-nodes captured no recognised ESP32 nodes");
+    }
+
+    let mut node_ids: Vec<u8> = nodes.keys().copied().collect();
+    node_ids.sort_unstable();
+
+    let node_count = nodes.len();
+
+    for node_id in node_ids {
+        let state = nodes.remove(&node_id).expect("node exists");
+
+        let frames = state.recorder.frames_recorded();
+        if frames < target_frames as u32 {
+            eprintln!(
+                "[calibrate] node {}: only {} valid frames (target {}); finalization may fail",
+                node_id, frames, target_frames
+            );
+        }
+
+        let output = format!(
+            "{}/baseline-node{}.bin",
+            args.output_dir.trim_end_matches('/'),
+            node_id
+        );
+
+        eprintln!("[calibrate] node {}: finalising {} frames…", node_id, frames);
+
+        let baseline = state.recorder
+            .finalize()
+            .map_err(|e| anyhow::anyhow!("node {} calibration failed: {e}", node_id))?;
+
+        let bytes = baseline.to_bytes();
+        std::fs::write(&output, &bytes)
+            .map_err(|e| anyhow::anyhow!("cannot write {output}: {e}"))?;
+
+        eprintln!(
+            "[calibrate] node {} baseline saved to {} ({} bytes), subcarriers={}",
+            node_id,
+            output,
+            bytes.len(),
+            baseline.subcarriers.len()
+        );
+    }
+
+    eprintln!(
+        "[calibrate] ALL-NODES complete: {} node(s) written to {}",
+        node_count,
+        args.output_dir
+    );
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +480,9 @@ fn finalise_and_save(recorder: CalibrationRecorder, output: &str) -> Result<()> 
 pub(crate) fn tier_config(tier: &str) -> CalibrationConfig {
     match tier.to_ascii_lowercase().as_str() {
         "ht40" => CalibrationConfig::ht40(),
+        "esp32_ht40_192" => CalibrationConfig::ht40_192(),
+        "esp32_ht40_128" => CalibrationConfig::ht40_128(),
+        "esp32_ht40_306" => CalibrationConfig::ht40_306(),
         "he20" => CalibrationConfig::he20(),
         "he40" => CalibrationConfig::he40(),
         _      => CalibrationConfig::ht20(), // ht20 or unknown → safe default
@@ -278,17 +524,17 @@ pub(crate) fn parse_csi_packet(buf: &[u8], tier: &str) -> Option<CsiFrame> {
     if buf.len() < iq_start + n_pairs * 2 {
         return None;
     }
-
+    
     // Build an ndarray Array2<Complex64> shaped [n_antennas, n_subcarriers].
     let mut data = Array2::<Complex64>::zeros((n_antennas.max(1), n_subcarriers.max(1)));
     for s in 0..n_antennas {
-        for k in 0..n_subcarriers {
+    	for k in 0..n_subcarriers {
             let idx = s * n_subcarriers + k;
-            let i_val = buf[iq_start + idx * 2]     as i8 as f64;
+            let i_val = buf[iq_start + idx * 2] as i8 as f64;
             let q_val = buf[iq_start + idx * 2 + 1] as i8 as f64;
             data[[s, k]] = Complex64::new(i_val, q_val);
         }
-    }
+    }   
 
     let band = if freq_mhz >= 5000 {
         FrequencyBand::Band5GHz
@@ -339,6 +585,9 @@ fn freq_mhz_to_channel(freq_mhz: u16) -> u8 {
 // ---------------------------------------------------------------------------
 
 fn validate_args(args: &CalibrateArgs) -> Result<()> {
+    if args.all_nodes && args.node_id.is_some() {
+        bail!("--all-nodes cannot be combined with --node-id");
+    }
     if args.duration_s < 10 {
         bail!(
             "--duration-s must be at least 10 s (got {}). \
@@ -352,7 +601,15 @@ fn validate_args(args: &CalibrateArgs) -> Result<()> {
             args.duration_s
         );
     }
-    let valid = ["ht20", "ht40", "he20", "he40"];
+    let valid = [
+        "ht20",
+        "ht40",
+        "esp32_ht40_192",
+        "esp32_ht40_128",
+        "esp32_ht40_306",
+        "he20",
+        "he40",
+    ];
     if !valid.contains(&args.tier.to_ascii_lowercase().as_str()) {
         bail!(
             "--tier must be one of {:?} (got {:?})",
@@ -400,6 +657,20 @@ mod tests {
     fn test_tier_config_ht40() {
         let cfg = tier_config("ht40");
         assert_eq!(cfg.num_active, 114);
+    }
+
+    #[test]
+    fn test_tier_config_esp32_ht40_306() {
+        let cfg = tier_config("esp32_ht40_306");
+        assert_eq!(cfg.num_subcarriers, 306);
+        assert_eq!(cfg.num_active, 306);
+    }
+
+    #[test]
+    fn test_tier_config_esp32_ht40_192() {
+        let cfg = tier_config("esp32_ht40_192");
+        assert_eq!(cfg.num_subcarriers, 192);
+        assert_eq!(cfg.num_active, 192);
     }
 
     #[test]
@@ -534,7 +805,10 @@ mod tests {
             udp_port: 5005,
             bind: "0.0.0.0".into(),
             duration_s: 30,
+            node_id: None,
+            all_nodes: false,
             output: "./baseline.bin".into(),
+            output_dir: "./baselines".into(),
             tier: "ht20".into(),
             banner_every: 20,
             abort_z_threshold: 2.0,
