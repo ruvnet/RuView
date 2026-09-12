@@ -28,6 +28,9 @@ const latency = { video: 0, csi: 0, fusion: 0, total: 0 };
 // === Components ===
 const videoCapture = new VideoCapture(document.getElementById('webcam'));
 const csiSimulator = new CsiSimulator({ subcarriers: 52, timeWindow: 56 });
+// Handle for the headless verification harness, which drives disconnects to
+// exercise the reconnect path. Harmless in a browser session.
+window.__csiSimulator = csiSimulator;
 const visualCnn = new CnnEmbedder({ inputSize: 56, embeddingDim: 128, seed: 42 });
 const csiCnn = new CnnEmbedder({ inputSize: 56, embeddingDim: 128, seed: 137 });
 const fusionEngine = new FusionEngine(128);
@@ -208,7 +211,16 @@ async function startCamera() {
  */
 function drawNoPose(ctx, canvas, serverPresence) {
   ctx.save();
+  // Start from an identity transform: a previous draw may have left a rotation or
+  // translation behind, and this function must not inherit it.
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // The skeleton canvas is mirrored by CSS (`.video-panel canvas {
+  // transform: scaleX(-1) }`, the selfie-view convention that also mirrors the
+  // pose), so canvas text renders reversed. Pre-mirror the context so the two
+  // mirrors cancel and the label reads normally.
+  ctx.translate(canvas.width, 0);
+  ctx.scale(-1, 1);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const empty = serverPresence === 'absent';
