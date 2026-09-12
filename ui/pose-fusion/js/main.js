@@ -154,10 +154,24 @@ function init() {
   // a safety mechanism — `onVerifiedFrame` below (issue #1557 fix) is what
   // actually prevents an unconfirmed/failed connection from ever being shown
   // as LIVE, regardless of whether this guess is right.
+  // The bundled sensing server (v2/crates/wifi-densepose-sensing-server) serves
+  // HTTP + UI on 8080 but the sensing WebSocket on 8765, so the Docker
+  // `httpPort + 1` convention alone sent this page to 8081 and the connection
+  // failed silently — leaving the watermarked SYNTHETIC view even with a live
+  // node streaming. Keep the mapping identical to the canonical UI service
+  // (`ui/services/sensing.service.js`), then fall back to the port-plus-one
+  // guess for host-port remappings this table does not know.
+  const SENSING_WS_PORT_BY_HTTP_PORT = {
+    '3000': '3001', // Docker image: UI/API 3000, sensing stream 3001.
+    '8080': '8765', // Bundled sensing server: UI/API 8080, WS 8765.
+  };
   const httpPort = Number(window.location.port);
-  const defaultWsUrl = Number.isFinite(httpPort) && httpPort > 0
-    ? `ws://${window.location.hostname}:${httpPort + 1}/ws/sensing`
-    : 'ws://localhost:8765/ws/sensing';
+  const mappedWsPort = SENSING_WS_PORT_BY_HTTP_PORT[String(window.location.port)];
+  const defaultWsUrl = mappedWsPort
+    ? `ws://${window.location.hostname}:${mappedWsPort}/ws/sensing`
+    : Number.isFinite(httpPort) && httpPort > 0
+      ? `ws://${window.location.hostname}:${httpPort + 1}/ws/sensing`
+      : 'ws://localhost:8765/ws/sensing';
   if (wsUrlInput) wsUrlInput.value = defaultWsUrl;
   // ADR-272: exchange the stored bearer for a single-use ?ticket= before the
   // upgrade — a browser cannot set an Authorization header on a WebSocket.
