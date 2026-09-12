@@ -11,3 +11,10 @@ dependencies:
 
   ## Onboard WS2812 LED Disabling
   espressif/led_strip: "^3.0.0"
+
+  ## XIAO ESP32S3 Sense camera (camera_node.c — only used when
+  ## CONFIG_CAMERA_ENABLE=y; rule keeps it out of non-S3 builds)
+  espressif/esp32-camera:
+    version: "^2.0.0"
+    rules:
+      - if: "target == esp32s3"
