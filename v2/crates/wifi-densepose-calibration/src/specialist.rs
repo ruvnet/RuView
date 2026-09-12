@@ -97,9 +97,38 @@ pub trait Specialist {
 ///   paths and *lower* the mean too.
 ///
 /// Present when EITHER channel fires.
+/// `serde` support for an `f32` field that may legitimately hold a non-finite
+/// sentinel.
+///
+/// [`PresenceSpecialist::train`] stores `f32::INFINITY` in `threshold` when the
+/// variance channel is disabled (issue #1440). JSON cannot represent infinity,
+/// so `serde_json` writes `null` for it and then refuses to read the value back
+/// (`invalid type: null, expected f32`): a bank trained on a room whose
+/// variance channel is inert could be written but never loaded again.
+/// Round-tripping the sentinel explicitly keeps such banks loadable.
+mod nonfinite_f32 {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(value: &f32, serializer: S) -> Result<S::Ok, S::Error> {
+        if value.is_finite() {
+            serializer.serialize_f32(*value)
+        } else {
+            serializer.serialize_none()
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<f32, D::Error> {
+        Ok(Option::<f32>::deserialize(deserializer)?.unwrap_or(f32::INFINITY))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresenceSpecialist {
     /// Decision threshold on series variance.
+    ///
+    /// `f32::INFINITY` when the variance channel is disabled, which JSON cannot
+    /// represent — see [`nonfinite_f32`].
+    #[serde(with = "nonfinite_f32")]
     pub threshold: f32,
     /// Occupied-anchor mean variance (for confidence scaling).
     pub occupied_var: f32,
@@ -490,6 +519,32 @@ mod tests {
             label,
             features: feat_mean(mean, variance, motion),
         }
+    }
+
+    /// Regression: a bank whose variance channel is disabled stores
+    /// `threshold = f32::INFINITY`. `serde_json` encodes that as `null`, so the
+    /// value has to round-trip through that encoding instead of failing to
+    /// load — otherwise `room-status`/`room-watch` reject a freshly trained
+    /// bank (issue #1440).
+    #[test]
+    fn presence_specialist_roundtrips_an_infinite_threshold() {
+        let mut p = PresenceSpecialist {
+            threshold: f32::INFINITY,
+            occupied_var: 1.0,
+            empty_mean: 2.0,
+            mean_dist_threshold: None,
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        let back: PresenceSpecialist =
+            serde_json::from_str(&json).unwrap_or_else(|e| panic!("cannot load {json}: {e}"));
+        assert!(back.threshold.is_infinite(), "sentinel lost in {json}");
+
+        // A finite threshold must still be written as a plain number.
+        p.threshold = 5.5;
+        let json = serde_json::to_string(&p).unwrap();
+        let back: PresenceSpecialist = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.threshold, 5.5);
+        assert!(json.contains("5.5"), "finite threshold not inline: {json}");
     }
 
     #[test]
