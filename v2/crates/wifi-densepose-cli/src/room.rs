@@ -1090,6 +1090,21 @@ pub struct RoomWatchArgs {
     /// slow drift is removed and a person entering (a step) still stands out.
     #[arg(long, default_value_t = 0.0)]
     pub drift_adapt_s: f32,
+    /// Absolute noise floor for the mean-shift presence channel (0 = off).
+    ///
+    /// A bank's threshold is half the empty-to-occupied mean distance seen at
+    /// train time, which on real hardware can be as small as 0.047 amplitude
+    /// units while the window mean itself wanders by about +/-0.5. Raising every
+    /// node's threshold to at least this value stops the channel from firing on
+    /// noise alone.
+    #[arg(long, default_value_t = 0.0)]
+    pub min_mean_dist: f32,
+    /// Require this many consecutive PRESENT windows before reporting present.
+    /// A person is a sustained change; RF noise is transient. Integrating over
+    /// K windows suppresses the noise without delaying a real occupant beyond
+    /// K seconds.
+    #[arg(long, default_value_t = 1)]
+    pub hold_windows: u32,
     /// Print the per-node inputs and decisions behind every fused readout:
     /// window features, the bank's presence thresholds, the mean distance that
     /// drove the presence decision, and the anomaly score behind a veto.
@@ -1169,7 +1184,19 @@ async fn room_watch_multi(args: RoomWatchArgs) -> Result<()> {
             .map_err(|_| anyhow::anyhow!("bad node id in {spec:?}"))?;
         let raw = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("cannot read {path}: {e}"))?;
-        let bank = SpecialistBank::from_json(&raw).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let mut bank = SpecialistBank::from_json(&raw).map_err(|e| anyhow::anyhow!("{e}"))?;
+        if args.min_mean_dist > 0.0 {
+            if let Some(p) = bank.presence.as_mut() {
+                p.mean_dist_threshold = Some(match p.mean_dist_threshold {
+                    Some(t) => t.max(args.min_mean_dist),
+                    None => args.min_mean_dist,
+                });
+                eprintln!(
+                    "[room-watch] node {id}: presence mean-shift threshold raised to {:?}",
+                    p.mean_dist_threshold
+                );
+            }
+        }
         let baseline = bank.baseline_id.clone();
         mix.add_node(id, bank, baseline);
         node_ids.push(id);
@@ -1186,6 +1213,8 @@ async fn room_watch_multi(args: RoomWatchArgs) -> Result<()> {
     let mut wins: BTreeMap<u8, VecDeque<f32>> = BTreeMap::new();
     // Slow per-node mean tracker used by --drift-adapt-s.
     let mut ema_by_node: BTreeMap<u8, f32> = BTreeMap::new();
+    // Consecutive windows the fused presence has been positive (--hold-windows).
+    let mut present_streak: u32 = 0;
     let start = Instant::now();
     let mut last_print = Instant::now();
 
@@ -1285,7 +1314,22 @@ async fn room_watch_multi(args: RoomWatchArgs) -> Result<()> {
                     }
                 }
                 let active: Vec<u8> = per_node.keys().copied().collect();
-                let s = mix.infer(&per_node);
+                let mut s = mix.infer(&per_node);
+                if args.hold_windows > 1 {
+                    let raw_present =
+                        s.presence.as_ref().is_some_and(|r| r.value >= 0.5);
+                    if raw_present {
+                        present_streak = present_streak.saturating_add(1);
+                    } else {
+                        present_streak = 0;
+                    }
+                    if present_streak < args.hold_windows {
+                        if let Some(r) = s.presence.as_mut() {
+                            r.value = 0.0;
+                            r.label = Some("absent".into());
+                        }
+                    }
+                }
                 let pres = s.presence.as_ref().and_then(|r| r.label.clone()).unwrap_or("-".into());
                 let post = s.posture.as_ref().and_then(|r| r.label.clone()).unwrap_or("-".into());
                 let br = s.breathing.as_ref().map(|r| format!("{:.1}bpm", r.value)).unwrap_or("-".into());
