@@ -66,6 +66,13 @@ impl MultiNodeMixture {
         self.nodes.len()
     }
 
+    /// One node's mixture, so a caller can print the per-node readings next to
+    /// the fused state instead of only the fused result. Diagnostics only —
+    /// fusion still goes through [`Self::infer`].
+    pub fn node_mixture(&self, node_id: u8) -> Option<&MixtureOfSpecialists> {
+        self.nodes.get(&node_id).map(|e| &e.mixture)
+    }
+
     /// The transceiver-geometry snapshot a node's bank was trained under
     /// (ADR-152 §2.1.1), if its enrollment recorded one. Threaded through for
     /// the fusion logic; **not used algorithmically yet** — geometry-aware

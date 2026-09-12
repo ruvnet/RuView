@@ -1079,6 +1079,11 @@ pub struct RoomWatchArgs {
     /// Seconds to run (0 = until Ctrl-C).
     #[arg(long, default_value_t = 0)]
     pub seconds: u32,
+    /// Print the per-node inputs and decisions behind every fused readout:
+    /// window features, the bank's presence thresholds, the mean distance that
+    /// drove the presence decision, and the anomaly score behind a veto.
+    #[arg(long)]
+    pub diagnostics: bool,
 }
 
 /// Execute `room-watch` — live (multistatic) mixture-of-specialists readout.
@@ -1203,6 +1208,47 @@ async fn room_watch_multi(args: RoomWatchArgs) -> Result<()> {
                 })
                 .collect();
             if !per_node.is_empty() {
+                if args.diagnostics {
+                    for (id, f) in per_node.iter() {
+                        let frames = wins.get(id).map(|w| w.len()).unwrap_or(0);
+                        println!(
+                            "[diag] node {id} frames={frames} mean={:.3} var={:.3} motion={:.3} breath={:.3}/{:.3} heart={:.3}/{:.3}",
+                            f.mean, f.variance, f.motion,
+                            f.breathing_score, f.breathing_hz,
+                            f.heart_score, f.heart_hz
+                        );
+                        let Some(entry) = mix.node_mixture(*id) else {
+                            continue;
+                        };
+                        let baseline = entry.bank().baseline_id.clone();
+                        if let Some(ps) = entry.bank().presence.as_ref() {
+                            let mean_dist = (f.mean - ps.empty_mean).abs();
+                            let by_var = f.variance > ps.threshold;
+                            let by_mean =
+                                ps.mean_dist_threshold.is_some_and(|t| mean_dist > t);
+                            println!(
+                                "[diag] node {id} presence: mean_dist={mean_dist:.3} (thr {:?}) by_mean={by_mean} | var={:.3} vs var_thr={:.3} by_var={by_var} => {}",
+                                ps.mean_dist_threshold,
+                                f.variance,
+                                ps.threshold,
+                                if by_var || by_mean { "PRESENT" } else { "absent" }
+                            );
+                        }
+                        let st = entry.infer(f, &baseline);
+                        if let Some(a) = st.anomaly.as_ref() {
+                            println!(
+                                "[diag] node {id} anomaly={:.3} conf={:.3} vetoed={} stale={}",
+                                a.value, a.confidence, st.vetoed, st.stale
+                            );
+                        }
+                        if let Some(p) = st.presence.as_ref() {
+                            println!(
+                                "[diag] node {id} presence_reading: {:?} value={:.2} conf={:.2}",
+                                p.label, p.value, p.confidence
+                            );
+                        }
+                    }
+                }
                 let active: Vec<u8> = per_node.keys().copied().collect();
                 let s = mix.infer(&per_node);
                 let pres = s.presence.as_ref().and_then(|r| r.label.clone()).unwrap_or("-".into());
