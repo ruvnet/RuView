@@ -328,7 +328,41 @@ pub struct FeatureStats {
 
 // ── Data loading ─────────────────────────────────────────────────────────────
 
-/// Load CSI frames from `.csi.jsonl` recording files for the given dataset IDs.
+/// Parse one recording line, accepting both native training frames and the
+/// `sensing_update` envelopes emitted by the dashboard recorder.
+fn parse_recording_line(line: &str) -> Vec<RecordedFrame> {
+    if let Ok(frame) = serde_json::from_str::<RecordedFrame>(line) {
+        return vec![frame];
+    }
+    let value = match serde_json::from_str::<serde_json::Value>(line) {
+        Ok(value) => value,
+        Err(_) => return Vec::new(),
+    };
+    let timestamp = value.get("timestamp").and_then(serde_json::Value::as_f64);
+    let nodes = value.get("nodes").and_then(serde_json::Value::as_array);
+    match (timestamp, nodes) {
+        (Some(timestamp), Some(nodes)) => nodes
+            .iter()
+            .filter_map(|node| {
+                let subcarriers = node.get("amplitude")?.as_array()?.iter()
+                    .map(serde_json::Value::as_f64).collect::<Option<Vec<_>>>()?;
+                if subcarriers.is_empty() {
+                    return None;
+                }
+                Some(RecordedFrame {
+                    timestamp,
+                    subcarriers,
+                    rssi: node.get("rssi_dbm").and_then(serde_json::Value::as_f64).unwrap_or_default(),
+                    noise_floor: node.get("noise_floor_dbm").and_then(serde_json::Value::as_f64).unwrap_or_default(),
+                    features: serde_json::Value::Null,
+                })
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Load CSI frames from recording files for the given dataset IDs.
 ///
 /// Each dataset_id maps to a file at `data/recordings/{dataset_id}.csi.jsonl`.
 /// If a file does not exist, it is silently skipped.
@@ -348,13 +382,19 @@ async fn load_recording_frames(dataset_ids: &[String]) -> Vec<RecordedFrame> {
                 continue;
             }
         };
-        let file_path = recordings_dir.join(format!("{safe}.csi.jsonl"));
-        let data = match tokio::fs::read_to_string(&file_path).await {
+        let candidates = [
+            recordings_dir.join(format!("{safe}.csi.jsonl")),
+            recordings_dir.join(format!("{safe}.jsonl")),
+        ];
+        let data = match tokio::fs::read_to_string(&candidates[0]).await {
             Ok(d) => d,
-            Err(e) => {
-                warn!("Could not read recording {}: {e}", file_path.display());
-                continue;
-            }
+            Err(_) => match tokio::fs::read_to_string(&candidates[1]).await {
+                Ok(d) => d,
+                Err(e) => {
+                    warn!("Could not read recording {}: {e}", candidates[0].display());
+                    continue;
+                }
+            },
         };
 
         let mut line_count = 0u64;
@@ -365,9 +405,11 @@ async fn load_recording_frames(dataset_ids: &[String]) -> Vec<RecordedFrame> {
                 continue;
             }
             line_count += 1;
-            match serde_json::from_str::<RecordedFrame>(line) {
-                Ok(frame) => all_frames.push(frame),
-                Err(_) => parse_errors += 1,
+            let parsed = parse_recording_line(line);
+            if parsed.is_empty() {
+                parse_errors += 1;
+            } else {
+                all_frames.extend(parsed);
             }
         }
 
@@ -1041,9 +1083,11 @@ async fn run_training_job(
     }
 
     let mut frames = load_recording_frames(&dataset_ids).await;
-    if frames.is_empty() {
+    if frames.is_empty() && dataset_ids.is_empty() {
         info!("No recordings found for dataset_ids; falling back to live frame_history");
         frames = frames_from_history(&history_snapshot);
+    } else if frames.is_empty() {
+        warn!("Selected recordings contained no usable CSI frames; refusing live-history fallback");
     }
 
     if frames.len() < 10 {
@@ -2291,6 +2335,24 @@ mod tests {
         let parsed: FeatureStats = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.n_features, 2);
         assert_eq!(parsed.mean, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn recording_parser_extracts_non_empty_sensing_update_nodes() {
+        let line = r#"{"type":"sensing_update","timestamp":12.5,"nodes":[{"rssi_dbm":-42.0,"amplitude":[1.0,2.0],"subcarrier_count":2},{"amplitude":[],"subcarrier_count":0}]}"#;
+        let frames = parse_recording_line(line);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].timestamp, 12.5);
+        assert_eq!(frames[0].subcarriers, vec![1.0, 2.0]);
+        assert_eq!(frames[0].rssi, -42.0);
+    }
+
+    #[test]
+    fn recording_parser_keeps_native_training_frame_compatibility() {
+        let line = r#"{"timestamp":3.0,"subcarriers":[4.0,5.0]}"#;
+        let frames = parse_recording_line(line);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].subcarriers, vec![4.0, 5.0]);
     }
 
     /// Build a small deterministic set of synthetic CSI frames with enough
