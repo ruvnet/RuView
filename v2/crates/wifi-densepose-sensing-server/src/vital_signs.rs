@@ -65,8 +65,18 @@ impl Default for VitalSigns {
 /// Stateful vital sign detector. Maintains rolling buffers of CSI amplitude
 /// data and extracts breathing and heart rate via spectral analysis.
 #[allow(dead_code)]
+/// Consecutive evaluations that must agree on a new sample rate before the
+/// detector retunes and clears its history. At the accepted-frame rates this
+/// hardware produces (~12-45 Hz) that is roughly one to two seconds of
+/// persistence, while the jitter that used to trigger a wipe lasts a few
+/// frames.
+const RATE_CHANGE_CONFIRMATIONS: u32 = 25;
+
 pub struct VitalSignDetector {
     /// Rolling buffer of mean-amplitude samples for breathing detection.
+    /// Candidate new clock awaiting confirmation: `(rate, agreeing streak)`.
+    /// See `RATE_CHANGE_CONFIRMATIONS`.
+    pending_rate: Option<(f64, u32)>,
     breathing_buffer: VecDeque<f64>,
     /// Rolling buffer of phase-variance samples for heartbeat detection.
     heartbeat_buffer: VecDeque<f64>,
@@ -98,6 +108,7 @@ impl VitalSignDetector {
         let heartbeat_capacity = (sample_rate * heartbeat_window_secs) as usize;
 
         Self {
+            pending_rate: None,
             breathing_buffer: VecDeque::with_capacity(breathing_capacity.max(1)),
             heartbeat_buffer: VecDeque::with_capacity(heartbeat_capacity.max(1)),
             sample_rate,
@@ -356,8 +367,30 @@ impl VitalSignDetector {
         }
         let relative_change = (sample_rate - self.sample_rate).abs() / self.sample_rate.max(1.0);
         if relative_change < 0.20 {
+            // Back inside the band: any pending change was jitter.
+            self.pending_rate = None;
             return false;
         }
+
+        // A rate *estimate* swings with bursty arrivals even when the clock is
+        // unchanged, and applying such a swing would clear a history that is
+        // still valid — which is exactly how a live three-node array ended up
+        // with buffers at 104/468, 35/412, 286/460 instead of a full window.
+        // Require the new rate to persist, and to agree with itself, so only a
+        // real clock change (firmware rate change, grid switch) retunes.
+        let streak = match self.pending_rate {
+            Some((pending, count))
+                if (pending - sample_rate).abs() / sample_rate.max(1.0) < 0.10 =>
+            {
+                count.saturating_add(1)
+            }
+            _ => 1,
+        };
+        if streak < RATE_CHANGE_CONFIRMATIONS {
+            self.pending_rate = Some((sample_rate, streak));
+            return false;
+        }
+        self.pending_rate = None;
         self.sample_rate = sample_rate;
         self.breathing_capacity =
             ((sample_rate * self.breathing_window_secs) as usize).max(1);
@@ -877,10 +910,48 @@ mod tests {
         }
         assert!(!detector.reconfigure_sample_rate(18.0));
         assert_eq!(detector.sample_rate_hz(), 20.0);
-        assert!(detector.reconfigure_sample_rate(12.0));
+
+        // A single off-band reading is jitter, not a clock change: it must not
+        // retune, and must not clear a valid history.
+        assert!(!detector.reconfigure_sample_rate(12.0));
+        assert_eq!(detector.sample_rate_hz(), 20.0);
+        assert_eq!(detector.buffer_status().0, 32);
+
+        // A sustained change retunes once and clears the mixed-clock history.
+        let mut applied = false;
+        for _ in 0..40 {
+            if detector.reconfigure_sample_rate(12.0) {
+                applied = true;
+                break;
+            }
+        }
+        assert!(applied, "a sustained change must retune");
         assert_eq!(detector.sample_rate_hz(), 12.0);
         assert_eq!(detector.buffer_status(), (0, 360, 0, 180));
+
         assert!(!detector.reconfigure_sample_rate(f64::NAN));
+    }
+
+    /// Jitter that wanders outside the band and back must never retune: on a
+    /// live ESP32 node the accepted-frame rate estimate swung like this every
+    /// 15-30 s and wiped the buffers each time.
+    #[test]
+    fn wandering_rate_jitter_never_retunes() {
+        let mut detector = VitalSignDetector::new(20.0);
+        let amp = vec![10.0; 56];
+        let phase = vec![0.0; 56];
+        let mut retunes = 0;
+        for i in 0..300 {
+            detector.process_frame(&amp, &phase);
+            // Alternate between in-band and far-off-band readings.
+            let probe = if i % 2 == 0 { 11.0 } else { 20.5 };
+            if detector.reconfigure_sample_rate(probe) {
+                retunes += 1;
+            }
+        }
+        assert_eq!(retunes, 0, "wandering jitter must not retune");
+        assert_eq!(detector.sample_rate_hz(), 20.0);
+        assert_eq!(detector.buffer_status().0, 300);
     }
 
     #[test]
