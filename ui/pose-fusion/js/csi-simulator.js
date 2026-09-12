@@ -8,6 +8,9 @@
  * matching the ADR-018 frame format expectations.
  */
 
+import { reconnectState, scheduleReconnect, cancelReconnect, reconnectSucceeded }
+  from '../../services/ws-reconnect.js';
+
 export class CsiSimulator {
   static VERSION = 'v4-drift';  // Cache-bust verification
 
@@ -38,6 +41,23 @@ export class CsiSimulator {
     this.rssiDbm = -70; // default mid-range
     this._rssiTarget = -70;
 
+    // Reconnect bookkeeping (see ui/services/ws-reconnect.js).
+    Object.assign(this, reconnectState());
+    this._liveUrl = null;
+
+    // Server presence verdict, kept verbatim for the display and for gating the
+    // CSI-only pose. `null` until the server reports a classification, which is
+    // the demo case.
+    this.serverPresence = null;
+    this.serverPersons = 0;
+    // Published vitals from the sensing update (`null` while the ADR-021/ADR-293
+    // gate abstains) and the gate's own explanation, fetched from
+    // /api/v1/vital-signs so the page can say *why* there are no numbers.
+    this.vitalSigns = null;
+    this.vitalSignsAt = null;
+    this.vitalsAuthority = null;
+    this.vitalsReason = null;
+
     // Person influence (updated from video motion)
     this.personPresence = 0;
     this.personX = 0.5;
@@ -50,6 +70,7 @@ export class CsiSimulator {
    * @param {string} url - WebSocket URL (e.g. ws://localhost:3030/ws/csi)
    */
   async connectLive(url) {
+    this._liveUrl = url;
     return new Promise((resolve) => {
       try {
         this.ws = new WebSocket(url);
@@ -61,7 +82,19 @@ export class CsiSimulator {
         // live only once it has parsed a verified frame.
         this.ws.onopen = () => { this.socketOpen = true; resolve(true); };
         this.ws.onerror = () => resolve(false);
-        this.ws.onclose = () => { this.mode = 'demo'; this.verifiedFrame = false; this.socketOpen = false; };
+        this.ws.onclose = () => {
+          this.socketOpen = false;
+          this.serverPresence = null;
+          this.serverPersons = 0;
+          this.vitalSigns = null;
+          this.vitalSignsAt = null;
+          // Retry before giving up: a server restart must not leave this page
+          // showing SYNTHETIC until someone reloads it.
+          scheduleReconnect(this, () => { void this.connectLive(this._liveUrl); }, () => {
+            this.mode = 'demo';
+            this.verifiedFrame = false;
+          });
+        };
         // Timeout after 3s
         setTimeout(() => { if (!this.socketOpen) resolve(false); }, 3000);
       } catch {
@@ -71,10 +104,14 @@ export class CsiSimulator {
   }
 
   disconnect() {
+    cancelReconnect(this);
+    this._liveUrl = null;
     if (this.ws) { this.ws.close(); this.ws = null; }
     this.mode = 'demo';
     this.verifiedFrame = false;
     this.socketOpen = false;
+    this.serverPresence = null;
+    this.serverPersons = 0;
   }
 
   /** True only once a real frame has been decoded — not merely on socket open. */
@@ -305,6 +342,7 @@ export class CsiSimulator {
 
   /** ADR-295: promote from watermarked demo to live once a real frame lands. */
   _markVerifiedFrame() {
+    reconnectSucceeded(this);
     this.verifiedFrame = true;
     this.mode = 'live';
     if (typeof this.onVerifiedFrame === 'function') this.onVerifiedFrame();
@@ -312,13 +350,35 @@ export class CsiSimulator {
 
   _handleJsonFrame(msg) {
     // Sensing server sends: { type: "sensing_update", nodes: [{ amplitude: [...], subcarrier_count }], classification, features }
+    //
+    // ADR-141 / ADR-295: a governed cycle emitted at privacy class Restricted
+    // (`/api/v1/status` -> `trust.raw_outputs_suppressed === true`) strips the
+    // per-node raw amplitude/phase proxies, so `amplitude` arrives as `[]` with
+    // `subcarrier_count: 0`. Such a frame is still live, but it carries no
+    // decodable CSI. Treating it as a verified frame caused two defects:
+    // `Array.isArray([])` is true, so `_markVerifiedFrame()` fired on an empty
+    // payload, and the live buffers were blanked to zeros on every suppressed
+    // cycle (46% of cycles on a measured 3-node ESP32 array whose fusion soft
+    // guard was 20 ms while the inter-node frame-arrival spread was ~33 ms),
+    // which made the live view read 0.00 while `isLive` was already true. Keep
+    // the last verified frame instead and only refresh the metadata.
+    const node = (msg.nodes && msg.nodes[0]) || msg;
+    const ampArr = node.amplitude || msg.amplitude;
+    const phaseArr = node.phase || msg.phase;
+    const iq = node.iq || msg.iq;
+    const hasAmplitude = Array.isArray(ampArr) && ampArr.length > 0;
+    const hasPhase = Array.isArray(phaseArr) && phaseArr.length > 0;
+    const hasIq = Array.isArray(iq) && iq.length > 0;
+    if (!hasAmplitude && !hasPhase && !hasIq) {
+      this._updateSensingMetadata(node, msg);
+      return;
+    }
+
     this._liveAmplitude = new Float32Array(this.subcarriers);
     this._livePhase = new Float32Array(this.subcarriers);
 
     // Extract amplitude from sensing_update node data
-    const node = (msg.nodes && msg.nodes[0]) || msg;
-    const ampArr = node.amplitude || msg.amplitude;
-    if (ampArr && Array.isArray(ampArr)) {
+    if (hasAmplitude) {
       const n = Math.min(ampArr.length, this.subcarriers);
       // Server sends raw amplitude (already magnitude), normalize to 0-1
       let maxAmp = 0;
@@ -332,11 +392,10 @@ export class CsiSimulator {
     }
 
     // Phase from node (if available)
-    const phaseArr = node.phase || msg.phase;
-    if (phaseArr && Array.isArray(phaseArr)) {
+    if (hasPhase) {
       const n = Math.min(phaseArr.length, this.subcarriers);
       for (let i = 0; i < n; i++) this._livePhase[i] = phaseArr[i];
-    } else if (ampArr) {
+    } else if (hasAmplitude) {
       // Synthesize phase from amplitude variation (Hilbert-like estimate)
       for (let i = 1; i < this.subcarriers; i++) {
         this._livePhase[i] = this._livePhase[i - 1] + (this._liveAmplitude[i] - this._liveAmplitude[i - 1]) * Math.PI;
@@ -344,8 +403,7 @@ export class CsiSimulator {
     }
 
     // Handle raw I/Q pairs
-    const iq = node.iq || msg.iq;
-    if (iq && Array.isArray(iq)) {
+    if (hasIq) {
       const n = Math.min(iq.length / 2, this.subcarriers);
       for (let i = 0; i < n; i++) {
         const real = iq[i * 2], imag = iq[i * 2 + 1];
@@ -354,6 +412,16 @@ export class CsiSimulator {
       }
     }
 
+    this._updateSensingMetadata(node, msg);
+  }
+
+  /**
+   * Refresh the non-CSI metadata carried by a `sensing_update`: the RSSI target
+   * and the server-side presence/confidence. Kept separate from the raw-CSI
+   * decode so a privacy-suppressed cycle can still update the display metadata
+   * without touching the last verified amplitude/phase frame.
+   */
+  _updateSensingMetadata(node, msg) {
     // Extract RSSI from node data
     if (typeof node.rssi_dbm === 'number') {
       this._rssiTarget = node.rssi_dbm;
@@ -361,11 +429,27 @@ export class CsiSimulator {
       this._rssiTarget = msg.features.mean_rssi;
     }
 
-    // Update presence from server classification
+    // Update presence from server classification.
+    //
+    // The server is the authority on presence: `/api/v1/status` and this
+    // classification come from the ADR-297 room inference over the per-node
+    // verdicts. Keep the label verbatim so the view can say EMPTY or PRESENT
+    // instead of showing a bare confidence number, and so the CSI-only pose can
+    // be suppressed when the room is empty.
     const cls = msg.classification;
     if (cls) {
       if (typeof cls.confidence === 'number') {
         this.personPresence = cls.presence ? cls.confidence : 0;
+      }
+      if (typeof cls.motion_level === 'string') this.serverPresence = cls.motion_level;
+      this.serverPersons = typeof msg.estimated_persons === 'number' ? msg.estimated_persons : 0;
+      // Keep the last published value: the gate only opens on a minority of frames
+      // (~9.5% MEASURED), so clearing on every message would hide numbers the
+      // server is publishing. The age is carried alongside so the display can say
+      // how old it is.
+      if (msg.vital_signs) {
+        this.vitalSigns = msg.vital_signs;
+        this.vitalSignsAt = Date.now();
       }
     }
   }

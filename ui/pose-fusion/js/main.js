@@ -28,6 +28,9 @@ const latency = { video: 0, csi: 0, fusion: 0, total: 0 };
 // === Components ===
 const videoCapture = new VideoCapture(document.getElementById('webcam'));
 const csiSimulator = new CsiSimulator({ subcarriers: 52, timeWindow: 56 });
+// Handle for the headless verification harness, which drives disconnects to
+// exercise the reconnect path. Harmless in a browser session.
+window.__csiSimulator = csiSimulator;
 const visualCnn = new CnnEmbedder({ inputSize: 56, embeddingDim: 128, seed: 42 });
 const csiCnn = new CnnEmbedder({ inputSize: 56, embeddingDim: 128, seed: 137 });
 const fusionEngine = new FusionEngine(128);
@@ -154,10 +157,24 @@ function init() {
   // a safety mechanism — `onVerifiedFrame` below (issue #1557 fix) is what
   // actually prevents an unconfirmed/failed connection from ever being shown
   // as LIVE, regardless of whether this guess is right.
+  // The bundled sensing server (v2/crates/wifi-densepose-sensing-server) serves
+  // HTTP + UI on 8080 but the sensing WebSocket on 8765, so the Docker
+  // `httpPort + 1` convention alone sent this page to 8081 and the connection
+  // failed silently — leaving the watermarked SYNTHETIC view even with a live
+  // node streaming. Keep the mapping identical to the canonical UI service
+  // (`ui/services/sensing.service.js`), then fall back to the port-plus-one
+  // guess for host-port remappings this table does not know.
+  const SENSING_WS_PORT_BY_HTTP_PORT = {
+    '3000': '3001', // Docker image: UI/API 3000, sensing stream 3001.
+    '8080': '8765', // Bundled sensing server: UI/API 8080, WS 8765.
+  };
   const httpPort = Number(window.location.port);
-  const defaultWsUrl = Number.isFinite(httpPort) && httpPort > 0
-    ? `ws://${window.location.hostname}:${httpPort + 1}/ws/sensing`
-    : 'ws://localhost:8765/ws/sensing';
+  const mappedWsPort = SENSING_WS_PORT_BY_HTTP_PORT[String(window.location.port)];
+  const defaultWsUrl = mappedWsPort
+    ? `ws://${window.location.hostname}:${mappedWsPort}/ws/sensing`
+    : Number.isFinite(httpPort) && httpPort > 0
+      ? `ws://${window.location.hostname}:${httpPort + 1}/ws/sensing`
+      : 'ws://localhost:8765/ws/sensing';
   if (wsUrlInput) wsUrlInput.value = defaultWsUrl;
   // ADR-272: exchange the stored bearer for a single-use ?ticket= before the
   // upgrade — a browser cannot set an Authorization header on a WebSocket.
@@ -179,6 +196,21 @@ function init() {
     }
   });
 
+  // Ask the server why vitals are (or are not) published. The sensing stream
+  // carries only the values, so the reason is a separate same-origin read — this is
+  // what lets the page distinguish "no data yet" from "withheld by the gate".
+  async function refreshVitalsStatus() {
+    try {
+      const r = await fetch('/api/v1/vital-signs', { cache: 'no-store' });
+      if (!r.ok) return;
+      const body = await r.json();
+      csiSimulator.vitalsAuthority = body.authority || null;
+      csiSimulator.vitalsReason = body.abstention_reason || null;
+    } catch { /* server restarting; the reconnect path handles the socket */ }
+  }
+  void refreshVitalsStatus();
+  setInterval(refreshVitalsStatus, 5000);
+
   // Auto-start camera for video/dual modes
   updateModeUI();
   startTime = performance.now() / 1000;
@@ -197,6 +229,37 @@ async function startCamera() {
     cameraPrompt.style.display = 'flex';
     cameraPrompt.querySelector('p').textContent = 'Camera access denied. Try CSI-only mode.';
   }
+}
+
+/**
+ * Draw the explicit "no pose" state on the skeleton canvas.
+ *
+ * An empty room used to keep a full skeleton on screen because the pose path ran
+ * unconditionally; saying EMPTY is the honest output, and it is also what makes
+ * an occupancy regression visible at a glance.
+ */
+function drawNoPose(ctx, canvas, serverPresence) {
+  ctx.save();
+  // Start from an identity transform: a previous draw may have left a rotation or
+  // translation behind, and this function must not inherit it.
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // The skeleton canvas is mirrored by CSS (`.video-panel canvas {
+  // transform: scaleX(-1) }`, the selfie-view convention that also mirrors the
+  // pose), so canvas text renders reversed. Pre-mirror the context so the two
+  // mirrors cancel and the label reads normally.
+  ctx.translate(canvas.width, 0);
+  ctx.scale(-1, 1);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const empty = serverPresence === 'absent';
+  ctx.fillStyle = empty ? 'rgba(255,176,32,0.9)' : 'rgba(150,150,150,0.75)';
+  ctx.font = '600 15px "JetBrains Mono", ui-monospace, monospace';
+  ctx.fillText(empty ? 'EMPTY — NO PRESENCE' : 'NO POSE DATA', canvas.width / 2, canvas.height / 2 - 8);
+  ctx.font = '11px "JetBrains Mono", ui-monospace, monospace';
+  ctx.fillText(empty ? 'server room verdict: absent' : 'waiting for a presence verdict',
+               canvas.width / 2, canvas.height / 2 + 12);
+  ctx.restore();
 }
 
 function updateModeUI() {
@@ -323,15 +386,97 @@ function mainLoop(timestamp) {
     isLive: csiSimulator.isLive
   };
 
-  const keypoints = poseDecoder.decode(fusedEmb, motionRegion, elapsed, csiState);
+  // --- Presence gate ---
+  // The server's room verdict (ADR-297) has authority over the pose: an empty
+  // room must not render a skeleton. Without this, the through-wall branch keeps
+  // coasting on the last body state while the CSI presence estimate is stale.
+  const serverAbsent = csiSimulator.serverPresence === 'absent';
+  let keypoints = [];
+  if (serverAbsent) {
+    poseDecoder.clearTrack();
+  } else {
+    keypoints = poseDecoder.decode(fusedEmb, motionRegion, elapsed, csiState);
+  }
 
   // --- Render Skeleton ---
   const labelMap = { dual: 'DUAL FUSION', video: 'VIDEO ONLY', csi: 'CSI ONLY' };
-  renderer.drawSkeleton(skeletonCtx, keypoints, skeletonCanvas.width, skeletonCanvas.height, {
-    minConfidence: confidenceThreshold,
-    color: mode === 'csi' ? 'amber' : 'green',
-    label: labelMap[mode]
-  });
+  if (keypoints && keypoints.length > 0) {
+    renderer.drawSkeleton(skeletonCtx, keypoints, skeletonCanvas.width, skeletonCanvas.height, {
+      minConfidence: confidenceThreshold,
+      color: mode === 'csi' ? 'amber' : 'green',
+      label: labelMap[mode]
+    });
+  } else {
+    drawNoPose(skeletonCtx, skeletonCanvas, csiSimulator.serverPresence);
+  }
+
+  // --- Presence readout ---
+  //
+  // Presence is occupancy, not motion. A person sitting or sleeping still produces
+  // `motion_level: absent` while the calibrated occupancy estimate still sees them
+  // (MEASURED: occupancy 1, motion absent), and reading presence off the motion
+  // level alone made exactly that case display as an empty room.
+  const presenceEl = document.getElementById('presence-value');
+  const presenceSrcEl = document.getElementById('presence-source');
+  if (presenceEl) {
+    const activity = csiSimulator.serverPresence;   // motion level, or null
+    const occupants = csiSimulator.serverPersons || 0;
+    const moving = !!activity && activity !== 'absent';
+    const occupied = occupants > 0 || moving;
+    if (activity === null && occupants === 0) {
+      presenceEl.textContent = '--';
+      presenceEl.style.color = 'var(--amber)';
+      if (presenceSrcEl) presenceSrcEl.textContent = 'awaiting live frames';
+    } else if (occupied) {
+      presenceEl.textContent = occupants > 1 ? `PRESENT · ${occupants}` : 'PRESENT';
+      presenceEl.style.color = 'var(--green-glow)';
+      if (presenceSrcEl) {
+        presenceSrcEl.textContent = moving
+          ? `moving: ${activity}`
+          : 'still — no movement';
+      }
+    } else {
+      presenceEl.textContent = 'EMPTY';
+      presenceEl.style.color = 'var(--amber)';
+      if (presenceSrcEl) presenceSrcEl.textContent = 'server: no presence';
+    }
+  }
+
+  // --- Vitals readout ---
+  //
+  // Two numbers, or an honest abstention: the server publishes them only behind a
+  // fresh explicit calibration, exactly one occupant and qualified confidence.
+  const respEl = document.getElementById('resp-value');
+  const hrEl = document.getElementById('hr-value');
+  const vitalsNoteEl = document.getElementById('vitals-note');
+  if (respEl || hrEl) {
+    // The gate opens on a minority of frames, so the panel shows the most recent
+    // published value with its age rather than flickering to "abstained" between
+    // publications. Past VITALS_MAX_AGE_S the value is no longer current and says so.
+    const VITALS_MAX_AGE_S = 20;
+    const vs = csiSimulator.vitalSigns;
+    const at = csiSimulator.vitalSignsAt;
+    const ageS = at ? Math.round((Date.now() - at) / 1000) : null;
+    const fresh = vs && ageS !== null && ageS <= VITALS_MAX_AGE_S;
+    const fmt = (v, unit, digits) =>
+      (typeof v === 'number' && isFinite(v)) ? `${v.toFixed(digits)} ${unit}` : null;
+    const suffix = fresh ? ` (${ageS}s)` : '';
+    const resp = fresh ? fmt(vs.breathing_rate_bpm, 'rpm', 1) : null;
+    const hr = fresh ? fmt(vs.heart_rate_bpm, 'bpm', 0) : null;
+    if (respEl) {
+      respEl.textContent = resp ? resp + suffix : 'abstained';
+      respEl.style.color = resp ? 'var(--cyan)' : 'rgba(150,150,150,0.7)';
+    }
+    if (hrEl) {
+      hrEl.textContent = hr ? hr + suffix : 'abstained';
+      hrEl.style.color = hr ? 'var(--cyan)' : 'rgba(150,150,150,0.7)';
+    }
+    if (vitalsNoteEl) {
+      vitalsNoteEl.textContent = fresh
+        ? `published; age shown — the gate reopens when confidence clears the threshold`
+        : (csiSimulator.vitalsReason || 'needs a fresh calibration and exactly one occupant');
+    }
+  }
 
   // --- Render Embedding Space ---
   const embPoints = fusionEngine.getEmbeddingPoints();

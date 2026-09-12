@@ -35,6 +35,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use wifi_densepose_bfld::{PrivacyClass, PrivacyMode};
+use wifi_densepose_signal::ruvsense::fusion_quality::ContradictionFlag;
 use wifi_densepose_engine::{AdapterInfo, EngineError, StreamingEngine, TrustedOutput};
 use wifi_densepose_geo::types::GeoRegistration;
 use wifi_densepose_signal::ruvsense::fusion_quality::CalibrationId;
@@ -48,6 +49,11 @@ use super::NodeState;
 /// every cycle; only the log line is rate-limited — a 20 Hz loop must not
 /// emit 20 warns/s).
 const ENGINE_ERROR_WARN_INTERVAL: Duration = Duration::from_secs(10);
+
+/// Minimum spacing between demotion warn logs. Demotions are a *normal*
+/// outcome of a tolerated contradiction and can fire on every cycle, so the
+/// first one is always logged and the rest are rate-limited.
+const DEMOTION_WARN_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Owns a [`StreamingEngine`] and the WorldGraph scope (one room + sensor) the
 /// live sensing loop publishes beliefs into.
@@ -77,6 +83,20 @@ pub struct EngineBridge {
     engine_error_count: u64,
     /// Last time an engine error was actually logged (rate limiter).
     last_error_warn_at: Option<Instant>,
+    /// Why the most recent cycle was demoted, as a stable slug naming the
+    /// trigger (`timestamp_mismatch`, `calibration_id_mismatch`, ...,
+    /// `mesh_at_risk`, joined with `+` when several fired). `None` when the
+    /// last cycle was emitted at the base class. ADR-141 review finding 1c
+    /// strips the raw amplitude/phase proxies on a demoted cycle, and without
+    /// this field a consumer could only observe the stripped output — never
+    /// the reason (a 46%-of-cycles `TimestampMismatch` demotion on a real
+    /// three-node array looked exactly like a broken CSI pipeline).
+    demotion_reason: Option<String>,
+    /// Cycles demoted since startup.
+    demotion_count: u64,
+    /// Last time a demotion was actually logged (rate limiter, kept separate
+    /// from the error limiter so a demotion storm cannot hide an engine error).
+    last_demotion_warn_at: Option<Instant>,
 }
 
 impl EngineBridge {
@@ -118,6 +138,9 @@ impl EngineBridge {
             demoted: false,
             engine_error_count: 0,
             last_error_warn_at: None,
+            demotion_reason: None,
+            demotion_count: 0,
+            last_demotion_warn_at: None,
         }
     }
 
@@ -218,6 +241,30 @@ impl EngineBridge {
                 self.recalibration_recommended = trust.recalibration_recommended;
                 self.effective_class = Some(trust.effective_class);
                 self.demoted = trust.demoted;
+                if trust.demoted {
+                    self.demotion_count += 1;
+                    self.demotion_reason = Some(demotion_reason_of(&trust));
+                    let now = Instant::now();
+                    let warn_due = self.last_demotion_warn_at.map_or(true, |t| {
+                        now.duration_since(t) >= DEMOTION_WARN_INTERVAL
+                    });
+                    if warn_due {
+                        self.last_demotion_warn_at = Some(now);
+                        tracing::warn!(
+                            demotion_reason = self.demotion_reason.as_deref().unwrap_or("unnamed"),
+                            total_demotions = self.demotion_count,
+                            guard_interval_us = self.guard_interval_us,
+                            "governed cycle demoted: ADR-141 strips the per-node raw amplitude/phase \
+                             proxies from the live publish for this cycle (see /api/v1/status \
+                             trust.demotion_reason). `timestamp_mismatch` means the newest per-node \
+                             frame timestamps are further apart than the fusion soft guard \
+                             (WDP_SOFT_GUARD_US); on a node array slower than 1/soft_guard frames per \
+                             second that fires on a large fraction of cycles"
+                        );
+                    }
+                } else {
+                    self.demotion_reason = None;
+                }
                 Some(trust)
             }
             Err(e) => {
@@ -265,6 +312,18 @@ impl EngineBridge {
         self.engine_error_count
     }
 
+    /// Stable slug naming why the most recent cycle was demoted, or `None`
+    /// when it was emitted at the base class. Set by `observe_cycle`.
+    pub fn demotion_reason(&self) -> Option<&str> {
+        self.demotion_reason.as_deref()
+    }
+
+    /// Number of cycles demoted since startup (each one strips the raw
+    /// amplitude/phase proxies from the live publish).
+    pub fn demotion_count(&self) -> u64 {
+        self.demotion_count
+    }
+
     /// ADR-141 output mapping for the live publish path (review finding 1c):
     /// at effective class [`PrivacyClass::Restricted`] the bfld privacy gate
     /// drops the amplitude + phase proxies; the live `SensingUpdate` applies
@@ -274,6 +333,43 @@ impl EngineBridge {
     pub fn suppress_raw_outputs(&self) -> bool {
         self.effective_class
             .is_some_and(|c| c.as_u8() >= PrivacyClass::Restricted.as_u8())
+    }
+}
+
+/// Stable slug for every trigger that demoted this cycle, so a status
+/// consumer can tell a privacy-class policy from a timing wall without
+/// parsing a log line.
+fn demotion_reason_of(trust: &TrustedOutput) -> String {
+    let mut parts: Vec<&'static str> = Vec::new();
+    for flag in &trust.quality.contradiction_flags {
+        parts.push(contradiction_slug(flag));
+    }
+    if let Some(directional) = trust.directional.as_ref() {
+        for flag in &directional.contradictions {
+            parts.push(contradiction_slug(flag));
+        }
+    }
+    if trust.mesh.as_ref().is_some_and(|m| m.at_risk) {
+        parts.push("mesh_at_risk");
+    }
+    parts.dedup();
+    if parts.is_empty() {
+        // A demotion must come from one of the three inputs above; if one ever
+        // arrives unnamed, say so rather than inventing a cause.
+        "unnamed".to_string()
+    } else {
+        parts.join("+")
+    }
+}
+
+fn contradiction_slug(flag: &ContradictionFlag) -> &'static str {
+    match flag {
+        ContradictionFlag::TimestampMismatch { .. } => "timestamp_mismatch",
+        ContradictionFlag::CalibrationIdMismatch { .. } => "calibration_id_mismatch",
+        ContradictionFlag::PhaseAlignmentFailed { .. } => "phase_alignment_failed",
+        ContradictionFlag::DriftProfileConflict { .. } => "drift_profile_conflict",
+        ContradictionFlag::CoherenceDrop { .. } => "coherence_drop",
+        ContradictionFlag::GeometryInsufficient { .. } => "geometry_insufficient",
     }
 }
 
@@ -514,6 +610,55 @@ mod tests {
             .expect("cycle runs");
         assert_eq!(bridge.effective_class(), Some(PrivacyClass::Restricted));
         assert!(bridge.suppress_raw_outputs());
+    }
+
+    /// A demotion must name its trigger. The measured failure this guards
+    /// against: on a three-node ESP32 array the 20 ms default soft guard sat
+    /// below the inter-node frame-arrival spread, so 45.9% of cycles were
+    /// demoted by `TimestampMismatch` and lost their raw amplitude vectors —
+    /// with nothing on any surface saying why.
+    #[test]
+    fn timestamp_mismatch_demotion_is_named() {
+        let mut bridge = EngineBridge::new(PrivacyMode::PrivateHome, 1, "r", "R", None);
+        let now = Instant::now();
+        let mut states = two_node_states();
+        // 25 ms spread: above the 20 ms soft guard, well inside the 60 ms hard one.
+        states.get_mut(&0).expect("node 0").last_frame_time = Some(now - Duration::from_millis(25));
+        states.get_mut(&1).expect("node 1").last_frame_time = Some(now);
+
+        let out = bridge.observe_cycle(&states, 1_000).expect("cycle runs");
+        assert!(out.demoted, "a 25 ms spread must exceed the 20 ms soft guard");
+        assert!(
+            bridge.demotion_reason().is_some_and(|r| r.contains("timestamp_mismatch")),
+            "demotion must name the trigger, got {:?}",
+            bridge.demotion_reason()
+        );
+        assert_eq!(bridge.demotion_count(), 1);
+        assert!(bridge.suppress_raw_outputs());
+    }
+
+    /// A clean cycle must clear the reason again, so a consumer polling
+    /// `/api/v1/status` never reads a stale cause.
+    #[test]
+    fn a_clean_cycle_clears_the_demotion_reason() {
+        let mut bridge = EngineBridge::new(PrivacyMode::PrivateHome, 1, "r", "R", None);
+        let now = Instant::now();
+        let mut states = two_node_states();
+        states.get_mut(&0).expect("node 0").last_frame_time = Some(now - Duration::from_millis(25));
+        states.get_mut(&1).expect("node 1").last_frame_time = Some(now);
+        bridge.observe_cycle(&states, 1_000).expect("cycle runs");
+        assert!(bridge.demotion_reason().is_some());
+
+        // Both nodes now arrive together, inside the soft guard.
+        let now = Instant::now();
+        let mut aligned = two_node_states();
+        for id in [0u8, 1u8] {
+            aligned.get_mut(&id).expect("node").last_frame_time = Some(now);
+        }
+        let out = bridge.observe_cycle(&aligned, 2_000).expect("cycle runs");
+        assert!(!out.demoted, "aligned arrivals must not demote");
+        assert_eq!(bridge.demotion_reason(), None);
+        assert_eq!(bridge.demotion_count(), 1, "the counter is cumulative");
     }
 
     #[test]
