@@ -38,6 +38,12 @@ export class CsiSimulator {
     this.rssiDbm = -70; // default mid-range
     this._rssiTarget = -70;
 
+    // Server presence verdict, kept verbatim for the display and for gating the
+    // CSI-only pose. `null` until the server reports a classification, which is
+    // the demo case.
+    this.serverPresence = null;
+    this.serverPersons = 0;
+
     // Person influence (updated from video motion)
     this.personPresence = 0;
     this.personX = 0.5;
@@ -61,7 +67,10 @@ export class CsiSimulator {
         // live only once it has parsed a verified frame.
         this.ws.onopen = () => { this.socketOpen = true; resolve(true); };
         this.ws.onerror = () => resolve(false);
-        this.ws.onclose = () => { this.mode = 'demo'; this.verifiedFrame = false; this.socketOpen = false; };
+        this.ws.onclose = () => {
+          this.mode = 'demo'; this.verifiedFrame = false; this.socketOpen = false;
+          this.serverPresence = null; this.serverPersons = 0;
+        };
         // Timeout after 3s
         setTimeout(() => { if (!this.socketOpen) resolve(false); }, 3000);
       } catch {
@@ -75,6 +84,8 @@ export class CsiSimulator {
     this.mode = 'demo';
     this.verifiedFrame = false;
     this.socketOpen = false;
+    this.serverPresence = null;
+    this.serverPersons = 0;
   }
 
   /** True only once a real frame has been decoded — not merely on socket open. */
@@ -361,12 +372,20 @@ export class CsiSimulator {
       this._rssiTarget = msg.features.mean_rssi;
     }
 
-    // Update presence from server classification
+    // Update presence from server classification.
+    //
+    // The server is the authority on presence: `/api/v1/status` and this
+    // classification come from the ADR-297 room inference over the per-node
+    // verdicts. Keep the label verbatim so the view can say EMPTY or PRESENT
+    // instead of showing a bare confidence number, and so the CSI-only pose can
+    // be suppressed when the room is empty.
     const cls = msg.classification;
     if (cls) {
       if (typeof cls.confidence === 'number') {
         this.personPresence = cls.presence ? cls.confidence : 0;
       }
+      if (typeof cls.motion_level === 'string') this.serverPresence = cls.motion_level;
+      this.serverPersons = typeof msg.estimated_persons === 'number' ? msg.estimated_persons : 0;
     }
   }
 

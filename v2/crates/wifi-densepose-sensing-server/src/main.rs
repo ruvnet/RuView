@@ -930,6 +930,9 @@ struct NodeState {
     debounce_candidate: String,
     baseline_motion: f64,
     baseline_frames: u64,
+    /// EMA of `|raw_motion - baseline_motion|`: the quiet-room jitter scale used
+    /// to decide whether a motion score is presence or noise.
+    motion_noise_floor: f64,
     smoothed_hr: f64,
     smoothed_br: f64,
     smoothed_hr_conf: f64,
@@ -1393,6 +1396,7 @@ impl NodeState {
             debounce_candidate: "absent".to_string(),
             baseline_motion: 0.0,
             baseline_frames: 0,
+            motion_noise_floor: 0.0,
             smoothed_hr: 0.0,
             smoothed_br: 0.0,
             smoothed_hr_conf: 0.0,
@@ -1879,6 +1883,9 @@ struct AppStateInner {
     baseline_motion: f64,
     /// Number of frames processed so far (for baseline warm-up).
     baseline_frames: u64,
+    /// EMA of `|raw_motion - baseline_motion|`: the quiet-room jitter scale used
+    /// to decide whether a motion score is presence or noise.
+    motion_noise_floor: f64,
     // ── Vital signs smoothing ────────────────────────────────────────────
     /// EMA-smoothed heart rate (BPM).
     smoothed_hr: f64,
@@ -2471,6 +2478,7 @@ impl AppStateInner {
             debounce_candidate: "absent".to_string(),
             baseline_motion: 0.0,
             baseline_frames: 0,
+            motion_noise_floor: 0.0,
             smoothed_hr: 0.0,
             smoothed_br: 0.0,
             smoothed_hr_conf: 0.0,
@@ -3559,11 +3567,32 @@ fn extract_features_from_frame(
 
 /// Simple threshold classification (no smoothing) — used as the "raw" input.
 fn raw_classify(score: f64) -> String {
-    if score > 0.25 {
+    raw_classify_scaled(score, 0.0)
+}
+
+/// Classify a baseline-and-margin-adjusted motion score, with thresholds scaled
+/// to the node's own measured quiet-room jitter.
+///
+/// A fixed `present_still` threshold of 0.04 sits inside the residual noise of a
+/// noisier link. MEASURED on three ESP32-S3 nodes with nobody in the room: while
+/// two nodes read `smoothed_motion` 0.039/0.018 and classified `absent`, the node
+/// with the largest jitter (0.021) sat at 0.037 — under 0.04, yet its smoothed
+/// score crossed it often enough to hold `present_still`, which made the room
+/// aggregate report presence and kept three tracked skeletons alive in an empty
+/// room. Scaling the threshold by the jitter keeps one link's noise floor from
+/// being another link's "presence".
+///
+/// `noise_floor` of 0.0 reproduces the original fixed thresholds.
+fn raw_classify_scaled(score: f64, noise_floor: f64) -> String {
+    let jitter = noise_floor.max(0.0);
+    let present = (jitter * PRESENCE_NOISE_SIGMA * 1.5).max(PRESENCE_STILL_THRESHOLD);
+    let moving = (present * 2.5).max(PRESENT_MOVING_THRESHOLD);
+    let active = (moving * 2.0).max(ACTIVE_THRESHOLD);
+    if score > active {
         "active".into()
-    } else if score > 0.12 {
+    } else if score > moving {
         "present_moving".into()
-    } else if score > 0.04 {
+    } else if score > present {
         "present_still".into()
     } else {
         "absent".into()
@@ -3602,6 +3631,33 @@ const NODE_DEBOUNCE_DURATION_SECS: f64 = 0.4;
 /// Deriving a per-frame alpha from the node's actual measured
 /// `csi_fps_ema` makes the smoothing strength invariant to arrival rate.
 const NODE_MOTION_TIME_CONSTANT_SECS: f64 = 0.6154;
+/// Multiple of the learned quiet-room noise floor that a motion score must
+/// clear before it may be reported as presence rather than as the room's own
+/// jitter. Half-wave rectification of the baseline-adjusted score biases its
+/// mean positive, so a margin scaled to the measured floor is required.
+const PRESENCE_NOISE_SIGMA: f64 = 2.0;
+
+/// Absolute floor for that margin, used while the noise floor is still warming
+/// up (the first few seconds after start).
+const PRESENCE_MOTION_MARGIN: f64 = 0.02;
+
+/// Fixed floor of the `present_still` classification threshold, used until the
+/// node's jitter is known.
+const PRESENCE_STILL_THRESHOLD: f64 = 0.04;
+
+/// Fixed floor of the `present_moving` threshold.
+const PRESENT_MOVING_THRESHOLD: f64 = 0.12;
+
+/// Fixed floor of the `active` threshold.
+const ACTIVE_THRESHOLD: f64 = 0.25;
+
+/// Minimum training accuracy for the adaptive classifier to override the signal
+/// classifier. The label set, so ~0.33 is chance.
+const ADAPTIVE_MIN_ACCURACY: f64 = 0.60;
+
+/// Minimum per-frame model confidence for that same override.
+const ADAPTIVE_MIN_CONFIDENCE: f64 = 0.50;
+
 /// Time constant for [`smooth_and_classify_node`]'s baseline EMA, same
 /// derivation as `NODE_MOTION_TIME_CONSTANT_SECS` from `BASELINE_EMA_ALPHA`.
 const NODE_BASELINE_TIME_CONSTANT_SECS: f64 = 33.28;
@@ -3624,16 +3680,31 @@ fn smooth_and_classify(state: &mut AppStateInner, raw: &mut ClassificationInfo, 
             state.baseline_motion * (1.0 - BASELINE_EMA_ALPHA) + raw_motion * BASELINE_EMA_ALPHA;
     }
 
-    // 2. Subtract baseline and clamp.
-    let adjusted = (raw_motion - state.baseline_motion * 0.7).max(0.0);
+    // 1b. Quiet-room noise floor: how far the raw score wanders from the
+    //     baseline while nothing else is happening.
+    state.motion_noise_floor = state.motion_noise_floor * (1.0 - BASELINE_EMA_ALPHA)
+        + (raw_motion - state.baseline_motion).abs() * BASELINE_EMA_ALPHA;
+
+    // 2. Subtract the *whole* baseline plus a noise margin, then clamp.
+    //
+    // The 0.7 factor replaced here left 30% of the quiet-room floor in the
+    // score. MEASURED on three ESP32-S3 nodes with nobody in the room:
+    // `raw_motion` ~= 0.45 (the variance and motion-band terms are ratios
+    // against absolute magnitudes, so real CSI clamps them near 1.0), the
+    // baseline tracks ~0.45, and the residual ~= 0.135 cleared
+    // `raw_classify`'s 0.12 "present_moving" threshold — so an empty room
+    // reported presence indefinitely and the pose path drew a skeleton.
+    let margin =
+        (state.motion_noise_floor * PRESENCE_NOISE_SIGMA).max(PRESENCE_MOTION_MARGIN);
+    let adjusted = (raw_motion - state.baseline_motion - margin).max(0.0);
 
     // 3. EMA smooth the adjusted score.
     state.smoothed_motion =
         state.smoothed_motion * (1.0 - MOTION_EMA_ALPHA) + adjusted * MOTION_EMA_ALPHA;
     let sm = state.smoothed_motion;
 
-    // 4. Classify from smoothed score.
-    let candidate = raw_classify(sm);
+    // 4. Classify from smoothed score, with thresholds scaled to the floor.
+    let candidate = raw_classify_scaled(sm, state.motion_noise_floor);
 
     // 5. Hysteresis debounce: require N consecutive frames agreeing on a new state.
     if candidate == state.current_motion_level {
@@ -3654,9 +3725,22 @@ fn smooth_and_classify(state: &mut AppStateInner, raw: &mut ClassificationInfo, 
     }
 
     // 6. Write the smoothed result back into the classification.
+    //
+    // Issue #1442 convention: presence follows the level, never a raw flag. The
+    // `sm > 0.03` this replaces was a fixed threshold on the same score the level
+    // used, so an empty room whose residual jitter sat at 0.0325 reported
+    // `presence: true` while its level read `absent` — and `total_persons` reads
+    // this flag, so the published update carried `estimated_persons: 1` with
+    // nobody in the room.
     raw.motion_level = state.current_motion_level.clone();
-    raw.presence = sm > 0.03;
-    raw.confidence = (0.4 + sm * 0.6).clamp(0.0, 1.0);
+    raw.presence = !matches!(raw.motion_level.as_str(), "absent");
+    // An absent classification has no confidence to report (matches
+    // `classify_vitals`, which uses 0.0 rather than a floor).
+    raw.confidence = if raw.presence {
+        (0.4 + sm * 0.6).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
 }
 
 /// Per-node variant of `smooth_and_classify` that operates on a `NodeState`
@@ -3680,12 +3764,18 @@ fn smooth_and_classify_node(ns: &mut NodeState, raw: &mut ClassificationInfo, ra
             ns.baseline_motion * (1.0 - baseline_alpha) + raw_motion * baseline_alpha;
     }
 
-    let adjusted = (raw_motion - ns.baseline_motion * 0.7).max(0.0);
+    ns.motion_noise_floor = ns.motion_noise_floor * (1.0 - baseline_alpha)
+        + (raw_motion - ns.baseline_motion).abs() * baseline_alpha;
+
+    // Same correction as `smooth_and_classify`: keep none of the quiet-room
+    // floor in the score, and require a margin over the measured jitter.
+    let margin = (ns.motion_noise_floor * PRESENCE_NOISE_SIGMA).max(PRESENCE_MOTION_MARGIN);
+    let adjusted = (raw_motion - ns.baseline_motion - margin).max(0.0);
 
     ns.smoothed_motion = ns.smoothed_motion * (1.0 - motion_alpha) + adjusted * motion_alpha;
     let sm = ns.smoothed_motion;
 
-    let candidate = raw_classify(sm);
+    let candidate = raw_classify_scaled(sm, ns.motion_noise_floor);
 
     if candidate == ns.current_motion_level {
         ns.debounce_counter = 0;
@@ -3701,9 +3791,16 @@ fn smooth_and_classify_node(ns: &mut NodeState, raw: &mut ClassificationInfo, ra
         ns.debounce_counter = 1;
     }
 
+    // Same rule as `smooth_and_classify`: presence follows the debounced,
+    // jitter-scaled level, so an empty room cannot report presence from a fixed
+    // threshold that its own smoothed score happens to exceed.
     raw.motion_level = ns.current_motion_level.clone();
-    raw.presence = sm > 0.03;
-    raw.confidence = (0.4 + sm * 0.6).clamp(0.0, 1.0);
+    raw.presence = !matches!(raw.motion_level.as_str(), "absent");
+    raw.confidence = if raw.presence {
+        (0.4 + sm * 0.6).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
 }
 
 /// If an adaptive model is loaded, override the classification with the
@@ -3738,6 +3835,26 @@ fn adaptive_override(
             amps,
         );
         let (label, conf) = model.classify(&feat_arr);
+
+        // A model that is not meaningfully better than chance must not rewrite
+        // the signal classifier's presence verdict. MEASURED: the stale
+        // `data/adaptive_model.json` on this workstation reports 41.5% training
+        // accuracy over three classes (~33% is chance) and made a genuinely
+        // empty room read `present_moving` with
+        // `confidence = 0.4*0.7 + 0.4*0.3 = 0.4`, which the pose path turned
+        // into a 26-keypoint skeleton.
+        if model.training_accuracy < ADAPTIVE_MIN_ACCURACY
+            || conf < ADAPTIVE_MIN_CONFIDENCE
+        {
+            debug!(
+                training_accuracy = model.training_accuracy,
+                confidence = conf,
+                label,
+                "adaptive classifier is below the override floor; keeping the signal classification"
+            );
+            return;
+        }
+
         classification.motion_level = label.to_string();
         classification.presence = label != "absent";
         // Blend model confidence with existing smoothed confidence.
@@ -5950,8 +6067,13 @@ fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
         return vec![];
     }
 
-    // Use estimated_persons if set by the tick loop; otherwise default to 1.
-    let person_count = update.estimated_persons.unwrap_or(1).max(1);
+    // `estimated_persons` is `Some` only when the estimators found at least one
+    // person, so a missing count means nobody. Defaulting to one person here is
+    // how a presence false positive became a full 26-keypoint skeleton in an
+    // empty room — the pose must come from the count, never from the flag.
+    let Some(person_count) = update.estimated_persons.filter(|count| *count > 0) else {
+        return vec![];
+    };
 
     (0..person_count)
         .map(|idx| derive_single_person_pose(update, idx, person_count))
@@ -8470,6 +8592,10 @@ async fn vital_signs_diagnostics_endpoint(
             "node_id": node_id,
             "csi_fps_ema": node.csi_fps_ema,
             "accepted_sample_rate_hz": node.effective_accepted_sample_rate_hz(),
+            "current_motion_level": node.current_motion_level,
+            "baseline_motion": node.baseline_motion,
+            "smoothed_motion": node.smoothed_motion,
+            "motion_noise_floor": node.motion_noise_floor,
             "breathing_samples": br_len,
             "breathing_capacity": br_cap,
             "heartbeat_samples": hb_len,
@@ -9654,10 +9780,28 @@ async fn udp_receiver_task(
                             amps,
                         );
                         let (label, conf) = model.classify(&feat_arr);
-                        classification.motion_level = label.to_string();
-                        classification.presence = label != "absent";
-                        classification.confidence =
-                            (conf * 0.7 + classification.confidence * 0.3).clamp(0.0, 1.0);
+                        // Same floor as `adaptive_override`: a model that is not
+                        // meaningfully better than chance must not rewrite the
+                        // signal classifier's presence verdict. MEASURED: with
+                        // this gate missing here (the function above was already
+                        // gated), the stale 41.5% model kept an empty room at
+                        // `present_still`/`estimated_persons: 1`.
+                        if model.training_accuracy < ADAPTIVE_MIN_ACCURACY
+                            || conf < ADAPTIVE_MIN_CONFIDENCE
+                        {
+                            debug!(
+                                node_id = frame.node_id,
+                                training_accuracy = model.training_accuracy,
+                                confidence = conf,
+                                label,
+                                "adaptive classifier is below the override floor; keeping the signal classification"
+                            );
+                        } else {
+                            classification.motion_level = label.to_string();
+                            classification.presence = label != "absent";
+                            classification.confidence =
+                                (conf * 0.7 + classification.confidence * 0.3).clamp(0.0, 1.0);
+                        }
                     }
 
                     ns.rssi_history.push_back(features.mean_rssi);
@@ -11499,6 +11643,7 @@ async fn main() {
         debounce_candidate: "absent".to_string(),
         baseline_motion: 0.0,
         baseline_frames: 0,
+        motion_noise_floor: 0.0,
         smoothed_hr: 0.0,
         smoothed_br: 0.0,
         smoothed_hr_conf: 0.0,
@@ -11523,11 +11668,23 @@ async fn main() {
             adaptive_classifier::AdaptiveModel::load(&adaptive_classifier::model_path())
                 .ok()
                 .inspect(|m| {
-                    info!(
-                        "Loaded adaptive classifier: {} frames, {:.1}% accuracy",
-                        m.trained_frames,
-                        m.training_accuracy * 100.0
-                    );
+                    if m.training_accuracy < ADAPTIVE_MIN_ACCURACY {
+                        warn!(
+                            "Loaded adaptive classifier: {} frames, {:.1}% training accuracy — BELOW the {:.0}% \
+                             floor, so it will NOT override the signal classifier's presence/level. Retrain or \
+                             quarantine {}.",
+                            m.trained_frames,
+                            m.training_accuracy * 100.0,
+                            ADAPTIVE_MIN_ACCURACY * 100.0,
+                            adaptive_classifier::model_path().display(),
+                        );
+                    } else {
+                        info!(
+                            "Loaded adaptive classifier: {} frames, {:.1}% accuracy",
+                            m.trained_frames,
+                            m.training_accuracy * 100.0
+                        );
+                    }
                 }),
         node_states: HashMap::new(),
         room_debounced_level: "absent".to_string(),

@@ -199,6 +199,28 @@ async function startCamera() {
   }
 }
 
+/**
+ * Draw the explicit "no pose" state on the skeleton canvas.
+ *
+ * An empty room used to keep a full skeleton on screen because the pose path ran
+ * unconditionally; saying EMPTY is the honest output, and it is also what makes
+ * an occupancy regression visible at a glance.
+ */
+function drawNoPose(ctx, canvas, serverPresence) {
+  ctx.save();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const empty = serverPresence === 'absent';
+  ctx.fillStyle = empty ? 'rgba(255,176,32,0.9)' : 'rgba(150,150,150,0.75)';
+  ctx.font = '600 15px "JetBrains Mono", ui-monospace, monospace';
+  ctx.fillText(empty ? 'EMPTY — NO PRESENCE' : 'NO POSE DATA', canvas.width / 2, canvas.height / 2 - 8);
+  ctx.font = '11px "JetBrains Mono", ui-monospace, monospace';
+  ctx.fillText(empty ? 'server room verdict: absent' : 'waiting for a presence verdict',
+               canvas.width / 2, canvas.height / 2 + 12);
+  ctx.restore();
+}
+
 function updateModeUI() {
   const needsVideo = mode !== 'csi';
 
@@ -323,15 +345,49 @@ function mainLoop(timestamp) {
     isLive: csiSimulator.isLive
   };
 
-  const keypoints = poseDecoder.decode(fusedEmb, motionRegion, elapsed, csiState);
+  // --- Presence gate ---
+  // The server's room verdict (ADR-297) has authority over the pose: an empty
+  // room must not render a skeleton. Without this, the through-wall branch keeps
+  // coasting on the last body state while the CSI presence estimate is stale.
+  const serverAbsent = csiSimulator.serverPresence === 'absent';
+  let keypoints = [];
+  if (serverAbsent) {
+    poseDecoder.clearTrack();
+  } else {
+    keypoints = poseDecoder.decode(fusedEmb, motionRegion, elapsed, csiState);
+  }
 
   // --- Render Skeleton ---
   const labelMap = { dual: 'DUAL FUSION', video: 'VIDEO ONLY', csi: 'CSI ONLY' };
-  renderer.drawSkeleton(skeletonCtx, keypoints, skeletonCanvas.width, skeletonCanvas.height, {
-    minConfidence: confidenceThreshold,
-    color: mode === 'csi' ? 'amber' : 'green',
-    label: labelMap[mode]
-  });
+  if (keypoints && keypoints.length > 0) {
+    renderer.drawSkeleton(skeletonCtx, keypoints, skeletonCanvas.width, skeletonCanvas.height, {
+      minConfidence: confidenceThreshold,
+      color: mode === 'csi' ? 'amber' : 'green',
+      label: labelMap[mode]
+    });
+  } else {
+    drawNoPose(skeletonCtx, skeletonCanvas, csiSimulator.serverPresence);
+  }
+
+  // --- Presence readout ---
+  const presenceEl = document.getElementById('presence-value');
+  const presenceSrcEl = document.getElementById('presence-source');
+  if (presenceEl) {
+    const verdict = csiSimulator.serverPresence;
+    if (verdict === 'absent') {
+      presenceEl.textContent = 'EMPTY';
+      presenceEl.style.color = 'var(--amber)';
+      if (presenceSrcEl) presenceSrcEl.textContent = 'server: no presence';
+    } else if (verdict) {
+      const n = csiSimulator.serverPersons || 1;
+      presenceEl.textContent = n > 1 ? `PRESENT · ${n}` : 'PRESENT';
+      presenceEl.style.color = 'var(--green-glow)';
+      if (presenceSrcEl) presenceSrcEl.textContent = `server: ${verdict}`;
+    } else {
+      presenceEl.textContent = '--';
+      if (presenceSrcEl) presenceSrcEl.textContent = 'awaiting live frames';
+    }
+  }
 
   // --- Render Embedding Space ---
   const embPoints = fusionEngine.getEmbeddingPoints();
