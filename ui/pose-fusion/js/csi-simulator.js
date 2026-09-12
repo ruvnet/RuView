@@ -8,6 +8,9 @@
  * matching the ADR-018 frame format expectations.
  */
 
+import { reconnectState, scheduleReconnect, cancelReconnect, reconnectSucceeded }
+  from '../../services/ws-reconnect.js';
+
 export class CsiSimulator {
   static VERSION = 'v4-drift';  // Cache-bust verification
 
@@ -38,6 +41,10 @@ export class CsiSimulator {
     this.rssiDbm = -70; // default mid-range
     this._rssiTarget = -70;
 
+    // Reconnect bookkeeping (see ui/services/ws-reconnect.js).
+    Object.assign(this, reconnectState());
+    this._liveUrl = null;
+
     // Server presence verdict, kept verbatim for the display and for gating the
     // CSI-only pose. `null` until the server reports a classification, which is
     // the demo case.
@@ -56,6 +63,7 @@ export class CsiSimulator {
    * @param {string} url - WebSocket URL (e.g. ws://localhost:3030/ws/csi)
    */
   async connectLive(url) {
+    this._liveUrl = url;
     return new Promise((resolve) => {
       try {
         this.ws = new WebSocket(url);
@@ -68,8 +76,15 @@ export class CsiSimulator {
         this.ws.onopen = () => { this.socketOpen = true; resolve(true); };
         this.ws.onerror = () => resolve(false);
         this.ws.onclose = () => {
-          this.mode = 'demo'; this.verifiedFrame = false; this.socketOpen = false;
-          this.serverPresence = null; this.serverPersons = 0;
+          this.socketOpen = false;
+          this.serverPresence = null;
+          this.serverPersons = 0;
+          // Retry before giving up: a server restart must not leave this page
+          // showing SYNTHETIC until someone reloads it.
+          scheduleReconnect(this, () => { void this.connectLive(this._liveUrl); }, () => {
+            this.mode = 'demo';
+            this.verifiedFrame = false;
+          });
         };
         // Timeout after 3s
         setTimeout(() => { if (!this.socketOpen) resolve(false); }, 3000);
@@ -80,6 +95,8 @@ export class CsiSimulator {
   }
 
   disconnect() {
+    cancelReconnect(this);
+    this._liveUrl = null;
     if (this.ws) { this.ws.close(); this.ws = null; }
     this.mode = 'demo';
     this.verifiedFrame = false;
@@ -316,6 +333,7 @@ export class CsiSimulator {
 
   /** ADR-295: promote from watermarked demo to live once a real frame lands. */
   _markVerifiedFrame() {
+    reconnectSucceeded(this);
     this.verifiedFrame = true;
     this.mode = 'live';
     if (typeof this.onVerifiedFrame === 'function') this.onVerifiedFrame();

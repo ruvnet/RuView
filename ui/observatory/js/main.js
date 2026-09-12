@@ -36,8 +36,14 @@ const C = {
 
 // ---- Main Class ----
 
+import { reconnectState, scheduleReconnect, cancelReconnect, reconnectSucceeded }
+  from '../../services/ws-reconnect.js';
+
 class Observatory {
   constructor() {
+    // Reconnect bookkeeping (see ui/services/ws-reconnect.js).
+    Object.assign(this, reconnectState());
+    this._candidates = null;
     this._canvas = document.getElementById('observatory-canvas');
     this.settings = { ...DEFAULTS };
 
@@ -437,40 +443,109 @@ class Observatory {
   // ---- WebSocket live data ----
 
   _autoDetectLive() {
-    // Probe sensing server health on same origin, then common ports
+    // Probe by opening a WebSocket, not by fetching `${base}/health`.
+    //
+    // MEASURED failure of the previous HTTP-probe version (bundled sensing
+    // server, three live ESP32 nodes):
+    //
+    //   6.59s  fetch OK 200 4237ms http://localhost:8080/health
+    //   7.89s  Access to fetch at 'http://localhost:8765/health' blocked by CORS policy
+    //   9.61s  [Observatory] No sensing server detected, using demo mode
+    //
+    // The same-origin `/health` did answer, but only after 4.2 s: this page
+    // blocks its main thread building the three.js/WebGL scene, and the probe's
+    // own deadline was `AbortSignal.timeout(1500)`, so the one reachable
+    // candidate was aborted before it completed. The second candidate
+    // (`:8765/health`) is CORS-blocked — that router serves /health with no
+    // CORS headers — and the third (`:3000`) is a Docker-era HTTP port that
+    // never serves a WebSocket. Every load ended in DEMO.
+    //
+    // A WebSocket handshake is not subject to CORS and completes off the main
+    // thread, so open one and require an actual frame before claiming live.
     const host = window.location.hostname || 'localhost';
-    const candidates = [
-      window.location.origin,                   // same origin (e.g. :3000)
-      `http://${host}:8765`,                     // default WS port
-      `http://${host}:3000`,                     // default HTTP port
-    ];
-    // Deduplicate
-    const unique = [...new Set(candidates)];
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    // Same HTTP -> WS mapping the other UI services use (ui/services/sensing.service.js).
+    // The bundled server serves HTTP/UI on 8080 and the sensing WebSocket on 8765;
+    // its HTTP router also answers /ws/sensing, so the page's own port is a valid
+    // second candidate. 3000 -> 3001 is the Docker image.
+    const WS_PORT_BY_HTTP_PORT = { '3000': '3001', '8080': '8765' };
+    const ports = [
+      WS_PORT_BY_HTTP_PORT[String(window.location.port)],
+      String(window.location.port),
+      '8765',
+      '3001',
+    ].filter(Boolean);
+    const candidates = [...new Set(ports.map(p => `${proto}//${host}:${p}/ws/sensing`))];
+    this._candidates = candidates;
+    void this._tryLiveCandidate(candidates, 0);
+  }
 
-    const tryNext = (i) => {
-      if (i >= unique.length) {
-        console.log('[Observatory] No sensing server detected, using demo mode');
+  /**
+   * Open `candidates[i]`, adopt it on the first real frame, else move on.
+   * A socket that opens but never delivers a frame is not live data, so the
+   * first frame — not `onopen` — is what promotes the view (ADR-295).
+   */
+  _tryLiveCandidate(candidates, i) {
+    if (i >= candidates.length) {
+      console.log('[Observatory] No sensing server detected, using demo mode');
+      return;
+    }
+    const candidate = candidates[i];
+    // ADR-272: mint a single-use ticket when the deployment has auth on; the
+    // helper returns the URL unchanged when no token is configured.
+    Promise.resolve(withWsTicket(candidate)).catch(() => candidate).then((url) => {
+      let ws;
+      try {
+        ws = new WebSocket(url);
+      } catch {
+        this._tryLiveCandidate(candidates, i + 1);
         return;
       }
-      const base = unique[i];
-      fetch(`${base}/health`, { signal: AbortSignal.timeout(1500) })
-        .then(r => r.ok ? r.json() : Promise.reject())
-        .then(data => {
-          if (data && data.status === 'ok') {
-            const wsProto = base.startsWith('https') ? 'wss:' : 'ws:';
-            const urlObj = new URL(base);
-            const wsUrl = `${wsProto}//${urlObj.host}/ws/sensing`;
-            console.log('[Observatory] Sensing server detected at', base, '→', wsUrl);
-            this.settings.dataSource = 'ws';
-            this.settings.wsUrl = wsUrl;
-            void this._connectWS(wsUrl);
-          } else {
-            tryNext(i + 1);
-          }
-        })
-        .catch(() => tryNext(i + 1));
+      let settled = false;
+      const next = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try { ws.close(); } catch { /* already gone */ }
+        this._tryLiveCandidate(candidates, i + 1);
+      };
+      const timer = setTimeout(next, 4000);
+      ws.onopen = () => console.log('[Observatory] Sensing WebSocket open at', url);
+      ws.onmessage = (evt) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reconnectSucceeded(this);
+        try { this._liveData = JSON.parse(evt.data); } catch { /* non-JSON frame */ }
+        console.log('[Observatory] Sensing server verified at', url);
+        this.settings.dataSource = 'ws';
+        this.settings.wsUrl = url;
+        this._adoptLiveSocket(ws);
+      };
+      ws.onerror = next;
+      ws.onclose = next;
+    });
+  }
+
+  /** Take ownership of a socket that has already delivered a live frame. */
+  _adoptLiveSocket(ws) {
+    this._ws = ws;
+    ws.onerror = () => {};
+    ws.onmessage = (evt) => { try { this._liveData = JSON.parse(evt.data); } catch { /* non-JSON frame */ } };
+    ws.onclose = () => {
+      this._ws = null;
+      // Retry before giving up: a server restart must not leave this page in DEMO
+      // until someone reloads it.
+      scheduleReconnect(this, () => {
+        if (this._candidates) void this._tryLiveCandidate(this._candidates, 0);
+      }, () => {
+        console.log('[Observatory] WebSocket closed, falling back to demo');
+        this._liveData = null;
+        this.settings.dataSource = 'demo';
+        this._hud.updateSourceBadge('demo', null);
+      });
     };
-    tryNext(0);
+    this._hud.updateSourceBadge('ws', ws);
   }
 
   // async: `/ws/sensing` is gated (ADR-272); mint a single-use ticket first.
@@ -479,19 +554,15 @@ class Observatory {
     let wsUrl = url;
     try { wsUrl = await withWsTicket(url); } catch { /* auth off or pre-ADR-272 server */ }
     try {
-      this._ws = new WebSocket(wsUrl);
-      this._ws.onopen = () => {
+      const ws = new WebSocket(wsUrl);
+      // _adoptLiveSocket() badges from the current readyState, which is still
+      // CONNECTING here, so re-badge once the upgrade completes.
+      ws.onopen = () => {
         console.log('[Observatory] WebSocket connected');
-        this._hud.updateSourceBadge('ws', this._ws);
+        this._hud.updateSourceBadge('ws', ws);
       };
-      this._ws.onmessage = (evt) => { try { this._liveData = JSON.parse(evt.data); } catch {} };
-      this._ws.onclose = () => {
-        console.log('[Observatory] WebSocket closed, falling back to demo');
-        this._ws = null;
-        this.settings.dataSource = 'demo';
-        this._hud.updateSourceBadge('demo', null);
-      };
-      this._ws.onerror = () => {};
+      ws.onerror = () => {};
+      this._adoptLiveSocket(ws);
     } catch {}
   }
 
@@ -716,4 +787,4 @@ class Observatory {
   }
 }
 
-new Observatory();
+window.__observatory = new Observatory();
