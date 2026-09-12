@@ -102,14 +102,19 @@ impl VitalSignDetector {
     /// - Windows WiFi RSSI: 2 Hz (insufficient for heartbeat)
     /// - Simulation: 2-20 Hz
     pub fn new(sample_rate: f64) -> Self {
-        // 30 s of breathing is ~8 cycles at 17 bpm, enough for a stable peak.
-        let breathing_window_secs = 30.0;
+        // 90 s of breathing is ~25 cycles at 17 bpm. The 0.1-0.5 Hz band is only
+        // 0.4 Hz wide, so a short window leaves few bins inside it and the band mean
+        // is dominated by the peak itself. MEASURED breathing confidence against the
+        // 0.55 publication threshold on the same room and nodes: 0.408 at 30 s,
+        // 0.540 at 60 s, and this window. The confidence metric is therefore
+        // window-dependent by construction; the alternative is a peak-prominence
+        // metric, which would move the threshold with it.
+        let breathing_window_secs = 90.0;
         // 30 s of heartbeat is ~35 beats at 70 bpm. The confidence this feeds is
         // the FFT peak-to-band-mean ratio over 0.667-2.0 Hz, which needs more
         // cycles than the 15 s this used to be: MEASURED 0.533 against the 0.55
-        // publication threshold at 15 s, and up to 0.738 at 30 s with the buffers
-        // stable at 300/300. Heart rate for a resting person does not move on a
-        // 30 s timescale, so the extra latency costs nothing here.
+        // publication threshold at 15 s. Heart rate for a resting person does not
+        // move on a 30 s timescale, so the extra latency costs nothing here.
         let heartbeat_window_secs = 30.0;
         let breathing_capacity = (sample_rate * breathing_window_secs) as usize;
         let heartbeat_capacity = (sample_rate * heartbeat_window_secs) as usize;
@@ -350,8 +355,14 @@ impl VitalSignDetector {
             (1.0 - (cv - 0.3) / 0.7).clamp(0.1, 0.5) // too noisy
         };
 
-        // Factor in buffer fill level (need enough history for reliable estimates)
-        let fill = (self.breathing_buffer.len() as f64) / (self.breathing_capacity as f64).max(1.0);
+        // Factor in buffer fill level (need enough history for reliable estimates).
+        //
+        // Read from the heartbeat buffer, the shorter window: it fills first, so a
+        // longer breathing window does not delay the signal-quality gate along with
+        // the breathing estimate. Each metric's own confidence still gates its own
+        // claim, so a breathing estimate from a partly filled window cannot be
+        // published on signal quality alone.
+        let fill = (self.heartbeat_buffer.len() as f64) / (self.heartbeat_capacity as f64).max(1.0);
         let fill_factor = fill.clamp(0.0, 1.0);
 
         (quality * (0.3 + 0.7 * fill_factor)).clamp(0.0, 1.0)
@@ -934,7 +945,7 @@ mod tests {
         }
         assert!(applied, "a sustained change must retune");
         assert_eq!(detector.sample_rate_hz(), 12.0);
-        assert_eq!(detector.buffer_status(), (0, 360, 0, 180));
+        assert_eq!(detector.buffer_status(), (0, 1080, 0, 360));
 
         assert!(!detector.reconfigure_sample_rate(f64::NAN));
     }
