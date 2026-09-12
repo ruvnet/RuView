@@ -263,13 +263,25 @@ fn try_parse_bssid_line(line: &str) -> Option<BssidId> {
     BssidId::parse(mac_str.trim()).ok()
 }
 
+/// Match a netsh field label against its English name or a localised variant.
+///
+/// Windows emits the WLAN field names in the user's display language whenever
+/// `netsh` writes to a pipe — which is exactly how [`NetshBssidScanner`]
+/// invokes it. Matching only the English label makes every field line fall
+/// through to the "unknown lines are ignored" branch on a non-English install,
+/// so `Signal` is never parsed and each observation silently degrades to the
+/// RSSI floor while still being reported as a valid BSSID.
+fn label_matches(line: &str, english: &str, localised: &[&str]) -> bool {
+    line.to_ascii_uppercase().starts_with(english)
+        || localised.iter().any(|label| line.starts_with(label))
+}
+
 /// Parse a Signal line and return the percentage value.
 ///
 /// Accepts `"Signal             : 84%"` and returns `84.0`.
 /// Also handles values without the trailing `%` sign.
 fn try_parse_signal_line(line: &str) -> Option<f64> {
-    let upper = line.to_ascii_uppercase();
-    if !upper.starts_with("SIGNAL") {
+    if !label_matches(line, "SIGNAL", &["シグナル", "信号"]) {
         return None;
     }
     let (_key, value) = split_kv(line)?;
@@ -281,8 +293,7 @@ fn try_parse_signal_line(line: &str) -> Option<f64> {
 ///
 /// Accepts `"Radio type         : 802.11ax"`.
 fn try_parse_radio_type_line(line: &str) -> Option<RadioType> {
-    let upper = line.to_ascii_uppercase();
-    if !upper.starts_with("RADIO TYPE") {
+    if !label_matches(line, "RADIO TYPE", &["無線タイプ", "無線の種類"]) {
         return None;
     }
     let (_key, value) = split_kv(line)?;
@@ -294,8 +305,7 @@ fn try_parse_radio_type_line(line: &str) -> Option<RadioType> {
 /// Accepts `"Band               : 5 GHz"` and variations such as
 /// `"2.4 GHz"` and `"6 GHz"`.
 fn try_parse_band_line(line: &str) -> Option<BandType> {
-    let upper = line.to_ascii_uppercase();
-    if !upper.starts_with("BAND") {
+    if !label_matches(line, "BAND", &["バンド", "帯域"]) {
         return None;
     }
     let (_key, value) = split_kv(line)?;
@@ -315,8 +325,7 @@ fn try_parse_band_line(line: &str) -> Option<BandType> {
 ///
 /// Accepts `"Channel            : 48"`.
 fn try_parse_channel_line(line: &str) -> Option<u8> {
-    let upper = line.to_ascii_uppercase();
-    if !upper.starts_with("CHANNEL") {
+    if !label_matches(line, "CHANNEL", &["チャネル", "チャンネル"]) {
         return None;
     }
     let (_key, value) = split_kv(line)?;
@@ -446,6 +455,78 @@ SSID 2 : NeighborNet
         assert_eq!(obs.channel, 36);
         assert_eq!(obs.band, BandType::Band5GHz);
         assert_eq!(obs.radio_type, RadioType::Ac);
+    }
+
+    // -- localised output (ja-JP) ---------------------------------------------
+
+    /// Real `netsh wlan show networks mode=bssid` output captured on a Japanese
+    /// Windows 11 install. `SSID`/`BSSID` stay ASCII but every field label is
+    /// localised, which is what makes this silently lossy rather than an error:
+    /// the field lines fall through to the "unknown lines are ignored" branch,
+    /// so each BSSID is still reported but with `signal_pct` left at 0 — i.e. a
+    /// -100 dBm floor that looks like a real (very weak) measurement.
+    ///
+    /// Note the trailing spaces after the values: netsh emits them.
+    const SAMPLE_OUTPUT_JA: &str = "\
+SSID 1 : Rakuten-2DD8
+    ネットワークの種類            : インフラストラクチャ
+    認証          : WPA3-パーソナル
+    暗号化              : CCMP
+    BSSID 1                 : 1a:e4:ce:72:7c:77
+         シグナル             : 84%
+         無線タイプ         : 802.11n
+         バンド               : 2.4 GHz
+         チャネル            : 1
+
+    BSSID 2                 : 5e:9b:49:b3:06:8e
+         シグナル             : 45%
+         無線タイプ         : 802.11ax
+         バンド               : 5 GHz
+         チャネル            : 48
+";
+
+    #[test]
+    fn parse_localised_output_yields_two_observations() {
+        let results = parse_netsh_output(SAMPLE_OUTPUT_JA).unwrap();
+        assert_eq!(results.len(), 2, "expected 2 BSSID observations");
+    }
+
+    #[test]
+    fn localised_signal_is_parsed_not_floored() {
+        let results = parse_netsh_output(SAMPLE_OUTPUT_JA).unwrap();
+        let obs = &results[0];
+
+        assert_eq!(obs.bssid.to_string(), "1a:e4:ce:72:7c:77");
+        assert_eq!(obs.ssid, "Rakuten-2DD8");
+        assert!(
+            (obs.signal_pct - 84.0).abs() < f64::EPSILON,
+            "signal_pct should be 84.0, got {} — localised 'シグナル' label was dropped",
+            obs.signal_pct
+        );
+        // pct_to_dbm(84) = 84/2 - 100 = -58. A dropped Signal line yields -100.
+        assert!(
+            (obs.rssi_dbm - (-58.0)).abs() < f64::EPSILON,
+            "rssi_dbm should be -58.0, got {} (-100.0 means the signal line was ignored)",
+            obs.rssi_dbm
+        );
+        assert_eq!(obs.channel, 1);
+        assert_eq!(obs.band, BandType::Band2_4GHz);
+        assert_eq!(obs.radio_type, RadioType::N);
+    }
+
+    #[test]
+    fn localised_second_bssid_inherits_same_ssid() {
+        let results = parse_netsh_output(SAMPLE_OUTPUT_JA).unwrap();
+        let obs = &results[1];
+
+        assert_eq!(obs.bssid.to_string(), "5e:9b:49:b3:06:8e");
+        assert_eq!(obs.ssid, "Rakuten-2DD8");
+        assert!((obs.signal_pct - 45.0).abs() < f64::EPSILON);
+        // pct_to_dbm(45) = 45/2 - 100 = -77.5
+        assert!((obs.rssi_dbm - (-77.5)).abs() < f64::EPSILON);
+        assert_eq!(obs.channel, 48);
+        assert_eq!(obs.band, BandType::Band5GHz);
+        assert_eq!(obs.radio_type, RadioType::Ax);
     }
 
     // -- empty / minimal inputs -----------------------------------------------
