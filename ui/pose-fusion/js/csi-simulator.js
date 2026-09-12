@@ -312,13 +312,35 @@ export class CsiSimulator {
 
   _handleJsonFrame(msg) {
     // Sensing server sends: { type: "sensing_update", nodes: [{ amplitude: [...], subcarrier_count }], classification, features }
+    //
+    // ADR-141 / ADR-295: a governed cycle emitted at privacy class Restricted
+    // (`/api/v1/status` -> `trust.raw_outputs_suppressed === true`) strips the
+    // per-node raw amplitude/phase proxies, so `amplitude` arrives as `[]` with
+    // `subcarrier_count: 0`. Such a frame is still live, but it carries no
+    // decodable CSI. Treating it as a verified frame caused two defects:
+    // `Array.isArray([])` is true, so `_markVerifiedFrame()` fired on an empty
+    // payload, and the live buffers were blanked to zeros on every suppressed
+    // cycle (46% of cycles on a measured 3-node ESP32 array whose fusion soft
+    // guard was 20 ms while the inter-node frame-arrival spread was ~33 ms),
+    // which made the live view read 0.00 while `isLive` was already true. Keep
+    // the last verified frame instead and only refresh the metadata.
+    const node = (msg.nodes && msg.nodes[0]) || msg;
+    const ampArr = node.amplitude || msg.amplitude;
+    const phaseArr = node.phase || msg.phase;
+    const iq = node.iq || msg.iq;
+    const hasAmplitude = Array.isArray(ampArr) && ampArr.length > 0;
+    const hasPhase = Array.isArray(phaseArr) && phaseArr.length > 0;
+    const hasIq = Array.isArray(iq) && iq.length > 0;
+    if (!hasAmplitude && !hasPhase && !hasIq) {
+      this._updateSensingMetadata(node, msg);
+      return;
+    }
+
     this._liveAmplitude = new Float32Array(this.subcarriers);
     this._livePhase = new Float32Array(this.subcarriers);
 
     // Extract amplitude from sensing_update node data
-    const node = (msg.nodes && msg.nodes[0]) || msg;
-    const ampArr = node.amplitude || msg.amplitude;
-    if (ampArr && Array.isArray(ampArr)) {
+    if (hasAmplitude) {
       const n = Math.min(ampArr.length, this.subcarriers);
       // Server sends raw amplitude (already magnitude), normalize to 0-1
       let maxAmp = 0;
@@ -332,11 +354,10 @@ export class CsiSimulator {
     }
 
     // Phase from node (if available)
-    const phaseArr = node.phase || msg.phase;
-    if (phaseArr && Array.isArray(phaseArr)) {
+    if (hasPhase) {
       const n = Math.min(phaseArr.length, this.subcarriers);
       for (let i = 0; i < n; i++) this._livePhase[i] = phaseArr[i];
-    } else if (ampArr) {
+    } else if (hasAmplitude) {
       // Synthesize phase from amplitude variation (Hilbert-like estimate)
       for (let i = 1; i < this.subcarriers; i++) {
         this._livePhase[i] = this._livePhase[i - 1] + (this._liveAmplitude[i] - this._liveAmplitude[i - 1]) * Math.PI;
@@ -344,8 +365,7 @@ export class CsiSimulator {
     }
 
     // Handle raw I/Q pairs
-    const iq = node.iq || msg.iq;
-    if (iq && Array.isArray(iq)) {
+    if (hasIq) {
       const n = Math.min(iq.length / 2, this.subcarriers);
       for (let i = 0; i < n; i++) {
         const real = iq[i * 2], imag = iq[i * 2 + 1];
@@ -354,6 +374,16 @@ export class CsiSimulator {
       }
     }
 
+    this._updateSensingMetadata(node, msg);
+  }
+
+  /**
+   * Refresh the non-CSI metadata carried by a `sensing_update`: the RSSI target
+   * and the server-side presence/confidence. Kept separate from the raw-CSI
+   * decode so a privacy-suppressed cycle can still update the display metadata
+   * without touching the last verified amplitude/phase frame.
+   */
+  _updateSensingMetadata(node, msg) {
     // Extract RSSI from node data
     if (typeof node.rssi_dbm === 'number') {
       this._rssiTarget = node.rssi_dbm;

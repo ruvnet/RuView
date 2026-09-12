@@ -4586,7 +4586,8 @@ async fn handle_ws_client(mut socket: WebSocket, state: SharedState) {
             msg = rx.recv() => {
                 match msg {
                     Ok(json) => {
-                        if socket.send(Message::Text(json)).await.is_err() {
+                        if let Err(e) = socket.send(Message::Text(json)).await {
+                            info!("sensing WS: send failed ({e}); closing");
                             break;
                         }
                     }
@@ -4595,19 +4596,41 @@ async fn handle_ws_client(mut socket: WebSocket, state: SharedState) {
                         tracing::debug!("WS client lagged by {n} frames, skipping");
                         continue;
                     }
-                    Err(_) => break, // channel closed
+                    Err(e) => {
+                        info!("sensing WS: broadcast channel closed ({e}); closing");
+                        break;
+                    }
                 }
             }
             _ = ping_interval.tick() => {
-                if socket.send(Message::Ping(vec![])).await.is_err() {
+                if let Err(e) = socket.send(Message::Ping(vec![])).await {
+                    info!("sensing WS: ping failed ({e}); closing");
                     break;
                 }
             }
             msg = socket.recv() => {
                 match msg {
-                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Close(c))) => {
+                        info!("sensing WS: client sent close {c:?}");
+                        break;
+                    }
+                    None => {
+                        info!("sensing WS: client stream ended");
+                        break;
+                    }
                     Some(Ok(Message::Pong(_))) => {} // keepalive response
-                    _ => {} // ignore other client messages
+                    Some(Ok(Message::Ping(p))) => {
+                        // Answer a client ping so a browser-side keepalive cannot
+                        // tear the stream down silently.
+                        let _ = socket.send(Message::Pong(p)).await;
+                    }
+                    Some(Ok(other)) => {
+                        tracing::debug!("sensing WS: ignoring client message {other:?}");
+                    }
+                    Some(Err(e)) => {
+                        info!("sensing WS: client error ({e}); closing");
+                        break;
+                    }
                 }
             }
         }
@@ -6023,6 +6046,11 @@ async fn health_ready(State(state): State<SharedState>) -> Json<serde_json::Valu
             "last_witness": s.engine_bridge.last_trust_witness().map(witness_hex),
             "effective_class": s.engine_bridge.effective_class().map(|c| format!("{c:?}")),
             "demoted": s.engine_bridge.demoted(),
+            // ADR-141 review finding 1c: a demoted cycle loses its per-node raw
+            // amplitude/phase proxies on the live publish. Name the trigger so a
+            // consumer is not left inferring 'broken CSI' from empty arrays.
+            "demotion_reason": s.engine_bridge.demotion_reason(),
+            "demotion_count": s.engine_bridge.demotion_count(),
             "recalibration_recommended": s.engine_bridge.recalibration_recommended(),
             "engine_error_count": s.engine_bridge.engine_error_count(),
             "raw_outputs_suppressed": s.engine_bridge.suppress_raw_outputs(),
