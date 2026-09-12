@@ -611,6 +611,22 @@ fn debounce_room_classification(state: &mut AppStateInner, raw: &RoomInference) 
 /// the fused room aggregate (its entities go stale/unavailable rather than
 /// holding a frozen online value). Mirrors the 10 s active-node filter used to
 /// assemble the nodes array.
+/// A node's vitals are only considered for publication while its newest frame
+/// is younger than this.
+const VITALS_MAX_AGE_MS: u64 = 5_000;
+
+/// How far apart two nodes' heart-rate estimates may be and still count as
+/// corroborating each other. MEASURED spread on this array when the estimates
+/// were wrong: 88.6 vs 61.6 bpm.
+const HR_AGREEMENT_TOLERANCE_BPM: f64 = 8.0;
+
+/// Same for breathing rate. MEASURED agreement on this array: 8.4 vs 11.1 bpm.
+const BREATHING_AGREEMENT_TOLERANCE_BPM: f64 = 3.0;
+
+/// Minimum number of concurring reporters. One reporter has nothing to contradict
+/// it; two or more must agree.
+const MIN_AGREEING_NODES: usize = 2;
+
 /// Silence from the bound calibration source, in seconds, after which a
 /// collecting calibration is reported as stalled. At the 10-25 Hz these nodes
 /// deliver on their bound grid, five seconds of nothing means the grid is gone.
@@ -5949,6 +5965,219 @@ fn assess_legacy_image_pose(state: &mut AppStateInner, update: &SensingUpdate) {
     }
 }
 
+/// Per-metric best evidence across the fresh nodes.
+///
+/// `s.latest_vitals` used to be assigned by every node in turn, so the published
+/// vitals were the *last writer's* rather than the best available. MEASURED with
+/// the empty-room calibration in place: node 1 reported `heartbeat_confidence`
+/// 0.533 and node 3 reported 0.423 against a 0.55 publication threshold, so which
+/// node delivered the last frame decided whether any vitals were published at all.
+///
+/// Breathing and heart rate are each taken from the node with the strongest
+/// evidence for that metric, restricted to nodes whose newest frame is fresh.
+/// Returns `None` when no fresh node reports either metric, so the caller can
+/// keep the frame-local value.
+fn best_vitals_across_nodes(nodes: &HashMap<u8, NodeState>) -> Option<VitalSigns> {
+    let now = std::time::Instant::now();
+    let max_age = Duration::from_millis(VITALS_MAX_AGE_MS);
+
+    let mut breathing_reports: Vec<(f64, f64)> = Vec::new(); // (confidence, rate)
+    let mut heartbeat_reports: Vec<(f64, f64)> = Vec::new();
+    let mut signal_quality = 0.0f64;
+
+    for node in nodes.values() {
+        let fresh = node
+            .last_frame_time
+            .is_some_and(|seen| now.saturating_duration_since(seen) < max_age);
+        if !fresh {
+            continue;
+        }
+        let vitals = &node.latest_vitals;
+        if let Some(rate) = vitals.breathing_rate_bpm {
+            breathing_reports.push((vitals.breathing_confidence, rate));
+        }
+        if let Some(rate) = vitals.heart_rate_bpm {
+            heartbeat_reports.push((vitals.heartbeat_confidence, rate));
+        }
+        signal_quality = signal_quality.max(vitals.signal_quality);
+    }
+
+    let breathing = corroborate(breathing_reports, BREATHING_AGREEMENT_TOLERANCE_BPM);
+    let heartbeat = corroborate(heartbeat_reports, HR_AGREEMENT_TOLERANCE_BPM);
+
+    if breathing.is_none() && heartbeat.is_none() {
+        return None;
+    }
+    Some(VitalSigns {
+        breathing_rate_bpm: breathing.map(|(_, rate)| rate),
+        heart_rate_bpm: heartbeat.map(|(_, rate)| rate),
+        breathing_confidence: breathing.map_or(0.0, |(confidence, _)| confidence),
+        heartbeat_confidence: heartbeat.map_or(0.0, |(confidence, _)| confidence),
+        signal_quality,
+    })
+}
+
+/// Reduce per-node reports for one metric to a corroborated estimate.
+///
+/// Returns `(confidence, rate)` of the strongest reporter inside the largest
+/// agreeing group, or `None` when the reporters contradict each other. A single
+/// reporter is returned as-is: there is nothing to contradict it.
+fn corroborate(mut reports: Vec<(f64, f64)>, tolerance_bpm: f64) -> Option<(f64, f64)> {
+    if reports.is_empty() {
+        return None;
+    }
+    if reports.len() < MIN_AGREEING_NODES {
+        return reports.pop();
+    }
+    // Largest group of reports that agree with one another, then the strongest
+    // member of it. Deterministic: ties broken by the higher confidence, then by
+    // the lower rate, so the result never depends on iteration order.
+    let mut best: Option<Vec<(f64, f64)>> = None;
+    for anchor in &reports {
+        let group: Vec<(f64, f64)> = reports
+            .iter()
+            .copied()
+            .filter(|(_, rate)| (rate - anchor.1).abs() <= tolerance_bpm)
+            .collect();
+        let better = match &best {
+            None => true,
+            Some(current) => {
+                group.len() > current.len()
+                    || (group.len() == current.len()
+                        && group
+                            .iter()
+                            .copied()
+                            .fold(f64::NEG_INFINITY, |m, (c, _)| m.max(c))
+                            > current
+                                .iter()
+                                .copied()
+                                .fold(f64::NEG_INFINITY, |m, (c, _)| m.max(c)))
+            }
+        };
+        if better {
+            best = Some(group);
+        }
+    }
+    let group = best?;
+    if group.len() < MIN_AGREEING_NODES {
+        return None;
+    }
+    group
+        .into_iter()
+        .max_by(|a, b| {
+            a.0.total_cmp(&b.0)
+                .then_with(|| b.1.total_cmp(&a.1))
+        })
+}
+
+#[cfg(test)]
+mod best_vitals_tests {
+    use super::*;
+
+    fn node_with(vitals: VitalSigns, age_ms: u64) -> NodeState {
+        let mut node = NodeState::new();
+        node.last_frame_time =
+            Some(std::time::Instant::now() - Duration::from_millis(age_ms));
+        node.latest_vitals = vitals;
+        node
+    }
+
+    fn vitals(br: Option<f64>, br_c: f64, hr: Option<f64>, hr_c: f64, q: f64) -> VitalSigns {
+        VitalSigns {
+            breathing_rate_bpm: br,
+            heart_rate_bpm: hr,
+            breathing_confidence: br_c,
+            heartbeat_confidence: hr_c,
+            signal_quality: q,
+        }
+    }
+
+    /// Two nodes that agree: each metric comes from the stronger reporter.
+    #[test]
+    fn takes_the_strongest_evidence_per_metric_when_nodes_agree() {
+        let mut nodes: HashMap<u8, NodeState> = HashMap::new();
+        nodes.insert(1, node_with(vitals(Some(18.71), 0.378, Some(70.33), 0.533, 0.432), 0));
+        nodes.insert(3, node_with(vitals(Some(17.45), 0.239, Some(72.00), 0.423, 0.500), 0));
+
+        let best = best_vitals_across_nodes(&nodes).expect("both nodes are fresh");
+        assert_eq!(best.breathing_rate_bpm, Some(18.71), "breathing from the stronger node");
+        assert_eq!(best.heart_rate_bpm, Some(70.33), "heart rate from the stronger node");
+        assert!((best.breathing_confidence - 0.378).abs() < 1e-9);
+        assert!((best.heartbeat_confidence - 0.533).abs() < 1e-9);
+        assert!(
+            (best.signal_quality - 0.500).abs() < 1e-9,
+            "signal quality is the best available regardless of which node wins a metric"
+        );
+    }
+
+    /// The MEASURED contradiction on this array: two fresh nodes reporting stable
+    /// heart rates 27 bpm apart. A sharp spectral peak is not proof of a cardiac
+    /// peak, so the contradicted metric must not be published — while breathing,
+    /// whose reporters agree, still is.
+    #[test]
+    fn suppresses_a_metric_the_nodes_contradict() {
+        let mut nodes: HashMap<u8, NodeState> = HashMap::new();
+        nodes.insert(1, node_with(vitals(Some(8.4), 0.416, Some(88.6), 0.738, 0.443), 0));
+        nodes.insert(3, node_with(vitals(Some(11.1), 0.300, Some(61.6), 0.577, 0.500), 0));
+
+        let best = best_vitals_across_nodes(&nodes).expect("both nodes are fresh");
+        assert_eq!(
+            best.heart_rate_bpm, None,
+            "88.6 vs 61.6 bpm is a contradiction, whatever the peak confidence says"
+        );
+        assert_eq!(best.heartbeat_confidence, 0.0);
+        assert_eq!(best.breathing_rate_bpm, Some(8.4), "2.7 bpm apart is agreement");
+        assert!((best.breathing_confidence - 0.416).abs() < 1e-9);
+    }
+
+    /// A lone strong outlier does not outvote reporters that agree with each other.
+    #[test]
+    fn a_lone_outlier_does_not_win() {
+        let picked = corroborate(vec![(0.95, 150.0), (0.30, 60.0), (0.25, 61.0)], 8.0)
+            .expect("two reporters agree");
+        assert_eq!(picked.1, 60.0);
+        assert!((picked.0 - 0.30).abs() < 1e-9);
+    }
+
+    /// With a single reporter there is nothing to contradict it.
+    #[test]
+    fn a_single_reporter_publishes() {
+        assert_eq!(corroborate(vec![(0.2, 70.0)], 8.0), Some((0.2, 70.0)));
+        assert_eq!(corroborate(Vec::new(), 8.0), None);
+    }
+
+    #[test]
+    fn ignores_stale_nodes_and_reports_none_without_evidence() {
+        let mut nodes: HashMap<u8, NodeState> = HashMap::new();
+        nodes.insert(
+            2,
+            node_with(vitals(Some(12.0), 0.9, Some(60.0), 0.9, 0.9), VITALS_MAX_AGE_MS + 1_000),
+        );
+        assert!(
+            best_vitals_across_nodes(&nodes).is_none(),
+            "a stale node must not publish, however confident it was"
+        );
+
+        nodes.insert(4, node_with(VitalSigns::default(), 0));
+        assert!(
+            best_vitals_across_nodes(&nodes).is_none(),
+            "a fresh node with no estimate is not evidence"
+        );
+    }
+
+    /// A fresh node with only one metric still publishes that metric.
+    #[test]
+    fn publishes_a_single_metric_when_that_is_all_there_is() {
+        let mut nodes: HashMap<u8, NodeState> = HashMap::new();
+        nodes.insert(5, node_with(vitals(None, 0.0, Some(64.0), 0.61, 0.45), 0));
+        let best = best_vitals_across_nodes(&nodes).expect("one metric is enough");
+        assert_eq!(best.heart_rate_bpm, Some(64.0));
+        assert_eq!(best.breathing_rate_bpm, None);
+        assert_eq!(best.breathing_confidence, 0.0);
+        assert!((best.heartbeat_confidence - 0.61).abs() < 1e-9);
+    }
+}
+
 fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
     let cls = &update.classification;
     if !cls.presence {
@@ -9770,7 +9999,10 @@ async fn udp_receiver_task(
                     if s.rssi_history.len() > 60 {
                         s.rssi_history.pop_front();
                     }
-                    s.latest_vitals = vitals.clone();
+                    // Publish the best per-metric evidence among fresh nodes; fall
+                    // back to this frame's own estimate when no node qualifies.
+                    s.latest_vitals = best_vitals_across_nodes(&s.node_states)
+                        .unwrap_or_else(|| vitals.clone());
 
                     // Cross-node fusion: combine features from all active nodes.
                     let fused_features = fuse_multi_node_features(&features, &s.node_states);

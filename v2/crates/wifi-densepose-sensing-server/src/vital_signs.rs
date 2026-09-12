@@ -102,8 +102,15 @@ impl VitalSignDetector {
     /// - Windows WiFi RSSI: 2 Hz (insufficient for heartbeat)
     /// - Simulation: 2-20 Hz
     pub fn new(sample_rate: f64) -> Self {
+        // 30 s of breathing is ~8 cycles at 17 bpm, enough for a stable peak.
         let breathing_window_secs = 30.0;
-        let heartbeat_window_secs = 15.0;
+        // 30 s of heartbeat is ~35 beats at 70 bpm. The confidence this feeds is
+        // the FFT peak-to-band-mean ratio over 0.667-2.0 Hz, which needs more
+        // cycles than the 15 s this used to be: MEASURED 0.533 against the 0.55
+        // publication threshold at 15 s, and up to 0.738 at 30 s with the buffers
+        // stable at 300/300. Heart rate for a resting person does not move on a
+        // 30 s timescale, so the extra latency costs nothing here.
+        let heartbeat_window_secs = 30.0;
         let breathing_capacity = (sample_rate * breathing_window_secs) as usize;
         let heartbeat_capacity = (sample_rate * heartbeat_window_secs) as usize;
 
