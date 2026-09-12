@@ -1886,6 +1886,11 @@ struct AppStateInner {
     /// EMA of `|raw_motion - baseline_motion|`: the quiet-room jitter scale used
     /// to decide whether a motion score is presence or noise.
     motion_noise_floor: f64,
+    /// Occupancy after the dwell filter — what the API and the gate read.
+    stable_occupancy: usize,
+    /// Candidate occupancy change and when it was first seen (dwell filter).
+    occupancy_candidate: usize,
+    occupancy_candidate_since: Option<std::time::Instant>,
     // ── Vital signs smoothing ────────────────────────────────────────────
     /// EMA-smoothed heart rate (BPM).
     smoothed_hr: f64,
@@ -2280,6 +2285,37 @@ impl AppStateInner {
     /// "esp32:offline" so the UI can distinguish active vs stale connections.
     /// Person count: eigenvalue-based if field model is calibrated, else heuristic.
     /// Uses global frame_history if populated, otherwise the freshest per-node history.
+    /// Report occupancy through a dwell filter.
+    ///
+    /// `person_count_at` is a per-call estimate of a slowly changing quantity, so
+    /// its noise reaches every consumer. A change must persist for
+    /// `OCCUPANCY_DWELL_MS` before it is reported, which removes the 0 <-> 1
+    /// flicker MEASURED in a still room while still registering a person who walks
+    /// in within a couple of seconds.
+    fn observe_occupancy(&mut self, raw: usize, now: std::time::Instant) -> usize {
+        if raw == self.stable_occupancy {
+            self.occupancy_candidate = raw;
+            self.occupancy_candidate_since = None;
+            return self.stable_occupancy;
+        }
+        match self.occupancy_candidate_since {
+            Some(since)
+                if self.occupancy_candidate == raw
+                    && now.saturating_duration_since(since)
+                        >= Duration::from_millis(OCCUPANCY_DWELL_MS) =>
+            {
+                self.stable_occupancy = raw;
+                self.occupancy_candidate_since = None;
+            }
+            Some(_) if self.occupancy_candidate == raw => {}
+            _ => {
+                self.occupancy_candidate = raw;
+                self.occupancy_candidate_since = Some(now);
+            }
+        }
+        self.stable_occupancy
+    }
+
     fn person_count_at(&self, observed_at_unix_ms: u64) -> usize {
         // A persisted bootstrap model has negative-only authority. Its only
         // allowed occupancy effect is the explicit empty-background suppression
@@ -2479,6 +2515,9 @@ impl AppStateInner {
             baseline_motion: 0.0,
             baseline_frames: 0,
             motion_noise_floor: 0.0,
+            stable_occupancy: 0,
+            occupancy_candidate: 0,
+            occupancy_candidate_since: None,
             smoothed_hr: 0.0,
             smoothed_br: 0.0,
             smoothed_hr_conf: 0.0,
@@ -3651,6 +3690,33 @@ const PRESENT_MOVING_THRESHOLD: f64 = 0.12;
 /// Fixed floor of the `active` threshold.
 const ACTIVE_THRESHOLD: f64 = 0.25;
 
+/// A node's vitals are only considered for publication while its newest frame
+/// is younger than this.
+const VITALS_MAX_AGE_MS: u64 = 5_000;
+
+/// How long an occupancy change must persist before it is reported. MEASURED with
+/// a person sitting still: the eigenvalue estimate flipped between 0 and 1 every
+/// few seconds, which made vitals publication intermittent and the presence
+/// display flicker. Two seconds still registers a person walking in promptly.
+const OCCUPANCY_DWELL_MS: u64 = 2_000;
+
+/// How far apart two nodes' heart-rate estimates may be and still count as
+/// corroborating each other. MEASURED spread on this array when the estimates
+/// were wrong: 88.6 vs 61.6 bpm.
+const HR_AGREEMENT_TOLERANCE_BPM: f64 = 8.0;
+
+/// Same for breathing rate. MEASURED agreement on this array: 8.4 vs 11.1 bpm.
+const BREATHING_AGREEMENT_TOLERANCE_BPM: f64 = 3.0;
+
+/// Minimum number of concurring reporters. One reporter has nothing to contradict
+/// it; two or more must agree.
+const MIN_AGREEING_NODES: usize = 2;
+
+/// Silence from the bound calibration source, in seconds, after which a
+/// collecting calibration is reported as stalled. At the 10-25 Hz these nodes
+/// deliver on their bound grid, five seconds of nothing means the grid is gone.
+const CALIBRATION_STALL_SECS: f64 = 5.0;
+
 /// Minimum training accuracy for the adaptive classifier to override the signal
 /// classifier. The label set, so ~0.33 is chance.
 const ADAPTIVE_MIN_ACCURACY: f64 = 0.60;
@@ -4771,7 +4837,8 @@ async fn handle_ws_client(mut socket: WebSocket, state: SharedState) {
             msg = rx.recv() => {
                 match msg {
                     Ok(json) => {
-                        if socket.send(Message::Text(json)).await.is_err() {
+                        if let Err(e) = socket.send(Message::Text(json)).await {
+                            info!("sensing WS: send failed ({e}); closing");
                             break;
                         }
                     }
@@ -4780,19 +4847,41 @@ async fn handle_ws_client(mut socket: WebSocket, state: SharedState) {
                         tracing::debug!("WS client lagged by {n} frames, skipping");
                         continue;
                     }
-                    Err(_) => break, // channel closed
+                    Err(e) => {
+                        info!("sensing WS: broadcast channel closed ({e}); closing");
+                        break;
+                    }
                 }
             }
             _ = ping_interval.tick() => {
-                if socket.send(Message::Ping(vec![])).await.is_err() {
+                if let Err(e) = socket.send(Message::Ping(vec![])).await {
+                    info!("sensing WS: ping failed ({e}); closing");
                     break;
                 }
             }
             msg = socket.recv() => {
                 match msg {
-                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Close(c))) => {
+                        info!("sensing WS: client sent close {c:?}");
+                        break;
+                    }
+                    None => {
+                        info!("sensing WS: client stream ended");
+                        break;
+                    }
                     Some(Ok(Message::Pong(_))) => {} // keepalive response
-                    _ => {} // ignore other client messages
+                    Some(Ok(Message::Ping(p))) => {
+                        // Answer a client ping so a browser-side keepalive cannot
+                        // tear the stream down silently.
+                        let _ = socket.send(Message::Pong(p)).await;
+                    }
+                    Some(Ok(other)) => {
+                        tracing::debug!("sensing WS: ignoring client message {other:?}");
+                    }
+                    Some(Err(e)) => {
+                        info!("sensing WS: client error ({e}); closing");
+                        break;
+                    }
                 }
             }
         }
@@ -6061,16 +6150,226 @@ fn assess_legacy_image_pose(state: &mut AppStateInner, update: &SensingUpdate) {
     }
 }
 
+/// Per-metric best evidence across the fresh nodes.
+///
+/// `s.latest_vitals` used to be assigned by every node in turn, so the published
+/// vitals were the *last writer's* rather than the best available. MEASURED with
+/// the empty-room calibration in place: node 1 reported `heartbeat_confidence`
+/// 0.533 and node 3 reported 0.423 against a 0.55 publication threshold, so which
+/// node delivered the last frame decided whether any vitals were published at all.
+///
+/// Breathing and heart rate are each taken from the node with the strongest
+/// evidence for that metric, restricted to nodes whose newest frame is fresh.
+/// Returns `None` when no fresh node reports either metric, so the caller can
+/// keep the frame-local value.
+fn best_vitals_across_nodes(nodes: &HashMap<u8, NodeState>) -> Option<VitalSigns> {
+    let now = std::time::Instant::now();
+    let max_age = Duration::from_millis(VITALS_MAX_AGE_MS);
+
+    let mut breathing_reports: Vec<(f64, f64)> = Vec::new(); // (confidence, rate)
+    let mut heartbeat_reports: Vec<(f64, f64)> = Vec::new();
+    let mut signal_quality = 0.0f64;
+
+    for node in nodes.values() {
+        let fresh = node
+            .last_frame_time
+            .is_some_and(|seen| now.saturating_duration_since(seen) < max_age);
+        if !fresh {
+            continue;
+        }
+        let vitals = &node.latest_vitals;
+        if let Some(rate) = vitals.breathing_rate_bpm {
+            breathing_reports.push((vitals.breathing_confidence, rate));
+        }
+        if let Some(rate) = vitals.heart_rate_bpm {
+            heartbeat_reports.push((vitals.heartbeat_confidence, rate));
+        }
+        signal_quality = signal_quality.max(vitals.signal_quality);
+    }
+
+    let breathing = corroborate(breathing_reports, BREATHING_AGREEMENT_TOLERANCE_BPM);
+    let heartbeat = corroborate(heartbeat_reports, HR_AGREEMENT_TOLERANCE_BPM);
+
+    if breathing.is_none() && heartbeat.is_none() {
+        return None;
+    }
+    Some(VitalSigns {
+        breathing_rate_bpm: breathing.map(|(_, rate)| rate),
+        heart_rate_bpm: heartbeat.map(|(_, rate)| rate),
+        breathing_confidence: breathing.map_or(0.0, |(confidence, _)| confidence),
+        heartbeat_confidence: heartbeat.map_or(0.0, |(confidence, _)| confidence),
+        signal_quality,
+    })
+}
+
+#[cfg(test)]
+mod best_vitals_tests {
+    use super::*;
+
+    fn node_with(vitals: VitalSigns, age_ms: u64) -> NodeState {
+        let mut node = NodeState::new();
+        node.last_frame_time =
+            Some(std::time::Instant::now() - Duration::from_millis(age_ms));
+        node.latest_vitals = vitals;
+        node
+    }
+
+    fn vitals(br: Option<f64>, br_c: f64, hr: Option<f64>, hr_c: f64, q: f64) -> VitalSigns {
+        VitalSigns {
+            breathing_rate_bpm: br,
+            heart_rate_bpm: hr,
+            breathing_confidence: br_c,
+            heartbeat_confidence: hr_c,
+            signal_quality: q,
+        }
+    }
+
+    /// Two nodes that agree: each metric comes from the stronger reporter.
+    #[test]
+    fn takes_the_strongest_evidence_per_metric_when_nodes_agree() {
+        let mut nodes: HashMap<u8, NodeState> = HashMap::new();
+        nodes.insert(1, node_with(vitals(Some(18.71), 0.378, Some(70.33), 0.533, 0.432), 0));
+        nodes.insert(3, node_with(vitals(Some(17.45), 0.239, Some(72.00), 0.423, 0.500), 0));
+
+        let best = best_vitals_across_nodes(&nodes).expect("both nodes are fresh");
+        assert_eq!(best.breathing_rate_bpm, Some(18.71), "breathing from the stronger node");
+        assert_eq!(best.heart_rate_bpm, Some(70.33), "heart rate from the stronger node");
+        assert!((best.breathing_confidence - 0.378).abs() < 1e-9);
+        assert!((best.heartbeat_confidence - 0.533).abs() < 1e-9);
+        assert!(
+            (best.signal_quality - 0.500).abs() < 1e-9,
+            "signal quality is the best available regardless of which node wins a metric"
+        );
+    }
+
+    /// The MEASURED contradiction on this array: two fresh nodes reporting stable
+    /// heart rates 27 bpm apart. A sharp spectral peak is not proof of a cardiac
+    /// peak, so the contradicted metric must not be published — while breathing,
+    /// whose reporters agree, still is.
+    #[test]
+    fn suppresses_a_metric_the_nodes_contradict() {
+        let mut nodes: HashMap<u8, NodeState> = HashMap::new();
+        nodes.insert(1, node_with(vitals(Some(8.4), 0.416, Some(88.6), 0.738, 0.443), 0));
+        nodes.insert(3, node_with(vitals(Some(11.1), 0.300, Some(61.6), 0.577, 0.500), 0));
+
+        let best = best_vitals_across_nodes(&nodes).expect("both nodes are fresh");
+        assert_eq!(
+            best.heart_rate_bpm, None,
+            "88.6 vs 61.6 bpm is a contradiction, whatever the peak confidence says"
+        );
+        assert_eq!(best.heartbeat_confidence, 0.0);
+        assert_eq!(best.breathing_rate_bpm, Some(8.4), "2.7 bpm apart is agreement");
+        assert!((best.breathing_confidence - 0.416).abs() < 1e-9);
+    }
+
+    /// A lone strong outlier does not outvote reporters that agree with each other.
+    #[test]
+    fn a_lone_outlier_does_not_win() {
+        let picked = corroborate(vec![(0.95, 150.0), (0.30, 60.0), (0.25, 61.0)], 8.0)
+            .expect("two reporters agree");
+        assert_eq!(picked.1, 60.0);
+        assert!((picked.0 - 0.30).abs() < 1e-9);
+    }
+
+    /// With a single reporter there is nothing to contradict it.
+    #[test]
+    fn a_single_reporter_publishes() {
+        assert_eq!(corroborate(vec![(0.2, 70.0)], 8.0), Some((0.2, 70.0)));
+        assert_eq!(corroborate(Vec::new(), 8.0), None);
+    }
+
+    #[test]
+    fn ignores_stale_nodes_and_reports_none_without_evidence() {
+        let mut nodes: HashMap<u8, NodeState> = HashMap::new();
+        nodes.insert(
+            2,
+            node_with(vitals(Some(12.0), 0.9, Some(60.0), 0.9, 0.9), VITALS_MAX_AGE_MS + 1_000),
+        );
+        assert!(
+            best_vitals_across_nodes(&nodes).is_none(),
+            "a stale node must not publish, however confident it was"
+        );
+
+        nodes.insert(4, node_with(VitalSigns::default(), 0));
+        assert!(
+            best_vitals_across_nodes(&nodes).is_none(),
+            "a fresh node with no estimate is not evidence"
+        );
+    }
+
+    /// A fresh node with only one metric still publishes that metric.
+    #[test]
+    fn publishes_a_single_metric_when_that_is_all_there_is() {
+        let mut nodes: HashMap<u8, NodeState> = HashMap::new();
+        nodes.insert(5, node_with(vitals(None, 0.0, Some(64.0), 0.61, 0.45), 0));
+        let best = best_vitals_across_nodes(&nodes).expect("one metric is enough");
+        assert_eq!(best.heart_rate_bpm, Some(64.0));
+        assert_eq!(best.breathing_rate_bpm, None);
+        assert_eq!(best.breathing_confidence, 0.0);
+        assert!((best.heartbeat_confidence - 0.61).abs() < 1e-9);
+    }
+}
+
+/// Reduce per-node reports for one metric to a corroborated estimate.
+///
+/// Returns `(confidence, rate)` of the strongest reporter inside the largest
+/// agreeing group, or `None` when the reporters contradict each other. A single
+/// reporter is returned as-is: there is nothing to contradict it.
+fn corroborate(mut reports: Vec<(f64, f64)>, tolerance_bpm: f64) -> Option<(f64, f64)> {
+    if reports.is_empty() {
+        return None;
+    }
+    if reports.len() < MIN_AGREEING_NODES {
+        return reports.pop();
+    }
+    // Largest group of reports that agree with one another, then the strongest
+    // member of it. Ties are broken by confidence and then by the lower rate, so
+    // the result never depends on iteration order.
+    let mut best: Option<Vec<(f64, f64)>> = None;
+    for anchor in &reports {
+        let group: Vec<(f64, f64)> = reports
+            .iter()
+            .copied()
+            .filter(|(_, rate)| (rate - anchor.1).abs() <= tolerance_bpm)
+            .collect();
+        let better = match &best {
+            None => true,
+            Some(current) => {
+                let group_best = group.iter().copied().fold(f64::NEG_INFINITY, |m, (c, _)| m.max(c));
+                let current_best =
+                    current.iter().copied().fold(f64::NEG_INFINITY, |m, (c, _)| m.max(c));
+                group.len() > current.len()
+                    || (group.len() == current.len() && group_best > current_best)
+            }
+        };
+        if better {
+            best = Some(group);
+        }
+    }
+    let group = best?;
+    if group.len() < MIN_AGREEING_NODES {
+        return None;
+    }
+    group
+        .into_iter()
+        .max_by(|a, b| a.0.total_cmp(&b.0).then_with(|| b.1.total_cmp(&a.1)))
+}
+
 fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
     let cls = &update.classification;
     if !cls.presence {
         return vec![];
     }
 
-    // `estimated_persons` is `Some` only when the estimators found at least one
-    // person, so a missing count means nobody. Defaulting to one person here is
-    // how a presence false positive became a full 26-keypoint skeleton in an
-    // empty room — the pose must come from the count, never from the flag.
+    // A pose needs motion *and* an occupant. The count alone is not enough now: a
+    // still occupant is presence (the calibrated occupancy estimate sees them) but
+    // there is no motion to derive a pose from, and fabricating one is how an empty
+    // room ended up with a 26-keypoint skeleton. The count alone was not enough in
+    // the other direction either — defaulting to one person from a bare presence
+    // flag did the same thing.
+    if !cls.presence {
+        return vec![];
+    }
     let Some(person_count) = update.estimated_persons.filter(|count| *count > 0) else {
         return vec![];
     };
@@ -6213,6 +6512,11 @@ async fn health_ready(State(state): State<SharedState>) -> Json<serde_json::Valu
             "last_witness": s.engine_bridge.last_trust_witness().map(witness_hex),
             "effective_class": s.engine_bridge.effective_class().map(|c| format!("{c:?}")),
             "demoted": s.engine_bridge.demoted(),
+            // ADR-141 review finding 1c: a demoted cycle loses its per-node raw
+            // amplitude/phase proxies on the live publish. Name the trigger so a
+            // consumer is not left inferring 'broken CSI' from empty arrays.
+            "demotion_reason": s.engine_bridge.demotion_reason(),
+            "demotion_count": s.engine_bridge.demotion_count(),
             "recalibration_recommended": s.engine_bridge.recalibration_recommended(),
             "engine_error_count": s.engine_bridge.engine_error_count(),
             "raw_outputs_suppressed": s.engine_bridge.suppress_raw_outputs(),
@@ -7794,6 +8098,26 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
         || "none".to_string(),
         |status| format!("{status:?}").to_lowercase(),
     );
+    // A collection bound to a grid the node stopped emitting makes no progress
+    // and burns the whole window silently: MEASURED, 3 frames in 105 s against
+    // `min_frames: 1000` / `min_duration_s: 600`. The grid is chosen from a 20 s
+    // evidence window, and these nodes interleave 192- and 306-bin frames, so the
+    // binding can be correct when taken and wrong seconds later.
+    let stall_seconds: Option<f64> = s.calibration_grid_binding.and_then(|binding| {
+        s.node_states
+            .get(&binding.source_node_id)
+            .and_then(|node| node.field_model_latest_seen)
+            .map(|seen| now.saturating_duration_since(seen).as_secs_f64())
+    });
+    let stalled = active && stall_seconds.is_some_and(|age| age > CALIBRATION_STALL_SECS);
+    // Kept out of the `json!` body below, which is already at the macro's
+    // recursion limit.
+    let stall_hint: Option<&str> = stalled.then_some(
+        "bound calibration grid is not arriving — the node moved to a different subcarrier \
+         grid. reset and start again, preferring the eligible source with the highest measured \
+         rate_hz.",
+    );
+
     let grid_binding = s.calibration_grid_binding.map(|binding| {
         let node = s.node_states.get(&binding.source_node_id);
         let latest_seen_ms = node
@@ -7811,6 +8135,48 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
             { "active" } else { "stale" },
         })
     });
+    // Extracted from the response below: the default macro recursion limit is
+    // reached by this response's nesting, so the deepest branch lives here.
+    let bootstrap_baseline_json = s
+        .bootstrap_baseline
+        .as_ref()
+        .map(|metadata| {
+            serde_json::json!({
+                "stored": true,
+                "active": bootstrap_active,
+                "authority": metadata.authority,
+                "source_node_ids": metadata.source_node_ids,
+                "source_grid": metadata.source_grid,
+                "source_model_id": metadata.source_model_id,
+                "created_at_unix_ms": metadata.created_at_unix_ms,
+                "expires_at_unix_ms": metadata.expires_at_unix_ms,
+                "content_sha256": metadata.content_sha256,
+                "background_match": bootstrap_background_match.map(|result| serde_json::json!({
+                    "state": if result.matches_empty { "matched" } else { "changed" },
+                    "matches_empty": result.matches_empty,
+                    "score": result.score,
+                    "normalized_residual_z": result.normalized_residual_z,
+                    "maturity": result.maturity,
+                    "reliable": result.reliable,
+                    "residual_energy": result.residual_energy,
+                    "residual_energy_threshold": result.residual_energy_threshold,
+                    "window_size": result.window_size,
+                    "reference_window_count": result.reference_window_count,
+                })),
+                "calibrated_evidence_authorized": false,
+                "numeric_vitals_authorized": false,
+            })
+        })
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "stored": false,
+                "active": false,
+                "authority": "none",
+                "calibrated_evidence_authorized": false,
+                "numeric_vitals_authorized": false,
+            })
+        });
+
     Json(serde_json::json!({
         "active": active,
         "status": status,
@@ -7822,6 +8188,12 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
         "model_id": s.calibration_model_id,
         "source_node_ids": s.calibration_source_node_ids,
         "grid_binding": grid_binding,
+        // Explicit stall verdict: `true` means the bound source is not feeding the
+        // collection, so finishing this run is impossible and it should be reset
+        // and started again on the highest-rate eligible source.
+        "stalled": stalled,
+        "stall_seconds": stall_seconds,
+        "stall_hint": stall_hint,
         "last_sequence_by_node": s.calibration_last_sequences,
         "sequence_policy": "forward_only_with_bounded_udp_reorder_drop_v1",
         "reorder_window_sequences": CALIBRATION_SEQUENCE_REORDER_WINDOW,
@@ -7830,37 +8202,7 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
         "sequence_fault_node_ids": s.calibration_sequence_fault_node_ids,
         "runtime_reference": runtime_reference,
         "binding_mode": if bootstrap_active { "bootstrap_only" } else if active { "runtime" } else { "none" },
-        "bootstrap_baseline": s.bootstrap_baseline.as_ref().map(|metadata| serde_json::json!({
-            "stored": true,
-            "active": bootstrap_active,
-            "authority": metadata.authority,
-            "source_node_ids": metadata.source_node_ids,
-            "source_grid": metadata.source_grid,
-            "source_model_id": metadata.source_model_id,
-            "created_at_unix_ms": metadata.created_at_unix_ms,
-            "expires_at_unix_ms": metadata.expires_at_unix_ms,
-            "content_sha256": metadata.content_sha256,
-            "background_match": bootstrap_background_match.map(|result| serde_json::json!({
-                "state": if result.matches_empty { "matched" } else { "changed" },
-                "matches_empty": result.matches_empty,
-                "score": result.score,
-                "normalized_residual_z": result.normalized_residual_z,
-                "maturity": result.maturity,
-                "reliable": result.reliable,
-                "residual_energy": result.residual_energy,
-                "residual_energy_threshold": result.residual_energy_threshold,
-                "window_size": result.window_size,
-                "reference_window_count": result.reference_window_count,
-            })),
-            "calibrated_evidence_authorized": false,
-            "numeric_vitals_authorized": false,
-        })).unwrap_or_else(|| serde_json::json!({
-            "stored": false,
-            "active": false,
-            "authority": "none",
-            "calibrated_evidence_authorized": false,
-            "numeric_vitals_authorized": false,
-        })),
+        "bootstrap_baseline": bootstrap_baseline_json,
     }))
 }
 
@@ -8579,6 +8921,25 @@ async fn vital_signs_diagnostics_endpoint(
 
     let s = state.read().await;
     let observed_at_unix_ms = chrono::Utc::now().timestamp_millis().max(0) as u64;
+    // How many fresh nodes reported each metric, and what the publication path
+    // selected from them. A metric reported by two or more nodes is only selected
+    // when at least two agree within tolerance, so a contradiction shows up here
+    // as a reporter count above one with `null` in `selected`.
+    let (breathing_reporters, heartbeat_reporters) = s
+        .node_states
+        .values()
+        .filter(|node| {
+            node.last_frame_time.is_some_and(|seen| {
+                std::time::Instant::now().saturating_duration_since(seen)
+                    < Duration::from_millis(VITALS_MAX_AGE_MS)
+            })
+        })
+        .fold((0usize, 0usize), |(br, hr), node| {
+            (
+                br + usize::from(node.latest_vitals.breathing_rate_bpm.is_some()),
+                hr + usize::from(node.latest_vitals.heart_rate_bpm.is_some()),
+            )
+        });
     let mut nodes: Vec<serde_json::Value> = Vec::new();
     let mut node_ids: Vec<u8> = s.node_states.keys().copied().collect();
     node_ids.sort_unstable();
@@ -8616,6 +8977,18 @@ async fn vital_signs_diagnostics_endpoint(
         "person_count": s.person_count_at(observed_at_unix_ms),
         "explicit_calibration_fresh": s.explicit_calibration_fresh_at(observed_at_unix_ms),
         "gate": "vitals_for_publication requires fresh explicit calibration + exactly one occupant + qualified confidence",
+        "reporters": {
+            "breathing": breathing_reporters,
+            "heartbeat": heartbeat_reporters,
+            "rule": "a metric with two or more reporters is selected only when at least two agree within tolerance",
+        },
+        "selected": {
+            "breathing_rate_bpm": s.latest_vitals.breathing_rate_bpm,
+            "heart_rate_bpm": s.latest_vitals.heart_rate_bpm,
+            "breathing_confidence": s.latest_vitals.breathing_confidence,
+            "heartbeat_confidence": s.latest_vitals.heartbeat_confidence,
+            "signal_quality": s.latest_vitals.signal_quality,
+        },
         "nodes": nodes,
     }))
     .into_response()
@@ -9871,7 +10244,10 @@ async fn udp_receiver_task(
                     if s.rssi_history.len() > 60 {
                         s.rssi_history.pop_front();
                     }
-                    s.latest_vitals = vitals.clone();
+                    // Publish the best per-metric evidence among fresh nodes; fall
+                    // back to this frame's own estimate when no node qualifies.
+                    s.latest_vitals = best_vitals_across_nodes(&s.node_states)
+                        .unwrap_or_else(|| vitals.clone());
 
                     // Cross-node fusion: combine features from all active nodes.
                     let fused_features = fuse_multi_node_features(&features, &s.node_states);
@@ -9895,8 +10271,28 @@ async fn udp_receiver_task(
                     // A restored prior can suppress a background-only raw
                     // classification. It cannot authorize positive presence.
                     let now = std::time::Instant::now();
+                    // A fresh calibration makes the occupancy estimate the
+                    // authority on how many people are present — the only signal
+                    // that sees a still occupant, and what `person_count_at`
+                    // documents ("eigenvalue-based if field model is calibrated,
+                    // else heuristic"). MEASURED with a person sitting still:
+                    // motion_level `absent` while `person_count_at` read 1, so the
+                    // published count was `None` and every UI showed an empty room.
+                    let calibrated_occupancy = if s
+                        .explicit_calibration_fresh_at(observed_at_unix_ms)
+                    {
+                        let raw_count = s.person_count_at(observed_at_unix_ms);
+                        let occupancy_now = std::time::Instant::now();
+                        Some(s.observe_occupancy(raw_count, occupancy_now))
+                    } else {
+                        None
+                    };
+
                     let total_persons = if bootstrap_empty {
                         0
+                    } else if let Some(count) = calibrated_occupancy {
+                        s.prev_person_count = count;
+                        count
                     } else if classification.presence {
                         let dedup = s.dedup_factor;
                         let (fused, fallback_count) = multistatic_bridge::fuse_or_fallback(
@@ -11641,6 +12037,9 @@ async fn main() {
         current_motion_level: "absent".to_string(),
         debounce_counter: 0,
         debounce_candidate: "absent".to_string(),
+        stable_occupancy: 0,
+        occupancy_candidate: 0,
+        occupancy_candidate_since: None,
         baseline_motion: 0.0,
         baseline_frames: 0,
         motion_noise_floor: 0.0,

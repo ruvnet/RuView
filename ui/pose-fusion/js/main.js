@@ -157,10 +157,24 @@ function init() {
   // a safety mechanism — `onVerifiedFrame` below (issue #1557 fix) is what
   // actually prevents an unconfirmed/failed connection from ever being shown
   // as LIVE, regardless of whether this guess is right.
+  // The bundled sensing server (v2/crates/wifi-densepose-sensing-server) serves
+  // HTTP + UI on 8080 but the sensing WebSocket on 8765, so the Docker
+  // `httpPort + 1` convention alone sent this page to 8081 and the connection
+  // failed silently — leaving the watermarked SYNTHETIC view even with a live
+  // node streaming. Keep the mapping identical to the canonical UI service
+  // (`ui/services/sensing.service.js`), then fall back to the port-plus-one
+  // guess for host-port remappings this table does not know.
+  const SENSING_WS_PORT_BY_HTTP_PORT = {
+    '3000': '3001', // Docker image: UI/API 3000, sensing stream 3001.
+    '8080': '8765', // Bundled sensing server: UI/API 8080, WS 8765.
+  };
   const httpPort = Number(window.location.port);
-  const defaultWsUrl = Number.isFinite(httpPort) && httpPort > 0
-    ? `ws://${window.location.hostname}:${httpPort + 1}/ws/sensing`
-    : 'ws://localhost:8765/ws/sensing';
+  const mappedWsPort = SENSING_WS_PORT_BY_HTTP_PORT[String(window.location.port)];
+  const defaultWsUrl = mappedWsPort
+    ? `ws://${window.location.hostname}:${mappedWsPort}/ws/sensing`
+    : Number.isFinite(httpPort) && httpPort > 0
+      ? `ws://${window.location.hostname}:${httpPort + 1}/ws/sensing`
+      : 'ws://localhost:8765/ws/sensing';
   if (wsUrlInput) wsUrlInput.value = defaultWsUrl;
   // ADR-272: exchange the stored bearer for a single-use ?ticket= before the
   // upgrade — a browser cannot set an Authorization header on a WebSocket.
@@ -181,6 +195,21 @@ function init() {
       statusLabel.textContent = 'SYNTHETIC';
     }
   });
+
+  // Ask the server why vitals are (or are not) published. The sensing stream
+  // carries only the values, so the reason is a separate same-origin read — this is
+  // what lets the page distinguish "no data yet" from "withheld by the gate".
+  async function refreshVitalsStatus() {
+    try {
+      const r = await fetch('/api/v1/vital-signs', { cache: 'no-store' });
+      if (!r.ok) return;
+      const body = await r.json();
+      csiSimulator.vitalsAuthority = body.authority || null;
+      csiSimulator.vitalsReason = body.abstention_reason || null;
+    } catch { /* server restarting; the reconnect path handles the socket */ }
+  }
+  void refreshVitalsStatus();
+  setInterval(refreshVitalsStatus, 5000);
 
   // Auto-start camera for video/dual modes
   updateModeUI();
@@ -382,22 +411,62 @@ function mainLoop(timestamp) {
   }
 
   // --- Presence readout ---
+  //
+  // Presence is occupancy, not motion. A person sitting or sleeping still produces
+  // `motion_level: absent` while the calibrated occupancy estimate still sees them
+  // (MEASURED: occupancy 1, motion absent), and reading presence off the motion
+  // level alone made exactly that case display as an empty room.
   const presenceEl = document.getElementById('presence-value');
   const presenceSrcEl = document.getElementById('presence-source');
   if (presenceEl) {
-    const verdict = csiSimulator.serverPresence;
-    if (verdict === 'absent') {
+    const activity = csiSimulator.serverPresence;   // motion level, or null
+    const occupants = csiSimulator.serverPersons || 0;
+    const moving = !!activity && activity !== 'absent';
+    const occupied = occupants > 0 || moving;
+    if (activity === null && occupants === 0) {
+      presenceEl.textContent = '--';
+      presenceEl.style.color = 'var(--amber)';
+      if (presenceSrcEl) presenceSrcEl.textContent = 'awaiting live frames';
+    } else if (occupied) {
+      presenceEl.textContent = occupants > 1 ? `PRESENT · ${occupants}` : 'PRESENT';
+      presenceEl.style.color = 'var(--green-glow)';
+      if (presenceSrcEl) {
+        presenceSrcEl.textContent = moving
+          ? `moving: ${activity}`
+          : 'still — no movement';
+      }
+    } else {
       presenceEl.textContent = 'EMPTY';
       presenceEl.style.color = 'var(--amber)';
       if (presenceSrcEl) presenceSrcEl.textContent = 'server: no presence';
-    } else if (verdict) {
-      const n = csiSimulator.serverPersons || 1;
-      presenceEl.textContent = n > 1 ? `PRESENT · ${n}` : 'PRESENT';
-      presenceEl.style.color = 'var(--green-glow)';
-      if (presenceSrcEl) presenceSrcEl.textContent = `server: ${verdict}`;
-    } else {
-      presenceEl.textContent = '--';
-      if (presenceSrcEl) presenceSrcEl.textContent = 'awaiting live frames';
+    }
+  }
+
+  // --- Vitals readout ---
+  //
+  // Two numbers, or an honest abstention: the server publishes them only behind a
+  // fresh explicit calibration, exactly one occupant and qualified confidence.
+  const respEl = document.getElementById('resp-value');
+  const hrEl = document.getElementById('hr-value');
+  const vitalsNoteEl = document.getElementById('vitals-note');
+  if (respEl || hrEl) {
+    const vs = csiSimulator.vitalSigns;
+    const fmt = (v, unit, digits) =>
+      (typeof v === 'number' && isFinite(v)) ? `${v.toFixed(digits)} ${unit}` : null;
+    const resp = vs ? fmt(vs.breathing_rate_bpm, 'rpm', 1) : null;
+    const hr = vs ? fmt(vs.heart_rate_bpm, 'bpm', 0) : null;
+    if (respEl) {
+      respEl.textContent = resp || 'abstained';
+      respEl.style.color = resp ? 'var(--cyan)' : 'rgba(150,150,150,0.7)';
+    }
+    if (hrEl) {
+      hrEl.textContent = hr || 'abstained';
+      hrEl.style.color = hr ? 'var(--cyan)' : 'rgba(150,150,150,0.7)';
+    }
+    if (vitalsNoteEl) {
+      vitalsNoteEl.textContent = (resp || hr)
+        ? 'published by the sensing server'
+        : (csiSimulator.vitalsReason || 'needs a fresh calibration and exactly one occupant');
     }
   }
 
