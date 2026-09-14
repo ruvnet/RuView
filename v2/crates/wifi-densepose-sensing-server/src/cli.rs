@@ -398,3 +398,27 @@ mod tests {
         assert_eq!(args.no_semantic, vec!["sleeping", "meeting", "fall_risk"]);
     }
 }
+
+/// CLI args for the Neo4j sink (flattened into `main::Args`).
+#[derive(clap::Args, Debug, Clone)]
+pub struct Neo4jArgs {
+    /// Enable Neo4j sink for sensing event logging
+    #[arg(long, env = "RUVIEW_NEO4J")]
+    pub neo4j: bool,
+
+    /// Neo4j Bolt URL
+    #[arg(long, env = "RUVIEW_NEO4J_URL", default_value = "bolt://x1-370:7687")]
+    pub neo4j_url: String,
+
+    /// Neo4j username
+    #[arg(long, env = "RUVIEW_NEO4J_USER", default_value = "neo4j")]
+    pub neo4j_user: String,
+
+    /// Environment variable holding the Neo4j password
+    #[arg(long, default_value = "NEO4J_PASSWORD")]
+    pub neo4j_password_env: String,
+
+    /// Room identifier for the :Room node
+    #[arg(long, env = "RUVIEW_NEO4J_ROOM", default_value = "main")]
+    pub neo4j_room_name: String,
+}

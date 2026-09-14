@@ -19,6 +19,11 @@ path = "src/lib.rs"
 name = "sensing-server"
 path = "src/main.rs"
 
+[[bin]]
+name = "sensing-mcp"
+path = "src/bin/sensing-mcp.rs"
+required-features = ["neo4j", "mcp"]
+
 [dependencies]
 # Web framework
 axum = { workspace = true }
@@ -120,6 +125,12 @@ opentelemetry_sdk = { version = "0.32", default-features = false, features = ["l
 opentelemetry-otlp = { version = "0.32", default-features = false, features = ["logs", "grpc-tonic", "tls", "tls-roots"], optional = true }
 opentelemetry-appender-tracing = { version = "0.32", default-features = false, optional = true }
 
+# Neo4j Bolt driver (ADR-262+: sensing event graph persistence).
+neo4rs = { version = "0.9.0-rc.10", optional = true }
+
+# MCP server SDK (hermes agent integration — sensing data as MCP tools).
+pmcp = { version = "2", optional = true }
+
 [features]
 default = []
 # Enables OTLP log export from the `telemetry` module (dogfooding into an
@@ -135,6 +146,11 @@ mqtt = ["dep:rumqttc"]
 # matter-rs is added in P7; intentionally absent in P1 to keep the dep
 # surface small until the SDK choice is validated.
 matter = []
+# Neo4j sink — logs sensing events (pose, vitals, person count) to a Neo4j
+# graph database via Bolt protocol. Gated same as `mqtt`.
+neo4j = ["dep:neo4rs"]
+# MCP server — exposes sensing data as MCP tools for hermes agent integration.
+mcp = ["dep:pmcp"]
 
 [dev-dependencies]
 tempfile = "3.10"

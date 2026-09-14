@@ -20,6 +20,8 @@ pub mod introspection;
 pub mod matter;
 pub mod model_format;
 pub mod mqtt;
+#[cfg(feature = "neo4j")]
+pub mod neo4j_sink;
 pub mod path_safety;
 pub mod semantic;
 /// ADR-262 P3: the live RuField surface — turns the governed sensing cycle into

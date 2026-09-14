@@ -131,6 +131,10 @@ struct Args {
     #[command(flatten)]
     mqtt_opts: wifi_densepose_sensing_server::cli::MqttArgs,
 
+    /// Neo4j sink — logs sensing events to a Neo4j graph database.
+    #[command(flatten)]
+    neo4j_opts: wifi_densepose_sensing_server::cli::Neo4jArgs,
+
     /// Data source: auto, wifi, esp32, simulate
     #[arg(long, default_value = "auto")]
     source: String,
@@ -7953,6 +7957,28 @@ async fn main() {
             "--mqtt set but this binary was built without the `mqtt` feature; the publisher is a \
              no-op. Use the official Docker image (built `--features mqtt`) or rebuild with \
              `cargo build -p wifi-densepose-sensing-server --features mqtt`."
+        );
+    }
+
+    // Neo4j sink — logs every SensingUpdate to a Neo4j graph database.
+    // Same broadcast-subscriber pattern as MQTT; gated on the `neo4j` feature.
+    if args.neo4j_opts.neo4j {
+        #[cfg(feature = "neo4j")]
+        {
+            use wifi_densepose_sensing_server::neo4j_sink;
+            match neo4j_sink::Neo4jConfig::from_args(&args.neo4j_opts) {
+                Ok(ncfg) => {
+                    let rx = tx.subscribe();
+                    neo4j_sink::spawn(ncfg, rx);
+                    tracing::info!("Neo4j sink started -> {}", args.neo4j_opts.neo4j_url);
+                }
+                Err(e) => tracing::error!("Neo4j config invalid: {e}; sink not started"),
+            }
+        }
+        #[cfg(not(feature = "neo4j"))]
+        tracing::warn!(
+            "--neo4j set but this binary was built without the `neo4j` feature; the sink is a \
+             no-op. Rebuild with `cargo build -p wifi-densepose-sensing-server --features neo4j`."
         );
     }
 
