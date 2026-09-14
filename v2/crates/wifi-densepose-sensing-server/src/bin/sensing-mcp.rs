@@ -96,7 +96,7 @@ fn bolt_to_json(val: &neo4rs::BoltType) -> Value {
         BoltType::String(s) => Value::String(s.value.clone()),
         BoltType::Null(_) => Value::Null,
         BoltType::List(list) => {
-            let arr: Vec<Value> = list.value.iter().map(|v| bolt_to_json(v)).collect();
+            let arr: Vec<Value> = list.value.iter().map(bolt_to_json).collect();
             Value::Array(arr)
         }
         BoltType::Map(map) => {
@@ -110,7 +110,7 @@ fn bolt_to_json(val: &neo4rs::BoltType) -> Value {
             m.insert("_type".into(), Value::String("Node".into()));
             m.insert("_id".into(), json!(node.id.value));
             m.insert("_labels".into(), Value::Array(
-                node.labels.value.iter().map(|l| bolt_to_json(l)).collect()
+                node.labels.value.iter().map(bolt_to_json).collect()
             ));
             for (k, v) in &node.properties.value {
                 m.insert(k.value.clone(), bolt_to_json(v));

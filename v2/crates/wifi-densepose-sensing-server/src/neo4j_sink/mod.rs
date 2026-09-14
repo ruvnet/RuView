@@ -117,7 +117,7 @@ async fn run(cfg: Neo4jConfig, state_rx: &mut broadcast::Receiver<String>) -> Re
                 }
 
                 event_count += 1;
-                if event_count % 100 == 0 {
+                if event_count.is_multiple_of(100) {
                     info!(event_count, "[neo4j] events written");
                 }
             }
@@ -216,7 +216,7 @@ async fn write_event(
             let pos = person["position"]
                 .as_array()
                 .unwrap_or(&default_pos);
-            let px = pos.get(0).and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let px = pos.first().and_then(|v| v.as_f64()).unwrap_or(0.0);
             let py = pos.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0);
             let conf = person["confidence"].as_f64().unwrap_or(0.0);
             let keypoints_json = person["keypoints"].to_string();
@@ -254,7 +254,7 @@ async fn write_event(
             let pos = node["position"]
                 .as_array()
                 .unwrap_or(&default_pos);
-            let px = pos.get(0).and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let px = pos.first().and_then(|v| v.as_f64()).unwrap_or(0.0);
             let py = pos.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0);
 
             graph
