@@ -23,7 +23,7 @@ case "${1:-}" in
         case "$RUVIEW_MCP_PRIVACY_MODE" in true|false) ;; *) echo "[entrypoint] ERROR: RUVIEW_MCP_PRIVACY_MODE must be true or false" >&2; exit 64;; esac
         export RUVIEW_NEO4J_USER="$RUVIEW_MCP_NEO4J_USER"
         export RUVIEW_NEO4J_ROOM="$RUVIEW_MCP_ROOM"
-        exec /app/sensing-mcp --neo4j-user "$RUVIEW_MCP_NEO4J_USER" --neo4j-password-env "$RUVIEW_MCP_NEO4J_PASSWORD_ENV" --room "$RUVIEW_MCP_ROOM" --privacy-mode "$RUVIEW_MCP_PRIVACY_MODE" "$@"
+        exec /app/sensing-mcp --neo4j-user "$RUVIEW_MCP_NEO4J_USER" --neo4j-password-env "$RUVIEW_MCP_NEO4J_PASSWORD_ENV" --room "$RUVIEW_MCP_ROOM" "$@"
         ;;
 esac
 
