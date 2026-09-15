@@ -1,6 +1,5 @@
 {
-  "enabledMcpjsonServers": [
-    "claude-flow"
-  ],
-  "enableAllProjectMcpServers": true
+  "enabledMcpjsonServers": [],
+  "enableAllProjectMcpServers": false,
+  "hooks": {}
 }
