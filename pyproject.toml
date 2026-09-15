@@ -138,7 +138,7 @@ dev = [
     "safety>=2.3.0",
     "factory-boy>=3.3.0",
     "freezegun>=1.2.0",
-    "responses>=0.23.0",
+    "responses>=0.26.1",
 ]
 
 docs = [
