@@ -105,6 +105,17 @@ if [ "${1#-}" != "$1" ] || [ -z "$1" ]; then
         --ws-port 3001 \
         --bind-addr "${RUVIEW_BIND_ADDR:-0.0.0.0}" \
         "$@"
+
+    # Append Neo4j flags if RUVIEW_NEO4J is set.
+    if [ "${RUVIEW_NEO4J:-}" = "1" ] || [ "${RUVIEW_NEO4J:-}" = "true" ]; then
+        set -- "$@" \
+            --neo4j \
+            --neo4j-url "${RUVIEW_NEO4J_URL:-bolt://x1-370:7687}" \
+            --neo4j-user "${RUVIEW_NEO4J_USER:-neo4j}" \
+            --neo4j-password-env "${RUVIEW_NEO4J_PASSWORD_ENV:-NEO4J_PASSWORD}" \
+            --neo4j-room-name "${RUVIEW_NEO4J_ROOM:-main}" \
+            --neo4j-ttl-hours "${RUVIEW_NEO4J_TTL_HOURS:-168}"
+    fi
 fi
 
 exec "$@"
