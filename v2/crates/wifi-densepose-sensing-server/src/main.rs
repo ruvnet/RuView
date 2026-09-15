@@ -16,6 +16,7 @@ mod engine_bridge;
 mod field_bridge;
 mod field_localize;
 mod model_format;
+mod mmfi_pose;
 mod multistatic_bridge;
 mod mediatek_csi;
 mod qualcomm_csi;
@@ -203,6 +204,11 @@ struct Args {
     /// Load a trained .rvf model for inference
     #[arg(long, value_name = "PATH")]
     model: Option<PathBuf>,
+
+    /// Load the published MM-Fi Micro pose checkpoint converted to safe F32 NPZ.
+    /// Output is experimental for live ESP32 input until room validation passes.
+    #[arg(long, value_name = "PATH")]
+    pose_model: Option<PathBuf>,
 
     /// Enable progressive loading (Layer A instant start)
     #[arg(long)]
@@ -1792,6 +1798,8 @@ struct AppStateInner {
     active_sona_profile: Option<String>,
     /// Whether a trained model is loaded.
     model_loaded: bool,
+    /// Native MM-Fi Micro pose decoder (experimental live-domain adapter).
+    pose_model: Option<mmfi_pose::MmfiPoseModel>,
     /// Smoothed person count (EMA) for hysteresis — prevents frame-to-frame jumping.
     smoothed_person_score: f64,
     /// Previous person count for hysteresis (asymmetric up/down thresholds).
@@ -2395,6 +2403,7 @@ impl AppStateInner {
             progressive_loader: None,
             active_sona_profile: None,
             model_loaded: false,
+            pose_model: None,
             smoothed_person_score: 0.0,
             prev_person_count: 0,
             smoothed_motion: 0.0,
@@ -5882,12 +5891,47 @@ fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
         return vec![];
     }
 
+    // A real decoder result takes precedence over the legacy visualisation skeleton.
+    if let Some(kps) = update.pose_keypoints.as_ref().filter(|v| v.len() == 17) {
+        let names = ["nose", "left_eye", "right_eye", "left_ear", "right_ear",
+            "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+            "left_wrist", "right_wrist", "left_hip", "right_hip", "left_knee",
+            "right_knee", "left_ankle", "right_ankle"];
+        let keypoints: Vec<PoseKeypoint> = kps.iter().zip(names).map(|(p, name)| PoseKeypoint {
+            name: name.to_string(), x: p[0] * 640.0, y: p[1] * 480.0,
+            z: p[2], confidence: p[3],
+        }).collect();
+        let min_x = keypoints.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
+        let max_x = keypoints.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max);
+        let min_y = keypoints.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
+        let max_y = keypoints.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max);
+        return vec![PersonDetection { id: 1, confidence: cls.confidence, keypoints,
+            bbox: BoundingBox { x: min_x, y: min_y, width: (max_x-min_x).max(1.0),
+                height: (max_y-min_y).max(1.0) }, zone: "experimental_mmfi".into(),
+            position: [0.0; 3], motion_score: 0.0, pose: None }];
+    }
+
     // Use estimated_persons if set by the tick loop; otherwise default to 1.
     let person_count = update.estimated_persons.unwrap_or(1).max(1);
 
     (0..person_count)
         .map(|idx| derive_single_person_pose(update, idx, person_count))
         .collect()
+}
+
+fn infer_mmfi_pose(model: Option<&mmfi_pose::MmfiPoseModel>, nodes: &HashMap<u8, NodeState>,
+    now: std::time::Instant) -> Option<Vec<[f64; 4]>> {
+    let model = model?;
+    let mut active: Vec<_> = nodes.iter().filter(|(_, n)| n.frame_history.len() >= 10
+        && n.last_frame_time.is_some_and(|t| now.duration_since(t).as_secs() < 2)).collect();
+    active.sort_by_key(|(id, _)| **id);
+    if active.len() != 3 { return None; }
+    let input: Vec<Vec<Vec<f64>>> = active.into_iter()
+        .map(|(_, n)| n.frame_history.iter().cloned().collect()).collect();
+    match model.infer(&input) {
+        Ok(kps) => Some(kps.into_iter().map(|p| [p[0] as f64, p[1] as f64, 0.0, 0.5]).collect()),
+        Err(e) => { debug!("MM-Fi pose inference skipped: {e}"); None }
+    }
 }
 
 // ── RuVector Phase 2: Temporal EMA smoothing for keypoints ──────────────────
@@ -6234,9 +6278,8 @@ async fn get_active_model(State(state): State<SharedState>) -> Json<serde_json::
                 .discovered_models
                 .iter()
                 .find(|m| m.get("id").and_then(|v| v.as_str()) == Some(id.as_str()));
-            Json(serde_json::json!({
-                "active": model.cloned().unwrap_or_else(|| serde_json::json!({ "id": id })),
-            }))
+            let model = model.cloned().unwrap_or_else(|| serde_json::json!({ "id": id }));
+            Json(serde_json::json!({ "active": model, "model_id": id }))
         }
         None => Json(serde_json::json!({ "active": serde_json::Value::Null })),
     }
@@ -6256,7 +6299,29 @@ async fn load_model(
     if model_id.is_empty() {
         return Json(serde_json::json!({ "error": "missing 'id' field", "success": false }));
     }
+    let safe_id = std::path::Path::new(&model_id)
+        .file_name().and_then(|v| v.to_str()).filter(|v| *v == model_id).unwrap_or("");
+    if safe_id.is_empty() {
+        return Json(serde_json::json!({ "error": "invalid model id", "success": false }));
+    }
+    let discovered = scan_model_files();
+    let Some(info) = discovered.iter().find(|m| m.get("id").and_then(|v| v.as_str()) == Some(safe_id)) else {
+        return Json(serde_json::json!({ "error": "model not found", "success": false }));
+    };
+    let format = info.get("format").and_then(|v| v.as_str()).unwrap_or("");
+    let loaded_pose = if format == "mmfi_pose_npz" {
+        let path = effective_models_dir().join(format!("{safe_id}.npz"));
+        match mmfi_pose::MmfiPoseModel::load(&path) {
+            Ok(model) => Some(model),
+            Err(e) => {
+                error!("MM-Fi pose model NOT loaded from model manager: {e}");
+                return Json(serde_json::json!({ "error": "model load failed", "success": false }));
+            }
+        }
+    } else { None };
     let mut s = state.write().await;
+    if let Some(model) = loaded_pose { s.pose_model = Some(model); }
+    s.discovered_models = discovered;
     s.active_model_id = Some(model_id.clone());
     s.model_loaded = true;
     if telemetry::curated_events_enabled() {
@@ -6271,6 +6336,7 @@ async fn load_model(
 async fn unload_model(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let mut s = state.write().await;
     let prev = s.active_model_id.take();
+    s.pose_model = None;
     s.model_loaded = false;
     info!("Model unloaded (was: {:?})", prev);
     Json(serde_json::json!({ "success": true, "previous": prev }))
@@ -6289,8 +6355,10 @@ async fn delete_model(
     if safe_id.is_empty() || safe_id != id {
         return Json(serde_json::json!({ "error": "invalid model id", "success": false }));
     }
-    let path = effective_models_dir().join(format!("{}.rvf", safe_id));
-    if path.exists() {
+    let dir = effective_models_dir();
+    let path = [dir.join(format!("{}.rvf", safe_id)), dir.join(format!("{}.npz", safe_id))]
+        .into_iter().find(|p| p.exists());
+    if let Some(path) = path {
         if let Err(e) = std::fs::remove_file(&path) {
             // ADR-080 #2: log the OS error (incl. path) server-side only; the
             // client gets a generic body + correlation id, no leaked path.
@@ -6301,6 +6369,7 @@ async fn delete_model(
         if s.active_model_id.as_deref() == Some(id.as_str()) {
             s.active_model_id = None;
             s.model_loaded = false;
+            s.pose_model = None;
         }
         s.discovered_models
             .retain(|m| m.get("id").and_then(|v| v.as_str()) != Some(id.as_str()));
@@ -6339,7 +6408,7 @@ fn effective_models_dir() -> PathBuf {
     PathBuf::from(std::env::var("MODELS_DIR").unwrap_or_else(|_| "data/models".to_string()))
 }
 
-/// Scan the models directory for `.rvf` files and return metadata.
+/// Scan the models directory for RVF and safe F32 MM-Fi pose NPZ files.
 /// Respects the `MODELS_DIR` environment variable.
 fn scan_model_files() -> Vec<serde_json::Value> {
     let dir = effective_models_dir();
@@ -6347,7 +6416,8 @@ fn scan_model_files() -> Vec<serde_json::Value> {
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("rvf") {
+            let extension = path.extension().and_then(|e| e.to_str());
+            if matches!(extension, Some("rvf") | Some("npz")) {
                 let name = path
                     .file_stem()
                     .and_then(|s| s.to_str())
@@ -6361,12 +6431,13 @@ fn scan_model_files() -> Vec<serde_json::Value> {
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map(|d| d.as_secs())
                     .unwrap_or(0);
+                let format = if extension == Some("npz") { "mmfi_pose_npz" } else { "rvf" };
                 models.push(serde_json::json!({
                     "id": name,
                     "name": name,
                     "path": path.display().to_string(),
                     "size_bytes": size,
-                    "format": "rvf",
+                    "format": format,
                     "modified_epoch": modified,
                 }));
             }
@@ -9194,6 +9265,7 @@ async fn udp_receiver_task(
                         room_inference: Some(room_inference),
                     };
 
+                    update.pose_keypoints = infer_mmfi_pose(s.pose_model.as_ref(), &s.node_states, now);
                     let raw_persons = derive_pose_from_sensing(&update);
                     let mut last_tracker_instant = s.last_tracker_instant.take();
                     let tracked = tracker_bridge::tracker_update(
@@ -9708,6 +9780,7 @@ async fn udp_receiver_task(
                         room_inference: Some(room_inference),
                     };
 
+                    update.pose_keypoints = infer_mmfi_pose(s.pose_model.as_ref(), &s.node_states, now);
                     let raw_persons = derive_pose_from_sensing(&update);
                     let mut last_tracker_instant = s.last_tracker_instant.take();
                     let tracked = tracker_bridge::tracker_update(
@@ -11102,6 +11175,19 @@ async fn main() {
         }
     }
 
+    let pose_model = args.pose_model.as_ref().and_then(|path| {
+        match mmfi_pose::MmfiPoseModel::load(path) {
+            Ok(model) => {
+                info!("Loaded experimental MM-Fi Micro pose decoder from {}", path.display());
+                Some(model)
+            }
+            Err(e) => { error!("MM-Fi pose model NOT loaded: {e}"); None }
+        }
+    });
+    let active_pose_model_id = pose_model.as_ref().and_then(|_| {
+        args.pose_model.as_ref()?.file_stem()?.to_str().map(str::to_string)
+    });
+
     // Ensure data directories exist for models and recordings
     let models_dir = effective_models_dir();
     let _ = std::fs::create_dir_all(&models_dir);
@@ -11284,6 +11370,7 @@ async fn main() {
         progressive_loader,
         active_sona_profile: None,
         model_loaded,
+        pose_model,
         smoothed_person_score: 0.0,
         prev_person_count: 0,
         smoothed_motion: 0.0,
@@ -11302,7 +11389,7 @@ async fn main() {
         latest_wasm_events: None,
         // Model management
         discovered_models: initial_models,
-        active_model_id: None,
+        active_model_id: active_pose_model_id,
         // Recording
         recordings: initial_recordings,
         recording_active: false,

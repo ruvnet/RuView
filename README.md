@@ -221,6 +221,29 @@ huggingface-cli download ruvnet/wifi-densepose-pretrained --local-dir models/wif
 
 **Loader scope:** `--model` now accepts native RVF and auto-converts the published safetensors or JSONL files. The quantized `model-q*.bin` files still need a compatible reader, and loading weights does not supply the matching pose-decoder architecture or establish end-to-end pose accuracy.
 
+### Experimental MM-Fi pose decoder
+
+`--pose-model <path>` loads the published 75k-parameter MM-Fi Micro decoder
+from a non-executable F32 NPZ. Live inference requires exactly three active
+nodes with at least ten CSI frames each. Each node is treated as one MM-Fi
+channel and its current grid is linearly resampled to 114 bins. Outputs are
+labelled `experimental_mmfi`: this adapter is an architecture integration, not
+an accuracy claim for ESP32 hardware or a new room. Validate against reference
+poses in the deployment room before relying on its coordinates.
+The published MM-Fi checkpoint is CC BY-NC 4.0; confirm that license fits the
+deployment before distributing the weights or using them commercially.
+
+The upstream `edge/pose_micro_int4.npz` contains full weights under `f::` in
+FP16. A safe numerical conversion (no PyTorch/pickle loading) is:
+
+```python
+import numpy as np
+z = np.load("pose_micro_int4.npz", allow_pickle=False)
+np.savez("pose_micro_f32.npz", **{
+    k: z[k].astype(np.float32) for k in z.files if k.startswith("f::")
+})
+```
+
 **Quantization choices** (all in the HF repo): `model-q2.bin` (4 KB) · `model-q4.bin` ⭐ recommended (8 KB) · `model-q8.bin` (16 KB) · `model.safetensors` full (48 KB)
 
 The separate **17-keypoint pose-estimation model** is now published at [`ruvnet/wifi-densepose-mmfi-pose`](https://huggingface.co/ruvnet/wifi-densepose-mmfi-pose) — **82.69% torso-PCK@20** on MM-Fi (single model) / **83.59%** (3-model ensemble + TTA), beating the prior published SOTA MultiFormer (72.25%) and CSI2Pose (68.41%) on the matched `random_split` protocol. See **Results & proof** below.
