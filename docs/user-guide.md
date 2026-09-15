@@ -320,8 +320,10 @@ Uses `netsh wlan` to capture RSSI from nearby access points. No special hardware
 # From source (Windows only)
 ./target/release/sensing-server --source wifi --http-port 3000 --ws-port 3001 --tick-ms 500
 
-# Docker (requires --network host on Windows)
-docker run --network host ruvnet/wifi-densepose:latest --source wifi --tick-ms 500
+# Docker
+# Note: Docker Desktop on Windows does NOT support `--network host` to access native Windows WiFi adapters. 
+# Therefore, `--source wifi` will fail inside a Docker container on Windows. 
+# You MUST build from source to use Windows WiFi sensing.
 ```
 
 > **Community verified:** Tested on Windows 10 (10.0.26200) with Intel Wi-Fi 6 AX201 160MHz, Python 3.14, StormFiber 5 GHz network. All 7 tutorial steps passed with stable RSSI readings at -48 dBm. See [Tutorial #36](https://github.com/ruvnet/RuView/issues/36) for the full walkthrough and test results.
