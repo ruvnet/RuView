@@ -1274,6 +1274,10 @@ cargo run -p wifi-densepose-sensing-server --release -- \
     --source esp32 --udp-port 5005 --http-port 3000
 ```
 
+### Verifying the downloaded bundle
+
+After downloading, run [`scripts/verify-hf-model.py`](../scripts/verify-hf-model.py) to confirm the bundle is intact and the weights load cleanly. The script prints the safetensors tensor inventory (names, shapes, dtypes), parses `model.rvf.jsonl` line by line, dumps `presence-head.json` / `config.json` / `training-metrics.json`, and — when `torch` is available — pushes a synthetic batch through the first encoder linear layer to confirm no NaN / Inf. It exits 0 on success, non-zero with a clear error otherwise, and accepts `--local-dir <path>` (default `models/wifi-densepose-pretrained/`). Heads up: the published `model.safetensors` header has three trailing NUL bytes that the strict Rust loader rejects (`trailing characters at line 1 column 1462`); the script falls back to a small pure-Python reader that strips the padding so you still get the full inventory.
+
 See [RVF Model Containers](#rvf-model-containers) for the binary format the loader expects, and [Training a Model](#training-a-model) for using the encoder as a starting point for environment-specific fine-tuning.
 
 ---
