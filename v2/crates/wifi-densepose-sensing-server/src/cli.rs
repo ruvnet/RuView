@@ -421,4 +421,8 @@ pub struct Neo4jArgs {
     /// Room identifier for the :Room node
     #[arg(long, env = "RUVIEW_NEO4J_ROOM", default_value = "main")]
     pub neo4j_room_name: String,
+
+    /// TTL in hours: events older than this are deleted periodically (0 = no compaction)
+    #[arg(long, env = "RUVIEW_NEO4J_TTL_HOURS", default_value = "168")]
+    pub neo4j_ttl_hours: u64,
 }

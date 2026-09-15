@@ -377,6 +377,72 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })
     .with_description("List all rooms with sensing data");
 
+    // Tool: compaction — manually trigger TTL cleanup
+    let state_clone = state.clone();
+    let compaction = SimpleTool::new("compaction", move |args, _extra| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            let hours = args["hours"].as_u64().unwrap_or(168);
+
+            let cutoff = chrono::Utc::now() - chrono::Duration::hours(hours as i64);
+            let cutoff_str = cutoff.to_rfc3339();
+
+            // Count events to be deleted.
+            let count_results = state.query(
+                "MATCH (e:SensingEvent)
+                 WHERE datetime(e.timestamp) < datetime($cutoff)
+                 RETURN count(e) AS count",
+                vec![("cutoff", cutoff_str.clone().into())],
+            ).await?;
+            let count = count_results.first()
+                .and_then(|r| r.get("count"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+
+            if count == 0 {
+                return Ok(json!({"deleted": 0, "message": "No events older than cutoff"}));
+            }
+
+            // Delete expired events.
+            state.query(
+                "MATCH (e:SensingEvent)
+                 WHERE datetime(e.timestamp) < datetime($cutoff)
+                 OPTIONAL MATCH (r:Room)-[rel:CURRENT_EVENT]->(e)
+                 DELETE rel, e",
+                vec![("cutoff", cutoff_str.clone().into())],
+            ).await?;
+
+            // Re-point Room pointers.
+            state.query(
+                "MATCH (r:Room)
+                 WHERE NOT (r)-[:CURRENT_EVENT]->(:SensingEvent)
+                 MATCH (newest:SensingEvent)
+                 WHERE NOT ()-[:CURRENT_EVENT]->(newest)
+                 WITH r, newest
+                 ORDER BY newest.timestamp DESC
+                 LIMIT 1
+                 CREATE (r)-[:CURRENT_EVENT]->(newest)",
+                vec![],
+            ).await?;
+
+            Ok(json!({
+                "deleted": count,
+                "cutoff": cutoff_str,
+                "hours": hours,
+            }))
+        })
+    })
+    .with_description("Manually trigger TTL compaction: delete events older than N hours")
+    .with_schema(json!({
+        "type": "object",
+        "properties": {
+            "hours": {
+                "type": "integer",
+                "description": "Delete events older than this many hours (default: 168 = 7 days)"
+            }
+        }
+    }));
+
     // Build and run
     let server = Server::builder()
         .name("ruview-sensing-mcp")
@@ -387,6 +453,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .tool("room_status", room_status)
         .tool("query_cypher", query_cypher)
         .tool("rooms", rooms)
+        .tool("compaction", compaction)
         .build()?;
 
     eprintln!("[sensing-mcp] server ready on stdin/stdout");

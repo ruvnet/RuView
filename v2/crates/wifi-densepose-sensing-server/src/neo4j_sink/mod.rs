@@ -40,6 +40,8 @@ pub struct Neo4jConfig {
     pub password: String,
     /// Room identifier for the `:Room` node.
     pub room_name: String,
+    /// TTL in hours: events older than this are deleted periodically (0 = disabled).
+    pub ttl_hours: u64,
 }
 
 impl Neo4jConfig {
@@ -56,6 +58,7 @@ impl Neo4jConfig {
             user: args.neo4j_user.clone(),
             password,
             room_name: args.neo4j_room_name.clone(),
+            ttl_hours: args.neo4j_ttl_hours,
         })
     }
 }
@@ -96,7 +99,28 @@ async fn run(cfg: Neo4jConfig, state_rx: &mut broadcast::Receiver<String>) -> Re
         .await
         .map_err(|e| format!("Schema setup failed: {e}"))?;
 
+    // Create time-series index on SensingEvent.timestamp for fast range queries.
+    graph
+        .run(query(
+            "CREATE INDEX event_timestamp IF NOT EXISTS
+             FOR (e:SensingEvent) ON (e.timestamp)",
+        ))
+        .await
+        .map_err(|e| format!("Index creation failed: {e}"))?;
+
     info!(room = %cfg.room_name, "[neo4j] schema ready");
+
+    // Spawn TTL compaction background task if enabled.
+    if cfg.ttl_hours > 0 {
+        let compaction_url = cfg.url.clone();
+        let compaction_user = cfg.user.clone();
+        let compaction_pass = cfg.password.clone();
+        let ttl = cfg.ttl_hours;
+        tokio::spawn(async move {
+            compaction_loop(&compaction_url, &compaction_user, &compaction_pass, ttl).await;
+        });
+        info!(ttl_hours = cfg.ttl_hours, "[neo4j] TTL compaction enabled");
+    }
 
     let mut event_count: u64 = 0;
 
@@ -303,6 +327,84 @@ async fn write_event(
     Ok(())
 }
 
+/// Background compaction loop: deletes SensingEvents (and their connected
+/// Person/VitalSigns nodes) older than the TTL threshold.
+/// Runs every 10 minutes.
+async fn compaction_loop(url: &str, user: &str, password: &str, ttl_hours: u64) {
+    use neo4rs::{query, Graph};
+
+    let graph = match Graph::new(url, user, password) {
+        Ok(g) => g,
+        Err(e) => {
+            warn!("[neo4j-compaction] connection failed: {e}");
+            return;
+        }
+    };
+
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(600)); // 10 min
+    loop {
+        interval.tick().await;
+
+        let cutoff = chrono::Utc::now() - chrono::Duration::hours(ttl_hours as i64);
+        let cutoff_str = cutoff.to_rfc3339();
+
+        // Delete Person nodes only connected to expired events.
+        let _ = graph
+            .run(query(
+                "MATCH (e:SensingEvent)
+                 WHERE datetime(e.timestamp) < datetime($cutoff)
+                 MATCH (e)-[:DETECTED]->(p:Person)
+                 WHERE NOT (p)<-[:DETECTED]-(:SensingEvent)
+                    OR ALL(x IN [(e2)-[:DETECTED]->(p) | e2] WHERE datetime(x.timestamp) < datetime($cutoff))
+                 DETACH DELETE p",
+            )
+            .param("cutoff", cutoff_str.clone()))
+            .await;
+
+        // Delete VitalSigns only connected to expired events.
+        let _ = graph
+            .run(query(
+                "MATCH (e:SensingEvent)
+                 WHERE datetime(e.timestamp) < datetime($cutoff)
+                 MATCH (e)-[:HAS_VITALS]->(v:VitalSigns)
+                 DETACH DELETE v",
+            )
+            .param("cutoff", cutoff_str.clone()))
+            .await;
+
+        // Delete expired events and fix Room pointers if needed.
+        let _ = graph
+            .run(query(
+                "MATCH (e:SensingEvent)
+                 WHERE datetime(e.timestamp) < datetime($cutoff)
+                 OPTIONAL MATCH (r:Room)-[rel:CURRENT_EVENT]->(e)
+                 DELETE rel, e",
+            )
+            .param("cutoff", cutoff_str.clone()))
+            .await;
+
+        // Re-point Room CURRENT_EVENT to newest surviving event.
+        let _ = graph
+            .run(query(
+                "MATCH (r:Room)
+                 WHERE NOT (r)-[:CURRENT_EVENT]->(:SensingEvent)
+                 MATCH (newest:SensingEvent)
+                 WHERE NOT ()-[:CURRENT_EVENT]->(newest)
+                 WITH r, newest
+                 ORDER BY newest.timestamp DESC
+                 LIMIT 1
+                 CREATE (r)-[:CURRENT_EVENT]->(newest)",
+            ))
+            .await;
+
+        info!(
+            ttl_hours,
+            cutoff = %cutoff_str,
+            "[neo4j-compaction] TTL sweep complete",
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -315,11 +417,13 @@ mod tests {
             neo4j_user: "neo4j".into(),
             neo4j_password_env: "NEO4J_PASSWORD".into(),
             neo4j_room_name: "main".into(),
+            neo4j_ttl_hours: 168,
         };
         std::env::set_var("NEO4J_PASSWORD", "testpass");
         let cfg = Neo4jConfig::from_args(&args).unwrap();
         assert_eq!(cfg.url, "bolt://x1-370:7687");
         assert_eq!(cfg.password, "testpass");
         assert_eq!(cfg.room_name, "main");
+        assert_eq!(cfg.ttl_hours, 168);
     }
 }
