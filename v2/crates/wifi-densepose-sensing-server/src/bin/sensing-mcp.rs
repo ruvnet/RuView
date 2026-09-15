@@ -55,7 +55,8 @@ impl McpState {
                 if results.len() >= MAX_ROWS as usize { break; }
                 let mut map = serde_json::Map::new();
                 for key in row.keys() {
-                    if let Ok(val) = row.get::<neo4rs::BoltType>(key) { map.insert(key.to_string(), bolt_to_json(&val)); }
+                    let key_str = key.to_string();
+                    if let Ok(val) = row.get::<neo4rs::BoltType>(&key_str) { map.insert(key_str, bolt_to_json(&val)); }
                 }
                 results.push(Value::Object(map));
             }
