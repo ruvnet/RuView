@@ -116,6 +116,8 @@ RuView turns ordinary WiFi into a contactless sensor. A $9 ESP32 board reads the
 docker pull ruvnet/wifi-densepose:latest
 docker run -p 3000:3000 ruvnet/wifi-densepose:latest
 # Open http://localhost:3000
+# CasaOS / docker compose? See docs/DOCKER-CASAOS.md (ready-made
+# docker-compose.yml with an app tile)
 
 # Option 2a: Live sensing with ESP32-S3 hardware ($9)
 # Flash firmware, provision WiFi, and start sensing:
@@ -710,6 +712,7 @@ Start with the user, build, and calibration guides; expand for the full referenc
 | Document | Description |
 |----------|-------------|
 | [User Guide](docs/user-guide.md) | Step-by-step guide: installation, first run, API usage, hardware setup, training |
+| [Docker & CasaOS](docs/DOCKER-CASAOS.md) | Run the sensing server via Docker / `docker-compose.yml`, import as a CasaOS app tile, and connect ESP32-S3 nodes |
 | [Build Guide](docs/build-guide.md) | Building from source (Rust and Python) |
 | [Calibration & Room Training Guide](docs/calibration-guide.md) | What `calibrate`/`enroll`/`train-room` actually enforce: minimum frame counts, per-anchor quality gates, the pet/small-motion presence-detection caveat, and empty-room baseline conditions — grounded in the real code, not just ADR-135/151 |
 | [Trust State & Engine Errors](docs/trust-and-engine-errors.md) | What `engine_error_count` and `demoted` mean on `/api/v1/status`, exact trigger conditions, the current diagnostic gap (no per-cause breakdown), the `WDP_GUARD_INTERVAL_US` recovery path, and why a converted Hugging Face model isn't shown to be the cause in code |

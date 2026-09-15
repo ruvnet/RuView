@@ -1,0 +1,122 @@
+# RuView — WiFi DensePose sensing server, CasaOS-ready compose.
+#
+# Uses the prebuilt image from Docker Hub, so the host does NOT need to compile
+# the Rust workspace. (The published `:latest` tag is amd64; on arm64 hosts build
+# locally first: `docker compose -f docker/docker-compose.yml build`.) The server
+# hosts the REST API + web UI on one port, a WebSocket stream, and a UDP listener
+# for ESP32-S3 CSI nodes.
+#
+# Import into CasaOS:  App Store → Custom Install → paste this file, OR
+#   docker compose -f docker-compose.casaos.yml up -d
+#
+# Open the dashboard at:  http://<host-ip>:3000/ui/index.html
+# (the bare http://<host-ip>:3000/ root is just an API index — the visual
+#  dashboards live under /ui/: index.html, observatory.html, pose-fusion.html)
+#
+# If host ports 3000/3001 are already taken on your machine, change the
+# `published:` values below (and `port_map` / `webui_port` to match the new UI port).
+#
+# Data source (CSI_SOURCE):
+#   auto       probe UDP 5005 for an ESP32, else fall back to simulation (default)
+#   esp32      require real CSI frames from an ESP32-S3 node on UDP 5005
+#   simulated  synthetic CSI, no hardware needed (good for first evaluation)
+
+name: ruview
+
+services:
+  ruview:
+    image: ruvnet/wifi-densepose:latest
+    container_name: ruview
+    hostname: ruview
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/ruvnet/RuView@main/assets/ruview-icon.png
+    ports:
+      - mode: ingress
+        target: 3000
+        published: "3000"
+        protocol: tcp
+      - mode: ingress
+        target: 3001
+        published: "3001"
+        protocol: tcp
+      - mode: ingress
+        target: 5005
+        published: "5005"
+        protocol: udp
+    environment:
+      - RUST_LOG=info
+      # auto | esp32 | wifi | simulated  (see header)
+      - CSI_SOURCE=${CSI_SOURCE:-auto}
+      - MODELS_DIR=/app/models
+      # Optional bearer-token auth on /api/v1/*. Leave empty for LAN-only use;
+      # set a token to require `Authorization: Bearer <token>`:
+      #   RUVIEW_API_TOKEN=$(openssl rand -hex 32)
+      - RUVIEW_API_TOKEN=${RUVIEW_API_TOKEN:-}
+    volumes:
+      # Drop .rvf model files here to make them visible to the API.
+      - ./data/models:/app/models
+    restart: unless-stopped
+    networks:
+      default: null
+
+networks:
+  default:
+    name: ruview_default
+
+x-casaos:
+  architectures:
+    - amd64
+  main: ruview
+  author: self
+  developer: ruvnet
+  category: HomeAutomation
+  hostname: ""
+  icon: https://cdn.jsdelivr.net/gh/ruvnet/RuView@main/assets/ruview-icon.png
+  index: /ui/index.html
+  is_uncontrolled: false
+  port_map: "3000"
+  webui_port: 3000
+  scheme: http
+  tagline:
+    en_us: See through walls with WiFi — contactless presence, breathing & pose sensing
+  description:
+    en_us: |
+      RuView (WiFi DensePose) turns ordinary WiFi into a contactless spatial
+      sensor. Using Channel State Information (CSI) from low-cost ESP32-S3 nodes,
+      it detects people through walls, estimates breathing and heart rate, tracks
+      motion and falls, and runs 17-keypoint pose estimation — no cameras, no
+      wearables. This image runs the Rust sensing server with its web dashboard.
+      With CSI_SOURCE=simulated it works with synthetic data and no hardware;
+      point one or more ESP32-S3 CSI nodes at UDP 5005 for live sensing.
+  title:
+    en_us: RuView
+  thumbnail: https://cdn.jsdelivr.net/gh/ruvnet/RuView@main/assets/ruview-icon.png
+  screenshot_link:
+    - https://cdn.jsdelivr.net/gh/ruvnet/RuView@main/assets/ruview-icon.png
+  envs:
+    - container: CSI_SOURCE
+      description:
+        en_us: "Data source: auto (default) | esp32 | simulated. 'simulated' needs no hardware."
+    - container: RUVIEW_API_TOKEN
+      description:
+        en_us: "(Optional) bearer token to protect /api/v1/*. Leave empty for LAN-only use."
+    - container: MODELS_DIR
+      description:
+        en_us: "In-container path scanned for .rvf model files (default /app/models)."
+    - container: RUST_LOG
+      description:
+        en_us: "Log level: info (default), debug, warn, error."
+  ports:
+    - container: "3000"
+      description:
+        en_us: "Web UI + REST API (HTTP)."
+    - container: "3001"
+      description:
+        en_us: "WebSocket sensing stream."
+    - container: "5005"
+      description:
+        en_us: "ESP32-S3 CSI ingest (UDP)."
+  volumes:
+    - container: /app/models
+      description:
+        en_us: "Holds .rvf model files exposed via /api/v1/models."
