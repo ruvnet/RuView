@@ -10,4 +10,4 @@ pytest-benchmark>=5.2.3
 # Linting and formatting
 black>=23.0.0
 flake8>=6.0.0
-mypy>=1.0.0
+mypy>=1.19.1

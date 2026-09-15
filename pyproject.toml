@@ -114,7 +114,7 @@ dependencies = [
     "black>=23.9.0",
     "isort>=5.12.0",
     "flake8>=6.1.0",
-    "mypy>=1.6.0",
+    "mypy>=1.19.1",
 ]
 
 [project.optional-dependencies]
@@ -132,7 +132,7 @@ dev = [
     "black>=23.9.0",
     "isort>=5.12.0",
     "flake8>=6.1.0",
-    "mypy>=1.6.0",
+    "mypy>=1.19.1",
     "pre-commit>=3.5.0",
     "bandit>=1.7.0",
     "safety>=2.3.0",
