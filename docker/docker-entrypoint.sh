@@ -45,4 +45,7 @@ window.__RUVIEW_DASHBOARD_CONFIG = { token: "${RUVIEW_API_TOKEN}" };
 DASHEOF
 fi
 
+# Default observatory.html to Live WebSocket instead of Demo Generator.
+sed -i 's|<option value="demo" selected>Demo Generator</option>|<option value="demo">Demo Generator</option>|g; s|<option value="ws">Live WebSocket</option>|<option value="ws" selected>Live WebSocket</option>|g' /app/ui/observatory.html 2>/dev/null || true
+
 exec "$@"
