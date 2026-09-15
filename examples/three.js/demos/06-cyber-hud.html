@@ -1,0 +1,1350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>RuView · Cyber HUD · rigged avatar + RTI backdrop + vitals telemetry</title>
+<!--
+  RuView cyberpunk composite viewport.
+  ─────────────────────────────────────────────────────────────────────────
+  Consumes the SAME live pose contract as examples/through-wall/pose.html:
+    ws://<host>:8770/pose   (override with ?ws=…)
+      {type:'meta', edges:[[a,b],…]}
+      {type:'pose', src, kps:[[x,y]…17 COCO], presence, motion, nodes,
+                    bpm_breath?, bpm_heart?, stress?, rti?,
+                    target?:{x,y,z},              // metres, blueprint frame
+                    ranges?:[{node_id, r_m}…],    // per-node target ranges
+                    target_true?:{x,y}}           // sim ground truth only
+  Blueprint ingestion: ?map=<url> loads a JSON layout (schema below); without
+  it an embedded demo map is used.
+    { "map_metadata": {"name", "width_meters", "height_meters"},
+      "nodes": [{"node_id","x","y","z"}…],
+      "structural_walls": [{"start":[x,y],"end":[x,y],"material","height"?}…] }
+  If `ranges` arrive and >= 3 map nodes match, a 2D range-only multilateration
+  solve (closed-form init + Gauss-Newton, mirrored from
+  wifi-densepose-signal::multilateration and its numeric proof) positions the
+  target capsule in the blueprint frame, alpha-filtered against jitter.
+  When no bridge is present a synthetic driver walks a waypoint path inside
+  the map and emits noisy ranges, proving the pipeline end-to-end (banner
+  shows SIMULATED; true-vs-estimate error is displayed, never hidden).
+
+  HONEST SCOPE (matches the repo's ethos — see through-wall/README.md):
+   • WiFi-inferred pose is COARSE (~59.5% PCK@0.10 vs 50% mean-pose baseline).
+   • The feed is 2D image-space; depth (z) here is ESTIMATED for display, not measured.
+   • Vitals + RTI occupancy are SYNTHETIC unless the bridge sends bpm_*/rti fields.
+   • The avatar is an articulated low-poly rig driven by direct quaternionic
+     retargeting (rest→desired per bone) with 3-frame temporal smoothing.
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<style>
+  :root{
+    --bg:#04060a; --panel:rgba(10,14,20,.72); --line:rgba(64,224,255,.18);
+    --cyan:#3fe4ff; --magenta:#ff4fd8; --amber:#ffb840; --green:#46e08a;
+    --red:#ff5a6a; --mute:#6d7a8c; --ink:#dbe7f2;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font:13px/1.5 'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden}
+  #viewport{position:fixed;inset:0}
+  canvas{display:block}
+  #hud{position:fixed;inset:0;pointer-events:none} /* 2D telemetry overlay */
+
+  /* ── top bar ── */
+  header{position:fixed;top:0;left:0;right:0;height:46px;display:flex;align-items:center;
+    gap:14px;padding:0 18px;pointer-events:none;
+    background:linear-gradient(180deg,rgba(4,6,10,.9),transparent)}
+  h1{margin:0;font-size:14px;letter-spacing:2px;text-transform:uppercase;font-weight:600}
+  h1 b{color:var(--cyan)}
+  #banner{margin-left:auto;padding:5px 12px;border-radius:5px;font-weight:600;font-size:11px;
+    letter-spacing:.5px;pointer-events:none}
+  .live{background:rgba(70,224,138,.15);color:var(--green);border:1px solid var(--green)}
+  .sim{background:rgba(255,184,64,.14);color:var(--amber);border:1px solid var(--amber)}
+  .down{background:rgba(255,90,106,.14);color:var(--red);border:1px solid var(--red)}
+
+  /* ── left telemetry stack ── */
+  #left{position:fixed;top:58px;left:18px;width:260px;display:flex;flex-direction:column;
+    gap:12px;pointer-events:none}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+    backdrop-filter:blur(9px);box-shadow:0 0 24px rgba(0,0,0,.35), inset 0 0 22px rgba(63,228,255,.04)}
+  .card .lbl{font-size:10px;text-transform:uppercase;letter-spacing:1.6px;color:var(--mute);margin-bottom:8px}
+  .row{display:flex;justify-content:space-between;padding:2px 0}
+  .row .k{color:var(--mute)} .row .v{color:var(--cyan);font-variant-numeric:tabular-nums}
+  .row .v.mag{color:var(--magenta)} .row .v.grn{color:var(--green)} .row .v.amb{color:var(--amber)}
+  canvas.gauge{width:100%;display:block;border-radius:6px;background:rgba(2,4,8,.55)}
+
+  /* ── controls (interactive) ── */
+  #ctl{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:8px;
+    align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:999px;
+    padding:7px 12px;backdrop-filter:blur(10px);pointer-events:auto;z-index:10}
+  #ctl button, #ctl label{color:var(--ink);background:transparent;border:1px solid var(--line);
+    border-radius:6px;padding:5px 10px;font:inherit;font-size:11px;cursor:pointer;display:flex;
+    align-items:center;gap:6px}
+  #ctl button:hover{border-color:var(--cyan);color:var(--cyan)}
+  #ctl button.on{border-color:var(--cyan);color:var(--cyan);background:rgba(63,228,255,.08)}
+  #ctl input[type=checkbox]{accent-color:var(--cyan)}
+
+  #note{position:fixed;bottom:16px;right:18px;max-width:340px;font-size:10.5px;color:var(--mute);
+    line-height:1.6;text-align:right;pointer-events:none}
+  #note b{color:var(--ink)}
+  .spin{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);
+    margin-right:6px;box-shadow:0 0 8px var(--green)}
+
+  /* ── layout editor panel ── */
+  #edit-panel{position:fixed;top:58px;right:18px;width:230px;display:none;
+    flex-direction:column;gap:8px;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;padding:12px 14px;backdrop-filter:blur(9px);pointer-events:auto;z-index:9}
+  #edit-panel.open{display:flex}
+  #edit-panel .lbl{font-size:10px;text-transform:uppercase;letter-spacing:1.6px;color:var(--mute)}
+  #edit-panel button{background:transparent;border:1px solid var(--line);border-radius:6px;
+    color:var(--ink);padding:6px 10px;font:inherit;font-size:11px;cursor:pointer;text-align:left}
+  #edit-panel button:hover{border-color:var(--cyan);color:var(--cyan)}
+  #edit-panel .dims{display:flex;gap:6px;align-items:center;font-size:11px;color:var(--mute)}
+  #edit-panel input[type=number]{width:56px;background:rgba(2,4,8,.55);border:1px solid var(--line);
+    border-radius:5px;color:var(--ink);font:inherit;font-size:11px;padding:4px 6px}
+  #edit-panel .hint{font-size:10px;color:var(--mute);line-height:1.5}
+  #edit-panel .cal{display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--mute)}
+  #edit-panel .cal .cv{color:var(--cyan);font-variant-numeric:tabular-nums}
+  #edit-panel input[type=range]{width:100%;accent-color:var(--cyan);height:14px}
+
+  /* ── intercept log feed ── */
+  #log-feed{position:fixed;bottom:64px;left:18px;width:390px;max-height:150px;
+    overflow:hidden;display:flex;flex-direction:column-reverse;gap:1px;
+    font-size:10px;line-height:1.45;pointer-events:none;
+    mask-image:linear-gradient(180deg,transparent 0,black 30%)}
+  #log-feed .ln{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    color:var(--mute)}
+  #log-feed .ln .t{color:#49586c}
+  #log-feed .ln .tag{font-weight:600}
+  #log-feed .tag.sys{color:var(--cyan)} #log-feed .tag.sim{color:var(--amber)}
+  #log-feed .tag.trk{color:var(--green)} #log-feed .tag.edt{color:var(--magenta)}
+
+  /* ── target roster ── */
+  #roster{position:fixed;right:18px;bottom:120px;width:250px;background:var(--panel);
+    border:1px solid var(--line);border-radius:10px;padding:10px 12px;backdrop-filter:blur(9px);
+    pointer-events:auto;z-index:8}
+  #roster .lbl{font-size:10px;text-transform:uppercase;letter-spacing:1.6px;color:var(--mute);
+    margin-bottom:6px;display:flex;justify-content:space-between}
+  #roster-count{color:var(--cyan)}
+  .rrow{display:flex;align-items:center;gap:6px;font-size:10.5px;padding:2px 0;
+    font-variant-numeric:tabular-nums}
+  .rrow.foc-on{background:rgba(63,228,255,.08);border-radius:5px}
+  .rrow .sw{width:9px;height:9px;border-radius:50%;flex:0 0 auto;box-shadow:0 0 6px currentColor}
+  .rrow .mac{flex:0 0 66px;color:var(--ink);overflow:hidden;text-overflow:ellipsis}
+  .rrow .xy{flex:1;color:var(--mute)} .rrow .vel{flex:0 0 46px;color:var(--amber);text-align:right}
+  .rrow .foc{flex:0 0 auto;background:transparent;border:1px solid var(--line);border-radius:5px;
+    color:var(--mute);cursor:pointer;font-size:11px;line-height:1;padding:3px 6px}
+  .rrow.foc-on .foc{color:var(--cyan);border-color:var(--cyan)}
+  #roster .empty{font-size:10px;color:var(--mute)}
+</style>
+</head>
+<body>
+  <div id="viewport"></div>
+  <canvas id="hud"></canvas>
+
+  <header>
+    <h1>Ru<b>View</b> · CYBER-HUD</h1>
+    <div id="banner" class="down">CONNECTING…</div>
+  </header>
+
+  <div id="left">
+    <div class="card">
+      <div class="lbl">Target telemetry</div>
+      <div class="row"><span class="k">source</span><span class="v" id="t-src">—</span></div>
+      <div class="row"><span class="k">presence</span><span class="v" id="t-pres">—</span></div>
+      <div class="row"><span class="k">motion idx</span><span class="v" id="t-motion">—</span></div>
+      <div class="row"><span class="k">velocity</span><span class="v mag" id="t-vel">—</span></div>
+      <div class="row"><span class="k">pose fps</span><span class="v grn" id="t-fps">—</span></div>
+    </div>
+    <div class="card">
+      <div class="lbl">IPS multilateration <span id="ips-tag" style="color:var(--mute)">·off</span></div>
+      <div class="row"><span class="k">map</span><span class="v" id="ips-map">—</span></div>
+      <div class="row"><span class="k">nodes used</span><span class="v" id="ips-nodes">—</span></div>
+      <div class="row"><span class="k">target (m)</span><span class="v" id="ips-xy">—</span></div>
+      <div class="row"><span class="k">residual</span><span class="v amb" id="ips-res">—</span></div>
+      <div class="row"><span class="k">sim true err</span><span class="v grn" id="ips-err">—</span></div>
+      <div class="row"><span class="k">NLOS nodes</span><span class="v mag" id="ips-nlos">—</span></div>
+    </div>
+    <div class="card">
+      <div class="lbl">Respiration <span id="br-tag" style="color:var(--amber)">·sim</span></div>
+      <canvas class="gauge" id="g-breath" width="232" height="76"></canvas>
+      <div class="row" style="margin-top:6px"><span class="k">rate</span><span class="v" id="v-breath">— bpm</span></div>
+    </div>
+    <div class="card">
+      <div class="lbl">Cardiac <span id="hr-tag" style="color:var(--amber)">·sim</span></div>
+      <canvas class="gauge" id="g-heart" width="232" height="92"></canvas>
+      <div class="row" style="margin-top:6px"><span class="k">rate</span><span class="v mag" id="v-heart">— bpm</span></div>
+    </div>
+    <div class="card">
+      <div class="lbl">Stress index</div>
+      <canvas class="gauge" id="g-stress" width="232" height="26"></canvas>
+      <div class="row" style="margin-top:6px"><span class="k">level</span><span class="v" id="v-stress">—</span></div>
+    </div>
+  </div>
+
+  <div id="edit-panel">
+    <div class="lbl">Layout editor</div>
+    <button id="e-floor">🖼 Floor image…</button>
+    <input type="file" id="e-file" accept="image/*" style="display:none"/>
+    <div class="dims">
+      W <input type="number" id="e-w" min="2" max="200" step="0.5"/>
+      H <input type="number" id="e-h" min="2" max="200" step="0.5"/> m
+    </div>
+    <button id="e-export">⬇ Export layout JSON</button>
+    <div class="lbl" style="margin-top:4px">Signal→distance calibration</div>
+    <div class="cal">path-loss exponent N <span class="cv" id="cal-n-v">2.0</span>
+      <input type="range" id="cal-n" min="1.6" max="4.0" step="0.05" value="2.0"/></div>
+    <div class="cal">P₀ @1 m (dBm) <span class="cv" id="cal-p0-v">-40</span>
+      <input type="range" id="cal-p0" min="-60" max="-30" step="1" value="-40"/></div>
+    <div class="cal">material loss × <span class="cv" id="cal-mat-v">1.0</span>
+      <input type="range" id="cal-mat" min="0.3" max="2.5" step="0.05" value="1.0"/></div>
+    <div class="hint">N/P₀ convert live <b>rssi_dbm</b> ranges via the log-distance
+      model; material × scales the SIM wall degradation. Double-click the floor to
+      place a node; double-click a marker to remove it.</div>
+  </div>
+
+  <div id="log-feed"></div>
+
+  <div id="roster">
+    <div class="lbl"><span>Target roster</span><span id="roster-count">0</span></div>
+    <div id="roster-body"><div class="empty">no targets — awaiting telemetry</div></div>
+  </div>
+
+  <div id="ctl">
+    <button id="b-edit">✎ Layout</button>
+    <button id="b-rti" class="on">RTI backdrop</button>
+    <button id="b-caps" class="on">Target capsule</button>
+    <button id="b-vel" class="on">Velocity vec</button>
+    <button id="b-bloom" class="on">Bloom</button>
+    <label><input type="checkbox" id="c-spin"/> auto-orbit</label>
+  </div>
+
+  <div id="note">
+    WiFi-inferred pose is <b>coarse</b> (~59.5% PCK@0.10 vs 50% baseline). Feed is 2D image-space;
+    <b>depth is estimated</b> for display. Vitals, RTI occupancy &amp; per-node ranges are
+    <b>synthetic</b> unless the bridge sends <b>bpm_*/rti/ranges</b>; multilateration output is only
+    as good as the input ranges (residual shown). Amber wireframe ghost = simulated ground truth.
+    Load a layout with <b>?map=&lt;url&gt;</b>. Start <b>wiflow_infer.py</b> for a live bridge on :8770.
+  </div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   0.  Config, COCO layout, small math helpers
+   ═══════════════════════════════════════════════════════════════════════════ */
+const QUERY = new URLSearchParams(location.search);
+const POSE_WS = QUERY.get('ws') || `ws://${location.hostname||'localhost'}:8770/pose`;
+
+/* Blueprint map — embedded demo layout; override with ?map=<url> (JSON). */
+const DEFAULT_MAP = {
+  map_metadata: { name:'demo-flat-20x15', width_meters: 20.0, height_meters: 15.0 },
+  nodes: [
+    { node_id:'ESP32_01', x:  1.2, y:  0.5, z: 1.0 },
+    { node_id:'ESP32_02', x: 18.5, y:  2.1, z: 1.2 },
+    { node_id:'ESP32_03', x:  9.0, y: 14.2, z: 2.5 },
+    { node_id:'ESP32_04', x:  0.8, y: 13.5, z: 1.8 },
+  ],
+  structural_walls: [
+    { start:[ 0, 0], end:[20, 0], material:'concrete' },
+    { start:[20, 0], end:[20,15], material:'concrete' },
+    { start:[20,15], end:[ 0,15], material:'concrete' },
+    { start:[ 0,15], end:[ 0, 0], material:'concrete' },
+    { start:[ 8, 0], end:[ 8, 6], material:'brick'    },
+    { start:[ 8, 9], end:[ 8,15], material:'brick'    },
+    { start:[13, 6], end:[20, 6], material:'drywall', height:2.4 },
+  ],
+  // Synthetic-driver walk: threads the x=8 door gap (y 6..9) so the target
+  // transitions naturally between rooms instead of ghosting through walls.
+  sim_path: [[2,2],[6,5],[10,8],[17,3],[17,12],[10,12],[10,8],[6,5]],
+};
+let MAP = DEFAULT_MAP;
+
+/* Map frame (x = width, y = depth, z = height; metres, origin at corner)
+   → three.js world (x right, y up, z toward camera), map centred at origin. */
+function mapToWorld(mx, my, mz){
+  const W = MAP.map_metadata.width_meters, H = MAP.map_metadata.height_meters;
+  return V(mx - W/2, mz ?? 0, my - H/2);
+}
+
+// COCO-17 indices
+const KP = { NOSE:0, LEYE:1, REYE:2, LEAR:3, REAR:4, LSHO:5, RSHO:6, LELB:7, RELB:8,
+             LWRI:9, RWRI:10, LHIP:11, RHIP:12, LKNE:13, RKNE:14, LANK:15, RANK:16 };
+let EDGES = [[5,7],[7,9],[6,8],[8,10],[5,6],[11,12],[5,11],[6,12],
+             [11,13],[13,15],[12,14],[14,16],[0,5],[0,6]];
+
+// World scale for mapping normalized image coords → metres-ish scene units.
+const WORLD_W = 3.2, WORLD_H = 3.4, FLOOR_Y = 0;
+const V = (x,y,z)=>new THREE.Vector3(x,y,z);
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp  = (a,b,t)=>a+(b-a)*t;
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   1.  Scene / renderer / post-processing (r128 global THREE, matches demo 05)
+   ═══════════════════════════════════════════════════════════════════════════ */
+const vp = document.getElementById('viewport');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x04060a);
+scene.fog = new THREE.FogExp2(0x04060a, 0.055);
+
+const camera = new THREE.PerspectiveCamera(52, innerWidth/innerHeight, 0.1, 200);
+camera.position.set(3.4, 2.5, 5.6);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputEncoding = THREE.sRGBEncoding;
+vp.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+controls.target.set(0, 1.4, 0); controls.maxPolarAngle = Math.PI*0.52;
+
+const composer = new THREE.EffectComposer(renderer);
+composer.addPass(new THREE.RenderPass(scene, camera));
+const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.9, 0.55, 0.15);
+composer.addPass(bloom);
+let bloomOn = true;
+
+scene.add(new THREE.AmbientLight(0x223344, 1.1));
+const key = new THREE.DirectionalLight(0x9fe8ff, 0.8); key.position.set(4,8,5); scene.add(key);
+const rim = new THREE.PointLight(0xff4fd8, 0.7, 30); rim.position.set(-4,3,-3); scene.add(rim);
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   2.  Cyber-grid volumetric backdrop + RTI attenuation field
+   ═══════════════════════════════════════════════════════════════════════════ */
+// Map-driven backdrop: grid, volumetric walls, node markers, RTI voxel field.
+// Everything below is (re)built from the blueprint JSON by buildMap(MAP).
+const room = new THREE.Group(); scene.add(room);   // walls + node markers
+const RTI  = new THREE.Group(); scene.add(RTI);    // voxel attenuation field
+let grid = null;
+let voxels = [];
+const nodeMarkers = [];        // raycast targets for the layout editor
+let floorTexURL = null;        // user-uploaded floor-plan image (data URL)
+let floorMesh = null;
+const WALL_PALETTE = {   // material → [fill, edge] (structural density coding)
+  concrete:[0x0e3a44, 0x3fe4ff],
+  brick:   [0x431a38, 0xff4fd8],
+  drywall: [0x22262e, 0x66788c],
+};
+
+function disposeGroup(g){
+  while (g.children.length){
+    const c = g.children.pop();
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) c.material.dispose();
+  }
+}
+
+function buildMap(map){
+  MAP = map;
+  const W = map.map_metadata.width_meters, H = map.map_metadata.height_meters;
+  disposeGroup(room); disposeGroup(RTI); voxels = [];
+  if (grid){ scene.remove(grid); grid.geometry.dispose(); grid.material.dispose(); }
+
+  // Ground grid sized to the blueprint.
+  const gsize = Math.ceil(Math.max(W, H)) + 4;
+  grid = new THREE.GridHelper(gsize, gsize*2, 0x2a6b7a, 0x123038);
+  grid.material.transparent = true; grid.material.opacity = 0.45; scene.add(grid);
+
+  // Volumetric wall slabs from 2D segments (blueprint metres).
+  for (const w of (map.structural_walls || [])){
+    const [x1,y1] = w.start, [x2,y2] = w.end;
+    const len = Math.hypot(x2-x1, y2-y1); if (len < 1e-6) continue;
+    const h = w.height ?? 3.0;
+    const [fill, edge] = WALL_PALETTE[w.material] || WALL_PALETTE.drywall;
+    const geo = new THREE.BoxGeometry(len, h, 0.15);
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color:fill, transparent:true, opacity:0.22, depthWrite:false }));
+    const c = mapToWorld((x1+x2)/2, (y1+y2)/2, h/2);
+    mesh.position.copy(c);
+    mesh.rotation.y = -Math.atan2(y2-y1, x2-x1);
+    room.add(mesh);
+    const lines = new THREE.LineSegments(new THREE.EdgesGeometry(geo),
+      new THREE.LineBasicMaterial({ color:edge, transparent:true, opacity:0.55 }));
+    lines.position.copy(mesh.position); lines.rotation.copy(mesh.rotation);
+    room.add(lines);
+  }
+
+  // Sensing-node markers (octahedron at mount height + ground ring).
+  nodeMarkers.length = 0;
+  for (const nd of (map.nodes || [])){
+    const p = mapToWorld(nd.x, nd.y, nd.z);
+    const marker = new THREE.Mesh(new THREE.OctahedronGeometry(0.16, 0),
+      new THREE.MeshStandardMaterial({ color:0x0b1a24, emissive:0x3fe4ff,
+        emissiveIntensity:0.9, metalness:0.5, roughness:0.4 }));
+    marker.position.copy(p); marker.userData.node_id = nd.node_id;
+    nodeMarkers.push(marker); room.add(marker);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.3, 24),
+      new THREE.MeshBasicMaterial({ color:0x3fe4ff, transparent:true, opacity:0.35,
+        side:THREE.DoubleSide }));
+    ring.rotation.x = -Math.PI/2; ring.position.set(p.x, 0.02, p.z); room.add(ring);
+  }
+
+  // RTI voxel field spanning the blueprint footprint (≈1.5 m cells, clamped).
+  const gx = clamp(Math.round(W/1.5), 8, 24), gz = clamp(Math.round(H/1.5), 8, 24);
+  const voxGeo = new THREE.BoxGeometry(W/gx*0.82, 0.06, H/gz*0.82);
+  for (let iz=0; iz<gz; iz++) for (let ix=0; ix<gx; ix++){
+    const m = new THREE.Mesh(voxGeo, new THREE.MeshBasicMaterial({
+      color:0x3fe4ff, transparent:true, opacity:0.0, depthWrite:false }));
+    m.position.copy(mapToWorld((ix+0.5)*W/gx, (iz+0.5)*H/gz, 0.03));
+    RTI.add(m); voxels.push(m);
+  }
+
+  // User floor-plan image under the grid (layout editor upload).
+  if (floorMesh){ scene.remove(floorMesh); floorMesh.geometry.dispose(); floorMesh.material.dispose(); floorMesh = null; }
+  if (floorTexURL){
+    new THREE.TextureLoader().load(floorTexURL, tex => {
+      floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(W, H),
+        new THREE.MeshBasicMaterial({ map:tex, transparent:true, opacity:0.38, depthWrite:false }));
+      floorMesh.rotation.x = -Math.PI/2; floorMesh.position.y = 0.005;
+      scene.add(floorMesh);
+    });
+  }
+
+  // Frame the camera to the blueprint extent.
+  const d = Math.max(W, H);
+  camera.position.set(d*0.45, d*0.42, d*0.72);
+  controls.target.set(0, 1.0, 0);
+  const el = document.getElementById('ips-map');
+  if (el) el.textContent =
+    `${map.map_metadata.name || 'map'} ${W}x${H} m · ${(map.nodes||[]).length} nodes`;
+}
+
+// Paint the RTI field: real array if provided, else a soft blob around the target.
+function paintRTI(arr, target){
+  for (let i=0;i<voxels.length;i++){
+    const m = voxels[i];
+    let a;
+    if (arr && arr.length===voxels.length){ a = clamp(arr[i],0,1); }
+    else {
+      const d = Math.hypot(m.position.x-target.x, m.position.z-target.z);
+      a = clamp(0.55*Math.exp(-(d*d)/0.6), 0, 0.55);  // attenuation ↑ near the body
+    }
+    m.material.opacity = a*0.7;
+    m.material.color.setHSL(0.52 - a*0.42, 0.9, 0.5); // cyan→magenta with density
+    m.scale.y = 1 + a*10;
+    m.position.y = 0.03 + a*0.3;
+  }
+}
+
+// Load ?map=<url> if given, else build the embedded demo layout.
+(async ()=>{
+  const url = QUERY.get('map');
+  if (url){
+    try {
+      const r = await fetch(url); const j = await r.json();
+      if (j?.map_metadata?.width_meters > 0 && j?.map_metadata?.height_meters > 0){
+        buildMap(j); return;
+      }
+      console.warn('map JSON missing map_metadata dims; using default');
+    } catch(e){ console.warn('map load failed:', e); }
+  }
+  buildMap(DEFAULT_MAP);
+})();
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   3.  Articulated low-poly rig  (bone hierarchy + direct quaternionic retarget)
+   ═══════════════════════════════════════════════════════════════════════════
+   Each limb bone is an Object3D whose local +Y is its rest axis; a tapered
+   cylinder mesh (r128 has no CapsuleGeometry) is parented to it, spanning its
+   length. Retargeting rotates each bone so its rest world-direction aligns to
+   the desired direction taken from a (parent→child) keypoint pair.            */
+const rig = new THREE.Group(); scene.add(rig);
+
+const limbMat = new THREE.MeshStandardMaterial({ color:0x0b1a24, emissive:0x0aa6c8,
+  emissiveIntensity:0.55, metalness:0.6, roughness:0.35, transparent:true, opacity:0.92 });
+const jointMat = new THREE.MeshBasicMaterial({ color:0x8ff6ff });
+
+function makeLimb(len, r0, r1){
+  const b = new THREE.Object3D();                       // the "bone"
+  const geo = new THREE.CylinderGeometry(r1, r0, len, 10, 1, true);
+  geo.translate(0, len/2, 0);                            // base at bone origin, grows +Y
+  const mesh = new THREE.Mesh(geo, limbMat); b.add(mesh);
+  const wire = new THREE.LineSegments(new THREE.EdgesGeometry(geo),
+    new THREE.LineBasicMaterial({ color:0x3fe4ff, transparent:true, opacity:0.5 }));
+  b.add(wire);
+  const j = new THREE.Mesh(new THREE.SphereGeometry(r0*1.25, 10, 8), jointMat); b.add(j);
+  b.userData.len = len; return b;
+}
+
+// Skeleton assembly. Offsets set body proportions; `rest` marks direction-driven bones.
+const bones = {};
+function addBone(name, parent, pos, len, r0, r1, driven){
+  const b = driven ? makeLimb(len, r0, r1) : new THREE.Object3D();
+  b.name = name; b.position.copy(pos); (parent||rig).add(b);
+  bones[name] = b; return b;
+}
+const HIPW = 0.16, SHOW = 0.20;
+addBone('hips', null,        V(0,0,0),            0,0,0,false);
+addBone('spine','hips',      V(0,0,0),            0.62,0.11,0.09,true);   // hipC → shoC
+addBone('neck','spine',      V(0,0.62,0),         0.30,0.06,0.05,true);   // shoC → nose
+addBone('pelvisL','hips',    V(-HIPW,0,0),        0,0,0,false);
+addBone('pelvisR','hips',    V( HIPW,0,0),        0,0,0,false);
+addBone('thighL','pelvisL',  V(0,0,0),            0.44,0.09,0.07,true);
+addBone('shinL','thighL',    V(0,0.44,0),         0.42,0.07,0.05,true);
+addBone('thighR','pelvisR',  V(0,0,0),            0.44,0.09,0.07,true);
+addBone('shinR','thighR',    V(0,0.44,0),         0.42,0.07,0.05,true);
+addBone('cladL','spine',     V(-SHOW,0.60,0),     0,0,0,false);
+addBone('cladR','spine',     V( SHOW,0.60,0),     0,0,0,false);
+addBone('uarmL','cladL',     V(0,0,0),            0.30,0.06,0.05,true);
+addBone('farmL','uarmL',     V(0,0.30,0),         0.28,0.05,0.035,true);
+addBone('uarmR','cladR',     V(0,0,0),            0.30,0.06,0.05,true);
+addBone('farmR','uarmR',     V(0,0.30,0),         0.28,0.05,0.035,true);
+// Head marker.
+const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.13,1),
+  new THREE.MeshStandardMaterial({ color:0x0b1a24, emissive:0x0aa6c8, emissiveIntensity:0.6,
+  metalness:0.6, roughness:0.3 }));
+bones.neck.add(head); head.position.set(0,0.30,0);
+
+// Which (parent,child) COCO keypoints drive each bone's desired direction.
+const DRIVE = {
+  spine: ['hipC','shoC'], neck: ['shoC', KP.NOSE],
+  thighL:[KP.LHIP,KP.LKNE], shinL:[KP.LKNE,KP.LANK],
+  thighR:[KP.RHIP,KP.RKNE], shinR:[KP.RKNE,KP.RANK],
+  uarmL:[KP.LSHO,KP.LELB], farmL:[KP.LELB,KP.LWRI],
+  uarmR:[KP.RSHO,KP.RELB], farmR:[KP.RELB,KP.RWRI],
+};
+// Capture each driven bone's rest world direction (+Y) and world quaternion.
+rig.updateMatrixWorld(true);
+const REST = {};
+const _q = new THREE.Quaternion(), _up = V(0,1,0);
+for (const name in DRIVE){
+  const b = bones[name]; b.getWorldQuaternion(_q);
+  REST[name] = { dir: _up.clone().applyQuaternion(_q).normalize(), q: _q.clone() };
+}
+
+/* ── Target capsule + velocity vector ─────────────────────────────────────── */
+const capsule = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.34,0.34,1.7,20,1,true),
+  new THREE.MeshBasicMaterial({ color:0x3fe4ff, transparent:true, opacity:0.10,
+    side:THREE.DoubleSide, depthWrite:false }));
+capsule.position.y = 0.85; capsule.visible = false; scene.add(capsule); // superseded by per-target capsules
+const capRing = new THREE.Mesh(new THREE.RingGeometry(0.34,0.4,32),
+  new THREE.MeshBasicMaterial({ color:0x3fe4ff, transparent:true, opacity:0.45,
+    side:THREE.DoubleSide }));
+capRing.rotation.x = -Math.PI/2; capRing.position.y = 0.02; scene.add(capRing); // focus ring on primary target
+const velArrow = new THREE.ArrowHelper(V(0,0,1), V(0,0,0), 0.01, 0xff4fd8, 0.18, 0.1);
+scene.add(velArrow);
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   4.  Pose ingest: 3-frame temporal smoothing + dropout hold
+   ═══════════════════════════════════════════════════════════════════════════ */
+const SMOOTH_N = 3;
+let kpHist = [];             // ring of last N valid keypoint frames (world Vec3[17])
+let lastGood = null;         // per-joint hold for short dropouts
+let missCount = new Array(17).fill(0);
+
+// Map one normalized [0,1] image keypoint → world. Depth is ESTIMATED, not measured:
+// a mild z lift so limbs aren't perfectly coplanar (keeps direction math stable),
+// plus arms nudged forward for readability.
+function toWorld(kp, idx){
+  const x = (kp[0]-0.5)*WORLD_W;
+  const y = FLOOR_Y + (1-kp[1])*WORLD_H;
+  let z = 0.0;
+  if (idx===KP.LWRI||idx===KP.RWRI||idx===KP.LELB||idx===KP.RELB) z = 0.18;
+  if (idx===KP.NOSE) z = 0.1;
+  return V(x,y,z);
+}
+function ingestPose(kps){
+  const frame = new Array(17);
+  for (let i=0;i<17;i++){
+    const kp = kps[i];
+    const valid = kp && isFinite(kp[0]) && isFinite(kp[1]) && !(kp[0]===0&&kp[1]===0);
+    if (valid){ frame[i]=toWorld(kp,i); missCount[i]=0; lastGood ||= new Array(17); lastGood[i]=frame[i]; }
+    else if (lastGood && lastGood[i] && missCount[i]<SMOOTH_N){ frame[i]=lastGood[i]; missCount[i]++; }
+    else frame[i]=null;
+  }
+  kpHist.push(frame); if (kpHist.length>SMOOTH_N) kpHist.shift();
+}
+// Triangular-weighted average over the ring → smoothed joint (kills CSI jitter).
+function smoothedJoint(i){
+  let sx=0,sy=0,sz=0,w=0;
+  for (let f=0; f<kpHist.length; f++){
+    const p = kpHist[f][i]; if(!p) continue;
+    const wt = f+1; sx+=p.x*wt; sy+=p.y*wt; sz+=p.z*wt; w+=wt;
+  }
+  return w>0 ? V(sx/w, sy/w, sz/w) : null;
+}
+// Virtual joints derived from COCO pairs.
+function joint(id){
+  if (id==='hipC'){ const l=smoothedJoint(KP.LHIP),r=smoothedJoint(KP.RHIP); return l&&r?l.clone().add(r).multiplyScalar(0.5):null; }
+  if (id==='shoC'){ const l=smoothedJoint(KP.LSHO),r=smoothedJoint(KP.RSHO); return l&&r?l.clone().add(r).multiplyScalar(0.5):null; }
+  return smoothedJoint(id);
+}
+
+/* ── retarget one bone: rest world-dir → desired world-dir, in parent-local ── */
+const _pq = new THREE.Quaternion(), _delta = new THREE.Quaternion(), _tmp = new THREE.Quaternion();
+function retargetBone(name){
+  const [aId,bId] = DRIVE[name];
+  const a = joint(aId), b = joint(bId);
+  if (!a || !b) return false;
+  const desired = b.clone().sub(a); if (desired.lengthSq()<1e-6) return false;
+  desired.normalize();
+  const rest = REST[name];
+  _delta.setFromUnitVectors(rest.dir, desired);      // rest world-dir → desired
+  const worldQ = _delta.multiply(rest.q.clone());    // desired world quaternion
+  bones[name].parent.getWorldQuaternion(_pq);        // parent already updated (topo order)
+  bones[name].quaternion.copy(_pq.invert().multiply(worldQ));
+  return true;
+}
+const RETARGET_ORDER = ['spine','neck','thighL','shinL','thighR','shinR',
+                        'uarmL','farmL','uarmR','farmR'];
+let retargetCount = 0;
+function applyPose(){
+  const hipC = joint('hipC'), shoC = joint('shoC');
+  if (hipC){                                          // place & face the rig
+    rig.position.set(hipC.x, hipC.y, hipC.z);
+    if (shoC){ const f = shoC.clone().sub(hipC); rig.position.y = hipC.y; }
+  }
+  rig.updateMatrixWorld(true);
+  retargetCount = 0;
+  for (const name of RETARGET_ORDER){
+    if (retargetBone(name)) retargetCount++;
+    bones[name].updateMatrixWorld(true);             // keep children's parentWorldQ current
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   4.5  Range-only multilateration (2D) — JS mirror of
+        wifi-densepose-signal::multilateration and its numeric proof.
+        Nodes are treated as sphere centres; a closed-form linearized init is
+        refined by damped Gauss-Newton. 2D solve only: indoor node arrays are
+        near-coplanar, where a 3D solve is mirror-ambiguous (the Rust refuses
+        it too). Degenerate/underdetermined inputs return null — the HUD shows
+        no target rather than a fabricated one.
+   ═══════════════════════════════════════════════════════════════════════════ */
+// [MLAT-BEGIN]
+function mlatCholSolve(A, b, n){          // SPD solve, in-place lower Cholesky
+  for (let i=0;i<n;i++) for (let j=0;j<=i;j++){
+    let s = A[i*n+j];
+    for (let k=0;k<j;k++) s -= A[i*n+k]*A[j*n+k];
+    if (i===j){ if (s <= 0) return null; A[i*n+i] = Math.sqrt(s); }
+    else A[i*n+j] = s / A[j*n+j];
+  }
+  const y = new Array(n).fill(0);
+  for (let i=0;i<n;i++){ let s=b[i]; for(let k=0;k<i;k++) s-=A[i*n+k]*y[k]; y[i]=s/A[i*n+i]; }
+  const x = new Array(n).fill(0);
+  for (let i=n-1;i>=0;i--){ let s=y[i]; for(let k=i+1;k<n;k++) s-=A[k*n+i]*x[k]; x[i]=s/A[i*n+i]; }
+  return x;
+}
+
+/* nodes: [{x,y}] (blueprint metres), ranges: [r_m]. Returns
+   {x, y, residual} or null (insufficient nodes / degenerate geometry). */
+function mlatSolve2D(nodes, ranges){
+  const n = nodes.length;
+  if (n < 3 || ranges.length !== n) return null;
+  if (ranges.some(r => !isFinite(r) || r < 0)) return null;
+  // Geometry spread check: 2x2 covariance eigenvalues via closed form.
+  let cx=0, cy=0; for (const p of nodes){ cx+=p.x; cy+=p.y; } cx/=n; cy/=n;
+  let sxx=0, sxy=0, syy=0;
+  for (const p of nodes){ const dx=p.x-cx, dy=p.y-cy; sxx+=dx*dx; sxy+=dx*dy; syy+=dy*dy; }
+  const tr=sxx+syy, det=sxx*syy-sxy*sxy;
+  const disc=Math.sqrt(Math.max(tr*tr/4-det,0));
+  const evMin=tr/2-disc, evMax=tr/2+disc;
+  if (evMin < 1e-9*Math.max(evMax,1e-12)) return null;   // collinear nodes
+  // Linearized init: 2(ni-n0)·p = r0² - ri² + |ni|² - |n0|²
+  const n0=nodes[0], r0=ranges[0];
+  const A=[0,0,0,0], B=[0,0];
+  for (let i=1;i<n;i++){
+    const ni=nodes[i];
+    const row=[2*(ni.x-n0.x), 2*(ni.y-n0.y)];
+    const b = r0*r0 - ranges[i]*ranges[i] + (ni.x*ni.x+ni.y*ni.y) - (n0.x*n0.x+n0.y*n0.y);
+    A[0]+=row[0]*row[0]; A[1]+=row[0]*row[1]; A[2]+=row[1]*row[0]; A[3]+=row[1]*row[1];
+    B[0]+=row[0]*b; B[1]+=row[1]*b;
+  }
+  A[0]+=1e-9; A[3]+=1e-9;
+  const p0 = mlatCholSolve(A.slice(), B, 2);
+  if (!p0) return null;
+  // Damped Gauss-Newton on min Σ(‖p-ni‖-ri)²
+  let px=p0[0], py=p0[1], rms=0;
+  for (let iter=0; iter<50; iter++){
+    let j00=0,j01=0,j11=0,g0=0,g1=0,f2=0;
+    for (let i=0;i<n;i++){
+      const dx=px-nodes[i].x, dy=py-nodes[i].y;
+      const dist=Math.max(Math.hypot(dx,dy),1e-12);
+      const f=dist-ranges[i], jx=dx/dist, jy=dy/dist;
+      j00+=jx*jx; j01+=jx*jy; j11+=jy*jy; g0+=jx*f; g1+=jy*f; f2+=f*f;
+    }
+    rms=Math.sqrt(f2/n);
+    const step=mlatCholSolve([j00+1e-9,j01,j01,j11+1e-9],[-g0,-g1],2);
+    if (!step) return null;
+    px+=step[0]; py+=step[1];
+    if (Math.hypot(step[0],step[1]) < 1e-10) break;
+  }
+  return { x:px, y:py, residual:rms };
+}
+
+/* Exponential position smoother (anti-jitter; proof: ~halves tracking error
+   at alpha 0.35 against sigma 0.2 m per-frame noise). */
+function makeAlphaFilter(alpha){
+  let s=null;
+  return {
+    update(p){ s = s ? {x:s.x+alpha*(p.x-s.x), y:s.y+alpha*(p.y-s.y)} : {x:p.x,y:p.y}; return s; },
+    reset(){ s=null; },
+  };
+}
+// [MLAT-END]
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   4.6  Material attenuation model (SIMULATION ONLY — drives the synthetic
+        range generator so the solver + alpha filter visibly wrestle with
+        NLOS degradation). Real through-wall propagation biases ranges LONG
+        (excess path delay), so each crossed wall adds a positive bias AND
+        extra noise sigma per material — zero-mean noise alone would be
+        unrealistically kind to the solver.
+   ═══════════════════════════════════════════════════════════════════════════ */
+// [SIM-ATTEN-BEGIN]
+/* Proper 2D segment intersection (orientation test, incl. collinear overlap). */
+function segIntersect(ax,ay,bx,by, cx,cy,dx,dy){
+  const o = (px,py,qx,qy,rx,ry)=>{
+    const v = (qy-py)*(rx-qx) - (qx-px)*(ry-qy);
+    return Math.abs(v) < 1e-12 ? 0 : (v > 0 ? 1 : 2);
+  };
+  const onSeg = (px,py,qx,qy,rx,ry)=>
+    Math.min(px,rx)-1e-12<=qx && qx<=Math.max(px,rx)+1e-12 &&
+    Math.min(py,ry)-1e-12<=qy && qy<=Math.max(py,ry)+1e-12;
+  const o1=o(ax,ay,bx,by,cx,cy), o2=o(ax,ay,bx,by,dx,dy);
+  const o3=o(cx,cy,dx,dy,ax,ay), o4=o(cx,cy,dx,dy,bx,by);
+  if (o1!==o2 && o3!==o4) return true;
+  if (o1===0 && onSeg(ax,ay,cx,cy,bx,by)) return true;
+  if (o2===0 && onSeg(ax,ay,dx,dy,bx,by)) return true;
+  if (o3===0 && onSeg(cx,cy,ax,ay,dx,dy)) return true;
+  if (o4===0 && onSeg(cx,cy,bx,by,dx,dy)) return true;
+  return false;
+}
+
+/* Per-material NLOS penalty per crossed wall: positive range bias (m) +
+   extra noise sigma (m). Sigmas per the Phase-5 spec; biases ~ sigma. */
+const MATERIAL_RF = {
+  drywall:  { bias: 0.06, sigma: 0.08, rank: 1 },
+  wood:     { bias: 0.06, sigma: 0.08, rank: 1 },
+  brick:    { bias: 0.20, sigma: 0.25, rank: 2 },
+  concrete: { bias: 0.50, sigma: 0.65, rank: 3 },
+};
+
+/* Walls crossed by the target→node sight line: list of material names. */
+function wallsBetween(tx, ty, nx, ny, walls){
+  const hit = [];
+  for (const w of (walls || [])){
+    if (segIntersect(tx,ty, nx,ny, w.start[0],w.start[1], w.end[0],w.end[1])){
+      hit.push(w.material || 'drywall');
+    }
+  }
+  return hit;
+}
+
+/* Degrade a true range through crossed walls: LOS noise sigma0, plus each
+   wall's bias + sigma (both scaled by matScale — the live calibration knob).
+   gauss() must be a zero-mean unit-sigma sampler.
+   Returns { r, crossed, worst } — worst = highest-rank material or null. */
+function attenuatedRange(trueRange, crossed, sigma0, gauss, matScale = 1.0){
+  let r = trueRange + sigma0 * gauss();
+  let worst = null, worstRank = 0;
+  for (const mat of crossed){
+    const m = MATERIAL_RF[mat] || MATERIAL_RF.drywall;
+    r += (m.bias + m.sigma * gauss()) * matScale;
+    if (m.rank > worstRank){ worstRank = m.rank; worst = mat; }
+  }
+  return { r: Math.max(0.1, r), crossed: crossed.length, worst };
+}
+
+/* Log-distance path-loss: RSSI (dBm) → range (m), r = 10^((P0−rssi)/(10N)).
+   The live calibration path for bridges that send rssi_dbm instead of r_m. */
+function rssiToRange(rssi_dbm, p0_dbm, n_exp){
+  if (!isFinite(rssi_dbm) || n_exp <= 0) return null;
+  return Math.pow(10, (p0_dbm - rssi_dbm) / (10 * n_exp));
+}
+// [SIM-ATTEN-END]
+
+/* Live calibration state (edit-panel sliders). N/P0 feed rssiToRange for
+   live rssi_dbm telemetry; matScale feeds the SIM degradation only. */
+const CAL = { n_exp: 2.0, p0_dbm: -40, matScale: 1.0 };
+
+/* Intercept log feed — scrolling terminal of tracker/system events. */
+const LOG_MAX = 30;
+function slog(tag, msg){
+  const feed = document.getElementById('log-feed');
+  if (!feed) return;
+  const t = new Date().toTimeString().slice(0, 8);
+  const ln = document.createElement('div');
+  ln.className = 'ln';
+  // PR #1298 fix #1: `msg` can carry network-derived text (a MAC) — build with
+  // textContent, never innerHTML, so markup in it can't execute. `tag` is one
+  // of our own controlled keys, safe as a class name.
+  const ts = document.createElement('span'); ts.className = 't'; ts.textContent = t;
+  const tg = document.createElement('span'); tg.className = 'tag ' + tag;
+  tg.textContent = '[' + ({sys:'SYS_INT', sim:'SIM_ENV', trk:'TRK', edt:'LAYOUT'}[tag] || tag) + ']';
+  ln.append(ts, document.createTextNode(' '), tg, document.createTextNode(' ' + msg));
+  feed.prepend(ln);
+  while (feed.children.length > LOG_MAX) feed.lastChild.remove();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   4.7  Multi-target data association (Phase 8)
+        activeTargets: Map<mac, track>; each has its own alpha filter, capsule
+        mesh, colour, and independent Gauss-Newton solve. GC drops a track that
+        goes silent for TARGET_TTL. Backward-compatible: a legacy single-target
+        payload (`target`/`ranges`) is wrapped as one implicit mac 'TARGET_01'.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const TARGET_TTL = 10000;                 // ms of silence → track GC'd
+const activeTargets = new Map();          // mac -> track
+let focusMac = null;                      // camera-locked target, or null
+let rosterDirty = true;                   // rebuild roster rows on membership change
+
+// [MTGT-BEGIN]
+// (pure helpers — extracted + Node-tested)
+// Defense-in-depth ID guard (PR #1298 fix #1): on top of textContent rendering,
+// reject any id outside a safe charset. Allows canonical MACs, 'TARGET_01',
+// 'SIM:AA:00:01'; blocks anything containing < > " ' ( ) space etc.
+const SAFE_ID = /^[\w:.\-]{1,64}$/;
+function validMac(mac){ return typeof mac === 'string' && SAFE_ID.test(mac); }
+function macHue(mac){                      // deterministic hue from MAC string
+  let h = 0; for (let i=0;i<mac.length;i++) h = (h*31 + mac.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+// Build (nodes, ranges) for one target from its range list + the active map.
+// Prefers explicit r_m; else converts rssi_dbm via the live N/P0 calibration.
+function targetRanges(rangeList, nodesById, cal){
+  const ns = [], rs = [];
+  for (const m of (rangeList || [])){
+    const nd = nodesById[m.node_id]; if (!nd) continue;
+    const r = isFinite(m.r_m) ? m.r_m : rssiToRange(m.rssi_dbm, cal.p0_dbm, cal.n_exp);
+    if (r != null && isFinite(r)){ ns.push({x:nd.x, y:nd.y}); rs.push(r); }
+  }
+  return { ns, rs };
+}
+function isExpired(track, now, ttl){ return now - track.lastSeen > ttl; }
+// [MTGT-END]
+
+const shortMac = m => m.length > 8 ? m.slice(-8) : m;
+
+function ensureTrack(mac){
+  let t = activeTargets.get(mac);
+  if (t) return t;
+  const hue = macHue(mac);
+  const col = new THREE.Color().setHSL(hue/360, 0.75, 0.6);
+  const cap = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.3,0.3,1.7,20,1,true),
+    new THREE.MeshBasicMaterial({ color:col, transparent:true, opacity:0.28,
+      side:THREE.DoubleSide, depthWrite:false }));
+  cap.position.y = 0.85; scene.add(cap);
+  t = { mac, hue, color:col, capsule:cap, filter:makeAlphaFilter(0.35),
+        world:null, map:null, vel:0, residual:0, nodesUsed:0, err:null,
+        lastSeen:performance.now(), posHist:[], rowEl:null };
+  activeTargets.set(mac, t);
+  if (focusMac === null) focusMac = mac;   // first target auto-focused
+  slog('trk', `TARGET ${shortMac(mac)} acquired`);
+  rosterDirty = true;
+  return t;
+}
+function dropTrack(mac, reason){
+  const t = activeTargets.get(mac); if (!t) return;
+  scene.remove(t.capsule); t.capsule.geometry.dispose(); t.capsule.material.dispose();
+  activeTargets.delete(mac);
+  if (focusMac === mac) focusMac = activeTargets.size ? activeTargets.keys().next().value : null;
+  slog('trk', `TARGET ${shortMac(mac)} lost (${reason})`);
+  rosterDirty = true;
+}
+function primaryTrack(){
+  if (focusMac && activeTargets.has(focusMac)) return activeTargets.get(focusMac);
+  return activeTargets.size ? activeTargets.values().next().value : null;
+}
+
+/* Ingest a list of {mac, ranges?|xy?, truth?} into the registry. */
+function ingestTargets(items, now, nodesById){
+  for (const it of items){
+    if (!validMac(it.mac)) continue;       // PR #1298 fix #1: reject unsafe ids
+    let raw = null, nodesUsed = 0, residual = 0;
+    if (it.xy && isFinite(it.xy.x)){ raw = { x:it.xy.x, y:it.xy.y }; nodesUsed = it.nodesUsed || 0; }
+    else if (it.ranges){
+      const { ns, rs } = targetRanges(it.ranges, nodesById, CAL);
+      nodesUsed = ns.length;
+      const sol = mlatSolve2D(ns, rs);
+      if (sol){ raw = { x:sol.x, y:sol.y }; residual = sol.residual; }
+    }
+    if (!raw) continue;                    // no fix this frame; keep prior track
+    const t = ensureTrack(it.mac);
+    const sm = t.filter.update(raw);
+    t.world = mapToWorld(sm.x, sm.y, 0);
+    t.map = sm; t.residual = residual; t.nodesUsed = nodesUsed; t.lastSeen = now;
+    t.posHist.push({ x:t.world.x, z:t.world.z, t:now });
+    if (t.posHist.length > 8) t.posHist.shift();
+    const p0 = t.posHist[0];
+    t.vel = t.posHist.length > 1
+      ? Math.hypot(t.world.x-p0.x, t.world.z-p0.z)/Math.max((now-p0.t)/1000,1e-3) : 0;
+    t.err = (it.truth && isFinite(it.truth.x))
+      ? Math.hypot(sm.x-it.truth.x, sm.y-it.truth.y) : null;
+    // ghost tracks the focused target's sim truth only.
+    if (it.mac === (focusMac || t.mac) && it.truth && isFinite(it.truth.x)){
+      ghost.position.copy(mapToWorld(it.truth.x, it.truth.y, 0.9)); ghost.visible = true;
+    }
+  }
+}
+
+/* Per-frame: position capsules, GC expired tracks, colour by focus. */
+function updateTargets(now){
+  let anyGhost = false;
+  for (const [mac, t] of activeTargets){
+    if (isExpired(t, now, TARGET_TTL)){ dropTrack(mac, 'timeout'); continue; }
+    if (t.world){
+      t.capsule.position.set(t.world.x, 0.85, t.world.z);
+      const focused = mac === focusMac;
+      t.capsule.material.opacity = focused ? 0.42 : 0.22;
+      t.capsule.scale.setScalar(focused ? 1.0 : 0.85);
+      if (t.err != null) anyGhost = true;
+    }
+  }
+  if (!anyGhost) ghost.visible = false;
+}
+
+/* Target Roster panel: rebuild rows on membership change, update values live. */
+function refreshRoster(){
+  const body = document.getElementById('roster-body'); if (!body) return;
+  if (rosterDirty){
+    body.innerHTML = '';
+    if (activeTargets.size === 0){
+      body.innerHTML = '<div class="empty">no targets — awaiting telemetry</div>';
+      document.getElementById('roster-count').textContent = '0';
+      rosterDirty = false; return;
+    }
+    for (const [mac, t] of activeTargets){
+      // PR #1298 fix #1: build the row from elements + textContent; the MAC
+      // never touches innerHTML. `t.hue` is a number, not remote text.
+      const row = document.createElement('div'); row.className = 'rrow';
+      const sw = document.createElement('span'); sw.className = 'sw';
+      sw.style.background = `hsl(${t.hue} 75% 60%)`;
+      const macEl = document.createElement('span'); macEl.className = 'mac';
+      macEl.textContent = shortMac(mac);
+      const xy = document.createElement('span'); xy.className = 'xy';
+      const vel = document.createElement('span'); vel.className = 'vel';
+      const btn = document.createElement('button'); btn.className = 'foc';
+      btn.dataset.mac = mac; btn.textContent = '◎';   // dataset is not an HTML sink
+      btn.addEventListener('click', ()=>{
+        focusMac = (focusMac === mac) ? null : mac; rosterDirty = true;
+        slog('sys', focusMac ? `camera focus → ${shortMac(mac)}` : 'camera focus cleared');
+      });
+      row.append(sw, macEl, xy, vel, btn);
+      t.rowEl = row; body.appendChild(row);
+    }
+    document.getElementById('roster-count').textContent = activeTargets.size;
+    rosterDirty = false;
+  }
+  for (const [, t] of activeTargets){
+    if (!t.rowEl) continue;
+    t.rowEl.classList.toggle('foc-on', t.mac === focusMac);
+    t.rowEl.querySelector('.xy').textContent  = t.map ? `${t.map.x.toFixed(1)},${t.map.y.toFixed(1)}` : '—';
+    t.rowEl.querySelector('.vel').textContent = t.world ? `${t.vel.toFixed(1)}m/s` : '—';
+  }
+}
+
+// Ghost marker at the SIMULATED true position (visible in sim mode only, so
+// the estimate can never masquerade as ground truth).
+const ghost = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 10),
+  new THREE.MeshBasicMaterial({ color:0xffb840, wireframe:true, transparent:true, opacity:0.7 }));
+ghost.visible = false; scene.add(ghost);
+
+// Node→target sight lines, colour-coded by the worst material crossing them
+// (sim only — shows exactly which nodes are NLOS behind which walls).
+const rayGroup = new THREE.Group(); scene.add(rayGroup);
+const RAY_COLORS = { los:0x46e08a, drywall:0xffb840, wood:0xffb840, brick:0xff4fd8, concrete:0xff5a6a };
+function updateSimRays(){
+  const rays = (synthetic && window._simRays) ? window._simRays : [];
+  while (rayGroup.children.length > rays.length){
+    const l = rayGroup.children.pop(); l.geometry.dispose(); l.material.dispose();
+  }
+  while (rayGroup.children.length < rays.length){
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+    rayGroup.add(new THREE.Line(g, new THREE.LineBasicMaterial({ transparent:true, opacity:0.45 })));
+  }
+  rays.forEach((r, i) => {
+    const line = rayGroup.children[i];
+    const a = mapToWorld(r.node.x, r.node.y, r.node.z ?? 1.0);
+    const b = mapToWorld(r.target.x, r.target.y, 0.9);
+    const pos = line.geometry.attributes.position;
+    pos.setXYZ(0, a.x, a.y, a.z); pos.setXYZ(1, b.x, b.y, b.z); pos.needsUpdate = true;
+    line.material.color.setHex(RAY_COLORS[r.worst || 'los']);
+  });
+}
+
+/* Ingest target/ranges fields from a pose payload → mlat state. */
+/* Dispatch a /pose payload into the multi-target registry. Accepts the Phase-8
+   `targets:[{mac,ranges}]` array or a legacy single-target `target`/`ranges`. */
+function updateMlat(d){
+  if (!MAP.nodes) return;
+  const nodesById = Object.fromEntries(MAP.nodes.map(nd => [nd.node_id, nd]));
+  const now = performance.now();
+  let items;
+  if (Array.isArray(d.targets)){
+    const truthByMac = d.targets_true || {};
+    items = d.targets.map(t => ({
+      mac: t.mac, ranges: t.ranges, xy: t.xy,
+      truth: t.truth || truthByMac[t.mac] || null }));
+  } else if (d.target && isFinite(d.target.x)){
+    items = [{ mac:'TARGET_01', xy:{x:d.target.x, y:d.target.y},
+               nodesUsed:(d.ranges||[]).length, truth:d.target_true }];
+  } else if (Array.isArray(d.ranges)){
+    items = [{ mac:'TARGET_01', ranges:d.ranges, truth:d.target_true }];
+  } else return;
+  ingestTargets(items, now, nodesById);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   5.  Vitals HUD (2D overlay: bezier breathing, pulsing heart ring, stress bar)
+   ═══════════════════════════════════════════════════════════════════════════ */
+const gB = document.getElementById('g-breath').getContext('2d');
+const gH = document.getElementById('g-heart').getContext('2d');
+const gS = document.getElementById('g-stress').getContext('2d');
+const breathBuf = new Array(120).fill(0);
+let heartPhase = 0;
+const vit = { brBpm:14, hrBpm:68, stress:0.25, brSim:true, hrSim:true };
+
+// Smooth bezier through a rolling buffer.
+function drawWave(ctx, buf, color){
+  const w=ctx.canvas.width, h=ctx.canvas.height; ctx.clearRect(0,0,w,h);
+  ctx.strokeStyle='rgba(63,228,255,.08)'; ctx.lineWidth=1;
+  for(let gy=0;gy<=h;gy+=h/3){ ctx.beginPath(); ctx.moveTo(0,gy); ctx.lineTo(w,gy); ctx.stroke(); }
+  ctx.beginPath(); ctx.lineWidth=2; ctx.strokeStyle=color;
+  ctx.shadowColor=color; ctx.shadowBlur=8;
+  const n=buf.length, step=w/(n-1), mid=h/2, amp=h*0.38;
+  const px=i=>i*step, py=i=>mid-buf[clamp(i,0,n-1)]*amp;
+  ctx.moveTo(px(0),py(0));
+  for(let i=1;i<n;i++){                                // Catmull-Rom → cubic bezier segments
+    const cx1=px(i-1)+(px(i)-px(i-2))/6, cy1=py(i-1)+(py(i)-py(i-2))/6;
+    const cx2=px(i)  -(px(i+1)-px(i-1))/6, cy2=py(i)  -(py(i+1)-py(i-1))/6;
+    ctx.bezierCurveTo(cx1,cy1,cx2,cy2,px(i),py(i));
+  }
+  ctx.stroke(); ctx.shadowBlur=0;
+}
+function drawHeart(ctx){
+  const w=ctx.canvas.width, h=ctx.canvas.height, cx=w/2, cy=h/2; ctx.clearRect(0,0,w,h);
+  // pulsing ring at HR frequency; radius eases with a cardiac-like double bump
+  const beat = 0.5*(1+Math.sin(heartPhase)); const kick = Math.exp(-(((heartPhase%(2*Math.PI))-0.4)**2)/0.05);
+  const r = 20 + beat*4 + kick*10;
+  ctx.strokeStyle=`rgba(255,79,216,${0.4+0.5*beat})`; ctx.lineWidth=3+kick*3;
+  ctx.shadowColor='#ff4fd8'; ctx.shadowBlur=14;
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,7); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx,cy,r*0.62,0,7); ctx.globalAlpha=0.5; ctx.stroke(); ctx.globalAlpha=1;
+  ctx.shadowBlur=0;
+  ctx.fillStyle='#ff8fe4'; ctx.font='600 13px JetBrains Mono, monospace'; ctx.textAlign='center';
+  ctx.fillText('♥', cx, cy+5);
+}
+function drawStress(ctx, s){
+  const w=ctx.canvas.width, h=ctx.canvas.height; ctx.clearRect(0,0,w,h);
+  const g=ctx.createLinearGradient(0,0,w,0);
+  g.addColorStop(0,'#46e08a'); g.addColorStop(0.5,'#ffb840'); g.addColorStop(1,'#ff5a6a');
+  ctx.fillStyle=g; ctx.globalAlpha=0.35; ctx.fillRect(0,0,w,h); ctx.globalAlpha=1;
+  const x=clamp(s,0,1)*w;
+  ctx.fillStyle='#fff'; ctx.shadowColor='#fff'; ctx.shadowBlur=10;
+  ctx.fillRect(x-2,0,4,h); ctx.shadowBlur=0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   6.  Live WebSocket bridge  ( + synthetic fallback driver )
+   ═══════════════════════════════════════════════════════════════════════════ */
+const $ = id=>document.getElementById(id);
+function banner(cls,txt){ const b=$('banner'); b.className=cls; b.textContent=txt; }
+
+let last=null, frames=0, tFps=performance.now(), poseFps=0;
+let synthetic=true;                     // until a real esp32 frame arrives
+let posHist=[];                         // for velocity (world centroid)
+
+function onPose(d){
+  last=d; frames++;
+  // 'synthetic' => the no-hardware demo driver. Real sources (esp32 CSI, udp
+  // RSSI gateway) are LIVE — coarse, but real data, so not flagged simulated.
+  synthetic = (d.src==='synthetic');
+  banner(synthetic ? 'sim' : 'live',
+    synthetic ? 'SIMULATED — no hardware (demo driver)'
+              : `LIVE — ${d.src==='udp' ? 'UDP RSSI gateway' : 'real ESP32 CSI'}`);
+  $('t-src').textContent=d.src||'—';
+  $('t-pres').textContent=d.presence?'PRESENT':'—';
+  $('t-motion').textContent=d.motion!=null?Math.round(d.motion):'—';
+  if (d.kps) ingestPose(d.kps);
+  updateMlat(d);   // target/ranges → blueprint-frame position (or null)
+  // Vitals: use bridge fields if present, else keep synthesising.
+  if (d.bpm_breath!=null){ vit.brBpm=d.bpm_breath; vit.brSim=false; }
+  if (d.bpm_heart !=null){ vit.hrBpm=d.bpm_heart;  vit.hrSim=false; }
+  if (d.stress    !=null){ vit.stress=d.stress; }
+  window._rtiArr = Array.isArray(d.rti)?d.rti:null;
+}
+
+function connect(){
+  banner('down','CONNECTING…');
+  let ws;
+  try { ws = new WebSocket(POSE_WS); } catch(e){ return startSynthetic(); }
+  ws.onopen  = ()=>{ banner('sim','WAITING FOR POSE…'); connect.wasOpen = true;
+    slog('sys', `bridge connected (${POSE_WS})`); };
+  ws.onmessage = ev=>{ let d; try{ d=JSON.parse(ev.data);}catch{return;}
+    if (d.type==='meta'){ if(d.edges) EDGES=d.edges; return; }
+    if (d.type==='pose'){ synthOff(); onPose(d); } };
+  ws.onclose = ()=>{ banner('down','NO BRIDGE — running synthetic driver');
+    if (connect.wasOpen) slog('sys', 'bridge lost — synthetic driver engaged');
+    connect.wasOpen = false; startSynthetic(); setTimeout(connect, 2500); };
+  ws.onerror = ()=> { try{ws.close();}catch{} };
+}
+
+/* Synthetic driver — a physically-plausible walking/breathing subject so the
+   whole HUD is demoable with no hardware. Clearly flagged SIMULATED. The
+   subject walks a waypoint loop inside the blueprint and emits noisy per-node
+   ranges (sigma ~0.25 m — coarse indoor ranging), so the full ranges →
+   multilateration → capsule pipeline runs end-to-end with a visible
+   true-vs-estimate error readout.                                             */
+let synthTimer=null, sT=0;
+let pathPos=null, pathLeg=0;
+function synthWaypoints(){
+  if (Array.isArray(MAP.sim_path) && MAP.sim_path.length >= 2) return MAP.sim_path;
+  const W=MAP.map_metadata.width_meters, H=MAP.map_metadata.height_meters;
+  const mx=Math.min(2, W*0.15), my=Math.min(2, H*0.15);
+  return [[mx,my],[W-mx,my],[W-mx,H-my],[W/2,H-my],[mx,H-my]];
+}
+function advancePath(step){
+  const wp=synthWaypoints();
+  if(!pathPos) pathPos={x:wp[0][0], y:wp[0][1]};
+  const tgt=wp[(pathLeg+1)%wp.length];
+  const dx=tgt[0]-pathPos.x, dy=tgt[1]-pathPos.y, d=Math.hypot(dx,dy);
+  if (d < step){ pathPos={x:tgt[0], y:tgt[1]}; pathLeg=(pathLeg+1)%wp.length; }
+  else { pathPos.x+=dx/d*step; pathPos.y+=dy/d*step; }
+  return pathPos;
+}
+function startSynthetic(){ if(synthTimer) return;
+  synthTimer=setInterval(()=>{
+    sT+=0.05;
+    const cx = 0.5 + 0.16*Math.sin(sT*0.5);          // stroll left/right
+    const bob = 0.02*Math.sin(sT*4);
+    const sw  = 0.28*Math.sin(sT*2);                 // limb swing
+    const K = new Array(17);
+    const set=(i,x,y)=>K[i]=[x,y];
+    set(KP.NOSE, cx, 0.14+bob);
+    set(KP.LSHO, cx-0.09, 0.26+bob); set(KP.RSHO, cx+0.09, 0.26+bob);
+    set(KP.LELB, cx-0.13, 0.40+bob+0.05*sw); set(KP.RELB, cx+0.13, 0.40+bob-0.05*sw);
+    set(KP.LWRI, cx-0.15, 0.54+bob+0.09*sw); set(KP.RWRI, cx+0.15, 0.54+bob-0.09*sw);
+    set(KP.LHIP, cx-0.06, 0.55+bob); set(KP.RHIP, cx+0.06, 0.55+bob);
+    set(KP.LKNE, cx-0.07, 0.74-0.04*sw); set(KP.RKNE, cx+0.07, 0.74+0.04*sw);
+    set(KP.LANK, cx-0.07, 0.93-0.06*sw); set(KP.RANK, cx+0.07, 0.93+0.06*sw);
+    set(KP.LEYE,cx-0.02,0.12); set(KP.REYE,cx+0.02,0.12); set(KP.LEAR,cx-0.05,0.13); set(KP.REAR,cx+0.05,0.13);
+    // Waypoint walk (1.0 m/s) → true position → per-node ranges degraded by
+    // every wall crossing the sight line (material bias + sigma, NLOS model).
+    const prevP = pathPos ? { x: pathPos.x, y: pathPos.y } : null;
+    const p = advancePath(0.05);
+    // TARGET wall-crossing events (sim ground truth).
+    if (prevP && MAP.structural_walls){
+      MAP.structural_walls.forEach((w, i) => {
+        if (segIntersect(prevP.x, prevP.y, p.x, p.y, w.start[0], w.start[1], w.end[0], w.end[1]))
+          slog('sim', `TARGET_01 crossed ${w.material || 'wall'}_wall_${String(i+1).padStart(2,'0')}`);
+      });
+    }
+    const gauss = ()=> (Math.random()+Math.random()+Math.random()-1.5)*2; // ~N(0,1): sum-of-3-uniforms sigma=0.5, x2 => unit
+    const rays = [];
+    const ranges = (MAP.nodes||[]).map(nd => {
+      const trueR = Math.hypot(p.x-nd.x, p.y-nd.y, 1.0-nd.z);
+      const crossed = wallsBetween(p.x, p.y, nd.x, nd.y, MAP.structural_walls);
+      const att = attenuatedRange(trueR, crossed, 0.08, gauss, CAL.matScale);
+      rays.push({ node: nd, target: p, worst: att.worst, crossed: att.crossed });
+      // Per-node LOS↔NLOS transition events.
+      const prev = startSynthetic.nlos?.[nd.node_id] ?? null;
+      if (prev !== att.worst){
+        (startSynthetic.nlos ||= {})[nd.node_id] = att.worst;
+        if (att.worst) slog('sim', `${nd.node_id} sight-line obstructed (${att.worst})`);
+        else if (prev !== null) slog('sim', `${nd.node_id} line-of-sight restored`);
+      }
+      return { node_id: nd.node_id, r_m: att.r };
+    });
+    window._simRays = rays;
+    // Second independent device (mac SIM:BB:02) walks a Lissajous loop — proves
+    // multi-target association, roster, and per-target solve with no hardware.
+    const W=MAP.map_metadata.width_meters, H=MAP.map_metadata.height_meters;
+    const b = { x: W*0.5 + W*0.32*Math.sin(sT*0.40 + 1.7),
+                y: H*0.5 + H*0.34*Math.sin(sT*0.55) };
+    const rangesB = (MAP.nodes||[]).map(nd => {
+      const trueR = Math.hypot(b.x-nd.x, b.y-nd.y, 1.0-nd.z);
+      const crossed = wallsBetween(b.x, b.y, nd.x, nd.y, MAP.structural_walls);
+      const att = attenuatedRange(trueR, crossed, 0.08, gauss, CAL.matScale);
+      return { node_id: nd.node_id, r_m: att.r };
+    });
+    onPose({ type:'pose', src:'synthetic', kps:K, presence:true,
+             motion:40+20*Math.abs(Math.sin(sT)),
+             targets:[
+               { mac:'SIM:AA:00:01', ranges, truth:{x:p.x, y:p.y} },
+               { mac:'SIM:BB:00:02', ranges:rangesB, truth:{x:b.x, y:b.y} },
+             ]});
+  }, 50);
+}
+function synthOff(){ if(synthTimer){ clearInterval(synthTimer); synthTimer=null; } }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   7.  Controls
+   ═══════════════════════════════════════════════════════════════════════════ */
+function toggle(btn, on, fn){ btn.addEventListener('click',()=>{ on.v=!on.v; btn.classList.toggle('on',on.v); fn(on.v); }); }
+const S = { rti:{v:true}, caps:{v:true}, vel:{v:true}, bloom:{v:true} };
+toggle($('b-rti'),  S.rti,  v=>RTI.visible=v);
+toggle($('b-caps'), S.caps, v=>{ capsule.visible=v; capRing.visible=v; });
+toggle($('b-vel'),  S.vel,  v=>velArrow.visible=v);
+toggle($('b-bloom'),S.bloom,v=>bloomOn=v);
+$('c-spin').addEventListener('change', e=>controls.autoRotate=e.target.checked);
+controls.autoRotate=false; controls.autoRotateSpeed=0.6;
+
+/* ── Layout editor ─────────────────────────────────────────────────────────── */
+let editMode = false;
+$('b-edit').addEventListener('click', ()=>{
+  editMode = !editMode;
+  $('b-edit').classList.toggle('on', editMode);
+  document.getElementById('edit-panel').classList.toggle('open', editMode);
+  if (editMode){ $('e-w').value = MAP.map_metadata.width_meters;
+                 $('e-h').value = MAP.map_metadata.height_meters; }
+});
+
+// Double-click: place a node on the floor, or remove the node marker hit.
+const raycaster = new THREE.Raycaster();
+renderer.domElement.addEventListener('dblclick', e=>{
+  if (!editMode) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((e.clientX-r.left)/r.width)*2-1,
+                                -((e.clientY-r.top)/r.height)*2+1);
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.intersectObjects(nodeMarkers)[0];
+  if (hit){
+    const gone = hit.object.userData.node_id;
+    MAP.nodes = MAP.nodes.filter(nd => nd.node_id !== gone);
+    buildMap(MAP);
+    slog('edt', `${gone} removed from tracking matrix`);
+    return;
+  }
+  const pt = new THREE.Vector3();
+  if (!raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0,1,0), 0), pt)) return;
+  const W = MAP.map_metadata.width_meters, H = MAP.map_metadata.height_meters;
+  const mx = clamp(pt.x + W/2, 0, W), my = clamp(pt.z + H/2, 0, H);
+  let n = MAP.nodes.length + 1, id;
+  do { id = 'ESP32_' + String(n++).padStart(2,'0'); }
+  while (MAP.nodes.some(nd => nd.node_id === id));
+  MAP.nodes.push({ node_id:id, x:+mx.toFixed(2), y:+my.toFixed(2), z:1.5 });
+  buildMap(MAP);   // new node joins the tracking matrix immediately
+  slog('edt', `${id} placed at (${mx.toFixed(1)}, ${my.toFixed(1)}) — tracking matrix updated`);
+});
+
+// Floor-plan image upload → translucent textured plane under the grid.
+$('e-floor').addEventListener('click', ()=> $('e-file').click());
+$('e-file').addEventListener('change', e=>{
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = ()=>{ floorTexURL = rd.result; buildMap(MAP); };
+  rd.readAsDataURL(f);
+});
+
+// Map dimension edits rescale the world (grid, RTI field, camera framing).
+for (const [id, key] of [['e-w','width_meters'], ['e-h','height_meters']]){
+  $(id).addEventListener('change', e=>{
+    const v = parseFloat(e.target.value);
+    if (isFinite(v) && v >= 2 && v <= 200){ MAP.map_metadata[key] = v; buildMap(MAP); }
+  });
+}
+
+// Export the live layout as schema-conformant JSON.
+$('e-export').addEventListener('click', ()=>{
+  const blob = new Blob([JSON.stringify(MAP, null, 2)], { type:'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (MAP.map_metadata.name || 'ruview-layout') + '.json';
+  a.click();
+  setTimeout(()=> URL.revokeObjectURL(a.href), 5000);
+  slog('edt', `layout exported (${MAP.nodes.length} nodes, ${(MAP.structural_walls||[]).length} walls)`);
+});
+
+// Calibration sliders → CAL state (live; N/P0 affect the next rssi frame).
+for (const [id, key, vId, fmt] of [
+  ['cal-n',  'n_exp',    'cal-n-v',  v=>v.toFixed(2)],
+  ['cal-p0', 'p0_dbm',   'cal-p0-v', v=>v.toFixed(0)],
+  ['cal-mat','matScale', 'cal-mat-v',v=>v.toFixed(2)],
+]){
+  $(id).addEventListener('input', e=>{
+    CAL[key] = parseFloat(e.target.value);
+    $(vId).textContent = fmt(CAL[key]);
+  });
+  $(id).addEventListener('change', ()=>
+    slog('sys', `calibration: N=${CAL.n_exp.toFixed(2)} P0=${CAL.p0_dbm} dBm mat×${CAL.matScale.toFixed(2)}`));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   8.  Main loop
+   ═══════════════════════════════════════════════════════════════════════════ */
+const hud=document.getElementById('hud'); const hctx=hud.getContext('2d');
+function resize(){
+  renderer.setSize(innerWidth,innerHeight); composer.setSize(innerWidth,innerHeight);
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  hud.width=innerWidth; hud.height=innerHeight;
+}
+addEventListener('resize', resize); resize();
+
+let prevT=performance.now();
+function tick(){
+  requestAnimationFrame(tick);
+  const now=performance.now(), dt=(now-prevT)/1000; prevT=now;
+
+  // Camera lock-on: ease the orbit pivot toward the focused target.
+  const foc = focusMac && activeTargets.get(focusMac);
+  if (foc && foc.world) controls.target.lerp(new THREE.Vector3(foc.world.x, 0.9, foc.world.z), 0.08);
+  controls.update();
+
+  // pose → rig articulation; translation comes from the primary target
+  if (kpHist.length) applyPose();
+  updateTargets(now);                       // GC expired tracks + place capsules
+  const prim = primaryTrack();
+
+  // Primary target drives rig translation, focus ring, velocity vector, RTI.
+  const hipC=joint('hipC');
+  const center = prim ? prim.world : hipC;
+  if (prim && prim.world && hipC) rig.position.set(prim.world.x, hipC.y, prim.world.z);
+  if (center){
+    capRing.position.set(center.x,0.02,center.z);
+    capRing.material.color.copy(prim ? prim.color : new THREE.Color(0x3fe4ff));
+    posHist.push({x:center.x,z:center.z,t:now}); if(posHist.length>8) posHist.shift();
+    const p0=posHist[0], v=posHist.length>1?{x:(center.x-p0.x),z:(center.z-p0.z)}:{x:0,z:0};
+    const spd=Math.hypot(v.x,v.z)/Math.max((now-p0.t)/1000,1e-3);
+    $('t-vel').textContent=spd.toFixed(2)+' m/s';
+    if (spd>0.02){ velArrow.position.set(center.x,0.9,center.z);
+      velArrow.setDirection(V(v.x,0,v.z).normalize()); velArrow.setLength(clamp(spd*1.2,0.2,1.4),0.18,0.1); }
+    paintRTI(window._rtiArr, center);
+  }
+
+  // IPS readouts = primary (focused) target
+  $('ips-nodes').textContent = prim ? String(prim.nodesUsed) : '—';
+  $('ips-xy').textContent = (prim && prim.map) ? `${prim.map.x.toFixed(2)}, ${prim.map.y.toFixed(2)}` : '—';
+  $('ips-res').textContent = prim ? prim.residual.toFixed(3)+' m' : '—';
+  $('ips-err').textContent = (prim && prim.err!=null) ? prim.err.toFixed(2)+' m' : '—';
+  const ipsTag = $('ips-tag');
+  ipsTag.textContent = prim ? (synthetic ? '·sim' : '·live') : '·off';
+  ipsTag.style.color = prim ? (synthetic ? 'var(--amber)' : 'var(--green)') : 'var(--mute)';
+  updateSimRays();
+  refreshRoster();
+  const sr = (synthetic && window._simRays) ? window._simRays : null;
+  $('ips-nlos').textContent = sr ? `${sr.filter(r=>r.worst).length} / ${sr.length}` : '—';
+
+  // vitals advance
+  heartPhase += dt * (vit.hrBpm/60) * 2*Math.PI;
+  const brW = Math.sin(now/1000 * (vit.brBpm/60) * 2*Math.PI);
+  breathBuf.push(brW*0.9); breathBuf.shift();
+  drawWave(gB, breathBuf, '#3fe4ff'); drawHeart(gH); drawStress(gS, vit.stress);
+  $('v-breath').textContent=vit.brBpm.toFixed(0)+' bpm';
+  $('v-heart').textContent=vit.hrBpm.toFixed(0)+' bpm';
+  $('v-stress').textContent=(vit.stress*100).toFixed(0)+' %';
+  $('br-tag').textContent=vit.brSim?'·sim':'·live'; $('br-tag').style.color=vit.brSim?'var(--amber)':'var(--green)';
+  $('hr-tag').textContent=vit.hrSim?'·sim':'·live'; $('hr-tag').style.color=vit.hrSim?'var(--amber)':'var(--green)';
+
+  // fps
+  if (now-tFps>1000){ poseFps=frames; frames=0; tFps=now; $('t-fps').textContent=poseFps; }
+
+  bloomOn ? composer.render() : renderer.render(scene,camera);
+}
+
+// slow synthetic stress drift for the demo
+setInterval(()=>{ if(vit.hrSim) vit.stress = clamp(vit.stress + (Math.random()-0.5)*0.06, 0.05, 0.85); }, 1200);
+
+connect(); startSynthetic(); tick();
+</script>
+</body>
+</html>
