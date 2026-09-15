@@ -1,27 +1,8 @@
-//! Neo4j sink — logs sensing events to a Neo4j graph database via Bolt.
+//! Neo4j sensing sink.
 //!
-//! Follows the same broadcast-subscriber pattern as the MQTT publisher
-//! (`mqtt/publisher.rs`). Subscribes to the main `broadcast::Sender<String>`
-//! channel, deserializes each `SensingUpdate`, and writes to Neo4j.
-//!
-//! ## Schema
-//!
-//! ```cypher
-//! (:SensingEvent {timestamp, source, tick, motion_level, person_count, presence, signal_quality})
-//!   -[:HAS_VITALS]-> (:VitalSigns {heart_rate, breathing_rate, hr_confidence, br_confidence, signal_quality})
-//!   -[:DETECTED {index}]-> (:Person {id, position_x, position_y, keypoints_json})
-//!   -[:FROM_NODE]-> (:SensorNode {id, rssi_dbm, position_x, position_y})
-//!
-//! (:Room {name}) -[:CURRENT_EVENT]-> (:SensingEvent)
-//! ```
-//!
-//! ## Lifecycle
-//!
-//! 1. Connect to Neo4j via Bolt (`neo4rs::Graph`).
-//! 2. Ensure room node exists.
-//! 3. Subscribe to broadcast channel.
-//! 4. Per inbound message: deserialize, write nodes/relationships, update Room pointer.
-//! 5. On channel close: log and exit.
+//! Every event is durably owned by one Room through `HAS_EVENT`; the room's
+//! `CURRENT_EVENT` pointer is only a convenience pointer. Event creation,
+//! subordinate nodes, ownership, and pointer replacement commit atomically.
 
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
@@ -29,30 +10,22 @@ use tracing::{error, info, warn};
 
 pub use crate::cli::Neo4jArgs;
 
-/// Configuration for the Neo4j sink.
 #[derive(Debug, Clone)]
 pub struct Neo4jConfig {
-    /// Bolt URL (e.g. `bolt://x1-370:7687`).
     pub url: String,
-    /// Neo4j username.
     pub user: String,
-    /// Neo4j password (resolved from env var at startup).
     pub password: String,
-    /// Room identifier for the `:Room` node.
     pub room_name: String,
-    /// TTL in hours: events older than this are deleted periodically (0 = disabled).
     pub ttl_hours: u64,
 }
 
 impl Neo4jConfig {
-    /// Build config from CLI args + environment.
     pub fn from_args(args: &Neo4jArgs) -> Result<Self, String> {
         let password = std::env::var(&args.neo4j_password_env)
-            .map_err(|_| format!(
-                "Neo4j password env var `{}` not set",
-                args.neo4j_password_env
-            ))?;
-
+            .map_err(|_| format!("Neo4j password env var `{}` not set", args.neo4j_password_env))?;
+        if args.neo4j_room_name.trim().is_empty() {
+            return Err("Neo4j room name must not be empty".into());
+        }
         Ok(Self {
             url: args.neo4j_url.clone(),
             user: args.neo4j_user.clone(),
@@ -63,11 +36,7 @@ impl Neo4jConfig {
     }
 }
 
-/// Spawn the Neo4j sink background task.
-pub fn spawn(
-    cfg: Neo4jConfig,
-    mut state_rx: broadcast::Receiver<String>,
-) -> JoinHandle<()> {
+pub fn spawn(cfg: Neo4jConfig, mut state_rx: broadcast::Receiver<String>) -> JoinHandle<()> {
     tokio::spawn(async move {
         if let Err(e) = run(cfg, &mut state_rx).await {
             error!("[neo4j] sink terminated: {e}");
@@ -75,333 +44,145 @@ pub fn spawn(
     })
 }
 
-/// Core run loop. Receives `SensingUpdate` JSON from the broadcast channel
-/// and writes to Neo4j.
 async fn run(cfg: Neo4jConfig, state_rx: &mut broadcast::Receiver<String>) -> Result<(), String> {
     use neo4rs::{query, Graph};
-
-    info!(
-        url = %cfg.url,
-        user = %cfg.user,
-        room = %cfg.room_name,
-        "[neo4j] connecting",
-    );
-
     let graph = Graph::new(&cfg.url, &cfg.user, &cfg.password)
         .map_err(|e| format!("Neo4j connection failed: {e}"))?;
 
-    info!("[neo4j] connected");
+    graph.run(query("MERGE (r:Room {name:$name}) SET r.last_updated=datetime()")
+        .param("name", cfg.room_name.clone())).await
+        .map_err(|e| format!("Room setup failed: {e}"))?;
+    graph.run(query("CREATE INDEX event_timestamp IF NOT EXISTS FOR (e:SensingEvent) ON (e.timestamp)"))
+        .await.map_err(|e| format!("Index creation failed: {e}"))?;
+    graph.run(query("CREATE INDEX event_room IF NOT EXISTS FOR (e:SensingEvent) ON (e.room_name)"))
+        .await.map_err(|e| format!("Index creation failed: {e}"))?;
 
-    // Ensure room node exists.
-    graph
-        .run(query("MERGE (r:Room {name: $name}) SET r.last_updated = datetime()")
-            .param("name", cfg.room_name.clone()))
-        .await
-        .map_err(|e| format!("Schema setup failed: {e}"))?;
-
-    // Create time-series index on SensingEvent.timestamp for fast range queries.
-    graph
-        .run(query(
-            "CREATE INDEX event_timestamp IF NOT EXISTS
-             FOR (e:SensingEvent) ON (e.timestamp)",
-        ))
-        .await
-        .map_err(|e| format!("Index creation failed: {e}"))?;
-
-    info!(room = %cfg.room_name, "[neo4j] schema ready");
-
-    // Spawn TTL compaction background task if enabled.
     if cfg.ttl_hours > 0 {
-        let compaction_url = cfg.url.clone();
-        let compaction_user = cfg.user.clone();
-        let compaction_pass = cfg.password.clone();
-        let ttl = cfg.ttl_hours;
-        tokio::spawn(async move {
-            compaction_loop(&compaction_url, &compaction_user, &compaction_pass, ttl).await;
-        });
-        info!(ttl_hours = cfg.ttl_hours, "[neo4j] TTL compaction enabled");
+        let (url, user, pass, room, ttl) = (
+            cfg.url.clone(), cfg.user.clone(), cfg.password.clone(), cfg.room_name.clone(), cfg.ttl_hours,
+        );
+        tokio::spawn(async move { compaction_loop(&url, &user, &pass, &room, ttl).await; });
     }
 
-    let mut event_count: u64 = 0;
-
+    let mut event_count = 0u64;
     loop {
         match state_rx.recv().await {
-            Ok(json) => {
-                let v: serde_json::Value = match serde_json::from_str(&json) {
+            Ok(raw) => {
+                let value: serde_json::Value = match serde_json::from_str(&raw) {
                     Ok(v) => v,
-                    Err(e) => {
-                        warn!("[neo4j] failed to parse SensingUpdate JSON: {e}");
-                        continue;
-                    }
+                    Err(e) => { warn!("[neo4j] invalid update: {e}"); continue; }
                 };
-
-                if let Err(e) = write_event(&graph, &cfg.room_name, &v).await {
-                    warn!("[neo4j] write failed: {e}");
+                if let Err(e) = write_event(&graph, &cfg.room_name, &value).await {
+                    warn!("[neo4j] transactional write failed: {e}");
                     continue;
                 }
-
                 event_count += 1;
-                if event_count.is_multiple_of(50) {
-                    info!(event_count, "[neo4j] events written");
-                }
-                if event_count <= 10 || event_count.is_multiple_of(100) {
-                    info!(payload = %v, "[neo4j] event payload");
-                }
+                if event_count.is_multiple_of(50) { info!(event_count, "[neo4j] events written"); }
             }
-            Err(broadcast::error::RecvError::Lagged(n)) => {
-                warn!("[neo4j] lagged behind broadcast by {n} messages — dropped");
-            }
-            Err(broadcast::error::RecvError::Closed) => {
-                info!("[neo4j] broadcast channel closed, exiting");
-                return Ok(());
-            }
+            Err(broadcast::error::RecvError::Lagged(n)) => warn!("[neo4j] dropped {n} lagged updates"),
+            Err(broadcast::error::RecvError::Closed) => return Ok(()),
         }
     }
 }
 
-/// Write a single SensingUpdate (as JSON Value) as Neo4j nodes + relationships.
-async fn write_event(
-    graph: &neo4rs::Graph,
-    room_name: &str,
-    v: &serde_json::Value,
-) -> Result<(), String> {
+async fn write_event(graph: &neo4rs::Graph, room: &str, v: &serde_json::Value) -> Result<(), String> {
     use neo4rs::query;
 
     let timestamp = v["timestamp"].as_f64().unwrap_or(0.0);
-    let ts_str = chrono::DateTime::from_timestamp_millis((timestamp * 1000.0) as i64)
-        .map(|dt| dt.to_rfc3339())
-        .unwrap_or_else(|| timestamp.to_string());
-
-    let source = v["source"].as_str().unwrap_or("unknown");
+    let ts = chrono::DateTime::from_timestamp_millis((timestamp * 1000.0) as i64)
+        .map(|dt| dt.to_rfc3339()).unwrap_or_else(|| timestamp.to_string());
+    let source = v["source"].as_str().unwrap_or("unknown").to_string();
     let tick = v["tick"].as_i64().unwrap_or(0);
-    let motion_level = v["classification"]["motion_level"]
-        .as_str()
-        .unwrap_or("absent");
+    let motion = v["classification"]["motion_level"].as_str().unwrap_or("absent").to_string();
     let presence = v["classification"]["presence"].as_bool().unwrap_or(false);
-    let person_count = v["estimated_persons"].as_i64().unwrap_or(0);
-    let signal_quality = v["signal_quality_score"].as_f64().unwrap_or(0.0);
+    let persons = v["estimated_persons"].as_i64().unwrap_or(0);
+    let quality = v["signal_quality_score"].as_f64().unwrap_or(0.0);
 
-    // 1. Create the SensingEvent node.
-    graph
-        .run(query(
-            "CREATE (e:SensingEvent {
-                timestamp: $timestamp,
-                source: $source,
-                tick: $tick,
-                motion_level: $motion_level,
-                person_count: $person_count,
-                presence: $presence,
-                signal_quality: $signal_quality,
-                created_at: datetime()
-            })",
-        )
-        .param("timestamp", ts_str.clone())
-        .param("source", source)
-        .param("tick", tick)
-        .param("motion_level", motion_level)
-        .param("person_count", person_count)
-        .param("presence", presence)
-        .param("signal_quality", signal_quality))
-        .await
-        .map_err(|e| format!("Event creation failed: {e}"))?;
+    let mut queries = Vec::new();
+    queries.push(query(
+        "MATCH (r:Room {name:$room})
+         CREATE (e:SensingEvent {room_name:$room,timestamp:$ts,source:$source,tick:$tick,motion_level:$motion,person_count:$persons,presence:$presence,signal_quality:$quality,created_at:datetime()})
+         CREATE (r)-[:HAS_EVENT]->(e)"
+    ).param("room", room.to_string()).param("ts", ts.clone()).param("source", source)
+      .param("tick", tick).param("motion", motion).param("persons", persons)
+      .param("presence", presence).param("quality", quality));
 
-    // 2. Create VitalSigns node and link to event.
     if let Some(vs) = v.get("vital_signs") {
-        let hr = vs["heart_rate_bpm"].as_f64().unwrap_or(0.0);
-        let br = vs["breathing_rate_bpm"].as_f64().unwrap_or(0.0);
-        let hr_conf = vs["heartbeat_confidence"].as_f64().unwrap_or(0.0);
-        let br_conf = vs["breathing_confidence"].as_f64().unwrap_or(0.0);
-        let vs_quality = vs["signal_quality"].as_f64().unwrap_or(0.0);
-
-        graph
-            .run(query(
-                "MATCH (e:SensingEvent {timestamp: $timestamp})
-                 CREATE (v:VitalSigns {
-                    heart_rate: $hr,
-                    breathing_rate: $br,
-                    hr_confidence: $hr_conf,
-                    br_confidence: $br_conf,
-                    signal_quality: $vs_quality
-                 })
-                 CREATE (e)-[:HAS_VITALS]->(v)",
-            )
-            .param("timestamp", ts_str.clone())
-            .param("hr", hr)
-            .param("br", br)
-            .param("hr_conf", hr_conf)
-            .param("br_conf", br_conf)
-            .param("vs_quality", vs_quality))
-            .await
-            .map_err(|e| format!("VitalSigns creation failed: {e}"))?;
+        queries.push(query(
+            "MATCH (e:SensingEvent {room_name:$room,timestamp:$ts,tick:$tick})
+             CREATE (x:VitalSigns {heart_rate:$hr,breathing_rate:$br,hr_confidence:$hc,br_confidence:$bc,signal_quality:$q})
+             CREATE (e)-[:HAS_VITALS]->(x)"
+        ).param("room", room.to_string()).param("ts", ts.clone()).param("tick", tick)
+          .param("hr", vs["heart_rate_bpm"].as_f64().unwrap_or(0.0))
+          .param("br", vs["breathing_rate_bpm"].as_f64().unwrap_or(0.0))
+          .param("hc", vs["heartbeat_confidence"].as_f64().unwrap_or(0.0))
+          .param("bc", vs["breathing_confidence"].as_f64().unwrap_or(0.0))
+          .param("q", vs["signal_quality"].as_f64().unwrap_or(0.0)));
     }
 
-    // 3. Create Person nodes for each detected person.
-    if let Some(persons) = v["persons"].as_array() {
-        for (i, person) in persons.iter().enumerate() {
-            let id = person["id"].as_i64().unwrap_or(i as i64);
-            let default_pos = vec![0.0.into(), 0.0.into(), 0.0.into()];
-            let pos = person["position"]
-                .as_array()
-                .unwrap_or(&default_pos);
-            let px = pos.first().and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let py = pos.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let conf = person["confidence"].as_f64().unwrap_or(0.0);
-            let keypoints_json = person["keypoints"].to_string();
-
-            graph
-                .run(query(
-                    "MATCH (e:SensingEvent {timestamp: $timestamp})
-                     CREATE (p:Person {
-                        id: $id,
-                        position_x: $px,
-                        position_y: $py,
-                        keypoints_json: $kp,
-                        confidence: $conf
-                     })
-                     CREATE (e)-[:DETECTED {index: $idx}]->(p)",
-                )
-                .param("timestamp", ts_str.clone())
-                .param("id", id)
-                .param("px", px)
-                .param("py", py)
-                .param("kp", keypoints_json.as_str())
-                .param("conf", conf)
-                .param("idx", i as i64))
-                .await
-                .map_err(|e| format!("Person creation failed: {e}"))?;
+    if let Some(items) = v["persons"].as_array() {
+        for (i, p) in items.iter().enumerate() {
+            let pos = p["position"].as_array();
+            let px = pos.and_then(|x| x.first()).and_then(|x| x.as_f64()).unwrap_or(0.0);
+            let py = pos.and_then(|x| x.get(1)).and_then(|x| x.as_f64()).unwrap_or(0.0);
+            queries.push(query(
+                "MATCH (e:SensingEvent {room_name:$room,timestamp:$ts,tick:$tick})
+                 CREATE (p:Person {id:$id,position_x:$px,position_y:$py,keypoints_json:$kp,confidence:$conf})
+                 CREATE (e)-[:DETECTED {index:$idx}]->(p)"
+            ).param("room", room.to_string()).param("ts", ts.clone()).param("tick", tick)
+              .param("id", p["id"].as_i64().unwrap_or(i as i64)).param("px", px).param("py", py)
+              .param("kp", p["keypoints"].to_string()).param("conf", p["confidence"].as_f64().unwrap_or(0.0))
+              .param("idx", i as i64));
         }
     }
 
-    // 4. Link SensorNode entries.
     if let Some(nodes) = v["nodes"].as_array() {
-        for node in nodes {
-            let node_id = node["node_id"].as_i64().unwrap_or(0);
-            let rssi = node["rssi_dbm"].as_f64().unwrap_or(0.0);
-            let default_pos = vec![0.0.into(), 0.0.into(), 0.0.into()];
-            let pos = node["position"]
-                .as_array()
-                .unwrap_or(&default_pos);
-            let px = pos.first().and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let py = pos.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0);
-
-            graph
-                .run(query(
-                    "MATCH (e:SensingEvent {timestamp: $timestamp})
-                     MERGE (n:SensorNode {id: $id})
-                     SET n.rssi_dbm = $rssi,
-                         n.position_x = $px,
-                         n.position_y = $py
-                     CREATE (e)-[:FROM_NODE]->(n)",
-                )
-                .param("timestamp", ts_str.clone())
-                .param("id", node_id)
-                .param("rssi", rssi)
-                .param("px", px)
-                .param("py", py))
-                .await
-                .map_err(|e| format!("SensorNode creation failed: {e}"))?;
+        for n in nodes {
+            let pos = n["position"].as_array();
+            let px = pos.and_then(|x| x.first()).and_then(|x| x.as_f64()).unwrap_or(0.0);
+            let py = pos.and_then(|x| x.get(1)).and_then(|x| x.as_f64()).unwrap_or(0.0);
+            queries.push(query(
+                "MATCH (e:SensingEvent {room_name:$room,timestamp:$ts,tick:$tick})
+                 MERGE (n:SensorNode {id:$id}) SET n.rssi_dbm=$rssi,n.position_x=$px,n.position_y=$py
+                 CREATE (e)-[:FROM_NODE]->(n)"
+            ).param("room", room.to_string()).param("ts", ts.clone()).param("tick", tick)
+              .param("id", n["node_id"].as_i64().unwrap_or(0)).param("rssi", n["rssi_dbm"].as_f64().unwrap_or(0.0))
+              .param("px", px).param("py", py));
         }
     }
 
-    // 5. Update the Room's CURRENT_EVENT pointer (delete old, link newest).
-    graph
-        .run(query(
-            "MATCH (r:Room {name: $room})-[old:CURRENT_EVENT]->(:SensingEvent)
-             DELETE old",
-        )
-        .param("room", room_name.to_string()))
-        .await
-        .map_err(|e| format!("Room cleanup failed: {e}"))?;
+    queries.push(query(
+        "MATCH (r:Room {name:$room}), (e:SensingEvent {room_name:$room,timestamp:$ts,tick:$tick})
+         OPTIONAL MATCH (r)-[old:CURRENT_EVENT]->(:SensingEvent) DELETE old
+         CREATE (r)-[:CURRENT_EVENT]->(e) SET r.last_updated=datetime()"
+    ).param("room", room.to_string()).param("ts", ts).param("tick", tick));
 
-    graph
-        .run(query(
-            "MATCH (r:Room {name: $room}), (e:SensingEvent {timestamp: $timestamp})
-             CREATE (r)-[:CURRENT_EVENT]->(e)
-             SET r.last_updated = datetime()",
-        )
-        .param("room", room_name.to_string())
-        .param("timestamp", ts_str.clone()))
-        .await
-        .map_err(|e| format!("Room update failed: {e}"))?;
-
+    let mut txn = graph.start_txn().await.map_err(|e| format!("transaction start failed: {e}"))?;
+    txn.run_queries(queries).await.map_err(|e| format!("transaction body failed: {e}"))?;
+    txn.commit().await.map_err(|e| format!("transaction commit failed: {e}"))?;
     Ok(())
 }
 
-/// Background compaction loop: deletes SensingEvents (and their connected
-/// Person/VitalSigns nodes) older than the TTL threshold.
-/// Runs every 10 minutes.
-async fn compaction_loop(url: &str, user: &str, password: &str, ttl_hours: u64) {
+async fn compaction_loop(url: &str, user: &str, password: &str, room: &str, ttl_hours: u64) {
     use neo4rs::{query, Graph};
-
-    let graph = match Graph::new(url, user, password) {
-        Ok(g) => g,
-        Err(e) => {
-            warn!("[neo4j-compaction] connection failed: {e}");
-            return;
-        }
-    };
-
-    let mut interval = tokio::time::interval(std::time::Duration::from_secs(600)); // 10 min
+    let graph = match Graph::new(url, user, password) { Ok(g) => g, Err(e) => { warn!("[neo4j-compaction] connection failed: {e}"); return; } };
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(600));
     loop {
         interval.tick().await;
-
-        let cutoff = chrono::Utc::now() - chrono::Duration::hours(ttl_hours as i64);
-        let cutoff_str = cutoff.to_rfc3339();
-
-        // Delete Person nodes only connected to expired events.
-        let _ = graph
-            .run(query(
-                "MATCH (e:SensingEvent)
-                 WHERE datetime(e.timestamp) < datetime($cutoff)
-                 MATCH (e)-[:DETECTED]->(p:Person)
-                 WHERE NOT (p)<-[:DETECTED]-(:SensingEvent)
-                    OR ALL(x IN [(e2)-[:DETECTED]->(p) | e2] WHERE datetime(x.timestamp) < datetime($cutoff))
-                 DETACH DELETE p",
-            )
-            .param("cutoff", cutoff_str.clone()))
-            .await;
-
-        // Delete VitalSigns only connected to expired events.
-        let _ = graph
-            .run(query(
-                "MATCH (e:SensingEvent)
-                 WHERE datetime(e.timestamp) < datetime($cutoff)
-                 MATCH (e)-[:HAS_VITALS]->(v:VitalSigns)
-                 DETACH DELETE v",
-            )
-            .param("cutoff", cutoff_str.clone()))
-            .await;
-
-        // Delete expired events and fix Room pointers if needed.
-        let _ = graph
-            .run(query(
-                "MATCH (e:SensingEvent)
-                 WHERE datetime(e.timestamp) < datetime($cutoff)
-                 OPTIONAL MATCH (r:Room)-[rel:CURRENT_EVENT]->(e)
-                 DELETE rel, e",
-            )
-            .param("cutoff", cutoff_str.clone()))
-            .await;
-
-        // Re-point Room CURRENT_EVENT to newest surviving event.
-        let _ = graph
-            .run(query(
-                "MATCH (r:Room)
-                 WHERE NOT (r)-[:CURRENT_EVENT]->(:SensingEvent)
-                 MATCH (newest:SensingEvent)
-                 WHERE NOT ()-[:CURRENT_EVENT]->(newest)
-                 WITH r, newest
-                 ORDER BY newest.timestamp DESC
-                 LIMIT 1
-                 CREATE (r)-[:CURRENT_EVENT]->(newest)",
-            ))
-            .await;
-
-        info!(
-            ttl_hours,
-            cutoff = %cutoff_str,
-            "[neo4j-compaction] TTL sweep complete",
-        );
+        let cutoff = (chrono::Utc::now() - chrono::Duration::hours(ttl_hours as i64)).to_rfc3339();
+        let mut txn = match graph.start_txn().await { Ok(t) => t, Err(e) => { warn!("[neo4j-compaction] txn start failed: {e}"); continue; } };
+        let queries = vec![
+            query("MATCH (:Room {name:$room})-[:HAS_EVENT]->(e:SensingEvent)-[:DETECTED]->(p:Person) WHERE datetime(e.timestamp)<datetime($cutoff) DETACH DELETE p")
+                .param("room", room.to_string()).param("cutoff", cutoff.clone()),
+            query("MATCH (:Room {name:$room})-[:HAS_EVENT]->(e:SensingEvent)-[:HAS_VITALS]->(v:VitalSigns) WHERE datetime(e.timestamp)<datetime($cutoff) DETACH DELETE v")
+                .param("room", room.to_string()).param("cutoff", cutoff.clone()),
+            query("MATCH (r:Room {name:$room})-[:HAS_EVENT]->(e:SensingEvent) WHERE datetime(e.timestamp)<datetime($cutoff) DETACH DELETE e")
+                .param("room", room.to_string()).param("cutoff", cutoff.clone()),
+            query("MATCH (r:Room {name:$room}) OPTIONAL MATCH (r)-[old:CURRENT_EVENT]->() DELETE old WITH r OPTIONAL MATCH (r)-[:HAS_EVENT]->(e:SensingEvent) WITH r,e ORDER BY e.timestamp DESC WITH r,head(collect(e)) AS newest FOREACH (_ IN CASE WHEN newest IS NULL THEN [] ELSE [1] END | CREATE (r)-[:CURRENT_EVENT]->(newest))")
+                .param("room", room.to_string()),
+        ];
+        if let Err(e) = txn.run_queries(queries).await { warn!("[neo4j-compaction] failed: {e}"); continue; }
+        if let Err(e) = txn.commit().await { warn!("[neo4j-compaction] commit failed: {e}"); }
     }
 }
 
@@ -410,20 +191,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn neo4j_config_from_args() {
-        let args = crate::cli::Neo4jArgs {
+    fn rejects_empty_room_scope() {
+        let args = Neo4jArgs {
             neo4j: true,
-            neo4j_url: "bolt://x1-370:7687".into(),
+            neo4j_url: "bolt://localhost:7687".into(),
             neo4j_user: "neo4j".into(),
-            neo4j_password_env: "NEO4J_PASSWORD".into(),
-            neo4j_room_name: "main".into(),
-            neo4j_ttl_hours: 168,
+            neo4j_password_env: "RUVIEW_TEST_MISSING_PASSWORD".into(),
+            neo4j_room_name: " ".into(),
+            neo4j_ttl_hours: 1,
         };
-        std::env::set_var("NEO4J_PASSWORD", "testpass");
-        let cfg = Neo4jConfig::from_args(&args).unwrap();
-        assert_eq!(cfg.url, "bolt://x1-370:7687");
-        assert_eq!(cfg.password, "testpass");
-        assert_eq!(cfg.room_name, "main");
-        assert_eq!(cfg.ttl_hours, 168);
+        assert!(Neo4jConfig::from_args(&args).is_err());
     }
 }
