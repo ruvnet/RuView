@@ -37,6 +37,7 @@ static adapt_config_t default_cfg(void) {
         .motion_threshold = 0.20f,
         .anomaly_threshold = 0.60f,
         .min_pkt_yield = 5,
+        .degraded_recovery_ticks = 15,
     };
     return c;
 }
@@ -60,9 +61,11 @@ static void test_degraded_gate_on_pkt_yield_collapse(void) {
     adapt_config_t cfg = default_cfg();
     adapt_observation_t obs = quiet_obs();
     obs.pkt_yield_per_sec = 2;  /* below min_pkt_yield=5 */
+    uint16_t recovery_counter = 0;
 
     adapt_decision_t dec;
-    adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_IDLE, &obs, &dec);
+    adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_IDLE, &obs, &dec,
+                               &recovery_counter);
 
     CHECK(dec.change_state, "should change state");
     CHECK(dec.new_state == ADAPT_STATE_DEGRADED, "new state == DEGRADED");
@@ -70,6 +73,7 @@ static void test_degraded_gate_on_pkt_yield_collapse(void) {
           "profile pinned to PASSIVE_LOW_RATE in degraded");
     CHECK(dec.suggested_vital_interval_ms == 2000,
           "cadence relaxed to 2s in degraded");
+    CHECK(recovery_counter == 0, "recovery counter reset on entering DEGRADED");
 }
 
 static void test_degraded_gate_on_coherence_loss(void) {
@@ -77,10 +81,12 @@ static void test_degraded_gate_on_coherence_loss(void) {
     adapt_config_t cfg = default_cfg();
     adapt_observation_t obs = quiet_obs();
     obs.node_coherence = 0.15f;  /* below 0.20 threshold */
+    uint16_t recovery_counter = 0;
 
     adapt_decision_t dec;
-    adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_IDLE, &obs, &dec);
-    CHECK(dec.new_state == ADAPT_STATE_DEGRADED, "coherence loss → DEGRADED");
+    adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_IDLE, &obs, &dec,
+                               &recovery_counter);
+    CHECK(dec.new_state == ADAPT_STATE_DEGRADED, "coherence loss -> DEGRADED");
 }
 
 static void test_anomaly_trumps_motion(void) {
@@ -89,26 +95,30 @@ static void test_anomaly_trumps_motion(void) {
     adapt_observation_t obs = quiet_obs();
     obs.motion_score = 0.9f;  /* high motion */
     obs.anomaly_score = 0.8f; /* but anomaly is above threshold */
+    uint16_t recovery_counter = 0;
 
     adapt_decision_t dec;
-    adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_IDLE, &obs, &dec);
+    adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_IDLE, &obs, &dec,
+                               &recovery_counter);
 
-    CHECK(dec.new_state == ADAPT_STATE_ALERT, "anomaly → ALERT");
+    CHECK(dec.new_state == ADAPT_STATE_ALERT, "anomaly -> ALERT");
     CHECK(dec.new_profile == RV_PROFILE_FAST_MOTION,
           "alert uses FAST_MOTION profile");
     CHECK(dec.suggested_vital_interval_ms == 100, "alert cadence 100ms");
 }
 
 static void test_motion_triggers_sense_active(void) {
-    printf("test: motion → SENSE_ACTIVE\n");
+    printf("test: motion -> SENSE_ACTIVE\n");
     adapt_config_t cfg = default_cfg();
     adapt_observation_t obs = quiet_obs();
     obs.motion_score = 0.50f;
+    uint16_t recovery_counter = 0;
 
     adapt_decision_t dec;
-    adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_IDLE, &obs, &dec);
+    adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_IDLE, &obs, &dec,
+                               &recovery_counter);
 
-    CHECK(dec.new_state == ADAPT_STATE_SENSE_ACTIVE, "motion → SENSE_ACTIVE");
+    CHECK(dec.new_state == ADAPT_STATE_SENSE_ACTIVE, "motion -> SENSE_ACTIVE");
     CHECK(dec.new_profile == RV_PROFILE_FAST_MOTION, "profile FAST_MOTION");
     CHECK(dec.suggested_vital_interval_ms == 200,
           "non-aggressive cadence 200ms");
@@ -120,22 +130,26 @@ static void test_aggressive_cadence(void) {
     cfg.aggressive = true;
     adapt_observation_t obs = quiet_obs();
     obs.motion_score = 0.50f;
+    uint16_t recovery_counter = 0;
 
     adapt_decision_t dec;
-    adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_IDLE, &obs, &dec);
+    adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_IDLE, &obs, &dec,
+                               &recovery_counter);
     CHECK(dec.suggested_vital_interval_ms == 100,
           "aggressive motion cadence 100ms");
 }
 
 static void test_stable_presence_uses_resp_high_sens(void) {
-    printf("test: stable presence → RESP_HIGH_SENS\n");
+    printf("test: stable presence -> RESP_HIGH_SENS\n");
     adapt_config_t cfg = default_cfg();
     adapt_observation_t obs = quiet_obs();
     obs.presence_score = 0.8f;
     obs.motion_score = 0.01f;
+    uint16_t recovery_counter = 0;
 
     adapt_decision_t dec;
-    adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_IDLE, &obs, &dec);
+    adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_IDLE, &obs, &dec,
+                               &recovery_counter);
     CHECK(dec.new_profile == RV_PROFILE_RESP_HIGH_SENS,
           "stable presence uses respiration profile");
     CHECK(dec.suggested_vital_interval_ms == 1000,
@@ -143,14 +157,16 @@ static void test_stable_presence_uses_resp_high_sens(void) {
 }
 
 static void test_empty_room_default_is_passive(void) {
-    printf("test: empty room → PASSIVE_LOW_RATE\n");
+    printf("test: empty room -> PASSIVE_LOW_RATE\n");
     adapt_config_t cfg = default_cfg();
     adapt_observation_t obs = quiet_obs();
+    uint16_t recovery_counter = 0;
 
     adapt_decision_t dec;
-    adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_IDLE, &obs, &dec);
+    adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_IDLE, &obs, &dec,
+                               &recovery_counter);
     CHECK(dec.new_profile == RV_PROFILE_PASSIVE_LOW_RATE,
-          "empty → passive low rate");
+          "empty -> passive low rate");
 }
 
 static void test_hysteresis_no_flap(void) {
@@ -158,27 +174,149 @@ static void test_hysteresis_no_flap(void) {
     adapt_config_t cfg = default_cfg();
     adapt_observation_t obs = quiet_obs();
     obs.motion_score = 0.50f;
+    uint16_t recovery_counter = 0;
 
     adapt_decision_t dec;
-    adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_ACTIVE, &obs, &dec);
+    adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_ACTIVE, &obs, &dec,
+                               &recovery_counter);
     CHECK(!dec.change_state,
-          "already in SENSE_ACTIVE — no redundant change_state");
+          "already in SENSE_ACTIVE -- no redundant change_state");
 }
 
 static void test_null_safety(void) {
     printf("test: NULL args are no-ops (no crash)\n");
     adapt_decision_t dec = {0};
-    adaptive_controller_decide(NULL, ADAPT_STATE_SENSE_IDLE, NULL, &dec);
-    /* if we got here, no segfault — pass */
+    uint16_t recovery_counter = 0;
+    adaptive_controller_decide(NULL, ADAPT_STATE_SENSE_IDLE, NULL, &dec,
+                               &recovery_counter);
+    /* if we got here, no segfault -- pass */
     g_pass++;
     printf("  OK\n");
 }
+
+/* ---- RuView#1401: DEGRADED recovery tests ---- */
+
+static void test_degraded_recovery_after_sustained_yield(void) {
+    printf("test: DEGRADED exits after sustained healthy yield (#1401)\n");
+    adapt_config_t cfg = default_cfg();
+    cfg.degraded_recovery_ticks = 5;  /* short threshold for test speed */
+    adapt_observation_t obs = quiet_obs();
+    obs.pkt_yield_per_sec = 30;  /* healthy */
+    uint16_t recovery_counter = 0;
+
+    adapt_decision_t dec;
+
+    /* Simulate 4 healthy ticks while in DEGRADED -- should stay DEGRADED. */
+    for (int i = 0; i < 4; i++) {
+        adaptive_controller_decide(&cfg, ADAPT_STATE_DEGRADED, &obs, &dec,
+                                   &recovery_counter);
+        CHECK(!dec.change_state,
+              "should NOT exit DEGRADED before recovery threshold");
+        CHECK(recovery_counter == (uint16_t)(i + 1),
+              "recovery counter increments each healthy tick");
+    }
+
+    /* 5th healthy tick -- should exit DEGRADED. */
+    adaptive_controller_decide(&cfg, ADAPT_STATE_DEGRADED, &obs, &dec,
+                               &recovery_counter);
+    CHECK(dec.change_state, "should exit DEGRADED on 5th healthy tick");
+    CHECK(dec.new_state == ADAPT_STATE_SENSE_IDLE,
+          "recovery target is SENSE_IDLE");
+    CHECK(recovery_counter == 0, "counter resets after successful recovery");
+}
+
+static void test_degraded_recovery_resets_on_yield_drop(void) {
+    printf("test: DEGRADED recovery counter resets if yield drops again\n");
+    adapt_config_t cfg = default_cfg();
+    cfg.degraded_recovery_ticks = 10;
+    uint16_t recovery_counter = 0;
+    adapt_decision_t dec;
+
+    /* 7 healthy ticks -- building toward recovery. */
+    adapt_observation_t obs_healthy = quiet_obs();
+    obs_healthy.pkt_yield_per_sec = 20;
+    for (int i = 0; i < 7; i++) {
+        adaptive_controller_decide(&cfg, ADAPT_STATE_DEGRADED, &obs_healthy,
+                                   &dec, &recovery_counter);
+    }
+    CHECK(recovery_counter == 7, "counter at 7 after 7 healthy ticks");
+
+    /* Yield drops again -- counter must reset. */
+    adapt_observation_t obs_bad = quiet_obs();
+    obs_bad.pkt_yield_per_sec = 2;  /* below min_pkt_yield */
+    adaptive_controller_decide(&cfg, ADAPT_STATE_DEGRADED, &obs_bad, &dec,
+                               &recovery_counter);
+    CHECK(recovery_counter == 0, "counter resets when yield drops in DEGRADED");
+    CHECK(!dec.change_state,
+          "stays in DEGRADED when yield drops (already there)");
+}
+
+static void test_degraded_recovery_coherence_drop_resets(void) {
+    printf("test: DEGRADED recovery resets on coherence loss\n");
+    adapt_config_t cfg = default_cfg();
+    cfg.degraded_recovery_ticks = 5;
+    uint16_t recovery_counter = 0;
+    adapt_decision_t dec;
+
+    /* 3 healthy ticks. */
+    adapt_observation_t obs = quiet_obs();
+    for (int i = 0; i < 3; i++) {
+        adaptive_controller_decide(&cfg, ADAPT_STATE_DEGRADED, &obs, &dec,
+                                   &recovery_counter);
+    }
+    CHECK(recovery_counter == 3, "counter at 3");
+
+    /* Coherence drops -- counter resets. */
+    obs.node_coherence = 0.10f;
+    adaptive_controller_decide(&cfg, ADAPT_STATE_DEGRADED, &obs, &dec,
+                               &recovery_counter);
+    CHECK(recovery_counter == 0, "counter resets on coherence loss");
+}
+
+static void test_degraded_recovery_default_threshold(void) {
+    printf("test: DEGRADED uses default 15 ticks when config is 0\n");
+    adapt_config_t cfg = default_cfg();
+    cfg.degraded_recovery_ticks = 0;  /* should fall back to default 15 */
+    adapt_observation_t obs = quiet_obs();
+    uint16_t recovery_counter = 0;
+    adapt_decision_t dec;
+
+    /* 14 ticks -- should not exit. */
+    for (int i = 0; i < 14; i++) {
+        adaptive_controller_decide(&cfg, ADAPT_STATE_DEGRADED, &obs, &dec,
+                                   &recovery_counter);
+    }
+    CHECK(!dec.change_state, "14 ticks < default 15 -- stays DEGRADED");
+    CHECK(recovery_counter == 14, "counter at 14");
+
+    /* 15th tick -- should exit. */
+    adaptive_controller_decide(&cfg, ADAPT_STATE_DEGRADED, &obs, &dec,
+                               &recovery_counter);
+    CHECK(dec.change_state, "15th tick exits DEGRADED (default threshold)");
+    CHECK(dec.new_state == ADAPT_STATE_SENSE_IDLE, "exits to SENSE_IDLE");
+}
+
+static void test_degraded_no_false_recovery_on_normal_states(void) {
+    printf("test: recovery counter stays 0 when not in DEGRADED\n");
+    adapt_config_t cfg = default_cfg();
+    adapt_observation_t obs = quiet_obs();
+    uint16_t recovery_counter = 5;  /* leftover from previous DEGRADED */
+    adapt_decision_t dec;
+
+    /* Normal operation in SENSE_IDLE -- counter should be cleared. */
+    adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_IDLE, &obs, &dec,
+                               &recovery_counter);
+    CHECK(recovery_counter == 0, "counter zeroed when not in DEGRADED");
+}
+
+/* ---- Benchmark ---- */
 
 static void benchmark_decide(void) {
     printf("bench: adaptive_controller_decide() throughput\n");
     adapt_config_t cfg = default_cfg();
     adapt_observation_t obs = quiet_obs();
     adapt_decision_t dec;
+    uint16_t recovery_counter = 0;
 
     const int N = 10000000;
     struct timespec a, b;
@@ -186,13 +324,14 @@ static void benchmark_decide(void) {
     for (int i = 0; i < N; i++) {
         /* Vary input slightly so the compiler can't fold the call. */
         obs.motion_score = (i & 0xff) / 255.0f;
-        adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_IDLE, &obs, &dec);
+        adaptive_controller_decide(&cfg, ADAPT_STATE_SENSE_IDLE, &obs, &dec,
+                                   &recovery_counter);
     }
     clock_gettime(CLOCK_MONOTONIC, &b);
     double ns_per_call = ((b.tv_sec - a.tv_sec) * 1e9 +
                           (b.tv_nsec - a.tv_nsec)) / (double)N;
     printf("  %d calls, %.1f ns/call\n", N, ns_per_call);
-    /* Sanity: decide() is O(constant) — must be under 10us even on a
+    /* Sanity: decide() is O(constant) -- must be under 10us even on a
      * slow emulator. Real ESP32 will be ~100-300ns. */
     CHECK(ns_per_call < 10000.0, "decide() must be under 10us/call");
 }
@@ -209,6 +348,14 @@ int main(void) {
     test_empty_room_default_is_passive();
     test_hysteresis_no_flap();
     test_null_safety();
+
+    /* RuView#1401: DEGRADED recovery tests. */
+    test_degraded_recovery_after_sustained_yield();
+    test_degraded_recovery_resets_on_yield_drop();
+    test_degraded_recovery_coherence_drop_resets();
+    test_degraded_recovery_default_threshold();
+    test_degraded_no_false_recovery_on_normal_states();
+
     benchmark_decide();
 
     printf("\n=== result: %d pass, %d fail ===\n", g_pass, g_fail);
