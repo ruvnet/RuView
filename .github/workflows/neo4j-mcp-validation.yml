@@ -79,13 +79,14 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Shell syntax
         run: sh -n docker/docker-entrypoint.sh
-      - name: Assert legacy and MCP routes remain present
+      - name: Execute route and fail-closed contract
+        run: sh docker/test-entrypoint-contract.sh
+      - name: Assert image contract remains additive
         run: |
-          grep -q 'cog-ha-matter|ha-matter' docker/docker-entrypoint.sh
-          grep -q 'homecore|homecore-server' docker/docker-entrypoint.sh
-          grep -q 'sensing-mcp' docker/docker-entrypoint.sh
-          grep -q 'RUVIEW_MCP_PRIVACY_MODE' docker/docker-entrypoint.sh
           grep -q 'ARG SENSING_FEATURES=mqtt' docker/Dockerfile.rust
+          grep -q '/app/cog-ha-matter' docker/Dockerfile.rust
+          grep -q '/app/homecore-server' docker/Dockerfile.rust
+          grep -q '/app/sensing-mcp' docker/Dockerfile.rust
 
   security-contract:
     name: MCP security contract
