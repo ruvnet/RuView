@@ -14,7 +14,7 @@ tags:
   - ruvector
 language:
   - en
-library_name: onnxruntime
+library_name: safetensors
 pipeline_tag: other
 ---
 
@@ -152,12 +152,21 @@ Validated on real hardware (Apple M4 Pro + 2x ESP32-S3):
 
 ## Models in This Repo
 
+Files match what is currently published on
+[`ruvnet/wifi-densepose-pretrained`](https://huggingface.co/ruvnet/wifi-densepose-pretrained)
+(verified against the Hub tree).
+
 | File | Size | Use |
 |------|------|-----|
 | `model.safetensors` | 48 KB | Full contrastive encoder (128-dim embeddings) |
 | `model-q4.bin` | 8 KB | **Recommended** — 4-bit quantized, 8x compression |
 | `model-q2.bin` | 4 KB | Ultra-compact for ESP32 edge inference |
 | `model-q8.bin` | 16 KB | High quality 8-bit |
+| `model.rvf.jsonl` | ~1 KB | RVF JSONL manifest (sensing-server can convert) |
+| `csi-embed-v2.safetensors` | ~40 KB | v2 fp32 encoder (honest re-benchmark) |
+| `csi-embed-v2-int4.bin` | 4.56 KB | v2 4-bit encoder for ESP32 SRAM budget |
+| `csi-embed-v2.py` | <1 KB | `Enc` definition + loader for v2 weights |
+| `csi-embed-v2-metrics.json` | — | v2 metrics + quantization scales |
 | `presence-head.json` | 2.6 KB | Presence detection head (v1 "100%" retracted — single-class; #882) |
 | `node-1.json` | 21 KB | LoRA adapter for room/node 1 |
 | `node-2.json` | 21 KB | LoRA adapter for room/node 2 |
@@ -169,7 +178,7 @@ Validated on real hardware (Apple M4 Pro + 2x ESP32-S3):
 ```bash
 # Download models
 pip install huggingface_hub
-huggingface-cli download ruv/ruview --local-dir models/
+huggingface-cli download ruvnet/wifi-densepose-pretrained --local-dir models/
 
 # Use with RuView sensing pipeline
 git clone https://github.com/ruvnet/RuView.git
@@ -291,12 +300,13 @@ Built on these embeddings ([RuView](https://github.com/ruvnet/RuView)):
   author={rUv},
   year={2026},
   url={https://github.com/ruvnet/RuView},
-  note={Models: https://huggingface.co/ruv/ruview}
+  note={Models: https://huggingface.co/ruvnet/wifi-densepose-pretrained}
 }
 ```
 
 ## Links
 
+- **Models (Hugging Face)**: https://huggingface.co/ruvnet/wifi-densepose-pretrained
 - **GitHub**: https://github.com/ruvnet/RuView
 - **Cognitum Seed**: https://cognitum.one
 - **RuVector**: https://github.com/ruvnet/ruvector
