@@ -117,8 +117,11 @@ async fn run(cfg: Neo4jConfig, state_rx: &mut broadcast::Receiver<String>) -> Re
                 }
 
                 event_count += 1;
-                if event_count.is_multiple_of(100) {
+                if event_count.is_multiple_of(50) {
                     info!(event_count, "[neo4j] events written");
+                }
+                if event_count <= 10 || event_count.is_multiple_of(100) {
+                    info!(payload = %v, "[neo4j] event payload");
                 }
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {

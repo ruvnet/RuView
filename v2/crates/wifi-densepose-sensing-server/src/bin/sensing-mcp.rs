@@ -128,9 +128,28 @@ fn bolt_to_json(val: &neo4rs::BoltType) -> Value {
             }
             Value::Object(m)
         }
-        // DateTime types: Debug format is the only available serializer
-        BoltType::DateTime(dt) => Value::String(format!("{dt:?}")),
-        BoltType::LocalDateTime(ldt) => Value::String(format!("{ldt:?}")),
+        BoltType::DateTime(_) => {
+            use serde::de::IntoDeserializer;
+            use serde::Deserialize;
+            if let Ok(dt) = chrono::DateTime::<chrono::Utc>::deserialize(
+                val.into_deserializer(),
+            ) {
+                Value::String(dt.to_rfc3339())
+            } else {
+                Value::String(format!("{val:?}"))
+            }
+        }
+        BoltType::LocalDateTime(_) => {
+            use serde::de::IntoDeserializer;
+            use serde::Deserialize;
+            if let Ok(ldt) = chrono::NaiveDateTime::deserialize(
+                val.into_deserializer(),
+            ) {
+                Value::String(ldt.format("%Y-%m-%dT%H:%M:%S%.f").to_string())
+            } else {
+                Value::String(format!("{val:?}"))
+            }
+        }
         _ => Value::String(format!("{val:?}")),
     }
 }
@@ -197,7 +216,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let results = state.query(
                 "MATCH (r:Room {name: $room})-[:CURRENT_EVENT]->(e:SensingEvent)
                  MATCH (e)-[:HAS_VITALS]->(v)
-                 WHERE e.timestamp > datetime() - duration({hours: $hours})
+                 WHERE datetime(e.timestamp) > datetime() - duration({hours: $hours})
                  RETURN e.timestamp AS ts, v.heart_rate AS hr, v.breathing_rate AS br,
                         v.hr_confidence AS hr_conf, v.br_confidence AS br_conf,
                         v.signal_quality AS quality
@@ -236,7 +255,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let results = state.query(
                 "MATCH (r:Room {name: $room})-[:CURRENT_EVENT]->(e:SensingEvent)
                  WHERE e.person_count > 0
-                 AND e.timestamp > datetime() - duration({hours: $hours})
+                 AND datetime(e.timestamp) > datetime() - duration({hours: $hours})
                  MATCH (e)-[:DETECTED]->(p:Person)
                  RETURN e.timestamp AS ts, e.person_count AS count,
                         collect({id: p.id, confidence: p.confidence, x: p.position_x, y: p.position_y}) AS persons
