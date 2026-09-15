@@ -388,6 +388,19 @@ CONFIG_WASM_MAX_MODULES=4
 CONFIG_WASM_VERIFY_SIGNATURE=y
 ```
 
+#### LVGL / display config gotcha (ADR-045)
+
+This project builds the managed `lvgl/lvgl` component with **`CONFIG_LV_CONF_SKIP=y`**, so `main/lv_conf.h` is **ignored** — every LVGL option is taken from Kconfig instead. Editing `lv_conf.h` (fonts, tick, widgets, …) has **no effect**. Configure LVGL through `sdkconfig.defaults` (or `idf.py menuconfig` → *Component config → LVGL*):
+
+```ini
+# Fonts: setting LV_FONT_MONTSERRAT_* in lv_conf.h does NOTHING — use Kconfig:
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_36=y
+CONFIG_LV_USE_BAR=y
+```
+
+The same applies to the **LVGL tick**: the display only refreshes if `lv_tick` advances, which requires either `CONFIG_LV_TICK_CUSTOM` (Kconfig) or a firmware-driven `lv_tick_inc()` — `LV_TICK_CUSTOM=1` in `lv_conf.h` is ignored. (The firmware drives the tick via an `esp_timer`.)
+
 ---
 
 ## Flashing
