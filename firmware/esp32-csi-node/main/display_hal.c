@@ -379,4 +379,13 @@ void display_hal_set_brightness(uint8_t percent)
     panel_write_cmd(0x51, &val, 1);
 }
 
+void display_hal_refresh(void)
+{
+    /* Re-assert display-on (0x29) + brightness so a transient brownout that
+     * dimmed the panel self-recovers without a full re-init. */
+    if (!s_io_handle) return;
+    panel_write_cmd(0x29, NULL, 0);
+    display_hal_set_brightness(CONFIG_DISPLAY_BRIGHTNESS);
+}
+
 #endif /* CONFIG_DISPLAY_ENABLE */

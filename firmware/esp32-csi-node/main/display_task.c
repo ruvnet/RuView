@@ -24,13 +24,20 @@ bool display_is_active(void) { return s_display_active; }
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "lvgl.h"
 
 #include "display_hal.h"
 #include "display_ui.h"
 
+/* Panel geometry: ST7789 (240x280) vs SH8601 AMOLED (368x448). */
+#if CONFIG_DISPLAY_PANEL_ST7789
+#define DISP_H_RES  CONFIG_DISPLAY_ST7789_H_RES
+#define DISP_V_RES  CONFIG_DISPLAY_ST7789_V_RES
+#else
 #define DISP_H_RES  368
 #define DISP_V_RES  448
+#endif
 
 static const char *TAG = "disp_task";
 
@@ -67,6 +74,16 @@ static void lvgl_touch_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
     }
 }
 
+/* ---- LVGL tick source ----
+ * Kconfig has CONFIG_LV_TICK_CUSTOM unset and nothing calls lv_tick_inc(),
+ * so LVGL's tick never advances and its refresh timer never fires — the panel
+ * draws once and never repaints. This esp_timer drives the tick so LVGL
+ * actually refreshes (works headless; esp_timer runs with no USB host). */
+static void lvgl_tick_cb(void *arg)
+{
+    lv_tick_inc(2);
+}
+
 /* ---- Display task ---- */
 static void display_task(void *arg)
 {
@@ -78,9 +95,15 @@ static void display_task(void *arg)
     display_ui_create(lv_scr_act());
 
     TickType_t last_wake = xTaskGetTickCount();
+    TickType_t last_heal = last_wake;
     while (1) {
         display_ui_update();
         lv_timer_handler();
+        /* Backlight-only self-heal every ~2s (LEDC, no SPI). */
+        if ((xTaskGetTickCount() - last_heal) >= pdMS_TO_TICKS(2000)) {
+            last_heal = xTaskGetTickCount();
+            display_hal_refresh();
+        }
         vTaskDelayUntil(&last_wake, frame_period);
     }
 }
@@ -129,6 +152,19 @@ esp_err_t display_task_start(void)
 
     /* Initialize LVGL */
     lv_init();
+
+    /* Start the LVGL tick (2 ms) — WITHOUT this the display never refreshes. */
+    const esp_timer_create_args_t tick_args = {
+        .callback = &lvgl_tick_cb,
+        .name     = "lvgl_tick",
+    };
+    esp_timer_handle_t tick_timer = NULL;
+    if (esp_timer_create(&tick_args, &tick_timer) == ESP_OK &&
+        esp_timer_start_periodic(tick_timer, 2000) == ESP_OK) {
+        ESP_LOGI(TAG, "LVGL tick timer started (2 ms)");
+    } else {
+        ESP_LOGE(TAG, "LVGL tick timer failed — display will not refresh");
+    }
 
     /* Double-buffered draw buffers — prefer PSRAM, fall back to internal DMA */
     size_t buf_lines = use_psram ? DISP_BUF_LINES : 10;  /* Smaller buffers without PSRAM */
