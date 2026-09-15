@@ -1,0 +1,74 @@
+name: Neo4j MCP Validation
+
+on:
+  push:
+    branches: ['feat/neo4j-sink-mcp-server']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-rust:
+    name: Focused Rust validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          workspaces: v2
+      - name: Check sensing server default feature compatibility
+        working-directory: v2
+        run: cargo check -p wifi-densepose-sensing-server
+      - name: Check Neo4j sink feature
+        working-directory: v2
+        run: cargo check -p wifi-densepose-sensing-server --no-default-features --features neo4j
+      - name: Check MCP binary
+        working-directory: v2
+        run: cargo check -p wifi-densepose-sensing-server --bin sensing-mcp --no-default-features --features neo4j,mcp
+      - name: Run sensing server tests with Neo4j and MCP features
+        working-directory: v2
+        env:
+          CARGO_PROFILE_DEV_DEBUG: '0'
+          CARGO_PROFILE_TEST_DEBUG: '0'
+        run: cargo test -p wifi-densepose-sensing-server --no-default-features --features neo4j,mcp
+
+  docker-contract:
+    name: Docker entrypoint contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Shell syntax
+        run: sh -n docker/docker-entrypoint.sh
+      - name: Assert legacy and MCP routes remain present
+        run: |
+          grep -q 'cog-ha-matter|ha-matter' docker/docker-entrypoint.sh
+          grep -q 'homecore|homecore-server' docker/docker-entrypoint.sh
+          grep -q 'sensing-mcp' docker/docker-entrypoint.sh
+          grep -q 'RUVIEW_MCP_PRIVACY_MODE' docker/docker-entrypoint.sh
+          grep -q 'ARG SENSING_FEATURES=mqtt' docker/Dockerfile.rust
+
+  security-contract:
+    name: MCP security contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Assert dangerous generic/effectful MCP tools are absent
+        run: |
+          ! grep -q 'SimpleTool::new("query_cypher"' v2/crates/wifi-densepose-sensing-server/src/bin/sensing-mcp.rs
+          ! grep -q 'SimpleTool::new("compaction"' v2/crates/wifi-densepose-sensing-server/src/bin/sensing-mcp.rs
+      - name: Assert room scoping and bounded reads
+        run: |
+          grep -q 'RUVIEW_NEO4J_ROOM' v2/crates/wifi-densepose-sensing-server/src/bin/sensing-mcp.rs
+          grep -q 'MAX_HISTORY_HOURS' v2/crates/wifi-densepose-sensing-server/src/bin/sensing-mcp.rs
+          grep -q 'MAX_ROWS' v2/crates/wifi-densepose-sensing-server/src/bin/sensing-mcp.rs
+          grep -q 'QUERY_TIMEOUT_SECS' v2/crates/wifi-densepose-sensing-server/src/bin/sensing-mcp.rs
+          grep -q 'HAS_EVENT' v2/crates/wifi-densepose-sensing-server/src/bin/sensing-mcp.rs
