@@ -139,6 +139,9 @@ mqtt = ["dep:rumqttc"]
 # surface small until the SDK choice is validated.
 matter = []
 
+# 4-stage vital signs pipeline (IIR + autocorrelation) — issue #44 / ADR-045.
+wifi-densepose-vitals = { version = "0.3.0", path = "../wifi-densepose-vitals" }
+
 [dev-dependencies]
 tempfile = "3.10"
 # `tower::ServiceExt::oneshot` for in-process Router tests (bearer_auth).
