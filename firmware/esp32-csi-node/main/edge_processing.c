@@ -786,6 +786,18 @@ static void update_multi_person_vitals(const uint8_t *iq_data, uint16_t n_sc,
 {
     if (s_top_k_count < 2) return;
 
+    /* Presence gate (issues #803, #496): only activate persons when presence is
+     * actually detected. Without this, the loop below unconditionally marks
+     * top_k/2 persons active every frame, so the reported n_persons is a fixed
+     * artifact of the subcarrier count (never 0) regardless of occupancy — an
+     * empty room still reports e.g. 4 "people". s_presence_detected is updated
+     * earlier in the same process_frame() pass. (This bounds the count to
+     * presence; true multi-person separation is a separate, larger problem.) */
+    if (!s_presence_detected) {
+        for (uint8_t p = 0; p < EDGE_MAX_PERSONS; p++) s_persons[p].active = false;
+        return;
+    }
+
     /* Determine number of active persons based on available subcarriers. */
     uint8_t n_persons = s_top_k_count / 2;
     if (n_persons > EDGE_MAX_PERSONS) n_persons = EDGE_MAX_PERSONS;
