@@ -37,6 +37,40 @@ jobs:
           CARGO_PROFILE_TEST_DEBUG: '0'
         run: cargo test -p wifi-densepose-sensing-server --no-default-features --features neo4j,mcp
 
+  neo4j-integration:
+    name: Ephemeral Neo4j integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      neo4j:
+        image: neo4j:5.26-community
+        env:
+          NEO4J_AUTH: neo4j/ci-test-password
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p ci-test-password 'RETURN 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          workspaces: v2
+      - name: Run live graph contract tests
+        working-directory: v2
+        env:
+          NEO4J_TEST_URL: 127.0.0.1:7687
+          NEO4J_TEST_USER: neo4j
+          NEO4J_TEST_PASSWORD: ci-test-password
+          CARGO_PROFILE_DEV_DEBUG: '0'
+          CARGO_PROFILE_TEST_DEBUG: '0'
+        run: cargo test -p wifi-densepose-sensing-server --no-default-features --features neo4j --test neo4j_integration -- --ignored --test-threads=1
+
   docker-contract:
     name: Docker entrypoint contract
     runs-on: ubuntu-latest
