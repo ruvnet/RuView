@@ -133,6 +133,27 @@ impl CalibrationConfig {
     pub fn ht40() -> Self {
         Self { tier: PhyTier::Ht40, num_subcarriers: 128, num_active: 114, min_frames: DEFAULT_MIN_FRAMES, max_phase_variance: 0.3 }
     }
+    /// ESP32 HT40 capture: 192 raw CSI bins.
+    pub fn ht40_192() -> Self {
+        Self { tier: PhyTier::Ht40, num_subcarriers: 192, num_active: 192, min_frames: DEFAULT_MIN_FRAMES, max_phase_variance: 0.3 }
+    }
+
+    /// ESP32 HT40 capture: 128 raw CSI bins.
+    pub fn ht40_128() -> Self {
+        Self { tier: PhyTier::Ht40, num_subcarriers: 128, num_active: 128, min_frames: DEFAULT_MIN_FRAMES, max_phase_variance: 0.3 }
+    }
+
+    /// ESP32-S3 HT40 capture with **merged LTF** (612-byte CSI payload).
+    ///
+    /// The S3 uses the legacy `wifi_csi_config_t` bool layout with
+    /// `ltf_merge_en = true` and `channel_filter_en = false`, so an HT40 PPDU
+    /// yields `612 / 2 = 306` complex bins (guard/DC included). Measured live on
+    /// the roomB nodes: 306 bins dominate (~83% of frames), with 64/188/192
+    /// appearing on other bandwidths. `channel_filter_en` is left false here, so
+    /// the baseline simply carries the near-zero, stable guard/DC bins too.
+    pub fn ht40_306() -> Self {
+        Self { tier: PhyTier::Ht40, num_subcarriers: 306, num_active: 306, min_frames: DEFAULT_MIN_FRAMES, max_phase_variance: 0.3 }
+    }
     /// HE20 defaults: 256 FFT, **256 active** (record all delivered bins).
     ///
     /// Issue #1009: the ESP-IDF v5.5.2 driver delivers all 256 FFT bins on the

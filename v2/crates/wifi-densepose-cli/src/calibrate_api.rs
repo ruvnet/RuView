@@ -415,7 +415,17 @@ async fn ingest_loop(
                         continue;
                     }
                     let tier = params.tier.unwrap_or_else(|| default_tier.clone());
-                    if !["ht20", "ht40", "he20", "he40"].contains(&tier.to_ascii_lowercase().as_str()) {
+                    if ![
+                        "ht20",
+                        "ht40",
+                        "esp32_ht40_192",
+                        "esp32_ht40_128",
+                        "esp32_ht40_306",
+                        "he20",
+                        "he40",
+                    ]
+                    .contains(&tier.to_ascii_lowercase().as_str())
+                    {
                         let _ = reply.send(Err(format!("invalid tier {tier:?}")));
                         continue;
                     }
@@ -559,7 +569,7 @@ async fn ingest_loop(
                 if enroll_done {
                     if let Some(mut ec) = active_enroll.take() {
                         let gate = AnchorQualityGate::default();
-                        let (anchor, reason) = ec.recorder.finalize(&gate, (unix_ms() / 1000) as i64);
+                        let (anchor, reason) = ec.recorder.finalize(&gate, (unix_ms() / 1000) as i64, None);
                         let mut verdict = AnchorVerdict {
                             label: ec.label.as_str().into(),
                             accepted: anchor.quality.accepted,
