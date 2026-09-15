@@ -3,8 +3,6 @@ name: Neo4j MCP Validation
 on:
   push:
     branches: ['feat/neo4j-sink-mcp-server']
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
