@@ -1,0 +1,42 @@
+# Option 1: Docker (simulated data, no hardware needed)
+docker pull ruvnet/wifi-densepose:latest
+docker run -p 3000:3000 ruvnet/wifi-densepose:latest
+# Open http://localhost:3000
+
+# Option 2a: Live sensing with ESP32-S3 hardware ($9)
+# Flash firmware, provision WiFi, and start sensing:
+python -m esptool --chip esp32s3 --port COM9 --baud 460800 \
+  write_flash 0x0 bootloader.bin 0x8000 partition-table.bin \
+  0xf000 ota_data_initial.bin 0x20000 esp32-csi-node.bin
+python firmware/esp32-csi-node/provision.py --port COM9 \
+  --ssid "YourWiFi" --password "secret" --target-ip 192.168.1.20
+
+# Option 2b: WiFi 6 + 802.15.4 research sensing with ESP32-C6 ($6-10, ADR-110)
+# Same csi-node firmware compiled for the C6 target — picks up the C6
+# overlay (sdkconfig.defaults.esp32c6) automatically.
+cd firmware/esp32-csi-node
+idf.py set-target esp32c6 && idf.py build
+idf.py -p COM6 flash
+# C6 boot extras (vs S3): HE-LTF subcarrier tagging in ADR-018 bytes 18-19,
+#   802.15.4 mesh time-sync on channel 15, TWT setup when the AP supports it,
+#   opt-in LP-core wake-on-motion for ~5 µA battery seed nodes.
+# v0.6.7 adds: real LP-core RISC-V motion-gate program (debounce + motion
+#   counter) and a Wi-Fi 6 soft-AP with TWT Responder so two C6 boards can
+#   benchmark real iTWT without buying an 11ax router. Both default off,
+#   flip CONFIG_C6_{LP_CORE,SOFTAP_HE}_ENABLE to turn them on.
+
+# Option 3: Full system with Cognitum Seed ($140)
+# ESP32 streams CSI → bridge forwards to Seed for persistent storage + kNN + witness chain
+node scripts/rf-scan.js --port 5006           # Live RF room scan
+node scripts/snn-csi-processor.js --port 5006  # SNN real-time learning
+node scripts/mincut-person-counter.js --port 5006  # Correct person counting
+
+# Option 4: Python — live on PyPI (ADR-117)
+pip install ruview                        # or: pip install wifi-densepose
+# Both ship the same compiled PyO3 wheel (~250 KB, abi3-py310, Linux/macOS/Windows).
+# Add [client] for the asyncio WebSocket + paho-mqtt clients:
+pip install "ruview[client]"              # or: pip install "wifi-densepose[client]"
+
+# from ruview import BreathingExtractor, HeartRateExtractor   # equivalent to:
+# from wifi_densepose import BreathingExtractor, HeartRateExtractor
+# from ruview.client import SensingClient, RuViewMqttClient
