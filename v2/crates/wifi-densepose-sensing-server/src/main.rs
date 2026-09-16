@@ -17365,16 +17365,14 @@ async fn config_set_dedup_factor(
 async fn config_get_room(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
     let saved = load_room_config(&s.data_dir);
-    let nodes: Vec<RoomNode> = s
+    let mut nodes: Vec<RoomNode> = s
         .node_positions_config
         .iter()
-        .enumerate()
-        .map(|(idx, p)| {
-            // #1791 made node_positions_config a POSITIONAL Vec rather than a
-            // map keyed by node_id, so identity here is the list index. Kept
-            // consistent with that convention deliberately: the Room Builder
+        .map(|(&id, p)| {
+            // #1866 made node_positions_config a map keyed by node_id, replacing
+            // the positional Vec #1791 had introduced, so identity here is read
+            // from the key rather than inferred from ordering. The Room Builder
             // must describe the same binding the fusion path actually uses.
-            let id = idx as u8;
             let saved_node = saved.nodes.iter().find(|n| n.id == id);
             let label = saved_node.and_then(|n| n.label.clone());
             // Storey is carried on the persisted config, not on the live
@@ -17392,6 +17390,9 @@ async fn config_get_room(State(state): State<SharedState>) -> Json<serde_json::V
             }
         })
         .collect();
+    // A HashMap has no iteration order, where the Vec it replaced was implicitly
+    // ordered by id. Sort so a page reload does not reshuffle the node list.
+    nodes.sort_by_key(|n| n.id);
     Json(serde_json::json!({
         "width_m": saved.width_m,
         "depth_m": saved.depth_m,
@@ -17630,13 +17631,17 @@ async fn config_set_room(
     // ingestion is dead code -- excluded would once again mean nothing
     // more than "not approved".
     s.excluded_emitters = excluded_emitter_macs(&config);
-    let max_id = config.nodes.iter().map(|n| n.id).max().unwrap_or(0);
-    let mut positions = vec![[0.0f32, 0.0, 0.0]; max_id as usize + 1];
-    for n in &config.nodes {
-        positions[n.id as usize] = [n.x, n.y, n.z];
-    }
+    // Keyed by the node's own id (#1866). The dense Vec this replaced had to be
+    // padded out to max_id, which gave every unconfigured id in the gap a
+    // position at the origin -- indistinguishable from a node genuinely
+    // surveyed there. An absent key is now absent.
+    let positions: HashMap<u8, [f32; 3]> = config
+        .nodes
+        .iter()
+        .map(|n| (n.id, [n.x, n.y, n.z]))
+        .collect();
     s.node_positions_config = positions.clone();
-    s.multistatic_fuser.set_node_positions(positions);
+    s.multistatic_fuser.set_node_positions_by_id(positions);
     let data_dir = s.data_dir.clone();
     drop(s);
     save_room_config(&data_dir, &config);
