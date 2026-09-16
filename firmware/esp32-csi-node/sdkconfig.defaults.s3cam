@@ -1,0 +1,30 @@
+# Seeed XIAO ESP32S3 Sense — CSI + camera build overlay.
+# Feature set = sdkconfig.defaults.s3-fair (no display, no WASM — those pins
+# collide with the camera and the XIAO has neither peripheral) PLUS the
+# onboard OV3660 camera and the 8MB octal PSRAM it needs for framebuffers.
+#
+# Unlike s3-fair (which forces 4MB flash for the apples-to-apples C6 size
+# comparison), this overlay keeps the base 8MB flash + partitions_display.csv
+# from sdkconfig.defaults — the XIAO Sense has 8MB flash.
+#
+# Build (separate build dir — do NOT touch the C6 build/):
+#   idf.py -B build-s3cam -D SDKCONFIG=sdkconfig.s3cam \
+#       -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.s3cam" \
+#       set-target esp32s3
+#   idf.py -B build-s3cam -D SDKCONFIG=sdkconfig.s3cam \
+#       -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.s3cam" build
+
+CONFIG_IDF_TARGET="esp32s3"
+
+# Camera node (main/camera_node.c) — HTTP on 8081 (OTA owns 8032)
+CONFIG_CAMERA_ENABLE=y
+CONFIG_CAMERA_HTTP_PORT=8081
+
+# 8MB octal PSRAM @ 80MHz — required for camera framebuffers
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# s3-fair feature trims: no AMOLED display, no WASM3 runtime
+# CONFIG_DISPLAY_ENABLE is not set
+# CONFIG_WASM_ENABLE is not set
