@@ -79,6 +79,7 @@ CONFIG_VALUE_CHECKS = [
     ("zone", lambda value: value is not None),
     ("swarm_hb", lambda value: value is not None),
     ("swarm_ingest", lambda value: value is not None),
+    ("ota_psk", lambda value: value is not None),
 ]
 
 
@@ -100,14 +101,24 @@ def has_config_value(args):
 
 # argparse attribute names that participate in the merge. Order doesn't
 # matter; this is just the surface area to round-trip.
+#
+# SECRETS ARE DELIBERATELY EXCLUDED. "password" and "seed_token" used to be in
+# this list, which meant every successful run wrote the WiFi passphrase in
+# cleartext to a JSON file under the user's config dir -- defeating the point
+# of keeping credentials in a file outside the repo, and leaving stale copies
+# of retired passwords lying around after an SSID change. The cost of leaving
+# them out is that a secret must be supplied on every run rather than merged
+# from prior state; provision_node.py already does exactly that, reading them
+# from files, and a direct provision.py call now fails loudly instead of
+# silently reusing an old credential. Do not add them back.
 MERGEABLE_ATTRS = [
-    "ssid", "password", "target_ip", "target_port", "node_id",
+    "ssid", "target_ip", "target_port", "node_id",
     "tdm_slot", "tdm_total",
     "edge_tier", "pres_thresh", "fall_thresh",
     "vital_win", "vital_int", "subk_count",
     "channel", "filter_mac",
     "hop_channels", "hop_dwell",
-    "seed_url", "seed_token", "zone", "swarm_hb", "swarm_ingest",
+    "seed_url", "zone", "swarm_hb", "swarm_ingest",
 ]
 
 
@@ -129,8 +140,18 @@ def _state_path_for(port: str, state_dir: str) -> str:
     return os.path.join(state_dir, f"{safe}.json")
 
 
+SECRET_ATTRS = ("password", "seed_token", "ota_psk")
+
+
 def load_state(port: str, state_dir: str) -> dict:
-    """Return the merged-state dict for `port`, or `{}` if absent / unreadable."""
+    """Return the merged-state dict for `port`, or `{}` if absent / unreadable.
+
+    A state file written before secrets were excluded still holds the WiFi
+    passphrase in cleartext. Reading one is the only moment we are certain
+    such a file exists, so scrub it here and rewrite it immediately rather
+    than waiting for the next successful run to overwrite it -- a run that
+    may never happen on a board that has been retired or moved.
+    """
     path = _state_path_for(port, state_dir)
     if not os.path.isfile(path):
         return {}
@@ -138,6 +159,24 @@ def load_state(port: str, state_dir: str) -> dict:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
+            stale = [k for k in SECRET_ATTRS if k in data]
+            if stale:
+                data = {k: v for k, v in data.items() if k not in SECRET_ATTRS}
+                print(
+                    f"NOTE: removed {', '.join(stale)} from the state file "
+                    f"{path}. Credentials are no longer cached there; supply "
+                    f"them on this run (provision_node.py reads them from "
+                    f"files).",
+                    file=sys.stderr,
+                )
+                try:
+                    save_state(port, state_dir, data)
+                except OSError as exc:
+                    print(
+                        f"WARNING: could not rewrite {path} without the "
+                        f"credential: {exc}",
+                        file=sys.stderr,
+                    )
             return data
     except (OSError, json.JSONDecodeError) as exc:
         print(f"WARNING: could not read state file {path}: {exc}", file=sys.stderr)
@@ -148,6 +187,10 @@ def save_state(port: str, state_dir: str, state: dict) -> str:
     """Write `state` to the per-port file, creating dirs as needed. Returns path."""
     os.makedirs(state_dir, exist_ok=True)
     path = _state_path_for(port, state_dir)
+    # Enforced here rather than relying on MERGEABLE_ATTRS alone, so a secret
+    # cannot reach the disk by a route someone adds later. This file is a
+    # convenience cache; it is never worth a credential.
+    state = {k: v for k, v in state.items() if k not in SECRET_ATTRS}
     # Sort keys for deterministic on-disk content (easier to diff).
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -234,6 +277,18 @@ def build_nvs_csv(args):
         writer.writerow(["swarm_hb", "data", "u16", str(args.swarm_hb)])
     if args.swarm_ingest is not None:
         writer.writerow(["swarm_ingest", "data", "u16", str(args.swarm_ingest)])
+    # ADR-050: OTA pre-shared key. Separate NVS namespace ("security"), which
+    # is what ota_update.c's ota_load_psk_from_nvs() opens. Must come after
+    # every csi_cfg row -- in an NVS CSV a `namespace` row starts a section and
+    # everything below it belongs to that namespace until the next one.
+    #
+    # Deliberately NOT in MERGEABLE_ATTRS: that would round-trip the key in
+    # cleartext through the per-port JSON state file, which is how the WiFi
+    # password is already handled and is not a habit worth spreading. The cost
+    # is that the key must be supplied on every run -- see the warning below.
+    if getattr(args, "ota_psk", None):
+        writer.writerow(["security", "namespace", "", ""])
+        writer.writerow(["ota_psk", "data", "string", args.ota_psk])
     return buf.getvalue()
 
 
@@ -354,6 +409,12 @@ def main():
     parser.add_argument("--zone", type=str, help="Zone name for this node (e.g. lobby, hallway)")
     parser.add_argument("--swarm-hb", type=int, help="Swarm heartbeat interval in seconds (default 30)")
     parser.add_argument("--swarm-ingest", type=int, help="Swarm vector ingest interval in seconds (default 5)")
+    parser.add_argument("--ota-psk", type=str,
+                        help="OTA pre-shared key (hex). Without it the node's "
+                             "OTA upload endpoint rejects everything, so the "
+                             "board can only ever be updated over USB. Prefer "
+                             "provision_node.py, which reads this from a file "
+                             "instead of a command line.")
     parser.add_argument("--dry-run", action="store_true", help="Generate NVS binary but don't flash")
     parser.add_argument("--force-partial", action="store_true",
                         help="[deprecated since #391/#574] Suppress the missing-WiFi-trio "
@@ -403,13 +464,25 @@ def main():
         ] if val is None or val == ""
     ]
     if wifi_trio_missing and not args.force_partial:
+        state_path = _state_path_for(args.port, args.state_dir)
+        # Distinguish the two ways to land here. "No state file" was the only
+        # cause until secrets stopped being cached; saying it when the file is
+        # sitting right there sends the operator looking for the wrong problem.
+        if os.path.isfile(state_path):
+            why = (f"  The state file {state_path} exists but does not carry\n"
+                   f"  credentials -- they are no longer cached there -- and the\n"
+                   f"  CLI didn't include them.\n")
+        else:
+            why = (f"  No per-port state file at {state_path}\n"
+                   f"  and the CLI didn't include them.\n")
         parser.error(
             f"Missing required WiFi credentials after merging prior state: "
             f"{', '.join(wifi_trio_missing)}.\n"
             f"\n"
-            f"  No per-port state file at {_state_path_for(args.port, args.state_dir)}\n"
-            f"  and the CLI didn't include them. Either pass --ssid + --password + --target-ip\n"
-            f"  on this run, or add --force-partial to flash without WiFi.\n"
+            f"{why}"
+            f"  Either pass --ssid + --password + --target-ip on this run\n"
+            f"  (provision_node.py reads them from files), or add\n"
+            f"  --force-partial to flash without WiFi.\n"
         )
     if args.force_partial and wifi_trio_missing:
         print(
@@ -439,6 +512,20 @@ def main():
                     raise ValueError
         except ValueError:
             parser.error(f"--filter-mac contains invalid hex bytes: '{args.filter_mac}'")
+
+    # Flashing NVS rewrites the whole partition, so a namespace that is absent
+    # from this run's CSV is erased from the board. Omitting --ota-psk on a
+    # reprovision therefore silently revokes the node's OTA key and drops it
+    # back to USB-only updates -- and because ota_check_auth() fails closed,
+    # nothing about the node's behaviour announces it. Say so out loud.
+    if not getattr(args, "ota_psk", None):
+        print(
+            "WARNING: no --ota-psk on this run. The 'security' NVS namespace "
+            "will be absent, so this board will REJECT every OTA upload and "
+            "can only be updated over USB. Use provision_node.py to supply the "
+            "key from a file.",
+            file=sys.stderr,
+        )
 
     print("Building NVS configuration:")
     if args.ssid:
