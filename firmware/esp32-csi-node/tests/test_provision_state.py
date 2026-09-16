@@ -55,6 +55,48 @@ class TestStateFile(unittest.TestCase):
         # Should warn but not raise.
         self.assertEqual(provision.load_state("COM7", self.dir), {})
 
+    @unittest.skipIf(sys.platform == "win32",
+                      "POSIX permission bits; Windows has no equivalent to assert on")
+    def test_save_creates_dir_and_file_with_restrictive_perms(self):
+        # RuView#1754: a state file holds the WiFi password in cleartext and
+        # must not be world- or group-readable.
+        path = provision.save_state("COM7", self.dir, {"ssid": "x", "password": "y"})
+        self.assertEqual(os.stat(self.dir).st_mode & 0o777, 0o700)
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+
+    @unittest.skipIf(sys.platform == "win32",
+                      "POSIX permission bits; Windows has no equivalent to assert on")
+    def test_save_tightens_permissions_left_by_an_earlier_version(self):
+        # Simulate a directory/file created by the pre-#1754 code path
+        # (os.makedirs/open with no mode, so whatever the umask allowed).
+        os.makedirs(self.dir, exist_ok=True)
+        os.chmod(self.dir, 0o755)
+        path = provision._state_path_for("COM7", self.dir)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("{}")
+        os.chmod(path, 0o644)
+
+        provision.save_state("COM7", self.dir, {"ssid": "x", "password": "y"})
+
+        self.assertEqual(os.stat(self.dir).st_mode & 0o777, 0o700)
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+
+    @unittest.skipIf(sys.platform == "win32",
+                      "POSIX permission bits; Windows has no equivalent to assert on")
+    def test_save_tightens_sibling_state_files_not_being_rewritten(self):
+        # A second port's state file, left at 0644 by an earlier version,
+        # must be tightened too when *any* save_state call hardens the dir —
+        # not just the file the current call happens to write.
+        os.makedirs(self.dir, exist_ok=True)
+        other_path = provision._state_path_for("/dev/ttyUSB0", self.dir)
+        with open(other_path, "w", encoding="utf-8") as f:
+            f.write("{}")
+        os.chmod(other_path, 0o644)
+
+        provision.save_state("COM7", self.dir, {"ssid": "x"})
+
+        self.assertEqual(os.stat(other_path).st_mode & 0o777, 0o600)
+
 
 class TestMerge(unittest.TestCase):
     def test_cli_wins_over_prior(self):
