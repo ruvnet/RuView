@@ -19,6 +19,14 @@
 #include "nvs_config.h"
 #include "thermal.h"
 
+/* firmware/esp32-csi-node/partitions_4mb.csv has two 1.81 MB app slots and
+ * only 256 KB free -- no room for the FAT volume this module needs. The
+ * whole implementation below is compiled out on that profile; every entry
+ * point still links via the stubs in the #else branch so main.c's call
+ * sites need no #ifdef of their own. See partitions_display.csv (8MB) and
+ * partitions_16mb.csv for the profiles where this module is active. */
+#ifndef CONFIG_ESPTOOLPY_FLASHSIZE_4MB
+
 static const char *TAG = "node_log";
 
 /* The FAT volume reserved in partitions_16mb.csv (storage, 8000K) and never
@@ -380,3 +388,37 @@ esp_err_t node_log_clear(void)
     xSemaphoreGive(s_lock);
     return err;
 }
+
+#else /* CONFIG_ESPTOOLPY_FLASHSIZE_4MB */
+
+esp_err_t node_log_init(void) { return ESP_ERR_NOT_SUPPORTED; }
+bool node_log_is_active(void) { return false; }
+void node_log_boot(uint32_t reset_reason, uint32_t prev_uptime_s)
+{
+    (void)reset_reason;
+    (void)prev_uptime_s;
+}
+void node_log_periodic(void) { }
+void node_log_event(uint8_t subtype, int32_t a, int32_t b)
+{
+    (void)subtype;
+    (void)a;
+    (void)b;
+}
+void node_log_note_disconnect(uint8_t reason, int8_t rssi)
+{
+    (void)reason;
+    (void)rssi;
+}
+size_t node_log_read(uint8_t *out, size_t max_records, size_t skip)
+{
+    (void)out;
+    (void)max_records;
+    (void)skip;
+    return 0;
+}
+size_t node_log_count(void) { return 0; }
+uint16_t node_log_boot_id(void) { return 0; }
+esp_err_t node_log_clear(void) { return ESP_ERR_NOT_SUPPORTED; }
+
+#endif /* CONFIG_ESPTOOLPY_FLASHSIZE_4MB */
