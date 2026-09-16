@@ -1,4 +1,8 @@
-/** Deterministic host test for ESP-IDF first_word_invalid sanitation. */
+/** Deterministic host test for ESP-IDF first_word_invalid sanitation.
+ *
+ * Offsets are CSI_HEADER_SIZE_V3: the wire v3 header carries the transmitter
+ * MAC and rx_seq after byte 20, so the I/Q payload starts 8 bytes later than
+ * it did when this test was written against v1. */
 
 #include "esp_stubs.h"
 #include "nvs_config.h"
@@ -29,26 +33,26 @@ int main(void)
 
     make_info(&info, iq, sizeof(iq), true);
     size_t len = csi_serialize_frame(&info, frame, sizeof(frame));
-    assert(len == CSI_HEADER_SIZE + sizeof(iq));
-    assert(frame[CSI_HEADER_SIZE] == 0);
-    assert(frame[CSI_HEADER_SIZE + 1] == 0);
-    assert(frame[CSI_HEADER_SIZE + 2] == 0);
-    assert(frame[CSI_HEADER_SIZE + 3] == 0);
-    assert(frame[CSI_HEADER_SIZE + 4] == 5);
+    assert(len == CSI_HEADER_SIZE_V3 + sizeof(iq));
+    assert(frame[CSI_HEADER_SIZE_V3] == 0);
+    assert(frame[CSI_HEADER_SIZE_V3 + 1] == 0);
+    assert(frame[CSI_HEADER_SIZE_V3 + 2] == 0);
+    assert(frame[CSI_HEADER_SIZE_V3 + 3] == 0);
+    assert(frame[CSI_HEADER_SIZE_V3 + 4] == 5);
     assert((frame[19] & CSI_FLAG_FIRST_WORD_SANITIZED) != 0);
 
     make_info(&info, iq, sizeof(iq), false);
     len = csi_serialize_frame(&info, frame, sizeof(frame));
-    assert(len == CSI_HEADER_SIZE + sizeof(iq));
-    assert(memcmp(&frame[CSI_HEADER_SIZE], iq, sizeof(iq)) == 0);
+    assert(len == CSI_HEADER_SIZE_V3 + sizeof(iq));
+    assert(memcmp(&frame[CSI_HEADER_SIZE_V3], iq, sizeof(iq)) == 0);
     assert((frame[19] & CSI_FLAG_FIRST_WORD_SANITIZED) == 0);
 
     int8_t short_iq[] = {9, 10};
     make_info(&info, short_iq, sizeof(short_iq), true);
     len = csi_serialize_frame(&info, frame, sizeof(frame));
-    assert(len == CSI_HEADER_SIZE + sizeof(short_iq));
-    assert(frame[CSI_HEADER_SIZE] == 0);
-    assert(frame[CSI_HEADER_SIZE + 1] == 0);
+    assert(len == CSI_HEADER_SIZE_V3 + sizeof(short_iq));
+    assert(frame[CSI_HEADER_SIZE_V3] == 0);
+    assert(frame[CSI_HEADER_SIZE_V3 + 1] == 0);
     assert((frame[19] & CSI_FLAG_FIRST_WORD_SANITIZED) != 0);
 
     puts("CSI invalid-prefix sanitation: PASS");
