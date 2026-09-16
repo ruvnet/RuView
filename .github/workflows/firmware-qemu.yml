@@ -30,7 +30,7 @@ env:
 jobs:
   build-qemu:
     name: Build Espressif QEMU
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - name: Cache QEMU build
         id: cache-qemu
@@ -82,7 +82,7 @@ jobs:
   qemu-test:
     name: QEMU Test (${{ matrix.nvs_config }})
     needs: build-qemu
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     container:
       image: espressif/idf:v5.4
 
@@ -213,7 +213,7 @@ jobs:
 
   fuzz-test:
     name: Fuzz Testing (ADR-061 Layer 6)
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -264,7 +264,7 @@ jobs:
 
   nvs-matrix-validate:
     name: NVS Matrix Generation
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -317,7 +317,7 @@ jobs:
   swarm-test:
     name: Swarm Test (ADR-062)
     needs: [build-qemu]
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     container:
       image: espressif/idf:v5.4
 

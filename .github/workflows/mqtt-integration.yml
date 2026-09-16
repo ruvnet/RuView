@@ -24,7 +24,7 @@ on:
 
 jobs:
   mqtt-integration:
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     timeout-minutes: 20
 
     # NB: we don't use a `services:` mosquitto container here because the
@@ -95,7 +95,6 @@ jobs:
           --features mqtt --no-default-features
           --lib
           --no-fail-fast
-
       - name: Run integration tests against mosquitto
         working-directory: v2
         run: >-
@@ -104,7 +103,6 @@ jobs:
           --test mqtt_integration
           --no-fail-fast
           -- --test-threads=1 --nocapture
-
       - name: Dump broker logs on failure
         if: failure()
         run: |

@@ -26,7 +26,7 @@ concurrency:
 jobs:
   verify:
     name: Verify contributor harness
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     defaults:
       run:
         working-directory: harness/ruview
@@ -52,7 +52,7 @@ jobs:
     name: Generate untrusted Darwin proposal
     if: github.event_name == 'workflow_dispatch' && inputs.run_darwin
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     permissions:
       contents: read
     defaults:

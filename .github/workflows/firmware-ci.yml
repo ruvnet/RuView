@@ -18,7 +18,7 @@ on:
 jobs:
   version-guard:
     name: Verify version.txt matches release tag
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     if: github.ref_type == 'tag'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -41,7 +41,7 @@ jobs:
 
   build:
     name: Build firmware (${{ matrix.target }} / ${{ matrix.variant }})
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     container:
       image: espressif/idf:v5.4
     strategy:
@@ -188,7 +188,7 @@ jobs:
 
   build-c6-idf6:
     name: Build XIAO C6 external antenna (ESP-IDF 6.0.2)
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     container:
       image: espressif/idf:v6.0.2
     steps:

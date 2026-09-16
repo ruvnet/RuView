@@ -36,7 +36,7 @@ permissions:
 jobs:
   publish:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     environment:
       name: npm-release
     concurrency:

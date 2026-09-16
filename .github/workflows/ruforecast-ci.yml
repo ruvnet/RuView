@@ -38,7 +38,6 @@ on:
       - 'docs/validation/ruforecast-requirements-evidence.md'
       - '.github/workflows/ruforecast-ci.yml'
   workflow_dispatch:
-
 permissions:
   contents: read
 
@@ -56,7 +55,7 @@ env:
 jobs:
   contract-rust-189:
     name: Forecast contract and feature-off boundary (Rust 1.89)
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     timeout-minutes: 45
     steps:
       - name: Checkout recursively
@@ -166,7 +165,6 @@ jobs:
           -p ruforecast-model
           -p ruforecast-train
           -- --check
-
       - name: Prove feature-off graph excludes Burn and CubeCL
         working-directory: v2/crates/ruforecast
         shell: bash
@@ -191,35 +189,30 @@ jobs:
           -p ruforecast-model
           -p ruforecast-train
           --no-default-features --all-targets
-
       - name: Test model-neutral core
         working-directory: v2/crates/ruforecast
         run: >-
           cargo +1.89.0 test --locked
           -p ruforecast-core
           --no-default-features --lib --tests
-
       - name: Test model contracts without a model backend
         working-directory: v2/crates/ruforecast
         run: >-
           cargo +1.89.0 test --locked
           -p ruforecast-model
           --no-default-features --lib --tests
-
       - name: Test RuVector retrieval boundary without a model backend
         working-directory: v2/crates/ruforecast
         run: >-
           cargo +1.89.0 test --locked
           -p ruforecast-model
           --no-default-features --features ruvector --lib --tests
-
       - name: Clippy RuVector retrieval boundary
         working-directory: v2/crates/ruforecast
         run: >-
           cargo +1.89.0 clippy --locked
           -p ruforecast-model
           --no-default-features --features ruvector --all-targets -- -D warnings
-
       - name: Clippy forecast packages without backend features
         working-directory: v2/crates/ruforecast
         run: >-
@@ -228,7 +221,6 @@ jobs:
           -p ruforecast-model
           -p ruforecast-train
           --no-default-features --all-targets -- -D warnings
-
       - name: Upload feature-off dependency tree
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -239,7 +231,7 @@ jobs:
 
   hosted-boundaries-rust-189:
     name: Forecast hosted boundaries and privacy contract (Rust 1.89)
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     timeout-minutes: 45
     steps:
       - name: Checkout recursively
@@ -347,7 +339,6 @@ jobs:
           python3
           v2/crates/ruforecast/crates/ruforecast-train/deploy/fal/deploy.py
           self-test
-
       - name: Prove hosted feature graph excludes Burn and CubeCL
         working-directory: v2/crates/ruforecast
         shell: bash
@@ -407,7 +398,6 @@ jobs:
           -p ruforecast-train
           --no-default-features --features cli,server,fal-client
           privacy_external_dataset_payload_is_denied
-
       - name: Test server and fal client with mock integrations
         working-directory: v2/crates/ruforecast
         env:
@@ -417,7 +407,6 @@ jobs:
           -p ruforecast-train
           --no-default-features --features cli,server,fal-client
           --lib --bins --tests
-
       - name: Clippy server and fal client boundaries
         working-directory: v2/crates/ruforecast
         env:
@@ -427,7 +416,6 @@ jobs:
           -p ruforecast-train
           --no-default-features --features cli,server,fal-client
           --all-targets -- -D warnings
-
       - name: Clippy standalone CLI feature boundary
         working-directory: v2/crates/ruforecast
         env:
@@ -437,7 +425,6 @@ jobs:
           -p ruforecast-train
           --no-default-features --features cli
           --bin ruforecast -- -D warnings
-
       - name: Upload hosted dependency tree
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -448,7 +435,7 @@ jobs:
 
   burn-cpu-rust-192:
     name: Forecast Burn CPU tests and bench compile (Rust 1.92)
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     timeout-minutes: 90
     steps:
       - name: Checkout recursively
@@ -475,14 +462,12 @@ jobs:
           cargo +1.92.0 test --locked
           -p ruforecast-model
           --no-default-features --features cpu --lib --tests
-
       - name: Test trainer and CLI with Burn CPU backend
         working-directory: v2/crates/ruforecast
         run: >-
           cargo +1.92.0 test --locked
           -p ruforecast-train
           --no-default-features --features cpu,cli --lib --bins
-
       - name: Run one-step local JSONL training smoke
         working-directory: v2/crates/ruforecast
         run: >-
@@ -491,7 +476,6 @@ jobs:
           --no-default-features --features cpu
           --test local_jsonl_smoke --
           --exact local_hash_addressed_jsonl_executes_one_real_optimizer_step
-
       - name: Run idempotent synthetic CLI training smoke
         working-directory: v2/crates/ruforecast
         run: >-
@@ -500,7 +484,6 @@ jobs:
           --no-default-features --features cpu,cli
           --test cli_smoke --
           --exact cli_smoke_trains_and_writes_the_complete_candidate_set
-
       - name: Test combined CPU and hosted feature surface
         working-directory: v2/crates/ruforecast
         env:
@@ -510,14 +493,12 @@ jobs:
           -p ruforecast-train
           --no-default-features --features cpu,cli,server,fal-client
           --lib --bins
-
       - name: Clippy model with Burn CPU backend
         working-directory: v2/crates/ruforecast
         run: >-
           cargo +1.92.0 clippy --locked
           -p ruforecast-model
           --no-default-features --features cpu --all-targets -- -D warnings
-
       - name: Clippy trainer and CLI with Burn CPU backend
         working-directory: v2/crates/ruforecast
         env:
@@ -527,7 +508,6 @@ jobs:
           -p ruforecast-train
           --no-default-features --features cpu,cli,server,fal-client
           --all-targets -- -D warnings
-
       - name: Compile forecast inference benchmark
         working-directory: v2/crates/ruforecast
         run: >-
@@ -535,7 +515,6 @@ jobs:
           -p ruforecast-model
           --no-default-features --features cpu
           --bench forecast_inference --no-run
-
       - name: Compile forecast data-pipeline benchmark
         working-directory: v2/crates/ruforecast
         run: >-
@@ -543,7 +522,6 @@ jobs:
           -p ruforecast-train
           --no-default-features --features cpu
           --bench data_pipeline --no-run
-
       - name: Run quick inference benchmark for trend visibility
         continue-on-error: true
         timeout-minutes: 15
@@ -582,7 +560,7 @@ jobs:
 
   burn-cuda-compile-rust-192:
     name: Forecast Burn CUDA/WGPU compile checks only (Rust 1.92)
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     timeout-minutes: 60
     steps:
       - name: Checkout recursively
@@ -608,14 +586,12 @@ jobs:
           cargo +1.92.0 check --locked
           -p ruforecast-model
           --no-default-features --features cuda --lib
-
       - name: Check model WGPU feature
         working-directory: v2/crates/ruforecast
         run: >-
           cargo +1.92.0 check --locked
           -p ruforecast-model
           --no-default-features --features wgpu --lib
-
       - name: Check trainer CUDA and hosted-server feature combination
         working-directory: v2/crates/ruforecast
         env:

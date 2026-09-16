@@ -2,7 +2,7 @@ name: Verify Pipeline Determinism
 
 on:
   push:
-    branches: [ main, master, 'claude/**' ]
+    branches: [main, master, 'claude/**']
     paths:
       - 'archive/v1/src/core/**'
       - 'archive/v1/src/hardware/**'
@@ -10,7 +10,7 @@ on:
       - 'archive/v1/requirements-lock.txt'
       - '.github/workflows/verify-pipeline.yml'
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
     paths:
       - 'archive/v1/src/core/**'
       - 'archive/v1/src/hardware/**'
@@ -18,11 +18,10 @@ on:
       - 'archive/v1/requirements-lock.txt'
       - '.github/workflows/verify-pipeline.yml'
   workflow_dispatch:
-
 jobs:
   verify-determinism:
     name: Verify Pipeline Determinism
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     strategy:
       matrix:
         python-version: ['3.11']

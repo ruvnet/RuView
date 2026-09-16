@@ -34,7 +34,7 @@ name: Bench Regression Guard
 
 on:
   push:
-    branches: [ main, develop, 'feat/*' ]
+    branches: [main, develop, 'feat/*']
     paths:
       - 'v2/crates/**/benches/**'
       - 'v2/crates/**/Cargo.toml'
@@ -51,7 +51,6 @@ on:
       - 'v2/Cargo.lock'
       - '.github/workflows/bench-regression.yml'
   workflow_dispatch:
-
 permissions:
   contents: read
 
@@ -68,7 +67,7 @@ jobs:
   # ── HARD GATE: every bench must still compile + link ─────────────────────
   bench-compile:
     name: bench compile-verify (--no-run)
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - name: Checkout (recursive — wifi-densepose-rufield path-deps vendor/rufield)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -143,7 +142,7 @@ jobs:
   # ── INFORMATIONAL: run a curated fast subset (never gates) ───────────────
   bench-fast-run:
     name: bench fast-run (informational, non-gating)
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     # NEVER fail the workflow on this job — timings are noise-prone on shared
     # runners (see header). It exists to surface trends for humans, not to gate.
     continue-on-error: true

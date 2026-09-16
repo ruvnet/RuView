@@ -19,7 +19,7 @@ permissions:
 jobs:
   web:
     name: Node relay and codec
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     defaults:
       run:
         working-directory: integrations/iphone-lidar/web
@@ -45,7 +45,7 @@ jobs:
 
   ios:
     name: iOS 17 compile
-    runs-on: macos-15
+    runs-on: tenki-macos-latest-mini
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

@@ -55,8 +55,8 @@ on:
         default: testpypi
         type: choice
         options:
-          - testpypi  # dry-run target
-          - pypi      # production
+          - testpypi # dry-run target
+          - pypi # production
   push:
     tags:
       - "v*-pip"
@@ -82,13 +82,13 @@ jobs:
             arch: x86_64
           - os: ubuntu-latest
             arch: aarch64
-          - os: macos-15-intel    # x86_64 runner
+          - os: macos-15-intel # x86_64 runner
             arch: x86_64
-          - os: macos-14          # arm64 runner
+          - os: macos-14 # arm64 runner
             arch: arm64
           - os: windows-latest
             arch: AMD64
-    runs-on: ${{ matrix.os }}
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -135,7 +135,7 @@ jobs:
     if: |
       github.event_name == 'workflow_dispatch' && inputs.target == 'v2-wheels' ||
       startsWith(github.ref, 'refs/tags/v2.')
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -156,7 +156,7 @@ jobs:
     if: |
       github.event_name == 'workflow_dispatch' && inputs.target == 'v2-wheels' ||
       startsWith(github.ref, 'refs/tags/v2.')
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -200,7 +200,7 @@ jobs:
     if: |
       github.event_name == 'workflow_dispatch' && inputs.target == 'v1-99-tombstone' ||
       startsWith(github.ref, 'refs/tags/v1.99')
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -286,7 +286,7 @@ jobs:
         github.event_name == 'workflow_dispatch' && inputs.target == 'v2-wheels' ||
         startsWith(github.ref, 'refs/tags/v2.')
       )
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Enforce production witness gate
@@ -337,7 +337,7 @@ jobs:
         github.event_name == 'workflow_dispatch' && inputs.target == 'v1-99-tombstone' ||
         startsWith(github.ref, 'refs/tags/v1.99')
       )
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:

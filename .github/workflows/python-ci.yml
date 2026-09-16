@@ -49,7 +49,6 @@ on:
       - 'v2/crates/wifi-densepose-signal/**'
       - '.github/workflows/python-ci.yml'
   workflow_dispatch:
-
 permissions:
   contents: read
 
@@ -66,7 +65,7 @@ jobs:
   # at collection time — without the features they would error, not skip).
   parity-tests:
     name: Wheel + parity tests (features=sota)
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -131,7 +130,7 @@ jobs:
   # real guard against a dependency silently ballooning the shipped wheel.
   wheel-size-budget:
     name: Default wheel <= 5 MiB (ADR-117 §5.4)
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

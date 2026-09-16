@@ -30,7 +30,7 @@ jobs:
       github.repository == 'ruvnet/RuView' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'workflow_dispatch' || vars.RUVIEW_NIGHTLY_SOTA_ENABLED == 'true')
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     timeout-minutes: 10
     permissions:
       contents: read
@@ -62,7 +62,7 @@ jobs:
         (inputs.mode == 'live' && github.actor == github.repository_owner)
       )
     needs: collect
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     timeout-minutes: 10
     permissions:
       contents: read
@@ -97,7 +97,7 @@ jobs:
   score:
     name: Verify frozen Darwin and Flywheel score
     needs: propose
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     timeout-minutes: 10
     permissions:
       contents: read
@@ -141,7 +141,7 @@ jobs:
   issue:
     name: Deduplicate and create issue
     needs: score
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     timeout-minutes: 10
     permissions:
       contents: read
@@ -194,7 +194,7 @@ jobs:
     name: Generate offline prototype bundle
     if: needs.issue.outputs.should_implement == 'true'
     needs: issue
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     timeout-minutes: 10
     permissions:
       contents: read
@@ -234,7 +234,7 @@ jobs:
   validate:
     name: Validate without external credentials
     needs: [score, implement]
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     timeout-minutes: 15
     permissions:
       contents: read
@@ -287,7 +287,7 @@ jobs:
   publish:
     name: Publish draft prototype PR
     needs: [issue, validate]
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     timeout-minutes: 10
     permissions:
       actions: write # Dispatch the read-only contributor-harness verifier for the generated branch.

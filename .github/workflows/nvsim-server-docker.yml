@@ -16,14 +16,13 @@ on:
       - '.github/workflows/nvsim-server-docker.yml'
     tags: ['nvsim-server-v*']
   workflow_dispatch:
-
 permissions:
   contents: read
   packages: write
 
 jobs:
   build-and-publish:
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

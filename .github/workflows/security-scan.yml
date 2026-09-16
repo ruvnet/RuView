@@ -2,14 +2,13 @@ name: Security Scanning
 
 on:
   push:
-    branches: [ main, develop, 'feat/*' ]
+    branches: [main, develop, 'feat/*']
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
   schedule:
     # Run security scans daily at 2 AM UTC
     - cron: '0 2 * * *'
   workflow_dispatch:
-
 env:
   PYTHON_VERSION: '3.11'
 
@@ -18,7 +17,7 @@ jobs:
   # so this job gates the PR and retains the exact machine-readable report.
   rust-audit:
     name: Rust Dependency Audit
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     permissions:
       contents: read
     steps:
@@ -44,8 +43,8 @@ jobs:
   # Static Application Security Testing (SAST)
   sast:
     name: Static Application Security Testing
-    runs-on: ubuntu-latest
-    continue-on-error: true   # third-party scanners are flaky / SARIF uploads can 403; don't gate the PR
+    runs-on: tenki-standard-small-2c-4g
+    continue-on-error: true # third-party scanners are flaky / SARIF uploads can 403; don't gate the PR
     permissions:
       security-events: write
       actions: read
@@ -121,8 +120,8 @@ jobs:
   # Dependency vulnerability scanning
   dependency-scan:
     name: Dependency Vulnerability Scan
-    runs-on: ubuntu-latest
-    continue-on-error: true   # third-party scanners are flaky / SARIF uploads can 403; don't gate the PR
+    runs-on: tenki-standard-small-2c-4g
+    continue-on-error: true # third-party scanners are flaky / SARIF uploads can 403; don't gate the PR
     permissions:
       security-events: write
       actions: read
@@ -186,8 +185,8 @@ jobs:
   # Container security scanning
   container-scan:
     name: Container Security Scan
-    runs-on: ubuntu-latest
-    continue-on-error: true   # third-party scanners are flaky / SARIF uploads can 403; don't gate the PR
+    runs-on: tenki-standard-small-2c-4g
+    continue-on-error: true # third-party scanners are flaky / SARIF uploads can 403; don't gate the PR
     if: github.event_name == 'push' || github.event_name == 'schedule'
     permissions:
       security-events: write
@@ -241,8 +240,8 @@ jobs:
   # Infrastructure as Code security scanning
   iac-scan:
     name: Infrastructure Security Scan
-    runs-on: ubuntu-latest
-    continue-on-error: true   # third-party scanners are flaky / SARIF uploads can 403; don't gate the PR
+    runs-on: tenki-standard-small-2c-4g
+    continue-on-error: true # third-party scanners are flaky / SARIF uploads can 403; don't gate the PR
     permissions:
       security-events: write
       actions: read
@@ -277,8 +276,8 @@ jobs:
   # Secret scanning
   secret-scan:
     name: Secret Scanning
-    runs-on: ubuntu-latest
-    continue-on-error: true   # third-party scanners are flaky / SARIF uploads can 403; don't gate the PR
+    runs-on: tenki-standard-small-2c-4g
+    continue-on-error: true # third-party scanners are flaky / SARIF uploads can 403; don't gate the PR
     permissions:
       security-events: write
       actions: read
@@ -316,8 +315,8 @@ jobs:
   # License compliance scanning
   license-scan:
     name: License Compliance Scan
-    runs-on: ubuntu-latest
-    continue-on-error: true   # third-party scanners are flaky / SARIF uploads can 403; don't gate the PR
+    runs-on: tenki-standard-small-2c-4g
+    continue-on-error: true # third-party scanners are flaky / SARIF uploads can 403; don't gate the PR
     steps:
     - name: Checkout code
       continue-on-error: true
@@ -353,8 +352,8 @@ jobs:
   # Security policy compliance
   compliance-check:
     name: Security Policy Compliance
-    runs-on: ubuntu-latest
-    continue-on-error: true   # third-party scanners are flaky / SARIF uploads can 403; don't gate the PR
+    runs-on: tenki-standard-small-2c-4g
+    continue-on-error: true # third-party scanners are flaky / SARIF uploads can 403; don't gate the PR
     steps:
     - name: Checkout code
       continue-on-error: true
@@ -401,8 +400,8 @@ jobs:
   # Notification and reporting
   security-report:
     name: Security Report
-    runs-on: ubuntu-latest
-    continue-on-error: true   # third-party scanners are flaky / SARIF uploads can 403; don't gate the PR
+    runs-on: tenki-standard-small-2c-4g
+    continue-on-error: true # third-party scanners are flaky / SARIF uploads can 403; don't gate the PR
     needs: [sast, dependency-scan, container-scan, iac-scan, secret-scan, license-scan, compliance-check]
     if: always()
     # Promote secret to env-scope so the gating `if:` on the Slack-notify

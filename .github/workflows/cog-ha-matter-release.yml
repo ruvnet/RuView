@@ -25,7 +25,7 @@ env:
 jobs:
   build-x86_64:
     name: Build x86_64
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -77,7 +77,7 @@ jobs:
 
   build-arm:
     name: Build aarch64 (arm)
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -142,7 +142,7 @@ jobs:
   publish-gcs:
     name: Upload to GCS (gated)
     needs: [build-x86_64, build-arm]
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     # Skip on dry-run dispatch; skip on tags when GCP_CREDENTIALS unset.
     if: >
       github.event_name == 'push' &&

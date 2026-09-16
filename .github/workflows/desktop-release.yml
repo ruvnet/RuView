@@ -9,7 +9,7 @@ on:
       version:
         description: 'Version to release (e.g., 0.4.0)'
         required: true
-        default: '0.4.0'
+        default: '0.4.4'
       attach_to_existing:
         description: 'Attach to existing release tag (leave empty to create new)'
         required: false
@@ -20,11 +20,19 @@ env:
 
 jobs:
   build-macos:
-    name: Build macOS
-    runs-on: macos-latest
+    name: Build macOS (${{ matrix.arch }})
+    runs-on: tenki-standard-small-2c-4g
     strategy:
       matrix:
-        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+        include:
+          # Build natively on each runner. This avoids cross-compilation
+          # failures from native dependencies used by the desktop crate.
+          - runner: macos-13
+            target: x86_64-apple-darwin
+            arch: x64
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            arch: arm64
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -43,7 +51,7 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: v2/crates/wifi-densepose-desktop/ui
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: Build frontend
         working-directory: v2/crates/wifi-densepose-desktop/ui
@@ -59,29 +67,72 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      - name: Get architecture name
-        id: arch
-        run: |
-          if [ "${{ matrix.target }}" = "aarch64-apple-darwin" ]; then
-            echo "arch=arm64" >> $GITHUB_OUTPUT
-          else
-            echo "arch=x64" >> $GITHUB_OUTPUT
-          fi
-
       - name: Package macOS app
         run: |
           cd v2/target/${{ matrix.target }}/release/bundle/macos
-          zip -r "RuView-Desktop-${{ github.event.inputs.version || '0.4.0' }}-macos-${{ steps.arch.outputs.arch }}.zip" "RuView Desktop.app"
+          zip -r "RuView-Desktop-${{ github.event.inputs.version || '0.4.4' }}-macos-${{ matrix.arch }}.zip" "RuView Desktop.app"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: ruview-macos-${{ steps.arch.outputs.arch }}
+          name: ruview-macos-${{ matrix.arch }}
           path: v2/target/${{ matrix.target }}/release/bundle/macos/*.zip
+
+  build-macos-universal:
+    name: Build macOS universal
+    needs: build-macos
+    runs-on: tenki-macos-latest-mini
+    steps:
+      - name: Download Intel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ruview-macos-x64
+          path: artifacts/x64
+
+      - name: Download Apple Silicon artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ruview-macos-arm64
+          path: artifacts/arm64
+
+      - name: Create universal app and DMG
+        run: |
+          set -euo pipefail
+          mkdir -p extracted/x64 extracted/arm64
+          unzip -q artifacts/x64/*.zip -d extracted/x64
+          unzip -q artifacts/arm64/*.zip -d extracted/arm64
+
+          rm -rf "RuView Desktop.app"
+          cp -R "extracted/arm64/RuView Desktop.app" "RuView Desktop.app"
+          lipo -create \
+            "extracted/x64/RuView Desktop.app/Contents/MacOS/wifi-densepose-desktop" \
+            "extracted/arm64/RuView Desktop.app/Contents/MacOS/wifi-densepose-desktop" \
+            -output "RuView Desktop.app/Contents/MacOS/wifi-densepose-desktop"
+
+          codesign --force --deep --sign - "RuView Desktop.app"
+          ditto -c -k --keepParent "RuView Desktop.app" \
+            "RuView-Desktop-${{ github.event.inputs.version || '0.4.4' }}-macos-universal.zip"
+          hdiutil create -volname "RuView Desktop" \
+            -srcfolder "RuView Desktop.app" \
+            -ov -format UDZO \
+            "RuView-Desktop-${{ github.event.inputs.version || '0.4.4' }}-macos-universal.dmg"
+
+      - name: Verify universal binary
+        run: |
+          file "RuView Desktop.app/Contents/MacOS/wifi-densepose-desktop"
+          lipo -info "RuView Desktop.app/Contents/MacOS/wifi-densepose-desktop"
+
+      - name: Upload universal artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruview-macos-universal
+          path: |
+            RuView-Desktop-*-macos-universal.zip
+            RuView-Desktop-*-macos-universal.dmg
 
   build-windows:
     name: Build Windows
-    runs-on: windows-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -128,8 +179,8 @@ jobs:
 
   create-release:
     name: Create Release
-    needs: [build-macos, build-windows]
-    runs-on: ubuntu-latest
+    needs: [build-macos, build-macos-universal, build-windows]
+    runs-on: tenki-standard-small-2c-4g
     permissions:
       contents: write
     steps:
@@ -149,8 +200,8 @@ jobs:
       - name: Create or Update Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
-          name: RuView Desktop v${{ github.event.inputs.version || '0.4.0' }}
-          tag_name: ${{ github.event.inputs.attach_to_existing || format('desktop-v{0}', github.event.inputs.version || '0.4.0') }}
+          name: RuView Desktop v${{ github.event.inputs.version || '0.4.4' }}
+          tag_name: ${{ github.event.inputs.attach_to_existing || format('desktop-v{0}', github.event.inputs.version || '0.4.4') }}
           draft: false
           prerelease: false
           generate_release_notes: ${{ github.event.inputs.attach_to_existing == '' }}
@@ -160,7 +211,7 @@ jobs:
             artifacts/**/*.exe
             artifacts/**/*.dmg
           body: |
-            ## RuView Desktop v${{ github.event.inputs.version || '0.4.0' }}
+            ## RuView Desktop v${{ github.event.inputs.version || '0.4.4' }}
 
             WiFi-based human pose estimation desktop application.
 
@@ -170,6 +221,7 @@ jobs:
             |----------|--------------|----------|
             | macOS | Apple Silicon (M1/M2/M3) | `RuView-Desktop-*-macos-arm64.zip` |
             | macOS | Intel | `RuView-Desktop-*-macos-x64.zip` |
+            | macOS | Universal | `RuView-Desktop-*-macos-universal.zip` or `.dmg` |
             | Windows | x64 | `RuView-Desktop-*.msi` or `RuView-Desktop-*.exe` |
 
             ### Installation

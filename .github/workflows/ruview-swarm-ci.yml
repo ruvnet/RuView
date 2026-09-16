@@ -12,7 +12,7 @@ name: ruview-swarm CI guard
 
 on:
   push:
-    branches: [ main, 'feat/*' ]
+    branches: [main, 'feat/*']
     paths:
       - 'v2/crates/ruview-swarm/**'
       - '.github/workflows/ruview-swarm-ci.yml'
@@ -21,7 +21,6 @@ on:
       - 'v2/crates/ruview-swarm/**'
       - '.github/workflows/ruview-swarm-ci.yml'
   workflow_dispatch:
-
 env:
   CARGO_TERM_COLOR: always
 
@@ -29,15 +28,15 @@ jobs:
   # ── Feature-matrix tests ─────────────────────────────────────────────────
   tests:
     name: tests (${{ matrix.features.label }})
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     strategy:
       fail-fast: false
       matrix:
         features:
-          - { label: 'default',          flags: '--no-default-features' }
-          - { label: 'train',            flags: '--features train' }
-          - { label: 'ruflo',            flags: '--features ruflo' }
-          - { label: 'full+train',       flags: '--features full,train' }
+          - {label: 'default', flags: '--no-default-features'}
+          - {label: 'train', flags: '--features train'}
+          - {label: 'ruflo', flags: '--features ruflo'}
+          - {label: 'full+train', flags: '--features full,train'}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -59,7 +58,7 @@ jobs:
   # ── Clippy: zero warnings in the crate's own code ────────────────────────
   clippy:
     name: clippy (-D warnings, --no-deps)
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -94,7 +93,7 @@ jobs:
   # ── Build the GPU training binary (train feature) ────────────────────────
   train-bin:
     name: build train_marl bin
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -130,7 +129,7 @@ jobs:
   # ── ITAR + publish guards ────────────────────────────────────────────────
   export-control-guard:
     name: ITAR / publish guard
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

@@ -19,7 +19,6 @@ on:
   push:
     branches: ['feat/adr-149-aether-arena']
   workflow_dispatch:
-
 permissions:
   contents: read
   pull-requests: write
@@ -27,7 +26,7 @@ permissions:
 jobs:
   harness-gate:
     name: Run AA scorer harness (determinism gate)
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     defaults:
       run:
         working-directory: v2

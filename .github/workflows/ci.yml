@@ -2,11 +2,10 @@ name: Continuous Integration
 
 on:
   push:
-    branches: [ main, develop, 'feature/*', 'feat/*', 'hotfix/*' ]
+    branches: [main, develop, 'feature/*', 'feat/*', 'hotfix/*']
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
   workflow_dispatch:
-
 env:
   PYTHON_VERSION: '3.11'
   NODE_VERSION: '20' # ADR-265: all Node packages in this repo declare engines >= 20
@@ -22,7 +21,7 @@ jobs:
   # rule shouldn't gate PRs to the Rust workspace.
   code-quality:
     name: Code Quality & Security
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     continue-on-error: true
     steps:
     - name: Checkout code
@@ -79,7 +78,7 @@ jobs:
   # Rust Workspace Tests
   rust-tests:
     name: Rust Workspace Tests
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
     - name: Checkout code
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -148,7 +147,6 @@ jobs:
         cargo test
         --manifest-path crates/worldgraph/wifi-densepose-worldmodel/Cargo.toml
         --no-default-features
-
     # ADR-134 CIR tests are behind the `cir` feature so the bench dependency
     # (Criterion) only pulls when actually exercised. Run them as a separate
     # step so a CIR-only regression is unambiguously attributable.
@@ -193,7 +191,7 @@ jobs:
   # workspace. Blocking, and fast — no browser, no install step.
   ui-tests:
     name: UI JavaScript Tests
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
     - name: Checkout code
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -212,7 +210,7 @@ jobs:
   # the archive is frozen reference, not blocking the Rust workspace PRs.
   test:
     name: Tests
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -312,7 +310,7 @@ jobs:
   # proper locust suite is added under archive/v1/tests/performance/.
   performance-test:
     name: Performance Tests
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     needs: [test]
     continue-on-error: true
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -334,13 +332,13 @@ jobs:
         pip install -r requirements.txt
         pip install pytest   # the perf suite is pytest, not locust
 
+
     # No "Start application" step: the gated test (test_frame_budget.py) drives
     # the CSIProcessor pipeline in-process and makes no HTTP calls, so the old
     # uvicorn server + `sleep 10` were dead weight — they only existed for the
     # now-excluded api_throughput/inference_speed tests, and on every run dumped
     # ~50 misleading "router requires hardware setup" ERROR lines for a server
     # no test touched. MOCK_POSE_DATA is server-only and unused here.
-
     - name: Run performance tests
       working-directory: archive/v1
       run: |
@@ -382,7 +380,7 @@ jobs:
   # workflow, so it doesn't gate the rest of the pipeline.
   docker-build:
     name: Docker Build & Test
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     needs: [code-quality, test, rust-tests]
     continue-on-error: true
     steps:
@@ -455,11 +453,11 @@ jobs:
   # API Documentation
   docs:
     name: API Documentation
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     needs: [docker-build]
     if: github.ref == 'refs/heads/main'
     permissions:
-      contents: write   # gh-pages deploy needs write (GITHUB_TOKEN is read-only by default -> 403)
+      contents: write # gh-pages deploy needs write (GITHUB_TOKEN is read-only by default -> 403)
     steps:
     - name: Checkout code
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -480,7 +478,7 @@ jobs:
     - name: Generate OpenAPI spec
       working-directory: archive/v1
       env:
-        MOCK_POSE_DATA: "true"   # no CSI hardware in CI
+        MOCK_POSE_DATA: "true" # no CSI hardware in CI
       run: |
         python -c "
         from src.api.main import app
@@ -491,7 +489,7 @@ jobs:
 
     - name: Deploy to GitHub Pages
       uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453
-      continue-on-error: true   # openapi generation above is the real validation; deploy is best-effort (Pages may be disabled)
+      continue-on-error: true # openapi generation above is the real validation; deploy is best-effort (Pages may be disabled)
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         publish_dir: ./docs
@@ -500,11 +498,11 @@ jobs:
   # Notification
   notify:
     name: Notify
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     needs: [code-quality, test, rust-tests, performance-test, docker-build, docs]
     if: always()
     permissions:
-      contents: write   # required by softprops/action-gh-release
+      contents: write # required by softprops/action-gh-release
     # GitHub Actions does not allow `secrets.X` directly in step-level `if:`
     # expressions — only `env.X`. Promote the secret to env at job scope so
     # the gating expression below is parseable.

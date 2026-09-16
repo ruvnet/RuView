@@ -35,7 +35,7 @@ jobs:
   # Pre-deployment checks
   pre-deployment:
     name: Pre-deployment Checks
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     if: |
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
       github.event_name == 'workflow_dispatch'
@@ -88,7 +88,7 @@ jobs:
   # Deploy to staging
   deploy-staging:
     name: Deploy to Staging
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     needs: [pre-deployment]
     if: needs.pre-deployment.outputs.deploy_env == 'staging'
     environment:
@@ -136,7 +136,7 @@ jobs:
   # Deploy to production
   deploy-production:
     name: Deploy to Production
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     needs: [pre-deployment, deploy-staging]
     if: |
       always() &&
@@ -232,7 +232,7 @@ jobs:
   # Rollback capability
   rollback:
     name: Rollback Deployment
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     if: failure() && (needs.deploy-staging.result == 'failure' || needs.deploy-production.result == 'failure')
     needs: [pre-deployment, deploy-staging, deploy-production]
     environment:
@@ -271,7 +271,7 @@ jobs:
   # Post-deployment monitoring
   post-deployment:
     name: Post-deployment Monitoring
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     needs: [pre-deployment, deploy-staging, deploy-production]
     if: always() && (needs.deploy-staging.result == 'success' || needs.deploy-production.result == 'success')
     steps:
@@ -311,7 +311,7 @@ jobs:
   # Notification
   notify:
     name: Notify Deployment Status
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     needs: [pre-deployment, deploy-staging, deploy-production, post-deployment]
     if: always()
     steps:

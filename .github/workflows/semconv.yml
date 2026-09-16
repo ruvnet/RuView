@@ -7,7 +7,7 @@ name: semconv
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
     paths:
       - 'semconv/**'
       - 'templates/**'
@@ -20,11 +20,10 @@ on:
       - 'v2/crates/wifi-densepose-sensing-server/src/semconv.rs'
       - '.github/workflows/semconv.yml'
   workflow_dispatch:
-
 jobs:
   semconv:
     name: semconv (weaver)
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     env:
       WEAVER_VERSION: v0.23.0
       # sha256 of weaver-x86_64-unknown-linux-gnu.tar.xz for WEAVER_VERSION
