@@ -1911,6 +1911,15 @@ canvas {
   color: #00cc88;
 }
 
+/* Real measurements from a commodity RSSI adapter: genuine data, but no CSI.
+   Deliberately cyan — distinct from the green "ESP32 + CSI" state above and
+   from the orange "synthetic" state below, so neither can be mistaken for it. */
+.sensing-source-rssi {
+  background: rgba(0, 170, 255, 0.14);
+  border: 1px solid #00aaff;
+  color: #00aaff;
+}
+
 .sensing-source-reconnecting {
   background: rgba(255, 180, 0, 0.12);
   border: 1px solid var(--color-warning);

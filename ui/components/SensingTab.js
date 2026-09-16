@@ -108,7 +108,7 @@ export class SensingTab {
           <!-- Setup info -->
           <div class="sensing-card">
             <div class="sensing-card-title">About This Data</div>
-            <p class="sensing-about-text">
+            <p class="sensing-about-text" id="sensingAboutText">
               Metrics are computed from WiFi Channel State Information (CSI).
               With <strong><span id="sensingNodeCount">0</span> ESP32 node(s)</strong> you get presence detection, breathing
               estimation, and gross motion. Add <strong>3-4+ ESP32 nodes</strong>
@@ -226,6 +226,7 @@ export class SensingTab {
       const dataSource = sensingService.dataSource;
       const bannerConfig = {
         'live':              { text: 'LIVE \u2014 ESP32 HARDWARE',           cls: 'sensing-source-live' },
+        'rssi-only':         { text: 'LIVE RSSI \u2014 REAL DATA, NO CSI',  cls: 'sensing-source-rssi' },
         'server-simulated':  { text: 'SIMULATED \u2014 NO HARDWARE',        cls: 'sensing-source-server-sim' },
         'reconnecting':      { text: 'RECONNECTING...',                    cls: 'sensing-source-reconnecting' },
         'unreachable':       { text: 'NO DATA \u2014 SERVER UNREACHABLE',   cls: 'sensing-source-simulated' },
@@ -234,6 +235,38 @@ export class SensingTab {
       const cfg = bannerConfig[dataSource] || bannerConfig.reconnecting;
       banner.textContent = cfg.text;
       banner.className = 'sensing-source-banner ' + cfg.cls;
+    }
+
+    this._updateAboutText(sensingService.dataSource);
+  }
+
+  /**
+   * Keep "About This Data" truthful about where the numbers came from.
+   *
+   * The default copy describes the CSI pipeline, which is wrong when the
+   * server fell back to a commodity RSSI adapter: there are no subcarriers,
+   * no ESP32 nodes, and breathing/heart rate are not recoverable from a
+   * single aggregate power scalar.
+   */
+  _updateAboutText(dataSource) {
+    const el = this.container.querySelector('#sensingAboutText');
+    if (!el) return;
+
+    if (dataSource === 'rssi-only') {
+      el.innerHTML =
+        'Metrics are computed from an <strong>RSSI time series</strong> read off this ' +
+        'machine\'s own WiFi adapter &mdash; real measurements, but <strong>not CSI</strong>. ' +
+        'RSSI is one aggregate power scalar per sample (1 dBm quantisation), so only ' +
+        '<strong>presence and gross motion</strong> are recoverable. Breathing rate, heart ' +
+        'rate, pose and person-counting need per-subcarrier phase &mdash; add an ' +
+        '<strong>ESP32-S3/C6 node</strong> on UDP :5005 to unlock them.';
+    } else {
+      el.innerHTML =
+        'Metrics are computed from WiFi Channel State Information (CSI). ' +
+        'With <strong><span id="sensingNodeCount">0</span> ESP32 node(s)</strong> you get ' +
+        'presence detection, breathing estimation, and gross motion. Add ' +
+        '<strong>3-4+ ESP32 nodes</strong> around the room for spatial resolution and ' +
+        'limb-level tracking.';
     }
   }
 
