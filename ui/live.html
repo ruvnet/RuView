@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RuView Live Feed</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background:#0a0a0f; color:#e0e0e0; overflow-x:hidden; }
+.header { background:#12121a; padding:16px 24px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #2a2a3a; }
+.header h1 { color:#00e5ff; font-size:1.4rem; }
+.badge { padding:4px 12px; border-radius:4px; font-size:.85rem; font-weight:600; }
+.badge-live { background:#00c853; color:#000; }
+.status-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:16px; padding:24px; }
+.card { background:#1a1a2e; border-radius:12px; padding:20px; border:1px solid #2a2a3a; }
+.card-label { font-size:.8rem; color:#888; text-transform:uppercase; letter-spacing:1px; }
+.card-value { font-size:2rem; font-weight:700; color:#00e5ff; margin-top:8px; }
+.card-sub { font-size:.85rem; color:#666; margin-top:4px; }
+.person-card { background:#1a1a2e; border-radius:12px; padding:16px; border:1px solid #2a2a3a; margin-bottom:12px; }
+.person-header { display:flex; justify-content:space-between; align-items:center; }
+.person-id { color:#ffab40; font-weight:700; }
+.person-zone { font-size:.75rem; padding:2px 8px; border-radius:3px; background:#333; color:#aaa; }
+.node-row { display:flex; align-items:center; gap:12px; padding:8px; background:#12121a; border-radius:8px; margin-bottom:6px; }
+.node-dot { width:10px; height:10px; border-radius:50%; background:#00e5ff; }
+.vitals { display:flex; gap:24px; }
+.vital-item { text-align:center; }
+.vital-label { font-size:.7rem; color:#888; text-transform:uppercase; }
+.vital-value { font-size:1.4rem; font-weight:700; color:#76ff03; }
+.canvas-wrap { padding:24px; }
+canvas { background:#0a0a0f; border-radius:12px; border:1px solid #2a2a3a; width:100%; }
+.update-time { font-size:.7rem; color:#555; text-align:right; margin-top:8px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>RuView Live Feed</h1>
+  <span class="badge badge-live" id="sourceBadge">LIVE — ESP32</span>
+</div>
+<div class="status-grid">
+  <div class="card"><div class="card-label">Source</div><div class="card-value" id="source">—</div><div class="card-sub" id="sourceSub">Waiting...</div></div>
+  <div class="card"><div class="card-label">People Detected</div><div class="card-value" id="persons">—</div><div class="card-sub" id="personsSub">Estimated</div></div>
+  <div class="card"><div class="card-label">Motion</div><div class="card-value" id="motion">—</div><div class="card-sub" id="motionSub">Current level</div></div>
+  <div class="card"><div class="card-label">Data Points</div><div class="card-value" id="tick">—</div><div class="card-sub">Total frames</div></div>
+  <div class="card"><div class="card-label">Heart Rate</div><div class="card-value" id="hr">—</div><div class="card-sub" id="hrConf">BPM / confidence</div></div>
+  <div class="card"><div class="card-label">Breathing</div><div class="card-value" id="br">—</div><div class="card-sub" id="brConf">BPM / confidence</div></div>
+</div>
+<div class="status-grid" style="margin-top:0">
+  <div class="card" style="grid-column:1/-1">
+    <div class="card-label">Nodes</div>
+    <div id="nodes"></div>
+  </div>
+  <div class="card" style="grid-column:1/-1">
+    <div class="card-label">People</div>
+    <div id="people"></div>
+  </div>
+</div>
+<div class="update-time" id="updateTime">Last update: —</div>
+<script>
+const WS_URL = 'ws://192.168.1.86:3001/ws/sensing';
+const el = id => document.getElementById(id);
+let ws = null;
+function connectWS() {
+  try { ws = new WebSocket(WS_URL); } catch(e) { setTimeout(connectWS, 3000); return; }
+  ws.onopen = () => { el('source').textContent = 'ESP32'; el('sourceSub').textContent = 'WebSocket connected'; };
+  ws.onmessage = evt => {
+    try {
+      const d = JSON.parse(evt.data);
+      render(d);
+    } catch(e) {}
+  };
+  ws.onclose = () => { setTimeout(connectWS, 3000); };
+  ws.onerror = () => { ws.close(); };
+}
+function render(d) {
+  el('source').textContent = d.source || '—';
+  el('sourceSub').textContent = d.type || '';
+  el('persons').textContent = d.estimated_persons ?? 0;
+  el('personsSub').textContent = (d.classification?.presence ? 'Present' : 'Absent') + ' · ' + (d.classification?.motion_level || '—');
+  el('motion').textContent = d.classification?.motion_level || '—';
+  el('motionSub').textContent = d.classification?.confidence ? (d.classification.confidence * 100).toFixed(0) + '% confidence' : '';
+  el('tick').textContent = d.tick ?? 0;
+  if (d.vital_signs) {
+    el('hr').textContent = d.vital_signs.heart_rate_bpm?.toFixed(1) ?? '—';
+    el('hrConf').textContent = (d.vital_signs.heartbeat_confidence * 100).toFixed(0) + '% confidence';
+    el('br').textContent = d.vital_signs.breathing_rate_bpm?.toFixed(1) ?? '—';
+    el('brConf').textContent = (d.vital_signs.breathing_confidence * 100).toFixed(0) + '% confidence';
+  }
+  // Nodes
+  const nodesDiv = el('nodes');
+  nodesDiv.innerHTML = '';
+  if (d.nodes) d.nodes.forEach(n => {
+    const row = document.createElement('div');
+    row.className = 'node-row';
+    row.innerHTML = `<span class="node-dot"></span><span>Node ${n.node_id}</span><span style="color:#aaa">RSSI ${n.rssi_dbm}dBm</span><span style="color:#888">FPS ${n.sync?.csi_fps_ema?.toFixed(1) ?? '—'}</span><span style="color:#888">Pos [${n.position?.join(', ') ?? '—'}]</span>`;
+    nodesDiv.appendChild(row);
+  });
+  // People
+  const peopleDiv = el('people');
+  peopleDiv.innerHTML = '';
+  if (d.persons) d.persons.forEach(p => {
+    const card = document.createElement('div');
+    card.className = 'person-card';
+    card.innerHTML = `<div class="person-header"><span class="person-id">Person #${p.id}</span><span class="person-zone">${p.zone || '—'}</span></div>
+      <div style="margin-top:8px;display:flex;gap:24px;font-size:.85rem;color:#aaa">
+        <span>Pos [${p.position?.join(', ') ?? '—'}]</span>
+        <span>Motion ${p.motion_score ?? 0}%</span>
+      </div>`;
+    peopleDiv.appendChild(card);
+  });
+  el('updateTime').textContent = 'Last update: ' + new Date().toLocaleTimeString();
+}
+connectWS();
+</script>
+</body>
+</html>
