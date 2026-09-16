@@ -130,6 +130,20 @@ export class PoseDecoder {
    * @param {{ csiPresence: number }} csiState - CSI sensing state for through-wall
    * @returns {Array<{x: number, y: number, confidence: number, name: string}>}
    */
+  /**
+   * Drop every trace of a tracked body.
+   *
+   * Called when the server reports the room empty: the through-wall branch below
+   * deliberately coasts on the last body state while CSI still senses someone,
+   * which is correct for a person who walked behind a wall but keeps a phantom
+   * skeleton alive in a room that is actually empty.
+   */
+  clearTrack() {
+    this.smoothedKeypoints = null;
+    this._lastBodyState = null;
+    this._ghostConfidence = 0;
+  }
+
   decode(embedding, motionRegion, elapsed, csiState = {}) {
     this._time = elapsed;
 
