@@ -149,4 +149,11 @@ pub struct SensingSnapshot {
     pub identity_bound: bool,
     /// Stable node id (e.g. `"esp32_room_01"`).
     pub node_id: String,
+    /// Whether this cycle came from real hardware/replay or a synthetic demo
+    /// source (RuView's `--source simulated` / Docker demo mode). Stamped
+    /// verbatim onto the emitted event's `ProvenanceRef.synthetic` — this
+    /// bridge does not get to assume "real" by default; the caller who knows
+    /// where the cycle actually came from must say so.
+    #[serde(default)]
+    pub synthetic: bool,
 }

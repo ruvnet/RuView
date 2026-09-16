@@ -93,8 +93,10 @@ fn event_id(snap: &SensingSnapshot) -> String {
 /// 3. Stamps the §3.3 egress privacy class (information-content mapping with
 ///    the demotion floor) on both tensor and observation.
 /// 4. Builds a real `ProvenanceRef` (sha256 raw hash over the tensor/feature
-///    bytes, `synthetic = false`) and **signs** it with the supplied ed25519
-///    [`Signer`] so `rufield_provenance::is_fusable` passes.
+///    bytes, `synthetic` stamped from `snap.synthetic` — the caller's, not
+///    this bridge's, judgment of where the cycle came from) and **signs** it
+///    with the supplied ed25519 [`Signer`] so `rufield_provenance::is_fusable`
+///    passes regardless of which way `synthetic` reads.
 ///
 /// Determinism: with no RNG anywhere and a deterministic ed25519 signer, the
 /// same `snap` + same signer seed yields a byte-identical event.
@@ -171,14 +173,14 @@ pub fn snapshot_to_field_event(snap: &SensingSnapshot, signer: &Signer) -> Field
         firmware_hash: firmware_hash(),
         model_id: MODEL_ID.to_string(),
         calibration_id,
-        synthetic: false, // a real (non-synthetic) live/replay event
+        synthetic: snap.synthetic,
         signature_hex: None,
         signer_pubkey_hex: None,
     };
 
     let sensor = SensorDescriptor {
         modality: "wifi_csi".to_string(),
-        vendor: "esp32".to_string(),
+        vendor: if snap.synthetic { "simulated" } else { "esp32" }.to_string(),
         device_id: snap.node_id.clone(),
         placement: "unknown".to_string(),
         // Optional sensor pose, added upstream. Left unset on purpose: a CSI

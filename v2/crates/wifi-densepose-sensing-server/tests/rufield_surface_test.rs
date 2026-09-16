@@ -78,6 +78,7 @@ async fn inject(state: &FieldState, trust: RuViewPrivacyClass, presence: bool, i
         trust,
         false, // demoted
         identity_bound,
+        false, // synthetic
     );
     state.write().await.emit(&snap);
 }
