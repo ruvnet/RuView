@@ -59,6 +59,16 @@ export class DataProcessor {
           result.metadata.sensingMode = 'CSI';
         }
       }
+    } else if (message.type === 'sensing_update') {
+      result.persons = this._extractSensingPersons(message);
+      result.zoneOccupancy = this._extractZoneOccupancy(message, null);
+      result.signalData = message.signal_field || null;
+      result.metadata.isRealData = true;
+      result.metadata.timestamp = message.timestamp;
+      result.metadata.sensingMode = message.source || 'CSI';
+      result.metadata.source = message.source;
+      result.metadata.tick = message.tick;
+      result.metadata.estimated_persons = message.estimated_persons;
     }
 
     return result;
@@ -139,6 +149,25 @@ export class DataProcessor {
       };
     }
     return null;
+  }
+
+  // Extract persons from a sensing_update message (ESP32 live data)
+  _extractSensingPersons(message) {
+    const persons = message.persons || [];
+    return persons.map(p => ({
+      id: p.id || `person_${Math.random()}`,
+      confidence: p.confidence || 0,
+      motion_score: p.motion_score || 0,
+      zone: p.zone || 'tracked',
+      position: p.position || [0, 0, 0],
+      keypoints: (p.keypoints || []).map(kp => ({
+        x: kp.x || 0,
+        y: kp.y || 0,
+        confidence: kp.confidence || 0
+      })),
+      bbox: p.bbox || null,
+      pose: p.pose || null
+    }));
   }
 
   // Generate demo data that cycles through pre-recorded poses
