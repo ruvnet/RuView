@@ -459,7 +459,7 @@ class Observatory {
           if (data && data.status === 'ok') {
             const wsProto = base.startsWith('https') ? 'wss:' : 'ws:';
             const urlObj = new URL(base);
-            const wsUrl = `${wsProto}//${urlObj.host}/ws/sensing`;
+            const wsUrl = `${wsProto}//${urlObj.hostname}:3001/ws/sensing`;
             console.log('[Observatory] Sensing server detected at', base, '→', wsUrl);
             this.settings.dataSource = 'ws';
             this.settings.wsUrl = wsUrl;
