@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+TOKEN="e07dddbea25f678e162f67374dfb7a4826629c3aa5b0e7eca03d0770ce15f265"
+HOST="${1:-192.168.1.86}"
+PORT="${2:-3000}"
+
+while true; do
+  clear
+  echo "=== RuView Live Feed ==="
+  echo "  $HOST:$PORT | $(date '+%H:%M:%S')"
+  echo ""
+  curl -s -H "Authorization: Bearer $TOKEN" http://$HOST:$PORT/api/v1/sensing/latest 2>/dev/null | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(f'  Source:      {d.get(\"source\",\"—\")}')
+    print(f'  Type:        {d.get(\"type\",\"—\")}')
+    print(f'  Tick:        {d.get(\"tick\",\"—\")}')
+    print(f'  People:      {d.get(\"estimated_persons\",\"—\")}')
+    print(f'  Presence:    {\"Yes\" if d.get(\"classification\",{}).get(\"presence\") else \"No\"}')
+    print(f'  Motion:      {d.get(\"classification\",{}).get(\"motion_level\",\"—\")}')
+    print(f'  Confidence:  {(d.get(\"classification\",{}).get(\"confidence\",0)*100):.1f}%' if d.get(\"classification\",{}).get(\"confidence\") else '  Confidence:  —')
+    vs = d.get('vital_signs',{})
+    print(f'  Heart Rate:  {vs.get(\"heart_rate_bpm\",\"—\")} BPM ({(vs.get(\"heartbeat_confidence\",0)*100):.0f}% conf)' if vs.get('heart_rate_bpm') else '  Heart Rate:  —')
+    print(f'  Breathing:   {vs.get(\"breathing_rate_bpm\",\"—\")} BPM ({(vs.get(\"breathing_confidence\",0)*100):.0f}% conf)' if vs.get('breathing_rate_bpm') else '  Breathing:   —')
+    print(f'  Signal Q:    {(d.get(\"vital_signs\",{}).get(\"signal_quality\",0)*100):.0f}%' if d.get('vital_signs',{}).get('signal_quality') else '  Signal Q:    —')
+    nodes = d.get('nodes',[])
+    if nodes:
+        print(f'  Nodes ({len(nodes)}):')
+        for n in nodes:
+            print(f'    Node {n[\"node_id\"]}: RSSI {n.get(\"rssi_dbm\",\"—\")}dBm | FPS {n.get(\"sync\",{}).get(\"csi_fps_ema\",\"—\")} | Pos [{n.get(\"position\",\"—\")}]')
+    persons = d.get('persons',[])
+    if persons:
+        print(f'  People ({len(persons)}):')
+        for p in persons:
+            print(f'    Person #{p[\"id\"]}: zone={p.get(\"zone\",\"—\")} | motion={p.get(\"motion_score\",\"—\")}% | pos [{p.get(\"position\",\"—\")}]')
+except Exception as e:
+    print(f'  Error: {e}')
+" 2>/dev/null
+  sleep 2
+done

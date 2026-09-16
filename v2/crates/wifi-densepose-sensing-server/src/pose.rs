@@ -29,157 +29,66 @@ pub fn derive_single_person_pose(
     let cls = &update.classification;
     let feat = &update.features;
 
-    let phase_offset = person_idx as f64 * 2.094;
-    let half = (total_persons as f64 - 1.0) / 2.0;
-    let person_x_offset = (person_idx as f64 - half) * 120.0;
     let conf_decay = 1.0 - person_idx as f64 * 0.15;
+    let base_confidence = cls.confidence * (0.6 + 0.4 * ((feat.variance - 0.5) / 10.0).clamp(0.0, 1.0)) * conf_decay;
 
     let motion_score = (feat.motion_band_power / 15.0).clamp(0.0, 1.0);
     let is_walking = motion_score > 0.55;
-    let breath_amp = (feat.breathing_band_power * 4.0).clamp(0.0, 12.0);
+    let breath_amp = (feat.breathing_band_power * 4.0).clamp(0.0, 0.15);
 
     let breath_phase = if let Some(ref vs) = update.vital_signs {
         let bpm = vs.breathing_rate_bpm.unwrap_or(15.0);
         let freq = (bpm / 60.0).clamp(0.1, 0.5);
-        (update.tick as f64 * freq * 0.02 * std::f64::consts::TAU + phase_offset).sin()
+        (update.tick as f64 * freq * 0.02 * std::f64::consts::TAU + person_idx as f64 * 2.094).sin()
     } else {
-        (update.tick as f64 * 0.02 + phase_offset).sin()
+        (update.tick as f64 * 0.02 + person_idx as f64 * 2.094).sin()
     };
 
-    let lean_x = (feat.dominant_freq_hz / 5.0 - 1.0).clamp(-1.0, 1.0) * 18.0;
-    let stride_x = if is_walking {
-        let stride_phase =
-            (feat.motion_band_power * 0.7 + update.tick as f64 * 0.06 + phase_offset).sin();
-        stride_phase * 20.0 * motion_score
-    } else {
-        0.0
-    };
+    let pose_label = update.posture.as_deref().unwrap_or(if is_walking { "walking" } else { "standing" });
 
-    let burst = (feat.change_points as f64 / 20.0).clamp(0.0, 0.3);
-    let noise_seed = person_idx as f64 * 97.1;
-    let noise_val = (noise_seed.sin() * 43758.545).fract();
-    let snr_factor = ((feat.variance - 0.5) / 10.0).clamp(0.0, 1.0);
-    let base_confidence = cls.confidence * (0.6 + 0.4 * snr_factor) * conf_decay;
-
-    let base_x = 320.0 + stride_x + lean_x * 0.5 + person_x_offset;
-    let base_y = 240.0 - motion_score * 8.0;
+    // Spread persons across the room using person_idx as an offset
+    let person_spread = (person_idx as f64 - (total_persons as f64 - 1.0) / 2.0) * 0.5;
 
     let kp_names = [
-        "nose",
-        "left_eye",
-        "right_eye",
-        "left_ear",
-        "right_ear",
-        "left_shoulder",
-        "right_shoulder",
-        "left_elbow",
-        "right_elbow",
-        "left_wrist",
-        "right_wrist",
-        "left_hip",
-        "right_hip",
-        "left_knee",
-        "right_knee",
-        "left_ankle",
-        "right_ankle",
+        "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+        "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+        "left_wrist", "right_wrist", "left_hip", "right_hip",
+        "left_knee", "right_knee", "left_ankle", "right_ankle",
     ];
 
-    let kp_offsets: [(f64, f64); 17] = [
-        (0.0, -80.0),
-        (-8.0, -88.0),
-        (8.0, -88.0),
-        (-16.0, -82.0),
-        (16.0, -82.0),
-        (-30.0, -50.0),
-        (30.0, -50.0),
-        (-45.0, -15.0),
-        (45.0, -15.0),
-        (-50.0, 20.0),
-        (50.0, 20.0),
-        (-20.0, 20.0),
-        (20.0, 20.0),
-        (-22.0, 70.0),
-        (22.0, 70.0),
-        (-24.0, 120.0),
-        (24.0, 120.0),
-    ];
+    // Person center in room coordinates — position will be updated by attach_field_positions
+    let center_x = person_spread;
+    let center_z = 0.0;
+
+    let (kp_offsets, kp_confs) = pose_offsets(pose_label, motion_score, breath_phase, breath_amp);
 
     let keypoints: Vec<PoseKeypoint> = kp_names
         .iter()
-        .zip(kp_offsets.iter())
         .enumerate()
-        .map(|(i, (name, (dx, dy)))| {
-            let breath_dx = if TORSO_KP.contains(&i) {
-                let sign = if *dx < 0.0 { -1.0 } else { 1.0 };
-                sign * breath_amp * breath_phase * 0.5
-            } else {
-                0.0
-            };
-            let breath_dy = if TORSO_KP.contains(&i) {
-                let sign = if *dy < 0.0 { -1.0 } else { 1.0 };
-                sign * breath_amp * breath_phase * 0.3
-            } else {
-                0.0
-            };
-
-            let extremity_jitter = if EXTREMITY_KP.contains(&i) {
-                let phase = noise_seed + i as f64 * 2.399;
-                (
-                    phase.sin() * burst * motion_score * 4.0,
-                    (phase * 1.31).cos() * burst * motion_score * 3.0,
-                )
-            } else {
-                (0.0, 0.0)
-            };
-
-            let kp_noise_x = ((noise_seed + i as f64 * 1.618).sin() * 43758.545).fract()
-                * feat.variance.sqrt().clamp(0.0, 3.0)
-                * motion_score;
-            let kp_noise_y = ((noise_seed + i as f64 * std::f64::consts::E).cos() * 31415.926)
-                .fract()
-                * feat.variance.sqrt().clamp(0.0, 3.0)
-                * motion_score
-                * 0.6;
-
-            let swing_dy = if is_walking {
-                let stride_phase =
-                    (feat.motion_band_power * 0.7 + update.tick as f64 * 0.12 + phase_offset).sin();
-                match i {
-                    7 | 9 => -stride_phase * 20.0 * motion_score,
-                    8 | 10 => stride_phase * 20.0 * motion_score,
-                    13 | 15 => stride_phase * 25.0 * motion_score,
-                    14 | 16 => -stride_phase * 25.0 * motion_score,
-                    _ => 0.0,
-                }
-            } else {
-                0.0
-            };
-
-            let final_x = base_x + dx + breath_dx + extremity_jitter.0 + kp_noise_x;
-            let final_y = base_y + dy + breath_dy + extremity_jitter.1 + kp_noise_y + swing_dy;
-
-            let kp_conf = if EXTREMITY_KP.contains(&i) {
-                base_confidence * (0.7 + 0.3 * snr_factor) * (0.85 + 0.15 * noise_val)
-            } else {
-                base_confidence * (0.88 + 0.12 * ((i as f64 * 0.7 + noise_seed).cos()))
-            };
+        .map(|(i, name)| {
+            let (dx, dy, dz) = kp_offsets[i];
+            let conf = kp_confs[i].min(base_confidence).max(0.1);
+            let final_y = dy + breath_amp * breath_phase * 0.1;
 
             PoseKeypoint {
                 name: name.to_string(),
-                x: final_x,
+                x: center_x + dx,
                 y: final_y,
-                z: lean_x * 0.02,
-                confidence: kp_conf.clamp(0.1, 1.0),
+                z: center_z + dz,
+                confidence: conf,
             }
         })
         .collect();
 
     let xs: Vec<f64> = keypoints.iter().map(|k| k.x).collect();
     let ys: Vec<f64> = keypoints.iter().map(|k| k.y).collect();
-    let min_x = xs.iter().cloned().fold(f64::MAX, f64::min) - 10.0;
-    let min_y = ys.iter().cloned().fold(f64::MAX, f64::min) - 10.0;
-    let max_x = xs.iter().cloned().fold(f64::MIN, f64::max) + 10.0;
-    let max_y = ys.iter().cloned().fold(f64::MIN, f64::max) + 10.0;
+    let zs: Vec<f64> = keypoints.iter().map(|k| k.z).collect();
+    let min_x = xs.iter().cloned().fold(f64::MAX, f64::min) - 0.1;
+    let min_y = ys.iter().cloned().fold(f64::MAX, f64::min) - 0.1;
+    let min_z = zs.iter().cloned().fold(f64::MAX, f64::min) - 0.1;
+    let max_x = xs.iter().cloned().fold(f64::MIN, f64::max) + 0.1;
+    let max_y = ys.iter().cloned().fold(f64::MIN, f64::max) + 0.1;
+    let max_z = zs.iter().cloned().fold(f64::MIN, f64::max) + 0.1;
 
     PersonDetection {
         id: (person_idx + 1) as u32,
@@ -188,15 +97,108 @@ pub fn derive_single_person_pose(
         bbox: BoundingBox {
             x: min_x,
             y: min_y,
-            width: (max_x - min_x).max(80.0),
-            height: (max_y - min_y).max(160.0),
+            width: (max_x - min_x).max(0.3),
+            height: (max_y - min_y).max(0.5),
         },
         zone: format!("zone_{}", person_idx + 1),
-        // Field-derived fields (#1050) — defaulted here; the live `/ws/sensing`
-        // path attaches real positions via `attach_field_positions`.
-        position: [0.0, 0.0, 0.0],
-        motion_score: 0.0,
-        pose: None,
+        position: [center_x, 0.0, center_z],
+        motion_score,
+        pose: update.posture.clone(),
+    }
+}
+
+/// Return (dx, dy, dz) offsets and per-keypoint confidence multipliers for a given pose label.
+/// Room coordinates in meters. Y axis is up.
+fn pose_offsets(
+    pose: &str,
+    motion_score: f64,
+    breath_phase: f64,
+    breath_amp: f64,
+) -> ([(f64, f64, f64); 17], [f64; 17]) {
+    // Standing: arms at sides, feet together
+    // All positions relative to hip center at (0, 0, 0)
+    let standing = [
+        (0.0, 1.65, 0.0),          // 0 nose
+        (-0.03, 1.67, -0.02),      // 1 left_eye
+        (0.03, 1.67, -0.02),       // 2 right_eye
+        (-0.07, 1.65, 0.0),        // 3 left_ear
+        (0.07, 1.65, 0.0),         // 4 right_ear
+        (-0.18, 1.45, -0.05),      // 5 left_shoulder
+        (0.18, 1.45, -0.05),       // 6 right_shoulder
+        (-0.28, 1.15, -0.05),      // 7 left_elbow
+        (0.28, 1.15, -0.05),       // 8 right_elbow
+        (-0.35, 0.85, -0.05),      // 9 left_wrist
+        (0.35, 0.85, -0.05),       // 10 right_wrist
+        (-0.10, 1.05, -0.05),      // 11 left_hip
+        (0.10, 1.05, -0.05),       // 12 right_hip
+        (-0.12, 0.65, -0.05),      // 13 left_knee
+        (0.12, 0.65, -0.05),       // 14 right_knee
+        (-0.12, 0.05, -0.05),      // 15 left_ankle
+        (0.12, 0.05, -0.05),       // 16 right_ankle
+    ];
+    let standing_conf = [0.9, 0.8, 0.8, 0.7, 0.7, 0.9, 0.9, 0.85, 0.85, 0.8, 0.8, 0.9, 0.9, 0.85, 0.85, 0.8, 0.8];
+
+    // Walking: legs alternating, arms swing
+    let walking = [
+        (0.0, 1.65, 0.0),          // 0 nose
+        (-0.03, 1.67, -0.02),      // 1 left_eye
+        (0.03, 1.67, -0.02),       // 2 right_eye
+        (-0.07, 1.65, 0.0),        // 3 left_ear
+        (0.07, 1.65, 0.0),         // 4 right_ear
+        (-0.18, 1.45, -0.05),      // 5 left_shoulder
+        (0.18, 1.45, -0.05),       // 6 right_shoulder
+        (-0.30, 1.15, -0.05),      // 7 left_elbow
+        (0.25, 1.20, -0.05),       // 8 right_elbow
+        (-0.40, 0.80, -0.05),      // 9 left_wrist
+        (0.30, 0.90, -0.05),       // 10 right_wrist
+        (-0.10, 1.05, -0.05),      // 11 left_hip
+        (0.10, 1.05, -0.05),       // 12 right_hip
+        (-0.12, 0.35, -0.05),      // 13 left_knee
+        (0.15, 0.40, -0.05),       // 14 right_knee
+        (-0.12, -0.05, -0.05),     // 15 left_ankle
+        (0.15, -0.05, -0.05),      // 16 right_ankle
+    ];
+    let walking_conf = [0.8, 0.7, 0.7, 0.6, 0.6, 0.8, 0.8, 0.75, 0.75, 0.7, 0.7, 0.8, 0.8, 0.7, 0.7, 0.6, 0.6];
+
+    // Sitting: lower hips, knees bent
+    let sitting = [
+        (0.0, 1.35, 0.0),          // 0 nose
+        (-0.03, 1.37, -0.02),      // 1 left_eye
+        (0.03, 1.37, -0.02),       // 2 right_eye
+        (-0.07, 1.35, 0.0),        // 3 left_ear
+        (0.07, 1.35, 0.0),         // 4 right_ear
+        (-0.18, 1.25, -0.05),      // 5 left_shoulder
+        (0.18, 1.25, -0.05),       // 6 right_shoulder
+        (-0.25, 1.05, -0.05),      // 7 left_elbow
+        (0.25, 1.05, -0.05),       // 8 right_elbow
+        (-0.30, 0.85, -0.05),      // 9 left_wrist
+        (0.30, 0.85, -0.05),       // 10 right_wrist
+        (-0.12, 0.75, -0.05),      // 11 left_hip
+        (0.12, 0.75, -0.05),       // 12 right_hip
+        (-0.15, 0.45, -0.05),      // 13 left_knee
+        (0.15, 0.45, -0.05),       // 14 right_knee
+        (-0.12, 0.05, -0.05),      // 15 left_ankle
+        (0.12, 0.05, -0.05),       // 16 right_ankle
+    ];
+    let sitting_conf = [0.8, 0.7, 0.7, 0.6, 0.6, 0.8, 0.8, 0.75, 0.75, 0.7, 0.7, 0.8, 0.8, 0.7, 0.7, 0.6, 0.6];
+
+    let (offsets, confs) = match pose {
+        "walking" => (walking, walking_conf),
+        "sitting" => (sitting, sitting_conf),
+        _ => (standing, standing_conf),
+    };
+
+    // Apply walking leg animation
+    if pose == "walking" && motion_score > 0.5 {
+        let stride = motion_score * 0.08;
+        let mut offsets = offsets;
+        offsets[13] = (offsets[13].0 - stride, offsets[13].1, offsets[13].2);
+        offsets[14] = (offsets[14].0 + stride, offsets[14].1, offsets[14].2);
+        offsets[15] = (offsets[15].0 - stride, offsets[15].1, offsets[15].2);
+        offsets[16] = (offsets[16].0 + stride, offsets[16].1, offsets[16].2);
+        (offsets, confs)
+    } else {
+        (offsets, confs)
     }
 }
 
