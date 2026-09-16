@@ -36,6 +36,12 @@ typedef struct {
     uint8_t  tdm_slot_index;                  /**< This node's TDM slot index (0-based). */
     uint8_t  tdm_node_count;                  /**< Total nodes in the TDM schedule. */
 
+/* ADR-345: ESP-NOW sensing-beacon cadence.
+     *
+     * 0 = derive from tdm_node_count (the normal case). A non-zero value is an
+     * explicit override for benching; see c6_sync_espnow_period_ms(). */
+    uint16_t beacon_period_ms;
+
     /* ADR-039: Edge intelligence configuration */
     uint8_t  edge_tier;                       /**< Processing tier (0=raw, 1=basic, 2=full). */
     float    presence_thresh;                 /**< Presence threshold (0 = auto-calibrate). */
@@ -72,5 +78,8 @@ typedef struct {
  * @param cfg  Output configuration struct.
  */
 void nvs_config_load(nvs_config_t *cfg);
+
+/** Live configuration, loaded once at boot by app_main(). */
+extern nvs_config_t g_nvs_config;
 
 #endif /* NVS_CONFIG_H */
