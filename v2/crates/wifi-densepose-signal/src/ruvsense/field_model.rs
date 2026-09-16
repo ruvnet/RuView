@@ -58,6 +58,12 @@ pub const MIN_CALIBRATION_FRAMES: usize =
 const CALIBRATION_BACKGROUND_WINDOWS_MAX: usize = 512;
 const EMPTY_ROOM_RESIDUAL_MARGIN: f64 = 1.5;
 const EMPTY_ROOM_HELD_OUT_MARGIN: f64 = 1.10;
+/// The boundary stored at finalization is the calibration residual p95
+/// times [`EMPTY_ROOM_RESIDUAL_MARGIN`]. Any disturbance during the
+/// calibration window lands in that upper tail, so the robust
+/// median-derived boundary is applied whenever the stored one is more
+/// than this many times looser.
+const EMPTY_ROOM_CONTAMINATION_RATIO: f64 = 2.0;
 const EMPTY_ROOM_REFINEMENT_MAX_LIFT: f64 = 1.25;
 const EMPTY_ROOM_REFINEMENT_MIN_SAMPLES: usize = 10;
 const EMPTY_ROOM_REFINEMENT_MAX_SAMPLES: usize = 64;
@@ -373,6 +379,35 @@ pub struct FieldNormalMode {
     pub empty_room_residual_refinement_count: u8,
 }
 
+/// Robust summary of the retained empty-room residual reference windows.
+///
+/// The finalization boundary is a 95th percentile, which a transient
+/// disturbance during calibration (motion in an adjacent room, a door, an
+/// appliance, an animal) inflates. These statistics are derived from the
+/// same retained scalar references and stay near the settled empty level.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EmptyRoomReferenceStats {
+    pub window_count: usize,
+    /// Lower quartile: the quiet floor of the calibration period, and the
+    /// statistic the effective boundary is derived from.
+    pub p25: f64,
+    pub median: f64,
+    pub p75: f64,
+    pub p95: f64,
+    /// 1.4826 x median absolute deviation of the references.
+    pub robust_scale: f64,
+    /// Boundary stored by calibration finalization (p95 x margin).
+    pub stored_threshold: f64,
+    /// Median x margin, bounded below by the absolute floor.
+    pub robust_threshold: f64,
+    /// Boundary the runtime comparison actually applies.
+    pub effective_threshold: f64,
+    /// `stored_threshold / robust_threshold`; a large value marks a
+    /// calibration period that was not quiet.
+    pub contamination_ratio: f64,
+    pub contaminated: bool,
+}
+
 /// A bounded comparison between one runtime window and the learned empty room
 /// residual distribution. `score` is an empirical conformance score, not a
 /// probability that a person is absent.
@@ -387,7 +422,17 @@ pub struct EmptyRoomMatch {
     /// Whether the reference set is large and valid enough to suppress change.
     pub reliable: bool,
     pub residual_energy: f64,
+    /// Boundary actually applied to `residual_energy` for `matches_empty`.
     pub residual_energy_threshold: f64,
+    /// Boundary learned at finalization, kept for operator comparison.
+    pub stored_residual_energy_threshold: f64,
+    /// Median of the retained empty-room residual references.
+    pub reference_p50: Option<f64>,
+    /// Robust spread (1.4826 x MAD) of the retained references.
+    pub reference_robust_scale: Option<f64>,
+    /// True when a calibration disturbance lifted the learned boundary
+    /// well above the robust one, so the calibration period was not quiet.
+    pub reference_contaminated: bool,
     pub window_size: usize,
     pub reference_window_count: usize,
 }
@@ -639,6 +684,20 @@ fn residual_energy_for_link(
     )
 }
 
+/// Percentile of an ascending slice using the same nearest-rank index the
+/// calibration p95 uses, so the two statistics stay comparable.
+fn quantile_sorted(sorted: &[f64], percentile: usize) -> Option<f64> {
+    if sorted.is_empty() || percentile == 0 || percentile > 100 {
+        return None;
+    }
+    let index = sorted
+        .len()
+        .saturating_mul(percentile)
+        .div_ceil(100)
+        .saturating_sub(1);
+    sorted.get(index).copied()
+}
+
 fn percentile_95(mut values: Vec<f64>) -> Option<f64> {
     values.retain(|value| value.is_finite());
     values.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
@@ -736,6 +795,89 @@ impl FieldModel {
         self.modes
             .as_ref()
             .and_then(|modes| modes.empty_room_residual_energy_threshold)
+    }
+
+    /// Robust summary of the retained empty-room residual references, or
+    /// `None` when the model predates runtime window calibration or the
+    /// reference set is too small to summarize.
+    ///
+    /// `p25` is the quiet floor of the calibration period and drives
+    /// `effective_threshold`; `median` and `p95` are reported so an operator
+    /// can see that a calibration was disturbed. MEASURED on the room B rig:
+    /// the first calibration produced a reference whose fitted median was
+    /// 6.7 (p95 15.86, stored boundary 23.79) while the settled empty room
+    /// measured 3.7-5.5, and a person sitting still on the floor measured
+    /// 3.25-35.0 with a median of 14.4 - inside the stored boundary, so the
+    /// occupant was reported as an empty room for the whole still phase.
+    pub fn empty_room_reference_stats(&self) -> Option<EmptyRoomReferenceStats> {
+        let modes = self.modes.as_ref()?;
+        let references = &modes.empty_room_residual_energy_reference;
+        let mut sorted: Vec<f64> = references
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .collect();
+        if sorted.len() != references.len()
+            || sorted.len() < MIN_BACKGROUND_REFERENCE_WINDOWS
+        {
+            return None;
+        }
+        sorted.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
+        let p25 = quantile_sorted(&sorted, 25)?;
+        let median = quantile_sorted(&sorted, 50)?;
+        let p75 = quantile_sorted(&sorted, 75)?;
+        let p95 = quantile_sorted(&sorted, 95)?;
+        let mut deviations: Vec<f64> = sorted
+            .iter()
+            .map(|value| (value - median).abs())
+            .collect();
+        deviations
+            .sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
+        let mad = quantile_sorted(&deviations, 50)?;
+        let robust_scale = (1.4826 * mad).max(median.abs() * 0.01);
+        let stored_threshold = modes
+            .empty_room_residual_energy_threshold
+            .unwrap_or(f64::INFINITY)
+            .max(EMPTY_ROOM_RESIDUAL_ENERGY_MAX);
+        // The quiet floor, not the median: a still occupant or any
+        // disturbance during the calibration moves the median and the p95
+        // but leaves the lower quartile near the settled empty level.
+        let quiet_floor = p25.min(median);
+        let robust_threshold = (quiet_floor * EMPTY_ROOM_RESIDUAL_MARGIN)
+            .max(EMPTY_ROOM_RESIDUAL_ENERGY_MAX);
+        let contamination_ratio = if robust_threshold > 0.0 {
+            stored_threshold / robust_threshold
+        } else {
+            f64::INFINITY
+        };
+        Some(EmptyRoomReferenceStats {
+            window_count: sorted.len(),
+            p25,
+            median,
+            p75,
+            p95,
+            robust_scale,
+            stored_threshold,
+            robust_threshold,
+            effective_threshold: robust_threshold.min(stored_threshold),
+            contamination_ratio,
+            contaminated: contamination_ratio > EMPTY_ROOM_CONTAMINATION_RATIO,
+        })
+    }
+
+    /// Boundary the runtime empty-room comparison applies. It is the tighter
+    /// of the learned boundary and the robust median-derived one, so a noisy
+    /// calibration cannot keep a still occupant invisible and the robust
+    /// statistic can never widen the learned suppression range.
+    pub fn effective_empty_room_threshold(&self) -> Option<f64> {
+        let stored = self
+            .empty_room_residual_energy_threshold()?
+            .max(EMPTY_ROOM_RESIDUAL_ENERGY_MAX);
+        Some(
+            self.empty_room_reference_stats()
+                .map(|stats| stats.effective_threshold.min(stored))
+                .unwrap_or(stored),
+        )
     }
 
     /// Refine a completed single-link empty-room boundary with scalar residuals
@@ -1339,8 +1481,13 @@ impl FieldModel {
             *value /= window_size as f64;
         }
         let residual_energy = residual_energy_for_link(modes, 0, &mean)?;
-        let residual_energy_threshold = modes
+        let stored_residual_energy_threshold = modes
             .empty_room_residual_energy_threshold?
+            .max(EMPTY_ROOM_RESIDUAL_ENERGY_MAX);
+        let reference_stats = self.empty_room_reference_stats();
+        let residual_energy_threshold = reference_stats
+            .map(|stats| stats.effective_threshold)
+            .unwrap_or(stored_residual_energy_threshold)
             .max(EMPTY_ROOM_RESIDUAL_ENERGY_MAX);
         let reference_window_count = modes.empty_room_residual_energy_reference.len();
         let maturity = (reference_window_count as f64
@@ -1374,6 +1521,11 @@ impl FieldModel {
             reliable,
             residual_energy,
             residual_energy_threshold,
+            stored_residual_energy_threshold,
+            reference_p50: reference_stats.map(|stats| stats.median),
+            reference_robust_scale: reference_stats.map(|stats| stats.robust_scale),
+            reference_contaminated: reference_stats
+                .is_some_and(|stats| stats.contaminated),
             window_size,
             reference_window_count,
         })
@@ -2234,6 +2386,133 @@ mod tests {
         assert!(model
             .refine_empty_room_residual_boundary(&residuals)
             .is_err());
+    }
+
+    /// A ten minute empty-room calibration is not always quiet: motion in an
+    /// adjacent room, a door, an appliance, or an animal lands in the upper tail
+    /// of the window residuals. The stored boundary is that 95th percentile
+    /// times the empty-room margin, so a still occupant whose residual sits
+    /// between the quiet median and that inflated tail used to be reported as an
+    /// empty room. Measured in room B: stored boundary 23.79 against a settled
+    /// empty level of 3.7-5.5 and a person sitting still on the floor at 6-29
+    /// (median 14), so `person_count` stayed zero and the ADR-021 publication
+    /// gate could never open.
+    #[test]
+    fn disturbed_calibration_reference_tightens_the_effective_boundary() {
+        let config = FieldModelConfig {
+            n_links: 1,
+            n_subcarriers: 8,
+            n_modes: 2,
+            min_calibration_frames: 100,
+            min_calibration_duration_s: 0.0,
+            baseline_expiry_s: 86_400.0,
+        };
+        // The quiet drift keeps a residual well above the absolute floor, and
+        // the disturbance is a fixed spatial pattern so it survives the fifty
+        // frame window mean exactly as a still occupant's static shadow does.
+        let quiet = |index: usize| -> Vec<f64> {
+            let t = index as f64 * 0.05;
+            (0..8)
+                .map(|sc| 20.0 + sc as f64 * 0.1 + (t + sc as f64 * 0.2).sin() * 2.0)
+                .collect()
+        };
+        let disturbed = |index: usize| -> Vec<f64> {
+            let t = index as f64 * 0.05;
+            (0..8)
+                .map(|sc| {
+                    20.0 + sc as f64 * 0.1
+                        + (t + sc as f64 * 0.2).sin() * 2.0
+                        + (sc as f64 * 1.7).sin() * 3.0
+                })
+                .collect()
+        };
+
+        let mut model = FieldModel::new(config).unwrap();
+        for index in 0..1_200 {
+            let frame = if (300..420).contains(&index) {
+                disturbed(index)
+            } else {
+                quiet(index)
+            };
+            model.feed_calibration(&[frame]).unwrap();
+        }
+        model.finalize_calibration(1_000_000, 0).unwrap();
+
+        let stats = model
+            .empty_room_reference_stats()
+            .expect("reference statistics");
+        assert!(stats.window_count >= MIN_BACKGROUND_REFERENCE_WINDOWS);
+        assert!(
+            stats.contaminated,
+            "a disturbed calibration must be reported: {stats:?}"
+        );
+        assert!(stats.stored_threshold > stats.robust_threshold);
+        let effective = model.effective_empty_room_threshold().unwrap();
+        assert_eq!(effective, stats.effective_threshold);
+        assert!(effective < stats.stored_threshold);
+
+        // A quiet window still reads as an empty room.
+        let quiet_window: Vec<Vec<f64>> = (1_200..1_250).map(quiet).collect();
+        let quiet_match = model.empty_room_match(&quiet_window).expect("quiet match");
+        assert!(quiet_match.matches_empty);
+        assert!(quiet_match.reference_contaminated);
+        assert_eq!(
+            quiet_match.stored_residual_energy_threshold,
+            stats.stored_threshold
+        );
+        assert!(quiet_match.residual_energy <= effective);
+
+        // The disturbance that inflated the learned boundary no longer hides
+        // behind it: the same signature is what a still occupant looks like
+        // against the quiet reference.
+        let disturbed_window: Vec<Vec<f64>> = (700..750).map(disturbed).collect();
+        let disturbed_match = model
+            .empty_room_match(&disturbed_window)
+            .expect("disturbed match");
+        assert!(
+            !disturbed_match.matches_empty,
+            "residual {} must exceed the effective boundary {effective}",
+            disturbed_match.residual_energy
+        );
+    }
+
+    /// A quiet calibration keeps the boundary the operator-visible model
+    /// reports; the robust statistic may only tighten it.
+    #[test]
+    fn quiet_calibration_reference_is_not_flagged_contaminated() {
+        let config = FieldModelConfig {
+            n_links: 1,
+            n_subcarriers: 8,
+            n_modes: 2,
+            min_calibration_frames: 100,
+            min_calibration_duration_s: 0.0,
+            baseline_expiry_s: 86_400.0,
+        };
+        let quiet = |index: usize| -> Vec<f64> {
+            let t = index as f64 * 0.05;
+            (0..8)
+                .map(|sc| 20.0 + sc as f64 * 0.1 + (t + sc as f64 * 0.2).sin() * 0.2)
+                .collect()
+        };
+
+        let mut model = FieldModel::new(config).unwrap();
+        for index in 0..1_200 {
+            model.feed_calibration(&[quiet(index)]).unwrap();
+        }
+        model.finalize_calibration(1_000_000, 0).unwrap();
+
+        let stats = model
+            .empty_room_reference_stats()
+            .expect("reference statistics");
+        assert!(!stats.contaminated, "{stats:?}");
+        let effective = model.effective_empty_room_threshold().unwrap();
+        assert!(effective <= stats.stored_threshold);
+        let quiet_window: Vec<Vec<f64>> = (1_200..1_250).map(quiet).collect();
+        let quiet_match = model.empty_room_match(&quiet_window).expect("quiet match");
+        assert!(quiet_match.matches_empty);
+        assert!(!quiet_match.reference_contaminated);
+        assert!(quiet_match.reference_p50.is_some());
+        assert!(quiet_match.reference_robust_scale.is_some());
     }
 
     #[cfg(feature = "eigenvalue")]
