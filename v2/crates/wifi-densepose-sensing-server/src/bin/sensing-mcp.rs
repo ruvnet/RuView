@@ -113,11 +113,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(json!({"room":s.room,"hours":hours,"detections":data}))
     })}).with_description("Get bounded person history for the authorized room").with_schema(json!({"type":"object","properties":{"hours":{"type":"integer","minimum":1,"maximum":24},"limit":{"type":"integer","minimum":1,"maximum":250}}}));
 
-    let s=state.clone();
-    let room_status=SimpleTool::new("room_status",move |_args,_extra|{let s=s.clone();Box::pin(async move{
-        let data=s.query("MATCH (r:Room {name:$room}) OPTIONAL MATCH (r)-[:CURRENT_EVENT]->(cur:SensingEvent) OPTIONAL MATCH (r)-[:HAS_EVENT]->(e:SensingEvent) RETURN r.last_updated AS last_updated,cur.timestamp AS event_ts,cur.motion_level AS motion,cur.presence AS presence,count(e) AS total_events,avg(e.signal_quality) AS avg_signal_quality,min(e.timestamp) AS first_event,max(e.timestamp) AS last_event",vec![("room",s.room.clone().into())]).await?;
-        Ok(json!({"room":s.room,"privacy_mode":s.privacy_mode,"status":data}))
-    })}).with_description("Get aggregate non-sensitive status for the authorized room");
+let s=state.clone();
+let get_rooms=SimpleTool::new("get_rooms",move |_args,_extra|{let s=s.clone();Box::pin(async move{
+    let data=s.query("MATCH (r:Room) OPTIONAL MATCH (r)-[:CURRENT_EVENT]->(e:SensingEvent) RETURN r.name AS name,r.last_updated AS last_updated,e.timestamp AS latest_event_ts,e.motion_level AS latest_motion ORDER BY r.name",vec![]).await?;
+    Ok(json!({"rooms":data}))
+})}).with_description("List all configured rooms with their current status");
+
+let s=state.clone();
+let room_status=SimpleTool::new("room_status",move |args,_extra|{let s=s.clone();let room=args.get("room").and_then(|v|v.as_str()).unwrap_or(&s.room);let data=s.query("MATCH (r:Room {name:$room}) OPTIONAL MATCH (r)-[:CURRENT_EVENT]->(cur:SensingEvent) OPTIONAL MATCH (r)-[:HAS_EVENT]->(e:SensingEvent) RETURN r.last_updated AS last_updated,cur.timestamp AS event_ts,cur.motion_level AS motion,cur.presence AS presence,count(e) AS total_events,avg(e.signal_quality) AS avg_signal_quality,min(e.timestamp) AS first_event,max(e.timestamp) AS last_event",vec![("room",room.into())]).await?;Ok(json!({"room":room,"privacy_mode":s.privacy_mode,"status":data}))}).with_description("Get aggregate non-sensitive status for a room");
 
      let s=state.clone();
      let rooms=SimpleTool::new("rooms",move |_args,_extra|{let s=s.clone();Box::pin(async move{
@@ -146,7 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
      let server=Server::builder().name("ruview-sensing").version(env!("CARGO_PKG_VERSION"))
          .tool("latest_event",latest_event).tool("vitals_history",vitals_history).tool("person_history",person_history)
-         .tool("room_status",room_status).tool("rooms",rooms).tool("presence_status",presence_status)
+         .tool("room_status",room_status).tool("get_rooms",get_rooms).tool("rooms",rooms).tool("presence_status",presence_status)
          .tool("home_away_status",home_away_status).build()?;
      server.run_stdio().await?; Ok(())
 }
