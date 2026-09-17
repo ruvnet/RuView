@@ -119,16 +119,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(json!({"room":s.room,"privacy_mode":s.privacy_mode,"status":data}))
     })}).with_description("Get aggregate non-sensitive status for the authorized room");
 
-    let s=state.clone();
-    let rooms=SimpleTool::new("rooms",move |_args,_extra|{let s=s.clone();Box::pin(async move{
-        let data=s.query("MATCH (r:Room {name:$room}) OPTIONAL MATCH (r)-[:CURRENT_EVENT]->(e:SensingEvent) RETURN r.name AS name,r.last_updated AS last_updated,e.timestamp AS latest_event_ts,e.motion_level AS latest_motion LIMIT 1",vec![("room",s.room.clone().into())]).await?;
-        Ok(json!({"rooms":data}))
-    })}).with_description("Return only the authorized room");
+     let s=state.clone();
+     let rooms=SimpleTool::new("rooms",move |_args,_extra|{let s=s.clone();Box::pin(async move{
+         let data=s.query("MATCH (r:Room {name:$room}) OPTIONAL MATCH (r)-[:CURRENT_EVENT]->(e:SensingEvent) RETURN r.name AS name,r.last_updated AS last_updated,e.timestamp AS latest_event_ts,e.motion_level AS latest_motion LIMIT 1",vec![("room",s.room.clone().into())]).await?;
+         Ok(json!({"rooms":data}))
+     })}).with_description("Return only the authorized room");
 
-    let server=Server::builder().name("ruview-sensing").version(env!("CARGO_PKG_VERSION"))
-        .tool("latest_event",latest_event).tool("vitals_history",vitals_history).tool("person_history",person_history)
-        .tool("room_status",room_status).tool("rooms",rooms).build()?;
-    server.run_stdio().await?; Ok(())
+     // ---- Layer 3: Presence & home/away context ----
+
+     let s=state.clone();
+     let presence_status=SimpleTool::new("presence_status",move |_args,_extra|{let s=s.clone();Box::pin(async move{
+         let data=s.query("MATCH (r:Room {name:$room})-[:CURRENT_EVENT]->(e:SensingEvent) RETURN e.timestamp AS ts,e.motion_level AS motion,e.presence AS presence,e.signal_quality AS quality,e.person_count AS persons",vec![("room",s.room.clone().into())]).await?;
+         let enter=s.query("MATCH (r:Room {name:$room})-[:CURRENT_EVENT]->(e:SensingEvent)-[:HAS_EVENT]->(ev:EnterEvent) RETURN ev.timestamp AS ts,ev.confidence AS conf,ev.motion AS motion ORDER BY ev.timestamp DESC LIMIT 1",vec![("room",s.room.clone().into())]).await?;
+         let exit=s.query("MATCH (r:Room {name:$room})-[:CURRENT_EVENT]->(e:SensingEvent)-[:HAS_EVENT]->(ev:ExitEvent) RETURN ev.timestamp AS ts,ev.confidence AS conf,ev.motion AS motion ORDER BY ev.timestamp DESC LIMIT 1",vec![("room",s.room.clone().into())]).await?;
+         Ok(json!({"room":s.room,"privacy_mode":s.privacy_mode,"presence":data,"last_enter":enter,"last_exit":exit}))
+     })}).with_description("Get current presence status with last enter/exit events for the authorized room");
+
+     let s=state.clone();
+     let home_away_status=SimpleTool::new("home_away_status",move |_args,_extra|{let s=s.clone();Box::pin(async move{
+         let presence=s.query("MATCH (r:Room {name:$room})-[:CURRENT_EVENT]->(e:SensingEvent) RETURN e.presence AS presence,e.motion_level AS motion,e.timestamp AS ts,e.person_count AS persons",vec![("room",s.room.clone().into())]).await?;
+         let vitals=s.query("MATCH (r:Room {name:$room})-[:CURRENT_EVENT]->(e:SensingEvent)-[:HAS_VITALS]->(v) RETURN v.heart_rate AS hr,v.breathing_rate AS br,v.hr_confidence AS hr_conf,v.br_confidence AS br_conf LIMIT 1",vec![("room",s.room.clone().into())]).await?;
+         let enter=s.query("MATCH (r:Room {name:$room})-[:CURRENT_EVENT]->(e:SensingEvent)-[:HAS_EVENT]->(ev:EnterEvent) RETURN ev.timestamp AS ts,ev.confidence AS conf,ev.motion AS motion ORDER BY ev.timestamp DESC LIMIT 1",vec![("room",s.room.clone().into())]).await?;
+         let recent=s.query("MATCH (r:Room {name:$room})-[:HAS_EVENT]->(e:SensingEvent) WHERE datetime(e.timestamp)>datetime()-duration({hours:$hours}) RETURN count(e) AS events,sum(e.person_count) AS total_persons,avg(e.signal_quality) AS avg_quality",vec![("room",s.room.clone().into()),("hours",(1i64).into())]).await?;
+         Ok(json!({"room":s.room,"privacy_mode":s.privacy_mode,"status":presence,"vitals":vitals,"last_enter":enter,"recent":recent}))
+     })}).with_description("Get comprehensive home/away status combining presence, vitals, and recent activity for the authorized room").with_schema(json!({"type":"object","properties":{"hours":{"type":"integer","minimum":1,"maximum":24}}}));
+
+     let server=Server::builder().name("ruview-sensing").version(env!("CARGO_PKG_VERSION"))
+         .tool("latest_event",latest_event).tool("vitals_history",vitals_history).tool("person_history",person_history)
+         .tool("room_status",room_status).tool("rooms",rooms).tool("presence_status",presence_status)
+         .tool("home_away_status",home_away_status).build()?;
+     server.run_stdio().await?; Ok(())
 }
 
 #[cfg(test)]
