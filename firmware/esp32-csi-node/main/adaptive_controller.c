@@ -117,18 +117,24 @@ static void collect_observation(adapt_observation_t *out)
         }
     }
 
-    /* Edge-derived state. The ADR-039 vitals packet exposes presence_score
-     * and motion_energy directly; we treat motion_energy as a proxy for
-     * motion_score by clamping to [0,1]. anomaly_score and node_coherence
-     * are not yet emitted by edge_processing — placeholder until Layer 4
-     * extraction lands. */
+    /* Edge-derived state. The ADR-039 vitals packet's presence_score and
+     * motion_energy are the same raw, unbounded phase-variance quantity
+     * (edge_processing.c sets s_presence_score = s_motion_energy directly),
+     * so both must go through the same scale-then-clamp normalization
+     * send_feature_vector() already uses (divide by 10, clamp to [0,1]).
+     * A bare [0,1] clamp on either field saturates at 1.0 almost
+     * unconditionally, since raw values routinely exceed 1.0 — this is
+     * what caused presence/motion to read "detected" regardless of actual
+     * occupancy. anomaly_score and node_coherence are not yet emitted by
+     * edge_processing — placeholder until Layer 4 extraction lands. */
     edge_vitals_pkt_t vitals;
     if (edge_get_vitals(&vitals)) {
-        out->presence_score = vitals.presence_score;
+        float p = vitals.presence_score;
+        if (p < 0.0f) p = 0.0f;
+        out->presence_score = (p > 10.0f) ? 1.0f : (p / 10.0f);
         float m = vitals.motion_energy;
         if (m < 0.0f) m = 0.0f;
-        if (m > 1.0f) m = 1.0f;
-        out->motion_score   = m;
+        out->motion_score   = (m > 10.0f) ? 1.0f : (m / 10.0f);
     }
     out->anomaly_score  = 0.0f;
     out->node_coherence = 1.0f;

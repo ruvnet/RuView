@@ -19,6 +19,20 @@ Endpoints (matched against tools/ruview-mcp/src/tools/*.ts):
   GET  /api/v1/edge/registry                   — node enumeration
   GET  /api/v1/vitals/<node_id>/latest         — EdgeVitalsMessage
   GET  /api/v1/bfld/<node_id>/last_scan        — BfldScanResponse
+  GET  /api/v1/sensing/history/<node_id>?hours=24&bucket_min=10
+                                                — bucketed presence history
+                                                  + exact state-change events,
+                                                  for the ui/live-status.html
+                                                  24h chart. A background
+                                                  thread samples the feature
+                                                  file every HISTORY_SAMPLE_S
+                                                  and appends to a per-node
+                                                  JSONL file so history
+                                                  survives server restarts.
+                                                  There is no backfill: the
+                                                  window only has real data
+                                                  from whenever this sampler
+                                                  was first started.
   POST /api/v1/bfld/<node_id>/subscribe?duration_s=N — { subscription_id }
 
 The source-of-truth file is `/tmp/ruview-last-feature.json` written
@@ -35,7 +49,9 @@ import json
 import os
 import re
 import sys
+import threading
 import time
+from collections import deque
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -43,6 +59,134 @@ FEATURE_FILE = os.environ.get("RUVIEW_FEATURE_JSON",
                               "/tmp/ruview-last-feature.json")
 STALENESS_S = 10.0
 DEFAULT_PORT = int(os.environ.get("PORT", "3000"))
+
+# --- Presence history (for the 24h chart) -----------------------------------
+# The feature file only ever holds the latest sample, so a background thread
+# samples it every HISTORY_SAMPLE_S and keeps a rolling HISTORY_WINDOW_S of
+# (timestamp, presence) pairs in memory, persisted to a per-node JSONL file
+# so history survives a server restart. No backfill — a freshly started
+# sampler has no history before its own start time.
+HISTORY_DIR = os.environ.get("RUVIEW_HISTORY_DIR", "/tmp")
+HISTORY_SAMPLE_S = 30.0
+HISTORY_WINDOW_S = 24 * 3600.0
+_history_lock = threading.Lock()
+_history: dict[str, deque] = {}
+
+
+def _history_file(node_id: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", node_id)
+    return os.path.join(HISTORY_DIR, f"ruview-history-{safe}.jsonl")
+
+
+def _load_history_from_disk(node_id: str) -> deque:
+    dq: deque = deque()
+    cutoff = time.time() - HISTORY_WINDOW_S
+    try:
+        with open(_history_file(node_id), "r") as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                ts = rec.get("ts")
+                if ts is not None and ts >= cutoff:
+                    dq.append((ts, bool(rec.get("presence"))))
+    except OSError:
+        pass
+    return dq
+
+
+def _history_get(node_id: str) -> deque:
+    with _history_lock:
+        if node_id not in _history:
+            _history[node_id] = _load_history_from_disk(node_id)
+        return _history[node_id]
+
+
+def _append_history_disk(node_id: str, ts: float, presence: bool) -> None:
+    try:
+        with open(_history_file(node_id), "a") as fh:
+            fh.write(json.dumps({"ts": ts, "presence": presence}) + "\n")
+    except OSError as e:
+        print(f"[sensing-server] history write error: {e}", flush=True)
+
+
+def _prune_history_disk(node_id: str) -> None:
+    """Rewrite the history file from the in-memory window, bounding growth."""
+    with _history_lock:
+        records = list(_history.get(node_id, ()))
+    path = _history_file(node_id)
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w") as fh:
+            for ts, presence in records:
+                fh.write(json.dumps({"ts": ts, "presence": presence}) + "\n")
+        os.replace(tmp, path)
+    except OSError as e:
+        print(f"[sensing-server] history prune error: {e}", flush=True)
+
+
+def _history_sampler_loop() -> None:
+    prune_countdown = {}
+    while True:
+        time.sleep(HISTORY_SAMPLE_S)
+        f = _load_feature()
+        if f is None:
+            continue
+        node_id = f["node_id"]
+        presence = bool(f.get("presence", False))
+        now = time.time()
+        dq = _history_get(node_id)
+        with _history_lock:
+            dq.append((now, presence))
+            cutoff = now - HISTORY_WINDOW_S
+            while dq and dq[0][0] < cutoff:
+                dq.popleft()
+        _append_history_disk(node_id, now, presence)
+        prune_countdown[node_id] = prune_countdown.get(node_id, 0) + 1
+        if prune_countdown[node_id] >= 200:  # ~100 min at 30s cadence
+            _prune_history_disk(node_id)
+            prune_countdown[node_id] = 0
+
+
+def history_for(node_id: str, hours: float, bucket_min: float) -> dict:
+    now = time.time()
+    bucket_s = max(1.0, bucket_min * 60.0)
+    n_buckets = max(1, int((hours * 3600.0) // bucket_s))
+    start = now - n_buckets * bucket_s
+
+    dq = _history_get(node_id)
+    with _history_lock:
+        samples = sorted((ts, p) for ts, p in dq if ts >= start)
+
+    changes = []
+    prev = None
+    for ts, presence in samples:
+        if prev is not None and presence != prev:
+            changes.append({"ts": ts, "presence": presence})
+        prev = presence
+
+    buckets = []
+    for i in range(n_buckets):
+        b_start = start + i * bucket_s
+        b_end = b_start + bucket_s
+        in_bucket = [p for ts, p in samples if b_start <= ts < b_end]
+        buckets.append({
+            "ts_start": b_start,
+            "ts_end": b_end,
+            "has_data": bool(in_bucket),
+            "presence_frac": (sum(in_bucket) / len(in_bucket)
+                               if in_bucket else None),
+        })
+
+    return {
+        "node_id": node_id,
+        "window_hours": hours,
+        "bucket_minutes": bucket_min,
+        "sample_interval_s": HISTORY_SAMPLE_S,
+        "buckets": buckets,
+        "changes": changes,
+    }
 
 
 def _load_feature() -> dict | None:
@@ -100,6 +244,7 @@ _PATH_VITALS = re.compile(r"^/api/v1/vitals/([^/]+)/latest$")
 _PATH_BFLD_SCAN = re.compile(r"^/api/v1/bfld/([^/]+)/last_scan$")
 _PATH_BFLD_SUBSCRIBE = re.compile(r"^/api/v1/bfld/([^/]+)/subscribe$")
 _PATH_SEMANTIC = re.compile(r"^/api/v1/semantic-events/([^/]+)/latest$")
+_PATH_HISTORY = re.compile(r"^/api/v1/sensing/history/([^/]+)$")
 
 
 def semantic_events_for(node_id: str) -> dict | None:
@@ -164,6 +309,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(payload)
 
@@ -243,6 +389,15 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, r)
             return
 
+        m = _PATH_HISTORY.match(path)
+        if m:
+            node_id = m.group(1)
+            qs = parse_qs(parsed.query)
+            hours = float(qs.get("hours", ["24"])[0])
+            bucket_min = float(qs.get("bucket_min", ["10"])[0])
+            self._json(200, history_for(node_id, hours, bucket_min))
+            return
+
         self._json(404, {"error": "not found", "path": path})
 
     def do_POST(self) -> None:
@@ -266,9 +421,12 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> int:
     port = DEFAULT_PORT
     server = HTTPServer(("0.0.0.0", port), Handler)
+    threading.Thread(target=_history_sampler_loop, daemon=True).start()
     print(f"[sensing-server] listening on 0.0.0.0:{port}", flush=True)
     print(f"[sensing-server] feature source: {FEATURE_FILE}", flush=True)
     print(f"[sensing-server] staleness limit: {STALENESS_S} s", flush=True)
+    print(f"[sensing-server] history sampler: every {HISTORY_SAMPLE_S}s, "
+          f"{HISTORY_WINDOW_S/3600:.0f}h window, dir={HISTORY_DIR}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

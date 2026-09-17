@@ -532,12 +532,20 @@ menu "Onboard LED (ADR-183)"
     config LED_MOTION_FULLSCALE_MILLI
         int "Motion value (x1000) that saturates the colormap to yellow"
         depends on LED_GAMMA_VIZ
-        default 250
+        default 10000
         range 1 100000
         help
             edge motion_energy that maps to the top (yellow) of the viridis
-            colormap, in milli-units (250 = 0.25). Lower = more sensitive
+            colormap, in milli-units (10000 = 10.0). Lower = more sensitive
             (reaches yellow with less motion).
+
+            10.0 matches the saturation point adaptive_controller.c's
+            collect_observation() uses to normalize this same raw
+            motion_energy/presence_score value into motion_score/presence_score
+            (RuView#1286) — yellow now means the same "fully saturated motion"
+            as motion_score == 1.0 elsewhere in the system, instead of an
+            unrelated 0.25 threshold that saturated to yellow almost
+            immediately given real-world motion_energy commonly runs 4-14.
 endmenu
 
 
