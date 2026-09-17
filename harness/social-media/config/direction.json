@@ -1,0 +1,72 @@
+{
+  "schema": "SocialDirectionPolicyV1",
+  "version": 1,
+  "principal": "ruv",
+  "claim_grades": [
+    "MEASURED",
+    "CLAIMED",
+    "SYNTHETIC"
+  ],
+  "quantitative_claim_requirements": [
+    "grade",
+    "source_url",
+    "measured_at"
+  ],
+  "identity_scopes": [
+    "ruv_personal",
+    "ruvnet",
+    "agentics",
+    "cognitum"
+  ],
+  "channels": {
+    "linkedin": {
+      "max_characters": 3000,
+      "voice": "first person practitioner with personal and technical context kept explicit"
+    },
+    "x": {
+      "max_characters": 280,
+      "voice": "direct technical observation with one checkable fact"
+    },
+    "reddit": {
+      "max_characters": 10000,
+      "voice": "specific answer with limitations and no promotional repetition"
+    },
+    "facebook": {
+      "max_characters": 5000,
+      "voice": "community context with a concrete source"
+    },
+    "threads": {
+      "max_characters": 500,
+      "voice": "short practitioner note without unsupported superlatives"
+    },
+    "instagram": {
+      "max_characters": 2200,
+      "voice": "visual context plus a specific practical takeaway"
+    },
+    "discord": {
+      "max_characters": 2000,
+      "voice": "operational community update with a clear next action"
+    },
+    "whatsapp": {
+      "max_characters": 1000,
+      "voice": "consent aware service message with a human escalation path"
+    },
+    "github": {
+      "max_characters": 10000,
+      "voice": "reproducible engineering evidence with exact constraints"
+    },
+    "gist": {
+      "max_characters": 10000,
+      "voice": "dated technical record with sources and a runnable check"
+    }
+  },
+  "flagged_phrases": [
+    "best in class",
+    "game changing",
+    "guaranteed",
+    "industry leading",
+    "production ready",
+    "revolutionary",
+    "world first"
+  ]
+}

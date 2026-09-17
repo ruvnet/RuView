@@ -1,0 +1,36 @@
+{
+  "schema": "SocialIdentityRegistryV1",
+  "version": 1,
+  "authority": "PUBLIC_ATTRIBUTION_FOR_PLANNING_ONLY",
+  "writeAuthorityEstablished": false,
+  "bindings": [
+    {
+      "platform": "github",
+      "account": "ruvnet",
+      "identityScope": "ruvnet",
+      "evidenceStatus": "STRONGLY_ATTRIBUTABLE",
+      "source": "https://github.com/ruvnet"
+    },
+    {
+      "platform": "linkedin",
+      "account": "reuvencohen",
+      "identityScope": "ruv_personal",
+      "evidenceStatus": "STRONGLY_ATTRIBUTABLE",
+      "source": "https://ca.linkedin.com/in/reuvencohen"
+    },
+    {
+      "platform": "x",
+      "account": "ruv",
+      "identityScope": "ruv_personal",
+      "evidenceStatus": "STRONGLY_ATTRIBUTABLE",
+      "source": "https://x.com/ruv"
+    },
+    {
+      "platform": "instagram",
+      "account": "ruv",
+      "identityScope": "ruv_personal",
+      "evidenceStatus": "HISTORICAL_ASSOCIATION_UNVERIFIED_FOR_WRITE",
+      "source": "https://www.instagram.com/ruv/"
+    }
+  ]
+}
