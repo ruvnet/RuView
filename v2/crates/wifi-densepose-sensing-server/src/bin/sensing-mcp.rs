@@ -138,19 +138,25 @@ let room_status=SimpleTool::new("room_status",move |args,_extra|{let s=s.clone()
          Ok(json!({"room":s.room,"privacy_mode":s.privacy_mode,"presence":data,"last_enter":enter,"last_exit":exit}))
      })}).with_description("Get current presence status with last enter/exit events for the authorized room");
 
-     let s=state.clone();
-     let home_away_status=SimpleTool::new("home_away_status",move |_args,_extra|{let s=s.clone();Box::pin(async move{
-         let presence=s.query("MATCH (r:Room {name:$room})-[:CURRENT_EVENT]->(e:SensingEvent) RETURN e.presence AS presence,e.motion_level AS motion,e.timestamp AS ts,e.person_count AS persons",vec![("room",s.room.clone().into())]).await?;
-         let vitals=s.query("MATCH (r:Room {name:$room})-[:CURRENT_EVENT]->(e:SensingEvent)-[:HAS_VITALS]->(v) RETURN v.heart_rate AS hr,v.breathing_rate AS br,v.hr_confidence AS hr_conf,v.br_confidence AS br_conf LIMIT 1",vec![("room",s.room.clone().into())]).await?;
-         let enter=s.query("MATCH (r:Room {name:$room})-[:CURRENT_EVENT]->(e:SensingEvent)-[:HAS_EVENT]->(ev:EnterEvent) RETURN ev.timestamp AS ts,ev.confidence AS conf,ev.motion AS motion ORDER BY ev.timestamp DESC LIMIT 1",vec![("room",s.room.clone().into())]).await?;
-         let recent=s.query("MATCH (r:Room {name:$room})-[:HAS_EVENT]->(e:SensingEvent) WHERE datetime(e.timestamp)>datetime()-duration({hours:$hours}) RETURN count(e) AS events,sum(e.person_count) AS total_persons,avg(e.signal_quality) AS avg_quality",vec![("room",s.room.clone().into()),("hours",(1i64).into())]).await?;
-         Ok(json!({"room":s.room,"privacy_mode":s.privacy_mode,"status":presence,"vitals":vitals,"last_enter":enter,"recent":recent}))
-     })}).with_description("Get comprehensive home/away status combining presence, vitals, and recent activity for the authorized room").with_schema(json!({"type":"object","properties":{"hours":{"type":"integer","minimum":1,"maximum":24}}}));
+let s=state.clone();
+let home_away_status=SimpleTool::new("home_away_status",move |args,_extra|{let s=s.clone();Box::pin(async move{
+      let presence=s.query("MATCH (r:Room {name:$room})-[:CURRENT_EVENT]->(e:SensingEvent) RETURN e.presence AS presence,e.motion_level AS motion,e.timestamp AS ts,e.person_count AS persons",vec![("room",s.room.clone().into())]).await?;
+      let vitals=s.query("MATCH (r:Room {name:$room})-[:CURRENT_EVENT]->(e:SensingEvent)-[:HAS_VITALS]->(v) RETURN v.heart_rate AS hr,v.breathing_rate AS br,v.hr_confidence AS hr_conf,v.br_confidence AS br_conf LIMIT 1",vec![("room",s.room.clone().into())]).await?;
+      let enter=s.query("MATCH (r:Room {name:$room})-[:CURRENT_EVENT]->(e:SensingEvent)-[:HAS_EVENT]->(ev:EnterEvent) RETURN ev.timestamp AS ts,ev.confidence AS conf,ev.motion AS motion ORDER BY ev.timestamp DESC LIMIT 1",vec![("room",s.room.clone().into())]).await?;
+      let recent=s.query("MATCH (r:Room {name:$room})-[:HAS_EVENT]->(e:SensingEvent) WHERE datetime(e.timestamp)>datetime()-duration({hours:$hours}) RETURN count(e) AS events,sum(e.person_count) AS total_persons,avg(e.signal_quality) AS avg_quality",vec![("room",s.room.clone().into()),("hours",(1i64).into())]).await?;
+      Ok(json!({"room":s.room,"privacy_mode":s.privacy_mode,"status":presence,"vitals":vitals,"last_enter":enter,"recent":recent}))
+    })}).with_description("Get comprehensive home/away status combining presence, vitals, and recent activity for the authorized room").with_schema(json!({"type":"object","properties":{"hours":{"type":"integer","minimum":1,"maximum":24}}}));
 
-     let server=Server::builder().name("ruview-sensing").version(env!("CARGO_PKG_VERSION"))
-         .tool("latest_event",latest_event).tool("vitals_history",vitals_history).tool("person_history",person_history)
-         .tool("room_status",room_status).tool("get_rooms",get_rooms).tool("rooms",rooms).tool("presence_status",presence_status)
-         .tool("home_away_status",home_away_status).build()?;
+     let s=state.clone();
+     let cross_room_transitions=SimpleTool::new("cross_room_transitions",move |args,_extra|{let s=s.clone();let hours=args.get("hours").and_then(|v|v.as_u64()).unwrap_or(1).clamp(1,24) as i64;Box::pin(async move{
+      let data=s.query("MATCH (pt:PersonTransition) WHERE datetime(pt.timestamp)>datetime()-duration({hours:$hours}) RETURN pt.id AS id,pt.node_id AS node_id,pt.from_room AS from_room,pt.to_room AS to_room,pt.timestamp AS ts ORDER BY pt.timestamp DESC LIMIT 50",vec![("hours",hours)]).await?;
+      Ok(json!({"hours":hours,"transitions":data}))
+     })}).with_description("Get cross-room person transitions for the last N hours").with_schema(json!({"type":"object","properties":{"hours":{"type":"integer","minimum":1,"maximum":24}}}));
+
+      let server=Server::builder().name("ruview-sensing").version(env!("CARGO_PKG_VERSION"))
+          .tool("latest_event",latest_event).tool("vitals_history",vitals_history).tool("person_history",person_history)
+          .tool("room_status",room_status).tool("get_rooms",get_rooms).tool("rooms",rooms).tool("presence_status",presence_status)
+          .tool("home_away_status",home_away_status).tool("cross_room_transitions",cross_room_transitions).build()?;
      server.run_stdio().await?; Ok(())
 }
 
