@@ -1,0 +1,30 @@
+{
+  "schema_version": "ruview.sensing-claim-evidence/v1",
+  "claim_id": "fixture-synthetic-research-v1",
+  "capability": "presence",
+  "claim_class": "research",
+  "statement": "Synthetic fixture exercises the claim gate and is not a production result.",
+  "claim_surface_paths": [],
+  "source": {
+    "kind": "synthetic",
+    "device_family": null,
+    "device_id": null,
+    "firmware_version": null,
+    "capture_artifact": null,
+    "ground_truth_artifact": null
+  },
+  "evaluation": {
+    "protocol": "in_domain",
+    "train_environment_ids": ["synthetic-train"],
+    "test_environment_ids": ["synthetic-test"],
+    "environment_results": [],
+    "train_subject_ids": [],
+    "test_subject_ids": [],
+    "test_samples": 30,
+    "positive_test_samples": null,
+    "negative_test_samples": null
+  },
+  "metrics": {},
+  "evaluation_binding": null,
+  "independent_validation": null
+}
