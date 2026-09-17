@@ -362,6 +362,14 @@ The `MSYS_NO_PATHCONV=1` prefix prevents Git Bash from mangling the `/project` p
 - `build/partition_table/partition-table.bin` -- flash partition layout
 - `build/esp32-csi-node.bin` -- application firmware
 
+### Release bundles
+
+Firmware downloads are published from dedicated `vX.Y.Z-esp32` tags after all
+S3 and C6 matrix builds pass. Each release contains separate S3 8 MB, S3 4 MB,
+and C6 4 MB archives plus an archive checksum manifest. The repository's
+automated `vNNNN` server releases (for example `v2655`) are not firmware tags;
+do not use their presence or absence of assets as firmware provenance.
+
 ### Custom Configuration
 
 To change Kconfig settings before building:

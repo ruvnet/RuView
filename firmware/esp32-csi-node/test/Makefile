@@ -55,7 +55,8 @@ FUZZ_JOBS     ?= 1
 .PHONY: all clean run_serialize run_edge run_nvs run_all test_adr110 run_adr110 \
         test_vitals run_vitals test_mmwave_detect run_mmwave_detect host_tests \
         test_thermal run_thermal test_csi_sanitize run_csi_sanitize \
-        test_c6_antenna run_c6_antenna test_serial_onboarding run_serial_onboarding
+        test_c6_antenna run_c6_antenna test_serial_onboarding run_serial_onboarding \
+        run_delivery_contract
 
 all: fuzz_serialize fuzz_edge fuzz_nvs test_adr110 test_vitals test_mmwave_detect \
      test_thermal test_csi_sanitize test_c6_antenna test_serial_onboarding
@@ -132,9 +133,12 @@ test_serial_onboarding: test_serial_onboarding_protocol.c $(MAIN_DIR)/serial_onb
 run_serial_onboarding: test_serial_onboarding
 	./test_serial_onboarding
 
+run_delivery_contract:
+	python3 test_delivery_contract.py
+
 host_tests: run_adr110 run_vitals run_mmwave_detect run_thermal run_csi_sanitize \
-            run_c6_antenna run_serial_onboarding
-	@echo "Host tests passed (ADR-110 + CSI sanitation + vitals + mmwave + thermal + C6 antenna + USB onboarding)"
+            run_c6_antenna run_serial_onboarding run_delivery_contract
+	@echo "Host tests passed (ADR-110 + CSI sanitation + vitals + mmwave + thermal + C6 antenna + USB onboarding + delivery contract)"
 
 # --- Serialize fuzzer ---
 # Tests csi_serialize_frame() with random wifi_csi_info_t inputs.
