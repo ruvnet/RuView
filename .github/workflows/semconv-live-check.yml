@@ -1,0 +1,184 @@
+# Emission-side semantic-conventions gate: boots the real sensing server
+# with the opt-in `otel` feature, drives a fixture request, and validates
+# the telemetry it actually emits against `semconv/registry/` with
+# `weaver registry live-check`.
+#
+# Complements `semconv.yml`: that workflow validates the registry
+# *definitions* and the generated-constants module; this one validates
+# what the binary *emits*. The distinction matters because the curated
+# events are emitted through `tracing`, whose macros take field names as
+# compile-time tokens — the generated constants cannot reach the
+# attribute keys at the call sites, so registry/codegen checks alone
+# cannot catch call-site drift. Live-check closes exactly that gap
+# (review finding 3 on #1382): a renamed registry attribute or a stray
+# key on a `ruview.*` event fails this job even while codegen stays
+# green.
+#
+# Scope: hard-gates the `ruview.*` namespace (curated events and their
+# attributes). Non-curated `tracing` events also reach OTLP through the
+# appender bridge under default file:line names; those are surfaced as a
+# counted warning rather than a failure — tightening the appender to
+# curated-events-only would zero that count and is a candidate follow-up.
+name: semconv live-check
+
+on:
+  pull_request:
+    paths:
+      - 'semconv/**'
+      - 'templates/**'
+      - 'v2/crates/wifi-densepose-sensing-server/**'
+      - '.github/workflows/semconv-live-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-check:
+    name: live-check (weaver)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      WEAVER_VERSION: v0.23.0
+      # sha256 of weaver-x86_64-unknown-linux-gnu.tar.xz for WEAVER_VERSION
+      # (open-telemetry/weaver release asset). Bump both together — same
+      # pin as semconv.yml.
+      WEAVER_SHA256: a9822c712d6871bd89d6530f18c5df5cea3821f642e7b8e5e49e985917f7d12d
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          # The sensing-server workspace pulls vendored crates
+          # (vendor/rufield, …) in as path dependencies.
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master (channel: stable via input)
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: v2
+      - name: Install weaver
+        run: |
+          set -euo pipefail
+          tarball="weaver-x86_64-unknown-linux-gnu.tar.xz"
+          curl -fsSL -o "$RUNNER_TEMP/$tarball" \
+            "https://github.com/open-telemetry/weaver/releases/download/${WEAVER_VERSION}/${tarball}"
+          echo "${WEAVER_SHA256}  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          tar xJf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/weaver-x86_64-unknown-linux-gnu" >> "$GITHUB_PATH"
+      - name: Build sensing server (otel feature)
+        working-directory: v2
+        run: cargo build -p wifi-densepose-sensing-server --features otel
+      - name: Live-check the emitted telemetry
+        run: |
+          set -euo pipefail
+          workdir="$RUNNER_TEMP/live-check"
+          mkdir -p "$workdir/report"
+          # weaver's OTLP gRPC listener; --include-unreferenced resolves
+          # the SDK resource attributes (service.name, telemetry.sdk.*)
+          # through the registry manifest's otel dependency. The
+          # inactivity timeout is a generous backstop; the session is
+          # ended deterministically via the admin /stop below.
+          weaver registry live-check -r semconv/registry --future \
+            --include-unreferenced \
+            --otlp-grpc-port 34317 --admin-port 34320 \
+            --inactivity-timeout 120 \
+            --format json --output "$workdir/report" &
+          weaver_pid=$!
+          sleep 3
+          OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:34317 \
+          OTEL_BLRP_SCHEDULE_DELAY=500 \
+            ./v2/target/debug/sensing-server \
+              --http-port 38080 --ws-port 38765 > "$workdir/server.log" 2>&1 &
+          server_pid=$!
+          # Fixture: loading a model emits the curated
+          # ruview.model.loaded event with its ruview.model.id
+          # attribute — a deterministic, hardware-free emission. Polled
+          # so a slow startup can't race the request.
+          ok=0
+          for _ in $(seq 1 60); do
+            if curl -sf -m 2 -X POST http://127.0.0.1:38080/api/v1/models/load \
+              -H 'content-type: application/json' \
+              -d '{"id":"live-check-fixture"}' > /dev/null; then
+              ok=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::the server never accepted the fixture request"
+            tail -50 "$workdir/server.log" || true
+            kill -TERM "$server_pid" || true
+            exit 1
+          fi
+          sleep 2
+          kill -TERM "$server_pid" || true
+          server_status=0
+          wait "$server_pid" || server_status=$?
+          # The server has no graceful SIGTERM handler; 143 is its
+          # normal termination. Panics surface via the log scan below.
+          if [ "$server_status" -ne 0 ] && [ "$server_status" -ne 143 ]; then
+            echo "::error::sensing-server exited with unexpected status $server_status"
+            tail -50 "$workdir/server.log" || true
+            exit 1
+          fi
+          if grep -q 'panicked at' "$workdir/server.log"; then
+            echo "::error::sensing-server panicked during live-check"
+            tail -50 "$workdir/server.log" || true
+            exit 1
+          fi
+          sleep 2
+          curl -sf -X POST http://127.0.0.1:34320/stop > /dev/null || true
+          wait "$weaver_pid" || true
+          report="$workdir/report/live_check.json"
+          if [ ! -s "$report" ]; then
+            echo "::error::weaver live-check produced no report"
+            exit 1
+          fi
+          entities="$(jq '.statistics.total_entities // 0' "$report")"
+          if [ "$entities" -eq 0 ]; then
+            echo "::error::weaver ingested no telemetry — the OTLP export never reached it"
+            exit 1
+          fi
+          curated_seen="$(jq '[.. | objects | select((.signal_name? // "") | startswith("ruview."))] | length' "$report")"
+          if [ "$curated_seen" -eq 0 ]; then
+            echo "::error::no ruview.* event reached weaver — the fixture emitted nothing curated"
+            cat "$report" || true
+            exit 1
+          fi
+          # Hard gate: violations on the curated namespace — an
+          # unregistered ruview.* event name, or any finding attached to
+          # a ruview.*-named signal (e.g. an unregistered attribute on a
+          # curated event).
+          curated_viol="$(jq '[.. | objects
+            | select(.type? == "PolicyFinding" and .level? == "violation")
+            | select( ((.context.event_name // "") | startswith("ruview."))
+                   or ((.context.attribute_name // "") | startswith("ruview."))
+                   or ((.signal_name? // "") | startswith("ruview.")) )
+            ] | length' "$report")"
+          if [ "$curated_viol" -ne 0 ]; then
+            echo "::error::weaver found $curated_viol violation(s) on the ruview.* namespace — emitted telemetry drifts from semconv/registry/"
+            jq '[.. | objects
+              | select(.type? == "PolicyFinding" and .level? == "violation")
+              | select( ((.context.event_name // "") | startswith("ruview."))
+                     or ((.context.attribute_name // "") | startswith("ruview."))
+                     or ((.signal_name? // "") | startswith("ruview.")) )]' "$report"
+            exit 1
+          fi
+          # Visibility: non-curated tracing events bridged to OTLP under
+          # default file:line names. Not a failure — but the count is the
+          # measure of how much unregistered telemetry the export carries.
+          bridged="$(jq '[.. | objects
+            | select(.type? == "PolicyFinding" and .level? == "violation")] | length' "$report")"
+          if [ "$bridged" -ne 0 ]; then
+            echo "::warning::$bridged finding(s) on non-curated bridged events (default file:line names) — filtering the OTLP appender to curated events would zero this"
+          fi
+          echo "live-check: $entities entities, $curated_seen curated ruview.* signals, 0 curated violations"
+      - name: Upload live-check report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: live-check-report
+          path: ${{ runner.temp }}/live-check/report/
+          if-no-files-found: ignore
