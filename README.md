@@ -114,8 +114,22 @@ RuView turns ordinary WiFi into a contactless sensor. A $9 ESP32 board reads the
 ```bash
 # Option 1: Docker (simulated data, no hardware needed)
 docker pull ruvnet/wifi-densepose:latest
-docker run -p 3000:3000 ruvnet/wifi-densepose:latest
-# Open http://localhost:3000
+
+# Two env vars are required for the no-hardware demo:
+#   CSI_SOURCE=simulated            opt into synthetic CSI — the default `auto`
+#                                   fails loud (exit 78) when no ESP32/NIC is
+#                                   detected (issue #937), so it must be explicit.
+#   RUVIEW_ALLOW_UNAUTHENTICATED=1  localhost-only demo posture — the entrypoint
+#                                   otherwise refuses to start (exit 64) on a
+#                                   0.0.0.0 bind without auth (issue #864). On a
+#                                   shared network use RUVIEW_API_TOKEN=$(openssl
+#                                   rand -hex 32) instead.
+docker run -p 3000:3000 -p 3001:3001 \
+  -e CSI_SOURCE=simulated \
+  -e RUVIEW_ALLOW_UNAUTHENTICATED=1 \
+  ruvnet/wifi-densepose:latest
+# Open http://localhost:3000/ui/index.html
+# Live sensing frames stream over ws://localhost:3001/ws/sensing
 
 # Option 2a: Live sensing with ESP32-S3 hardware ($9)
 # Flash firmware, provision WiFi, and start sensing:
