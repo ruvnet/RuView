@@ -125,5 +125,134 @@ class TestStatePathSanitization(unittest.TestCase):
         self.assertTrue(path.endswith("COM7.json"))
 
 
+
+
+class TestStateFilePermissions(unittest.TestCase):
+    """Issue #1754: the state file holds the WiFi password in cleartext."""
+
+    def setUp(self):
+        self.dir = os.path.join(tempfile.mkdtemp(prefix="provision-perm-"), "state")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(os.path.dirname(self.dir), ignore_errors=True)
+
+    @unittest.skipIf(sys.platform == "win32", "POSIX permission model only")
+    def test_state_file_is_owner_only(self):
+        path = provision.save_state("COM7", self.dir, {"ssid": "x", "password": "secret"})
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+
+    @unittest.skipIf(sys.platform == "win32", "POSIX permission model only")
+    def test_state_dir_is_owner_only(self):
+        provision.save_state("COM7", self.dir, {"password": "secret"})
+        self.assertEqual(os.stat(self.dir).st_mode & 0o777, 0o700)
+
+    @unittest.skipIf(sys.platform == "win32", "POSIX permission model only")
+    def test_tightens_a_directory_left_by_an_earlier_version(self):
+        # makedirs cannot tighten an existing directory; an explicit chmod must.
+        os.makedirs(self.dir, exist_ok=True)
+        os.chmod(self.dir, 0o755)
+        provision.save_state("COM7", self.dir, {"password": "secret"})
+        self.assertEqual(os.stat(self.dir).st_mode & 0o777, 0o700)
+
+
+class TestChipIdentityBinding(unittest.TestCase):
+    """Issue #1755: port paths are reused when boards are swapped."""
+
+    def test_matches_when_identity_absent_on_either_side(self):
+        # Permissive: pre-existing state files carry no identity, and a board
+        # that will not answer must still be provisionable.
+        self.assertTrue(provision.identity_matches({}, "80:b5:4e:c1:b5:68"))
+        self.assertTrue(provision.identity_matches(
+            {provision.STATE_IDENTITY_KEY: "80:b5:4e:c1:b5:68"}, None))
+
+    def test_matches_same_board(self):
+        self.assertTrue(provision.identity_matches(
+            {provision.STATE_IDENTITY_KEY: "80:b5:4e:c1:b5:68"}, "80:b5:4e:c1:b5:68"))
+
+    def test_rejects_a_different_board_on_the_same_port(self):
+        self.assertFalse(provision.identity_matches(
+            {provision.STATE_IDENTITY_KEY: "80:b5:4e:c1:b5:68"}, "80:b5:4e:c1:c4:f0"))
+
+
+class TestOtaPskNamespace(unittest.TestCase):
+    """Issue #1753: the OTA PSK lives in its own `security` NVS namespace."""
+
+    def test_security_namespace_emitted_with_psk(self):
+        args = _mk_args(ssid="net", ota_psk="a" * 64)
+        csv_text = provision.build_nvs_csv(args)
+        self.assertIn("security,namespace", csv_text.replace(", ", ","))
+        self.assertIn("ota_psk", csv_text)
+
+    def test_no_security_namespace_without_psk(self):
+        args = _mk_args(ssid="net")
+        csv_text = provision.build_nvs_csv(args)
+        self.assertNotIn("security", csv_text)
+        self.assertNotIn("ota_psk", csv_text)
+
+    def test_csi_cfg_namespace_still_first(self):
+        args = _mk_args(ssid="net", ota_psk="b" * 64)
+        rows = [r.split(",") for r in provision.build_nvs_csv(args).strip().splitlines()]
+        namespaces = [r[0] for r in rows if len(r) > 1 and r[1] == "namespace"]
+        self.assertEqual(namespaces, ["csi_cfg", "security"])
+
+
+class TestReworkedAfterReview(unittest.TestCase):
+    """Regressions for defects found reviewing the first cut of this change."""
+
+    def setUp(self):
+        self.dir = os.path.join(tempfile.mkdtemp(prefix="provision-rework-"), "state")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(os.path.dirname(self.dir), ignore_errors=True)
+
+    def test_ota_psk_alone_counts_as_a_config_value(self):
+        # The headline flag must be able to provision on its own; previously
+        # has_config_value() rejected it before NVS generation.
+        args = _mk_args(ota_psk="a" * 64)
+        self.assertTrue(provision.has_config_value(args))
+
+    @unittest.skipIf(sys.platform == "win32", "POSIX symlink semantics")
+    def test_symlink_at_the_temp_path_cannot_capture_the_secret(self):
+        # The temp path is predictable. Without O_EXCL/O_NOFOLLOW, os.open with
+        # O_CREAT|O_TRUNC follows a planted symlink and writes the cleartext
+        # password through it. Asserting the *final* file mode does not catch
+        # this — the trailing chmod fixes that either way — so assert the victim
+        # never receives the secret.
+        os.makedirs(self.dir, mode=0o700, exist_ok=True)
+        victim = os.path.join(os.path.dirname(self.dir), "victim.txt")
+        with open(victim, "w", encoding="utf-8") as f:
+            f.write("original")
+        tmp = provision._state_path_for("COM7", self.dir) + ".tmp"
+        os.symlink(victim, tmp)
+
+        try:
+            provision.save_state("COM7", self.dir, {"password": "s3cret"})
+        except OSError:
+            pass  # refusing outright is an acceptable outcome
+
+        with open(victim, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "original",
+                             "secret was written through a planted symlink")
+
+    @unittest.skipIf(sys.platform == "win32", "POSIX permission model only")
+    def test_read_path_repairs_permissions_left_by_an_earlier_version(self):
+        os.makedirs(self.dir, exist_ok=True)
+        provision.save_state("COM7", self.dir, {"password": "secret"})
+        # Simulate state written before this change.
+        os.chmod(self.dir, 0o755)
+        os.chmod(provision._state_path_for("COM7", self.dir), 0o644)
+        provision._harden_existing_state("COM7", self.dir)
+        self.assertEqual(os.stat(self.dir).st_mode & 0o777, 0o700)
+        self.assertEqual(
+            os.stat(provision._state_path_for("COM7", self.dir)).st_mode & 0o777, 0o600)
+
+    def test_harden_survives_a_chmod_failure(self):
+        # A read-only or exotic filesystem must warn, not abort provisioning.
+        missing = os.path.join(self.dir, "definitely-not-there.json")
+        provision._harden(missing, 0o600)  # must not raise
+
+
 if __name__ == "__main__":
     unittest.main()
