@@ -16,6 +16,7 @@
 
 #include "c6_sync_espnow.h"
 #include "csi_collector.h"
+#include "edge_processing.h"
 #include "nvs_config.h"
 #include "thermal.h"
 
@@ -170,6 +171,14 @@ static void fill_health(node_log_periodic_t *h)
     h->min_heap_kib  = (uint16_t)(esp_get_minimum_free_heap_size() / 1024);
     h->csi_fps_x100  = csi_collector_get_pkt_yield_per_sec() * 100;
     h->tx_send_fail  = csi_collector_get_send_fail_count();
+
+    /* node_log_periodic_t has declared these two since the log shipped and
+     * node_log_read.py has always rendered them, but nothing assigned them,
+     * so every record on every node reported 0/0 -- the memset, not a
+     * measurement. On the one question this log exists to answer about an
+     * unreachable node, it returned a plausible constant zero. */
+    h->frames_processed = edge_processing_get_frames_processed();
+    h->frames_rejected  = edge_processing_get_frames_rejected();
 
     h->disconnect_count  = s_disconnect_count;
     h->last_disc_reason  = s_last_disc_reason;
