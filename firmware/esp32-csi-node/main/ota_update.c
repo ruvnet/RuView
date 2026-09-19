@@ -9,6 +9,7 @@
  */
 
 #include "ota_update.h"
+#include "config_api.h"
 
 #include <string.h>
 #include "esp_log.h"
@@ -77,6 +78,11 @@ static bool ota_check_auth(httpd_req_t *req)
         result |= (uint8_t)(s_ota_psk[i] ^ token[i]);
     }
     return result == 0;
+}
+
+bool ota_auth_check(httpd_req_t *req)
+{
+    return ota_check_auth(req);
 }
 
 /**
@@ -214,7 +220,7 @@ static esp_err_t ota_start_server(httpd_handle_t *out_handle)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = OTA_PORT;
-    config.max_uri_handlers = 12;  /* Extra slots for WASM endpoints (ADR-040). */
+    config.max_uri_handlers = 14;  /* WASM endpoints (ADR-040) + /config. */
     /* Increase receive timeout for large uploads. */
     config.recv_wait_timeout = 30;
 
@@ -242,6 +248,12 @@ static esp_err_t ota_start_server(httpd_handle_t *out_handle)
         .user_ctx = NULL,
     };
     httpd_register_uri_handler(server, &upload_uri);
+
+    /* Remote configuration shares this server so it inherits the OTA PSK,
+     * the port, and the same fail-closed auth path (config_api.c). */
+    if (config_api_register(server) != ESP_OK) {
+        ESP_LOGW(TAG, "remote config endpoints unavailable");
+    }
 
     ESP_LOGI(TAG, "OTA HTTP server started on port %d", OTA_PORT);
     ESP_LOGI(TAG, "  GET  /ota/status — firmware version info");

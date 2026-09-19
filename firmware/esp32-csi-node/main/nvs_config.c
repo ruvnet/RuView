@@ -23,6 +23,9 @@ void nvs_config_load(nvs_config_t *cfg)
         return;
     }
 
+    cfg->led_mode = LED_MODE_FLICKER;
+    cfg->led_brightness = 100;
+
     /* Start with Kconfig compiled defaults */
     strlcpy(cfg->wifi_ssid, CONFIG_CSI_WIFI_SSID, sizeof(cfg->wifi_ssid));
 
@@ -313,6 +316,18 @@ void nvs_config_load(nvs_config_t *cfg)
     if (nvs_get_u16(handle, "swarm_hb", &cfg->swarm_heartbeat_sec) != ESP_OK) {
         cfg->swarm_heartbeat_sec = 30;
     }
+    uint8_t led_mode_val = 0;
+    if (nvs_get_u8(handle, "led_mode", &led_mode_val) == ESP_OK && led_mode_val <= 2) {
+        cfg->led_mode = led_mode_val;
+        ESP_LOGI(TAG, "NVS override: led_mode=%u", led_mode_val);
+    }
+
+    uint8_t led_bright_val = 0;
+    if (nvs_get_u8(handle, "led_bright", &led_bright_val) == ESP_OK && led_bright_val <= 100) {
+        cfg->led_brightness = led_bright_val;
+        ESP_LOGI(TAG, "NVS override: led_brightness=%u", led_bright_val);
+    }
+
     if (nvs_get_u16(handle, "swarm_ingest", &cfg->swarm_ingest_sec) != ESP_OK) {
         cfg->swarm_ingest_sec = 5;
     }
