@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
+use serde::Serialize;
 
 use wifi_densepose_signal::hardware_norm::{CanonicalCsiFrame, HardwareNormalizer, HardwareType};
 use wifi_densepose_signal::ruvsense::multiband::MultiBandCsiFrame;
@@ -23,6 +24,98 @@ const STALE_THRESHOLD: Duration = Duration::from_secs(10);
 
 /// Default WiFi channel frequency (MHz) used for single-channel frames.
 const DEFAULT_FREQ_MHZ: u32 = 2437; // Channel 6
+
+/// Bounded, aggregate explanation of the cohort used by a sensing cycle.
+/// This is observability only; it is not a physical aperture or accuracy score.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct CohortQuality {
+    pub active_nodes: usize,
+    pub selected_nodes: usize,
+    pub dropped_for_age: usize,
+    pub dropped_for_guard: usize,
+    pub timestamp_domain: &'static str,
+    pub oldest_age_us: u64,
+    pub cohort_span_us: u64,
+    pub guard_interval_us: u64,
+    pub aperture_coverage_ratio: f64,
+    pub freshness_disposition: &'static str,
+    pub coherence_valid: bool,
+}
+
+/// Assess the same governed cohort used by [`node_frames_from_states_with_guard`].
+pub fn cohort_quality(
+    node_states: &HashMap<u8, NodeState>,
+    guard_interval_us: u64,
+) -> CohortQuality {
+    let now = Instant::now();
+    let guard_interval_us = guard_interval_us.max(1);
+    let mut active = Vec::new();
+    let mut dropped_for_age = 0;
+    let mut oldest_age_us = 0;
+    for (&node_id, ns) in node_states {
+        match ns.last_frame_time {
+            Some(t) => {
+                let age = now.duration_since(t).as_micros() as u64;
+                oldest_age_us = oldest_age_us.max(age);
+                if age <= STALE_THRESHOLD.as_micros() as u64 {
+                    active.push((node_id, ns));
+                } else {
+                    dropped_for_age += 1;
+                }
+            }
+            None => dropped_for_age += 1,
+        }
+    }
+    active.sort_unstable_by_key(|(id, _)| *id);
+    let active_nodes = active.len();
+    let mesh_times: Option<Vec<u64>> = active
+        .iter()
+        .map(|(_, ns)| ns.mesh_aligned_us_for_latest_csi_frame())
+        .collect::<Option<Vec<_>>>()
+        .filter(|times| {
+            let min = times.iter().copied().min().unwrap_or(0);
+            let max = times.iter().copied().max().unwrap_or(0);
+            max.saturating_sub(min) <= guard_interval_us
+        });
+    let timestamp_domain = if mesh_times.is_some() { "mesh" } else { "host_arrival" };
+    let times: Vec<u64> = active
+        .iter()
+        .enumerate()
+        .map(|(i, (_, ns))| mesh_times.as_ref().map_or_else(|| {
+            host_arrival_timestamp_us(ns.last_frame_time.as_ref().expect("active node has time"))
+        }, |v| v[i]))
+        .collect();
+    let freshest = times.iter().copied().max().unwrap_or(0);
+    let mut selected_nodes = 0;
+    let mut dropped_for_guard = 0;
+    let mut selected_times = Vec::new();
+    for (i, (_, ns)) in active.iter().enumerate() {
+        if freshest.saturating_sub(times[i]) > guard_interval_us
+            || ns.frame_history.back().is_none_or(|frame| frame.is_empty())
+        {
+            dropped_for_guard += 1;
+        } else {
+            selected_nodes += 1;
+            selected_times.push(times[i]);
+        }
+    }
+    let cohort_span_us = selected_times.iter().copied().min().map_or(0, |min| freshest.saturating_sub(min));
+    let coherence_valid = selected_nodes > 0 && cohort_span_us <= guard_interval_us;
+    let freshness_disposition = if selected_nodes == 0 { "stale_evidence" } else if dropped_for_guard > 0 { "incoherent_cohort" } else { "fresh" };
+    CohortQuality {
+        active_nodes,
+        selected_nodes,
+        dropped_for_age,
+        dropped_for_guard,
+        timestamp_domain,
+        oldest_age_us,
+        cohort_span_us,
+        guard_interval_us,
+        aperture_coverage_ratio: if active_nodes == 0 { 0.0 } else { selected_nodes as f64 / active_nodes as f64 },
+        freshness_disposition,
+        coherence_valid,
+    }
+}
 
 /// Monotonic reference point for timestamp generation. All node timestamps
 /// are relative to this instant, avoiding wall-clock/monotonic mixing issues.
@@ -281,6 +374,38 @@ mod tests {
     fn test_node_frame_from_empty_state() {
         let ns = make_node_state(VecDeque::new(), Some(Instant::now()), 0);
         assert!(node_frame_from_state(1, &ns).is_none());
+    }
+
+    #[test]
+    fn cohort_quality_reports_selection_and_bounds() {
+        let mut states = HashMap::new();
+        let mut history = VecDeque::new();
+        history.push_back(vec![1.0; 64]);
+        states.insert(1, make_node_state(history, Some(Instant::now()), 0));
+        let quality = cohort_quality(&states, 60_000);
+        assert_eq!(quality.active_nodes, 1);
+        assert_eq!(quality.selected_nodes, 1);
+        assert_eq!(quality.dropped_for_age, 0);
+        assert_eq!(quality.dropped_for_guard, 0);
+        assert_eq!(quality.timestamp_domain, "host_arrival");
+        assert!(quality.coherence_valid);
+        assert!((0.0..=1.0).contains(&quality.aperture_coverage_ratio));
+    }
+
+    #[test]
+    fn cohort_quality_prunes_stale_nodes() {
+        let mut states = HashMap::new();
+        let mut history = VecDeque::new();
+        history.push_back(vec![1.0; 64]);
+        states.insert(
+            1,
+            make_node_state(history, Some(Instant::now() - STALE_THRESHOLD - Duration::from_secs(1)), 0),
+        );
+        let quality = cohort_quality(&states, 60_000);
+        assert_eq!(quality.active_nodes, 0);
+        assert_eq!(quality.dropped_for_age, 1);
+        assert_eq!(quality.selected_nodes, 0);
+        assert_eq!(quality.freshness_disposition, "stale_evidence");
     }
 
     #[test]

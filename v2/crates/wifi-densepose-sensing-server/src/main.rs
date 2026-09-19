@@ -6304,6 +6304,10 @@ async fn health_ready(State(state): State<SharedState>) -> Json<serde_json::Valu
             "engine_error_count": s.engine_bridge.engine_error_count(),
             "raw_outputs_suppressed": s.engine_bridge.suppress_raw_outputs(),
         },
+        "multistatic": multistatic_bridge::cohort_quality(
+            &s.node_states,
+            s.multistatic_fuser.guard_interval_us(),
+        ),
     }))
 }
 
