@@ -8,6 +8,7 @@
 
 import { sensingService } from '../services/sensing.service.js';
 import { GaussianSplatRenderer } from './gaussian-splats.js';
+import { i18n } from '../utils/i18n.js';
 
 export class SensingTab {
   /** @param {HTMLElement} container - the #sensing section element */
@@ -22,6 +23,11 @@ export class SensingTab {
 
   async init() {
     this._buildDOM();
+    this._localeUnsub = i18n.onLocaleChange(() => {
+      i18n.applyTranslations(this.container);
+      if (this._lastState) this._onStateChange(this._lastState);
+      if (this._lastData) this._updateHUD(this._lastData);
+    });
     await this._loadThree();
     this._initSplatRenderer();
     this._connectService();
@@ -32,60 +38,60 @@ export class SensingTab {
 
   _buildDOM() {
     this.container.innerHTML = `
-      <h2>Live WiFi Sensing</h2>
+      <h2 data-i18n="sensing.title">Live WiFi Sensing</h2>
 
       <!-- Data-source status banner — updated by _onStateChange -->
       <div id="sensingSourceBanner" class="sensing-source-banner sensing-source-reconnecting"
            role="status" aria-live="polite">
-        RECONNECTING...
+        ${i18n.t('sensing.reconnecting')}
       </div>
 
       <div class="sensing-layout">
         <!-- 3D viewport -->
         <div class="sensing-viewport" id="sensingViewport">
-          <div class="sensing-loading">Loading 3D engine...</div>
+          <div class="sensing-loading" data-i18n="sensing.loading3d">Loading 3D engine...</div>
         </div>
 
         <!-- Side panel -->
         <div class="sensing-panel">
           <!-- Connection -->
           <div class="sensing-card">
-            <div class="sensing-card-title">Connection</div>
+            <div class="sensing-card-title" data-i18n="sensing.connection">Connection</div>
             <div class="sensing-connection">
               <span class="sensing-dot" id="sensingDot"></span>
-              <span id="sensingState">Connecting...</span>
+              <span id="sensingState">${i18n.t('common.connecting')}</span>
               <span class="sensing-source" id="sensingSource"></span>
             </div>
           </div>
 
           <!-- RSSI -->
           <div class="sensing-card">
-            <div class="sensing-card-title">RSSI</div>
+            <div class="sensing-card-title" data-i18n="sensing.rssi">RSSI</div>
             <div class="sensing-big-value" id="sensingRssi">-- dBm</div>
             <canvas id="sensingSparkline" width="200" height="40"></canvas>
           </div>
 
           <!-- Signal Features -->
           <div class="sensing-card">
-            <div class="sensing-card-title">Signal Features</div>
+            <div class="sensing-card-title" data-i18n="sensing.signalFeatures">Signal Features</div>
             <div class="sensing-meters">
               <div class="sensing-meter">
-                <label>Variance</label>
+                <label data-i18n="sensing.variance">Variance</label>
                 <div class="sensing-bar"><div class="sensing-bar-fill" id="barVariance"></div></div>
                 <span class="sensing-meter-val" id="valVariance">0</span>
               </div>
               <div class="sensing-meter">
-                <label>Motion Band</label>
+                <label data-i18n="sensing.motionBand">Motion Band</label>
                 <div class="sensing-bar"><div class="sensing-bar-fill motion" id="barMotion"></div></div>
                 <span class="sensing-meter-val" id="valMotion">0</span>
               </div>
               <div class="sensing-meter">
-                <label>Breathing Band</label>
+                <label data-i18n="sensing.breathingBand">Breathing Band</label>
                 <div class="sensing-bar"><div class="sensing-bar-fill breath" id="barBreath"></div></div>
                 <span class="sensing-meter-val" id="valBreath">0</span>
               </div>
               <div class="sensing-meter">
-                <label>Spectral Power</label>
+                <label data-i18n="sensing.spectralPower">Spectral Power</label>
                 <div class="sensing-bar"><div class="sensing-bar-fill spectral" id="barSpectral"></div></div>
                 <span class="sensing-meter-val" id="valSpectral">0</span>
               </div>
@@ -94,11 +100,11 @@ export class SensingTab {
 
           <!-- Classification -->
           <div class="sensing-card">
-            <div class="sensing-card-title">Classification</div>
+            <div class="sensing-card-title" data-i18n="sensing.classification">Classification</div>
             <div class="sensing-classification" id="sensingClassification">
-              <div class="sensing-class-label" id="classLabel">ABSENT</div>
+              <div class="sensing-class-label" id="classLabel">${i18n.t('observatory.presenceAbsent')}</div>
               <div class="sensing-confidence">
-                <label>Confidence</label>
+                <label data-i18n="sensing.confidence">Confidence</label>
                 <div class="sensing-bar"><div class="sensing-bar-fill confidence" id="barConfidence"></div></div>
                 <span class="sensing-meter-val" id="valConfidence">0%</span>
               </div>
@@ -107,39 +113,35 @@ export class SensingTab {
 
           <!-- Setup info -->
           <div class="sensing-card">
-            <div class="sensing-card-title">About This Data</div>
-            <p class="sensing-about-text">
-              Metrics are computed from WiFi Channel State Information (CSI).
-              With <strong><span id="sensingNodeCount">0</span> ESP32 node(s)</strong> you get presence detection, breathing
-              estimation, and gross motion. Add <strong>3-4+ ESP32 nodes</strong>
-              around the room for spatial resolution and limb-level tracking.
-            </p>
+            <div class="sensing-card-title" data-i18n="sensing.aboutTitle">About This Data</div>
+            <p class="sensing-about-text" id="sensingAboutText"></p>
           </div>
 
           <!-- Node Status -->
           <div class="sensing-card" id="sensingNodeCards">
-            <div class="sensing-card-title">NODE STATUS</div>
+            <div class="sensing-card-title" data-i18n="sensing.nodeStatus">NODE STATUS</div>
             <div id="nodeStatusContainer"></div>
           </div>
 
           <!-- Extra info -->
           <div class="sensing-card">
-            <div class="sensing-card-title">Details</div>
+            <div class="sensing-card-title" data-i18n="sensing.details">Details</div>
             <div class="sensing-details">
               <div class="sensing-detail-row">
-                <span>Dominant Freq</span><span id="valDomFreq">0 Hz</span>
+                <span data-i18n="sensing.dominantFreq">Dominant Freq</span><span id="valDomFreq">0 Hz</span>
               </div>
               <div class="sensing-detail-row">
-                <span>Change Points</span><span id="valChangePoints">0</span>
+                <span data-i18n="sensing.changePoints">Change Points</span><span id="valChangePoints">0</span>
               </div>
               <div class="sensing-detail-row">
-                <span>Sample Rate</span><span id="valSampleRate">--</span>
+                <span data-i18n="sensing.sampleRate">Sample Rate</span><span id="valSampleRate">--</span>
               </div>
             </div>
           </div>
         </div>
       </div>
     `;
+    i18n.applyTranslations(this.container);
   }
 
   // ---- Three.js loading --------------------------------------------------
@@ -178,7 +180,7 @@ export class SensingTab {
       });
     } catch (e) {
       console.error('[SensingTab] Failed to init splat renderer:', e);
-      viewport.innerHTML = '<div class="sensing-loading">3D rendering unavailable</div>';
+      viewport.innerHTML = `<div class="sensing-loading">${i18n.t('sensing.renderUnavailable')}</div>`;
     }
   }
 
@@ -205,17 +207,18 @@ export class SensingTab {
   }
 
   _onStateChange(state) {
+    this._lastState = state;
     const dot    = this.container.querySelector('#sensingDot');
     const text   = this.container.querySelector('#sensingState');
     const banner = this.container.querySelector('#sensingSourceBanner');
 
     if (dot && text) {
       const stateLabels = {
-        disconnected: 'Disconnected',
-        connecting:   'Connecting...',
-        connected:    'Connected',
-        reconnecting: 'Reconnecting...',
-        simulated:    'Simulated',
+        disconnected: i18n.t('sensing.disconnected'),
+        connecting:   i18n.t('common.connecting'),
+        connected:    i18n.t('sensing.connected'),
+        reconnecting: i18n.t('common.reconnecting'),
+        simulated:    i18n.t('common.simulated'),
       };
       dot.className = 'sensing-dot ' + state;
       text.textContent = stateLabels[state] || state;
@@ -225,11 +228,11 @@ export class SensingTab {
       // Map the service's dataSource to banner text and CSS modifier class.
       const dataSource = sensingService.dataSource;
       const bannerConfig = {
-        'live':              { text: 'LIVE \u2014 ESP32 HARDWARE',           cls: 'sensing-source-live' },
-        'server-simulated':  { text: 'SIMULATED \u2014 NO HARDWARE',        cls: 'sensing-source-server-sim' },
-        'reconnecting':      { text: 'RECONNECTING...',                    cls: 'sensing-source-reconnecting' },
-        'unreachable':       { text: 'NO DATA \u2014 SERVER UNREACHABLE',   cls: 'sensing-source-simulated' },
-        'simulated':         { text: 'INVENTED DATA \u2014 NOT MEASURED',   cls: 'sensing-source-simulated' },
+        'live':              { text: i18n.t('sensing.connectedBanner'),   cls: 'sensing-source-live' },
+        'server-simulated':  { text: i18n.t('sensing.simBanner'),         cls: 'sensing-source-server-sim' },
+        'reconnecting':      { text: i18n.t('sensing.reconnecting'),      cls: 'sensing-source-reconnecting' },
+        'unreachable':       { text: i18n.t('sensing.unreachableBanner'), cls: 'sensing-source-simulated' },
+        'simulated':         { text: i18n.t('sensing.inventedBanner'),    cls: 'sensing-source-simulated' },
       };
       const cfg = bannerConfig[dataSource] || bannerConfig.reconnecting;
       banner.textContent = cfg.text;
@@ -240,6 +243,7 @@ export class SensingTab {
   // ---- HUD update --------------------------------------------------------
 
   _updateHUD(data) {
+    this._lastData = data;
     const f = data.features || {};
     const c = data.classification || {};
 
@@ -247,6 +251,10 @@ export class SensingTab {
     const nodeCount = (data.nodes || []).length;
     const countEl = this.container.querySelector('#sensingNodeCount');
     if (countEl) countEl.textContent = String(nodeCount);
+    const aboutEl = this.container.querySelector('#sensingAboutText');
+    if (aboutEl) {
+      aboutEl.textContent = i18n.t('sensing.aboutText', { count: nodeCount });
+    }
 
     // RSSI
     this._setText('sensingRssi', `${(f.mean_rssi || -80).toFixed(1)} dBm`);
@@ -262,7 +270,11 @@ export class SensingTab {
     const label = this.container.querySelector('#classLabel');
     if (label) {
       const level = (c.motion_level || 'absent').toUpperCase();
-      label.textContent = level;
+      label.textContent = c.motion_level === 'active'
+        ? i18n.t('observatory.presenceActive')
+        : c.motion_level === 'present'
+          ? i18n.t('observatory.presencePresent')
+          : i18n.t('observatory.presenceAbsent');
       label.className = 'sensing-class-label ' + (c.motion_level || 'absent');
     }
 
@@ -334,7 +346,7 @@ export class SensingTab {
       container.textContent = '';
       const msg = document.createElement('div');
       msg.style.cssText = 'color:#888;font-size:12px;padding:8px;';
-      msg.textContent = 'No nodes detected';
+      msg.textContent = i18n.t('sensing.noNodes');
       container.appendChild(msg);
       return;
     }
@@ -351,10 +363,10 @@ export class SensingTab {
       idCol.style.minWidth = '50px';
       const nameEl = document.createElement('div');
       nameEl.style.cssText = `font-size:11px;font-weight:600;color:${color};`;
-      nameEl.textContent = 'Node ' + nf.node_id;
+      nameEl.textContent = `${i18n.t('sensing.node')} ${nf.node_id}`;
       const statusEl = document.createElement('div');
       statusEl.style.cssText = `font-size:9px;color:${statusColor};`;
-      statusEl.textContent = nf.stale ? 'STALE' : 'ACTIVE';
+      statusEl.textContent = nf.stale ? i18n.t('sensing.stale') : i18n.t('sensing.active');
       idCol.appendChild(nameEl);
       idCol.appendChild(statusEl);
 
@@ -396,6 +408,7 @@ export class SensingTab {
   dispose() {
     if (this._unsubData) this._unsubData();
     if (this._unsubState) this._unsubState();
+    if (this._localeUnsub) this._localeUnsub();
     if (this._resizeObserver) this._resizeObserver.disconnect();
     if (this.splatRenderer) this.splatRenderer.dispose();
     sensingService.stop();

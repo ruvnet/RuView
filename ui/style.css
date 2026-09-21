@@ -1449,7 +1449,8 @@ canvas {
 .live-status-panel,
 .system-metrics-panel,
 .features-panel,
-.live-stats-panel {
+.live-stats-panel,
+.hybrid-panel {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
@@ -1509,6 +1510,118 @@ canvas {
 .status-message {
   font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
+}
+
+.hybrid-device-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-12);
+}
+
+.hybrid-device-item {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base);
+  padding: var(--space-12);
+  background: rgba(var(--color-primary-rgb), 0.03);
+}
+
+.hybrid-device-name {
+  font-weight: var(--font-weight-semibold);
+  margin-bottom: var(--space-4);
+}
+
+.hybrid-device-meta {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.hybrid-bluetooth-note,
+.hybrid-device-help {
+  margin-top: var(--space-12);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  text-align: left;
+}
+
+.hybrid-bluetooth-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: var(--space-12);
+}
+
+.hybrid-known-device-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-12);
+  margin-top: var(--space-16);
+}
+
+.hybrid-known-device-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base);
+  padding: var(--space-16);
+  background: rgba(var(--color-primary-rgb), 0.03);
+  text-align: left;
+}
+
+.hybrid-known-device-controls {
+  display: grid;
+  gap: var(--space-8);
+  margin-top: var(--space-12);
+}
+
+.hybrid-known-device-actions {
+  display: flex;
+  gap: var(--space-8);
+  margin-top: var(--space-12);
+}
+
+.hybrid-manual-title {
+  margin-top: var(--space-20);
+  margin-bottom: var(--space-12);
+  text-align: left;
+}
+
+.hybrid-manual-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-12);
+  align-items: center;
+}
+
+.hybrid-manual-input,
+.hybrid-manual-select {
+  width: 100%;
+  padding: var(--space-10) var(--space-12);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.hybrid-manual-notes {
+  grid-column: span 2;
+}
+
+.hybrid-manual-save,
+.hybrid-inline-btn {
+  padding: var(--space-10) var(--space-12);
+  border-radius: var(--radius-base);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.hybrid-manual-save,
+.hybrid-inline-btn--primary {
+  background: rgba(var(--color-primary-rgb), 0.12);
+  border-color: rgba(var(--color-primary-rgb), 0.35);
+}
+
+.hybrid-inline-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Metrics display */
@@ -3619,6 +3732,34 @@ a:focus-visible,
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   line-height: var(--line-height-normal);
+}
+
+.onboarding-language-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-8);
+  margin-bottom: var(--space-16);
+}
+
+.onboarding-language-btn {
+  padding: var(--space-10) var(--space-12);
+  border-radius: var(--radius-base);
+  border: 1px solid var(--color-border);
+  background: var(--color-secondary);
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.onboarding-language-btn:hover {
+  background: var(--color-secondary-hover);
+}
+
+.onboarding-language-btn.active {
+  border-color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.12);
+  color: var(--color-primary);
 }
 
 .onboarding-actions {

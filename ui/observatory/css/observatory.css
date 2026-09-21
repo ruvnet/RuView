@@ -181,6 +181,10 @@ body {
   border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 
+.panel-header--compact {
+  margin-top: 12px;
+}
+
 /* ---- Vitals Panel (left) ---- */
 #panel-vitals {
   left: 28px;
@@ -276,6 +280,10 @@ body {
   color: var(--blue-signal);
 }
 
+.signal-value--muted {
+  color: var(--text-primary);
+}
+
 #rssi-sparkline {
   width: 100%;
   height: 48px;
@@ -334,6 +342,45 @@ body {
 @keyframes pulse-alert {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+.hybrid-state {
+  text-align: center;
+  padding: 8px;
+  border-radius: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  margin-top: 10px;
+  margin-bottom: 10px;
+  transition: all 0.4s ease;
+}
+
+.hybrid-state--wifi-only {
+  background: rgba(32, 144, 255, 0.08);
+  color: var(--blue-signal);
+  border: 1px solid rgba(32, 144, 255, 0.25);
+}
+
+.hybrid-state--bt-ready {
+  background: rgba(0, 216, 120, 0.1);
+  color: var(--green-glow);
+  border: 1px solid rgba(0, 216, 120, 0.3);
+  box-shadow: 0 0 16px rgba(0, 216, 120, 0.08);
+}
+
+.hybrid-state--bt-partial {
+  background: rgba(255, 176, 32, 0.1);
+  color: var(--amber);
+  border: 1px solid rgba(255, 176, 32, 0.3);
+}
+
+.hybrid-note {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
 }
 
 /* ---- Capabilities Bar (bottom center) ---- */
@@ -579,6 +626,29 @@ body {
 
 .check-row {
   flex-direction: row;
+}
+
+.settings-note {
+  margin: -2px 0 14px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+}
+
+.settings-note__title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--green-glow);
+  margin-bottom: 6px;
+}
+
+.settings-note__text {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
 }
 
 .range-val {

@@ -33,6 +33,12 @@ firmware/esp32-csi-node/test/*.obj
 # Claude Flow swarm runtime state
 .swarm/
 
+# Local runtime/debug artifacts from the Windows PT-BR contribution workflow
+/.dbg/
+/v2/.dbg/
+/v2/crates/wifi-densepose-sensing-server/.dbg/
+/v2/data/config.json
+
 # CSI recordings (local training/capture data — CSI is person data per
 # CLAUDE.md; never commit). Covers current and legacy layouts. See ADR-299.
 data/recordings/

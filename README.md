@@ -11,6 +11,57 @@
 
 **Turn ordinary WiFi into a spatial intelligence / sensing system.** Detect people, measure breathing and heart rate, track movement, and monitor rooms — through walls, in the dark, with no cameras or wearables. Just physics.
 
+## Fork roadmap: Hybrid Wi-Fi intelligence
+
+This fork is evolving RuView into a **hybrid sensing + network-awareness** platform for home and small-office environments.
+
+Our goal is to keep the upstream WiFi sensing pipeline intact while adding a practical layer that can:
+
+- inventory devices visible on the local network,
+- heuristically classify likely **smartphones**, **smart TVs**, **computers**, and **IoT/media** devices,
+- fuse that inventory with RuView's **presence / motion / estimated-person** outputs,
+- help operators distinguish **human movement** from **stationary connected devices**.
+
+### What this fork is adding
+
+- `GET /api/v1/hybrid/latest` for a fused hybrid snapshot
+- `GET /api/v1/hybrid/overrides`, `POST /api/v1/hybrid/overrides/upsert`, and `DELETE /api/v1/hybrid/overrides/delete` for manual device labeling
+- `GET /api/v1/bluetooth/status` for an **experimental Windows-only Bluetooth helper** status
+- LAN device discovery from the local machine
+- heuristic device classification for common home devices
+- manual override of device naming/category for home deployments
+- dashboard visibility into:
+  - estimated humans,
+  - known devices,
+  - likely smartphones,
+  - likely smart TVs,
+  - Bluetooth helper availability / adapter / service state
+
+### Honest scope
+
+This does **not** mean RuView can magically identify every device purely from ambient RF disturbance. The fork uses a **hybrid approach**:
+
+- **WiFi sensing layer** for presence, motion, and human-related inference
+- **network inventory layer** for connected-device hints
+- **manual home-device labeling** for practical overrides in non-ideal networks
+- **Bluetooth helper layer** as an optional Windows-only context signal
+- **fusion layer** to keep devices like TVs and idle phones from being mistaken for people
+
+In the current notebook/basic-RSSI mode, this fork aims to extract the **maximum useful home-presence signal** without pretending it has CSI-grade spatial precision. Presence and movement can still be useful; stable multi-person separation remains a hardware-limited case until CSI-capable hardware is used.
+
+### Roadmap
+
+1. **Phase 1**
+   LAN discovery + heuristic classification + dashboard fusion
+2. **Phase 2**
+   router/vendor integrations for richer client metadata
+3. **Phase 3**
+   stronger room-level fusion with CSI-capable multi-node deployments
+4. **Phase 4**
+   better semantic automation and publishable case studies
+
+If this fork proves useful in practice, the plan is to upstream the pieces that are generic and maintain the rest as optional extensions for hybrid deployments.
+
 Works natively with the four major smart-home ecosystems: **[Home Assistant](docs/integrations/home-assistant.md)** via the HA-DISCO MQTT publisher, **[Apple Home & HomePod](docs/user-guide-apple-homepod.md)** as a discoverable HAP-1.1 bridge, **[Google Home](docs/integrations/home-assistant.md)** + **[Amazon Alexa](docs/integrations/home-assistant.md)** via the same HA bridge or a [Matter](docs/adr/ADR-122-bfld-ruview-ha-matter-exposure.md) endpoint. Siri, Google Assistant, and Alexa can voice presence and vitals by room with zero custom skills.
 
 [![Works with Home Assistant](https://img.shields.io/badge/Works%20with-Home%20Assistant-blue?logo=home-assistant&logoColor=white&labelColor=41BDF5)](docs/integrations/home-assistant.md) [![Works with Matter](https://img.shields.io/badge/Works%20with-Matter-blue?labelColor=4285F4)](docs/adr/ADR-122-bfld-ruview-ha-matter-exposure.md) [![Works with Apple Home](https://img.shields.io/badge/Works%20with-Apple%20Home-black?logo=apple)](docs/user-guide-apple-homepod.md) [![Works with Google Home](https://img.shields.io/badge/Works%20with-Google%20Home-blue?logo=googlehome)](docs/integrations/home-assistant.md) [![Works with Alexa](https://img.shields.io/badge/Works%20with-Alexa-blue?logo=amazon&logoColor=white&labelColor=00CAFF)](docs/integrations/home-assistant.md)

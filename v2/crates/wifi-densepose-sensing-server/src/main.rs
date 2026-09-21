@@ -15,6 +15,7 @@ pub mod csi;
 mod engine_bridge;
 mod field_bridge;
 mod field_localize;
+mod hybrid_detection;
 mod model_format;
 mod multistatic_bridge;
 mod mediatek_csi;
@@ -70,7 +71,7 @@ use axum::{
 };
 use clap::Parser;
 
-use axum::http::HeaderValue;
+use axum::http::{header, HeaderValue};
 use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 use tokio::sync::{broadcast, RwLock};
@@ -1769,11 +1770,21 @@ impl RollingP95 {
 pub(crate) struct RuntimeConfig {
     /// Divisor for multi-node person-count deduplication (sum / factor).
     pub dedup_factor: f64,
+    /// Manual overrides for device naming and category in the hybrid layer.
+    #[serde(default)]
+    pub hybrid_device_overrides: Vec<hybrid_detection::HybridDeviceOverride>,
+    /// Enables the experimental Bluetooth helper on supported Windows hosts.
+    #[serde(default)]
+    pub bluetooth_helper_enabled: bool,
 }
 
 impl Default for RuntimeConfig {
     fn default() -> Self {
-        Self { dedup_factor: 3.0 }
+        Self {
+            dedup_factor: 3.0,
+            hybrid_device_overrides: Vec::new(),
+            bluetooth_helper_enabled: false,
+        }
     }
 }
 
@@ -1829,6 +1840,8 @@ struct AppStateInner {
     last_realtek_csi_frame: Option<std::time::Instant>,
     /// Latest bounded ADR-270 event per vendor. Complex CSI uses dedicated transports.
     latest_vendor_rf: BTreeMap<String, wifi_densepose_sensing_server::vendor_rf::VendorEventSnapshot>,
+    /// Latest hybrid snapshot combining LAN device discovery with room-level sensing.
+    latest_hybrid_snapshot: Option<hybrid_detection::HybridSnapshot>,
     tx: broadcast::Sender<String>,
     // ADR-099 D2/D3/D4: real-time CSI introspection tap. Per-frame state +
     // a parallel broadcast topic (`/ws/introspection`) running alongside
@@ -1994,6 +2007,10 @@ struct AppStateInner {
     /// Configurable at runtime via `POST /api/v1/config/dedup-factor` and
     /// `POST /api/v1/config/ground-truth`. Persisted across restarts.
     pub(crate) dedup_factor: f64,
+    /// Persisted manual LAN-device overrides used by the hybrid inventory.
+    pub(crate) hybrid_device_overrides: Vec<hybrid_detection::HybridDeviceOverride>,
+    /// Enables the experimental Bluetooth helper in the adapted Windows flow.
+    pub(crate) bluetooth_helper_enabled: bool,
     /// Data directory for persisting runtime config (parent of `firmware_dir`).
     pub(crate) data_dir: std::path::PathBuf,
     /// ADR-262 P3: the live RuField surface. Holds the dedicated ed25519 signer
@@ -2536,6 +2553,7 @@ impl AppStateInner {
             latest_realtek_csi: None,
             last_realtek_csi_frame: None,
             latest_vendor_rf: BTreeMap::new(),
+            latest_hybrid_snapshot: None,
             tx: broadcast::channel::<String>(16).0,
             intro: wifi_densepose_sensing_server::introspection::IntrospectionState::new(),
             intro_tx: broadcast::channel::<String>(16).0,
@@ -2609,6 +2627,8 @@ impl AppStateInner {
             p95_motion_band_power: RollingP95::new(600, 60),
             p95_spectral_power: RollingP95::new(600, 60),
             dedup_factor: 3.0,
+            hybrid_device_overrides: Vec::new(),
+            bluetooth_helper_enabled: false,
             data_dir: std::path::PathBuf::from("data"),
             field_surface: Arc::new(RwLock::new(rufield_surface::FieldSurface::from_env())),
             pose_physics: pose_physics::PosePhysicsRuntime::new(
@@ -4068,6 +4088,100 @@ fn trimmed_mean(buf: &VecDeque<f64>) -> f64 {
     }
 }
 
+// #region debug-point helpers shared
+fn read_first_env_file(filenames: &[&str]) -> (String, String, bool) {
+    let candidates = [
+        ".dbg",
+        "../.dbg",
+        "../../.dbg",
+        "../../../.dbg",
+        "../../../../.dbg",
+    ];
+    for base in candidates.iter() {
+        for name in filenames {
+            let p = format!("{}/{}", base, name);
+            if let Ok(txt) = std::fs::read_to_string(&p) {
+                return (txt, p, true);
+            }
+        }
+    }
+    (String::new(), String::new(), false)
+}
+
+fn debug_dispatch(
+    env_filename: &str,
+    default_session: &str,
+    hypothesis_id: &str,
+    location: &str,
+    msg: &str,
+    data: serde_json::Value,
+) {
+    let (env_text, _, _) = read_first_env_file(&[env_filename]);
+    let mut debug_url = "http://127.0.0.1:7777/event".to_string();
+    let mut session_id = default_session.to_string();
+    for line in env_text.lines() {
+        if let Some(value) = line.strip_prefix("DEBUG_SERVER_URL=") {
+            debug_url = value.trim().to_string();
+        } else if let Some(value) = line.strip_prefix("DEBUG_SESSION_ID=") {
+            session_id = value.trim().to_string();
+        }
+    }
+    let payload = serde_json::json!({
+        "sessionId": session_id,
+        "runId": "pre-fix",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "msg": format!("[DEBUG] {msg}"),
+        "data": data,
+        "ts": chrono::Utc::now().timestamp_millis(),
+    })
+    .to_string();
+    let thread_name = format!("dbg-{hypothesis_id}-{}", &session_id[..session_id.len().min(8)]);
+    let _ = std::thread::Builder::new()
+        .name(thread_name)
+        .spawn(move || {
+            let _ = ureq::post(&debug_url)
+                .set("Content-Type", "application/json")
+                .send_string(&payload);
+        });
+}
+
+// #region debug-point helper:basic-rssi-invalid
+fn debug_report_basic_rssi_invalid(
+    hypothesis_id: &str,
+    location: &str,
+    msg: &str,
+    data: serde_json::Value,
+) {
+    debug_dispatch(
+        "basic-rssi-invalid.env",
+        "basic-rssi-invalid",
+        hypothesis_id,
+        location,
+        msg,
+        data,
+    );
+}
+// #endregion
+
+// #region debug-point helper:basic-rssi-coverage
+fn debug_report_basic_rssi_coverage(
+    hypothesis_id: &str,
+    location: &str,
+    msg: &str,
+    data: serde_json::Value,
+) {
+    debug_dispatch(
+        "basic-rssi-coverage.env",
+        "basic-rssi-coverage",
+        hypothesis_id,
+        location,
+        msg,
+        data,
+    );
+}
+// #endregion
+
 // ── Windows WiFi RSSI collector ──────────────────────────────────────────────
 
 /// Parse `netsh wlan show interfaces` output for RSSI and signal quality
@@ -4079,14 +4193,24 @@ fn parse_netsh_interfaces_output(output: &str) -> Option<(f64, f64, String)> {
 
     for line in output.lines() {
         let line = line.trim();
-        if line.starts_with("Signal") {
-            // "Signal                 : 89%"
+        let lower = line.to_lowercase();
+        if lower.starts_with("signal") || lower.starts_with("sinal") {
+            // "Signal : 89%" / "Sinal : 80%"
             if let Some(pct) = line.split(':').nth(1) {
                 let pct = pct.trim().trim_end_matches('%');
                 if let Ok(v) = pct.parse::<f64>() {
                     signal = Some(v);
-                    // Convert signal% to approximate dBm: -100 + (signal% * 0.6)
-                    rssi = Some(-100.0 + v * 0.6);
+                    if rssi.is_none() {
+                        // Fallback approximation if direct RSSI is unavailable.
+                        rssi = Some(-100.0 + v * 0.6);
+                    }
+                }
+            }
+        }
+        if lower.starts_with("rssi") {
+            if let Some(value) = line.split(':').nth(1) {
+                if let Ok(v) = value.trim().parse::<f64>() {
+                    rssi = Some(v);
                 }
             }
         }
@@ -4096,6 +4220,20 @@ fn parse_netsh_interfaces_output(output: &str) -> Option<(f64, f64, String)> {
             }
         }
     }
+
+    // #region debug-point A:netsh-interfaces-parse
+    debug_report_basic_rssi_invalid(
+        "A",
+        "main.rs:parse_netsh_interfaces_output",
+        "parsed netsh wlan show interfaces output",
+        serde_json::json!({
+            "has_signal": signal.is_some(),
+            "signal_pct": signal,
+            "rssi_dbm": rssi,
+            "ssid": ssid,
+        }),
+    );
+    // #endregion
 
     match (rssi, signal, ssid) {
         (Some(r), Some(_s), Some(name)) => Some((r, _s, name)),
@@ -4109,7 +4247,8 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
     let mut seq: u32 = 0;
 
     // ADR-022 Phase 3: Multi-BSSID pipeline state (kept across ticks)
-    let mut registry = BssidRegistry::new(32, 30);
+    // Keep Windows netsh observations fresh enough for local presence testing.
+    let mut registry = BssidRegistry::new(32, 10);
     let mut pipeline = WindowsWifiPipeline::new();
 
     info!(
@@ -4157,12 +4296,28 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
         let observations = match bssid_scan_result {
             Ok(Ok(obs)) if !obs.is_empty() => obs,
             Ok(Ok(_empty)) => {
+                // #region debug-point C:multi-bssid-empty
+                debug_report_basic_rssi_invalid(
+                    "C",
+                    "main.rs:wifi_task",
+                    "multi-bssid scan returned no observations, falling back to netsh interfaces",
+                    serde_json::json!({ "sequence": seq }),
+                );
+                // #endregion
                 debug!("WiFi scan returned 0 observations");
                 #[cfg(not(target_os = "macos"))]
                 windows_wifi_fallback_tick(&state, seq).await;
                 continue;
             }
             Ok(Err(e)) => {
+                // #region debug-point C:multi-bssid-error
+                debug_report_basic_rssi_invalid(
+                    "C",
+                    "main.rs:wifi_task",
+                    "multi-bssid scan failed, falling back to netsh interfaces",
+                    serde_json::json!({ "sequence": seq, "error": e.to_string() }),
+                );
+                // #endregion
                 warn!("WiFi scan error: {e}");
                 #[cfg(not(target_os = "macos"))]
                 windows_wifi_fallback_tick(&state, seq).await;
@@ -4176,21 +4331,70 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
 
         let obs_count = observations.len();
 
-        // Derive SSID from the first observation for the source label.
-        let ssid = observations
-            .first()
-            .map(|o| o.ssid.clone())
-            .unwrap_or_else(|| "Unknown".into());
+        // #region debug-point B:multi-bssid-list-coverage
+        let bssid_list: Vec<serde_json::Value> = observations
+            .iter()
+            .map(|o| {
+                serde_json::json!({
+                    "ssid": o.ssid,
+                    "bssid": format!("{}", o.bssid),
+                    "rssi_dbm": o.rssi_dbm,
+                    "signal_pct": o.signal_pct,
+                    "channel": o.channel,
+                    "band": format!("{}", o.band),
+                })
+            })
+            .collect();
+        debug_report_basic_rssi_coverage(
+            "B",
+            "main.rs:wifi_task::after_scan",
+            "coverage: all BSSIDs observed by netsh networks mode=bssid",
+            serde_json::json!({
+                "sequence": seq,
+                "obs_count": obs_count,
+                "bssids": bssid_list,
+                "primary_ssid": observations
+                    .iter()
+                    .filter(|o| o.rssi_dbm > -99.0)
+                    .max_by(|a, b| a.signal_pct.total_cmp(&b.signal_pct))
+                    .filter(|o| !o.ssid.trim().is_empty())
+                    .map(|o| o.ssid.clone())
+                    .or_else(|| observations.iter().find(|o| !o.ssid.trim().is_empty()).map(|o| o.ssid.clone()))
+                    .unwrap_or_else(|| "Unknown".into()),
+                "primary_rssi": observations.iter().filter(|o| o.rssi_dbm > -99.0).max_by(|a, b| a.signal_pct.total_cmp(&b.signal_pct)).map(|o| o.rssi_dbm).unwrap_or(-80.0),
+            }),
+        );
+        // #endregion
 
         // ── Step 2: Feed observations into registry ──────────────────
         registry.update(&observations);
         let multi_ap_frame = registry.to_multi_ap_frame();
+        let primary_observation = observations
+            .iter()
+            .filter(|o| o.rssi_dbm > -99.0)
+            .max_by(|a, b| a.signal_pct.total_cmp(&b.signal_pct))
+            .or_else(|| observations.first());
+        let ssid = primary_observation
+            .filter(|o| !o.ssid.trim().is_empty())
+            .map(|o| o.ssid.clone())
+            .or_else(|| {
+                observations
+                    .iter()
+                    .find(|o| !o.ssid.trim().is_empty())
+                    .map(|o| o.ssid.clone())
+            })
+            .unwrap_or_else(|| "Unknown".into());
+        let primary_rssi = primary_observation.map(|o| o.rssi_dbm).unwrap_or(-80.0);
+        let frame_rssi = if multi_ap_frame.mean_rssi().is_finite() {
+            multi_ap_frame.mean_rssi()
+        } else {
+            primary_rssi
+        };
 
         // ── Step 3: Run enhanced pipeline ────────────────────────────
         let enhanced = pipeline.process(&multi_ap_frame);
 
         // ── Step 4: Build backward-compatible Esp32Frame ─────────────
-        let first_rssi = observations.first().map(|o| o.rssi_dbm).unwrap_or(-80.0);
         let _first_signal_pct = observations.first().map(|o| o.signal_pct).unwrap_or(40.0);
 
         let frame = Esp32Frame {
@@ -4200,7 +4404,7 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
             n_subcarriers: obs_count.min(u16::MAX as usize) as u16,
             freq_mhz: 2437,
             sequence: seq,
-            rssi: first_rssi.clamp(-128.0, 127.0) as i8,
+            rssi: frame_rssi.clamp(-128.0, 127.0) as i8,
             noise_floor: -90,
             ppdu_type: wifi_densepose_hardware::PpduType::HtLegacy,
             adr018_flags: wifi_densepose_hardware::Adr018Flags::default(),
@@ -4239,14 +4443,46 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
         });
 
         let posture_str = enhanced.posture.map(|p| format!("{p:?}"));
-        let sig_quality_score = Some(enhanced.signal_quality.score);
-        let verdict_str = Some(format!("{:?}", enhanced.verdict));
+        let (sig_quality_score, verdict_str) = practical_wifi_quality_override(
+            &format!("wifi:{ssid}"),
+            obs_count,
+            frame_rssi,
+            &features,
+            &classification,
+            Some(enhanced.signal_quality.score),
+            Some(format!("{:?}", enhanced.verdict)),
+        );
         let bssid_n = Some(enhanced.bssid_count);
+
+        // #region debug-point B:multi-bssid-features
+        debug_report_basic_rssi_invalid(
+            "B",
+            "main.rs:wifi_task",
+            "multi-bssid pipeline produced features and classification",
+            serde_json::json!({
+                "sequence": seq,
+                "ssid": ssid,
+                "observations": obs_count,
+                "primary_rssi": primary_rssi,
+                "frame_rssi": frame_rssi,
+                "amplitude_len": frame.amplitudes.len(),
+                "variance": features.variance,
+                "motion_band_power": features.motion_band_power,
+                "spectral_power": features.spectral_power,
+                "mean_rssi": features.mean_rssi,
+                "motion_level": classification.motion_level,
+                "presence": classification.presence,
+                "signal_quality_score": sig_quality_score,
+                "quality_verdict": verdict_str,
+                "bssid_count": bssid_n,
+            }),
+        );
+        // #endregion
 
         // ── Step 6: Update shared state ──────────────────────────────
         let mut s = state.write().await;
         s.source = format!("wifi:{ssid}");
-        s.rssi_history.push_back(first_rssi);
+        s.rssi_history.push_back(frame_rssi);
         if s.rssi_history.len() > 60 {
             s.rssi_history.pop_front();
         }
@@ -4278,14 +4514,68 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
         // Multi-person estimation with temporal smoothing (EMA α=0.10).
         let raw_score = compute_person_score(&s, &features);
         s.smoothed_person_score = s.smoothed_person_score * 0.90 + raw_score * 0.10;
+        let previous_person_count = s.prev_person_count;
         let est_persons = if classification.presence {
-            let count = s.person_count();
+            let count = practical_wifi_person_count_cap(
+                &format!("wifi:{ssid}"),
+                Some(obs_count),
+                sig_quality_score,
+                s.person_count(),
+            );
+            let count = stabilize_basic_wifi_estimate(
+                &format!("wifi:{ssid}"),
+                Some(obs_count),
+                &classification,
+                &features,
+                s.smoothed_person_score,
+                previous_person_count,
+                count,
+            );
             s.prev_person_count = count;
             count
         } else {
-            s.prev_person_count = 0;
-            0
+            let count = stabilize_basic_wifi_estimate(
+                &format!("wifi:{ssid}"),
+                Some(obs_count),
+                &classification,
+                &features,
+                s.smoothed_person_score,
+                previous_person_count,
+                0,
+            );
+            s.prev_person_count = count;
+            count
         };
+
+        // #region debug-point AC:multi-bssid-coverage
+        let pure_person_count = s.person_count();
+        let cap_branch = "dynamic_practical_wifi_cap_with_hold";
+        debug_report_basic_rssi_coverage(
+            "AC",
+            "main.rs:wifi_task::after_cap",
+            "coverage: multi-bssid person counts before and after practical_wifi_person_count_cap",
+            serde_json::json!({
+                "sequence": seq,
+                "ssid": ssid,
+                "obs_count": obs_count,
+                "live_bssid_count": obs_count,
+                "signal_quality_score": sig_quality_score,
+                "quality_verdict": verdict_str,
+                "frame_rssi": frame_rssi,
+                "variance": features.variance,
+                "motion_band_power": features.motion_band_power,
+                "spectral_power": features.spectral_power,
+                "motion_level": classification.motion_level,
+                "presence": classification.presence,
+                "raw_score": raw_score,
+                "smoothed_person_score": s.smoothed_person_score,
+                "pure_person_count_via_score_to_person_count": pure_person_count,
+                "cap_branch": cap_branch,
+                "estimated_persons_after_cap": est_persons,
+                "prev_person_count": s.prev_person_count,
+            }),
+        );
+        // #endregion
 
         let mut update = SensingUpdate {
             msg_type: "sensing_update".to_string(),
@@ -4294,7 +4584,7 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
             tick,
             nodes: vec![NodeInfo {
                 node_id: 0,
-                rssi_dbm: first_rssi,
+                rssi_dbm: frame_rssi,
                 position: [0.0, 0.0, 0.0],
                 amplitude: multi_ap_frame.amplitudes,
                 subcarrier_count: obs_count,
@@ -4304,7 +4594,7 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
             features,
             classification,
             signal_field: generate_signal_field(
-                first_rssi,
+                frame_rssi,
                 motion_score,
                 breathing_rate_hz,
                 feat_variance.min(1.0),
@@ -4317,7 +4607,7 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
             posture: posture_str,
             signal_quality_score: sig_quality_score,
             quality_verdict: verdict_str,
-            bssid_count: bssid_n,
+            bssid_count: Some(obs_count),
             pose_keypoints: None,
             model_status: None,
             persons: None,
@@ -4444,14 +4734,100 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
     // Multi-person estimation with temporal smoothing (EMA α=0.10).
     let raw_score = compute_person_score(&s, &features);
     s.smoothed_person_score = s.smoothed_person_score * 0.90 + raw_score * 0.10;
+    let previous_person_count = s.prev_person_count;
     let est_persons = if classification.presence {
-        let count = s.person_count();
+        let count = practical_wifi_person_count_cap(
+            &format!("wifi:{ssid}"),
+            Some(1),
+            None,
+            s.person_count(),
+        );
+        let count = stabilize_basic_wifi_estimate(
+            &format!("wifi:{ssid}"),
+            Some(1),
+            &classification,
+            &features,
+            s.smoothed_person_score,
+            previous_person_count,
+            count,
+        );
         s.prev_person_count = count;
         count
     } else {
-        s.prev_person_count = 0;
-        0
+        let count = stabilize_basic_wifi_estimate(
+            &format!("wifi:{ssid}"),
+            Some(1),
+            &classification,
+            &features,
+            s.smoothed_person_score,
+            previous_person_count,
+            0,
+        );
+        s.prev_person_count = count;
+        count
     };
+
+    // #region debug-point AC:fallback-coverage
+    let pure_person_count_fb = s.person_count();
+    let cap_branch_fb = "dynamic_practical_wifi_cap_with_hold";
+    debug_report_basic_rssi_coverage(
+        "AC",
+        "main.rs:windows_wifi_fallback_tick::after_cap",
+        "coverage: fallback person counts before and after practical_wifi_person_count_cap",
+        serde_json::json!({
+            "sequence": seq,
+            "ssid": ssid,
+            "obs_count": 1,
+            "live_bssid_count": 1,
+            "signal_quality_score": serde_json::Value::Null,
+            "quality_verdict": serde_json::Value::Null,
+            "frame_rssi": rssi_dbm,
+            "variance": features.variance,
+            "motion_band_power": features.motion_band_power,
+            "spectral_power": features.spectral_power,
+            "motion_level": classification.motion_level,
+            "presence": classification.presence,
+            "raw_score": raw_score,
+            "smoothed_person_score": s.smoothed_person_score,
+            "pure_person_count_via_score_to_person_count": pure_person_count_fb,
+            "cap_branch": cap_branch_fb,
+            "estimated_persons_after_cap": est_persons,
+            "prev_person_count": s.prev_person_count,
+        }),
+    );
+    // #endregion
+
+    // #region debug-point D:fallback-features
+    debug_report_basic_rssi_invalid(
+        "D",
+        "main.rs:windows_wifi_fallback_tick",
+        "fallback RSSI path produced features and classification",
+        serde_json::json!({
+            "sequence": seq,
+            "ssid": ssid,
+            "rssi_dbm": rssi_dbm,
+            "signal_pct": signal_pct,
+            "frame_history_len": s.frame_history.len(),
+            "variance": features.variance,
+            "motion_band_power": features.motion_band_power,
+            "spectral_power": features.spectral_power,
+            "mean_rssi": features.mean_rssi,
+            "motion_level": classification.motion_level,
+            "presence": classification.presence,
+            "estimated_persons": est_persons,
+        }),
+    );
+    // #endregion
+
+    let (signal_quality_score, quality_verdict) = practical_wifi_quality_override(
+        &format!("wifi:{ssid}"),
+        1,
+        rssi_dbm,
+        &features,
+        &classification,
+        None,
+        None,
+    );
 
     let mut update = SensingUpdate {
         msg_type: "sensing_update".to_string(),
@@ -4481,9 +4857,9 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         enhanced_motion: None,
         enhanced_breathing: None,
         posture: None,
-        signal_quality_score: None,
-        quality_verdict: None,
-        bssid_count: None,
+        signal_quality_score,
+        quality_verdict,
+        bssid_count: Some(1),
         pose_keypoints: None,
         model_status: None,
         persons: None,
@@ -5075,6 +5451,332 @@ async fn latest(State(state): State<SharedState>) -> Json<serde_json::Value> {
     }
 }
 
+fn hybrid_input_from_update(update: Option<&SensingUpdate>) -> hybrid_detection::HybridSensingInput {
+    let Some(update) = update else {
+        return hybrid_detection::HybridSensingInput::default();
+    };
+    hybrid_detection::HybridSensingInput {
+        source: update.source.clone(),
+        presence: update.classification.presence,
+        motion_level: update.classification.motion_level.clone(),
+        confidence: update.classification.confidence,
+        estimated_persons: update
+            .estimated_persons
+            .or_else(|| update.persons.as_ref().map(|persons| persons.len()))
+            .unwrap_or(0),
+    }
+}
+
+fn runtime_config_from_state(state: &AppStateInner) -> RuntimeConfig {
+    RuntimeConfig {
+        dedup_factor: state.dedup_factor,
+        hybrid_device_overrides: state.hybrid_device_overrides.clone(),
+        bluetooth_helper_enabled: state.bluetooth_helper_enabled,
+    }
+}
+
+fn build_hybrid_snapshot(
+    input: hybrid_detection::HybridSensingInput,
+    overrides: &[hybrid_detection::HybridDeviceOverride],
+    bluetooth_enabled: bool,
+) -> hybrid_detection::HybridSnapshot {
+    let snapshot = hybrid_detection::collect_snapshot(input, overrides);
+    apply_bluetooth_context_to_hybrid_snapshot(snapshot, bluetooth_enabled)
+}
+
+fn apply_bluetooth_context_to_hybrid_snapshot(
+    mut snapshot: hybrid_detection::HybridSnapshot,
+    bluetooth_enabled: bool,
+) -> hybrid_detection::HybridSnapshot {
+    let bluetooth_status = read_bluetooth_helper_status(bluetooth_enabled);
+    snapshot.bluetooth = hybrid_detection::HybridBluetoothSummary {
+        enabled: bluetooth_status.enabled,
+        available: bluetooth_status.available,
+        effective: bluetooth_status.effective,
+        adapter_present: bluetooth_status.adapter_present,
+        service_running: bluetooth_status.service_running,
+        helper_mode: bluetooth_status.helper_mode.clone(),
+        adapter_name: bluetooth_status.adapter_name.clone(),
+        note: bluetooth_status.note.clone(),
+    };
+
+    let base_note = snapshot
+        .fusion
+        .note
+        .split(" Bluetooth auxiliar ")
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let bluetooth_note = if snapshot.bluetooth.effective {
+        "Bluetooth auxiliar ativo como contexto complementar."
+    } else if snapshot.bluetooth.enabled {
+        "Bluetooth auxiliar habilitado, mas ainda nao operacional."
+    } else {
+        "Bluetooth auxiliar desligado."
+    };
+
+    snapshot.fusion.note = if base_note.is_empty() {
+        bluetooth_note.to_string()
+    } else {
+        format!("{base_note} {bluetooth_note}")
+    };
+    snapshot
+}
+
+async fn latest_hybrid(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let (cached, bluetooth_enabled) = {
+        let s = state.read().await;
+        (
+            s.latest_hybrid_snapshot.clone(),
+            s.bluetooth_helper_enabled,
+        )
+    };
+    if let Some(mut snapshot) = cached {
+        snapshot = apply_bluetooth_context_to_hybrid_snapshot(snapshot, bluetooth_enabled);
+        return Json(serde_json::to_value(snapshot).unwrap_or_default());
+    }
+
+    let (input, overrides, bluetooth_enabled) = {
+        let s = state.read().await;
+        (
+            hybrid_input_from_update(s.latest_update.as_ref()),
+            s.hybrid_device_overrides.clone(),
+            s.bluetooth_helper_enabled,
+        )
+    };
+    let snapshot = build_hybrid_snapshot(input, &overrides, bluetooth_enabled);
+    Json(serde_json::to_value(snapshot).unwrap_or_default())
+}
+
+async fn hybrid_poll_task(state: SharedState, interval_ms: u64) {
+    let mut ticker = tokio::time::interval(Duration::from_millis(interval_ms.max(5_000)));
+    loop {
+        ticker.tick().await;
+        let (input, overrides, bluetooth_enabled) = {
+            let s = state.read().await;
+            (
+                hybrid_input_from_update(s.latest_update.as_ref()),
+                s.hybrid_device_overrides.clone(),
+                s.bluetooth_helper_enabled,
+            )
+        };
+        let snapshot = build_hybrid_snapshot(input, &overrides, bluetooth_enabled);
+        // #region debug-point E:hybrid-latest-coverage
+        let fusion_devices: Vec<serde_json::Value> = snapshot
+            .network_devices
+            .iter()
+            .map(|d| {
+                serde_json::json!({
+                    "ip": d.ip,
+                    "mac": d.mac,
+                    "hostname": d.hostname,
+                    "category": d.category,
+                    "vendor": d.vendor,
+                    "confidence": d.confidence,
+                })
+            })
+            .collect();
+        debug_report_basic_rssi_coverage(
+            "E",
+            "main.rs:hybrid_poll_task",
+            "coverage: hybrid inventory latest snapshot",
+            serde_json::json!({
+                "total_devices": snapshot.network_devices.len(),
+                "fusion": snapshot.fusion,
+                "devices": fusion_devices,
+            }),
+        );
+        // #endregion
+        let mut s = state.write().await;
+        s.latest_hybrid_snapshot = Some(snapshot);
+    }
+}
+
+async fn list_hybrid_device_overrides(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    Json(serde_json::json!({
+        "items": s.hybrid_device_overrides,
+    }))
+}
+
+async fn upsert_hybrid_device_override(
+    State(state): State<SharedState>,
+    Json(body): Json<hybrid_detection::HybridDeviceOverride>,
+) -> Json<serde_json::Value> {
+    let normalized = hybrid_detection::normalize_override(body);
+    let mut s = state.write().await;
+    if let Some(existing) = s
+        .hybrid_device_overrides
+        .iter_mut()
+        .find(|entry| entry.id == normalized.id)
+    {
+        *existing = normalized.clone();
+    } else {
+        s.hybrid_device_overrides.push(normalized.clone());
+        s.hybrid_device_overrides
+            .sort_by(|left, right| left.id.cmp(&right.id));
+    }
+    s.latest_hybrid_snapshot = None;
+    let config = runtime_config_from_state(&s);
+    let data_dir = s.data_dir.clone();
+    drop(s);
+    save_runtime_config(&data_dir, &config);
+    Json(serde_json::json!({
+        "status": "ok",
+        "item": normalized,
+    }))
+}
+
+async fn delete_hybrid_device_override(
+    State(state): State<SharedState>,
+    Json(body): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let Some(id) = body.get("id").and_then(|value| value.as_str()) else {
+        return Json(serde_json::json!({"error": "id is required"}));
+    };
+    let mut s = state.write().await;
+    let before = s.hybrid_device_overrides.len();
+    s.hybrid_device_overrides.retain(|entry| entry.id != id);
+    let removed = before.saturating_sub(s.hybrid_device_overrides.len());
+    s.latest_hybrid_snapshot = None;
+    let config = runtime_config_from_state(&s);
+    let data_dir = s.data_dir.clone();
+    drop(s);
+    save_runtime_config(&data_dir, &config);
+    Json(serde_json::json!({
+        "status": "ok",
+        "removed": removed,
+        "id": id,
+    }))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct BluetoothHelperStatus {
+    enabled: bool,
+    available: bool,
+    effective: bool,
+    adapter_present: bool,
+    service_running: bool,
+    helper_mode: String,
+    adapter_name: Option<String>,
+    note: String,
+}
+
+fn read_bluetooth_helper_status(enabled: bool) -> BluetoothHelperStatus {
+    #[cfg(target_os = "windows")]
+    {
+        let script = r#"$service = Get-Service bthserv -ErrorAction SilentlyContinue;
+$adapter = Get-PnpDevice -Class Bluetooth -ErrorAction SilentlyContinue |
+  Where-Object { $_.FriendlyName -and $_.FriendlyName -notmatch 'Enumerator' } |
+  Select-Object -First 1;
+[PSCustomObject]@{
+  adapterPresent = [bool]$adapter;
+  adapterName = if ($adapter) { $adapter.FriendlyName } else { $null };
+  serviceRunning = [bool]($service -and $service.Status -eq 'Running');
+} | ConvertTo-Json -Compress"#;
+        let output = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", script])
+            .output();
+        if let Ok(output) = output {
+            if output.status.success() {
+                if let Ok(value) =
+                    serde_json::from_slice::<serde_json::Value>(&output.stdout)
+                {
+                    let adapter_present = value
+                        .get("adapterPresent")
+                        .and_then(|item| item.as_bool())
+                        .unwrap_or(false);
+                    let service_running = value
+                        .get("serviceRunning")
+                        .and_then(|item| item.as_bool())
+                        .unwrap_or(false);
+                    let adapter_name = value
+                        .get("adapterName")
+                        .and_then(|item| item.as_str())
+                        .map(str::to_string);
+                    let effective = enabled && adapter_present && service_running;
+                    return BluetoothHelperStatus {
+                        enabled,
+                        available: adapter_present && service_running,
+                        effective,
+                        adapter_present,
+                        service_running,
+                        helper_mode: "experimental".to_string(),
+                        adapter_name,
+                        note: if !enabled {
+                            "O auxiliar Bluetooth esta desligado. Ative-o na Dashboard para usar esse apoio experimental no Windows."
+                                .to_string()
+                        } else if effective {
+                            "O auxiliar Bluetooth esta ativo como contexto complementar no Windows; ele nao substitui o sensing Wi-Fi para presenca humana."
+                                .to_string()
+                        } else {
+                            "O auxiliar Bluetooth foi ativado, mas ainda nao esta operacional neste Windows. Verifique o adaptador e o servico Bluetooth."
+                                .to_string()
+                        },
+                    };
+                }
+            }
+        }
+        BluetoothHelperStatus {
+            enabled,
+            available: false,
+            effective: false,
+            adapter_present: false,
+            service_running: false,
+            helper_mode: "experimental".to_string(),
+            adapter_name: None,
+            note: if !enabled {
+                "O auxiliar Bluetooth esta desligado. Ative-o na Dashboard para usar esse apoio experimental no Windows."
+                    .to_string()
+            } else {
+                "Nao foi possivel consultar o estado do Bluetooth via PowerShell neste ambiente."
+                    .to_string()
+            },
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        BluetoothHelperStatus {
+            enabled,
+            available: false,
+            effective: false,
+            adapter_present: false,
+            service_running: false,
+            helper_mode: "unsupported".to_string(),
+            adapter_name: None,
+            note: "O auxilio Bluetooth desta adaptacao foi planejado apenas para Windows."
+                .to_string(),
+        }
+    }
+}
+
+async fn bluetooth_helper_status(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let enabled = {
+        let s = state.read().await;
+        s.bluetooth_helper_enabled
+    };
+    Json(serde_json::to_value(read_bluetooth_helper_status(enabled)).unwrap_or_default())
+}
+
+async fn bluetooth_helper_set_enabled(
+    State(state): State<SharedState>,
+    Json(body): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let enabled = body
+        .get("enabled")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let mut s = state.write().await;
+    s.bluetooth_helper_enabled = enabled;
+    let config = runtime_config_from_state(&s);
+    let data_dir = s.data_dir.clone();
+    drop(s);
+    save_runtime_config(&data_dir, &config);
+    Json(serde_json::to_value(read_bluetooth_helper_status(enabled)).unwrap_or_default())
+}
+
 async fn latest_realtek_radar(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
     match &s.latest_realtek_radar {
@@ -5634,6 +6336,135 @@ fn score_to_person_count(smoothed_score: f64, prev_count: usize) -> usize {
     }
 }
 
+fn practical_wifi_person_count_cap(
+    source: &str,
+    live_bssid_count: Option<usize>,
+    signal_quality_score: Option<f64>,
+    estimated_persons: usize,
+) -> usize {
+    if !source.starts_with("wifi:") {
+        return estimated_persons.max(1);
+    }
+
+    let live_count = live_bssid_count.unwrap_or(1);
+    let quality = signal_quality_score.unwrap_or(0.0);
+    let estimated_persons = estimated_persons.max(1);
+
+    if live_count <= 1 {
+        if quality >= 0.28 {
+            estimated_persons.min(2)
+        } else {
+            1
+        }
+    } else if live_count <= 2 {
+        if quality >= 0.18 {
+            estimated_persons.min(2)
+        } else {
+            1
+        }
+    } else if live_count <= 4 {
+        if quality < 0.20 {
+            1
+        } else if quality < 0.60 {
+            estimated_persons.min(2)
+        } else {
+            estimated_persons.min(3)
+        }
+    } else if quality < 0.15 {
+        1
+    } else if quality < 0.45 {
+        estimated_persons.min(2)
+    } else {
+        estimated_persons.min(4)
+    }
+}
+
+fn stabilize_basic_wifi_estimate(
+    source: &str,
+    live_bssid_count: Option<usize>,
+    classification: &ClassificationInfo,
+    features: &FeatureInfo,
+    smoothed_person_score: f64,
+    previous_person_count: usize,
+    estimated_persons: usize,
+) -> usize {
+    if !source.starts_with("wifi:") {
+        return estimated_persons;
+    }
+
+    let live_count = live_bssid_count.unwrap_or(1);
+    let lingering_activity = smoothed_person_score > 0.34
+        || features.variance > 10.0
+        || features.motion_band_power > 2.0;
+
+    if estimated_persons == 0 {
+        if previous_person_count > 0 && lingering_activity && live_count >= 1 {
+            return 1;
+        }
+        return 0;
+    }
+
+    let strong_motion = classification.motion_level == "present_moving"
+        || features.variance > 18.0
+        || features.motion_band_power > 4.5;
+
+    if previous_person_count > estimated_persons && strong_motion && smoothed_person_score > 0.48 {
+        return previous_person_count.min(estimated_persons + 1);
+    }
+
+    estimated_persons
+}
+
+fn practical_wifi_quality_override(
+    source: &str,
+    live_bssid_count: usize,
+    frame_rssi: f64,
+    features: &FeatureInfo,
+    classification: &ClassificationInfo,
+    signal_quality_score: Option<f64>,
+    quality_verdict: Option<String>,
+) -> (Option<f64>, Option<String>) {
+    if !source.starts_with("wifi:") {
+        return (signal_quality_score, quality_verdict);
+    }
+
+    let verdict_lower = quality_verdict
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let already_usable = verdict_lower != "deny" && signal_quality_score.unwrap_or(0.0) > 0.01;
+    if already_usable {
+        return (signal_quality_score, quality_verdict);
+    }
+
+    let practical_motion = classification.motion_level == "present_moving"
+        || features.variance > 12.0
+        || features.motion_band_power > 4.0;
+    let strong_enough_signal = frame_rssi > -85.0;
+    let poor_visibility = live_bssid_count <= 2;
+
+    if strong_enough_signal && poor_visibility && classification.presence && practical_motion {
+        let variance_scale = if live_bssid_count <= 1 { 80.0 } else { 120.0 };
+        let motion_scale = if live_bssid_count <= 1 { 25.0 } else { 60.0 };
+        let rssi_scale = if live_bssid_count <= 1 { 32.0 } else { 36.0 };
+        let score_cap = if live_bssid_count <= 1 { 0.82 } else { 0.90 };
+
+        let practical_score = (((features.variance / variance_scale).clamp(0.0, 0.45))
+            + ((features.motion_band_power / motion_scale).clamp(0.0, 0.45))
+            + (((frame_rssi + 90.0) / rssi_scale).clamp(0.0, 0.22)))
+        .clamp(0.22, score_cap);
+
+        let practical_verdict = if practical_score >= 0.78 {
+            "Permit"
+        } else {
+            "Warn"
+        };
+        return (Some(practical_score), Some(practical_verdict.to_string()));
+    }
+
+    (signal_quality_score, quality_verdict)
+}
+
 /// Combine the activity-score-derived aggregate count with the count-aware
 /// per-node estimates (issue #803).
 ///
@@ -6159,8 +6990,29 @@ fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
         return vec![];
     }
 
-    // Use estimated_persons if set by the tick loop; otherwise default to 1.
-    let person_count = update.estimated_persons.unwrap_or(1).max(1);
+    // The tick loop already resolved practical Wi-Fi caps for this cycle.
+    // Here we preserve that result for the UI instead of capping again.
+    let person_count = update.estimated_persons.unwrap_or(1).max(1).min(4);
+
+    // #region debug-point E:pose-fallback
+    debug_report_basic_rssi_invalid(
+        "E",
+        "main.rs:derive_pose_from_sensing",
+        "deriving pose from sensing update",
+        serde_json::json!({
+            "source": update.source,
+            "presence": cls.presence,
+            "motion_level": cls.motion_level,
+            "estimated_persons": update.estimated_persons,
+            "resolved_person_count": person_count,
+            "quality_verdict": update.quality_verdict,
+            "signal_quality_score": update.signal_quality_score,
+            "mean_rssi": update.features.mean_rssi,
+            "variance": update.features.variance,
+            "motion_band_power": update.features.motion_band_power,
+        }),
+    );
+    // #endregion
 
     (0..person_count)
         .map(|idx| derive_single_person_pose(update, idx, person_count))
@@ -11946,6 +12798,7 @@ async fn main() {
         latest_realtek_csi: None,
         last_realtek_csi_frame: None,
         latest_vendor_rf: BTreeMap::new(),
+        latest_hybrid_snapshot: None,
         tx,
         intro: wifi_densepose_sensing_server::introspection::IntrospectionState::new(),
         intro_tx,
@@ -12093,6 +12946,8 @@ async fn main() {
         p95_spectral_power: RollingP95::new(600, 60),
         // ADR-044 §5.3: runtime-configurable dedup factor (persisted).
         dedup_factor: runtime_config.dedup_factor,
+        hybrid_device_overrides: runtime_config.hybrid_device_overrides.clone(),
+        bluetooth_helper_enabled: runtime_config.bluetooth_helper_enabled,
         data_dir: data_dir.clone(),
         field_surface: field_surface.clone(),
         pose_physics: pose_physics::PosePhysicsRuntime::new(
@@ -12159,6 +13014,7 @@ async fn main() {
     if plan.run_simulator {
         tokio::spawn(simulated_data_task(state.clone(), args.tick_ms));
     }
+    tokio::spawn(hybrid_poll_task(state.clone(), 20_000));
 
     // ADR-166: Parse bind address once, use for all listeners
     let bind_ip: std::net::IpAddr = args
@@ -12292,6 +13148,12 @@ async fn main() {
         .route("/api/v1/metrics", get(health_metrics))
         // Sensing endpoints
         .route("/api/v1/sensing/latest", get(latest))
+        .route("/api/v1/hybrid/latest", get(latest_hybrid))
+        .route("/api/v1/hybrid/overrides", get(list_hybrid_device_overrides))
+        .route("/api/v1/hybrid/overrides/upsert", post(upsert_hybrid_device_override))
+        .route("/api/v1/hybrid/overrides/delete", delete(delete_hybrid_device_override))
+        .route("/api/v1/bluetooth/status", get(bluetooth_helper_status))
+        .route("/api/v1/bluetooth/enabled", post(bluetooth_helper_set_enabled))
         .route("/api/v1/radar/latest", get(latest_realtek_radar))
         .route("/api/v1/csi/mediatek/latest", get(latest_mediatek_csi))
         .route("/api/v1/csi/qualcomm/latest", get(latest_qualcomm_csi))
@@ -12406,8 +13268,16 @@ async fn main() {
         // available to the /api/v1/edge/registry handler. None when disabled.
         .layer(Extension(edge_registry.clone()))
         .layer(SetResponseHeaderLayer::overriding(
-            axum::http::header::CACHE_CONTROL,
-            HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-cache, no-store, must-revalidate, max-age=0"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::PRAGMA,
+            HeaderValue::from_static("no-cache"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::EXPIRES,
+            HeaderValue::from_static("0"),
         ))
         // Opt-in bearer-token auth on `/api/v1/*` (#443). When `RUVIEW_API_TOKEN`
         // is unset/empty the middleware is a no-op — the default stays
@@ -13014,14 +13884,10 @@ async fn config_set_dedup_factor(
     let clamped = value.clamp(1.0, 10.0);
     let mut s = state.write().await;
     s.dedup_factor = clamped;
+    let config = runtime_config_from_state(&s);
     let data_dir = s.data_dir.clone();
     drop(s);
-    save_runtime_config(
-        &data_dir,
-        &RuntimeConfig {
-            dedup_factor: clamped,
-        },
-    );
+    save_runtime_config(&data_dir, &config);
     Json(serde_json::json!({
         "status": "ok",
         "dedup_factor": clamped,
@@ -13060,14 +13926,10 @@ async fn config_set_ground_truth(
     };
     let clamped = optimal.clamp(1.0, 10.0);
     s.dedup_factor = clamped;
+    let config = runtime_config_from_state(&s);
     let data_dir = s.data_dir.clone();
     drop(s);
-    save_runtime_config(
-        &data_dir,
-        &RuntimeConfig {
-            dedup_factor: clamped,
-        },
-    );
+    save_runtime_config(&data_dir, &config);
     Json(serde_json::json!({
         "status": "ok",
         "ground_truth": ground_truth,

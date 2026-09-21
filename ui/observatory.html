@@ -3,7 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RuView Observatory — WiFi DensePose</title>
+  <meta name="ruview-canonical-loopback" content="localhost">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title data-i18n="title.observatory">RuView Observatory - WiFi DensePose</title>
+  <script type="module">
+    import { enforceLocalDevFreshness } from './utils/local-dev-cache-guard.js';
+    await enforceLocalDevFreshness();
+  </script>
   <link rel="stylesheet" href="observatory/css/observatory.css">
 </head>
 <body>
@@ -15,7 +23,7 @@
     <!-- Top-left: Branding -->
     <div id="brand">
       <div id="brand-logo"><span class="pi">&pi;</span> RuView</div>
-      <div id="brand-tagline">WiFi DensePose Sensing Observatory</div>
+      <div id="brand-tagline" data-i18n="observatory.brandTagline">WiFi DensePose Sensing Observatory</div>
     </div>
 
     <!-- Top-right: Connection + status + gear -->
@@ -27,19 +35,19 @@
       <div id="scenario-area">
         <span id="autoplay-icon" title="Auto-cycling">&#9654;</span>
         <select id="scenario-quick-select" title="Change scenario">
-          <option value="auto">Auto-Cycle</option>
-          <option value="empty_room">Empty Room</option>
-          <option value="single_breathing">Vital Signs</option>
-          <option value="two_walking">Multi-Person</option>
-          <option value="fall_event">Fall Detect</option>
-          <option value="sleep_monitoring">Sleep Monitor</option>
-          <option value="intrusion_detect">Intrusion</option>
-          <option value="gesture_control">Gesture Ctrl</option>
-          <option value="crowd_occupancy">Crowd (4 ppl)</option>
-          <option value="search_rescue">Search Rescue</option>
-          <option value="elderly_care">Elderly Care</option>
-          <option value="fitness_tracking">Fitness</option>
-          <option value="security_patrol">Security Patrol</option>
+          <option value="auto" data-i18n="observatory.autoCycle">Auto-Cycle</option>
+          <option value="empty_room" data-i18n="observatory.emptyRoom">Empty Room</option>
+          <option value="single_breathing" data-i18n="observatory.vitalSignsScenario">Vital Signs</option>
+          <option value="two_walking" data-i18n="observatory.multiPerson">Multi-Person</option>
+          <option value="fall_event" data-i18n="observatory.fallDetect">Fall Detect</option>
+          <option value="sleep_monitoring" data-i18n="observatory.sleepMonitor">Sleep Monitor</option>
+          <option value="intrusion_detect" data-i18n="observatory.intrusion">Intrusion</option>
+          <option value="gesture_control" data-i18n="observatory.gestureCtrl">Gesture Ctrl</option>
+          <option value="crowd_occupancy" data-i18n="observatory.crowd">Crowd (4 ppl)</option>
+          <option value="search_rescue" data-i18n="observatory.searchRescue">Search Rescue</option>
+          <option value="elderly_care" data-i18n="observatory.elderlyCare">Elderly Care</option>
+          <option value="fitness_tracking" data-i18n="observatory.fitness">Fitness</option>
+          <option value="security_patrol" data-i18n="observatory.securityPatrol">Security Patrol</option>
         </select>
       </div>
       <div id="scenario-description"></div>
@@ -49,11 +57,11 @@
 
     <!-- Left panel: Vital Signs -->
     <div id="panel-vitals" class="data-panel">
-      <div class="panel-header">Vital Signs</div>
+      <div class="panel-header" data-i18n="observatory.vitalSigns">Vital Signs</div>
       <div class="vital-row">
         <div class="vital-icon">&#9825;</div>
         <div class="vital-data">
-          <div class="vital-label">Heart Rate</div>
+          <div class="vital-label" data-i18n="observatory.heartRate">Heart Rate</div>
           <div class="vital-value"><span id="hr-value">--</span> <span class="vital-unit">BPM</span></div>
           <div class="vital-bar"><div id="hr-bar" class="vital-bar-fill vital-bar--hr"></div></div>
         </div>
@@ -61,7 +69,7 @@
       <div class="vital-row">
         <div class="vital-icon">&#9788;</div>
         <div class="vital-data">
-          <div class="vital-label">Respiration</div>
+          <div class="vital-label" data-i18n="observatory.respiration">Respiration</div>
           <div class="vital-value"><span id="br-value">--</span> <span class="vital-unit">RPM</span></div>
           <div class="vital-bar"><div id="br-bar" class="vital-bar-fill vital-bar--br"></div></div>
         </div>
@@ -69,7 +77,7 @@
       <div class="vital-row">
         <div class="vital-icon">&#9878;</div>
         <div class="vital-data">
-          <div class="vital-label">Confidence</div>
+          <div class="vital-label" data-i18n="observatory.confidence">Confidence</div>
           <div class="vital-value"><span id="conf-value">--</span><span class="vital-unit">%</span></div>
           <div class="vital-bar"><div id="conf-bar" class="vital-bar-fill vital-bar--conf"></div></div>
         </div>
@@ -78,31 +86,55 @@
 
     <!-- Right panel: Signal & Presence -->
     <div id="panel-signal" class="data-panel">
-      <div class="panel-header">WiFi Signal</div>
+      <div class="panel-header" data-i18n="observatory.wifiSignal">WiFi Signal</div>
       <div class="signal-row">
         <span class="signal-label">RSSI</span>
         <span class="signal-value" id="rssi-value">-- dBm</span>
       </div>
       <div class="signal-row">
-        <span class="signal-label">Variance</span>
+        <span class="signal-label" data-i18n="observatory.variance">Variance</span>
         <span class="signal-value" id="var-value">--</span>
       </div>
       <div class="signal-row">
-        <span class="signal-label">Motion</span>
+        <span class="signal-label" data-i18n="observatory.motion">Motion</span>
         <span class="signal-value" id="motion-value">--</span>
       </div>
       <div class="signal-row">
-        <span class="signal-label">Persons</span>
+        <span class="signal-label" data-i18n="observatory.persons">Persons</span>
         <span class="signal-value" id="persons-value">0</span>
         <span id="persons-dots" class="persons-dots"></span>
       </div>
       <canvas id="rssi-sparkline" width="200" height="48"></canvas>
 
-      <div class="panel-header" style="margin-top:12px">Presence</div>
+      <div class="panel-header" style="margin-top:12px" data-i18n="observatory.presence">Presence</div>
       <div id="presence-indicator" class="presence-state presence--absent">
-        <span id="presence-label">ABSENT</span>
+        <span id="presence-label" data-i18n="observatory.presenceAbsent">ABSENT</span>
       </div>
-      <div id="fall-alert" class="fall-alert" style="display:none">FALL DETECTED</div>
+      <div id="fall-alert" class="fall-alert" style="display:none" data-i18n="observatory.fallDetected">FALL DETECTED</div>
+
+      <div class="panel-header panel-header--compact" data-i18n="observatory.hybridFusion">Radio Fusion</div>
+      <div id="hybrid-fusion-state" class="hybrid-state hybrid-state--wifi-only">
+        <span id="hybrid-fusion-label" data-i18n="observatory.hybridWifiOnly">Wi-Fi base only</span>
+      </div>
+      <div class="signal-row">
+        <span class="signal-label" data-i18n="observatory.hybridWifiRole">Wi-Fi</span>
+        <span class="signal-value signal-value--muted" id="hybrid-wifi-role">Base</span>
+      </div>
+      <div class="signal-row">
+        <span class="signal-label" data-i18n="observatory.hybridBluetoothRole">Bluetooth</span>
+        <span class="signal-value signal-value--muted" id="hybrid-bluetooth-role">Disabled</span>
+      </div>
+      <div class="signal-row">
+        <span class="signal-label" data-i18n="observatory.hybridKnownDevices">Devices</span>
+        <span class="signal-value signal-value--muted" id="hybrid-known-devices">0</span>
+      </div>
+      <div class="signal-row">
+        <span class="signal-label" data-i18n="observatory.hybridPersonalDevices">Personal</span>
+        <span class="signal-value signal-value--muted" id="hybrid-personal-devices">0</span>
+      </div>
+      <div id="hybrid-fusion-note" class="hybrid-note" data-i18n="observatory.hybridNoteIdle">
+        Wi-Fi continua sendo a base. Bluetooth aparece aqui apenas como apoio experimental no Windows.
+      </div>
     </div>
 
     <!-- Edge module badges (populated dynamically by HudController) -->
@@ -110,20 +142,20 @@
 
     <!-- Bottom bar: capabilities -->
     <div id="capabilities-bar">
-      <div class="cap-item"><span class="cap-icon">&#9898;</span><span>Human Pose Estimation</span></div>
+      <div class="cap-item"><span class="cap-icon">&#9898;</span><span data-i18n="observatory.capPose">Human Pose Estimation</span></div>
       <div class="cap-divider"></div>
-      <div class="cap-item"><span class="cap-icon">&#9829;</span><span>Vital Sign Monitoring</span></div>
+      <div class="cap-item"><span class="cap-icon">&#9829;</span><span data-i18n="observatory.capVitals">Vital Sign Monitoring</span></div>
       <div class="cap-divider"></div>
-      <div class="cap-item"><span class="cap-icon">&#9784;</span><span>Presence Detection</span></div>
+      <div class="cap-item"><span class="cap-icon">&#9784;</span><span data-i18n="observatory.capPresence">Presence Detection</span></div>
     </div>
 
     <!-- Bottom-right: keyboard hints -->
     <div id="key-hints">
-      <span class="key-hint">[A] Orbit</span>
-      <span class="key-hint">[D] Scenario</span>
-      <span class="key-hint">[F] FPS</span>
-      <span class="key-hint">[S] Settings</span>
-      <span class="key-hint">[Space] Pause</span>
+      <span class="key-hint" data-i18n="observatory.hintOrbit">[A] Orbit</span>
+      <span class="key-hint" data-i18n="observatory.hintScenario">[D] Scenario</span>
+      <span class="key-hint" data-i18n="observatory.hintFps">[F] FPS</span>
+      <span class="key-hint" data-i18n="observatory.hintSettings">[S] Settings</span>
+      <span class="key-hint" data-i18n="observatory.hintPause">[Space] Pause</span>
     </div>
   </div>
 
@@ -131,15 +163,15 @@
   <div id="settings-overlay" class="settings-overlay" style="display:none">
     <div class="settings-dialog">
       <div class="settings-header">
-        <span>Settings</span>
+        <span data-i18n="observatory.settings">Settings</span>
         <button id="settings-close">&times;</button>
       </div>
 
       <div class="settings-tabs">
-        <button class="stab active" data-stab="rendering">Rendering</button>
-        <button class="stab" data-stab="wireframe">Wireframe</button>
-        <button class="stab" data-stab="scene">Scene</button>
-        <button class="stab" data-stab="data">Data</button>
+        <button class="stab active" data-stab="rendering" data-i18n="observatory.rendering">Rendering</button>
+        <button class="stab" data-stab="wireframe" data-i18n="observatory.wireframe">Wireframe</button>
+        <button class="stab" data-stab="scene" data-i18n="observatory.scene">Scene</button>
+        <button class="stab" data-stab="data" data-i18n="observatory.data">Data</button>
       </div>
 
       <!-- Rendering tab -->
@@ -314,9 +346,23 @@
             <option value="ws">Live WebSocket</option>
           </select>
         </label>
+        <label class="setting-row check-row">
+          <span data-i18n="observatory.realisticView">Realistic View</span>
+          <input type="checkbox" id="opt-realistic-view" checked>
+        </label>
+        <label class="setting-row check-row">
+          <span data-i18n="observatory.deviceAura">Device Aura Highlight</span>
+          <input type="checkbox" id="opt-device-aura" checked>
+        </label>
+        <div class="settings-note">
+          <div class="settings-note__title" data-i18n="observatory.auraMeaningTitle">What the aura means</div>
+          <div class="settings-note__text" data-i18n="observatory.auraMeaningBody">
+            The silhouette shows estimated human presence from Wi-Fi behavior. The stronger aura is only an extra highlight when the hybrid layer also sees signs of a likely personal device nearby. It is not proof of a phone in the hand and it is not a camera-style identification.
+          </div>
+        </div>
         <label class="setting-row" id="ws-url-row" style="display:none">
           <span>WS URL</span>
-          <input type="text" id="opt-ws-url" value="" placeholder="ws://localhost:3000/ws/sensing">
+          <input type="text" id="opt-ws-url" value="" placeholder="ws://localhost:3001/ws/sensing">
         </label>
         <button id="btn-reset-camera" class="settings-btn">Reset Camera</button>
         <button id="btn-reset-settings" class="settings-btn">Reset to Defaults</button>
@@ -335,6 +381,26 @@
   }
   </script>
 
-  <script type="module" src="observatory/js/main.js"></script>
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      const boot = params.get('boot') || Date.now().toString();
+      window.__ruviewBootVersion = boot;
+
+      document.querySelectorAll('a[href$=".html"]').forEach((link) => {
+        try {
+          const url = new URL(link.getAttribute('href'), window.location.href);
+          if (url.origin !== window.location.origin) return;
+          url.searchParams.set('boot', boot);
+          link.setAttribute('href', `${url.pathname}${url.search}${url.hash}`);
+        } catch {
+          // noop
+        }
+      });
+    })();
+  </script>
+  <script type="module">
+    import(`./observatory/js/main.js?v=${encodeURIComponent(window.__ruviewBootVersion)}`);
+  </script>
 </body>
 </html>

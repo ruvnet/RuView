@@ -2,6 +2,7 @@
 // Accessible via gear icon in header
 
 import { apiService, API_TOKEN_STORAGE_KEY } from '../services/api.service.js';
+import { i18n } from './i18n.js';
 
 export class QuickSettings {
   constructor(app) {
@@ -103,8 +104,8 @@ export class QuickSettings {
             <button class="qs-btn-danger" id="qs-clear-data">Clear</button>
           </div>
           <div class="qs-row">
-            <span>Reset onboarding</span>
-            <button class="qs-btn" id="qs-reset-tour">Reset</button>
+            <span>${i18n.t('quickSettings.resetOnboarding')}</span>
+            <button class="qs-btn" id="qs-reset-tour">${i18n.t('quickSettings.reset')}</button>
           </div>
         </div>
       </div>

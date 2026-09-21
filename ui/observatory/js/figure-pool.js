@@ -112,6 +112,14 @@ const MAX_FIGURES = 4;
 const _vecFrom = new THREE.Vector3();
 const _vecTo = new THREE.Vector3();
 const _vecTarget = new THREE.Vector3();
+const _wireColorTmp = new THREE.Color();
+const _jointColorTmp = new THREE.Color();
+const _mutedWireColorTmp = new THREE.Color();
+const _mutedJointColorTmp = new THREE.Color();
+const _deviceHighlightColor = new THREE.Color(0xffb020);
+const _bluetoothAssistColor = new THREE.Color(0x2090ff);
+const _realisticWireColor = new THREE.Color(0xb9c7d6);
+const _realisticJointColor = new THREE.Color(0xe7eef7);
 
 export class FigurePool {
   /**
@@ -265,21 +273,28 @@ export class FigurePool {
    * @param {object} data - Current sensing data with persons[], vital_signs, classification
    * @param {number} elapsed - Elapsed time in seconds
    */
-  update(data, elapsed) {
+  update(data, elapsed, hybridSnapshot = null) {
     const persons = data?.persons || [];
     const vs = data?.vital_signs || {};
-    const isPresent = data?.classification?.presence || false;
+    const verdict = `${data?.quality_verdict || ''}`.toLowerCase();
+    const quality = data?.signal_quality_score;
+    const feat = data?.features || {};
+    const hasReliableSignal = verdict !== 'deny'
+      && !(typeof quality === 'number' && quality <= 0.01)
+      && !((feat.mean_rssi ?? 0) <= -99 && (feat.variance ?? 0) === 0 && (feat.motion_band_power ?? 0) === 0);
+    const isPresent = !!data?.classification?.presence && hasReliableSignal;
     const breathBpm = vs.breathing_rate_bpm || 0;
     const breathPulse = breathBpm > 0
       ? Math.sin(elapsed * Math.PI * 2 * (breathBpm / 60)) * 0.012
       : 0;
+    const visualContext = this._buildVisualContext(data, hybridSnapshot);
 
     for (let f = 0; f < this._figures.length; f++) {
       const fig = this._figures[f];
       if (f < persons.length && isPresent) {
         const p = persons[f];
         const kps = this._poseSystem.generateKeypoints(p, elapsed, breathPulse);
-        this.applyKeypoints(fig, kps, breathPulse, p.position || [0, 0, 0], elapsed, p.pose);
+        this.applyKeypoints(fig, kps, breathPulse, p.position || [0, 0, 0], elapsed, p.pose, visualContext, f);
         fig.visible = true;
       } else {
         if (fig.visible) {
@@ -288,6 +303,22 @@ export class FigurePool {
         }
       }
     }
+  }
+
+  _buildVisualContext(data, hybridSnapshot) {
+    const fusion = hybridSnapshot?.fusion || {};
+    const bluetooth = hybridSnapshot?.bluetooth || {};
+    const likelySmartphones = Number(fusion.likely_smartphones || 0);
+    const deviceHighlightActive = !!this._settings.deviceAura
+      && !!data?.classification?.presence
+      && !!fusion.likely_human_presence
+      && likelySmartphones > 0;
+
+    return {
+      realisticView: !!this._settings.realisticView,
+      deviceHighlightActive,
+      bluetoothAssistActive: !!bluetooth.effective && deviceHighlightActive,
+    };
   }
 
   /**
@@ -299,8 +330,25 @@ export class FigurePool {
    * @param {number} elapsed - Elapsed time for pulsation effects
    * @param {string} pose - Current pose name for aura adaptation
    */
-  applyKeypoints(fig, kps, breathPulse, pos, elapsed = 0, pose = 'standing') {
+  applyKeypoints(fig, kps, breathPulse, pos, elapsed = 0, pose = 'standing', visualContext = {}, figureIndex = 0) {
     const lerpFactor = fig._initialized ? 0.18 : 1.0;
+    const realisticView = !!visualContext.realisticView;
+    const showDeviceAura = !!visualContext.deviceHighlightActive && figureIndex === 0;
+    const showBluetoothAssist = !!visualContext.bluetoothAssistActive && showDeviceAura;
+    const pulseFactor = 1.0 + Math.abs(breathPulse) * 8.0;
+    _wireColorTmp.set(this._settings.wireColor);
+    _jointColorTmp.set(this._settings.jointColor);
+    if (realisticView) {
+      _mutedWireColorTmp.copy(showDeviceAura ? _deviceHighlightColor : _realisticWireColor);
+      _mutedJointColorTmp.copy(showDeviceAura ? _deviceHighlightColor : _realisticJointColor);
+      if (showBluetoothAssist) {
+        _mutedWireColorTmp.lerp(_bluetoothAssistColor, 0.35);
+        _mutedJointColorTmp.copy(_mutedWireColorTmp);
+      }
+    } else {
+      _mutedWireColorTmp.copy(_wireColorTmp);
+      _mutedJointColorTmp.copy(_jointColorTmp);
+    }
 
     // Joints with smooth interpolation and secondary motion
     for (let i = 0; i < 17 && i < kps.length; i++) {
@@ -330,22 +378,32 @@ export class FigurePool {
         fig.velocities[i].set(0, 0, 0);
       }
 
-      j.material.opacity = 0.95;
-
-      // Joint pulsation synced with breathing
-      const pulseFactor = 1.0 + Math.abs(breathPulse) * 8.0;
-      j.material.emissiveIntensity = 0.35 * pulseFactor;
+      const jointBaseColor = i === 0 ? _mutedWireColorTmp : _mutedJointColorTmp;
+      j.material.color.copy(jointBaseColor);
+      j.material.emissive.copy(jointBaseColor);
+      j.material.opacity = realisticView ? 0.82 : 0.95;
+      j.material.emissiveIntensity = realisticView
+        ? (showDeviceAura ? 0.14 * pulseFactor : 0.018 * pulseFactor)
+        : 0.35 * pulseFactor;
 
       const baseScale = this._settings.jointSize / 0.04;
       // Subtle size pulsation on breathing
-      const pulseScale = baseScale * (1.0 + Math.abs(breathPulse) * 3.0);
+      const pulseScale = realisticView
+        ? baseScale * (1.0 + Math.abs(breathPulse) * 0.6)
+        : baseScale * (1.0 + Math.abs(breathPulse) * 3.0);
       j.scale.setScalar(pulseScale);
 
       if (j._haloMat) {
-        j._haloMat.opacity = 0.04 * this._settings.glow * pulseFactor;
+        j._haloMat.color.copy(showBluetoothAssist ? _bluetoothAssistColor : (showDeviceAura ? _deviceHighlightColor : jointBaseColor));
+        j._haloMat.opacity = realisticView
+          ? (showDeviceAura ? (showBluetoothAssist ? 0.04 : 0.028) * this._settings.glow * pulseFactor : 0.0)
+          : 0.04 * this._settings.glow * pulseFactor;
       }
       if (j._glow) {
-        j._glow.intensity = this._settings.glow * 0.12 * pulseFactor;
+        j._glow.color.copy(showBluetoothAssist ? _bluetoothAssistColor : (showDeviceAura ? _deviceHighlightColor : jointBaseColor));
+        j._glow.intensity = realisticView
+          ? (showDeviceAura ? this._settings.glow * (showBluetoothAssist ? 0.18 : 0.12) * pulseFactor : 0)
+          : this._settings.glow * 0.12 * pulseFactor;
       }
     }
 
@@ -372,8 +430,12 @@ export class FigurePool {
           bone.mesh.lookAt(_vecTo);
         }
 
-        bone.mesh.material.opacity = 0.85;
-        bone.mesh.material.emissiveIntensity = 0.3 + Math.abs(breathPulse) * 2.0;
+        bone.mesh.material.color.copy(_mutedWireColorTmp);
+        bone.mesh.material.emissive.copy(_mutedWireColorTmp);
+        bone.mesh.material.opacity = realisticView ? 0.68 : 0.85;
+        bone.mesh.material.emissiveIntensity = realisticView
+          ? (showDeviceAura ? 0.07 + Math.abs(breathPulse) * 0.12 : 0.008)
+          : 0.3 + Math.abs(breathPulse) * 2.0;
       }
     }
 
@@ -382,7 +444,7 @@ export class FigurePool {
       if (seg.isHead) {
         const headJoint = fig.joints[seg.a];
         seg.mesh.position.set(headJoint.position.x, headJoint.position.y + 0.05, headJoint.position.z);
-        seg.mat.opacity = 0.15;
+        seg.mat.opacity = realisticView ? 0.09 : 0.15;
       } else {
         const jA = fig.joints[seg.a];
         const jB = fig.joints[seg.b];
@@ -391,10 +453,14 @@ export class FigurePool {
           seg.mesh.position.copy(jA.position);
           seg.mesh.scale.set(1, 1, len);
           seg.mesh.lookAt(jB.position);
-          seg.mat.opacity = 0.12;
+          seg.mat.opacity = realisticView ? 0.06 : 0.12;
         }
       }
-      seg.mat.emissiveIntensity = 0.1 + Math.abs(breathPulse) * 0.4;
+      seg.mat.color.copy(_mutedWireColorTmp);
+      seg.mat.emissive.copy(_mutedWireColorTmp);
+      seg.mat.emissiveIntensity = realisticView
+        ? (showDeviceAura ? 0.025 : 0.0)
+        : 0.1 + Math.abs(breathPulse) * 0.4;
     }
 
     // Aura — adapt shape to pose
@@ -402,7 +468,10 @@ export class FigurePool {
     const cx = (fig.joints[11].position.x + fig.joints[12].position.x) / 2;
     const cz = (fig.joints[11].position.z + fig.joints[12].position.z) / 2;
     fig.aura.position.set(cx, hipY, cz);
-    fig.auraMat.opacity = this._settings.aura + Math.abs(breathPulse) * 0.8;
+    fig.auraMat.color.copy(showBluetoothAssist ? _bluetoothAssistColor : (showDeviceAura ? _deviceHighlightColor : _mutedWireColorTmp));
+    fig.auraMat.opacity = realisticView
+      ? (showDeviceAura ? (showBluetoothAssist ? 0.07 : 0.04) + Math.abs(breathPulse) * (showBluetoothAssist ? 0.18 : 0.12) : 0.0)
+      : this._settings.aura + Math.abs(breathPulse) * 0.8;
 
     // Pose-adaptive aura: compute from actual keypoint spread
     const auraShape = this._computeAuraShape(fig, pose, breathPulse);
@@ -410,7 +479,10 @@ export class FigurePool {
 
     // Person light
     fig.personLight.position.set(pos[0], 1.2, pos[2]);
-    fig.personLight.intensity = this._settings.glow * 0.4;
+    fig.personLight.color.copy(showBluetoothAssist ? _bluetoothAssistColor : (showDeviceAura ? _deviceHighlightColor : _mutedWireColorTmp));
+    fig.personLight.intensity = realisticView
+      ? (showDeviceAura ? this._settings.glow * (showBluetoothAssist ? 0.18 : 0.11) : 0)
+      : this._settings.glow * 0.4;
 
     fig._lastPose = pose;
   }
