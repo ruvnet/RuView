@@ -35,6 +35,8 @@ pub mod error;
 pub mod inference;
 #[cfg(feature = "onnx")]
 pub mod onnx;
+/// CPU inference profiles + deployment metadata (`cpu-micro-fp32` …).
+pub mod profile;
 /// ADR-146 — RF encoder multi-task heads + uncertainty + contrastive batcher.
 pub mod rf_encoder;
 pub mod tensor;
@@ -46,6 +48,10 @@ pub use error::{NnError, NnResult};
 pub use inference::{Backend, InferenceEngine, InferenceOptions};
 #[cfg(feature = "onnx")]
 pub use onnx::{OnnxBackend, OnnxSession};
+pub use profile::{
+    AccuracyStatus, CpuProfile, LocalHardwareValidation, ModelMetadata, Precision,
+    RealWorldValidation, TrainingData,
+};
 pub use tensor::{Tensor, TensorShape};
 pub use translator::{ModalityTranslator, TranslatorConfig, TranslatorOutput};
 
@@ -56,6 +62,10 @@ pub mod prelude {
     pub use crate::inference::{Backend, InferenceEngine, InferenceOptions};
     #[cfg(feature = "onnx")]
     pub use crate::onnx::{OnnxBackend, OnnxSession};
+    pub use crate::profile::{
+        AccuracyStatus, CpuProfile, LocalHardwareValidation, ModelMetadata, Precision,
+        RealWorldValidation, TrainingData,
+    };
     pub use crate::tensor::{Tensor, TensorShape};
     pub use crate::translator::{ModalityTranslator, TranslatorConfig, TranslatorOutput};
 }

@@ -27,6 +27,13 @@ required-features = ["tch-backend"]
 name = "aa_score_runner"
 path = "src/bin/aa_score_runner.rs"
 
+# Public real-CSI dataset preparation (dataset manifest + subject-disjoint
+# split manifest from a manually downloaded MM-Fi directory). Pure
+# dataset/manifest code, no torch, so it builds under --no-default-features.
+[[bin]]
+name = "prepare-public-dataset"
+path = "src/bin/prepare_public_dataset.rs"
+
 [features]
 default = []
 tch-backend = ["tch"]
@@ -106,6 +113,12 @@ ndarray-npy.workspace = true
 
 [[bench]]
 name = "training_bench"
+harness = false
+
+# Real-CSI preprocessing pipeline stages on deterministic synthetic windows
+# (software timing only — never a data result).
+[[bench]]
+name = "real_csi_bench"
 harness = false
 
 # ADR-291 — bfee-parser throughput and split-assignment benchmarks on

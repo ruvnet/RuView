@@ -13312,6 +13312,7 @@ dependencies = [
  "criterion",
  "memmap2",
  "ndarray 0.17.2",
+ "ndarray-npy",
  "num-traits",
  "ort",
  "parking_lot",

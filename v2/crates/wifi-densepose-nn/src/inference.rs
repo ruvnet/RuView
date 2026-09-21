@@ -5,6 +5,7 @@
 
 use crate::densepose::{DensePoseConfig, DensePoseOutput};
 use crate::error::{NnError, NnResult};
+use crate::profile::{CpuProfile, Precision};
 use crate::tensor::{Tensor, TensorShape};
 use crate::translator::TranslatorConfig;
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,18 @@ pub struct InferenceOptions {
     /// Enable profiling
     #[serde(default)]
     pub profiling: bool,
+    /// Deployment profile (see [`CpuProfile`]). `None` keeps the legacy
+    /// backend-default behavior.
+    #[serde(default)]
+    pub profile: Option<CpuProfile>,
+    /// Execution precision. Must agree with `profile` when one is set.
+    #[serde(default = "default_precision")]
+    pub precision: Precision,
+    /// Request deterministic inference. Implemented as single-threaded
+    /// execution: it removes thread-scheduling nondeterminism but does not
+    /// promise bit-identical results across machines or runtimes.
+    #[serde(default)]
+    pub deterministic: bool,
 }
 
 fn default_batch_size() -> usize {
@@ -51,6 +64,10 @@ fn default_optimize() -> bool {
     true
 }
 
+fn default_precision() -> Precision {
+    Precision::default()
+}
+
 impl Default for InferenceOptions {
     fn default() -> Self {
         Self {
@@ -61,6 +78,9 @@ impl Default for InferenceOptions {
             optimize: default_optimize(),
             memory_limit: 0,
             profiling: false,
+            profile: None,
+            precision: Precision::default(),
+            deterministic: false,
         }
     }
 }
@@ -90,6 +110,54 @@ impl InferenceOptions {
     pub fn with_threads(mut self, num_threads: usize) -> Self {
         self.num_threads = num_threads;
         self
+    }
+
+    /// Set the deployment profile
+    pub fn with_profile(mut self, profile: CpuProfile) -> Self {
+        self.profile = Some(profile);
+        self
+    }
+
+    /// Set the execution precision
+    pub fn with_precision(mut self, precision: Precision) -> Self {
+        self.precision = precision;
+        self
+    }
+
+    /// Request deterministic (single-threaded) inference
+    pub fn with_deterministic(mut self, deterministic: bool) -> Self {
+        self.deterministic = deterministic;
+        self
+    }
+
+    /// Check profile/precision consistency.
+    ///
+    /// # Errors
+    ///
+    /// [`NnError::Unsupported`] for a reserved-but-unimplemented profile, or
+    /// [`NnError::Config`] when the precision disagrees with the profile.
+    pub fn validate(&self) -> Result<(), NnError> {
+        if let Some(profile) = self.profile {
+            profile.require_supported()?;
+            if self.precision != profile.precision() {
+                return Err(NnError::config(format!(
+                    "profile `{profile}` executes at {} but options request {}",
+                    profile.precision(),
+                    self.precision
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Effective intra-op thread count: 1 when deterministic, else
+    /// `num_threads` (0 means "let the runtime decide").
+    pub fn effective_threads(&self) -> usize {
+        if self.deterministic {
+            1
+        } else {
+            self.num_threads
+        }
     }
 }
 
