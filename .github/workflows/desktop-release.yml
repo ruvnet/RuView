@@ -21,7 +21,7 @@ env:
 jobs:
   build-macos:
     name: Build macOS (${{ matrix.arch }})
-    runs-on: tenki-standard-small-2c-4g
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
