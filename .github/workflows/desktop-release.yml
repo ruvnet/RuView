@@ -27,10 +27,10 @@ jobs:
         include:
           # Build natively on each runner. This avoids cross-compilation
           # failures from native dependencies used by the desktop crate.
-          - runner: macos-13
+          - runner: macos-15
             target: x86_64-apple-darwin
             arch: x64
-          - runner: macos-14
+          - runner: macos-15
             target: aarch64-apple-darwin
             arch: arm64
     steps:
