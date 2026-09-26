@@ -15,7 +15,6 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-
 /* ---- esp_err.h ---- */
 typedef int esp_err_t;
 #define ESP_OK          0
@@ -23,6 +22,12 @@ typedef int esp_err_t;
 #define ESP_ERR_NO_MEM      0x101
 #define ESP_ERR_INVALID_ARG 0x102
 #define ESP_ERR_NOT_FOUND   0x105
+
+#include "esp_mac.h"
+
+/* MAC stub setters used by host test */
+void esp_stub_set_mac(const uint8_t *mac, size_t len);
+void esp_stub_set_base_mac_result(esp_err_t result);
 
 /* ---- esp_log.h ---- */
 #define ESP_LOGI(tag, fmt, ...)  ((void)0)

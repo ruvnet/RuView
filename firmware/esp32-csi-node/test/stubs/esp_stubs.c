@@ -8,9 +8,12 @@
  */
 
 #include "esp_stubs.h"
+#ifndef TEST_DEVICE_DIGEST
 #include "edge_processing.h"
 #include "wasm_runtime.h"
+#endif
 #include <stdint.h>
+#include <string.h>
 
 /** Monotonically increasing microsecond counter for esp_timer_get_time(). */
 static int64_t s_fake_time_us = 0;
@@ -45,7 +48,27 @@ void stream_sender_deinit(void)
 {
 }
 
+/* ---- MAC address stubs ---- */
+static uint8_t g_stub_mac[6] = {0};
+static esp_err_t g_stub_mac_result = ESP_OK;
+
+void esp_stub_set_mac(const uint8_t *mac, size_t len) {
+    if (len > sizeof(g_stub_mac)) len = sizeof(g_stub_mac);
+    memcpy(g_stub_mac, mac, len);
+}
+
+void esp_stub_set_base_mac_result(esp_err_t result) {
+    g_stub_mac_result = result;
+}
+
+esp_err_t esp_base_mac_addr_get(uint8_t mac[6]) {
+    if (g_stub_mac_result != ESP_OK) return g_stub_mac_result;
+    memcpy(mac, g_stub_mac, sizeof(g_stub_mac));
+    return ESP_OK;
+}
+
 /* ---- wasm_runtime stubs ---- */
+#ifndef TEST_DEVICE_DIGEST
 
 void wasm_runtime_on_frame(const float *phases, const float *amplitudes,
                            const float *variances, uint16_t n_sc,
@@ -83,3 +106,5 @@ const char *mmwave_type_name(mmwave_type_t t) { (void)t; return "None"; }
  * stays 0 in fuzz inputs, which is the natural fuzz semantic. */
 #include <stdbool.h>
 bool c6_sync_espnow_is_valid(void) { return false; }
+
+#endif /* TEST_DEVICE_DIGEST */

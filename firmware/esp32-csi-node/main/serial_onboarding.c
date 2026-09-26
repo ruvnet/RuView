@@ -17,15 +17,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs.h"
-#include "psa/crypto.h"
 
 static const char *TAG = "serial_onboard";
 static nvs_config_t s_current_config;
-static char s_issued_nonce[RUVIEW_ONBOARDING_NONCE_HEX_LEN + 1];
-static int64_t s_nonce_issued_at_us;
+static ruview_onboarding_session_t s_session;
 
 #define ONBOARDING_LINE_MAX 384
-#define ONBOARDING_NONCE_TTL_US (60LL * 1000LL * 1000LL)
+#define ONBOARDING_NONCE_TTL_US RUVIEW_ONBOARDING_NONCE_TTL_US
 
 static const char *chip_name(void)
 {
@@ -38,44 +36,33 @@ static const char *chip_name(void)
 #endif
 }
 
-static void device_digest(char output[17])
+static void device_digest(char output[RUVIEW_ONBOARDING_DIGEST_HEX_LEN + 1])
 {
-    uint8_t base_mac[6] = {0};
-    uint8_t digest[32] = {0};
-    static const uint8_t domain[] = "ruview-device-v1";
-    uint8_t digest_input[sizeof(domain) - 1 + sizeof(base_mac)];
-    size_t digest_length = 0;
-    memcpy(digest_input, domain, sizeof(domain) - 1);
-    const esp_err_t mac_result = esp_efuse_mac_get_default(base_mac);
-    if (mac_result == ESP_OK) {
-        memcpy(digest_input + sizeof(domain) - 1, base_mac, sizeof(base_mac));
-    }
-    if (mac_result == ESP_OK &&
-        psa_crypto_init() == PSA_SUCCESS &&
-        psa_hash_compute(PSA_ALG_SHA_256, digest_input, sizeof(digest_input),
-                         digest, sizeof(digest), &digest_length) == PSA_SUCCESS &&
-        digest_length == sizeof(digest)) {
-        for (size_t index = 0; index < 8; index++) {
-            snprintf(output + index * 2, 3, "%02x", digest[index]);
-        }
-    } else {
-        memcpy(output, "0000000000000000", 17);
+    uint8_t base_mac[RUVIEW_ONBOARDING_BASE_MAC_LEN] = {0};
+    const esp_err_t mac_result = esp_base_mac_addr_get(base_mac);
+    if (mac_result != ESP_OK ||
+        !ruview_onboarding_device_digest(base_mac, sizeof(base_mac), output)) {
+        memcpy(output, RUVIEW_ONBOARDING_DIGEST_FALLBACK,
+               RUVIEW_ONBOARDING_DIGEST_HEX_LEN + 1);
     }
 }
 
 static void emit_hello(const char *nonce)
 {
     const esp_app_desc_t *description = esp_app_get_description();
-    char digest[17] = {0};
+    char digest[RUVIEW_ONBOARDING_DIGEST_HEX_LEN + 1] = {0};
     device_digest(digest);
     const bool configured = s_current_config.wifi_ssid[0] != '\0' &&
                             s_current_config.target_ip[0] != '\0';
-    printf("RUVIEW_HELLO_OK_V1 nonce=%s chip=%s version=%s node_id=%u "
-           "target_ip=%s target_port=%u configured=%u device_digest=%s\n",
-           nonce, chip_name(), description->version,
-           (unsigned)s_current_config.node_id, s_current_config.target_ip,
-           (unsigned)s_current_config.target_port, configured ? 1U : 0U, digest);
-    fflush(stdout);
+    char line[ONBOARDING_LINE_MAX];
+    const int len = ruview_onboarding_format_hello_response(
+        line, sizeof(line), nonce, chip_name(), description->version,
+        s_current_config.node_id, s_current_config.target_ip,
+        s_current_config.target_port, configured, digest);
+    if (len > 0) {
+        printf("%s\n", line);
+        fflush(stdout);
+    }
 }
 
 static esp_err_t commit_config(const ruview_onboarding_config_t *config)
@@ -99,8 +86,7 @@ static void process_line(char *line)
 {
     char nonce[RUVIEW_ONBOARDING_NONCE_HEX_LEN + 1] = {0};
     if (ruview_onboarding_parse_hello(line, nonce)) {
-        memcpy(s_issued_nonce, nonce, sizeof(s_issued_nonce));
-        s_nonce_issued_at_us = esp_timer_get_time();
+        ruview_onboarding_session_record_hello(&s_session, nonce, esp_timer_get_time());
         emit_hello(nonce);
         return;
     }
@@ -113,14 +99,15 @@ static void process_line(char *line)
         fflush(stdout);
         return;
     }
-    const int64_t age_us = esp_timer_get_time() - s_nonce_issued_at_us;
-    if (s_issued_nonce[0] == '\0' || strcmp(request.nonce, s_issued_nonce) != 0 ||
-        age_us < 0 || age_us > ONBOARDING_NONCE_TTL_US) {
-        printf("RUVIEW_CONFIG_ERR_V1 nonce=%s reason=claim_expired\n", request.nonce);
+    const char *rejection_reason = NULL;
+    if (!ruview_onboarding_session_validate_claim(
+            &s_session, request.nonce, esp_timer_get_time(),
+            ONBOARDING_NONCE_TTL_US, &rejection_reason)) {
+        printf("RUVIEW_CONFIG_ERR_V1 nonce=%s reason=%s\n",
+               request.nonce, rejection_reason ? rejection_reason : "claim_expired");
         fflush(stdout);
         return;
     }
-    s_issued_nonce[0] = '\0';
     const esp_err_t result = commit_config(&request);
     if (result != ESP_OK) {
         printf("RUVIEW_CONFIG_ERR_V1 nonce=%s reason=nvs_commit code=%s\n",
