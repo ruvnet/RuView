@@ -937,7 +937,14 @@ static void send_vitals_packet(void)
     s_latest_pkt = pkt;
     s_pkt_valid = true;
 
-    /* ADR-063: If mmWave is active, send fused 48-byte packet instead. */
+    /* Always send the standard 32-byte packet: the sensing server only feeds
+     * per-node presence, person count and the edge presence gate from it; it
+     * merely forwards fused packets to the WebSocket. Sending fused INSTEAD
+     * (upstream ADR-063 behaviour) blinds the server to a node the moment a
+     * radar is plugged in. */
+    stream_sender_send((const uint8_t *)&pkt, sizeof(pkt));
+
+    /* ADR-063: If mmWave is active, also send the fused 48-byte packet. */
     mmwave_state_t mw;
     if (mmwave_sensor_get_state(&mw) && mw.detected) {
         edge_fused_vitals_pkt_t fpkt;
@@ -985,9 +992,6 @@ static void send_vitals_packet(void)
         fpkt.mmwave_confidence = (mw.frame_count > 10) ? 80 : 40;
 
         stream_sender_send((const uint8_t *)&fpkt, sizeof(fpkt));
-    } else {
-        /* No mmWave — send standard 32-byte packet. */
-        stream_sender_send((const uint8_t *)&pkt, sizeof(pkt));
     }
 }
 
