@@ -343,4 +343,30 @@ void edge_get_phase_history(const float **out_buf, uint16_t *out_len,
  */
 void edge_get_variances(float *out_variances, uint16_t n_subcarriers);
 
+/**
+ * Frames that passed the subcarrier-grid guard and were actually processed.
+ *
+ * Monotonic since boot. Zero on a node whose DSP task is running and logging
+ * normally means the pipeline is producing nothing at all -- the condition that
+ * went unnoticed while EDGE_MAX_SUBCARRIERS was too small for the radio.
+ *
+ * @return Frames processed since boot.
+ */
+uint32_t edge_processing_get_frames_processed(void);
+
+/**
+ * Frames rejected by the subcarrier-grid guard because they were wider than
+ * EDGE_MAX_SUBCARRIERS (or empty).
+ *
+ * Read beside the processed count, this separates the two ways a quiet pipeline
+ * can look identical from outside:
+ *
+ *   processed == 0 && rejected == 0  -- nothing is reaching the DSP task at all
+ *   processed == 0 && rejected  > 0  -- frames arrive and every one is discarded,
+ *                                       i.e. the grid does not match the radio
+ *
+ * @return Frames rejected since boot.
+ */
+uint32_t edge_processing_get_frames_rejected(void);
+
 #endif /* EDGE_PROCESSING_H */
