@@ -13445,6 +13445,8 @@ dependencies = [
  "mdns-sd",
  "midstreamer-attractor",
  "midstreamer-temporal-compare",
+ "ndarray 0.17.2",
+ "num-complex",
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
