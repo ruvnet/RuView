@@ -262,6 +262,32 @@ jobs:
             firmware/esp32-csi-node/test/timeout-*
           retention-days: 30
 
+  # ---------------------------------------------------------------------------
+  # Provisioning tooling tests (firmware/esp32-csi-node/tests).
+  #
+  # These existed but nothing ran them: the repo's pytest invocations cover
+  # archive/v1, python/ and tests/performance, and the `Tests (3.x)` job marks
+  # every step continue-on-error, so it cannot fail a PR. A change that put the
+  # WiFi passphrase back into the per-port state file -- or took it out and
+  # broke the merge contract -- would have gone in green. Stdlib unittest, no
+  # dependencies, under a second.
+  # ---------------------------------------------------------------------------
+  provision-tests:
+    name: Provisioning Tooling Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+
+      - name: Run provisioning state + merge tests
+        working-directory: firmware/esp32-csi-node
+        run: python -m unittest discover -s tests -p "test_provision*.py" -v
+
   nvs-matrix-validate:
     name: NVS Matrix Generation
     runs-on: ubuntu-latest
