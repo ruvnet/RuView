@@ -58,13 +58,22 @@ impl std::fmt::Debug for OnnxSession {
 
 impl OnnxSession {
     /// Create a new ONNX session from a file
-    pub fn from_file<P: AsRef<Path>>(path: P, _options: &InferenceOptions) -> NnResult<Self> {
+    pub fn from_file<P: AsRef<Path>>(path: P, options: &InferenceOptions) -> NnResult<Self> {
         let path = path.as_ref();
         info!(?path, "Loading ONNX model");
+        options.validate()?;
 
-        // Build session using ort 2.0 API
-        let session = Session::builder()
-            .map_err(|e| NnError::model_load(format!("Failed to create session builder: {}", e)))?
+        // Intra-op thread pool: the batch-1 latency knob. Deterministic
+        // mode forces a single thread (see `InferenceOptions`).
+        let threads = options.effective_threads();
+        let mut builder = Session::builder()
+            .map_err(|e| NnError::model_load(format!("Failed to create session builder: {}", e)))?;
+        if threads > 0 {
+            builder = builder.with_intra_threads(threads).map_err(|e| {
+                NnError::model_load(format!("Failed to set intra-op threads: {}", e))
+            })?;
+        }
+        let session = builder
             .commit_from_file(path)
             .map_err(|e| NnError::model_load(format!("Failed to load model: {}", e)))?;
 
@@ -101,11 +110,19 @@ impl OnnxSession {
     }
 
     /// Create from in-memory bytes
-    pub fn from_bytes(bytes: &[u8], _options: &InferenceOptions) -> NnResult<Self> {
+    pub fn from_bytes(bytes: &[u8], options: &InferenceOptions) -> NnResult<Self> {
         info!("Loading ONNX model from bytes");
+        options.validate()?;
 
-        let session = Session::builder()
-            .map_err(|e| NnError::model_load(format!("Failed to create session builder: {}", e)))?
+        let threads = options.effective_threads();
+        let mut builder = Session::builder()
+            .map_err(|e| NnError::model_load(format!("Failed to create session builder: {}", e)))?;
+        if threads > 0 {
+            builder = builder.with_intra_threads(threads).map_err(|e| {
+                NnError::model_load(format!("Failed to set intra-op threads: {}", e))
+            })?;
+        }
+        let session = builder
             .commit_from_memory(bytes)
             .map_err(|e| NnError::model_load(format!("Failed to load model from bytes: {}", e)))?;
 
@@ -467,8 +484,27 @@ impl OnnxBackendBuilder {
         self
     }
 
+    /// Set the deployment profile (validated at [`Self::build`])
+    pub fn profile(mut self, profile: crate::profile::CpuProfile) -> Self {
+        self.options.profile = Some(profile);
+        self
+    }
+
+    /// Set the execution precision (validated at [`Self::build`])
+    pub fn precision(mut self, precision: crate::profile::Precision) -> Self {
+        self.options.precision = precision;
+        self
+    }
+
+    /// Request deterministic (single-threaded) inference
+    pub fn deterministic(mut self, deterministic: bool) -> Self {
+        self.options.deterministic = deterministic;
+        self
+    }
+
     /// Build the backend
     pub fn build(self) -> NnResult<OnnxBackend> {
+        self.options.validate()?;
         if let Some(path) = self.model_path {
             OnnxBackend::from_file_with_options(path, self.options)
         } else if let Some(bytes) = self.model_bytes {

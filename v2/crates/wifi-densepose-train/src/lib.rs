@@ -69,7 +69,9 @@ pub mod model_gates;
 /// assignment plus the structural [`protocols::leakage::LeakageAudit`],
 /// mean-pose baseline, and evidence-graded evaluation reports.
 pub mod protocols;
+pub mod public_dataset;
 pub mod rapid_adapt;
+pub mod real_csi;
 pub mod ruview_metrics;
 pub mod signal_features;
 pub mod subcarrier;
@@ -119,6 +121,14 @@ pub use protocols::leakage::{
     EvaluationReport, EvidenceGrade, LeakageAudit, LeakageClaims, MeanPoseBaseline,
 };
 pub use protocols::{SampleMeta, SplitPlan, SplitProtocol, SplitSide};
+pub use public_dataset::{
+    DatasetManifest, PreparedSplit, ProcessedSampleMeta, SplitPolicy,
+    MANIFEST_PREPROCESSING_VERSION,
+};
+pub use real_csi::{
+    PreprocessError, ProcessedSample, QualityReport, RealCsiConfig, RealCsiPipeline,
+    RealCsiSourceInfo, PREPROCESSING_VERSION,
+};
 
 // ADR-298 — model release sanity gates.
 pub use model_gates::{

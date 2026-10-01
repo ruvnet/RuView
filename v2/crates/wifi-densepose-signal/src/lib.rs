@@ -53,6 +53,7 @@ pub use features::{
     AmplitudeFeatures, CorrelationFeatures, CsiFeatures, DopplerFeatures, FeatureExtractor,
     FeatureExtractorConfig, PhaseFeatures, PowerSpectralDensity,
 };
+pub use hampel::{hampel_filter, HampelConfig, HampelError, HampelResult};
 pub use hardware_norm::{
     AmplitudeStats, CanonicalCsiFrame, HardwareNormError, HardwareNormalizer, HardwareType,
 };

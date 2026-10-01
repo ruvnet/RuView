@@ -49,6 +49,9 @@ tokio = { workspace = true, features = ["sync", "rt"] }
 parking_lot = "0.12"
 memmap2 = "0.9"
 
+# Input tensor loading for the cpu-inference-bench binary (pure Rust)
+ndarray-npy.workspace = true
+
 [dev-dependencies]
 criterion.workspace = true
 proptest.workspace = true
@@ -67,3 +70,11 @@ required-features = ["onnx"]
 [[bench]]
 name = "native_conv_bench"
 harness = false
+
+# Reproducible CPU inference benchmark (cpu-micro-fp32 / cpu-micro-int8).
+# Requires the `onnx` feature for model execution; without a `--model` it
+# runs a pipeline-only smoke check.
+[[bin]]
+name = "cpu-inference-bench"
+path = "src/bin/cpu_inference_bench.rs"
+required-features = ["onnx"]

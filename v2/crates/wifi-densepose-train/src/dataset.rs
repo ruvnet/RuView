@@ -432,6 +432,28 @@ impl MmFiDataset {
         })
     }
 
+    /// Discover a subject-filtered subset of the recordings.
+    ///
+    /// Identical to [`Self::discover`], except subject directories whose id
+    /// is not in `keep_subjects` are skipped. Used for small development
+    /// subsets; the kept set is recorded in the dataset manifest notes.
+    pub fn discover_subset(
+        root: &Path,
+        window_frames: usize,
+        target_subcarriers: usize,
+        num_keypoints: usize,
+        keep_subjects: &std::collections::BTreeSet<u32>,
+    ) -> Result<Self, DatasetError> {
+        let mut ds = Self::discover(root, window_frames, target_subcarriers, num_keypoints)?;
+        ds.entries.retain(|e| keep_subjects.contains(&e.subject_id));
+        let mut cumulative = vec![0usize; ds.entries.len() + 1];
+        for (i, e) in ds.entries.iter().enumerate() {
+            cumulative[i + 1] = cumulative[i] + e.num_windows();
+        }
+        ds.cumulative = cumulative;
+        Ok(ds)
+    }
+
     /// Resolve a global sample index to `(entry_index, frame_offset)`.
     fn locate(&self, idx: usize) -> Option<(usize, usize)> {
         let total = self.cumulative.last().copied().unwrap_or(0);
