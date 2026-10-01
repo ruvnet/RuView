@@ -32,7 +32,7 @@ jobs:
       WEAVER_SHA256: a9822c712d6871bd89d6530f18c5df5cea3821f642e7b8e5e49e985917f7d12d
     steps:
       - name: Checkout code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
