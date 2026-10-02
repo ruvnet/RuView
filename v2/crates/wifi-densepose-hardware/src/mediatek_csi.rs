@@ -85,6 +85,17 @@ impl TryFrom<u8> for ElementFormat {
     }
 }
 
+/// PPDU format a CSI report was measured on.
+///
+/// `Legacy` and `Unknown` were added after a real MT7981 capture (a 2.4 GHz
+/// client on channel 6) reported `rx_mode = MT_PHY_TYPE_OFDM`. MediaTek's CSI
+/// driver treats legacy OFDM as a first-class mode — its tone-mask table gives
+/// `MT_PHY_TYPE_OFDM` its own group — so a vendor bridge must be able to carry
+/// one. Without these, such a frame had to be dropped, which lost real data.
+///
+/// Wire note: a decoder older than this change rejects discriminants 6 and 7 as
+/// `UnknownPpduType`. Producers should only emit them for frames that genuinely
+/// are pre-HT or unrecognised.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum PpduType {
@@ -93,6 +104,11 @@ pub enum PpduType {
     HeSu = 3,
     HeMu = 4,
     Eht = 5,
+    /// Pre-HT: 802.11b CCK or 802.11a/g OFDM.
+    Legacy = 6,
+    /// A PPDU format the producer could not classify. Carried rather than
+    /// guessed, so the frame survives and the ambiguity stays visible.
+    Unknown = 7,
 }
 
 impl TryFrom<u8> for PpduType {
@@ -104,6 +120,8 @@ impl TryFrom<u8> for PpduType {
             3 => Ok(Self::HeSu),
             4 => Ok(Self::HeMu),
             5 => Ok(Self::Eht),
+            6 => Ok(Self::Legacy),
+            7 => Ok(Self::Unknown),
             _ => Err(CsiParseError::UnknownPpduType(value)),
         }
     }
@@ -628,6 +646,27 @@ mod tests {
         let w = f.to_bytes().unwrap();
         assert_eq!(CsiFrame::from_bytes(&w).unwrap().0, f);
     }
+    #[test]
+    fn legacy_and_unknown_ppdu_types_round_trip() {
+        // A real MT7981 capture reported MT_PHY_TYPE_OFDM, which has no HT/VHT/HE
+        // equivalent; these two discriminants exist so such a frame is carried
+        // rather than dropped.
+        let mut s = MediatekCsiSimulator::new(SimulatorConfig::default()).unwrap();
+        for want in [PpduType::Legacy, PpduType::Unknown] {
+            let mut f = s.next_frame();
+            f.ppdu_type = want;
+            let w = f.to_bytes().unwrap();
+            let (decoded, _) = CsiFrame::from_bytes(&w).unwrap();
+            assert_eq!(decoded.ppdu_type, want);
+        }
+        assert_eq!(PpduType::try_from(6u8).unwrap(), PpduType::Legacy);
+        assert_eq!(PpduType::try_from(7u8).unwrap(), PpduType::Unknown);
+        assert!(matches!(
+            PpduType::try_from(8u8),
+            Err(CsiParseError::UnknownPpduType(8))
+        ));
+    }
+
     #[test]
     fn crc_corruption_is_rejected() {
         let mut s = MediatekCsiSimulator::new(SimulatorConfig::default()).unwrap();
