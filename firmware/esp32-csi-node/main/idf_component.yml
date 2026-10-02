@@ -11,3 +11,14 @@ dependencies:
 
   ## Onboard WS2812 LED Disabling
   espressif/led_strip: "^3.0.0"
+
+  ## cJSON for config_api.c.
+  ## Bundled as the `json` component up to ESP-IDF 5.x and moved out to the
+  ## component manager in v6, so it is pulled ONLY on the v6+ lane -- on 5.4
+  ## `main/CMakeLists.txt` requires the built-in `json` instead. Taking it from
+  ## the registry on 5.x as well would mean two cJSON implementations in one
+  ## build.
+  espressif/cjson:
+    version: "^1.7.19"
+    rules:
+      - if: "idf_version >=6.0"

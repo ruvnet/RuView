@@ -63,6 +63,14 @@ int stream_sender_send_priority(const uint8_t *data, size_t len);
 int64_t stream_sender_last_success_us(void);
 
 /**
+ * Consecutive sendto() failures since the last accepted send, on the bulk
+ * (non-priority) path only. Resets to 0 on the next accepted send. Used by
+ * the OTA rollback confirmation gate to require actual send-health before
+ * cancelling rollback, not just wall-clock-plus-network-presence.
+ */
+uint32_t stream_sender_failure_streak(void);
+
+/**
  * Close the UDP sender socket.
  */
 void stream_sender_deinit(void);
