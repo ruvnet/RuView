@@ -11,6 +11,8 @@ set(SRCS
     "rv_feature_state.c"
     "rv_mesh.c"
     "adaptive_controller.c"
+    # RuView#1941 — CSI capture stall watchdog
+    "csi_watchdog.c" "csi_stall_policy.c"
     # ADR-110 — ESP32-C6 capability modules (no-op stubs on other targets via #ifdef)
     "c6_twt.c"
     "c6_timesync.c"

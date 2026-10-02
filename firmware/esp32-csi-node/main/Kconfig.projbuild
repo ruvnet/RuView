@@ -672,6 +672,53 @@ config UPLINK_WATCHDOG_TIMEOUT_S
       If nodes do restart unexpectedly, check the reset reason in the sync
       packet's health field before assuming the watchdog is responsible.
 
+config CSI_STALL_WATCHDOG
+    bool "Recover when CSI capture stops while the link stays up (RuView#1941)"
+    default y
+    help
+      MEASURED 2026-09-15 (ESP32-C6, 0.8.12): CSI callbacks stopped for 473 s
+      while Wi-Fi, ping, ESP-NOW, the console and RUVIEW_HELLO all stayed
+      healthy. UPLINK_WATCHDOG above cannot see this, because adaptive-
+      controller and mesh packets keep sendto() succeeding.
+
+      This watches capture itself: the older of the last raw CSI callback and
+      the last CSI frame accepted by sendto. With the link up and no capture
+      for CSI_STALL_TIMEOUT_S it walks a ladder, one timeout per step, reset by
+      any fresh capture:
+        1. re-arm CSI config, callback, promiscuous filter and self-ping
+        2. force a Wi-Fi reassociation
+        3. restart
+      Step 1 does not disturb the association or mesh time sync. The ladder
+      pauses while the link is down (the reconnect path owns that) and arms
+      only after the first captured and sent frame. It stays off while power
+      duty-cycling is enabled, since modem sleep starves the callback.
+
+config CSI_STALL_TIMEOUT_S
+    int "Seconds without capture per ladder step"
+    depends on CSI_STALL_WATCHDOG
+    range 5 600
+    default 15
+    help
+      A connected node's self-ping alone guarantees tens of CSI callbacks per
+      second, so 15 s of none with the link up is not a quiet room. A restart
+      needs three full steps of no capture (45 s by default).
+
+config CSI_STALL_INJECT_MODE
+    int "TEST ONLY: inject a CSI capture stall (0=off, 1=transient, 2=persistent)"
+    depends on CSI_STALL_WATCHDOG
+    range 0 2
+    default 0
+    help
+      Hardware validation of the ladder. 1 disables CSI once (a re-arm clears
+      it); 2 discards every callback until reboot (walks the whole ladder).
+      Never ship a build with this set.
+
+config CSI_STALL_INJECT_AFTER_S
+    int "TEST ONLY: uptime at which to inject the stall"
+    depends on CSI_STALL_WATCHDOG
+    range 10 86400
+    default 60
+
 endmenu
 
 config CSI_GATE_MESH_ALIGNED

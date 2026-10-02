@@ -57,6 +57,9 @@ extern "C" {
 #define NODE_LOG_EV_THERMAL_STATE   3
 #define NODE_LOG_EV_SEND_FAIL_RATE  4
 #define NODE_LOG_EV_WATCHDOG        5
+/** RuView#1941: a = ladder stage (1 rearm, 2 reassoc, 3 restart, 0 recovered),
+ *  b = capture outage in ms so far. */
+#define NODE_LOG_EV_CSI_STALL       6
 
 /** Mount the FAT volume and open the ring. Call once at boot, after NVS is up
  *  (the boot counter lives there).
