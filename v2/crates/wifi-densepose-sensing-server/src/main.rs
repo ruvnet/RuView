@@ -10464,7 +10464,12 @@ async fn udp_receiver_task(
                             } else {
                                 n.frame_history
                                     .back()
-                                    .map(|a| a.iter().take(56).cloned().collect())
+                                    .map(|a| {
+                                        a.iter()
+                                            .take(adaptive_classifier::RECORDED_AMPLITUDE_LEN)
+                                            .cloned()
+                                            .collect()
+                                    })
                                     .unwrap_or_default()
                             },
                             subcarrier_count: if suppress_raw {
