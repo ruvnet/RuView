@@ -5105,11 +5105,123 @@ async fn health(State(state): State<SharedState>) -> Json<serde_json::Value> {
     }))
 }
 
+/// How old `latest_update` may be before `/api/v1/sensing/latest` stops
+/// serving it as current. `latest_update` is only rewritten when a source
+/// produces a new update, so when every source goes quiet (frames stop, a
+/// receiver is unplugged, a bogus node's one-off frame was the last write)
+/// the endpoint kept serving the last classification indefinitely, with
+/// nothing marking it old. `effective_source()` already reports an offline
+/// source after `ESP32_OFFLINE_TIMEOUT`; this bounds the payload itself.
+const LATEST_UPDATE_STALE_AFTER: Duration = Duration::from_secs(10);
+
 async fn latest(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
     match &s.latest_update {
-        Some(update) => Json(serde_json::to_value(update).unwrap_or_default()),
+        Some(update) => {
+            // Every SensingUpdate is stamped with wall-clock seconds at
+            // creation, so its age is measured against the same clock.
+            let now_ms = chrono::Utc::now().timestamp_millis() as f64;
+            let age_ms = (now_ms - update.timestamp * 1000.0).max(0.0);
+            if age_ms > LATEST_UPDATE_STALE_AFTER.as_millis() as f64 {
+                return Json(serde_json::json!({
+                    "status": "stale",
+                    "age_ms": age_ms,
+                    "source": s.effective_source(),
+                }));
+            }
+            let mut value = serde_json::to_value(update).unwrap_or_default();
+            if let Some(obj) = value.as_object_mut() {
+                obj.insert("age_ms".to_string(), serde_json::json!(age_ms));
+            }
+            Json(value)
+        }
         None => Json(serde_json::json!({"status": "no data yet"})),
+    }
+}
+
+#[cfg(test)]
+mod latest_update_staleness_tests {
+    //! `/api/v1/sensing/latest` must age out a frozen update instead of
+    //! serving it as current forever.
+    use super::*;
+
+    fn update_at(timestamp: f64) -> SensingUpdate {
+        SensingUpdate {
+            msg_type: "sensing_update".to_string(),
+            timestamp,
+            source: "esp32".to_string(),
+            tick: 1,
+            nodes: vec![],
+            features: FeatureInfo {
+                mean_rssi: 0.0,
+                variance: 0.0,
+                motion_band_power: 0.0,
+                breathing_band_power: 0.0,
+                dominant_freq_hz: 0.0,
+                change_points: 0,
+                spectral_power: 0.0,
+            },
+            classification: ClassificationInfo {
+                motion_level: "absent".to_string(),
+                presence: false,
+                confidence: 0.97,
+            },
+            signal_field: SignalField {
+                grid_size: [0, 0, 0],
+                values: vec![],
+            },
+            vital_signs: None,
+            calibrated_presence_evidence: None,
+            enhanced_motion: None,
+            enhanced_breathing: None,
+            posture: None,
+            signal_quality_score: None,
+            quality_verdict: None,
+            bssid_count: None,
+            pose_keypoints: None,
+            model_status: None,
+            persons: None,
+            estimated_persons: None,
+            node_features: None,
+            room_inference: None,
+        }
+    }
+
+    fn now_s() -> f64 {
+        chrono::Utc::now().timestamp_millis() as f64 / 1000.0
+    }
+
+    #[tokio::test]
+    async fn fresh_update_is_served_with_age_ms() {
+        let state: SharedState = Arc::new(RwLock::new(AppStateInner::minimal()));
+        state.write().await.latest_update = Some(update_at(now_s()));
+        let Json(value) = latest(State(state)).await;
+        assert_eq!(value["classification"]["motion_level"], "absent");
+        let age = value["age_ms"]
+            .as_f64()
+            .expect("fresh payload carries age_ms");
+        assert!(age < 1000.0, "age_ms was {age}");
+    }
+
+    #[tokio::test]
+    async fn update_older_than_cutoff_is_reported_stale_not_served() {
+        let state: SharedState = Arc::new(RwLock::new(AppStateInner::minimal()));
+        let old = now_s() - (LATEST_UPDATE_STALE_AFTER.as_secs_f64() + 60.0);
+        state.write().await.latest_update = Some(update_at(old));
+        let Json(value) = latest(State(state)).await;
+        assert_eq!(value["status"], "stale");
+        assert!(value["age_ms"].as_f64().unwrap() > LATEST_UPDATE_STALE_AFTER.as_millis() as f64);
+        assert!(
+            value.get("classification").is_none(),
+            "a frozen classification must not be served as current"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_update_yet_is_unchanged() {
+        let state: SharedState = Arc::new(RwLock::new(AppStateInner::minimal()));
+        let Json(value) = latest(State(state)).await;
+        assert_eq!(value["status"], "no data yet");
     }
 }
 
