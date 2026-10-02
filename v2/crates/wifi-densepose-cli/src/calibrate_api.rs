@@ -625,9 +625,16 @@ async fn finalize(
     let path = format!("{output_dir}/{room_id}-{uuid}.bin");
     let bytes = baseline.to_bytes();
     // Async write — never block the ingest task's UDP/command path.
-    tokio::fs::write(&path, &bytes)
-        .await
-        .map_err(|e| format!("cannot write {path}: {e}"))?;
+    if let Err(e) = tokio::fs::write(&path, &bytes).await {
+        let error = format!("cannot write {path}: {e}");
+        let mut shared = status.write().await;
+        if let Some(session) = shared.session.as_mut() {
+            session.state = "aborted".into();
+            session.note = Some(error.clone());
+        }
+        eprintln!("[calibrate-serve] {error}");
+        return Err(error);
+    }
 
     let summary = ResultSummary {
         calibration_id: uuid,
@@ -1023,6 +1030,40 @@ fn unix_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn failed_baseline_write_leaves_a_terminal_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = tier_config("ht20");
+        config.min_frames = 1;
+        let mut recorder = CalibrationRecorder::new(config);
+        let mut packet = vec![0u8; 20 + 52 * 2];
+        packet[..4].copy_from_slice(&0xC511_0001u32.to_le_bytes());
+        packet[5] = 1;
+        packet[6..8].copy_from_slice(&52u16.to_le_bytes());
+        packet[8..12].copy_from_slice(&2432u32.to_le_bytes());
+        recorder.record(&parse_csi_packet(&packet, "ht20").unwrap()).unwrap();
+        let now = Instant::now();
+        let sess = ActiveSession {
+            recorder,
+            room_id: "test".into(),
+            tier: "ht20".into(),
+            started: now,
+            deadline: now,
+            target_frames: 1,
+            z_median: 0.0,
+            z_max: 0.0,
+            motion_flagged: false,
+        };
+        let status = Arc::new(RwLock::new(SharedStatus::default()));
+        let missing = dir.path().join("missing");
+
+        let result = finalize(sess, missing.to_str().unwrap(), &status).await;
+        assert!(result.is_err());
+        let snapshot = status.read().await.session.clone().unwrap();
+        assert_eq!(snapshot.state, "aborted");
+        assert!(snapshot.note.unwrap().contains("cannot write"));
+    }
 
     #[test]
     fn start_params_defaults() {
