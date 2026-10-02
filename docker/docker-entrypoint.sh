@@ -22,6 +22,10 @@
 #                  Default is `auto`. Set CSI_SOURCE=simulated when you want
 #                  fake data tagged as such; never set it implicitly.
 #   MODELS_DIR   — directory to scan for .rvf model files (default: data/models)
+#   RUVIEW_UDP_ALLOW / RUVIEW_UDP_INSECURE_LAN — ADR-296 UDP source guard.
+#                  Setting either makes the entrypoint bind UDP on 0.0.0.0 so
+#                  ESP32 frames on the published 5005/udp port can arrive.
+#   RUVIEW_UDP_BIND — explicit UDP bind; overrides the choice above.
 set -e
 
 # ── Issue #864: fail-closed on default posture ───────────────────────────────
@@ -97,6 +101,48 @@ esac
 # server binary so users can just pass flags:
 #   docker run <image> --source esp32 --tick-ms 500
 if [ "${1#-}" != "$1" ] || [ -z "$1" ]; then
+    # ── Issue #2089: UDP CSI ingest posture inside a container ───────────────
+    # ADR-296 defaults the UDP receiver to 127.0.0.1. Inside a container that
+    # bind can never receive from a published port, so no node ever appears.
+    # We bind 0.0.0.0 only when the operator has configured an ADR-296 guard
+    # (RUVIEW_UDP_ALLOW or RUVIEW_UDP_INSECURE_LAN); without one the server
+    # would refuse a routable bind, so we keep loopback and say why instead.
+    # An explicit RUVIEW_UDP_BIND or --udp-bind always wins.
+    case "${RUVIEW_UDP_INSECURE_LAN:-}" in
+        1|yes|YES|on|ON|TRUE|True) export RUVIEW_UDP_INSECURE_LAN=true ;;
+        0|no|NO|off|OFF|FALSE|False) export RUVIEW_UDP_INSECURE_LAN=false ;;
+    esac
+    __udp_bind_arg=0
+    __udp_guard_arg=0
+    for __arg in "$@"; do
+        case "$__arg" in
+            --udp-bind|--udp-bind=*) __udp_bind_arg=1 ;;
+            --udp-allow|--udp-allow=*|--udp-insecure-lan) __udp_guard_arg=1 ;;
+        esac
+    done
+    if [ -z "${RUVIEW_UDP_BIND:-}" ] && [ "$__udp_bind_arg" = 0 ]; then
+        if [ -n "${RUVIEW_UDP_ALLOW:-}" ] || [ "${RUVIEW_UDP_INSECURE_LAN:-}" = true ] \
+            || [ "$__udp_guard_arg" = 1 ]; then
+            export RUVIEW_UDP_BIND=0.0.0.0
+            echo "[entrypoint] UDP CSI receiver: binding 0.0.0.0 inside the container" >&2
+            echo "[entrypoint]   (a source guard is set: RUVIEW_UDP_ALLOW or RUVIEW_UDP_INSECURE_LAN)." >&2
+        else
+            case "${CSI_SOURCE:-auto}" in
+                simulated|simulate) ;;
+                *)
+                    echo "[entrypoint] NOTE: UDP CSI receiver stays on 127.0.0.1 (ADR-296 default)." >&2
+                    echo "[entrypoint]   Inside a container that bind cannot receive ESP32 frames from" >&2
+                    echo "[entrypoint]   a published 5005/udp port, so no node will appear. To ingest:" >&2
+                    echo "[entrypoint]     -e RUVIEW_UDP_ALLOW=<node-ip-or-cidr>   (restrict sources), or" >&2
+                    echo "[entrypoint]     -e RUVIEW_UDP_INSECURE_LAN=true         (accept spoofing risk)" >&2
+                    echo "[entrypoint]   Docker Desktop/OrbStack on macOS rewrite the source to the bridge" >&2
+                    echo "[entrypoint]   gateway, so the allowlist must name <gateway>/32, not the LAN subnet." >&2
+                    echo "[entrypoint]   See https://github.com/ruvnet/RuView/issues/2089" >&2
+                    ;;
+            esac
+        fi
+    fi
+
     set -- /app/sensing-server \
         --source "${CSI_SOURCE:-auto}" \
         --tick-ms 100 \

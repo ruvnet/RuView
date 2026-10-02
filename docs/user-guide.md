@@ -109,7 +109,7 @@ Multi-architecture image (amd64 + arm64). Works on Intel/AMD and Apple Silicon M
 | `simulated` | Generate synthetic CSI frames (no hardware required) |
 | `wifi` | Host Wi-Fi RSSI (not available inside containers) |
 
-Example: `docker run -e CSI_SOURCE=esp32 -p 3000:3000 -p 5005:5005/udp ruvnet/wifi-densepose:latest`
+Example: `docker run -e RUVIEW_API_TOKEN -e CSI_SOURCE=esp32 -e RUVIEW_UDP_ALLOW=<node-ip-or-cidr> -p 127.0.0.1:3000:3000 -p 5005:5005/udp ruvnet/wifi-densepose:latest`. The container exits with code 64 unless `RUVIEW_API_TOKEN` is set, and receives no ESP32 frames until a UDP source guard is set; see [Receiving ESP32 frames in Docker](#receiving-esp32-frames-in-docker).
 
 ### From Source (Rust)
 
@@ -261,8 +261,9 @@ Non-interactive:
 ### 30-Second Demo (Docker)
 
 ```bash
-# Pull and run
-docker run -p 3000:3000 -p 3001:3001 ruvnet/wifi-densepose:latest
+# Pull and run (the container exits with code 64 without an API token)
+export RUVIEW_API_TOKEN=$(openssl rand -hex 32)
+docker run -p 127.0.0.1:3000:3000 -p 127.0.0.1:3001:3001 -e RUVIEW_API_TOKEN ruvnet/wifi-densepose:latest
 
 # Open the UI in your browser
 # http://localhost:3000
@@ -365,10 +366,38 @@ Real Channel State Information at 20 Hz with 56-192 subcarriers. Required for po
 ./target/release/sensing-server --source esp32 --udp-port 5005 --http-port 3000 --ws-port 3001
 
 # Docker (use CSI_SOURCE environment variable)
-docker run -p 3000:3000 -p 3001:3001 -p 5005:5005/udp -e CSI_SOURCE=esp32 ruvnet/wifi-densepose:latest
+docker run -p 127.0.0.1:3000:3000 -p 127.0.0.1:3001:3001 -p 5005:5005/udp \
+  -e RUVIEW_API_TOKEN -e CSI_SOURCE=esp32 -e RUVIEW_UDP_ALLOW=<node-ip-or-cidr> \
+  ruvnet/wifi-densepose:latest
 ```
 
 The ESP32 nodes stream binary CSI frames over UDP to port 5005. See [Hardware Setup](#esp32-s3-mesh) for flashing instructions.
+
+#### Receiving ESP32 frames in Docker
+
+The sensing server binds its UDP receiver to `127.0.0.1` by default (ADR-296). Inside a container that address cannot receive anything from a published `5005/udp` port, so no node ever appears. The image's entrypoint binds UDP on `0.0.0.0` only when you set a source guard, and prints a note at startup when you have not:
+
+| Variable | Effect |
+|----------|--------|
+| `RUVIEW_API_TOKEN` | Required. Without it (or `RUVIEW_ALLOW_UNAUTHENTICATED=1`) the container exits with code 64. |
+| `RUVIEW_UDP_ALLOW=<ip-or-cidr>` | Accept frames only from these sources. Preferred. |
+| `RUVIEW_UDP_INSECURE_LAN=true` | Accept frames from any source. The UDP data plane is not authenticated, so only use this on a trusted network. |
+| `RUVIEW_UDP_BIND` | Explicit UDP bind address. Overrides the entrypoint's choice. |
+| `SENSING_ALLOWED_HOSTS=<host-ip>` | Needed to open the UI from another machine; otherwise the server answers 421. That also requires publishing the TCP ports beyond `127.0.0.1`. |
+
+**macOS (Docker Desktop, OrbStack):** datagrams reach the container from the Docker bridge gateway, not from the node's LAN address, so an allowlist that names your LAN subnet drops every frame. Allow the gateway instead:
+
+```bash
+export RUVIEW_API_TOKEN=$(openssl rand -hex 32)
+GW=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
+docker run --rm -d --name ruview \
+  -p 127.0.0.1:3000:3000 -p 127.0.0.1:3001:3001 -p 5005:5005/udp \
+  -e RUVIEW_API_TOKEN -e CSI_SOURCE=esp32 -e RUVIEW_UDP_ALLOW="$GW/32" \
+  ruvnet/wifi-densepose:latest
+curl -s -H "Authorization: Bearer $RUVIEW_API_TOKEN" localhost:3000/api/v1/nodes
+```
+
+Allowing the gateway admits anything that can reach the published port, so keep `5005/udp` off untrusted networks. Node identity still comes from the frame payload. With Docker Compose the service runs on the project network (`<project>_default`), so inspect that network's gateway rather than `bridge`. Docker Desktop on Windows has a related source-address problem; see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ### ESP32 Multistatic Mesh (Advanced)
 
@@ -407,12 +436,16 @@ cargo run -p wifi-densepose-sensing-server -- \
 
 # Docker
 docker run --rm \
+  -e RUVIEW_API_TOKEN \
   -e CSI_SOURCE=esp32 \
-  -p 3000:3000 \
-  -p 3001:3001 \
+  -e RUVIEW_UDP_ALLOW=<node-ip-or-cidr> \
+  -p 127.0.0.1:3000:3000 \
+  -p 127.0.0.1:3001:3001 \
   -p 5005:5005/udp \
   ruvnet/wifi-densepose:latest
 ```
+
+On macOS Docker the allowlist must name the bridge gateway; see [Receiving ESP32 frames in Docker](#receiving-esp32-frames-in-docker).
 
 Open the UI from the sensing server, not from a local file:
 
@@ -2047,8 +2080,10 @@ Binary size: 990 KB (8MB flash, 52% free) or 773 KB (4MB flash). v0.5.0 adds mmW
 # From source
 ./target/release/sensing-server --source esp32 --udp-port 5005 --http-port 3000 --ws-port 3001
 
-# Docker (use CSI_SOURCE environment variable)
-docker run -p 3000:3000 -p 3001:3001 -p 5005:5005/udp -e CSI_SOURCE=esp32 ruvnet/wifi-densepose:latest
+# Docker (see "Receiving ESP32 frames in Docker" for the UDP source guard)
+docker run -p 127.0.0.1:3000:3000 -p 127.0.0.1:3001:3001 -p 5005:5005/udp \
+  -e RUVIEW_API_TOKEN -e CSI_SOURCE=esp32 -e RUVIEW_UDP_ALLOW=<node-ip-or-cidr> \
+  ruvnet/wifi-densepose:latest
 ```
 
 See [ADR-018](../docs/adr/ADR-018-esp32-dev-implementation.md), [ADR-029](../docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md), and [Tutorial #34](https://github.com/ruvnet/RuView/issues/34).
@@ -2377,12 +2412,16 @@ For production deployments with both Rust and Python services:
 
 ```bash
 cd docker
+export RUVIEW_API_TOKEN=$(openssl rand -hex 32)
+export RUVIEW_UDP_ALLOW=<node-ip-or-cidr>   # macOS Docker: <gateway>/32
 docker compose up
 ```
 
 This starts:
 - Rust sensing server on ports 3000 (HTTP), 3001 (WS), 5005 (UDP)
 - Python legacy server on ports 8080 (HTTP), 8765 (WS)
+
+The sensing server exits with code 64 when `RUVIEW_API_TOKEN` is unset. Without `RUVIEW_UDP_ALLOW` or `RUVIEW_UDP_INSECURE_LAN=true` it starts but receives no ESP32 frames. `docker/docker-compose.yml` passes these variables through from your shell, along with `RUVIEW_UDP_BIND` and `SENSING_ALLOWED_HOSTS`. See [Receiving ESP32 frames in Docker](#receiving-esp32-frames-in-docker).
 
 ---
 
