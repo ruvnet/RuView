@@ -29,6 +29,7 @@ use clap::{Parser, Subcommand};
 pub mod auth;
 pub mod calibrate;
 pub mod calibrate_api;
+pub mod occupancy_readiness;
 #[cfg(feature = "mat")]
 pub mod mat;
 pub mod room;
