@@ -253,6 +253,7 @@ impl Default for Timestamp {
 /// Confidence score in the range [0.0, 1.0].
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "f32"))]
 pub struct Confidence(f32);
 
 impl Confidence {
@@ -295,6 +296,14 @@ impl Confidence {
 
     /// Minimum confidence (0.0).
     pub const MIN: Self = Self(0.0);
+}
+
+impl TryFrom<f32> for Confidence {
+    type Error = CoreError;
+
+    fn try_from(value: f32) -> CoreResult<Self> {
+        Self::new(value)
+    }
 }
 
 impl Default for Confidence {
