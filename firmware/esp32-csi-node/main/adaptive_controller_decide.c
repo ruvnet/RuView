@@ -14,18 +14,35 @@
 void adaptive_controller_decide(const adapt_config_t *cfg,
                                 adapt_state_t current,
                                 const adapt_observation_t *obs,
-                                adapt_decision_t *out)
+                                adapt_decision_t *out,
+                                uint16_t *degraded_recovery_counter)
 {
-    if (cfg == NULL || obs == NULL || out == NULL) {
+    if (cfg == NULL || obs == NULL || out == NULL || degraded_recovery_counter == NULL) {
         return;
     }
     memset(out, 0, sizeof(*out));
     out->new_state   = (uint8_t)current;
     out->new_profile = RV_PROFILE_PASSIVE_LOW_RATE;
 
-    /* Degraded gate: pkt yield collapse or severe coherence loss → DEGRADED. */
+    /* Recovery threshold: how many consecutive healthy ticks before exiting
+     * DEGRADED. Use config value if set, otherwise default to 15 (~3 s at
+     * the 200 ms fast loop). */
+    uint16_t recovery_threshold = cfg->degraded_recovery_ticks > 0
+                                    ? cfg->degraded_recovery_ticks
+                                    : 15;
+
+    /* Degraded gate: pkt yield collapse or severe coherence loss → DEGRADED.
+     *
+     * RuView#1401 fix: if the board is already in DEGRADED and conditions
+     * have recovered (yield >= threshold AND coherence >= 0.20), increment
+     * the recovery counter. Once the counter reaches recovery_threshold
+     * consecutive healthy ticks, transition back to SENSE_IDLE. This
+     * prevents permanent DEGRADED lock-in while avoiding flapping on
+     * intermittent yield drops. */
     if (obs->pkt_yield_per_sec < cfg->min_pkt_yield ||
         obs->node_coherence    < 0.20f) {
+        /* Conditions are bad — enter or stay in DEGRADED. */
+        *degraded_recovery_counter = 0;  /* Reset recovery progress. */
         if (current != ADAPT_STATE_DEGRADED) {
             out->change_state = true;
             out->new_state    = ADAPT_STATE_DEGRADED;
@@ -35,6 +52,28 @@ void adaptive_controller_decide(const adapt_config_t *cfg,
         out->suggested_vital_interval_ms = 2000;
         return;
     }
+
+    /* Conditions are healthy. If we're in DEGRADED, attempt recovery. */
+    if (current == ADAPT_STATE_DEGRADED) {
+        (*degraded_recovery_counter)++;
+        if (*degraded_recovery_counter < recovery_threshold) {
+            /* Not yet enough consecutive healthy ticks — stay DEGRADED
+             * but use a shorter vital interval to surface progress. */
+            out->suggested_vital_interval_ms = 1000;
+            return;
+        }
+        /* Recovery threshold met — exit DEGRADED → SENSE_IDLE. */
+        *degraded_recovery_counter = 0;
+        out->change_state = true;
+        out->new_state    = ADAPT_STATE_SENSE_IDLE;
+        out->change_profile = true;
+        out->new_profile    = RV_PROFILE_PASSIVE_LOW_RATE;
+        out->suggested_vital_interval_ms = 1000;
+        return;
+    }
+
+    /* Not in DEGRADED and conditions are healthy — reset counter. */
+    *degraded_recovery_counter = 0;
 
     /* Anomaly trumps motion. */
     if (obs->anomaly_score >= cfg->anomaly_threshold) {
