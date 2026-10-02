@@ -5,7 +5,8 @@ import { DashboardTab } from './components/DashboardTab.js';
 import { HardwareTab } from './components/HardwareTab.js';
 import { LiveDemoTab } from './components/LiveDemoTab.js';
 import { SensingTab } from './components/SensingTab.js';
-import { NodesTab } from './components/NodesTab.js';import { apiService } from './services/api.service.js';
+import { NodesTab } from './components/NodesTab.js';
+import { apiService } from './services/api.service.js';
 import { wsService } from './services/websocket.service.js';
 import { healthService } from './services/health.service.js';
 import { sensingService } from './services/sensing.service.js';
@@ -161,8 +162,6 @@ class WiFiDensePoseApp {
       this.components.sensing = new SensingTab(sensingContainer);
     }
 
-    // Room Builder tab
-        console.error('Failed to initialize room builder:', error);
     // Node management tab
     const nodesContainer = document.getElementById('nodes');
     if (nodesContainer) {
