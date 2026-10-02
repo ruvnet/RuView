@@ -9702,6 +9702,120 @@ mod node_positions_by_active_id_tests {
     }
 }
 
+/// A node that has not reported for this long is removed from `node_states`.
+/// `/api/v1/nodes` already flags a node `"stale"` after 5 s; this bounds how
+/// long an abandoned or bogus node id is kept at all.
+const NODE_STATES_EVICT_AFTER: Duration = Duration::from_secs(60);
+
+/// How often `node_states_eviction_task` sweeps `node_states`.
+const NODE_STATES_EVICT_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Remove every node silent for `NODE_STATES_EVICT_AFTER` (or that never
+/// reported), log it, and return the evicted ids.
+fn evict_stale_node_states(
+    node_states: &mut HashMap<u8, NodeState>,
+    now: std::time::Instant,
+) -> Vec<u8> {
+    let stale_ids: Vec<u8> = node_states
+        .iter()
+        .filter(|(_, ns)| {
+            ns.last_frame_time
+                .is_none_or(|t| now.saturating_duration_since(t) >= NODE_STATES_EVICT_AFTER)
+        })
+        .map(|(&id, _)| id)
+        .collect();
+    for id in &stale_ids {
+        node_states.remove(id);
+        if telemetry::curated_events_enabled() {
+            info!(name: semconv::EVENT_RUVIEW_NODE_OFFLINE, { "ruview.node.id" = *id }, "node {id} offline (no frames for 60s)");
+        }
+    }
+    if !stale_ids.is_empty() {
+        info!(
+            "Evicted {} stale node(s), {} active",
+            stale_ids.len(),
+            node_states.len()
+        );
+    }
+    stale_ids
+}
+
+/// Periodic eviction independent of frame arrival. The in-path eviction in
+/// `udp_receiver_task` only runs while ESP32 frames keep coming, so after a
+/// burst of bogus node ids (or when every node goes quiet) the entries were
+/// never removed and stayed listed in `/api/v1/nodes` for the life of the
+/// process.
+async fn node_states_eviction_task(state: SharedState) {
+    let mut interval = tokio::time::interval(NODE_STATES_EVICT_INTERVAL);
+    loop {
+        interval.tick().await;
+        let mut s = state.write().await;
+        evict_stale_node_states(&mut s.node_states, std::time::Instant::now());
+    }
+}
+
+#[cfg(test)]
+mod node_states_eviction_tests {
+    use super::*;
+
+    fn seen(secs_ago: u64, now: std::time::Instant) -> NodeState {
+        let mut ns = NodeState::new();
+        ns.last_frame_time = Some(now - Duration::from_secs(secs_ago));
+        ns
+    }
+
+    #[test]
+    fn silent_and_never_reported_nodes_are_evicted_fresh_ones_kept() {
+        let now = std::time::Instant::now();
+        let mut nodes: HashMap<u8, NodeState> = HashMap::new();
+        nodes.insert(1, seen(5, now));
+        nodes.insert(2, seen(NODE_STATES_EVICT_AFTER.as_secs() + 1, now));
+        let mut never = NodeState::new();
+        never.last_frame_time = None;
+        nodes.insert(3, never);
+
+        let mut evicted = evict_stale_node_states(&mut nodes, now);
+        evicted.sort_unstable();
+        assert_eq!(evicted, vec![2, 3]);
+        assert_eq!(nodes.keys().copied().collect::<Vec<_>>(), vec![1]);
+    }
+
+    #[test]
+    fn a_255_node_burst_drains_completely() {
+        let now = std::time::Instant::now();
+        let mut nodes: HashMap<u8, NodeState> = HashMap::new();
+        for id in 1..=255u8 {
+            nodes.insert(id, seen(NODE_STATES_EVICT_AFTER.as_secs() + 1, now));
+        }
+        assert_eq!(evict_stale_node_states(&mut nodes, now).len(), 255);
+        assert!(nodes.is_empty());
+    }
+
+    /// The sweep runs on its own timer: stale nodes go away with no frame
+    /// arriving at all, which the receive-path eviction never did.
+    #[tokio::test]
+    async fn eviction_task_removes_stale_nodes_without_any_incoming_frame() {
+        let state: SharedState = Arc::new(RwLock::new(AppStateInner::minimal()));
+        {
+            let now = std::time::Instant::now();
+            let mut s = state.write().await;
+            s.node_states
+                .insert(9, seen(NODE_STATES_EVICT_AFTER.as_secs() + 5, now));
+        }
+        let task = tokio::spawn(node_states_eviction_task(state.clone()));
+        // The interval's first tick fires immediately; give the task a
+        // moment to take the lock and sweep.
+        for _ in 0..50 {
+            if state.read().await.node_states.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(state.read().await.node_states.is_empty());
+        task.abort();
+    }
+}
+
 // ── UDP receiver task ────────────────────────────────────────────────────────
 
 async fn udp_receiver_task(
@@ -10591,30 +10705,10 @@ async fn udp_receiver_task(
                     s.latest_update = Some(update);
 
                     // Evict stale nodes every 100 ticks to prevent memory leak.
+                    // `node_states_eviction_task` covers the case where frames
+                    // stop arriving and this path never runs again.
                     if tick % 100 == 0 {
-                        let stale = Duration::from_secs(60);
-                        let stale_ids: Vec<u8> = s
-                            .node_states
-                            .iter()
-                            .filter(|(_, ns)| {
-                                !ns.last_frame_time
-                                    .is_some_and(|t| now.duration_since(t) < stale)
-                            })
-                            .map(|(&id, _)| id)
-                            .collect();
-                        for id in &stale_ids {
-                            s.node_states.remove(id);
-                            if telemetry::curated_events_enabled() {
-                                info!(name: semconv::EVENT_RUVIEW_NODE_OFFLINE, { "ruview.node.id" = *id }, "node {id} offline (no frames for 60s)");
-                            }
-                        }
-                        if !stale_ids.is_empty() {
-                            info!(
-                                "Evicted {} stale node(s), {} active",
-                                stale_ids.len(),
-                                s.node_states.len()
-                            );
-                        }
+                        evict_stale_node_states(&mut s.node_states, now);
                     }
                 }
             }
@@ -12330,6 +12424,7 @@ async fn main() {
             udp_allowlist,
         ));
         tokio::spawn(broadcast_tick_task(state.clone(), args.tick_ms));
+        tokio::spawn(node_states_eviction_task(state.clone()));
     }
     if plan.run_wifi {
         tokio::spawn(wifi_task(state.clone(), args.tick_ms));
