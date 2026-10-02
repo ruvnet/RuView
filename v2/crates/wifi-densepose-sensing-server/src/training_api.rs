@@ -4,8 +4,9 @@
 //! Training runs in a background tokio task. Progress updates are broadcast via
 //! a `tokio::sync::broadcast` channel that the WebSocket handler subscribes to.
 //!
-//! Uses a **real training pipeline** that loads recorded CSI data from `.csi.jsonl`
-//! files, extracts signal features (subcarrier variance, temporal gradients, Goertzel
+//! Uses a **real training pipeline** that loads recorded CSI data (the
+//! `sensing_update` recordings the recording endpoint writes, per node, or legacy
+//! flat `.csi.jsonl` lines), extracts signal features (subcarrier variance, temporal gradients, Goertzel
 //! frequency-domain power), trains a regularised linear model via batch gradient
 //! descent, and exports calibrated `.rvf` model containers.
 //!
@@ -51,7 +52,8 @@ use crate::rvf_container::RvfBuilder;
 pub const MODELS_DIR: &str = "data/models";
 
 /// Directory the training loop reads recorded CSI datasets from. Each
-/// `dataset_id` maps to `{RECORDINGS_DIR}/{dataset_id}.csi.jsonl`.
+/// `dataset_id` maps to `{RECORDINGS_DIR}/{dataset_id}.jsonl` (what the
+/// recording endpoint writes) or, for older datasets, `{dataset_id}.csi.jsonl`.
 pub const RECORDINGS_DIR: &str = "data/recordings";
 
 /// Monotonic per-process counter appended to exported model filenames so two
@@ -107,6 +109,11 @@ pub struct RecordedFrame {
     pub noise_floor: f64,
     #[serde(default)]
     pub features: serde_json::Value,
+    /// Source node. Set for frames read from a multi-node sensing recording;
+    /// `None` for flat `.csi.jsonl` lines and live single-stream history.
+    /// Temporal features never span two different nodes.
+    #[serde(default)]
+    pub node_id: Option<u8>,
 }
 
 /// Training configuration submitted with a start request.
@@ -328,10 +335,100 @@ pub struct FeatureStats {
 
 // ── Data loading ─────────────────────────────────────────────────────────────
 
-/// Load CSI frames from `.csi.jsonl` recording files for the given dataset IDs.
+/// Training frames from one line of a recording.
 ///
-/// Each dataset_id maps to a file at `data/recordings/{dataset_id}.csi.jsonl`.
-/// If a file does not exist, it is silently skipped.
+/// Two layouts are accepted:
+/// - a flat `RecordedFrame` (`{timestamp, subcarriers, ...}`), the legacy
+///   `.csi.jsonl` schema;
+/// - a `sensing_update` broadcast, which is what `POST /api/v1/recording/start`
+///   actually writes. It carries every node's latest amplitudes under `nodes[]`
+///   and per-node features under `node_features[]`.
+///
+/// Each broadcast is a snapshot of all nodes, so a node yields a frame only when
+/// its amplitude vector changed since the previous line (`last_amps`), i.e.
+/// when it delivered a new CSI frame. Nodes without amplitudes (vitals-only
+/// lines, suppressed raw output) are skipped.
+fn frames_from_recording_line(
+    line: &serde_json::Value,
+    last_amps: &mut std::collections::HashMap<u8, Vec<f64>>,
+) -> Vec<RecordedFrame> {
+    if line.get("subcarriers").is_some() {
+        return serde_json::from_value::<RecordedFrame>(line.clone())
+            .map(|f| vec![f])
+            .unwrap_or_default();
+    }
+    let Some(nodes) = line.get("nodes").and_then(|n| n.as_array()) else {
+        return Vec::new();
+    };
+    let timestamp = line
+        .get("timestamp")
+        .and_then(|t| t.as_f64())
+        .unwrap_or(0.0);
+    let per_node = line
+        .get("node_features")
+        .and_then(|n| n.as_array())
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let mut frames = Vec::new();
+    for node in nodes {
+        let Some(node_id) = node
+            .get("node_id")
+            .and_then(|v| v.as_u64())
+            .and_then(|v| u8::try_from(v).ok())
+        else {
+            continue;
+        };
+        let amps: Vec<f64> = node
+            .get("amplitude")
+            .and_then(|a| a.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
+            .unwrap_or_default();
+        if amps.is_empty() || last_amps.get(&node_id) == Some(&amps) {
+            continue;
+        }
+        let features = per_node
+            .iter()
+            .find(|f| f.get("node_id").and_then(|v| v.as_u64()) == Some(u64::from(node_id)))
+            .and_then(|f| f.get("features").cloned())
+            .unwrap_or_default();
+        frames.push(RecordedFrame {
+            timestamp,
+            subcarriers: amps.clone(),
+            rssi: node.get("rssi_dbm").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            noise_floor: 0.0,
+            features,
+            node_id: Some(node_id),
+        });
+        last_amps.insert(node_id, amps);
+    }
+    frames
+}
+
+/// Parse a whole recording into training frames, grouped per node.
+///
+/// Frames are stable-sorted by node so each node's frames are contiguous and in
+/// time order; `extract_features_and_targets` never lets a temporal window or
+/// gradient span two nodes.
+fn frames_from_recording(data: &str) -> (Vec<RecordedFrame>, u64, u64) {
+    let mut frames = Vec::new();
+    let mut last_amps = std::collections::HashMap::new();
+    let (mut line_count, mut parse_errors) = (0u64, 0u64);
+    for line in data.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        line_count += 1;
+        match serde_json::from_str::<serde_json::Value>(line) {
+            Ok(v) => frames.extend(frames_from_recording_line(&v, &mut last_amps)),
+            Err(_) => parse_errors += 1,
+        }
+    }
+    frames.sort_by_key(|f| f.node_id);
+    (frames, line_count, parse_errors)
+}
+
+/// Load training frames for the given dataset IDs.
+///
+/// Each dataset_id maps to `data/recordings/{dataset_id}.jsonl` (written by the
+/// recording endpoint) or, for older datasets, `{dataset_id}.csi.jsonl`.
+/// If neither file exists, the dataset is skipped with a warning.
 async fn load_recording_frames(dataset_ids: &[String]) -> Vec<RecordedFrame> {
     let mut all_frames = Vec::new();
     let recordings_dir = PathBuf::from(RECORDINGS_DIR);
@@ -348,33 +445,24 @@ async fn load_recording_frames(dataset_ids: &[String]) -> Vec<RecordedFrame> {
                 continue;
             }
         };
-        let file_path = recordings_dir.join(format!("{safe}.csi.jsonl"));
-        let data = match tokio::fs::read_to_string(&file_path).await {
-            Ok(d) => d,
-            Err(e) => {
-                warn!("Could not read recording {}: {e}", file_path.display());
-                continue;
-            }
-        };
-
-        let mut line_count = 0u64;
-        let mut parse_errors = 0u64;
-        for line in data.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            line_count += 1;
-            match serde_json::from_str::<RecordedFrame>(line) {
-                Ok(frame) => all_frames.push(frame),
-                Err(_) => parse_errors += 1,
+        let mut data = None;
+        for name in [format!("{safe}.jsonl"), format!("{safe}.csi.jsonl")] {
+            if let Ok(d) = tokio::fs::read_to_string(recordings_dir.join(&name)).await {
+                data = Some(d);
+                break;
             }
         }
+        let Some(data) = data else {
+            warn!("Could not read recording {id}: no {safe}.jsonl or {safe}.csi.jsonl");
+            continue;
+        };
 
+        let (frames, line_count, parse_errors) = frames_from_recording(&data);
         info!(
             "Loaded recording {id}: {line_count} lines, {} frames, {parse_errors} parse errors",
-            all_frames.len()
+            frames.len()
         );
+        all_frames.extend(frames);
     }
 
     all_frames
@@ -389,6 +477,7 @@ fn frames_from_history(history: &[Vec<f64>]) -> Vec<RecordedFrame> {
         .iter()
         .enumerate()
         .map(|(i, amplitudes)| RecordedFrame {
+            node_id: None,
             timestamp: i as f64 * 0.1, // approximate 10 fps
             subcarriers: amplitudes.clone(),
             rssi: -50.0,
@@ -787,8 +876,17 @@ fn extract_features_and_targets(
         } else {
             0
         };
-        let window: Vec<&RecordedFrame> = frames[start..i].iter().collect();
-        let prev = if i > 0 { Some(&frames[i - 1]) } else { None };
+        // Temporal context only from the same node: a gradient or variance
+        // across two different nodes' amplitudes is meaningless.
+        let window: Vec<&RecordedFrame> = frames[start..i]
+            .iter()
+            .filter(|f| f.node_id == frame.node_id)
+            .collect();
+        let prev = if i > 0 && frames[i - 1].node_id == frame.node_id {
+            Some(&frames[i - 1])
+        } else {
+            None
+        };
 
         let feats = extract_features_for_frame(frame, &window, prev, sample_rate_hz);
         let targets = compute_teacher_targets(frame, prev);
@@ -1529,6 +1627,7 @@ pub fn infer_pose_from_model(
 
     // Build a synthetic RecordedFrame for the feature extractor.
     let current_frame = RecordedFrame {
+        node_id: None,
         timestamp: 0.0,
         subcarriers: raw_subcarriers.to_vec(),
         rssi: -50.0,
@@ -1537,6 +1636,7 @@ pub fn infer_pose_from_model(
     };
 
     let prev_frame = prev_subcarriers.map(|subs| RecordedFrame {
+        node_id: None,
         timestamp: -0.1,
         subcarriers: subs.to_vec(),
         rssi: -50.0,
@@ -1551,6 +1651,7 @@ pub fn infer_pose_from_model(
         .take(VARIANCE_WINDOW)
         .rev()
         .map(|amps| RecordedFrame {
+            node_id: None,
             timestamp: 0.0,
             subcarriers: amps.clone(),
             rssi: -50.0,
@@ -1955,6 +2056,93 @@ pub fn routes() -> Router<AppState> {
 }
 
 #[cfg(test)]
+mod recording_format_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// One line in the shape `POST /api/v1/recording/start` writes: a
+    /// `sensing_update` snapshot of every node.
+    fn update_line(t: f64, nodes: &[(u8, Vec<f64>)]) -> String {
+        json!({
+            "type": "sensing_update",
+            "timestamp": t,
+            "nodes": nodes.iter().map(|(id, amp)| json!({
+                "node_id": id, "rssi_dbm": -50.0 - f64::from(*id), "amplitude": amp
+            })).collect::<Vec<_>>(),
+            "node_features": nodes.iter().map(|(id, _)| json!({
+                "node_id": id, "features": { "variance": f64::from(*id) }
+            })).collect::<Vec<_>>(),
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn sensing_update_recording_yields_per_node_frames() {
+        let data = [
+            update_line(1.0, &[(1, vec![1.0, 2.0]), (2, vec![9.0, 9.0])]),
+            // Node 2 delivered nothing new: its snapshot repeats.
+            update_line(1.1, &[(1, vec![1.5, 2.5]), (2, vec![9.0, 9.0])]),
+            // A vitals-only node with no amplitudes is skipped.
+            update_line(1.2, &[(1, vec![1.6, 2.6]), (3, vec![])]),
+        ]
+        .join("\n");
+        let (frames, lines, errors) = frames_from_recording(&data);
+        assert_eq!((lines, errors), (3, 0));
+        let ids: Vec<_> = frames.iter().map(|f| f.node_id).collect();
+        assert_eq!(
+            ids,
+            vec![Some(1), Some(1), Some(1), Some(2)],
+            "grouped per node, no repeats"
+        );
+        assert_eq!(frames[3].subcarriers, vec![9.0, 9.0]);
+        assert_eq!(frames[3].rssi, -52.0);
+        assert_eq!(frames[3].features["variance"], 2.0);
+        assert_eq!(frames[1].timestamp, 1.1);
+    }
+
+    #[test]
+    fn legacy_flat_csi_jsonl_still_loads() {
+        let data = r#"{"timestamp":0.5,"subcarriers":[1.0,2.0,3.0],"rssi":-40.0}"#;
+        let (frames, _, errors) = frames_from_recording(data);
+        assert_eq!(errors, 0);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].node_id, None);
+        assert_eq!(frames[0].subcarriers, vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn malformed_lines_are_counted_not_fatal() {
+        let data = format!("not json\n{}", update_line(1.0, &[(1, vec![1.0])]));
+        let (frames, lines, errors) = frames_from_recording(&data);
+        assert_eq!((frames.len(), lines, errors), (1, 2, 1));
+    }
+
+    #[test]
+    fn temporal_features_never_span_two_nodes() {
+        let lines: Vec<String> = (0..12)
+            .map(|i| {
+                let t = f64::from(i) * 0.1;
+                update_line(t, &[(1, vec![t, t + 1.0]), (2, vec![100.0 + t, 50.0 - t])])
+            })
+            .collect();
+        let (frames, _, _) = frames_from_recording(&lines.join("\n"));
+        let first_node2 = frames.iter().position(|f| f.node_id == Some(2)).unwrap();
+        assert!(first_node2 > 0);
+        let (features, _, stats) = extract_features_and_targets(&frames, 10.0);
+        // The first node-2 frame must see no previous frame and an empty window,
+        // exactly as if it started the recording. Features come back z-scored.
+        let isolated: Vec<f64> = extract_features_for_frame(&frames[first_node2], &[], None, 10.0)
+            .iter()
+            .enumerate()
+            .map(|(j, v)| (v - stats.mean[j]) / stats.std[j])
+            .collect();
+        for (got, want) in features[first_node2].iter().zip(&isolated) {
+            assert!((got - want).abs() < 1e-9, "{got} != {want}");
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -2078,6 +2266,7 @@ mod tests {
     #[test]
     fn extract_features_produces_correct_length() {
         let frame = RecordedFrame {
+            node_id: None,
             timestamp: 1.0,
             subcarriers: vec![1.0; 56],
             rssi: -50.0,
@@ -2091,6 +2280,7 @@ mod tests {
     #[test]
     fn teacher_targets_produce_51_values() {
         let frame = RecordedFrame {
+            node_id: None,
             timestamp: 1.0,
             subcarriers: vec![5.0; 56],
             rssi: -50.0,
