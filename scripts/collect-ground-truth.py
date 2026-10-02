@@ -113,21 +113,40 @@ def ensure_model(cache_dir: Path) -> Path:
     return model_path
 
 
-def post_json(url: str, payload: dict | None = None, timeout: float = 5.0) -> bool:
-    """POST JSON to a URL. Returns True on success, False on failure."""
+def load_api_token(token_file: str | None) -> str | None:
+    """Bearer token for the sensing server: --token-file, else RUVIEW_API_TOKEN."""
+    if token_file:
+        return Path(token_file).read_text(encoding="utf-8").strip() or None
+    return os.environ.get("RUVIEW_API_TOKEN", "").strip() or None
+
+
+def post_json(
+    url: str,
+    payload: dict | None = None,
+    token: str | None = None,
+    timeout: float = 5.0,
+) -> bool:
+    """POST JSON to a sensing-server endpoint.
+
+    Returns True only when the server accepted the request. The recording
+    endpoints answer HTTP 200 with ``{"success": false, "error": ...}`` for
+    refusals such as "recording already in progress", so the body is checked.
+    """
     data = json.dumps(payload or {}).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return 200 <= resp.status < 300
+            body = json.loads(resp.read() or b"{}")
     except Exception as exc:
         print(f"WARNING: POST {url} failed: {exc}", file=sys.stderr)
         return False
+    if body.get("success") is False:
+        print(f"WARNING: POST {url} refused: {body.get('error')}", file=sys.stderr)
+        return False
+    return True
 
 
 def draw_skeleton(frame: np.ndarray, keypoints: list[list[float]], w: int, h: int):
@@ -185,7 +204,20 @@ def main():
         "(ADR-152 S2.1.3); adds room-frame keypoint rays + transceiver geometry "
         "to every record",
     )
+    parser.add_argument(
+        "--token-file",
+        default=None,
+        help="File holding the sensing-server API bearer token "
+        "(default: the RUVIEW_API_TOKEN environment variable)",
+    )
+    parser.add_argument(
+        "--allow-no-csi",
+        action="store_true",
+        help="Keep capturing camera keypoints even if the CSI recording cannot "
+        "be started (the output is then unpaired and useless for training)",
+    )
     args = parser.parse_args()
+    api_token = load_api_token(args.token_file)
 
     if not args.calibration:
         print(
@@ -248,24 +280,35 @@ def main():
     )
     landmarker = PoseLandmarker.create_from_options(options)
 
-    # --- Output file ---
+    # --- Start CSI recording (named after the keypoints file so they pair) ---
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    recording_id = f"gt_{timestamp_str}"
+    recording_url_start = f"{args.server}/api/v1/recording/start"
+    recording_url_stop = f"{args.server}/api/v1/recording/stop"
+    csi_started = post_json(recording_url_start, {"id": recording_id}, api_token)
+    if csi_started:
+        print(f"CSI recording '{recording_id}' started on sensing server.")
+    elif args.allow_no_csi:
+        print(
+            "WARNING: Could not start CSI recording; capturing unpaired "
+            "camera keypoints (--allow-no-csi).",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "ERROR: Could not start CSI recording, so keypoints would have no "
+            "CSI to pair with. Check the server URL and RUVIEW_API_TOKEN / "
+            "--token-file, or pass --allow-no-csi.",
+            file=sys.stderr,
+        )
+        cap.release()
+        landmarker.close()
+        sys.exit(1)
+
+    # --- Output file ---
     out_path = output_dir / f"keypoints_{timestamp_str}.jsonl"
     out_file = open(out_path, "w", encoding="utf-8")
     print(f"Output: {out_path}")
-
-    # --- Start CSI recording ---
-    recording_url_start = f"{args.server}/api/v1/recording/start"
-    recording_url_stop = f"{args.server}/api/v1/recording/stop"
-    csi_started = post_json(recording_url_start)
-    if csi_started:
-        print("CSI recording started on sensing server.")
-    else:
-        print(
-            "WARNING: Could not start CSI recording. "
-            "Camera keypoints will still be captured.",
-            file=sys.stderr,
-        )
 
     # --- Graceful shutdown ---
     shutdown_requested = False
@@ -369,7 +412,7 @@ def main():
 
         # Stop CSI recording
         if csi_started:
-            if post_json(recording_url_stop):
+            if post_json(recording_url_stop, token=api_token):
                 print("CSI recording stopped.")
             else:
                 print("WARNING: Failed to stop CSI recording.", file=sys.stderr)
