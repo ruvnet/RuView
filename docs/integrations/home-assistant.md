@@ -33,59 +33,82 @@ cargo run --release -p wifi-densepose-sensing-server \
     --mqtt-username homeassistant
 ```
 
-Within ~5 seconds of starting, Home Assistant should auto-create:
+Within ~5 seconds of the first CSI frame, Home Assistant should auto-create:
 
-- One **device** per RuView node (named after the MAC or the `friendly_name` from your zones config)
-- 17+ **entities** per device (presence, person count, heart rate, breathing rate, motion, fall events, signal strength, zones, and the 10 semantic primitives)
+- One **device** per RuView node, named `RuView node <client-id>-node<N>` (see [Device identity](#device-identity))
+- **15 entities** per device (13 with `--privacy-mode`): the raw signals and six semantic primitives listed in the [Entity reference](#entity-reference)
 
 If nothing appears in HA's Settings → Devices, see [Troubleshooting](#troubleshooting).
 
 ### 3. Stop the publisher cleanly
 
-Ctrl-C — the publisher pushes `offline` to every availability topic before disconnect so HA marks all entities unavailable instantly. A `kill -9` triggers MQTT LWT, which has the same effect within ~30 s.
+Ctrl-C (SIGINT/SIGTERM) stops the server. It does **not** publish `offline` first, and no MQTT last-will is registered, so every availability topic keeps its last retained value until the server starts again (MEASURED: no availability message in the last 6 s of a SIGTERM'd run, see [ADR-115 §11](../adr/ADR-115-home-assistant-integration.md#11-status-note-p45-semantic-states-on-the-live-publisher-2026-10-02)). While the server runs, a node that stops sending frames goes `offline` at the next 30 s availability heartbeat.
 
 ---
 
 ## Entity reference
 
-RuView publishes three classes of entity. Names below are the `unique_id` slugs — Home Assistant assigns friendly names automatically.
+Names below are the `unique_id` slugs; Home Assistant assigns friendly names automatically. Every entity has its own availability topic (`…/<slug>/availability`, retained). An entity is `online` only while the server has a real source for it. Otherwise it is `offline`, no state is published, and Home Assistant shows **unavailable** rather than a made-up value.
 
-### Raw signals (11 entities)
+### Raw signals (9 entities)
 
-| HA entity | Slug | HA component | Unit | Source field |
+| HA entity | Slug | HA component | Unit | Source | Available when |
+|---|---|---|---|---|---|
+| Presence | `presence` | `binary_sensor` | — | `nodes[].node_inference.classification != "absent"` | always |
+| Person count | `person_count` | `sensor` | persons | `persons[]` length, else `estimated_persons` (room-level, same on every node) | always |
+| Motion level | `motion_level` | `sensor` | % | node classification: `present_moving` = 100, `present_still`/`absent` = 0 | always |
+| Presence score | `presence_score` | `sensor` | % | node classification confidence × 100 while present, else 0 | always |
+| Motion energy | `motion_energy` | `sensor` | (dimensionless) | `node_features[].features.motion_band_power`, else the room `features.motion_band_power` | a band-power value was seen in the last 30 s |
+| Signal strength | `rssi` | `sensor` | dBm | `nodes[].rssi_dbm` | an RSSI was seen in the last 30 s |
+| Heart rate | `heart_rate` | `sensor` | bpm | `vital_signs.heart_rate_bpm` (room-level) | a published estimate in the last 30 s |
+| Breathing rate | `breathing_rate` | `sensor` | bpm | `vital_signs.breathing_rate_bpm` (room-level) | a published estimate in the last 30 s |
+| Fall detected | `fall` | `event` | — | rising edge of the node's `edge_vitals.fall_detected` | the node sent `edge_vitals` in the last 30 s |
+
+The server publishes heart and breathing rate only after explicit calibration, with exactly one occupant and a passing quality gate. Until then both entities stay unavailable. Heart rate and breathing rate are **biometric**: `--privacy-mode` removes them from discovery and state (see [Privacy](#privacy)).
+
+### Semantic automation primitives (6 entities)
+
+Small finite-state machines run inside the server, one set per node, sampled once per second ([ADR-115 §3.12](../adr/ADR-115-home-assistant-integration.md#312-semantic-automation-primitives-ha-mind), P4.5). All of them are unavailable for the first 60 s after start (warmup). After that each publishes its current state, then on every change.
+
+| HA entity | Slug | HA component | What it fires on | Available when |
 |---|---|---|---|---|
-| Presence | `presence` | `binary_sensor` | — | `edge_vitals.presence` |
-| Person count | `person_count` | `sensor` | persons | `edge_vitals.n_persons` |
-| Heart rate | `heart_rate` | `sensor` | bpm | `edge_vitals.heartrate_bpm` |
-| Breathing rate | `breathing_rate` | `sensor` | bpm | `edge_vitals.breathing_rate_bpm` |
-| Motion level | `motion_level` | `sensor` | % | `edge_vitals.motion` × 100 |
-| Motion energy | `motion_energy` | `sensor` | (dimensionless) | `edge_vitals.motion_energy` |
-| Fall detected | `fall` | `event` | — | `edge_vitals.fall_detected` |
-| Presence score | `presence_score` | `sensor` | % | `edge_vitals.presence_score` × 100 |
-| Signal strength | `rssi` | `sensor` | dBm | `edge_vitals.rssi` |
-| Zone occupancy | `zone_occupancy` | `binary_sensor` | — | `sensing_update.zones` |
-| Pose keypoints | `pose` | `sensor` (attrs) | — | `pose_data.keypoints` (opt-in via `--mqtt-publish-pose`) |
+| Room active | `room_active` | `binary_sensor` | presence + motion >10% within a 30 s window; off after 10 min idle | after warmup |
+| No movement (safety) | `no_movement` | `binary_sensor` | presence + motion <1% for 30 min | after warmup |
+| Elderly inactivity anomaly | `elderly_inactivity_anomaly` | `binary_sensor` | stillness > 2× the longest stillness seen since start (floor 30 min) | after warmup |
+| Someone sleeping | `someone_sleeping` | `binary_sensor` | presence + motion <5% + BR ∈ [8,20] bpm for 5 min | after warmup, while breathing rate is available |
+| Possible distress | `possible_distress` | `binary_sensor` | HR ≥ 1.5× resting baseline + motion >20% + no fall, for 60 s | after warmup, while heart rate is available |
+| Fall risk elevated | `fall_risk_elevated` | `sensor` | 0–100 score: 10 per fall in 24 h + 50 × motion variance over 60 s | after warmup, while the fall detector is available |
 
-Heart rate, breathing rate, and pose are **biometric** entities — they are stripped from MQTT (and never published over Matter) when `--privacy-mode` is set. See [Privacy](#privacy) below.
+Per-node motion is a three-level classification, so the motion thresholds above effectively mean "moving" or "not moving". The precision and recall figures in [`semantic-primitives-metrics.md`](./semantic-primitives-metrics.md) are CLAIMED: the replay tooling they cite is not in the repository. No `reason` attribute is published yet; the explanation tags stay server-side.
 
-### Semantic automation primitives (10 entities)
+### Not announced
 
-These are the inferred high-level states that customer automations actually use. Each one is a small finite-state machine running server-side with explicit warmup, hysteresis, and refractory windows. Per-primitive precision/recall is published in [`semantic-primitives-metrics.md`](./semantic-primitives-metrics.md).
+These entities from ADR-115 §3.1 and §3.12 are not announced, because the sensing broadcast has nothing to drive them. Announcing them only produced entities stuck at "unknown" ([#2085](https://github.com/ruvnet/RuView/issues/2085)).
 
-| HA entity | Slug | HA component | What it fires on |
-|---|---|---|---|
-| Someone sleeping | `someone_sleeping` | `binary_sensor` | presence + motion<5% + BR ∈ [8,20] bpm sustained for 5 min |
-| Possible distress | `possible_distress` | `binary_sensor` | HR > 1.5× baseline + motion >20% + no fall, sustained 60 s |
-| Room active | `room_active` | `binary_sensor` | motion >10% in a 30-s rolling window |
-| Elderly inactivity anomaly | `elderly_inactivity_anomaly` | `binary_sensor` | idle > 2× observed-max-idle baseline |
-| Meeting in progress | `meeting_in_progress` | `binary_sensor` | ≥2 persons + low-amplitude motion for 10 min |
-| Bathroom occupied | `bathroom_occupied` | `binary_sensor` | presence + active zone tagged `bathroom` |
-| Fall risk elevated | `fall_risk_elevated` | `sensor` | 0–100 score; event fires on ≥70 crossing |
-| Bed exit (overnight) | `bed_exit` | `event` | sleeping → presence leaves bed zone between 22:00–06:00 |
-| No movement (safety) | `no_movement` | `binary_sensor` | presence + motion <1% for 30 min |
-| Multi-room transition | `multi_room_transition` | `event` | zone X exit + zone Y enter within 10 s |
+| Slug | Why not |
+|---|---|
+| `zone_occupancy`, `bathroom_occupied`, `bed_exit`, `multi_room_transition` | the broadcast carries no zones, and the server loads no zone-tag map |
+| `meeting_in_progress` | needs a 1–20 % motion level; per-node motion is three-level |
+| `pose` | `pose_keypoints` is never populated on the broadcast, and the `persons[].keypoints` skeletons are synthesized. `--mqtt-publish-pose` is accepted but logs a warning and announces nothing |
 
-Every state change carries a `reason` attribute (e.g. `["motion<5%", "br=12bpm", "presence=true"]`) so you can template against it in HA automations to understand why an automation triggered.
+### Publish rates and retention
+
+| Entity kind | When it publishes | QoS / retain |
+|---|---|---|
+| `presence` and semantic `binary_sensor`s | on change, plus a heartbeat every 60 s if unchanged | 1 / retained |
+| `person_count`, `motion_level`, `motion_energy`, `presence_score`, `fall_risk_elevated` | at most `--mqtt-rate-motion` / `--mqtt-rate-count` (default 1 Hz) | 0 / not retained |
+| `heart_rate`, `breathing_rate` | at most `--mqtt-rate-vitals` (default 0.2 Hz) | 0 / not retained |
+| `rssi` | at most `--mqtt-rate-rssi` (default 0.1 Hz) | 0 / not retained |
+| `fall` | once per detected fall | 1 / not retained |
+| availability | on every transition, and all topics every 30 s | 1 / retained |
+
+Before [#2093](https://github.com/ruvnet/RuView/issues/2093), `presence` was published on every CSI frame (MEASURED 37.9 msg/s with one node, 1 msg per ~45 s after the fix; see [ADR-115 §11](../adr/ADR-115-home-assistant-integration.md#11-status-note-p45-semantic-states-on-the-live-publisher-2026-10-02)).
+
+### Device identity
+
+Each node's HA device id is `wifi_densepose_<client-id>-node<N>`, where `<N>` is the node id from the CSI frames. Without `--mqtt-client-id`, the server creates `wifi-densepose-<8 hex digits>` on first start and keeps it in `<data-dir>/mqtt_client_id`, so device ids survive restarts. Keep `--data-dir` on persistent storage (a Docker volume, for example). If the file cannot be written, the server logs a warning and falls back to a per-process id for that run. `--mqtt-client-id` overrides the persisted id. Use it to pin ids across reinstalls or to run two servers against one broker.
+
+Releases before this change used `wifi-densepose-<pid>`, so every restart created a new set of devices. To remove the leftovers, publish an empty retained message to each stale `homeassistant/+/wifi_densepose_<old-id>…/+/config` topic, or delete the devices in Home Assistant.
 
 ### Matter device-type mapping
 
@@ -115,7 +138,7 @@ Per ADR-115 §3.11.1, the Matter Bridge exposes a subset on standard clusters so
 | `--mqtt-port <PORT>` | 1883 (8883 with TLS) | Broker port |
 | `--mqtt-username <U>` | — | Username for broker auth |
 | `--mqtt-password-env <VAR>` | `MQTT_PASSWORD` | Env var holding the password |
-| `--mqtt-client-id <ID>` | `wifi-densepose-<hostname>` | MQTT client ID |
+| `--mqtt-client-id <ID>` | persisted `wifi-densepose-<hex>` in `<data-dir>/mqtt_client_id` | MQTT client ID; prefixes every HA device id |
 | `--mqtt-prefix <PREFIX>` | `homeassistant` | Discovery topic prefix |
 | `--mqtt-tls` | off | Encrypt connection |
 | `--mqtt-ca-file <PATH>` | — | Pinned CA for TLS / mTLS |
@@ -126,43 +149,21 @@ Per ADR-115 §3.11.1, the Matter Bridge exposes a subset on standard clusters so
 | `--mqtt-rate-motion <HZ>` | 1.0 | Motion publish rate (Hz) |
 | `--mqtt-rate-count <HZ>` | 1.0 | Person-count publish rate (Hz) |
 | `--mqtt-rate-rssi <HZ>` | 0.1 | RSSI publish rate (Hz) |
-| `--mqtt-publish-pose` | off | Enable pose-keypoint publication |
-| `--mqtt-rate-pose <HZ>` | 1.0 | Pose publish rate when enabled |
+| `--mqtt-publish-pose` | off | Accepted; no pose source exists, so it only logs a warning |
+| `--mqtt-rate-pose <HZ>` | 1.0 | Unused while no pose entity is announced |
 | `--privacy-mode` | off | Strip HR/BR/pose from MQTT and Matter |
+| `--data-dir <DIR>` | `data` | Holds `mqtt_client_id` (and other server state) |
 | `--matter` | off | Enable the HA-FABRIC Matter Bridge |
 | `--matter-setup-file <PATH>` | — | Where to write the QR + manual code |
 | `--matter-reset` | off | Wipe fabric credentials and re-commission |
 | `--matter-vendor-id <VID>` | `0xFFF1` (dev) | CSA-assigned vendor ID |
 | `--matter-product-id <PID>` | `0x8001` | Product ID |
-| `--semantic` | on | Enable inference layer |
-| `--semantic-thresholds-file <PATH>` | — | Per-primitive threshold overrides |
-| `--semantic-zones-file <PATH>` | — | Zone-tag map (`bathroom`, `bedroom`, …) |
-| `--no-semantic <PRIMITIVE>` | — | Disable a specific primitive (repeatable) |
 
-### Zone tag file format
+The `--semantic`, `--semantic-thresholds-file`, `--semantic-zones-file` and `--no-semantic` flags from ADR-115 §3.12.5 are **not accepted by `sensing-server` yet**. The primitives always run with the defaults in `PrimitiveConfig`, and no zone map is loaded.
 
-```yaml
-# semantic-zones.yaml — passed to --semantic-zones-file
-zones:
-  bathroom: ["zone_3", "zone_7"]
-  bedroom:  ["zone_1"]
-  kitchen:  ["zone_2"]
-  living:   ["zone_5"]
-bed_zones: ["zone_1"]
-```
+### Zone tags and threshold overrides (not implemented)
 
-### Threshold overrides
-
-```yaml
-# semantic-thresholds.yaml — passed to --semantic-thresholds-file
-sleep_dwell_secs: 300
-distress_hr_multiple: 1.5
-room_active_motion_threshold: 0.10
-elderly_anomaly_multiple: 2.0
-meeting_min_persons: 2
-no_movement_dwell_secs: 1800
-fall_risk_event_threshold: 70.0
-```
+ADR-115 §3.12.5 specifies a zone-tag file and a threshold-override file. Neither is read by `sensing-server` today, which is why the zone-based primitives are not announced.
 
 ---
 
@@ -170,9 +171,11 @@ fall_risk_event_threshold: 70.0
 
 When deploying in **healthcare**, **AAL (aging-in-place)**, or **commercial** settings, set `--privacy-mode`. This:
 
-- **Strips** heart rate, breathing rate, and pose keypoints from every outbound MQTT publication.
-- **Suppresses discovery** for those entities entirely — HA never even sees they exist.
-- **Keeps every semantic primitive enabled.** Sleeping / distress / room-active / etc are *inferred* states. The inference happens server-side and only the boolean or score crosses the wire. This is the architectural win that makes the platform deployable in regulated contexts.
+- **Strips** heart rate and breathing rate from every outbound MQTT publication (pose is never announced; see [Not announced](#not-announced)).
+- **Suppresses discovery** for those entities entirely: Home Assistant never sees them, and no availability or state topic is published for them.
+- **Keeps the semantic primitives enabled.** `someone_sleeping` and `possible_distress` still use breathing and heart rate *inside the server*; only the ON/OFF state crosses the wire (ADR-115 §3.12.3). If that is too much for your deployment, drop those two entities in Home Assistant.
+
+With `--privacy-mode`, 13 entities are announced per node. Privacy mode reduces what leaves the server. It does not by itself make a deployment compliant with any regulation.
 
 Always pair `--privacy-mode` with `--mqtt-tls` on non-localhost brokers.
 
@@ -210,7 +213,6 @@ action:
       title: "Possible distress detected"
       message: >
         RuView flagged sustained elevated heart rate + agitated motion.
-        Reason: {{ state_attr(trigger.entity_id, 'reason') }}.
 ```
 
 ### 2. Dim hallway when someone is sleeping
@@ -255,6 +257,8 @@ action:
 ```
 
 ### 3. Wake-up routine on bed exit
+
+> `bed_exit` is not published by `sensing-server` today (it needs a bed-zone map; see [Not announced](#not-announced)). This blueprint will not fire until that lands.
 
 ```yaml
 blueprint:
@@ -335,8 +339,8 @@ cards:
     entity: binary_sensor.ruview_kitchen_presence
     name: Kitchen
   - type: tile
-    entity: binary_sensor.ruview_bathroom_occupied
-    name: Bathroom
+    entity: binary_sensor.ruview_bedroom_room_active
+    name: Bedroom active
 ```
 
 ---
@@ -373,6 +377,15 @@ All three accept the same HA discovery topics RuView publishes. Performance and 
    wscat -c ws://localhost:8765/ws/sensing
    ```
 3. Confirm rate limits aren't dropping everything: `--mqtt-rate-vitals 1.0` for diagnosis (default 0.2 Hz = every 5 s).
+4. Unchanged binary states (presence, the semantic primitives) publish once per change and then every 60 s. A flat line in HA history is expected while nothing changes.
+
+### Entity shows "unavailable"
+
+The server has no source for it right now: heart and breathing rate need explicit calibration and a single occupant, `fall` needs a node that sends `edge_vitals`, and the semantic primitives wait 60 s after start (`someone_sleeping` and `possible_distress` also need breathing or heart rate). Check the availability topic with `mosquitto_sub -t 'homeassistant/+/+/<slug>/availability' -v`.
+
+### Duplicate devices after a restart
+
+Older releases derived device ids from the process id. See [Device identity](#device-identity) for how to remove the stale devices; the current default id is persisted in `--data-dir`.
 
 ### "Plaintext MQTT on non-localhost broker" WARN
 
@@ -391,7 +404,7 @@ Per [ADR-115 §3.9](../adr/ADR-115-home-assistant-integration.md#39-tls--auth), 
 
 ## Applications — what people actually do with this
 
-The 21 entities per node — 11 raw signals (presence, person count, breathing, heart rate, motion, RSSI, etc.) and 10 inferred semantic states (someone-sleeping, possible-distress, room-active, elderly-inactivity-anomaly, meeting-in-progress, bathroom-occupied, fall-risk-elevated, bed-exit, no-movement, multi-room-transition) — slot into Home Assistant like any other sensor. The list below groups real-world uses so you can pick the ones that match your space.
+The 15 entities per node (9 raw signals and 6 semantic states, see the [Entity reference](#entity-reference)) slot into Home Assistant like any other sensor. Some uses below rely on entities that are not announced yet (zones, bathroom, bed exit, meeting); those wait on a zone source or a finer motion level. The list below groups real-world uses so you can pick the ones that match your space.
 
 ### Personal & home
 
@@ -495,13 +508,9 @@ A few patterns appear over and over; if you understand these you can build most 
 
 ### What about regulated environments?
 
-Run RuView with `--privacy-mode` and only the 10 inferred semantic states reach Home Assistant — heart rate, breathing rate, and pose values are stripped at the MQTT wire. Per ADR-115 §6, this passes:
+With `--privacy-mode`, heart rate and breathing rate never reach the broker; their entities are not even announced. The semantic states still reach Home Assistant, and two of them (`someone_sleeping`, `possible_distress`) are derived from those vitals inside the server, so their ON/OFF values are themselves health-related information.
 
-- **HIPAA-style minimum-necessary** (no biometric numbers leave the device)
-- **GDPR purpose-limitation** (the inferred states are the smallest dataset that supports the automation)
-- **CCPA "sensitive personal information"** (no health data crosses the wire)
-
-The fall-risk-elevated / possible-distress / someone-sleeping flags still work — they're computed *inside* the sensor pipeline and only the boolean outputs are published. That's the architectural win that makes RuView deployable in care homes, hospitals, schools, and shared-housing scenarios where raw biometrics would be a non-starter.
+Privacy mode narrows what crosses the MQTT wire. It is not a compliance certification, and RuView makes no HIPAA, GDPR or CCPA compliance claim. Whether a deployment meets a regulation depends on the whole system: broker access control and TLS, Home Assistant's recorder retention, who can see the dashboards, consent, and local law. Assess that with whoever is responsible for compliance in your setting.
 
 ## References
 

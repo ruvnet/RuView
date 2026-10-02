@@ -22,24 +22,27 @@
 //!
 //! - [`discovery`] — HA discovery payload generators per entity type
 //! - [`state`]     — per-entity state-message encoders + rate limiter
+//! - [`bridge`]    — sensing-broadcast JSON → [`state::VitalsSnapshot`]
+//! - [`planner`]   — entity → state/availability plan + semantic primitives
 //! - [`publisher`] — connection lifecycle + topic publication
 //! - [`privacy`]   — biometric stripping per `--privacy-mode`
 //! - [`config`]    — `MqttConfig` struct fed by [`crate::cli::Args`]
 //!
 //! ## Cross-protocol coupling
 //!
-//! The semantic inference layer (ADR-115 §3.12, future `crate::semantic`)
-//! emits primitive state changes onto a `tokio::broadcast` channel that
-//! this module also subscribes to. Same channel is consumed by the Matter
-//! Bridge (ADR-115 §3.11, future `crate::matter`), so adding a new
-//! semantic primitive automatically flows to all surfaces.
+//! The semantic inference layer ([`crate::semantic`], ADR-115 §3.12) runs
+//! inside [`planner`], one bus per node, fed by the same snapshots as the
+//! raw entities (ADR-115 P4.5). The Matter bridge (ADR-115 §3.11) does not
+//! consume semantic states yet.
 
+pub mod bridge;
 pub mod config;
 pub mod discovery;
+pub mod planner;
 pub mod privacy;
 pub mod security;
-// State encoders + rate limiter compile without rumqttc, so they're
-// available for testing under `--no-default-features`. Only the
+// State encoders, the bridge and the planner compile without rumqttc, so
+// they're available for testing under `--no-default-features`. Only the
 // publisher itself (which holds the `rumqttc::AsyncClient`) needs the
 // `mqtt` feature.
 pub mod state;

@@ -29,7 +29,8 @@ pub struct MqttArgs {
     #[arg(long, default_value = "MQTT_PASSWORD")]
     pub mqtt_password_env: String,
 
-    /// MQTT client ID (default: wifi-densepose-<pid>)
+    /// MQTT client ID; prefixes every Home Assistant device id (default: a
+    /// `wifi-densepose-<hex>` id persisted in `<data-dir>/mqtt_client_id`)
     #[arg(long, env = "RUVIEW_MQTT_CLIENT_ID")]
     pub mqtt_client_id: Option<String>,
 
