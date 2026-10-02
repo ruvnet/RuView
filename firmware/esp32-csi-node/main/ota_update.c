@@ -217,6 +217,14 @@ static esp_err_t ota_start_server(httpd_handle_t *out_handle)
     config.max_uri_handlers = 12;  /* Extra slots for WASM endpoints (ADR-040). */
     /* Increase receive timeout for large uploads. */
     config.recv_wait_timeout = 30;
+    /* The upload handler runs esp_ota_end() -> esp_image_verify() on THIS
+     * task's stack; with the httpd default (4 KB) that overflows
+     * deterministically at the end of every upload ("stack overflow in task
+     * httpd", panic in vApplicationStackOverflowHook with bootloader_mmap on
+     * the stack) — the transfer completes, validation crashes the node, and
+     * the A/B scheme boots the old image. 12 KB gives the image-verification
+     * path comfortable headroom. */
+    config.stack_size = 12288;
 
     httpd_handle_t server = NULL;
     esp_err_t err = httpd_start(&server, &config);
