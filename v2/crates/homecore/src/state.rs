@@ -172,8 +172,15 @@ impl StateMachine {
 
     /// Remove a state. Fires `state_changed` with `new_state = None`.
     pub fn remove(&self, entity_id: &EntityId) -> Option<Arc<State>> {
-        let removed = self.inner.states.remove(entity_id).map(|(_, s)| s);
-        if let Some(old) = &removed {
+        use dashmap::mapref::entry::Entry;
+        let Entry::Occupied(entry) = self.inner.states.entry(entity_id.clone()) else {
+            return None;
+        };
+        // Publish while holding the same shard lock used by set(). A writer
+        // cannot recreate the entity and publish ahead of this removal.
+        // Readers receiving the event wait for the removal to commit below.
+        {
+            let old = entry.get();
             let event = StateChangedEvent {
                 entity_id: entity_id.clone(),
                 old_state: Some(Arc::clone(old)),
@@ -185,7 +192,7 @@ impl StateMachine {
                 bus.fire_system(SystemEvent::StateChanged(event));
             }
         }
-        removed
+        Some(entry.remove())
     }
 
     /// Snapshot all current states. Allocates a new Vec — useful for
