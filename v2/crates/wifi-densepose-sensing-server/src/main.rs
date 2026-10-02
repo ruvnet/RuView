@@ -129,6 +129,14 @@ struct Args {
     #[arg(long, env = "RUVIEW_UDP_INSECURE_LAN")]
     udp_insecure_lan: bool,
 
+    /// Copy every admitted UDP datagram, unchanged, to these loopback
+    /// `ip:port` targets (comma-separated, repeatable; env `RUVIEW_UDP_TEE`;
+    /// ADR-380). Lets a second consumer read full I/Q and sync packets without
+    /// binding the CSI port. Off by default.
+    /// Example: `--udp-tee 127.0.0.1:5007`.
+    #[arg(long = "udp-tee", value_name = "IP:PORT", env = "RUVIEW_UDP_TEE")]
+    udp_tee: Vec<String>,
+
     /// Path to UI static files (repo `ui/`; from `v2/` use `../ui` or rely on auto-detect)
     #[arg(long, default_value = "../ui")]
     ui_path: PathBuf,
@@ -9709,6 +9717,7 @@ async fn udp_receiver_task(
     bind_ip: std::net::IpAddr,
     udp_port: u16,
     allowlist: std::sync::Arc<wifi_densepose_sensing_server::udp_bind::UdpSourceAllowlist>,
+    tee: Option<std::sync::Arc<wifi_densepose_sensing_server::udp_tee::UdpTee>>,
 ) {
     let addr = format!("{bind_ip}:{udp_port}");
     let socket = match UdpSocket::bind(&addr).await {
@@ -9734,6 +9743,10 @@ async fn udp_receiver_task(
                         allowlist.dropped()
                     );
                     continue;
+                }
+                // ADR-380: second consumers see exactly what was admitted.
+                if let Some(tee) = &tee {
+                    tee.forward(&buf[..len]);
                 }
                 if len > 0 && buf[0] == b'{' {
                     match serde_json::from_slice::<wifi_densepose_hardware::vendor_rf::VendorRfEvent>(&buf[..len])
@@ -12289,7 +12302,7 @@ async fn main() {
     if plan.bind_udp {
         // ADR-296: resolve the UDP bind scope + source allowlist and fail closed
         // on an unguarded routable bind, mirroring the OAuth boot refusal below.
-        use wifi_densepose_sensing_server::udp_bind;
+        use wifi_densepose_sensing_server::{udp_bind, udp_tee};
         let udp_bind_ip: std::net::IpAddr = match args.udp_bind.parse() {
             Ok(ip) => ip,
             Err(_) => {
@@ -12323,11 +12336,29 @@ async fn main() {
                 std::process::exit(1);
             }
         }
+        let udp_tee = match udp_tee::parse_targets(args.udp_tee.iter(), args.udp_port) {
+            Ok(targets) if targets.is_empty() => None,
+            Ok(targets) => match udp_tee::UdpTee::bind(targets) {
+                Ok(tee) => {
+                    info!("UDP tee: copying admitted datagrams to {:?}", tee.targets());
+                    Some(std::sync::Arc::new(tee))
+                }
+                Err(e) => {
+                    error!("Failed to open UDP tee socket: {e}");
+                    std::process::exit(1);
+                }
+            },
+            Err(e) => {
+                error!("Invalid --udp-tee: {e}");
+                std::process::exit(1);
+            }
+        };
         tokio::spawn(udp_receiver_task(
             state.clone(),
             udp_bind_ip,
             args.udp_port,
             udp_allowlist,
+            udp_tee,
         ));
         tokio::spawn(broadcast_tick_task(state.clone(), args.tick_ms));
     }

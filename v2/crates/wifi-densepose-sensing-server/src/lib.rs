@@ -43,6 +43,8 @@ pub mod telemetry;
 pub mod trainer;
 /// ADR-296: UDP data-plane bind scope decision + source IP/CIDR allowlist.
 pub mod udp_bind;
+/// ADR-380: loopback raw-datagram tee for second consumers of the CSI stream.
+pub mod udp_tee;
 pub mod vital_signs;
 /// ADR-270 Mist and NETGEAR telemetry providers.
 pub mod vendor_mist_netgear;
