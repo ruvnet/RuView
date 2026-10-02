@@ -4150,6 +4150,15 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
     let mut registry = BssidRegistry::new(32, 30);
     let mut pipeline = WindowsWifiPipeline::new();
 
+    // While associated, Windows refreshes its BSS cache only rarely, so the
+    // netsh read below would keep returning just the connected AP. Request a
+    // fresh (asynchronous) scan on this interval to keep every AP visible;
+    // each scan briefly takes the radio off-channel, so keep it infrequent.
+    #[cfg(windows)]
+    const WLAN_SCAN_REQUEST_INTERVAL: Duration = Duration::from_secs(10);
+    #[cfg(windows)]
+    let mut last_scan_request: Option<std::time::Instant> = None;
+
     info!(
         "WiFi RSSI pipeline active (platform={}, tick={}ms, max_bssids=32)",
         std::env::consts::OS,
@@ -4159,6 +4168,16 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
     loop {
         interval.tick().await;
         seq += 1;
+
+        #[cfg(windows)]
+        if last_scan_request.is_none_or(|t| t.elapsed() >= WLAN_SCAN_REQUEST_INTERVAL) {
+            last_scan_request = Some(std::time::Instant::now());
+            tokio::task::spawn_blocking(|| {
+                if let Err(e) = wifi_densepose_wifiscan::request_scan() {
+                    debug!("WLAN scan request failed: {e}");
+                }
+            });
+        }
 
         // ── Step 1: Run multi-BSSID scan via spawn_blocking ──────────
         // Keep platform subprocess calls off the async runtime workers.
