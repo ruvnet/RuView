@@ -4,6 +4,7 @@
 |-------|-------|
 | **Status** | Proposed |
 | **Date** | 2026-03-01 |
+| **Updated** | 2026-10-01: macOS 27 also redacts SSID without Location Services; the connected link is kept with a synthetic id, and `auto`+wifi keeps UDP bound (Amendment 1); optional `MacWifi.app` restores real SSID/BSSID via Location Services (Amendment 2) |
 | **Deciders** | ruv |
 | **Codename** | **ORCA** — OS-native Radio Channel Acquisition |
 | **Relates to** | ADR-013 (Feature-Level Sensing Commodity Gear), ADR-022 (Windows WiFi Enhanced Fidelity), ADR-014 (SOTA Signal Processing), ADR-018 (ESP32 Dev Implementation) |
@@ -313,3 +314,43 @@ All verification on Mac Mini (M2 Pro, macOS 26.3).
 - ADR-022: Windows WiFi Enhanced Fidelity (analogous platform adapter)
 - ADR-013: Feature-Level Sensing from Commodity Gear
 - Issue [#56](https://github.com/ruvnet/wifi-densepose/issues/56): macOS support request
+
+---
+
+## Amendment 1 (2026-10-01): SSID is also redacted; keep the connected link
+
+**Observed on macOS 27 (M-series Mac, CoreWLAN, unsigned CLI helper).** Without Location Services, `mac_wifi --scan-once` returns `"ssid":""` and `"bssid":"00:00:00:00:00:00"`, while `rssi`, `noise`, `channel` and `tx_rate` are real. The §1 assumption that "SSID + RSSI + channel" survive no longer holds. An unsigned CLI helper never calls `CLLocationManager`, so it never appears in Location Services and cannot be granted access.
+
+Before this amendment, `resolve_bssid` abstained when both identities were blank (to avoid merging unrelated networks), so every macOS scan was dropped and `--source wifi` produced nothing, with no error.
+
+**Change.**
+1. `--scan-once` marks its single sample `"connected": true`. It is always the one connected link, so it cannot collide with another network.
+2. A redacted sample marked `connected` gets a stable, locally administered synthetic BSSID derived from a reserved key plus the channel. The SSID stays empty; none is invented. Unmarked redacted lines still abstain.
+3. `--source auto` that resolves to host WiFi now also binds the UDP receiver, and `wifi_task` yields while the source is a live `esp32`. ESP32 nodes that start after the 2 s boot probe still promote the source, matching the #1004 rule for the simulator.
+4. A missing helper logs one clear error with the build command instead of a warning on every tick.
+
+**Measured (2026-10-01, this change):** `--source wifi` → source `wifi:unnamed`, sensing ticks advance. `--source auto` on a quiet port → `wifi` with `udp_receiver=true`; relaying real ADR-018 frames promoted the source to `esp32`, with all 5 nodes listed.
+
+**Still open:** real BSSID/SSID would need a signed `.app` helper with `NSLocationWhenInUseUsageDescription` that requests authorization. The helper still lives under `archive/v1` with no build step.
+
+## Amendment 2 (2026-10-01): `MacWifi.app` for real SSID/BSSID
+
+**Finding.** macOS grants Location Services to the *responsible* app. A CLI helper spawned from a terminal is attributed to the terminal (Ghostty here), which never appears in the Location Services list for this purpose, so the SSID/BSSID stay redacted. Packaging alone isn't enough: running the bundle's binary directly from a shell is still redacted (measured).
+
+**Change.** `tools/mac-wifi-helper/` builds an ad-hoc-signed `MacWifi.app`:
+- `LSUIElement`, plus `NSLocationWhenInUseUsageDescription` and `NSLocationUsageDescription` in Info.plist;
+- `--authorize`, which calls `CLLocationManager.requestWhenInUseAuthorization()`;
+- `--status`;
+- `--scan-once`, with the same JSON contract as the CLI helper.
+
+`MacosCoreWlanScanner::new()` prefers this bundle when it's found (`RUVIEW_MAC_WIFI_APP`, `~/Applications`, `/Applications`). It launches each scan as `open -W -g -n --stdout <fresh tmp> <app> --args --scan-once`; `--stdout` appends, so every scan gets a fresh file. Otherwise it falls back to the CLI helper on `PATH` (Amendment 1 behaviour).
+
+**Measured (macOS 27, 2026-10-01).**
+- The prompt appeared, and the user allowed it: `authorized`.
+- A scan launched with `open` returned a real SSID and BSSID.
+- A direct exec of the same binary was still redacted.
+- Each `open` launch took about 0.1 s.
+- The server with `--source wifi` and `mac_wifi` absent from `PATH` labelled the source with the real SSID: `bssid_count=1`, 16 ticks in 8 s at 500 ms, no temp files left behind.
+
+**Limitation (measured).** Rebuilding changes the ad-hoc signature, and macOS then forgets the grant (`not_determined`), so users must re-run `--authorize` after each rebuild. A stable signing identity would remove that step. Not tested: Developer ID signing, notarization, behaviour under `launchd`.
+
