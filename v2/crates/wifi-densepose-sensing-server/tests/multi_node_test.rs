@@ -1,15 +1,30 @@
 //! Integration test: multi-node per-node state isolation (ADR-068, #249).
 //!
-//! Sends simulated ESP32 CSI frames from multiple node IDs to the server's
-//! UDP port and verifies that:
+//! Sends simulated ESP32 CSI frames from multiple node IDs to a test-owned
+//! UDP receiver on an ephemeral port and verifies that:
 //! 1. Each node gets independent state (no cross-contamination)
 //! 2. Person count aggregates across active nodes
 //! 3. Stale nodes are excluded from aggregation
 //!
 //! This does NOT require QEMU — it sends raw UDP packets directly.
 
-use std::net::UdpSocket;
+use std::net::{SocketAddr, UdpSocket};
 use std::time::Duration;
+
+/// Bind a test-owned receiver on an OS-assigned port and return it with its
+/// address. Tests in this file must send here, never to a well-known port
+/// such as the sensing server's default UDP port: a running local server would
+/// otherwise ingest up to 255 synthetic node IDs, and a hardcoded port can
+/// collide with other processes or parallel test runs (#2086). The datagrams
+/// are never read; keep the returned socket alive for the whole test so the
+/// port is not reused mid-test.
+fn ephemeral_test_target() -> (UdpSocket, SocketAddr) {
+    let receiver = UdpSocket::bind("127.0.0.1:0").expect("bind ephemeral receiver");
+    let addr = receiver
+        .local_addr()
+        .expect("ephemeral receiver has a local addr");
+    (receiver, addr)
+}
 
 /// Build a minimal valid ESP32 CSI frame (magic 0xC511_0001).
 ///
@@ -126,16 +141,16 @@ fn test_different_nodes_produce_different_frames() {
     assert_ne!(&frame1[20..], &frame2[20..]);
 }
 
-/// Send multiple frames from different nodes to a UDP port.
-/// This test verifies the packet format is accepted by a real server
-/// if one is running, but doesn't fail if no server is available.
+/// Send multiple frames from different nodes to a test-owned UDP receiver.
+/// This is a sender-side smoke test; it does not talk to a real server.
 #[test]
 fn test_multi_node_udp_send() {
-    // Try to bind to a random port and send to localhost:5005
+    // Bind to a random port and send to our own ephemeral receiver.
     // This is a smoke test — it verifies frames can be sent without panic.
     let sock = UdpSocket::bind("0.0.0.0:0").expect("bind");
     sock.set_write_timeout(Some(Duration::from_millis(100)))
         .ok();
+    let (_receiver, target) = ephemeral_test_target();
 
     let n_sub = 32u16;
     let node_ids = [1u8, 2, 3, 5, 7];
@@ -143,15 +158,14 @@ fn test_multi_node_udp_send() {
     for &nid in &node_ids {
         for seq in 0..10u32 {
             let frame = build_csi_frame(nid, seq, -50 + nid as i8, n_sub);
-            // Send to localhost:5005 (won't fail even if nothing is listening)
-            let _ = sock.send_to(&frame, "127.0.0.1:5005");
+            let _ = sock.send_to(&frame, target);
         }
     }
 
     // Also send vitals packets
     for &nid in &node_ids {
         let pkt = build_vitals_packet(nid, true, 1, -45);
-        let _ = sock.send_to(&pkt, "127.0.0.1:5005");
+        let _ = sock.send_to(&pkt, target);
     }
 
     // If we get here without panic, the frame builders work correctly
@@ -178,6 +192,7 @@ fn test_frame_sizes() {
 fn test_mesh_simulation_pattern() {
     let sock = UdpSocket::bind("0.0.0.0:0").expect("bind");
     sock.set_write_timeout(Some(Duration::from_millis(50))).ok();
+    let (_receiver, target) = ephemeral_test_target();
 
     let mut total_sent = 0u32;
 
@@ -185,21 +200,21 @@ fn test_mesh_simulation_pattern() {
         // Nodes 1-3: every tick
         for nid in 1..=3u8 {
             let frame = build_csi_frame(nid, tick, -50, 32);
-            let _ = sock.send_to(&frame, "127.0.0.1:5005");
+            let _ = sock.send_to(&frame, target);
             total_sent += 1;
         }
 
         // Node 4: every other tick
         if tick % 2 == 0 {
             let frame = build_csi_frame(4, tick / 2, -55, 32);
-            let _ = sock.send_to(&frame, "127.0.0.1:5005");
+            let _ = sock.send_to(&frame, target);
             total_sent += 1;
         }
 
         // Node 5: stops after tick 5
         if tick < 5 {
             let frame = build_csi_frame(5, tick, -60, 32);
-            let _ = sock.send_to(&frame, "127.0.0.1:5005");
+            let _ = sock.send_to(&frame, target);
             total_sent += 1;
         }
     }
@@ -214,12 +229,13 @@ fn test_mesh_simulation_pattern() {
 fn test_large_mesh_100_nodes() {
     let sock = UdpSocket::bind("0.0.0.0:0").expect("bind");
     sock.set_write_timeout(Some(Duration::from_millis(50))).ok();
+    let (_receiver, target) = ephemeral_test_target();
 
     let mut total = 0u32;
     for nid in 1..=100u8 {
         for seq in 0..10u32 {
             let frame = build_csi_frame(nid, seq, -50 + (nid % 30) as i8, 32);
-            let _ = sock.send_to(&frame, "127.0.0.1:5005");
+            let _ = sock.send_to(&frame, target);
             total += 1;
         }
     }
@@ -233,10 +249,11 @@ fn test_max_nodes_255() {
     let sock = UdpSocket::bind("0.0.0.0:0").expect("bind");
     sock.set_write_timeout(Some(Duration::from_millis(100)))
         .ok();
+    let (_receiver, target) = ephemeral_test_target();
 
     for nid in 1..=255u8 {
         let frame = build_csi_frame(nid, 0, -50, 16);
-        let _ = sock.send_to(&frame, "127.0.0.1:5005");
+        let _ = sock.send_to(&frame, target);
     }
 
     // 255 unique node_ids — the HashMap should handle this fine
