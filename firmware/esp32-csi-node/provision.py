@@ -11,7 +11,7 @@ Usage:
         --password "..." --target-ip 192.168.1.20
 
 Requirements:
-    pip install 'esptool>=5.0' nvs-partition-gen
+    pip install 'esptool>=5.0' esp-idf-nvs-partition-gen
     (or use the nvs_partition_gen.py bundled with ESP-IDF)
 
 ADDITIVE-BY-DEFAULT (issue #391, #574 phase 1):
@@ -360,7 +360,8 @@ def main():
                         "error when no prior state file exists. The script now merges "
                         "with prior state by default, so this flag is rarely needed.")
     parser.add_argument("--reset", action="store_true",
-                        help="Wipe this machine's per-port state file before merging. "
+                        help="Ignore this machine's per-port state file when merging; it is "
+                        "replaced after a successful flash. "
                         "Use for first-time provisioning of a recycled board where "
                         "previously-staged keys should NOT be re-applied.")
     parser.add_argument("--state-dir", default=_default_state_dir(),
@@ -373,10 +374,12 @@ def main():
 
     # --- Per-port state load + merge (additive-by-default, #391 / #574) ---
     if args.reset:
+        # Don't delete the state file here: validation below can still fail,
+        # and a failed run must not lose the record. A successful flash
+        # overwrites it with the reset (CLI-only) state.
         path = _state_path_for(args.port, args.state_dir)
         if os.path.isfile(path):
-            os.unlink(path)
-            print(f"--reset: removed state file {path}", file=sys.stderr)
+            print(f"--reset: ignoring state file {path}", file=sys.stderr)
         prior = {}
     else:
         prior = load_state(args.port, args.state_dir)
@@ -502,10 +505,9 @@ def main():
         print(f"NVS binary saved to {out} ({len(nvs_bin)} bytes)")
         print(f"Flash manually: python -m esptool --chip {args.chip} --port {args.port} "
               f"write_flash 0x9000 {out}")
-        # Persist merged state even on dry-run so a subsequent real flash from
-        # this machine sees the same staged config.
-        path = save_state(args.port, args.state_dir, merged)
-        print(f"State persisted to {path}")
+        # Don't persist state on dry-run: nothing reached the device, so the
+        # next real run must not merge on top of values that were never flashed.
+        print("Dry run: state file not updated.")
         return
 
     flash_nvs(args.port, args.baud, nvs_bin, args.chip)
