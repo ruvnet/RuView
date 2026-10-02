@@ -17,6 +17,8 @@
 #include "esp_app_desc.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "ota_update";
 
@@ -88,14 +90,26 @@ static esp_err_t ota_status_handler(httpd_req_t *req)
     const esp_partition_t *running = esp_ota_get_running_partition();
     const esp_partition_t *update = esp_ota_get_next_update_partition(NULL);
 
+    /* ADR-379: lets an operator confirm remotely that an OTA'd image left
+     * pending_verify (and so survives a power cycle) without a serial log. */
+    esp_ota_img_states_t st;
+    const char *ota_state = "none";
+    if (running && esp_ota_get_state_partition(running, &st) == ESP_OK) {
+        ota_state = st == ESP_OTA_IMG_VALID          ? "valid" :
+                    st == ESP_OTA_IMG_PENDING_VERIFY ? "pending_verify" :
+                    st == ESP_OTA_IMG_NEW            ? "new" :
+                    st == ESP_OTA_IMG_UNDEFINED      ? "undefined" : "other";
+    }
+
     char response[512];
     int len = snprintf(response, sizeof(response),
         "{\"version\":\"%s\",\"date\":\"%s\",\"time\":\"%s\","
         "\"running_partition\":\"%s\",\"next_partition\":\"%s\","
-        "\"max_size\":%lu}",
+        "\"ota_state\":\"%s\",\"max_size\":%lu}",
         app->version, app->date, app->time,
         running ? running->label : "unknown",
         update ? update->label : "none",
+        ota_state,
         (unsigned long)(update ? update->size : 0));
 
     httpd_resp_set_type(req, "application/json");
@@ -103,10 +117,25 @@ static esp_err_t ota_status_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* Receive chunk for POST /ota. Static, not on the httpd task stack: handlers
+ * run one at a time on the single httpd task, so one buffer is enough, and
+ * 1 KB was a quarter of the default 4 KB stack (ADR-379). */
+static char s_ota_rx_buf[1024];
+
+void ota_update_log_httpd_stack(const char *what)
+{
+    /* ESP-IDF FreeRTOS counts stack in bytes. */
+    ESP_LOGI(TAG, "httpd stack after %s: %u of %d bytes never used",
+             what, (unsigned)uxTaskGetStackHighWaterMark(NULL),
+             CONFIG_OTA_HTTPD_STACK_SIZE);
+}
+
 /**
- * POST /ota — receive and flash firmware binary.
+ * POST /ota — receive and flash firmware binary. Returns ESP_OK only after the
+ * new slot is set as boot partition and the response is sent; the caller
+ * reboots.
  */
-static esp_err_t ota_upload_handler(httpd_req_t *req)
+static esp_err_t ota_upload_receive(httpd_req_t *req)
 {
     /* ADR-050: Authenticate before accepting firmware upload. */
     if (!ota_check_auth(req)) {
@@ -144,12 +173,12 @@ static esp_err_t ota_upload_handler(httpd_req_t *req)
     }
 
     /* Read firmware in chunks. */
-    char buf[1024];
+    char *buf = s_ota_rx_buf;
     int received = 0;
     int total = 0;
 
     while (total < req->content_len) {
-        received = httpd_req_recv(req, buf, sizeof(buf));
+        received = httpd_req_recv(req, buf, sizeof(s_ota_rx_buf));
         if (received <= 0) {
             if (received == HTTPD_SOCK_ERR_TIMEOUT) {
                 continue;  /* Retry on timeout. */
@@ -173,9 +202,11 @@ static esp_err_t ota_upload_handler(httpd_req_t *req)
 
         total += received;
         if ((total % (64 * 1024)) == 0) {
-            ESP_LOGI(TAG, "OTA progress: %d / %d bytes (%.0f%%)",
+            /* Integer percent: %f pulls newlib's float formatter onto this
+             * task's stack for no benefit. */
+            ESP_LOGI(TAG, "OTA progress: %d / %d bytes (%d%%)",
                      total, req->content_len,
-                     (float)total * 100.0f / (float)req->content_len);
+                     (int)((int64_t)total * 100 / req->content_len));
         }
     }
 
@@ -201,12 +232,24 @@ static esp_err_t ota_upload_handler(httpd_req_t *req)
     const char *resp = "{\"status\":\"ok\",\"message\":\"OTA update successful. Rebooting...\"}";
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, resp, strlen(resp));
+    return ESP_OK;
+}
 
-    /* Delay briefly to let the response flush, then reboot. */
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    esp_restart();
+static esp_err_t ota_upload_handler(httpd_req_t *req)
+{
+    esp_err_t ret = ota_upload_receive(req);
 
-    return ESP_OK;  /* Never reached. */
+    /* The deepest path this server runs is esp_ota_end() -> esp_image_verify().
+     * Log the headroom it left so the stack size is set from evidence, not
+     * guessed a second time. */
+    ota_update_log_httpd_stack("POST /ota");
+
+    if (ret == ESP_OK) {
+        /* Delay briefly to let the response flush, then reboot. */
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        esp_restart();
+    }
+    return ret;
 }
 
 /** Internal: start the HTTP server and register OTA endpoints. */
@@ -214,6 +257,11 @@ static esp_err_t ota_start_server(httpd_handle_t *out_handle)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = OTA_PORT;
+    /* HTTPD_DEFAULT_CONFIG gives 4096 B. MEASURED 2026-09-29 on an S3 (node 4,
+     * v0.8.12): POST /ota overflowed it every time ("stack overflow in task
+     * httpd", RTC_SW_CPU_RST), so no OTA had ever completed on this firmware.
+     * See CONFIG_OTA_HTTPD_STACK_SIZE for the sizing. */
+    config.stack_size = CONFIG_OTA_HTTPD_STACK_SIZE;
     config.max_uri_handlers = 12;  /* Extra slots for WASM endpoints (ADR-040). */
     /* Increase receive timeout for large uploads. */
     config.recv_wait_timeout = 30;

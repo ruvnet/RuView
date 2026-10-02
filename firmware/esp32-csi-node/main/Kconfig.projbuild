@@ -332,6 +332,25 @@ menu "WASM Programmable Sensing (ADR-040)"
 
 endmenu
 
+menu "OTA / WASM HTTP server (ADR-379)"
+
+config OTA_HTTPD_STACK_SIZE
+    int "Stack size of the OTA / WASM HTTP server task (bytes)"
+    range 4096 16384
+    default 8192
+    help
+      HTTPD_DEFAULT_CONFIG() gives 4096. MEASURED 2026-09-29 on an ESP32-S3
+      (node 4, v0.8.12): every POST /ota overflowed it ("stack overflow in
+      task httpd", RTC_SW_CPU_RST), so no OTA had ever completed on this
+      firmware. The same task runs POST /wasm/upload (signature check plus
+      wasm3 module load) and GET /wasm/list.
+
+      Every OTA and WASM upload logs "httpd stack after <handler>: N of M
+      bytes never used". Lower this only with those numbers in hand, and keep
+      at least 1 KB unused on the worst handler.
+
+endmenu
+
 menu "ESP32-C6 capabilities (ADR-110)"
     depends on IDF_TARGET_ESP32C6
 
@@ -671,6 +690,50 @@ config UPLINK_WATCHDOG_TIMEOUT_S
 
       If nodes do restart unexpectedly, check the reset reason in the sync
       packet's health field before assuming the watchdog is responsible.
+
+endmenu
+
+menu "OTA health check (ADR-379)"
+
+config OTA_HEALTH_TIMEOUT_S
+    int "Seconds an OTA'd image has to prove itself before rolling back"
+    depends on BOOTLOADER_APP_ROLLBACK_ENABLE
+    range 30 900
+    default 120
+    help
+      Only applies when the running image is ESP_OTA_IMG_PENDING_VERIFY, i.e.
+      it was just delivered by OTA to a node whose bootloader has
+      CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE. USB-flashed and already-confirmed
+      images are never checked.
+
+      Healthy means: the STA got an IP, and the stream sender accepted at least
+      one CSI frame. Both must happen within this many seconds of boot, or the
+      image is marked invalid and the node reboots into the previous slot.
+
+      Measured from boot, and the WiFi boot wait alone can take about two
+      minutes against an absent AP, so an AP outage during a rollout rolls a
+      good image back. That is the safe direction: re-push it later.
+
+config OTA_HEALTH_MIN_UPTIME_S
+    int "Minimum uptime before an OTA'd image may be confirmed"
+    depends on BOOTLOADER_APP_ROLLBACK_ENABLE
+    range 0 600
+    default 30
+    help
+      Holds confirmation back for this long after boot even once both signals
+      are in, so an image that crashes shortly after starting its pipelines
+      still reverts (a crash while PENDING_VERIFY is a rollback). Clamped to
+      OTA_HEALTH_TIMEOUT_S.
+
+config OTA_HEALTH_FORCE_FAIL
+    bool "TEST ONLY: fail the OTA health check to exercise rollback"
+    depends on BOOTLOADER_APP_ROLLBACK_ENABLE
+    default n
+    help
+      Builds an image that rolls itself back at the point it would otherwise
+      confirm. OTA-push it to a node to prove rollback works end to end: the
+      node should reboot into the previous image. Has no effect when USB
+      flashed (such an image is not PENDING_VERIFY). Never ship this.
 
 endmenu
 

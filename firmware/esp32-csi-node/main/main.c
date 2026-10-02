@@ -28,6 +28,7 @@
 #include "serial_onboarding.h"
 #include "edge_processing.h"
 #include "ota_update.h"
+#include "ota_health.h"
 #include "power_mgmt.h"
 #include "wasm_runtime.h"
 #include "wasm_upload.h"
@@ -142,6 +143,7 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_num = 0;
+        ota_health_note_got_ip();
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }
@@ -337,6 +339,11 @@ void app_main(void)
 #endif
     ESP_LOGI(TAG, "%s CSI Node (ADR-018 / ADR-110) — v%s — Node ID: %d",
              target_name, app_desc->version, g_nvs_config.node_id);
+
+    /* ADR-379: an OTA'd image boots PENDING_VERIFY and reverts at the next
+     * reset unless it confirms itself. Start the clock before anything that
+     * can block (WiFi waits up to ~2 min for an AP), so the deadline is real. */
+    ota_health_start();
 
     /* Apply the opt-in XIAO RF path before WiFi starts. Generic C6 boards keep
      * ownership of GPIO3 and GPIO14 because the default implementation is a

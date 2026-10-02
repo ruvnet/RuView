@@ -750,6 +750,11 @@ uint16_t csi_collector_get_send_fail_count(void)
     return (f > 0xFFFFu) ? 0xFFFFu : (uint16_t)f;
 }
 
+uint32_t csi_collector_get_send_ok_count(void)
+{
+    return s_send_ok;
+}
+
 /* The gate here is fixed at compile time (mesh-aligned bucketing, falling
  * back to elapsed time when unsynced), so there is no mode or period to
  * report. Return the explicit sentinel rather than a number that reads as

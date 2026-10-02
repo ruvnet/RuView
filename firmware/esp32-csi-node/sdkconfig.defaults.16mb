@@ -18,8 +18,8 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16mb.csv"
 
 # Firmware rollback: an OTA'd image boots PENDING_VERIFY and must confirm
-# itself, or the bootloader reverts on the next boot. See ota_rollback_* in
-# ota_update.c for when confirmation happens and why.
+# itself, or the bootloader reverts on the next boot. main/ota_health.c does
+# the confirming (IP + one CSI frame within OTA_HEALTH_TIMEOUT_S), ADR-379.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
 # Coredump to flash. The 64K `coredump` partition has existed in

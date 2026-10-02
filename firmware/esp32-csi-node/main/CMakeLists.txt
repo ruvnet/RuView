@@ -2,7 +2,7 @@ set(SRCS
     "main.c" "csi_collector.c" "node_log.c"
     "thermal.c" "stream_sender.c" "nvs_config.c"
     "serial_onboarding.c" "serial_onboarding_protocol.c"
-    "edge_processing.c" "ota_update.c" "power_mgmt.c"
+    "edge_processing.c" "ota_update.c" "ota_health.c" "power_mgmt.c"
     "wasm_runtime.c" "wasm_upload.c" "rvf_parser.c"
     "mmwave_sensor.c"
     "swarm_bridge.c"

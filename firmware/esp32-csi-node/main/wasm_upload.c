@@ -24,7 +24,9 @@
 #include "wasm_runtime.h"
 #include "rvf_parser.h"
 #include "nvs_config.h"
+#include "ota_update.h"
 
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include "esp_log.h"
@@ -82,7 +84,7 @@ static uint8_t *receive_body(httpd_req_t *req, int *out_len)
  * POST /wasm/upload — Upload RVF or raw .wasm
  * ====================================================================== */
 
-static esp_err_t wasm_upload_handler(httpd_req_t *req)
+static esp_err_t wasm_upload_process(httpd_req_t *req)
 {
     int total = 0;
     uint8_t *buf = receive_body(req, &total);
@@ -215,6 +217,15 @@ static esp_err_t wasm_upload_handler(httpd_req_t *req)
     (void)format;
 }
 
+/* Signature check and wasm3 module load run on the shared httpd task; log
+ * the headroom they left (ADR-379, CONFIG_OTA_HTTPD_STACK_SIZE). */
+static esp_err_t wasm_upload_handler(httpd_req_t *req)
+{
+    esp_err_t ret = wasm_upload_process(req);
+    ota_update_log_httpd_stack("POST /wasm/upload");
+    return ret;
+}
+
 /* ======================================================================
  * GET /wasm/list — List module slots
  * ====================================================================== */
@@ -237,18 +248,24 @@ static esp_err_t wasm_list_handler(httpd_req_t *req)
     uint8_t count = 0;
     wasm_runtime_get_info(info, &count);
 
-    /* Build JSON array (larger buffer for manifest fields). */
-    char response[2048];
+    /* Build JSON array (larger buffer for manifest fields). Heap, not stack:
+     * 2 KB was half the httpd task's former 4 KB stack. */
+    const size_t resp_size = 2048;
+    char *response = malloc(resp_size);
+    if (response == NULL) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
     int pos = 0;
-    pos += snprintf(response + pos, sizeof(response) - pos,
+    pos += snprintf(response + pos, resp_size - pos,
                     "{\"modules\":[");
 
     for (uint8_t i = 0; i < WASM_MAX_MODULES; i++) {
-        if (i > 0) pos += snprintf(response + pos, sizeof(response) - pos, ",");
+        if (i > 0) pos += snprintf(response + pos, resp_size - pos, ",");
         uint32_t mean_us = (info[i].frame_count > 0)
                            ? (info[i].total_us / info[i].frame_count) : 0;
         const char *name = info[i].module_name[0] ? info[i].module_name : "";
-        pos += snprintf(response + pos, sizeof(response) - pos,
+        pos += snprintf(response + pos, resp_size - pos,
                         "{\"id\":%u,\"state\":\"%s\",\"name\":\"%s\","
                         "\"binary_size\":%lu,\"caps\":\"0x%04lx\","
                         "\"frame_count\":%lu,\"event_count\":%lu,\"error_count\":%lu,"
@@ -266,11 +283,12 @@ static esp_err_t wasm_list_handler(httpd_req_t *req)
                         (unsigned long)info[i].budget_faults);
     }
 
-    pos += snprintf(response + pos, sizeof(response) - pos,
+    pos += snprintf(response + pos, resp_size - pos,
                     "],\"loaded\":%u,\"max\":%d}", count, WASM_MAX_MODULES);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, response, pos);
+    free(response);
     return ESP_OK;
 }
 

@@ -139,6 +139,18 @@ uint16_t csi_collector_get_pkt_yield_per_sec(void);
  */
 uint16_t csi_collector_get_send_fail_count(void);
 
+/**
+ * Get the cumulative count of CSI frames the stream sender accepted since boot.
+ *
+ * Nonzero means the whole capture path worked at least once: the driver
+ * delivered a CSI callback, the frame serialized, and sendto() accepted it.
+ * Used by the OTA health check (ota_health.c) as its "operational" signal.
+ *
+ * @return Number of successful stream_sender_send() calls from the CSI
+ *         callback path.
+ */
+uint32_t csi_collector_get_send_ok_count(void);
+
 /** Reported by the gate accessors when this build has no selectable gate. */
 #define CSI_GATE_NOT_CONFIGURABLE 0xFF
 

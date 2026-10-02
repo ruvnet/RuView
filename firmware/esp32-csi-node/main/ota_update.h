@@ -30,4 +30,13 @@ esp_err_t ota_update_init(void);
  */
 esp_err_t ota_update_init_ex(void **out_server);
 
+/**
+ * Log the httpd task's stack high-water mark (bytes never used). Call from an
+ * HTTP handler on the OTA server after its deepest work, so the configured
+ * CONFIG_OTA_HTTPD_STACK_SIZE is backed by a measured margin.
+ *
+ * @param what  Short label for the handler, e.g. "POST /ota".
+ */
+void ota_update_log_httpd_stack(const char *what);
+
 #endif /* OTA_UPDATE_H */

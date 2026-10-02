@@ -98,6 +98,12 @@ For an existing provisioned node, back up its current application and inspect
 `http://DEVICE_IP:8032/ota/status` before choosing an application-only update.
 Writing only offset `0x20000` is safe only when the status endpoint reports
 `running_partition` as `ota_0` and the downloaded image matches the board.
+
+After an OTA, the same endpoint's `ota_state` must read `valid` before you
+power-cycle the node or push again. `pending_verify` means the image has not
+passed its first-boot health check yet and would revert on reset. See
+[RUNBOOK §2.1](RUNBOOK.md) and ADR-379.
+
 The full bundles do not include NVS, so the documented four-offset install
 preserves WiFi and node configuration while replacing the boot and application
 images.
@@ -632,6 +638,7 @@ cargo build -p wifi-densepose-wasm-edge --target wasm32-unknown-unknown --releas
 | `main/nvs_config.c` / `.h` | Runtime configuration: loads Kconfig defaults, overrides from NVS |
 | `main/edge_processing.c` / `.h` | Tier 0-2 DSP pipeline: SPSC ring buffer, biquad IIR filters, Welford stats, BPM extraction, presence, fall detection |
 | `main/ota_update.c` / `.h` | HTTP OTA firmware update server on port 8032 |
+| `main/ota_health.c` / `.h` | First-boot health check that confirms an OTA'd image or rolls it back (ADR-379) |
 | `main/power_mgmt.c` / `.h` | Battery-aware light sleep duty cycling |
 | `main/wasm_runtime.c` / `.h` | WASM3 interpreter: module slots, host API bindings, budget guard, per-frame dispatch |
 | `main/wasm_upload.c` / `.h` | HTTP endpoints for WASM module upload, list, start, stop, delete |
