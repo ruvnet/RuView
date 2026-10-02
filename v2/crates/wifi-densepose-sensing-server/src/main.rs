@@ -12103,10 +12103,24 @@ async fn main() {
     let field_surface: rufield_surface::FieldState =
         Arc::new(RwLock::new(rufield_surface::FieldSurface::from_env()));
 
-    // Populated inside the `multistatic_fuser` field initializer below, then
-    // threaded into `engine_bridge` so both fusion paths honor the same
+    // #1031/#1049: the default guard (60 ms hard / 20 ms soft)
+    // accommodates a real TDM slot offset. A deployment overrides it via
+    // WDP_GUARD_INTERVAL_US (direct, e.g. 200000 for WiFi/ESP-NOW sync —
+    // #1049) or WDP_TDM_SLOTS + WDP_TDM_SLOT_US (derive from schedule).
+    // Threaded into `engine_bridge` so both fusion paths honor the same
     // WDP_TDM_SLOTS/WDP_GUARD_INTERVAL_US-derived guard (#1049/#1057).
-    let mut engine_bridge_multistatic_cfg: Option<MultistaticConfig> = None;
+    let multistatic_cfg = {
+        let cfg = multistatic_guard_config_from_env();
+        info!(
+            "Multistatic fusion guard: {} µs hard / {} µs soft (override via \
+             WDP_GUARD_INTERVAL_US / WDP_SOFT_GUARD_US, or WDP_TDM_SLOTS+WDP_TDM_SLOT_US)",
+            cfg.guard_interval_us, cfg.soft_guard_us
+        );
+        MultistaticConfig {
+            min_nodes: 1, // single-node passthrough
+            ..cfg
+        }
+    };
     let mut node_positions_config: HashMap<u8, [f32; 3]> = HashMap::new();
     let state: SharedState = Arc::new(RwLock::new(AppStateInner {
         latest_update: None,
@@ -12182,20 +12196,7 @@ async fn main() {
         pose_tracker: PoseTracker::new(),
         last_tracker_instant: None,
         multistatic_fuser: {
-            // #1031/#1049: the default guard (60 ms hard / 20 ms soft)
-            // accommodates a real TDM slot offset. A deployment overrides it via
-            // WDP_GUARD_INTERVAL_US (direct, e.g. 200000 for WiFi/ESP-NOW sync —
-            // #1049) or WDP_TDM_SLOTS + WDP_TDM_SLOT_US (derive from schedule).
-            let cfg = multistatic_guard_config_from_env();
-            info!(
-                "Multistatic fusion guard: {} µs hard / {} µs soft (override via \
-                 WDP_GUARD_INTERVAL_US / WDP_SOFT_GUARD_US, or WDP_TDM_SLOTS+WDP_TDM_SLOT_US)",
-                cfg.guard_interval_us, cfg.soft_guard_us
-            );
-            let mut fuser = MultistaticFuser::with_config(MultistaticConfig {
-                min_nodes: 1, // single-node passthrough
-                ..cfg.clone()
-            });
+            let mut fuser = MultistaticFuser::with_config(multistatic_cfg.clone());
             if let Some(ref pos_str) = args.node_positions {
                 let entries = field_bridge::parse_node_position_entries(pos_str);
                 if !entries.is_empty() {
@@ -12223,10 +12224,6 @@ async fn main() {
                     fuser.set_node_positions_by_id(node_positions_config.clone());
                 }
             }
-            engine_bridge_multistatic_cfg = Some(MultistaticConfig {
-                min_nodes: 1,
-                ..cfg
-            });
             fuser
         },
         node_positions_config,
@@ -12235,7 +12232,7 @@ async fn main() {
             1,
             "default",
             "Default Room",
-            engine_bridge_multistatic_cfg,
+            Some(multistatic_cfg),
         ),
         field_model: bootstrap_field_model,
         installation_id: args.installation_id.clone(),
