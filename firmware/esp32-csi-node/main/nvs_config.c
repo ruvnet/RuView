@@ -48,6 +48,7 @@ void nvs_config_load(nvs_config_t *cfg)
     cfg->dwell_ms       = 50;
     cfg->tdm_slot_index = 0;
     cfg->tdm_node_count = 1;
+    cfg->wifi_allow_11b = 0;    /* 802.11b rates off by default */
 
     /* ADR-039: Edge intelligence defaults from Kconfig. */
 #ifdef CONFIG_EDGE_TIER
@@ -189,6 +190,17 @@ void nvs_config_load(nvs_config_t *cfg)
             ESP_LOGI(TAG, "NVS override: tdm_node_count=%u", (unsigned)cfg->tdm_node_count);
         } else {
             ESP_LOGW(TAG, "NVS tdm_nodes=%u invalid, ignored", (unsigned)tdm_nodes_val);
+        }
+    }
+
+    /* 802.11b rate-control override (see nvs_config.h). */
+    uint8_t allow_11b_val;
+    if (nvs_get_u8(handle, "allow_11b", &allow_11b_val) == ESP_OK) {
+        if (allow_11b_val <= 1) {
+            cfg->wifi_allow_11b = allow_11b_val;
+            ESP_LOGI(TAG, "NVS override: wifi_allow_11b=%u", (unsigned)allow_11b_val);
+        } else {
+            ESP_LOGW(TAG, "NVS allow_11b=%u not 0/1, ignored", (unsigned)allow_11b_val);
         }
     }
 

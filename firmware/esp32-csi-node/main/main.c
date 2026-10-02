@@ -243,6 +243,17 @@ static void wifi_init_sta(void)
         s_reconnect_timer = NULL;
     }
 
+    /* Keep rate control out of 802.11b (1-11 Mbps DSSS/CCK). It must be set
+     * after esp_wifi_init() and before esp_wifi_start(). Non-fatal: if the
+     * driver refuses, the node runs as before rather than not at all. */
+    if (!g_nvs_config.wifi_allow_11b) {
+        esp_err_t r11b = esp_wifi_config_11b_rate(WIFI_IF_STA, true);
+        ESP_LOGI(TAG, "802.11b rates on STA: %s (%s)",
+                 r11b == ESP_OK ? "disabled" : "STILL ENABLED", esp_err_to_name(r11b));
+    } else {
+        ESP_LOGW(TAG, "802.11b rates on STA: allowed (NVS allow_11b=1)");
+    }
+
     ESP_ERROR_CHECK(esp_wifi_start());
 
     ESP_LOGI(TAG, "WiFi STA initialized, connecting to SSID: %s", g_nvs_config.wifi_ssid);
