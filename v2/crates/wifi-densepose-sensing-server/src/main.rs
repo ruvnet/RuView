@@ -3213,6 +3213,16 @@ fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
     let ppdu_type = wifi_densepose_hardware::PpduType::from_byte(buf[18]);
     let adr018_flags = wifi_densepose_hardware::Adr018Flags::from_byte(buf[19]);
 
+    // A real CSI frame has at least one antenna and one subcarrier. With
+    // either at zero, `expected_len` collapses to the bare 20-byte header, so
+    // any datagram that merely starts with this magic would pass the length
+    // check below and mint a node carrying empty amplitude/phase data. That
+    // was seen with a non-ESP32 sender on the shared UDP port: bogus nodes
+    // appeared in /api/v1/nodes. Drop rather than guess.
+    if n_antennas == 0 || n_subcarriers == 0 {
+        return None;
+    }
+
     let iq_start = 20;
     let n_pairs = n_antennas as usize * n_subcarriers as usize;
     let expected_len = iq_start + n_pairs * 2;
@@ -3304,6 +3314,64 @@ mod issue_1009_n_subcarriers_u16_tests {
         let frame = parse_esp32_frame(&buf).expect("64-bin HT20 frame must parse");
         assert_eq!(frame.n_subcarriers, 64);
         assert_eq!(frame.amplitudes.len(), 64);
+    }
+}
+
+#[cfg(test)]
+mod esp32_frame_structure_tests {
+    //! `parse_esp32_frame` accepted any datagram carrying the 0xC511_0001
+    //! magic and a 20-byte header, even with zero antennas or zero
+    //! subcarriers, which minted a node with empty CSI. These pin the
+    //! structural gate without changing what a well-formed frame parses to.
+    use super::*;
+
+    /// Minimal well-formed ADR-018 frame: one antenna, `n_subcarriers` bins.
+    fn frame(n_subcarriers: u16) -> Vec<u8> {
+        let mut buf = vec![0u8; 20 + n_subcarriers as usize * 2];
+        buf[0..4].copy_from_slice(&0xC511_0001u32.to_le_bytes());
+        buf[4] = 7; // node_id
+        buf[5] = 1; // n_antennas
+        buf[6..8].copy_from_slice(&n_subcarriers.to_le_bytes());
+        buf[8..12].copy_from_slice(&2437u32.to_le_bytes());
+        buf[12..16].copy_from_slice(&42u32.to_le_bytes());
+        buf[16] = (-40i8) as u8;
+        buf[17] = (-90i8) as u8;
+        for k in 0..n_subcarriers as usize {
+            buf[20 + k * 2] = 5 + (k % 40) as u8;
+            buf[20 + k * 2 + 1] = (k % 30) as u8;
+        }
+        buf
+    }
+
+    #[test]
+    fn zero_antennas_is_rejected() {
+        let mut buf = frame(4);
+        buf[5] = 0;
+        assert!(parse_esp32_frame(&buf).is_none());
+    }
+
+    #[test]
+    fn zero_subcarriers_is_rejected() {
+        let mut buf = frame(4);
+        buf[6..8].copy_from_slice(&0u16.to_le_bytes());
+        assert!(parse_esp32_frame(&buf).is_none());
+    }
+
+    #[test]
+    fn bare_header_with_magic_is_rejected() {
+        // Exactly the 20-byte header: no I/Q at all.
+        let mut buf = frame(0);
+        buf[5] = 0;
+        assert_eq!(buf.len(), 20);
+        assert!(parse_esp32_frame(&buf).is_none());
+    }
+
+    #[test]
+    fn well_formed_frame_still_parses() {
+        let parsed = parse_esp32_frame(&frame(64)).expect("HT20 frame parses");
+        assert_eq!(parsed.n_antennas, 1);
+        assert_eq!(parsed.n_subcarriers, 64);
+        assert_eq!(parsed.amplitudes.len(), 64);
     }
 }
 
