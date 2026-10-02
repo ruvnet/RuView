@@ -4149,6 +4149,7 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
     // ADR-022 Phase 3: Multi-BSSID pipeline state (kept across ticks)
     let mut registry = BssidRegistry::new(32, 30);
     let mut pipeline = WindowsWifiPipeline::new();
+    let mut reported_missing_helper = false;
 
     info!(
         "WiFi RSSI pipeline active (platform={}, tick={}ms, max_bssids=32)",
@@ -4159,6 +4160,13 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
     loop {
         interval.tick().await;
         seq += 1;
+
+        // In `auto`, a live ESP32 stream outranks host WiFi: once the UDP
+        // receiver promotes the source, stop overwriting it (resumes if the
+        // nodes age out to esp32:offline), mirroring the simulator.
+        if state.read().await.effective_source() == "esp32" {
+            continue;
+        }
 
         // ── Step 1: Run multi-BSSID scan via spawn_blocking ──────────
         // Keep platform subprocess calls off the async runtime workers.
@@ -4201,7 +4209,17 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
                 continue;
             }
             Ok(Err(e)) => {
-                warn!("WiFi scan error: {e}");
+                if cfg!(target_os = "macos") && e.contains("failed to run mac_wifi helper") {
+                    if !reported_missing_helper {
+                        error!(
+                            "--source wifi on macOS needs the mac_wifi helper on PATH: \
+                             swiftc -O archive/v1/src/sensing/mac_wifi.swift -o <dir-on-PATH>/mac_wifi ({e})"
+                        );
+                        reported_missing_helper = true;
+                    }
+                } else {
+                    warn!("WiFi scan error: {e}");
+                }
                 #[cfg(not(target_os = "macos"))]
                 windows_wifi_fallback_tick(&state, seq).await;
                 continue;
@@ -4218,7 +4236,8 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
         let ssid = observations
             .first()
             .map(|o| o.ssid.clone())
-            .unwrap_or_else(|| "Unknown".into());
+            .filter(|ssid| !ssid.trim().is_empty())
+            .unwrap_or_else(|| "unnamed".into());
 
         // ── Step 2: Feed observations into registry ──────────────────
         registry.update(&observations);
@@ -4651,9 +4670,13 @@ fn plan_source(requested: &str, esp32_detected: bool, wifi_detected: bool) -> So
                     run_wifi: false,
                 }
             } else if wifi_detected {
+                // Host WiFi first, but keep the UDP receiver bound so ESP32
+                // nodes that start after the 2 s boot probe still promote
+                // the source to esp32 (same rule as #1004). Without this, a
+                // Mac whose connected-link probe succeeds would ignore nodes.
                 SourcePlan {
                     initial_source: "wifi".to_string(),
-                    bind_udp: false,
+                    bind_udp: true,
                     run_simulator: false,
                     run_wifi: true,
                 }
@@ -4733,11 +4756,12 @@ mod issue_1004_source_plan_tests {
         assert_eq!(plan.initial_source, "esp32");
     }
 
+    // Host WiFi must not shut out ESP32 nodes that start after the boot probe.
     #[test]
-    fn auto_with_wifi_detected_runs_wifi_no_udp() {
+    fn auto_with_wifi_detected_runs_wifi_and_still_binds_udp() {
         let plan = plan_source("auto", false, true);
         assert!(plan.run_wifi);
-        assert!(!plan.bind_udp);
+        assert!(plan.bind_udp, "auto+wifi must keep UDP bound so ESP32 can promote");
         assert!(!plan.run_simulator);
         assert_eq!(plan.initial_source, "wifi");
     }

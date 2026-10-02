@@ -160,8 +160,11 @@ fn parse_json_line(line: &str, timestamp: Instant) -> Option<BssidObservation> {
     let channel_f = extract_number_field(line, "channel")?;
     let channel = channel_f as u8;
 
+    // `--scan-once` reports only the connected link and marks it so.
+    let connected = extract_bool_field(line, "connected").unwrap_or(false);
+
     // Resolve BSSID: use real MAC if available, otherwise generate synthetic.
-    let bssid = resolve_bssid(&bssid_str, &ssid, channel)?;
+    let bssid = resolve_bssid(&bssid_str, &ssid, channel, connected)?;
 
     let band = BandType::from_channel(channel);
 
@@ -186,9 +189,11 @@ fn parse_json_line(line: &str, timestamp: Instant) -> Option<BssidObservation> {
 /// Resolve a BSSID string to a [`BssidId`].
 ///
 /// If the MAC is all-zeros (macOS redaction), generate a synthetic
-/// locally-administered MAC from the SSID and channel. Abstain when the
-/// real BSSID is unavailable and the SSID is blank.
-fn resolve_bssid(bssid_str: &str, ssid: &str, channel: u8) -> Option<BssidId> {
+/// locally-administered MAC from the SSID and channel. When both are redacted
+/// (no Location Services permission), keep the observation only if the helper
+/// marked it as the connected link: there is exactly one, so it cannot collide
+/// with another network. Otherwise abstain.
+fn resolve_bssid(bssid_str: &str, ssid: &str, channel: u8, connected: bool) -> Option<BssidId> {
     // Try parsing the real BSSID first.
     if let Ok(id) = BssidId::parse(bssid_str) {
         // Check for the all-zeros redacted BSSID.
@@ -200,13 +205,17 @@ fn resolve_bssid(bssid_str: &str, ssid: &str, channel: u8) -> Option<BssidId> {
     // Without either identity, unrelated networks on the same channel would
     // collapse to one synthetic BSSID. Do not emit an observation in that case.
     if ssid.trim().is_empty() {
-        return None;
+        return connected.then(|| synthetic_bssid(REDACTED_CONNECTED_LINK, channel));
     }
 
     // Generate synthetic BSSID from SSID and channel, take first 6 bytes,
     // set locally-administered + unicast bits (byte 0: bit 1 set, bit 0 clear).
     Some(synthetic_bssid(ssid, channel))
 }
+
+/// Hash key for the connected link when macOS redacts both SSID and BSSID.
+/// The NUL prefix keeps it from matching any real SSID.
+const REDACTED_CONNECTED_LINK: &str = "\u{0}redacted-connected-link";
 
 /// Generate a deterministic synthetic BSSID from SSID and channel.
 ///
@@ -271,6 +280,20 @@ fn extract_string_field(json: &str, key: &str) -> Option<String> {
     }
 
     Some(after_quote[..end].to_owned())
+}
+
+/// Extract a boolean field value (`"key": true|false`) from a JSON object string.
+fn extract_bool_field(json: &str, key: &str) -> Option<bool> {
+    let pattern = format!("\"{key}\"");
+    let key_pos = json.find(&pattern)?;
+    let after = json[key_pos + pattern.len()..].trim_start().strip_prefix(':')?.trim_start();
+    if after.starts_with("true") {
+        Some(true)
+    } else if after.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 /// Extract a numeric field value from a JSON object string.
@@ -373,6 +396,42 @@ mod tests {
                 assert!(parse_macos_scan_output(&output).unwrap().is_empty());
             }
         }
+    }
+
+    // macOS without Location Services: the helper's connected-link sample has
+    // a blank SSID and zero BSSID but real rssi/channel. Keep it (#H15).
+    #[test]
+    fn redacted_connected_link_is_kept() {
+        let output = r#"{"bssid":"00:00:00:00:00:00","channel":40,"connected":true,"noise":-94,"rssi":-57,"ssid":"","timestamp":1790888839.88,"tx_rate":576}"#;
+        let obs = parse_macos_scan_output(output).unwrap();
+        assert_eq!(obs.len(), 1);
+        assert!((obs[0].rssi_dbm - (-57.0)).abs() < f64::EPSILON);
+        assert_eq!(obs[0].channel, 40);
+        assert!(obs[0].ssid.is_empty(), "never invent an SSID");
+        assert_ne!(obs[0].bssid.0, [0; 6]);
+        assert_eq!(obs[0].bssid.0[0] & 0x03, 0x02, "locally administered unicast");
+        // Stable across samples, distinct from any real SSID's synthetic id.
+        let again = parse_macos_scan_output(output).unwrap();
+        assert_eq!(obs[0].bssid, again[0].bssid);
+        assert_ne!(obs[0].bssid, synthetic_bssid("", 40));
+    }
+
+    #[test]
+    fn redacted_line_not_marked_connected_still_abstains() {
+        for connected in ["", r#","connected":false"#] {
+            let output = format!(
+                r#"{{"ssid":"","bssid":"00:00:00:00:00:00","rssi":-65,"channel":36{connected}}}"#
+            );
+            assert!(parse_macos_scan_output(&output).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn extract_bool_field_basic() {
+        assert_eq!(extract_bool_field(r#"{"connected":true}"#, "connected"), Some(true));
+        assert_eq!(extract_bool_field(r#"{"connected" : false}"#, "connected"), Some(false));
+        assert_eq!(extract_bool_field(r#"{"connected":1}"#, "connected"), None);
+        assert_eq!(extract_bool_field(r#"{"x":true}"#, "connected"), None);
     }
 
     #[test]
