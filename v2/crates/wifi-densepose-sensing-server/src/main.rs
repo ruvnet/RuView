@@ -1978,6 +1978,9 @@ struct AppStateInner {
     /// same convention `MultistaticFuser::fuse` uses. See
     /// `node_positions_by_active_id`.
     node_positions_config: HashMap<u8, [f32; 3]>,
+    /// Node ids already logged as using `DEFAULT_NODE_POSITION`, so the
+    /// notice fires once per id rather than every cycle (issue #1804).
+    default_position_noted: std::collections::HashSet<u8>,
     /// Governed trust-path bridge (ADR-135..146): runs the same live frames
     /// through the privacy/provenance/witness control plane. Does not alter
     /// person-count behavior; its trust state (witness, effective class,
@@ -2620,6 +2623,7 @@ impl AppStateInner {
             last_tracker_instant: None,
             multistatic_fuser: MultistaticFuser::new(),
             node_positions_config: HashMap::new(),
+            default_position_noted: std::collections::HashSet::new(),
             engine_bridge: engine_bridge::EngineBridge::new(
                 wifi_densepose_bfld::PrivacyMode::PrivateHome,
                 1,
@@ -6552,7 +6556,24 @@ async fn health_ready(State(state): State<SharedState>) -> Json<serde_json::Valu
             "engine_error_count": s.engine_bridge.engine_error_count(),
             "raw_outputs_suppressed": s.engine_bridge.suppress_raw_outputs(),
         },
+        "node_positions": node_positions_status(&s.node_positions_config, &s.node_states),
     }))
+}
+
+/// `/api/v1/status` view of `--node-positions` (issue #1804): which node ids
+/// are configured, and which known nodes fall back to `DEFAULT_NODE_POSITION`.
+fn node_positions_status(
+    node_positions_config: &HashMap<u8, [f32; 3]>,
+    node_states: &HashMap<u8, NodeState>,
+) -> serde_json::Value {
+    let mut configured: Vec<u8> = node_positions_config.keys().copied().collect();
+    configured.sort_unstable();
+    serde_json::json!({
+        "configured_node_ids": configured,
+        "default_position": DEFAULT_NODE_POSITION,
+        "default_position_node_ids":
+            default_position_node_ids(node_positions_config, node_states.keys().copied()),
+    })
 }
 
 async fn health_system(State(state): State<SharedState>) -> Json<serde_json::Value> {
@@ -9561,6 +9582,9 @@ async fn nodes_endpoint(State(state): State<SharedState>) -> Json<serde_json::Va
                 "person_count_valid": ns.edge_vitals
                     .as_ref()
                     .map(|vitals| vitals.person_count_valid),
+                // Issue #1804: false means no --node-positions entry names this
+                // node, so it reports the shared default position.
+                "position_configured": s.node_positions_config.contains_key(&id),
             })
         })
         .collect();
@@ -9620,6 +9644,64 @@ fn node_positions_by_active_id(
                 .map(|p| (id, [p[0] as f64, p[1] as f64, p[2] as f64]))
         })
         .collect()
+}
+
+/// Position reported for a node with no `--node-positions` entry.
+const DEFAULT_NODE_POSITION: [f64; 3] = [2.0, 0.0, 1.5];
+
+/// Node ids with no `--node-positions` entry, sorted ascending.
+///
+/// Every such node reports `DEFAULT_NODE_POSITION`, so several of them sit on
+/// the same point. Issue #1804: nothing said which nodes those were.
+fn default_position_node_ids(
+    node_positions_config: &HashMap<u8, [f32; 3]>,
+    node_ids: impl IntoIterator<Item = u8>,
+) -> Vec<u8> {
+    let mut ids: Vec<u8> = node_ids
+        .into_iter()
+        .filter(|id| !node_positions_config.contains_key(id))
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+/// Log once per node id when a fresh node falls back to the default position.
+///
+/// WARN when `--node-positions` was given, since a node it does not name is
+/// usually an id mismatch; INFO when no positions were configured at all.
+/// Returns the ids logged this call.
+fn note_default_position_nodes(
+    node_positions_config: &HashMap<u8, [f32; 3]>,
+    node_states: &HashMap<u8, NodeState>,
+    warned: &mut std::collections::HashSet<u8>,
+    now: std::time::Instant,
+) -> Vec<u8> {
+    let fresh = node_states
+        .iter()
+        .filter(|(_, n)| node_is_fresh(n, now))
+        .map(|(&id, _)| id);
+    let newly: Vec<u8> = default_position_node_ids(node_positions_config, fresh)
+        .into_iter()
+        .filter(|id| warned.insert(*id))
+        .collect();
+    if newly.is_empty() {
+        return newly;
+    }
+    if node_positions_config.is_empty() {
+        info!(
+            "node(s) {newly:?} use the default position {DEFAULT_NODE_POSITION:?} \
+             (no --node-positions configured)"
+        );
+    } else {
+        let mut configured: Vec<u8> = node_positions_config.keys().copied().collect();
+        configured.sort_unstable();
+        warn!(
+            "node(s) {newly:?} have no --node-positions entry and use the default \
+             position {DEFAULT_NODE_POSITION:?}; configured node ids are {configured:?}"
+        );
+    }
+    newly
 }
 
 #[cfg(test)]
@@ -9699,6 +9781,65 @@ mod node_positions_by_active_id_tests {
 
         let resolved = node_positions_by_active_id(&cfg(&[]), &node_states, now);
         assert_eq!(resolved.get(&11), None);
+    }
+
+    /// Issue #1804: only ids the config names count as configured; duplicates
+    /// collapse and the result is sorted.
+    #[test]
+    fn default_position_node_ids_lists_unconfigured_nodes_sorted() {
+        let configured = cfg(&[(11, [0.0; 3]), (12, [0.0; 3]), (2, [0.0; 3])]);
+        assert_eq!(
+            default_position_node_ids(&configured, [3, 1, 2, 3]),
+            vec![1, 3]
+        );
+        assert!(default_position_node_ids(&configured, [2, 11]).is_empty());
+    }
+
+    #[test]
+    fn default_position_note_fires_once_per_fresh_node() {
+        let now = std::time::Instant::now();
+        let configured = cfg(&[(11, [1.0, 0.0, 0.0])]);
+        let mut node_states = HashMap::new();
+        node_states.insert(1, active_node(now));
+        node_states.insert(11, active_node(now));
+        let mut stale = NodeState::new();
+        stale.last_frame_time = Some(now - std::time::Duration::from_secs(30));
+        node_states.insert(5, stale);
+        let mut warned = std::collections::HashSet::new();
+
+        let first = note_default_position_nodes(&configured, &node_states, &mut warned, now);
+        assert_eq!(
+            first,
+            vec![1],
+            "configured and stale nodes are not reported"
+        );
+
+        let again = note_default_position_nodes(&configured, &node_states, &mut warned, now);
+        assert!(again.is_empty(), "a node is reported once");
+
+        // The node state can be evicted and recreated; the id is still known.
+        node_states.remove(&1);
+        node_states.insert(1, active_node(now));
+        node_states.insert(2, active_node(now));
+        let later = note_default_position_nodes(&configured, &node_states, &mut warned, now);
+        assert_eq!(later, vec![2]);
+    }
+
+    #[test]
+    fn status_view_lists_configured_and_default_position_nodes() {
+        let now = std::time::Instant::now();
+        let configured = cfg(&[(13, [0.0; 3]), (11, [0.0; 3]), (12, [0.0; 3])]);
+        let mut node_states = HashMap::new();
+        for id in [3u8, 1, 2] {
+            node_states.insert(id, active_node(now));
+        }
+        let view = node_positions_status(&configured, &node_states);
+        assert_eq!(view["configured_node_ids"], serde_json::json!([11, 12, 13]));
+        assert_eq!(
+            view["default_position_node_ids"],
+            serde_json::json!([1, 2, 3])
+        );
+        assert_eq!(view["default_position"], serde_json::json!([2.0, 0.0, 1.5]));
     }
 }
 
@@ -9926,6 +10067,15 @@ async fn udp_receiver_task(
                     // Build nodes array with all active nodes.
                     let resolved_positions =
                         node_positions_by_active_id(&s.node_positions_config, &s.node_states, now);
+                    {
+                        let sref: &mut AppStateInner = &mut s;
+                        note_default_position_nodes(
+                            &sref.node_positions_config,
+                            &sref.node_states,
+                            &mut sref.default_position_noted,
+                            now,
+                        );
+                    }
                     let active_nodes: Vec<NodeInfo> = s
                         .node_states
                         .iter()
@@ -9936,7 +10086,7 @@ async fn udp_receiver_task(
                             position: resolved_positions
                                 .get(&id)
                                 .copied()
-                                .unwrap_or([2.0, 0.0, 1.5]),
+                                .unwrap_or(DEFAULT_NODE_POSITION),
                             amplitude: vec![],
                             subcarrier_count: 0,
                             // Vitals-only path; still expose the sync snapshot
@@ -10448,6 +10598,15 @@ async fn udp_receiver_task(
                     let suppress_raw = s.engine_bridge.suppress_raw_outputs();
                     let resolved_positions =
                         node_positions_by_active_id(&s.node_positions_config, &s.node_states, now);
+                    {
+                        let sref: &mut AppStateInner = &mut s;
+                        note_default_position_nodes(
+                            &sref.node_positions_config,
+                            &sref.node_states,
+                            &mut sref.default_position_noted,
+                            now,
+                        );
+                    }
                     let active_nodes: Vec<NodeInfo> = s
                         .node_states
                         .iter()
@@ -10458,7 +10617,7 @@ async fn udp_receiver_task(
                             position: resolved_positions
                                 .get(&id)
                                 .copied()
-                                .unwrap_or([2.0, 0.0, 1.5]),
+                                .unwrap_or(DEFAULT_NODE_POSITION),
                             amplitude: if suppress_raw {
                                 vec![]
                             } else {
@@ -12203,6 +12362,12 @@ async fn main() {
                         "Configured {} node positions for multistatic fusion",
                         entries.len()
                     );
+                    // Issue #1804: say how unprefixed entries map to node ids.
+                    // The parsed count alone does not show whether any entry
+                    // matches a live node.
+                    if let Some(note) = field_bridge::positional_entries_note(&entries) {
+                        warn!("{note}");
+                    }
                     // Identity comes from the explicit `node_id:` prefix when
                     // given, and from the list index otherwise. Built by a
                     // tested function rather than inline here, because keying
@@ -12230,6 +12395,7 @@ async fn main() {
             fuser
         },
         node_positions_config,
+        default_position_noted: std::collections::HashSet::new(),
         engine_bridge: engine_bridge::EngineBridge::new(
             wifi_densepose_bfld::PrivacyMode::PrivateHome,
             1,

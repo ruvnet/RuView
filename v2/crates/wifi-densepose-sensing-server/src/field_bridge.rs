@@ -434,6 +434,32 @@ pub fn node_positions_by_id(
     map
 }
 
+/// Boot-time note for entries given without a `node_id:` prefix.
+///
+/// Those entries are keyed by list index from 0, so on a fleet numbered from 1
+/// the first entry goes to a node that does not exist and node 1 takes the
+/// second entry. The rule stays as it is, since existing configs depend on it;
+/// this only says it out loud. Returns `None` when every entry names its node.
+pub fn positional_entries_note(entries: &[NodePositionEntry]) -> Option<String> {
+    let mapping: Vec<String> = entries
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.node_id.is_none())
+        .map(|(idx, _)| format!("entry {idx} -> node {idx}"))
+        .collect();
+    if mapping.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{} node position entr{} without a node_id: prefix {} keyed by list index \
+         from 0 ({}); use node_id:x,y,z to name the node explicitly",
+        mapping.len(),
+        if mapping.len() == 1 { "y" } else { "ies" },
+        if mapping.len() == 1 { "is" } else { "are" },
+        mapping.join(", ")
+    ))
+}
+
 /// Parse node positions from a semicolon-delimited string.
 ///
 /// Format: `"x,y,z;x,y,z;..."` where each coordinate is an `f32`.
@@ -644,6 +670,35 @@ mod tests {
         for odd in [1u8, 3, 5, 7] {
             assert!(map.get(&odd).is_none(), "node {odd} does not exist in this fleet");
         }
+    }
+
+    /// Issue #1804: the unprefixed form maps entry 0 to node 0, so on a fleet
+    /// numbered from 1 node 1 takes the second entry. The boot note says so.
+    #[test]
+    fn positional_entries_note_names_the_index_mapping() {
+        let note = positional_entries_note(&parse_node_position_entries("0,0,2.5;4,0,2.5"))
+            .expect("unprefixed entries produce a note");
+        assert!(note.contains("keyed by list index from 0"), "{note}");
+        assert!(
+            note.contains("entry 0 -> node 0, entry 1 -> node 1"),
+            "{note}"
+        );
+    }
+
+    #[test]
+    fn positional_entries_note_lists_only_unprefixed_entries() {
+        let note = positional_entries_note(&parse_node_position_entries("5:1,1,1;2,2,2"))
+            .expect("one unprefixed entry");
+        assert!(note.starts_with("1 node position entry"), "{note}");
+        assert!(note.contains("entry 1 -> node 1"), "{note}");
+        assert!(!note.contains("entry 0"), "{note}");
+    }
+
+    #[test]
+    fn positional_entries_note_is_silent_when_every_entry_names_its_node() {
+        let entries = parse_node_position_entries("1:0,0,2.5;2:4,0,2.5");
+        assert_eq!(positional_entries_note(&entries), None);
+        assert_eq!(positional_entries_note(&[]), None);
     }
 
     /// A duplicate id keeps the later entry rather than silently holding two.
