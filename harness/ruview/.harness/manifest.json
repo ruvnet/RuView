@@ -43,7 +43,7 @@
     "skills/provision-node.md": "13dd6c35eac67b79116e370412b77df3509458da2c6f5d7a5938c2d008c5ed73",
     "skills/train-pose.md": "8cb132e468392497377828f7974c744e4c877134ed9a87f960f77fa1221540ba",
     "skills/verify.md": "2d38d240e9810a7827e2ebd3717dc0f85c646cc92e46c3812fe77c5b9eb40b76",
-    "src/brain.js": "0f16a75aea943acdacc430ff11d5df7ecdec9cca2ab497795ff6f33eaebdfab6",
+    "src/brain.js": "ff00e05c6cb5150c9fb3c86355127c6bf9b4030cc6d963dbcf5bf2c5109a5c20",
     "src/cli-ui.js": "507fbd4444c6639c69354790ed3aed2addcb826929a6b3ad7ddb752f058c1f2f",
     "src/cli.js": "5e8467f0d0fb90d81347715143b3777e239165d707dd9d8c5d647294509a7fc3",
     "src/devices/esp32.js": "4d7ff3d63d751222756e227a98de38c70a707e8be2a431d1b3ac604622f94225",
@@ -75,7 +75,7 @@
     "src/training.js": "b8451c48db69c7d077d75f07500996213beaa52705116f64afafe084e68e3956",
     "src/ui/console-widget.js": "0d2f707d57b5ec54968dee1dc80f31c7db9152dcadfc48700c18379dabb55462"
   },
-  "filesDigest": "60935843295b67f3354b4b02cc31df62bac8b5093568b11f896dfc7fc3a91545",
+  "filesDigest": "f8361c21651efc3fb47ce828ffa70d153f38c2eed45ea2b6c2878058d521f477",
   "brainDigest": "c0fb7b079ded157059b91601361429944697dae3cc42abc00dfe1a680986b0f4",
   "gateFingerprint": "6e53c784eee38310188948fc75fb49e6b4ebc04e247d01b903fa8c8a92d67bdd",
   "developmentPins": {
