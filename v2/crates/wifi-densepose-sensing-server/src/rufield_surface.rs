@@ -239,6 +239,7 @@ pub fn build_snapshot(
     trust_class: RuViewPrivacyClass,
     demoted: bool,
     identity_bound: bool,
+    synthetic: bool,
 ) -> SensingSnapshot {
     SensingSnapshot {
         timestamp_ns,
@@ -249,6 +250,7 @@ pub fn build_snapshot(
         demoted,
         identity_bound,
         node_id,
+        synthetic,
     }
 }
 
@@ -387,6 +389,7 @@ mod tests {
             RuViewPrivacyClass::Anonymous, // → P2, network-allowed
             false,
             false,
+            false,
         );
         let ev = surface.emit(&snap).expect("anonymous P2 cycle is surfaced");
         assert_eq!(ev.observation.privacy_class, PrivacyClass::P2);
@@ -409,6 +412,7 @@ mod tests {
                 RuViewPrivacyClass::Derived,
                 false,
                 identity_bound,
+                false,
             );
             assert!(
                 surface.emit(&snap).is_none(),
@@ -429,6 +433,7 @@ mod tests {
                 present_class(),
                 None,
                 RuViewPrivacyClass::Anonymous,
+                false,
                 false,
                 false,
             );
