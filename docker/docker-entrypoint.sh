@@ -34,8 +34,8 @@ set -e
 #
 # Escape hatches (operator must opt in explicitly):
 #   * Set RUVIEW_API_TOKEN to a strong secret → auth enabled on /api/v1/*.
-#   * Set RUVIEW_ALLOW_UNAUTHENTICATED=1 → preserves the pre-fix behaviour;
-#     only safe on an isolated trust boundary.
+#   * Set RUVIEW_ALLOW_UNAUTHENTICATED=1 (or true/yes/on, any case) →
+#     preserves the pre-fix behaviour; only safe on an isolated trust boundary.
 #   * Set RUVIEW_BIND_ADDR to a loopback / private interface → unauth is fine
 #     when the socket isn't reachable. The auto-bind nudges toward 127.0.0.1.
 #
@@ -45,7 +45,12 @@ set -e
 case "${1:-}" in
     cog-ha-matter|ha-matter|homecore|homecore-server) ;;
     *)
-        if [ -z "${RUVIEW_API_TOKEN:-}" ] && [ "${RUVIEW_ALLOW_UNAUTHENTICATED:-}" != "1" ]; then
+        # Same spellings the sensing-server accepts for its boolean env flags.
+        case "${RUVIEW_ALLOW_UNAUTHENTICATED:-}" in
+            1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]|[Oo][Nn]) __allow_unauth=1 ;;
+            *) __allow_unauth=0 ;;
+        esac
+        if [ -z "${RUVIEW_API_TOKEN:-}" ] && [ "$__allow_unauth" != "1" ]; then
             # If the operator hasn't overridden the bind, refuse outright on
             # the default 0.0.0.0. If they've nailed it to loopback (or a
             # specific private address they trust), let it run.

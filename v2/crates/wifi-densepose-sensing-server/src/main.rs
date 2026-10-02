@@ -126,7 +126,7 @@ struct Args {
     /// Accept a routable UDP bind with no source allowlist, explicitly opting
     /// into the LAN-spoofing risk (ADR-296). The UDP data plane is NOT
     /// authenticated; see the crate SECURITY.md.
-    #[arg(long, env = "RUVIEW_UDP_INSECURE_LAN")]
+    #[arg(long, env = "RUVIEW_UDP_INSECURE_LAN", value_parser = cli::parse_env_bool)]
     udp_insecure_lan: bool,
 
     /// Path to UI static files (repo `ui/`; from `v2/` use `../ui` or rely on auto-detect)
@@ -143,7 +143,7 @@ struct Args {
 
     /// Disable local `_ruview._tcp` discovery. Discovery is automatically
     /// skipped for loopback-only binds and never carries sensor data.
-    #[arg(long, env = "RUVIEW_NO_MDNS")]
+    #[arg(long, env = "RUVIEW_NO_MDNS", value_parser = cli::parse_env_bool)]
     no_mdns: bool,
 
     /// Stable, non-secret installation routing hint published over mDNS.
@@ -293,8 +293,28 @@ struct Args {
 
     /// Disable the edge module registry endpoint entirely. Returns 404 on
     /// `GET /api/v1/edge/registry`. Use for air-gapped deployments.
-    #[arg(long, env = "RUVIEW_NO_EDGE_REGISTRY")]
+    #[arg(long, env = "RUVIEW_NO_EDGE_REGISTRY", value_parser = cli::parse_env_bool)]
     no_edge_registry: bool,
+}
+
+#[cfg(test)]
+mod env_bool_flag_tests {
+    use super::Args;
+    use clap::Parser;
+
+    /// Bare flags still mean `true` with the env-friendly parser (#2091).
+    #[test]
+    fn bare_env_bool_flags_set_true() {
+        let args = Args::parse_from([
+            "sensing-server",
+            "--udp-insecure-lan",
+            "--no-mdns",
+            "--no-edge-registry",
+        ]);
+        assert!(args.udp_insecure_lan);
+        assert!(args.no_mdns);
+        assert!(args.no_edge_registry);
+    }
 }
 
 // ── Data types ───────────────────────────────────────────────────────────────
