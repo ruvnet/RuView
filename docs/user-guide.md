@@ -21,6 +21,7 @@ WiFi DensePose turns commodity WiFi signals into real-time human pose estimation
    - [Windows WiFi (RSSI Only)](#windows-wifi-rssi-only)
    - [ESP32-S3 (Full CSI)](#esp32-s3-full-csi)
    - [ESP32 Multistatic Mesh (Advanced)](#esp32-multistatic-mesh-advanced)
+   - [MediaTek Router CSI (Experimental)](#mediatek-router-csi-experimental)
    - [Connect Mesh Data to the Dashboard and Observatory](#connect-mesh-data-to-the-dashboard-and-observatory)
    - [Cognitum Spaces activation](#cognitum-spaces-activation)
    - [Cognitum Seed Integration (ADR-069)](#cognitum-seed-integration-adr-069)
@@ -390,6 +391,16 @@ The mesh uses a **Time-Division Multiplexing (TDM)** protocol so nodes take turn
 | Attention-weighted fusion | Cross-viewpoint attention with geometric diversity bias |
 
 See [ADR-029](adr/ADR-029-ruvsense-multistatic-sensing-mode.md) and [ADR-032](adr/ADR-032-multistatic-mesh-security-hardening.md) for the full design.
+
+### MediaTek Router CSI (Experimental)
+
+An OpenWrt router with an MT7981B + MT7976C radio (tested on a Wavlink WL-WN586X3 Rev A) can report CSI through MediaTek's vendor CSI patch. A host-side bridge converts it to MTC1 (ADR-267) for the sensing server:
+
+```bash
+./target/release/sensing-server --source mediatek --udp-port 5005 --http-port 3000 --ws-port 3001
+```
+
+Frames are labelled `mediatek:physical-unvalidated`. The presence and activity outputs on this source are uncalibrated heuristics with no sensing-quality validation. CSI exists only while associated clients transmit. See the [MediaTek Router CSI guide](mediatek-router-csi.md) for the OpenWrt build, arming CSI, the bridge, and limitations.
 
 ### Connect Mesh Data to the Dashboard and Observatory
 

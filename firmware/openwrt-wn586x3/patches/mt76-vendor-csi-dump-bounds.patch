@@ -1,0 +1,192 @@
+Fix for mt76-vendor 'dump csi' SIGSEGV.
+Base: mediatek/mtk-openwrt-feeds @ a15454c888f4f4144c50e33b5feef4f247c5f78b
+  feed/app/mt76-vendor/src/csi.c
+
+Root cause: the driver seeds its per-dump counter on the FIRST dumpit
+callback and only then decrements it, so a request for CSI_DUMP_PER_NUM=3
+yields FOUR records. Userspace sized csi[] for pkt_num but looped pkt_num/3
+times, storing up to 4*(pkt_num/3) records with no bounds check, so any dump
+with >= pkt_num records buffered wrote past the allocation. A dump that found
+only one record buffered never overran, which is why the single association
+record succeeded and every data-frame dump crashed.
+
+Also fixed: the JSON writer passed the full MAX_BUF_SIZE to every snprintf
+instead of the remaining space, and three attributes were dereferenced without
+being in the presence check.
+---
+--- /tmp/csi.c.orig	2026-09-19 19:46:49
++++ src/csi.c	2026-09-19 19:47:16
+@@ -6,6 +6,7 @@
+ 
+ struct csi_data *csi;
+ int csi_idx;
++int csi_max;	/* entries allocated in csi[] */
+ 
+ static struct nla_policy csi_ctrl_policy[NUM_MTK_VENDOR_ATTRS_CSI_CTRL] = {
+ 	[MTK_VENDOR_ATTR_CSI_CTRL_CFG] = { .type = NLA_NESTED },
+@@ -51,8 +52,13 @@
+ 	struct nlattr *cur;
+ 	size_t idx;
+ 	int rem;
+-	struct csi_data *c = &csi[csi_idx];
++	struct csi_data *c;
+ 
++	if (!csi || csi_idx >= csi_max)
++		return NL_SKIP;
++
++	c = &csi[csi_idx];
++
+ 	attr = unl_find_attr(&unl, msg, NL80211_ATTR_VENDOR_DATA);
+ 	if (!attr) {
+ 		fprintf(stderr, "Testdata attribute not found\n");
+@@ -90,15 +96,20 @@
+ 	c->pri_ch_idx = nla_get_u8(tb_data[MTK_VENDOR_ATTR_CSI_DATA_CH_IDX]);
+ 	c->rx_mode = nla_get_u8(tb_data[MTK_VENDOR_ATTR_CSI_DATA_MODE]);
+ 
+-	c->tx_idx = nla_get_u16(tb_data[MTK_VENDOR_ATTR_CSI_DATA_TX_ANT]);
+-	c->rx_idx = nla_get_u16(tb_data[MTK_VENDOR_ATTR_CSI_DATA_RX_ANT]);
++	c->tx_idx = tb_data[MTK_VENDOR_ATTR_CSI_DATA_TX_ANT] ?
++		nla_get_u16(tb_data[MTK_VENDOR_ATTR_CSI_DATA_TX_ANT]) : 0;
++	c->rx_idx = tb_data[MTK_VENDOR_ATTR_CSI_DATA_RX_ANT] ?
++		nla_get_u16(tb_data[MTK_VENDOR_ATTR_CSI_DATA_RX_ANT]) : 0;
+ 
+ 	c->ext_info = nla_get_u32(tb_data[MTK_VENDOR_ATTR_CSI_DATA_INFO]);
+ 	c->chain_info = nla_get_u32(tb_data[MTK_VENDOR_ATTR_CSI_DATA_CHAIN_INFO]);
+ 
+ 	c->ts = nla_get_u32(tb_data[MTK_VENDOR_ATTR_CSI_DATA_TS]);
+ 
+-	c->data_num = nla_get_u32(tb_data[MTK_VENDOR_ATTR_CSI_DATA_NUM]);
++	c->data_num = tb_data[MTK_VENDOR_ATTR_CSI_DATA_NUM] ?
++		nla_get_u32(tb_data[MTK_VENDOR_ATTR_CSI_DATA_NUM]) : 0;
++	if (c->data_num > CSI_BW160_DATA_COUNT)
++		c->data_num = CSI_BW160_DATA_COUNT;
+ 
+ 	idx = 0;
+ 	nla_for_each_nested(cur, tb_data[MTK_VENDOR_ATTR_CSI_DATA_TA], rem) {
+@@ -125,7 +136,7 @@
+ 
+ static int mt76_csi_to_json(const char *name)
+ {
+-#define MAX_BUF_SIZE	6000
++#define MAX_BUF_SIZE	16384	/* 2 x 512 samples of "-32768," plus header */
+ 	FILE *f;
+ 	int i, ret = -ENOMEM;
+ 
+@@ -142,7 +153,7 @@
+ 
+ 	for (i = 0; i < csi_idx; i++) {
+ 		struct csi_data *c = &csi[i];
+-		char *pos, *buf;
++		char *pos, *buf, *end;
+ 		int j;
+ 
+ 		buf = malloc(MAX_BUF_SIZE);
+@@ -150,40 +161,51 @@
+ 			goto out;
+ 
+ 		pos = buf;
+-		pos += snprintf(pos, MAX_BUF_SIZE, "%c", '[');
++		end = buf + MAX_BUF_SIZE;
++#define EMIT(...) do { \
++		int _n = snprintf(pos, (size_t)(end - pos), __VA_ARGS__); \
++		if (_n < 0 || _n >= (int)(end - pos)) { \
++			fprintf(stderr, "csi json: record %d truncated\n", i); \
++			free(buf); \
++			goto out; \
++		} \
++		pos += _n; \
++	} while (0)
+ 
+-		pos += snprintf(pos, MAX_BUF_SIZE, "%d,", c->ts);
+-		pos += snprintf(pos, MAX_BUF_SIZE, "\"%02x%02x%02x%02x%02x%02x\",", c->ta[0], c->ta[1], c->ta[2], c->ta[3], c->ta[4], c->ta[5]);
++		EMIT("%c", '[');
+ 
+-		pos += snprintf(pos, MAX_BUF_SIZE, "%d,", c->rssi);
+-		pos += snprintf(pos, MAX_BUF_SIZE, "%u,", c->snr);
+-		pos += snprintf(pos, MAX_BUF_SIZE, "%u,", c->data_bw);
+-		pos += snprintf(pos, MAX_BUF_SIZE, "%u,", c->pri_ch_idx);
+-		pos += snprintf(pos, MAX_BUF_SIZE, "%u,", c->rx_mode);
+-		pos += snprintf(pos, MAX_BUF_SIZE, "%d,", c->tx_idx);
+-		pos += snprintf(pos, MAX_BUF_SIZE, "%d,", c->rx_idx);
+-		pos += snprintf(pos, MAX_BUF_SIZE, "%d,", c->chain_info);
+-		pos += snprintf(pos, MAX_BUF_SIZE, "%d,", c->ext_info);
++		EMIT("%d,", c->ts);
++		EMIT("\"%02x%02x%02x%02x%02x%02x\",", c->ta[0], c->ta[1], c->ta[2], c->ta[3], c->ta[4], c->ta[5]);
+ 
+-		pos += snprintf(pos, MAX_BUF_SIZE, "%c", '[');
+-		for (j = 0; j < c->data_num; j++) {
+-			pos += snprintf(pos, MAX_BUF_SIZE, "%d", c->data_i[j]);
+-			if (j != (c->data_num - 1))
+-				pos += snprintf(pos, MAX_BUF_SIZE, ",");
+-		}
+-		pos += snprintf(pos, MAX_BUF_SIZE, "%c,", ']');
++		EMIT("%d,", c->rssi);
++		EMIT("%u,", c->snr);
++		EMIT("%u,", c->data_bw);
++		EMIT("%u,", c->pri_ch_idx);
++		EMIT("%u,", c->rx_mode);
++		EMIT("%d,", c->tx_idx);
++		EMIT("%d,", c->rx_idx);
++		EMIT("%d,", c->chain_info);
++		EMIT("%d,", c->ext_info);
+ 
+-		pos += snprintf(pos, MAX_BUF_SIZE, "%c", '[');
++		EMIT("%c", '[');
+ 		for (j = 0; j < c->data_num; j++) {
+-			pos += snprintf(pos, MAX_BUF_SIZE, "%d", c->data_q[j]);
++			EMIT("%d", c->data_i[j]);
+ 			if (j != (c->data_num - 1))
+-				pos += snprintf(pos, MAX_BUF_SIZE, ",");
++				EMIT(",");
+ 		}
+-		pos += snprintf(pos, MAX_BUF_SIZE, "%c", ']');
++		EMIT("%c,", ']');
+ 
+-		pos += snprintf(pos, MAX_BUF_SIZE, "%c", ']');
++		EMIT("%c", '[');
++		for (j = 0; j < c->data_num; j++) {
++			EMIT("%d", c->data_q[j]);
++			if (j != (c->data_num - 1))
++				EMIT(",");
++		}
++		EMIT("%c", ']');
++
++		EMIT("%c", ']');
+ 		if (i != csi_idx - 1)
+-			pos += snprintf(pos, MAX_BUF_SIZE, ",");
++			EMIT(",");
+ 
+ 		if (fwrite(buf, 1, pos - buf, f) != (pos - buf)) {
+ 			perror("fwrite");
+@@ -192,6 +214,7 @@
+ 		}
+ 
+ 		free(buf);
++#undef EMIT
+ 	}
+ 
+ 	if (fwrite("]", 1, 1, f) != 1) {
+@@ -221,10 +244,21 @@
+ 		return -EINVAL;
+ 
+ #define CSI_DUMP_PER_NUM	3
++/* The driver seeds its per-dump counter on the first callback and only then
++ * decrements it, so a request for N yields N+1 records. Size for that. */
++#define CSI_DUMP_PER_REQ	(CSI_DUMP_PER_NUM + 1)
+ 	csi_idx = 0;
+-	csi = (struct csi_data *)calloc(pkt_num, sizeof(*csi));
++	csi_max = pkt_num;
++	csi = (struct csi_data *)calloc(csi_max, sizeof(*csi));
++	if (!csi) {
++		fprintf(stderr, "csi: cannot allocate %d records\n", csi_max);
++		return -ENOMEM;
++	}
+ 
+-	for (i = 0; i < pkt_num / CSI_DUMP_PER_NUM; i++) {
++	for (i = 0; i < DIV_ROUND_UP(pkt_num, CSI_DUMP_PER_REQ); i++) {
++		if (csi_idx >= csi_max)
++			break;
++
+ 		if (unl_genl_init(&unl, "nl80211") < 0) {
+ 			fprintf(stderr, "Failed to connect to nl80211\n");
+ 			return 2;

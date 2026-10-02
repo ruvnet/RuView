@@ -1,0 +1,187 @@
+Subject: [PATCH] mediatek: wl-wn586x3 Rev A - single-image sysupgrade, generic SPI-NOR
+
+Origin: https://github.com/dadogroove/openwrt/tree/wl-wn586x3
+  branch wl-wn586x3 @ b080a6550ec6928400735dab4837601efaaf6243 (2026-09-19),
+  which tracks openwrt/main. Ported here onto the v24.10.8 tag.
+  Forum: https://forum.openwrt.org/t/wavlink-wl-wn586x3-ver-a-installation-advice/243893
+
+Four separable changes, all in target/, none touching package/kernel/mt76, so
+this is orthogonal to the CSI driver patch and composes with it.
+
+1. Single-image sysupgrade (filogic.mk, platform.sh). Replaces the stock
+   wn586x3 recipe with the append-kernel/append-rootfs/append-metadata form
+   that wl-wn573hx3 already uses in 24.10.8, adds a `fit lzma` KERNEL, drops
+   IMAGE_SIZE 15424k to 14336k, marks the firmware partition `denx,fit`, and
+   adds the board to the default_do_upgrade case list. One sysupgrade.bin then
+   serves both the initial mtd write and later sysupgrades. This is the
+   soft-brick fix dadogroove landed 2026-04-25.
+
+2. Generic SPI-NOR operation (the Boya fix). There is NO Boya BY25Q128AS
+   driver patch anywhere - the fix is a DELETION. Dropping
+   spi-tx-bus-width/spi-rx-bus-width = <4> stops the controller driving the
+   chip in quad mode, so the generic jedec,spi-nor binding is sufficient and
+   the chip no longer needs to be recognised by name. spi-max-frequency also
+   goes 25 -> 50 MHz.
+
+3. MAC addressing. Sources both ethernet MACs from absolute factory offsets
+   0x3fff4/0x3fffa instead of the mac-base cell at hw+0x44e, and drops the
+   wifi mac-address cell so wifi takes its MAC from the EEPROM. Entangled with
+   (2) only by file, but NOT separable within this patch: the eth nodes and the
+   cell definitions must move together. This CHANGES the MACs the board
+   presents versus an official 24.10.8 image. Adopted because dadogroove has
+   the hardware and his build is the one known to boot on Boya units.
+
+4. Cosmetic: gpio-keys node renamed button-reset -> button-0; mdio_pins
+   pinctrl moved onto &eth.
+
+Adaptations made while porting to 24.10.8:
+ - platform.sh: the case list is ordered differently; wl-wn586x3 was inserted
+   next to the wl-wn573hx3 entry that is already there.
+ - &wifi: 24.10.8 takes the EEPROM via `mediatek,mtd-eeprom = <&factory 0x0>`,
+   not snapshot's eeprom_factory_0 nvmem cell, so only the mac-address cell
+   was removed.
+ - filogic.mk hunk landed at a -1824 line offset; content identical.
+Verified: no dangling DTS labels. NOT yet verified: DTB compilation, and
+nothing has been flashed.
+---
+diff --git a/target/linux/mediatek/dts/mt7981b-wavlink-wl-wn586x3.dts b/target/linux/mediatek/dts/mt7981b-wavlink-wl-wn586x3.dts
+index 62be0faa4af3..2260df89e9b5 100644
+--- a/target/linux/mediatek/dts/mt7981b-wavlink-wl-wn586x3.dts
++++ b/target/linux/mediatek/dts/mt7981b-wavlink-wl-wn586x3.dts
+@@ -24,7 +24,7 @@
+ 	gpio-keys {
+ 		compatible = "gpio-keys";
+ 
+-		button-reset {
++		button-0 {
+ 			label = "reset";
+ 			linux,code = <KEY_RESTART>;
+ 			gpios = <&pio 11 GPIO_ACTIVE_LOW>;
+@@ -79,13 +79,17 @@
+ };
+ 
+ &eth {
++
++	pinctrl-names = "default";
++	pinctrl-0 = <&mdio_pins>;
++
+ 	status = "okay";
+ 
+ 	gmac0: mac@0 {
+ 		compatible = "mediatek,eth-mac";
+ 		reg = <0>;
+ 		phy-mode = "2500base-x";
+-		nvmem-cells = <&macaddr_hw_44e 0>;
++		nvmem-cells = <&macaddr_factory_3fff4>;
+ 		nvmem-cell-names = "mac-address";
+ 
+ 		fixed-link {
+@@ -100,7 +104,7 @@
+ 		reg = <1>;
+ 		phy-mode = "gmii";
+ 		phy-handle = <&int_gbe_phy>;
+-		nvmem-cells = <&macaddr_hw_44e 1>;
++		nvmem-cells = <&macaddr_factory_3fffa>;
+ 		nvmem-cell-names = "mac-address";
+ 	};
+ };
+@@ -118,8 +122,6 @@
+ };
+ 
+ &spi0 {
+-	pinctrl-names = "default";
+-	pinctrl-0 = <&spi0_flash_pins>;
+ 	status = "disabled";
+ };
+ 
+@@ -135,9 +137,7 @@
+ 		compatible = "jedec,spi-nor";
+ 		reg = <0>;
+ 
+-		spi-max-frequency = <25000000>;
+-		spi-tx-bus-width = <4>;
+-		spi-rx-bus-width = <4>;
++		spi-max-frequency = <50000000>;
+ 
+ 		partitions {
+ 			compatible = "fixed-partitions";
+@@ -166,10 +166,12 @@
+ 					#address-cells = <1>;
+ 					#size-cells = <1>;
+ 
+-					macaddr_factory_4: macaddr@4 {
+-						compatible = "mac-base";
+-						reg = <0x4 0x6>;
+-						#nvmem-cell-cells = <1>;
++					macaddr_factory_3fff4: macaddr@3fff4 {
++						reg = <0x3fff4 0x6>;
++					};
++
++					macaddr_factory_3fffa: macaddr@3fffa {
++						reg = <0x3fffa 0x6>;
+ 					};
+ 				};
+ 			};
+@@ -181,6 +183,7 @@
+ 			};
+ 
+ 			partition@f0000 {
++				compatible = "denx,fit";
+ 				label = "firmware";
+ 				reg = <0x180000 0xe00000>;
+ 			};
+@@ -189,17 +192,6 @@
+ 				label = "hw";
+ 				reg = <0xf80000 0x80000>;
+ 
+-				nvmem-layout {
+-					compatible = "fixed-layout";
+-					#address-cells = <1>;
+-					#size-cells = <1>;
+-
+-					macaddr_hw_44e: macaddr@44e {
+-						compatible = "mac-base";
+-						reg = <0x44e 0x11>;
+-						#nvmem-cell-cells = <1>;
+-					};
+-				};
+ 			};
+ 		};
+ 	};
+@@ -265,6 +257,4 @@
+ &wifi {
+ 	status = "okay";
+ 	mediatek,mtd-eeprom = <&factory 0x0>;
+-	nvmem-cells = <&macaddr_factory_4 0>;
+-	nvmem-cell-names = "mac-address";
+ };
+diff --git a/target/linux/mediatek/filogic/base-files/lib/upgrade/platform.sh b/target/linux/mediatek/filogic/base-files/lib/upgrade/platform.sh
+index 8af61b028926..4a71285bea01 100644
+--- a/target/linux/mediatek/filogic/base-files/lib/upgrade/platform.sh
++++ b/target/linux/mediatek/filogic/base-files/lib/upgrade/platform.sh
+@@ -137,6 +137,7 @@ platform_do_upgrade() {
+ 	cudy,wr3000-v1|\
+ 	yuncore,ax835|\
+ 	wavlink,wl-wn573hx3|\
++	wavlink,wl-wn586x3|\
+ 	totolink,x6000r)
+ 		default_do_upgrade "$1"
+ 		;;
+diff --git a/target/linux/mediatek/image/filogic.mk b/target/linux/mediatek/image/filogic.mk
+index b7f8ffd47c51..756dc86b8541 100644
+--- a/target/linux/mediatek/image/filogic.mk
++++ b/target/linux/mediatek/image/filogic.mk
+@@ -1910,8 +1910,12 @@ define Device/wavlink_wl-wn586x3
+   DEVICE_DTS := mt7981b-wavlink-wl-wn586x3
+   DEVICE_DTS_DIR := ../dts
+   DEVICE_DTS_LOADADDR := 0x47000000
+-  IMAGE_SIZE := 15424k
+   DEVICE_PACKAGES := kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware
++  IMAGE_SIZE := 14336k
++  IMAGES := sysupgrade.bin
++  KERNEL := kernel-bin | lzma | \
++	fit lzma $$(KDIR)/image-$$(firstword $$(DEVICE_DTS)).dtb
++  IMAGE/sysupgrade.bin := append-kernel | pad-to 128k | append-rootfs | pad-rootfs | check-size | append-metadata
+ endef
+ TARGET_DEVICES += wavlink_wl-wn586x3
+ 

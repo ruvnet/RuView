@@ -17,7 +17,11 @@ mod field_bridge;
 mod field_localize;
 mod model_format;
 mod multistatic_bridge;
+mod mediatek_activity;
 mod mediatek_csi;
+mod mediatek_csi_ring;
+mod mediatek_devices;
+mod mediatek_heuristic;
 mod qualcomm_csi;
 mod realtek_csi;
 mod realtek_radar;
@@ -109,6 +113,21 @@ struct Args {
     #[arg(long, default_value = "5005")]
     udp_port: u16,
 
+    /// Per-device ring buffer size (frame count) for MediaTek per-subcarrier
+    /// CSI inspection (`/api/v1/csi/mediatek/devices/:id/frames`). See `mediatek_csi_ring`'s doc
+    /// comment for the memory bound at this default.
+    #[arg(long, default_value = "256")]
+    csi_ring: usize,
+
+    /// Path to persist each MediaTek device's learned `activity` floor
+    /// (JSON `{device_id: floor}`), written every
+    /// `mediatek_activity::ACTIVITY_STATE_PERSIST_INTERVAL` and loaded at
+    /// startup, so a restart doesn't reset the quiet-room baseline it took
+    /// up to FLOOR_INIT_WINDOW (or longer) to learn. In-memory only
+    /// (no persistence) when omitted.
+    #[arg(long)]
+    activity_state: Option<std::path::PathBuf>,
+
     /// UDP bind address for the CSI receiver (ADR-296). Defaults to
     /// `127.0.0.1` (loopback only). Binding to a routable address (`0.0.0.0`
     /// or a LAN IP) is an explicit operator choice and requires `--udp-allow`
@@ -185,7 +204,7 @@ struct Args {
     #[command(flatten)]
     mqtt_opts: wifi_densepose_sensing_server::cli::MqttArgs,
 
-    /// Data source: auto, wifi, esp32, simulate
+    /// Data source: auto, wifi, esp32, mediatek, simulate
     #[arg(long, default_value = "auto")]
     source: String,
 
@@ -480,6 +499,24 @@ struct SensingUpdate {
     /// fresh node backs the room rather than a frozen online value.
     #[serde(skip_serializing_if = "Option::is_none")]
     room_inference: Option<RoomInference>,
+    /// Which detector produced `classification`/`nodes[].node_inference`, when
+    /// it isn't the validated ESP32 `extract_features_from_frame` /
+    /// `VitalSignDetector` pipeline (that path leaves this `None`, matching
+    /// its pre-existing wire format). Set to
+    /// `mediatek_heuristic::CLASSIFIER_ID` on frames derived from the
+    /// unvalidated MediaTek amplitude heuristic so consumers never mistake
+    /// one for the other.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    classifier: Option<String>,
+    /// Relative fast/slow activity index (2026-09-20, `mediatek_activity`,
+    /// `activity-index-v0`) — `{room:{level,index,peak_30s},
+    /// devices:{device_id:{level,index,fast,slow,peak_30s,frames_2s}}}`.
+    /// Answers "is the channel fluctuating more than it typically does
+    /// here", NOT an absolute presence call — see the module's doc comment
+    /// for why a room that's always busy trends back toward the middle of
+    /// the scale. `None` on every non-MediaTek update.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    activity: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -489,6 +526,15 @@ struct NodeInfo {
     position: [f64; 3],
     amplitude: Vec<f64>,
     subcarrier_count: usize,
+    /// Stable receiver identity for sources whose real identity isn't a small
+    /// mesh index, e.g. a MediaTek MTC1 `device_id` (64-bit, serialized as a
+    /// 16-hex-char string). `None` on ESP32/simulated nodes, which keep using
+    /// `node_id`. When present, the MQTT mapper
+    /// (`vitals_snapshots_from_sensing_json`) keys per-node topics on this
+    /// instead of `node_id`, since collapsing a 64-bit id into `node_id: u8`
+    /// risks two receivers colliding onto the same topic.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    device_id: Option<String>,
     /// ADR-110 iter 23 — cross-board sync snapshot for this node.
     /// `None` when no fresh sync packet has been observed (no mesh peer
     /// reachable, or this node is a singleton). Populated from
@@ -498,9 +544,30 @@ struct NodeInfo {
     /// ADR-297 — this node's *own* inference (classification + confidence +
     /// freshness). Distinct from the room aggregate; a node reports what it
     /// sees, with no silent fallback to the room value. `None` on synthetic /
-    /// placeholder frames that carry no per-node classification.
+    /// placeholder frames that carry no per-node classification, AND on a
+    /// MediaTek device whose confidence is below
+    /// `mediatek_heuristic::UNKNOWN_CONFIDENCE_THRESHOLD` (it abstains from
+    /// the room vote rather than asserting "absent" on weak evidence — see
+    /// `mediatek_diagnostics.presence_state` for that case).
     #[serde(skip_serializing_if = "Option::is_none")]
     node_inference: Option<NodeInference>,
+    /// MediaTek-heuristic-specific per-device diagnostics (added with the
+    /// hysteresis fix), so a client can show why a device reads
+    /// the way it does even when it abstained (`node_inference: None`).
+    /// `None` on every non-MediaTek node.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mediatek_diagnostics: Option<MediatekNodeDiagnostics>,
+}
+
+/// See `NodeInfo::mediatek_diagnostics`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct MediatekNodeDiagnostics {
+    /// "present" | "absent" | "unknown" — see `mediatek_heuristic::PresenceState`.
+    presence_state: String,
+    coefficient_of_variation: f64,
+    baseline_deviation: f64,
+    sample_count: usize,
+    span_ms: u64,
 }
 
 /// ADR-110 iter 23 — per-node mesh-sync snapshot embedded in NodeInfo.
@@ -1857,6 +1924,51 @@ struct AppStateInner {
     latest_mediatek_csi: Option<mediatek_csi::MediatekCsiSnapshot>,
     /// Instant of the last validated MediaTek CSI UDP frame.
     last_mediatek_frame: Option<std::time::Instant>,
+    /// Per-device MediaTek CSI, keyed by `device_id`, so multiple MediaTek
+    /// bridges (e.g. two WN586X3 routers) each keep their own slot instead of
+    /// overwriting `latest_mediatek_csi`. See `mediatek_devices` module and
+    /// `/api/v1/csi/mediatek/devices`.
+    mediatek_csi_by_device:
+        HashMap<String, (mediatek_csi::MediatekCsiSnapshot, std::time::Instant)>,
+    /// Per-device rolling amplitude history backing the MediaTek heuristic
+    /// classifier (`mediatek_heuristic`), keyed by `device_id`. Separate from
+    /// `mediatek_csi_by_device` above: that map holds the last raw snapshot
+    /// for the `/devices` route; this one accumulates the window the
+    /// heuristic judges presence/motion from.
+    mediatek_heuristic_by_device: HashMap<String, mediatek_heuristic::DeviceHistory>,
+    /// Per-device bounded ring buffer of full per-subcarrier amplitude/phase
+    /// (`mediatek_csi_ring`), for per-device channel inspection.
+    /// Sized by `csi_ring_capacity` (the `--csi-ring` flag) when a device's
+    /// entry is first created.
+    mediatek_csi_ring_by_device: HashMap<String, mediatek_csi_ring::DeviceRing>,
+    /// Ring size (frame count) for new entries in `mediatek_csi_ring_by_device`.
+    /// Set once from `--csi-ring` at startup.
+    csi_ring_capacity: usize,
+    /// Per-device fast/slow relative-activity EMA + peak-hold state
+    /// (`mediatek_activity`, activity-index-v0), keyed by `device_id`.
+    mediatek_activity_by_device: HashMap<String, mediatek_activity::ActivityTracker>,
+    /// Floors loaded from `--activity-state` at startup (empty if the flag
+    /// was omitted or the file didn't exist yet), consulted once when a
+    /// device_id's `ActivityTracker` is first created so a restart doesn't
+    /// reset its learned quiet-room baseline. Read-only after startup —
+    /// never mutated once `main()` seeds it.
+    activity_floor_seed: HashMap<String, f64>,
+    /// Room-level 30s peak-hold history for the room activity index —
+    /// separate from each device's own (`ActivityTracker` carries that
+    /// itself), since the room index is a per-tick aggregate rather than
+    /// something with its own EMA state.
+    room_activity_peak_history: std::collections::VecDeque<(std::time::Instant, f64)>,
+    /// Room-level 30s peak-hold history for the ABSOLUTE (`abs_level`)
+    /// activity index — separate from `room_activity_peak_history` above,
+    /// which tracks the relative `level`'s own peak.
+    room_abs_activity_peak_history: std::collections::VecDeque<(std::time::Instant, f64)>,
+    /// Decimated (~1 Hz) room + per-device activity history for
+    /// `GET /api/v1/csi/mediatek/activity`, retained for
+    /// `mediatek_activity::HISTORY_RETENTION`.
+    activity_history: std::collections::VecDeque<mediatek_activity::ActivitySample>,
+    /// Gate for `activity_history`'s decimation — the `Instant` the last
+    /// sample was actually appended (not every ingest tick).
+    activity_history_last_sampled: Option<std::time::Instant>,
     /// Latest validated Qualcomm CSI summary; raw matrices are not retained here.
     latest_qualcomm_csi: Option<qualcomm_csi::QualcommCsiSnapshot>,
     /// Instant of the last validated Qualcomm CSI UDP frame.
@@ -2569,6 +2681,16 @@ impl AppStateInner {
             last_realtek_frame: None,
             latest_mediatek_csi: None,
             last_mediatek_frame: None,
+            mediatek_csi_by_device: HashMap::new(),
+            mediatek_heuristic_by_device: HashMap::new(),
+            mediatek_csi_ring_by_device: HashMap::new(),
+            csi_ring_capacity: 16,
+            mediatek_activity_by_device: HashMap::new(),
+            activity_floor_seed: HashMap::new(),
+            room_activity_peak_history: std::collections::VecDeque::new(),
+            room_abs_activity_peak_history: std::collections::VecDeque::new(),
+            activity_history: std::collections::VecDeque::new(),
+            activity_history_last_sampled: None,
             latest_qualcomm_csi: None,
             last_qualcomm_frame: None,
             latest_realtek_csi: None,
@@ -4332,12 +4454,14 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
             tick,
             nodes: vec![NodeInfo {
                 node_id: 0,
+                device_id: None,
                 rssi_dbm: first_rssi,
                 position: [0.0, 0.0, 0.0],
                 amplitude: multi_ap_frame.amplitudes,
                 subcarrier_count: obs_count,
                 sync: None,  // multi-BSSID scan path — no mesh peer
                 node_inference: None, // single aggregate frame; no per-node split
+                mediatek_diagnostics: None,
             }],
             features,
             classification,
@@ -4366,6 +4490,8 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
             },
             node_features: None,
             room_inference: None,
+            classifier: None,
+            activity: None,
         };
 
         // Populate persons from the sensing update (Kalman-smoothed via tracker).
@@ -4498,12 +4624,14 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         tick,
         nodes: vec![NodeInfo {
             node_id: 0,
+            device_id: None,
             rssi_dbm,
             position: [0.0, 0.0, 0.0],
             amplitude: vec![signal_pct],
             subcarrier_count: 1,
             sync: None,  // synthetic-RSSI fallback path — no mesh peer
             node_inference: None, // synthetic fallback; no per-node inference
+            mediatek_diagnostics: None,
         }],
         features,
         classification,
@@ -4532,6 +4660,8 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         },
         node_features: None,
         room_inference: None,
+        classifier: None,
+        activity: None,
     };
 
     let raw_persons = derive_pose_from_sensing(&update);
@@ -4682,6 +4812,19 @@ fn plan_source(requested: &str, esp32_detected: bool, wifi_detected: bool) -> So
             run_simulator: false,
             run_wifi: false,
         },
+        // Explicit MediaTek override: bind UDP so MTC1 frames from
+        // wifi-densepose-mtk-bridge (or the ADR-266 simulator) are received and
+        // served on /api/v1/csi/mediatek/*, but never run the ESP32-shaped
+        // simulator — it has no per-device mediatek branch to stand down for
+        // (see `simulated_data_task`'s `effective_source() == "esp32"` guard)
+        // and would otherwise fabricate a "simulated" room classification
+        // forever alongside real MediaTek data.
+        "mediatek" => SourcePlan {
+            initial_source: "mediatek".to_string(),
+            bind_udp: true,
+            run_simulator: false,
+            run_wifi: false,
+        },
         "wifi" => SourcePlan {
             initial_source: "wifi".to_string(),
             bind_udp: false,
@@ -4761,6 +4904,36 @@ mod issue_1004_source_plan_tests {
         assert!(plan.bind_udp);
         assert!(!plan.run_simulator);
         assert_eq!(plan.initial_source, "esp32");
+    }
+
+    // Before this arm existed, `--source mediatek` fell into the `other`
+    // catch-all below (bind_udp: false) and silently received nothing at all.
+    // Mirrors `explicit_esp32_binds_udp`: bind UDP for real MTC1 frames, but
+    // never run the ESP32-shaped simulator (it has no mediatek branch to
+    // stand down for).
+    #[test]
+    fn explicit_mediatek_binds_udp_no_simulator() {
+        let plan = plan_source("mediatek", false, false);
+        assert!(plan.bind_udp, "--source mediatek must receive MTC1 frames");
+        assert!(
+            !plan.run_simulator,
+            "must not fabricate a simulated classification"
+        );
+        assert!(!plan.run_wifi);
+        assert_eq!(plan.initial_source, "mediatek");
+    }
+
+    // The bug `explicit_mediatek_binds_udp_no_simulator` guards against is
+    // general: any vendor name not explicitly matched still falls into the
+    // catch-all and binds nothing. Pinned here so the next vendor addition
+    // remembers to add its own arm rather than relying on this default.
+    #[test]
+    fn unmatched_vendor_name_still_binds_nothing_by_default() {
+        let plan = plan_source("qualcomm", false, false);
+        assert!(!plan.bind_udp);
+        assert!(!plan.run_simulator);
+        assert!(!plan.run_wifi);
+        assert_eq!(plan.initial_source, "qualcomm");
     }
 
     // Promotion check: the runtime promotes by setting `AppStateInner.source`
@@ -9702,6 +9875,619 @@ mod node_positions_by_active_id_tests {
     }
 }
 
+/// Build the MediaTek-heuristic `SensingUpdate` from every currently-fresh
+/// device in `mediatek_csi_by_device` / `mediatek_heuristic_by_device`, after
+/// the caller has already folded the arriving frame's amplitude into its own
+/// device's history via `DeviceHistory::observe`. Devices whose last frame is
+/// older than `stale_after` are dropped from the vote, mirroring the same
+/// per-vendor freshness pattern `effective_source` already uses — a receiver
+/// that goes quiet takes only itself out of the room.
+///
+/// `classifier` is always `Some(mediatek_heuristic::CLASSIFIER_ID)`: this
+/// path never produces the validated ESP32 pipeline's output.
+fn mediatek_room_update(
+    s: &mut AppStateInner,
+    now: std::time::Instant,
+    stale_after: std::time::Duration,
+    tick: u64,
+    source: String,
+) -> SensingUpdate {
+    let mut verdicts: HashMap<String, mediatek_heuristic::DeviceVerdict> = HashMap::new();
+    let fresh_ids: Vec<String> = s
+        .mediatek_csi_by_device
+        .iter()
+        .filter(|(_, (_, seen))| now.saturating_duration_since(*seen) <= stale_after)
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in fresh_ids {
+        if let Some(hist) = s.mediatek_heuristic_by_device.get_mut(&id) {
+            verdicts.insert(id, hist.verdict(now));
+        }
+    }
+    let confidences = mediatek_heuristic::apply_agreement(&verdicts);
+
+    let mut ids: Vec<&String> = verdicts.keys().collect();
+    ids.sort();
+
+    let nodes: Vec<NodeInfo> = ids
+        .iter()
+        .map(|&id| {
+            let v = &verdicts[id];
+            let confidence = confidences.get(id).copied().unwrap_or(0.0);
+            let rssi = s
+                .mediatek_csi_by_device
+                .get(id)
+                .and_then(|(snap, _)| snap.rssi_dbm.first().copied())
+                .unwrap_or(0) as f64;
+            // A device below the confidence threshold abstains from the room
+            // vote (node_inference: None) rather than asserting "absent" on
+            // weak evidence — the 2026-09-19 "standing person read as
+            // absent 0.09" bug. Its diagnostics are still reported so the
+            // client can show why.
+            let node_inference = v
+                .presence
+                .map(|_| NodeInference::new(v.motion_level.as_str(), confidence, Some(0)));
+            NodeInfo {
+                node_id: 0,
+                device_id: Some(id.clone()),
+                rssi_dbm: rssi,
+                position: [0.0, 0.0, 0.0],
+                amplitude: vec![],
+                subcarrier_count: 0,
+                sync: None,
+                node_inference,
+                mediatek_diagnostics: Some(MediatekNodeDiagnostics {
+                    presence_state: v.presence_state.as_str().to_string(),
+                    coefficient_of_variation: v.window.coefficient_of_variation,
+                    baseline_deviation: v.window.baseline_deviation,
+                    sample_count: v.window.sample_count,
+                    span_ms: v.window.span_ms,
+                }),
+            }
+        })
+        .collect();
+
+    let node_inferences: Vec<NodeInference> = nodes
+        .iter()
+        .filter_map(|n| n.node_inference.clone())
+        .collect();
+    let room = fuse_room(node_inferences.iter(), stale_after.as_millis() as u64);
+    let classification = classification_from_room(&room);
+
+    let mean_rssi = if nodes.is_empty() {
+        0.0
+    } else {
+        nodes.iter().map(|n| n.rssi_dbm).sum::<f64>() / nodes.len() as f64
+    };
+
+    // Fast/slow activity index (activity-index-v0, plus an absolute
+    // measure — a purely relative index sags to mid-scale while a crowd
+    // simply stays, so a "maxed out" reading would decay within minutes
+    // even with the room still full). Independent of the presence/absent/unknown heuristic above.
+    // Room aggregates exclude devices stale past ROOM_STALE_AFTER; the
+    // per-device listing shows every tracked device's last known verdict
+    // regardless, same convention as /api/v1/csi/mediatek/devices.
+    let room_activity_index = mediatek_activity::room_index(
+        &s.mediatek_activity_by_device,
+        now,
+        mediatek_activity::ROOM_STALE_AFTER,
+    );
+    let room_activity_level = mediatek_activity::room_level(room_activity_index);
+    let room_activity_peak_30s = mediatek_activity::room_peak_30s(
+        &mut s.room_activity_peak_history,
+        now,
+        room_activity_level,
+    );
+    // abs_level's room aggregate is a MAX, not a weighted mean — a crowd
+    // anywhere in any receiver's path counts.
+    let room_activity_abs_level = mediatek_activity::room_abs_level(
+        &s.mediatek_activity_by_device,
+        now,
+        mediatek_activity::ROOM_STALE_AFTER,
+    );
+    let room_activity_abs_peak_30s = mediatek_activity::room_peak_30s(
+        &mut s.room_abs_activity_peak_history,
+        now,
+        room_activity_abs_level,
+    );
+    mediatek_activity::maybe_sample_history(
+        &mut s.activity_history,
+        &mut s.activity_history_last_sampled,
+        now,
+        room_activity_level,
+        room_activity_abs_level,
+        &s.mediatek_activity_by_device,
+    );
+    // 2026-09-20: apply the SAME staleness cutoff /api/v1/csi/mediatek/devices
+    // uses (mediatek_activity::ROOM_STALE_AFTER is literally that constant),
+    // so activity.devices can never list a receiver /devices has already
+    // dropped — a downstream consumer caught the two listings disagreeing after a
+    // unit restart when this filter didn't exist.
+    let activity_devices: serde_json::Map<String, serde_json::Value> = s
+        .mediatek_activity_by_device
+        .iter()
+        .filter_map(|(id, tracker)| {
+            let last_update = tracker.last_update()?;
+            let age = now.saturating_duration_since(last_update);
+            if age > mediatek_activity::ROOM_STALE_AFTER {
+                return None;
+            }
+            let v = tracker.last_verdict()?;
+            Some((
+                id.clone(),
+                serde_json::json!({
+                    "level": v.level,
+                    "index": v.index,
+                    "fast": v.fast,
+                    "slow": v.slow,
+                    "peak_30s": v.peak_30s,
+                    "frames_2s": v.frames_2s,
+                    "floor": v.floor,
+                    "abs_level": v.abs_level,
+                    "abs_peak_30s": v.abs_peak_30s,
+                    "age_ms": age.as_millis() as u64,
+                    "is_occupancy_estimate": false,
+                }),
+            ))
+        })
+        .collect();
+    let activity = serde_json::json!({
+        "room": {
+            "level": room_activity_level,
+            "index": room_activity_index,
+            "peak_30s": room_activity_peak_30s,
+            "abs_level": room_activity_abs_level,
+            "abs_peak_30s": room_activity_abs_peak_30s,
+            "is_occupancy_estimate": false,
+        },
+        "devices": activity_devices,
+    });
+
+    SensingUpdate {
+        msg_type: "sensing_update".to_string(),
+        timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
+        source,
+        tick,
+        nodes,
+        // The remaining ESP32-shaped spectral features (motion/breathing band
+        // power, dominant frequency, spectral power, change points) require
+        // per-subcarrier phase history this heuristic doesn't have — left at
+        // 0.0 rather than fabricated. `mean_rssi` is real, averaged over the
+        // contributing devices' own reported RSSI.
+        features: FeatureInfo {
+            mean_rssi,
+            variance: 0.0,
+            motion_band_power: 0.0,
+            breathing_band_power: 0.0,
+            dominant_freq_hz: 0.0,
+            change_points: 0,
+            spectral_power: 0.0,
+        },
+        classification,
+        // No spatial field: this heuristic has no per-subcarrier or
+        // multi-antenna geometry to place a heat map from.
+        signal_field: SignalField {
+            grid_size: [0, 0, 0],
+            values: vec![],
+        },
+        vital_signs: None,
+        calibrated_presence_evidence: None,
+        enhanced_motion: None,
+        enhanced_breathing: None,
+        posture: None,
+        signal_quality_score: None,
+        quality_verdict: None,
+        bssid_count: None,
+        pose_keypoints: None,
+        model_status: None,
+        persons: None,
+        // Presence/motion, not a person count this heuristic has no basis to
+        // claim — left absent rather than inventing a number from receiver
+        // count.
+        estimated_persons: None,
+        node_features: None,
+        room_inference: Some(room),
+        classifier: Some(mediatek_heuristic::CLASSIFIER_ID.to_string()),
+        activity: Some(activity),
+    }
+}
+
+#[cfg(test)]
+mod mediatek_room_update_tests {
+    //! Exercises `mediatek_room_update` directly against `AppStateInner`,
+    //! without binding a socket — mirrors the style of
+    //! `mediatek_devices::tests` and `issue_1004_source_plan_tests`. Uses a
+    //! synthetic, monotonically-advancing `Instant` for both the device's
+    //! amplitude history AND `mediatek_csi_by_device`'s "last seen" stamp,
+    //! matching production (both are set from the same `now` per incoming
+    //! frame) — mixing a synthetic clock with a fresh real `Instant::now()`
+    //! would silently defeat hysteresis (a future synthetic timestamp reads
+    //! as "0ms old" against a real `now` that hasn't caught up to it).
+    use super::*;
+    use std::time::Duration;
+
+    /// Feeds `samples` 500ms apart starting at `start`, returns the `Instant`
+    /// of the last sample (use this as the `now` passed to
+    /// `mediatek_room_update`).
+    fn seed_device(
+        s: &mut AppStateInner,
+        device_id: &str,
+        start: std::time::Instant,
+        samples: &[f64],
+        rssi: i8,
+    ) -> std::time::Instant {
+        use wifi_densepose_hardware::mediatek_csi::{
+            ChipsetProfile, CsiFlags, CsiPayload, PpduType, ReportKind,
+        };
+        let mut hist = mediatek_heuristic::DeviceHistory::default();
+        let mut t = start;
+        for (i, &sample) in samples.iter().enumerate() {
+            if i > 0 {
+                t += Duration::from_millis(500);
+            }
+            hist.observe(t, sample, sample);
+        }
+        s.mediatek_heuristic_by_device
+            .insert(device_id.to_string(), hist);
+        let frame = wifi_densepose_hardware::mediatek_csi::CsiFrame {
+            report_kind: ReportKind::Csi,
+            sequence: samples.len() as u32,
+            timestamp_us: 0,
+            device_id: u64::from_str_radix(device_id, 16).unwrap_or(0),
+            chipset: ChipsetProfile::Mt7981Mt7976,
+            bandwidth_mhz: 80,
+            center_freq_khz: 5_210_000,
+            flags: CsiFlags(CsiFlags::CALIBRATED),
+            tx_count: 2,
+            rx_count: 1,
+            ppdu_type: PpduType::HeSu,
+            subcarrier_count: 4,
+            noise_floor_dbm: -95,
+            scale: 1.0,
+            subcarrier_spacing_hz: 312_500.0,
+            calibration_id: 1,
+            payload: CsiPayload::ComplexI16 {
+                rssi_dbm: vec![rssi],
+                values: vec![[0, 0]; 8],
+            },
+        };
+        let snapshot = mediatek_csi::MediatekCsiSnapshot::from_frame(&frame);
+        s.mediatek_csi_by_device
+            .insert(device_id.to_string(), (snapshot, t));
+        t
+    }
+
+    /// 40 samples spaced 500ms = ~19.5s span: comfortably past WINDOW_DURATION,
+    /// HOLD_DURATION, and CONFIRM_ABSENT_DURATION (all <= 10s) so confidence
+    /// clears UNKNOWN_CONFIDENCE_THRESHOLD and hysteresis has settled.
+    const SETTLE_SAMPLES: usize = 40;
+
+    #[test]
+    fn empty_room_flat_amplitudes_is_absent() {
+        let mut s = AppStateInner::minimal();
+        let flat: Vec<f64> = std::iter::repeat_n(100.0, SETTLE_SAMPLES).collect();
+        let now = seed_device(
+            &mut s,
+            "a9be7e5bb1644d3a",
+            std::time::Instant::now(),
+            &flat,
+            -50,
+        );
+
+        let update = mediatek_room_update(
+            &mut s,
+            now,
+            ESP32_OFFLINE_TIMEOUT,
+            1,
+            "mediatek:physical-unvalidated".to_string(),
+        );
+        assert!(!update.classification.presence);
+        assert_eq!(update.classification.motion_level, "absent");
+        assert_eq!(
+            update.classifier.as_deref(),
+            Some(mediatek_heuristic::CLASSIFIER_ID)
+        );
+        assert_eq!(update.nodes.len(), 1);
+        assert_eq!(
+            update.nodes[0].device_id.as_deref(),
+            Some("a9be7e5bb1644d3a")
+        );
+        assert_eq!(
+            update.nodes[0]
+                .mediatek_diagnostics
+                .as_ref()
+                .map(|d| d.presence_state.as_str()),
+            Some("absent")
+        );
+    }
+
+    #[test]
+    fn injected_variance_is_present_moving() {
+        let mut s = AppStateInner::minimal();
+        let swinging: Vec<f64> = (0..SETTLE_SAMPLES)
+            .map(|i| if i % 2 == 0 { 100.0 } else { 130.0 })
+            .collect();
+        let now = seed_device(
+            &mut s,
+            "a9be7e5bb1644d3a",
+            std::time::Instant::now(),
+            &swinging,
+            -50,
+        );
+
+        let update = mediatek_room_update(
+            &mut s,
+            now,
+            ESP32_OFFLINE_TIMEOUT,
+            1,
+            "mediatek:physical-unvalidated".to_string(),
+        );
+        assert!(update.classification.presence);
+        assert_eq!(update.classification.motion_level, "present_moving");
+    }
+
+    /// A device below the confidence threshold abstains (node_inference:
+    /// None) rather than asserting "absent" — the exact 2026-09-19 bug
+    /// ("standing person read as absent 0.09").
+    #[test]
+    fn low_confidence_device_abstains_instead_of_asserting_absent() {
+        let mut s = AppStateInner::minimal();
+        // A single sample: window barely covers any time, so confidence is
+        // near zero regardless of amplitude.
+        let now = seed_device(
+            &mut s,
+            "a9be7e5bb1644d3a",
+            std::time::Instant::now(),
+            &[1800.0],
+            -49,
+        );
+
+        let update = mediatek_room_update(
+            &mut s,
+            now,
+            ESP32_OFFLINE_TIMEOUT,
+            1,
+            "mediatek:physical-unvalidated".to_string(),
+        );
+        assert_eq!(update.nodes.len(), 1);
+        assert_eq!(
+            update.nodes[0]
+                .mediatek_diagnostics
+                .as_ref()
+                .map(|d| d.presence_state.as_str()),
+            Some("unknown")
+        );
+        assert!(
+            update.nodes[0].node_inference.is_none(),
+            "an unknown device must abstain, not vote"
+        );
+        // No fresh contributor -> room is honestly unavailable-derived absent, not a guess.
+        assert_eq!(update.classification.motion_level, "absent");
+        assert_eq!(update.classification.confidence, 0.0);
+    }
+
+    /// A single transient dip must not flip the room to absent — the core
+    /// 2026-09-19 field bug (walk between routers flickered present <-> absent).
+    #[test]
+    fn a_single_transient_dip_does_not_flip_the_room_to_absent() {
+        let mut s = AppStateInner::minimal();
+        let swinging: Vec<f64> = (0..SETTLE_SAMPLES)
+            .map(|i| if i % 2 == 0 { 100.0 } else { 130.0 })
+            .collect();
+        let mut samples = swinging.clone();
+        samples.push(115.0); // one flat-ish sample right after — a real transient fade
+        let now = seed_device(
+            &mut s,
+            "a9be7e5bb1644d3a",
+            std::time::Instant::now(),
+            &samples,
+            -50,
+        );
+
+        let update = mediatek_room_update(
+            &mut s,
+            now,
+            ESP32_OFFLINE_TIMEOUT,
+            1,
+            "mediatek:physical-unvalidated".to_string(),
+        );
+        assert!(
+            update.classification.presence,
+            "a single dip must not flip the room to absent"
+        );
+    }
+
+    #[test]
+    fn two_devices_disagreeing_lowers_room_confidence_vs_single_device() {
+        let swinging: Vec<f64> = (0..SETTLE_SAMPLES)
+            .map(|i| if i % 2 == 0 { 100.0 } else { 130.0 })
+            .collect();
+        let flat: Vec<f64> = std::iter::repeat_n(100.0, SETTLE_SAMPLES).collect();
+
+        let mut solo = AppStateInner::minimal();
+        let solo_now = seed_device(
+            &mut solo,
+            "a9be7e5bb1644d3a",
+            std::time::Instant::now(),
+            &swinging,
+            -50,
+        );
+        let solo_update = mediatek_room_update(
+            &mut solo,
+            solo_now,
+            ESP32_OFFLINE_TIMEOUT,
+            1,
+            "mediatek:physical-unvalidated".to_string(),
+        );
+
+        let mut pair = AppStateInner::minimal();
+        let start = std::time::Instant::now();
+        seed_device(&mut pair, "a9be7e5bb1644d3a", start, &swinging, -50);
+        let pair_now = seed_device(&mut pair, "a9be7d5bb1644b87", start, &flat, -55);
+        let pair_update = mediatek_room_update(
+            &mut pair,
+            pair_now,
+            ESP32_OFFLINE_TIMEOUT,
+            1,
+            "mediatek:physical-unvalidated".to_string(),
+        );
+
+        assert_eq!(
+            pair_update.nodes.len(),
+            2,
+            "both devices must vote, not overwrite each other"
+        );
+        let moving_node = pair_update
+            .nodes
+            .iter()
+            .find(|n| n.device_id.as_deref() == Some("a9be7e5bb1644d3a"))
+            .expect("moving device present");
+        let moving_confidence = moving_node.node_inference.as_ref().unwrap().confidence;
+        let solo_confidence = solo_update.classification.confidence;
+        assert!(
+            moving_confidence < solo_confidence,
+            "disagreement should lower confidence: solo={solo_confidence} paired={moving_confidence}"
+        );
+    }
+
+    /// A bursty two-device timeline (dump-loop-style gaps up to a few
+    /// seconds between arrivals per device), interleaved. Both devices must
+    /// still vote correctly and the room must not flicker on the gaps alone.
+    #[test]
+    fn bursty_interleaved_two_device_timeline_stays_stable() {
+        let mut s = AppStateInner::minimal();
+        let start = std::time::Instant::now();
+        let mut t = start;
+        let mut hist_a = mediatek_heuristic::DeviceHistory::default();
+        let mut hist_b = mediatek_heuristic::DeviceHistory::default();
+
+        // Both devices arrive at the SAME irregular times (0.3-4s gaps,
+        // mirroring the real dump-loop cadence) so this isolates "does a
+        // bursty arrival pattern break the time-based window" from "did one
+        // device merely go stale relative to the other" (a separate,
+        // legitimate concern already covered by ESP32_OFFLINE_TIMEOUT).
+        // A moves (swinging amplitude), B is steady (flat).
+        let gaps_ms = [300u64, 4000, 500, 3500, 300, 4000, 500, 3000, 300, 4000];
+        for (i, &gap) in gaps_ms.iter().enumerate() {
+            t += Duration::from_millis(gap);
+            let sample_a = if i % 2 == 0 { 100.0 } else { 130.0 };
+            hist_a.observe(t, sample_a, sample_a + 2.0);
+            hist_b.observe(t, 1600.0, 1650.0);
+        }
+        let (t_a, t_b) = (t, t);
+
+        let now = t;
+        s.mediatek_heuristic_by_device
+            .insert("dev-a".to_string(), hist_a);
+        s.mediatek_heuristic_by_device
+            .insert("dev-b".to_string(), hist_b);
+        // Minimal snapshots just to satisfy the freshness join in
+        // mediatek_room_update; RSSI/content beyond device_id is unused here.
+        for (id, seen) in [("dev-a", t_a), ("dev-b", t_b)] {
+            use wifi_densepose_hardware::mediatek_csi::{
+                ChipsetProfile, CsiFlags, CsiPayload, PpduType, ReportKind,
+            };
+            let frame = wifi_densepose_hardware::mediatek_csi::CsiFrame {
+                report_kind: ReportKind::Csi,
+                sequence: 0,
+                timestamp_us: 0,
+                device_id: 0,
+                chipset: ChipsetProfile::Mt7981Mt7976,
+                bandwidth_mhz: 80,
+                center_freq_khz: 5_210_000,
+                flags: CsiFlags(CsiFlags::CALIBRATED),
+                tx_count: 2,
+                rx_count: 1,
+                ppdu_type: PpduType::HeSu,
+                subcarrier_count: 4,
+                noise_floor_dbm: -95,
+                scale: 1.0,
+                subcarrier_spacing_hz: 312_500.0,
+                calibration_id: 1,
+                payload: CsiPayload::ComplexI16 {
+                    rssi_dbm: vec![-50],
+                    values: vec![[0, 0]; 8],
+                },
+            };
+            let snapshot = mediatek_csi::MediatekCsiSnapshot::from_frame(&frame);
+            s.mediatek_csi_by_device
+                .insert(id.to_string(), (snapshot, seen));
+        }
+
+        let update = mediatek_room_update(
+            &mut s,
+            now,
+            ESP32_OFFLINE_TIMEOUT,
+            1,
+            "mediatek:physical-unvalidated".to_string(),
+        );
+        assert_eq!(
+            update.nodes.len(),
+            2,
+            "both bursty devices must still be represented"
+        );
+        let dev_a = update
+            .nodes
+            .iter()
+            .find(|n| n.device_id.as_deref() == Some("dev-a"))
+            .unwrap();
+        // dev-a's time-based window must have accumulated more than the
+        // handful of samples closest to `now` — a count-based window with
+        // this arrival pattern would badly underfill given the gaps.
+        let diag = dev_a.mediatek_diagnostics.as_ref().unwrap();
+        assert!(
+            diag.sample_count >= 3,
+            "sample_count was {}",
+            diag.sample_count
+        );
+    }
+
+    /// `/devices` and `activity.devices` must
+    /// never name different receiver sets. A device stale past
+    /// ROOM_STALE_AFTER — the same cutoff `/devices` uses — must be dropped
+    /// from `activity.devices` (and so excluded from `room.level`/
+    /// `room.abs_level` too), while a fresh device reports `age_ms`.
+    #[test]
+    fn stale_device_is_excluded_from_activity_but_fresh_one_reports_age_ms() {
+        let mut s = AppStateInner::minimal();
+        let stale_seen = std::time::Instant::now();
+        let now =
+            stale_seen + mediatek_activity::ROOM_STALE_AFTER + std::time::Duration::from_secs(1);
+
+        let mut fresh = mediatek_activity::ActivityTracker::default();
+        fresh.observe(now, 0.5, 10);
+        s.mediatek_activity_by_device
+            .insert("dev-fresh".to_string(), fresh);
+
+        let mut stale = mediatek_activity::ActivityTracker::default();
+        stale.observe(stale_seen, 0.5, 10);
+        s.mediatek_activity_by_device
+            .insert("dev-stale".to_string(), stale);
+
+        let update = mediatek_room_update(
+            &mut s,
+            now,
+            ESP32_OFFLINE_TIMEOUT,
+            1,
+            "mediatek:physical-unvalidated".to_string(),
+        );
+        let activity = update.activity.expect("activity block present");
+        let devices = activity["devices"].as_object().expect("devices object");
+        assert!(
+            devices.contains_key("dev-fresh"),
+            "the fresh device must be listed"
+        );
+        assert!(
+            !devices.contains_key("dev-stale"),
+            "a device stale past ROOM_STALE_AFTER must be dropped, matching /devices"
+        );
+        assert!(
+            devices["dev-fresh"]["age_ms"].as_u64().is_some(),
+            "a listed device must report age_ms"
+        );
+    }
+}
+
 // ── UDP receiver task ────────────────────────────────────────────────────────
 
 async fn udp_receiver_task(
@@ -9782,11 +10568,95 @@ async fn udp_receiver_task(
                             let snapshot = mediatek_csi::MediatekCsiSnapshot::from_frame(&frame);
                             debug!("MediaTek CSI from {src}: profile={} seq={} dimensions={}x{}x{}", snapshot.chipset, snapshot.sequence, snapshot.tx_count, snapshot.rx_count, snapshot.subcarrier_count);
                             let json = serde_json::to_string(&snapshot).ok();
+                            let now = std::time::Instant::now();
+                            let device_id = snapshot.device_id.clone();
+                            let source_label = snapshot.source.to_string();
+                            let mean_amplitude = snapshot.mean_amplitude;
+                            let peak_amplitude = snapshot.peak_amplitude;
                             let mut s = state.write().await;
-                            s.source = snapshot.source.to_string();
-                            s.last_mediatek_frame = Some(std::time::Instant::now());
+                            s.source = source_label.clone();
+                            s.last_mediatek_frame = Some(now);
+                            s.mediatek_csi_by_device
+                                .insert(device_id.clone(), (snapshot.clone(), now));
                             s.latest_mediatek_csi = Some(snapshot);
                             if let Some(json) = json { let _ = s.tx.send(json); }
+
+                            // Per-device channel inspection: retain full
+                            // per-subcarrier
+                            // amplitude/phase from this frame's raw I/Q,
+                            // bounded to the last `csi_ring_capacity` frames
+                            // per device. Independent of the heuristic
+                            // classifier below — this runs even on a frame
+                            // whose mean_amplitude is somehow absent.
+                            let ring_capacity = s.csi_ring_capacity;
+                            s.mediatek_csi_ring_by_device
+                                .entry(device_id.clone())
+                                .or_insert_with(|| mediatek_csi_ring::DeviceRing::new(ring_capacity))
+                                .push(&frame);
+
+                            // Tier-2 heuristic classifier: fold this frame
+                            // into its device's
+                            // rolling amplitude window, then rebuild the room
+                            // picture from every currently-fresh MediaTek
+                            // device so latest_update reflects real CSI
+                            // instead of simulated_data_task's fabricated
+                            // number. Skipped when the snapshot carries no
+                            // mean_amplitude (defensive; from_frame always
+                            // sets it for a valid ComplexI16/F32 payload) —
+                            // silently falling back would mean no update at
+                            // all this tick, which is honest, not a bug.
+                            if let Some(mean_amp) = mean_amplitude {
+                                let peak_amp = peak_amplitude.unwrap_or(mean_amp);
+
+                                // Relative fast/slow activity index
+                                // (2026-09-20, activity-index-v0): the
+                                // ring already has this frame (pushed
+                                // above), so compute "fast" from it now
+                                // and fold it into this device's EMA
+                                // baseline. Independent of the
+                                // presence/absent heuristic below.
+                                if let Some(ring) = s.mediatek_csi_ring_by_device.get(&device_id) {
+                                    let (fast, frames_2s) = ring.fast_activity(mediatek_activity::FAST_WINDOW);
+                                    // Seed a brand-new tracker's floor from
+                                    // --activity-state (2026-09-20,
+                                    // floor-bootstrap fix) so a restart
+                                    // doesn't re-run the ~30 s bootstrap
+                                    // window and re-saturate abs_level in
+                                    // the meantime. Read out of
+                                    // activity_floor_seed before touching
+                                    // mediatek_activity_by_device to keep
+                                    // the borrows disjoint.
+                                    let floor_seed = s.activity_floor_seed.get(&device_id).copied();
+                                    s.mediatek_activity_by_device
+                                        .entry(device_id.clone())
+                                        .or_insert_with(|| {
+                                            let mut tracker = mediatek_activity::ActivityTracker::default();
+                                            if let Some(seed) = floor_seed {
+                                                tracker.seed_floor(seed);
+                                            }
+                                            tracker
+                                        })
+                                        .observe(now, fast, frames_2s);
+                                }
+
+                                s.mediatek_heuristic_by_device
+                                    .entry(device_id)
+                                    .or_default()
+                                    .observe(now, mean_amp as f64, peak_amp as f64);
+                                s.tick += 1;
+                                let tick = s.tick;
+                                let update = mediatek_room_update(
+                                    &mut s,
+                                    now,
+                                    ESP32_OFFLINE_TIMEOUT,
+                                    tick,
+                                    source_label,
+                                );
+                                if let Ok(json) = serde_json::to_string(&update) {
+                                    let _ = s.tx.send(json);
+                                }
+                                s.latest_update = Some(update);
+                            }
                         }
                         Ok((_, consumed)) => warn!("MediaTek CSI datagram from {src} has trailing bytes: consumed={consumed} received={len}"),
                         Err(error) => warn!("Rejected MediaTek CSI datagram from {src}: {error}"),
@@ -9932,6 +10802,7 @@ async fn udp_receiver_task(
                         .filter(|(_, n)| node_is_fresh(n, now))
                         .map(|(&id, n)| NodeInfo {
                             node_id: id,
+                            device_id: None,
                             rssi_dbm: n.rssi_history.back().copied().unwrap_or(0.0),
                             position: resolved_positions
                                 .get(&id)
@@ -9944,6 +10815,7 @@ async fn udp_receiver_task(
                             sync: n.sync_snapshot(),
                             // ADR-297 — each node carries its own inference.
                             node_inference: Some(node_inference_for(n, now)),
+                            mediatek_diagnostics: None,
                         })
                         .collect();
 
@@ -10070,6 +10942,8 @@ async fn udp_receiver_task(
                         // tripping back to the server.
                         node_features: build_node_features(&s.node_states, now),
                         room_inference: Some(room_inference),
+                        classifier: None,
+                        activity: None,
                     };
 
                     let raw_persons = derive_pose_from_sensing(&update);
@@ -10454,6 +11328,7 @@ async fn udp_receiver_task(
                         .filter(|(_, n)| node_is_fresh(n, now))
                         .map(|(&id, n)| NodeInfo {
                             node_id: id,
+                            device_id: None,
                             rssi_dbm: n.rssi_history.back().copied().unwrap_or(0.0),
                             position: resolved_positions
                                 .get(&id)
@@ -10476,6 +11351,7 @@ async fn udp_receiver_task(
                             sync: n.sync_snapshot(),
                             // ADR-297 — each node carries its own inference.
                             node_inference: Some(node_inference_for(n, now)),
+                            mediatek_diagnostics: None,
                         })
                         .collect();
 
@@ -10555,6 +11431,8 @@ async fn udp_receiver_task(
                         // tripping back to the server.
                         node_features: build_node_features(&s.node_states, now),
                         room_inference: Some(room_inference),
+                        classifier: None,
+                        activity: None,
                     };
 
                     let raw_persons = derive_pose_from_sensing(&update);
@@ -10772,12 +11650,14 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
             tick,
             nodes: vec![NodeInfo {
                 node_id: 1,
+                device_id: None,
                 rssi_dbm: features.mean_rssi,
                 position: [2.0, 0.0, 1.5],
                 amplitude: frame_amplitudes,
                 subcarrier_count: frame_n_sub as usize,
                 sync: None,  // simulated frame path — no mesh peer
                 node_inference: None, // simulated frame; source is synthetic
+                mediatek_diagnostics: None,
             }],
             features: features.clone(),
             classification,
@@ -10816,6 +11696,8 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
             },
             node_features: None,
             room_inference: None,
+            classifier: None,
+            activity: None,
         };
 
         // Populate persons from the sensing update (Kalman-smoothed via tracker).
@@ -10944,7 +11826,17 @@ fn vitals_snapshots_from_sensing_json(
         Some(arr) if !arr.is_empty() => arr
             .iter()
             .map(|node| {
-                let n = node["node_id"].as_u64().unwrap_or(0);
+                // Prefer a string `device_id` (MediaTek MTC1 and other
+                // vendor receivers whose real identity is a 64-bit id, not a
+                // small mesh index) over the numeric `node_id`. Collapsing a
+                // device_id into `node_id: u8` would risk two receivers
+                // colliding onto the same topic; ESP32/simulated nodes never
+                // set `device_id`, so they fall through to the pre-existing
+                // numeric-suffix topic naming unchanged.
+                let node_key = node["device_id"]
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| node["node_id"].as_u64().unwrap_or(0).to_string());
                 // Each node carries its OWN classification under `node_inference`
                 // (ADR-297) — use it, deferring to the room aggregate only for
                 // fields the node omits. Issue #1541: this previously read a
@@ -10960,7 +11852,7 @@ fn vitals_snapshots_from_sensing_json(
                 let motion = motion_of(ninf["classification"].as_str(), agg_motion);
                 let conf = ninf["confidence"].as_f64().unwrap_or(agg_conf);
                 mk(
-                    format!("{base_id}-node{n}"),
+                    format!("{base_id}-node{node_key}"),
                     presence,
                     motion,
                     conf,
@@ -12108,6 +13000,14 @@ async fn main() {
     // WDP_TDM_SLOTS/WDP_GUARD_INTERVAL_US-derived guard (#1049/#1057).
     let mut engine_bridge_multistatic_cfg: Option<MultistaticConfig> = None;
     let mut node_positions_config: HashMap<u8, [f32; 3]> = HashMap::new();
+    // Loaded once at startup from --activity-state (if given) so a restart
+    // doesn't reset each device's learned quiet-room activity floor; see
+    // AppStateInner::activity_floor_seed and mediatek_activity::load_activity_state.
+    let activity_floor_seed: HashMap<String, f64> = args
+        .activity_state
+        .as_ref()
+        .map(|p| mediatek_activity::load_activity_state(p))
+        .unwrap_or_default();
     let state: SharedState = Arc::new(RwLock::new(AppStateInner {
         latest_update: None,
         rssi_history: VecDeque::new(),
@@ -12119,6 +13019,16 @@ async fn main() {
         last_realtek_frame: None,
         latest_mediatek_csi: None,
         last_mediatek_frame: None,
+        mediatek_csi_by_device: HashMap::new(),
+        mediatek_heuristic_by_device: HashMap::new(),
+        mediatek_csi_ring_by_device: HashMap::new(),
+        csi_ring_capacity: args.csi_ring,
+        mediatek_activity_by_device: HashMap::new(),
+        activity_floor_seed,
+        room_activity_peak_history: std::collections::VecDeque::new(),
+        room_abs_activity_peak_history: std::collections::VecDeque::new(),
+        activity_history: std::collections::VecDeque::new(),
+        activity_history_last_sampled: None,
         latest_qualcomm_csi: None,
         last_qualcomm_frame: None,
         latest_realtek_csi: None,
@@ -12337,6 +13247,17 @@ async fn main() {
     if plan.run_simulator {
         tokio::spawn(simulated_data_task(state.clone(), args.tick_ms));
     }
+    // Floor persistence (2026-09-20, floor-bootstrap fix): only when
+    // --activity-state was given. Writes every
+    // mediatek_activity::ACTIVITY_STATE_PERSIST_INTERVAL so a restart's
+    // freshly loaded activity_floor_seed reflects the last run's learned
+    // quiet-room baseline, not an empty map.
+    if let Some(activity_state_path) = args.activity_state.clone() {
+        tokio::spawn(mediatek_activity::activity_state_persist_task(
+            state.clone(),
+            activity_state_path,
+        ));
+    }
 
     // ADR-166: Parse bind address once, use for all listeners
     let bind_ip: std::net::IpAddr = args
@@ -12472,6 +13393,22 @@ async fn main() {
         .route("/api/v1/sensing/latest", get(latest))
         .route("/api/v1/radar/latest", get(latest_realtek_radar))
         .route("/api/v1/csi/mediatek/latest", get(latest_mediatek_csi))
+        .route(
+            "/api/v1/csi/mediatek/devices",
+            get(mediatek_devices::mediatek_csi_devices),
+        )
+        .route(
+            "/api/v1/csi/mediatek/devices/:device_id/frames",
+            get(mediatek_csi_ring::mediatek_csi_frames),
+        )
+        .route(
+            "/api/v1/csi/mediatek/devices/:device_id/summary",
+            get(mediatek_csi_ring::mediatek_csi_summary),
+        )
+        .route(
+            "/api/v1/csi/mediatek/activity",
+            get(mediatek_activity::mediatek_activity_history),
+        )
         .route("/api/v1/csi/qualcomm/latest", get(latest_qualcomm_csi))
         .route("/api/v1/csi/realtek/latest", get(latest_realtek_csi))
         .route("/api/v1/rf/vendors", get(vendor_descriptors))
@@ -12795,12 +13732,14 @@ mod node_sync_snapshot_serialization_tests {
     fn sample_node(sync: Option<NodeSyncSnapshot>) -> NodeInfo {
         NodeInfo {
             node_id: 9,
+            device_id: None,
             rssi_dbm: -38.0,
             position: [2.0, 0.0, 1.5],
             amplitude: vec![],
             subcarrier_count: 0,
             sync,
             node_inference: None,
+            mediatek_diagnostics: None,
         }
     }
 
@@ -13374,6 +14313,36 @@ mod mqtt_bridge_tests {
         assert_eq!(n2.presence_score, 0.0);
     }
 
+    /// A `device_id` string (MediaTek MTC1 and other vendor receivers whose
+    /// real identity isn't a small mesh index) takes the MQTT topic slot
+    /// instead of `node_id`, and two devices never collide onto one topic.
+    #[test]
+    fn per_node_device_id_string_takes_priority_over_node_id() {
+        let v = json!({
+            "timestamp": 1.0,
+            "classification": { "presence": true, "motion_level": "present_moving", "confidence": 0.7 },
+            "vital_signs": {},
+            "nodes": [
+                { "node_id": 0, "device_id": "a9be7e5bb1644d3a", "rssi_dbm": -42.0,
+                  "node_inference": { "classification": "present_moving", "confidence": 0.8 } },
+                { "node_id": 0, "device_id": "a9be7d5bb1644b87", "rssi_dbm": -55.0,
+                  "node_inference": { "classification": "absent", "confidence": 0.1 } }
+            ]
+        });
+        let snaps = vitals_snapshots_from_sensing_json(&v, "ruview");
+        assert_eq!(
+            snaps.len(),
+            2,
+            "one snapshot per device, despite identical node_id: 0"
+        );
+        assert!(snaps
+            .iter()
+            .any(|s| s.node_id == "ruview-nodea9be7e5bb1644d3a"));
+        assert!(snaps
+            .iter()
+            .any(|s| s.node_id == "ruview-nodea9be7d5bb1644b87"));
+    }
+
     /// A node that omits a classification field defers to the room aggregate
     /// rather than silently reading false/0.
     #[test]
@@ -13575,6 +14544,8 @@ mod observatory_persons_field_position_tests {
             estimated_persons: Some(1),
             node_features: None,
             room_inference: None,
+            classifier: None,
+            activity: None,
         }
     }
 

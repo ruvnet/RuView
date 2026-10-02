@@ -13312,6 +13312,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "wifi-densepose-mtk-bridge"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "wifi-densepose-hardware",
+]
+
+[[package]]
 name = "wifi-densepose-nn"
 version = "0.3.2"
 dependencies = [
