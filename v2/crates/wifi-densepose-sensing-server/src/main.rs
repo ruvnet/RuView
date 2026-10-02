@@ -18,6 +18,8 @@ mod field_localize;
 mod model_format;
 mod multistatic_bridge;
 mod mediatek_csi;
+mod mediatek_csi_ring;
+mod mediatek_devices;
 mod qualcomm_csi;
 mod realtek_csi;
 mod realtek_radar;
@@ -109,6 +111,12 @@ struct Args {
     #[arg(long, default_value = "5005")]
     udp_port: u16,
 
+    /// Per-device ring buffer size (frame count) for MediaTek per-subcarrier
+    /// CSI inspection (`/api/v1/csi/mediatek/devices/:id/frames`). See `mediatek_csi_ring`'s doc
+    /// comment for the memory bound at this default.
+    #[arg(long, default_value = "256")]
+    csi_ring: usize,
+
     /// UDP bind address for the CSI receiver (ADR-296). Defaults to
     /// `127.0.0.1` (loopback only). Binding to a routable address (`0.0.0.0`
     /// or a LAN IP) is an explicit operator choice and requires `--udp-allow`
@@ -185,7 +193,7 @@ struct Args {
     #[command(flatten)]
     mqtt_opts: wifi_densepose_sensing_server::cli::MqttArgs,
 
-    /// Data source: auto, wifi, esp32, simulate
+    /// Data source: auto, wifi, esp32, mediatek, simulate
     #[arg(long, default_value = "auto")]
     source: String,
 
@@ -1857,6 +1865,20 @@ struct AppStateInner {
     latest_mediatek_csi: Option<mediatek_csi::MediatekCsiSnapshot>,
     /// Instant of the last validated MediaTek CSI UDP frame.
     last_mediatek_frame: Option<std::time::Instant>,
+    /// Per-device MediaTek CSI, keyed by `device_id`, so multiple MediaTek
+    /// bridges (e.g. two WN586X3 routers) each keep their own slot instead of
+    /// overwriting `latest_mediatek_csi`. See `mediatek_devices` module and
+    /// `/api/v1/csi/mediatek/devices`.
+    mediatek_csi_by_device:
+        HashMap<String, (mediatek_csi::MediatekCsiSnapshot, std::time::Instant)>,
+    /// Per-device bounded ring buffer of full per-subcarrier amplitude/phase
+    /// (`mediatek_csi_ring`), for per-device channel inspection.
+    /// Sized by `csi_ring_capacity` (the `--csi-ring` flag) when a device's
+    /// entry is first created.
+    mediatek_csi_ring_by_device: HashMap<String, mediatek_csi_ring::DeviceRing>,
+    /// Ring size (frame count) for new entries in `mediatek_csi_ring_by_device`.
+    /// Set once from `--csi-ring` at startup.
+    csi_ring_capacity: usize,
     /// Latest validated Qualcomm CSI summary; raw matrices are not retained here.
     latest_qualcomm_csi: Option<qualcomm_csi::QualcommCsiSnapshot>,
     /// Instant of the last validated Qualcomm CSI UDP frame.
@@ -2569,6 +2591,9 @@ impl AppStateInner {
             last_realtek_frame: None,
             latest_mediatek_csi: None,
             last_mediatek_frame: None,
+            mediatek_csi_by_device: HashMap::new(),
+            mediatek_csi_ring_by_device: HashMap::new(),
+            csi_ring_capacity: 16,
             latest_qualcomm_csi: None,
             last_qualcomm_frame: None,
             latest_realtek_csi: None,
@@ -4682,6 +4707,19 @@ fn plan_source(requested: &str, esp32_detected: bool, wifi_detected: bool) -> So
             run_simulator: false,
             run_wifi: false,
         },
+        // Explicit MediaTek override: bind UDP so MTC1 frames from
+        // wifi-densepose-mtk-bridge (or the ADR-266 simulator) are received and
+        // served on /api/v1/csi/mediatek/*, but never run the ESP32-shaped
+        // simulator — it has no per-device mediatek branch to stand down for
+        // (see `simulated_data_task`'s `effective_source() == "esp32"` guard)
+        // and would otherwise fabricate a "simulated" room classification
+        // forever alongside real MediaTek data.
+        "mediatek" => SourcePlan {
+            initial_source: "mediatek".to_string(),
+            bind_udp: true,
+            run_simulator: false,
+            run_wifi: false,
+        },
         "wifi" => SourcePlan {
             initial_source: "wifi".to_string(),
             bind_udp: false,
@@ -4761,6 +4799,36 @@ mod issue_1004_source_plan_tests {
         assert!(plan.bind_udp);
         assert!(!plan.run_simulator);
         assert_eq!(plan.initial_source, "esp32");
+    }
+
+    // Before this arm existed, `--source mediatek` fell into the `other`
+    // catch-all below (bind_udp: false) and silently received nothing at all.
+    // Mirrors `explicit_esp32_binds_udp`: bind UDP for real MTC1 frames, but
+    // never run the ESP32-shaped simulator (it has no mediatek branch to
+    // stand down for).
+    #[test]
+    fn explicit_mediatek_binds_udp_no_simulator() {
+        let plan = plan_source("mediatek", false, false);
+        assert!(plan.bind_udp, "--source mediatek must receive MTC1 frames");
+        assert!(
+            !plan.run_simulator,
+            "must not fabricate a simulated classification"
+        );
+        assert!(!plan.run_wifi);
+        assert_eq!(plan.initial_source, "mediatek");
+    }
+
+    // The bug `explicit_mediatek_binds_udp_no_simulator` guards against is
+    // general: any vendor name not explicitly matched still falls into the
+    // catch-all and binds nothing. Pinned here so the next vendor addition
+    // remembers to add its own arm rather than relying on this default.
+    #[test]
+    fn unmatched_vendor_name_still_binds_nothing_by_default() {
+        let plan = plan_source("qualcomm", false, false);
+        assert!(!plan.bind_udp);
+        assert!(!plan.run_simulator);
+        assert!(!plan.run_wifi);
+        assert_eq!(plan.initial_source, "qualcomm");
     }
 
     // Promotion check: the runtime promotes by setting `AppStateInner.source`
@@ -9782,11 +9850,26 @@ async fn udp_receiver_task(
                             let snapshot = mediatek_csi::MediatekCsiSnapshot::from_frame(&frame);
                             debug!("MediaTek CSI from {src}: profile={} seq={} dimensions={}x{}x{}", snapshot.chipset, snapshot.sequence, snapshot.tx_count, snapshot.rx_count, snapshot.subcarrier_count);
                             let json = serde_json::to_string(&snapshot).ok();
+                            let now = std::time::Instant::now();
+                            let device_id = snapshot.device_id.clone();
+                            let source_label = snapshot.source.to_string();
                             let mut s = state.write().await;
-                            s.source = snapshot.source.to_string();
-                            s.last_mediatek_frame = Some(std::time::Instant::now());
+                            s.source = source_label.clone();
+                            s.last_mediatek_frame = Some(now);
+                            s.mediatek_csi_by_device
+                                .insert(device_id.clone(), (snapshot.clone(), now));
                             s.latest_mediatek_csi = Some(snapshot);
                             if let Some(json) = json { let _ = s.tx.send(json); }
+
+                            // Per-device channel inspection: retain full
+                            // per-subcarrier amplitude/phase from this
+                            // frame's raw I/Q, bounded to the last
+                            // `csi_ring_capacity` frames per device.
+                            let ring_capacity = s.csi_ring_capacity;
+                            s.mediatek_csi_ring_by_device
+                                .entry(device_id.clone())
+                                .or_insert_with(|| mediatek_csi_ring::DeviceRing::new(ring_capacity))
+                                .push(&frame);
                         }
                         Ok((_, consumed)) => warn!("MediaTek CSI datagram from {src} has trailing bytes: consumed={consumed} received={len}"),
                         Err(error) => warn!("Rejected MediaTek CSI datagram from {src}: {error}"),
@@ -12119,6 +12202,9 @@ async fn main() {
         last_realtek_frame: None,
         latest_mediatek_csi: None,
         last_mediatek_frame: None,
+        mediatek_csi_by_device: HashMap::new(),
+        mediatek_csi_ring_by_device: HashMap::new(),
+        csi_ring_capacity: args.csi_ring,
         latest_qualcomm_csi: None,
         last_qualcomm_frame: None,
         latest_realtek_csi: None,
@@ -12472,6 +12558,18 @@ async fn main() {
         .route("/api/v1/sensing/latest", get(latest))
         .route("/api/v1/radar/latest", get(latest_realtek_radar))
         .route("/api/v1/csi/mediatek/latest", get(latest_mediatek_csi))
+        .route(
+            "/api/v1/csi/mediatek/devices",
+            get(mediatek_devices::mediatek_csi_devices),
+        )
+        .route(
+            "/api/v1/csi/mediatek/devices/:device_id/frames",
+            get(mediatek_csi_ring::mediatek_csi_frames),
+        )
+        .route(
+            "/api/v1/csi/mediatek/devices/:device_id/summary",
+            get(mediatek_csi_ring::mediatek_csi_summary),
+        )
         .route("/api/v1/csi/qualcomm/latest", get(latest_qualcomm_csi))
         .route("/api/v1/csi/realtek/latest", get(latest_realtek_csi))
         .route("/api/v1/rf/vendors", get(vendor_descriptors))
