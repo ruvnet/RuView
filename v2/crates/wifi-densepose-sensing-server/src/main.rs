@@ -6940,6 +6940,14 @@ async fn start_recording(
     State(state): State<SharedState>,
     Json(body): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
+    start_recording_in_directory(state, body, std::path::Path::new("data/recordings")).await
+}
+
+async fn start_recording_in_directory(
+    state: SharedState,
+    body: serde_json::Value,
+    recordings_dir: &std::path::Path,
+) -> Json<serde_json::Value> {
     let mut s = state.write().await;
     if s.recording_active {
         return Json(serde_json::json!({
@@ -6948,11 +6956,16 @@ async fn start_recording(
             "recording_id": s.recording_current_id,
         }));
     }
-    let id = body
-        .get("id")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| format!("rec_{}", chrono_timestamp()));
+    let id = match body.get("id") {
+        None => format!("rec_{}_{:016x}", chrono_timestamp(), OsRng.next_u64()),
+        Some(serde_json::Value::String(id)) => id.clone(),
+        Some(_) => {
+            return Json(serde_json::json!({ "error": "invalid recording id", "success": false }));
+        }
+    };
+    if path_safety::safe_id(&id).is_err() {
+        return Json(serde_json::json!({ "error": "invalid recording id", "success": false }));
+    }
 
     // ADR-295: a recording captured while the live source is `Synthetic` is an
     // export, and every export of synthetic data must be watermarked so it can
@@ -6965,10 +6978,20 @@ async fn start_recording(
     // `GET /api/v1/recordings` (and the success response below) sees it.
     let watermark = s.source_state().export_watermark();
 
-    // Create the recording file
-    let rec_path = PathBuf::from("data/recordings").join(format!("{}.jsonl", id));
-    let file = match std::fs::File::create(&rec_path) {
+    // Reserve a new destination atomically. A valid ID must not truncate an
+    // existing capture or follow an existing symlink to another file.
+    let rec_path = recordings_dir.join(format!("{}.jsonl", id));
+    let file = match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&rec_path)
+    {
         Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Json(
+                serde_json::json!({ "error": "recording id already exists", "success": false }),
+            );
+        }
         Err(e) => {
             // ADR-080 #2: the OS error can carry the recordings path; log it
             // server-side only and return a generic body + correlation id.
@@ -7044,6 +7067,219 @@ async fn start_recording(
         None => info!("Recording started: {id}"),
     }
     Json(serde_json::json!({ "success": true, "recording_id": id, "watermark": watermark }))
+}
+
+#[cfg(test)]
+mod recording_storage_tests {
+    use super::*;
+
+    async fn assert_inactive(state: &SharedState) {
+        let s = state.read().await;
+        assert!(!s.recording_active);
+        assert!(s.recording_start_time.is_none());
+        assert!(s.recording_current_id.is_none());
+        assert!(s.recording_stop_tx.is_none());
+        assert!(s.recordings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn recording_start_rejects_absolute_ids_without_overwriting_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let victim = dir.path().join("retained.jsonl");
+        let original = b"{\"retained\":true}\n";
+        std::fs::write(&victim, original).unwrap();
+        let state = Arc::new(RwLock::new(AppStateInner::minimal()));
+        let id = victim.with_extension("").to_string_lossy().into_owned();
+
+        let Json(result) =
+            start_recording(State(state.clone()), Json(serde_json::json!({ "id": id }))).await;
+
+        assert_eq!(std::fs::read(&victim).unwrap(), original);
+        assert_eq!(result["success"], false);
+        assert_inactive(&state).await;
+    }
+
+    #[tokio::test]
+    async fn recording_start_rejects_traversal_before_creating_a_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let recordings = dir.path().join("recordings");
+        std::fs::create_dir(&recordings).unwrap();
+        let victim = dir.path().join("retained.jsonl");
+        let original = b"retained capture\n";
+        std::fs::write(&victim, original).unwrap();
+        let state = Arc::new(RwLock::new(AppStateInner::minimal()));
+        let Json(result) = start_recording_in_directory(
+            state.clone(),
+            serde_json::json!({ "id": "../retained" }),
+            &recordings,
+        )
+        .await;
+        assert_eq!(result["success"], false);
+        assert_eq!(std::fs::read(&victim).unwrap(), original);
+        assert_eq!(std::fs::read_dir(&recordings).unwrap().count(), 0);
+        assert_inactive(&state).await;
+    }
+
+    #[tokio::test]
+    async fn recording_start_rejects_invalid_ids_without_creating_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let invalid = [
+            serde_json::json!(""),
+            serde_json::json!(".hidden"),
+            serde_json::json!("nested/name"),
+            serde_json::json!("nested\\name"),
+            serde_json::json!("a".repeat(path_safety::MAX_ID_LEN + 1)),
+            serde_json::json!("name\0suffix"),
+            serde_json::json!("name with spaces"),
+            serde_json::Value::Null,
+            serde_json::json!(12),
+            serde_json::json!([]),
+        ];
+        for id in invalid {
+            let state = Arc::new(RwLock::new(AppStateInner::minimal()));
+            let Json(result) = start_recording_in_directory(
+                state.clone(),
+                serde_json::json!({ "id": id }),
+                dir.path(),
+            )
+            .await;
+            assert_eq!(result["success"], false, "id: {id}");
+            assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+            assert_inactive(&state).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn recording_start_preserves_an_existing_capture() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("capture.jsonl");
+        let original = b"{\"frame\":1}\n";
+        std::fs::write(&file, original).unwrap();
+        let state = Arc::new(RwLock::new(AppStateInner::minimal()));
+        let Json(result) = start_recording_in_directory(
+            state.clone(),
+            serde_json::json!({ "id": "capture" }),
+            dir.path(),
+        )
+        .await;
+        assert_eq!(result["success"], false);
+        assert_eq!(result["error"], "recording id already exists");
+        assert_eq!(std::fs::read(&file).unwrap(), original);
+        assert_inactive(&state).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn recording_start_does_not_follow_existing_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let recordings = dir.path().join("recordings");
+        std::fs::create_dir(&recordings).unwrap();
+        let victim = dir.path().join("retained.jsonl");
+        let original = b"retained capture\n";
+        std::fs::write(&victim, original).unwrap();
+        std::os::unix::fs::symlink(&victim, recordings.join("capture.jsonl")).unwrap();
+        let state = Arc::new(RwLock::new(AppStateInner::minimal()));
+        let Json(result) = start_recording_in_directory(
+            state.clone(),
+            serde_json::json!({ "id": "capture" }),
+            &recordings,
+        )
+        .await;
+        assert_eq!(result["success"], false);
+        assert_eq!(std::fs::read(&victim).unwrap(), original);
+        assert_inactive(&state).await;
+    }
+
+    #[tokio::test]
+    async fn recording_start_reserves_a_new_file_and_preserves_watermark() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut inner = AppStateInner::minimal();
+        inner.source = "simulated".into();
+        let state = Arc::new(RwLock::new(inner));
+        let Json(result) = start_recording_in_directory(
+            state.clone(),
+            serde_json::json!({ "id": "Capture.v2_01-test" }),
+            dir.path(),
+        )
+        .await;
+        assert_eq!(result["success"], true);
+        assert_eq!(result["recording_id"], "Capture.v2_01-test");
+        assert!(result["watermark"].is_string());
+        assert!(dir.path().join("Capture.v2_01-test.jsonl").is_file());
+        {
+            let s = state.read().await;
+            assert!(s.recording_active);
+            assert_eq!(s.recordings.len(), 1);
+            assert_eq!(s.recordings[0]["watermark"], result["watermark"]);
+        }
+        let Json(stopped) = stop_recording(State(state)).await;
+        assert_eq!(stopped["success"], true);
+    }
+
+    #[tokio::test]
+    async fn recording_start_generates_distinct_ids_for_new_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = Arc::new(RwLock::new(AppStateInner::minimal()));
+        let mut ids = std::collections::HashSet::new();
+        for _ in 0..3 {
+            let Json(result) =
+                start_recording_in_directory(state.clone(), serde_json::json!({}), dir.path())
+                    .await;
+            assert_eq!(result["success"], true);
+            let id = result["recording_id"].as_str().unwrap();
+            assert!(path_safety::safe_id(id).is_ok());
+            assert!(ids.insert(id.to_owned()));
+            let Json(stopped) = stop_recording(State(state.clone())).await;
+            assert_eq!(stopped["success"], true);
+        }
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 3);
+    }
+
+    #[tokio::test]
+    async fn independent_recorders_cannot_claim_the_same_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = Arc::new(RwLock::new(AppStateInner::minimal()));
+        let second = Arc::new(RwLock::new(AppStateInner::minimal()));
+        let (Json(a), Json(b)) = tokio::join!(
+            start_recording_in_directory(
+                first.clone(),
+                serde_json::json!({ "id": "capture" }),
+                dir.path()
+            ),
+            start_recording_in_directory(
+                second.clone(),
+                serde_json::json!({ "id": "capture" }),
+                dir.path()
+            ),
+        );
+        assert_ne!(a["success"], b["success"]);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        for state in [first, second] {
+            if state.read().await.recording_active {
+                let Json(stopped) = stop_recording(State(state)).await;
+                assert_eq!(stopped["success"], true);
+            } else {
+                assert_inactive(&state).await;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn recording_create_errors_leave_state_inactive_without_path_disclosure() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = Arc::new(RwLock::new(AppStateInner::minimal()));
+        let Json(result) = start_recording_in_directory(
+            state.clone(),
+            serde_json::json!({ "id": "capture" }),
+            &dir.path().join("missing"),
+        )
+        .await;
+        assert_eq!(result["error"], "internal_error");
+        assert!(!result
+            .to_string()
+            .contains(&dir.path().display().to_string()));
+        assert_inactive(&state).await;
+    }
 }
 
 /// POST /api/v1/recording/stop — stop recording CSI data.
