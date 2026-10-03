@@ -27,12 +27,16 @@ function storedToken() {
 }
 
 /**
- * Mint a ticket. Returns null when no token is configured (auth is off, so no
- * ticket is needed) or when the server does not offer the endpoint.
+ * Mint a ticket. Resolves to `{ ticket, authRequired }`:
+ *
+ * - `ticket` is null when no token is configured (auth is off, so no ticket is
+ *   needed) or when the server does not offer the endpoint.
+ * - `authRequired` is `'rejected'` when the stored token was refused (401/403),
+ *   so the caller can stop retrying with it. It is null otherwise.
  */
 async function mintTicket() {
   const token = storedToken();
-  if (!token) return null;
+  if (!token) return { ticket: null, authRequired: null };
 
   try {
     const resp = await fetch('/api/v1/ws-ticket', {
@@ -42,18 +46,66 @@ async function mintTicket() {
     // 404 means a server predating ADR-272: it still exempts WebSockets, so
     // connecting without a ticket is correct there. Treated as "no ticket
     // needed" rather than as an error, so the UI works against both.
-    if (resp.status === 404) return null;
+    if (resp.status === 404) return { ticket: null, authRequired: null };
+    // #2099: a wrong or revoked token. Retrying with it can never succeed.
+    if (resp.status === 401 || resp.status === 403) {
+      console.warn('[ws-ticket] stored API token was rejected:', resp.status);
+      return { ticket: null, authRequired: 'rejected' };
+    }
     if (!resp.ok) {
       console.warn('[ws-ticket] mint failed:', resp.status);
-      return null;
+      return { ticket: null, authRequired: null };
     }
     const body = await resp.json();
-    return body.ticket || null;
+    return { ticket: body.ticket || null, authRequired: null };
   } catch (err) {
     // Offline, or the server is down. The socket attempt will fail on its own
     // and the caller's reconnect logic handles it; failing loudly here would
     // just duplicate that.
     console.warn('[ws-ticket] mint error:', err.message);
+    return { ticket: null, authRequired: null };
+  }
+}
+
+/**
+ * Like `withWsTicket`, but also reports when the stored token was rejected.
+ * Resolves to `{ url, authRequired }` with `authRequired` null or `'rejected'`.
+ *
+ * @param {string} url  ws:// or wss:// URL
+ * @returns {Promise<{url: string, authRequired: null|'rejected'}>}
+ */
+export async function resolveWsUrl(url) {
+  const { ticket, authRequired } = await mintTicket();
+  if (!ticket) return { url, authRequired };
+  const sep = url.includes('?') ? '&' : '?';
+  return { url: `${url}${sep}ticket=${encodeURIComponent(ticket)}`, authRequired: null };
+}
+
+/**
+ * #2099: ask the server whether a socket refusal was an auth refusal.
+ *
+ * A browser cannot see the status of a refused WebSocket upgrade; it only gets
+ * a close event. So after an unticketed socket closes without ever opening,
+ * repeat the ticket request with no bearer. The server answers 401 exactly
+ * when it requires a credential the browser does not have (a signed-in session
+ * cookie still counts, since `fetch` sends it same-origin). Returns
+ * `'missing'` in that case and null for anything else, including a network
+ * failure, which is an outage rather than an auth problem.
+ *
+ * Only called on the failure path, so a server with auth off sees no extra
+ * request while it is reachable.
+ *
+ * @returns {Promise<null|'missing'>}
+ */
+export async function probeWsAuthRequired() {
+  if (storedToken()) return null; // mintTicket already judged the stored token
+  try {
+    const resp = await fetch('/api/v1/ws-ticket', {
+      method: 'POST',
+      credentials: 'same-origin',
+    });
+    return resp.status === 401 || resp.status === 403 ? 'missing' : null;
+  } catch {
     return null;
   }
 }
@@ -70,8 +122,5 @@ async function mintTicket() {
  * @returns {Promise<string>}
  */
 export async function withWsTicket(url) {
-  const ticket = await mintTicket();
-  if (!ticket) return url;
-  const sep = url.includes('?') ? '&' : '?';
-  return `${url}${sep}ticket=${encodeURIComponent(ticket)}`;
+  return (await resolveWsUrl(url)).url;
 }

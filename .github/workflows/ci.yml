@@ -204,7 +204,7 @@ jobs:
         node-version: '22'
 
     - name: Run UI unit tests
-      run: node --test ui/sw.test.mjs ui/services/ws-ticket.test.mjs ui/services/websocket.service.test.mjs v2/crates/wifi-densepose-desktop/ui/build-config.test.mjs
+      run: node --test ui/sw.test.mjs ui/services/ws-ticket.test.mjs ui/services/websocket.service.test.mjs ui/services/sensing.service.test.mjs v2/crates/wifi-densepose-desktop/ui/build-config.test.mjs
 
   # Unit and Integration Tests
   # Python pytest matrix — runs against the archived v1 Python tree.

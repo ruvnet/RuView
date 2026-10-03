@@ -97,6 +97,7 @@ export class DashboardTab {
       'reconnecting':      { text: 'RECONNECTING', status: 'degraded', msg: 'Attempting to connect...' },
       'unreachable':       { text: 'NO DATA',   status: 'unhealthy', msg: 'Server unreachable — readings below are stale' },
       'simulated':         { text: 'INVENTED',  status: 'unhealthy', msg: 'Browser-generated data, not measured' },
+      'auth-required':     { text: 'TOKEN REQUIRED', status: 'unhealthy', msg: 'Paste the server API token in Settings \u2192 API Access' },
     };
     const cfg = config[ds] || config['reconnecting'];
     el.className = `component-status status-${cfg.status}`;

@@ -196,6 +196,10 @@ export class QuickSettings {
 
     document.body.appendChild(this.panel);
 
+    // #2099: the dashboard asks for this when the server refused the stream
+    // for lack of a valid token.
+    document.addEventListener('ruview-open-api-access', (e) => this.openApiAccess(e.detail?.reason));
+
     // Close on outside click
     document.addEventListener('click', (e) => {
       if (this.isOpen && !this.panel.contains(e.target) && !this.button.contains(e.target)) {
@@ -243,6 +247,22 @@ export class QuickSettings {
     // Fire-and-forget — a failure renders as a message in the panel, and must
     // not stop the panel opening.
     void refreshSignInPanel(this.panel);
+  }
+
+  /** Open on the API Access section and say why (#2099). */
+  openApiAccess(reason) {
+    this.open();
+    const status = this.panel.querySelector('#qs-api-token-status');
+    if (status) {
+      status.textContent = reason === 'rejected'
+        ? 'The server rejected the saved token. Paste the current RUVIEW_API_TOKEN and Save & Apply.'
+        : 'This server requires an API token. Paste RUVIEW_API_TOKEN and Save & Apply.';
+    }
+    const input = this.panel.querySelector('#qs-api-token');
+    if (input) {
+      input.scrollIntoView?.({ block: 'center' });
+      input.focus();
+    }
   }
 
   close() {

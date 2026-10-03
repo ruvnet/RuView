@@ -82,13 +82,14 @@ ui/
 
 ## Data Sources
 
-The sensing service (`sensing.service.js`) supports three connection states:
+The sensing service (`sensing.service.js`) reports these connection states:
 
 | State | Banner Color | Description |
 |-------|-------------|-------------|
 | **LIVE - ESP32** | Green | Connected to the Rust sensing server receiving real CSI data |
 | **RECONNECTING** | Yellow (pulsing) | WebSocket disconnected, retrying (up to 20 attempts) |
 | **SIMULATED DATA** | Red | Fallback to client-side simulation after 5+ failed reconnects |
+| **API TOKEN REQUIRED** | Red | The server has `RUVIEW_API_TOKEN` set and this browser has no valid token. Retries stop; click the banner or open Settings → API Access |
 
 Simulated frames include a `_simulated: true` marker so code can detect synthetic data.
 

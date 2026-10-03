@@ -1,4 +1,4 @@
-import { withWsTicket } from './ws-ticket.js';
+import { resolveWsUrl, probeWsAuthRequired } from './ws-ticket.js';
 import { apiService } from './api.service.js';
 /**
  * Sensing WebSocket Service
@@ -70,7 +70,7 @@ function clientSimulationAllowed() {
   }
 }
 
-class SensingService {
+export class SensingService {
   constructor() {
     /** @type {WebSocket|null} */
     this._ws = null;
@@ -84,13 +84,19 @@ class SensingService {
     // Bumped per connect attempt and by `stop()`; lets a socket recognise that
     // it has been abandoned and stop driving reconnect state.
     this._connectEpoch = 0;
-    // Connection state: disconnected | connecting | connected | reconnecting | simulated
+    // Connection state: disconnected | connecting | connected | reconnecting |
+    // simulated | auth-required
     this._state = 'disconnected';
+    // #2099: why the server refused us, while in `auth-required`:
+    //   'missing'  — the server needs a token and the browser has none
+    //   'rejected' — the stored token was refused
+    this._authRequired = null;
     // Data-source label exposed to the UI:
     //   "live"              — real ESP32 hardware connected
     //   "server-simulated"  — server is running but using synthetic data (no hardware)
     //   "reconnecting"      — WebSocket disconnected, retrying
     //   "simulated"         — client-side fallback simulation (server unreachable)
+    //   "auth-required"     — the server refused us for lack of a valid token
     this._dataSource = 'reconnecting';
     // The raw source string from the server (e.g. "esp32", "simulated", "simulate")
     this._serverSource = null;
@@ -153,6 +159,14 @@ class SensingService {
   }
 
   /**
+   * #2099: null, or why the server refused the stream —
+   * 'missing' (no token in this browser) or 'rejected' (stored token refused).
+   */
+  get authRequired() {
+    return this._authRequired;
+  }
+
+  /**
    * Current data source label.
    * "live"         — frames are arriving from the real ESP32 over WebSocket
    * "reconnecting" — WebSocket disconnected; actively retrying, no frames emitted
@@ -194,8 +208,9 @@ class SensingService {
     this._setState('connecting');
 
     let url = SENSING_WS_URL;
+    let authRequired = null;
     try {
-      url = await withWsTicket(SENSING_WS_URL);
+      ({ url, authRequired } = await resolveWsUrl(SENSING_WS_URL));
     } catch {
       // Ticket minting is best-effort: against a server with auth off, or one
       // predating ADR-272, connecting without a ticket is correct.
@@ -207,6 +222,15 @@ class SensingService {
       this._connectInFlight = false;
       return;
     }
+
+    if (authRequired) {
+      // #2099: the stored token was refused. Retrying with it cannot succeed.
+      this._connectInFlight = false;
+      this._enterAuthRequired(authRequired);
+      return;
+    }
+    const ticketed = url !== SENSING_WS_URL;
+    let opened = false;
 
     let ws;
     try {
@@ -230,6 +254,8 @@ class SensingService {
         return;
       }
       console.info('[Sensing] Connected to', SENSING_WS_URL);
+      opened = true;
+      this._authRequired = null;
       this._reconnectAttempt = 0;
       this._stopSimulation();
       this._setState('connected');
@@ -261,13 +287,50 @@ class SensingService {
       }
       console.info('[Sensing] Connection closed (code=%d)', evt.code);
       this._ws = null;
-      if (evt.code !== 1000) {
+      if (evt.code !== 1000 && !opened && !ticketed) {
+        // #2099: a refused upgrade looks like any other failure from here, so
+        // ask the server whether it wants a token before retrying forever.
+        void this._handleRefusedConnect(epoch);
+      } else if (evt.code !== 1000) {
         this._scheduleReconnect();
       } else {
         this._setState('disconnected');
         this._setDataSource('reconnecting');
       }
     };
+  }
+
+  async _handleRefusedConnect(epoch) {
+    const reason = await probeWsAuthRequired();
+    // stop(), reconnect() or another attempt took over during the probe.
+    if (epoch !== this._connectEpoch || this._ws) return;
+    if (reason) {
+      this._enterAuthRequired(reason);
+    } else {
+      this._scheduleReconnect();
+    }
+  }
+
+  /**
+   * #2099: stop the retry loop and say why. Nothing is retried until the user
+   * supplies a token (QuickSettings reloads the page on save) or asks for a
+   * reconnect.
+   */
+  _enterAuthRequired(reason) {
+    console.warn('[Sensing] Server requires an API token (%s); not retrying', reason);
+    this._clearTimers();
+    this._reconnectAttempt = 0;
+    this._authRequired = reason;
+    this._setState('auth-required');
+    this._setDataSource('auth-required');
+  }
+
+  /** Retry now, e.g. from the header's reconnect button. */
+  reconnect() {
+    this._clearTimers();
+    this._authRequired = null;
+    this._reconnectAttempt = 0;
+    void this._connect();
   }
 
   _scheduleReconnect() {
@@ -529,7 +592,7 @@ class SensingService {
   /**
    * Update the dataSource label and notify state listeners so the UI can
    * react without needing a separate subscription.
-   * @param {'live'|'server-simulated'|'reconnecting'|'simulated'} source
+   * @param {'live'|'server-simulated'|'reconnecting'|'unreachable'|'simulated'|'auth-required'} source
    */
   _setDataSource(source) {
     if (source === this._dataSource) return;

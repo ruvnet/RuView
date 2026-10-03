@@ -3,6 +3,11 @@
 
 import { sensingService } from '../services/sensing.service.js';
 
+/** Ask QuickSettings to open on its API Access section (#2099). */
+export function openApiAccess(reason) {
+  document.dispatchEvent(new CustomEvent('ruview-open-api-access', { detail: { reason } }));
+}
+
 export class ConnectionStatus {
   constructor() {
     this.widget = null;
@@ -26,6 +31,15 @@ export class ConnectionStatus {
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
       </button>
     `;
+
+    // #2099: while the server wants a token, the widget is the way to it.
+    this.widget.addEventListener('click', (e) => {
+      if (sensingService.state !== 'auth-required') return;
+      if (e.target.closest('.conn-status-reconnect')) return;
+      // QuickSettings closes on any outside click; this click must not count.
+      e.stopPropagation();
+      openApiAccess(sensingService.authRequired);
+    });
 
     this.widget.querySelector('.conn-status-reconnect').addEventListener('click', () => {
       this.setStatus('reconnecting', 'Reconnecting...');
@@ -58,6 +72,17 @@ export class ConnectionStatus {
       this.setStatus('connected', label);
     } else if (state === 'connecting' || state === 'reconnecting') {
       this.setStatus('reconnecting', 'Connecting...');
+    } else if (state === 'auth-required') {
+      this.setStatus('error', 'Token required');
+      this.widget.title = 'This server requires an API token. Click to open Settings \u2192 API Access.';
+      // Open the panel once per page load; after that the widget stays
+      // clickable but does not keep popping the panel up.
+      if (!this._openedApiAccess) {
+        this._openedApiAccess = true;
+        // Deferred so QuickSettings, initialised after this widget in the same
+        // synchronous pass, is listening by the time the event fires.
+        setTimeout(() => openApiAccess(sensingService.authRequired), 0);
+      }
     } else if (state === 'error') {
       this.setStatus('error', 'Error');
     } else {
@@ -67,6 +92,8 @@ export class ConnectionStatus {
 
   setStatus(status, label) {
     if (!this.widget) return;
+    if (sensingService.state !== 'auth-required') this.widget.removeAttribute('title');
+    this.widget.style.cursor = sensingService.state === 'auth-required' ? 'pointer' : '';
     this.widget.className = `conn-status conn-status-${status}`;
     this.widget.querySelector('.conn-status-label').textContent = label;
 
