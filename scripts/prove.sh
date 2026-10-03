@@ -12,17 +12,29 @@
 #
 # Exit code 0 only if every NON-gated claim passes. Gated claims never fail the
 # run; they print exactly what they need (libtorch, a GPU, a dataset) so you can
-# reproduce them yourself.
+# reproduce them yourself. If a hard gate (workspace tests, Python proof) cannot
+# run here, the result is INCOMPLETE and the exit code is 2.
+#
+# Before running: stop any local sensing server on UDP 5005. Older versions of
+# v2/crates/wifi-densepose-sensing-server/tests/multi_node_test.rs send
+# synthetic frames to 127.0.0.1:5005 (#2086).
+#
+# The Python proof uses $PYTHON if set, else python3, else python. It needs the
+# pinned deps in archive/v1/requirements-lock.txt, e.g.:
+#   python3 -m venv .venv && .venv/bin/pip install -r archive/v1/requirements-lock.txt
+#   PYTHON=.venv/bin/python bash scripts/prove.sh
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 FULL=0; [ "${1:-}" = "--full" ] && FULL=1
 
-pass=0; fail=0; skip=0
+pass=0; fail=0; skip=0; incomplete=0
 PASS(){ echo "  [PASS] $1"; pass=$((pass+1)); }
 FAIL(){ echo "  [FAIL] $1"; fail=$((fail+1)); }
 SKIP(){ echo "  [CLAIMED — not reproduced here] $1"; skip=$((skip+1)); }
+# A hard gate that could not run on this machine. Never reported as PASS.
+NOTRUN(){ echo "  [NOT RUN] $1"; incomplete=$((incomplete+1)); }
 hr(){ echo "------------------------------------------------------------"; }
 
 echo "RuView / wifi-densepose — PROOF harness"
@@ -32,6 +44,7 @@ hr
 
 # ── 1. HARD GATE: Rust workspace tests (no native libs required) ────────────
 echo "[1] Rust workspace tests  (cargo test --workspace --no-default-features)"
+echo "  note: stop any local sensing server on UDP 5005 first (#2086)"
 if command -v cargo >/dev/null 2>&1; then
   if ( cd v2 && cargo test --workspace --no-default-features ) > /tmp/prove_ws.log 2>&1; then
     n=$(grep -oE "result: ok\. [0-9]+ passed" /tmp/prove_ws.log | grep -oE "[0-9]+" | awk '{s+=$1} END {print s}')
@@ -40,20 +53,40 @@ if command -v cargo >/dev/null 2>&1; then
     FAIL "workspace tests — see /tmp/prove_ws.log (grep 'test result: FAILED')"
   fi
 else
-  SKIP "cargo not installed — install Rust to run the workspace gate"
+  NOTRUN "cargo not installed — install Rust to run the workspace gate"
 fi
 hr
 
 # ── 2. HARD GATE: deterministic Python pipeline proof (SHA-256) ─────────────
 echo "[2] Deterministic CSI pipeline proof  (archive/v1/data/proof/verify.py)"
-if command -v python >/dev/null 2>&1; then
-  if python archive/v1/data/proof/verify.py > /tmp/prove_py.log 2>&1 && grep -q "VERDICT: PASS" /tmp/prove_py.log; then
+PY="${PYTHON:-}"
+if [ -z "$PY" ]; then
+  if command -v python3 >/dev/null 2>&1; then PY=python3
+  elif command -v python >/dev/null 2>&1; then PY=python
+  fi
+fi
+LOCK=archive/v1/requirements-lock.txt
+if [ -z "$PY" ] || ! command -v "$PY" >/dev/null 2>&1; then
+  NOTRUN "no Python found (tried PYTHON='${PYTHON:-}', python3, python) — install Python 3.10+ to run the deterministic proof"
+elif ! "$PY" -c "import numpy, scipy" > /tmp/prove_py_deps.log 2>&1; then
+  NOTRUN "$PY is missing the proof deps ($(tail -1 /tmp/prove_py_deps.log)). Install them: $PY -m venv .venv && .venv/bin/pip install -r $LOCK, then re-run with PYTHON=.venv/bin/python"
+else
+  echo "  python: $PY ($("$PY" -c 'import sys; print(sys.version.split()[0])'))"
+  # The published hash was generated with the versions pinned in the lockfile;
+  # other versions can change floating-point results.
+  for pkg in numpy scipy; do
+    want=$(grep -E "^$pkg==" "$LOCK" | cut -d= -f3)
+    have=$("$PY" -c "import $pkg; print($pkg.__version__)")
+    [ "$want" = "$have" ] || echo "  warning: $pkg $have installed, $LOCK pins $want — a hash mismatch may be a version mismatch"
+  done
+  # Single-threaded BLAS/FFT, as in CI: threaded reduction order is not deterministic.
+  if OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+     VECLIB_MAXIMUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \
+     "$PY" archive/v1/data/proof/verify.py > /tmp/prove_py.log 2>&1 && grep -q "VERDICT: PASS" /tmp/prove_py.log; then
     PASS "Python proof VERDICT: PASS (bit-exact SHA-256 of reference features)"
   else
     FAIL "Python proof — see /tmp/prove_py.log"
   fi
-else
-  SKIP "python not installed — install Python 3.10+ to run the deterministic proof"
 fi
 hr
 
@@ -61,7 +94,7 @@ hr
 # Format: claim_test <crate> <test-name-filter> <human claim> [extra cargo args]
 claim_test(){
   local crate="$1" filt="$2" desc="$3"; shift 3
-  if ! command -v cargo >/dev/null 2>&1; then SKIP "$desc (cargo missing)"; return; fi
+  if ! command -v cargo >/dev/null 2>&1; then NOTRUN "$desc (cargo missing)"; return; fi
   if ( cd v2 && cargo test -p "$crate" "$@" "$filt" ) > /tmp/prove_claim.log 2>&1 \
      && grep -qE "test result: ok\. [1-9]" /tmp/prove_claim.log; then
     PASS "$desc"
@@ -79,7 +112,7 @@ claim_test(){
 # Variant for workspace-excluded crates (e.g. wasm-edge): run from the crate dir.
 claim_test_indir(){
   local dir="$1" filt="$2" desc="$3"; shift 3
-  if ! command -v cargo >/dev/null 2>&1; then SKIP "$desc (cargo missing)"; return; fi
+  if ! command -v cargo >/dev/null 2>&1; then NOTRUN "$desc (cargo missing)"; return; fi
   if ( cd "$dir" && cargo test "$@" "$filt" ) > /tmp/prove_claim.log 2>&1 \
      && grep -qE "test result: ok\. [1-9]" /tmp/prove_claim.log; then
     PASS "$desc"
@@ -137,11 +170,14 @@ fi
 hr
 
 # ── verdict ──────────────────────────────────────────────────────────────────
-echo "VERDICT:  $pass verified · $fail failed · $skip claimed-not-reproduced-here"
-if [ "$fail" -eq 0 ]; then
-  echo "RESULT: PASS — every reproducible claim verified on this machine."
-  exit 0
-else
+echo "VERDICT:  $pass verified · $fail failed · $incomplete not run · $skip claimed-not-reproduced-here"
+if [ "$fail" -ne 0 ]; then
   echo "RESULT: FAIL — $fail claim(s) did not reproduce. See the /tmp/prove_*.log files."
   exit 1
+elif [ "$incomplete" -ne 0 ]; then
+  echo "RESULT: INCOMPLETE — $incomplete hard-gate check(s) could not run on this machine (see [NOT RUN] above)."
+  exit 2
+else
+  echo "RESULT: PASS — every reproducible claim verified on this machine."
+  exit 0
 fi
