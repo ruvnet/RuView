@@ -1,5 +1,6 @@
 // Onboarding Tour - Interactive first-run walkthrough
 // Shows on first visit, can be re-triggered from command palette or help
+import { i18n } from './i18n.js';
 
 const STORAGE_KEY = 'ruview-onboarding-done';
 
@@ -10,10 +11,14 @@ export class Onboarding {
     this.currentStep = 0;
     this.steps = [];
     this.active = false;
+    this.selectedLocale = i18n.locale;
   }
 
   init() {
     this.defineSteps();
+    this._localeUnsub = i18n.onLocaleChange(() => {
+      if (this.active) this.showStep();
+    });
     document.addEventListener('start-onboarding', () => this.start());
 
     // Auto-start on first visit
@@ -26,38 +31,38 @@ export class Onboarding {
   defineSteps() {
     this.steps = [
       {
-        title: 'Welcome to RuView',
-        text: 'WiFi-based human pose estimation that works through walls. Let\'s take a quick tour of the dashboard.',
+        titleKey: 'onboarding.step1.title',
+        textKey: 'onboarding.step1.text',
         target: null, // No highlight, centered
         position: 'center'
       },
       {
-        title: 'System Status',
-        text: 'Monitor your WiFi sensing hardware and API server status in real time. Green means everything is connected.',
+        titleKey: 'onboarding.step2.title',
+        textKey: 'onboarding.step2.text',
         target: '.live-status-panel',
         position: 'bottom'
       },
       {
-        title: 'Live Demo',
-        text: 'Switch to the Live Demo tab to see real-time pose detection. Connect an ESP32 sensor or use the built-in simulation.',
+        titleKey: 'onboarding.step3.title',
+        textKey: 'onboarding.step3.text',
         target: '[data-tab="demo"]',
         position: 'bottom'
       },
       {
-        title: 'Sensing Visualization',
-        text: 'The Sensing tab shows a 3D Gaussian splat visualization of WiFi signal fields, with real-time metrics.',
+        titleKey: 'onboarding.step4.title',
+        textKey: 'onboarding.step4.text',
         target: '[data-tab="sensing"]',
         position: 'bottom'
       },
       {
-        title: 'Keyboard Shortcuts',
-        text: 'Press ? for shortcuts, Ctrl+K for the command palette, or use number keys 1-8 to switch tabs quickly.',
+        titleKey: 'onboarding.step5.title',
+        textKey: 'onboarding.step5.text',
         target: null,
         position: 'center'
       },
       {
-        title: 'You\'re all set!',
-        text: 'Explore the dashboard, connect hardware, or start the demo. You can replay this tour anytime from the command palette.',
+        titleKey: 'onboarding.step6.title',
+        textKey: 'onboarding.step6.text',
         target: null,
         position: 'center'
       }
@@ -75,8 +80,9 @@ export class Onboarding {
   }
 
   start() {
-    this.currentStep = 0;
+    this.currentStep = -1;
     this.active = true;
+    this.selectedLocale = i18n.locale;
     this.createOverlay();
     this.showStep();
   }
@@ -88,12 +94,18 @@ export class Onboarding {
     this.overlay = document.createElement('div');
     this.overlay.className = 'onboarding-overlay';
     this.overlay.setAttribute('role', 'dialog');
-    this.overlay.setAttribute('aria-label', 'Onboarding tour');
+    this.overlay.setAttribute('aria-label', i18n.t('onboarding.ariaLabel'));
     this.overlay.setAttribute('aria-modal', 'true');
     document.body.appendChild(this.overlay);
   }
 
   showStep() {
+    if (this._escHandler) document.removeEventListener('keydown', this._escHandler);
+    if (this.currentStep < 0) {
+      this.showLanguageStep();
+      return;
+    }
+
     if (this.currentStep >= this.steps.length) {
       this.finish();
       return;
@@ -103,6 +115,12 @@ export class Onboarding {
     const total = this.steps.length;
     const isFirst = this.currentStep === 0;
     const isLast = this.currentStep === total - 1;
+    const title = i18n.t(step.titleKey);
+    const text = i18n.t(step.textKey);
+    const skipLabel = i18n.t('onboarding.skip');
+    const backLabel = i18n.t('onboarding.back');
+    const nextLabel = i18n.t('onboarding.next');
+    const getStartedLabel = i18n.t('onboarding.getStarted');
 
     // Clear highlight
     document.querySelectorAll('.onboarding-highlight').forEach(el => el.classList.remove('onboarding-highlight'));
@@ -125,13 +143,13 @@ export class Onboarding {
             `<span class="onboarding-dot ${i === this.currentStep ? 'active' : i < this.currentStep ? 'done' : ''}"></span>`
           ).join('')}
         </div>
-        <h3 class="onboarding-title">${step.title}</h3>
-        <p class="onboarding-text">${step.text}</p>
+        <h3 class="onboarding-title">${title}</h3>
+        <p class="onboarding-text">${text}</p>
         <div class="onboarding-actions">
-          <button class="onboarding-skip">Skip tour</button>
+          <button class="onboarding-skip">${skipLabel}</button>
           <div class="onboarding-nav">
-            ${!isFirst ? '<button class="onboarding-prev">Back</button>' : ''}
-            <button class="onboarding-next">${isLast ? 'Get started' : 'Next'}</button>
+            ${!isFirst ? `<button class="onboarding-prev">${backLabel}</button>` : ''}
+            <button class="onboarding-next">${isLast ? getStartedLabel : nextLabel}</button>
           </div>
         </div>
       </div>
@@ -156,6 +174,59 @@ export class Onboarding {
     this.overlay.querySelector('.onboarding-next').focus();
 
     // Escape to close
+    this._escHandler = (e) => { if (e.key === 'Escape') this.finish(); };
+    document.addEventListener('keydown', this._escHandler);
+  }
+
+  showLanguageStep() {
+    if (this._escHandler) document.removeEventListener('keydown', this._escHandler);
+    document.querySelectorAll('.onboarding-highlight').forEach(el => el.classList.remove('onboarding-highlight'));
+
+    const title = i18n.t('onboarding.languageTitle');
+    const text = i18n.t('onboarding.languageText');
+    const skipLabel = i18n.t('onboarding.skip');
+    const continueLabel = i18n.t('onboarding.continue');
+    const locale = this.selectedLocale || i18n.locale;
+
+    this.overlay.innerHTML = `
+      <div class="onboarding-backdrop"></div>
+      <div class="onboarding-tooltip center onboarding-tooltip--language">
+        <div class="onboarding-progress">
+          <span class="onboarding-dot active"></span>
+        </div>
+        <h3 class="onboarding-title">${title}</h3>
+        <p class="onboarding-text">${text}</p>
+        <div class="onboarding-language-grid">
+          <button class="onboarding-language-btn ${locale === 'pt-BR' ? 'active' : ''}" data-locale="pt-BR">Português (Brasil)</button>
+          <button class="onboarding-language-btn ${locale === 'en' ? 'active' : ''}" data-locale="en">English</button>
+          <button class="onboarding-language-btn ${locale === 'pl' ? 'active' : ''}" data-locale="pl">Polski</button>
+        </div>
+        <div class="onboarding-actions">
+          <button class="onboarding-skip">${skipLabel}</button>
+          <div class="onboarding-nav">
+            <button class="onboarding-next">${continueLabel}</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    this.overlay.querySelectorAll('.onboarding-language-btn').forEach(button => {
+      button.addEventListener('click', () => {
+        this.selectedLocale = button.dataset.locale;
+        i18n.setLocale(this.selectedLocale);
+        this.showLanguageStep();
+      });
+    });
+
+    this.overlay.querySelector('.onboarding-skip').addEventListener('click', () => this.finish());
+    this.overlay.querySelector('.onboarding-next').addEventListener('click', () => {
+      if (this.selectedLocale) i18n.setLocale(this.selectedLocale);
+      this.currentStep = 0;
+      this.showStep();
+    });
+    this.overlay.querySelector('.onboarding-backdrop').addEventListener('click', () => this.finish());
+    this.overlay.querySelector('.onboarding-next').focus();
+
     this._escHandler = (e) => { if (e.key === 'Escape') this.finish(); };
     document.addEventListener('keydown', this._escHandler);
   }
@@ -187,6 +258,7 @@ export class Onboarding {
   }
 
   dispose() {
+    if (this._localeUnsub) this._localeUnsub();
     this.finish();
   }
 }

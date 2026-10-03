@@ -11,6 +11,7 @@
  */
 
 // ---- Constants ----
+import { i18n } from '../../utils/i18n.js?v=20260921-9';
 
 export const SCENARIO_NAMES = [
   'EMPTY ROOM','VITAL SIGNS','MULTI-PERSON','FALL DETECT',
@@ -25,6 +26,7 @@ export const DEFAULTS = {
   wireColor: '#00d878', jointColor: '#ff4060', aura: 0.02,
   field: 0.45, waves: 0.4, ambient: 0.7, reflect: 0.2,
   fov: 50, orbitSpeed: 0.15, grid: true, room: true,
+  realisticView: true, deviceAura: true,
   scenario: 'auto', cycle: 30, dataSource: 'demo', wsUrl: '',
 };
 
@@ -66,19 +68,19 @@ export const PRESETS = {
 
 // Scenario descriptions shown below the dropdown
 const SCENARIO_DESCRIPTIONS = {
-  auto:              'Auto-cycling through all sensing scenarios.',
-  empty_room:        'Baseline calibration with no human presence in the monitored zone.',
-  single_breathing:  'Detecting vital signs through WiFi signal micro-variations.',
-  two_walking:       'Tracking multiple people simultaneously via CSI multiplex separation.',
-  fall_event:        'Sudden posture-change detection using acceleration feature analysis.',
-  sleep_monitoring:  'Monitoring breathing patterns and apnea events during sleep.',
-  intrusion_detect:  'Passive perimeter monitoring -- no cameras, pure RF sensing.',
-  gesture_control:   'DTW-based gesture recognition from hand/arm motion signatures.',
-  crowd_occupancy:   'Estimating room occupancy count from aggregate CSI variance.',
-  search_rescue:     'Through-wall survivor detection using WiFi-MAT multistatic mode.',
-  elderly_care:      'Continuous gait analysis for early mobility-decline detection.',
-  fitness_tracking:  'Rep counting and exercise classification from body kinematics.',
-  security_patrol:   'Multi-zone presence patrol with camera-free motion heatmaps.',
+  auto:              'observatory.scenario.auto',
+  empty_room:        'observatory.scenario.empty_room',
+  single_breathing:  'observatory.scenario.single_breathing',
+  two_walking:       'observatory.scenario.two_walking',
+  fall_event:        'observatory.scenario.fall_event',
+  sleep_monitoring:  'observatory.scenario.sleep_monitoring',
+  intrusion_detect:  'observatory.scenario.intrusion_detect',
+  gesture_control:   'observatory.scenario.gesture_control',
+  crowd_occupancy:   'observatory.scenario.crowd_occupancy',
+  search_rescue:     'observatory.scenario.search_rescue',
+  elderly_care:      'observatory.scenario.elderly_care',
+  fitness_tracking:  'observatory.scenario.fitness_tracking',
+  security_patrol:   'observatory.scenario.security_patrol',
 };
 
 // Edge modules active per scenario
@@ -112,6 +114,21 @@ const MODULE_COLORS = {
   APNEA:     'var(--red-heart)',
   MAT:       'var(--blue-signal)',
 };
+
+function hasReliableLiveSignal(data) {
+  const verdict = `${data?.quality_verdict || ''}`.toLowerCase();
+  if (verdict === 'deny') return false;
+
+  const quality = data?.signal_quality_score;
+  if (typeof quality === 'number' && quality <= 0.01) return false;
+
+  const feat = data?.features || {};
+  if ((feat.mean_rssi ?? 0) <= -99 && (feat.variance ?? 0) === 0 && (feat.motion_band_power ?? 0) === 0) {
+    return false;
+  }
+
+  return true;
+}
 
 // Vital-sign color-coding thresholds
 function vitalColor(type, value) {
@@ -154,6 +171,11 @@ export class HudController {
 
     // Track current scenario for description/edge updates
     this._currentScenarioKey = null;
+    this._localeUnsub = i18n.onLocaleChange(() => {
+      i18n.applyTranslations(document);
+      this._updateScenarioDescription(this._currentScenarioKey || 'auto');
+      this.updateSourceBadge(this._obs.settings.dataSource, this._obs._ws);
+    });
   }
 
   // ============================================================
@@ -232,9 +254,7 @@ export class HudController {
     const scenarioSel = document.getElementById('opt-scenario');
     scenarioSel.value = s.scenario;
     scenarioSel.addEventListener('change', (e) => {
-      s.scenario = e.target.value;
-      obs._demoData.setScenario(e.target.value);
-      this.saveSettings();
+      this._activateDemoScenario(e.target.value);
     });
 
     // Data source
@@ -255,6 +275,20 @@ export class HudController {
     wsInput.addEventListener('change', (e) => {
       s.wsUrl = e.target.value;
       if (s.dataSource === 'ws') obs._connectWS(e.target.value);
+      this.saveSettings();
+    });
+
+    const realisticViewInput = document.getElementById('opt-realistic-view');
+    realisticViewInput.checked = s.realisticView;
+    realisticViewInput.addEventListener('change', (e) => {
+      s.realisticView = e.target.checked;
+      this.saveSettings();
+    });
+
+    const deviceAuraInput = document.getElementById('opt-device-aura');
+    deviceAuraInput.checked = s.deviceAura;
+    deviceAuraInput.addEventListener('change', (e) => {
+      s.deviceAura = e.target.checked;
       this.saveSettings();
     });
 
@@ -293,12 +327,34 @@ export class HudController {
     const sel = document.getElementById('scenario-quick-select');
     if (!sel) return;
     sel.addEventListener('change', (e) => {
-      this._obs._demoData.setScenario(e.target.value);
-      const settingsSel = document.getElementById('opt-scenario');
-      if (settingsSel) settingsSel.value = e.target.value;
-      this._obs.settings.scenario = e.target.value;
-      this.saveSettings();
+      this._activateDemoScenario(e.target.value);
     });
+  }
+
+  _activateDemoScenario(scenario) {
+    const obs = this._obs;
+    obs._demoData.setScenario(scenario);
+    obs.settings.scenario = scenario;
+
+    const settingsSel = document.getElementById('opt-scenario');
+    if (settingsSel) settingsSel.value = scenario;
+
+    const quickSel = document.getElementById('scenario-quick-select');
+    if (quickSel) quickSel.value = scenario;
+
+    if (obs.settings.dataSource === 'ws' || obs._ws || obs._liveData) {
+      obs.settings.dataSource = 'demo';
+      obs.settings.wsUrl = '';
+      obs._disconnectWS();
+      obs._syncLiveControls();
+      const dsSel = document.getElementById('opt-data-source');
+      if (dsSel) dsSel.value = 'demo';
+      const wsRow = document.getElementById('ws-url-row');
+      if (wsRow) wsRow.style.display = 'none';
+      this.updateSourceBadge('demo', null);
+    }
+
+    this.saveSettings();
   }
 
   // ============================================================
@@ -341,6 +397,10 @@ export class HudController {
     if (gridEl) { gridEl.checked = obs.settings.grid; obs._grid.visible = obs.settings.grid; }
     const roomEl = document.getElementById('opt-room');
     if (roomEl) { roomEl.checked = obs.settings.room; obs._roomWire.visible = obs.settings.room; }
+    const realisticEl = document.getElementById('opt-realistic-view');
+    if (realisticEl) realisticEl.checked = obs.settings.realisticView;
+    const deviceAuraEl = document.getElementById('opt-device-aura');
+    if (deviceAuraEl) deviceAuraEl.checked = obs.settings.deviceAura;
     document.getElementById('opt-wire-color').value = obs.settings.wireColor;
     document.getElementById('opt-joint-color').value = obs.settings.jointColor;
     obs._applyPostSettings();
@@ -363,9 +423,9 @@ export class HudController {
     const dot = document.querySelector('#data-source-badge .dot');
     const label = document.getElementById('data-source-label');
     if (dataSource === 'ws' && ws?.readyState === WebSocket.OPEN) {
-      dot.className = 'dot dot--live'; label.textContent = 'LIVE';
+      dot.className = 'dot dot--live'; label.textContent = i18n.t('observatory.liveBadge');
     } else {
-      dot.className = 'dot dot--demo'; label.textContent = 'DEMO';
+      dot.className = 'dot dot--demo'; label.textContent = i18n.t('observatory.demoBadge');
     }
   }
 
@@ -373,18 +433,26 @@ export class HudController {
   // HUD update (called every frame)
   // ============================================================
 
-  updateHUD(data, demoData) {
+  updateHUD(data, context = {}) {
     if (!data) return;
+    const demoData = context.demoData || this._obs._demoData;
+    const isLiveMode = !!context.isLiveMode;
+    const hybridSnapshot = context.hybridSnapshot || null;
     const vs = data.vital_signs || {};
     const feat = data.features || {};
     const cls = data.classification || {};
+    const effectivePresence = !!cls.presence && hasReliableLiveSignal(data);
+    const effectiveMotionLevel = effectivePresence ? (cls.motion_level || 'present_still') : 'absent';
 
-    // Sync scenario dropdown
+    // Sync demo-only scenario UI
     const quickSel = document.getElementById('scenario-quick-select');
-    const cur = demoData._autoMode ? 'auto' : demoData.currentScenario;
-    if (quickSel && quickSel.value !== cur) quickSel.value = cur;
     const autoIcon = document.getElementById('autoplay-icon');
-    if (autoIcon) autoIcon.className = demoData._autoMode ? '' : 'hidden';
+    if (quickSel) {
+      const cur = demoData._autoMode ? 'auto' : demoData.currentScenario;
+      quickSel.disabled = false;
+      if (quickSel.value !== cur) quickSel.value = cur;
+    }
+    if (autoIcon) autoIcon.className = !isLiveMode && demoData._autoMode ? '' : 'hidden';
 
     const targetHr = vs.heart_rate_bpm || 0;
     const targetBr = vs.breathing_rate_bpm || 0;
@@ -422,28 +490,44 @@ export class HudController {
     this._setText('motion-value', (feat.motion_band_power || 0).toFixed(3));
 
     // Mini person-count dots
-    const personCount = data.estimated_persons || 0;
+    const personCount = effectivePresence ? (data.estimated_persons || 0) : 0;
     this._updatePersonDots(personCount);
 
     const presEl = document.getElementById('presence-indicator');
     const presLabel = document.getElementById('presence-label');
     if (presEl) {
-      const ml = cls.motion_level || 'absent';
+      const ml = effectiveMotionLevel;
       presEl.className = 'presence-state';
-      if (ml === 'active') { presEl.classList.add('presence--active'); presLabel.textContent = 'ACTIVE'; }
-      else if (cls.presence) { presEl.classList.add('presence--present'); presLabel.textContent = 'PRESENT'; }
-      else { presEl.classList.add('presence--absent'); presLabel.textContent = 'ABSENT'; }
+      if (ml === 'active') { presEl.classList.add('presence--active'); presLabel.textContent = i18n.t('observatory.presenceActive'); }
+      else if (effectivePresence) { presEl.classList.add('presence--present'); presLabel.textContent = i18n.t('observatory.presencePresent'); }
+      else { presEl.classList.add('presence--absent'); presLabel.textContent = i18n.t('observatory.presenceAbsent'); }
     }
 
     const fallEl = document.getElementById('fall-alert');
     if (fallEl) fallEl.style.display = cls.fall_detected ? 'block' : 'none';
 
+    this._updateHybridFusion(hybridSnapshot, {
+      isLiveMode,
+      effectivePresence,
+    });
+
     // Scenario description and edge modules
-    const scenarioKey = demoData._autoMode ? (demoData.currentScenario || 'auto') : (demoData.currentScenario || 'auto');
-    if (scenarioKey !== this._currentScenarioKey) {
-      this._currentScenarioKey = scenarioKey;
-      this._updateScenarioDescription(scenarioKey);
-      this._updateEdgeModules(scenarioKey);
+    if (isLiveMode) {
+      const liveScenarioKey = effectivePresence
+        ? 'live_presence'
+        : 'live_idle';
+      if (liveScenarioKey !== this._currentScenarioKey) {
+        this._currentScenarioKey = liveScenarioKey;
+        this._updateScenarioDescription(liveScenarioKey);
+        this._updateEdgeModules(null);
+      }
+    } else {
+      const scenarioKey = demoData._autoMode ? (demoData.currentScenario || 'auto') : (demoData.currentScenario || 'auto');
+      if (scenarioKey !== this._currentScenarioKey) {
+        this._currentScenarioKey = scenarioKey;
+        this._updateScenarioDescription(scenarioKey);
+        this._updateEdgeModules(scenarioKey);
+      }
     }
   }
 
@@ -546,12 +630,25 @@ export class HudController {
   _updateScenarioDescription(scenarioKey) {
     const el = document.getElementById('scenario-description');
     if (!el) return;
-    el.textContent = SCENARIO_DESCRIPTIONS[scenarioKey] || '';
+    if (scenarioKey === 'live_presence') {
+      el.textContent = i18n.t('observatory.livePresenceDescription');
+      return;
+    }
+    if (scenarioKey === 'live_idle') {
+      el.textContent = i18n.t('observatory.liveIdleDescription');
+      return;
+    }
+    el.textContent = i18n.t(SCENARIO_DESCRIPTIONS[scenarioKey] || '');
   }
 
   _updateEdgeModules(scenarioKey) {
     const bar = document.getElementById('edge-modules-bar');
     if (!bar) return;
+    if (!scenarioKey) {
+      bar.innerHTML = '';
+      bar.style.display = 'none';
+      return;
+    }
     const modules = SCENARIO_EDGE_MODULES[scenarioKey] || [];
     if (modules.length === 0) {
       bar.innerHTML = '';
@@ -563,5 +660,64 @@ export class HudController {
       const color = MODULE_COLORS[m] || 'var(--text-secondary)';
       return `<span class="edge-badge" style="--badge-color:${color}">${m}</span>`;
     }).join('');
+  }
+
+  _updateHybridFusion(hybridSnapshot, context = {}) {
+    const stateEl = document.getElementById('hybrid-fusion-state');
+    const labelEl = document.getElementById('hybrid-fusion-label');
+    const wifiRoleEl = document.getElementById('hybrid-wifi-role');
+    const bluetoothRoleEl = document.getElementById('hybrid-bluetooth-role');
+    const knownDevicesEl = document.getElementById('hybrid-known-devices');
+    const personalDevicesEl = document.getElementById('hybrid-personal-devices');
+    const noteEl = document.getElementById('hybrid-fusion-note');
+    if (!stateEl || !labelEl || !wifiRoleEl || !bluetoothRoleEl || !knownDevicesEl || !personalDevicesEl || !noteEl) {
+      return;
+    }
+
+    const fusion = hybridSnapshot?.fusion || {};
+    const bluetooth = hybridSnapshot?.bluetooth || {};
+    const likelySmartphones = Number(fusion.likely_smartphones || 0);
+    const likelyComputers = Number(fusion.likely_computers || 0);
+    const personalDevices = likelySmartphones + likelyComputers;
+
+    wifiRoleEl.textContent = context.isLiveMode
+      ? i18n.t('observatory.hybridWifiLive')
+      : i18n.t('observatory.hybridWifiDemo');
+
+    if (bluetooth.effective) {
+      stateEl.className = 'hybrid-state hybrid-state--bt-ready';
+      labelEl.textContent = i18n.t('observatory.hybridWifiBtReady');
+      bluetoothRoleEl.textContent = i18n.t('observatory.hybridBluetoothReady');
+    } else if (bluetooth.enabled) {
+      stateEl.className = 'hybrid-state hybrid-state--bt-partial';
+      labelEl.textContent = i18n.t('observatory.hybridWifiBtPartial');
+      bluetoothRoleEl.textContent = i18n.t('observatory.hybridBluetoothPartial');
+    } else {
+      stateEl.className = 'hybrid-state hybrid-state--wifi-only';
+      labelEl.textContent = i18n.t('observatory.hybridWifiOnly');
+      bluetoothRoleEl.textContent = i18n.t('observatory.hybridBluetoothOff');
+    }
+
+    knownDevicesEl.textContent = `${Number(fusion.known_devices || 0)}`;
+    personalDevicesEl.textContent = `${personalDevices}`;
+
+    if (context.effectivePresence && bluetooth.effective && personalDevices > 0) {
+      noteEl.textContent = i18n.t('observatory.hybridNotePresenceAssist', {
+        count: personalDevices,
+      });
+      return;
+    }
+
+    if (context.effectivePresence && bluetooth.effective) {
+      noteEl.textContent = i18n.t('observatory.hybridNotePresenceOnly');
+      return;
+    }
+
+    if (bluetooth.enabled && !bluetooth.effective) {
+      noteEl.textContent = bluetooth.note || i18n.t('observatory.hybridNoteBluetoothWaiting');
+      return;
+    }
+
+    noteEl.textContent = fusion.note || bluetooth.note || i18n.t('observatory.hybridNoteIdle');
   }
 }

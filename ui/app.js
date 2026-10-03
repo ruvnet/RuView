@@ -29,6 +29,10 @@ import { ScreenshotTool } from './utils/screenshot.js';
 import { UptimeClock } from './utils/uptime-clock.js';
 import { QuickSettings } from './utils/quick-settings.js';
 import { dataSourceBanner } from './utils/data-source-banner.js';
+import {
+  enforceLocalDevFreshness,
+  shouldBypassPersistentCaching
+} from './utils/local-dev-cache-guard.js';
 
 class WiFiDensePoseApp {
   constructor() {
@@ -296,6 +300,11 @@ class WiFiDensePoseApp {
 
   // Register service worker for offline capability
   registerServiceWorker() {
+    if (shouldBypassPersistentCaching()) {
+      console.info('Local loopback detected - skipping service worker registration');
+      return;
+    }
+
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./sw.js').then(reg => {
         console.info('Service worker registered:', reg.scope);
@@ -487,11 +496,27 @@ class WiFiDensePoseApp {
   }
 }
 
-// Initialize app when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-  window.wifiDensePoseApp = new WiFiDensePoseApp();
-  window.wifiDensePoseApp.init();
-});
+async function bootWiFiDensePoseApp() {
+  if (window.wifiDensePoseApp?.isReady?.()) {
+    return;
+  }
+
+  if (!window.wifiDensePoseApp) {
+    window.wifiDensePoseApp = new WiFiDensePoseApp();
+  }
+
+  await enforceLocalDevFreshness();
+  await window.wifiDensePoseApp.init();
+}
+
+// Initialize app reliably even when this module is loaded via dynamic import.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    bootWiFiDensePoseApp();
+  }, { once: true });
+} else {
+  bootWiFiDensePoseApp();
+}
 
 // Export for testing
 export { WiFiDensePoseApp };

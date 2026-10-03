@@ -3,7 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RuView — Dual-Modal Pose Estimation</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title data-i18n="title.poseFusion">RuView - Dual-Modal Pose Estimation</title>
+  <script type="module">
+    import { enforceLocalDevFreshness } from './utils/local-dev-cache-guard.js';
+    await enforceLocalDevFreshness();
+  </script>
   <link rel="stylesheet" href="pose-fusion/css/style.css?v=13">
 </head>
 <body>
@@ -12,21 +19,21 @@
   <header class="header">
     <div class="header-left">
       <div class="logo"><span class="pi">&pi;</span> RuView</div>
-      <div class="header-title">Dual-Modal Pose Estimation — Live Video + WiFi CSI Fusion</div>
+      <div class="header-title" data-i18n="poseFusion.headerTitle">Dual-Modal Pose Estimation - Live Video + WiFi CSI Fusion</div>
     </div>
     <div class="header-right">
       <select id="mode-select" class="mode-select">
-        <option value="dual">Dual Mode (Video + CSI)</option>
-        <option value="video">Video Only</option>
-        <option value="csi">CSI Only (WiFi)</option>
+        <option value="dual" data-i18n="poseFusion.mode.dual">Dual Mode (Video + CSI)</option>
+        <option value="video" data-i18n="poseFusion.mode.video">Video Only</option>
+        <option value="csi" data-i18n="poseFusion.mode.csi">CSI Only (WiFi)</option>
       </select>
       <div class="status-badge">
         <span id="status-dot" class="status-dot offline"></span>
         <span id="status-label">READY</span>
       </div>
       <span id="fps-display" class="fps-badge">-- FPS</span>
-      <a href="index.html" class="back-link">&larr; Dashboard</a>
-      <a href="observatory.html" class="back-link">Observatory &rarr;</a>
+      <a href="index.html" class="back-link"><span data-i18n="nav.backDashboard">Dashboard</span></a>
+      <a href="observatory.html" class="back-link"><span data-i18n="nav.observatory">Observatory</span> &rarr;</a>
     </div>
   </header>
 
@@ -41,9 +48,9 @@
 
       <div id="camera-prompt" class="camera-prompt">
         <div class="camera-prompt-label" id="prompt-mode-label">DUAL FUSION</div>
-        <p>Enable your webcam for live video pose estimation.<br>
-           Or switch to <strong>CSI Only</strong> mode for WiFi-based sensing.</p>
-        <button id="start-camera-btn">Enable Camera</button>
+        <p><span data-i18n="poseFusion.cameraPrompt">Enable your webcam for live video pose estimation.</span><br>
+           <span data-i18n="poseFusion.cameraPrompt2">Or switch to CSI Only mode for WiFi-based sensing.</span></p>
+        <button id="start-camera-btn" data-i18n="poseFusion.enableCamera">Enable Camera</button>
       </div>
     </div>
 
@@ -52,20 +59,20 @@
 
       <!-- Fusion Confidence -->
       <div class="panel">
-        <div class="panel-title">&#9670; Fusion Confidence</div>
+        <div class="panel-title">&#9670; <span data-i18n="poseFusion.fusionConfidence">Fusion Confidence</span></div>
         <div class="fusion-bars">
           <div class="bar-row">
-            <span class="bar-label">Video</span>
+            <span class="bar-label" data-i18n="poseFusion.video">Video</span>
             <div class="bar-track"><div class="bar-fill video" id="video-bar" style="width:0%"></div></div>
             <span class="bar-value" id="video-bar-val">0%</span>
           </div>
           <div class="bar-row">
-            <span class="bar-label">CSI</span>
+            <span class="bar-label" data-i18n="poseFusion.csi">CSI</span>
             <div class="bar-track"><div class="bar-fill csi" id="csi-bar" style="width:0%"></div></div>
             <span class="bar-value" id="csi-bar-val">0%</span>
           </div>
           <div class="bar-row">
-            <span class="bar-label">Fused</span>
+            <span class="bar-label" data-i18n="poseFusion.fused">Fused</span>
             <div class="bar-track"><div class="bar-fill fused" id="fused-bar" style="width:0%"></div></div>
             <span class="bar-value" id="fused-bar-val">0%</span>
           </div>
@@ -77,7 +84,7 @@
 
       <!-- CSI Heatmap -->
       <div class="panel">
-        <div class="panel-title">&#9670; CSI Amplitude Heatmap</div>
+      <div class="panel-title">&#9670; <span data-i18n="poseFusion.csiHeatmap">CSI Amplitude Heatmap</span></div>
         <div class="csi-canvas-wrapper">
           <canvas id="csi-canvas" width="320" height="100"></canvas>
         </div>
@@ -85,7 +92,7 @@
 
       <!-- RSSI Signal Strength -->
       <div class="panel">
-        <div class="panel-title">&#9670; RSSI Signal Strength</div>
+      <div class="panel-title">&#9670; <span data-i18n="poseFusion.rssiStrength">RSSI Signal Strength</span></div>
         <div class="rssi-row">
           <div class="rssi-gauge">
             <div class="rssi-bar-track">
@@ -102,7 +109,7 @@
 
       <!-- Embedding Space -->
       <div class="panel">
-        <div class="panel-title">&#9670; Embedding Space (2D Projection)</div>
+      <div class="panel-title">&#9670; <span data-i18n="poseFusion.embeddingSpace">Embedding Space (2D Projection)</span></div>
         <div class="embedding-canvas-wrapper">
           <canvas id="embedding-canvas" width="320" height="100"></canvas>
         </div>
@@ -110,7 +117,7 @@
 
       <!-- RuVector Attention Pipeline -->
       <div class="panel">
-        <div class="panel-title">&#9670; RuVector WASM Attention Pipeline</div>
+      <div class="panel-title">&#9670; <span data-i18n="poseFusion.pipeline">RuVector WASM Attention Pipeline</span></div>
         <div class="rv-pipeline">
           <div class="rv-stage" id="rv-flash">Flash</div>
           <div class="rv-arrow">&rarr;</div>
@@ -125,56 +132,56 @@
           <div class="rv-stage" id="rv-lg">L+G</div>
         </div>
         <div class="rv-stats">
-          <span>Energy: <span id="rv-energy" style="color:var(--green-glow)">--</span></span>
-          <span>Refinement: <span id="rv-refine" style="color:var(--cyan)">--</span></span>
-          <span>Pose Impact: <span id="rv-impact" style="color:var(--amber)">--</span></span>
+          <span><span data-i18n="poseFusion.energy">Energy:</span> <span id="rv-energy" style="color:var(--green-glow)">--</span></span>
+          <span><span data-i18n="poseFusion.refinement">Refinement:</span> <span id="rv-refine" style="color:var(--cyan)">--</span></span>
+          <span><span data-i18n="poseFusion.poseImpact">Pose Impact:</span> <span id="rv-impact" style="color:var(--amber)">--</span></span>
         </div>
       </div>
 
       <!-- Latency -->
       <div class="panel">
-        <div class="panel-title">&#9670; Pipeline Latency</div>
+        <div class="panel-title">&#9670; <span data-i18n="poseFusion.latency">Pipeline Latency</span></div>
         <div class="latency-grid">
           <div class="latency-item">
             <div class="latency-value" id="lat-video">--</div>
-            <div class="latency-label">Video CNN</div>
+            <div class="latency-label" data-i18n="poseFusion.videoCnn">Video CNN</div>
           </div>
           <div class="latency-item">
             <div class="latency-value" id="lat-csi">--</div>
-            <div class="latency-label">CSI CNN</div>
+            <div class="latency-label" data-i18n="poseFusion.csiCnn">CSI CNN</div>
           </div>
           <div class="latency-item">
             <div class="latency-value" id="lat-fusion">--</div>
-            <div class="latency-label">Fusion</div>
+            <div class="latency-label" data-i18n="poseFusion.fusion">Fusion</div>
           </div>
           <div class="latency-item">
             <div class="latency-value" id="lat-total">--</div>
-            <div class="latency-label">Total</div>
+            <div class="latency-label" data-i18n="poseFusion.total">Total</div>
           </div>
         </div>
       </div>
 
       <!-- Controls -->
       <div class="panel">
-        <div class="panel-title">&#9670; Controls</div>
+        <div class="panel-title">&#9670; <span data-i18n="poseFusion.controls">Controls</span></div>
         <div class="controls-row">
-          <button class="btn" id="pause-btn">⏸ Pause</button>
+          <button class="btn" id="pause-btn">⏸ <span data-i18n="poseFusion.pause">Pause</span></button>
         </div>
 
         <div class="slider-row">
-          <label>Confidence</label>
+          <label data-i18n="poseFusion.confidence">Confidence</label>
           <input type="range" id="confidence-slider" min="0" max="1" step="0.05" value="0.3">
           <span class="slider-val" id="confidence-value">0.30</span>
         </div>
 
         <div style="margin-top:10px">
-          <div class="panel-title" style="margin-bottom:6px">&#9670; Live CSI Source</div>
+          <div class="panel-title" style="margin-bottom:6px">&#9670; <span data-i18n="poseFusion.liveCsiSource">Live CSI Source</span></div>
           <div style="display:flex;gap:6px">
             <input type="text" id="ws-url" placeholder="ws://localhost:3030/ws/csi"
               style="flex:1;background:rgba(255,255,255,0.05);border:1px solid var(--bg-panel-border);
                      color:var(--text-primary);padding:5px 8px;border-radius:4px;font-size:11px;
                      font-family:'JetBrains Mono',monospace">
-            <button class="btn" id="connect-ws-btn">Connect</button>
+            <button class="btn" id="connect-ws-btn" data-i18n="poseFusion.connect">Connect</button>
           </div>
         </div>
       </div>
@@ -184,18 +191,37 @@
     <!-- Bottom Bar -->
     <div class="bottom-bar">
       <div>
-        RuView &middot; Dual-Modal Pose Estimation &middot;
-        Architecture: Conv2D &rarr; RuVector 6-Stage Attention (Flash+MHA+Hyperbolic+Linear+MoE+L/G) &rarr; Fusion &rarr; 26-Keypoint Pose
+        <span data-i18n="poseFusion.footerLine1">RuView - Dual-Modal Pose Estimation - Architecture: Conv2D -> RuVector 6-Stage Attention (Flash+MHA+Hyperbolic+Linear+MoE+L/G) -> Fusion -> 26-Keypoint Pose</span>
       </div>
       <div>
         <a href="https://github.com/ruvnet/RuView">GitHub</a> &middot;
-        CNN: <span id="cnn-backend">ruvector-cnn (loading…)</span> &middot;
-        <a href="observatory.html">Observatory</a>
+        <span data-i18n="poseFusion.footerLine2">GitHub - CNN:</span> <span id="cnn-backend">ruvector-cnn (loading...)</span> &middot;
+        <a href="observatory.html" data-i18n="poseFusion.observatory">Observatory</a>
       </div>
     </div>
 
   </div><!-- /main-grid -->
 
-  <script type="module" src="pose-fusion/js/main.js?v=14"></script>
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      const boot = params.get('boot') || Date.now().toString();
+      window.__ruviewBootVersion = boot;
+
+      document.querySelectorAll('a[href$=".html"]').forEach((link) => {
+        try {
+          const url = new URL(link.getAttribute('href'), window.location.href);
+          if (url.origin !== window.location.origin) return;
+          url.searchParams.set('boot', boot);
+          link.setAttribute('href', `${url.pathname}${url.search}${url.hash}`);
+        } catch {
+          // noop
+        }
+      });
+    })();
+  </script>
+  <script type="module">
+    import(`./pose-fusion/js/main.js?v=${encodeURIComponent(window.__ruviewBootVersion)}`);
+  </script>
 </body>
 </html>

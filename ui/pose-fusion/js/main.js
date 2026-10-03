@@ -11,6 +11,7 @@ import { FusionEngine } from './fusion-engine.js?v=13';
 import { PoseDecoder } from './pose-decoder.js?v=13';
 import { CanvasRenderer } from './canvas-renderer.js?v=13';
 import { withWsTicket } from '../../services/ws-ticket.js';
+import { i18n } from '../../utils/i18n.js';
 
 // === State ===
 let mode = 'dual';  // 'dual' | 'video' | 'csi'
@@ -84,6 +85,16 @@ const RSSI_HISTORY_MAX = 80;
 // === Initialize ===
 function init() {
   console.log(`[PoseFusion] init() v4 — CsiSimulator=${CsiSimulator.VERSION || 'OLD'}, starting...`);
+  i18n.init({ selectorTarget: '.header-right' });
+  i18n.applyTranslations(document);
+  statusLabel.textContent = i18n.t('poseFusion.ready');
+  const backendEl = document.getElementById('cnn-backend');
+  if (backendEl) backendEl.textContent = i18n.t('poseFusion.backendLoading');
+  i18n.onLocaleChange(() => {
+    i18n.applyTranslations(document);
+    updateModeUI();
+    pauseBtn.textContent = isPaused ? `▶ ${i18n.t('poseFusion.resume')}` : `⏸ ${i18n.t('poseFusion.pause')}`;
+  });
   resizeCanvases();
   console.log(`[PoseFusion] canvases: skeleton=${skeletonCanvas.width}x${skeletonCanvas.height}, csi=${csiCanvas.width}x${csiCanvas.height}, emb=${embeddingCanvas.width}x${embeddingCanvas.height}`);
   window.addEventListener('resize', resizeCanvases);
@@ -100,7 +111,7 @@ function init() {
   // Pause
   pauseBtn.addEventListener('click', () => {
     isPaused = !isPaused;
-    pauseBtn.textContent = isPaused ? '▶ Resume' : '⏸ Pause';
+    pauseBtn.textContent = isPaused ? `▶ ${i18n.t('poseFusion.resume')}` : `⏸ ${i18n.t('poseFusion.pause')}`;
     pauseBtn.classList.toggle('active', isPaused);
   });
 
@@ -114,11 +125,11 @@ function init() {
   connectWsBtn.addEventListener('click', async () => {
     const url = wsUrlInput.value.trim();
     if (!url) return;
-    connectWsBtn.textContent = 'Connecting...';
+    connectWsBtn.textContent = i18n.t('poseFusion.connecting');
     // ADR-272: exchange the stored bearer for a single-use ?ticket= before the
     // upgrade — a browser cannot set an Authorization header on a WebSocket.
     const ok = await csiSimulator.connectLive(await withWsTicket(url));
-    connectWsBtn.textContent = ok ? '✓ Connected' : 'Connect';
+    connectWsBtn.textContent = ok ? `✓ ${i18n.t('poseFusion.connected')}` : i18n.t('poseFusion.connect');
     if (ok) {
       connectWsBtn.classList.add('active');
     }
@@ -133,8 +144,8 @@ function init() {
     const backendEl = document.getElementById('cnn-backend');
     if (backendEl) {
       backendEl.textContent = ok && visualCnn.useRuVector
-        ? `RuVector WASM v${visualCnn.rvModule.version()} — 6 attention mechanisms`
-        : 'ruvector-cnn (JS fallback)';
+        ? i18n.t('poseFusion.backendWasm', { version: visualCnn.rvModule.version() })
+        : i18n.t('poseFusion.backendFallback');
     }
   });
   csiCnn.tryLoadWasm(wasmBase);
@@ -166,16 +177,16 @@ function init() {
   // is decoded. Only the verified-frame callback promotes the label to LIVE.
   csiSimulator.onVerifiedFrame = () => {
     if (connectWsBtn) {
-      connectWsBtn.textContent = '✓ Live ESP32';
+      connectWsBtn.textContent = `✓ ${i18n.t('poseFusion.liveEsp32')}`;
       connectWsBtn.classList.add('active');
     }
-    statusLabel.textContent = 'LIVE CSI';
+    statusLabel.textContent = i18n.t('poseFusion.liveCsi');
     statusDot.classList.remove('offline');
   };
   withWsTicket(defaultWsUrl).then(u => csiSimulator.connectLive(u)).then(ok => {
     if (ok) {
       // Socket open, but no verified frame yet — stay honest.
-      statusLabel.textContent = 'SYNTHETIC';
+      statusLabel.textContent = i18n.t('poseFusion.synthetic');
     }
   });
 
@@ -191,11 +202,11 @@ async function startCamera() {
   const ok = await videoCapture.start();
   if (ok) {
     statusDot.classList.remove('offline');
-    statusLabel.textContent = 'LIVE';
+    statusLabel.textContent = i18n.t('poseFusion.live');
     resizeCanvases();
   } else {
     cameraPrompt.style.display = 'flex';
-    cameraPrompt.querySelector('p').textContent = 'Camera access denied. Try CSI-only mode.';
+    cameraPrompt.querySelector('p').textContent = i18n.t('poseFusion.cameraDenied');
   }
 }
 
@@ -210,7 +221,11 @@ function updateModeUI() {
   }
 
   // Update mode label in both the overlay and the camera prompt
-  const labelMap = { dual: 'DUAL FUSION', video: 'VIDEO ONLY', csi: 'CSI ONLY' };
+  const labelMap = {
+    dual: i18n.t('poseFusion.modeLabel.dual'),
+    video: i18n.t('poseFusion.modeLabel.video'),
+    csi: i18n.t('poseFusion.modeLabel.csi')
+  };
   const modeLabel = document.getElementById('mode-label');
   const promptLabel = document.getElementById('prompt-mode-label');
   if (modeLabel) modeLabel.textContent = labelMap[mode] || mode;
@@ -421,11 +436,11 @@ function updateRssi(dbm) {
 
   // Quality label
   let quality;
-  if (clamped > -50) quality = 'Excellent';
-  else if (clamped > -60) quality = 'Good';
-  else if (clamped > -70) quality = 'Fair';
-  else if (clamped > -80) quality = 'Weak';
-  else quality = 'Poor';
+  if (clamped > -50) quality = i18n.t('poseFusion.quality.excellent');
+  else if (clamped > -60) quality = i18n.t('poseFusion.quality.good');
+  else if (clamped > -70) quality = i18n.t('poseFusion.quality.fair');
+  else if (clamped > -80) quality = i18n.t('poseFusion.quality.weak');
+  else quality = i18n.t('poseFusion.quality.poor');
   rssiQualityEl.textContent = quality;
 
   // Color the dBm value based on quality

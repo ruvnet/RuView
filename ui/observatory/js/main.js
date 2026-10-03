@@ -8,17 +8,18 @@
  * - Dot-matrix mist body mass, particle trails, WiFi waves, signal field
  * - Reflective floor, settings dialog, and practical data HUD
  */
-import { withWsTicket } from '../../services/ws-ticket.js';
+import { withWsTicket } from '../../services/ws-ticket.js?v=20260920-6';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-import { DemoDataGenerator } from './demo-data.js';
-import { NebulaBackground } from './nebula-background.js';
-import { PostProcessing } from './post-processing.js';
-import { FigurePool, SKELETON_PAIRS } from './figure-pool.js';
-import { PoseSystem } from './pose-system.js';
-import { ScenarioProps } from './scenario-props.js';
-import { HudController, DEFAULTS, SETTINGS_VERSION, PRESETS, SCENARIO_NAMES } from './hud-controller.js';
+import { DemoDataGenerator } from './demo-data.js?v=20260920-6';
+import { NebulaBackground } from './nebula-background.js?v=20260920-6';
+import { PostProcessing } from './post-processing.js?v=20260920-6';
+import { FigurePool, SKELETON_PAIRS } from './figure-pool.js?v=20260921-10';
+import { PoseSystem } from './pose-system.js?v=20260920-6';
+import { ScenarioProps } from './scenario-props.js?v=20260920-6';
+import { HudController, DEFAULTS, SETTINGS_VERSION, PRESETS, SCENARIO_NAMES } from './hud-controller.js?v=20260921-10';
+import { i18n } from '../../utils/i18n.js?v=20260921-10';
 
 // ---- Palette ----
 const C = {
@@ -32,12 +33,16 @@ const C = {
   bgDeep:     0x080c14,
 };
 
+const HYBRID_POLL_INTERVAL_MS = 4000;
+
 // SCENARIO_NAMES, DEFAULTS, SETTINGS_VERSION, PRESETS imported from hud-controller.js
 
 // ---- Main Class ----
 
 class Observatory {
   constructor() {
+    i18n.init({ selectorTarget: '#status-bar' });
+    i18n.applyTranslations(document);
     this._canvas = document.getElementById('observatory-canvas');
     this.settings = { ...DEFAULTS };
 
@@ -131,7 +136,12 @@ class Observatory {
     // WebSocket for live data — always try auto-detect on startup
     this._ws = null;
     this._liveData = null;
+    this._hybridSnapshot = null;
+    this._lastHybridPollAt = 0;
+    this._hybridPollPending = false;
     this._autoDetectLive();
+    this._pollHybridSnapshot(true);
+    window.__ruviewObservatory = this;
 
     // Input
     this._initKeyboard();
@@ -436,51 +446,106 @@ class Observatory {
 
   // ---- WebSocket live data ----
 
-  _autoDetectLive() {
-    // Probe sensing server health on same origin, then common ports
-    const host = window.location.hostname || 'localhost';
-    const candidates = [
-      window.location.origin,                   // same origin (e.g. :3000)
-      `http://${host}:8765`,                     // default WS port
-      `http://${host}:3000`,                     // default HTTP port
-    ];
-    // Deduplicate
-    const unique = [...new Set(candidates)];
+  _syncLiveControls() {
+    const dsSel = document.getElementById('opt-data-source');
+    if (dsSel) dsSel.value = this.settings.dataSource;
 
-    const tryNext = (i) => {
-      if (i >= unique.length) {
-        console.log('[Observatory] No sensing server detected, using demo mode');
+    const wsInput = document.getElementById('opt-ws-url');
+    if (wsInput) wsInput.value = this.settings.wsUrl || '';
+
+    const wsRow = document.getElementById('ws-url-row');
+    if (wsRow) wsRow.style.display = this.settings.dataSource === 'ws' ? 'flex' : 'none';
+  }
+
+  _wsCandidatesFromBase(base) {
+    const urlObj = new URL(base);
+    const wsProto = urlObj.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsCandidates = [];
+
+    // Prefer RuView's dedicated sensing port when we are on the normal UI origin.
+    if (urlObj.port === '3000' || urlObj.port === '') {
+      wsCandidates.push(`${wsProto}//${urlObj.hostname}:3001/ws/sensing`);
+    }
+
+    // The server also exposes /ws/sensing on the HTTP port for single-port setups.
+    wsCandidates.push(`${wsProto}//${urlObj.host}/ws/sensing`);
+
+    // Legacy all-in-one Observatory deployments.
+    wsCandidates.push(`${wsProto}//${urlObj.hostname}:8765/ws/sensing`);
+
+    return [...new Set(wsCandidates)];
+  }
+
+  _tryWsCandidates(candidates, onAllFailed = null) {
+    const uniqueWs = [...new Set(candidates.filter(Boolean))];
+    const tryWs = (wsIndex) => {
+      if (wsIndex >= uniqueWs.length) {
+        if (typeof onAllFailed === 'function') onAllFailed();
         return;
       }
-      const base = unique[i];
+
+      const wsUrl = uniqueWs[wsIndex];
+      console.log('[Observatory] Trying live WebSocket', wsUrl);
+      this.settings.dataSource = 'ws';
+      this.settings.wsUrl = wsUrl;
+      this._syncLiveControls();
+      this._connectWS(wsUrl, () => tryWs(wsIndex + 1));
+    };
+
+    tryWs(0);
+  }
+
+  _autoDetectLive() {
+    // Prefer direct websocket candidates first. In the packaged RuView UI we
+    // already know the host and likely ports, so a direct connect is more
+    // reliable than waiting for a health-probe flow to decide for us.
+    const host = window.location.hostname || 'localhost';
+    const directBases = [
+      window.location.origin,
+      `http://${host}:3000`,
+      `http://${host}:8765`,
+    ];
+    const directWs = directBases.flatMap(base => this._wsCandidatesFromBase(base));
+
+    const fallbackProbeBases = [...new Set(directBases)];
+    const tryHealthProbe = (i) => {
+      if (i >= fallbackProbeBases.length) {
+        console.log('[Observatory] No sensing server detected, using demo mode');
+        this.settings.dataSource = 'demo';
+        this.settings.wsUrl = '';
+        this._syncLiveControls();
+        this._hud?.updateSourceBadge('demo', null);
+        return;
+      }
+
+      const base = fallbackProbeBases[i];
       fetch(`${base}/health`, { signal: AbortSignal.timeout(1500) })
         .then(r => r.ok ? r.json() : Promise.reject())
         .then(data => {
           if (data && data.status === 'ok') {
-            const wsProto = base.startsWith('https') ? 'wss:' : 'ws:';
-            const urlObj = new URL(base);
-            const wsUrl = `${wsProto}//${urlObj.host}/ws/sensing`;
-            console.log('[Observatory] Sensing server detected at', base, '→', wsUrl);
-            this.settings.dataSource = 'ws';
-            this.settings.wsUrl = wsUrl;
-            void this._connectWS(wsUrl);
+            console.log('[Observatory] Sensing server detected at', base);
+            this._tryWsCandidates(this._wsCandidatesFromBase(base), () => tryHealthProbe(i + 1));
           } else {
-            tryNext(i + 1);
+            tryHealthProbe(i + 1);
           }
         })
-        .catch(() => tryNext(i + 1));
+        .catch(() => tryHealthProbe(i + 1));
     };
-    tryNext(0);
+
+    this._tryWsCandidates(directWs, () => tryHealthProbe(0));
   }
 
   // async: `/ws/sensing` is gated (ADR-272); mint a single-use ticket first.
-  async _connectWS(url) {
+  async _connectWS(url, onFailure = null) {
     this._disconnectWS();
     let wsUrl = url;
     try { wsUrl = await withWsTicket(url); } catch { /* auth off or pre-ADR-272 server */ }
     try {
       this._ws = new WebSocket(wsUrl);
       this._ws.onopen = () => {
+        this.settings.dataSource = 'ws';
+        this.settings.wsUrl = url;
+        this._syncLiveControls();
         console.log('[Observatory] WebSocket connected');
         this._hud.updateSourceBadge('ws', this._ws);
       };
@@ -489,15 +554,39 @@ class Observatory {
         console.log('[Observatory] WebSocket closed, falling back to demo');
         this._ws = null;
         this.settings.dataSource = 'demo';
+        this.settings.wsUrl = '';
+        this._syncLiveControls();
         this._hud.updateSourceBadge('demo', null);
+        if (typeof onFailure === 'function') onFailure();
       };
-      this._ws.onerror = () => {};
+      this._ws.onerror = () => {
+        console.log('[Observatory] WebSocket error for', wsUrl);
+      };
     } catch {}
   }
 
   _disconnectWS() {
     if (this._ws) { this._ws.close(); this._ws = null; }
     this._liveData = null;
+  }
+
+  async _pollHybridSnapshot(force = false) {
+    const now = Date.now();
+    if (!force && (this._hybridPollPending || now - this._lastHybridPollAt < HYBRID_POLL_INTERVAL_MS)) {
+      return;
+    }
+
+    this._hybridPollPending = true;
+    this._lastHybridPollAt = now;
+    try {
+      const response = await fetch('/api/v1/hybrid/latest', { signal: AbortSignal.timeout(1500) });
+      if (!response.ok) return;
+      this._hybridSnapshot = await response.json();
+    } catch {
+      // Keep the last successful snapshot; this signal is only a visual hint.
+    } finally {
+      this._hybridPollPending = false;
+    }
   }
 
   // ========================================
@@ -510,22 +599,28 @@ class Observatory {
     const elapsed = this._clock.getElapsedTime();
 
     // Data source
-    if (this.settings.dataSource === 'ws' && this._liveData) {
+    const isLiveMode = this.settings.dataSource === 'ws' && !!this._liveData;
+    if (isLiveMode) {
       this._currentData = this._liveData;
     } else {
       this._currentData = this._demoData.update(dt);
     }
     const data = this._currentData;
+    this._pollHybridSnapshot();
 
     // Updates
     this._nebula.update(dt, elapsed);
-    this._figurePool.update(data, elapsed);
-    this._scenarioProps.update(data, this._demoData.currentScenario);
+    this._figurePool.update(data, elapsed, this._hybridSnapshot);
+    this._scenarioProps.update(data, isLiveMode ? null : this._demoData.currentScenario);
     this._updateDotMatrixMist(data, elapsed);
     this._updateParticleTrail(data, dt, elapsed);
     this._updateWifiWaves(elapsed);
     this._updateSignalField(data);
-    this._hud.updateHUD(data, this._demoData);
+    this._hud.updateHUD(data, {
+      isLiveMode,
+      demoData: this._demoData,
+      hybridSnapshot: this._hybridSnapshot,
+    });
     this._hud.updateSparkline(data);
 
     // Router LED
@@ -557,7 +652,13 @@ class Observatory {
 
   _updateDotMatrixMist(data, elapsed) {
     const persons = data?.persons || [];
-    const isPresent = data?.classification?.presence || false;
+    const verdict = `${data?.quality_verdict || ''}`.toLowerCase();
+    const quality = data?.signal_quality_score;
+    const feat = data?.features || {};
+    const hasReliableSignal = verdict !== 'deny'
+      && !(typeof quality === 'number' && quality <= 0.01)
+      && !((feat.mean_rssi ?? 0) <= -99 && (feat.variance ?? 0) === 0 && (feat.motion_band_power ?? 0) === 0);
+    const isPresent = !!data?.classification?.presence && hasReliableSignal;
     const pos = this._mistPoints.geometry.attributes.position;
     const alpha = this._mistPoints.geometry.attributes.alpha;
 
@@ -610,7 +711,13 @@ class Observatory {
   _updateParticleTrail(data, dt, elapsed) {
     if (this.settings.trail <= 0) return;
     const persons = data?.persons || [];
-    const isPresent = data?.classification?.presence || false;
+    const verdict = `${data?.quality_verdict || ''}`.toLowerCase();
+    const quality = data?.signal_quality_score;
+    const feat = data?.features || {};
+    const hasReliableSignal = verdict !== 'deny'
+      && !(typeof quality === 'number' && quality <= 0.01)
+      && !((feat.mean_rssi ?? 0) <= -99 && (feat.variance ?? 0) === 0 && (feat.motion_band_power ?? 0) === 0);
+    const isPresent = !!data?.classification?.presence && hasReliableSignal;
     const pos = this._trail.geometry.attributes.position;
     const ages = this._trail.geometry.attributes.age;
 

@@ -1,5 +1,7 @@
 // Hardware Tab Component
 
+import { i18n } from '../utils/i18n.js';
+
 export class HardwareTab {
   constructor(containerElement) {
     this.container = containerElement;
@@ -127,9 +129,9 @@ export class HardwareTab {
       return div;
     };
     
-    arrayStatus.appendChild(createInfoDiv('Active TX:', `${txActive}/3`));
-    arrayStatus.appendChild(createInfoDiv('Active RX:', `${rxActive}/6`));
-    arrayStatus.appendChild(createInfoDiv('Signal Quality:', `${this.calculateSignalQuality(txActive, rxActive)}%`));
+    arrayStatus.appendChild(createInfoDiv(i18n.t('hardware.activeTx'), `${txActive}/3`));
+    arrayStatus.appendChild(createInfoDiv(i18n.t('hardware.activeRx'), `${rxActive}/6`));
+    arrayStatus.appendChild(createInfoDiv(i18n.t('hardware.signalQuality'), `${this.calculateSignalQuality(txActive, rxActive)}%`));
   }
 
   // Calculate signal quality based on active antennas

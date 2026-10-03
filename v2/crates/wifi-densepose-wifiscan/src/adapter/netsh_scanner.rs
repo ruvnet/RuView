@@ -268,8 +268,8 @@ fn try_parse_bssid_line(line: &str) -> Option<BssidId> {
 /// Accepts `"Signal             : 84%"` and returns `84.0`.
 /// Also handles values without the trailing `%` sign.
 fn try_parse_signal_line(line: &str) -> Option<f64> {
-    let upper = line.to_ascii_uppercase();
-    if !upper.starts_with("SIGNAL") {
+    let lower = line.to_lowercase();
+    if !lower.starts_with("signal") && !lower.starts_with("sinal") {
         return None;
     }
     let (_key, value) = split_kv(line)?;
@@ -281,8 +281,11 @@ fn try_parse_signal_line(line: &str) -> Option<f64> {
 ///
 /// Accepts `"Radio type         : 802.11ax"`.
 fn try_parse_radio_type_line(line: &str) -> Option<RadioType> {
-    let upper = line.to_ascii_uppercase();
-    if !upper.starts_with("RADIO TYPE") {
+    let lower = line.to_lowercase();
+    if !lower.starts_with("radio type")
+        && !lower.starts_with("tipo de radio")
+        && !lower.starts_with("tipo de rádio")
+    {
         return None;
     }
     let (_key, value) = split_kv(line)?;
@@ -294,8 +297,8 @@ fn try_parse_radio_type_line(line: &str) -> Option<RadioType> {
 /// Accepts `"Band               : 5 GHz"` and variations such as
 /// `"2.4 GHz"` and `"6 GHz"`.
 fn try_parse_band_line(line: &str) -> Option<BandType> {
-    let upper = line.to_ascii_uppercase();
-    if !upper.starts_with("BAND") {
+    let lower = line.to_lowercase();
+    if !lower.starts_with("band") && !lower.starts_with("banda") {
         return None;
     }
     let (_key, value) = split_kv(line)?;
@@ -315,8 +318,8 @@ fn try_parse_band_line(line: &str) -> Option<BandType> {
 ///
 /// Accepts `"Channel            : 48"`.
 fn try_parse_channel_line(line: &str) -> Option<u8> {
-    let upper = line.to_ascii_uppercase();
-    if !upper.starts_with("CHANNEL") {
+    let lower = line.to_lowercase();
+    if !lower.starts_with("channel") && !lower.starts_with("canal") {
         return None;
     }
     let (_key, value) = split_kv(line)?;
@@ -967,6 +970,31 @@ SSID 1 : TestNet
         let results = parse_netsh_output(output).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].ssid, "TestNet");
+    }
+
+    #[test]
+    fn parses_portuguese_bssid_output() {
+        let output = "\
+Nome da interface: Wi-Fi
+Ha 1 redes visiveis no momento.
+
+SSID 1 : JHON_5G
+    Tipo de rede            : Infraestrutura
+    Autenticacao            : WPA2-Personal
+    Criptografia            : CCMP
+    BSSID 1                 : 74:fe:ce:f1:5f:12
+         Sinal              : 87%
+         Tipo de Radio      : 802.11ax
+         Banda              : 5 GHz
+         Canal              : 36
+";
+        let results = parse_netsh_output(output).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].ssid, "JHON_5G");
+        assert_eq!(results[0].channel, 36);
+        assert_eq!(results[0].radio_type, RadioType::Ax);
+        assert_eq!(results[0].band, BandType::Band5GHz);
+        assert!((results[0].signal_pct - 87.0).abs() < f64::EPSILON);
     }
 
     // -- timestamp consistency ------------------------------------------------
