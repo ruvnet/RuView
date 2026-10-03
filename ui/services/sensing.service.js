@@ -18,6 +18,13 @@ const SENSING_WS_PORT_BY_HTTP_PORT = {
   '8080': '8765',
 };
 
+// Raw `source` values emitted by ws_server.py when it falls back to a
+// commodity platform WiFi adapter (ADR-013 collectors). The samples are really
+// measured, but the adapter exposes RSSI only — no per-subcarrier CSI — so
+// these map to the dedicated "rssi-only" state rather than "live" or
+// "server-simulated". Capabilities: PRESENCE + MOTION only.
+const RSSI_ONLY_SOURCES = new Set(['macos_wifi', 'linux_wifi', 'windows_wifi']);
+
 export function buildSensingWsUrl(locationLike = (typeof window !== 'undefined' ? window.location : null)) {
   const protocol = locationLike && locationLike.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = locationLike && locationLike.host ? locationLike.host : 'localhost:3001';
@@ -88,6 +95,7 @@ class SensingService {
     this._state = 'disconnected';
     // Data-source label exposed to the UI:
     //   "live"              — real ESP32 hardware connected
+    //   "rssi-only"         — real commodity-WiFi RSSI measurements, no CSI
     //   "server-simulated"  — server is running but using synthetic data (no hardware)
     //   "reconnecting"      — WebSocket disconnected, retrying
     //   "simulated"         — client-side fallback simulation (server unreachable)
@@ -155,6 +163,8 @@ class SensingService {
   /**
    * Current data source label.
    * "live"         — frames are arriving from the real ESP32 over WebSocket
+   * "rssi-only"    — frames are real measurements from this machine's own WiFi
+   *                  adapter (RSSI only, no CSI): presence + gross motion only
    * "reconnecting" — WebSocket disconnected; actively retrying, no frames emitted
    * "unreachable"  — retries exhausted, client simulation off; NO frames emitted
    *                  and whatever is on screen is the last live reading, stale
@@ -457,6 +467,12 @@ class SensingService {
     }
     if (rawSource === 'esp32' || rawSource === 'wifi' || rawSource === 'live') {
       this._setDataSource('live');
+    } else if (RSSI_ONLY_SOURCES.has(rawSource)) {
+      // Real measurements from a commodity platform WiFi adapter (ADR-013 /
+      // ADR-049 collectors). These are genuinely measured — collapsing them to
+      // "server-simulated" would label real data as invented — but they carry
+      // no CSI, so they must not be promoted to "live" either. Third state.
+      this._setDataSource('rssi-only');
     } else if (rawSource === 'simulated' || rawSource === 'simulate') {
       this._setDataSource('server-simulated');
     } else {
@@ -529,7 +545,7 @@ class SensingService {
   /**
    * Update the dataSource label and notify state listeners so the UI can
    * react without needing a separate subscription.
-   * @param {'live'|'server-simulated'|'reconnecting'|'simulated'} source
+   * @param {'live'|'rssi-only'|'server-simulated'|'reconnecting'|'simulated'} source
    */
   _setDataSource(source) {
     if (source === this._dataSource) return;
