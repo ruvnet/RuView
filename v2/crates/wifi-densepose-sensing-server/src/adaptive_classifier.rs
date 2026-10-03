@@ -255,6 +255,14 @@ fn default_class_names() -> Vec<String> {
     DEFAULT_CLASSES.iter().map(|s| s.to_string()).collect()
 }
 
+fn finite_or(value: f64, fallback: f64) -> f64 {
+    if value.is_finite() {
+        value
+    } else {
+        fallback
+    }
+}
+
 impl Default for AdaptiveModel {
     fn default() -> Self {
         let n_classes = DEFAULT_CLASSES.len();
@@ -282,7 +290,11 @@ impl AdaptiveModel {
         // Normalise features.
         let mut x = [0.0f64; N_FEATURES];
         for i in 0..N_FEATURES {
-            x[i] = (raw_features[i] - self.global_mean[i]) / (self.global_std[i] + 1e-9);
+            let mean = finite_or(self.global_mean[i], 0.0);
+            let std = finite_or(self.global_std[i], 1.0);
+            let denom = finite_or(std + 1e-9, 1.0);
+            let feature = finite_or(raw_features[i], mean);
+            x[i] = finite_or((feature - mean) / denom, 0.0);
         }
 
         // Compute logits: w·x + b for each class.
@@ -306,20 +318,21 @@ impl AdaptiveModel {
             probs[c] = ((logits[c] - max_logit).exp()) / exp_sum;
         }
 
-        // Pick argmax. Same NaN-panic class as #611: if any raw_feature is NaN
-        // it propagates through normalize → logits → softmax, then partial_cmp
-        // returns None and unwrap() panics the sensing server on every frame.
+        // Pick argmax. Non-finite hardware samples are neutralized during
+        // normalization so confidence values do not leak NaN downstream.
         let (best_c, best_p) = probs
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-            .unwrap();
+            .filter(|(_, p)| p.is_finite())
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .map(|(class_idx, prob)| (class_idx, *prob))
+            .unwrap_or((0, 0.0));
         let label = if best_c < self.class_names.len() {
             self.class_names[best_c].clone()
         } else {
             "present_still".to_string()
         };
-        (label, *best_p)
+        (label, best_p)
     }
 
     /// Save model to a JSON file.
@@ -691,5 +704,51 @@ mod compatibility_tests {
         let amplitudes = [1.0, 20.0, 2.0];
         assert_eq!(compatible_dominant_frequency(2, 1.25, &amplitudes), 1.25);
         assert_eq!(compatible_dominant_frequency(2, f64::NAN, &amplitudes), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn two_class_model() -> AdaptiveModel {
+        AdaptiveModel {
+            class_stats: vec![
+                ClassStats {
+                    label: "absent".to_string(),
+                    count: 1,
+                    mean: [0.0; N_FEATURES],
+                    stddev: [1.0; N_FEATURES],
+                },
+                ClassStats {
+                    label: "present_still".to_string(),
+                    count: 1,
+                    mean: [0.0; N_FEATURES],
+                    stddev: [1.0; N_FEATURES],
+                },
+            ],
+            weights: vec![vec![0.0; N_FEATURES + 1], vec![0.0; N_FEATURES + 1]],
+            global_mean: [0.0; N_FEATURES],
+            global_std: [1.0; N_FEATURES],
+            trained_frames: 2,
+            training_accuracy: 1.0,
+            version: 1,
+            class_names: vec!["absent".to_string(), "present_still".to_string()],
+        }
+    }
+
+    #[test]
+    fn classify_returns_finite_confidence_for_non_finite_features() {
+        let mut model = two_class_model();
+        model.weights[0][N_FEATURES] = 1.0;
+        let mut features = [0.25; N_FEATURES];
+        features[0] = f64::NAN;
+        features[7] = f64::INFINITY;
+
+        let (label, confidence) = model.classify(&features);
+
+        assert_eq!(label, "absent");
+        assert!(confidence.is_finite());
+        assert!(confidence > 0.5 && confidence < 1.0);
     }
 }
