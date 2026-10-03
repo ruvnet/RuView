@@ -1873,6 +1873,12 @@ struct AppStateInner {
     // (not replacing) the window-aggregated `tx` / `/ws/sensing` pipeline.
     intro: wifi_densepose_sensing_server::introspection::IntrospectionState,
     intro_tx: broadcast::Sender<String>,
+    /// #2087: browser WebSocket clients currently connected. `tx` receivers
+    /// also include the recorder and the MQTT bridge, so they are not a count
+    /// of clients.
+    ws_clients: wifi_densepose_sensing_server::stream_stats::WsClientCounter,
+    /// #2087: measured rate of sensing updates (one per `tick` advance).
+    update_rate: wifi_densepose_sensing_server::stream_stats::UpdateRateMeter,
     total_detections: u64,
     start_time: std::time::Instant,
     /// Vital sign detector (processes CSI frames to estimate HR/RR).
@@ -2157,6 +2163,14 @@ fn calibration_sequence_order(previous: Option<u32>, sequence: u32) -> Calibrati
 }
 
 impl AppStateInner {
+    /// Advance the sensing tick and record the update for the measured
+    /// stream rate (#2087). Returns the new tick.
+    fn advance_tick(&mut self) -> u64 {
+        self.tick += 1;
+        self.update_rate.observe(std::time::Instant::now());
+        self.tick
+    }
+
     /// Admit at most one raw CSI observation per forward node sequence into
     /// the current calibration session. This stateful boundary prevents a
     /// caller from advancing the model with a replayed history tail.
@@ -2577,6 +2591,8 @@ impl AppStateInner {
             tx: broadcast::channel::<String>(16).0,
             intro: wifi_densepose_sensing_server::introspection::IntrospectionState::new(),
             intro_tx: broadcast::channel::<String>(16).0,
+            ws_clients: Default::default(),
+            update_rate: Default::default(),
             total_detections: 0,
             start_time: std::time::Instant::now(),
             vital_detector: VitalSignDetector::new(10.0),
@@ -4289,8 +4305,7 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
             s.rssi_history.pop_front();
         }
 
-        s.tick += 1;
-        let tick = s.tick;
+        let tick = s.advance_tick();
 
         let motion_score = if classification.motion_level == "active" {
             0.8
@@ -4455,8 +4470,7 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         s.rssi_history.pop_front();
     }
 
-    s.tick += 1;
-    let tick = s.tick;
+    let tick = s.advance_tick();
 
     let motion_score = if classification.motion_level == "active" {
         0.8
@@ -4838,9 +4852,9 @@ async fn ws_sensing_handler(
 }
 
 async fn handle_ws_client(mut socket: WebSocket, state: SharedState) {
-    let mut rx = {
+    let (mut rx, _client) = {
         let s = state.read().await;
-        s.tx.subscribe()
+        (s.tx.subscribe(), s.ws_clients.enter())
     };
 
     info!("WebSocket client connected (sensing)");
@@ -4947,9 +4961,9 @@ async fn ws_pose_handler(
 }
 
 async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
-    let mut rx = {
+    let (mut rx, _client) = {
         let s = state.read().await;
-        s.tx.subscribe()
+        (s.tx.subscribe(), s.ws_clients.enter())
     };
 
     info!("WebSocket client connected (pose)");
@@ -5101,7 +5115,7 @@ async fn health(State(state): State<SharedState>) -> Json<serde_json::Value> {
         "status": "ok",
         "source": s.effective_source(),
         "tick": s.tick,
-        "clients": s.tx.receiver_count(),
+        "clients": s.ws_clients.get(),
     }))
 }
 
@@ -6567,8 +6581,7 @@ async fn health_system(State(state): State<SharedState>) -> Json<serde_json::Val
                 "message": format!("Source: {}", s.effective_source())
             },
             "pose": { "status": "healthy", "message": "WiFi-derived pose estimation" },
-            "stream": { "status": if s.tx.receiver_count() > 0 { "healthy" } else { "idle" },
-                        "message": format!("{} client(s)", s.tx.receiver_count()) },
+            "stream": stream_health_component(&s, std::time::Instant::now()),
         },
         "metrics": {
             "cpu_percent": 2.5,
@@ -6728,12 +6741,160 @@ async fn pose_zones_summary(State(state): State<SharedState>) -> Json<serde_json
 
 async fn stream_status(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
-    Json(serde_json::json!({
-        "active": true,
-        "clients": s.tx.receiver_count(),
-        "fps": if s.tick > 1 { 10u64 } else { 0u64 },
+    Json(stream_status_json(&s, std::time::Instant::now()))
+}
+
+/// #2087: measured stream status. `fps` is the rate of sensing updates over
+/// the last few seconds (0 when nothing is flowing), `nodes` carries each
+/// fresh node's measured CSI frame rate, and `clients` counts browser
+/// WebSockets rather than every internal broadcast subscriber.
+fn stream_status_json(s: &AppStateInner, now: std::time::Instant) -> serde_json::Value {
+    use wifi_densepose_sensing_server::stream_stats::round1;
+    let fps = s.update_rate.rate_hz(now);
+    let mut ids: Vec<u8> = s
+        .node_states
+        .iter()
+        .filter(|(_, n)| node_is_fresh(n, now))
+        .map(|(id, _)| *id)
+        .collect();
+    ids.sort_unstable();
+    let nodes: Vec<serde_json::Value> = ids
+        .iter()
+        .map(|id| {
+            let n = &s.node_states[id];
+            serde_json::json!({
+                "node_id": id,
+                // null until the node's EMA has warmed up (5 frames).
+                "csi_fps": n.measured_sample_rate_hz().map(round1),
+                "csi_fps_samples": n.csi_fps_samples,
+            })
+        })
+        .collect();
+    // fold from +0.0: an empty f64 `sum()` is -0.0, which serializes as "-0.0".
+    let csi_fps_total = ids
+        .iter()
+        .filter_map(|id| s.node_states[id].measured_sample_rate_hz())
+        .fold(0.0, |acc, fps| acc + fps);
+    serde_json::json!({
+        "active": fps > 0.0,
+        "clients": s.ws_clients.get(),
+        "fps": round1(fps),
+        "csi_fps_total": round1(csi_fps_total),
+        "nodes": nodes,
         "source": s.effective_source(),
-    }))
+    })
+}
+
+/// `stream` component of `/health/system`: healthy while updates are flowing
+/// to at least one browser client.
+fn stream_health_component(s: &AppStateInner, now: std::time::Instant) -> serde_json::Value {
+    let clients = s.ws_clients.get();
+    let fps = wifi_densepose_sensing_server::stream_stats::round1(s.update_rate.rate_hz(now));
+    let status = if clients > 0 && fps > 0.0 {
+        "healthy"
+    } else {
+        "idle"
+    };
+    serde_json::json!({
+        "status": status,
+        "message": format!("{clients} client(s), {fps} updates/s"),
+        "clients": clients,
+        "fps": fps,
+    })
+}
+
+#[cfg(test)]
+mod stream_status_tests {
+    //! #2087: `/api/v1/stream/status` reported a literal 10 fps and counted
+    //! every broadcast subscriber as a client.
+
+    use super::*;
+
+    fn warmed_node(fps: f64, seen: std::time::Instant) -> NodeState {
+        let mut n = NodeState::new();
+        n.csi_fps_ema = fps;
+        n.csi_fps_samples = 50;
+        n.last_frame_time = Some(seen);
+        n
+    }
+
+    #[test]
+    fn idle_server_reports_zero_fps_and_no_clients() {
+        let s = AppStateInner::minimal();
+        let _recorder = s.tx.subscribe(); // internal subscriber, not a client
+        let v = stream_status_json(&s, std::time::Instant::now());
+        assert_eq!(v["fps"], 0.0);
+        assert_eq!(v["active"], false);
+        assert_eq!(v["clients"], 0);
+        assert_eq!(v["nodes"].as_array().unwrap().len(), 0);
+        assert_eq!(
+            stream_health_component(&s, std::time::Instant::now())["status"],
+            "idle"
+        );
+    }
+
+    #[test]
+    fn fps_is_the_measured_update_rate() {
+        let mut s = AppStateInner::minimal();
+        let t0 = std::time::Instant::now();
+        for i in 0..=40u64 {
+            s.tick += 1;
+            s.update_rate.observe(t0 + Duration::from_millis(50 * i));
+        }
+        let v = stream_status_json(&s, t0 + Duration::from_millis(2000));
+        assert_eq!(v["fps"], 20.0, "a 50 ms cadence must read 20, not 10");
+        assert_eq!(v["active"], true);
+    }
+
+    #[test]
+    fn per_node_fps_and_aggregate_cover_fresh_nodes_only() {
+        let mut s = AppStateInner::minimal();
+        let now = std::time::Instant::now();
+        s.node_states.insert(2, warmed_node(46.0, now));
+        s.node_states.insert(1, warmed_node(41.0, now));
+        s.node_states.insert(
+            3,
+            warmed_node(30.0, now - Duration::from_millis(NODE_STALE_AFTER_MS + 1)),
+        );
+        let mut cold = NodeState::new();
+        cold.last_frame_time = Some(now);
+        s.node_states.insert(4, cold);
+
+        let v = stream_status_json(&s, now);
+        let nodes = v["nodes"].as_array().unwrap();
+        let ids: Vec<u64> = nodes
+            .iter()
+            .map(|n| n["node_id"].as_u64().unwrap())
+            .collect();
+        assert_eq!(ids, vec![1, 2, 4], "stale node 3 excluded, sorted by id");
+        assert_eq!(nodes[0]["csi_fps"], 41.0);
+        assert_eq!(nodes[1]["csi_fps"], 46.0);
+        assert!(
+            nodes[2]["csi_fps"].is_null(),
+            "unwarmed EMA is not reported"
+        );
+        assert_eq!(v["csi_fps_total"], 87.0);
+    }
+
+    #[test]
+    fn clients_count_websockets_not_internal_subscribers() {
+        let mut s = AppStateInner::minimal();
+        let _recorder = s.tx.subscribe();
+        let _mqtt = s.tx.subscribe();
+        let browser = s.ws_clients.enter();
+        let now = std::time::Instant::now();
+        for i in 0..10u64 {
+            s.update_rate
+                .observe(now - Duration::from_millis(100 * (10 - i)));
+        }
+        assert_eq!(stream_status_json(&s, now)["clients"], 1);
+        let health = stream_health_component(&s, now);
+        assert_eq!(health["status"], "healthy");
+        assert_eq!(health["clients"], 1);
+        drop(browser);
+        assert_eq!(stream_status_json(&s, now)["clients"], 0);
+        assert_eq!(stream_health_component(&s, now)["status"], "idle");
+    }
 }
 
 // ── Model Management Endpoints ──────────────────────────────────────────────
@@ -9890,8 +10051,7 @@ async fn udp_receiver_task(
 
                     update_edge_node_classification(ns, &vitals);
 
-                    s.tick += 1;
-                    let tick = s.tick;
+                    let tick = s.advance_tick();
 
                     let motion_score = if vitals.motion {
                         0.8
@@ -10404,8 +10564,7 @@ async fn udp_receiver_task(
                     // Cross-node fusion: combine features from all active nodes.
                     let fused_features = fuse_multi_node_features(&features, &s.node_states);
 
-                    s.tick += 1;
-                    let tick = s.tick;
+                    let tick = s.advance_tick();
 
                     let motion_score = if classification.motion_level == "active" {
                         0.8
@@ -10709,8 +10868,7 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
             continue;
         }
 
-        s.tick += 1;
-        let tick = s.tick;
+        let tick = s.advance_tick();
 
         let frame = generate_simulated_frame(tick);
 
@@ -12127,6 +12285,8 @@ async fn main() {
         tx,
         intro: wifi_densepose_sensing_server::introspection::IntrospectionState::new(),
         intro_tx,
+        ws_clients: Default::default(),
+        update_rate: Default::default(),
         total_detections: 0,
         start_time: std::time::Instant::now(),
         vital_detector: VitalSignDetector::new(vital_sample_rate),

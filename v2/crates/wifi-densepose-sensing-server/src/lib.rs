@@ -38,6 +38,8 @@ pub mod rufield_surface;
 pub mod rvf_container;
 pub mod rvf_pipeline;
 pub mod semconv;
+/// #2087: measured stream rate and WebSocket client count.
+pub mod stream_stats;
 pub mod telemetry;
 #[allow(dead_code)]
 pub mod trainer;
