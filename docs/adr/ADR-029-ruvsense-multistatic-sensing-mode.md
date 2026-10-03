@@ -2,11 +2,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | Proposed |
+| **Status** | Proposed + amended by ADR-113 |
 | **Date** | 2026-03-02 |
 | **Deciders** | ruv |
 | **Codename** | **RuvSense** -- RuVector-Enhanced Sensing for Multistatic Fidelity |
-| **Relates to** | ADR-012 (ESP32 Mesh), ADR-014 (SOTA Signal Processing), ADR-016 (RuVector Training), ADR-017 (RuVector Signal+MAT), ADR-018 (ESP32 Implementation), ADR-024 (AETHER Embeddings), ADR-026 (Survivor Track Lifecycle), ADR-027 (MERIDIAN Generalization) |
+| **Relates to** | ADR-012 (ESP32 Mesh), ADR-014 (SOTA Signal Processing), ADR-016 (RuVector Training), ADR-017 (RuVector Signal+MAT), ADR-018 (ESP32 Implementation), ADR-024 (AETHER Embeddings), ADR-026 (Survivor Track Lifecycle), ADR-027 (MERIDIAN Generalization), ADR-113 (Multistatic Anchor Placement Strategy) |
 
 ---
 
@@ -41,6 +41,12 @@ Quantified:
 - Zero identity swaps over 600 seconds (12,000 frames)
 - 20 Hz output rate (50 ms cycle time)
 - Breathing SNR > 10dB at 3m (validates small-motion sensitivity)
+
+### 1.4 Placement Amendment (ADR-113)
+
+ADR-113 amends this ADR with the installation guidance that was intentionally left open here: how many anchors to deploy, where to place them, and how that decision changes by cog category and target zone. Implementers should treat ADR-113's 4-axis placement matrix as the binding anchor-placement specification for RuvSense deployments.
+
+Based on ADR-113's **SYNTHETIC** physics benchmarks, "4 nodes" is no longer a universal default. The recommended anchor count is cog-dependent: presence can start at 3 anchors, person-count at 4, 2D pose/vital-signs at 5, and 3D vital-signs at 6 low/mid wall anchors with no ceiling-only layout.
 
 ---
 
@@ -128,6 +134,28 @@ Synchronization: GPIO pulse from aggregator node at cycle start. Clock drift at 
 1. Build cross-link temporal correlation graph (nodes = TX-RX links, edges = correlation coefficient)
 2. `DynamicMinCut` partitions into K clusters (one per detected person)
 3. Attention fusion (§5.3 of research doc) runs independently per cluster
+
+#### 2.4.1 Anchor Placement Matrix (ADR-113 Amendment)
+
+ADR-113 fills ADR-029's open placement question with a cog-aware decision matrix:
+
+> **Validation caveat — SYNTHETIC:** These anchor-count recommendations and coverage values are estimates from ADR-113's benchmark geometries, not real-hardware guarantees. Bench validation is required before production use.
+
+| Cog category | Dimension | Zone mode | Occupants | Recommended anchors | Anchor heights | SYNTHETIC expected coverage |
+|--------------|-----------|-----------|-----------|---------------------|----------------|-------------------|
+| Presence / occupancy | 2D | body | 1 | 3 | walls @ 0.8 m | 63% |
+| Person count | 2D | body | 1-4 | 4 | walls @ 0.8-1.5 m mixed | 86% |
+| Pose estimation | 2D | body | 1-2 | 5 | walls @ 0.8/1.5 m mixed | 97% |
+| Vital signs | 2D | chest | 1-4 | 5 | walls @ 0.8/1.5 m | 100% |
+| Pose estimation (3D) | 3D | body | 1-2 | 7-8 | mixed: 0.8/1.5/2.4 m | 65%+ |
+| Vital signs (3D) | 3D | chest | 1-4 | 6 | walls @ 0.8/1.5 m, no ceiling | 82% |
+
+Placement rules inherited from ADR-113:
+
+1. Avoid ceiling-only deployments; they place the Fresnel envelope above floor- and chest-level targets.
+2. Match anchor heights to target zones: chest-centric vital-sign cogs prefer low/mid wall anchors, while full-body 3D pose can use mixed heights.
+3. Keep multi-feature cogs at N >= 4 so R7 mincut single-anchor-compromise detection remains available.
+4. Use the future `wifi-densepose plan-antennas --cog <name>` CLI path to select the matrix row and produce a deterministic installation diagram.
 
 ### 2.5 Coherence Metric
 
@@ -387,6 +415,7 @@ No new workspace dependencies. All ruvector crates are already in the workspace 
 | ADR-024 | **Used**: AETHER embeddings for person re-identification |
 | ADR-026 | **Reused**: Kalman + lifecycle infrastructure lifted to RuvSense |
 | ADR-027 | **Used**: GeometryEncoder, HardwareNormalizer, FiLM conditioning |
+| ADR-113 | **Amends**: Adds the cog-aware anchor-count and placement matrix for RuvSense deployments |
 
 ---
 
