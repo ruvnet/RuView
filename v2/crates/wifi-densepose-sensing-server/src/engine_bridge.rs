@@ -132,6 +132,21 @@ impl EngineBridge {
         self.engine.set_semantic_retention(max_states);
     }
 
+    /// Give the governed fuser the `--node-positions` map, keyed by node id.
+    /// The fuser resolves each frame's position by its `node_id`, so nodes
+    /// discovered later pick up their entry without another call; nodes with
+    /// no entry fuse at the origin.
+    #[must_use]
+    pub fn with_node_positions(mut self, positions: HashMap<u8, [f32; 3]>) -> Self {
+        self.engine.set_node_positions(positions);
+        self
+    }
+
+    /// Node positions the governed fuser is using, keyed by node id.
+    pub fn node_positions(&self) -> &HashMap<u8, [f32; 3]> {
+        self.engine.node_positions()
+    }
+
     /// Switch the active privacy mode (operator/control-plane action).
     pub fn set_privacy_mode(&mut self, mode: PrivacyMode) {
         self.engine.set_privacy_mode(mode);
@@ -297,6 +312,33 @@ mod tests {
         m.insert(0u8, node_state_with_history(1.0, 56));
         m.insert(1u8, node_state_with_history(1.05, 56));
         m
+    }
+
+    fn configured_positions() -> HashMap<u8, [f32; 3]> {
+        [(0u8, [0.5, 0.0, 1.0]), (1u8, [4.0, 3.0, 1.0])]
+            .into_iter()
+            .collect()
+    }
+
+    #[test]
+    fn with_node_positions_reaches_the_governed_fuser() {
+        let bridge = EngineBridge::new(PrivacyMode::PrivateHome, 1, "r", "R", None)
+            .with_node_positions(configured_positions());
+        assert_eq!(bridge.node_positions(), &configured_positions());
+    }
+
+    #[test]
+    fn node_positions_survive_a_guard_config() {
+        let cfg = MultistaticConfig {
+            guard_interval_us: 200_000,
+            min_nodes: 1,
+            ..MultistaticConfig::default()
+        };
+        let mut bridge = EngineBridge::new(PrivacyMode::PrivateHome, 1, "r", "R", Some(cfg))
+            .with_node_positions(configured_positions());
+        assert_eq!(bridge.node_positions(), &configured_positions());
+        assert!(bridge.observe_cycle(&two_node_states(), 1_000).is_some());
+        assert_eq!(bridge.node_positions(), &configured_positions());
     }
 
     #[test]

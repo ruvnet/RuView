@@ -260,6 +260,14 @@ impl StreamingEngine {
         self.fuser.set_node_positions_by_id(positions);
     }
 
+    /// Node positions the governed fuser currently holds, keyed by node id.
+    /// Empty until [`Self::set_node_positions`] is called, in which case every
+    /// node fuses at the origin.
+    #[must_use]
+    pub fn node_positions(&self) -> &std::collections::HashMap<u8, [f32; 3]> {
+        self.fuser.node_positions_by_id()
+    }
+
     /// Activate a per-room calibration adapter (ADR-150 §3.4). From the next
     /// cycle on, the adapter id is part of provenance `model_version` — and
     /// therefore of the witness — so the exact weights shaping inference are
