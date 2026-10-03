@@ -108,9 +108,10 @@
 
 <h1>RuView · <span>three.js demos</span></h1>
 <p class="lede">
-  Five progressively richer browser demos of the <a href="https://github.com/ruvnet/RuView/blob/main/docs/adr/ADR-097-adopt-rvcsi-as-ruview-csi-runtime.md">ADR-097</a>
-  sensing-helpers scene, ending with a live MediaPipe-Pose → Mixamo X Bot retargeting pipeline driven
-  by a real ESP32 CSI feed.
+  Six progressively richer browser demos of the <a href="https://github.com/ruvnet/RuView/blob/main/docs/adr/ADR-097-adopt-rvcsi-as-ruview-csi-runtime.md">ADR-097</a>
+  sensing-helpers scene — from plain helpers, through a live MediaPipe-Pose → Mixamo X Bot retargeting
+  pipeline driven by a real ESP32 CSI feed, to a standalone cyberpunk HUD that drives an articulated rig
+  straight from the <code>:8770/pose</code> WiFi feed with RTI backdrop and vitals telemetry.
 </p>
 
 <div class="grid">
@@ -143,6 +144,14 @@
     <h2>05 · Realtime (Pose + CSI) <span class="pill warn">needs FBX</span></h2>
     <div class="sub">Webcam → MediaPipe Pose Heavy → Mixamo IK retarget, live ESP32 CSI overlay.</div>
     <img src="screenshots/05-skinned-realtime.png" alt="05 screenshot">
+  </a>
+
+  <a class="card" href="demos/06-cyber-hud.html">
+    <h2>06 · Cyber HUD <span class="pill ok">standalone</span></h2>
+    <div class="sub">Articulated low-poly rig driven directly from the <code>:8770/pose</code> WiFi feed via
+      quaternionic retargeting + 3-frame smoothing. Cyber-grid + RTI attenuation backdrop, target capsule
+      with velocity vector, and bezier breathing / pulsing-heart / stress-gradient telemetry. No FBX —
+      runs a synthetic driver when no bridge is present.</div>
   </a>
 
 </div>
