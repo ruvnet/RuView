@@ -61,9 +61,25 @@ MAGIC_FEATURES = 0xC5110003
 FEATURE_PKT_FMT = "<IBBHq8f"
 FEATURE_PKT_SIZE = struct.calcsize(FEATURE_PKT_FMT)  # 48 bytes
 
-# Raw CSI header: magic(4) + node_id(1) + antenna_cfg(1) + n_sub(2) + rssi(1) + noise(1) + channel(1) + reserved(1) + timestamp_ms(4)
-RAW_CSI_HDR_FMT = "<IBBHbbBxI"
-RAW_CSI_HDR_SIZE = struct.calcsize(RAW_CSI_HDR_FMT)  # 16 bytes
+# Raw CSI header, as written by csi_collector.c and read by esp32_parser.rs:
+# magic(4) + node_id(1) + n_antennas(1) + n_subcarriers(2) + freq_mhz(4) +
+# sequence(4) + rssi(1) + noise_floor(1) + ppdu_type(1) + flags(1), then
+# n_antennas * n_subcarriers int8 I/Q pairs.
+RAW_CSI_HDR_FMT = "<IBBHIIbbBB"
+RAW_CSI_HDR_SIZE = struct.calcsize(RAW_CSI_HDR_FMT)  # 20 bytes
+RAW_CSI_MAX_ANTENNAS = 4
+RAW_CSI_MAX_SUBCARRIERS = 256
+
+
+def freq_to_channel(freq_mhz: int) -> int:
+    """802.11 channel number for a 2.4/5 GHz centre frequency (0 if unknown)."""
+    if freq_mhz == 2484:
+        return 14
+    if 2412 <= freq_mhz <= 2472:
+        return (freq_mhz - 2407) // 5
+    if 5000 <= freq_mhz <= 5900:
+        return (freq_mhz - 5000) // 5
+    return 0
 
 
 # ── Packet parsing ───────────────────────────────────────────────────────────
@@ -114,22 +130,22 @@ def _parse_feature_packet(data: bytes) -> Optional[dict]:
 def _parse_raw_csi_packet(data: bytes) -> Optional[dict]:
     """Parse ADR-018 raw CSI frame with full subcarrier data."""
     try:
-        magic, node_id, ant_cfg, n_sub, rssi, noise, channel, ts_ms = struct.unpack_from(
-            RAW_CSI_HDR_FMT, data
-        )
+        (magic, node_id, n_ant, n_sub, freq_mhz, seq,
+         rssi, noise, ppdu_type, flags) = struct.unpack_from(RAW_CSI_HDR_FMT, data)
     except struct.error:
         return None
 
     if magic != MAGIC_CSI_RAW:
         return None
-
-    # Subcarrier data follows header as int16 I/Q pairs
-    payload_offset = RAW_CSI_HDR_SIZE
-    expected_bytes = n_sub * 2 * 2  # n_sub * (I + Q) * int16
-    if len(data) < payload_offset + expected_bytes:
+    if not 1 <= n_ant <= RAW_CSI_MAX_ANTENNAS or n_sub > RAW_CSI_MAX_SUBCARRIERS:
         return None
 
-    iq_data = struct.unpack_from(f"<{n_sub * 2}h", data, payload_offset)
+    # I/Q data follows the header as int8 pairs, antenna-major
+    n_pairs = n_ant * n_sub
+    if len(data) < RAW_CSI_HDR_SIZE + n_pairs * 2:
+        return None
+
+    iq_data = struct.unpack_from(f"<{n_pairs * 2}b", data, RAW_CSI_HDR_SIZE)
     # Convert I/Q pairs to amplitude
     subcarriers = []
     for i in range(0, len(iq_data), 2):
@@ -137,13 +153,18 @@ def _parse_raw_csi_packet(data: bytes) -> Optional[dict]:
         amplitude = (real ** 2 + imag ** 2) ** 0.5
         subcarriers.append(amplitude)
 
+    # The header has no timestamp; CsiRecorder stamps the receive time.
     return {
         "type": "raw_csi",
         "node_id": node_id,
-        "antenna_config": ant_cfg,
+        "antenna_config": n_ant,
+        "n_antennas": n_ant,
         "n_subcarriers": n_sub,
-        "channel": channel,
-        "timestamp": ts_ms / 1000.0,
+        "freq_mhz": freq_mhz,
+        "channel": freq_to_channel(freq_mhz),
+        "seq": seq,
+        "ppdu_type": ppdu_type,
+        "flags": flags,
         "subcarriers": subcarriers,
         "rssi": float(rssi),
         "noise_floor": float(noise),
