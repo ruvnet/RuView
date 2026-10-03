@@ -25,7 +25,7 @@
 //! - `WS /ws/train/progress`       -- streaming training progress
 
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -46,13 +46,6 @@ use tracing::{error, info, warn};
 use crate::rvf_container::RvfBuilder;
 
 // ── Constants ────────────────────────────────────────────────────────────────
-
-/// Directory for trained model output.
-pub const MODELS_DIR: &str = "data/models";
-
-/// Directory the training loop reads recorded CSI datasets from. Each
-/// `dataset_id` maps to `{RECORDINGS_DIR}/{dataset_id}.csi.jsonl`.
-pub const RECORDINGS_DIR: &str = "data/recordings";
 
 /// Monotonic per-process counter appended to exported model filenames so two
 /// runs that complete in the same wall-clock microsecond still get distinct
@@ -330,11 +323,14 @@ pub struct FeatureStats {
 
 /// Load CSI frames from `.csi.jsonl` recording files for the given dataset IDs.
 ///
-/// Each dataset_id maps to a file at `data/recordings/{dataset_id}.csi.jsonl`.
+/// Each dataset_id maps to a file at `{recordings_dir}/{dataset_id}.csi.jsonl`,
+/// where `recordings_dir` is `crate::recordings_dir(data_dir)`.
 /// If a file does not exist, it is silently skipped.
-async fn load_recording_frames(dataset_ids: &[String]) -> Vec<RecordedFrame> {
+async fn load_recording_frames(
+    recordings_dir: &Path,
+    dataset_ids: &[String],
+) -> Vec<RecordedFrame> {
     let mut all_frames = Vec::new();
-    let recordings_dir = PathBuf::from(RECORDINGS_DIR);
 
     for id in dataset_ids {
         // Path-traversal guard (#615). Reject any dataset_id that contains
@@ -1009,6 +1005,7 @@ async fn run_training_job(
     dataset_ids: Vec<String>,
     history_snapshot: Vec<Vec<f64>>,
     training_type: &str,
+    data_dir: PathBuf,
 ) -> Option<PathBuf> {
     let total_epochs = config.epochs;
     let patience = config.early_stopping_patience;
@@ -1040,7 +1037,7 @@ async fn run_training_job(
         }
     }
 
-    let mut frames = load_recording_frames(&dataset_ids).await;
+    let mut frames = load_recording_frames(&crate::recordings_dir(&data_dir), &dataset_ids).await;
     if frames.is_empty() {
         info!("No recordings found for dataset_ids; falling back to live frame_history");
         frames = frames_from_history(&history_snapshot);
@@ -1383,11 +1380,12 @@ async fn run_training_job(
     }
 
     if completed_phase == "completed" || completed_phase == "early_stopped" {
-        if let Err(e) = tokio::fs::create_dir_all(MODELS_DIR).await {
+        let models_dir = crate::models_dir(&data_dir);
+        if let Err(e) = tokio::fs::create_dir_all(&models_dir).await {
             error!("Failed to create models directory: {e}");
         } else {
             let model_id = next_model_id(training_type);
-            let rvf_path = PathBuf::from(MODELS_DIR).join(format!("{model_id}.rvf"));
+            let rvf_path = models_dir.join(format!("{model_id}.rvf"));
 
             let mut builder = RvfBuilder::new();
 
@@ -1738,13 +1736,14 @@ async fn spawn_training_job(
 ) -> Result<(), TrainingStatus> {
     // Grab the shared handles under a read lock; the RwLock is only guarding
     // access to the Arcs, not the single-job decision.
-    let (progress_tx, status, cancel, history_snapshot) = {
+    let (progress_tx, status, cancel, history_snapshot, data_dir) = {
         let s = state.read().await;
         (
             s.training_progress_tx.clone(),
             s.training_state.status.clone(),
             s.training_state.cancel.clone(),
             s.frame_history.iter().cloned().collect::<Vec<_>>(),
+            s.data_dir.clone(),
         )
     };
 
@@ -1762,6 +1761,7 @@ async fn spawn_training_job(
             dataset_ids,
             history_snapshot,
             training_type,
+            data_dir,
         )
         .await;
     });
@@ -2336,6 +2336,7 @@ mod tests {
             Vec::new(),
             history,
             "supervised",
+            PathBuf::from("data"),
         )
         .await;
 
@@ -2389,7 +2390,11 @@ mod tests {
     /// rather than reading an arbitrary file.
     #[tokio::test]
     async fn load_recording_frames_rejects_path_traversal() {
-        let frames = load_recording_frames(&["../../etc/passwd".to_string()]).await;
+        let frames = load_recording_frames(
+            Path::new("data/recordings"),
+            &["../../etc/passwd".to_string()],
+        )
+        .await;
         assert!(
             frames.is_empty(),
             "path-traversal dataset_id must yield no frames"
@@ -2448,6 +2453,7 @@ mod tests {
             Vec::new(),
             history,
             "supervised",
+            PathBuf::from("data"),
         )
         .await;
 

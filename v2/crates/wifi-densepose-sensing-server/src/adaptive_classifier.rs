@@ -672,8 +672,8 @@ pub fn train_from_recordings(recordings_dir: &Path) -> Result<AdaptiveModel, Str
 }
 
 /// Default path for the saved adaptive model.
-pub fn model_path() -> PathBuf {
-    PathBuf::from("data/adaptive_model.json")
+pub fn model_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("adaptive_model.json")
 }
 
 #[cfg(test)]

@@ -150,8 +150,10 @@ struct Args {
     #[arg(long, env = "RUVIEW_INSTALLATION_ID")]
     installation_id: Option<String>,
 
-    /// Private server state directory used for runtime configuration and the
-    /// installation bound empty room bootstrap prior.
+    /// Private server state directory used for runtime configuration, the
+    /// installation bound empty room bootstrap prior, CSI recordings
+    /// (`recordings/`), models (`models/`, unless `MODELS_DIR` is set) and the
+    /// adaptive classifier.
     #[arg(long, default_value = "data", env = "RUVIEW_DATA_DIR")]
     data_dir: PathBuf,
 
@@ -6741,7 +6743,8 @@ async fn stream_status(State(state): State<SharedState>) -> Json<serde_json::Val
 /// GET /api/v1/models — list discovered RVF model files.
 async fn list_models(State(state): State<SharedState>) -> Json<serde_json::Value> {
     // Re-scan directory each call so newly-added files are visible.
-    let models = scan_model_files();
+    let dir = models_dir(&state.read().await.data_dir);
+    let models = scan_model_files(&dir);
     let total = models.len();
     {
         let mut s = state.write().await;
@@ -6814,7 +6817,7 @@ async fn delete_model(
     if safe_id.is_empty() || safe_id != id {
         return Json(serde_json::json!({ "error": "invalid model id", "success": false }));
     }
-    let path = effective_models_dir().join(format!("{}.rvf", safe_id));
+    let path = models_dir(&state.read().await.data_dir).join(format!("{}.rvf", safe_id));
     if path.exists() {
         if let Err(e) = std::fs::remove_file(&path) {
             // ADR-080 #2: log the OS error (incl. path) server-side only; the
@@ -6837,9 +6840,9 @@ async fn delete_model(
 }
 
 /// GET /api/v1/models/lora/profiles — list LoRA adapter profiles.
-async fn list_lora_profiles() -> Json<serde_json::Value> {
-    // LoRA profiles are discovered from data/models/*.lora.json
-    let profiles = scan_lora_profiles();
+async fn list_lora_profiles(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    // LoRA profiles are discovered from <models dir>/*.lora.json
+    let profiles = scan_lora_profiles(&models_dir(&state.read().await.data_dir));
     Json(serde_json::json!({ "profiles": profiles }))
 }
 
@@ -6858,18 +6861,24 @@ async fn activate_lora_profile(Json(body): Json<serde_json::Value>) -> Json<serd
     Json(serde_json::json!({ "success": true, "profile": profile }))
 }
 
-/// Return the effective models directory, respecting the `MODELS_DIR`
-/// environment variable.  Defaults to `data/models`.
-fn effective_models_dir() -> PathBuf {
-    PathBuf::from(std::env::var("MODELS_DIR").unwrap_or_else(|_| "data/models".to_string()))
+/// Return the effective models directory: the `MODELS_DIR` environment
+/// variable if set, otherwise `<data_dir>/models` (issue #2088).
+pub(crate) fn models_dir(data_dir: &std::path::Path) -> PathBuf {
+    std::env::var_os("MODELS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| data_dir.join("models"))
+}
+
+/// Return the directory CSI recordings are written to and read from:
+/// `<data_dir>/recordings` (issue #2088).
+pub(crate) fn recordings_dir(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("recordings")
 }
 
 /// Scan the models directory for `.rvf` files and return metadata.
-/// Respects the `MODELS_DIR` environment variable.
-fn scan_model_files() -> Vec<serde_json::Value> {
-    let dir = effective_models_dir();
+fn scan_model_files(dir: &std::path::Path) -> Vec<serde_json::Value> {
     let mut models = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("rvf") {
@@ -6901,11 +6910,9 @@ fn scan_model_files() -> Vec<serde_json::Value> {
 }
 
 /// Scan the models directory for `.lora.json` LoRA profile files.
-/// Respects the `MODELS_DIR` environment variable.
-fn scan_lora_profiles() -> Vec<serde_json::Value> {
-    let dir = effective_models_dir();
+fn scan_lora_profiles(dir: &std::path::Path) -> Vec<serde_json::Value> {
     let mut profiles = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -6930,8 +6937,8 @@ fn scan_lora_profiles() -> Vec<serde_json::Value> {
 // ── Recording Endpoints ─────────────────────────────────────────────────────
 
 /// GET /api/v1/recording/list — list CSI recordings.
-async fn list_recordings() -> Json<serde_json::Value> {
-    let recordings = scan_recording_files();
+async fn list_recordings(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let recordings = scan_recording_files(&recordings_dir(&state.read().await.data_dir));
     Json(serde_json::json!({ "recordings": recordings }))
 }
 
@@ -6966,7 +6973,7 @@ async fn start_recording(
     let watermark = s.source_state().export_watermark();
 
     // Create the recording file
-    let rec_path = PathBuf::from("data/recordings").join(format!("{}.jsonl", id));
+    let rec_path = recordings_dir(&s.data_dir).join(format!("{}.jsonl", id));
     let file = match std::fs::File::create(&rec_path) {
         Ok(f) => f,
         Err(e) => {
@@ -7096,7 +7103,7 @@ async fn delete_recording(
     if safe_id.is_empty() || safe_id != id {
         return Json(serde_json::json!({ "error": "invalid recording id", "success": false }));
     }
-    let path = PathBuf::from("data/recordings").join(format!("{}.jsonl", safe_id));
+    let path = recordings_dir(&state.read().await.data_dir).join(format!("{}.jsonl", safe_id));
     if path.exists() {
         if let Err(e) = std::fs::remove_file(&path) {
             // ADR-080 #2: log the OS error (incl. path) server-side only.
@@ -7112,11 +7119,10 @@ async fn delete_recording(
     }
 }
 
-/// Scan `data/recordings/` for `.jsonl` files and return metadata.
-fn scan_recording_files() -> Vec<serde_json::Value> {
-    let dir = PathBuf::from("data/recordings");
+/// Scan the recordings directory for `.jsonl` files and return metadata.
+fn scan_recording_files(dir: &std::path::Path) -> Vec<serde_json::Value> {
     let mut recordings = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
@@ -7164,7 +7170,13 @@ fn scan_recording_files() -> Vec<serde_json::Value> {
 
 /// POST /api/v1/adaptive/train — train the adaptive classifier from recordings.
 async fn adaptive_train(State(state): State<SharedState>) -> Json<serde_json::Value> {
-    let rec_dir = PathBuf::from("data/recordings");
+    let (rec_dir, model_path) = {
+        let s = state.read().await;
+        (
+            recordings_dir(&s.data_dir),
+            adaptive_classifier::model_path(&s.data_dir),
+        )
+    };
     eprintln!("=== Adaptive Classifier Training ===");
     match adaptive_classifier::train_from_recordings(&rec_dir) {
         Ok(model) => {
@@ -7183,13 +7195,10 @@ async fn adaptive_train(State(state): State<SharedState>) -> Json<serde_json::Va
                 .collect();
 
             // Save to disk.
-            if let Err(e) = model.save(&adaptive_classifier::model_path()) {
+            if let Err(e) = model.save(&model_path) {
                 warn!("Failed to save adaptive model: {e}");
             } else {
-                info!(
-                    "Adaptive model saved to {}",
-                    adaptive_classifier::model_path().display()
-                );
+                info!("Adaptive model saved to {}", model_path.display());
             }
 
             // Load into runtime state.
@@ -11953,13 +11962,14 @@ async fn main() {
     }
 
     // Ensure data directories exist for models and recordings
-    let models_dir = effective_models_dir();
-    let _ = std::fs::create_dir_all(&models_dir);
-    let _ = std::fs::create_dir_all("data/recordings");
+    let models_path = models_dir(&args.data_dir);
+    let recordings_path = recordings_dir(&args.data_dir);
+    let _ = std::fs::create_dir_all(&models_path);
+    let _ = std::fs::create_dir_all(&recordings_path);
 
     // Discover model and recording files on startup
-    let initial_models = scan_model_files();
-    let initial_recordings = scan_recording_files();
+    let initial_models = scan_model_files(&models_path);
+    let initial_recordings = scan_recording_files(&recordings_path);
     info!(
         "Discovered {} model files, {} recording files",
         initial_models.len(),
@@ -11972,6 +11982,7 @@ async fn main() {
         warn!(path = %data_dir.display(), %error, "Could not create server data directory");
     }
     let runtime_config = load_runtime_config(&data_dir);
+    let adaptive_model_path = adaptive_classifier::model_path(&data_dir);
     // ADR-271: resolve (or generate + persist) the browser-session signing key
     // before any request can arrive. Zero-config for a single appliance; the
     // env var still wins for a multi-instance deployment that must share one.
@@ -12164,16 +12175,15 @@ async fn main() {
         // Training (ADR-186 TRAIN-RECONNECT)
         training_state: training_api::TrainingState::default(),
         training_progress_tx: broadcast::channel::<String>(256).0,
-        adaptive_model:
-            adaptive_classifier::AdaptiveModel::load(&adaptive_classifier::model_path())
-                .ok()
-                .inspect(|m| {
-                    info!(
-                        "Loaded adaptive classifier: {} frames, {:.1}% accuracy",
-                        m.trained_frames,
-                        m.training_accuracy * 100.0
-                    );
-                }),
+        adaptive_model: adaptive_classifier::AdaptiveModel::load(&adaptive_model_path)
+            .ok()
+            .inspect(|m| {
+                info!(
+                    "Loaded adaptive classifier: {} frames, {:.1}% accuracy",
+                    m.trained_frames,
+                    m.training_accuracy * 100.0
+                );
+            }),
         node_states: HashMap::new(),
         room_debounced_level: "absent".to_string(),
         room_debounce_candidate: "absent".to_string(),
@@ -14082,7 +14092,7 @@ mod adr186_http_tests {
             s.training_progress_tx.subscribe()
         };
 
-        let models_dir = std::path::PathBuf::from(training_api::MODELS_DIR);
+        let models_dir = super::models_dir(&shared.read().await.data_dir);
         let before: std::collections::HashSet<std::path::PathBuf> = std::fs::read_dir(&models_dir)
             .into_iter()
             .flatten()
@@ -14192,5 +14202,200 @@ mod adr186_http_tests {
             Some(&serde_json::Value::Bool(true)),
             "must never claim success:true when disabled"
         );
+    }
+
+    /// Issue #2088: training reads `dataset_ids` from `<data_dir>/recordings`
+    /// and writes the exported `.rvf` into `<data_dir>/models`, not into
+    /// `data/` under the process working directory.
+    #[tokio::test]
+    async fn http_train_uses_data_dir_for_recordings_and_models() {
+        let _env_lock = TRAIN_ENV_LOCK.lock().unwrap(); // enablement must stay ON
+        let tmp = tempfile::tempdir().unwrap();
+        let rec_dir = tmp.path().join("recordings");
+        std::fs::create_dir_all(&rec_dir).unwrap();
+        let lines: Vec<String> = (0..40)
+            .map(|i| {
+                let sub: Vec<f64> = (0..56)
+                    .map(|k| 10.0 + ((i as f64) * 0.3 + (k as f64) * 0.1).sin() * 2.0)
+                    .collect();
+                serde_json::json!({ "timestamp": i as f64 * 0.1, "subcarriers": sub }).to_string()
+            })
+            .collect();
+        std::fs::write(rec_dir.join("dd_train.csi.jsonl"), lines.join("\n")).unwrap();
+
+        // No live frame history: the job can only succeed by finding the
+        // dataset under the data dir.
+        let shared = test_state();
+        shared.write().await.data_dir = tmp.path().to_path_buf();
+        let app = training_api::routes().with_state(shared.clone());
+
+        let body = serde_json::json!({
+            "dataset_ids": ["dd_train"],
+            "config": {"epochs": 2, "batch_size": 8, "warmup_epochs": 1, "early_stopping_patience": 10}
+        });
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/train/start")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "start should be accepted");
+
+        let mut phase = String::new();
+        for _ in 0..250 {
+            let req = Request::builder()
+                .uri("/api/v1/train/status")
+                .body(Body::empty())
+                .unwrap();
+            let resp = app.clone().oneshot(req).await.unwrap();
+            let bytes = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            phase = v
+                .get("phase")
+                .and_then(|p| p.as_str())
+                .unwrap_or("")
+                .to_string();
+            if v.get("active") == Some(&serde_json::Value::Bool(false))
+                && !phase.is_empty()
+                && phase != "idle"
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            phase, "completed",
+            "training should load the dataset from <data_dir>/recordings"
+        );
+
+        let models: Vec<_> = std::fs::read_dir(tmp.path().join("models"))
+            .map(|rd| rd.flatten().map(|e| e.path()).collect())
+            .unwrap_or_default();
+        assert!(
+            models
+                .iter()
+                .any(|p| p.extension().and_then(|e| e.to_str()) == Some("rvf")),
+            "the trained model should be written under <data_dir>/models, found {models:?}"
+        );
+    }
+}
+
+/// Issue #2088: recordings and models live under `--data-dir`, not under
+/// `data/` relative to the process working directory.
+#[cfg(test)]
+mod issue_2088_data_dir_tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    /// The delete handlers are called directly: their `{id}` routes do not
+    /// match under axum 0.7 (tracked separately), and this test is about paths.
+    fn app_with_data_dir(dir: &std::path::Path) -> (Router, SharedState) {
+        let mut inner = AppStateInner::minimal();
+        inner.data_dir = dir.to_path_buf();
+        let state: SharedState = Arc::new(RwLock::new(inner));
+        let app = Router::new()
+            .route("/api/v1/recording/list", get(list_recordings))
+            .route("/api/v1/recording/start", post(start_recording))
+            .route("/api/v1/recording/stop", post(stop_recording))
+            .route("/api/v1/models", get(list_models))
+            .with_state(state.clone());
+        (app, state)
+    }
+
+    async fn call(
+        app: &Router,
+        method: &str,
+        uri: &str,
+        body: Option<serde_json::Value>,
+    ) -> serde_json::Value {
+        let mut req = Request::builder().method(method).uri(uri);
+        let body = match body {
+            Some(b) => {
+                req = req.header("content-type", "application/json");
+                Body::from(b.to_string())
+            }
+            None => Body::empty(),
+        };
+        let resp = app.clone().oneshot(req.body(body).unwrap()).await.unwrap();
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|e| panic!("{method} {uri}: HTTP {status}, body not JSON: {e}"))
+    }
+
+    #[tokio::test]
+    async fn recording_start_list_delete_use_data_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rec_dir = tmp.path().join("recordings");
+        // The server creates this at startup; the handlers expect it to exist.
+        std::fs::create_dir_all(&rec_dir).unwrap();
+        let (app, state) = app_with_data_dir(tmp.path());
+
+        let v = call(
+            &app,
+            "POST",
+            "/api/v1/recording/start",
+            Some(serde_json::json!({"id": "dd_2088"})),
+        )
+        .await;
+        assert_eq!(v["success"], true, "start failed: {v}");
+        let v = call(&app, "POST", "/api/v1/recording/stop", None).await;
+        assert_eq!(v["success"], true, "stop failed: {v}");
+        assert!(
+            rec_dir.join("dd_2088.jsonl").is_file(),
+            "recording must be written under <data_dir>/recordings"
+        );
+
+        let v = call(&app, "GET", "/api/v1/recording/list", None).await;
+        let ids: Vec<&str> = v["recordings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|r| r["id"].as_str())
+            .collect();
+        assert!(
+            ids.contains(&"dd_2088"),
+            "list must read <data_dir>/recordings: {v}"
+        );
+
+        let Json(v) = delete_recording(State(state), Path("dd_2088".to_string())).await;
+        assert_eq!(v["success"], true, "delete failed: {v}");
+        assert!(
+            !rec_dir.join("dd_2088.jsonl").exists(),
+            "delete must remove the file under <data_dir>/recordings"
+        );
+    }
+
+    #[tokio::test]
+    async fn models_list_and_delete_use_data_dir() {
+        if std::env::var_os("MODELS_DIR").is_some() {
+            return; // an explicit MODELS_DIR overrides the data dir by design
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let models_dir = tmp.path().join("models");
+        std::fs::create_dir_all(&models_dir).unwrap();
+        std::fs::write(models_dir.join("dd_model_2088.rvf"), b"rvf").unwrap();
+        let (app, state) = app_with_data_dir(tmp.path());
+
+        let v = call(&app, "GET", "/api/v1/models", None).await;
+        let ids: Vec<&str> = v["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|m| m["id"].as_str())
+            .collect();
+        assert!(
+            ids.contains(&"dd_model_2088"),
+            "models list must read <data_dir>/models: {v}"
+        );
+
+        let Json(v) = delete_model(State(state), Path("dd_model_2088".to_string())).await;
+        assert_eq!(v["success"], true, "delete failed: {v}");
+        assert!(!models_dir.join("dd_model_2088.rvf").exists());
     }
 }

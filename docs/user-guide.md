@@ -587,6 +587,8 @@ Base URL: `http://localhost:3000` (Docker) or `http://localhost:8080` (binary de
 | `GET` | `/api/v1/mesh/metrics` | ADR-110 mesh state in Prometheus exposition format ([iter 36](adr/ADR-110-esp32-c6-firmware-extension.md)) | `wifi_densepose_mesh_offset_us{node="9"} 1163565\n…` |
 | `GET` | `/api/field` | ADR-262 P3 — latest **signed RuField `FieldEvent`s** from the live sensing cycle, plus the signer pubkey + a `dev_signing_key` flag. Only egress-safe (P1/P2) events are surfaced; identity/biometric (P4/P5) and raw (P0) are held edge-local | `{"spec":"rufield","signer_pubkey_hex":"…","dev_signing_key":true,"events":[…]}` |
 
+Recording and model files live under the server's `--data-dir` (env `RUVIEW_DATA_DIR`, default `data`, resolved against the directory the server was started from): recordings in `<data-dir>/recordings/`, `.rvf` models in `<data-dir>/models/` unless `MODELS_DIR` is set, and the adaptive classifier in `<data-dir>/adaptive_model.json`.
+
 ### RuField surface (ADR-262 P3)
 
 RuView's live WiFi-CSI sensing now also speaks the standalone **RuField MFS** wire format. Each governed sensing cycle is converted (via the `wifi-densepose-rufield` anti-corruption bridge) into a **signed** `FieldEvent` (`Modality::WifiCsi`, ed25519 `ProvenanceRef`) and surfaced on two additive endpoints:
@@ -1494,7 +1496,7 @@ curl -X POST http://localhost:3000/api/v1/recording/start \
 curl -X POST http://localhost:3000/api/v1/recording/stop
 ```
 
-Recordings are saved as JSONL files in `data/recordings/`. Filenames must start with `train_` and contain a class keyword:
+Recordings are saved as JSONL files in `recordings/` under the server's `--data-dir` (default `data`, so `data/recordings/` relative to the directory the server was started from). Filenames must start with `train_` and contain a class keyword:
 
 | Filename pattern | Class |
 |-----------------|-------|
@@ -1511,7 +1513,7 @@ Train the adaptive classifier from your labeled recordings:
 curl -X POST http://localhost:3000/api/v1/adaptive/train
 ```
 
-The server trains a multiclass logistic regression on 15 features using mini-batch SGD (200 epochs). Training completes in under 1 second for typical recording sets. The trained model is saved to `data/adaptive_model.json` and automatically loaded on server restart.
+The server trains a multiclass logistic regression on 15 features using mini-batch SGD (200 epochs). Training completes in under 1 second for typical recording sets. The trained model is saved to `adaptive_model.json` in the `--data-dir` (default `data/adaptive_model.json`) and automatically loaded on server restart.
 
 **Check model status:**
 
@@ -1531,7 +1533,7 @@ Once trained, the adaptive model runs automatically:
 
 1. Each CSI frame is classified using the learned weights instead of static thresholds
 2. Model confidence is blended with smoothed threshold confidence (70/30 split)
-3. The model persists across server restarts (loaded from `data/adaptive_model.json`)
+3. The model persists across server restarts (loaded from `<data-dir>/adaptive_model.json`)
 
 **Tips for better accuracy:**
 
