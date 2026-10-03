@@ -58,6 +58,8 @@ firmware/esp32-csi-node/nvs.bin
 /*.wasm
 /esp32_*.txt
 /serial_error.txt
+# Local demo/session token (never publish)
+demo-token.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
