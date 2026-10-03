@@ -27,6 +27,13 @@ required-features = ["tch-backend"]
 name = "aa_score_runner"
 path = "src/bin/aa_score_runner.rs"
 
+# ADR-328 sensing evidence and claim gate. This binary validates a claim
+# manifest against a repository-owned policy and emits a deterministic JSON
+# receipt. It is dependency-light and runs under --no-default-features.
+[[bin]]
+name = "sensing-claim-gate"
+path = "src/bin/sensing_claim_gate.rs"
+
 [features]
 default = []
 tch-backend = ["tch"]
