@@ -12386,6 +12386,33 @@ async fn main() {
         );
     }
 
+    // #864/ADR-296: a routable bind with auth off is refused, the same rule
+    // the Docker entrypoint and the UDP receiver apply. Loopback is unaffected.
+    {
+        use wifi_densepose_sensing_server::http_bind;
+        let allow_unauthenticated = http_bind::allow_unauthenticated_opt_in(
+            std::env::var(http_bind::ALLOW_UNAUTHENTICATED_ENV)
+                .ok()
+                .as_deref(),
+        );
+        match http_bind::decide_http_bind(
+            bind_ip,
+            bearer_auth_state.is_enabled(),
+            allow_unauthenticated,
+        ) {
+            Ok(http_bind::HttpBindDecision::RoutableUnauthenticated) => warn!(
+                "API auth OFF on routable bind {bind_ip} ({} set): /api/v1/* and \
+                 /ws/sensing are readable by anyone who can reach this host",
+                http_bind::ALLOW_UNAUTHENTICATED_ENV
+            ),
+            Ok(_) => {}
+            Err(e) => {
+                error!("{e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     // DNS-rebinding defense: validate the `Host` header against an allowlist
     // before any handler runs. Default is loopback-only (`localhost`,
     // `127.0.0.1`, `[::1]`, each with or without a port). Operators extend

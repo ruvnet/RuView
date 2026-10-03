@@ -1,5 +1,23 @@
 # Security notes — wifi-densepose-sensing-server
 
+## HTTP and WebSocket API bind
+
+`--bind-addr` (env `SENSING_BIND_ADDR`) defaults to `127.0.0.1`. The server
+refuses to start when the bind is routable (`0.0.0.0`, `::` or a LAN IP) and
+API auth is off, because `/api/v1/*` and `/ws/sensing` would then be readable
+by anyone who can reach the host. Pick one:
+
+- **Enable auth.** Set `RUVIEW_API_TOKEN=<token>` (or `RUVIEW_OAUTH_ISSUER`).
+- **Stay on loopback.** Use `--bind-addr 127.0.0.1` and put a reverse proxy in
+  front for remote access.
+- **Opt in explicitly.** Set `RUVIEW_ALLOW_UNAUTHENTICATED=1` (`true`, `yes`
+  and `on` also work). The server starts and logs a warning. Only do this on an
+  isolated, trusted network.
+
+This is the same rule the Docker entrypoint already applies (#864), so a
+container that starts today keeps starting. The refusal exits with status 1;
+the entrypoint's own check exits with 64 before the binary runs.
+
 ## UDP CSI data plane (ADR-296)
 
 The sensing server ingests CSI/radar frames over UDP from ESP32, MediaTek,

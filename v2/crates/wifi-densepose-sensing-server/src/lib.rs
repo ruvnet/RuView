@@ -18,6 +18,8 @@ pub mod discovery;
 pub mod edge_registry;
 pub mod error_response;
 pub mod host_validation;
+/// #864/ADR-296: refuse a routable HTTP bind with API auth off.
+pub mod http_bind;
 /// ADR-297: per-node vs. fused room inference, with deterministic fusion.
 pub mod inference;
 pub mod introspection;
