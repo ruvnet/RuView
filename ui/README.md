@@ -161,6 +161,16 @@ sensing-server --source esp32 --model path/to/model.rvf --ui-path ./ui
 
 ## Configuration
 
+### Localization
+
+The web UI uses the small i18n helper in `utils/i18n.js`.
+
+- Add user-facing strings to the `translations` object for every supported locale.
+- Keep English text in HTML and component templates as the fallback copy.
+- Prefer `data-i18n`, `data-i18n-placeholder`, and `data-i18n-aria` for static markup.
+- Use `i18n.t(key)` or `i18n.format(key, values)` for strings created from JavaScript.
+- Add new languages to the selector in `I18n.createSelector()` and to `detectLocale()` when browser auto-detection should apply.
+
 ### API Configuration
 Edit `config/api.config.js`:
 
