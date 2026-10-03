@@ -93,6 +93,8 @@ midstreamer-attractor        = "0.2"   # Lyapunov + regime classification
 ureq      = { version = "2", default-features = false, features = ["tls", "json"] }
 sha2      = "0.10"
 thiserror = "1"
+ndarray = { workspace = true }
+ndarray-npy = { workspace = true }
 
 # ADR-271 — Cognitum OAuth access-token verification. Reuses the `ureq`
 # transport above rather than pulling a second HTTP stack: `ruview-auth`'s
