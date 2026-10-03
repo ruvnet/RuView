@@ -536,7 +536,7 @@ async fn ingest_loop(
                 if let Some(sess) = active.as_ref() {
                     if Instant::now() >= sess.deadline {
                         let frames = sess.recorder.frames_recorded() as usize;
-                        if frames >= 10 {
+                        if frames >= sess.target_frames {
                             if let Some(done) = active.take() {
                                 let _ = finalize(done, &output_dir, &status).await;
                             }
@@ -544,8 +544,9 @@ async fn ingest_loop(
                             // not enough frames — abort honestly rather than emit a bad baseline
                             done.motion_flagged = false;
                             let note = format!(
-                                "aborted: only {frames} frames in the time window (need >=10) — \
+                                "aborted: only {frames} frames in the time window (need >= {}) — \
                                  is the ESP32 streaming to udp:{}? ",
+                                done.target_frames,
                                 status.read().await.udp_port
                             );
                             let snap = session_snapshot(&done, "aborted", Some(note.clone()));
@@ -615,10 +616,20 @@ async fn finalize(
         status.write().await.session = Some(snap);
     }
 
-    let baseline: BaselineCalibration = sess
-        .recorder
-        .finalize()
-        .map_err(|e| format!("finalize failed: {e}"))?;
+    // `CalibrationRecorder::finalize` consumes the recorder, so retain a
+    // terminal snapshot before attempting the fallible operation.
+    let mut aborted_snapshot = session_snapshot(&sess, "aborted", None);
+    let baseline: BaselineCalibration = match sess.recorder.finalize() {
+        Ok(baseline) => baseline,
+        Err(e) => {
+            let message = format!("finalize failed: {e}");
+            let note = format!("aborted: {message}");
+            aborted_snapshot.note = Some(note.clone());
+            status.write().await.session = Some(aborted_snapshot);
+            eprintln!("[calibrate-serve] {note}");
+            return Err(message);
+        }
+    };
 
     let (amp_mean_avg, amp_var_avg, disp_avg) = baseline_averages(&baseline);
     let uuid = baseline.calibration_uuid().to_string();
@@ -1053,6 +1064,33 @@ mod tests {
         };
         assert_eq!(a.http_port, 8090);
         assert_eq!(a.udp_port, 5005);
+    }
+
+    #[tokio::test]
+    async fn finalize_insufficient_frames_marks_session_aborted() {
+        let dir = tempfile::tempdir().unwrap();
+        let status = Arc::new(RwLock::new(SharedStatus::default()));
+        let sess = ActiveSession {
+            recorder: CalibrationRecorder::new(tier_config("ht20")),
+            room_id: "test".into(),
+            tier: "ht20".into(),
+            started: Instant::now(),
+            deadline: Instant::now(),
+            target_frames: 1,
+            z_median: 0.0,
+            z_max: 0.0,
+            motion_flagged: false,
+        };
+
+        let err = finalize(sess, dir.path().to_str().unwrap(), &status)
+            .await
+            .expect_err("an empty recorder cannot finalize");
+        assert!(err.contains("finalize failed"));
+
+        let guard = status.read().await;
+        let session = guard.session.as_ref().expect("terminal session status");
+        assert_eq!(session.state, "aborted");
+        assert!(session.note.as_deref().unwrap_or_default().contains("finalize failed"));
     }
 
     #[test]
