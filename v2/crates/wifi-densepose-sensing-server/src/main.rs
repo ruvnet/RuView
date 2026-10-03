@@ -185,8 +185,8 @@ struct Args {
     #[command(flatten)]
     mqtt_opts: wifi_densepose_sensing_server::cli::MqttArgs,
 
-    /// Data source: auto, wifi, esp32, simulate
-    #[arg(long, default_value = "auto")]
+    /// Data source: auto, esp32, wifi, simulated (alias: simulate)
+    #[arg(long, default_value = "auto", value_parser = SOURCE_VALUES)]
     source: String,
 
     /// Run vital sign detection benchmark (1000 frames) and exit
@@ -1867,6 +1867,8 @@ struct AppStateInner {
     last_realtek_csi_frame: Option<std::time::Instant>,
     /// Latest bounded ADR-270 event per vendor. Complex CSI uses dedicated transports.
     latest_vendor_rf: BTreeMap<String, wifi_densepose_sensing_server::vendor_rf::VendorEventSnapshot>,
+    /// Instant of the last accepted ADR-270 vendor event (issue #2097).
+    last_vendor_rf_frame: Option<std::time::Instant>,
     tx: broadcast::Sender<String>,
     // ADR-099 D2/D3/D4: real-time CSI introspection tap. Per-frame state +
     // a parallel broadcast topic (`/ws/introspection`) running alongside
@@ -2525,19 +2527,40 @@ impl AppStateInner {
         self.source.clone()
     }
 
-    /// ADR-295 — canonical provenance state for the current source. Derived
-    /// from the freshness-gated [`effective_source`](Self::effective_source)
-    /// label so ambiguity can never collapse to "live": a synthetic source is
-    /// always `Synthetic`, an `":offline"` label is `Disconnected`, and a fresh
-    /// hardware feed is `LiveUnverified` — never `LiveVerified`, since this path
-    /// carries no attestation. `effective_source()` has already applied the
-    /// freshness gate, so a non-offline live label means a fresh frame.
+    /// Age of the newest frame accepted from the current source, or `None`
+    /// when none has arrived yet (issue #2097). Hardware and vendor sources
+    /// use their receive clocks; any other source (WiFi RSSI, the simulator)
+    /// falls back to the age of the last published update.
+    fn last_frame_age(&self) -> Option<Duration> {
+        let seen = if self.source == "esp32" {
+            self.last_esp32_frame
+        } else if self.source.starts_with("realtek_csi") {
+            self.last_realtek_csi_frame
+        } else if self.source.starts_with("realtek") {
+            self.last_realtek_frame
+        } else if self.source.starts_with("mediatek") {
+            self.last_mediatek_frame
+        } else if self.source.starts_with("qualcomm") {
+            self.last_qualcomm_frame
+        } else if self.source.starts_with("vendor:") {
+            self.last_vendor_rf_frame
+        } else {
+            return self.latest_update.as_ref().map(|update| {
+                let now_s = chrono::Utc::now().timestamp_millis() as f64 / 1000.0;
+                Duration::from_secs_f64((now_s - update.timestamp).max(0.0))
+            });
+        };
+        seen.map(|t| t.elapsed())
+    }
+
+    /// ADR-295 — canonical provenance state for the current source, resolved
+    /// from the real age of its last accepted frame so ambiguity can never
+    /// collapse to "live": a synthetic source is always `Synthetic`, a live
+    /// source with no frame yet is `Disconnected`, one whose frames stopped
+    /// is `Stale`, and a fresh hardware feed is `LiveUnverified` — never
+    /// `LiveVerified`, since this path carries no attestation.
     fn source_state(&self) -> SourceState {
-        SourceState::from_source_label(
-            &self.effective_source(),
-            Some(Duration::ZERO),
-            ESP32_OFFLINE_TIMEOUT,
-        )
+        SourceState::from_source_label(&self.source, self.last_frame_age(), ESP32_OFFLINE_TIMEOUT)
     }
 }
 
@@ -2574,6 +2597,7 @@ impl AppStateInner {
             latest_realtek_csi: None,
             last_realtek_csi_frame: None,
             latest_vendor_rf: BTreeMap::new(),
+            last_vendor_rf_frame: None,
             tx: broadcast::channel::<String>(16).0,
             intro: wifi_densepose_sensing_server::introspection::IntrospectionState::new(),
             intro_tx: broadcast::channel::<String>(16).0,
@@ -4633,14 +4657,35 @@ struct SourcePlan {
     run_wifi: bool,
 }
 
+/// Every `--source` value [`plan_source`] accepts. Clap rejects anything else
+/// at startup (issue #2097): an unknown value used to start the server with no
+/// data task while `/api/v1/status` still reported a live source. The vendor
+/// names match the labels the UDP receiver writes for MTC1, RAC1, Qualcomm
+/// and RTL8720F radar frames, so `effective_source()` ages them correctly.
+const SOURCE_VALUES: [&str; 9] = [
+    "auto",
+    "esp32",
+    "wifi",
+    "simulated",
+    "simulate",
+    "mediatek",
+    "qualcomm",
+    "realtek",
+    "realtek_csi",
+];
+
 /// Pure decision function — fully unit-testable without binding sockets.
 ///
 /// `requested` is the normalized `--source` value. `esp32_detected` /
 /// `wifi_detected` are the boot-probe results (only consulted in `auto` mode).
-/// Returns `None` for an unknown source that names neither a real source nor a
-/// simulate alias (the caller maps that to its own pass-through/exit policy).
-fn plan_source(requested: &str, esp32_detected: bool, wifi_detected: bool) -> SourcePlan {
-    match requested {
+/// Returns an error naming the valid values for an unknown source, which
+/// would otherwise start no data task at all.
+fn plan_source(
+    requested: &str,
+    esp32_detected: bool,
+    wifi_detected: bool,
+) -> Result<SourcePlan, String> {
+    let plan = match requested {
         "auto" => {
             if esp32_detected {
                 // Real CSI already flowing — bind UDP, no simulator.
@@ -4688,14 +4733,24 @@ fn plan_source(requested: &str, esp32_detected: bool, wifi_detected: bool) -> So
             run_simulator: false,
             run_wifi: true,
         },
-        // Unknown source — preserve it verbatim, no tasks (caller's policy).
-        other => SourcePlan {
-            initial_source: other.to_string(),
-            bind_udp: false,
+        // Vendor CSI and radar frames arrive on the same UDP receiver as ESP32
+        // frames. Before #2097 these names fell into a catch-all that bound no
+        // receiver, so nothing was ever ingested. Never run the ESP32-shaped
+        // simulator alongside a vendor feed.
+        "mediatek" | "qualcomm" | "realtek" | "realtek_csi" => SourcePlan {
+            initial_source: requested.to_string(),
+            bind_udp: true,
             run_simulator: false,
             run_wifi: false,
         },
-    }
+        other => {
+            return Err(format!(
+                "unknown --source '{other}' (valid values: {})",
+                SOURCE_VALUES.join(", ")
+            ))
+        }
+    };
+    Ok(plan)
 }
 
 #[cfg(test)]
@@ -4718,7 +4773,7 @@ mod issue_1004_source_plan_tests {
     // UDP IS bound even when the boot probe finds no source.
     #[test]
     fn auto_with_no_boot_source_still_binds_udp_and_simulates() {
-        let plan = plan_source("auto", false, false);
+        let plan = plan_source("auto", false, false).expect("valid source");
         assert!(plan.bind_udp, "auto must bind UDP :5005 even with no boot source (#1004)");
         assert!(plan.run_simulator, "auto must serve simulated data until real CSI arrives");
         assert!(!plan.run_wifi);
@@ -4727,7 +4782,7 @@ mod issue_1004_source_plan_tests {
 
     #[test]
     fn auto_with_esp32_detected_binds_udp_no_simulator() {
-        let plan = plan_source("auto", true, false);
+        let plan = plan_source("auto", true, false).expect("valid source");
         assert!(plan.bind_udp);
         assert!(!plan.run_simulator, "real CSI present → no synthetic frames");
         assert_eq!(plan.initial_source, "esp32");
@@ -4735,7 +4790,7 @@ mod issue_1004_source_plan_tests {
 
     #[test]
     fn auto_with_wifi_detected_runs_wifi_no_udp() {
-        let plan = plan_source("auto", false, true);
+        let plan = plan_source("auto", false, true).expect("valid source");
         assert!(plan.run_wifi);
         assert!(!plan.bind_udp);
         assert!(!plan.run_simulator);
@@ -4748,7 +4803,7 @@ mod issue_1004_source_plan_tests {
     #[test]
     fn explicit_simulated_is_offline_override_no_udp() {
         for s in ["simulated", "simulate"] {
-            let plan = plan_source(s, false, false);
+            let plan = plan_source(s, false, false).expect("valid source");
             assert!(!plan.bind_udp, "{s}: explicit simulate must not bind UDP (offline demo)");
             assert!(plan.run_simulator);
             assert_eq!(plan.initial_source, "simulated");
@@ -4757,7 +4812,7 @@ mod issue_1004_source_plan_tests {
 
     #[test]
     fn explicit_esp32_binds_udp() {
-        let plan = plan_source("esp32", false, false);
+        let plan = plan_source("esp32", false, false).expect("valid source");
         assert!(plan.bind_udp);
         assert!(!plan.run_simulator);
         assert_eq!(plan.initial_source, "esp32");
@@ -4794,6 +4849,151 @@ mod issue_1004_source_plan_tests {
             }
         }
         source.to_string()
+    }
+}
+
+#[cfg(test)]
+mod issue_2097_status_tests {
+    //! Issue #2097 — `/api/v1/status` must not report a live source before any
+    //! frame has arrived, and an unknown `--source` must not start a server
+    //! that runs no data task.
+    use super::*;
+
+    async fn status_with(
+        source: &str,
+        last_esp32_frame: Option<std::time::Instant>,
+    ) -> serde_json::Value {
+        let mut inner = AppStateInner::minimal();
+        inner.source = source.to_string();
+        inner.last_esp32_frame = last_esp32_frame;
+        let state: SharedState = Arc::new(RwLock::new(inner));
+        let Json(value) = health_ready(State(state)).await;
+        value
+    }
+
+    #[tokio::test]
+    async fn esp32_with_no_frame_yet_is_waiting_not_live() {
+        let status = status_with("esp32", None).await;
+        assert_eq!(status["source_state"], "disconnected");
+        assert_eq!(status["waiting_for_frames"], true);
+        assert!(status["last_frame_age_ms"].is_null());
+    }
+
+    #[tokio::test]
+    async fn esp32_with_fresh_frame_is_live() {
+        let status = status_with("esp32", Some(std::time::Instant::now())).await;
+        assert_eq!(status["source_state"], "live_unverified");
+        assert_eq!(status["waiting_for_frames"], false);
+        assert!(status["last_frame_age_ms"].as_u64().unwrap() < 1000);
+    }
+
+    #[tokio::test]
+    async fn esp32_whose_frames_stopped_is_stale() {
+        let old = std::time::Instant::now()
+            .checked_sub(ESP32_OFFLINE_TIMEOUT + Duration::from_secs(1))
+            .expect("monotonic clock is past the offline timeout");
+        let status = status_with("esp32", Some(old)).await;
+        assert_eq!(status["source_state"], "stale");
+        assert_eq!(status["waiting_for_frames"], false);
+        assert_eq!(status["source"], "esp32:offline");
+    }
+
+    #[tokio::test]
+    async fn vendor_event_source_uses_its_receive_clock() {
+        let mut inner = AppStateInner::minimal();
+        inner.source = "vendor:linksys:live".to_string();
+        inner.last_vendor_rf_frame = Some(std::time::Instant::now());
+        let state: SharedState = Arc::new(RwLock::new(inner));
+        let Json(status) = health_ready(State(state)).await;
+        assert_eq!(status["source_state"], "live_unverified");
+    }
+
+    #[tokio::test]
+    async fn wifi_source_before_first_scan_is_waiting() {
+        let status = status_with("wifi", None).await;
+        assert_eq!(status["source_state"], "disconnected");
+        assert_eq!(status["waiting_for_frames"], true);
+    }
+
+    #[tokio::test]
+    async fn simulated_source_stays_synthetic() {
+        let status = status_with("simulated", None).await;
+        assert_eq!(status["source_state"], "synthetic");
+        assert_eq!(status["waiting_for_frames"], false);
+    }
+
+    #[test]
+    fn unknown_source_is_rejected_at_parse_time() {
+        let err = Args::try_parse_from(["sensing-server", "--source", "macos"])
+            .expect_err("--source macos must be rejected");
+        let msg = err.to_string();
+        for valid in ["auto", "esp32", "wifi", "simulated"] {
+            assert!(msg.contains(valid), "error should list '{valid}': {msg}");
+        }
+    }
+
+    #[test]
+    fn plan_source_rejects_unknown_values_with_the_valid_list() {
+        for bogus in ["macos", "linux", "bogus", ""] {
+            let err = plan_source(bogus, false, false).expect_err("unknown source must not plan");
+            assert!(err.contains("esp32") && err.contains("simulated"), "{err}");
+        }
+        for valid in SOURCE_VALUES {
+            assert!(
+                plan_source(valid, false, false).is_ok(),
+                "{valid} must plan"
+            );
+        }
+    }
+
+    #[test]
+    fn vendor_sources_bind_the_udp_receiver() {
+        for vendor in ["mediatek", "qualcomm", "realtek", "realtek_csi"] {
+            let plan = plan_source(vendor, false, false).expect("vendor source plans");
+            assert!(plan.bind_udp, "{vendor}: vendor frames arrive over UDP");
+            assert!(!plan.run_simulator, "{vendor}: no ESP32-shaped simulator");
+            assert!(!plan.run_wifi);
+            assert_eq!(plan.initial_source, vendor);
+        }
+    }
+
+    #[test]
+    fn only_garbage_is_rejected() {
+        for bogus in [
+            "bogus",
+            "macos",
+            "linux",
+            "mock",
+            "MEDIATEK",
+            "mediatek:simulated",
+            "esp32 ",
+        ] {
+            assert!(
+                Args::try_parse_from(["sensing-server", "--source", bogus]).is_err(),
+                "--source {bogus:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn every_documented_source_still_parses() {
+        for source in [
+            "auto",
+            "esp32",
+            "wifi",
+            "simulated",
+            "simulate",
+            "mediatek",
+            "qualcomm",
+            "realtek",
+            "realtek_csi",
+        ] {
+            let args = Args::try_parse_from(["sensing-server", "--source", source])
+                .unwrap_or_else(|e| panic!("--source {source} must parse: {e}"));
+            assert_eq!(args.source, source);
+        }
+        let args = Args::try_parse_from(["sensing-server"]).expect("default parses");
+        assert_eq!(args.source, "auto");
     }
 }
 
@@ -5248,6 +5448,7 @@ async fn ingest_vendor_events(
             Ok(snapshot) => {
                 let json = serde_json::to_string(&snapshot).ok();
                 state.source = snapshot.source.clone();
+                state.last_vendor_rf_frame = Some(std::time::Instant::now());
                 state
                     .latest_vendor_rf
                     .insert(canonical_vendor.clone(), snapshot);
@@ -6535,12 +6736,17 @@ fn witness_hex(w: [u8; 32]) -> String {
 
 async fn health_ready(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
+    let source_state = s.source_state();
     Json(serde_json::json!({
         "status": "ready",
         "source": s.effective_source(),
         // ADR-295 — canonical provenance state so a status-endpoint consumer
         // never has to infer "live" from the absence of a signal (issue #1526).
-        "source_state": s.source_state().as_str(),
+        "source_state": source_state.as_str(),
+        // Issue #2097 — a configured live source that has not delivered a
+        // frame yet must not look like a working one.
+        "waiting_for_frames": source_state == SourceState::Disconnected,
+        "last_frame_age_ms": s.last_frame_age().map(|age| age.as_millis() as u64),
         // Governed trust-path state (ADR-135..146; review finding 1b): latest
         // witness + privacy class + recalibration flag, and the engine error
         // audit — previously write-only on AppState, now readable here.
@@ -9745,6 +9951,7 @@ async fn udp_receiver_task(
                             let json = serde_json::to_string(&snapshot).ok();
                             let mut state = state.write().await;
                             state.source = snapshot.source.clone();
+                            state.last_vendor_rf_frame = Some(std::time::Instant::now());
                             state.latest_vendor_rf.insert(snapshot.event.vendor.as_str().to_string(), snapshot);
                             if let Some(json) = json { let _ = state.tx.send(json); }
                         }
@@ -11863,6 +12070,13 @@ async fn main() {
     } else {
         plan_source(normalized, false, false)
     };
+    let plan = match plan {
+        Ok(plan) => plan,
+        Err(e) => {
+            error!("{e}");
+            std::process::exit(2);
+        }
+    };
     let source: &str = plan.initial_source.as_str();
 
     info!(
@@ -12124,6 +12338,7 @@ async fn main() {
         latest_realtek_csi: None,
         last_realtek_csi_frame: None,
         latest_vendor_rf: BTreeMap::new(),
+        last_vendor_rf_frame: None,
         tx,
         intro: wifi_densepose_sensing_server::introspection::IntrospectionState::new(),
         intro_tx,

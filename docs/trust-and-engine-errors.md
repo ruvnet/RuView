@@ -111,6 +111,10 @@ handler (`health_ready`, `main.rs:8128,8133`) and return a `trust` block
 ```json
 {
   "status": "ready",
+  "source": "esp32",
+  "source_state": "live_unverified",
+  "waiting_for_frames": false,
+  "last_frame_age_ms": 42,
   "trust": {
     "last_witness": "…64 hex chars or null…",
     "effective_class": "Anonymous | Restricted | …",

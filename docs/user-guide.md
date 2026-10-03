@@ -302,7 +302,11 @@ All endpoints return JSON. In simulated mode, data is generated from a determini
 
 ## Data Sources
 
-The `--source` flag controls where CSI data comes from.
+The `--source` flag controls where CSI data comes from. Valid values are
+`auto`, `esp32`, `wifi`, and `simulated` (alias `simulate`), plus the vendor
+feeds `mediatek`, `qualcomm`, `realtek` (RTL8720F radar), and `realtek_csi`
+(RTL8721Dx CSI), which bind the UDP receiver like `esp32`. Any other value
+stops the server at startup with an error that lists them.
 
 ### Simulated Mode (No Hardware)
 
@@ -335,26 +339,24 @@ docker run --network host ruvnet/wifi-densepose:latest --source wifi --tick-ms 5
 
 ### macOS WiFi (RSSI Only)
 
-Uses CoreWLAN via a Swift helper binary. macOS Sonoma 14.4+ redacts real BSSIDs; the adapter generates deterministic synthetic MACs so the multi-BSSID pipeline still works.
+Uses CoreWLAN via a Swift helper binary. macOS Sonoma 14.4+ redacts real BSSIDs; the adapter generates deterministic synthetic MACs so the multi-BSSID pipeline still works. On macOS, `--source wifi` selects the CoreWLAN scanner; there is no separate `macos` value.
 
 ```bash
 # Compile the Swift helper (once)
 swiftc -O archive/v1/src/sensing/mac_wifi.swift -o mac_wifi
 
 # Run natively
-./target/release/sensing-server --source macos --http-port 3000 --ws-port 3001 --tick-ms 500
+./target/release/sensing-server --source wifi --http-port 3000 --ws-port 3001 --tick-ms 500
 ```
 
 See [ADR-025](adr/ADR-025-macos-corewlan-wifi-sensing.md) for details.
 
 ### Linux WiFi (RSSI Only)
 
-Uses `iw dev <iface> scan` to capture RSSI. Requires `CAP_NET_ADMIN` (root) for active scans; use `scan dump` for cached results without root.
-
-```bash
-# Run natively (requires root for active scanning)
-sudo ./target/release/sensing-server --source linux --http-port 3000 --ws-port 3001 --tick-ms 500
-```
+The sensing server does not have a Linux RSSI source yet. `--source wifi`
+on Linux runs the Windows `netsh` scanner, which is not present there, and
+`--source linux` is rejected at startup. Use an ESP32 node (`--source esp32`)
+on Linux.
 
 ### ESP32-S3 (Full CSI)
 
@@ -425,9 +427,19 @@ Use these checks before debugging the browser:
 
 ```bash
 curl http://localhost:3000/health
+curl http://localhost:3000/api/v1/status
 curl http://localhost:3000/api/v1/nodes
 curl http://localhost:3000/api/v1/sensing/latest
 ```
+
+`/api/v1/status` reports whether frames are actually arriving:
+
+| `source_state` | Meaning |
+|---|---|
+| `disconnected` | A live source is configured but no frame has arrived yet. `waiting_for_frames` is `true` and `last_frame_age_ms` is `null`. |
+| `live_unverified` | Frames are arriving. `last_frame_age_ms` is under 5000. |
+| `stale` | Frames arrived, then stopped for more than 5 seconds. For a hardware source, `source` gains an `:offline` suffix (for example `esp32:offline`). |
+| `synthetic` | Simulated data. Never shown as live. |
 
 If the ESP32 nodes are provisioned with `--target-ip <AGGREGATOR_HOST>`, that IP must be the machine running `sensing-server`. Only one process can receive UDP `:5005` at a time, so leave the standalone hardware `aggregator` off while the dashboard or Observatory is live.
 
@@ -1277,7 +1289,7 @@ The Rust sensing server binary accepts the following flags:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--source` | `auto` | Data source: `auto`, `simulate`, `wifi`, `esp32` |
+| `--source` | `auto` | Data source: `auto`, `esp32`, `wifi`, `simulated` (alias `simulate`), `mediatek`, `qualcomm`, `realtek`, `realtek_csi`. Other values are rejected at startup |
 | `--http-port` | `8080` | HTTP port for REST API and UI |
 | `--ws-port` | `8765` | WebSocket port |
 | `--udp-port` | `5005` | UDP port for ESP32 CSI frames |
