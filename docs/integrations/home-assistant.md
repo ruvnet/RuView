@@ -128,7 +128,7 @@ Per ADR-115 §3.11.1, the Matter Bridge exposes a subset on standard clusters so
 | `--mqtt-rate-rssi <HZ>` | 0.1 | RSSI publish rate (Hz) |
 | `--mqtt-publish-pose` | off | Enable pose-keypoint publication |
 | `--mqtt-rate-pose <HZ>` | 1.0 | Pose publish rate when enabled |
-| `--privacy-mode` | off | Strip HR/BR/pose from MQTT and Matter |
+| `--privacy-mode` | off | Strip HR/BR/pose from MQTT, Matter, REST, WebSocket and recordings |
 | `--matter` | off | Enable the HA-FABRIC Matter Bridge |
 | `--matter-setup-file <PATH>` | — | Where to write the QR + manual code |
 | `--matter-reset` | off | Wipe fabric credentials and re-commission |
@@ -172,6 +172,7 @@ When deploying in **healthcare**, **AAL (aging-in-place)**, or **commercial** se
 
 - **Strips** heart rate, breathing rate, and pose keypoints from every outbound MQTT publication.
 - **Suppresses discovery** for those entities entirely — HA never even sees they exist.
+- **Applies to the rest of the server too.** The same fields are removed from REST responses, WebSocket frames and recordings, so another client on the HTTP or WebSocket port can't read what MQTT withholds. See [Privacy mode](../user-guide.md#privacy-mode-for-healthcare--aal) in the user guide.
 - **Keeps every semantic primitive enabled.** Sleeping / distress / room-active / etc are *inferred* states. The inference happens server-side and only the boolean or score crosses the wire. This is the architectural win that makes the platform deployable in regulated contexts.
 
 Always pair `--privacy-mode` with `--mqtt-tls` on non-localhost brokers.

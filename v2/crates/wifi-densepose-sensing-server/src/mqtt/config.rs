@@ -92,7 +92,9 @@ impl MqttConfig {
                 pose_hz: args.mqtt_rate_pose,
             },
             publish_pose: args.mqtt_publish_pose,
-            privacy_mode: args.privacy_mode,
+            // `--privacy-mode` is a server-wide flag (#2094); the caller sets
+            // this from it after building the config.
+            privacy_mode: false,
         }
     }
 

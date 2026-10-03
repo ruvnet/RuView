@@ -61,14 +61,18 @@ use wifi_densepose_sensing_server::mqtt::{
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
-    let args = {
+    let (args, privacy_mode) = {
         use clap::Parser;
         #[derive(Parser)]
         struct W {
             #[command(flatten)]
             m: MqttArgs,
+            /// Strip biometrics (HR/BR/pose) from MQTT
+            #[arg(long, env = "RUVIEW_PRIVACY_MODE")]
+            privacy_mode: bool,
         }
-        W::parse().m
+        let w = W::parse();
+        (w.m, w.privacy_mode)
     };
 
     if !args.mqtt {
@@ -78,7 +82,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 1. Build MqttConfig from CLI + run the security audit before any
     //    network I/O. A failed audit short-circuits with a clear error.
-    let cfg = Arc::new(MqttConfig::from_args(&args));
+    let mut cfg = MqttConfig::from_args(&args);
+    cfg.privacy_mode = privacy_mode;
+    let cfg = Arc::new(cfg);
     match audit(&cfg) {
         Ok(()) => {}
         Err(e) if !e.is_fatal() => {

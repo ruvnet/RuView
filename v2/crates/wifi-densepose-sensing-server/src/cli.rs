@@ -3,10 +3,11 @@
 use clap::Parser;
 use std::path::PathBuf;
 
-/// MQTT publisher (HA auto-discovery) + privacy-mode flags, shared via
-/// `#[command(flatten)]` by both `cli::Args` and the binary's `main::Args`
-/// so the `--mqtt*` flags reach the actual `Args::parse()` the server uses
-/// (the publisher in `mqtt::` is keyed off this group). ADR-115 §3.8/§3.10.
+/// MQTT publisher (HA auto-discovery) flags, flattened into the binary's
+/// `main::Args` so the `--mqtt*` flags reach the actual `Args::parse()` the
+/// server uses (the publisher in `mqtt::` is keyed off this group). ADR-115
+/// §3.8. `--privacy-mode` is a top-level server flag (#2094), not part of
+/// this group.
 #[derive(clap::Args, Debug, Clone)]
 pub struct MqttArgs {
     /// Enable MQTT publisher with HA auto-discovery
@@ -80,10 +81,6 @@ pub struct MqttArgs {
     /// Pose publish rate (Hz) when --mqtt-publish-pose is set
     #[arg(long, default_value = "1.0")]
     pub mqtt_rate_pose: f64,
-
-    /// Strip biometrics (HR/BR/pose) before any MQTT/Matter publish (ADR-115 §3.10).
-    #[arg(long, env = "RUVIEW_PRIVACY_MODE")]
-    pub privacy_mode: bool,
 }
 
 /// CLI arguments for the sensing server.
@@ -264,11 +261,10 @@ pub struct Args {
     #[arg(long, default_value = "1.0")]
     pub mqtt_rate_pose: f64,
 
-    // ─── ADR-115 §3.10 — Privacy mode ──────────────────────────────────────
-    /// Strip biometrics (HR/BR/pose) before any MQTT or Matter publish.
-    /// Discovery for those entities is suppressed entirely — the controller
-    /// never sees them exist. Implements the ADR-106 primitive-isolation
-    /// contract at the integration boundary.
+    // ─── ADR-115 §3.10 / #2094 — Privacy mode ──────────────────────────────
+    /// Strip biometrics (heart rate, breathing rate, pose keypoints) from
+    /// every output: REST, WebSocket, recordings, MQTT and Matter. MQTT
+    /// discovery for those entities is suppressed entirely.
     #[arg(long, env = "RUVIEW_PRIVACY_MODE")]
     pub privacy_mode: bool,
 
