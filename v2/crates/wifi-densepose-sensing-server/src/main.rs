@@ -688,6 +688,18 @@ fn update_edge_node_classification(n: &mut NodeState, vitals: &Esp32VitalsPacket
     };
 }
 
+/// Raw-CSI nodes gate their count on the node's own published level, the same
+/// decision [`node_inference_for`] feeds to the room vote. Gating on the
+/// per-frame classification let an adaptive-model label hold the count at 1
+/// while the node and the room both read `absent`.
+fn update_node_person_count(n: &mut NodeState) {
+    n.prev_person_count = if n.current_motion_level != "absent" {
+        score_to_person_count(n.smoothed_person_score, n.prev_person_count)
+    } else {
+        0
+    };
+}
+
 /// Build a node's *own* [`NodeInference`] from its smoothed per-node state
 /// (ADR-297). Uses the node's own `current_motion_level` — never the room
 /// aggregate — with the latest classification confidence (or the legacy score
@@ -3851,9 +3863,11 @@ fn smooth_and_classify(state: &mut AppStateInner, raw: &mut ClassificationInfo, 
         state.debounce_counter = 1;
     }
 
-    // 6. Write the smoothed result back into the classification.
+    // 6. Write the smoothed result back into the classification. Presence
+    //    follows the debounced level (as the ADR-297 room vote does) so a
+    //    frame never reads `absent` while gating a person count of 1.
     raw.motion_level = state.current_motion_level.clone();
-    raw.presence = sm > 0.03;
+    raw.presence = raw.motion_level != "absent";
     raw.confidence = (0.4 + sm * 0.6).clamp(0.0, 1.0);
 }
 
@@ -3900,8 +3914,129 @@ fn smooth_and_classify_node(ns: &mut NodeState, raw: &mut ClassificationInfo, ra
     }
 
     raw.motion_level = ns.current_motion_level.clone();
-    raw.presence = sm > 0.03;
+    raw.presence = raw.motion_level != "absent";
     raw.confidence = (0.4 + sm * 0.6).clamp(0.0, 1.0);
+}
+
+#[cfg(test)]
+mod smoothed_presence_tests {
+    //! Every person count is gated on `classification.presence`, so presence
+    //! must agree with the debounced motion level that is published next to
+    //! it. A smoothed score in (0.03, 0.04] used to read `absent` with
+    //! `presence: true`, which held the count at 1 in a quiet room.
+    use super::*;
+
+    /// Steady quiet-room motion: the 0.7 baseline subtraction leaves
+    /// 0.3 * 0.117 = 0.035, inside the old disagreement band.
+    const QUIET_ROOM_MOTION: f64 = 0.117;
+
+    #[test]
+    fn node_presence_matches_debounced_level() {
+        for raw_motion in [0.0, QUIET_ROOM_MOTION, 0.2, 1.0] {
+            let mut ns = NodeState::new();
+            ns.csi_fps_ema = 10.0;
+            for frame in 0..600 {
+                let mut c = ClassificationInfo {
+                    motion_level: raw_classify(raw_motion),
+                    presence: raw_motion > 0.04,
+                    confidence: 0.5,
+                };
+                smooth_and_classify_node(&mut ns, &mut c, raw_motion);
+                assert_eq!(
+                    c.presence,
+                    c.motion_level != "absent",
+                    "raw_motion={raw_motion} frame={frame} level={} sm={}",
+                    c.motion_level,
+                    ns.smoothed_motion
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn quiet_node_reports_absent_and_no_presence() {
+        let mut ns = NodeState::new();
+        ns.csi_fps_ema = 10.0;
+        let mut c = ClassificationInfo {
+            motion_level: "absent".into(),
+            presence: false,
+            confidence: 0.5,
+        };
+        for _ in 0..600 {
+            smooth_and_classify_node(&mut ns, &mut c, QUIET_ROOM_MOTION);
+        }
+        assert!(ns.smoothed_motion > 0.03 && ns.smoothed_motion <= 0.04);
+        assert_eq!(c.motion_level, "absent");
+        assert!(
+            !c.presence,
+            "an absent node must not gate a person count of 1"
+        );
+    }
+
+    #[test]
+    fn room_presence_matches_debounced_level() {
+        for raw_motion in [0.0, QUIET_ROOM_MOTION, 0.2, 1.0] {
+            let mut s = AppStateInner::minimal();
+            for frame in 0..600 {
+                let mut c = ClassificationInfo {
+                    motion_level: raw_classify(raw_motion),
+                    presence: raw_motion > 0.04,
+                    confidence: 0.5,
+                };
+                smooth_and_classify(&mut s, &mut c, raw_motion);
+                assert_eq!(
+                    c.presence,
+                    c.motion_level != "absent",
+                    "raw_motion={raw_motion} frame={frame} level={} sm={}",
+                    c.motion_level,
+                    s.smoothed_motion
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn absent_node_count_is_zero_whatever_the_frame_label() {
+        let mut ns = NodeState::new();
+        ns.current_motion_level = "absent".into();
+        ns.smoothed_person_score = corr_persons_to_score(1);
+        ns.prev_person_count = 1;
+        update_node_person_count(&mut ns);
+        assert_eq!(ns.prev_person_count, 0);
+        // The room vote reads the same field, so both say empty.
+        assert_eq!(
+            node_inference_for(&ns, std::time::Instant::now()).classification,
+            "absent"
+        );
+    }
+
+    #[test]
+    fn present_node_count_is_at_least_one() {
+        let mut ns = NodeState::new();
+        ns.current_motion_level = "present_still".into();
+        ns.smoothed_person_score = 0.0;
+        update_node_person_count(&mut ns);
+        assert_eq!(ns.prev_person_count, 1);
+        ns.smoothed_person_score = corr_persons_to_score(2);
+        update_node_person_count(&mut ns);
+        assert_eq!(ns.prev_person_count, 2);
+    }
+
+    #[test]
+    fn sustained_motion_still_reports_presence() {
+        let mut ns = NodeState::new();
+        ns.csi_fps_ema = 10.0;
+        let mut c = ClassificationInfo {
+            motion_level: "absent".into(),
+            presence: false,
+            confidence: 0.5,
+        };
+        for _ in 0..600 {
+            smooth_and_classify_node(&mut ns, &mut c, 1.0);
+        }
+        assert_ne!(c.motion_level, "absent");
+        assert!(c.presence);
+    }
 }
 
 /// If an adaptive model is loaded, override the classification with the
@@ -10379,13 +10514,7 @@ async fn udp_receiver_task(
                     // 0.70 up-threshold — so the count was pinned at 1.
                     let raw_score = corr_persons_to_score(corr_persons);
                     ns.smoothed_person_score = ns.smoothed_person_score * 0.92 + raw_score * 0.08;
-                    if classification.presence {
-                        let count =
-                            score_to_person_count(ns.smoothed_person_score, ns.prev_person_count);
-                        ns.prev_person_count = count;
-                    } else {
-                        ns.prev_person_count = 0;
-                    }
+                    update_node_person_count(ns);
 
                     // Store latest features on node for cross-node fusion.
                     ns.latest_classification_confidence = Some(classification.confidence);
