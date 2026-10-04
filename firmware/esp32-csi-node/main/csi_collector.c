@@ -63,6 +63,33 @@ static uint32_t s_send_ok = 0;
 static uint32_t s_send_fail = 0;
 static uint32_t s_rate_skip = 0;
 
+/* RuView#1941: capture liveness for csi_watchdog.c, in ms since boot. uint32
+ * so the watchdog task reads them without tearing on the 32-bit cores; 0
+ * means "never". The callback stamps these before any gate, so they measure
+ * the radio and the send path, not the rate limiter. */
+static volatile uint32_t s_last_cb_ms = 0;
+static volatile uint32_t s_last_csi_tx_ms = 0;
+
+#ifndef CONFIG_CSI_STALL_INJECT_MODE
+#define CONFIG_CSI_STALL_INJECT_MODE 0
+#endif
+#if CONFIG_CSI_STALL_INJECT_MODE == 2
+/* Test-only: a stall that no re-arm can clear, to exercise the full ladder. */
+static volatile bool s_inject_drop = false;
+#endif
+
+static inline uint32_t live_ms(int64_t us)
+{
+    uint32_t ms = (uint32_t)(us / 1000);
+    return ms ? ms : 1u;
+}
+
+/* Promiscuous filter currently in force, so a re-arm restores the same one
+ * (MGMT-only on display builds, MGMT+DATA after the #893 upgrade). */
+static uint32_t s_promisc_filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT;
+
+static esp_err_t csi_apply_capture_config(void);
+
 #ifndef CONFIG_CSI_SELF_PING_HZ
 #define CONFIG_CSI_SELF_PING_HZ 50
 #endif
@@ -90,12 +117,21 @@ static int64_t s_next_edge_enqueue_us = 0;
 static uint32_t s_edge_rate_skip = 0;
 
 /**
- * Minimum interval between UDP sends in microseconds.
- * CSI callbacks can fire hundreds of times per second in promiscuous mode.
- * We cap the send rate to avoid exhausting lwIP packet buffers (ENOMEM).
- * Default: 20 ms = 50 Hz max send rate.
+ * Minimum interval between UDP sends in microseconds -- a burst guard only.
+ *
+ * The average rate is already bounded to 50 Hz by the process gate below,
+ * and stream_sender backs off on ENOMEM. This was a second 20 ms gate timed
+ * from a different moment (the send, not the accept), so two frames the
+ * process gate legitimately accepted 10-20 ms apart (its mesh-aligned mode
+ * allows a 10 ms floor) had the second one serialized, fed to the edge DSP,
+ * given a sequence number -- and then silently dropped.
+ *
+ * MEASURED 2026-09-29, ESP32-C6 node 42, 30 s at the host: ADR-018 sequence
+ * steps were 402x "+1" and 255x "+2" and never more, i.e. 28% of captured
+ * frames were discarded here, none lost over the air. Matching the process
+ * gate's floor keeps the burst bound without discarding accepted frames.
  */
-#define CSI_MIN_SEND_INTERVAL_US  (20 * 1000)
+#define CSI_MIN_SEND_INTERVAL_US  (CSI_MIN_PROCESS_INTERVAL_US / 2)
 static int64_t s_last_send_us = 0;
 
 /**
@@ -287,6 +323,14 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
 {
     (void)ctx;
 
+#if CONFIG_CSI_STALL_INJECT_MODE == 2
+    if (s_inject_drop) {
+        return;
+    }
+#endif
+    int64_t now_us = esp_timer_get_time();
+    s_last_cb_ms = live_ms(now_us);
+
     /* Early rate gate: drop excess callbacks to ~50 Hz to prevent
      * SPI flash cache crash in WiFi ISR (wDev_ProcessFiq).
      *
@@ -317,7 +361,6 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
      * next, back to back. The floor bounds that to ~100 Hz for a single pair
      * while the average stays at 50 Hz. Do not remove it; the gate exists for
      * a crash, not for tidiness. */
-    int64_t now_us = esp_timer_get_time();
     bool take;
 #ifdef CONFIG_CSI_GATE_MESH_ALIGNED
     if (c6_sync_espnow_is_valid()) {
@@ -370,6 +413,7 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
             if (ret > 0) {
                 s_send_ok++;
                 s_last_send_us = now;
+                s_last_csi_tx_ms = live_ms(now);
             } else {
                 s_send_fail++;
                 if (s_send_fail <= 5) {
@@ -647,9 +691,34 @@ void csi_collector_init(void)
         .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT,
     };
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_filter(&filt));
+    s_promisc_filter_mask = filt.filter_mask;
 
     ESP_LOGI(TAG, "Promiscuous mode enabled (MGMT-only, RuView#396)");
 
+    ESP_ERROR_CHECK(csi_apply_capture_config());
+
+    if (g_nvs_config.filter_mac_set) {
+        ESP_LOGI(TAG, "MAC filter active: %02x:%02x:%02x:%02x:%02x:%02x",
+                 g_nvs_config.filter_mac[0], g_nvs_config.filter_mac[1],
+                 g_nvs_config.filter_mac[2], g_nvs_config.filter_mac[3],
+                 g_nvs_config.filter_mac[4], g_nvs_config.filter_mac[5]);
+    }
+
+    ESP_LOGI(TAG, "CSI collection initialized (node_id=%u, channel=%u)",
+             (unsigned)s_node_id, (unsigned)csi_channel);
+    ESP_LOGI(TAG, "edge DSP cadence=%dHz; raw CSI network cadence remains independent",
+             CONFIG_EDGE_DSP_SAMPLE_HZ);
+
+    /* RuView#521/#954: start the connected-STA traffic source so the CSI engine
+     * receives a guaranteed OFDM unicast floor even when promiscuous capture is
+     * starved (display builds / quiet networks). Additive to #396/#893. */
+    csi_start_self_ping();
+}
+
+/* CSI acquisition config + callback + enable. Shared by init and the
+ * RuView#1941 re-arm so both always program the same capture path. */
+static esp_err_t csi_apply_capture_config(void)
+{
 #if CONFIG_SOC_WIFI_HE_SUPPORT
     /* Wi-Fi 6 targets (e.g. ESP32-C6): wifi_csi_config_t is wifi_csi_acquire_config_t
      * (bitfields), not the legacy 802.11n bool layout used on ESP32-S3. */
@@ -685,26 +754,78 @@ void csi_collector_init(void)
     };
 #endif
 
-    ESP_ERROR_CHECK(esp_wifi_set_csi_config(&csi_config));
-    ESP_ERROR_CHECK(esp_wifi_set_csi_rx_cb(wifi_csi_callback, NULL));
-    ESP_ERROR_CHECK(esp_wifi_set_csi(true));
-
-    if (g_nvs_config.filter_mac_set) {
-        ESP_LOGI(TAG, "MAC filter active: %02x:%02x:%02x:%02x:%02x:%02x",
-                 g_nvs_config.filter_mac[0], g_nvs_config.filter_mac[1],
-                 g_nvs_config.filter_mac[2], g_nvs_config.filter_mac[3],
-                 g_nvs_config.filter_mac[4], g_nvs_config.filter_mac[5]);
+    esp_err_t err = esp_wifi_set_csi_config(&csi_config);
+    if (err == ESP_OK) {
+        err = esp_wifi_set_csi_rx_cb(wifi_csi_callback, NULL);
     }
+    if (err == ESP_OK) {
+        err = esp_wifi_set_csi(true);
+    }
+    return err;
+}
 
-    ESP_LOGI(TAG, "CSI collection initialized (node_id=%u, channel=%u)",
-             (unsigned)s_node_id, (unsigned)csi_channel);
-    ESP_LOGI(TAG, "edge DSP cadence=%dHz; raw CSI network cadence remains independent",
-             CONFIG_EDGE_DSP_SAMPLE_HZ);
+/* ---- RuView#1941: capture watchdog hooks ---- */
 
-    /* RuView#521/#954: start the connected-STA traffic source so the CSI engine
-     * receives a guaranteed OFDM unicast floor even when promiscuous capture is
-     * starved (display builds / quiet networks). Additive to #396/#893. */
+uint32_t csi_collector_last_callback_ms(void)
+{
+    return s_last_cb_ms;
+}
+
+uint32_t csi_collector_last_csi_send_ms(void)
+{
+    return s_last_csi_tx_ms;
+}
+
+bool csi_collector_mac_filter_active(void)
+{
+    return s_filter_mac_set;
+}
+
+esp_err_t csi_collector_rearm(void)
+{
+    esp_err_t first = ESP_OK;
+    esp_err_t err;
+#define REARM_STEP(call) do {                                              \
+        err = (call);                                                      \
+        if (err != ESP_OK) {                                               \
+            ESP_LOGW(TAG, "rearm: %s failed: %s", #call, esp_err_to_name(err)); \
+            if (first == ESP_OK) first = err;                              \
+        }                                                                  \
+    } while (0)
+
+    /* Tear the whole capture path down and program it again from scratch,
+     * rather than guessing which piece stopped: CSI enable, promiscuous
+     * mode with the filter that was in force, the callback, and the
+     * self-ping traffic floor (whose gateway may also have changed). */
+    wifi_promiscuous_filter_t filt = { .filter_mask = s_promisc_filter_mask };
+    REARM_STEP(esp_wifi_set_csi(false));
+    REARM_STEP(esp_wifi_set_promiscuous(false));
+    REARM_STEP(esp_wifi_set_promiscuous_rx_cb(wifi_promiscuous_cb));
+    REARM_STEP(esp_wifi_set_promiscuous_filter(&filt));
+    REARM_STEP(esp_wifi_set_promiscuous(true));
+    REARM_STEP(csi_apply_capture_config());
+#undef REARM_STEP
+
+    if (s_self_ping != NULL) {
+        esp_ping_stop(s_self_ping);
+        esp_ping_delete_session(s_self_ping);
+        s_self_ping = NULL;
+    }
     csi_start_self_ping();
+    return first;
+}
+
+void csi_collector_inject_stall(void)
+{
+#if CONFIG_CSI_STALL_INJECT_MODE == 1
+    /* Transient: the CSI engine stops delivering; a re-arm clears it. */
+    ESP_LOGW(TAG, "TEST: injecting transient CSI stall (esp_wifi_set_csi(false))");
+    esp_wifi_set_csi(false);
+#elif CONFIG_CSI_STALL_INJECT_MODE == 2
+    /* Persistent: callbacks are discarded until reboot. */
+    ESP_LOGW(TAG, "TEST: injecting persistent CSI stall (callbacks discarded)");
+    s_inject_drop = true;
+#endif
 }
 
 /* Accessor for other modules that need the authoritative runtime node_id. */
@@ -841,6 +962,7 @@ void csi_collector_enable_data_capture(void)
     };
     esp_err_t err = esp_wifi_set_promiscuous_filter(&filt);
     if (err == ESP_OK) {
+        s_promisc_filter_mask = filt.filter_mask;
         ESP_LOGI(TAG, "CSI filter upgraded to MGMT+DATA (no display, RuView#893)");
     } else {
         ESP_LOGW(TAG, "Failed to enable DATA-frame CSI capture: %s", esp_err_to_name(err));

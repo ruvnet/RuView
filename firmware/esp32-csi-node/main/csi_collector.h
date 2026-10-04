@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 #include "esp_err.h"
 #include "esp_wifi_types.h"
 
@@ -53,6 +54,31 @@ void csi_collector_set_node_id(uint8_t node_id);
  * @return Node ID (0-255) as loaded from NVS at boot.
  */
 uint8_t csi_collector_get_node_id(void);
+
+/* ---- RuView#1941: capture liveness, used by csi_watchdog.c ---- */
+
+/** ms since boot of the last raw CSI callback (before any gate), 0 = never. */
+uint32_t csi_collector_last_callback_ms(void);
+
+/** ms since boot of the last CSI frame accepted by sendto(), 0 = never. */
+uint32_t csi_collector_last_csi_send_ms(void);
+
+/** True when an ADR-060 source-MAC filter is active. Callbacks from other
+ *  transmitters then fire but are never sent, so send age alone cannot tell a
+ *  stalled path from a filtered transmitter that is simply off. */
+bool csi_collector_mac_filter_active(void);
+
+/**
+ * Re-program the whole capture path: CSI config and callback, promiscuous
+ * mode with the filter currently in force, and the self-ping traffic floor.
+ * Every step is attempted even if an earlier one fails.
+ *
+ * @return ESP_OK, or the first failing step's error.
+ */
+esp_err_t csi_collector_rearm(void);
+
+/** Test builds only (CONFIG_CSI_STALL_INJECT_MODE): simulate a capture stall. */
+void csi_collector_inject_stall(void);
 
 /**
  * Serialize CSI data into ADR-018 binary frame format.

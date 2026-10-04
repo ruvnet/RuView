@@ -56,10 +56,11 @@ FUZZ_JOBS     ?= 1
         test_vitals run_vitals test_mmwave_detect run_mmwave_detect host_tests \
         test_thermal run_thermal test_csi_sanitize run_csi_sanitize \
         test_c6_antenna run_c6_antenna test_serial_onboarding run_serial_onboarding \
-        run_delivery_contract
+        run_delivery_contract test_csi_stall run_csi_stall
 
 all: fuzz_serialize fuzz_edge fuzz_nvs test_adr110 test_vitals test_mmwave_detect \
-     test_thermal test_csi_sanitize test_c6_antenna test_serial_onboarding
+     test_thermal test_csi_sanitize test_c6_antenna test_serial_onboarding \
+     test_csi_stall
 
 # --- XIAO ESP32-C6 RF switch selection ---
 # Host-side truth table for the GPIO14 antenna selector. GPIO3 is always driven
@@ -69,6 +70,14 @@ test_c6_antenna: test_c6_antenna_select.c $(MAIN_DIR)/c6_antenna_select.h
 
 run_c6_antenna: test_c6_antenna
 	./test_c6_antenna
+
+# --- CSI capture stall ladder (RuView#1941) ---
+# Pure escalation policy behind the device-side capture watchdog.
+test_csi_stall: test_csi_stall_policy.c $(MAIN_DIR)/csi_stall_policy.c $(MAIN_DIR)/csi_stall_policy.h
+	cc -std=c99 -Wall -Wextra -Werror -I$(MAIN_DIR) -o $@ test_csi_stall_policy.c $(MAIN_DIR)/csi_stall_policy.c
+
+run_csi_stall: test_csi_stall
+	./test_csi_stall
 
 # --- ESP-IDF invalid first-word sanitation ---
 # Links the production serializer. Function sections and dead stripping keep
@@ -137,8 +146,8 @@ run_delivery_contract:
 	python3 test_delivery_contract.py
 
 host_tests: run_adr110 run_vitals run_mmwave_detect run_thermal run_csi_sanitize \
-            run_c6_antenna run_serial_onboarding run_delivery_contract
-	@echo "Host tests passed (ADR-110 + CSI sanitation + vitals + mmwave + thermal + C6 antenna + USB onboarding + delivery contract)"
+            run_c6_antenna run_serial_onboarding run_delivery_contract run_csi_stall
+	@echo "Host tests passed (ADR-110 + CSI sanitation + vitals + mmwave + thermal + C6 antenna + USB onboarding + delivery contract + CSI stall ladder)"
 
 # --- Serialize fuzzer ---
 # Tests csi_serialize_frame() with random wifi_csi_info_t inputs.

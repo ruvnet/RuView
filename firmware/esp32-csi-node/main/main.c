@@ -21,6 +21,7 @@
 #include "led_strip.h"
 
 #include "csi_collector.h"
+#include "csi_watchdog.h"
 #include "node_log.h"
 #include "thermal.h"
 #include "stream_sender.h"
@@ -670,6 +671,13 @@ void app_main(void)
 #endif
     if (!has_display) {
         csi_collector_enable_data_capture();
+    }
+
+    /* RuView#1941: supervise capture itself, which the uplink watchdog
+     * cannot see. Started after the filter upgrade so a re-arm restores it. */
+    esp_err_t wd_ret = csi_watchdog_start();
+    if (wd_ret != ESP_OK) {
+        ESP_LOGW(TAG, "CSI watchdog start failed: %s", esp_err_to_name(wd_ret));
     }
 
     ESP_LOGI(TAG, "CSI streaming active → %s:%d (edge_tier=%u, OTA=%s, WASM=%s, mmWave=%s, swarm=%s, adapt=%s)",
