@@ -16,7 +16,8 @@
  *   [N+1]  Data Checksum = ~XOR(payload bytes)
  *
  *   Frame types: 0x0A14=breathing, 0x0A15=heart rate,
- *                0x0A16=distance, 0x0F09=presence
+ *                0x0A16=distance, 0x0F09=presence, 0x0A04=targets
+ *   Protocol constants and the probe classifier live in mmwave_mr60.h.
  *
  * LD2410 frame format (HLK binary, 256000 baud):
  *   Header:  0xF4 0xF3 0xF2 0xF1
@@ -27,6 +28,7 @@
 
 #include "mmwave_sensor.h"
 #include "mmwave_detect.h"
+#include "mmwave_mr60.h"
 
 #include <string.h>
 #include <math.h>
@@ -50,18 +52,13 @@ static const char *TAG = "mmwave";
 #define MMWAVE_TASK_STACK         4096
 #define MMWAVE_TASK_PRIORITY      3
 #define MMWAVE_PROBE_TIMEOUT_MS   2000
-#define MMWAVE_MR60_MAX_PAYLOAD   30   /* Sanity limit from Arduino lib */
+/* The MR60 probe starts with a short window and extends it once 0x0A-family
+ * frames arrive, so a sensor that sends vitals at ~1 Hz gets a fair chance to
+ * show its signature without slowing boot on nodes with no sensor. */
+#define MMWAVE_MR60_PROBE_EXTEND_MS 3000
 
-/* ---- MR60BHA2 protocol constants (Seeed mmWave) ---- */
-#define MR60_SOF            0x01
-
-/* Frame types (big-endian uint16 at offset 5-6) */
-#define MR60_TYPE_BREATHING     0x0A14
-#define MR60_TYPE_HEARTRATE     0x0A15
-#define MR60_TYPE_DISTANCE      0x0A16
-#define MR60_TYPE_PRESENCE      0x0F09
-#define MR60_TYPE_PHASE         0x0A13
-#define MR60_TYPE_POINTCLOUD    0x0A04
+_Static_assert(MMWAVE_MR60_MAX_PAYLOAD <= MMWAVE_BUF_SIZE,
+               "MR60 payload cap must fit the parser buffer");
 
 /* ---- LD2410 protocol constants ---- */
 #define LD2410_REPORT_HEAD  0xAA
@@ -74,15 +71,6 @@ static volatile bool s_running;
 /* ======================================================================
  * MR60BHA2 Parser (corrected protocol from Seeed Arduino library)
  * ====================================================================== */
-
-static uint8_t mr60_calc_checksum(const uint8_t *data, uint16_t len)
-{
-    uint8_t cksum = 0;
-    for (uint16_t i = 0; i < len; i++) {
-        cksum ^= data[i];
-    }
-    return ~cksum;
-}
 
 typedef enum {
     MR60_WAIT_SOF,
@@ -110,7 +98,8 @@ static void mr60_process_frame(uint16_t type, const uint8_t *data, uint16_t len)
 
     switch (type) {
     case MR60_TYPE_BREATHING:
-        if (len >= sizeof(float)) {
+        /* Exact length: other 0x0A-family sensors reuse 0x0A14 (#2136). */
+        if (len == MR60_LEN_BREATHING) {
             /* Breathing rate as float32 (little-endian in payload). */
             float br;
             memcpy(&br, data, sizeof(float));
@@ -149,6 +138,27 @@ static void mr60_process_frame(uint16_t type, const uint8_t *data, uint16_t len)
         }
         break;
 
+    case MR60_TYPE_POINTCLOUD:
+        s_state.target_frames++;
+        s_state.target_last_len = len;
+#ifdef CONFIG_CSI_MMWAVE_MR60_DECODE_TARGETS
+        {
+            /* Layout unconfirmed on hardware; see mmwave_mr60.h. */
+            mmwave_target_t t[MMWAVE_MAX_TARGETS];
+            int n = mmwave_mr60_decode_targets(data, len, t, MMWAVE_MAX_TARGETS);
+            if (n < 0) {
+                s_state.target_decode_errors++;
+                break;
+            }
+            int kept = (n < MMWAVE_MAX_TARGETS) ? n : MMWAVE_MAX_TARGETS;
+            memcpy(s_state.targets, t, sizeof(t[0]) * (size_t)kept);
+            s_state.targets_valid = (uint8_t)kept;
+            s_state.target_count = (n > 255) ? 255 : (uint8_t)n;
+            s_state.capabilities |= MMWAVE_CAP_MULTI_TARGET;
+        }
+#endif
+        break;
+
     default:
         break;
     }
@@ -169,7 +179,7 @@ static void mr60_feed_byte(uint8_t b)
         s_mr60.header[s_mr60.hdr_idx++] = b;
         if (s_mr60.hdr_idx >= 8) {
             /* Validate header checksum: ~XOR(bytes 0..6) == byte 7 */
-            uint8_t expected = mr60_calc_checksum(s_mr60.header, 7);
+            uint8_t expected = mmwave_mr60_checksum(s_mr60.header, 7);
             if (expected != s_mr60.header[7]) {
                 s_state.error_count++;
                 s_mr60.state = MR60_WAIT_SOF;
@@ -180,7 +190,7 @@ static void mr60_feed_byte(uint8_t b)
             s_mr60.frame_type = ((uint16_t)s_mr60.header[5] << 8) | s_mr60.header[6];
             s_mr60.data_idx = 0;
 
-            if (s_mr60.data_len > MMWAVE_MR60_MAX_PAYLOAD) {
+            if (!mmwave_mr60_payload_len_ok(s_mr60.data_len)) {
                 s_state.error_count++;
                 s_mr60.state = MR60_WAIT_SOF;
             } else if (s_mr60.data_len == 0) {
@@ -201,7 +211,7 @@ static void mr60_feed_byte(uint8_t b)
     case MR60_READ_DATA_CKSUM:
         /* Validate data checksum */
         if (s_mr60.data_len > 0) {
-            uint8_t expected = mr60_calc_checksum(s_mr60.data, s_mr60.data_len);
+            uint8_t expected = mmwave_mr60_checksum(s_mr60.data, s_mr60.data_len);
             if (expected == b) {
                 mr60_process_frame(s_mr60.frame_type, s_mr60.data, s_mr60.data_len);
             } else {
@@ -378,29 +388,27 @@ static mmwave_type_t probe_at_baud(uint32_t baud)
     uart_flush_input(MMWAVE_UART_NUM);
 
     uint8_t buf[128];
-    int mr60_sof_seen = 0;
+    mmwave_mr60_probe_t mr60 = {0};
     int ld2410_header_seen = 0;
 
-    int64_t deadline = esp_timer_get_time() + (int64_t)(MMWAVE_PROBE_TIMEOUT_MS / 2) * 1000;
+    int64_t start = esp_timer_get_time();
+    int64_t deadline = start + (int64_t)(MMWAVE_PROBE_TIMEOUT_MS / 2) * 1000;
+    bool extended = false;
 
     while (esp_timer_get_time() < deadline) {
         int len = uart_read_bytes(MMWAVE_UART_NUM, buf, sizeof(buf), pdMS_TO_TICKS(100));
         if (len <= 0) continue;
 
         for (int i = 0; i < len; i++) {
-            /* MR60BHA2: require a *validated* 8-byte header — SOF (0x01) + a valid
-             * header checksum (over bytes 0..6) + a known frame type (0x0A__ or
-             * 0x0F09) — NOT a bare 0x01 byte. A floating UART1 with no sensor reads
-             * noise full of 0x01s, which the old `buf[i] == MR60_SOF` check mistook
-             * for a real sensor (false "Detected MR60BHA2", #1107). */
-            if (buf[i] == MR60_SOF && baud == MMWAVE_MR60_BAUD && i + 7 < len) {
-                const uint8_t *h = &buf[i];
-                if (mr60_calc_checksum(h, 7) == h[7]) {
-                    uint16_t type = ((uint16_t)h[5] << 8) | h[6];
-                    if ((type >> 8) == 0x0A || type == 0x0F09) {
-                        mr60_sof_seen++;
-                    }
-                }
+            /* MR60-family: require a *validated* 8-byte header — SOF (0x01) + a
+             * valid header checksum + a 0x0A__/0x0F09 type — NOT a bare 0x01
+             * byte (#1107). The header's type and length then feed the model
+             * classifier in mmwave_mr60.h, which tells an MR60BHA2 apart from
+             * LD6002B/LD6004 sensors that reuse its type IDs (#2136). */
+            uint16_t type, dlen;
+            if (baud == MMWAVE_MR60_BAUD &&
+                mmwave_mr60_header_at(buf, i, len, &type, &dlen)) {
+                mmwave_mr60_probe_note(&mr60, type, dlen);
             }
             /* LD2410: require a *full validated* report frame, not just the
              * 4-byte head. A floating UART1 at 256000 baud can emit the head
@@ -412,12 +420,26 @@ static mmwave_type_t probe_at_baud(uint32_t baud)
             }
         }
 
-        if (mr60_sof_seen >= 3) return MMWAVE_TYPE_MR60BHA2;
+        mmwave_mr60_verdict_t v = mmwave_mr60_probe_verdict(&mr60, false);
+        if (v == MMWAVE_MR60_PROBE_MATCH) return MMWAVE_TYPE_MR60BHA2;
+        if (v == MMWAVE_MR60_PROBE_AMBIGUOUS) break;
+        if (mr60.family_frames > 0 && !extended) {
+            deadline = start + (int64_t)MMWAVE_MR60_PROBE_EXTEND_MS * 1000;
+            extended = true;
+        }
         if (ld2410_header_seen >= 2) return MMWAVE_TYPE_LD2410;
     }
 
+    if (mmwave_mr60_probe_verdict(&mr60, true) == MMWAVE_MR60_PROBE_AMBIGUOUS) {
+        /* Refuse rather than mis-decode: an LD6002B/LD6004 would otherwise
+         * have its work-mode report read as breathing rate (#2136). */
+        ESP_LOGW(TAG, "0x0A-family radar seen (%u frames, %u with a non-MR60BHA2 "
+                 "length, %u MR60BHA2 vitals frames); not an MR60BHA2, ignoring it",
+                 mr60.family_frames, mr60.conflict_frames, mr60.signature_frames);
+    }
+
     /* No weak single-hit fallback: line noise can produce a stray match, so a real
-     * sensor must clear the ≥3 (MR60) / ≥2 (LD2410) validated-frame thresholds. */
+     * sensor must clear the validated-frame thresholds. */
     return MMWAVE_TYPE_NONE;
 }
 

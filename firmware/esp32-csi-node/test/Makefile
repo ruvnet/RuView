@@ -53,12 +53,12 @@ FUZZ_DURATION ?= 30
 FUZZ_JOBS     ?= 1
 
 .PHONY: all clean run_serialize run_edge run_nvs run_all test_adr110 run_adr110 \
-        test_vitals run_vitals test_mmwave_detect run_mmwave_detect host_tests \
+        test_vitals run_vitals test_mmwave_detect run_mmwave_detect test_mmwave_mr60 run_mmwave_mr60 host_tests \
         test_thermal run_thermal test_csi_sanitize run_csi_sanitize \
         test_c6_antenna run_c6_antenna test_serial_onboarding run_serial_onboarding \
         run_delivery_contract
 
-all: fuzz_serialize fuzz_edge fuzz_nvs test_adr110 test_vitals test_mmwave_detect \
+all: fuzz_serialize fuzz_edge fuzz_nvs test_adr110 test_vitals test_mmwave_detect test_mmwave_mr60 \
      test_thermal test_csi_sanitize test_c6_antenna test_serial_onboarding
 
 # --- XIAO ESP32-C6 RF switch selection ---
@@ -112,6 +112,14 @@ test_mmwave_detect: test_mmwave_detect.c $(MAIN_DIR)/mmwave_detect.h
 run_mmwave_detect: test_mmwave_detect
 	./test_mmwave_detect
 
+# --- MR60-family probe classifier, payload cap and 0x0A04 decode (#2136) ---
+# Host-side. Tests ../main/mmwave_mr60.h, the same header mmwave_sensor.c uses.
+test_mmwave_mr60: test_mmwave_mr60.c $(MAIN_DIR)/mmwave_mr60.h
+	cc -std=c99 -Wall -Wextra -I$(MAIN_DIR) -o $@ $< -lm
+
+run_mmwave_mr60: test_mmwave_mr60
+	./test_mmwave_mr60
+
 # --- Thermal state hysteresis ---
 # Host-side. Exercises thermal_next_state() from ../main/thermal.h directly --
 # the same function the device build runs -- so the test and the firmware cannot
@@ -136,9 +144,9 @@ run_serial_onboarding: test_serial_onboarding
 run_delivery_contract:
 	python3 test_delivery_contract.py
 
-host_tests: run_adr110 run_vitals run_mmwave_detect run_thermal run_csi_sanitize \
+host_tests: run_adr110 run_vitals run_mmwave_detect run_mmwave_mr60 run_thermal run_csi_sanitize \
             run_c6_antenna run_serial_onboarding run_delivery_contract
-	@echo "Host tests passed (ADR-110 + CSI sanitation + vitals + mmwave + thermal + C6 antenna + USB onboarding + delivery contract)"
+	@echo "Host tests passed (ADR-110 + CSI sanitation + vitals + mmwave + MR60 probe + thermal + C6 antenna + USB onboarding + delivery contract)"
 
 # --- Serialize fuzzer ---
 # Tests csi_serialize_frame() with random wifi_csi_info_t inputs.
@@ -174,6 +182,6 @@ run_nvs: fuzz_nvs
 run_all: run_serialize run_edge run_nvs
 
 clean:
-	rm -f fuzz_serialize fuzz_edge fuzz_nvs test_adr110 test_vitals test_mmwave_detect \
+	rm -f fuzz_serialize fuzz_edge fuzz_nvs test_adr110 test_vitals test_mmwave_detect test_mmwave_mr60 \
 		test_thermal test_csi_sanitize test_c6_antenna test_serial_onboarding
 	rm -rf corpus_serialize/ corpus_edge/ corpus_nvs/

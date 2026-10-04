@@ -16,6 +16,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
+#include "mmwave_mr60.h"
 
 /* ---- Sensor type enumeration ---- */
 typedef enum {
@@ -48,6 +49,16 @@ typedef struct {
     bool     person_present;    /**< True if person detected. */
     float    distance_cm;       /**< Distance to nearest target in cm. */
     uint8_t  target_count;      /**< Number of detected targets. */
+
+    /* 0x0A04 target records (MR60-family). The record layout is unconfirmed
+     * on hardware, so targets[] is only filled when
+     * CONFIG_CSI_MMWAVE_MR60_DECODE_TARGETS is set. The counters are always
+     * kept so a capture shows whether the sensor sends 0x0A04 at all. */
+    mmwave_target_t targets[MMWAVE_MAX_TARGETS];
+    uint8_t  targets_valid;     /**< Entries of targets[] that are filled. */
+    uint32_t target_frames;     /**< 0x0A04 frames received. */
+    uint32_t target_decode_errors; /**< 0x0A04 frames that did not fit the layout. */
+    uint16_t target_last_len;   /**< Payload length of the last 0x0A04 frame. */
 
     /* Quality metrics */
     uint32_t frame_count;       /**< Total parsed frames since boot. */

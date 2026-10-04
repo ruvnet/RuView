@@ -132,6 +132,21 @@ menu "Edge Intelligence (ADR-039)"
 
 endmenu
 
+menu "mmWave sensor (ADR-063)"
+
+    config CSI_MMWAVE_MR60_DECODE_TARGETS
+        bool "Decode MR60-family 0x0A04 target records (layout unconfirmed)"
+        default n
+        help
+            Decode 0x0A04 frames as n:u32 followed by n records of
+            {x f32, y f32, word3 u32, word4 u32}, and report the target count
+            in the fused vitals packet. The layout follows the Seeed MR60BHA2
+            Arduino library and has not been confirmed on MR60BHA2 hardware.
+            Frames that do not fit it are counted as decode errors. With this
+            off, 0x0A04 frames are only counted.
+
+endmenu
+
 menu "Adaptive Controller (ADR-081)"
 
     config ADAPTIVE_FAST_LOOP_MS
