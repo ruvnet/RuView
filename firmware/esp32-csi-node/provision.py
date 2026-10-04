@@ -144,13 +144,42 @@ def load_state(port: str, state_dir: str) -> dict:
     return {}
 
 
+def _harden_state_dir(state_dir: str) -> None:
+    """Ensure state_dir is 0700 and tighten any state files an earlier,
+    unpatched version of this script may have left behind at 0644.
+
+    os.chmod is best-effort on platforms without POSIX permission bits
+    (Windows): it never raises for an unsupported mode there, it just has
+    a narrower effect (roughly the read-only attribute), so this is safe
+    to call unconditionally on every platform.
+    """
+    os.makedirs(state_dir, mode=0o700, exist_ok=True)
+    try:
+        os.chmod(state_dir, 0o700)
+    except OSError:
+        pass
+    try:
+        for name in os.listdir(state_dir):
+            if name.endswith(".json"):
+                try:
+                    os.chmod(os.path.join(state_dir, name), 0o600)
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+
 def save_state(port: str, state_dir: str, state: dict) -> str:
     """Write `state` to the per-port file, creating dirs as needed. Returns path."""
-    os.makedirs(state_dir, exist_ok=True)
+    _harden_state_dir(state_dir)
     path = _state_path_for(port, state_dir)
     # Sort keys for deterministic on-disk content (easier to diff).
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    # Create the temp file pre-restricted (mode applies at creation, before
+    # any data is written) so the secret is never briefly world-readable
+    # between creation and a chmod that would otherwise follow it.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, sort_keys=True)
         f.write("\n")
     os.replace(tmp, path)
