@@ -54,6 +54,7 @@ const TP_STYLES = `
 .tp-btn-rec:hover:not(:disabled){background:rgba(220,53,69,.3)}
 .tp-btn-muted{background:transparent;color:#6b7a8d;border-color:rgba(56,68,89,.4);font-size:11px;padding:3px 8px}
 .tp-btn-muted:hover:not(:disabled){color:#b0b8c8;border-color:rgba(56,68,89,.8)}
+.tp-warning{background:rgba(255,193,7,.15);color:#ffd166;border:1px solid rgba(255,193,7,.35);border-radius:4px;padding:8px 12px;margin:10px 12px 0;font-size:12px;font-weight:500}
 `;
 
 export default class TrainingPanel {
@@ -180,6 +181,11 @@ export default class TrainingPanel {
     const panel = this._el('div', 'tp-panel');
     panel.appendChild(this._renderHeader());
     if (this.state.error) panel.appendChild(this._el('div', 'tp-error', this.state.error));
+    const ds = this.state.trainingStatus && this.state.trainingStatus.data_source;
+    if (ds === 'live_buffer_fallback') {
+      panel.appendChild(this._el('div', 'tp-warning',
+        '⚠ The recordings you selected did not load. This run trained on the live sensing buffer instead — it does NOT reflect your selected recordings.'));
+    }
     panel.appendChild(this._renderRecordings());
     const ts = this.state.trainingStatus;
     const active = ts && ts.active;
@@ -333,6 +339,7 @@ export default class TrainingPanel {
     g.appendChild(mc('Patience', ts.patience_remaining != null ? String(ts.patience_remaining) : '--'));
     g.appendChild(mc('ETA', ts.eta_secs != null ? this._fmtEta(ts.eta_secs) : '--'));
     g.appendChild(mc('Phase', ts.phase || '--'));
+    g.appendChild(mc('Data Source', this._fmtDataSource(ts.data_source)));
     s.appendChild(g);
 
     const stop = this._btn('Stop Training', 'tp-btn tp-btn-danger', () => this._stopTraining());
@@ -351,6 +358,7 @@ export default class TrainingPanel {
     g.appendChild(mc('Best PCK', ts.best_pck != null ? (ts.best_pck * 100).toFixed(1) + '%' : '--'));
     g.appendChild(mc('Best Epoch', ts.best_epoch != null ? String(ts.best_epoch) : '--'));
     g.appendChild(mc('Total Epochs', String(losses.length)));
+    g.appendChild(mc('Data Source', this._fmtDataSource(ts.data_source)));
     s.appendChild(g);
     const acts = this._el('div', 'tp-train-actions');
     acts.appendChild(this._btn('New Training', 'tp-btn tp-btn-secondary', () => {
@@ -420,6 +428,14 @@ export default class TrainingPanel {
 
   _fmtB(b) { return b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(1) + ' KB' : (b / 1048576).toFixed(1) + ' MB'; }
   _fmtEta(s) { return s < 60 ? Math.round(s) + 's' : s < 3600 ? Math.round(s / 60) + 'm' : (s / 3600).toFixed(1) + 'h'; }
+  _fmtDataSource(ds) {
+    switch (ds) {
+      case 'recordings': return 'Selected recordings';
+      case 'live_buffer': return 'Live buffer';
+      case 'live_buffer_fallback': return '⚠ Live buffer (fallback)';
+      default: return '--';
+    }
+  }
 
   _injectStyles() {
     if (document.getElementById('training-panel-styles')) return;
