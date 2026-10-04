@@ -88,6 +88,12 @@ pub struct PhaseSanitizerConfig {
 
     /// Valid phase range
     pub phase_range: (f64, f64),
+
+    /// Remove the linear phase slope (SFO/STO) + constant offset (CFO) by
+    /// subtracting a per-row least-squares line fit across subcarriers.
+    /// Off by default (preserves the legacy pipeline behaviour).
+    #[serde(default)]
+    pub enable_cfo_sfo_removal: bool,
 }
 
 impl Default for PhaseSanitizerConfig {
@@ -101,6 +107,7 @@ impl Default for PhaseSanitizerConfig {
             enable_noise_filtering: false,
             noise_threshold: 0.05,
             phase_range: (-PI, PI),
+            enable_cfo_sfo_removal: false,
         }
     }
 }
@@ -194,6 +201,12 @@ impl PhaseSanitizerConfigBuilder {
     /// Set phase range
     pub fn phase_range(mut self, min: f64, max: f64) -> Self {
         self.config.phase_range = (min, max);
+        self
+    }
+
+    /// Enable/disable CFO/SFO linear phase removal
+    pub fn enable_cfo_sfo_removal(mut self, enable: bool) -> Self {
+        self.config.enable_cfo_sfo_removal = enable;
         self
     }
 
@@ -652,6 +665,67 @@ impl PhaseSanitizer {
         Ok(filtered)
     }
 
+    /// Remove the linear phase component — SFO/STO slope + CFO constant offset —
+    /// from each subcarrier row by subtracting a least-squares line fit over
+    /// index `k = 0..N-1`.
+    ///
+    /// This is the standard CSI phase-calibration step (e.g. SpotFi §3.1): the
+    /// output is provably invariant to any injected linear phase `a·k + b` and
+    /// preserves the nonlinear multipath structure. Requires the phase to be
+    /// unwrapped first (call after [`Self::unwrap_phase`]). No-op unless
+    /// `enable_cfo_sfo_removal` is set.
+    pub fn remove_linear_phase(
+        &self,
+        phase_data: &Array2<f64>,
+    ) -> Result<Array2<f64>, PhaseSanitizationError> {
+        if !self.config.enable_cfo_sfo_removal {
+            return Ok(phase_data.clone());
+        }
+        if phase_data.is_empty() {
+            return Err(PhaseSanitizationError::InvalidData(
+                "Cannot de-trend empty phase data".into(),
+            ));
+        }
+
+        let mut out = phase_data.clone();
+        let ncols = out.ncols();
+        for i in 0..out.nrows() {
+            let mut row: Vec<f64> = (0..ncols).map(|j| out[[i, j]]).collect();
+            Self::detrend_row(&mut row);
+            for (j, &val) in row.iter().enumerate() {
+                out[[i, j]] = val;
+            }
+        }
+        Ok(out)
+    }
+
+    /// In-place least-squares linear de-trend of one subcarrier row.
+    /// Subtracts the best-fit line `slope·k + intercept` over `k = 0..N-1`.
+    fn detrend_row(row: &mut [f64]) {
+        let n = row.len();
+        if n < 2 {
+            return;
+        }
+        let nf = n as f64;
+        let (mut sum_k, mut sum_kk, mut sum_y, mut sum_ky) = (0.0, 0.0, 0.0, 0.0);
+        for (k, &y) in row.iter().enumerate() {
+            let kf = k as f64;
+            sum_k += kf;
+            sum_kk += kf * kf;
+            sum_y += y;
+            sum_ky += kf * y;
+        }
+        let denom = nf * sum_kk - sum_k * sum_k;
+        if denom.abs() < 1e-12 {
+            return;
+        }
+        let slope = (nf * sum_ky - sum_k * sum_y) / denom;
+        let intercept = (sum_y - slope * sum_k) / nf;
+        for (k, y) in row.iter_mut().enumerate() {
+            *y -= slope * (k as f64) + intercept;
+        }
+    }
+
     /// Complete sanitization pipeline
     pub fn sanitize_phase(
         &mut self,
@@ -669,8 +743,13 @@ impl PhaseSanitizer {
             self.statistics.sanitization_errors += 1;
         })?;
 
+        // Remove CFO/SFO linear phase (no-op unless enabled)
+        let detrended = self.remove_linear_phase(&unwrapped).inspect_err(|_| {
+            self.statistics.sanitization_errors += 1;
+        })?;
+
         // Remove outliers
-        let cleaned = self.remove_outliers(&unwrapped).inspect_err(|_| {
+        let cleaned = self.remove_outliers(&detrended).inspect_err(|_| {
             self.statistics.sanitization_errors += 1;
         })?;
 
@@ -708,6 +787,30 @@ impl PhaseSanitizer {
             data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / data.len() as f64;
         variance.sqrt()
     }
+}
+
+/// Unwrap and CFO/SFO-de-trend a flat phase buffer of `n_rows` equal rows
+/// (e.g. the per-antenna × per-subcarrier phases of one parsed CSI frame),
+/// in place, without requiring callers to build an `ndarray` or a
+/// [`PhaseSanitizer`].
+///
+/// Per row: 1D phase unwrapping (removes ±2π discontinuities from wrapped
+/// `atan2` output) followed by least-squares linear de-trend (strips the
+/// SFO/STO slope + CFO offset). Unwrap-first matters: fitting a line to
+/// *wrapped* phase is meaningless once the slope exceeds π per row.
+///
+/// Returns `false` (buffer untouched) if `n_rows` is zero or does not divide
+/// `phases.len()`.
+pub fn unwrap_and_detrend_rows(phases: &mut [f64], n_rows: usize) -> bool {
+    if n_rows == 0 || phases.is_empty() || phases.len() % n_rows != 0 {
+        return false;
+    }
+    let row_len = phases.len() / n_rows;
+    for row in phases.chunks_mut(row_len) {
+        PhaseSanitizer::unwrap_1d(row);
+        PhaseSanitizer::detrend_row(row);
+    }
+    true
 }
 
 #[cfg(test)]
@@ -917,5 +1020,105 @@ mod tests {
         sanitizer.reset_statistics();
         let stats = sanitizer.get_statistics();
         assert_eq!(stats.total_processed, 0);
+    }
+
+    #[test]
+    fn test_cfo_sfo_linear_removal_is_invariant() {
+        let config = PhaseSanitizerConfig::builder()
+            .enable_cfo_sfo_removal(true)
+            .build();
+        let sanitizer = PhaseSanitizer::new(config).unwrap();
+
+        // Nonlinear multipath phase (two tones) — the structure we must preserve.
+        let ncols = 56usize;
+        let phi_true: Vec<f64> = (0..ncols)
+            .map(|k| {
+                0.6 * (2.0 * PI * k as f64 / 17.0).sin() + 0.3 * (2.0 * PI * k as f64 / 6.0).sin()
+            })
+            .collect();
+
+        // Reference: the true phase minus its own best-fit line.
+        let mut reference = phi_true.clone();
+        PhaseSanitizer::detrend_row(&mut reference);
+
+        // Inject a CFO offset (b0) + SFO/STO slope (a0); output must be invariant.
+        let a0 = 1.3;
+        let b0 = -0.8;
+        let injected = Array2::from_shape_fn((1, ncols), |(_, k)| phi_true[k] + a0 * k as f64 + b0);
+        let out = sanitizer.remove_linear_phase(&injected).unwrap();
+
+        for k in 0..ncols {
+            assert!(
+                (out[[0, k]] - reference[k]).abs() < 1e-9,
+                "not invariant at k={k}: {} vs {}",
+                out[[0, k]],
+                reference[k]
+            );
+        }
+
+        // Residual has no linear component left: re-fitting changes nothing.
+        let mut residual: Vec<f64> = (0..ncols).map(|k| out[[0, k]]).collect();
+        let before = residual.clone();
+        PhaseSanitizer::detrend_row(&mut residual);
+        for k in 0..ncols {
+            assert!(
+                (residual[k] - before[k]).abs() < 1e-9,
+                "residual still carried a linear slope at k={k}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_unwrap_and_detrend_rows_flat_buffer() {
+        // Two antenna rows, each = wrapped(true_phase + slope·k + offset).
+        let ncols = 32usize;
+        let truth: Vec<f64> = (0..ncols).map(|k| 0.4 * (k as f64 * 0.5).sin()).collect();
+        let mut reference = truth.clone();
+        PhaseSanitizer::detrend_row(&mut reference);
+
+        let wrap = |v: f64| {
+            let mut w = v;
+            while w > PI {
+                w -= 2.0 * PI;
+            }
+            while w < -PI {
+                w += 2.0 * PI;
+            }
+            w
+        };
+        let mut flat = Vec::with_capacity(2 * ncols);
+        for &(a0, b0) in &[(0.7, 0.3), (-0.5, -1.1)] {
+            for (k, &t) in truth.iter().enumerate() {
+                flat.push(wrap(t + a0 * k as f64 + b0));
+            }
+        }
+
+        assert!(unwrap_and_detrend_rows(&mut flat, 2));
+        for row in 0..2 {
+            for k in 0..ncols {
+                assert!(
+                    (flat[row * ncols + k] - reference[k]).abs() < 1e-9,
+                    "row {row} k {k}: {} vs {}",
+                    flat[row * ncols + k],
+                    reference[k]
+                );
+            }
+        }
+
+        // Invalid row counts leave the buffer untouched.
+        let mut buf = vec![1.0, 2.0, 3.0];
+        let before = buf.clone();
+        assert!(!unwrap_and_detrend_rows(&mut buf, 2));
+        assert!(!unwrap_and_detrend_rows(&mut buf, 0));
+        assert_eq!(buf, before);
+    }
+
+    #[test]
+    fn test_cfo_sfo_removal_disabled_is_noop() {
+        let config = PhaseSanitizerConfig::default(); // disabled by default
+        let sanitizer = PhaseSanitizer::new(config).unwrap();
+        let data = Array2::from_shape_fn((2, 20), |(_, k)| 0.5 * k as f64 + 0.1);
+        let out = sanitizer.remove_linear_phase(&data).unwrap();
+        assert_eq!(out, data, "disabled de-trend must be an exact no-op");
     }
 }
