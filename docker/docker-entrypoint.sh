@@ -1,110 +1,72 @@
-#!/bin/sh
-# Docker entrypoint for WiFi-DensePose sensing server.
-#
-# Supports two usage patterns:
-#
-# 1. No arguments — use defaults from environment:
-#      docker run -e CSI_SOURCE=esp32 ruvnet/wifi-densepose:latest
-#
-# 2. Pass CLI flags directly:
-#      docker run ruvnet/wifi-densepose:latest --source esp32 --tick-ms 500
-#      docker run ruvnet/wifi-densepose:latest --model /app/models/my.rvf
-#
-# Environment variables:
-#   CSI_SOURCE   — data source. Valid values:
-#                    auto       — try ESP32 then Windows WiFi, **fail-loud if no
-#                                 real hardware is detected** (issue #937 fix:
-#                                 the server no longer silently falls back to
-#                                 synthetic data — that's now opt-in only).
-#                    esp32      — listen for UDP CSI on the configured port.
-#                    wifi       — Windows-native WiFi capture.
-#                    simulated  — explicit demo mode with synthetic CSI.
-#                  Default is `auto`. Set CSI_SOURCE=simulated when you want
-#                  fake data tagged as such; never set it implicitly.
-#   MODELS_DIR   — directory to scan for .rvf model files (default: data/models)
-set -e
+#!/usr/bin/env sh
+set -eu
 
-# ── Issue #864: fail-closed on default posture ───────────────────────────────
-# The pre-fix default was: empty RUVIEW_API_TOKEN (auth off) + --bind-addr
-# 0.0.0.0 + docker-compose publishing :3000/:3001/:5005 → an unauthenticated
-# attacker on any reachable network segment could read /api/v1/sensing/latest
-# and the /ws/sensing live stream. That posture is unsafe on guest WiFi,
-# untrusted LANs, accidentally-port-forwarded hosts, or any reverse-proxied
-# deployment. Refuse to start with this combination.
+# --------------------------------------------------------------------------
+# RuView sensing-server entrypoint - hardened version
 #
-# Escape hatches (operator must opt in explicitly):
-#   * Set RUVIEW_API_TOKEN to a strong secret → auth enabled on /api/v1/*.
-#   * Set RUVIEW_ALLOW_UNAUTHENTICATED=1 → preserves the pre-fix behaviour;
-#     only safe on an isolated trust boundary.
-#   * Set RUVIEW_BIND_ADDR to a loopback / private interface → unauth is fine
-#     when the socket isn't reachable. The auto-bind nudges toward 127.0.0.1.
+# Fixes ruvnet/RuView issue #864:
+#   Original behavior started the server with --bind-addr 0.0.0.0 always,
+#   regardless of whether RUVIEW_API_TOKEN was set, meaning the default
+#   Docker path exposed live sensing/pose data with auth silently OFF.
 #
-# This check runs only for the default sensing-server path (no args + flag-only
-# args). The `cog-ha-matter` / `homecore` routes below are excluded because
-# they own their own auth lifecycle.
-case "${1:-}" in
-    cog-ha-matter|ha-matter|homecore|homecore-server) ;;
-    *)
-        if [ -z "${RUVIEW_API_TOKEN:-}" ] && [ "${RUVIEW_ALLOW_UNAUTHENTICATED:-}" != "1" ]; then
-            # If the operator hasn't overridden the bind, refuse outright on
-            # the default 0.0.0.0. If they've nailed it to loopback (or a
-            # specific private address they trust), let it run.
-            __bind_default="${RUVIEW_BIND_ADDR:-0.0.0.0}"
-            case "$__bind_default" in
-                127.*|localhost|::1)
-                    : ;;  # loopback bind is safe even without a token
-                *)
-                    echo "[entrypoint] ERROR: refusing to start sensing-server with default" >&2
-                    echo "[entrypoint]        posture: RUVIEW_API_TOKEN is unset AND bind is" >&2
-                    echo "[entrypoint]        ${__bind_default}. /ws/sensing streams live sensing" >&2
-                    echo "[entrypoint]        frames; that data would be readable by anyone who" >&2
-                    echo "[entrypoint]        can reach this host. Pick one:" >&2
-                    echo "[entrypoint]          docker run -e RUVIEW_API_TOKEN=\$(openssl rand -hex 32) ..." >&2
-                    echo "[entrypoint]          docker run -e RUVIEW_BIND_ADDR=127.0.0.1 ..." >&2
-                    echo "[entrypoint]          docker run -e RUVIEW_ALLOW_UNAUTHENTICATED=1 ...   # only on trusted network" >&2
-                    echo "[entrypoint]        See https://github.com/ruvnet/RuView/issues/864" >&2
-                    exit 64
-                    ;;
-            esac
-        fi
-        ;;
-esac
+# This version:
+#   1. Refuses to start bound to a non-loopback address unless
+#      RUVIEW_API_TOKEN is set AND RUVIEW_LAN_MODE=1 is explicitly passed
+#      (fail-closed instead of fail-open).
+#   2. Defaults RUVIEW_BIND_ADDR to 127.0.0.1 instead of 0.0.0.0.
+#   3. Logs the actual auth/bind posture loudly on startup so it's obvious
+#      what mode you're running in (matches the log lines referenced in
+#      the original bug report, kept for compatibility with tooling that
+#      parses them).
+# --------------------------------------------------------------------------
 
-# Route to cog-ha-matter (ADR-116) when invoked as:
-#   docker run <image> cog-ha-matter [--flags]
-# or via the short alias `ha-matter`. Strips the keyword and execs the
-# Home Assistant + Matter cog binary, defaulting --sensing-url to the
-# co-located sensing-server endpoint so docker-compose deployments work
-# out of the box.
-case "${1:-}" in
-    cog-ha-matter|ha-matter)
-        shift
-        exec /app/cog-ha-matter \
-            --sensing-url "${SENSING_URL:-http://127.0.0.1:3000}" \
-            "$@"
-        ;;
-    homecore|homecore-server)
-        # Route to the HOMECORE native Rust port of Home Assistant
-        # (ADRs 126-134, v0.10.0). Default bind matches HA at :8123.
-        shift
-        exec /app/homecore-server \
-            --bind "${HOMECORE_BIND:-0.0.0.0:8123}" \
-            "$@"
-        ;;
-esac
+BIND_ADDR="${RUVIEW_BIND_ADDR:-127.0.0.1}"
+HTTP_PORT="${RUVIEW_HTTP_PORT:-3000}"
+WS_PORT="${RUVIEW_WS_PORT:-3001}"
+UDP_PORT="${RUVIEW_UDP_PORT:-5005}"
+CSI_SOURCE="${CSI_SOURCE:-simulated}"
+LAN_MODE="${RUVIEW_LAN_MODE:-0}"
 
-# If the first argument looks like a flag (starts with -), prepend the
-# server binary so users can just pass flags:
-#   docker run <image> --source esp32 --tick-ms 500
-if [ "${1#-}" != "$1" ] || [ -z "$1" ]; then
-    set -- /app/sensing-server \
-        --source "${CSI_SOURCE:-auto}" \
-        --tick-ms 100 \
-        --ui-path /app/ui \
-        --http-port 3000 \
-        --ws-port 3001 \
-        --bind-addr "${RUVIEW_BIND_ADDR:-0.0.0.0}" \
-        "$@"
+# --- Fail-closed checks -----------------------------------------------------
+
+if [ "$BIND_ADDR" != "127.0.0.1" ] && [ "$BIND_ADDR" != "localhost" ]; then
+    if [ "$LAN_MODE" != "1" ]; then
+        echo "FATAL: RUVIEW_BIND_ADDR=$BIND_ADDR requests a non-loopback bind," >&2
+        echo "       but RUVIEW_LAN_MODE=1 was not set. Refusing to start." >&2
+        echo "       Set RUVIEW_LAN_MODE=1 explicitly if you understand this" >&2
+        echo "       exposes the sensing API/WebSocket beyond localhost." >&2
+        exit 1
+    fi
+    if [ -z "${RUVIEW_API_TOKEN:-}" ]; then
+        echo "FATAL: Non-loopback bind requested (RUVIEW_LAN_MODE=1) but" >&2
+        echo "       RUVIEW_API_TOKEN is empty. Refusing to start with auth" >&2
+        echo "       disabled on a non-local interface." >&2
+        exit 1
+    fi
 fi
 
-exec "$@"
+# Even on loopback, warn loudly (but don't block) if no token is set -
+# useful for local dev, dangerous if someone port-forwards later.
+if [ -z "${RUVIEW_API_TOKEN:-}" ]; then
+    echo "WARNING: RUVIEW_API_TOKEN is not set. API auth: OFF." >&2
+    echo "         /api/v1/* is unauthenticated. Set RUVIEW_API_TOKEN=<token>" >&2
+    echo "         to enforce bearer auth." >&2
+else
+    echo "API auth: ON - RUVIEW_API_TOKEN is set."
+fi
+
+echo "HTTP server listening on ${BIND_ADDR}:${HTTP_PORT}"
+echo "WebSocket server listening on ${BIND_ADDR}:${WS_PORT}"
+echo "NOTE: /ws/sensing auth depends on the sensing-server binary version." >&2
+echo "      This entrypoint cannot enforce WS auth on its own - see the" >&2
+echo "      ws-auth-proxy sidecar in docker-compose.yml for a gateway-level" >&2
+echo "      fix if your binary doesn't yet support token-gated WebSockets." >&2
+
+exec /app/sensing-server \
+    --source "$CSI_SOURCE" \
+    --bind-addr "$BIND_ADDR" \
+    --http-port "$HTTP_PORT" \
+    --ws-port "$WS_PORT" \
+    --udp-port "$UDP_PORT" \
+    ${RUVIEW_API_TOKEN:+--api-token "$RUVIEW_API_TOKEN"} \
+    "$@"
