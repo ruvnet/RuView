@@ -14,7 +14,8 @@
 //! `WlanGetNetworkBssList` reads the driver's *already-maintained* BSS
 //! cache, so back-to-back reads are bounded by the WLAN service IPC, not
 //! by an active-scan dwell. Calling [`scan_native`] in a loop polls that
-//! cache; the driver refreshes it in the background. That is what makes
+//! cache; the driver refreshes it in the background (rarely while
+//! associated — [`request_scan`] forces a refresh). That is what makes
 //! a >2 Hz observation rate possible — see `WlanApiScanner::benchmark`.
 //!
 //! # Platform gating (honest, not faked)
@@ -250,6 +251,109 @@ pub(crate) fn scan_native() -> Result<Vec<BssidObservation>, WifiScanError> {
     ))
 }
 
+/// Ask the WLAN service to start a fresh scan on every WLAN interface.
+///
+/// `WlanGetNetworkBssList` and `netsh wlan show networks mode=bssid` both
+/// read the driver's BSS cache, and while the adapter is associated
+/// Windows refreshes that cache only rarely — in practice the cache can
+/// hold just the connected AP for minutes. Calling this periodically keeps
+/// the multi-BSSID view populated. `WlanScan` is asynchronous: it returns
+/// immediately and the cache fills a few seconds later.
+///
+/// Returns the number of interfaces that accepted the request.
+///
+/// # Errors
+///
+/// - [`WifiScanError::Unsupported`] on non-Windows targets.
+/// - [`WifiScanError::ScanFailed`] if the WLAN service cannot be opened,
+///   the interfaces cannot be enumerated, or no interface accepted the
+///   request.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub fn request_scan() -> Result<usize, WifiScanError> {
+    use std::ptr;
+    use windows_sys::Win32::NetworkManagement::WiFi::{
+        WlanCloseHandle, WlanEnumInterfaces, WlanFreeMemory, WlanOpenHandle, WlanScan,
+        WLAN_INTERFACE_INFO, WLAN_INTERFACE_INFO_LIST,
+    };
+
+    const WLAN_CLIENT_VERSION_2: u32 = 2;
+
+    let mut negotiated: u32 = 0;
+    let mut handle: windows_sys::Win32::Foundation::HANDLE = ptr::null_mut();
+    // SAFETY: out-params are valid local addresses; `preserved` must be null.
+    let rc = unsafe {
+        WlanOpenHandle(
+            WLAN_CLIENT_VERSION_2,
+            ptr::null(),
+            &mut negotiated,
+            &mut handle,
+        )
+    };
+    if rc != 0 {
+        return Err(WifiScanError::ScanFailed {
+            reason: format!("WlanOpenHandle failed (Win32 error {rc})"),
+        });
+    }
+
+    let result = (|| -> Result<usize, WifiScanError> {
+        let mut iface_list: *mut WLAN_INTERFACE_INFO_LIST = ptr::null_mut();
+        // SAFETY: `handle` is a live WLAN session; out-ptr is a local address.
+        let rc = unsafe { WlanEnumInterfaces(handle, ptr::null(), &mut iface_list) };
+        if rc != 0 || iface_list.is_null() {
+            return Err(WifiScanError::ScanFailed {
+                reason: format!("WlanEnumInterfaces failed (Win32 error {rc})"),
+            });
+        }
+
+        // SAFETY: `iface_list` is non-null and driver-allocated;
+        // `dwNumberOfItems` bounds the trailing `InterfaceInfo` array.
+        let n_ifaces = unsafe { (*iface_list).dwNumberOfItems } as usize;
+        let iface_base =
+            unsafe { ptr::addr_of!((*iface_list).InterfaceInfo).cast::<WLAN_INTERFACE_INFO>() };
+
+        let mut accepted = 0;
+        let mut last_rc = 0;
+        for i in 0..n_ifaces {
+            // SAFETY: `i < dwNumberOfItems`, so this element is in-bounds.
+            let guid = unsafe { (*iface_base.add(i)).InterfaceGuid };
+            // SAFETY: `handle` is live; `&guid` is a valid GUID; null SSID and
+            // IE data request a scan for all networks; `preserved` is null.
+            let rc = unsafe { WlanScan(handle, &guid, ptr::null(), ptr::null(), ptr::null()) };
+            if rc == 0 {
+                accepted += 1;
+            } else {
+                last_rc = rc;
+            }
+        }
+
+        // SAFETY: `iface_list` was allocated by the WLAN API; not used after.
+        unsafe { WlanFreeMemory(iface_list.cast()) };
+
+        if accepted == 0 {
+            return Err(WifiScanError::ScanFailed {
+                reason: format!(
+                    "WlanScan accepted on 0 of {n_ifaces} interfaces (last Win32 error {last_rc})"
+                ),
+            });
+        }
+        Ok(accepted)
+    })();
+
+    // SAFETY: `handle` is a live WLAN session handle and not used after this.
+    unsafe { WlanCloseHandle(handle, ptr::null()) };
+
+    result
+}
+
+/// Non-Windows fallback: there is no WLAN service to ask for a scan.
+#[cfg(not(windows))]
+pub fn request_scan() -> Result<usize, WifiScanError> {
+    Err(WifiScanError::Unsupported(
+        "WlanScan is only available on Windows".to_string(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,6 +414,29 @@ mod tests {
         match scan_native() {
             Err(WifiScanError::Unsupported(_)) => {}
             other => panic!("expected Unsupported off-Windows, got {other:?}"),
+        }
+    }
+
+    /// Off Windows there is no WLAN service to ask for a fresh scan, so the
+    /// request must be an honest typed `Unsupported`.
+    #[cfg(not(windows))]
+    #[test]
+    fn request_scan_unsupported_off_windows() {
+        match crate::request_scan() {
+            Err(WifiScanError::Unsupported(_)) => {}
+            other => panic!("expected Unsupported off-Windows, got {other:?}"),
+        }
+    }
+
+    /// On Windows the scan request must reach the real `WlanScan` FFI.
+    /// A CI box with the WLAN service disabled may report `ScanFailed`,
+    /// but never `Unsupported`.
+    #[cfg(windows)]
+    #[test]
+    fn request_scan_runs_real_ffi_on_windows() {
+        match crate::request_scan() {
+            Ok(_) | Err(WifiScanError::ScanFailed { .. }) => {}
+            Err(e) => panic!("unexpected scan request error: {e:?}"),
         }
     }
 

@@ -21,6 +21,7 @@ pub mod linux_scanner;
 
 pub use netsh_scanner::parse_netsh_output;
 pub use netsh_scanner::NetshBssidScanner;
+pub use wlanapi_native::request_scan;
 pub use wlanapi_scanner::WlanApiScanner;
 
 #[cfg(target_os = "macos")]

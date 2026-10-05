@@ -20,6 +20,7 @@ pub mod port;
 // Re-export key types at the crate root for convenience.
 pub use adapter::parse_netsh_output;
 pub use adapter::NetshBssidScanner;
+pub use adapter::request_scan;
 pub use adapter::WlanApiScanner;
 
 #[cfg(target_os = "macos")]
