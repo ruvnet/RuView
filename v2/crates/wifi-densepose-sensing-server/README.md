@@ -76,6 +76,16 @@ cargo run -p wifi-densepose-sensing-server -- \
     --static-dir ./ui
 ```
 
+### Recording IDs
+
+`POST /api/v1/recording/start` accepts an optional string `id`. IDs must be
+1–64 ASCII characters from `A-Z`, `a-z`, `0-9`, `.`, `_`, and `-`, and must not
+start with `.`. Omit `id` to generate a new recording ID.
+
+Each recording creates a new `data/recordings/{id}.jsonl` file. An invalid ID
+or an existing destination returns `success: false` without starting a session
+or overwriting the existing file. Choose another ID to retain both captures.
+
 ### Empty-room startup baseline
 
 Provide a stable installation ID and an application-owned private state directory:
