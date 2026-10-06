@@ -895,6 +895,10 @@ fn characteristics_response(target: &str, bridge: &HapBridge) -> Response {
     Response::json(207, json!({"characteristics": values}))
 }
 
+// Per-connection retained state must be bounded across requests, not just
+// within one request's 128-item batch.
+const MAX_CHARACTERISTIC_SUBSCRIPTIONS: usize = 1024;
+
 fn characteristic_subscription_response(
     body: &[u8],
     subscriptions: &mut HashSet<(u64, u64)>,
@@ -918,6 +922,13 @@ fn characteristic_subscription_response(
             return Response::json(207, json!({"characteristics": [{"status": -70405}]}));
         };
         if enabled {
+            if subscriptions.len() >= MAX_CHARACTERISTIC_SUBSCRIPTIONS
+                && !subscriptions.contains(&(aid, iid))
+            {
+                return Response::json(207, json!({"characteristics": [
+                    {"aid": aid, "iid": iid, "status": -70407}
+                ]}));
+            }
             subscriptions.insert((aid, iid));
         } else {
             subscriptions.remove(&(aid, iid));
@@ -1075,6 +1086,51 @@ mod tests {
     use homecore::entity::{EntityId, State};
     use homecore::event::Context;
     use x25519_dalek::{PublicKey, StaticSecret};
+
+    #[test]
+    fn subscriptions_are_bounded_across_requests_and_recover_capacity() {
+        let mut subscriptions = HashSet::new();
+        for aid in 0..1024 {
+            let body =
+                serde_json::to_vec(&json!({"characteristics": [{"aid": aid, "iid": 8, "ev": true}]}))
+                    .unwrap();
+            assert_eq!(
+                characteristic_subscription_response(&body, &mut subscriptions).status,
+                204
+            );
+        }
+        let overflow =
+            serde_json::to_vec(&json!({"characteristics": [{"aid": 1024, "iid": 8, "ev": true}]}))
+                .unwrap();
+        let response = characteristic_subscription_response(&overflow, &mut subscriptions);
+        assert_eq!(
+            subscriptions.len(),
+            1024,
+            "per-request limit must also bound retained subscriptions"
+        );
+        assert_eq!(response.status, 207);
+        let error: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(error["characteristics"][0]["status"], -70407);
+        let duplicate =
+            serde_json::to_vec(&json!({"characteristics": [{"aid": 0, "iid": 8, "ev": true}]}))
+                .unwrap();
+        assert_eq!(
+            characteristic_subscription_response(&duplicate, &mut subscriptions).status,
+            204
+        );
+        let remove =
+            serde_json::to_vec(&json!({"characteristics": [{"aid": 0, "iid": 8, "ev": false}]}))
+                .unwrap();
+        assert_eq!(
+            characteristic_subscription_response(&remove, &mut subscriptions).status,
+            204
+        );
+        assert_eq!(
+            characteristic_subscription_response(&overflow, &mut subscriptions).status,
+            204
+        );
+        assert_eq!(subscriptions.len(), 1024);
+    }
 
     fn bridge() -> HapBridge {
         let bridge = HapBridge::new(HapServiceRecord::bridge(
