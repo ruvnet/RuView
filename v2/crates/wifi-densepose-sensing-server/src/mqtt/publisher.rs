@@ -302,6 +302,11 @@ async fn run(
                         } else {
                             let nb = builder_owned.for_node(&snap.node_id);
                             let b = nb.as_borrowed();
+                            // Once per node per run: delete what #2117
+                            // stopped announcing before announcing the rest.
+                            if let Err(e) = clear_retired_entities(&client, &b).await {
+                                otel_warn!("[mqtt] node {} retired-entity cleanup failed: {e}", snap.node_id);
+                            }
                             if let Err(e) = publish_all_discovery(&client, &b, planner.entities()).await {
                                 otel_warn!("[mqtt] node {} discovery failed: {e}", snap.node_id);
                             }
@@ -348,6 +353,29 @@ async fn publish_all_discovery(
                 payload,
                 PublishOptions::new(QoS::AtLeastOnce).retained(),
             )
+            .await?;
+    }
+    Ok(())
+}
+
+/// Empty retained payloads for the retained topics earlier releases left for
+/// this node's retired entities (#2117). Bounded by
+/// [`super::discovery::RETIRED_ENTITIES`], and idempotent: clearing an
+/// already-absent retained topic changes nothing at the broker.
+fn retired_entity_clears(b: &DiscoveryBuilder<'_>) -> Vec<(String, Vec<u8>)> {
+    b.retired_entity_topics()
+        .into_iter()
+        .map(|topic| (topic, Vec::new()))
+        .collect()
+}
+
+async fn clear_retired_entities(
+    client: &AsyncClient,
+    b: &DiscoveryBuilder<'_>,
+) -> Result<(), ClientError> {
+    for (topic, payload) in retired_entity_clears(b) {
+        client
+            .publish(&topic, payload, PublishOptions::new(QoS::AtLeastOnce).retained())
             .await?;
     }
     Ok(())
@@ -411,6 +439,21 @@ mod per_node_device_tests {
         assert_eq!(a, vec!["wifi_densepose_node-A".to_string()]);
         assert_eq!(c, vec!["wifi_densepose_node-B".to_string()]);
         assert_ne!(a, c, "#898: two nodes must not collapse into one device");
+    }
+
+    #[test]
+    fn retired_entity_clears_are_empty_and_bounded() {
+        let node = base().for_node("wifi-densepose-1-node3");
+        let clears = retired_entity_clears(&node.as_borrowed());
+        assert_eq!(clears.len(), 2 * crate::mqtt::discovery::RETIRED_ENTITIES.len());
+        for (topic, payload) in &clears {
+            assert!(payload.is_empty(), "{topic}: HA deletes only on an empty payload");
+            assert!(topic.contains("/wifi_densepose_wifi-densepose-1-node3/"), "{topic}");
+        }
+        assert!(clears.iter().any(|(t, _)| t
+            == "homeassistant/binary_sensor/wifi_densepose_wifi-densepose-1-node3/zone_occupancy/config"));
+        // Idempotent: the same node always yields the same clears.
+        assert_eq!(clears, retired_entity_clears(&node.as_borrowed()));
     }
 
     #[test]

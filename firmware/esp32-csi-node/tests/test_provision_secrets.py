@@ -214,6 +214,56 @@ class TestIntermediateArtifacts(_TempDirCase):
         self.assertEqual(seen["csv_mode"], 0o600)
 
 
+@unittest.skipIf(sys.platform == "win32",
+                 "O_NOFOLLOW and unprivileged symlinks are POSIX-only")
+class TestSymlinkRefusal(_TempDirCase):
+    """_write_private refuses a pre-existing symlink instead of following it."""
+
+    def plant_link(self, link_path):
+        victim = os.path.join(self.root, "victim.txt")
+        with open(victim, "w", encoding="utf-8") as f:
+            f.write("original")
+        os.symlink(victim, link_path)
+        return victim
+
+    def assert_untouched(self, victim):
+        with open(victim, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "original")
+
+    def test_write_private_refuses_a_symlink(self):
+        link = os.path.join(self.root, "nvs_provision.bin")
+        victim = self.plant_link(link)
+
+        with self.assertRaises(SystemExit) as ctx:
+            provision._write_private(link, FAKE_PASSWORD.encode())
+
+        self.assertIn("refusing to write credentials through a symlink", str(ctx.exception.code))
+        self.assertIn(link, str(ctx.exception.code))
+        self.assertTrue(os.path.islink(link), "the link is reported, not replaced")
+        self.assert_untouched(victim)
+
+    def test_dry_run_refuses_to_write_the_binary_through_a_symlink(self):
+        victim = self.plant_link(os.path.join(self.root, "nvs_provision.bin"))
+
+        with mock.patch.object(provision, "generate_nvs_binary",
+                               return_value=b"nvs-with-" + FAKE_PASSWORD.encode()):
+            code, _, _ = self.run_main(*TestIntermediateArtifacts.ARGS,
+                                       "--state-dir", self.state_dir)
+
+        self.assertIsInstance(code, str)
+        self.assertIn("refusing to write credentials through a symlink", code)
+        self.assert_untouched(victim)
+
+    def test_write_private_still_writes_a_regular_file(self):
+        path = os.path.join(self.root, "nvs_provision.bin")
+
+        provision._write_private(path, b"nvs")
+
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), b"nvs")
+        self.assertEqual(mode_of(path), 0o600)
+
+
 class TestPasswordInput(_TempDirCase):
     """Ways to give the password without putting it on the command line."""
 

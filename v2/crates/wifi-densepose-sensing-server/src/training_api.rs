@@ -825,7 +825,9 @@ fn compute_teacher_targets(frame: &RecordedFrame, prev_frame: Option<&RecordedFr
         let kp_noise_x = ((noise_seed + i as f64 * 1.618).sin() * 43758.545).fract()
             * variance.sqrt().clamp(0.0, 3.0)
             * motion_score;
-        let kp_noise_y = ((noise_seed + i as f64 * 2.718).cos() * 31415.926).fract()
+        // 2.718 is an arbitrary hash/noise seed, not Euler's number.
+        #[allow(clippy::approx_constant)]
+        let kp_noise_y =((noise_seed + i as f64 * 2.718).cos() * 31415.926).fract()
             * variance.sqrt().clamp(0.0, 3.0)
             * motion_score
             * 0.6;

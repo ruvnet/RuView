@@ -34,7 +34,6 @@ use std::collections::BTreeMap;
 
 use wifi_densepose_bfld::{PrivacyAction, PrivacyClass, PrivacyMode, PrivacyModeRegistry};
 use wifi_densepose_geo::types::GeoRegistration;
-use wifi_densepose_ruvector::viewpoint::coherence::ClockQualityScore;
 use wifi_densepose_signal::ruvsense::fusion_quality::CalibrationId;
 use wifi_densepose_signal::ruvsense::multistatic::{MultistaticConfig, MultistaticFuser, PhaseFusion};
 use wifi_densepose_signal::ruvsense::{
@@ -48,6 +47,12 @@ use wifi_densepose_worldgraph::{
 
 pub mod mesh_guard;
 pub use mesh_guard::{MeshGuard, MeshPartitionReport};
+pub use wifi_densepose_ruvector::viewpoint::coherence::ClockQualityScore;
+
+/// Clock score for a node with no sync evidence (issue #2156). The ADR-138
+/// gate rejects it as `ClockInvalid`, so the node adds no directional evidence.
+pub const UNKNOWN_CLOCK: ClockQualityScore =
+    ClockQualityScore { offset_stdev_us: f32::INFINITY, age_us: u64::MAX, valid: false };
 
 /// Errors from an engine cycle.
 #[derive(Debug)]
@@ -126,6 +131,9 @@ pub struct StreamingEngine {
     // ADR-138: array coordinator + per-node geometry (by frame node_id).
     array: ArrayCoordinator,
     node_geom: BTreeMap<u8, NodeGeom>,
+    // ADR-138: per-node clock quality from ADR-110 sync state (#2156). Nodes
+    // without an entry are scored `UNKNOWN_CLOCK`.
+    node_clock: BTreeMap<u8, ClockQualityScore>,
     // ADR-142: per-link evolution tracker (sized lazily to the node count).
     evolution: Option<EvolutionTracker>,
     // ADR-143: persistent reflector discovery (v2 mode).
@@ -216,6 +224,7 @@ impl StreamingEngine {
             cycle: 0,
             array: ArrayCoordinator::new(ArrayCoordinatorConfig::default()),
             node_geom: BTreeMap::new(),
+            node_clock: BTreeMap::new(),
             evolution: None,
             slam: RfSlam::with_discovery(
                 Self::SLAM_ASSOC_RADIUS_M,
@@ -396,6 +405,13 @@ impl StreamingEngine {
     /// coordinator and folds its contradictions into the privacy decision.
     pub fn register_node_geometry(&mut self, node_id: u8, x: f32, y: f32, azimuth: f32) {
         self.node_geom.insert(node_id, NodeGeom { x, y, azimuth });
+    }
+
+    /// Set a node's clock-sync quality for the ADR-138 gate (#2156). Callers
+    /// derive it from the node's ADR-110 sync packets; a node never set here
+    /// is scored [`UNKNOWN_CLOCK`] and rejected by the gate.
+    pub fn set_node_clock(&mut self, node_id: u8, clock: ClockQualityScore) {
+        self.node_clock.insert(node_id, clock);
     }
 
     /// Ingest CIR-derived reflector sightings (ADR-143) and persist any newly
@@ -624,7 +640,7 @@ impl StreamingEngine {
                 position: (g.x, g.y),
                 azimuth: g.azimuth,
                 coherence: f.coherence,
-                clock: ClockQualityScore { offset_stdev_us: 50.0, age_us: 1_000, valid: true },
+                clock: self.node_clock.get(&f.node_id).copied().unwrap_or(UNKNOWN_CLOCK),
                 amplitude: f.channel_frames.first().map(|cf| cf.amplitude.clone()),
             });
         }
@@ -1048,6 +1064,11 @@ mod tests {
         }
     }
 
+    /// A well-synchronised node's clock score (ADR-110 measured stdev, fresh).
+    fn synced_clock() -> ClockQualityScore {
+        ClockQualityScore { offset_stdev_us: 104.0, age_us: 1_000, valid: true }
+    }
+
     /// ADR-138 composed: with node geometry registered, the cycle produces
     /// directional evidence (admitted nodes + weights).
     #[test]
@@ -1056,6 +1077,8 @@ mod tests {
         let (mut e, room) = engine();
         e.register_node_geometry(0, 1.0, 0.0, 0.0);
         e.register_node_geometry(1, -1.0, 0.0, PI); // opposite → good diversity
+        e.set_node_clock(0, synced_clock());
+        e.set_node_clock(1, synced_clock());
         let out = e
             .process_cycle(&[node_frame(0, 1000, 56), node_frame(1, 1001, 56)], CalibrationId(1), room, 1)
             .unwrap();
@@ -1073,12 +1096,41 @@ mod tests {
         let (mut e, room) = engine();
         e.register_node_geometry(0, 1.0, 0.0, 0.0);
         e.register_node_geometry(1, 1.0, 0.01, 0.01); // nearly colinear → low GDI
+        e.set_node_clock(0, synced_clock());
+        e.set_node_clock(1, synced_clock());
         let out = e
             .process_cycle(&[node_frame(0, 1000, 56), node_frame(1, 1001, 56)], CalibrationId(1), room, 1)
             .unwrap();
         let d = out.directional.unwrap();
         assert!(!d.contradictions.is_empty(), "insufficient geometry flagged");
         assert!(out.demoted && out.effective_class == PrivacyClass::Restricted);
+    }
+
+    /// Issue #2156: a node with no sync evidence is not assumed to be on a
+    /// shared clock. The gate rejects it as `ClockInvalid` instead of admitting
+    /// it on a hard-coded score.
+    #[test]
+    fn nodes_without_clock_evidence_are_rejected_by_the_gate() {
+        use std::f32::consts::PI;
+        use wifi_densepose_ruvector::viewpoint::coherence::{ClockGateDecision, ClockRejectReason};
+        let (mut e, room) = engine();
+        e.register_node_geometry(0, 1.0, 0.0, 0.0);
+        e.register_node_geometry(1, -1.0, 0.0, PI);
+        e.set_node_clock(0, synced_clock());
+        let out = e
+            .process_cycle(&[node_frame(0, 1000, 56), node_frame(1, 1001, 56)], CalibrationId(1), room, 1)
+            .unwrap();
+        let d = out.directional.expect("geometry registered → directional evidence");
+        assert_eq!(d.n_admitted, 1, "only the node with sync evidence is admitted");
+        let node1 = d.gate_decisions.iter().find(|(id, _)| *id == 1).unwrap().1;
+        assert_eq!(node1, ClockGateDecision::Reject { reason: ClockRejectReason::ClockInvalid });
+
+        // An explicitly invalid clock is rejected the same way.
+        e.set_node_clock(0, UNKNOWN_CLOCK);
+        let out = e
+            .process_cycle(&[node_frame(0, 2000, 56), node_frame(1, 2001, 56)], CalibrationId(1), room, 2)
+            .unwrap();
+        assert_eq!(out.directional.unwrap().n_admitted, 0);
     }
 
     /// ADR-142 composed: a sustained baseline then a simultaneous amplitude

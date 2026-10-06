@@ -264,6 +264,19 @@ impl EntityKind {
     }
 }
 
+/// Entities that earlier releases announced but #2117 stopped announcing
+/// because the server has no source for them (see
+/// [`EntityKind::has_server_source`]). Their retained discovery configs stay
+/// at the broker on upgraded installs until something clears them.
+pub const RETIRED_ENTITIES: [EntityKind; 6] = [
+    EntityKind::ZoneOccupancy,
+    EntityKind::BathroomOccupied,
+    EntityKind::BedExit,
+    EntityKind::MultiRoomTransition,
+    EntityKind::MeetingInProgress,
+    EntityKind::PoseKeypoints,
+];
+
 /// Builds HA discovery payloads for a specific RuView node.
 pub struct DiscoveryBuilder<'a> {
     pub discovery_prefix: &'a str,
@@ -307,6 +320,19 @@ impl<'a> DiscoveryBuilder<'a> {
             self.node_id,
             entity.topic_slug(),
         )
+    }
+
+    /// Retained topics earlier releases left for this node's
+    /// [`RETIRED_ENTITIES`]: each discovery `config` and its retained
+    /// `availability`. Publishing an empty retained payload to a topic
+    /// deletes it, and Home Assistant removes an entity whose config is
+    /// cleared. Clearing an already-absent topic is a no-op, so this is safe
+    /// to repeat.
+    pub fn retired_entity_topics(&self) -> Vec<String> {
+        RETIRED_ENTITIES
+            .iter()
+            .flat_map(|&e| [self.config_topic(e), self.availability_topic(e)])
+            .collect()
     }
 
     fn device(&self) -> DeviceMeta {
@@ -620,6 +646,44 @@ mod tests {
         ] {
             assert!(!e.has_server_source());
             assert!(!entities.contains(&e), "{e:?} announced without a source");
+        }
+    }
+
+    #[test]
+    fn retired_entities_are_exactly_the_unsourced_ones() {
+        // #2117 stopped announcing these; the cleanup list must match, so a
+        // retired entity is never one the server still announces.
+        for e in RETIRED_ENTITIES {
+            assert!(!e.has_server_source(), "{e:?} is still announced");
+        }
+        let announced = DiscoveryBuilder::enabled_entities(false, true, &[]);
+        assert_eq!(announced.len() + RETIRED_ENTITIES.len(), 21, "every EntityKind accounted for");
+    }
+
+    #[test]
+    fn retired_entity_topics_name_the_old_retained_configs() {
+        let topics = builder().retired_entity_topics();
+        assert_eq!(topics.len(), 12);
+        for expected in [
+            "homeassistant/binary_sensor/wifi_densepose_aabbccddeeff/zone_occupancy/config",
+            "homeassistant/binary_sensor/wifi_densepose_aabbccddeeff/bathroom_occupied/config",
+            "homeassistant/event/wifi_densepose_aabbccddeeff/bed_exit/config",
+            "homeassistant/event/wifi_densepose_aabbccddeeff/multi_room_transition/config",
+            "homeassistant/binary_sensor/wifi_densepose_aabbccddeeff/meeting_in_progress/config",
+            "homeassistant/sensor/wifi_densepose_aabbccddeeff/pose/config",
+            "homeassistant/sensor/wifi_densepose_aabbccddeeff/pose/availability",
+        ] {
+            assert!(topics.iter().any(|t| t == expected), "missing {expected}");
+        }
+    }
+
+    #[test]
+    fn retired_entity_topics_never_touch_an_announced_entity() {
+        let b = builder();
+        let retired = b.retired_entity_topics();
+        for e in DiscoveryBuilder::enabled_entities(false, true, &[]) {
+            assert!(!retired.contains(&b.config_topic(e)), "{e:?} would be deleted");
+            assert!(!retired.contains(&b.availability_topic(e)), "{e:?} would go unavailable");
         }
     }
 

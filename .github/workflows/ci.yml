@@ -206,6 +206,26 @@ jobs:
     - name: Run UI unit tests
       run: node --test ui/sw.test.mjs ui/services/ws-ticket.test.mjs ui/services/websocket.service.test.mjs ui/services/sensing.service.test.mjs ui/components/DashboardTab.test.mjs v2/crates/wifi-densepose-desktop/ui/build-config.test.mjs
 
+  # Host-side Python tools under scripts/ (calibration, ground-truth capture,
+  # ADR-018 recorder). Blocking. `-o addopts=""` drops the root pyproject's
+  # --cov flags, which target the archived v1 package, not scripts/.
+  script-tests:
+    name: Script Python Tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+    - name: Set up Python
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+      with:
+        python-version: '3.12'
+
+    - name: Run script tests
+      run: |
+        python -m pip install pytest opencv-python-headless
+        python -m pytest scripts/tests -o addopts="" -q
+
   # Unit and Integration Tests
   # Python pytest matrix — runs against the archived v1 Python tree.
   # `continue-on-error: true` for the same reason as code-quality above:

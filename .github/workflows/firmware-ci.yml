@@ -205,6 +205,24 @@ jobs:
           test "$(stat -c%s build/esp32-csi-node.bin)" -le $((1152 * 1024))
           strings build/esp32-csi-node.bin | grep -F "external U.FL"
 
+  # Host-side provisioning tests (provision.py). Stdlib-only apart from pytest.
+  # `-o addopts=""` drops the root pyproject's --cov flags, which target the
+  # archived v1 package, not this directory.
+  provision-tests:
+    name: Provisioning Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+
+      - name: Run provisioning tests
+        run: |
+          python -m pip install pytest
+          python -m pytest firmware/esp32-csi-node/tests -o addopts="" -q
+
   publish-release-assets:
     name: Publish firmware release assets
     if: github.ref_type == 'tag'

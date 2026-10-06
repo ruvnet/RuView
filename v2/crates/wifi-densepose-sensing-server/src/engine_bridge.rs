@@ -35,7 +35,9 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use wifi_densepose_bfld::{PrivacyClass, PrivacyMode};
-use wifi_densepose_engine::{AdapterInfo, EngineError, StreamingEngine, TrustedOutput};
+use wifi_densepose_engine::{
+    AdapterInfo, EngineError, StreamingEngine, TrustedOutput, UNKNOWN_CLOCK,
+};
 use wifi_densepose_geo::types::GeoRegistration;
 use wifi_densepose_signal::ruvsense::fusion_quality::CalibrationId;
 use wifi_densepose_signal::ruvsense::multistatic::{MultistaticConfig, PhaseFusion};
@@ -195,6 +197,15 @@ impl EngineBridge {
             node_frames_from_states_with_guard(node_states, self.guard_interval_us);
         if frames.is_empty() {
             return None;
+        }
+        // Issue #2156: score each node's clock from its own sync packets
+        // rather than assuming a shared clock.
+        let now = Instant::now();
+        for f in &frames {
+            let clock = node_states
+                .get(&f.node_id)
+                .map_or(UNKNOWN_CLOCK, |ns| ns.clock_quality(now));
+            self.engine.set_node_clock(f.node_id, clock);
         }
         // Lazily register each contributing node as a sensor observing the room,
         // so the privacy rollup can suppress it under identity-strict modes.
