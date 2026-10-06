@@ -61,6 +61,10 @@ pub struct BootstrapBackgroundMatch {
     pub reliable: bool,
     pub residual_energy: f64,
     pub residual_energy_threshold: f64,
+    pub stored_residual_energy_threshold: f64,
+    pub reference_p50: Option<f64>,
+    pub reference_robust_scale: Option<f64>,
+    pub reference_contaminated: bool,
     pub window_size: usize,
     pub reference_window_count: usize,
 }
@@ -91,7 +95,9 @@ fn mean_frame(frames: &[Vec<f64>]) -> Option<Vec<f64>> {
 }
 
 fn perturbation_occupancy(field: &FieldModel, frames: &[Vec<f64>]) -> Option<usize> {
-    let adaptive_threshold = field.empty_room_residual_energy_threshold();
+    // Same boundary the empty-room comparison applies: an inflated
+    // calibration p95 used to keep a still occupant at count zero.
+    let adaptive_threshold = field.effective_empty_room_threshold();
     let frame = match adaptive_threshold {
         Some(_) => mean_frame(frames)?,
         None => frames.first()?.clone(),
@@ -257,6 +263,10 @@ pub fn bootstrap_background_match(
         reliable: result.reliable,
         residual_energy: result.residual_energy,
         residual_energy_threshold: result.residual_energy_threshold,
+        stored_residual_energy_threshold: result.stored_residual_energy_threshold,
+        reference_p50: result.reference_p50,
+        reference_robust_scale: result.reference_robust_scale,
+        reference_contaminated: result.reference_contaminated,
         window_size: result.window_size,
         reference_window_count: result.reference_window_count,
     })
