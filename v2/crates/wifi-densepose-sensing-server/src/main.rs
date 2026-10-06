@@ -2316,30 +2316,143 @@ mod adr323_pose_physics_http_tests {
 #[cfg(test)]
 mod privacy_mode_surface_tests {
     use super::*;
+    use wifi_densepose_sensing_server::privacy_fields;
     use axum::{body::Body, http::Request};
     use tower::ServiceExt;
 
+    /// A sensing update with every field populated, built field by field so a
+    /// new `SensingUpdate` field fails to compile here until it is added, and
+    /// then fails `every_sensing_payload_key_is_classified` until it is
+    /// classified in `privacy_fields` (#2165).
     fn update_with_biometrics() -> SensingUpdate {
-        serde_json::from_value(serde_json::json!({
-            "type": "sensing_update",
-            "timestamp": 1.0,
-            "source": "simulated",
-            "tick": 7,
-            "nodes": [],
-            "features": { "mean_rssi": -50.0, "variance": 1.0, "motion_band_power": 0.5,
-                          "breathing_band_power": 0.2, "dominant_freq_hz": 0.25,
-                          "change_points": 0, "spectral_power": 1.0 },
-            "classification": { "motion_level": "present_still", "presence": true, "confidence": 0.9 },
-            "signal_field": { "grid_size": [1, 1, 1], "values": [0.0] },
-            "vital_signs": { "breathing_rate_bpm": 14.0, "heart_rate_bpm": 62.0,
-                             "breathing_confidence": 0.8, "heartbeat_confidence": 0.7,
-                             "signal_quality": 0.9 },
-            "pose_keypoints": [[0.1, 0.2, 0.0, 0.9]],
-            "persons": [{ "id": 1, "confidence": 0.9, "zone": "zone_1",
-                          "bbox": { "x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0 },
-                          "keypoints": [{ "name": "nose", "x": 1.0, "y": 2.0, "z": 0.0, "confidence": 0.9 }] }]
-        }))
-        .expect("test SensingUpdate")
+        let features = FeatureInfo {
+            mean_rssi: -50.0,
+            variance: 1.0,
+            motion_band_power: 0.5,
+            breathing_band_power: 0.2,
+            dominant_freq_hz: 0.25,
+            change_points: 0,
+            spectral_power: 1.0,
+        };
+        let classification = ClassificationInfo {
+            motion_level: "present_still".into(),
+            presence: true,
+            confidence: 0.9,
+        };
+        SensingUpdate {
+            msg_type: "sensing_update".into(),
+            timestamp: 1.0,
+            source: "simulated".into(),
+            tick: 7,
+            nodes: vec![NodeInfo {
+                node_id: 1,
+                rssi_dbm: -40.0,
+                position: [0.0, 0.0, 0.0],
+                amplitude: vec![1.0, 2.0],
+                subcarrier_count: 2,
+                device_id: Some("00000000000000ab".into()),
+                sync: Some(NodeSyncSnapshot {
+                    offset_us: -5,
+                    is_leader: true,
+                    is_valid: true,
+                    smoothed: true,
+                    sequence: 9,
+                    csi_fps_ema: 20.0,
+                    csi_fps_samples: 10,
+                    staleness_ms: Some(100),
+                }),
+                node_inference: Some(NodeInference::new("present_still", 0.9, Some(10))),
+                mediatek_diagnostics: Some(MediatekNodeDiagnostics {
+                    presence_state: "present".into(),
+                    coefficient_of_variation: 0.1,
+                    baseline_deviation: 0.2,
+                    sample_count: 30,
+                    span_ms: 2000,
+                }),
+            }],
+            features: features.clone(),
+            classification: classification.clone(),
+            signal_field: SignalField { grid_size: [1, 1, 1], values: vec![0.0] },
+            vital_signs: Some(VitalSigns {
+                breathing_rate_bpm: Some(14.0),
+                heart_rate_bpm: Some(62.0),
+                breathing_confidence: 0.8,
+                heartbeat_confidence: 0.7,
+                signal_quality: 0.9,
+            }),
+            calibrated_presence_evidence: Some(CalibratedPresenceEvidence {
+                schema: "calibrated-presence-v1".into(),
+                boot_epoch: "boot".into(),
+                session_id: "cal-session".into(),
+                model_id: "cal-model".into(),
+                binding_digest: "0".repeat(64),
+                source_node_ids: vec![1],
+                model_completed_at_unix_ms: 1,
+                inference_node_id: 1,
+                source_tick: 7,
+                observed_at_unix_ms: 2,
+                inference_method: "field_model".into(),
+                presence: true,
+                person_count: 1,
+            }),
+            // The four `Value` fields mirror the objects their producers build
+            // (the multi-BSSID pipeline, model loader and MediaTek activity index).
+            enhanced_motion: Some(serde_json::json!({
+                "score": 0.4, "level": "Active", "contributing_bssids": 3,
+            })),
+            enhanced_breathing: Some(serde_json::json!({
+                "rate_bpm": 14.1, "confidence": 0.6, "bssid_count": 3,
+            })),
+            posture: Some("standing".into()),
+            signal_quality_score: Some(0.9),
+            quality_verdict: Some("Permit".into()),
+            bssid_count: Some(3),
+            pose_keypoints: Some(vec![[0.1, 0.2, 0.0, 0.9]]),
+            model_status: Some(serde_json::json!({
+                "loaded": true, "layers": 3, "sona_profile": "default",
+            })),
+            persons: Some(vec![PersonDetection {
+                id: 1,
+                confidence: 0.9,
+                keypoints: vec![PoseKeypoint {
+                    name: "nose".into(),
+                    x: 1.0,
+                    y: 2.0,
+                    z: 0.0,
+                    confidence: 0.9,
+                }],
+                bbox: BoundingBox { x: 0.0, y: 0.0, width: 1.0, height: 1.0 },
+                zone: "zone_1".into(),
+                position: [1.0, 0.0, 2.0],
+                motion_score: 12.0,
+                pose: Some("standing".into()),
+            }]),
+            estimated_persons: Some(1),
+            node_features: Some(vec![PerNodeFeatureInfo {
+                node_id: 1,
+                features,
+                classification,
+                rssi_dbm: -40.0,
+                last_seen_ms: 5,
+                frame_rate_hz: 20.0,
+                stale: false,
+                novelty_score: Some(0.1),
+            }]),
+            room_inference: Some(RoomInference {
+                classification: "present_still".into(),
+                confidence: 0.9,
+                contributing_nodes: 1,
+            }),
+            classifier: Some("mediatek-heuristic-v0".into()),
+            activity: Some(serde_json::json!({
+                "room": { "level": "low", "index": 0.2, "peak_30s": 0.3, "abs_level": "low",
+                          "abs_peak_30s": 0.3, "is_occupancy_estimate": false },
+                "devices": { "00000000000000ab": {
+                    "level": "low", "index": 0.2, "fast": 0.1, "slow": 0.1, "peak_30s": 0.3,
+                    "frames_2s": 40, "floor": 0.05, "abs_level": "low", "abs_peak_30s": 0.3,
+                    "age_ms": 100, "is_occupancy_estimate": false } },
+            })),
+        }
     }
 
     fn state(privacy_mode: bool) -> SharedState {
@@ -2358,6 +2471,14 @@ mod privacy_mode_surface_tests {
             .route("/api/v1/sensing/latest", get(latest))
             .route("/api/v1/vital-signs", get(vital_signs_endpoint))
             .route("/api/v1/pose/current", get(pose_current))
+            .route("/api/v1/edge-vitals", get(edge_vitals_endpoint))
+            .route("/api/v1/nodes", get(nodes_endpoint))
+            .route("/api/v1/mesh", get(mesh_endpoint))
+            .route("/api/v1/stream/status", get(stream_status))
+            .route("/api/v1/pose/stats", get(pose_stats))
+            .route("/api/v1/pose/zones/summary", get(pose_zones_summary))
+            .route("/api/v1/pose/activities", get(pose_activities))
+            .route("/api/v1/introspection/snapshot", get(api_introspection_snapshot))
             .with_state(state(privacy_mode))
             .layer(axum::middleware::from_fn_with_state(
                 privacy_filter::PrivacyFilter::new(privacy_mode),
@@ -2427,6 +2548,17 @@ mod privacy_mode_surface_tests {
     }
 
     async fn first_ws_frame(app: Router, path: &str, tx: broadcast::Sender<String>) -> String {
+        let frame = serde_json::to_string(&update_with_biometrics()).unwrap();
+        first_ws_frame_of(app, path, tx, frame).await
+    }
+
+    /// The first data frame `path` sends while `frame` is broadcast on `tx`.
+    async fn first_ws_frame_of(
+        app: Router,
+        path: &str,
+        tx: broadcast::Sender<String>,
+        frame: String,
+    ) -> String {
         use futures_util::StreamExt;
         use tokio_tungstenite::tungstenite::Message as TMsg;
 
@@ -2438,7 +2570,6 @@ mod privacy_mode_surface_tests {
         let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}{path}"))
             .await
             .expect("WebSocket handshake");
-        let frame = serde_json::to_string(&update_with_biometrics()).unwrap();
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
         // The handler subscribes after the upgrade, so keep sending until it hears one.
         while tokio::time::Instant::now() < deadline {
@@ -2446,7 +2577,7 @@ mod privacy_mode_surface_tests {
             match tokio::time::timeout(std::time::Duration::from_millis(200), ws.next()).await {
                 Ok(Some(Ok(TMsg::Text(text)))) => {
                     let v: serde_json::Value = serde_json::from_str(&text).unwrap();
-                    if v["type"] == "sensing_update" || v["type"] == "pose_data" {
+                    if v["type"] != "connection_established" {
                         return text;
                     }
                 }
@@ -2485,9 +2616,192 @@ mod privacy_mode_surface_tests {
     #[tokio::test]
     async fn websocket_streams_unchanged_when_privacy_off() {
         let (sensing, pose) = ws_frames(false).await;
+        // Byte-for-byte the broadcast frame.
+        assert_eq!(sensing, serde_json::to_string(&update_with_biometrics()).unwrap());
         assert!(sensing.contains("heart_rate_bpm"), "{sensing}");
         assert!(sensing.contains("keypoints"), "{sensing}");
         assert!(pose.contains("keypoints"), "{pose}");
+        assert_classified("pose_data", &serde_json::from_str(&pose).unwrap());
+    }
+
+    // ── #2165: deny-by-default ─────────────────────────────────────────────
+
+    fn assert_classified(what: &str, value: &serde_json::Value) {
+        let missing = privacy_fields::unclassified_keys(value);
+        assert!(
+            missing.is_empty(),
+            "{what}: unclassified keys {missing:?}; add them to privacy_fields::FIELD_CLASSES"
+        );
+    }
+
+    /// Paths of keys privacy mode must never emit: biometric or unclassified.
+    fn non_public_keys(value: &serde_json::Value, path: &str, out: &mut Vec<String>) {
+        use privacy_fields::FieldClass;
+        match value {
+            serde_json::Value::Object(map) => {
+                for (key, child) in map {
+                    let child_path = format!("{path}.{key}");
+                    match privacy_fields::field_class(key) {
+                        Some(FieldClass::Public) => non_public_keys(child, &child_path, out),
+                        Some(FieldClass::IdMap) => match child {
+                            serde_json::Value::Object(entries) => entries
+                                .values()
+                                .for_each(|e| non_public_keys(e, &child_path, out)),
+                            other => non_public_keys(other, &child_path, out),
+                        },
+                        _ => out.push(child_path),
+                    }
+                }
+            }
+            serde_json::Value::Array(items) => {
+                items.iter().for_each(|i| non_public_keys(i, &format!("{path}[]"), out))
+            }
+            _ => {}
+        }
+    }
+
+    const SENSING_ROUTES: &[&str] = &[
+        "/api/v1/sensing/latest",
+        "/api/v1/vital-signs",
+        "/api/v1/pose/current",
+        "/api/v1/edge-vitals",
+        "/api/v1/nodes",
+        "/api/v1/mesh",
+        "/api/v1/stream/status",
+        "/api/v1/pose/stats",
+        "/api/v1/pose/zones/summary",
+        "/api/v1/pose/activities",
+        "/api/v1/introspection/snapshot",
+    ];
+
+    #[test]
+    fn every_sensing_payload_key_is_classified() {
+        assert_classified(
+            "sensing_update",
+            &serde_json::to_value(update_with_biometrics()).unwrap(),
+        );
+        let raw = Esp32VitalsPacket {
+            node_id: 1,
+            presence: true,
+            fall_detected: false,
+            motion: true,
+            breathing_rate_bpm: 14.0,
+            heartrate_bpm: 62.0,
+            rssi: -40,
+            n_persons: 1,
+            person_count_valid: true,
+            motion_energy: 0.5,
+            presence_score: 0.9,
+            timestamp_ms: 1,
+        };
+        let vitals = VitalSigns {
+            breathing_rate_bpm: Some(14.0),
+            heart_rate_bpm: Some(62.0),
+            breathing_confidence: 0.8,
+            heartbeat_confidence: 0.7,
+            signal_quality: 0.9,
+        };
+        assert_classified(
+            "edge_vitals",
+            &edge_vitals_message_for_publication(&raw, Some(&vitals), false, true, 1),
+        );
+        assert_classified(
+            "edge_vitals (abstained)",
+            &edge_vitals_message_for_publication(&raw, None, false, false, 2),
+        );
+        let fused = EdgeFusedVitalsPacket {
+            node_id: 1,
+            flags: 0b1111,
+            breathing_rate_bpm: 14.0,
+            heartrate_bpm: 62.0,
+            rssi: -40,
+            n_persons: 1,
+            person_count_valid: true,
+            mmwave_type: 1,
+            fusion_confidence: 80,
+            motion_energy: 0.5,
+            presence_score: 0.9,
+            timestamp_ms: 1,
+            mmwave_hr_bpm: 61.0,
+            mmwave_br_bpm: 14.0,
+            mmwave_distance_cm: 120.0,
+            mmwave_targets: 1,
+            mmwave_confidence: 70,
+        };
+        assert_classified("edge_fused_vitals", &edge_fused_vitals_message(&fused));
+    }
+
+    #[tokio::test]
+    async fn every_rest_sensing_response_key_is_classified() {
+        for uri in SENSING_ROUTES {
+            assert_eq!(
+                privacy_fields::route_class(uri),
+                privacy_fields::RouteClass::Sensing,
+                "{uri}"
+            );
+            let (status, body) = get_json(rest_app(false), uri).await;
+            assert_eq!(status, StatusCode::OK, "{uri}");
+            assert_classified(uri, &body);
+        }
+    }
+
+    #[tokio::test]
+    async fn privacy_mode_rest_sensing_responses_carry_only_public_keys() {
+        for uri in SENSING_ROUTES {
+            let (status, body) = get_json(rest_app(true), uri).await;
+            assert_eq!(status, StatusCode::OK, "{uri}");
+            let mut leaked = Vec::new();
+            non_public_keys(&body, "", &mut leaked);
+            assert!(leaked.is_empty(), "{uri} leaked {leaked:?}: {body}");
+        }
+        // Vitals-derived features are gone; the rest of the update is served.
+        let (_, body) = get_json(rest_app(true), "/api/v1/sensing/latest").await;
+        assert!(body["features"].get("dominant_freq_hz").is_none(), "{body}");
+        assert!(body["features"].get("breathing_band_power").is_none(), "{body}");
+        assert!(body["nodes"][0].get("amplitude").is_none(), "{body}");
+        assert_eq!(body["features"]["mean_rssi"], -50.0);
+        assert_eq!(body["nodes"][0]["sync"]["is_leader"], true);
+        assert_eq!(body["activity"]["devices"]["00000000000000ab"]["level"], "low");
+    }
+
+    #[tokio::test]
+    async fn privacy_mode_strips_an_unclassified_field_from_streams() {
+        let mut frame = serde_json::to_value(update_with_biometrics()).unwrap();
+        frame["sleep_stage"] = serde_json::json!("rem");
+        frame["classification"]["respiration_index"] = serde_json::json!(0.4);
+        let frame = frame.to_string();
+        for privacy_mode in [true, false] {
+            let shared = state(privacy_mode);
+            let tx = shared.read().await.tx.clone();
+            let app = Router::new()
+                .route("/ws/sensing", get(ws_sensing_handler))
+                .with_state(shared);
+            let got = first_ws_frame_of(app, "/ws/sensing", tx, frame.clone()).await;
+            if privacy_mode {
+                assert!(!got.contains("sleep_stage"), "{got}");
+                assert!(!got.contains("respiration_index"), "{got}");
+                assert!(got.contains("\"presence\":true"), "{got}");
+            } else {
+                assert_eq!(got, frame);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn privacy_mode_filters_the_introspection_stream() {
+        let frame = serde_json::json!({
+            "timestamp_ns": 1, "regime": "quasi_periodic", "breathing_rate_bpm": 14.0,
+            "new_metric": 1,
+        })
+        .to_string();
+        let shared = state(true);
+        let tx = shared.read().await.intro_tx.clone();
+        let app = Router::new()
+            .route("/ws/introspection", get(ws_introspection_handler))
+            .with_state(shared);
+        let got = first_ws_frame_of(app, "/ws/introspection", tx, frame).await;
+        let got: serde_json::Value = serde_json::from_str(&got).unwrap();
+        assert_eq!(got, serde_json::json!({ "timestamp_ns": 1, "regime": "quasi_periodic" }));
     }
 }
 
@@ -3518,6 +3832,30 @@ struct EdgeFusedVitalsPacket {
     mmwave_targets: u8,
     /// mmWave signal quality 0-100.
     mmwave_confidence: u8,
+}
+
+/// The `edge_fused_vitals` broadcast frame for one fused-vitals packet.
+fn edge_fused_vitals_message(fused: &EdgeFusedVitalsPacket) -> serde_json::Value {
+    serde_json::json!({
+        "type": "edge_fused_vitals",
+        "node_id": fused.node_id,
+        "breathing_rate_bpm": fused.breathing_rate_bpm,
+        "heartrate_bpm": fused.heartrate_bpm,
+        "n_persons": fused.n_persons,
+        "person_count_valid": fused.person_count_valid,
+        "fusion_confidence": fused.fusion_confidence,
+        "mmwave": {
+            "hr_bpm": fused.mmwave_hr_bpm,
+            "br_bpm": fused.mmwave_br_bpm,
+            "distance_cm": fused.mmwave_distance_cm,
+            "targets": fused.mmwave_targets,
+            "confidence": fused.mmwave_confidence,
+            "type": fused.mmwave_type,
+        },
+        "motion_energy": fused.motion_energy,
+        "presence_score": fused.presence_score,
+        "timestamp_ms": fused.timestamp_ms,
+    })
 }
 
 /// Parse an ADR-063 edge fused vitals packet (magic 0xC511_0004, 48 bytes).
@@ -5830,9 +6168,9 @@ async fn ws_introspection_handler(
 }
 
 async fn handle_ws_introspection_client(mut socket: WebSocket, state: SharedState) {
-    let mut rx = {
+    let (mut rx, privacy_mode) = {
         let s = state.read().await;
-        s.intro_tx.subscribe()
+        (s.intro_tx.subscribe(), s.privacy_mode)
     };
 
     info!("WebSocket client connected (introspection)");
@@ -5842,6 +6180,15 @@ async fn handle_ws_introspection_client(mut socket: WebSocket, state: SharedStat
             msg = rx.recv() => {
                 match msg {
                     Ok(json) => {
+                        // #2165: every sensing stream is filtered in privacy mode.
+                        let json = if privacy_mode {
+                            match privacy_filter::redact_json_str(&json) {
+                                Some(json) => json,
+                                None => continue,
+                            }
+                        } else {
+                            json
+                        };
                         if socket.send(Message::Text(json)).await.is_err() {
                             break;
                         }
@@ -12724,26 +13071,7 @@ async fn udp_receiver_task(
                         fused.mmwave_targets, fused.fusion_confidence,
                     );
                     let s = state.write().await;
-                    if let Ok(json) = serde_json::to_string(&serde_json::json!({
-                        "type": "edge_fused_vitals",
-                        "node_id": fused.node_id,
-                        "breathing_rate_bpm": fused.breathing_rate_bpm,
-                        "heartrate_bpm": fused.heartrate_bpm,
-                        "n_persons": fused.n_persons,
-                        "person_count_valid": fused.person_count_valid,
-                        "fusion_confidence": fused.fusion_confidence,
-                        "mmwave": {
-                            "hr_bpm": fused.mmwave_hr_bpm,
-                            "br_bpm": fused.mmwave_br_bpm,
-                            "distance_cm": fused.mmwave_distance_cm,
-                            "targets": fused.mmwave_targets,
-                            "confidence": fused.mmwave_confidence,
-                            "type": fused.mmwave_type,
-                        },
-                        "motion_energy": fused.motion_energy,
-                        "presence_score": fused.presence_score,
-                        "timestamp_ms": fused.timestamp_ms,
-                    })) {
+                    if let Ok(json) = serde_json::to_string(&edge_fused_vitals_message(&fused)) {
                         let _ = s.tx.send(json);
                     }
                     continue;
@@ -14527,8 +14855,9 @@ async fn main() {
 
     if args.privacy_mode {
         info!(
-            "Privacy mode ON: heart rate, breathing rate and pose keypoints are withheld from \
-             REST, WebSocket, recordings and MQTT"
+            "Privacy mode ON: only fields classified non-biometric are served on REST, \
+             WebSocket, recordings and MQTT; vitals, vitals-derived states, pose and raw \
+             signal are withheld"
         );
     }
 

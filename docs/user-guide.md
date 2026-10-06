@@ -901,14 +901,16 @@ Full design + operator guide: [`docs/integrations/home-assistant.md`](integratio
 sensing-server --mqtt --mqtt-host <broker> --mqtt-tls --privacy-mode
 ```
 
-`--privacy-mode` (env `RUVIEW_PRIVACY_MODE`) is a server-wide flag. It withholds heart rate, breathing rate, and pose keypoints from every output:
+`--privacy-mode` (env `RUVIEW_PRIVACY_MODE`) is a server-wide flag. It is deny-by-default: a field leaves the server only if it is classified as non-biometric in `v2/crates/wifi-densepose-sensing-server/src/privacy_fields.rs`. Biometric fields and fields that have not been classified yet are removed.
 
-- REST responses: the fields are removed from every JSON body (`/api/v1/sensing/latest`, `/api/v1/vital-signs`, `/api/v1/edge-vitals`, `/api/v1/pose/current`, ...). `/api/v1/pose/current?view=both|refined` returns `403` with `"code": "privacy_mode"`.
-- WebSocket streams: `/ws/sensing` and `/api/v1/stream/pose` frames are filtered the same way.
+- REST responses: sensing endpoints (`/api/v1/sensing/latest`, `/api/v1/vital-signs`, `/api/v1/edge-vitals`, `/api/v1/pose/current`, `/api/v1/nodes`, ... and any endpoint not listed in that file) keep only classified non-biometric fields. Control-plane endpoints (health, info, models, recording, training, calibration, config, auth) lose only biometric fields. Raw-signal endpoints (`/api/v1/csi/*`, `/api/v1/radar/*`, `/api/v1/rf/vendors/latest`, `/api/v1/rf/vendors/<vendor>/latest`, `/api/v1/wasm-events`) return `403` with `"code": "privacy_mode"`, as does `/api/v1/pose/current?view=both|refined`.
+- WebSocket streams: `/ws/sensing`, `/api/v1/stream/pose` and `/ws/introspection` frames are filtered the same way. Raw CSI, radar, vendor RF and edge WASM event frames are dropped.
 - Recordings started with `POST /api/v1/recording/start` are written already filtered.
-- MQTT and Matter: those entities are neither announced nor published.
+- MQTT and Matter: biometric entities are neither announced nor published.
 
-Presence, motion, person count, zones and the coarse posture label are still served, and semantic primitives stay published because they're inferred *states*, not biometric *values*. Some of those states (sleeping, possible distress) are derived from vitals, so they are still health-related information. Privacy mode reduces what leaves the server. It does not by itself make a deployment compliant with any regulation.
+What is withheld: heart rate, breathing rate and their confidences, the vital-signs buffer status, pose keypoints and the pose physics assessment, the breathing-band power and dominant frequency features, per-subcarrier CSI amplitude, and the `someone_sleeping` and `possible_distress` states (they are inferred from breathing and heart rate). Presence, motion, person count, zones, the coarse posture label, falls, and the semantic states built only on presence and motion (`room_active`, `no_movement`, `elderly_inactivity_anomaly`, `fall_risk_elevated`) are still served. Privacy mode reduces what leaves the server. It does not by itself make a deployment compliant with any regulation.
+
+Changed 2026-10-06 (#2165): privacy mode used to remove a fixed list of biometric keys and pass everything else, so a new field leaked until someone added it to the list, and the sleeping and distress states were published. It now passes only classified fields, and withholds those two states, the breathing-band and dominant-frequency features, CSI amplitude and the raw-signal endpoints listed above. Clients that read those in privacy mode will no longer receive them.
 
 ### Matter Bridge (Apple Home / Google Home / Alexa / SmartThings)
 

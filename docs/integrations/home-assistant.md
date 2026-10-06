@@ -36,7 +36,7 @@ cargo run --release -p wifi-densepose-sensing-server \
 Within ~5 seconds of the first CSI frame, Home Assistant should auto-create:
 
 - One **device** per RuView node, named `RuView node <client-id>-node<N>` (see [Device identity](#device-identity))
-- **15 entities** per device (13 with `--privacy-mode`): the raw signals and six semantic primitives listed in the [Entity reference](#entity-reference)
+- **15 entities** per device (11 with `--privacy-mode`): the raw signals and six semantic primitives listed in the [Entity reference](#entity-reference)
 
 If nothing appears in HA's Settings → Devices, see [Troubleshooting](#troubleshooting).
 
@@ -151,7 +151,7 @@ Per ADR-115 §3.11.1, the Matter Bridge exposes a subset on standard clusters so
 | `--mqtt-rate-rssi <HZ>` | 0.1 | RSSI publish rate (Hz) |
 | `--mqtt-publish-pose` | off | Accepted; no pose source exists, so it only logs a warning |
 | `--mqtt-rate-pose <HZ>` | 1.0 | Unused while no pose entity is announced |
-| `--privacy-mode` | off | Strip HR/BR/pose from MQTT, Matter, REST, WebSocket and recordings |
+| `--privacy-mode` | off | Serve only fields classified non-biometric on MQTT, Matter, REST, WebSocket and recordings (see [Privacy](#privacy)) |
 | `--data-dir <DIR>` | `data` | Holds `mqtt_client_id` (and other server state) |
 | `--matter` | off | Enable the HA-FABRIC Matter Bridge |
 | `--matter-setup-file <PATH>` | — | Where to write the QR + manual code |
@@ -173,9 +173,12 @@ When deploying in **healthcare**, **AAL (aging-in-place)**, or **commercial** se
 
 - **Strips** heart rate and breathing rate from every outbound MQTT publication and, in the same way, from REST responses, WebSocket frames and recordings (pose is never announced over MQTT; see [Not announced](#not-announced)).
 - **Suppresses discovery** for those entities entirely: Home Assistant never sees them, and no availability or state topic is published for them.
-- **Keeps the semantic primitives enabled.** `someone_sleeping` and `possible_distress` still use breathing and heart rate *inside the server*; only the ON/OFF state crosses the wire (ADR-115 §3.12.3). If that is too much for your deployment, drop those two entities in Home Assistant.
+- **Suppresses the states inferred from vitals.** `someone_sleeping` (breathing rate) and `possible_distress` (heart rate) are biometric too, so they are not announced either. `room_active`, `no_movement`, `elderly_inactivity_anomaly` and `fall_risk_elevated` use only presence, motion and falls and stay enabled.
+- **Is deny-by-default on REST, WebSocket and recordings.** A field is served only if it is classified as non-biometric in `privacy_fields.rs`; a field nobody has classified yet is withheld. See the [user guide](../user-guide.md#privacy-mode-for-healthcare--aal) for the full list.
 
-With `--privacy-mode`, 13 entities are announced per node. Privacy mode reduces what leaves the server. It does not by itself make a deployment compliant with any regulation.
+Changed 2026-10-06 (#2165): `someone_sleeping` and `possible_distress` used to stay enabled in privacy mode. Existing Home Assistant installs keep their retained discovery configs until they are cleared.
+
+With `--privacy-mode`, 11 entities are announced per node. Privacy mode reduces what leaves the server. It does not by itself make a deployment compliant with any regulation.
 
 Always pair `--privacy-mode` with `--mqtt-tls` on non-localhost brokers.
 
@@ -426,7 +429,7 @@ The 15 entities per node (9 raw signals and 6 semantic states, see the [Entity r
 |---|---|---|
 | **Fall detection + escalation** | `fall_detected` | Phase-acceleration spike + 3-frame debounce. Trigger a Lovelace alert, then escalate to a phone call if the person stays still for >2 min. Blueprint `07-fall-risk-escalation.yaml`. |
 | **Elderly inactivity anomaly** | `elderly_inactivity_anomaly` | Learns a person's normal day-pattern and flags deviations (e.g. usually up by 9 am, hasn't moved by 11 am). Blueprint `04-alert-elderly-inactivity-anomaly.yaml`. |
-| **Privacy-mode care monitoring** | `possible_distress` + `no_movement` + `someone_sleeping` | Run with `--privacy-mode` — heart rate and breathing values are stripped at the wire, but the *inferred states* keep working. Care staff sees "Distress detected" without ever seeing the underlying biometric numbers. The architectural win that makes RuView legally deployable in care homes. |
+| **Privacy-mode care monitoring** | `no_movement` + `elderly_inactivity_anomaly` + `fall_detected` | Run with `--privacy-mode`: vitals and the states inferred from them (`possible_distress`, `someone_sleeping`) are withheld, and the presence- and motion-based states keep working. Privacy mode reduces what leaves the server; it does not by itself make a deployment compliant with any regulation. |
 | **Sleep apnea screening** | `breathing_rate_bpm` + `breathing_confidence` | Track per-night BPM histograms; flag dips that correlate with apnea events. |
 | **Post-surgery recovery monitoring** | `no_movement` + `bed_exit` + `breathing_rate_bpm` | Hospital-discharge patient at home; rule: "no bed exits in 12 h" triggers a check-in call. |
 | **Dementia wandering detection** | `multi_room_transition` + nighttime gate | Multi-room transitions between 23:00 and 06:00 alert a caregiver — without GPS tags or wearables the person may refuse to wear. |

@@ -29,6 +29,8 @@ pub mod mqtt;
 pub mod path_safety;
 /// ADR-323: fail-closed pose physics integration and raw/refined view selection.
 pub mod pose_physics;
+/// #2165: the `--privacy-mode` classification of every output key and route.
+pub mod privacy_fields;
 /// #2094: server-wide `--privacy-mode` filter for REST, WebSocket and recordings.
 pub mod privacy_filter;
 /// ADR-295: canonical source-provenance state machine (synthetic can never
