@@ -31,6 +31,8 @@ static const char *chip_name(void)
 {
 #if defined(CONFIG_IDF_TARGET_ESP32C6)
     return "esp32c6";
+#elif defined(CONFIG_IDF_TARGET_ESP32C5)
+    return "esp32c5";
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
     return "esp32s3";
 #else

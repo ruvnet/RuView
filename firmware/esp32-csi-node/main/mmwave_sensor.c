@@ -509,16 +509,31 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
      * routed UART1 TX onto the console RX line and silently killed serial
      * input (USB onboarding, monitor commands) even when no sensor was found,
      * because uart_driver_delete() does not undo the GPIO matrix routing. */
-#if defined(CONFIG_IDF_TARGET_ESP32C6)
+#if defined(CONFIG_IDF_TARGET_ESP32C6) || defined(CONFIG_IDF_TARGET_ESP32C5)
     if (uart_tx_pin < 0) uart_tx_pin = 4;
     if (uart_rx_pin < 0) uart_rx_pin = 5;
 #else
     if (uart_tx_pin < 0) uart_tx_pin = 17;
     if (uart_rx_pin < 0) uart_rx_pin = 18;
 #endif
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    /* ADR-383: on the ESP32-C5, GPIO15-22 are the flash/PSRAM MSPI bus
+     * (CS1=15, CS0=16, MISO=17, WP=18, HD=20, CLK=21, MOSI=22). The legacy
+     * 17/18 default routed UART1 onto flash MISO/WP, locking the CPU
+     * (rst 0x1a) and leaving the flash mid-transaction so the ROM then
+     * looped on "SPI flash busy detected" until a power cycle. */
+    if ((uart_tx_pin >= 15 && uart_tx_pin <= 22) ||
+        (uart_rx_pin >= 15 && uart_rx_pin <= 22)) {
+        ESP_LOGW(TAG, "mmWave probe pins (TX=%d, RX=%d) overlap the C5 flash/PSRAM bus (GPIO15-22); skipping probe",
+                 uart_tx_pin, uart_rx_pin);
+        return ESP_ERR_INVALID_ARG;
+    }
+#endif
 #if defined(CONFIG_ESP_CONSOLE_UART_CUSTOM)
     const int console_tx = CONFIG_ESP_CONSOLE_UART_TX_GPIO;
     const int console_rx = CONFIG_ESP_CONSOLE_UART_RX_GPIO;
+#elif defined(CONFIG_IDF_TARGET_ESP32C5)
+    const int console_tx = 11, console_rx = 12;   /* U0TXD / U0RXD IOMUX pins */
 #elif defined(CONFIG_IDF_TARGET_ESP32C6)
     const int console_tx = 16, console_rx = 17;   /* U0TXD / U0RXD IOMUX pins */
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)

@@ -23,7 +23,7 @@
 
 #include "sdkconfig.h"
 
-#if defined(CONFIG_IDF_TARGET_ESP32C6) && defined(CONFIG_ULP_COPROC_TYPE_LP_CORE)
+#if (defined(CONFIG_IDF_TARGET_ESP32C6) || defined(CONFIG_IDF_TARGET_ESP32C5)) && defined(CONFIG_ULP_COPROC_TYPE_LP_CORE)
 
 #include "c6_lp_core.h"
 #include "esp_idf_version.h"

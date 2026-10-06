@@ -1,0 +1,117 @@
+# ESP32-C5 CSI Node — Target overlay (ADR-383, extends ADR-110)
+#
+# Auto-applied by ESP-IDF when CONFIG_IDF_TARGET=esp32c5.
+# Layered on top of sdkconfig.defaults — only the differences live here.
+#
+# Build (requires ESP-IDF >= 5.5 — the esp32c5 target and HE-LTF CSI both
+# land in 5.5; the v5.4 driver silently downconverts HE to 64-bin HT):
+#   idf.py set-target esp32c5
+#   idf.py build
+#
+# Hardware: ESP32-C5-WROOM-1 (16 MB flash, with or without in-package PSRAM) on an ESP32-C5-DevKitC-1.
+# Confirmed in hand: ESP32-C5 (rev v1.0), dual-band Wi-Fi 6 (2.4 + 5 GHz),
+# BT 5 LE, IEEE 802.15.4, single HP RISC-V core (240 MHz) + LP core, 48 MHz
+# crystal, 16 MB flash, no PSRAM, native USB-Serial/JTAG.
+#
+# WHY C5 over C6 (ADR-383 §1): the C5 is the first in-house chip that can
+# actually SOURCE 5 GHz CSI. The host/provisioning side already understands
+# 5 GHz channels (36/40/44 UNII-1, non-DFS); the C6 could not transmit there.
+# Provision this node onto a 5 GHz non-DFS channel to exercise dual-band CSI.
+
+# ── Target ──
+CONFIG_IDF_TARGET="esp32c5"
+
+# ── Flash & partitions (16 MB — C5-WROOM-1; folds in sdkconfig.defaults.16mb,
+#    which IDF does NOT auto-apply alongside the target overlay) ──
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16mb.csv"
+# Two 4 MB OTA slots — real dual-image OTA headroom (vs the C6's 4 MB single).
+# Rollback-enable MUST be set or OTA silently cannot revert a bad image.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+# Coredump to the 16 MB layout's dedicated partition (bring-up forensics).
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+CONFIG_ESP_COREDUMP_LOGS=y
+CONFIG_WL_SECTOR_SIZE_4096=y
+
+# Native USB/JTAG is the interactive onboarding console on C5 boards. ESP-IDF
+# secondary consoles mirror output only and cannot receive RUVIEW_HELLO_V1.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# CONFIG_ESP_CONSOLE_UART_DEFAULT is not set
+# CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG is not set
+
+# ── CSI (required) ──
+CONFIG_ESP_WIFI_CSI_ENABLED=y
+
+# ── Wi-Fi 6 / HE / iTWT (ADR-110 P2 & P3) ──
+# HE (11ax) and iTWT are SoC capabilities (SOC_WIFI_HE_SUPPORT), auto-enabled
+# on C5 as on C6. On C5 HE spans BOTH bands. WPA3 is opt-in:
+CONFIG_ESP_WIFI_ENABLE_WPA3_SAE=y
+
+# ADR-383 P2 finding (2026-10-04): TWT negotiation locks up the C5 *preview*
+# WiFi driver when the associated AP does not support iTWT — observed a hard
+# CPU_LOCKUP immediately after the "Connected AP does not support setup
+# individual TWT agreement" error, right after the first CSI callback. TWT is a
+# power-saving feature, not needed for CSI qualification, so disable it for C5
+# bring-up. Revisit with a TWT-capable AP or a newer (non-preview) C5 WiFi blob.
+CONFIG_C6_TWT_ENABLE=n
+
+# ── 802.15.4 (ADR-110 P4) ──
+# PHY available on C5 as on C6, but DISABLED at runtime for the same reason:
+# the raw 15.4 RX path never delivered a frame on our C6 (ruvnet/RuView#762),
+# ESP-NOW is the working time-sync transport, and on a single shared 2.4 GHz
+# transceiver the 15.4 stack only costs coexistence time against CSI capture.
+# Fixed on C5 (2026-10-05, ADR-383): 15.4 sync now works next to Wi-Fi, but
+# sharing the radio drops CSI yield from ~40 to ~27 pps, so it stays opt-in.
+# ESP-NOW is the default time-sync transport.
+CONFIG_IEEE802154_ENABLED=y
+CONFIG_OPENTHREAD_ENABLED=n
+CONFIG_C6_TIMESYNC_CHANNEL=26
+CONFIG_C6_TIMESYNC_ENABLE=n
+
+# ── LP-core (deep-sleep coprocessor, ADR-110 P5) ──
+# C5 carries an LP RISC-V core like the C6; c6_lp_core.c (ADR-383: HE-class
+# shared module) ships the wake-on-motion stub.
+CONFIG_ULP_COPROC_ENABLED=y
+CONFIG_ULP_COPROC_TYPE_LP_CORE=y
+CONFIG_ULP_COPROC_RESERVE_MEM=8192
+
+# ── PSRAM: optional (ADR-383) ──
+# Retail C5-WROOM-1 variants (N8R8, N16R8, ...) carry in-package PSRAM on the
+# shared MSPI bus. Initialise it when present; boards without it boot as before.
+# Needs ESP-IDF >= 5.5.2 (the C5 PSRAM reset-hang fix).
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+
+# ── No display, no WASM on the C5 research target ──
+# No WASM3 (ADR-040) and no 8 MB OTG framebuffer path (display/ADR-045).
+# mmWave stays probe-only, on GPIO4/5 (GPIO15-22 are the flash/PSRAM bus).
+# CONFIG_DISPLAY_ENABLE is not set
+# CONFIG_WASM_ENABLE is not set
+
+# ── On-device edge DSP cadence ──
+# PROVISIONAL. The C6 converges at 8 Hz on a 160 MHz core; the C5's 240 MHz
+# core should sustain more, but the qualifying number is MEASURED, not
+# assumed (that is how the C6's 8 was chosen — ADR-347). Start at the known
+# pipeline-stable C6 cadence and raise to the measured C5 ceiling during
+# physical qualification, then pin it here.
+CONFIG_EDGE_DSP_SAMPLE_HZ=8
+
+# ── Compiler ──
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# ── Logging ──
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# ── lwIP / FreeRTOS — same as S3/C6 path ──
+CONFIG_LWIP_SO_RCVBUF=y
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=8192
+
+# ── Power: C5 HP core runs to 240 MHz — give the DSP the full ceiling ──
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240

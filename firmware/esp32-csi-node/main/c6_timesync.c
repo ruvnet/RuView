@@ -18,13 +18,17 @@
 
 #include "sdkconfig.h"
 
-#if defined(CONFIG_IDF_TARGET_ESP32C6) && defined(CONFIG_IEEE802154_ENABLED)
+#if (defined(CONFIG_IDF_TARGET_ESP32C6) || defined(CONFIG_IDF_TARGET_ESP32C5)) && defined(CONFIG_IEEE802154_ENABLED)
 
 #include "c6_timesync.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_timer.h"
 #include "esp_ieee802154.h"
+#include "esp_idf_version.h"
+#if CONFIG_ESP_COEX_SW_COEXIST_ENABLE
+#include "esp_coexist.h"
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/timers.h"
@@ -47,9 +51,16 @@ typedef struct __attribute__((packed)) {
 
 static uint64_t s_local_eui    = 0;
 static uint64_t s_leader_eui   = 0;       /* 0 = unknown */
-static int64_t  s_offset_us    = 0;       /* leader_us - local_us */
-static uint64_t s_last_seen_us = 0;
-static bool     s_is_leader    = false;
+static volatile int64_t  s_offset_us    = 0;       /* leader_us - local_us */
+static volatile uint64_t s_last_seen_us = 0;
+static volatile bool     s_is_leader    = false;
+/* Set in the RX ISR, logged from the beacon timer task (no logging in ISR). */
+static volatile bool     s_step_down_pending = false;
+/* First frame that fails the beacon check, copied in the ISR and dumped once
+ * from the timer task, to tell foreign 15.4 traffic from a layout mismatch. */
+static uint8_t           s_odd_frame[24];
+static volatile uint8_t  s_odd_len = 0;
+static volatile bool     s_odd_pending = false, s_odd_logged = false;
 static uint8_t  s_channel      = 15;
 static TimerHandle_t s_beacon_timer = NULL;
 
@@ -74,10 +85,18 @@ static uint64_t eui64_bytes_to_u64(const uint8_t eui[8])
            ((uint64_t)eui[6] << 8 ) |  (uint64_t)eui[7];
 }
 
-static uint32_t s_tx_count = 0;
-static uint32_t s_tx_fail  = 0;
-static uint32_t s_rx_count = 0;
-static uint32_t s_rx_magic_match = 0;
+static volatile uint32_t s_tx_count = 0;
+static volatile uint32_t s_tx_fail  = 0;
+static volatile uint32_t s_tx_done_fail = 0;
+static volatile uint32_t s_rx_count = 0;
+static volatile uint32_t s_rx_magic_match = 0;
+static volatile uint32_t s_tx_skipped_busy = 0;
+/* esp_ieee802154_transmit() is asynchronous: the radio reads the buffer after
+ * the call returns. A stack buffer here was reused before the radio read it,
+ * so peers received garbage (RAM/register addresses) after a valid header.
+ * Keep the frame in a static buffer, untouched until transmit_done/failed. */
+static uint8_t           s_tx_buf[64];
+static volatile bool     s_tx_in_flight = false;
 
 static void send_beacon(void)
 {
@@ -101,40 +120,68 @@ static void send_beacon(void)
     b->leader_epoch_us = (uint64_t)esp_timer_get_time();
     size_t total = 9 + sizeof(ts_beacon_t);
     /* ESP-IDF esp_ieee802154 transmit: first byte is the PHY length. */
-    uint8_t tx_buf[64];
-    tx_buf[0] = (uint8_t)(total + 2);  /* +2 for FCS appended by HW */
-    memcpy(&tx_buf[1], frame, total);
-    esp_err_t r = esp_ieee802154_transmit(tx_buf, false);
+    if (s_tx_in_flight) {           /* previous beacon still owned by the radio */
+        s_tx_skipped_busy++;
+        return;
+    }
+    s_tx_buf[0] = (uint8_t)(total + 2);  /* +2 for FCS appended by HW */
+    memcpy(&s_tx_buf[1], frame, total);
+    s_tx_in_flight = true;
+    esp_err_t r = esp_ieee802154_transmit(s_tx_buf, false);
     s_tx_count++;
-    if (r != ESP_OK) s_tx_fail++;
+    if (r != ESP_OK) {
+        s_tx_fail++;
+        s_tx_in_flight = false;
+    }
     /* Diag log every 10 beacons. */
     if ((s_tx_count % 10) == 1) {
-        ESP_LOGI(TAG, "tx#%lu (fail=%lu) rx#%lu (magic_match=%lu) is_leader=%d",
+        ESP_LOGI(TAG, "tx#%lu (fail=%lu, air_fail=%lu, busy_skip=%lu) rx#%lu (magic_match=%lu) is_leader=%d",
                  (unsigned long)s_tx_count, (unsigned long)s_tx_fail,
+                 (unsigned long)s_tx_done_fail, (unsigned long)s_tx_skipped_busy,
                  (unsigned long)s_rx_count, (unsigned long)s_rx_magic_match,
                  (int)s_is_leader);
     }
 }
 
-/* KNOWN ISSUE (see WITNESS-LOG-110 §D1 / task #30):
- * Empirically observed on 3 C6 boards with channel=26, OpenThread disabled,
- * promiscuous=true, and IDF v5.4 reference RX/TX callback pattern: only 1
- * RX event ever fires after init, despite ~381 successful TX events from
- * the other boards in the same 38-second window. Manual re-arm with
- * esp_ieee802154_receive() in either callback context bootloops the
- * driver. Hypothesis: half-duplex radio + driver state-machine issue;
- * needs an IDF maintainer trace or a working multi-board reference.
- * Cross-node sync claim (ADR-110 §B3) is BLOCKED on this. */
+/* 802.15.4 time-sync (ADR-383, 2026-10-05). The esp_ieee802154 callbacks
+ * below run in ISR context. Four bugs made this path look dead on C6 (#762)
+ * and C5; all fixed here, verified on two ESP32-C5 boards (IDF 5.5.2):
+ *  1. RX was armed once at init and rx_when_idle was never set, so after
+ *     the first beacon TX the radio went idle. rx_when_idle is now set.
+ *     As a defensive extra, RX is also re-armed from task context after
+ *     every TX (transmit_done/failed defer rearm_rx() to the timer task;
+ *     calling receive() in the ISR itself is what used to bootloop). One
+ *     run of a minimal app saw RX not resume after TX despite rx_when_idle,
+ *     but three reruns without the re-arm (IDF 5.5.2 and 5.5.4) did not
+ *     reproduce it.
+ *  2. receive_done called ESP_LOGI(); taking the log lock in ISR context
+ *     aborts (lock_acquire_generic). Logging moved to the timer task.
+ *  3. The beacon was built in a stack buffer, but esp_ieee802154_transmit()
+ *     is asynchronous, so the radio sent whatever reused that stack: peers
+ *     got a valid header followed by RAM/register addresses. Static buffer.
+ *  4. Wi-Fi + 15.4 coexistence was never enabled. With 15.4 in RX the STA
+ *     could not authenticate or even find the AP (reason 2, then 201).
+ *     esp_coex_wifi_i154_enable() now runs in c6_timesync_init(), before
+ *     Wi-Fi starts.
+ * Result: STA joins in ~6 s; the follower received 708/708 beacons intact.
+ * Cost: CSI callback yield drops from ~40 to ~27 pps while 15.4 shares the
+ * radio, so C6_TIMESYNC_ENABLE stays off by default; ESP-NOW is the default
+ * time-sync transport. esp_ieee802154_receive_handle_done() only releases
+ * the RX buffer. */
 void esp_ieee802154_receive_done(uint8_t *frame, esp_ieee802154_frame_info_t *frame_info)
 {
     s_rx_count++;
     /* PHY length is frame[0]; payload starts at frame[1]. */
-    if (frame == NULL || frame[0] < (9 + sizeof(ts_beacon_t) + 2)) {
-        if (frame) esp_ieee802154_receive_handle_done(frame);
-        return;
-    }
+    if (frame == NULL) return;
     const ts_beacon_t *b = (const ts_beacon_t *)&frame[1 + 9];
-    if (b->magic != TS_MAGIC || b->proto_ver != TS_PROTO_VER) {
+    if (frame[0] < (9 + sizeof(ts_beacon_t) + 2) ||
+        b->magic != TS_MAGIC || b->proto_ver != TS_PROTO_VER) {
+        if (!s_odd_logged && !s_odd_pending) {
+            uint8_t n = frame[0] + 1 < sizeof(s_odd_frame) ? frame[0] + 1 : sizeof(s_odd_frame);
+            memcpy(s_odd_frame, frame, n);
+            s_odd_len = n;
+            s_odd_pending = true;
+        }
         esp_ieee802154_receive_handle_done(frame);
         return;
     }
@@ -149,36 +196,62 @@ void esp_ieee802154_receive_done(uint8_t *frame, esp_ieee802154_frame_info_t *fr
                 /* Step down — somebody else is broadcasting; lowest EUI wins
                  * (deferred — for now last-heard wins). */
                 s_is_leader = false;
-                ESP_LOGI(TAG, "stepping down — heard another leader beacon");
+                s_step_down_pending = true;   /* logged from the timer task */
             }
         }
     }
-    /* handle_done auto-restarts RX in the IDF driver; calling
-     * esp_ieee802154_receive() here would double-arm and panic
-     * (verified empirically — 25 reboot loops observed). */
+    /* Release the RX buffer; rx_when_idle keeps the radio in RX. */
     esp_ieee802154_receive_handle_done(frame);
+}
+
+/* Runs in the timer daemon task (deferred from transmit_done/failed). */
+static void rearm_rx(void *arg1, uint32_t arg2)
+{
+    (void)arg1; (void)arg2;
+    esp_ieee802154_receive();
+}
+
+static void IRAM_ATTR defer_rearm_rx_from_isr(void)
+{
+    BaseType_t woken = pdFALSE;
+    xTimerPendFunctionCallFromISR(rearm_rx, NULL, 0, &woken);
+    portYIELD_FROM_ISR(woken);
 }
 
 void esp_ieee802154_transmit_done(const uint8_t *frame,
                                   const uint8_t *ack,
                                   esp_ieee802154_frame_info_t *ack_frame_info)
 {
-    (void)frame; (void)ack; (void)ack_frame_info;
-    /* Note: do NOT call esp_ieee802154_receive() here — it panics the
-     * driver (verified empirically, all 3 boards bootloop). The IDF
-     * driver internally manages RX/TX state transitions. */
+    (void)frame; (void)ack_frame_info;
+    /* Beacons are broadcast without an ACK request, but if an ACK frame is
+     * ever handed over, its buffer must be released (esp_ieee802154.h). */
+    if (ack) esp_ieee802154_receive_handle_done(ack);
+    s_tx_in_flight = false;
+    defer_rearm_rx_from_isr();
 }
 
 void esp_ieee802154_transmit_failed(const uint8_t *frame, esp_ieee802154_tx_error_t error)
 {
-    (void)frame;
-    ESP_LOGD(TAG, "tx failed: %d", error);
+    (void)frame; (void)error;
+    s_tx_done_fail++;   /* ISR context: count only, no logging */
+    s_tx_in_flight = false;
+    defer_rearm_rx_from_isr();
 }
 
 static void beacon_timer_cb(TimerHandle_t t)
 {
     (void)t;
     uint64_t now = (uint64_t)esp_timer_get_time();
+    if (s_step_down_pending) {
+        s_step_down_pending = false;
+        ESP_LOGI(TAG, "stepping down — heard another leader beacon");
+    }
+    if (s_odd_pending) {
+        s_odd_pending = false;
+        s_odd_logged = true;
+        ESP_LOGI(TAG, "first non-beacon frame (%u bytes incl. PHY len):", (unsigned)s_odd_len);
+        ESP_LOG_BUFFER_HEX(TAG, s_odd_frame, s_odd_len);
+    }
     if (s_is_leader) {
         send_beacon();
     } else if ((now - s_last_seen_us) > (TS_VALID_WINDOW_MS * 1000ULL)) {
@@ -214,6 +287,14 @@ esp_err_t c6_timesync_init(uint8_t channel)
     esp_read_mac(mac, ESP_MAC_BASE);
     s_channel   = (channel >= 11 && channel <= 26) ? channel : 15;
 
+#if CONFIG_ESP_COEX_SW_COEXIST_ENABLE
+    /* Wi-Fi + 15.4 coexistence must be switched on explicitly (as Espressif's
+     * ot_br and zigbee_gateway examples do). Without it, 15.4 RX starved the
+     * Wi-Fi STA (reason 2, then 201 NO_AP_FOUND). Must run before Wi-Fi
+     * starts; c6_timesync_init() runs before wifi_init_sta(). */
+    esp_err_t coex_ret = esp_coex_wifi_i154_enable();
+    ESP_LOGI(TAG, "esp_coex_wifi_i154_enable: %s", esp_err_to_name(coex_ret));
+#endif
     esp_err_t ret = esp_ieee802154_enable();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "ieee802154_enable failed: %s", esp_err_to_name(ret));
@@ -227,6 +308,20 @@ esp_err_t c6_timesync_init(uint8_t channel)
     esp_ieee802154_set_short_address(0x0000);
     esp_ieee802154_set_extended_address(mac);
     esp_ieee802154_set_channel(s_channel);
+#if CONFIG_ESP_COEX_SW_COEXIST_ENABLE && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
+    /* (set_coex_config is declared in esp_ieee802154.h from IDF 5.5.)
+     * The C5/C6 share one RF front end between Wi-Fi and 15.4. Parked in RX,
+     * 15.4 starved Wi-Fi (join took ~3 min). Give 15.4 idle-RX the lowest
+     * priority and TX/RX low, so Wi-Fi (and CSI capture) wins arbitration. */
+    esp_ieee802154_coex_config_t coex = {
+        .idle    = IEEE802154_IDLE,
+        .txrx    = IEEE802154_LOW,
+        .txrx_at = IEEE802154_MIDDLE,
+    };
+    esp_ieee802154_set_coex_config(coex);
+#endif
+    /* Stay in RX whenever not transmitting (see the RX path note above). */
+    esp_ieee802154_set_rx_when_idle(true);
     esp_ieee802154_receive();
 
     /* Start as candidate leader; first received beacon will demote us if needed. */
