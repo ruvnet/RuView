@@ -4900,8 +4900,10 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
                 if cfg!(target_os = "macos") && e.contains("failed to run mac_wifi helper") {
                     if !reported_missing_helper {
                         error!(
-                            "--source wifi on macOS needs the mac_wifi helper on PATH: \
-                             swiftc -O archive/v1/src/sensing/mac_wifi.swift -o <dir-on-PATH>/mac_wifi ({e})"
+                            "--source wifi on macOS needs the mac_wifi helper: run \
+                             tools/mac-wifi-helper/build.sh (MacWifi.app; real SSID/BSSID once \
+                             Location Services is allowed), or put a CLI build of \
+                             archive/v1/src/sensing/mac_wifi.swift on PATH (redacted link only) ({e})"
                         );
                         reported_missing_helper = true;
                     }
