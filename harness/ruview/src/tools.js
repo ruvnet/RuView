@@ -37,17 +37,29 @@ import { readIphoneLidar, readRplidar } from './devices/lidar.js';
 import { loadHosts, runRemote } from './remote.js';
 import { TOOL_POLICY } from './policy.js';
 
-/** Walk up from `start` to find the RuView monorepo root (or null). */
+/** Walk up from `start` to find the RuView monorepo root (or null).
+ * Cache the answer for a long-lived MCP session: repo root is stable and these
+ * lookups happen many times while probing tool prerequisites.
+ */
+const repoRootCache = new Map();
 export function findRepoRoot(start = process.cwd()) {
-  let dir = resolve(start);
+  const key = resolve(start);
+  if (repoRootCache.has(key)) return repoRootCache.get(key);
+
+  let dir = key;
   for (let i = 0; i < 8; i++) {
     const hasProof = existsSync(join(dir, 'archive', 'v1', 'data', 'proof', 'verify.py'));
     const hasV2 = existsSync(join(dir, 'v2', 'Cargo.toml'));
-    if (hasProof || hasV2) return dir;
+    if (hasProof || hasV2) {
+      repoRootCache.set(key, dir);
+      return dir;
+    }
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
+
+  repoRootCache.set(key, null);
   return null;
 }
 
