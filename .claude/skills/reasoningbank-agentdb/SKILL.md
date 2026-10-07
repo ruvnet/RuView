@@ -1,5 +1,5 @@
 ---
-name: "ReasoningBank with AgentDB"
+name: reasoningbank-agentdb
 description: "Implement ReasoningBank adaptive learning with AgentDB's 150x faster vector database. Includes trajectory tracking, verdict judgment, memory distillation, and pattern recognition. Use when building self-learning agents, optimizing decision-making, or implementing experience replay systems."
 ---
 
