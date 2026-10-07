@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh Matrix</title>
+<!--
+  Receiver x transmitter link matrix.
+             hears
+  Deliberately coordinate-free. The geometric link-line model was falsified on
+  this fleet (2026-08-28: response is inversely related to link-line distance),
+  so a coverage map drawn from a floor plan would be confidently wrong. What
+  IS diagnostic is the graph itself: who hears whom, how strongly, and whether
+  the pair agrees.
+
+  At three nodes this is 9 cells and you can eyeball the JSON. At nine it is 81
+  and a missing or dying link is invisible without a view like this -- a node
+  that goes deaf contributes nothing and says nothing, which is the failure
+  mode worth catching early.
+
+  Three things it surfaces that a flat list does not:
+
+  1. MISSING links. The gap matters more than any value, because MAX_LINKS used
+     to silently drop links past 64 and a nine-node mesh needs 81.
+  2. ASYMMETRY. Propagation is reciprocal, so A->B and B->A should agree within
+     a few dB. A large gap is one-sided: antenna orientation, obstruction right
+     at one board, or a node with a receive problem.
+  3. WINDOW SPAN. rssi and motion are statistics over a fixed 32-frame history,
+     so a link whose delivery rate shifts changes its own window span and stops
+     being comparable to itself. Span is shown so that is visible rather than
+     silently corrupting a comparison.
+-->
+<style>
+  :root{
+    --bg:#0d1117; --fg:#e6edf3; --dim:#8b949e; --line:#30363d; --card:#161b22;
+    --ok:#2ea043; --warn:#d29922; --bad:#f85149; --info:#388bfd; --self:#21262d;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; padding:18px; background:var(--bg); color:var(--fg);
+       font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  h1{font-size:16px; margin:0 0 3px;}
+  .sub{color:var(--dim); font-size:12px; margin-bottom:16px;}
+  .card{border:1px solid var(--line); border-radius:9px; padding:14px;
+        margin-bottom:14px; background:var(--card);}
+  .scroll{overflow-x:auto;}
+  table{border-collapse:collapse; font-variant-numeric:tabular-nums;}
+  th,td{padding:7px 9px; text-align:center; border:1px solid var(--line);
+        white-space:nowrap;}
+  th{color:var(--dim); font-weight:600; font-size:11.5px;
+     letter-spacing:.06em; text-transform:uppercase;}
+  th.rx{text-align:right;}
+  td.self{background:var(--self); color:var(--line);}
+  td.miss{background:rgba(248,81,73,.16); color:var(--bad); font-weight:700;}
+  td .v{font-weight:600;}
+  td .m{display:block; font-size:10.5px; color:var(--dim); font-weight:400;}
+  .stats{display:flex; gap:22px; flex-wrap:wrap; margin-top:12px;
+         font-size:12.5px; color:var(--dim);}
+  .stats b{color:var(--fg);}
+  .legend{display:flex; gap:14px; flex-wrap:wrap; font-size:12px;
+          color:var(--dim); margin-top:10px;}
+  .sw{display:inline-block; width:11px; height:11px; border-radius:2px;
+      vertical-align:-1px; margin-right:5px;}
+  .row{display:flex; gap:9px; align-items:center; margin-bottom:12px;}
+  button{font:inherit; padding:7px 13px; border-radius:6px; cursor:pointer;
+         border:1px solid var(--line); background:#21262d; color:var(--fg);}
+  .err{color:var(--bad);}
+  .asym td{font-size:12.5px;}
+</style>
+</head>
+<body>
+
+<h1>Mesh Matrix</h1>
+<div class="sub">Rows hear columns. Coordinate-free &mdash; the graph, not the geometry.</div>
+
+<div class="row">
+  <button id="refresh">Refresh</button>
+  <label><input type="checkbox" id="auto" checked> auto every 3 s</label>
+  <span id="stamp" class="sub" style="margin:0"></span>
+</div>
+
+<div class="card">
+  <div class="scroll"><table id="matrix"></table></div>
+  <div class="legend">
+    <span><i class="sw" style="background:#2ea043"></i>&ge; &minus;70 dBm</span>
+    <span><i class="sw" style="background:#d29922"></i>&minus;70 to &minus;85</span>
+    <span><i class="sw" style="background:#f85149"></i>&lt; &minus;85 (marginal)</span>
+    <span><i class="sw" style="background:rgba(248,81,73,.16)"></i>link absent</span>
+  </div>
+  <div class="stats" id="stats"></div>
+</div>
+
+<div class="card">
+  <div class="sub" style="margin:0 0 8px">Reciprocity &mdash; propagation is symmetric, so a
+  large gap is one-sided: orientation, an obstruction at one board, or a receive fault.</div>
+  <div class="scroll"><table id="asym" class="asym"></table></div>
+</div>
+
+<script>
+var API = '/api/v1/links';
+
+function colour(dbm){
+  if (dbm >= -70) return '#2ea043';
+  if (dbm >= -85) return '#d29922';
+  return '#f85149';
+}
+
+function render(d){
+  var links = d.links || [];
+  // Column key: peers by inferred node id, infrastructure as a single AP column.
+  var nodes = {}, cells = {}, meta = {};
+  links.forEach(function(l){
+    nodes[l.rx_node] = true;
+    var tx = (l.tx_node_inferred === null || l.tx_node_inferred === undefined)
+             ? 'AP' : l.tx_node_inferred;
+    if (tx !== 'AP') nodes[tx] = true;
+    cells[l.rx_node + '>' + tx] = l.rssi_dbm;
+    meta[l.rx_node + '>' + tx] = l;
+  });
+  var ids = Object.keys(nodes).map(Number).sort(function(a,b){return a-b;});
+  var cols = ids.slice(); cols.push('AP');
+
+  var h = '<tr><th class="rx">rx \\ tx</th>';
+  cols.forEach(function(c){ h += '<th>' + (c === 'AP' ? 'AP' : 'n' + c) + '</th>'; });
+  h += '</tr>';
+
+  var present = 0, expected = 0, weakest = null, strongest = null;
+  ids.forEach(function(r){
+    h += '<tr><th class="rx">node ' + r + '</th>';
+    cols.forEach(function(c){
+      if (c === r) { h += '<td class="self">&mdash;</td>'; return; }
+      expected++;
+      var k = r + '>' + c, v = cells[k];
+      if (v === undefined) { h += '<td class="miss">absent</td>'; return; }
+      present++;
+      if (weakest === null || v < weakest) weakest = v;
+      if (strongest === null || v > strongest) strongest = v;
+      var m = meta[k];
+      h += '<td><span class="v" style="color:' + colour(v) + '">' +
+           v.toFixed(0) + '</span><span class="m">' +
+           (m.fps !== undefined ? m.fps.toFixed(1) + ' fps' : '') +
+           (m.window_span_s !== undefined ? ' &middot; ' + m.window_span_s.toFixed(1) + 's' : '') +
+           '</span></td>';
+    });
+    h += '</tr>';
+  });
+  document.getElementById('matrix').innerHTML = h;
+
+  var spans = links.filter(function(l){ return l.window_span_s !== undefined; })
+                   .map(function(l){ return l.window_span_s; });
+  var spanTxt = spans.length
+    ? Math.min.apply(null, spans).toFixed(1) + '&ndash;' + Math.max.apply(null, spans).toFixed(1) + ' s'
+    : 'n/a';
+  document.getElementById('stats').innerHTML =
+    '<span>links <b>' + present + '</b> of <b>' + expected + '</b></span>' +
+    '<span>strongest <b>' + (strongest === null ? '-' : strongest.toFixed(0)) + ' dBm</b></span>' +
+    '<span>weakest <b>' + (weakest === null ? '-' : weakest.toFixed(0)) + ' dBm</b></span>' +
+    '<span>window span <b>' + spanTxt + '</b></span>' +
+    (present < expected
+      ? '<span class="err">' + (expected - present) + ' link(s) absent</span>' : '');
+
+  // Reciprocity, peer pairs only — the AP column has no return path to compare.
+  var a = '<tr><th>pair</th><th>a&rarr;b</th><th>b&rarr;a</th><th>gap</th><th></th></tr>';
+  var any = false;
+  for (var i = 0; i < ids.length; i++) {
+    for (var j = i + 1; j < ids.length; j++) {
+      var x = cells[ids[i] + '>' + ids[j]], y = cells[ids[j] + '>' + ids[i]];
+      if (x === undefined || y === undefined) continue;
+      any = true;
+      var gap = Math.abs(x - y);
+      var note = gap < 4 ? '<span style="color:#2ea043">symmetric</span>'
+               : gap < 8 ? '<span style="color:#d29922">mild asymmetry</span>'
+                         : '<span style="color:#f85149">one-sided &mdash; check that board</span>';
+      a += '<tr><td>n' + ids[i] + ' &harr; n' + ids[j] + '</td>' +
+           '<td>' + x.toFixed(0) + '</td><td>' + y.toFixed(0) + '</td>' +
+           '<td><b>' + gap.toFixed(0) + ' dB</b></td><td>' + note + '</td></tr>';
+    }
+  }
+  document.getElementById('asym').innerHTML = any
+    ? a : '<tr><td>no reciprocal peer pairs yet</td></tr>';
+
+  document.getElementById('stamp').textContent =
+    'updated ' + new Date().toTimeString().slice(0, 8);
+}
+
+function load(){
+  fetch(API, {cache:'no-store'})
+    .then(function(r){ return r.json(); })
+    .then(render)
+    .catch(function(){
+      document.getElementById('stamp').innerHTML =
+        '<span class="err">server unreachable</span>';
+    });
+}
+
+document.getElementById('refresh').onclick = load;
+setInterval(function(){
+  if (document.getElementById('auto').checked) load();
+}, 3000);
+load();
+</script>
+</body>
+</html>
