@@ -111,14 +111,21 @@ impl AutomationEngine {
     /// Event-driven loop: state/numeric/event triggers.
     fn start_event_loop(&self) -> tokio::task::JoinHandle<()> {
         let mut rx = self.hc.states().subscribe();
+        let mut domain_rx = self.hc.bus().subscribe_domain();
         let automations = Arc::clone(&self.automations);
         let hc = self.hc.clone();
         let templates = Arc::clone(&self.templates);
 
         tokio::spawn(async move {
             loop {
-                match rx.recv().await {
-                    Ok(event) => {
+                let received = tokio::select! {
+                    event = rx.recv() => event.map(|event| TriggerContext::state_changed(
+                        event.entity_id, event.old_state, event.new_state,
+                    )),
+                    event = domain_rx.recv() => event.map(|event| TriggerContext::event(event.event_type)),
+                };
+                match received {
+                    Ok(trigger_ctx) => {
                         let snapshot: Vec<(Arc<Automation>, RunState)> = automations
                             .lock()
                             .unwrap()
@@ -129,11 +136,6 @@ impl AutomationEngine {
                             if !automation.enabled {
                                 continue;
                             }
-                            let trigger_ctx = TriggerContext::state_changed(
-                                event.entity_id.clone(),
-                                event.old_state.clone(),
-                                event.new_state.clone(),
-                            );
                             let triggered = automation
                                 .trigger
                                 .iter()
@@ -154,7 +156,7 @@ impl AutomationEngine {
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
                     Err(broadcast::error::RecvError::Lagged(n)) => {
-                        eprintln!("[homecore-automation] state-changed receiver lagged by {n} events");
+                        eprintln!("[homecore-automation] automation receiver lagged by {n} events");
                     }
                 }
             }
