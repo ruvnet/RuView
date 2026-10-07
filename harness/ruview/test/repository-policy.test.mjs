@@ -24,10 +24,12 @@ function git(args, cwd = repoRoot) {
   return execFileSync("git", args, { cwd, encoding: "utf8" });
 }
 
-test("sensing-server session secret is ignored at the v2 runtime path", () => {
-  assert.doesNotThrow(() =>
-    git(["check-ignore", "--no-index", "--quiet", "--", "v2/data/session-secret"]),
-  );
+test("sensing-server session secret is ignored at every runtime path", () => {
+  for (const path of ["data/session-secret", "v2/data/session-secret"]) {
+    assert.doesNotThrow(() =>
+      git(["check-ignore", "--no-index", "--quiet", "--", path]),
+    );
+  }
 });
 
 test("harness provenance files are checked out with LF line endings", () => {
