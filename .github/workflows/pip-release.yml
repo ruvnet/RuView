@@ -124,7 +124,7 @@ jobs:
           package-dir: python
           output-dir: wheelhouse
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: wheels-${{ matrix.os }}-${{ matrix.arch }}
           path: wheelhouse/*.whl
@@ -145,7 +145,7 @@ jobs:
       - name: Build sdist
         working-directory: python
         run: maturin sdist --out ../sdist
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: sdist
           path: sdist/*.tar.gz
@@ -185,7 +185,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip build
           python -m build python/ruview-meta --outdir ruview-dist
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ruview
           path: ruview-dist/*
@@ -264,7 +264,7 @@ jobs:
             exit 1
           fi
           echo "Tombstone wheel correctly raises ImportError with migration URL."
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: tombstone
           path: tombstone-dist/*
