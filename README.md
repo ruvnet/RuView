@@ -1,5 +1,3 @@
-# π RuView
-
 <p align="center">
   <a href="https://cognitum.one/seed">
     <img src="assets/ruview-hero-h3-v3.gif" alt="RuView - WiFi DensePose — animated visualization of real-time pose estimation, breathing, and heart-rate sensing through WiFi" width="100%">
