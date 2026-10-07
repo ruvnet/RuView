@@ -5,16 +5,17 @@ name: Model release gate (ADR-298)
 # boundary, near-constant output, degenerate class balance, a metric
 # surfaced under a task name it wasn't computed as) before it ships.
 #
-# Checker: v2/crates/wifi-densepose-train/src/model_gates.rs
+# Checkers:
+#   * v2/crates/wifi-densepose-train/src/model_gates.rs
+#   * v2/crates/wifi-densepose-train/src/sensing_claim_gate.rs (ADR-328)
 #
-# IMPORTANT — the honest scope of this job: it protects the *checker itself*
-# from regressing (the gate logic + its issue-1521 regression fixture are
-# exercised on every push/PR that touches this crate), and running it is
-# required before ADR-298 can be called "wired in" at all. It does NOT gate
-# an actual model publish — this repository does not automate uploading to
-# the HuggingFace model repo (`ruvnet/wifi-densepose-pretrained`); that
-# remains a manual, human-run step. Before publishing or replacing a model
-# artifact there, run this gate against the real head weights locally:
+# IMPORTANT — the honest scope of this job: it protects the structural model
+# checker from regressing and hard-fails every committed sensing claim manifest
+# that does not satisfy the repository-owned ADR-328 policy. It still does NOT
+# gate an actual HuggingFace model publish because this repository does not
+# automate uploads to `ruvnet/wifi-densepose-pretrained`; that remains a manual,
+# human-run step. Before publishing or replacing a model artifact there, run
+# the structural model gate against the real head weights locally:
 #
 #   cargo test -p wifi-densepose-train model_gates
 #
@@ -29,13 +30,54 @@ on:
       - master
     paths:
       - "v2/crates/wifi-densepose-train/**"
+      - "v2/Cargo.toml"
+      - "v2/Cargo.lock"
+      - "v2/rust-toolchain.toml"
+      - "v2/.cargo/**"
+      - ".cargo/**"
+      - "evidence/claims/**"
+      - "evidence/fixtures/**"
+      - "evidence/policies/**"
+      - "README.md"
+      - "benchmarks/**"
+      - "docs/benchmarks/**"
+      - "docs/releases/**"
+      - "docs/huggingface/**"
+      - "docs/adr/ADR-298-model-release-sanity-gates.md"
+      - "docs/adr/ADR-304-evidence-engine.md"
+      - "docs/adr/ADR-328-sensing-evidence-claim-gate.md"
+      - ".github/workflows/model-release-gate.yml"
+      - ".github/CODEOWNERS"
   pull_request:
     paths:
       - "v2/crates/wifi-densepose-train/**"
+      - "v2/Cargo.toml"
+      - "v2/Cargo.lock"
+      - "v2/rust-toolchain.toml"
+      - "v2/.cargo/**"
+      - ".cargo/**"
+      - "evidence/claims/**"
+      - "evidence/fixtures/**"
+      - "evidence/policies/**"
+      - "README.md"
+      - "benchmarks/**"
+      - "docs/benchmarks/**"
+      - "docs/releases/**"
+      - "docs/huggingface/**"
+      - "docs/adr/ADR-298-model-release-sanity-gates.md"
+      - "docs/adr/ADR-304-evidence-engine.md"
+      - "docs/adr/ADR-328-sensing-evidence-claim-gate.md"
+      - ".github/workflows/model-release-gate.yml"
+      - ".github/CODEOWNERS"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  # Update only with the CODEOWNERS-reviewed policy. This prevents an unnoticed
+  # threshold edit from changing the policy consumed by the same workflow.
+  CLAIM_POLICY_SHA256: 1ba2b73ede726a789aa50f4eb60a443429bb2f38ff3a2acf27755708265e303f
 
 jobs:
   model-release-gate:
@@ -46,13 +88,156 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+          fetch-depth: 0
+
+      - name: Verify protected claim-policy digest
+        run: |
+          actual="$(sha256sum evidence/policies/sensing-claim-policy-v1.json | cut -d ' ' -f 1)"
+          test "$actual" = "$CLAIM_POLICY_SHA256"
+
+      - name: Require evidence manifest for changed public claim surfaces
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          mapfile -d '' -t changed < <(git diff --name-only -z --diff-filter=ACMRT "$BASE_SHA" "$GITHUB_SHA")
+          changed_manifests=()
+          for path in "${changed[@]}"; do
+            case "$path" in
+              evidence/claims/research/*.json|evidence/claims/production/*.json|evidence/claims/safety_critical/*.json)
+                changed_manifests+=("$path")
+                ;;
+            esac
+          done
+
+          for surface in "${changed[@]}"; do
+            required_class=""
+            case "$surface" in
+              README.md)
+                if git diff --unified=0 "$BASE_SHA" "$GITHUB_SHA" -- README.md \
+                    | grep -Eiq '^\+[^+].*(accuracy|auc|precision|recall|sensitivity|specificity|false[ -]?positive|confidence|detect|through walls|heart[ -]?rate|breathing|occupancy|presence|pose|pck|mpjpe|latency|held[ -]?out|benchmark|score|production[ -]?ready|[0-9]+([.][0-9]+)?(%|[[:space:]]*(ms|hz|bpm)))'; then
+                  required_class="production"
+                else
+                  continue
+                fi
+                ;;
+              benchmarks/*|docs/benchmarks/*)
+                if git diff --unified=0 "$BASE_SHA" "$GITHUB_SHA" -- "$surface" \
+                    | grep -Eiq '^\+[^+].*(production|ready|deploy|ship|safety|medical|commercial)'; then
+                  required_class="production"
+                else
+                  required_class="any"
+                fi
+                ;;
+              docs/releases/*|docs/huggingface/*)
+                required_class="production"
+                ;;
+              *)
+                continue
+                ;;
+            esac
+
+            matched=false
+            for manifest in "${changed_manifests[@]}"; do
+              [[ -f "$manifest" ]] || continue
+              relative="${manifest#evidence/claims/}"
+              class="${relative%%/*}"
+              filename="${relative#*/}"
+              [[ "$filename" != */* ]] || continue
+              if [[ "$required_class" == production && "$class" != production ]]; then
+                continue
+              fi
+              if jq -e --arg surface "$surface" \
+                  '(.claim_surface_paths | type == "array") and (.claim_surface_paths | index($surface) != null)' \
+                  "$manifest" >/dev/null; then
+                matched=true
+                break
+              fi
+            done
+            if [[ "$matched" != true ]]; then
+              echo "Public claim surface $surface changed without a matching $required_class class-bound evidence manifest." >&2
+              exit 1
+            fi
+          done
 
       - name: Install Rust toolchain
-        run: rustup toolchain install stable --profile minimal
+        run: rustup toolchain install 1.89 --profile minimal
 
       - name: Run the model-release gate's own test suite
         working-directory: v2
         run: cargo test -p wifi-densepose-train --no-default-features model_gates -- --nocapture
+
+      - name: Run sensing evidence and claim gate tests
+        working-directory: v2
+        run: cargo test -p wifi-densepose-train --no-default-features sensing_claim_gate -- --nocapture
+
+      - name: Validate repository policy with research-only fixture
+        working-directory: v2
+        run: |
+          mkdir -p ../evidence-receipts
+          cargo run -p wifi-densepose-train --no-default-features \
+            --bin sensing-claim-gate -- \
+            --manifest ../evidence/fixtures/research-synthetic.json \
+            --policy ../evidence/policies/sensing-claim-policy-v1.json \
+            --required-class research \
+            --receipt ../evidence-receipts/research-synthetic.receipt.json
+
+      - name: Gate every committed sensing claim manifest
+        working-directory: v2
+        run: |
+          mkdir -p ../evidence-receipts
+          manifest_count=0
+          gate_failed=false
+          while IFS= read -r -d '' manifest; do
+            relative="${manifest#../evidence/claims/}"
+            class="${relative%%/*}"
+            filename="${relative#*/}"
+            if [[ ! -f "$manifest" || -L "$manifest" ]]; then
+              echo "Claim manifest must be a regular non-symlink file: $manifest" >&2
+              gate_failed=true
+              continue
+            fi
+            if [[ "$filename" == */* || ! "$filename" =~ ^[a-z0-9][a-z0-9._-]*\.json$ ]]; then
+              echo "Claim JSON must be exactly one level below a class directory and use a canonical filename: $manifest" >&2
+              gate_failed=true
+              continue
+            fi
+            case "$class" in
+              research|production|safety_critical) ;;
+              *)
+                echo "Unsupported claim class directory for $manifest" >&2
+                gate_failed=true
+                continue
+                ;;
+            esac
+            cli_class="${class//_/-}"
+            stem="${filename%.json}"
+            manifest_count=$((manifest_count + 1))
+            if ! cargo run -p wifi-densepose-train --no-default-features \
+                --bin sensing-claim-gate -- \
+                --manifest "$manifest" \
+                --policy ../evidence/policies/sensing-claim-policy-v1.json \
+                --required-class "$cli_class" \
+                --receipt "../evidence-receipts/${class}-${stem}.receipt.json"; then
+              gate_failed=true
+            fi
+          done < <(find ../evidence/claims -name '*.json' -print0 | sort -z)
+          if (( manifest_count == 0 )); then
+            echo "Claim inventory is empty; at least one class-bound manifest is required." >&2
+            exit 1
+          fi
+          if [[ "$gate_failed" == true ]]; then
+            echo "One or more sensing claim manifests failed closed." >&2
+            exit 1
+          fi
+
+      - name: Upload machine-readable evidence receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sensing-claim-receipts
+          path: evidence-receipts/
+          if-no-files-found: warn
 
       - name: Summarize result
         if: always()
@@ -60,8 +245,10 @@ jobs:
           {
             echo '### Model release gate (ADR-298)'
             echo ''
-            echo 'This job protects `model_gates.rs` from regressing. It does not itself'
-            echo 'gate a real HuggingFace model publish — that upload is a manual step'
-            echo 'outside this repository; run `cargo test -p wifi-densepose-train model_gates`'
-            echo 'against real head weights before publishing one.'
+            echo 'This job protects `model_gates.rs` and the ADR-328 claim gate from'
+            echo 'regressing, and gates every JSON manifest in `evidence/claims/`.'
+            echo 'This is repository evidence lint. The committed policy disables'
+            echo 'production and safety claims until artifact retrieval, a real presence'
+            echo 'reproducer, authenticated evaluator attestation, and maintainer review.'
+            echo 'It does not gate the external HuggingFace upload.'
           } >> "$GITHUB_STEP_SUMMARY"
