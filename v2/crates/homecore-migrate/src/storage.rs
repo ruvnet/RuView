@@ -119,11 +119,15 @@ pub fn write_json_atomic<T: Serialize>(
         .unwrap_or("storage");
     let temp = parent.join(format!(".{name}.{}.{}.tmp", std::process::id(), sequence));
 
+    // Only a successful create_new grants ownership of this path. In
+    // particular, a stale file from a reused process id must survive failure.
+    let mut created_temp = false;
     let result = (|| -> std::io::Result<()> {
         let mut file = OpenOptions::new()
             .create_new(true)
             .write(true)
             .open(&temp)?;
+        created_temp = true;
         file.write_all(&bytes)?;
         file.write_all(b"\n")?;
         file.sync_all()?;
@@ -149,7 +153,9 @@ pub fn write_json_atomic<T: Serialize>(
     })();
 
     if let Err(source) = result {
-        let _ = fs::remove_file(&temp);
+        if created_temp {
+            let _ = fs::remove_file(&temp);
+        }
         let source = if source.kind() == std::io::ErrorKind::AlreadyExists {
             std::io::Error::new(
                 std::io::ErrorKind::AlreadyExists,
@@ -197,5 +203,34 @@ mod tests {
     fn envelope_rejects_malformed_json() {
         let result = serde_json::from_str::<HaStorageEnvelope>("not json");
         assert!(result.is_err());
+    }
+    #[test]
+    fn temp_collision_preserves_existing_file_and_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("registry.json");
+        std::fs::write(&target, b"original destination").unwrap();
+        // Reserve a range to tolerate other atomic-write tests running in parallel.
+        let first = TEMP_SEQUENCE.load(Ordering::Relaxed);
+        let collisions: Vec<_> = (first..first + 1024)
+            .map(|sequence| {
+                let path = dir.path().join(format!(
+                    ".registry.json.{}.{}.tmp",
+                    std::process::id(),
+                    sequence
+                ));
+                std::fs::write(&path, b"pre-existing recovery data").unwrap();
+                path
+            })
+            .collect();
+        let result = write_json_atomic(&target, &serde_json::json!({"new": true}), true);
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"original destination");
+        for path in collisions {
+            assert_eq!(
+                std::fs::read(&path).unwrap(),
+                b"pre-existing recovery data",
+                "a failed create_new must never clean up someone else's file"
+            );
+        }
     }
 }
