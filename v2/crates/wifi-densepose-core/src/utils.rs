@@ -85,9 +85,7 @@ pub fn calculate_snr_db(signal: &Array1<f64>, noise: &Array1<f64>) -> f64 {
 
 /// Applies a moving average filter.
 ///
-/// # Panics
-///
-/// Panics if the data array is not contiguous in memory.
+/// Samples are read in logical order, including for strided or reversed arrays.
 #[must_use]
 #[allow(clippy::cast_precision_loss)]
 pub fn moving_average(data: &Array1<f64>, window_size: usize) -> Array1<f64> {
@@ -98,16 +96,10 @@ pub fn moving_average(data: &Array1<f64>, window_size: usize) -> Array1<f64> {
     let mut result = Array1::zeros(data.len());
     let half_window = window_size / 2;
 
-    // ndarray Array1 is always contiguous, but handle gracefully if not
-    let Some(slice) = data.as_slice() else {
-        return data.clone();
-    };
-
     for i in 0..data.len() {
         let start = i.saturating_sub(half_window);
         let end = (i + half_window + 1).min(data.len());
-        let window = &slice[start..end];
-        result[i] = window.iter().sum::<f64>() / window.len() as f64;
+        result[i] = (start..end).map(|j| data[j]).sum::<f64>() / (end - start) as f64;
     }
 
     result
