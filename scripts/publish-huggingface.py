@@ -25,12 +25,20 @@ import sys
 from pathlib import Path
 
 EXPECTED_FILES = [
-    "pretrained-encoder.onnx",
-    "pretrained-heads.onnx",
-    "pretrained.rvf",
-    "room-profiles.json",
-    "collection-witness.json",
     "config.json",
+    "model.safetensors",
+    "model-q2.bin",
+    "model-q4.bin",
+    "model-q8.bin",
+    "model.rvf.jsonl",
+    "csi-embed-v2.safetensors",
+    "csi-embed-v2-int4.bin",
+    "csi-embed-v2.py",
+    "csi-embed-v2-metrics.json",
+    "presence-head.json",
+    "node-1.json",
+    "node-2.json",
+    "training-metrics.json",
     "README.md",
 ]
 
