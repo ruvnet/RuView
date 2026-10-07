@@ -96,6 +96,9 @@ export function parseSpacesOutput(stdout, expectedKind = undefined) {
     || (expectedKind !== undefined && response.kind !== expectedKind))) {
     throw new Error('invalid spatial contract version or kind');
   }
+  if (!versioned && expectedKind !== undefined && expectedKind !== 'spaces') {
+    throw new Error('legacy response is valid only for spaces');
+  }
   const boundary = response.boundary;
   if (!boundary || boundary.authoritativeState !== 'HomeCore Edge' || !Array.isArray(boundary.excluded)
     || !boundary.excluded.every((item) => typeof item === 'string')) {
