@@ -231,10 +231,12 @@ test('CLI run(): unknown command exits non-zero', async () => {
   assert.notEqual(await cliRun(['definitely-not-a-command']), 0);
 });
 
-test('findRepoRoot locates this monorepo from cwd', () => {
+test('findRepoRoot locates this monorepo from cwd and memoizes the answer', () => {
   // when run from within wifi-densepose, it should find a root; elsewhere null is fine
   const root = findRepoRoot();
   assert.ok(root === null || typeof root === 'string');
+  assert.equal(findRepoRoot(), root);
+  assert.equal(findRepoRoot(process.cwd()), root);
 });
 
 // ADR-263 F7/O7: skills ship from one source; the projected copies must match.
