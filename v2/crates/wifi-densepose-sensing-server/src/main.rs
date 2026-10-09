@@ -16255,13 +16255,13 @@ mod node_src_ip_tests {
     #[test]
     fn gateway_does_not_clobber_a_learned_node_address() {
         let mut addr = None;
-        record_node_src_ip(&mut addr, ip("192.168.1.112"));
-        assert_eq!(addr, Some(ip("192.168.1.112")));
+        record_node_src_ip(&mut addr, ip("192.0.2.112"));
+        assert_eq!(addr, Some(ip("192.0.2.112")));
 
         record_node_src_ip(&mut addr, ip("172.18.0.1"));
         assert_eq!(
             addr,
-            Some(ip("192.168.1.112")),
+            Some(ip("192.0.2.112")),
             "a bridge-range source must never overwrite a real node address"
         );
     }
@@ -16277,21 +16277,21 @@ mod node_src_ip_tests {
 
     #[test]
     fn a_real_address_still_replaces_a_stale_one() {
-        let mut addr = Some(ip("192.168.1.112"));
-        record_node_src_ip(&mut addr, ip("192.168.1.150"));
+        let mut addr = Some(ip("192.0.2.112"));
+        record_node_src_ip(&mut addr, ip("192.0.2.150"));
         assert_eq!(
             addr,
-            Some(ip("192.168.1.150")),
+            Some(ip("192.0.2.150")),
             "a node that moves on the LAN must still be followed"
         );
     }
 
     #[test]
     fn loopback_and_unspecified_are_never_recorded() {
-        let mut addr = Some(ip("192.168.1.112"));
+        let mut addr = Some(ip("192.0.2.112"));
         record_node_src_ip(&mut addr, ip("127.0.0.1"));
         record_node_src_ip(&mut addr, ip("0.0.0.0"));
-        assert_eq!(addr, Some(ip("192.168.1.112")));
+        assert_eq!(addr, Some(ip("192.0.2.112")));
     }
 }
 
