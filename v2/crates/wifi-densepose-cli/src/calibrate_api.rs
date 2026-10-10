@@ -46,6 +46,7 @@ use wifi_densepose_core::types::CsiFrame;
 use wifi_densepose_signal::{BaselineCalibration, CalibrationRecorder};
 
 use crate::calibrate::{parse_csi_packet, tier_config};
+use crate::occupancy_readiness::{EvidenceKind, OccupancyReadiness, Phase, Readiness};
 
 /// Rolling window of per-frame scalars (mean amplitude) for live `room-state`
 /// inference. Maintained by the ingest task regardless of any baseline session.
@@ -99,6 +100,11 @@ pub struct CalibrateServeArgs {
     /// recommended before binding to anything other than 127.0.0.1.
     #[arg(long, env = "CALIBRATE_TOKEN")]
     pub token: Option<String>,
+
+    /// Declare the UDP input source. `live` is unverified transport provenance;
+    /// `replay` and `synthetic` can test the flow but never yield live-room VALID.
+    #[arg(long, default_value = "live")]
+    pub input_kind: String,
 }
 
 /// Sanitize a client-supplied `room_id` for use in a filename (defends the
@@ -187,12 +193,20 @@ struct SharedStatus {
     last_frame_unix_ms: u64,
     session: Option<SessionStatus>,
     last_result: Option<ResultSummary>,
+    occupancy: Option<Readiness>,
 }
 
 /// Commands sent from HTTP handlers to the ingest task.
 enum CalCommand {
     Start { params: StartParams, reply: oneshot::Sender<Result<SessionStatus, String>> },
     Stop { reply: oneshot::Sender<Result<ResultSummary, String>> },
+    VerifyOccupancy {
+        room_id: String,
+        baseline_name: String,
+        phase: Phase,
+        target_frames: usize,
+        reply: oneshot::Sender<Result<Readiness, String>>,
+    },
     EnrollAnchor {
         room_id: String,
         baseline_name: String,
@@ -300,6 +314,8 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/v1/calibration/stop", post(stop))
         .route("/api/v1/calibration/result", get(result))
         .route("/api/v1/calibration/baselines", get(baselines))
+        .route("/api/v1/occupancy/readiness", get(occupancy_readiness))
+        .route("/api/v1/occupancy/verify", post(verify_occupancy))
         .route("/api/v1/room/state", get(room_state))
         .route("/api/v1/room/train", post(train_room))
         .route("/api/v1/enroll/anchor", post(enroll_anchor))
@@ -311,6 +327,8 @@ fn build_router(state: ApiState) -> Router {
 
 /// Run the calibration HTTP API server (blocks until Ctrl-C).
 pub async fn execute(args: CalibrateServeArgs) -> Result<()> {
+    let evidence = EvidenceKind::parse(&args.input_kind)
+        .ok_or_else(|| anyhow::anyhow!("--input-kind must be live, replay, or synthetic"))?;
     std::fs::create_dir_all(&args.output_dir)
         .map_err(|e| anyhow::anyhow!("cannot create output dir {}: {e}", args.output_dir))?;
 
@@ -324,6 +342,7 @@ pub async fn execute(args: CalibrateServeArgs) -> Result<()> {
         udp_port: args.udp_port,
         default_tier: args.tier.clone(),
         output_dir: args.output_dir.clone(),
+        occupancy: Some(OccupancyReadiness::new(evidence).snapshot(unix_ms())),
         ..Default::default()
     }));
 
@@ -339,7 +358,7 @@ pub async fn execute(args: CalibrateServeArgs) -> Result<()> {
         let window = window.clone();
         let enroll = enroll.clone();
         tokio::spawn(async move {
-            ingest_loop(socket, cmd_rx, status, default_tier, output_dir, window, enroll).await;
+            ingest_loop(socket, cmd_rx, status, default_tier, output_dir, window, enroll, evidence).await;
         });
     }
 
@@ -393,10 +412,12 @@ async fn ingest_loop(
     output_dir: String,
     window: Arc<RwLock<VecDeque<f32>>>,
     enroll: Arc<RwLock<HashMap<String, RoomEnroll>>>,
+    evidence: EvidenceKind,
 ) {
     let mut buf = vec![0u8; RECV_BUF];
     let mut active: Option<ActiveSession> = None;
     let mut active_enroll: Option<EnrollCapture> = None;
+    let mut occupancy = OccupancyReadiness::new(evidence);
     let mut tick = tokio::time::interval(Duration::from_millis(200));
     // Counters mirrored to shared status only on the 200 ms tick — avoids a lock
     // + SessionStatus clone on every UDP frame (CPU starvation under flood).
@@ -410,8 +431,8 @@ async fn ingest_loop(
             // --- incoming command ---
             Some(cmd) = cmd_rx.recv() => match cmd {
                 CalCommand::Start { params, reply } => {
-                    if active.is_some() {
-                        let _ = reply.send(Err("a calibration session is already running".into()));
+                    if active.is_some() || active_enroll.is_some() || occupancy.is_capturing() {
+                        let _ = reply.send(Err("another capture is already running".into()));
                         continue;
                     }
                     let tier = params.tier.unwrap_or_else(|| default_tier.clone());
@@ -440,10 +461,13 @@ async fn ingest_loop(
                     };
                     let snap = session_snapshot(&sess, "recording", None);
                     active = Some(sess);
+                    // A new baseline invalidates any previous occupancy claim.
+                    occupancy = OccupancyReadiness::new(evidence);
                     {
                         let mut s = status.write().await;
                         s.session = Some(snap.clone());
                         s.last_result = None;
+                        s.occupancy = Some(occupancy.snapshot(unix_ms()));
                     }
                     eprintln!("[calibrate-serve] session start room={room_id} tier={tier} target={target_frames}");
                     let _ = reply.send(Ok(snap));
@@ -457,8 +481,31 @@ async fn ingest_loop(
                         None => { let _ = reply.send(Err("no active calibration session".into())); }
                     }
                 }
-                CalCommand::EnrollAnchor { room_id, baseline_name, label, duration_s, reply } => {
+                CalCommand::VerifyOccupancy { room_id, baseline_name, phase, target_frames, reply } => {
                     if active.is_some() || active_enroll.is_some() {
+                        let _ = reply.send(Err("another capture is already running".into()));
+                        continue;
+                    }
+                    let path = format!("{output_dir}/{baseline_name}.bin");
+                    match tokio::fs::symlink_metadata(&path).await {
+                        Ok(m) if m.is_file() && m.len() <= 16_384 => {},
+                        _ => { let _ = reply.send(Err("baseline is missing, too large, or not a regular file".into())); continue; }
+                    }
+                    let baseline = match tokio::fs::read(&path).await {
+                        Ok(bytes) => match BaselineCalibration::from_bytes(&bytes) {
+                            Ok(b) => b,
+                            Err(e) => { let _ = reply.send(Err(format!("invalid baseline: {e}"))); continue; }
+                        },
+                        Err(e) => { let _ = reply.send(Err(format!("cannot read baseline: {e}"))); continue; }
+                    };
+                    let result = occupancy.start(room_id, baseline, phase, target_frames, unix_ms())
+                        .map(|()| occupancy.snapshot(unix_ms()))
+                        .map_err(str::to_owned);
+                    if let Ok(snap) = &result { status.write().await.occupancy = Some(snap.clone()); }
+                    let _ = reply.send(result);
+                }
+                CalCommand::EnrollAnchor { room_id, baseline_name, label, duration_s, reply } => {
+                    if active.is_some() || active_enroll.is_some() || occupancy.is_capturing() {
                         let _ = reply.send(Err("a capture is already running".into()));
                         continue;
                     }
@@ -494,6 +541,7 @@ async fn ingest_loop(
                 last_frame_ms = unix_ms();
                 let parse_tier = active.as_ref().map(|s| s.tier.clone()).unwrap_or_else(|| default_tier.clone());
                 if let Some(frame) = parse_csi_packet(&buf[..n], &parse_tier) {
+                    occupancy.record(&frame, last_frame_ms);
                     // Always maintain the live window (drives /room/state).
                     win_local.push_back(frame_scalar(&frame));
                     while win_local.len() > LIVE_WINDOW {
@@ -520,10 +568,12 @@ async fn ingest_loop(
 
             // --- 200 ms tick: flush counters + window + session snapshot, deadline check ---
             _ = tick.tick() => {
+                occupancy.tick(unix_ms());
                 {
                     let mut s = status.write().await;
                     s.frames_seen = frames_seen;
                     s.last_frame_unix_ms = last_frame_ms;
+                    s.occupancy = Some(occupancy.snapshot(unix_ms()));
                     if let Some(sess) = active.as_ref() {
                         s.session = Some(session_snapshot(sess, "recording", None));
                     }
@@ -674,6 +724,8 @@ async fn descriptor() -> impl IntoResponse {
             "POST /api/v1/calibration/stop": "finalize current session early",
             "GET  /api/v1/calibration/result": "last finalized baseline summary",
             "GET  /api/v1/calibration/baselines": "list persisted baseline files",
+            "POST /api/v1/occupancy/verify": "{ room_id, baseline, phase: empty|occupied, target_frames?: 600 } — guided live CSI check",
+            "GET  /api/v1/occupancy/readiness": "VALID/DEGRADED/UNKNOWN occupancy-signal status; live UDP evidence only",
             "GET  /api/v1/room/state?bank=<name>": "live mixture-of-specialists RoomState over the CSI window",
             "POST /api/v1/room/train": "{ room_id, baseline_id, anchors[]?, geometry[]? } → train + persist a specialist bank (anchors[]/geometry[] optional if enrolled in-server)",
             "POST /api/v1/enroll/anchor": "{ room_id, baseline, label, duration_s? } → capture one guided anchor (blocks for the capture)",
@@ -736,6 +788,52 @@ async fn result(State(st): State<ApiState>) -> impl IntoResponse {
         Some(r) => (StatusCode::OK, Json(serde_json::to_value(r).unwrap())).into_response(),
         None => (StatusCode::NOT_FOUND, Json(serde_json::json!({"error":"no finalized baseline yet"}))).into_response(),
     }
+}
+
+#[derive(Deserialize)]
+struct VerifyOccupancyBody {
+    room_id: String,
+    /// Filename stem returned by `/calibration/baselines` (without `.bin`).
+    baseline: String,
+    phase: String,
+    target_frames: Option<usize>,
+}
+
+/// Start a bounded, operator-labelled CSI window. Declared replay/synthetic
+/// modes exercise the path but cannot promote a real room to VALID.
+async fn verify_occupancy(State(st): State<ApiState>, Json(b): Json<VerifyOccupancyBody>) -> impl IntoResponse {
+    let valid_name = |s: &str, max: usize| !s.is_empty() && s.len() <= max
+        && s.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-');
+    // A generated baseline stem is `<64-char-room>-<36-char-uuid>`.
+    if !valid_name(&b.room_id, 64) || !valid_name(&b.baseline, 101) {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error":"room_id and baseline must contain only ASCII letters, digits, _ or -"}))).into_response();
+    }
+    if !b.baseline.starts_with(&format!("{}-", b.room_id)) {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error":"baseline stem must belong to room_id"}))).into_response();
+    }
+    let Some(phase) = Phase::parse(&b.phase) else {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error":"phase must be empty or occupied"}))).into_response();
+    };
+    let target_frames = b.target_frames.unwrap_or(600);
+    if !(32..=4096).contains(&target_frames) {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error":"target_frames must be 32..4096"}))).into_response();
+    }
+    let (tx, rx) = oneshot::channel();
+    if st.cmd_tx.send(CalCommand::VerifyOccupancy {
+        room_id: b.room_id, baseline_name: b.baseline, phase, target_frames, reply: tx,
+    }).await.is_err() {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error":"ingest task unavailable"}))).into_response();
+    }
+    match rx.await {
+        Ok(Ok(snap)) => (StatusCode::ACCEPTED, Json(serde_json::to_value(snap).unwrap())).into_response(),
+        Ok(Err(e)) => (StatusCode::CONFLICT, Json(serde_json::json!({"error":e}))).into_response(),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error":"no reply"}))).into_response(),
+    }
+}
+
+async fn occupancy_readiness(State(st): State<ApiState>) -> impl IntoResponse {
+    let s = st.status.read().await;
+    Json(serde_json::to_value(s.occupancy.clone().unwrap_or_else(|| OccupancyReadiness::default().snapshot(unix_ms()))).unwrap())
 }
 
 /// Body for `POST /api/v1/room/train` — an enrollment (CLI `enroll` output or
@@ -1050,6 +1148,7 @@ mod tests {
             tier: "ht20".into(),
             output_dir: "./baselines".into(),
             token: None,
+            input_kind: "live".into(),
         };
         assert_eq!(a.http_port, 8090);
         assert_eq!(a.udp_port, 5005);
@@ -1101,6 +1200,74 @@ mod tests {
         let app = build_router(test_state(dir.path().to_str().unwrap()));
         assert_eq!(req(app.clone(), "GET", "/", None).await, StatusCode::OK);
         assert_eq!(req(app, "GET", "/api/v1/calibration/health", None).await, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn synthetic_udp_guided_flow_reaches_contrast_but_not_live_valid() {
+        use wifi_densepose_signal::{PhyTier, SubcarrierBaseline};
+
+        let dir = tempfile::tempdir().unwrap();
+        let baseline = BaselineCalibration {
+            tier: PhyTier::Ht20, captured_at_unix_s: 1, frame_count: 600,
+            subcarriers: (0..52).map(|_| SubcarrierBaseline {
+                amp_mean: 1.0, amp_variance: 1.0,
+                phase_mean: 0.0, phase_dispersion: 0.0,
+            }).collect(),
+        };
+        std::fs::write(dir.path().join("room-base.bin"), baseline.to_bytes()).unwrap();
+
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr = socket.local_addr().unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let (cmd_tx, cmd_rx) = mpsc::channel(8);
+        let status = Arc::new(RwLock::new(SharedStatus {
+            output_dir: dir.path().to_str().unwrap().into(), ..Default::default()
+        }));
+        let window = Arc::new(RwLock::new(VecDeque::new()));
+        let enroll = Arc::new(RwLock::new(HashMap::new()));
+        let state = ApiState { cmd_tx, status: status.clone(), window: window.clone(), fs_hz: 15.0, enroll: enroll.clone() };
+        let task = tokio::spawn(ingest_loop(
+            socket, cmd_rx, status.clone(), "ht20".into(),
+            dir.path().to_str().unwrap().into(), window, enroll,
+            EvidenceKind::Synthetic,
+        ));
+        let app = build_router(state);
+        assert_eq!(req(app.clone(), "GET", "/api/v1/occupancy/readiness", None).await, StatusCode::OK);
+        let body = |phase: &str| format!(
+            "{{\"room_id\":\"room\",\"baseline\":\"room-base\",\"phase\":\"{phase}\",\"target_frames\":32}}"
+        );
+        assert_eq!(req(app.clone(), "POST", "/api/v1/occupancy/verify", Some(&body("occupied"))).await, StatusCode::CONFLICT);
+        assert_eq!(req(app.clone(), "POST", "/api/v1/occupancy/verify", Some(&body("empty"))).await, StatusCode::ACCEPTED);
+
+        async fn send_frames(sender: &UdpSocket, addr: std::net::SocketAddr, amplitude: u8) {
+            let mut packet = vec![0u8; 20 + 64 * 2];
+            packet[0..4].copy_from_slice(&0xC511_0001u32.to_le_bytes());
+            packet[4] = 1; // node
+            packet[5] = 1; // antenna
+            packet[6..8].copy_from_slice(&64u16.to_le_bytes());
+            packet[8..12].copy_from_slice(&2432u32.to_le_bytes());
+            for k in 0..64 { packet[20 + k * 2] = amplitude; }
+            for _ in 0..36 {
+                sender.send_to(&packet, addr).await.unwrap();
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        }
+
+        send_frames(&sender, addr, 1).await;
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let empty = status.read().await.occupancy.clone().unwrap();
+        assert_eq!(empty.observed_empty_amp, Some(1.0));
+        assert_eq!(empty.state, "UNKNOWN");
+
+        assert_eq!(req(app.clone(), "POST", "/api/v1/occupancy/verify", Some(&body("occupied"))).await, StatusCode::ACCEPTED);
+        send_frames(&sender, addr, 3).await;
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let occupied = status.read().await.occupancy.clone().unwrap();
+        assert_eq!(occupied.observed_occupied_amp, Some(3.0));
+        assert_eq!(occupied.signal_contrast_pct, Some(200.0));
+        assert_eq!(occupied.state, "UNKNOWN", "synthetic packets cannot assert real-room validity");
+        assert_eq!(occupied.evidence_source, "synthetic_udp_declared");
+        task.abort();
     }
 
     #[tokio::test]
