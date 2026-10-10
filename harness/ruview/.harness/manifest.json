@@ -62,7 +62,7 @@
     "src/hosts/index.js": "ab276c41ab722bcdf72c2d1649cecbb760ae05c41c1372aae4c2447aa7c11539",
     "src/kernel.js": "48dfd218a747dd158f82ae108e7e8ed89a82cd68649214d23266112dc9033f5d",
     "src/mcp-http.js": "6eb36fa546f333e32ec6283e711d2c93914d4de48a6a3b47fce963c5ec711f5d",
-    "src/mcp-server.js": "5eb8c3431768932c3a85476df032d0608fc7a732ede3d6bdcc8467ca47552666",
+    "src/mcp-server.js": "0d907a8763b1c25a5dc73c01bd4ed5d0fba0cd4af9dcc3354e862cea97d195ac",
     "src/policy.js": "baad5eb8c3eb2e416e0a71b342ad850d7c8413d7d976571ebf596937f69da8e2",
     "src/process-runner.js": "49533b038044dfb8bc76ed01c030d06a9856ead0836157fb693e2a7d40f786d6",
     "src/redact.js": "ebf1afff46341078706b0401838c53db043603586e280d51ece5cf1feba35189",
@@ -75,7 +75,7 @@
     "src/training.js": "b8451c48db69c7d077d75f07500996213beaa52705116f64afafe084e68e3956",
     "src/ui/console-widget.js": "0d2f707d57b5ec54968dee1dc80f31c7db9152dcadfc48700c18379dabb55462"
   },
-  "filesDigest": "60935843295b67f3354b4b02cc31df62bac8b5093568b11f896dfc7fc3a91545",
+  "filesDigest": "c9afe88913de30af63bf4ede272848f4092486a782ad666522b8732615c32ef6",
   "brainDigest": "c0fb7b079ded157059b91601361429944697dae3cc42abc00dfe1a680986b0f4",
   "gateFingerprint": "6e53c784eee38310188948fc75fb49e6b4ebc04e247d01b903fa8c8a92d67bdd",
   "developmentPins": {
