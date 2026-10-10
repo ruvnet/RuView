@@ -5,11 +5,23 @@ The README uses a Cognitum-inspired palette: midnight backgrounds, cyan gradient
 ## Rebuild and check
 
 ```bash
+python3 -m pip install -r scripts/requirements-readme-visuals.txt
 python3 scripts/render-readme-visuals.py
 python3 scripts/verify-readme-visuals.py
+python3 -m unittest discover -s scripts/tests -p test_readme_visuals_xml.py
 ```
 
-The generator uses only Python's standard library and makes no network calls. The committed SVGs are the deployment artifacts. The manifest in `assets/readme/manifest.json` lists every destination.
+Install the tooling dependency in a virtual environment. The generator and verifier
+use `defusedxml` to reject DTDs, entities and external XML references. SVG inputs
+must be smaller than 20,000 bytes; the verifier reads at most that limit and
+rejects oversized inputs before parsing. Both tools use UTF-8, and generated
+files use LF line endings for reproducibility across platforms. They make no
+network calls. This dependency is only for visual maintenance, not the runtime.
+Manifest paths must be relative: SVG files stay inside `assets/readme`, and
+local link targets stay inside the repository, including after symlink resolution.
+
+The committed SVGs are the deployment artifacts. The manifest in
+`assets/readme/manifest.json` lists every destination.
 
 ## Links and rendering
 

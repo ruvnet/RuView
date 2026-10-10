@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Generate the RuView README visual system. Deterministic, stdlib, no network."""
+"""Generate the RuView README visual system. Deterministic, no network."""
 from pathlib import Path
 from html import escape
-import math,json,xml.etree.ElementTree as ET
+import math,json
+from readme_visuals_xml import parse_svg
 ROOT=Path(__file__).resolve().parents[1];OUT=ROOT/'assets/readme';OUT.mkdir(parents=True,exist_ok=True)
 C='#72eee0';BLUE='#70b6ff';INK='#041117';WHITE='#ecfafb';MUTED='#9abac5'
 def text(x,y,value,size=16,color=MUTED,anchor='start',extra=''):
@@ -46,7 +47,7 @@ def frame(w,h,title,desc,body):
  return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img" aria-labelledby="title desc"><title id="title">{escape(title)}</title><desc id="desc">{escape(desc)}</desc><defs><linearGradient id="wash" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b303a"/><stop offset=".55" stop-color="#06171e"/><stop offset="1" stop-color="#030c13"/></linearGradient><linearGradient id="accent"><stop stop-color="#91f6df"/><stop offset="1" stop-color="#26bad7"/></linearGradient><radialGradient id="halo"><stop stop-color="#35d4db" stop-opacity=".17"/><stop offset="1" stop-color="#35d4db" stop-opacity="0"/></radialGradient></defs><style>text{{font-family:Arial,Helvetica,sans-serif}}.mono{{font-family:ui-monospace,Consolas,monospace;letter-spacing:2px}}.flow{{stroke-dasharray:5 12;animation:flow 12s linear infinite}}.breathe{{animation:breathe 6s ease-in-out infinite}}.trace{{stroke-dasharray:400;stroke-dashoffset:0;animation:trace 10s ease-in-out infinite}}.float{{animation:float 9s ease-in-out infinite}}@keyframes flow{{to{{stroke-dashoffset:-136}}}}@keyframes breathe{{50%{{opacity:.4}}}}@keyframes trace{{0%,100%{{stroke-dashoffset:0}}50%{{stroke-dashoffset:90}}}}@keyframes float{{50%{{transform:translateY(-6px)}}}}@media(prefers-reduced-motion:reduce){{*{{animation:none!important}}}}</style><rect x=".5" y=".5" width="{w-1}" height="{h-1}" rx="18" fill="url(#wash)" stroke="#245360"/>{body}</svg>'''
 manifest=[]
 def save(name,w,h,title,desc,body,target):
- s=frame(w,h,title,desc,body);ET.fromstring(s);(OUT/(name+'.svg')).write_text(s+'\n');manifest.append({'file':'assets/readme/'+name+'.svg','title':title,'target':target,'width':w,'height':h})
+ s=frame(w,h,title,desc,body);raw=(s+'\n').encode('utf-8');parse_svg(raw);(OUT/(name+'.svg')).write_bytes(raw);manifest.append({'file':'assets/readme/'+name+'.svg','title':title,'target':target,'width':w,'height':h})
 # Main title panel: a radio field passes through an illustrated room.
 s=text(48,44,'RUVIEW / COGNITUM ECOSYSTEM',13,C,extra='class="mono"')+text(48,121,'RuView',76,WHITE)+text(48,184,'Spaces become signals.',38,WHITE)+text(48,234,'Signals become understanding.',32,C)+text(50,279,'Explore RF sensing, edge inference and local automation.',18)
 s+='<rect x="48" y="326" width="270" height="52" rx="12" fill="url(#accent)"/>'+text(72,359,'Explore the guide',20,INK)+path('M272 352H292M285 345L292 352L285 359',INK,2)
@@ -91,5 +92,5 @@ s+='<rect x="44" y="224" width="256" height="46" rx="11" fill="url(#accent)"/>'+
 s+='<circle cx="947" cy="151" r="173" fill="url(#halo)"/>'+icon('seed',945,150,2.4)
 for j in range(3):s+=f'<ellipse cx="945" cy="150" rx="{140+j*20}" ry="{30+j*13}" transform="rotate(-25 945 150)" fill="none" stroke="#3c8897" stroke-dasharray="5 18" class="flow"/>'
 save('cognitum',1200,304,'Explore Cognitum One','Ambient Intelligence at the edge of the physical world. Open cognitum.one.',s,'https://cognitum.one')
-(OUT/'manifest.json').write_text(json.dumps({'schema_version':1,'style':'Cognitum cyan on midnight','motion':'Decorative CSS; prefers-reduced-motion supported; no script or remote dependencies','assets':manifest},indent=2)+'\n')
+(OUT/'manifest.json').write_bytes((json.dumps({'schema_version':1,'style':'Cognitum cyan on midnight','motion':'Decorative CSS; prefers-reduced-motion supported; no script or remote dependencies','assets':manifest},indent=2)+'\n').encode('utf-8'))
 print(f'Generated {len(manifest)} SVGs, {sum((ROOT/x["file"]).stat().st_size for x in manifest):,} bytes')
