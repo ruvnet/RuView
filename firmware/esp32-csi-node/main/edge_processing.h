@@ -343,4 +343,21 @@ void edge_get_phase_history(const float **out_buf, uint16_t *out_len,
  */
 void edge_get_variances(float *out_variances, uint16_t n_subcarriers);
 
+/**
+ * Frames the edge pipeline accepted, cumulative since init.
+ *
+ * Read with edge_processing_get_frames_rejected(): the pair is what makes an
+ * idle edge stage distinguishable from one rejecting every frame.
+ */
+uint32_t edge_processing_get_frames_processed(void);
+
+/**
+ * Frames process_frame() refused, cumulative since init.
+ *
+ * Non-zero and climbing with frames_processed stuck at 0 means every frame is
+ * failing the EDGE_MAX_SUBCARRIERS guard -- the signature of a build that
+ * selected the pre-HE 128 on an HE-capable part.
+ */
+uint32_t edge_processing_get_frames_rejected(void);
+
 #endif /* EDGE_PROCESSING_H */

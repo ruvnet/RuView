@@ -382,6 +382,14 @@ static uint8_t  s_presence_below_count;  /**< Consecutive frames below low thres
 static bool     s_fall_detected;
 static int8_t   s_latest_rssi;
 static uint32_t s_frame_count;
+/** Frames process_frame() refused. Counted separately from s_frame_count so
+ *  the two together distinguish "the edge stage is idle" from "the edge stage
+ *  is rejecting everything" -- states that look identical from the outside
+ *  and have completely different causes. EDGE_MAX_SUBCARRIERS is
+ *  target-conditional, so a build that selects the pre-HE 128 on an HE part
+ *  rejects every frame here while the task still starts and logs its
+ *  banner. */
+static uint32_t s_frame_rejected;
 
 /** Previous phase velocity for fall detection (acceleration). */
 static float s_prev_phase_velocity;
@@ -1062,7 +1070,10 @@ static void send_feature_vector(void)
 static void process_frame(const edge_ring_slot_t *slot)
 {
     uint16_t n_subcarriers = slot->iq_len / 2;
-    if (n_subcarriers == 0 || n_subcarriers > EDGE_MAX_SUBCARRIERS) return;
+    if (n_subcarriers == 0 || n_subcarriers > EDGE_MAX_SUBCARRIERS) {
+        s_frame_rejected++;
+        return;
+    }
 
     s_frame_count++;
     s_latest_rssi = slot->rssi;
@@ -1389,6 +1400,16 @@ void edge_get_variances(float *out_variances, uint16_t n_subcarriers)
     }
 }
 
+uint32_t edge_processing_get_frames_processed(void)
+{
+    return s_frame_count;
+}
+
+uint32_t edge_processing_get_frames_rejected(void)
+{
+    return s_frame_rejected;
+}
+
 esp_err_t edge_processing_init(const edge_config_t *cfg)
 {
     if (cfg == NULL) {
@@ -1421,6 +1442,7 @@ esp_err_t edge_processing_init(const edge_config_t *cfg)
     s_fall_detected = false;
     s_latest_rssi = 0;
     s_frame_count = 0;
+    s_frame_rejected = 0;
     s_sample_rate_hz = EDGE_CONFIGURED_SAMPLE_RATE_HZ;
     s_filter_design_fs = EDGE_CONFIGURED_SAMPLE_RATE_HZ;
     s_rate_window_start_us = 0;
