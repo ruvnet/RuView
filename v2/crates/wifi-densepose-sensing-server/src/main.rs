@@ -10036,12 +10036,14 @@ async fn calibration_promote_bootstrap(
     }
 
     let validation = bootstrap_baseline::evaluate_validation(&samples);
+    let validation_diagnostics = validation.diagnostics();
     if !validation.passed {
         return Json(serde_json::json!({
             "success": false,
             "error_code": "bootstrap_validation_failed",
-            "error": "The held out empty room check did not pass. The model was not stored.",
+            "error": format!("The held out empty room check did not pass: {}. The model was not stored.", validation_diagnostics.failure_summary()),
             "validation": validation,
+            "validation_diagnostics": validation_diagnostics,
         }));
     }
 
@@ -10107,6 +10109,7 @@ async fn calibration_promote_bootstrap(
         "success": true,
         "message": "Validated startup baseline stored locally.",
         "validation": validation,
+        "validation_diagnostics": validation_diagnostics,
         "holdout_window_size": holdout_window_size,
         "bootstrap_baseline": stored,
         "calibrated_evidence_authorized": false,
@@ -10236,6 +10239,12 @@ async fn calibration_refine_bootstrap(
             + Duration::from_millis(BOOTSTRAP_VALIDATION_MIN_SPACING_MS);
     }
 
+    let validation_diagnostics = bootstrap_baseline::validation_diagnostics(
+        residuals.len(),
+        None,
+        stale_sample_count,
+        vital_sign_sample_count,
+    );
     if residuals.len() != BOOTSTRAP_VALIDATION_SAMPLES
         || stale_sample_count != 0
         || vital_sign_sample_count != 0
@@ -10243,12 +10252,13 @@ async fn calibration_refine_bootstrap(
         return Json(serde_json::json!({
             "success": false,
             "error_code": "bootstrap_refinement_validation_failed",
-            "error": "The fresh empty-room refinement gate did not pass. The stored baseline was not changed.",
+            "error": format!("The fresh empty-room refinement gate did not pass: {}. The stored baseline was not changed.", validation_diagnostics.failure_summary()),
             "validation": {
                 "sample_count": residuals.len(),
                 "stale_sample_count": stale_sample_count,
                 "vital_sign_sample_count": vital_sign_sample_count,
             },
+            "validation_diagnostics": validation_diagnostics,
         }));
     }
 
@@ -10335,6 +10345,7 @@ async fn calibration_refine_bootstrap(
     Json(serde_json::json!({
         "success": true,
         "message": "The local empty-room startup baseline was refined.",
+        "validation_diagnostics": validation_diagnostics,
         "validation": {
             "sample_count": residuals.len(),
             "stale_sample_count": stale_sample_count,

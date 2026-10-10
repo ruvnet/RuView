@@ -88,7 +88,29 @@ cargo run -p wifi-densepose-sensing-server -- \
 
 Complete the normal empty-room calibration, then call
 `POST /api/v1/calibration/bootstrap/promote`. The server measures a separate 12-sample holdout
-before storing an aggregate field-model snapshot. On a later start with the same installation ID,
+before storing an aggregate field-model snapshot. Promotion requires all of the following:
+
+- Exactly 12 fresh samples, spaced at least one second apart, with no stale samples.
+- At least 10 of the 12 samples classified as empty.
+- Zero samples containing numeric vital-sign estimates.
+
+The 10-of-12 tolerance applies only to the empty classification. A holdout with 12 empty samples
+and five samples containing vital-sign estimates still fails; a vital-sign estimate does not
+prove occupancy, but it prevents storing the startup baseline under this conservative check.
+
+Completed holdout evaluations return the existing `validation` counters and additive
+`validation_diagnostics.requirements` and `validation_diagnostics.failures` fields. A failed
+check retains `success: false`, `error_code`, and `error`; the error describes the observed
+counts and required limits. Each failure identifies its `check`, `observed` and `required`
+counts, and `comparison`, so clients can explain every failed condition. For example, five
+vital-sign samples produce a `vital_sign_sample_count` failure with `observed: 5`,
+`required: 0`, and `comparison: "at_most"`.
+
+The bounded refinement endpoint, `POST /api/v1/calibration/bootstrap/refine`, also requires
+12 fresh samples with zero stale or vital-sign samples. Its diagnostics omit the empty-sample
+minimum because refinement does not apply that promotion-only check.
+
+On a later start with the same installation ID,
 the snapshot is restored with `bootstrap_only` authority. It can reduce startup background false
 positives, but cannot authorize calibrated evidence or numeric heart and breathing rates. Use
 `POST /api/v1/calibration/reset` with administrator scope to remove it.
