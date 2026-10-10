@@ -20,6 +20,8 @@ pub const BOOTSTRAP_BASELINE_SCHEMA: &str = "ruview.bootstrap-empty-field-model.
 pub const BOOTSTRAP_BASELINE_AUTHORITY: &str = "bootstrap_only";
 pub const BOOTSTRAP_VALIDATION_SAMPLES: usize = 12;
 pub const BOOTSTRAP_VALIDATION_MIN_EMPTY: usize = 10;
+pub const BOOTSTRAP_VALIDATION_MAX_VITALS: usize =
+    BOOTSTRAP_VALIDATION_SAMPLES - BOOTSTRAP_VALIDATION_MIN_EMPTY;
 pub const BOOTSTRAP_VALIDATION_MIN_SPACING_MS: u64 = 1_000;
 pub const BOOTSTRAP_VALIDATION_SAMPLE_TIMEOUT_MS: u64 = 4_000;
 const BOOTSTRAP_MAX_FILE_BYTES: u64 = 1_048_576;
@@ -144,7 +146,7 @@ pub fn evaluate_validation(samples: &[BootstrapValidationSample]) -> BootstrapVa
         passed: samples.len() == BOOTSTRAP_VALIDATION_SAMPLES
             && empty_sample_count >= BOOTSTRAP_VALIDATION_MIN_EMPTY
             && stale_sample_count == 0
-            && vital_sign_sample_count == 0,
+            && vital_sign_sample_count <= BOOTSTRAP_VALIDATION_MAX_VITALS,
     }
 }
 
@@ -500,9 +502,15 @@ mod tests {
         let mut stale = passing.clone();
         stale[0].fresh_tick = false;
         assert!(!evaluate_validation(&stale).passed);
-        let mut vital = passing;
-        vital[0].vital_signs_absent = false;
-        assert!(!evaluate_validation(&vital).passed);
+
+        let mut within_tolerance = passing.clone();
+        within_tolerance[0].vital_signs_absent = false;
+        within_tolerance[1].vital_signs_absent = false;
+        assert!(evaluate_validation(&within_tolerance).passed);
+
+        let mut exceeds_tolerance = within_tolerance;
+        exceeds_tolerance[2].vital_signs_absent = false;
+        assert!(!evaluate_validation(&exceeds_tolerance).passed);
     }
 
     #[test]
