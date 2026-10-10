@@ -10037,10 +10037,21 @@ async fn calibration_promote_bootstrap(
 
     let validation = bootstrap_baseline::evaluate_validation(&samples);
     if !validation.passed {
+        let error_msg = if validation.vital_sign_sample_count > BOOTSTRAP_VALIDATION_MAX_VITALS {
+            format!(
+                "The held out empty room check failed: vital signs detected in {}/{} samples (max allowed: {}). Ensure the room is vacated.",
+                validation.vital_sign_sample_count,
+                validation.sample_count,
+                BOOTSTRAP_VALIDATION_MAX_VITALS
+            )
+        } else {
+            "The held out empty room check did not pass. The model was not stored.".to_string()
+        };
+
         return Json(serde_json::json!({
             "success": false,
             "error_code": "bootstrap_validation_failed",
-            "error": "The held out empty room check did not pass. The model was not stored.",
+            "error": error_msg,
             "validation": validation,
         }));
     }
