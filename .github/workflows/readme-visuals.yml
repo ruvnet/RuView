@@ -1,0 +1,44 @@
+name: README visual asset validation
+
+on:
+  pull_request:
+    paths:
+      - 'README.md'
+      - 'assets/readme/**'
+      - 'docs/readme-visual-system.md'
+      - 'scripts/*readme*'
+      - 'scripts/tests/test_readme_visuals_xml.py'
+      - '.github/workflows/readme-visuals.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'README.md'
+      - 'assets/readme/**'
+      - 'docs/readme-visual-system.md'
+      - 'scripts/*readme*'
+      - 'scripts/tests/test_readme_visuals_xml.py'
+      - '.github/workflows/readme-visuals.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Safe and reproducible README visuals
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Install visual tooling dependency
+        run: python -m pip install -r scripts/requirements-readme-visuals.txt
+      - name: Test XML input boundaries
+        run: python -m unittest discover -s scripts/tests -p test_readme_visuals_xml.py
+      - name: Verify reproducible and accessible assets
+        run: |
+          python scripts/render-readme-visuals.py
+          python scripts/verify-readme-visuals.py
+          git diff --exit-code -- assets/readme
+          test -z "$(git ls-files --others --exclude-standard -- assets/readme)"

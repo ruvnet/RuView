@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "style": "Cognitum cyan on midnight",
+  "motion": "Decorative CSS; prefers-reduced-motion supported; no script or remote dependencies",
+  "assets": [
+    {
+      "file": "assets/readme/hero.svg",
+      "title": "RuView: spaces become signals",
+      "target": "docs/user-guide.md",
+      "width": 1200,
+      "height": 450
+    },
+    {
+      "file": "assets/readme/nav-start.svg",
+      "title": "Start here",
+      "target": "docs/user-guide.md",
+      "width": 180,
+      "height": 116
+    },
+    {
+      "file": "assets/readme/nav-hardware.svg",
+      "title": "Hardware",
+      "target": "firmware/esp32-csi-node/README.md",
+      "width": 180,
+      "height": 116
+    },
+    {
+      "file": "assets/readme/nav-models.svg",
+      "title": "Models",
+      "target": "https://huggingface.co/ruvnet/wifi-densepose-pretrained",
+      "width": 180,
+      "height": 116
+    },
+    {
+      "file": "assets/readme/nav-agents.svg",
+      "title": "AI toolkit",
+      "target": "harness/ruview/README.md",
+      "width": 180,
+      "height": 116
+    },
+    {
+      "file": "assets/readme/nav-home.svg",
+      "title": "Smart home",
+      "target": "docs/integrations/home-assistant.md",
+      "width": 180,
+      "height": 116
+    },
+    {
+      "file": "assets/readme/nav-seed.svg",
+      "title": "Cognitum",
+      "target": "https://cognitum.one/seed",
+      "width": 180,
+      "height": 116
+    },
+    {
+      "file": "assets/readme/feature-presence.svg",
+      "title": "Presence & motion",
+      "target": "docs/user-guide.md",
+      "width": 580,
+      "height": 276
+    },
+    {
+      "file": "assets/readme/feature-vitals.svg",
+      "title": "Breathing & vital signals",
+      "target": "v2/crates/wifi-densepose-signal/README.md",
+      "width": 580,
+      "height": 276
+    },
+    {
+      "file": "assets/readme/feature-pose.svg",
+      "title": "Pose research",
+      "target": "docs/benchmarks/pose-estimation-cog.md",
+      "width": 580,
+      "height": 276
+    },
+    {
+      "file": "assets/readme/feature-edge.svg",
+      "title": "Edge sensor mesh",
+      "target": "firmware/esp32-csi-node/README.md",
+      "width": 580,
+      "height": 276
+    },
+    {
+      "file": "assets/readme/feature-automation.svg",
+      "title": "Local automation",
+      "target": "docs/integrations/home-assistant.md",
+      "width": 580,
+      "height": 276
+    },
+    {
+      "file": "assets/readme/feature-agents.svg",
+      "title": "A guided AI operator",
+      "target": "harness/ruview/README.md",
+      "width": 580,
+      "height": 276
+    },
+    {
+      "file": "assets/readme/overview.svg",
+      "title": "RuView sensing overview",
+      "target": "docs/user-guide.md",
+      "width": 1200,
+      "height": 396
+    },
+    {
+      "file": "assets/readme/header-features.svg",
+      "title": "Explore the capabilities",
+      "target": "docs/user-guide.md",
+      "width": 1200,
+      "height": 148
+    },
+    {
+      "file": "assets/readme/header-edge.svg",
+      "title": "Intelligence at the edge",
+      "target": "firmware/esp32-csi-node/README.md",
+      "width": 1200,
+      "height": 148
+    },
+    {
+      "file": "assets/readme/header-learning.svg",
+      "title": "From recordings to models",
+      "target": "docs/user-guide.md",
+      "width": 1200,
+      "height": 148
+    },
+    {
+      "file": "assets/readme/header-evidence.svg",
+      "title": "Evidence before accuracy claims",
+      "target": "docs/benchmarks/pose-estimation-cog.md",
+      "width": 1200,
+      "height": 148
+    },
+    {
+      "file": "assets/readme/header-docs.svg",
+      "title": "Choose your next step",
+      "target": "docs/user-guide.md",
+      "width": 1200,
+      "height": 148
+    },
+    {
+      "file": "assets/readme/cognitum.svg",
+      "title": "Explore Cognitum One",
+      "target": "https://cognitum.one",
+      "width": 1200,
+      "height": 304
+    }
+  ]
+}
