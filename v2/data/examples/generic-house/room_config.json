@@ -1,0 +1,41 @@
+{
+  "width_m": 12.2,
+  "depth_m": 11.4,
+  "ap_position": [6.1, 5.7, 2.2],
+  "ap_mac": "02:00:00:00:00:01",
+  "ap_floor": 1,
+  "floors": [
+    { "level": 0, "name": "Basement", "elevation_m": -2.4, "ceiling_m": 2.3, "subfloor_m": 0.3 },
+    { "level": 1, "name": "First Floor", "elevation_m": 0.0, "ceiling_m": 2.4, "subfloor_m": 0.3 }
+  ],
+  "footprint": [
+    { "level": 0, "points": [[0.0, 0.0], [12.2, 0.0], [12.2, 11.4], [0.0, 11.4]] },
+    { "level": 1, "points": [[0.0, 0.0], [12.2, 0.0], [12.2, 11.4], [0.0, 11.4]] }
+  ],
+  "walls": [],
+  "rooms": [
+    { "level": 1, "name": "Primary Bedroom", "x": 0.0, "y": 0.0, "w": 4.0, "h": 5.0 },
+    { "level": 1, "name": "Bathroom", "x": 0.0, "y": 5.0, "w": 4.0, "h": 2.0 },
+    { "level": 1, "name": "Bedroom 2", "x": 0.0, "y": 7.0, "w": 4.0, "h": 4.4 },
+    { "level": 1, "name": "Hallway", "x": 4.0, "y": 0.0, "w": 1.5, "h": 11.4 },
+    { "level": 1, "name": "Kitchen", "x": 5.5, "y": 0.0, "w": 6.7, "h": 4.5 },
+    { "level": 1, "name": "Family Room", "x": 5.5, "y": 4.5, "w": 6.7, "h": 6.9 },
+    { "level": 0, "name": "Basement Storage", "x": 0.0, "y": 0.0, "w": 5.5, "h": 11.4 },
+    { "level": 0, "name": "Basement Rec Room", "x": 5.5, "y": 0.0, "w": 6.7, "h": 11.4 }
+  ],
+  "nodes": [
+    { "id": 1, "label": "Primary Bedroom", "floor": 1, "x": 1.0, "y": 1.0, "z": 2.1 },
+    { "id": 2, "label": "Bedroom 2", "floor": 1, "x": 1.0, "y": 10.5, "z": 2.1 },
+    { "id": 3, "label": "Kitchen", "floor": 1, "x": 11.2, "y": 1.0, "z": 2.1 },
+    { "id": 4, "label": "Family Room", "floor": 1, "x": 11.2, "y": 10.5, "z": 2.1 },
+    { "id": 5, "label": "Basement Storage", "floor": 0, "x": 2.0, "y": 6.0, "z": -2.0 },
+    { "id": 6, "label": "Basement Rec Room", "floor": 0, "x": 9.0, "y": 6.0, "z": -2.0 }
+  ],
+  "emitters": [
+    { "label": "Home AP", "mac": "02:00:00:00:00:01", "status": "surveyed", "floor": 1, "position": [6.1, 5.7, 2.2] },
+    { "label": "Neighbor Router (Approx)", "mac": "02:00:00:00:00:02", "status": "approved", "floor": 1, "position": [-3.0, 5.0, 1.2], "uncertainty_m": 5.0 },
+    { "label": "Guest Phone", "mac": "02:00:00:00:00:03", "status": "pending" },
+    { "label": "Smart Speaker (Shortlisted)", "mac": "02:00:00:00:00:04", "status": "selected" },
+    { "label": "Guest Laptop (Roaming)", "mac": "02:00:00:00:00:05", "status": "excluded" }
+  ]
+}
