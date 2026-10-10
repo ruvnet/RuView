@@ -128,16 +128,23 @@ class TestStateFilePermissions(_TempDirCase):
 
 
 class TestStateOutputMasking(_TempDirCase):
+    """--state output, including a file left by a version that cached secrets."""
+
     def setUp(self):
         super().setUp()
-        provision.save_state("COM7", self.state_dir, {
-            "ssid": "test-ssid",
-            "password": FAKE_PASSWORD,
-            "seed_token": FAKE_TOKEN,
-            "target_ip": "192.0.2.10",
-        })
+        # Written directly: save_state() would strip the secrets, and the point
+        # is what happens to a file an older version already wrote.
+        os.makedirs(self.state_dir, exist_ok=True)
+        self.legacy_path = provision._state_path_for("COM7", self.state_dir)
+        with open(self.legacy_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "ssid": "test-ssid",
+                "password": FAKE_PASSWORD,
+                "seed_token": FAKE_TOKEN,
+                "target_ip": "192.0.2.10",
+            }, f)
 
-    def test_state_hides_password_and_seed_token(self):
+    def test_state_never_shows_secrets_from_a_legacy_file(self):
         code, out, err = self.run_main(
             "--port", "COM7", "--state-dir", self.state_dir, "--state")
 
@@ -145,19 +152,31 @@ class TestStateOutputMasking(_TempDirCase):
         self.assertNotIn(FAKE_PASSWORD, out)
         self.assertNotIn(FAKE_TOKEN, out)
         shown = json.loads(out)
-        self.assertEqual(shown["password"], "(set)")
-        self.assertEqual(shown["seed_token"], "(set)")
+        self.assertNotIn("password", shown)
+        self.assertNotIn("seed_token", shown)
         self.assertEqual(shown["ssid"], "test-ssid")
-        self.assertIn("--show-secrets", err)
 
-    def test_show_secrets_prints_them(self):
+    def test_show_secrets_has_nothing_to_show(self):
         code, out, _ = self.run_main(
             "--port", "COM7", "--state-dir", self.state_dir, "--state", "--show-secrets")
 
         self.assertEqual(code, 0)
         shown = json.loads(out)
-        self.assertEqual(shown["password"], FAKE_PASSWORD)
-        self.assertEqual(shown["seed_token"], FAKE_TOKEN)
+        self.assertNotIn("password", shown)
+        self.assertNotIn("seed_token", shown)
+
+    def test_reading_a_legacy_file_scrubs_it_on_disk(self):
+        state = provision.load_state("COM7", self.state_dir)
+
+        self.assertEqual(state, {"ssid": "test-ssid", "target_ip": "192.0.2.10"})
+        with open(self.legacy_path, encoding="utf-8") as f:
+            raw = f.read()
+        self.assertNotIn(FAKE_PASSWORD, raw)
+        self.assertNotIn(FAKE_TOKEN, raw)
+
+    def test_redact_hides_values_it_is_given(self):
+        shown = provision.redact_secrets({"password": FAKE_PASSWORD, "seed_token": FAKE_TOKEN})
+        self.assertEqual(shown, {"password": "(set)", "seed_token": "(set)"})
 
     def test_redact_marks_empty_and_leaves_absent_alone(self):
         shown = provision.redact_secrets({"password": "", "ssid": "test-ssid"})
@@ -321,17 +340,44 @@ class TestPasswordInput(_TempDirCase):
         self.assertEqual(code, 0)
         prompt.assert_called_once()
         self.assertEqual(self.flashed_password(), FAKE_PASSWORD)
-        self.assertEqual(provision.load_state("COM7", self.state_dir)["password"], FAKE_PASSWORD)
+        self.assertNotIn("password", provision.load_state("COM7", self.state_dir))
 
-    def test_no_prompt_when_saved_password_matches_the_ssid(self):
-        provision.save_state("COM7", self.state_dir,
-                             {"ssid": "test-ssid", "password": FAKE_PASSWORD})
+    def test_saved_ssid_alone_still_prompts_for_the_password(self):
+        # The password is never cached, so a known SSID in state is not enough.
+        provision.save_state("COM7", self.state_dir, {"ssid": "test-ssid"})
 
-        code, _, prompt = self.provision("--ssid", "test-ssid", tty=True, typed="unused")
+        code, _, prompt = self.provision(tty=True, typed=FAKE_PASSWORD)
+
+        self.assertEqual(code, 0)
+        prompt.assert_called_once()
+        self.assertEqual(self.flashed_password(), FAKE_PASSWORD)
+
+    def test_no_prompt_when_password_is_given(self):
+        code, _, prompt = self.provision("--ssid", "test-ssid", "--password", FAKE_PASSWORD,
+                                         tty=True, typed="unused")
 
         self.assertEqual(code, 0)
         prompt.assert_not_called()
         self.assertEqual(self.flashed_password(), FAKE_PASSWORD)
+
+    def test_full_run_leaves_no_secret_in_the_state_file(self):
+        code, _, _ = self.provision(
+            "--ssid", "test-ssid", "--password", FAKE_PASSWORD,
+            "--seed-url", "http://192.0.2.10:8080", "--seed-token", FAKE_TOKEN,
+            "--ota-psk", "deadbeef")
+
+        self.assertEqual(code, 0)
+        self.assertEqual(self.flashed_password(), FAKE_PASSWORD)  # it did reach the NVS image
+        files = [n for n in os.listdir(self.state_dir) if n.endswith(".json")]
+        self.assertTrue(files)
+        for name in files:
+            with open(os.path.join(self.state_dir, name), encoding="utf-8") as f:
+                raw = f.read()
+            data = json.loads(raw)
+            for key in ("password", "seed_token", "ota_psk"):
+                self.assertNotIn(key, data)
+            for secret in (FAKE_PASSWORD, FAKE_TOKEN, "deadbeef"):
+                self.assertNotIn(secret, raw)
 
     def test_no_prompt_without_a_terminal(self):
         code, err, prompt = self.provision("--ssid", "test-ssid", tty=False, typed="unused")

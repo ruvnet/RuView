@@ -6,9 +6,9 @@ Writes WiFi credentials and aggregator target to the ESP32's NVS partition
 so users can configure a pre-built firmware binary without recompiling.
 
 Usage:
-    python provision.py --port COM7 --ssid "MyWiFi" --password "secret" --target-ip 192.168.1.20
+    python provision.py --port COM7 --ssid "MyWiFi" --password "secret" --target-ip 192.0.2.20
     python provision.py --port /dev/ttyUSB0 --chip esp32c6 --ssid "..." \\
-        --password "..." --target-ip 192.168.1.20
+        --password "..." --target-ip 192.0.2.20
 
 Requirements:
     pip install 'esptool>=5.0' esp-idf-nvs-partition-gen
@@ -87,6 +87,7 @@ CONFIG_VALUE_CHECKS = [
     ("zone", lambda value: value is not None),
     ("swarm_hb", lambda value: value is not None),
     ("swarm_ingest", lambda value: value is not None),
+    ("ota_psk", lambda value: value is not None),
 ]
 
 
@@ -108,14 +109,19 @@ def has_config_value(args):
 
 # argparse attribute names that participate in the merge. Order doesn't
 # matter; this is just the surface area to round-trip.
+#
+# SECRETS ARE DELIBERATELY EXCLUDED ("password", "seed_token", "ota_psk"; see
+# SECRET_ATTRS). Earlier versions cached them in the state file; they are now
+# supplied on every run (--password / --password-file / prompt, --seed-token,
+# --ota-psk) and save_state() strips them as a backstop. Do not add them back.
 MERGEABLE_ATTRS = [
-    "ssid", "password", "target_ip", "target_port", "node_id",
+    "ssid", "target_ip", "target_port", "node_id",
     "tdm_slot", "tdm_total",
     "edge_tier", "pres_thresh", "fall_thresh",
     "vital_win", "vital_int", "subk_count",
     "channel", "filter_mac",
     "hop_channels", "hop_dwell",
-    "seed_url", "seed_token", "zone", "swarm_hb", "swarm_ingest",
+    "seed_url", "zone", "swarm_hb", "swarm_ingest",
 ]
 
 
@@ -143,7 +149,7 @@ STATE_DIR_MODE = 0o700
 STATE_FILE_MODE = 0o600
 
 # Values `--state` hides unless `--show-secrets` is passed (#1754).
-SECRET_ATTRS = ("password", "seed_token")
+SECRET_ATTRS = ("password", "seed_token", "ota_psk")
 
 
 def _restrict_mode(path: str, mode: int) -> None:
@@ -269,6 +275,19 @@ def load_state(port: str, state_dir: str) -> dict:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
+            stale = [k for k in SECRET_ATTRS if k in data]
+            if stale:
+                # Written by an older version. Scrub it now rather than wait
+                # for a next run that may never happen on a retired board.
+                data = {k: v for k, v in data.items() if k not in SECRET_ATTRS}
+                print(f"NOTE: removed {', '.join(stale)} from the state file "
+                      f"{path}; credentials are no longer cached there.",
+                      file=sys.stderr)
+                try:
+                    save_state(port, state_dir, data)
+                except OSError as exc:
+                    print(f"WARNING: could not rewrite {path} without the "
+                          f"credential: {exc}", file=sys.stderr)
             return data
     except (OSError, json.JSONDecodeError) as exc:
         print(f"WARNING: could not read state file {path}: {exc}", file=sys.stderr)
@@ -278,11 +297,14 @@ def load_state(port: str, state_dir: str) -> dict:
 def save_state(port: str, state_dir: str, state: dict) -> str:
     """Write `state` to the per-port file, creating dirs as needed. Returns path.
 
-    The file holds secrets, so it is written 0600 inside a 0700 dir (#1754).
+    Secrets (SECRET_ATTRS) are stripped before writing; the file is still
+    written 0600 inside a 0700 dir (#1754).
     """
     os.makedirs(state_dir, mode=STATE_DIR_MODE, exist_ok=True)
     harden_state_dir(state_dir)
     path = _state_path_for(port, state_dir)
+    # Secrets never reach disk, whatever the caller passed in.
+    state = {k: v for k, v in state.items() if k not in SECRET_ATTRS}
     # mkstemp picks a unique name and opens it O_EXCL with mode 0600, so a
     # stale temp file or a planted symlink can't receive the secret.
     fd, tmp = tempfile.mkstemp(
@@ -490,6 +512,13 @@ def build_nvs_csv(args):
         writer.writerow(["swarm_hb", "data", "u16", str(args.swarm_hb)])
     if args.swarm_ingest is not None:
         writer.writerow(["swarm_ingest", "data", "u16", str(args.swarm_ingest)])
+    # ADR-050: OTA pre-shared key. Separate NVS namespace ("security"), which
+    # is what ota_update.c's ota_load_psk_from_nvs() opens. Must come after
+    # every csi_cfg row: a `namespace` row starts a section. Never persisted in
+    # the state file (SECRET_ATTRS), so it must be supplied on every run.
+    if getattr(args, "ota_psk", None):
+        writer.writerow(["security", "namespace", "", ""])
+        writer.writerow(["ota_psk", "data", "string", args.ota_psk])
     return buf.getvalue()
 
 
@@ -572,7 +601,7 @@ def main():
         description="Provision CSI node NVS (WiFi + aggregator); works on S3, C6, etc.",
         epilog=(
             "Example: python provision.py --port COM7 --ssid MyWiFi --password secret "
-            "--target-ip 192.168.1.20\n"
+            "--target-ip 192.0.2.20\n"
             "ESP32-C6: same, or pass --chip esp32c6 if auto-detect fails "
             "(default chip is auto for esptool v5+)."
         ),
@@ -595,7 +624,7 @@ def main():
     parser.add_argument("--allow-insecure-password-file", action="store_true",
                         help="Accept a --password-file that group or others can read, with a "
                         "warning (e.g. a read-only 0444 secrets mount).")
-    parser.add_argument("--target-ip", help="Aggregator host IP (e.g. 192.168.1.20)")
+    parser.add_argument("--target-ip", help="Aggregator host IP (e.g. 192.0.2.20)")
     parser.add_argument("--target-port", type=int, help="Aggregator UDP port (default: 5005)")
     parser.add_argument("--node-id", type=int, help="Node ID 0-255 (default: 1)")
     # TDM mesh settings
@@ -624,6 +653,11 @@ def main():
     parser.add_argument("--zone", type=str, help="Zone name for this node (e.g. lobby, hallway)")
     parser.add_argument("--swarm-hb", type=int, help="Swarm heartbeat interval in seconds (default 30)")
     parser.add_argument("--swarm-ingest", type=int, help="Swarm vector ingest interval in seconds (default 5)")
+    parser.add_argument("--ota-psk", type=str,
+                        help="OTA pre-shared key (hex). Without it the node's "
+                             "OTA upload endpoint rejects everything, so the "
+                             "board can only be updated over USB. Prefer "
+                             "provision_node.py, which reads this from a file.")
     parser.add_argument("--dry-run", action="store_true", help="Generate NVS binary but don't flash")
     parser.add_argument("--force-partial", action="store_true",
                         help="[deprecated since #391/#574] Suppress the missing-WiFi-trio "
@@ -709,15 +743,13 @@ def main():
                   file=sys.stderr)
     merged = merge_state_into_args(args, prior)
 
-    # A new --ssid with no password given: ask for it on a terminal instead of
-    # requiring it on the command line. The saved password is reused only when
-    # it belongs to the same SSID. Without a terminal (scripts, CI) nothing is
-    # asked and the WiFi-credential check below applies as before.
-    if (not args.state and cli_ssid is not None and cli_password is None
-            and (prior.get("password") is None or prior.get("ssid") != cli_ssid)
-            and sys.stdin.isatty()):
-        args.password = getpass.getpass(f"WiFi password for {cli_ssid}: ")
-        merged["password"] = args.password
+    # No password on the CLI or in a file: ask for it on a terminal. Passwords
+    # are never stored in the state file, so this applies whenever an SSID is
+    # known (from the CLI or the merged state). Without a terminal (scripts,
+    # CI) nothing is asked and the WiFi-credential check below applies.
+    if (not args.state and args.ssid and cli_password is None
+            and args.password is None and sys.stdin.isatty()):
+        args.password = getpass.getpass(f"WiFi password for {args.ssid}: ")
 
     if args.state:
         shown = merged if args.show_secrets else redact_secrets(merged)
@@ -748,9 +780,10 @@ def main():
             f"Missing required WiFi credentials after merging prior state: "
             f"{', '.join(wifi_trio_missing)}.\n"
             f"\n"
-            f"  No saved state at {_state_path_for(state_key, args.state_dir)}\n"
-            f"  and the CLI didn't include them. Either pass --ssid + --password + --target-ip\n"
-            f"  on this run, or add --force-partial to flash without WiFi.\n"
+            f"  Saved state ({_state_path_for(state_key, args.state_dir)}) holds no\n"
+            f"  credentials -- the WiFi password is never cached -- and the CLI\n"
+            f"  didn't include them. Pass --ssid + --password (or --password-file)\n"
+            f"  + --target-ip on this run, or add --force-partial to flash without WiFi.\n"
         )
     if args.force_partial and wifi_trio_missing:
         print(
@@ -780,6 +813,17 @@ def main():
                     raise ValueError
         except ValueError:
             parser.error(f"--filter-mac contains invalid hex bytes: '{args.filter_mac}'")
+
+    # Flashing NVS rewrites the whole partition, so omitting --ota-psk on a
+    # reprovision silently revokes the node's OTA key (it fails closed).
+    if not getattr(args, "ota_psk", None):
+        print(
+            "WARNING: no --ota-psk on this run. The 'security' NVS namespace "
+            "will be absent, so this board will REJECT every OTA upload and "
+            "can only be updated over USB. Use provision_node.py to supply the "
+            "key from a file.",
+            file=sys.stderr,
+        )
 
     print("Building NVS configuration:")
     if args.ssid:
