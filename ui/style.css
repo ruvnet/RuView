@@ -3501,6 +3501,37 @@ a:focus-visible,
   font-weight: var(--font-weight-semibold);
 }
 
+/* Tools section of the drawer (links copied from the desktop Tools menu). */
+.mobile-nav-head {
+  margin-top: var(--space-8);
+  padding: var(--space-12) var(--space-24) var(--space-4);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.mobile-nav-subhead {
+  padding: var(--space-8) var(--space-24) var(--space-4);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+  opacity: 0.7;
+}
+
+.mobile-nav-tool {
+  font-size: var(--font-size-sm);
+}
+
+.mobile-nav-tool em {
+  display: block;
+  font-style: normal;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-normal, 400);
+  opacity: 0.8;
+}
+
 .mobile-nav-hint {
   padding: var(--space-16) var(--space-24);
   font-size: var(--font-size-xs);
@@ -4186,4 +4217,67 @@ a:focus-visible,
 @media (max-width: 640px) {
   .uptime-clock { display: none; }
   .lang-selector-wrap { display: none; }
+}
+
+/* ── Tools menu ────────────────────────────────────────────────────────────
+   Groups the standalone diagnostic pages, which previously had no route into
+   them from the UI at all. Anchored to its button rather than the nav bar so
+   it stays put when the bar wraps to two rows on a narrow screen. */
+.nav-menu { position: relative; display: inline-block; }
+
+.nav-menu-btn { cursor: pointer; }
+
+.nav-menu-list {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 60;
+  min-width: 260px;
+  padding: var(--space-8) 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base, 8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  text-align: left;
+}
+
+.nav-menu-head {
+  display: block;
+  padding: var(--space-8) var(--space-16) var(--space-4);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+  opacity: 0.7;
+}
+
+.nav-menu-list a {
+  display: block;
+  padding: var(--space-8) var(--space-16);
+  color: var(--color-text);
+  text-decoration: none;
+  font-size: var(--font-size-sm);
+  line-height: 1.3;
+}
+
+/* The one-line description matters: these pages are named after what they are
+   rather than what they do, and a name alone does not tell you which to open. */
+.nav-menu-list a em {
+  display: block;
+  font-style: normal;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  opacity: 0.8;
+}
+
+.nav-menu-list a:hover,
+.nav-menu-list a:focus-visible {
+  background: var(--color-secondary, rgba(255, 255, 255, 0.06));
+}
+
+/* Touch targets: a 13px link with 8px padding is fiddly on a phone, and this
+   menu is most useful from one while walking the house. */
+@media (pointer: coarse) {
+  .nav-menu-list { min-width: 280px; }
+  .nav-menu-list a { padding: var(--space-12) var(--space-16); }
 }

@@ -55,6 +55,10 @@ export class MobileNav {
     list.className = 'mobile-nav-list';
 
     tabs.forEach(tab => {
+      // The Tools button opens a dropdown that lives inside .nav-tabs, which
+      // is display:none on mobile -- cloning it here produced a dead item
+      // (BACKLOG row 167). Its links are expanded into the drawer below.
+      if (tab.classList.contains('nav-menu-btn')) return;
       const item = document.createElement(tab.tagName === 'A' ? 'a' : 'button');
       item.className = 'mobile-nav-item';
       item.textContent = tab.textContent.trim();
@@ -79,6 +83,41 @@ export class MobileNav {
 
       list.appendChild(item);
     });
+
+    // Tools menu: headings and links copied flat into the drawer, so the
+    // standalone pages stay reachable from a phone.
+    const toolsList = document.querySelector('.nav-menu-list');
+    if (toolsList) {
+      const toolsHead = document.createElement('div');
+      toolsHead.className = 'mobile-nav-head';
+      toolsHead.textContent = 'Tools';
+      list.appendChild(toolsHead);
+      Array.from(toolsList.children).forEach(el => {
+        if (el.classList.contains('nav-menu-head')) {
+          const h = document.createElement('div');
+          h.className = 'mobile-nav-subhead';
+          h.textContent = el.textContent.trim();
+          list.appendChild(h);
+        } else if (el.tagName === 'A') {
+          // Pose Fusion / Observatory are also top-level tabs; list once.
+          if (list.querySelector('a[href="' + el.getAttribute('href') + '"]')) return;
+          const a = document.createElement('a');
+          a.className = 'mobile-nav-item mobile-nav-tool';
+          a.href = el.href;
+          const em = el.querySelector('em');
+          const name = Array.from(el.childNodes)
+            .filter(n => n.nodeType === Node.TEXT_NODE)
+            .map(n => n.textContent).join('').trim();
+          a.textContent = name;
+          if (em) {
+            const d = document.createElement('em');
+            d.textContent = em.textContent.trim();
+            a.appendChild(d);
+          }
+          list.appendChild(a);
+        }
+      });
+    }
 
     this.drawer.appendChild(list);
 
