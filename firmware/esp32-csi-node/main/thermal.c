@@ -29,7 +29,7 @@
 #include "sdkconfig.h"
 #include "thermal.h"
 
-#if defined(CONFIG_THERMAL_MONITOR) && defined(CONFIG_IDF_TARGET_ESP32C6)
+#if defined(CONFIG_THERMAL_MONITOR) && (defined(CONFIG_IDF_TARGET_ESP32C6) || defined(CONFIG_IDF_TARGET_ESP32C5))
 
 #include "driver/temperature_sensor.h"
 #include "esp_wifi.h"

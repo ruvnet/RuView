@@ -10,6 +10,7 @@
 | **Tracking issue** | [ruvnet/RuView#762](https://github.com/ruvnet/RuView/issues/762) |
 | **Firmware releases** | [v0.6.7](https://github.com/ruvnet/RuView/releases/tag/v0.6.7-esp32) · [v0.6.8](https://github.com/ruvnet/RuView/releases/tag/v0.6.8-esp32) · [v0.6.9](https://github.com/ruvnet/RuView/releases/tag/v0.6.9-esp32) · [v0.7.0](https://github.com/ruvnet/RuView/releases/tag/v0.7.0-esp32) |
 | **Witness** | [`docs/WITNESS-LOG-110.md`](../WITNESS-LOG-110.md) — 13 §A0 entries (§A0.1 → §A0.13), 1 §A.1-A.12 dual-soak, 4 §B blocker entries, 5 §C bug fixes, 1 §D-workaround |
+| **Extended by** | [ADR-383](ADR-383-esp32-c5-firmware-extension.md) (ESP32-C5, 2026-10-04) — the HE-class `c6_*` modules (TWT, LP-core, SoftAP-HE, timesync, thermal) and their Kconfig/CMake gates are now shared C6/C5, not C6-only. The XIAO antenna-select stays C6-specific. |
 
 ---
 

@@ -557,9 +557,13 @@ def flash_nvs(port, baud, nvs_bin, chip):
             "--chip", chip,
             "--port", port,
             "--baud", str(baud),
-            "write_flash",
-            hex(NVS_PARTITION_OFFSET), bin_path,
         ]
+        # ADR-383: esp32c5 is an IDF preview target with no flasher stub yet, so
+        # esptool must talk to the ROM loader directly. Without --no-stub the
+        # write silently fails its MD5 verify (flash reads back 0xFF).
+        if chip == "esp32c5":
+            cmd.append("--no-stub")
+        cmd += ["write_flash", hex(NVS_PARTITION_OFFSET), bin_path]
         print(f"Flashing NVS partition ({len(nvs_bin)} bytes) to {port} (chip={chip})...")
         subprocess.check_call(cmd)
         print("NVS provisioning complete!")

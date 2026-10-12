@@ -25,7 +25,7 @@ extern "C" {
 
 #include "soc/soc_caps.h"
 
-#if defined(CONFIG_IDF_TARGET_ESP32C6) && SOC_WIFI_HE_SUPPORT
+#if (defined(CONFIG_IDF_TARGET_ESP32C6) || defined(CONFIG_IDF_TARGET_ESP32C5)) && SOC_WIFI_HE_SUPPORT
 
 #include "esp_err.h"
 #include <stdint.h>

@@ -102,6 +102,7 @@ menu "Edge Intelligence (ADR-039)"
     config EDGE_DSP_SAMPLE_HZ
         int "On-device edge DSP sample rate (Hz)"
         default 8 if IDF_TARGET_ESP32C6
+        default 8 if IDF_TARGET_ESP32C5
         default 20
         range 8 50
         help
@@ -351,8 +352,26 @@ config OTA_HTTPD_STACK_SIZE
 
 endmenu
 
-menu "ESP32-C6 capabilities (ADR-110)"
-    depends on IDF_TARGET_ESP32C6
+menu "ESP32-C6/C5 (HE-class) capabilities (ADR-110, ADR-383)"
+    depends on IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32C5
+
+    choice CSI_WIFI_BAND_MODE
+        prompt "Wi-Fi band (dual-band chips only)"
+        default CSI_WIFI_BAND_AUTO
+        depends on SOC_WIFI_SUPPORT_5G
+        help
+            ADR-383: which band the STA may join on a dual-band chip
+            (ESP32-C5). AUTO lets the driver pick, so a dual-band AP may
+            steer the node to 5 GHz. 2G_ONLY / 5G_ONLY pin the band, e.g.
+            to qualify CSI on one band or keep 2.4 GHz free for 802.15.4.
+
+        config CSI_WIFI_BAND_AUTO
+            bool "Auto (2.4 + 5 GHz)"
+        config CSI_WIFI_BAND_2G_ONLY
+            bool "2.4 GHz only"
+        config CSI_WIFI_BAND_5G_ONLY
+            bool "5 GHz only"
+    endchoice
 
     config C6_TWT_ENABLE
         bool "Enable TWT (Target Wake Time) negotiation"
@@ -564,7 +583,7 @@ menu "Thermal monitoring"
 
 config THERMAL_MONITOR
     bool "Read the on-chip temperature sensor and throttle the radio"
-    depends on IDF_TARGET_ESP32C6
+    depends on IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32C5
     default y
     help
       The C6 has a temperature sensor this firmware otherwise never reads.

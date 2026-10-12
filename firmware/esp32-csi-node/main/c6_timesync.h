@@ -26,7 +26,7 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
-#if defined(CONFIG_IDF_TARGET_ESP32C6) && defined(CONFIG_IEEE802154_ENABLED)
+#if (defined(CONFIG_IDF_TARGET_ESP32C6) || defined(CONFIG_IDF_TARGET_ESP32C5)) && defined(CONFIG_IEEE802154_ENABLED)
 
 /**
  * Initialize the 802.15.4 radio and time-sync state machine.

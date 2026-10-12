@@ -22,7 +22,7 @@
 
 #include "sdkconfig.h"
 
-#if defined(CONFIG_IDF_TARGET_ESP32C6) && defined(CONFIG_C6_SOFTAP_HE_ENABLE)
+#if (defined(CONFIG_IDF_TARGET_ESP32C6) || defined(CONFIG_IDF_TARGET_ESP32C5)) && defined(CONFIG_C6_SOFTAP_HE_ENABLE)
 
 #include "c6_softap_he.h"
 #include "esp_log.h"

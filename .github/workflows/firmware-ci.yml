@@ -43,7 +43,8 @@ jobs:
     name: Build firmware (${{ matrix.target }} / ${{ matrix.variant }})
     runs-on: ubuntu-latest
     container:
-      image: espressif/idf:v5.4
+      # Entries default to IDF v5.4; a target that needs a newer IDF sets `idf`.
+      image: espressif/idf:${{ matrix.idf || 'v5.4' }}
     strategy:
       fail-fast: false
       matrix:
@@ -75,6 +76,20 @@ jobs:
             size_limit_kb: 1152
             artifact_app: esp32-csi-node-c6.bin
             artifact_pt: partition-table-c6.bin
+          # ADR-383: ESP32-C5 dual-band (2.4 + 5 GHz) target. Preview target that
+          # needs IDF >= 5.5.2 (HE-LTF CSI, C5 PSRAM reset fix). The app is
+          # ~1123 KiB in a 4096 KiB OTA slot (16 MB layout); the gate is a growth
+          # budget, not the slot size.
+          - variant: c5-16mb
+            target: esp32c5
+            idf: v5.5.2
+            preview: true
+            sdkconfig: sdkconfig.defaults
+            partition_table_name: partitions_16mb.csv
+            size_warn_kb: 1300
+            size_limit_kb: 1536
+            artifact_app: esp32-csi-node-c5.bin
+            artifact_pt: partition-table-c5.bin
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -88,10 +103,11 @@ jobs:
           # 4mb variant supplies its own sdkconfig.defaults overlay.
           # c6-4mb variant relies on the auto-applied sdkconfig.defaults.esp32c6
           # overlay (ESP-IDF auto-loads sdkconfig.defaults.$TARGET when present).
+          # c5-16mb likewise relies on sdkconfig.defaults.esp32c5.
           if [ "${{ matrix.variant }}" = "4mb" ]; then
             cp "${{ matrix.sdkconfig }}" sdkconfig.defaults
           fi
-          idf.py set-target ${{ matrix.target }}
+          idf.py ${{ matrix.preview && '--preview' || '' }} set-target ${{ matrix.target }}
           idf.py build
 
       - name: Build and run host-side firmware unit tests
@@ -233,6 +249,6 @@ jobs:
         with:
           name: ESP32 firmware ${{ github.ref_name }}
           body: |
-            Exact-run ESP32-S3 8 MB, ESP32-S3 4 MB, and ESP32-C6 4 MB firmware bundles.
+            Exact-run ESP32-S3 8 MB, ESP32-S3 4 MB, ESP32-C6 4 MB, and ESP32-C5 16 MB firmware bundles.
             Verify each archive against `SHA256SUMS.txt` before flashing.
           files: release-assets/*

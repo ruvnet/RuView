@@ -72,7 +72,7 @@ static inline thermal_state_t thermal_next_state(thermal_state_t cur, float c,
     return THERMAL_OK;
 }
 
-#if defined(CONFIG_THERMAL_MONITOR) && defined(CONFIG_IDF_TARGET_ESP32C6)
+#if defined(CONFIG_THERMAL_MONITOR) && (defined(CONFIG_IDF_TARGET_ESP32C6) || defined(CONFIG_IDF_TARGET_ESP32C5))
 
 esp_err_t thermal_init(void);
 

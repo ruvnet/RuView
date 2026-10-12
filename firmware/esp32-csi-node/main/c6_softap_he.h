@@ -27,7 +27,7 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
-#if defined(CONFIG_IDF_TARGET_ESP32C6) && defined(CONFIG_C6_SOFTAP_HE_ENABLE)
+#if (defined(CONFIG_IDF_TARGET_ESP32C6) || defined(CONFIG_IDF_TARGET_ESP32C5)) && defined(CONFIG_C6_SOFTAP_HE_ENABLE)
 
 /**
  * Bring up the soft-AP in AP+STA mode with HE (Wi-Fi 6) advertised and
