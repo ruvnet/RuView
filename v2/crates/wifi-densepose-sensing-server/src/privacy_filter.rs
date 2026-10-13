@@ -1,4 +1,4 @@
-//! Server-wide `--privacy-mode` output filter (#2094).
+//! Server-wide `--privacy-mode` output filter (#2094, #2165).
 //!
 //! `--privacy-mode` used to be read only by the MQTT publisher, so REST, the
 //! WebSocket streams and recordings kept serving heart rate, breathing rate
@@ -10,11 +10,14 @@
 //! - WebSocket and recordings: the server calls [`redact_json_str`] on each
 //!   broadcast frame before it is sent or written.
 //!
-//! The suppressed set matches the MQTT filter (`mqtt::privacy`): heart rate,
-//! breathing rate and pose keypoints. Presence, motion, person count, zone
-//! and the coarse posture label are kept, as they are on MQTT. Keys are
-//! removed, not nulled, so a client can't tell a suppressed value from one
-//! the server never had.
+//! The filter is deny-by-default (#2165). A key survives only if
+//! [`crate::privacy_fields::FIELD_CLASSES`] classifies it as public; biometric
+//! and unclassified keys are removed, at any depth. A frame whose kind isn't
+//! in [`crate::privacy_fields::PUBLIC_FRAME_KINDS`] is dropped whole. REST
+//! routes are classified too: control-plane routes lose only biometric keys,
+//! raw-signal routes are refused, and every other route, including one added
+//! later, gets the full filter. Keys are removed, not nulled, so a client
+//! can't tell a suppressed value from one the server never had.
 //!
 //! The filter fails closed: a frame or JSON body that can't be parsed is
 //! dropped (WebSocket, recording) or replaced with a 500 (REST) rather than
@@ -30,24 +33,9 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use serde_json::Value;
 
-/// JSON object keys removed, at any depth, from every output in privacy mode.
-pub const BIOMETRIC_KEYS: &[&str] = &[
-    // Vital signs: the `vital_signs` object carries HR/BR and their
-    // confidences; the leaf keys cover edge vitals, fused vitals and the
-    // mmWave block.
-    "vital_signs",
-    "breathing_rate_bpm",
-    "heart_rate_bpm",
-    "heartrate_bpm",
-    "hr_bpm",
-    "br_bpm",
-    "enhanced_breathing",
-    // Pose: per-person skeletons, model keypoints and refined joints.
-    "keypoints",
-    "pose_keypoints",
-    "joints_m",
-];
+use crate::privacy_fields::{field_class, is_public_frame_kind, route_class, FieldClass, RouteClass};
 
 /// Upper bound on a REST body the filter will buffer.
 const MAX_FILTERED_BODY_BYTES: usize = 16 * 1024 * 1024;
@@ -68,28 +56,73 @@ impl PrivacyFilter {
     }
 }
 
-/// Remove every [`BIOMETRIC_KEYS`] entry from `value`, recursively.
-pub fn redact_value(value: &mut serde_json::Value) {
+/// Keep only keys classified public, recursively. Biometric and unclassified
+/// keys are removed.
+pub fn redact_value(value: &mut Value) {
     match value {
-        serde_json::Value::Object(map) => {
-            map.retain(|key, _| !BIOMETRIC_KEYS.contains(&key.as_str()));
-            for child in map.values_mut() {
+        Value::Object(map) => map.retain(|key, child| match field_class(key) {
+            Some(FieldClass::Public) => {
                 redact_value(child);
+                true
             }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                redact_value(item);
+            Some(FieldClass::IdMap) => {
+                redact_id_map(child);
+                true
             }
-        }
+            Some(FieldClass::Biometric) | None => false,
+        }),
+        Value::Array(items) => items.iter_mut().for_each(redact_value),
         _ => {}
     }
 }
 
-/// Redact one serialized JSON frame. `None` when the frame isn't valid JSON,
-/// in which case the caller must drop it.
+/// An id-keyed object: the keys are identifiers, and each entry must be an
+/// object or array, which is filtered as usual. Anything else is filtered
+/// as an ordinary value.
+fn redact_id_map(value: &mut Value) {
+    match value {
+        Value::Object(map) => map.retain(|key, entry| {
+            let structured = matches!(entry, Value::Object(_) | Value::Array(_));
+            if !structured || field_class(key) == Some(FieldClass::Biometric) {
+                return false;
+            }
+            redact_value(entry);
+            true
+        }),
+        other => redact_value(other),
+    }
+}
+
+/// Remove only keys classified biometric, recursively. Used for control-plane
+/// routes, which carry no sensing payload.
+pub fn redact_biometric_keys(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            map.retain(|key, _| field_class(key) != Some(FieldClass::Biometric));
+            map.values_mut().for_each(redact_biometric_keys);
+        }
+        Value::Array(items) => items.iter_mut().for_each(redact_biometric_keys),
+        _ => {}
+    }
+}
+
+/// Whether `value` is a frame whose kind (`type` or `event_type`) may not
+/// leave the server in privacy mode. A non-string kind counts as withheld.
+pub fn is_withheld_frame(value: &Value) -> bool {
+    ["type", "event_type"].iter().any(|k| match value.get(k) {
+        None => false,
+        Some(Value::String(kind)) => !is_public_frame_kind(kind),
+        Some(_) => true,
+    })
+}
+
+/// Redact one serialized JSON frame. `None` when the frame isn't valid JSON
+/// or its kind is withheld; either way the caller must drop it.
 pub fn redact_json_str(json: &str) -> Option<String> {
-    let mut value: serde_json::Value = serde_json::from_str(json).ok()?;
+    let mut value: Value = serde_json::from_str(json).ok()?;
+    if is_withheld_frame(&value) {
+        return None;
+    }
     redact_value(&mut value);
     serde_json::to_string(&value).ok()
 }
@@ -102,32 +135,67 @@ fn is_json(response: &Response) -> bool {
         .is_some_and(|ct| ct.trim_start().starts_with("application/json"))
 }
 
-/// Axum middleware: in privacy mode, strip [`BIOMETRIC_KEYS`] from every JSON
-/// response body. A no-op when privacy mode is off.
+fn withheld_response() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        axum::Json(serde_json::json!({
+            "code": "privacy_mode",
+            "detail": "this endpoint serves raw signal and is disabled while --privacy-mode is set",
+        })),
+    )
+        .into_response()
+}
+
+/// How a JSON body on a given route was filtered.
+enum Filtered {
+    Body(Vec<u8>),
+    Withheld,
+    Failed,
+}
+
+fn filter_body(route: RouteClass, bytes: &[u8]) -> Filtered {
+    let Ok(mut value) = serde_json::from_slice::<Value>(bytes) else {
+        return Filtered::Failed;
+    };
+    match route {
+        RouteClass::Control => redact_biometric_keys(&mut value),
+        RouteClass::Withheld => return Filtered::Withheld,
+        RouteClass::Sensing if is_withheld_frame(&value) => return Filtered::Withheld,
+        RouteClass::Sensing => redact_value(&mut value),
+    }
+    serde_json::to_vec(&value).map_or(Filtered::Failed, Filtered::Body)
+}
+
+/// Axum middleware: in privacy mode, filter every JSON response body by its
+/// route's [`RouteClass`]. A no-op when privacy mode is off.
 pub async fn redact_json_responses(
     State(filter): State<PrivacyFilter>,
     request: Request,
     next: Next,
 ) -> Response {
+    if !filter.is_enabled() {
+        return next.run(request).await;
+    }
+    let route = route_class(request.uri().path());
+    if route == RouteClass::Withheld {
+        return withheld_response();
+    }
     let response = next.run(request).await;
-    if !filter.is_enabled() || !is_json(&response) {
+    if !is_json(&response) {
         return response;
     }
     let (mut parts, body) = response.into_parts();
-    let redacted = axum::body::to_bytes(body, MAX_FILTERED_BODY_BYTES)
-        .await
-        .ok()
-        .and_then(|bytes| {
-            let mut value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-            redact_value(&mut value);
-            serde_json::to_vec(&value).ok()
-        });
-    match redacted {
-        Some(bytes) => {
+    let filtered = match axum::body::to_bytes(body, MAX_FILTERED_BODY_BYTES).await {
+        Ok(bytes) => filter_body(route, &bytes),
+        Err(_) => Filtered::Failed,
+    };
+    match filtered {
+        Filtered::Body(bytes) => {
             parts.headers.remove(CONTENT_LENGTH);
             Response::from_parts(parts, Body::from(bytes))
         }
-        None => {
+        Filtered::Withheld => withheld_response(),
+        Filtered::Failed => {
             tracing::warn!("privacy mode: could not filter a JSON response; withholding it");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -183,32 +251,93 @@ mod tests {
     fn redact_strips_edge_and_fused_vitals_leaves() {
         let mut v = json!({
             "type": "edge_fused_vitals",
-            "presence": true,
+            "presence_score": 0.8,
             "breathing_rate_bpm": 15.0,
             "heartrate_bpm": 72.0,
-            "mmwave": { "hr_bpm": 71.0, "br_bpm": 14.0, "present": true }
+            "fusion_confidence": 0.9,
+            "mmwave": { "hr_bpm": 71.0, "br_bpm": 14.0, "targets": 1 }
         });
         redact_value(&mut v);
         let text = v.to_string();
-        for key in ["breathing_rate_bpm", "heartrate_bpm", "hr_bpm", "br_bpm"] {
+        for key in ["breathing_rate_bpm", "heartrate_bpm", "hr_bpm", "br_bpm", "fusion_confidence"] {
             assert!(!text.contains(key), "{key} leaked: {text}");
         }
-        assert_eq!(v["presence"], true);
-        assert_eq!(v["mmwave"]["present"], true);
+        assert_eq!(v["presence_score"], 0.8);
+        assert_eq!(v["mmwave"]["targets"], 1);
     }
 
     #[test]
-    fn redact_json_str_fails_closed_on_invalid_json() {
+    fn redact_strips_unclassified_fields_at_any_depth() {
+        let mut v = sensing_update();
+        v["sleep_stage"] = json!("rem");
+        v["classification"]["respiration_index"] = json!(0.4);
+        v["persons"][0]["new_field"] = json!({ "presence": true });
+        redact_value(&mut v);
+        assert!(v.get("sleep_stage").is_none(), "{v}");
+        assert!(v["classification"].get("respiration_index").is_none(), "{v}");
+        assert!(v["persons"][0].get("new_field").is_none(), "{v}");
+        assert_eq!(v["classification"]["presence"], true);
+    }
+
+    #[test]
+    fn redact_strips_vitals_derived_fields() {
+        let mut v = json!({
+            "type": "sensing_update",
+            "features": { "mean_rssi": -50.0, "breathing_band_power": 0.2, "dominant_freq_hz": 0.25 },
+            "nodes": [{ "node_id": 1, "amplitude": [1.0, 2.0] }],
+            "abstention_reason": "vital_quality_gate_failed",
+            "numeric_vitals_authorized": false,
+        });
+        redact_value(&mut v);
+        assert_eq!(
+            v,
+            json!({ "type": "sensing_update", "features": { "mean_rssi": -50.0 }, "nodes": [{ "node_id": 1 }] })
+        );
+    }
+
+    #[test]
+    fn id_map_entries_must_be_structured_and_are_filtered() {
+        let mut v = json!({
+            "nodes": {
+                "1": { "offset_us": 5, "heart_rate_bpm": 60.0, "unknown": 1 },
+                "2": 72.0,
+                "heart_rate_bpm": { "offset_us": 1 }
+            }
+        });
+        redact_value(&mut v);
+        assert_eq!(v, json!({ "nodes": { "1": { "offset_us": 5 } } }));
+    }
+
+    #[test]
+    fn redact_json_str_fails_closed_and_drops_withheld_kinds() {
         assert!(redact_json_str("not json").is_none());
         let out = redact_json_str(&sensing_update().to_string()).unwrap();
         assert!(!out.contains("heart_rate_bpm"));
         assert!(!out.contains("keypoints"));
+        for frame in [
+            json!({ "event_type": "mediatek_csi", "device_id": "ab" }),
+            json!({ "type": "wasm_event", "node_id": 1, "events": [] }),
+            json!({ "type": "sleep_report", "presence": true }),
+            json!({ "type": 7, "presence": true }),
+        ] {
+            assert!(redact_json_str(&frame.to_string()).is_none(), "{frame}");
+        }
+    }
+
+    #[test]
+    fn control_plane_keeps_unclassified_keys_but_not_biometrics() {
+        let mut v = json!({ "status": "ok", "uptime": 5, "nested": { "heart_rate_bpm": 60.0 } });
+        redact_biometric_keys(&mut v);
+        assert_eq!(v, json!({ "status": "ok", "uptime": 5, "nested": {} }));
     }
 
     fn app(enabled: bool) -> Router {
         Router::new()
             .route("/json", get(|| async { axum::Json(sensing_update()) }))
             .route("/text", get(|| async { "heart_rate_bpm keypoints" }))
+            .route("/health", get(|| async { axum::Json(json!({ "uptime": 1, "heart_rate_bpm": 60.0 })) }))
+            .route("/api/v1/csi/mediatek/latest", get(|| async { axum::Json(json!({ "status": "no_data" })) }))
+            .route("/raw", get(|| async { axum::Json(json!({ "event_type": "realtek_radar", "sequence": 1 })) }))
             .route(
                 "/bad",
                 get(|| async { ([(CONTENT_TYPE, "application/json")], "{not json") }),
@@ -242,9 +371,30 @@ mod tests {
 
     #[tokio::test]
     async fn middleware_is_a_no_op_when_disabled() {
+        // Byte-for-byte what the handler wrote.
+        let golden = serde_json::to_string(&sensing_update()).unwrap();
         let (_, text) = body(app(false), "/json").await;
-        assert!(text.contains("heart_rate_bpm"));
-        assert!(text.contains("keypoints"));
+        assert_eq!(text, golden);
+        for path in ["/health", "/api/v1/csi/mediatek/latest", "/raw"] {
+            let (status, _) = body(app(false), path).await;
+            assert_eq!(status, StatusCode::OK, "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn middleware_filters_by_route_class() {
+        // Control plane: unclassified keys stay, biometric keys go.
+        let (status, text) = body(app(true), "/health").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(text, r#"{"uptime":1}"#);
+        // Raw-signal routes are refused, with a reason.
+        let (status, text) = body(app(true), "/api/v1/csi/mediatek/latest").await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(text.contains(r#""code":"privacy_mode""#), "{text}");
+        // A raw frame served from an unlisted route is refused by its kind.
+        let (status, text) = body(app(true), "/raw").await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(text.contains(r#""code":"privacy_mode""#), "{text}");
     }
 
     #[tokio::test]
