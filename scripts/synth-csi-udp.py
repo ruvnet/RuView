@@ -21,17 +21,17 @@ def build_packet(node_id: int, seq: int, freq_mhz: int, rssi: int,
     n_ant = 1
     n_sc = len(amps)
     header = struct.pack(
-        "<I B B B B H I b b I",
+        "<I B B H I I b b B B",
         MAGIC,
         node_id,
         n_ant,
-        n_sc,
-        0,           # reserved
-        freq_mhz,
-        seq,
-        rssi,
-        -95,         # noise_floor
-        0,           # reserved/padding
+        n_sc,        # u16 @6
+        freq_mhz,    # u32 @8
+        seq,         # u32 @12
+        rssi,        # i8  @16
+        -95,         # i8  @17 noise_floor
+        0,           # u8  @18 ppdu_type
+        0,           # u8  @19 flags
     )
     iq = bytearray()
     for amp, phase in zip(amps, phases):
