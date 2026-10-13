@@ -1,5 +1,5 @@
 ---
-name: "Swarm Orchestration"
+name: swarm-orchestration
 description: "Orchestrate multi-agent swarms with agentic-flow for parallel task execution, dynamic topology, and intelligent coordination. Use when scaling beyond single agents, implementing complex workflows, or building distributed AI systems."
 ---
 
