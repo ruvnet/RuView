@@ -129,25 +129,17 @@ impl Trigger {
                 if !eid_match {
                     return false;
                 }
-                let value: f64 = ctx
-                    .to_state
-                    .as_ref()
-                    .and_then(|s| s.state.parse().ok())
-                    .unwrap_or(f64::NAN);
-                if value.is_nan() {
-                    return false;
-                }
-                if let Some(a) = above {
-                    if value <= *a {
-                        return false;
-                    }
-                }
-                if let Some(b) = below {
-                    if value >= *b {
-                        return false;
-                    }
-                }
-                true
+                let in_range = |state: &Arc<State>| {
+                    state.state.parse::<f64>().ok().is_some_and(|value| {
+                        value.is_finite()
+                            && above.is_none_or(|a| value > a)
+                            && below.is_none_or(|b| value < b)
+                    })
+                };
+                // A numeric trigger fires on entry, not on every update
+                // while the entity remains inside the configured range.
+                ctx.to_state.as_ref().is_some_and(in_range)
+                    && !ctx.from_state.as_ref().is_some_and(in_range)
             }
             Trigger::Time { .. } => {
                 // Time triggers are wall-clock based and have no state-change
@@ -238,6 +230,31 @@ mod tests {
         };
         let ctx = state_ctx("light.kitchen", "off", "on");
         assert!(trigger.matches_sync(&ctx));
+    }
+
+    #[test]
+    fn numeric_trigger_only_fires_when_entering_range() {
+        let trigger = Trigger::NumericState {
+            entity_id: EntityId::parse("sensor.temperature").unwrap(),
+            above: Some(25.0),
+            below: Some(30.0),
+        };
+        for (from, to, expected) in [
+            ("20", "26", true),
+            ("26", "27", false),
+            ("27", "27", false),
+            ("30", "29", true),
+            ("25", "26", true),
+            ("29", "30", false),
+            ("unavailable", "26", true),
+            ("26", "unavailable", false),
+        ] {
+            assert_eq!(
+                trigger.matches_sync(&state_ctx("sensor.temperature", from, to)),
+                expected,
+                "{from} -> {to}"
+            );
+        }
     }
 
     #[test]
