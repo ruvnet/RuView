@@ -62,7 +62,7 @@
     "src/hosts/index.js": "ab276c41ab722bcdf72c2d1649cecbb760ae05c41c1372aae4c2447aa7c11539",
     "src/kernel.js": "48dfd218a747dd158f82ae108e7e8ed89a82cd68649214d23266112dc9033f5d",
     "src/mcp-http.js": "b72e021ae00d01831ef7184db824f5e85a2b8747e1d8e994b6a1cb1cb4d08945",
-    "src/mcp-server.js": "5eb8c3431768932c3a85476df032d0608fc7a732ede3d6bdcc8467ca47552666",
+    "src/mcp-server.js": "0d907a8763b1c25a5dc73c01bd4ed5d0fba0cd4af9dcc3354e862cea97d195ac",
     "src/policy.js": "baad5eb8c3eb2e416e0a71b342ad850d7c8413d7d976571ebf596937f69da8e2",
     "src/process-runner.js": "49533b038044dfb8bc76ed01c030d06a9856ead0836157fb693e2a7d40f786d6",
     "src/redact.js": "ebf1afff46341078706b0401838c53db043603586e280d51ece5cf1feba35189",
@@ -75,7 +75,7 @@
     "src/training.js": "bd8a6c12eba4f9d2f8990fa9692cd04c743ea247f9b13e10f8717ceefcbd09ac",
     "src/ui/console-widget.js": "0d2f707d57b5ec54968dee1dc80f31c7db9152dcadfc48700c18379dabb55462"
   },
-  "filesDigest": "edc6be28115ad21f18954066e989a6b4aaae2137b2f4e6d6571312beef610288",
+  "filesDigest": "13c9cfe56f226fedaa4cf5f692e0c338de74c072408cbe03870b31caf6981050",
   "brainDigest": "c0fb7b079ded157059b91601361429944697dae3cc42abc00dfe1a680986b0f4",
   "gateFingerprint": "6e53c784eee38310188948fc75fb49e6b4ebc04e247d01b903fa8c8a92d67bdd",
   "developmentPins": {
