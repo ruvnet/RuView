@@ -122,7 +122,16 @@ class TestStatePathSanitization(unittest.TestCase):
 
     def test_windows_com_port_is_safe(self):
         path = provision._state_path_for("COM7", "/tmp/x")
-        self.assertTrue(path.endswith("COM7.json"))
+        self.assertTrue(path.endswith("_COM7.json"))
+
+    def test_reserved_dos_device_names_are_prefixed(self):
+        for name in ["CON", "PRN", "AUX", "NUL", "COM1", "COM9", "LPT1"]:
+            path = provision._state_path_for(name, "/tmp/x")
+            self.assertEqual(os.path.basename(path), f"_{name}.json")
+
+    def test_non_reserved_ports_remain_unprefixed(self):
+        path = provision._state_path_for("/dev/ttyUSB0", "/tmp/x")
+        self.assertEqual(os.path.basename(path), "_dev_ttyUSB0.json")
 
 
 if __name__ == "__main__":

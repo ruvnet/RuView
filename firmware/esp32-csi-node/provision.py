@@ -136,9 +136,16 @@ def _default_state_dir() -> str:
     return os.path.join(base, "wifi-densepose", "esp32-provision-state")
 
 
+_RESERVED_DEVICE_RE = re.compile(
+    r"^(con|prn|aux|nul|com[1-9]|lpt[1-9])$", re.IGNORECASE
+)
+
+
 def _state_path_for(port: str, state_dir: str) -> str:
     """File path for a given serial port. Sanitize the port for filesystem use."""
     safe = port.replace("/", "_").replace(":", "_").replace("\\", "_")
+    if _RESERVED_DEVICE_RE.match(safe):
+        safe = f"_{safe}"
     return os.path.join(state_dir, f"{safe}.json")
 
 
@@ -306,7 +313,13 @@ def load_state(port: str, state_dir: str) -> dict:
     """Return the merged-state dict for `port`, or `{}` if absent / unreadable."""
     path = _state_path_for(port, state_dir)
     if not os.path.isfile(path):
-        return {}
+        legacy = os.path.join(
+            state_dir, f"{port.replace('/', '_').replace(':', '_').replace('\\', '_')}.json"
+        )
+        if legacy != path and os.path.isfile(legacy):
+            path = legacy
+        else:
+            return {}
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -443,6 +456,11 @@ def load_board_state(port: str, mac, state_dir: str):
     legacy = _state_path_for(port, state_dir)
     if os.path.isfile(legacy):
         return load_state(port, state_dir), legacy
+    unprefixed = os.path.join(
+        state_dir, f"{port.replace('/', '_').replace(':', '_').replace('\\', '_')}.json"
+    )
+    if unprefixed != legacy and os.path.isfile(unprefixed):
+        return load_state(port, state_dir), unprefixed
     return {}, None
 
 
