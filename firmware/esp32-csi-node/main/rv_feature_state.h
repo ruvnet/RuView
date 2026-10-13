@@ -14,6 +14,7 @@
  *   0xC5110005 — ADR-039 compressed CSI (edge_processing.h)
  *   0xC5110006 — ADR-081 feature state  (this file)
  *   0xC5110007 — ADR-040 WASM output    (wasm_runtime.h, reassigned per issue #928)
+ *   0xC5110008 — LD2450 radar targets  (mmwave_sensor.h)
  */
 
 #ifndef RV_FEATURE_STATE_H

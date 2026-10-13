@@ -2,7 +2,7 @@
  * @file mmwave_sensor.c
  * @brief ADR-063: mmWave sensor UART driver with auto-detection.
  *
- * Supports Seeed MR60BHA2 (60 GHz) and HLK-LD2410 (24 GHz).
+ * Supports Seeed MR60BHA2 (60 GHz), HLK-LD2410 and HLK-LD2450 (24 GHz).
  * Under QEMU (CONFIG_CSI_MOCK_ENABLED), uses a mock generator
  * that produces synthetic vital signs for pipeline testing.
  *
@@ -23,6 +23,9 @@
  *   Length:  uint16 LE
  *   Data:    [type 0xAA] [target_state] [moving_dist LE] [energy] ...
  *   Footer:  0xF8 0xF7 0xF6 0xF5
+ *
+ * LD2450 frame format (HLK binary, 256000 baud): see mmwave_detect.h.
+ *   AA FF 03 00 | 3 x (x, y, speed, res) | 55 CC, 30 bytes, ~10 Hz
  */
 
 #include "mmwave_sensor.h"
@@ -35,6 +38,8 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "sdkconfig.h"
+#include "stream_sender.h"
+#include "csi_collector.h"
 
 #ifndef CONFIG_CSI_MOCK_ENABLED
 #include "driver/uart.h"
@@ -45,7 +50,7 @@ static const char *TAG = "mmwave";
 /* ---- Configuration ---- */
 #define MMWAVE_UART_NUM           UART_NUM_1
 #define MMWAVE_MR60_BAUD          115200
-#define MMWAVE_LD2410_BAUD        256000
+#define MMWAVE_LD2410_BAUD        256000  /* LD2450 uses the same rate. */
 #define MMWAVE_BUF_SIZE           256
 #define MMWAVE_TASK_STACK         4096
 #define MMWAVE_TASK_PRIORITY      3
@@ -309,6 +314,80 @@ static void ld2410_feed_byte(uint8_t b)
 }
 
 /* ======================================================================
+ * LD2450 Parser (HLK binary protocol, 256000 baud, fixed 30-byte frames)
+ * ====================================================================== */
+
+typedef struct {
+    uint8_t  frame[MMWAVE_LD2450_FRAME_LEN];
+    uint8_t  idx;
+} ld2450_parser_t;
+
+static ld2450_parser_t s_ld50;
+
+static void ld2450_send_targets(void)
+{
+    mmwave_targets_pkt_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.magic = MMWAVE_TARGETS_MAGIC;
+    pkt.node_id = csi_collector_get_node_id();
+    pkt.mmwave_type = (uint8_t)s_state.type;
+    pkt.n_targets = s_state.target_count;
+    pkt.timestamp_ms = (uint32_t)(s_state.last_update_us / 1000);
+    pkt.frame_seq = s_state.frame_count;
+    memcpy(pkt.targets, s_state.targets, sizeof(pkt.targets));
+    stream_sender_send((const uint8_t *)&pkt, sizeof(pkt));
+}
+
+static void ld2450_process_frame(const uint8_t *frame)
+{
+    mmwave_ld2450_target_t t[MMWAVE_LD2450_MAX_TARGETS];
+    memset(t, 0, sizeof(t));
+    int n = mmwave_ld2450_decode(frame, t);
+
+    /* Nearest target feeds the fused vitals packet's single distance field. */
+    float nearest_cm = 0.0f;
+    for (int k = 0; k < n; k++) {
+        float d = sqrtf((float)t[k].x_mm * t[k].x_mm + (float)t[k].y_mm * t[k].y_mm) / 10.0f;
+        if (k == 0 || d < nearest_cm) nearest_cm = d;
+    }
+
+    memcpy(s_state.targets, t, sizeof(t));
+    s_state.target_count = (uint8_t)n;
+    s_state.person_present = (n > 0);
+    s_state.distance_cm = nearest_cm;
+    s_state.frame_count++;
+    s_state.last_update_us = esp_timer_get_time();
+
+    ld2450_send_targets();
+}
+
+static void ld2450_feed_byte(uint8_t b)
+{
+    static const uint8_t head[4] = { 0xAA, 0xFF, 0x03, 0x00 };
+
+    if (s_ld50.idx < 4) {
+        if (b == head[s_ld50.idx]) {
+            s_ld50.frame[s_ld50.idx++] = b;
+        } else {
+            /* Resync: this byte may itself start a new head. */
+            s_ld50.idx = 0;
+            if (b == head[0]) s_ld50.frame[s_ld50.idx++] = b;
+        }
+        return;
+    }
+
+    s_ld50.frame[s_ld50.idx++] = b;
+    if (s_ld50.idx < MMWAVE_LD2450_FRAME_LEN) return;
+
+    s_ld50.idx = 0;
+    if (mmwave_ld2450_valid_at(s_ld50.frame, 0, MMWAVE_LD2450_FRAME_LEN)) {
+        ld2450_process_frame(s_ld50.frame);
+    } else {
+        s_state.error_count++;
+    }
+}
+
+/* ======================================================================
  * Mock mmWave Generator (for QEMU testing)
  * ====================================================================== */
 
@@ -380,6 +459,12 @@ static mmwave_type_t probe_at_baud(uint32_t baud)
     uint8_t buf[128];
     int mr60_sof_seen = 0;
     int ld2410_header_seen = 0;
+    int ld2450_frame_seen = 0;
+    /* LD2450 frames (30 bytes at ~10 Hz) routinely straddle two reads, so they
+     * are scanned in a window that carries the previous read's last 29 bytes.
+     * 29 < one frame, so no frame is ever counted twice. */
+    uint8_t win[MMWAVE_LD2450_FRAME_LEN - 1 + sizeof(buf)];
+    int win_len = 0;
 
     int64_t deadline = esp_timer_get_time() + (int64_t)(MMWAVE_PROBE_TIMEOUT_MS / 2) * 1000;
 
@@ -412,12 +497,25 @@ static mmwave_type_t probe_at_baud(uint32_t baud)
             }
         }
 
+        /* LD2450: same baud; a whole frame (head AND tail) must be present. */
+        if (baud == MMWAVE_LD2410_BAUD) {
+            memcpy(&win[win_len], buf, len);
+            win_len += len;
+            for (int i = 0; i < win_len; i++) {
+                if (mmwave_ld2450_valid_at(win, i, win_len)) ld2450_frame_seen++;
+            }
+            int keep = (win_len < MMWAVE_LD2450_FRAME_LEN - 1) ? win_len : MMWAVE_LD2450_FRAME_LEN - 1;
+            memmove(win, &win[win_len - keep], keep);
+            win_len = keep;
+        }
+
         if (mr60_sof_seen >= 3) return MMWAVE_TYPE_MR60BHA2;
         if (ld2410_header_seen >= 2) return MMWAVE_TYPE_LD2410;
+        if (ld2450_frame_seen >= 2) return MMWAVE_TYPE_LD2450;
     }
 
     /* No weak single-hit fallback: line noise can produce a stray match, so a real
-     * sensor must clear the ≥3 (MR60) / ≥2 (LD2410) validated-frame thresholds. */
+     * sensor must clear the ≥3 (MR60) / ≥2 (LD2410, LD2450) validated-frame thresholds. */
     return MMWAVE_TYPE_NONE;
 }
 
@@ -431,7 +529,7 @@ static mmwave_type_t probe_sensor(void)
     mmwave_type_t result = probe_at_baud(MMWAVE_MR60_BAUD);
     if (result != MMWAVE_TYPE_NONE) return result;
 
-    ESP_LOGI(TAG, "Probing at %d baud (LD2410)...", MMWAVE_LD2410_BAUD);
+    ESP_LOGI(TAG, "Probing at %d baud (LD2410/LD2450)...", MMWAVE_LD2410_BAUD);
     result = probe_at_baud(MMWAVE_LD2410_BAUD);
     return result;
 }
@@ -456,6 +554,8 @@ static void mmwave_uart_task(void *arg)
                 mr60_feed_byte(buf[i]);
             } else if (s_state.type == MMWAVE_TYPE_LD2410) {
                 ld2410_feed_byte(buf[i]);
+            } else if (s_state.type == MMWAVE_TYPE_LD2450) {
+                ld2450_feed_byte(buf[i]);
             }
         }
 
@@ -476,6 +576,7 @@ const char *mmwave_type_name(mmwave_type_t type)
     switch (type) {
     case MMWAVE_TYPE_MR60BHA2: return "MR60BHA2";
     case MMWAVE_TYPE_LD2410:   return "LD2410";
+    case MMWAVE_TYPE_LD2450:   return "LD2450";
     case MMWAVE_TYPE_MOCK:     return "Mock";
     case MMWAVE_TYPE_NONE:
     default:                   return "None";
@@ -487,6 +588,7 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
     memset(&s_state, 0, sizeof(s_state));
     memset(&s_mr60, 0, sizeof(s_mr60));
     memset(&s_ld, 0, sizeof(s_ld));
+    memset(&s_ld50, 0, sizeof(s_ld50));
     s_running = true;
 
 #ifdef CONFIG_CSI_MOCK_ENABLED
@@ -565,7 +667,7 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
     }
 
     /* Set final baud rate for the detected sensor. */
-    uint32_t final_baud = (detected == MMWAVE_TYPE_LD2410)
+    uint32_t final_baud = (detected == MMWAVE_TYPE_LD2410 || detected == MMWAVE_TYPE_LD2450)
                           ? MMWAVE_LD2410_BAUD : MMWAVE_MR60_BAUD;
     uart_set_baudrate(MMWAVE_UART_NUM, final_baud);
 
@@ -579,6 +681,10 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
         break;
     case MMWAVE_TYPE_LD2410:
         s_state.capabilities = MMWAVE_CAP_PRESENCE | MMWAVE_CAP_DISTANCE;
+        break;
+    case MMWAVE_TYPE_LD2450:
+        s_state.capabilities = MMWAVE_CAP_PRESENCE | MMWAVE_CAP_DISTANCE
+                             | MMWAVE_CAP_MULTI_TARGET | MMWAVE_CAP_POSITION;
         break;
     default:
         break;
