@@ -1,0 +1,227 @@
+{
+  "status": "complete",
+  "promotionAuthorized": false,
+  "task": "public_motion_ablation",
+  "selected": {
+    "candidate": {
+      "family": "motion_acf",
+      "kind": "rff",
+      "dimensions": 128,
+      "gamma_multiplier": 0.1,
+      "alpha": 0.1
+    },
+    "folds": [
+      {
+        "macro_f1": 0.33211530016861246,
+        "samples": 139
+      },
+      {
+        "macro_f1": 0.3359438976366347,
+        "samples": 140
+      }
+    ],
+    "mean_cv_macro_f1": 0.33402959890262357,
+    "scalar_count": 61999
+  },
+  "evidence": "MEASURED",
+  "development": {
+    "accuracy": 0.5571428571428572,
+    "macro_f1": 0.4998706443528175,
+    "per_class_f1": [
+      0.16666666666666666,
+      0.6451612903225806,
+      0.0,
+      0.8421052631578947,
+      0.5333333333333333,
+      0.6451612903225806,
+      0.6666666666666666
+    ],
+    "confusion_matrix": [
+      [
+        1,
+        9,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        10,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0,
+        1,
+        6,
+        2
+      ],
+      [
+        0,
+        1,
+        1,
+        8,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        2,
+        0,
+        4,
+        4,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        10,
+        0
+      ],
+      [
+        1,
+        0,
+        1,
+        1,
+        0,
+        1,
+        6
+      ]
+    ],
+    "samples": 70
+  },
+  "incumbent_development": {
+    "accuracy": 0.44285714285714284,
+    "macro_f1": 0.3839985224859174,
+    "per_class_f1": [
+      0.35294117647058826,
+      0.6153846153846154,
+      0.0,
+      0.5882352941176471,
+      0.56,
+      0.5714285714285714,
+      0.0
+    ],
+    "confusion_matrix": [
+      [
+        3,
+        7,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        2,
+        8,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        1,
+        0,
+        0,
+        0,
+        5,
+        1,
+        3
+      ],
+      [
+        0,
+        1,
+        1,
+        5,
+        0,
+        2,
+        1
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        7,
+        2,
+        1
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        2,
+        8,
+        0
+      ],
+      [
+        1,
+        0,
+        1,
+        2,
+        1,
+        5,
+        0
+      ]
+    ],
+    "samples": 70
+  },
+  "retention_checks": {
+    "macro_f1_gain": true,
+    "accuracy_nonregression": true,
+    "no_additional_zero_f1_classes": true,
+    "p95_under_1ms": true
+  },
+  "retained_as_research_candidate": true,
+  "latency": {
+    "candidate": {
+      "p50_ms": 0.430715,
+      "p95_ms": 0.6146145
+    },
+    "incumbent": {
+      "p50_ms": 0.31372,
+      "p95_ms": 0.4576855
+    }
+  },
+  "reload_max_abs_logit_error": 0.0,
+  "model_bytes": 496488,
+  "model_sha256": "8d3c8b144663808159159f7af9d14b09f54ee78dc1f852c643fbd001a23d2fc5",
+  "baseline_model_sha256": "8a2cafdc5e6df989a3d8fff5762e2287ac5051f0e8b1ca2868431d60274b31ca",
+  "baseline_receipt_sha256": "26bad1e0d7ce7a8ad525f8218e567dd88ba3f78404027a0795b2ab0e0faeb40d",
+  "source_sha256": {
+    "espfi_motion.py": "c6a8529ccf9d9f834383a2bdf5b14626764ec7ca2ade7ad5d4c1c14797d76054",
+    "espfi_generalize.py": "956b3a5e918f7c263a2b9183b4a6a70c8f2157604262a4ec6cee2c324a69224f",
+    "espfi_kernel.py": "ae837cb2e3fac7f052b4bd371cd496e9636e5d5dbaf3a341526a4fc5aef23478",
+    "espfi_runtime.py": "8e100972b0deeb8a6586271264f335551cb5d1e9cc42a24bddf933dba064a80f"
+  },
+  "elapsed_seconds": 3.2100241279999864,
+  "scope": "24 configurations selected only on two training folds; development seen once after selection; 1000 alternating paired batch1 calls include features/checks/classifier, exclude pooling and IO. Candidate is float64 with explicit map, incumbent uses seeded float32 folded runtime; storage comparison includes different encodings. No test, hardware, pose or SOTA claim.",
+  "provenance": {
+    "manifest_sha256": "74e0fe039acbed1b287bd11ee6b779becbb8f9b66c3c249d260ed66f5583f02a",
+    "full_receipt_sha256": "f8a565cb031d3ce9b488432dfb97408a58cee8f511c0ddc89aa74edb90388b88",
+    "scope": "Portable summary; full intake record retained on executor"
+  },
+  "selection_policy": "minimum training-fold macro F1, then mean, then fewer scalars, then declaration order",
+  "validation": {
+    "public_tests": 40,
+    "original_tests": 28,
+    "final_test_opened": false,
+    "independent_review": "NO BLOCK"
+  }
+}

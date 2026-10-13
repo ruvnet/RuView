@@ -1,0 +1,177 @@
+{
+  "evidence": "MEASURED",
+  "promotionAuthorized": false,
+  "prediction_count": 70,
+  "tolerance": 0.0001,
+  "parity": {
+    "buffered": {
+      "max_abs_logit_error": 0.0000010728836059570312,
+      "predictions_equal": true,
+      "retained_model_bytes": 247996,
+      "workspace_bytes": 204560,
+      "speed_gate_passed": true
+    },
+    "fused": {
+      "max_abs_logit_error": 0.0000014156103134155273,
+      "predictions_equal": true,
+      "retained_model_bytes": 243740,
+      "workspace_bytes": 204560,
+      "speed_gate_passed": true
+    }
+  },
+  "rounds": [
+    {
+      "reference": {
+        "p50_ms": 0.40779,
+        "p95_ms": 0.5969754999999999
+      },
+      "buffered": {
+        "p50_ms": 0.3373,
+        "p95_ms": 0.4756145
+      },
+      "fused": {
+        "p50_ms": 0.33046,
+        "p95_ms": 0.47210649999999993
+      }
+    },
+    {
+      "reference": {
+        "p50_ms": 0.402875,
+        "p95_ms": 0.577802
+      },
+      "buffered": {
+        "p50_ms": 0.32714,
+        "p95_ms": 0.4805985
+      },
+      "fused": {
+        "p50_ms": 0.32706999999999997,
+        "p95_ms": 0.47014149999999993
+      }
+    },
+    {
+      "reference": {
+        "p50_ms": 0.408875,
+        "p95_ms": 0.5745135
+      },
+      "buffered": {
+        "p50_ms": 0.33120499999999997,
+        "p95_ms": 0.4822354999999999
+      },
+      "fused": {
+        "p50_ms": 0.32797,
+        "p95_ms": 0.478745
+      }
+    }
+  ],
+  "pairs_per_round": 1000,
+  "development": {
+    "accuracy": 0.44285714285714284,
+    "macro_f1": 0.3839985224859174,
+    "per_class_f1": [
+      0.35294117647058826,
+      0.6153846153846154,
+      0,
+      0.5882352941176471,
+      0.56,
+      0.5714285714285714,
+      0
+    ],
+    "confusion_matrix": [
+      [
+        3,
+        7,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        2,
+        8,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        1,
+        0,
+        0,
+        0,
+        5,
+        1,
+        3
+      ],
+      [
+        0,
+        1,
+        1,
+        5,
+        0,
+        2,
+        1
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        7,
+        2,
+        1
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        2,
+        8,
+        0
+      ],
+      [
+        1,
+        0,
+        1,
+        2,
+        1,
+        5,
+        0
+      ]
+    ],
+    "samples": 70
+  },
+  "float32_feature_probe": {
+    "evidence": "SYNTHETIC stress plus development parity",
+    "stress_max_abs_logit_error": 1.710675597190857,
+    "development_max_abs_logit_error": 0.000009045004844665527,
+    "development_predictions_equal": true,
+    "stress_gate_passed": false,
+    "exported": false
+  },
+  "model_sha256": "8a2cafdc5e6df989a3d8fff5762e2287ac5051f0e8b1ca2868431d60274b31ca",
+  "metadata_sha256": "0bbf3ab84d5bbec747407d0ca8d9da506718b62910e499f3f586ac012e5ad1f9",
+  "source_sha256": {
+    "espfi_runtime.py": "8e100972b0deeb8a6586271264f335551cb5d1e9cc42a24bddf933dba064a80f",
+    "espfi_runtime_benchmark.py": "b496e9b469544ca77715f34197518bcc50a0f062c848603f94e58566a0a48bca",
+    "espfi_generalize.py": "956b3a5e918f7c263a2b9183b4a6a70c8f2157604262a4ec6cee2c324a69224f",
+    "espfi_kernel.py": "ae837cb2e3fac7f052b4bd371cd496e9636e5d5dbaf3a341526a4fc5aef23478"
+  },
+  "runtime": {
+    "python": "3.12.3",
+    "numpy": "2.4.4",
+    "machine": "x86_64",
+    "threads": 1
+  },
+  "scope": "Rotating paired batch1 calls cycling development windows; includes checks, features and classifier; excludes acquisition, pooling, IO. Shared CPU, not edge hardware. Retained tensors/workspace are not total process RAM. No training or final-test evaluation. Repeatedly observed development set.",
+  "status": "complete",
+  "validation": {
+    "public_tests": 36,
+    "original_tests": 28,
+    "independent_review": "NO BLOCK",
+    "test_partition_opened": false
+  },
+  "receipt_kind": "Reviewed aggregate summary; full provenance receipt retained on executor"
+}

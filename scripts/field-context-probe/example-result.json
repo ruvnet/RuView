@@ -1,0 +1,56 @@
+{
+  "benchmark": {
+    "bridge_ms": {
+      "p50": 0.08661999999999999,
+      "p95": 0.12714
+    },
+    "evidence": "MEASURED software timing on SYNTHETIC fixtures",
+    "extra_p95_target_met": true,
+    "extra_p95_target_ms": 0.1,
+    "iterations": 1000,
+    "native_ms": {
+      "p50": 0.08199000000000001,
+      "p95": 0.122819
+    },
+    "paired_extra_ms": {
+      "p50": 0.00452000000000001,
+      "p95": 0.03833999999999997
+    },
+    "profile": "release required for reported comparison",
+    "scope": "Fresh isolated engine per call: signature verify, fixture clone, rule parsing, ingestion and inference; bridge adds guards, WorldGraph creation and ancestry publication. Excludes signing, sensing, training and persistent-stream costs.",
+    "warmup": 100
+  },
+  "bridge": {
+    "ancestryEdges": 1,
+    "derivedCircularRejected": true,
+    "duplicateBeliefRejected": true,
+    "duplicateRejected": true,
+    "edges": 1,
+    "expiredBeliefRejected": true,
+    "missingAncestryRejected": true,
+    "nodes": 2,
+    "rejectionsDoNotMutateWorldGraph": true,
+    "staleRejected": true,
+    "worldGraphRoundTrip": true
+  },
+  "confidenceIsCalibrated": false,
+  "evidence": "SYNTHETIC",
+  "heuristicScore": 0.8999999761581421,
+  "limitations": [
+    "No real hardware or ESP-Fi timestamps/labels used",
+    "Bridge freshness/ancestry guards are additional policy, not native WorldGraph guarantees",
+    "Simulation trust is not production sensor enrollment",
+    "No model training or predictive accuracy uplift established"
+  ],
+  "native": {
+    "duplicateRejected": true,
+    "productionRejectsSynthetic": true,
+    "simulationSkipsWallClockFreshness": true,
+    "worldGraphAllowsCycles": true
+  },
+  "promotionAuthorized": false,
+  "purpose": "integrity and reliability, not activity accuracy",
+  "rawDataIncluded": false,
+  "ruFieldRevision": "b74bc035e4a3d4023665aa5479b41e938facd113",
+  "worldGraphRevision": "9b1c79c836cdacfb7b44f058c593157bac4c1dab"
+}

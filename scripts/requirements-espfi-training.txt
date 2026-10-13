@@ -1,0 +1,3 @@
+-r requirements-csi-training.txt
+scipy==1.17.1
+libarchive-c==5.3

@@ -1,0 +1,66 @@
+{
+  "date_utc": "2026-10-12",
+  "rust": "1.90.0",
+  "evidence": "Measured software integrity and format parsing; no predictive accuracy claim",
+  "test_result": {
+    "passed": 6,
+    "failed": 0
+  },
+  "commands": [
+    "cargo test --locked",
+    "cargo build --release --locked",
+    "target/release/ruview-field-context-probe --benchmark",
+    "target/release/ruview-field-context-probe --inspect-jsonl EXCLUDED_FIXTURE_PATH"
+  ],
+  "completionVerified": true,
+  "test_build_benchmark_exit_code": 0,
+  "independent_review": "NO BLOCK on final source",
+  "primary_agent_test_rerun": {
+    "completionVerified": true,
+    "exitCode": 0,
+    "passed": 6,
+    "source_hashes_match": true
+  },
+  "files_sha256": {
+    "Cargo.toml": "6cbae892247fc9fb3c5e9c02c1d8fc3c5cdea9efc15f8794a5885db797ca1c75",
+    "Cargo.lock": "c614e88fbf703f79f7f15a273f03b185a580efd04cc8452f302c23013d4c3267",
+    "src/main.rs": "c85aa8bcdfbc49a13ae0ebc807fcb09e4d0d619a4125d33dbe3c105d7f4eaa2a",
+    "example-result.json": "dbfbeac396588fefb3c0067897f74b80c76cdadb88cdfce60fd0e3566fe6a6fa"
+  },
+  "public_fixture_source_revision": "995567283606b86594439d6594387ff551a21ede",
+  "public_replay": [
+    {
+      "name": "real_csi_small.jsonl",
+      "sha256": "af90245da89f91b2ac9408aa933e654b43b57033f1d7c77db4f0ab27b801eeab",
+      "accepted": true,
+      "exit_code": 0,
+      "frames": 3,
+      "timestamp_span_seconds": 0.200999936
+    },
+    {
+      "name": "real_csi_medium.jsonl",
+      "sha256": "fb0c7cd81a968f99020ce16b4c35fecd5638062278aecf0f0f1ed883afba1f67",
+      "accepted": false,
+      "exit_code": 2,
+      "reason": "strict_json_parse",
+      "nonempty_line": 200,
+      "native_adapter_accepts": true
+    }
+  ],
+  "raw_capture_committed": false,
+  "calibration_performed": false,
+  "labels_inferred": false,
+  "production_promotion": false,
+  "strict_schema_tail_regressions": [
+    "empty object rejected",
+    "wrong timestamp type rejected"
+  ],
+  "strict_numeric_recording_regressions": [
+    "timestamp1e300",
+    "amplitude1e300",
+    "negative amplitude",
+    "empty channels",
+    "nonincreasing timestamp",
+    "channel width change"
+  ]
+}

@@ -1,0 +1,133 @@
+{
+  "status": "complete",
+  "evidence": "MEASURED",
+  "promotionAuthorized": false,
+  "development": {
+    "accuracy": 0.42857142857142855,
+    "macro_f1": 0.39720523837065186,
+    "per_class_f1": [
+      0.625,
+      0.47619047619047616,
+      0.2857142857142857,
+      0.4166666666666667,
+      0.3076923076923077,
+      0.5263157894736842,
+      0.14285714285714285
+    ],
+    "samples": 70
+  },
+  "incumbent_development": {
+    "accuracy": 0.44285714285714284,
+    "macro_f1": 0.3839985224859174,
+    "per_class_f1": [
+      0.35294117647058826,
+      0.6153846153846154,
+      0,
+      0.5882352941176471,
+      0.56,
+      0.5714285714285714,
+      0
+    ],
+    "samples": 70
+  },
+  "retention_checks": {
+    "macro_f1_gain": false,
+    "accuracy_nonregression": false,
+    "no_additional_zero_f1_classes": true,
+    "p95_under_1ms": true
+  },
+  "retained_as_research_candidate": false,
+  "latency": {
+    "candidate": {
+      "p50_ms": 0.5314695,
+      "p95_ms": 0.7371814999999999
+    },
+    "incumbent": {
+      "p50_ms": 0.31542,
+      "p95_ms": 0.456288
+    }
+  },
+  "model_bytes": 496488,
+  "model_sha256": "c4bef32b0b4a563381883a705679637b188f30940e92c113ff21102aa1871d36",
+  "baseline_model_sha256": "8a2cafdc5e6df989a3d8fff5762e2287ac5051f0e8b1ca2868431d60274b31ca",
+  "baseline_receipt_sha256": "26bad1e0d7ce7a8ad525f8218e567dd88ba3f78404027a0795b2ab0e0faeb40d",
+  "source_sha256": {
+    "espfi_motion.py": "53fa62558d4ec0e357e0854f728f282ca2db6449c96f1dd9a1478de98ec8dd90",
+    "espfi_generalize.py": "956b3a5e918f7c263a2b9183b4a6a70c8f2157604262a4ec6cee2c324a69224f",
+    "espfi_kernel.py": "ae837cb2e3fac7f052b4bd371cd496e9636e5d5dbaf3a341526a4fc5aef23478",
+    "espfi_runtime.py": "8e100972b0deeb8a6586271264f335551cb5d1e9cc42a24bddf933dba064a80f"
+  },
+  "scope": "24 configurations selected only on two training folds; development seen once after selection; 1000 alternating paired batch1 calls include features/checks/classifier, exclude pooling and IO. Candidate is float64 with explicit map, incumbent uses seeded float32 folded runtime; storage comparison includes different encodings. No test, hardware, pose or SOTA claim.",
+  "reload_max_abs_logit_error": 0,
+  "selected": {
+    "candidate": {
+      "family": "local_spectral",
+      "kind": "rff",
+      "dimensions": 128,
+      "gamma_multiplier": 0.1,
+      "alpha": 0.01
+    },
+    "mean_cv_macro_f1": 0.35559936248893814,
+    "scalar_count": 61999
+  },
+  "best_per_family": {
+    "relative_combined": {
+      "candidate": {
+        "family": "relative_combined",
+        "kind": "rff",
+        "dimensions": 128,
+        "gamma_multiplier": 0.1,
+        "alpha": 0.01
+      },
+      "mean_cv_macro_f1": 0.306028118879762,
+      "fold_macro_f1": [
+        0.30414628178603337,
+        0.30790995597349063
+      ]
+    },
+    "motion_acf": {
+      "candidate": {
+        "family": "motion_acf",
+        "kind": "rff",
+        "dimensions": 128,
+        "gamma_multiplier": 0.1,
+        "alpha": 0.1
+      },
+      "mean_cv_macro_f1": 0.33402959890262357,
+      "fold_macro_f1": [
+        0.33211530016861246,
+        0.3359438976366347
+      ]
+    },
+    "motion_invariant": {
+      "candidate": {
+        "family": "motion_invariant",
+        "kind": "rff",
+        "dimensions": 128,
+        "gamma_multiplier": 0.1,
+        "alpha": 0.1
+      },
+      "mean_cv_macro_f1": 0.3541747172155182,
+      "fold_macro_f1": [
+        0.31217774871662207,
+        0.39617168571441436
+      ]
+    },
+    "local_spectral": {
+      "candidate": {
+        "family": "local_spectral",
+        "kind": "rff",
+        "dimensions": 128,
+        "gamma_multiplier": 0.1,
+        "alpha": 0.01
+      },
+      "mean_cv_macro_f1": 0.35559936248893814,
+      "fold_macro_f1": [
+        0.26600194570119384,
+        0.44519677927668244
+      ]
+    }
+  },
+  "manifest_sha256": "74e0fe039acbed1b287bd11ee6b779becbb8f9b66c3c249d260ed66f5583f02a",
+  "full_receipt_sha256": "98e56df2181dcae17070b80002ca67fc7a53206742903f5f2c8c353747d3d8f1"
+}
