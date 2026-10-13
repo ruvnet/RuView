@@ -98,24 +98,26 @@ impl AutomationEngine {
     /// Subscribe to the state-machine broadcast channel and start
     /// evaluating triggers. Also starts the wall-clock timer task that
     /// evaluates `time:` triggers. Returns a join handle for the event
-    /// task (the timer task is detached and tied to the engine handle's
-    /// lifetime via the broadcast channel close).
-    ///
-    /// The task runs until the broadcast sender is dropped (i.e. the
-    /// `HomeCore` instance is destroyed).
+    /// task. Aborting the returned handle stops both listener tasks.
+    /// Dropping a JoinHandle still detaches it, following Tokio semantics.
+    /// Already-dispatched action tasks retain their existing run-mode lifetime.
     pub fn start(&self) -> tokio::task::JoinHandle<()> {
-        self.start_timer();
-        self.start_event_loop()
+        let timer = self.start_timer();
+        self.start_event_loop(AbortTimer(timer.abort_handle()))
     }
 
     /// Event-driven loop: state/numeric/event triggers.
-    fn start_event_loop(&self) -> tokio::task::JoinHandle<()> {
+    fn start_event_loop(&self, timer: AbortTimer) -> tokio::task::JoinHandle<()> {
         let mut rx = self.hc.states().subscribe();
         let automations = Arc::clone(&self.automations);
         let hc = self.hc.clone();
         let templates = Arc::clone(&self.templates);
 
         tokio::spawn(async move {
+            // Owned before spawn: aborting even before the first poll drops
+            // this guard and cancels the timer. The returned handle remains
+            // the event task itself, preserving panic/error reporting.
+            let _timer = timer;
             loop {
                 match rx.recv().await {
                     Ok(event) => {
@@ -259,6 +261,16 @@ impl AutomationEngine {
             fired += 1;
         }
         fired
+    }
+}
+
+
+/// Cancels the timer even if the event task is aborted before polling.
+struct AbortTimer(tokio::task::AbortHandle);
+
+impl Drop for AbortTimer {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 
@@ -422,6 +434,27 @@ mod tests {
     // Behavioral tests for the timer / run-mode / template paths
     // (HC-WS-04/05/07) live in `tests/engine_behaviors.rs` to keep this
     // file under the 500-line guideline; they use only the public API.
+
+    #[tokio::test]
+    async fn aborting_engine_handle_stops_timer_even_before_first_poll() {
+        let hc = HomeCore::new();
+        let engine = AutomationEngine::new(hc.clone());
+        let task = engine.start();
+        // No yield between starting and aborting: ownership must already exist.
+        task.abort();
+        let _ = task.await;
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        drop(engine);
+        // The timer and event loop must not retain the state-machine sender.
+        let mut rx = hc.states().subscribe();
+        drop(hc);
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_millis(50), rx.recv()).await,
+            Ok(Err(tokio::sync::broadcast::error::RecvError::Closed))
+        ));
+    }
 
     #[test]
     fn time_at_matches_handles_hh_mm_and_hh_mm_ss() {
