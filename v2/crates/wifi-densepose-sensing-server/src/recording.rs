@@ -478,10 +478,10 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/recording/stop", post(stop_recording))
         .route("/api/v1/recording/list", get(list_recordings))
         .route(
-            "/api/v1/recording/download/{id}",
+            "/api/v1/recording/download/:id",
             get(download_recording),
         )
-        .route("/api/v1/recording/{id}", delete(delete_recording))
+        .route("/api/v1/recording/:id", delete(delete_recording))
 }
 
 #[cfg(test)]
