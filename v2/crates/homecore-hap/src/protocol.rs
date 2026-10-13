@@ -69,7 +69,7 @@ impl Tlv8 {
 
     pub fn byte(&self, kind: u8) -> Option<u8> {
         let value = self.get(kind)?;
-        (value.len() == 1).then_some(value[0])
+        (value.len() == 1).then(|| value[0])
     }
 
     pub fn insert(&mut self, kind: u8, value: impl Into<Vec<u8>>) {
@@ -113,6 +113,15 @@ pub fn error_response(state: u8, error: u8) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_scalar_tlv_returns_none_without_panicking() {
+        let parsed = Tlv8::parse(&[TLV_STATE, 0]).unwrap();
+        assert_eq!(parsed.byte(TLV_STATE), None);
+        assert_eq!(parsed.byte(TLV_METHOD), None);
+        let multi = Tlv8::parse(&[TLV_STATE, 2, 1, 2]).unwrap();
+        assert_eq!(multi.byte(TLV_STATE), None);
+    }
 
     #[test]
     fn tlv8_roundtrip_supports_fragmented_values() {
