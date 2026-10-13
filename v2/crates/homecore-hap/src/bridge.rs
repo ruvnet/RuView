@@ -31,7 +31,10 @@ pub struct CharacteristicEvent {
 }
 
 struct BridgeInner {
-    accessories: HashMap<EntityId, ExposedAccessory>,
+    accessories: HashMap<EntityId, (u64, ExposedAccessory)>,
+    known_ids: HashMap<EntityId, u64>,
+    next_aid: u64,
+    ids_frozen: bool,
 }
 
 /// HOMECORE-to-HAP accessory bridge state.
@@ -62,6 +65,9 @@ impl HapBridge {
         Self {
             inner: Arc::new(RwLock::new(BridgeInner {
                 accessories: HashMap::new(),
+                known_ids: HashMap::new(),
+                next_aid: 2, // AID 1 belongs to the bridge itself.
+                ids_frozen: false,
             })),
             advertiser,
             events,
@@ -92,7 +98,23 @@ impl HapBridge {
         if inner.accessories.contains_key(entity_id) {
             return Err(HapError::AlreadyRegistered(entity_id.as_str().to_owned()));
         }
-        inner.accessories.insert(entity_id.clone(), exposed);
+        let aid = if inner.ids_frozen {
+            match inner.known_ids.get(entity_id).copied() {
+                Some(aid) => aid,
+                None => {
+                    let aid = inner.next_aid;
+                    inner.next_aid = aid
+                        .checked_add(1)
+                        .ok_or_else(|| HapError::Server("HAP accessory IDs exhausted".into()))?;
+                    inner.known_ids.insert(entity_id.clone(), aid);
+                    aid
+                }
+            }
+        } else {
+            // No IDs are advertised until the initial inventory is frozen.
+            0
+        };
+        inner.accessories.insert(entity_id.clone(), (aid, exposed));
         tracing::debug!(entity = %entity_id, ?accessory_type, "HAP accessory registered");
         Ok(())
     }
@@ -123,8 +145,8 @@ impl HapBridge {
                 .accessories
                 .get_mut(entity_id)
                 .ok_or_else(|| HapError::EntityNotFound(entity_id.as_str().to_owned()))?;
-            accessory.accessory_type = accessory_type;
-            accessory.mapping = mapping.clone();
+            accessory.1.accessory_type = accessory_type;
+            accessory.1.mapping = mapping.clone();
         }
         let _ = self.events.send(CharacteristicEvent {
             entity_id: entity_id.clone(),
@@ -147,8 +169,48 @@ impl HapBridge {
             .unwrap()
             .accessories
             .values()
+            .map(|(_, accessory)| accessory.clone())
+            .collect()
+    }
+
+    /// Snapshot the accessory IDs assigned at registration. Removing or adding
+    /// another entity must not change IDs already advertised to controllers.
+    #[cfg(feature = "hap-server")]
+    pub(crate) fn running_accessories_with_ids(&self) -> Vec<(u64, ExposedAccessory)> {
+        self.freeze_accessory_ids();
+        self.inner
+            .read()
+            .unwrap()
+            .accessories
+            .values()
             .cloned()
             .collect()
+    }
+
+    /// Assign the initial inventory in entity-ID order, independent of the
+    /// order in which HOMECORE restored its states. Later registrations get
+    /// new IDs; removed entities retain their ID if resynchronization readds them.
+    #[cfg(feature = "hap-server")]
+    pub(crate) fn freeze_accessory_ids(&self) {
+        let mut inner = self.inner.write().unwrap();
+        if inner.ids_frozen {
+            return;
+        }
+        let mut entities: Vec<_> = inner.accessories.keys().cloned().collect();
+        entities.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        for entity in entities {
+            let aid = inner.next_aid;
+            inner.next_aid = aid
+                .checked_add(1)
+                .expect("HAP accessory ID space cannot exhaust");
+            inner.known_ids.insert(entity.clone(), aid);
+            inner
+                .accessories
+                .get_mut(&entity)
+                .expect("entity came from map")
+                .0 = aid;
+        }
+        inner.ids_frozen = true;
     }
 
     /// Number of registered accessories.
