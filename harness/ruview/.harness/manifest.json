@@ -70,12 +70,12 @@
     "src/repo-trust.js": "06e2a94d7113ed936f208a12b7fcc785801c215a3e2c5e7418f6238d991a289c",
     "src/sdk.d.ts": "d4c80689248c197b2ddb1ebf4cd7d8f2e55716722074d9e1cdb8029b2dfa19f7",
     "src/sdk.js": "1ac29fb389ed86e0f62ecfddbbd31614c58e832a8181495caa83fe5cf8b30bc4",
-    "src/spaces.js": "45ef786537cb2a446db5e926e5a1c10b73639d2767dec84611f914f78d4325eb",
+    "src/spaces.js": "304b771194790e653269812f4caf320e0b257c2e4b88a6b6322f7f87b193cac1",
     "src/tools.js": "1b81750fe6271fa632bf7dfc35f7a072ef3f26baeed9c58cfbc82ad27b0fed30",
     "src/training.js": "bd8a6c12eba4f9d2f8990fa9692cd04c743ea247f9b13e10f8717ceefcbd09ac",
     "src/ui/console-widget.js": "0d2f707d57b5ec54968dee1dc80f31c7db9152dcadfc48700c18379dabb55462"
   },
-  "filesDigest": "edc6be28115ad21f18954066e989a6b4aaae2137b2f4e6d6571312beef610288",
+  "filesDigest": "83acb8f907f520941326f23f5d2a95a4f269d5dd4a5eea89d7f83e8ff37a23ca",
   "brainDigest": "c0fb7b079ded157059b91601361429944697dae3cc42abc00dfe1a680986b0f4",
   "gateFingerprint": "6e53c784eee38310188948fc75fb49e6b4ebc04e247d01b903fa8c8a92d67bdd",
   "developmentPins": {
