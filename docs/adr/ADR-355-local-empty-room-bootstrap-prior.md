@@ -72,6 +72,27 @@ host to provide a protected state directory.
 
 ## Consequences
 
+### Explicit recovery without restarting, 2026-10-12
+
+`POST /api/v1/calibration/bootstrap/recover` requires administrator authority,
+the current server boot epoch and the stored payload digest. It validates the
+installation-bound file and original expiry before changing live state, and
+requires at least ten seconds of eligible raw CSI on its original source/grid.
+An active unfinished capture must be cancelled first.
+
+Recovery clears old source sequence faults and runtime windows, withdraws any
+full room session/receipt, and restores only `bootstrap_only`. New packets must
+build a complete matching runtime window before negative suppression applies.
+Duplicates and backward discontinuities remain rejected. No calibration frame
+count, training timestamp, threshold or expiry is renewed, and the stored file
+is not rewritten. Full calibrated evidence and numeric vitals remain disabled.
+
+The twelve-hour stale boundary still withdraws full calibrated authority. A
+restored negative-only prior may match fresh runtime windows while stale until
+its original twenty-four-hour hard expiry. Expiry stops matching and recovery.
+This resolves the mismatch between the advertised twenty-four-hour prior and
+the previous fresh-only runtime gate; it makes no room-selectivity claim.
+
 Startup can use recent measured background structure instead of only generic
 heuristics. No accuracy lift is claimed until occupied and empty held out data
 from multiple installations is recorded.

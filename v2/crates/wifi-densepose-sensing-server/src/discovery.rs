@@ -87,6 +87,15 @@ pub fn start_advertiser(
     Ok(DiscoveryAdvertiser { daemon, fullname })
 }
 
+/// Advertise the QR-pinned companion TLS endpoint independently of legacy HTTP.
+pub fn start_tls_advertiser(instance_name: &str, installation_id: &str, hostname: &str, port: u16) -> Result<DiscoveryAdvertiser, mdns_sd::Error> {
+    let daemon = ServiceDaemon::new()?;
+    let service = build_service(instance_name, installation_id, hostname, port, true)?;
+    let fullname = service.get_fullname().to_owned();
+    daemon.register(service)?;
+    Ok(DiscoveryAdvertiser { daemon, fullname })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -69,3 +69,6 @@ pub mod vendor_rf;
 // `crate::sona`) and public API (`wifi_densepose_sensing_server::embedding`, …)
 // are unchanged.
 pub use wifi_densepose_aether::{embedding, graph_transformer, sona, sparse_inference};
+
+pub mod companion;
+pub mod companion_tls;
