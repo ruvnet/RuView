@@ -365,6 +365,8 @@ struct Request {
 #[derive(Default)]
 struct ConnectionBuffer {
     bytes: Vec<u8>,
+    // Retained across select! cancellation while an encrypted record arrives.
+    encrypted: Vec<u8>,
 }
 
 async fn read_request(
@@ -380,7 +382,7 @@ async fn read_request(
         if buffer.bytes.len() >= config.max_header_bytes {
             return Err(RequestReadError::HeadersTooLarge);
         }
-        let chunk = read_transport_chunk(stream, record_layer).await?;
+        let chunk = read_transport_chunk(stream, record_layer, &mut buffer.encrypted).await?;
         if chunk.is_empty() {
             return if buffer.bytes.is_empty() {
                 Ok(None)
@@ -450,7 +452,7 @@ async fn read_request(
         .checked_add(content_length)
         .ok_or(RequestReadError::BodyTooLarge)?;
     while buffer.bytes.len() < request_end {
-        let chunk = read_transport_chunk(stream, record_layer).await?;
+        let chunk = read_transport_chunk(stream, record_layer, &mut buffer.encrypted).await?;
         if chunk.is_empty() {
             return Err(RequestReadError::Malformed("truncated HTTP body"));
         }
@@ -469,6 +471,7 @@ async fn read_request(
 async fn read_transport_chunk(
     stream: &mut TcpStream,
     record_layer: &mut Option<RecordLayer>,
+    encrypted: &mut Vec<u8>,
 ) -> Result<Vec<u8>, RequestReadError> {
     let Some(records) = record_layer.as_mut() else {
         let mut chunk = vec![0u8; 2048];
@@ -480,30 +483,41 @@ async fn read_transport_chunk(
         return Ok(chunk);
     };
 
-    let mut length_bytes = [0u8; 2];
-    let first = stream
-        .read(&mut length_bytes[..1])
-        .await
-        .map_err(RequestReadError::Io)?;
-    if first == 0 {
-        return Ok(Vec::new());
+    loop {
+        let required = if encrypted.len() < 2 {
+            2
+        } else {
+            let length = u16::from_le_bytes([encrypted[0], encrypted[1]]) as usize;
+            if length > crate::crypto::MAX_RECORD_PLAINTEXT {
+                return Err(RequestReadError::Authentication);
+            }
+            2 + length + RECORD_TAG_BYTES
+        };
+        if encrypted.len() == required && required > 2 {
+            let length_bytes = [encrypted[0], encrypted[1]];
+            let plaintext = records
+                .decrypt(length_bytes, &encrypted[2..])
+                .map_err(|_| RequestReadError::Authentication)?;
+            encrypted.clear();
+            return Ok(plaintext);
+        }
+        let mut chunk = [0u8; crate::crypto::MAX_RECORD_PLAINTEXT + RECORD_TAG_BYTES];
+        let remaining = required - encrypted.len();
+        // read() is cancellation safe; commit every successful read to the
+        // connection-owned buffer before reaching another await.
+        let read = stream
+            .read(&mut chunk[..remaining])
+            .await
+            .map_err(RequestReadError::Io)?;
+        if read == 0 {
+            return if encrypted.is_empty() {
+                Ok(Vec::new())
+            } else {
+                Err(RequestReadError::Authentication)
+            };
+        }
+        encrypted.extend_from_slice(&chunk[..read]);
     }
-    stream
-        .read_exact(&mut length_bytes[1..])
-        .await
-        .map_err(|_| RequestReadError::Authentication)?;
-    let length = u16::from_le_bytes(length_bytes) as usize;
-    if length > crate::crypto::MAX_RECORD_PLAINTEXT {
-        return Err(RequestReadError::Authentication);
-    }
-    let mut encrypted = vec![0u8; length + RECORD_TAG_BYTES];
-    stream
-        .read_exact(&mut encrypted)
-        .await
-        .map_err(|_| RequestReadError::Authentication)?;
-    records
-        .decrypt(length_bytes, &encrypted)
-        .map_err(|_| RequestReadError::Authentication)
 }
 
 fn find_header_end(bytes: &[u8]) -> Option<usize> {
@@ -1075,6 +1089,47 @@ mod tests {
     use homecore::entity::{EntityId, State};
     use homecore::event::Context;
     use x25519_dalek::{PublicKey, StaticSecret};
+
+    #[tokio::test]
+    async fn encrypted_request_survives_cancelled_partial_reads() {
+        for split in [1, 2, 9] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let mut client = TcpStream::connect(listener.local_addr().unwrap())
+                .await
+                .unwrap();
+            let (mut server, _) = listener.accept().await.unwrap();
+            let shared = [42; 32];
+            let mut sender =
+                RecordLayer::controller(SessionKeys::derive(&shared).unwrap().controller_view());
+            let mut receiver = Some(RecordLayer::accessory(
+                SessionKeys::derive(&shared).unwrap(),
+            ));
+            let encrypted = sender
+                .encrypt(b"GET /accessories HTTP/1.1\r\n\r\n")
+                .unwrap();
+            let mut buffer = ConnectionBuffer::default();
+            let config = HapServerConfig::default();
+            client.write_all(&encrypted[..split]).await.unwrap();
+            // Same cancellation boundary as serve_connection's notification select.
+            assert!(timeout(
+                Duration::from_millis(20),
+                read_request(&mut server, &mut receiver, &mut buffer, &config)
+            )
+            .await
+            .is_err());
+            client.write_all(&encrypted[split..]).await.unwrap();
+            client.shutdown().await.unwrap();
+            let request = timeout(
+                Duration::from_secs(1),
+                read_request(&mut server, &mut receiver, &mut buffer, &config),
+            )
+            .await
+            .unwrap()
+            .expect("partial ciphertext must survive cancellation")
+            .unwrap();
+            assert_eq!(request.target, "/accessories", "split at {split}");
+        }
+    }
 
     fn bridge() -> HapBridge {
         let bridge = HapBridge::new(HapServiceRecord::bridge(
