@@ -21,6 +21,9 @@
 //! }
 //! ```
 
+#[cfg(not(feature = "std"))]
+use alloc::{string::String, vec::Vec};
+
 use thiserror::Error;
 
 /// A specialized `Result` type for core operations.
@@ -457,6 +460,8 @@ impl StorageError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(feature = "std"))]
+    use alloc::string::ToString;
 
     #[test]
     fn test_core_error_display() {
