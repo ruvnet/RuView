@@ -166,6 +166,13 @@ impl AutomationEngine {
     /// wall-clock `HH:MM:SS` equals the trigger's `at`. The task exits
     /// when the state-machine broadcast channel closes (engine teardown).
     fn start_timer(&self) -> tokio::task::JoinHandle<()> {
+        self.start_timer_with_clock(Local::now)
+    }
+
+    fn start_timer_with_clock<F>(&self, mut now: F) -> tokio::task::JoinHandle<()>
+    where
+        F: FnMut() -> chrono::DateTime<Local> + Send + 'static,
+    {
         let automations = Arc::clone(&self.automations);
         let hc = self.hc.clone();
         let templates = Arc::clone(&self.templates);
@@ -174,14 +181,15 @@ impl AutomationEngine {
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_millis(1000));
-            // Track the last second we fired, to fire once per match.
-            let mut last_fired_sec: Option<String> = None;
+            // Include the date so the same daily schedule can fire tomorrow.
+            let mut last_fired: Option<(chrono::NaiveDate, String)> = None;
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
-                        let now = Local::now();
+                        let now = now();
                         let hhmmss = format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second());
-                        if last_fired_sec.as_deref() == Some(hhmmss.as_str()) {
+                        let firing_key = (now.date_naive(), hhmmss.clone());
+                        if last_fired.as_ref() == Some(&firing_key) {
                             continue;
                         }
                         let snapshot: Vec<(Arc<Automation>, RunState)> = automations
@@ -213,7 +221,7 @@ impl AutomationEngine {
                             fired_any = true;
                         }
                         if fired_any {
-                            last_fired_sec = Some(hhmmss);
+                            last_fired = Some(firing_key);
                         }
                     }
                     r = teardown_rx.recv() => {
@@ -431,3 +439,7 @@ mod tests {
         assert!(!time_at_matches("07:30:15", "07:30:16"));
     }
 }
+
+#[cfg(test)]
+#[path = "timer_tests.rs"]
+mod timer_tests;
