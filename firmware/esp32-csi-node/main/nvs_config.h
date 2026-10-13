@@ -36,6 +36,19 @@ typedef struct {
     uint8_t  tdm_slot_index;                  /**< This node's TDM slot index (0-based). */
     uint8_t  tdm_node_count;                  /**< Total nodes in the TDM schedule. */
 
+    /* 802.11b rates on the STA interface (NVS key "allow_11b").
+     *
+     * 0 (default) = disabled: rate control cannot fall below 6 Mbps OFDM.
+     * With 11b allowed, a node whose link degrades can settle at 1-2 Mbps
+     * and stay there; each CSI datagram then takes tens of times the
+     * airtime, the whole fleet's channel fills up and frame rates slide.
+     * The TX queue also backs up, which shows as deep free-heap dips and
+     * send_fail bursts that look like a leak. On a 9-node ESP32-C6 fleet,
+     * disabling 11b took the channel from 80-85% busy to ~44%.
+     * 1 = allow (the previous behaviour), kept as a no-reflash rollback;
+     * needs a reboot, since it is applied before esp_wifi_start(). */
+    uint8_t  wifi_allow_11b;
+
     /* ADR-039: Edge intelligence configuration */
     uint8_t  edge_tier;                       /**< Processing tier (0=raw, 1=basic, 2=full). */
     float    presence_thresh;                 /**< Presence threshold (0 = auto-calibrate). */

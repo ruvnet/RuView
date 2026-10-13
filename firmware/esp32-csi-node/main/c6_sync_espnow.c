@@ -24,9 +24,12 @@
 #include "esp_idf_version.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
+#include "nvs_config.h"
 #include <string.h>
 
 static const char *TAG = "c6_espnow";
+
+extern nvs_config_t g_nvs_config;
 
 #define BEACON_MAGIC      0x53454E50u   /* 'SENP' little-endian */
 #define BEACON_PROTO_VER  0x01
@@ -42,6 +45,26 @@ typedef struct __attribute__((packed)) {
 } espnow_beacon_t;
 
 static const uint8_t s_broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+/* Send beacons at 6 Mbps OFDM, not ESP-NOW's 1 Mbps 802.11b default. When
+ * the STA's 11b rates are disabled (the default, see nvs_config.h)
+ * a 1 Mbps beacon would not be sendable at all; and OFDM carries the LTF that
+ * CSI is computed from, at about a quarter of the airtime. With 11b allowed
+ * (NVS allow_11b=1) the old default is left untouched. */
+static void espnow_set_beacon_rate(void)
+{
+    if (g_nvs_config.wifi_allow_11b) return;
+    esp_now_rate_config_t rc = {
+        .phymode = WIFI_PHY_MODE_11G,
+        .rate    = WIFI_PHY_RATE_6M,
+        .ersu    = false,
+        .dcm     = false,
+    };
+    esp_err_t r = esp_now_set_peer_rate_config(s_broadcast_mac, &rc);
+    if (r != ESP_OK) {
+        ESP_LOGW(TAG, "beacon rate 6M OFDM not set: %s", esp_err_to_name(r));
+    }
+}
 
 static uint64_t s_local_id     = 0;   /* 6-byte MAC packed into u64 */
 static uint64_t s_leader_id    = 0;
@@ -212,6 +235,7 @@ esp_err_t c6_sync_espnow_init(void)
     if (r != ESP_OK && r != ESP_ERR_ESPNOW_EXIST) {
         ESP_LOGW(TAG, "esp_now_add_peer(broadcast) failed: %s", esp_err_to_name(r));
     }
+    espnow_set_beacon_rate();
 
     /* Start as candidate leader — will step down on receiving lower-id beacon. */
     s_is_leader    = true;
