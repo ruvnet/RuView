@@ -871,22 +871,22 @@ fn characteristics_response(target: &str, bridge: &HapBridge) -> Response {
     if ids.len() > 4096 || ids.split(',').count() > 128 {
         return Response::plain(400, b"characteristic query too large".to_vec());
     }
-    let accessories = indexed_accessories(bridge);
+    // Resolve exactly the IDs published by /accessories, including bridge
+    // metadata. Saturating subtraction aliased IDs below 8 to sensor value 0.
+    let accessories = accessories_json(bridge);
     let mut values = Vec::new();
     for id in ids.split(',') {
         let Some((aid, iid)) = parse_aid_iid(id) else {
             return Response::plain(400, b"invalid aid.iid".to_vec());
         };
-        let value = accessories
-            .iter()
-            .find(|(candidate, _)| *candidate == aid)
-            .and_then(|(_, accessory)| {
-                accessory
-                    .mapping
-                    .characteristics
-                    .get(iid.saturating_sub(8) as usize)
-            })
-            .map(|(_, value)| characteristic_value(value));
+        let value = accessories["accessories"].as_array()
+            .and_then(|items| items.iter().find(|item| item["aid"].as_u64() == Some(aid)))
+            .and_then(|accessory| accessory["services"].as_array())
+            .and_then(|services| services.iter()
+                .filter_map(|service| service["characteristics"].as_array())
+                .flatten()
+                .find(|characteristic| characteristic["iid"].as_u64() == Some(iid)))
+            .and_then(|characteristic| characteristic.get("value"));
         values.push(match value {
             Some(value) => json!({"aid": aid, "iid": iid, "value": value}),
             None => json!({"aid": aid, "iid": iid, "status": -70409}),
@@ -1075,6 +1075,32 @@ mod tests {
     use homecore::entity::{EntityId, State};
     use homecore::event::Context;
     use x25519_dalek::{PublicKey, StaticSecret};
+
+    #[test]
+    fn characteristic_reads_match_advertised_ids_and_values() {
+        let bridge = bridge();
+        let advertised = accessories_json(&bridge);
+        for accessory in advertised["accessories"].as_array().unwrap() {
+            let aid = accessory["aid"].as_u64().unwrap();
+            for service in accessory["services"].as_array().unwrap() {
+                for characteristic in service["characteristics"].as_array().unwrap() {
+                    let iid = characteristic["iid"].as_u64().unwrap();
+                    let response =
+                        characteristics_response(&format!("/characteristics?id={aid}.{iid}"), &bridge);
+                    let body: Value = serde_json::from_slice(&response.body).unwrap();
+                    assert_eq!(
+                        body["characteristics"][0]["value"], characteristic["value"],
+                        "{aid}.{iid}"
+                    );
+                }
+            }
+        }
+        for id in ["2.0", "2.7", "2.18446744073709551615", "999.8"] {
+            let response = characteristics_response(&format!("/characteristics?id={id}"), &bridge);
+            let body: Value = serde_json::from_slice(&response.body).unwrap();
+            assert_eq!(body["characteristics"][0]["status"], -70409, "{id}");
+        }
+    }
 
     fn bridge() -> HapBridge {
         let bridge = HapBridge::new(HapServiceRecord::bridge(
