@@ -71,7 +71,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (recursive — wifi-densepose-rufield path-deps vendor/rufield)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           # The workspace includes `wifi-densepose-rufield`, which path-deps the
           # `vendor/rufield` submodule crates. Without a recursive checkout the
@@ -150,7 +150,7 @@ jobs:
     needs: [bench-compile]
     steps:
       - name: Checkout (recursive)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           submodules: recursive
 
