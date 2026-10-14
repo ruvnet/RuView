@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Illuminator Triage</title>
+<!--
+  Every transmitter the fleet can hear, and whether it is worth keeping as an
+  illumination source.
+
+  No dependencies, so it works with the internet down — same as mark.html,
+  mesh.html, mesh3d.html and world3d.html.
+
+  WHY THIS EXISTS: until 2026-09-01 the server admitted ~10 transmitters, all
+  our own hardware. A per-node subcarrier-grid gate discarded every frame on a
+  sparser grid than the associated AP had negotiated, which was essentially
+  every other transmitter in the building. With that gate moved per-link the
+  fleet admits 30+, including a second access point at -58 dBm across seven
+  receivers and a Powerwall gateway at -73 across four. This page is how those
+  get judged.
+
+  WHAT DECIDES "KEEPER":
+
+    receivers  How many nodes hear it. THE number that matters — one receiver
+               gives a single ellipsoid and no intersection, so it can never
+               localise however loud it is. Two is a constraint; three or more
+               is geometry.
+    rssi       Best across receivers. Below about -85 dBm links flicker between
+               windows rather than holding (MEASURED on this fleet), so they
+               add variance to a solver rather than evidence.
+    fps        Delivery rate. A link needs 8 frames at one grid width before it
+               produces any metric at all, so a loud transmitter at 0.02 fps is
+               permanently useless.
+    drift      How much its per-receiver RSSI signature MOVES. This is the
+               mobility test, measured here rather than guessed from the MAC:
+               phones randomise their addresses precisely to defeat vendor
+               lookup, but nothing hides a signature that changes as the device
+               is carried around. A mobile emitter is worse than none, because
+               the association it teaches is only true while it stands still.
+
+  DRIFT IS OBSERVED IN THIS PAGE, IN THIS SESSION. It needs minutes, not
+  seconds, and it resets on reload — the server does not yet track it. Until a
+  transmitter has enough samples the verdict says so instead of guessing.
+-->
+<style>
+  :root{
+    --bg:#0d1117; --fg:#e6edf3; --dim:#8b949e; --line:#30363d; --card:#161b22;
+    --ok:#2ea043; --warn:#d29922; --bad:#f85149; --accent:#388bfd; --violet:#a371f7;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--fg);
+       font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  header{padding:12px 16px 10px; border-bottom:1px solid var(--line);
+         position:sticky; top:0; background:var(--bg); z-index:2;}
+  h1{font-size:15px; margin:0 0 2px;}
+  .sub{color:var(--dim); font-size:11.5px;}
+  .bar{display:flex; flex-wrap:wrap; gap:14px; margin-top:8px; font-size:11.5px;}
+  .bar b{color:var(--fg); font-weight:600;}
+  .bar span{color:var(--dim);}
+  main{padding:12px 16px 40px;}
+  table{width:100%; border-collapse:collapse; font-size:12px;}
+  th{text-align:left; color:var(--dim); font-weight:600; font-size:10.5px;
+     letter-spacing:.06em; text-transform:uppercase; padding:6px 6px;
+     border-bottom:1px solid var(--line); cursor:pointer; white-space:nowrap;}
+  th:hover{color:var(--fg);}
+  td{padding:5px 6px; border-bottom:1px solid rgba(48,54,61,0.45); white-space:nowrap;}
+  td.n{text-align:right; font-variant-numeric:tabular-nums;}
+  tr:hover td{background:rgba(56,139,253,0.06);}
+  .mac{color:var(--fg);}
+  .v-KEEPER{color:var(--ok); font-weight:600;}
+  .v-GOOD{color:var(--ok);}
+  .v-WATCH{color:var(--warn);}
+  .v-WAIT{color:var(--dim);}
+  .v-DROP{color:var(--bad);}
+  .v-MOBILE{color:var(--bad); font-weight:600;}
+  .pill{display:inline-block; padding:0 5px; border-radius:3px; font-size:10.5px;
+        border:1px solid var(--line); color:var(--dim);}
+  .assigned{color:var(--violet);}
+  .dev{color:var(--fg); font-weight:600;}
+  .unnamed{color:var(--dim); font-weight:400; font-style:italic;}
+  .macsub{color:var(--dim); font-size:10px;}
+  .note{color:var(--dim); font-size:11.5px; margin:10px 0 0; max-width:78ch;}
+</style>
+</head>
+<body>
+<header>
+  <h1>Illuminator Triage</h1>
+  <div class="sub">Every transmitter the fleet hears, and whether it earns a place. Click a column to sort.</div>
+  <div class="bar" id="bar"><span>loading…</span></div>
+</header>
+<main>
+  <table>
+    <thead><tr id="head"></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <p class="note" id="foot"></p>
+</main>
+<script>
+'use strict';
+
+var POLL_MS = 4000;
+/* Drift needs several samples before it means anything. Below this the verdict
+ * says "watching" rather than inventing a judgement from two readings. */
+var MIN_DRIFT_SAMPLES = 8;
+
+var OUR_OUI = ['e8:f6:0a', '9c:cc:01'];
+
+var sortKey = 'receivers', sortDir = -1;
+var track = {};      /* tx_mac -> {prev:{node:rssi}, drift:ema, samples:n} */
+var assigned = {};   /* tx_mac -> emitter row from room config */
+
+var COLS = [
+  ['verdict',    'verdict',   false],
+  ['tx_mac',     'device',    false],
+  ['kind',       'kind',      false],
+  ['receivers',  'rx',        true],
+  ['bestRssi',   'best dBm',  true],
+  ['fps',        'fps',       true],
+  ['visible',    'vis/links', true],
+  ['drift',      'drift dB',  true],
+  ['grids',      'grid',      false],
+  ['assigned',   'assigned',  false]
+];
+
+function oui(m){ return m.slice(0,8); }
+
+function kindOf(m, row){
+  if (m === apMac) return 'our AP (assoc)';
+  if (OUR_OUI.indexOf(oui(m)) >= 0) return 'our node';
+  /* The locally-administered bit is set both by an AP advertising extra SSIDs
+   * and by a client randomising its address. Beaconing separates them, which
+   * this page cannot see — so it reports the bit and leaves the call to drift. */
+  if (row.locally_administered) return 'virtual/random';
+  return 'device';
+}
+
+var apMac = null;
+
+/** Human name from the room-config roster, if the device has been named.
+ *  The MAC stays visible underneath — it is the identity everything else keys
+ *  on, and a label is a convenience that can be wrong or missing. */
+function labelOf(t){
+  var a = assigned[t.mac];
+  if (a && a.label) return a.label;
+  if (apMac && t.mac === apMac) return 'AP (associated)';
+  return '';
+}
+
+function verdict(t){
+  /* Mobility overrides everything: a moving emitter teaches an association
+   * that is only true while it stands still. */
+  if (t.samples >= MIN_DRIFT_SAMPLES && t.drift > 4.0) return 'MOBILE';
+  if (t.receivers >= 3 && t.bestRssi > -80 && t.fps >= 1.0) {
+    return t.samples >= MIN_DRIFT_SAMPLES ? 'KEEPER' : 'WATCH';
+  }
+  if (t.receivers >= 2 && t.bestRssi > -85) return 'GOOD';
+  if (t.fps < 0.2 || t.bestRssi <= -88) return 'DROP';
+  return 'WAIT';
+}
+
+function reasonFor(t, v){
+  if (v === 'MOBILE') return 'signature drifts ' + t.drift.toFixed(1) + ' dB — carried, not fixed';
+  if (v === 'KEEPER') return 'stable, ' + t.receivers + ' receivers — usable as a fixed focus';
+  if (v === 'WATCH')  return 'looks good; needs ' + (MIN_DRIFT_SAMPLES - t.samples) + ' more samples to confirm it is stationary';
+  if (v === 'GOOD')   return 'can intersect (' + t.receivers + ' receivers) but weak or slow';
+  if (v === 'DROP')   return t.receivers === 1 ? 'one receiver — cannot intersect' : 'too weak or too slow to form a history';
+  return 'not enough evidence yet';
+}
+
+function fetchJSON(p){
+  return fetch(p, {cache:'no-store'}).then(function(r){
+    if (!r.ok) throw new Error(p + ' -> ' + r.status);
+    return r.json();
+  });
+}
+
+function refresh(){
+  Promise.all([
+    fetchJSON('/api/v1/links/inventory'),
+    fetchJSON('/api/v1/config/room')
+  ]).then(function(res){
+    var inv = res[0], room = res[1];
+    /* The associated AP is identified by ap_mac in the room config rather
+     * than by an emitter row, so it needs naming here or the loudest
+     * transmitter in the house reads as "unnamed". */
+    apMac = (room && room.ap_mac) ? room.ap_mac : null;
+    assigned = {};
+    (room.emitters || []).forEach(function(e){ assigned[e.mac] = e; });
+
+    /* Group links by transmitter. */
+    var tx = {};
+    inv.links.forEach(function(r){
+      var t = tx[r.tx_mac];
+      if (!t) {
+        t = tx[r.tx_mac] = {
+          mac: r.tx_mac, rows: [], receivers: 0, bestRssi: -999, fps: 0,
+          visible: 0, grids: {}, la: r.locally_administered, sig: {}
+        };
+      }
+      t.rows.push(r);
+      t.receivers++;
+      t.bestRssi = Math.max(t.bestRssi, r.rssi_dbm);
+      t.fps += r.fps || 0;
+      if (r.visible_in_links) t.visible++;
+      t.grids[r.grid] = true;
+      t.sig[r.rx_node] = r.rssi_dbm;
+    });
+
+    /* Drift: mean absolute change of the per-receiver RSSI signature between
+     * polls, smoothed. A fixed transmitter's signature barely moves; one being
+     * carried through the house changes on several receivers at once. */
+    Object.keys(tx).forEach(function(m){
+      var t = tx[m], k = track[m];
+      if (!k) { k = track[m] = {prev: t.sig, drift: 0, samples: 0}; }
+      else {
+        var deltas = [], shared = 0;
+        Object.keys(t.sig).forEach(function(n){
+          if (k.prev[n] !== undefined) { deltas.push(Math.abs(t.sig[n] - k.prev[n])); shared++; }
+        });
+        if (shared > 0) {
+          var mean = deltas.reduce(function(a,b){return a+b;},0) / shared;
+          k.drift = k.samples === 0 ? mean : (k.drift * 0.7 + mean * 0.3);
+          k.samples++;
+        }
+        k.prev = t.sig;
+      }
+      t.drift = k.drift; t.samples = k.samples;
+    });
+
+    render(inv, Object.keys(tx).map(function(m){ return tx[m]; }));
+  }).catch(function(e){
+    document.getElementById('bar').innerHTML = '<span style="color:var(--bad)">' + e.message + '</span>';
+  });
+}
+
+function render(inv, list){
+  list.forEach(function(t){ t.verdict = verdict(t); t.kind = kindOf(t.mac, {locally_administered: t.la}); });
+
+  var order = {KEEPER:0, WATCH:1, GOOD:2, WAIT:3, DROP:4, MOBILE:5};
+  list.sort(function(a,b){
+    var x, y;
+    if (sortKey === 'verdict') { x = order[a.verdict]; y = order[b.verdict]; }
+    else if (sortKey === 'grids') { x = Object.keys(a.grids)[0]; y = Object.keys(b.grids)[0]; }
+    else if (sortKey === 'assigned') { x = assigned[a.mac] ? 1 : 0; y = assigned[b.mac] ? 1 : 0; }
+    else if (sortKey === 'tx_mac') { x = labelOf(a) || ('zzz' + a.mac); y = labelOf(b) || ('zzz' + b.mac); }
+    else if (sortKey === 'kind') { x = a.kind; y = b.kind; }
+    else { x = a[sortKey]; y = b[sortKey]; }
+    if (x < y) return sortDir; if (x > y) return -sortDir; return 0;
+  });
+
+  var counts = {};
+  list.forEach(function(t){ counts[t.verdict] = (counts[t.verdict] || 0) + 1; });
+  document.getElementById('bar').innerHTML =
+    '<span><b>' + list.length + '</b> transmitters</span>' +
+    '<span><b>' + inv.links_total + '</b> links (' + inv.links_visible + ' renderable)</span>' +
+    '<span>headroom <b>' + inv.headroom + '</b>/' + inv.max_links + '</span>' +
+    ['KEEPER','WATCH','GOOD','WAIT','DROP','MOBILE'].map(function(v){
+      return counts[v] ? '<span class="v-' + v + '">' + v + ' <b>' + counts[v] + '</b></span>' : '';
+    }).join('');
+
+  var head = document.getElementById('head');
+  head.innerHTML = COLS.map(function(c){
+    var arrow = sortKey === c[0] ? (sortDir < 0 ? ' ▾' : ' ▴') : '';
+    return '<th data-k="' + c[0] + '">' + c[1] + arrow + '</th>';
+  }).join('');
+  Array.prototype.forEach.call(head.querySelectorAll('th'), function(th){
+    th.addEventListener('click', function(){
+      var k = th.dataset.k;
+      if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = -1; }
+      refresh();
+    });
+  });
+
+  document.getElementById('rows').innerHTML = list.map(function(t){
+    var a = assigned[t.mac];
+    var asg = a
+      ? '<span class="assigned">' + a.status + (a.position ? '' : ' (no pos)') + '</span>'
+      : '<span class="pill">unassigned</span>';
+    var drift = t.samples >= 2
+      ? t.drift.toFixed(1) + (t.samples < MIN_DRIFT_SAMPLES ? ' <span class="pill">n=' + t.samples + '</span>' : '')
+      : '<span class="pill">watching</span>';
+    return '<tr title="' + reasonFor(t, t.verdict) + '">' +
+      '<td class="v-' + t.verdict + '">' + t.verdict + '</td>' +
+      '<td><span class="dev">' + (labelOf(t) || '<span class="unnamed">unnamed</span>') + '</span>'
+        + '<br><span class="macsub">' + t.mac + '</span></td>' +
+      '<td>' + t.kind + '</td>' +
+      '<td class="n">' + t.receivers + '</td>' +
+      '<td class="n">' + t.bestRssi.toFixed(0) + '</td>' +
+      '<td class="n">' + t.fps.toFixed(2) + '</td>' +
+      '<td class="n">' + t.visible + '/' + t.rows.length + '</td>' +
+      '<td class="n">' + drift + '</td>' +
+      '<td class="n">' + Object.keys(t.grids).join(',') + '</td>' +
+      '<td>' + asg + '</td>' +
+    '</tr>';
+  }).join('');
+
+  document.getElementById('foot').textContent =
+    'Drift is measured in this page over this session and resets on reload — the server does not track it yet. '
+    + 'It needs ' + MIN_DRIFT_SAMPLES + ' samples (~' + Math.round(MIN_DRIFT_SAMPLES * POLL_MS / 1000)
+    + ' s) before a stationary verdict is offered, so leave this open while you decide. '
+    + 'Hover a row for why it got its verdict.';
+}
+
+refresh();
+setInterval(refresh, POLL_MS);
+</script>
+</body>
+</html>

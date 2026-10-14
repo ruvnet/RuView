@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>House &amp; Fleet in 3D</title>
+<!--
+  The building, the fleet, and the links between them, in true geometry.
+
+  No dependencies, so it works with the internet down — same as mark.html,
+  mesh.html and mesh3d.html.
+
+  HOW THIS DIFFERS FROM mesh3d.html: that page lays nodes out by RF distance,
+  deliberately ignoring architecture, so distance means isolation. This one is
+  the opposite — every coordinate here is a surveyed number from
+  room_config.json, drawn where it physically is. Put side by side they answer
+  different questions: mesh3d says "how coupled are these two boards", this
+  says "where are they, and what is between them".
+
+  WHAT IS MEASURED HERE (all of it):
+    - Node and AP positions      room_config.json, hand-surveyed with a tape
+    - Storey elevations          derived from measured ceiling + subfloor
+    - Building outline           the footprint rings you traced
+    - Link RSSI / fps / motion   /api/v1/links, live rolling windows
+    - Pair co-reception counts   /api/v1/fusion, (tx_mac, rx_seq) pairing
+
+  WHAT IS NOT DRAWN, DELIBERATELY: any person, pose, skeleton or occupancy
+  volume. The link-line forward model was falsified on this fleet (response ran
+  INVERSELY to link-line distance), and the pose path in the Observatory is
+  procedurally generated. Neither belongs in a view whose whole claim is that
+  everything in it is real. When position estimation earns its place it can be
+  added with a provenance label; until then this shows the instrument, not its
+  guesses.
+
+  THE POINT OF THE THIRD DIMENSION: a link between storeys has to cross the
+  floor slab, and the slab costs signal. In plan view that link is just a line
+  like any other. Here it visibly punches through, and the panel puts a
+  measured number on what it cost.
+-->
+<style>
+  :root{
+    --bg:#0d1117; --fg:#e6edf3; --dim:#8b949e; --line:#30363d; --card:#161b22;
+    --ok:#2ea043; --warn:#d29922; --bad:#f85149; --accent:#388bfd;
+    --node:#e05561; --ap:#a371f7; --slab:#d29922;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--fg);
+       font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+       display:flex; flex-direction:column; height:100vh; overflow:hidden;}
+  header{padding:12px 16px 10px; border-bottom:1px solid var(--line); flex:0 0 auto;}
+  h1{font-size:15px; margin:0 0 2px;}
+  .sub{color:var(--dim); font-size:11.5px;}
+  .wrap{flex:1 1 auto; display:flex; min-height:0;}
+  #stage{flex:1 1 auto; position:relative; min-width:0;}
+  canvas{display:block; width:100%; height:100%; cursor:grab;}
+  canvas:active{cursor:grabbing;}
+  aside{flex:0 0 320px; border-left:1px solid var(--line); padding:14px;
+        overflow-y:auto; background:var(--card);}
+  @media (max-width:820px){ .wrap{flex-direction:column;}
+    aside{flex:0 0 auto; border-left:none; border-top:1px solid var(--line);} }
+  h2{font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+     color:var(--dim); margin:14px 0 8px; font-weight:600;}
+  h2:first-child{margin-top:0;}
+  table{width:100%; border-collapse:collapse; font-size:11.5px;}
+  td{padding:2px 4px; border-bottom:1px solid rgba(48,54,61,0.5);}
+  td.n{text-align:right; font-variant-numeric:tabular-nums;}
+  .warnbox{border:1px solid var(--warn); border-radius:5px; padding:8px 10px;
+           margin-bottom:12px; font-size:11.5px; color:var(--warn);}
+  .toggles{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;}
+  label.tg{display:flex; align-items:center; gap:5px; font-size:11.5px;
+           color:var(--dim); cursor:pointer;}
+  #stamp{color:var(--dim); font-size:11px; margin-top:10px;}
+  .key{display:flex; align-items:center; gap:6px; font-size:11.5px; margin:3px 0;}
+  .sw{width:22px; height:3px; border-radius:2px; flex:0 0 auto;}
+</style>
+</head>
+<body>
+<header>
+  <h1>House &amp; Fleet in 3D</h1>
+  <div class="sub">Every coordinate surveyed, every link measured. Drag to orbit, scroll to zoom.</div>
+</header>
+<div class="wrap">
+  <div id="stage"><canvas id="cv"></canvas></div>
+  <aside>
+    <div id="warn"></div>
+
+    <h2>Show</h2>
+    <div class="toggles">
+      <label class="tg"><input type="checkbox" id="tShell" checked> shell</label>
+      <label class="tg"><input type="checkbox" id="tPeer" checked> node links</label>
+      <label class="tg"><input type="checkbox" id="tAp" checked> AP links</label>
+      <label class="tg"><input type="checkbox" id="tEmit" checked> illuminators</label>
+      <label class="tg"><input type="checkbox" id="tLabels" checked> labels</label>
+      <label class="tg"><input type="checkbox" id="tSlabOnly"> through-slab only</label>
+    </div>
+
+    <h2>Link colour</h2>
+    <div class="key"><span class="sw" style="background:#2ea043"></span> same storey</div>
+    <div class="key"><span class="sw" style="background:#d29922"></span> crosses a floor slab</div>
+    <div class="key"><span class="sw" style="background:#a371f7"></span> node &rarr; access point</div>
+    <div class="key"><span class="sw" style="background:#2ea043"></span> node &rarr; trusted illuminator</div>
+    <div class="sub" style="margin-top:6px;">
+      Thickness is measured co-reception: how many transmissions both boards
+      captured, from the <code>(tx_mac, rx_seq)</code> pairing index. Note what
+      that is and is not — it counts co-observation of a common transmitter
+      (nearly always the AP), gated by each board's own frame rate. It is
+      <em>not</em> a measure of coupling between the pair, so a thick line does
+      not mean those two boards hear each other well.
+    </div>
+
+    <h2>Slab penalty</h2>
+    <table id="slabTbl"></table>
+    <div class="sub" style="margin-top:6px;" id="slabNote"></div>
+
+    <h2>Storeys</h2>
+    <table id="floorTbl"></table>
+
+    <h2>Nodes</h2>
+    <table id="nodeTbl"></table>
+
+    <div id="stamp">loading…</div>
+  </aside>
+</div>
+<script>
+'use strict';
+
+// ---- constants ------------------------------------------------------------
+
+var M_PER_FT = 0.3048;
+var REFRESH_MS = 3000;
+
+// ---- view state -----------------------------------------------------------
+
+var az = -0.6, el = 0.42, zoom = 1.0;
+var dragging = false, lastX = 0, lastY = 0;
+
+// ---- data -----------------------------------------------------------------
+
+var cfg = null;      // /api/v1/config/room
+var pairs = [];      // [{a, b, common}] from /api/v1/fusion
+var apLinks = [];    // [{rx_node, rssi_dbm, fps}] infrastructure links
+// Node-to-node links whose transmitter is attributed to one of our own boards.
+// Only these have BOTH endpoints surveyed, so only these carry a real 3D
+// distance — which is what the slab comparison needs and the AP links, whose
+// far end is a single fixed point, cannot supply.
+var peerLinks = [];
+/* Trusted illuminators from the room config, plus which nodes currently hear
+ * each one. Only `approved` and `surveyed` appear: those are the transmitters
+ * whose coordinates the solver may actually use, so they are the only ones
+ * whose geometry it is honest to draw. */
+var emitters = [];
+var nodeState = {};  // node_id -> {status, rssi_dbm}
+var lastErr = null;
+
+function ft(m){ return m / M_PER_FT; }
+
+// ---- geometry -------------------------------------------------------------
+
+/** Storeys as declared, or a single implicit ground floor for a config
+ *  written before storeys existed. */
+function floors(){
+  if (cfg && cfg.floors && cfg.floors.length) {
+    return cfg.floors.slice().sort(function(a,b){ return a.level - b.level; });
+  }
+  return [{level:1, name:'First', elevation_m:0, ceiling_m:2.44, subfloor_m:0}];
+}
+
+function floorOf(n){ return (n.floor === null || n.floor === undefined) ? 1 : n.floor; }
+
+function floorRec(level){
+  var fs = floors();
+  for (var i=0;i<fs.length;i++) if (fs[i].level === level) return fs[i];
+  return fs[0];
+}
+
+/** The outline of one storey, as a list of rings in room coordinates.
+ *
+ *  Falls back to the bounding rectangle when that storey has no ring, and the
+ *  caller is told which it got — a box standing in for an untraced storey must
+ *  never be mistaken for a surveyed outline. */
+function ringsFor(level){
+  var out = [];
+  var fp = (cfg && cfg.footprint) || [];
+  for (var i=0;i<fp.length;i++){
+    if (fp[i].level === level && fp[i].points && fp[i].points.length >= 3) {
+      out.push({pts: fp[i].points, traced: true});
+    }
+  }
+  if (!out.length && cfg &&
+      typeof cfg.width_m === 'number' && typeof cfg.depth_m === 'number') {
+    out.push({pts: [[0,0],[cfg.width_m,0],[cfg.width_m,cfg.depth_m],[0,cfg.depth_m]],
+              traced: false});
+  }
+  return out;
+}
+
+/** Model-space point from room coordinates.
+ *
+ *  Room space is x east, y south, z up. The projector wants y up and z into
+ *  the screen, so south becomes depth and height becomes the vertical axis.
+ *  Everything is re-centred on the model's own middle, otherwise the view
+ *  orbits the north-west corner — a point outside the house — which reads as
+ *  the building swinging around a stake driven through its corner. */
+var centre = {x:0, y:0, z:0};
+
+function pt(xm, ym, zm){
+  return {x: ft(xm) - centre.x, y: ft(zm) - centre.y, z: ft(ym) - centre.z};
+}
+
+function recentre(){
+  var xs = [], ys = [], zs = [];
+  function add(xm, ym, zm){ xs.push(ft(xm)); ys.push(ft(zm)); zs.push(ft(ym)); }
+  if (!cfg) return;
+  floors().forEach(function(f){
+    ringsFor(f.level).forEach(function(r){
+      r.pts.forEach(function(p){
+        add(p[0], p[1], f.elevation_m);
+        add(p[0], p[1], f.elevation_m + (f.ceiling_m || 0));
+      });
+    });
+  });
+  ((cfg && cfg.nodes) || []).forEach(function(n){ add(n.x, n.y, n.z); });
+  if (cfg && cfg.ap_position) add(cfg.ap_position[0], cfg.ap_position[1], cfg.ap_position[2]);
+  /* Sub-floor emitters are the reason this matters: a basement gateway sits
+   * below every other point in the model, and leaving it out of the centring
+   * pushes it off the bottom of the view. */
+  ((cfg && cfg.emitters) || []).forEach(function(e){
+    if (Array.isArray(e.position) && (e.status === 'approved' || e.status === 'surveyed')) {
+      add(e.position[0], e.position[1], e.position[2]);
+    }
+  });
+  if (!xs.length) return;
+  function mid(a){ return (Math.min.apply(null,a) + Math.max.apply(null,a)) / 2; }
+  centre = {x: mid(xs), y: mid(ys), z: mid(zs)};
+}
+
+/** Longest edge of the model, used to pick a scale that fits it on screen. */
+function extent(){
+  var lo = 1e9, hi = -1e9;
+  if (!cfg) return 40;
+  floors().forEach(function(f){
+    ringsFor(f.level).forEach(function(r){
+      r.pts.forEach(function(p){
+        lo = Math.min(lo, ft(p[0]), ft(p[1]));
+        hi = Math.max(hi, ft(p[0]), ft(p[1]));
+      });
+    });
+  });
+  return (hi - lo) > 0 ? (hi - lo) : 40;
+}
+
+// ---- projection -----------------------------------------------------------
+
+var cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+
+function project(p, w, h){
+  var ca=Math.cos(az), sa=Math.sin(az), ce=Math.cos(el), se=Math.sin(el);
+  var x = p.x*ca - p.z*sa;
+  var z = p.x*sa + p.z*ca;
+  var y = p.y*ce - z*se;
+  var depth = p.y*se + z*ce;
+  var s = zoom * Math.min(w,h) / (extent() * 1.7);
+  return {x: w/2 + x*s, y: h/2 - y*s, d: depth};
+}
+
+// ---- drawing --------------------------------------------------------------
+
+function on(id){ var e = document.getElementById(id); return e && e.checked; }
+
+/** Painter's algorithm: everything is collected with a depth, then drawn back
+ *  to front. Without it a link behind the far wall draws over it and the
+ *  building reads as inside-out. */
+var prims = [];
+function push(depth, fn){ prims.push({d: depth, fn: fn}); }
+
+function drawShell(w, h){
+  floors().forEach(function(f){
+    var elev = f.elevation_m, ceil = elev + (f.ceiling_m || 0);
+    ringsFor(f.level).forEach(function(ring){
+      var lo = ring.pts.map(function(p){ return project(pt(p[0], p[1], elev), w, h); });
+      var hi = ring.pts.map(function(p){ return project(pt(p[0], p[1], ceil), w, h); });
+      var dep = 0; lo.forEach(function(q){ dep += q.d; }); dep /= (lo.length || 1);
+
+      // An untraced storey is drawn dashed. It is a stand-in bounding box, not
+      // a surveyed outline, and the two must never look alike.
+      var dash = ring.traced ? [] : [5,5];
+
+      push(dep - 0.01, function(){
+        // Floor slab, filled faintly so storeys read as solid surfaces.
+        ctx.beginPath();
+        lo.forEach(function(q,i){ i ? ctx.lineTo(q.x,q.y) : ctx.moveTo(q.x,q.y); });
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(56,139,253,0.07)';
+        ctx.fill();
+        ctx.setLineDash(dash);
+        ctx.strokeStyle = ring.traced ? 'rgba(56,139,253,0.75)' : 'rgba(139,148,158,0.55)';
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
+        // Ceiling outline and the verticals joining the two.
+        ctx.beginPath();
+        hi.forEach(function(q,i){ i ? ctx.lineTo(q.x,q.y) : ctx.moveTo(q.x,q.y); });
+        ctx.closePath();
+        ctx.strokeStyle = 'rgba(56,139,253,0.30)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.beginPath();
+        for (var i=0;i<lo.length;i++){ ctx.moveTo(lo[i].x,lo[i].y); ctx.lineTo(hi[i].x,hi[i].y); }
+        ctx.stroke();
+        ctx.setLineDash([]);
+      });
+    });
+  });
+
+  // Interior walls, if any have been drawn. Stored per storey and full height
+  // unless a height was given.
+  ((cfg && cfg.walls) || []).forEach(function(wl){
+    var f = floorRec(wl.level);
+    var base = f.elevation_m, top = base + (wl.height_m || f.ceiling_m || 0);
+    var a0 = project(pt(wl.x1, wl.y1, base), w, h), b0 = project(pt(wl.x2, wl.y2, base), w, h);
+    var a1 = project(pt(wl.x1, wl.y1, top), w, h),  b1 = project(pt(wl.x2, wl.y2, top), w, h);
+    push((a0.d + b0.d) / 2, function(){
+      ctx.beginPath();
+      ctx.moveTo(a0.x,a0.y); ctx.lineTo(b0.x,b0.y); ctx.lineTo(b1.x,b1.y); ctx.lineTo(a1.x,a1.y);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(230,237,243,0.10)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(230,237,243,0.45)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    });
+  });
+}
+
+function nodeById(id){
+  var ns = (cfg && cfg.nodes) || [];
+  for (var i=0;i<ns.length;i++) if (ns[i].id === id) return ns[i];
+  return null;
+}
+
+/** Peer links, thickness by measured co-reception count. */
+function drawPeerLinks(w, h){
+  var maxc = 1;
+  pairs.forEach(function(p){ if (p.common > maxc) maxc = p.common; });
+
+  pairs.forEach(function(p){
+    var A = nodeById(p.a), B = nodeById(p.b);
+    if (!A || !B) return;                       // a pair with no surveyed position
+    var slab = floorOf(A) !== floorOf(B);
+    if (on('tSlabOnly') && !slab) return;
+    var pa = project(pt(A.x, A.y, A.z), w, h);
+    var pb = project(pt(B.x, B.y, B.z), w, h);
+    var frac = p.common / maxc;
+    push((pa.d + pb.d) / 2, function(){
+      ctx.beginPath();
+      ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y);
+      ctx.strokeStyle = slab ? 'rgba(210,153,34,' + (0.25 + 0.65*frac) + ')'
+                             : 'rgba(46,160,67,'  + (0.20 + 0.60*frac) + ')';
+      ctx.lineWidth = 0.6 + 3.4 * frac;
+      ctx.stroke();
+    });
+  });
+}
+
+/** AP links. The AP is one known fixed endpoint, so these are the links whose
+ *  geometry is fully determined. */
+function drawApLinks(w, h){
+  if (!cfg || !cfg.ap_position) return;
+  var ap = cfg.ap_position;
+  var pap = project(pt(ap[0], ap[1], ap[2]), w, h);
+  apLinks.forEach(function(l){
+    var N = nodeById(l.rx_node);
+    if (!N) return;
+    var apFloor = (cfg.ap_floor === null || cfg.ap_floor === undefined) ? 1 : cfg.ap_floor;
+    var slab = floorOf(N) !== apFloor;
+    if (on('tSlabOnly') && !slab) return;
+    var pn = project(pt(N.x, N.y, N.z), w, h);
+    // Stronger RSSI draws heavier. -50 dBm is a very good link here, -85 poor.
+    var q = Math.max(0, Math.min(1, (l.rssi_dbm + 85) / 35));
+    push((pap.d + pn.d) / 2, function(){
+      ctx.beginPath();
+      ctx.moveTo(pap.x, pap.y); ctx.lineTo(pn.x, pn.y);
+      ctx.strokeStyle = 'rgba(163,113,247,' + (0.18 + 0.55*q) + ')';
+      ctx.lineWidth = 0.5 + 2.2 * q;
+      ctx.setLineDash([4,3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    });
+  });
+}
+
+/** Trusted illuminators, and a chord to each node that currently hears one.
+ *
+ * These are what the whole illuminator effort is for: a second access point, a
+ * basement gateway, a ceiling smoke detector. Each is a bistatic source with a
+ * known position, and the chords are the geometry it contributes.
+ *
+ * A surveyed emitter draws solid; an estimated one draws hollow with a ring
+ * whose radius IS its stated uncertainty, in metres, at the same scale as
+ * everything else. That is deliberately not a label — a 15 m ring around a
+ * neighbour's router visibly constrains far less than a taped-in gateway, and
+ * seeing that is the point.
+ */
+function drawEmitters(w, h){
+  emitters.forEach(function(e){
+    var p = project(pt(e.pos[0], e.pos[1], e.pos[2]), w, h);
+
+    /* Chords to the nodes hearing it right now. Same weighting rule as the AP
+     * links so the two are comparable by eye. */
+    e.rx.forEach(function(r){
+      var N = nodeById(r.rx_node);
+      if (!N) return;
+      var pn = project(pt(N.x, N.y, N.z), w, h);
+      var q = Math.max(0, Math.min(1, (r.rssi_dbm + 95) / 40));
+      push((p.d + pn.d) / 2, function(){
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y); ctx.lineTo(pn.x, pn.y);
+        ctx.strokeStyle = 'rgba(46,160,67,' + (0.16 + 0.5 * q) + ')';
+        ctx.lineWidth = 0.5 + 2.0 * q;
+        ctx.stroke();
+      });
+    });
+
+    push(p.d, function(){
+      /* Drop line to the ground plane. Without it a sub-floor emitter is
+       * indistinguishable from one at head height under this projection. */
+      var foot = project(pt(e.pos[0], e.pos[1], 0), w, h);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y); ctx.lineTo(foot.x, foot.y);
+      ctx.strokeStyle = 'rgba(46,160,67,0.35)';
+      ctx.setLineDash([3, 3]); ctx.lineWidth = 1; ctx.stroke();
+      ctx.setLineDash([]);
+
+      if (e.uncertainty > 0) {
+        /* Horizontal ring at the emitter's own height. */
+        var s0 = project(pt(e.pos[0], e.pos[1], e.pos[2]), w, h);
+        var s1 = project(pt(e.pos[0] + e.uncertainty, e.pos[1], e.pos[2]), w, h);
+        var rpx = Math.hypot(s1.x - s0.x, s1.y - s0.y);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, rpx, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(46,160,67,0.40)';
+        ctx.setLineDash([4, 4]); ctx.lineWidth = 1; ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      var half = 6;
+      ctx.beginPath();
+      ctx.rect(p.x - half, p.y - half, half * 2, half * 2);
+      ctx.fillStyle = '#2ea043';
+      ctx.fill();
+      ctx.strokeStyle = '#0d1117'; ctx.lineWidth = 2; ctx.stroke();
+      if (!e.surveyed) {                       /* estimated: hollow centre */
+        ctx.beginPath();
+        ctx.rect(p.x - 2, p.y - 2, 4, 4);
+        ctx.fillStyle = '#0d1117'; ctx.fill();
+      }
+
+      if (on('tLabels')) {
+        ctx.fillStyle = '#2ea043';
+        ctx.font = '11px ui-monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(e.label, p.x, p.y - 11);
+        ctx.textAlign = 'left';
+      }
+    });
+  });
+}
+
+function drawMarkers(w, h){
+  ((cfg && cfg.nodes) || []).forEach(function(n){
+    var p = project(pt(n.x, n.y, n.z), w, h);
+    var st = nodeState[n.id];
+    var alive = st && st.status === 'active';
+    push(p.d, function(){
+      // Drop line to its own storey's floor: without it, height is invisible
+      // under an orthographic projection and every node looks like it is lying
+      // on the slab.
+      var f = floorRec(floorOf(n));
+      var foot = project(pt(n.x, n.y, f.elevation_m), w, h);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y); ctx.lineTo(foot.x, foot.y);
+      ctx.strokeStyle = 'rgba(224,85,97,0.35)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 5.5, 0, Math.PI*2);
+      // Literal hex, not a CSS variable: a canvas context does not resolve
+      // var(), it silently keeps the previous colour.
+      ctx.fillStyle = alive ? '#e05561' : '#6e2c33';
+      ctx.fill();
+      ctx.strokeStyle = '#0d1117';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      if (on('tLabels')) {
+        ctx.fillStyle = '#e6edf3';
+        ctx.font = '11px ui-monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(n.id + (n.label ? ':' + n.label : ''), p.x, p.y - 10);
+        ctx.textAlign = 'left';
+      }
+    });
+  });
+
+  if (cfg && cfg.ap_position) {
+    var ap = cfg.ap_position;
+    var p = project(pt(ap[0], ap[1], ap[2]), w, h);
+    push(p.d, function(){
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(Math.PI/4);
+      ctx.fillStyle = '#a371f7';
+      ctx.fillRect(-5, -5, 10, 10);
+      ctx.restore();
+      if (on('tLabels')) {
+        ctx.fillStyle = '#a371f7';
+        ctx.font = '11px ui-monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('AP', p.x, p.y - 11);
+        ctx.textAlign = 'left';
+      }
+    });
+  }
+}
+
+function draw(){
+  var w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== w || cv.height !== h){ cv.width = w; cv.height = h; }
+  ctx.clearRect(0, 0, w, h);
+
+  if (!cfg){
+    ctx.fillStyle = '#8b949e'; ctx.font = '13px ui-monospace';
+    ctx.fillText(lastErr || 'loading room config…', 18, 26);
+    return;
+  }
+
+  prims = [];
+  if (on('tShell')) drawShell(w, h);
+  if (on('tPeer')) drawPeerLinks(w, h);
+  if (on('tAp')) drawApLinks(w, h);
+  if (on('tEmit')) drawEmitters(w, h);
+  drawMarkers(w, h);
+
+  prims.sort(function(a,b){ return a.d - b.d; });
+  prims.forEach(function(p){ p.fn(); });
+
+  // North arrow, so the model can be oriented against the house.
+  var n0 = project(pt(0,0,0), w, h), n1 = project(pt(0,-2,0), w, h);
+  ctx.strokeStyle = '#8b949e'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(n0.x,n0.y); ctx.lineTo(n1.x,n1.y); ctx.stroke();
+  ctx.fillStyle = '#8b949e'; ctx.font = '11px ui-monospace';
+  ctx.fillText('N', n1.x - 3, n1.y - 5);
+}
+
+// ---- side panel -----------------------------------------------------------
+
+function renderPanel(){
+  var warn = document.getElementById('warn');
+  var msgs = [];
+
+  if (cfg) {
+    // An untraced storey is drawn as a bounding box. Saying so in the panel is
+    // the difference between a stand-in and a claim.
+    var untraced = floors().filter(function(f){
+      return !ringsFor(f.level).some(function(r){ return r.traced; });
+    });
+    if (untraced.length) {
+      msgs.push('Storey ' + untraced.map(function(f){ return f.level; }).join(', ') +
+        ' has no traced outline — shown dashed, as the bounding box. Not surveyed geometry.');
+    }
+    if (!(cfg.walls || []).length) {
+      msgs.push('No interior walls drawn yet, so the shell is an empty volume.');
+    }
+  }
+  warn.innerHTML = msgs.length
+    ? '<div class="warnbox">' + msgs.join('<br><br>') + '</div>' : '';
+
+  // Slab penalty — reported ONLY when the layout can actually identify it.
+  //
+  // The obvious comparison, mean RSSI of same-storey links against
+  // through-slab ones, is confounded by distance and gets the sign wrong on
+  // this fleet: measured 2026-08-31, every cross-floor pair (10.6-18.2 ft) was
+  // CLOSER than every same-floor pair (18.6-29.4 ft), because upper-storey
+  // boards sit nearly above lower ones. Cross-floor links duly read ~4 dB
+  // STRONGER, which is geometry, not physics.
+  //
+  // Controlling for distance needs the two sets to overlap in distance. With
+  // no overlap there is no common support and no amount of fitting recovers
+  // the slab term, so this reports that it is not identifiable rather than
+  // printing a number. It starts reporting one on its own the day a node
+  // placement creates overlap.
+  function mean(a){ return a.length ? a.reduce(function(s,v){return s+v;},0)/a.length : null; }
+  var same = [], cross = [];
+  peerLinks.forEach(function(l){
+    var A = nodeById(l.rx_node), B = nodeById(l.tx_node_inferred);
+    if (!A || !B) return;
+    var d = Math.sqrt(Math.pow(ft(A.x-B.x),2) + Math.pow(ft(A.y-B.y),2) + Math.pow(ft(A.z-B.z),2));
+    (floorOf(A) === floorOf(B) ? same : cross).push({d: d, r: l.rssi_dbm});
+  });
+  var rows = '', note = '';
+  function span(a){
+    if (!a.length) return null;
+    var ds = a.map(function(v){ return v.d; });
+    return {lo: Math.min.apply(null, ds), hi: Math.max.apply(null, ds)};
+  }
+  var ss = span(same), sc = span(cross);
+  rows += '<tr><td>same storey</td><td class="n">' + same.length + '</td><td class="n">' +
+          (ss ? ss.lo.toFixed(0) + '&ndash;' + ss.hi.toFixed(0) + ' ft' : '&mdash;') + '</td></tr>';
+  rows += '<tr><td>through slab</td><td class="n">' + cross.length + '</td><td class="n">' +
+          (sc ? sc.lo.toFixed(0) + '&ndash;' + sc.hi.toFixed(0) + ' ft' : '&mdash;') + '</td></tr>';
+
+  if (ss && sc) {
+    var lo = Math.max(ss.lo, sc.lo), hi = Math.min(ss.hi, sc.hi);
+    if (hi <= lo) {
+      rows += '<tr><td colspan="3" style="color:var(--warn)">not identifiable</td></tr>';
+      note = 'The two sets do not overlap in distance (' +
+             ss.lo.toFixed(0) + '&ndash;' + ss.hi.toFixed(0) + ' ft against ' +
+             sc.lo.toFixed(0) + '&ndash;' + sc.hi.toFixed(0) + ' ft), so floor and ' +
+             'distance are perfectly confounded and no slab penalty can be ' +
+             'separated out. A same-storey link near ' + sc.lo.toFixed(0) +
+             '&nbsp;ft, or a through-slab link near ' + ss.hi.toFixed(0) +
+             '&nbsp;ft, would create the overlap this needs.';
+    } else {
+      var inBand = function(a){ return a.filter(function(v){ return v.d >= lo && v.d <= hi; }); };
+      var bs = inBand(same), bc = inBand(cross);
+      var ms = mean(bs.map(function(v){ return v.r; }));
+      var mc = mean(bc.map(function(v){ return v.r; }));
+      if (ms !== null && mc !== null) {
+        rows += '<tr><td>overlap band</td><td class="n">' + (bs.length + bc.length) +
+                '</td><td class="n">' + lo.toFixed(0) + '&ndash;' + hi.toFixed(0) + ' ft</td></tr>';
+        rows += '<tr><td>slab cost</td><td class="n"></td><td class="n" style="color:var(--slab)">' +
+                (ms - mc).toFixed(1) + ' dB</td></tr>';
+        note = 'Compared only within the band where both sets have links, so the ' +
+               'difference is not just cross-floor pairs being closer. ' +
+               bs.length + ' same-storey and ' + bc.length + ' through-slab links ' +
+               'in band — a handful of links either way, so treat it as an ' +
+               'indication, not a calibrated figure.';
+      }
+    }
+  } else {
+    note = 'Needs peer links on both sides of a slab with attributed transmitters.';
+  }
+  document.getElementById('slabTbl').innerHTML = rows;
+  document.getElementById('slabNote').innerHTML = note;
+
+  // Storeys.
+  var frows = '';
+  floors().forEach(function(f){
+    var nn = ((cfg && cfg.nodes) || []).filter(function(n){ return floorOf(n) === f.level; }).length;
+    var traced = ringsFor(f.level).some(function(r){ return r.traced; });
+    frows += '<tr><td>' + (f.name || ('Floor ' + f.level)) + '</td>' +
+             '<td class="n">' + ft(f.elevation_m).toFixed(1) + ' ft</td>' +
+             '<td class="n">' + nn + ' node(s)</td>' +
+             '<td class="n" style="color:' + (traced ? 'var(--ok)' : 'var(--dim)') + '">' +
+             (traced ? 'traced' : 'box') + '</td></tr>';
+  });
+  document.getElementById('floorTbl').innerHTML = frows;
+
+  // Nodes.
+  var nrows = '';
+  ((cfg && cfg.nodes) || []).slice().sort(function(a,b){ return a.id - b.id; }).forEach(function(n){
+    var st = nodeState[n.id];
+    var col = !st ? 'var(--dim)' : st.status === 'active' ? 'var(--ok)' : 'var(--bad)';
+    nrows += '<tr><td style="color:' + col + '">' + n.id + '</td>' +
+             '<td>' + (n.label || '') + '</td>' +
+             '<td class="n">f' + floorOf(n) + '</td>' +
+             '<td class="n">' + (st && st.rssi_dbm !== undefined ? st.rssi_dbm.toFixed(0) : '&mdash;') + '</td></tr>';
+  });
+  document.getElementById('nodeTbl').innerHTML = nrows;
+
+  document.getElementById('stamp').textContent =
+    ((cfg && cfg.nodes) || []).length + ' nodes · ' + pairs.length + ' peer links · ' +
+    apLinks.length + ' AP links · ' + emitters.length + ' illuminators' + (lastErr ? ' · ' + lastErr : '');
+}
+
+// ---- data ---------------------------------------------------------------
+
+function getJSON(path){
+  return fetch(path, {cache:'no-store'}).then(function(r){
+    if (!r.ok) throw new Error(path + ' -> ' + r.status);
+    return r.json();
+  });
+}
+
+// Each source is fetched independently and a failure yields null rather
+// than rejecting. Promise.all would abandon the WHOLE view if any one
+// endpoint were missing or briefly failing, so a server built without
+// the fusion endpoint -- or a single transient 500 on any route --
+// rendered an empty scene instead of the four sources that answered.
+// The room and the nodes make the picture; pairing and the link
+// inventory enrich it.
+var failed = [];
+function getJSONOrNull(path){
+  return getJSON(path).catch(function(){ failed.push(path); return null; });
+}
+
+function refresh(){
+  failed = [];
+  Promise.all([
+    getJSONOrNull('/api/v1/config/room'),
+    getJSONOrNull('/api/v1/fusion'),
+    getJSONOrNull('/api/v1/links'),
+    getJSONOrNull('/api/v1/nodes'),
+    getJSONOrNull('/api/v1/links/inventory')
+  ]).then(function(res){
+    // `cfg` may be null when the room endpoint did not answer. An empty
+    // object keeps every downstream read harmless instead of throwing and
+    // taking the whole scene with it.
+    cfg = res[0] || {};
+    pairs = (res[1] && res[1].pairs) || [];
+    var allLinks = (res[2] && res[2].links) || [];
+    apLinks = allLinks.filter(function(l){ return l.kind === 'infrastructure'; });
+    peerLinks = allLinks.filter(function(l){
+      return l.kind !== 'infrastructure' &&
+             l.tx_node_inferred !== null && l.tx_node_inferred !== undefined;
+    });
+    nodeState = {};
+    (((res[3] && res[3].nodes) || [])).forEach(function(n){ nodeState[n.node_id] = n; });
+
+    /* Which receivers currently hear each transmitter. Taken from the inventory
+     * rather than /api/v1/links because a transmitter with no computable motion
+     * metric is absent from the latter — and a silent illuminator is exactly
+     * the case worth drawing, since its geometry has not changed just because
+     * it stopped talking for a minute. */
+    var heard = {};
+    (((res[4] && res[4].links) || [])).forEach(function(r){
+      (heard[r.tx_mac] || (heard[r.tx_mac] = [])).push(r);
+    });
+    emitters = ((cfg && cfg.emitters) || []).filter(function(e){
+      return Array.isArray(e.position) &&
+             (e.status === 'approved' || e.status === 'surveyed');
+    }).map(function(e){
+      return {
+        mac: e.mac,
+        label: e.label || e.mac.slice(-8),
+        pos: e.position,
+        surveyed: e.status === 'surveyed',
+        uncertainty: e.uncertainty_m || 0,
+        rx: heard[e.mac] || []
+      };
+    });
+    // Say plainly which sources did not answer. A view that quietly drops
+    // a layer is indistinguishable from one where nothing is happening.
+    lastErr = failed.length
+      ? failed.length + ' source(s) unavailable: ' + failed.join(', ')
+      : null;
+    recentre();
+    renderPanel();
+    draw();
+  }).catch(function(e){
+    lastErr = e.message;
+    renderPanel();
+    draw();
+  });
+}
+
+// ---- interaction ----------------------------------------------------------
+
+cv.addEventListener('mousedown', function(e){
+  dragging = true; lastX = e.clientX; lastY = e.clientY;
+});
+window.addEventListener('mousemove', function(e){
+  if (!dragging) return;
+  az += (e.clientX - lastX) * 0.008;
+  el += (e.clientY - lastY) * 0.008;
+  // Past vertical the model turns inside out and north points at the floor.
+  el = Math.max(-1.45, Math.min(1.45, el));
+  lastX = e.clientX; lastY = e.clientY;
+  draw();
+});
+window.addEventListener('mouseup', function(){ dragging = false; });
+cv.addEventListener('wheel', function(e){
+  e.preventDefault();
+  zoom *= e.deltaY < 0 ? 1.1 : 0.9;
+  zoom = Math.max(0.2, Math.min(8, zoom));
+  draw();
+}, {passive:false});
+window.addEventListener('resize', draw);
+['tShell','tPeer','tAp','tEmit','tLabels','tSlabOnly'].forEach(function(id){
+  document.getElementById(id).addEventListener('change', draw);
+});
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>
