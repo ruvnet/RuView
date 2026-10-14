@@ -4996,6 +4996,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "ureq 2.12.1",
 ]
 
 [[package]]
