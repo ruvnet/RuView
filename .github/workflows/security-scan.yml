@@ -460,7 +460,7 @@ jobs:
     - name: Create security issue on critical findings
       continue-on-error: true
       if: needs.sast.result == 'failure' || needs.dependency-scan.result == 'failure'
-      uses: actions/github-script@00f12e3e20659f42342b1c0226afda7f7c042325 # v6
+      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v6
       with:
         script: |
           github.rest.issues.create({
