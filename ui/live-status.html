@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>RuView — Live Status</title>
+<style>
+  :root { color-scheme: dark light; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #0f1115;
+    color: #e8eaed;
+    margin: 0;
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  h1 { margin: 0; font-size: 1.4rem; font-weight: 600; }
+  #status-badge {
+    font-size: 0.8rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  .badge-ok { background: #103b23; color: #4ade80; }
+  .badge-stale { background: #3b1010; color: #f87171; }
+  #error-banner {
+    display: none;
+    background: #3b1010;
+    color: #f87171;
+    padding: 0.75rem 1.25rem;
+    border-radius: 8px;
+    max-width: 960px;
+    width: 100%;
+    font-size: 0.9rem;
+  }
+  #nodes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1.25rem;
+    width: 100%;
+    max-width: 960px;
+  }
+  .node-card {
+    background: #161920;
+    border: 1px solid #262b35;
+    border-radius: 16px;
+    padding: 1.25rem 1.25rem 1.5rem;
+  }
+  .node-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+    gap: 0.5rem;
+  }
+  .node-title {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+  .floor-label {
+    font-size: 1.05rem;
+    font-weight: 700;
+    background: transparent;
+    border: none;
+    color: #e8eaed;
+    border-bottom: 1px dashed transparent;
+    padding: 0 0.15rem;
+    min-width: 4ch;
+    max-width: 16ch;
+  }
+  .floor-label:hover, .floor-label:focus {
+    border-bottom-color: #4b5563;
+    outline: none;
+  }
+  .node-id {
+    font-size: 0.7rem;
+    color: #6b7280;
+    white-space: nowrap;
+  }
+  .node-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 999px;
+    flex-shrink: 0;
+  }
+  .dot-online { background: #4ade80; box-shadow: 0 0 6px #4ade8090; }
+  .dot-stale { background: #f87171; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+  }
+  .card {
+    background: #1a1d24;
+    border: 1px solid #2a2e37;
+    border-radius: 12px;
+    padding: 0.9rem 0.6rem;
+    text-align: center;
+  }
+  .card .label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #9aa0aa;
+    margin-bottom: 0.35rem;
+  }
+  .card .value {
+    font-size: 1.5rem;
+    font-weight: 700;
+  }
+  .card .unit {
+    font-size: 0.75rem;
+    color: #9aa0aa;
+    margin-left: 0.2rem;
+  }
+  .presence-on { color: #4ade80; }
+  .presence-off { color: #6b7280; }
+  .node-footer {
+    margin-top: 0.75rem;
+    font-size: 0.7rem;
+    color: #6b7280;
+    text-align: right;
+  }
+  .chart-wrap { margin-top: 1.1rem; }
+  .chart-title {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #9aa0aa;
+    margin-bottom: 0.4rem;
+  }
+  .chart {
+    width: 100%;
+    height: 44px;
+    display: block;
+    border-radius: 6px;
+    background: #20242c;
+  }
+  .chart-axis {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.6rem;
+    color: #6b7280;
+    margin-top: 0.3rem;
+  }
+  .chart-legend {
+    display: flex;
+    gap: 0.9rem;
+    flex-wrap: wrap;
+    font-size: 0.62rem;
+    color: #9aa0aa;
+    margin-top: 0.5rem;
+  }
+  .chart-legend .swatch {
+    display: inline-block;
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 2px;
+    margin-right: 0.3rem;
+    vertical-align: middle;
+  }
+  #empty-state {
+    color: #6b7280;
+    font-size: 0.9rem;
+    text-align: center;
+    max-width: 500px;
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>RuView — Live Sensing Status</h1>
+    <span id="status-badge" class="badge-stale">connecting…</span>
+  </header>
+
+  <div id="error-banner"></div>
+
+  <div id="nodes"></div>
+  <div id="empty-state" style="display:none;">
+    No nodes registered at <code id="api-base-echo"></code>/api/v1/edge/registry —
+    is c6-presence-watcher.py running for at least one device?
+  </div>
+
+<script>
+  const API_BASE = "http://localhost:3000";
+  const POLL_MS = 1000;
+  const HISTORY_POLL_MS = 30000;
+  const STALE_S = 10;
+  const LABEL_KEY = "ruview-floor-labels";
+
+  const badge = document.getElementById("status-badge");
+  const errBanner = document.getElementById("error-banner");
+  const nodesEl = document.getElementById("nodes");
+  const emptyState = document.getElementById("empty-state");
+  document.getElementById("api-base-echo").textContent = API_BASE;
+
+  const cardEls = new Map(); // node_id -> element refs
+
+  function loadLabels() {
+    try { return JSON.parse(localStorage.getItem(LABEL_KEY)) || {}; }
+    catch { return {}; }
+  }
+  function saveLabel(nodeId, label) {
+    const labels = loadLabels();
+    labels[nodeId] = label;
+    localStorage.setItem(LABEL_KEY, JSON.stringify(labels));
+  }
+
+  function setBadge(ok, text) {
+    badge.textContent = text;
+    badge.className = ok ? "badge-ok" : "badge-stale";
+  }
+  function showError(msg) {
+    errBanner.style.display = "block";
+    errBanner.textContent = msg;
+  }
+  function clearError() {
+    errBanner.style.display = "none";
+  }
+
+  function buildCard(nodeId) {
+    const labels = loadLabels();
+    const defaultLabel = labels[nodeId] || ("Node " + nodeId);
+
+    const card = document.createElement("div");
+    card.className = "node-card";
+    card.innerHTML = `
+      <div class="node-header">
+        <div class="node-title">
+          <span class="node-dot dot-stale" data-el="dot"></span>
+          <input class="floor-label" data-el="label" value="${defaultLabel.replace(/"/g, "&quot;")}" spellcheck="false">
+        </div>
+        <span class="node-id">node ${nodeId}</span>
+      </div>
+      <div class="grid">
+        <div class="card"><div class="label">Presence</div><div class="value" data-el="presence">—</div></div>
+        <div class="card"><div class="label">People</div><div class="value" data-el="persons">—</div></div>
+        <div class="card"><div class="label">Motion</div><div class="value" data-el="motion">—</div></div>
+        <div class="card"><div class="label">Breathing</div><div class="value" data-el="breathing">—<span class="unit">bpm</span></div></div>
+        <div class="card"><div class="label">Heart Rate</div><div class="value" data-el="heart">—<span class="unit">bpm</span></div></div>
+        <div class="card"><div class="label">Confidence</div><div class="value" data-el="confidence">—</div></div>
+      </div>
+      <div class="node-footer" data-el="footer">waiting for data…</div>
+
+      <div class="chart-wrap">
+        <div class="chart-title">Presence — last 24h (10 min buckets)</div>
+        <svg class="chart" data-el="chart" viewBox="0 0 720 60" preserveAspectRatio="none"></svg>
+        <div class="chart-axis" data-el="chartAxis"></div>
+        <div class="chart-legend">
+          <span><span class="swatch" style="background:#20242c;border:1px solid #33394a;"></span>no data</span>
+          <span><span class="swatch" style="background:#2a2e37;"></span>empty</span>
+          <span><span class="swatch" style="background:rgba(74,222,128,0.85);"></span>occupied</span>
+          <span><span class="swatch" style="background:#4ade80;"></span>| became present</span>
+          <span><span class="swatch" style="background:#94a3b8;"></span>| became absent</span>
+        </div>
+      </div>
+    `;
+    nodesEl.appendChild(card);
+
+    const refs = {
+      root: card,
+      dot: card.querySelector('[data-el="dot"]'),
+      label: card.querySelector('[data-el="label"]'),
+      presence: card.querySelector('[data-el="presence"]'),
+      persons: card.querySelector('[data-el="persons"]'),
+      motion: card.querySelector('[data-el="motion"]'),
+      breathing: card.querySelector('[data-el="breathing"]'),
+      heart: card.querySelector('[data-el="heart"]'),
+      confidence: card.querySelector('[data-el="confidence"]'),
+      footer: card.querySelector('[data-el="footer"]'),
+      chart: card.querySelector('[data-el="chart"]'),
+      chartAxis: card.querySelector('[data-el="chartAxis"]'),
+    };
+    refs.label.addEventListener("change", () => saveLabel(nodeId, refs.label.value.trim() || ("Node " + nodeId)));
+    cardEls.set(nodeId, refs);
+    return refs;
+  }
+
+  function removeStaleCards(currentIds) {
+    for (const [nodeId, refs] of cardEls) {
+      if (!currentIds.has(nodeId)) {
+        refs.root.remove();
+        cardEls.delete(nodeId);
+      }
+    }
+  }
+
+  async function fetchVitals(nodeId) {
+    const res = await fetch(`${API_BASE}/api/v1/vitals/${encodeURIComponent(nodeId)}/latest`, { cache: "no-store" });
+    if (res.status === 503) return null;
+    if (!res.ok) throw new Error(`HTTP ${res.status} for node ${nodeId}`);
+    return res.json();
+  }
+
+  async function fetchHistory(nodeId) {
+    const res = await fetch(
+      `${API_BASE}/api/v1/sensing/history/${encodeURIComponent(nodeId)}?hours=24&bucket_min=10`,
+      { cache: "no-store" }
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status} for node ${nodeId} history`);
+    return res.json();
+  }
+
+  function bucketColor(b) {
+    if (!b.has_data) return "#20242c";
+    if (!b.presence_frac) return "#2a2e37";
+    const alpha = (0.35 + b.presence_frac * 0.65).toFixed(2);
+    return `rgba(74, 222, 128, ${alpha})`;
+  }
+
+  function fmtTime(ts) {
+    return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+
+  function renderHistory(refs, hist) {
+    const buckets = hist.buckets;
+    const n = buckets.length;
+    if (n === 0) { refs.chart.innerHTML = ""; refs.chartAxis.innerHTML = ""; return; }
+
+    const W = 720, H = 60;
+    const barW = W / n;
+    const t0 = buckets[0].ts_start;
+    const t1 = buckets[n - 1].ts_end;
+    const total = Math.max(1, t1 - t0);
+    const tToX = (ts) => ((ts - t0) / total) * W;
+
+    let svg = "";
+    for (let i = 0; i < n; i++) {
+      const b = buckets[i];
+      const x = i * barW;
+      const w = Math.max(barW - 0.4, 0.6);
+      const desc = !b.has_data
+        ? `${fmtTime(b.ts_start)} — no data`
+        : (b.presence_frac > 0
+            ? `${fmtTime(b.ts_start)} — ${Math.round(b.presence_frac * 100)}% occupied`
+            : `${fmtTime(b.ts_start)} — empty`);
+      svg += `<rect x="${x.toFixed(2)}" y="0" width="${w.toFixed(2)}" height="${H}" fill="${bucketColor(b)}"><title>${desc}</title></rect>`;
+    }
+    for (const ch of hist.changes) {
+      const x = tToX(ch.ts).toFixed(2);
+      const color = ch.presence ? "#4ade80" : "#94a3b8";
+      const label = `${fmtTime(ch.ts)} — ${ch.presence ? "became present" : "became absent"}`;
+      svg += `<line x1="${x}" y1="0" x2="${x}" y2="${H}" stroke="${color}" stroke-width="1.5"><title>${label}</title></line>`;
+    }
+    refs.chart.innerHTML = svg;
+
+    // Axis labels every ~3h (18 buckets at 10-min resolution).
+    const step = Math.max(1, Math.round(n / 8));
+    const axisLabels = [];
+    for (let i = 0; i < n; i += step) {
+      axisLabels.push(`<span>${fmtTime(buckets[i].ts_start)}</span>`);
+    }
+    axisLabels.push(`<span>now</span>`);
+    refs.chartAxis.innerHTML = axisLabels.join("");
+  }
+
+  function renderVitals(refs, d) {
+    if (!d) {
+      refs.dot.className = "node-dot dot-stale";
+      refs.footer.textContent = "stale — no recent data";
+      return;
+    }
+    refs.dot.className = "node-dot dot-online";
+    refs.presence.textContent = d.presence ? "YES" : "NO";
+    refs.presence.className = "value " + (d.presence ? "presence-on" : "presence-off");
+    refs.persons.textContent = d.n_persons ?? "—";
+    refs.motion.textContent = (d.motion !== undefined) ? (d.motion >= 0.5 ? "YES" : "no") : "—";
+    refs.breathing.innerHTML = (d.breathing_rate_bpm != null ? d.breathing_rate_bpm.toFixed(1) : "—") + '<span class="unit">bpm</span>';
+    refs.heart.innerHTML = (d.heartrate_bpm != null ? d.heartrate_bpm.toFixed(1) : "—") + '<span class="unit">bpm</span>';
+    refs.confidence.textContent = (d.confidence !== undefined) ? (d.confidence * 100).toFixed(0) + "%" : "—";
+    refs.footer.textContent = "updated " + new Date().toLocaleTimeString();
+  }
+
+  async function poll() {
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/edge/registry`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { nodes } = await res.json();
+
+      emptyState.style.display = nodes.length === 0 ? "block" : "none";
+
+      const currentIds = new Set(nodes.map(n => n.node_id));
+      removeStaleCards(currentIds);
+
+      for (const n of nodes) {
+        const refs = cardEls.get(n.node_id) || buildCard(n.node_id);
+        try {
+          const vitals = await fetchVitals(n.node_id);
+          renderVitals(refs, vitals);
+        } catch (e) {
+          refs.dot.className = "node-dot dot-stale";
+          refs.footer.textContent = "error: " + e.message;
+        }
+      }
+
+      setBadge(true, nodes.length + " node" + (nodes.length === 1 ? "" : "s") + " online");
+      clearError();
+    } catch (e) {
+      setBadge(false, "disconnected");
+      showError("Can't reach sensing server at " + API_BASE + " — is ruview-sensing-server.py running? (" + e.message + ")");
+    }
+  }
+
+  async function pollHistory() {
+    for (const [nodeId, refs] of cardEls) {
+      try {
+        const hist = await fetchHistory(nodeId);
+        renderHistory(refs, hist);
+      } catch (e) {
+        // Leave the last-rendered chart in place; vitals polling already
+        // surfaces connectivity errors via the status badge.
+      }
+    }
+  }
+
+  poll();
+  setInterval(poll, POLL_MS);
+  pollHistory();
+  setInterval(pollHistory, HISTORY_POLL_MS);
+</script>
+</body>
+</html>
