@@ -31,6 +31,9 @@ MAC_B = "02:00:00:00:00:0b"
 CREDS = ("--ssid", "test-ssid", "--password", "fake-pass-not-real",
          "--target-ip", "192.0.2.10")
 
+# The password is never cached, so reruns that rely on saved state still pass it.
+PW = ("--password", "fake-pass-not-real")
+
 # Shapes of `esptool read_mac` output (esptool/cmds.py read_mac in 4.x and 5.x).
 ESPTOOL_V5_S3 = "Connected to ESP32-S3 on /dev/x:\nMAC:                02:00:00:00:00:0a\n"
 ESPTOOL_V4_S3 = "Chip is ESP32-S3\nMAC: 02:00:00:00:00:0a\nHard resetting via RTS pin...\n"
@@ -142,7 +145,7 @@ class TestBoardKeyedState(_MainCase):
     def test_board_keeps_its_state_on_a_different_port(self):
         self.run_main("--port", PORT, *CREDS, "--node-id", "2", mac=MAC_A)
 
-        code, _, _ = self.run_main("--port", OTHER_PORT, "--zone", "lab", mac=MAC_A)
+        code, _, _ = self.run_main("--port", OTHER_PORT, *PW, "--zone", "lab", mac=MAC_A)
 
         self.assertEqual(code, 0)
         flashed = self.last_flashed()
@@ -192,7 +195,7 @@ class TestMigration(_MainCase):
             "target_ip": "192.0.2.10", "node_id": 5,
         })
 
-        code, _, err = self.run_main("--port", PORT, "--zone", "lab", mac=MAC_A)
+        code, _, err = self.run_main("--port", PORT, *PW, "--zone", "lab", mac=MAC_A)
 
         self.assertEqual(code, 0)
         self.assertIn("port-keyed state", err)
@@ -209,7 +212,7 @@ class TestMigration(_MainCase):
         self.run_main("--port", OTHER_PORT, *CREDS, "--node-id", "2", mac=MAC_A)
         self.write_legacy(PORT, {"node_id": 9})
 
-        code, _, _ = self.run_main("--port", PORT, "--zone", "lab", mac=MAC_A)
+        code, _, _ = self.run_main("--port", PORT, *PW, "--zone", "lab", mac=MAC_A)
 
         self.assertEqual(code, 0)
         self.assertEqual(self.last_flashed()["node_id"], "2")

@@ -26,7 +26,6 @@ PORT = "/dev/null-test"
 FAKE_NVS = b"\xab" * 64
 PRIOR = {
     "ssid": "TESTSSID",
-    "password": "TESTPASS",
     "target_ip": "127.0.0.1",
     "node_id": 1,
 }
@@ -81,7 +80,7 @@ class ProvisionSideEffectTests(unittest.TestCase):
 
     def test_dry_run_does_not_modify_existing_state(self):
         before = self.seed_state()
-        self.assertIsNone(self.run_main("--node-id", "7", "--dry-run"))
+        self.assertIsNone(self.run_main("--password", "TESTPASS", "--node-id", "7", "--dry-run"))
         self.assertEqual(self.read_state_bytes(), before)
         self.flash.assert_not_called()
 
@@ -121,12 +120,15 @@ class ProvisionSideEffectTests(unittest.TestCase):
 
     def test_real_flash_still_persists_merged_state(self):
         self.seed_state()
-        self.assertIsNone(self.run_main("--zone", "lobby"))
+        self.assertIsNone(self.run_main("--password", "TESTPASS", "--zone", "lobby"))
         self.flash.assert_called_once()
         state = provision.load_state(PORT, self.state_dir)
         self.assertEqual(state["zone"], "lobby")
         for key, value in PRIOR.items():
             self.assertEqual(state[key], value)
+        # The password is supplied per run and never cached.
+        self.assertNotIn("password", state)
+        self.assertNotIn("TESTPASS", self.read_state_bytes().decode())
 
 
 if __name__ == "__main__":
