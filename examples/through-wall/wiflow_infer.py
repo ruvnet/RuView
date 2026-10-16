@@ -40,6 +40,43 @@ class Model:
         out = 1.0/(1.0+np.exp(-(h @ self.W[3].T + self.b[3])))   # Linear+Sigmoid -> 34
         return out.reshape(17,2)
 
+def vitals_fields(frame):
+    """Forward REAL vitals from the sensing frame into the /pose payload, honestly.
+
+    The sensing server (csi.rs) computes an FFT breathing-rate estimate and emits
+    ``features.dominant_freq_hz`` / ``features.breathing_band_power``, plus gated
+    ``breathing_rate_bpm`` / ``heart_rate_bpm`` on a ``vitals`` object when present.
+
+    - ``bpm_breath``: an explicit ``breathing_rate_bpm`` if the pipeline reports one,
+      else derived from the breathing-band spectral peak (``dominant_freq_hz`` inside
+      the 0.1-0.5 Hz band -> bpm = f*60). Omitted when there is no in-band signal.
+    - ``bpm_heart``: forwarded ONLY when the pipeline explicitly reports a plausible
+      value (40-180 bpm). WiFi heart-rate is never synthesised here.
+    - ``stress``: not produced by the pipeline, so it is never emitted (the HUD keeps
+      its own clearly-labelled synthetic stress trace).
+
+    Every field is an *estimate* from real signal; the client already flags coarse
+    accuracy. Fields are simply left off when unavailable, so the HUD shows ``sim``.
+    """
+    out = {}
+    vit = frame.get("vitals") or {}
+    feats = frame.get("features") or {}
+
+    br = vit.get("breathing_rate_bpm") or frame.get("breathing_rate_bpm")
+    if not br:
+        f = feats.get("dominant_freq_hz")
+        band_power = feats.get("breathing_band_power") or 0.0
+        if f is not None and 0.1 <= f <= 0.5 and band_power > 0.0:
+            br = f * 60.0
+    if br and 5.0 <= br <= 35.0:
+        out["bpm_breath"] = round(float(br), 1)
+
+    hr = vit.get("heart_rate_bpm") or frame.get("heart_rate_bpm")
+    if hr and 40.0 <= hr <= 180.0:
+        out["bpm_heart"] = round(float(hr), 1)
+
+    return out
+
 CLIENTS = set()
 LATEST = {"pose": None}
 
@@ -67,6 +104,13 @@ async def infer_loop(model, in_url):
                                "motion":(d.get("features",{}) or {}).get("motion_band_power"),
                                "kps":[[round(float(x),4),round(float(y),4)] for x,y in kp],
                                "nodes":sorted(n.get("node_id") for n in d.get("nodes",[]) if n.get("node_id") is not None)}
+                    payload.update(vitals_fields(d))   # real breathing/heart when the feed carries them
+                    # IPS fields: forward-only, never synthesised here. `ranges`
+                    # is [{node_id, r_m}] and `target` {x,y,z} in the blueprint
+                    # frame; the HUD runs its own multilateration on `ranges`.
+                    for key in ("target", "ranges", "target_true"):
+                        if key in d:
+                            payload[key] = d[key]
                     LATEST["pose"]=payload
                     if CLIENTS:
                         dead=[]
