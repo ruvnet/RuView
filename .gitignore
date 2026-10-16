@@ -137,6 +137,9 @@ docs/_build/
 .pybuilder/
 target/
 
+# macOS RSSI bridge — Swift-compiled helper binary
+scripts/macos-rssi-bridge/mac_wifi
+
 # Jupyter Notebook
 .ipynb_checkpoints
 
