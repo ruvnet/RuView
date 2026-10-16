@@ -1,0 +1,72 @@
+{
+  "name": "@ruvnet/social-metaharness",
+  "version": "0.1.0",
+  "description": "Governed, zero-credential social operations metaharness for research, planning, analytics, and proposal-only optimization.",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "ruv-social": "bin/cli.js"
+  },
+  "exports": {
+    ".": "./src/tools.js",
+    "./policy": "./src/policy.js",
+    "./metrics": "./src/metrics.js",
+    "./voice": "./src/voice.js",
+    "./autopilot": "./src/autopilot.js"
+  },
+  "files": [
+    ".dockerignore",
+    ".harness/",
+    ".mcp/",
+    ".claude/",
+    "bin/",
+    "config/",
+    "Containerfile",
+    "deploy/",
+    "research/",
+    "scripts/",
+    "src/",
+    "AGENTS.md",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "test:security": "node --test test/policy.test.mjs test/mcp.test.mjs test/audit.test.mjs test/sensitive.test.mjs test/deployment.test.mjs test/network.test.mjs test/research.test.mjs test/package-surface.test.mjs test/metrics.test.mjs test/autopilot.test.mjs",
+    "test:schemas": "node --test test/metrics.test.mjs test/voice.test.mjs test/audit.test.mjs",
+    "test:bounds": "node --test test/mcp.test.mjs test/cli.test.mjs",
+    "test:network-deny": "node --test test/network.test.mjs",
+    "test:network-deny:os": "/usr/bin/sandbox-exec -p '(version 1)(allow default)(deny network*)' node --test test/audit.test.mjs test/autopilot.test.mjs test/cli.test.mjs test/deployment.test.mjs test/flywheel.test.mjs test/mcp.test.mjs test/metrics.test.mjs test/network.test.mjs test/package-surface.test.mjs test/policy.test.mjs test/research.test.mjs test/sensitive.test.mjs test/voice.test.mjs",
+    "test:mcp-read-only": "node --test test/mcp.test.mjs",
+    "test:policy-laundering": "node --test test/policy.test.mjs",
+    "test:receipt-tamper": "node --test test/audit.test.mjs",
+    "test:voice-nonauthority": "node --test test/voice.test.mjs test/policy.test.mjs",
+    "test:identity-isolation": "node --test test/policy.test.mjs test/metrics.test.mjs",
+    "test:metric-semantics": "node --test test/metrics.test.mjs",
+    "test:optimizer-proposal-only": "node --test test/flywheel.test.mjs test/autopilot.test.mjs",
+    "test:autopilot-proposal-only": "node --test test/autopilot.test.mjs",
+    "security:secrets": "node ./bin/cli.js doctor --strict",
+    "security:capability-links": "node ./bin/cli.js doctor --strict",
+    "security:container-static": "node --test test/deployment.test.mjs",
+    "security:iam-static": "node --test test/deployment.test.mjs",
+    "security:gcp-plan-policy": "node --test test/deployment.test.mjs",
+    "platform-policy:verify": "node ./bin/cli.js doctor --strict",
+    "doctor": "node ./bin/cli.js doctor",
+    "mcp": "node ./bin/cli.js mcp start",
+    "serve": "node ./bin/cli.js serve",
+    "manifest:update": "node ./scripts/update-manifest.mjs",
+    "manifest:verify": "node ./scripts/verify-manifest.mjs",
+    "check": "node ./bin/cli.js doctor --strict && npm test && npm run test:network-deny && node ./scripts/verify-manifest.mjs",
+    "prepack": "node ./scripts/verify-manifest.mjs --quiet"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT",
+  "author": "ruvnet",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ruvnet/RuView.git",
+    "directory": "harness/social-media"
+  }
+}
