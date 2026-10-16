@@ -71,6 +71,10 @@ pub mod model_gates;
 pub mod protocols;
 pub mod rapid_adapt;
 pub mod ruview_metrics;
+/// Sensing evidence and claim gate (ADR-328) — validates provenance,
+/// held-out-environment coverage, sample counts, pre-registered metric
+/// thresholds, and claim class, then emits a deterministic JSON receipt.
+pub mod sensing_claim_gate;
 pub mod signal_features;
 pub mod subcarrier;
 pub mod virtual_aug;
@@ -125,6 +129,12 @@ pub use model_gates::{
     check_baseline, check_class_balance, check_constant_output, check_metric_provenance,
     check_unreachable_boundary, evaluate_linear_head, GateError, GateFailure, GateOutcomeError,
     LabeledMetric, LinearHead, MetricKind, ModelGateReport, ProbeSet,
+};
+
+// ADR-328 — sensing evidence and claim receipts.
+pub use sensing_claim_gate::{
+    evaluate_claim_json_for_class, ClaimGateError, ClaimManifest, ClaimPolicy, GateDecision,
+    GateReceipt, ReceiptEnvelope,
 };
 
 pub use error::{ConfigError, DatasetError, MaeError, ProtocolError, SubcarrierError, TrainError};

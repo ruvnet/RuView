@@ -39,6 +39,13 @@ for any classifier artifact proposed for release, fails on:
 Each gate emits a structured, human-readable failure explaining the defect and
 the offending numbers.
 
+ADR-328 adds the complementary evidence-release boundary. ADR-298 answers
+"is this model artifact structurally degenerate?" ADR-328 answers "does the
+submitted physical-sensing evidence support this class of public claim under a
+pre-registered policy?" A model must pass both checks. Structural model health
+cannot substitute for real-hardware held-out evidence, and strong benchmark
+evidence cannot excuse a degenerate classifier head.
+
 ## Consequences
 
 - The specific degenerate presence head cannot ship again, and the
@@ -55,6 +62,9 @@ the offending numbers.
   metric cannot be constructed with a presence label.
 - `cargo test -p wifi-densepose-train`; the CI gate runs in the model-check
   workflow.
+- `cargo test -p wifi-densepose-train --no-default-features sensing_claim_gate`;
+  `.github/workflows/model-release-gate.yml` also evaluates committed claim
+  manifests and retains machine-readable receipts.
 - This ADR does **not** withdraw the already-published artifact (an
   outward-facing action requiring maintainer sign-off) — it prevents
   recurrence and documents the model-card correction.
