@@ -39,12 +39,42 @@ RUN cargo build --release -p wifi-densepose-sensing-server --features "${SENSING
  && cargo build --release -p homecore-server 2>&1 \
  && strip target/release/sensing-server target/release/cog-ha-matter target/release/homecore-server
 
-# Stage 2: Runtime
-FROM debian:bookworm-slim
+# Copy the UI assets into the builder and sanity-check the full set the runtime
+# serves (regression guard for #520/#514 — the published image must include the
+# observatory and pose-fusion dashboards, not just the legacy `index.html` set,
+# plus the three release binaries). This runs here in the builder because the
+# runtime stage is now distroless (#1140) and has no shell to RUN checks in. A
+# missing asset or non-executable binary fails the build, so a stale image can't
+# be silently pushed.
+COPY ui/ /build/ui/
+RUN set -e; \
+    for f in /build/ui/index.html /build/ui/observatory.html /build/ui/pose-fusion.html /build/ui/viz.html; do \
+        test -f "$f" || { echo "FATAL: missing UI asset $f"; exit 1; }; \
+    done; \
+    for d in /build/ui/observatory /build/ui/pose-fusion /build/ui/components /build/ui/services; do \
+        test -d "$d" || { echo "FATAL: missing UI directory $d"; exit 1; }; \
+    done; \
+    test -x /build/target/release/sensing-server || { echo "FATAL: sensing-server is not executable"; exit 1; }; \
+    test -x /build/target/release/cog-ha-matter || { echo "FATAL: cog-ha-matter is not executable"; exit 1; }; \
+    test -x /build/target/release/homecore-server || { echo "FATAL: homecore-server is not executable"; exit 1; }; \
+    echo "image assets OK"
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# Stage 2: Runtime — distroless (Issue #1140).
+#
+# Previously debian:bookworm-slim, which carries the full Debian base package set
+# (perl-base, apt, tar, gnupg, pam, shadow, systemd libs, ...). Docker Scout
+# flagged 37 base-image CVEs against those source packages. None are reachable —
+# the container runs a single Rust binary, with no Perl/Python/compiler — but
+# they pad every scan, and none have a fix in Debian 12, so re-pulling the slim
+# base clears nothing. Distroless cc-debian12 ships only glibc + libgcc/libstdc++
+# + libssl + the CA bundle (everything a glibc-linked Rust binary needs) and
+# drops the large majority of those findings at the source.
+#
+# We use the :debug variant on purpose: the entrypoint is a /bin/sh script with
+# real security logic (#864 fail-closed auth, cog-ha-matter/homecore routing).
+# :debug bundles a static busybox shell at /busybox/sh, through which the
+# entrypoint is invoked explicitly below.
+FROM gcr.io/distroless/cc-debian12:debug
 
 WORKDIR /app
 
@@ -55,22 +85,6 @@ COPY --from=builder /build/target/release/homecore-server /app/homecore-server
 
 # Copy UI assets
 COPY ui/ /app/ui/
-
-# Sanity-check the assets the runtime actually serves (regression guard for
-# #520/#514 — the published image must include the observatory and pose-fusion
-# dashboards, not just the legacy `index.html` set). Build fails if any of
-# these are missing, so a stale image can't be silently pushed.
-RUN set -e; \
-    for f in /app/ui/index.html /app/ui/observatory.html /app/ui/pose-fusion.html /app/ui/viz.html; do \
-        test -f "$f" || { echo "FATAL: missing UI asset $f"; exit 1; }; \
-    done; \
-    for d in /app/ui/observatory /app/ui/pose-fusion /app/ui/components /app/ui/services; do \
-        test -d "$d" || { echo "FATAL: missing UI directory $d"; exit 1; }; \
-    done; \
-    test -x /app/sensing-server || { echo "FATAL: /app/sensing-server is not executable"; exit 1; }; \
-    test -x /app/cog-ha-matter || { echo "FATAL: /app/cog-ha-matter is not executable"; exit 1; }; \
-    test -x /app/homecore-server || { echo "FATAL: /app/homecore-server is not executable"; exit 1; }; \
-    echo "image assets OK"
 
 # Optional bearer-token auth on /api/v1/*: leave unset for LAN-mode (default),
 # set to enforce `Authorization: Bearer <token>` (see bearer_auth module, #443).
@@ -106,5 +120,9 @@ COPY docker/docker-entrypoint.sh /app/docker-entrypoint.sh
 # Exec-form ENTRYPOINT so Docker appends user arguments correctly.
 # Pass flags directly:  docker run <image> --source esp32 --tick-ms 500
 # Or use env vars:      docker run -e CSI_SOURCE=esp32 <image>
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
+#
+# Invoked through the distroless busybox shell (#1140): the runtime base has no
+# /bin/sh, so the entrypoint script is run explicitly via /busybox/sh rather than
+# relying on its `#!/bin/sh` shebang.
+ENTRYPOINT ["/busybox/sh", "/app/docker-entrypoint.sh"]
 CMD []
