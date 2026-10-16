@@ -215,15 +215,104 @@ menu "Adaptive Controller (ADR-081)"
 
 endmenu
 
-menu "AMOLED Display (ADR-045)"
+menu "Display (ADR-045)"
 
     config DISPLAY_ENABLE
-        bool "Enable AMOLED display support"
+        bool "Enable on-device display support"
         default y
         help
-            Enable RM67162 QSPI AMOLED display and LVGL UI.
-            Auto-detects at boot; gracefully skips if no display hardware.
-            Requires SPIRAM for frame buffers.
+            Enable the LVGL UI on an attached panel. Auto-detects at boot;
+            gracefully skips if no display hardware. Requires SPIRAM for
+            frame buffers. Choose the panel type below — the CSI pipeline
+            runs unchanged regardless of panel.
+
+    choice DISPLAY_PANEL
+        prompt "Display panel"
+        depends on DISPLAY_ENABLE
+        default DISPLAY_PANEL_SH8601
+        help
+            Which physical panel is attached. Exactly one HAL is compiled.
+
+        config DISPLAY_PANEL_SH8601
+            bool "SH8601 QSPI AMOLED (Waveshare ESP32-S3-Touch-AMOLED-1.8, 368x448)"
+
+        config DISPLAY_PANEL_ST7789
+            bool "ST7789V2 SPI LCD (Waveshare ESP32-S3-Touch-LCD-1.69, 240x280)"
+    endchoice
+
+    # ---- ST7789 SPI LCD pins / geometry (Waveshare 1.69 defaults) ----
+    config DISPLAY_ST7789_SCLK
+        int "ST7789 SPI SCLK GPIO"
+        default 6
+        depends on DISPLAY_PANEL_ST7789
+
+    config DISPLAY_ST7789_MOSI
+        int "ST7789 SPI MOSI GPIO"
+        default 7
+        depends on DISPLAY_PANEL_ST7789
+
+    config DISPLAY_ST7789_CS
+        int "ST7789 SPI CS GPIO"
+        default 5
+        depends on DISPLAY_PANEL_ST7789
+
+    config DISPLAY_ST7789_DC
+        int "ST7789 SPI DC GPIO"
+        default 4
+        depends on DISPLAY_PANEL_ST7789
+
+    config DISPLAY_ST7789_RST
+        int "ST7789 RST GPIO"
+        default 8
+        depends on DISPLAY_PANEL_ST7789
+
+    config DISPLAY_ST7789_BL
+        int "ST7789 backlight PWM GPIO"
+        default 15
+        depends on DISPLAY_PANEL_ST7789
+
+    config DISPLAY_ST7789_H_RES
+        int "ST7789 horizontal resolution"
+        default 240
+        depends on DISPLAY_PANEL_ST7789
+
+    config DISPLAY_ST7789_V_RES
+        int "ST7789 vertical resolution"
+        default 280
+        depends on DISPLAY_PANEL_ST7789
+
+    config DISPLAY_ST7789_GAP_X
+        int "ST7789 column offset (gap X)"
+        default 0
+        depends on DISPLAY_PANEL_ST7789
+
+    config DISPLAY_ST7789_GAP_Y
+        int "ST7789 row offset (gap Y)"
+        default 20
+        depends on DISPLAY_PANEL_ST7789
+        help
+            The 240x280 visible window sits at row 20 of the ST7789's
+            240x320 controller RAM. Adjust if the image is shifted.
+
+    config DISPLAY_ST7789_TOUCH_SDA
+        int "CST816 touch I2C SDA GPIO"
+        default 11
+        depends on DISPLAY_PANEL_ST7789
+
+    config DISPLAY_ST7789_TOUCH_SCL
+        int "CST816 touch I2C SCL GPIO"
+        default 10
+        depends on DISPLAY_PANEL_ST7789
+
+    config DISPLAY_ST7789_TOUCH_RST
+        int "CST816 touch RST GPIO"
+        default 13
+        depends on DISPLAY_PANEL_ST7789
+
+    config DISPLAY_ST7789_TOUCH_INT
+        int "CST816 touch INT GPIO"
+        default 14
+        depends on DISPLAY_PANEL_ST7789
 
     config DISPLAY_FPS_LIMIT
         int "Display refresh rate limit (FPS)"

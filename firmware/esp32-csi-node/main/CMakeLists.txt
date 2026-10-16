@@ -66,9 +66,17 @@ if(CONFIG_CSI_MOCK_ENABLED)
     list(APPEND SRCS "mock_csi.c" "rv_radio_ops_mock.c")
 endif()
 
-# ADR-045: AMOLED display support (compile-time optional)
+# ADR-045: on-device display support (compile-time optional).
+# Exactly one panel HAL is compiled, selected by the DISPLAY_PANEL choice.
 if(CONFIG_DISPLAY_ENABLE)
-    list(APPEND SRCS "display_hal.c" "display_ui.c" "display_task.c")
+    list(APPEND SRCS "display_task.c")
+    if(CONFIG_DISPLAY_PANEL_ST7789)
+        # 240x280 ST7789: compact UI + ST7789 HAL.
+        list(APPEND SRCS "display_hal_st7789.c" "display_ui_st7789.c")
+    else()
+        # 368x448 SH8601 AMOLED: 4-view UI + QSPI HAL.
+        list(APPEND SRCS "display_hal.c" "display_ui.c")
+    endif()
     list(APPEND REQUIRES esp_lcd esp_lcd_touch lvgl)
 endif()
 
