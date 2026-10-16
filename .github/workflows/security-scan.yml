@@ -34,7 +34,7 @@ jobs:
         cargo audit --file v2/Cargo.lock --json | tee v2/cargo-audit.json
 
     - name: Upload Rust advisory report
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       if: always()
       with:
         name: cargo-audit-report
@@ -174,7 +174,7 @@ jobs:
 
     - name: Upload vulnerability reports
       continue-on-error: true
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       if: always()
       with:
         name: vulnerability-reports
@@ -345,7 +345,7 @@ jobs:
 
     - name: Upload license report
       continue-on-error: true
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: license-report
         path: licenses.json
@@ -433,7 +433,7 @@ jobs:
 
     - name: Upload security summary
       continue-on-error: true
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: security-summary
         path: security-summary.md
