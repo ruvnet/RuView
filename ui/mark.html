@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<title>Room Marker</title>
+<!--
+  One-thumb ground truth for the link recorder.
+
+  Written 2026-08-28 after the night's analysis showed why this is needed: the
+  only label with good provenance that night was the one reported in real time
+  (23:18 light-off, a clean miss). Everything recalled afterwards — "around
+  9:45", the feeding window — was soft by roughly half an hour, and a soft
+  label cannot support a per-event claim. Worse, matching a detection to a
+  remembered time is post-hoc fitting: during an active stretch the detector
+  bumps every ~1.5 min, so ANY estimate inside it "matches" something.
+
+  So this page exists to stamp events at the instant they happen, from a phone,
+  without needing a watch or a clear head. The whole interface is one big
+  toggle because it has to work half-asleep in the dark.
+
+  Marks are written twice and independently:
+    - GET /api/v1/diag/mark/<label>  -> the server's phase_markers sink
+      (the running server has --phase-diagnostics data/mesh, so this works)
+    - localStorage                   -> survives reload, server restart, and
+                                        a dropped WiFi connection
+  Losing ground truth means re-walking everything, so neither path is trusted
+  alone. Export writes the local copy out as JSON.
+
+  Reachable from the phone at  http://<host>:3000/ui/mark.html
+-->
+<style>
+  :root {
+    --bg:#0d1117; --fg:#e6edf3; --dim:#8b949e; --line:#30363d;
+    --in:#2ea043; --out:#d29922; --tag:#388bfd; --warn:#f85149; --ok:#a371f7;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; }
+  body {
+    margin:0; padding:14px; background:var(--bg); color:var(--fg);
+    font:15px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    display:flex; flex-direction:column; gap:12px;
+    padding-bottom:calc(14px + env(safe-area-inset-bottom));
+    -webkit-user-select:none; user-select:none;
+  }
+  h1 { font-size:15px; margin:0; font-weight:700; }
+  .sub { color:var(--dim); font-size:12px; }
+  .card { border:1px solid var(--line); border-radius:10px; padding:12px; }
+
+  /* The main control. Deliberately enormous — this is used in the dark. */
+  #toggle {
+    flex:1 1 auto; min-height:210px; width:100%;
+    border:none; border-radius:16px; cursor:pointer;
+    font:inherit; font-size:34px; font-weight:700; letter-spacing:.02em;
+    color:#fff; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:10px;
+    transition:transform .06s ease, filter .15s ease;
+  }
+  #toggle:active { transform:scale(.985); filter:brightness(1.12); }
+  #toggle .hint { font-size:14px; font-weight:400; opacity:.9; letter-spacing:0; }
+  #toggle.going-in  { background:var(--in); }
+  #toggle.going-out { background:var(--out); color:#1a1205; }
+
+  .state { text-align:center; font-size:13px; color:var(--dim); }
+  .state b { color:var(--fg); }
+
+  .tags { display:grid; grid-template-columns:repeat(2, 1fr); gap:8px; }
+  .tags button {
+    font:inherit; font-size:13px; padding:14px 8px; border-radius:9px;
+    border:1px solid var(--line); background:#161b22; color:var(--fg);
+    cursor:pointer;
+  }
+  .tags button:active { background:#21262d; }
+
+  .row { display:flex; gap:8px; }
+  .row button {
+    flex:1; font:inherit; font-size:12px; padding:11px 8px; border-radius:8px;
+    border:1px solid var(--line); background:#161b22; color:var(--dim);
+    cursor:pointer;
+  }
+  #log {
+    max-height:150px; overflow:auto; font-size:11.5px; color:var(--dim);
+    white-space:pre-wrap; word-break:break-word; margin:0;
+  }
+  .err { color:var(--warn); }
+  .okc { color:var(--ok); }
+</style>
+</head>
+<body>
+
+<div>
+  <h1>Room Marker</h1>
+  <div class="sub">Tap the moment it happens. Don't try to remember it later.</div>
+</div>
+
+<button id="toggle" class="going-in">
+  <span id="toggleLabel">I'M GOING IN</span>
+  <span class="hint" id="toggleHint">tap as you cross the doorway</span>
+</button>
+
+<div class="state" id="state">outside &middot; no marks yet</div>
+
+<div class="card">
+  <div class="sub" style="margin-bottom:8px">Context (optional, tap any time)</div>
+  <div class="tags">
+    <button data-tag="feeding">feeding animals</button>
+    <button data-tag="animals-active">animals active</button>
+    <button data-tag="other-person-in">someone else in</button>
+    <button data-tag="other-person-out">someone else out</button>
+    <button data-tag="pet-out">Pet out</button>
+    <button data-tag="pet-away">Pet away</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="sub" style="margin-bottom:6px">Recent</div>
+  <div id="log">nothing yet</div>
+</div>
+
+<div class="row">
+  <button id="export">export JSON</button>
+  <button id="undo">undo last</button>
+  <button id="clear">clear</button>
+</div>
+
+<script>
+// ---- storage ---------------------------------------------------------------
+// The local copy is authoritative for the operator; the server sink is the
+// copy that lines up with the recorder. Keep both, trust neither alone.
+
+var KEY = 'ruview-room-marks';
+var marks = [];
+try { marks = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { marks = []; }
+
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(marks)); } catch (e) { /* private mode */ }
+}
+
+function inside() {
+  for (var i = marks.length - 1; i >= 0; i--) {
+    if (marks[i].label === 'room-in')  return true;
+    if (marks[i].label === 'room-out') return false;
+  }
+  return false;
+}
+
+// ---- marking ---------------------------------------------------------------
+
+function hhmmss(ms) { return new Date(ms).toTimeString().slice(0, 8); }
+
+function mark(label) {
+  var at = Date.now();
+  var rec = { t_unix_ms: at, label: label, server_t_s: null, server: 'pending' };
+  marks.push(rec);
+  save(); render();
+
+  if (navigator.vibrate) { try { navigator.vibrate(label === 'room-in' ? 40 : [30, 40, 30]); } catch (e) {} }
+
+  fetch('/api/v1/diag/mark/' + encodeURIComponent(label), { cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      // The endpoint answers ok:false when --phase-diagnostics is not set;
+      // that is a real failure for alignment, so surface it rather than
+      // treating any 200 as success.
+      rec.server = j && j.ok ? 'ok' : 'not-recording';
+      if (j && typeof j.t_s === 'number') rec.server_t_s = j.t_s;
+      save(); render();
+    })
+    .catch(function () { rec.server = 'unreachable'; save(); render(); });
+}
+
+// ---- render ----------------------------------------------------------------
+
+function render() {
+  var isIn = inside();
+  var btn = document.getElementById('toggle');
+  btn.className = isIn ? 'going-out' : 'going-in';
+  document.getElementById('toggleLabel').textContent = isIn ? "I'M COMING OUT" : "I'M GOING IN";
+  document.getElementById('toggleHint').textContent = isIn
+    ? 'tap as you leave the room'
+    : 'tap as you cross the doorway';
+
+  var last = marks[marks.length - 1];
+  document.getElementById('state').innerHTML =
+    (isIn ? '<b>inside</b>' : 'outside') + ' &middot; ' +
+    (last ? marks.length + ' marks, last ' + hhmmss(last.t_unix_ms) : 'no marks yet');
+
+  var log = document.getElementById('log');
+  if (!marks.length) { log.textContent = 'nothing yet'; return; }
+  log.innerHTML = '';
+  marks.slice(-14).reverse().forEach(function (m) {
+    var line = document.createElement('div');
+    var cls = m.server === 'ok' ? 'okc' : (m.server === 'pending' ? '' : 'err');
+    line.innerHTML = hhmmss(m.t_unix_ms) + '  ' + m.label +
+      '  <span class="' + cls + '">' + m.server + '</span>';
+    log.appendChild(line);
+  });
+}
+
+// ---- wiring ----------------------------------------------------------------
+
+document.getElementById('toggle').addEventListener('click', function () {
+  mark(inside() ? 'room-out' : 'room-in');
+});
+
+Array.prototype.forEach.call(document.querySelectorAll('.tags button'), function (b) {
+  b.addEventListener('click', function () { mark(b.getAttribute('data-tag')); });
+});
+
+document.getElementById('undo').addEventListener('click', function () {
+  if (!marks.length) return;
+  // Local only — the server sink is append-only by design, so note the
+  // retraction there instead of pretending the original never happened.
+  var gone = marks.pop();
+  save(); render();
+  fetch('/api/v1/diag/mark/' + encodeURIComponent('undo-' + gone.label), { cache: 'no-store' })
+    .catch(function () {});
+});
+
+document.getElementById('clear').addEventListener('click', function () {
+  if (!confirm('Clear ' + marks.length + ' local marks? The server copy is kept.')) return;
+  marks = []; save(); render();
+});
+
+document.getElementById('export').addEventListener('click', function () {
+  var blob = new Blob([JSON.stringify({
+    exported_at_unix_ms: Date.now(),
+    note: 'Ground-truth room-entry marks. room-in/room-out are the toggle; ' +
+          'the rest are context tags. server_t_s aligns with the ' +
+          'sensing-server phase_markers sink.',
+    marks: marks
+  }, null, 2)], { type: 'application/json' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'room-marks-' + Date.now() + '.json';
+  a.click();
+});
+
+render();
+</script>
+</body>
+</html>

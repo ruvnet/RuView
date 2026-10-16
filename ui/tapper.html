@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<title>Node Tapper</title>
+<!--
+  Per-location ground truth, keyed to the nearest node. The successor to
+  mark.html, which was one IN/OUT toggle for a single place.
+
+  Written 2026-09-01. Every open question this week is starved of labels, not
+  of data: the fleet records 165 links continuously, and almost none of it is
+  attached to a known place. The two labelled events we did get that evening
+  (a circuit past one node, then two occupants together near another)
+  were worth more than the preceding hour of unlabelled polling.
+
+  Three things are recorded per tap, and all three matter for different reasons:
+
+    WHERE   which node you are nearest. Without it nothing can be tested
+            against position at all.
+    WHO     which group. Two separated groups at once is the ONLY configuration
+            that can test whether the fleet represents two disturbances rather
+            than averaging them into one phantom between the two.
+    MOVING  still vs moving. A previous analysis nearly reported a flat
+            correlation as a refutation before noticing 97% of the window was
+            `present_still` -- a body that is not moving perturbs almost
+            nothing, so an unlabelled quiet stretch looks identical to an
+            absent one and silently dilutes every statistic computed over it.
+
+  Marks are written twice, independently, because losing ground truth means
+  re-walking everything:
+    - GET /api/v1/diag/mark/<label>   -> server phase_markers sink
+    - localStorage                    -> survives reload, restart, dropped WiFi
+  Failed sends are queued and retried; the badge shows the backlog.
+
+  One button per node, built from /api/v1/nodes at load, so this page suits any
+  fleet of any size without being edited. Stand near a node, tap its button.
+  Node identity is the only spatial reference used -- no floor plan, no
+  coordinates, nothing specific to one building.
+
+  "Elsewhere" covers the places a fleet does not instrument. Those need
+  labelling arguably more than the rest, precisely because nothing there is
+  measuring.
+
+  Open it on a phone at  http://<sensing-server-host>:3000/ui/tapper.html
+-->
+<style>
+  :root{
+    --bg:#0d1117; --fg:#e6edf3; --dim:#8b949e; --line:#30363d; --card:#161b22;
+    --move:#2ea043; --still:#d29922; --adult1:#388bfd; --children:#a371f7; --all:#db6d28;
+    --adult2:#e85aad; --child1:#2bb3c0;
+    --warn:#f85149;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{
+    margin:0;padding:12px;background:var(--bg);color:var(--fg);
+    font:15px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    display:flex;flex-direction:column;gap:10px;
+    padding-bottom:calc(12px + env(safe-area-inset-bottom));
+    -webkit-user-select:none;user-select:none;
+  }
+  .row{display:flex;gap:8px;align-items:center}
+  h1{font-size:14px;margin:0;font-weight:700;flex:1}
+  .badge{font-size:11px;color:var(--dim);border:1px solid var(--line);
+         border-radius:20px;padding:3px 9px}
+  .badge.bad{color:var(--warn);border-color:var(--warn)}
+
+  #now{border:1px solid var(--line);border-radius:12px;padding:12px;
+       background:var(--card);text-align:center}
+  #now .where{font-size:24px;font-weight:700;line-height:1.2}
+  #now .meta{font-size:12px;color:var(--dim);margin-top:4px}
+
+  .seg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .seg button{font:inherit;font-size:13px;font-weight:700;padding:13px 4px;
+    border-radius:10px;border:1px solid var(--line);background:var(--card);
+    color:var(--dim);cursor:pointer}
+  .seg button[aria-pressed="true"]{color:#fff;border-color:transparent}
+  #who button[aria-pressed="true"][data-v="adult1"]{background:var(--adult1)}
+  #who button[aria-pressed="true"][data-v="children-together"]{background:var(--children)}
+  #who button[aria-pressed="true"][data-v="everyone"]{background:var(--all)}
+  #who button[aria-pressed="true"][data-v="adult2"]{background:var(--adult2)}
+  #who button[aria-pressed="true"][data-v="child1"]{background:var(--child1)}
+  #who2{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}
+  #who2 button{font:inherit;font-size:13px;font-weight:700;padding:13px 4px;
+    border-radius:10px;border:1px solid var(--line);background:var(--card);
+    color:var(--dim);cursor:pointer}
+  #who2 button[aria-pressed="true"][data-v="children-together"]{background:var(--children);color:#fff;border-color:transparent}
+  #who2 button[aria-pressed="true"][data-v="everyone"]{background:var(--all);color:#fff;border-color:transparent}
+
+  #motion{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  #motion button{font:inherit;font-size:17px;font-weight:700;padding:20px 4px;
+    border-radius:12px;border:1px solid var(--line);background:var(--card);
+    color:var(--dim);cursor:pointer}
+  #motion button[aria-pressed="true"][data-v="moving"]{background:var(--move);color:#fff;border-color:transparent}
+  #motion button[aria-pressed="true"][data-v="still"]{background:var(--still);color:#1a1205;border-color:transparent}
+
+  .lbl{font-size:11px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase}
+  #rooms{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}
+  #rooms button{font:inherit;font-size:14px;font-weight:600;padding:16px 6px;
+    border-radius:11px;border:1px solid var(--line);background:var(--card);
+    color:var(--fg);cursor:pointer;min-width:0;text-align:left;line-height:1.25}
+  #rooms button:active{filter:brightness(1.3)}
+  #rooms button.on{background:var(--adult1);border-color:transparent;color:#fff}
+  #rooms button .fl{display:block;font-size:10px;color:var(--dim);font-weight:400}
+  #rooms button.on .fl{color:rgba(255,255,255,.85)}
+  #rooms button.nonode{border-style:dashed}
+
+  #log{border:1px solid var(--line);border-radius:10px;background:var(--card);
+       padding:8px;max-height:26vh;overflow:auto;font-size:12px}
+  #log div{padding:3px 0;border-bottom:1px solid #21262d;color:var(--dim)}
+  #log div:last-child{border-bottom:none}
+  #log b{color:var(--fg)}
+  .foot{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .foot button{font:inherit;font-size:12px;padding:11px;border-radius:9px;
+    border:1px solid var(--line);background:var(--card);color:var(--dim);cursor:pointer}
+</style>
+
+<div class="row">
+  <h1>Node Tapper</h1>
+  <span class="badge" id="queue">synced</span>
+</div>
+
+<div id="now">
+  <div class="where" id="nowWhere">tap a room</div>
+  <div class="meta" id="nowMeta">nothing marked yet</div>
+</div>
+
+<div class="lbl">who</div>
+<div class="seg" id="who">
+  <button data-v="adult1" aria-pressed="true">adult 1</button>
+  <button data-v="adult2" aria-pressed="false">adult 2</button>
+  <button data-v="child1" aria-pressed="false">child 1</button>
+</div>
+<div id="who2">
+  <button data-v="children-together" aria-pressed="false">children together</button>
+  <button data-v="everyone" aria-pressed="false">everyone</button>
+</div>
+
+<div class="lbl">what they are doing</div>
+<div class="seg" id="motion" style="grid-template-columns:1fr 1fr">
+  <button data-v="moving" aria-pressed="true">MOVING</button>
+  <button data-v="still" aria-pressed="false">STILL</button>
+</div>
+
+<div class="lbl">where — tap to stamp</div>
+<div id="rooms"></div>
+
+<div class="lbl">recent</div>
+<div id="log"></div>
+
+<div class="foot">
+  <button id="export">export json</button>
+  <button id="clear">clear local</button>
+</div>
+
+<script>
+// Places that are not a node. A fleet never covers every space, and the gaps
+// still need ground truth -- arguably more, since nothing there is measuring.
+// Deliberately generic: no room names, no coordinates, nothing tied to one
+// building.
+const NON_NODE_PLACES = [
+  { label: 'Elsewhere',    note: 'in the building, not near a node' },
+  { label: 'Outside/away', note: 'baseline' }
+];
+
+const KEY = 'ruview.tapper.v1';
+let marks = [];
+let queue = [];
+let cur = null;
+let who = 'adult1', motion = 'moving';
+
+try { marks = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { marks = []; }
+try { queue = JSON.parse(localStorage.getItem(KEY + '.q') || '[]'); } catch (e) { queue = []; }
+
+const save = () => {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(marks.slice(-800)));
+    localStorage.setItem(KEY + '.q', JSON.stringify(queue.slice(-400)));
+  } catch (e) { /* private mode, quota — the server copy still stands */ }
+};
+
+const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+async function flush() {
+  while (queue.length) {
+    const lab = queue[0];
+    try {
+      const r = await fetch('/api/v1/diag/mark/' + encodeURIComponent(lab), { cache: 'no-store' });
+      if (!r.ok) break;
+      queue.shift();
+    } catch (e) { break; }
+  }
+  save();
+  const q = document.getElementById('queue');
+  q.textContent = queue.length ? (queue.length + ' queued') : 'synced';
+  q.className = 'badge' + (queue.length ? ' bad' : '');
+}
+
+function stamp(place) {
+  const now = new Date();
+  // '_' not '.', because the server's mark sink keeps only [A-Za-z0-9-_] to
+  // stay CSV-safe: dots were silently stripped, so 'adult1.upstairs-bath.moving'
+  // landed as 'meupstairs-bathmoving'. Slugs use '-' internally, so '_' stays
+  // an unambiguous field separator. The sink also truncates at 64 chars.
+  const label = [who, slug(place.label), motion].join('_');
+  const m = {
+    t: now.toISOString(),
+    local: now.toTimeString().slice(0, 8),
+    who, motion,
+    place: place.label,
+    floor: place.floor,
+    node: place.node === undefined ? null : place.node,
+    label
+  };
+  marks.push(m);
+  queue.push(label);
+  cur = m;
+  save();
+  flush();
+  render();
+  if (navigator.vibrate) navigator.vibrate(18);
+}
+
+function render() {
+  const w = document.getElementById('nowWhere');
+  const meta = document.getElementById('nowMeta');
+  if (cur) {
+    w.textContent = cur.place;
+    const secs = Math.max(0, Math.round((Date.now() - new Date(cur.t).getTime()) / 1000));
+    const el = secs < 90 ? secs + 's' : Math.round(secs / 60) + 'm';
+    meta.textContent = cur.who + ' · ' + cur.motion + ' · marked ' + cur.local + ' (' + el + ' ago)';
+  }
+  document.querySelectorAll('#rooms button').forEach(b => {
+    b.classList.toggle('on', !!cur && b.dataset.place === cur.place);
+  });
+  const log = document.getElementById('log');
+  log.innerHTML = '';
+  marks.slice(-14).reverse().forEach(m => {
+    const d = document.createElement('div');
+    d.innerHTML = '<b>' + m.local + '</b> · ' + m.who + ' · ' + m.place + ' · ' + m.motion;
+    log.appendChild(d);
+  });
+}
+
+function seg(id, set) {
+  document.getElementById(id).addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    document.querySelectorAll('#' + id + ' button')
+      .forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    set(b.dataset.v);
+  });
+}
+
+// "who" spans two rows -- individuals above, groupings below. They are one
+// choice, not two, so selecting one adult has to release "children together".
+// Getting this wrong would let a tap record two identities at once, and a
+// mislabelled identity is worse than no label: it would place one person in
+// two rooms and quietly corrupt exactly the multi-object test this exists for.
+function pickWho(v) {
+  who = v;
+  document.querySelectorAll('#who button, #who2 button')
+    .forEach(x => x.setAttribute('aria-pressed', String(x.dataset.v === v)));
+}
+document.getElementById('who').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (b) pickWho(b.dataset.v);
+});
+document.getElementById('who2').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (b) pickWho(b.dataset.v);
+});
+seg('motion', v => { motion = v; });
+
+async function boot() {
+  // One button per node the SERVER knows about. /api/v1/nodes is the fleet
+  // roster; it carries no geometry, so this page needs no floor plan and
+  // works unchanged on a fleet of three nodes or thirty.
+  let places = [];
+  const meta = document.getElementById('nowMeta');
+  try {
+    const res = await fetch('/api/v1/nodes', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const nodes = (data.nodes || []).slice().sort((a, b) => a.node_id - b.node_id);
+    places = nodes.map(n => ({
+      label: 'Node ' + n.node_id,
+      node: n.node_id,
+      // Whatever the server last heard from it. Useful while walking: a node
+      // that has gone quiet is one whose marks will have no CSI behind them.
+      note: n.status || 'unknown'
+    }));
+    if (!places.length) {
+      meta.textContent = 'server reports no nodes yet -- only the generic places are available';
+    }
+  } catch (e) {
+    // Never invent a fleet. An empty roster is reported as empty; a page that
+    // guessed at node ids would attach marks to nodes that do not exist.
+    meta.textContent = 'could not reach the server -- only the generic places are available';
+  }
+  places = places.concat(NON_NODE_PLACES);
+
+  const wrap = document.getElementById('rooms');
+  places.forEach(p => {
+    const b = document.createElement('button');
+    b.dataset.place = p.label;
+    if (p.node === undefined) b.classList.add('nonode');
+    b.innerHTML = p.label + '<span class="fl">' + p.note + '</span>';
+    b.addEventListener('click', () => stamp(p));
+    wrap.appendChild(b);
+  });
+  render();
+  flush();
+}
+
+document.getElementById('export').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(marks, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'tapper-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '') + '.json';
+  a.click();
+});
+document.getElementById('clear').addEventListener('click', () => {
+  if (confirm('Clear the local copy? The server sink keeps its own record.')) {
+    marks = []; save(); render();
+  }
+});
+
+setInterval(render, 5000);
+setInterval(flush, 15000);
+boot();
+</script>
+</html>

@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tile Survey Runner</title>
+<!--
+  Fingerprint survey over the foam-tile grid (ADR-345 follow-on). Successor to
+  walk.html, which is kept as the record of the 5-spot walk that produced the
+  2026-08-28 measurements.
+
+  ONE PASS, not two. Splitting each 40 s dwell of that walk in half and
+  comparing the halves gave cosine 0.954; comparing two separate passes gave
+  0.952. They measure the same thing, so a second pass bought only time. And
+  with foam tiles the repositioning error a second pass used to catch is gone
+  by construction — you step on the same physical square.
+
+  What a single pass genuinely cannot see is slow drift: in serpentine order,
+  position becomes confounded with time. Hence the revisit block at the end,
+  which re-walks the first few tiles so drift over the run is measured rather
+  than assumed absent. That matters more than usual here — this mesh has
+  already shifted twice in one day.
+
+  Every dwell is MOVE IN PLACE. The metric is the temporal variance of
+  amplitude, so a motionless person records nothing at all. The earlier
+  protocol got this wrong and made the target invisible to its own instrument.
+
+  Ground truth is written twice, because losing it means re-walking everything:
+  /api/v1/diag/mark/<label> into the server's phase_markers CSV, and an in-page
+  log saveable as JSON.
+-->
+<style>
+  :root {
+    --bg:#0d1117; --fg:#e6edf3; --dim:#8b949e; --line:#30363d;
+    --go:#2ea043; --hold:#d29922; --done:#388bfd; --rev:#a371f7;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg);
+         font:15px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  h1 { font-size:17px; margin:0 0 4px; }
+  .sub { color:var(--dim); font-size:12px; margin-bottom:14px; }
+  .card { border:1px solid var(--line); border-radius:8px; padding:14px; margin-bottom:12px; }
+  .phase { font-size:22px; font-weight:700; margin:4px 0; }
+  .tileid { font-size:64px; font-weight:700; line-height:1.05; margin:2px 0; }
+  .huge { font-size:50px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .go { color:var(--go); } .hold { color:var(--hold); }
+  .done { color:var(--done); } .rev { color:var(--rev); }
+  .where { font-size:14px; color:var(--dim); margin-top:2px; }
+  .bar { height:6px; background:#21262d; border-radius:3px; overflow:hidden; margin-top:12px; }
+  .bar > i { display:block; height:100%; background:var(--go); width:0; transition:width .3s linear; }
+  button { font:inherit; padding:12px 18px; border-radius:7px; cursor:pointer;
+           border:1px solid var(--line); background:#21262d; color:var(--fg);
+           margin:4px 6px 4px 0; }
+  button.primary { background:var(--go); border-color:var(--go); color:#fff; font-weight:700; }
+  button:disabled { opacity:.4; cursor:default; }
+  #log { max-height:150px; overflow:auto; font-size:11px; color:var(--dim); white-space:pre-wrap; }
+  .note { color:var(--dim); font-size:12px; margin-top:8px; }
+  .warn { color:var(--hold); }
+  .next { color:var(--dim); font-size:13px; margin-top:8px; }
+</style>
+</head>
+<body>
+
+<h1>Tile Survey — fingerprint ground truth</h1>
+<div class="sub">
+  C counts east from the west wall, R counts south. Stand on the tile and keep moving.
+</div>
+
+<div class="card">
+  <div id="phase" class="phase">Ready</div>
+  <div id="tileid" class="tileid">&mdash;</div>
+  <div id="where" class="where"></div>
+  <div id="countdown" class="huge">&mdash;</div>
+  <div id="instruction" class="note"></div>
+  <div class="bar"><i id="prog"></i></div>
+  <div id="next" class="next"></div>
+</div>
+
+<div class="card">
+  <button id="start" class="primary">Start survey</button>
+  <button id="skip" disabled>Skip</button>
+  <button id="abort" disabled>Abort</button>
+  <button id="save" disabled>Save ground truth JSON</button>
+  <div class="note">
+    Keep this page visible — a backgrounded tab throttles the countdown, which
+    silently corrupts the timing of every tile after it.
+  </div>
+</div>
+
+<div class="card">
+  <div class="sub" style="margin:0 0 6px">Event log</div>
+  <div id="log"></div>
+</div>
+
+<script>
+// ---- Protocol -------------------------------------------------------------
+
+var DWELL_S   = 35;   // split in half during analysis for the repeatability check
+var TRANSIT_S = 20;   // walking to the next tile; recorded, then excluded
+var REVISITS  = 4;    // first N tiles re-walked at the end, to measure drift
+
+// The 26 selected tiles in serpentine order, so consecutive tiles are adjacent
+// and transit stays short. x is inches east of the west wall, y inches south
+// of the north wall.
+var TILES = [
+  {id:'C2R1',x:36,y:24},  {id:'C3R1',x:60,y:24},  {id:'C6R1',x:132,y:24}, {id:'C7R1',x:156,y:24},
+  {id:'C7R2',x:156,y:48}, {id:'C6R2',x:132,y:48}, {id:'C5R2',x:108,y:48}, {id:'C4R2',x:84,y:48},
+  {id:'C3R2',x:60,y:48},  {id:'C2R2',x:36,y:48},
+  {id:'C2R3',x:36,y:72},  {id:'C3R3',x:60,y:72},  {id:'C4R3',x:84,y:72},  {id:'C5R3',x:108,y:72},
+  {id:'C6R3',x:132,y:72}, {id:'C7R3',x:156,y:72},
+  {id:'C7R4',x:156,y:96}, {id:'C6R4',x:132,y:96}, {id:'C5R4',x:108,y:96}, {id:'C4R4',x:84,y:96},
+  {id:'C3R4',x:60,y:96},  {id:'C2R4',x:36,y:96},
+  {id:'C2R5',x:36,y:120}, {id:'C3R5',x:60,y:120}, {id:'C5R5',x:108,y:120},
+  {id:'C7R6',x:156,y:144}
+];
+
+function feet(n) { var f = Math.floor(n / 12), i = n - 12 * f; return f + "' " + i + '"'; }
+
+var steps = [];
+TILES.forEach(function (t, i) {
+  steps.push({ kind:'transit', tile:t, secs:TRANSIT_S, seq:i + 1, revisit:false });
+  steps.push({ kind:'dwell',   tile:t, secs:DWELL_S,   seq:i + 1, revisit:false });
+});
+TILES.slice(0, REVISITS).forEach(function (t, i) {
+  steps.push({ kind:'transit', tile:t, secs:TRANSIT_S, seq:i + 1, revisit:true });
+  steps.push({ kind:'dwell',   tile:t, secs:DWELL_S,   seq:i + 1, revisit:true });
+});
+
+var totalSecs = steps.reduce(function (a, s) { return a + s.secs; }, 0);
+var idx = -1, timer = null, remaining = 0, elapsed = 0, events = [], running = false;
+
+// ---- Recording ------------------------------------------------------------
+
+function mark(label) {
+  var at = Date.now();
+  events.push({ t_unix_ms: at, label: label });
+  logLine(new Date(at).toISOString().substr(11, 8) + '  ' + label);
+  fetch('/api/v1/diag/mark/' + encodeURIComponent(label), { cache: 'no-store' })
+    .catch(function () { logLine('   (server mark failed; in-page log still good)'); });
+}
+
+function logLine(s) {
+  var el = document.getElementById('log');
+  el.textContent += s + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+
+// ---- Render ---------------------------------------------------------------
+
+function render() {
+  var phase = document.getElementById('phase');
+  var tid = document.getElementById('tileid');
+  var where = document.getElementById('where');
+  var cd = document.getElementById('countdown');
+  var ins = document.getElementById('instruction');
+  var nxt = document.getElementById('next');
+
+  document.getElementById('prog').style.width = (100 * elapsed / totalSecs) + '%';
+
+  if (idx < 0 || idx >= steps.length) {
+    var finished = idx >= steps.length;
+    phase.textContent = finished ? 'Survey complete' : 'Ready';
+    phase.className = 'phase done';
+    tid.textContent = finished ? '✓' : '—';
+    tid.className = 'tileid done';
+    where.textContent = ''; cd.textContent = '—'; nxt.textContent = '';
+    ins.textContent = finished
+      ? 'Save the ground truth JSON, then tell Claude you are done.'
+      : TILES.length + ' tiles plus ' + REVISITS + ' revisits — about ' +
+        Math.round(totalSecs / 60) + ' minutes.';
+    return;
+  }
+
+  var s = steps[idx];
+  cd.textContent = remaining;
+  tid.textContent = s.tile.id;
+  tid.className = 'tileid ' + (s.revisit ? 'rev' : (s.kind === 'dwell' ? 'go' : 'hold'));
+  where.textContent = feet(s.tile.x) + ' east of the west wall, ' +
+                      feet(s.tile.y) + ' south of the north wall';
+
+  if (s.kind === 'transit') {
+    phase.textContent = s.revisit ? 'REVISIT — walk to' : 'Walk to';
+    phase.className = 'phase hold';
+    ins.textContent = 'Transit. Recorded, then excluded from the analysis.';
+  } else {
+    phase.textContent = s.revisit ? 'REVISIT — move in place' : 'MOVE IN PLACE';
+    phase.className = 'phase ' + (s.revisit ? 'rev' : 'go');
+    ins.innerHTML = 'Stay on the tile and <b>keep moving</b> — shift weight, swing ' +
+      'your arms, step in place. <span class="warn">Standing still records nothing.</span>';
+  }
+
+  var upcoming = null;
+  for (var j = idx + 1; j < steps.length; j++) {
+    if (steps[j].kind === 'dwell') { upcoming = steps[j]; break; }
+  }
+  nxt.textContent = upcoming
+    ? 'next: ' + upcoming.tile.id + (upcoming.revisit ? ' (revisit)' : '') +
+      '   ·   ' + Math.round((totalSecs - elapsed) / 60) + ' min left'
+    : 'last tile';
+}
+
+function tick() {
+  remaining--; elapsed++;
+  if (remaining <= 0) { next(); } else { render(); }
+}
+
+function next() {
+  idx++;
+  if (idx >= steps.length) {
+    stopTimer(); running = false;
+    mark('survey-end');
+    document.getElementById('save').disabled = false;
+    document.getElementById('skip').disabled = true;
+    document.getElementById('abort').disabled = true;
+    render();
+    return;
+  }
+  var s = steps[idx];
+  remaining = s.secs;
+  mark(s.kind + '_' + s.tile.id + '_' + (s.revisit ? 'rev' : 'seq') +
+       (s.seq < 10 ? '0' : '') + s.seq + '_x' + s.tile.x + '_y' + s.tile.y);
+  render();
+}
+
+function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }
+
+document.getElementById('start').onclick = function () {
+  if (running) return;
+  running = true; events = []; elapsed = 0;
+  document.getElementById('start').disabled = true;
+  document.getElementById('skip').disabled = false;
+  document.getElementById('abort').disabled = false;
+  document.getElementById('save').disabled = true;
+  mark('survey-start');
+  idx = -1; next();
+  stopTimer(); timer = setInterval(tick, 1000);
+};
+
+document.getElementById('skip').onclick = function () { if (running) next(); };
+
+document.getElementById('abort').onclick = function () {
+  stopTimer(); running = false;
+  mark('survey-abort');
+  document.getElementById('start').disabled = false;
+  document.getElementById('skip').disabled = true;
+  document.getElementById('abort').disabled = true;
+  document.getElementById('save').disabled = false;
+  idx = steps.length; render();
+};
+
+document.getElementById('save').onclick = function () {
+  var blob = new Blob([JSON.stringify({
+    protocol: 'foam-tile fingerprint survey, single pass with revisits',
+    grid: '24 inch tiles, index NW corner, flush west, 12 inch north buffer',
+    units: 'inches; x east of the west wall, y south of the north wall',
+    dwell_s: DWELL_S, transit_s: TRANSIT_S, revisits: REVISITS,
+    tiles: TILES, events: events
+  }, null, 2)], { type: 'application/json' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'tile-survey-' + Date.now() + '.json';
+  a.click();
+};
+
+render();
+</script>
+</body>
+</html>
