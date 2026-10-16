@@ -30,6 +30,16 @@ use crate::anchor::{Anchor, AnchorLabel, AnchorQuality};
 pub struct AnchorQualityGate {
     /// Minimum mean amplitude z-score to consider a person present.
     pub min_presence_z: f32,
+    /// Minimum **relative** mean-amplitude shift versus the session's own
+    /// `empty` capture that counts as "a person is present" (0.0075 = 0.75%).
+    ///
+    /// The per-subcarrier `presence_z` test measures frame-to-frame jitter, not
+    /// the presence shift: live ESP32-S3 data showed a person standing still
+    /// shifting the capture mean by +0.5..+1.8 amplitude units (6-12 sigma over
+    /// ~1300 frames) while `presence_z` stayed flat at ~0.8 for both the empty
+    /// and the occupied room. When `mean_shift_rel` is supplied to `evaluate`,
+    /// it replaces the z test. `0.0` keeps the legacy z behaviour.
+    pub min_mean_shift: f32,
     /// For `empty`: maximum mean z-score to consider the room truly empty.
     pub empty_max_z: f32,
     /// For "still" anchors: maximum motion-flag rate tolerated.
@@ -45,6 +55,7 @@ impl Default for AnchorQualityGate {
         Self {
             min_presence_z: 1.5,
             empty_max_z: 1.0,
+            min_mean_shift: 0.0,
             max_still_motion: 0.6,
             min_move_motion: 0.3,
             min_frames: 60,
@@ -61,6 +72,7 @@ impl AnchorQualityGate {
         presence_z: f32,
         motion_rate: f32,
         frames: u32,
+        mean_shift_rel: Option<f32>,
     ) -> (AnchorQuality, Option<String>) {
         let mut reason: Option<String> = None;
 
@@ -70,11 +82,24 @@ impl AnchorQualityGate {
                 self.min_frames
             ));
         } else if label.expects_presence() {
-            if presence_z < self.min_presence_z {
-                reason = Some(format!(
-                    "no person detected (presence_z {presence_z:.2} < {:.2}) — move closer / face the sensor",
-                    self.min_presence_z
-                ));
+            // Magnitude, not sign: a person changes the multipath phase, so the
+            // capture mean can move either way (live data: -13.7%..+3.7%).
+            let present = match mean_shift_rel {
+                Some(shift) => shift.abs() >= self.min_mean_shift,
+                None => presence_z >= self.min_presence_z,
+            };
+            if !present {
+                reason = Some(match mean_shift_rel {
+                    Some(shift) => format!(
+                        "no presence shift (|capture mean {:+.2}%| vs this session's empty capture, need >= {:.2}%) — move into the sensed area",
+                        100.0 * shift,
+                        100.0 * self.min_mean_shift
+                    ),
+                    None => format!(
+                        "no person detected (presence_z {presence_z:.2} < {:.2}) — move closer / face the sensor",
+                        self.min_presence_z
+                    ),
+                });
             } else if label.expects_still() && motion_rate > self.max_still_motion {
                 reason = Some(format!(
                     "too much motion ({:.0}% > {:.0}%) for a still anchor — hold still",
@@ -203,12 +228,18 @@ impl AnchorRecorder {
 
     /// Evaluate the capture against the gate and produce an `Anchor` (accepted
     /// or not) plus a rejection reason.
-    pub fn finalize(&self, gate: &AnchorQualityGate, at_unix_s: i64) -> (Anchor, Option<String>) {
+    pub fn finalize(
+        &self,
+        gate: &AnchorQualityGate,
+        at_unix_s: i64,
+        mean_shift_rel: Option<f32>,
+    ) -> (Anchor, Option<String>) {
         let (quality, reason) = gate.evaluate(
             self.label,
             self.presence_z(),
             self.motion_rate(),
             self.frames,
+            mean_shift_rel,
         );
         (
             Anchor {
@@ -244,7 +275,7 @@ mod tests {
         for &z in zs {
             r.record_score(&score(z));
         }
-        r.finalize(&AnchorQualityGate::default(), 100)
+        r.finalize(&AnchorQualityGate::default(), 100, None)
     }
 
     /// Constant z (a perfectly still capture at the given presence strength).
@@ -317,7 +348,7 @@ mod tests {
             };
             r.record_score(&s);
         }
-        let (a, reason) = r.finalize(&AnchorQualityGate::default(), 100);
+        let (a, reason) = r.finalize(&AnchorQualityGate::default(), 100, None);
         assert!(!a.quality.accepted);
         assert!(reason.unwrap().contains("motion"));
     }
