@@ -937,6 +937,37 @@ static void send_vitals_packet(void)
     s_latest_pkt = pkt;
     s_pkt_valid = true;
 
+    /* Per-slot vitals, sent alongside (never instead of) the aggregate packet
+     * above. update_multi_person_vitals() already computed these; before this
+     * they were discarded at the wire, leaving the sink unable to tell what the
+     * slot count was actually counting. See EDGE_VITALS_SLOTS_MAGIC's comment. */
+    {
+        edge_vitals_slots_pkt_t spkt;
+        memset(&spkt, 0, sizeof(spkt));
+        spkt.magic = EDGE_VITALS_SLOTS_MAGIC;
+        spkt.node_id = pkt.node_id;
+        spkt.n_active = n_active;
+        spkt.max_slots = EDGE_MAX_PERSONS;
+        spkt.timestamp_ms = pkt.timestamp_ms;
+        for (uint8_t p = 0; p < EDGE_MAX_PERSONS; p++) {
+            if (s_persons[p].active) {
+                spkt.active_mask |= (uint8_t)(1u << p);
+            }
+            /* Fixed-point BPM*100 in a uint16 tops out at 655 BPM, far above
+             * any plausible rate; clamp rather than wrap on a bad estimate. */
+            float br = s_persons[p].breathing_bpm;
+            float hr = s_persons[p].heartrate_bpm;
+            if (br < 0.0f) br = 0.0f;
+            if (br > 650.0f) br = 650.0f;
+            if (hr < 0.0f) hr = 0.0f;
+            if (hr > 650.0f) hr = 650.0f;
+            spkt.breathing_bpm[p] = (uint16_t)(br * 100.0f);
+            spkt.heartrate_bpm[p] = (uint16_t)(hr * 100.0f);
+            spkt.subcarrier_idx[p] = s_persons[p].subcarrier_idx;
+        }
+        stream_sender_send((const uint8_t *)&spkt, sizeof(spkt));
+    }
+
     /* ADR-063: If mmWave is active, send fused 48-byte packet instead. */
     mmwave_state_t mw;
     if (mmwave_sensor_get_state(&mw) && mw.detected) {

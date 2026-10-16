@@ -343,4 +343,39 @@ void edge_get_phase_history(const float **out_buf, uint16_t *out_len,
  */
 void edge_get_variances(float *out_variances, uint16_t n_subcarriers);
 
+/* ---- Per-slot vitals packet (wire format) ----
+ *
+ * update_multi_person_vitals() already computes an independent breathing and
+ * heart rate for every detected slot — its own phase history, filters and
+ * autocorrelation. The 32-byte edge_vitals_pkt_t above then transmits only the
+ * aggregate plus a bare n_persons count, so all per-slot detail is computed
+ * and thrown away.
+ *
+ * That discarded detail is the only thing that can distinguish WHAT is being
+ * counted. The slot count is a subcarrier-energy-cluster heuristic with no
+ * size or species awareness, so a room containing pets reports them as
+ * "persons". Per-slot breathing rates are species-plausible evidence: a
+ * resting human sits near 12-20 BPM, a rabbit near 30-60, a chinchilla higher
+ * still. Sending them lets the sink label honestly instead of overclaiming.
+ *
+ * Sent IN ADDITION to edge_vitals_pkt_t, never instead of it, so an older sink
+ * keeps working unchanged and simply ignores this magic. */
+#define EDGE_VITALS_SLOTS_MAGIC 0xC5110009
+
+typedef struct __attribute__((packed)) {
+    uint32_t magic;          /**< EDGE_VITALS_SLOTS_MAGIC = 0xC5110009. */
+    uint8_t  node_id;        /**< ESP32 node identifier. */
+    uint8_t  n_active;       /**< Slots currently marked active. */
+    uint8_t  max_slots;      /**< EDGE_MAX_PERSONS, so the sink can validate. */
+    uint8_t  active_mask;    /**< Bit p set when slot p is active. */
+    uint32_t timestamp_ms;   /**< Milliseconds since boot. */
+    uint16_t breathing_bpm[EDGE_MAX_PERSONS];  /**< BPM * 100 per slot. */
+    uint16_t heartrate_bpm[EDGE_MAX_PERSONS];  /**< BPM * 100 per slot. */
+    uint8_t  subcarrier_idx[EDGE_MAX_PERSONS]; /**< Subcarrier group per slot. */
+} edge_vitals_slots_pkt_t;
+
+_Static_assert(sizeof(edge_vitals_slots_pkt_t) == 32,
+               "per-slot vitals packet must be 32 bytes");
+
+
 #endif /* EDGE_PROCESSING_H */
