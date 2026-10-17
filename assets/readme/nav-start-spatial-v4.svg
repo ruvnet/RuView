@@ -2,30 +2,14 @@
 text{font-family:"Avenir Next","Segoe UI Variable Display","Segoe UI",Helvetica,Arial,sans-serif}
 .mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;letter-spacing:1.6px}
 .float{animation:float 5s ease-in-out infinite}
-
-
-
-
-
 .spark{animation:spark 3.5s ease-in-out infinite}
-
 @keyframes float{0%,100%{transform:translate(0,0)}50%{transform:translate(3px,-10px)}}
 
-
 .sweep{animation:sweep 5s ease-in-out infinite;transform-origin:0 0}
-
-
-
-
 @keyframes sweep{0%,100%{transform:rotate(-20deg)}50%{transform:rotate(155deg)}}
 
 
 
-
 @keyframes spark{50%{opacity:.25}}
-
-
-
-
 @media(prefers-reduced-motion:reduce){*{animation:none!important}}
 </style><rect x=".5" y=".5" width="179" height="115" rx="18" fill="url(#wash)" stroke="#2d4e77"/><g transform="translate(90 45) scale(0.65)"><ellipse cy="53" rx="48" ry="8" fill="#020816" opacity=".65"/><g class="float"><ellipse rx="18" ry="8.64" fill="none" stroke="#78cfff" opacity=".4"/><ellipse rx="32" ry="15.36" fill="none" stroke="#78cfff" opacity=".4"/><ellipse rx="46" ry="22.08" fill="none" stroke="#78cfff" opacity=".4"/><path d="M-46 0H46M0 -23V23" fill="none" stroke="#438fff" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" /><g class="sweep"><path d="M0 0L40 -18" fill="none" stroke="#b8f36c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /><circle cx="34" cy="-15" r="3" stroke="#b8f36c"  fill="#b8f36c"/></g><circle cx="-20" cy="8" r="3" stroke="#ffb45e"  fill="#ffb45e" class="spark"/><circle cx="12" cy="13" r="3" stroke="#ffb45e"  fill="#ffb45e" class="spark"/><circle cx="23" cy="-8" r="3" stroke="#ffb45e"  fill="#ffb45e" class="spark"/></g></g><text x="90" y="98" font-size="16" fill="#f3f7ff" text-anchor="middle" font-weight="500" >Start here</text><path d="M24 1H156" stroke="url(#accent)" opacity=".55"/><path d="M24 115H156" stroke="#438fff" opacity=".15"/></svg>

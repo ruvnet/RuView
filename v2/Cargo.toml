@@ -268,6 +268,14 @@ wiremock = "0.5"
 # 0.1.0 was yanked; upgrade to latest 0.3/0.2 releases which pull in
 # quinn-proto >=0.11.14 (fixes RUSTSEC-2026-0037) and
 # rustls-webpki >=0.103.13 (fixes RUSTSEC-2026-0049/0098/0099/0104).
+#
+# The transitive security floors live in Cargo.lock, which the gating
+# Security Scanning job audits: quinn-proto >=0.11.18
+# (RUSTSEC-2026-0338/0339/0340/0341/0342), rustls >=0.23.46
+# (RUSTSEC-2026-0346/0347/0348/0349) and wasmtime >=36.0.18
+# (RUSTSEC-2026-0363). A plain `cargo update` can walk them backwards;
+# keep the lockfile at or above these until the direct requirements
+# enforce them.
 midstreamer-quic = "0.3"
 midstreamer-scheduler = "0.2"
 midstreamer-temporal-compare = "0.2"

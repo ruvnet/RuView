@@ -1,0 +1,3 @@
+build/
+__pycache__/
+*.shm

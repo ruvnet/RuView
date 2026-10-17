@@ -1,11 +1,15 @@
 name: wifi-densepose sensing-server → Docker Hub + ghcr.io
 
-# Build + publish the `wifi-densepose` sensing-server image to both Docker Hub
-# (`ruvnet/wifi-densepose`) and ghcr.io (`ghcr.io/ruvnet/wifi-densepose`) on:
+# Build + publish the `wifi-densepose` sensing-server image under the repository
+# owner (`docker.io/<owner>/wifi-densepose` and `ghcr.io/<owner>/wifi-densepose`)
+# on:
 #   - push to main affecting the Dockerfile, the server crate, the UI assets,
 #     or this workflow itself,
 #   - tag push matching v* (release builds),
 #   - manual workflow_dispatch.
+#
+# Docker Hub is only published when DOCKERHUB_USERNAME/DOCKERHUB_TOKEN exist;
+# ghcr.io always publishes.
 #
 # Closes #520 and #514: the stale `:latest` is rebuilt and pushed automatically
 # whenever the surface that produces it changes, and the Dockerfile fails the
@@ -61,17 +65,42 @@ jobs:
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
 
-      - name: Log in to Docker Hub
-        # Bypassing docker/login-action@v3: the action kept emitting
-        # "malformed HTTP Authorization header" against a known-good
-        # dckr_pat_* token (verified by direct curl against the Hub API).
-        # `docker login --password-stdin` is the documented credential
-        # path and avoids whatever encoding step the action injects.
+      # Publish under the repository owner instead of a hard-coded `ruvnet`
+      # namespace: a fork cannot push to the upstream's Docker Hub or ghcr.io
+      # namespaces, and `github.repository_owner` resolves correctly for both
+      # the upstream and every fork.
+      #
+      # Docker Hub is optional. The login was previously hard-required, so a
+      # repository without DOCKERHUB_USERNAME/DOCKERHUB_TOKEN failed at
+      # `docker login` ("Must provide --username with --password-stdin") before
+      # it ever built anything. ghcr.io needs no secret, so it stays the
+      # always-on target.
+      #
+      # Bypassing docker/login-action@v3: the action kept emitting
+      # "malformed HTTP Authorization header" against a known-good
+      # dckr_pat_* token (verified by direct curl against the Hub API).
+      # `docker login --password-stdin` is the documented credential
+      # path and avoids whatever encoding step the action injects.
+      - name: Resolve publish targets
+        id: targets
         env:
           DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
           DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
         run: |
-          printf '%s' "$DH_TOKEN" | docker login docker.io -u "$DH_USER" --password-stdin
+          set -uo pipefail
+          image="wifi-densepose"
+          images="ghcr.io/${OWNER}/${image}"
+          if [ -n "$DH_USER" ] && [ -n "$DH_TOKEN" ]; then
+            images="docker.io/${OWNER}/${image}"$'\n'"${images}"
+            printf '%s' "$DH_TOKEN" | docker login docker.io -u "$DH_USER" --password-stdin
+          else
+            echo "::warning::DOCKERHUB_USERNAME/DOCKERHUB_TOKEN are not configured; this run publishes to ghcr.io only."
+          fi
+          echo "images<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$images" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "ghcr_image=ghcr.io/${OWNER}/${image}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to ghcr.io
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
@@ -84,9 +113,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302
         with:
-          images: |
-            docker.io/ruvnet/wifi-densepose
-            ghcr.io/ruvnet/wifi-densepose
+          images: ${{ steps.targets.outputs.images }}
           tags: |
             type=ref,event=branch
             type=ref,event=tag
@@ -123,7 +150,7 @@ jobs:
       - name: Smoke-test image assets + LAN-mode HTTP
         run: |
           set -euo pipefail
-          IMAGE="ghcr.io/ruvnet/wifi-densepose:sha-${GITHUB_SHA::7}"
+          IMAGE="${{ steps.targets.outputs.ghcr_image }}:sha-${GITHUB_SHA::7}"
           docker pull "$IMAGE"
           docker run --rm --entrypoint sh "$IMAGE" -c \
             'ls /app/ui/observatory.html /app/ui/pose-fusion.html /app/ui/index.html /app/ui/viz.html >/dev/null'
@@ -147,7 +174,7 @@ jobs:
       - name: Smoke-test the bearer-token auth path
         run: |
           set -euo pipefail
-          IMAGE="ghcr.io/ruvnet/wifi-densepose:sha-${GITHUB_SHA::7}"
+          IMAGE="${{ steps.targets.outputs.ghcr_image }}:sha-${GITHUB_SHA::7}"
           docker run -d --name auth \
             -p 3000:3000 \
             -e CSI_SOURCE=simulated \

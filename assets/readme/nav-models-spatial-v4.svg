@@ -2,30 +2,14 @@
 text{font-family:"Avenir Next","Segoe UI Variable Display","Segoe UI",Helvetica,Arial,sans-serif}
 .mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;letter-spacing:1.6px}
 .float{animation:float 5s ease-in-out infinite}
-
-
 .trace{stroke-dasharray:400;animation:trace 6s ease-in-out infinite}
-
-
-
-
 @keyframes float{0%,100%{transform:translate(0,0)}50%{transform:translate(3px,-10px)}}
 
-
-
-
-
-
 .cursor{animation:cursor 5s ease-in-out infinite}
-
-
-
 @keyframes cursor{0%,100%{transform:translateX(-35px);opacity:.3}50%{transform:translateX(35px);opacity:1}}
 
 
 
-
 @keyframes trace{0%,100%{stroke-dashoffset:0}50%{stroke-dashoffset:90}}
-
 @media(prefers-reduced-motion:reduce){*{animation:none!important}}
 </style><rect x=".5" y=".5" width="179" height="115" rx="18" fill="url(#wash)" stroke="#2d4e77"/><g transform="translate(90 45) scale(0.65)"><ellipse cy="53" rx="48" ry="8" fill="#020816" opacity=".65"/><g class="float"><path d="M-49 -14C-34 -14 -30 -35 -17 -35S0 7 14 7S34 -14 49 -14" fill="none" stroke="#78cfff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="trace" style="animation-delay:-0s" opacity="1.0"/><path d="M-49 -2C-34 -2 -30 -23 -17 -23S0 19 14 19S34 -2 49 -2" fill="none" stroke="#b8f36c" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="trace" style="animation-delay:-1s" opacity="0.8"/><path d="M-49 10C-34 10 -30 -11 -17 -11S0 31 14 31S34 10 49 10" fill="none" stroke="#78cfff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="trace" style="animation-delay:-2s" opacity="0.6"/><g class="cursor"><path d="M0 -42V40" fill="none" stroke="#ffb45e" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" /><circle cx="0" cy="-8" r="3" stroke="#ffb45e"  fill="#ffb45e"/></g></g></g><text x="90" y="98" font-size="16" fill="#f3f7ff" text-anchor="middle" font-weight="500" >Models</text><path d="M24 1H156" stroke="url(#accent)" opacity=".55"/><path d="M24 115H156" stroke="#438fff" opacity=".15"/></svg>

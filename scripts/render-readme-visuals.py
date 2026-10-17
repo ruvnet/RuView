@@ -139,7 +139,7 @@ def frame(w,h,title,desc,body):
  motion=MOTION
  for name in ['float','flow','breathe','trace','scan','orbit','spark','wave','sweep','limb','stride','layer','cursor','humanTurn','humanBody','armFar','armNear','legFar','legNear','humanLight','gaitShadow']:
   if f'class="{name}"' not in body:
-   motion=re.sub(r'\.'+name+r'\{[^}]*\}', '', motion)
+   motion=re.sub(r'\.'+name+r'\{[^}]*\}\n?', '', motion)
  for name in ['float','flow','breathe','trace','scan','spark','wave','sweep','limb','layer','cursor','humanTurn','humanBody','armSwing','legSwing','humanLight','gaitShadow']:
   if f'animation:{name} ' not in motion:
    marker='@keyframes '+name+'{'; start=motion.find(marker)
@@ -147,7 +147,7 @@ def frame(w,h,title,desc,body):
     pos=start+len(marker); depth=1
     while depth:
      depth+=(motion[pos]=='{')-(motion[pos]=='}');pos+=1
-    motion=motion[:start]+motion[pos:]
+    motion=motion[:start]+motion[pos:].removeprefix('\n')
  value=value[:value.index('<style>')]+motion+value[value.index('</style>')+8:]
  palette={'#0b303a':'#102749','#06171e':'#071429','#030c13':'#03091a',
           '#245360':'#2d4e77','#91f6df':'#9ee7ff','#26bad7':'#348bff',
