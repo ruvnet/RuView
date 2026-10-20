@@ -70,7 +70,7 @@ for (const [name, failure, seconds, stop, expected, successful, start = 'a520', 
       });
       assert.ifError(result.error);
       assert.equal(result.status === 0, successful, result.stderr);
-      assert.deepEqual(readFileSync(trace, 'utf8').trim().split('\n'), expected);
+      assert.deepEqual(readFileSync(trace, 'utf8').trim().split(/\r?\n/), expected);
       if (failure === 'read-stop') {
         assert.match(result.stderr, /injected read failure/);
         assert.match(result.stderr, /injected write failure/);
