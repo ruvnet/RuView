@@ -19,6 +19,15 @@ class Serial:
  def __init__(self,*args,**kwargs):
   record('open')
   if os.environ['PUMP_FAILURE']=='open': raise RuntimeError('injected open failure')
+ @property
+ def dtr(self): return False
+ @dtr.setter
+ def dtr(self,value):
+  record('dtr')
+  failure=os.environ['PUMP_FAILURE']
+  if failure=='dtr-output': sys.stdout=BrokenOutput()
+  if failure=='dtr-interrupt': raise KeyboardInterrupt('injected DTR interrupt')
+  if failure in ('dtr', 'dtr-output'): raise RuntimeError('injected unsupported DTR')
  def write(self,data):
   value=data.hex(); record('write:'+value)
   failure=os.environ['PUMP_FAILURE']
@@ -35,7 +44,7 @@ class Serial:
  def close(self): record('close')
 `;
 
-for (const [name, failure, seconds, stop, expected, successful, start = 'a520'] of [
+for (const [name, failure, seconds, stop, expected, successful, start = 'a520', dtr = 'keep'] of [
   ['normal completion', '', '0', 'a525', ['open', 'write:a520', 'flush', 'write:a525', 'flush', 'close'], true],
   ['read failure', '', '1', 'a525', ['open', 'write:a520', 'flush', 'read', 'write:a525', 'flush', 'close'], false],
   ['start failure', 'a520', '0', 'a525', ['open', 'write:a520', 'write:a525', 'flush', 'close'], false],
@@ -44,6 +53,9 @@ for (const [name, failure, seconds, stop, expected, successful, start = 'a520'] 
   ['open failure', 'open', '0', 'a525', ['open'], false],
   ['start flush failure', 'flush', '0', 'a525', ['open', 'write:a520', 'flush', 'write:a525', 'flush', 'close'], false],
   ['read and stop failures', 'read-stop', '1', 'a525', ['open', 'write:a520', 'flush', 'read', 'write:a525', 'close'], false],
+  ['unsupported DTR', 'dtr', '0', 'a525', ['open', 'dtr', 'write:a520', 'flush', 'write:a525', 'flush', 'close'], true, 'a520', 'low'],
+  ['unsupported DTR reporting failure', 'dtr-output', '0', 'a525', ['open', 'dtr', 'write:a525', 'flush', 'close'], false, 'a520', 'low'],
+  ['DTR interrupt', 'dtr-interrupt', '0', 'a525', ['open', 'dtr', 'write:a525', 'flush', 'close'], false, 'a520', 'low'],
   ['passive completion', '', '0', '', ['open', 'close'], true, ''],
   ['passive read failure', '', '1', '', ['open', 'read', 'close'], false, ''],
 ]) {
@@ -52,7 +64,7 @@ for (const [name, failure, seconds, stop, expected, successful, start = 'a520'] 
     try {
       const trace = join(dir, 'trace.txt');
       writeFileSync(join(dir, 'serial.py'), fakeSerial);
-      const result = spawnSync(python, ['-c', PUMP_SCRIPT, 'synthetic-port', '115200', seconds, '4096', start, stop, 'keep'], {
+      const result = spawnSync(python, ['-c', PUMP_SCRIPT, 'synthetic-port', '115200', seconds, '4096', start, stop, dtr], {
         cwd: dir, encoding: 'utf8', timeout: 5000,
         env: { PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT || '', PYTHONPATH: dir, PUMP_TRACE: trace, PUMP_FAILURE: failure },
       });
@@ -63,6 +75,7 @@ for (const [name, failure, seconds, stop, expected, successful, start = 'a520'] 
         assert.match(result.stderr, /injected read failure/);
         assert.match(result.stderr, /injected write failure/);
       }
+      if (failure === 'dtr') assert.match(result.stdout, /DTR_UNSUPPORTED/);
       if (failure === 'open') assert.match(result.stdout, /OPEN_ERROR/);
       assert.equal(result.stdout.includes('END 0'), successful, 'only completed captures report END');
     } finally { rmSync(dir, { recursive: true, force: true }); }
