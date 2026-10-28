@@ -278,15 +278,23 @@ pub struct PoseTrack {
 
 impl PoseTrack {
     /// Create a new tentative track from a detection.
+    ///
+    /// `keypoint_confidences` carries the per-keypoint measurement confidence
+    /// from the detector. Slots the detector did not observe must be passed as
+    /// `0.0` — downstream consumers (bbox fitting, the UI renderer) treat
+    /// confidence `0.0` as "unobserved" and skip those joints.
     pub fn new(
         id: TrackId,
         keypoint_positions: &[[f32; 3]; NUM_KEYPOINTS],
+        keypoint_confidences: &[f32; NUM_KEYPOINTS],
         timestamp_us: u64,
         embedding_dim: usize,
     ) -> Self {
         let keypoints = std::array::from_fn(|i| {
             let [x, y, z] = keypoint_positions[i];
-            KeypointState::new(x, y, z)
+            let mut kp = KeypointState::new(x, y, z);
+            kp.confidence = keypoint_confidences[i];
+            kp
         });
 
         Self {
@@ -343,12 +351,22 @@ impl PoseTrack {
     pub fn update_keypoints(
         &mut self,
         measurements: &[[f32; 3]; NUM_KEYPOINTS],
+        confidences: &[f32; NUM_KEYPOINTS],
         measurement_noise: f32,
         noise_multiplier: f32,
         timestamp_us: u64,
     ) {
-        for (kp, meas) in self.keypoints.iter_mut().zip(measurements.iter()) {
+        for ((kp, meas), conf) in self
+            .keypoints
+            .iter_mut()
+            .zip(measurements.iter())
+            .zip(confidences.iter())
+        {
             kp.update(meas, measurement_noise, noise_multiplier);
+            // Carry the measurement confidence onto the filtered state. Without
+            // this the Kalman state keeps its `0.0` init value forever and every
+            // consumer treats the joint as unobserved.
+            kp.confidence = *conf;
         }
 
         self.time_since_update = 0;
@@ -582,12 +600,19 @@ impl PoseTracker {
     pub fn create_track(
         &mut self,
         keypoints: &[[f32; 3]; NUM_KEYPOINTS],
+        confidences: &[f32; NUM_KEYPOINTS],
         timestamp_us: u64,
     ) -> TrackId {
         let id = TrackId::new(self.next_id);
         self.next_id += 1;
 
-        let track = PoseTrack::new(id, keypoints, timestamp_us, self.config.embedding_dim);
+        let track = PoseTrack::new(
+            id,
+            keypoints,
+            confidences,
+            timestamp_us,
+            self.config.embedding_dim,
+        );
         self.tracks.push(track);
         id
     }
@@ -1069,6 +1094,11 @@ mod tests {
         [[0.0, 0.0, 0.0]; NUM_KEYPOINTS]
     }
 
+    /// All keypoints observed with full confidence.
+    fn full_confidences() -> [f32; NUM_KEYPOINTS] {
+        [1.0; NUM_KEYPOINTS]
+    }
+
     #[allow(dead_code)]
     fn offset_positions(offset: f32) -> [[f32; 3]; NUM_KEYPOINTS] {
         std::array::from_fn(|i| [offset + i as f32 * 0.1, offset, 0.0])
@@ -1144,7 +1174,7 @@ mod tests {
     #[test]
     fn track_creation() {
         let positions = zero_positions();
-        let track = PoseTrack::new(TrackId(0), &positions, 1000, 128);
+        let track = PoseTrack::new(TrackId(0), &positions, &full_confidences(), 1000, 128);
         assert_eq!(track.id, TrackId(0));
         assert_eq!(track.lifecycle, TrackLifecycleState::Tentative);
         assert_eq!(track.embedding.len(), 128);
@@ -1152,21 +1182,52 @@ mod tests {
         assert_eq!(track.consecutive_hits, 1);
     }
 
+    /// Regression: per-keypoint confidence must survive creation and update.
+    ///
+    /// It previously did not — `KeypointState::confidence` kept its `0.0` init
+    /// value forever, so every consumer downstream (bbox fitting, the UI
+    /// renderer) saw all 17 joints as unobserved and drew nothing.
+    #[test]
+    fn track_preserves_keypoint_confidence() {
+        let positions = zero_positions();
+        let mut confidences = [0.0_f32; NUM_KEYPOINTS];
+        // Mixed: some observed, one explicitly unobserved.
+        for (i, c) in confidences.iter_mut().enumerate() {
+            *c = if i == 3 { 0.0 } else { 0.5 + (i as f32) * 0.01 };
+        }
+
+        let mut track = PoseTrack::new(TrackId(0), &positions, &confidences, 0, 128);
+        for (i, kp) in track.keypoints.iter().enumerate() {
+            assert_eq!(kp.confidence, confidences[i], "creation lost kp {i}");
+        }
+        assert!(
+            track.keypoints.iter().any(|k| k.confidence > 0.0),
+            "at least one keypoint must be observed"
+        );
+
+        // A measurement update must refresh confidence, not freeze the initial one.
+        let updated = [0.9_f32; NUM_KEYPOINTS];
+        track.update_keypoints(&positions, &updated, 0.08, 1.0, 100);
+        for (i, kp) in track.keypoints.iter().enumerate() {
+            assert_eq!(kp.confidence, 0.9, "update lost kp {i}");
+        }
+    }
+
     #[test]
     fn track_birth_gate() {
         let positions = zero_positions();
-        let mut track = PoseTrack::new(TrackId(0), &positions, 0, 128);
+        let mut track = PoseTrack::new(TrackId(0), &positions, &full_confidences(), 0, 128);
         assert_eq!(track.lifecycle, TrackLifecycleState::Tentative);
 
         // First update: still tentative (need 2 hits)
-        track.update_keypoints(&positions, 0.08, 1.0, 100);
+        track.update_keypoints(&positions, &full_confidences(), 0.08, 1.0, 100);
         assert_eq!(track.lifecycle, TrackLifecycleState::Active);
     }
 
     #[test]
     fn track_loss_gate() {
         let positions = zero_positions();
-        let mut track = PoseTrack::new(TrackId(0), &positions, 0, 128);
+        let mut track = PoseTrack::new(TrackId(0), &positions, &full_confidences(), 0, 128);
         track.lifecycle = TrackLifecycleState::Active;
 
         // Predict without updates exceeding loss_misses
@@ -1183,7 +1244,7 @@ mod tests {
     #[test]
     fn track_centroid() {
         let positions: [[f32; 3]; NUM_KEYPOINTS] = std::array::from_fn(|_| [1.0, 2.0, 3.0]);
-        let track = PoseTrack::new(TrackId(0), &positions, 0, 128);
+        let track = PoseTrack::new(TrackId(0), &positions, &full_confidences(), 0, 128);
         let c = track.centroid();
         assert!((c[0] - 1.0).abs() < 1e-5);
         assert!((c[1] - 2.0).abs() < 1e-5);
@@ -1193,7 +1254,7 @@ mod tests {
     #[test]
     fn track_embedding_update() {
         let positions = zero_positions();
-        let mut track = PoseTrack::new(TrackId(0), &positions, 0, 4);
+        let mut track = PoseTrack::new(TrackId(0), &positions, &full_confidences(), 0, 4);
         let new_embed = vec![1.0, 2.0, 3.0, 4.0];
         track.update_embedding(&new_embed, 0.5);
         // EMA: 0.5 * 0.0 + 0.5 * new = new / 2
@@ -1206,7 +1267,7 @@ mod tests {
     fn tracker_create_and_find() {
         let mut tracker = PoseTracker::new();
         let positions = zero_positions();
-        let id = tracker.create_track(&positions, 1000);
+        let id = tracker.create_track(&positions, &full_confidences(), 1000);
         assert!(tracker.find_track(id).is_some());
         assert_eq!(tracker.active_count(), 1);
     }
@@ -1219,7 +1280,7 @@ mod tests {
             ..Default::default()
         });
         let positions = zero_positions();
-        let id = tracker.create_track(&positions, 0);
+        let id = tracker.create_track(&positions, &full_confidences(), 0);
 
         // Promote to active
         if let Some(t) = tracker.find_track_mut(id) {
@@ -1239,7 +1300,7 @@ mod tests {
     fn tracker_prune_terminated() {
         let mut tracker = PoseTracker::new();
         let positions = zero_positions();
-        let id = tracker.create_track(&positions, 0);
+        let id = tracker.create_track(&positions, &full_confidences(), 0);
         if let Some(t) = tracker.find_track_mut(id) {
             t.terminate();
         }
@@ -1311,7 +1372,7 @@ mod tests {
     fn assignment_cost_computation() {
         let mut tracker = PoseTracker::new();
         let positions = zero_positions();
-        let id = tracker.create_track(&positions, 0);
+        let id = tracker.create_track(&positions, &full_confidences(), 0);
 
         let track = tracker.find_track(id).unwrap();
         let cost = tracker.assignment_cost(track, &[0.0, 0.0, 0.0], &vec![0.0; 128]);
@@ -1324,7 +1385,7 @@ mod tests {
     #[test]
     fn torso_jitter_rms_stationary() {
         let positions = zero_positions();
-        let track = PoseTrack::new(TrackId(0), &positions, 0, 128);
+        let track = PoseTrack::new(TrackId(0), &positions, &full_confidences(), 0, 128);
         let jitter = track.torso_jitter_rms();
         assert!(
             jitter < 1e-5,
@@ -1350,7 +1411,7 @@ mod tests {
     #[test]
     fn track_terminate_prevents_lost() {
         let positions = zero_positions();
-        let mut track = PoseTrack::new(TrackId(0), &positions, 0, 128);
+        let mut track = PoseTrack::new(TrackId(0), &positions, &full_confidences(), 0, 128);
         track.terminate();
         assert_eq!(track.lifecycle, TrackLifecycleState::Terminated);
         track.mark_lost(); // Should not override Terminated
