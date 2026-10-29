@@ -68,7 +68,7 @@ jobs:
 
     - name: Upload security reports
       continue-on-error: true
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       if: always()
       with:
         name: security-reports
@@ -307,7 +307,7 @@ jobs:
 
     - name: Upload test results
       continue-on-error: true
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       if: always()
       with:
         name: test-results-${{ matrix.python-version }}
@@ -377,7 +377,7 @@ jobs:
 
     - name: Upload performance results
       if: always()
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       with:
         name: performance-results
         path: archive/v1/perf-junit.xml
