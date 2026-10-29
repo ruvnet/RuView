@@ -21,6 +21,7 @@ Usage::
     python scripts/check_fix_markers.py --list     # list all markers
     python scripts/check_fix_markers.py --json      # machine-readable result
     python scripts/check_fix_markers.py --only RuView#396 RuView#521
+    python scripts/check_fix_markers.py --manifest path/to/markers.json
 
 Exit codes: 0 = all markers OK, 1 = one or more regressions, 2 = bad manifest.
 """
@@ -64,11 +65,12 @@ class ManifestError(Exception):
     pass
 
 
-def load_manifest() -> dict:
-    if not MANIFEST_PATH.exists():
-        raise ManifestError(f"manifest not found: {MANIFEST_PATH}")
+def load_manifest(path: Path | None = None) -> dict:
+    target_path = path or MANIFEST_PATH
+    if not target_path.exists():
+        raise ManifestError(f"manifest not found: {target_path}")
     try:
-        data = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+        data = json.loads(target_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         raise ManifestError(f"manifest is not valid JSON: {e}") from e
     if not isinstance(data, dict) or not isinstance(data.get("markers"), list):
@@ -82,12 +84,16 @@ def load_manifest() -> dict:
 
 def _pattern_found(text: str, pattern: str) -> bool:
     if len(pattern) >= 2 and pattern.startswith("/") and pattern.endswith("/"):
-        return re.search(pattern[1:-1], text, re.MULTILINE) is not None
+        try:
+            return re.search(pattern[1:-1], text, re.MULTILINE) is not None
+        except re.error as e:
+            raise ManifestError(f"invalid regex in pattern {pattern!r}: {e}") from e
     return pattern in text
 
 
-def check_marker(marker: dict) -> tuple[bool, list[str]]:
+def check_marker(marker: dict, root: Path | None = None) -> tuple[bool, list[str]]:
     """Return (ok, problems) for a single marker."""
+    repo_root = root or REPO_ROOT
     problems: list[str] = []
     files = marker.get("files", [])
     require = marker.get("require", [])
@@ -99,7 +105,7 @@ def check_marker(marker: dict) -> tuple[bool, list[str]]:
 
     contents: dict[str, str] = {}
     for rel in files:
-        p = REPO_ROOT / rel
+        p = repo_root / rel
         if not p.exists():
             problems.append(f"missing file: {rel}")
             continue
@@ -109,13 +115,16 @@ def check_marker(marker: dict) -> tuple[bool, list[str]]:
             problems.append(f"cannot read {rel}: {e}")
 
     haystack = "\n".join(contents.values())
-    for pat in require:
-        if not _pattern_found(haystack, pat):
-            problems.append(f"required marker absent (fix likely reverted): {pat!r}")
-    for pat in forbid:
-        for rel, text in contents.items():
-            if _pattern_found(text, pat):
-                problems.append(f"forbidden pattern re-appeared in {rel} (bug re-introduced?): {pat!r}")
+    try:
+        for pat in require:
+            if not _pattern_found(haystack, pat):
+                problems.append(f"required marker absent (fix likely reverted): {pat!r}")
+        for pat in forbid:
+            for rel, text in contents.items():
+                if _pattern_found(text, pat):
+                    problems.append(f"forbidden pattern re-appeared in {rel} (bug re-introduced?): {pat!r}")
+    except ManifestError as e:
+        problems.append(str(e))
 
     return (len(problems) == 0), problems
 
@@ -136,10 +145,12 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--list", action="store_true", help="list all markers and exit")
     ap.add_argument("--json", action="store_true", help="emit a JSON result object")
     ap.add_argument("--only", nargs="+", metavar="ID", help="only check the given marker ids")
+    ap.add_argument("--manifest", type=Path, default=MANIFEST_PATH, help="path to fix-markers manifest (default: scripts/fix-markers.json)")
+    ap.add_argument("--root", type=Path, default=REPO_ROOT, help="path to repository root (default: repo root)")
     args = ap.parse_args(argv)
 
     try:
-        manifest = load_manifest()
+        manifest = load_manifest(args.manifest)
     except ManifestError as e:
         print(RED(f"[manifest error] {e}"), file=sys.stderr)
         return 2
@@ -159,7 +170,7 @@ def main(argv: list[str]) -> int:
     results = []
     failed = 0
     for m in markers:
-        ok, problems = check_marker(m)
+        ok, problems = check_marker(m, root=args.root)
         results.append({"id": m["id"], "title": m.get("title", ""), "ok": ok, "problems": problems})
         if not ok:
             failed += 1

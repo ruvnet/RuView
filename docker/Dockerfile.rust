@@ -10,6 +10,7 @@ WORKDIR /build
 # Copy workspace files
 COPY v2/Cargo.toml v2/Cargo.lock ./
 COPY v2/crates/ ./crates/
+COPY v2/vendor/security/ ./vendor/security/
 
 # Copy vendored RuVector crates
 COPY vendor/ruvector/ /build/vendor/ruvector/
@@ -34,9 +35,9 @@ COPY vendor/rufield/ /vendor/rufield/
 # set (docker/otel-compose.yml builds with `mqtt,otel` for OTLP log
 # export) without forking this Dockerfile.
 ARG SENSING_FEATURES=mqtt
-RUN cargo build --release -p wifi-densepose-sensing-server --features "${SENSING_FEATURES}" 2>&1 \
- && cargo build --release -p cog-ha-matter 2>&1 \
- && cargo build --release -p homecore-server 2>&1 \
+RUN cargo build --locked --release -p wifi-densepose-sensing-server --features "${SENSING_FEATURES}" 2>&1 \
+ && cargo build --locked --release -p cog-ha-matter 2>&1 \
+ && cargo build --locked --release -p homecore-server 2>&1 \
  && strip target/release/sensing-server target/release/cog-ha-matter target/release/homecore-server
 
 # Stage 2: Runtime

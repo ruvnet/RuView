@@ -1920,12 +1920,14 @@ A 3-6 node ESP32-S3 mesh provides full CSI at 20 Hz. Total cost: ~$54 for a 3-no
 
 Use versioned bundles from [Releases](https://github.com/ruvnet/RuView/releases),
 not the historical binaries in `firmware/esp32-csi-node/release_bins/`.
-The 0.8.14 prerelease fixes USB device identity and adds OTA key provisioning.
+The 0.8.16 prerelease adds conservative MR60BHA2 identification to the prior
+USB identity, OTA provisioning, and CSI reliability fixes.
 It has CI build/host-test coverage; new physical-board qualification remains
 pending. The previous stable firmware is 0.8.8.
 
 | Release | What It Includes | Tag |
 |---------|-----------------|-----|
+| [v0.8.16](https://github.com/ruvnet/RuView/releases/tag/v0.8.16-esp32) | **Prerelease:** conservative MR60BHA2 identification; CI/host-test coverage, without new physical firmware qualification | `v0.8.16-esp32` |
 | [v0.8.14](https://github.com/ruvnet/RuView/releases/tag/v0.8.14-esp32) | **Prerelease:** corrected C6 base-MAC identity, OTA key provisioning without a host key cache; physical qualification pending | `v0.8.14-esp32` |
 | [v0.8.8](https://github.com/ruvnet/RuView/releases/tag/v0.8.8-esp32) | Previous stable firmware: consistent occupancy and rate-aware C6 processing; see [release evidence](releases/v0.8.8-esp32.md) | `v0.8.8-esp32` |
 | [v0.7.0](https://github.com/ruvnet/RuView/releases/tag/v0.7.0-esp32) | Historical ADR-110 firmware-side substrate: ESP-NOW synchronization and sync-packet UDP emission ([WITNESS-LOG-110 §A0.7-§A0.13](WITNESS-LOG-110.md)) | `v0.7.0-esp32` |
@@ -1961,7 +1963,7 @@ python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
 
 **4 MB headless S3 boards:** use the matching application and partition table
 from `esp32-csi-node-firmware-4mb.tar.gz` on the
-[0.8.14 prerelease](https://github.com/ruvnet/RuView/releases/tag/v0.8.14-esp32)
+[0.8.16 prerelease](https://github.com/ruvnet/RuView/releases/tag/v0.8.16-esp32)
 and select `--flash-size 4MB`:
 
 ```bash

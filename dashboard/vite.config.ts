@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
@@ -65,6 +66,11 @@ export default defineConfig({
         },
       },
     },
+  },
+  test: {
+    // tests/ holds Playwright specs (run via `npm run test:e2e`), not Vitest.
+    exclude: ['**/node_modules/**', '**/dist/**', 'tests/**'],
+    passWithNoTests: true,
   },
   server: {
     port: 5173,

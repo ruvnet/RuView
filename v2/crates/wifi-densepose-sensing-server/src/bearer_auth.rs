@@ -1219,8 +1219,10 @@ mod oauth_tests {
     };
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
     use jsonwebtoken::{encode, EncodingKey, Header};
-    use p256::ecdsa::SigningKey;
-    use p256::pkcs8::{EncodePrivateKey, LineEnding};
+    use ring::{
+        rand::SystemRandom,
+        signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_FIXED_SIGNING},
+    };
     use ruview_auth::jwks::{JwksError, JwksFetcher};
     use std::sync::OnceLock;
     use tower::ServiceExt;
@@ -1229,7 +1231,7 @@ mod oauth_tests {
     const ISSUER: &str = "https://auth.test.local";
 
     struct TestKey {
-        pem: String,
+        der: Vec<u8>,
         x: String,
         y: String,
     }
@@ -1237,12 +1239,21 @@ mod oauth_tests {
     fn key() -> &'static TestKey {
         static K: OnceLock<TestKey> = OnceLock::new();
         K.get_or_init(|| {
-            let sk = SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
-            let point = sk.verifying_key().to_encoded_point(false);
+            let rng = SystemRandom::new();
+            let der = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng).unwrap();
+            let sk = EcdsaKeyPair::from_pkcs8(
+                &ECDSA_P256_SHA256_FIXED_SIGNING,
+                der.as_ref(),
+                &rng,
+            )
+            .unwrap();
+            let point = sk.public_key().as_ref();
+            assert_eq!(point.len(), 65);
+            assert_eq!(point[0], 4);
             TestKey {
-                pem: sk.to_pkcs8_pem(LineEnding::LF).unwrap().to_string(),
-                x: URL_SAFE_NO_PAD.encode(point.x().unwrap()),
-                y: URL_SAFE_NO_PAD.encode(point.y().unwrap()),
+                der: der.as_ref().to_vec(),
+                x: URL_SAFE_NO_PAD.encode(&point[1..33]),
+                y: URL_SAFE_NO_PAD.encode(&point[33..65]),
             }
         })
     }
@@ -1296,7 +1307,7 @@ mod oauth_tests {
         encode(
             &header,
             &claims,
-            &EncodingKey::from_ec_pem(key().pem.as_bytes()).unwrap(),
+            &EncodingKey::from_ec_der(&key().der),
         )
         .unwrap()
     }
@@ -1359,7 +1370,7 @@ mod oauth_tests {
                 "sub":subject, "org_id":"20000000-0000-4000-8000-000000000001", "workspace_id":workspace,
                 "scope":"sensing:read spaces:read", "iat":now, "exp":now+300, "setup":false, "workload":false});
             let mut header = Header::new(jsonwebtoken::Algorithm::ES256); header.kid = Some(KID.into());
-            encode(&header, &claims, &EncodingKey::from_ec_pem(key().pem.as_bytes()).unwrap()).unwrap()
+            encode(&header, &claims, &EncodingKey::from_ec_der(&key().der)).unwrap()
         };
         let a = make_token("10000000-0000-4000-8000-000000000001", "30000000-0000-4000-8000-000000000001");
         let b = make_token("10000000-0000-4000-8000-000000000002", "30000000-0000-4000-8000-000000000001");
