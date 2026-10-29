@@ -6151,6 +6151,34 @@ fn generate_simulated_frame(tick: u64) -> Esp32Frame {
     }
 }
 
+/// A cached observation is not a new measurement. Keep its original identity
+/// and timestamp while refreshing receive-clock metadata for a new subscriber
+/// or source-state transition. Never rebroadcast this snapshot per subscriber.
+fn current_sensing_snapshot(state: &AppStateInner) -> Option<SensingUpdate> {
+    let mut snapshot = state.latest_update.clone()?;
+    snapshot.source = state.effective_source();
+    if snapshot.source.starts_with("esp32") {
+        let now = std::time::Instant::now();
+        snapshot.node_features = build_node_features(&state.node_states, now);
+        for node in &mut snapshot.nodes {
+            node.node_inference = state.node_states.get(&node.node_id)
+                .map(|state| node_inference_for(state, now));
+        }
+    }
+    let age_ms = chrono::Utc::now().timestamp_millis() as f64 - snapshot.timestamp * 1000.0;
+    if snapshot.source.ends_with(":offline") || age_ms > LATEST_UPDATE_STALE_AFTER.as_millis() as f64 {
+        // Preserve historical classification, not a fabricated absence.
+        snapshot.vital_signs = None;
+        snapshot.vital_evidence = None;
+        snapshot.calibrated_presence_evidence = None;
+        snapshot.detector_diagnostics = None;
+        snapshot.room_inference = None;
+        snapshot.persons = None;
+        snapshot.pose_keypoints = None;
+    }
+    Some(snapshot)
+}
+
 // ── WebSocket handler ────────────────────────────────────────────────────────
 
 async fn ws_sensing_handler(
@@ -6166,9 +6194,10 @@ async fn ws_sensing_handler(
 }
 
 async fn handle_ws_client(mut socket: WebSocket, state: SharedState) {
-    let (mut rx, privacy_mode, _client) = {
+    let (mut rx, privacy_mode, _client, mut initial_snapshot) = {
         let s = state.read().await;
-        (s.tx.subscribe(), s.privacy_mode, s.ws_clients.enter())
+        (s.tx.subscribe(), s.privacy_mode, s.ws_clients.enter(),
+            current_sensing_snapshot(&s).and_then(|update| serde_json::to_string(&update).ok()))
     };
 
     info!("WebSocket client connected (sensing)");
@@ -6179,7 +6208,12 @@ async fn handle_ws_client(mut socket: WebSocket, state: SharedState) {
 
     loop {
         tokio::select! {
-            msg = rx.recv() => {
+            msg = async {
+                match initial_snapshot.take() {
+                    Some(snapshot) => Ok(snapshot),
+                    None => rx.recv().await,
+                }
+            } => {
                 match msg {
                     Ok(json) => {
                         let json = if privacy_mode {
@@ -6283,9 +6317,10 @@ async fn ws_pose_handler(
 }
 
 async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
-    let (mut rx, privacy_mode, _client) = {
+    let (mut rx, privacy_mode, _client, mut initial_snapshot) = {
         let s = state.read().await;
-        (s.tx.subscribe(), s.privacy_mode, s.ws_clients.enter())
+        (s.tx.subscribe(), s.privacy_mode, s.ws_clients.enter(),
+            current_sensing_snapshot(&s).and_then(|update| serde_json::to_string(&update).ok()))
     };
 
     info!("WebSocket client connected (pose)");
@@ -6297,14 +6332,41 @@ async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
     });
     let _ = socket.send(Message::Text(conn_msg.to_string())).await;
 
+    let mut ping_interval = tokio::time::interval(Duration::from_secs(30));
+    ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
     loop {
         tokio::select! {
-            msg = rx.recv() => {
+            msg = async {
+                match initial_snapshot.take() {
+                    Some(snapshot) => Ok(snapshot),
+                    None => rx.recv().await,
+                }
+            } => {
                 match msg {
                     Ok(json) => {
                         // Parse the sensing update and convert to pose format
                         if let Ok(sensing) = serde_json::from_str::<SensingUpdate>(&json) {
                             if sensing.msg_type == "sensing_update" {
+                                let age_ms = chrono::Utc::now().timestamp_millis() as f64 - sensing.timestamp * 1000.0;
+                                if sensing.source.ends_with(":offline") || age_ms > LATEST_UPDATE_STALE_AFTER.as_millis() as f64 {
+                                    // Unavailable is not measured absence. Never reconstruct
+                                    // a skeleton from a deliberately expired cached snapshot.
+                                    let mut unavailable = serde_json::json!({
+                                        "type": "pose_data", "zone_id": "zone_1",
+                                        "timestamp": sensing.timestamp, "physics": null,
+                                        "payload": {
+                                            "pose": {"persons": []}, "confidence": null,
+                                            "activity": "unavailable", "pose_source": "unavailable",
+                                            "metadata": {"frame_id": format!("rust_frame_{}", sensing.tick),
+                                                "source": sensing.source, "tick": sensing.tick,
+                                                "estimated_persons": null, "evidence_state": "unavailable"}
+                                        }
+                                    });
+                                    if privacy_mode { privacy_filter::redact_value(&mut unavailable); }
+                                    if socket.send(Message::Text(unavailable.to_string())).await.is_err() { break; }
+                                    continue;
+                                }
                                 // Determine pose estimation mode for the UI indicator.
                                 // "model_inference"    — a trained RVF model is loaded.
                                 // "signal_derived"     — keypoints estimated from raw CSI features.
@@ -6412,6 +6474,9 @@ async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
                     }
                     Err(_) => break, // channel closed
                 }
+            }
+            _ = ping_interval.tick() => {
+                if socket.send(Message::Ping(vec![])).await.is_err() { break; }
             }
             msg = socket.recv() => {
                 match msg {
@@ -14334,26 +14399,19 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
 
 async fn broadcast_tick_task(state: SharedState, tick_ms: u64) {
     let mut interval = tokio::time::interval(Duration::from_millis(tick_ms));
-
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut previous_source = None;
     loop {
         interval.tick().await;
         let s = state.read().await;
-        if let Some(ref update) = s.latest_update {
-            if s.tx.receiver_count() > 0 {
-                // Re-broadcast the latest sensing_update so pose WS clients
-                // always get data even when ESP32 pauses between frames.
-                //
-                // Issue #618: overwrite `source` with `effective_source()`
-                // before each broadcast so a stale latest_update (frozen
-                // payload from a now-offline ESP32) is emitted with
-                // `source: "esp32:offline"` instead of `source: "esp32"`.
-                // The REST `/health` endpoint already does this; before
-                // this fix the WS path was the only consumer that didn't,
-                // so the UI's "LIVE — ESP32 HARDWARE Connected" banner
-                // stayed green long after the hardware went away.
-                let mut tagged = update.clone();
-                tagged.source = s.effective_source();
-                if let Ok(json) = serde_json::to_string(&tagged) {
+        let source = s.effective_source();
+        let changed = previous_source.as_ref().is_some_and(|previous| previous != &source);
+        previous_source = Some(source);
+        // Producers publish observations directly. Only announce source-state
+        // transitions here; WebSocket Ping provides keepalive without cached CSI.
+        if changed && s.tx.receiver_count() > 0 {
+            if let Some(snapshot) = current_sensing_snapshot(&s) {
+                if let Ok(json) = serde_json::to_string(&snapshot) {
                     let _ = s.tx.send(json);
                 }
             }
@@ -17856,5 +17914,151 @@ mod investigation_vitals_endpoint_tests {
         println!("INVESTIGATION: synthetic31.25Hz3-packet bursts: resets={} buffers={:?} detector_rate={}", resets, buffers, detector.sample_rate_hz());
         assert!(resets < 6);
         assert!(buffers.0 > 40 && buffers.2 > 30);
+    }
+}
+
+#[cfg(test)]
+mod cached_stream_freshness_tests {
+    use super::*;
+
+    fn fixture() -> AppStateInner {
+        let mut state = AppStateInner::minimal();
+        state.source = "esp32".into();
+        state.last_esp32_frame = Some(std::time::Instant::now());
+        state.latest_update = Some(serde_json::from_value(serde_json::json!({
+            "type":"sensing_update", "tick":9,
+            "timestamp":chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
+            "source":"esp32", "nodes":[],
+            "features":{"mean_rssi":-50.0,"variance":1.0,"motion_band_power":0.5,
+                "breathing_band_power":0.2,"dominant_freq_hz":0.25,"change_points":0,"spectral_power":1.0},
+            "classification":{"motion_level":"present_still","presence":true,"confidence":0.9},
+            "signal_field":{"grid_size":[1,1,1],"values":[0.0]},
+            "vital_signs":{"breathing_rate_bpm":14.0,"heart_rate_bpm":62.0,
+                "breathing_confidence":0.8,"heartbeat_confidence":0.7,"signal_quality":0.9},
+            "pose_keypoints":[[0.1,0.2,0.0,0.9]]
+        })).unwrap());
+        state
+    }
+
+    #[test]
+    fn cached_snapshot_retains_observation_identity_and_ages_node_metadata() {
+        let mut state = fixture();
+        let old = std::time::Instant::now() - Duration::from_secs(6);
+        state.last_esp32_frame = Some(old);
+        let mut node = NodeState::new();
+        node.last_frame_time = Some(old);
+        state.node_states.insert(7, node);
+        let previous = serde_json::to_string(state.latest_update.as_ref().unwrap()).unwrap();
+        let snapshot = current_sensing_snapshot(&state).unwrap();
+        let original = state.latest_update.as_ref().unwrap();
+        assert_eq!(snapshot.tick, original.tick);
+        assert_eq!(snapshot.timestamp, original.timestamp);
+        assert_eq!(snapshot.source, "esp32:offline");
+        assert!(snapshot.classification.presence, "history must not become a fabricated absence");
+        assert!(snapshot.vital_signs.is_none());
+        assert!(snapshot.pose_keypoints.is_none());
+        let node = &snapshot.node_features.as_ref().unwrap()[0];
+        assert!(node.stale);
+        assert!(node.last_seen_ms >= 6000);
+        assert_eq!(serde_json::to_string(original).unwrap(), previous, "snapshot must not rewrite stored observations");
+    }
+
+    #[tokio::test]
+    async fn cached_snapshots_use_each_clients_filter_and_protocol_keepalive() {
+        use futures_util::StreamExt;
+        for privacy in [false, true] {
+            let mut inner = fixture();
+            inner.privacy_mode = privacy;
+            let state = Arc::new(RwLock::new(inner));
+            let app = Router::new()
+                .route("/ws/sensing", get(ws_sensing_handler))
+                .route("/api/v1/stream/pose", get(ws_pose_handler))
+                .with_state(state);
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            for (path, kind) in [("/ws/sensing", "sensing_update"), ("/api/v1/stream/pose", "pose_data")] {
+                let (mut socket, _) = tokio_tungstenite::connect_async(format!("ws://{address}{path}")).await.unwrap();
+                let mut snapshot = None;
+                let mut ping = false;
+                for _ in 0..4 {
+                    let message = tokio::time::timeout(Duration::from_secs(1), socket.next()).await.unwrap().unwrap().unwrap();
+                    match message {
+                        tokio_tungstenite::tungstenite::Message::Ping(_) => ping = true,
+                        tokio_tungstenite::tungstenite::Message::Text(text) => {
+                            let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+                            if value["type"] == kind { snapshot = Some(text); }
+                        }
+                        _ => {}
+                    }
+                    if snapshot.is_some() && ping { break; }
+                }
+                assert!(ping, "{path} needs keepalive independent of sensor snapshots");
+                let snapshot = snapshot.expect("initial snapshot without timer or producer");
+                if privacy {
+                    assert!(!snapshot.contains("vital_signs"));
+                    assert!(!snapshot.contains("keypoints"));
+                } else if kind == "sensing_update" {
+                    assert!(snapshot.contains("heart_rate_bpm"));
+                }
+                socket.close(None).await.unwrap();
+            }
+            server.abort(); let _ = server.await;
+        }
+    }
+
+    #[tokio::test]
+    async fn offline_legacy_snapshot_abstains_instead_of_deriving_a_pose_or_absence() {
+        use futures_util::StreamExt;
+        for model_loaded in [false, true] {
+            let mut inner = fixture();
+            inner.model_loaded = model_loaded;
+            inner.last_esp32_frame = Some(std::time::Instant::now() - Duration::from_secs(6));
+            let original_timestamp = inner.latest_update.as_ref().unwrap().timestamp;
+            let app = Router::new().route("/pose", get(ws_pose_handler))
+                .with_state(Arc::new(RwLock::new(inner)));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let (mut socket, _) = tokio_tungstenite::connect_async(format!("ws://{address}/pose")).await.unwrap();
+            let value = loop {
+                let message = tokio::time::timeout(Duration::from_secs(1), socket.next()).await.unwrap().unwrap().unwrap();
+                if let tokio_tungstenite::tungstenite::Message::Text(text) = message {
+                    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+                    if value["type"] == "pose_data" { break value; }
+                }
+            };
+            assert_eq!(value["timestamp"], original_timestamp);
+            assert_eq!(value["payload"]["pose_source"], "unavailable");
+            assert_eq!(value["payload"]["activity"], "unavailable");
+            assert!(value["payload"]["confidence"].is_null());
+            assert!(value["payload"]["metadata"]["estimated_persons"].is_null());
+            assert_eq!(value["payload"]["metadata"]["source"], "esp32:offline");
+            assert_eq!(value["payload"]["pose"]["persons"], serde_json::json!([]));
+            assert!(value["physics"].is_null());
+            socket.close(None).await.unwrap();
+            server.abort(); let _ = server.await;
+        }
+    }
+
+    #[tokio::test]
+    async fn timer_emits_only_source_transitions_and_remains_quiet_between_them() {
+        let state = Arc::new(RwLock::new(fixture()));
+        let mut rx = state.read().await.tx.subscribe();
+        let task = tokio::spawn(broadcast_tick_task(state.clone(), 2));
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        assert!(matches!(rx.try_recv(), Err(tokio::sync::broadcast::error::TryRecvError::Empty)));
+        state.write().await.last_esp32_frame = Some(std::time::Instant::now() - Duration::from_secs(6));
+        let offline = tokio::time::timeout(Duration::from_secs(1), rx.recv()).await.unwrap().unwrap();
+        let offline: SensingUpdate = serde_json::from_str(&offline).unwrap();
+        assert_eq!(offline.source, "esp32:offline");
+        assert_eq!(offline.tick, 9);
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        assert!(matches!(rx.try_recv(), Err(tokio::sync::broadcast::error::TryRecvError::Empty)));
+        state.write().await.last_esp32_frame = Some(std::time::Instant::now());
+        let resumed = tokio::time::timeout(Duration::from_secs(1), rx.recv()).await.unwrap().unwrap();
+        assert_eq!(serde_json::from_str::<SensingUpdate>(&resumed).unwrap().source, "esp32");
+        task.abort();
+        let _ = task.await;
     }
 }

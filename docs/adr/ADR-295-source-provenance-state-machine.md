@@ -62,3 +62,38 @@ simulator status, sensing client source label). Broader UI adoption follows.
   simulator → never live without a verified frame; freshness expiry → `Stale`;
   watermark present on synthetic export.
 - `cargo test -p wifi-densepose-sensing-server`.
+
+## October 28 amendment: cached observations and stream keepalive
+
+A timer must not repeatedly publish the same sensing observation as transport
+keepalive. Raw, edge and synthetic producers continue to publish their new
+observations directly. The ESP32 timer now publishes a cached snapshot only on
+an effective-source transition, including the first offline transition and a
+later recovery. It preserves the observation's original tick and wall-clock
+measurement timestamp rather than making old evidence fresh.
+
+A new raw or legacy-pose subscriber receives one local initial snapshot through
+that connection's existing authorization and privacy filtering. This initial
+snapshot is not sent to the shared broadcast bus. Both transports have an
+independent protocol Ping keepalive, so quiet sensing requires no synthetic
+measurement traffic. Late subscribers can inspect the historical timestamp and
+offline source without amplifying traffic to every existing client.
+
+Cached snapshots refresh ESP32 receive-clock node age/stale metadata. Optional
+expired vital, calibrated-presence, detector, room-inference and pose-proof blocks
+are withheld; the historical classification is not rewritten as an observed
+absence. Receive-rate estimates describe their original sample history: an
+unchanging accepted CSI sequence alongside a receive rate can reflect feature-grid
+rejection, and is not relabelled as packet loss or an invented accepted rate.
+
+Validation uses the real raw/legacy handlers and an isolated actual-helper
+UDP-stop/late-subscribe/resume probe, including privacy-on behavior:
+`node scripts/verify-sensing-stream-freshness.mjs /path/to/sensing-server`.
+The probe uses synthetic loopback data and private temporary storage; it does
+not establish real-hardware sensing accuracy or room-selective occupancy.
+
+The legacy pose conversion abstains before any model/signal reconstruction or
+physics assessment for an offline or expired cached observation. It retains the
+original timestamp/source but emits `pose_source`/`activity: unavailable`, null
+confidence and null estimated-person count, with no produced person poses. The
+empty pose array means no available pose candidates, not a measured empty room.
