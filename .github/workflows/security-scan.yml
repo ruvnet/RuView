@@ -23,7 +23,7 @@ jobs:
       contents: read
     steps:
     - name: Checkout code
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Install cargo-audit
       run: cargo install cargo-audit --locked --version 0.22.2
@@ -60,7 +60,7 @@ jobs:
     steps:
     - name: Checkout code
       continue-on-error: true
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         fetch-depth: 0
 
@@ -137,7 +137,7 @@ jobs:
     steps:
     - name: Checkout code
       continue-on-error: true
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Set up Python
       continue-on-error: true
@@ -203,7 +203,7 @@ jobs:
     steps:
     - name: Checkout code
       continue-on-error: true
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         submodules: recursive
 
@@ -257,7 +257,7 @@ jobs:
     steps:
     - name: Checkout code
       continue-on-error: true
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Run KICS IaC scan
       continue-on-error: true
@@ -293,7 +293,7 @@ jobs:
     steps:
     - name: Checkout code
       continue-on-error: true
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         fetch-depth: 0
 
@@ -328,7 +328,7 @@ jobs:
     steps:
     - name: Checkout code
       continue-on-error: true
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Set up Python
       continue-on-error: true
@@ -365,7 +365,7 @@ jobs:
     steps:
     - name: Checkout code
       continue-on-error: true
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Check security policy files
       continue-on-error: true

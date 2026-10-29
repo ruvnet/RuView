@@ -44,7 +44,7 @@ jobs:
       image_tag: ${{ steps.determine-tag.outputs.tag }}
     steps:
     - name: Checkout code
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         ref: ${{ github.event.workflow_run.head_sha || github.sha }}
         submodules: recursive
@@ -96,7 +96,7 @@ jobs:
       url: https://staging.wifi-densepose.com
     steps:
     - name: Checkout code
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         submodules: recursive
 
@@ -147,7 +147,7 @@ jobs:
       url: https://wifi-densepose.com
     steps:
     - name: Checkout code
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         submodules: recursive
 
