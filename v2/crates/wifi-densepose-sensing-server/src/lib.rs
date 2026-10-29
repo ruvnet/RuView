@@ -29,6 +29,7 @@ pub mod mat_surface;
 pub mod model_format;
 pub mod mqtt;
 pub mod path_safety;
+pub mod parent_lifetime;
 /// ADR-323: fail-closed pose physics integration and raw/refined view selection.
 pub mod pose_physics;
 /// #2094: server-wide `--privacy-mode` filter for REST, WebSocket and recordings.
