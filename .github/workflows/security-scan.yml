@@ -29,9 +29,16 @@ jobs:
       run: cargo install cargo-audit --locked --version 0.22.2
 
     - name: Audit the checked-in Rust lockfile
+      # cargo-audit resolves .cargo/audit.toml relative to the CURRENT
+      # WORKING DIRECTORY, not relative to the --file lockfile, and it has no
+      # flag to point at a config path. Auditing from the repository root
+      # therefore ran with cargo-audit's defaults and applied none of the
+      # reviewed ignores in v2/.cargo/audit.toml. Run inside the v2 workspace
+      # so that policy file is actually loaded.
+      working-directory: v2
       run: |
         set -o pipefail
-        cargo audit --file v2/Cargo.lock --json | tee v2/cargo-audit.json
+        cargo audit --file Cargo.lock --json | tee cargo-audit.json
 
     - name: Upload Rust advisory report
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

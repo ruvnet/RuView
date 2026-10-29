@@ -16,8 +16,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use jsonwebtoken::{encode, EncodingKey, Header};
-use p256::ecdsa::SigningKey;
-use p256::pkcs8::{EncodePrivateKey, LineEnding};
+use ring::{
+    rand::SystemRandom,
+    signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_FIXED_SIGNING},
+};
 use ruview_auth::{
     jwks::{JwksError, JwksFetcher},
     scope, verify_access_token, verify_account_identity, JwksCache, VerifierConfig, VerifyError,
@@ -27,25 +29,27 @@ use serde_json::json;
 const TEST_KID: &str = "test-key-1";
 const TEST_ISSUER: &str = "https://auth.test.local";
 
-/// A generated P-256 keypair: the PKCS#8 PEM to sign with, and the JWK
+/// A generated P-256 keypair: the PKCS#8 DER to sign with, and the JWK
 /// coordinates to serve in the stub JWKS.
 struct TestKey {
-    pkcs8_pem: String,
+    pkcs8_der: Vec<u8>,
     x: String,
     y: String,
 }
 
 fn generate_key() -> TestKey {
-    let signing = SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
-    let pem = signing
-        .to_pkcs8_pem(LineEnding::LF)
-        .expect("PKCS#8 encode")
-        .to_string();
-    let point = signing.verifying_key().to_encoded_point(false);
+    let rng = SystemRandom::new();
+    let der = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng)
+        .expect("P-256 key generation");
+    let signing = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, der.as_ref(), &rng)
+        .expect("generated key parses");
+    let point = signing.public_key().as_ref();
+    assert_eq!(point.len(), 65);
+    assert_eq!(point[0], 4); // Uncompressed SEC1 P-256 public key.
     TestKey {
-        pkcs8_pem: pem,
-        x: URL_SAFE_NO_PAD.encode(point.x().expect("P-256 x")),
-        y: URL_SAFE_NO_PAD.encode(point.y().expect("P-256 y")),
+        pkcs8_der: der.as_ref().to_vec(),
+        x: URL_SAFE_NO_PAD.encode(&point[1..33]),
+        y: URL_SAFE_NO_PAD.encode(&point[33..65]),
     }
 }
 
@@ -125,7 +129,7 @@ fn sign(claims: &serde_json::Value) -> String {
 fn sign_with(claims: &serde_json::Value, key: &TestKey) -> String {
     let mut header = Header::new(jsonwebtoken::Algorithm::ES256);
     header.kid = Some(TEST_KID.to_string());
-    let enc = EncodingKey::from_ec_pem(key.pkcs8_pem.as_bytes()).expect("generated key parses");
+    let enc = EncodingKey::from_ec_der(&key.pkcs8_der);
     encode(&header, claims, &enc).expect("signs")
 }
 
@@ -266,7 +270,7 @@ fn a_tampered_payload_invalidates_the_signature() {
 fn an_unknown_kid_is_rejected() {
     let mut header = Header::new(jsonwebtoken::Algorithm::ES256);
     header.kid = Some("a-kid-we-have-never-seen".to_string());
-    let key = EncodingKey::from_ec_pem(primary_key().pkcs8_pem.as_bytes()).unwrap();
+    let key = EncodingKey::from_ec_der(&primary_key().pkcs8_der);
     let token = encode(&header, &valid_claims(), &key).unwrap();
 
     assert!(matches!(

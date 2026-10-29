@@ -166,7 +166,7 @@ proptest = { version = "1.5", default-features = false, features = ["std"] }
 # end to end (router → middleware → verifier), not just mocked at the seam.
 # Keys are generated at test runtime; none are committed.
 jsonwebtoken = "9"
-p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+ring = "0.17"
 base64 = "0.21"
 
 [[bench]]
