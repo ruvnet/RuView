@@ -1,25 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="580" height="276" viewBox="0 0 580 276" role="img" aria-labelledby="title desc"><title id="title">Pose research</title><desc id="desc">Train and compare body keypoints. Live accuracy differs from benchmarks. Conceptual animation; follow the linked source for capability limits.</desc><defs><linearGradient id="wash" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#102749"/><stop offset=".55" stop-color="#071429"/><stop offset="1" stop-color="#03091a"/></linearGradient><linearGradient id="accent"><stop stop-color="#9ee7ff"/><stop offset="1" stop-color="#348bff"/></linearGradient><radialGradient id="halo"><stop stop-color="#348bff" stop-opacity=".17"/><stop offset="1" stop-color="#348bff" stop-opacity="0"/></radialGradient></defs><style>
 text{font-family:"Avenir Next","Segoe UI Variable Display","Segoe UI",Helvetica,Arial,sans-serif}
 .mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;letter-spacing:1.6px}
-
 .flow{stroke-dasharray:5 12;animation:flow 5s linear infinite}
-
-
-
-
 .spark{animation:spark 3.5s ease-in-out infinite}
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -40,8 +23,5 @@ text{font-family:"Avenir Next","Segoe UI Variable Display","Segoe UI",Helvetica,
 
 @keyframes spark{50%{opacity:.25}}
 @keyframes flow{to{stroke-dashoffset:-136}}
-
-
-
 @media(prefers-reduced-motion:reduce){*{animation:none!important}}
 </style><rect x=".5" y=".5" width="579" height="275" rx="18" fill="url(#wash)" stroke="#2d4e77"/><text x="30" y="39" font-size="11" fill="#78cfff" text-anchor="start" font-weight="500" class="mono">RUVIEW / 03</text><text x="30" y="89" font-size="25" fill="#f3f7ff" text-anchor="start" font-weight="650" letter-spacing="-0.6" >Pose research</text><text x="30" y="126" font-size="14" fill="#b0c2db" text-anchor="start" font-weight="500" >Train and compare body keypoints.</text><text x="30" y="151" font-size="14" fill="#b0c2db" text-anchor="start" font-weight="500" >Live accuracy differs from benchmarks.</text><circle cx="465" cy="170" r="110" fill="url(#halo)"/><g transform="translate(480 144) scale(1.12)"><ellipse cy="53" rx="37" ry="7" fill="#020816" class="gaitShadow"/><g class="humanBody"><defs><linearGradient id="humanSurface" x1="0" y1="0" x2="1" y2=".3"><stop stop-color="#153d48"/><stop offset=".42" stop-color="#338469"/><stop offset=".7" stop-color="#83c766"/><stop offset="1" stop-color="#163c4a"/></linearGradient><linearGradient id="humanRear"><stop stop-color="#0f2d40"/><stop offset="1" stop-color="#397a68"/></linearGradient></defs><g class="humanTurn"><g stroke="#88d783" stroke-width=".65" stroke-linejoin="round"><g class="armFar"><path d="M-9 -25C-15 -25 -18 -19 -21 -13L-29 -5C-32 -3 -33 1 -30 3L-25 2L-14 -7C-9 -12 -6 -19 -6 -23Z" fill="url(#humanRear)"/></g><g class="legFar"><path d="M-6 5C-13 10 -15 18 -17 26L-25 43L-29 47C-30 49 -28 51 -24 51L-17 50L-16 46L-8 30C-4 23 2 15 3 10Z" fill="url(#humanRear)"/><circle cx="-15" cy="26" r="1.8" fill="#ffb45e"/></g><g class="legNear"><path d="M3 5C10 7 14 17 19 23C24 28 23 35 24 41L29 45C32 47 32 49 28 50L20 49C17 48 17 46 17 42L14 32C8 28 2 23 -3 16L-4 10Z" fill="url(#humanSurface)"/><circle cx="19" cy="28" r="1.8" fill="#ffb45e"/></g><g class="armNear"><path d="M7 -26C14 -25 17 -20 20 -13L24 -17L29 -24C30 -27 33 -29 35 -26L35 -22L30 -16L24 -8C22 -5 18 -5 16 -8L8 -17Z" fill="url(#humanSurface)"/></g><path d="M-4 -32L4 -33L6 -28C11 -27 14 -24 13 -19L9 -5L10 7C10 13 2 15 -5 12L-10 7L-8 -5L-12 -20C-13 -25 -8 -28 -5 -28Z" fill="url(#humanSurface)"/><path d="M-6 -42C-6 -48 2 -51 7 -47C10 -45 10 -41 9 -39L11 -36L8 -35L7 -31L3 -29L-3 -32L-5 -37Z" fill="url(#humanSurface)"/></g><path d="M-9 -23Q-2 -18 10 -23M-7 -15Q0 -11 9 -16M-6 -8Q1 -5 8 -9M-7 1Q1 5 9 1M0 -26L2 9M-4 -40Q0 -42 7 -40M2 -32L6 -34" fill="none" stroke="#b8f36c" stroke-width="0.55" stroke-linecap="round" stroke-linejoin="round" opacity=".65"/><path d="M-5 -45Q1 -49 6 -46M-10 -22L-6 -8" fill="none" stroke="#78cfff" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" opacity=".8"/><path d="M-8 -25Q-2 -21 1 -10L3 9Q-5 8 -6 3L-5 -8Z" fill="#a7ebff" class="humanLight" opacity=".2"/><circle cx="-9" cy="-24" r="3.5" stroke="#ffb45e" fill="none" stroke-opacity=".25"/><circle cx="-9" cy="-24" r="1.5" stroke="#ffb45e"  fill="#ffb45e" class="spark"/><circle cx="10" cy="-23" r="3.5" stroke="#ffb45e" fill="none" stroke-opacity=".25"/><circle cx="10" cy="-23" r="1.5" stroke="#ffb45e"  fill="#ffb45e" class="spark"/><circle cx="1" cy="-12" r="3.5" stroke="#ffb45e" fill="none" stroke-opacity=".25"/><circle cx="1" cy="-12" r="1.5" stroke="#ffb45e"  fill="#ffb45e" class="spark"/><circle cx="2" cy="9" r="3.5" stroke="#ffb45e" fill="none" stroke-opacity=".25"/><circle cx="2" cy="9" r="1.5" stroke="#ffb45e"  fill="#ffb45e" class="spark"/></g><path d="M-42 -42V-53H-30M30 -53H42V-42M42 45V55H30M-30 55H-42V45" fill="none" stroke="#438fff" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" /></g></g><path d="M30 204H550" fill="none" stroke="#2d4e77" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" /><path d="M30 204H550" fill="none" stroke="#78cfff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="flow" opacity=".5"/><text x="30" y="245" font-size="12" fill="#78cfff" text-anchor="start" font-weight="500" class="mono">READ THE EVIDENCE</text><path d="M510 239H540M532 231L540 239L532 247" fill="none" stroke="#78cfff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /><path d="M24 1H556" stroke="url(#accent)" opacity=".55"/><path d="M24 275H556" stroke="#438fff" opacity=".15"/></svg>

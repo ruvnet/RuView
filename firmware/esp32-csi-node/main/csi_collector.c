@@ -483,9 +483,9 @@ static void wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type)
  * are sparse beacons (often non-OFDM DSSS), so wifi_csi_callback can starve to
  * yield=0pps -> DEGRADED -> motion/presence=0 (#521, #954).
  *
- * This guarantees a ~50 Hz OFDM unicast floor by pinging the STA's own gateway:
- * the router's ICMP echo replies are OFDM frames destined to this station, which
- * drive the CSI engine regardless of promiscuous filter state or ambient traffic.
+ * Ping the STA's gateway to request unicast traffic. Some APs send ICMP replies
+ * at 802.11b rates, which produce no CSI (#2287); this is not a guaranteed
+ * OFDM floor. Such APs need a LAN host sending unicast UDP to the node.
  * It is ADDITIVE — promiscuous capture (#396/#893) is left fully intact so
  * multistatic/multi-node sensing still hears other stations' frames. Mirrors
  * Espressif's esp-csi csi_recv_router reference.
@@ -517,6 +517,7 @@ static void csi_start_self_ping(void)
     cfg.target_addr     = target;
     cfg.count           = ESP_PING_COUNT_INFINITE;
     cfg.interval_ms     = CSI_SELF_PING_INTERVAL_MS;
+    cfg.timeout_ms      = CSI_SELF_PING_INTERVAL_MS;
     cfg.data_size       = 1;
     cfg.task_stack_size = 4096;
 
@@ -529,7 +530,7 @@ static void csi_start_self_ping(void)
 
     if (esp_ping_new_session(&cfg, &cbs, &s_self_ping) == ESP_OK && s_self_ping != NULL) {
         esp_ping_start(s_self_ping);
-        ESP_LOGI(TAG, "self-ping started -> %s @%dHz (CSI OFDM source, fix #521/#954)",
+        ESP_LOGI(TAG, "self-ping started -> %s @%dHz (CSI yield depends on AP reply rate, #2287)",
                  gw_str, CONFIG_CSI_SELF_PING_HZ);
     } else {
         ESP_LOGW(TAG, "self-ping: esp_ping_new_session failed");

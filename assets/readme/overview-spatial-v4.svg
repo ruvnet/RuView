@@ -13,14 +13,11 @@ text{font-family:"Avenir Next","Segoe UI Variable Display","Segoe UI",Helvetica,
 @keyframes scan{0%,100%{transform:translateY(0)}50%{transform:translateY(-76px)}}
 
 .sweep{animation:sweep 5s ease-in-out infinite;transform-origin:0 0}
-
-
-
 .cursor{animation:cursor 5s ease-in-out infinite}
 @keyframes sweep{0%,100%{transform:rotate(-20deg)}50%{transform:rotate(155deg)}}
-
-
 @keyframes cursor{0%,100%{transform:translateX(-35px);opacity:.3}50%{transform:translateX(35px);opacity:1}}
+
+
 
 @keyframes spark{50%{opacity:.25}}
 @keyframes flow{to{stroke-dashoffset:-136}}

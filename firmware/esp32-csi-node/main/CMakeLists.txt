@@ -1,5 +1,5 @@
 set(SRCS
-    "main.c" "csi_collector.c" "node_log.c"
+    "main.c" "csi_collector.c" "config_api.c" "config_rules.c" "node_log.c"
     "thermal.c" "stream_sender.c" "nvs_config.c"
     "serial_onboarding.c" "serial_onboarding_protocol.c"
     "edge_processing.c" "ota_update.c" "ota_health.c" "power_mgmt.c"
@@ -59,6 +59,18 @@ endif()
 # component. Keep the 5.4 lane working while declaring the v6 dependency.
 if(IDF_VERSION_MAJOR GREATER_EQUAL 6)
     list(APPEND REQUIRES esp_driver_tsens)
+    if(IDF_TARGET STREQUAL "esp32c6" OR IDF_TARGET STREQUAL "esp32s3")
+        list(APPEND REQUIRES esp_driver_usb_serial_jtag)
+    endif()
+endif()
+
+# cJSON (config_api.c) ships as the bundled `json` component up to ESP-IDF 5.x
+# and was moved OUT to the component manager in v6, where requiring `json`
+# fails outright: "Failed to resolve component 'json' required by component
+# 'main': unknown name." Declaring it unconditionally broke the v6.0.2 lane
+# while the 5.4 lane stayed green -- one toolchain is not the build matrix.
+if(IDF_VERSION_MAJOR LESS 6)
+    list(APPEND REQUIRES json)
 endif()
 
 # ADR-061: Mock CSI generator for QEMU testing + ADR-081 mock radio binding
