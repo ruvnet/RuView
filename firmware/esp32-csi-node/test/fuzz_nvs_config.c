@@ -28,7 +28,7 @@
  */
 static uint8_t validate_hop_count(uint8_t val)
 {
-    if (val >= 1 && val <= NVS_CFG_HOP_MAX) return val;
+    if (val >= CFG_LIMIT_HOP_COUNT_MIN && val <= CFG_LIMIT_HOP_COUNT_MAX) return val;
     return 0;
 }
 
@@ -61,11 +61,14 @@ static uint8_t validate_edge_tier(uint8_t val)
 }
 
 /**
- * Validate vital_window (32-256).
+ * Validate vital_window.
+ *
+ * The bounds come from config_limits.h, the same header the loader and the
+ * configuration API use, so the fuzzer cannot drift away from the firmware.
  */
 static uint16_t validate_vital_window(uint16_t val)
 {
-    if (val >= 32 && val <= 256) return val;
+    if (val >= CFG_LIMIT_VITAL_WINDOW_MIN && val <= CFG_LIMIT_VITAL_WINDOW_MAX) return val;
     return 0;
 }
 
@@ -83,7 +86,7 @@ static uint16_t validate_vital_interval(uint16_t val)
  */
 static uint8_t validate_top_k(uint8_t val)
 {
-    if (val >= 1 && val <= 32) return val;
+    if (val >= CFG_LIMIT_TOP_K_MIN && val <= CFG_LIMIT_TOP_K_MAX) return val;
     return 0;
 }
 
