@@ -55,9 +55,18 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use ruview_auth::{scope, verify_access_token, JwksCache, UreqFetcher, VerifierConfig};
+use sha2::{Digest, Sha256};
 
 /// Environment variable that gates the middleware. Unset / empty ⇒ auth off.
 pub const API_TOKEN_ENV: &str = "RUVIEW_API_TOKEN";
+pub const OWNER_ACCOUNT_SCOPE_ENV: &str = "RUVIEW_OWNER_ACCOUNT_SCOPE";
+
+fn account_scope_key(identity: &ruview_auth::AccountIdentity) -> String {
+    let encoded = serde_json::to_vec(&["ruview.account-data.v1", identity.issuer.as_str(),
+        identity.subject.as_str(), identity.org_id.as_str(), identity.workspace_id.as_str()])
+        .expect("string array serializes");
+    format!("{:x}", Sha256::digest(encoded))
+}
 
 /// Issuer origin of the Cognitum authorization server. Setting this enables
 /// OAuth verification; unset ⇒ OAuth off and behaviour is unchanged.
@@ -239,6 +248,8 @@ impl std::fmt::Debug for OAuthState {
 /// [`AuthState::from_env`]'s contract about failing closed.
 #[derive(Debug, thiserror::Error)]
 pub enum OAuthConfigError {
+    #[error("owned account scope requires a bounded namespace, owner credential, fixed Cognitum issuer/client and authenticated streams")]
+    InvalidOwnerContext,
     #[error("{OAUTH_ISSUER_ENV} is set but empty")]
     EmptyIssuer,
     #[error("JWKS at {url} is unreachable, so no token could ever be verified: {source}")]
@@ -258,6 +269,7 @@ pub enum OAuthConfigError {
 /// should not be the one that does not.
 #[derive(Clone, Default)]
 pub struct AuthState {
+    owner_account_scope: Option<String>,
     /// The expected static bearer token, if any.
     token: Option<Arc<String>>,
     /// Cognitum OAuth verification, if enabled.
@@ -288,6 +300,7 @@ impl AuthState {
             AuthState::default()
         } else {
             AuthState {
+                owner_account_scope: None,
                 token: Some(Arc::new(s)),
                 oauth: None,
                 tickets: crate::ws_ticket::TicketStore::new(),
@@ -362,7 +375,16 @@ impl AuthState {
                 WS_PATHS.join(", ")
             );
         }
+        let owner_account_scope = match std::env::var(OWNER_ACCOUNT_SCOPE_ENV) {
+            Err(std::env::VarError::NotPresent) => None,
+            Ok(value) if value.len() == 64 && value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                && token.is_some() && !legacy_ws
+                && std::env::var(OAUTH_JWKS_URL_ENV).ok().as_deref().is_none_or(|url| url == "https://auth.cognitum.one/.well-known/jwks.json")
+                && oauth.as_ref().is_some_and(|o| o.issuer == COGNITUM_ISSUER && o.allowed_client_ids == [DEFAULT_CLIENT_ID]) => Some(value),
+            _ => return Err(OAuthConfigError::InvalidOwnerContext),
+        };
         Ok(AuthState {
+            owner_account_scope,
             token,
             oauth,
             tickets: crate::ws_ticket::TicketStore::new(),
@@ -394,6 +416,7 @@ impl AuthState {
         &self,
         token: &str,
     ) -> Result<ruview_auth::Principal, ruview_auth::VerifyError> {
+        self.verify_account_ownership(token).map_err(|_| ruview_auth::VerifyError::InvalidOwnership)?;
         let oauth = self
             .oauth
             .as_ref()
@@ -407,6 +430,22 @@ impl AuthState {
                 allowed_client_ids: oauth.allowed_client_ids.clone(),
             },
         )
+    }
+
+    pub fn owner_account_scope(&self) -> Option<&str> { self.owner_account_scope.as_deref() }
+
+    /// The companion proof alone is not Cognitum account ownership. Require
+    /// the same verified user/tenant/workspace for every owned TLS request.
+    /// Unscoped manually configured servers retain their existing contract.
+    pub fn verify_account_ownership(&self, token: &str) -> Result<Option<u64>, StatusCode> {
+        let Some(expected) = self.owner_account_scope.as_deref() else { return Ok(None); };
+        let oauth = self.oauth.as_ref().ok_or(StatusCode::UNAUTHORIZED)?;
+        let identity = ruview_auth::verify_account_identity(token, &oauth.jwks, &VerifierConfig {
+            issuer: oauth.issuer.clone(), required_scope: scope::SENSING_READ.into(),
+            allowed_client_ids: vec![DEFAULT_CLIENT_ID.into()],
+        }).map_err(|_| StatusCode::UNAUTHORIZED)?;
+        if !ct_eq(expected.as_bytes(), account_scope_key(&identity).as_bytes()) { return Err(StatusCode::FORBIDDEN); }
+        Ok(Some(identity.expires_at as u64))
     }
 
     /// Whether the legacy unauthenticated-WebSocket escape hatch is active.
@@ -612,9 +651,11 @@ pub async fn require_bearer(
         // as "the same mistake this codebase had to fix in jwks.rs". The hot
         // verification path had not been given the same treatment.
         let token = supplied.to_string();
+        let owner_auth = auth.clone();
         let oauth = Arc::clone(oauth);
         let required_owned = required.to_string();
         let verified = tokio::task::spawn_blocking(move || {
+            owner_auth.verify_account_ownership(&token).map_err(|_| ruview_auth::VerifyError::InvalidOwnership)?;
             let config = VerifierConfig {
                 issuer: oauth.issuer.clone(),
                 required_scope: required_owned,
@@ -670,6 +711,9 @@ pub async fn require_bearer(
             .and_then(|v| v.to_str().ok())
         {
             if let Some(session) = crate::browser_session::from_cookie_header(cookie_header) {
+                if !session_matches_owner(&auth, &session) {
+                    return unauthorized(&auth);
+                }
                 let required = if is_ws_path(&path) {
                     scope::SENSING_READ
                 } else {
@@ -718,6 +762,25 @@ pub async fn require_bearer(
     unauthorized(&auth)
 }
 
+fn session_matches_owner(auth: &AuthState, session: &crate::browser_session::BrowserSession) -> bool {
+    auth.owner_account_scope().is_none() || auth.owner_account_scope() == session.owner_account_scope.as_deref()
+}
+
+/// The public browser status must agree with the protected cookie boundary.
+/// A legacy cookie may still verify against a migrated signing key without
+/// belonging to this account-owned helper.
+pub fn browser_status(auth: &AuthState, cookie: Option<&str>) -> serde_json::Value {
+    let session = cookie.and_then(crate::browser_session::from_cookie_header)
+        .filter(|session| session_matches_owner(auth, session));
+    serde_json::json!({
+        "auth_required": auth.is_enabled(), "oauth_enabled": auth.oauth_enabled(),
+        "browser_signin": auth.oauth_enabled() && crate::browser_session::is_configured(),
+        "signed_in": session.is_some(),
+        "account": session.as_ref().map(|value| value.account_id.clone()),
+        "scope": session.as_ref().map(|value| value.scope.clone()),
+    })
+}
+
 /// The no-bearer path: try a browser session cookie, else 401.
 async fn session_or_unauthorized(auth: &AuthState, request: Request, next: Next) -> Response {
     let path = request.uri().path().to_string();
@@ -728,6 +791,7 @@ async fn session_or_unauthorized(auth: &AuthState, request: Request, next: Next)
             .and_then(|v| v.to_str().ok())
         {
             if let Some(session) = crate::browser_session::from_cookie_header(h) {
+                if !session_matches_owner(auth, &session) { return unauthorized(auth); }
                 let required = if is_ws_path(&path) {
                     scope::SENSING_READ
                 } else {
@@ -1293,6 +1357,53 @@ mod oauth_tests {
         )
     }
 
+    #[tokio::test]
+    async fn companion_owner_http_guard_matches_the_native_namespace_without_a_billing_id() {
+        let mut auth = oauth_only();
+        Arc::get_mut(auth.oauth.as_mut().unwrap()).unwrap().issuer = "https://auth.cognitum.one".into();
+        auth.token = Some(Arc::new("synthetic-local-owner-capability".into()));
+        // Same fixed user/tenant/workspace vector as the JS and Swift checks.
+        auth.owner_account_scope = Some("40b085eb7fdbb89941aa63cd909813c2b9a718e1b5b2b052f17a600d7bb372b4".into());
+        let now = chrono::Utc::now().timestamp();
+        let make_token = |subject: &str, workspace: &str| {
+            let claims = serde_json::json!({"typ":"access", "iss":"https://auth.cognitum.one", "aud":"ruview", "client_id":"ruview",
+                "sub":subject, "org_id":"20000000-0000-4000-8000-000000000001", "workspace_id":workspace,
+                "scope":"sensing:read spaces:read", "iat":now, "exp":now+300, "setup":false, "workload":false});
+            let mut header = Header::new(jsonwebtoken::Algorithm::ES256); header.kid = Some(KID.into());
+            encode(&header, &claims, &EncodingKey::from_ec_der(&key().der)).unwrap()
+        };
+        let a = make_token("10000000-0000-4000-8000-000000000001", "30000000-0000-4000-8000-000000000001");
+        let b = make_token("10000000-0000-4000-8000-000000000002", "30000000-0000-4000-8000-000000000001");
+        let workspace = make_token("10000000-0000-4000-8000-000000000001", "30000000-0000-4000-8000-000000000002");
+        for (credential, expected) in [(None, StatusCode::UNAUTHORIZED), (Some(b), StatusCode::FORBIDDEN),
+            (Some(workspace), StatusCode::FORBIDDEN), (Some(a.clone()), StatusCode::OK), (Some(format!("{a}x")), StatusCode::UNAUTHORIZED)] {
+            let router = Router::new().route("/companion/v1/enroll", post(|| async { "accepted" }))
+                .layer(axum::middleware::from_fn_with_state(auth.clone(), crate::companion::require_account_ownership));
+            let mut request = Request::builder().method("POST").uri("/companion/v1/enroll");
+            if let Some(value) = credential { request = request.header("X-RuView-Account-Authorization", value); }
+            assert_eq!(router.oneshot(request.body(Body::empty()).unwrap()).await.unwrap().status(), expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn owned_helper_cookie_path_rejects_legacy_and_other_owner_but_accepts_its_owner() {
+        let owner = "a".repeat(64);
+        for candidate in [None, Some("b".repeat(64)), Some(owner.clone())] {
+            let mut auth = oauth_only(); auth.owner_account_scope = Some(owner.clone());
+            let mut claims = serde_json::json!({"subject":"synthetic-user","account_id":"synthetic-billing",
+                "scope":scope::SENSING_READ,"exp":chrono::Utc::now().timestamp()+300});
+            if let Some(key) = &candidate { claims["owner_account_scope"] = serde_json::json!(key); }
+            let raw = crate::browser_session::test_sign_for_tests(&serde_json::to_vec(&claims).unwrap());
+            let cookie = format!("ruview_session={raw}");
+            let status = browser_status(&auth, Some(&cookie));
+            let actual = call_with_session(auth, "GET", "/api/v1/models", &cookie).await;
+            let expected = if candidate.as_deref() == Some(owner.as_str()) { StatusCode::OK } else { StatusCode::UNAUTHORIZED };
+            assert_eq!(actual, expected, "cookie ownership mismatch on normal no-bearer request");
+            assert_eq!(status["signed_in"], expected == StatusCode::OK, "public status disagrees with cookie authority");
+            assert_eq!(status["account"].is_null(), expected != StatusCode::OK);
+        }
+    }
+
     // ── browser session cookie as a credential ────────────────────────
     //
     // The session cookie authorizes /api/v1/* and WebSocket upgrades, and had
@@ -1545,6 +1656,7 @@ mod oauth_tests {
 
     fn oauth_only() -> AuthState {
         AuthState {
+            owner_account_scope: None,
             token: None,
             oauth: Some(oauth_state()),
             tickets: crate::ws_ticket::TicketStore::new(),
@@ -1682,6 +1794,7 @@ mod oauth_tests {
 
     fn both() -> AuthState {
         AuthState {
+            owner_account_scope: None,
             token: Some(Arc::new("legacy-secret".to_string())),
             oauth: Some(oauth_state()),
             tickets: crate::ws_ticket::TicketStore::new(),
@@ -1810,6 +1923,7 @@ mod ws_gate_tests {
 
     fn static_auth() -> AuthState {
         AuthState {
+            owner_account_scope: None,
             token: Some(Arc::new("secret".into())),
             oauth: None,
             tickets: crate::ws_ticket::TicketStore::new(),

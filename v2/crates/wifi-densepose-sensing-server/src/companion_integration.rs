@@ -69,11 +69,12 @@ impl Integration {
             wifi_densepose_sensing_server::discovery::discovery_hostname(&identity.installation_id);
         let authority = companion_authority(&identity, port);
         let origin = format!("https://{authority}");
-        let service = Companion::load(
+        let service = Companion::load_for_account(
             &dir,
             identity.installation_id.clone(),
             identity.cert_sha256,
             origin,
+            auth.owner_account_scope().map(str::to_owned),
         )?;
         state.write().await.installation_id = Some(identity.installation_id.clone());
         let ip: std::net::IpAddr = args.bind_addr.parse().map_err(std::io::Error::other)?;
@@ -141,6 +142,7 @@ impl Integration {
                 require_companion,
             ))
             .merge(companion::public_router(self.service))
+            .layer(axum::middleware::from_fn_with_state(self.auth, companion::require_account_ownership))
             .layer(axum::extract::DefaultBodyLimit::max(64 * 1024));
         tokio::spawn(async move {
             let _advertiser = self.advertiser;
@@ -276,10 +278,13 @@ async fn require_companion(
         .get("x-ruview-installation-id")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    let grant = match service.authorize(installation, bearer(&request).unwrap_or(""), calibration) {
+    let mut grant = match service.authorize(installation, bearer(&request).unwrap_or(""), calibration) {
         Ok(grant) => grant,
         Err(status) => return status.into_response(),
     };
+    if let Some(companion::AccountOwnershipExpiry(expiry)) = request.extensions().get::<companion::AccountOwnershipExpiry>() {
+        grant.expires_at = grant.expires_at.min(*expiry);
+    }
     request.extensions_mut().insert(grant);
     next.run(request).await
 }
