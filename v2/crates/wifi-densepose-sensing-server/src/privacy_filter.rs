@@ -40,6 +40,7 @@ pub const BIOMETRIC_KEYS: &[&str] = &[
     // confidences; the leaf keys cover edge vitals, fused vitals and the
     // mmWave block.
     "vital_signs",
+    "vital_evidence",
     "breathing_rate_bpm",
     "heart_rate_bpm",
     "heartrate_bpm",

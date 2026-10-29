@@ -127,6 +127,45 @@ occupied sequences. Empty data is never relabeled as human training.
    performs the bounded one time held out refinement. It requires administrator
    authority when transport authentication is enabled.
 
+## Publication and diagnostics clarification, 2026-10-27
+
+The REST vital endpoint and both raw-CSI/edge sensing publishers share the same
+room aggregate and bound-model publication gates. REST must not substitute the
+single-link model's count for the room aggregate: a fresh second node can still
+make occupant attribution ambiguous. A cached candidate is bound to its producing
+node, packet tick/time and full immutable calibration receipt identity. A REST
+read may withdraw a previously published candidate as gates expire or change;
+it cannot promote a sample withheld at its original publication decision. A new
+qualifying packet is required. Candidate freshness is bounded independently of
+other nodes' arrival clocks.
+
+Raw CSI estimates carry the existing exact `ruview.vital-evidence.v1` envelope
+with capability `esp32_csi_spectral_vitals_v1`. `source_node_ids` names only the
+radio producing the estimate, not the active-node inventory or occupancy-model
+source. The legacy five-field mirror may remain for dashboard compatibility,
+but must match the exact envelope. Firmware edge estimates use the distinct
+`esp32_firmware_edge_vitals_v1` capability; this does not qualify them for a
+consumer that only accepts raw CSI spectral estimates. Calibrated presence tags
+the radio whose history the model actually scored, rather than the radio whose
+packet happened to trigger publication. Complementary vital/occupancy sensors
+are not silently claimed as joint vital inference.
+
+`GET /api/v1/vital-signs` retains its existing managed owner/account/paired-read
+authorization. Its bounded `ruview.vital-publication-diagnostics.v1` object
+separates the last packet's publication decision from current reevaluation for
+each node. It reports candidate kind/tick/time/age, occupancy source, gate
+outcomes, actual per-node detector buffers, reset count, and distinct detector
+and observed sample clocks. It contains no raw CSI, suppressed BPM, credentials,
+room names or user identity. It is not sensing authority or clinical evidence.
+No such diagnostic is added to public health. Privacy mode withholds node/buffer
+details and both vital envelopes. Diagnostic snapshots explain only their own
+observation time; they do not extend rate/model freshness.
+
+The single-link calibration algorithm and negative-only restart prior are
+unchanged by this clarification. Multiple radios in a room receipt do not imply
+separate trained baselines. A per-source model bank and fused presence require a
+separately reviewed capture, coverage, persistence and holdout contract.
+
 ## Measured installation evidence
 
 One physical empty home run on source Node 5 collected 1,762 accepted frames
