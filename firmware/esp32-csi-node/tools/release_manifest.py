@@ -6,11 +6,14 @@ SHA-256 digests and their flash offsets. Offsets are read from the
 `flasher_args.json` that ESP-IDF wrote for that exact build and that the
 bundle carries; they are never hand-written here.
 
-Signing happens OUTSIDE GitHub, mirroring ruflo's sign-helpers.mjs: CI
-publishes an unsigned prerelease and only verifies; a maintainer runs
-`sign-release` with a key from GCP Secret Manager (or a local file), which
-verifies the published release, signs, uploads the signature and, for the
-stable channel, clears the prerelease flag. See release-signing/README.md.
+Signing (see release-signing/README.md):
+- Main path: CI signs with a Google Cloud KMS Ed25519 key (`--kms-key`),
+  authenticated by Workload Identity Federation. The private key never leaves
+  KMS; CI holds only a short-lived token allowed to call asymmetricSign.
+- Fallback: a maintainer runs `sign-release` (same `--kms-key`, or a key from
+  GCP Secret Manager / a local file), which verifies the published release,
+  signs, uploads the signature and, for the stable channel, clears the
+  prerelease flag.
 
 generate/verify use only the standard library. Signing and signature checks
 need the `cryptography` package for Ed25519 and import it lazily.
@@ -33,6 +36,8 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path, PurePosixPath
 
 SCHEMA = "ruview.firmware.release-manifest.v1"
@@ -59,6 +64,19 @@ DEFAULT_KEY_RELATIVE = Path(".ruview") / "firmware-signing.key"
 DEFAULT_SECRET_NAME = "ruview-firmware-signing-key"
 SECRET_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,255}$")
 PROJECT_PATTERN = re.compile(r"^[a-z][a-z0-9.:-]{1,98}[a-z0-9]$")
+
+# Cloud KMS (main CI signing path). Only a single key VERSION is accepted.
+KMS_ENDPOINT = "https://cloudkms.googleapis.com/v1/"
+KMS_KEY_PATTERN = re.compile(
+    r"projects/(?:[a-z][a-z0-9.-]{0,61}[a-z0-9]:)?[a-z][a-z0-9-]{4,28}[a-z0-9]"
+    r"/locations/[a-z][a-z0-9-]{0,62}"
+    r"/keyRings/[A-Za-z0-9_-]{1,63}"
+    r"/cryptoKeys/[A-Za-z0-9_-]{1,63}"
+    r"/cryptoKeyVersions/[1-9][0-9]{0,18}")
+KMS_ALGORITHM = "EC_SIGN_ED25519"
+TOKEN_ENV = "GOOGLE_OAUTH_ACCESS_TOKEN"
+TOKEN_PATTERN = re.compile(r"[A-Za-z0-9._~+/=-]{16,4096}")
+HTTP_TIMEOUT_SECONDS = 30
 
 # One entry per firmware-ci.yml build matrix `variant` (a test keeps them in sync).
 VARIANT_PROFILES = {
@@ -404,6 +422,151 @@ def read_signing_key_bytes(args, runner):
                         f"or create {default}")
 
 
+# --- Cloud KMS signing (main path) ----------------------------------------
+# The private key is generated in and never leaves Cloud KMS. Requests carry
+# CRC32C checksums end to end, the KMS public key must equal the committed
+# pin, and every signature is verified locally before it is written. The
+# OAuth access token is only ever placed in the Authorization header: it is
+# never printed, logged, put in argv, or included in an error message.
+
+def _crc32c_table() -> list:
+    table = []
+    for byte in range(256):
+        crc = byte
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0x82F63B78 if crc & 1 else crc >> 1
+        table.append(crc)
+    return table
+
+
+CRC32C_TABLE = _crc32c_table()
+
+
+def crc32c(data: bytes) -> int:
+    """CRC-32C (Castagnoli), as Cloud KMS uses for request/response integrity."""
+    crc = 0xFFFFFFFF
+    for byte in data:
+        crc = CRC32C_TABLE[(crc ^ byte) & 0xFF] ^ (crc >> 8)
+    return crc ^ 0xFFFFFFFF
+
+
+def validate_kms_key_version(name: str) -> str:
+    if not isinstance(name, str) or not KMS_KEY_PATTERN.fullmatch(name):
+        raise ManifestError("--kms-key must be a full key version name: projects/P/locations/L/"
+                            "keyRings/R/cryptoKeys/K/cryptoKeyVersions/N")
+    return name
+
+
+def urllib_transport(method: str, url: str, headers: dict, body):
+    """Default HTTPS transport: returns (status, body bytes); never raises for HTTP status."""
+    request = urllib.request.Request(url, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as error:
+        return error.code, error.read()
+    except (urllib.error.URLError, OSError) as error:
+        reason = getattr(error, "reason", None) or type(error).__name__
+        raise ManifestError(f"could not reach Cloud KMS ({reason})") from None
+
+
+def kms_access_token(runner) -> str:
+    """$GOOGLE_OAUTH_ACCESS_TOKEN (set from the auth action in CI), else `gcloud auth print-access-token`."""
+    token = os.environ.get(TOKEN_ENV, "").strip()
+    if not token:
+        try:
+            result = runner(["gcloud", "auth", "print-access-token"])
+        except OSError:
+            raise ManifestError(f"no ${TOKEN_ENV} and could not run gcloud; install the Google Cloud SDK "
+                                "and run `gcloud auth login`") from None
+        if result.returncode != 0 or not result.stdout:
+            # gcloud's own stderr is deliberately not forwarded.
+            raise ManifestError(f"gcloud auth print-access-token failed (exit {result.returncode}); "
+                                "is gcloud authenticated (gcloud auth login)?")
+        token = result.stdout.decode("ascii", "replace").strip()
+    if not TOKEN_PATTERN.fullmatch(token):
+        raise ManifestError("the Google Cloud access token is malformed; refusing to send it")
+    return token
+
+
+def kms_call(http, method: str, url: str, token: str, payload=None) -> dict:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    body = None
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        body = json.dumps(payload).encode("utf-8")
+    action = url.rsplit("/", 1)[-1].split(":")[-1]
+    status, raw = http(method, url, headers, body)
+    if status != 200:
+        message = ""
+        try:
+            message = str(json.loads(raw)["error"]["message"])[:300]
+        except (ValueError, KeyError, TypeError):
+            pass
+        raise ManifestError(f"Cloud KMS {action} failed (HTTP {status}){': ' + message if message else ''}; "
+                            "does this identity hold roles/cloudkms.signerVerifier on the key?")
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        raise ManifestError(f"Cloud KMS {action} returned a non-JSON response") from None
+    if not isinstance(data, dict):
+        raise ManifestError(f"Cloud KMS {action} returned an unexpected response")
+    return data
+
+
+def crc_matches(value, data: bytes) -> bool:
+    try:
+        return int(str(value)) == crc32c(data)
+    except ValueError:
+        return False
+
+
+def kms_public_key(http, token: str, name: str) -> bytes:
+    """Fetch the key version's public key; require Ed25519 and return the raw 32 bytes."""
+    data = kms_call(http, "GET", f"{KMS_ENDPOINT}{name}/publicKey", token)
+    if data.get("name") != name:
+        raise ManifestError("Cloud KMS returned the public key of another key version")
+    if data.get("algorithm") != KMS_ALGORITHM:
+        raise ManifestError(f"Cloud KMS key algorithm is {data.get('algorithm')!r}, expected {KMS_ALGORITHM}")
+    pem = str(data.get("pem", "")).encode("ascii", "replace")
+    if not crc_matches(data.get("pemCrc32c"), pem):
+        raise ManifestError("Cloud KMS public key failed its CRC32C check; retry")
+    return public_key_from_pem_bytes(pem, "Cloud KMS")
+
+
+def kms_sign(http, token: str, name: str, manifest_bytes: bytes) -> bytes:
+    """asymmetricSign over the raw bytes (Ed25519 signs data, not a digest), with CRC32C both ways."""
+    data = kms_call(http, "POST", f"{KMS_ENDPOINT}{name}:asymmetricSign", token, {
+        "data": base64.b64encode(manifest_bytes).decode("ascii"),
+        "dataCrc32c": str(crc32c(manifest_bytes)),
+    })
+    if data.get("name") != name:
+        raise ManifestError("Cloud KMS signed with another key version than requested")
+    if data.get("verifiedDataCrc32c") is not True:
+        raise ManifestError("Cloud KMS did not verify the request CRC32C; the data may be corrupted in transit")
+    try:
+        signature = base64.b64decode(str(data.get("signature", "")), validate=True)
+    except ValueError:
+        raise ManifestError("Cloud KMS returned a signature that is not base64") from None
+    if not crc_matches(data.get("signatureCrc32c"), signature):
+        raise ManifestError("Cloud KMS signature failed its CRC32C check; retry")
+    if len(signature) != 64:
+        raise ManifestError("Cloud KMS returned a signature that is not 64-byte Ed25519")
+    return signature
+
+
+def public_key_from_pem_bytes(pem: bytes, source: str) -> bytes:
+    module, _ = ed25519()
+    from cryptography.hazmat.primitives import serialization
+    try:
+        key = serialization.load_pem_public_key(pem)
+    except Exception:  # noqa: BLE001
+        raise ManifestError(f"public key from {source} is not a valid PEM public key") from None
+    if not isinstance(key, module.Ed25519PublicKey):
+        raise ManifestError(f"public key from {source} is not Ed25519")
+    return raw_public_bytes(key)
+
+
 def expected_public_key(public_raw: bytes, pin: Path, allow_unpinned: bool) -> bytes:
     """Refuse any key other than the committed one; unpinned signing is first-time setup only."""
     if pin.is_file():
@@ -424,16 +587,26 @@ def expected_public_key(public_raw: bytes, pin: Path, allow_unpinned: bool) -> b
 def sign_bytes(args, manifest_bytes: bytes) -> tuple:
     """Sign and self-verify against the pinned key. Returns (signature, public key, fingerprint), base64."""
     module, invalid = ed25519()
-    data, source = read_signing_key_bytes(args, args.runner)
-    key = parse_private_key(data, source)
-    del data
-    public_raw = expected_public_key(raw_public_bytes(key.public_key()), Path(args.public_key),
-                                     args.allow_unpinned)
-    signature = key.sign(manifest_bytes)
+    if args.kms_key:
+        if args.stdin_key or args.key_file:
+            raise ManifestError("--kms-key cannot be combined with --stdin-key or --key-file")
+        name = validate_kms_key_version(args.kms_key)
+        token = kms_access_token(args.runner)
+        public_raw = expected_public_key(kms_public_key(args.http, token, name), Path(args.public_key),
+                                         args.allow_unpinned)
+        signature = kms_sign(args.http, token, name, manifest_bytes)
+        del token
+    else:
+        data, source = read_signing_key_bytes(args, args.runner)
+        key = parse_private_key(data, source)
+        del data
+        public_raw = expected_public_key(raw_public_bytes(key.public_key()), Path(args.public_key),
+                                         args.allow_unpinned)
+        signature = key.sign(manifest_bytes)
     try:
         module.Ed25519PublicKey.from_public_bytes(public_raw).verify(signature, manifest_bytes)
-    except invalid as error:  # pragma: no cover - would mean a broken crypto backend
-        raise ManifestError("signature does not verify against the pinned key") from error
+    except invalid:
+        raise ManifestError("signature does not verify against the pinned key; nothing written") from None
     return base64.b64encode(signature).decode(), base64.b64encode(public_raw).decode(), fingerprint(public_raw)
 
 
@@ -609,6 +782,26 @@ def command_verify_release(args) -> int:
     return 0
 
 
+def print_public_key(public_raw: bytes, out) -> None:
+    public_b64 = base64.b64encode(public_raw).decode()
+    if out:
+        Path(out).write_text(public_b64 + "\n", encoding="ascii")
+    print(f"Public key: {public_b64}\nFingerprint: {fingerprint(public_raw)}"
+          + (f"\nWrote {out}" if out else "")
+          + "\nCommit it as firmware/esp32-csi-node/release-signing/public-key.ed25519.b64")
+
+
+def command_kms_public_key(args) -> int:
+    name = validate_kms_key_version(args.kms_key)
+    print_public_key(kms_public_key(args.http, kms_access_token(args.runner), name), args.out)
+    return 0
+
+
+def command_public_key_from_pem(args) -> int:
+    print_public_key(public_key_from_pem_bytes(Path(args.pem).read_bytes(), args.pem), args.out)
+    return 0
+
+
 def command_keygen(args) -> int:
     from cryptography.hazmat.primitives import serialization
     module, _ = ed25519()
@@ -638,6 +831,9 @@ def command_keygen(args) -> int:
 
 
 def add_key_options(parser) -> None:
+    parser.add_argument("--kms-key", metavar="KEY_VERSION",
+                        help="sign with Cloud KMS: projects/P/locations/L/keyRings/R/cryptoKeys/K/"
+                             f"cryptoKeyVersions/N (token from ${TOKEN_ENV} or `gcloud auth print-access-token`)")
     parser.add_argument("--stdin-key", action="store_true",
                         help="read the private key from piped stdin (first source checked)")
     parser.add_argument("--key-file", help="private key file: PEM PKCS8 Ed25519 or base64 raw")
@@ -666,7 +862,7 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--out", required=True)
     generate.set_defaults(handler=command_generate)
 
-    sign = commands.add_parser("sign", help="write a detached Ed25519 signature (maintainer machine)")
+    sign = commands.add_parser("sign", help="write a detached Ed25519 signature (CI with --kms-key, or maintainer)")
     sign.add_argument("--manifest", required=True)
     sign.add_argument("--out", required=True)
     add_key_options(sign)
@@ -694,6 +890,18 @@ def build_parser() -> argparse.ArgumentParser:
     verify_release.add_argument("--public-key", default=str(PINNED_PUBLIC_KEY))
     verify_release.set_defaults(handler=command_verify_release)
 
+    kms_public = commands.add_parser("kms-public-key",
+                                     help="print a Cloud KMS Ed25519 key version's raw public key and fingerprint")
+    kms_public.add_argument("--kms-key", required=True, metavar="KEY_VERSION")
+    kms_public.add_argument("--out", help="also write the base64 public key to this file")
+    kms_public.set_defaults(handler=command_kms_public_key)
+
+    from_pem = commands.add_parser("public-key-from-pem",
+                                   help="convert a PEM Ed25519 public key (e.g. gcloud kms ... get-public-key)")
+    from_pem.add_argument("--pem", required=True)
+    from_pem.add_argument("--out", help="also write the base64 public key to this file")
+    from_pem.set_defaults(handler=command_public_key_from_pem)
+
     keygen = commands.add_parser("keygen", help="maintainer helper; never run in CI")
     keygen.add_argument("--private-out", required=True)
     keygen.add_argument("--public-out", required=True)
@@ -703,9 +911,10 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv=None, runner=None) -> int:
+def main(argv=None, runner=None, http=None) -> int:
     args = build_parser().parse_args(argv)
     args.runner = runner or run_command
+    args.http = http or urllib_transport
     try:
         return args.handler(args)
     except (ManifestError, OSError) as error:

@@ -244,9 +244,12 @@ jobs:
     if: github.ref_type == 'tag'
     needs: [version-guard, provisioning-tests, build, build-c6-idf6]
     runs-on: ubuntu-latest
-    # No signing key here, by design (RuView#2394): CI publishes an UNSIGNED prerelease
-    # and only verifies. A maintainer signs outside GitHub with
-    # `release_manifest.py sign-release`, mirroring ruflo's sign-helpers.mjs.
+    # Signing (RuView#2394). Main path: when the repository VARIABLE FIRMWARE_SIGNING_KMS_KEY
+    # is set, this job signs the manifest with a Cloud KMS Ed25519 key over Workload Identity
+    # Federation. No private key and no GitHub secret is involved: the key never leaves KMS and
+    # the federated token can only call asymmetricSign on that one key. When the variable is
+    # unset, CI publishes an UNSIGNED prerelease and a maintainer runs
+    # `release_manifest.py sign-release` (fallback). See release-signing/README.md.
     permissions:
       contents: write
       id-token: write
@@ -288,7 +291,7 @@ jobs:
             exit 1
           fi
           echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
-          echo "Release channel: $CHANNEL (published as a prerelease until signed)"
+          echo "Release channel: $CHANNEL (a stable release is published as a prerelease until signed)"
 
       - name: Generate the release manifest from the exact-run bundles
         env:
@@ -308,6 +311,55 @@ jobs:
           python firmware/esp32-csi-node/tools/release_manifest.py verify \
             --manifest release-assets/firmware-manifest.json --assets release-assets --allow-unsigned
 
+      - name: Check the CI signing configuration
+        if: vars.FIRMWARE_SIGNING_KMS_KEY != ''
+        env:
+          WIF_PROVIDER: ${{ vars.FIRMWARE_SIGNING_WIF_PROVIDER }}
+        run: |
+          if [ -z "$WIF_PROVIDER" ]; then
+            echo "::error::FIRMWARE_SIGNING_KMS_KEY is set but FIRMWARE_SIGNING_WIF_PROVIDER is not set"
+            exit 1
+          fi
+          if [ ! -s firmware/esp32-csi-node/release-signing/public-key.ed25519.b64 ]; then
+            echo "::error::CI signing is configured but firmware/esp32-csi-node/release-signing/public-key.ed25519.b64 is not committed"
+            exit 1
+          fi
+
+      - name: Install the signing dependency before any credential exists
+        if: vars.FIRMWARE_SIGNING_KMS_KEY != ''
+        run: python -m pip install --disable-pip-version-check cryptography==46.0.7
+
+      # Direct WIF (no service account): the federated token is the auth_token output.
+      # Through a service account: token_format access_token mints a 5-minute access token.
+      # Both outputs are masked by the action; no credentials file and no env exports.
+      - name: Authenticate to Google Cloud with Workload Identity Federation
+        id: gcp-auth
+        if: vars.FIRMWARE_SIGNING_KMS_KEY != ''
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ vars.FIRMWARE_SIGNING_WIF_PROVIDER }}
+          service_account: ${{ vars.FIRMWARE_SIGNING_SERVICE_ACCOUNT }}
+          token_format: ${{ vars.FIRMWARE_SIGNING_SERVICE_ACCOUNT != '' && 'access_token' || '' }}
+          access_token_lifetime: 300s
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Sign the manifest with Cloud KMS and verify the signature before upload
+        id: sign
+        if: vars.FIRMWARE_SIGNING_KMS_KEY != ''
+        env:
+          KMS_KEY: ${{ vars.FIRMWARE_SIGNING_KMS_KEY }}
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.gcp-auth.outputs.access_token || steps.gcp-auth.outputs.auth_token }}
+        run: |
+          set -euo pipefail
+          python firmware/esp32-csi-node/tools/release_manifest.py sign \
+            --manifest release-assets/firmware-manifest.json \
+            --out release-assets/firmware-manifest.json.sig --kms-key "$KMS_KEY"
+          python firmware/esp32-csi-node/tools/release_manifest.py verify --manifest release-assets/firmware-manifest.json \
+            --sig release-assets/firmware-manifest.json.sig \
+            --public-key firmware/esp32-csi-node/release-signing/public-key.ed25519.b64 --assets release-assets
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
       - name: Attest build provenance for the archives and manifest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
         with:
@@ -319,16 +371,17 @@ jobs:
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           name: ESP32 firmware ${{ github.ref_name }}
-          # Always a prerelease: `release_manifest.py sign-release` clears the flag for the
-          # stable channel only after the maintainer's signature upload succeeds.
-          prerelease: true
+          # A full release only when the channel is stable AND CI signed with Cloud KMS. Otherwise a
+          # prerelease; the maintainer's `release_manifest.py sign-release` (fallback) clears the
+          # flag for the stable channel only after its signature upload succeeds.
+          prerelease: ${{ !(steps.channel.outputs.channel == 'stable' && steps.sign.outputs.signed == 'true') }}
           make_latest: false
           body: |
             Exact-run ESP32-S3 display 8 MB, ESP32-S3 headless 4 MB, ESP32-C6 4 MB, and ESP32-C5 4 MB firmware bundles.
             Manifest channel: ${{ steps.channel.outputs.channel }}.
             Verify each archive against `SHA256SUMS.txt` before flashing.
             `firmware-manifest.json` lists each variant's images, SHA-256 digests and flash offsets taken from the bundled `flasher_args.json`.
-            `firmware-manifest.json` is UNSIGNED when CI publishes it: it proves integrity and offsets, not origin. A maintainer signs it outside GitHub with `release_manifest.py sign-release`, which adds `firmware-manifest.json.sig` and, for the stable channel, marks this release non-prerelease.
+            ${{ steps.sign.outputs.signed == 'true' && '`firmware-manifest.json.sig` was produced in CI with the project Cloud KMS Ed25519 key and verified against the committed public key before upload.' || '`firmware-manifest.json` is UNSIGNED: it proves integrity and offsets, not origin. A maintainer signs it with `release_manifest.py sign-release` (fallback), which adds `firmware-manifest.json.sig` and, for the stable channel, marks this release non-prerelease.' }}
             Verify: `python3 firmware/esp32-csi-node/tools/release_manifest.py verify-release --tag ${{ github.ref_name }}` (reports signed and verified, or unsigned), or run the `Firmware release verify` workflow.
             Build provenance: `gh attestation verify <archive> -R ${{ github.repository }}`.
             CI builds and host tests verify software behavior, not target hardware.

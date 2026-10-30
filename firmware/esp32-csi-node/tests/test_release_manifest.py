@@ -409,20 +409,23 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertIn("attestations: write", publish)
         self.assertIn("--allow-unsigned", publish)
 
-    def test_publish_job_never_holds_or_uses_a_signing_key(self):
+    def test_publish_job_never_holds_private_key_material(self):
+        # CI may sign only through Cloud KMS (test_release_manifest_kms.py); it never holds a key.
         publish = self.publish_job()
         self.assertNotIn("environment:", publish)
         self.assertNotIn("secrets.", publish)
         self.assertNotIn("SIGNING_KEY", publish)
-        self.assertNotRegex(publish, r"release_manifest\.py sign(?![-\w])")
+        for match in re.finditer(r"release_manifest\.py sign(?![-\w])", publish):
+            command = publish[match.start():].split("\n          python", 1)[0].split("\n\n", 1)[0]
+            self.assertIn('--kms-key "$KMS_KEY"', command)
         self.assertNotRegex(publish.split("body: |", 1)[0].replace("`release_manifest.py sign-release`", ""),
                             r"sign-release")
-        self.assertNotIn("firmware-manifest.json.sig", publish.split("body:", 1)[0])
 
-    def test_publish_job_always_publishes_a_prerelease(self):
+    def test_publish_job_is_a_prerelease_unless_stable_and_signed_in_ci(self):
         publish = self.publish_job()
-        self.assertRegex(publish, r"\n\s+prerelease: true\n")
-        self.assertNotIn("prerelease: ${{", publish)
+        self.assertNotRegex(publish, r"\n\s+prerelease: (true|false)\n")
+        self.assertIn("prerelease: ${{ !(steps.channel.outputs.channel == 'stable' && "
+                      "steps.sign.outputs.signed == 'true') }}", publish)
 
     def test_release_body_explains_unsigned_manifest_and_verification(self):
         body = self.publish_job().split("body: |", 1)[1]
