@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     # Checksum-verified dependency patches; keep their upstream tests in CI.
     "vendor/security/zip-0.6.6",
-    "vendor/security/wasmtime-internal-cache-36.0.19",
+    "vendor/security/wasmtime-internal-cache-36.0.20",
     "crates/wifi-densepose-core",
     "crates/wifi-densepose-physics", # ADR-323 bounded pose assessment/correction
     "crates/wifi-densepose-signal",
@@ -275,8 +275,8 @@ wiremock = "0.5"
 # The transitive security floors live in Cargo.lock, which the gating
 # Security Scanning job audits: quinn-proto >=0.11.18
 # (RUSTSEC-2026-0338/0339/0340/0341/0342), rustls >=0.23.46
-# (RUSTSEC-2026-0346/0347/0348/0349) and wasmtime >=36.0.19
-# (RUSTSEC-2026-0363/0379/0380). A plain `cargo update` can walk them backwards;
+# (RUSTSEC-2026-0346/0347/0348/0349) and wasmtime >=36.0.20
+# (RUSTSEC-2026-0363/0379/0380/0424). A plain `cargo update` can walk them backwards;
 # keep the lockfile at or above these until the direct requirements
 # enforce them.
 #
@@ -346,4 +346,4 @@ debug = true
 # See each directory's RUVIEW-PROVENANCE.md for archive digests and scope.
 [patch.crates-io]
 zip-legacy = { package = "zip", path = "vendor/security/zip-0.6.6" }
-wasmtime-internal-cache = { path = "vendor/security/wasmtime-internal-cache-36.0.19" }
+wasmtime-internal-cache = { path = "vendor/security/wasmtime-internal-cache-36.0.20" }

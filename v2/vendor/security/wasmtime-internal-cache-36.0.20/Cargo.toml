@@ -13,7 +13,7 @@
 edition = "2024"
 rust-version = "1.86.0"
 name = "wasmtime-internal-cache"
-version = "36.0.19"
+version = "36.0.20"
 authors = ["The Wasmtime Project Developers"]
 build = "build.rs"
 autolib = false
