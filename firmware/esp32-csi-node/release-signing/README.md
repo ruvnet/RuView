@@ -25,6 +25,14 @@ without the private key.
 offsets are read from it and are never hand-written. The ESP32-C5 bootloader sits
 at `0x2000`; S3 and C6 bootloaders sit at `0x0`.
 
+**Clients must not flash from `flasher_args.json` file names.** Its `flash_files`
+entries are ESP-IDF build-tree paths (`bootloader/bootloader.bin`,
+`partition_table/partition-table.bin`, `esp32-csi-node.bin`). The bundle renames
+the application and partition table per variant (for example
+`esp32-csi-node-c6.bin`, `partition-table-c6.bin`). The manifest's `images[].file`
+is the bundled name to flash at `images[].offset`; use `flasher_args.json` only to
+cross-check offsets, as `verify` does.
+
 ## Schema `ruview.firmware.release-manifest.v1`
 
 ```json
@@ -134,8 +142,9 @@ client update that embeds the new key.
 
 ## Revoking a bad release
 
-Pass `--revokes 0.8.15,0.8.16` to `generate` for the next release (edit the
-generate step in the workflow for that release). Clients that trust the newest
+Add the bad version, one per line, to `firmware/esp32-csi-node/REVOKED_VERSIONS`
+in a reviewed PR (`#` starts a comment). The publish job passes the list to
+`generate --revokes`, so every later manifest carries it. Clients that trust the newest
 signed manifest must refuse to flash revoked versions, even when they hold valid
 archives for them. A manifest cannot revoke its own version. Also mark the bad
 GitHub release clearly in its notes. Deleting it is a maintainer decision.

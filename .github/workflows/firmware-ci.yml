@@ -298,9 +298,11 @@ jobs:
           CHANNEL: ${{ steps.channel.outputs.channel }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          REVOKES="$(sed -e 's/#.*//' -e 's/[[:space:]]//g' firmware/esp32-csi-node/REVOKED_VERSIONS | grep -v '^$' | paste -sd, - || true)"
           python firmware/esp32-csi-node/tools/release_manifest.py generate \
             --tag "$TAG" --assets release-assets --channel "$CHANNEL" \
             --source-commit "$GITHUB_SHA" --workflow-run "$RUN_URL" \
+            --revokes "$REVOKES" \
             --out release-assets/firmware-manifest.json
 
       - name: Sign the release manifest

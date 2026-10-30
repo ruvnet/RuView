@@ -404,6 +404,15 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertNotIn("prerelease: true", publish)
         self.assertIn("environment: firmware-release", publish)
 
+    def test_revoked_versions_file_is_valid_and_wired_into_publish(self):
+        text = (FIRMWARE_ROOT / "REVOKED_VERSIONS").read_text(encoding="utf-8")
+        entries = [line.split("#", 1)[0].strip() for line in text.splitlines()]
+        for entry in filter(None, entries):
+            self.assertRegex(entry, r"^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$")
+        workflow = (REPOSITORY_ROOT / ".github/workflows/firmware-ci.yml").read_text(encoding="utf-8")
+        self.assertIn("firmware/esp32-csi-node/REVOKED_VERSIONS", workflow)
+        self.assertIn('--revokes "$REVOKES"', workflow)
+
     def test_release_channel_file_defaults_to_prerelease(self):
         channel = (FIRMWARE_ROOT / "RELEASE_CHANNEL").read_text(encoding="utf-8").strip()
         self.assertIn(channel, release_manifest.CHANNELS)
