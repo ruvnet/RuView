@@ -5,6 +5,7 @@ import { DashboardTab } from './components/DashboardTab.js';
 import { HardwareTab } from './components/HardwareTab.js';
 import { LiveDemoTab } from './components/LiveDemoTab.js';
 import { SensingTab } from './components/SensingTab.js';
+import { RoomBuilderTab } from './components/RoomBuilderTab.js';
 import { apiService } from './services/api.service.js';
 import { wsService } from './services/websocket.service.js';
 import { healthService } from './services/health.service.js';
@@ -159,6 +160,15 @@ class WiFiDensePoseApp {
     const sensingContainer = document.getElementById('sensing');
     if (sensingContainer) {
       this.components.sensing = new SensingTab(sensingContainer);
+    }
+
+    // Room Builder tab
+    const roomBuilderContainer = document.getElementById('roombuilder');
+    if (roomBuilderContainer) {
+      this.components.roomBuilder = new RoomBuilderTab(roomBuilderContainer);
+      this.components.roomBuilder.init().catch(error => {
+        console.error('Failed to initialize room builder:', error);
+      });
     }
 
     // Training tab - lazy load to avoid breaking other tabs if import fails
@@ -344,6 +354,14 @@ class WiFiDensePoseApp {
         }
         if (this.components.modelPanel && typeof this.components.modelPanel.refresh === 'function') {
           this.components.modelPanel.refresh();
+        }
+        break;
+
+      case 'roombuilder':
+        // Re-fetch the live config each time the tab is opened, in case it
+        // changed elsewhere (another browser tab's save, a server restart).
+        if (this.components.roomBuilder) {
+          this.components.roomBuilder._load();
         }
         break;
     }
