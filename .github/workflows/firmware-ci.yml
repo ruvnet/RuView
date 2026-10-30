@@ -26,6 +26,10 @@ jobs:
           python-version: '3.11'
       - name: Verify provisioning and secret handling without hardware
         run: python -m unittest discover -s firmware/esp32-csi-node/tests -p 'test_provision*.py' -v
+      - name: Verify release manifest generation, signing and offsets (synthetic bundles)
+        run: |
+          python -m pip install --disable-pip-version-check cryptography==46.0.7
+          python -m unittest discover -s firmware/esp32-csi-node/tests -p 'test_release_manifest*.py' -v
 
   version-guard:
     name: Verify version.txt matches release tag
@@ -194,10 +198,12 @@ jobs:
           cp build/bootloader/bootloader.bin               release-staging/bootloader.bin
           cp build/ota_data_initial.bin                    release-staging/ota_data_initial.bin
           cp version.txt                                   release-staging/version.txt
+          # IDF's own flash plan for this build: clients read offsets from it (RuView#2394).
+          cp build/flasher_args.json                       release-staging/flasher_args.json
           (cd release-staging && sha256sum \
             "${{ matrix.artifact_app }}" \
             "${{ matrix.artifact_pt }}" \
-            bootloader.bin ota_data_initial.bin version.txt \
+            bootloader.bin ota_data_initial.bin version.txt flasher_args.json \
             > SHA256SUMS.txt)
           ls -la release-staging/
 
@@ -238,9 +244,20 @@ jobs:
     if: github.ref_type == 'tag'
     needs: [version-guard, provisioning-tests, build, build-c6-idf6]
     runs-on: ubuntu-latest
+    # No signing key here, by design (RuView#2394): CI publishes an UNSIGNED prerelease
+    # and only verifies. A maintainer signs outside GitHub with
+    # `release_manifest.py sign-release`, mirroring ruflo's sign-helpers.mjs.
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+
       - name: Download the exact-run firmware artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -256,16 +273,65 @@ jobs:
           done
           (cd release-assets && sha256sum *.tar.gz > SHA256SUMS.txt)
 
+      - name: Resolve the release channel
+        id: channel
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          CHANNEL="$(tr -d '[:space:]' < firmware/esp32-csi-node/RELEASE_CHANNEL)"
+          case "$CHANNEL" in
+            stable|prerelease) ;;
+            *) echo "::error::RELEASE_CHANNEL must be 'stable' or 'prerelease', got '$CHANNEL'"; exit 1 ;;
+          esac
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.]*)?-esp32$'; then
+            echo "::error::Tag '$TAG' is not v<semver>-esp32"
+            exit 1
+          fi
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "Release channel: $CHANNEL (published as a prerelease until signed)"
+
+      - name: Generate the release manifest from the exact-run bundles
+        env:
+          TAG: ${{ github.ref_name }}
+          CHANNEL: ${{ steps.channel.outputs.channel }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          REVOKES="$(sed -e 's/#.*//' -e 's/[[:space:]]//g' firmware/esp32-csi-node/REVOKED_VERSIONS | grep -v '^$' | paste -sd, - || true)"
+          python firmware/esp32-csi-node/tools/release_manifest.py generate \
+            --tag "$TAG" --assets release-assets --channel "$CHANNEL" \
+            --source-commit "$GITHUB_SHA" --workflow-run "$RUN_URL" \
+            --revokes "$REVOKES" \
+            --out release-assets/firmware-manifest.json
+
+      - name: Verify the manifest, archives, images and offsets before upload
+        run: |
+          python firmware/esp32-csi-node/tools/release_manifest.py verify \
+            --manifest release-assets/firmware-manifest.json --assets release-assets --allow-unsigned
+
+      - name: Attest build provenance for the archives and manifest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: |
+            release-assets/*.tar.gz
+            release-assets/firmware-manifest.json
+
       - name: Publish the downloadable firmware bundles
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           name: ESP32 firmware ${{ github.ref_name }}
+          # Always a prerelease: `release_manifest.py sign-release` clears the flag for the
+          # stable channel only after the maintainer's signature upload succeeds.
           prerelease: true
           make_latest: false
           body: |
             Exact-run ESP32-S3 display 8 MB, ESP32-S3 headless 4 MB, ESP32-C6 4 MB, and ESP32-C5 4 MB firmware bundles.
+            Manifest channel: ${{ steps.channel.outputs.channel }}.
             Verify each archive against `SHA256SUMS.txt` before flashing.
+            `firmware-manifest.json` lists each variant's images, SHA-256 digests and flash offsets taken from the bundled `flasher_args.json`.
+            `firmware-manifest.json` is UNSIGNED when CI publishes it: it proves integrity and offsets, not origin. A maintainer signs it outside GitHub with `release_manifest.py sign-release`, which adds `firmware-manifest.json.sig` and, for the stable channel, marks this release non-prerelease.
+            Verify: `python3 firmware/esp32-csi-node/tools/release_manifest.py verify-release --tag ${{ github.ref_name }}` (reports signed and verified, or unsigned), or run the `Firmware release verify` workflow.
+            Build provenance: `gh attestation verify <archive> -R ${{ github.repository }}`.
             CI builds and host tests verify software behavior, not target hardware.
-            This prerelease has no new physical-board qualification or sensing-accuracy claim.
+            This release has no new physical-board qualification or sensing-accuracy claim.
             Select the matching board configuration using firmware/esp32-csi-node/README.md.
           files: release-assets/*
