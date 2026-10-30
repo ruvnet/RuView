@@ -9,8 +9,8 @@
 //      (wifi-densepose train-room, wifi-densepose-train `train`), writes only
 //      under the trusted checkout, and fails closed when a toolchain is absent.
 
-import { existsSync, mkdirSync, realpathSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 export const SPLITS = Object.freeze(['chronological', 'blocked-gap', 'grouped-subject', 'grouped-session', 'random-frame']);
 const LEAKAGE_FREE = new Set(['chronological', 'blocked-gap', 'grouped-subject', 'grouped-session']);
@@ -147,7 +147,27 @@ export async function runTraining(args, deps) {
     return { ok: true, dryRun: true, plan: summary, next: 'Re-run with confirm to train. Nothing was executed.', gate: 'Publish results only through ruview_train_gate.' };
   }
   if (plan.cmd === 'cargo' && !deps.which('cargo')) return { ok: false, reason: 'cargo_missing', plan: summary, remedy: 'Install Rust via https://rustup.rs' };
-  for (const dir of plan.writes) if (isAbsolute(dir) && within(repo, dir)) mkdirSync(dir, { recursive: true });
+  try {
+    if (plan.mode === 'room') {
+      for (const output of plan.writes) {
+        let ancestor = output;
+        while (!existsSync(ancestor)) {
+          if (lstatSync(ancestor, { throwIfNoEntry: false })) {
+            throw Object.assign(new Error('training output has an unresolved path'), { reason: 'invalid_path' });
+          }
+          ancestor = dirname(ancestor);
+        }
+        repoPath(repo, relative(repo, ancestor) || '.', { mustExist: true });
+      }
+    }
+    for (const output of plan.writes) {
+      // Room banks are files; pose checkpoints are directories.
+      const dir = plan.mode === 'room' ? dirname(output) : output;
+      if (isAbsolute(dir) && within(repo, dir)) mkdirSync(dir, { recursive: true });
+    }
+  } catch (error) {
+    return { ok: false, reason: error.reason || 'output_preparation_failed', detail: error.message, plan: summary };
+  }
   const r = await deps.exec(plan.cmd, plan.args, { cwd: plan.cwd, timeoutMs: plan.timeoutMs });
   const text = `${r.stdout}\n${r.stderr}`;
   const hint = r.ok ? null : /Cannot find a libtorch install/i.test(text)

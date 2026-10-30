@@ -72,10 +72,10 @@
     "src/sdk.js": "1ac29fb389ed86e0f62ecfddbbd31614c58e832a8181495caa83fe5cf8b30bc4",
     "src/spaces.js": "45ef786537cb2a446db5e926e5a1c10b73639d2767dec84611f914f78d4325eb",
     "src/tools.js": "6d34816a4fb5caac8b744658eb4e5e0432418a4c6a0e1a2ca36456695ba3790f",
-    "src/training.js": "bd8a6c12eba4f9d2f8990fa9692cd04c743ea247f9b13e10f8717ceefcbd09ac",
+    "src/training.js": "5de056fe25e63d65c7847fa7fcffd375f29f0cfebb91a8466ee68bb7e0d63468",
     "src/ui/console-widget.js": "0d2f707d57b5ec54968dee1dc80f31c7db9152dcadfc48700c18379dabb55462"
   },
-  "filesDigest": "1876f3c17e08626d4a93d01eaf3a95e63b2eb262572f2eaf58803c165cfc4f22",
+  "filesDigest": "3121b7f75270e374d5e876e84068b4fb6bf7330f300fbb5eebd4bcb8990e57ee",
   "brainDigest": "c0fb7b079ded157059b91601361429944697dae3cc42abc00dfe1a680986b0f4",
   "gateFingerprint": "6e53c784eee38310188948fc75fb49e6b4ebc04e247d01b903fa8c8a92d67bdd",
   "developmentPins": {
