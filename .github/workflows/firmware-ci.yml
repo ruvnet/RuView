@@ -194,10 +194,12 @@ jobs:
           cp build/bootloader/bootloader.bin               release-staging/bootloader.bin
           cp build/ota_data_initial.bin                    release-staging/ota_data_initial.bin
           cp version.txt                                   release-staging/version.txt
+          # IDF's own flash plan for this build: clients read offsets from it (RuView#2394).
+          cp build/flasher_args.json                       release-staging/flasher_args.json
           (cd release-staging && sha256sum \
             "${{ matrix.artifact_app }}" \
             "${{ matrix.artifact_pt }}" \
-            bootloader.bin ota_data_initial.bin version.txt \
+            bootloader.bin ota_data_initial.bin version.txt flasher_args.json \
             > SHA256SUMS.txt)
           ls -la release-staging/
 
