@@ -198,18 +198,15 @@ fn bounded_regular_file(path: &Path, maximum: u64, kind: &str) -> Result<Vec<u8>
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
 
     fn root() -> PathBuf {
         let path = std::env::temp_dir().join(format!(
-            "homecore-plugin-discovery-{}-{}-{}",
+            "homecore-plugin-discovery-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_nanos(),
-            NEXT_ROOT.fetch_add(1, Ordering::Relaxed)
+                .as_nanos()
         ));
         fs::create_dir(&path).unwrap();
         path
