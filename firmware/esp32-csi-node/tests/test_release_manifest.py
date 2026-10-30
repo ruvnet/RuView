@@ -12,7 +12,6 @@ import hashlib
 import importlib.util
 import io
 import json
-import os
 import re
 import tarfile
 import tempfile
@@ -304,16 +303,19 @@ class ManifestSignatureTests(unittest.TestCase):
         self.private_b64 = base64.b64encode(raw).decode()
         self.public_b64 = base64.b64encode(key.public_key().public_bytes(
             serialization.Encoding.Raw, serialization.PublicFormat.Raw)).decode()
-        os.environ["TEST_MANIFEST_KEY"] = self.private_b64
+        self.key_file = self.root / "signing.key"
+        self.key_file.write_text(self.private_b64 + "\n")
+        self.pin = self.root / "pinned-public-key.b64"
+        self.pin.write_text(self.public_b64 + "\n")
         self.assertEqual(quiet(generate, self.assets, self.manifest)[0], 0)
 
     def tearDown(self):
-        os.environ.pop("TEST_MANIFEST_KEY", None)
         self.temp.cleanup()
 
     def sign(self):
         return quiet(release_manifest.main, ["sign", "--manifest", str(self.manifest),
-                                             "--key-env", "TEST_MANIFEST_KEY", "--out", str(self.signature)])
+                                             "--key-file", str(self.key_file), "--public-key", str(self.pin),
+                                             "--out", str(self.signature)])
 
     def verify(self, public_key=None):
         return quiet(release_manifest.main, [
@@ -373,11 +375,11 @@ class ManifestSignatureTests(unittest.TestCase):
         self.assertIn("c6-4mb", output)
 
     def test_missing_signing_key_fails_closed(self):
-        os.environ.pop("TEST_MANIFEST_KEY")
+        self.key_file.unlink()
         code, output = self.sign()
         self.assertNotEqual(code, 0)
         self.assertFalse(self.signature.exists())
-        self.assertIn("TEST_MANIFEST_KEY", output)
+        self.assertIn(str(self.key_file), output)
 
 
 class ReleaseWorkflowContractTests(unittest.TestCase):
@@ -393,16 +395,67 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertTrue(variants)
         self.assertEqual(variants, set(release_manifest.VARIANT_PROFILES))
 
-    def test_publish_job_signs_verifies_and_attests_before_upload(self):
-        publish = self.workflow.split("publish-release-assets:", 1)[1]
+    def publish_job(self) -> str:
+        return self.workflow.split("publish-release-assets:", 1)[1]
+
+    def test_publish_job_generates_verifies_and_attests_before_upload(self):
+        publish = self.publish_job()
         order = [publish.index(step) for step in (
-            "release_manifest.py generate", "release_manifest.py sign",
-            "release_manifest.py verify", "actions/attest-build-provenance@",
-            "softprops/action-gh-release@")]
+            "release_manifest.py generate", "release_manifest.py verify",
+            "actions/attest-build-provenance@", "softprops/action-gh-release@")]
         self.assertEqual(order, sorted(order))
         self.assertIn("actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8", publish)
-        self.assertNotIn("prerelease: true", publish)
-        self.assertIn("environment: firmware-release", publish)
+        self.assertIn("id-token: write", publish)
+        self.assertIn("attestations: write", publish)
+        self.assertIn("--allow-unsigned", publish)
+
+    def test_publish_job_never_holds_or_uses_a_signing_key(self):
+        publish = self.publish_job()
+        self.assertNotIn("environment:", publish)
+        self.assertNotIn("secrets.", publish)
+        self.assertNotIn("SIGNING_KEY", publish)
+        self.assertNotRegex(publish, r"release_manifest\.py sign(?![-\w])")
+        self.assertNotRegex(publish.split("body: |", 1)[0].replace("`release_manifest.py sign-release`", ""),
+                            r"sign-release")
+        self.assertNotIn("firmware-manifest.json.sig", publish.split("body:", 1)[0])
+
+    def test_publish_job_always_publishes_a_prerelease(self):
+        publish = self.publish_job()
+        self.assertRegex(publish, r"\n\s+prerelease: true\n")
+        self.assertNotIn("prerelease: ${{", publish)
+
+    def test_release_body_explains_unsigned_manifest_and_verification(self):
+        body = self.publish_job().split("body: |", 1)[1]
+        self.assertIn("UNSIGNED", body)
+        self.assertIn("sign-release", body)
+        self.assertIn("verify-release", body)
+        self.assertIn("gh attestation verify", body)
+
+    def test_firmware_workflows_pin_every_action_by_sha(self):
+        for name in ("firmware-ci.yml", "firmware-release-verify.yml"):
+            text = (REPOSITORY_ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+            uses = re.findall(r"uses:\s*(\S+)", text)
+            self.assertTrue(uses, name)
+            for action in uses:
+                with self.subTest(workflow=name, action=action):
+                    self.assertRegex(action, r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$")
+
+    def test_release_verify_workflow_is_dispatch_only_and_read_only(self):
+        text = (REPOSITORY_ROOT / ".github/workflows/firmware-release-verify.yml").read_text(encoding="utf-8")
+        triggers = text.split("\non:", 1)[1].split("\npermissions:", 1)[0]
+        self.assertIn("workflow_dispatch:", triggers)
+        for event in ("push:", "pull_request", "schedule:", "workflow_run:", "release:"):
+            self.assertNotIn(event, triggers)
+        permissions = re.findall(r"^\s*([a-z-]+): (read|write|none)$", text, re.MULTILINE)
+        self.assertTrue(permissions)
+        self.assertEqual({scope for scope, _ in permissions}, {"contents"})
+        self.assertEqual({level for _, level in permissions}, {"read"})
+        self.assertNotIn("secrets.", text)
+        self.assertNotIn("environment:", text)
+        self.assertIn("release_manifest.py verify-release", text)
+        self.assertIn("persist-credentials: false", text)
+        for block in text.split("run: |")[1:]:
+            self.assertNotIn("${{", block.split("- name:", 1)[0], "inputs must reach run: via env")
 
     def test_revoked_versions_file_is_valid_and_wired_into_publish(self):
         text = (FIRMWARE_ROOT / "REVOKED_VERSIONS").read_text(encoding="utf-8")

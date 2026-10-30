@@ -1,15 +1,38 @@
 # Firmware release manifest and signing
 
 Every `v*-esp32` release publishes `firmware-manifest.json` next to the variant
-archives and `SHA256SUMS.txt` (RuView#2394). Releases signed with the release key
-also publish `firmware-manifest.json.sig`. The manifest is generated in the
+archives and `SHA256SUMS.txt` (RuView#2394). The manifest is generated in the
 `publish-release-assets` job of `.github/workflows/firmware-ci.yml` from the
-exact-run build artifacts by `firmware/esp32-csi-node/tools/release_manifest.py`.
-The same job verifies it before upload.
+exact-run build artifacts by `firmware/esp32-csi-node/tools/release_manifest.py`,
+and the same job verifies it before upload.
 
 Checksums prove integrity. Only the signature proves origin: someone who replaces
 an archive can replace `SHA256SUMS.txt` too, but cannot re-sign the manifest
 without the private key.
+
+## Signing model: the key never enters GitHub
+
+Signing mirrors the model ruflo already uses for its helper manifest
+(`v3/@claude-flow/cli/scripts/sign-helpers.mjs`, verified in CI by
+`helpers-manifest-guard.yml` / `verify-helpers.mjs`):
+
+- The **private key lives outside GitHub**, in GCP Secret Manager (or a maintainer's
+  local file). It is not a repository secret, not an environment secret, and no
+  workflow can read it.
+- The **public key is committed** at
+  `firmware/esp32-csi-node/release-signing/public-key.ed25519.b64`.
+- **CI only verifies.** On a tag it builds, generates the manifest, checks every hash
+  and offset, attests build provenance, and publishes an **unsigned prerelease**.
+- A **maintainer signs** afterwards with `release_manifest.py sign-release`, which
+  downloads the published release, re-verifies everything, signs, uploads
+  `firmware-manifest.json.sig` and, for the stable channel only, clears the
+  prerelease flag.
+
+Why: a signing key that a workflow can read is a key that a compromised workflow,
+a malicious action update, or a poisoned dependency in that job can use. With the
+key outside GitHub, an attacker who controls CI can still publish bytes, but cannot
+produce a signature that verifies against the committed public key, so clients that
+check the signature refuse them.
 
 ## What each release contains
 
@@ -18,7 +41,7 @@ without the private key.
 | `esp32-csi-node-firmware-<variant>.tar.gz` | Flat bundle: images, `version.txt`, `flasher_args.json`, inner `SHA256SUMS.txt` |
 | `SHA256SUMS.txt` | SHA-256 of each archive |
 | `firmware-manifest.json` | Variants, images, digests, flash offsets, channel, revocations |
-| `firmware-manifest.json.sig` | Base64 Ed25519 signature over the exact bytes of the manifest |
+| `firmware-manifest.json.sig` | Base64 Ed25519 signature over the exact bytes of the manifest. Added by the maintainer's `sign-release`, never by CI |
 | GitHub artifact attestations | SLSA build provenance for the archives and the manifest (`gh attestation verify`) |
 
 `flasher_args.json` is the flash plan ESP-IDF wrote for that build. The manifest's
@@ -80,49 +103,106 @@ Clients must ignore unknown fields and reject an unknown `schema`.
 ## Channels and promotion
 
 `firmware/esp32-csi-node/RELEASE_CHANNEL` holds one word, `prerelease` (the
-default) or `stable`. The publish job reads it at the tagged commit:
+default) or `stable`. The publish job writes it into the manifest's `channel` at
+the tagged commit, but **CI always publishes the GitHub release as a prerelease**,
+whatever the channel.
 
-- `prerelease`: the GitHub release is marked prerelease. If the signing key is
-  absent, the manifest is published unsigned and the release body says so.
-- `stable`: the GitHub release is not marked prerelease. The job **fails** unless
-  the signing key secret and the committed public key are both present.
+- `prerelease`: `sign-release` signs and leaves the release marked prerelease.
+- `stable`: `sign-release` marks the release non-prerelease **only after** the
+  signature upload succeeds. An unsigned stable-channel manifest fails
+  `verify-release`.
 
 To promote, open a PR that changes `RELEASE_CHANNEL` to `stable` (with the
-qualification evidence in the PR), merge it, bump `version.txt`, then tag
-`v<semver>-esp32`. Put `RELEASE_CHANNEL` back to `prerelease` in a later PR for
-releases that should not be stable. `make_latest` stays `false`, so firmware
-releases never become the repository's "latest" release.
+qualification evidence in the PR), merge it, bump `version.txt`, tag
+`v<semver>-esp32`, wait for the publish job, then run `sign-release`. Put
+`RELEASE_CHANNEL` back to `prerelease` in a later PR for releases that should not
+be stable. `make_latest` stays `false`, so firmware releases never become the
+repository's "latest" release.
 
-## Signing key (maintainer actions)
+## One-time setup (maintainer)
 
-These steps are done by a maintainer once. CI never generates keys.
+CI never generates or holds keys. On a trusted machine:
 
-1. Generate the key pair on a trusted machine:
+1. Generate the key pair:
 
    ```bash
    python3 -m pip install cryptography
    python3 firmware/esp32-csi-node/tools/release_manifest.py keygen \
-     --private-out firmware-manifest-signing.key --public-out public-key.ed25519.b64
+     --private-out ruview-firmware-signing.pem --public-out public-key.ed25519.b64
    ```
 
-   The private key is written with mode `0600` and is never printed. Both files
-   hold base64 of a raw 32-byte Ed25519 key.
-2. In GitHub, create the environment **`firmware-release`** (Settings ->
-   Environments). Add required reviewers and limit deployments to tags matching
-   `v*-esp32`.
-3. Add the environment secret **`FIRMWARE_MANIFEST_SIGNING_KEY`** with the
-   contents of `firmware-manifest-signing.key`. Store an offline backup, then
-   delete the local copy.
-4. Commit the public key as
+   The private key is written as PEM PKCS8 with mode `0600` (`--format raw` writes
+   base64 of the raw 32 bytes instead) and is never printed. The public key and its
+   fingerprint are printed.
+2. Store the private half in GCP Secret Manager, in a project you choose. The
+   suggested secret name is `ruview-firmware-signing-key`:
+
+   ```bash
+   gcloud secrets create ruview-firmware-signing-key --project=<project> \
+     --replication-policy=automatic --data-file=ruview-firmware-signing.pem
+   ```
+
+   Grant `roles/secretmanager.secretAccessor` on that secret only to the people who
+   sign releases. Keep an offline backup if your policy requires one, then delete
+   the local file.
+3. Commit the public key as
    `firmware/esp32-csi-node/release-signing/public-key.ed25519.b64` and record its
    fingerprint here:
 
    **Current key fingerprint:** `SHA256:<to be filled in when the key is created>`
 
    The fingerprint is `SHA256:` plus the hex SHA-256 of the raw 32-byte public key.
-   `keygen`, `sign` and `verify` all print it.
+   `keygen`, `sign`, `sign-release` and `verify-release` all print it.
+
+Until the public key is committed, `sign` and `sign-release` refuse to run unless
+you pass `--allow-unpinned`, which prints a loud warning. Use it only to test the
+first key before committing it.
 
 Never commit a private key. This directory holds only the public key and this README.
+
+## Each release (maintainer)
+
+1. Tag: `git tag v0.8.18-esp32 && git push origin v0.8.18-esp32` (after the
+   `version.txt` bump is on `main`).
+2. CI's `publish-release-assets` job publishes the archives, `SHA256SUMS.txt`, the
+   unsigned `firmware-manifest.json` and build provenance, as a prerelease.
+3. Sign it from your machine, with `gh` authenticated for the repository and
+   `gcloud` authenticated with access to the secret:
+
+   ```bash
+   RUVIEW_FIRMWARE_SIGNING_SECRET=ruview-firmware-signing-key \
+   RUVIEW_FIRMWARE_SIGNING_PROJECT=<project> \
+     python3 firmware/esp32-csi-node/tools/release_manifest.py sign-release --tag v0.8.18-esp32
+   ```
+
+   `sign-release` (`--repo` defaults to `ruvnet/RuView`):
+   1. refuses if the release already has `firmware-manifest.json.sig` (pass
+      `--replace` to re-sign);
+   2. downloads the manifest, archives and `SHA256SUMS.txt` into a temporary
+      directory and runs the full `verify` (archive and inner hashes, member safety,
+      `version.txt`, offsets against `flasher_args.json`, tag);
+   3. signs, refusing a key whose public half differs from the committed one;
+   4. checks the signature with the pinned public key;
+   5. uploads `firmware-manifest.json.sig`;
+   6. for `channel: stable` only, and only after the upload succeeded, runs
+      `gh release edit --prerelease=false`.
+4. Check the result: `python3 firmware/esp32-csi-node/tools/release_manifest.py verify-release --tag v0.8.18-esp32`.
+
+### Private key sources
+
+`sign` and `sign-release` take the first source that is set, in this order:
+
+| Order | Source | Notes |
+|---|---|---|
+| 1 | `--stdin-key` | Piped input only, for example `gcloud secrets versions access latest --secret=ruview-firmware-signing-key \| ... --stdin-key`. A terminal is refused. |
+| 2 | `--key-file PATH` | Local or air-gapped file. |
+| 3 | `RUVIEW_FIRMWARE_SIGNING_SECRET=<secret name>` | Fetched with `gcloud secrets versions access latest --secret=<name>`. Project from `--secret-project`, else `RUVIEW_FIRMWARE_SIGNING_PROJECT`, else gcloud's active project. |
+| 4 | `RUVIEW_FIRMWARE_SIGNING_KEY=<base64 raw key>` | For scripted local use. |
+| 5 | `~/.ruview/firmware-signing.key` | Default file. |
+
+Keys may be PEM PKCS8 Ed25519 or base64 of the raw 32 bytes. The tool keeps the key
+in memory only: it never prints it, writes it to disk, passes it in argv, or forwards
+gcloud's error output.
 
 ## Rotation
 
@@ -134,8 +214,10 @@ Clients embed the public key, not a release version. To rotate:
    `--next-public-key <next base64 or file>` to the `generate` step of that
    release. Clients that verified the signature with the current key may then
    trust `nextPublicKey`.
-3. Replace the environment secret and the committed `public-key.ed25519.b64`, and
-   update the fingerprint above. From then on, releases are signed by the new key.
+3. Add the next private key as a new version of the Secret Manager secret (or a new
+   secret), replace the committed `public-key.ed25519.b64`, and update the
+   fingerprint above. From then on, `sign-release` signs with the new key and
+   refuses the old one.
 
 If the current key is compromised, there is no safe in-band rotation. Ship a
 client update that embeds the new key.
@@ -151,7 +233,22 @@ GitHub release clearly in its notes. Deleting it is a maintainer decision.
 
 ## Verifying a release
 
-With the tool:
+With the tool (needs `gh` and `cryptography`):
+
+```bash
+python3 firmware/esp32-csi-node/tools/release_manifest.py verify-release --tag v0.8.18-esp32
+gh attestation verify <downloaded archive> -R ruvnet/RuView
+```
+
+`verify-release` downloads the release and prints either **signed and verified**
+(with the key fingerprint) or **unsigned (integrity only)**. It exits non-zero on
+any mismatch, on a signature that does not verify against the committed public key,
+and on a release that is unsigned but stable (stable channel, or not marked
+prerelease). Anyone can run the same check in CI with the read-only
+`Firmware release verify` workflow (`.github/workflows/firmware-release-verify.yml`,
+`workflow_dispatch` with the tag).
+
+To verify files you already downloaded:
 
 ```bash
 gh release download v0.8.18-esp32 -R ruvnet/RuView -D release
@@ -160,7 +257,6 @@ python3 firmware/esp32-csi-node/tools/release_manifest.py verify \
   --sig release/firmware-manifest.json.sig \
   --public-key firmware/esp32-csi-node/release-signing/public-key.ed25519.b64 \
   --assets release
-gh attestation verify release/esp32-csi-node-firmware-c6-4mb.tar.gz -R ruvnet/RuView
 ```
 
 `verify` exits non-zero on any mismatch. It checks:

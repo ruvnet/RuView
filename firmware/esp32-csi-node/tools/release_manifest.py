@@ -6,12 +6,19 @@ SHA-256 digests and their flash offsets. Offsets are read from the
 `flasher_args.json` that ESP-IDF wrote for that exact build and that the
 bundle carries; they are never hand-written here.
 
-generate/verify use only the standard library. sign/verify-with-signature
+Signing happens OUTSIDE GitHub, mirroring ruflo's sign-helpers.mjs: CI
+publishes an unsigned prerelease and only verifies; a maintainer runs
+`sign-release` with a key from GCP Secret Manager (or a local file), which
+verifies the published release, signs, uploads the signature and, for the
+stable channel, clears the prerelease flag. See release-signing/README.md.
+
+generate/verify use only the standard library. Signing and signature checks
 need the `cryptography` package for Ed25519 and import it lazily.
 
 Signature format: `firmware-manifest.json.sig` holds the base64 Ed25519
 signature (64 bytes) over the exact bytes of `firmware-manifest.json`.
-Keys are raw 32-byte Ed25519 keys, base64-encoded.
+Public keys are base64 of the raw 32 bytes. Private keys are PEM PKCS8
+Ed25519 or base64 of the raw 32 bytes.
 """
 
 from __future__ import annotations
@@ -22,8 +29,10 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import tarfile
+import tempfile
 from pathlib import Path, PurePosixPath
 
 SCHEMA = "ruview.firmware.release-manifest.v1"
@@ -34,6 +43,22 @@ TAG_PATTERN = re.compile(r"^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.]*)?)-esp32
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.]*)?$")
 MAX_MEMBER_BYTES = 16 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 64
+MANIFEST_NAME = "firmware-manifest.json"
+SIGNATURE_NAME = MANIFEST_NAME + ".sig"
+RELEASE_SUMS_NAME = "SHA256SUMS.txt"
+RELEASE_ARCHIVE_PATTERN = re.compile(r"^esp32-csi-node-firmware-[0-9a-z-]+\.tar\.gz$")
+DEFAULT_REPO = "ruvnet/RuView"
+REPO_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$")
+
+# Signing key sources (see read_signing_key_bytes for the order).
+PINNED_PUBLIC_KEY = Path(__file__).resolve().parents[1] / "release-signing" / "public-key.ed25519.b64"
+SECRET_ENV = "RUVIEW_FIRMWARE_SIGNING_SECRET"
+PROJECT_ENV = "RUVIEW_FIRMWARE_SIGNING_PROJECT"
+KEY_ENV = "RUVIEW_FIRMWARE_SIGNING_KEY"
+DEFAULT_KEY_RELATIVE = Path(".ruview") / "firmware-signing.key"
+DEFAULT_SECRET_NAME = "ruview-firmware-signing-key"
+SECRET_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,255}$")
+PROJECT_PATTERN = re.compile(r"^[a-z][a-z0-9.:-]{1,98}[a-z0-9]$")
 
 # One entry per firmware-ci.yml build matrix `variant` (a test keeps them in sync).
 VARIANT_PROFILES = {
@@ -292,22 +317,130 @@ def fingerprint(public_raw: bytes) -> str:
     return "SHA256:" + sha256_hex(public_raw)
 
 
-def private_key_from_env(name: str):
+# --- Private key sources --------------------------------------------------
+# Mirrors ruflo's v3/@claude-flow/cli/scripts/sign-helpers.mjs: the private key
+# lives outside GitHub (GCP Secret Manager or a maintainer file) and CI only
+# verifies. Key material is never printed, logged, passed in argv, or written
+# to disk by this tool, and diagnostics never echo it.
+
+def run_command(argv):
+    """Default runner for gh/gcloud: no shell, no stdin, output captured (never inherited)."""
+    return subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, check=False)
+
+
+def parse_private_key(data: bytes, source: str):
+    """Accept a PEM PKCS8 Ed25519 key or base64 of the raw 32-byte private key."""
     module, _ = ed25519()
-    value = os.environ.get(name, "")
-    if not value.strip():
-        raise ManifestError(f"signing key environment variable {name} is empty or unset")
-    return module.Ed25519PrivateKey.from_private_bytes(decode_key(value, f"${name}"))
+    from cryptography.hazmat.primitives import serialization
+
+    text = data.strip()
+    if not text:
+        raise ManifestError(f"signing key from {source} is empty")
+    invalid = ManifestError(f"signing key from {source} is not a valid Ed25519 private key "
+                            "(expected PEM PKCS8 or base64 of the raw 32 bytes)")
+    try:
+        if text.startswith(b"-----BEGIN"):
+            key = serialization.load_pem_private_key(text, password=None)
+        else:
+            raw = base64.b64decode(text, validate=True)
+            if len(raw) != 32:
+                raise invalid
+            key = module.Ed25519PrivateKey.from_private_bytes(raw)
+    except ManifestError:
+        raise
+    except Exception:  # noqa: BLE001 - parser errors may quote their input; never chain them
+        raise invalid from None
+    if not isinstance(key, module.Ed25519PrivateKey):
+        raise invalid
+    return key
+
+
+def read_secret_manager_key(secret: str, project: str, runner) -> bytes:
+    if not SECRET_NAME_PATTERN.fullmatch(secret):
+        raise ManifestError(f"${SECRET_ENV} {secret!r} is not a Secret Manager secret name")
+    argv = ["gcloud", "secrets", "versions", "access", "latest", "--secret", secret]
+    if project:
+        if not PROJECT_PATTERN.fullmatch(project):
+            raise ManifestError(f"GCP project {project!r} is not a project id")
+        argv += ["--project", project]
+    try:
+        result = runner(argv)
+    except OSError:
+        raise ManifestError(f"could not run gcloud to read secret {secret!r}; "
+                            "install the Google Cloud SDK or use --key-file/--stdin-key") from None
+    if result.returncode != 0 or not result.stdout:
+        # gcloud's own stderr is deliberately not forwarded.
+        raise ManifestError(f"failed to read GCP secret {secret!r} (gcloud exit {result.returncode}); "
+                            "is gcloud authenticated (gcloud auth login) with access to it?")
+    return result.stdout
+
+
+def read_signing_key_bytes(args, runner):
+    """Resolve the private key: --stdin-key, --key-file, Secret Manager, env key, default file."""
+    if args.stdin_key:
+        if sys.stdin is None or sys.stdin.isatty():
+            raise ManifestError("--stdin-key needs piped input, for example "
+                                "`gcloud secrets versions access latest --secret=NAME | ... --stdin-key`; "
+                                "refusing interactive key entry")
+        return sys.stdin.buffer.read(), "--stdin-key"
+    if args.key_file:
+        path = Path(args.key_file).expanduser()
+        if not path.is_file():
+            raise ManifestError(f"--key-file {path} does not exist")
+        return path.read_bytes(), str(path)
+    secret = os.environ.get(SECRET_ENV, "").strip()
+    if secret:
+        project = (args.secret_project or os.environ.get(PROJECT_ENV, "")).strip()
+        return read_secret_manager_key(secret, project, runner), f"Secret Manager secret {secret!r}"
+    env_key = os.environ.get(KEY_ENV, "")
+    if env_key.strip():
+        return env_key.encode("ascii", "replace"), f"${KEY_ENV}"
+    default = Path.home() / DEFAULT_KEY_RELATIVE
+    if default.is_file():
+        return default.read_bytes(), str(default)
+    raise ManifestError(f"no signing key: pass --stdin-key or --key-file PATH, set {SECRET_ENV}=<secret name> "
+                        f"(GCP Secret Manager, optional {PROJECT_ENV}), set {KEY_ENV}=<base64 raw key>, "
+                        f"or create {default}")
+
+
+def expected_public_key(public_raw: bytes, pin: Path, allow_unpinned: bool) -> bytes:
+    """Refuse any key other than the committed one; unpinned signing is first-time setup only."""
+    if pin.is_file():
+        pinned = load_public_key(str(pin))
+        if pinned != public_raw:
+            raise ManifestError(f"signing key {fingerprint(public_raw)} is not the pinned key "
+                                f"{fingerprint(pinned)} in {pin}; refusing to sign")
+        return pinned
+    if not allow_unpinned:
+        raise ManifestError(f"no pinned public key at {pin}; commit it first, "
+                            "or pass --allow-unpinned for first-time setup only")
+    print("WARNING: " + "!" * 60 + f"\nWARNING: --allow-unpinned: {pin} does not exist, so nothing checks that "
+          f"this is the project key.\nWARNING: signing with {fingerprint(public_raw)}. Commit its public key "
+          "before publishing anything signed.\nWARNING: " + "!" * 60, file=sys.stderr)
+    return public_raw
+
+
+def sign_bytes(args, manifest_bytes: bytes) -> tuple:
+    """Sign and self-verify against the pinned key. Returns (signature, public key, fingerprint), base64."""
+    module, invalid = ed25519()
+    data, source = read_signing_key_bytes(args, args.runner)
+    key = parse_private_key(data, source)
+    del data
+    public_raw = expected_public_key(raw_public_bytes(key.public_key()), Path(args.public_key),
+                                     args.allow_unpinned)
+    signature = key.sign(manifest_bytes)
+    try:
+        module.Ed25519PublicKey.from_public_bytes(public_raw).verify(signature, manifest_bytes)
+    except invalid as error:  # pragma: no cover - would mean a broken crypto backend
+        raise ManifestError("signature does not verify against the pinned key") from error
+    return base64.b64encode(signature).decode(), base64.b64encode(public_raw).decode(), fingerprint(public_raw)
 
 
 def command_sign(args) -> int:
-    key = private_key_from_env(args.key_env)
-    signature = key.sign(Path(args.manifest).read_bytes())
-    Path(args.out).write_text(base64.b64encode(signature).decode() + "\n", encoding="ascii")
-    public_raw = raw_public_bytes(key.public_key())
-    if args.public_key_out:
-        Path(args.public_key_out).write_text(base64.b64encode(public_raw).decode() + "\n", encoding="ascii")
-    print(f"Signed {args.manifest} -> {args.out} with key {fingerprint(public_raw)}")
+    signature, _, key_fingerprint = sign_bytes(args, Path(args.manifest).read_bytes())
+    Path(args.out).write_text(signature + "\n", encoding="ascii")
+    print(f"Signed {args.manifest} -> {args.out} with key {key_fingerprint}")
     return 0
 
 
@@ -322,6 +455,30 @@ def verify_signature(manifest_bytes: bytes, signature_path: Path, public_value: 
     return fingerprint(public_raw)
 
 
+def verify_manifest(manifest_bytes: bytes, assets: Path) -> dict:
+    """Check the manifest against the archives: hashes, inner sums, offsets, version."""
+    try:
+        manifest = json.loads(manifest_bytes)
+    except ValueError as error:
+        raise ManifestError(f"manifest is not JSON ({error})") from error
+    if not isinstance(manifest, dict) or manifest.get("schema") != SCHEMA or manifest.get("channel") not in CHANNELS:
+        raise ManifestError("manifest schema or channel is not recognised")
+    version = tag_version(str(manifest.get("tag")))
+    if manifest.get("version") != version or version in manifest.get("revokes", []):
+        raise ManifestError("manifest version does not match its tag, or revokes itself")
+    actual = {variant["id"]: variant for variant in collect_variants(assets, version)}
+    claimed = {variant.get("id"): variant for variant in manifest.get("variants", [])}
+    if set(actual) != set(claimed):
+        raise ManifestError(f"manifest variants {sorted(claimed)} do not match archives {sorted(actual)}")
+    for variant_id, entry in actual.items():
+        for field in ("chip", "flashSizeMb", "display", "archive", "images"):
+            if claimed[variant_id].get(field) != entry[field]:
+                raise ManifestError(f"{variant_id}: manifest {field} does not match the bundle")
+        if claimed[variant_id].get("qualification") not in QUALIFICATIONS:
+            raise ManifestError(f"{variant_id}: unknown qualification")
+    return manifest
+
+
 def command_verify(args) -> int:
     manifest_bytes = Path(args.manifest).read_bytes()
     if args.sig and args.public_key:
@@ -332,26 +489,123 @@ def command_verify(args) -> int:
         status = "UNSIGNED (integrity and offsets only; origin not proven)"
     else:
         raise ManifestError("no signature given; pass --sig and --public-key, or --allow-unsigned")
+    manifest = verify_manifest(manifest_bytes, Path(args.assets))
+    variants = sorted(variant["id"] for variant in manifest["variants"])
+    print(f"PASS {manifest['tag']} channel={manifest['channel']} variants={variants}: {status}")
+    return 0
+
+
+# --- GitHub release commands (maintainer machine or read-only CI) ---------
+
+def gh(runner, argv: list, action: str):
     try:
-        manifest = json.loads(manifest_bytes)
-    except ValueError as error:
-        raise ManifestError(f"manifest is not JSON ({error})") from error
-    if manifest.get("schema") != SCHEMA or manifest.get("channel") not in CHANNELS:
-        raise ManifestError("manifest schema or channel is not recognised")
-    version = tag_version(str(manifest.get("tag")))
-    if manifest.get("version") != version or version in manifest.get("revokes", []):
-        raise ManifestError("manifest version does not match its tag, or revokes itself")
-    actual = {variant["id"]: variant for variant in collect_variants(Path(args.assets), version)}
-    claimed = {variant.get("id"): variant for variant in manifest.get("variants", [])}
-    if set(actual) != set(claimed):
-        raise ManifestError(f"manifest variants {sorted(claimed)} do not match archives {sorted(actual)}")
-    for variant_id, entry in actual.items():
-        for field in ("chip", "flashSizeMb", "display", "archive", "images"):
-            if claimed[variant_id].get(field) != entry[field]:
-                raise ManifestError(f"{variant_id}: manifest {field} does not match the bundle")
-        if claimed[variant_id].get("qualification") not in QUALIFICATIONS:
-            raise ManifestError(f"{variant_id}: unknown qualification")
-    print(f"PASS {manifest['tag']} channel={manifest['channel']} variants={sorted(actual)}: {status}")
+        result = runner(argv)
+    except OSError as error:
+        raise ManifestError(f"could not run gh for {action} ({error}); install the GitHub CLI") from None
+    if result.returncode != 0:
+        detail = (result.stderr or b"").decode("utf-8", "replace").strip()[-400:]
+        raise ManifestError(f"gh {action} failed (exit {result.returncode}): {detail}")
+    return result
+
+
+def release_target(args) -> tuple:
+    tag_version(args.tag)
+    if not REPO_PATTERN.fullmatch(args.repo):
+        raise ManifestError(f"--repo {args.repo!r} is not OWNER/NAME")
+    return args.tag, args.repo
+
+
+def release_assets(runner, tag: str, repo: str) -> tuple:
+    result = gh(runner, ["gh", "release", "view", tag, "--repo", repo, "--json", "assets,isPrerelease"],
+                "release view")
+    try:
+        data = json.loads(result.stdout)
+        names = {str(asset["name"]) for asset in data.get("assets", [])}
+    except (ValueError, KeyError, TypeError, AttributeError) as error:
+        raise ManifestError(f"gh release view returned unexpected output ({error})") from error
+    return names, bool(data.get("isPrerelease"))
+
+
+def download_release(runner, tag: str, repo: str, names: set, directory: Path, with_signature: bool) -> None:
+    for required in (RELEASE_SUMS_NAME, MANIFEST_NAME):
+        if required not in names:
+            raise ManifestError(f"{tag} has no {required}")
+    wanted = sorted(name for name in names if RELEASE_ARCHIVE_PATTERN.fullmatch(name))
+    if not wanted:
+        raise ManifestError(f"{tag} has no {ARCHIVE_PREFIX}*.tar.gz archives")
+    wanted += [RELEASE_SUMS_NAME, MANIFEST_NAME]
+    if with_signature and SIGNATURE_NAME in names:
+        wanted.append(SIGNATURE_NAME)
+    argv = ["gh", "release", "download", tag, "--repo", repo, "--dir", str(directory)]
+    for name in wanted:
+        argv += ["--pattern", name]
+    gh(runner, argv, "release download")
+    missing = [name for name in wanted if not (directory / name).is_file()]
+    if missing:
+        raise ManifestError(f"gh release download did not produce {missing}")
+
+
+def checked_release_manifest(directory: Path, tag: str) -> tuple:
+    manifest_bytes = (directory / MANIFEST_NAME).read_bytes()
+    manifest = verify_manifest(manifest_bytes, directory)
+    if manifest["tag"] != tag:
+        raise ManifestError(f"release {tag} carries a manifest for {manifest['tag']}")
+    return manifest_bytes, manifest
+
+
+def command_sign_release(args) -> int:
+    tag, repo = release_target(args)
+    names, _ = release_assets(args.runner, tag, repo)
+    if SIGNATURE_NAME in names and not args.replace:
+        raise ManifestError(f"{tag} already has {SIGNATURE_NAME}; pass --replace to overwrite it")
+    with tempfile.TemporaryDirectory(prefix="ruview-sign-release-") as temporary:
+        directory = Path(temporary)
+        download_release(args.runner, tag, repo, names, directory, with_signature=False)
+        manifest_bytes, manifest = checked_release_manifest(directory, tag)
+        signature, public_b64, key_fingerprint = sign_bytes(args, manifest_bytes)
+        signature_path = directory / SIGNATURE_NAME
+        signature_path.write_text(signature + "\n", encoding="ascii")
+        # Re-read the exact file that will be uploaded and check it against the expected key.
+        verify_signature(manifest_bytes, signature_path, public_b64)
+        upload = ["gh", "release", "upload", tag, str(signature_path), "--repo", repo]
+        gh(args.runner, upload + (["--clobber"] if args.replace else []), "release upload")
+    print(f"Signed {tag} manifest with {key_fingerprint} and uploaded {SIGNATURE_NAME}")
+    if manifest["channel"] == "stable":
+        gh(args.runner, ["gh", "release", "edit", tag, "--repo", repo, "--prerelease=false"], "release edit")
+        print(f"{tag}: channel stable, marked as a full (non-prerelease) release")
+    else:
+        print(f"{tag}: channel {manifest['channel']}, left as a prerelease")
+    return 0
+
+
+def command_verify_release(args) -> int:
+    tag, repo = release_target(args)
+    names, prerelease = release_assets(args.runner, tag, repo)
+    with tempfile.TemporaryDirectory(prefix="ruview-verify-release-") as temporary:
+        directory = Path(temporary)
+        download_release(args.runner, tag, repo, names, directory, with_signature=True)
+        signature_path = directory / SIGNATURE_NAME
+        signed_by = None
+        if signature_path.is_file():
+            if not Path(args.public_key).is_file():
+                raise ManifestError(f"{tag} is signed but there is no public key at {args.public_key}")
+            signed_by = verify_signature((directory / MANIFEST_NAME).read_bytes(), signature_path,
+                                         args.public_key)
+        _, manifest = checked_release_manifest(directory, tag)
+    channel = manifest["channel"]
+    variants = sorted(variant["id"] for variant in manifest["variants"])
+    if signed_by:
+        print(f"PASS {tag} channel={channel} prerelease={prerelease} variants={variants}: "
+              f"signed and verified ({signed_by})")
+        if channel == "stable" and prerelease:
+            print(f"NOTE: {tag} is signed for stable but still marked prerelease; "
+                  "the maintainer's sign-release run did not finish promotion")
+        return 0
+    if channel == "stable" or not prerelease:
+        raise ManifestError(f"{tag} is unsigned but published as stable (channel={channel}, "
+                            f"prerelease={prerelease}); a stable release must carry a valid signature")
+    print(f"PASS {tag} channel={channel} prerelease={prerelease} variants={variants}: "
+          "unsigned (integrity only); origin is not proven until the maintainer runs sign-release")
     return 0
 
 
@@ -359,17 +613,40 @@ def command_keygen(args) -> int:
     from cryptography.hazmat.primitives import serialization
     module, _ = ed25519()
     key = module.Ed25519PrivateKey.generate()
-    private_raw = key.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw,
+    if args.format == "pem":
+        private = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                                     serialization.NoEncryption())
+    else:
+        raw = key.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw,
+                                serialization.NoEncryption())
+        private = base64.b64encode(raw) + b"\n"
     private_path, public_path = Path(args.private_out), Path(args.public_out)
     descriptor = os.open(private_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(descriptor, "w", encoding="ascii") as stream:
-        stream.write(base64.b64encode(private_raw).decode() + "\n")
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(private)
     public_raw = raw_public_bytes(key.public_key())
-    public_path.write_text(base64.b64encode(public_raw).decode() + "\n", encoding="ascii")
-    print(f"Private key (0600, keep offline): {private_path}\nPublic key: {public_path}\n"
-          f"Fingerprint: {fingerprint(public_raw)}")
+    public_b64 = base64.b64encode(public_raw).decode()
+    public_path.write_text(public_b64 + "\n", encoding="ascii")
+    print(f"Private key ({args.format}, mode 0600): {private_path}\n"
+          f"Public key: {public_b64}\nPublic key file: {public_path}\nFingerprint: {fingerprint(public_raw)}\n"
+          "Next: store the private key in GCP Secret Manager, then delete the local file:\n"
+          f"  gcloud secrets create {DEFAULT_SECRET_NAME} --project=<project> "
+          f"--replication-policy=automatic --data-file={private_path}\n"
+          f"  rm {private_path}\n"
+          f"and commit {public_path.name} as firmware/esp32-csi-node/release-signing/public-key.ed25519.b64")
     return 0
+
+
+def add_key_options(parser) -> None:
+    parser.add_argument("--stdin-key", action="store_true",
+                        help="read the private key from piped stdin (first source checked)")
+    parser.add_argument("--key-file", help="private key file: PEM PKCS8 Ed25519 or base64 raw")
+    parser.add_argument("--secret-project",
+                        help=f"GCP project for ${SECRET_ENV} (default: ${PROJECT_ENV}, then gcloud's active project)")
+    parser.add_argument("--public-key", default=str(PINNED_PUBLIC_KEY),
+                        help="pinned public key the signing key must match (default: the committed key)")
+    parser.add_argument("--allow-unpinned", action="store_true",
+                        help="first-time setup only: sign although no pinned public key exists")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -389,11 +666,10 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--out", required=True)
     generate.set_defaults(handler=command_generate)
 
-    sign = commands.add_parser("sign", help="write a detached Ed25519 signature")
+    sign = commands.add_parser("sign", help="write a detached Ed25519 signature (maintainer machine)")
     sign.add_argument("--manifest", required=True)
-    sign.add_argument("--key-env", required=True, help="env var holding the base64 raw private key")
     sign.add_argument("--out", required=True)
-    sign.add_argument("--public-key-out", help="also write the signer's public key (not secret)")
+    add_key_options(sign)
     sign.set_defaults(handler=command_sign)
 
     verify = commands.add_parser("verify", help="check signature, archives, images and offsets")
@@ -404,15 +680,32 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--allow-unsigned", action="store_true")
     verify.set_defaults(handler=command_verify)
 
+    sign_release = commands.add_parser(
+        "sign-release", help="download a published release, verify it, sign its manifest, upload the .sig")
+    sign_release.add_argument("--tag", required=True)
+    sign_release.add_argument("--repo", default=DEFAULT_REPO)
+    sign_release.add_argument("--replace", action="store_true", help="overwrite an existing signature")
+    add_key_options(sign_release)
+    sign_release.set_defaults(handler=command_sign_release)
+
+    verify_release = commands.add_parser("verify-release", help="download and verify a published release")
+    verify_release.add_argument("--tag", required=True)
+    verify_release.add_argument("--repo", default=DEFAULT_REPO)
+    verify_release.add_argument("--public-key", default=str(PINNED_PUBLIC_KEY))
+    verify_release.set_defaults(handler=command_verify_release)
+
     keygen = commands.add_parser("keygen", help="maintainer helper; never run in CI")
     keygen.add_argument("--private-out", required=True)
     keygen.add_argument("--public-out", required=True)
+    keygen.add_argument("--format", choices=("pem", "raw"), default="pem",
+                        help="private key encoding: PEM PKCS8 (default) or base64 raw")
     keygen.set_defaults(handler=command_keygen)
     return parser
 
 
-def main(argv=None) -> int:
+def main(argv=None, runner=None) -> int:
     args = build_parser().parse_args(argv)
+    args.runner = runner or run_command
     try:
         return args.handler(args)
     except (ManifestError, OSError) as error:
