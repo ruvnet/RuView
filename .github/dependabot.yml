@@ -56,3 +56,18 @@ updates:
     labels:
       - dependencies
       - rust
+
+  # Vendored gitlinks. Dependabot's gitsubmodule ecosystem opens one pull
+  # request per submodule, so a failure in one vendored dependency cannot be
+  # attributed to another. The scheduled workflow in
+  # update-submodules.yml produces the same one-per-submodule split with the
+  # reachability and upstream-status receipt, and is the path that keeps
+  # working when Dependabot is disabled for the repository.
+  - package-ecosystem: gitsubmodule
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - submodules
