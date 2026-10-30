@@ -1,0 +1,28 @@
+# Run 3: the node repointed at this host, with the server listening
+> RUVIEW_UDP_ALLOW=192.168.0.107 RUVIEW_UDP_BIND=0.0.0.0 sensing-server --source esp32 --udp-port 5005 --http-port 8080 --ws-port 8765 --bind-addr 127.0.0.1 --ui-path <repo>/ui
+
+2026-10-23T01:14:47.236484Z  INFO sensing_server: Data source: esp32 (udp_receiver=true, simulator=false, wifi=false)
+2026-10-23T01:14:47.238485Z  INFO sensing_server: UDP data plane security: bind 0.0.0.0:5005 — ROUTABLE, source allowlist enforced; allowlist active (1 entry), loopback always allowed
+2026-10-23T01:14:47.239610Z  INFO sensing_server: UDP listening on 0.0.0.0:5005 for ESP32, MediaTek, Qualcomm, RTL8721Dx CSI, and RTL8720F radar frames
+2026-10-23T01:14:47.388229Z  INFO sensing_server: node(s) [1] use the default position [2.0, 0.0, 1.5] (no --node-positions configured)
+
+> curl -s http://127.0.0.1:8080/api/v1/status
+{"last_frame_age_ms":9,"node_positions":{"configured_node_ids":"<redacted>","default_position":"<redacted>","default_position_node_ids":"<redacted>"},"source":"esp32","source_state":"live_unverified","status":"ready","trust":{"demoted":"<redacted>","effective_class":"<redacted>","engine_error_count":"<redacted>","last_witness":"<redacted>","node_positions":{},"phase_fusion":"<redacted>","raw_outputs_suppressed":"<redacted>","recalibration_recommended":"<redacted>"},"waiting_for_frames":false}
+
+> curl -s http://127.0.0.1:8080/api/v1/nodes
+{"nodes":[{"csi_last_seen_ms":54,"csi_sequence":109,"csi_status":"active","last_seen_ms":54,"motion_level":"<redacted>","node_id":1,"person_count":"<redacted>","person_count_valid":"<redacted>","position_configured":false,"rssi_dbm":-52.0,"status":"active"}],"total":1}
+
+> curl -s http://127.0.0.1:8080/api/v1/sensing/latest
+{"age_ms":56.0,"classification":"<redacted>","estimated_persons":"<redacted>","features":"<redacted>","node_features":"<redacted>","nodes":[{"amplitude":"<redacted>","node_id":1,"node_inference":"<redacted>","position":"<redacted>","rssi_dbm":-52.0,"subcarrier_count":188,"sync":{"csi_fps_ema":7.042033979125043,"csi_fps_samples":147,"is_leader":true,"is_valid":true,"offset_us":-4,"sequence":100,"smoothed":false,"staleness_ms":1369}}],"persons":"<redacted>","room_inference":"<redacted>","signal_field":"<redacted>","source":"esp32","tick":"<redacted>","timestamp":"<redacted>","type":"<redacted>"}
+
+# The node reached this host and the server registered it
+node boot line: I (4249) main: CSI streaming active ??? 192.168.0.45:5005 (edge_tier=2, OTA=ready, WASM=ready, mmWave=off, swarm=off, adapt=on)
+
+# The occupancy-derived fields above were removed before publication.
+# Real CSI is person data (ADR-299): the frames in this capture carry
+# breathing, movement, presence and a 17-keypoint body pose from a
+# private home. What is kept is the transport-level evidence the quick
+# start needs: the source state, the frame age, the CSI sequence, the
+# link RSSI and the node registration. The redaction is an allowlist, so
+# a person-bearing field that appears in a future response is removed by
+# default rather than by a list someone has to remember to extend.

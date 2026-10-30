@@ -328,6 +328,11 @@ cargo run -p wifi-densepose-sensing-server -- --http-port 3000 --source auto \
 Use your nodes' subnet for `--udp-allow`. The default UDP listener is loopback
 only, so LAN nodes need both the bind address and an explicit source allowlist.
 
+For the whole path from a bare board to a server that accepts its frames,
+including what the node's serial console prints when it is sending to the
+wrong address, see the
+[ESP32-S3 CSI quick start](../../docs/tutorials/esp32-s3-csi-quickstart.md).
+
 ### 5. Open the UI
 
 Navigate to [http://localhost:3000](http://localhost:3000) in your browser.

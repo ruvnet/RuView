@@ -1,0 +1,42 @@
+RuView sensing-server evidence for docs/tutorials/esp32-s3-csi-quickstart.md
+
+Captured 2026-10-22 on the guide author's Windows 11 host, Ethernet 192.168.0.45/24,
+gateway 192.168.0.1, with one ESP32-S3 node (firmware 0.8.15) on the same LAN at
+192.168.0.107. The node was provisioned with target_ip=192.168.0.57, an address
+that is not present on the LAN, so no CSI frame ever reached this host.
+
+The server binary was built from this repository at main (fcf3e93f):
+  cargo build -p wifi-densepose-sensing-server --no-default-features
+
+Run 1 shows the refusal to serve the API on a routable address without a token.
+Run 2 shows the UDP data plane widening to 0.0.0.0 under the ADR-296 guard, and
+the server state when no frame has ever arrived.
+# Run 1: routable bind without an API token
+> sensing-server --source esp32 --udp-port 5005 --http-port 8080 --ws-port 8765 --bind-addr 0.0.0.0 --ui-path <repo>/ui
+
+2026-10-23T00:43:17.362714Z  INFO sensing_server:   Source:    esp32
+2026-10-23T00:43:17.362862Z  INFO sensing_server: Data source: esp32 (udp_receiver=true, simulator=false, wifi=false)
+2026-10-23T00:43:17.364885Z  INFO sensing_server: UDP data plane security: bind 127.0.0.1:5005 — loopback-only (not reachable off-host); no source allowlist
+2026-10-23T00:43:17.365137Z ERROR sensing_server: Refusing to serve the API on routable address 0.0.0.0 with API auth off: /api/v1/* and /ws/sensing would be readable by anyone who can reach this host. Set RUVIEW_API_TOKEN=<token> (or RUVIEW_OAUTH_ISSUER) to enable auth, use --bind-addr 127.0.0.1, or set RUVIEW_ALLOW_UNAUTHENTICATED=1 on a trusted network only.
+exit status: the process refused to serve; the API port was never opened.
+
+# Run 2: loopback API, ADR-296 UDP guard, node still pointed at 192.168.0.57
+> RUVIEW_UDP_ALLOW=192.168.0.107 RUVIEW_UDP_BIND=0.0.0.0 sensing-server --source esp32 --udp-port 5005 --http-port 8080 --ws-port 8765 --bind-addr 127.0.0.1 --ui-path <repo>/ui
+
+2026-10-23T00:43:25.393751Z  INFO sensing_server: Data source: esp32 (udp_receiver=true, simulator=false, wifi=false)
+2026-10-23T00:43:25.395804Z  INFO sensing_server: UDP data plane security: bind 0.0.0.0:5005 — ROUTABLE, source allowlist enforced; allowlist active (1 entry), loopback always allowed
+2026-10-23T00:43:25.396008Z  INFO sensing_server: API auth: OFF — /api/v1/* is unauthenticated. Set RUVIEW_API_TOKEN=<token> or RUVIEW_OAUTH_ISSUER=<issuer> to enforce auth.
+
+> curl -s http://127.0.0.1:8080/api/v1/status
+{"last_frame_age_ms":null,"node_positions":{"configured_node_ids":[],"default_position":[2.0,0.0,1.5],"default_position_node_ids":[]},"source":"esp32","source_state":"disconnected","status":"ready","trust":{"demoted":false,"effective_class":null,"engine_error_count":0,"last_witness":null,"node_positions":{},"phase_fusion":null,"raw_outputs_suppressed":false,"recalibration_recommended":false},"waiting_for_frames":true}
+
+> curl -s http://127.0.0.1:8080/api/v1/nodes
+{"nodes":[],"total":0}
+
+# UDP socket the process actually opened
+UDP 0.0.0.0:5005
+
+# Host network state at capture time
+interface Ethernet: 192.168.0.45/24, gateway 192.168.0.1
+neighbour 192.168.0.57   -> 00-00-00-00-00-00   Unreachable
+neighbour 192.168.0.107  -> <NODE_MAC>          Stale
