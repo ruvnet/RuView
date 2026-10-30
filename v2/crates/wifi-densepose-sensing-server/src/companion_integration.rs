@@ -179,6 +179,17 @@ async fn serialize_control(
     if !publish && !start && !artifact {
         return next.run(request).await;
     }
+    // Do not let a permitted phone hold the shared calibration lock while
+    // streaming an unfinished body. Bound and time-limit it before locking.
+    let request = if artifact {
+        let (parts, body) = request.into_parts();
+        let bytes = match tokio::time::timeout(std::time::Duration::from_secs(5), axum::body::to_bytes(body, 64 * 1024)).await {
+            Ok(Ok(bytes)) => bytes,
+            Ok(Err(_)) => return StatusCode::PAYLOAD_TOO_LARGE.into_response(),
+            Err(_) => return StatusCode::REQUEST_TIMEOUT.into_response(),
+        };
+        Request::from_parts(parts, axum::body::Body::from(bytes))
+    } else { request };
     let _guard = control.serial.lock().await;
     if publish {
         let state = control.state.read().await;
@@ -364,6 +375,23 @@ mod tests {
             assert_eq!(policy(&Method::POST, path), None, "{path}");
         }
         assert_eq!(policy(&Method::GET, "/ws/train/progress"), None);
+    }
+    #[tokio::test]
+    async fn unfinished_spatial_upload_does_not_hold_calibration_lock() {
+        use tower::ServiceExt;
+        use axum::body::Body;
+        let serial=Arc::new(tokio::sync::Mutex::new(()));
+        let control=Control{state:Arc::new(RwLock::new(AppStateInner::minimal())),serial:serial.clone()};
+        let router=Router::new().route("/companion/v1/spatial",post(||async{StatusCode::OK}))
+            .layer(axum::middleware::from_fn_with_state(control,serialize_control));
+        let stream=futures_util::stream::pending::<Result<String,std::io::Error>>();
+        let request=Request::builder().method("POST").uri("/companion/v1/spatial").body(Body::from_stream(stream)).unwrap();
+        let pending=tokio::spawn(router.clone().oneshot(request));
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert!(serial.try_lock().is_ok());
+        assert_eq!(pending.await.unwrap().unwrap().status(),StatusCode::REQUEST_TIMEOUT);
+        let huge=Request::builder().method("POST").uri("/companion/v1/spatial").body(Body::from(vec![b'x';65537])).unwrap();
+        assert_eq!(router.oneshot(huge).await.unwrap().status(),StatusCode::PAYLOAD_TOO_LARGE);
     }
     #[tokio::test]
     async fn sensor_routes_preserve_owner_peer_and_companion_isolation() {
