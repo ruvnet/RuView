@@ -10,6 +10,99 @@ and `v2/crates/wifi-densepose-cli/`, not just the design ADRs. Where the design
 documents (ADR-135, ADR-151) describe something that isn't actually built yet,
 this guide says so explicitly.
 
+## Guided occupancy readiness (calibration HTTP service)
+
+The `calibrate-serve` command now provides a focused occupancy-signal check
+without training the full room specialist bank. This check asks whether one
+operator-labelled empty window and one occupied window separate **in the
+current CSI stream**. It does not measure detection accuracy or create the
+signed capability certificate described in ADR-301/318.
+
+1. Start the service and point **one** supported ESP32 CSI node at its UDP
+   port. This first slice supports one stream/room per service instance;
+   additional nodes on the same port invalidate readiness rather than mixing
+   their evidence:
+
+   ```bash
+   wifi-densepose calibrate-serve --udp-port 5005 --http-port 8090 --output-dir ./baselines --input-kind live
+   ```
+
+   `live` is a **declared mode**; the current UDP packet format does not
+   authenticate sensor origin or rule out packet replay. Keep the HTTP API on
+   its loopback default. If exposing it on a network, set `--token` and send
+   an `Authorization: Bearer <token>` header on every request.
+
+2. Clear the room, capture the usual empty-room baseline, and wait for
+   `state: complete`. Use the persisted filename stem from the `output_path`
+   returned by `/api/v1/calibration/result`. For example, if the result path
+   ends in `office-<uuid>.bin`, the baseline parameter below is
+   `office-<uuid>`.
+
+   ```bash
+   curl -sS -X POST http://127.0.0.1:8090/api/v1/calibration/start \
+     -H 'content-type: application/json' \
+     -d '{"room_id":"office","duration_s":60}'
+   curl -sS http://127.0.0.1:8090/api/v1/calibration/status
+   curl -sS http://127.0.0.1:8090/api/v1/calibration/result
+   ```
+
+3. With the room still empty, verify an empty window. Wait until
+   `phase` becomes `null` and `observed_empty_amp` appears, then stand in the
+   room and verify the occupied window:
+
+   ```bash
+   curl -sS -X POST http://127.0.0.1:8090/api/v1/occupancy/verify \
+     -H 'content-type: application/json' \
+     -d '{"room_id":"office","baseline":"office-<uuid>","phase":"empty"}'
+   curl -sS http://127.0.0.1:8090/api/v1/occupancy/readiness
+   curl -sS -X POST http://127.0.0.1:8090/api/v1/occupancy/verify \
+     -H 'content-type: application/json' \
+     -d '{"room_id":"office","baseline":"office-<uuid>","phase":"occupied"}'
+   curl -sS http://127.0.0.1:8090/api/v1/occupancy/readiness
+   ```
+
+   The endpoint defaults to 600 frames per phase (allowed 32–4096) and stops
+   a stalled phase after a timeout sized for at least 10 frames/s plus 30
+   seconds of overhead (minimum two minutes). A request below 600 frames can exercise
+   the flow, but cannot yield live VALID. `VALID` means this local heuristic saw
+   enough fresh frames and a mean-amplitude shift between the labelled windows
+   above 3× the combined estimated uncertainty of their medians
+   (1.857×MAD/√frames per window) and a provisional 0.75% relative floor.
+   This uncertainty estimate does not correct for serially correlated frames.
+   The empty median must also stay
+   within a provisional 10% of the saved baseline mean. These are conservative
+   setup heuristics, not calibrated accuracy guarantees. The mean-amplitude
+   choice follows [measured ESP32 observations in PR #1909](https://github.com/ruvnet/RuView/pull/1909),
+   which found that median baseline z scores often failed to separate empty
+   and occupied captures. This endpoint then reports
+   `occupancy: empty|occupied` from the rolling live window. `DEGRADED` means
+   the empty check differs from the baseline or the two windows lack contrast.
+   `UNKNOWN` means the setup is
+   incomplete, the stream is stale (over 2 seconds), the CSI grid changed,
+   its source or AP channel changed, verification timed out, or the server
+   restarted. In DEGRADED and UNKNOWN,
+   `occupancy` is null; read `reason` and `next_action` for the specific fix.
+
+4. After moving furniture, changing the sensor or AP, or seeing an unexpected
+   reading, run the empty verification again. That immediately clears the
+   previous occupied evidence; repeat the occupied phase before readiness can
+   return to VALID. A stream outage likewise clears old evidence on resumption.
+   A sustained live window outside the labelled amplitude range plus a margin
+   based on observed contrast, noise, and baseline amplitude also latches
+   DEGRADED. Recovery
+   then requires both guided phases again. This flags an out-of-range signal,
+   **not** a diagnosis of furniture drift: changed occupant position, a pet,
+   and a changed room can look similar. If the empty check remains DEGRADED,
+   recapture the baseline after checking placement.
+
+For a packet replay or generated CSI, start the service with
+`--input-kind replay` or `--input-kind synthetic`. Both modes exercise the
+same ingest and contrast path and report their declared source, but they can
+never promote a **live room** to VALID. These labels are operator declarations,
+not cryptographic source attestations. No real-room accuracy, false-alarm rate,
+or certificate claim follows from the synthetic tests in this PR. Keep this
+heuristic out of safety-critical or actuator decisions.
+
 ## The three-step pipeline
 
 ```
