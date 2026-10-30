@@ -42,6 +42,7 @@ pub struct Integration {
     room: Arc<companion_room::SharedRoomStore>,
     control: Control,
     sensors: companion_sensors::Shared,
+    spatial: Option<Arc<companion_spatial::SpatialStore>>,
     advertiser: Option<wifi_densepose_sensing_server::discovery::DiscoveryAdvertiser>,
 }
 impl Integration {
@@ -98,6 +99,7 @@ impl Integration {
             serial: Arc::new(tokio::sync::Mutex::new(())),
         };
         let sensors = companion_sensors::SensorStore::new(service.clone());
+        let spatial = auth.owner_account_scope().map(|scope| companion_spatial::SpatialStore::load(&dir, scope, &identity.installation_id, service.clone(), room.clone())).transpose()?;
         Ok(Some(Self {
             service,
             authority,
@@ -108,6 +110,7 @@ impl Integration {
             room,
             control,
             sensors,
+            spatial,
         }))
     }
     pub fn authority(&self) -> &str {
@@ -117,6 +120,7 @@ impl Integration {
         companion::owner_router(self.service.clone())
             .merge(companion_sensors::owner_router(self.sensors.clone()))
             .merge(companion_room::owner_router(self.room.clone()))
+            .merge(self.spatial.as_ref().map(|s| companion_spatial::owner_router(s.clone())).unwrap_or_default())
             .layer(axum::middleware::from_fn_with_state(
                 self.control.clone(),
                 serialize_control,
@@ -137,6 +141,8 @@ impl Integration {
         let app = app
             .merge(companion_sensors::companion_router(self.sensors.clone()))
             .merge(companion_room::read_router(self.room.clone()))
+            .merge(self.spatial.as_ref().map(|s| companion_spatial::peer_router(s.clone())).unwrap_or_default())
+            .layer(axum::middleware::from_fn_with_state(self.control.clone(), serialize_control))
             .layer(axum::middleware::from_fn_with_state(
                 self.service.clone(),
                 require_companion,
@@ -169,7 +175,8 @@ async fn serialize_control(
             request.uri().path(),
             "/api/v1/calibration/start" | "/api/v1/pose/calibrate"
         );
-    if !publish && !start {
+    let artifact = request.method() == axum::http::Method::POST && matches!(request.uri().path(), "/api/v1/companion/spatial" | "/companion/v1/spatial");
+    if !publish && !start && !artifact {
         return next.run(request).await;
     }
     let _guard = control.serial.lock().await;
@@ -236,10 +243,12 @@ fn policy(method: &axum::http::Method, path: &str) -> Option<bool> {
                 | "/ws/sensing"
                 | "/companion/v1/room"
                 | "/companion/v1/sensors"
+                | "/companion/v1/spatial"
         ) {
             return Some(false);
         }
     }
+    if *method == Method::POST && path == "/companion/v1/spatial" { return Some(false); }
     if *method == Method::POST
         && matches!(
             path,
@@ -370,6 +379,11 @@ mod tests {
             assert_eq!(owner.clone().oneshot(req).await.unwrap().status().as_u16(), expected);
         }
         assert_eq!(policy(&Method::GET,"/companion/v1/sensors"),Some(false));
+        assert_eq!(policy(&Method::GET,"/companion/v1/spatial"),Some(false));
+        assert_eq!(policy(&Method::POST,"/companion/v1/spatial"),Some(false));
+        assert_eq!(policy(&Method::PUT,"/companion/v1/spatial"),None);
+        assert_eq!(policy(&Method::GET,"/api/v1/companion/spatial"),None);
+        assert_eq!(policy(&Method::POST,"/api/v1/companion/spatial"),None);
         for path in ["/api/v1/companion/sensors", "/api/v1/companion/devices/phone/sensors"] {
             assert_eq!(policy(&Method::GET,path),None); assert_eq!(policy(&Method::POST,path),None); assert_eq!(policy(&Method::DELETE,path),None);
         }
