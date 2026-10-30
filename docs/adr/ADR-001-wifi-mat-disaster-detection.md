@@ -165,6 +165,29 @@ The module integrates with existing crates through adapters:
 | False positives from animals | Size/pattern classification |
 | Power constraints in field | Low-power modes, solar charging |
 
+## Hosted API and privacy boundary amendment (2026-10-22)
+
+PR #2249 composes the MAT API into the sensing-server host with one in-memory
+MAT `AppState`. It remains inside host validation and authentication; optional
+ML unavailability and empty incident state must be reported explicitly. This
+composition does not implement a durable incident database or establish the
+physical performance targets above.
+
+The host's `--privacy-mode` applies to MAT REST output and WebSocket broadcasts.
+HTTP response middleware cannot inspect messages after an upgrade, so the host
+installs the same recursive serialized-output filter in the MAT stream path.
+Besides structured vital signs, this removes generated alert prose and domain
+event Debug details that can contain literal heart/breathing rates. Permitted
+status, identity and coarse metadata remain; ordinary error messages and
+privacy-off serialization retain their existing behavior. Standalone MAT hosts
+must install their own output policy; the extension hook alone is not a privacy
+guarantee.
+
+Authenticated nonempty REST and real-socket stream regressions cover the output
+boundary in both privacy modes. They use synthetic incidents and do not qualify
+survivor detection, clinical accuracy, phone transport, or restart persistence.
+Native companion stream support remains governed by ADR-419's allowlist.
+
 ## References
 
 - [WiFi-based Vital Signs Monitoring](https://dl.acm.org/doi/10.1145/3130944)

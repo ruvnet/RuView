@@ -424,6 +424,11 @@ impl AuthState {
         self.oauth.is_some()
     }
 
+    /// Exact owner capability check; caller must also verify a loopback socket peer.
+    pub fn is_owner_token(&self, supplied: &str) -> bool {
+        self.token.as_ref().is_some_and(|expected| ct_eq(supplied.as_bytes(), expected.as_bytes()))
+    }
+
     /// Whether the legacy static `RUVIEW_API_TOKEN` is configured.
     pub fn static_token_enabled(&self) -> bool {
         self.token.is_some()
@@ -521,6 +526,10 @@ pub async fn require_bearer(
     mut request: Request,
     next: Next,
 ) -> Response {
+    // Only the dedicated TLS router can insert this verified principal.
+    if request.extensions().get::<crate::companion::Grant>().is_some() {
+        return next.run(request).await;
+    }
     if !auth.is_enabled() {
         return next.run(request).await;
     }
@@ -1986,6 +1995,7 @@ mod scope_gate_polarity_tests {
             (Method::DELETE, "/api/v1/recording/r1"),
             (Method::POST, "/api/v1/config/ground-truth"),
             (Method::POST, "/api/v1/calibration/reset"),
+            (Method::POST, "/api/v1/calibration/bootstrap/recover"),
         ] {
             assert_eq!(
                 required_scope_for(&m, p),

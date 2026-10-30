@@ -139,6 +139,13 @@ jobs:
         CARGO_PROFILE_TEST_DEBUG: "0"
       run: cargo test --workspace --no-default-features
 
+    - name: Verify secure companion over real sockets
+      env:
+        CARGO_PROFILE_DEV_DEBUG: "0"
+      run: |
+        cargo build --manifest-path v2/Cargo.toml --locked -p wifi-densepose-sensing-server --bin sensing-server
+        python3 scripts/tests/companion_socket_probe.py v2/target/debug/sensing-server
+
     - name: Verify patched archive and cache compatibility
       working-directory: v2
       env:

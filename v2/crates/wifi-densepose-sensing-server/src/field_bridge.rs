@@ -264,7 +264,7 @@ pub fn bootstrap_background_match(
     observed_at_us: u64,
 ) -> Option<BootstrapBackgroundMatch> {
     if frame_history.len() < OCCUPANCY_WINDOW
-        || field.check_freshness(observed_at_us) != CalibrationStatus::Fresh
+        || !matches!(field.check_freshness(observed_at_us), CalibrationStatus::Fresh | CalibrationStatus::Stale)
     {
         return None;
     }
@@ -923,6 +923,11 @@ mod tests {
             .is_some_and(|score| (0.5..=1.0).contains(&score)));
 
         let short_history: VecDeque<Vec<f64>> = empty_history.iter().take(49).cloned().collect();
+        // Staleness withdraws full calibrated authority after half the lifetime,
+        // but the persisted negative-only reference remains useful until expiry.
+        assert!(bootstrap_background_match(&field, &empty_history, 32_000_000).is_some());
+        assert!(calibrated_occupancy(&field, &empty_history, 32_000_000).is_none());
+        assert!(bootstrap_background_match(&field, &empty_history, 62_000_000).is_none());
         assert!(!bootstrap_empty_prior_applies(
             &field,
             &short_history,

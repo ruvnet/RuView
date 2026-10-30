@@ -192,6 +192,12 @@ impl DetectionPipeline {
         self.ml_pipeline.as_ref().is_none_or(|ml| ml.is_ready())
     }
 
+    /// API-only packages have no optional ML runtime to initialize.
+    #[cfg(not(feature = "ml"))]
+    pub fn ml_ready(&self) -> bool {
+        false
+    }
+
     /// Process a scan zone and return detected vital signs.
     ///
     /// CSI data must be pushed into the pipeline via [`add_data`] before calling
