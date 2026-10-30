@@ -325,6 +325,10 @@ jobs:
             exit 1
           fi
 
+      - name: Install the signing dependency before any credential exists
+        if: vars.FIRMWARE_SIGNING_KMS_KEY != ''
+        run: python -m pip install --disable-pip-version-check cryptography==46.0.7
+
       # Direct WIF (no service account): the federated token is the auth_token output.
       # Through a service account: token_format access_token mints a 5-minute access token.
       # Both outputs are masked by the action; no credentials file and no env exports.
@@ -348,7 +352,6 @@ jobs:
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.gcp-auth.outputs.access_token || steps.gcp-auth.outputs.auth_token }}
         run: |
           set -euo pipefail
-          python -m pip install --disable-pip-version-check cryptography==46.0.7
           python firmware/esp32-csi-node/tools/release_manifest.py sign \
             --manifest release-assets/firmware-manifest.json \
             --out release-assets/firmware-manifest.json.sig --kms-key "$KMS_KEY"
