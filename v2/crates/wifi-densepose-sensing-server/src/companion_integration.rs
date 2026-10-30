@@ -138,11 +138,12 @@ impl Integration {
             ))
     }
     pub async fn start(self, app: Router) {
-        let app = app
-            .merge(companion_sensors::companion_router(self.sensors.clone()))
-            .merge(companion_room::read_router(self.room.clone()))
-            .merge(self.spatial.as_ref().map(|s| companion_spatial::peer_router(s.clone())).unwrap_or_default())
-            .layer(axum::middleware::from_fn_with_state(self.control.clone(), serialize_control))
+        let app = attach_peer_artifacts(
+            app.merge(companion_sensors::companion_router(self.sensors.clone()))
+                .merge(companion_room::read_router(self.room.clone())),
+            self.spatial.as_ref().map(|s| companion_spatial::peer_router(s.clone())).unwrap_or_default(),
+            self.control.clone(),
+        )
             .layer(axum::middleware::from_fn_with_state(
                 self.service.clone(),
                 require_companion,
@@ -158,6 +159,12 @@ impl Integration {
         });
     }
 }
+// Existing calibration routes already use protect_control. Layering their
+// router a second time would reacquire the same non-reentrant mutex.
+fn attach_peer_artifacts(app: Router, artifacts: Router, control: Control) -> Router {
+    app.merge(artifacts.layer(axum::middleware::from_fn_with_state(control, serialize_control)))
+}
+
 #[derive(Clone)]
 struct Control {
     state: SharedState,
@@ -375,6 +382,21 @@ mod tests {
             assert_eq!(policy(&Method::POST, path), None, "{path}");
         }
         assert_eq!(policy(&Method::GET, "/ws/train/progress"), None);
+    }
+    #[tokio::test]
+    async fn peer_composition_never_takes_the_calibration_lock_twice() {
+        use tower::ServiceExt;
+        use axum::body::Body;
+        let control=Control{state:Arc::new(RwLock::new(AppStateInner::minimal())),serial:Arc::new(tokio::sync::Mutex::new(()))};
+        let existing=Router::new().route("/api/v1/calibration/start",post(||async{StatusCode::OK}))
+            .layer(axum::middleware::from_fn_with_state(control.clone(),serialize_control));
+        let artifacts=Router::new().route("/companion/v1/spatial",post(||async{StatusCode::OK}));
+        let app=attach_peer_artifacts(existing,artifacts,control);
+        for path in ["/api/v1/calibration/start","/companion/v1/spatial"] {
+            let request=Request::builder().method("POST").uri(path).body(Body::from("{}")).unwrap();
+            let response=tokio::time::timeout(std::time::Duration::from_secs(1),app.clone().oneshot(request)).await.expect("nested calibration lock").unwrap();
+            assert_eq!(response.status(),StatusCode::OK);
+        }
     }
     #[tokio::test]
     async fn unfinished_spatial_upload_does_not_hold_calibration_lock() {
