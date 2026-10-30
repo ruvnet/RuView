@@ -304,6 +304,35 @@
       ],
       "rationale": "The [aether]/[meridian]/[mat]/[sota] extras map to Cargo features that link heavy crates (mat -> ort/ONNX Runtime, train -> tokio+ruvector, etc.). The DEFAULT wheel must link none of them to stay under the ADR-117 §5.4 5 MB budget, which requires: (1) `default = []` in python/Cargo.toml [features], (2) every SOTA dep declared `optional = true` so it is pulled only by its own feature, and (3) `strip = true` in pyproject [tool.maturin] to drop debug symbols. Flipping default to include a SOTA feature, or making a SOTA dep non-optional, silently balloons the default wheel. NOTE: a fix-marker is a string guard and cannot measure bytes — it protects the CONFIG that keeps the wheel small. The actual numeric 5 MB ceiling is enforced by the `wheel-size-budget` job in .github/workflows/python-ci.yml, which builds the default (no-features) wheel and fails if it exceeds the budget.",
       "ref": "https://github.com/ruvnet/RuView/pull/1387"
+    },
+    {
+      "id": "RuView#2092",
+      "title": "the ESP32 stable-release qualification is runnable and gated: the harness records the environment and the firmware version, the gate reads a version-scoped verdict, and a failed qualification blocks the release",
+      "files": [
+        "scripts/esp32_firmware_qualification.py",
+        "scripts/esp32_firmware_release_readiness.py",
+        "scripts/qualify-esp32-firmware.py",
+        "scripts/check-firmware-release-readiness.py",
+        "docs/firmware-release.md",
+        "docs/validation/2026-10-23-esp32-firmware-release-qualification.md"
+      ],
+      "require": [
+        "RuView#2092",
+        "ruview:esp32-firmware-qualification",
+        "qualification_marker",
+        "--environment-note is required",
+        "--firmware-version is required",
+        "firmware_version",
+        "verdict=",
+        "qualification that passes"
+      ],
+      "forbid": [
+        "/ruview:esp32-firmware-qualification\\s+node=/",
+        "/\"--environment-note\",\\s*default=\"[^\"]+\"/",
+        "/\"--firmware-version\",\\s*default=\"[^\"]+\"/"
+      ],
+      "rationale": "The acceptance procedure for a stable ESP32 firmware release existed only as prose inside the 2026-08-31 validation record: nothing ran it, nothing checked whether a version had been qualified, and nothing recorded the environment a threshold came from. The harness has to keep two fail-closed properties, because dropping either one would turn the verdict into decoration. (1) The run must name the environment and the firmware version: the thresholds were measured on one board, one access point, and one room, so a number without its environment is not evidence, and a record that does not name its version cannot be matched to a release. The 'require' patterns pin both refusals, and the two 'forbid' patterns keep the two arguments from ever acquiring a default, which would silently make the run legal without them. (2) The verdict must be scoped to the version: a qualification record is only a qualification for the version it names, so the marker carries version= and the gate matches on it. The first 'forbid' fires on a record whose marker names a node but no version. The 'require' on the gate's own error text keeps the FAIL path from being rewritten into a pass.",
+      "ref": "https://github.com/ruvnet/RuView/issues/2092"
     }
   ]
 }
