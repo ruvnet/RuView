@@ -2059,6 +2059,9 @@ struct AppStateInner {
     latest_realtek_csi: Option<realtek_csi::RealtekCsiSnapshot>,
     /// Instant of the last validated RTL8721Dx CSI UDP frame.
     last_realtek_csi_frame: Option<std::time::Instant>,
+    /// Last accepted RTL8721Dx sequence per node, so a replayed or
+    /// reordered datagram never updates the state (issue #1950).
+    realtek_sequences: std::collections::HashMap<u8, u32>,
     /// Latest bounded ADR-270 event per vendor. Complex CSI uses dedicated transports.
     latest_vendor_rf: BTreeMap<String, wifi_densepose_sensing_server::vendor_rf::VendorEventSnapshot>,
     /// Instant of the last accepted ADR-270 vendor event (issue #2097).
@@ -3015,6 +3018,7 @@ impl AppStateInner {
             last_qualcomm_frame: None,
             latest_realtek_csi: None,
             last_realtek_csi_frame: None,
+            realtek_sequences: std::collections::HashMap::new(),
             latest_vendor_rf: BTreeMap::new(),
             last_vendor_rf_frame: None,
             tx: broadcast::channel::<String>(16).0,
@@ -6241,7 +6245,27 @@ async fn latest_qualcomm_csi(State(state): State<SharedState>) -> Json<serde_jso
 async fn latest_realtek_csi(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
     match &s.latest_realtek_csi {
-        Some(snapshot) => Json(serde_json::to_value(snapshot).unwrap_or_default()),
+        Some(snapshot) => {
+            // The snapshot is only a measurement while it is fresh. An expired
+            // one is reported as such instead of being served as current
+            // (issue #1950).
+            let age_ms = realtek_csi::now_unix_ms().saturating_sub(snapshot.received_at_unix_ms);
+            let freshness = realtek_csi::Freshness::of_age(age_ms);
+            if freshness == realtek_csi::Freshness::Offline {
+                return Json(serde_json::json!({
+                    "status": "offline",
+                    "state": "offline",
+                    "age_ms": age_ms,
+                    "node_id": snapshot.node_id,
+                }));
+            }
+            let mut value = serde_json::to_value(snapshot).unwrap_or_default();
+            if let Some(object) = value.as_object_mut() {
+                object.insert("age_ms".to_string(), serde_json::json!(age_ms));
+                object.insert("state".to_string(), serde_json::json!(freshness));
+            }
+            Json(value)
+        }
         None => Json(serde_json::json!({"status": "no Realtek RTL8721Dx CSI data yet"})),
     }
 }
@@ -6272,7 +6296,7 @@ mod realtek_ingest_tests {
     }
 
     #[tokio::test]
-    async fn latest_route_keeps_synthetic_provenance_and_node_identity() {
+    async fn latest_route_keeps_provenance_and_node_identity() {
         let state: SharedState = Arc::new(RwLock::new(AppStateInner::minimal()));
         let mut simulator = RealtekCsiSimulator::new(SimulatorConfig::default()).unwrap();
         let snapshot = realtek_csi::RealtekCsiSnapshot::from_frame(&simulator.next_frame());
@@ -6280,8 +6304,30 @@ mod realtek_ingest_tests {
         state.write().await.latest_realtek_csi = Some(snapshot);
         let Json(value) = latest_realtek_csi(State(state)).await;
         assert_eq!(value["node_id"], expected_node_id);
+        // The payload's synthetic flag is a claim, never the origin: the UDP
+        // data plane is unauthenticated (ADR-323).
         assert_eq!(value["source"], "realtek_csi:simulated");
-        assert_eq!(value["synthetic"], true);
+        assert_eq!(value["origin"], "unverified");
+        assert_eq!(value["payload_claims_synthetic"], true);
+        assert_eq!(value["state"], "fresh");
+    }
+
+    #[tokio::test]
+    async fn latest_route_expires_an_old_snapshot() {
+        let state: SharedState = Arc::new(RwLock::new(AppStateInner::minimal()));
+        let mut simulator = RealtekCsiSimulator::new(SimulatorConfig::default()).unwrap();
+        let frame = simulator.next_frame();
+        let old = realtek_csi::RealtekCsiSnapshot::from_frame_at(
+            &frame,
+            realtek_csi::now_unix_ms() - (realtek_csi::REALTEK_CSI_EXPIRY_MS + 1_000),
+        );
+        state.write().await.latest_realtek_csi = Some(old);
+        let Json(value) = latest_realtek_csi(State(state)).await;
+        assert_eq!(value["state"], "offline");
+        assert_eq!(value["status"], "offline");
+        // An expired snapshot is no longer served as a measurement.
+        assert!(value.get("csi_valid").is_none());
+        assert!(value.get("mean_amplitude").is_none());
     }
 }
 
@@ -12447,10 +12493,27 @@ async fn udp_receiver_task(
                 {
                     match wifi_densepose_hardware::realtek_csi::CsiFrame::from_bytes(&buf[..len]) {
                         Ok((frame, consumed)) if consumed == len => {
-                            let snapshot = realtek_csi::RealtekCsiSnapshot::from_frame(&frame);
+                            // The UDP data plane is unauthenticated, so a frame
+                            // is accepted only when it carries a valid payload
+                            // and is newer than the last one accepted for its
+                            // node. A replayed or reordered datagram must not
+                            // reach the state or the broadcast (issue #1950).
+                            let mut s = state.write().await;
+                            let last_sequence =
+                                s.realtek_sequences.get(&frame.node_id).copied();
+                            if let Err(reason) = realtek_csi::accept_frame(&frame, last_sequence) {
+                                warn!(
+                                    "Rejected RTL8721Dx CSI datagram from {src}: {}",
+                                    reason.as_str()
+                                );
+                                continue;
+                            }
+                            let snapshot = realtek_csi::RealtekCsiSnapshot::from_frame_at(
+                                &frame,
+                                realtek_csi::now_unix_ms(),
+                            );
                             debug!("RTL8721Dx CSI from {src}: node={} seq={} subcarriers={}", snapshot.node_id, snapshot.sequence, snapshot.num_sub_carrier);
                             let json = serde_json::to_string(&snapshot).ok();
-                            let mut s = state.write().await;
                             // A secondary Realtek link must not replace a fresh ESP32
                             // room source and make its vitals disappear from the UI.
                             s.source = primary_source_with_realtek(
@@ -12458,6 +12521,7 @@ async fn udp_receiver_task(
                                 snapshot.source,
                             );
                             s.last_realtek_csi_frame = Some(std::time::Instant::now());
+                            s.realtek_sequences.insert(frame.node_id, frame.sequence);
                             s.latest_realtek_csi = Some(snapshot);
                             if let Some(json) = json {
                                 let _ = s.tx.send(json);
@@ -14698,6 +14762,7 @@ async fn main() {
         last_qualcomm_frame: None,
         latest_realtek_csi: None,
         last_realtek_csi_frame: None,
+        realtek_sequences: std::collections::HashMap::new(),
         latest_vendor_rf: BTreeMap::new(),
         last_vendor_rf_frame: None,
         tx,
