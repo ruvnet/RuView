@@ -183,3 +183,15 @@ python -m serial.tools.miniterm COM7 115200
 ```
 
 If the boot loop persists on a release build, capture a full serial trace including the watchdog backtrace and reopen #438 with the new build hash.
+
+---
+
+## 12. Person count changes while the room is unchanged
+
+**Symptom:** `estimated_persons` moves between 1, 2 and 3 while nobody enters or leaves the room. Reported in #2058.
+
+**Root cause:** The count's hysteresis (`score_to_person_count`) holds the *output* steady while the activity score sits inside a band, but it cannot hold it when the score crosses the whole band on its own: the thresholds are crossed on the way up as easily as on the way down, so every crossing moved the published number. The room classification has its own 1.5 s debounce; the count had none.
+
+**Fix:** The published count now changes only after the new value has been observed continuously for 1.5 s — the same window the room classification uses, because both describe the same debounced room state. A count of zero is not held back: an empty room is reported as empty as soon as the room vote says so.
+
+**What it does not fix:** The count's correspondence to the true occupancy. The activity score this count is derived from is not an occupancy estimator (see section 2 and #1940), so in an empty room the count can still settle on a non-zero value. What the dwell removes is the *movement*, not the bias.
