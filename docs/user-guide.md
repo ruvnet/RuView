@@ -1952,13 +1952,15 @@ A 3-6 node ESP32-S3 mesh provides full CSI at 20 Hz. Total cost: ~$54 for a 3-no
 
 Use versioned bundles from [Releases](https://github.com/ruvnet/RuView/releases),
 not the historical binaries in `firmware/esp32-csi-node/release_bins/`.
-The 0.8.16 prerelease adds conservative MR60BHA2 identification to the prior
-USB identity, OTA provisioning, and CSI reliability fixes.
-It has CI build/host-test coverage; new physical-board qualification remains
-pending. The previous stable firmware is 0.8.8.
+The 0.8.17 prerelease adds an experimental ESP32-C5 headless bundle beside the
+existing S3 and C6 targets, with guarded C5 installation.
+It has CI build/host-test coverage; C5 remains experimental and new
+physical-board qualification remains pending. The previous stable firmware is
+0.8.8.
 
 | Release | What It Includes | Tag |
 |---------|-----------------|-----|
+| [v0.8.17](https://github.com/ruvnet/RuView/releases/tag/v0.8.17-esp32) | **Prerelease:** experimental ESP32-C5 headless bundle; CI/host-test coverage, without new physical firmware qualification | `v0.8.17-esp32` |
 | [v0.8.16](https://github.com/ruvnet/RuView/releases/tag/v0.8.16-esp32) | **Prerelease:** conservative MR60BHA2 identification; CI/host-test coverage, without new physical firmware qualification | `v0.8.16-esp32` |
 | [v0.8.14](https://github.com/ruvnet/RuView/releases/tag/v0.8.14-esp32) | **Prerelease:** corrected C6 base-MAC identity, OTA key provisioning without a host key cache; physical qualification pending | `v0.8.14-esp32` |
 | [v0.8.8](https://github.com/ruvnet/RuView/releases/tag/v0.8.8-esp32) | Previous stable firmware: consistent occupancy and rate-aware C6 processing; see [release evidence](releases/v0.8.8-esp32.md) | `v0.8.8-esp32` |
@@ -1972,7 +1974,7 @@ pending. The previous stable firmware is 0.8.8.
 | [v0.3.0-alpha](https://github.com/ruvnet/RuView/releases/tag/v0.3.0-alpha-esp32) | Alpha — adds on-device edge intelligence (ADR-039) | `v0.3.0-alpha-esp32` |
 | [v0.2.0](https://github.com/ruvnet/RuView/releases/tag/v0.2.0-esp32) | Raw CSI streaming, TDM, channel hopping, QUIC mesh | `v0.2.0-esp32` |
 
-For 0.8.14, select the correct archive, verify its release `SHA256SUMS.txt`,
+For 0.8.17, select the correct archive, verify its release `SHA256SUMS.txt`,
 extract into a separate directory, then verify the enclosed checksums:
 
 | Archive | Board configuration |
@@ -1980,6 +1982,7 @@ extract into a separate directory, then verify the enclosed checksums:
 | `esp32-csi-node-firmware-8mb.tar.gz` | ESP32-S3 display build, 8 MB flash |
 | `esp32-csi-node-firmware-4mb.tar.gz` | ESP32-S3 headless build, 4 MB layout |
 | `esp32-csi-node-firmware-c6-4mb.tar.gz` | ESP32-C6 research target, 4 MB layout |
+| `esp32-csi-node-firmware-c5-4mb.tar.gz` | ESP32-C5 research target, 4 MB layout (experimental) |
 
 Bare 8 MB DevKitC boards need the source `sdkconfig.defaults.devkitc` overlay;
 do not use the display build. See the [firmware guide](../firmware/esp32-csi-node/README.md#0-download-a-versioned-firmware-bundle)
@@ -1995,7 +1998,7 @@ python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
 
 **4 MB headless S3 boards:** use the matching application and partition table
 from `esp32-csi-node-firmware-4mb.tar.gz` on the
-[0.8.16 prerelease](https://github.com/ruvnet/RuView/releases/tag/v0.8.16-esp32)
+[0.8.17 prerelease](https://github.com/ruvnet/RuView/releases/tag/v0.8.17-esp32)
 and select `--flash-size 4MB`:
 
 ```bash

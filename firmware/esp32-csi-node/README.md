@@ -197,7 +197,7 @@ For users who want to get running fast. Detailed explanations follow in later se
 ### 0. Download a versioned firmware bundle
 
 Use the versioned source tag and binaries on the
-[v0.8.16 ESP32 prerelease page](https://github.com/ruvnet/RuView/releases/tag/v0.8.16-esp32).
+[v0.8.17 ESP32 prerelease page](https://github.com/ruvnet/RuView/releases/tag/v0.8.17-esp32).
 For the previous stable firmware and its hardware evidence, see
 [v0.8.8](https://github.com/ruvnet/RuView/releases/tag/v0.8.8-esp32).
 Choose the package that names both your chip and flash size:
@@ -207,12 +207,14 @@ Choose the package that names both your chip and flash size:
 | `esp32-csi-node-firmware-8mb.tar.gz` | ESP32-S3 display configuration, 8 MB flash |
 | `esp32-csi-node-firmware-4mb.tar.gz` | ESP32-S3 headless configuration, 4 MB layout |
 | `esp32-csi-node-firmware-c6-4mb.tar.gz` | ESP32-C6 research target, 4 MB layout |
+| `esp32-csi-node-firmware-c5-4mb.tar.gz` | ESP32-C5 research target, 4 MB layout (experimental) |
 
 Each bundle contains the matching bootloader, partition table, OTA metadata,
 application, version and checksums. Verify the archive using the release's
 `SHA256SUMS.txt`, extract it into its own directory, then verify the enclosed
 `SHA256SUMS.txt`. Never flash an S3 bundle
-onto a C6, or a C6 bundle onto an S3.
+onto a C6 or a C5, or a C6 or C5 bundle onto an S3. The C5 bootloader is at
+`0x2000` and is not interchangeable with the S3 or C6 bootloader.
 
 The 4 MB application/partition filenames are `esp32-csi-node-4mb.bin` and
 `partition-table-4mb.bin`; C6 uses `esp32-csi-node-c6.bin` and
