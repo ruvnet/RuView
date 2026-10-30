@@ -26,6 +26,10 @@ jobs:
           python-version: '3.11'
       - name: Verify provisioning and secret handling without hardware
         run: python -m unittest discover -s firmware/esp32-csi-node/tests -p 'test_provision*.py' -v
+      - name: Verify release manifest generation, signing and offsets (synthetic bundles)
+        run: |
+          python -m pip install --disable-pip-version-check cryptography==46.0.7
+          python -m unittest discover -s firmware/esp32-csi-node/tests -p 'test_release_manifest*.py' -v
 
   version-guard:
     name: Verify version.txt matches release tag
@@ -240,9 +244,22 @@ jobs:
     if: github.ref_type == 'tag'
     needs: [version-guard, provisioning-tests, build, build-c6-idf6]
     runs-on: ubuntu-latest
+    # Holds FIRMWARE_MANIFEST_SIGNING_KEY; add required reviewers to gate publishing.
+    environment: firmware-release
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+
+      - name: Install the manifest signing dependency
+        run: python -m pip install --disable-pip-version-check cryptography==46.0.7
+
       - name: Download the exact-run firmware artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -258,16 +275,99 @@ jobs:
           done
           (cd release-assets && sha256sum *.tar.gz > SHA256SUMS.txt)
 
+      - name: Resolve the release channel
+        id: channel
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          CHANNEL="$(tr -d '[:space:]' < firmware/esp32-csi-node/RELEASE_CHANNEL)"
+          case "$CHANNEL" in
+            stable|prerelease) ;;
+            *) echo "::error::RELEASE_CHANNEL must be 'stable' or 'prerelease', got '$CHANNEL'"; exit 1 ;;
+          esac
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.]*)?-esp32$'; then
+            echo "::error::Tag '$TAG' is not v<semver>-esp32"
+            exit 1
+          fi
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "Release channel: $CHANNEL"
+
+      - name: Generate the release manifest from the exact-run bundles
+        env:
+          TAG: ${{ github.ref_name }}
+          CHANNEL: ${{ steps.channel.outputs.channel }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python firmware/esp32-csi-node/tools/release_manifest.py generate \
+            --tag "$TAG" --assets release-assets --channel "$CHANNEL" \
+            --source-commit "$GITHUB_SHA" --workflow-run "$RUN_URL" \
+            --out release-assets/firmware-manifest.json
+
+      - name: Sign the release manifest
+        id: sign
+        env:
+          CHANNEL: ${{ steps.channel.outputs.channel }}
+          FIRMWARE_MANIFEST_SIGNING_KEY: ${{ secrets.FIRMWARE_MANIFEST_SIGNING_KEY }}
+        run: |
+          mkdir -p release-work
+          if [ -n "$FIRMWARE_MANIFEST_SIGNING_KEY" ]; then
+            python firmware/esp32-csi-node/tools/release_manifest.py sign \
+              --manifest release-assets/firmware-manifest.json \
+              --key-env FIRMWARE_MANIFEST_SIGNING_KEY \
+              --out release-assets/firmware-manifest.json.sig \
+              --public-key-out release-work/signer-public-key.b64
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "note=\`firmware-manifest.json\` is signed (Ed25519, \`firmware-manifest.json.sig\`); see firmware/esp32-csi-node/release-signing/README.md." >> "$GITHUB_OUTPUT"
+          elif [ "$CHANNEL" = "stable" ]; then
+            echo "::error::A stable release requires FIRMWARE_MANIFEST_SIGNING_KEY in the firmware-release environment."
+            exit 1
+          else
+            echo "::warning::FIRMWARE_MANIFEST_SIGNING_KEY is not set; publishing an UNSIGNED prerelease manifest."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "note=\`firmware-manifest.json\` is UNSIGNED for this prerelease: it proves integrity and offsets, not origin." >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify the manifest, archives, images and offsets before upload
+        env:
+          CHANNEL: ${{ steps.channel.outputs.channel }}
+          SIGNED: ${{ steps.sign.outputs.signed }}
+        run: |
+          PUBLIC_KEY=firmware/esp32-csi-node/release-signing/public-key.ed25519.b64
+          if [ "$SIGNED" != "true" ]; then
+            set -- --allow-unsigned
+          elif [ -f "$PUBLIC_KEY" ]; then
+            set -- --sig release-assets/firmware-manifest.json.sig --public-key "$PUBLIC_KEY"
+          elif [ "$CHANNEL" = "stable" ]; then
+            echo "::error::A stable release requires the committed public key $PUBLIC_KEY."
+            exit 1
+          else
+            echo "::warning::No committed public key; verifying the prerelease signature against the signer's own key."
+            set -- --sig release-assets/firmware-manifest.json.sig --public-key release-work/signer-public-key.b64
+          fi
+          python firmware/esp32-csi-node/tools/release_manifest.py verify \
+            --manifest release-assets/firmware-manifest.json --assets release-assets "$@"
+
+      - name: Attest build provenance for the archives and manifest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: |
+            release-assets/*.tar.gz
+            release-assets/firmware-manifest.json
+
       - name: Publish the downloadable firmware bundles
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           name: ESP32 firmware ${{ github.ref_name }}
-          prerelease: true
+          prerelease: ${{ steps.channel.outputs.channel != 'stable' }}
           make_latest: false
           body: |
             Exact-run ESP32-S3 display 8 MB, ESP32-S3 headless 4 MB, ESP32-C6 4 MB, and ESP32-C5 4 MB firmware bundles.
+            Release channel: ${{ steps.channel.outputs.channel }}.
             Verify each archive against `SHA256SUMS.txt` before flashing.
+            `firmware-manifest.json` lists each variant's images, SHA-256 digests and flash offsets taken from the bundled `flasher_args.json`.
+            ${{ steps.sign.outputs.note }}
+            Build provenance: `gh attestation verify <archive> -R ${{ github.repository }}`.
             CI builds and host tests verify software behavior, not target hardware.
-            This prerelease has no new physical-board qualification or sensing-accuracy claim.
+            This release has no new physical-board qualification or sensing-accuracy claim.
             Select the matching board configuration using firmware/esp32-csi-node/README.md.
           files: release-assets/*
