@@ -242,6 +242,7 @@ impl SharedRoomStore {
             current: Mutex::new(current),
         }))
     }
+    pub fn snapshot(&self) -> Option<Envelope> { self.current.lock().ok().map(|v| v.clone()) }
     pub fn matches_binding(&self, binding: &str, node_ids: &[u8]) -> bool {
         let Ok(e) = self.current.lock() else {
             return false;
