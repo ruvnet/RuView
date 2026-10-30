@@ -64,6 +64,11 @@ pub mod metrics_core;
 /// degenerate class balance, missing baseline, metric-name provenance) before
 /// release. Prevention only; withdraws nothing already published.
 pub mod model_gates;
+/// Model-artifact reader for the ADR-298 release gate (issue #1521) — parses a
+/// published `.safetensors` container or the `presence-head.json` sidecar into
+/// the [`model_gates::LinearHead`] the gates evaluate, and checks the container
+/// against the safetensors format spec (issue #1522).
+pub mod model_artifact;
 /// Public-benchmark split protocols and leakage guards (ADR-291 §2–3) —
 /// deterministic cross-subject / cross-environment / cross-orientation
 /// assignment plus the structural [`protocols::leakage::LeakageAudit`],

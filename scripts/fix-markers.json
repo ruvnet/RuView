@@ -304,6 +304,63 @@
       ],
       "rationale": "The [aether]/[meridian]/[mat]/[sota] extras map to Cargo features that link heavy crates (mat -> ort/ONNX Runtime, train -> tokio+ruvector, etc.). The DEFAULT wheel must link none of them to stay under the ADR-117 §5.4 5 MB budget, which requires: (1) `default = []` in python/Cargo.toml [features], (2) every SOTA dep declared `optional = true` so it is pulled only by its own feature, and (3) `strip = true` in pyproject [tool.maturin] to drop debug symbols. Flipping default to include a SOTA feature, or making a SOTA dep non-optional, silently balloons the default wheel. NOTE: a fix-marker is a string guard and cannot measure bytes — it protects the CONFIG that keeps the wheel small. The actual numeric 5 MB ceiling is enforced by the `wheel-size-budget` job in .github/workflows/python-ci.yml, which builds the default (no-features) wheel and fails if it exceeds the budget.",
       "ref": "https://github.com/ruvnet/RuView/pull/1387"
+    },
+    {
+      "id": "RuView#1521",
+      "title": "the ADR-298 release gate runs against a real artifact: the model_release_gate CLI reads a published head, the publish path runs it before uploading, CI executes it, and the model card discloses the saturated head",
+      "files": [
+        "v2/crates/wifi-densepose-train/src/bin/model_release_gate.rs",
+        "v2/crates/wifi-densepose-train/src/model_artifact.rs",
+        "v2/crates/wifi-densepose-train/src/model_gates.rs",
+        "v2/crates/wifi-densepose-train/tests/test_model_release_gate.rs",
+        "v2/crates/wifi-densepose-train/Cargo.toml",
+        "scripts/publish-huggingface.py",
+        "scripts/tests/test_publish_huggingface_gate.py",
+        ".github/workflows/model-release-gate.yml",
+        "docs/huggingface/MODEL_CARD.md"
+      ],
+      "require": [
+        "RuView#1521",
+        "if gate is None:\n        gate = run_model_release_gate(model_dir)",
+        "if not gate.passed:",
+        "--bin model_release_gate -- --artifact",
+        "python -m unittest scripts/tests/test_publish_huggingface_gate.py",
+        "evaluate_head_gates",
+        "rejects_the_degenerate_issue_1521_head",
+        "not_evaluated",
+        "Do not use this head for occupancy or safety decisions until it is replaced",
+        "minimum possible logit over **all** inputs"
+      ],
+      "forbid": [
+        "/skip[-_]model[-_]gate|--no-verify-gate|--force-publish|--ignore-gate|--bypass[-_]gate/i",
+        "/cannot_evaluate[\\s\\S]{0,600}ExitCode::SUCCESS/"
+      ],
+      "rationale": "ADR-298's gates existed and were unit-tested, but nothing pointed them at a file. The maintainer said so twice: in issue #1521 the ADR-298 gate 'exists and is tested, but it is not yet wired into any CI job or release/export path', and the workflow's own comment admitted it 'does NOT gate an actual model publish'. A gate nobody runs is a note, not a barrier, so the published presence head (bias 8.19 against a weight norm of 3.67, a head that can never output 'absent') stayed downloadable. This marker pins the three links that turn it into a barrier. (1) An entry point that reads a real artifact: the CLI (model_release_gate), the artifact reader (model_artifact), and evaluate_head_gates, which is the ADR-298 maths without the report-level baseline gate an artifact file cannot satisfy. (2) The publish path calls it and refuses to upload without a pass: 'gate = run_model_release_gate(model_dir)' plus the fail-closed 'if not gate.passed:' guard, and 'not_evaluated' keeps 'could not be told' distinct from 'it is fine'. (3) CI actually executes the CLI and the publish-path tests: the '--bin model_release_gate -- --artifact' invocation in the workflow plus the 'python -m unittest scripts/tests/test_publish_huggingface_gate.py' step, so neither the guard nor the only coverage of the publish wiring can quietly stop running — the failure mode this marker exists to prevent. The first forbid keeps a bypass flag from ever appearing; the second keeps the fail-closed exit code from being rewritten into a pass. (4) The saturation is disclosed in the in-repo model card, so the warning cannot be quietly deleted: 'Do not use this head for occupancy or safety decisions until it is replaced' and the minimum-logit table row keep the arithmetic visible next to the 'Is someone there?' claim, which is what the maintainer asked for in #1521 and what a reader of the card needs before using the head.",
+      "ref": "https://github.com/ruvnet/RuView/issues/1521"
+    },
+    {
+      "id": "RuView#1522",
+      "title": "a published .safetensors container must pad its JSON header with 0x20 spaces; a NUL-padded header is a violation, not a warning",
+      "files": [
+        "v2/crates/wifi-densepose-train/src/model_artifact.rs",
+        "v2/crates/wifi-densepose-train/src/bin/model_release_gate.rs",
+        "v2/crates/wifi-densepose-train/tests/test_model_release_gate.rs",
+        ".github/workflows/model-release-gate.yml"
+      ],
+      "require": [
+        "RuView#1522",
+        "FormatVerdict",
+        "format_verdict",
+        "the safetensors format requires 0x20 space padding",
+        "rejects_a_container_with_nul_padded_headers",
+        "count_v1.safetensors",
+        "sample_room.adapter.safetensors"
+      ],
+      "forbid": [
+        "/skip[-_]format[-_]check|--no-verify-format|--ignore-format|--allow-nul[-_]padding/i"
+      ],
+      "rationale": "Issue #1522 reported that the published model.safetensors pads its JSON header with NUL bytes instead of the 0x20 spaces the safetensors format requires (section 2.1). The reference deserializer rejects that file ('trailing characters at line 1 column 1462'), while the in-tree Rust reader is lenient enough to load it, so the defect only surfaces for whoever consumes the artifact with standard tooling. The maintainer's ask was explicit: 'adding a CI check that validates the header padding on published safetensors files to prevent regression'. The check has to live in the release path rather than in a reader: format_verdict reports the violation, the CLI turns it into a failed verdict, the '--format-only' mode lets CI check every in-tree .safetensors artifact without pretending a head gate applies to them, and the regression test builds a NUL-padded fixture and asserts the rejection. The forbid keeps a bypass flag from appearing.",
+      "ref": "https://github.com/ruvnet/RuView/issues/1522"
     }
   ]
 }

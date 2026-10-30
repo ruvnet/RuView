@@ -741,11 +741,40 @@ impl ModelGateReport {
 /// Uses [`DEFAULT_MIN_OUTPUT_VARIANCE`], [`DEFAULT_MAX_POSITIVE_RATE`], and a
 /// [`DEFAULT_PROBE_POINTS`] sweep. Malformed probe evaluation is impossible here
 /// because the sweep is generated to match the head dimension.
+///
+/// This is the *aggregate* form: it adds the report-level baseline gate on top
+/// of the head gates, so it needs an [`EvaluationReport`]. Use
+/// [`evaluate_head_gates`] when all you have is a head — an artifact file
+/// carries no report.
 #[must_use]
 pub fn evaluate_linear_head(
     head: &LinearHead,
     baseline: Option<&EvaluationReport>,
 ) -> ModelGateReport {
+    let mut report = evaluate_head_gates(head);
+
+    if let Err(f) = check_baseline(baseline) {
+        report.failures.push(f);
+    }
+
+    report
+}
+
+/// Run only the head-level release gates: unreachable decision boundary,
+/// constant output, and degenerate class balance.
+///
+/// These three are the gates a *classifier artifact* can be judged by on its
+/// own — they read nothing but the head's parameters and the probe set the
+/// sweep derives from them. The report-level gates ([`check_baseline`] and
+/// [`check_metric_provenance`]) are deliberately excluded: they judge a
+/// *reported metric*, which an artifact file does not carry.
+///
+/// The probe set is the L2-normalized sweep from [`ProbeSet::sweep_for_head`],
+/// so these gates are only meaningful for a head that consumes L2-normalized
+/// embeddings. Applying them to a head with unnormalized inputs would produce
+/// a false failure; the caller is responsible for that assumption.
+#[must_use]
+pub fn evaluate_head_gates(head: &LinearHead) -> ModelGateReport {
     let mut failures = Vec::new();
 
     if let Err(f) = check_unreachable_boundary(head) {
@@ -761,10 +790,6 @@ pub fn evaluate_linear_head(
     if let Err(GateOutcomeError::Failure(f)) =
         check_class_balance(head, &probe, DEFAULT_MAX_POSITIVE_RATE)
     {
-        failures.push(f);
-    }
-
-    if let Err(f) = check_baseline(baseline) {
         failures.push(f);
     }
 
@@ -875,6 +900,46 @@ mod tests {
         .unwrap();
         let gate = evaluate_linear_head(&h, Some(&rep));
         assert!(gate.passed(), "{}", gate.summary());
+    }
+
+    #[test]
+    fn head_gates_alone_pass_a_healthy_head_without_a_report() {
+        // The aggregate needs a baseline report; the head-only form does not,
+        // because an artifact file carries no report.
+        let h = healthy_head();
+        let gate = evaluate_head_gates(&h);
+        assert!(gate.passed(), "{}", gate.summary());
+        assert!(gate.failures.is_empty());
+    }
+
+    #[test]
+    fn head_gates_alone_reject_the_issue_1521_head() {
+        let h = issue_1521_head();
+        let gate = evaluate_head_gates(&h);
+        assert!(!gate.passed());
+        let has_boundary = gate
+            .failures
+            .iter()
+            .any(|f| matches!(f, GateFailure::UnreachableBoundary { .. }));
+        let has_constant = gate
+            .failures
+            .iter()
+            .any(|f| matches!(f, GateFailure::ConstantOutput { .. }));
+        let has_balance = gate
+            .failures
+            .iter()
+            .any(|f| matches!(f, GateFailure::ClassBalance { .. }));
+        assert!(has_boundary, "expected unreachable-boundary failure");
+        assert!(has_constant, "expected constant-output failure");
+        assert!(has_balance, "expected class-balance failure");
+        // The baseline gate is a report-level gate and is not part of the
+        // head-only form.
+        assert!(
+            !gate.failures
+                .iter()
+                .any(|f| matches!(f, GateFailure::MissingBaseline { .. })),
+            "the head-only form must not require a baseline report"
+        );
     }
 
     #[test]

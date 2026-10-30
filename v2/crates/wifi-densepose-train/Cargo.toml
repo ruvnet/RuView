@@ -27,6 +27,14 @@ required-features = ["tch-backend"]
 name = "aa_score_runner"
 path = "src/bin/aa_score_runner.rs"
 
+# ADR-298 model release gate (issue #1521) — the entry point that points the
+# release gates at a real artifact (.safetensors / presence-head.json). Pure
+# model_gates + model_artifact, no torch, so it runs in CI under
+# --no-default-features.
+[[bin]]
+name = "model_release_gate"
+path = "src/bin/model_release_gate.rs"
+
 [features]
 default = []
 tch-backend = ["tch"]
