@@ -110,9 +110,17 @@ export function isPrivateAddress(ip) {
     return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
   }
   if (net.isIPv6(ip)) {
-    const v = ip.toLowerCase();
-    if (v.startsWith('::ffff:')) return isPrivateAddress(v.slice(7));
-    return v === '::1' || v.startsWith('fc') || v.startsWith('fd') || v.startsWith('fe8') || v.startsWith('fe9') || v.startsWith('fea') || v.startsWith('feb');
+    // Classify equivalent IPv6 spellings identically; keep the zone on the
+    // original host used for connection, since scoped link-local hosts need it.
+    const address = ip.split('%', 1)[0];
+    const v = new URL(`http://[${address}]/`).hostname.slice(1, -1);
+    const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(v);
+    if (mapped) {
+      const words = mapped.slice(1).map((word) => parseInt(word, 16));
+      return isPrivateAddress([words[0] >>> 8, words[0] & 255, words[1] >>> 8, words[1] & 255].join('.'));
+    }
+    const first = parseInt(v.split(':', 1)[0], 16);
+    return v === '::1' || (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80;
   }
   return false;
 }
