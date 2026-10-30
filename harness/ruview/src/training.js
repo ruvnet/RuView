@@ -17,6 +17,7 @@ const LEAKAGE_FREE = new Set(['chronological', 'blocked-gap', 'grouped-subject',
 export const TRAIN_MODES = Object.freeze(['pose-smoke', 'pose', 'room']);
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+const isScore = (v) => isNum(v) && v >= 0 && v <= 100;
 const toPct = (v) => (v <= 1 ? v * 100 : v);
 const timeMillis = (value) => isNum(value) ? value : typeof value === 'string' ? Date.parse(value) : NaN;
 
@@ -32,7 +33,9 @@ export function trainingGate(report = {}) {
   const warn = (code, message) => findings.push({ severity: 'warn', code, message });
 
   if (!isNum(report.model_score)) fail('model_score_missing', 'model_score is required.');
+  else if (!isScore(report.model_score)) fail('model_score_out_of_range', 'model_score must be between 0 and 100 (fraction or percent).');
   if (!isNum(report.baseline_score)) fail('baseline_missing', 'baseline_score (mean-pose baseline on the same split) is required before any score is quoted.');
+  else if (!isScore(report.baseline_score)) fail('baseline_out_of_range', 'baseline_score must be between 0 and 100 (fraction or percent).');
   if (!SPLITS.includes(report.split)) fail('split_missing', `split must be one of ${SPLITS.join(', ')}.`);
   else if (!LEAKAGE_FREE.has(report.split)) fail('split_leaky', `${report.split} splits leak temporally adjacent frames; use chronological, blocked-gap, or grouped splits.`);
 
@@ -53,7 +56,7 @@ export function trainingGate(report = {}) {
   if (!isNum(report.n_test) || report.n_test < 100) warn('small_test_set', 'n_test is missing or below 100 samples; confidence intervals will be wide.');
 
   let deltaPp = null;
-  if (isNum(report.model_score) && isNum(report.baseline_score)) {
+  if (isScore(report.model_score) && isScore(report.baseline_score)) {
     deltaPp = Number((toPct(report.model_score) - toPct(report.baseline_score)).toFixed(2));
     if (deltaPp <= 0) fail('no_signal', `model does not beat the mean-pose baseline (${deltaPp} pp).`);
     if (toPct(report.model_score) >= 99.5) warn('implausible_score', 'near-perfect scores historically indicated leakage (retracted 92.9%/100% results); audit the split.');
