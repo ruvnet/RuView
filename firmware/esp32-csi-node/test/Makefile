@@ -193,7 +193,14 @@ test_self_ping: test_self_ping.c $(MAIN_DIR)/csi_collector.c $(STUBS_SRC)
 run_self_ping: test_self_ping
 	./test_self_ping
 
-host_tests: run_self_ping run_edge_stbc run_adr110 run_vitals run_mmwave_detect run_thermal run_csi_sanitize \
+test_mmwave_pins: test_mmwave_pins.c $(MAIN_DIR)/mmwave_pins.h
+	cc -std=c11 -Wall -Wextra -Werror -I$(MAIN_DIR) $< -o $@
+
+.PHONY: run_mmwave_pins
+run_mmwave_pins: test_mmwave_pins
+	./test_mmwave_pins
+
+host_tests: run_mmwave_pins run_self_ping run_edge_stbc run_adr110 run_vitals run_mmwave_detect run_thermal run_csi_sanitize \
             run_c6_antenna run_serial_onboarding run_onboarding_identity run_onboarding_console run_delivery_contract run_ota_health \
             run_config_rules run_config_recovery
 	@echo "Host tests passed (firmware contracts, DSP, configuration recovery, onboarding and OTA health)"

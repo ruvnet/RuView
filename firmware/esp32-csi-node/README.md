@@ -19,6 +19,67 @@ This firmware captures WiFi Channel State Information (CSI) from an ESP32-S3 (pr
 > | **Fall detection** | Phase acceleration threshold | Configurable sensitivity |
 > | **Programmable sensing** | WASM modules loaded over HTTP | Hot-swap, no reflash |
 
+## ESP32-C5 candidate: installation and qualification
+
+The source checkout adds an experimental ESP32-C5 headless target. Bounded
+real-board boot and CSI transport checks are recorded below; they do not
+establish sensing accuracy, consistent cadence or long-run reliability.
+See the [firmware releases](https://github.com/ruvnet/RuView/releases) for
+published bundles. C5 remains experimental: the tested AP setup produced
+variable cadence, including runs below the 20 packets/s acceptance target.
+Additional traffic did not consistently restore that target.
+
+Use ESP-IDF 6.0.2 (the CI lane; minimum 5.5.2), esptool >=5.3 for its corrected
+C5 security layouts, and a separate build directory:
+
+In an isolated Python environment, the measured setup used esptool 5.6.0
+and `esp-idf-nvs-partition-gen` 0.3.0. The latter is required by `provision.py`:
+
+```sh
+python -m pip install esptool==5.6.0 esp-idf-nvs-partition-gen==0.3.0
+```
+
+```sh
+cd firmware/esp32-csi-node
+idf.py -B build-c5 -D IDF_TARGET=esp32c5 -D SDKCONFIG=build-c5/sdkconfig build
+```
+
+The candidate uses a 4 MB OTA layout, UART console, 240 MHz CPU, and a
+conservative 8 Hz edge DSP rate independent of raw CSI transmission. Display,
+WASM, and external PSRAM are not enabled. The addressable LED stays disabled
+unless the board schematic is checked and `C5_STATUS_LED_GPIO` is set.
+Association is explicitly 2.4 GHz; the C5 radio's 5 GHz capability is not yet
+qualified by this profile.
+
+C5 skips automatic mmWave probing. The legacy GPIO17/18 pair overlaps the
+C5 flash/PSRAM bus and can cause watchdog resets with `SPI flash busy`.
+An explicit sensor pin assignment must avoid GPIO16-22, the console pins,
+and board-specific connections. The CSI-only baseline needs no sensor wiring.
+
+**Do not reuse the S3/C6 bootloader address.** C5's ROM boots from `0x2000`.
+The other release addresses remain `0x8000` (partition table), `0xf000`
+(OTA data), and `0x20000` (application). Prefer the generated IDF `flash_args`
+or the source harness's checksum-verified `--variant c5` plan. Confirm the
+attached chip with `python -m esptool --port COM8 chip-id` before any write;
+COM8 is an example port, not a chip identity.
+
+Candidate bundles use `esp32-csi-node-c5.bin` and `partition-table-c5.bin`.
+The source operator rejects preproduction beta chips and devices with less
+than 4 MB flash before writing.
+CI verifies both the embedded chip ID and the generated flash plan before
+packaging them. Never substitute an S3 or C6 application.
+
+See the [C5 comparison and qualification record](../../docs/validation/2026-10-28-esp32-c5-candidate.md)
+for software checks, measured transport runs and remaining qualification limits.
+
+## Firmware 0.8.16 prerelease: conservative mmWave identification
+
+Version 0.8.16 restricts MR60BHA2 identification to its heart-rate, distance,
+and presence frame types. Ambiguous LD6002B/LD6004 headers no longer identify
+those devices as MR60BHA2. Host regressions and CI builds cover this change;
+a live MR60BHA2 kit was read using its existing ESPHome firmware, which does
+not qualify the new firmware image or sensing accuracy.
+
 ## Firmware 0.8.15 prerelease: CSI reliability and recoverable configuration
 
 Version 0.8.15 preserves bounded CSI input for ESP32-S3 STBC frames, caps
@@ -136,7 +197,7 @@ For users who want to get running fast. Detailed explanations follow in later se
 ### 0. Download a versioned firmware bundle
 
 Use the versioned source tag and binaries on the
-[v0.8.14 ESP32 prerelease page](https://github.com/ruvnet/RuView/releases/tag/v0.8.14-esp32).
+[v0.8.16 ESP32 prerelease page](https://github.com/ruvnet/RuView/releases/tag/v0.8.16-esp32).
 For the previous stable firmware and its hardware evidence, see
 [v0.8.8](https://github.com/ruvnet/RuView/releases/tag/v0.8.8-esp32).
 Choose the package that names both your chip and flash size:

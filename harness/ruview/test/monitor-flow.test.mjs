@@ -53,3 +53,17 @@ test('buffer starvation still refuses a monitor with a real frame marker', { ski
   assert.equal(result.csi_callbacks, 1);
   assert.equal(result.csi_buffer_starved, 1);
 });
+
+test('public SDK monitor rejects C5 flash-busy watchdog loops after initial CSI', { skip: !python }, t => {
+  const result = monitor(t, ['CSI cb #1: len=106', 'SPI flash busy detected(0x0f)', 'rst:0x7 (TG0_WDT_HPSYS)']);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'firmware_fault');
+  assert.equal(result.firmware_fault_lines, 2);
+  assert.equal(result.csi_callbacks, 1);
+});
+
+test('public SDK monitor rejects zero callback counters', { skip: !python }, t => {
+  const result = monitor(t, ['CSI cb #0: len=106', 'RUVIEW_CSI: frame #0']);
+  assert.equal(result.ok, false);
+  assert.equal(result.csi_callbacks, 0);
+});

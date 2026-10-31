@@ -27,6 +27,7 @@
 
 #include "mmwave_sensor.h"
 #include "mmwave_detect.h"
+#include "mmwave_pins.h"
 
 #include <string.h>
 #include <math.h>
@@ -388,16 +389,16 @@ static mmwave_type_t probe_at_baud(uint32_t baud)
         if (len <= 0) continue;
 
         for (int i = 0; i < len; i++) {
-            /* MR60BHA2: require a *validated* 8-byte header — SOF (0x01) + a valid
-             * header checksum (over bytes 0..6) + a known frame type (0x0A__ or
-             * 0x0F09) — NOT a bare 0x01 byte. A floating UART1 with no sensor reads
-             * noise full of 0x01s, which the old `buf[i] == MR60_SOF` check mistook
-             * for a real sensor (false "Detected MR60BHA2", #1107). */
+            /* MR60BHA2: require a validated header and a sensor-specific type.
+             * Do not accept every 0x0Axx type: LD6002B/LD6004 share this frame
+             * layout but use 0x0A14 for work-mode, 0x0A13 for low-power, and
+             * 0x0A04 for target data (#2136). A floating UART can also contain
+             * 0x01 noise, which caused false detection before (#1107). */
             if (buf[i] == MR60_SOF && baud == MMWAVE_MR60_BAUD && i + 7 < len) {
                 const uint8_t *h = &buf[i];
                 if (mr60_calc_checksum(h, 7) == h[7]) {
                     uint16_t type = ((uint16_t)h[5] << 8) | h[6];
-                    if ((type >> 8) == 0x0A || type == 0x0F09) {
+                    if (mmwave_mr60_identifying_type(type)) {
                         mr60_sof_seen++;
                     }
                 }
@@ -509,7 +510,13 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
      * routed UART1 TX onto the console RX line and silently killed serial
      * input (USB onboarding, monitor commands) even when no sensor was found,
      * because uart_driver_delete() does not undo the GPIO matrix routing. */
-#if defined(CONFIG_IDF_TARGET_ESP32C6)
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    if (uart_tx_pin < 0 || uart_rx_pin < 0) {
+        s_running = false;
+        ESP_LOGI(TAG, "C5 mmWave probe disabled: explicit board-safe pins required");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
     if (uart_tx_pin < 0) uart_tx_pin = 4;
     if (uart_rx_pin < 0) uart_rx_pin = 5;
 #else
@@ -523,8 +530,17 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
     const int console_tx = 16, console_rx = 17;   /* U0TXD / U0RXD IOMUX pins */
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
     const int console_tx = 43, console_rx = 44;
+#elif defined(CONFIG_IDF_TARGET_ESP32C5)
+    const int console_tx = 11, console_rx = 12;
 #else
     const int console_tx = 1, console_rx = 3;
+#endif
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    if (!ruview_c5_mmwave_pins_safe(uart_tx_pin, uart_rx_pin, console_tx, console_rx)) {
+        s_running = false;
+        ESP_LOGW(TAG, "C5 mmWave pins overlap memory/console or are invalid; skipping probe");
+        return ESP_ERR_INVALID_ARG;
+    }
 #endif
     if (uart_tx_pin == console_tx || uart_tx_pin == console_rx ||
         uart_rx_pin == console_tx || uart_rx_pin == console_rx) {

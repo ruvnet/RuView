@@ -150,7 +150,7 @@ const ONBOARD_PATHS = {
 // Read-only serial monitor script; the port arrives via sys.argv (ADR-263 O5 —
 // never spliced into interpreter source).
 export const MONITOR_SCRIPT = [
-  'import sys,time',
+  'import sys,time,re',
   'try:',
   ' import serial',
   'except Exception as e:',
@@ -164,17 +164,18 @@ export const MONITOR_SCRIPT = [
   'ser.port=port; ser.baudrate=baud; ser.timeout=1',
   'ser.dtr=False; ser.rts=False',
   'ser.open()',
-  'csi=0; n=0; starved=0; t=time.time()',
+  'csi=0; n=0; starved=0; faults=0; t=time.time()',
   'while time.time()-t<dur:',
   ' ln=ser.readline()',
   ' if not ln: continue',
   " s=ln.decode('utf-8','replace')",
   ' n+=1',
-  " if 'CSI cb #' in s or 'RUVIEW_CSI: frame #' in s: csi+=1",
+  " if re.search(r'(?:CSI cb #|RUVIEW_CSI: frame #)[1-9]\\d*\\b',s): csi+=1",
+  " if re.search(r'Guru Meditation|abort\\(\\) was called|Backtrace:|SPI flash busy detected|TG[01]_WDT',s): faults+=1",
   " if 'MGMT+DATA' in s: print('UPGRADE_MGMT_DATA')",
   " if 'lack of csi buf' in s or 'csi buf not enough' in s: starved+=1",
   'ser.close()',
-  "print(f'LINES={n} CSI={csi} STARVED={starved}')",
+  "print(f'LINES={n} CSI={csi} STARVED={starved} FAULTS={faults}')",
 ].join('\n');
 
 /**
@@ -268,9 +269,14 @@ export const TOOLS = {
       const csi = Number((r.stdout.match(/CSI=(\d+)/) || [])[1] || 0);
       const lines = Number((r.stdout.match(/LINES=(\d+)/) || [])[1] || 0);
       const starved = Number((r.stdout.match(/STARVED=(\d+)/) || [])[1] || 0);
+      const faults = Number((r.stdout.match(/FAULTS=(\d+)/) || [])[1] || 0);
       const upgraded = r.stdout.includes('UPGRADE_MGMT_DATA');
-      const out = { ok: csi > 0 && starved === 0, csi_callbacks: csi, lines, baud, mgmt_data_upgrade: upgraded, reset_on_open: false, raw: r.stdout.trim() };
-      if (starved) {
+      const out = { ok: csi > 0 && starved === 0 && faults === 0, csi_callbacks: csi, lines, baud, mgmt_data_upgrade: upgraded, reset_on_open: false, raw: r.stdout.trim() };
+      if (faults) {
+        out.reason = 'firmware_fault';
+        out.firmware_fault_lines = faults;
+        out.hint = 'Captured panic, watchdog or flash-busy evidence; earlier CSI callbacks do not qualify this run.';
+      } else if (starved) {
         out.csi_buffer_starved = starved;
         out.reason = 'csi_buffer_starvation';
         out.hint = `${starved} 'lack of csi buf' lines: the radio is generating CSI reports but the firmware is not returning report buffers, so CSI stops while heartbeats continue (heartbeat-only on UDP). Reset the node now; the lasting fix is in the firmware's CSI report handling (buffer release/drain rate vs. CSI_REPORT_BUF_NUM).`;

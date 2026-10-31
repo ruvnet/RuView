@@ -30,7 +30,9 @@ static int64_t s_nonce_issued_at_us;
 
 static const char *chip_name(void)
 {
-#if defined(CONFIG_IDF_TARGET_ESP32C6)
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    return "esp32c5";
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
     return "esp32c6";
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
     return "esp32s3";

@@ -10,6 +10,21 @@ import { runTool } from '../src/tools.js';
 
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 
+test('boot evidence requires positive CSI callbacks and recognizes C5 firmware', () => {
+  for (const text of ['csi_collector: initialized', 'CSI cb #0: len=128']) {
+    assert.equal(summarizeBootLog(text).hardwareValidated, false);
+    assert.equal(summarizeBootLog(text).csiCallbacks, 0);
+  }
+  const result = summarizeBootLog('ESP32-C5 CSI Node (ADR-018 / ADR-110) v0.8.17\nCSI cb #1: len=128');
+  assert.equal(result.hardwareValidated, true);
+  assert.equal(result.firmwareVersion, '0.8.17');
+  for (const failure of ['SPI flash busy detected(0x0f)', 'rst:0x7 (TG0_WDT_HPSYS)']) {
+    const broken = summarizeBootLog(`CSI cb #1: len=106\n${failure}`);
+    assert.equal(broken.panic, true);
+    assert.equal(broken.hardwareValidated, false);
+  }
+});
+
 function makeBundle({ otadata = true, sums = true, tamper = false, extra = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ruview-fw-'));
   const files = { 'bootloader.bin': 'BOOT', 'partition-table.bin': 'PT', 'esp32-csi-node.bin': 'APP', ...(otadata ? { 'ota_data_initial.bin': 'OTA' } : {}), ...extra };
@@ -22,14 +37,16 @@ function makeBundle({ otadata = true, sums = true, tamper = false, extra = {} } 
 }
 
 /** Fake hardware: records every esptool/python invocation. */
-function fakeDeps({ chip = 'ESP32-S3', flashOk = true, bootLog = 'I (123) csi_collector: CSI cb\nMGMT+DATA\n' } = {}) {
+function fakeDeps({ chip = 'ESP32-S3', toolVersion = '5.6.0', flashSize = '8MB', flashOk = true, bootLog = 'I (123) csi_collector: CSI cb #1: len=128\nMGMT+DATA\n' } = {}) {
   const calls = [];
   return {
     calls,
     python: () => '/usr/bin/python3',
     exec: async (cmd, args) => {
       calls.push([cmd, ...args]);
+      if (args.at(-1) === 'version') return { ok: true, code: 0, stdout: `esptool v${toolVersion}\n${toolVersion}\n`, stderr: '' };
       if (args.includes('chip_id')) return { ok: Boolean(chip), code: 0, stdout: chip ? `Detecting chip type... ${chip}\nChip type: ${chip} (QFN56)` : '', stderr: chip ? '' : 'Failed to connect', error: null };
+      if (args.includes('flash_id')) return { ok: true, code: 0, stdout: `Detected flash size: ${flashSize}\n`, stderr: '' };
       if (args.includes('write_flash')) return { ok: flashOk, code: flashOk ? 0 : 2, stdout: flashOk ? 'Hash of data verified.' : '', stderr: flashOk ? '' : 'A fatal error occurred', error: null };
       if (args[0] === '-c') return { ok: true, code: 0, stdout: bootLog, stderr: '', error: null };
       return { ok: false, code: 1, stdout: '', stderr: 'unexpected', error: null };
@@ -141,6 +158,50 @@ test('C6 keeps generic ESP-IDF build directory support', () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('C5 release bundle is checksum verified and rejects other attached chips before writes', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ruview-fw-c5-'));
+  try {
+    const files = { 'bootloader.bin': 'C5_BOOT', 'partition-table-c5.bin': 'C5_PT', 'esp32-csi-node-c5.bin': 'C5_APP' };
+    for (const [name, body] of Object.entries(files)) writeFileSync(join(dir, name), body);
+    writeFileSync(join(dir, 'SHA256SUMS.txt'), Object.entries(files).map(([name, body]) => `${sha(body)}  ${name}`).join('\n'));
+    const bundle = resolveBundle(dir, 'c5');
+    assert.equal(bundle.chip, 'esp32c5');
+    assert.equal(bundle.flashSize, '4MB');
+    assert.deepEqual(bundle.images.map((i) => [i.role, i.offset]), [
+      ['bootloader', '0x2000'], ['partition-table', '0x8000'], ['app', '0x20000'],
+    ]);
+    assert.equal(bundle.images.find((i) => i.role === 'app').relative, 'esp32-csi-node-c5.bin');
+    assert.ok(bundle.images.every((i) => i.integrity === 'verified'));
+    for (const toolVersion of ['4.12.0', '5.1.0', '5.2.0', 'unknown']) {
+      const old = fakeDeps({ chip: 'ESP32-C5', toolVersion });
+      const result = await flashFirmware({ port: 'COM8', variant: 'c5', bundle: dir, confirm: true }, old);
+      assert.equal(result.reason, 'esptool_version_unsupported');
+      assert.ok(!old.calls.some((call) => call.includes('chip_id') || call.includes('write_flash')));
+    }
+    for (const variant of ['s3-8mb', 's3-4mb', 'c6']) {
+      assert.throws(() => resolveBundle(dir, variant), (e) => e.reason === 'image_missing');
+    }
+    for (const chip of ['ESP32-S3', 'ESP32-C6', 'ESP32-C5(beta3)']) {
+      const deps = fakeDeps({ chip });
+      const result = await flashFirmware({ port: 'COM8', variant: 'c5', bundle: dir, confirm: true }, deps);
+      assert.equal(result.reason, 'chip_mismatch');
+      assert.ok(!deps.calls.some((call) => call.includes('write_flash')));
+    }
+    for (const [flashSize, reason] of [['2MB', 'flash_capacity_too_small'], ['unknown', 'flash_capacity_unverified']]) {
+      const deps = fakeDeps({ chip: 'ESP32-C5', flashSize });
+      const result = await flashFirmware({ port: 'COM8', variant: 'c5', bundle: dir, confirm: true }, deps);
+      assert.equal(result.reason, reason);
+      assert.ok(!deps.calls.some((call) => call.includes('write_flash')));
+    }
+    for (const flashSize of ['4MB', '8MB']) {
+      const deps = fakeDeps({ chip: 'ESP32-C5', flashSize });
+      assert.equal((await flashFirmware({ port: 'COM8', variant: 'c5', bundle: dir, confirm: true }, deps)).ok, true);
+      const write = deps.calls.find((call) => call.includes('write_flash'));
+      assert.equal(write[write.indexOf('--chip') + 1], 'esp32c5');
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('flash without confirm is a plan and touches no hardware', async () => {
   const dir = makeBundle({ otadata: false });
   const deps = fakeDeps();
@@ -185,6 +246,8 @@ test('confirmed flash probes the chip, refuses a mismatch, and records boot evid
 test('chip and boot-log parsers handle esptool 4.x and 5.x output', () => {
   assert.equal(parseChip('Chip is ESP32-S3 (QFN56) (revision v0.2)'), 'ESP32-S3');
   assert.equal(parseChip('Detecting chip type... ESP32-C6'), 'ESP32-C6');
+  assert.equal(parseChip('Chip type: ESP32-C5 (revision v1.2)'), 'ESP32-C5');
+  assert.equal(parseChip('Chip type: ESP32-C5 (beta3)'), 'ESP32-C5(BETA3)');
   assert.equal(parseChip('Chip type:          ESP32-S3 (QFN56)'), 'ESP32-S3');
   assert.equal(parseChip('nothing'), null);
   const panic = summarizeBootLog('CSI cb\nGuru Meditation Error: Core 0 panic\n');
