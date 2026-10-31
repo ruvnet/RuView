@@ -10,6 +10,7 @@
 
 pub mod bearer_auth;
 pub mod bootstrap_baseline;
+pub mod room_calibration;
 pub mod browser_session;
 pub mod ws_ticket;
 pub mod cli;

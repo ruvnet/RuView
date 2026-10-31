@@ -409,12 +409,12 @@ fn metadata(image: &BootstrapImageV2) -> BootstrapBaselineMetadata {
     }
 }
 
-fn hex_sha256(bytes: &[u8]) -> String {
+pub(crate) fn hex_sha256(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn atomic_write_private(path: &Path, bytes: &[u8]) -> Result<(), BootstrapBaselineError> {
+pub(crate) fn atomic_write_private(path: &Path, bytes: &[u8]) -> Result<(), BootstrapBaselineError> {
     let parent = path.parent().ok_or(BootstrapBaselineError::InvalidPath)?;
     fs::create_dir_all(parent)?;
     let file_name = path
