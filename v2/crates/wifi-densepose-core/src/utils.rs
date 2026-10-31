@@ -24,7 +24,7 @@ pub fn complex_phase(data: &Array2<Complex64>) -> Array2<f64> {
 #[must_use]
 pub fn unwrap_phase(phase: &Array1<f64>) -> Array1<f64> {
     let mut unwrapped = phase.clone();
-    let pi = std::f64::consts::PI;
+    let pi = core::f64::consts::PI;
     let two_pi = 2.0 * pi;
 
     for i in 1..unwrapped.len() {
@@ -211,7 +211,7 @@ mod tests {
     fn test_deg_rad_conversion() {
         let degrees = 180.0;
         let radians = deg_to_rad(degrees);
-        assert!((radians - std::f64::consts::PI).abs() < 1e-10);
+        assert!((radians - core::f64::consts::PI).abs() < 1e-10);
 
         let back = rad_to_deg(radians);
         assert!((back - degrees).abs() < 1e-10);
@@ -225,7 +225,7 @@ mod tests {
 
     #[test]
     fn test_unwrap_phase() {
-        let pi = std::f64::consts::PI;
+        let pi = core::f64::consts::PI;
         // Simulate a phase wrap
         let phase = array![0.0, pi / 2.0, pi, -pi + 0.1, -pi / 2.0];
         let unwrapped = unwrap_phase(&phase);
