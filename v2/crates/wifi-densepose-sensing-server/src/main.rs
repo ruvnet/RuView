@@ -453,19 +453,7 @@ struct CalibrationGridBinding {
     evidence: Option<CalibrationGridEvidence>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct CalibrationModelReceipt {
-    schema: &'static str,
-    boot_epoch: String,
-    session_id: String,
-    model_id: String,
-    binding_digest: String,
-    source_node_ids: Vec<u8>,
-    frame_count: u64,
-    variance_explained: f64,
-    baseline_eigenvalue_count: usize,
-    completed_at_unix_ms: u64,
-}
+use wifi_densepose_sensing_server::room_calibration::{self, RoomReceipt as CalibrationModelReceipt};
 
 /// Per-frame occupancy result bound to one immutable field-model calibration
 /// receipt. Absent whenever the model is stale, unavailable, or cannot score
@@ -2233,6 +2221,8 @@ struct AppStateInner {
     calibration_observed_source_node_ids: std::collections::BTreeSet<u8>,
     /// Immutable evidence created when the active model is finalized.
     calibration_model_receipt: Option<CalibrationModelReceipt>,
+    /// Requires current-boot evidence from every saved contributor before publication.
+    calibration_restored: bool,
     /// Immutable source and CSI symbol grid selected from recent header-only
     /// evidence for the current field model.
     calibration_grid_binding: Option<CalibrationGridBinding>,
@@ -2569,6 +2559,37 @@ fn calibration_sequence_order(previous: Option<u32>, sequence: u32) -> Calibrati
 }
 
 impl AppStateInner {
+    fn restore_saved_room(&mut self) -> Result<bool, bootstrap_baseline::BootstrapBaselineError> {
+        let Some((installation, metadata)) = self.installation_id.as_deref().zip(self.bootstrap_baseline.as_ref()) else { return Ok(false); };
+        match room_calibration::load(&room_calibration::path_in(&self.data_dir), installation, metadata) {
+            Ok(receipt) => {
+                let [source_node_id] = metadata.source_node_ids.as_slice() else { return Ok(false); };
+                self.calibration_grid_binding = Some(CalibrationGridBinding {
+                    source_node_id: *source_node_id, grid: CsiGridKey::from_bootstrap_grid(metadata.source_grid), evidence: None,
+                });
+                self.install_restored_room(receipt);
+                Ok(true)
+            }
+            Err(bootstrap_baseline::BootstrapBaselineError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn install_restored_room(&mut self, mut receipt: CalibrationModelReceipt) {
+        receipt.boot_epoch = self.calibration_boot_epoch.clone();
+        receipt.session_id = opaque_calibration_id("cal-session");
+        self.calibration_model_id = Some(receipt.model_id.clone());
+        self.calibration_session_id = Some(receipt.session_id.clone());
+        self.calibration_binding_digest = Some(receipt.binding_digest.clone());
+        self.calibration_source_node_ids = receipt.source_node_ids.iter().copied().collect();
+        self.calibration_observed_source_node_ids.clear();
+        self.clear_calibration_sequence_state();
+        for node in self.node_states.values_mut() { node.clear_field_model_history(); }
+        self.calibration_model_receipt = Some(receipt);
+        self.calibration_restored = true;
+        self.bootstrap_baseline_active = false;
+    }
+
     /// Advance the sensing tick and record the update for the measured
     /// stream rate (#2087). Returns the new tick.
     fn advance_tick(&mut self) -> u64 {
@@ -2751,7 +2772,16 @@ impl AppStateInner {
     }
 
     fn explicit_calibration_fresh_at(&self, observed_at_unix_ms: u64) -> bool {
-        !self.bootstrap_baseline_active
+        (!self.calibration_restored || (!self.calibration_source_node_ids.is_empty()
+            && self.calibration_source_node_ids.iter().all(|id| self.node_states.get(id).is_some_and(|node|
+                self.calibration_observed_source_node_ids.contains(id)
+                && !self.calibration_sequence_fault_node_ids.contains(id)
+                && node.field_model_latest_seen.is_some_and(|seen| seen.elapsed() < ESP32_OFFLINE_TIMEOUT)))
+            && self.calibration_grid_binding.is_some_and(|binding| self.field_model.as_ref()
+                .and_then(|model| model.modes()).and_then(|modes| modes.baseline_runtime_window_size)
+                .filter(|size| *size > 0 && *size <= FRAME_HISTORY_CAPACITY)
+                .is_some_and(|size| self.field_model_holdout_ready(binding, size, std::time::Instant::now())))))
+            && !self.bootstrap_baseline_active
             && self.field_model_status_at(observed_at_unix_ms) == Some(CalibrationStatus::Fresh)
     }
 
@@ -2851,7 +2881,7 @@ impl AppStateInner {
         // A persisted bootstrap model has negative-only authority. Its only
         // allowed occupancy effect is the explicit empty-background suppression
         // in `bootstrap_empty_prior_applies`; it must never infer positive count.
-        if self.bootstrap_baseline_active {
+        if self.bootstrap_baseline_active || (self.calibration_restored && !self.explicit_calibration_fresh_at(observed_at_unix_ms)) {
             return score_to_person_count(self.smoothed_person_score, self.prev_person_count);
         }
         match self.field_model.as_ref() {
@@ -3110,6 +3140,7 @@ impl AppStateInner {
             calibration_source_node_ids: std::collections::BTreeSet::new(),
             calibration_observed_source_node_ids: std::collections::BTreeSet::new(),
             calibration_model_receipt: None,
+            calibration_restored: false,
             calibration_grid_binding: None,
             calibration_last_sequences: HashMap::new(),
             calibration_reordered_packets: HashMap::new(),
@@ -3203,7 +3234,7 @@ mod calibration_expiry_tests {
         state.calibration_model_id = Some("cal-model-test".to_string());
         state.calibration_binding_digest = Some("ab".repeat(32));
         state.calibration_model_receipt = Some(CalibrationModelReceipt {
-            schema: field_bridge::CALIBRATION_MODEL_RECEIPT_SCHEMA,
+            schema: field_bridge::CALIBRATION_MODEL_RECEIPT_SCHEMA.to_string(),
             boot_epoch: state.calibration_boot_epoch.clone(),
             session_id: "cal-session-test".to_string(),
             model_id: "cal-model-test".to_string(),
@@ -3336,6 +3367,61 @@ mod calibration_expiry_tests {
         snapshot.modes.baseline_runtime_window_size = Some(50);
         *model = FieldModel::from_snapshot(snapshot, 1_500_000).unwrap();
         state
+    }
+
+    #[test]
+    fn saved_room_roundtrips_through_real_restart_loader_with_new_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = chrono::Utc::now().timestamp_millis().max(0) as u64;
+        let source = qualified_vital_state(now);
+        let mut receipt = source.calibration_model_receipt.clone().unwrap();
+        receipt.frame_count = 18942;
+        let metadata = bootstrap_baseline::store(&bootstrap_baseline::path_in(dir.path()), "account-A-installation", &[5],
+            source.calibration_grid_binding.unwrap().grid.as_bootstrap_grid(), &receipt.model_id, now,
+            source.field_model.as_ref().unwrap()).unwrap();
+        room_calibration::store(&room_calibration::path_in(dir.path()), "account-A-installation", &metadata, &receipt).unwrap();
+        let (model, metadata) = bootstrap_baseline::load(&bootstrap_baseline::path_in(dir.path()), "account-A-installation", now + 1).unwrap();
+        let mut restarted = AppStateInner::minimal();
+        restarted.data_dir = dir.path().to_path_buf();
+        restarted.installation_id = Some("account-A-installation".into());
+        restarted.field_model = Some(model);
+        restarted.bootstrap_baseline = Some(metadata.clone());
+        restarted.bootstrap_baseline_active = true;
+        assert!(restarted.restore_saved_room().unwrap());
+        let current = restarted.calibration_model_receipt.as_ref().unwrap();
+        assert_eq!(current.frame_count, 18942);
+        assert_eq!(current.completed_at_unix_ms, receipt.completed_at_unix_ms);
+        assert_ne!(current.boot_epoch, receipt.boot_epoch);
+        assert_ne!(current.session_id, receipt.session_id);
+        assert!(!restarted.explicit_calibration_fresh_at(now));
+        restarted.installation_id = Some("account-B-installation".into());
+        assert!(restarted.restore_saved_room().is_err());
+        room_calibration::remove(dir.path()).unwrap();
+        assert!(!restarted.restore_saved_room().unwrap());
+    }
+
+    #[test]
+    fn restored_room_requires_new_boot_source_evidence_and_never_renews_completion() {
+        let mut state = state_with_runtime_window();
+        let old = state.calibration_model_receipt.clone().unwrap();
+        state.install_restored_room(old.clone());
+        let current = state.calibration_model_receipt.as_ref().unwrap();
+        assert_eq!(current.completed_at_unix_ms, old.completed_at_unix_ms);
+        assert_eq!(current.model_id, old.model_id);
+        assert_ne!(current.session_id, old.session_id);
+        assert!(!state.explicit_calibration_fresh_at(1_500));
+        state.calibration_observed_source_node_ids.insert(5);
+        assert!(!state.explicit_calibration_fresh_at(1_500));
+        let baseline = state.field_model.as_ref().unwrap().modes().unwrap().baseline[0].clone();
+        let node = state.node_states.get_mut(&5).unwrap();
+        node.field_model_history = (0..50).map(|_| baseline.clone()).collect();
+        node.field_model_latest_seen = Some(std::time::Instant::now());
+        node.field_model_latest_sequence = Some(60);
+        assert!(state.explicit_calibration_fresh_at(1_500));
+        state.node_states.get_mut(&5).unwrap().field_model_history.pop_front();
+        assert!(!state.explicit_calibration_fresh_at(1_500));
+        state.calibration_source_node_ids.insert(17);
+        assert!(!state.explicit_calibration_fresh_at(1_500));
     }
 
     fn qualified_vital_state(observed: u64) -> AppStateInner {
@@ -10223,6 +10309,9 @@ async fn calibration_recover_bootstrap(
         }));
     };
     let binding = CalibrationGridBinding { source_node_id: *source_node_id, grid, evidence: Some(evidence) };
+    if let Err(error) = room_calibration::remove(&s.data_dir) {
+        return error_response::internal_error_json("room calibration downgrade", error);
+    }
     s.clear_field_model_binding();
     s.clear_calibration_sequence_state();
     s.calibration_source_node_ids.clear();
@@ -10232,6 +10321,7 @@ async fn calibration_recover_bootstrap(
     s.calibration_session_id = None;
     s.calibration_binding_digest = None;
     s.calibration_model_receipt = None;
+    s.calibration_restored = false;
     s.field_model = Some(model);
     s.calibration_grid_binding = Some(binding);
     s.bootstrap_baseline = Some(metadata.clone());
@@ -10462,6 +10552,9 @@ async fn calibration_start(
             _ => {} // Stale/Expired/Uncalibrated — ok to recalibrate
         }
     }
+    if let Err(error) = room_calibration::remove(&s.data_dir) {
+        return error_response::internal_error_json("room calibration replacement", error);
+    }
     match FieldModel::new(field_bridge::single_link_config()) {
         Ok(fm) => {
             s.field_model = Some(fm);
@@ -10471,6 +10564,7 @@ async fn calibration_start(
             s.calibration_source_node_ids.clear();
             s.calibration_observed_source_node_ids.clear();
             s.calibration_model_receipt = None;
+            s.calibration_restored = false;
             s.clear_field_model_binding();
             s.clear_calibration_sequence_state();
             s.calibration_source_node_ids
@@ -10604,7 +10698,7 @@ async fn calibration_stop(
                 let holdout_window_size = modes.baseline_runtime_window_size;
                 let final_frame_count = fm.calibration_frame_count();
                 let receipt = CalibrationModelReceipt {
-                    schema: field_bridge::CALIBRATION_MODEL_RECEIPT_SCHEMA,
+                    schema: field_bridge::CALIBRATION_MODEL_RECEIPT_SCHEMA.to_string(),
                     boot_epoch: s.calibration_boot_epoch.clone(),
                     session_id: s.calibration_session_id.clone().expect("validated identity"),
                     model_id: model_id.clone().expect("bound calibration model identity"),
@@ -10615,6 +10709,7 @@ async fn calibration_stop(
                     baseline_eigenvalue_count: baseline,
                     completed_at_unix_ms: chrono::Utc::now().timestamp_millis().max(0) as u64,
                 };
+                s.calibration_restored = false;
                 s.calibration_model_receipt = Some(receipt.clone());
                 s.begin_field_model_holdout(binding);
                 info!("Field model calibrated: baseline_eigenvalues={baseline}, variance_explained={variance_explained:.2}");
@@ -10760,6 +10855,11 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
     response["binding_digest"] = serde_json::json!(if bound { s.calibration_binding_digest.clone() } else { None });
     response["legacy"] = serde_json::json!(false);
     response["model_id"] = serde_json::json!(if bound { s.calibration_model_id.clone() } else { None });
+    response["restored_from_snapshot"] = serde_json::json!(s.calibration_restored);
+    response["restored_sources_ready"] = serde_json::json!(!s.calibration_restored || s.explicit_calibration_fresh_at(observed_at_unix_ms));
+    if s.calibration_restored {
+        response["frame_count"] = serde_json::json!(s.calibration_model_receipt.as_ref().map_or(0, |r| r.frame_count));
+    }
     response["model_receipt"] = serde_json::json!(if bound { s.calibration_model_receipt.clone() } else { None });
     response["source_node_ids"] = serde_json::json!(if bound { s.calibration_source_node_ids.iter().copied().collect::<Vec<_>>() } else { Vec::new() });
     response["observed_source_node_ids"] = serde_json::json!(if bound { s.calibration_observed_source_node_ids.iter().copied().collect::<Vec<_>>() } else { Vec::new() });
@@ -11018,6 +11118,12 @@ async fn calibration_promote_bootstrap(
             return error_response::internal_error_json("bootstrap baseline store", error)
         }
     };
+    let Some(receipt) = s.calibration_model_receipt.as_ref() else {
+        return error_response::internal_error_json("room calibration receipt", "missing receipt");
+    };
+    if let Err(error) = room_calibration::store(&room_calibration::path_in(&s.data_dir), &installation_id, &stored, receipt) {
+        return error_response::internal_error_json("room calibration store", error);
+    }
     s.bootstrap_baseline = Some(stored.clone());
     info!(
         model_id = %stored.source_model_id,
@@ -11308,6 +11414,9 @@ async fn calibration_cancel(
         }));
     }
     let cancelled_session_id = s.calibration_session_id.clone();
+    if let Err(error) = room_calibration::remove(&s.data_dir) {
+        return error_response::internal_error_json("room calibration removal", error);
+    }
     s.field_model = None;
     s.calibration_model_id = None;
     s.calibration_session_id = None;
@@ -11315,6 +11424,7 @@ async fn calibration_cancel(
     s.calibration_source_node_ids.clear();
     s.calibration_observed_source_node_ids.clear();
     s.calibration_model_receipt = None;
+    s.calibration_restored = false;
     s.clear_field_model_binding();
     s.clear_calibration_sequence_state();
     if let Some(installation_id) = s.installation_id.clone() {
@@ -11365,6 +11475,9 @@ async fn calibration_reset(
     if !boot_only && !calibration_identity_matches(&s, &request) {
         return calibration_identity_error();
     }
+    if let Err(error) = room_calibration::remove(&s.data_dir) {
+        return error_response::internal_error_json("room calibration removal", error);
+    }
     s.field_model = None;
     s.calibration_model_id = None;
     s.calibration_session_id = None;
@@ -11372,6 +11485,7 @@ async fn calibration_reset(
     s.calibration_source_node_ids.clear();
     s.calibration_observed_source_node_ids.clear();
     s.calibration_model_receipt = None;
+    s.calibration_restored = false;
     s.clear_field_model_binding();
     s.clear_calibration_sequence_state();
     s.bootstrap_baseline_active = false;
@@ -15771,6 +15885,7 @@ async fn main() {
             .unwrap_or_default(),
         calibration_observed_source_node_ids: std::collections::BTreeSet::new(),
         calibration_model_receipt: None,
+        calibration_restored: false,
         calibration_grid_binding: bootstrap_metadata.as_ref().and_then(|metadata| {
             let [source_node_id] = metadata.source_node_ids.as_slice() else {
                 return None;
@@ -15798,6 +15913,15 @@ async fn main() {
         )
         .expect("default pose physics configuration is valid"),
     }));
+
+    {
+        let mut s = state.write().await;
+        match s.restore_saved_room() {
+            Ok(true) => info!("Restored saved room model; waiting for fresh current-boot source windows"),
+            Ok(false) => {},
+            Err(error) => warn!(%error, "Ignored invalid full-room receipt; retaining bootstrap-only authority"),
+        }
+    }
 
     // Start background tasks from the resolved plan (issue #1004).
     //

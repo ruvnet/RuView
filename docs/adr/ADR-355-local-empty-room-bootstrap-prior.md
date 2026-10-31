@@ -205,3 +205,14 @@ the source set for the entire capture.
 After restart, a confirmed empty holdout may refine the restored boundary once.
 The stored snapshot must reject a second refinement and must continue to deny
 calibrated evidence and numeric vital authority.
+
+
+## Proposed amendment: bounded full-room restoration (2026-10-31)
+
+The bootstrap-only contract above remains the fallback for existing or incomplete saved images. A separately integrity-checked `room-receipt-v1.json` companion may now preserve the completed full-room receipt, but only after the server's independent held-out promotion succeeds. It binds the exact bootstrap payload digest, installation identity, room digest, original model ID, sorted contributor set, original frame count and completion time. It contains no raw CSI, room names, geometry, credentials or live history; its size is capped at 64 KiB and writes are private/atomic.
+
+On restart, both files must validate together under the current account-owned data directory and installation ID. No original lifetime is renewed. The process generates a new boot/session receipt for the same saved model and original completion time. Every recorded contributor must deliver fresh current-boot CSI on the frozen grid, the scored source must rebuild a full runtime window, and sequence faults or missing/stale sources withhold calibrated publication. A client with its own previously saved and passed check may reconnect the unchanged model only after account/origin/room binding, every immutable model field, current contributor readiness and a fresh matching calibrated stream are verified. It retains the original check timestamp and original model lifetime; it does not claim a new empty observation. A different or previously unverified model still requires explicit adoption and a new independent check. Bootstrap-only images cannot gain full authority from client history. Numeric Vitals still require their independent existing qualification gates.
+
+Reset, replacement capture and explicit downgrade to a bootstrap prior retire the companion receipt. A crash between the two writes leaves a digest mismatch and falls back to bootstrap-only, never a mismatched full model. Account erasure removes both through the owned helper data directory. Older saved priors cannot be upgraded from client history and require one new complete capture after installation of this change. Expiry/staleness policy (24/12 hours) is unchanged.
+
+Existing upstream PR #1529 was assessed before this amendment: it proposes aggregate FieldModel persistence but does not carry this installation/room/session authority boundary. The implementation reuses the reviewed snapshot/atomic-write infrastructure already present in ADR-355 rather than introducing a competing field-model format. Physical logout/relaunch acceptance remains required before claiming delivered restoration.
