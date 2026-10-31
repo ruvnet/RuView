@@ -1,9 +1,9 @@
 //! Owner-approved, QR-pinned companion pairing; durable secrets are hashed.
 use axum::{
-    extract::{DefaultBodyLimit, Path as RoutePath, State},
+    extract::{DefaultBodyLimit, Path as RoutePath, Request, State},
     http::StatusCode,
     routing::{delete, get, post},
-    Json, Router,
+    middleware::Next, response::{IntoResponse, Response}, Json, Router,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::{rngs::OsRng, RngCore};
@@ -21,6 +21,26 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::watch;
+use crate::bearer_auth::AuthState;
+
+#[derive(Clone, Copy)]
+pub struct AccountOwnershipExpiry(pub u64);
+
+pub async fn require_account_ownership(State(auth): State<AuthState>, mut request: Request, next: Next) -> Response {
+    if auth.owner_account_scope().is_none() { return next.run(request).await; }
+    let Some(token) = request.headers().get("x-ruview-account-authorization").and_then(|value| value.to_str().ok())
+        .filter(|value| value.len() <= 16_384).map(str::to_owned) else { return StatusCode::UNAUTHORIZED.into_response(); };
+    // A cold/rotated JWKS cache may fetch. Never block a Tokio worker on it.
+    let verified = tokio::task::spawn_blocking(move || auth.verify_account_ownership(&token)).await;
+    match verified {
+        Ok(Ok(Some(expiry))) => { request.extensions_mut().insert(AccountOwnershipExpiry(expiry)); },
+        Ok(Err(status)) => return status.into_response(),
+        _ => return StatusCode::UNAUTHORIZED.into_response(),
+    }
+    next.run(request).await
+}
+
+
 pub fn secret() -> String {
     let mut b = [0; 32];
     OsRng.fill_bytes(&mut b);
@@ -124,6 +144,7 @@ pub struct Companion {
     pub installation_id: String,
     pub cert_sha256: String,
     pub origin: String,
+    owner_account_scope: Option<String>,
     path: PathBuf,
     fault: AtomicBool,
     inner: Mutex<Inner>,
@@ -137,6 +158,14 @@ pub struct Grant {
     pub revoked: watch::Receiver<bool>,
 }
 impl Companion {
+    pub fn load_for_account(path: &Path, installation_id: String, cert_sha256: String, origin: String, owner_account_scope: Option<String>) -> io::Result<Shared> {
+        if owner_account_scope.as_ref().is_some_and(|key| key.len() != 64 || !key.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))) {
+            return Err(io::Error::other("invalid owner account namespace"));
+        }
+        let mut service = Self::load(path, installation_id, cert_sha256, origin)?;
+        Arc::get_mut(&mut service).ok_or_else(|| io::Error::other("shared companion initialization"))?.owner_account_scope = owner_account_scope;
+        Ok(service)
+    }
     pub fn load(
         dir: &Path,
         installation_id: String,
@@ -174,6 +203,7 @@ impl Companion {
             installation_id,
             cert_sha256,
             origin,
+            owner_account_scope: None,
             path,
             fault: AtomicBool::new(false),
             inner: Mutex::new(Inner {
@@ -329,7 +359,7 @@ async fn invite(State(s): State<Shared>) -> ApiResult {
         },
     );
     Ok(Json(
-        json!({"schema":"ruview.companion.invite.v1","installation_id":s.installation_id,"cert_sha256":s.cert_sha256,"origin":s.origin,"invite_id":id,"invite_secret":token,"expires_at":expires}),
+        json!({"schema":"ruview.companion.invite.v1","installation_id":s.installation_id,"cert_sha256":s.cert_sha256,"origin":s.origin,"invite_id":id,"invite_secret":token,"expires_at":expires,"owner_account_scope":s.owner_account_scope}),
     ))
 }
 async fn enroll(State(s): State<Shared>, Json(r): Json<Enroll>) -> ApiResult {

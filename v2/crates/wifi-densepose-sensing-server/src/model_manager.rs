@@ -39,6 +39,9 @@ pub const MODELS_DIR_DEFAULT: &str = "data/models";
 
 /// Return the effective models directory, respecting `MODELS_DIR` env var.
 pub fn models_dir() -> PathBuf {
+    if std::env::var_os(crate::bearer_auth::OWNER_ACCOUNT_SCOPE_ENV).is_some() {
+        return std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join("models");
+    }
     PathBuf::from(
         std::env::var("MODELS_DIR").unwrap_or_else(|_| MODELS_DIR_DEFAULT.to_string()),
     )

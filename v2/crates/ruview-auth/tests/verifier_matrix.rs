@@ -22,7 +22,7 @@ use ring::{
 };
 use ruview_auth::{
     jwks::{JwksError, JwksFetcher},
-    scope, verify_access_token, JwksCache, VerifierConfig, VerifyError,
+    scope, verify_access_token, verify_account_identity, JwksCache, VerifierConfig, VerifyError,
 };
 use serde_json::json;
 
@@ -144,6 +144,50 @@ fn config_for(required_scope: &str) -> VerifierConfig {
 
 fn verify(token: &str, required_scope: &str) -> Result<ruview_auth::Principal, VerifyError> {
     verify_access_token(token, &jwks_serving_test_key(), &config_for(required_scope))
+}
+
+fn ownership_claims() -> serde_json::Value {
+    let mut claims = valid_claims();
+    claims["org_id"] = json!("20000000-0000-4000-8000-000000000001");
+    claims["workspace_id"] = json!("30000000-0000-4000-8000-000000000001");
+    claims["scope"] = json!("sensing:read spaces:read");
+    claims.as_object_mut().unwrap().remove("account_id");
+    claims
+}
+
+#[test]
+fn local_ownership_is_a_user_identity_without_requiring_firebase_billing() {
+    let token = sign(&ownership_claims());
+    let identity = verify_account_identity(&token, &jwks_serving_test_key(), &config_for(scope::SENSING_READ)).unwrap();
+    assert_eq!(identity.subject, "0f8fad5b-d9cb-469f-a165-70867728950e");
+    assert_eq!(identity.org_id, "20000000-0000-4000-8000-000000000001");
+    // This new verifier must not weaken the existing billing/attribution path.
+    assert!(matches!(verify(&token, scope::SENSING_READ), Err(VerifyError::MissingAccountId)));
+}
+
+#[test]
+fn local_ownership_rejects_wrong_or_unbounded_interactive_identity() {
+    for (field, value) in [
+        ("sub", json!("")), ("sub", json!("../other-user")),
+        ("org_id", json!("org-1")), ("workspace_id", json!("")),
+        ("client_id", json!("other")), ("typ", json!("inference")),
+        ("setup", json!(true)), ("workload", json!(true)),
+        ("scope", json!("spaces:read")), ("iat", json!(now() + 300)),
+        ("exp", json!(now() + 7200)), ("exp", json!(now() - 1)),
+        ("iss", json!("https://attacker.example")), ("aud", json!("other")),
+    ] {
+        let mut claims = ownership_claims(); claims[field] = value;
+        assert!(verify_account_identity(&sign(&claims), &jwks_serving_test_key(), &config_for(scope::SENSING_READ)).is_err(), "accepted field {field}");
+    }
+}
+
+#[test]
+fn local_ownership_verifies_signature_and_supports_current_issuer_claims() {
+    let mut claims = ownership_claims();
+    claims["iss"] = json!(TEST_ISSUER); claims["aud"] = json!("ruview");
+    assert!(verify_account_identity(&sign(&claims), &jwks_serving_test_key(), &config_for(scope::SENSING_READ)).is_ok());
+    assert!(verify_account_identity(&sign_with(&claims, other_key()), &jwks_serving_test_key(), &config_for(scope::SENSING_READ)).is_err());
+    assert!(verify_account_identity(ALG_NONE_TOKEN, &jwks_serving_test_key(), &config_for(scope::SENSING_READ)).is_err());
 }
 
 // ─────────────────────────── accept ───────────────────────────
