@@ -26,6 +26,7 @@
 #include "esp_netif.h"          /* #954: STA gateway lookup for self-ping CSI source */
 #include "ping/ping_sock.h"     /* #954: esp_ping gateway traffic generator */
 #include "lwip/ip_addr.h"       /* #954: ip_addr_t target for esp_ping */
+#include "traffic_probe.h"      /* #2287: optional UDP DNS probe instead of ICMP */
 
 /* ADR-060: Access the global NVS config for MAC filter and channel override. */
 extern nvs_config_t g_nvs_config;
@@ -485,7 +486,8 @@ static void wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type)
  *
  * Ping the STA's gateway to request unicast traffic. Some APs send ICMP replies
  * at 802.11b rates, which produce no CSI (#2287); this is not a guaranteed
- * OFDM floor. Such APs need a LAN host sending unicast UDP to the node.
+ * OFDM floor. For such APs, CONFIG_CSI_TRAFFIC_SOURCE_UDP_DNS sends a DNS
+ * query to the gateway instead (traffic_probe.c), so the replies are UDP.
  * It is ADDITIVE — promiscuous capture (#396/#893) is left fully intact so
  * multistatic/multi-node sensing still hears other stations' frames. Mirrors
  * Espressif's esp-csi csi_recv_router reference.
@@ -505,6 +507,14 @@ static void csi_start_self_ping(void)
         ESP_LOGW(TAG, "self-ping: no gateway IP yet; CSI relies on ambient frames (#954)");
         return;
     }
+
+#if CONFIG_CSI_TRAFFIC_SOURCE_UDP_DNS
+    if (traffic_probe_start(ip.gw.addr, CSI_SELF_PING_INTERVAL_MS,
+                            CONFIG_CSI_TRAFFIC_DNS_QNAME)) {
+        return;
+    }
+    ESP_LOGW(TAG, "self-ping: UDP DNS probe did not start; falling back to ICMP (#2287)");
+#endif
 
     char gw_str[16];
     esp_ip4addr_ntoa(&ip.gw, gw_str, sizeof(gw_str));
