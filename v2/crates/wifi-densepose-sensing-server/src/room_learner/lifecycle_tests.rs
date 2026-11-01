@@ -141,7 +141,7 @@ async fn real_capture_train_private_store_cold_load_and_unlabelled_inference_com
     rt.start_training(
         &rt.mutation_guard().unwrap(),
         FitConfig {
-            epochs: 32,
+            epochs: 4, // Composition needs real updates, not accuracy convergence.
             ..FitConfig::default()
         },
     )
