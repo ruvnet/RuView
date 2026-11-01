@@ -278,3 +278,18 @@ async fn stale_http_start_is_rejected_after_another_client_changes_room() {
     assert_eq!(current["mutation_guard"], b["status"]["mutation_guard"]);
     assert!(current["capture"]["phase"].is_null());
 }
+
+#[tokio::test]
+async fn native_adapter_rejection_is_visible_without_admitting_or_labelling_packets() {
+    let (_dir,state)=fixture();let router=app(state.clone());
+    let configured=json_request(router.clone(),"/configure",Method::POST,config()).await;
+    assert_eq!(configured["success"],true);
+    let mut packet=wire(15,121);packet[19]|=0x01; // Actual ADR-018 40 MHz bit.
+    let frame=parse_esp32_frame(&packet).unwrap();
+    observe(&mut *state.write().await,&frame,&packet,std::time::Instant::now());
+    let status=json_request_status(router).await;
+    assert_eq!(status["input_error"],"Node 15 native input rejected: native capture does not support the reported 40 MHz bandwidth");
+    assert_eq!(status["capture"]["sources"][0]["admitted_packets"],0);
+    assert_eq!(status["mutation_guard"],configured["status"]["mutation_guard"]);
+    assert_eq!(status["physically_validated"],false);
+}

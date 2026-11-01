@@ -93,7 +93,7 @@ pub(super) fn observe(
         provenance: CaptureProvenance::LiveReceiverObserved,
     }) {
         Ok(p) => p,
-        Err(_) => return,
+        Err(reason) => { runtime.record_native_rejection(frame.node_id, &id, &reason); return; }
     };
     // This is the real canonical RF record plus an explicitly derived magnitude
     // view. No IQ, source-clock or coherent-phase claim is invented/persisted.

@@ -503,3 +503,20 @@ fn advertised_defaults_fit_all_native_source_counts_before_capture() {
         }
     }
 }
+
+#[test]
+fn native_rejection_diagnostics_are_context_bound_bounded_and_not_admission() {
+    let dir=tempfile::tempdir().unwrap();let rt=runtime(dir.path());
+    rt.configure(&rt.mutation_guard().unwrap(),context(),"native-diagnostic".into(),true).unwrap();
+    let observed=rt.mutation_guard().unwrap();
+    rt.record_native_rejection(17,"ht64-canonical8","unselected");
+    rt.record_native_rejection(1,"other-grid","unselected");
+    assert!(rt.status(START)["input_error"].is_null());
+    rt.record_native_rejection(1,"ht64-canonical8",&"x".repeat(1000));
+    let status=rt.status(START);
+    assert!(status["input_error"].as_str().unwrap().starts_with("Node 1 native input rejected:"));
+    assert!(status["input_error"].as_str().unwrap().len()<=256);
+    assert_eq!(rt.mutation_guard().unwrap(),observed);
+    assert_eq!(status["capture"]["sources"][0]["admitted_packets"],0);
+    assert_eq!(status["physically_validated"],false);
+}

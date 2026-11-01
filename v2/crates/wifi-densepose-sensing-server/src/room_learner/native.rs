@@ -100,9 +100,10 @@ pub fn grid_id(n_antennas: usize, raw_bins: usize, ppdu_type: PpduType) -> Resul
 /// `normalize()` or `RfFrameV2::to_canonical()` (both remove amplitude gain).
 pub fn canonicalize_esp32(input: NativePacketInput<'_>) -> Result<CanonicalPacket, String> {
     let grid_id = grid_id(input.n_antennas, input.raw_bins, input.ppdu_type)?;
-    if input.flags.bw40 || input.received_at_ns == 0 || !input.receiver_sample_rate_hz.is_finite()
-        || input.receiver_sample_rate_hz <= 0.0 {
-        return Err("unsupported bandwidth, receiver time or measured receiver cadence".into());
+    if input.flags.bw40 { return Err("native capture does not support the reported 40 MHz bandwidth".into()); }
+    if input.received_at_ns == 0 { return Err("native receiver time is unavailable".into()); }
+    if !input.receiver_sample_rate_hz.is_finite() || input.receiver_sample_rate_hz <= 0.0 {
+        return Err("measured receiver cadence is unavailable".into());
     }
     let mhz = input.frequency_hz / 1_000_000;
     if input.frequency_hz % 1_000_000 != 0
