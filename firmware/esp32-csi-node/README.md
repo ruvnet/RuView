@@ -151,6 +151,14 @@ CSI cadence; compare actual received frames before and during the helper
 run. The helper stops after the requested duration and caps its requested
 rate at 50 Hz.
 
+To make the node generate unicast UDP itself, with no LAN host running,
+build with `CONFIG_CSI_TRAFFIC_SOURCE_UDP_DNS=y` (menuconfig: "Connected-STA
+CSI probe type"). The node then sends a small DNS query (recursion not
+requested) to its gateway at `CSI_SELF_PING_HZ` instead of pinging it, and the
+replies are unicast UDP. It needs a gateway that answers DNS on port 53; if none
+does, the node logs `no DNS replies from the gateway` after 10 s. The default
+remains ICMP.
+
 On S3, STBC frames can carry 192 I/Q entries. Edge processing uses the first
 128 entries rather than dropping the entire frame (#2286), while raw CSI
 preserves the full payload. This restores DSP input availability; it does
