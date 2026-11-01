@@ -52,6 +52,8 @@ clap = { workspace = true }
 # from `lib.rs` so the Python `[aether]` wheel can bind it without this server's
 # Axum/tokio/worldgraph/ruvector tree.
 wifi-densepose-aether = { version = "0.3.0", path = "../wifi-densepose-aether" }
+ruview-unified = { path = "../ruview-unified" }
+num-complex = { workspace = true }
 wifi-densepose-core = { workspace = true, features = ["serde"] }
 wifi-densepose-physics = { workspace = true }
 wifi-densepose-mat = { version = "0.3.2", path = "../wifi-densepose-mat", default-features = false, features = ["std", "api"] }
