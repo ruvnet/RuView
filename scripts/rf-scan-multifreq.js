@@ -305,7 +305,7 @@ function parseFeaturePacket(buf) {
   if (magic !== FEATURE_MAGIC) return null;
 
   const features = [];
-  for (let i = 0; i < 8; i++) features.push(buf.readFloatLE(12 + i * 4));
+  for (let i = 0; i < 8; i++) features.push(buf.readFloatLE(16 + i * 4));
   return { nodeId: buf.readUInt8(4), seq: buf.readUInt16LE(6), features };
 }
 

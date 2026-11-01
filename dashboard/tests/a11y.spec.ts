@@ -15,13 +15,32 @@ test.describe('axe-core a11y smoke', () => {
   for (const view of VIEWS) {
     test(`view: ${view}`, async ({ page }) => {
       await page.goto('/');
-      // Dismiss the welcome modal if it auto-shows.
-      await page.evaluate(() => {
-        const sr = (document.querySelector('nv-app') as HTMLElement & { shadowRoot: ShadowRoot }).shadowRoot;
-        const ob = sr.querySelector('nv-onboarding') as HTMLElement | null;
-        if (ob?.hasAttribute('open')) {
-          (ob.shadowRoot?.querySelector('.skip') as HTMLElement | null)?.click();
+      // Dismiss the welcome modal if it auto-shows, then wait until it has left
+      // the accessibility tree. A single poll handles every race at once,
+      // because each of these was observed as an intermittent failure across
+      // chromium/firefox/webkit:
+      //   - `nv-app` may not have upgraded yet (no shadowRoot to query);
+      //   - Lit may not have upgraded `nv-onboarding` yet, so a `.skip` click
+      //     would be a silent no-op;
+      //   - `nv-onboarding` decides whether to open inside an async storage
+      //     read, so before its `ready` attribute is set "not open" only means
+      //     "not decided yet". Treating that as dismissed let the modal open
+      //     underneath the scan.
+      //   - the modal fades out over 180ms while staying in the DOM. Scanning
+      //     inside that window samples a half-transparent panel, and contrast
+      //     tooling composites the fading text over the dimmed backdrop into
+      //     false failures no user ever sees.
+      await page.waitForFunction(() => {
+        const app = document.querySelector('nv-app') as (HTMLElement & { shadowRoot: ShadowRoot }) | null;
+        if (!app?.shadowRoot) return false;
+        const ob = app.shadowRoot.querySelector('nv-onboarding') as HTMLElement | null;
+        if (!ob) return true;
+        if (!ob.shadowRoot || !ob.hasAttribute('ready')) return false;
+        if (ob.hasAttribute('open')) {
+          (ob.shadowRoot.querySelector('.skip') as HTMLElement | null)?.click();
+          return false;
         }
+        return getComputedStyle(ob).visibility === 'hidden';
       });
       // Navigate to the view via the rail button (except for home which is default).
       if (view !== 'home') {

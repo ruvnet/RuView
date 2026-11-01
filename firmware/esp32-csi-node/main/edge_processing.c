@@ -39,7 +39,7 @@ extern nvs_config_t g_nvs_config;
 static const char *TAG = "edge_proc";
 
 #ifndef CONFIG_EDGE_DSP_SAMPLE_HZ
-#if CONFIG_IDF_TARGET_ESP32C6
+#if CONFIG_IDF_TARGET_ESP32C6 || CONFIG_IDF_TARGET_ESP32C5
 #define CONFIG_EDGE_DSP_SAMPLE_HZ 8
 #else
 #define CONFIG_EDGE_DSP_SAMPLE_HZ 20
@@ -1065,20 +1065,18 @@ static void send_feature_vector(void)
 static void process_frame(const edge_ring_slot_t *slot)
 {
     uint16_t n_subcarriers = slot->iq_len / 2;
-    if (n_subcarriers == 0 || n_subcarriers > EDGE_MAX_SUBCARRIERS) {
-        /* Counted, not silent.
-         *
-         * This return is where the HE20 truncation bug lived: EDGE_MAX_SUBCARRIERS
-         * was 128 while a C6 delivers 256 bins, so every frame took this branch
-         * and the entire edge pipeline did nothing while the DSP task logged a
-         * healthy banner. Nothing anywhere recorded that it was happening.
-         *
-         * A frame arriving wider than the configured grid is a configuration
-         * error, not traffic to discard quietly, so it gets a counter that
-         * leaves the node in the sync packet. `rejected > 0 && processed == 0`
-         * names that failure exactly, from the server, with no cable. */
+    if (n_subcarriers == 0) {
+        /* Counted, not silent: an empty frame leaves the node in the sync
+         * packet via the rejected counter (`rejected > 0 && processed == 0`
+         * names a dead edge pipeline from the server, with no cable). */
         s_frame_rejected++;
         return;
+    }
+    /* S3 STBC frames append a second HT-LTF block (192 entries total).
+     * Process the bounded LLTF + HT-LTF prefix instead of starving edge
+     * output (#2286). Raw CSI streaming retains the complete payload. */
+    if (n_subcarriers > EDGE_MAX_SUBCARRIERS) {
+        n_subcarriers = EDGE_MAX_SUBCARRIERS;
     }
 
     s_frame_count++;

@@ -1,0 +1,56 @@
+{
+  "name": "ruview",
+  "version": "0.9.1",
+  "description": "RuView in one install: the WiFi-sensing operator harness (ESP32/Realtek CSI, 60/24 GHz radar incl. ESPHome kits, LiDAR, flashing, training, doctor, MCP + ChatGPT/MCP Apps console), the Homecore developer metaharness, and the WASM vitals kernel. One CLI and one MCP server.",
+  "type": "module",
+  "bin": {
+    "ruview": "bin/ruview.js"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./mcp": "./src/mcp.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@ruvnet/ruview": "0.9.1",
+    "@ruvnet/ruview-kernel": "0.1.0",
+    "homecore": "0.1.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "ruview",
+    "wifi-sensing",
+    "csi",
+    "esp32",
+    "realtek",
+    "mmwave",
+    "esphome",
+    "mcp",
+    "mcp-apps",
+    "chatgpt",
+    "homecore",
+    "wasm"
+  ],
+  "license": "MIT",
+  "author": "ruvnet",
+  "homepage": "https://github.com/ruvnet/RuView#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ruvnet/RuView.git",
+    "directory": "harness/ruview-umbrella"
+  },
+  "bugs": {
+    "url": "https://github.com/ruvnet/RuView/issues"
+  }
+}

@@ -24,6 +24,14 @@
 //!              └─ to_evidence_record → ruview_evidence ledger
 //! ```
 //!
+//! Radar reference logs (one JSON summary per window) enter through
+//! [`RadarLabels`], which turns each window into presence, count and range
+//! labels with an uncertainty and a reason when a window cannot be labelled.
+//! [`auto_label`] pairs those labels with a RuView recording to make
+//! occupancy training windows; [`session_disjoint_split`] and
+//! [`majority_baseline`] give the split and the baseline any accuracy built
+//! on them must be reported against (see `examples/radar_autolabel.rs`).
+//!
 //! ## Honesty and determinism
 //!
 //! - **Canonical vocabulary (ADR-300 rule 3):** the report speaks the
@@ -48,8 +56,11 @@
 
 mod agreement;
 mod align;
+mod autolabel;
+mod baseline;
 mod error;
 mod model;
+mod radar;
 mod scope;
 mod series;
 mod source;
@@ -58,8 +69,18 @@ pub use agreement::{AgreementMetrics, AgreementReport, EvidenceGrade, GradingPol
 pub use align::{
     estimate_alignment, Alignment, AlignmentConfig, MAX_GRID_POINTS, MAX_LAG_STEPS,
 };
+pub use autolabel::{
+    auto_label, parse_recording_jsonl, AutoLabelConfig, AutoLabelOutput, CsiFrame,
+    CsiWindowSummary, LabelledWindow, Occupancy, SkipReason, MAX_RECORDING_LINE_BYTES,
+};
+pub use baseline::{majority_baseline, session_disjoint_split, BaselineReport, SessionSplit};
 pub use error::{GroundTruthError, MAX_STR_LEN};
 pub use model::{DataProvenance, Measurand, Reading, ReadingKind};
+pub use radar::{
+    label_window, parse_radar_jsonl, LabelStatus, LabelUncertainty, PresenceBasis,
+    RadarAdapterConfig, RadarLabel, RadarLabels, RadarTarget, RadarWindow, RadarWindowSource,
+    UnknownReason, LABEL_ABSENT, LABEL_PRESENT, MAX_RADAR_LINE_BYTES, MAX_RADAR_TARGETS,
+};
 pub use scope::{DistanceBand, LineOfSight, MotionState, SessionScope, MAX_SUBJECTS};
 pub use series::{EstimateSeries, ReferenceObservation, ReferenceSeries, MAX_SAMPLES};
 pub use source::{ReferenceModality, ReferenceSource};

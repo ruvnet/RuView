@@ -81,8 +81,22 @@ for residuals, weights in your_csi_source:  # one frame at a time
         print(f"{est.value_bpm:.1f} BPM  (confidence={est.confidence:.2f})")
 ```
 
-Heart rate is the same shape — `HeartRateExtractor.esp32_default()` with a
-0.8–2.0 Hz band-pass and a 15-second window.
+For heart rate, use `HeartRateExtractor.esp32_default()` with a 0.8–2.0 Hz
+bandpass and a 15-second window. Its second argument is `phases`, not the
+breathing extractor's `weights`:
+
+```python
+hr = HeartRateExtractor.esp32_default()
+est = hr.extract(residuals=residuals, phases=phases)
+# If phase measurements are unavailable, phases=[] uses equal weighting.
+```
+
+The current binding rejects the old `weights` keyword with `TypeError`.
+Heart-rate estimation requires a local autocorrelation peak; a declining
+breathing-only correlation is not treated as a pulse at the band edge.
+Additional filtering reduces respiratory leakage, while confidence remains
+capped by evidence from the original filter stage. Synthetic regression tests
+cover these cases; they do not establish accuracy on real CSI or medical use.
 
 ### Subscribe to a live sensing-server
 
@@ -112,7 +126,8 @@ listener.on(SemanticPrimitive.PossibleDistress, lambda e: alert(e))
 
 client = RuViewMqttClient(broker_host="homeassistant.local")
 client.on_message(
-    "homeassistant/+/wifi_densepose_+/+/state",
+    # MQTT `+` must fill a whole topic level; the listener skips non-RuView topics.
+    "homeassistant/+/+/+/state",
     listener.handle_mqtt_message,
 )
 client.start()
@@ -125,8 +140,8 @@ client.wait_connected()
 import numpy as np
 from wifi_densepose import BfldFrame, BfldKind
 
-# Parse compressed BFR from a Wireshark capture into a Complex64 ndarray ...
-fb = np.zeros((2, 1, 996), dtype=np.complex64)  # Nr=2 Nc=1 Nsc=996 for HE80
+# Parse compressed BFR from a Wireshark capture into a complex128 ndarray ...
+fb = np.zeros((2, 1, 996), dtype=np.complex128)  # Nr=2 Nc=1 Nsc=996 for HE80
 
 frame = BfldFrame.from_compressed_feedback(
     timestamp_ms=ts,

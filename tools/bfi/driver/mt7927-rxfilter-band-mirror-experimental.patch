@@ -1,0 +1,27 @@
+--- a/mt76/mt7925/mcu.c
++++ b/mt76/mt7925/mcu.c
+@@ -3895,6 +3895,7 @@
+ 			    u8 bit_op, u32 bit_map)
+ {
+ 	struct mt792x_phy *phy = &dev->phy;
++	int ret;
+ 	struct {
+ 		u8 band_idx;
+ 		u8 rsv1[3];
+@@ -3918,6 +3919,16 @@
+ 		.bit_op = bit_op,
+ 	};
+ 
++	ret = mt76_mcu_send_msg(&phy->dev->mt76, MCU_UNI_CMD(BAND_CONFIG),
++			       &req, sizeof(req), true);
++	if (ret || !is_mt7927(&dev->mt76) || !fif)
++		return ret;
++
++	/* Experimental: mac80211 aggregate filter flags apply to both
++	 * MT7927 band contexts. Preserve bitmap-only updates and older chips.
++	 * The primary PHY index is zero; never alter that shared index.
++	 */
++	req.band_idx = 1;
+ 	return mt76_mcu_send_msg(&phy->dev->mt76, MCU_UNI_CMD(BAND_CONFIG),
+ 				 &req, sizeof(req), true);
+ }

@@ -8,6 +8,7 @@
   },
   "exports": {
     ".": "./src/tools.js",
+    "./cli": "./bin/cli.js",
     "./brain": "./src/brain.js",
     "./guidance": "./src/guidance.js",
     "./hosts": "./src/hosts/index.js",

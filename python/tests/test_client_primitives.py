@@ -22,12 +22,12 @@ def test_enum_covers_all_10_v1_primitives() -> None:
         "someone_sleeping",
         "possible_distress",
         "room_active",
-        "elderly_inactivity",
+        "elderly_inactivity_anomaly",
         "meeting_in_progress",
         "bathroom_occupied",
         "fall_risk_elevated",
         "bed_exit",
-        "no_movement_safety",
+        "no_movement",
         "multi_room_transition",
     }
     actual = {p.value for p in SemanticPrimitive}
@@ -119,6 +119,34 @@ def test_listener_decodes_numeric_sensor_state() -> None:
     assert evt is not None
     assert evt.kind is SemanticPrimitive.FallRiskElevated
     assert evt.state == "73"
+
+
+def test_listener_decodes_server_score_payload() -> None:
+    """The sensing-server publishes fall_risk_elevated as a ScorePayload
+    (`{"score": ..., "ts": ...}`, mqtt/state.rs) with no `state` key."""
+    listener = SemanticPrimitiveListener()
+    evt = listener.handle_mqtt_message(
+        "homeassistant/sensor/wifi_densepose_aabb/fall_risk_elevated/state",
+        json.dumps({"score": 73.0, "ts": "2026-10-11T12:00:00Z"}),
+    )
+    assert evt is not None
+    assert evt.state == "73.0"
+
+
+def test_listener_routes_server_topic_slugs() -> None:
+    """Slugs must match EntityKind::topic_slug() in the sensing-server's
+    mqtt/discovery.rs, or the server's state messages are dropped."""
+    listener = SemanticPrimitiveListener()
+    received: list[SemanticPrimitive] = []
+    listener.on_any(lambda e: received.append(e.kind))
+    for slug in ("elderly_inactivity_anomaly", "no_movement"):
+        listener.handle_mqtt_message(
+            f"homeassistant/binary_sensor/wifi_densepose_aabb/{slug}/state", "ON"
+        )
+    assert received == [
+        SemanticPrimitive.ElderlyInactivityAnomaly,
+        SemanticPrimitive.NoMovementSafety,
+    ]
 
 
 def test_listener_decodes_bytes_payload() -> None:

@@ -1,0 +1,132 @@
+# ADR-368 — @ruvnet/ruview-kernel: build the WASM and napi-rs transports from
+# source on every OS, run the Rust ABI tests, the package unit/security/e2e
+# tests with the native addon REQUIRED, the wasm↔napi parity check, artifact
+# verification, and the cross-package e2e through the @ruvnet/ruview
+# metaharness. No publish step: publication stays CI-only via the release
+# workflow and requires explicit maintainer approval (ADR-265).
+
+name: ruview-kernel npm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'v2/crates/ruview-kernel/**'
+      - 'v2/crates/ruview-kernel-napi/**'
+      - 'v2/crates/wifi-densepose-vitals/**'
+      - 'harness/ruview-kernel/**'
+      - 'harness/ruview/src/kernel.js'
+      - 'harness/ruview/test/kernel.test.mjs'
+      - '.github/workflows/ruview-kernel-npm.yml'
+  pull_request:
+    paths:
+      - 'v2/crates/ruview-kernel/**'
+      - 'v2/crates/ruview-kernel-napi/**'
+      - 'v2/crates/wifi-densepose-vitals/**'
+      - 'harness/ruview-kernel/**'
+      - 'harness/ruview/src/kernel.js'
+      - 'harness/ruview/test/kernel.test.mjs'
+      - '.github/workflows/ruview-kernel-npm.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ruview-kernel-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kernel:
+    name: kernel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The v2 workspace lists submodule crates as members; cargo must be
+          # able to load every member manifest.
+          submodules: recursive
+
+      - name: Install Rust + wasm32 target
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          targets: wasm32-unknown-unknown
+
+      # v2/rust-toolchain pins its own channel; the target must be installed
+      # for that toolchain, not only for the action's default `stable`.
+      - name: Add wasm32 target to the pinned v2 toolchain
+        working-directory: v2
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          workspaces: |
+            v2 -> target
+            v2/crates/ruview-kernel-napi -> target
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      - name: Rust ABI tests
+        run: cargo test --manifest-path v2/Cargo.toml -p ruview-kernel --locked
+
+      - name: Build WASM + napi-rs artifacts from source
+        working-directory: harness/ruview-kernel
+        run: npm run build
+
+      - name: Verify artifacts (checksums, zero WASM imports, ABI)
+        working-directory: harness/ruview-kernel
+        run: node scripts/verify-artifacts.mjs --require-wasm
+
+      - name: Package tests (napi required)
+        working-directory: harness/ruview-kernel
+        env:
+          RUVIEW_KERNEL_REQUIRE_NAPI: '1'
+        run: npm test
+
+      - name: Doctor, self-test, and wasm↔napi parity (SYNTHETIC)
+        working-directory: harness/ruview-kernel
+        run: |
+          node bin/cli.js doctor --strict-napi
+          node bin/cli.js selftest --backend wasm
+          node bin/cli.js selftest --backend napi
+          node bin/cli.js parity
+
+      - name: Pack
+        working-directory: harness/ruview-kernel
+        run: |
+          npm pack --dry-run
+          # Relative destination: Windows runner temp paths contain
+          # backslashes that bash globbing would mangle.
+          mkdir -p dist-pack
+          npm pack --pack-destination dist-pack
+
+      - name: Cross-package e2e through the @ruvnet/ruview metaharness
+        working-directory: harness/ruview
+        run: |
+          npm ci --ignore-scripts
+          npm install --no-save --ignore-scripts ../ruview-kernel/dist-pack/ruvnet-ruview-kernel-*.tgz
+          node --test test/kernel.test.mjs
+          node bin/cli.js kernel --backend auto
+
+      - name: Upload built artifacts
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ruview-kernel-linux-x64
+          path: |
+            harness/ruview-kernel/wasm/ruview_kernel.wasm
+            harness/ruview-kernel/wasm/SHA256SUMS
+            harness/ruview-kernel/native/*.node
+            harness/ruview-kernel/native/SHA256SUMS
+          retention-days: 14

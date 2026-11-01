@@ -1,0 +1,32 @@
+[package]
+name = "ruview-kernel-napi"
+version = "0.1.0"
+edition = "2021"
+description = "napi-rs transport for ruview-kernel (ADR-368); same JSON ABI as the WASM backend"
+license = "MIT OR Apache-2.0"
+authors = ["rUv <ruv@ruv.net>", "WiFi-DensePose Contributors"]
+repository = "https://github.com/ruvnet/RuView"
+publish = false
+
+# Standalone workspace: keeps napi out of `cargo test --workspace` in v2/.
+# Built by `npm run build:napi` in harness/ruview-kernel.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ruview-kernel = { path = "../ruview-kernel" }
+napi = { version = "3", default-features = false, features = ["napi4"] }
+napi-derive = "3"
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"
+opt-level = 3
+# Unwind (not abort) so a defect surfaces as a JS exception, not a process kill.
+panic = "unwind"

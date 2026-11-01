@@ -290,7 +290,7 @@ function parseFeaturePacket(buf) {
   const seq    = buf.readUInt16LE(6);
   const features = [];
   for (let i = 0; i < 8; i++) {
-    features.push(buf.readFloatLE(12 + i * 4));
+    features.push(buf.readFloatLE(16 + i * 4));
   }
 
   return { nodeId, seq, features };

@@ -1,0 +1,4 @@
+{
+  "description": "RuView live pane: /ruview and its Pane drawing, a timed refresh from the @ruvnet/ruview CLI (node capture and ESPHome radar, read-only), and a one-line status",
+  "modules": ["./register.mjs"]
+}

@@ -137,6 +137,7 @@ impl GaussianMap {
                 e.doppler_variance = (wa * e.doppler_variance + wb * g.doppler_variance) / wsum;
                 e.confidence = (wa + wb - wa * wb).clamp(0.0, 1.0);
                 e.first_seen_ns = e.first_seen_ns.min(g.first_seen_ns);
+                e.decayed_to_ns = e.decayed_to_ns.max(g.decayed_to_ns);
                 if g.timestamp_ns >= e.timestamp_ns {
                     e.timestamp_ns = g.timestamp_ns;
                     e.provenance = g.provenance;
@@ -181,9 +182,15 @@ impl GaussianMap {
     /// repeatedly observed — `τ_eff = τ · (1 + ln(1 + lifetime/τ))` with
     /// `lifetime = last_seen − first_seen`. A wall confirmed for hours
     /// outlives a transient echo seen once, even at equal nominal τ.
+    ///
+    /// Only the interval since `max(decayed_to_ns, timestamp_ns)` is applied,
+    /// so `decay(t1); decay(t2)` equals `decay(t2)`: the result does not
+    /// depend on how often the caller ticks.
     pub fn decay(&mut self, now_ns: u64) {
         for g in &mut self.gaussians {
-            let dt_s = (now_ns.saturating_sub(g.timestamp_ns)) as f64 / 1e9;
+            let from_ns = g.decayed_to_ns.max(g.timestamp_ns);
+            let dt_s = (now_ns.saturating_sub(from_ns)) as f64 / 1e9;
+            g.decayed_to_ns = from_ns.max(now_ns);
             let lifetime_s = (g.timestamp_ns.saturating_sub(g.first_seen_ns)) as f64 / 1e9;
             // `RfGaussian::new` validates `decay_tau_s > 0`, but the field is
             // mutable after construction (`gaussians_mut`); re-clamp here so a
@@ -269,6 +276,7 @@ impl GaussianMap {
                 e.confidence = (wa + wb - wa * wb).clamp(0.0, 1.0);
                 e.first_seen_ns = e.first_seen_ns.min(partner.first_seen_ns);
                 e.timestamp_ns = e.timestamp_ns.max(partner.timestamp_ns);
+                e.decayed_to_ns = e.decayed_to_ns.max(partner.decayed_to_ns);
                 for r in partner.source_receipts {
                     if !e.source_receipts.contains(&r)
                         && e.source_receipts.len() < super::primitive::MAX_SOURCE_RECEIPTS
@@ -530,6 +538,61 @@ mod tests {
         map.decay(2_100_000_000_000);
         assert_eq!(map.len(), 1, "only the long-lived structure survives");
         assert!((map.gaussians()[0].position[0]).abs() < 1e-9, "survivor is the wall");
+    }
+
+    #[test]
+    fn decay_is_independent_of_call_frequency() {
+        // A transient (lifetime 0 ⇒ τ_eff = τ) and a wall seen for 30 min
+        // (stretched τ_eff), both last observed at t = 1800 s.
+        let build = || {
+            let mut map = GaussianMap::new(1.0);
+            let mut wall = g_at([0.0, 0.0, 1.0], 0.9, 1_800_000_000_000);
+            wall.first_seen_ns = 0;
+            map.insert(wall);
+            map.insert(g_at([6.0, 0.0, 1.0], 0.9, 1_800_000_000_000));
+            map
+        };
+        let end_ns = 1_890_000_000_000; // 90 s after the last observation
+
+        let mut once = build();
+        once.decay(end_ns);
+
+        let mut stepped = build();
+        for k in 1..=90u64 {
+            stepped.decay(1_800_000_000_000 + k * 1_000_000_000);
+        }
+        // Repeating the final timestamp must be a no-op.
+        stepped.decay(end_ns);
+
+        assert_eq!(once.len(), 2, "both survive 90 s of single-call decay");
+        assert_eq!(stepped.len(), once.len(), "no extra pruning");
+        for (a, b) in once.gaussians().iter().zip(stepped.gaussians()) {
+            assert!(
+                (a.confidence - b.confidence).abs() < 1e-12,
+                "decay(t) once gave {} but stepped decay up to t gave {}",
+                a.confidence,
+                b.confidence
+            );
+        }
+        // Transient: exactly 0.9·e^{-90/60}.
+        let transient = &once.gaussians()[1];
+        assert!((transient.confidence - 0.9 * (-1.5f64).exp()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn static_persistence_holds_under_frequent_decay() {
+        // Same scenario as `long_lived_structure_outlives_transients_at_equal_tau`,
+        // but decay runs every 10 s instead of once at the end.
+        let mut map = GaussianMap::new(1.0);
+        let mut wall = g_at([0.0, 0.0, 1.0], 0.9, 1_800_000_000_000);
+        wall.first_seen_ns = 0;
+        map.insert(wall);
+        map.insert(g_at([6.0, 0.0, 1.0], 0.9, 1_800_000_000_000));
+        for k in 1..=30u64 {
+            map.decay(1_800_000_000_000 + k * 10_000_000_000);
+        }
+        assert_eq!(map.len(), 1, "only the long-lived structure survives");
+        assert!(map.gaussians()[0].position[0].abs() < 1e-9, "wall survives");
     }
 
     #[test]

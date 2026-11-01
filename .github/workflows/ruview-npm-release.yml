@@ -104,8 +104,10 @@ jobs:
         run: |
           set -euo pipefail
           case "${{ inputs.package }}" in
-            # ADR-283/325: brain + hosts + replay + guarded Spaces OAuth; no runtime deps.
-            harness/ruview) export UNPACKED_BUDGET=163840 ;;
+            # ADR-283/325/369-374: brain + hosts + replay + Spaces OAuth + SDK,
+            # flashing, training, doctor, device access, SSH hosts; ADR-375 console
+            # widget, HTTP transport, terminal UI; ADR-378 mod showcase; no runtime deps.
+            harness/ruview) export UNPACKED_BUDGET=458752 ;;
             # ADR-285: CLI + MCP + reviewed brain + WASM-kernel adapter.
             harness/homecore) export UNPACKED_BUDGET=180000 ;;
             # ADR-264 O2: map-free tarball (was 188 kB with maps).
@@ -140,12 +142,12 @@ jobs:
           npm i --no-fund --no-audit "$TGZ"
           case "${{ inputs.package }}" in
             harness/ruview)
-              ./node_modules/.bin/ruview --version
-              ./node_modules/.bin/ruview doctor
-              ./node_modules/.bin/ruview guidance --topic homecore --query restore --limit 1 \
+              ./node_modules/.bin/ruview-harness --version
+              ./node_modules/.bin/ruview-harness doctor
+              ./node_modules/.bin/ruview-harness guidance --topic homecore --query restore --limit 1 \
                 | grep -q '"homecore-runtime-restore"'
               # the honesty gate must fail closed on empty input (ADR-263 F1)
-              if ./node_modules/.bin/ruview claim-check; then
+              if ./node_modules/.bin/ruview-harness claim-check; then
                 echo 'claim-check passed with no input — fail-open regression'; exit 1
               fi
               node --input-type=module -e "const m = await import('@ruvnet/ruview'); if (!m.TOOLS) process.exit(1);"

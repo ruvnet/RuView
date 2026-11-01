@@ -86,8 +86,8 @@ pub use rf_slam::{PersistentReflector, ReflectorClass, ReflectorObservation, RfS
 pub use fusion_quality::{
     CalibrationId, ContradictionFlag, EvidenceRef, FamilyId, QualityScore,
 };
-pub use multiband::MultiBandCsiFrame;
-pub use multistatic::FusedSensingFrame;
+pub use multiband::{MultiBandCsiFrame, PhaseReference};
+pub use multistatic::{FusedSensingFrame, NonCoherentReason, PhaseFusion};
 pub use phase_align::{PhaseAlignError, PhaseAligner};
 pub use pose_tracker::{
     CompressedPoseHistory, KeypointState, PoseTrack, SkeletonConstraints,

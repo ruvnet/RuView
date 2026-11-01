@@ -1,0 +1,25 @@
+[package]
+name = "ruview-spatial-evidence"
+description = "Emit RuView RF Gaussians and link measurements as spatial.evidence.v1 JSONL (ADR-382)"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Standalone emitter: the v1 wire shapes are mirrored here with local serde
+# structs, so this crate never depends on the WeftOS consumer. The only
+# internal dependency is `ruview-unified`, the source of the Gaussians and
+# of the Friis free-space reference.
+[dependencies]
+ruview-unified = { path = "../ruview-unified" }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+all = "warn"

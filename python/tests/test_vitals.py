@@ -19,6 +19,7 @@ from __future__ import annotations
 import math
 from random import Random
 
+import numpy as np
 import pytest
 
 import wifi_densepose
@@ -253,6 +254,35 @@ def test_heart_rate_extract_with_empty_phases_produces_estimates() -> None:
         "HeartRateExtractor.extract(residuals=..., phases=[]) must not silently "
         "return None for every frame of a clean 72 BPM signal (issue #1423)"
     )
+
+
+@pytest.mark.parametrize("heart_amplitude", [0.0, 0.01])
+def test_issue_2057_breathing_leakage(heart_amplitude: float) -> None:
+    """Replay the reported synthetic input through the installed Rust wheel."""
+    hr = HeartRateExtractor(n_subcarriers=56, sample_rate=100.0, window_secs=15.0)
+    rng = np.random.default_rng(0)
+    last = None
+    for i in range(6000):
+        t = i / 100.0
+        base = 0.1 * math.sin(2.0 * math.pi * 0.25 * t)
+        base += heart_amplitude * math.sin(2.0 * math.pi * 1.2 * t)
+        residuals = (base + 0.01 * rng.standard_normal(56)).tolist()
+        last = hr.extract(residuals=residuals, phases=[])
+    if heart_amplitude == 0.0:
+        assert last is None or last.confidence < 0.3
+    else:
+        assert last is not None
+        assert abs(last.value_bpm - 72.0) < 3.0
+
+
+def test_issue_2057_filtering_does_not_promote_noise() -> None:
+    hr = HeartRateExtractor(n_subcarriers=56, sample_rate=50.0, window_secs=15.0)
+    rng = np.random.default_rng(79)
+    last = None
+    for frame in 0.01 * rng.standard_normal((250, 56)):
+        last = hr.extract(residuals=frame.tolist(), phases=[])
+    assert last is None or last.confidence < 0.6
+    assert last is None or last.status != VitalStatus.Valid
 
 
 # ─── Build feature flag ──────────────────────────────────────────────

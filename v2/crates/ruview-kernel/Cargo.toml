@@ -1,0 +1,25 @@
+[package]
+name = "ruview-kernel"
+version = "0.1.0"
+edition.workspace = true
+description = "RuView portable compute kernel (ADR-368): bounded JSON ABI over the ADR-021 vitals pipeline, shared by the WASM and napi-rs npm backends"
+license.workspace = true
+authors = ["rUv <ruv@ruv.net>", "WiFi-DensePose Contributors"]
+repository.workspace = true
+keywords = ["wifi", "csi", "wasm", "napi", "ruview"]
+categories = ["science", "wasm"]
+
+[lib]
+# cdylib: wasm32-unknown-unknown module consumed by `@ruvnet/ruview-kernel`.
+# rlib: consumed by the napi-rs binding crate and by native tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wifi-densepose-vitals = { version = "0.3.2", path = "../wifi-densepose-vitals", default-features = false }
+serde = { workspace = true }
+serde_json.workspace = true
+
+[lints.rust]
+# The only unsafe code is the pointer/length C ABI in `src/wasm_abi.rs`,
+# compiled for wasm32 only. The portable core is safe Rust.
+unsafe_code = "deny"

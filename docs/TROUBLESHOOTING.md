@@ -6,7 +6,9 @@ Known issues and fixes from the rebase-to-upstream branch (upstream #301).
 
 ## 1. Node not appearing in /api/v1/nodes
 
-**Symptom:** ESP32-S3 node associates with WiFi, LED blinks, but no CSI frames arrive at the server. Node missing from `/api/v1/spatial/nodes`.
+**Symptom:** ESP32-S3 node associates with WiFi, LED blinks, but no CSI frames arrive at the server. Node missing from `/api/v1/nodes`.
+
+**Check the server first:** the UDP receiver listens on `127.0.0.1` by default (ADR-296), so a natively run `sensing-server` never hears nodes on your network unless it was started with `--udp-bind 0.0.0.0 --udp-allow <node-ip-or-cidr>` (or `--udp-insecure-lan`). The startup log line for the UDP receiver says `loopback-only` when this is the problem. For Docker, see "Receiving ESP32 frames in Docker" in the [user guide](user-guide.md).
 
 **Root cause:** After USB flash, the node enters a limping state where WiFi associates but the UDP CSI sender silently fails. The SoftAP + mDNS stack initializes but the CSI callback never fires.
 
@@ -145,18 +147,18 @@ ESP32 nodes still target the host on `--target-ip <host>:5005` — no firmware r
 
 **Symptom:** `sensing-server` starts cleanly, logs `HTTP server listening on http://localhost:3000`, but loading `http://localhost:3000/` (or `/ui/index.html`) returns `404 Not Found`. Reported in #188.
 
-**Root cause:** The default `--ui-path ../../ui` is resolved relative to the binary's *current working directory*, not the binary location. When the binary is launched from anywhere other than `crates/wifi-densepose-sensing-server/`, the relative path doesn't reach the UI assets and Axum's static file handler returns 404.
+**Root cause:** The default `--ui-path ../ui` is resolved relative to the *current working directory*, not the binary location. If it doesn't exist the server also tries `./ui` and `../../ui`. Launching from `v2/` works; from anywhere else (including `v2/crates/wifi-densepose-sensing-server/`) those paths miss the repo's UI, or hit some other `ui` directory, and Axum's static file handler returns 404.
 
-**Fix:** Pass an absolute UI path, run the binary from the crate directory, or use the Docker image (which bundles the UI under `/app/ui`).
+**Fix:** Pass an absolute UI path, run the binary from `v2/`, or use the Docker image (which bundles the UI under `/app/ui`).
 
 ```bash
 # Option A — absolute path (recommended for production)
 sensing-server --source esp32 --udp-port 5005 --http-port 3000 \
   --ws-port 3001 --ui-path /absolute/path/to/ui
 
-# Option B — run from the crate dir (works for local dev / cargo run)
-cd v2/crates/wifi-densepose-sensing-server
-cargo run -- --source esp32
+# Option B — run from v2/ (works for local dev / cargo run)
+cd v2
+cargo run -p wifi-densepose-sensing-server -- --source esp32
 
 # Option C — Docker (no path config needed)
 docker compose -f docker/docker-compose.yml up sensing-server

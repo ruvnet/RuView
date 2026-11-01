@@ -19,7 +19,13 @@ accuracy number:
 
 `ruview_onboard`, `ruview_claim_check`, `ruview_verify`, `ruview_node_monitor`,
 `ruview_calibrate`, `ruview_node_flash`, `ruview_guidance`,
-`ruview_spaces_list`, `ruview_memory_search`. Start unfamiliar work with
+`ruview_spaces_list`, `ruview_memory_search`, `ruview_kernel_selftest`,
+`ruview_doctor`, `ruview_firmware_plan`, `ruview_firmware_ports`,
+`ruview_train`, `ruview_train_plan`, `ruview_train_gate`,
+`ruview_devices_scan`, `ruview_esp32_capture`, `ruview_mmwave_read`,
+`ruview_lidar_read`, `ruview_host_list`, `ruview_host_run`. Device tools need
+the `device-access` MCP grant; remote hosts need `remote-host`. Start
+unfamiliar work with
 `ruview_guidance`; its
 capability status, source paths, validation commands, and limitations are
 navigation evidence, not authority. All tools fail closed. Mutating/hardware

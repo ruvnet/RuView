@@ -8,27 +8,64 @@
       "ruview_verify",
       "ruview_node_monitor",
       "ruview_guidance",
-      "ruview_memory_search"
+      "ruview_memory_search",
+      "ruview_kernel_selftest",
+      "ruview_doctor",
+      "ruview_firmware_plan",
+      "ruview_firmware_ports",
+      "ruview_train_plan",
+      "ruview_train_gate",
+      "ruview_host_list"
     ],
     "grants": {
       "credential-use": {
-        "tools": ["ruview_spaces_list"],
+        "tools": [
+          "ruview_spaces_list"
+        ],
         "requiresConfirmation": false,
         "notes": "Allows a tenant-scoped external read; OAuth refresh may rotate the local credential file."
       },
       "workspace-write": {
-        "tools": ["ruview_calibrate"],
+        "tools": [
+          "ruview_calibrate",
+          "ruview_train"
+        ],
         "requiresConfirmation": true
       },
       "hardware-write": {
-        "tools": ["ruview_node_flash"],
+        "tools": [
+          "ruview_node_flash"
+        ],
         "requiresConfirmation": true
+      },
+      "device-access": {
+        "tools": [
+          "ruview_devices_scan",
+          "ruview_esp32_capture",
+          "ruview_mmwave_read",
+          "ruview_lidar_read"
+        ],
+        "requiresConfirmation": false,
+        "notes": "Read-only access to serial devices and the local ESP32 UDP stream; RPLIDAR scans spin the motor but write no configuration."
+      },
+      "remote-host": {
+        "tools": [
+          "ruview_host_run"
+        ],
+        "requiresConfirmation": false,
+        "notes": "Runs one read-only tool on an operator-configured SSH host with pinned host keys; the remote tool's own grant is also required."
       }
     },
     "agentHosts": {
       "defaultMode": "read-only",
-      "writeRequires": ["allow-write", "confirm"],
-      "forbiddenFlags": ["dangerously-skip-permissions", "dangerously-bypass-approvals-and-sandbox"]
+      "writeRequires": [
+        "allow-write",
+        "confirm"
+      ],
+      "forbiddenFlags": [
+        "dangerously-skip-permissions",
+        "dangerously-bypass-approvals-and-sandbox"
+      ]
     }
   }
 }

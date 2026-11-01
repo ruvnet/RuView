@@ -5,6 +5,8 @@ import { poseService } from '../services/pose.service.js';
 import { sensingService } from '../services/sensing.service.js';
 
 export class DashboardTab {
+  static STREAM_HEALTH_REFRESH_DELAY_MS = 500;
+
   constructor(containerElement) {
     this.container = containerElement;
     this.statsElements = {};
@@ -65,8 +67,9 @@ export class DashboardTab {
     });
 
     // Subscribe to sensing service state changes for data source indicator
-    this._sensingUnsub = sensingService.onStateChange(() => {
+    this._sensingUnsub = sensingService.onStateChange((state) => {
       this.updateDataSourceIndicator();
+      this._refreshStreamHealthOn(state);
     });
     // Also update on data — catches source changes mid-stream
     this._sensingDataUnsub = sensingService.onData(() => {
@@ -84,6 +87,23 @@ export class DashboardTab {
     healthService.startHealthMonitoring(30000);
   }
 
+  // #2087: the Streaming card comes from /health, polled every 30 s. The first
+  // poll runs before this page's own socket has connected (with auth on, the
+  // ticket round-trip makes that gap wider), so the card read "IDLE, 0
+  // client(s)" for up to 30 s while data was streaming. Re-read health when
+  // the socket opens or drops. The short delay lets the server register the
+  // socket before it is counted.
+  _refreshStreamHealthOn(state) {
+    if (state === this._lastSensingState) return;
+    const wasConnected = this._lastSensingState === 'connected';
+    this._lastSensingState = state;
+    if (state !== 'connected' && !wasConnected) return;
+    clearTimeout(this._streamHealthTimer);
+    this._streamHealthTimer = setTimeout(() => {
+      healthService.getSystemHealth().catch(() => { /* next poll retries */ });
+    }, DashboardTab.STREAM_HEALTH_REFRESH_DELAY_MS);
+  }
+
   // Update the data source indicator on the dashboard
   updateDataSourceIndicator() {
     const el = this.container.querySelector('#dashboard-datasource');
@@ -97,6 +117,7 @@ export class DashboardTab {
       'reconnecting':      { text: 'RECONNECTING', status: 'degraded', msg: 'Attempting to connect...' },
       'unreachable':       { text: 'NO DATA',   status: 'unhealthy', msg: 'Server unreachable — readings below are stale' },
       'simulated':         { text: 'INVENTED',  status: 'unhealthy', msg: 'Browser-generated data, not measured' },
+      'auth-required':     { text: 'TOKEN REQUIRED', status: 'unhealthy', msg: 'Paste the server API token in Settings \u2192 API Access' },
     };
     const cfg = config[ds] || config['reconnecting'];
     el.className = `component-status status-${cfg.status}`;
@@ -427,6 +448,7 @@ export class DashboardTab {
       this.healthSubscription();
     }
     if (this._sensingUnsub) this._sensingUnsub();
+    clearTimeout(this._streamHealthTimer);
     if (this._sensingDataUnsub) this._sensingDataUnsub();
 
     if (this.statsInterval) {

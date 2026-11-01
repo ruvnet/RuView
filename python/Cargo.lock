@@ -3416,7 +3416,7 @@ dependencies = [
 
 [[package]]
 name = "wifi-densepose-core"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "blake3",
  "chrono",
@@ -3429,7 +3429,7 @@ dependencies = [
 
 [[package]]
 name = "wifi-densepose-mat"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3469,7 +3469,7 @@ dependencies = [
 
 [[package]]
 name = "wifi-densepose-ruvector"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "ruvector-attention",
  "ruvector-attn-mincut",
@@ -3483,7 +3483,7 @@ dependencies = [
 
 [[package]]
 name = "wifi-densepose-signal"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "chrono",
  "midstreamer-attractor",
@@ -3507,7 +3507,7 @@ dependencies = [
 
 [[package]]
 name = "wifi-densepose-train"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3539,7 +3539,7 @@ dependencies = [
 
 [[package]]
 name = "wifi-densepose-vitals"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "serde",
  "tracing",

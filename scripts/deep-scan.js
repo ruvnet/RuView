@@ -41,7 +41,7 @@ server.on('message', (buf, rinfo) => {
       amps.push(Math.sqrt(I * I + Q * Q));
     }
     if (!raw[nid]) raw[nid] = [];
-    raw[nid].push({ time: Date.now(), amps, rssi: buf.readInt8(5), nSub });
+    raw[nid].push({ time: Date.now(), amps, rssi: buf.readInt8(16), nSub });
   } else if (magic === 0xC5110002 && buf.length >= 32) {
     const br = buf.readUInt16LE(6) / 100;
     const hr = buf.readUInt32LE(8) / 10000;

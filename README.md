@@ -6,6 +6,27 @@
   </a>
 </p>
 
+[![RuView: spaces become signals, with an animated conceptual RF field](assets/readme/hero-spatial-v6.svg)](docs/user-guide.md)
+
+<table>
+<tr>
+<td align="center" width="33%"><a href="docs/user-guide.md"><img src="assets/readme/nav-start-spatial-v4.svg" width="180" alt="Start here" /></a><br/><a href="docs/user-guide.md">Start here</a></td>
+<td align="center" width="33%"><a href="firmware/esp32-csi-node/README.md"><img src="assets/readme/nav-hardware-spatial-v4.svg" width="180" alt="Hardware" /></a><br/><a href="firmware/esp32-csi-node/README.md">Hardware</a></td>
+<td align="center" width="33%"><a href="https://huggingface.co/ruvnet/wifi-densepose-pretrained"><img src="assets/readme/nav-models-spatial-v4.svg" width="180" alt="Models" /></a><br/><a href="https://huggingface.co/ruvnet/wifi-densepose-pretrained">Models</a></td>
+</tr>
+<tr>
+<td align="center" width="33%"><a href="harness/ruview/README.md"><img src="assets/readme/nav-agents-spatial-v4.svg" width="180" alt="AI toolkit" /></a><br/><a href="harness/ruview/README.md">AI toolkit</a></td>
+<td align="center" width="33%"><a href="docs/integrations/home-assistant.md"><img src="assets/readme/nav-home-spatial-v4.svg" width="180" alt="Smart home" /></a><br/><a href="docs/integrations/home-assistant.md">Smart home</a></td>
+<td align="center" width="33%"><a href="https://cognitum.one/seed"><img src="assets/readme/nav-seed-spatial-v4.svg" width="180" alt="Cognitum Seed" /></a><br/><a href="https://cognitum.one/seed">Cognitum Seed</a></td>
+</tr>
+</table>
+
+<p align="center">
+  <a href="https://ruos.cognitum.one">
+    <img src="assets/ruos-animated.svg" alt="RuView — WiFi becomes spatial awareness, with Ruflo coordination and a ruOS sensing workspace" width="100%">
+  </a>
+</p>
+
 
 ## **See through walls with WiFi** ##
 
@@ -20,6 +41,8 @@ Works natively with the four major smart-home ecosystems: **[Home Assistant](doc
 ### π RuView is a WiFi sensing platform that turns radio signals into spatial intelligence.
 
 Every WiFi router already fills your space with radio waves. When people move, breathe, or even sit still, they disturb those waves in measurable ways. RuView captures these disturbances using Channel State Information (CSI) from low-cost ESP32 sensors and turns them into actionable data: who's there, what they're doing, and whether they're okay.
+
+[![Explore RuView sensing, models and automation](assets/readme/header-features-spatial-v4.svg)](docs/user-guide.md)
 
 **What it senses:**
 - **Presence and occupancy** — detect people through walls, count them, track entries and exits
@@ -37,32 +60,75 @@ Every WiFi router already fills your space with radio waves. When people move, b
 - **Governed evidence** — attach privacy policy, uncertainty, provenance, and witness records to sensing events
 - **RuView MetaHarness** — use an AI operator to onboard, calibrate, train, verify, and check sensing claims
 
+<!-- ruview-capability-cards -->
+<table>
+<tr>
+<td width="50%"><a href="docs/user-guide.md"><img src="assets/readme/feature-presence-spatial-v4.svg" width="580" alt="Presence and motion: open documentation and current limitations" /></a><br/><a href="docs/user-guide.md">Presence and motion</a></td>
+<td width="50%"><a href="v2/crates/wifi-densepose-signal/README.md"><img src="assets/readme/feature-vitals-spatial-v4.svg" width="580" alt="Breathing and vital signals: open documentation and current limitations" /></a><br/><a href="v2/crates/wifi-densepose-signal/README.md">Breathing and vital signals</a></td>
+</tr>
+<tr>
+<td width="50%"><a href="docs/benchmarks/pose-estimation-cog.md"><img src="assets/readme/feature-pose-spatial-v6.svg" width="580" alt="Pose research and limitations: open documentation and current limitations" /></a><br/><a href="docs/benchmarks/pose-estimation-cog.md">Pose research and limitations</a></td>
+<td width="50%"><a href="firmware/esp32-csi-node/README.md"><img src="assets/readme/feature-edge-spatial-v4.svg" width="580" alt="Edge sensor mesh: open documentation and current limitations" /></a><br/><a href="firmware/esp32-csi-node/README.md">Edge sensor mesh</a></td>
+</tr>
+<tr>
+<td width="50%"><a href="docs/integrations/home-assistant.md"><img src="assets/readme/feature-automation-spatial-v4.svg" width="580" alt="Local automation: open documentation and current limitations" /></a><br/><a href="docs/integrations/home-assistant.md">Local automation</a></td>
+<td width="50%"><a href="harness/ruview/README.md"><img src="assets/readme/feature-agents-spatial-v4.svg" width="580" alt="Guided AI operator: open documentation and current limitations" /></a><br/><a href="harness/ruview/README.md">Guided AI operator</a></td>
+</tr>
+</table>
+
 <details>
 <summary><strong>RuView MetaHarness</strong> — guided operation for humans and AI agents</summary>
 
-The RuView-specific metaharness we created is published as [`@ruvnet/ruview`](harness/ruview/README.md). It provides source-cited guidance, guarded Claude Code/Codex agents, deterministic verification, an honesty check for accuracy claims, and an explicitly granted OAuth-only Cognitum Spaces read.
+The RuView-specific metaharness we created is published as [`@ruvnet/ruview`](harness/ruview/README.md). It provides:
+- source-cited guidance;
+- device access for CSI nodes, radar and LiDAR;
+- firmware flashing with boot evidence;
+- one MCP server, usable over stdio or HTTP for ChatGPT, with a live console widget;
+- a Claude Code mod;
+- guarded Claude Code/Codex agents;
+- deterministic verification;
+- an honesty check for accuracy claims.
+
+Companion packages: [`homecore`](harness/homecore/README.md) (Homecore developer metaharness) and [`@ruvnet/ruview-kernel`](harness/ruview-kernel/README.md) (the vitals pipeline as WASM).
 
 ```bash
 # Check the local setup and get source-cited guidance
-npx @ruvnet/ruview@0.4.0 doctor
-npx @ruvnet/ruview@0.4.0 guidance --topic sensing --query "model loading"
+npx @ruvnet/ruview@0.9.1 doctor
+npx @ruvnet/ruview@0.9.1 guidance --topic sensing --query "model loading"
+
+# Hardware: what is plugged in, live CSI from your nodes, a 60 GHz radar kit
+npx @ruvnet/ruview@0.9.1 devices
+npx @ruvnet/ruview@0.9.1 esp32 --watch                       # ESP32 + Realtek RAC1 nodes, live view
+npx @ruvnet/ruview@0.9.1 esp32 --seconds 45 --analyze        # live CSI through the vitals kernel
+npx @ruvnet/ruview@0.9.1 mmwave --source esphome --host <kit-ip>
+
+# Agents: MCP over stdio, or over HTTP for ChatGPT (token-protected, read tools only)
+npx @ruvnet/ruview@0.9.1 mcp start
+RUVIEW_MCP_GRANTS=device-access npx @ruvnet/ruview@0.9.1 mcp start --http
+
+# Claude Code: a live sensing pane (/ruview), shipped in the package
+npx @ruvnet/ruview@0.9.1 mod
 
 # Run a read-only RuView agent through Codex
-npx @ruvnet/ruview@0.4.0 agent run --host codex --repo . \
+npx @ruvnet/ruview@0.9.1 agent run --host codex --repo . \
   --prompt "Find the nearest tests and cite the source files"
 
-# Search or verify the reviewed contributor brain
-npx @ruvnet/ruview@0.4.0 brain search --query "calibration"
-npx @ruvnet/ruview@0.4.0 brain verify --repo .
-
-# Check claims, replay the deterministic proof, or expose the MCP server
-npx @ruvnet/ruview@0.4.0 claim-check --file REPORT.md
-npx @ruvnet/ruview@0.4.0 verify
-npx @ruvnet/ruview@0.4.0 spaces
-npx @ruvnet/ruview@0.4.0 mcp start
+# Check claims, replay the deterministic proof, search the reviewed brain
+npx @ruvnet/ruview@0.9.1 claim-check --file REPORT.md
+npx @ruvnet/ruview@0.9.1 verify
+npx @ruvnet/ruview@0.9.1 brain search --query "calibration"
 ```
 
-Agent runs are read-only by default. Workspace writes require both `--allow-write` and `--confirm`; retrieved brain content is evidence, not authority.
+**Safety:**
+- Agent runs are read-only by default. Workspace writes require both `--allow-write` and `--confirm`.
+- Hardware reads need the `device-access` grant.
+- Flashing and calibration never run over the HTTP transport.
+- Device-reported vitals are labelled as unvalidated.
+- Retrieved brain content is evidence, not authority.
+
+A single `npx ruview` package bundling all of this is ready (ADR-376). It is waiting on npm to release the unscoped name.
+
+Full walkthrough: [user guide → RuView npm toolkit](docs/user-guide.md#ruview-npm-toolkit-ruvnetruview).
 
 </details>
 
@@ -100,8 +166,8 @@ RuView turns ordinary WiFi into a contactless sensor. A $9 ESP32 board reads the
 > | 🧱 **Through-wall sensing** | Fresnel-zone geometry + multipath modeling | Up to ~5 m, signal-dependent |
 > | 🧠 **Edge intelligence** | **105-cog catalog** ([ADR-102](docs/adr/ADR-102-edge-module-registry.md)) live from `app-registry.json` — health, security, building, retail, industrial, research, AI, swarm, signal, network, and developer modules. Optional Cognitum Seed adds persistent vector store + kNN + witness chain | $140 total BOM |
 > | 🎯 **Camera-free pre-training** | Self-supervised contrastive encoder, 12.2M training steps on 60K frames, shipped on Hugging Face | 84 s/epoch retrain on M4 Pro |
-> | 📷 **Camera-supervised fine-tune** | MediaPipe + ESP32 CSI paired training, end-to-end Candle pipeline on RTX 5080 ([ADR-079](docs/adr/ADR-079-camera-supervised-pose-finetune.md)) | 2.1 s for 400 epochs (~5 ms/epoch) |
-> | 📡 **Multi-frequency mesh** | Channel hopping across 6 bands, TDM slot scheduling ([ADR-029](docs/adr/ADR-029-multifrequency-mesh.md)) | 3× sensing bandwidth |
+> | 📷 **Camera-supervised fine-tune** | MediaPipe + ESP32 CSI paired training, end-to-end Candle pipeline on RTX 5080 ([ADR-079](docs/adr/ADR-079-camera-ground-truth-training.md)) | 2.1 s for 400 epochs (~5 ms/epoch) |
+> | 📡 **Multi-frequency mesh** | Channel hopping across 6 bands, TDM slot scheduling ([ADR-029](docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md)) | 3× sensing bandwidth |
 > | 🌐 **3D point cloud fusion** | Camera depth (MiDaS) + WiFi CSI + mmWave radar → unified spatial model | 22 ms pipeline · 19K+ points/frame |
 >
 > Browse the full 105-module catalog (with practical descriptions, sizes, and difficulty) below in [🧩 Edge Module Catalog](#-edge-module-catalog), or visit [seed.cognitum.one/store](https://seed.cognitum.one/store).
@@ -114,8 +180,11 @@ RuView turns ordinary WiFi into a contactless sensor. A $9 ESP32 board reads the
 ```bash
 # Option 1: Docker (simulated data, no hardware needed)
 docker pull ruvnet/wifi-densepose:latest
-docker run -p 3000:3000 ruvnet/wifi-densepose:latest
+export RUVIEW_API_TOKEN=$(openssl rand -hex 32)   # required; the container exits 64 without it
+docker run -p 127.0.0.1:3000:3000 -e RUVIEW_API_TOKEN ruvnet/wifi-densepose:latest
 # Open http://localhost:3000
+# ESP32 nodes in Docker also need a UDP source guard (RUVIEW_UDP_ALLOW);
+# see docs/user-guide.md "Receiving ESP32 frames in Docker".
 
 # Option 2a: Live sensing with ESP32-S3 hardware ($9)
 # Flash firmware, provision WiFi, and start sensing:
@@ -227,6 +296,8 @@ The separate **17-keypoint pose-estimation model** is now published at [`ruvnet/
 
 ### Results & proof
 
+[![RuView visual guide: header-evidence](assets/readme/header-evidence-spatial-v4.svg)](docs/benchmarks/pose-estimation-cog.md)
+
 See the measured benchmarks, witness records, and one-command reproducibility check.
 
 <details>
@@ -280,6 +351,8 @@ number. The path to a first *reproducible* on-device baseline (PCK@20 ≥ 35%) i
 
 
 ## 🧩 Edge Module Catalog
+
+[![RuView visual guide: header-edge](assets/readme/header-edge-spatial-v4.svg)](firmware/esp32-csi-node/README.md)
 
 Add signed modules for health, security, buildings, industry, research, AI, and more.
 
@@ -455,6 +528,8 @@ Browse and install modules at [seed.cognitum.one/store](https://seed.cognitum.on
 
 ## 🔬 How It Works
 
+[![RuView visual guide: overview](assets/readme/overview-spatial-v4.svg)](docs/user-guide.md)
+
 WiFi routers flood every room with radio waves. When a person moves — or even breathes — those waves scatter differently. WiFi DensePose reads that scattering pattern and reconstructs what happened:
 
 ```
@@ -579,6 +654,8 @@ These scenarios exploit WiFi's ability to penetrate solid materials — concrete
 
 ## 🧠 Self-Learning WiFi AI
 
+[![RuView visual guide: header-learning](assets/readme/header-learning-spatial-v4.svg)](docs/user-guide.md)
+
 Learn compact room fingerprints from raw CSI and adapt the model to each environment.
 
 <details>
@@ -694,13 +771,21 @@ claude --plugin-dir ./plugins/ruview
 
 Verify the plugin structure: `bash plugins/ruview/scripts/smoke.sh`. Full details: [`plugins/ruview/README.md`](plugins/ruview/README.md).
 
-For the portable RuView MetaHarness, use `npx @ruvnet/ruview@0.4.0`; the quick commands and fuller explanation are in the collapsed MetaHarness section near the top of this README and in [`harness/ruview/`](harness/ruview/README.md).
+**Live sensing pane (Claude Code mod):** the same marketplace also lists `ruview-live`, a Claude Code mod.
+- Install it with `/plugin install ruview-live@ruview`, or run `npx @ruvnet/ruview@0.9.1 mod` for its path inside the npm package.
+- `/ruview` opens a pane beside the transcript with your CSI nodes and radar, refreshed on a timer, plus a one-line status.
+- It is read-only.
+- Mods are early access; if `/ruview` is missing, start Claude Code with `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`. See [ADR-377](docs/adr/ADR-377-ruview-live-claude-code-mod.md).
+
+For the portable RuView MetaHarness, use `npx @ruvnet/ruview@0.9.1`. The quick commands and a fuller explanation are in the collapsed MetaHarness section near the top of this README, in [`harness/ruview/`](harness/ruview/README.md), and in the [user guide](docs/user-guide.md#ruview-npm-toolkit-ruvnetruview).
 
 </details>
 
 ---
 
 ## 📖 Documentation
+
+[![RuView visual guide: header-docs](assets/readme/header-docs-spatial-v4.svg)](docs/user-guide.md)
 
 Start with the user, build, and calibration guides; expand for the full reference map.
 
@@ -742,6 +827,8 @@ Start with the user, build, and calibration guides; expand for the full referenc
 > - Camera-free pose accuracy is limited (PCK@20 ≈ 2.5% with proxy labels) — [camera ground-truth training](docs/adr/ADR-079-camera-ground-truth-training.md) targets **35%+ PCK@20**; the pipeline is implemented, but the data-collection and evaluation phases (ADR-079 P7–P9) are still pending.
 >
 > Contributions and bug reports welcome at [Issues](https://github.com/ruvnet/RuView/issues).
+
+[![Cognitum One: Ambient Intelligence at the edge of the physical world](assets/readme/cognitum-spatial-v4.svg)](https://cognitum.one)
 
 ## 📄 License
 

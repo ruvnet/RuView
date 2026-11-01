@@ -32,6 +32,9 @@ jobs:
       - name: Validate the manifest is well-formed JSON
         run: python -c "import json; json.load(open('scripts/fix-markers.json')); print('manifest OK')"
 
+      - name: Run unit tests for fix-marker checker
+        run: python -m unittest scripts/tests/test_check_fix_markers.py
+
       - name: Check fix markers
         run: python scripts/check_fix_markers.py
 

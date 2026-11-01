@@ -32,7 +32,7 @@
     "README.md": "7b4eda2e05ab35345e50ec8b8058c0bcbe0fc52e11e8b7447f3d8d231b4ca58d",
     "bin/cli.js": "c463451f4cecebf308cbfce74c553ca44edb58462fe4e7bfacc49a3bf3aa0c49",
     "brain/corpus/core.jsonl": "a01a42723490e8c4bcf4ceb4233e8115cb7e27fb9a17a802f279d565dc3493fb",
-    "package.json": "45d9e00dc059e84e2445e9b7a8131a04c4c0241b88908c5e849b964735833601",
+    "package.json": "b3614446b634a5b522484adb2d1292421c57ffdc57177b054cda759356d3f87c",
     "scripts/update-manifest.mjs": "5dbebd536a65c88dd26f6830c5a4b62b3f9058d971304c3c6c410c3e0e78faaa",
     "scripts/verify-manifest.mjs": "787351d57f452ee58e67675e09158f17e43adba643981f5148ac144cae17fd80",
     "skills/explore.md": "4fccb5aab3705fd0d266ae7cb98523d71cce4eed4623e9c10e46fb2136b690e3",
@@ -54,7 +54,7 @@
     "src/repo-trust.js": "c11b2255e43f7cba0c74c33e4a972f60193490821445dce8bab0f97dd47db977",
     "src/tools.js": "1ad280eebca0688a52ae08fe5647c8e42a6a8e8e5d70534cc4361dc319c22fbf"
   },
-  "filesDigest": "ad2340db9fc044ffe69d6a9b09a560515cee1d454a405db1b9cc3547afc868c1",
+  "filesDigest": "01b6331f69562fc216bec49a23ef318daf2e7fed76f3714c1db26c0ebe1c7f5f",
   "brainDigest": "a01a42723490e8c4bcf4ceb4233e8115cb7e27fb9a17a802f279d565dc3493fb",
   "policyDigest": "73893df248c9a8d79da5451940b40d6b930b9b92999b52ef8bd538c527cd8a47",
   "dependencies": {

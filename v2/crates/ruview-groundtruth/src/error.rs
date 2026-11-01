@@ -121,6 +121,21 @@ pub enum GroundTruthError {
         /// Human-readable reason.
         reason: &'static str,
     },
+    /// A row of an untrusted input file could not be read.
+    #[error("row {row}: {reason}")]
+    InvalidRow {
+        /// 1-based row (line) number.
+        row: usize,
+        /// Human-readable reason.
+        reason: String,
+    },
+    /// A train/test split could not be made session-disjoint, or a side was
+    /// empty.
+    #[error("invalid split: {reason}")]
+    InvalidSplit {
+        /// Human-readable reason.
+        reason: &'static str,
+    },
     /// A failure raised by the [`ruview_evidence`] ledger boundary when
     /// emitting a record.
     #[error(transparent)]

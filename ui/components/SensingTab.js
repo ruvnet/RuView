@@ -216,6 +216,7 @@ export class SensingTab {
         connected:    'Connected',
         reconnecting: 'Reconnecting...',
         simulated:    'Simulated',
+        'auth-required': 'API token required',
       };
       dot.className = 'sensing-dot ' + state;
       text.textContent = stateLabels[state] || state;
@@ -230,6 +231,7 @@ export class SensingTab {
         'reconnecting':      { text: 'RECONNECTING...',                    cls: 'sensing-source-reconnecting' },
         'unreachable':       { text: 'NO DATA \u2014 SERVER UNREACHABLE',   cls: 'sensing-source-simulated' },
         'simulated':         { text: 'INVENTED DATA \u2014 NOT MEASURED',   cls: 'sensing-source-simulated' },
+        'auth-required':     { text: 'API TOKEN REQUIRED \u2014 SETTINGS \u2192 API ACCESS', cls: 'sensing-source-simulated' },
       };
       const cfg = bannerConfig[dataSource] || bannerConfig.reconnecting;
       banner.textContent = cfg.text;

@@ -66,10 +66,64 @@ hardware claims.
   timestamps, sequence behavior, calibration, maximum size, and report rate.
 - Validate OpenWrt One first, then BPI-R3 4x4, before considering MT7996/MLO.
 
+## Amendment 1 — vendor CSI on MT7981, still unvalidated
+
+- **Date**: 2026-09-19, recorded here 2026-10-01
+- **Status**: proposed. One board model (two units). The hardware gates below are still open.
+
+The 2026-07-18 decision said the public `mt76` tree has no supported CSI export,
+and that a firmware change might be required before physical CSI exists. Both
+statements need a narrower reading.
+
+Mainline `openwrt/mt76` still has no CSI export. MediaTek's public OpenWrt feed
+does: vendor id `0x0ce7`, MCU event `0xc2`, patch
+`1001-wifi-mt76-mt7915-csi-implement-csi-support`. On a Wavlink WL-WN586X3
+Rev A (MT7981BA + MT7976CN + MT7531AE) that patch, rebased onto the `mt76`
+revision pinned by OpenWrt 24.10.8, produced complex samples without a firmware
+blob swap. The `0xc2` hook is already in the MT7981 firmware that the OpenWrt
+24.10.8 image carries. The
+rebased patch and the two userspace fixes are in `firmware/openwrt-wn586x3/`.
+
+What the first capture was: one record, 2.4 GHz, 20 MHz, legacy OFDM, 64
+subcarriers, a single chain. CSI arrived only while a client sent frames.
+The rate is client traffic, not a sensor sample clock. The capture is not in
+this repository.
+
+What it was not:
+
+- Not a calibration, a sequence check, a timestamp check, or a repeatability run.
+  The label on the wire is `mediatek:physical-unvalidated`. Plain `mediatek` stays
+  reserved for a frame that has passed those gates.
+- Not a 4x4 array. Each radio is two chains. The four antennas are a 2.4 GHz pair
+  and a 5 GHz pair. Two routers are two receivers. Cross-box phase is not a
+  shared local oscillator, so it is not a beam.
+- Not the OpenWrt One or the BPI-R3. Those remain the upstream-friendly targets
+  in the original decision. The WN586X3 is the board this path was actually run on.
+
+`wifi-densepose-mtk-bridge` translates `mt76-vendor` JSON, or an MtkCSIdump
+datagram, into ADR-267 MTC1 and sends it to the sensing server. The server keeps
+one snapshot and a bounded ring of per-subcarrier amplitude and phase per
+`device_id`. It runs `mediatek-amplitude-heuristic-v0` on mean and peak amplitude,
+and `activity-index-v0` on per-subcarrier fluctuation. Both are `CLAIMED`. Neither
+is the ESP32 vital-sign path.
+
+One measured property supports further work, and nothing more. Offline, on six
+local dump captures from two units (2.4 GHz, HT20, chains rx0 and rx1 of transmit
+stream 0), the cross-chain phase `arg(H0·conj(H1))`, summed over subcarriers,
+moved 0.014-0.039 rad (p50) between adjacent frames for well-sampled
+transmitters. Raw per-chain phase moved about 1.56 rad (p50), which is what
+uniformly random phase gives (MEASURED; reproducer
+`scripts/mediatek-csi-phase-stability.py`). That shows a stable observable inside
+one radio. It does not show that the observable tracks people.
+
+The operator guide is [`docs/mediatek-router-csi.md`](../mediatek-router-csi.md).
+
 ## Links
 
 - [ADR-123: BFLD capture path](ADR-123-bfld-capture-path-nexmon-and-esp32.md)
 - [ADR-264: RTL8720F radar wire protocol](ADR-264-rtl8720f-radar-wire-protocol.md)
+- [ADR-267: MediaTek MIMO CSI wire protocol](ADR-267-mediatek-mimo-csi-wire-protocol.md)
+- [MediaTek router CSI guide](../mediatek-router-csi.md)
 - [upstream mt76](https://github.com/openwrt/mt76)
 - [OpenWrt One](https://openwrt.org/toh/openwrt/one)
 - [MediaTek OpenWrt feed](https://git01.mediatek.com/openwrt/feeds/mtk-openwrt-feeds/)

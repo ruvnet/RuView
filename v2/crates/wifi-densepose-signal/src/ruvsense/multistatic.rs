@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::cir::{CirConfig, CirEstimator};
-use super::multiband::MultiBandCsiFrame;
+use super::multiband::{MultiBandCsiFrame, PhaseReference};
 
 /// Errors from multistatic fusion.
 #[derive(Debug, thiserror::Error)]
@@ -68,7 +68,12 @@ pub struct FusedSensingFrame {
     /// Length = n_subcarriers.
     pub fused_amplitude: Vec<f32>,
     /// Fused phase vector across all nodes.
-    /// Length = n_subcarriers.
+    ///
+    /// Length = n_subcarriers when [`Self::phase_fusion`] carries phase
+    /// ([`PhaseFusion::Coherent`] or [`PhaseFusion::SingleNode`]). **Empty**
+    /// for [`PhaseFusion::AmplitudeOnly`]: phases with no shared reference are
+    /// not combined, because a weighted mean of unrelated phases is not a
+    /// measurement (issue #1752).
     pub fused_phase: Vec<f32>,
     /// Per-node multi-band frames (preserved for geometry computations).
     pub node_frames: Vec<MultiBandCsiFrame>,
@@ -84,7 +89,115 @@ pub struct FusedSensingFrame {
     pub active_nodes: usize,
     /// Cross-node coherence score (0.0-1.0). Higher means more agreement
     /// across viewpoints, indicating a strong body reflection signal.
+    ///
+    /// Derived from amplitude attention weights. It is **not** RF phase
+    /// coherence and never implies the nodes share a phase reference; see
+    /// [`Self::phase_fusion`] for that.
     pub cross_node_coherence: f32,
+    /// How (and whether) phase was combined this cycle, with the reason when
+    /// it was not (issue #1752).
+    pub phase_fusion: PhaseFusion,
+}
+
+/// Why phase was not combined across nodes (issue #1752).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NonCoherentReason {
+    /// At least one frame carries no measured phase (placeholder vector).
+    PhaseUnavailable,
+    /// Phases were measured, but against independent per-node oscillators.
+    IndependentClocks,
+    /// Frames declare shared references, but not the same one.
+    MixedReferences,
+}
+
+impl NonCoherentReason {
+    /// Stable machine-readable label for status/API output.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PhaseUnavailable => "phase_unavailable",
+            Self::IndependentClocks => "independent_clocks",
+            Self::MixedReferences => "mixed_references",
+        }
+    }
+}
+
+/// Phase-combining mode for one fusion cycle (issue #1752).
+///
+/// Amplitude fusion is identical in every mode; only the phase output differs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhaseFusion {
+    /// Every frame declared the same shared phase reference, so phase was
+    /// combined across nodes.
+    Coherent {
+        /// The shared reference all frames declared.
+        reference_id: u32,
+    },
+    /// One node with measured phase: its phase passes through uncombined.
+    SingleNode,
+    /// Phase was not combined; `fused_phase` is empty.
+    AmplitudeOnly(NonCoherentReason),
+}
+
+impl PhaseFusion {
+    /// Decide the phase-combining mode for a cohort. Coherent combining needs
+    /// every frame to declare the same [`PhaseReference::Shared`] id; anything
+    /// less falls back to amplitude-only with the reason.
+    #[must_use]
+    pub fn for_frames(node_frames: &[MultiBandCsiFrame]) -> Self {
+        if node_frames.is_empty()
+            || node_frames
+                .iter()
+                .any(|f| f.phase_reference == PhaseReference::Unavailable)
+        {
+            return Self::AmplitudeOnly(NonCoherentReason::PhaseUnavailable);
+        }
+        if node_frames.len() == 1 {
+            return Self::SingleNode;
+        }
+        let mut shared = node_frames.iter().map(|f| match f.phase_reference {
+            PhaseReference::Shared { id } => Some(id),
+            _ => None,
+        });
+        let Some(Some(first)) = shared.next() else {
+            return Self::AmplitudeOnly(NonCoherentReason::IndependentClocks);
+        };
+        for id in shared {
+            match id {
+                None => return Self::AmplitudeOnly(NonCoherentReason::IndependentClocks),
+                Some(id) if id != first => {
+                    return Self::AmplitudeOnly(NonCoherentReason::MixedReferences)
+                }
+                Some(_) => {}
+            }
+        }
+        Self::Coherent { reference_id: first }
+    }
+
+    /// Whether this cycle produced a phase vector.
+    #[must_use]
+    pub fn carries_phase(self) -> bool {
+        !matches!(self, Self::AmplitudeOnly(_))
+    }
+
+    /// Stable machine-readable mode label for status/API output.
+    #[must_use]
+    pub fn mode_str(self) -> &'static str {
+        match self {
+            Self::Coherent { .. } => "coherent",
+            Self::SingleNode => "single_node",
+            Self::AmplitudeOnly(_) => "amplitude_only",
+        }
+    }
+
+    /// Reason phase was not combined, if it was not.
+    #[must_use]
+    pub fn reason(self) -> Option<NonCoherentReason> {
+        match self {
+            Self::AmplitudeOnly(reason) => Some(reason),
+            _ => None,
+        }
+    }
 }
 
 /// Configuration for multistatic fusion.
@@ -443,13 +556,19 @@ impl MultistaticFuser {
             }
         }
 
+        // Issue #1752: only combine phase when the frames share a declared
+        // phase reference. Otherwise fuse amplitude alone and say why.
+        let phase_fusion = PhaseFusion::for_frames(node_frames);
+        let phases = phase_fusion.carries_phase().then_some(phases.as_slice());
+
         let n_nodes = amplitudes.len();
         let (fused_amp, fused_ph, freq_coherence) = if n_nodes == 1 {
             // Single-node fallback
-            (amplitudes[0].to_vec(), phases[0].to_vec(), 1.0_f32)
+            let ph = phases.map_or_else(Vec::new, |p| p[0].to_vec());
+            (amplitudes[0].to_vec(), ph, 1.0_f32)
         } else {
             // Multi-node attention-weighted fusion
-            attention_weighted_fusion(&amplitudes, &phases, self.config.attention_temperature)
+            attention_weighted_fusion(&amplitudes, phases, self.config.attention_temperature)
         };
 
         // ADR-134 CIR gate: blend freq-domain coherence with CIR dominant-tap
@@ -488,6 +607,7 @@ impl MultistaticFuser {
             node_positions: positions,
             active_nodes: n_nodes,
             cross_node_coherence: coherence,
+            phase_fusion,
         })
     }
 
@@ -662,6 +782,15 @@ impl MultistaticFuser {
         let Some(cf) = first_frame.channel_frames.first() else {
             return freq_coherence;
         };
+        // Issue #1752: a placeholder phase vector would make the CIR describe
+        // a zero-phase spectrum, not the channel. Skip the blend when ANY frame
+        // in the cohort has a placeholder phase, not just the first.
+        if node_frames
+            .iter()
+            .any(|f| f.phase_reference == PhaseReference::Unavailable)
+        {
+            return freq_coherence;
+        }
 
         // Reconstruct Complex64 data from amplitude+phase for the CIR estimator.
         let csi_frame = build_csi_frame_from_channel(cf);
@@ -747,10 +876,12 @@ fn build_csi_frame_from_channel(
 /// Attention-weighted fusion of amplitude and phase vectors from multiple nodes.
 ///
 /// Each node's contribution is weighted by its agreement with the consensus.
+/// Phase is combined only when `phases` is `Some` (a shared phase reference,
+/// issue #1752); otherwise the returned phase vector is empty.
 /// Returns (fused_amplitude, fused_phase, cross_node_coherence).
 fn attention_weighted_fusion(
     amplitudes: &[&[f32]],
-    phases: &[&[f32]],
+    phases: Option<&[&[f32]]>,
     temperature: f32,
 ) -> (Vec<f32>, Vec<f32>, f32) {
     let n_sub = amplitudes[0].len();
@@ -763,21 +894,29 @@ fn attention_weighted_fusion(
     let mut fused_ph_sin = vec![0.0_f32; n_sub];
     let mut fused_ph_cos = vec![0.0_f32; n_sub];
 
-    for (n, (&amp, &ph)) in amplitudes.iter().zip(phases.iter()).enumerate() {
+    for (n, &amp) in amplitudes.iter().enumerate() {
         let w = weights[n];
         for i in 0..n_sub {
             fused_amp[i] += w * amp[i];
-            fused_ph_sin[i] += w * ph[i].sin();
-            fused_ph_cos[i] += w * ph[i].cos();
+        }
+        if let Some(ph) = phases.and_then(|p| p.get(n)) {
+            for i in 0..n_sub {
+                fused_ph_sin[i] += w * ph[i].sin();
+                fused_ph_cos[i] += w * ph[i].cos();
+            }
         }
     }
 
     // Recover phase from sin/cos weighted average
-    let fused_ph: Vec<f32> = fused_ph_sin
-        .iter()
-        .zip(fused_ph_cos.iter())
-        .map(|(&s, &c)| s.atan2(c))
-        .collect();
+    let fused_ph: Vec<f32> = if phases.is_some() {
+        fused_ph_sin
+            .iter()
+            .zip(fused_ph_cos.iter())
+            .map(|(&s, &c)| s.atan2(c))
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     // Coherence = mean weight entropy proxy: high when weights are balanced
     let coherence = compute_weight_coherence(&weights);
@@ -942,7 +1081,13 @@ mod tests {
             }],
             frequencies_mhz: vec![2412],
             coherence: 0.9,
+            phase_reference: PhaseReference::NodeLocal,
         }
+    }
+
+    fn with_reference(mut f: MultiBandCsiFrame, r: PhaseReference) -> MultiBandCsiFrame {
+        f.phase_reference = r;
+        f
     }
 
     #[test]
@@ -1704,5 +1849,131 @@ mod tests {
             (coh_dead - coh_off).abs() < 1e-9,
             "dead ht20 gate silently equals gate-off: dead={coh_dead} off={coh_off}"
         );
+    }
+
+    // ===== Issue #1752: non-coherent phase gate =====
+
+    #[test]
+    fn placeholder_phase_is_never_combined() {
+        let fuser = MultistaticFuser::new();
+        let frames = [
+            with_reference(make_node_frame(0, 1000, 56, 1.0), PhaseReference::Unavailable),
+            with_reference(make_node_frame(1, 1001, 56, 1.1), PhaseReference::Unavailable),
+        ];
+        let fused = fuser.fuse(&frames).unwrap();
+        assert_eq!(
+            fused.phase_fusion,
+            PhaseFusion::AmplitudeOnly(NonCoherentReason::PhaseUnavailable)
+        );
+        assert!(fused.fused_phase.is_empty(), "placeholder phase must not be fused");
+        assert_eq!(fused.fused_amplitude.len(), 56);
+    }
+
+    #[test]
+    fn independent_node_clocks_fall_back_to_amplitude_only() {
+        let fuser = MultistaticFuser::new();
+        let frames = [make_node_frame(0, 1000, 56, 1.0), make_node_frame(1, 1001, 56, 1.1)];
+        let fused = fuser.fuse(&frames).unwrap();
+        assert_eq!(
+            fused.phase_fusion,
+            PhaseFusion::AmplitudeOnly(NonCoherentReason::IndependentClocks)
+        );
+        assert_eq!(fused.phase_fusion.reason().map(NonCoherentReason::as_str), Some("independent_clocks"));
+        assert!(fused.fused_phase.is_empty());
+    }
+
+    #[test]
+    fn one_placeholder_node_demotes_the_whole_cohort() {
+        let shared = PhaseReference::Shared { id: 7 };
+        let frames = [
+            with_reference(make_node_frame(0, 1000, 56, 1.0), shared),
+            with_reference(make_node_frame(1, 1001, 56, 1.0), PhaseReference::Unavailable),
+        ];
+        assert_eq!(
+            PhaseFusion::for_frames(&frames),
+            PhaseFusion::AmplitudeOnly(NonCoherentReason::PhaseUnavailable)
+        );
+    }
+
+    #[test]
+    fn mixed_shared_references_are_not_coherent() {
+        let frames = [
+            with_reference(make_node_frame(0, 1000, 56, 1.0), PhaseReference::Shared { id: 1 }),
+            with_reference(make_node_frame(1, 1001, 56, 1.0), PhaseReference::Shared { id: 2 }),
+        ];
+        assert_eq!(
+            PhaseFusion::for_frames(&frames),
+            PhaseFusion::AmplitudeOnly(NonCoherentReason::MixedReferences)
+        );
+    }
+
+    /// Opt-in path for a future shared-clock source (for example a coherent
+    /// multi-radio array): frames that declare one shared reference are
+    /// combined coherently and produce a phase vector.
+    #[test]
+    fn shared_reference_source_opts_into_coherent_fusion() {
+        let fuser = MultistaticFuser::new();
+        let shared = PhaseReference::Shared { id: 42 };
+        let frames: Vec<MultiBandCsiFrame> = (0..3)
+            .map(|i| with_reference(make_node_frame(i, 1000 + u64::from(i), 56, 1.0), shared))
+            .collect();
+        let fused = fuser.fuse(&frames).unwrap();
+        assert_eq!(fused.phase_fusion, PhaseFusion::Coherent { reference_id: 42 });
+        assert_eq!(fused.fused_phase.len(), 56);
+        // Identical phases under one reference fuse back to themselves.
+        let expected = &frames[0].channel_frames[0].phase;
+        for (got, want) in fused.fused_phase.iter().zip(expected) {
+            assert!((got - want).abs() < 1e-5, "{got} vs {want}");
+        }
+    }
+
+    #[test]
+    fn single_node_passes_measured_phase_through() {
+        let fuser = MultistaticFuser::new();
+        let f = make_node_frame(0, 1000, 56, 1.0);
+        let fused = fuser.fuse(std::slice::from_ref(&f)).unwrap();
+        assert_eq!(fused.phase_fusion, PhaseFusion::SingleNode);
+        assert_eq!(fused.fused_phase, f.channel_frames[0].phase);
+    }
+
+    #[test]
+    fn amplitude_fusion_is_unchanged_by_the_phase_gate() {
+        let fuser = MultistaticFuser::new();
+        let local = [make_node_frame(0, 1000, 56, 1.0), make_node_frame(1, 1001, 56, 1.3)];
+        let shared: Vec<MultiBandCsiFrame> = local
+            .iter()
+            .cloned()
+            .map(|f| with_reference(f, PhaseReference::Shared { id: 1 }))
+            .collect();
+        let a = fuser.fuse(&local).unwrap();
+        let b = fuser.fuse(&shared).unwrap();
+        assert_eq!(a.fused_amplitude, b.fused_amplitude);
+        assert_eq!(a.cross_node_coherence, b.cross_node_coherence);
+    }
+
+    #[test]
+    fn cir_gate_ignores_placeholder_phase() {
+        let on = MultistaticFuser::with_cir_canonical56();
+        let off = MultistaticFuser::new();
+        let frames = [
+            with_reference(make_node_frame(0, 1000, 56, 1.0), PhaseReference::Unavailable),
+            with_reference(make_node_frame(1, 1001, 56, 1.2), PhaseReference::Unavailable),
+        ];
+        let coh_on = on.fuse(&frames).unwrap().cross_node_coherence;
+        let coh_off = off.fuse(&frames).unwrap().cross_node_coherence;
+        assert_eq!(coh_on, coh_off, "no CIR blend from a placeholder phase vector");
+    }
+
+    #[test]
+    fn cir_gate_skips_when_later_frame_has_placeholder_phase() {
+        let on = MultistaticFuser::with_cir_canonical56();
+        let off = MultistaticFuser::new();
+        let frames = [
+            with_reference(make_node_frame(0, 1000, 56, 1.0), PhaseReference::NodeLocal),
+            with_reference(make_node_frame(1, 1001, 56, 1.2), PhaseReference::Unavailable),
+        ];
+        let coh_on = on.fuse(&frames).unwrap().cross_node_coherence;
+        let coh_off = off.fuse(&frames).unwrap().cross_node_coherence;
+        assert_eq!(coh_on, coh_off, "no CIR blend when any cohort frame lacks phase");
     }
 }

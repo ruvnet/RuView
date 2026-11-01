@@ -41,8 +41,12 @@ jobs:
             build: false
             publishable: true
             # ADR-283/325: brain + local hosts + replay assets + guarded Spaces OAuth adapter;
-            # still runtime-dependency-free. 160 KiB is the reviewed hard ceiling.
-            unpacked_budget: 163840
+            # still runtime-dependency-free. ADR-369..374 add the SDK, firmware
+            # flashing, training runner/gate, doctor, device access, and SSH
+            # hosts. ADR-375 adds the MCP Apps console widget (~12 KB), the
+            # Streamable HTTP transport and the terminal UI (384 KiB); ADR-378 the
+            # ruview-live showcase views (~37 KB): 448 KiB reviewed ceiling.
+            unpacked_budget: 458752
           - dir: harness/homecore
             build: false
             publishable: true
@@ -131,13 +135,19 @@ jobs:
           npm i --no-fund --no-audit "$TGZ"
           case "${{ matrix.package.dir }}" in
             harness/ruview)
-              ./node_modules/.bin/ruview --version
-              ./node_modules/.bin/ruview doctor
+              ./node_modules/.bin/ruview-harness --version
+              ./node_modules/.bin/ruview-harness doctor
               # the honesty gate must fail closed on empty input (ADR-263 F1)
-              if ./node_modules/.bin/ruview claim-check; then
+              if ./node_modules/.bin/ruview-harness claim-check; then
                 echo 'claim-check passed with no input — fail-open regression'; exit 1
               fi
               node --input-type=module -e "const m = await import('@ruvnet/ruview'); if (!m.TOOLS) process.exit(1);"
+              # ADR-369: the typed SDK resolves and the evidence gate refuses a baseline-free score
+              node --input-type=module -e "const { createRuView } = await import('@ruvnet/ruview/sdk'); const r = createRuView(); if (r.tools().length < 22) process.exit(1); const g = await r.training.gate({ model_score: 0.93 }); if (g.verdict !== 'FAIL') process.exit(1);"
+              ./node_modules/.bin/ruview-harness doctor --json --group runtime,harness,firmware > doctor.json
+              if ./node_modules/.bin/ruview-harness train-gate --model-score 0.93 > /dev/null; then
+                echo 'train-gate passed without a baseline'; exit 1
+              fi
               ;;
             harness/homecore)
               ./node_modules/.bin/homecore --version

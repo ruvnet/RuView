@@ -3,14 +3,33 @@
 use clap::Parser;
 use std::path::PathBuf;
 
-/// MQTT publisher (HA auto-discovery) + privacy-mode flags, shared via
-/// `#[command(flatten)]` by both `cli::Args` and the binary's `main::Args`
-/// so the `--mqtt*` flags reach the actual `Args::parse()` the server uses
-/// (the publisher in `mqtt::` is keyed off this group). ADR-115 §3.8/§3.10.
+/// Value parser for boolean flags that can also be set from the environment.
+///
+/// clap's default `bool` parser accepts only `true`/`false`, so
+/// `RUVIEW_UDP_INSECURE_LAN=1` used to exit 2 with "invalid value '1'"
+/// (#2091). This accepts the usual spellings, case-insensitive:
+/// `1/true/yes/on` and `0/false/no/off`. Anything else is still an error, so
+/// a typo cannot silently flip a security flag. The bare `--flag` form is
+/// unchanged: clap's `SetTrue` action feeds this parser `"true"`.
+pub fn parse_env_bool(value: &str) -> Result<bool, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => Err(format!(
+            "expected one of 1/0, true/false, yes/no, on/off (got '{value}')"
+        )),
+    }
+}
+
+/// MQTT publisher (HA auto-discovery) flags, flattened into the binary's
+/// `main::Args` so the `--mqtt*` flags reach the actual `Args::parse()` the
+/// server uses (the publisher in `mqtt::` is keyed off this group). ADR-115
+/// §3.8. `--privacy-mode` is a top-level server flag (#2094), not part of
+/// this group.
 #[derive(clap::Args, Debug, Clone)]
 pub struct MqttArgs {
     /// Enable MQTT publisher with HA auto-discovery
-    #[arg(long, env = "RUVIEW_MQTT")]
+    #[arg(long, env = "RUVIEW_MQTT", value_parser = parse_env_bool)]
     pub mqtt: bool,
 
     /// MQTT broker host
@@ -29,7 +48,8 @@ pub struct MqttArgs {
     #[arg(long, default_value = "MQTT_PASSWORD")]
     pub mqtt_password_env: String,
 
-    /// MQTT client ID (default: wifi-densepose-<pid>)
+    /// MQTT client ID; prefixes every Home Assistant device id (default: a
+    /// `wifi-densepose-<hex>` id persisted in `<data-dir>/mqtt_client_id`)
     #[arg(long, env = "RUVIEW_MQTT_CLIENT_ID")]
     pub mqtt_client_id: Option<String>,
 
@@ -38,7 +58,7 @@ pub struct MqttArgs {
     pub mqtt_prefix: String,
 
     /// Enable TLS to the broker
-    #[arg(long, env = "RUVIEW_MQTT_TLS")]
+    #[arg(long, env = "RUVIEW_MQTT_TLS", value_parser = parse_env_bool)]
     pub mqtt_tls: bool,
 
     /// CA bundle for TLS
@@ -80,10 +100,6 @@ pub struct MqttArgs {
     /// Pose publish rate (Hz) when --mqtt-publish-pose is set
     #[arg(long, default_value = "1.0")]
     pub mqtt_rate_pose: f64,
-
-    /// Strip biometrics (HR/BR/pose) before any MQTT/Matter publish (ADR-115 §3.10).
-    #[arg(long, env = "RUVIEW_PRIVACY_MODE")]
-    pub privacy_mode: bool,
 }
 
 /// CLI arguments for the sensing server.
@@ -193,7 +209,7 @@ pub struct Args {
 
     // ─── ADR-115 §3.8 — MQTT publisher (HA-DISCO) ──────────────────────────
     /// Enable MQTT publisher with HA auto-discovery
-    #[arg(long, env = "RUVIEW_MQTT")]
+    #[arg(long, env = "RUVIEW_MQTT", value_parser = parse_env_bool)]
     pub mqtt: bool,
 
     /// MQTT broker host
@@ -221,7 +237,7 @@ pub struct Args {
     pub mqtt_prefix: String,
 
     /// Enable TLS to the broker
-    #[arg(long, env = "RUVIEW_MQTT_TLS")]
+    #[arg(long, env = "RUVIEW_MQTT_TLS", value_parser = parse_env_bool)]
     pub mqtt_tls: bool,
 
     /// CA bundle for TLS
@@ -264,17 +280,16 @@ pub struct Args {
     #[arg(long, default_value = "1.0")]
     pub mqtt_rate_pose: f64,
 
-    // ─── ADR-115 §3.10 — Privacy mode ──────────────────────────────────────
-    /// Strip biometrics (HR/BR/pose) before any MQTT or Matter publish.
-    /// Discovery for those entities is suppressed entirely — the controller
-    /// never sees them exist. Implements the ADR-106 primitive-isolation
-    /// contract at the integration boundary.
-    #[arg(long, env = "RUVIEW_PRIVACY_MODE")]
+    // ─── ADR-115 §3.10 / #2094 — Privacy mode ──────────────────────────────
+    /// Strip biometrics (heart rate, breathing rate, pose keypoints) from
+    /// every output: REST, WebSocket, recordings, MQTT and Matter. MQTT
+    /// discovery for those entities is suppressed entirely.
+    #[arg(long, env = "RUVIEW_PRIVACY_MODE", value_parser = parse_env_bool)]
     pub privacy_mode: bool,
 
     // ─── ADR-115 §3.11 — Matter Bridge (HA-FABRIC) ─────────────────────────
     /// Enable Matter Bridge
-    #[arg(long, env = "RUVIEW_MATTER")]
+    #[arg(long, env = "RUVIEW_MATTER", value_parser = parse_env_bool)]
     pub matter: bool,
 
     /// Write Matter setup code + QR string to this file on first start
@@ -401,5 +416,78 @@ mod tests {
             "--no-semantic", "fall_risk",
         ]);
         assert_eq!(args.no_semantic, vec!["sleeping", "meeting", "fall_risk"]);
+    }
+
+    #[test]
+    fn parse_env_bool_accepts_common_spellings() {
+        for v in ["1", "true", "TRUE", "True", "yes", "YES", "on", "On", " 1 "] {
+            assert_eq!(parse_env_bool(v), Ok(true), "{v:?}");
+        }
+        for v in ["0", "false", "FALSE", "no", "No", "off", "OFF"] {
+            assert_eq!(parse_env_bool(v), Ok(false), "{v:?}");
+        }
+    }
+
+    #[test]
+    fn parse_env_bool_rejects_other_values() {
+        for v in ["", "2", "y", "n", "enable", "truee", "-1"] {
+            assert!(parse_env_bool(v).is_err(), "{v:?} must be rejected");
+        }
+    }
+
+    /// Bare flags still mean `true` with the custom parser (#2091).
+    #[test]
+    fn bare_env_bool_flags_set_true() {
+        let args = Args::parse_from([
+            "sensing-server",
+            "--mqtt",
+            "--mqtt-tls",
+            "--privacy-mode",
+            "--matter",
+        ]);
+        assert!(args.mqtt);
+        assert!(args.mqtt_tls);
+        assert!(args.privacy_mode);
+        assert!(args.matter);
+    }
+
+    /// The flag still takes no value on the command line.
+    #[test]
+    fn env_bool_flag_rejects_inline_value() {
+        assert!(Args::try_parse_from(["sensing-server", "--mqtt=1"]).is_err());
+    }
+
+    /// The env path goes through `parse_env_bool`. Uses dedicated variable
+    /// names so it cannot race with other tests reading the real ones.
+    #[test]
+    fn env_bool_flag_reads_env_spellings() {
+        #[derive(Parser)]
+        struct W {
+            #[arg(long, env = "RUVIEW_TEST_ENV_BOOL_A", value_parser = parse_env_bool)]
+            a: bool,
+            #[arg(long, env = "RUVIEW_TEST_ENV_BOOL_B", value_parser = parse_env_bool)]
+            b: bool,
+            #[arg(long, env = "RUVIEW_TEST_ENV_BOOL_C", value_parser = parse_env_bool)]
+            c: bool,
+            #[arg(long, env = "RUVIEW_TEST_ENV_BOOL_D", value_parser = parse_env_bool)]
+            d: bool,
+        }
+        std::env::set_var("RUVIEW_TEST_ENV_BOOL_A", "1");
+        std::env::set_var("RUVIEW_TEST_ENV_BOOL_B", "yes");
+        std::env::set_var("RUVIEW_TEST_ENV_BOOL_C", "0");
+        std::env::remove_var("RUVIEW_TEST_ENV_BOOL_D");
+        let w = W::parse_from(["t"]);
+        assert!(w.a && w.b && !w.c && !w.d);
+
+        // The command-line flag wins over an env value of `0`.
+        let w = W::parse_from(["t", "--c"]);
+        assert!(w.c);
+
+        std::env::set_var("RUVIEW_TEST_ENV_BOOL_D", "maybe");
+        assert!(W::try_parse_from(["t"]).is_err());
+
+        for k in ["A", "B", "C", "D"] {
+            std::env::remove_var(format!("RUVIEW_TEST_ENV_BOOL_{k}"));
+        }
     }
 }

@@ -1,0 +1,68 @@
+# ADR-373/374 — device-access end-to-end through the real @ruvnet/ruview CLI.
+# MR60BHA2 (60 GHz) and RPLIDAR are emulated on pseudo-terminals and read via
+# real pyserial; an ESP32 node is emulated over UDP; the iPhone LiDAR path
+# uses the repository's real relay. All results are SYNTHETIC: this proves
+# the transports and parsers, not hardware behaviour.
+
+name: ruview device e2e
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'harness/ruview/src/**'
+      - 'harness/ruview/bin/**'
+      - 'harness/ruview/test/e2e/**'
+      - 'integrations/iphone-lidar/web/**'
+      - '.github/workflows/ruview-device-e2e.yml'
+  pull_request:
+    paths:
+      - 'harness/ruview/src/**'
+      - 'harness/ruview/bin/**'
+      - 'harness/ruview/test/e2e/**'
+      - 'integrations/iphone-lidar/web/**'
+      - '.github/workflows/ruview-device-e2e.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ruview-device-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  devices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+
+      - name: Install pyserial
+        run: python -m pip install pyserial==3.5
+
+      - name: Install the iPhone LiDAR relay
+        working-directory: integrations/iphone-lidar/web
+        run: npm ci --ignore-scripts
+
+      - name: Install harness
+        working-directory: harness/ruview
+        run: npm ci --ignore-scripts
+
+      # Missing prerequisites fail instead of skipping (RUVIEW_E2E_REQUIRE).
+      # The suite links each emulator pty to /dev/ttyRUVIEWE2E<n> with
+      # `sudo -n`, because the harness refuses /dev/pts/* port names.
+      - name: Device e2e (SYNTHETIC devices)
+        working-directory: harness/ruview
+        env:
+          RUVIEW_E2E_REQUIRE: '1'
+        run: npm run test:e2e:devices

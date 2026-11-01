@@ -19,7 +19,99 @@ This firmware captures WiFi Channel State Information (CSI) from an ESP32-S3 (pr
 > | **Fall detection** | Phase acceleration threshold | Configurable sensitivity |
 > | **Programmable sensing** | WASM modules loaded over HTTP | Hot-swap, no reflash |
 
-## Firmware 0.8.12: guided Mac onboarding
+## ESP32-C5 candidate: installation and qualification
+
+The source checkout adds an experimental ESP32-C5 headless target. Bounded
+real-board boot and CSI transport checks are recorded below; they do not
+establish sensing accuracy, consistent cadence or long-run reliability.
+See the [firmware releases](https://github.com/ruvnet/RuView/releases) for
+published bundles. C5 remains experimental: the tested AP setup produced
+variable cadence, including runs below the 20 packets/s acceptance target.
+Additional traffic did not consistently restore that target.
+
+Use ESP-IDF 6.0.2 (the CI lane; minimum 5.5.2), esptool >=5.3 for its corrected
+C5 security layouts, and a separate build directory:
+
+In an isolated Python environment, the measured setup used esptool 5.6.0
+and `esp-idf-nvs-partition-gen` 0.3.0. The latter is required by `provision.py`:
+
+```sh
+python -m pip install esptool==5.6.0 esp-idf-nvs-partition-gen==0.3.0
+```
+
+```sh
+cd firmware/esp32-csi-node
+idf.py -B build-c5 -D IDF_TARGET=esp32c5 -D SDKCONFIG=build-c5/sdkconfig build
+```
+
+The candidate uses a 4 MB OTA layout, UART console, 240 MHz CPU, and a
+conservative 8 Hz edge DSP rate independent of raw CSI transmission. Display,
+WASM, and external PSRAM are not enabled. The addressable LED stays disabled
+unless the board schematic is checked and `C5_STATUS_LED_GPIO` is set.
+Association is explicitly 2.4 GHz; the C5 radio's 5 GHz capability is not yet
+qualified by this profile.
+
+C5 skips automatic mmWave probing. The legacy GPIO17/18 pair overlaps the
+C5 flash/PSRAM bus and can cause watchdog resets with `SPI flash busy`.
+An explicit sensor pin assignment must avoid GPIO16-22, the console pins,
+and board-specific connections. The CSI-only baseline needs no sensor wiring.
+
+**Do not reuse the S3/C6 bootloader address.** C5's ROM boots from `0x2000`.
+The other release addresses remain `0x8000` (partition table), `0xf000`
+(OTA data), and `0x20000` (application). Prefer the generated IDF `flash_args`
+or the source harness's checksum-verified `--variant c5` plan. Confirm the
+attached chip with `python -m esptool --port COM8 chip-id` before any write;
+COM8 is an example port, not a chip identity.
+
+Candidate bundles use `esp32-csi-node-c5.bin` and `partition-table-c5.bin`.
+The source operator rejects preproduction beta chips and devices with less
+than 4 MB flash before writing.
+CI verifies both the embedded chip ID and the generated flash plan before
+packaging them. Never substitute an S3 or C6 application.
+
+See the [C5 comparison and qualification record](../../docs/validation/2026-10-28-esp32-c5-candidate.md)
+for software checks, measured transport runs and remaining qualification limits.
+
+## Firmware 0.8.16 prerelease: conservative mmWave identification
+
+Version 0.8.16 restricts MR60BHA2 identification to its heart-rate, distance,
+and presence frame types. Ambiguous LD6002B/LD6004 headers no longer identify
+those devices as MR60BHA2. Host regressions and CI builds cover this change;
+a live MR60BHA2 kit was read using its existing ESPHome firmware, which does
+not qualify the new firmware image or sensing accuracy.
+
+## Firmware 0.8.15 prerelease: CSI reliability and recoverable configuration
+
+Version 0.8.15 preserves bounded CSI input for ESP32-S3 STBC frames, caps
+gateway ping waits to one probe interval, and prepares IDF 6 USB serial/JTAG
+before onboarding. The authenticated remote configuration endpoint validates
+whole requests before writing and retains a durable rollback bank if a write
+or recovery step fails.
+
+The attached ESP32-C6 booted 0.8.15 from its existing OTA slot after a complete
+read-only flash backup. A 30-second runtime sample received raw CSI, vitals,
+and feature packets with no malformed packets or presence/count contradictions.
+This short transport check does not establish sensing accuracy, long-run
+stability, or the S3-specific STBC behavior. See the
+[candidate validation record](../../docs/validation/2026-10-20-esp32-csi-input-release-candidate.md).
+
+### Firmware 0.8.14 prerelease: device identity and OTA provisioning
+
+Version 0.8.14 fixes the six-byte base-MAC input used for USB onboarding on
+ESP32-C6, where the previous API wrote an eight-byte EUI-64 into that buffer.
+The PSA SHA-256 algorithm and domain remain unchanged. Affected boards now
+report a corrected `device_digest`; rediscover and reselect the physical board
+after updating rather than accepting its old saved digest.
+
+The provisioner can also write the OTA authentication key to `security/ota_psk`
+using `--ota-psk-file`. The key is never cached in host state. See
+[OTA key provisioning](#ota-key-provisioning) before reprovisioning a node.
+
+This prerelease is built from the main source line. CI builds and host tests
+do not establish physical-board qualification or sensing accuracy. The older
+0.8.13 prerelease's unmerged watchdog experiments are not included.
+
+### Guided Mac onboarding (introduced in 0.8.12)
 
 Firmware 0.8.12 adds the protocol used by the RuView macOS Add
 Sensor workflow. A directly attached S3 or C6 can identify itself through a
@@ -37,6 +129,41 @@ receipt or diagnostic output. See
 On ESP32 C6, the default optional mmWave UART uses GPIO 4 and GPIO 5. Firmware
 refuses any mmWave configuration that overlaps the active console pins. This
 prevents a sensor probe from taking over UART0 RX and disabling Mac onboarding.
+
+## Low CSI yield despite self-ping (#2287)
+
+Gateway ICMP replies do not guarantee CSI: some access points transmit replies
+using 802.11b DSSS/CCK rates, which provide no CSI. Successful pings alone do
+not establish a healthy sensing stream. The ping timeout is bounded to one
+probe interval so a lost reply cannot stall probing for a full second.
+
+When raw CSI stays low, run the bounded UDP traffic helper from a LAN host,
+preferably wired to the router. Substitute the sensing node's private IPv4
+address and use an unused UDP port on that node:
+
+```bash
+python scripts/csi-udp-poke.py 192.168.1.100 --hz 50 --seconds 60
+```
+
+No UDP service on the node is required. This does not query gateway DNS or
+assume a gateway echo service. AP transmit-rate selection still determines
+CSI cadence; compare actual received frames before and during the helper
+run. The helper stops after the requested duration and caps its requested
+rate at 50 Hz.
+
+On S3, STBC frames can carry 192 I/Q entries. Edge processing uses the first
+128 entries rather than dropping the entire frame (#2286), while raw CSI
+preserves the full payload. This restores DSP input availability; it does
+not establish vital-sign accuracy. Production-code host regressions run via
+`make host_tests` in `firmware/esp32-csi-node/test`.
+
+## Onboarding console transport
+
+The standard C6 configuration uses native USB serial/JTAG for the interactive
+onboarding console. A separate CP210x UART bridge can flash the same chip but
+does not carry that native USB console. Use the board's native USB connector
+for runtime logs and onboarding, or explicitly build a UART-console variant.
+Do not interpret a silent UART bridge as proof of a failed boot.
 
 ## Firmware 0.8.8 in plain language
 
@@ -67,21 +194,33 @@ measured evidence and limitations.
 
 For users who want to get running fast. Detailed explanations follow in later sections.
 
-### 0. Download the 0.8.8 release
+### 0. Download a versioned firmware bundle
 
 Use the versioned source tag and binaries on the
-[v0.8.8 ESP32 release page](https://github.com/ruvnet/RuView/releases/tag/v0.8.8-esp32).
+[v0.8.16 ESP32 prerelease page](https://github.com/ruvnet/RuView/releases/tag/v0.8.16-esp32).
+For the previous stable firmware and its hardware evidence, see
+[v0.8.8](https://github.com/ruvnet/RuView/releases/tag/v0.8.8-esp32).
 Choose the package that names both your chip and flash size:
 
 | Package | Use it for |
 |---------|------------|
-| `esp32-csi-node-v0.8.8-s3-8mb-flash-bundle.zip` | Fresh ESP32-S3 installation with 8 MB flash |
-| `esp32-csi-node-v0.8.8-s3-4mb-flash-bundle.zip` | Fresh ESP32-S3 installation with 4 MB flash |
-| `esp32-csi-node-v0.8.8-c6-4mb-flash-bundle.zip` | Fresh ESP32-C6 installation using the supported 4 MB layout |
+| `esp32-csi-node-firmware-8mb.tar.gz` | ESP32-S3 display configuration, 8 MB flash |
+| `esp32-csi-node-firmware-4mb.tar.gz` | ESP32-S3 headless configuration, 4 MB layout |
+| `esp32-csi-node-firmware-c6-4mb.tar.gz` | ESP32-C6 research target, 4 MB layout |
 
 Each bundle contains the matching bootloader, partition table, OTA metadata,
-application, checksums, and a short flashing guide. Never flash an S3 bundle
+application, version and checksums. Verify the archive using the release's
+`SHA256SUMS.txt`, extract it into its own directory, then verify the enclosed
+`SHA256SUMS.txt`. Never flash an S3 bundle
 onto a C6, or a C6 bundle onto an S3.
+
+The 4 MB application/partition filenames are `esp32-csi-node-4mb.bin` and
+`partition-table-4mb.bin`; C6 uses `esp32-csi-node-c6.bin` and
+`partition-table-c6.bin`. Do not mix files from different archives.
+Bare 8 MB DevKitC boards need a source build with `sdkconfig.defaults.devkitc`
+as documented below; the 8 MB release bundle enables display support.
+The tracked `release_bins/` files are historical snapshots and must not be
+used as current firmware downloads (see issues #1899 and #2092).
 
 Example for an 8 MB ESP32-S3 after extracting its bundle:
 
@@ -98,6 +237,13 @@ For an existing provisioned node, back up its current application and inspect
 `http://DEVICE_IP:8032/ota/status` before choosing an application-only update.
 Writing only offset `0x20000` is safe only when the status endpoint reports
 `running_partition` as `ota_0` and the downloaded image matches the board.
+
+After an OTA, the same endpoint's `ota_state` must read `valid` before you
+power-cycle the node or push again. `pending_verify` means the image has not
+passed its first-boot health check yet and would revert on reset. A passed
+check means only that the node reached the network and sent CSI. See
+[RUNBOOK §2.1](RUNBOOK.md) and ADR-379.
+
 The full bundles do not include NVS, so the documented four-offset install
 preserves WiFi and node configuration while replacing the boot and application
 images.
@@ -161,15 +307,26 @@ board default and emits no antenna-path claim.
 ### 3. Provision WiFi credentials (no reflash needed)
 
 ```bash
+# Keep the WiFi password in an owner-only file, not on the command line.
+printf '%s\n' 'YourPass' > ~/.wifi-pass && chmod 600 ~/.wifi-pass
 python firmware/esp32-csi-node/provision.py --port COM7 \
-  --ssid "YourSSID" --password "YourPass" --target-ip 192.168.1.20
+  --ssid "YourSSID" --password-file ~/.wifi-pass --target-ip 192.168.1.20
 ```
+
+Leave out both `--password` and `--password-file` and the script asks for the
+password when run from a terminal. `--password` still works, but it shows up in
+`ps` and shell history.
 
 ### 4. Start the sensing server
 
 ```bash
-cargo run -p wifi-densepose-sensing-server -- --http-port 3000 --source auto
+cd v2
+cargo run -p wifi-densepose-sensing-server -- --http-port 3000 --source auto \
+  --udp-bind 0.0.0.0 --udp-allow 192.168.1.0/24
 ```
+
+Use your nodes' subnet for `--udp-allow`. The default UDP listener is loopback
+only, so LAN nodes need both the bind address and an explicit source allowlist.
 
 ### 5. Open the UI
 
@@ -261,8 +418,8 @@ Adds real-time health and safety monitoring.
   drives the on-screen skeleton from signal-based heuristics (amplitude
   variance, motion-band power), not from learned keypoint inference. The
   repository does not ship pre-trained weights — see issues
-  [#509](../../issues/509) and [#506](../../issues/506) for context, and
-  [ADR-079](../../docs/adr/ADR-079-camera-supervised-pose-finetune.md) for
+  [#509](https://github.com/ruvnet/RuView/issues/509) and [#506](https://github.com/ruvnet/RuView/issues/506) for context, and
+  [ADR-079](../../docs/adr/ADR-079-camera-ground-truth-training.md) for
   the planned training path (phases P7-P9 are `Pending`).
 - The presence indicator is a calibrated variance threshold and **will
   false-positive** under strong RF interference from non-human sources
@@ -362,6 +519,14 @@ The `MSYS_NO_PATHCONV=1` prefix prevents Git Bash from mangling the `/project` p
 - `build/partition_table/partition-table.bin` -- flash partition layout
 - `build/esp32-csi-node.bin` -- application firmware
 
+### Release bundles
+
+Firmware downloads are published from dedicated `vX.Y.Z-esp32` tags after all
+S3 and C6 matrix builds pass. Each release contains separate S3 8 MB, S3 4 MB,
+and C6 4 MB archives plus an archive checksum manifest. The repository's
+automated `vNNNN` server releases (for example `v2655`) are not firmware tags;
+do not use their presence or absence of assets as firmware provenance.
+
 ### Custom Configuration
 
 To change Kconfig settings before building:
@@ -432,9 +597,138 @@ The easiest way to write NVS settings:
 ```bash
 python firmware/esp32-csi-node/provision.py --port COM7 \
   --ssid "MyWiFi" \
-  --password "MyPassword" \
+  --password-file ~/.wifi-pass \
   --target-ip 192.168.1.20
 ```
+
+The password file must be owner-only (`chmod 600`); one trailing newline is
+dropped. Without a password flag the script prompts on a terminal; in scripts
+and CI it doesn't prompt and fails if no password was given now or saved
+earlier for that port.
+
+### Remote Configuration (no USB)
+
+`provision.py` writes NVS over USB and is still how a **new** node is set up.
+Once a node is on the network, `config_push.py` changes the same parameters
+over HTTP, so a node count, server address or threshold no longer needs a
+ladder and a cable.
+
+This is **not** OTA. OTA writes a firmware image to an app partition; this
+writes NVS parameters. They share the port and the PSK, nothing else.
+
+```bash
+# what is this node running?
+python config_push.py --node <node-ip> --get
+
+# change something and let the node restart to apply it
+python config_push.py --node <node-ip> --set tdm_node_count=9
+
+# stage across the fleet, restart on your own schedule
+python config_push.py --fleet nodes.txt --set edge_tier=1 --no-reboot
+```
+
+Config is read only at boot, so a change does nothing until the node restarts.
+`config_push.py` therefore restarts it by default; `--no-reboot` stages instead.
+
+#### Why some parameters reboot-and-prove
+
+Most settings are recoverable: a wrong `target_ip` sends CSI nowhere, but the
+node keeps its association and stays reachable, so the next push fixes it.
+
+`wifi_ssid`, `wifi_password`, `csi_channel`, `channel_hop_count` and `dwell_ms`
+are not. A wrong value there means the node never rejoins the network and no
+push can ever reach it again -- worse than a bad OTA, which at least has a
+second partition to fall back to.
+
+Those go through a **trial**. The node banks its current values, writes the new
+ones, and reboots. It keeps them only once it has actually re-associated; if it
+cannot within `trial_seconds` (default 120, max 900) it restores the bank and
+reboots itself. That is the app-level equivalent of bootloader rollback, and
+unlike bootloader rollback it can be delivered by OTA.
+
+`GET /config` reports which parameters carry that risk, so tooling does not
+keep its own copy of the list to drift out of date.
+
+#### The onboard LED
+
+The WS2812 on the devkit is not a power light. It runs a **40 Hz square-wave
+gamma stimulus** (GENUS) whose colour is live CSI motion energy through a
+viridis colormap -- purple when still, yellow when moving. That makes it a
+useful bench indicator and a bad thing to have in a bedroom.
+
+It used to be compile-time only (`CONFIG_LED_GAMMA_VIZ`), so darkening one node
+meant reflashing all of them. It is now runtime selectable per node:
+
+| `led_mode` | name | behaviour |
+|---|---|---|
+| 0 | `off` | dark |
+| 1 | `steady` | motion colour, no flicker |
+| 2 | `flicker` | 40 Hz gamma stimulus (default) |
+
+`led_brightness` is 0-100 and scales the colormap.
+
+```bash
+python config_push.py --node <node-ip> --set led_mode=off
+python config_push.py --node <node-ip> --set led_mode=steady led_brightness=10
+```
+
+Both are read by the LED callback on every cycle, so they are the one pair of
+parameters that applies **immediately with no restart** -- `config_push.py`
+does not reboot a node when the change is LED-only.
+
+Defaults preserve existing behaviour: a node never told otherwise keeps
+flickering at full brightness exactly as before.
+
+#### Endpoint
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/config` | Current values; `wifi_password` reported only as `(set)` |
+| `POST` | `/config` | JSON object of parameters to change |
+
+Both require `Authorization: Bearer <ota-psk>` and fail closed when no PSK is
+provisioned. A body is validated in full before anything is committed, so one
+bad field changes nothing, and an unrecognised parameter is an error rather
+than a silently ignored setting.
+
+Control fields, which are not stored: `trial_seconds`, `reboot`.
+
+### OTA key provisioning
+
+Create a random 256-bit key in a private file outside the repository. For
+example, on POSIX:
+
+```bash
+(umask 077; set -C; openssl rand -hex 32 > ~/.ruview-ota-psk)
+python firmware/esp32-csi-node/provision.py --port COM7 \
+  --ssid "MyWiFi" --password-file ~/.wifi-pass --target-ip 192.168.1.20 \
+  --ota-psk-file ~/.ruview-ota-psk
+```
+
+The file must contain exactly 64 hexadecimal characters and optionally one
+trailing newline. The tool rejects symlinks and non-regular files, bounds the
+read, and checks owner-only POSIX permissions. On Windows, protect the file
+with your user ACL; POSIX mode bits cannot enforce Windows ACLs.
+`--ota-psk HEX` is also supported, but exposes the key in process arguments and
+shell history. Key values are never printed by this tool, including `--state
+--show-secrets`, and never saved in the per-board host JSON.
+
+Provisioning rewrites the **whole NVS partition**, not just the key supplied.
+Pass the key again on every later provisioning run. Once this tool records
+that OTA was configured, omission is refused unless `--clear-ota-psk` explicitly
+disables OTA. An older board with no host record cannot be detected this way;
+without a supplied key the tool warns that the rewrite disables OTA. Legacy
+cached OTA keys are hidden from inspection and never reused. A successful
+provisioning run removes them from saved state; read-only inspection leaves
+the existing file unchanged.
+Keep the key backed up securely. A dry-run binary or fallback CSV still
+contains credentials and must remain private and be deleted after use.
+
+This writes `security/ota_psk` through the USB NVS workflow; it does not flash
+application firmware. After reboot, verify the `OTA PSK loaded` log. The HTTP
+server starting alone does not mean OTA authentication is armed. Uploads
+remain fail-closed without a key; see the first-boot health check above after
+an authenticated update.
 
 ### NVS Key Reference
 
@@ -624,6 +918,7 @@ cargo build -p wifi-densepose-wasm-edge --target wasm32-unknown-unknown --releas
 | `main/nvs_config.c` / `.h` | Runtime configuration: loads Kconfig defaults, overrides from NVS |
 | `main/edge_processing.c` / `.h` | Tier 0-2 DSP pipeline: SPSC ring buffer, biquad IIR filters, Welford stats, BPM extraction, presence, fall detection |
 | `main/ota_update.c` / `.h` | HTTP OTA firmware update server on port 8032 |
+| `main/ota_health.c` / `.h` | First-boot health check that confirms an OTA'd image or rolls it back (ADR-379) |
 | `main/power_mgmt.c` / `.h` | Battery-aware light sleep duty cycling |
 | `main/wasm_runtime.c` / `.h` | WASM3 interpreter: module slots, host API bindings, budget guard, per-frame dispatch |
 | `main/wasm_upload.c` / `.h` | HTTP endpoints for WASM module upload, list, start, stop, delete |
@@ -922,12 +1217,12 @@ This firmware implements or references the following ADRs:
 
 | ADR | Title | Status |
 |-----|-------|--------|
-| [ADR-018](../../docs/adr/ADR-018-csi-binary-frame-format.md) | CSI binary frame format | Accepted |
+| [ADR-018](../../docs/adr/ADR-018-esp32-dev-implementation.md) | CSI binary frame format | Accepted |
 | [ADR-029](../../docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md) | Channel hopping and TDM protocol | Accepted |
 | [ADR-039](../../docs/adr/ADR-039-esp32-edge-intelligence.md) | Edge intelligence tiers 0-2 | Accepted |
 | [ADR-040](../../docs/adr/) | WASM programmable sensing (Tier 3) with RVF container format | Alpha |
-| [ADR-057](../../docs/adr/ADR-057-build-time-csi-guard.md) | Build-time CSI guard (`CONFIG_ESP_WIFI_CSI_ENABLED`) | Accepted |
-| [ADR-060](../../docs/adr/ADR-060-channel-mac-filter.md) | Channel override and MAC address filter | Accepted |
+| [ADR-057](../../docs/adr/ADR-057-firmware-csi-build-guard.md) | Build-time CSI guard (`CONFIG_ESP_WIFI_CSI_ENABLED`) | Accepted |
+| [ADR-060](../../docs/adr/ADR-060-provision-channel-mac-filter.md) | Channel override and MAC address filter | Accepted |
 | [ADR-061](../../docs/adr/ADR-061-qemu-esp32s3-firmware-testing.md) | QEMU ESP32-S3 emulation for firmware testing | Proposed |
 
 ---

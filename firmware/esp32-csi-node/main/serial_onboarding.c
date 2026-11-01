@@ -1,6 +1,8 @@
 #include "serial_onboarding.h"
 
 #include "serial_onboarding_protocol.h"
+#include "onboarding_identity.h"
+#include "onboarding_console.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -17,7 +19,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs.h"
-#include "psa/crypto.h"
 
 static const char *TAG = "serial_onboard";
 static nvs_config_t s_current_config;
@@ -29,7 +30,9 @@ static int64_t s_nonce_issued_at_us;
 
 static const char *chip_name(void)
 {
-#if defined(CONFIG_IDF_TARGET_ESP32C6)
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    return "esp32c5";
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
     return "esp32c6";
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
     return "esp32s3";
@@ -38,36 +41,11 @@ static const char *chip_name(void)
 #endif
 }
 
-static void device_digest(char output[17])
-{
-    uint8_t base_mac[6] = {0};
-    uint8_t digest[32] = {0};
-    static const uint8_t domain[] = "ruview-device-v1";
-    uint8_t digest_input[sizeof(domain) - 1 + sizeof(base_mac)];
-    size_t digest_length = 0;
-    memcpy(digest_input, domain, sizeof(domain) - 1);
-    const esp_err_t mac_result = esp_efuse_mac_get_default(base_mac);
-    if (mac_result == ESP_OK) {
-        memcpy(digest_input + sizeof(domain) - 1, base_mac, sizeof(base_mac));
-    }
-    if (mac_result == ESP_OK &&
-        psa_crypto_init() == PSA_SUCCESS &&
-        psa_hash_compute(PSA_ALG_SHA_256, digest_input, sizeof(digest_input),
-                         digest, sizeof(digest), &digest_length) == PSA_SUCCESS &&
-        digest_length == sizeof(digest)) {
-        for (size_t index = 0; index < 8; index++) {
-            snprintf(output + index * 2, 3, "%02x", digest[index]);
-        }
-    } else {
-        memcpy(output, "0000000000000000", 17);
-    }
-}
-
 static void emit_hello(const char *nonce)
 {
     const esp_app_desc_t *description = esp_app_get_description();
     char digest[17] = {0};
-    device_digest(digest);
+    ruview_onboarding_device_digest(digest);
     const bool configured = s_current_config.wifi_ssid[0] != '\0' &&
                             s_current_config.target_ip[0] != '\0';
     printf("RUVIEW_HELLO_OK_V1 nonce=%s chip=%s version=%s node_id=%u "
@@ -162,16 +140,9 @@ static void serial_onboarding_task(void *argument)
     (void)argument;
     const int original_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
     if (original_flags >= 0) (void)fcntl(STDIN_FILENO, F_SETFL, original_flags | O_NONBLOCK);
-    /* ESP-IDF secondary consoles mirror output but deliberately do not forward
-     * input to STDIN. Native S3/C6 USB Serial/JTAG therefore needs a bounded
-     * direct VFS reader while UART-console boards continue to use STDIN. */
-    const int usb_fd = open("/dev/secondary", O_RDONLY | O_NONBLOCK);
     char primary_line[ONBOARDING_LINE_MAX];
-    char usb_line[ONBOARDING_LINE_MAX];
     size_t primary_length = 0;
-    size_t usb_length = 0;
     bool primary_overflow = false;
-    bool usb_overflow = false;
     for (;;) {
         uint8_t input[64];
         const ssize_t count = read(STDIN_FILENO, input, sizeof(input));
@@ -182,12 +153,6 @@ static void serial_onboarding_task(void *argument)
             ESP_LOGW(TAG, "serial input unavailable: errno=%d", errno);
             vTaskDelay(pdMS_TO_TICKS(500));
         }
-        if (usb_fd >= 0) {
-            const ssize_t usb_count = read(usb_fd, input, sizeof(input));
-            if (usb_count > 0) {
-                consume_bytes(input, usb_count, usb_line, &usb_length, &usb_overflow);
-            }
-        }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
@@ -195,6 +160,8 @@ static void serial_onboarding_task(void *argument)
 esp_err_t serial_onboarding_start(const nvs_config_t *config)
 {
     if (config == NULL) return ESP_ERR_INVALID_ARG;
+    const esp_err_t console_result = ruview_onboarding_console_prepare();
+    if (console_result != ESP_OK) return console_result;
     memcpy(&s_current_config, config, sizeof(s_current_config));
     const BaseType_t created = xTaskCreate(serial_onboarding_task, "serial_onboard",
                                            4096, NULL, 4, NULL);

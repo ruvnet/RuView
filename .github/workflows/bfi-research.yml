@@ -1,0 +1,43 @@
+name: BFI Research Tools
+
+on:
+  pull_request:
+    paths:
+      - 'tools/bfi/**'
+      - 'tools/bfi_learning/**'
+      - '.github/workflows/bfi-research.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/bfi/**'
+      - 'tools/bfi_learning/**'
+      - '.github/workflows/bfi-research.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bfi-research-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-tests:
+    name: BFI offline tests (Linux, CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - name: Install numeric test dependencies
+        run: python -m pip install numpy==2.4.2 scipy==1.17.1
+      - name: Install CPU PyTorch
+        run: python -m pip install torch==2.11.0 --index-url https://download.pytorch.org/whl/cpu
+      - name: Test capture parsing and bounded runners
+        run: python -B -m unittest discover -s tools/bfi -v
+      - name: Test offline learning and data admission
+        run: python -B -m unittest discover -s tools/bfi_learning -v

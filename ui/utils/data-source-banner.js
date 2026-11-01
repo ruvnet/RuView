@@ -11,6 +11,7 @@
 // meaningful.
 
 import { sensingService } from '../services/sensing.service.js';
+import { openApiAccess } from './connection-status.js';
 
 const STYLE_ID = 'ruview-data-source-banner-style';
 const BAR_ID = 'ruview-data-source-banner';
@@ -36,6 +37,13 @@ const CONFIG = {
     text: 'SIMULATED — every value on this screen is invented by your browser, not measured',
     bg: '#6b0f6b',
     fg: '#ffc9ff',
+  },
+  // #2099: the server refused the stream. Clicking the bar opens API Access.
+  'auth-required': {
+    text: 'API TOKEN REQUIRED — this server needs its API token. Click here, or Settings → API Access',
+    textRejected: 'API TOKEN REJECTED — the saved token was refused. Click here, or Settings → API Access',
+    bg: '#5c1010',
+    fg: '#ffc9c9',
   },
 };
 
@@ -90,6 +98,12 @@ export class DataSourceBanner {
       // message describes context, not an error to act on right now.
       this._bar.setAttribute('aria-live', 'polite');
       document.body.appendChild(this._bar);
+      this._bar.addEventListener('click', (e) => {
+        if (sensingService.dataSource !== 'auth-required') return;
+        // QuickSettings closes on any outside click; this click must not count.
+        e.stopPropagation();
+        openApiAccess(sensingService.authRequired);
+      });
     }
 
     // dataSource changes are published on the state-listener channel.
@@ -107,7 +121,9 @@ export class DataSourceBanner {
       return;
     }
 
-    this._bar.textContent = cfg.text;
+    this._bar.textContent =
+      cfg.textRejected && sensingService.authRequired === 'rejected' ? cfg.textRejected : cfg.text;
+    this._bar.style.cursor = sensingService.dataSource === 'auth-required' ? 'pointer' : '';
     this._bar.style.background = cfg.bg;
     this._bar.style.color = cfg.fg;
     this._bar.classList.add('is-visible');

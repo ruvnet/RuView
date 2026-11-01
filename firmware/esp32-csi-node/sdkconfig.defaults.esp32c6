@@ -19,6 +19,12 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_4mb.csv"
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
 
+# Native USB/JTAG is the interactive onboarding console on C6 boards. ESP-IDF
+# secondary consoles mirror output only and cannot receive RUVIEW_HELLO_V1.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# CONFIG_ESP_CONSOLE_UART_DEFAULT is not set
+# CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG is not set
+
 # ── CSI (required) ──
 CONFIG_ESP_WIFI_CSI_ENABLED=y
 

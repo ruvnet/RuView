@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use wifi_densepose_signal::hardware_norm::{CanonicalCsiFrame, HardwareNormalizer, HardwareType};
-use wifi_densepose_signal::ruvsense::multiband::MultiBandCsiFrame;
+use wifi_densepose_signal::ruvsense::multiband::{MultiBandCsiFrame, PhaseReference};
 use wifi_densepose_signal::ruvsense::multistatic::{
     FusedSensingFrame, MultistaticConfig, MultistaticFuser,
 };
@@ -19,7 +19,7 @@ use wifi_densepose_signal::ruvsense::multistatic::{
 use super::NodeState;
 
 /// Maximum age for a node frame to be considered active (10 seconds).
-const STALE_THRESHOLD: Duration = Duration::from_secs(10);
+const STALE_THRESHOLD: Duration = Duration::from_millis(super::NODE_STALE_AFTER_MS);
 
 /// Default WiFi channel frequency (MHz) used for single-channel frames.
 const DEFAULT_FREQ_MHZ: u32 = 2437; // Channel 6
@@ -78,6 +78,9 @@ fn node_frame_from_state_at(
     let canonical_amp = NORMALIZER.resample_to_canonical(latest);
     let amplitude: Vec<f32> = canonical_amp.iter().map(|&v| v as f32).collect();
     let n_sub = amplitude.len();
+    // Issue #1752: the server keeps amplitude history only, so this vector is
+    // a placeholder, not measured phase. `PhaseReference::Unavailable` below
+    // stops the fuser from combining it or treating it as evidence.
     let phase = vec![0.0_f32; n_sub];
 
     let canonical = CanonicalCsiFrame {
@@ -91,7 +94,12 @@ fn node_frame_from_state_at(
         timestamp_us,
         channel_frames: vec![canonical],
         frequencies_mhz: vec![DEFAULT_FREQ_MHZ],
-        coherence: 1.0, // single-channel, perfect self-coherence
+        // Cross-channel amplitude agreement: trivially 1.0 for one channel.
+        // This is not cross-node phase coherence; that is `phase_reference`.
+        coherence: 1.0,
+        // Independent ESP32 crystals with a random PLL phase per reset, and
+        // no phase kept here: never phase-coherent across nodes.
+        phase_reference: PhaseReference::Unavailable,
     })
 }
 
@@ -123,8 +131,7 @@ pub fn node_frames_from_states_with_guard(
     let mut active: Vec<(u8, &NodeState)> = node_states
         .iter()
         .filter_map(|(&node_id, ns)| {
-            let last_time = ns.last_frame_time.as_ref()?;
-            (now.duration_since(*last_time) <= STALE_THRESHOLD).then_some((node_id, ns))
+            super::node_is_fresh(ns, now).then_some((node_id, ns))
         })
         .collect();
     active.sort_unstable_by_key(|(node_id, _)| *node_id);
@@ -214,13 +221,10 @@ pub fn fuse_or_fallback(
             // Sum per-node counts then divide by dedup_factor (assumed average
             // visibility per body across nodes).  ADR-044 §5.1.
             // dedup_factor is runtime-configurable; default 3.0.
+            let now = Instant::now();
             let total: usize = node_states
                 .values()
-                .filter(|ns| {
-                    ns.last_frame_time
-                        .map(|t| t.elapsed() <= STALE_THRESHOLD)
-                        .unwrap_or(false)
-                })
+                .filter(|ns| super::node_is_fresh(ns, now))
                 .map(|ns| ns.prev_person_count)
                 .sum();
             let estimated = ((total as f64) / dedup_factor).ceil() as usize;
@@ -309,8 +313,9 @@ mod tests {
         // the person-score relies on is intact.
         assert!((ch.amplitude[0] - 10.0_f32).abs() < 1e-3);
         assert!((ch.amplitude[55] - 30.5_f32).abs() < 1e-3);
-        // Phase should be all zeros
+        // Phase is a zero placeholder and is declared as such (#1752).
         assert!(ch.phase.iter().all(|&p| p == 0.0));
+        assert_eq!(frame.phase_reference, PhaseReference::Unavailable);
         assert_eq!(ch.hardware_type, HardwareType::Esp32S3);
     }
 
@@ -616,5 +621,29 @@ mod tests {
         let (fused, count) = fuse_or_fallback(&fuser, &states, 3.0);
         assert!(fused.is_none());
         assert_eq!(count, Some(0));
+    }
+
+    /// Issue #1752: live ESP32 nodes have independent oscillators and the
+    /// bridge keeps no phase, so a multi-node cycle must not emit a fused
+    /// phase vector built from the zero placeholders.
+    #[test]
+    fn live_nodes_are_fused_amplitude_only() {
+        let now = Instant::now();
+        let mut states = HashMap::new();
+        for (node_id, scale) in [(1u8, 1.0), (2u8, 1.4)] {
+            let mut history = VecDeque::new();
+            history.push_back((0..64).map(|i| scale * (1.0 + 0.1 * f64::from(i))).collect());
+            states.insert(node_id, make_node_state(history, Some(now), 0));
+        }
+        let fuser = MultistaticFuser::new();
+        let (fused, fallback) = fuse_or_fallback(&fuser, &states, 3.0);
+        let fused = fused.expect("two fresh nodes fuse");
+        assert!(fallback.is_none());
+        assert_eq!(fused.active_nodes, 2);
+        assert_eq!(fused.fused_amplitude.len(), 56);
+        assert!(
+            fused.fused_phase.is_empty(),
+            "placeholder phase must not be combined across nodes"
+        );
     }
 }

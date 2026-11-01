@@ -36,7 +36,7 @@ use wifi_densepose_bfld::{PrivacyAction, PrivacyClass, PrivacyMode, PrivacyModeR
 use wifi_densepose_geo::types::GeoRegistration;
 use wifi_densepose_ruvector::viewpoint::coherence::ClockQualityScore;
 use wifi_densepose_signal::ruvsense::fusion_quality::CalibrationId;
-use wifi_densepose_signal::ruvsense::multistatic::{MultistaticConfig, MultistaticFuser};
+use wifi_densepose_signal::ruvsense::multistatic::{MultistaticConfig, MultistaticFuser, PhaseFusion};
 use wifi_densepose_signal::ruvsense::{
     ArrayCoordinator, ArrayCoordinatorConfig, ArrayNodeInput, ChangePoint, DirectionalEvidence,
     EvolutionTracker, MultiBandCsiFrame, QualityScore, ReflectorObservation, RfSlam,
@@ -109,6 +109,10 @@ pub struct TrustedOutput {
     /// structural event for the recalibration advisor and names the nodes
     /// (`weak_side`) closest to splitting off — failure/jamming triage.
     pub mesh: Option<MeshPartitionReport>,
+    /// Whether phase was combined across nodes this cycle, and why not when it
+    /// was not (issue #1752). Amplitude-only sources report
+    /// `AmplitudeOnly(PhaseUnavailable)`.
+    pub phase_fusion: PhaseFusion,
 }
 
 /// Composition root for the RuView streaming engine.
@@ -258,6 +262,14 @@ impl StreamingEngine {
     /// positions are already set across its rebuild.
     pub fn set_node_positions(&mut self, positions: std::collections::HashMap<u8, [f32; 3]>) {
         self.fuser.set_node_positions_by_id(positions);
+    }
+
+    /// Node positions the governed fuser currently holds, keyed by node id.
+    /// Empty until [`Self::set_node_positions`] is called, in which case every
+    /// node fuses at the origin.
+    #[must_use]
+    pub fn node_positions(&self) -> &std::collections::HashMap<u8, [f32; 3]> {
+        self.fuser.node_positions_by_id()
     }
 
     /// Activate a per-room calibration adapter (ADR-150 §3.4). From the next
@@ -594,6 +606,7 @@ impl StreamingEngine {
             witness,
             recalibration_recommended,
             mesh,
+            phase_fusion: fused.phase_fusion,
         })
     }
 
@@ -715,6 +728,7 @@ fn demote_one(c: PrivacyClass) -> PrivacyClass {
 mod tests {
     use super::*;
     use wifi_densepose_signal::hardware_norm::{CanonicalCsiFrame, HardwareType};
+    use wifi_densepose_signal::ruvsense::PhaseReference;
 
     fn node_frame(node_id: u8, ts_us: u64, n_sub: usize) -> MultiBandCsiFrame {
         MultiBandCsiFrame {
@@ -727,6 +741,7 @@ mod tests {
             }],
             frequencies_mhz: vec![2412],
             coherence: 0.9,
+            phase_reference: PhaseReference::NodeLocal,
         }
     }
 
@@ -735,6 +750,20 @@ mod tests {
         let room = e.add_room("living_room", "Living Room");
         e.add_sensor("esp32-com9", room);
         (e, room)
+    }
+
+    /// Issue #1752: independent node oscillators never yield a coherent cycle;
+    /// the trusted output says phase was not combined and why.
+    #[test]
+    fn independent_nodes_report_amplitude_only_phase_fusion() {
+        use wifi_densepose_signal::ruvsense::NonCoherentReason;
+        let (mut e, room) = engine();
+        let frames = [node_frame(0, 1000, 56), node_frame(1, 1001, 56)];
+        let out = e.process_cycle(&frames, CalibrationId(1), room, 10_000).unwrap();
+        assert_eq!(
+            out.phase_fusion,
+            PhaseFusion::AmplitudeOnly(NonCoherentReason::IndependentClocks)
+        );
     }
 
     /// End-to-end trust invariant: a clean cycle produces a SemanticState whose
@@ -1015,6 +1044,7 @@ mod tests {
             }],
             frequencies_mhz: vec![2412],
             coherence: 0.9,
+            phase_reference: PhaseReference::NodeLocal,
         }
     }
 

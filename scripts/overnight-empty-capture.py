@@ -12,33 +12,19 @@ import argparse
 import json
 import os
 import socket
-import struct
+import importlib.util
+from pathlib import Path
 import time
 
 
-def parse_csi_packet(data):
-    """ADR-018 binary CSI packet → dict (same layout as record-csi-udp.py)."""
-    if len(data) < 8:
-        return None
-    node_id = data[4]
-    rssi = struct.unpack("b", bytes([data[6]]))[0]
-    channel = data[7]
-    iq = data[8:]
-    amplitudes = []
-    for i in range(0, len(iq) - 1, 2):
-        I = struct.unpack("b", bytes([iq[i]]))[0]
-        Q = struct.unpack("b", bytes([iq[i + 1]]))[0]
-        amplitudes.append(round((I * I + Q * Q) ** 0.5, 2))
-    return {
-        "type": "raw_csi",
-        "ts_ns": time.time_ns(),
-        "node_id": node_id,
-        "rssi": rssi,
-        "channel": channel,
-        "subcarriers": len(iq) // 2,
-        "amplitudes": amplitudes,
-        "iq_hex": iq.hex(),
-    }
+# Share the reviewed ADR-018 decoder with the ordinary UDP recorder so segment
+# capture cannot drift to an older header layout.
+_parser_spec = importlib.util.spec_from_file_location(
+    "ruview_record_csi_udp", Path(__file__).with_name("record-csi-udp.py")
+)
+_parser_module = importlib.util.module_from_spec(_parser_spec)
+_parser_spec.loader.exec_module(_parser_module)
+parse_csi_packet = _parser_module.parse_csi_packet
 
 
 def main():

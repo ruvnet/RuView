@@ -20,6 +20,10 @@ func main() {
             exit(1)
         }
         let sample: [String: Any] = [
+            // Always the connected link. macOS redacts ssid/bssid without
+            // Location Services; rssi/noise/channel stay real, so mark the
+            // sample as the connected link for the Rust adapter.
+            "connected": true,
             "ssid": interface.ssid() ?? "",
             "bssid": interface.bssid() ?? "00:00:00:00:00:00",
             "channel": channel.channelNumber,

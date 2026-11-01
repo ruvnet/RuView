@@ -1,17 +1,33 @@
 {
   "name": "@ruvnet/ruview",
-  "version": "0.5.1",
-  "description": "RuView WiFi-sensing operator harness — onboard, calibrate, verify, enforce evidence guardrails, and read Cognitum Spaces through explicitly granted OAuth.",
+  "version": "0.9.3",
+  "description": "RuView WiFi-sensing operator harness — CLI, MCP server, and SDK for host device access (ESP32 CSI nodes, 60/24 GHz mmWave, LiDAR), SSH remote hosts, diagnostics, verified ESP32 flashing, evidence-gated training, calibration, and Cognitum Spaces.",
   "type": "module",
   "bin": {
-    "ruview": "bin/cli.js"
+    "ruview-harness": "bin/cli.js"
   },
   "exports": {
     ".": "./src/tools.js",
+    "./sdk": {
+      "types": "./src/sdk.d.ts",
+      "default": "./src/sdk.js"
+    },
     "./guardrails": "./src/guardrails.js",
     "./brain": "./src/brain.js",
     "./guidance": "./src/guidance.js",
-    "./hosts": "./src/hosts/index.js"
+    "./hosts": "./src/hosts/index.js",
+    "./doctor": "./src/doctor.js",
+    "./firmware": "./src/firmware.js",
+    "./training": "./src/training.js",
+    "./devices": "./src/devices/registry.js",
+    "./remote": "./src/remote.js",
+    "./cli": "./src/cli.js",
+    "./cli-ui": "./src/cli-ui.js",
+    "./mcp": "./src/mcp-server.js",
+    "./mcp-http": "./src/mcp-http.js",
+    "./ui": "./src/ui/console-widget.js",
+    "./esphome": "./src/devices/esphome.js",
+    "./kernel": "./src/kernel.js"
   },
   "files": [
     "bin/",
@@ -23,13 +39,15 @@
     "brain/",
     "flywheel/",
     "scripts/",
+    "mod/.claude-plugin/",
+    "mod/hooks/",
     "CLAUDE.md",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test test/*.test.mjs",
-    "test:security": "node --test test/hosts.test.mjs test/brain.test.mjs test/policy.test.mjs test/spaces.test.mjs",
+    "test": "node --test --test-concurrency=2 test/*.test.mjs",
+    "test:security": "node --test test/hosts.test.mjs test/brain.test.mjs test/policy.test.mjs test/spaces.test.mjs test/kernel.test.mjs test/firmware.test.mjs test/training.test.mjs test/devices.test.mjs test/csi-nodes.test.mjs test/remote.test.mjs test/mcp-apps.test.mjs test/cli-ui.test.mjs test/esphome.test.mjs",
     "doctor": "node ./bin/cli.js doctor",
     "mcp": "node ./bin/cli.js mcp start",
     "brain:verify": "node ./bin/cli.js brain verify",
@@ -39,7 +57,8 @@
     "manifest:update": "node ./scripts/update-manifest.mjs",
     "manifest:verify": "node ./scripts/verify-manifest.mjs",
     "prepack": "node ./scripts/sync-skills.mjs && node ./scripts/update-manifest.mjs --quiet && node ./scripts/verify-manifest.mjs --quiet",
-    "prepublishOnly": "npm test && node ./scripts/verify-manifest.mjs"
+    "prepublishOnly": "npm test && node ./scripts/verify-manifest.mjs",
+    "test:e2e:devices": "node --test test/e2e/devices.e2e.mjs"
   },
   "keywords": [
     "wifi-sensing",
@@ -57,8 +76,26 @@
     "claude-code",
     "ambient-intelligence",
     "cognitum-spaces",
-    "oauth"
+    "oauth",
+    "firmware-flashing",
+    "esptool",
+    "sdk",
+    "model-training",
+    "mmwave",
+    "lidar",
+    "rplidar",
+    "mr60bha2",
+    "ld2410",
+    "ssh"
   ],
+  "peerDependencies": {
+    "@ruvnet/ruview-kernel": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@ruvnet/ruview-kernel": {
+      "optional": true
+    }
+  },
   "engines": {
     "node": ">=20.0.0"
   },
@@ -80,5 +117,6 @@
   },
   "publishConfig": {
     "access": "public"
-  }
+  },
+  "types": "./src/sdk.d.ts"
 }

@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|-------|
 | **Status** | **Accepted** (MQTT track P1–P7 + P8a + P9 + P10 shipped 2026-05-23 in PR #778, 410 lib tests, witness bundle VERIFIED) / **Proposed** (Matter SDK wiring P8b deferred to v0.7.1 per §9.10) |
-| **Date** | 2026-05-23 |
+| **Date** | 2026-05-23 (amended 2026-10-02: P4.5 status note, §11) |
 | **Deciders** | ruv |
 | **Codename** | **HA-DISCO** (MQTT) + **HA-FABRIC** (Matter) + **HA-MIND** (semantic primitives) |
 | **Relates to** | ADR-018 (CSI binary frame format), ADR-021 (ESP32 vitals), ADR-031 (RuView sensing-first), ADR-039 (edge vitals packet 0xC511_0002), ADR-079 (camera ground-truth), ADR-103 (cog-person-count), ADR-110 (ESP32-C6 firmware), ADR-114 (cog-quantum-vitals) |
@@ -440,7 +440,7 @@ This means: **adding a new primitive is one file change**. No MQTT schema rev, n
 | **P2** | HA discovery message emitter. New module `mqtt_discovery.rs`. Emits all entity `config` topics on connect + every `--mqtt-refresh-secs`. Schema-validated against HA's published JSON schema. | pending |
 | **P3** | State publication. Subscribe to internal `tokio::broadcast` channel (the one `tx.send(json)` writes to on line 3983 of `main.rs`). Translate `edge_vitals` / `sensing_update` / `pose_data` messages into per-entity state payloads. Apply rate-limit + privacy-mode filters. | pending |
 | **P4** | Integration tests: dockerised mosquitto in CI (extend `.github/workflows/firmware-qemu.yml` pattern), schema-validate every emitted config against HA's `homeassistant/components/mqtt` JSON schemas (pin to a tested HA version). Add a smoke test that brings up sensing-server in `--source mock --mqtt`, subscribes with `paho-mqtt` test client, asserts on entity creation. | pending |
-| **P4.5** | **Semantic inference layer (HA-MIND).** New module `semantic_inference.rs` implementing the 10 v1 primitives from §3.12. Output broadcast channel consumed by both MQTT publisher (P3) and Matter bridge (P8). Per-primitive precision/recall baselines published to `docs/integrations/semantic-primitives-metrics.md`. Unit tests per FSM + integration tests via replay of ADR-079 paired captures. | pending |
+| **P4.5** | **Semantic inference layer (HA-MIND).** New module `semantic_inference.rs` implementing the 10 v1 primitives from §3.12. Output broadcast channel consumed by both MQTT publisher (P3) and Matter bridge (P8). Per-primitive precision/recall baselines published to `docs/integrations/semantic-primitives-metrics.md`. Unit tests per FSM + integration tests via replay of ADR-079 paired captures. | partial — 6 of 10 primitives on the live MQTT publisher; see §11 |
 | **P5** | Docs: new `docs/integrations/home-assistant.md` with screenshots of the HA UI after auto-discovery completes, example HA dashboard YAML (Lovelace card configs), 8 starter blueprints from §3.12.2 (distress notify, wake routine, hallway dim, elderly anomaly alert, meeting lights, bathroom fan, fall-risk escalate, auto-arm security), and the raw-channel example automations: "turn on hall light when presence ON", "send notification on fall_detected event", "log HR/BR to InfluxDB". | pending |
 | **P6** | Ship `--mqtt` in the next sensing-server release (target: v0.7.0). Demo end-to-end on `cognitum-v0` against a Mosquitto add-on running on a Home Assistant OS install. Update README hardware-options table with "Works with Home Assistant" badge. | pending |
 | **P7** | Matter Bridge spike: build a throwaway prototype with `matter-rs` exposing one `OccupancySensor` endpoint + one `GenericSwitch` for fall. Pair against Apple Home, Google Home, and HA's Matter integration. Decision gate: if pairing works on all three, proceed to P8; if blocked, switch to chip-tool FFI and re-spike. | pending |
@@ -664,6 +664,59 @@ Empty as of 2026-05-23. New questions discovered during implementation will be f
 - Issue [#574](https://github.com/ruvnet/RuView/issues/574) — mDNS for seed_url (complementary)
 - Issue [#760](https://github.com/ruvnet/RuView/issues/760) — Sensing UI / onboarding friction
 - Issue [#761](https://github.com/ruvnet/RuView/issues/761) — Competitive scan (espectre.dev, tommysense.com)
+
+---
+
+## 11. Status note: P4.5 semantic states on the live publisher (2026-10-02)
+
+Issues [#2085](https://github.com/ruvnet/RuView/issues/2085) and [#2093](https://github.com/ruvnet/RuView/issues/2093) found that discovery announced 20 entities per device while only 6 ever received state, that `presence/state` was published on every CSI frame, and that HA device ids changed on every restart. The FSMs in `crate::semantic` existed but had no caller outside their tests. This note records what is now wired and what is not.
+
+### 11.1 What changed
+
+- **Semantic primitives run on the live path.** `mqtt::planner` holds one `SemanticBus` per node, sampled at 1 Hz (the rate the FSM constants assume). The bus feeds only the MQTT publisher. Matter does not consume it yet, so the "output broadcast channel shared with Matter" in P4.5 is not built.
+- **Announce only what has a source.** Six primitives are announced: `room_active`, `no_movement`, `elderly_inactivity_anomaly`, `someone_sleeping`, `possible_distress` and `fall_risk_elevated`. Four are not: `meeting_in_progress` needs a 1–20 % motion level, but per-node motion is a three-level classification; `bathroom_occupied`, `bed_exit` and `multi_room_transition` need zones, and the broadcast carries none (the §3.12.5 zone file is not implemented). For the same reason `zone_occupancy` (§3.1) and `pose` are not announced: `pose_keypoints` is never populated on the broadcast, and `persons[].keypoints` are synthesized.
+- **Per-entity availability (§3.6).** An announced entity is `online` only while its input exists: vitals while the calibration-gated estimate is published, `fall` while the node sends `edge_vitals`, `motion_energy` and `rssi` while present, and semantic primitives after the 60 s warmup (sleeping and distress also need breathing or heart rate, fall risk needs the fall detector). Otherwise it is `offline` and no state is sent. Transitions publish at once; all availability topics are re-sent every 30 s.
+- **No default values.** `motion_energy` was always `0.0` (MEASURED: 176 of 176 samples) because the bridge never set it. It now carries the node's `motion_band_power`, or the room value, or nothing. `fall` is driven by the rising edge of `edge_vitals.fall_detected`. Only `sensing_update` produces snapshots, which removes the phantom aggregate device that `edge_vitals` frames created. `present_still` now maps to 0 % motion instead of 100 %.
+- **Rates (§3.7).** Binary states publish on change, plus a 60 s retained heartbeat, as §3.5 already specified. Sensors keep their configured rates.
+- **Stable device identity (§3.8).** The default client id is now `wifi-densepose-<8 hex>`, persisted in `<data-dir>/mqtt_client_id`. §3.8 specified `wifi-densepose-<hostname>`; a persisted random id avoids a hostname dependency and survives hostname changes. `--mqtt-client-id` still overrides it.
+
+### 11.2 Evidence
+
+Unit tests (CODE-DERIVED, run with `cargo test -p wifi-densepose-sensing-server --features mqtt --lib -- mqtt:: semantic::`): `mqtt::planner::tests` covers the entity → state mapping, unavailable-without-source, warmup, on-change with heartbeat at a 73 frame/s input, sensor rates, reset and privacy mode. `mqtt::bridge::tests` covers message-type filtering, fall edges and motion energy. `mqtt::config::tests` covers client-id persistence across two "restarts" in a temp dir, override and malformed-file recovery.
+
+Live measurement (MEASURED, 2026-10-02): one ESP32 node streaming CSI and `edge_vitals` over UDP to a macOS host; `sensing-server --source esp32 --mqtt` against `eclipse-mosquitto:2` in Docker on a non-default port; every topic captured with a `paho-mqtt` subscriber on `#`. "Before" is `03a89793` (main), "after" is this change, built `--release --features mqtt`, same command and window.
+
+```bash
+# Broker: mosquitto.conf = "listener 1883 0.0.0.0 / allow_anonymous true / persistence false"
+docker run -d --rm -p 127.0.0.1:18830:1883 \
+  -v "$PWD/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro" eclipse-mosquitto:2
+# Run A (180 s, then SIGTERM) and run B (restart, 45 s) share one --data-dir.
+# A paho-mqtt subscriber on '#' starts 2 s before each run.
+RUVIEW_API_TOKEN=<random> sensing-server --source esp32 --udp-port 5006 \
+  --udp-bind 0.0.0.0 --udp-allow <node-subnet> --http-port 3000 --ws-port 3001 \
+  --no-mdns --data-dir <dir> --mqtt --mqtt-host 127.0.0.1 --mqtt-port 18830
+```
+
+| Measure (180 s window unless noted) | Before (`03a89793`) | After |
+|---|---|---|
+| HA devices announced in run A | 2 (one phantom aggregate + `-node1`) | 1 (`-node1`) |
+| Entities announced per device | 20 | 15 |
+| Entities that received state (node device) | 6 | 10 |
+| Announced entities without state that still reported `online` | 14 | 1 (`fall`: an event, and no fall occurred) |
+| `presence/state` messages (node device) | 6,814 (37.9 / s) | 4 (one per change, plus 60 s heartbeat) |
+| `motion_energy` values | `0.0` in 176 of 176 | node band power, 177 samples |
+| Device id, run A → run B (restart, same `--data-dir`) | `wifi-densepose-<pid A>` → `<pid B>` (4 devices on the broker after B) | same persisted id in both runs (1 device) |
+| `offline` published on SIGTERM | no | no (unchanged; see 11.3) |
+| Same, plus `--privacy-mode` (75 s, fresh `--data-dir`) | — | 13 entities announced; no `heart_rate`, `breathing_rate` or `pose` topic for that device |
+
+After the change, five announced entities had no state: `heart_rate` and `breathing_rate`, because no calibration had been run; `someone_sleeping` and `possible_distress`, which depend on them; and `fall`, which is an event and no fall occurred. The first four were `offline`. `fall` was `online`, because the node sent `edge_vitals`. Before the change all 14 entities without state still reported `online`. Only one node was streaming during this measurement. #2085 used five nodes and measured about 73 `presence` messages per second per node.
+
+### 11.3 Not done
+
+- Semantic precision/recall on real captures. The figures in `semantic-primitives-metrics.md` have no reproducer in the repository and stay CLAIMED.
+- Zone and threshold files, `--semantic*` / `--no-semantic` flags on `sensing-server`, the `reason` attribute (§3.12.4), and `semantic_events.jsonl`.
+- MQTT last-will and offline-on-shutdown (§3.6). The server registers no LWT and SIGTERM does not publish `offline`, so availability stays as last published after the server stops.
+- Matter consumption of the semantic states.
 
 ---
 

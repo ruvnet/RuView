@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="116" viewBox="0 0 180 116" role="img" aria-labelledby="title desc"><title id="title">AI toolkit</title><desc id="desc">Open AI toolkit. Animated navigation icon.</desc><defs><linearGradient id="wash" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#102749"/><stop offset=".55" stop-color="#071429"/><stop offset="1" stop-color="#03091a"/></linearGradient><linearGradient id="accent"><stop stop-color="#9ee7ff"/><stop offset="1" stop-color="#348bff"/></linearGradient><radialGradient id="halo"><stop stop-color="#348bff" stop-opacity=".17"/><stop offset="1" stop-color="#348bff" stop-opacity="0"/></radialGradient></defs><style>
+text{font-family:"Avenir Next","Segoe UI",Helvetica,Arial,sans-serif}
+.mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;letter-spacing:1.6px}
+.float{animation:float 5s ease-in-out infinite}
+.flow{stroke-dasharray:5 12;animation:flow 5s linear infinite}
+.breathe{animation:breathe 4s ease-in-out infinite}
+.trace{stroke-dasharray:400;animation:trace 6s ease-in-out infinite}
+.scan{animation:scan 7s ease-in-out infinite}
+.orbit{transform-box:fill-box;transform-origin:center;animation:orbit 18s linear infinite}
+.spark{animation:spark 3.5s ease-in-out infinite}
+.wave{transform-box:fill-box;transform-origin:center;animation:wave 4s ease-out infinite}
+@keyframes float{0%,100%{transform:translate(0,0)}50%{transform:translate(3px,-10px)}}
+@keyframes scan{0%,100%{transform:translateY(0)}50%{transform:translateY(-76px)}}
+@keyframes orbit{to{transform:rotate(360deg)}}
+@keyframes spark{50%{opacity:.25}}
+@keyframes flow{to{stroke-dashoffset:-136}}
+@keyframes breathe{50%{opacity:.4}}
+@keyframes trace{0%,100%{stroke-dashoffset:0}50%{stroke-dashoffset:90}}
+@keyframes wave{0%{transform:scale(.5);opacity:.7}100%{transform:scale(1.3);opacity:0}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important}}
+</style><rect x=".5" y=".5" width="179" height="115" rx="18" fill="url(#wash)" stroke="#2d4e77"/><g transform="translate(90 45) scale(0.65)"><ellipse cx="0" cy="48" rx="43" ry="12" fill="#142c50" opacity=".5"/><path d="M-43 48L0 27L43 48L0 69Z" fill="none" stroke="#2e527d" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" /><g class="float"><path d="M0 0L0 -33" fill="none" stroke="#438fff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="flow"/><circle cx="0" cy="-33" r="7" stroke="#78cfff" fill="none" class="breathe"/><path d="M0 0L-35 23" fill="none" stroke="#438fff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="flow"/><circle cx="-35" cy="23" r="7" stroke="#78cfff" fill="none" class="breathe"/><path d="M0 0L35 23" fill="none" stroke="#438fff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="flow"/><circle cx="35" cy="23" r="7" stroke="#78cfff" fill="none" class="breathe"/><circle cx="0" cy="0" r="15" stroke="#78cfff" fill="none" /><path d="M-6 0L-1 5L8 -6" fill="none" stroke="#78cfff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></g></g><text x="90" y="98" font-size="16" fill="#f3f7ff" text-anchor="middle" font-weight="500" >AI toolkit</text></svg>

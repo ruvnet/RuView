@@ -1,6 +1,6 @@
 ---
 name: provision-node
-description: Build, flash, and provision an ESP32-S3/C6 CSI node for RuView — firmware variant choice, ESP-IDF Windows-subprocess flow, NVS/WiFi/channel/MAC-filter overrides.
+description: Build, flash, and provision an ESP32-S3/C6 CSI node for RuView — firmware variant choice, cross-platform checksum-verified esptool flashing, NVS/WiFi/channel/MAC-filter overrides, boot-log evidence.
 ---
 
 # provision-node
@@ -19,17 +19,23 @@ Prebuilt binaries: GitHub release `v0.8.1-esp32` (hardware-validated on S3 QFN56
 
 ## 2. Flash
 
-ESP-IDF v5.4 on Windows is **subprocess-only** (Git Bash/MSYS is unsupported — strip
-`MSYSTEM*` env vars). Offsets for the S3 image:
+Use a release flash bundle (or `release_bins/<variant>`, or an ESP-IDF `build/`).
+The harness flashes on Windows, macOS, and Linux through `python -m esptool`:
 
 ```
-esptool --chip esp32s3 -p <PORT> -b 460800 write_flash \
-  0x0 bootloader.bin  0x8000 partition-table.bin \
-  0xf000 ota_data_initial.bin  0x20000 esp32-csi-node-s3-8mb.bin
+npx @ruvnet/ruview doctor --group python,serial,firmware   # esptool, pyserial, ports, bundle checksums
+npx @ruvnet/ruview flash-plan --port <PORT> --bundle <dir> --variant s3-8mb
+npx @ruvnet/ruview flash --port <PORT> --bundle <dir> --variant s3-8mb --confirm
 ```
 
-(`ruview_node_flash` returns the exact pinned command rather than running an
-unattended flash.)
+`flash` verifies SHA256SUMS, refuses a chip that does not match the variant
+(`esptool chip_id`), writes 0x0 / 0x8000 / 0xf000 / 0x20000 (NVS preserved),
+then captures a boot log. `hardwareValidated: true` requires CSI callbacks in
+that log. Over MCP, `ruview_node_flash` needs the `hardware-write` grant and
+`confirm: true`.
+
+Building from source still uses ESP-IDF v5.4 (Docker or the Windows subprocess
+flow; Git Bash/MSYS is unsupported, so strip `MSYSTEM*` env vars).
 
 ## 3. Provision
 

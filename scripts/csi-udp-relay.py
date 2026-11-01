@@ -44,10 +44,10 @@ def main() -> None:
     try:
         while True:
             try:
-                data, src = rx.recvfrom(2048)
+                data, src = rx.recvfrom(65535)
             except socket.timeout:
                 data = None
-            if data:
+            if data is not None:
                 tx.sendto(data, dst)
                 count += 1
                 last_src = src

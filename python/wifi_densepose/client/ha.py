@@ -40,7 +40,9 @@ from typing import Any, Iterable
 _DISCOVERY_TOPIC_RE = re.compile(
     r"^homeassistant/"
     r"(?P<entity_kind>[A-Za-z_]+)/"
-    r"wifi_densepose_(?P<node_id>[A-Za-z0-9]+)/"
+    # Node ids default to the server's MQTT client id (`wifi-densepose-<hex>`,
+    # plus `-node<N>` per node), so accept `-`, `_` and `.` as well.
+    r"wifi_densepose_(?P<node_id>[A-Za-z0-9_.\-]+)/"
     r"(?P<object_id>[A-Za-z0-9_\-]+)/"
     r"config$"
 )
@@ -143,9 +145,10 @@ class HABlueprintHelper:
     structured queries against them.
 
     Intended use: subscribe a RuViewMqttClient to
-    `homeassistant/+/wifi_densepose_+/+/config`, feed every message
-    into `add_payload()`, then ask the helper "what entities does
-    node X expose?" or "what binary_sensors are presence-class?".
+    `homeassistant/+/+/+/config`, feed every message into
+    `add_payload()` (it ignores non-RuView topics), then ask the helper
+    "what entities does node X expose?" or "what binary_sensors are
+    presence-class?".
     """
 
     def __init__(self) -> None:

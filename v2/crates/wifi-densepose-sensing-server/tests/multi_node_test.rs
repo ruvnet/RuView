@@ -1,15 +1,30 @@
 //! Integration test: multi-node per-node state isolation (ADR-068, #249).
 //!
-//! Sends simulated ESP32 CSI frames from multiple node IDs to the server's
-//! UDP port and verifies that:
+//! Sends simulated ESP32 CSI frames from multiple node IDs to a test-owned
+//! UDP receiver on an ephemeral port and verifies that:
 //! 1. Each node gets independent state (no cross-contamination)
 //! 2. Person count aggregates across active nodes
 //! 3. Stale nodes are excluded from aggregation
 //!
 //! This does NOT require QEMU — it sends raw UDP packets directly.
 
-use std::net::UdpSocket;
+use std::net::{SocketAddr, UdpSocket};
 use std::time::Duration;
+
+/// Bind a test-owned receiver on an OS-assigned port and return it with its
+/// address. Tests in this file must send here, never to a well-known port
+/// such as the sensing server's default UDP port: a running local server would
+/// otherwise ingest up to 255 synthetic node IDs, and a hardcoded port can
+/// collide with other processes or parallel test runs (#2086). The datagrams
+/// are never read; keep the returned socket alive for the whole test so the
+/// port is not reused mid-test.
+fn ephemeral_test_target() -> (UdpSocket, SocketAddr) {
+    let receiver = UdpSocket::bind("127.0.0.1:0").expect("bind ephemeral receiver");
+    let addr = receiver
+        .local_addr()
+        .expect("ephemeral receiver has a local addr");
+    (receiver, addr)
+}
 
 /// Build a minimal valid ESP32 CSI frame (magic 0xC511_0001).
 ///
@@ -126,16 +141,16 @@ fn test_different_nodes_produce_different_frames() {
     assert_ne!(&frame1[20..], &frame2[20..]);
 }
 
-/// Send multiple frames from different nodes to a UDP port.
-/// This test verifies the packet format is accepted by a real server
-/// if one is running, but doesn't fail if no server is available.
+/// Send multiple frames from different nodes to a test-owned UDP receiver.
+/// This is a sender-side smoke test; it does not talk to a real server.
 #[test]
 fn test_multi_node_udp_send() {
-    // Try to bind to a random port and send to localhost:5005
+    // Bind to a random port and send to our own ephemeral receiver.
     // This is a smoke test — it verifies frames can be sent without panic.
     let sock = UdpSocket::bind("0.0.0.0:0").expect("bind");
     sock.set_write_timeout(Some(Duration::from_millis(100)))
         .ok();
+    let (_receiver, target) = ephemeral_test_target();
 
     let n_sub = 32u16;
     let node_ids = [1u8, 2, 3, 5, 7];
@@ -143,15 +158,14 @@ fn test_multi_node_udp_send() {
     for &nid in &node_ids {
         for seq in 0..10u32 {
             let frame = build_csi_frame(nid, seq, -50 + nid as i8, n_sub);
-            // Send to localhost:5005 (won't fail even if nothing is listening)
-            let _ = sock.send_to(&frame, "127.0.0.1:5005");
+            let _ = sock.send_to(&frame, target);
         }
     }
 
     // Also send vitals packets
     for &nid in &node_ids {
         let pkt = build_vitals_packet(nid, true, 1, -45);
-        let _ = sock.send_to(&pkt, "127.0.0.1:5005");
+        let _ = sock.send_to(&pkt, target);
     }
 
     // If we get here without panic, the frame builders work correctly
@@ -178,6 +192,7 @@ fn test_frame_sizes() {
 fn test_mesh_simulation_pattern() {
     let sock = UdpSocket::bind("0.0.0.0:0").expect("bind");
     sock.set_write_timeout(Some(Duration::from_millis(50))).ok();
+    let (_receiver, target) = ephemeral_test_target();
 
     let mut total_sent = 0u32;
 
@@ -185,21 +200,21 @@ fn test_mesh_simulation_pattern() {
         // Nodes 1-3: every tick
         for nid in 1..=3u8 {
             let frame = build_csi_frame(nid, tick, -50, 32);
-            let _ = sock.send_to(&frame, "127.0.0.1:5005");
+            let _ = sock.send_to(&frame, target);
             total_sent += 1;
         }
 
         // Node 4: every other tick
         if tick % 2 == 0 {
             let frame = build_csi_frame(4, tick / 2, -55, 32);
-            let _ = sock.send_to(&frame, "127.0.0.1:5005");
+            let _ = sock.send_to(&frame, target);
             total_sent += 1;
         }
 
         // Node 5: stops after tick 5
         if tick < 5 {
             let frame = build_csi_frame(5, tick, -60, 32);
-            let _ = sock.send_to(&frame, "127.0.0.1:5005");
+            let _ = sock.send_to(&frame, target);
             total_sent += 1;
         }
     }
@@ -214,12 +229,13 @@ fn test_mesh_simulation_pattern() {
 fn test_large_mesh_100_nodes() {
     let sock = UdpSocket::bind("0.0.0.0:0").expect("bind");
     sock.set_write_timeout(Some(Duration::from_millis(50))).ok();
+    let (_receiver, target) = ephemeral_test_target();
 
     let mut total = 0u32;
     for nid in 1..=100u8 {
         for seq in 0..10u32 {
             let frame = build_csi_frame(nid, seq, -50 + (nid % 30) as i8, 32);
-            let _ = sock.send_to(&frame, "127.0.0.1:5005");
+            let _ = sock.send_to(&frame, target);
             total += 1;
         }
     }
@@ -233,12 +249,153 @@ fn test_max_nodes_255() {
     let sock = UdpSocket::bind("0.0.0.0:0").expect("bind");
     sock.set_write_timeout(Some(Duration::from_millis(100)))
         .ok();
+    let (_receiver, target) = ephemeral_test_target();
 
     for nid in 1..=255u8 {
         let frame = build_csi_frame(nid, 0, -50, 16);
-        let _ = sock.send_to(&frame, "127.0.0.1:5005");
+        let _ = sock.send_to(&frame, target);
     }
 
     // 255 unique node_ids — the HashMap should handle this fine
     let _ = 255; // loop completed without panic
+}
+
+// ── Issue #1894: live server, multi-node grid drift ─────────────────────────
+//
+// Boots the real binary on ephemeral ports (nothing shared with a server on
+// the default ports) and drives it over real UDP.
+
+struct LiveServer {
+    child: std::process::Child,
+    http: u16,
+    udp: u16,
+}
+
+impl Drop for LiveServer {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn free_tcp_port() -> u16 {
+    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral");
+    l.local_addr().unwrap().port()
+}
+
+fn free_udp_port() -> u16 {
+    let s = UdpSocket::bind("127.0.0.1:0").expect("bind ephemeral");
+    s.local_addr().unwrap().port()
+}
+
+impl LiveServer {
+    fn start() -> Self {
+        use std::io::Read;
+        for attempt in 1..=3 {
+            let (http, ws, udp) = (free_tcp_port(), free_tcp_port(), free_udp_port());
+            let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_sensing-server"))
+                .args([
+                    "--http-port", &http.to_string(),
+                    "--ws-port", &ws.to_string(),
+                    "--udp-port", &udp.to_string(),
+                    "--bind-addr", "127.0.0.1",
+                    "--no-edge-registry",
+                    "--source", "esp32",
+                ])
+                .env_remove("RUVIEW_API_TOKEN")
+                .env_remove("RUVIEW_UDP_ALLOW")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .expect("spawn sensing-server");
+            // Generous: a debug build boots slowly on a loaded machine.
+            let deadline = std::time::Instant::now() + Duration::from_secs(90);
+            while std::time::Instant::now() < deadline {
+                if health(http).is_some() {
+                    return LiveServer { child, http, udp };
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            // Kill first: reading stderr of a live child blocks until it exits.
+            let _ = child.kill();
+            let _ = child.wait();
+            let mut err = String::new();
+            if let Some(mut s) = child.stderr.take() {
+                let _ = s.read_to_string(&mut err);
+            }
+            if err.contains("Address already in use") && attempt < 3 {
+                continue;
+            }
+            panic!("sensing-server did not become ready\n--- stderr ---\n{err}");
+        }
+        unreachable!()
+    }
+}
+
+/// `GET /health` over a raw socket; `None` until the listener answers.
+fn health(http: u16) -> Option<serde_json::Value> {
+    use std::io::{Read, Write};
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", http)).ok()?;
+    s.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+    s.write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .ok()?;
+    let mut resp = String::new();
+    s.read_to_string(&mut resp).ok()?;
+    let body = resp.split("\r\n\r\n").nth(1)?;
+    serde_json::from_str(body).ok()
+}
+
+fn tick(h: &serde_json::Value) -> u64 {
+    h["tick"].as_u64().expect("health.tick")
+}
+
+/// Send `n_sub`-subcarrier frames from `nodes` at ~50 fps each for `dur`.
+fn stream(sock: &UdpSocket, udp: u16, nodes: &[u8], n_sub: u16, seq: &mut u32, dur: Duration) {
+    let end = std::time::Instant::now() + dur;
+    while std::time::Instant::now() < end {
+        for &nid in nodes {
+            let _ = sock.send_to(&build_csi_frame(nid, *seq, -50, n_sub), ("127.0.0.1", udp));
+        }
+        *seq = seq.wrapping_add(1);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Issue #1894: three nodes lock onto a 128-subcarrier grid, then their
+/// radios drop to 64 for good. Before the fix every later frame was rejected
+/// by the grid gate, so `tick` froze for the life of the process while
+/// `/health` kept answering `"status": "ok"`. The node must re-lock onto the
+/// grid it is actually sending, and `/health` must report input stopping.
+#[test]
+#[ignore = "slow: spawns the live binary; run with --ignored"]
+fn multi_node_grid_drift_does_not_freeze_processing() {
+    let server = LiveServer::start();
+    let sock = UdpSocket::bind("127.0.0.1:0").expect("bind sender");
+    let nodes = [1u8, 2, 3];
+    let mut seq = 0u32;
+
+    stream(&sock, server.udp, &nodes, 128, &mut seq, Duration::from_millis(1500));
+    let h = health(server.http).expect("health after 128-bin phase");
+    let locked_tick = tick(&h);
+    assert!(locked_tick > 0, "128-bin frames must be processed: {h}");
+
+    // Radios switch to 64 bins and stay there. The gate re-locks once 64
+    // dominates its vote window; then processing must have resumed.
+    stream(&sock, server.udp, &nodes, 64, &mut seq, Duration::from_secs(7));
+    let before = tick(&health(server.http).expect("health mid-drift"));
+    stream(&sock, server.udp, &nodes, 64, &mut seq, Duration::from_secs(1));
+    let h = health(server.http).expect("health after drift");
+    assert!(
+        tick(&h) > before && before > locked_tick,
+        "tick froze after the grid change: locked={locked_tick} before={before} now={}",
+        tick(&h)
+    );
+    assert_eq!(h["processing"]["state"], "live", "{h}");
+
+    // Every node goes quiet: /health must say so rather than read healthy.
+    std::thread::sleep(Duration::from_secs(6));
+    let h = health(server.http).expect("health after silence");
+    assert_eq!(h["status"], "ok", "server itself is still up: {h}");
+    assert_eq!(h["processing"]["state"], "no_input", "{h}");
+    assert!(h["processing"]["udp"]["datagrams"].as_u64().unwrap_or(0) > 0, "{h}");
 }

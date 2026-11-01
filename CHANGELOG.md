@@ -7,8 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **ESP32-C5 release candidate (hardware qualification pending).** Add a
+  headless IDF 6.0.2 C5 build and checksum-verified operator variant, use the
+  C5 ROM's `0x2000` bootloader address, and check image chip IDs and generated
+  flash layouts before packaging. The baseline keeps UART onboarding, a
+  conservative DSP rate, 2.4 GHz association, and no assumed LED/PSRAM wiring.
+  The C5 dependency graph excludes unused display libraries. No measured C5
+  runtime improvement or sensing accuracy is claimed.
+
+
+### Community batch (PRs #2100-#2157 by aepod, reviewed and integrated)
+
+Integrated as one set: conflicts resolved, review findings fixed, validated on the integrated branch. Hardware figures cited by the PRs are the author's own live runs on ESP32-S3 nodes and were not independently reproduced here.
+
+- **Security and honest status.** Refuse a routable HTTP bind when API auth is off (#2134). `--privacy-mode` now strips biometrics from REST, WebSocket and recordings, not only MQTT (#2125; the stripped-key list is an exact-match allowlist, so a new biometric field must be added to it). `/api/v1/status` waits for a real frame and unknown `--source` values are rejected (#2126; breaking for `--source macos|linux|windows`). A stale `/sensing/latest` reports `{"status":"stale"}` after 10 s (#2119). Measured stream fps and real WebSocket client counts (#2127). Absent nodes no longer count as one person (#2132). ESP32 frames with zero antennas or subcarriers are dropped (#2118). Dead nodes are evicted on a timer (#2120). Recordings and models stay under `--data-dir` (#2129). Boolean env flags accept 1/0/yes/no/on/off (#2108). Docker UDP ingest posture is explicit (#2107).
+- **CSI pipeline.** The grid gate locks on the majority frame shape and `/health` reports a stalled pipeline (#2157; a partial fix, mixed 192/306 frame shapes still drop frames, so it does not close #1894). Phase is combined across nodes only when they declare a shared reference (#2156). Point-cloud and hardware parsers use the ADR-018 layout and accept more than 256 subcarriers (#2155; the bandwidth rule for counts above 64 is CLAIMED, inferred from the datasheet). Per-node adaptive training from real recordings (#2101, #2103); a run that fell back to the live buffer now reports `degraded: true`. Gaussian decay no longer compounds across calls (#2140).
+- **MediaTek (ADR-266/267).** Legacy and unknown PPDU types in MTC1 (#2112), per-device ingest capped at 64 devices (#2113), a labelled amplitude heuristic and activity index (#2114; CLAIMED, not an occupancy estimate), an MT7981 bridge (#2115), and the OpenWrt WN586X3 patch set and guide (#2116; the vendored CSI patch is BSD-3-Clause-Clear, see `NOTICE`).
+- **MQTT / Home Assistant.** Semantic states wired into the publisher, entities announced only when sourced, persisted client id (#2117). Existing Home Assistant installs keep retained discovery configs for the six removed entities until they are cleared manually.
+- **Provisioning and firmware.** Wi-Fi password kept owner-only and out of argv and `--state` (#2153); state keyed by board MAC (#2152); `--dry-run` and a failed `--reset` leave state intact (#2111); OTA images confirmed by a bounded health check, which means only "reached the network and sent CSI" (#2100, ADR-379).
+- **Ground truth and spatial.** Radar window adapter and auto-labeller with a session-disjoint split and a median count baseline; radar labels carry `evidence: CLAIMED` (#2143, #2144). Node self-survey, check-only (#2145, ADR-381). The `spatial.evidence.v1` export defaults to the CODE proof grade and MEASURED requires a reproducer (#2141, ADR-382). Loopback UDP tee (#2102, ADR-380).
+- **Tooling.** `prove.sh` reports INCOMPLETE instead of PASS when a gate is skipped (#2130); ADR-018 capture scripts (#2131); API token on the ground-truth script (#2104); the UI asks for the API token instead of retrying forever (#2128); macOS redacted-link handling (#2105).
+- **Not included:** #2106 (MacWifi.app, draft) and #2142 (MR60 probe change, needs a captured MR60BHA2 boot log). `v2/data/adaptive_model.json` (41.5% training accuracy) is no longer tracked (#2135).
+
 ### Added
 
+- **`@ruvnet/ruview` 0.9.1: live sensing views inside Claude Code (ADR-377, ADR-378).** The package now ships `ruview-live`, a Claude Code mod. Type `/ruview` and a pane opens next to the conversation showing what your sensors see right now, refreshed automatically. It has three views, switched with keys `1` `2` `3` or with `/ruview overview|waterfall|radar`:
+  - **Overview**: the CSI nodes streaming to your machine (rate, packet loss, signal strength) and an optional 60 GHz radar kit (presence, distance, heart and breathing rates).
+  - **CSI waterfall**: the Wi-Fi signal itself, the strength of every subcarrier over time, drawn in colour and scrolling as frames arrive. The new `ruview esp32 --spectrum` option supplies the data.
+  - **Radar**: a top-down range fan with an animated ping out to the measured distance, plus heart, breathing and distance charts.
+
+  Every reading is labelled honestly: MEASURED or SYNTHETIC from the packets themselves; radar vitals as "device-reported, not validated"; range-only radar as "distance, not direction". The pane only reads; it never flashes or configures a device.
+
+  Verified on real hardware: an ESP32-C6 streaming CSI and a Seeed MR60BHA2 radar kit (MEASURED; reproducer `npx @ruvnet/ruview esp32 --seconds 4 --spectrum --json`). The package's size ceiling rises from 384 KiB to 448 KiB; it still has no runtime dependencies.
 - **`wifi-densepose-sar` — coherent wideband RF tomography research crate (ADR-287).** New standalone leaf crate (the `nvsim` pattern; zero coupling to `wifi-densepose-hardware` or any real ingestion path) implementing the synthetic-aperture-radar reconstruction primitive a handheld through-wall RF imaging device would need — motivated by comparison against Applied Electrodynamics' "WaveSight" launch, and explicitly scoped below ADR-278's RISE/DiffRadar/GeRaF reproduction gates. Ships: (1) a stepped-frequency, multi-position complex forward measurement simulator (`y_{m,k} = Σ σ_j/R² · exp(-i·4π·f·R/c) + noise`, deterministic ChaCha20 seeding); (2) delay-and-sum backprojection reconstruction onto a 3D voxel grid, rayon-parallelized over voxels; (3) threshold + local-maximum point-cloud extraction; (4) closed-form range/cross-range resolution and antenna-pose coherence-budget formulas (`ΔR=c/2B`, `δ_CR≈λR/2L`, `Δp≤λ/8`) checked against the reconstruction's *actual* behavior in `tests/physics_validation.rs` rather than merely documented — forward-simulating two targets at controlled separations and proving they resolve or merge exactly where the formulas predict, and that reconstructed focus at a known target degrades as injected antenna-pose error grows. Every number is SYNTHETIC/L0 (ADR-282) — no real wideband RF hardware backs this crate; see the crate README and `docs/tutorials/coherent-rf-tomography-backprojection.md` for the full honesty boundary and a worked walkthrough. `focus_at_point` exploits the evenly-spaced-by-construction frequency sweep (an arithmetic progression in per-term phase) to evaluate each pose's phasor once and advance it by a fixed complex-multiply step per frequency instead of one `sin`/`cos` pair per frequency — **MEASURED ~4.4-4.5x faster** (criterion regression detection, p < 0.001) than the first-shipped direct-computation version, proven equivalent (not just faster) to an independently reimplemented reference across four sweep sizes and on-/off-target points. 25 tests (22 unit + 3 integration), 0 failed, clippy-clean; MEASURED backprojection throughput ~1.7-2.3M voxels/sec (criterion, 21 poses × 32 freq steps).
 - **HOMECORE platform runtime completion — secure native/Wasmtime plugins, authenticated HAP IP, expanded Home Assistant APIs, durable restoration/migration, and voice protocols.** `homecore-server` now owns deterministic compiled-in native plugin registration plus explicitly configured, path-bounded, Ed25519 publisher-verified Wasm packages executed through Wasmtime with setup/state-change/teardown lifecycle; arbitrary native dynamic libraries remain intentionally unsupported. The optional HAP server implements persisted accessory identity and controller records, SRP-6a Pair-Setup M1–M6, X25519/Ed25519 Pair-Verify M1–M4, HKDF-SHA512/ChaCha20-Poly1305 record framing, authenticated/admin endpoint gates, replay/tamper closure, live entity synchronization, and paired-state `_hap._tcp` mDNS updates (45 focused tests; external Apple certification is not claimed). Startup restores device/entity registries and deterministic latest recorder states before plugins, and migration now atomically preserves forward-compatible device/config-entry fields. The HA-compatible surface adds events, templates, config checks, components, registries, history/logbook with SQL-enforced global response bounds, calendar/camera provider routes, and modern WebSocket negotiation while retaining a machine-readable limitations matrix for integration-specific behavior. Assist adds bounded PCM16, async STT/TTS contracts, an end-to-end speech pipeline, and an authenticated satellite session protocol; real deployments still provide the speech engines.
 - **`ruview-unified` increment 3 — Gaussian update-loop completion, separable delay-Doppler, and property-tested boundary hardening.** (1) `GaussianMap::merge_overlapping` (ADR-275 step 5: mutual-Mahalanobis + semantic-compatibility dedup catching drift the insert-time gate misses) and lifetime-aware decay (`τ_eff = τ·(1+ln(1+lifetime/τ))` — confirmed structures outlive transients at equal nominal τ). (2) `delay_doppler_map` reimplemented separably (`O(B²S+S²B)`), proven equivalent to the direct reference to <1e-10 and **measured 8.3× faster** (520 µs vs 4.34 ms at 56×8). (3) `tests/security_boundaries.rs` — 8 `proptest` properties over the boundary surfaces (arbitrary values incl. NaN/±inf via `f64::from_bits`) that found and fixed three input-controlled defects: a BLE-CS phase-unwrap infinite loop on non-finite phases and an ~1e299-iteration loop on finite-huge phases (now O(1) modular unwrap + plausibility bound), and a subnormal Gaussian scale overflowing `1/σ²` to NaN density (now physical σ/occupancy bounds). (4) New criterion benches for all increment-2 hot paths (`to_canonical` 38 µs, `ble_cs_range` 481 ns, AoI planner 647 ns/200 regions, coherent fusion 1.5 µs/32 members, factorized pose 521 ns). ruview-unified now 98 tests (87 lib + 3 acceptance + 8 security), 0 failed, clippy-clean.
@@ -704,6 +734,38 @@ Model release (no new firmware binary). Firmware remains at v0.6.0-esp32.
 
 ### Verified
 - Real hardware: ESP32-S3 (COM7) WiFi CSI + ESP32-C6/MR60BHA2 (COM4) 60 GHz mmWave running concurrently. HR=75 bpm, BR=25/min at 52 cm range. All 11 QEMU CI jobs green.
+
+## [0.8.16-esp32] - 2026-10-26
+
+- Keep the container entrypoint on LF in Windows checkouts so the built Linux
+  image can start successfully.
+- Restrict MR60BHA2 probe identification to its heart-rate, distance, and
+  presence frame types. Ambiguous LD6002B/LD6004 work-mode, low-power, and
+  target headers no longer establish an MR60BHA2 identity (#2136).
+- Generate test ES256 keys with the existing Ring backend, removing the
+  obsolete test-only curve dependency. Update constant-time arithmetic and
+  Tokio to patched releases. Checksum-verified ZIP and Wasmtime cache compatibility
+  patches retain upstream source code and use Zstandard 0.14.3. The existing
+  audit policy is unchanged; the new upstream archive/cache test gates
+  exercise the patched dependencies.
+- Host tests and firmware builds validate the probe change. A live MR60BHA2
+  kit was read through its existing ESPHome API; that checks the network
+  integration, not the new firmware image or sensing accuracy. Firmware
+  bundles remain prerelease builds without new physical-board qualification.
+
+## [0.8.15-esp32] - 2026-10-21
+
+### ESP32 CSI input and onboarding corrections
+
+- Process the bounded prefix of S3 STBC CSI frames instead of discarding the
+  entire frame and starving edge vitals/features (#2286). Raw CSI is unchanged.
+- Bound gateway ping timeouts to one probe interval and document that APs
+  transmitting ICMP at 802.11b rates require a separate CSI traffic source
+  (#2287). Add a duration/rate-bounded LAN UDP traffic helper.
+- Prepare the USB serial/JTAG driver before starting IDF 6 onboarding, reuse
+  an installed driver, and propagate initialization failures (#2302).
+- Add production-code host regressions. These software checks do not establish
+  physical-board qualification, sensing accuracy, or medical validity.
 
 ## [v0.4.3-esp32] — 2026-03-15
 

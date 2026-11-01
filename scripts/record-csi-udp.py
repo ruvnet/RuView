@@ -18,24 +18,45 @@ import time
 from datetime import datetime, timezone
 
 
+# ADR-018 header, as written by csi_collector.c and read by esp32_parser.rs:
+# magic u32 @0, node_id @4, n_antennas @5, n_subcarriers u16 @6, freq_mhz u32 @8,
+# sequence u32 @12, rssi i8 @16, noise_floor i8 @17, ppdu_type @18, flags @19,
+# then n_antennas * n_subcarriers int8 I/Q pairs from @20.
+CSI_MAGIC = 0xC5110001
+CSI_HDR_FMT = "<IBBHIIbbBB"
+CSI_HDR_SIZE = struct.calcsize(CSI_HDR_FMT)  # 20 bytes
+
+
+def freq_to_channel(freq_mhz):
+    """802.11 channel number for a 2.4/5 GHz centre frequency (0 if unknown)."""
+    if freq_mhz == 2484:
+        return 14
+    if 2412 <= freq_mhz <= 2472:
+        return (freq_mhz - 2407) // 5
+    if 5000 <= freq_mhz <= 5900:
+        return (freq_mhz - 5000) // 5
+    return 0
+
+
 def parse_csi_packet(data):
-    """Parse ADR-018 binary CSI packet into dict."""
-    if len(data) < 8:
+    """Parse ADR-018 binary CSI packet into dict, or None if it is not one."""
+    if len(data) < CSI_HDR_SIZE:
         return None
 
-    # ADR-018 header: [magic(2), len(2), node_id(1), seq(1), rssi(1), channel(1), iq_data...]
-    # Simplified: extract what we can from the raw packet
-    node_id = data[4] if len(data) > 4 else 0
-    rssi = struct.unpack('b', bytes([data[6]]))[0] if len(data) > 6 else 0
-    channel = data[7] if len(data) > 7 else 0
+    (magic, node_id, n_antennas, n_sub, freq_mhz, seq,
+     rssi, noise_floor, ppdu_type, flags) = struct.unpack_from(CSI_HDR_FMT, data)
+    # Same antenna/subcarrier limits as esp32_parser.rs
+    if magic != CSI_MAGIC or not 1 <= n_antennas <= 4 or n_sub > 256:
+        return None
 
-    # IQ data starts at offset 8
-    iq_data = data[8:] if len(data) > 8 else b''
-    n_subcarriers = len(iq_data) // 2  # I,Q pairs
+    n_pairs = n_antennas * n_sub
+    iq_data = data[CSI_HDR_SIZE:CSI_HDR_SIZE + n_pairs * 2]
+    if len(iq_data) < n_pairs * 2:
+        return None
 
     # Compute amplitudes
     amplitudes = []
-    for i in range(0, len(iq_data) - 1, 2):
+    for i in range(0, len(iq_data), 2):
         I = struct.unpack('b', bytes([iq_data[i]]))[0]
         Q = struct.unpack('b', bytes([iq_data[i + 1]]))[0]
         amplitudes.append(round((I * I + Q * Q) ** 0.5, 2))
@@ -46,9 +67,16 @@ def parse_csi_packet(data):
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "ts_ns": time.time_ns(),
         "node_id": node_id,
+        "seq": seq,
         "rssi": rssi,
-        "channel": channel,
-        "subcarriers": n_subcarriers,
+        "noise_floor": noise_floor,
+        "freq_mhz": freq_mhz,
+        "channel": freq_to_channel(freq_mhz),
+        "ppdu_type": ppdu_type,
+        "flags": flags,
+        "n_antennas": n_antennas,
+        "n_subcarriers": n_sub,
+        "subcarriers": n_pairs,  # I/Q pairs in iq_hex (n_antennas * n_subcarriers)
         "amplitudes": amplitudes,
         "iq_hex": iq_data.hex(),
     }

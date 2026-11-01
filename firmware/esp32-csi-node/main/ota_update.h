@@ -9,7 +9,10 @@
 #ifndef OTA_UPDATE_H
 #define OTA_UPDATE_H
 
+#include <stdbool.h>
+
 #include "esp_err.h"
+#include "esp_http_server.h"  /* httpd_req_t, for ota_auth_check() */
 
 /**
  * Initialize the OTA update HTTP server.
@@ -29,5 +32,24 @@ esp_err_t ota_update_init(void);
  * @return ESP_OK on success.
  */
 esp_err_t ota_update_init_ex(void **out_server);
+
+/**
+ * Validate the Authorization: Bearer <psk> header against the provisioned OTA
+ * PSK, in constant time. Fails closed when no PSK is provisioned.
+ *
+ * Shared with config_api.c so remote configuration is gated by exactly the
+ * same secret and the same comparison as firmware upload -- a second
+ * implementation would be a second place for the check to rot.
+ */
+bool ota_auth_check(httpd_req_t *req);
+
+/**
+ * Log the httpd task's stack high-water mark (bytes never used). Call from an
+ * HTTP handler on the OTA server after its deepest work, so the configured
+ * CONFIG_OTA_HTTPD_STACK_SIZE is backed by a measured margin.
+ *
+ * @param what  Short label for the handler, e.g. "POST /ota".
+ */
+void ota_update_log_httpd_stack(const char *what);
 
 #endif /* OTA_UPDATE_H */

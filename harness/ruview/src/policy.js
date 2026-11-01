@@ -11,6 +11,19 @@ export const TOOL_POLICY = Object.freeze({
   ruview_guidance: { class: 'read', readOnly: true },
   ruview_spaces_list: { class: 'external-read', readOnly: true, requiredGrant: 'credential-use', openWorld: true, usesCredentials: true, mayRefreshCredentials: true },
   ruview_memory_search: { class: 'read', readOnly: true },
+  ruview_kernel_selftest: { class: 'read', readOnly: true },
+  ruview_doctor: { class: 'read', readOnly: true },
+  ruview_firmware_plan: { class: 'read', readOnly: true },
+  ruview_firmware_ports: { class: 'hardware-read', readOnly: true, hardware: true },
+  ruview_train_plan: { class: 'read', readOnly: true },
+  ruview_train_gate: { class: 'read', readOnly: true },
+  ruview_train: { class: 'workspace-write', writesWorkspace: true, confirmField: 'confirm' },
+  ruview_devices_scan: { class: 'hardware-read', readOnly: true, requiredGrant: 'device-access' },
+  ruview_esp32_capture: { class: 'network-read', readOnly: true, requiredGrant: 'device-access' },
+  ruview_mmwave_read: { class: 'hardware-read', readOnly: true, requiredGrant: 'device-access' },
+  ruview_lidar_read: { class: 'hardware-read', readOnly: true, requiredGrant: 'device-access', openWorld: true },
+  ruview_host_list: { class: 'read', readOnly: true },
+  ruview_host_run: { class: 'remote-read', readOnly: true, requiredGrant: 'remote-host', openWorld: true },
 });
 
 function typeMatches(value, type) {
@@ -42,6 +55,7 @@ export function validateArguments(schema, value, path = '$') {
   if (schema.type === 'string') {
     if (schema.minLength !== undefined && value.length < schema.minLength) errors.push(`${path} is too short`);
     if (schema.maxLength !== undefined && value.length > schema.maxLength) errors.push(`${path} is too long`);
+    if (schema.pattern !== undefined && !new RegExp(schema.pattern).test(value)) errors.push(`${path} has an invalid format`);
   }
   if (schema.type === 'number') {
     if (schema.minimum !== undefined && value < schema.minimum) errors.push(`${path} is below minimum`);

@@ -1,0 +1,9 @@
+# Built by `npm run build` (ADR-368); never committed. CI builds, checksums,
+# and packs them from source.
+wasm/*.wasm
+wasm/SHA256SUMS
+native/*.node
+native/SHA256SUMS
+node_modules/
+*.tgz
+dist-pack/

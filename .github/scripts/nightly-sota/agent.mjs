@@ -135,6 +135,10 @@ async function runProcess(command, args, {
         resolve(result);
       });
     });
+    // A child that never reads stdin (e.g. `git check-ignore`) may exit and
+    // close the pipe before this write flushes; the resulting EPIPE is not a
+    // failure of the command, whose real outcome the 'close' handler reports.
+    child.stdin.on('error', () => {});
     child.stdin.end(input);
   });
 }

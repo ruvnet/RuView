@@ -1,0 +1,4 @@
+# Unified-diff context lines intentionally contain a leading space before tabs.
+*.patch text eol=lf whitespace=-blank-at-eol,-space-before-tab
+*.md text eol=lf
+.gitattributes text eol=lf

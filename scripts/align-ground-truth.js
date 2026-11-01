@@ -68,11 +68,22 @@ Options:
   process.exit(args.help ? 0 : 1);
 }
 
-const WINDOW_FRAMES     = parseInt(args['window-frames'], 10);
-const WINDOW_MS         = parseInt(args['window-ms'], 10);
-const MIN_CAMERA_FRAMES = parseInt(args['min-camera-frames'], 10);
-const MIN_CONFIDENCE    = parseFloat(args['min-confidence']);
-const CLOCK_OFFSET_MS   = parseFloat(args['clock-offset-ms']);
+function numericOption(name, accepts, requirement) {
+  const raw = args[name];
+  const value = raw.trim() === '' ? NaN : Number(raw);
+  if (!Number.isFinite(value) || !accepts(value)) {
+    console.error(`ERROR: --${name} must be ${requirement}; received ${JSON.stringify(raw)}.`);
+    process.exit(2);
+  }
+  return value;
+}
+
+const positiveInteger = value => Number.isSafeInteger(value) && value > 0;
+const WINDOW_FRAMES = numericOption('window-frames', positiveInteger, 'a positive integer');
+const WINDOW_MS = numericOption('window-ms', value => value >= 0, 'a finite nonnegative number');
+const MIN_CAMERA_FRAMES = numericOption('min-camera-frames', positiveInteger, 'a positive integer');
+const MIN_CONFIDENCE = numericOption('min-confidence', value => value >= 0 && value <= 1, 'a finite number from 0 to 1');
+const CLOCK_OFFSET_MS = numericOption('clock-offset-ms', () => true, 'a finite number');
 const NUM_KEYPOINTS     = 17; // COCO 17-keypoint format
 
 // ---------------------------------------------------------------------------

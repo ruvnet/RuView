@@ -21,7 +21,11 @@ from typing import Any
 
 import pytest
 
-from wifi_densepose.client import RuViewMqttClient
+from wifi_densepose.client import (
+    RuViewMqttClient,
+    SemanticPrimitive,
+    SemanticPrimitiveListener,
+)
 from wifi_densepose.client.mqtt import _topic_matches
 
 
@@ -183,6 +187,30 @@ def test_multiple_handlers_for_overlapping_patterns_all_fire() -> None:
 
     assert len(a_received) == 1
     assert len(b_received) == 1
+
+
+def test_documented_ha_state_pattern_subscribes_and_reaches_listener() -> None:
+    """The subscription shown in python/README.md and the
+    SemanticPrimitiveListener docstring. paho rejects mid-level `+`
+    (e.g. `wifi_densepose_+`) with ValueError on subscribe."""
+    listener = SemanticPrimitiveListener()
+    received: list[Any] = []
+    listener.on(SemanticPrimitive.SomeoneSleeping, received.append)
+
+    c = RuViewMqttClient()
+    c.on_message("homeassistant/+/+/+/state", listener.handle_mqtt_message)
+
+    # The real paho client validates the filter before it checks for a
+    # connection, so this exercises the same subscribe() the broker path runs.
+    c._on_connect(c._client, None, None, 0)
+
+    c._on_message(None, None, _fake_message(
+        "homeassistant/binary_sensor/wifi_densepose_aabb/someone_sleeping/state",
+        {"state": "ON", "confidence": 0.9},
+    ))
+    assert [(e.kind, e.node_id, e.state) for e in received] == [
+        (SemanticPrimitive.SomeoneSleeping, "aabb", "ON"),
+    ]
 
 
 # ─── on_connect path ─────────────────────────────────────────────────

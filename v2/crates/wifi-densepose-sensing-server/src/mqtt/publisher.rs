@@ -11,21 +11,22 @@
 //!    install LWT on every entity's availability topic, set keepalive.
 //! 2. **Discovery**: emit one retained discovery `config` topic per
 //!    enabled entity per known node. Re-emit every `refresh_secs`.
-//! 3. **Availability heartbeat**: publish `online` retained on every
-//!    availability topic on connect, and re-publish every 30 s so HA can
+//! 3. **Availability**: per entity, `online` only while the server has a
+//!    source for it (see [`PublishPlanner`]); transitions publish at once
+//!    and every availability topic is re-published every 30 s so HA can
 //!    detect zombie sessions.
-//! 4. **State publication**: subscribe to the broadcast channel; for
-//!    each inbound message project it into a [`VitalsSnapshot`], pass
-//!    through the privacy filter, gate by [`RateLimiter`], encode via
-//!    [`StateEncoder`], publish.
+//! 4. **State publication**: for each [`VitalsSnapshot`] from the bridge,
+//!    [`PublishPlanner`] runs the semantic primitives, applies the privacy
+//!    filter, the on-change gate (binary states) and the rate limiter
+//!    (sensors), and returns the messages to publish.
 //!
 //! ## Reconnect strategy
 //!
 //! `rumqttc::EventLoop` reconnects automatically with backoff. After a
 //! successful reconnect we re-publish discovery (retained config topics
 //! survive at the broker, but a fresh HA install that came online after
-//! we last refreshed needs them) and reset the rate limiter so the
-//! first post-reconnect sample emits promptly.
+//! we last refreshed needs them) and reset the planner so every state and
+//! availability is re-sent promptly.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -60,7 +61,8 @@ macro_rules! otel_warn {
 
 use super::config::{MqttConfig, TlsConfig};
 use super::discovery::{DiscoveryBuilder, EntityKind};
-use super::state::{RateLimiter, StateEncoder, StateMessage, VitalsSnapshot};
+use super::planner::PublishPlanner;
+use super::state::{StateMessage, VitalsSnapshot};
 
 /// Heartbeat cadence for availability re-publication (per §3.6).
 const AVAILABILITY_HEARTBEAT: Duration = Duration::from_secs(30);
@@ -146,22 +148,6 @@ fn build_transport(tls: &TlsConfig) -> Transport {
     Transport::tls_with_default_config()
 }
 
-/// One node's per-entity availability topics, pre-computed at startup so
-/// the heartbeat loop doesn't allocate per tick.
-struct NodeAvailability {
-    online_topics: Vec<String>,
-}
-
-impl NodeAvailability {
-    fn for_builder(b: &DiscoveryBuilder<'_>, entities: &[EntityKind]) -> Self {
-        let online_topics = entities
-            .iter()
-            .map(|e| b.availability_topic(*e))
-            .collect();
-        Self { online_topics }
-    }
-}
-
 /// Spawn the MQTT publisher background task. Returns the join handle so
 /// the caller can `await` it on shutdown. Errors during connection are
 /// retried internally by `rumqttc::EventLoop`.
@@ -229,27 +215,21 @@ async fn run(
     let (client, mut eventloop): (AsyncClient, EventLoop) =
         AsyncClient::builder(opts).capacity(256).build();
 
-    let entities = DiscoveryBuilder::enabled_entities(
-        cfg.privacy_mode,
-        cfg.publish_pose,
-        &[], // no_semantic — wire from cli::Args in P3.5
-    );
+    let mut planner = PublishPlanner::new(&cfg);
+    if cfg.publish_pose {
+        otel_warn!(
+            "[mqtt] --mqtt-publish-pose ignored: the sensing broadcast carries no measured pose \
+             keypoints, so no pose entity is announced (issue #2085)"
+        );
+    }
 
-    // #898: one Home-Assistant device per node. Discovery + availability are
-    // published lazily the first time a snapshot for a given node_id arrives;
-    // each node's builder + availability are retained here for heartbeats and
-    // the offline LWT. (Previously a single hard-coded builder collapsed every
-    // node into one device.)
-    // Issue #1555: the third tuple element is the Instant this node's last
-    // broadcast snapshot arrived, so the heartbeat below can tell a node that
-    // has genuinely gone quiet from one that's just between publish-rate
-    // ticks, and stop asserting "online" for it.
-    let mut nodes: std::collections::HashMap<
-        String,
-        (OwnedDiscoveryBuilder, NodeAvailability, Instant),
-    > = std::collections::HashMap::new();
+    // #898: one Home-Assistant device per node. Discovery is published lazily
+    // the first time a snapshot for a given node_id arrives. The Instant is
+    // when that node's last snapshot arrived (issue #1555), so the heartbeat
+    // can tell a node that has gone quiet from one between publish ticks.
+    let mut nodes: std::collections::HashMap<String, (OwnedDiscoveryBuilder, Instant)> =
+        std::collections::HashMap::new();
 
-    let mut rate_limiter = RateLimiter::new();
     let mut last_heartbeat = Instant::now();
     let mut last_refresh = Instant::now();
     let start_instant = Instant::now();
@@ -258,7 +238,7 @@ async fn run(
         host = %cfg.host,
         port = cfg.port,
         prefix = %cfg.discovery_prefix,
-        entities = entities.len(),
+        entities = planner.entities().len(),
         privacy = cfg.privacy_mode,
         "[mqtt] publisher started",
     );
@@ -274,7 +254,7 @@ async fn run(
                     Ok(_) => {}
                     Err(e) => {
                         otel_error!("[mqtt] event loop error, will reconnect: {e}");
-                        rate_limiter.reset();
+                        planner.reset();
                         // Brief backoff before next poll attempt.
                         tokio::time::sleep(Duration::from_millis(500)).await;
                     }
@@ -284,29 +264,24 @@ async fn run(
             // Periodic heartbeat / discovery refresh.
             _ = tokio::time::sleep(Duration::from_secs(1)) => {
                 if last_heartbeat.elapsed() >= AVAILABILITY_HEARTBEAT {
-                    for (node_id, (_, na, last_seen)) in &nodes {
-                        // Issue #1555: a node whose snapshots have actually
-                        // stopped arriving must go `offline`, not keep
-                        // reporting `online` on a fixed timer regardless of
-                        // whether its data is still flowing — a frozen HA
-                        // entity that still shows "available" is worse than
-                        // one correctly marked unavailable.
-                        let state = if last_seen.elapsed() < NODE_SNAPSHOT_STALE_AFTER {
-                            "online"
-                        } else {
-                            "offline"
-                        };
-                        if let Err(e) = publish_availability(&client, na, state).await {
+                    let now = start_instant.elapsed();
+                    for (node_id, (nb, last_seen)) in &nodes {
+                        // Issue #1555: a node whose snapshots have stopped
+                        // arriving goes `offline` rather than reporting
+                        // `online` on a fixed timer.
+                        let fresh = last_seen.elapsed() < NODE_SNAPSHOT_STALE_AFTER;
+                        let b = nb.as_borrowed();
+                        let msgs = planner.availability(&b, node_id, fresh, now, true);
+                        if let Err(e) = publish_messages(&client, &msgs).await {
                             otel_warn!("[mqtt] heartbeat publish failed for node {node_id}: {e}");
                         }
                     }
                     last_heartbeat = Instant::now();
                 }
                 if last_refresh.elapsed() >= Duration::from_secs(cfg.refresh_secs) {
-                    for (nb, _, _) in nodes.values() {
-                        if let Err(e) =
-                            publish_all_discovery(&client, &nb.as_borrowed(), &entities).await
-                        {
+                    for (nb, _) in nodes.values() {
+                        let b = nb.as_borrowed();
+                        if let Err(e) = publish_all_discovery(&client, &b, planner.entities()).await {
                             otel_warn!("[mqtt] discovery refresh failed: {e}");
                         }
                     }
@@ -318,32 +293,25 @@ async fn run(
             recv = state_rx.recv() => {
                 match recv {
                     Ok(snap) => {
-                        let elapsed = start_instant.elapsed();
                         let now = Instant::now();
                         // #898: on first sight of a node_id, publish that
-                        // node's discovery + availability; then route its
-                        // state to per-node topics.
-                        if !nodes.contains_key(&snap.node_id) {
+                        // node's discovery; then route its state to per-node
+                        // topics.
+                        if let Some(entry) = nodes.get_mut(&snap.node_id) {
+                            entry.1 = now;
+                        } else {
                             let nb = builder_owned.for_node(&snap.node_id);
-                            let borrowed = nb.as_borrowed();
-                            if let Err(e) =
-                                publish_all_discovery(&client, &borrowed, &entities).await
-                            {
+                            let b = nb.as_borrowed();
+                            if let Err(e) = publish_all_discovery(&client, &b, planner.entities()).await {
                                 otel_warn!("[mqtt] node {} discovery failed: {e}", snap.node_id);
                             }
-                            let na = NodeAvailability::for_builder(&borrowed, &entities);
-                            if let Err(e) = publish_availability(&client, &na, "online").await {
-                                otel_warn!("[mqtt] node {} availability failed: {e}", snap.node_id);
-                            }
-                            nodes.insert(snap.node_id.clone(), (nb, na, now));
-                        } else if let Some(entry) = nodes.get_mut(&snap.node_id) {
-                            // Issue #1555: record that this node is still
-                            // alive so the heartbeat above doesn't have to
-                            // guess from a fixed timer.
-                            entry.2 = now;
+                            nodes.insert(snap.node_id.clone(), (nb, now));
                         }
                         let borrowed = nodes[&snap.node_id].0.as_borrowed();
-                        publish_snapshot(&client, &borrowed, &snap, &cfg, &mut rate_limiter, elapsed).await;
+                        let msgs = planner.on_snapshot(&borrowed, &snap, start_instant.elapsed());
+                        if let Err(e) = publish_messages(&client, &msgs).await {
+                            otel_warn!("[mqtt] node {} state publish failed: {e}", snap.node_id);
+                        }
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         warn!("[mqtt] lagged behind broadcast by {n} messages — dropped");
@@ -351,8 +319,9 @@ async fn run(
                     Err(broadcast::error::RecvError::Closed) => {
                         info!("[mqtt] broadcast channel closed, draining");
                         // Publish offline for every known node before exit.
-                        for (_, na, _) in nodes.values() {
-                            let _ = publish_availability(&client, na, "offline").await;
+                        for (nb, _) in nodes.values() {
+                            let msgs = planner.offline(&nb.as_borrowed());
+                            let _ = publish_messages(&client, &msgs).await;
                         }
                         let _ = client.disconnect().await;
                         return;
@@ -384,71 +353,11 @@ async fn publish_all_discovery(
     Ok(())
 }
 
-async fn publish_availability(
-    client: &AsyncClient,
-    avail: &NodeAvailability,
-    state: &str,
-) -> Result<(), ClientError> {
-    for topic in &avail.online_topics {
-        client
-            .publish(
-                topic,
-                state,
-                PublishOptions::new(QoS::AtLeastOnce).retained(),
-            )
-            .await?;
+async fn publish_messages(client: &AsyncClient, msgs: &[StateMessage]) -> Result<(), ClientError> {
+    for m in msgs {
+        publish_state(client, m).await?;
     }
     Ok(())
-}
-
-async fn publish_snapshot(
-    client: &AsyncClient,
-    b: &DiscoveryBuilder<'_>,
-    snap: &VitalsSnapshot,
-    cfg: &MqttConfig,
-    rl: &mut RateLimiter,
-    elapsed: Duration,
-) {
-    let encoder = StateEncoder { builder: b };
-
-    // Binary: presence (change-only — caller is responsible for detecting
-    // change, but we always publish here because broadcast already debounces
-    // and HA will dedup retained equal values harmlessly).
-    if let Some(m) = encoder.boolean(EntityKind::Presence, snap.presence) {
-        let _ = publish_state(client, &m).await;
-    }
-
-    // Event: fall.
-    if snap.fall_detected {
-        if let Some(m) = encoder.event(
-            EntityKind::FallDetected,
-            "fall_detected",
-            snap.timestamp_ms,
-            Some(snap.vital_confidence),
-        ) {
-            let _ = publish_state(client, &m).await;
-        }
-    }
-
-    // Numeric rate-limited entities. Rate limiting is per (node, entity)
-    // (ADR-297, issue #1541) so nodes never starve one another.
-    let node = snap.node_id.as_str();
-    for (entity, allowed) in [
-        (EntityKind::PersonCount, rl.allow(node, EntityKind::PersonCount, elapsed, &cfg.rates)),
-        (EntityKind::HeartRate, !cfg.privacy_mode && rl.allow(node, EntityKind::HeartRate, elapsed, &cfg.rates)),
-        (EntityKind::BreathingRate, !cfg.privacy_mode && rl.allow(node, EntityKind::BreathingRate, elapsed, &cfg.rates)),
-        (EntityKind::MotionLevel, rl.allow(node, EntityKind::MotionLevel, elapsed, &cfg.rates)),
-        (EntityKind::MotionEnergy, rl.allow(node, EntityKind::MotionEnergy, elapsed, &cfg.rates)),
-        (EntityKind::PresenceScore, rl.allow(node, EntityKind::PresenceScore, elapsed, &cfg.rates)),
-        (EntityKind::Rssi, rl.allow(node, EntityKind::Rssi, elapsed, &cfg.rates)),
-    ] {
-        if !allowed {
-            continue;
-        }
-        if let Some(m) = encoder.numeric(entity, snap) {
-            let _ = publish_state(client, &m).await;
-        }
-    }
 }
 
 async fn publish_state(client: &AsyncClient, m: &StateMessage) -> Result<(), ClientError> {

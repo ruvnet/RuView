@@ -11,7 +11,7 @@ use wifi_densepose_engine::StreamingEngine;
 use wifi_densepose_geo::types::GeoRegistration;
 use wifi_densepose_signal::hardware_norm::{CanonicalCsiFrame, HardwareType};
 use wifi_densepose_signal::ruvsense::fusion_quality::CalibrationId;
-use wifi_densepose_signal::ruvsense::MultiBandCsiFrame;
+use wifi_densepose_signal::ruvsense::{MultiBandCsiFrame, PhaseReference};
 
 fn node_frame(node_id: u8, ts_us: u64, n_sub: usize) -> MultiBandCsiFrame {
     MultiBandCsiFrame {
@@ -24,6 +24,7 @@ fn node_frame(node_id: u8, ts_us: u64, n_sub: usize) -> MultiBandCsiFrame {
         }],
         frequencies_mhz: vec![2412],
         coherence: 0.9,
+        phase_reference: PhaseReference::NodeLocal,
     }
 }
 

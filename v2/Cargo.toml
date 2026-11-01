@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
+    # Checksum-verified dependency patches; keep their upstream tests in CI.
+    "vendor/security/zip-0.6.6",
+    "vendor/security/wasmtime-internal-cache-36.0.19",
     "crates/wifi-densepose-core",
     "crates/wifi-densepose-physics", # ADR-323 bounded pose assessment/correction
     "crates/wifi-densepose-signal",
@@ -21,6 +24,8 @@ members = [
     "crates/wifi-densepose-mat",
     "crates/wifi-densepose-train",
     "crates/wifi-densepose-sensing-server",
+    # ADR-266/267: MT7981 vendor CSI (mt76) -> MTC1 bridge.
+    "crates/wifi-densepose-mtk-bridge",
     "crates/wifi-densepose-aether",    # ADR-185 §13 — AETHER pure-compute leaf (std-only)
     "crates/wifi-densepose-privshield", # ADR-291 — VEIL privacy shield (compliant-waveform anti-sensing; std-only leaf)
     "crates/wifi-densepose-wifiscan",
@@ -120,9 +125,16 @@ members = [
     "crates/ruview-counterfactual",# ADR-313 counterfactual spatial inference
     "crates/ruview-infogain",      # ADR-314 information-gain scheduler
     "crates/ruview-active",        # ADR-309 active sensing control
+    "crates/ruview-survey",        # ADR-381 node self-survey (check mode)
     # ADR-324 — clean-room Kooima off-axis (head-coupled perspective) projection.
     # Dependency-free native core; wasm-bindgen surface only on wasm32.
     "crates/ruview-offaxis",
+    # ADR-368 — portable compute kernel for the `@ruvnet/ruview-kernel` npm
+    # package: one bounded JSON ABI, wasm32 (zero-import) + napi-rs transports.
+    "crates/ruview-kernel",
+    # spatial.evidence.v1 emitter (WeftOS ADR-107 wire contract): RF Gaussians
+    # and link measurements as JSONL evidence. Leaf over ruview-unified.
+    "crates/ruview-spatial-evidence",
     # ADR-348 — RuForecast extracted to the ruvnet/RuForecast submodule
     # (see crates/ruforecast in the exclude list below); path-deps only.
 ]
@@ -136,6 +148,9 @@ members = [
 exclude = [
     "crates/wifi-densepose-wasm-edge",
     "crates/homecore-plugin-example",
+    # ADR-368: napi-rs transport for ruview-kernel. Own workspace so napi never
+    # enters `cargo test --workspace`. Built by harness/ruview-kernel scripts.
+    "crates/ruview-kernel-napi",
     "crates/worldgraph",   # ruvnet/worldgraph submodule — its own workspace (geo/worldgraph/worldmodel)
     "crates/ruforecast",   # ruvnet/RuForecast submodule — its own workspace (ruforecast-core/model/train)
     # LOCAL-DEV-ONLY: path-depends on an absolute, unpublished ruvnet/autogenous
@@ -256,6 +271,25 @@ wiremock = "0.5"
 # 0.1.0 was yanked; upgrade to latest 0.3/0.2 releases which pull in
 # quinn-proto >=0.11.14 (fixes RUSTSEC-2026-0037) and
 # rustls-webpki >=0.103.13 (fixes RUSTSEC-2026-0049/0098/0099/0104).
+#
+# The transitive security floors live in Cargo.lock, which the gating
+# Security Scanning job audits: quinn-proto >=0.11.18
+# (RUSTSEC-2026-0338/0339/0340/0341/0342), rustls >=0.23.46
+# (RUSTSEC-2026-0346/0347/0348/0349) and wasmtime >=36.0.19
+# (RUSTSEC-2026-0363/0379/0380). A plain `cargo update` can walk them backwards;
+# keep the lockfile at or above these until the direct requirements
+# enforce them.
+#
+# The TLS trust anchors carry floors for the same reason: rustls-webpki
+# >=0.103.16 (RUSTSEC-2026-0382) rejects certificate paths that contain
+# distrusted emSign intermediate public keys, and webpki-roots >=1.0.10 /
+# webpki-root-certs >=1.0.10 (RUSTSEC-2026-0381/0383) drop the emSign ECC
+# Root CA - G3 anchor that made those paths reachable. The private keys of
+# the distrusted emSign intermediates are public, so an affected build can
+# be talked into accepting a forged certificate chain. Those crates are
+# transitive too, so the lockfile is the only place the floor can live:
+# bump them explicitly instead of letting a plain `cargo update` walk them
+# backwards.
 midstreamer-quic = "0.3"
 midstreamer-scheduler = "0.2"
 midstreamer-temporal-compare = "0.2"
@@ -306,3 +340,10 @@ strip = false
 [profile.bench]
 inherits = "release"
 debug = true
+
+# Narrow, checksum-verified parent manifest patches. Source/API code is
+# unchanged; both parents use the fixed zstd 0.14.3 implementation.
+# See each directory's RUVIEW-PROVENANCE.md for archive digests and scope.
+[patch.crates-io]
+zip-legacy = { package = "zip", path = "vendor/security/zip-0.6.6" }
+wasmtime-internal-cache = { path = "vendor/security/wasmtime-internal-cache-36.0.19" }

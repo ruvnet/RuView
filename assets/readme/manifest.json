@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "style": "RuView spatial v4: navy glass, electric blue, lime and amber",
+  "motion": "Decorative CSS; prefers-reduced-motion supported; no script or remote dependencies",
+  "assets": [
+    {
+      "file": "assets/readme/hero-spatial-v6.svg",
+      "title": "RuView: invisible signals, visible possibility",
+      "target": "docs/user-guide.md",
+      "width": 1200,
+      "height": 450
+    },
+    {
+      "file": "assets/readme/nav-start-spatial-v4.svg",
+      "title": "Start here",
+      "target": "docs/user-guide.md",
+      "width": 180,
+      "height": 116
+    },
+    {
+      "file": "assets/readme/nav-hardware-spatial-v4.svg",
+      "title": "Hardware",
+      "target": "firmware/esp32-csi-node/README.md",
+      "width": 180,
+      "height": 116
+    },
+    {
+      "file": "assets/readme/nav-models-spatial-v4.svg",
+      "title": "Models",
+      "target": "https://huggingface.co/ruvnet/wifi-densepose-pretrained",
+      "width": 180,
+      "height": 116
+    },
+    {
+      "file": "assets/readme/nav-agents-spatial-v4.svg",
+      "title": "AI toolkit",
+      "target": "harness/ruview/README.md",
+      "width": 180,
+      "height": 116
+    },
+    {
+      "file": "assets/readme/nav-home-spatial-v4.svg",
+      "title": "Smart home",
+      "target": "docs/integrations/home-assistant.md",
+      "width": 180,
+      "height": 116
+    },
+    {
+      "file": "assets/readme/nav-seed-spatial-v4.svg",
+      "title": "Cognitum",
+      "target": "https://cognitum.one/seed",
+      "width": 180,
+      "height": 116
+    },
+    {
+      "file": "assets/readme/feature-presence-spatial-v4.svg",
+      "title": "Presence & motion",
+      "target": "docs/user-guide.md",
+      "width": 580,
+      "height": 276
+    },
+    {
+      "file": "assets/readme/feature-vitals-spatial-v4.svg",
+      "title": "Breathing & vital signals",
+      "target": "v2/crates/wifi-densepose-signal/README.md",
+      "width": 580,
+      "height": 276
+    },
+    {
+      "file": "assets/readme/feature-pose-spatial-v6.svg",
+      "title": "Pose research",
+      "target": "docs/benchmarks/pose-estimation-cog.md",
+      "width": 580,
+      "height": 276
+    },
+    {
+      "file": "assets/readme/feature-edge-spatial-v4.svg",
+      "title": "Edge sensor mesh",
+      "target": "firmware/esp32-csi-node/README.md",
+      "width": 580,
+      "height": 276
+    },
+    {
+      "file": "assets/readme/feature-automation-spatial-v4.svg",
+      "title": "Local automation",
+      "target": "docs/integrations/home-assistant.md",
+      "width": 580,
+      "height": 276
+    },
+    {
+      "file": "assets/readme/feature-agents-spatial-v4.svg",
+      "title": "A guided AI operator",
+      "target": "harness/ruview/README.md",
+      "width": 580,
+      "height": 276
+    },
+    {
+      "file": "assets/readme/overview-spatial-v4.svg",
+      "title": "RuView sensing overview",
+      "target": "docs/user-guide.md",
+      "width": 1200,
+      "height": 396
+    },
+    {
+      "file": "assets/readme/header-features-spatial-v4.svg",
+      "title": "Explore the capabilities",
+      "target": "docs/user-guide.md",
+      "width": 1200,
+      "height": 148
+    },
+    {
+      "file": "assets/readme/header-edge-spatial-v4.svg",
+      "title": "Intelligence at the edge",
+      "target": "firmware/esp32-csi-node/README.md",
+      "width": 1200,
+      "height": 148
+    },
+    {
+      "file": "assets/readme/header-learning-spatial-v4.svg",
+      "title": "From recordings to models",
+      "target": "docs/user-guide.md",
+      "width": 1200,
+      "height": 148
+    },
+    {
+      "file": "assets/readme/header-evidence-spatial-v4.svg",
+      "title": "Evidence before accuracy claims",
+      "target": "docs/benchmarks/pose-estimation-cog.md",
+      "width": 1200,
+      "height": 148
+    },
+    {
+      "file": "assets/readme/header-docs-spatial-v4.svg",
+      "title": "Choose your next step",
+      "target": "docs/user-guide.md",
+      "width": 1200,
+      "height": 148
+    },
+    {
+      "file": "assets/readme/cognitum-spatial-v4.svg",
+      "title": "Explore Cognitum One",
+      "target": "https://cognitum.one",
+      "width": 1200,
+      "height": 304
+    }
+  ]
+}

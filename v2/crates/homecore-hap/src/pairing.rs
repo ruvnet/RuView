@@ -439,8 +439,11 @@ fn new_state(setup_code: &SetupCode, device_id: Option<String>) -> Result<StoreS
         Some(device_id) => device_id,
         None => generate_device_id()?,
     };
-    let verifier =
-        ClientG3072::<Sha512>::new().compute_verifier(SRP_USERNAME, setup_code.as_bytes(), &salt);
+    let verifier = padded_verifier(ClientG3072::<Sha512>::new().compute_verifier(
+        SRP_USERNAME,
+        setup_code.as_bytes(),
+        &salt,
+    ));
     let state = StoreState {
         accessory: StoredAccessory {
             device_id,
@@ -451,6 +454,21 @@ fn new_state(setup_code: &SetupCode, device_id: Option<String>) -> Result<StoreS
     };
     validate_state(&state)?;
     Ok(state)
+}
+
+/// Width of a 3072-bit SRP group element, the verifier's stored size.
+const SRP_VERIFIER_LEN: usize = 384;
+
+/// `compute_verifier` returns the minimal big-endian encoding, so about one
+/// verifier in 256 has a zero top byte and comes back shorter. Left-pad to the
+/// group width: the same number, and the fixed length the store validates.
+fn padded_verifier(verifier: Vec<u8>) -> Vec<u8> {
+    if verifier.len() >= SRP_VERIFIER_LEN {
+        return verifier;
+    }
+    let mut padded = vec![0u8; SRP_VERIFIER_LEN - verifier.len()];
+    padded.extend_from_slice(&verifier);
+    padded
 }
 
 fn generate_device_id() -> Result<String, HapError> {
@@ -481,7 +499,7 @@ fn validate_device_id(device_id: &str) -> Result<(), HapError> {
 fn validate_state(state: &StoreState) -> Result<(), HapError> {
     validate_device_id(&state.accessory.device_id)?;
     SigningKey::from_bytes(&state.accessory.signing_seed);
-    if state.setup.verifier.len() != 384 {
+    if state.setup.verifier.len() != SRP_VERIFIER_LEN {
         return Err(HapError::InvalidPairingRecord(
             "SRP verifier must contain exactly 384 bytes".into(),
         ));
@@ -664,6 +682,23 @@ mod tests {
                 .to_bytes(),
             admin,
         }
+    }
+
+    #[test]
+    fn short_verifier_is_left_padded_to_the_group_width() {
+        // Seen in CI: a verifier with a zero top byte encoded to 383 bytes and
+        // failed validation, about one provisioning in 256.
+        let short = vec![0xAB; SRP_VERIFIER_LEN - 1];
+        let padded = padded_verifier(short.clone());
+        assert_eq!(padded.len(), SRP_VERIFIER_LEN);
+        assert_eq!(padded[0], 0);
+        assert_eq!(&padded[1..], &short[..], "the same big-endian number");
+        let full = vec![0xCD; SRP_VERIFIER_LEN];
+        assert_eq!(
+            padded_verifier(full.clone()),
+            full,
+            "a full-width verifier is untouched"
+        );
     }
 
     #[test]
