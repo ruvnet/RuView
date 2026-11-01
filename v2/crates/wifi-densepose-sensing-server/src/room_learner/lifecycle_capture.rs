@@ -109,6 +109,13 @@ impl RoomLearningRuntime {
         {
             return Err("native RF provenance does not match the selected source".into());
         }
+        // Another PHY class from the same receiver is not this selected source
+        // view. Ignore it; required-cohort freshness still gates every decision.
+        if packet.frequency_hz != source.center_frequency_hz
+            || packet.bandwidth_hz != source.bandwidth_hz
+        {
+            return Ok(());
+        }
         let result = capture.ingest(
             RawSourceFrame {
                 source_id: packet.source_id,
@@ -127,10 +134,17 @@ impl RoomLearningRuntime {
     }
     /// Bounded protected diagnostics only; never grants admission or advances a
     /// workflow revision. Ignore sources/grids outside the current context.
-    pub fn record_native_rejection(&self, source_id:u8, grid_id:&str, reason:&str) {
-        if let Ok(mut state)=self.inner.lock() {
-            if state.capture.as_ref().is_some_and(|c|c.context().sources.iter().any(|s|s.source_id==source_id && s.grid_id==grid_id)) {
-                state.input_error=Some(bounded(format!("Node {source_id} native input rejected: {reason}")));
+    pub fn record_native_rejection(&self, source_id: u8, grid_id: &str, reason: &str) {
+        if let Ok(mut state) = self.inner.lock() {
+            if state.capture.as_ref().is_some_and(|c| {
+                c.context()
+                    .sources
+                    .iter()
+                    .any(|s| s.source_id == source_id && s.grid_id == grid_id)
+            }) {
+                state.input_error = Some(bounded(format!(
+                    "Node {source_id} native input rejected: {reason}"
+                )));
             }
         }
     }

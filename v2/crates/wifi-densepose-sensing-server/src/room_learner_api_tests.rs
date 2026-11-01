@@ -116,7 +116,10 @@ async fn configure_and_actual_native_ingress_share_grid_projection_and_device_id
     let sources = configured["status"]["sources"].as_array().unwrap();
     assert_eq!(sources.len(), 3);
     assert_eq!(sources[0]["device_id"], "esp32-node-15");
-    assert_eq!(sources[0]["grid_id"], "ant1-bins64-ppdu0-usable-drop2-v1");
+    assert_eq!(
+        sources[0]["grid_id"],
+        "ant1-bins64-ppdu0-usable-drop2-linear-v2"
+    );
     let begun=json_request(router.clone(),"/phase",Method::POST,serde_json::json!({
         "trial_id":"synthetic-empty","session_id":"synthetic-train-session","role":"Train","label":"Empty",
         "duration_ms":12000,"conditions_confirmed":true})).await;
@@ -281,15 +284,107 @@ async fn stale_http_start_is_rejected_after_another_client_changes_room() {
 
 #[tokio::test]
 async fn native_adapter_rejection_is_visible_without_admitting_or_labelling_packets() {
-    let (_dir,state)=fixture();let router=app(state.clone());
-    let configured=json_request(router.clone(),"/configure",Method::POST,config()).await;
-    assert_eq!(configured["success"],true);
-    let mut packet=wire(15,121);packet[19]|=0x01; // Actual ADR-018 40 MHz bit.
-    let frame=parse_esp32_frame(&packet).unwrap();
-    observe(&mut *state.write().await,&frame,&packet,std::time::Instant::now());
-    let status=json_request_status(router).await;
+    let (_dir, state) = fixture();
+    let router = app(state.clone());
+    let configured = json_request(router.clone(), "/configure", Method::POST, config()).await;
+    assert_eq!(configured["success"], true);
+    let mut packet = wire(15, 121);
+    packet[19] |= 0x01; // Actual ADR-018 40 MHz bit.
+    let frame = parse_esp32_frame(&packet).unwrap();
+    observe(
+        &mut *state.write().await,
+        &frame,
+        &packet,
+        std::time::Instant::now(),
+    );
+    let status = json_request_status(router).await;
     assert_eq!(status["input_error"],"Node 15 native input rejected: native capture does not support the reported 40 MHz bandwidth");
-    assert_eq!(status["capture"]["sources"][0]["admitted_packets"],0);
-    assert_eq!(status["mutation_guard"],configured["status"]["mutation_guard"]);
-    assert_eq!(status["physically_validated"],false);
+    assert_eq!(status["capture"]["sources"][0]["admitted_packets"], 0);
+    assert_eq!(
+        status["mutation_guard"],
+        configured["status"]["mutation_guard"]
+    );
+    assert_eq!(status["physically_validated"], false);
+}
+
+#[tokio::test]
+async fn minority_supported_bandwidth_cannot_borrow_wide_grid_eligibility() {
+    let (_dir, state) = fixture();
+    {
+        let mut inner = state.write().await;
+        inner.node_states.clear();
+        inner.room_learning_sources.clear();
+        let now = std::time::Instant::now();
+        for row in 0..120 {
+            for node in [15, 16, 17] {
+                let mut packet = wire(node, row + 1);
+                if row < 119 {
+                    packet[19] |= 0x01;
+                }
+                let frame = parse_esp32_frame(&packet).unwrap();
+                let at = now - std::time::Duration::from_millis((120 - row) as u64 * 100);
+                inner
+                    .node_states
+                    .entry(node)
+                    .or_insert_with(NodeState::new)
+                    .observe_raw_grid(CsiGridKey::from_frame(&frame), at);
+                observe(&mut inner, &frame, &packet, at);
+            }
+        }
+    }
+    let result = json_request(app(state), "/configure", Method::POST, config()).await;
+    assert_eq!(
+        result["success"], false,
+        "one 20MHz packet must not inherit sustained 40MHz cadence: {result}"
+    );
+    assert_eq!(result["error_code"], "learner_source_unready");
+}
+
+#[tokio::test]
+async fn rare_foreign_frequency_neither_relabels_selection_nor_invalidates_a_phase() {
+    let (_dir, state) = fixture();
+    let mut foreign = wire(15, 121);
+    foreign[8..12].copy_from_slice(&2462u32.to_le_bytes());
+    let frame = parse_esp32_frame(&foreign).unwrap();
+    observe(
+        &mut *state.write().await,
+        &frame,
+        &foreign,
+        std::time::Instant::now(),
+    );
+    let router = app(state.clone());
+    let configured = json_request(router.clone(), "/configure", Method::POST, config()).await;
+    assert_eq!(configured["success"], true, "{configured}");
+    assert_eq!(
+        configured["status"]["sources"][0]["center_frequency_hz"],
+        2_437_000_000u64
+    );
+    let begun = json_request(
+        router.clone(),
+        "/phase",
+        Method::POST,
+        serde_json::json!({
+        "trial_id":"synthetic-phy","session_id":"synthetic-phy","role":"Train","label":"Empty",
+        "duration_ms":12000,"conditions_confirmed":true}),
+    )
+    .await;
+    assert_eq!(begun["success"], true, "{begun}");
+    observe(
+        &mut *state.write().await,
+        &frame,
+        &foreign,
+        std::time::Instant::now(),
+    );
+    let packet = wire(15, 122);
+    let frame = parse_esp32_frame(&packet).unwrap();
+    observe(
+        &mut *state.write().await,
+        &frame,
+        &packet,
+        std::time::Instant::now(),
+    );
+    let status = json_request_status(router).await;
+    assert_eq!(status["capture"]["phase"]["trial_id"], "synthetic-phy");
+    assert_eq!(status["capture"]["sources"][0]["admitted_packets"], 1);
+    assert_eq!(status["mutation_guard"], begun["status"]["mutation_guard"]);
 }

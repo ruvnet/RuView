@@ -10,95 +10,11 @@ use wifi_densepose_sensing_server::room_learner::{
     training::FitConfig,
 };
 
-#[derive(Debug, Clone)]
-pub(super) struct LiveSource {
-    frequency_hz: u64,
-    bandwidth_hz: Option<u64>,
-    seen: std::time::Instant,
-    receiver_rate_hz: f64,
-}
-fn grid_id(frame: &Esp32Frame) -> Option<String> {
-    native::grid_id(
-        frame.n_antennas as usize,
-        frame.n_subcarriers as usize,
-        frame.ppdu_type,
-    )
-    .ok()
-}
-fn bandwidth(frame: &Esp32Frame) -> Option<u64> {
-    if !frame.adr018_flags.bw40 && grid_id(frame).is_some() {
-        Some(20_000_000)
-    } else {
-        None
-    }
-}
-pub(super) fn observe(
-    state: &mut AppStateInner,
-    frame: &Esp32Frame,
-    packet: &[u8],
-    now: std::time::Instant,
-) {
-    let Some(runtime) = state.room_learning.clone() else {
-        return;
-    };
-    let key = (
-        frame.node_id,
-        frame.n_subcarriers,
-        frame.ppdu_type.to_byte(),
-    );
-    let rate = state
-        .room_learning_sources
-        .get(&key)
-        .map_or(0.0, |previous| {
-            let delta = now.saturating_duration_since(previous.seen).as_secs_f64();
-            if delta <= 0.0 || delta > 5.0 {
-                0.0
-            } else if previous.receiver_rate_hz > 0.0 {
-                previous.receiver_rate_hz * 0.9 + (1.0 / delta) * 0.1
-            } else {
-                1.0 / delta
-            }
-        });
-    let meta = LiveSource {
-        frequency_hz: u64::from(frame.freq_mhz) * 1_000_000,
-        bandwidth_hz: bandwidth(frame),
-        seen: now,
-        receiver_rate_hz: rate,
-    };
-    if state.room_learning_sources.len() < 1_024 || state.room_learning_sources.contains_key(&key) {
-        state.room_learning_sources.insert(key, meta.clone());
-    }
-    let Some(id) = grid_id(frame) else {
-        return;
-    };
-    if !runtime.selects_grid(frame.node_id, &id) {
-        return;
-    }
-    let bytes = usize::from(frame.n_antennas) * usize::from(frame.n_subcarriers) * 2;
-    let Some(iq) = packet.get(20..20 + bytes) else {
-        return;
-    };
-    let ns = runtime.receiver_now_ns();
-    let projected = match native::canonicalize_esp32(NativePacketInput {
-        node_id: frame.node_id,
-        n_antennas: frame.n_antennas as usize,
-        raw_bins: frame.n_subcarriers as usize,
-        frequency_hz: meta.frequency_hz,
-        ppdu_type: frame.ppdu_type,
-        sequence: frame.sequence,
-        received_at_ns: ns,
-        receiver_sample_rate_hz: rate,
-        iq_bytes: iq,
-        flags: frame.adr018_flags,
-        provenance: CaptureProvenance::LiveReceiverObserved,
-    }) {
-        Ok(p) => p,
-        Err(reason) => { runtime.record_native_rejection(frame.node_id, &id, &reason); return; }
-    };
-    // This is the real canonical RF record plus an explicitly derived magnitude
-    // view. No IQ, source-clock or coherent-phase claim is invented/persisted.
-    let _ = runtime.ingest_native(&projected, ns);
-}
+#[path = "room_learner_ingress.rs"]
+mod ingress;
+use ingress::native_candidates;
+pub(super) use ingress::{observe, LiveSource, NativeSourceKey};
+
 fn failure(code: &str, error: impl ToString) -> Json<serde_json::Value> {
     let code = if error.to_string() == "learner_state_changed" {
         "learner_state_changed"
@@ -136,32 +52,21 @@ pub(super) struct ConfigureRequest {
     new_training: bool,
 }
 fn source_ready(state: &AppStateInner, spec: &SourceSpec, now: std::time::Instant) -> bool {
-    state.node_states.get(&spec.source_id).is_some_and(|node| {
-        node.calibration_grid_candidates(now)
-            .iter()
-            .any(|(grid, evidence)| {
-                native::grid_id(
-                    1,
-                    grid.n_subcarriers as usize,
-                    wifi_densepose_hardware::PpduType::from_byte(grid.ppdu_type),
-                )
-                .ok()
-                .as_deref()
-                    == Some(spec.grid_id.as_str())
-                    && evidence.span_s >= CALIBRATION_GRID_MIN_SPAN_S
-                    && evidence.rate_hz >= CALIBRATION_GRID_MIN_RATE_HZ
-                    && evidence.max_gap_s < CALIBRATION_GRID_MAX_GAP_S
-                    && evidence.latest_age_s < 2.0
-                    && state
-                        .room_learning_sources
-                        .get(&(spec.source_id, grid.n_subcarriers, grid.ppdu_type))
-                        .is_some_and(|meta| {
-                            now.saturating_duration_since(meta.seen).as_secs_f64() < 2.0
-                                && meta.frequency_hz == spec.center_frequency_hz
-                                && meta.bandwidth_hz == Some(spec.bandwidth_hz)
-                        })
-            })
-    }) && spec.feature_count == 56
+    native_candidates(state, spec.source_id, now)
+        .iter()
+        .any(|(key, meta)| {
+            native::grid_id(
+                key.n_antennas as usize,
+                key.raw_bins as usize,
+                wifi_densepose_hardware::PpduType::from_byte(key.ppdu_type),
+            )
+            .ok()
+            .as_deref()
+                == Some(spec.grid_id.as_str())
+                && meta.frequency_hz == spec.center_frequency_hz
+                && meta.bandwidth_hz == Some(spec.bandwidth_hz)
+        })
+        && spec.feature_count == 56
         && spec.signal_kind == RfModality::WifiCsi
         && spec.device_id == format!("esp32-node-{}", spec.source_id)
 }
@@ -229,46 +134,33 @@ pub(super) async fn configure(
     }
     let mut sources = Vec::new();
     for &id in &request.source_node_ids {
-        let Some(node) = s.node_states.get(&id) else {
+        let Some(_) = s.node_states.get(&id) else {
             return failure(
                 "learner_source_missing",
                 format!("Node {id} is not receiving."),
             );
         };
-        let Some((grid, _)) = node.select_calibration_grid(now) else {
-            return failure(
-                "learner_source_unready",
-                format!("Node {id} needs an eligible stable raw CSI grid."),
-            );
+        let Some((key, meta)) =
+            native_candidates(&s, id, now)
+                .into_iter()
+                .max_by(|(ka, a), (kb, b)| {
+                    a.receiver_rate_hz
+                        .total_cmp(&b.receiver_rate_hz)
+                        .then(ka.raw_bins.cmp(&kb.raw_bins))
+                })
+        else {
+            return failure("learner_source_unready",format!("Node {id} needs a stable, supported exact native PHY cohort and a fresh eight-packet window."));
         };
-        let key = (id, grid.n_subcarriers, grid.ppdu_type);
-        let Some(meta) = s.room_learning_sources.get(&key) else {
-            return failure(
-                "learner_phy_missing",
-                format!("Node {id} lacks current PHY metadata."),
-            );
-        };
-        let Some(bandwidth_hz) = meta.bandwidth_hz else {
-            return failure(
-                "learner_phy_unsupported",
-                format!("Node {id} uses an unsupported bandwidth layout."),
-            );
-        };
-        if now.saturating_duration_since(meta.seen).as_secs_f64() > 2.0
-            || !(2_000_000_000..=8_000_000_000).contains(&meta.frequency_hz)
-        {
-            return failure(
-                "learner_phy_stale",
-                format!("Node {id} PHY metadata is stale or invalid."),
-            );
-        }
+        let bandwidth_hz = meta
+            .bandwidth_hz
+            .expect("eligible native cohort has supported bandwidth");
         sources.push(SourceSpec {
             source_id: id,
             device_id: format!("esp32-node-{id}"),
             grid_id: match native::grid_id(
-                1,
-                grid.n_subcarriers as usize,
-                wifi_densepose_hardware::PpduType::from_byte(grid.ppdu_type),
+                key.n_antennas as usize,
+                key.raw_bins as usize,
+                wifi_densepose_hardware::PpduType::from_byte(key.ppdu_type),
             ) {
                 Ok(id) => id,
                 Err(error) => return failure("learner_grid_unsupported", error),

@@ -456,6 +456,29 @@ struct CalibrationGridEvidence {
     latest_age_s: f64,
 }
 
+impl CalibrationGridEvidence {
+    fn from_arrivals(arrivals: &[std::time::Instant], now: std::time::Instant) -> Option<Self> {
+        let first = *arrivals.first()?;
+        let last = *arrivals.last()?;
+        let span_s = last.saturating_duration_since(first).as_secs_f64();
+        let latest_age_s = now.saturating_duration_since(last).as_secs_f64();
+        let mut max_gap_s = latest_age_s;
+        for pair in arrivals.windows(2) {
+            max_gap_s = max_gap_s.max(
+                pair[1]
+                    .saturating_duration_since(pair[0])
+                    .as_secs_f64(),
+            );
+        }
+        let rate_hz = if span_s > 0.0 {
+            arrivals.len().saturating_sub(1) as f64 / span_s
+        } else {
+            0.0
+        };
+        Some(Self {sample_count:arrivals.len(),span_s,rate_hz,max_gap_s,latest_age_s})
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct CalibrationGridBinding {
     source_node_id: u8,
@@ -1641,35 +1664,7 @@ impl NodeState {
         }
         grouped
             .into_iter()
-            .filter_map(|(grid, arrivals)| {
-                let first = *arrivals.first()?;
-                let last = *arrivals.last()?;
-                let span_s = last.saturating_duration_since(first).as_secs_f64();
-                let latest_age_s = now.saturating_duration_since(last).as_secs_f64();
-                let mut max_gap_s = latest_age_s;
-                for pair in arrivals.windows(2) {
-                    max_gap_s = max_gap_s.max(
-                        pair[1]
-                            .saturating_duration_since(pair[0])
-                            .as_secs_f64(),
-                    );
-                }
-                let rate_hz = if span_s > 0.0 {
-                    arrivals.len().saturating_sub(1) as f64 / span_s
-                } else {
-                    0.0
-                };
-                Some((
-                    grid,
-                    CalibrationGridEvidence {
-                        sample_count: arrivals.len(),
-                        span_s,
-                        rate_hz,
-                        max_gap_s,
-                        latest_age_s,
-                    },
-                ))
-            })
+            .filter_map(|(grid, arrivals)| CalibrationGridEvidence::from_arrivals(&arrivals, now).map(|evidence|(grid,evidence)))
             .collect()
     }
 
@@ -2216,7 +2211,7 @@ struct AppStateInner {
     source_bank_shadow_enabled: bool,
     source_bank_shadow: Option<source_bank_shadow::ShadowCapture>,
     room_learning: Option<Arc<wifi_densepose_sensing_server::room_learner::lifecycle::RoomLearningRuntime>>,
-    room_learning_sources: HashMap<(u8, u16, u8), room_learner_api::LiveSource>,
+    room_learning_sources: HashMap<room_learner_api::NativeSourceKey, room_learner_api::LiveSource>,
     /// Stable installation identity used only to bind local persisted state.
     installation_id: Option<String>,
     /// Metadata for the privacy reduced empty room image, when available.
