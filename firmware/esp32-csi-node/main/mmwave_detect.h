@@ -15,6 +15,17 @@
 #include <stdbool.h>
 
 /**
+ * True iff a frame type is specific enough to identify the supported Seeed
+ * MR60BHA2. The broader 0x0A family is shared by other Hi-Link sensors:
+ * 0x0A14/0x0A13/0x0A04 can mean work-mode, low-power, and target data on
+ * LD6002B/LD6004, so those types must never establish an MR60BHA2 identity.
+ */
+static inline bool mmwave_mr60_identifying_type(uint16_t type)
+{
+    return type == 0x0A15 || type == 0x0A16 || type == 0x0F09;
+}
+
+/**
  * True iff buf[i..] begins a *validated* LD2410 report frame within [0,len):
  *   F4 F3 F2 F1 | len(LE,2) | data[len] | F8 F7 F6 F5
  * Requires the head magic, a sane intra-frame length, AND the matching tail at

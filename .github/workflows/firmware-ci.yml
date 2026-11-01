@@ -54,12 +54,13 @@ jobs:
     name: Build firmware (${{ matrix.target }} / ${{ matrix.variant }})
     runs-on: ubuntu-latest
     container:
-      image: espressif/idf:v5.4
+      image: ${{ matrix.idf_image }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - variant: 8mb
+            idf_image: espressif/idf:v5.4
             target: esp32s3
             sdkconfig: sdkconfig.defaults
             partition_table_name: partitions_display.csv
@@ -70,6 +71,7 @@ jobs:
             artifact_app: esp32-csi-node.bin
             artifact_pt: partition-table.bin
           - variant: 4mb
+            idf_image: espressif/idf:v5.4
             target: esp32s3
             sdkconfig: sdkconfig.defaults.4mb
             partition_table_name: partitions_4mb.csv
@@ -79,6 +81,7 @@ jobs:
             artifact_pt: partition-table-4mb.bin
           # ADR-110: ESP32-C6 research target (Wi-Fi 6 / 802.15.4 / TWT / LP-core)
           - variant: c6-4mb
+            idf_image: espressif/idf:v5.4
             target: esp32c6
             sdkconfig: sdkconfig.defaults
             partition_table_name: partitions_4mb.csv
@@ -86,6 +89,16 @@ jobs:
             size_limit_kb: 1152
             artifact_app: esp32-csi-node-c6.bin
             artifact_pt: partition-table-c6.bin
+          # C5 uses the stable IDF 6 lane; older preview drivers are not supported.
+          - variant: c5-4mb
+            idf_image: espressif/idf:v6.0.2
+            target: esp32c5
+            sdkconfig: sdkconfig.defaults
+            partition_table_name: partitions_4mb.csv
+            size_warn_kb: 1100
+            size_limit_kb: 1152
+            artifact_app: esp32-csi-node-c5.bin
+            artifact_pt: partition-table-c5.bin
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -130,9 +143,9 @@ jobs:
           fi
           echo "Binary size OK: $SIZE <= $MAX"
 
-      - name: Verify built application version before packaging
+      - name: Verify built application version, chip, and flash layout
         working-directory: firmware/esp32-csi-node
-        run: python test/test_delivery_contract.py --built-app build/esp32-csi-node.bin
+        run: python test/test_delivery_contract.py --built-app build/esp32-csi-node.bin --target ${{ matrix.target }} --flasher-args build/flasher_args.json
 
       - name: Verify flash image integrity
         working-directory: firmware/esp32-csi-node
@@ -250,7 +263,7 @@ jobs:
           prerelease: true
           make_latest: false
           body: |
-            Exact-run ESP32-S3 display 8 MB, ESP32-S3 headless 4 MB, and ESP32-C6 4 MB firmware bundles.
+            Exact-run ESP32-S3 display 8 MB, ESP32-S3 headless 4 MB, ESP32-C6 4 MB, and ESP32-C5 4 MB firmware bundles.
             Verify each archive against `SHA256SUMS.txt` before flashing.
             CI builds and host tests verify software behavior, not target hardware.
             This prerelease has no new physical-board qualification or sensing-accuracy claim.

@@ -4,28 +4,12 @@ text{font-family:"Avenir Next","Segoe UI Variable Display","Segoe UI",Helvetica,
 .float{animation:float 5s ease-in-out infinite}
 .flow{stroke-dasharray:5 12;animation:flow 5s linear infinite}
 .breathe{animation:breathe 4s ease-in-out infinite}
-
-
-
-
-
 @keyframes float{0%,100%{transform:translate(0,0)}50%{transform:translate(3px,-10px)}}
-
-
-
-
-
-
-
-
-
 
 
 
 
 @keyframes flow{to{stroke-dashoffset:-136}}
 @keyframes breathe{50%{opacity:.4}}
-
-
 @media(prefers-reduced-motion:reduce){*{animation:none!important}}
 </style><rect x=".5" y=".5" width="179" height="115" rx="18" fill="url(#wash)" stroke="#2d4e77"/><g transform="translate(90 45) scale(0.65)"><ellipse cy="53" rx="48" ry="8" fill="#020816" opacity=".65"/><g class="float"><path d="M0 0L0 -36" fill="none" stroke="#438fff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="flow"/><path d="M0 -43l7 4v8l-7 4l-7 -4v-8Z" fill="#102749" stroke="#78cfff" class="breathe"/><path d="M0 0L-38 -10" fill="none" stroke="#438fff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="flow"/><path d="M-38 -17l7 4v8l-7 4l-7 -4v-8Z" fill="#102749" stroke="#78cfff" class="breathe"/><path d="M0 0L-23 31" fill="none" stroke="#438fff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="flow"/><path d="M-23 24l7 4v8l-7 4l-7 -4v-8Z" fill="#102749" stroke="#78cfff" class="breathe"/><path d="M0 0L30 28" fill="none" stroke="#438fff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="flow"/><path d="M30 21l7 4v8l-7 4l-7 -4v-8Z" fill="#102749" stroke="#78cfff" class="breathe"/><path d="M0 0L39 -17" fill="none" stroke="#438fff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="flow"/><path d="M39 -24l7 4v8l-7 4l-7 -4v-8Z" fill="#102749" stroke="#78cfff" class="breathe"/><circle cx="0" cy="0" r="15" stroke="#b8f36c" fill="none" /><path d="M-6 0L-1 5L8 -6" fill="none" stroke="#b8f36c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></g></g><text x="90" y="98" font-size="16" fill="#f3f7ff" text-anchor="middle" font-weight="500" >AI toolkit</text><path d="M24 1H156" stroke="url(#accent)" opacity=".55"/><path d="M24 115H156" stroke="#438fff" opacity=".15"/></svg>

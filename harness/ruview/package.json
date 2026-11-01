@@ -1,6 +1,6 @@
 {
   "name": "@ruvnet/ruview",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "description": "RuView WiFi-sensing operator harness — CLI, MCP server, and SDK for host device access (ESP32 CSI nodes, 60/24 GHz mmWave, LiDAR), SSH remote hosts, diagnostics, verified ESP32 flashing, evidence-gated training, calibration, and Cognitum Spaces.",
   "type": "module",
   "bin": {
@@ -46,7 +46,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test --test-concurrency=2 test/*.test.mjs",
     "test:security": "node --test test/hosts.test.mjs test/brain.test.mjs test/policy.test.mjs test/spaces.test.mjs test/kernel.test.mjs test/firmware.test.mjs test/training.test.mjs test/devices.test.mjs test/csi-nodes.test.mjs test/remote.test.mjs test/mcp-apps.test.mjs test/cli-ui.test.mjs test/esphome.test.mjs",
     "doctor": "node ./bin/cli.js doctor",
     "mcp": "node ./bin/cli.js mcp start",

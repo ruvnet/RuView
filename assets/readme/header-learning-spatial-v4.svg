@@ -2,8 +2,6 @@
 text{font-family:"Avenir Next","Segoe UI Variable Display","Segoe UI",Helvetica,Arial,sans-serif}
 .mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;letter-spacing:1.6px}
 .float{animation:float 5s ease-in-out infinite}
-
-
 .trace{stroke-dasharray:400;animation:trace 6s ease-in-out infinite}
 .scan{animation:scan 7s ease-in-out infinite}
 .orbit{stroke-dasharray:3 14;animation:flow 8s linear infinite}
@@ -12,19 +10,13 @@ text{font-family:"Avenir Next","Segoe UI Variable Display","Segoe UI",Helvetica,
 @keyframes float{0%,100%{transform:translate(0,0)}50%{transform:translate(3px,-10px)}}
 @keyframes scan{0%,100%{transform:translateY(0)}50%{transform:translateY(-76px)}}
 
-
-
-
-
 .cursor{animation:cursor 5s ease-in-out infinite}
-
-
-
 @keyframes cursor{0%,100%{transform:translateX(-35px);opacity:.3}50%{transform:translateX(35px);opacity:1}}
+
+
 
 @keyframes spark{50%{opacity:.25}}
 @keyframes flow{to{stroke-dashoffset:-136}}
-
 @keyframes trace{0%,100%{stroke-dashoffset:0}50%{stroke-dashoffset:90}}
 @keyframes wave{0%{transform:scale(.5);opacity:.7}100%{transform:scale(1.3);opacity:0}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important}}

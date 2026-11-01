@@ -139,6 +139,13 @@ jobs:
         CARGO_PROFILE_TEST_DEBUG: "0"
       run: cargo test --workspace --no-default-features
 
+    - name: Verify patched archive and cache compatibility
+      working-directory: v2
+      env:
+        CARGO_PROFILE_DEV_DEBUG: "0"
+        CARGO_PROFILE_TEST_DEBUG: "0"
+      run: cargo test --locked -p zip@0.6.6 -p wasmtime-internal-cache
+
     - name: Run ADR-147 worldmodel tests
       working-directory: v2
       env:

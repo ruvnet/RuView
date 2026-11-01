@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
+    # Checksum-verified dependency patches; keep their upstream tests in CI.
+    "vendor/security/zip-0.6.6",
+    "vendor/security/wasmtime-internal-cache-36.0.19",
     "crates/wifi-densepose-core",
     "crates/wifi-densepose-physics", # ADR-323 bounded pose assessment/correction
     "crates/wifi-densepose-signal",
@@ -268,6 +271,25 @@ wiremock = "0.5"
 # 0.1.0 was yanked; upgrade to latest 0.3/0.2 releases which pull in
 # quinn-proto >=0.11.14 (fixes RUSTSEC-2026-0037) and
 # rustls-webpki >=0.103.13 (fixes RUSTSEC-2026-0049/0098/0099/0104).
+#
+# The transitive security floors live in Cargo.lock, which the gating
+# Security Scanning job audits: quinn-proto >=0.11.18
+# (RUSTSEC-2026-0338/0339/0340/0341/0342), rustls >=0.23.46
+# (RUSTSEC-2026-0346/0347/0348/0349) and wasmtime >=36.0.19
+# (RUSTSEC-2026-0363/0379/0380). A plain `cargo update` can walk them backwards;
+# keep the lockfile at or above these until the direct requirements
+# enforce them.
+#
+# The TLS trust anchors carry floors for the same reason: rustls-webpki
+# >=0.103.16 (RUSTSEC-2026-0382) rejects certificate paths that contain
+# distrusted emSign intermediate public keys, and webpki-roots >=1.0.10 /
+# webpki-root-certs >=1.0.10 (RUSTSEC-2026-0381/0383) drop the emSign ECC
+# Root CA - G3 anchor that made those paths reachable. The private keys of
+# the distrusted emSign intermediates are public, so an affected build can
+# be talked into accepting a forged certificate chain. Those crates are
+# transitive too, so the lockfile is the only place the floor can live:
+# bump them explicitly instead of letting a plain `cargo update` walk them
+# backwards.
 midstreamer-quic = "0.3"
 midstreamer-scheduler = "0.2"
 midstreamer-temporal-compare = "0.2"
@@ -318,3 +340,10 @@ strip = false
 [profile.bench]
 inherits = "release"
 debug = true
+
+# Narrow, checksum-verified parent manifest patches. Source/API code is
+# unchanged; both parents use the fixed zstd 0.14.3 implementation.
+# See each directory's RUVIEW-PROVENANCE.md for archive digests and scope.
+[patch.crates-io]
+zip-legacy = { package = "zip", path = "vendor/security/zip-0.6.6" }
+wasmtime-internal-cache = { path = "vendor/security/wasmtime-internal-cache-36.0.19" }

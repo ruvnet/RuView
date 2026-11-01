@@ -4,28 +4,12 @@ text{font-family:"Avenir Next","Segoe UI Variable Display","Segoe UI",Helvetica,
 .float{animation:float 5s ease-in-out infinite}
 .flow{stroke-dasharray:5 12;animation:flow 5s linear infinite}
 .breathe{animation:breathe 4s ease-in-out infinite}
-
-
-
-
-
 @keyframes float{0%,100%{transform:translate(0,0)}50%{transform:translate(3px,-10px)}}
-
-
-
-
-
-
-
-
-
 
 
 
 
 @keyframes flow{to{stroke-dashoffset:-136}}
 @keyframes breathe{50%{opacity:.4}}
-
-
 @media(prefers-reduced-motion:reduce){*{animation:none!important}}
 </style><rect x=".5" y=".5" width="579" height="275" rx="18" fill="url(#wash)" stroke="#2d4e77"/><text x="30" y="39" font-size="11" fill="#78cfff" text-anchor="start" font-weight="500" class="mono">RUVIEW / 05</text><text x="30" y="89" font-size="25" fill="#f3f7ff" text-anchor="start" font-weight="650" letter-spacing="-0.6" >Local automation</text><text x="30" y="126" font-size="14" fill="#b0c2db" text-anchor="start" font-weight="500" >Connect rooms to your smart home.</text><text x="30" y="151" font-size="14" fill="#b0c2db" text-anchor="start" font-weight="500" >Home Assistant, MQTT and Matter.</text><circle cx="465" cy="170" r="110" fill="url(#halo)"/><g transform="translate(480 144) scale(1.12)"><ellipse cy="53" rx="48" ry="8" fill="#020816" opacity=".65"/><g class="float"><path d="M-43 12L0 -10L43 12L0 35Z" fill="#102749" stroke="#438fff"/><path d="M-32 17V-16L0 -35L32 -16V17M-32 -16L0 3L32 -16M0 3V34" fill="none" stroke="#78cfff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /><path d="M-22 20L-10 13L12 25M-10 13V-5" fill="none" stroke="#b8f36c" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="flow"/><circle cx="-22" cy="20" r="4" stroke="#ffb45e"  fill="#102749" class="breathe"/><circle cx="-10" cy="-5" r="4" stroke="#ffb45e"  fill="#102749" class="breathe"/><circle cx="12" cy="25" r="4" stroke="#ffb45e"  fill="#102749" class="breathe"/></g></g><path d="M30 204H550" fill="none" stroke="#2d4e77" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" /><path d="M30 204H550" fill="none" stroke="#78cfff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="flow" opacity=".5"/><text x="30" y="245" font-size="12" fill="#78cfff" text-anchor="start" font-weight="500" class="mono">INTEGRATION GUIDE</text><path d="M510 239H540M532 231L540 239L532 247" fill="none" stroke="#78cfff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /><path d="M24 1H556" stroke="url(#accent)" opacity=".55"/><path d="M24 275H556" stroke="#438fff" opacity=".15"/></svg>

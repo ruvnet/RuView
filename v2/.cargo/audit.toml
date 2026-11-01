@@ -1,10 +1,20 @@
 # cargo-audit configuration — v2 workspace
 # Managed by security audit (fix/security-audit-rustsec-clippy branch).
 #
-# This file suppresses UNMAINTAINED-only advisories (no CVE) flowing through
+# This file records every advisory that the gating Security Scanning job is
+# allowed to skip, together with the reason it is acceptable here. Most
+# entries are UNMAINTAINED-only advisories (no CVE) flowing through
 # dependencies that are purely transitive / build-time and have no
-# user-facing attack surface in this workspace.
-# Each entry documents the root cause and the mitigation path.
+# user-facing attack surface in this workspace; each entry documents the
+# root cause and the mitigation path. A few entries are real CVEs whose
+# vulnerable code path is proven unreachable from this workspace — those
+# carry an explicit reachability proof and an upstream release condition.
+#
+# NOTE: cargo-audit resolves this file relative to the CURRENT WORKING
+# DIRECTORY (./.cargo/audit.toml), never relative to the --file lockfile it
+# audits. The workflow therefore runs the audit with working-directory: v2.
+# Running it from the repository root silently audits with cargo-audit's
+# defaults and ignores nothing.
 
 [advisories]
 
@@ -90,6 +100,13 @@ ignore = [
     "RUSTSEC-2024-0370",   # proc-macro-error: unmaintained
 
     # -----------------------------------------------------------------------
+    # proc-macro-error2 — RUSTSEC-2026-0173
+    # Unmaintained (author-confirmed).  No CVE.  Build-time proc-macro;
+    # zero runtime exposure.  Same family and same mitigation path as
+    # RUSTSEC-2024-0370 above.
+    "RUSTSEC-2026-0173",   # proc-macro-error2: unmaintained
+
+    # -----------------------------------------------------------------------
     # rand <0.9 — RUSTSEC-2026-0097
     # Unsound: the rand 0.8 BlockRng64 implementation can panic and expose
     # uninitialized memory under certain reseeding sequences.  No CVE.
@@ -127,4 +144,43 @@ ignore = [
     "RUSTSEC-2025-0081",   # unic-char-property
     "RUSTSEC-2025-0098",   # unic-ucd-version
     "RUSTSEC-2025-0100",   # unic-ucd-ident
+
+    # -----------------------------------------------------------------------
+    # zip 0.6.x / 6.x / 7.x — RUSTSEC-2026-0367, RUSTSEC-2026-0368,
+    # RUSTSEC-2026-0369
+    # Three privilege-escalation advisories, all confined to the zip crate's
+    # EXTRACTION path:
+    #   0367 — SUID/SGID/sticky bits carried in `external_attributes` survive
+    #          extraction instead of being masked to safe permission bits.
+    #   0368 — `ZipArchive::extract` creates a symlink whose target bytes are
+    #          handed to the platform symlink API without confining the
+    #          target to the destination directory.
+    #   0369 — `ZipStreamReader::extract` / `ZipArchive::extract` apply Unix
+    #          permissions THROUGH an extracted symlink without validating
+    #          that the symlink target stays inside the destination.
+    # All three are fixed only in zip >= 9.0.0.
+    #
+    # NOT REACHABLE from this workspace: the vulnerable API is
+    # `ZipArchive::extract` / `ZipStreamReader::extract`, and no crate in
+    # the resolved graph calls either one.
+    #   - ndarray-npy 0.10.0 (src/npz.rs) uses ZipArchive::new + by_name /
+    #     by_index for reading and ZipWriter for writing.
+    #   - candle-core 0.4.1 (src/npy.rs, src/pickle.rs) and 0.9.2
+    #     (src/py.rs, src/pickle.rs) use the same read/write subset.
+    #   - torch-sys 0.24.0 (build.rs) extracts the libtorch archive with its
+    #     own per-entry loop — archive.by_index(i), fs::File::create and
+    #     io::copy — so it never calls extract(), never creates a symlink
+    #     (directory entries are skipped) and never applies the archive's
+    #     Unix permission bits (files are created with umask defaults).
+    # The single archive it does extract is the pinned libtorch build
+    # downloaded over HTTPS from download.pytorch.org.
+    #
+    # Mitigation: a version bump is not possible yet — no published release
+    # of the parents moves to zip >= 9.0.0 (ndarray-npy 0.10.0 -> zip ^6,
+    # candle-core 0.11.0 -> zip ^8.6, tch/torch-sys 0.26.0 -> zip ^0.6).
+    # Re-evaluate when candle-core / ndarray-npy / tch ship a release that
+    # adopts zip 9.x, then delete this block and bump the lockfile.
+    "RUSTSEC-2026-0367",   # zip: SUID/SGID preserved during extraction
+    "RUSTSEC-2026-0368",   # zip: extract() symlink target escapes destination
+    "RUSTSEC-2026-0369",   # zip: extract() applies permissions through symlinks
 ]

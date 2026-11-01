@@ -423,7 +423,7 @@ export class NvInspector extends LitElement {
           role="tab" aria-selected=${this.tab === 'witness'}
           @click=${() => this.tab = 'witness'}>Witness</button>
       </div>
-      <div class="body" role="tabpanel">
+      <div class="body" role="tabpanel" tabindex="0">
         ${this.renderHeader()}
         ${this.tab === 'signal' ? this.renderSignalTab()
           : this.tab === 'frame' ? this.renderFrameTab()

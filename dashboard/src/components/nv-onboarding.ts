@@ -185,9 +185,20 @@ export class NvOnboarding extends LitElement {
       z-index: 240;
       display: grid; place-items: center;
       opacity: 0; pointer-events: none;
-      transition: opacity 0.18s;
+      /* A dismissed modal must leave the rendering + accessibility tree, not
+         just fade to opacity 0. While the 0.18s fade-out runs, automated
+         scanners (and mid-animation users) still see the panel, and contrast
+         tooling composites the fading text over the dimmed backdrop and
+         reports false failures. Delaying visibility by the fade duration keeps
+         the animation intact while making the closed state truly absent. */
+      visibility: hidden;
+      transition: opacity 0.18s, visibility 0s linear 0.18s;
     }
-    :host([open]) { opacity: 1; pointer-events: auto; }
+    :host([open]) {
+      opacity: 1; pointer-events: auto;
+      visibility: visible;
+      transition: opacity 0.18s, visibility 0s;
+    }
     .card {
       background: var(--bg-1);
       border: 1px solid var(--line-2);
@@ -329,6 +340,11 @@ export class NvOnboarding extends LitElement {
       this.open = true;
       this.setAttribute('open', '');
     }
+    // Signals that the async storage read above has settled. Until it is set,
+    // "the tour was already seen" and "the decision has not been made yet"
+    // are indistinguishable, so a caller can act in the gap and then watch the
+    // modal open underneath it.
+    this.setAttribute('ready', '');
   }
   override disconnectedCallback(): void {
     super.disconnectedCallback();

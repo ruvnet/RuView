@@ -25,6 +25,7 @@
 #include "thermal.h"
 #include "stream_sender.h"
 #include "nvs_config.h"
+#include "config_api.h"
 #include "serial_onboarding.h"
 #include "edge_processing.h"
 #include "ota_update.h"
@@ -115,6 +116,11 @@ static void event_handler(void *arg, esp_event_base_t event_base,
                           int32_t event_id, void *event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+        /* The band API requires started WiFi. Set it before association,
+         * using the same 2.4 GHz radio domain as existing CSI nodes. */
+        ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_2G_ONLY));
+#endif
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t *disc = (wifi_event_sta_disconnected_t *)event_data;
@@ -145,6 +151,8 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         s_retry_num = 0;
         ota_health_note_got_ip();
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        /* Proof that a pending config trial produced a usable network. */
+        config_trial_notify_connected();
     }
 }
 
@@ -294,8 +302,31 @@ static led_strip_handle_t s_viz_led;
 static void led_gamma_40hz_cb(void *arg)
 {
     static bool on = false;
+    static uint8_t last_mode = 0xFF;
+
+    /* Read live rather than latching at boot, so turning the LED down from
+     * config_push.py takes effect immediately -- the point of the knob is
+     * being able to darken a bedroom without waiting for a reboot. */
+    uint8_t mode = g_nvs_config.led_mode;
+    uint8_t bright = g_nvs_config.led_brightness;
+    if (bright > 100) bright = 100;
+
+    if (mode == LED_MODE_OFF) {
+        /* Blank once on the transition, then leave the RMT idle instead of
+         * clocking out zeros eighty times a second for the node's lifetime. */
+        if (last_mode != LED_MODE_OFF) {
+            led_strip_set_pixel(s_viz_led, 0, 0, 0, 0);
+            led_strip_refresh(s_viz_led);
+            last_mode = mode;
+        }
+        return;
+    }
+    last_mode = mode;
+
     on = !on;
-    if (on) {
+    /* STEADY keeps the motion colour but drops the square wave: same
+     * information, no 40 Hz strobe. */
+    if (on || mode == LED_MODE_STEADY) {
         edge_vitals_pkt_t v;
         float m = edge_get_vitals(&v) ? v.motion_energy : 0.0f;
         float norm = m / LED_MOTION_FULLSCALE;
@@ -303,7 +334,10 @@ static void led_gamma_40hz_cb(void *arg)
         if (norm > 1.0f) norm = 1.0f;
         int idx = (int)(norm * 59.0f + 0.5f);
         const uint8_t *c = VIRIDIS_LUT[idx];
-        led_strip_set_pixel(s_viz_led, 0, c[0], c[1], c[2]); /* R,G,B (driver maps to GRB) */
+        led_strip_set_pixel(s_viz_led, 0,                    /* R,G,B (driver maps to GRB) */
+                            (uint32_t)c[0] * bright / 100,
+                            (uint32_t)c[1] * bright / 100,
+                            (uint32_t)c[2] * bright / 100);
     } else {
         led_strip_set_pixel(s_viz_led, 0, 0, 0, 0);          /* off phase */
     }
@@ -322,6 +356,10 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     /* Load runtime config (NVS overrides Kconfig defaults) */
+    /* Before loading config: if the last change is still on trial this arms
+     * the revert timer, so settings that cannot associate undo themselves. */
+    config_trial_boot_check();
+
     nvs_config_load(&g_nvs_config);
 
     /* Capture node_id IMMEDIATELY — before wifi_init_sta() can corrupt
@@ -330,7 +368,9 @@ void app_main(void)
     csi_collector_set_node_id(g_nvs_config.node_id);
 
     const esp_app_desc_t *app_desc = esp_app_get_description();
-#if defined(CONFIG_IDF_TARGET_ESP32C6)
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    const char *target_name = "ESP32-C5";
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
     const char *target_name = "ESP32-C6";
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
     const char *target_name = "ESP32-S3";
@@ -363,7 +403,10 @@ void app_main(void)
      * common module). On C6, GPIO 38/48 don't exist (only 0-30) — gate by target.
      * Behaviour is set by CONFIG_LED_GAMMA_VIZ (ADR-183): on = 40 Hz gamma flicker
      * coloured by CSI motion; off = clear the LED at boot. */
-#if defined(CONFIG_IDF_TARGET_ESP32C6)
+#if !defined(CONFIG_IDF_TARGET_ESP32C5) || CONFIG_C5_STATUS_LED_GPIO >= 0
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    const int led_gpio = CONFIG_C5_STATUS_LED_GPIO;
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
     const int led_gpio = 8;
 #else
     const int led_gpio = 48;
@@ -399,6 +442,7 @@ void app_main(void)
         led_strip_del(led_strip);
     }
 #endif /* CONFIG_LED_GAMMA_VIZ */
+#endif /* C5 LED wiring is opt-in; never drive an unknown board pin. */
 
     /* ADR-110 P4: 802.15.4 mesh time-sync (C6 only).
      * Initialized BEFORE WiFi so it's available even when WiFi STA can't

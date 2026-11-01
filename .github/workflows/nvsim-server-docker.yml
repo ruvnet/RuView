@@ -1,6 +1,7 @@
 name: nvsim-server → ghcr.io
 
-# Builds and publishes the nvsim-server Docker image to ghcr.io on:
+# Builds and publishes the nvsim-server Docker image under the repository
+# owner (ghcr.io/<owner>/nvsim-server) on:
 # - push to main affecting nvsim-server or nvsim
 # - tag push matching nvsim-server-v*
 # - manual workflow_dispatch
@@ -31,6 +32,10 @@ jobs:
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
 
+      # ghcr.io is always the target; there is no Docker Hub leg here.
+      # The image path is derived from the repository owner because a fork
+      # cannot push to the upstream's `ruvnet` namespace — that push
+      # fails with `denied: The requested installation does not exist`.
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
           registry: ghcr.io
@@ -41,7 +46,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302
         with:
-          images: ghcr.io/ruvnet/nvsim-server
+          images: ghcr.io/${{ github.repository_owner }}/nvsim-server
           tags: |
             type=ref,event=branch
             type=ref,event=tag
@@ -61,11 +66,16 @@ jobs:
           platforms: linux/amd64
 
       - name: Smoke-test the image
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/nvsim-server
         run: |
-          docker pull ghcr.io/ruvnet/nvsim-server:sha-${GITHUB_SHA::7} || \
-            docker pull ghcr.io/ruvnet/nvsim-server:latest
+          # `type=sha,format=short` is emitted on every event, so this is
+          # the one tag that always exists after a successful push. The
+          # old `|| latest` fallback hid a failed push and only worked on
+          # the default branch, so tag builds never reached this step.
+          docker pull "${IMAGE}:sha-${GITHUB_SHA::7}"
           docker run --rm -d --name nvsim-test -p 7878:7878 \
-            ghcr.io/ruvnet/nvsim-server:latest
+            "${IMAGE}:sha-${GITHUB_SHA::7}"
           sleep 4
           curl -fsS http://localhost:7878/api/health
           docker stop nvsim-test

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Type declarations for @ruvnet/ruview/sdk (ADR-369).
 
-export type FirmwareVariant = 's3-8mb' | 's3-4mb' | 'c6';
+export type FirmwareVariant = 's3-8mb' | 's3-4mb' | 'c6' | 'c5';
 export type TrainMode = 'pose-smoke' | 'pose' | 'room';
 export type Split = 'chronological' | 'blocked-gap' | 'grouped-subject' | 'grouped-session' | 'random-frame';
 export type DoctorGroup = 'runtime' | 'harness' | 'hosts' | 'repo' | 'rust' | 'python' | 'firmware' | 'serial' | 'devices' | 'remote' | 'sensing' | 'kernel';

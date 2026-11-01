@@ -2,6 +2,7 @@
 
 #include "serial_onboarding_protocol.h"
 #include "onboarding_identity.h"
+#include "onboarding_console.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -29,7 +30,9 @@ static int64_t s_nonce_issued_at_us;
 
 static const char *chip_name(void)
 {
-#if defined(CONFIG_IDF_TARGET_ESP32C6)
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    return "esp32c5";
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
     return "esp32c6";
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
     return "esp32s3";
@@ -157,6 +160,8 @@ static void serial_onboarding_task(void *argument)
 esp_err_t serial_onboarding_start(const nvs_config_t *config)
 {
     if (config == NULL) return ESP_ERR_INVALID_ARG;
+    const esp_err_t console_result = ruview_onboarding_console_prepare();
+    if (console_result != ESP_OK) return console_result;
     memcpy(&s_current_config, config, sizeof(s_current_config));
     const BaseType_t created = xTaskCreate(serial_onboarding_task, "serial_onboard",
                                            4096, NULL, 4, NULL);

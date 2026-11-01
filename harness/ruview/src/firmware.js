@@ -16,14 +16,15 @@ export const FIRMWARE_VARIANTS = Object.freeze({
   's3-8mb': Object.freeze({ chip: 'esp32s3', chipName: 'ESP32-S3', flashSize: '8MB' }),
   's3-4mb': Object.freeze({ chip: 'esp32s3', chipName: 'ESP32-S3', flashSize: '4MB' }),
   c6: Object.freeze({ chip: 'esp32c6', chipName: 'ESP32-C6', flashSize: '4MB' }),
+  c5: Object.freeze({ chip: 'esp32c5', chipName: 'ESP32-C5', flashSize: '4MB' }),
 });
 
-/** Image layout shared by the S3 and C6 partition tables (README §2). */
+/** Shared partition/app layout; C5 boots at 0x2000 instead of S3/C6's 0x0. */
 const IMAGES = Object.freeze([
   { role: 'bootloader', offset: '0x0', names: ['bootloader.bin', 'bootloader/bootloader.bin'], required: true },
-  { role: 'partition-table', offset: '0x8000', names: ['partition-table.bin', 'partition_table/partition-table.bin'], names4mb: ['partition-table-4mb.bin'], namesC6: ['partition-table-c6.bin'], required: true },
+  { role: 'partition-table', offset: '0x8000', names: ['partition-table.bin', 'partition_table/partition-table.bin'], names4mb: ['partition-table-4mb.bin'], namesC6: ['partition-table-c6.bin'], namesC5: ['partition-table-c5.bin'], required: true },
   { role: 'otadata', offset: '0xf000', names: ['ota_data_initial.bin'], required: false },
-  { role: 'app', offset: '0x20000', names: ['esp32-csi-node.bin'], names4mb: ['esp32-csi-node-4mb.bin'], namesC6: ['esp32-csi-node-c6.bin'], required: true },
+  { role: 'app', offset: '0x20000', names: ['esp32-csi-node.bin'], names4mb: ['esp32-csi-node-4mb.bin'], namesC6: ['esp32-csi-node-c6.bin'], namesC5: ['esp32-csi-node-c5.bin'], required: true },
 ]);
 
 const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
@@ -88,7 +89,8 @@ export function resolveBundle(bundleDir, variant, { requireChecksums = true } = 
   }
   const images = [];
   for (const image of IMAGES) {
-    const variantNames = variant === 'c6' ? image.namesC6 : variant === 's3-4mb' ? image.names4mb : [];
+    const variantNames = variant === 'c5' ? image.namesC5
+      : variant === 'c6' ? image.namesC6 : variant === 's3-4mb' ? image.names4mb : [];
     const candidates = [...(variantNames ?? []), ...image.names];
     const found = candidates.map((n) => join(root, n)).find((p) => existsSync(p));
     if (!found) {
@@ -113,7 +115,8 @@ export function resolveBundle(bundleDir, variant, { requireChecksums = true } = 
         throw new FirmwareError('checksum_mismatch', `${rel} sha256 ${digest} does not match ${checksums.file}`);
       } else integrity = 'verified';
     }
-    images.push({ role: image.role, offset: image.offset, file: found, relative: rel, bytes: stat.size, sha256: digest, integrity });
+    const offset = variant === 'c5' && image.role === 'bootloader' ? '0x2000' : image.offset;
+    images.push({ role: image.role, offset, file: found, relative: rel, bytes: stat.size, sha256: digest, integrity });
   }
   // A 4 MB board must not receive the 8 MB partition table, and vice versa.
   const table = images.find((i) => i.role === 'partition-table');
@@ -134,16 +137,16 @@ export function buildFlashArgs(bundle, { port, baud = 460800 }) {
 
 /** Parse `esptool chip_id` output into a chip name like "ESP32-S3". */
 export function parseChip(output) {
-  const m = /(?:Chip is|Detecting chip type\.\.\.|Chip type:)\s*(ESP32(?:-[A-Z0-9]+)?)/i.exec(output);
-  return m ? m[1].toUpperCase() : null;
+  const m = /(?:Chip is|Detecting chip type\.\.\.|Chip type:)\s*(ESP32(?:-[A-Z0-9]+)?(?:\s*\(beta\d+\))?)/i.exec(output);
+  return m ? m[1].replace(/\s+\(/g, '(').toUpperCase() : null;
 }
 
 /** Summarize a captured serial boot log into hardware evidence. */
 export function summarizeBootLog(text) {
   const lines = String(text).split(/\r?\n/);
-  const csi = lines.filter((l) => /CSI cb|csi_collector/.test(l)).length;
-  const panic = lines.some((l) => /Guru Meditation|abort\(\) was called|Backtrace:/.test(l));
-  const version = (/(?:RuView|esp32-csi-node)[^\n]*?v?(\d+\.\d+\.\d+)/i.exec(text) || [])[1] || null;
+  const csi = lines.filter((l) => /\bCSI cb #[1-9]\d*\b/.test(l)).length;
+  const panic = lines.some((l) => /Guru Meditation|abort\(\) was called|Backtrace:|SPI flash busy detected|TG[01]_WDT/.test(l));
+  const version = (/(?:RuView|esp32-csi-node|ESP32(?:-[A-Z0-9]+)? CSI Node)[^\n]*?v?(\d+\.\d+\.\d+)/i.exec(text) || [])[1] || null;
   return {
     lines: lines.filter(Boolean).length,
     csiCallbacks: csi,
@@ -202,6 +205,19 @@ export async function flashFirmware(args, deps) {
   const python = deps.python();
   if (!python) return { ok: false, reason: 'python_missing', plan, remedy: 'Install Python 3 and `pip install esptool pyserial`.' };
 
+  if (variant === 'c5') {
+    // esptool 5.3 corrected C5 security-eFuse layouts. Never write a new C5
+    // through an older tool that can misinterpret its flash security state.
+    const version = await deps.exec(python, ['-m', 'esptool', 'version'], { timeoutMs: 15_000 });
+    const match = /esptool(?:\.py)?\s+v(\d+)\.(\d+)/i.exec(version.stdout + version.stderr);
+    const major = match ? Number(match[1]) : NaN;
+    const minor = match ? Number(match[2]) : NaN;
+    if (!version.ok || !Number.isSafeInteger(major) || !Number.isSafeInteger(minor) || major < 5 || (major === 5 && minor < 3)) {
+      return { ok: false, reason: 'esptool_version_unsupported', plan,
+        remedy: 'ESP32-C5 requires esptool >=5.3 for corrected security layouts. Install a current esptool in your active Python environment.' };
+    }
+  }
+
   const probe = await deps.exec(python, ['-m', 'esptool', '--port', args.port, 'chip_id'], { timeoutMs: 60_000 });
   if (/No module named '?esptool/i.test(probe.stderr + probe.stdout)) {
     return { ok: false, reason: 'esptool_missing', plan, remedy: 'pip install esptool' };
@@ -212,6 +228,14 @@ export async function flashFirmware(args, deps) {
   }
   if (detected !== bundle.chipName) {
     return { ok: false, reason: 'chip_mismatch', plan, detected, expected: bundle.chipName, detail: 'Refusing to flash firmware built for a different chip.' };
+  }
+
+  if (variant === 'c5') {
+    const flash = await deps.exec(python, ['-m', 'esptool', '--port', args.port, 'flash_id'], { timeoutMs: 60_000 });
+    const size = /Detected flash size:\s*(\d+)\s*(KB|MB)/i.exec(flash.stdout + flash.stderr);
+    const bytes = size ? Number(size[1]) * (size[2].toUpperCase() === 'MB' ? 1024 * 1024 : 1024) : NaN;
+    if (!flash.ok || !Number.isSafeInteger(bytes) || bytes <= 0) return { ok: false, reason: 'flash_capacity_unverified', plan, detail: 'C5 flash capacity could not be verified; nothing was written.' };
+    if (bytes < 4 * 1024 * 1024) return { ok: false, reason: 'flash_capacity_too_small', plan, detail: 'The C5 release layout requires at least 4 MB flash; nothing was written.' };
   }
 
   const written = await deps.exec(python, ['-m', 'esptool', ...flashArgs], { timeoutMs: 300_000 });
