@@ -17,6 +17,7 @@ pub mod cli;
 pub mod csi;
 mod engine_bridge;
 mod field_bridge;
+mod source_bank_shadow;
 mod field_localize;
 mod model_format;
 mod multistatic_bridge;
@@ -315,6 +316,10 @@ struct Args {
     /// Start field model calibration on boot (empty room required)
     #[arg(long)]
     calibrate: bool,
+
+    /// Collect a memory-only per-source shadow during explicit room calibration; never promote it.
+    #[arg(long)]
+    source_bank_shadow: bool,
 
     // ---------------------------------------------------------------
     // ADR-102: Edge Module Registry — surface the canonical Cognitum
@@ -2203,6 +2208,8 @@ struct AppStateInner {
     engine_bridge: engine_bridge::EngineBridge,
     /// SVD-based room field model for eigenvalue person counting (None until calibration).
     field_model: Option<FieldModel>,
+    source_bank_shadow_enabled: bool,
+    source_bank_shadow: Option<source_bank_shadow::ShadowCapture>,
     /// Stable installation identity used only to bind local persisted state.
     installation_id: Option<String>,
     /// Metadata for the privacy reduced empty room image, when available.
@@ -2645,6 +2652,7 @@ impl AppStateInner {
             }
             CalibrationSequenceOrder::Discontinuity => {
                 self.calibration_sequence_fault_node_ids.insert(node_id);
+                if let Some(shadow) = self.source_bank_shadow.as_mut() { shadow.invalidate(); }
                 warn!(
                     node_id,
                     previous_sequence,
@@ -2700,6 +2708,9 @@ impl AppStateInner {
             if let Some(node) = self.node_states.get_mut(&node_id) {
                 node.push_field_model_frame(sequence, amplitudes, observed_at);
             }
+            if let Some(shadow) = self.source_bank_shadow.as_mut() {
+                shadow.observe(node_id, chrono::Utc::now().timestamp_micros().max(0) as u64, amplitudes);
+            }
         }
         accepted
     }
@@ -2712,6 +2723,7 @@ impl AppStateInner {
     }
 
     fn clear_field_model_binding(&mut self) {
+        self.source_bank_shadow = None;
         self.calibration_grid_binding = None;
         for node in self.node_states.values_mut() {
             node.clear_field_model_history();
@@ -3130,6 +3142,8 @@ impl AppStateInner {
                 None,
             ),
             field_model: None,
+            source_bank_shadow_enabled: false,
+            source_bank_shadow: None,
             installation_id: None,
             bootstrap_baseline: None,
             bootstrap_baseline_active: false,
@@ -10570,6 +10584,11 @@ async fn calibration_start(
             s.calibration_source_node_ids
                 .extend(request.source_node_ids.iter().copied());
             s.calibration_grid_binding = Some(selected_binding);
+            if s.source_bank_shadow_enabled {
+                s.source_bank_shadow = source_bank_shadow::ShadowCapture::new(
+                    &request.source_node_ids, selected_binding.grid.n_subcarriers as usize,
+                    format!("csi-{}-{}", selected_binding.grid.n_subcarriers, selected_binding.grid.ppdu_type));
+            }
             Json(serde_json::json!({
                 "success": true,
                 "message": "Calibration started — keep room empty while frames accumulate.",
@@ -10711,6 +10730,7 @@ async fn calibration_stop(
                 };
                 s.calibration_restored = false;
                 s.calibration_model_receipt = Some(receipt.clone());
+                if let Some(shadow) = s.source_bank_shadow.as_mut() { shadow.freeze(ts); }
                 s.begin_field_model_holdout(binding);
                 info!("Field model calibrated: baseline_eigenvalues={baseline}, variance_explained={variance_explained:.2}");
                 Json(serde_json::json!({
@@ -10864,6 +10884,11 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
     response["source_node_ids"] = serde_json::json!(if bound { s.calibration_source_node_ids.iter().copied().collect::<Vec<_>>() } else { Vec::new() });
     response["observed_source_node_ids"] = serde_json::json!(if bound { s.calibration_observed_source_node_ids.iter().copied().collect::<Vec<_>>() } else { Vec::new() });
     response["missing_source_node_ids"] = serde_json::json!(if bound { s.calibration_source_node_ids.difference(&s.calibration_observed_source_node_ids).copied().collect::<Vec<_>>() } else { Vec::new() });
+    if !s.privacy_mode {
+        if let Some(shadow) = s.source_bank_shadow.as_ref() {
+            response["source_bank_shadow"] = shadow.diagnostics(observed_at_unix_ms.saturating_mul(1_000));
+        }
+    }
     Json(response)
 }
 
@@ -15872,6 +15897,8 @@ async fn main() {
         )
         .with_node_positions(engine_bridge_node_positions),
         field_model: bootstrap_field_model,
+        source_bank_shadow_enabled: args.source_bank_shadow,
+        source_bank_shadow: None,
         installation_id: args.installation_id.clone(),
         bootstrap_baseline: bootstrap_metadata.clone(),
         bootstrap_baseline_active,
