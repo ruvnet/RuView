@@ -23,16 +23,16 @@ fn ht64_packet_retains_original_signed_iq_phase_mask_and_unknown_geometry() {
     assert!(packet.native_frame.valid_mask.iter().all(|v|*v));
     assert!(packet.native_frame.transmitter_pose.is_none() && packet.native_frame.receiver_pose.is_none()
         && packet.native_frame.antenna_geometry.is_empty());
-    assert_eq!(packet.grid_id,"ant1-bins64-ppdu0-usable-drop2-v1");
+    assert_eq!(packet.grid_id,"ant1-bins64-ppdu0-usable-drop2-linear-v2");
 }
 #[test]
 fn he256_packet_uses_actual_frame_contract_and_existing_56_bin_projection() {
     let payload=bytes(256,6,8);
     let packet=canonicalize_esp32(input(&payload,256)).unwrap();
-    let direct=HardwareNormalizer::new().resample_to_canonical(&vec![10.0;254]);
+    let direct=HardwareNormalizer::new().resample_magnitude_to_canonical(&vec![10.0;254]).unwrap();
     assert_eq!(packet.amplitudes,direct);
     assert_eq!(packet.native_frame.native_shape,vec![1,256,1]);
-    assert_eq!(packet.grid_id,"ant1-bins256-ppdu1-usable-drop2-v1");
+    assert_eq!(packet.grid_id,"ant1-bins256-ppdu1-usable-drop2-linear-v2");
     assert_eq!(packet.amplitudes.len(),56);
 }
 #[test]
@@ -116,7 +116,7 @@ fn actual_raw_grid_identity_survives_both_supported_families() {
         let bins=if ppdu==PpduType::HtLegacy {64} else {256};let payload=bytes(bins,3,4);
         let mut i=input(&payload,bins);i.ppdu_type=ppdu;
         let packet=canonicalize_esp32(i).unwrap();
-        assert_eq!(packet.grid_id,format!("ant1-bins{bins}-ppdu{}-usable-drop2-v1",ppdu.to_byte()));
+        assert_eq!(packet.grid_id,format!("ant1-bins{bins}-ppdu{}-usable-drop2-linear-v2",ppdu.to_byte()));
         assert_eq!((packet.frequency_hz,packet.bandwidth_hz),(2_437_000_000,20_000_000));
     }
 }
@@ -145,4 +145,32 @@ fn source_record_requires_actual_receiver_rate_and_never_invents_one_hz() {
     assert_eq!(packet.native_frame.sample_rate_hz,42.0);
     assert_eq!(packet.receiver_sample_rate_hz,42.0);
     assert!(!packet.temporal_sample_rate_known);
+}
+
+#[test]
+fn valid_native_spectral_nulls_are_admitted_without_negative_projected_magnitudes() {
+    for bins in [64, 256] {
+        let payload: Vec<u8> = (0..bins)
+            .flat_map(|bin| [if bin % 8 == 0 { 100 } else { 0 }, 0])
+            .collect();
+        let result = canonicalize_esp32(input(&payload, bins));
+        assert!(
+            result.is_ok(),
+            "valid {bins}-bin spectral nulls must not be rejected by interpolation: {result:?}"
+        );
+        let packet = result.unwrap();
+        assert!(packet
+            .amplitudes
+            .iter()
+            .all(|v| v.is_finite() && *v >= 0.0 && *v <= 100.0));
+        for (actual, original) in packet
+            .native_frame
+            .native_iq
+            .iter()
+            .zip(payload.chunks_exact(2))
+        {
+            assert_eq!(actual.re, f64::from(original[0] as i8));
+            assert_eq!(actual.im, 0.0);
+        }
+    }
 }

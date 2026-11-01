@@ -92,7 +92,14 @@ pub fn grid_id(n_antennas: usize, raw_bins: usize, ppdu_type: PpduType) -> Resul
         PpduType::Unknown => false,
     };
     if !supported { return Err("unsupported ESP32 antenna/grid/PPDU".into()); }
-    Ok(format!("ant{n_antennas}-bins{raw_bins}-ppdu{}-usable-drop2-v1", ppdu_type.to_byte()))
+    Ok(format!("ant{n_antennas}-bins{raw_bins}-ppdu{}-usable-drop2-linear-v2", ppdu_type.to_byte()))
+}
+
+pub fn is_supported_frequency_hz(frequency_hz: u64) -> bool {
+    let mhz = frequency_hz / 1_000_000;
+    frequency_hz % 1_000_000 == 0
+        && ((2412..=2484).contains(&mhz) || (4900..=5900).contains(&mhz)
+            || (5925..=7125).contains(&mhz))
 }
 
 /// Preserves original signed int8 complex samples; uses only the existing
@@ -105,9 +112,7 @@ pub fn canonicalize_esp32(input: NativePacketInput<'_>) -> Result<CanonicalPacke
     if !input.receiver_sample_rate_hz.is_finite() || input.receiver_sample_rate_hz <= 0.0 {
         return Err("measured receiver cadence is unavailable".into());
     }
-    let mhz = input.frequency_hz / 1_000_000;
-    if input.frequency_hz % 1_000_000 != 0
-        || !((2412..=2484).contains(&mhz) || (4900..=5900).contains(&mhz) || (5925..=7125).contains(&mhz)) {
+    if !is_supported_frequency_hz(input.frequency_hz) {
         return Err("unknown or unsupported ESP32 centre frequency".into());
     }
     let expected = input.raw_bins * 2;
@@ -145,7 +150,7 @@ pub fn canonicalize_esp32(input: NativePacketInput<'_>) -> Result<CanonicalPacke
         return Err("retained native region contains an invalid sample".into());
     }
     let magnitudes: Vec<_> = native_frame.native_iq[2..].iter().map(|z| z.norm()).collect();
-    let amplitudes = HardwareNormalizer::new().resample_to_canonical(&magnitudes);
+    let amplitudes = HardwareNormalizer::new().resample_magnitude_to_canonical(&magnitudes).map_err(|e|e.to_string())?;
     if amplitudes.len() != CANONICAL_PACKET_BINS || amplitudes.iter().any(|v| !v.is_finite() || *v < 0.0) {
         return Err("length-only magnitude projection produced an invalid feature vector".into());
     }
