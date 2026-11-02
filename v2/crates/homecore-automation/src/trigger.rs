@@ -110,6 +110,14 @@ impl Trigger {
                 if !eid_match {
                     return false;
                 }
+                // With from/to constraints only a state-value transition
+                // qualifies. Unconstrained triggers still observe attributes.
+                if (from.is_some() || to.is_some())
+                    && ctx.from_state.as_ref().zip(ctx.to_state.as_ref())
+                        .is_some_and(|(old, new)| old.state == new.state)
+                {
+                    return false;
+                }
                 if let Some(expected_from) = from {
                     let actual_from = ctx.from_state.as_ref().map(|s| s.state.as_str()).unwrap_or("unavailable");
                     if actual_from != expected_from.as_str() {
@@ -194,6 +202,40 @@ mod tests {
             Some(make_state(entity_id, from)),
             Some(make_state(entity_id, to)),
         )
+    }
+
+    #[test]
+    fn constrained_state_trigger_ignores_attribute_only_changes() {
+        let eid = EntityId::parse("light.kitchen").unwrap();
+        let ctx = TriggerContext::state_changed(
+            eid.clone(),
+            Some(Arc::new(State::new(
+                eid.clone(),
+                "on",
+                serde_json::json!({"brightness": 10}),
+                Context::new(),
+            ))),
+            Some(Arc::new(State::new(
+                eid.clone(),
+                "on",
+                serde_json::json!({"brightness": 20}),
+                Context::new(),
+            ))),
+        );
+        for (from, to) in [(None, Some("on".into())), (Some("on".into()), None)] {
+            assert!(!Trigger::State {
+                entity_id: eid.clone(),
+                from,
+                to
+            }
+            .matches_sync(&ctx));
+        }
+        assert!(Trigger::State {
+            entity_id: eid,
+            from: None,
+            to: None
+        }
+        .matches_sync(&ctx));
     }
 
     #[test]
