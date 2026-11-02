@@ -187,14 +187,34 @@ impl Recorder {
     }
 
     /// Persist a `StateChangedEvent`. Inserts into `states` and dedupes into
-    /// `state_attributes`. Returns the `state_id` of the new row.
+    /// `state_attributes`. Returns the `state_id` of a snapshot row. Removals
+    /// persist an explicit tombstone and return `None`.
     pub async fn record_state(
         &self,
         event: &StateChangedEvent,
     ) -> Result<Option<i64>, RecorderError> {
         let new_state = match &event.new_state {
             Some(s) => s,
-            None => return Ok(None), // removal event — no row to insert
+            None => {
+                // Keep a durable tombstone without discarding the entity's history.
+                // Mark it explicitly so legacy NULL states still report corruption.
+                let ts = event.fired_at.timestamp_micros() as f64 / 1_000_000.0;
+                let mut tx = self.pool.begin().await?;
+                let row = sqlx::query(
+                    "INSERT INTO states (entity_id, state, last_changed_ts, last_updated_ts) VALUES (?, NULL, ?, ?)",
+                )
+                .bind(event.entity_id.as_str())
+                .bind(ts)
+                .bind(ts)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query("INSERT INTO state_removals (state_id) VALUES (?)")
+                    .bind(row.last_insert_rowid())
+                    .execute(&mut *tx)
+                    .await?;
+                tx.commit().await?;
+                return Ok(None);
+            }
         };
 
         let attrs_json = serde_json::to_string(&new_state.attributes)?;
@@ -322,10 +342,11 @@ impl Recorder {
                         s.last_changed_ts, s.last_updated_ts, s.context_id \
                  FROM states s \
                  LEFT JOIN state_attributes sa ON s.attributes_id = sa.attributes_id \
-                 WHERE ?1 = '' \
+                 WHERE NOT EXISTS (SELECT 1 FROM state_removals r WHERE r.state_id = s.state_id) \
+                   AND (?1 = '' \
                     OR s.entity_id   LIKE ?2 ESCAPE '\\' \
                     OR s.state        LIKE ?2 ESCAPE '\\' \
-                    OR sa.shared_attrs LIKE ?2 ESCAPE '\\' \
+                    OR sa.shared_attrs LIKE ?2 ESCAPE '\\') \
                  ORDER BY s.last_updated_ts DESC \
                  LIMIT ?3",
         )
@@ -374,7 +395,7 @@ impl Recorder {
                          s.last_changed_ts, s.last_updated_ts, s.context_id \
                  FROM states s \
                  LEFT JOIN state_attributes sa ON s.attributes_id = sa.attributes_id \
-                 WHERE s.state_id = ?",
+                 WHERE s.state_id = ? AND NOT EXISTS (SELECT 1 FROM state_removals r WHERE r.state_id = s.state_id)",
         )
         .bind(state_id)
         .fetch_optional(&self.pool)
@@ -469,6 +490,7 @@ impl Recorder {
              FROM states s \
              LEFT JOIN state_attributes sa ON s.attributes_id = sa.attributes_id \
              WHERE s.entity_id = ? \
+               AND NOT EXISTS (SELECT 1 FROM state_removals r WHERE r.state_id = s.state_id) \
                AND s.last_updated_ts >= ? \
                AND s.last_updated_ts <= ? \
              ORDER BY s.last_updated_ts ASC \
@@ -504,7 +526,8 @@ impl Recorder {
             .collect()
     }
 
-    /// Read the newest row for each entity in deterministic entity-id order.
+    /// Read the newest snapshot for each live entity in entity-id order.
+    /// A newest removal row suppresses the entity without consuming the limit.
     ///
     /// The query is bounded and uses `(last_updated_ts, state_id)` as a stable
     /// newest-row tie-break. Malformed rows are reported and skipped
@@ -539,8 +562,8 @@ impl Recorder {
                       ) AS newest \
                FROM states s \
                LEFT JOIN state_attributes sa ON s.attributes_id = sa.attributes_id \
-             ) \
-             WHERE newest = 1 \
+             ) latest \
+             WHERE newest = 1 AND NOT EXISTS (SELECT 1 FROM state_removals r WHERE r.state_id = latest.state_id) \
              ORDER BY entity_id ASC \
              LIMIT ?",
         )
@@ -678,7 +701,7 @@ impl Recorder {
     ///
     /// ## Atomicity (no partial-corrupt state)
     ///
-    /// All three deletes run inside a single transaction. A failure mid-purge
+    /// All deletes, including removal-marker cleanup, run in one transaction. A failure mid-purge
     /// rolls the whole operation back — the store is never left with states
     /// deleted but their events kept, or attributes orphaned by a half-purge.
     ///
@@ -695,6 +718,12 @@ impl Recorder {
             .execute(&mut *tx)
             .await?
             .rows_affected();
+
+        sqlx::query(
+            "DELETE FROM state_removals WHERE state_id NOT IN (SELECT state_id FROM states)",
+        )
+        .execute(&mut *tx)
+        .await?;
 
         let events_deleted = sqlx::query("DELETE FROM events WHERE time_fired_ts < ?")
             .bind(cutoff_ts)
@@ -1487,5 +1516,112 @@ mod tests {
         let bounded = recorder.latest_states(1).await.unwrap();
         assert!(bounded.truncated);
         assert!(bounded.states.len() <= 1);
+    }
+    #[tokio::test]
+    async fn removed_entity_stays_absent_after_reopen_without_losing_history() {
+        let path = std::env::temp_dir().join(format!("homecore-removal-{}.db", Context::new().id));
+        let url = format!("sqlite://{}", path.display());
+        let recorder = Recorder::open(&url).await.unwrap();
+        let event = make_state_event("light.kitchen", "on", serde_json::json!({"brightness": 42}));
+        recorder.record_state(&event).await.unwrap();
+        let removal = StateChangedEvent {
+            entity_id: event.entity_id.clone(),
+            old_state: event.new_state.clone(),
+            new_state: None,
+            // Equal timestamps also require the tombstone's row-id tie-break.
+            fired_at: event.new_state.as_ref().unwrap().last_updated,
+        };
+        assert!(recorder.record_state(&removal).await.unwrap().is_none());
+        recorder.pool.close().await;
+        let recorder = Recorder::open(&url).await.unwrap();
+        let sm = StateMachine::new();
+        let restored = recorder.restore_latest(&sm, 10).await.unwrap();
+        assert_eq!(
+            restored.restored, 0,
+            "removed entities must not be resurrected"
+        );
+        assert!(restored.warnings.is_empty());
+        let history = recorder
+            .get_state_history(
+                &event.entity_id,
+                Utc::now() - chrono::Duration::seconds(10),
+                Utc::now() + chrono::Duration::seconds(10),
+            )
+            .await
+            .unwrap();
+        assert_eq!(history.len(), 1, "the original snapshot remains queryable");
+        assert_eq!(history[0].state, "on");
+        assert_eq!(
+            recorder.search_states_by_text("", 10).await.unwrap().len(),
+            1
+        );
+        assert_eq!(
+            recorder.search_semantic("kitchen", 10).await.unwrap().len(),
+            1
+        );
+        recorder
+            .record_state(&make_state_event(
+                "light.kitchen",
+                "off",
+                serde_json::json!({}),
+            ))
+            .await
+            .unwrap();
+        let batch = recorder.latest_states(10).await.unwrap();
+        assert_eq!(batch.states.len(), 1);
+        assert_eq!(batch.states[0].state, "off");
+        recorder.pool.close().await;
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn removals_preserve_restore_limits_legacy_warnings_and_retention() {
+        let recorder = open_memory().await;
+        let time = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        let mut old = make_state_event("sensor.a", "on", serde_json::json!({}));
+        Arc::make_mut(old.new_state.as_mut().unwrap()).last_updated = time;
+        recorder.record_state(&old).await.unwrap();
+        let removal = StateChangedEvent {
+            entity_id: old.entity_id.clone(),
+            old_state: old.new_state,
+            new_state: None,
+            fired_at: time + chrono::Duration::seconds(1),
+        };
+        recorder.record_state(&removal).await.unwrap();
+        recorder
+            .record_state(&make_state_event("sensor.z", "on", serde_json::json!({})))
+            .await
+            .unwrap();
+        let batch = recorder.latest_states(1).await.unwrap();
+        assert_eq!(batch.states.len(), 1);
+        assert_eq!(batch.states[0].entity_id.as_str(), "sensor.z");
+        assert!(
+            !batch.truncated,
+            "removed entities do not consume restore slots"
+        );
+        let stats = recorder.purge(removal.fired_at).await.unwrap();
+        assert_eq!(
+            stats.states_deleted, 1,
+            "the removal survives at the cutoff"
+        );
+        assert_eq!(recorder.latest_states(10).await.unwrap().states.len(), 1);
+        let stats = recorder
+            .purge(removal.fired_at + chrono::Duration::seconds(1))
+            .await
+            .unwrap();
+        assert_eq!(stats.states_deleted, 1);
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM state_removals")
+            .fetch_one(&recorder.pool)
+            .await
+            .unwrap();
+        assert_eq!(count.0, 0, "purge collects orphan removal markers");
+        assert_eq!(recorder.latest_states(10).await.unwrap().states.len(), 1);
+        sqlx::query("INSERT INTO states (entity_id, state, last_updated_ts) VALUES ('sensor.legacy', NULL, 1)")
+            .execute(&recorder.pool).await.unwrap();
+        let batch = recorder.latest_states(10).await.unwrap();
+        assert!(matches!(
+            batch.warnings.as_slice(),
+            [RestoreWarning::MissingState { .. }]
+        ));
     }
 }
