@@ -106,40 +106,77 @@ pub(crate) fn observe(
     let Some(runtime) = state.room_learning.clone() else {
         return;
     };
-    let key = NativeSourceKey::from_frame(frame);
-    if state.room_learning_sources.len() >= 1024 && !state.room_learning_sources.contains_key(&key)
-    {
-        return;
-    }
-    let id = native::grid_id(
+    // Unsupported input must never consume the bounded readiness cache. Keep
+    // the selected-source rejection diagnostic without admitting any evidence.
+    let Ok(id) = native::grid_id(
         frame.n_antennas as usize,
         frame.n_subcarriers as usize,
         frame.ppdu_type,
-    )
-    .ok();
-    let meta = state
-        .room_learning_sources
-        .entry(key)
-        .or_insert_with(|| LiveSource {
-            frequency_hz: u64::from(frame.freq_mhz) * 1_000_000,
-            bandwidth_hz: if !frame.adr018_flags.bw40 && id.is_some() {
-                Some(20_000_000)
-            } else {
-                None
-            },
-            receiver_rate_hz: 0.0,
-            arrivals: VecDeque::new(),
-        });
-    meta.record(now);
-    let (frequency_hz, rate) = (meta.frequency_hz, meta.receiver_rate_hz);
-    let Some(id) = id else { return };
-    if !runtime.selects_grid(frame.node_id, &id) {
+    ) else {
+        return;
+    };
+    let frequency_hz = u64::from(frame.freq_mhz) * 1_000_000;
+    let rejection = if frame.adr018_flags.bw40 {
+        Some("native capture does not support the reported 40 MHz bandwidth")
+    } else if !native::is_supported_frequency_hz(frequency_hz) {
+        Some("unknown or unsupported ESP32 centre frequency")
+    } else {
+        None
+    };
+    if let Some(reason) = rejection {
+        runtime.record_native_rejection(frame.node_id, &id, reason);
         return;
     }
     let bytes = usize::from(frame.n_antennas) * usize::from(frame.n_subcarriers) * 2;
     let Some(iq) = packet.get(20..20 + bytes) else {
         return;
     };
+    let key = NativeSourceKey::from_frame(frame);
+    if state.room_learning_sources.len() >= 1024 && !state.room_learning_sources.contains_key(&key)
+    {
+        // Reclaim only expired unrelated classes. Selected contexts keep their
+        // identity, but eligible() still expires their readiness by receiver
+        // time; retaining a key cannot manufacture a fresh source window.
+        let context = runtime.context();
+        state.room_learning_sources.retain(|key, meta| {
+            let fresh = meta.arrivals.back().is_some_and(|last| {
+                now.saturating_duration_since(*last) <= CALIBRATION_GRID_EVIDENCE_WINDOW
+            });
+            fresh
+                || context.as_ref().is_some_and(|context| {
+                    context.sources.iter().any(|source| {
+                        source.source_id == key.node_id
+                            && source.center_frequency_hz == meta.frequency_hz
+                            && Some(source.bandwidth_hz) == meta.bandwidth_hz
+                            && native::grid_id(
+                                key.n_antennas as usize,
+                                key.raw_bins as usize,
+                                wifi_densepose_hardware::PpduType::from_byte(key.ppdu_type),
+                            )
+                            .ok()
+                            .as_deref()
+                                == Some(source.grid_id.as_str())
+                    })
+                })
+        });
+        if state.room_learning_sources.len() >= 1024 {
+            return;
+        }
+    }
+    let meta = state
+        .room_learning_sources
+        .entry(key)
+        .or_insert_with(|| LiveSource {
+            frequency_hz,
+            bandwidth_hz: Some(20_000_000),
+            receiver_rate_hz: 0.0,
+            arrivals: VecDeque::new(),
+        });
+    meta.record(now);
+    let rate = meta.receiver_rate_hz;
+    if !runtime.selects_grid(frame.node_id, &id) {
+        return;
+    }
     let ns = runtime.receiver_now_ns();
     let projected = match native::canonicalize_esp32(NativePacketInput {
         node_id: frame.node_id,
