@@ -51,7 +51,7 @@
     "src/devices/lidar.js": "d9a91e2b6eec21463bbb950fc333e9d0ebd2699a7c533d534323bb4d6a55bd97",
     "src/devices/mmwave.js": "2ac0be6c4be3c71d147d4bc57b8fd516d051234a8897295bc9e7f9c36c8ae710",
     "src/devices/registry.js": "26725e43adaa908b41462f492c5f6bf63e9193f3ee076e3d64ebaa012b66f6be",
-    "src/devices/serial-pump.js": "86fd00708c7f74ca004eee1b729821aa10a70bfd394cc556dc0ec4b64b43b149",
+    "src/devices/serial-pump.js": "2f77c02e0741059a3ec14a96029aeb0a17458fc69f0440f7ac0a2dbf25d1ed16",
     "src/doctor.js": "e5feccab91da3fdad16316ed7fd9090218a55b6de48772219ced96a930b87e75",
     "src/exec.js": "8889d13b8a8277f322856e743c79ac8f29b707251eaf9757c46d3f745743ae22",
     "src/firmware.js": "b0aa0a1e49a75072cb9d0422572152c6552a451e41df264e0489eda22a5d1c62",
@@ -75,7 +75,7 @@
     "src/training.js": "bd8a6c12eba4f9d2f8990fa9692cd04c743ea247f9b13e10f8717ceefcbd09ac",
     "src/ui/console-widget.js": "0d2f707d57b5ec54968dee1dc80f31c7db9152dcadfc48700c18379dabb55462"
   },
-  "filesDigest": "1876f3c17e08626d4a93d01eaf3a95e63b2eb262572f2eaf58803c165cfc4f22",
+  "filesDigest": "ac17b00433746a988044d3f9af398c76e4484184a396a725f322e94fef1f2e1f",
   "brainDigest": "c0fb7b079ded157059b91601361429944697dae3cc42abc00dfe1a680986b0f4",
   "gateFingerprint": "6e53c784eee38310188948fc75fb49e6b4ebc04e247d01b903fa8c8a92d67bdd",
   "developmentPins": {
