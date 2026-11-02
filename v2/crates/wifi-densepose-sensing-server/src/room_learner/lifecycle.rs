@@ -7,7 +7,7 @@ use super::{
     observation::{CaptureContext, DataRole, RoomLabel},
     training::{FitConfig, TrainingReport},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     path::Path,
@@ -17,7 +17,7 @@ use std::{
     },
 };
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum JobPhase {
     Idle,
@@ -54,12 +54,14 @@ struct Inner {
     last_evaluation: Option<Value>,
     evaluation_warning: Option<String>,
     input_error: Option<String>,
+    recovery: RecoveryState,
 }
 pub struct RoomLearningRuntime {
     runtime_epoch: String,
     owner: String,
     installation: String,
     store: ArtifactStore,
+    recovery_store: Option<super::recovery_store::RecoveryStore>,
     inner: Mutex<Inner>,
     clock_origin: std::time::Instant,
     clock_epoch_ns: u64,
@@ -76,6 +78,63 @@ fn bounded(error: String) -> String {
 }
 impl RoomLearningRuntime {
     pub fn new(directory: &Path, owner: &str, installation: &str) -> Result<Self, String> {
+        Self::build(directory, owner, installation, None)
+    }
+    pub fn new_with_recovery(
+        directory: &Path,
+        owner: &str,
+        installation: &str,
+        recovery: super::recovery_store::RecoveryStore,
+    ) -> Result<Self, String> {
+        Self::build(directory, owner, installation, Some(recovery))
+    }
+    pub fn new_with_recovery_unavailable(
+        directory: &Path,
+        owner: &str,
+        installation: &str,
+        reason: String,
+    ) -> Result<Self, String> {
+        let runtime = Self::new(directory, owner, installation)?;
+        {
+            let mut state = runtime
+                .inner
+                .lock()
+                .map_err(|_| "learner state unavailable")?;
+            state.recovery.supported = true;
+            state.recovery.error = Some(bounded(reason));
+        }
+        Ok(runtime)
+    }
+    /// Explicit time domain for deterministic fixtures; production uses the managed clock.
+    pub fn new_with_recovery_at(
+        directory: &Path,
+        owner: &str,
+        installation: &str,
+        recovery: super::recovery_store::RecoveryStore,
+        now_ns: u64,
+    ) -> Result<Self, String> {
+        if now_ns == 0 {
+            return Err("recovery_clock_invalid".into());
+        }
+        let mut runtime = Self::build(directory, owner, installation, Some(recovery))?;
+        runtime.clock_epoch_ns = now_ns;
+        runtime.clock_origin = std::time::Instant::now();
+        {
+            let mut state = runtime
+                .inner
+                .lock()
+                .map_err(|_| "learner state unavailable")?;
+            state.recovery = RecoveryState::default();
+            runtime.inspect_recovery(&mut state, now_ns);
+        }
+        Ok(runtime)
+    }
+    fn build(
+        directory: &Path,
+        owner: &str,
+        installation: &str,
+        recovery_store: Option<super::recovery_store::RecoveryStore>,
+    ) -> Result<Self, String> {
         let clock_origin = std::time::Instant::now();
         let clock_epoch_ns = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -83,13 +142,14 @@ impl RoomLearningRuntime {
             .as_nanos()
             .try_into()
             .map_err(|_| "receiver clock outside bounds")?;
-        Ok(Self {
+        let runtime = Self {
             clock_origin,
             clock_epoch_ns,
             runtime_epoch: crate::companion::secret(),
             owner: owner.into(),
             installation: installation.into(),
             store: ArtifactStore::new(directory, owner, installation)?,
+            recovery_store,
             inner: Mutex::new(Inner {
                 generation: 0,
                 workflow_revision: 0,
@@ -101,8 +161,17 @@ impl RoomLearningRuntime {
                 last_evaluation: None,
                 evaluation_warning: None,
                 input_error: None,
+                recovery: RecoveryState::default(),
             }),
-        })
+        };
+        {
+            let mut state = runtime
+                .inner
+                .lock()
+                .map_err(|_| "learner state unavailable")?;
+            runtime.inspect_recovery(&mut state, runtime.receiver_now_ns());
+        }
+        Ok(runtime)
     }
     /// UTC-anchored monotonic receiver time. Wall-clock adjustments cannot
     /// shorten an operator capture or turn a countdown into labelled RF data.
@@ -124,6 +193,24 @@ impl RoomLearningRuntime {
         context: CaptureContext,
         run_id: String,
         new_training: bool,
+    ) -> Result<(), String> {
+        self.configure_for_recovery(
+            expected,
+            context,
+            run_id,
+            new_training,
+            false,
+            self.receiver_now_ns(),
+        )
+    }
+    pub fn configure_for_recovery(
+        &self,
+        expected: &MutationGuard,
+        context: CaptureContext,
+        run_id: String,
+        new_training: bool,
+        recovery_consent: bool,
+        now_ns: u64,
     ) -> Result<(), String> {
         context.validate()?;
         if context.owner_scope != self.owner || context.installation_id != self.installation {
@@ -151,6 +238,12 @@ impl RoomLearningRuntime {
         } else {
             (None, None)
         };
+        if recovery_consent {
+            self.prepare_recovery(&mut state, &context, now_ns)?;
+        } else {
+            state.recovery.enabled = false;
+            state.recovery.marker = None;
+        }
         state.generation = state
             .generation
             .checked_add(1)
@@ -170,6 +263,7 @@ impl RoomLearningRuntime {
         state.last_evaluation = restored_evaluation;
         state.evaluation_warning = evaluation_warning;
         state.input_error = None;
+        self.checkpoint_recovery(&mut state, now_ns, true)?;
         Ok(())
     }
     /// Called from an explicit protected action. Completion commits only a
@@ -182,6 +276,7 @@ impl RoomLearningRuntime {
         config.validate()?;
         let (generation, dataset, cancel) = {
             let mut state = self.command_state(expected)?;
+            self.require_recovery_ready(&state)?;
             if busy(&state.job)
                 || (state.frozen_training
                     && !matches!(state.job.phase, JobPhase::Failed | JobPhase::Cancelled))
@@ -215,6 +310,12 @@ impl RoomLearningRuntime {
                 error: None,
             };
             state.frozen_training = true;
+            let now = self.checkpoint_now(&state);
+            if let Err(error) = self.checkpoint_recovery(&mut state, now, true) {
+                state.job.phase = JobPhase::Failed;
+                state.job.error = Some(bounded(error.clone()));
+                return Err(error);
+            }
             (state.generation, dataset, cancel)
         };
         let runtime = self.clone();
@@ -234,6 +335,8 @@ impl RoomLearningRuntime {
                 state.job.phase = JobPhase::Cancelled;
                 state.job.error =
                     Some("training cancelled; previous stored candidates preserved".into());
+                let now = runtime.checkpoint_now(&state);
+                let _ = runtime.checkpoint_recovery(&mut state, now, true);
                 return;
             }
             match outcome {
@@ -254,6 +357,8 @@ impl RoomLearningRuntime {
                     state.job.error = Some(bounded(error));
                 }
             }
+            let now = runtime.checkpoint_now(&state);
+            let _ = runtime.checkpoint_recovery(&mut state, now, true);
         });
         Ok(generation)
     }
@@ -271,9 +376,10 @@ impl RoomLearningRuntime {
         Ok((self.guard_for(&state), model.infer(&cohort)))
     }
     pub fn status(&self, now_ns: u64) -> Value {
-        let Ok(state) = self.inner.lock() else {
+        let Ok(mut state) = self.inner.lock() else {
             return json!({"enabled":true,"state":"unavailable"});
         };
+        let _ = self.checkpoint_recovery(&mut state, now_ns, false);
         let required_ids: Vec<_> = state
             .capture
             .as_ref()
@@ -305,7 +411,7 @@ impl RoomLearningRuntime {
             "phase_history":state.capture.as_ref().map(|c|c.history()),
             "phase_duration_defaults":{"Empty":600000,"OccupiedStatic":12000,"OccupiedMoving":12000,"AdjacentOnly":12000},
             "phase_lead_in_defaults":{"Empty":15000,"OccupiedStatic":5000,"OccupiedMoving":5000,"AdjacentOnly":15000},
-            "untrained_capture_progress_is_volatile":true,
+            "untrained_capture_progress_is_volatile":!state.recovery.enabled || state.recovery.error.is_some(),"recovery":self.recovery_status(&state, now_ns),
             "generation":state.generation,"state":state.job.phase,"context_digest":state.capture.as_ref().map(|c|c.context().digest()),
             "room_digest":state.capture.as_ref().map(|c| &c.context().room_digest),
             "revision":state.capture.as_ref().map(|c|c.context().revision),
@@ -315,7 +421,7 @@ impl RoomLearningRuntime {
             "error":state.job.error,"input_error":state.input_error,
             "candidate":state.receipt,"candidate_loaded":state.model.is_some(),
             "last_evaluation":state.last_evaluation,"evaluation_warning":state.evaluation_warning,"physically_validated":false,
-            "control_detector_changed":false,"raw_observations_persisted":false,
+            "control_detector_changed":false,"raw_observations_persisted":state.recovery.derived_persisted(),"derived_samples_persisted":state.recovery.derived_persisted(),"raw_iq_persisted":false,
             "limitations":["receiver-observed magnitude path; no coherent phase claim",
                 "legacy UDP transmitter identity is unverified","independent teacher registry not configured",
                 "candidate training is not physical qualification"]})
@@ -332,6 +438,14 @@ mod capture_control;
 #[path = "command.rs"]
 mod command;
 pub use command::{MutationGuard, PhaseIdentity};
+
+#[path = "lifecycle_recovery.rs"]
+mod recovery_control;
+use recovery_control::RecoveryState;
+
+#[cfg(all(test, unix))]
+#[path = "lifecycle_recovery_tests.rs"]
+mod recovery_tests;
 
 #[path = "lifecycle_evaluation.rs"]
 mod evaluation_control;
