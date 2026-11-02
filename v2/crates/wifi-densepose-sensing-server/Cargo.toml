@@ -29,6 +29,8 @@ ruvector-mincut = { workspace = true }
 mdns-sd = "0.11"
 rcgen = "0.12.1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+# Opt-in encrypted capture recovery uses the same already-locked crypto package.
+ring = "0.17"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 hyper = { workspace = true }
 hyper-util = { version = "0.1", features = ["server-auto", "tokio", "service"] }
@@ -168,7 +170,6 @@ proptest = { version = "1.5", default-features = false, features = ["std"] }
 # end to end (router → middleware → verifier), not just mocked at the seam.
 # Keys are generated at test runtime; none are committed.
 jsonwebtoken = "9"
-ring = "0.17"
 base64 = "0.21"
 
 [[bench]]

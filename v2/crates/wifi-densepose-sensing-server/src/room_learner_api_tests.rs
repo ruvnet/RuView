@@ -197,6 +197,8 @@ fn every_new_mutation_requires_admin_and_default_cli_does_not_enable_capture() {
         "train",
         "train/cancel",
         "evaluate",
+        "recovery/restore",
+        "recovery/discard",
     ] {
         assert_eq!(
             required_scope_for(&Method::POST, &format!("/api/v1/room-learner/{suffix}")),
@@ -529,3 +531,7 @@ async fn cache_pressure_preserves_selected_active_class_and_freshness() {
         configured["status"]["mutation_guard"]
     );
 }
+
+#[cfg(unix)]
+#[path = "room_learner_api_recovery_tests.rs"]
+mod recovery_tests;
