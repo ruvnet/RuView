@@ -191,20 +191,30 @@ export async function readEsphome(args = {}, deps = {}) {
     const socket = (deps.connect || ((p, h) => net.connect(p, h)))(port, target.address);
     let buf = Buffer.alloc(0);
     let done = false;
-    const finish = (out) => {
+    const finish = (out, reply = T.DISCONNECT_REQ) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       clearTimeout(connectTimer);
-      try { socket.write(encodeFrame(T.DISCONNECT_REQ)); } catch { /* closing anyway */ }
-      socket.destroy();
+      if (reply === T.DISCONNECT_RES) {
+        // Flush the acknowledgement before closing; bound an unresponsive peer.
+        const closeTimer = setTimeout(() => socket.destroy(), 1000);
+        closeTimer.unref();
+        socket.once('close', () => clearTimeout(closeTimer));
+        try { socket.end(encodeFrame(reply), () => socket.destroy()); }
+        catch { clearTimeout(closeTimer); socket.destroy(); }
+      } else {
+        try { socket.write(encodeFrame(reply)); } catch { /* closing anyway */ }
+        socket.destroy();
+      }
       resolve(out);
     };
-    const fail = (reason, detail, remedy) => finish({ ok: false, reason, detail, ...(remedy ? { remedy } : {}), host: args.host, port });
+    const fail = (reason, detail, remedy, reply) => finish({ ok: false, reason, detail, ...(remedy ? { remedy } : {}), host: args.host, port }, reply);
     const connectTimer = setTimeout(() => fail('esphome_unreachable', `no TCP connection to ${target.address}:${port} within 5 s`, 'Check that the device is on the network and that `api:` is enabled in its ESPHome config.'), 5000);
     let timer = null;
 
     socket.on('connect', () => {
+      if (done) return;
       clearTimeout(connectTimer);
       socket.write(encodeFrame(T.HELLO_REQ, Buffer.concat([pbString(1, 'ruview'), pbUint(2, 1), pbUint(3, 10)])));
       socket.write(encodeFrame(T.CONNECT_REQ));
@@ -223,6 +233,7 @@ export async function readEsphome(args = {}, deps = {}) {
     socket.on('error', (error) => fail('esphome_unreachable', `${target.address}:${port}: ${error.code || error.message}`, 'Check that the device is on the network and that `api:` is enabled in its ESPHome config.'));
     socket.on('close', () => { if (!done && session.hello) fail('esphome_closed', 'the device closed the API connection early'); else if (!done) fail('esphome_unreachable', 'connection closed before the API handshake'); });
     socket.on('data', (chunk) => {
+      if (done) return;
       buf = Buffer.concat([buf, chunk]);
       if (buf.length > MAX_BUFFER) return fail('esphome_protocol_error', 'response exceeded 1 MiB');
       let frames;
@@ -234,6 +245,8 @@ export async function readEsphome(args = {}, deps = {}) {
         let f;
         try { f = decodeFields(payload); } catch (error) { return fail('esphome_protocol_error', error.message); }
         switch (type) {
+          case T.DISCONNECT_REQ:
+            return fail('esphome_closed', 'the device requested disconnection before capture completed', undefined, T.DISCONNECT_RES);
           case T.HELLO_RES:
             session.hello = true;
             session.device.apiVersion = `${fUint(f, 1)}.${fUint(f, 2)}`;
