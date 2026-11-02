@@ -388,3 +388,144 @@ async fn rare_foreign_frequency_neither_relabels_selection_nor_invalidates_a_pha
     assert_eq!(status["capture"]["sources"][0]["admitted_packets"], 1);
     assert_eq!(status["mutation_guard"], begun["status"]["mutation_guard"]);
 }
+
+// SYNTHETIC cache lifecycle regressions through the real parser and ingress.
+fn observe_wire_at(inner: &mut AppStateInner, packet: &[u8], at: std::time::Instant) {
+    let frame = parse_esp32_frame(packet).expect("complete synthetic packet");
+    inner
+        .node_states
+        .entry(frame.node_id)
+        .or_insert_with(NodeState::new)
+        .observe_raw_grid(CsiGridKey::from_frame(&frame), at);
+    observe(inner, &frame, packet, at);
+}
+#[tokio::test]
+async fn unsupported_class_churn_cannot_exhaust_readiness_for_healthy_nodes() {
+    let (_dir, state) = fixture();
+    let now = std::time::Instant::now();
+    {
+        let mut inner = state.write().await;
+        inner.room_learning_sources.clear();
+        for bins in 1u16..=1024 {
+            let mut packet = wire(200, 1);
+            packet[6..8].copy_from_slice(&bins.to_le_bytes());
+            packet.resize(20 + usize::from(bins) * 2, 3);
+            observe_wire_at(&mut inner, &packet, now);
+        }
+        for frequency in 1u32..=1024 {
+            let mut packet = wire(200, 1);
+            packet[8..12].copy_from_slice(&frequency.to_le_bytes());
+            observe_wire_at(&mut inner, &packet, now);
+        }
+        for row in 0..120 {
+            for node in [30, 31] {
+                let at = now - std::time::Duration::from_millis((120 - row) as u64 * 100);
+                observe_wire_at(&mut inner, &wire(node, row + 1), at);
+            }
+        }
+    }
+    let mut request = config();
+    request["source_node_ids"] = serde_json::json!([30, 31]);
+    let response = json_request(app(state.clone()), "/configure", Method::POST, request).await;
+    assert_eq!(response["success"], true, "{response}");
+    // Only the supported 64-bin class at 2437 MHz plus the two healthy nodes.
+    assert_eq!(state.read().await.room_learning_sources.len(), 3);
+}
+#[tokio::test]
+async fn expired_supported_classes_are_reclaimed_without_manufacturing_readiness() {
+    let (_dir, state) = fixture();
+    let now = std::time::Instant::now();
+    let mut inner = state.write().await;
+    inner.room_learning_sources.clear();
+    let old = now - CALIBRATION_GRID_EVIDENCE_WINDOW - std::time::Duration::from_secs(1);
+    // Supported one-antenna HT20 classes, all unique by frequency.
+    for frequency in 4900u32..5924 {
+        let mut packet = wire(200, 1);
+        packet[8..12].copy_from_slice(&frequency.to_le_bytes());
+        // 5901..5924 falls outside the supported range; use a different node
+        // at the beginning of the same supported band for those slots.
+        if frequency > 5900 {
+            packet[4] = 201;
+            packet[8..12].copy_from_slice(&(frequency - 1001).to_le_bytes());
+        }
+        observe_wire_at(&mut inner, &packet, old);
+    }
+    assert_eq!(inner.room_learning_sources.len(), 1024);
+    observe_wire_at(&mut inner, &wire(30, 1), now);
+    assert!(inner.room_learning_sources.len() <= 1024);
+    assert!(
+        native_candidates(&inner, 30, now).is_empty(),
+        "one fresh packet is not readiness"
+    );
+    for row in 1..120 {
+        observe_wire_at(
+            &mut inner,
+            &wire(30, row + 1),
+            now + std::time::Duration::from_millis(row as u64 * 100),
+        );
+    }
+    let later = now + std::time::Duration::from_millis(11900);
+    assert_eq!(
+        native_candidates(&inner, 30, later).len(),
+        1,
+        "expired unrelated classes must not permanently block a new supported stream"
+    );
+    assert_eq!(inner.room_learning_sources.len(), 1);
+}
+#[tokio::test]
+async fn cache_pressure_preserves_selected_active_class_and_freshness() {
+    let (_dir, state) = fixture();
+    let configured = json_request(app(state.clone()), "/configure", Method::POST, config()).await;
+    assert_eq!(configured["success"], true);
+    let now = std::time::Instant::now();
+    let mut inner = state.write().await;
+    // Fill the remaining capacity with unique supported classes. Existing
+    // selected classes must retain their measured 120-packet readiness.
+    for frequency in 4900u32..5921 {
+        let mut packet = wire(200, 1);
+        packet[8..12].copy_from_slice(&frequency.to_le_bytes());
+        if frequency > 5900 {
+            packet[4] = 201;
+            packet[8..12].copy_from_slice(&(frequency - 1001).to_le_bytes());
+        }
+        observe_wire_at(&mut inner, &packet, now);
+    }
+    assert_eq!(inner.room_learning_sources.len(), 1024);
+    observe_wire_at(&mut inner, &wire(30, 1), now);
+    assert_eq!(
+        inner.room_learning_sources.len(),
+        1024,
+        "fresh cache stays bounded"
+    );
+    assert!(native_candidates(&inner, 30, now).is_empty());
+    for node in [15, 16, 17] {
+        assert_eq!(
+            native_candidates(&inner, node, now).len(),
+            1,
+            "pressure must not evict a selected ready source"
+        );
+    }
+    let later = now + CALIBRATION_GRID_EVIDENCE_WINDOW + std::time::Duration::from_secs(1);
+    observe_wire_at(&mut inner, &wire(30, 2), later);
+    assert_eq!(
+        inner.room_learning_sources.len(),
+        4,
+        "reclaim only unrelated expired classes"
+    );
+    for node in [15, 16, 17] {
+        assert!(
+            native_candidates(&inner, node, later).is_empty(),
+            "retaining a selected class must not preserve expired readiness"
+        );
+    }
+    assert!(native_candidates(&inner, 30, later).is_empty());
+    let status = inner
+        .room_learning
+        .as_ref()
+        .unwrap()
+        .status(now_ns(inner.room_learning.as_ref().unwrap()));
+    assert_eq!(
+        status["mutation_guard"],
+        configured["status"]["mutation_guard"]
+    );
+}
