@@ -79,3 +79,6 @@ pub mod account_profile;
 pub mod companion_tls;
 
 pub mod companion_sensors;
+
+/// Account-bound multi-source room learning and managed lifecycle.
+pub mod room_learner;

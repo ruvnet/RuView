@@ -18,6 +18,7 @@ pub mod csi;
 mod engine_bridge;
 mod field_bridge;
 mod source_bank_shadow;
+mod room_learner_api;
 mod field_localize;
 mod model_format;
 mod multistatic_bridge;
@@ -321,6 +322,10 @@ struct Args {
     #[arg(long)]
     source_bank_shadow: bool,
 
+    /// Enable the account-owned managed capture/train/candidate room learner.
+    #[arg(long)]
+    room_learner: bool,
+
     // ---------------------------------------------------------------
     // ADR-102: Edge Module Registry — surface the canonical Cognitum
     // cog catalog via `GET /api/v1/edge/registry`.
@@ -449,6 +454,29 @@ struct CalibrationGridEvidence {
     rate_hz: f64,
     max_gap_s: f64,
     latest_age_s: f64,
+}
+
+impl CalibrationGridEvidence {
+    fn from_arrivals(arrivals: &[std::time::Instant], now: std::time::Instant) -> Option<Self> {
+        let first = *arrivals.first()?;
+        let last = *arrivals.last()?;
+        let span_s = last.saturating_duration_since(first).as_secs_f64();
+        let latest_age_s = now.saturating_duration_since(last).as_secs_f64();
+        let mut max_gap_s = latest_age_s;
+        for pair in arrivals.windows(2) {
+            max_gap_s = max_gap_s.max(
+                pair[1]
+                    .saturating_duration_since(pair[0])
+                    .as_secs_f64(),
+            );
+        }
+        let rate_hz = if span_s > 0.0 {
+            arrivals.len().saturating_sub(1) as f64 / span_s
+        } else {
+            0.0
+        };
+        Some(Self {sample_count:arrivals.len(),span_s,rate_hz,max_gap_s,latest_age_s})
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1636,35 +1664,7 @@ impl NodeState {
         }
         grouped
             .into_iter()
-            .filter_map(|(grid, arrivals)| {
-                let first = *arrivals.first()?;
-                let last = *arrivals.last()?;
-                let span_s = last.saturating_duration_since(first).as_secs_f64();
-                let latest_age_s = now.saturating_duration_since(last).as_secs_f64();
-                let mut max_gap_s = latest_age_s;
-                for pair in arrivals.windows(2) {
-                    max_gap_s = max_gap_s.max(
-                        pair[1]
-                            .saturating_duration_since(pair[0])
-                            .as_secs_f64(),
-                    );
-                }
-                let rate_hz = if span_s > 0.0 {
-                    arrivals.len().saturating_sub(1) as f64 / span_s
-                } else {
-                    0.0
-                };
-                Some((
-                    grid,
-                    CalibrationGridEvidence {
-                        sample_count: arrivals.len(),
-                        span_s,
-                        rate_hz,
-                        max_gap_s,
-                        latest_age_s,
-                    },
-                ))
-            })
+            .filter_map(|(grid, arrivals)| CalibrationGridEvidence::from_arrivals(&arrivals, now).map(|evidence|(grid,evidence)))
             .collect()
     }
 
@@ -2210,6 +2210,8 @@ struct AppStateInner {
     field_model: Option<FieldModel>,
     source_bank_shadow_enabled: bool,
     source_bank_shadow: Option<source_bank_shadow::ShadowCapture>,
+    room_learning: Option<Arc<wifi_densepose_sensing_server::room_learner::lifecycle::RoomLearningRuntime>>,
+    room_learning_sources: HashMap<room_learner_api::NativeSourceKey, room_learner_api::LiveSource>,
     /// Stable installation identity used only to bind local persisted state.
     installation_id: Option<String>,
     /// Metadata for the privacy reduced empty room image, when available.
@@ -3144,6 +3146,8 @@ impl AppStateInner {
             field_model: None,
             source_bank_shadow_enabled: false,
             source_bank_shadow: None,
+            room_learning: None,
+            room_learning_sources: HashMap::new(),
             installation_id: None,
             bootstrap_baseline: None,
             bootstrap_baseline_active: false,
@@ -10472,6 +10476,13 @@ async fn calibration_start(
         return Json(serde_json::json!({"success":false,"error_code":"shared_room_binding_required","error":"Import the current Mac room revision before starting calibration."}));
     }
     let mut s = state.write().await;
+    if let Some(learner)=s.room_learning.as_ref() {
+        match learner.capture_active() {
+            Ok(false)=>{},
+            Ok(true)=>return Json(serde_json::json!({"success":false,"error_code":"learner_capture_active","error":"Finish or cancel learner example capture before starting a legacy empty baseline."})),
+            Err(_)=>return Json(serde_json::json!({"success":false,"error_code":"learner_state_unavailable","error":"Learner capture state is unavailable; retry before changing calibration mode."})),
+        }
+    }
     if !valid_binding_digest(&request.binding_digest)
         || !valid_source_node_ids(&request.source_node_ids)
     {
@@ -13899,6 +13910,7 @@ async fn udp_receiver_task(
                         .entry(frame.node_id)
                         .or_insert_with(NodeState::new)
                         .observe_raw_grid(grid_key, observed_at);
+                    room_learner_api::observe(&mut s, &frame, &buf[..len], observed_at);
 
                     // The field model owns a separate, frozen grid path. Feed
                     // it before the global inference grid gate so a stable
@@ -15745,6 +15757,14 @@ async fn main() {
         .as_ref()
         .map(|p| mediatek_activity::load_activity_state(p))
         .unwrap_or_default();
+    let room_learning = if args.room_learner {
+        let owner = std::env::var(wifi_densepose_sensing_server::bearer_auth::OWNER_ACCOUNT_SCOPE_ENV).unwrap_or_default();
+        let installation = args.installation_id.as_deref().unwrap_or("");
+        match wifi_densepose_sensing_server::room_learner::lifecycle::RoomLearningRuntime::new(&args.data_dir, &owner, installation) {
+            Ok(runtime) => Some(Arc::new(runtime)),
+            Err(error) => { error!("Managed room learner could not initialize: {error}"); std::process::exit(2); }
+        }
+    } else { None };
     let state: SharedState = Arc::new(RwLock::new(AppStateInner {
         latest_update: None,
         rssi_history: VecDeque::new(),
@@ -15899,6 +15919,8 @@ async fn main() {
         field_model: bootstrap_field_model,
         source_bank_shadow_enabled: args.source_bank_shadow,
         source_bank_shadow: None,
+        room_learning,
+        room_learning_sources: HashMap::new(),
         installation_id: args.installation_id.clone(),
         bootstrap_baseline: bootstrap_metadata.clone(),
         bootstrap_baseline_active,
@@ -16316,6 +16338,16 @@ async fn main() {
         )
         .route("/api/v1/calibration/cancel", post(calibration_cancel))
         .route("/api/v1/calibration/status", get(calibration_status))
+        // Mutations remain behind the existing default-admin bearer policy.
+        .route("/api/v1/room-learner/status", get(room_learner_api::status))
+        .route("/api/v1/room-learner/configure", post(room_learner_api::configure))
+        .route("/api/v1/room-learner/phase/start", post(room_learner_api::begin_phase))
+        .route("/api/v1/room-learner/phase/finish", post(room_learner_api::finish_phase))
+        .route("/api/v1/room-learner/phase/cancel", post(room_learner_api::cancel_phase))
+        .route("/api/v1/room-learner/train", post(room_learner_api::train))
+        .route("/api/v1/room-learner/train/cancel", post(room_learner_api::cancel_training))
+        .route("/api/v1/room-learner/evaluate", post(room_learner_api::evaluate))
+        .route("/api/v1/room-learner/prediction", get(room_learner_api::prediction))
         .route("/api/v1/calibration/reset", post(calibration_reset))
         .route("/api/v1/calibration/bootstrap/recover", post(calibration_recover_bootstrap))
         // ADR-044 §5.3: runtime-configurable dedup factor
