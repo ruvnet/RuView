@@ -3,7 +3,7 @@ use super::model::{
     center_empty_heads, extractor, initial_encoder, initial_projection_weights, EncoderConfig,
     RoomModel, SourceProfile, TrainingManifest,
 };
-use super::observation::{CaptureCohort, CaptureContext, DataRole, RoomLabel, ValidatedDataset};
+use super::observation::{CaptureCohort, CaptureContext, RoomLabel, ValidatedDataset};
 use crate::embedding::info_nce_loss;
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
@@ -24,13 +24,11 @@ pub struct ObjectiveValues {
     pub contrastive: f32,
     pub supervised: f32,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EvaluationReport {
-    pub samples: usize,
-    pub correct: usize,
-    pub abstained: usize,
-    pub binary_cross_entropy: f32,
-}
+#[path = "evaluation_report.rs"]
+mod evaluation_report;
+pub use evaluation_report::{
+    BinaryConfusion, ConditionEvaluation, EvaluationRates, EvaluationReport,
+};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrainingReport {
     pub initial: ObjectiveValues,
@@ -365,37 +363,7 @@ impl RoomModel {
     }
     /// Explicit evaluation only; fit never reads HeldOut observations.
     pub fn evaluate(&self, cohorts: &[CaptureCohort]) -> Result<EvaluationReport, String> {
-        if cohorts.is_empty() || cohorts.len() > 4096 {
-            return Err("invalid evaluation cohort count".into());
-        }
-        let mut result = EvaluationReport {
-            samples: cohorts.len(),
-            correct: 0,
-            abstained: 0,
-            binary_cross_entropy: 0.0,
-        };
-        for cohort in cohorts {
-            if cohort.role == DataRole::Inference || cohort.label == RoomLabel::Unknown {
-                return Err("evaluation requires a labeled non-inference cohort".into());
-            }
-            let prediction = self.infer(cohort);
-            if prediction.decision == super::model::PresenceDecision::Abstain {
-                result.abstained += 1;
-            }
-            let probability = prediction
-                .occupied_probability
-                .ok_or_else(|| prediction.reason.unwrap_or("evaluation abstained".into()))?;
-            let target = occupied(cohort.label);
-            if prediction.decision != super::model::PresenceDecision::Abstain
-                && (probability > 0.5) == (target > 0.5)
-            {
-                result.correct += 1;
-            }
-            let p = probability.clamp(1.0e-6, 1.0 - 1.0e-6);
-            result.binary_cross_entropy -= target * p.ln() + (1.0 - target) * (1.0 - p).ln();
-        }
-        result.binary_cross_entropy /= cohorts.len() as f32;
-        Ok(result)
+        EvaluationReport::compute(self, cohorts)
     }
 }
 

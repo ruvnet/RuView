@@ -2,6 +2,8 @@
 
 Latest proposed decisions:
 
+- [ADR-420: Managed source-aware room learning and durable candidate evidence](ADR-420-managed-source-aware-room-learner.md)
+
 - [ADR-379: An OTA'd image confirms itself with a bounded health check, or rolls back](ADR-379-ota-first-boot-health-check.md)
 - [ADR-380: Loopback UDP tee for second consumers of the CSI stream](ADR-380-loopback-udp-tee.md)
 - [ADR-382: `spatial.evidence.v1` export of RF Gaussians and link observations](ADR-382-spatial-evidence-rf-export.md)

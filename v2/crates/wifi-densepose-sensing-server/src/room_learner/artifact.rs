@@ -271,3 +271,7 @@ mod tests;
 #[path="artifact_catalog.rs"]
 mod catalog;
 pub use catalog::{CandidateCatalog,SavedCandidate};
+
+#[path="evaluation_store.rs"]
+mod evaluation_store;
+pub use evaluation_store::EvaluationReceipt;
