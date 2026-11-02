@@ -100,9 +100,10 @@ leave the UI busy.
 
 Preparation is excluded from labelled collection. Completion requires the
 operator's conditions-held acknowledgement. A completed recording interval can
-remain provisional while that acknowledgement is pending. Untrained observations
-stay in bounded memory under the current retention policy and can be lost if the
-helper or account runtime closes; the UI must disclose that limitation.
+remain provisional while that acknowledgement is pending. By default, untrained
+observations stay in bounded memory and can be lost if the helper or account
+runtime closes. The proposed explicit-consent recovery extension below is a
+narrow local-storage exception; it is not enabled by an app update or helper flag.
 
 Store trained candidates privately beneath the verified owner/installation
 namespace, with immutable model versions, hashes and an exact-context pointer.
@@ -121,6 +122,62 @@ Train identities cannot be converted into a newly verified lineage claim.
 Corrupt evaluation evidence must be retained/quarantined without discarding a
 valid candidate or manufacturing a pass. Evaluation receipts authorize neither
 physical qualification nor adoption.
+
+### Proposed November 2 extension: opt-in provisional capture recovery
+
+The operator can explicitly choose encrypted local recovery when configuring a
+run. This retains bounded **reduced magnitude training samples** in selected
+representative/sealed cohorts, original source/context/role/time identities and
+sequence watermarks. It excludes raw IQ/CSI packet files, camera/depth images,
+teacher frames, live receiver windows and pending packet buffers. It is not a
+blanket relaxation of the default no-observation-retention policy. API metadata
+must disclose when derived samples persist rather than keeping a false raw-data
+absence flag.
+
+Use the existing per-owner persistent Keychain signing seed only as input to a
+domain-separated HKDF purpose key bound to owner and installation. AES-256-GCM
+uses a fresh nonce and authenticates the descriptor. No key enters JavaScript,
+HTTP responses or diagnostics; the existing native-to-helper secret mechanism
+is unchanged. A nonsecret stability marker is true only for actual persistent
+Keychain sources. Missing, ephemeral or unavailable keys cannot silently fall
+back to plaintext or claim recoverability. Other platforms without a qualified
+private-file/key path keep the RAM-only workflow.
+
+One owner-bound recovery slot is limited to64MiB of plaintext plus bounded
+framing,0700 directories and0600 regular files, with authenticated atomic
+write/fsync/rename/directory barriers. Symlinks, unsafe ownership/permissions,
+wrong keys, identity/context mismatches and unknown/corrupt formats fail closed.
+The original24-hour recovery-availability deadline never renews on save/read/
+resume. Expiry withdraws recovery; it does **not** promise that a stopped app
+can automatically erase ciphertext. The UI states that an expired encrypted
+copy may remain until explicitly discarded. Authenticated expired records can
+be explicitly deleted by their guarded identity; unreadable unknown files remain
+blocked rather than being overwritten or silently erased.
+
+After restart, recovery is explicit and requires the exact current room,
+revision, source/PHY contract and verified owner/installation. Restore preserves
+original evidence time and role isolation. A completed phase remains pending
+operator conditions-held confirmation. An incomplete interrupted phase fails
+and must restart; waiting through downtime never creates measured windows.
+Restored live/pending buffers are empty, so new measured packets must establish
+current freshness before inference. Interrupted fitting becomes an explicit
+retry state, never an automatic job. A saved model is restored by its exact
+immutable hash, not today's pointer. Neither recovery nor retention grants
+physical qualification, statistical independence or adoption.
+
+Serialize checkpoint writes and disable/delete under the same runtime lock,
+with generation/phase guards and bounded failed-write retry. Cancellation or
+discard never acknowledges deletion after I/O failure. A late writer cannot
+recreate a successfully discarded copy. Saved state is shown only after durable
+success; unavailable/unverifiable retained contents report `null` (unknown), not
+`false` (absence), in persistence metadata. Confirmed empty/deleted state may
+report false. Full account erasure still drains/stops the helper before removing
+its tree; narrower checkpoint discard preserves room scans, candidates and
+control/evaluation artifacts.
+
+Software fixtures are not crash/power-loss or signed-device acceptance. The
+extension remains Proposed pending privacy/maintainer review and actual Mac/
+iPhone interruption, owner-isolation, expiry and retention verification.
 
 ### Admit optional teachers through a validated reference boundary
 
@@ -171,7 +228,7 @@ from source CI, packaged native verification and end-user validation.
 - Source admission and training attribution become explicit and testable.
 - Candidate/model/evidence histories can survive sessions without renewing trust.
 - Real-world preprocessing errors are visible before spending a room-capture window.
-- Bounded RAM-only capture creates a deliberate interruption/restart limitation.
+- Default RAM capture has an interruption limitation; explicit recovery adds encrypted sample-retention consent and cold-restore obligations.
 - Additional sources or modalities require compatible view and reference contracts.
 - Model capacity, generalization and uncertainty remain empirical questions.
 
