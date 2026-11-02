@@ -6,3 +6,4 @@ pub mod training;
 pub mod artifact;
 pub mod lifecycle;
 pub mod native;
+pub mod recovery_store;
