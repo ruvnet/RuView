@@ -17,7 +17,6 @@ use chrono::{DateTime, Utc};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use thiserror::Error;
 use tokio::sync::RwLock;
-use tracing::debug;
 
 use homecore::entity::{EntityId, State};
 use homecore::event::{Context, DomainEvent, StateChangedEvent};
@@ -200,28 +199,22 @@ impl Recorder {
         let attrs_json = serde_json::to_string(&new_state.attributes)?;
         let hash = fnv64a_hash(&attrs_json);
 
-        // Upsert into state_attributes (dedup by hash).
-        let attributes_id: i64 = {
-            // Try to find an existing row first.
-            let existing: Option<(i64,)> =
-                sqlx::query_as("SELECT attributes_id FROM state_attributes WHERE hash = ?")
-                    .bind(hash)
-                    .fetch_optional(&self.pool)
-                    .await?;
-
-            if let Some((id,)) = existing {
-                debug!(hash, id, "reusing existing state_attributes row");
-                id
-            } else {
-                let result =
-                    sqlx::query("INSERT INTO state_attributes (shared_attrs, hash) VALUES (?, ?)")
-                        .bind(&attrs_json)
-                        .bind(hash)
-                        .execute(&self.pool)
-                        .await?;
-                result.last_insert_rowid()
-            }
-        };
+        // Take the SQLite writer lock before reading the dedup row. The upsert
+        // handles concurrent first writes, and the transaction prevents purge
+        // from collecting the blob before its state row references it.
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "INSERT INTO state_attributes (shared_attrs, hash) VALUES (?, ?) ON CONFLICT(hash) DO NOTHING",
+        )
+        .bind(&attrs_json)
+        .bind(hash)
+        .execute(&mut *tx)
+        .await?;
+        let (attributes_id,): (i64,) =
+            sqlx::query_as("SELECT attributes_id FROM state_attributes WHERE hash = ?")
+                .bind(hash)
+                .fetch_one(&mut *tx)
+                .await?;
 
         let context_id = new_state.context.id.to_string();
         let last_changed_ts = new_state.last_changed.timestamp_micros() as f64 / 1_000_000.0;
@@ -238,10 +231,11 @@ impl Recorder {
         .bind(last_changed_ts)
         .bind(last_updated_ts)
         .bind(&context_id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         let state_id = result.last_insert_rowid();
+        tx.commit().await?;
 
         // Best-effort semantic indexing — failure is logged, not propagated.
         if let Err(e) = self
@@ -841,6 +835,61 @@ mod tests {
             new_state: Some(s),
             fired_at: Utc::now(),
         }
+    }
+
+    #[tokio::test]
+    async fn concurrent_writers_share_attributes_without_dropping_states() {
+        let recorder = open_memory().await;
+        let barrier = Arc::new(tokio::sync::Barrier::new(32));
+        let mut tasks = Vec::new();
+        for n in 0..32 {
+            let recorder = recorder.clone();
+            let barrier = barrier.clone();
+            tasks.push(tokio::spawn(async move {
+                let event = make_state_event(
+                    &format!("sensor.concurrent_{n}"),
+                    "on",
+                    serde_json::json!({"unit": "C"}),
+                );
+                barrier.wait().await;
+                recorder.record_state(&event).await
+            }));
+        }
+        for task in tasks {
+            task.await
+                .unwrap()
+                .expect("concurrent deduplication must not lose writes");
+        }
+        let counts: (i64, i64) = sqlx::query_as(
+            "SELECT (SELECT COUNT(*) FROM states), (SELECT COUNT(*) FROM state_attributes)",
+        )
+        .fetch_one(&recorder.pool)
+        .await
+        .unwrap();
+        assert_eq!(counts, (32, 1));
+    }
+
+    #[tokio::test]
+    async fn failed_state_insert_rolls_back_new_attributes() {
+        let recorder = open_memory().await;
+        sqlx::query("CREATE TRIGGER reject_state BEFORE INSERT ON states BEGIN SELECT RAISE(ABORT, 'test write failure'); END")
+            .execute(&recorder.pool).await.unwrap();
+        let result = recorder
+            .record_state(&make_state_event(
+                "sensor.failed",
+                "on",
+                serde_json::json!({"unique": 17}),
+            ))
+            .await;
+        assert!(result.is_err());
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM state_attributes")
+            .fetch_one(&recorder.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            count.0, 0,
+            "failed state writes must not leave orphaned attribute blobs"
+        );
     }
 
     // ── schema ────────────────────────────────────────────────────────────────
