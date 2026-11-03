@@ -376,3 +376,6 @@ async fn export_actual_selected_contract_cases() {
         println!("RUVIEW_SELECTED_CONTRACT_FILE={}", path.display());
     }
 }
+
+#[path = "room_learner_api_offline_metadata_tests.rs"]
+mod offline_metadata_tests;

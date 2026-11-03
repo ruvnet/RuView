@@ -387,7 +387,7 @@ mod tests {
         assert_eq!(policy(&Method::GET, "/api/v1/room-learner/selection"), Some(false));
         assert_eq!(policy(&Method::HEAD, "/api/v1/room-learner/selection"), Some(false));
         assert_eq!(policy(&Method::GET, "/api/v1/room-learner/status"), None);
-        for path in ["/api/v1/room-learner/qualify", "/api/v1/room-learner/select", "/api/v1/room-learner/deselect"] {
+        for path in ["/api/v1/room-learner/qualify", "/api/v1/room-learner/select", "/api/v1/room-learner/deselect", "/api/v1/room-learner/phase/cancel", "/api/v1/room-learner/train/cancel"] {
             assert_eq!(policy(&Method::POST, path), None, "paired read/calibration grants cannot select: {path}");
         }
 

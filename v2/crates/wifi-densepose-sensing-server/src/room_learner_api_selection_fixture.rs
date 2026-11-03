@@ -52,7 +52,7 @@ pub(super) fn feed(rt: &RoomLearningRuntime, grid: &str, label: RoomLabel, seque
         }
     }
 }
-fn phase(
+pub(super) fn phase(
     rt: &RoomLearningRuntime,
     grid: &str,
     role: DataRole,
