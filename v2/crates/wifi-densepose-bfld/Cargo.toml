@@ -57,6 +57,11 @@ required-features = ["serde-json"]
 name = "bfld_handle"
 required-features = ["std"]
 
+# bfi_decode uses the std-only capture/features modules.
+[[example]]
+name = "bfi_decode"
+required-features = ["std"]
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
