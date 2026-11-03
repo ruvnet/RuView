@@ -1,0 +1,249 @@
+{
+  "development": {
+    "accuracy": 0.5571428571428572,
+    "macro_f1": 0.4998706443528175,
+    "per_class_f1": [
+      0.16666666666666666,
+      0.6451612903225806,
+      0,
+      0.8421052631578947,
+      0.5333333333333333,
+      0.6451612903225806,
+      0.6666666666666666
+    ],
+    "confusion_matrix": [
+      [
+        1,
+        9,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        10,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0,
+        1,
+        6,
+        2
+      ],
+      [
+        0,
+        1,
+        1,
+        8,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        2,
+        0,
+        4,
+        4,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        10,
+        0
+      ],
+      [
+        1,
+        0,
+        1,
+        1,
+        0,
+        1,
+        6
+      ]
+    ],
+    "samples": 70
+  },
+  "incumbent_development": {
+    "accuracy": 0.5571428571428572,
+    "macro_f1": 0.4998706443528175,
+    "per_class_f1": [
+      0.16666666666666666,
+      0.6451612903225806,
+      0,
+      0.8421052631578947,
+      0.5333333333333333,
+      0.6451612903225806,
+      0.6666666666666666
+    ],
+    "confusion_matrix": [
+      [
+        1,
+        9,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        10,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0,
+        1,
+        6,
+        2
+      ],
+      [
+        0,
+        1,
+        1,
+        8,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        2,
+        0,
+        4,
+        4,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        10,
+        0
+      ],
+      [
+        1,
+        0,
+        1,
+        1,
+        0,
+        1,
+        6
+      ]
+    ],
+    "samples": 70
+  },
+  "retention_checks": {
+    "macro_f1_gain": false,
+    "accuracy_nonregression": true,
+    "protect_each_previously_nonzero_class": true,
+    "p95_under_1ms": true
+  },
+  "retained_as_research_candidate": false,
+  "latency": {
+    "candidate": {
+      "p50_ms": 0.44926999999999995,
+      "p95_ms": 0.623414
+    },
+    "incumbent": {
+      "p50_ms": 0.435755,
+      "p95_ms": 0.605297
+    }
+  },
+  "model_bytes": 496488,
+  "model_sha256": "8d3c8b144663808159159f7af9d14b09f54ee78dc1f852c643fbd001a23d2fc5",
+  "baseline_model_sha256": "8d3c8b144663808159159f7af9d14b09f54ee78dc1f852c643fbd001a23d2fc5",
+  "source_sha256": {
+    "espfi_spatial.py": "fe690e72be77180b11efa80bccbf833c0f6154e994a12ab48d97aceafc1580b7",
+    "espfi.py": "1ea4f72b3bbb0fe68e9903e6f32663a887bd9c8eac3a659932ff97b7e3d87124",
+    "espfi_motion.py": "c6a8529ccf9d9f834383a2bdf5b14626764ec7ca2ade7ad5d4c1c14797d76054",
+    "espfi_generalize.py": "956b3a5e918f7c263a2b9183b4a6a70c8f2157604262a4ec6cee2c324a69224f",
+    "espfi_kernel.py": "ae837cb2e3fac7f052b4bd371cd496e9636e5d5dbaf3a341526a4fc5aef23478",
+    "espfi_train.py": "f3692319b383c67d092776a7690b72963061efeaa3516f2d5e41b5dac1cfbd1e"
+  },
+  "baseline_state_exact": true,
+  "elapsed_seconds": 3.20996624899999,
+  "manifest_sha256": "74e0fe039acbed1b287bd11ee6b779becbb8f9b66c3c249d260ed66f5583f02a",
+  "full_receipt_sha256": "6c54ce00b6d702bf90f5cb2767e1e78f8d79d5a9f2d30b689cfb9368daa3e410",
+  "selected": {
+    "family": "motion_acf",
+    "kind": "rff",
+    "dimensions": 128,
+    "gamma_multiplier": 0.1,
+    "alpha": 0.1
+  },
+  "families": [
+    {
+      "candidate": {
+        "family": "motion_acf",
+        "kind": "rff",
+        "dimensions": 128,
+        "gamma_multiplier": 0.1,
+        "alpha": 0.1
+      },
+      "minimum_cv_macro_f1": 0.33211530016861246,
+      "mean_cv_macro_f1": 0.33402959890262357
+    },
+    {
+      "candidate": {
+        "family": "cross_corr",
+        "kind": "rff",
+        "dimensions": 128,
+        "gamma_multiplier": 1,
+        "alpha": 0.01
+      },
+      "minimum_cv_macro_f1": 0.11551543694400837,
+      "mean_cv_macro_f1": 0.20019397158937186
+    },
+    {
+      "candidate": {
+        "family": "motion_cross",
+        "kind": "rff",
+        "dimensions": 128,
+        "gamma_multiplier": 0.1,
+        "alpha": 0.01
+      },
+      "minimum_cv_macro_f1": 0.2395240258000975,
+      "mean_cv_macro_f1": 0.31520255814042963
+    }
+  ],
+  "schema_version": 1,
+  "evidence": "MEASURED",
+  "status": "complete",
+  "promotionAuthorized": false,
+  "protocol_date": "2026-10-13",
+  "test_access": "Original final test opened once in pilot; not reopened in this round. Development is reused adaptive evidence.",
+  "validation": {
+    "focused_tests": 4,
+    "focused_exit_code": 0,
+    "full_suite": "passed",
+    "independent_source_review": "NO BLOCK",
+    "public_pipeline_tests": 59,
+    "original_encoder_tests": 28,
+    "verified_exit_code": 0
+  }
+}

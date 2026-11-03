@@ -1,0 +1,356 @@
+{
+  "date_utc": "2026-10-13",
+  "status": "complete",
+  "promotionAuthorized": false,
+  "task": "public_resolution_ablation",
+  "evidence": "MEASURED",
+  "development": {
+    "accuracy": 0.5571428571428572,
+    "macro_f1": 0.4998706443528175,
+    "per_class_f1": [
+      0.16666666666666666,
+      0.6451612903225806,
+      0,
+      0.8421052631578947,
+      0.5333333333333333,
+      0.6451612903225806,
+      0.6666666666666666
+    ],
+    "confusion_matrix": [
+      [
+        1,
+        9,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        10,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0,
+        1,
+        6,
+        2
+      ],
+      [
+        0,
+        1,
+        1,
+        8,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        2,
+        0,
+        4,
+        4,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        10,
+        0
+      ],
+      [
+        1,
+        0,
+        1,
+        1,
+        0,
+        1,
+        6
+      ]
+    ],
+    "samples": 70
+  },
+  "incumbent_development": {
+    "accuracy": 0.5571428571428572,
+    "macro_f1": 0.4998706443528175,
+    "per_class_f1": [
+      0.16666666666666666,
+      0.6451612903225806,
+      0,
+      0.8421052631578947,
+      0.5333333333333333,
+      0.6451612903225806,
+      0.6666666666666666
+    ],
+    "confusion_matrix": [
+      [
+        1,
+        9,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        10,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0,
+        1,
+        6,
+        2
+      ],
+      [
+        0,
+        1,
+        1,
+        8,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        2,
+        0,
+        4,
+        4,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        10,
+        0
+      ],
+      [
+        1,
+        0,
+        1,
+        1,
+        0,
+        1,
+        6
+      ]
+    ],
+    "samples": 70
+  },
+  "baseline_state_exact": true,
+  "reload_max_abs_logit_error": 0,
+  "retention_checks": {
+    "macro_f1_gain": false,
+    "accuracy_nonregression": true,
+    "protect_each_previously_nonzero_class": true,
+    "p95_under_1ms": true
+  },
+  "retained_as_research_candidate": false,
+  "latency": {
+    "candidate": {
+      "p50_ms": 0.492675,
+      "p95_ms": 0.7017945
+    },
+    "incumbent": {
+      "p50_ms": 0.480525,
+      "p95_ms": 0.6862874999999998
+    }
+  },
+  "model_bytes": 496488,
+  "model_sha256": "8d3c8b144663808159159f7af9d14b09f54ee78dc1f852c643fbd001a23d2fc5",
+  "baseline_model_sha256": "8d3c8b144663808159159f7af9d14b09f54ee78dc1f852c643fbd001a23d2fc5",
+  "baseline_receipt_sha256": "f8a565cb031d3ce9b488432dfb97408a58cee8f511c0ddc89aa74edb90388b88",
+  "elapsed_seconds": 6.864779120000094,
+  "selected": {
+    "family": "pooled190",
+    "kind": "rff",
+    "dimensions": 128,
+    "gamma_multiplier": 0.1,
+    "alpha": 0.1
+  },
+  "full_receipt_sha256": "7bf24b959fdcc7ac760b34464991c9eecde706acb6c0bd5b8fb11da8b2e6ccc3",
+  "source_sha256": {
+    "espfi_resolution.py": "6203c6eb4a0a1f1e8e3b06b2af6daa84a4e917967426628a53b634c0bb6bc6a7",
+    "espfi_resolution_data.py": "021ee037e7bb1c41a01fa590d50aa93a77fa3fdcc7f14562099a062145518274",
+    "espfi_motion.py": "c6a8529ccf9d9f834383a2bdf5b14626764ec7ca2ade7ad5d4c1c14797d76054",
+    "espfi_generalize.py": "956b3a5e918f7c263a2b9183b4a6a70c8f2157604262a4ec6cee2c324a69224f",
+    "espfi_kernel.py": "ae837cb2e3fac7f052b4bd371cd496e9636e5d5dbaf3a341526a4fc5aef23478",
+    "espfi_train.py": "f3692319b383c67d092776a7690b72963061efeaa3516f2d5e41b5dac1cfbd1e"
+  },
+  "manifest_sha256": "a7aaea19b9a30f8e278f5cb8d482d7b624d93f05c593998094d8dbffcab0f003",
+  "parent_manifest_sha256": "74e0fe039acbed1b287bd11ee6b779becbb8f9b66c3c249d260ed66f5583f02a",
+  "counts": {
+    "train": 837,
+    "validation": 70
+  },
+  "source_dtypes": [
+    "<f8"
+  ],
+  "best_by_family": [
+    {
+      "candidate": {
+        "family": "pooled190",
+        "kind": "rff",
+        "dimensions": 128,
+        "gamma_multiplier": 0.1,
+        "alpha": 0.1
+      },
+      "minimum_cv_macro_f1": 0.33211530016861246,
+      "mean_cv_macro_f1": 0.33402959890262357,
+      "fold_f1": [
+        0.33211530016861246,
+        0.3359438976366347
+      ],
+      "fold_class3_f1": [
+        0.08,
+        0.2
+      ],
+      "fold_class3_confusion": [
+        [
+          0,
+          0,
+          1,
+          2,
+          6,
+          2,
+          9
+        ],
+        [
+          0,
+          5,
+          3,
+          2,
+          9,
+          1,
+          0
+        ]
+      ]
+    },
+    {
+      "candidate": {
+        "family": "raw950_matched",
+        "kind": "rff",
+        "dimensions": 128,
+        "gamma_multiplier": 0.1,
+        "alpha": 0.1
+      },
+      "minimum_cv_macro_f1": 0.3008616373852123,
+      "mean_cv_macro_f1": 0.32198371114003,
+      "fold_f1": [
+        0.3008616373852123,
+        0.34310578489484767
+      ],
+      "fold_class3_f1": [
+        0.09090909090909091,
+        0.3076923076923077
+      ],
+      "fold_class3_confusion": [
+        [
+          0,
+          0,
+          1,
+          4,
+          4,
+          2,
+          9
+        ],
+        [
+          0,
+          1,
+          10,
+          1,
+          8,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "candidate": {
+        "family": "raw950_native",
+        "kind": "rff",
+        "dimensions": 128,
+        "gamma_multiplier": 1,
+        "alpha": 0.1
+      },
+      "minimum_cv_macro_f1": 0.2991058894120357,
+      "mean_cv_macro_f1": 0.304702988594541,
+      "fold_f1": [
+        0.31030008777704626,
+        0.2991058894120357
+      ],
+      "fold_class3_f1": [
+        0,
+        0.11594202898550725
+      ],
+      "fold_class3_confusion": [
+        [
+          0,
+          0,
+          0,
+          9,
+          0,
+          0,
+          11
+        ],
+        [
+          0,
+          0,
+          4,
+          8,
+          6,
+          1,
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": "MEASURED adaptive development research. Frozen 18 configurations selected on original training folds; only selected pooled control evaluated on reused development. Original test opened in first pilot, not reopened in this round. No native-family development accuracy or hardware claim.",
+  "intake": {
+    "test_payload_decoded": false,
+    "excluded_payload_decoded": false,
+    "pooled_exact": true,
+    "source_dtype": "float64",
+    "archive_sha256": "85f3df633c5b1a48ca4b1423467fce22821b21eeb3eed085a8d9f983dc156660",
+    "decoded_recordings": 907,
+    "intake_exit_code": 0,
+    "intake_seconds": 31.518044787999997,
+    "experiment_exit_code": 0,
+    "experiment_process_seconds": 12.019457520999822
+  },
+  "validation": {
+    "focused_tests": 8,
+    "public_tests": 52,
+    "original_tests": 28,
+    "completionVerified": true,
+    "exit_code": 0,
+    "independent_source_review": "NO BLOCK",
+    "final_test_reopened": false
+  },
+  "latency_scope": "1000 alternating batch1 pairs,20warmups,sharedx86CPU; both selected and incumbent models are the same pooled190 weights. Includes validation,feature extraction,classifier; excludes acquisition,pooling,IO. Small timing difference is wrapper overhead/noise, not an accuracy or fullpipeline speed gain."
+}

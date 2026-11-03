@@ -1,0 +1,183 @@
+{
+  "status": "complete",
+  "parity": {
+    "train": {
+      "samples": 837,
+      "batch_sizes": [
+        1,
+        32
+      ],
+      "references": {
+        "buffered_reference": {
+          "max_abs_logit_error": 0.0000010154106133697383,
+          "identical_predictions": true
+        },
+        "original": {
+          "max_abs_logit_error": 0.0000010154106127868712,
+          "identical_predictions": true
+        }
+      },
+      "min_original_top1_top2_margin_half": 0.0001453015204804231,
+      "margin_bound_diagnostic_only": true,
+      "output_dtype": "float32"
+    },
+    "validation": {
+      "samples": 70,
+      "batch_sizes": [
+        1,
+        32
+      ],
+      "references": {
+        "buffered_reference": {
+          "max_abs_logit_error": 7.940611030932132e-7,
+          "identical_predictions": true
+        },
+        "original": {
+          "max_abs_logit_error": 7.940611026768796e-7,
+          "identical_predictions": true
+        }
+      },
+      "min_original_top1_top2_margin_half": 0.002173961549982034,
+      "margin_bound_diagnostic_only": true,
+      "output_dtype": "float32"
+    }
+  },
+  "rounds": [
+    {
+      "mixed": {
+        "min_ms": 0.30899,
+        "p50_ms": 0.45141,
+        "p95_ms": 0.607638,
+        "derived_calls_per_second": 2175.81881006371
+      },
+      "buffered_reference": {
+        "min_ms": 0.31234,
+        "p50_ms": 0.464445,
+        "p95_ms": 0.630166,
+        "derived_calls_per_second": 2119.6006229006002
+      },
+      "round": 1,
+      "seed": 42,
+      "gain_at_least_10percent": false,
+      "p95_within_5percent": true
+    },
+    {
+      "mixed": {
+        "min_ms": 0.30868,
+        "p50_ms": 0.44104,
+        "p95_ms": 0.614359,
+        "derived_calls_per_second": 2227.702851430467
+      },
+      "buffered_reference": {
+        "min_ms": 0.31221,
+        "p50_ms": 0.44014,
+        "p95_ms": 0.6259455,
+        "derived_calls_per_second": 2196.582090590108
+      },
+      "round": 2,
+      "seed": 43,
+      "gain_at_least_10percent": false,
+      "p95_within_5percent": true
+    },
+    {
+      "mixed": {
+        "min_ms": 0.30813,
+        "p50_ms": 0.48646999999999996,
+        "p95_ms": 0.6724515,
+        "derived_calls_per_second": 2051.6020422828456
+      },
+      "buffered_reference": {
+        "min_ms": 0.3095,
+        "p50_ms": 0.49614499999999995,
+        "p95_ms": 0.6695494999999999,
+        "derived_calls_per_second": 2014.5052557303925
+      },
+      "round": 3,
+      "seed": 44,
+      "gain_at_least_10percent": false,
+      "p95_within_5percent": true
+    }
+  ],
+  "retention_checks": {
+    "model_arrays_at_most_half": true,
+    "total_retained_at_most_65percent": true,
+    "parity_passed": true,
+    "p95_within_5percent_every_round": true
+  },
+  "retained_runtime": true,
+  "measured_10percent_speed_gain": false,
+  "memory_bytes": {
+    "mixed_model_arrays": 243740,
+    "mixed_workspace": 165068,
+    "reference_model_arrays": 487480,
+    "reference_workspace": 163736
+  },
+  "receipt_sha256": "4569955a2090d2e848038f99808328cc0c95bf777d99853983e625a02119aced",
+  "hashes": {
+    "manifest": "74e0fe039acbed1b287bd11ee6b779becbb8f9b66c3c249d260ed66f5583f02a",
+    "compact_artifact": "87765a4da415465e3a4c5415b199da4593ef173e8fc0a2398dbe67faa454374d",
+    "compact_metadata": "e80ceb9d6a68df18c35eb624fcadbfa9b715869998ee3f2fb39b504424df2372",
+    "compact_status": "a437f3cb1b87019ab0af9cae510de8f811bdd6b12c9d3bcdce2e3482934a051d",
+    "original_artifact": "8d3c8b144663808159159f7af9d14b09f54ee78dc1f852c643fbd001a23d2fc5",
+    "original_receipt": "f8a565cb031d3ce9b488432dfb97408a58cee8f511c0ddc89aa74edb90388b88",
+    "original_status": "a437f3cb1b87019ab0af9cae510de8f811bdd6b12c9d3bcdce2e3482934a051d"
+  },
+  "source_sha256": {
+    "espfi_motion_mixed_benchmark.py": "a34801cd3acf178c5c826bd95360e3c2ab76d26c02f37e6210e6617b4d3fde3c",
+    "espfi_motion_mixed.py": "839068b3e2ebe072020a16a17cf063e9fca08e5930c11c4176a9d9ba600cc084",
+    "espfi_motion_runtime.py": "1a468974a441045a852215529d73e3eaddf40c2c81842465b5952d0322490add",
+    "espfi_motion_compact.py": "74b13890afd33fbdf40efce3e91f44ddeb505d0f6d84f2d9a0b03adcd92c6f52",
+    "espfi_motion.py": "c6a8529ccf9d9f834383a2bdf5b14626764ec7ca2ade7ad5d4c1c14797d76054",
+    "espfi_kernel.py": "ae837cb2e3fac7f052b4bd371cd496e9636e5d5dbaf3a341526a4fc5aef23478",
+    "espfi_generalize.py": "956b3a5e918f7c263a2b9183b4a6a70c8f2157604262a4ec6cee2c324a69224f",
+    "espfi_train.py": "f3692319b383c67d092776a7690b72963061efeaa3516f2d5e41b5dac1cfbd1e",
+    "espfi.py": "1ea4f72b3bbb0fe68e9903e6f32663a887bd9c8eac3a659932ff97b7e3d87124"
+  },
+  "environment": {
+    "python": "3.12.3",
+    "numpy": "2.4.4",
+    "platform": "Linux-6.12.105-fly-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "thread_environment": {
+      "OPENBLAS_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": null
+    }
+  },
+  "protocol": {
+    "rounds": 3,
+    "calls_per_runtime_per_round": 1000,
+    "warmups_per_runtime_per_round": 100,
+    "seed": 42,
+    "batch_size": 1,
+    "alternating_runtime_order": true,
+    "max_abs_logit_error": 0.0001,
+    "exact_argmax_required": true,
+    "max_model_array_ratio": 0.5,
+    "max_total_retained_ratio": 0.65,
+    "max_p95_ratio_every_round": 1.05,
+    "speed_gate_max_p50_and_p95_ratio_every_round": 0.9,
+    "rotating_seeded_development_order": true,
+    "primary_reference": "BufferedMotionBundle retained float64",
+    "original_reference": "parity only"
+  },
+  "elapsed_seconds": 6.082579396000028,
+  "reviewed_on": "2026-10-13",
+  "evidence": "MEASURED_AGGREGATE",
+  "promotionAuthorized": false,
+  "float64_default_unchanged": true,
+  "tests": {
+    "espfi": 71,
+    "csi_training": 28,
+    "total": 99,
+    "verified_exit_code": 0,
+    "focused_mixed": 6,
+    "source_sha256": {
+      "scripts/csi_training/espfi_motion_mixed.py": "839068b3e2ebe072020a16a17cf063e9fca08e5930c11c4176a9d9ba600cc084",
+      "scripts/csi_training/espfi_motion_mixed_benchmark.py": "a34801cd3acf178c5c826bd95360e3c2ab76d26c02f37e6210e6617b4d3fde3c",
+      "scripts/tests/test_espfi_motion_mixed.py": "f4f9996831d99d57e295f09c61317f44a66a95371dfa79059e7f2aecd923898d",
+      "scripts/tests/test_espfi_motion_mixed_benchmark.py": "3a526e4b371c4fe90f509548041dd1778f9cdb009a26755ad2e5a686c6ca9ae8"
+    }
+  },
+  "scope": "Research option on the retained seven-class ESPFi activity model. Reused development evidence only. Final test was opened once in the first pilot and is not reopened here. Float64 features, float32 classifier. Same model artifact. No new accuracy, SOTA, total process or peak loading RAM, target device or deployment claim. Retained workspace stores transformed last-window values until reuse; not secure erasure."
+}
