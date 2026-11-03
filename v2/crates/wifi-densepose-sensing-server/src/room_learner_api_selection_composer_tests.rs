@@ -274,3 +274,103 @@ async fn actual_selected_composer_withdraws_without_fallback_and_never_grants_au
     assert!(queued.get("selected_binary_evidence").is_none());
     assert!(queued.get("classification_source").is_none());
 }
+
+/// Explicit opt-in producer fixture for the actual TypeScript wire consumer.
+/// All input, training and labels are SYNTHETIC; no device/user state is read.
+#[tokio::test]
+async fn export_actual_selected_contract_cases() {
+    async fn capture_case(
+        name: &str,
+        state: SharedState,
+        rt: &RoomLearningRuntime,
+    ) -> serde_json::Value {
+        let mut sensing = update();
+        project_live_selection(&*state.read().await, &mut sensing);
+        let response = Router::new()
+            .route("/api/v1/room-learner/selection", get(selection))
+            .with_state(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/room-learner/selection")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 65536)
+            .await
+            .unwrap();
+        let paired_selection: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        serde_json::json!({
+            "name": name,
+            "captured_at_unix_ms": rt.receiver_now_ns() / 1_000_000,
+            "sensing_update": sensing,
+            "paired_selection": paired_selection,
+        })
+    }
+    let (_dir, state, rt, _binding) = fitted().await;
+    let grid = rt.context().unwrap().sources[0].grid_id.clone();
+    let occupied = capture_case("ready_occupied", state.clone(), &rt).await;
+    assert_eq!(
+        occupied["sensing_update"]["selected_binary_evidence"]["decision"],
+        "occupied"
+    );
+    feed(&rt, &grid, RoomLabel::Empty, 2000, rt.receiver_now_ns());
+    tokio::time::sleep(std::time::Duration::from_millis(12)).await;
+    let empty = capture_case("ready_empty", state.clone(), &rt).await;
+    assert_eq!(
+        empty["sensing_update"]["selected_binary_evidence"]["decision"],
+        "empty"
+    );
+    rt.record_native_rejection(16, &grid, "synthetic missing selected source");
+    let unavailable = capture_case("unavailable_missing_selected_source", state.clone(), &rt).await;
+    assert_eq!(
+        unavailable["sensing_update"]["selected_binary_evidence"]["status"],
+        "unavailable"
+    );
+    state.write().await.privacy_mode = true;
+    let privacy = capture_case("privacy_withheld", state.clone(), &rt).await;
+    assert_eq!(privacy["paired_selection"]["success"], false);
+    assert!(privacy["sensing_update"]["selected_binary_evidence"]["identity"].is_null());
+    let producer_sha = std::env::var("RUVIEW_TEST_PRODUCER_SHA").ok();
+    let fixture = serde_json::json!({
+        "schema": "ruview.test.selected-contract-cases.v1",
+        "evidence": "SYNTHETIC_SOFTWARE_COMPOSITION_NOT_PHYSICAL_QUALIFICATION",
+        "producer_commit": producer_sha,
+        "producer_path": "real public runtime capture/train/evaluate/qualify/select; actual GET selection handler and final SensingUpdate projector",
+        "clock_contract": "Use each captured_at_unix_ms as an injected parser clock; stored fixtures are not fresh live observations.",
+        "authentication_scope": "owner and paired-read policy tested separately; this fixture exercises the real bounded GET response producer",
+        "cases": [occupied, empty, unavailable, privacy],
+    });
+    if let Ok(output) = std::env::var("RUVIEW_TEST_SELECTED_CONTRACT_OUTPUT") {
+        use std::io::Write;
+        #[cfg(unix)]
+        use std::os::unix::fs::OpenOptionsExt;
+        let sha = producer_sha
+            .as_deref()
+            .expect("explicit fixture export requires producer commit");
+        assert!(sha.len() == 40 && sha.bytes().all(|b| b.is_ascii_hexdigit()));
+        let path = std::path::PathBuf::from(output);
+        assert!(path.is_absolute());
+        let parent = path.parent().unwrap().canonicalize().unwrap();
+        let system_tmp = std::env::temp_dir().canonicalize().unwrap();
+        assert!(
+            parent.starts_with(&system_tmp)
+                || parent == std::path::Path::new("/private/tmp")
+                || parent == std::path::Path::new("/tmp"),
+            "test export is confined to temporary storage"
+        );
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options
+            .open(&path)
+            .expect("never overwrite an existing fixture");
+        serde_json::to_writer_pretty(&mut file, &fixture).unwrap();
+        file.write_all(b"\n").unwrap();
+        file.sync_all().unwrap();
+        println!("RUVIEW_SELECTED_CONTRACT_FILE={}", path.display());
+    }
+}
