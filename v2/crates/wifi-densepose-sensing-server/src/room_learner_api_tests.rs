@@ -535,3 +535,9 @@ async fn cache_pressure_preserves_selected_active_class_and_freshness() {
 #[cfg(unix)]
 #[path = "room_learner_api_recovery_tests.rs"]
 mod recovery_tests;
+
+#[path = "room_learner_api_selection_tests.rs"]
+mod selection_tests;
+
+#[path = "room_learner_api_selection_composer_tests.rs"]
+mod selection_composer_tests;

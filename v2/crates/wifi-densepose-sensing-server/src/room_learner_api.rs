@@ -199,7 +199,10 @@ pub(super) async fn configure(
 }
 pub(super) async fn status(State(state): State<SharedState>) -> Json<serde_json::Value> {
     match runtime(&state).await {
-        Ok(rt) => Json(rt.status(now_ns(&rt))),
+        Ok(rt) => {
+            let state = state.read().await;
+            Json(selection_routes::enriched_status(&state, &rt))
+        }
         Err(e) => e,
     }
 }
@@ -437,3 +440,12 @@ pub(super) async fn discard_capture(
 #[cfg(test)]
 #[path = "room_learner_api_tests.rs"]
 mod tests;
+
+
+#[path = "room_learner_api_publication.rs"]
+mod publication;
+pub(super) use publication::{project_cached_selection, project_live_selection, refresh_queued_update, selection_owns_output};
+
+#[path = "room_learner_api_selection.rs"]
+mod selection_routes;
+pub(super) use selection_routes::{owner_selection_routes, selection};

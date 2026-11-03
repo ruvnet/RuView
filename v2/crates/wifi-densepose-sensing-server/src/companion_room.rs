@@ -259,6 +259,21 @@ impl SharedRoomStore {
             && ids.len() == node_ids.len()
             && ids == expected
     }
+    /// Read the current geometry binding without publishing or advancing its revision.
+    /// Model selection is separate metadata and must never mutate room geometry.
+    /// Hold the read binding stable across a guarded model-selection operation.
+    /// Lock order is app state -> shared room -> learner; no callback may publish
+    /// geometry or reacquire this store.
+    pub fn with_current_binding<T>(&self, operation: impl FnOnce(Option<&str>) -> T) -> Result<T, StatusCode> {
+        let room = self.current.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        Ok(operation(room.binding_digest.as_deref()))
+    }
+
+    pub fn current_binding_digest(&self) -> Result<Option<String>, StatusCode> {
+        self.current.lock().map(|room| room.binding_digest.clone())
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    }
+
     fn publish(&self, expected: u64, room: Value) -> Result<Envelope, StatusCode> {
         let room = validate(room).map_err(|_| StatusCode::BAD_REQUEST)?;
         let mut current = self
@@ -365,6 +380,20 @@ mod tests {
         assert!(restored.matches_binding(e.binding_digest.as_ref().unwrap(), &[17]));
         assert!(SharedRoomStore::load(dir.path(), "other").is_err());
     }
+    #[test]
+    fn reading_current_binding_never_publishes_a_new_geometry_revision() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SharedRoomStore::load(dir.path(), "install-1").unwrap();
+        assert_eq!(store.current_binding_digest().unwrap(), None);
+        let published = store.publish(0, room()).unwrap();
+        let before = fs::read(&store.path).unwrap();
+        for _ in 0..3 {
+            assert_eq!(store.current_binding_digest().unwrap(), published.binding_digest);
+        }
+        assert_eq!(store.current.lock().unwrap().revision, published.revision);
+        assert_eq!(fs::read(&store.path).unwrap(), before);
+    }
+
     #[test]
     fn malformed_geometry_unknown_evidence_and_duplicate_slots_rejected() {
         for (key, value) in [
