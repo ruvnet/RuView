@@ -12,6 +12,7 @@
 mod adaptive_classifier;
 mod companion_integration;
 mod companion_room;
+mod companion_spatial;
 pub mod cli;
 pub mod csi;
 mod engine_bridge;

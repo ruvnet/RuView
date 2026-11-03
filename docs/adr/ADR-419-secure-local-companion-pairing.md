@@ -154,3 +154,29 @@ The Mac launcher still refuses an occupied foreign endpoint, with a bounded
 vacancy wait for a previous managed helper to finish. Existing durable room,
 pairing and account records are not removed by parent loss. Physical capture and
 TestFlight acceptance must name the newly embedded helper, not an older build.
+
+## Explicit saved spatial artifacts (mobile issue102, 2026-10-30)
+
+A separate owner-only receive action opens one15-minute artifact slot for an
+already paired phone. The paired TLS route accepts a single bounded geometry
+payload with a one-use nonce and SHA-256 digest. Publisher identity comes from
+the authenticated grant. Upload and acceptance both match the current canonical
+installation, room revision and binding; they serialize with room publication.
+Pairing revocation and permission expiry withdraw pending review authority.
+
+Only an explicit owner acceptance retains the artifact. It is historical geometry,
+not a calibration/model import: no points enter the detector, no room dimensions
+are overwritten and no cold-restored scan establishes current AR alignment.
+The payload has at most128 surfaces and64 anchors,48KiB encoded content, capture
+and coordinate provenance, and an optional source calibration digest. Raw camera,
+depth and CSI are excluded. Accepted history is capped at32 records without eviction.
+
+Pending permissions/artifacts are memory-only. Accepted history is atomically
+written0600 in the account-owned private companion directory. Startup checks
+account/installation ownership, geometry bounds and content digests; corrupt,
+non-private or symlinked files fail closed. A persistence error freezes the inbox
+until restart so an uncertain rename/fsync result cannot be reported as accepted
+or followed by further writes. Pairing expiry does not delete already accepted
+history. Consumers must implement review and distinguish this retained history
+from current alignment. Rollout requires a rebuilt helper and mobile consumer;
+source tests are not delivered-device or measured accuracy evidence.

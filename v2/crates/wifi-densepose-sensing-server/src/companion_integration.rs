@@ -42,6 +42,7 @@ pub struct Integration {
     room: Arc<companion_room::SharedRoomStore>,
     control: Control,
     sensors: companion_sensors::Shared,
+    spatial: Option<Arc<companion_spatial::SpatialStore>>,
     advertiser: Option<wifi_densepose_sensing_server::discovery::DiscoveryAdvertiser>,
 }
 impl Integration {
@@ -98,6 +99,7 @@ impl Integration {
             serial: Arc::new(tokio::sync::Mutex::new(())),
         };
         let sensors = companion_sensors::SensorStore::new(service.clone());
+        let spatial = auth.owner_account_scope().map(|scope| companion_spatial::SpatialStore::load(&dir, scope, &identity.installation_id, service.clone(), room.clone())).transpose()?;
         Ok(Some(Self {
             service,
             authority,
@@ -108,6 +110,7 @@ impl Integration {
             room,
             control,
             sensors,
+            spatial,
         }))
     }
     pub fn authority(&self) -> &str {
@@ -117,6 +120,7 @@ impl Integration {
         companion::owner_router(self.service.clone())
             .merge(companion_sensors::owner_router(self.sensors.clone()))
             .merge(companion_room::owner_router(self.room.clone()))
+            .merge(self.spatial.as_ref().map(|s| companion_spatial::owner_router(s.clone())).unwrap_or_default())
             .layer(axum::middleware::from_fn_with_state(
                 self.control.clone(),
                 serialize_control,
@@ -134,9 +138,12 @@ impl Integration {
             ))
     }
     pub async fn start(self, app: Router) {
-        let app = app
-            .merge(companion_sensors::companion_router(self.sensors.clone()))
-            .merge(companion_room::read_router(self.room.clone()))
+        let app = attach_peer_artifacts(
+            app.merge(companion_sensors::companion_router(self.sensors.clone()))
+                .merge(companion_room::read_router(self.room.clone())),
+            self.spatial.as_ref().map(|s| companion_spatial::peer_router(s.clone())).unwrap_or_default(),
+            self.control.clone(),
+        )
             .layer(axum::middleware::from_fn_with_state(
                 self.service.clone(),
                 require_companion,
@@ -152,6 +159,12 @@ impl Integration {
         });
     }
 }
+// Existing calibration routes already use protect_control. Layering their
+// router a second time would reacquire the same non-reentrant mutex.
+fn attach_peer_artifacts(app: Router, artifacts: Router, control: Control) -> Router {
+    app.merge(artifacts.layer(axum::middleware::from_fn_with_state(control, serialize_control)))
+}
+
 #[derive(Clone)]
 struct Control {
     state: SharedState,
@@ -169,9 +182,21 @@ async fn serialize_control(
             request.uri().path(),
             "/api/v1/calibration/start" | "/api/v1/pose/calibrate"
         );
-    if !publish && !start {
+    let artifact = request.method() == axum::http::Method::POST && matches!(request.uri().path(), "/api/v1/companion/spatial" | "/companion/v1/spatial");
+    if !publish && !start && !artifact {
         return next.run(request).await;
     }
+    // Do not let a permitted phone hold the shared calibration lock while
+    // streaming an unfinished body. Bound and time-limit it before locking.
+    let request = if artifact {
+        let (parts, body) = request.into_parts();
+        let bytes = match tokio::time::timeout(std::time::Duration::from_secs(5), axum::body::to_bytes(body, 64 * 1024)).await {
+            Ok(Ok(bytes)) => bytes,
+            Ok(Err(_)) => return StatusCode::PAYLOAD_TOO_LARGE.into_response(),
+            Err(_) => return StatusCode::REQUEST_TIMEOUT.into_response(),
+        };
+        Request::from_parts(parts, axum::body::Body::from(bytes))
+    } else { request };
     let _guard = control.serial.lock().await;
     if publish {
         let state = control.state.read().await;
@@ -236,10 +261,12 @@ fn policy(method: &axum::http::Method, path: &str) -> Option<bool> {
                 | "/ws/sensing"
                 | "/companion/v1/room"
                 | "/companion/v1/sensors"
+                | "/companion/v1/spatial"
         ) {
             return Some(false);
         }
     }
+    if *method == Method::POST && path == "/companion/v1/spatial" { return Some(false); }
     if *method == Method::POST
         && matches!(
             path,
@@ -357,6 +384,38 @@ mod tests {
         assert_eq!(policy(&Method::GET, "/ws/train/progress"), None);
     }
     #[tokio::test]
+    async fn peer_composition_never_takes_the_calibration_lock_twice() {
+        use tower::ServiceExt;
+        use axum::body::Body;
+        let control=Control{state:Arc::new(RwLock::new(AppStateInner::minimal())),serial:Arc::new(tokio::sync::Mutex::new(()))};
+        let existing=Router::new().route("/api/v1/calibration/start",post(||async{StatusCode::OK}))
+            .layer(axum::middleware::from_fn_with_state(control.clone(),serialize_control));
+        let artifacts=Router::new().route("/companion/v1/spatial",post(||async{StatusCode::OK}));
+        let app=attach_peer_artifacts(existing,artifacts,control);
+        for path in ["/api/v1/calibration/start","/companion/v1/spatial"] {
+            let request=Request::builder().method("POST").uri(path).body(Body::from("{}")).unwrap();
+            let response=tokio::time::timeout(std::time::Duration::from_secs(1),app.clone().oneshot(request)).await.expect("nested calibration lock").unwrap();
+            assert_eq!(response.status(),StatusCode::OK);
+        }
+    }
+    #[tokio::test]
+    async fn unfinished_spatial_upload_does_not_hold_calibration_lock() {
+        use tower::ServiceExt;
+        use axum::body::Body;
+        let serial=Arc::new(tokio::sync::Mutex::new(()));
+        let control=Control{state:Arc::new(RwLock::new(AppStateInner::minimal())),serial:serial.clone()};
+        let router=Router::new().route("/companion/v1/spatial",post(||async{StatusCode::OK}))
+            .layer(axum::middleware::from_fn_with_state(control,serialize_control));
+        let stream=futures_util::stream::pending::<Result<String,std::io::Error>>();
+        let request=Request::builder().method("POST").uri("/companion/v1/spatial").body(Body::from_stream(stream)).unwrap();
+        let pending=tokio::spawn(router.clone().oneshot(request));
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert!(serial.try_lock().is_ok());
+        assert_eq!(pending.await.unwrap().unwrap().status(),StatusCode::REQUEST_TIMEOUT);
+        let huge=Request::builder().method("POST").uri("/companion/v1/spatial").body(Body::from(vec![b'x';65537])).unwrap();
+        assert_eq!(router.oneshot(huge).await.unwrap().status(),StatusCode::PAYLOAD_TOO_LARGE);
+    }
+    #[tokio::test]
     async fn sensor_routes_preserve_owner_peer_and_companion_isolation() {
         use tower::ServiceExt;
         use axum::{body::Body, http::{Request, Method}};
@@ -370,6 +429,11 @@ mod tests {
             assert_eq!(owner.clone().oneshot(req).await.unwrap().status().as_u16(), expected);
         }
         assert_eq!(policy(&Method::GET,"/companion/v1/sensors"),Some(false));
+        assert_eq!(policy(&Method::GET,"/companion/v1/spatial"),Some(false));
+        assert_eq!(policy(&Method::POST,"/companion/v1/spatial"),Some(false));
+        assert_eq!(policy(&Method::PUT,"/companion/v1/spatial"),None);
+        assert_eq!(policy(&Method::GET,"/api/v1/companion/spatial"),None);
+        assert_eq!(policy(&Method::POST,"/api/v1/companion/spatial"),None);
         for path in ["/api/v1/companion/sensors", "/api/v1/companion/devices/phone/sensors"] {
             assert_eq!(policy(&Method::GET,path),None); assert_eq!(policy(&Method::POST,path),None); assert_eq!(policy(&Method::DELETE,path),None);
         }
