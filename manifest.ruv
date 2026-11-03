@@ -1,0 +1,130 @@
+{
+  "schemaVersion": "0.1",
+  "id": "ruv://ruvnet/constellation/service/ruview/resources/manifest.ruv",
+  "name": "RuView",
+  "summary": "WiFi CSI sensing for presence, movement and vitals, with hardware and accuracy caveats. Record CSI, train models, load RVF files and switch LoRA profiles. Boundaries: Nested packages and scoped instructions are not exhaustively inventoried. Hardware validation and sensing accuracy were not evaluated. AGENTS requires MEASURED, CLAIMED or SYNTHETIC evidence labels and held-out pose validation. Root AGENTS and README cite different contributor-harness versions; use current package manifests before invocation.",
+  "repository": {
+    "url": "https://github.com/ruvnet/RuView",
+    "defaultBranch": "main",
+    "visibility": "public"
+  },
+  "nexus": "https://github.com/ruvnet/ruvnet",
+  "capabilities": [
+    {
+      "id": "wifi-sensing",
+      "description": "WiFi CSI sensing for presence, movement and vitals, with hardware and accuracy caveats.",
+      "status": "documented",
+      "evidence": [
+        {
+          "url": "https://github.com/ruvnet/RuView/blob/0ef6b96fe15e30b4a086992e47e18081a0ba37ce/README.md",
+          "revision": "0ef6b96fe15e30b4a086992e47e18081a0ba37ce",
+          "kind": "documentation"
+        }
+      ]
+    },
+    {
+      "id": "model-workflow",
+      "description": "Record CSI, train models, load RVF files and switch LoRA profiles.",
+      "status": "documented",
+      "evidence": [
+        {
+          "url": "https://github.com/ruvnet/RuView/blob/0ef6b96fe15e30b4a086992e47e18081a0ba37ce/README.md",
+          "revision": "0ef6b96fe15e30b4a086992e47e18081a0ba37ce",
+          "kind": "documentation"
+        }
+      ]
+    },
+    {
+      "id": "local-automation",
+      "description": "HOMECORE local state, history, automation and signed Wasm plugins.",
+      "status": "documented",
+      "evidence": [
+        {
+          "url": "https://github.com/ruvnet/RuView/blob/0ef6b96fe15e30b4a086992e47e18081a0ba37ce/README.md",
+          "revision": "0ef6b96fe15e30b4a086992e47e18081a0ba37ce",
+          "kind": "documentation"
+        }
+      ]
+    },
+    {
+      "id": "contributor-harness",
+      "description": "Repository guidance, guarded agents, MCP and deterministic verification.",
+      "status": "documented",
+      "evidence": [
+        {
+          "url": "https://github.com/ruvnet/RuView/blob/0ef6b96fe15e30b4a086992e47e18081a0ba37ce/README.md",
+          "revision": "0ef6b96fe15e30b4a086992e47e18081a0ba37ce",
+          "kind": "documentation"
+        }
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "readme",
+      "url": "https://github.com/ruvnet/RuView/blob/0ef6b96fe15e30b4a086992e47e18081a0ba37ce/README.md",
+      "kind": "docs"
+    }
+  ],
+  "relationships": [],
+  "integrations": [
+    {
+      "role": "nexus",
+      "project": "ruv://ruvnet/constellation/service/ruvnet/resources/manifest.ruv",
+      "status": "declared"
+    },
+    {
+      "role": "coordination",
+      "project": "ruv://ruvnet/constellation/service/ruflo/resources/manifest.ruv",
+      "status": "declared"
+    },
+    {
+      "role": "execution-artifacts",
+      "project": "ruv://ruvnet/constellation/service/rvm/resources/manifest.ruv",
+      "status": "declared"
+    },
+    {
+      "role": "public-retrieval",
+      "project": "ruv://ruvnet/constellation/service/ruvector/resources/manifest.ruv",
+      "status": "declared"
+    },
+    {
+      "role": "evaluation",
+      "project": "ruv://ruvnet/constellation/service/metaharness/resources/manifest.ruv",
+      "status": "declared"
+    },
+    {
+      "role": "evolution",
+      "project": "ruv://ruvnet/constellation/service/autogenous/resources/manifest.ruv",
+      "status": "declared"
+    },
+    {
+      "role": "improvement-proposals",
+      "project": "ruv://ruvnet/constellation/service/dream-machine/resources/manifest.ruv",
+      "status": "declared"
+    },
+    {
+      "role": "stream-observation",
+      "project": "ruv://ruvnet/constellation/service/midstream/resources/manifest.ruv",
+      "status": "declared"
+    },
+    {
+      "role": "cryptography-research",
+      "project": "ruv://ruvnet/constellation/service/qudag/resources/manifest.ruv",
+      "status": "declared"
+    },
+    {
+      "role": "community",
+      "project": "ruv://ruvnet/constellation/service/agentbbs/resources/manifest.ruv",
+      "status": "declared"
+    }
+  ],
+  "safety": {
+    "discoveryOnly": true,
+    "executionRequiresAuthorization": true
+  },
+  "provenance": {
+    "sourceCommit": "0ef6b96fe15e30b4a086992e47e18081a0ba37ce",
+    "observedAt": "2026-10-10T02:57:25.760278Z"
+  }
+}
