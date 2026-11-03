@@ -179,3 +179,43 @@ pub(crate) fn refresh_queued_update(state: &AppStateInner, json: &str) -> Option
         _ => Some(json.to_owned()),
     }
 }
+
+/// Legacy MQTT/automation bridges cannot reinterpret selected-model frames,
+/// even after deselection or when an older unmarked frame was queued before
+/// selection. This is an admission guard, not new MQTT presence authority.
+#[cfg(any(feature = "mqtt", test))]
+pub(crate) fn legacy_sink_frame_allowed(selection_owned: bool, frame: &serde_json::Value) -> bool {
+    !selection_owned
+        && frame.get("selected_binary_evidence").is_none()
+        && frame.get("classification_source").is_none()
+}
+
+#[cfg(test)]
+mod legacy_sink_tests {
+    use super::*;
+    #[test]
+    fn selected_current_state_and_queued_markers_both_withhold_legacy_bridges() {
+        let legacy =
+            serde_json::json!({"type":"sensing_update","classification":{"presence":true}});
+        assert!(legacy_sink_frame_allowed(false, &legacy));
+        assert!(
+            !legacy_sink_frame_allowed(true, &legacy),
+            "pre-selection queued legacy data must be withheld after selection"
+        );
+        for status in ["ready", "unavailable", "none"] {
+            let mut selected = legacy.clone();
+            selected["selected_binary_evidence"] = serde_json::json!({"status":status});
+            assert!(
+                !legacy_sink_frame_allowed(false, &selected),
+                "old selected frame must not regain legacy authority after deselection"
+            );
+            assert!(!legacy_sink_frame_allowed(true, &selected));
+        }
+        let mut malformed = legacy.clone();
+        malformed["selected_binary_evidence"] = serde_json::Value::Null;
+        assert!(!legacy_sink_frame_allowed(false, &malformed));
+        let mut comparison = legacy;
+        comparison["classification_source"] = serde_json::json!("legacy_control_comparison");
+        assert!(!legacy_sink_frame_allowed(false, &comparison));
+    }
+}

@@ -15746,65 +15746,6 @@ async fn main() {
         );
     }
 
-    // #872: actually start the MQTT publisher when `--mqtt` is set. The publisher
-    // (mqtt::) consumes a typed VitalsSnapshot stream; we bridge the existing JSON
-    // sensing broadcast into it with a defensive serde_json::Value mapping (absent
-    // fields default — never publish wrong values). Gated on the `mqtt` feature
-    // (the Docker image is built `--features mqtt`); without it `--mqtt` WARNs and
-    // no-ops, matching the documented contract.
-    if args.mqtt_opts.mqtt {
-        #[cfg(feature = "mqtt")]
-        {
-            use wifi_densepose_sensing_server::mqtt;
-            let mut mcfg = mqtt::config::MqttConfig::from_args_with_data_dir(
-                &args.mqtt_opts,
-                &data_dir,
-            );
-            mcfg.privacy_mode = args.privacy_mode;
-            let mcfg = std::sync::Arc::new(mcfg);
-            match mcfg.validate() {
-                Ok(()) => {
-                    let node_id = mcfg.client_id.clone();
-                    let builder = mqtt::publisher::OwnedDiscoveryBuilder {
-                        discovery_prefix: mcfg.discovery_prefix.clone(),
-                        node_id: node_id.clone(),
-                        node_friendly_name: Some("RuView".to_string()),
-                        sw_version: env!("CARGO_PKG_VERSION").to_string(),
-                        model: "RuView WiFi Sensing".to_string(),
-                        via_device: None,
-                    };
-                    let (vtx, vrx) = broadcast::channel::<mqtt::state::VitalsSnapshot>(64);
-                    let (host, port) = (mcfg.host.clone(), mcfg.port);
-                    mqtt::publisher::spawn(mcfg, builder, vrx);
-                    let mut jrx = tx.subscribe();
-                    tokio::spawn(async move {
-                        // #898/#872/#2085: one snapshot per physical node from
-                        // each `sensing_update`; `edge_vitals` feeds the fall
-                        // detector; other message types are ignored.
-                        let mut bridge = mqtt::bridge::SensingBridge::new(node_id);
-                        let started = std::time::Instant::now();
-                        while let Ok(json) = jrx.recv().await {
-                            let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) else {
-                                continue;
-                            };
-                            for snap in bridge.ingest(&v, started.elapsed()) {
-                                let _ = vtx.send(snap);
-                            }
-                        }
-                    });
-                    tracing::info!("MQTT publisher started -> {host}:{port}");
-                }
-                Err(e) => tracing::error!("MQTT config invalid: {e}; publisher not started"),
-            }
-        }
-        #[cfg(not(feature = "mqtt"))]
-        tracing::warn!(
-            "--mqtt set but this binary was built without the `mqtt` feature; the publisher is a \
-             no-op. Use the official Docker image (built `--features mqtt`) or rebuild with \
-             `cargo build -p wifi-densepose-sensing-server --features mqtt`."
-        );
-    }
-
     // ADR-262 P3: build the live RuField surface (dedicated ed25519 signer from
     // WDP_RUFIELD_SIGNING_SEED, else a logged dev default). The same Arc is
     // stored in AppStateInner (so the sensing loop can `emit()` per cycle) and
@@ -16039,6 +15980,81 @@ async fn main() {
         )
         .expect("default pose physics configuration is valid"),
     }));
+
+    // #872: actually start the MQTT publisher when `--mqtt` is set. The publisher
+    // (mqtt::) consumes a typed VitalsSnapshot stream; we bridge the existing JSON
+    // sensing broadcast into it with a defensive serde_json::Value mapping (absent
+    // fields default — never publish wrong values). Gated on the `mqtt` feature
+    // (the Docker image is built `--features mqtt`); without it `--mqtt` WARNs and
+    // no-ops, matching the documented contract.
+    // Selected models have no MQTT authority in this version. This admission
+    // guard does not retract a snapshot already queued inside the publisher or
+    // a broker-retained legacy value; known nodes retain the existing 10-second
+    // stale threshold / 30-second availability heartbeat. Managed native helpers do
+    // not enable MQTT. Network-time withdrawal needs a separate sink contract.
+    if args.mqtt_opts.mqtt {
+        #[cfg(feature = "mqtt")]
+        {
+            use wifi_densepose_sensing_server::mqtt;
+            let mut mcfg = mqtt::config::MqttConfig::from_args_with_data_dir(
+                &args.mqtt_opts,
+                &data_dir,
+            );
+            mcfg.privacy_mode = args.privacy_mode;
+            let mcfg = std::sync::Arc::new(mcfg);
+            match mcfg.validate() {
+                Ok(()) => {
+                    let node_id = mcfg.client_id.clone();
+                    let builder = mqtt::publisher::OwnedDiscoveryBuilder {
+                        discovery_prefix: mcfg.discovery_prefix.clone(),
+                        node_id: node_id.clone(),
+                        node_friendly_name: Some("RuView".to_string()),
+                        sw_version: env!("CARGO_PKG_VERSION").to_string(),
+                        model: "RuView WiFi Sensing".to_string(),
+                        via_device: None,
+                    };
+                    let (vtx, vrx) = broadcast::channel::<mqtt::state::VitalsSnapshot>(64);
+                    let (host, port) = (mcfg.host.clone(), mcfg.port);
+                    mqtt::publisher::spawn(mcfg, builder, vrx);
+                    let mut jrx = state.read().await.tx.subscribe();
+                    let mqtt_state = Arc::downgrade(&state);
+                    tokio::spawn(async move {
+                        // #898/#872/#2085: one snapshot per physical node from
+                        // each `sensing_update`; `edge_vitals` feeds the fall
+                        // detector; other message types are ignored.
+                        let mut bridge = mqtt::bridge::SensingBridge::new(node_id.clone());
+                        let started = std::time::Instant::now();
+                        while let Ok(json) = jrx.recv().await {
+                            let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) else {
+                                continue;
+                            };
+                            let Some(live_state) = mqtt_state.upgrade() else { break; };
+                            let current = live_state.read().await;
+                            if !room_learner_api::legacy_sink_frame_allowed(
+                                room_learner_api::selection_owns_output(&current), &v,
+                            ) {
+                                // Do not replay pending legacy fall/motion state when
+                                // the operator later explicitly returns to control.
+                                bridge = mqtt::bridge::SensingBridge::new(node_id.clone());
+                                continue;
+                            }
+                            for snap in bridge.ingest(&v, started.elapsed()) {
+                                let _ = vtx.send(snap);
+                            }
+                        }
+                    });
+                    tracing::info!("MQTT publisher started -> {host}:{port}");
+                }
+                Err(e) => tracing::error!("MQTT config invalid: {e}; publisher not started"),
+            }
+        }
+        #[cfg(not(feature = "mqtt"))]
+        tracing::warn!(
+            "--mqtt set but this binary was built without the `mqtt` feature; the publisher is a \
+             no-op. Use the official Docker image (built `--features mqtt`) or rebuild with \
+             `cargo build -p wifi-densepose-sensing-server --features mqtt`."
+        );
+    }
 
     {
         let mut s = state.write().await;

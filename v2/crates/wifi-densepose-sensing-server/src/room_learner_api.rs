@@ -444,6 +444,8 @@ mod tests;
 
 #[path = "room_learner_api_publication.rs"]
 mod publication;
+#[cfg(feature = "mqtt")]
+pub(super) use publication::legacy_sink_frame_allowed;
 pub(super) use publication::{project_cached_selection, project_live_selection, refresh_queued_update, selection_owns_output};
 
 #[path = "room_learner_api_selection.rs"]

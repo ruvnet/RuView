@@ -81,7 +81,8 @@ pub(crate) async fn qualify(
         Ok(rt) => rt,
         Err(e) => return e,
     };
-    let state = state.read().await;
+    // Serialize authority transitions with live producers and legacy sink admission.
+    let state = state.write().await;
     match with_current_room(&state, &rt, || rt.qualify(&request.expected)) {
         Ok(receipt) => Json(
             serde_json::json!({"success":true,"qualification":receipt,"status":enriched_status(&state, &rt)}),
@@ -98,7 +99,8 @@ pub(crate) async fn select_model(
         Ok(rt) => rt,
         Err(e) => return e,
     };
-    let state = state.read().await;
+    // Serialize authority transitions with live producers and legacy sink admission.
+    let state = state.write().await;
     match with_current_room(&state, &rt, || {
         rt.select_model(
             &request.expected,
@@ -121,7 +123,8 @@ pub(crate) async fn deselect_model(
         Ok(rt) => rt,
         Err(e) => return e,
     };
-    let state = state.read().await;
+    // Serialize authority transitions with live producers and legacy sink admission.
+    let state = state.write().await;
     match rt.deselect_model(&request.expected) {
         Ok(receipt) => Json(
             serde_json::json!({"success":true,"selection":receipt,"status":enriched_status(&state, &rt)}),

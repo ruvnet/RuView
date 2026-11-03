@@ -288,7 +288,7 @@ async fn export_actual_selected_contract_cases() {
         project_live_selection(&*state.read().await, &mut sensing);
         let response = Router::new()
             .route("/api/v1/room-learner/selection", get(selection))
-            .with_state(state)
+            .with_state(state.clone())
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/room-learner/selection")
@@ -302,7 +302,9 @@ async fn export_actual_selected_contract_cases() {
             .await
             .unwrap();
         let paired_selection: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let owner_status = status(State(state)).await.0;
         serde_json::json!({
+            "owner_status": owner_status,
             "name": name,
             "captured_at_unix_ms": rt.receiver_now_ns() / 1_000_000,
             "sensing_update": sensing,

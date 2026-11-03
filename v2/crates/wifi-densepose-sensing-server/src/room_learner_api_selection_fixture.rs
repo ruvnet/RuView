@@ -151,6 +151,13 @@ pub(super) async fn fitted() -> (
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+    let published: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 65536)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(published["revision"], 1);
     let binding = room.current_binding_digest().unwrap().unwrap();
     state.write().await.current_room_store = Some(room);
     let configured = json_request(
@@ -158,10 +165,14 @@ pub(super) async fn fitted() -> (
         "/configure",
         Method::POST,
         serde_json::json!({
-        "binding_digest":binding,"revision":1,"source_node_ids":[15,16],"new_training":true}),
+        "binding_digest":binding,"revision":7001,"source_node_ids":[15,16],"new_training":true}),
     )
     .await;
     assert_eq!(configured["success"], true, "{configured}");
+    // Learner config generation and companion publication revision are separate
+    // domains. Only the full shared binding digest joins their authority.
+    assert_eq!(configured["status"]["revision"], 7001);
+
     let rt = state.read().await.room_learning.as_ref().unwrap().clone();
     let grid = rt.context().unwrap().sources[0].grid_id.clone();
     let base = rt.receiver_now_ns() - 200_000_000_000;
