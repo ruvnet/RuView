@@ -1079,7 +1079,12 @@ impl FieldModel {
         // The noise_var slot is 0.0 in the diagonal-fallback paths; the
         // estimation hot path treats 0.0 as "no anchored noise floor" and
         // falls back to per-window noise_var, preserving pre-#942 behavior.
-        let (mode_energies, environmental_modes, baseline_eig_count, baseline_noise_var) =
+        let (
+            mode_energies,
+            environmental_modes,
+            mut baseline_eig_count,
+            baseline_noise_var,
+        ) =
             if let Some(ref cov_sum) = self.covariance_sum {
                 if self.covariance_count > 1 {
                     // Compute sample covariance from raw outer products:
@@ -1185,6 +1190,18 @@ impl FieldModel {
                 let (e, m, b) = diagonal_fallback(&self.link_stats, n_sc, n_modes);
                 (e, m, b, 0.0_f64)
             };
+
+        // Short runtime windows can transiently spread baseline-only energy into
+        // a couple extra eigenvalues, especially with deterministic periodic
+        // calibration streams. Keep a conservative floor on the empty-room rank
+        // from the calibrated ambient modes so `estimate_occupancy` does not
+        // overcount noise-only windows.
+        let ambient_rank_floor = mode_energies
+            .iter()
+            .filter(|&&e| e > 1e-12)
+            .count()
+            .saturating_sub(1);
+        baseline_eig_count = baseline_eig_count.max(ambient_rank_floor);
 
         // Compute variance explained using the same centered covariance as modes.
         // total_variance = trace(centered_covariance) = sum of ALL eigenvalues.
