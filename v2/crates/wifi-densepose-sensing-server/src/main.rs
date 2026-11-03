@@ -533,6 +533,12 @@ struct SensingUpdate {
     nodes: Vec<NodeInfo>,
     features: FeatureInfo,
     classification: ClassificationInfo,
+    /// Legacy classification is retained only as a labelled comparison while a
+    /// selected binary model owns presence. It does not acquire learner authority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    classification_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    selected_binary_evidence: Option<serde_json::Value>,
     signal_field: SignalField,
     /// Vital sign estimates (breathing rate, heart rate, confidence).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2212,6 +2218,7 @@ struct AppStateInner {
     source_bank_shadow: Option<source_bank_shadow::ShadowCapture>,
     room_learning: Option<Arc<wifi_densepose_sensing_server::room_learner::lifecycle::RoomLearningRuntime>>,
     room_learning_sources: HashMap<room_learner_api::NativeSourceKey, room_learner_api::LiveSource>,
+    current_room_store: Option<Arc<companion_room::SharedRoomStore>>,
     /// Stable installation identity used only to bind local persisted state.
     installation_id: Option<String>,
     /// Metadata for the privacy reduced empty room image, when available.
@@ -3148,6 +3155,7 @@ impl AppStateInner {
             source_bank_shadow: None,
             room_learning: None,
             room_learning_sources: HashMap::new(),
+            current_room_store: None,
             installation_id: None,
             bootstrap_baseline: None,
             bootstrap_baseline_active: false,
@@ -5553,6 +5561,8 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
             }],
             features,
             classification,
+            classification_source: None,
+            selected_binary_evidence: None,
             signal_field: generate_signal_field(
                 first_rssi,
                 motion_score,
@@ -5600,6 +5610,7 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
         attach_field_positions(&mut update);
         assess_legacy_image_pose(&mut s, &update);
 
+        room_learner_api::project_live_selection(&s, &mut update);
         if let Ok(json) = serde_json::to_string(&update) {
             let _ = s.tx.send(json);
         }
@@ -5724,6 +5735,8 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         }],
         features,
         classification,
+        classification_source: None,
+        selected_binary_evidence: None,
         signal_field: generate_signal_field(
             rssi_dbm,
             motion_score,
@@ -5767,6 +5780,7 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
     attach_field_positions(&mut update);
     assess_legacy_image_pose(&mut s, &update);
 
+    room_learner_api::project_live_selection(&s, &mut update);
     if let Ok(json) = serde_json::to_string(&update) {
         let _ = s.tx.send(json);
     }
@@ -6285,6 +6299,7 @@ fn current_sensing_snapshot(state: &AppStateInner) -> Option<SensingUpdate> {
         snapshot.persons = None;
         snapshot.pose_keypoints = None;
     }
+    room_learner_api::project_cached_selection(state, &mut snapshot);
     Some(snapshot)
 }
 
@@ -6325,6 +6340,11 @@ async fn handle_ws_client(mut socket: WebSocket, state: SharedState) {
             } => {
                 match msg {
                     Ok(json) => {
+                        let refreshed = {
+                            let s = state.read().await;
+                            room_learner_api::refresh_queued_update(&s, &json)
+                        };
+                        let Some(json) = refreshed else { continue; };
                         let json = if privacy_mode {
                             match privacy_filter::redact_json_str(&json) {
                                 Some(json) => json,
@@ -6454,11 +6474,16 @@ async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
             } => {
                 match msg {
                     Ok(json) => {
+                        let refreshed = {
+                            let s = state.read().await;
+                            room_learner_api::refresh_queued_update(&s, &json)
+                        };
+                        let Some(json) = refreshed else { continue; };
                         // Parse the sensing update and convert to pose format
                         if let Ok(sensing) = serde_json::from_str::<SensingUpdate>(&json) {
                             if sensing.msg_type == "sensing_update" {
                                 let age_ms = chrono::Utc::now().timestamp_millis() as f64 - sensing.timestamp * 1000.0;
-                                if sensing.source.ends_with(":offline") || age_ms > LATEST_UPDATE_STALE_AFTER.as_millis() as f64 {
+                                if sensing.selected_binary_evidence.is_some() || sensing.source.ends_with(":offline") || age_ms > LATEST_UPDATE_STALE_AFTER.as_millis() as f64 {
                                     // Unavailable is not measured absence. Never reconstruct
                                     // a skeleton from a deliberately expired cached snapshot.
                                     let mut unavailable = serde_json::json!({
@@ -6687,6 +6712,8 @@ mod latest_update_staleness_tests {
                 presence: false,
                 confidence: 0.97,
             },
+            classification_source: None,
+            selected_binary_evidence: None,
             signal_field: SignalField {
                 grid_size: [0, 0, 0],
                 values: vec![],
@@ -7853,6 +7880,10 @@ fn derive_single_person_pose(
 /// ever *lowers* a Derived cycle from P5 to P4, both of which are already held
 /// edge-local, so it cannot leak.
 fn emit_rufield_event(s: &AppStateInner, update: &SensingUpdate, node_id: u8) {
+    // The legacy field bridge cannot encode a selected model/qualification or
+    // its source-set/window identity. Never relabel packet features and signal
+    // field peaks as qualified binary-model motion/count/location evidence.
+    if update.selected_binary_evidence.is_some() { return; }
     // No-presence ⇒ no phantom event.
     if !update.classification.presence {
         return;
@@ -8040,6 +8071,7 @@ fn assess_legacy_image_pose(state: &mut AppStateInner, update: &SensingUpdate) {
 }
 
 fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
+    if update.selected_binary_evidence.is_some() { return vec![]; }
     let cls = &update.classification;
     if !cls.presence {
         return vec![];
@@ -8319,6 +8351,12 @@ async fn pose_current(
     Query(query): Query<PoseCurrentQuery>,
 ) -> impl IntoResponse {
     let s = state.read().await;
+    if room_learner_api::selection_owns_output(&s) {
+        return (StatusCode::CONFLICT, Json(serde_json::json!({
+            "code":"selected_binary_model_has_no_pose_authority", "persons":[], "total_persons":null,
+            "detail":"The selected model qualifies room presence only; no pose or person count is available."
+        })));
+    }
     let persons = match &s.latest_update {
         Some(update) => update
             .persons
@@ -8404,6 +8442,10 @@ async fn pose_physics_metrics(State(state): State<SharedState>) -> impl IntoResp
 
 async fn pose_stats(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
+    if room_learner_api::selection_owns_output(&s) {
+        return Json(serde_json::json!({"authority":"withheld","reason":"selected_binary_model_has_no_pose_authority",
+            "total_detections":null,"average_confidence":null,"frames_processed":s.tick,"source":s.effective_source()}));
+    }
     Json(serde_json::json!({
         "total_detections": s.total_detections,
         "average_confidence": 0.87,
@@ -8414,6 +8456,9 @@ async fn pose_stats(State(state): State<SharedState>) -> Json<serde_json::Value>
 
 async fn pose_zones_summary(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
+    if room_learner_api::selection_owns_output(&s) {
+        return Json(serde_json::json!({"zones":{},"authority":"withheld","reason":"selected_binary_model_has_no_zone_count_authority"}));
+    }
     let presence = s
         .latest_update
         .as_ref()
@@ -11566,6 +11611,14 @@ fn chrono_timestamp() -> u64 {
 
 async fn vital_signs_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
+    if room_learner_api::selection_owns_output(&s) {
+        return Json(serde_json::json!({"vital_signs":{
+            "breathing_rate_bpm":null,"heart_rate_bpm":null,"breathing_confidence":null,
+            "heartbeat_confidence":null,"signal_quality":null},"authority":"abstained",
+            "abstention_reason":"selected_binary_model_has_no_vital_authority","buffer_status":null,
+            "buffer_source_node_id":null,"diagnostics":{"schema":vital_publication::DIAGNOSTICS_SCHEMA,
+            "privacy_redacted":s.privacy_mode,"nodes":[]},"source":s.effective_source(),"tick":s.tick}));
+    }
     let observed = chrono::Utc::now().timestamp_millis().max(0) as u64;
     let room_count = current_vital_room_count(&s, std::time::Instant::now());
     // Candidate, room aggregate, model and diagnostic snapshot share one lock.
@@ -11688,6 +11741,10 @@ async fn edge_registry_endpoint(
 /// GET /api/v1/edge-vitals — latest edge vitals from ESP32 (ADR-039).
 async fn edge_vitals_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
+    if room_learner_api::selection_owns_output(&s) {
+        return Json(serde_json::json!({"status":"abstained","edge_vitals":null,
+            "message":"The selected binary model does not grant vital-sign authority."}));
+    }
     let observed_at_unix_ms = chrono::Utc::now().timestamp_millis().max(0) as u64;
     let explicit_single_occupant = s.explicit_calibration_fresh_at(observed_at_unix_ms)
         && s.person_count_at(observed_at_unix_ms) == 1;
@@ -12823,6 +12880,8 @@ fn mediatek_room_update(
         classification,
         // No spatial field: this heuristic has no per-subcarrier or
         // multi-antenna geometry to place a heat map from.
+        classification_source: None,
+        selected_binary_evidence: None,
         signal_field: SignalField {
             grid_size: [0, 0, 0],
             values: vec![],
@@ -13467,13 +13526,14 @@ async fn udp_receiver_task(
                                     .observe(now, mean_amp as f64, peak_amp as f64);
                                 s.tick += 1;
                                 let tick = s.tick;
-                                let update = mediatek_room_update(
+                                let mut update = mediatek_room_update(
                                     &mut s,
                                     now,
                                     ESP32_OFFLINE_TIMEOUT,
                                     tick,
                                     source_label,
                                 );
+                                room_learner_api::project_live_selection(&s, &mut update);
                                 if let Ok(json) = serde_json::to_string(&update) {
                                     let _ = s.tx.send(json);
                                 }
@@ -13732,8 +13792,10 @@ async fn udp_receiver_task(
                         explicit_calibration_fresh,
                         total_persons,
                     );
-                    if let Ok(json) = serde_json::to_string(&edge_vitals_message) {
-                        let _ = s.tx.send(json);
+                    if !room_learner_api::selection_owns_output(&s) {
+                        if let Ok(json) = serde_json::to_string(&edge_vitals_message) {
+                            let _ = s.tx.send(json);
+                        }
                     }
 
                     let calibrated_presence_evidence = s.calibrated_presence_evidence(
@@ -13749,6 +13811,8 @@ async fn udp_receiver_task(
                         nodes: active_nodes,
                         features: fused_features.clone(),
                         classification,
+                        classification_source: None,
+                        selected_binary_evidence: None,
                         signal_field,
                         vital_signs: published_vitals,
                         vital_evidence,
@@ -13794,6 +13858,7 @@ async fn udp_receiver_task(
                     attach_field_positions(&mut update);
                     assess_legacy_image_pose(&mut s, &update);
 
+                    room_learner_api::project_live_selection(&s, &mut update);
                     if let Ok(json) = serde_json::to_string(&update) {
                         let _ = s.tx.send(json);
                     }
@@ -14242,6 +14307,8 @@ async fn udp_receiver_task(
                         // The count uses this same room presence gate; only
                         // `motion_score` remains local to the arriving packet.
                         classification: room_classification,
+                        classification_source: None,
+                        selected_binary_evidence: None,
                         signal_field: generate_signal_field(
                             fused_features.mean_rssi,
                             motion_score,
@@ -14293,6 +14360,7 @@ async fn udp_receiver_task(
                     attach_field_positions(&mut update);
                     assess_legacy_image_pose(&mut s, &update);
 
+                    room_learner_api::project_live_selection(&s, &mut update);
                     if let Ok(json) = serde_json::to_string(&update) {
                         let _ = s.tx.send(json);
                     }
@@ -14483,6 +14551,8 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
             }],
             features: features.clone(),
             classification,
+            classification_source: None,
+            selected_binary_evidence: None,
             signal_field: generate_signal_field(
                 features.mean_rssi,
                 motion_score,
@@ -14543,6 +14613,7 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
         if update.classification.presence {
             s.total_detections += 1;
         }
+        room_learner_api::project_live_selection(&s, &mut update);
         if let Ok(json) = serde_json::to_string(&update) {
             let _ = s.tx.send(json);
         }
@@ -15675,65 +15746,6 @@ async fn main() {
         );
     }
 
-    // #872: actually start the MQTT publisher when `--mqtt` is set. The publisher
-    // (mqtt::) consumes a typed VitalsSnapshot stream; we bridge the existing JSON
-    // sensing broadcast into it with a defensive serde_json::Value mapping (absent
-    // fields default — never publish wrong values). Gated on the `mqtt` feature
-    // (the Docker image is built `--features mqtt`); without it `--mqtt` WARNs and
-    // no-ops, matching the documented contract.
-    if args.mqtt_opts.mqtt {
-        #[cfg(feature = "mqtt")]
-        {
-            use wifi_densepose_sensing_server::mqtt;
-            let mut mcfg = mqtt::config::MqttConfig::from_args_with_data_dir(
-                &args.mqtt_opts,
-                &data_dir,
-            );
-            mcfg.privacy_mode = args.privacy_mode;
-            let mcfg = std::sync::Arc::new(mcfg);
-            match mcfg.validate() {
-                Ok(()) => {
-                    let node_id = mcfg.client_id.clone();
-                    let builder = mqtt::publisher::OwnedDiscoveryBuilder {
-                        discovery_prefix: mcfg.discovery_prefix.clone(),
-                        node_id: node_id.clone(),
-                        node_friendly_name: Some("RuView".to_string()),
-                        sw_version: env!("CARGO_PKG_VERSION").to_string(),
-                        model: "RuView WiFi Sensing".to_string(),
-                        via_device: None,
-                    };
-                    let (vtx, vrx) = broadcast::channel::<mqtt::state::VitalsSnapshot>(64);
-                    let (host, port) = (mcfg.host.clone(), mcfg.port);
-                    mqtt::publisher::spawn(mcfg, builder, vrx);
-                    let mut jrx = tx.subscribe();
-                    tokio::spawn(async move {
-                        // #898/#872/#2085: one snapshot per physical node from
-                        // each `sensing_update`; `edge_vitals` feeds the fall
-                        // detector; other message types are ignored.
-                        let mut bridge = mqtt::bridge::SensingBridge::new(node_id);
-                        let started = std::time::Instant::now();
-                        while let Ok(json) = jrx.recv().await {
-                            let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) else {
-                                continue;
-                            };
-                            for snap in bridge.ingest(&v, started.elapsed()) {
-                                let _ = vtx.send(snap);
-                            }
-                        }
-                    });
-                    tracing::info!("MQTT publisher started -> {host}:{port}");
-                }
-                Err(e) => tracing::error!("MQTT config invalid: {e}; publisher not started"),
-            }
-        }
-        #[cfg(not(feature = "mqtt"))]
-        tracing::warn!(
-            "--mqtt set but this binary was built without the `mqtt` feature; the publisher is a \
-             no-op. Use the official Docker image (built `--features mqtt`) or rebuild with \
-             `cargo build -p wifi-densepose-sensing-server --features mqtt`."
-        );
-    }
-
     // ADR-262 P3: build the live RuField surface (dedicated ed25519 signer from
     // WDP_RUFIELD_SIGNING_SEED, else a logged dev default). The same Arc is
     // stored in AppStateInner (so the sensing loop can `emit()` per cycle) and
@@ -15926,6 +15938,7 @@ async fn main() {
         source_bank_shadow: None,
         room_learning,
         room_learning_sources: HashMap::new(),
+        current_room_store: None,
         installation_id: args.installation_id.clone(),
         bootstrap_baseline: bootstrap_metadata.clone(),
         bootstrap_baseline_active,
@@ -15967,6 +15980,81 @@ async fn main() {
         )
         .expect("default pose physics configuration is valid"),
     }));
+
+    // #872: actually start the MQTT publisher when `--mqtt` is set. The publisher
+    // (mqtt::) consumes a typed VitalsSnapshot stream; we bridge the existing JSON
+    // sensing broadcast into it with a defensive serde_json::Value mapping (absent
+    // fields default — never publish wrong values). Gated on the `mqtt` feature
+    // (the Docker image is built `--features mqtt`); without it `--mqtt` WARNs and
+    // no-ops, matching the documented contract.
+    // Selected models have no MQTT authority in this version. This admission
+    // guard does not retract a snapshot already queued inside the publisher or
+    // a broker-retained legacy value; known nodes retain the existing 10-second
+    // stale threshold / 30-second availability heartbeat. Managed native helpers do
+    // not enable MQTT. Network-time withdrawal needs a separate sink contract.
+    if args.mqtt_opts.mqtt {
+        #[cfg(feature = "mqtt")]
+        {
+            use wifi_densepose_sensing_server::mqtt;
+            let mut mcfg = mqtt::config::MqttConfig::from_args_with_data_dir(
+                &args.mqtt_opts,
+                &data_dir,
+            );
+            mcfg.privacy_mode = args.privacy_mode;
+            let mcfg = std::sync::Arc::new(mcfg);
+            match mcfg.validate() {
+                Ok(()) => {
+                    let node_id = mcfg.client_id.clone();
+                    let builder = mqtt::publisher::OwnedDiscoveryBuilder {
+                        discovery_prefix: mcfg.discovery_prefix.clone(),
+                        node_id: node_id.clone(),
+                        node_friendly_name: Some("RuView".to_string()),
+                        sw_version: env!("CARGO_PKG_VERSION").to_string(),
+                        model: "RuView WiFi Sensing".to_string(),
+                        via_device: None,
+                    };
+                    let (vtx, vrx) = broadcast::channel::<mqtt::state::VitalsSnapshot>(64);
+                    let (host, port) = (mcfg.host.clone(), mcfg.port);
+                    mqtt::publisher::spawn(mcfg, builder, vrx);
+                    let mut jrx = state.read().await.tx.subscribe();
+                    let mqtt_state = Arc::downgrade(&state);
+                    tokio::spawn(async move {
+                        // #898/#872/#2085: one snapshot per physical node from
+                        // each `sensing_update`; `edge_vitals` feeds the fall
+                        // detector; other message types are ignored.
+                        let mut bridge = mqtt::bridge::SensingBridge::new(node_id.clone());
+                        let started = std::time::Instant::now();
+                        while let Ok(json) = jrx.recv().await {
+                            let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) else {
+                                continue;
+                            };
+                            let Some(live_state) = mqtt_state.upgrade() else { break; };
+                            let current = live_state.read().await;
+                            if !room_learner_api::legacy_sink_frame_allowed(
+                                room_learner_api::selection_owns_output(&current), &v,
+                            ) {
+                                // Do not replay pending legacy fall/motion state when
+                                // the operator later explicitly returns to control.
+                                bridge = mqtt::bridge::SensingBridge::new(node_id.clone());
+                                continue;
+                            }
+                            for snap in bridge.ingest(&v, started.elapsed()) {
+                                let _ = vtx.send(snap);
+                            }
+                        }
+                    });
+                    tracing::info!("MQTT publisher started -> {host}:{port}");
+                }
+                Err(e) => tracing::error!("MQTT config invalid: {e}; publisher not started"),
+            }
+        }
+        #[cfg(not(feature = "mqtt"))]
+        tracing::warn!(
+            "--mqtt set but this binary was built without the `mqtt` feature; the publisher is a \
+             no-op. Use the official Docker image (built `--features mqtt`) or rebuild with \
+             `cargo build -p wifi-densepose-sensing-server --features mqtt`."
+        );
+    }
 
     {
         let mut s = state.write().await;
@@ -16345,6 +16433,8 @@ async fn main() {
         .route("/api/v1/calibration/status", get(calibration_status))
         // Mutations remain behind the existing default-admin bearer policy.
         .route("/api/v1/room-learner/status", get(room_learner_api::status))
+        .route("/api/v1/room-learner/selection", get(room_learner_api::selection))
+        .merge(room_learner_api::owner_selection_routes(bearer_auth_state.clone()))
         .route("/api/v1/room-learner/configure", post(room_learner_api::configure))
         .route("/api/v1/room-learner/phase/start", post(room_learner_api::begin_phase))
         .route("/api/v1/room-learner/phase/finish", post(room_learner_api::finish_phase))
@@ -17258,6 +17348,8 @@ mod observatory_persons_field_position_tests {
                 presence,
                 confidence: 0.8,
             },
+            classification_source: None,
+            selected_binary_evidence: None,
             signal_field,
             vital_signs: None,
             vital_evidence: None,

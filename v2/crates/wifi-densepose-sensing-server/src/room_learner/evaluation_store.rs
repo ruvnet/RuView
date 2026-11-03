@@ -50,7 +50,7 @@ fn private_subdirectory(
     private_dir(&path).map_err(|e| e.to_string())?;
     Ok(Some(path))
 }
-fn write_immutable(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(super) fn write_immutable(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if regular_or_missing(path)? {
         return if private_read(path).map_err(|e| e.to_string())? == bytes {
             Ok(())
@@ -263,3 +263,13 @@ impl ArtifactStore {
 #[cfg(test)]
 #[path = "evaluation_store_tests.rs"]
 mod tests;
+
+impl ArtifactStore {
+    pub(crate) fn load_exact_evaluation(&self, model: &RoomModel, role: DataRole, key: &str) -> Result<EvaluationReceipt,String> {
+        let directory=self.evaluation_directory(model,role,false)?.ok_or("evaluation unavailable")?;
+        let receipt=self.read_evaluation(&directory,key,model,role)?;
+        let original=self.read_evidence_index(&directory,&receipt.dataset_sha256,model,role)?.ok_or("original evaluation index missing")?;
+        if original.sha256()?!=key {return Err("evaluation differs from original dataset index".into())}
+        Ok(receipt)
+    }
+}
