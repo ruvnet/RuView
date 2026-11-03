@@ -12,6 +12,9 @@
 //   GET  /api/v1/sensing/latest   — node / feature snapshot
 
 const POLL_MS = 2000;
+// Fetch cadence for the server-side fall capture record (the record itself is
+// per-frame; this only controls how often the waveform repaints).
+const FALL_CAPTURE_POLL_MS = 1000;
 
 export class DebugTab {
   constructor(container) {
@@ -51,7 +54,11 @@ export class DebugTab {
     this._fallState = null;  // last /api/v1/debug/fall response (server edge-equivalent)
     // Fall capture: user-armed recording of the fall-detector scores, shown
     // as the stillness waveform below the live strip.
-    this._fallCap = { on: false, timer: null, data: [], t0: null, max: 3600 };
+    this._fallCap = {
+      on: false, timer: null, data: [], node: null, full: false,
+      // Fallback until the server reports the thresholds in force.
+      thresholds: { spike: 3.5, still: 0.09 },
+    };
     this._rfWindowMs = 120000; // chart time window: last 2 min
     // Waterfall: one column per 1 s poll of the 56-bin amplitude vector.
     this._wf = [];
@@ -401,19 +408,42 @@ export class DebugTab {
   }
 
   // ── Fall capture (user-armed recording + stillness waveform) ────────────
-  // The toggle records the fall-detector scores at 5 Hz into _fallCap.data;
-  // the captured history renders as a two-panel waveform (spike z on top,
-  // stillness Δs% below) with each channel's threshold line and shaded
-  // pending/FALL periods — the record a fall test needs for tuning.
+  // Recording runs on the server, one record per processed CSI frame
+  // (POST /api/v1/debug/fall/capture); the tab only fetches the record.
+  // Browser-side polling of the live status sampled at 5 Hz and missed the
+  // 5-frame spike runs the detector actually triggers on.
 
-  _toggleFallCapture() {
+  async _fallCaptureAction(action) {
+    const res = await fetch('/api/v1/debug/fall/capture', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    });
+    const body = await res.json();
+    if (!body.success) throw new Error(body.error || `${action} failed`);
+    return body;
+  }
+
+  async _toggleFallCapture() {
     const cap = this._fallCap;
-    if (cap.on) {
+    const info = this.container.querySelector('#dbgFallCapInfo');
+    try {
+      if (cap.on) {
+        this._stopFallCapture();
+        await this._fallCaptureAction('stop');
+        await this._pollFallCapture(); // pull the final frames
+      } else {
+        const r = await this._fallCaptureAction('start');
+        if (!r.nodes) throw new Error('没有在线节点');
+        cap.data = [];
+        cap.full = false;
+        cap.on = true;
+        cap.timer = setInterval(() => this._pollFallCapture(), FALL_CAPTURE_POLL_MS);
+      }
+    } catch (err) {
       this._stopFallCapture();
-    } else {
-      cap.on = true;
-      if (!cap.t0) cap.t0 = Date.now();
-      cap.timer = setInterval(() => this._pollFallCapture(), 200);
+      if (info) info.textContent = '捕捉控制失败: ' + err.message;
+      return;
     }
     this._renderFallCaptureControls();
   }
@@ -427,10 +457,11 @@ export class DebugTab {
     cap.on = false;
   }
 
-  _clearFallCapture() {
+  async _clearFallCapture() {
     this._stopFallCapture();
+    try { await this._fallCaptureAction('clear'); } catch (err) { /* local clear still applies */ }
     this._fallCap.data = [];
-    this._fallCap.t0 = null;
+    this._fallCap.full = false;
     this._renderFallCaptureControls();
     this._renderFallCapture();
   }
@@ -438,11 +469,15 @@ export class DebugTab {
   _exportFallCapture() {
     const cap = this._fallCap;
     if (!cap.data.length) return;
+    const span = cap.data[cap.data.length - 1].t - cap.data[0].t;
     const payload = {
-      schema: 'ruview.fall-capture.v1',
+      schema: 'ruview.fall-capture.v2',
       exported_at: new Date().toISOString(),
-      sample_interval_ms: 200,
-      thresholds: { spike: 3.5, still: 0.08 },
+      source: 'server full-rate capture (one record per CSI frame)',
+      node_id: cap.node,
+      frames: cap.data.length,
+      effective_rate_hz: span > 0 ? (cap.data.length - 1) / span : null,
+      thresholds: cap.thresholds,
       data: cap.data,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2) + '\n'], { type: 'application/json' });
@@ -466,13 +501,19 @@ export class DebugTab {
         t: Number(r.t) || 0,
         spike: Number(r.spike) || 0,
         still: Number(r.still) || 0,
+        still_inst: Number(r.still_inst) || 0,
         pending: !!r.pending,
         detected: !!r.detected,
       })).sort((a, b) => a.t - b.t);
       this._stopFallCapture();
       this._fallCap.data = data;
-      // 时间轴续接：t0 回推，使波形显示原始时长；继续捕捉则接在后面
-      this._fallCap.t0 = Date.now() - data[data.length - 1].t * 1000;
+      this._fallCap.node = obj.node_id ?? null;
+      // v1 files carried hard-coded thresholds; trust only what the file says.
+      const th = obj.thresholds || {};
+      this._fallCap.thresholds = {
+        spike: Number(th.spike) || this._fallCap.thresholds.spike,
+        still: Number(th.still) || this._fallCap.thresholds.still,
+      };
       this._renderFallCaptureControls();
       this._renderFallCapture();
       if (info) info.textContent = `已导入 ${data.length} 帧（${data[data.length - 1].t.toFixed(1)} s）`;
@@ -483,19 +524,34 @@ export class DebugTab {
 
   async _pollFallCapture() {
     try {
-      const d = await (await fetch('/api/v1/debug/fall', { cache: 'no-store' })).json();
+      const d = await (await fetch('/api/v1/debug/fall?data=1', { cache: 'no-store' })).json();
       const nodes = d.nodes || {};
-      const n = nodes['1'] || Object.values(nodes)[0] || {};
-      const st = n.status || {};
       const cap = this._fallCap;
-      cap.data.push({
-        t: (Date.now() - cap.t0) / 1000,
-        spike: st.spike_score || 0,
-        still: st.still_avg || 0,
-        pending: !!st.pending,
-        detected: !!st.detected,
-      });
-      while (cap.data.length > cap.max) cap.data.shift();
+      // Stay on one node for the whole record; prefer node 1, else the first.
+      if (cap.node == null || !nodes[cap.node]) {
+        cap.node = nodes['1'] ? '1' : (Object.keys(nodes)[0] ?? null);
+      }
+      const n = cap.node != null ? nodes[cap.node] : null;
+      if (!n) return;
+      const st = n.status || {};
+      cap.thresholds = {
+        spike: Number(st.spike_threshold) || cap.thresholds.spike,
+        still: Number(st.still_threshold) || cap.thresholds.still,
+      };
+      const rows = (n.capture && n.capture.data) || [];
+      const t0 = rows.length ? rows[0].t_unix_ms : 0;
+      cap.data = rows.map(r => ({
+        t: (r.t_unix_ms - t0) / 1000,
+        t_unix_ms: r.t_unix_ms,
+        spike: r.spike || 0,
+        still: r.still_avg || 0,      // the confirmation criterion's input
+        still_inst: r.still || 0,
+        pending: !!r.pending,
+        detected: !!r.detected,
+      }));
+      cap.full = !!(n.capture && n.capture.full);
+      // The server auto-stops when its buffer is full.
+      if (cap.on && n.capture && !n.capture.capturing) this._stopFallCapture();
       this._renderFallCapture();
       this._renderFallCaptureControls();
     } catch (err) { /* a missed poll is fine; the next one repaints */ }
@@ -507,12 +563,16 @@ export class DebugTab {
     if (btn) btn.textContent = cap.on ? '停止捕捉' : '开始捕捉';
     const info = this.container.querySelector('#dbgFallCapInfo');
     if (info) {
+      const node = cap.node != null ? `node ${cap.node} · ` : '';
       if (!cap.data.length) {
-        info.textContent = '未捕捉 — 点「开始捕捉」录制波形（5 Hz）';
-      } else if (cap.on) {
-        info.textContent = `捕捉中 ${cap.data.length} 帧 / ${(cap.data[cap.data.length - 1].t).toFixed(1)} s`;
+        info.textContent = cap.on
+          ? `${node}捕捉中，等待首帧…`
+          : '未捕捉 — 点「开始捕捉」录制波形（服务端逐帧）';
       } else {
-        info.textContent = `已停止 — 共 ${cap.data.length} 帧 / ${(cap.data[cap.data.length - 1].t).toFixed(1)} s`;
+        const dur = cap.data[cap.data.length - 1].t;
+        const rate = dur > 0 ? ((cap.data.length - 1) / dur).toFixed(1) : '--';
+        const state = cap.on ? '捕捉中' : (cap.full ? '缓冲已满，已自动停止' : '已停止');
+        info.textContent = `${node}${state} — ${cap.data.length} 帧 / ${dur.toFixed(1)} s（${rate} Hz）`;
       }
     }
   }
@@ -608,11 +668,14 @@ export class DebugTab {
       }
     };
 
-    // 上：尖峰 z（阈值 3.5，与实时图同高）；下：静止 Δs%（阈值 8%）
-    // z 轴自适应：与实时图同一比例逻辑（thresh×1.3 下限），3.5 线位于高位
-    const spikeYmax = Math.max(3.5 * 1.3, ...cap.data.map(d => d.spike || 0), 1);
-    drawPanel(0, zPanelH, 'spike', 3.5, '#4db8ff', 'z', { ymax: spikeYmax, threshLabel: 'spike 3.5' });
-    drawPanel(zPanelH + gap, panelH, 'still', 0.08, '#2ecc71', '|Δs|%', { ymax: 0.25, threshLabel: 'still 8%' });
+    // 上：尖峰 z；下：静止 Δs%（4 s 平均）。阈值取服务端实际生效值。
+    const { spike: spikeTh, still: stillTh } = cap.thresholds;
+    let spikeYmax = Math.max(spikeTh * 1.3, 1);
+    for (const d of data) spikeYmax = Math.max(spikeYmax, d.spike || 0); // no spread: up to 3600 rows
+    drawPanel(0, zPanelH, 'spike', spikeTh, '#4db8ff', 'z',
+      { ymax: spikeYmax, threshLabel: `spike ${spikeTh}` });
+    drawPanel(zPanelH + gap, panelH, 'still', stillTh, '#2ecc71', '|Δs|%',
+      { ymax: Math.max(0.25, stillTh * 2), threshLabel: `still ${(stillTh * 100).toFixed(1)}%` });
     xLabels();
   }
 
@@ -1878,8 +1941,8 @@ export class DebugTab {
             </div>
             <canvas id="dbgFallChart" style="width:100%;margin-top:6px;border-radius:6px;"></canvas>
             <div style="font-size:10px;color:#667;margin-top:4px;">
-              基线 z-score 尖峰 ≥3.5 连续 5 帧 + 静止确认（0.5s 平均 |Δs| <
-              8% 持续 12 s）→ 锁存 10 s。区分度来自静止时长：坐姿停顿只有
+              基线 z-score 尖峰 ≥ 阈值连续 5 帧 + 静止确认（4 s 平均 |Δs| <
+              确认线，默认 9%，持续 12 s）→ 锁存 10 s。区分度来自静止时长：坐姿停顿只有
               2-5 s，跌倒后人不再起身。AGC 免疫：逐帧形状归一化。
             </div>
             <div style="display:flex;gap:6px;align-items:center;margin-top:8px;">
@@ -1888,7 +1951,7 @@ export class DebugTab {
               <button id="dbgFallExportBtn" class="btn btn-outline" style="font-size:11px;padding:4px 10px;">导出</button>
               <button id="dbgFallImportBtn" class="btn btn-outline" style="font-size:11px;padding:4px 10px;">导入</button>
               <input type="file" id="dbgFallImportFile" accept=".json,application/json" style="display:none;">
-              <span id="dbgFallCapInfo" style="font-size:10px;color:#667;">未捕捉 — 点「开始捕捉」录制波形（5 Hz）</span>
+              <span id="dbgFallCapInfo" style="font-size:10px;color:#667;">未捕捉 — 点「开始捕捉」录制波形（服务端逐帧）</span>
             </div>
             <canvas id="dbgFallCapChart" style="width:100%;height:258px;margin-top:6px;border-radius:6px;"></canvas>
           </div>
