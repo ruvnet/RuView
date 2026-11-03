@@ -152,8 +152,19 @@ pub struct CalibratedOccupancy {
 /// Create a FieldModelConfig for single-link mode (one ESP32 node = one link).
 /// This avoids the DimensionMismatch error when feeding single-frame observations.
 pub fn single_link_config() -> FieldModelConfig {
+    // A completed explicit calibration is persisted across restarts, so the
+    // historical 24 h default forced a daily recalibration. Default to seven
+    // days; RUVIEW_CALIBRATION_EXPIRY_S can shorten it for testing. The field
+    // model itself caps the value at 604_800 s (seven days).
+    let expiry_s = std::env::var("RUVIEW_CALIBRATION_EXPIRY_S")
+        .ok()
+        .and_then(|value| value.trim().parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(604_800.0)
+        .min(604_800.0);
     FieldModelConfig {
         n_links: 1,
+        baseline_expiry_s: expiry_s,
         ..FieldModelConfig::default()
     }
 }

@@ -378,7 +378,7 @@ fn test_reset_clears_buffers() {
 
     // Extraction should return None after reset
     let (breathing, _) = detector.extract_breathing();
-    let (heartbeat, _) = detector.extract_heartbeat();
+    let (heartbeat, _) = detector.extract_heartbeat(None, 0.0);
     assert!(
         breathing.is_none(),
         "breathing should be None after reset (not enough samples)"
@@ -642,4 +642,110 @@ fn test_multiple_detectors_independent() {
             b
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Breathing-harmonic suppression inside the heartbeat band
+// ---------------------------------------------------------------------------
+
+/// Phase vector whose cross-subcarrier variance oscillates with TWO
+/// components: a strong breathing harmonic and a weaker true heartbeat.
+/// Variance tracks the modulation, so both tones appear in the heartbeat
+/// buffer's spectrum — the field-measured condition that made the detector
+/// report breathing harmonics as "HR".
+fn make_mixed_heartbeat_phase(
+    harmonic_hz: f64,
+    harmonic_amp: f64,
+    heartbeat_hz: f64,
+    heartbeat_amp: f64,
+    t: f64,
+) -> Vec<f64> {
+    let modulation = 0.5
+        * (1.0
+            + harmonic_amp * (2.0 * PI * harmonic_hz * t).sin()
+            + heartbeat_amp * (2.0 * PI * heartbeat_hz * t).sin());
+    (0..N_SUBCARRIERS)
+        .map(|i| (i as f64 * 0.2).sin() * modulation)
+        .collect()
+}
+
+/// Fill the heartbeat buffer with the mixed harmonic + true-heartbeat signal.
+fn feed_mixed_heartbeat(
+    detector: &mut VitalSignDetector,
+    harmonic_hz: f64,
+    heartbeat_hz: f64,
+    sample_rate: f64,
+    secs: f64,
+) {
+    let amp: Vec<f64> = (0..N_SUBCARRIERS)
+        .map(|i| 15.0 + 5.0 * (i as f64 * 0.1).sin())
+        .collect();
+    let n = (sample_rate * secs) as usize;
+    for frame in 0..n {
+        let t = frame as f64 / sample_rate;
+        let phase = make_mixed_heartbeat_phase(harmonic_hz, 0.5, heartbeat_hz, 0.25, t);
+        detector.process_frame(&amp, &phase);
+    }
+}
+
+/// Field regression: BR 0.21 Hz (12.6 BPM) leaked its 8th harmonic into the
+/// heartbeat band and the detector reported "HR" ≈ 100.8 BPM (8 × 12.6).
+/// With a confident breathing estimate supplied, the harmonic bins are
+/// excluded and the surviving peak must be the true heartbeat — or nothing
+/// (fail-closed), never the harmonic.
+#[test]
+fn test_harmonic_suppression_excludes_breathing_harmonic() {
+    let sample_rate = 20.0;
+    let fb_hz = 0.22; // 13.2 BPM breathing
+    let harmonic_hz = 8.0 * fb_hz; // 1.76 Hz = 105.6 BPM
+    let true_hr_hz = 1.2; // 72 BPM
+    let mut detector = VitalSignDetector::new(sample_rate);
+    feed_mixed_heartbeat(&mut detector, harmonic_hz, true_hr_hz, sample_rate, 15.0);
+
+    // Regression documentation: without a usable breathing estimate the
+    // suppression stays disarmed and the harmonic wins, as it did in the field.
+    let (hr_unsuppressed, _) = detector.extract_heartbeat(None, 0.0);
+    let hr_unsuppressed = hr_unsuppressed
+        .expect("the harmonic peak should be detected while suppression is disarmed");
+    assert!(
+        (hr_unsuppressed - harmonic_hz * 60.0).abs() < 4.0,
+        "without suppression the harmonic {:.1} BPM should win, got {:.1} BPM",
+        harmonic_hz * 60.0,
+        hr_unsuppressed
+    );
+
+    // With a confident breathing estimate the harmonic is excluded and the
+    // surviving peak is the true heartbeat (or nothing, fail-closed).
+    let (hr_suppressed, conf) = detector.extract_heartbeat(Some(fb_hz * 60.0), 0.9);
+    if let Some(bpm) = hr_suppressed {
+        assert!(
+            (bpm - true_hr_hz * 60.0).abs() < 6.0,
+            "with suppression the true heartbeat {:.1} BPM should win, got {:.1} BPM",
+            true_hr_hz * 60.0,
+            bpm
+        );
+        assert!(
+            conf >= 0.55,
+            "a surviving true-heartbeat peak should stay confident, got {conf:.2}"
+        );
+    }
+}
+
+/// A heartbeat that exists ONLY at a breathing harmonic must never be
+/// confidently published once suppression is armed: the harmonic bins are
+/// excluded and the leakage skirt must not clear the 0.55 publication gate.
+#[test]
+fn test_heartbeat_on_harmonic_is_not_confidently_published() {
+    let sample_rate = 20.0;
+    let fb_hz = 0.22;
+    let harmonic_hz = 8.0 * fb_hz;
+    let mut detector = VitalSignDetector::new(sample_rate);
+    // Both tones coincide on the harmonic → no heartbeat energy off-harmonic.
+    feed_mixed_heartbeat(&mut detector, harmonic_hz, harmonic_hz, sample_rate, 15.0);
+
+    let (hr, conf) = detector.extract_heartbeat(Some(fb_hz * 60.0), 0.9);
+    assert!(
+        hr.is_none() || conf < 0.55,
+        "harmonic-only heartbeat must not pass the publication gate: hr={hr:?} conf={conf:.2}"
+    );
 }

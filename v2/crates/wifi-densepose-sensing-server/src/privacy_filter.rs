@@ -37,6 +37,10 @@ pub const BIOMETRIC_KEYS: &[&str] = &[
     // confidences; the leaf keys cover edge vitals, fused vitals and the
     // mmWave block.
     "vital_signs",
+    // Ungated estimator output surfaced by `/api/v1/vital-signs`. It carries
+    // the same HR/BR leaves plus their confidences; drop the whole object so
+    // the leaf-key rule above can't be relied on alone.
+    "raw_vital_signs",
     "breathing_rate_bpm",
     "heart_rate_bpm",
     "heartrate_bpm",

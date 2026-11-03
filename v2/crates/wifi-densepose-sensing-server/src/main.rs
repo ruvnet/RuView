@@ -49,6 +49,7 @@ use wifi_densepose_sensing_server::bootstrap_baseline::{
     BOOTSTRAP_VALIDATION_MIN_SPACING_MS, BOOTSTRAP_VALIDATION_SAMPLES,
     BOOTSTRAP_VALIDATION_SAMPLE_TIMEOUT_MS,
 };
+use wifi_densepose_sensing_server::explicit_calibration;
 // ADR-295 / ADR-297: canonical provenance state + per-node/room inference.
 use wifi_densepose_sensing_server::inference::{fuse_room, NodeInference, RoomInference};
 use wifi_densepose_sensing_server::privacy_filter;
@@ -453,6 +454,69 @@ struct CalibrationModelReceipt {
     variance_explained: f64,
     baseline_eigenvalue_count: usize,
     completed_at_unix_ms: u64,
+}
+
+impl CalibrationModelReceipt {
+    fn to_persisted(&self) -> explicit_calibration::ExplicitReceipt {
+        explicit_calibration::ExplicitReceipt {
+            schema: self.schema.to_string(),
+            boot_epoch: self.boot_epoch.clone(),
+            session_id: self.session_id.clone(),
+            model_id: self.model_id.clone(),
+            binding_digest: self.binding_digest.clone(),
+            source_node_ids: self.source_node_ids.clone(),
+            frame_count: self.frame_count,
+            variance_explained: self.variance_explained,
+            baseline_eigenvalue_count: self.baseline_eigenvalue_count,
+            completed_at_unix_ms: self.completed_at_unix_ms,
+        }
+    }
+
+    fn from_persisted(receipt: &explicit_calibration::ExplicitReceipt) -> Self {
+        Self {
+            schema: field_bridge::CALIBRATION_MODEL_RECEIPT_SCHEMA,
+            boot_epoch: receipt.boot_epoch.clone(),
+            session_id: receipt.session_id.clone(),
+            model_id: receipt.model_id.clone(),
+            binding_digest: receipt.binding_digest.clone(),
+            source_node_ids: receipt.source_node_ids.clone(),
+            frame_count: receipt.frame_count,
+            variance_explained: receipt.variance_explained,
+            baseline_eigenvalue_count: receipt.baseline_eigenvalue_count,
+            completed_at_unix_ms: receipt.completed_at_unix_ms,
+        }
+    }
+}
+
+/// Persist a just-finalized calibration next to the bootstrap prior. Best
+/// effort: the in-memory calibration stays usable if the write fails, but the
+/// caller surfaces `persisted: false` so the operator knows a restart will
+/// lose it.
+/// Persist a just-finalized calibration next to the bootstrap prior. Best
+/// effort: the in-memory calibration stays usable if the write fails, but the
+/// caller surfaces `persisted: false` so the operator knows a restart will
+/// lose it.
+fn persist_explicit_calibration(
+    installation_id: Option<&str>,
+    path: &std::path::Path,
+    snapshot: wifi_densepose_signal::ruvsense::field_model::FieldModelSnapshotV1,
+    receipt: &CalibrationModelReceipt,
+    binding: CalibrationGridBinding,
+) -> Result<explicit_calibration::ExplicitMetadata, explicit_calibration::ExplicitCalibrationError>
+{
+    let installation_id =
+        installation_id.ok_or(explicit_calibration::ExplicitCalibrationError::MissingInstallationId)?;
+    explicit_calibration::store(
+        path,
+        installation_id,
+        &receipt.source_node_ids,
+        binding.source_node_id,
+        binding.grid.as_bootstrap_grid(),
+        &receipt.model_id,
+        &receipt.to_persisted(),
+        receipt.completed_at_unix_ms,
+        snapshot,
+    )
 }
 
 /// Per-frame occupancy result bound to one immutable field-model calibration
@@ -1191,6 +1255,9 @@ struct NodeState {
     field_model_history: VecDeque<Vec<f64>>,
     field_model_latest_sequence: Option<u32>,
     field_model_latest_seen: Option<std::time::Instant>,
+    /// Server-side edge-equivalent fall detection from this node's raw CSI
+    /// phases (mirrors the firmware's 0xC5110002 flags-bit1 computation).
+    fall_detector: wifi_densepose_sensing_server::fall_detection::FallDetector,
 }
 
 /// Default EMA alpha for temporal keypoint smoothing (RuVector Phase 2).
@@ -1565,6 +1632,7 @@ impl NodeState {
             field_model_history: VecDeque::with_capacity(FRAME_HISTORY_CAPACITY),
             field_model_latest_sequence: None,
             field_model_latest_seen: None,
+            fall_detector: wifi_densepose_sensing_server::fall_detection::FallDetector::new(),
         }
     }
 
@@ -2110,6 +2178,12 @@ struct AppStateInner {
     br_buffer: VecDeque<f64>,
     /// ADR-039: Latest edge vitals packet from ESP32.
     edge_vitals: Option<Esp32VitalsPacket>,
+    /// Debug tab: bounded log of recently admitted UDP datagrams, decoded by
+    /// magic so the UI can show human-readable raw packet contents. Covers the
+    /// packet types the server parses (0xC511_0001/0002/0004/0007) plus the
+    /// ones it otherwise drops (0xC511_0003 feature vector, 0xC511_0005
+    /// compressed CSI, 0xC511_0006 feature state, 0xC511_A110 sync).
+    raw_packet_log: RawPacketLog,
     /// ADR-040: Latest WASM output packet from ESP32.
     latest_wasm_events: Option<WasmOutputPacket>,
     // ── Model management fields ─────────────────────────────────────────────
@@ -2186,6 +2260,8 @@ struct AppStateInner {
     bootstrap_baseline: Option<BootstrapBaselineMetadata>,
     /// A restored prior can affect startup occupancy but cannot authorize vitals.
     bootstrap_baseline_active: bool,
+    /// Metadata for the completed explicit calibration persisted on disk, if any.
+    explicit_calibration: Option<explicit_calibration::ExplicitMetadata>,
     /// Server generated identity for the current explicit calibration model.
     calibration_model_id: Option<String>,
     /// Process and current explicit room-calibration identities.
@@ -3020,6 +3096,7 @@ impl AppStateInner {
             hr_buffer: VecDeque::with_capacity(8),
             br_buffer: VecDeque::with_capacity(8),
             edge_vitals: None,
+            raw_packet_log: RawPacketLog::new(RAW_PACKET_LOG_CAPACITY),
             latest_wasm_events: None,
             discovered_models: Vec::new(),
             active_model_id: None,
@@ -3052,6 +3129,7 @@ impl AppStateInner {
             installation_id: None,
             bootstrap_baseline: None,
             bootstrap_baseline_active: false,
+            explicit_calibration: None,
             calibration_model_id: None,
             calibration_boot_epoch: opaque_calibration_id("cal-boot"),
             calibration_session_id: None,
@@ -3567,6 +3645,387 @@ fn parse_edge_fused_vitals(buf: &[u8]) -> Option<EdgeFusedVitalsPacket> {
         mmwave_distance_cm,
         mmwave_targets,
         mmwave_confidence,
+    })
+}
+
+// ── Raw UDP packet debug log (Debug tab) ─────────────────────────────────────
+//
+// The certified-vitals path only consumes a subset of the datagrams the ESP32
+// emits. The Debug tab needs to show *every* packet type, including the ones
+// the server otherwise drops (feature vector 0xC511_0003, compressed CSI
+// 0xC511_0005, feature state 0xC511_0006). This bounded log records a decoded
+// summary for each admitted datagram, keyed by magic, and is served by
+// `GET /api/v1/debug/raw-packets`.
+
+/// Maximum number of recent datagrams retained for the Debug tab.
+const RAW_PACKET_LOG_CAPACITY: usize = 200;
+/// The global ring is dominated by the ~30 Hz raw-CSI stream, so a 200-slot
+/// window only spans a few seconds and the 1 Hz vitals packets scroll out
+/// almost immediately. Keep a separate newest-N bucket per magic so every
+/// packet type stays inspectable from the Debug tab.
+const RAW_PACKET_LOG_PER_MAGIC_CAPACITY: usize = 50;
+
+#[derive(Debug, Clone, Serialize)]
+struct RawPacketEntry {
+    /// Server wall-clock time when the datagram was admitted (unix ms).
+    received_at_ms: u64,
+    /// Source socket address (`ip:port`).
+    source: String,
+    /// Datagram size in bytes.
+    size: usize,
+    /// Magic as `0xXXXXXXXX` (or `—` for non-binary datagrams).
+    magic: String,
+    /// Human-readable packet type.
+    kind: String,
+    /// Whether the main pipeline has a parser for this magic.
+    parsed: bool,
+    /// Decoded fields. Shape depends on `magic`.
+    decoded: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+struct RawPacketCounter {
+    count: u64,
+    last_at_ms: u64,
+    last_size: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RawPacketLog {
+    capacity: usize,
+    entries: VecDeque<RawPacketEntry>,
+    per_magic_capacity: usize,
+    per_magic: HashMap<String, VecDeque<RawPacketEntry>>,
+    counters: HashMap<String, RawPacketCounter>,
+}
+
+impl RawPacketLog {
+    fn new(capacity: usize) -> Self {
+        Self {
+            capacity,
+            entries: VecDeque::with_capacity(capacity),
+            per_magic_capacity: RAW_PACKET_LOG_PER_MAGIC_CAPACITY,
+            per_magic: HashMap::new(),
+            counters: HashMap::new(),
+        }
+    }
+
+    /// Decode one admitted datagram and push it onto the ring. Newest first.
+    fn record(&mut self, buf: &[u8], source: &str, now_ms: u64) {
+        let (magic, kind, parsed, decoded) = decode_raw_packet(buf);
+        let entry = RawPacketEntry {
+            received_at_ms: now_ms,
+            source: source.to_string(),
+            size: buf.len(),
+            magic: magic.clone(),
+            kind,
+            parsed,
+            decoded,
+        };
+        self.entries.push_front(entry.clone());
+        while self.entries.len() > self.capacity {
+            self.entries.pop_back();
+        }
+        let per_magic_capacity = self.per_magic_capacity;
+        let bucket = self
+            .per_magic
+            .entry(magic.clone())
+            .or_insert_with(|| VecDeque::with_capacity(per_magic_capacity));
+        bucket.push_front(entry);
+        while bucket.len() > per_magic_capacity {
+            bucket.pop_back();
+        }
+        let counter = self.counters.entry(magic).or_default();
+        counter.count += 1;
+        counter.last_at_ms = now_ms;
+        counter.last_size = buf.len();
+    }
+}
+
+fn round3(value: f64) -> f64 {
+    (value * 1000.0).round() / 1000.0
+}
+
+fn round4(value: f64) -> f64 {
+    (value * 10_000.0).round() / 10_000.0
+}
+
+/// Decode a raw datagram by its leading magic. Returns
+/// `(magic_hex, kind, parsed_by_pipeline, decoded_fields)`.
+fn decode_raw_packet(buf: &[u8]) -> (String, String, bool, serde_json::Value) {
+    if buf.is_empty() {
+        return (
+            "—".to_string(),
+            "empty datagram".to_string(),
+            false,
+            serde_json::Value::Null,
+        );
+    }
+    if buf[0] == b'{' {
+        return (
+            "—".to_string(),
+            "JSON (vendor RF event)".to_string(),
+            true,
+            serde_json::json!({ "note": "JSON datagram handled by the ADR-270 vendor path" }),
+        );
+    }
+    if buf.len() < 4 {
+        return (
+            "—".to_string(),
+            "too short".to_string(),
+            false,
+            serde_json::json!({ "bytes": buf.len() }),
+        );
+    }
+    let magic = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+    let hex = format!("0x{magic:08X}");
+    match magic {
+        0xC511_0001 => (hex, "ADR-018 CSI frame".to_string(), true, decode_adr018_csi(buf)),
+        0xC511_0002 => (
+            hex,
+            "ADR-039 edge vitals".to_string(),
+            true,
+            decode_edge_vitals_packet(buf),
+        ),
+        0xC511_0003 => (
+            hex,
+            "ADR-069 feature vector".to_string(),
+            false,
+            decode_feature_vector(buf),
+        ),
+        0xC511_0004 => (
+            hex,
+            "ADR-063 fused vitals".to_string(),
+            true,
+            decode_fused_vitals_packet(buf),
+        ),
+        0xC511_0005 => (
+            hex,
+            "ADR-039 compressed CSI".to_string(),
+            false,
+            decode_compressed_csi(buf),
+        ),
+        0xC511_0006 => (
+            hex,
+            "ADR-081 feature state".to_string(),
+            false,
+            serde_json::json!({ "size": buf.len() }),
+        ),
+        0xC511_0007 => (
+            hex,
+            "ADR-040 WASM output".to_string(),
+            true,
+            serde_json::json!({ "size": buf.len(), "note": "decoded by the WASM output path" }),
+        ),
+        0xC511_A110 => (
+            hex,
+            "ADR-110 time sync".to_string(),
+            true,
+            serde_json::json!({ "size": buf.len() }),
+        ),
+        _ => (
+            hex,
+            "unknown".to_string(),
+            false,
+            serde_json::json!({ "size": buf.len() }),
+        ),
+    }
+}
+
+/// ADR-018 CSI frame: 20-byte header + interleaved I/Q bytes.
+fn decode_adr018_csi(buf: &[u8]) -> serde_json::Value {
+    if buf.len() < 20 {
+        return serde_json::json!({ "error": "short header", "size": buf.len() });
+    }
+    let node_id = buf[4];
+    let n_antennas = buf[5];
+    let n_subcarriers = u16::from_le_bytes([buf[6], buf[7]]);
+    let channel_freq_mhz = u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]);
+    let sequence = u32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]);
+    let rssi_dbm = buf[16] as i8;
+    let noise_floor_dbm = buf[17] as i8;
+    let ppdu_type = buf[18];
+    let flags = buf[19];
+    let iq_bytes = buf.len() - 20;
+    let pairs = iq_bytes / 2;
+
+    // The first subcarriers are the guard/null/DC region, so a preview that
+    // starts at pair 0 is almost always all zeros on real hardware. Sample a
+    // middle slice instead, and report whole-frame energy / non-zero pair
+    // counts so "is the IQ payload actually populated?" is answerable from
+    // the JSON alone.
+    let mut iq_nonzero_pairs = 0usize;
+    let mut iq_energy = 0.0f64;
+    for i in 0..pairs {
+        let off = 20 + i * 2;
+        let iv = buf[off] as i8 as f64;
+        let qv = buf[off + 1] as i8 as f64;
+        if iv != 0.0 || qv != 0.0 {
+            iq_nonzero_pairs += 1;
+        }
+        iq_energy += iv * iv + qv * qv;
+    }
+    let preview_len = pairs.min(4);
+    let preview_start = if pairs > preview_len {
+        (pairs / 2).saturating_sub(preview_len / 2)
+    } else {
+        0
+    };
+    let mut iq_preview = Vec::with_capacity(preview_len);
+    for i in 0..preview_len {
+        let pair_index = preview_start + i;
+        let off = 20 + pair_index * 2;
+        let iv = buf[off] as i8 as f64;
+        let qv = buf[off + 1] as i8 as f64;
+        let amplitude = (iv * iv + qv * qv).sqrt();
+        let phase_rad = qv.atan2(iv);
+        iq_preview.push(serde_json::json!({
+            "index": pair_index,
+            "i": iv as i64,
+            "q": qv as i64,
+            "amplitude": round3(amplitude),
+            "phase_rad": round3(phase_rad),
+        }));
+    }
+
+    serde_json::json!({
+        "node_id": node_id,
+        "n_antennas": n_antennas,
+        "n_subcarriers": n_subcarriers,
+        "channel_freq_mhz": channel_freq_mhz,
+        "sequence": sequence,
+        "rssi_dbm": rssi_dbm,
+        "noise_floor_dbm": noise_floor_dbm,
+        "ppdu_type": ppdu_type,
+        "flags": format!("0x{flags:02X}"),
+        "iq_bytes": iq_bytes,
+        "iq_pairs": pairs,
+        "iq_nonzero_pairs": iq_nonzero_pairs,
+        "iq_energy": round3(iq_energy),
+        "iq_preview_start": preview_start,
+        "iq_preview": iq_preview,
+    })
+}
+
+/// ADR-039 edge vitals: 32-byte fixed layout.
+fn decode_edge_vitals_packet(buf: &[u8]) -> serde_json::Value {
+    if buf.len() < 32 {
+        return serde_json::json!({ "error": "short packet", "size": buf.len() });
+    }
+    let node_id = buf[4];
+    let flags = buf[5];
+    let breathing_rate_bpm = u16::from_le_bytes([buf[6], buf[7]]) as f64 / 100.0;
+    let heart_rate_bpm =
+        u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]) as f64 / 10_000.0;
+    let rssi_dbm = buf[12] as i8;
+    let n_persons = buf[13];
+    let motion_energy = f32::from_le_bytes([buf[16], buf[17], buf[18], buf[19]]);
+    let presence_score = f32::from_le_bytes([buf[20], buf[21], buf[22], buf[23]]);
+    let timestamp_ms = u32::from_le_bytes([buf[24], buf[25], buf[26], buf[27]]);
+
+    serde_json::json!({
+        "node_id": node_id,
+        "flags": format!("0x{flags:02X}"),
+        "presence": (flags & 0x01) != 0,
+        "fall_detected": (flags & 0x02) != 0,
+        "motion": (flags & 0x04) != 0,
+        "breathing_rate_bpm": round3(breathing_rate_bpm),
+        "heart_rate_bpm": round3(heart_rate_bpm),
+        "rssi_dbm": rssi_dbm,
+        "n_persons": n_persons,
+        "motion_energy": round3(motion_energy as f64),
+        "presence_score": round3(presence_score as f64),
+        "timestamp_ms": timestamp_ms,
+    })
+}
+
+/// ADR-069 feature vector: 48-byte packet with 8 normalized dimensions.
+fn decode_feature_vector(buf: &[u8]) -> serde_json::Value {
+    if buf.len() < 48 {
+        return serde_json::json!({ "error": "short packet", "size": buf.len() });
+    }
+    let node_id = buf[4];
+    let seq = u16::from_le_bytes([buf[6], buf[7]]);
+    let timestamp_us = i64::from_le_bytes([
+        buf[8], buf[9], buf[10], buf[11], buf[12], buf[13], buf[14], buf[15],
+    ]);
+    let mut raw = Vec::with_capacity(8);
+    for i in 0..8 {
+        let off = 16 + i * 4;
+        let value = f32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]]);
+        raw.push(round4(value as f64));
+    }
+
+    // The firmware normalises each dimension to 0..1; invert that so the debug
+    // view shows engineering units next to the wire value.
+    let presence_score = round3(raw[0] * 10.0);
+    let motion_energy = round3(raw[1] * 10.0);
+    let breathing_rate_bpm = round3(raw[2] * 30.0);
+    let heart_rate_bpm = round3(raw[3] * 120.0);
+    let phase_variance = round4(raw[4]);
+    let person_count = round3(raw[5] * 4.0);
+    let fall_risk = raw[6];
+    let rssi_dbm = round3(raw[7] * 100.0 - 100.0);
+
+    serde_json::json!({
+        "node_id": node_id,
+        "seq": seq,
+        "timestamp_us": timestamp_us,
+        "features_normalized": raw,
+        "features_engineering": {
+            "presence_score": presence_score,
+            "motion_energy": motion_energy,
+            "breathing_rate_bpm": breathing_rate_bpm,
+            "heart_rate_bpm": heart_rate_bpm,
+            "phase_variance": phase_variance,
+            "person_count": person_count,
+            "fall_risk": fall_risk,
+            "rssi_dbm": rssi_dbm,
+        },
+    })
+}
+
+/// ADR-063 fused vitals: 48-byte packet; reuse the certified-path parser so
+/// the debug view cannot drift from what the pipeline actually reads.
+fn decode_fused_vitals_packet(buf: &[u8]) -> serde_json::Value {
+    match parse_edge_fused_vitals(buf) {
+        Some(packet) => {
+            serde_json::to_value(packet).unwrap_or(serde_json::Value::Null)
+        }
+        None => serde_json::json!({ "error": "failed to parse fused vitals", "size": buf.len() }),
+    }
+}
+
+/// ADR-039 compressed CSI: 10-byte header + delta/RLE payload.
+fn decode_compressed_csi(buf: &[u8]) -> serde_json::Value {
+    if buf.len() < 10 {
+        return serde_json::json!({ "error": "short header", "size": buf.len() });
+    }
+    let node_id = buf[4];
+    let channel = buf[5];
+    let iq_len = u16::from_le_bytes([buf[6], buf[7]]);
+    let comp_len = u16::from_le_bytes([buf[8], buf[9]]);
+    let payload = &buf[10..];
+    let ratio = if iq_len > 0 {
+        comp_len as f64 / iq_len as f64
+    } else {
+        0.0
+    };
+    let preview: Vec<String> = payload
+        .iter()
+        .take(16)
+        .map(|byte| format!("{byte:02X}"))
+        .collect();
+
+    serde_json::json!({
+        "node_id": node_id,
+        "channel": channel,
+        "original_iq_bytes": iq_len,
+        "compressed_bytes": comp_len,
+        "payload_bytes": payload.len(),
+        "compression_ratio": round3(ratio),
+        "payload_preview_hex": preview,
+        "note": "delta+RLE compressed; the server does not currently decompress this packet",
     })
 }
 
@@ -9534,10 +9993,10 @@ async fn calibration_start(
                 }));
             }
             CalibrationStatus::Fresh => {
-                return Json(serde_json::json!({
-                    "success": false,
-                    "error": "A fresh calibration already exists. Call /calibration/stop or wait for expiry.",
-                }));
+                // Pressing Start is an explicit operator request to
+                // recalibrate, so replace the previous fresh model instead of
+                // refusing. The new session starts from frame zero.
+                info!("Replacing fresh calibration with a new empty-room session");
             }
             _ => {} // Stale/Expired/Uncalibrated — ok to recalibrate
         }
@@ -9556,6 +10015,20 @@ async fn calibration_start(
             s.calibration_source_node_ids
                 .extend(request.source_node_ids.iter().copied());
             s.calibration_grid_binding = Some(selected_binding);
+            // Start replaces any persisted calibration. Remove both files so a
+            // restart during the new capture cannot resurrect the old model.
+            s.explicit_calibration = None;
+            s.bootstrap_baseline = None;
+            if let Err(error) =
+                explicit_calibration::remove(&explicit_calibration::path_in(&s.data_dir))
+            {
+                warn!(%error, "Could not remove persisted explicit calibration before recalibration");
+            }
+            if let Err(error) =
+                bootstrap_baseline::remove(&bootstrap_baseline::path_in(&s.data_dir))
+            {
+                warn!(%error, "Could not remove stored bootstrap baseline before recalibration");
+            }
             Json(serde_json::json!({
                 "success": true,
                 "message": "Calibration started — keep room empty while frames accumulate.",
@@ -9682,6 +10155,7 @@ async fn calibration_stop(
                 let baseline = modes.baseline_eigenvalue_count;
                 let variance_explained = modes.variance_explained;
                 let holdout_window_size = modes.baseline_runtime_window_size;
+                let persisted_snapshot = fm.export_snapshot();
                 let final_frame_count = fm.calibration_frame_count();
                 let receipt = CalibrationModelReceipt {
                     schema: field_bridge::CALIBRATION_MODEL_RECEIPT_SCHEMA,
@@ -9697,6 +10171,38 @@ async fn calibration_stop(
                 };
                 s.calibration_model_receipt = Some(receipt.clone());
                 s.begin_field_model_holdout(binding);
+                let explicit_path = explicit_calibration::path_in(&s.data_dir);
+                let installation_id = s.installation_id.clone();
+                let persisted = match persisted_snapshot {
+                    Ok(snapshot) => {
+                        match persist_explicit_calibration(
+                            installation_id.as_deref(),
+                            &explicit_path,
+                            snapshot,
+                            &receipt,
+                            binding,
+                        ) {
+                            Ok(metadata) => {
+                                info!(
+                                    expires_at_unix_ms = metadata.expires_at_unix_ms,
+                                    "Persisted explicit calibration"
+                                );
+                                s.explicit_calibration = Some(metadata);
+                                true
+                            }
+                            Err(error) => {
+                                warn!(%error, "Could not persist explicit calibration");
+                                s.explicit_calibration = None;
+                                false
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        warn!(%error, "Could not snapshot the field model for persistence");
+                        s.explicit_calibration = None;
+                        false
+                    }
+                };
                 info!("Field model calibrated: baseline_eigenvalues={baseline}, variance_explained={variance_explained:.2}");
                 Json(serde_json::json!({
                     "success": true,
@@ -9710,6 +10216,7 @@ async fn calibration_stop(
                     "source_grid": source_grid,
                     "reordered_packets_by_node": reordered_packets_by_node,
                     "max_reorder_depth_by_node": max_reorder_depth_by_node,
+                    "persisted": persisted,
                     "model_receipt": receipt,
                 }))
             }
@@ -9844,6 +10351,33 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
     response["source_node_ids"] = serde_json::json!(if bound { s.calibration_source_node_ids.iter().copied().collect::<Vec<_>>() } else { Vec::new() });
     response["observed_source_node_ids"] = serde_json::json!(if bound { s.calibration_observed_source_node_ids.iter().copied().collect::<Vec<_>>() } else { Vec::new() });
     response["missing_source_node_ids"] = serde_json::json!(if bound { s.calibration_source_node_ids.difference(&s.calibration_observed_source_node_ids).copied().collect::<Vec<_>>() } else { Vec::new() });
+    response["persisted_calibration"] = s
+        .explicit_calibration
+        .as_ref()
+        .map(|metadata| {
+            let authorized = s.explicit_calibration_fresh_at(observed_at_unix_ms);
+            serde_json::json!({
+                "stored": true,
+                "authority": explicit_calibration::EXPLICIT_CALIBRATION_AUTHORITY,
+                "source_node_ids": &metadata.source_node_ids,
+                "bound_source_node_id": metadata.bound_source_node_id,
+                "source_grid": &metadata.source_grid,
+                "source_model_id": &metadata.source_model_id,
+                "created_at_unix_ms": metadata.created_at_unix_ms,
+                "expires_at_unix_ms": metadata.expires_at_unix_ms,
+                "content_sha256": &metadata.content_sha256,
+                "calibrated_evidence_authorized": authorized,
+                "numeric_vitals_authorized": authorized,
+            })
+        })
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "stored": false,
+                "authority": "none",
+                "calibrated_evidence_authorized": false,
+                "numeric_vitals_authorized": false,
+            })
+        });
     Json(response)
 }
 
@@ -10397,6 +10931,12 @@ async fn calibration_cancel(
     s.calibration_model_receipt = None;
     s.clear_field_model_binding();
     s.clear_calibration_sequence_state();
+    s.explicit_calibration = None;
+    if let Err(error) =
+        explicit_calibration::remove(&explicit_calibration::path_in(&s.data_dir))
+    {
+        warn!(%error, "Could not remove persisted explicit calibration during cancel");
+    }
     if let Some(installation_id) = s.installation_id.clone() {
         let path = bootstrap_baseline::path_in(&s.data_dir);
         if let Ok((model, metadata)) = bootstrap_baseline::load(
@@ -10455,6 +10995,7 @@ async fn calibration_reset(
     s.clear_field_model_binding();
     s.clear_calibration_sequence_state();
     s.bootstrap_baseline_active = false;
+    s.explicit_calibration = None;
     let path = bootstrap_baseline::path_in(&s.data_dir);
     let bootstrap_removed = match bootstrap_baseline::remove(&path) {
         Ok(removed) => {
@@ -10466,11 +11007,21 @@ async fn calibration_reset(
             false
         }
     };
+    let explicit_removed = match explicit_calibration::remove(&explicit_calibration::path_in(
+        &s.data_dir,
+    )) {
+        Ok(removed) => removed,
+        Err(error) => {
+            warn!(%error, "Could not remove persisted explicit calibration during reset");
+            false
+        }
+    };
     Json(serde_json::json!({
         "success": true,
         "message": "Calibration model reset.",
         "status": "none",
         "bootstrap_removed": bootstrap_removed,
+        "explicit_removed": explicit_removed,
     }))
 }
 
@@ -10494,6 +11045,92 @@ fn chrono_timestamp() -> u64 {
         .unwrap_or(0)
 }
 
+/// Ordered, fail-closed trace of every precondition the certified-vitals path
+/// checks (`calibrated_vitals_for_publication` -> `vitals_for_publication`).
+///
+/// The certified payload is unconditional-fail-closed, so when it blanks the
+/// only useful debugging datum is *which* precondition closed first. `reason`
+/// names that one; the remaining fields carry the raw evidence behind it so a
+/// monitoring UI can show the whole chain instead of a blank.
+fn vitals_certification_trace(
+    state: &AppStateInner,
+    candidates: &VitalSigns,
+    room_person_count: usize,
+    observed_at_unix_ms: u64,
+) -> serde_json::Value {
+    let explicit_calibration_fresh =
+        state.explicit_calibration_fresh_at(observed_at_unix_ms);
+    let sequence_fault_node_count = state.calibration_sequence_fault_node_ids.len();
+    let binding = state.calibration_grid_binding;
+    let runtime_window_size = state
+        .field_model
+        .as_ref()
+        .and_then(|model| model.modes())
+        .and_then(|modes| modes.baseline_runtime_window_size);
+    let (holdout_ready, holdout_frames) = match (binding, runtime_window_size) {
+        (Some(binding), Some(required)) => (
+            state.field_model_holdout_ready(binding, required, std::time::Instant::now()),
+            state
+                .node_states
+                .get(&binding.source_node_id)
+                .map(|node| node.field_model_history.len()),
+        ),
+        _ => (false, None),
+    };
+    // Mirrors `calibrated_vitals_for_publication`: the occupancy evidence can
+    // only be built from a fresh field model plus a completed holdout window.
+    let evidence = binding.and_then(|binding| {
+        state.calibrated_presence_evidence(
+            binding.source_node_id,
+            state.tick,
+            observed_at_unix_ms,
+        )
+    });
+
+    let reason = if !explicit_calibration_fresh {
+        "explicit_calibration_required"
+    } else if room_person_count != 1 {
+        "room_person_count_not_one"
+    } else if sequence_fault_node_count > 0 {
+        "calibration_sequence_fault"
+    } else if binding.is_none() {
+        "calibration_grid_binding_missing"
+    } else if runtime_window_size.is_none() {
+        "field_model_runtime_window_missing"
+    } else if !holdout_ready {
+        "field_model_holdout_not_ready"
+    } else if evidence.is_none() {
+        "calibrated_presence_evidence_unavailable"
+    } else if evidence.as_ref().map(|value| value.person_count) != Some(1) {
+        "calibrated_person_count_not_one"
+    } else if candidates.signal_quality < VITAL_PUBLICATION_MIN_SIGNAL_QUALITY {
+        "signal_quality_below_floor"
+    } else if candidates.breathing_confidence < VITAL_PUBLICATION_MIN_CONFIDENCE
+        && candidates.heartbeat_confidence < VITAL_PUBLICATION_MIN_CONFIDENCE
+    {
+        "vital_confidence_below_floor"
+    } else {
+        "unknown"
+    };
+
+    serde_json::json!({
+        "reason": reason,
+        "explicit_calibration_fresh": explicit_calibration_fresh,
+        "room_person_count": room_person_count,
+        "sequence_fault_node_count": sequence_fault_node_count,
+        "grid_binding_present": binding.is_some(),
+        "runtime_window_size": runtime_window_size,
+        "holdout_ready": holdout_ready,
+        "holdout_frames": holdout_frames,
+        "presence_evidence_present": evidence.is_some(),
+        "calibrated_person_count": evidence.as_ref().map(|value| value.person_count),
+        "signal_quality": candidates.signal_quality,
+        "signal_quality_ok": candidates.signal_quality >= VITAL_PUBLICATION_MIN_SIGNAL_QUALITY,
+        "confidence_ok": candidates.breathing_confidence >= VITAL_PUBLICATION_MIN_CONFIDENCE
+            || candidates.heartbeat_confidence >= VITAL_PUBLICATION_MIN_CONFIDENCE,
+    })
+}
+
 async fn vital_signs_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
     let observed_at_unix_ms = chrono::Utc::now().timestamp_millis().max(0) as u64;
@@ -10504,7 +11141,40 @@ async fn vital_signs_endpoint(State(state): State<SharedState>) -> Json<serde_js
         person_count,
         observed_at_unix_ms,
     );
-    let (br_len, br_cap, hb_len, hb_cap) = s.vital_detector.buffer_status();
+    // Read the *per-node* detector that actually feeds `latest_vitals`. The
+    // AppState-level detector is never fed on the ESP32 UDP path, so it always
+    // reported 0/0 here -- which made the UI's buffer row meaningless.
+    let (br_len, br_cap, hb_len, hb_cap) = s
+        .node_states
+        .values()
+        .map(|node| node.vital_detector.buffer_status())
+        .max_by_key(|(breathing_samples, ..)| *breathing_samples)
+        .unwrap_or_else(|| s.vital_detector.buffer_status());
+
+    // `vital_signs` above is *certified* evidence: it stays blank unless a
+    // fresh explicit calibration resolved exactly one occupant AND the
+    // quality/confidence floors held for the window. On a single ESP32 link
+    // those floors are reached intermittently at best, so a monitoring UI
+    // that reads only that block sees the numbers blink in and out.
+    //
+    // `raw_vital_signs` is the same estimator's ungated output (rate +
+    // confidence + signal quality). It is NOT certified evidence -- it is
+    // surfaced so a UI can show the live estimate and how far it is from the
+    // gate instead of showing nothing. `gates` explains which floor is open
+    // at this instant. In `--privacy-mode` the whole `raw_vital_signs` object
+    // is redacted (`privacy_filter::BIOMETRIC_KEYS`).
+    let raw = &s.latest_vitals;
+    // Walk the certification preconditions so an abstention reports the first
+    // closed gate rather than a generic message.
+    let certification = vitals_certification_trace(&s, raw, person_count, observed_at_unix_ms);
+    let abstention_reason = if published.is_some() {
+        serde_json::Value::Null
+    } else {
+        certification
+            .get("reason")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null)
+    };
     Json(serde_json::json!({
         "vital_signs": {
             "breathing_rate_bpm": published.as_ref().and_then(|value| value.breathing_rate_bpm),
@@ -10513,8 +11183,27 @@ async fn vital_signs_endpoint(State(state): State<SharedState>) -> Json<serde_js
             "heartbeat_confidence": published.as_ref().map(|value| value.heartbeat_confidence),
             "signal_quality": published.as_ref().map(|value| value.signal_quality),
         },
+        "raw_vital_signs": {
+            "breathing_rate_bpm": raw.breathing_rate_bpm,
+            "heart_rate_bpm": raw.heart_rate_bpm,
+            "breathing_confidence": raw.breathing_confidence,
+            "heartbeat_confidence": raw.heartbeat_confidence,
+            "signal_quality": raw.signal_quality,
+        },
+        "gates": {
+            "explicit_calibration_fresh": s.explicit_calibration_fresh_at(observed_at_unix_ms),
+            "person_count": person_count,
+            "person_count_ok": person_count == 1,
+            "signal_quality": raw.signal_quality,
+            "signal_quality_ok": raw.signal_quality >= VITAL_PUBLICATION_MIN_SIGNAL_QUALITY,
+            "breathing_confidence_ok": raw.breathing_confidence >= VITAL_PUBLICATION_MIN_CONFIDENCE,
+            "heartbeat_confidence_ok": raw.heartbeat_confidence >= VITAL_PUBLICATION_MIN_CONFIDENCE,
+            "min_signal_quality": VITAL_PUBLICATION_MIN_SIGNAL_QUALITY,
+            "min_confidence": VITAL_PUBLICATION_MIN_CONFIDENCE,
+        },
+        "certification": certification,
         "authority": if published.is_some() { "explicit_calibration" } else { "abstained" },
-        "abstention_reason": if published.is_some() { serde_json::Value::Null } else { serde_json::json!("fresh explicit calibration with exactly one occupant and qualified evidence required") },
+        "abstention_reason": abstention_reason,
         "buffer_status": {
             "breathing_samples": br_len,
             "breathing_capacity": br_cap,
@@ -10600,6 +11289,150 @@ async fn edge_vitals_endpoint(State(state): State<SharedState>) -> Json<serde_js
             "message": "No edge vitals packet received yet. Ensure ESP32 edge_tier >= 1.",
         })),
     }
+}
+
+/// Query params for `GET /api/v1/debug/fall`.
+#[derive(Debug, Default, Deserialize)]
+struct FallDebugQuery {
+    /// `?data=1` embeds each node's full-rate capture records in the reply.
+    #[serde(default)]
+    data: Option<u8>,
+}
+
+/// GET /api/v1/debug/fall — server-side edge-equivalent fall detection state
+/// (mirrors the firmware's 0xC5110002 flags-bit1 computation, run on the same
+/// raw 0xC5110001 CSI). One entry per live node plus its recent accel trace.
+async fn fall_debug_endpoint(
+    State(state): State<SharedState>,
+    Query(query): Query<FallDebugQuery>,
+) -> Json<serde_json::Value> {
+    use wifi_densepose_sensing_server::fall_detection;
+    let s = state.read().await;
+    let include_data = query.data == Some(1);
+    let mut nodes = serde_json::Map::new();
+    for (node_id, ns) in &s.node_states {
+        let status = ns.fall_detector.status();
+        nodes.insert(
+            node_id.to_string(),
+            serde_json::json!({
+                "status": status,
+                "score_history": ns.fall_detector.score_history(),
+                "capture": {
+                    "capturing": ns.fall_detector.capturing(),
+                    "full": ns.fall_detector.capture_full(),
+                    "frames": ns.fall_detector.capture_data().len(),
+                    "capacity": fall_detection::CAPTURE_MAX_FRAMES,
+                    "data": if include_data {
+                        serde_json::json!(ns.fall_detector.capture_data())
+                    } else {
+                        serde_json::Value::Null
+                    },
+                },
+            }),
+        );
+    }
+    Json(serde_json::json!({
+        "nodes": nodes,
+        "algo": {
+            "design": "two-stage shape-transient: per-frame shape normalization (AGC-immune) → Δs = mean|Δshape| per frame → spike (2-of-10 frames ≥ threshold) → stillness (0.5 s avg < threshold for 2 s) → latch",
+            "why_not_phase": "firmware #263 phase acceleration is unreachable (per-frame bound 2π < threshold 15) and jitter-dominated once scaled to rad/s²",
+            "spike_consec_min": fall_detection::SPIKE_CONSEC_MIN,
+            "cooldown_ms": fall_detection::FALL_COOLDOWN_MS,
+            "defaults": {
+                "spike_threshold": fall_detection::DEFAULT_SPIKE_THRESH,
+                "still_threshold": fall_detection::DEFAULT_STILL_THRESH,
+                "still_window_ms": fall_detection::DEFAULT_STILL_WINDOW_MS,
+                "pending_window_ms": fall_detection::DEFAULT_PENDING_WINDOW_MS,
+                "latch_hold_ms": fall_detection::DEFAULT_LATCH_HOLD_MS,
+            },
+        },
+    }))
+}
+
+/// Capture control request for the fall detector.
+#[derive(Debug, Deserialize)]
+struct FallCaptureControl {
+    /// "start" | "stop" | "clear"
+    action: String,
+}
+
+/// POST /api/v1/debug/fall/capture — arm/stop/clear the full-rate (per-frame,
+/// ~30 Hz) capture on every node. The record is then readable from
+/// `GET /api/v1/debug/fall?data=1` for the Debug tab waveform and export.
+async fn fall_capture_control(
+    State(state): State<SharedState>,
+    Json(req): Json<FallCaptureControl>,
+) -> Json<serde_json::Value> {
+    let mut s = state.write().await;
+    let applied: usize = match req.action.as_str() {
+        "start" => {
+            let n = s.node_states.values_mut().map(|ns| { ns.fall_detector.capture_start(); 1 }).count();
+            n
+        }
+        "stop" => {
+            let n = s.node_states.values_mut().map(|ns| { ns.fall_detector.capture_stop(); 1 }).count();
+            n
+        }
+        "clear" => {
+            let n = s.node_states.values_mut().map(|ns| { ns.fall_detector.capture_clear(); 1 }).count();
+            n
+        }
+        other => {
+            return Json(serde_json::json!({
+                "success": false,
+                "error": format!("unknown action '{other}' (start|stop|clear)"),
+            }));
+        }
+    };
+    Json(serde_json::json!({ "success": true, "action": req.action, "nodes": applied }))
+}
+
+/// GET /api/v1/debug/raw-packets — decoded view of recently admitted UDP
+/// datagrams for the Debug tab. Bounded ring buffer; newest first. When the
+/// server is in privacy mode the decoded payloads are withheld and only
+/// metadata (magic / kind / size) is returned.
+async fn raw_packets_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let s = state.read().await;
+    let privacy = s.privacy_mode;
+    let to_json = |entry: &RawPacketEntry| -> serde_json::Value {
+        if privacy {
+            serde_json::json!({
+                "received_at_ms": entry.received_at_ms,
+                "source": entry.source,
+                "size": entry.size,
+                "magic": entry.magic,
+                "kind": entry.kind,
+                "parsed": entry.parsed,
+                "decoded": serde_json::Value::Null,
+                "redacted": true,
+            })
+        } else {
+            serde_json::to_value(entry).unwrap_or(serde_json::Value::Null)
+        }
+    };
+    let entries: Vec<serde_json::Value> = s
+        .raw_packet_log
+        .entries
+        .iter()
+        .map(&to_json)
+        .collect();
+    let mut by_magic = serde_json::Map::new();
+    for (magic, bucket) in &s.raw_packet_log.per_magic {
+        by_magic.insert(
+            magic.clone(),
+            serde_json::Value::Array(bucket.iter().map(&to_json).collect()),
+        );
+    }
+    Json(serde_json::json!({
+        "status": "ok",
+        "privacy_mode": privacy,
+        "capacity": s.raw_packet_log.capacity,
+        "per_magic_capacity": s.raw_packet_log.per_magic_capacity,
+        "count": s.raw_packet_log.entries.len(),
+        "entries": entries,
+        "by_magic": by_magic,
+        "counters": &s.raw_packet_log.counters,
+    }))
 }
 
 /// GET /api/v1/wasm-events — latest WASM events from ESP32 (ADR-040).
@@ -12230,6 +13063,14 @@ async fn udp_receiver_task(
                 if let Some(tee) = &tee {
                     tee.forward(&buf[..len]);
                 }
+                // Debug tab: record a decoded summary of every admitted
+                // datagram — including types the pipeline drops — before
+                // dispatch. Newest-first ring buffer, bounded capacity.
+                {
+                    let now_ms = chrono::Utc::now().timestamp_millis().max(0) as u64;
+                    let mut s = state.write().await;
+                    s.raw_packet_log.record(&buf[..len], &src.to_string(), now_ms);
+                }
                 if len > 0 && buf[0] == b'{' {
                     match serde_json::from_slice::<wifi_densepose_hardware::vendor_rf::VendorRfEvent>(&buf[..len])
                         .map_err(|error| error.to_string())
@@ -12964,6 +13805,17 @@ async fn udp_receiver_task(
                         .process_frame(&frame.amplitudes, &frame.phases);
                     let vitals = smooth_vitals_node(ns, &raw_vitals);
                     ns.latest_vitals = vitals.clone();
+
+                    // Server-side fall detection on the same raw CSI frames
+                    // the board uplinks (magic 0xC5110001): two-stage
+                    // amplitude-shape detector — AGC-immune (per-frame shape
+                    // normalization) spike + stillness confirmation, with the
+                    // firmware's debounce/cooldown/latch semantics (#263).
+                    ns.fall_detector.process(
+                        &frame.amplitudes,
+                        ns.measured_sample_rate_hz().unwrap_or(20.0),
+                        chrono::Utc::now().timestamp_millis(),
+                    );
 
                     // DynamicMinCut person estimation from subcarrier correlation.
                     let corr_persons = estimate_persons_from_correlation(&ns.frame_history);
@@ -14470,7 +15322,7 @@ async fn main() {
     // before any request can arrive. Zero-config for a single appliance; the
     // env var still wins for a multi-instance deployment that must share one.
     wifi_densepose_sensing_server::browser_session::init_secret(&data_dir);
-    let (bootstrap_field_model, bootstrap_metadata, bootstrap_baseline_active) =
+    let (mut bootstrap_field_model, mut bootstrap_metadata, mut bootstrap_baseline_active) =
         if !args.calibrate {
             args.installation_id.as_deref().map_or(
                 (None, None, false),
@@ -14504,6 +15356,34 @@ async fn main() {
         } else {
             (None, None, false)
         };
+    // A completed explicit calibration outranks the negative-only bootstrap
+    // prior: restore it with calibrated-evidence authority until it expires.
+    let mut explicit_metadata: Option<explicit_calibration::ExplicitMetadata> = None;
+    if !args.calibrate {
+        if let Some(installation_id) = args.installation_id.as_deref() {
+            let explicit_path = explicit_calibration::path_in(&data_dir);
+            let now_ms = chrono::Utc::now().timestamp_millis().max(0) as u64;
+            match explicit_calibration::load(&explicit_path, installation_id, now_ms) {
+                Ok((model, metadata)) => {
+                    info!(
+                        source_model_id = %metadata.source_model_id,
+                        source_node_ids = ?metadata.source_node_ids,
+                        expires_at_unix_ms = metadata.expires_at_unix_ms,
+                        "Restored persisted explicit calibration"
+                    );
+                    bootstrap_field_model = Some(model);
+                    bootstrap_metadata = None;
+                    bootstrap_baseline_active = false;
+                    explicit_metadata = Some(metadata);
+                }
+                Err(explicit_calibration::ExplicitCalibrationError::Io(error))
+                    if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    warn!(%error, "Ignored invalid persisted explicit calibration");
+                }
+            }
+        }
+    }
     info!(
         "Loaded runtime config: dedup_factor={:.2}",
         runtime_config.dedup_factor
@@ -14681,6 +15561,7 @@ async fn main() {
         hr_buffer: VecDeque::with_capacity(8),
         br_buffer: VecDeque::with_capacity(8),
         edge_vitals: None,
+        raw_packet_log: RawPacketLog::new(RAW_PACKET_LOG_CAPACITY),
         latest_wasm_events: None,
         // Model management
         discovered_models: initial_models,
@@ -14780,26 +15661,49 @@ async fn main() {
         installation_id: args.installation_id.clone(),
         bootstrap_baseline: bootstrap_metadata.clone(),
         bootstrap_baseline_active,
-        calibration_model_id: None,
-        calibration_boot_epoch: opaque_calibration_id("cal-boot"),
-        calibration_session_id: None,
-        calibration_binding_digest: None,
-        calibration_source_node_ids: bootstrap_metadata
+        explicit_calibration: explicit_metadata.clone(),
+        calibration_model_id: explicit_metadata
             .as_ref()
-            .map(|metadata| metadata.source_node_ids.iter().copied().collect())
+            .map(|metadata| metadata.receipt.model_id.clone()),
+        calibration_boot_epoch: opaque_calibration_id("cal-boot"),
+        calibration_session_id: explicit_metadata
+            .as_ref()
+            .map(|metadata| metadata.receipt.session_id.clone()),
+        calibration_binding_digest: explicit_metadata
+            .as_ref()
+            .map(|metadata| metadata.receipt.binding_digest.clone()),
+        calibration_source_node_ids: explicit_metadata
+            .as_ref()
+            .map(|metadata| metadata.receipt.source_node_ids.iter().copied().collect())
+            .or_else(|| {
+                bootstrap_metadata
+                    .as_ref()
+                    .map(|metadata| metadata.source_node_ids.iter().copied().collect())
+            })
             .unwrap_or_default(),
         calibration_observed_source_node_ids: std::collections::BTreeSet::new(),
-        calibration_model_receipt: None,
-        calibration_grid_binding: bootstrap_metadata.as_ref().and_then(|metadata| {
-            let [source_node_id] = metadata.source_node_ids.as_slice() else {
-                return None;
-            };
-            Some(CalibrationGridBinding {
-                source_node_id: *source_node_id,
+        calibration_model_receipt: explicit_metadata
+            .as_ref()
+            .map(|metadata| CalibrationModelReceipt::from_persisted(&metadata.receipt)),
+        calibration_grid_binding: explicit_metadata
+            .as_ref()
+            .map(|metadata| CalibrationGridBinding {
+                source_node_id: metadata.bound_source_node_id,
                 grid: CsiGridKey::from_bootstrap_grid(metadata.source_grid),
                 evidence: None,
             })
-        }),
+            .or_else(|| {
+                bootstrap_metadata.as_ref().and_then(|metadata| {
+                    let [source_node_id] = metadata.source_node_ids.as_slice() else {
+                        return None;
+                    };
+                    Some(CalibrationGridBinding {
+                        source_node_id: *source_node_id,
+                        grid: CsiGridKey::from_bootstrap_grid(metadata.source_grid),
+                        evidence: None,
+                    })
+                })
+            }),
         calibration_last_sequences: HashMap::new(),
         calibration_reordered_packets: HashMap::new(),
         calibration_max_reorder_depth: HashMap::new(),
@@ -15103,6 +16007,9 @@ async fn main() {
         // Vital sign endpoints
         .route("/api/v1/vital-signs", get(vital_signs_endpoint))
         .route("/api/v1/edge-vitals", get(edge_vitals_endpoint))
+        .route("/api/v1/debug/raw-packets", get(raw_packets_endpoint))
+        .route("/api/v1/debug/fall", get(fall_debug_endpoint))
+        .route("/api/v1/debug/fall/capture", post(fall_capture_control))
         // ADR-102: Edge Module Registry — surfaces the canonical Cognitum cog
         // catalog (`https://storage.googleapis.com/cognitum-apps/app-registry.json`)
         // with in-process TTL cache + stale-on-error fallback. Disabled when

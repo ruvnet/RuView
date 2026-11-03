@@ -31,6 +31,16 @@ const MIN_HEARTBEAT_SAMPLES: usize = 30; // ~1.5s at 20 Hz
 /// Peak-to-mean ratio threshold for confident detection.
 const CONFIDENCE_THRESHOLD: f64 = 2.0;
 
+/// Minimum breathing confidence for breathing-harmonic suppression to arm
+/// inside the heartbeat band. An unconfident breathing estimate would notch
+/// the wrong frequencies, so suppression stays off (fail-closed).
+const HARMONIC_SUPPRESSION_MIN_BREATH_CONF: f64 = 0.7;
+
+/// Half-width of each harmonic notch as a fraction of the harmonic center
+/// frequency. Breathing drifts a few percent per minute; ±3% covers that
+/// drift while sparing a true heartbeat sitting near a harmonic.
+const HARMONIC_NOTCH_FRAC: f64 = 0.03;
+
 // ── Output types ───────────────────────────────────────────────────────────
 
 /// Vital sign readings produced each frame.
@@ -170,8 +180,15 @@ impl VitalSignDetector {
         }
 
         // -- Extract vital signs --
+        // Breathing is extracted first so its confident frequency estimate can
+        // steer breathing-harmonic suppression inside the heartbeat band (see
+        // `extract_heartbeat`): a non-sinusoidal breathing waveform leaks k·f_b
+        // harmonics into 0.67-2.0 Hz, and the heartbeat FFT then locks onto
+        // them (measured on hardware: BR 12.6 BPM reported as "HR" 100.8 BPM
+        // = 8 × 12.6).
         let (breathing_rate, breathing_confidence) = self.extract_breathing();
-        let (heart_rate, heartbeat_confidence) = self.extract_heartbeat();
+        let (heart_rate, heartbeat_confidence) =
+            self.extract_heartbeat(breathing_rate, breathing_confidence);
 
         // -- Signal quality --
         let signal_quality = self.compute_signal_quality(amplitude);
@@ -198,20 +215,87 @@ impl VitalSignDetector {
     }
 
     /// Extract heart rate from the heartbeat buffer via FFT.
+    ///
+    /// `breathing_rate_bpm` / `breathing_confidence` come from the parallel
+    /// breathing extraction. When the breathing estimate is confident, the
+    /// k·f_b harmonic frequencies are excluded from the heartbeat peak search
+    /// (fail-closed: an unconfident breathing estimate disables suppression).
     /// Returns (rate_bpm, confidence).
-    pub fn extract_heartbeat(&self) -> (Option<f64>, f64) {
+    pub fn extract_heartbeat(
+        &self,
+        breathing_rate_bpm: Option<f64>,
+        breathing_confidence: f64,
+    ) -> (Option<f64>, f64) {
         if self.heartbeat_buffer.len() < MIN_HEARTBEAT_SAMPLES {
             return (None, 0.0);
         }
 
         let data: Vec<f64> = self.heartbeat_buffer.iter().copied().collect();
         let filtered = bandpass_filter(&data, HEARTBEAT_MIN_HZ, HEARTBEAT_MAX_HZ, self.sample_rate);
-        self.compute_fft_peak(&filtered, HEARTBEAT_MIN_HZ, HEARTBEAT_MAX_HZ)
+
+        // Narrow exclusion bands around each breathing harmonic that falls
+        // inside the heartbeat band. The half-width is the larger of ±3% of
+        // the harmonic center (covers the breathing estimate's few-percent
+        // drift) and the FFT window's mainlobe half-width (~2.5 bins): the
+        // windowed sinusoid spreads energy over its neighboring bins, and an
+        // under-sized notch would leave the harmonic's shoulder exposed as a
+        // fake peak.
+        let excluded: Vec<(f64, f64)> = match breathing_rate_bpm {
+            Some(fb_bpm)
+                if breathing_confidence >= HARMONIC_SUPPRESSION_MIN_BREATH_CONF && fb_bpm > 0.0 =>
+            {
+                let fb = fb_bpm / 60.0;
+                let fft_len = filtered.len().next_power_of_two();
+                let freq_res = self.sample_rate / fft_len as f64;
+                let mainlobe_half_hz = 2.5 * freq_res;
+                let k_min = (HEARTBEAT_MIN_HZ / fb).ceil().max(2.0) as u32;
+                let k_max = ((HEARTBEAT_MAX_HZ / fb).floor() as u32).min(12);
+                (k_min..=k_max)
+                    .map(|k| {
+                        let center = k as f64 * fb;
+                        let half = (center * HARMONIC_NOTCH_FRAC).max(mainlobe_half_hz);
+                        (center - half, center + half)
+                    })
+                    .collect()
+            }
+            _ => Vec::new(),
+        };
+
+        self.compute_fft_peak_with_exclusions(
+            &filtered,
+            HEARTBEAT_MIN_HZ,
+            HEARTBEAT_MAX_HZ,
+            &excluded,
+        )
     }
 
     /// Find the dominant frequency in `buffer` within the [min_hz, max_hz] band
     /// using FFT. Returns (frequency_as_bpm, confidence).
     pub fn compute_fft_peak(&self, buffer: &[f64], min_hz: f64, max_hz: f64) -> (Option<f64>, f64) {
+        self.compute_fft_peak_with_exclusions(buffer, min_hz, max_hz, &[])
+    }
+
+    /// Like [`Self::compute_fft_peak`], but bins whose frequency falls inside
+    /// one of the closed `excluded` Hz ranges are skipped in the peak search.
+    ///
+    /// Used to suppress breathing harmonics inside the heartbeat band: the
+    /// breathing waveform is non-sinusoidal, so its k·f_b harmonics (k=2..12)
+    /// land in 0.67-2.0 Hz and the heartbeat FFT locks onto them (measured on
+    /// hardware: BR 12.6 BPM reported as "HR" 100.8 BPM = 8 × 12.6).
+    ///
+    /// Prominence stays anchored to the FULL band mean (exclusions do not
+    /// shrink the denominator): masking a dominant harmonic cannot inflate a
+    /// survivor's confidence, so a leakage shoulder of the removed harmonic
+    /// scores far below the publication gate while a genuine heartbeat peak
+    /// — a few tenths of the band total concentrated in one bin — still
+    /// clears it.
+    pub fn compute_fft_peak_with_exclusions(
+        &self,
+        buffer: &[f64],
+        min_hz: f64,
+        max_hz: f64,
+        excluded: &[(f64, f64)],
+    ) -> (Option<f64>, f64) {
         if buffer.len() < 4 {
             return (None, 0.0);
         }
@@ -234,6 +318,9 @@ impl VitalSignDetector {
         // Frequency resolution
         let freq_res = self.sample_rate / fft_len as f64;
 
+        let is_excluded =
+            |freq_hz: f64| excluded.iter().any(|(lo, hi)| freq_hz >= *lo && freq_hz <= *hi);
+
         // Find bin range for our band of interest
         let min_bin = (min_hz / freq_res).ceil() as usize;
         let max_bin = ((max_hz / freq_res).floor() as usize).min(spectrum.len().saturating_sub(1));
@@ -242,9 +329,12 @@ impl VitalSignDetector {
             return (None, 0.0);
         }
 
-        // Find peak magnitude and its bin index within the band
+        // Find the peak magnitude among the surviving (non-excluded) bins.
+        // The band mean denominator spans the FULL band, excluded bins
+        // included, so removing a dominant harmonic cannot inflate the
+        // confidence of whatever survives it.
         let mut peak_mag = 0.0f64;
-        let mut peak_bin = min_bin;
+        let mut peak_bin: Option<usize> = None;
         let mut band_sum = 0.0f64;
         let mut band_count = 0usize;
 
@@ -253,9 +343,12 @@ impl VitalSignDetector {
             let mag = spectrum[bin];
             band_sum += mag;
             band_count += 1;
+            if is_excluded(bin as f64 * freq_res) {
+                continue;
+            }
             if mag > peak_mag {
                 peak_mag = mag;
-                peak_bin = bin;
+                peak_bin = Some(bin);
             }
         }
 
@@ -264,6 +357,9 @@ impl VitalSignDetector {
         }
 
         let band_mean = band_sum / band_count as f64;
+        let Some(peak_bin) = peak_bin else {
+            return (None, 0.0);
+        };
 
         // Confidence: ratio of peak to band mean, normalized to 0-1
         let peak_ratio = if band_mean > f64::EPSILON {
@@ -272,8 +368,14 @@ impl VitalSignDetector {
             0.0
         };
 
-        // Parabolic interpolation for sub-bin frequency accuracy
-        let peak_freq = if peak_bin > min_bin && peak_bin < max_bin {
+        // Parabolic interpolation for sub-bin frequency accuracy. Skipped when
+        // a neighbor bin is excluded (its magnitude belongs to a notch).
+        let neighbor_excluded = |bin: usize| is_excluded(bin as f64 * freq_res);
+        let peak_freq = if peak_bin > min_bin
+            && peak_bin < max_bin
+            && !neighbor_excluded(peak_bin - 1)
+            && !neighbor_excluded(peak_bin + 1)
+        {
             let alpha = spectrum[peak_bin - 1];
             let beta = spectrum[peak_bin];
             let gamma = spectrum[peak_bin + 1];
