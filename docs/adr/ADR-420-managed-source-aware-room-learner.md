@@ -123,6 +123,73 @@ Corrupt evaluation evidence must be retained/quarantined without discarding a
 valid candidate or manufacturing a pass. Evaluation receipts authorize neither
 physical qualification nor adoption.
 
+### Proposed November 3 extension: local qualification, explicit selection and Room Save
+
+The current app's legacy Room Save requires a background-model receipt and its
+empty check. A separately trained learner cannot satisfy that contract merely
+by completing capture or evaluation. Do not manufacture a legacy receipt, or
+make the user repeat both workflows without explaining the missing seam.
+
+Introduce a distinct, versioned **local operational qualification**. The server
+computes it from the immutable candidate, exact retained Train lineage,
+validated role-disjoint HeldOut data, managed sealed-phase history, and the
+existing immutable evaluation artifact. The policy is fixed before evaluation;
+clients cannot submit scores, thresholds or a claim that qualification passed.
+Reuse the targets proposed in issue #2418: at least four Train and four HeldOut
+cohorts for each of Empty, OccupiedStatic, OccupiedMoving and AdjacentOnly;
+unconditional sensitivity at least 90% for each occupied condition; false
+positive rate at most 5% for each negative condition; evaluated cohort coverage
+at least 90% in every condition. Missing results, abstentions and unavailable
+rates cannot be counted as correct. At the minimum cohort count these gates
+require all four observations in every condition to be correctly scored.
+
+These are operator-labelled representative-cohort checks for one installation.
+They do not measure wall-time coverage, independent trial statistics, p95
+decision latency, coherent source clocks or general physical accuracy. Preserve
+the original diagnostic receipts' false `physically_validated`,
+`independence_verified` and `adoption_authorized` fields. The separate receipt
+names its narrower authority, policy hash, exact model/evaluation/data/context
+hashes, label provenance, original observation bounds and evaluation time.
+Older trusted managed sealed history may establish that the existing
+conditions-held gate was passed; it cannot acquire invented historical
+confirmation times or full-duration coverage.
+
+Qualification never selects a model automatically. Explicit guarded selection
+binds the verified owner, installation, room revision, ordered source/PHY
+context, immutable model and qualification hashes. Candidate discovery,
+training, evaluation, a new latest-model pointer, or consent completion cannot
+switch the selected model. Keep previous selection history for explicit
+rollback. A newer completed check that fails for the selected model withdraws
+current authority without rewriting its historical passing receipt or silently
+falling back to another detector.
+
+Persist model and selection independently of optional capture recovery. The
+24-hour reduced-sample recovery deadline does not expire a trained model or
+renew its evidence. After restart/logout the original selection and evidence
+times remain historical. Current use additionally requires the actual published
+room binding, exact artifact/policy verification, complete fresh source windows,
+and the model's existing out-of-distribution checks. Missing sources, changed
+room/PHY context, corruption, failed checks or unknown model state produce an
+explicit unavailable/abstaining result. They must not be rendered as an empty
+room or trigger an unlabelled heuristic fallback.
+
+Publish the selected result through a versioned binary-only evidence surface.
+It grants no person count, movement class, location, pose, numeric Vitals,
+HomeCore or cloud authority. Keep legacy output visibly attributable as a
+comparison where compatibility requires it; selected-model clients exclusively
+use the selected proof and its withdrawal state. Withhold downstream projections
+whose contracts cannot preserve this binary evidence boundary.
+
+The app stores a discriminated learner installation receipt and its own saved
+timestamp/history. It does not reuse the legacy baseline's receipt or timestamp.
+Room Save validates a fresh exact selection proof around durable persistence,
+and reports saved progress separately from qualified/selected/current state.
+Attaching a model must not republish geometry: the existing companion publish
+operation increments its revision and would invalidate the candidate's binding.
+Paired clients receive only the bounded read-scoped proof; qualification and
+selection mutations remain with the managed owner. Any final native delivery
+still requires composed tests and actual device qualification.
+
 ### Proposed November 2 extension: opt-in provisional capture recovery
 
 The operator can explicitly choose encrypted local recovery when configuring a
