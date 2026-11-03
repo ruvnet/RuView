@@ -41,6 +41,11 @@ const HARMONIC_SUPPRESSION_MIN_BREATH_CONF: f64 = 0.7;
 /// drift while sparing a true heartbeat sitting near a harmonic.
 const HARMONIC_NOTCH_FRAC: f64 = 0.03;
 
+/// Cap on each notch half-width as a fraction of the harmonic spacing `f_b`.
+/// Harmonics are only `f_b` apart (0.1-0.5 Hz), so wider notches merge and
+/// blank the whole heartbeat band; at most half of every gap is notched.
+const HARMONIC_NOTCH_MAX_SPACING_FRAC: f64 = 0.25;
+
 // ── Output types ───────────────────────────────────────────────────────────
 
 /// Vital sign readings produced each frame.
@@ -233,13 +238,11 @@ impl VitalSignDetector {
         let data: Vec<f64> = self.heartbeat_buffer.iter().copied().collect();
         let filtered = bandpass_filter(&data, HEARTBEAT_MIN_HZ, HEARTBEAT_MAX_HZ, self.sample_rate);
 
-        // Narrow exclusion bands around each breathing harmonic that falls
-        // inside the heartbeat band. The half-width is the larger of ±3% of
-        // the harmonic center (covers the breathing estimate's few-percent
-        // drift) and the FFT window's mainlobe half-width (~2.5 bins): the
-        // windowed sinusoid spreads energy over its neighboring bins, and an
-        // under-sized notch would leave the harmonic's shoulder exposed as a
-        // fake peak.
+        // Narrow exclusion bands around every breathing harmonic inside the
+        // heartbeat band: ±3% of the center (breathing drift), at least one
+        // bin, at most a quarter of the harmonic spacing so the notches never
+        // merge. The harmonic's leakage shoulders outside the notch are
+        // rejected by the local-maximum rule in the peak search instead.
         let excluded: Vec<(f64, f64)> = match breathing_rate_bpm {
             Some(fb_bpm)
                 if breathing_confidence >= HARMONIC_SUPPRESSION_MIN_BREATH_CONF && fb_bpm > 0.0 =>
@@ -247,13 +250,13 @@ impl VitalSignDetector {
                 let fb = fb_bpm / 60.0;
                 let fft_len = filtered.len().next_power_of_two();
                 let freq_res = self.sample_rate / fft_len as f64;
-                let mainlobe_half_hz = 2.5 * freq_res;
+                let max_half = fb * HARMONIC_NOTCH_MAX_SPACING_FRAC;
                 let k_min = (HEARTBEAT_MIN_HZ / fb).ceil().max(2.0) as u32;
-                let k_max = ((HEARTBEAT_MAX_HZ / fb).floor() as u32).min(12);
+                let k_max = (HEARTBEAT_MAX_HZ / fb).floor() as u32;
                 (k_min..=k_max)
                     .map(|k| {
                         let center = k as f64 * fb;
-                        let half = (center * HARMONIC_NOTCH_FRAC).max(mainlobe_half_hz);
+                        let half = (center * HARMONIC_NOTCH_FRAC).max(freq_res).min(max_half);
                         (center - half, center + half)
                     })
                     .collect()
@@ -282,6 +285,12 @@ impl VitalSignDetector {
     /// breathing waveform is non-sinusoidal, so its k·f_b harmonics (k=2..12)
     /// land in 0.67-2.0 Hz and the heartbeat FFT locks onto them (measured on
     /// hardware: BR 12.6 BPM reported as "HR" 100.8 BPM = 8 × 12.6).
+    ///
+    /// With exclusions active, a candidate must also be a local spectral
+    /// maximum: the shoulder of a notched harmonic slopes down away from it and
+    /// is never a local maximum, while a genuine heartbeat peak is. A heartbeat
+    /// closer to a harmonic than the window's resolution has no separate peak
+    /// and is abstained on rather than guessed.
     ///
     /// Prominence stays anchored to the FULL band mean (exclusions do not
     /// shrink the denominator): masking a dominant harmonic cannot inflate a
@@ -345,6 +354,13 @@ impl VitalSignDetector {
             band_count += 1;
             if is_excluded(bin as f64 * freq_res) {
                 continue;
+            }
+            if !excluded.is_empty() {
+                let left = bin.checked_sub(1).map_or(0.0, |b| spectrum[b]);
+                let right = spectrum.get(bin + 1).copied().unwrap_or(0.0);
+                if mag < left || mag < right {
+                    continue;
+                }
             }
             if mag > peak_mag {
                 peak_mag = mag;
