@@ -278,8 +278,8 @@ wiremock = "0.5"
 # The transitive security floors live in Cargo.lock, which the gating
 # Security Scanning job audits: quinn-proto >=0.11.18
 # (RUSTSEC-2026-0338/0339/0340/0341/0342), rustls >=0.23.46
-# (RUSTSEC-2026-0346/0347/0348/0349) and wasmtime >=36.0.19
-# (RUSTSEC-2026-0363/0379/0380). A plain `cargo update` can walk them backwards;
+# (RUSTSEC-2026-0346/0347/0348/0349) and wasmtime >=36.0.20
+# (RUSTSEC-2026-0363/0379/0380/0424). A plain `cargo update` can walk them backwards;
 # keep the lockfile at or above these until the direct requirements
 # enforce them.
 #
