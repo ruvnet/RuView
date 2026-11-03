@@ -5,7 +5,7 @@
 // that ran it hold a permanently signed-out answer. `activate` deletes every
 // cache whose name is not CACHE_NAME, so bumping is what evicts it from clients
 // already in the field. Bump again if a future change poisons the cache.
-const CACHE_NAME = 'ruview-v23';
+const CACHE_NAME = 'ruview-v24';
 
 // Requests whose response depends on the caller's credentials. These must never
 // be served from the Cache API.
