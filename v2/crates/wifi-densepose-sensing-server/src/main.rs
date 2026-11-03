@@ -2576,6 +2576,9 @@ fn calibration_sequence_order(previous: Option<u32>, sequence: u32) -> Calibrati
 
 impl AppStateInner {
     fn restore_saved_room(&mut self) -> Result<bool, bootstrap_baseline::BootstrapBaselineError> {
+        // Historical expiry metadata is retained for diagnostics after restart;
+        // it is not a restored model and cannot restore a full-room receipt.
+        if self.field_model.is_none() { return Ok(false); }
         let Some((installation, metadata)) = self.installation_id.as_deref().zip(self.bootstrap_baseline.as_ref()) else { return Ok(false); };
         match room_calibration::load(&room_calibration::path_in(&self.data_dir), installation, metadata) {
             Ok(receipt) => {
@@ -3427,6 +3430,29 @@ mod calibration_expiry_tests {
     }
 
     #[test]
+    fn expired_metadata_cannot_restore_a_full_room_without_a_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = (chrono::Utc::now().timestamp_millis().max(0) as u64) - 1_000_000_000;
+        let source = qualified_vital_state(old);
+        let receipt = source.calibration_model_receipt.as_ref().unwrap();
+        let path = bootstrap_baseline::path_in(dir.path());
+        let metadata = bootstrap_baseline::store(&path, "account-A-installation", &[5],
+            source.calibration_grid_binding.unwrap().grid.as_bootstrap_grid(), &receipt.model_id, old,
+            source.field_model.as_ref().unwrap()).unwrap();
+        room_calibration::store(&room_calibration::path_in(dir.path()), "account-A-installation", &metadata, receipt).unwrap();
+        let mut restarted = AppStateInner::minimal();
+        restarted.data_dir = dir.path().to_path_buf();
+        restarted.installation_id = Some("account-A-installation".into());
+        restarted.bootstrap_baseline = Some(bootstrap_baseline::load_expired_metadata(&path,
+            "account-A-installation", metadata.expires_at_unix_ms + 1).unwrap());
+        assert!(!restarted.restore_saved_room().unwrap());
+        assert!(restarted.field_model.is_none());
+        assert!(restarted.calibration_model_receipt.is_none());
+        assert!(restarted.calibration_session_id.is_none());
+        assert!(!restarted.bootstrap_baseline_active_at(metadata.expires_at_unix_ms + 1));
+    }
+
+    #[test]
     fn restored_room_requires_new_boot_source_evidence_and_never_renews_completion() {
         let mut state = state_with_runtime_window();
         let old = state.calibration_model_receipt.clone().unwrap();
@@ -3815,6 +3841,24 @@ mod calibration_expiry_tests {
             score_to_person_count(0.0, 0),
             "a bootstrap prior must not derive a positive or negative count through the runtime model path"
         );
+    }
+
+    #[tokio::test]
+    async fn expired_metadata_after_restart_reports_original_deadline_without_authority() {
+        let mut state = state_with_model(true);
+        let expected_expiry = state.bootstrap_baseline.as_ref().unwrap().expires_at_unix_ms;
+        state.field_model = None;
+        state.bootstrap_baseline_active = false;
+        let state = Arc::new(RwLock::new(state));
+        let Json(status) = calibration_status(State(state)).await;
+        assert_eq!(status["status"], "expired");
+        assert_eq!(status["active"], false);
+        assert_eq!(status["binding_mode"], "none");
+        assert_eq!(status["bootstrap_baseline"]["expires_at_unix_ms"], expected_expiry);
+        assert_eq!(status["bootstrap_baseline"]["active"], false);
+        assert_eq!(status["bootstrap_baseline"]["calibrated_evidence_authorized"], false);
+        assert_eq!(status["bootstrap_baseline"]["numeric_vitals_authorized"], false);
+        assert!(status["model_receipt"].is_null());
     }
 
     #[tokio::test]
@@ -10847,7 +10891,9 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
             )
         });
     let status = effective_status.map_or_else(
-        || "none".to_string(),
+        || if !bound && s.field_model.is_none() && s.bootstrap_baseline.as_ref()
+            .is_some_and(|metadata| observed_at_unix_ms > metadata.expires_at_unix_ms)
+        { "expired".to_string() } else { "none".to_string() },
         |status| format!("{status:?}").to_lowercase(),
     );
     // An expired calibration is inactive by definition, but "expired" is a
@@ -15696,6 +15742,14 @@ async fn main() {
                             if error.kind() == std::io::ErrorKind::NotFound =>
                         {
                             (None, None, false)
+                        }
+                        Err(bootstrap_baseline::BootstrapBaselineError::Expired) => {
+                            let metadata = bootstrap_baseline::load_expired_metadata(
+                                &path, installation_id, chrono::Utc::now().timestamp_millis().max(0) as u64,
+                            ).ok();
+                            // Keep original timestamps for honest status only.
+                            // No FieldModel, active prior or authority is restored.
+                            (None, metadata, false)
                         }
                         Err(error) => {
                             warn!(%error, "Ignored invalid empty room bootstrap prior");
