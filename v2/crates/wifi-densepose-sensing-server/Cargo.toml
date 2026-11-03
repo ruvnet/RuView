@@ -27,6 +27,11 @@ tokio = { workspace = true, features = ["full", "process"] }
 futures-util = "0.3"
 ruvector-mincut = { workspace = true }
 mdns-sd = "0.11"
+rcgen = "0.12.1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+hyper = { workspace = true }
+hyper-util = { version = "0.1", features = ["server-auto", "tokio", "service"] }
 
 # Serialization
 serde = { workspace = true }
@@ -49,6 +54,7 @@ clap = { workspace = true }
 wifi-densepose-aether = { version = "0.3.0", path = "../wifi-densepose-aether" }
 wifi-densepose-core = { workspace = true, features = ["serde"] }
 wifi-densepose-physics = { workspace = true }
+wifi-densepose-mat = { version = "0.3.2", path = "../wifi-densepose-mat", default-features = false, features = ["std", "api"] }
 
 # Multi-BSSID WiFi scanning pipeline (ADR-022 Phase 3)
 wifi-densepose-wifiscan = { version = "0.3.0", path = "../wifi-densepose-wifiscan" }
