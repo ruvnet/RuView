@@ -31,6 +31,7 @@
 //! let processor = CsiProcessor::new(config);
 //! ```
 
+pub mod aoa_music;
 pub mod bvp;
 pub mod csi_processor;
 pub mod csi_ratio;
@@ -39,6 +40,7 @@ pub mod fresnel;
 pub mod hampel;
 pub mod hardware_norm;
 pub mod motion;
+pub mod multilateration;
 pub mod phase_sanitizer;
 pub mod ruvsense;
 pub mod spectrogram;
