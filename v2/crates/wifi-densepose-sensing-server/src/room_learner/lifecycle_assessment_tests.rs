@@ -240,3 +240,156 @@ async fn canonical_56_feature_context_qualifies_through_actual_managed_training_
         SelectedBinaryEvidence::Ready { .. }
     ));
 }
+
+#[tokio::test]
+async fn missing_authoritative_pointer_with_history_is_unknown_not_legacy_after_cold_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let rt = fitted(dir.path()).await;
+    let q = rt.qualify(&rt.mutation_guard().unwrap()).unwrap();
+    let selected = rt
+        .select_model(
+            &rt.mutation_guard().unwrap(),
+            &q.receipt.model_sha256,
+            &q.receipt_sha256,
+        )
+        .unwrap();
+    let root = dir
+        .path()
+        .join("a".repeat(64))
+        .join("SensingServer/room-learner");
+    let pointer = root.join("model-selection-v1.json");
+    let original = std::fs::read(&pointer).unwrap();
+    let history = root
+        .join("selections")
+        .join(format!("{}.json", selected.receipt_sha256));
+    let history_bytes = std::fs::read(&history).unwrap();
+    std::fs::rename(&pointer, root.join("selection-pointer-backup.json")).unwrap();
+    let cold = runtime(dir.path());
+    let status = cold.selection_snapshot(cold.receiver_now_ns(), Some("synthetic-room"));
+    assert!(status
+        .integrity_error
+        .as_deref()
+        .is_some_and(|s| s.contains("history")));
+    assert!(matches!(
+        status.current,
+        SelectedBinaryEvidence::Unavailable { .. }
+    ));
+    assert!(!pointer.exists());
+    assert_eq!(std::fs::read(&history).unwrap(), history_bytes);
+    assert_eq!(
+        std::fs::read(root.join("selection-pointer-backup.json")).unwrap(),
+        original
+    );
+    // An actual explicit deselection pointer, unlike a missing pointer, proves legacy mode.
+    std::fs::rename(root.join("selection-pointer-backup.json"), &pointer).unwrap();
+    let restored = runtime(dir.path());
+    restored
+        .deselect_model(&restored.mutation_guard().unwrap())
+        .unwrap();
+    let deselected = runtime(dir.path());
+    let status =
+        deselected.selection_snapshot(deselected.receiver_now_ns(), Some("synthetic-room"));
+    assert!(status.integrity_error.is_none());
+    assert!(matches!(status.current, SelectedBinaryEvidence::None));
+}
+
+#[tokio::test]
+async fn orphan_first_write_history_does_not_invent_a_selected_model_or_legacy_fallback() {
+    use crate::room_learner::{
+        qualification::hash,
+        selection::{SelectionEnvelope, SelectionReceipt, SelectionTarget},
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let rt = fitted(dir.path()).await;
+    let q = rt.qualify(&rt.mutation_guard().unwrap()).unwrap();
+    let root = dir
+        .path()
+        .join("a".repeat(64))
+        .join("SensingServer/room-learner");
+    let history = root.join("selections");
+    crate::companion::private_dir(&history).unwrap();
+    // Simulate the persisted boundary after immutable history but before the
+    // first authoritative pointer. No successful selection is asserted.
+    let receipt = SelectionReceipt {
+        schema: "ruview.room-learner.model-selection.v1".into(),
+        owner_scope: "a".repeat(64),
+        installation_id: "synthetic-install".into(),
+        revision: 1,
+        selected_at_unix_ms: rt.receiver_now_ns() / 1_000_000,
+        selected: Some(SelectionTarget {
+            context: context(),
+            model_sha256: q.receipt.model_sha256.clone(),
+            model_version: q.receipt.model_version,
+            qualification_sha256: q.receipt_sha256.clone(),
+        }),
+        previous: None,
+    };
+    let envelope = SelectionEnvelope {
+        receipt_sha256: hash(&receipt).unwrap(),
+        receipt,
+    };
+    let bytes = serde_json::to_vec(&envelope).unwrap();
+    let record = history.join(format!("{}.json", envelope.receipt_sha256));
+    crate::companion::atomic_private_write(&record, &bytes).unwrap();
+    let pointer = root.join("model-selection-v1.json");
+    std::fs::create_dir(&pointer).unwrap();
+    assert!(crate::companion::atomic_private_write(&pointer, &bytes).is_err());
+    std::fs::remove_dir(&pointer).unwrap();
+    let cold = runtime(dir.path());
+    let status = cold.selection_snapshot(cold.receiver_now_ns(), Some("synthetic-room"));
+    assert!(status.selected.is_none());
+    assert!(status.integrity_error.is_some());
+    assert!(matches!(
+        status.current,
+        SelectedBinaryEvidence::Unavailable { .. }
+    ));
+    assert!(!pointer.exists());
+    assert_eq!(std::fs::read(record).unwrap(), bytes);
+}
+
+#[cfg(unix)]
+#[test]
+fn never_selected_empty_history_is_legacy_but_unsafe_history_is_unknown() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let dir = tempfile::tempdir().unwrap();
+    let rt = runtime(dir.path());
+    assert!(matches!(
+        rt.selection_snapshot(START, Some("synthetic-room")).current,
+        SelectedBinaryEvidence::None
+    ));
+    let root = dir
+        .path()
+        .join("a".repeat(64))
+        .join("SensingServer/room-learner");
+    let history = root.join("selections");
+    crate::companion::private_dir(&history).unwrap();
+    assert!(matches!(
+        runtime(dir.path())
+            .selection_snapshot(START, Some("synthetic-room"))
+            .current,
+        SelectedBinaryEvidence::None
+    ));
+    std::fs::set_permissions(&history, std::fs::Permissions::from_mode(0o000)).unwrap();
+    assert!(matches!(
+        runtime(dir.path())
+            .selection_snapshot(START, Some("synthetic-room"))
+            .current,
+        SelectedBinaryEvidence::Unavailable { .. }
+    ));
+    std::fs::set_permissions(&history, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::remove_dir(&history).unwrap();
+    let external = dir.path().join("empty-history-target");
+    crate::companion::private_dir(&external).unwrap();
+    symlink(&external, &history).unwrap();
+    assert!(matches!(
+        runtime(dir.path())
+            .selection_snapshot(START, Some("synthetic-room"))
+            .current,
+        SelectedBinaryEvidence::Unavailable { .. }
+    ));
+    assert!(std::fs::symlink_metadata(&history)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(std::fs::read_dir(external).unwrap().count(), 0);
+}

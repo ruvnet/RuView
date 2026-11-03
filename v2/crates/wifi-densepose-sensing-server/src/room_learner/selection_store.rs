@@ -125,10 +125,51 @@ impl ArtifactStore {
         }
         Ok((model, q))
     }
+    fn verify_no_selection_history(&self) -> Result<(), String> {
+        let history = self.root.join("selections");
+        let metadata = match std::fs::symlink_metadata(&history) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => {
+                return Err(
+                    "selection history cannot be inspected while its pointer is missing".into(),
+                )
+            }
+            Ok(m) => m,
+        };
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Err("selection history is unsafe while its pointer is missing".into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{MetadataExt, PermissionsExt};
+            unsafe extern "C" {
+                fn geteuid() -> u32;
+            }
+            // SAFETY: POSIX geteuid has no arguments or memory side effects.
+            let uid = unsafe { geteuid() };
+            if metadata.permissions().mode() & 0o777 != 0o700 || metadata.uid() != uid {
+                return Err(
+                    "selection history is not privately readable while its pointer is missing"
+                        .into(),
+                );
+            }
+        }
+        let mut entries = std::fs::read_dir(&history)
+            .map_err(|_| "selection history cannot be read while its pointer is missing")?;
+        match entries.next() {
+            None=>Ok(()),
+            Some(Ok(_))=>Err("selection pointer is missing but retained selection history exists; explicit recovery is required".into()),
+            Some(Err(_))=>Err("selection history cannot be read while its pointer is missing".into()),
+        }
+    }
     pub(crate) fn load_selection(&self) -> Result<Option<SelectionEnvelope>, String> {
         self.verify_owner()?;
         let path = self.root.join(SELECTION);
         if !regular_or_missing(&path)? {
+            // Absence is only known when no selection commit was attempted.
+            // Immutable history may outlive a lost pointer or a failed first
+            // pointer write. Never guess a replacement from that history.
+            self.verify_no_selection_history()?;
             return Ok(None);
         }
         let envelope: SelectionEnvelope =
