@@ -64,6 +64,16 @@ bool display_hal_touch_read(uint16_t *x, uint16_t *y);
  */
 void display_hal_set_brightness(uint8_t percent);
 
+/**
+ * Self-heal: re-assert backlight + display-on state.
+ *
+ * Called periodically by the display task so a transient power sag
+ * (e.g. shared-USB brownout dimming the backlight) auto-recovers
+ * instead of leaving the panel dark while the MCU keeps running.
+ * Cheap and flicker-free — does NOT re-init the panel.
+ */
+void display_hal_refresh(void);
+
 #ifdef __cplusplus
 }
 #endif
