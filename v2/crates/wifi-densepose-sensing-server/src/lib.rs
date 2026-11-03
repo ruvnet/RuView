@@ -73,6 +73,7 @@ pub mod vendor_rf;
 pub use wifi_densepose_aether::{embedding, graph_transformer, sona, sparse_inference};
 
 pub mod companion;
+pub mod account_profile;
 pub mod companion_tls;
 
 pub mod companion_sensors;

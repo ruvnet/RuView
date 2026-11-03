@@ -8193,9 +8193,9 @@ async fn activate_lora_profile(Json(body): Json<serde_json::Value>) -> Json<serd
 /// Return the effective models directory: the `MODELS_DIR` environment
 /// variable if set, otherwise `<data_dir>/models` (issue #2088).
 pub(crate) fn models_dir(data_dir: &std::path::Path) -> PathBuf {
-    std::env::var_os("MODELS_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| data_dir.join("models"))
+    wifi_densepose_sensing_server::account_profile::models_directory(
+        std::env::var_os(wifi_densepose_sensing_server::bearer_auth::OWNER_ACCOUNT_SCOPE_ENV).is_some(),
+        data_dir, std::env::var_os("MODELS_DIR").as_deref())
 }
 
 /// Return the directory CSI recordings are written to and read from:
@@ -14040,6 +14040,18 @@ async fn main() {
     let _telemetry = telemetry::init();
 
     let mut args = Args::parse();
+    if let Ok(scope) = std::env::var(wifi_densepose_sensing_server::bearer_auth::OWNER_ACCOUNT_SCOPE_ENV) {
+        let directory = match wifi_densepose_sensing_server::account_profile::prepare_directory(&scope, &args.data_dir) {
+            Ok(directory) => directory,
+            Err(error) => { eprintln!("Owned helper startup refused: {error}"); std::process::exit(2); },
+        };
+        // Child-process cwd only: relative model, recording and cache paths
+        // must not reopen a different account's directory or the app's cwd.
+        if let Err(error) = std::env::set_current_dir(&directory) {
+            eprintln!("Owned helper working directory could not be selected: {error}"); std::process::exit(2);
+        }
+        args.data_dir = directory;
+    }
     args.ui_path = coalesce_ui_path(args.ui_path);
 
     if let Err(error) = validate_startup_calibration_request(args.calibrate) {
@@ -15218,8 +15230,8 @@ async fn main() {
             Ok(s) => s,
             Err(e) => {
                 error!(
-                    "API auth: OAuth was requested but cannot be initialised: {e}. \
-                     Refusing to start — unset RUVIEW_OAUTH_ISSUER to run without it."
+                    "API auth could not be initialised: {e}. Correct the configuration before restarting; \
+                     an owned helper profile must remain account-bound."
                 );
                 std::process::exit(1);
             }
@@ -16684,7 +16696,7 @@ async fn oauth_callback(
         Err(e) => return bad(axum::http::StatusCode::UNAUTHORIZED, format!("{e}\n")),
     };
 
-    let session_cookie = match bs::issue(&principal, secure) {
+    let session_cookie = match bs::issue_for_account(&principal, secure, auth.owner_account_scope()) {
         Ok(c) => c,
         Err(e) => return bad(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("{e}\n")),
     };
@@ -16742,19 +16754,10 @@ async fn oauth_status(
     axum::Extension(auth): axum::Extension<wifi_densepose_sensing_server::bearer_auth::AuthState>,
     headers: axum::http::HeaderMap,
 ) -> axum::Json<serde_json::Value> {
-    use wifi_densepose_sensing_server::browser_session as bs;
     let raw = headers
         .get(axum::http::header::COOKIE)
         .and_then(|v| v.to_str().ok());
-    let session = raw.and_then(bs::from_cookie_header);
-    axum::Json(serde_json::json!({
-        "auth_required": auth.is_enabled(),
-        "oauth_enabled": auth.oauth_enabled(),
-        "browser_signin": auth.oauth_enabled() && bs::is_configured(),
-        "signed_in": session.is_some(),
-        "account": session.as_ref().map(|s| s.account_id.clone()),
-        "scope": session.as_ref().map(|s| s.scope.clone()),
-    }))
+    axum::Json(wifi_densepose_sensing_server::bearer_auth::browser_status(&auth, raw))
 }
 #[cfg(test)]
 mod adr186_http_tests {

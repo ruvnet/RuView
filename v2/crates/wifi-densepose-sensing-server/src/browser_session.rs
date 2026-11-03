@@ -163,6 +163,8 @@ struct Transaction {
 /// server already verified one — nothing replayable elsewhere.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BrowserSession {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_account_scope: Option<String>,
     pub subject: String,
     pub account_id: String,
     pub scope: String,
@@ -476,14 +478,19 @@ pub fn verifier_for_callback(cookie_header: &str, state: &str) -> Result<String,
 
 /// Issue the session cookie for a verified principal.
 pub fn issue(principal: &ruview_auth::Principal, secure: bool) -> Result<String, SessionError> {
+    issue_for_account(principal, secure, None)
+}
+
+pub fn issue_for_account(principal: &ruview_auth::Principal, secure: bool, owner_account_scope: Option<&str>) -> Result<String, SessionError> {
     let secret = secret()?;
     let session = BrowserSession {
+        owner_account_scope: owner_account_scope.map(str::to_owned),
         subject: principal.subject.clone(),
         account_id: principal.account_id.clone(),
         scope: principal.scopes().collect::<Vec<_>>().join(" "),
         // Never outlive our own ceiling, and never inherit the access token's
         // 15 minutes either — this is a browser session, not the token.
-        exp: now() + SESSION_TTL_SECS,
+        exp: if owner_account_scope.is_some() { (now() + SESSION_TTL_SECS).min(principal.expires_at) } else { now() + SESSION_TTL_SECS },
         // Stamped at issue, which is the moment a Cognitum token was actually
         // verified. Never refreshed by activity: it answers "when did you last
         // prove who you are", not "when were you last here".
@@ -550,6 +557,7 @@ pub(crate) fn test_cookie_value_aged(
     init_secret_for_tests();
     let secret = secret().expect("secret installed above");
     let session = BrowserSession {
+        owner_account_scope: None,
         subject: subject.to_string(),
         account_id: account_id.to_string(),
         scope: scope.to_string(),
@@ -720,6 +728,7 @@ mod tests {
         // so only the MAC stands between it and a valid session.
         let forged = sign(
             &serde_json::to_vec(&BrowserSession {
+                owner_account_scope: None,
                 subject: "attacker".into(),
                 account_id: "acct-attacker".into(),
                 scope: "sensing:admin".into(),
@@ -869,6 +878,7 @@ mod tests {
 
     fn session(exp: i64) -> BrowserSession {
         BrowserSession {
+            owner_account_scope: None,
             subject: "user-1".into(),
             account_id: "acct-1".into(),
             scope: "sensing:read".into(),
