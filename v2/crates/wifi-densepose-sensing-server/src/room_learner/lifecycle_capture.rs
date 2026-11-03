@@ -50,6 +50,7 @@ impl RoomLearningRuntime {
         now_ns: u64,
     ) -> Result<(), String> {
         let mut state = self.command_state(expected)?;
+        self.require_recovery_ready(&state)?;
         if busy(&state.job) {
             return Err("training is active".into());
         }
@@ -69,6 +70,7 @@ impl RoomLearningRuntime {
             .ok_or("configure the current room and source set first")?
             .begin_phase(request, now_ns)?;
         state.input_error = None;
+        self.checkpoint_recovery(&mut state, now_ns, true)?;
         Ok(())
     }
     pub fn ingest(&self, frame: RawSourceFrame<'_>, now_ns: u64) -> Result<(), String> {
@@ -80,7 +82,8 @@ impl RoomLearningRuntime {
         if let Err(error) = &result {
             state.input_error = Some(bounded(error.clone()));
         }
-        result
+        let saved = self.checkpoint_recovery(&mut state, now_ns, false);
+        result.and(saved)
     }
     pub fn ingest_native(
         &self,
@@ -130,7 +133,8 @@ impl RoomLearningRuntime {
         if let Err(error) = &result {
             state.input_error = Some(bounded(error.clone()));
         }
-        result
+        let saved = self.checkpoint_recovery(&mut state, now_ns, false);
+        result.and(saved)
     }
     /// Bounded protected diagnostics only; never grants admission or advances a
     /// workflow revision. Ignore sources/grids outside the current context.
@@ -155,17 +159,28 @@ impl RoomLearningRuntime {
         conditions_held: bool,
     ) -> Result<PhaseReceipt, String> {
         let mut state = self.command_state(expected)?;
+        let recovered_complete = state.recovery.disposition
+            == Some(
+                crate::room_learner::capture::RecoveryPhaseDisposition::CompletedNeedsConfirmation,
+            );
         let capture = state
             .capture
             .as_mut()
             .ok_or("no learner capture configured")?;
         if !conditions_held {
             capture.cancel_phase();
+            let _ = self.checkpoint_recovery(&mut state, now_ns, true);
             return Err(
                 "operator did not confirm conditions held; in-flight examples discarded".into(),
             );
         }
-        capture.finish_phase(now_ns)
+        if recovered_complete {
+            capture.live_cohort(now_ns)?;
+        }
+        let receipt = capture.finish_phase(now_ns)?;
+        state.recovery.disposition = None;
+        self.checkpoint_recovery(&mut state, now_ns, true)?;
+        Ok(receipt)
     }
     pub fn cancel_phase(&self, expected: &MutationGuard) -> Result<(), String> {
         let mut state = self.command_state(expected)?;
@@ -174,6 +189,8 @@ impl RoomLearningRuntime {
             .as_mut()
             .ok_or("no learner capture configured")?
             .cancel_phase();
+        let now = self.checkpoint_now(&state);
+        self.checkpoint_recovery(&mut state, now, true)?;
         Ok(())
     }
     pub fn cancel_training(&self, expected: &MutationGuard) -> Result<JobPhase, String> {
@@ -182,6 +199,8 @@ impl RoomLearningRuntime {
             state.job.cancel.store(true, Ordering::Release);
             state.job.phase = JobPhase::Cancelling;
         }
+        let now = self.checkpoint_now(&state);
+        self.checkpoint_recovery(&mut state, now, true)?;
         Ok(state.job.phase)
     }
 }

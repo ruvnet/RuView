@@ -16,10 +16,11 @@ use ingress::native_candidates;
 pub(super) use ingress::{observe, LiveSource, NativeSourceKey};
 
 fn failure(code: &str, error: impl ToString) -> Json<serde_json::Value> {
-    let code = if error.to_string() == "learner_state_changed" {
-        "learner_state_changed"
-    } else {
-        code
+    let message = error.to_string();
+    let code = match message.as_str() {
+        "learner_state_changed" => "learner_state_changed",
+        "learner_recovery_pending" => "learner_recovery_pending",
+        _ => code,
     };
     Json(serde_json::json!({"success":false,"error_code":code,
         "error":error.to_string().chars().filter(|c|!c.is_control()).take(256).collect::<String>()}))
@@ -50,6 +51,8 @@ pub(super) struct ConfigureRequest {
     revision: u64,
     source_node_ids: Vec<u8>,
     new_training: bool,
+    #[serde(default)]
+    recovery_consent: bool,
 }
 fn source_ready(state: &AppStateInner, spec: &SourceSpec, now: std::time::Instant) -> bool {
     native_candidates(state, spec.source_id, now)
@@ -122,11 +125,13 @@ pub(super) async fn configure(
         };
         let context = saved.context.clone();
         drop(s);
-        return match rt.configure(
+        return match rt.configure_for_recovery(
             &request.expected,
             context,
             opaque_calibration_id("learner-resume"),
             false,
+            request.recovery_consent,
+            now_ns(&rt),
         ) {
             Ok(()) => Json(serde_json::json!({"success":true,"status":rt.status(now_ns(&rt))})),
             Err(e) => failure("learner_resume_failed", e),
@@ -180,7 +185,14 @@ pub(super) async fn configure(
         Err(e) => return failure("learner_context_invalid", e),
     };
     let run = opaque_calibration_id("learner-run");
-    match rt.configure(&request.expected, context, run, request.new_training) {
+    match rt.configure_for_recovery(
+        &request.expected,
+        context,
+        run,
+        request.new_training,
+        request.recovery_consent,
+        now_ns(&rt),
+    ) {
         Ok(()) => Json(serde_json::json!({"success":true,"status":rt.status(now_ns(&rt))})),
         Err(e) => failure("learner_configure_failed", e),
     }
@@ -334,6 +346,91 @@ pub(super) async fn prediction(State(state): State<SharedState>) -> Json<serde_j
             serde_json::json!({"success":true,"mutation_guard":mutation_guard,"candidate_prediction":prediction,"authority":"experimental_candidate_only"}),
         ),
         Err(e) => failure("learner_prediction_unavailable", e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RestoreCaptureRequest {
+    expected: MutationGuard,
+    recovery_id: String,
+    binding_digest: String,
+    revision: u64,
+    source_node_ids: Vec<u8>,
+}
+pub(super) async fn restore_capture(
+    State(state): State<SharedState>,
+    Json(request): Json<RestoreCaptureRequest>,
+) -> Json<serde_json::Value> {
+    let rt = match runtime(&state).await {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+    let now = now_ns(&rt);
+    let context = match rt.saved_recovery_context(&request.recovery_id, now) {
+        Ok(c) => c,
+        Err(e) => return failure("learner_recovery_restore_failed", e),
+    };
+    if context.room_digest != request.binding_digest
+        || context.revision != request.revision
+        || context
+            .sources
+            .iter()
+            .map(|s| s.source_id)
+            .collect::<Vec<_>>()
+            != request.source_node_ids
+    {
+        return failure(
+            "learner_recovery_context_mismatch",
+            "Saved capture does not match the requested room, revision and source set.",
+        );
+    }
+    let s = state.read().await;
+    if s.field_model.as_ref().is_some_and(|f| {
+        matches!(f.status(), CalibrationStatus::Collecting)
+            || (s.calibration_session_id.is_some()
+                && matches!(f.status(), CalibrationStatus::Uncalibrated))
+    }) {
+        return failure(
+            "learner_capture_conflict",
+            "Finish or cancel the active field calibration first.",
+        );
+    }
+    if context
+        .sources
+        .iter()
+        .any(|spec| !source_ready(&s, spec, std::time::Instant::now()))
+    {
+        return failure(
+            "learner_recovery_source_unready",
+            "Restore the exact saved native source/PHY streams before recovering capture.",
+        );
+    }
+    let restored =
+        rt.restore_capture_recovery(&request.expected, &request.recovery_id, &context, now);
+    drop(s);
+    match restored {
+        Ok(()) => Json(serde_json::json!({"success":true,"status":rt.status(now_ns(&rt))})),
+        Err(e) => failure("learner_recovery_restore_failed", e),
+    }
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct DiscardCaptureRequest {
+    expected: MutationGuard,
+    recovery_id: String,
+}
+pub(super) async fn discard_capture(
+    State(state): State<SharedState>,
+    Json(request): Json<DiscardCaptureRequest>,
+) -> Json<serde_json::Value> {
+    let rt = match runtime(&state).await {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+    match rt.discard_capture_recovery(&request.expected, &request.recovery_id) {
+        Ok(()) => Json(serde_json::json!({"success":true,"status":rt.status(now_ns(&rt))})),
+        Err(e) => failure("learner_recovery_discard_failed", e),
     }
 }
 

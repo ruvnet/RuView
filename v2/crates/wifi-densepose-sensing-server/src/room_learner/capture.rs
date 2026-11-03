@@ -333,3 +333,7 @@ fn identifier(s: &str) -> Result<(), String> {
 #[cfg(test)]
 #[path = "capture_tests.rs"]
 mod tests;
+
+#[path = "capture_recovery.rs"]
+mod recovery;
+pub use recovery::{CaptureCheckpoint, CaptureCheckpointSummary, CaptureRestore, RecoveryPhaseDisposition, RecoveryPhaseSummary};

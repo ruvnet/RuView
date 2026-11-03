@@ -15760,7 +15760,12 @@ async fn main() {
     let room_learning = if args.room_learner {
         let owner = std::env::var(wifi_densepose_sensing_server::bearer_auth::OWNER_ACCOUNT_SCOPE_ENV).unwrap_or_default();
         let installation = args.installation_id.as_deref().unwrap_or("");
-        match wifi_densepose_sensing_server::room_learner::lifecycle::RoomLearningRuntime::new(&args.data_dir, &owner, installation) {
+        let recovery = wifi_densepose_sensing_server::room_learner::recovery_store::RecoveryStore::from_managed_env(&args.data_dir, &owner, installation);
+        let runtime = match recovery {
+            Ok(store) => wifi_densepose_sensing_server::room_learner::lifecycle::RoomLearningRuntime::new_with_recovery(&args.data_dir, &owner, installation, store),
+            Err(reason) => wifi_densepose_sensing_server::room_learner::lifecycle::RoomLearningRuntime::new_with_recovery_unavailable(&args.data_dir, &owner, installation, reason),
+        };
+        match runtime {
             Ok(runtime) => Some(Arc::new(runtime)),
             Err(error) => { error!("Managed room learner could not initialize: {error}"); std::process::exit(2); }
         }
@@ -16348,6 +16353,8 @@ async fn main() {
         .route("/api/v1/room-learner/train/cancel", post(room_learner_api::cancel_training))
         .route("/api/v1/room-learner/evaluate", post(room_learner_api::evaluate))
         .route("/api/v1/room-learner/prediction", get(room_learner_api::prediction))
+        .route("/api/v1/room-learner/recovery/restore", post(room_learner_api::restore_capture))
+        .route("/api/v1/room-learner/recovery/discard", post(room_learner_api::discard_capture))
         .route("/api/v1/calibration/reset", post(calibration_reset))
         .route("/api/v1/calibration/bootstrap/recover", post(calibration_recover_bootstrap))
         // ADR-044 §5.3: runtime-configurable dedup factor

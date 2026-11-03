@@ -72,6 +72,28 @@ fn regular_or_missing(path: &Path) -> Result<bool, String> {
     }
 }
 impl ArtifactStore {
+    /// Load an immutable historical model by exact hash; never use today's pointer.
+    pub fn load_exact_candidate(
+        &self,
+        context: &CaptureContext,
+        sha: &str,
+    ) -> Result<RoomModel, String> {
+        self.validate_context(context)?;
+        if !hex_digest(sha) {
+            return Err("invalid exact candidate digest".into());
+        }
+        let dir = self
+            .context_dir(context, false)?
+            .ok_or("exact candidate missing")?;
+        let envelope: Envelope = serde_json::from_slice(
+            &private_read(&dir.join(format!("{sha}.json"))).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        if envelope.receipt.model_sha256 != sha {
+            return Err("exact candidate hash mismatch".into());
+        }
+        self.read_model(&dir, &envelope.receipt, context)
+    }
     pub fn new(
         data_dir: &Path,
         expected_owner_scope: &str,
