@@ -137,3 +137,20 @@ The sensor preview remains transient and currently carries no room-binding
 digest. A displayed phone mesh is not a saved canonical room, durable draft,
 live AR alignment or RF calibration receipt. MAT HTTP composition likewise does
 not expand native companion WebSocket paths; see ADR-001's privacy amendment.
+
+## App-owned helper lifetime (2026-10-29)
+
+An embedded Mac helper may opt into `--parent-pid`. The value must be greater
+than1 and match the OS spawning parent before account state or listeners open.
+The helper watches reparenting from a native thread, requests graceful HTTP
+shutdown when its app ends, and exits within roughly2.1seconds even if async
+shutdown or an open socket cannot finish. The guard stays armed through final
+persistence. Reparenting is checked rather than merely testing whether an old
+PID exists, so PID reuse cannot transfer lifetime authority.
+
+Standalone servers omit this flag and retain their independent lifetime. This
+does not grant control over another process or authorize port-based PID killing.
+The Mac launcher still refuses an occupied foreign endpoint, with a bounded
+vacancy wait for a previous managed helper to finish. Existing durable room,
+pairing and account records are not removed by parent loss. Physical capture and
+TestFlight acceptance must name the newly embedded helper, not an older build.

@@ -105,6 +105,10 @@ use wifi_densepose_signal::ruvsense::pose_tracker::PoseTracker;
 #[derive(Parser, Debug)]
 #[command(name = "sensing-server", about = "WiFi-DensePose sensing server")]
 struct Args {
+    /// App-managed helper only: exit when this verified spawning parent ends.
+    #[arg(long)]
+    parent_pid: Option<u32>,
+
     /// HTTP port for UI and REST API
     #[arg(long, default_value = "8080")]
     http_port: u16,
@@ -14708,6 +14712,14 @@ async fn main() {
     let _telemetry = telemetry::init();
 
     let mut args = Args::parse();
+    let (_parent_lifetime_guard, parent_exit) =
+        match wifi_densepose_sensing_server::parent_lifetime::arm(args.parent_pid) {
+            Ok(lifetime) => lifetime,
+            Err(error) => {
+                eprintln!("Managed helper startup refused: {error}");
+                std::process::exit(2);
+            }
+        };
     if let Ok(scope) = std::env::var(wifi_densepose_sensing_server::bearer_auth::OWNER_ACCOUNT_SCOPE_ENV) {
         let directory = match wifi_densepose_sensing_server::account_profile::prepare_directory(&scope, &args.data_dir) {
             Ok(directory) => directory,
@@ -16258,10 +16270,13 @@ async fn main() {
 
     // Run the HTTP server with graceful shutdown support
     let shutdown_state = state.clone();
-    let server = axum::serve(http_listener, http_app.into_make_service_with_connect_info::<SocketAddr>()).with_graceful_shutdown(async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install CTRL+C handler");
+    let server = axum::serve(http_listener, http_app.into_make_service_with_connect_info::<SocketAddr>()).with_graceful_shutdown(async move {
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result.expect("failed to install CTRL+C handler"),
+            () = wifi_densepose_sensing_server::parent_lifetime::wait_for_exit(parent_exit) => {
+                info!("Managed parent ended; closing helper listeners");
+            }
+        }
         info!("Shutdown signal received");
     });
 
