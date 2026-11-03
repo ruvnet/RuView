@@ -715,19 +715,47 @@ fn test_harmonic_suppression_excludes_breathing_harmonic() {
     );
 
     // With a confident breathing estimate the harmonic is excluded and the
-    // surviving peak is the true heartbeat (or nothing, fail-closed).
+    // surviving peak must be the true heartbeat. `None` is a failure here:
+    // over-wide notches used to blank the whole band and pass this test.
     let (hr_suppressed, conf) = detector.extract_heartbeat(Some(fb_hz * 60.0), 0.9);
-    if let Some(bpm) = hr_suppressed {
-        assert!(
-            (bpm - true_hr_hz * 60.0).abs() < 6.0,
-            "with suppression the true heartbeat {:.1} BPM should win, got {:.1} BPM",
-            true_hr_hz * 60.0,
-            bpm
-        );
-        assert!(
-            conf >= 0.55,
-            "a surviving true-heartbeat peak should stay confident, got {conf:.2}"
-        );
+    let bpm = hr_suppressed.expect("suppression must not blank a resolvable true heartbeat");
+    assert!(
+        (bpm - true_hr_hz * 60.0).abs() < 4.0,
+        "with suppression the true heartbeat {:.1} BPM should win, got {:.1} BPM",
+        true_hr_hz * 60.0,
+        bpm
+    );
+    assert!(
+        conf >= 0.55,
+        "a surviving true-heartbeat peak should stay confident, got {conf:.2}"
+    );
+}
+
+/// Regression for over-wide notches: at common breathing rates the harmonic
+/// notches merged and left no heartbeat bin at all (e.g. 0 of 23 bins at
+/// 30 Hz with BR 10-15). A true heartbeat resolvable from every harmonic must
+/// still be reported at each frame rate.
+#[test]
+fn test_harmonic_suppression_keeps_heartbeat_band_open() {
+    // (breathing BPM, true HR BPM): HR sits >= 8 BPM from every harmonic,
+    // i.e. outside the 15 s window's mainlobe, so it is resolvable.
+    let cases = [(12.0, 90.0), (13.2, 60.0), (13.2, 72.0), (18.0, 60.0), (24.0, 60.0)];
+    for sample_rate in [10.0, 20.0, 30.0] {
+        for (br_bpm, hr_bpm) in cases {
+            let fb_hz = br_bpm / 60.0;
+            // Strongest in-band harmonic nearest the field-observed 1.76 Hz.
+            let k = (1.76 / fb_hz).round();
+            let mut detector = VitalSignDetector::new(sample_rate);
+            feed_mixed_heartbeat(&mut detector, k * fb_hz, hr_bpm / 60.0, sample_rate, 15.0);
+            let (hr, _) = detector.extract_heartbeat(Some(br_bpm), 0.9);
+            let hr = hr.unwrap_or_else(|| {
+                panic!("fs={sample_rate} BR={br_bpm}: heartbeat {hr_bpm} BPM was blanked")
+            });
+            assert!(
+                (hr - hr_bpm).abs() < 4.0,
+                "fs={sample_rate} BR={br_bpm}: expected {hr_bpm} BPM, got {hr:.1}"
+            );
+        }
     }
 }
 
