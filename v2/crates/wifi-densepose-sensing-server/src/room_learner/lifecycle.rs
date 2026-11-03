@@ -55,6 +55,9 @@ struct Inner {
     evaluation_warning: Option<String>,
     input_error: Option<String>,
     recovery: RecoveryState,
+    selection: selection_control::SelectionState,
+    qualification: Option<super::qualification::QualificationEnvelope>,
+    qualification_error: Option<String>,
 }
 pub struct RoomLearningRuntime {
     runtime_epoch: String,
@@ -162,6 +165,9 @@ impl RoomLearningRuntime {
                 evaluation_warning: None,
                 input_error: None,
                 recovery: RecoveryState::default(),
+                selection: selection_control::SelectionState::default(),
+                qualification: None,
+                qualification_error: None,
             }),
         };
         {
@@ -169,6 +175,7 @@ impl RoomLearningRuntime {
                 .inner
                 .lock()
                 .map_err(|_| "learner state unavailable")?;
+            runtime.restore_selection(&mut state);
             runtime.inspect_recovery(&mut state, runtime.receiver_now_ns());
         }
         Ok(runtime)
@@ -263,6 +270,20 @@ impl RoomLearningRuntime {
         state.last_evaluation = restored_evaluation;
         state.evaluation_warning = evaluation_warning;
         state.input_error = None;
+        state.qualification = None;
+        state.qualification_error = None;
+        if let Some(model)=state.model.clone() {
+            match self.store.load_latest_qualification(&model) {
+                Ok(q)=>{
+                    state.qualification=q;
+                    match self.store.load_latest_assessment(&model) {
+                        Ok(Some(a))=>state.qualification_error=a.receipt.failure_reason,
+                        Ok(None)=>{},Err(e)=>state.qualification_error=Some(bounded(e)),
+                    }
+                },
+                Err(e)=>state.qualification_error=Some(bounded(e)),
+            }
+        }
         self.checkpoint_recovery(&mut state, now_ns, true)?;
         Ok(())
     }
@@ -419,7 +440,8 @@ impl RoomLearningRuntime {
             "capture":state.capture.as_ref().map(|c|c.progress(now_ns)),
             "training_frozen":state.frozen_training,"training_defaults":FitConfig::for_source_count(state.capture.as_ref().map_or(0, |c| c.context().sources.len())),"training_report":state.job.report,
             "error":state.job.error,"input_error":state.input_error,
-            "candidate":state.receipt,"candidate_loaded":state.model.is_some(),
+            "candidate":state.receipt,"candidate_loaded":state.model.is_some(),"candidate_identity":self.candidate_identity(&state),
+            "model_selection":self.selection_status_locked(&state,now_ns,None),
             "last_evaluation":state.last_evaluation,"evaluation_warning":state.evaluation_warning,"physically_validated":false,
             "control_detector_changed":false,"raw_observations_persisted":state.recovery.derived_persisted(),"derived_samples_persisted":state.recovery.derived_persisted(),"raw_iq_persisted":false,
             "limitations":["receiver-observed magnitude path; no coherent phase claim",
@@ -453,3 +475,14 @@ mod evaluation_control;
 #[cfg(test)]
 #[path = "lifecycle_evaluation_tests.rs"]
 mod evaluation_tests;
+
+#[path = "lifecycle_selection.rs"]
+mod selection_control;
+
+#[cfg(test)]
+#[path="lifecycle_selection_tests.rs"]
+mod selection_tests;
+
+#[cfg(test)]
+#[path="lifecycle_assessment_tests.rs"]
+mod assessment_tests;

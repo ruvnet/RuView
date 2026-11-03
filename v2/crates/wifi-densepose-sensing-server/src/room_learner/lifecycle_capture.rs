@@ -80,7 +80,10 @@ impl RoomLearningRuntime {
         };
         let result = capture.ingest(frame, now_ns);
         if let Err(error) = &result {
+            capture.clear_live_windows();
             state.input_error = Some(bounded(error.clone()));
+        } else if capture.live_cohort(now_ns).is_ok() {
+            state.input_error = None;
         }
         let saved = self.checkpoint_recovery(&mut state, now_ns, false);
         result.and(saved)
@@ -95,6 +98,7 @@ impl RoomLearningRuntime {
             || packet.native_frame.provenance.class
                 != ruview_unified::frame::ProvenanceClass::Measured
         {
+            self.record_native_rejection(packet.source_id,&packet.grid_id,"synthetic/replayed native provenance");
             return Err("live managed capture rejects synthetic/replayed native provenance".into());
         }
         let mut state = self.inner.lock().map_err(|_| "learner state unavailable")?;
@@ -110,6 +114,10 @@ impl RoomLearningRuntime {
         if packet.native_frame.provenance.device_id != source.device_id
             || packet.native_frame.modality != source.signal_kind
         {
+            if packet.grid_id==source.grid_id && packet.frequency_hz==source.center_frequency_hz && packet.bandwidth_hz==source.bandwidth_hz {
+                capture.clear_live_windows();
+                state.input_error=Some("native RF provenance does not match the selected source".into());
+            }
             return Err("native RF provenance does not match the selected source".into());
         }
         // Another PHY class from the same receiver is not this selected source
@@ -131,7 +139,10 @@ impl RoomLearningRuntime {
             now_ns,
         );
         if let Err(error) = &result {
+            capture.clear_live_windows();
             state.input_error = Some(bounded(error.clone()));
+        } else if capture.live_cohort(now_ns).is_ok() {
+            state.input_error = None;
         }
         let saved = self.checkpoint_recovery(&mut state, now_ns, false);
         result.and(saved)
@@ -146,6 +157,7 @@ impl RoomLearningRuntime {
                     .iter()
                     .any(|s| s.source_id == source_id && s.grid_id == grid_id)
             }) {
+                if let Some(capture)=state.capture.as_mut() {capture.clear_live_windows();}
                 state.input_error = Some(bounded(format!(
                     "Node {source_id} native input rejected: {reason}"
                 )));

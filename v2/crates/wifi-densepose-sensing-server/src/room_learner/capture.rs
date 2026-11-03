@@ -135,6 +135,8 @@ impl CaptureSession {
             trials: HashMap::new(), sessions: HashMap::new() })
     }
 
+    /// A rejected selected input withdraws old live windows, not sealed training rows.
+    pub(crate) fn clear_live_windows(&mut self) { for source in self.sources.values_mut() { source.live.clear(); } }
     pub fn context(&self) -> &CaptureContext { &self.context }
     pub fn cohorts(&self) -> &[CaptureCohort] { &self.cohorts }
     pub fn history(&self) -> &[PhaseReceipt] { &self.history }

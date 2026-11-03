@@ -1,7 +1,7 @@
 //! Durable diagnostics only. Historical lineage checks are not current identity.
 use super::*;
 use crate::room_learner::artifact::EvaluationReceipt;
-fn presentation(
+pub(super) fn presentation(
     receipt: &EvaluationReceipt,
     restored: bool,
     current_train_checked: bool,
