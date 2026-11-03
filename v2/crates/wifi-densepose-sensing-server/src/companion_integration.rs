@@ -94,6 +94,7 @@ impl Integration {
             )
         };
         let room = companion_room::SharedRoomStore::load(&dir, &identity.installation_id)?;
+        state.write().await.current_room_store = Some(room.clone());
         let control = Control {
             state: state.clone(),
             serial: Arc::new(tokio::sync::Mutex::new(())),
@@ -229,7 +230,7 @@ fn bearer(request: &Request) -> Option<&str> {
     };
     Some(token)
 }
-async fn require_owner(State(auth): State<AuthState>, request: Request, next: Next) -> Response {
+pub(super) async fn require_owner(State(auth): State<AuthState>, request: Request, next: Next) -> Response {
     let local = request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
@@ -256,6 +257,7 @@ fn policy(method: &axum::http::Method, path: &str) -> Option<bool> {
                 | "/api/v1/pose/stats"
                 | "/api/v1/pose/zones/summary"
                 | "/api/v1/pose/activities"
+                | "/api/v1/room-learner/selection"
                 | "/api/v1/calibration/status"
                 | "/api/v1/pose/calibration/status"
                 | "/ws/sensing"
@@ -382,6 +384,13 @@ mod tests {
             assert_eq!(policy(&Method::POST, path), None, "{path}");
         }
         assert_eq!(policy(&Method::GET, "/ws/train/progress"), None);
+        assert_eq!(policy(&Method::GET, "/api/v1/room-learner/selection"), Some(false));
+        assert_eq!(policy(&Method::HEAD, "/api/v1/room-learner/selection"), Some(false));
+        assert_eq!(policy(&Method::GET, "/api/v1/room-learner/status"), None);
+        for path in ["/api/v1/room-learner/qualify", "/api/v1/room-learner/select", "/api/v1/room-learner/deselect", "/api/v1/room-learner/phase/cancel", "/api/v1/room-learner/train/cancel"] {
+            assert_eq!(policy(&Method::POST, path), None, "paired read/calibration grants cannot select: {path}");
+        }
+
     }
     #[tokio::test]
     async fn peer_composition_never_takes_the_calibration_lock_twice() {
