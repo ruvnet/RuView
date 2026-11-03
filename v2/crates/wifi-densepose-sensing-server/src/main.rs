@@ -3463,6 +3463,14 @@ mod edge_vitals_integrity_tests {
         assert_eq!(parsed.n_persons, 3);
         assert!(parsed.person_count_valid);
     }
+
+    // Moved from csi.rs, where it exercised an uncalled copy of the parser.
+    #[test]
+    fn out_of_range_count_fails_closed() {
+        let parsed = parse_esp32_vitals(&packet(true, 5)).expect("valid packet");
+        assert_eq!(parsed.n_persons, 0);
+        assert!(!parsed.person_count_valid);
+    }
 }
 
 // ── ADR-040: WASM Output Packet (magic 0xC511_0007 — reassigned per #928) ─────
@@ -16954,5 +16962,79 @@ mod issue_2088_data_dir_tests {
         let Json(v) = delete_model(State(state), Path("dd_model_2088".to_string())).await;
         assert_eq!(v["success"], true, "delete failed: {v}");
         assert!(!models_dir.join("dd_model_2088.rvf").exists());
+    }
+}
+
+#[cfg(test)]
+mod adr110_tests {
+    // Moved from csi.rs, where they exercised a copy of parse_esp32_frame that
+    // nothing called. Here they run against the parser the UDP path uses.
+    use super::*;
+    use crate::types::NodeState;
+    use wifi_densepose_hardware::PpduType;
+
+    /// Verbatim 532-byte HE-SU UDP payload captured live 2026-06-11 from an
+    /// ESP32-C6 (node 12, IDF v5.5): 256 subcarrier bins, byte18=0x01.
+    const HE_FRAME_HEX: &str = "010011c50c010001800900005a2d0000d8a9011000000000000000000000f70ef70ef50cf30bf209f108f006ef03ee02ee00eefdeffbeff8f0f7f1f4f2f3f4f1f5f0f7eef8edfaecfdecffeb01ea03ea05e908ea0aeb0deb0fec11ee13f015f216f318f519f71afa1bfd1bff1c021c051b071b0a1a0c190f1811161315161218101a0e1b0c1c091d071e041f0120ff20fc20f91ff71ff41ef11def1cec1be919e717e615e413e311e10edf0cde09dd06dc04dc01dcffdcfbdcf9ddf6def3dff0e0ede2eae4e8e6e6e8e4eae2ebe0eedef1dcf4dbf7dafad9fdd900d903d806d909d90cda0fdc12dc14dd17df1ae11ce31ee520e722e924ed25f127f328f629f929fd2900290329062809270c260e26122516061a00001c201c1f1a211722142411250e260c27082804280129fe29fb28f927f627f426f125ef23ec22ea20e81eea20e81e891b53a82951565d4ffafbfebe9abddb10222aa47b3b371fd2c0860cd4d86ea2f35faccd46b0b66f6ff0050f2da27d1c92f7f8e1017cb545afd3e3fe60db6f478dc85a33b3454cf6df9061194a0a0fc3e0eedf76f1d292cb25c8f541dfcc4109f9f1a34955520ad8ffa3694ac395cbf6c19073a4aefb1ebf47c76730458431805d9f18ff2e81955e8752b29757f66e289f72f8e35309a737547c040444cbda1a81d221d950037ec38fd9d1dd0f56c3dc707a7bbfe66ca5a97ab7cc17d68d38ba43a1806f91f5911a5967e2c9f7f07186";
+
+    /// Verbatim 148-byte HT payload from the same node seconds later:
+    /// 64 bins, byte18=0x00.
+    const HT_FRAME_HEX: &str = "010011c50c01400080090000662d0000b1a900100000000000000000fcfaf909f013f112f213f212f311f410f511f510f610f510f411f410f411f312f213f214f214f212f313f513f512f611f610f80ef90df90c0000010eff11fe13ff11fe1300000000ff01000001010002000200020204000301040103000400040002ff03ff03fe02fe02fe01fd00edfc03fa000000000000";
+
+    fn unhex(s: &str) -> Vec<u8> {
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn live_he_su_frame_parses_with_256_subcarriers() {
+        let buf = unhex(HE_FRAME_HEX);
+        assert_eq!(buf.len(), 532);
+        let f = parse_esp32_frame(&buf).expect("532-byte HE frame must parse");
+        assert_eq!(f.node_id, 12);
+        assert_eq!(f.n_subcarriers, 256);
+        assert_eq!(f.amplitudes.len(), 256);
+        assert_eq!(f.freq_mhz, 2432);
+        assert_eq!(f.sequence, 11610);
+        assert_eq!(f.rssi, -40);
+        assert_eq!(f.noise_floor, -87);
+        assert_eq!(f.ppdu_type, PpduType::HeSu);
+    }
+
+    #[test]
+    fn live_ht_frame_parses_with_64_subcarriers() {
+        let buf = unhex(HT_FRAME_HEX);
+        assert_eq!(buf.len(), 148);
+        let f = parse_esp32_frame(&buf).expect("148-byte HT frame must parse");
+        assert_eq!(f.node_id, 12);
+        assert_eq!(f.n_subcarriers, 64);
+        assert_eq!(f.amplitudes.len(), 64);
+        assert_eq!(f.rssi, -79);
+        assert_eq!(f.ppdu_type, PpduType::HtLegacy);
+    }
+
+    #[test]
+    fn grid_gate_never_mixes_ht_and_he_windows() {
+        let he = parse_esp32_frame(&unhex(HE_FRAME_HEX)).unwrap();
+        let ht = parse_esp32_frame(&unhex(HT_FRAME_HEX)).unwrap();
+        let mut ns = NodeState::new();
+
+        // First frame locks the grid.
+        assert!(ns.accept_grid(ht.grid()));
+        ns.frame_history.push_back(ht.amplitudes.clone());
+
+        // HE upgrade: accepted, denser grid wins, history re-keyed.
+        assert!(ns.accept_grid(he.grid()));
+        assert!(ns.frame_history.is_empty(), "upgrade must clear HT history");
+        ns.frame_history.push_back(he.amplitudes.clone());
+
+        // Interleaved HT minority frames are rejected from the feature path.
+        assert!(!ns.accept_grid(ht.grid()));
+        assert_eq!(ns.frame_history.len(), 1, "HT frame must not touch window");
+
+        // Steady-state HE frames keep flowing.
+        assert!(ns.accept_grid(he.grid()));
     }
 }
