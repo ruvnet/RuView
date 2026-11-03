@@ -397,3 +397,17 @@ pub(super) fn phase_override(
         .unwrap();
     at + 12_000_000_000
 }
+
+#[test]
+fn held_out_duration_defaults_are_short_and_leave_training_empty_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let rt = runtime(dir.path());
+    let status = rt.status(START);
+    assert_eq!(status["phase_duration_defaults"]["Empty"], 600_000);
+    for label in ["Empty", "OccupiedStatic", "OccupiedMoving", "AdjacentOnly"] {
+        assert_eq!(status["held_out_phase_duration_defaults"][label], 12_000);
+    }
+    assert_eq!(status["phase_duration_defaults"]["OccupiedStatic"], 12_000);
+    assert_eq!(crate::room_learner::capture::COHORTS_PER_PHASE, 4);
+    assert_eq!(crate::room_learner::capture::MIN_PHASE_MS, 12_000);
+}

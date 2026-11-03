@@ -431,6 +431,7 @@ impl RoomLearningRuntime {
             "candidate_prediction":prediction,"training_manifest":state.model.as_ref().map(|m|m.training_manifest()),
             "phase_history":state.capture.as_ref().map(|c|c.history()),
             "phase_duration_defaults":{"Empty":600000,"OccupiedStatic":12000,"OccupiedMoving":12000,"AdjacentOnly":12000},
+            "held_out_phase_duration_defaults":{"Empty":12000,"OccupiedStatic":12000,"OccupiedMoving":12000,"AdjacentOnly":12000},
             "phase_lead_in_defaults":{"Empty":15000,"OccupiedStatic":5000,"OccupiedMoving":5000,"AdjacentOnly":15000},
             "untrained_capture_progress_is_volatile":!state.recovery.enabled || state.recovery.error.is_some(),"recovery":self.recovery_status(&state, now_ns),
             "generation":state.generation,"state":state.job.phase,"context_digest":state.capture.as_ref().map(|c|c.context().digest()),

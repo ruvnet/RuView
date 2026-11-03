@@ -8,6 +8,10 @@ use super::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+const PERCENT_SCALE: u128 = 100;
+const MIN_SENSITIVITY_PERCENT: u128 = 90;
+const MAX_FALSE_POSITIVE_PERCENT: u128 = 5;
+const MIN_COVERAGE_PERCENT: u128 = 90;
 pub const POLICY_ID: &str = "ruview.local-operational-policy.v1";
 pub(crate) fn hash<T: Serialize>(value: &T) -> Result<String, String> {
     Ok(format!(
@@ -20,9 +24,9 @@ pub(crate) fn hash<T: Serialize>(value: &T) -> Result<String, String> {
 pub struct QualificationPolicy {
     pub id: String,
     pub minimum_cohorts_per_condition: usize,
-    pub minimum_unconditional_sensitivity: f32,
-    pub maximum_false_positive_rate: f32,
-    pub minimum_evaluated_cohort_coverage: f32,
+    pub minimum_unconditional_sensitivity: f64,
+    pub maximum_false_positive_rate: f64,
+    pub minimum_evaluated_cohort_coverage: f64,
     pub coverage_scope: String,
 }
 impl Default for QualificationPolicy {
@@ -30,9 +34,10 @@ impl Default for QualificationPolicy {
         Self {
             id: POLICY_ID.into(),
             minimum_cohorts_per_condition: 4,
-            minimum_unconditional_sensitivity: 0.9,
-            maximum_false_positive_rate: 0.05,
-            minimum_evaluated_cohort_coverage: 0.9,
+            minimum_unconditional_sensitivity: MIN_SENSITIVITY_PERCENT as f64
+                / PERCENT_SCALE as f64,
+            maximum_false_positive_rate: MAX_FALSE_POSITIVE_PERCENT as f64 / PERCENT_SCALE as f64,
+            minimum_evaluated_cohort_coverage: MIN_COVERAGE_PERCENT as f64 / PERCENT_SCALE as f64,
             coverage_scope: "representative_cohorts_not_wall_time".into(),
         }
     }
@@ -43,9 +48,9 @@ pub struct ConditionCriterion {
     pub condition: RoomLabel,
     pub train_cohorts: usize,
     pub held_out_cohorts: usize,
-    pub evaluated_cohort_coverage: f32,
-    pub unconditional_sensitivity: Option<f32>,
-    pub false_positive_rate: Option<f32>,
+    pub evaluated_cohort_coverage: f64,
+    pub unconditional_sensitivity: Option<f64>,
+    pub false_positive_rate: Option<f64>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -109,26 +114,33 @@ pub(crate) fn criteria(
                     "qualification requires four Train and HeldOut cohorts for {label:?}"
                 ));
             }
-            let coverage = c
-                .rates
+            // The diagnostic report remains f32. Operational public rates are
+            // computed from validated integer counts so JSON Value/JS widening
+            // cannot turn exact 90% or 5% boundaries into rejection.
+            c.rates
                 .evaluated_cohort_coverage
                 .ok_or("held-out coverage unavailable")?;
-            if !coverage.is_finite() || coverage < policy.minimum_evaluated_cohort_coverage {
+            let coverage = c.scored as f64 / c.samples as f64;
+            if (c.scored as u128) * PERCENT_SCALE < (c.samples as u128) * MIN_COVERAGE_PERCENT {
                 return Err(format!("held-out coverage failed for {label:?}"));
             }
             let occupied = matches!(label, RoomLabel::OccupiedStatic | RoomLabel::OccupiedMoving);
             let (sensitivity, false_positive) = if occupied {
-                let s = c
-                    .rates
+                c.rates
                     .unconditional_sensitivity
                     .ok_or("occupied sensitivity unavailable")?;
-                if !s.is_finite() || s < policy.minimum_unconditional_sensitivity {
+                let s = c.confusion.true_occupied as f64 / c.samples as f64;
+                if (c.confusion.true_occupied as u128) * PERCENT_SCALE
+                    < (c.samples as u128) * MIN_SENSITIVITY_PERCENT
+                {
                     return Err(format!("occupied sensitivity failed for {label:?}"));
                 }
                 (Some(s), None)
             } else {
-                let f = c.confusion.false_occupied as f32 / c.samples as f32;
-                if !f.is_finite() || f > policy.maximum_false_positive_rate {
+                let f = c.confusion.false_occupied as f64 / c.samples as f64;
+                if (c.confusion.false_occupied as u128) * PERCENT_SCALE
+                    > (c.samples as u128) * MAX_FALSE_POSITIVE_PERCENT
+                {
                     return Err(format!("false presence failed for {label:?}"));
                 }
                 (None, Some(f))
@@ -360,3 +372,7 @@ impl QualificationEnvelope {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "qualification_boundary_tests.rs"]
+mod boundary_tests;
