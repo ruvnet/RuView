@@ -5,7 +5,7 @@ use super::{
     capture::{CaptureSession, PhaseReceipt, PhaseRequest, RawSourceFrame},
     model::{RoomModel, RoomPrediction},
     observation::{CaptureContext, DataRole, RoomLabel},
-    training::{EvaluationReport, FitConfig, TrainingReport},
+    training::{FitConfig, TrainingReport},
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -52,6 +52,7 @@ struct Inner {
     frozen_training: bool,
     job: Job,
     last_evaluation: Option<Value>,
+    evaluation_warning: Option<String>,
     input_error: Option<String>,
 }
 pub struct RoomLearningRuntime {
@@ -98,6 +99,7 @@ impl RoomLearningRuntime {
                 frozen_training: false,
                 job: Job::default(),
                 last_evaluation: None,
+                evaluation_warning: None,
                 input_error: None,
             }),
         })
@@ -141,6 +143,14 @@ impl RoomLearningRuntime {
                 "no stored candidate for this exact context; start a new training capture".into(),
             );
         }
+        let (restored_evaluation, evaluation_warning) = if !new_training {
+            restored
+                .as_ref()
+                .map(|model| self.restored_evaluation(model))
+                .unwrap_or((None, None))
+        } else {
+            (None, None)
+        };
         state.generation = state
             .generation
             .checked_add(1)
@@ -157,7 +167,8 @@ impl RoomLearningRuntime {
         if state.model.is_some() {
             state.job.phase = JobPhase::Ready;
         }
-        state.last_evaluation = None;
+        state.last_evaluation = restored_evaluation;
+        state.evaluation_warning = evaluation_warning;
         state.input_error = None;
         Ok(())
     }
@@ -259,38 +270,6 @@ impl RoomLearningRuntime {
             .live_cohort(now_ns)?;
         Ok((self.guard_for(&state), model.infer(&cohort)))
     }
-    /// Evaluation does not mutate model parameters and never promotes physical
-    /// authority. The held-out result is a candidate diagnostic, not a certificate.
-    pub fn evaluate(&self, expected: &MutationGuard, role: DataRole) -> Result<Value, String> {
-        if !matches!(role, DataRole::Validation | DataRole::HeldOut) {
-            return Err("evaluate only validation or held-out data".into());
-        }
-        let mut state = self.command_state(expected)?;
-        if busy(&state.job) {
-            return Err("wait for the frozen candidate".into());
-        }
-        let model = state.model.as_ref().ok_or("no frozen candidate")?;
-        let capture = state.capture.as_ref().ok_or("no capture context")?;
-        if capture.phase_active() {
-            return Err("finish the current phase before evaluation".into());
-        }
-        let dataset = capture.validated_dataset()?;
-        let rows = if role == DataRole::HeldOut {
-            dataset.held_out()
-        } else {
-            dataset.validation()
-        };
-        if rows.is_empty() {
-            return Err("no independent rows for the selected evaluation role".into());
-        }
-        let report: EvaluationReport = model.evaluate(rows)?;
-        let result = json!({"schema":"ruview.room-learner.evaluation.v1","role":role,
-            "context_digest":capture.context().digest(),"report":report,
-            "measurement_clock_available":dataset.measurement_clock_available(),
-            "physically_validated":false,"adoption_authorized":false});
-        state.last_evaluation = Some(result.clone());
-        Ok(result)
-    }
     pub fn status(&self, now_ns: u64) -> Value {
         let Ok(state) = self.inner.lock() else {
             return json!({"enabled":true,"state":"unavailable"});
@@ -335,7 +314,7 @@ impl RoomLearningRuntime {
             "training_frozen":state.frozen_training,"training_defaults":FitConfig::for_source_count(state.capture.as_ref().map_or(0, |c| c.context().sources.len())),"training_report":state.job.report,
             "error":state.job.error,"input_error":state.input_error,
             "candidate":state.receipt,"candidate_loaded":state.model.is_some(),
-            "last_evaluation":state.last_evaluation,"physically_validated":false,
+            "last_evaluation":state.last_evaluation,"evaluation_warning":state.evaluation_warning,"physically_validated":false,
             "control_detector_changed":false,"raw_observations_persisted":false,
             "limitations":["receiver-observed magnitude path; no coherent phase claim",
                 "legacy UDP transmitter identity is unverified","independent teacher registry not configured",
@@ -353,3 +332,10 @@ mod capture_control;
 #[path = "command.rs"]
 mod command;
 pub use command::{MutationGuard, PhaseIdentity};
+
+#[path = "lifecycle_evaluation.rs"]
+mod evaluation_control;
+
+#[cfg(test)]
+#[path = "lifecycle_evaluation_tests.rs"]
+mod evaluation_tests;

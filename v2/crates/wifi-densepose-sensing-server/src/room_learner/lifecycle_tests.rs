@@ -6,8 +6,8 @@ use crate::room_learner::{
 };
 use ruview_unified::RfModality;
 use std::time::{Duration, Instant};
-const START: u64 = 1_000_000_000_000;
-fn context() -> CaptureContext {
+pub(super) const START: u64 = 1_000_000_000_000;
+pub(super) fn context() -> CaptureContext {
     CaptureContext {
         owner_scope: "a".repeat(64),
         installation_id: "synthetic-install".into(),
@@ -29,7 +29,7 @@ fn context() -> CaptureContext {
             .collect(),
     }
 }
-fn runtime(root: &Path) -> Arc<RoomLearningRuntime> {
+pub(super) fn runtime(root: &Path) -> Arc<RoomLearningRuntime> {
     Arc::new(
         RoomLearningRuntime::new(
             &root.join("a".repeat(64)).join("SensingServer"),
@@ -39,7 +39,7 @@ fn runtime(root: &Path) -> Arc<RoomLearningRuntime> {
         .unwrap(),
     )
 }
-fn phase(rt: &RoomLearningRuntime, role: DataRole, label: RoomLabel, index: u32) -> u64 {
+pub(super) fn phase(rt: &RoomLearningRuntime, role: DataRole, label: RoomLabel, index: u32) -> u64 {
     let at = START + u64::from(index) * 13_000_000_000;
     rt.begin_phase(
         &rt.mutation_guard().unwrap(),
@@ -98,7 +98,7 @@ fn phase(rt: &RoomLearningRuntime, role: DataRole, label: RoomLabel, index: u32)
     .unwrap();
     at + MIN_PHASE_MS * 1_000_000
 }
-fn train_phases(rt: &RoomLearningRuntime) {
+pub(super) fn train_phases(rt: &RoomLearningRuntime) {
     for (index, label) in [
         RoomLabel::Empty,
         RoomLabel::OccupiedStatic,
@@ -111,7 +111,7 @@ fn train_phases(rt: &RoomLearningRuntime) {
         phase(rt, DataRole::Train, label, index as u32);
     }
 }
-async fn finished(rt: &RoomLearningRuntime) -> Value {
+pub(super) async fn finished(rt: &RoomLearningRuntime) -> Value {
     let start = Instant::now();
     loop {
         let s = rt.status(START + 60_000_000_000);
@@ -209,9 +209,7 @@ async fn real_capture_train_private_store_cold_load_and_unlabelled_inference_com
     let (_, prediction) = cold.prediction(START + 100_080_000_000).unwrap();
     assert!(prediction.occupied_probability.is_some());
     assert!(!prediction.physically_validated);
-    assert!(!serde_json::to_string(&cold.status(START))
-        .unwrap()
-        .contains("samples"));
+    super::evaluation_tests::assert_no_raw_observation_arrays(&cold.status(START));
 }
 #[tokio::test]
 async fn cancellation_and_context_replacement_cannot_publish_a_late_model() {
