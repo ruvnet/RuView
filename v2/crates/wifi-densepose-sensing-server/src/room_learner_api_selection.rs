@@ -143,6 +143,7 @@ pub(crate) async fn selection(State(state): State<SharedState>) -> Json<serde_js
     let state = state.read().await;
     Json(
         serde_json::json!({"schema":"ruview.room-learner.selection.v1","success":true,
+        "progress_schema":"ruview.room-learner.progress.v1",
         "model_selection":selection_snapshot(&state, &rt, now_ns(&rt))}),
     )
 }

@@ -16488,6 +16488,7 @@ async fn main() {
         // Mutations remain behind the existing default-admin bearer policy.
         .route("/api/v1/room-learner/status", get(room_learner_api::status))
         .route("/api/v1/room-learner/selection", get(room_learner_api::selection))
+        .route("/api/v1/room-learner/progress", get(room_learner_api::progress))
         .merge(room_learner_api::owner_selection_routes(bearer_auth_state.clone()))
         .route("/api/v1/room-learner/configure", post(room_learner_api::configure))
         .route("/api/v1/room-learner/phase/start", post(room_learner_api::begin_phase))
