@@ -193,6 +193,10 @@ async fn actual_selected_composer_withdraws_without_fallback_and_never_grants_au
         "training_samples",
         "head_weights",
         "geometry",
+        "last_accepted_sequence",
+        "last_observed_sequence",
+        "sequence_rejection_count",
+        "sequence_rejection_reason",
     ] {
         assert!(
             !serialized.contains(forbidden),

@@ -518,3 +518,45 @@ fn native_rejection_diagnostics_are_context_bound_bounded_and_not_admission() {
     assert_eq!(status["capture"]["sources"][0]["admitted_packets"],0);
     assert_eq!(status["physically_validated"],false);
 }
+
+#[test]
+fn protected_progress_explains_rejections_without_advancing_admission_or_live_authority() {
+    let dir = tempfile::tempdir().unwrap();
+    let rt = runtime(dir.path());
+    rt.configure(&rt.mutation_guard().unwrap(), context(), "synthetic-sequence-diagnostics".into(), true).unwrap();
+    let values = vec![2.0; 8];
+    let input = |source_id, sequence| RawSourceFrame {
+        source_id, grid_id: "ht64-canonical8", frequency_hz: 2_437_000_000,
+        bandwidth_hz: 20_000_000, sequence, amplitudes: &values,
+    };
+    for sample in 0..8 {
+        for source in 1..=2 {
+            rt.ingest(input(source, 100 + sample), START + 1 + u64::from(sample) * 10_000_000 + u64::from(source)).unwrap();
+        }
+    }
+    assert!(rt.status(START + 80_000_000)["capture"]["sources"].as_array().unwrap().iter().all(|s| s["window_eligible"] == true));
+    assert!(rt.ingest(input(1, 1), START + 90_000_000).is_err());
+    let status = rt.status(START + 90_000_000);
+    let source = &status["capture"]["sources"][0];
+    assert_eq!(source["last_accepted_sequence"], 107);
+    assert_eq!(source["last_observed_sequence"], 1);
+    assert_eq!(source["sequence_rejection_count"], 1);
+    assert_eq!(source["sequence_rejection_reason"], "reversed");
+    assert_eq!(source["admitted_packets"], 8);
+    assert!(status["capture"]["sources"].as_array().unwrap().iter().all(|s| s["live_buffer_frames"] == 0 && s["window_eligible"] == false));
+    assert_eq!(status["input_error"], "replayed or reversed source sequence");
+    let json = serde_json::to_string(&status["capture"]).unwrap();
+    for raw in ["samples", "amplitudes", "frame_ids", "sequence_ids"] {
+        assert!(!json.contains(raw));
+    }
+    for sample in 0..8 {
+        for source in 1..=2 {
+            rt.ingest(input(source, 108 + sample), START + 100_000_000 + u64::from(sample) * 10_000_000 + u64::from(source)).unwrap();
+        }
+    }
+    let fresh = rt.status(START + 180_000_000);
+    assert!(fresh["input_error"].is_null());
+    assert_eq!(fresh["capture"]["sources"][0]["sequence_rejection_count"], 1);
+    assert!(fresh["capture"]["sources"][0]["sequence_rejection_reason"].is_null());
+    assert!(fresh["capture"]["sources"].as_array().unwrap().iter().all(|s| s["last_accepted_sequence"] == 115 && s["last_observed_sequence"] == 115 && s["window_eligible"] == true));
+}

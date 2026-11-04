@@ -175,6 +175,7 @@ impl CaptureSession {
                     last_time_ns: watermark.last_time_ns,
                     admitted_packets: watermark.admitted_packets,
                     live: VecDeque::new(),
+                    ..SourceBuffer::default()
                 },
             );
         }
