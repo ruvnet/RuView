@@ -50,6 +50,7 @@ impl RoomLearningRuntime {
         now_ns: u64,
     ) -> Result<(), String> {
         let mut state = self.command_state(expected)?;
+        self.expire_loaded_recovery(&mut state, now_ns)?;
         self.require_recovery_ready(&state)?;
         if busy(&state.job) {
             return Err("training is active".into());
@@ -63,6 +64,12 @@ impl RoomLearningRuntime {
             return Err(
                 "held-out capture starts only after a candidate is trained or restored".into(),
             );
+        }
+        if request.role==DataRole::HeldOut {
+            let readiness=self.qualification_readiness_locked(&state,now_ns);
+            if readiness["eligible_for_held_out"]!=true {
+                return Err(readiness["detail"].as_str().unwrap_or("managed training lineage unavailable before held-out capture").into());
+            }
         }
         state
             .capture
@@ -171,6 +178,7 @@ impl RoomLearningRuntime {
         conditions_held: bool,
     ) -> Result<PhaseReceipt, String> {
         let mut state = self.command_state(expected)?;
+        self.expire_loaded_recovery(&mut state, now_ns)?;
         let recovered_complete = state.recovery.disposition
             == Some(
                 crate::room_learner::capture::RecoveryPhaseDisposition::CompletedNeedsConfirmation,
@@ -189,7 +197,18 @@ impl RoomLearningRuntime {
         if recovered_complete {
             capture.live_cohort(now_ns)?;
         }
-        let receipt = capture.finish_phase(now_ns)?;
+        // A phase is not published as sealed until its metadata-only replay
+        // fence is durable. Failure leaves the complete original phase retryable.
+        let mut completed=capture.clone();
+        let receipt=completed.finish_phase(now_ns)?;
+        if let Some(model)=state.model.as_ref() {
+            if let Some(proof)=self.store.load_managed_training_proof(model)? {
+                completed.checkpoint(now_ns)?;
+                let seed=completed.managed_fence_seed(&proof)?;
+                self.store.save_managed_capture_fence(model,&proof,seed)?;
+            }
+        }
+        state.capture=Some(completed);
         state.recovery.disposition = None;
         self.checkpoint_recovery(&mut state, now_ns, true)?;
         Ok(receipt)

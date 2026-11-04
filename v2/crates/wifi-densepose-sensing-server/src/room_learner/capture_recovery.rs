@@ -14,6 +14,8 @@ pub struct CaptureCheckpoint {
     cohorts: Vec<CaptureCohort>,
     history: Vec<PhaseReceipt>,
     phase: Option<CheckpointPhase>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    metadata_lineage: Option<crate::room_learner::managed_training::TrainingProofSeed>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -114,7 +116,7 @@ impl CaptureCheckpoint {
 impl CaptureSession {
     pub fn checkpoint(&self, now_ns: u64) -> Result<CaptureCheckpoint, String> {
         let snapshot = CaptureCheckpoint {
-            schema: SCHEMA.into(),
+            schema: if self.metadata_lineage.is_some() {"ruview.room-learner.capture-checkpoint.v2"} else {SCHEMA}.into(),
             context: self.context.clone(),
             run_id: self.run_id.clone(),
             saved_at_ns: now_ns,
@@ -136,6 +138,7 @@ impl CaptureSession {
                 .collect(),
             cohorts: self.cohorts.clone(),
             history: self.history.clone(),
+            metadata_lineage: self.metadata_lineage.clone(),
             phase: self.phase.as_ref().map(|p| CheckpointPhase {
                 request: p.request.clone(),
                 started_ns: p.started_ns,
@@ -158,6 +161,7 @@ impl CaptureSession {
         session.last_seen_ns = snapshot.last_seen_ns;
         session.cohorts = snapshot.cohorts;
         session.history = snapshot.history;
+        session.metadata_lineage = snapshot.metadata_lineage;
         for receipt in &session.history {
             session
                 .trials
@@ -175,6 +179,7 @@ impl CaptureSession {
                     last_time_ns: watermark.last_time_ns,
                     admitted_packets: watermark.admitted_packets,
                     live: VecDeque::new(),
+                    ..SourceBuffer::default()
                 },
             );
         }
@@ -244,19 +249,28 @@ impl CaptureSession {
 impl CaptureCheckpoint {
     fn validate(&self, expected: &CaptureContext, now_ns: u64) -> Result<(), String> {
         self.context.validate()?;
-        if self.schema != SCHEMA
+        if let Some(seed)=&self.metadata_lineage {seed.validate()?;}
+        let lineage_offset=self.metadata_lineage.as_ref().map_or(0,|s|s.phase_claims.len());
+        let expected_schema=if self.metadata_lineage.is_some() {"ruview.room-learner.capture-checkpoint.v2"} else {SCHEMA};
+        if self.schema != expected_schema
             || &self.context != expected
             || self.saved_at_ns == 0
             || self.saved_at_ns > now_ns
             || self.last_seen_ns > self.saved_at_ns
             || self.sources.len() != self.context.sources.len()
-            || self.history.len() > MAX_PHASE_HISTORY
-            || (self.phase.is_some() && self.history.len() >= MAX_PHASE_HISTORY)
-            || self.cohorts.len() > MAX_COHORTS
+            || self.history.len()+lineage_offset > MAX_PHASE_HISTORY
+            || (self.phase.is_some() && self.history.len()+lineage_offset >= MAX_PHASE_HISTORY)
+            || self.cohorts.len()+self.metadata_lineage.as_ref().map_or(0,|s|s.phase_claims.iter().map(|p|p.cohort_count).sum::<usize>()) > MAX_COHORTS
         {
             return Err("invalid recovery context, time or capacity".into());
         }
         let session = CaptureSession::new(self.context.clone(), self.run_id.clone())?;
+        if let Some(seed)=&self.metadata_lineage {
+            seed.validate()?;
+            if seed.context!=self.context || seed.run_id!=self.run_id || seed.last_seen_ns>self.last_seen_ns {
+                return Err("recovery managed lineage context/namespace mismatch".into());
+            }
+        }
         let mut latest = 0;
         for (w, spec) in self.sources.iter().zip(&self.context.sources) {
             if w.source_id != spec.source_id
@@ -270,6 +284,13 @@ impl CaptureCheckpoint {
             {
                 return Err("invalid source recovery watermark".into());
             }
+            if let Some(seed)=&self.metadata_lineage {
+                let original=seed.sources.iter().find(|s|s.source_id==w.source_id).ok_or("missing original recovery source")?;
+                if w.ordinal<original.ordinal || w.last_time_ns<original.last_time_ns || w.admitted_packets<original.admitted_packets
+                    || w.sequence.map(|s|s.wrapping_sub(original.sequence))!=Some((w.ordinal-original.ordinal) as u32) {
+                    return Err("recovery source counter regressed from managed training proof".into());
+                }
+            }
             latest = latest.max(w.last_time_ns);
         }
         if latest != self.last_seen_ns {
@@ -281,6 +302,7 @@ impl CaptureCheckpoint {
             |trial: &String, capture_session: &String, role: DataRole| -> Result<(), String> {
                 identifier(trial)?;
                 identifier(capture_session)?;
+                if let Some(seed)=&self.metadata_lineage {seed.check_role(trial,capture_session,role)?;}
                 if role == DataRole::Inference
                     || trials
                         .insert(trial.clone(), role)
@@ -325,7 +347,7 @@ impl CaptureCheckpoint {
             for c in &p.representatives {
                 let bucket = (0..COHORTS_PER_PHASE)
                     .find(|b| {
-                        c.id == format!("{}-phase-{}-bucket-{b}", self.run_id, self.history.len())
+                        c.id == format!("{}-phase-{}-bucket-{b}", self.run_id, self.history.len()+lineage_offset)
                     })
                     .ok_or("invalid provisional cohort identity")?;
                 if previous_bucket.is_some_and(|b| b >= bucket)
@@ -353,6 +375,7 @@ impl CaptureCheckpoint {
             .filter(|(_, r)| r.status == PhaseStatus::Sealed)
         {
             for bucket in 0..COHORTS_PER_PHASE {
+                let index=index+lineage_offset;
                 let id = format!("{}-phase-{index}-bucket-{bucket}", self.run_id);
                 let c = self
                     .cohorts
@@ -374,7 +397,8 @@ impl CaptureCheckpoint {
         }
         let mut frames = HashSet::new();
         for c in &all {
-            if c.provenance != CaptureProvenance::LiveReceiverObserved || c.teacher.is_some() {
+            if c.provenance != CaptureProvenance::LiveReceiverObserved || c.teacher.is_some()
+                || (self.metadata_lineage.is_some() && c.role==DataRole::Train) {
                 return Err("recovery requires original managed capture provenance".into());
             }
             for v in &c.views {
@@ -390,6 +414,12 @@ impl CaptureCheckpoint {
                     || v.phase != PhaseAvailability::MagnitudeOnly
                 {
                     return Err("invalid reduced recovery source window".into());
+                }
+                if let Some(seed)=&self.metadata_lineage {
+                    let old=seed.sources.iter().find(|s|s.source_id==v.source_id).ok_or("unknown original source")?;
+                    if v.first_time_ns<=old.last_time_ns || v.sequence_ids.iter().any(|n|*n<=old.ordinal) {
+                        return Err("recovered cohort overlaps original managed Train capture".into());
+                    }
                 }
                 for (frame, ordinal) in v.frame_ids.iter().zip(&v.sequence_ids) {
                     let expected = (u128::from(session.prefix) << 64)

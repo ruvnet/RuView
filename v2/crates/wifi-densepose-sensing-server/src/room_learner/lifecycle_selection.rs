@@ -24,10 +24,10 @@ impl RoomLearningRuntime {
             if let Some(target) = &envelope.receipt.selected {
                 let (model, q) = self.store.resolve_selection_target(target)?;
                 let model = Arc::new(model);
-                state.capture = Some(CaptureSession::new(
-                    target.context.clone(),
-                    format!("selected-{}", envelope.receipt.revision),
-                )?);
+                state.capture = Some(if let Some(proof)=self.store.load_managed_training_proof(&model)? {
+                    let fence=self.store.load_managed_capture_fence(&model,&proof)?;
+                    CaptureSession::resume_managed_fence(&proof,&fence)?
+                } else {CaptureSession::new(target.context.clone(),format!("selected-{}",envelope.receipt.revision))?});
                 state.model = Some(model.clone());
                 state.frozen_training = true;
                 state.job.phase = JobPhase::Ready;
@@ -59,14 +59,24 @@ impl RoomLearningRuntime {
                 .store
                 .evaluate_candidate(&model, &dataset, DataRole::HeldOut)?;
             // Incomplete data or missing lineage is not a completed failed assessment.
-            let evidence = crate::room_learner::qualification::managed_evidence(
+            let proof=self.store.load_managed_training_proof(&model)?;
+            let fence=if let Some(proof)=&proof {
+                let fence=self.store.load_managed_capture_fence(&model,proof)?;
+                let current=capture.managed_fence_seed(proof)?;
+                current.ensure_extends(&fence.seed)?;
+                if current.phase_claims!=fence.seed.phase_claims {return Err("managed sealed phases are not durably published".into());}
+                Some(fence)
+            } else {None};
+            let evidence = crate::room_learner::qualification::managed_evidence_with_fence(
                 &model,
                 &dataset,
                 capture.history(),
                 &evaluation,
+                proof.as_ref(),
+                fence.as_ref().map(|f|f.fence_sha256.as_str()),
             )?;
             let outcome =
-                QualificationEnvelope::issue(&model, &dataset, capture.history(), &evaluation);
+                QualificationEnvelope::issue_with_proof(&model, &dataset, capture.history(), &evaluation,proof.as_ref(),fence.as_ref().map(|f|f.fence_sha256.as_str()));
             let assessment = crate::room_learner::assessment::AssessmentEnvelope::issue(
                 &model,
                 &evaluation,
@@ -76,7 +86,7 @@ impl RoomLearningRuntime {
             state.last_evaluation = Some(super::evaluation_control::presentation(
                 &evaluation,
                 false,
-                true,
+                !dataset.train().is_empty(),
             )?);
             state.evaluation_warning = None;
             if let Ok(q) = &outcome {

@@ -308,3 +308,99 @@ from source CI, packaged native verification and end-user validation.
 - [ ] Agree an adoption/rollback policy before enabling candidate authority.
 - [ ] Validate reference clock/coverage/registration and optional derived teachers.
 - [ ] Measure spatial, multi-source and reference benefit against frozen controls.
+
+## November 4 amendment: durable managed training and sealed-phase fences
+
+**Updated:** 2026-11-04. This extension is implemented in the source candidate;
+the ADR remains Proposed. Software fixtures do not qualify a room, reference
+sensor, delivered app or transmitter epoch.
+
+A v1 training manifest preserves the original Train SHA, total count and input
+claims. It does not prove four managed, operator-sealed Train cohorts for every
+condition. A stored v1 model without retained exact Train rows therefore remains
+diagnostic: new HeldOut data alone cannot recover its missing training history.
+Do not infer counts from the total, create acknowledgements from operator
+recollections, or inspect expired encrypted samples to manufacture a proof.
+
+At successful managed fit, freeze a metadata-only seed while the actual native
+Train rows and phase receipts are still available. Validate the exact original
+Train SHA, four cohorts per required condition, unique sealed phase matches,
+receiver-observed frame namespace, source ordinal/time ranges and original wire
+counter watermarks. Bind this seed to the exact exported model SHA, complete
+owner/installation/context contract, source/PHY contract, and domain-separated
+trial/session role commitments. Store its immutable private proof and initial
+sealed-phase fence, fsync and verify readback **before** publishing the candidate
+pointer. Generic fitter/model-import persistence cannot issue this proof.
+Retries reuse the first committed metadata, not later receive times.
+
+The proof contains no RF feature values, IQ, camera/depth frames or raw frame
+lists. Metadata includes source counter/range bounds and hashed phase identities.
+It uses the existing owner-private artifact directory, regular-file protections,
+immutable hashes and durability primitives. This is integrity under the private
+filesystem trust boundary, not a hardware signature or authenticated RF-source
+attestation. A fully privileged local writer is outside that boundary.
+
+Fit-time fences alone are insufficient after later evaluations. Before a
+post-fit phase becomes Sealed in RAM or its finish is acknowledged, commit a
+bounded immutable metadata record and atomic verified ledger head. The record
+extends the original model/proof identity, phase commitments and per-source
+sequence/ordinal/receiver-time floors. Publish one newly sealed phase per link;
+include no RF values. An I/O failure keeps the complete original phase retryable.
+A retry can finish its exact pending publication but cannot replace its original
+metadata with newer timestamps. A missing, torn, conflicting or unpublished
+ledger blocks model resume/qualification; it cannot become an empty ledger.
+This bounds previously sealed/labelled evidence, not every unused UDP packet.
+Existing phase/cohort capacity limits also bound the ledger.
+
+Resume verifies the proof and complete ledger, restores the original capture
+run/frame namespace, next phase index, frozen roles, original Train ranges and
+maximum sealed source watermarks, and leaves all live/pending RF buffers empty.
+It creates no dummy Train rows. Old sealed trial identities cannot be reused.
+A current declared session may group multiple same-role conditions; a resumed
+workflow needs a fresh group identity. Client IDs include the existing helper
+runtime epoch and generation so a helper restart cannot collide with old groups.
+Session declarations still do not establish statistical independence.
+
+Native ingress uses UTC-anchored monotonic receiver nanoseconds, not helper
+uptime. The proof explicitly records that receiver clock domain. A lower new
+helper wall anchor is incomparable and blocks capture; neither counter nor time
+is silently rebased. Duplicate/reversed node counters remain rejected. Resetting
+a node does not prove a new authenticated transmitter epoch.
+
+Qualification always recomputes the original Train SHA while rows remain. When
+Train is empty, only a verified managed proof and a complete fresh disjoint
+HeldOut set can provide that lineage basis. The per-condition minimums, coverage,
+sensitivity, false-positive thresholds, OOD checks and explicit selection remain
+unchanged. A failed latest assessment continues to withdraw positive authority;
+restart cannot reuse its old labelled packets to clear the failure.
+
+Retained-row qualifications retain their v1 bytes/readers. Proof-backed receipts
+use explicit `ruview.local-operational-qualification.v2`, bind the exact managed
+training proof and sealed-phase fence SHA, and identify their lineage basis.
+Their UTC nanoseconds are decimal strings, preserving precision beyond
+JavaScript's safe integer range. Evaluation v1 still reports
+`train_lineage_checked: false` at zero current Train rows. The bounded v2 public
+summary carries only its version, lineage basis and opaque proof hash in addition
+to the existing qualification summary; private phase identities/counters and
+nanoseconds are not added to paired summaries.
+
+Owner status exposes a bounded qualification-readiness preflight before asking
+for selection-oriented HeldOut captures: exact durable model, current room/source
+binding, retained exact Train or verified managed proof, and comparable receiver
+clock. Missing historical proof is a diagnostic limitation, not an invitation to
+repeat unsaveable trials. Existing issued v1 qualification/selection readers are
+preserved; no model is selected automatically and no general physical,
+independence, count, pose or numeric Vitals authority is added.
+
+Managed lineage checkpoints use explicit capture-checkpoint v2 to retain these
+metadata fences while v1 checkpoints remain readable. Optional reduced-sample
+recovery keeps its original consent and expiry contract. Candidate weights and
+bounded training/phase metadata survive that sample-recovery deadline in the
+same owner-private model tree until explicitly erased under the model/account
+lifecycle. They are not a retained sample set or a promise of automatic erasure.
+
+Verification covers synthetic packets through real managed fit, private writes,
+cold resume, all-condition qualification, explicit selection, corrupted or pending
+proof/ledger files, unchanged retained-row lineage, role/counter/time regression,
+phase-ack ordering, and 2026-scale Rust-to-client wire fixtures. Physical
+qualification and delivered-artifact acceptance remain separate work.

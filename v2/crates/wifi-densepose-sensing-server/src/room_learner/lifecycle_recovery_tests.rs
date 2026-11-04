@@ -619,3 +619,229 @@ fn persisted_flags_confirmed_empty_discard_and_default_ram_are_false() {
         .unwrap();
     assert_persisted_flags(&rt.status(BASE), json!(false));
 }
+
+fn recovery_file(root: &Path) -> std::path::PathBuf {
+    root.join("a".repeat(64)).join("SensingServer/room-learner-recovery/capture-recovery-v1.bin")
+}
+fn expiry_request(role: DataRole, label: RoomLabel, index: u32) -> PhaseRequest {
+    PhaseRequest {
+        trial_id: format!("expiry-trial-{index}"), session_id: format!("expiry-session-{index}"),
+        role, label, duration_ms: 12_000, lead_in_ms: 0, conditions_confirmed: true,
+    }
+}
+fn expiry_phase(rt: &RoomLearningRuntime, at: u64, role: DataRole, label: RoomLabel, index: u32) {
+    rt.begin_phase(&rt.mutation_guard().unwrap(), expiry_request(role, label, index), at).unwrap();
+    let gain = match label { RoomLabel::Empty => 2.0, RoomLabel::OccupiedStatic => 6.0,
+        RoomLabel::OccupiedMoving => 7.0, RoomLabel::AdjacentOnly => 2.3, RoomLabel::Unknown => panic!("label required") };
+    for quarter in 0..4u32 {
+        for sample in 0..8u32 {
+            for source in 1..=2u8 {
+                let values: Vec<_> = (0..8).map(|bin| gain + f64::from(source)*0.3 + f64::from(bin)*0.04 + f64::from(sample)*0.003).collect();
+                rt.ingest(RawSourceFrame {source_id: source, grid_id: "ht64-canonical8",
+                    frequency_hz: 2_437_000_000, bandwidth_hz: 20_000_000,
+                    sequence: index*32 + quarter*8 + sample + 1, amplitudes: &values},
+                    at + u64::from(quarter)*3_000_000_000 + 1_000_000 + u64::from(sample)*10_000_000 + u64::from(source)).unwrap();
+            }
+        }
+    }
+    rt.finish_phase(&rt.mutation_guard().unwrap(), at + 12_000_000_000, true).unwrap();
+}
+fn original_descriptor(root: &Path) -> crate::room_learner::recovery_store::RecoveryDescriptor {
+    let owner = "a".repeat(64);
+    RecoveryStore::new(&root.join(&owner).join("SensingServer"), &owner, "synthetic-install", Some(&[7;32]))
+        .unwrap().inspect().unwrap().unwrap()
+}
+
+#[test]
+fn loaded_recovery_expires_to_ram_at_exact_deadline_without_erasing_or_rebasing() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime(temp.path(), BASE, true);
+    rt.configure_for_recovery(&rt.mutation_guard().unwrap(), context(), "expiry-loaded".into(), true, true, BASE).unwrap();
+    for index in 0..7 { expiry_phase(&rt, BASE + u64::from(index)*13_000_000_000, DataRole::Train, RoomLabel::Empty, index); }
+    let descriptor = original_descriptor(temp.path());
+    drop(rt);
+    let recovered = runtime(temp.path(), BASE + 100_000_000_000, true);
+    recovered.restore_capture_recovery(&recovered.mutation_guard().unwrap(), &descriptor.id, &context(), BASE + 100_000_000_000).unwrap();
+    let descriptor = original_descriptor(temp.path());
+    let expires = descriptor.expires_at_ms*1_000_000;
+    let file = recovery_file(temp.path());
+    let bytes = std::fs::read(&file).unwrap();
+    let before = recovered.status(expires - 1);
+    assert_eq!(before["recovery"]["enabled"], true);
+    assert_eq!(before["capture"]["sealed_cohorts"], 28);
+    let (rows, history) = {
+        let state = recovered.inner.lock().unwrap();let capture = state.capture.as_ref().unwrap();
+        (serde_json::to_vec(capture.cohorts()).unwrap(), serde_json::to_vec(capture.history()).unwrap())
+    };
+    let at = recovered.status(expires);
+    assert_eq!(at["recovery"]["state"], "expired");assert_eq!(at["recovery"]["enabled"], false);
+    assert!(at["recovery"]["saved"].is_null());assert_eq!(at["capture"]["sealed_cohorts"], 28);
+    assert_eq!(at["capture"]["sources"], before["capture"]["sources"]);
+    assert!(at["recovery"]["error"].as_str().unwrap().contains("memory only"));
+    assert!(recovered.inner.lock().unwrap().recovery.error.is_none(), "informational expiry must not become a persistence error");
+    assert_eq!(original_descriptor(temp.path()), descriptor);assert_eq!(std::fs::read(&file).unwrap(), bytes);
+    let values = vec![6.0;8];
+    assert!(recovered.ingest(RawSourceFrame{source_id:1,grid_id:"ht64-canonical8",frequency_hz:2_437_000_000,
+        bandwidth_hz:20_000_000,sequence:224,amplitudes:&values},expires+1).unwrap_err().contains("replayed"));
+    assert!(recovered.begin_phase(&recovered.mutation_guard().unwrap(), expiry_request(DataRole::Validation,RoomLabel::Empty,0), expires+2).is_err(), "frozen phase roles must survive expiry");
+    expiry_phase(&recovered,expires+1_000_000,DataRole::Train,RoomLabel::Empty,7);
+    let after = recovered.status(expires+13_000_000_000);
+    assert_eq!(after["capture"]["sealed_cohorts"],32);assert!(after["capture"]["phase"].is_null());
+    assert_eq!(after["capture"]["sources"][0]["last_accepted_sequence"],256);
+    {
+        let state=recovered.inner.lock().unwrap();let capture=state.capture.as_ref().unwrap();
+        assert_eq!(serde_json::to_vec(&capture.cohorts()[..28]).unwrap(),rows);
+        assert_eq!(serde_json::to_vec(&capture.history()[..7]).unwrap(),history);
+        assert_eq!(capture.cohorts()[28].views[0].sequence_ids[0],225);
+    }
+    assert_eq!(original_descriptor(temp.path()),descriptor);assert_eq!(std::fs::read(&file).unwrap(),bytes);
+    drop(recovered);
+    let cold=runtime(temp.path(),expires+14_000_000_000,true);
+    assert!(cold.context().is_none());
+    assert_eq!(cold.restore_capture_recovery(&cold.mutation_guard().unwrap(),&descriptor.id,&context(),expires+14_000_000_000).unwrap_err(),"recovery_expired");
+    assert_eq!(std::fs::read(&file).unwrap(),bytes);
+}
+
+#[test]
+fn active_phase_can_cross_expiry_and_seal_without_a_false_failed_save() {
+    let temp=tempfile::tempdir().unwrap();let rt=runtime(temp.path(),BASE,true);
+    rt.configure_for_recovery(&rt.mutation_guard().unwrap(),context(),"crossing-phase".into(),true,true,BASE).unwrap();
+    let descriptor=original_descriptor(temp.path());let expires=descriptor.expires_at_ms*1_000_000;
+    let start=expires-6_000_000_000;
+    rt.begin_phase(&rt.mutation_guard().unwrap(),request(12_000),start).unwrap();
+    window(&rt,start+1_000_000,1);window(&rt,start+3_001_000_000,9);
+    let bytes=std::fs::read(recovery_file(temp.path())).unwrap();let final_saved=original_descriptor(temp.path());
+    window(&rt,expires+1_000_000,17);window(&rt,expires+3_001_000_000,25);
+    assert_eq!(rt.status(expires+4_000_000_000)["capture"]["sealed_cohorts"],0,"expiry must not auto-confirm a phase");
+    rt.finish_phase(&rt.mutation_guard().unwrap(),expires+6_000_000_000,true).unwrap();
+    let status=rt.status(expires+7_000_000_000);
+    assert_eq!(status["capture"]["sealed_cohorts"],4);assert!(status["capture"]["phase"].is_null());
+    assert_eq!(status["recovery"]["enabled"],false);assert_eq!(original_descriptor(temp.path()),final_saved);
+    assert_eq!(std::fs::read(recovery_file(temp.path())).unwrap(),bytes);
+}
+
+#[test]
+fn expiry_does_not_turn_io_tamper_missing_or_replacement_failures_into_ram_fallback() {
+    use std::os::unix::fs::PermissionsExt;
+    for case in ["latched_io", "tamper", "missing", "replacement"] {
+        let temp=tempfile::tempdir().unwrap();let rt=runtime(temp.path(),BASE,true);
+        rt.configure_for_recovery(&rt.mutation_guard().unwrap(),context(),format!("expiry-{case}"),true,true,BASE).unwrap();
+        let original=original_descriptor(temp.path());let expires=original.expires_at_ms*1_000_000;
+        let file=recovery_file(temp.path());
+        match case {
+            "latched_io"=>{
+                std::fs::set_permissions(&file,std::fs::Permissions::from_mode(0o644)).unwrap();
+                {let mut state=rt.inner.lock().unwrap();assert!(rt.checkpoint_recovery(&mut state,BASE+1_000_000,true).is_err());}
+                std::fs::set_permissions(&file,std::fs::Permissions::from_mode(0o600)).unwrap();
+            },
+            "tamper"=>{let mut bytes=std::fs::read(&file).unwrap();let last=bytes.len()-1;bytes[last]^=1;std::fs::write(&file,bytes).unwrap();},
+            "missing"=>std::fs::remove_file(&file).unwrap(),
+            "replacement"=>{
+                let owner="a".repeat(64);let store=RecoveryStore::new(&temp.path().join(&owner).join("SensingServer"),&owner,"synthetic-install",Some(&[7;32])).unwrap();
+                store.discard(&original.id).unwrap();let mut other=original.clone();other.id="different-authenticated-copy".into();store.save(&other,b"SYNTHETIC REPLACEMENT",BASE/1_000_000).unwrap();
+            },_=>unreachable!()
+        }
+        let bytes=std::fs::read(&file).ok();
+        assert!(rt.begin_phase(&rt.mutation_guard().unwrap(),request(12_000),expires).is_err(),"{case}");
+        let status=rt.status(expires+1);
+        assert!(status["capture"]["phase"].is_null(),"{case}: failed preflight must not start a phase");
+        assert_eq!(status["recovery"]["enabled"],true,"{case}: generic error cannot disable recovery silently");
+        assert!(!status["recovery"]["error"].as_str().unwrap().contains("memory only"));
+        assert_eq!(std::fs::read(&file).ok(),bytes,"{case}: expiry must not rewrite/delete a failed copy");
+    }
+}
+
+#[tokio::test]
+async fn recovered_28_cohorts_can_finish_heldout_after_expiry_under_the_same_qualification_policy() {
+    let temp=tempfile::tempdir().unwrap();let rt=runtime(temp.path(),BASE,true);
+    rt.configure_for_recovery(&rt.mutation_guard().unwrap(),context(),"expiry-qualified".into(),true,true,BASE).unwrap();
+    for (i,label) in [RoomLabel::Empty,RoomLabel::OccupiedStatic,RoomLabel::OccupiedMoving,RoomLabel::AdjacentOnly].into_iter().enumerate(){
+        expiry_phase(&rt,BASE+i as u64*13_000_000_000,DataRole::Train,label,i as u32);
+    }
+    rt.start_training(&rt.mutation_guard().unwrap(),FitConfig{epochs:8,learning_rate:0.5,hidden_dim:2,embedding_dim:2,temporal_tokens:2,..FitConfig::default()}).unwrap();
+    let wait_started=std::time::Instant::now();
+    loop {
+        let ready=rt.status(BASE+51_000_000_000);
+        if ready["state"]=="ready" {break;}
+        assert!(ready["state"]=="running" && wait_started.elapsed()<std::time::Duration::from_secs(65),"{ready}");
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    for (i,label) in [RoomLabel::OccupiedStatic,RoomLabel::OccupiedMoving,RoomLabel::AdjacentOnly].into_iter().enumerate(){
+        expiry_phase(&rt,BASE+(i+4) as u64*13_000_000_000,DataRole::HeldOut,label,(i+4) as u32);
+    }
+    let descriptor=original_descriptor(temp.path());drop(rt);
+    let recovered=runtime(temp.path(),BASE+100_000_000_000,true);
+    recovered.restore_capture_recovery(&recovered.mutation_guard().unwrap(),&descriptor.id,&context(),BASE+100_000_000_000).unwrap();
+    let expires=descriptor.expires_at_ms*1_000_000;let bytes=std::fs::read(recovery_file(temp.path())).unwrap();
+    assert_eq!(recovered.status(expires)["capture"]["sealed_cohorts"],28);
+    let before={let state=recovered.inner.lock().unwrap();serde_json::to_vec(state.capture.as_ref().unwrap().cohorts()).unwrap()};
+    assert!(recovered.qualify(&recovered.mutation_guard().unwrap()).is_err(),"expiry does not waive missing HeldOut Empty");
+    assert!(recovered.status(expires+1)["model_selection"]["selected"].is_null());
+    expiry_phase(&recovered,expires+1_000_000,DataRole::HeldOut,RoomLabel::Empty,7);
+    let q=recovered.qualify(&recovered.mutation_guard().unwrap()).unwrap();
+    assert_eq!(q.receipt.policy,crate::room_learner::qualification::QualificationPolicy::default());
+    assert!(q.receipt.criteria.iter().all(|c|c.train_cohorts==4&&c.held_out_cohorts==4));
+    assert!(!q.receipt.physically_validated&&!q.receipt.independence_verified);
+    let status=recovered.status(expires+13_000_000_000);
+    assert!(status["model_selection"]["selected"].is_null(),"qualification must not auto-select");
+    assert_eq!(status["control_detector_changed"],false);assert_eq!(status["recovery"]["enabled"],false);
+    {let state=recovered.inner.lock().unwrap();assert_eq!(serde_json::to_vec(&state.capture.as_ref().unwrap().cohorts()[..28]).unwrap(),before);}
+    assert_eq!(std::fs::read(recovery_file(temp.path())).unwrap(),bytes);
+    assert_eq!(original_descriptor(temp.path()).expires_at_ms,descriptor.expires_at_ms);
+}
+
+#[test]
+fn known_expiry_is_sticky_for_out_of_order_status_and_saved_context_reads() {
+    let temp=tempfile::tempdir().unwrap();let rt=runtime(temp.path(),BASE,true);
+    rt.configure_for_recovery(&rt.mutation_guard().unwrap(),context(),"sticky-status".into(),true,true,BASE).unwrap();
+    expiry_phase(&rt,BASE,DataRole::Train,RoomLabel::Empty,0);
+    let descriptor=original_descriptor(temp.path());let expires=descriptor.expires_at_ms*1_000_000;
+    assert_eq!(rt.status(expires)["recovery"]["state"],"expired");
+    let older=rt.status(expires-1_000_000);
+    let read=rt.saved_recovery_context(&descriptor.id,expires-1_000_000);
+    assert_eq!(older["recovery"]["state"],"expired","an older queued observation must not resurrect recovery availability");
+    assert!(older["recovery"]["saved"].is_null());
+    assert_eq!(read.unwrap_err(),"recovery_expired");
+    assert_eq!(older["recovery"]["enabled"],false);
+}
+
+#[test]
+fn known_expiry_cannot_be_reenabled_by_a_queued_restore_with_an_earlier_timestamp() {
+    for observe_by_status in [true,false] {
+        let temp=tempfile::tempdir().unwrap();let rt=runtime(temp.path(),BASE,true);
+        rt.configure_for_recovery(&rt.mutation_guard().unwrap(),context(),"sticky-restore".into(),true,true,BASE).unwrap();
+        expiry_phase(&rt,BASE,DataRole::Train,RoomLabel::Empty,0);
+        let descriptor=original_descriptor(temp.path());let expires=descriptor.expires_at_ms*1_000_000;
+        let bytes=std::fs::read(recovery_file(temp.path())).unwrap();
+        let rows={let state=rt.inner.lock().unwrap();serde_json::to_vec(state.capture.as_ref().unwrap().cohorts()).unwrap()};
+        if observe_by_status {
+            rt.status(expires);
+        } else {
+            let mut invalid=expiry_request(DataRole::Train,RoomLabel::Empty,1);invalid.conditions_confirmed=false;
+            assert!(rt.begin_phase(&rt.mutation_guard().unwrap(),invalid,expires).is_err());
+        }
+        let result=rt.restore_capture_recovery(&rt.mutation_guard().unwrap(),&descriptor.id,&context(),expires-1_000_000);
+        assert_eq!(result.unwrap_err(),"recovery_expired","queued restore: observe_by_status={observe_by_status}");
+        let status=rt.status(expires-1_000_000);
+        assert_eq!(status["recovery"]["state"],"expired");assert_eq!(status["recovery"]["enabled"],false);
+        assert!(status["recovery"]["saved"].is_null());assert_eq!(status["capture"]["sealed_cohorts"],4);
+        assert_eq!(original_descriptor(temp.path()),descriptor);assert_eq!(std::fs::read(recovery_file(temp.path())).unwrap(),bytes);
+        let state=rt.inner.lock().unwrap();assert_eq!(serde_json::to_vec(state.capture.as_ref().unwrap().cohorts()).unwrap(),rows);
+    }
+}
+
+#[test]
+fn cold_inspection_of_expired_copy_fences_earlier_queued_loads_without_creating_ram_state() {
+    let temp=tempfile::tempdir().unwrap();let rt=runtime(temp.path(),BASE,true);
+    rt.configure_for_recovery(&rt.mutation_guard().unwrap(),context(),"sticky-cold".into(),true,true,BASE).unwrap();
+    expiry_phase(&rt,BASE,DataRole::Train,RoomLabel::Empty,0);
+    let descriptor=original_descriptor(temp.path());let expires=descriptor.expires_at_ms*1_000_000;
+    let bytes=std::fs::read(recovery_file(temp.path())).unwrap();drop(rt);
+    let cold=runtime(temp.path(),expires,true); // Constructor inspection knows expiry before any status request.
+    assert_eq!(cold.saved_recovery_context(&descriptor.id,expires-1_000_000).unwrap_err(),"recovery_expired");
+    assert_eq!(cold.restore_capture_recovery(&cold.mutation_guard().unwrap(),&descriptor.id,&context(),expires-1_000_000).unwrap_err(),"recovery_expired");
+    let status=cold.status(expires-1_000_000);
+    assert_eq!(status["recovery"]["state"],"expired");assert_eq!(status["recovery"]["enabled"],false);
+    assert!(status["recovery"]["saved"].is_null());assert!(status["capture"].is_null());assert!(!status["candidate_loaded"].as_bool().unwrap());
+    assert_eq!(original_descriptor(temp.path()),descriptor);assert_eq!(std::fs::read(recovery_file(temp.path())).unwrap(),bytes);
+}

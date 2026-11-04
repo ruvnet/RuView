@@ -330,3 +330,103 @@ fn unlabelled_live_windows_and_partial_packet_buffers_are_never_serialized() {
         .unwrap()
         .contains("\"samples\""));
 }
+
+#[test]
+fn recovered_sequence_diagnostics_explain_lower_input_without_rebasing_evidence() {
+    let mut s = session();
+    let high = 1_000_000;
+    phase(&mut s, START, high, DataRole::Train, RoomLabel::Empty, "high", 2.0);
+    let at = START + MIN_PHASE_MS * 1_000_000;
+    let saved = s.checkpoint(at).unwrap();
+    let original_rows = serde_json::to_vec(s.cohorts()).unwrap();
+    let original_watermarks = serde_json::to_vec(&saved.sources).unwrap();
+    let mut recovered = reopen(&saved, at + 1).unwrap().session;
+    let first = &recovered.progress(at + 1).sources[0];
+    assert_eq!(first.last_accepted_sequence, Some(high + 31));
+    assert_eq!(first.last_observed_sequence, None);
+    assert_eq!(first.sequence_rejection_count, 0);
+    assert_eq!(first.sequence_rejection_reason, None);
+    let values = vec![2.0; 64];
+    for (index, seq) in [1, 2, high + 31].into_iter().enumerate() {
+        assert!(recovered.ingest(packet(1, seq, &values), at + 2 + index as u64).is_err());
+    }
+    let progress = recovered.progress(at + 6);
+    let source = &progress.sources[0];
+    assert_eq!(source.last_accepted_sequence, Some(high + 31));
+    assert_eq!(source.last_observed_sequence, Some(high + 31));
+    assert_eq!(source.sequence_rejection_count, 3);
+    assert_eq!(source.sequence_rejection_reason, Some(SequenceRejectionReason::Duplicate));
+    assert_eq!(source.admitted_packets, 32);
+    assert_eq!(source.live_buffer_frames, 0);
+    assert!(!source.window_eligible);
+    assert_eq!(progress.sources[1].sequence_rejection_count, 0);
+    assert_eq!(serde_json::to_vec(&recovered.checkpoint(at + 6).unwrap().sources).unwrap(), original_watermarks);
+    assert_eq!(serde_json::to_vec(recovered.cohorts()).unwrap(), original_rows);
+    assert!(recovered.begin_phase(request(DataRole::HeldOut, RoomLabel::Empty, "high"), at + 7).is_err());
+
+    window(&mut recovered, at + 100_000_000, high + 32, 3.0);
+    let progress = recovered.progress(at + 180_000_000);
+    assert!(progress.sources.iter().all(|s| s.window_eligible && s.last_accepted_sequence == Some(high + 39)));
+    assert_eq!(progress.sources[0].last_observed_sequence, Some(high + 39));
+    assert_eq!(progress.sources[0].sequence_rejection_count, 3);
+    assert_eq!(progress.sources[0].sequence_rejection_reason, None);
+    assert_eq!(progress.sources[0].admitted_packets, 40);
+    let live = recovered.live_cohort(at + 180_000_000).unwrap();
+    assert!(live.views.iter().all(|v| v.sequence_ids == (33..=40).collect::<Vec<_>>()));
+    assert_eq!(serde_json::to_vec(recovered.cohorts()).unwrap(), original_rows);
+
+    let checkpoint = recovered.checkpoint(at + 200_000_000).unwrap();
+    let serialized = serde_json::to_string(&checkpoint).unwrap();
+    for transient in ["last_observed_sequence", "sequence_rejection_count", "sequence_rejection_reason"] {
+        assert!(!serialized.contains(transient), "diagnostics must not become retained evidence: {transient}");
+    }
+    let restored = reopen(&checkpoint, at + 200_000_001).unwrap().session;
+    let progress = restored.progress(at + 200_000_001);
+    assert!(progress.sources.iter().all(|s| s.last_observed_sequence.is_none() && s.sequence_rejection_count == 0 && s.sequence_rejection_reason.is_none() && !s.window_eligible));
+}
+
+#[test]
+fn reversed_sequence_reason_is_source_local_bounded_and_does_not_claim_reboot() {
+    let mut s = session();
+    window(&mut s, START, 100, 2.0);
+    let values = vec![2.0; 64];
+    s.sources.get_mut(&1).unwrap().sequence_rejection_count = MAX_SEQUENCE_DIAGNOSTIC_COUNT;
+    assert!(s.ingest(packet(1, 1, &values), START + 90_000_000).is_err());
+    let progress = s.progress(START + 90_000_000);
+    let source = &progress.sources[0];
+    assert_eq!(source.last_observed_sequence, Some(1));
+    assert_eq!(source.last_accepted_sequence, Some(107));
+    assert_eq!(source.sequence_rejection_count, MAX_SEQUENCE_DIAGNOSTIC_COUNT);
+    assert_eq!(source.sequence_rejection_reason, Some(SequenceRejectionReason::Reversed));
+    assert_eq!(progress.sources[1].sequence_rejection_reason, None);
+    let diagnostic = serde_json::to_value(&progress).unwrap();
+    assert_eq!(diagnostic["sources"][0]["sequence_rejection_reason"], "reversed");
+    assert_eq!(diagnostic["sources"][0]["sequence_rejection_count"], 9_007_199_254_740_991_u64);
+    let json = serde_json::to_string(&progress).unwrap();
+    for forbidden in ["amplitudes", "samples", "frame_ids", "ordinal", "receiver_epoch", "reboot"] {
+        assert!(!json.contains(forbidden), "unexpected diagnostic data/claim: {forbidden}");
+    }
+}
+
+#[test]
+fn valid_sequence_wrap_remains_admitted_and_invalid_time_cannot_launder_diagnostics() {
+    let mut s = session();
+    window(&mut s, START, u32::MAX - 3, 2.0);
+    let at = START + 80_000_000;
+    let checkpoint = s.checkpoint(at).unwrap();
+    let mut recovered = reopen(&checkpoint, at + 1).unwrap().session;
+    window(&mut recovered, at + 100_000_000, 4, 3.0);
+    let source = &recovered.progress(at + 180_000_000).sources[0];
+    assert_eq!(source.last_accepted_sequence, Some(11));
+    assert_eq!(source.last_observed_sequence, Some(11));
+    assert_eq!(source.sequence_rejection_count, 0);
+    assert_eq!(source.sequence_rejection_reason, None);
+    let values = vec![3.0; 64];
+    assert!(recovered.ingest(packet(1, 2, &values), at + 190_000_000).is_err());
+    assert!(recovered.ingest(packet(1, 999, &values), START).is_err());
+    let source = &recovered.progress(at + 200_000_000).sources[0];
+    assert_eq!(source.last_observed_sequence, Some(2));
+    assert_eq!(source.last_accepted_sequence, Some(11));
+    assert_eq!(source.sequence_rejection_count, 1);
+    assert_eq!(source.sequence_rejection_reason, Some(SequenceRejectionReason::Reversed));
+}

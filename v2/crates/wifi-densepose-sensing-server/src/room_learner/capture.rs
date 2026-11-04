@@ -11,6 +11,8 @@ pub const MIN_PHASE_MS: u64 = 12_000;
 pub const MAX_PHASE_MS: u64 = 600_000;
 pub const MAX_CAPTURE_BINS: usize = 128;
 const MAX_PHASE_HISTORY: usize = 128;
+// Protected diagnostics are consumed by JavaScript clients as exact integers.
+const MAX_SEQUENCE_DIAGNOSTIC_COUNT: u64 = (1u64 << 53) - 1;
 
 /// Borrowed actual packet metadata. The caller must reject unknown bandwidth
 /// and retain the known raw grid identity. Amplitudes may be length-only
@@ -53,15 +55,20 @@ pub struct PhaseReceipt {
 
 #[derive(Debug, Clone)]
 struct Packet { values: Vec<f32>, frame_id: u128, ordinal: u64, received_ns: u64 }
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct SourceBuffer {
     sequence: Option<u32>,
     ordinal: u64,
     last_time_ns: u64,
     admitted_packets: u64,
+    // Transient diagnostics only. Never restore observations/rejections as
+    // fresh input, and never let them advance the admission watermark.
+    last_observed_sequence: Option<u32>,
+    sequence_rejection_count: u64,
+    sequence_rejection_reason: Option<SequenceRejectionReason>,
     live: VecDeque<Packet>,
 }
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 struct Phase {
     request: PhaseRequest,
     started_ns: u64,
@@ -70,6 +77,12 @@ struct Phase {
     representatives: Vec<CaptureCohort>,
     admitted: HashMap<u8, u64>,
 }
+
+/// A bounded diagnostic of the most recent sequence admission failure.
+/// It does not establish a source reboot or authenticated source epoch.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SequenceRejectionReason { Duplicate, Reversed }
 
 /// Counts and receiver freshness only. No learned/qualified state is implied.
 #[derive(Debug, Clone, Serialize)]
@@ -98,6 +111,13 @@ pub struct SourceProgress {
     pub source_id: u8,
     pub grid_id: String,
     pub admitted_packets: u64,
+    /// Last admitted wire sequence, including an original recovery watermark.
+    pub last_accepted_sequence: Option<u32>,
+    /// Last sequence tested by this receiver after PHY/shape/time validation.
+    pub last_observed_sequence: Option<u32>,
+    /// Transient since this capture was created/restored; never persisted.
+    pub sequence_rejection_count: u64,
+    pub sequence_rejection_reason: Option<SequenceRejectionReason>,
     pub phase_admitted_packets: u64,
     pub live_buffer_frames: usize,
     pub phase_buffer_frames: usize,
@@ -107,7 +127,7 @@ pub struct SourceProgress {
     pub reason: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct CaptureSession {
     context: CaptureContext,
     run_id: String,
@@ -119,6 +139,7 @@ pub struct CaptureSession {
     history: Vec<PhaseReceipt>,
     trials: HashMap<String, DataRole>,
     sessions: HashMap<String, DataRole>,
+    metadata_lineage: Option<super::managed_training::TrainingProofSeed>,
 }
 
 impl CaptureSession {
@@ -132,7 +153,7 @@ impl CaptureSession {
         let prefix = u64::from_be_bytes(hash[..8].try_into().map_err(|_| "run digest")?);
         let sources = context.sources.iter().map(|s| (s.source_id, SourceBuffer::default())).collect();
         Ok(Self { context, run_id, prefix, last_seen_ns: 0, sources, phase: None, cohorts: vec![], history: vec![],
-            trials: HashMap::new(), sessions: HashMap::new() })
+            trials: HashMap::new(), sessions: HashMap::new(), metadata_lineage: None })
     }
 
     /// A rejected selected input withdraws old live windows, not sealed training rows.
@@ -166,6 +187,10 @@ impl CaptureSession {
                 else if source.live.len() != WINDOW_PACKETS { Some("incomplete_window") } else { None };
             SourceProgress { source_id: spec.source_id, grid_id: spec.grid_id.clone(),
                 admitted_packets: source.admitted_packets,
+                last_accepted_sequence: source.sequence,
+                last_observed_sequence: source.last_observed_sequence,
+                sequence_rejection_count: source.sequence_rejection_count,
+                sequence_rejection_reason: source.sequence_rejection_reason,
                 phase_admitted_packets: self.phase.as_ref().and_then(|p| p.admitted.get(&spec.source_id)).copied().unwrap_or(0),
                 live_buffer_frames: source.live.len(),
                 phase_buffer_frames: self.phase.as_ref().and_then(|p| p.pending.get(&spec.source_id)).map_or(0, VecDeque::len),
@@ -183,14 +208,16 @@ impl CaptureSession {
         if !request.conditions_confirmed || request.role == DataRole::Inference || request.label == RoomLabel::Unknown
             || !(MIN_PHASE_MS..=MAX_PHASE_MS).contains(&request.duration_ms) || request.lead_in_ms > 120_000 || now_ns == 0
             || now_ns < self.last_seen_ns || now_ns.checked_add((request.duration_ms + request.lead_in_ms) * 1_000_000).is_none()
-            || self.history.len() >= MAX_PHASE_HISTORY || self.cohorts.len() + COHORTS_PER_PHASE > MAX_COHORTS {
+            || self.phase_index() >= MAX_PHASE_HISTORY || self.sealed_cohort_capacity_used() + COHORTS_PER_PHASE > MAX_COHORTS {
             return Err("phase requires confirmed labelled conditions, bounded duration and capacity".into());
         }
+        if let Some(lineage)=&self.metadata_lineage { lineage.check_role(&request.trial_id,&request.session_id,request.role)?; }
         for (roles, key) in [(&self.trials, &request.trial_id), (&self.sessions, &request.session_id)] {
             if roles.get(key).is_some_and(|role| *role != request.role) {
                 return Err("trial/session role is frozen".into());
             }
         }
+        if self.history.iter().any(|p|p.status==PhaseStatus::Sealed&&p.trial_id==request.trial_id) {return Err("phase identity was already sealed".into());}
         self.trials.insert(request.trial_id.clone(), request.role);
         self.sessions.insert(request.session_id.clone(), request.role);
         self.phase = Some(Phase { request, started_ns: now_ns, bucket: 0, pending: HashMap::new(), representatives: vec![], admitted: HashMap::new() });
@@ -209,10 +236,17 @@ impl CaptureSession {
         }
         let source = self.sources.get_mut(&frame.source_id).ok_or("source buffer unavailable")?;
         if now_ns == 0 || now_ns < self.last_seen_ns || now_ns <= source.last_time_ns { return Err("nonmonotonic receiver time".into()); }
+        source.last_observed_sequence = Some(frame.sequence);
         let delta = match source.sequence {
             Some(last) => {
                 let delta = frame.sequence.wrapping_sub(last);
-                if delta == 0 || delta >= (1u32 << 31) { return Err("replayed or reversed source sequence".into()); }
+                if delta == 0 || delta >= (1u32 << 31) {
+                    source.sequence_rejection_count = source.sequence_rejection_count.saturating_add(1).min(MAX_SEQUENCE_DIAGNOSTIC_COUNT);
+                    source.sequence_rejection_reason = Some(if delta == 0 {
+                        SequenceRejectionReason::Duplicate
+                    } else { SequenceRejectionReason::Reversed });
+                    return Err("replayed or reversed source sequence".into());
+                }
                 u64::from(delta)
             }
             None => 1,
@@ -221,12 +255,14 @@ impl CaptureSession {
         let packet = Packet { values: frame.amplitudes.iter().map(|x| *x as f32).collect(),
             frame_id: (u128::from(self.prefix) << 64) | (u128::from(frame.source_id) << 56) | u128::from(ordinal),
             ordinal, received_ns: now_ns };
+        source.sequence_rejection_reason = None;
         source.sequence = Some(frame.sequence);
         source.ordinal = ordinal;
         source.last_time_ns = now_ns;
         source.admitted_packets = source.admitted_packets.saturating_add(1);
         self.last_seen_ns = now_ns;
         push_bounded(&mut source.live, packet.clone());
+        let phase_index=self.phase_index();
         let Some(phase) = self.phase.as_mut() else { return Ok(()); };
         if now_ns < phase.started_ns { return self.invalidate("receiver time precedes phase start"); }
         let capture_start = phase.started_ns + phase.request.lead_in_ms * 1_000_000;
@@ -242,7 +278,7 @@ impl CaptureSession {
         push_bounded(phase.pending.entry(frame.source_id).or_default(), packet);
         if phase.pending.len() != self.context.sources.len()
             || phase.pending.values().any(|v| v.len() != WINDOW_PACKETS) { return Ok(()); }
-        let id = format!("{}-phase-{}-bucket-{bucket}", self.run_id, self.history.len());
+        let id = format!("{}-phase-{}-bucket-{bucket}", self.run_id, phase_index);
         // Disjoint streams remain incomplete until a complete aligned window
         // arrives. No pooling, padding, or fabricated source-clock alignment.
         if let Ok(cohort) = assemble(&self.context, &phase.pending, now_ns, id, &phase.request) {
@@ -339,3 +375,6 @@ mod tests;
 #[path = "capture_recovery.rs"]
 mod recovery;
 pub use recovery::{CaptureCheckpoint, CaptureCheckpointSummary, CaptureRestore, RecoveryPhaseDisposition, RecoveryPhaseSummary};
+
+#[path = "managed_capture.rs"]
+mod managed_capture;

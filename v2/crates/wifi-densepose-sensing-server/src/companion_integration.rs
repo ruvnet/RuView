@@ -258,6 +258,8 @@ fn policy(method: &axum::http::Method, path: &str) -> Option<bool> {
                 | "/api/v1/pose/zones/summary"
                 | "/api/v1/pose/activities"
                 | "/api/v1/room-learner/selection"
+                | "/api/v1/room-learner/progress"
+                | "/api/v1/worldgraph/snapshot"
                 | "/api/v1/calibration/status"
                 | "/api/v1/pose/calibration/status"
                 | "/ws/sensing"
@@ -385,8 +387,13 @@ mod tests {
         }
         assert_eq!(policy(&Method::GET, "/ws/train/progress"), None);
         assert_eq!(policy(&Method::GET, "/api/v1/room-learner/selection"), Some(false));
+        assert_eq!(policy(&Method::GET, "/api/v1/worldgraph/snapshot"), Some(false));
+        assert_eq!(policy(&Method::POST, "/api/v1/worldgraph/snapshot"), None);
         assert_eq!(policy(&Method::HEAD, "/api/v1/room-learner/selection"), Some(false));
         assert_eq!(policy(&Method::GET, "/api/v1/room-learner/status"), None);
+        assert_eq!(policy(&Method::GET, "/api/v1/room-learner/progress"), Some(false));
+        assert_eq!(policy(&Method::HEAD, "/api/v1/room-learner/progress"), Some(false));
+        assert_eq!(policy(&Method::POST, "/api/v1/room-learner/progress"), None);
         for path in ["/api/v1/room-learner/qualify", "/api/v1/room-learner/select", "/api/v1/room-learner/deselect", "/api/v1/room-learner/phase/cancel", "/api/v1/room-learner/train/cancel"] {
             assert_eq!(policy(&Method::POST, path), None, "paired read/calibration grants cannot select: {path}");
         }
@@ -452,3 +459,7 @@ mod tests {
     }
 
 }
+
+#[cfg(test)]
+#[path = "paired_progress_auth_tests.rs"]
+mod paired_progress_auth_tests;

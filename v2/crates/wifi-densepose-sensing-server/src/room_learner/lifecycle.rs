@@ -224,7 +224,7 @@ impl RoomLearningRuntime {
             return Err("learner context does not belong to this managed profile".into());
         }
         FitConfig::for_source_count(context.sources.len()).validate_context(&context)?;
-        let session = CaptureSession::new(context.clone(), run_id)?;
+        let mut session = CaptureSession::new(context.clone(), run_id)?;
         let mut state = self.command_state(expected)?;
         if busy(&state.job) || state.capture.as_ref().is_some_and(|c| c.phase_active()) {
             return Err(
@@ -236,6 +236,14 @@ impl RoomLearningRuntime {
             return Err(
                 "no stored candidate for this exact context; start a new training capture".into(),
             );
+        }
+        if !new_training {
+            if let Some(model)=restored.as_ref() {
+                if let Some(proof)=self.store.load_managed_training_proof(model)? {
+                    let fence=self.store.load_managed_capture_fence(model,&proof)?;
+                    session=CaptureSession::resume_managed_fence(&proof,&fence)?;
+                }
+            }
         }
         let (restored_evaluation, evaluation_warning) = if !new_training {
             restored
@@ -295,7 +303,7 @@ impl RoomLearningRuntime {
         config: FitConfig,
     ) -> Result<u64, String> {
         config.validate()?;
-        let (generation, dataset, cancel) = {
+        let (generation, dataset, proof_seed, cancel) = {
             let mut state = self.command_state(expected)?;
             self.require_recovery_ready(&state)?;
             if busy(&state.job)
@@ -323,6 +331,7 @@ impl RoomLearningRuntime {
                     return Err("capture Train empty, occupied-static, occupied-moving and adjacent-only trials before training".into());
                 }
             }
+            let proof_seed = capture.managed_training_seed()?;
             let cancel = Arc::new(AtomicBool::new(false));
             state.job = Job {
                 phase: JobPhase::Running,
@@ -337,7 +346,7 @@ impl RoomLearningRuntime {
                 state.job.error = Some(bounded(error.clone()));
                 return Err(error);
             }
-            (state.generation, dataset, cancel)
+            (state.generation, dataset, proof_seed, cancel)
         };
         let runtime = self.clone();
         tokio::task::spawn_blocking(move || {
@@ -361,7 +370,7 @@ impl RoomLearningRuntime {
                 return;
             }
             match outcome {
-                Ok((model, report)) => match runtime.store.save_candidate(&model) {
+                Ok((model, report)) => match runtime.store.save_managed_candidate(&model, proof_seed) {
                     Ok(receipt) => {
                         state.model = Some(Arc::new(model));
                         state.receipt = Some(receipt);
@@ -442,6 +451,7 @@ impl RoomLearningRuntime {
             "training_frozen":state.frozen_training,"training_defaults":FitConfig::for_source_count(state.capture.as_ref().map_or(0, |c| c.context().sources.len())),"training_report":state.job.report,
             "error":state.job.error,"input_error":state.input_error,
             "candidate":state.receipt,"candidate_loaded":state.model.is_some(),"candidate_identity":self.candidate_identity(&state),
+            "qualification_readiness":self.qualification_readiness_locked(&state,now_ns),
             "model_selection":self.selection_status_locked(&state,now_ns,None),
             "last_evaluation":state.last_evaluation,"evaluation_warning":state.evaluation_warning,"physically_validated":false,
             "control_detector_changed":false,"raw_observations_persisted":state.recovery.derived_persisted(),"derived_samples_persisted":state.recovery.derived_persisted(),"raw_iq_persisted":false,
@@ -487,3 +497,13 @@ mod selection_tests;
 #[cfg(test)]
 #[path="lifecycle_assessment_tests.rs"]
 mod assessment_tests;
+
+#[path="managed_training_readiness.rs"]
+mod managed_training_readiness;
+
+#[cfg(test)]
+#[path="managed_training_tests.rs"]
+mod managed_training_tests;
+#[path = "paired_progress.rs"]
+mod paired_progress;
+pub use paired_progress::{PairedCalibrationProgress, PublishedProgressRoom, PAIRED_PROGRESS_TTL_MS};

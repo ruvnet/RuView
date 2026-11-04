@@ -12,6 +12,7 @@
 mod adaptive_classifier;
 mod companion_integration;
 mod companion_room;
+mod managed_worldgraph;
 mod companion_spatial;
 pub mod cli;
 pub mod csi;
@@ -16394,6 +16395,7 @@ async fn main() {
         .route("/api/v1/rf/vendors/:vendor/events", post(ingest_vendor_events))
         // Per-node health endpoint
         .route("/api/v1/nodes", get(nodes_endpoint))
+        .route("/api/v1/worldgraph/snapshot", get(managed_worldgraph::snapshot))
         // ADR-110 iter 29 — per-node mesh sync state for HTTP clients.
         .route("/api/v1/nodes/:id/sync", get(node_sync_endpoint))
         .route("/api/v1/mesh", get(mesh_endpoint))
@@ -16488,6 +16490,7 @@ async fn main() {
         // Mutations remain behind the existing default-admin bearer policy.
         .route("/api/v1/room-learner/status", get(room_learner_api::status))
         .route("/api/v1/room-learner/selection", get(room_learner_api::selection))
+        .route("/api/v1/room-learner/progress", get(room_learner_api::progress))
         .merge(room_learner_api::owner_selection_routes(bearer_auth_state.clone()))
         .route("/api/v1/room-learner/configure", post(room_learner_api::configure))
         .route("/api/v1/room-learner/phase/start", post(room_learner_api::begin_phase))
