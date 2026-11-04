@@ -31,6 +31,8 @@ class OnboardingTransportTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("#pragma once\n" + body)
             (root / "probe.c").write_text(r'''
+// fileno/dup2 are POSIX, not ISO C11. glibc hides them in strict C mode.
+#define _POSIX_C_SOURCE 200809L
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>

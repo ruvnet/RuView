@@ -109,13 +109,10 @@ jobs:
         working-directory: firmware/esp32-csi-node
         run: |
           . $IDF_PATH/export.sh
-          # 4mb variant supplies its own sdkconfig.defaults overlay.
-          # c6-4mb variant relies on the auto-applied sdkconfig.defaults.esp32c6
-          # overlay (ESP-IDF auto-loads sdkconfig.defaults.$TARGET when present).
-          if [ "${{ matrix.variant }}" = "4mb" ]; then
-            cp "${{ matrix.sdkconfig }}" sdkconfig.defaults
-          fi
-          idf.py set-target ${{ matrix.target }}
+          # Select the profile without overwriting tracked sdkconfig.defaults:
+          # delivery checks also inspect the unchanged display/default profile.
+          # IDF still auto-applies sdkconfig.defaults.$TARGET for C5/C6.
+          idf.py -D SDKCONFIG_DEFAULTS="${{ matrix.sdkconfig }}" set-target ${{ matrix.target }}
           idf.py build
 
       - name: Build and run host-side firmware unit tests
