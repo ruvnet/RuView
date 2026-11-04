@@ -504,3 +504,6 @@ mod managed_training_readiness;
 #[cfg(test)]
 #[path="managed_training_tests.rs"]
 mod managed_training_tests;
+#[path = "paired_progress.rs"]
+mod paired_progress;
+pub use paired_progress::{PairedCalibrationProgress, PublishedProgressRoom, PAIRED_PROGRESS_TTL_MS};

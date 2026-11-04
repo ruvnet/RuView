@@ -1377,11 +1377,14 @@ mod oauth_tests {
         let workspace = make_token("10000000-0000-4000-8000-000000000001", "30000000-0000-4000-8000-000000000002");
         for (credential, expected) in [(None, StatusCode::UNAUTHORIZED), (Some(b), StatusCode::FORBIDDEN),
             (Some(workspace), StatusCode::FORBIDDEN), (Some(a.clone()), StatusCode::OK), (Some(format!("{a}x")), StatusCode::UNAUTHORIZED)] {
-            let router = Router::new().route("/companion/v1/enroll", post(|| async { "accepted" }))
-                .layer(axum::middleware::from_fn_with_state(auth.clone(), crate::companion::require_account_ownership));
-            let mut request = Request::builder().method("POST").uri("/companion/v1/enroll");
-            if let Some(value) = credential { request = request.header("X-RuView-Account-Authorization", value); }
-            assert_eq!(router.oneshot(request.body(Body::empty()).unwrap()).await.unwrap().status(), expected);
+            for (method,path) in [("POST","/companion/v1/enroll"),("GET","/api/v1/room-learner/progress")] {
+                let router = Router::new().route("/companion/v1/enroll", post(|| async { "accepted" }))
+                    .route("/api/v1/room-learner/progress", get(|| async { "accepted" }))
+                    .layer(axum::middleware::from_fn_with_state(auth.clone(), crate::companion::require_account_ownership));
+                let mut request = Request::builder().method(method).uri(path);
+                if let Some(value) = credential.as_ref() { request = request.header("X-RuView-Account-Authorization", value); }
+                assert_eq!(router.oneshot(request.body(Body::empty()).unwrap()).await.unwrap().status(), expected);
+            }
         }
     }
 
