@@ -50,6 +50,7 @@ impl RoomLearningRuntime {
         now_ns: u64,
     ) -> Result<(), String> {
         let mut state = self.command_state(expected)?;
+        self.expire_loaded_recovery(&mut state, now_ns)?;
         self.require_recovery_ready(&state)?;
         if busy(&state.job) {
             return Err("training is active".into());
@@ -171,6 +172,7 @@ impl RoomLearningRuntime {
         conditions_held: bool,
     ) -> Result<PhaseReceipt, String> {
         let mut state = self.command_state(expected)?;
+        self.expire_loaded_recovery(&mut state, now_ns)?;
         let recovered_complete = state.recovery.disposition
             == Some(
                 crate::room_learner::capture::RecoveryPhaseDisposition::CompletedNeedsConfirmation,
