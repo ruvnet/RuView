@@ -44,7 +44,7 @@ async fn mixed_he256_ht64_is_rejected_before_existing_baseline_or_receipt_mutati
     inner.calibration_source_node_ids.extend([3, 5]);
     inner.calibration_observed_source_node_ids.insert(3);
     inner.calibration_model_receipt = Some(CalibrationModelReceipt {
-        schema: "ruview.room-calibration.model-receipt.v1",
+        schema: "ruview.room-calibration.model-receipt.v1".into(),
         boot_epoch: inner.calibration_boot_epoch.clone(),
         session_id: "old-session-must-stay".into(),
         model_id: "old-model-must-stay".into(),
@@ -62,6 +62,8 @@ async fn mixed_he256_ht64_is_rejected_before_existing_baseline_or_receipt_mutati
         Query(CalibrationStartQuery {
             source_node_id: Some(3),
         }),
+        None,
+        None,
         Json(request(vec![3, 5])),
     )
     .await;
@@ -107,6 +109,8 @@ async fn start_nodes(
         Query(CalibrationStartQuery {
             source_node_id: Some(author),
         }),
+        None,
+        None,
         Json(request(ids)),
     )
     .await;
