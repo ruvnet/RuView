@@ -65,6 +65,12 @@ pub enum SelectedBinaryEvidence {
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct QualificationSummary {
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub schema: Option<String>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub training_lineage_basis: Option<String>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub managed_training_proof_sha256: Option<String>,
     pub receipt_sha256: String,
     pub model_sha256: String,
     pub context_digest: String,
@@ -80,6 +86,9 @@ impl From<&QualificationEnvelope> for QualificationSummary {
     fn from(q: &QualificationEnvelope) -> Self {
         let r = &q.receipt;
         Self {
+            schema: (r.schema=="ruview.local-operational-qualification.v2").then(||r.schema.clone()),
+            training_lineage_basis:r.training_lineage_basis.clone(),
+            managed_training_proof_sha256:r.managed_training_proof_sha256.clone(),
             receipt_sha256: q.receipt_sha256.clone(),
             model_sha256: r.model_sha256.clone(),
             context_digest: r.context_digest.clone(),

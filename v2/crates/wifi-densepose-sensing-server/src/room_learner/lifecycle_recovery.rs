@@ -408,6 +408,13 @@ impl RoomLearningRuntime {
             .as_ref()
             .map(|sha| self.store.load_exact_candidate(context, sha))
             .transpose()?;
+        if let Some(seed)=restored.session.metadata_lineage() {
+            let candidate=model.as_ref().ok_or("managed recovery has no exact candidate")?;
+            let proof=self.store.load_managed_training_proof(candidate)?.ok_or("managed recovery training proof missing")?;
+            seed.ensure_extends(&proof.seed)?;
+            let fence=self.store.load_managed_capture_fence(candidate,&proof)?;
+            restored.session.managed_fence_seed(&proof)?.ensure_extends(&fence.seed)?;
+        }
         state.generation = state
             .generation
             .checked_add(1)

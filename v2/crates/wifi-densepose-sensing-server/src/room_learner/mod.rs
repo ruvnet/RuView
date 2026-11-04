@@ -12,3 +12,7 @@ pub mod qualification;
 pub mod selection;
 
 pub mod assessment;
+
+pub(crate) mod managed_training;
+
+pub(crate) mod managed_capture_fences;

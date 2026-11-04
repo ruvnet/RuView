@@ -35,6 +35,13 @@ impl ArtifactStore {
             &q.receipt.evaluation_receipt_sha256,
         )?;
         q.validate(model, &eval)?;
+        if let Some(proof)=self.load_managed_training_proof(model)? {self.load_managed_capture_fence(model,&proof)?;}
+
+        if let Some(expected)=&q.receipt.managed_training_proof_sha256 {
+            let proof=self.load_managed_training_proof(model)?.ok_or("qualification managed training proof missing")?;
+            if &proof.proof_sha256!=expected {return Err("qualification managed training proof changed".into());}
+            self.require_managed_capture_fence(model,&proof,q.receipt.managed_sealed_phase_fence_sha256.as_deref().ok_or("qualification sealed phase fence missing")?)?;
+        }
         let dir = self
             .qualification_dir(model.context(), true)?
             .ok_or("qualification directory unavailable")?;
@@ -75,6 +82,13 @@ impl ArtifactStore {
             &q.receipt.evaluation_receipt_sha256,
         )?;
         q.validate(model, &eval)?;
+        if let Some(proof)=self.load_managed_training_proof(model)? {self.load_managed_capture_fence(model,&proof)?;}
+
+        if let Some(expected)=&q.receipt.managed_training_proof_sha256 {
+            let proof=self.load_managed_training_proof(model)?.ok_or("qualification managed training proof missing")?;
+            if &proof.proof_sha256!=expected {return Err("qualification managed training proof changed".into());}
+            self.require_managed_capture_fence(model,&proof,q.receipt.managed_sealed_phase_fence_sha256.as_deref().ok_or("qualification sealed phase fence missing")?)?;
+        }
         Ok(q)
     }
     pub(crate) fn load_latest_qualification(

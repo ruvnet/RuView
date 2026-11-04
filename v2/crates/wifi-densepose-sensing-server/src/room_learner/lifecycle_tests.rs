@@ -198,7 +198,8 @@ async fn real_capture_train_private_store_cold_load_and_unlabelled_inference_com
                     grid_id: "ht64-canonical8",
                     frequency_hz: 2_437_000_000,
                     bandwidth_hz: 20_000_000,
-                    sequence: 100 + row,
+                    // Cold resume retains the original wire-sequence fence.
+                    sequence: 1_000 + row,
                     amplitudes: &values,
                 },
                 START + 100_000_000_000 + u64::from(row) * 10_000_000 + u64::from(source),
