@@ -17,6 +17,7 @@ pub(super) struct RecoveryState {
     pub(super) disposition: Option<RecoveryPhaseDisposition>,
     last_now_ns: u64,
     last_attempt_ns: u64,
+    volatile_after_expiry: bool,
 }
 impl RecoveryState {
     pub(super) fn derived_persisted(&self) -> Option<bool> {
@@ -82,10 +83,56 @@ impl RoomLearningRuntime {
             Ok(())
         }
     }
+    /// Recovery availability is a disk deadline, not a lifetime for samples
+    /// already loaded into this active process. Authenticate the unchanged copy
+    /// before transitioning; other persistence failures never become RAM mode.
+    pub(super) fn expire_loaded_recovery(
+        &self,
+        state: &mut Inner,
+        now_ns: u64,
+    ) -> Result<(), String> {
+        state.recovery.last_now_ns = state.recovery.last_now_ns.max(now_ns);
+        let now_ns = state.recovery.last_now_ns;
+        if !state.recovery.enabled || state.capture.is_none() {
+            return Ok(());
+        }
+        let Some(descriptor) = state.recovery.descriptor.as_ref() else {
+            return Ok(()); // Existing checkpoint validation reports missing state.
+        };
+        if now_ns / 1_000_000 < descriptor.expires_at_ms {
+            return Ok(());
+        }
+        if let Some(error) = &state.recovery.error {
+            return Err(error.clone());
+        }
+        let verified = (|| -> Result<(), String> {
+            if state.capture.as_ref().map(|capture| capture.context().digest())
+                .as_deref() != Some(descriptor.context_digest.as_str())
+            {
+                return Err("recovery_context_mismatch".into());
+            }
+            let retained = self.recovery_store.as_ref().ok_or("recovery_unavailable")?
+                .inspect()?.ok_or("recovery_missing")?;
+            if retained != *descriptor {
+                return Err("recovery_descriptor_changed".into());
+            }
+            Ok(())
+        })();
+        if let Err(error) = verified {
+            state.recovery.error = Some(bounded(error.clone()));
+            return Err(error);
+        }
+        state.recovery.enabled = false;
+        state.recovery.marker = None;
+        state.recovery.volatile_after_expiry = true;
+        Ok(())
+    }
     pub(super) fn checkpoint_now(&self, state: &Inner) -> u64 {
         self.receiver_now_ns().max(state.recovery.last_now_ns)
     }
     pub(super) fn inspect_recovery(&self, state: &mut Inner, now_ns: u64) {
+        state.recovery.last_now_ns = state.recovery.last_now_ns.max(now_ns);
+        let now_ns = state.recovery.last_now_ns;
         let Some(store) = &self.recovery_store else {
             return;
         };
@@ -168,6 +215,7 @@ impl RoomLearningRuntime {
         force: bool,
     ) -> Result<(), String> {
         state.recovery.last_now_ns = state.recovery.last_now_ns.max(now_ns);
+        self.expire_loaded_recovery(state, now_ns)?;
         if !state.recovery.enabled {
             return Ok(());
         }
@@ -238,7 +286,10 @@ impl RoomLearningRuntime {
     pub(super) fn recovery_status(&self, state: &Inner, now_ns: u64) -> Value {
         let supported = self.recovery_store.is_some() || state.recovery.supported;
         let available = self.recovery_store.as_ref().is_some_and(|s| s.available());
-        let expired = state
+        // A request may have sampled receiver time before waiting for this
+        // mutex. Known expiry cannot be undone by that older observation.
+        let now_ns = now_ns.max(state.recovery.last_now_ns);
+        let expired = state.recovery.volatile_after_expiry || state
             .recovery
             .descriptor
             .as_ref()
@@ -280,6 +331,10 @@ impl RoomLearningRuntime {
             "disabled"
         };
         let error = state.recovery.error.clone().or_else(|| {
+            state.recovery.volatile_after_expiry.then(|| {
+                "Recovery expired. This loaded run continues in memory only; new progress is not saved. Closing the helper loses these samples. The expired encrypted copy remains until explicitly discarded.".into()
+            })
+        }).or_else(|| {
             (supported && !available).then(|| {
                 "recovery_unavailable: stable managed encryption key is unavailable".to_string()
             })
@@ -294,7 +349,9 @@ impl RoomLearningRuntime {
         recovery_id: &str,
         now_ns: u64,
     ) -> Result<CaptureContext, String> {
-        let _state = self.inner.lock().map_err(|_| "learner state unavailable")?;
+        let mut state = self.inner.lock().map_err(|_| "learner state unavailable")?;
+        state.recovery.last_now_ns = state.recovery.last_now_ns.max(now_ns);
+        let now_ns = state.recovery.last_now_ns;
         let loaded = self
             .recovery_store
             .as_ref()
@@ -321,6 +378,8 @@ impl RoomLearningRuntime {
         now_ns: u64,
     ) -> Result<(), String> {
         let mut state = self.command_state(expected)?;
+        state.recovery.last_now_ns = state.recovery.last_now_ns.max(now_ns);
+        let now_ns = state.recovery.last_now_ns;
         if busy(&state.job) || state.capture.as_ref().is_some_and(|c| c.phase_active()) {
             return Err("finish or cancel the active operation first".into());
         }
